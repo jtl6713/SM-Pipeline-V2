@@ -19,6 +19,25 @@
     return String(record?.idea_title || cached?.title || record?.requested_title || "").trim();
   }
 
+  function contentNumberForProductionRequest(record) {
+    const linked = Array.isArray(record?.promoted_content_item_links)
+      ? record.promoted_content_item_links
+      : [];
+    for (const id of linked) {
+      const content = productionContentRecords.find((row) => row?.id === id);
+      if (content?.content_id !== null && content?.content_id !== undefined && String(content.content_id).trim()) {
+        return String(content.content_id).trim();
+      }
+    }
+    return "";
+  }
+
+  function productionRequestHeading(record) {
+    const title = activeIdea?.title || ideaTitleForRequest(record) || "Untitled piece";
+    const contentNumber = contentNumberForProductionRequest(record);
+    return contentNumber ? `${title} · Content ${contentNumber}` : title;
+  }
+
   async function ensureIdeasCache() {
     if (ideasCache.length) return ideasCache;
     try {
@@ -206,7 +225,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.354-pipeline-rerendering-label";
+  const BUILD_ID = "item4-0.6.355-content-id-heading";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -9428,7 +9447,7 @@
     } else {
       $("productionRequestWorkspace").hidden = true;
     }
-    $("productionRequestTitle").textContent = activeIdea?.title || ideaTitleForRequest(record) || "Untitled piece";
+    $("productionRequestTitle").textContent = productionRequestHeading(record);
     if ($("productionRequestSubtitle")) $("productionRequestSubtitle").textContent = "";
     const requestId = $("productionRequestId");
     if (requestId) {
@@ -10901,6 +10920,9 @@
     const active = records.filter((record) => !record?.lifecycle_complete);
     const unchanged = silent && target.querySelector("table") && productionContentFingerprint(active) === productionContentFingerprint(productionContentRecords);
     productionContentRecords = active;
+    if (activeProductionRequest && $("productionRequestTitle")) {
+      $("productionRequestTitle").textContent = productionRequestHeading(activeProductionRequest);
+    }
     if (unchanged) return;
     if (!active.length) {
       const hadAny = records.length > 0;

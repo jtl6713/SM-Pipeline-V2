@@ -118,6 +118,23 @@ def test_r4_explicit_no_voiceover_ignores_parent_url_and_story_timing_failure():
     assert "voiceoverUrl" not in payload
 
 
+def test_r4_voiceover_route_passes_music_ducking_controls():
+    output = _photo_output(
+        Voiceover_URL="https://example.com/output-vo.mp3",
+        Music_URL="https://example.com/music.mp3",
+        Music_Volume=0.6,
+        Music_Ducked_Volume=0.18,
+        Music_Ducking_Enabled=True,
+        Music_Duck_Fade_Frames=6,
+    )
+    route, payload = choose_render_request(output, None, default_music=0.35, default_voice=1.0)
+    assert route == "voiceover"
+    assert payload["music"]["volume"] == 0.6
+    assert payload["music"]["duckingEnabled"] is True
+    assert payload["music"]["duckingMultiplier"] == 0.3
+    assert payload["music"]["duckFadeFrames"] == 6
+
+
 def test_r4_music_start_seconds_pass_through():
     output = _photo_output(Music_URL="https://example.com/track.mp3", Music_Start_Seconds=12.5)
     route, payload = choose_render_request(output, None, default_music=0.35, default_voice=1.0)
