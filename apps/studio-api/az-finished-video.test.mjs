@@ -22,6 +22,7 @@ import {
   mergeAzOutputLock,
   mergeAzProductionNotes,
   pickDuplicateOutputKeepers,
+  pickPlatformOutputSeedKeeper,
   shouldCreateFinishedOutput,
   uniquePlanItems,
 } from "./az-finished-video.mjs";
@@ -81,6 +82,22 @@ test("pickDuplicateOutputKeepers disables extra same-key rows", () => {
   ]);
   assert.deepEqual(keepers.map((row) => row.id).sort(), ["recFB", "recIG1"]);
   assert.deepEqual(extras.map((row) => row.id).sort(), ["recIG2", "recIG3"]);
+});
+
+test("platform output seed race keeps one deterministic canonical row", () => {
+  const ordinary = pickPlatformOutputSeedKeeper([
+    { id: "recLater", output_id: 751, created_at: "2026-09-21T13:04:19.900Z", published: false },
+    { id: "recEarlier", output_id: 750, created_at: "2026-09-21T13:04:19.100Z", published: false },
+  ]);
+  assert.equal(ordinary.keeper.id, "recEarlier");
+  assert.deepEqual(ordinary.extras.map((row) => row.id), ["recLater"]);
+
+  const publishedWins = pickPlatformOutputSeedKeeper([
+    { id: "recDraft", output_id: 800, created_at: "2026-09-21T13:00:00Z", published: false },
+    { id: "recPublished", output_id: 801, created_at: "2026-09-21T13:00:01Z", published: true },
+  ]);
+  assert.equal(publishedWins.keeper.id, "recPublished");
+  assert.deepEqual(publishedWins.extras.map((row) => row.id), ["recDraft"]);
 });
 
 test("merge keeps an existing AZ stamp", () => {

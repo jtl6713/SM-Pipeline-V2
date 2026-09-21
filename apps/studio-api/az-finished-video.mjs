@@ -130,6 +130,24 @@ export function pickDuplicateOutputKeepers(rows, { keyOf } = {}) {
   return { keepers, extras };
 }
 
+export function pickPlatformOutputSeedKeeper(rows) {
+  const sorted = [...(rows || [])].filter(Boolean).sort((a, b) => {
+    const aPublished = a?.published ? 0 : 1;
+    const bPublished = b?.published ? 0 : 1;
+    if (aPublished !== bPublished) return aPublished - bPublished;
+    const an = Number(a?.output_id);
+    const bn = Number(b?.output_id);
+    const ao = Number.isFinite(an) && an > 0 ? an : Number.MAX_SAFE_INTEGER;
+    const bo = Number.isFinite(bn) && bn > 0 ? bn : Number.MAX_SAFE_INTEGER;
+    if (ao !== bo) return ao - bo;
+    return String(a?.created_at || a?.id || "").localeCompare(String(b?.created_at || b?.id || ""));
+  });
+  return {
+    keeper: sorted[0] || null,
+    extras: sorted.slice(1),
+  };
+}
+
 export function finishedCompanionStoryFields() {
   return {
     Voiceover_Mode_Override: "No",
