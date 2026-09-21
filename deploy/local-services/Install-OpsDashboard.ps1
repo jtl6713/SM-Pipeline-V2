@@ -20,7 +20,7 @@ if (-not (Test-Path -LiteralPath (Join-Path $Source 'server.js') -PathType Leaf)
 }
 
 New-Item -ItemType Directory -Force -Path $Runtime | Out-Null
-foreach ($name in @('server.js', 'catalog.json', 'README.md', '.env.example')) {
+foreach ($name in @('server.js', 'catalog.json', 'openapi.json', 'README.md', '.env.example')) {
     Copy-Item -LiteralPath (Join-Path $Source $name) -Destination (Join-Path $Runtime $name) -Force
 }
 $publicSrc = Join-Path $Source 'public'
