@@ -50,6 +50,15 @@ test("variant not-ready copy distinguishes not started from preparing", () => {
   assert.match(app, /Platform crops are still finishing/);
 });
 
+test("Music Manager uses native file labels for Windows file picker", () => {
+  assert.match(html, /id="musicChooseFiles"[^>]*native-file-label/);
+  assert.match(html, /id="musicFileInput"[^>]*native-file-input/);
+  assert.match(html, /id="musicAddButton"[^>]*native-file-label/);
+  assert.match(html, /id="musicAddInput"[^>]*native-file-input/);
+  assert.match(app, /function musicFileInputs/);
+  assert.doesNotMatch(app, /choose\?\.addEventListener\("click", openPicker\)/);
+});
+
 test("Ideas archives promoted items in a collapsed section", () => {
   assert.match(app, /let ideasArchivedSectionOpen = false/);
   assert.match(app, /function partitionIdeaRecords/);

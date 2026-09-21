@@ -226,7 +226,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.356-ideas-archive";
+  const BUILD_ID = "item4-0.6.357-music-native-picker";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -14644,6 +14644,10 @@
     } catch (e) { target.innerHTML = `<div class="error">${escapeHtml(e.message)}</div>`; }
   }
 
+  function musicFileInputs() {
+    return ["musicFileInput", "musicAddInput"].map((id) => $(id)).filter(Boolean);
+  }
+
   async function uploadMusicFiles(fileList) {
     const files = Array.from(fileList || []).filter((file) => /\.(mp3|wav)$/i.test(file.name || "") || /audio\/(mpeg|mp3|wav|x-wav|wave)/i.test(file.type || ""));
     if (!files.length) {
@@ -14652,17 +14656,20 @@
     }
     const zone = $("musicUploadZone");
     const choose = $("musicChooseFiles");
+    const addButton = $("musicAddButton");
+    const inputs = musicFileInputs();
     const form = new FormData();
     files.forEach((file) => form.append("files", file, file.name));
     const displayName = String($("musicDisplayName")?.value || "").trim();
     if (displayName && files.length === 1) form.append("display_name", displayName);
     if (zone) zone.dataset.busy = "true";
-    if (choose) choose.disabled = true;
+    inputs.forEach((input) => { input.disabled = true; });
+    [choose, addButton].forEach((node) => node?.setAttribute("aria-disabled", "true"));
     setMusicUploadMessage(files.length === 1 ? "Adding track…" : `Adding ${files.length} tracks…`, "");
     try {
       const result = await api("/api/music", { method: "POST", body: form, timeoutMs: 120000, retries: 0 });
       if ($("musicDisplayName")) $("musicDisplayName").value = "";
-      if ($("musicFileInput")) $("musicFileInput").value = "";
+      inputs.forEach((input) => { input.value = ""; });
       invalidateMusicCatalog();
       setMusicUploadMessage(result.message || "Track added to Music Manager.", "success");
       await loadMusic();
@@ -14670,30 +14677,26 @@
       setMusicUploadMessage(error.message, "error-text");
     } finally {
       if (zone) delete zone.dataset.busy;
-      if (choose) choose.disabled = false;
+      inputs.forEach((input) => { input.disabled = false; });
+      [choose, addButton].forEach((node) => node?.removeAttribute("aria-disabled"));
     }
   }
 
   function bindMusicUpload() {
     const zone = $("musicUploadZone");
-    const input = $("musicFileInput");
-    const choose = $("musicChooseFiles");
-    const addButton = $("musicAddButton");
-    if (!input || (zone && zone.dataset.bound)) return;
+    const inputs = musicFileInputs();
+    if (!inputs.length || (zone && zone.dataset.bound)) return;
     if (zone) zone.dataset.bound = "true";
-    const openPicker = (event) => {
-      event?.preventDefault();
-      event?.stopPropagation();
-      input.click();
-    };
-    addButton?.addEventListener("click", openPicker);
-    choose?.addEventListener("click", openPicker);
     zone?.addEventListener("click", (event) => {
-      if (event.target === choose || event.target === addButton) return;
-      openPicker(event);
+      if (event.target?.closest?.("#musicChooseFiles, #musicAddButton")) return;
+      const input = $("musicFileInput");
+      if (input && !input.disabled) input.click();
     });
     zone?.addEventListener("keydown", (event) => {
-      if (event.key === "Enter" || event.key === " ") openPicker(event);
+      if (event.key !== "Enter" && event.key !== " ") return;
+      event.preventDefault();
+      const input = $("musicFileInput");
+      if (input && !input.disabled) input.click();
     });
     zone?.addEventListener("dragover", (event) => {
       event.preventDefault();
@@ -14705,7 +14708,9 @@
       zone.classList.remove("dragging");
       uploadMusicFiles(event.dataTransfer?.files);
     });
-    input.addEventListener("change", () => uploadMusicFiles(input.files));
+    inputs.forEach((input) => {
+      input.addEventListener("change", () => uploadMusicFiles(input.files));
+    });
   }
 
   bindMusicUpload();
