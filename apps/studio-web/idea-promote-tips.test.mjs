@@ -69,12 +69,12 @@ test("Ideas shows Current expanded and Archived collapsed by default", () => {
   assert.match(app, /already in production/);
 });
 
-test("Ideas archives promoted items in a collapsed section", () => {
+test("Ideas archives promoted items in the Archived section", () => {
   assert.match(app, /let ideasArchivedSectionOpen = false/);
   assert.match(app, /function partitionIdeaRecords/);
   assert.match(app, /if \(ideaIsPromoted\(record\)\) archived\.push\(record\)/);
-  assert.match(app, /data-idea-archived-toggle/);
-  assert.match(app, /idea.*in production/);
+  assert.match(app, /key: "archived"/);
+  assert.match(app, /already in production/);
 });
 
 test("Pipeline archives fully published content items at the bottom", () => {
