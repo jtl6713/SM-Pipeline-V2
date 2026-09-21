@@ -100,7 +100,7 @@ def duration_seconds(
     except (TypeError, ValueError):
         pass
     if story:
-        return SINGLE_STILL_SECONDS if clip_count <= 1 else min(15, clip_count * SINGLE_STILL_SECONDS)
+        return STORY_TEASER_SECONDS
     stored = effective.get("video_duration_seconds") or field(request, "Video_Duration_Seconds") or 0
     try:
         stored_n = float(stored)
