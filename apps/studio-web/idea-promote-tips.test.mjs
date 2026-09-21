@@ -37,6 +37,13 @@ test("idea promote drawer documents duration vs voiceover tail precedence", () =
   assert.match(app, /restoreIdeaLibraryPickerAfterDrawerUpdate/);
 });
 
+test("production request heading includes numeric Content ID beside title", () => {
+  assert.match(app, /function contentNumberForProductionRequest/);
+  assert.match(app, /function productionRequestHeading/);
+  assert.match(app, /Content \${contentNumber}/);
+  assert.match(app, /productionRequestTitle"\)\.textContent = productionRequestHeading\(record\)/);
+});
+
 test("variant not-ready copy distinguishes not started from preparing", () => {
   assert.match(app, /function item4VariantNotReadyCopy/);
   assert.match(app, /Platform crops have not been run yet/);
