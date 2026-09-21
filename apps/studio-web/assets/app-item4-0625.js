@@ -189,6 +189,7 @@
   const item4CropDrafts = new Map();
   let item4CropRequestId = null;
   let pipelineOutputs = [];
+  let pipelineContentRecords = [];
   let pipelineSort = { key: "output", dir: "desc" };
   let ideasSort = { key: "idea", dir: "desc" };
   let ideasCurrentSectionOpen = true;
@@ -227,7 +228,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.358-ideas-two-sections";
+  const BUILD_ID = "item4-0.6.359-pipeline-content-id";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -14158,14 +14159,26 @@
     return String(links[0] || record?.content_item_id || "").trim() || "unassigned";
   }
 
+  function pipelineContentRecordForGroup(records) {
+    const first = records?.[0] || {};
+    const key = pipelineContentGroupKey(first);
+    if (!key || key === "unassigned") return null;
+    return (pipelineContentRecords || []).find((record) => record?.id === key) || null;
+  }
+
   function pipelineContentGroupLabel(records) {
     const first = records[0] || {};
-    const title = String(first.output_title || first.content_title || "").trim();
+    const content = pipelineContentRecordForGroup(records);
+    const contentNumber = String(content?.content_id ?? "").trim();
+    const title = String(content?.title || first.output_title || first.content_title || "").trim();
     const count = records.length;
     const suffix = `${count} output${count === 1 ? "" : "s"}`;
     const dest = pipelineDestinationProgress(records);
     const destHint = dest ? ` · ${dest.done}/${dest.total} rendered` : "";
+    const contentPrefix = contentNumber ? `Content ${contentNumber}` : "";
+    if (title && contentPrefix) return `${contentPrefix} · ${title} · ${suffix}${destHint}`;
     if (title) return `${title} · ${suffix}${destHint}`;
+    if (contentPrefix) return `${contentPrefix} · ${suffix}${destHint}`;
     if (pipelineContentGroupKey(first) === "unassigned") return `Unassigned · ${suffix}${destHint}`;
     return `Content piece · ${suffix}${destHint}`;
   }
@@ -14488,6 +14501,10 @@
     ]));
   }
 
+  function pipelineContentFingerprint(records) {
+    return JSON.stringify((records || []).map((r) => [r.id, r.content_id, r.title]));
+  }
+
   function setPipelineLiveHint(text) {
     const hint = $("pipelineLiveHint");
     if (hint) hint.textContent = text;
@@ -14548,9 +14565,19 @@
       setPipelineLiveHint("Refreshing…");
     }
     try {
-      const { records = [] } = await api("/api/outputs?limit=100");
-      const unchanged = !force && silent && target.querySelector("table") && pipelineFingerprint(records) === pipelineFingerprint(pipelineOutputs);
+      const [outputsResult, contentResult] = await Promise.all([
+        api("/api/outputs?limit=100"),
+        api("/api/content?limit=100"),
+      ]);
+      const records = outputsResult?.records || [];
+      const contentRecords = contentResult?.records || [];
+      const unchanged = !force
+        && silent
+        && target.querySelector("table")
+        && pipelineFingerprint(records) === pipelineFingerprint(pipelineOutputs)
+        && pipelineContentFingerprint(contentRecords) === pipelineContentFingerprint(pipelineContentRecords);
       pipelineOutputs = records;
+      pipelineContentRecords = contentRecords;
       updatePipelineApproveAllButton();
       if (!unchanged) {
         const scrollTop = target.scrollTop;
