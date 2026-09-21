@@ -21,6 +21,25 @@ export function pipelineColumnDisplayBucket(value) {
   return text || "—";
 }
 
+export function pipelineMixRerenderInProgress(record) {
+  const review = String(record?.review_status || "").trim();
+  const output = String(record?.output_status || "").trim();
+  const render = String(record?.render_status || "").trim();
+  const state = String(record?.studio_state || "").trim();
+  if (state === "Rerendering") return true;
+  if (/in production/i.test(output) && /^(Ready for Render|Rendering)$/i.test(render)) return true;
+  if (review === "Changes Requested") {
+    if (/in production/i.test(output)) return true;
+    if (/^(Ready for Render|Rendering)$/i.test(render)) return true;
+  }
+  return false;
+}
+
+export function pipelineRenderLabel(record) {
+  if (pipelineMixRerenderInProgress(record)) return "Rerendering";
+  return String(record?.render_status || "").trim();
+}
+
 export function pipelineColumnFiltersActive(filters = {}) {
   return PIPELINE_COLUMN_FILTER_KEYS.some((key) => String(filters[key] || "").trim());
 }
