@@ -398,7 +398,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.346-finished-hardcap-six",
+          version: "0.10.347-fb-public-live-diagnostic",
           studio_desk_inventory_v1: true,
           studio_desk_activity_v1: true,
           studio_tiktok_complete_v1: true,
@@ -1250,6 +1250,11 @@ export default {
         await studioReconcileOverdueScheduledPublishes(env, { limit: 12 });
       } catch (error) {
         console.warn("overdue scheduled publish rescue cron failed", error);
+      }
+      try {
+        await studioDiagnoseFacebookPublicMakeOnce(env);
+      } catch (error) {
+        console.warn("FB-PUBLIC diagnostic cron failed", error);
       }
       try {
         await opsForceAzNavyPierTitle(env);
@@ -22788,6 +22793,8 @@ const PRODUCTION_CADENCE_WEBHOOK_LIVE = Object.freeze([
 const STUDIO_AP0_WEBHOOK_URL = ""; // Make.com retired
 // Live FB-PUBLIC scenario 6107230 (Make connection 9988775). Not unpublished Graph / FB-ORCH.
 const STUDIO_FB_PUBLIC_WEBHOOK_URL = "https://hook.us2.make.com/ivrjp4e0nfpuyvukb18116wj1fwgjdw1";
+const STUDIO_FB_PUBLIC_SCENARIO_ID = 6107230;
+const STUDIO_FB_PUBLIC_DIAG_CORRELATION = "FB-PUBLIC-LIVE-DIAG-20260921";
 const STUDIO_AP0_RECORD_ID = /^rec[A-Za-z0-9]{14}$/;
 const PRODUCTION_CADENCE_PUBLISH_ORCH = Object.freeze([
   { id: STUDIO_IG_ORCH_SCENARIO_ID, key: "IG" },
@@ -24668,6 +24675,77 @@ function studioFacebookPublicMakeEligible(record) {
   if (plan.target === "FB0") return true;
   if (plan.target === "FBS3" || plan.graphStory) return Boolean(studioFacebookPublicCdnUrl(record));
   return false;
+}
+
+async function studioDiagnoseFacebookPublicMakeOnce(env) {
+  try {
+    const prior = await listRecords(env, "Make Admin Queue", {
+      limit: 1,
+      filterFormula: `{Correlation_ID}="${STUDIO_FB_PUBLIC_DIAG_CORRELATION}"`,
+    }).catch(() => []);
+    if (prior.length) return { skipped: "already-captured", record_id: prior[0].id };
+
+    const stateBody = await phase6MakeApiJson(env, `/scenarios/${STUDIO_FB_PUBLIC_SCENARIO_ID}`, { method: "GET" });
+    const scenario = stateBody?.scenario || stateBody?.response?.scenario || stateBody || {};
+    const logsBody = await phase6MakeApiJson(
+      env,
+      `/scenarios/${STUDIO_FB_PUBLIC_SCENARIO_ID}/logs?pg%5Blimit%5D=30`,
+      { method: "GET" }
+    ).catch((error) => ({ diagnostic_error: String(error?.message || error) }));
+    const executionsBody = await phase6MakeApiJson(
+      env,
+      `/scenarios/${STUDIO_FB_PUBLIC_SCENARIO_ID}/executions?pg%5Blimit%5D=30`,
+      { method: "GET" }
+    ).catch((error) => ({ diagnostic_error: String(error?.message || error) }));
+
+    const logs = logsBody?.scenarioLogs || logsBody?.response?.scenarioLogs || logsBody?.data || [];
+    const executions = executionsBody?.executions || executionsBody?.response?.executions || executionsBody?.data || [];
+    const slim = (row) => {
+      const out = {};
+      for (const key of ["id","status","timestamp","startedAt","finishedAt","duration","operations","type","instant"]) {
+        if (row && Object.prototype.hasOwnProperty.call(row, key)) out[key] = row[key];
+      }
+      return out;
+    };
+    const result = {
+      scenario_id: STUDIO_FB_PUBLIC_SCENARIO_ID,
+      name: scenario?.name || null,
+      is_active: scenario?.isActive === true,
+      scheduling: scenario?.scheduling || null,
+      hook_present: Boolean(scenario?.hookId),
+      recent_logs: Array.isArray(logs) ? logs.slice(0, 30).map(slim) : [],
+      recent_executions: Array.isArray(executions) ? executions.slice(0, 30).map(slim) : [],
+      logs_error: logsBody?.diagnostic_error || null,
+      executions_error: executionsBody?.diagnostic_error || null,
+      captured_at: new Date().toISOString(),
+    };
+    const stamp = new Date().toISOString();
+    const created = await airtableFetch(env, "Make Admin Queue", "", {
+      method: "POST",
+      body: JSON.stringify({
+        records: [{ fields: {
+          Command_ID: `FB-PUBLIC-DIAG-${Date.now()}`,
+          Action: "GET_SCENARIO",
+          Scenario_ID: STUDIO_FB_PUBLIC_SCENARIO_ID,
+          Scenario_Name: String(scenario?.name || "FB-PUBLIC"),
+          Write_Approved: false,
+          Status: "Succeeded",
+          Result_JSON: JSON.stringify(result),
+          Requested_At: stamp,
+          Started_At: stamp,
+          Completed_At: stamp,
+          Requested_By: "chicagoshining-studio-api",
+          Correlation_ID: STUDIO_FB_PUBLIC_DIAG_CORRELATION,
+          Notes: "Read-only sanitized FB-PUBLIC live scenario/execution diagnostic for overdue scheduled publish recovery.",
+        }}],
+        typecast: true,
+      }),
+    });
+    return { ok: true, result, record_id: created?.records?.[0]?.id || null };
+  } catch (error) {
+    console.warn("FB-PUBLIC live diagnostic failed", error);
+    return { ok: false, error: String(error?.message || error) };
+  }
 }
 
 async function studioPulseFacebookPublicMake(env, record) {
