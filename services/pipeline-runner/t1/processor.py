@@ -13,6 +13,12 @@ from ap0.public_cover import drive_file_id_from_url
 from integrations.google_drive import GoogleDriveClient
 from render.fields import field, field_str, first_linked_id, json_text
 from render.settings import get_timing_defaults
+from audio.voiceover_duration import (
+    measured_voiceover_seconds,
+    voiceover_exceeds_video,
+    voiceover_exceeds_video_message,
+    voiceover_tail_seconds,
+)
 from t1.apply import (
     analysis_payload,
     analysis_window,
@@ -156,15 +162,32 @@ def process_one(
     has_video = clips_have_video(clips)
     engine_url, default_rules = get_timing_defaults(client)
     rules = resolve_rules(output, default_rules, has_video=has_video)
-    start, duration = analysis_window(output)
-    vo_end = voiceover_end_seconds(output)
     content_item_id = first_linked_id(field(output, "Content_Item"))
-    parent = client.get_record(CONTENT_ITEMS_TABLE, content_item_id) if content_item_id and not vo_end else None
-    if parent and not vo_end:
-        vo_end = voiceover_end_seconds(parent)
-        if vo_end:
-            output = {**output, "fields": {**(output.get("fields") or {}), "Voiceover_Duration_Seconds": vo_end}}
-            start, duration = analysis_window(output)
+    content_item = client.get_record(CONTENT_ITEMS_TABLE, content_item_id) if content_item_id else None
+    vo_end = measured_voiceover_seconds(output, content_item)
+    if not vo_end:
+        vo_end = voiceover_end_seconds(output) or voiceover_end_seconds(content_item or {})
+    start, duration = analysis_window(output, vo_end_override=vo_end)
+    tail_seconds = voiceover_tail_seconds(output, content_item)
+    if vo_end and voiceover_exceeds_video(
+        voiceover_seconds=vo_end,
+        video_seconds=duration,
+        tail_seconds=tail_seconds,
+    ):
+        message = voiceover_exceeds_video_message(
+            voiceover_seconds=vo_end,
+            video_seconds=duration,
+            tail_seconds=tail_seconds,
+            context="timing window",
+        )
+        if not dry_run:
+            client.update_record(
+                PLATFORM_OUTPUTS_TABLE,
+                output["id"],
+                {"Timing_Status": STATUS_FAILED, "Timing_Error_Message": message[:10000]},
+                typecast=True,
+            )
+        return {"processed": False, "reason": "voiceover_exceeds_video", "error": message, **preview}
     footage_capped = False
     if has_video:
         usable = footage_usable_seconds(clips)
@@ -227,6 +250,24 @@ def process_one(
         except (TypeError, ValueError):
             beat_end = 0
         if beat_end > 0 and beat_end + 0.05 < duration:
+            if vo_end and voiceover_exceeds_video(
+                voiceover_seconds=vo_end,
+                video_seconds=beat_end,
+                tail_seconds=tail_seconds,
+            ):
+                message = voiceover_exceeds_video_message(
+                    voiceover_seconds=vo_end,
+                    video_seconds=beat_end,
+                    tail_seconds=tail_seconds,
+                    context="music track length",
+                )
+                client.update_record(
+                    PLATFORM_OUTPUTS_TABLE,
+                    output["id"],
+                    {"Timing_Status": STATUS_FAILED, "Timing_Error_Message": message[:10000]},
+                    typecast=True,
+                )
+                return {"processed": False, "reason": "voiceover_exceeds_video", "error": message, **preview}
             # Drop leftover beats so the last still/clip is not longer than the others.
             fields["Music_Duration_Seconds"] = round(beat_end, 3)
             fields["Studio_Effective_Video_Duration_Seconds"] = round(beat_end, 3)

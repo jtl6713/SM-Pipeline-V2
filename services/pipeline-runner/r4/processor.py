@@ -9,6 +9,7 @@ from airtable.client import AirtableClient
 from airtable.constants import CONTENT_ITEMS_TABLE, PLATFORM_OUTPUTS_TABLE
 from r4.constants import MAKE_SCENARIO_ID, MAKE_SCENARIO_NAME, MAX_RECORDS, R4_CLEAR_FIELDS
 from r4.formulas import r4_exact_output_formula, r4_production_formula
+from audio.voiceover_duration import validate_voiceover_for_render
 from r4.render_request import choose_render_request, timing_blocks_render, voiceover_is_required, voiceover_url
 from render.fields import field_str, first_linked_id
 from render.remotion_client import RemotionClient
@@ -112,6 +113,27 @@ def process_one(
     if vo and not field_str(output, "Voiceover_URL"):
         client.update_record(PLATFORM_OUTPUTS_TABLE, output["id"], {"Voiceover_URL": vo})
         output.setdefault("fields", {})["Voiceover_URL"] = vo
+
+    vo_fit_error = validate_voiceover_for_render(output, content_item)
+    if vo_fit_error:
+        client.update_record(
+            PLATFORM_OUTPUTS_TABLE,
+            output["id"],
+            {
+                "Render_Status": "Blocked",
+                "Remotion_Error_Message": vo_fit_error[:10000],
+            },
+            typecast=True,
+        )
+        return {
+            "processed": False,
+            "reason": "voiceover_exceeds_video",
+            "error": vo_fit_error,
+            "output_record_id": output["id"],
+            "output_id": field_str(output, "Output_ID"),
+            "make_scenario_id": MAKE_SCENARIO_ID,
+            "make_scenario_name": MAKE_SCENARIO_NAME,
+        }
 
     route, payload = choose_render_request(
         output,
