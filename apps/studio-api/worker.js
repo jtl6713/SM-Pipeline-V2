@@ -399,7 +399,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.349-fb-public-admin-diagnostic",
+          version: "0.10.350-fb-public-direct-read",
           studio_desk_inventory_v1: true,
           studio_desk_activity_v1: true,
           studio_tiktok_complete_v1: true,
@@ -24693,17 +24693,30 @@ async function studioDiagnoseFacebookPublicMakeOnce(env) {
     }).catch(() => []);
     if (prior.length) return { skipped: "already-captured", record_id: prior[0].id };
 
-    const stateBody = await phase6MakeApiJson(env, `/scenarios/${STUDIO_FB_PUBLIC_SCENARIO_ID}`, { method: "GET" });
+    const settings = await listPipelineSettingsForAdmin(env);
+    const makeApiBase = pipelineSettingValue(settings, "MAKE_API_BASE_URL").replace(/\/+$/, "");
+    const makeApiToken = pipelineSettingValue(settings, "MAKE_API_TOKEN");
+    if (!makeApiBase || !makeApiToken) throw new Error("Make API configuration is unavailable");
+    const makeHeaders = {
+      Authorization: `Token ${makeApiToken}`,
+      Accept: "application/json",
+    };
+    const makeGet = async (path) => {
+      const response = await fetch(`${makeApiBase}${path}`, { method: "GET", headers: makeHeaders });
+      const raw = await response.text();
+      let body;
+      try { body = raw ? JSON.parse(raw) : {}; } catch { body = { raw: raw.slice(0, 500) }; }
+      if (!response.ok) throw new Error(`Make GET ${path} failed (${response.status})`);
+      return body;
+    };
+
+    const stateBody = await makeGet(`/scenarios/${STUDIO_FB_PUBLIC_SCENARIO_ID}`);
     const scenario = stateBody?.scenario || stateBody?.response?.scenario || stateBody || {};
-    const logsBody = await phase6MakeApiJson(
-      env,
-      `/scenarios/${STUDIO_FB_PUBLIC_SCENARIO_ID}/logs?pg%5Blimit%5D=30`,
-      { method: "GET" }
+    const logsBody = await makeGet(
+      `/scenarios/${STUDIO_FB_PUBLIC_SCENARIO_ID}/logs?pg%5Blimit%5D=30`
     ).catch((error) => ({ diagnostic_error: String(error?.message || error) }));
-    const executionsBody = await phase6MakeApiJson(
-      env,
-      `/scenarios/${STUDIO_FB_PUBLIC_SCENARIO_ID}/executions?pg%5Blimit%5D=30`,
-      { method: "GET" }
+    const executionsBody = await makeGet(
+      `/scenarios/${STUDIO_FB_PUBLIC_SCENARIO_ID}/executions?pg%5Blimit%5D=30`
     ).catch((error) => ({ diagnostic_error: String(error?.message || error) }));
 
     const logs = logsBody?.scenarioLogs || logsBody?.response?.scenarioLogs || logsBody?.data || [];
