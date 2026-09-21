@@ -77,6 +77,13 @@ test("Ideas archives promoted items in the Archived section", () => {
   assert.match(app, /already in production/);
 });
 
+test("Pipeline group headers include linked Content ID and title", () => {
+  assert.match(app, /let pipelineContentRecords = \[\]/);
+  assert.match(app, /function pipelineContentRecordForGroup/);
+  assert.match(app, /Content \${contentNumber}/);
+  assert.match(app, /api\("\/api\/content\?limit=100"\)/);
+});
+
 test("Pipeline archives fully published content items at the bottom", () => {
   assert.match(app, /function pipelineContentGroupFullyPublished/);
   assert.match(app, /renderPipelineArchivedSection/);
