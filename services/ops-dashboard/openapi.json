@@ -1,0 +1,175 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Chicago Shining Ops Dashboard API",
+    "version": "1.0.0",
+    "description": "Allowlisted operator actions for local Windows services (DEPLOY, VERIFY, restart). Does not deploy Cloudflare Worker or Pages — those use GitHub Actions trigger files on main."
+  },
+  "servers": [
+    { "url": "https://ops.chicagoshining.com", "description": "Public (Cloudflare Access + bearer token)" },
+    { "url": "http://127.0.0.1:3361", "description": "Local on Joseph's PC" }
+  ],
+  "security": [{ "bearerAuth": [] }, { "opsTokenHeader": [] }],
+  "paths": {
+    "/health": {
+      "get": {
+        "operationId": "health",
+        "summary": "Dashboard liveness",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Dashboard is up",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": { "type": "boolean" },
+                    "service": { "type": "string" },
+                    "host": { "type": "string" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/openapi.json": {
+      "get": {
+        "operationId": "openapi",
+        "summary": "This OpenAPI document",
+        "security": [],
+        "responses": { "200": { "description": "OpenAPI JSON" } }
+      }
+    },
+    "/api/catalog": {
+      "get": {
+        "operationId": "catalog",
+        "summary": "Services and allowlisted actions",
+        "responses": {
+          "200": { "description": "Catalog from catalog.json" },
+          "401": { "description": "Missing or invalid token" }
+        }
+      }
+    },
+    "/api/status": {
+      "get": {
+        "operationId": "status",
+        "summary": "Local port and public /health for each service",
+        "responses": {
+          "200": { "description": "Status rows" },
+          "401": { "description": "Missing or invalid token" }
+        }
+      }
+    },
+    "/api/run": {
+      "post": {
+        "operationId": "run",
+        "summary": "Run one allowlisted action (async job)",
+        "description": "Dangerous actions require confirm=true. Only one job runs at a time. Poll GET /api/jobs/{jobId} until status is ok or failed.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["action"],
+                "properties": {
+                  "action": {
+                    "type": "string",
+                    "enum": [
+                      "start-all",
+                      "stop-all",
+                      "verify",
+                      "desk-probe",
+                      "desk-restart",
+                      "close-orphans",
+                      "start-one",
+                      "restart-one",
+                      "stop-one",
+                      "sync",
+                      "plan",
+                      "deploy",
+                      "deploy-pipeline-runner",
+                      "rollback"
+                    ]
+                  },
+                  "service": {
+                    "type": "string",
+                    "description": "Required when action needsService (see catalog)",
+                    "enum": [
+                      "frame-extractor",
+                      "remotion-renderer",
+                      "watermark",
+                      "voiceover-normalizer",
+                      "youtube-uploader",
+                      "youtube-uploader-la",
+                      "youtube-uploader-nyc",
+                      "youtube-uploader-miami",
+                      "pipeline-runner",
+                      "timing-engine",
+                      "ops-dashboard"
+                    ]
+                  },
+                  "confirm": {
+                    "type": "boolean",
+                    "description": "Must be true for stop-all, desk-restart, restart-one, stop-one, sync, deploy, deploy-pipeline-runner, rollback"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": { "description": "Job started; body includes job.id" },
+          "400": { "description": "Unknown action, missing service, or confirm required" },
+          "401": { "description": "Missing or invalid token" },
+          "409": { "description": "Another job is still running" }
+        }
+      }
+    },
+    "/api/jobs/{jobId}": {
+      "get": {
+        "operationId": "getJob",
+        "summary": "Poll job log and exit status",
+        "parameters": [
+          {
+            "name": "jobId",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "format": "uuid" }
+          }
+        ],
+        "responses": {
+          "200": { "description": "Job with status running|ok|failed and log text" },
+          "404": { "description": "Unknown job id" }
+        }
+      }
+    },
+    "/api/jobs/unlock": {
+      "post": {
+        "operationId": "unlockJob",
+        "summary": "Force-unlock a stuck running job",
+        "responses": {
+          "200": { "description": "Unlocked" }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "DASHBOARD_TOKEN from Services/ops-dashboard/.env"
+      },
+      "opsTokenHeader": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "X-Ops-Token",
+        "description": "Same value as DASHBOARD_TOKEN"
+      }
+    }
+  }
+}

@@ -259,6 +259,22 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  if (req.method === 'GET' && url.pathname === '/api/openapi.json') {
+    const specPath = path.join(ROOT, 'openapi.json');
+    if (!fs.existsSync(specPath)) {
+      json(res, 404, { ok: false, error: 'openapi.json missing' });
+      return;
+    }
+    const spec = fs.readFileSync(specPath, 'utf8');
+    res.writeHead(200, {
+      'Content-Type': 'application/json; charset=utf-8',
+      'Cache-Control': 'no-store',
+      'Content-Length': Buffer.byteLength(spec),
+    });
+    res.end(spec);
+    return;
+  }
+
   if (!authorize(req, url)) {
     if (url.pathname.startsWith('/api/')) {
       json(res, 401, { ok: false, error: 'Set DASHBOARD_TOKEN and send it as Bearer, X-Ops-Token, or ?token=.' });

@@ -19,9 +19,24 @@ That writes `D:\Content Creation\ChicagoShining Pipeline\Services\ops-dashboard\
 
 Hidden start is also on `Start-ChicagoShiningHidden.ps1 -Service ops-dashboard` and the all-services hidden starter.
 
+## Callable API (ChatGPT / scripts)
+
+- **OpenAPI:** `GET /api/openapi.json` (public) — import into ChatGPT Custom Actions
+- **CLI:** `deploy/local-services/Invoke-OpsApi.ps1` — JSON stdout, `-Wait` for deploy jobs
+- **Handoff:** `docs/handoffs/ops-dashboard-api.md`
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass `
+  -File "..\..\deploy\local-services\Invoke-OpsApi.ps1" status
+
+powershell -NoProfile -ExecutionPolicy Bypass `
+  -File "..\..\deploy\local-services\Invoke-OpsApi.ps1" `
+  run -Action deploy-pipeline-runner -Confirm -Wait
+```
+
 ## Auth
 
-`/health` is public (same contract as the other local services).
+`/health` and `/api/openapi.json` are public. All other `/api/*` routes require a token when `DASHBOARD_TOKEN` is set.
 
 Everything else:
 
