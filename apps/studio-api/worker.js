@@ -399,7 +399,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.353-facebook-native-publish",
+          version: "0.10.354-facebook-reel-native-receipts",
           studio_desk_inventory_v1: true,
           studio_desk_activity_v1: true,
           studio_tiktok_complete_v1: true,
@@ -27265,10 +27265,16 @@ async function studioReconcileFacebookReels(env, options = {}) {
     if (!studioPublishCanDispatchNow(row)) continue;
     try {
       const pulsed = await studioPulseFbs3(env, row);
+      await studioStampPublishDispatch(
+        env,
+        row,
+        `facebook-native-reel: ${pulsed?.skipped ? `skipped=${pulsed.skipped}` : pulsed?.ok === false ? `failed=${pulsed?.message || pulsed?.status || "unknown"}` : `accepted FBS3 video_id=${pulsed?.video_id || ""}`}`
+      );
       results.push({ id: row.id, stage: "fbs3", ok: pulsed?.ok !== false, skipped: pulsed?.skipped || false });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       console.warn("facebook reel create reconcile failed", row.id, error);
+      await studioStampPublishDispatch(env, row, `facebook-native-reel failed: ${message}`);
       results.push({ id: row.id, stage: "fbs3", error: message });
     }
   }
