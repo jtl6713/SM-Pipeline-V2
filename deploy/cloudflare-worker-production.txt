@@ -516,3 +516,4 @@ Finished-video hard cap six Worker deploy: 2026-09-20 — Concurrent plan-sync a
 2026-09-20 deploy Worker 0.10.354 Facebook Reel native dispatch receipts
 2026-09-20 deploy Worker 0.10.355 Facebook Reel native Graph fallback
 2026-09-21 deploy Worker 0.10.356 pipeline Rerendering studio state during mix remix
+2026-09-21 deploy Worker 0.10.357 Platform Output fanout dedupe after concurrent create race (PR #289)
