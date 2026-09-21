@@ -399,7 +399,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.352-fb-public-module-logs",
+          version: "0.10.348-facebook-native-publish",
           studio_desk_inventory_v1: true,
           studio_desk_activity_v1: true,
           studio_tiktok_complete_v1: true,
@@ -441,6 +441,7 @@ export default {
           studio_due_publish_priority_v1: true,
           studio_overdue_scheduled_rescue_v1: true,
           studio_tiktok_photo_route_contract_v1: true,
+          studio_facebook_native_publish_v1: true,
           studio_fbs4_cover_unblock_v1: true,
           studio_publish_dispatch_reconcile_v1: true,
           studio_publish_location_v1: true,
@@ -1260,11 +1261,6 @@ export default {
         console.warn("overdue scheduled publish rescue cron failed", error);
       }
       try {
-        await studioDiagnoseFacebookPublicMakeOnce(env);
-      } catch (error) {
-        console.warn("FB-PUBLIC diagnostic cron failed", error);
-      }
-      try {
         await opsForceAzNavyPierTitle(env);
       } catch (error) {
         console.warn("ops az navy pier title patch failed", error);
@@ -1311,11 +1307,6 @@ export default {
         await studioReconcileTiktokDrafts(env);
       } catch (error) {
         console.warn("tiktok draft reconcile cron failed", error);
-      }
-      try {
-        await studioReconcileFacebookPublicMake(env);
-      } catch (error) {
-        console.warn("facebook public make reconcile cron failed", error);
       }
       // Due IG carousels (Parent Ready) must publish before heavier platform polls
       // burn the isolate subrequest budget — 304 sat ~3h past schedule otherwise.
@@ -7417,8 +7408,10 @@ const STUDIO_FB2R_SCENARIO_ID = 5813511;
 const STUDIO_FB3_SCENARIO_ID = 5813534;
 const STUDIO_FB_ORCH_SCENARIO_ID = 5813561;
 function studioFacebookGraphPublishHeld(env) {
-  const raw = String(env?.FACEBOOK_AUTO_PUBLISH || "").trim().toLowerCase();
-  return !["1", "true", "yes", "on"].includes(raw);
+  void env;
+  // Make.com is retired. Approved Facebook outputs publish through the native
+  // Graph/Python path; do not reinterpret a missing legacy flag as a publish hold.
+  return false;
 }
 const STUDIO_AP0C_SCENARIO_ID = 5786899;
 const STUDIO_AP1C_SCENARIO_ID = 5790745;
@@ -22800,7 +22793,7 @@ const PRODUCTION_CADENCE_WEBHOOK_LIVE = Object.freeze([
 ]);
 const STUDIO_AP0_WEBHOOK_URL = ""; // Make.com retired
 // Live FB-PUBLIC scenario 6107230 (Make connection 9988775). Not unpublished Graph / FB-ORCH.
-const STUDIO_FB_PUBLIC_WEBHOOK_URL = "https://hook.us2.make.com/ivrjp4e0nfpuyvukb18116wj1fwgjdw1";
+const STUDIO_FB_PUBLIC_WEBHOOK_URL = ""; // Make.com retired; Facebook publishes through native Graph/Python stages.
 const STUDIO_FB_PUBLIC_SCENARIO_ID = 6107230;
 const STUDIO_FB_PUBLIC_DIAG_CORRELATION = "FB-PUBLIC-LIVE-DIAG-20260921-V3";
 const STUDIO_AP0_RECORD_ID = /^rec[A-Za-z0-9]{14}$/;
@@ -24685,144 +24678,6 @@ function studioFacebookPublicMakeEligible(record) {
   return false;
 }
 
-async function studioDiagnoseFacebookPublicMakeOnce(env) {
-  try {
-    const prior = await listRecords(env, "Make Admin Queue", {
-      limit: 1,
-      filterFormula: `{Correlation_ID}="${STUDIO_FB_PUBLIC_DIAG_CORRELATION}"`,
-    }).catch(() => []);
-    if (prior.length) return { skipped: "already-captured", record_id: prior[0].id };
-
-    const settings = await listPipelineSettingsForAdmin(env);
-    const makeApiBase = pipelineSettingValue(settings, "MAKE_API_BASE_URL").replace(/\/+$/, "");
-    const makeApiToken = pipelineSettingValue(settings, "MAKE_API_TOKEN");
-    if (!makeApiBase || !makeApiToken) throw new Error("Make API configuration is unavailable");
-    const makeHeaders = {
-      Authorization: `Token ${makeApiToken}`,
-      Accept: "application/json",
-    };
-    const makeGet = async (path) => {
-      const response = await fetch(`${makeApiBase}${path}`, { method: "GET", headers: makeHeaders });
-      const raw = await response.text();
-      let body;
-      try { body = raw ? JSON.parse(raw) : {}; } catch { body = { raw: raw.slice(0, 500) }; }
-      if (!response.ok) throw new Error(`Make GET ${path} failed (${response.status})`);
-      return body;
-    };
-
-    const stateBody = await makeGet(`/scenarios/${STUDIO_FB_PUBLIC_SCENARIO_ID}`);
-    const scenario = stateBody?.scenario || stateBody?.response?.scenario || stateBody || {};
-    const logsBody = await makeGet(
-      `/scenarios/${STUDIO_FB_PUBLIC_SCENARIO_ID}/logs?pg%5Blimit%5D=30`
-    ).catch((error) => ({ diagnostic_error: String(error?.message || error) }));
-    const executionsBody = await makeGet(
-      `/scenarios/${STUDIO_FB_PUBLIC_SCENARIO_ID}/executions?pg%5Blimit%5D=30`
-    ).catch((error) => ({ diagnostic_error: String(error?.message || error) }));
-
-    const blueprintBody = await makeGet(
-      `/scenarios/${STUDIO_FB_PUBLIC_SCENARIO_ID}/blueprint?draft=false`
-    ).catch((error) => ({ diagnostic_error: String(error?.message || error) }));
-    const blueprint = blueprintBody?.blueprint || blueprintBody?.response?.blueprint || null;
-    const sanitize = (value, key = "") => {
-      const lower = String(key || "").toLowerCase();
-      if (["token","secret","password","authorization","connection","url","uri","hook"].some((part) => lower.includes(part))) {
-        return typeof value === "string" && /^https?:\/\//i.test(value) ? "<redacted-url>" : "<redacted>";
-      }
-      if (Array.isArray(value)) return value.map((item) => sanitize(item, key));
-      if (value && typeof value === "object") {
-        return Object.fromEntries(Object.entries(value).map(([childKey, childValue]) => [childKey, sanitize(childValue, childKey)]));
-      }
-      if (typeof value === "string" && /^https?:\/\//i.test(value)) return "<redacted-url>";
-      return value;
-    };
-    const modules = [];
-    const walk = (flow, depth = 0) => {
-      for (const node of Array.isArray(flow) ? flow : []) {
-        modules.push({
-          id: node?.id ?? null,
-          module: node?.module ?? null,
-          name: node?.metadata?.designer?.name ?? null,
-          depth,
-          filter: sanitize(node?.filter ?? null),
-          mapper: sanitize(node?.mapper ?? {}),
-          parameters: sanitize(node?.parameters ?? {}),
-        });
-        for (const route of Array.isArray(node?.routes) ? node.routes : []) walk(route?.flow || [], depth + 1);
-      }
-    };
-    if (blueprint?.flow) walk(blueprint.flow);
-
-    const moduleLogs = {};
-    for (const moduleId of [6, 7, 8, 9]) {
-      const body = await makeGet(
-        `/scenarios/${STUDIO_FB_PUBLIC_SCENARIO_ID}/modules/${moduleId}/logs?pg%5Blimit%5D=30`
-      ).catch((error) => ({ diagnostic_error: String(error?.message || error) }));
-      const rows = body?.moduleLogs || body?.response?.moduleLogs || body?.data || [];
-      moduleLogs[String(moduleId)] = {
-        error: body?.diagnostic_error || null,
-        rows: Array.isArray(rows) ? rows.slice(0, 30).map((row) => ({
-          executionId: row?.executionId ?? null,
-          timestamp: row?.timestamp ?? null,
-          status: row?.status ?? null,
-          bundles: sanitize(row?.bundles ?? null),
-        })) : [],
-      };
-    }
-
-    const logs = logsBody?.scenarioLogs || logsBody?.response?.scenarioLogs || logsBody?.data || [];
-    const executions = executionsBody?.executions || executionsBody?.response?.executions || executionsBody?.data || [];
-    const slim = (row) => {
-      const out = {};
-      for (const key of ["id","status","timestamp","startedAt","finishedAt","duration","operations","type","instant"]) {
-        if (row && Object.prototype.hasOwnProperty.call(row, key)) out[key] = row[key];
-      }
-      return out;
-    };
-    const result = {
-      scenario_id: STUDIO_FB_PUBLIC_SCENARIO_ID,
-      name: scenario?.name || null,
-      is_active: scenario?.isActive === true,
-      scheduling: scenario?.scheduling || null,
-      hook_present: Boolean(scenario?.hookId),
-      blueprint_name: blueprint?.name || null,
-      modules,
-      blueprint_error: blueprintBody?.diagnostic_error || null,
-      module_logs: moduleLogs,
-      recent_logs: Array.isArray(logs) ? logs.slice(0, 30).map(slim) : [],
-      recent_executions: Array.isArray(executions) ? executions.slice(0, 30).map(slim) : [],
-      logs_error: logsBody?.diagnostic_error || null,
-      executions_error: executionsBody?.diagnostic_error || null,
-      captured_at: new Date().toISOString(),
-    };
-    const stamp = new Date().toISOString();
-    const created = await airtableFetch(env, "Make Admin Queue", "", {
-      method: "POST",
-      body: JSON.stringify({
-        records: [{ fields: {
-          Command_ID: `FB-PUBLIC-DIAG-${Date.now()}`,
-          Action: "GET_SCENARIO",
-          Scenario_ID: STUDIO_FB_PUBLIC_SCENARIO_ID,
-          Scenario_Name: String(scenario?.name || "FB-PUBLIC"),
-          Write_Approved: false,
-          Status: "Succeeded",
-          Result_JSON: JSON.stringify(result),
-          Requested_At: stamp,
-          Started_At: stamp,
-          Completed_At: stamp,
-          Requested_By: "chicagoshining-studio-api",
-          Correlation_ID: STUDIO_FB_PUBLIC_DIAG_CORRELATION,
-          Notes: "Read-only sanitized FB-PUBLIC live scenario/execution diagnostic for overdue scheduled publish recovery.",
-        }}],
-        typecast: true,
-      }),
-    });
-    return { ok: true, result, record_id: created?.records?.[0]?.id || null };
-  } catch (error) {
-    console.warn("FB-PUBLIC live diagnostic failed", error);
-    return { ok: false, error: String(error?.message || error) };
-  }
-}
-
 async function studioPulseFacebookPublicMake(env, record) {
   const recordId = String(record?.id || "").trim();
   const target = "FB-PUBLIC";
@@ -26367,8 +26222,7 @@ async function studioEnsureOutputCaption(env, record) {
 // after it is recoverable on a later pass, so it is split off: this half runs on the request
 // path where it cannot be dropped by a cancelled background task or an exhausted invocation.
 async function studioDispatchApprovedPublishNow(env, record) {
-  if (studioFacebookGraphPublishHeld(env) && String(f(record, "Platform") || "").trim() === "Facebook") {
-    if (!studioPublishCanDispatchNow(record)) {
+  if (!studioPublishCanDispatchNow(record)) {
       return {
         ok: true,
         skipped: "scheduled-hold",
@@ -27472,23 +27326,16 @@ async function approveOutputRecordForPublishing(env, existing, note, stamp, payl
     occupiedMs = occupied[platform] || [];
   }
   const scheduleFields = studioPublishScheduleFields(payload || {}, record, { occupiedMs });
-  const facebookMake = studioFacebookGraphPublishHeld(env) && platform === "Facebook"
-    && studioFacebookPublicMakeRoutable(record);
-  const facebookManual = studioFacebookGraphPublishHeld(env) && platform === "Facebook" && !facebookMake;
   const scheduledIso = scheduleFields.Scheduled_Post_Date || f(record, "Scheduled_Post_Date");
   const fields = {
     Review_Status: "Approved",
     Output_Status: "Approved for Publishing",
     Publish_Status: "Ready to Schedule",
-    Publish_Method: facebookManual ? "Manual" : "Automated",
-    Auto_Publish_Enabled: !facebookManual,
+    Publish_Method: "Automated",
+    Auto_Publish_Enabled: true,
     Review_Decision_At: stamp,
     Do_Not_Publish: false,
-    Review_Notes: [existingNotes, note, facebookManual
-      ? `Studio Pipeline approved the Facebook render at ${stamp}. Graph publish is held — post this in Business Suite until the Meta app is live.`
-      : facebookMake
-        ? `Studio Pipeline approved the Facebook render at ${stamp}. Studio will fire the Live Make publisher (FB-PUBLIC).`
-        : `Studio Pipeline approved for publishing at ${stamp}.`].filter(Boolean).join("\n\n"),
+    Review_Notes: [existingNotes, note, `Studio Pipeline approved for publishing at ${stamp}.`].filter(Boolean).join("\n\n"),
     ...studioPublishHandoffFields(record, { scheduledPostDate: scheduledIso }),
     ...scheduleFields,
   };
