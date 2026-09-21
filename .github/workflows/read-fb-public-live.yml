@@ -1,0 +1,91 @@
+name: Read FB Public Live
+on:
+  push:
+    branches: [main]
+    paths: ['deploy/read-fb-public-live.txt']
+permissions: {contents: read}
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+    steps:
+      - uses: actions/checkout@v6
+      - name: Read FB-PUBLIC scenario contract and recent executions
+        shell: bash
+        run: |
+          set -euo pipefail; umask 077
+          openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:CLOUDFLARE_API_TOKEN -in deploy/credential-envelope/private.pem.enc -out /tmp/key.pem
+          base64 -d deploy/credential-envelope/airtable_pat.ciphertext.b64 >/tmp/pat.enc
+          openssl pkeyutl -decrypt -inkey /tmp/key.pem -in /tmp/pat.enc -pkeyopt rsa_padding_mode:oaep -pkeyopt rsa_oaep_md:sha256 -pkeyopt rsa_mgf1_md:sha256 -out /tmp/pat.txt
+          PAT=$(cat /tmp/pat.txt)
+          python - <<'PY' >/tmp/q.txt
+          import urllib.parse
+          f="OR({Setting_Name}='MAKE_API_TOKEN',{Setting_Name}='MAKE_API_BASE_URL')"
+          print(urllib.parse.urlencode([('filterByFormula',f),('fields[]','Setting_Name'),('fields[]','Setting_Value'),('fields[]','Active')]))
+          PY
+          curl -fsS "https://api.airtable.com/v0/appe33zkZn35yirTL/tblpHPWeEkyJaF7ql?$(cat /tmp/q.txt)" -H "Authorization: Bearer $PAT" -o /tmp/settings.json
+          python - <<'PY'
+          import json
+          d=json.load(open('/tmp/settings.json'))
+          vals={r['fields'].get('Setting_Name'):r['fields'].get('Setting_Value') for r in d.get('records',[]) if r.get('fields',{}).get('Active')}
+          open('/tmp/make-token.txt','w').write(str(vals['MAKE_API_TOKEN']).strip())
+          open('/tmp/make-base.txt','w').write(str(vals['MAKE_API_BASE_URL']).strip().rstrip('/'))
+          PY
+          TOKEN=$(cat /tmp/make-token.txt); BASE=$(cat /tmp/make-base.txt); SID=6107230
+          curl -fsS "$BASE/scenarios/$SID" -H "Authorization: Token $TOKEN" -o /tmp/scenario.json
+          curl -fsS "$BASE/scenarios/$SID/blueprint" -H "Authorization: Token $TOKEN" -o /tmp/blueprint.json
+          curl -fsS "$BASE/scenarios/$SID/logs?pg%5Blimit%5D=20" -H "Authorization: Token $TOKEN" -o /tmp/logs.json || echo '{}' >/tmp/logs.json
+          curl -fsS "$BASE/scenarios/$SID/executions?pg%5Blimit%5D=20" -H "Authorization: Token $TOKEN" -o /tmp/executions.json || echo '{}' >/tmp/executions.json
+          python - <<'PY'
+          import json,re
+          s=json.load(open('/tmp/scenario.json'))
+          b=json.load(open('/tmp/blueprint.json'))
+          l=json.load(open('/tmp/logs.json'))
+          e=json.load(open('/tmp/executions.json'))
+          scenario=s.get('scenario') or s.get('response') or s
+          bp=b.get('blueprint') or (b.get('response') or {}).get('blueprint') or b
+          def clean(v,key=''):
+              kl=str(key).lower()
+              if any(x in kl for x in ('token','secret','password','authorization','connection','url','uri','hook')):
+                  if kl in ('url','uri') and isinstance(v,str):
+                      return '<redacted-url>'
+                  return '<redacted>'
+              if isinstance(v,dict): return {k:clean(x,k) for k,x in v.items()}
+              if isinstance(v,list): return [clean(x,key) for x in v]
+              if isinstance(v,str) and re.search(r'https?://',v,re.I): return '<redacted-url>'
+              return v
+          mods=[]
+          def walk(flow,depth=0):
+              for n in flow or []:
+                  name=((n.get('metadata') or {}).get('designer') or {}).get('name')
+                  mods.append({
+                      'id':n.get('id'),'module':n.get('module'),'name':name,'depth':depth,
+                      'mapper':clean(n.get('mapper') or {}),
+                      'parameters':clean(n.get('parameters') or {}),
+                      'filter':clean(n.get('filter')),
+                  })
+                  for route in n.get('routes') or []: walk(route.get('flow') or [],depth+1)
+          walk(bp.get('flow') or [])
+          logs=l.get('scenarioLogs') or (l.get('response') or {}).get('scenarioLogs') or []
+          executions=e.get('executions') or (e.get('response') or {}).get('executions') or e.get('data') or []
+          out={
+              'scenario':{k:scenario.get(k) for k in ('id','name','isActive','scheduling','hookId')},
+              'modules':mods,
+              'logs':[{k:r.get(k) for k in ('id','status','timestamp','duration','operations','type','instant') if k in r} for r in logs[:20]],
+              'executions':[{k:r.get(k) for k in ('id','status','startedAt','finishedAt','duration','operations','type') if k in r} for r in executions[:20]]
+          }
+          open('/tmp/fb-public-live.json','w').write(json.dumps(out,indent=2))
+          print(json.dumps({'scenario':out['scenario'],'module_count':len(mods),'logs':out['logs'][:10],'executions':out['executions'][:10]},indent=2))
+          PY
+      - name: Destroy credentials
+        if: always()
+        run: |
+          for f in /tmp/key.pem /tmp/pat.enc /tmp/pat.txt /tmp/make-token.txt /tmp/make-base.txt /tmp/settings.json /tmp/scenario.json /tmp/blueprint.json /tmp/logs.json /tmp/executions.json /tmp/q.txt; do [[ ! -e "$f" ]] || shred -u "$f" 2>/dev/null || rm -f "$f"; done
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: fb-public-live-${{ github.run_id }}
+          path: /tmp/fb-public-live.json
+          retention-days: 7
