@@ -10,7 +10,7 @@ from ap0.public_cover import graph_fetchable_cover_url
 from carousel.timeutil import iso_utc, utc_now
 from config import load_settings
 from publish.location import PublishLocation, append_location_line
-from render.fields import field, field_str, first_linked_id
+from render.fields import field, field_str, first_linked_id, parse_json_field
 from rr1.email_builder import thumbnail_download_url
 from ttd.constants import (
     DEFAULT_TITLE,
@@ -145,12 +145,84 @@ def platform_status_block(siblings: list[dict[str, Any]] | None) -> str:
     )
 
 
-def handoff_email_subject(record: dict[str, Any]) -> str:
+def profile_display_name(record: dict[str, Any], profile: dict[str, Any] | None = None) -> str:
+    """Exact Content Profile name for human-facing TikTok handoffs."""
+    for source in (profile or {}, record or {}):
+        for field_name in ("Profile_Name", "Brand_Name", "Market_Name"):
+            value = field_str(source, field_name)
+            if value:
+                return value
+    return "ChicagoShining"
+
+
+def handoff_email_subject(
+    record: dict[str, Any],
+    *,
+    profile: dict[str, Any] | None = None,
+) -> str:
     title = field_str(record, "Output_Title") or "TikTok draft"
+    profile_name = profile_display_name(record, profile)
     if is_az_finished_video(record):
-        return f"ChicagoShining publish package — {title}"
+        return f"{profile_name} publish package — {title}"
     output_id = field(record, "Output_ID") or ""
-    return f"TikTok Draft #{output_id} Ready in Inbox - {title}"
+    return f"TikTok Draft #{output_id} — {profile_name} — Ready in Inbox - {title}"
+
+
+def _ordered_asset_urls(record: dict[str, Any]) -> list[str]:
+    parsed = parse_json_field(field(record, "TikTok_Draft_Assets_JSON"))
+    if isinstance(parsed, list):
+        return [str(value).strip() for value in parsed if str(value or "").strip()]
+    if isinstance(parsed, dict):
+        source = str(parsed.get("source_url") or "").strip()
+        return [source] if source else []
+    return []
+
+
+def _slide_label(slide: dict[str, Any], index: int) -> str:
+    name = field_str(slide, "Slide Name")
+    if name:
+        return name
+    number = field(slide, "Slide Number") or field(slide, "Current Order")
+    if number not in (None, ""):
+        return f"Slide {number}"
+    return f"Image {index + 1}"
+
+
+def ordered_asset_links_html(
+    record: dict[str, Any],
+    *,
+    slides: list[dict[str, Any]] | None = None,
+) -> str:
+    """Render the stored manifest as short named links without exposing raw JSON."""
+    urls = _ordered_asset_urls(record)
+    if not urls:
+        return (
+            '<div style="margin:8px 0;padding:12px;border:1px solid #e5e7eb;'
+            'border-radius:8px;background:#f9fafb;color:#6b7280;">No draft asset links were stored.</div>'
+        )
+
+    by_url: dict[str, str] = {}
+    for index, slide in enumerate(slides or []):
+        url = field_str(slide, "Asset_9x16_Public_URL")
+        if url and url not in by_url:
+            by_url[url] = _slide_label(slide, index)
+
+    is_video = _ci(field_str(record, "TikTok_Draft_Type")) == _ci(DRAFT_TYPE_VIDEO)
+    rows: list[str] = []
+    for index, url in enumerate(urls):
+        label = by_url.get(url) or ("Video draft asset" if is_video else f"Image {index + 1}")
+        safe_url = html.escape(url, quote=True)
+        safe_label = html.escape(label)
+        rows.append(
+            '<li style="margin:0 0 8px 0;">'
+            f'<a href="{safe_url}" style="font-weight:700;color:#2563eb;text-decoration:none;">{safe_label}</a>'
+            "</li>"
+        )
+    return (
+        '<div style="margin:8px 0;padding:12px 14px;border:1px solid #e5e7eb;'
+        'border-radius:8px;background:#f9fafb;">'
+        f'<ol style="margin:0;padding-left:22px;">{"".join(rows)}</ol></div>'
+    )
 
 
 def _ci(value: Any) -> str:
@@ -191,6 +263,8 @@ def handoff_email_html(
     *,
     location: PublishLocation | None = None,
     siblings: list[dict[str, Any]] | None = None,
+    profile: dict[str, Any] | None = None,
+    asset_slides: list[dict[str, Any]] | None = None,
 ) -> str:
     output_id = html.escape(str(field(record, "Output_ID") or ""))
     title = html.escape(field_str(record, "Output_Title") or "TikTok draft")
@@ -203,20 +277,21 @@ def handoff_email_html(
         if location_label
         else ""
     )
-    assets = html.escape(field_str(record, "TikTok_Draft_Assets_JSON"))
+    assets = ordered_asset_links_html(record, slides=asset_slides)
     publish_id = html.escape(field_str(record, "TikTok_Draft_Publish_ID"))
     completion = html.escape(field_str(record, "TikTok_Manual_Completion_URL"))
     when = html.escape(recommended_publish_label(record))
     count = html.escape(image_count_label(record))
     az = is_az_finished_video(record)
-    heading = "ChicagoShining publish package" if az else "TikTok draft delivered — manual action required"
+    profile_name = html.escape(profile_display_name(record, profile))
+    heading = f"{profile_name} publish package" if az else "TikTok draft delivered — manual action required"
     intro = (
-        '<p style="margin:0 0 16px;color:#4b5563;">TikTok accepted the asset package and delivered it to the <b>@chicago.shining</b> inbox. '
+        f'<p style="margin:0 0 16px;color:#4b5563;">TikTok accepted the asset package and delivered it to the TikTok inbox for <b>{profile_name}</b>. '
         "Sibling Instagram, Facebook, and YouTube posts for this video share the same campaign day. "
         "TikTok cannot tell us when the inbox draft goes public — use Mark as Published after you post. "
         "TikTok Story is still manual in the app.</p>"
         if az
-        else '<p style="margin:0 0 16px;color:#4b5563;">TikTok accepted the asset package and delivered it to the <b>@chicago.shining</b> inbox. It has not been marked Published in Airtable.</p>'
+        else f'<p style="margin:0 0 16px;color:#4b5563;">TikTok accepted the asset package and delivered it to the TikTok inbox for <b>{profile_name}</b>. It has not been marked Published in Airtable.</p>'
     )
     status_block = platform_status_block(siblings) if az else ""
     story_note = (
@@ -229,6 +304,7 @@ def handoff_email_html(
         '<div style="font-family:Arial,Helvetica,sans-serif;line-height:1.5;color:#111827;background:#f3f4f6;padding:20px;">'
         '<div style="max-width:820px;margin:0 auto;background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:22px;">'
         f"<h2 style=\"margin:0 0 8px;\">{heading}</h2>"
+        f'<div style="margin:0 0 14px;padding:10px 12px;border:1px solid #bfdbfe;border-radius:8px;background:#eff6ff;"><b>Profile:</b> {profile_name}</div>'
         f"{intro}"
         f"{status_block}"
         f'<div style="border:1px solid #ddd;border-radius:10px;padding:16px;"><h3 style="margin-top:0;">Output #{output_id} — {title}</h3>'
@@ -237,8 +313,8 @@ def handoff_email_html(
         f"{cover_block(record)}"
         '<p><b>Caption and hashtags — copyable block:</b></p>'
         f'<div style="white-space:pre-wrap;background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px;padding:12px;">{caption}\n\n{hashtags}</div>'
-        '<p><b>Ordered asset manifest:</b></p>'
-        f'<div style="white-space:pre-wrap;word-break:break-word;background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px;padding:12px;">{assets}</div>'
+        '<p><b>Ordered draft assets:</b></p>'
+        f"{assets}"
         f"{story_note}"
         "<ol><li>Open the TikTok inbox notification from <b>SM Pipeline Social Publisher</b>.</li>"
         "<li>Review and edit the images/video and caption.</li>"
