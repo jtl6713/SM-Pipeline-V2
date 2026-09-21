@@ -208,6 +208,7 @@ export default {
       const isOutputCreativeContinueRoute = /^\/api\/outputs\/rec[A-Za-z0-9]+\/creative\/render\/continue$/.test(url.pathname);
       const isOutputCreativeHandoffStatusRoute = /^\/api\/outputs\/rec[A-Za-z0-9]+\/creative\/handoff\/status$/.test(url.pathname);
       const isAdminMakeDeployRoute = url.pathname === "/api/admin/make-deploy";
+      const isAdminFbPublicDiagnosticRoute = url.pathname === "/api/admin/fb-public-diagnostic";
       const isAdminRepairControlRoute = url.pathname === "/api/admin/repair/control";
       const isOperationsRoute = url.pathname === "/api/operations";
       const isOperationsProfileRoute = /^\/api\/operations\/profiles\/rec[A-Za-z0-9]+$/.test(url.pathname);
@@ -398,7 +399,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.348-fb-public-diagnostic-buildfix",
+          version: "0.10.349-fb-public-admin-diagnostic",
           studio_desk_inventory_v1: true,
           studio_desk_activity_v1: true,
           studio_tiktok_complete_v1: true,
@@ -698,6 +699,13 @@ export default {
         }
         assertWriteRequest(request, env);
         return adminMakeDeploy(request, env, authorization);
+      }
+
+      if (isAdminFbPublicDiagnosticRoute) {
+        requirePermission(authorization, "tenant_admin");
+        if (request.method !== "GET") throw new HttpError(405, "Method not allowed");
+        const diagnostic = await studioDiagnoseFacebookPublicMakeOnce(env);
+        return respond(request, env, diagnostic);
       }
 
       if (isAdminRepairControlRoute) {
