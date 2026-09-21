@@ -7,6 +7,7 @@ from typing import Any
 from airtable.client import AirtableClient
 from studio_produce.constants import CAROUSEL_SLIDES_TABLE, CONTENT_ITEMS_TABLE, PLATFORM_OUTPUTS_TABLE, PRODUCTION_REQUESTS_TABLE
 from item4.processor import process_drain as process_smv1_drain
+from p3.helpers import caption_with_hashtags
 from render.fields import field, field_str
 from studio_produce.context import (
     expected_photo_count,
@@ -233,21 +234,32 @@ def persist_masters(client: AirtableClient, request_id: str, assets: list[dict[s
 
 
 def apply_caption(client: AirtableClient, parent: dict[str, Any], outputs: list[dict[str, Any]], themes: dict[str, Any]) -> None:
-    caption = str(themes.get("post_caption") or "").strip()
-    if not caption or field_str(parent, "Caption"):
+    generated_caption = str(themes.get("post_caption") or "").strip()
+    generated_hashtags = str(themes.get("hashtags") or "").strip()
+    parent_caption = field_str(parent, "Caption") or generated_caption
+    parent_hashtags = field_str(parent, "Hashtags") or generated_hashtags
+    if not parent_caption and not parent_hashtags:
         return
-    fields = {"Caption": caption}
-    hashtags = str(themes.get("hashtags") or "").strip()
-    if hashtags and not field_str(parent, "Hashtags"):
-        fields["Hashtags"] = hashtags
-    client.update_record(CONTENT_ITEMS_TABLE, parent["id"], fields, typecast=True)
+
+    parent_patch: dict[str, Any] = {}
+    if generated_caption and not field_str(parent, "Caption"):
+        parent_patch["Caption"] = generated_caption
+    if generated_hashtags and not field_str(parent, "Hashtags"):
+        parent_patch["Hashtags"] = generated_hashtags
+    if parent_patch:
+        client.update_record(CONTENT_ITEMS_TABLE, parent["id"], parent_patch, typecast=True)
+
     for output in outputs:
-        if field_str(output, "Output_Caption"):
-            continue
-        patch = {"Output_Caption": caption}
-        if hashtags and not field_str(output, "Output_Hashtags"):
-            patch["Output_Hashtags"] = hashtags
-        client.update_record(PLATFORM_OUTPUTS_TABLE, output["id"], patch, typecast=True)
+        output_caption = field_str(output, "Output_Caption") or parent_caption
+        output_hashtags = field_str(output, "Output_Hashtags") or parent_hashtags
+        patch: dict[str, Any] = {}
+        canonical_caption = caption_with_hashtags(output_caption, output_hashtags)
+        if canonical_caption and canonical_caption != field_str(output, "Output_Caption"):
+            patch["Output_Caption"] = canonical_caption
+        if output_hashtags and not field_str(output, "Output_Hashtags"):
+            patch["Output_Hashtags"] = output_hashtags
+        if patch:
+            client.update_record(PLATFORM_OUTPUTS_TABLE, output["id"], patch, typecast=True)
 
 
 def apply_voiceover_script(client: AirtableClient, parent: dict[str, Any], themes: dict[str, Any] | None) -> None:
