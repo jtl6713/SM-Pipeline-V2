@@ -4165,7 +4165,7 @@ const ITEM4_PLAN_SPECS = Object.freeze({
       "Carousel": { mapping_type: "Instagram Carousel", format: "Carousel", rationale: "Optional. Publishes a silent swipeable 4:5 Instagram carousel with no music or voiceover." },
       "Reel": { mapping_type: "Instagram Reel", format: "Vertical Short Video", rationale: "Default. Renders the photos as a 9:16 Instagram Reel with music and voiceover." },
       "Single Image": { mapping_type: "Instagram Feed Post", format: "Feed Post", rationale: "Use one hero photo as a feed post." },
-      "Story": { mapping_type: "Instagram Story", format: "Story", rationale: "Companion 5-second 9:16 Story from the first photo, with a slight zoom and the same music. After the main post is live, the Story can link through to that Reel or feed post." },
+      "Story": { mapping_type: "Instagram Story", format: "Story", rationale: "Companion 10-second 9:16 Story from the first photo, with a slight zoom and the same music. After the main post is live, the Story can link through to that Reel or feed post." },
     }),
   }),
   Facebook: Object.freeze({
@@ -4175,7 +4175,7 @@ const ITEM4_PLAN_SPECS = Object.freeze({
       "Slideshow Reel": { mapping_type: "Facebook Reel", format: "Vertical Short Video", rationale: "Default. Renders the same photos as a 9:16 Facebook Reel with music and voiceover." },
       "Reel": { mapping_type: "Facebook Reel", format: "Vertical Short Video", rationale: "Creates a 9:16 Facebook Reel from shot video, not from a photo set." },
       "Single Image": { mapping_type: "Facebook Post", format: "Feed Post", rationale: "Use one hero photo as a Facebook post." },
-      "Story": { mapping_type: "Facebook Story", format: "Story", rationale: "Companion 5-second 9:16 Story from the first photo, with a slight zoom and the same music. After the main post is live, the Story can link through to that Reel or photo post." },
+      "Story": { mapping_type: "Facebook Story", format: "Story", rationale: "Companion 10-second 9:16 Story from the first photo, with a slight zoom and the same music. After the main post is live, the Story can link through to that Reel or photo post." },
     }),
   }),
   TikTok: Object.freeze({
@@ -6959,7 +6959,7 @@ function item4IsUnsupportedCompanion(platform, outputType) {
   return String(platform || "").trim() === "TikTok" && item4IsCompanionOutputType(outputType);
 }
 
-const ITEM4_STORY_TEASER_SECONDS = 5;
+const ITEM4_STORY_TEASER_SECONDS = 10;
 const ITEM4_SINGLE_STILL_SECONDS = 5;
 
 function item4ResolvedVideoDurationSeconds({ storyTeaser, clipCount, effective, requestRecord, outputRow }) {
@@ -11939,7 +11939,7 @@ async function item4SourceToProductionBridgePreflight(env, requestRecord, ideaRe
   if (compatibility.length) issues.push(...compatibility);
   warnings.push(...productionRequestAudioPlatformWarnings(requestRecord, routeRows));
   if (routeRows.some((row) => row.output_type === "Story" && (row.platform === "Instagram" || row.platform === "Facebook"))) {
-    notes.push("Instagram and Facebook Stories will be a 5-second clip from the first vertical photo, with a slight zoom and your music. They do not inherit the 30-second main-video length.");
+    notes.push("Instagram and Facebook Stories will be a 10-second clip from the first vertical photo, with a slight zoom and your music. They do not inherit the 30-second main-video length.");
   }
 
   return {
@@ -14007,7 +14007,7 @@ function platformOutputSeedFields(parentContentItem, requestRecord, outputRow, e
     Output_Notes: [
       `Studio single-parent output seed. Production Request Output ${String(f(outputRow,"Production_Request_Output_ID")||outputRow.id)} is the per-platform execution authority.`,
       effective.output_type === "Story"
-        ? `Companion 5-second Story teaser from the first photo, slight zoom, music, no voiceover. After the matching ${effective.platform} main post is live, attach that post URL as the Story link.`
+        ? `Companion 10-second Story teaser from the first photo, slight zoom, music, no voiceover. After the matching ${effective.platform} main post is live, attach that post URL as the Story link.`
         : "",
     ].filter(Boolean).join(" "),
     Asset_Need_Status: "Not Needed",
@@ -19777,7 +19777,7 @@ function item4P3SingleParentEnrichmentRecord() {
     Voiceover_URL:'{{if(ifempty(102.Studio_Effective_Voiceover_Mode; "Yes") = "No"; ""; 101.Voiceover_URL)}}',
     Output_Status: STUDIO_P3_NATIVE_PHOTO_STATUS_IF,
     Asset_Selection_Status: STUDIO_P3_NATIVE_PHOTO_SELECTION_IF,
-    Output_Notes:`{{102.Output_Notes}}\nP3 v4.8 ${STUDIO_P3_REMOTION_HANDOFF_MARKER}: Multi-Photo / Instagram Carousel / Facebook Multi-Image Post stay Ready for Review; Instagram and Facebook Story plus other Remotion Studio outputs stay In Production with assets Selected so R3/R4 can render the 5-second Story teaser. Enrichment from Content Item {{101.Content_ID}}.`
+    Output_Notes:`{{102.Output_Notes}}\nP3 v4.8 ${STUDIO_P3_REMOTION_HANDOFF_MARKER}: Multi-Photo / Instagram Carousel / Facebook Multi-Image Post stay Ready for Review; Instagram and Facebook Story plus other Remotion Studio outputs stay In Production with assets Selected so R3/R4 can render the 10-second Story teaser. Enrichment from Content Item {{101.Content_ID}}.`
   };
 }
 
