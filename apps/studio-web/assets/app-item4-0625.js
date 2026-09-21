@@ -191,6 +191,7 @@
   let pipelineOutputs = [];
   let pipelineSort = { key: "output", dir: "desc" };
   let ideasSort = { key: "idea", dir: "desc" };
+  let ideasArchivedSectionOpen = false;
   let contentSort = { key: "content", dir: "desc" };
   const pipelineGroupOpen = new Map();
   let pipelineArchivedSectionOpen = false;
@@ -225,7 +226,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.355-content-id-heading";
+  const BUILD_ID = "item4-0.6.356-ideas-archive";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -10738,19 +10739,45 @@
     return `<th><button type="button" class="table-sort${active ? " is-active" : ""}" data-idea-sort="${escapeHtml(key)}" aria-pressed="${active ? "true" : "false"}">${escapeHtml(label)} <span aria-hidden="true">${arrow}</span></button></th>`;
   }
 
+  function ideaRowHtml(r) {
+    const promote = ideaShowPromoteAction(r)
+      ? `<button type="button" class="manage-button promote-row-button" data-idea-id="${escapeHtml(r.id)}" data-idea-action="promote">Promote</button>`
+      : "";
+    return `<tr class="${r.is_on_hold ? "idea-row-held" : ""}"><td><div class="title-cell">${value(r.title)}</div><div class="subtle">${value(r.summary, "")}${r.created_at ? `${r.summary ? " · " : ""}Created ${dateValue(r.created_at)}` : ""}</div></td><td>${badge(ideaStatusLabel(r))}</td><td>${value(r.content_type)}</td><td>${join(r.platforms)}</td><td>${ideaStructureLabel(r)}</td><td><div class="subtle">${escapeHtml(ideaProductionLabel(r))}</div></td><td><div class="idea-row-actions">${promote}<button type="button" class="manage-button" data-idea-id="${escapeHtml(r.id)}">Manage</button></div></td></tr>`;
+  }
+
+  function partitionIdeaRecords(records) {
+    const active = [];
+    const archived = [];
+    for (const record of records || []) {
+      if (ideaIsPromoted(record)) archived.push(record);
+      else active.push(record);
+    }
+    return { active, archived };
+  }
+
+  function renderIdeaArchivedSection(archived) {
+    if (!archived.length) return "";
+    const open = ideasArchivedSectionOpen;
+    const banner = `<tbody class="pipeline-archived-section${open ? "" : " is-collapsed"}" data-idea-archived-section><tr class="pipeline-archived-section-row"><td colspan="7"><button type="button" class="pipeline-archived-section-toggle" data-idea-archived-toggle aria-expanded="${open ? "true" : "false"}"><span class="pipeline-group-chevron" aria-hidden="true">${open ? "▾" : "▸"}</span><span class="pipeline-archived-section-title">Archived</span><span class="pipeline-archived-section-meta">${archived.length} idea${archived.length === 1 ? "" : "s"} in production</span></button></td></tr></tbody>`;
+    if (!open) return banner;
+    return `${banner}<tbody class="idea-archived-rows">${archived.map(ideaRowHtml).join("")}</tbody>`;
+  }
+
   function renderIdeasTable(target, records) {
     if (!target) return;
     if (!records.length) {
       target.innerHTML = '<div class="empty"><strong>No ideas are currently in the intake queue.</strong><br><span class="subtle">Studio is connected; the Idea Candidates table is simply empty after the recent reset/test cycle.</span></div>';
       return;
     }
-    const sorted = sortedIdeaRecords(records);
-    target.innerHTML = `<table class="data-table idea-table"><thead><tr>${ideaSortHeader("idea", "Idea")}${ideaSortHeader("status", "Status")}${ideaSortHeader("type", "Type")}${ideaSortHeader("platforms", "Platforms")}${ideaSortHeader("structure", "Structure")}${ideaSortHeader("production", "Production")}<th></th></tr></thead><tbody>${sorted.map((r) => {
-      const promote = ideaShowPromoteAction(r)
-        ? `<button type="button" class="manage-button promote-row-button" data-idea-id="${escapeHtml(r.id)}" data-idea-action="promote">Promote</button>`
-        : "";
-      return `<tr class="${r.is_on_hold ? "idea-row-held" : ""}"><td><div class="title-cell">${value(r.title)}</div><div class="subtle">${value(r.summary, "")}${r.created_at ? `${r.summary ? " · " : ""}Created ${dateValue(r.created_at)}` : ""}</div></td><td>${badge(ideaStatusLabel(r))}</td><td>${value(r.content_type)}</td><td>${join(r.platforms)}</td><td>${ideaStructureLabel(r)}</td><td><div class="subtle">${escapeHtml(ideaProductionLabel(r))}</div></td><td><div class="idea-row-actions">${promote}<button type="button" class="manage-button" data-idea-id="${escapeHtml(r.id)}">Manage</button></div></td></tr>`;
-    }).join("")}</tbody></table>`;
+    const { active, archived } = partitionIdeaRecords(records);
+    const sortedActive = sortedIdeaRecords(active);
+    const sortedArchived = sortedIdeaRecords(archived);
+    const activeRows = sortedActive.length
+      ? sortedActive.map(ideaRowHtml).join("")
+      : '<tr><td colspan="7"><div class="empty">No ideas are waiting to move into production.</div></td></tr>';
+    const archivedSection = renderIdeaArchivedSection(sortedArchived);
+    target.innerHTML = `<table class="data-table idea-table"><thead><tr>${ideaSortHeader("idea", "Idea")}${ideaSortHeader("status", "Status")}${ideaSortHeader("type", "Type")}${ideaSortHeader("platforms", "Platforms")}${ideaSortHeader("structure", "Structure")}${ideaSortHeader("production", "Production")}<th></th></tr></thead><tbody>${activeRows}</tbody>${archivedSection}</table>`;
     target.querySelectorAll("[data-idea-sort]").forEach((button) => {
       button.addEventListener("click", (event) => {
         event.stopPropagation();
@@ -10764,7 +10791,14 @@
         renderIdeasTable(target, records);
       });
     });
-    const byId = new Map(sorted.map((record) => [record.id, record]));
+    target.querySelectorAll("[data-idea-archived-toggle]").forEach((button) => {
+      button.addEventListener("click", (event) => {
+        event.stopPropagation();
+        ideasArchivedSectionOpen = !ideasArchivedSectionOpen;
+        renderIdeasTable(target, records);
+      });
+    });
+    const byId = new Map([...sortedActive, ...sortedArchived].map((record) => [record.id, record]));
     target.querySelectorAll("[data-idea-id]").forEach((button) => {
       button.addEventListener("click", () => {
         const idea = byId.get(button.dataset.ideaId);
