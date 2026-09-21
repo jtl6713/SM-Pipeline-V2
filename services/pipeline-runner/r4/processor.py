@@ -100,8 +100,9 @@ def process_one(
             "make_scenario_name": MAKE_SCENARIO_NAME,
         }
 
-    vo = voiceover_url(output, content_item)
-    if voiceover_is_required(output, content_item) and not vo:
+    voiceover_required = voiceover_is_required(output, content_item)
+    vo = voiceover_url(output, content_item) if voiceover_required else ""
+    if voiceover_required and not vo:
         return {
             "processed": False,
             "reason": "waiting_for_voiceover",
@@ -114,7 +115,7 @@ def process_one(
         client.update_record(PLATFORM_OUTPUTS_TABLE, output["id"], {"Voiceover_URL": vo})
         output.setdefault("fields", {})["Voiceover_URL"] = vo
 
-    vo_fit_error = validate_voiceover_for_render(output, content_item)
+    vo_fit_error = validate_voiceover_for_render(output, content_item) if voiceover_required else None
     if vo_fit_error:
         client.update_record(
             PLATFORM_OUTPUTS_TABLE,
