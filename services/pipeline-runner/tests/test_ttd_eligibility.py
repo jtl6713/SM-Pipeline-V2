@@ -105,10 +105,17 @@ def test_asset_helpers():
         Image_Output_Selected=True,
         Image_Publish_Mode="TikTok Draft",
         Asset_Aspect_Family="9:16",
-        Image_Output_Type="Photo Set",
+        Image_Output_Type="Photo Carousel",
+    )
+    legacy = _record(
+        Image_Output_Selected=True,
+        Image_Publish_Mode="TikTok Draft",
+        Asset_Aspect_Family="9:16",
+        TikTok_Draft_Type="Single Photo",
     )
     video = _record(TikTok_Draft_Type="Video", Publish_Asset_URL="https://media.chicagoshining.com/clip.mp4")
     assert is_photo_route(photo) is True
+    assert is_photo_route(legacy) is True
     assert is_video_route(photo) is False
     assert is_video_route(video) is True
     assert draft_type_for_photos(1) == "Single Photo"
