@@ -216,6 +216,10 @@ def build_voiceover_request(
     width, height = _dimensions(field_str(output, "Aspect_Ratio"))
     music_url = field_str(output, "Music_URL")
     music_volume = _music_volume(output, default_music) if music_url else 0.0
+    ducked = _num(field(output, "Music_Ducked_Volume"), music_volume * 0.35)
+    ducking_enabled = field(output, "Music_Ducking_Enabled") is not False
+    duck_fade = int(_num(field(output, "Music_Duck_Fade_Frames"), 6))
+    duck_multiplier = (ducked / music_volume) if music_volume > 0 and ducking_enabled else 0
     voice_volume = _num(field(output, "Voiceover_Render_Volume"), default_voice)
     clip_json = json.dumps(_clip_list_json(output) or [])
     spoken_disabled = "overlay" in clip_json.lower()
@@ -243,7 +247,15 @@ def build_voiceover_request(
         "voiceoverTailSeconds": _num(field(output, "Voiceover_Tail_Seconds"), 2),
         "durationIsExplicit": duration_is_explicit(output),
         "clips": clips,
-        "music": _with_music_start({"url": music_url, "volume": music_volume}, output, content_item),
+        "music": _with_music_start({
+            "url": music_url,
+            "volume": music_volume,
+            "duckingEnabled": ducking_enabled,
+            "duckingMultiplier": duck_multiplier,
+            "duckFadeFrames": duck_fade,
+            "fadeInFrames": 15,
+            "fadeOutFrames": 15,
+        }, output, content_item),
         "voiceover": {
             "url": voiceover_url(output, content_item),
             "volume": voice_volume,
