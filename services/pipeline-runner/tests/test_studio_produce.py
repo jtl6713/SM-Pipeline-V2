@@ -648,6 +648,9 @@ def test_source_package_story_photos_use_slow_zoom():
     output = {"id": "recPOStory", "fields": {"Platform": "Instagram", "Studio_Output_Type": "Story", "Aspect_Ratio": "9:16"}}
     package = source_package(request, output, None)
     assert package is not None
+    assert package["total_frames"] == 300
+    assert package["clips"][0]["durationFrames"] == 300
+    assert package["clips"][0]["outSeconds"] == 10
     assert package["clips"][0]["motionStyle"] == "slowZoom"
     assert package["clips"][0]["fitMode"] == "fill_crop"
     assert json.loads(package["render_clip_list_json"])[0]["motionStyle"] == "slowZoom"
