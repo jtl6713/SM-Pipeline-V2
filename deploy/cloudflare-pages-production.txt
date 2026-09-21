@@ -551,3 +551,4 @@ Pipeline archived section Pages deploy: 2026-09-20 — Fully published content i
 Variant prepare copy Pages deploy: 2026-09-20 — Approve prompt says Prepare first when crops have not started; still finishing only while Preparing. UI 0.6.352-variant-prepare-copy.
 2026-09-20 deploy Studio UI 0.6.353 bold red status messages
 2026-09-21 deploy Studio UI 0.6.354 pipeline rerendering label during mix remix
+2026-09-21 deploy Studio UI 0.6.358 ideas two-section archive + native Music Manager file picker. Source commit 19134513 / d9b57461.
