@@ -76,7 +76,7 @@ def _photo_output(**fields):
 
 def test_r4_uses_parent_voiceover_when_output_blank():
     output = _photo_output()
-    parent = {"fields": {"Voiceover_URL": "https://example.com/vo.mp3", "Voiceover_Script": "hello", "Include_Voiceover": "Yes"}}
+    parent = {"fields": {"Voiceover_URL": "https://example.com/vo.mp3", "Voiceover_Script": "hello"}}
     route, payload = choose_render_request(output, parent, default_music=0.35, default_voice=1.0)
     assert route == "voiceover"
     assert payload["voiceover"]["url"] == "https://example.com/vo.mp3"
@@ -85,7 +85,7 @@ def test_r4_uses_parent_voiceover_when_output_blank():
 
 
 def test_r4_voiceover_without_content_item_does_not_crash():
-    output = _photo_output(Voiceover_URL="https://example.com/output-vo.mp3", Studio_Effective_Voiceover_Mode="Yes")
+    output = _photo_output(Voiceover_URL="https://example.com/output-vo.mp3")
     route, payload = choose_render_request(output, None, default_music=0.35, default_voice=1.0)
     assert route == "voiceover"
     assert payload["voiceover"]["url"] == "https://example.com/output-vo.mp3"
@@ -142,7 +142,7 @@ def test_r4_expected_clip_count_follows_expanded_clip_list():
 
 def test_r4_p020_merges_parent_voiceover():
     output = _photo_output(Creative_Render_Manifest_JSON="{}")
-    parent = {"fields": {"Voiceover_URL": "https://example.com/parent-vo.mp3", "Include_Voiceover": "Yes"}}
+    parent = {"fields": {"Voiceover_URL": "https://example.com/parent-vo.mp3"}}
     route, payload = choose_render_request(output, parent, default_music=0.35, default_voice=1.0)
     assert route == "p020_manifest"
     assert payload["voiceover"]["url"] == "https://example.com/parent-vo.mp3"
