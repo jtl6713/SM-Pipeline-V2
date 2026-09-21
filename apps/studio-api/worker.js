@@ -399,7 +399,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.348-facebook-native-publish",
+          version: "0.10.353-facebook-native-publish",
           studio_desk_inventory_v1: true,
           studio_desk_activity_v1: true,
           studio_tiktok_complete_v1: true,
@@ -26222,24 +26222,6 @@ async function studioEnsureOutputCaption(env, record) {
 // after it is recoverable on a later pass, so it is split off: this half runs on the request
 // path where it cannot be dropped by a cancelled background task or an exhausted invocation.
 async function studioDispatchApprovedPublishNow(env, record) {
-  if (!studioPublishCanDispatchNow(record)) {
-      return {
-        ok: true,
-        skipped: "scheduled-hold",
-        held_until: studioPublishHeldUntilIso(record),
-        record,
-      };
-    }
-    if (studioFacebookPublicMakeEligible(record)) {
-      record = await studioEnsureOutputCaption(env, record);
-      const pulsed = await studioPulseFacebookPublicMake(env, record);
-      return { ...pulsed, armed: [], plan: pulsed.plan || { target: "FB-PUBLIC" }, record };
-    }
-    if (studioFacebookPublicMakeRoutable(record)) {
-      return { ok: true, skipped: "facebook-make-asset-pending", record };
-    }
-    return { ok: true, skipped: "facebook-manual-publish", record };
-  }
   if (!studioPublishCanDispatchNow(record)) {
     return {
       ok: true,
