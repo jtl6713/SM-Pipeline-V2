@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import json
 import re
 from typing import Any
 
 from asset.helpers import as_bool
 from item4.settings import PipelineSettings
+from p3.helpers import caption_with_hashtags
 from publish.location import PublishLocation, append_location_line
 from render.fields import field, field_str
 from ap0.public_cover import native_grid_cover_required
@@ -102,10 +104,7 @@ def description_final(
     body = field_str(record, "Output_Caption") or field_str(record, "YouTube_Description_Final")
     body = strip_leading_title(body, title)
     hashtags = field_str(record, "Output_Hashtags")
-    if hashtags:
-        text = f"{body}\n\n{hashtags}".strip()
-    else:
-        text = body
+    text = caption_with_hashtags(body, hashtags)
     # YouTube Data API recordingDetails.location* is deprecated; keep place as text.
     return append_location_line(text, location)
 
@@ -150,6 +149,7 @@ def package_fields(
         "YouTube_Made_For_Kids": as_bool(made_for_kids, False),
         "YouTube_Contains_Synthetic_Media": as_bool(synthetic, False),
         "YouTube_Description_Final": description_final(record, location=location),
+        "YouTube_Tags_JSON": json.dumps(youtube_tags(record), ensure_ascii=False),
         "YouTube_Idempotency_Key": field_str(record, "YouTube_Idempotency_Key") or idempotency_key(record),
         "YouTube_Thumbnail_Status": thumbnail_status(record),
         "YouTube_Response_JSON": (

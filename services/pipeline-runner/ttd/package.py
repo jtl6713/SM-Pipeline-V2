@@ -9,6 +9,7 @@ from urllib.parse import urlencode
 from ap0.public_cover import graph_fetchable_cover_url
 from carousel.timeutil import iso_utc, utc_now
 from config import load_settings
+from p3.helpers import caption_with_hashtags
 from publish.location import PublishLocation, append_location_line
 from render.fields import field, field_str, first_linked_id, parse_json_field
 from rr1.email_builder import thumbnail_download_url
@@ -31,7 +32,7 @@ def photo_description(
 ) -> str:
     caption = field_str(record, "Output_Caption")
     hashtags = field_str(record, "Output_Hashtags")
-    raw = f"{caption}\n\n{hashtags}".strip() if hashtags else caption
+    raw = caption_with_hashtags(caption, hashtags)
     # TikTok Content Posting API has no place/POI field; keep location in caption text.
     raw = append_location_line(raw, location)
     return raw[:DESCRIPTION_LIMIT]
@@ -308,8 +309,12 @@ def handoff_email_html(
     output_id = html.escape(str(field(record, "Output_ID") or ""))
     title = html.escape(field_str(record, "Output_Title") or "TikTok draft")
     draft_type = html.escape(field_str(record, "TikTok_Draft_Type") or "")
-    caption = html.escape(field_str(record, "Output_Caption"))
-    hashtags = html.escape(field_str(record, "Output_Hashtags"))
+    caption = html.escape(
+        caption_with_hashtags(
+            field_str(record, "Output_Caption"),
+            field_str(record, "Output_Hashtags"),
+        )
+    )
     location_label = html.escape(location.label if location else "")
     location_block = (
         f"<p><b>Suggested TikTok location (tag manually in app):</b> {location_label}</p>"
@@ -356,7 +361,7 @@ def handoff_email_html(
         f"{location_block}"
         f"{cover_block(record)}"
         '<p><b>Caption and hashtags — copyable block:</b></p>'
-        f'<div style="white-space:pre-wrap;background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px;padding:12px;">{caption}\n\n{hashtags}</div>'
+        f'<div style="white-space:pre-wrap;background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px;padding:12px;">{caption}</div>'
         '<p><b>Ordered draft assets:</b></p>'
         f"{assets}"
         f"{story_note}"

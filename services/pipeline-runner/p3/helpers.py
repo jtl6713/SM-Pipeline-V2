@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from p3.constants import (
@@ -15,6 +16,30 @@ from p3.constants import (
     STUDIO_ENRICHMENT_NOTE,
 )
 from render.fields import field, field_str, first_linked_id
+
+
+_HASHTAG_TOKEN = re.compile(r"#[^\s#]+")
+
+
+def caption_with_hashtags(caption: Any, hashtags: Any) -> str:
+    """Return one publishable caption with hashtag tokens appended exactly once."""
+    body = str(caption or "").strip()
+    raw_tags = str(hashtags or "").strip()
+    if not raw_tags:
+        return body
+
+    existing = {token.casefold() for token in _HASHTAG_TOKEN.findall(body)}
+    candidates = _HASHTAG_TOKEN.findall(raw_tags)
+    if candidates:
+        missing = [token for token in candidates if token.casefold() not in existing]
+        if not missing:
+            return body
+        suffix = " ".join(missing)
+    else:
+        if raw_tags.casefold() in body.casefold():
+            return body
+        suffix = raw_tags
+    return f"{body}\n\n{suffix}".strip()
 
 
 def csv_join(value: Any) -> str:
@@ -96,7 +121,9 @@ def build_studio_enrichment_fields(parent: dict[str, Any], output: dict[str, Any
     combined = f"{notes}\n{note_line}".strip() if notes else note_line
     return {
         "Output_Title": pick_title(output, parent),
-        "Output_Caption": pick_caption(output, parent),
+        "Output_Caption": caption_with_hashtags(
+            pick_caption(output, parent), field_str(parent, "Hashtags")
+        ),
         "Output_Hashtags": field_str(parent, "Hashtags"),
         "Thumbnail_URL": copied_media_url(
             parent, "Thumbnail_URL", field(output, "Studio_Effective_Thumbnail_Mode")
@@ -225,7 +252,9 @@ def build_legacy_output_fields(
         "Platform_Output_Type": field_str(mapping, "Platform_Output_Type"),
         "Content_Item": [item["id"]],
         "Output_Title": field_str(item, "Content_Title"),
-        "Output_Caption": field_str(item, "Caption"),
+        "Output_Caption": caption_with_hashtags(
+            field_str(item, "Caption"), field_str(item, "Hashtags")
+        ),
         "Output_Hashtags": field_str(item, "Hashtags"),
         "Output_Status": "Ready for Review",
         "Asset_Need_Status": "Not Needed",
