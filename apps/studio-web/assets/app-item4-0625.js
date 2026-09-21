@@ -11303,7 +11303,7 @@
     const duration = finishedVideo
       ? (finishedSeconds > 0 ? `${Math.round(finishedSeconds)} seconds` : "Your uploaded video")
       : (kind === "story"
-        ? "5 seconds"
+        ? "10 seconds"
         : (slideSeconds > 0
           ? `${Math.round(slideSeconds)} seconds`
           : `${Number($("creativeDefaultDuration")?.value || output?.creative_settings?.default_slide_duration_seconds || 30)} seconds`));

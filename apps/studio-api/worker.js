@@ -6968,9 +6968,7 @@ function item4ResolvedVideoDurationSeconds({ storyTeaser, clipCount, effective, 
     return storyTeaser ? Math.min(15, outputOverride) : outputOverride;
   }
   if (storyTeaser) {
-    return clipCount <= 1
-      ? ITEM4_SINGLE_STILL_SECONDS
-      : Math.min(15, clipCount * ITEM4_SINGLE_STILL_SECONDS);
+    return ITEM4_STORY_TEASER_SECONDS;
   }
   const stored = Number(effective?.video_duration_seconds || f(requestRecord, "Video_Duration_Seconds") || 0);
   // Owner-set duration on the Production Request (including 30) is authoritative for the main video.
