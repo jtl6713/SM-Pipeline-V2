@@ -5,12 +5,13 @@ from __future__ import annotations
 from typing import Any
 
 from airtable.client import AirtableClient
-from airtable.constants import PLATFORM_OUTPUTS_TABLE
+from airtable.constants import CONTENT_PROFILES_TABLE, PLATFORM_OUTPUTS_TABLE
 from carousel.timeutil import iso_utc, stamp_minutes
 from integrations.gmail import GmailClient
 from item4.settings import PipelineSettings
 from publish.location import resolve_publish_location
-from render.fields import field_str
+from render.fields import field, field_str, first_linked_id
+from ttd.assets import list_ready_slides
 from ttd.common import append_note, preview, response_json, retry_at, unlock_fields, valid_record_id
 from ttd.constants import (
     DEFAULT_EMAIL_TO,
@@ -29,6 +30,7 @@ from ttd.package import (
     handoff_email_html,
     handoff_email_subject,
     is_az_finished_video,
+    profile_display_name,
     sibling_platform_outputs,
 )
 
@@ -81,7 +83,16 @@ def process_request(
         },
     )
 
-    subject = handoff_email_subject(output)
+    profile: dict[str, Any] | None = None
+    profile_id = first_linked_id(field(output, "Content_Profile"))
+    if profile_id:
+        try:
+            profile = client.get_record(CONTENT_PROFILES_TABLE, profile_id)
+        except Exception as exc:
+            result["profile_lookup_error"] = str(exc)
+    result["profile_name"] = profile_display_name(output, profile)
+
+    subject = handoff_email_subject(output, profile=profile)
     location = resolve_publish_location(client, output, settings=settings)
     result["location"] = location.as_dict() if location else None
     siblings: list[dict] = []
@@ -99,7 +110,20 @@ def process_request(
             result["cover_url"] = public_cover
     except Exception as exc:
         result["cover_stage_error"] = str(exc)
-    html_body = handoff_email_html(output, location=location, siblings=siblings)
+    asset_slides: list[dict[str, Any]] = []
+    if field_str(output, "TikTok_Draft_Type").casefold() != "video":
+        try:
+            asset_slides = list_ready_slides(client, field_str(output, "Output_ID"))
+            result["asset_link_count"] = len(asset_slides)
+        except Exception as exc:
+            result["asset_links_error"] = str(exc)
+    html_body = handoff_email_html(
+        output,
+        location=location,
+        siblings=siblings,
+        profile=profile,
+        asset_slides=asset_slides,
+    )
     result["subject"] = subject
     try:
         send = GmailClient().send_html(to=to_addr, subject=subject, html_body=html_body)
