@@ -399,7 +399,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.350-fb-public-direct-read",
+          version: "0.10.351-fb-public-blueprint-diagnostic",
           studio_desk_inventory_v1: true,
           studio_desk_activity_v1: true,
           studio_tiktok_complete_v1: true,
@@ -22802,7 +22802,7 @@ const STUDIO_AP0_WEBHOOK_URL = ""; // Make.com retired
 // Live FB-PUBLIC scenario 6107230 (Make connection 9988775). Not unpublished Graph / FB-ORCH.
 const STUDIO_FB_PUBLIC_WEBHOOK_URL = "https://hook.us2.make.com/ivrjp4e0nfpuyvukb18116wj1fwgjdw1";
 const STUDIO_FB_PUBLIC_SCENARIO_ID = 6107230;
-const STUDIO_FB_PUBLIC_DIAG_CORRELATION = "FB-PUBLIC-LIVE-DIAG-20260921";
+const STUDIO_FB_PUBLIC_DIAG_CORRELATION = "FB-PUBLIC-LIVE-DIAG-20260921-V2";
 const STUDIO_AP0_RECORD_ID = /^rec[A-Za-z0-9]{14}$/;
 const PRODUCTION_CADENCE_PUBLISH_ORCH = Object.freeze([
   { id: STUDIO_IG_ORCH_SCENARIO_ID, key: "IG" },
@@ -24719,6 +24719,39 @@ async function studioDiagnoseFacebookPublicMakeOnce(env) {
       `/scenarios/${STUDIO_FB_PUBLIC_SCENARIO_ID}/executions?pg%5Blimit%5D=30`
     ).catch((error) => ({ diagnostic_error: String(error?.message || error) }));
 
+    const blueprintBody = await makeGet(
+      `/scenarios/${STUDIO_FB_PUBLIC_SCENARIO_ID}/blueprint?draft=false`
+    ).catch((error) => ({ diagnostic_error: String(error?.message || error) }));
+    const blueprint = blueprintBody?.blueprint || blueprintBody?.response?.blueprint || null;
+    const sanitize = (value, key = "") => {
+      const lower = String(key || "").toLowerCase();
+      if (["token","secret","password","authorization","connection","url","uri","hook"].some((part) => lower.includes(part))) {
+        return typeof value === "string" && /^https?:\/\//i.test(value) ? "<redacted-url>" : "<redacted>";
+      }
+      if (Array.isArray(value)) return value.map((item) => sanitize(item, key));
+      if (value && typeof value === "object") {
+        return Object.fromEntries(Object.entries(value).map(([childKey, childValue]) => [childKey, sanitize(childValue, childKey)]));
+      }
+      if (typeof value === "string" && /^https?:\/\//i.test(value)) return "<redacted-url>";
+      return value;
+    };
+    const modules = [];
+    const walk = (flow, depth = 0) => {
+      for (const node of Array.isArray(flow) ? flow : []) {
+        modules.push({
+          id: node?.id ?? null,
+          module: node?.module ?? null,
+          name: node?.metadata?.designer?.name ?? null,
+          depth,
+          filter: sanitize(node?.filter ?? null),
+          mapper: sanitize(node?.mapper ?? {}),
+          parameters: sanitize(node?.parameters ?? {}),
+        });
+        for (const route of Array.isArray(node?.routes) ? node.routes : []) walk(route?.flow || [], depth + 1);
+      }
+    };
+    if (blueprint?.flow) walk(blueprint.flow);
+
     const logs = logsBody?.scenarioLogs || logsBody?.response?.scenarioLogs || logsBody?.data || [];
     const executions = executionsBody?.executions || executionsBody?.response?.executions || executionsBody?.data || [];
     const slim = (row) => {
@@ -24734,6 +24767,9 @@ async function studioDiagnoseFacebookPublicMakeOnce(env) {
       is_active: scenario?.isActive === true,
       scheduling: scenario?.scheduling || null,
       hook_present: Boolean(scenario?.hookId),
+      blueprint_name: blueprint?.name || null,
+      modules,
+      blueprint_error: blueprintBody?.diagnostic_error || null,
       recent_logs: Array.isArray(logs) ? logs.slice(0, 30).map(slim) : [],
       recent_executions: Array.isArray(executions) ? executions.slice(0, 30).map(slim) : [],
       logs_error: logsBody?.diagnostic_error || null,
