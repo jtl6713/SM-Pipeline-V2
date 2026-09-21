@@ -8885,7 +8885,7 @@
     if (dropped) {
       updateOutputMatrixSummary();
       if (announce) {
-        const text = "TikTok Story is not a posting destination. Instagram and Facebook Stories are 5-second 9:16 teasers from the first photo, with a slight zoom and music. After the main post is live, the Story can link through to it.";
+        const text = "TikTok Story is not a posting destination. Instagram and Facebook Stories are 10-second 9:16 teasers from the first photo, with a slight zoom and music. After the main post is live, the Story can link through to it.";
         setEzMessage(text);
         setRequestMessage(text);
       }
@@ -11419,7 +11419,7 @@
     const titles = {
       story: finishedVideo
         ? ["This Story", "Your uploaded video. Stories do not use a profile grid cover."]
-        : ["This Story", "Fixed 5-second teaser. Music volume is the useful control."],
+        : ["This Story", "Fixed 10-second teaser. Music volume is the useful control."],
       reel: finishedVideo
         ? ["This Reel", "Your uploaded video. The 3D still is the grid cover only."]
         : ["This Reel", "Photo sequence with your audio settings. Music volume is the useful control."],
@@ -11838,7 +11838,7 @@
     prOverrideMusicMode: "Override background music for this one output, or inherit the master setting.",
     prOverrideThumbnail: "Override this output’s cover. Inherit follows the piece. Yes is AI generated. Use photo frame copies a still from the photos.",
     prOverrideMusicAsset: "Override the music track for this one output, or inherit the master track.",
-    prOverrideDuration: "Override duration for this one output. Long clips are still cut to fit. Stories default to 5 seconds for a single still and do not inherit the 30-second main video. Leave blank to inherit.",
+    prOverrideDuration: "Override duration for this one output. Long clips are still cut to fit. Stories default to 10 seconds for a single still and do not inherit the 30-second main video. Leave blank to inherit.",
     prOverrideVoiceoverTail: "Override extra seconds after narration for this one output.",
     prOverrideClipMode: "Override video clip count for this one output, or inherit the master setting.",
     prOverridePublishMode: "Override whether this output auto-publishes, waits for review, or stays unpublished.",
@@ -12050,7 +12050,7 @@
       const text = type === "Story" && platform === "TikTok"
         ? "TikTok’s posting API does not have a separate Stories destination. Leave this off; the Video Draft is the TikTok post."
         : type === "Story"
-          ? `Add a companion 5-second 9:16 ${platform} Story from the first photo, with a slight zoom and music. After the main ${platform} post is live, the Story can link through to it.`
+          ? `Add a companion 10-second 9:16 ${platform} Story from the first photo, with a slight zoom and music. After the main ${platform} post is live, the Story can link through to it.`
           : `Add ${platform} ${type} as an extra output beyond the recommended plan.`.replace(/\s+/g, " ").trim();
       phase6BindTooltipTarget(label, text);
     });
@@ -12689,7 +12689,7 @@
           : "This is the video you uploaded. The 3D lettering is the grid cover only — it is not burned into the file.";
       } else if (storyOutput) {
         heading.textContent = "Story teaser";
-        copy.textContent = "A 5-second 9:16 clip from the first photo, with a slight zoom and the selected music.";
+        copy.textContent = "A 10-second 9:16 clip from the first photo, with a slight zoom and the selected music.";
       } else if (videoKind === "reel") {
         heading.textContent = "Instagram Reel";
         copy.textContent = "Play the rendered Reel, then change music under Audio if you want a new mix.";
@@ -12750,7 +12750,7 @@
         ? "Native photo route — review the stills below. No Remotion MP4."
         : (String(output.render_status || "").toLowerCase().includes("render") || /story/i.test(String(output.studio_output_type || output.platform_output_type || ""))
           ? (/story/i.test(String(output.studio_output_type || output.platform_output_type || ""))
-            ? "The 5-second Story teaser is still rendering. Open Review will show the zoom-and-music clip when the MP4 is ready."
+            ? "The 10-second Story teaser is still rendering. Open Review will show the zoom-and-music clip when the MP4 is ready."
             : "The video is still rendering. Open Review will unlock when the MP4 is ready.")
           : "No rendered preview is available yet.");
       empty.hidden = false;
