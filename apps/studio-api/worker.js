@@ -398,7 +398,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.344-finished-hardcap-six",
+          version: "0.10.345-finished-hardcap-six",
           studio_desk_inventory_v1: true,
           studio_desk_activity_v1: true,
           studio_tiktok_complete_v1: true,
@@ -438,6 +438,7 @@ export default {
           studio_insights_overview_stats_v1: true,
           studio_insights_youtube_discovery_v1: true,
           studio_due_publish_priority_v1: true,
+          studio_overdue_scheduled_rescue_v1: true,
           studio_fbs4_cover_unblock_v1: true,
           studio_publish_dispatch_reconcile_v1: true,
           studio_publish_location_v1: true,
@@ -1244,6 +1245,11 @@ export default {
     // dispatch in the same tick when budget remains. Daily ideas stay on a
     // separate waitUntil so they cannot block P2/Remotion.
     ctx.waitUntil((async () => {
+      try {
+        await studioReconcileOverdueScheduledPublishes(env, { limit: 12 });
+      } catch (error) {
+        console.warn("overdue scheduled publish rescue cron failed", error);
+      }
       try {
         await opsForceAzNavyPierTitle(env);
       } catch (error) {
@@ -26951,11 +26957,94 @@ async function studioReconcileInstagramCarousels(env, options = {}) {
   return results;
 }
 
+// Scheduled posts are a hard deadline. This rescue deliberately ignores the normal
+// publisher-stage allowlist and looks only for already-approved rows whose scheduled time
+// has passed. That catches downstream-but-not-started states such as Facebook Reel
+// "Video Ready", plus stale TikTok TTD0 "Preparing Assets" locks.
+const STUDIO_OVERDUE_SCHEDULED_FORMULA = 'AND({Test_Run_ID}=BLANK(),{Do_Not_Publish}=0,{Auto_Publish_Enabled}=1,{Published_At}=BLANK(),'
+  + '{Output_Status}="Approved for Publishing",{Review_Status}="Approved",{Publish_Status}="Ready to Schedule",'
+  + '{Scheduled_Post_Date}!="",IS_BEFORE({Scheduled_Post_Date},NOW()))';
+
+function studioPublishLockIsStale(record, staleMs = 10 * 60 * 1000) {
+  const raw = String(f(record, "Publish_Locked_At") || "").trim();
+  if (!raw) return true;
+  const ms = Date.parse(raw);
+  return Number.isNaN(ms) || ms <= Date.now() - staleMs;
+}
+
+async function studioHealOverdueTikTokPrep(env, record) {
+  if (String(f(record, "Platform") || "").trim() !== "TikTok") return record;
+  if (String(f(record, "TikTok_Draft_Status") || "").trim() !== "Preparing Assets") return record;
+  if (!studioPublishLockIsStale(record)) return record;
+  try {
+    return await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, record.id, {
+      method: "PATCH",
+      body: JSON.stringify({
+        fields: {
+          TikTok_Draft_Status: "Ready for Assets",
+          Publish_Locked_At: null,
+          Publish_Locked_By: "",
+          Publish_Started_At: null,
+          Publish_Error_Stage: "",
+          Publish_Error_Message: "",
+          Publish_Next_Retry_At: null,
+          Publish_Retry_Eligible: false,
+        },
+        typecast: true,
+      }),
+    });
+  } catch (error) {
+    console.warn("overdue TikTok prep heal failed", record?.id, error);
+    return record;
+  }
+}
+
+async function studioReconcileOverdueScheduledPublishes(env, options = {}) {
+  const limit = Math.max(1, Math.min(20, Number(options.limit || 12)));
+  let rows = [];
+  try {
+    rows = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
+      limit,
+      filterFormula: STUDIO_OVERDUE_SCHEDULED_FORMULA,
+      sortField: "Scheduled_Post_Date",
+      sortDirection: "asc",
+    });
+  } catch (error) {
+    console.warn("overdue scheduled publish rescue scan failed", error);
+    return [];
+  }
+  const results = [];
+  for (const row of rows) {
+    try {
+      let current = await studioHealOverdueTikTokPrep(env, row);
+      current = await studioPromoteDuePublishStatus(env, current);
+      const primary = await studioDispatchApprovedPublishNow(env, current);
+      await studioStampPublishDispatch(env, current, `overdue-rescue: ${studioPublishDispatchNote(primary)}`);
+      results.push({
+        id: current.id,
+        output_id: f(current, "Output_ID"),
+        platform: f(current, "Platform"),
+        target: primary?.target || primary?.plan?.target || primary?.skipped || null,
+        ok: primary?.ok !== false,
+      });
+      await studioDispatchApprovedPublishTail(env, current, primary).catch((error) => {
+        console.warn("overdue scheduled publish rescue tail failed", current.id, error);
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.warn("overdue scheduled publish rescue failed", row.id, error);
+      await studioStampPublishDispatch(env, row, `overdue-rescue failed: ${message}`);
+      results.push({ id: row.id, output_id: f(row, "Output_ID"), error: message });
+    }
+  }
+  return results;
+}
+
 // Approval is one click, and it has to survive a publisher scenario that drifted off, a Make API
 // hiccup, and a Worker invocation that ran out of budget before reaching the webhook. Nothing else
 // guarantees an approved output reaches a publisher, so this sweep runs first on every cron tick.
 async function studioReconcileApprovedPublishes(env, options = {}) {
-  const limit = Number(options.limit || 3);
+  const limit = Math.max(1, Math.min(12, Number(options.limit || 8)));
   let rows = [];
   try {
     rows = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {

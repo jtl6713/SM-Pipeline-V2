@@ -295,6 +295,33 @@ def _clip_still_urls(raw: Any) -> set[str]:
     return urls
 
 
+def _clip_overlay_texts(raw: Any) -> list[str]:
+    parsed = raw
+    if isinstance(raw, str):
+        parsed = parse_json(raw, []) or []
+    texts: list[str] = []
+    for clip in parsed if isinstance(parsed, list) else []:
+        if not isinstance(clip, dict):
+            continue
+        overlay = clip.get("overlay") if isinstance(clip.get("overlay"), dict) else {}
+        text = str(overlay.get("text") or clip.get("caption") or "").strip()
+        texts.append(text)
+    return texts
+
+
+def _clip_overlay_signature(raw: Any) -> tuple[str, ...]:
+    parsed = raw
+    if isinstance(raw, str):
+        parsed = parse_json(raw, []) or []
+    signature: list[str] = []
+    for clip in parsed if isinstance(parsed, list) else []:
+        if not isinstance(clip, dict):
+            continue
+        overlay = clip.get("overlay") if isinstance(clip.get("overlay"), dict) else {}
+        signature.append(str(overlay.get("text") or clip.get("caption") or "").strip())
+    return tuple(signature)
+
+
 def _remotion_fetchable(url: str) -> bool:
     value = str(url or "").strip()
     return value.startswith(("http://", "https://")) and not value.startswith("/api/media-assets/")
@@ -786,14 +813,18 @@ def stamp_fields(
     existing_timeline = field_str(existing_record, "Timing_Timeline_JSON")
     old_stills = _clip_still_urls(field(existing_record, "Render_Clip_List_JSON"))
     new_stills = _clip_still_urls(package.get("render_clip_list_json"))
+    old_overlays = _clip_overlay_texts(field(existing_record, "Render_Clip_List_JSON"))
+    new_overlays = _clip_overlay_texts(package.get("render_clip_list_json"))
     recropped = bool(new_stills) and bool(old_stills) and new_stills != old_stills
+    overlay_changed = bool(new_overlays) and new_overlays != old_overlays
     if recropped:
         fields["Timing_Status"] = "Pending"
         fields["Timing_Timeline_JSON"] = None
         fields["Timing_Error_Message"] = None
     elif existing_timing in {"Ready", "Skipped"} or existing_timeline:
-        fields.pop("Render_Clip_List_JSON", None)
-        fields.pop("Render_Total_Frames", None)
+        if not overlay_changed:
+            fields.pop("Render_Clip_List_JSON", None)
+            fields.pop("Render_Total_Frames", None)
         if existing_timing in {"Ready", "Skipped"}:
             fields.pop("Timing_Status", None)
         elif existing_timeline:

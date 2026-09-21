@@ -206,7 +206,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.351-pipeline-archived";
+  const BUILD_ID = "item4-0.6.353-status-red-bold";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -7715,6 +7715,17 @@
     return /too many subrequests|subrequest|request failed \(5\d\d\)|timed out|networkerror|failed to fetch|502|503|504/i.test(text);
   }
 
+  function item4VariantNotReadyCopy(variantStatus) {
+    const status = String(variantStatus || "None").trim();
+    if (status === "Preparing") {
+      return "Platform crops are still finishing. Wait until frames show ready, then try again.";
+    }
+    if (status === "Error") {
+      return "Platform crop preparation stopped. Click Retry on Prepare, wait until frames show ready, then try again.";
+    }
+    return "Platform crops have not been run yet. Click Prepare and wait until frames show ready, then try again.";
+  }
+
   function item4BridgeIssueCopy(issues) {
     const lines = (Array.isArray(issues) ? issues : [issues])
       .map((issue) => String(issue || "").trim())
@@ -7725,10 +7736,14 @@
       if (/requires a title/i.test(issue)) return "Add a title before approving.";
       if (/master media must be ready/i.test(issue)) return "Photos are still finishing. Try again in a moment.";
       if (/platform output plan must be ready/i.test(issue)) return "Save the platform plan first.";
-      if (/variants must be ready|variant manifest is not complete/i.test(issue)) return "Platform crops are still finishing. Try again in a moment.";
+      if (/variants must be ready|variant manifest is not complete/i.test(issue)) {
+        return item4VariantNotReadyCopy(item4Workspace?.variant_status);
+      }
       if (/exactly one idea/i.test(issue)) return "This request needs to stay linked to its idea.";
       if (/proven production route|not fully mapped|not fully linked/i.test(issue)) return "One destination still needs a moment to finish linking. Try again shortly.";
-      if (/missing .+ authoritative variant/i.test(issue)) return "A platform crop is still finishing. Try again in a moment.";
+      if (/missing .+ authoritative variant/i.test(issue)) {
+        return item4VariantNotReadyCopy(item4Workspace?.variant_status);
+      }
       return "Something still needs a moment before approve. Try again shortly.";
     }).filter((line, index, all) => all.indexOf(line) === index);
   }
@@ -10430,7 +10445,7 @@
       return;
     }
     if (item4Workspace?.assets?.length && !item4IsFinishedRequest() && item4Workspace?.variant_status !== "Ready" && item4Workspace?.variant_status !== "Not Needed") {
-      setRequestMessage("Platform crops are still finishing. Wait until they show ready, then click Approve again.", "error-text");
+      setRequestMessage(`${item4VariantNotReadyCopy(item4Workspace?.variant_status)} Click Approve again when ready.`, "error-text");
       return;
     }
 
