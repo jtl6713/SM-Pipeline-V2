@@ -6,7 +6,8 @@ from datetime import datetime, timezone
 from typing import Any
 
 from airtable.client import AirtableClient
-from airtable.constants import CONTENT_ITEMS_TABLE
+from airtable.constants import CONTENT_ITEMS_TABLE, PRODUCTION_REQUESTS_TABLE
+from audio.voiceover_duration import probe_audio_duration_bytes, validate_voiceover_for_owner_cap
 from branding.watermark import apply_watermark_bytes, brand_watermark_bytes
 from config import load_settings
 from integrations.google_drive import GoogleDriveClient
@@ -28,7 +29,7 @@ from p2.formulas import (
 from p2.normalizer_client import normalization_details, normalize_voiceover
 from p2.stale_clears import stale_media_run_clears
 from p2.thumbnail_client import generate_thumbnail_png
-from render.fields import field_str
+from render.fields import field_str, first_linked_id
 
 
 def _now_iso() -> str:
@@ -227,13 +228,44 @@ def process_request(
         filename=f"{content_id}_voice.mp3",
         normalizer_base_url=normalizer_url,
     )
+    measured_seconds = probe_audio_duration_bytes(normalized_mp3)
+    request = None
+    request_id = first_linked_id(item.get("fields", {}).get("Production Requests"))
+    if request_id:
+        request = client.get_record(PRODUCTION_REQUESTS_TABLE, request_id)
+    cap_error = validate_voiceover_for_owner_cap(
+        voiceover_seconds=measured_seconds,
+        content_item=item,
+        request=request,
+    )
+    if cap_error:
+        client.update_record(
+            CONTENT_ITEMS_TABLE,
+            item["id"],
+            {
+                "Voiceover_Status": "Failed",
+                "Voiceover_Normalization_Status": "Rejected",
+                "Voiceover_Normalization_Details": (
+                    f"{normalization_details(norm_payload)} | Audio duration {measured_seconds:.3f}s | {cap_error}"
+                )[:10000],
+            },
+            typecast=True,
+        )
+        return {
+            **preview,
+            "reason": "voiceover_exceeds_video",
+            "error": cap_error,
+            "voiceover_seconds": measured_seconds,
+        }
     voice_file = drive.upload_and_share(
         VOICEOVER_DRIVE_FOLDER_ID,
         f"{content_id}_voice_normalized.mp3",
         normalized_mp3,
         "audio/mpeg",
     )
-    norm_details = normalization_details(norm_payload)
+    norm_details = (
+        f"{normalization_details(norm_payload)} | Audio duration {measured_seconds:.3f}s"
+    )
     sent_at = _now_iso()
     want_thumbnail = item_wants_ai_thumbnail(item)
 
@@ -267,6 +299,7 @@ def process_request(
             "Voiceover_Google_Drive_File_ID": voice_file.get("id"),
             "Voiceover_Normalization_Status": "Normalized",
             "Voiceover_Normalization_Details": norm_details,
+            "Voiceover_Duration_Seconds": round(measured_seconds, 3),
         }
         p3_source = "P-series daisy chain (python)"
     else:
@@ -280,6 +313,7 @@ def process_request(
             "Voiceover_Google_Drive_File_ID": voice_file.get("id"),
             "Voiceover_Normalization_Status": "Normalized",
             "Voiceover_Normalization_Details": norm_details,
+            "Voiceover_Duration_Seconds": round(measured_seconds, 3),
         }
         p3_source = "P2 optional-thumbnail branch (python)"
 

@@ -4,16 +4,25 @@ import test from "node:test";
 import {
   AZ_EXPECTED_OUTPUT_COUNT,
   AZ_EXTRAS,
+  AZ_OUTPUT_LOCK_MS,
   AZ_OVERRIDES,
+  FINISHED_DESTINATION_KEYS,
   FINISHED_STORY_TEASER_SECONDS,
   azDefaultPlanPayload,
   azOriginStamp,
+  azOutputLockHeld,
+  azOutputLockIsFresh,
+  azOutputLockToken,
   azRequestDefaults,
+  canonicalFinishedDestinationKey,
+  capFinishedPlanItems,
   finishedCompanionStoryFields,
   finishedStoryTeaserClipFlags,
   isAzFinishedVideoOrigin,
+  mergeAzOutputLock,
   mergeAzProductionNotes,
   pickDuplicateOutputKeepers,
+  shouldCreateFinishedOutput,
   uniquePlanItems,
 } from "./az-finished-video.mjs";
 
@@ -77,4 +86,77 @@ test("pickDuplicateOutputKeepers disables extra same-key rows", () => {
 test("merge keeps an existing AZ stamp", () => {
   const first = mergeAzProductionNotes("", { title: "A" });
   assert.equal(mergeAzProductionNotes(first, { title: "B" }), first);
+});
+
+test("canonical keys collapse reel-family types onto the six destinations", () => {
+  assert.equal(canonicalFinishedDestinationKey("Instagram", "Reel"), "Instagram::Reel");
+  assert.equal(canonicalFinishedDestinationKey("Instagram", "Slideshow Reel"), "Instagram::Reel");
+  assert.equal(canonicalFinishedDestinationKey("Facebook", "Reel"), "Facebook::Reel");
+  assert.equal(canonicalFinishedDestinationKey("TikTok", "Short"), "TikTok::Video Draft");
+  assert.equal(canonicalFinishedDestinationKey("TikTok", "Video Draft"), "TikTok::Video Draft");
+  assert.equal(canonicalFinishedDestinationKey("YouTube", "Standard Video"), "YouTube::Short");
+  assert.equal(canonicalFinishedDestinationKey("YouTube", "Short"), "YouTube::Short");
+  assert.equal(canonicalFinishedDestinationKey("Instagram", "Story"), "Instagram::Story");
+  assert.equal(canonicalFinishedDestinationKey("Facebook", "Story"), "Facebook::Story");
+  assert.deepEqual([...FINISHED_DESTINATION_KEYS], [
+    "Instagram::Reel",
+    "Facebook::Reel",
+    "TikTok::Video Draft",
+    "YouTube::Short",
+    "Instagram::Story",
+    "Facebook::Story",
+  ]);
+});
+
+test("capFinishedPlanItems refuses a seventh destination and same-key aliases", () => {
+  const capped = capFinishedPlanItems([
+    { platform: "Instagram", output_type: "Reel" },
+    { platform: "Instagram", output_type: "Slideshow Reel" },
+    { platform: "Facebook", output_type: "Reel" },
+    { platform: "TikTok", output_type: "Video Draft" },
+    { platform: "TikTok", output_type: "Short" },
+    { platform: "YouTube", output_type: "Short" },
+    { platform: "Instagram", output_type: "Story" },
+    { platform: "Facebook", output_type: "Story" },
+    { platform: "LinkedIn", output_type: "Video" },
+    { platform: "YouTube", output_type: "Standard Video" },
+  ]);
+  assert.deepEqual(capped.map((item) => `${item.platform}::${item.output_type}`), [...FINISHED_DESTINATION_KEYS]);
+});
+
+test("shouldCreateFinishedOutput hard-caps at six unique destinations", () => {
+  const live = [];
+  for (const key of FINISHED_DESTINATION_KEYS) {
+    assert.equal(shouldCreateFinishedOutput(live, key), true);
+    live.push(key);
+    assert.equal(shouldCreateFinishedOutput(live, key), false);
+  }
+  assert.equal(live.length, AZ_EXPECTED_OUTPUT_COUNT);
+  assert.equal(shouldCreateFinishedOutput(live, "Instagram::Reel"), false);
+  assert.equal(shouldCreateFinishedOutput(live, "YouTube::Standard Video"), false);
+  assert.equal(shouldCreateFinishedOutput(["Instagram::Reel"], "Instagram::Story"), true);
+});
+
+test("pickDuplicateOutputKeepers can collapse by canonical finished key", () => {
+  const { keepers, extras } = pickDuplicateOutputKeepers([
+    { id: "recReel", platform: "Instagram", output_type: "Reel", has_platform_output: true, output_order: 1, created_at: "2026-09-20T17:11:40Z" },
+    { id: "recSlide", platform: "Instagram", output_type: "Slideshow Reel", has_platform_output: false, output_order: 2, created_at: "2026-09-20T17:11:41Z" },
+    { id: "recStory2", platform: "Instagram", output_type: "Story", has_platform_output: false, output_order: 6, created_at: "2026-09-20T17:11:50Z" },
+    { id: "recStory1", platform: "Instagram", output_type: "Story", has_platform_output: true, output_order: 5, created_at: "2026-09-20T17:11:45Z" },
+  ], { keyOf: (row) => canonicalFinishedDestinationKey(row.platform, row.output_type) });
+  assert.deepEqual(keepers.map((row) => row.id).sort(), ["recReel", "recStory1"]);
+  assert.deepEqual(extras.map((row) => row.id).sort(), ["recSlide", "recStory2"]);
+});
+
+test("az output lock is last-writer token and expires", () => {
+  const now = 1_779_000_000_000;
+  const token = azOutputLockToken(now);
+  const notes = mergeAzOutputLock("origin=az-finished-video; ez-input=finished-video", token);
+  assert.equal(azOutputLockHeld(notes, token), true);
+  assert.equal(azOutputLockIsFresh(notes, now + 1_000), true);
+  assert.equal(azOutputLockIsFresh(notes, now + AZ_OUTPUT_LOCK_MS), false);
+  const later = azOutputLockToken(now + 10);
+  const overwritten = mergeAzOutputLock(notes, later);
+  assert.equal(azOutputLockHeld(overwritten, token), false);
+  assert.equal(azOutputLockHeld(overwritten, later), true);
 });
