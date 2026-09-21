@@ -398,7 +398,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.347-fb-public-live-diagnostic",
+          version: "0.10.348-fb-public-diagnostic-buildfix",
           studio_desk_inventory_v1: true,
           studio_desk_activity_v1: true,
           studio_tiktok_complete_v1: true,
@@ -3833,7 +3833,7 @@ async function syncProductionRequestOutputs(request, env, url, authorization) {
   try { payload = await request.json(); } catch { throw new HttpError(400, "Request body must be valid JSON"); }
 
   const productionRequestId = productionRequestIdFromOutputsPath(url);
-  const parent = await loadAuthorizedProductionRequest(env, productionRequestId, authorization);
+  let parent = await loadAuthorizedProductionRequest(env, productionRequestId, authorization);
   assertEditableProductionRequest(parent);
 
   const requested = Array.isArray(payload?.outputs) ? payload.outputs : [];
