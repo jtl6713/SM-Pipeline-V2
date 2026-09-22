@@ -114,7 +114,7 @@
   function enrichRows() {
     const contentById = new Map(state.content.map((row) => [row.id, row]));
     state.enriched = state.outputs.map((row) => {
-      const content = contentById.get(row.content_item_id) || {};
+      const content = row.content || contentById.get(row.content_item_id) || {};
       const views = num(row.insights_views);
       const reach = num(row.insights_reach);
       const likes = num(row.insights_likes);
@@ -677,12 +677,23 @@
     const status = $("insightsStatus");
     if (status) status.textContent = "Loading performance data…";
     try {
-      const [outputs, content] = await Promise.all([
-        fetchJson("/api/outputs?limit=500"),
-        fetchJson("/api/content?limit=500"),
-      ]);
-      state.outputs = Array.isArray(outputs.records) ? outputs.records : [];
-      state.content = Array.isArray(content.records) ? content.records : [];
+      let posts = null;
+      try {
+        posts = await fetchJson("/api/insights/posts?limit=500");
+      } catch {
+        posts = null;
+      }
+      if (posts && Array.isArray(posts.records)) {
+        state.outputs = posts.records;
+        state.content = [];
+      } else {
+        const [outputs, content] = await Promise.all([
+          fetchJson("/api/outputs?limit=100"),
+          fetchJson("/api/content?limit=100"),
+        ]);
+        state.outputs = Array.isArray(outputs.records) ? outputs.records : [];
+        state.content = Array.isArray(content.records) ? content.records : [];
+      }
       enrichRows();
       state.loadedAt = Date.now();
       renderAll();
