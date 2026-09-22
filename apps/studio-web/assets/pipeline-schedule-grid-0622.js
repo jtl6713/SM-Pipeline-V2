@@ -26,7 +26,7 @@
       date.setDate(start.getDate() + index);
       return date;
     });
-    return { start, end, days };
+    return { now, start, end, days };
   }
 
   function platformCode(platform) {
@@ -42,7 +42,7 @@
   function aggregate(records, windowValue) {
     const window = windowValue || sevenDayWindow(new Date());
     const cells = new Map();
-    const startMs = window.start.getTime();
+    const startMs = (window.now instanceof Date ? window.now : window.start).getTime();
     const endMs = window.end.getTime();
     for (const record of Array.isArray(records) ? records : []) {
       const raw = String(record?.scheduled_post_date || "").trim();
