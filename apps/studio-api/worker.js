@@ -3300,6 +3300,21 @@ const STUDIO_CITY_DESTINATION_KEYS = new Set([
   "TIKTOK_WORKER_BASE_URL",
 ]);
 
+async function studioContentProfileRecordIdForOutput(env, record) {
+  if (!record) return null;
+  const direct = studioFirstLinkedId(f(record, "Content_Profile"));
+  if (direct && /^rec[A-Za-z0-9]+$/.test(direct)) return direct;
+  const contentId = studioFirstLinkedId(f(record, "Content_Item"));
+  if (!contentId || !env.AIRTABLE_CONTENT_TABLE_ID) return null;
+  try {
+    const item = await airtableFetch(env, env.AIRTABLE_CONTENT_TABLE_ID, contentId);
+    const linked = studioFirstLinkedId(f(item, "Content_Profile"));
+    return linked && /^rec[A-Za-z0-9]+$/.test(linked) ? linked : null;
+  } catch {
+    return null;
+  }
+}
+
 async function studioThemeForPublishRecord(env, record) {
   if (!record) return "chicago";
   const direct = studioThemeForProfile(record);
@@ -16492,7 +16507,7 @@ async function studioSweepPublishedInsights(env, options = {}) {
       continue;
     }
     const profile = await studioThemeForPublishRecord(env, row);
-    const profileId = studioFirstLinkedId(f(row, "Content_Profile"));
+    const profileId = await studioContentProfileRecordIdForOutput(env, row);
     const outputType = String(f(row, "Platform_Output_Type") || f(row, "Studio_Output_Type") || "").trim();
     const caption = String(f(row, "Output_Caption") || "").trim();
     try {
