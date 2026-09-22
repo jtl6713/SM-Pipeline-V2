@@ -237,6 +237,8 @@ export default {
       const isInsightsCaptionsRoute = url.pathname === "/api/insights/captions";
       const isInsightsDiscoverRoute = url.pathname === "/api/insights/discover";
       const isInsightsWatchlistRoute = url.pathname === "/api/insights/watchlist";
+      const isInsightsChatRoute = url.pathname === "/api/insights/chat";
+      const isInsightsPostsRoute = url.pathname === "/api/insights/posts";
       const isR5DoneHookRoute = url.pathname === "/api/hooks/r5-done";
       const isRr2HookRoute = url.pathname === "/api/hooks/rr2";
       const isVoiceCatalogRoute = url.pathname === "/api/voices";
@@ -308,6 +310,7 @@ export default {
       const isInsightsWatchlistWrite = isInsightsWatchlistRoute && (request.method === "POST" || request.method === "PATCH");
       const isInsightsSimilarTimesWrite = isInsightsSimilarTimesRoute && request.method === "POST";
       const isInsightsDiscoverWrite = isInsightsDiscoverRoute && request.method === "POST";
+      const isInsightsChatWrite = isInsightsChatRoute && request.method === "POST";
       const allowedMethod =
         request.method === "GET" ||
         (request.method === "HEAD" && (isMusicPreviewRoute || isMediaAssetPreviewRoute || isMediaAssetStreamRoute || isOutputPreviewRoute || isVoicePreviewRoute)) ||
@@ -373,6 +376,8 @@ export default {
         isInsightsWatchlistWrite ||
         isInsightsSimilarTimesWrite ||
         isInsightsDiscoverWrite ||
+        isInsightsChatWrite ||
+        (isInsightsPostsRoute && request.method === "GET") ||
         (isInsightsBestTimesRoute && request.method === "GET") ||
         (isInsightsSimilarTimesRoute && request.method === "GET") ||
         (isInsightsCaptionsRoute && request.method === "GET") ||
@@ -402,7 +407,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.359-pipeline-schedule-grid",
+          version: "0.10.360-insights-dashboard",
           studio_desk_inventory_v1: true,
           studio_desk_activity_v1: true,
           studio_tiktok_complete_v1: true,
@@ -440,6 +445,9 @@ export default {
           studio_insights_seasonal_v1: true,
           studio_insights_caption_learning_v1: true,
           studio_insights_overview_stats_v1: true,
+          studio_insights_dashboard_v1: true,
+          studio_insights_posts_v1: true,
+          studio_insights_chat_v1: true,
           studio_insights_youtube_discovery_v1: true,
           studio_due_publish_priority_v1: true,
           studio_overdue_scheduled_rescue_v1: true,
@@ -837,6 +845,16 @@ export default {
         requirePermission(authorization, "tenant_admin");
         assertWriteRequest(request, env);
         return pulseAudioLeadingSilence(request, env);
+      }
+
+      if (isInsightsPostsRoute) {
+        requireAnyPermission(authorization, ["outputs_review", "publishing_control", "tenant_admin"]);
+        return getInsightsPosts(request, env, url, authorization);
+      }
+
+      if (isInsightsChatRoute) {
+        requireAnyPermission(authorization, ["outputs_review", "publishing_control", "tenant_admin"]);
+        return postInsightsChat(request, env, url, authorization);
       }
 
       if (isInsightsBestTimesRoute) {
@@ -2820,6 +2838,13 @@ function mapContent(record, outputRecords = null) {
     review_status: rollup?.review_status || rawReview,
     carousel_review_status: f(record, "Carousel_Review_Status"),
     duration: f(record, "Content_Duration"),
+    primary_location: String(f(record, "Primary_Location") || "").trim() || null,
+    neighborhood_or_area: String(f(record, "Neighborhood_or_Area") || "").trim() || null,
+    content_themes: f(record, "Content_Themes") || [],
+    include_voiceover: f(record, "Include_Voiceover"),
+    include_background_music: f(record, "Include_Background_Music"),
+    include_thumbnail: f(record, "Include_Thumbnail"),
+    video_clip_count: f(record, "Video_Clip_Count"),
     music_url: f(record, "Music_URL"),
     voiceover_url: f(record, "Voiceover_URL"),
     thumbnail_url: f(record, "Thumbnail_URL"),
@@ -2983,6 +3008,15 @@ function mapOutput(record, job = null) {
     output_url: f(record, "Output_URL"),
     platform_post_url: f(record, "Platform_Post_URL"),
     published_at: f(record, "Published_At"),
+    insights_views: f(record, "Insights_Views"),
+    insights_likes: f(record, "Insights_Likes"),
+    insights_comments: f(record, "Insights_Comments"),
+    insights_shares: f(record, "Insights_Shares"),
+    insights_reach: f(record, "Insights_Reach"),
+    insights_saves: f(record, "Insights_Saves"),
+    insights_watch_time_sec: f(record, "Insights_Watch_Time_Sec"),
+    insights_as_of: f(record, "Insights_As_Of"),
+    insights_source: f(record, "Insights_Source"),
     youtube_video_id: f(record, "YouTube_Video_ID"),
     youtube_privacy_status: f(record, "YouTube_Privacy_Status"),
     youtube_error_message: f(record, "YouTube_Error_Message"),
@@ -15546,6 +15580,169 @@ async function studioLoadSimilarTimesView(env, url, authorization) {
     posts,
     own_schedule: studioOwnScheduleHeatmap(occupiedByPlatform),
     occupiedMs: studioFlattenOccupiedByPlatform(occupiedByPlatform),
+  });
+}
+
+
+
+async function getInsightsPosts(request, env, url, authorization) {
+  const profile = await resolveWorkingContentProfile(env, authorization, requestedProfileId(url));
+  const requested = Number(url.searchParams.get("limit") || 300);
+  const limit = Math.max(1, Math.min(500, Number.isFinite(requested) ? Math.trunc(requested) : 300));
+  const profileFormula = contentProfileFilterFormula(profile);
+  const publishedFormula = "AND(" + profileFormula + ",{Published_At}!=\"\",{Do_Not_Publish}=0,{Test_Run_ID}=BLANK())";
+  const [outputs, contentRows] = await Promise.all([
+    listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
+      limit,
+      filterFormula: publishedFormula,
+      fields: [
+        "Output_ID",
+        "Platform",
+        "Platform_Output_Type",
+        "Studio_Output_Type",
+        "Output_Title",
+        "Output_Caption",
+        "Platform_Post_URL",
+        "Published_At",
+        "Content_Item",
+        "Insights_Views",
+        "Insights_Likes",
+        "Insights_Comments",
+        "Insights_Shares",
+        "Insights_Reach",
+        "Insights_Saves",
+        "Insights_Watch_Time_Sec",
+        "Insights_As_Of",
+        "Insights_Source",
+      ],
+      sortField: "Published_At",
+      sortDirection: "desc",
+    }),
+    listRecords(env, env.AIRTABLE_CONTENT_TABLE_ID, {
+      limit: 500,
+      filterFormula: profileFormula,
+      fields: [
+        "Content_ID",
+        "Content_Title",
+        "Content_Type",
+        "Content_Duration",
+        "Primary_Location",
+        "Neighborhood_or_Area",
+        "Content_Themes",
+        "Include_Voiceover",
+        "Include_Background_Music",
+        "Include_Thumbnail",
+        "Video_Clip_Count",
+      ],
+      sortField: "Created_At",
+      sortDirection: "desc",
+    }),
+  ]);
+  const contentById = new Map((contentRows || []).map((row) => [row.id, row]));
+  const records = (outputs || []).map((row) => {
+    const contentLinks = Array.isArray(f(row, "Content_Item")) ? f(row, "Content_Item") : [];
+    const contentId = contentLinks[0] || null;
+    const content = contentId ? contentById.get(contentId) : null;
+    return {
+      id: row.id,
+      output_id: f(row, "Output_ID"),
+      platform: f(row, "Platform"),
+      platform_output_type: f(row, "Platform_Output_Type"),
+      studio_output_type: f(row, "Studio_Output_Type"),
+      output_title: f(row, "Output_Title"),
+      output_caption: f(row, "Output_Caption"),
+      platform_post_url: f(row, "Platform_Post_URL"),
+      published_at: f(row, "Published_At"),
+      content_item_id: contentId,
+      insights_views: f(row, "Insights_Views"),
+      insights_likes: f(row, "Insights_Likes"),
+      insights_comments: f(row, "Insights_Comments"),
+      insights_shares: f(row, "Insights_Shares"),
+      insights_reach: f(row, "Insights_Reach"),
+      insights_saves: f(row, "Insights_Saves"),
+      insights_watch_time_sec: f(row, "Insights_Watch_Time_Sec"),
+      insights_as_of: f(row, "Insights_As_Of"),
+      insights_source: f(row, "Insights_Source"),
+      content: content ? {
+        id: content.id,
+        content_id: f(content, "Content_ID"),
+        title: f(content, "Content_Title"),
+        content_type: f(content, "Content_Type"),
+        duration: f(content, "Content_Duration"),
+        primary_location: String(f(content, "Primary_Location") || "").trim() || null,
+        neighborhood_or_area: String(f(content, "Neighborhood_or_Area") || "").trim() || null,
+        content_themes: f(content, "Content_Themes") || [],
+        include_voiceover: f(content, "Include_Voiceover"),
+        include_background_music: f(content, "Include_Background_Music"),
+        include_thumbnail: f(content, "Include_Thumbnail"),
+        video_clip_count: f(content, "Video_Clip_Count"),
+      } : null,
+    };
+  });
+  return respond(request, env, {
+    ok: true,
+    records,
+    count: records.length,
+    analytics_count: records.filter((row) => (
+      row.insights_as_of || row.insights_source ||
+      Number(row.insights_views || 0) || Number(row.insights_likes || 0) ||
+      Number(row.insights_comments || 0) || Number(row.insights_shares || 0) ||
+      Number(row.insights_reach || 0) || Number(row.insights_saves || 0)
+    )).length,
+    profile: mapStudioContentProfile(profile),
+  });
+}
+
+async function postInsightsChat(request, env, url, authorization) {
+  void url;
+  void authorization;
+  let payload = {};
+  try { payload = await request.json(); } catch { throw new HttpError(400, "Request body must be valid JSON"); }
+  const question = String(payload?.question || "").trim().slice(0, 800);
+  if (!question) throw new HttpError(400, "Ask a performance question");
+  const context = payload?.context && typeof payload.context === "object" ? payload.context : {};
+  const runnerUrl = String(env.PIPELINE_RUNNER_URL || "").trim().replace(/\/+$/, "");
+  if (!runnerUrl) throw new HttpError(503, "AI analyst is not configured");
+  const secret = String(env.PIPELINE_RUNNER_SHARED_SECRET || "");
+  const dataText = JSON.stringify(context).slice(0, 32000);
+  const prompt = [
+    "You are the read-only Performance Analyst inside ChicagoShining Studio.",
+    "Answer the operator's question using ONLY the supplied analytics context. Never invent metrics, posts, platforms, causes, audience traits, or missing values.",
+    "Missing analytics are unknown, not zero. Distinguish correlation from causation. Treat groups with fewer than 3 sampled posts as directional only. If platform coverage is uneven, say so before comparing platforms.",
+    "Be specific and useful. Cite post titles, sample sizes, views, interactions, engagement rates, content types, themes, or locations from the supplied data when relevant.",
+    "Return a JSON object with exactly these keys: answer (string), evidence (array of short strings), caveats (array of short strings), follow_ups (array of 2 to 4 useful questions).",
+    "Do not propose automatic publishing or make changes. You may recommend experiments or content ideas, but this analyst is read-only.",
+    "",
+    "Operator question:",
+    question,
+    "",
+    "Analytics context:",
+    dataText,
+  ].join("\n");
+  const response = await fetch(runnerUrl + "/jobs/autonomous-pick", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...(secret ? { "X-Pipeline-Secret": secret } : {}),
+    },
+    body: JSON.stringify({ prompt }),
+  });
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new HttpError(
+      response.status,
+      body?.error || body?.message || ("AI analyst failed (" + response.status + ")")
+    );
+  }
+  const parsed = body?.parsed;
+  if (!parsed || typeof parsed !== "object") throw new HttpError(502, "AI analyst returned an invalid response");
+  return respond(request, env, {
+    ok: true,
+    answer: String(parsed.answer || "").trim(),
+    evidence: Array.isArray(parsed.evidence) ? parsed.evidence.map((item) => String(item)).slice(0, 8) : [],
+    caveats: Array.isArray(parsed.caveats) ? parsed.caveats.map((item) => String(item)).slice(0, 6) : [],
+    follow_ups: Array.isArray(parsed.follow_ups) ? parsed.follow_ups.map((item) => String(item)).slice(0, 4) : [],
+    source: "openai-grounded-post-insights",
   });
 }
 
