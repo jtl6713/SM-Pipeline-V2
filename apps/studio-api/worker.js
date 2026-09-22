@@ -202,6 +202,7 @@ export default {
       const isItem4VariantsRoute = /^\/api\/production-requests\/rec[A-Za-z0-9]+\/variants$/.test(url.pathname);
       const isProductionRequestOutputRecordRoute = /^\/api\/production-request-outputs\/rec[A-Za-z0-9]+$/.test(url.pathname);
       const isOutputPreviewRoute = /^\/api\/outputs\/rec[A-Za-z0-9]+\/preview$/.test(url.pathname);
+      const isOutputScheduleGridRoute = url.pathname === "/api/outputs/schedule-grid";
       const isOutputCreativeRoute = /^\/api\/outputs\/rec[A-Za-z0-9]+\/creative$/.test(url.pathname);
       const isOutputCreativeReviewRoute = /^\/api\/outputs\/rec[A-Za-z0-9]+\/creative\/review$/.test(url.pathname);
       const isOutputApproveAllRoute = url.pathname === "/api/outputs/approve-all";
@@ -401,7 +402,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.358-production-request-owner-guard",
+          version: "0.10.359-pipeline-schedule-grid",
           studio_desk_inventory_v1: true,
           studio_desk_activity_v1: true,
           studio_tiktok_complete_v1: true,
@@ -474,6 +475,7 @@ export default {
           studio_p3_promote_pulse_v1: true,
           studio_platform_output_fanout_dedupe_v1: true,
           studio_single_production_request_owner_v1: true,
+          studio_pipeline_schedule_grid_v1: true,
           studio_r3_seed_selected_v1: true,
           production_make_idle_cadence_v1: true,
           production_request_kate_voice_v1: true,
@@ -1131,6 +1133,10 @@ export default {
         const response = await listOutputs(request, env, url, authorization, ctx);
         cadenceScheduleSync(ctx, env);
         return response;
+      }
+
+      if (isOutputScheduleGridRoute) {
+        return listOutputScheduleGrid(request, env, url, authorization);
       }
 
       if (isOutputPreviewRoute) {
@@ -17607,6 +17613,55 @@ const OUTPUT_LIST_FIELDS = [
   "Remotion_Job_ID",
   "Review_Decision_At",
 ];
+
+async function listOutputScheduleGrid(request, env, url, authorization) {
+  const profile = await resolveWorkingContentProfile(env, authorization, requestedProfileId(url));
+  const rawStart = String(url.searchParams.get("start") || "").trim();
+  const rawEnd = String(url.searchParams.get("end") || "").trim();
+  const startMs = Date.parse(rawStart);
+  const endMs = Date.parse(rawEnd);
+  if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs <= startMs) {
+    throw new HttpError(400, "start and end must be valid ISO date-times");
+  }
+  if (endMs - startMs > 8 * 24 * 60 * 60 * 1000) {
+    throw new HttpError(400, "Schedule grid range cannot exceed 8 days");
+  }
+
+  const startFloor = new Date(startMs - 1000).toISOString();
+  const endIso = new Date(endMs).toISOString();
+  const profileFormula = contentProfileFilterFormula(profile);
+  const formula = `AND(${profileFormula},{Scheduled_Post_Date}!="",IS_AFTER({Scheduled_Post_Date},DATETIME_PARSE("${airtableFormulaEscape(startFloor)}")),IS_BEFORE({Scheduled_Post_Date},DATETIME_PARSE("${airtableFormulaEscape(endIso)}")))`;
+  const records = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
+    limit: 500,
+    filterFormula: formula,
+    fields: [
+      "Output_ID",
+      "Platform",
+      "Output_Title",
+      "Scheduled_Post_Date",
+      "Publish_Status",
+      "Output_Status",
+    ],
+    sortField: "Scheduled_Post_Date",
+    sortDirection: "asc",
+  });
+
+  return respond(request, env, {
+    ok: true,
+    start: new Date(startMs).toISOString(),
+    end: endIso,
+    records: records.map((record) => ({
+      id: record.id,
+      output_id: f(record, "Output_ID"),
+      platform: f(record, "Platform"),
+      output_title: f(record, "Output_Title"),
+      scheduled_post_date: f(record, "Scheduled_Post_Date"),
+      publish_status: f(record, "Publish_Status"),
+      output_status: f(record, "Output_Status"),
+    })),
+    profile: mapStudioContentProfile(profile),
+  });
+}
 
 async function listOutputs(request, env, url, authorization, ctx = null) {
   const profile = await resolveWorkingContentProfile(env, authorization, requestedProfileId(url));
