@@ -250,6 +250,7 @@ export default {
       const isInsightsWatchlistRoute = url.pathname === "/api/insights/watchlist";
       const isInsightsChatRoute = url.pathname === "/api/insights/chat";
       const isInsightsPostsRoute = url.pathname === "/api/insights/posts";
+      const isInsightsConnectionsRoute = url.pathname === "/api/insights/connections";
       const isR5DoneHookRoute = url.pathname === "/api/hooks/r5-done";
       const isRr2HookRoute = url.pathname === "/api/hooks/rr2";
       const isVoiceCatalogRoute = url.pathname === "/api/voices";
@@ -389,6 +390,7 @@ export default {
         isInsightsDiscoverWrite ||
         isInsightsChatWrite ||
         (isInsightsPostsRoute && request.method === "GET") ||
+        (isInsightsConnectionsRoute && request.method === "GET") ||
         (isInsightsBestTimesRoute && request.method === "GET") ||
         (isInsightsSimilarTimesRoute && request.method === "GET") ||
         (isInsightsCaptionsRoute && request.method === "GET") ||
@@ -418,7 +420,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.360-insights-dashboard",
+          version: "0.10.361-first-party-analytics",
           studio_desk_inventory_v1: true,
           studio_desk_activity_v1: true,
           studio_tiktok_complete_v1: true,
@@ -458,6 +460,8 @@ export default {
           studio_insights_overview_stats_v1: true,
           studio_insights_dashboard_v1: true,
           studio_insights_posts_v1: true,
+          studio_insights_first_party_snapshots_v2: true,
+          studio_insights_connections_v1: true,
           studio_insights_chat_v1: true,
           studio_insights_youtube_discovery_v1: true,
           studio_due_publish_priority_v1: true,
@@ -856,6 +860,11 @@ export default {
         requirePermission(authorization, "tenant_admin");
         assertWriteRequest(request, env);
         return pulseAudioLeadingSilence(request, env);
+      }
+
+      if (isInsightsConnectionsRoute) {
+        requireAnyPermission(authorization, ["outputs_review", "publishing_control", "tenant_admin"]);
+        return getInsightsConnections(request, env, url, authorization);
       }
 
       if (isInsightsPostsRoute) {
@@ -15623,13 +15632,230 @@ async function studioLoadSimilarTimesView(env, url, authorization) {
 
 
 
+async function studioInsightsSafeJson(response) {
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const error = new Error(body?.error?.message || body?.error || body?.message || ("HTTP " + response.status));
+    error.status = response.status;
+    throw error;
+  }
+  return body;
+}
+
+async function studioInsightsMetaIdentity(id, token, version, fields) {
+  if (!id || !token) return null;
+  const url = new URL("https://graph.facebook.com/" + version + "/" + encodeURIComponent(id));
+  url.searchParams.set("fields", fields);
+  return studioInsightsSafeJson(await fetch(url.toString(), {
+    headers: { Authorization: "Bearer " + token, Accept: "application/json" },
+  }));
+}
+
+function studioInsightsConnectionStateFromError(error) {
+  const status = Number(error?.status || 0);
+  const message = sanitizeAnalyticsError(error);
+  const auth = status === 400 || status === 401 || status === 403
+    || /permission|oauth|token|authoriz|scope|credential/i.test(message);
+  return {
+    status: auth ? "needs_authorization" : "error",
+    error: message,
+  };
+}
+
+function studioInsightsLatestSyncByPlatform(rows) {
+  const result = {};
+  for (const row of rows || []) {
+    const platform = String(f(row, "Platform") || "").trim();
+    if (!platform) continue;
+    const current = result[platform] || { last_successful_sync: null, last_attempt: null, last_error: null };
+    const success = f(row, "Insights_As_Of");
+    const attempt = f(row, "Insights_Last_Attempt_At");
+    if (success && (!current.last_successful_sync || Date.parse(success) > Date.parse(current.last_successful_sync))) {
+      current.last_successful_sync = success;
+    }
+    if (attempt && (!current.last_attempt || Date.parse(attempt) > Date.parse(current.last_attempt))) {
+      current.last_attempt = attempt;
+      current.last_error = String(f(row, "Insights_Last_Error") || "").trim() || null;
+    }
+    result[platform] = current;
+  }
+  return result;
+}
+
+async function getInsightsConnections(request, env, url, authorization) {
+  const profile = await resolveWorkingContentProfile(env, authorization, requestedProfileId(url));
+  const theme = studioThemeForProfile(profile);
+  const settings = await studioActivePipelineSettings(env, [
+    "FACEBOOK_PAGE_ID",
+    "FACEBOOK_PAGE_ACCESS_TOKEN",
+    "FACEBOOK_GRAPH_API_VERSION",
+    "INSTAGRAM_BUSINESS_ACCOUNT_ID",
+    "YOUTUBE_CHANNEL_ID",
+    "YOUTUBE_UPLOAD_SERVICE_URL",
+    "YOUTUBE_UPLOAD_SERVICE_SHARED_SECRET",
+    "TIKTOK_WORKER_BASE_URL",
+  ], profile).catch(() => ({}));
+  const version = String(settings.FACEBOOK_GRAPH_API_VERSION || "v26.0").replace(/^\/+|\/+$/g, "");
+  const token = settings.FACEBOOK_PAGE_ACCESS_TOKEN || env.FACEBOOK_PAGE_ACCESS_TOKEN || "";
+  const profileFormula = contentProfileFilterFormula(profile);
+  const outputRows = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
+    limit: 250,
+    filterFormula: "AND(" + profileFormula + ",{Published_At}!=\"\",{Test_Run_ID}=BLANK())",
+    fields: ["Platform", "Insights_As_Of", "Insights_Last_Attempt_At", "Insights_Last_Error"],
+    sortField: "Published_At",
+    sortDirection: "desc",
+  }).catch(() => []);
+  const sync = studioInsightsLatestSyncByPlatform(outputRows);
+
+  const result = {
+    instagram: {
+      platform: "Instagram", status: "needs_authorization", account_name: null,
+      account_id: settings.INSTAGRAM_BUSINESS_ACCOUNT_ID || null, reconnect_url: null, error: null,
+    },
+    facebook: {
+      platform: "Facebook", status: "needs_authorization", account_name: null,
+      account_id: settings.FACEBOOK_PAGE_ID || null, reconnect_url: null, error: null,
+    },
+    youtube: {
+      platform: "YouTube", status: "needs_authorization", account_name: null,
+      account_id: settings.YOUTUBE_CHANNEL_ID || null, reconnect_url: null, error: null,
+    },
+    tiktok: {
+      platform: "TikTok", status: "needs_authorization", account_name: null,
+      account_id: null,
+      reconnect_url: settings.TIKTOK_WORKER_BASE_URL ? String(settings.TIKTOK_WORKER_BASE_URL).replace(/\/+$/, "") + "/tiktok/connect" : null,
+      error: null,
+    },
+  };
+
+  await Promise.all([
+    (async () => {
+      if (!token || !settings.FACEBOOK_PAGE_ID) {
+        result.facebook.error = "Page analytics authorization is not configured for this profile.";
+        return;
+      }
+      try {
+        const page = await studioInsightsMetaIdentity(settings.FACEBOOK_PAGE_ID, token, version, "id,name");
+        result.facebook.status = "connected";
+        result.facebook.account_name = page?.name || null;
+        result.facebook.account_id = page?.id || settings.FACEBOOK_PAGE_ID;
+      } catch (error) {
+        Object.assign(result.facebook, studioInsightsConnectionStateFromError(error));
+      }
+    })(),
+    (async () => {
+      if (!token || !settings.INSTAGRAM_BUSINESS_ACCOUNT_ID) {
+        result.instagram.error = "Instagram professional-account analytics authorization is not configured for this profile.";
+        return;
+      }
+      try {
+        const ig = await studioInsightsMetaIdentity(settings.INSTAGRAM_BUSINESS_ACCOUNT_ID, token, version, "id,username,name");
+        result.instagram.status = "connected";
+        result.instagram.account_name = ig?.username ? "@" + ig.username : (ig?.name || null);
+        result.instagram.account_id = ig?.id || settings.INSTAGRAM_BUSINESS_ACCOUNT_ID;
+      } catch (error) {
+        Object.assign(result.instagram, studioInsightsConnectionStateFromError(error));
+      }
+    })(),
+    (async () => {
+      const base = String(settings.YOUTUBE_UPLOAD_SERVICE_URL || "").trim().replace(/\/+$/, "");
+      const secret = settings.YOUTUBE_UPLOAD_SERVICE_SHARED_SECRET || env.YOUTUBE_UPLOAD_SERVICE_SHARED_SECRET || "";
+      if (!base) {
+        result.youtube.status = "error";
+        result.youtube.error = "YouTube uploader service is not configured for this profile.";
+        return;
+      }
+      try {
+        const response = await fetch(base + "/youtube/oauth/status", {
+          headers: {
+            Accept: "application/json",
+            ...(secret ? { "X-SM-Pipeline-Key": secret } : {}),
+          },
+        });
+        const body = await studioInsightsSafeJson(response);
+        result.youtube.account_name = body?.channel_title || null;
+        result.youtube.account_id = body?.channel_id || result.youtube.account_id;
+        result.youtube.status = body?.refresh_ok && body?.analytics_read_ok ? "connected"
+          : body?.refresh_ok ? "needs_authorization" : "needs_authorization";
+        result.youtube.error = body?.analytics_read_ok
+          ? null
+          : (body?.analytics_error || body?.error || "YouTube Analytics authorization is required.");
+      } catch (error) {
+        Object.assign(result.youtube, studioInsightsConnectionStateFromError(error));
+      }
+    })(),
+    (async () => {
+      const base = String(settings.TIKTOK_WORKER_BASE_URL || "").trim().replace(/\/+$/, "");
+      if (!base) {
+        result.tiktok.status = "error";
+        result.tiktok.error = "TikTok auth worker is not configured for this profile.";
+        return;
+      }
+      try {
+        const body = await studioInsightsSafeJson(await fetch(base + "/tiktok/status", {
+          headers: { Accept: "application/json" },
+        }));
+        result.tiktok.account_name = body?.creator_username ? "@" + body.creator_username : (body?.creator_nickname || null);
+        result.tiktok.status = body?.authorized && body?.required_scopes_granted ? "connected" : "needs_authorization";
+        result.tiktok.error = result.tiktok.status === "connected"
+          ? null
+          : "Reconnect TikTok to grant owned-video analytics access.";
+      } catch (error) {
+        Object.assign(result.tiktok, studioInsightsConnectionStateFromError(error));
+      }
+    })(),
+  ]);
+
+  for (const item of Object.values(result)) {
+    const activity = sync[item.platform] || {};
+    item.last_successful_sync = activity.last_successful_sync || null;
+    item.last_attempt = activity.last_attempt || null;
+    item.last_error = activity.last_error || null;
+  }
+
+  return respond(request, env, {
+    ok: true,
+    profile: mapStudioContentProfile(profile),
+    theme,
+    connections: result,
+  });
+}
+
+function studioInsightsMilestoneSnapshot(snapshots, targetHours, toleranceHours) {
+  const candidates = (snapshots || [])
+    .filter((row) => Number.isFinite(Number(row.age_hours)))
+    .map((row) => ({ row, delta: Math.abs(Number(row.age_hours) - targetHours) }))
+    .filter((entry) => entry.delta <= toleranceHours)
+    .sort((a, b) => a.delta - b.delta);
+  const row = candidates[0]?.row;
+  if (!row) return null;
+  return {
+    age_hours: row.age_hours,
+    fetched_at: row.fetched_at,
+    views: row.views,
+    reach: row.reach,
+    likes: row.likes,
+    comments: row.comments,
+    shares: row.shares,
+    saves: row.saves,
+    total_interactions: row.total_interactions,
+    engaged_views: row.engaged_views,
+    watch_time_sec: row.watch_time_sec,
+    average_view_duration_sec: row.average_view_duration_sec,
+    average_percentage_viewed: row.average_percentage_viewed,
+    audience_gained: row.audience_gained,
+    audience_lost: row.audience_lost,
+  };
+}
+
 async function getInsightsPosts(request, env, url, authorization) {
   const profile = await resolveWorkingContentProfile(env, authorization, requestedProfileId(url));
   const requested = Number(url.searchParams.get("limit") || 300);
   const limit = Math.max(1, Math.min(500, Number.isFinite(requested) ? Math.trunc(requested) : 300));
   const profileFormula = contentProfileFilterFormula(profile);
   const publishedFormula = "AND(" + profileFormula + ",{Published_At}!=\"\",{Do_Not_Publish}=0,{Test_Run_ID}=BLANK())";
-  const [outputs, contentRows] = await Promise.all([
+  const theme = studioThemeForProfile(profile);
+  const [outputs, contentRows, observations] = await Promise.all([
     listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
       limit,
       filterFormula: publishedFormula,
@@ -15650,6 +15876,15 @@ async function getInsightsPosts(request, env, url, authorization) {
         "Insights_Reach",
         "Insights_Saves",
         "Insights_Watch_Time_Sec",
+        "Insights_Total_Interactions",
+        "Insights_Engaged_Views",
+        "Insights_Avg_View_Duration_Sec",
+        "Insights_Avg_Percentage_Viewed",
+        "Insights_Audience_Gained",
+        "Insights_Audience_Lost",
+        "Insights_Next_Sync_At",
+        "Insights_Last_Attempt_At",
+        "Insights_Last_Error",
         "Insights_As_Of",
         "Insights_Source",
       ],
@@ -15675,8 +15910,20 @@ async function getInsightsPosts(request, env, url, authorization) {
       sortField: "Created_At",
       sortDirection: "desc",
     }),
+    studioInsightsLoadObservations(env, {
+      profile: theme,
+      source: "first_party",
+      limit: 500,
+    }).catch(() => []),
   ]);
   const contentById = new Map((contentRows || []).map((row) => [row.id, row]));
+  const snapshotsByOutput = new Map();
+  for (const snapshot of observations || []) {
+    const key = String(snapshot.platform_output_record_id || "").trim();
+    if (!key) continue;
+    if (!snapshotsByOutput.has(key)) snapshotsByOutput.set(key, []);
+    snapshotsByOutput.get(key).push(snapshot);
+  }
   const records = (outputs || []).map((row) => {
     const contentLinks = Array.isArray(f(row, "Content_Item")) ? f(row, "Content_Item") : [];
     const contentId = contentLinks[0] || null;
@@ -15699,6 +15946,20 @@ async function getInsightsPosts(request, env, url, authorization) {
       insights_reach: f(row, "Insights_Reach"),
       insights_saves: f(row, "Insights_Saves"),
       insights_watch_time_sec: f(row, "Insights_Watch_Time_Sec"),
+      insights_total_interactions: f(row, "Insights_Total_Interactions"),
+      insights_engaged_views: f(row, "Insights_Engaged_Views"),
+      insights_avg_view_duration_sec: f(row, "Insights_Avg_View_Duration_Sec"),
+      insights_avg_percentage_viewed: f(row, "Insights_Avg_Percentage_Viewed"),
+      insights_audience_gained: f(row, "Insights_Audience_Gained"),
+      insights_audience_lost: f(row, "Insights_Audience_Lost"),
+      insights_next_sync_at: f(row, "Insights_Next_Sync_At"),
+      insights_last_attempt_at: f(row, "Insights_Last_Attempt_At"),
+      insights_last_error: f(row, "Insights_Last_Error"),
+      insights_milestones: {
+        h24: studioInsightsMilestoneSnapshot(snapshotsByOutput.get(row.id), 24, 12),
+        d7: studioInsightsMilestoneSnapshot(snapshotsByOutput.get(row.id), 168, 48),
+        d30: studioInsightsMilestoneSnapshot(snapshotsByOutput.get(row.id), 720, 120),
+      },
       insights_as_of: f(row, "Insights_As_Of"),
       insights_source: f(row, "Insights_Source"),
       content: content ? {
@@ -15745,8 +16006,9 @@ async function postInsightsChat(request, env, url, authorization) {
   const dataText = JSON.stringify(context).slice(0, 32000);
   const prompt = [
     "You are the read-only Performance Analyst inside ChicagoShining Studio.",
-    "Answer the operator's question using ONLY the supplied analytics context. Never invent metrics, posts, platforms, causes, audience traits, or missing values.",
+    "Answer the operator's question using ONLY the supplied FIRST-PARTY analytics context for the operator's own authenticated accounts. Never invent metrics, posts, platforms, causes, audience traits, or missing values.",
     "Missing analytics are unknown, not zero. Distinguish correlation from causation. Treat groups with fewer than 3 sampled posts as directional only. If platform coverage is uneven, say so before comparing platforms.",
+    "Use insights_milestones when present for 24-hour, 7-day, and 30-day growth comparisons; cite the actual measurement age because a milestone may be sampled near rather than exactly at the target.",
     "Be specific and useful. Cite post titles, sample sizes, views, interactions, engagement rates, content types, themes, or locations from the supplied data when relevant.",
     "Return a JSON object with exactly these keys: answer (string), evidence (array of short strings), caveats (array of short strings), follow_ups (array of 2 to 4 useful questions).",
     "Do not propose automatic publishing or make changes. You may recommend experiments or content ideas, but this analyst is read-only.",
