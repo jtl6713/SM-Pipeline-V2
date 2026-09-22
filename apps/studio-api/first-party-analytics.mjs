@@ -236,7 +236,7 @@ async function serviceJson(url, { secret, method = "GET", body, fetchImpl = fetc
     headers: {
       Accept: "application/json",
       ...(body ? { "Content-Type": "application/json" } : {}),
-      ...(secret ? { "X-Studio-Secret": secret, Authorization: `Bearer ${secret}` } : {}),
+      ...(secret ? { "X-Studio-Secret": secret, "X-Pipeline-Secret": secret, Authorization: `Bearer ${secret}` } : {}),
     },
     body: body ? JSON.stringify(body) : undefined,
   });
