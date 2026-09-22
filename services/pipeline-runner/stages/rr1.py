@@ -38,6 +38,13 @@ def run(request: StageRequest) -> StageResult:
             details={"make_scenario_id": MAKE_SCENARIO_ID, "dry_run": True, "run": result},
         )
     if not result.get("processed"):
+        if result.get("reason") == "review_email_disabled":
+            return StageResult(
+                stage="rr1",
+                status="skipped",
+                message="Ready-for-review email is disabled; review in Studio Pipeline",
+                details={"make_scenario_id": MAKE_SCENARIO_ID, "run": result},
+            )
         return StageResult(
             stage="rr1",
             status="skipped",
