@@ -190,6 +190,25 @@ async function linkedChannelId(token) {
   };
 }
 
+async function analyticsReadStatus(token) {
+  const end = new Date();
+  const start = new Date(end.getTime() - 7 * 86400000);
+  const url = new URL("https://youtubeanalytics.googleapis.com/v2/reports");
+  url.searchParams.set("ids", "channel==MINE");
+  url.searchParams.set("startDate", start.toISOString().slice(0, 10));
+  url.searchParams.set("endDate", end.toISOString().slice(0, 10));
+  url.searchParams.set("metrics", "views");
+  const response = await fetch(url, { headers: { Authorization: "Bearer " + token, Accept: "application/json" } });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    return {
+      ok: false,
+      error: String(data?.error?.message || ("HTTP " + response.status)).slice(0, 240),
+    };
+  }
+  return { ok: true, error: null };
+}
+
 async function oauthStatus() {
   const result = {
     ok: false,
@@ -199,6 +218,8 @@ async function oauthStatus() {
     refresh_token_length: String(cfg.refreshToken || "").length,
     truncated: refreshTokenLooksTruncated(cfg.refreshToken),
     refresh_ok: false,
+    analytics_read_ok: false,
+    analytics_error: null,
     access_token_expires_in: null,
     channel_id: "",
     channel_title: "",
@@ -216,6 +237,9 @@ async function oauthStatus() {
     const channel = await linkedChannelId(refreshed.token);
     result.channel_id = channel.channelId;
     result.channel_title = channel.channelTitle;
+    const analyticsStatus = await analyticsReadStatus(refreshed.token);
+    result.analytics_read_ok = analyticsStatus.ok;
+    result.analytics_error = analyticsStatus.error;
   } catch (error) {
     result.error = error instanceof Error ? error.message : String(error);
   }
