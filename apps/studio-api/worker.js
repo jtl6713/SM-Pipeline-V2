@@ -3040,6 +3040,7 @@ function mapOutput(record, job = null) {
     insights_avg_percentage_viewed: f(record, "Insights_Avg_Percentage_Viewed"),
     insights_audience_gained: f(record, "Insights_Audience_Gained"),
     insights_audience_lost: f(record, "Insights_Audience_Lost"),
+    insights_duration_sec: f(record, "Insights_Duration_Sec"),
     insights_platform_metrics_json: f(record, "Insights_Platform_Metrics_JSON"),
     insights_next_sync_at: f(record, "Insights_Next_Sync_At"),
     insights_last_attempt_at: f(record, "Insights_Last_Attempt_At"),
@@ -14615,6 +14616,7 @@ function studioInsightsObservationFields(post, meta = {}) {
       Average_Percentage_Viewed: studioInsightsNumberOrNull(post?.average_percentage_viewed),
       Audience_Gained: studioInsightsNumberOrNull(post?.audience_gained),
       Audience_Lost: studioInsightsNumberOrNull(post?.audience_lost),
+      Duration_Sec: studioInsightsNumberOrNull(post?.duration_sec),
       Platform_Metrics_JSON: JSON.stringify(post?.platform_metrics || {}),
     } : {}),
   };
@@ -14642,6 +14644,7 @@ function studioInsightsObservationToPost(record) {
     average_percentage_viewed: studioInsightsNumberOrNull(f(record, "Average_Percentage_Viewed")),
     audience_gained: studioInsightsNumberOrNull(f(record, "Audience_Gained")),
     audience_lost: studioInsightsNumberOrNull(f(record, "Audience_Lost")),
+    duration_sec: studioInsightsNumberOrNull(f(record, "Duration_Sec")),
     age_hours: studioInsightsNumberOrNull(f(record, "Age_Hours")),
     measurement_bucket: String(f(record, "Measurement_Bucket") || "").trim() || null,
     platform_output_record_id: String(f(record, "Platform_Output_Record_ID") || "").trim() || null,
@@ -15668,6 +15671,7 @@ function studioInsightsConnectionStateFromError(error) {
 function studioInsightsLatestSyncByPlatform(rows) {
   const result = {};
   for (const row of rows || []) {
+    if (considered >= limit) break;
     const platform = String(f(row, "Platform") || "").trim();
     if (!platform) continue;
     const current = result[platform] || { last_successful_sync: null, last_attempt: null, last_error: null };
@@ -15882,6 +15886,7 @@ function studioInsightsMilestoneSnapshot(snapshots, targetHours, toleranceHours)
     average_percentage_viewed: row.average_percentage_viewed,
     audience_gained: row.audience_gained,
     audience_lost: row.audience_lost,
+    duration_sec: row.duration_sec,
   };
 }
 
@@ -15919,6 +15924,7 @@ async function getInsightsPosts(request, env, url, authorization) {
         "Insights_Avg_Percentage_Viewed",
         "Insights_Audience_Gained",
         "Insights_Audience_Lost",
+        "Insights_Duration_Sec",
         "Insights_Next_Sync_At",
         "Insights_Last_Attempt_At",
         "Insights_Last_Error",
@@ -15990,6 +15996,7 @@ async function getInsightsPosts(request, env, url, authorization) {
       insights_avg_percentage_viewed: f(row, "Insights_Avg_Percentage_Viewed"),
       insights_audience_gained: f(row, "Insights_Audience_Gained"),
       insights_audience_lost: f(row, "Insights_Audience_Lost"),
+      insights_duration_sec: f(row, "Insights_Duration_Sec"),
       insights_next_sync_at: f(row, "Insights_Next_Sync_At"),
       insights_last_attempt_at: f(row, "Insights_Last_Attempt_At"),
       insights_last_error: f(row, "Insights_Last_Error"),
@@ -16362,6 +16369,7 @@ function studioFirstPartySnapshotFields(snapshot) {
     Insights_Avg_Percentage_Viewed: snapshot.average_percentage_viewed,
     Insights_Audience_Gained: snapshot.audience_gained,
     Insights_Audience_Lost: snapshot.audience_lost,
+    Insights_Duration_Sec: snapshot.duration_sec,
     Insights_Platform_Metrics_JSON: JSON.stringify(snapshot.platform_metrics || {}),
     Insights_As_Of: snapshot.fetched_at,
     Insights_Source: snapshot.source || snapshot.platform,
@@ -16450,21 +16458,39 @@ async function studioFetchOwnedOutputAnalytics(env, row, { platform, postId, pub
 async function studioSweepPublishedInsights(env, options = {}) {
   const limit = Math.max(1, Math.min(12, Number(options.limit) || 8));
   const rows = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
-    limit,
+    limit: Math.min(60, limit * 5),
     sortField: "Published_At",
     sortDirection: "desc",
     filterFormula: 'AND({Test_Run_ID}=BLANK(),{Published_At}!="",{Do_Not_Publish}=0,OR({Insights_Next_Sync_At}=BLANK(),IS_BEFORE({Insights_Next_Sync_At},NOW())))',
   }).catch(() => []);
   let updated = 0;
   let failed = 0;
+  let considered = 0;
   const profiles = new Set();
   for (const row of rows || []) {
     const platform = String(f(row, "Platform") || "").trim();
     if (!["Instagram", "Facebook", "YouTube", "TikTok"].includes(platform)) continue;
     const publishedAt = f(row, "Published_At");
     const postId = nativePlatformId(platform, studioOutputNativeIdFields(row));
-    if (!postId || !publishedAt) continue;
+    if (!publishedAt) continue;
+    considered += 1;
     const attemptedAt = new Date().toISOString();
+    if (!postId) {
+      const retryAt = new Date(Date.now() + 24 * 3600000).toISOString();
+      await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, row.id, {
+        method: "PATCH",
+        body: JSON.stringify({
+          fields: {
+            Insights_Last_Attempt_At: attemptedAt,
+            Insights_Last_Error: "Missing native platform post ID for analytics",
+            Insights_Next_Sync_At: retryAt,
+          },
+          typecast: true,
+        }),
+      }).catch(() => null);
+      failed += 1;
+      continue;
+    }
     const profile = await studioThemeForPublishRecord(env, row);
     const profileId = studioFirstLinkedId(f(row, "Content_Profile"));
     const outputType = String(f(row, "Platform_Output_Type") || f(row, "Studio_Output_Type") || "").trim();
@@ -16512,7 +16538,7 @@ async function studioSweepPublishedInsights(env, options = {}) {
       console.warn("first-party analytics row failed", row.id, sanitizeAnalyticsError(error));
     }
   }
-  return { scanned: (rows || []).length, updated, failed, profiles: [...profiles] };
+  return { scanned: (rows || []).length, considered, updated, failed, profiles: [...profiles] };
 }
 
 async function studioFetchOutputInsights(platform, postId, creds) {
