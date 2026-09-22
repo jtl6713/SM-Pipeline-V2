@@ -14576,7 +14576,7 @@
     const windowValue = pipelineScheduleWindow();
     if (!windowValue) return "/api/outputs/schedule-grid";
     const params = new URLSearchParams({
-      start: windowValue.start.toISOString(),
+      start: windowValue.now.toISOString(),
       end: windowValue.end.toISOString(),
     });
     return `/api/outputs/schedule-grid?${params.toString()}`;
