@@ -510,6 +510,7 @@ async function handleCallback(url, env) {
     "user.info.basic",
     "video.publish",
     "video.upload",
+    "video.list",
   ];
 
   const missingScopes =
@@ -1312,6 +1313,7 @@ async function publicStatus(env) {
         "user.info.basic",
         "video.publish",
         "video.upload",
+        "video.list",
       ].every(
         (scope) =>
           scopes.includes(scope),
