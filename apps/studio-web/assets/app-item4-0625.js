@@ -190,6 +190,8 @@
   let item4CropRequestId = null;
   let pipelineOutputs = [];
   let pipelineContentRecords = [];
+  let pipelineScheduleGridRecords = [];
+  let pipelineScheduleGridOpen = true;
   let pipelineSort = { key: "output", dir: "desc" };
   let ideasSort = { key: "idea", dir: "desc" };
   let ideasCurrentSectionOpen = true;
@@ -228,7 +230,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.359-pipeline-content-id";
+  const BUILD_ID = "item4-0.6.360-pipeline-schedule-grid";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -345,6 +347,7 @@
       || pathname === "/api/production-requests" || pathname.startsWith("/api/production-requests/")
       || pathname === "/api/content"
       || pathname === "/api/outputs"
+      || pathname === "/api/outputs/schedule-grid"
       || pathname === "/api/dashboard"
       || pathname === "/api/insights/best-times"
       || pathname === "/api/insights/similar-times"
@@ -13284,6 +13287,7 @@
     const input = document.querySelector(`[data-pipeline-schedule="${id}"]`);
     if (input) input.value = local;
     pipelineOutputs = (pipelineOutputs || []).map((row) => (row.id === id ? { ...row, ...record } : row));
+    syncPipelineScheduleGridRecord(record);
   }
 
   function rememberPipelineTiktokUrlDrafts() {
@@ -14478,6 +14482,113 @@
     }
   }
 
+  function pipelineScheduleWindow() {
+    const helper = globalThis.PipelineScheduleGrid;
+    return helper?.sevenDayWindow ? helper.sevenDayWindow(new Date()) : null;
+  }
+
+  function pipelineScheduleHourLabel(hour) {
+    const date = new Date(2000, 0, 1, Number(hour) || 0, 0, 0, 0);
+    return date.toLocaleTimeString(undefined, { hour: "numeric" });
+  }
+
+  function pipelineScheduleDayHeader(date, index) {
+    const weekday = index === 0 ? "Today" : date.toLocaleDateString(undefined, { weekday: "short" });
+    const day = date.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+    return `<span class="pipeline-schedule-day-label">${escapeHtml(weekday)}</span><span class="pipeline-schedule-day-date">${escapeHtml(day)}</span>`;
+  }
+
+  function pipelineScheduleRecordTitle(record) {
+    const when = new Date(record?.scheduled_post_date || "");
+    const time = Number.isFinite(when.getTime())
+      ? when.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })
+      : "";
+    const output = record?.output_id ? `Output ${record.output_id}` : "Output";
+    return [output, record?.platform, time, record?.output_title].filter(Boolean).join(" · ");
+  }
+
+  function renderPipelineScheduleGrid(records = pipelineScheduleGridRecords, error = "") {
+    const target = $("pipelineScheduleGrid");
+    const summary = $("pipelineScheduleGridSummary");
+    const panel = $("pipelineScheduleOverview");
+    const toggle = $("pipelineScheduleGridToggle");
+    const helper = globalThis.PipelineScheduleGrid;
+    if (!target || !helper?.sevenDayWindow || !helper?.aggregate) return;
+
+    const windowValue = helper.sevenDayWindow(new Date());
+    const cells = helper.aggregate(records, windowValue);
+    const total = [...cells.values()].reduce((sum, cell) => sum + Number(cell?.total || 0), 0);
+    const lastDay = windowValue.days[6];
+    const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || "local time";
+    if (summary) {
+      const rangeEnd = lastDay.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
+      summary.textContent = error
+        ? `${total} scheduled in the loaded Pipeline rows · schedule service retrying · ${timezone}`
+        : `${total} scheduled output${total === 1 ? "" : "s"} · Today through ${rangeEnd} · ${timezone}`;
+    }
+
+    const now = new Date();
+    const nowKey = helper.cellKey(now);
+    const platforms = ["Instagram", "Facebook", "TikTok", "YouTube"];
+    const head = windowValue.days.map((date, index) => `<th scope="col">${pipelineScheduleDayHeader(date, index)}</th>`).join("");
+    const rows = Array.from({ length: 24 }, (_, hour) => {
+      const cellsHtml = windowValue.days.map((day) => {
+        const date = new Date(day);
+        date.setHours(hour, 0, 0, 0);
+        const key = helper.cellKey(date);
+        const cell = cells.get(key);
+        const entries = cell?.platforms || {};
+        const platformNames = [
+          ...platforms.filter((name) => entries[name]),
+          ...Object.keys(entries).filter((name) => !platforms.includes(name)).sort(),
+        ];
+        const chips = platformNames.map((name) => {
+          const count = Number(entries[name] || 0);
+          const slug = String(name || "").trim().toLowerCase().replace(/[^a-z0-9]+/g, "-");
+          return `<span class="pipeline-schedule-chip" data-platform="${escapeHtml(slug)}" title="${escapeHtml(name)}">${escapeHtml(helper.platformCode(name))} ${count}</span>`;
+        }).join("");
+        const titles = (cell?.records || []).map(pipelineScheduleRecordTitle).join("\n");
+        const totalLabel = cell?.total > 1 ? `<span class="pipeline-schedule-total">${cell.total} total</span>` : "";
+        return `<td class="pipeline-schedule-cell${cell?.total ? " has-scheduled" : " is-empty"}${key === nowKey ? " is-current-hour" : ""}" title="${escapeHtml(titles)}"><div class="pipeline-schedule-cell-inner">${chips}${totalLabel}</div></td>`;
+      }).join("");
+      return `<tr><th scope="row" class="pipeline-schedule-hour">${escapeHtml(pipelineScheduleHourLabel(hour))}</th>${cellsHtml}</tr>`;
+    }).join("");
+
+    target.innerHTML = `<table class="pipeline-schedule-grid-table"><thead><tr><th class="pipeline-hour-head" scope="col">Hour</th>${head}</tr></thead><tbody>${rows}</tbody></table>`;
+
+    if (panel) panel.classList.toggle("pipeline-schedule-collapsed", !pipelineScheduleGridOpen);
+    if (toggle) {
+      toggle.textContent = pipelineScheduleGridOpen ? "Collapse" : "Expand";
+      toggle.setAttribute("aria-expanded", pipelineScheduleGridOpen ? "true" : "false");
+      if (!toggle.dataset.bound) {
+        toggle.dataset.bound = "true";
+        toggle.addEventListener("click", () => {
+          pipelineScheduleGridOpen = !pipelineScheduleGridOpen;
+          panel?.classList.toggle("pipeline-schedule-collapsed", !pipelineScheduleGridOpen);
+          toggle.textContent = pipelineScheduleGridOpen ? "Collapse" : "Expand";
+          toggle.setAttribute("aria-expanded", pipelineScheduleGridOpen ? "true" : "false");
+        });
+      }
+    }
+  }
+
+  function pipelineScheduleGridApiPath() {
+    const windowValue = pipelineScheduleWindow();
+    if (!windowValue) return "/api/outputs/schedule-grid";
+    const params = new URLSearchParams({
+      start: windowValue.now.toISOString(),
+      end: windowValue.end.toISOString(),
+    });
+    return `/api/outputs/schedule-grid?${params.toString()}`;
+  }
+
+  function syncPipelineScheduleGridRecord(record) {
+    if (!record?.id) return;
+    pipelineScheduleGridRecords = pipelineScheduleGridRecords.filter((row) => row.id !== record.id);
+    if (String(record.scheduled_post_date || "").trim()) pipelineScheduleGridRecords.push(record);
+    renderPipelineScheduleGrid(pipelineScheduleGridRecords);
+  }
+
   function pipelinePageActive() {
     return Boolean($("page-outputs")?.classList.contains("active"));
   }
@@ -14565,12 +14676,18 @@
       setPipelineLiveHint("Refreshing…");
     }
     try {
-      const [outputsResult, contentResult] = await Promise.all([
+      const [outputsResult, contentResult, scheduleResult] = await Promise.all([
         api("/api/outputs?limit=100"),
         api("/api/content?limit=100"),
+        api(pipelineScheduleGridApiPath()).catch((error) => ({ records: [], schedule_error: error?.message || "Schedule view unavailable" })),
       ]);
       const records = outputsResult?.records || [];
       const contentRecords = contentResult?.records || [];
+      const scheduleError = String(scheduleResult?.schedule_error || "");
+      pipelineScheduleGridRecords = scheduleError
+        ? records.filter((row) => String(row?.scheduled_post_date || "").trim())
+        : (scheduleResult?.records || []);
+      renderPipelineScheduleGrid(pipelineScheduleGridRecords, scheduleError);
       const unchanged = !force
         && silent
         && target.querySelector("table")

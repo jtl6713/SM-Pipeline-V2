@@ -553,3 +553,4 @@ Variant prepare copy Pages deploy: 2026-09-20 — Approve prompt says Prepare fi
 2026-09-21 deploy Studio UI 0.6.354 pipeline rerendering label during mix remix
 2026-09-21 deploy Studio UI 0.6.358 ideas two-section archive + native Music Manager file picker. Source commit 19134513 / d9b57461.
 2026-09-21 deploy Studio UI 0.6.359 pipeline group Content ID labels. Source commit 322fa97c.
+2026-09-21 deploy Studio UI 0.6.360 rolling 7-day Pipeline schedule grid
