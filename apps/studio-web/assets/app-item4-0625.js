@@ -191,7 +191,7 @@
   let pipelineOutputs = [];
   let pipelineContentRecords = [];
   let pipelineScheduleGridRecords = [];
-  let pipelineScheduleGridOpen = true;
+  let pipelineScheduleGridOpen = false;
   let pipelineSort = { key: "output", dir: "desc" };
   let ideasSort = { key: "idea", dir: "desc" };
   let ideasCurrentSectionOpen = true;
@@ -230,7 +230,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.360-pipeline-schedule-grid";
+  const BUILD_ID = "item4-0.6.361-schedule-collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";

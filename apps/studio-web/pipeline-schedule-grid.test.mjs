@@ -1,5 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 await import("./assets/pipeline-schedule-grid-0622.js");
 const grid = globalThis.PipelineScheduleGrid;
@@ -36,4 +39,14 @@ test("platform abbreviations are stable", () => {
   assert.equal(grid.platformCode("Facebook"), "FB");
   assert.equal(grid.platformCode("TikTok"), "TT");
   assert.equal(grid.platformCode("YouTube"), "YT");
+});
+
+
+test("Pipeline schedule overview defaults collapsed", () => {
+  const here = path.dirname(fileURLToPath(import.meta.url));
+  const html = fs.readFileSync(path.join(here, "index.html"), "utf8");
+  const app = fs.readFileSync(path.join(here, "assets", "app-item4-0625.js"), "utf8");
+  assert.match(html, /pipeline-schedule-overview pipeline-schedule-collapsed/);
+  assert.match(html, /id="pipelineScheduleGridToggle" aria-expanded="false"[^>]*>Expand<\/button>/);
+  assert.match(app, /let pipelineScheduleGridOpen = false/);
 });

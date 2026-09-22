@@ -9,7 +9,7 @@
  <link rel="preconnect" href="https://fonts.googleapis.com">
  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@1,600;1,700&family=Inter:wght@400;500;600;700;800&family=Oswald:wght@500&display=swap">
- <link rel="stylesheet" href="/assets/styles-phase7-0621.css?v=0.6.360-pipeline-schedule-grid">
+ <link rel="stylesheet" href="/assets/styles-phase7-0621.css?v=0.6.361-schedule-collapsed">
 </head>
 <body>
  <header class="topbar">
@@ -880,7 +880,7 @@
  <section id="page-outputs" class="page">
  <div class="page-heading"><div><span class="eyebrow">Execution + creative review</span><h1>Platform pipeline</h1><p>Click an output row to watch the render, see the photo package, and read the caption. Studio state refreshes automatically while this page is open.</p></div><div class="heading-actions"><span class="subtle" id="pipelineLiveHint">Checking for updates…</span><button class="secondary-button" data-refresh="outputs">Refresh now</button><label class="toggle-control pipeline-default-schedule-toggle" id="pipelineUseDefaultSchedulesLabel"><input type="checkbox" id="pipelineUseDefaultSchedules"><span>Use default schedules</span></label><button type="button" class="primary-button" id="pipelineApproveAll" disabled>Approve All</button></div></div>
 
- <section class="panel pipeline-schedule-overview" id="pipelineScheduleOverview">
+ <section class="panel pipeline-schedule-overview pipeline-schedule-collapsed" id="pipelineScheduleOverview">
  <div class="panel-heading pipeline-schedule-overview-heading">
  <div>
  <span class="eyebrow">Rolling 7-day view</span>
@@ -891,7 +891,7 @@
  <div class="pipeline-schedule-legend" aria-label="Platform abbreviations">
  <span><b>IG</b> Instagram</span><span><b>FB</b> Facebook</span><span><b>TT</b> TikTok</span><span><b>YT</b> YouTube</span>
  </div>
- <button type="button" class="secondary-button" id="pipelineScheduleGridToggle" aria-expanded="true" aria-controls="pipelineScheduleGridBody">Collapse</button>
+ <button type="button" class="secondary-button" id="pipelineScheduleGridToggle" aria-expanded="false" aria-controls="pipelineScheduleGridBody">Expand</button>
  </div>
  </div>
  <div id="pipelineScheduleGridBody">
@@ -1817,7 +1817,7 @@
  </nav>
  <div class="studio-footer-meta">
  <span id="apiStatus" class="topbar-status">Connecting…</span>
- <span id="uiBuildLabel">UI build 0.6.360</span>
+ <span id="uiBuildLabel">UI build 0.6.361</span>
  <span id="workerBuildLabel">Worker …</span> </div>
  </footer>
 
@@ -1969,7 +1969,7 @@
 
  <script src="/assets/config-0621.js?v=0.6.344-idea-mixed-media"></script>
  <script src="/assets/ez-plan.js?v=0.6.345-vertical-reel-story"></script>
- <script src="/assets/pipeline-schedule-grid-0622.js?v=0.6.360-pipeline-schedule-grid"></script>
- <script src="/assets/app-item4-0625.js?v=0.6.360-pipeline-schedule-grid"></script>
+ <script src="/assets/pipeline-schedule-grid-0622.js?v=0.6.361-schedule-collapsed"></script>
+ <script src="/assets/app-item4-0625.js?v=0.6.361-schedule-collapsed"></script>
 </body>
 </html>
