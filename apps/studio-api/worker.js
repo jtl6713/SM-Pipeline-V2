@@ -1431,21 +1431,20 @@ export default {
       } catch (error) {
         console.warn("production cadence cron failed", error);
       }
+      let firstPartyAnalyticsSweep = null;
       try {
-        await studioSweepPublishedInsights(env, { limit: 4 });
+        firstPartyAnalyticsSweep = await studioSweepPublishedInsights(env, { limit: 8 });
       } catch (error) {
         console.warn("insights sweep cron failed", error);
       }
-      // Similar-account analytics are manual from Operations. Cron must not spend YouTube/Meta quota.
-      try {
-        await studioIngestFirstPartyObservations(env, { limit: 12 });
-      } catch (error) {
-        console.warn("first-party insights observation ingest failed", error);
-      }
-      try {
-        await studioRecomputeInsightsLearned(env, { profile: "chicago" });
-      } catch (error) {
-        console.warn("insights learned-model recompute failed", error);
+      // Similar-account collection remains manual. First-party lifecycle snapshots are
+      // persisted by the sweep; refresh learned patterns only for profiles that changed.
+      for (const profile of firstPartyAnalyticsSweep?.profiles || []) {
+        try {
+          await studioRecomputeInsightsLearned(env, { profile });
+        } catch (error) {
+          console.warn("insights learned-model recompute failed", profile, error);
+        }
       }
       try {
         // search.list is ~100 quota units. At most once per day from cron; Ops can still force discover.
