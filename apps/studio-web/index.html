@@ -10,6 +10,7 @@
  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@1,600;1,700&family=Inter:wght@400;500;600;700;800&family=Oswald:wght@500&display=swap">
  <link rel="stylesheet" href="/assets/styles-phase7-0621.css?v=0.6.361-schedule-collapsed">
+ <link rel="stylesheet" href="/assets/insights-0622.css?v=0.6.363-insights-ai">
 </head>
 <body>
  <header class="topbar">
@@ -38,6 +39,7 @@
  <button class="nav-item" data-page="ideas">Ideas</button>
  <button class="nav-item" data-page="content">Production</button>
  <button class="nav-item" data-page="outputs">Pipeline</button>
+ <button class="nav-item" data-page="insights">Insights</button>
  <button class="nav-item" data-page="music">Music Manager</button>
  <button class="nav-item" data-page="library">Asset Manager</button>
  <button class="nav-item" data-page="operations" id="navOperations" hidden>Operations <span class="ops-nav-badge" id="navOperationsBadge" hidden></span></button>
@@ -1066,6 +1068,90 @@
  </section>
  </section>
 
+ <section id="page-insights" class="page">
+ <div class="page-heading insights-heading">
+ <div class="insights-heading-copy">
+ <span class="eyebrow">Performance intelligence</span>
+ <h1>Post Insights</h1>
+ <p>See what is working, what is not, and why. Missing platform analytics stay unknown rather than being counted as poor performance. Ask the Performance Analyst questions against the same filtered data shown below.</p>
+ <p class="insights-status" id="insightsSubtitle">Choose a profile and open Insights to load performance.</p>
+ </div>
+ <div class="heading-actions insights-heading-actions">
+ <label class="insights-filter"><span>Date range</span><select id="insightsDateRange"><option value="30">Last 30 days</option><option value="90">Last 90 days</option><option value="365">Last year</option><option value="all" selected>All available</option></select></label>
+ <label class="insights-filter"><span>Platform</span><select id="insightsPlatform"><option value="all" selected>All platforms</option><option value="instagram">Instagram</option><option value="facebook">Facebook</option><option value="tiktok">TikTok</option><option value="youtube">YouTube</option></select></label>
+ <label class="insights-filter"><span>Measure</span><select id="insightsMetric"><option value="views" selected>Views</option><option value="interactions">Interactions</option><option value="engagement">Engagement rate</option><option value="reach">Reach</option></select></label>
+ <button type="button" class="secondary-button" id="insightsRefresh">Refresh data</button>
+ </div>
+ </div>
+ <div class="insights-status" id="insightsStatus" aria-live="polite"></div>
+ <div class="insights-coverage" id="insightsCoverageNote"><strong>Analytics coverage</strong><span>Open Insights to load stored post metrics.</span></div>
+ <section class="insights-kpis" id="insightsKpis"></section>
+
+ <div class="insights-grid">
+ <section class="panel insights-card">
+ <div class="panel-heading"><div><h2>Performance trend</h2><p>Stored results by publish date for the selected measure.</p></div></div>
+ <div id="insightsTrendChart"></div>
+ </section>
+ <section class="panel insights-card">
+ <div class="panel-heading"><div><h2>Platform comparison</h2><p>Average performance per sampled post, not raw account totals.</p></div></div>
+ <div id="insightsPlatformChart"></div>
+ </section>
+ <section class="panel insights-card">
+ <div class="panel-heading"><div><h2>Top posts</h2><p>The strongest sampled posts in the current filter.</p></div></div>
+ <div id="insightsTopPosts"></div>
+ </section>
+ <section class="panel insights-card">
+ <div class="panel-heading"><div><h2>Opportunity matrix</h2><p>High reach + high response is the repeatable sweet spot. High response + lower reach may deserve repackaging.</p></div></div>
+ <div id="insightsOpportunity"></div>
+ </section>
+ <section class="panel insights-card wide">
+ <div class="panel-heading"><div><h2>Post DNA</h2><p>Which content types, places, themes, and production choices are associated with stronger results.</p></div></div>
+ <div class="insights-dna-grid">
+ <div class="insights-dna-group" id="insightsDnaType"></div>
+ <div class="insights-dna-group" id="insightsDnaLocation"></div>
+ <div class="insights-dna-group" id="insightsDnaTheme"></div>
+ <div class="insights-dna-group" id="insightsDnaVoice"></div>
+ </div>
+ </section>
+ <section class="panel insights-card wide">
+ <div class="panel-heading"><div><h2>Publishing-time pattern</h2><p>Average views by day and time window. Treat cells with small n as directional only.</p></div></div>
+ <div class="insights-timing-scroll" id="insightsTiming"></div>
+ </section>
+ </div>
+
+ <section class="panel insights-analyst">
+ <div class="insights-analyst-main">
+ <span class="eyebrow">AI performance analyst</span>
+ <h2>Ask about your performance</h2>
+ <p class="insights-analyst-intro">The analyst is grounded in the profile, date range, platform filter, sampled posts, and Post DNA currently loaded above.</p>
+ <div class="insights-chat-messages" id="insightsChatMessages" aria-live="polite">
+ <article class="insights-chat-message assistant"><div class="chat-role">Performance Analyst</div><div class="chat-copy">Ask me where you are performing well, what is underperforming, which locations or themes are working, or what you should test next.</div></article>
+ </div>
+ <form class="insights-chat-form" id="insightsChatForm">
+ <input id="insightsChatInput" maxlength="800" autocomplete="off" placeholder="e.g. Where am I performing well and where am I not?">
+ <button type="submit" class="primary-button">Ask</button>
+ </form>
+ </div>
+ <aside class="insights-analyst-side">
+ <h3>Try asking</h3>
+ <p>These questions use your actual filtered post data. The analyst calls out weak sample sizes rather than inventing certainty.</p>
+ <div class="insights-prompt-chips">
+ <button type="button" data-insights-prompt="Where am I performing well and where am I not?">Where am I strong vs weak?</button>
+ <button type="button" data-insights-prompt="Which locations and themes should I post more of?">Which locations/themes work?</button>
+ <button type="button" data-insights-prompt="Compare my platforms and tell me where the evidence is strongest.">Compare platforms</button>
+ <button type="button" data-insights-prompt="What should I post next based on the patterns in this data?">What should I post next?</button>
+ <button type="button" data-insights-prompt="Does voiceover appear to help performance?">Does voiceover help?</button>
+ </div>
+ <div class="insights-readonly-note"><strong>Read-only analyst.</strong> It explains and recommends. It does not change schedules, create ideas, or publish content.</div>
+ </aside>
+ </section>
+
+ <section class="panel">
+ <div class="panel-heading"><div><h2>Sampled posts</h2><p>Posts with stored analytics in the current filter. Open the live post when a URL is available.</p></div></div>
+ <div class="insights-table-wrap" id="insightsPostsTable"></div>
+ </section>
+ </section>
+
  <section id="page-music" class="page">
  <div class="page-heading"><div><span class="eyebrow">Background audio</span><h1>Music Manager</h1><p>Add MP3 or WAV tracks, star favorites so they sit at the top of Production music dropdowns, preview a bed, or delete a track that nothing still uses.</p></div><div class="heading-actions"><label class="primary-button native-file-label" id="musicAddButton">+ Add tracks<input id="musicAddInput" class="native-file-input" type="file" accept=".mp3,.wav,audio/mpeg,audio/mp3,audio/wav,audio/x-wav" multiple></label><button class="secondary-button" data-refresh="music">Refresh</button></div></div>
  <section class="panel music-upload-panel" id="musicUploadPanel">
@@ -1817,7 +1903,7 @@
  </nav>
  <div class="studio-footer-meta">
  <span id="apiStatus" class="topbar-status">Connecting…</span>
- <span id="uiBuildLabel">UI build 0.6.362</span>
+ <span id="uiBuildLabel">UI build 0.6.363</span>
  <span id="workerBuildLabel">Worker …</span> </div>
  </footer>
 
@@ -1970,6 +2056,7 @@
  <script src="/assets/config-0621.js?v=0.6.344-idea-mixed-media"></script>
  <script src="/assets/ez-plan.js?v=0.6.345-vertical-reel-story"></script>
  <script src="/assets/pipeline-schedule-grid-0622.js?v=0.6.361-schedule-collapsed"></script>
- <script src="/assets/app-item4-0625.js?v=0.6.362-idea-delete-label"></script>
+ <script src="/assets/app-item4-0625.js?v=0.6.363-insights-ai"></script>
+ <script src="/assets/insights-0622.js?v=0.6.363-insights-ai"></script>
 </body>
 </html>
