@@ -81,6 +81,15 @@ class TikTokDraftClient:
         )
         return response.status_code, _json_body(response)
 
+    def analytics_videos(self, video_ids: list[str] | None = None) -> tuple[int, dict[str, Any]]:
+        response = requests.post(
+            f"{self.base_url}/tiktok/analytics/videos",
+            json={"video_ids": [str(item).strip() for item in (video_ids or []) if str(item).strip()]},
+            headers=self._headers(),
+            timeout=60,
+        )
+        return response.status_code, _json_body(response)
+
 
 def _json_body(response: requests.Response) -> dict[str, Any]:
     if not response.content:
