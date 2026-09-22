@@ -8,7 +8,7 @@ const { URL } = require("url");
 
 const { spawnSync } = require("child_process");
 
-const SERVICE_VERSION = "2026-09-12-propagate-videos-list-status";
+const SERVICE_VERSION = "2026-09-22-first-party-analytics";
 const MIN_REFRESH_TOKEN_LENGTH = 40;
 const ENV_PATH = path.join(process.cwd(), ".env");
 
@@ -602,6 +602,78 @@ async function updateSnippet(videoId, { title, description, categoryId, tags } =
   return data;
 }
 
+async function videoAnalytics(videoId, publishedAt) {
+  const id = String(videoId || "").trim();
+  if (!id) {
+    const error = new Error("videoId is required");
+    error.status = 400;
+    throw error;
+  }
+  const token = await accessToken();
+  const parsedPublished = new Date(publishedAt || 0);
+  const startDate = Number.isFinite(parsedPublished.getTime())
+    ? parsedPublished.toISOString().slice(0, 10)
+    : "2005-02-14";
+  const endDate = new Date().toISOString().slice(0, 10);
+  const baseMetrics = [
+    "views",
+    "engagedViews",
+    "comments",
+    "likes",
+    "shares",
+    "estimatedMinutesWatched",
+    "averageViewDuration",
+    "averageViewPercentage",
+    "subscribersGained",
+    "subscribersLost",
+  ];
+  async function query(metrics) {
+    const url = new URL("https://youtubeanalytics.googleapis.com/v2/reports");
+    url.searchParams.set("ids", "channel==MINE");
+    url.searchParams.set("startDate", startDate);
+    url.searchParams.set("endDate", endDate);
+    url.searchParams.set("metrics", metrics.join(","));
+    url.searchParams.set("filters", "video==" + id);
+    const response = await fetch(url, { headers: { Authorization: "Bearer " + token, Accept: "application/json" } });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      const error = new Error("YouTube Analytics reports.query failed " + response.status + ": " + (data?.error?.message || "unknown error"));
+      error.status = response.status;
+      error.body = data;
+      throw error;
+    }
+    return data;
+  }
+  let data;
+  try {
+    data = await query(baseMetrics);
+  } catch (error) {
+    data = await query(baseMetrics.filter((metric) => metric !== "engagedViews"));
+  }
+  const headers = Array.isArray(data.columnHeaders) ? data.columnHeaders : [];
+  const row = Array.isArray(data.rows?.[0]) ? data.rows[0] : [];
+  const values = Object.fromEntries(headers.map((header, index) => [header.name, row[index] ?? null]));
+  const numberOrNull = (value) =>
+    value === null || value === undefined || value === "" || !Number.isFinite(Number(value))
+      ? null
+      : Number(value);
+  return {
+    id,
+    views: numberOrNull(values.views),
+    engaged_views: numberOrNull(values.engagedViews),
+    comments: numberOrNull(values.comments),
+    likes: numberOrNull(values.likes),
+    shares: numberOrNull(values.shares),
+    watch_time_sec: numberOrNull(values.estimatedMinutesWatched) === null ? null : Number(values.estimatedMinutesWatched) * 60,
+    average_view_duration_sec: numberOrNull(values.averageViewDuration),
+    average_percentage_viewed: numberOrNull(values.averageViewPercentage),
+    audience_gained: numberOrNull(values.subscribersGained),
+    audience_lost: numberOrNull(values.subscribersLost),
+    source: "youtube-analytics-owner",
+    platform_metrics: { ...values, start_date: startDate, end_date: endDate },
+  };
+}
+
 async function handler(req, res) {
   try {
     const url = new URL(req.url, `http://${req.headers.host || "localhost"}`);
@@ -617,6 +689,10 @@ async function handler(req, res) {
     if (!authorized(req)) return json(res, 401, { error: "Unauthorized" });
     if (req.method === "GET" && url.pathname === "/youtube/oauth/status") {
       return json(res, 200, await oauthStatus());
+    }
+    if (req.method === "POST" && url.pathname === "/youtube/analytics") {
+      const payload = await readJson(req);
+      return json(res, 200, await videoAnalytics(payload.videoId, payload.publishedAt));
     }
     if (req.method === "POST" && url.pathname === "/youtube/upload") {
       const payload = await readJson(req);
