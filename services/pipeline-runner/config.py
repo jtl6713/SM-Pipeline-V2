@@ -26,6 +26,25 @@ def _without_retired_make_urls(settings: dict[str, Any]) -> dict[str, Any]:
 
 @lru_cache
 def load_settings() -> dict[str, Any]:
+    openai_account = os.environ.get(
+        "OPENAI_ACCOUNT", "PRIMARY"
+    ).strip().upper()
+
+    if openai_account not in {"PRIMARY", "SECONDARY"}:
+        raise RuntimeError(
+            "OPENAI_ACCOUNT must be PRIMARY or SECONDARY"
+        )
+
+    openai_api_key = os.environ.get(
+        f"OPENAI_API_KEY_{openai_account}", ""
+    ).strip()
+
+    # Temporary backward-compatible fallback
+    if not openai_api_key:
+        openai_api_key = os.environ.get(
+            "OPENAI_API_KEY", ""
+        ).strip()
+
     return _without_retired_make_urls({
         "port": int(os.environ.get("PORT", "3350")),
         "host": os.environ.get("HOST", "127.0.0.1"),
@@ -47,7 +66,8 @@ def load_settings() -> dict[str, Any]:
         "google_client_id": os.environ.get("GOOGLE_CLIENT_ID", ""),
         "google_client_secret": os.environ.get("GOOGLE_CLIENT_SECRET", ""),
         "google_refresh_token": os.environ.get("GOOGLE_REFRESH_TOKEN", ""),
-        "openai_api_key": os.environ.get("OPENAI_API_KEY", ""),
+        "openai_account": openai_account,
+	"openai_api_key": openai_api_key,
         "openai_r2_model": os.environ.get("OPENAI_R2_MODEL", "gpt-4.1"),
         "openai_p4_model": os.environ.get("OPENAI_P4_MODEL", "gpt-4o"),
         "openai_sai1_model": os.environ.get("OPENAI_SAI1_MODEL", "gpt-5"),
