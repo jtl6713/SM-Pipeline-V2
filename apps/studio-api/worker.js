@@ -15704,11 +15704,29 @@ async function getInsightsConnections(request, env, url, authorization) {
   const outputRows = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
     limit: 250,
     filterFormula: "AND(" + profileFormula + ",{Published_At}!=\"\",{Test_Run_ID}=BLANK())",
-    fields: ["Platform", "Insights_As_Of", "Insights_Last_Attempt_At", "Insights_Last_Error"],
+    fields: [
+      "Platform",
+      "Platform_Post_ID",
+      "Platform_Media_ID",
+      "YouTube_Video_ID",
+      "TikTok_Draft_Public_Post_IDs_JSON",
+      "IG_Carousel_Published_Media_ID",
+      "IG_Story_Post_ID",
+      "FB_Slideshow_Meta_Video_ID",
+      "Manual_Published_URL",
+      "Published_At",
+      "Insights_As_Of",
+      "Insights_Last_Attempt_At",
+      "Insights_Last_Error",
+    ],
     sortField: "Published_At",
     sortDirection: "desc",
   }).catch(() => []);
   const sync = studioInsightsLatestSyncByPlatform(outputRows);
+  const recentOutputForPlatform = (platform) => (outputRows || []).find((row) => {
+    if (String(f(row, "Platform") || "").trim() !== platform) return false;
+    return Boolean(nativePlatformId(platform, studioOutputNativeIdFields(row)));
+  }) || null;
 
   const result = {
     instagram: {
@@ -15739,9 +15757,17 @@ async function getInsightsConnections(request, env, url, authorization) {
       }
       try {
         const page = await studioInsightsMetaIdentity(settings.FACEBOOK_PAGE_ID, token, version, "id,name");
-        result.facebook.status = "connected";
         result.facebook.account_name = page?.name || null;
         result.facebook.account_id = page?.id || settings.FACEBOOK_PAGE_ID;
+        const sample = recentOutputForPlatform("Facebook");
+        if (sample) {
+          await fetchFacebookOwnedPostAnalytics({
+            postId: nativePlatformId("Facebook", studioOutputNativeIdFields(sample)),
+            token,
+            version,
+          });
+        }
+        result.facebook.status = "connected";
       } catch (error) {
         Object.assign(result.facebook, studioInsightsConnectionStateFromError(error));
       }
@@ -15753,9 +15779,17 @@ async function getInsightsConnections(request, env, url, authorization) {
       }
       try {
         const ig = await studioInsightsMetaIdentity(settings.INSTAGRAM_BUSINESS_ACCOUNT_ID, token, version, "id,username,name");
-        result.instagram.status = "connected";
         result.instagram.account_name = ig?.username ? "@" + ig.username : (ig?.name || null);
         result.instagram.account_id = ig?.id || settings.INSTAGRAM_BUSINESS_ACCOUNT_ID;
+        const sample = recentOutputForPlatform("Instagram");
+        if (sample) {
+          await fetchInstagramOwnedMediaAnalytics({
+            postId: nativePlatformId("Instagram", studioOutputNativeIdFields(sample)),
+            token,
+            version,
+          });
+        }
+        result.instagram.status = "connected";
       } catch (error) {
         Object.assign(result.instagram, studioInsightsConnectionStateFromError(error));
       }
