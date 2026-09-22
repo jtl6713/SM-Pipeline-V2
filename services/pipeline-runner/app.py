@@ -21,7 +21,6 @@ from studio_produce.ops_alert import send_produce_escalation
 from studio_produce.processor import resume_job, start_job
 from studio_compress.processor import start_job as start_studio_compress
 from ttd.client import TikTokDraftClient, load_tiktok_settings
-from item4.settings import pipeline_settings
 
 logger = logging.getLogger("pipeline-runner")
 settings = load_settings()
