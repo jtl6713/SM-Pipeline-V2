@@ -238,6 +238,7 @@ export default {
       const isInsightsDiscoverRoute = url.pathname === "/api/insights/discover";
       const isInsightsWatchlistRoute = url.pathname === "/api/insights/watchlist";
       const isInsightsChatRoute = url.pathname === "/api/insights/chat";
+      const isInsightsPostsRoute = url.pathname === "/api/insights/posts";
       const isR5DoneHookRoute = url.pathname === "/api/hooks/r5-done";
       const isRr2HookRoute = url.pathname === "/api/hooks/rr2";
       const isVoiceCatalogRoute = url.pathname === "/api/voices";
@@ -376,6 +377,7 @@ export default {
         isInsightsSimilarTimesWrite ||
         isInsightsDiscoverWrite ||
         isInsightsChatWrite ||
+        (isInsightsPostsRoute && request.method === "GET") ||
         (isInsightsBestTimesRoute && request.method === "GET") ||
         (isInsightsSimilarTimesRoute && request.method === "GET") ||
         (isInsightsCaptionsRoute && request.method === "GET") ||
@@ -444,6 +446,7 @@ export default {
           studio_insights_caption_learning_v1: true,
           studio_insights_overview_stats_v1: true,
           studio_insights_dashboard_v1: true,
+          studio_insights_posts_v1: true,
           studio_insights_chat_v1: true,
           studio_insights_youtube_discovery_v1: true,
           studio_due_publish_priority_v1: true,
@@ -842,6 +845,11 @@ export default {
         requirePermission(authorization, "tenant_admin");
         assertWriteRequest(request, env);
         return pulseAudioLeadingSilence(request, env);
+      }
+
+      if (isInsightsPostsRoute) {
+        requireAnyPermission(authorization, ["outputs_review", "publishing_control", "tenant_admin"]);
+        return getInsightsPosts(request, env, url, authorization);
       }
 
       if (isInsightsChatRoute) {
@@ -15575,6 +15583,115 @@ async function studioLoadSimilarTimesView(env, url, authorization) {
   });
 }
 
+
+
+async function getInsightsPosts(request, env, url, authorization) {
+  const profile = await resolveWorkingContentProfile(env, authorization, requestedProfileId(url));
+  const requested = Number(url.searchParams.get("limit") || 300);
+  const limit = Math.max(1, Math.min(500, Number.isFinite(requested) ? Math.trunc(requested) : 300));
+  const profileFormula = contentProfileFilterFormula(profile);
+  const publishedFormula = "AND(" + profileFormula + ",{Published_At}!=\"\",{Do_Not_Publish}=0,{Test_Run_ID}=BLANK())";
+  const [outputs, contentRows] = await Promise.all([
+    listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
+      limit,
+      filterFormula: publishedFormula,
+      fields: [
+        "Output_ID",
+        "Platform",
+        "Platform_Output_Type",
+        "Studio_Output_Type",
+        "Output_Title",
+        "Output_Caption",
+        "Platform_Post_URL",
+        "Published_At",
+        "Content_Item",
+        "Insights_Views",
+        "Insights_Likes",
+        "Insights_Comments",
+        "Insights_Shares",
+        "Insights_Reach",
+        "Insights_Saves",
+        "Insights_Watch_Time_Sec",
+        "Insights_As_Of",
+        "Insights_Source",
+      ],
+      sortField: "Published_At",
+      sortDirection: "desc",
+    }),
+    listRecords(env, env.AIRTABLE_CONTENT_TABLE_ID, {
+      limit: 500,
+      filterFormula: profileFormula,
+      fields: [
+        "Content_ID",
+        "Content_Title",
+        "Content_Type",
+        "Content_Duration",
+        "Primary_Location",
+        "Neighborhood_or_Area",
+        "Content_Themes",
+        "Include_Voiceover",
+        "Include_Background_Music",
+        "Include_Thumbnail",
+        "Video_Clip_Count",
+      ],
+      sortField: "Created_At",
+      sortDirection: "desc",
+    }),
+  ]);
+  const contentById = new Map((contentRows || []).map((row) => [row.id, row]));
+  const records = (outputs || []).map((row) => {
+    const contentLinks = Array.isArray(f(row, "Content_Item")) ? f(row, "Content_Item") : [];
+    const contentId = contentLinks[0] || null;
+    const content = contentId ? contentById.get(contentId) : null;
+    return {
+      id: row.id,
+      output_id: f(row, "Output_ID"),
+      platform: f(row, "Platform"),
+      platform_output_type: f(row, "Platform_Output_Type"),
+      studio_output_type: f(row, "Studio_Output_Type"),
+      output_title: f(row, "Output_Title"),
+      output_caption: f(row, "Output_Caption"),
+      platform_post_url: f(row, "Platform_Post_URL"),
+      published_at: f(row, "Published_At"),
+      content_item_id: contentId,
+      insights_views: f(row, "Insights_Views"),
+      insights_likes: f(row, "Insights_Likes"),
+      insights_comments: f(row, "Insights_Comments"),
+      insights_shares: f(row, "Insights_Shares"),
+      insights_reach: f(row, "Insights_Reach"),
+      insights_saves: f(row, "Insights_Saves"),
+      insights_watch_time_sec: f(row, "Insights_Watch_Time_Sec"),
+      insights_as_of: f(row, "Insights_As_Of"),
+      insights_source: f(row, "Insights_Source"),
+      content: content ? {
+        id: content.id,
+        content_id: f(content, "Content_ID"),
+        title: f(content, "Content_Title"),
+        content_type: f(content, "Content_Type"),
+        duration: f(content, "Content_Duration"),
+        primary_location: String(f(content, "Primary_Location") || "").trim() || null,
+        neighborhood_or_area: String(f(content, "Neighborhood_or_Area") || "").trim() || null,
+        content_themes: f(content, "Content_Themes") || [],
+        include_voiceover: f(content, "Include_Voiceover"),
+        include_background_music: f(content, "Include_Background_Music"),
+        include_thumbnail: f(content, "Include_Thumbnail"),
+        video_clip_count: f(content, "Video_Clip_Count"),
+      } : null,
+    };
+  });
+  return respond(request, env, {
+    ok: true,
+    records,
+    count: records.length,
+    analytics_count: records.filter((row) => (
+      row.insights_as_of || row.insights_source ||
+      Number(row.insights_views || 0) || Number(row.insights_likes || 0) ||
+      Number(row.insights_comments || 0) || Number(row.insights_shares || 0) ||
+      Number(row.insights_reach || 0) || Number(row.insights_saves || 0)
+    )).length,
+    profile: mapStudioContentProfile(profile),
+  });
+}
 
 async function postInsightsChat(request, env, url, authorization) {
   void url;
