@@ -538,6 +538,38 @@
         voiceover: r.voiceover || null,
         duration_seconds: r.duration || null,
       })),
+      bottom_mature_posts: [...state.sampled]
+        .filter((r) => {
+          const published = r.publishedDate?.getTime();
+          const asOf = Date.parse(r.insights_as_of || "");
+          return published && Number.isFinite(asOf) && asOf - published >= 12 * 3600000;
+        })
+        .sort((a, b) => a.views - b.views)
+        .slice(0, 10)
+        .map((r) => ({
+          title: r.title,
+          platform: r.platform,
+          published_at: r.published_at,
+          views: r.views,
+          interactions: r.interactions,
+          engagement_rate: r.engagementRate == null ? null : Number(r.engagementRate.toFixed(2)),
+          content_type: r.contentType,
+          location: r.location || null,
+          themes: r.themes,
+        })),
+      timing_windows: groupStats(
+        state.sampled.filter((r) => r.publishedDate),
+        (r) => {
+          const d = r.publishedDate;
+          const bucket = TIME_BUCKETS.find((b) => d.getHours() >= b.start && d.getHours() < b.end);
+          return DAY_NAMES[d.getDay()] + " " + (bucket?.label || "");
+        },
+        "views"
+      ).slice(0, 10).map((r) => ({
+        window: r.name,
+        sample_size: r.count,
+        average_views: Math.round(r.views / Math.max(r.count, 1)),
+      })),
     };
   }
 
