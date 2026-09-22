@@ -140,7 +140,7 @@ def process_request(
 
     revision = package_revision(slides)
     urls = [field_str(slide, "Asset_4x5_Public_URL") for slide in slides if field_str(slide, "Asset_4x5_Public_URL")]
-    if is_slideshow_route(output):
+    if slideshow_route:
         client.update_record(
             PLATFORM_OUTPUTS_TABLE,
             record_id,
