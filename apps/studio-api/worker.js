@@ -88,6 +88,7 @@ import {
   shouldCreateFinishedOutput,
   uniquePlanItems,
 } from "./az-finished-video.mjs";
+import { promotedContentOwner } from "./promotion-owner.mjs";
 import {
   AUTONOMOUS_DEFAULT_MUSIC_ASSET_ID,
   AUTONOMOUS_DEFAULT_VIDEO_SECONDS,
@@ -400,7 +401,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.357-platform-output-fanout-dedupe",
+          version: "0.10.358-production-request-owner-guard",
           studio_desk_inventory_v1: true,
           studio_desk_activity_v1: true,
           studio_tiktok_complete_v1: true,
@@ -472,6 +473,7 @@ export default {
           studio_finished_passthrough_six_v1: true,
           studio_p3_promote_pulse_v1: true,
           studio_platform_output_fanout_dedupe_v1: true,
+          studio_single_production_request_owner_v1: true,
           studio_r3_seed_selected_v1: true,
           production_make_idle_cadence_v1: true,
           production_request_kate_voice_v1: true,
@@ -16428,6 +16430,66 @@ async function fanoutProductionRequestOutputsToContentItems(env, requestRecord, 
 
 async function finalizeProductionRequestPromotion(env, requestRecordId, ideaRecord) {
   const contentItemId = linkedContentItemRecordId(ideaRecord);
+
+  // A promoted Idea has one authoritative Production Request owner. A stale
+  // request may finish later, but it must not overwrite directives or fan out
+  // another complete set of Platform Outputs for the same Content Item.
+  if (contentItemId) {
+    const parent = await airtableFetch(env, env.AIRTABLE_CONTENT_TABLE_ID, contentItemId).catch(() => null);
+    const incumbentRequestId = promotedContentOwner(
+      requestRecordId,
+      parent ? f(parent, "Production_Request") : []
+    );
+    if (incumbentRequestId) {
+      let incumbentStatus = "Unknown";
+      try {
+        const incumbent = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, incumbentRequestId);
+        incumbentStatus = String(f(incumbent, "Request_Status") || "").trim() || "Unknown";
+      } catch {}
+
+      if (incumbentStatus !== "Cancelled") {
+        const staleRows = await outputRowsForProductionRequest(
+          env,
+          requestRecordId,
+          { includeInactive: true }
+        ).catch(() => []);
+        for (const row of staleRows) {
+          await airtableFetch(env, PRODUCTION_REQUEST_OUTPUT_TABLE, row.id, {
+            method: "PATCH",
+            body: JSON.stringify({
+              fields: {
+                Enabled: false,
+                Active: false,
+                Output_Status: "Cancelled",
+                Pipeline_Route_Status: "Blocked",
+                Pipeline_Route_Notes: `Superseded before fanout by authoritative Production Request ${incumbentRequestId} for Content Item ${contentItemId}.`,
+              },
+              typecast: true,
+            }),
+          }).catch(() => null);
+        }
+        const requestRecord = await updateProductionRequestPromotionState(env, requestRecordId, {
+          Request_Status: "Cancelled",
+          Active: false,
+          Promoted_Content_Item: [],
+        });
+        return {
+          requestRecord,
+          contentItemId,
+          directiveBridge: null,
+          outputFanout: {
+            enabled_output_count: staleRows.length,
+            routed_count: 0,
+            blocked_count: staleRows.length,
+            remaining: 0,
+            superseded_by_request_id: incumbentRequestId,
+          },
+          supersededByRequestId: incumbentRequestId,
+        };
+      }
+    }
+  }
+
   const fields = {
     Request_Status: "Promoted",
     Active: true,
@@ -16700,6 +16762,21 @@ async function promoteProductionRequestViaI3I4(request, env, url, authorization,
 
   if (promotionCompleted(ideaRecord)) {
     const finalized = await finalizeProductionRequestPromotion(env, requestRecordId, ideaRecord);
+    if (finalized.supersededByRequestId) {
+      return respond(request, env, {
+        ok: true,
+        promoted: false,
+        superseded: true,
+        promotion_state: "cancelled",
+        handoff: "I3-to-I4",
+        production_request: mapProductionRequest(finalized.requestRecord),
+        idea: mapIdea(ideaRecord),
+        content_item_record_id: finalized.contentItemId,
+        output_fanout: finalized.outputFanout,
+        superseded_by_request_id: finalized.supersededByRequestId,
+        message: "This Production Request was cancelled because the promoted Content Item already belongs to another active Production Request",
+      });
+    }
     return respond(request, env, {
       ok: true,
       promoted: true,
@@ -16725,6 +16802,21 @@ async function promoteProductionRequestViaI3I4(request, env, url, authorization,
     ideaRecord = await waitForPromotionResult(env, ideaRecordId, autonomous ? 24 : 4, autonomous ? 1250 : 750);
     if (promotionCompleted(ideaRecord)) {
       const finalized = await finalizeProductionRequestPromotion(env, requestRecordId, ideaRecord);
+    if (finalized.supersededByRequestId) {
+      return respond(request, env, {
+        ok: true,
+        promoted: false,
+        superseded: true,
+        promotion_state: "cancelled",
+        handoff: "I3-to-I4",
+        production_request: mapProductionRequest(finalized.requestRecord),
+        idea: mapIdea(ideaRecord),
+        content_item_record_id: finalized.contentItemId,
+        output_fanout: finalized.outputFanout,
+        superseded_by_request_id: finalized.supersededByRequestId,
+        message: "This Production Request was cancelled because the promoted Content Item already belongs to another active Production Request",
+      });
+    }
       return respond(request, env, {
         ok: true,
         promoted: true,
@@ -16796,6 +16888,21 @@ async function promoteProductionRequestViaI3I4(request, env, url, authorization,
   );
   if (promotionCompleted(ideaRecord)) {
     const finalized = await finalizeProductionRequestPromotion(env, requestRecordId, ideaRecord);
+    if (finalized.supersededByRequestId) {
+      return respond(request, env, {
+        ok: true,
+        promoted: false,
+        superseded: true,
+        promotion_state: "cancelled",
+        handoff: "I3-to-I4",
+        production_request: mapProductionRequest(finalized.requestRecord),
+        idea: mapIdea(ideaRecord),
+        content_item_record_id: finalized.contentItemId,
+        output_fanout: finalized.outputFanout,
+        superseded_by_request_id: finalized.supersededByRequestId,
+        message: "This Production Request was cancelled because the promoted Content Item already belongs to another active Production Request",
+      });
+    }
     return respond(request, env, {
       ok: true,
       promoted: true,
