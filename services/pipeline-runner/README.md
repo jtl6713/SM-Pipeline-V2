@@ -40,7 +40,7 @@ Python stage workers that replace Make.com scenarios for SM Pipeline V2.
 | **C8** | Full (`5589822` — create/update platform outputs) | `STAGE_BACKEND_C8=python` |
 | **C9** | Full (`5589932` — Ready to Publish) | `STAGE_BACKEND_C9=python` |
 | **I1** | Full (`5514334` — daily/manual idea slate) | `STAGE_BACKEND_I1=python` |
-| **I2** | Full (`5516968` — idea review email) | `STAGE_BACKEND_I2=python`; I1 daisy-chains Python I2 |
+| **I2** | Full (`5516968` — idea review email) | `STAGE_BACKEND_I2=python`; email off unless `I2_EMAIL_ENABLED=true` |
 | **I3** | Full (`5517182` — email + Studio promote decisions) | `STAGE_BACKEND_I3=python`. Hook: `/hooks/i3/<I3_WEBHOOK_TOKEN>` |
 | **I4** | Full (`5524092` — promote Content Item) | `STAGE_BACKEND_I4=python`; I3 daisy-chains Python I4 |
 | **A2** | Full (`5531974` — Drive intake + MIME routing) | `STAGE_BACKEND_A2=python` |

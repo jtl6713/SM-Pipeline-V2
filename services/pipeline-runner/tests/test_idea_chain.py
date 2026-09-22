@@ -123,6 +123,68 @@ def test_i2_buttons_use_python_hook():
     assert review_action_url("https://example/hooks/i3/t", decision="tune", record_id="rec1").endswith("decision=tune&record_id=rec1") or "record_id=rec1" in review_action_url("https://example/hooks/i3/t", decision="tune", record_id="rec1")
 
 
+def test_i2_skips_email_when_disabled(monkeypatch):
+    from i2 import processor as i2p
+
+    class FakeAirtable:
+        def list_records(self, *_args, **_kwargs):
+            return [{"id": "recI1", "fields": {"Candidate_Title": "Daily batch idea"}}]
+
+        def update_record(self, *_args, **_kwargs):
+            raise AssertionError("disabled I2 must not stamp Sent for Review")
+
+    class FakeGmail:
+        def send_html(self, **_kwargs):
+            raise AssertionError("disabled I2 must not send Gmail")
+
+    monkeypatch.setattr(
+        i2p,
+        "load_settings",
+        lambda: {
+            "i2_email_enabled": False,
+            "i2_email_to": "chicagoshining@gmail.com",
+            "public_base_url": "https://pipeline.chicagoshining.com",
+            "i3_webhook_token": "token",
+            "i3_webhook_url": "",
+        },
+    )
+    monkeypatch.setattr(i2p, "AirtableClient", FakeAirtable)
+    monkeypatch.setattr(i2p, "GmailClient", FakeGmail)
+
+    result = i2p.process_request()
+    assert result["processed"] is False
+    assert result["reason"] == "email_disabled"
+    assert result["candidate_ids"] == ["recI1"]
+
+
+def test_i1_does_not_chain_i2_when_email_disabled(monkeypatch):
+    from i1 import processor as i1p
+
+    class FakeAirtable:
+        def get_record(self, *_args, **_kwargs):
+            return {"id": "recPROFILE", "fields": {"Daily_Idea_Limit": 1}}
+
+        def create_records(self, *_args, **_kwargs):
+            return [{"id": "recNEW"}]
+
+    def boom_trigger(*_args, **_kwargs):
+        raise AssertionError("I1 must not daisy-chain I2 while idea emails are off")
+
+    monkeypatch.setattr(i1p, "AirtableClient", FakeAirtable)
+    monkeypatch.setattr(
+        i1p,
+        "generate_ideas",
+        lambda _prompt: {"parsed": {"ideas": [{"candidate_title": "Riverwalk at dusk"}]}},
+    )
+    monkeypatch.setattr(i1p, "load_settings", lambda: {"i2_email_enabled": False})
+    monkeypatch.setattr(i1p, "trigger_next", boom_trigger)
+
+    result = i1p.process_request(profile_record_id="recPROFILE", trigger_i2=True)
+    assert result["processed"] is True
+    assert result["created_count"] == 1
+    assert result["i2"] is None
+
+
 def test_i2_skips_studio_managed_candidates():
     from i2.processor import is_studio_managed_candidate
 
