@@ -144,6 +144,17 @@ import {
   studioTikTokInboxIsDue,
 } from "./tiktok-inbox-schedule.mjs";
 
+import {
+  analyticsObservationKey,
+  fetchFacebookOwnedPostAnalytics,
+  fetchInstagramOwnedMediaAnalytics,
+  fetchTikTokOwnedVideoAnalytics,
+  fetchYouTubeOwnedVideoAnalytics,
+  nativePlatformId,
+  normalizeAnalyticsSnapshot,
+  sanitizeAnalyticsError,
+} from "./first-party-analytics.mjs";
+
 const JSON_HEADERS = {
   "Content-Type": "application/json; charset=UTF-8",
   "Cache-Control": "no-store",
@@ -3015,6 +3026,16 @@ function mapOutput(record, job = null) {
     insights_reach: f(record, "Insights_Reach"),
     insights_saves: f(record, "Insights_Saves"),
     insights_watch_time_sec: f(record, "Insights_Watch_Time_Sec"),
+    insights_total_interactions: f(record, "Insights_Total_Interactions"),
+    insights_engaged_views: f(record, "Insights_Engaged_Views"),
+    insights_avg_view_duration_sec: f(record, "Insights_Avg_View_Duration_Sec"),
+    insights_avg_percentage_viewed: f(record, "Insights_Avg_Percentage_Viewed"),
+    insights_audience_gained: f(record, "Insights_Audience_Gained"),
+    insights_audience_lost: f(record, "Insights_Audience_Lost"),
+    insights_platform_metrics_json: f(record, "Insights_Platform_Metrics_JSON"),
+    insights_next_sync_at: f(record, "Insights_Next_Sync_At"),
+    insights_last_attempt_at: f(record, "Insights_Last_Attempt_At"),
+    insights_last_error: f(record, "Insights_Last_Error"),
     insights_as_of: f(record, "Insights_As_Of"),
     insights_source: f(record, "Insights_Source"),
     youtube_video_id: f(record, "YouTube_Video_ID"),
@@ -14531,6 +14552,12 @@ function studioInsightsLearnedKey(profile, platform, outputType, season, metricT
   ].join("|");
 }
 
+function studioInsightsNumberOrNull(value) {
+  if (value === null || value === undefined || value === "") return null;
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+}
+
 function studioInsightsObservationFields(post, meta = {}) {
   const publishedAt = post?.published_at || null;
   const weekdayHour = publishedAt ? studioChicagoWeekdayHour(publishedAt) : null;
@@ -14539,9 +14566,11 @@ function studioInsightsObservationFields(post, meta = {}) {
   const handle = String(meta.handle || post?.handle || "first_party").trim();
   const source = String(meta.source || post?.source || "similar_account").trim().toLowerCase();
   const externalPostId = String(post?.external_post_id || post?.platform_post_id || publishedAt || "").trim();
+  const firstParty = source === "first_party";
   return {
-    Observation_Key: studioInsightsObservationKey(source, platform, handle, publishedAt, externalPostId),
-    Source: source === "first_party" ? "first_party" : "similar_account",
+    Observation_Key: String(meta.observation_key || "").trim()
+      || studioInsightsObservationKey(source, platform, handle, publishedAt, externalPostId),
+    Source: firstParty ? "first_party" : "similar_account",
     Profile: studioNormalizeSimilarProfile(meta.profile || post?.profile || "chicago"),
     Platform: platform,
     Account_Handle: handle,
@@ -14550,9 +14579,9 @@ function studioInsightsObservationFields(post, meta = {}) {
     Chicago_Weekday: weekdayHour?.day || null,
     Chicago_Hour: Number.isFinite(weekdayHour?.hour) ? weekdayHour.hour : null,
     Chicago_Season: studioChicagoSeason(publishedAt),
-    Views: Number(post?.views || 0) || 0,
-    Likes: Number(post?.likes || 0) || 0,
-    Comments: Number(post?.comments || 0) || 0,
+    Views: firstParty ? studioInsightsNumberOrNull(post?.views) : (Number(post?.views || 0) || 0),
+    Likes: firstParty ? studioInsightsNumberOrNull(post?.likes) : (Number(post?.likes || 0) || 0),
+    Comments: firstParty ? studioInsightsNumberOrNull(post?.comments) : (Number(post?.comments || 0) || 0),
     Engagement_Score: studioInsightsEngagementScore(post),
     Caption: caption.text || null,
     Caption_Length: caption.length,
@@ -14563,21 +14592,57 @@ function studioInsightsObservationFields(post, meta = {}) {
     External_Post_ID: externalPostId || null,
     Fetched_At: meta.fetched_at || new Date().toISOString(),
     Active: true,
+    ...(firstParty ? {
+      Platform_Output_Record_ID: meta.platform_output_record_id || null,
+      Content_Profile_Record_ID: meta.content_profile_record_id || null,
+      Measurement_Bucket: meta.measurement_bucket || post?.measurement_bucket || null,
+      Age_Hours: studioInsightsNumberOrNull(meta.age_hours ?? post?.age_hours),
+      Shares: studioInsightsNumberOrNull(post?.shares),
+      Reach: studioInsightsNumberOrNull(post?.reach),
+      Saves: studioInsightsNumberOrNull(post?.saves),
+      Total_Interactions: studioInsightsNumberOrNull(post?.total_interactions),
+      Engaged_Views: studioInsightsNumberOrNull(post?.engaged_views),
+      Watch_Time_Sec: studioInsightsNumberOrNull(post?.watch_time_sec),
+      Average_View_Duration_Sec: studioInsightsNumberOrNull(post?.average_view_duration_sec),
+      Average_Percentage_Viewed: studioInsightsNumberOrNull(post?.average_percentage_viewed),
+      Audience_Gained: studioInsightsNumberOrNull(post?.audience_gained),
+      Audience_Lost: studioInsightsNumberOrNull(post?.audience_lost),
+      Platform_Metrics_JSON: JSON.stringify(post?.platform_metrics || {}),
+    } : {}),
   };
 }
 
 function studioInsightsObservationToPost(record) {
+  const source = String(f(record, "Source") || "similar_account").trim().toLowerCase();
+  const firstParty = source === "first_party";
   return {
     platform: String(f(record, "Platform") || "").trim().toLowerCase(),
     handle: String(f(record, "Account_Handle") || "").trim(),
     profile: studioNormalizeSimilarProfile(f(record, "Profile")),
     output_type: String(f(record, "Platform_Output_Type") || "").trim(),
     published_at: f(record, "Published_At"),
-    views: Number(f(record, "Views") || 0) || 0,
-    likes: Number(f(record, "Likes") || 0) || 0,
-    comments: Number(f(record, "Comments") || 0) || 0,
+    views: firstParty ? studioInsightsNumberOrNull(f(record, "Views")) : (Number(f(record, "Views") || 0) || 0),
+    likes: firstParty ? studioInsightsNumberOrNull(f(record, "Likes")) : (Number(f(record, "Likes") || 0) || 0),
+    comments: firstParty ? studioInsightsNumberOrNull(f(record, "Comments")) : (Number(f(record, "Comments") || 0) || 0),
+    shares: studioInsightsNumberOrNull(f(record, "Shares")),
+    reach: studioInsightsNumberOrNull(f(record, "Reach")),
+    saves: studioInsightsNumberOrNull(f(record, "Saves")),
+    total_interactions: studioInsightsNumberOrNull(f(record, "Total_Interactions")),
+    engaged_views: studioInsightsNumberOrNull(f(record, "Engaged_Views")),
+    watch_time_sec: studioInsightsNumberOrNull(f(record, "Watch_Time_Sec")),
+    average_view_duration_sec: studioInsightsNumberOrNull(f(record, "Average_View_Duration_Sec")),
+    average_percentage_viewed: studioInsightsNumberOrNull(f(record, "Average_Percentage_Viewed")),
+    audience_gained: studioInsightsNumberOrNull(f(record, "Audience_Gained")),
+    audience_lost: studioInsightsNumberOrNull(f(record, "Audience_Lost")),
+    age_hours: studioInsightsNumberOrNull(f(record, "Age_Hours")),
+    measurement_bucket: String(f(record, "Measurement_Bucket") || "").trim() || null,
+    platform_output_record_id: String(f(record, "Platform_Output_Record_ID") || "").trim() || null,
+    content_profile_record_id: String(f(record, "Content_Profile_Record_ID") || "").trim() || null,
+    external_post_id: String(f(record, "External_Post_ID") || "").trim() || null,
+    fetched_at: f(record, "Fetched_At") || null,
+    platform_metrics_json: String(f(record, "Platform_Metrics_JSON") || "").trim() || null,
     caption: String(f(record, "Caption") || "").trim(),
-    source: String(f(record, "Source") || "similar_account").trim().toLowerCase(),
+    source,
     season: studioNormalizeInsightsSeason(f(record, "Chicago_Season")),
     caption_length: Number(f(record, "Caption_Length") || 0) || 0,
     hashtag_count: Number(f(record, "Hashtag_Count") || 0) || 0,
@@ -14924,6 +14989,18 @@ async function studioInsightsLoadLearned(env, options = {}) {
   };
 }
 
+function studioInsightsLatestFirstPartyPosts(posts) {
+  const latest = new Map();
+  for (const post of posts || []) {
+    const key = post.platform_output_record_id || post.external_post_id || [post.platform, post.published_at, post.caption].join("|");
+    const existing = latest.get(key);
+    const currentTime = Date.parse(post.fetched_at || "") || 0;
+    const existingTime = Date.parse(existing?.fetched_at || "") || 0;
+    if (!existing || currentTime >= existingTime) latest.set(key, post);
+  }
+  return [...latest.values()];
+}
+
 async function studioRecomputeInsightsLearned(env, options = {}) {
   if (!studioInsightsDbEnabled(env)) return { updated: 0 };
   const profile = studioNormalizeSimilarProfile(options.profile || "chicago");
@@ -14947,7 +15024,8 @@ async function studioRecomputeInsightsLearned(env, options = {}) {
       source: "similar_account",
       limit: 250,
     });
-    const firstHeatmap = studioBuildSimilarHeatmap(firstParty);
+    const latestFirstParty = studioInsightsLatestFirstPartyPosts(firstParty);
+    const firstHeatmap = studioBuildSimilarHeatmap(latestFirstParty);
     const similarHeatmap = studioBuildSimilarHeatmap(similar);
     const firstLearned = studioInsightsLearnedFromHeatmap(firstHeatmap, "first_party", season, platform, outputType);
     const similarLearned = studioInsightsLearnedFromHeatmap(similarHeatmap, "similar_accounts", season, platform, outputType);
@@ -14959,7 +15037,7 @@ async function studioRecomputeInsightsLearned(env, options = {}) {
       await studioInsightsUpsertLearned(env, { ...similarLearned, profile, metric_type: "post_time" });
       updated += 1;
     }
-    const captionLearned = studioInsightsBuildCaptionLearned([...firstParty, ...similar]);
+    const captionLearned = studioInsightsBuildCaptionLearned([...latestFirstParty, ...similar]);
     if (captionLearned) {
       await studioInsightsUpsertLearned(env, {
         profile,
@@ -14971,7 +15049,7 @@ async function studioRecomputeInsightsLearned(env, options = {}) {
         caption_patterns: captionLearned.patterns,
         sample_size: captionLearned.sample_size,
         score: captionLearned.score,
-        source: firstParty.length && similar.length ? "blended" : firstParty.length ? "first_party" : "similar_accounts",
+        source: latestFirstParty.length && similar.length ? "blended" : latestFirstParty.length ? "first_party" : "similar_accounts",
       });
       updated += 1;
     }
@@ -14979,48 +15057,8 @@ async function studioRecomputeInsightsLearned(env, options = {}) {
   return { updated, profile };
 }
 
-async function studioIngestFirstPartyObservations(env, options = {}) {
-  if (!studioInsightsDbEnabled(env)) return { upserted: 0 };
-  const limit = Math.max(1, Math.min(25, Number(options.limit) || 12));
-  const rows = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
-    limit,
-    sortField: "Published_At",
-    sortDirection: "desc",
-    filterFormula: 'AND({Test_Run_ID}=BLANK(),{Published_At}!="",{Do_Not_Publish}=0)',
-  }).catch(() => []);
-  let upserted = 0;
-  for (const row of rows || []) {
-    const publishedAt = f(row, "Published_At");
-    if (!publishedAt) continue;
-    const platform = String(f(row, "Platform") || "").trim();
-    const outputType = String(f(row, "Platform_Output_Type") || f(row, "Studio_Output_Type") || "").trim();
-    const caption = String(f(row, "Output_Caption") || "").trim();
-    const post = {
-      published_at: publishedAt,
-      views: Number(f(row, "Insights_Views") || 0) || 0,
-      likes: Number(f(row, "Insights_Likes") || 0) || 0,
-      comments: Number(f(row, "Insights_Comments") || 0) || 0,
-      caption,
-      platform,
-      output_type: outputType,
-      external_post_id: String(f(row, "Platform_Post_ID") || row.id).trim(),
-      source: "first_party",
-    };
-    try {
-      await studioInsightsUpsertObservation(env, studioInsightsObservationFields(post, {
-        source: "first_party",
-        platform,
-        handle: "first_party",
-        profile: "chicago",
-        output_type: outputType,
-        fetched_at: f(row, "Insights_As_Of") || new Date().toISOString(),
-      }));
-      upserted += 1;
-    } catch (error) {
-      console.warn("first-party observation ingest failed", row.id, error);
-    }
-  }
-  return { upserted };
+async function studioIngestFirstPartyObservations() {
+  return { upserted: 0, managed_by: "studioSweepPublishedInsights" };
 }
 
 function studioInsightsResolveSeason(url) {
@@ -15995,99 +16033,196 @@ async function postInsightsSimilarTimesSweep(request, env, url, authorization) {
   });
 }
 
+function studioOutputNativeIdFields(row) {
+  return {
+    Platform: f(row, "Platform"),
+    Platform_Post_ID: f(row, "Platform_Post_ID"),
+    Platform_Media_ID: f(row, "Platform_Media_ID"),
+    YouTube_Video_ID: f(row, "YouTube_Video_ID"),
+    TikTok_Draft_Public_Post_IDs_JSON: f(row, "TikTok_Draft_Public_Post_IDs_JSON"),
+    IG_Carousel_Published_Media_ID: f(row, "IG_Carousel_Published_Media_ID"),
+    IG_Story_Post_ID: f(row, "IG_Story_Post_ID"),
+    FB_Slideshow_Meta_Video_ID: f(row, "FB_Slideshow_Meta_Video_ID"),
+    Manual_Published_URL: f(row, "Manual_Published_URL"),
+  };
+}
+
+function studioFirstPartySnapshotFields(snapshot) {
+  return {
+    Insights_Views: snapshot.views,
+    Insights_Likes: snapshot.likes,
+    Insights_Comments: snapshot.comments,
+    Insights_Shares: snapshot.shares,
+    Insights_Reach: snapshot.reach,
+    Insights_Saves: snapshot.saves,
+    Insights_Watch_Time_Sec: snapshot.watch_time_sec,
+    Insights_Total_Interactions: snapshot.total_interactions,
+    Insights_Engaged_Views: snapshot.engaged_views,
+    Insights_Avg_View_Duration_Sec: snapshot.average_view_duration_sec,
+    Insights_Avg_Percentage_Viewed: snapshot.average_percentage_viewed,
+    Insights_Audience_Gained: snapshot.audience_gained,
+    Insights_Audience_Lost: snapshot.audience_lost,
+    Insights_Platform_Metrics_JSON: JSON.stringify(snapshot.platform_metrics || {}),
+    Insights_As_Of: snapshot.fetched_at,
+    Insights_Source: snapshot.source || snapshot.platform,
+    Insights_Next_Sync_At: snapshot.next_sync_at,
+    Insights_Last_Attempt_At: snapshot.fetched_at,
+    Insights_Last_Error: null,
+  };
+}
+
+async function studioPersistFirstPartySnapshot(env, row, snapshot, { profile, profileId, outputType, caption }) {
+  if (!studioInsightsDbEnabled(env)) return null;
+  const observationKey = analyticsObservationKey({
+    platform: snapshot.platform,
+    profileId: profileId || profile,
+    nativePostId: snapshot.native_post_id || row.id,
+    publishedAt: snapshot.published_at,
+    measuredAt: snapshot.fetched_at,
+  });
+  return studioInsightsUpsertObservation(env, studioInsightsObservationFields({
+    ...snapshot,
+    caption,
+    output_type: outputType,
+    external_post_id: snapshot.native_post_id || row.id,
+    source: "first_party",
+  }, {
+    observation_key: observationKey,
+    source: "first_party",
+    platform: snapshot.platform,
+    handle: "first_party:" + profile,
+    profile,
+    output_type: outputType,
+    fetched_at: snapshot.fetched_at,
+    platform_output_record_id: row.id,
+    content_profile_record_id: profileId || null,
+    measurement_bucket: snapshot.measurement_bucket,
+    age_hours: snapshot.age_hours,
+  }));
+}
+
+async function studioFetchOwnedOutputAnalytics(env, row, { platform, postId, publishedAt, profile }) {
+  const settings = await studioActivePipelineSettings(env, [
+    "FACEBOOK_PAGE_ACCESS_TOKEN",
+    "FACEBOOK_GRAPH_API_VERSION",
+    "YOUTUBE_UPLOAD_SERVICE_URL",
+    "YOUTUBE_UPLOAD_SERVICE_SHARED_SECRET",
+  ], row).catch(() => ({}));
+  const version = String(settings.FACEBOOK_GRAPH_API_VERSION || "v26.0").replace(/^\/+|\/+$/g, "");
+  if (platform === "Instagram") {
+    return fetchInstagramOwnedMediaAnalytics({
+      postId,
+      token: settings.FACEBOOK_PAGE_ACCESS_TOKEN || env.FACEBOOK_PAGE_ACCESS_TOKEN,
+      version,
+    });
+  }
+  if (platform === "Facebook") {
+    return fetchFacebookOwnedPostAnalytics({
+      postId,
+      token: settings.FACEBOOK_PAGE_ACCESS_TOKEN || env.FACEBOOK_PAGE_ACCESS_TOKEN,
+      version,
+    });
+  }
+  if (platform === "YouTube") {
+    return fetchYouTubeOwnedVideoAnalytics({
+      serviceBaseUrl: settings.YOUTUBE_UPLOAD_SERVICE_URL,
+      serviceSecret: settings.YOUTUBE_UPLOAD_SERVICE_SHARED_SECRET || env.YOUTUBE_UPLOAD_SERVICE_SHARED_SECRET,
+      videoId: postId,
+      publishedAt,
+    });
+  }
+  if (platform === "TikTok") {
+    return fetchTikTokOwnedVideoAnalytics({
+      pipelineRunnerUrl: env.PIPELINE_RUNNER_URL,
+      pipelineRunnerSecret: env.PIPELINE_RUNNER_SHARED_SECRET,
+      profile,
+      videoIds: [postId],
+    }).then((body) => {
+      const match = (body?.videos || []).find((video) => String(video?.id || "") === String(postId))
+        || (body?.videos || [])[0];
+      if (!match) throw new Error("TikTok Display API returned no matching owned video");
+      return { ...match, source: body?.source || "tiktok-display-api" };
+    });
+  }
+  return null;
+}
+
 async function studioSweepPublishedInsights(env, options = {}) {
-  const limit = Math.max(1, Math.min(10, Number(options.limit) || 8));
+  const limit = Math.max(1, Math.min(12, Number(options.limit) || 8));
   const rows = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
     limit,
     sortField: "Published_At",
     sortDirection: "desc",
-    filterFormula: 'AND({Test_Run_ID}=BLANK(),{Published_At}!="",{Platform_Post_ID}!="",OR({Insights_As_Of}="",IS_BEFORE({Insights_As_Of},DATEADD(NOW(),-1,"days"))))',
+    filterFormula: 'AND({Test_Run_ID}=BLANK(),{Published_At}!="",{Do_Not_Publish}=0,OR({Insights_Next_Sync_At}=BLANK(),IS_BEFORE({Insights_Next_Sync_At},NOW())))',
   }).catch(() => []);
-  const settings = await studioActivePipelineSettings(env, [
-    "FACEBOOK_PAGE_ACCESS_TOKEN",
-    "FACEBOOK_GRAPH_API_VERSION",
-    "INSTAGRAM_BUSINESS_ACCOUNT_ID",
-    "YOUTUBE_API_KEY",
-  ]).catch(() => ({}));
-  const version = String(settings.FACEBOOK_GRAPH_API_VERSION || "v25.0").replace(/^\/+|\/+$/g, "");
-  const token = settings.FACEBOOK_PAGE_ACCESS_TOKEN || env.FACEBOOK_PAGE_ACCESS_TOKEN;
-  const youtubeKey = settings.YOUTUBE_API_KEY || env.YOUTUBE_API_KEY;
   let updated = 0;
+  let failed = 0;
+  const profiles = new Set();
   for (const row of rows || []) {
-    const platform = String(f(row, "Platform") || "");
-    const postId = String(f(row, "Platform_Post_ID") || "").trim();
-    if (!postId) continue;
+    const platform = String(f(row, "Platform") || "").trim();
+    if (!["Instagram", "Facebook", "YouTube", "TikTok"].includes(platform)) continue;
+    const publishedAt = f(row, "Published_At");
+    const postId = nativePlatformId(platform, studioOutputNativeIdFields(row));
+    if (!postId || !publishedAt) continue;
+    const attemptedAt = new Date().toISOString();
+    const profile = await studioThemeForPublishRecord(env, row);
+    const profileId = studioFirstLinkedId(f(row, "Content_Profile"));
+    const outputType = String(f(row, "Platform_Output_Type") || f(row, "Studio_Output_Type") || "").trim();
+    const caption = String(f(row, "Output_Caption") || "").trim();
     try {
-      const metrics = await studioFetchOutputInsights(platform, postId, { token, version, youtubeKey });
-      if (!metrics) continue;
+      const raw = await studioFetchOwnedOutputAnalytics(env, row, {
+        platform,
+        postId,
+        publishedAt,
+        profile,
+      });
+      if (!raw) continue;
+      const snapshot = normalizeAnalyticsSnapshot(platform, raw, {
+        nativePostId: postId,
+        publishedAt: raw.published_at || publishedAt,
+        measuredAt: attemptedAt,
+        source: raw.source || platform.toLowerCase(),
+      });
+      await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, row.id, {
+        method: "PATCH",
+        body: JSON.stringify({ fields: studioFirstPartySnapshotFields(snapshot), typecast: true }),
+      });
+      await studioPersistFirstPartySnapshot(env, row, snapshot, {
+        profile,
+        profileId,
+        outputType,
+        caption,
+      });
+      profiles.add(profile);
+      updated += 1;
+    } catch (error) {
+      failed += 1;
+      const retryAt = new Date(Date.now() + 6 * 3600000).toISOString();
       await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, row.id, {
         method: "PATCH",
         body: JSON.stringify({
           fields: {
-            Insights_Views: metrics.views ?? null,
-            Insights_Likes: metrics.likes ?? null,
-            Insights_Comments: metrics.comments ?? null,
-            Insights_Shares: metrics.shares ?? null,
-            Insights_Reach: metrics.reach ?? null,
-            Insights_Saves: metrics.saves ?? null,
-            Insights_Watch_Time_Sec: metrics.watch_time_sec ?? null,
-            Insights_As_Of: new Date().toISOString(),
-            Insights_Source: metrics.source || platform,
+            Insights_Last_Attempt_At: attemptedAt,
+            Insights_Last_Error: sanitizeAnalyticsError(error),
+            Insights_Next_Sync_At: retryAt,
           },
           typecast: true,
         }),
-      });
-      updated += 1;
-    } catch (error) {
-      console.warn("insights row failed", row.id, error);
+      }).catch(() => null);
+      console.warn("first-party analytics row failed", row.id, sanitizeAnalyticsError(error));
     }
   }
-  return { scanned: (rows || []).length, updated };
+  return { scanned: (rows || []).length, updated, failed, profiles: [...profiles] };
 }
 
 async function studioFetchOutputInsights(platform, postId, creds) {
-  if (platform === "YouTube" && creds.youtubeKey) {
-    const videoId = postId.includes("watch?v=") ? postId.split("watch?v=").pop().split("&")[0] : postId;
-    const url = `https://www.googleapis.com/youtube/v3/videos?part=statistics&id=${encodeURIComponent(videoId)}&key=${encodeURIComponent(creds.youtubeKey)}`;
-    const response = await fetch(url);
-    if (!response.ok) return null;
-    const body = await response.json();
-    const stats = body?.items?.[0]?.statistics || {};
-    return {
-      views: Number(stats.viewCount || 0) || 0,
-      likes: Number(stats.likeCount || 0) || 0,
-      comments: Number(stats.commentCount || 0) || 0,
-      source: "youtube-data-api",
-    };
-  }
-  if (!creds.token) return null;
+  // Compatibility wrapper retained for older callers; the scheduled first-party
+  // sweep above is profile-aware and uses the normalized adapters.
   if (platform === "Instagram") {
-    const url = `https://graph.facebook.com/${creds.version}/${encodeURIComponent(postId)}?fields=like_count,comments_count,insights.metric(views,reach,saved,shares)&access_token=${encodeURIComponent(creds.token)}`;
-    const response = await fetch(url);
-    if (!response.ok) return null;
-    const body = await response.json();
-    const insightMap = Object.fromEntries((body.insights?.data || []).map((item) => [item.name, item.values?.[0]?.value]));
-    return {
-      views: Number(insightMap.views || 0) || 0,
-      likes: Number(body.like_count || 0) || 0,
-      comments: Number(body.comments_count || 0) || 0,
-      shares: Number(insightMap.shares || 0) || 0,
-      reach: Number(insightMap.reach || 0) || 0,
-      saves: Number(insightMap.saved || 0) || 0,
-      source: "instagram-graph",
-    };
+    return fetchInstagramOwnedMediaAnalytics({ postId, token: creds?.token, version: creds?.version || "v26.0" });
   }
   if (platform === "Facebook") {
-    const url = `https://graph.facebook.com/${creds.version}/${encodeURIComponent(postId)}?fields=likes.summary(true),comments.summary(true),shares&access_token=${encodeURIComponent(creds.token)}`;
-    const response = await fetch(url);
-    if (!response.ok) return null;
-    const body = await response.json();
-    return {
-      likes: Number(body.likes?.summary?.total_count || 0) || 0,
-      comments: Number(body.comments?.summary?.total_count || 0) || 0,
-      shares: Number(body.shares?.count || 0) || 0,
-      source: "facebook-graph",
-    };
+    return fetchFacebookOwnedPostAnalytics({ postId, token: creds?.token, version: creds?.version || "v26.0" });
   }
   return null;
 }
