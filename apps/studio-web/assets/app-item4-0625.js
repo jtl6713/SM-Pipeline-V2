@@ -230,7 +230,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.361-schedule-collapsed";
+  const BUILD_ID = "item4-0.6.362-idea-delete-label";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -2214,6 +2214,7 @@
     $("editIdeaTitle").disabled = !modifiable;
     $("editIdeaSummary").disabled = !modifiable;
     $("deleteIdeaButton").disabled = !modifiable;
+    $("deleteIdeaButton").textContent = "Delete";
     const configureButton = $("configureProductionButton");
     if (configureButton) {
       configureButton.disabled = promoted || Boolean(idea?.is_on_hold);
