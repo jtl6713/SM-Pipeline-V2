@@ -256,15 +256,21 @@ export async function fetchYouTubeOwnedVideoAnalytics({ serviceBaseUrl, serviceS
   });
 }
 
-export async function fetchTikTokOwnedVideoAnalytics({ workerBaseUrl, pipelineSecret, videoIds = [], fetchImpl = fetch }) {
-  const base = String(workerBaseUrl || "").replace(/\/+$/, "");
-  if (!base) throw new Error("TikTok auth worker URL is missing");
+export async function fetchTikTokOwnedVideoAnalytics({
+  pipelineRunnerUrl,
+  pipelineRunnerSecret,
+  profile,
+  videoIds = [],
+  fetchImpl = fetch,
+}) {
+  const base = String(pipelineRunnerUrl || "").replace(/\/+$/, "");
+  if (!base) throw new Error("Pipeline Runner URL is missing for TikTok analytics");
   const ids = [...new Set((videoIds || []).map((x) => String(x || "").trim()).filter(Boolean))].slice(0, 20);
-  return serviceJson(`${base}/tiktok/analytics/videos`, {
-    secret: pipelineSecret,
+  return serviceJson(base + "/jobs/tiktok-analytics", {
+    secret: pipelineRunnerSecret,
     method: "POST",
     fetchImpl,
-    body: { video_ids: ids },
+    body: { profile: profile || "chicago", video_ids: ids },
   });
 }
 
