@@ -555,3 +555,4 @@ Variant prepare copy Pages deploy: 2026-09-20 — Approve prompt says Prepare fi
 2026-09-21 deploy Studio UI 0.6.359 pipeline group Content ID labels. Source commit 322fa97c.
 2026-09-21 deploy Studio UI 0.6.360 rolling 7-day Pipeline schedule grid
 2026-09-21 deploy Studio UI 0.6.361 Pipeline schedule grid collapsed by default
+2026-09-21 deploy Studio UI 0.6.362 idea delete button stays Delete until pressed
