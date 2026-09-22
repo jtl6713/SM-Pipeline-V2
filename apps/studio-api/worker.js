@@ -407,7 +407,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.360-insights-dashboard",
+          version: "0.10.361-thumb-photo-real",
           studio_desk_inventory_v1: true,
           studio_desk_activity_v1: true,
           studio_tiktok_complete_v1: true,
@@ -6953,9 +6953,9 @@ function item4StudioThumbnailPrompt(requestRecord, parent) {
     `Create a ChicagoShining social thumbnail / promo still for: ${title}.`,
     caption ? `Post context: ${caption.slice(0, 500)}` : "",
     concept ? `Thumbnail concept: ${concept}` : "",
-    "Lettering mix: for at least ~80% of covers use premium gold or black-and-gold block lettering — metallic gold, slightly arched or refined, sophisticated and cinematic. Use colorful glossy 3D block lettering for at most ~20% of covers, and only when the subject clearly calls for high-energy playful treatment. Do not default to bright multicolor candy 3D letters. Prefer stylish gold sophistication.",
-    "Text must be large and readable on a phone, near the center or slightly below center, inside safe margins, and not in the top or bottom 10%.",
-    "Polished, high-contrast, and dramatic. Do not invent logos, watermarks, platform UI, or distorted letters.",
+    "Photorealism: the scene must look like a real photograph (natural camera, real light, real textures). Do not make it illustrated, CGI, painterly, plastic, or luxury-ad composite. Lettering mix: for at least ~80% of covers use restrained gold or black-and-gold block lettering — soft brushed or matte gold, or black letters with a thin gold edge. Quiet and sophisticated; keep lettering secondary to the photo. Do not use chrome, mirror-foil, glow, sparkle, giant arched 3D slabs, or gold-on-everything. Use colorful glossy 3D block lettering for at most ~20% of covers, and only when the subject clearly calls for high-energy playful treatment. Do not default to bright multicolor candy 3D letters.",
+    "Text must be large and readable on a phone, near the center or slightly below center, inside safe margins, and not in the top or bottom 10%. Do not let lettering dominate the frame.",
+    "Photorealistic and readable. Do not invent logos, watermarks, platform UI, or distorted letters.",
   ].filter(Boolean).join("\n");
 }
 
@@ -14137,8 +14137,8 @@ function studioFinishedSeedOverlay(requestRecord, clips, nativeReady) {
   const firstUrl = String(clips[0]?.url || "").trim() || null;
   const az = studioIsAzFinishedVideo(requestRecord);
   const note = az
-    ? `origin=az-finished-video; ez-input=${kind}. Finished passthrough. Skip P1/voiceover/R2-R5. Generate the grid thumbnail (prefer gold / black-and-gold sophisticated lettering ~80%; colorful 3D only occasionally). AI may write the post caption only; do not burn text onto the finished file. az-auto-queue=1.`
-    : `origin=ez-wizard; ez-input=${kind}. Finished passthrough. Skip P1/voiceover/R2-R5. Generate the grid thumbnail (prefer gold / black-and-gold sophisticated lettering ~80%; colorful 3D only occasionally). AI may write the post caption only; do not burn text onto the finished file.`;
+    ? `origin=az-finished-video; ez-input=${kind}. Finished passthrough. Skip P1/voiceover/R2-R5. Generate the grid thumbnail (photorealistic scene; restrained gold / black-and-gold lettering ~80%; colorful 3D only occasionally). AI may write the post caption only; do not burn text onto the finished file. az-auto-queue=1.`
+    : `origin=ez-wizard; ez-input=${kind}. Finished passthrough. Skip P1/voiceover/R2-R5. Generate the grid thumbnail (photorealistic scene; restrained gold / black-and-gold lettering ~80%; colorful 3D only occasionally). AI may write the post caption only; do not burn text onto the finished file.`;
   if (kind === "finished-video") {
     return {
       Output_Status: firstUrl ? "Ready for Review" : "In Production",

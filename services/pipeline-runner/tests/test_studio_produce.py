@@ -958,6 +958,8 @@ def test_finished_thumbnail_prompt_prefers_gold_lettering():
     assert "Rainy Chicago" in prompt
     assert "Lake Shore Drive" in prompt
     assert "gold" in prompt.lower()
+    assert "photoreal" in prompt.lower()
     assert "~80%" in prompt
     assert COLORFUL_3D_RULE in prompt
-    assert "Prefer stylish gold" in prompt or "premium gold" in prompt
+    assert "restrained gold" in prompt
+    assert "chrome" in prompt.lower()
