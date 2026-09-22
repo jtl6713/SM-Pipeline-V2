@@ -2339,18 +2339,20 @@ function studioPublishHandoffFields(record, options = {}) {
     if (!current("FB_Publish_Status") || current("FB_Publish_Status") === "Retry Pending") {
       fields.FB_Publish_Status = "Ready for Assets";
     }
-    fields.FB_Image_Publish_Mode = "Single Photo";
+    const facebookImageCount = Math.max(1, Math.min(clipCount || 1, 10));
+    fields.FB_Image_Publish_Mode = facebookImageCount > 1 ? "Multi-Photo Collage" : "Single Photo";
     fields.Publish_Status = armedPublish;
-    fields.Image_Count = clipCount || 1;
+    fields.Image_Count = facebookImageCount;
   }
   if (platform === "Facebook" && (outputType === "Multi-Image Post" || mapping === "Facebook Photo Set")) {
     fields.Image_Output_Selected = true;
     if (!current("FB_Publish_Status") || current("FB_Publish_Status") === "Retry Pending") {
       fields.FB_Publish_Status = "Ready for Assets";
     }
-    fields.FB_Image_Publish_Mode = "Multi-Photo Collage";
+    const facebookImageCount = Math.max(1, Math.min(clipCount || 1, 10));
+    fields.FB_Image_Publish_Mode = facebookImageCount > 1 ? "Multi-Photo Collage" : "Single Photo";
     fields.Publish_Status = armedPublish;
-    if (clipCount) fields.Image_Count = clipCount;
+    fields.Image_Count = facebookImageCount;
   }
   if (platform === "Facebook" && (outputType === "Slideshow Reel" || mapping === "Facebook Reel") && outputType !== "Multi-Image Post" && mapping !== "Facebook Photo Set") {
     if (preview.startsWith("https://media.chicagoshining.com/")) {
