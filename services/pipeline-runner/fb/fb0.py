@@ -26,6 +26,7 @@ from fb.constants import (
     STATUS_PREPARING_SLIDESHOW,
     STATUS_READY_FOR_PHOTO,
     STATUS_RETRY,
+    STATUS_MANUAL_FALLBACK,
 )
 from fb.eligibility import fb0_eligibility_reason
 from item4.settings import PipelineSettings
@@ -88,32 +89,54 @@ def process_request(
     settings = PipelineSettings(client)
     max_photos = parse_int(settings.get("FB_MAX_PHOTOS"), DEFAULT_MAX_PHOTOS) or DEFAULT_MAX_PHOTOS
     max_retries = parse_int(settings.get("FB_IMAGE_STAGE_MAX_RETRIES"), DEFAULT_IMAGE_STAGE_MAX_RETRIES) or DEFAULT_IMAGE_STAGE_MAX_RETRIES
+    requested = parse_int(field(output, "Image_Count"), None)
+    expected = min(requested, max_photos) if requested is not None else None
+    slideshow_route = is_slideshow_route(output)
+    if requested is not None and requested > max_photos:
+        normalize = {
+            "Image_Count": expected,
+            "Output_Notes": append_note(
+                output,
+                f"FB0 capped Facebook image count from {requested} to {expected} (FB_MAX_PHOTOS={max_photos}) at {stamp_minutes()}.",
+            ),
+        }
+        if not slideshow_route and expected and expected > 1:
+            normalize["FB_Image_Publish_Mode"] = "Multi-Photo Collage"
+        client.update_record(PLATFORM_OUTPUTS_TABLE, record_id, normalize, typecast=True)
+
     slides = list_ready_slides(client, field_str(output, "Output_ID"), max_photos=max_photos)
     actual = len(slides)
-    expected = parse_int(field(output, "Image_Count"), None)
     result["slide_count"] = actual
+    result["requested_image_count"] = requested
     result["expected_image_count"] = expected
-    result["slideshow_route"] = is_slideshow_route(output)
+    result["image_count_capped"] = bool(requested is not None and requested > max_photos)
+    result["slideshow_route"] = slideshow_route
 
     if actual < 1 or expected is None or actual != expected or actual > max_photos:
+        exhausted = attempt >= max_retries
         client.update_record(
             PLATFORM_OUTPUTS_TABLE,
             record_id,
             {
                 **unlock_fields(),
                 "Publish_Status": PUBLISH_STATUS_FAILED,
-                "FB_Publish_Status": STATUS_RETRY,
+                "FB_Publish_Status": STATUS_MANUAL_FALLBACK if exhausted else STATUS_RETRY,
                 "FB_Slideshow_Status": SLIDESHOW_STATUS_RETRY,
                 "Publish_Error_Stage": "FB0_ASSETS",
                 "Publish_Error_Message": f"FB0 found {actual} ready shared 4:5 assets; expected {expected}.",
-                "Publish_Next_Retry_At": retry_at(RETRY_MINUTES),
-                "Publish_Retry_Eligible": True,
-                "Manual_Fallback_Required": attempt >= max_retries,
+                "Publish_Next_Retry_At": None if exhausted else retry_at(RETRY_MINUTES),
+                "Publish_Retry_Eligible": not exhausted,
+                "Manual_Fallback_Required": exhausted,
                 "FB_Slideshow_Error_Message": "FB0 did not find the expected complete ordered 4:5 asset set.",
             },
             typecast=True,
         )
-        return {"processed": True, "retry": True, "reason": "asset_mismatch", **result}
+        return {
+            "processed": True,
+            "retry": not exhausted,
+            "reason": "asset_mismatch_retry_exhausted" if exhausted else "asset_mismatch",
+            **result,
+        }
 
     revision = package_revision(slides)
     urls = [field_str(slide, "Asset_4x5_Public_URL") for slide in slides if field_str(slide, "Asset_4x5_Public_URL")]
