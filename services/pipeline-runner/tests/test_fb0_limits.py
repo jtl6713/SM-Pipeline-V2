@@ -50,6 +50,7 @@ def test_fb0_caps_oversized_package_and_routes_multi_photo(monkeypatch):
         Image_Output_Selected=True,
         FB_Publish_Status="Ready for Assets",
         FB_Image_Publish_Mode="Single Photo",
+        FB_Resolved_Publish_Mode="Single Photo",
         Output_ID="594",
         Image_Count=15,
         Publish_Attempt_Count=0,
