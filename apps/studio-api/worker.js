@@ -3270,7 +3270,7 @@ function airtableFormulaEscape(value) {
 }
 
 function requestedProfileId(url, payload) {
-  const raw = String(payload?.content_profile_id || payload?.profile_id || url?.searchParams?.get("profile") || "").trim();
+  const raw = String(payload?.content_profile_id || payload?.profile_id || url?.searchParams?.get("content_profile_id") || url?.searchParams?.get("profile") || "").trim();
   if (!raw) return null;
   if (!/^rec[A-Za-z0-9]+$/.test(raw)) throw new HttpError(400, "Invalid Content Profile id");
   return raw;
@@ -14776,11 +14776,15 @@ async function studioInsightsLoadObservations(env, options = {}) {
     sortDirection: "desc",
     filterFormula: `AND(${parts.join(",")})`,
   }).catch(() => []);
-  return (rows || [])
+  const filtered = (rows || [])
     .map(studioInsightsObservationToPost)
     .filter((row) => row.published_at)
     .filter((row) => studioInsightsPlatformMatches(options.platform, row.platform))
     .filter((row) => studioInsightsOutputTypeMatches(options.output_type, row.output_type));
+  if (String(options.source || "").toLowerCase() === "first_party" && !options.include_history) {
+    return studioInsightsLatestFirstPartyPosts(filtered);
+  }
+  return filtered;
 }
 
 function parseSimilarAccountStatusCache(raw) {
@@ -15912,6 +15916,7 @@ async function getInsightsPosts(request, env, url, authorization) {
     studioInsightsLoadObservations(env, {
       profile: theme,
       source: "first_party",
+      include_history: true,
       limit: 500,
     }).catch(() => []),
   ]);
