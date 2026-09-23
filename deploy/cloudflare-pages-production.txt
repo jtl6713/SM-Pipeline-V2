@@ -562,3 +562,4 @@ Variant prepare copy Pages deploy: 2026-09-20 — Approve prompt says Prepare fi
 2026-09-23 redeploy Studio UI 0.6.366 after pre-production AI validation pass
 2026-09-23 deploy Studio UI 0.6.367 pre-production AI hardening (pure AI hides uploads; mixed keeps manual media)
 2026-09-23 redeploy Studio UI 0.6.367 with Access-aware production verification
+2026-09-23 deploy Studio UI 0.6.368 homepage recent outputs show title next to output ID
