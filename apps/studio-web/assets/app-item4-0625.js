@@ -232,7 +232,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.369-finished-passthrough-repair";
+  const BUILD_ID = "item4-0.6.370-production-lifecycle-repair";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -11062,7 +11062,16 @@
       return;
     }
     const sorted = sortedContentRecords(records);
-    target.innerHTML = `<table class="data-table content-table"><thead><tr>${contentSortHeader("content", "Content")}${contentSortHeader("stage", "Studio stage")}${contentSortHeader("assets", "Assets")}${contentSortHeader("render", "Render")}${contentSortHeader("review", "Review")}${contentSortHeader("outputs", "Outputs")}</tr></thead><tbody>${sorted.map((r) => `<tr><td><div class="title-cell">${value(r.title)}</div><div class="subtle">Content ${value(r.content_id)} · ${value(r.content_type)}${r.created_at ? ` · Created ${dateValue(r.created_at)}` : ""}</div></td><td>${badge(r.studio_stage)}</td><td>${value(r.asset_match_status)}</td><td>${value(contentRenderLabel(r))}</td><td>${value(r.review_status || r.carousel_review_status)}</td><td>${Array.isArray(r.output_links) ? r.output_links.length : 0}</td></tr>`).join("")}</tbody></table>`;
+    target.innerHTML = `<table class="data-table content-table"><thead><tr>${contentSortHeader("content", "Content")}${contentSortHeader("stage", "Studio stage")}${contentSortHeader("assets", "Assets")}${contentSortHeader("render", "Render")}${contentSortHeader("review", "Review")}${contentSortHeader("outputs", "Outputs")}<th>Open</th></tr></thead><tbody>${sorted.map((r) => {
+      const requestId = Array.isArray(r.production_request_links) ? String(r.production_request_links[0] || "") : "";
+      const outputCount = Array.isArray(r.output_links) ? r.output_links.length : 0;
+      const action = requestId
+        ? `<button type="button" class="manage-button" data-content-request="${escapeHtml(requestId)}" data-content-id="${escapeHtml(r.id)}">Open request</button>`
+        : outputCount
+          ? `<button type="button" class="manage-button" data-content-pipeline="${escapeHtml(r.id)}">Open pipeline</button>`
+          : "—";
+      return `<tr><td><div class="title-cell">${value(r.title)}</div><div class="subtle">Content ${value(r.content_id)} · ${value(r.content_type)}${r.created_at ? ` · Created ${dateValue(r.created_at)}` : ""}</div></td><td>${badge(r.studio_stage)}</td><td>${value(r.asset_match_status)}</td><td>${value(contentRenderLabel(r))}</td><td>${value(r.review_status || r.carousel_review_status)}</td><td>${outputCount}</td><td>${action}</td></tr>`;
+    }).join("")}</tbody></table>`;
     target.querySelectorAll("[data-content-sort]").forEach((button) => {
       button.addEventListener("click", (event) => {
         event.stopPropagation();
@@ -11075,6 +11084,34 @@
         }
         renderContentItemsTable(target, records);
       });
+    });
+    target.querySelectorAll("[data-content-request]").forEach((button) => {
+      button.addEventListener("click", async () => {
+        const requestId = String(button.dataset.contentRequest || "");
+        if (!requestId) return;
+        button.disabled = true;
+        button.textContent = "Opening…";
+        try {
+          const result = await api(`/api/production-requests/${encodeURIComponent(requestId)}`);
+          const record = result?.record;
+          if (!record?.id) throw new Error("Production Request was not found.");
+          ezEntryPath = "configure";
+          populateProductionRequestForm(record);
+          showProductionRequestWorkspace();
+          await Promise.all([
+            loadProductionRequestOutputs(record),
+            loadItem4Workspace(record),
+          ]);
+          $("productionRequestWorkspace")?.scrollIntoView({ behavior: "smooth", block: "start" });
+        } catch (error) {
+          setProductionLiveHint(error.message || "Could not open this Production Request.");
+          button.disabled = false;
+          button.textContent = "Open request";
+        }
+      });
+    });
+    target.querySelectorAll("[data-content-pipeline]").forEach((button) => {
+      button.addEventListener("click", () => switchToPage("outputs"));
     });
   }
 
@@ -11140,7 +11177,7 @@
     if (!target) return;
     if (!silent) target.innerHTML = '<div class="empty production-empty"><strong>Loading in-production items…</strong></div>';
     const { records = [] } = await api("/api/content?limit=100");
-    const active = records.filter((record) => !record?.lifecycle_complete);
+    const active = records.filter((record) => !record?.lifecycle_complete && String(record?.studio_stage || "") !== "Archived");
     const unchanged = silent && target.querySelector("table") && productionContentFingerprint(active) === productionContentFingerprint(productionContentRecords);
     productionContentRecords = active;
     if (activeProductionRequest && $("productionRequestTitle")) {
