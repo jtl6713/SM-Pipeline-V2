@@ -21,7 +21,7 @@ Python stage workers that replace Make.com scenarios for SM Pipeline V2.
 | **T1** | Timing Engine — beat-aware transition timeline before Remotion | `STAGE_BACKEND_T1=python` (also runs when R4 is Python) |
 | **R4** | Full (`5556716` — Remotion POST, 3 routes, batch 1) | Python (Make retired) |
 | **R5** | Full (`5565333` — poll, Drive upload, R2 preview, batch 5) | `STAGE_BACKEND_R5=python` |
-| **RR1** | Full (`5576363` — batched review email, max 10) | Python (Make retired) |
+| **RR1** | Full (`5576363` — batched review email, max 10) | Disabled — review in Studio Pipeline |
 | **P1** | Full (`5528742` — content package + OpenAI, then Python P2/P3) | `STAGE_BACKEND_P1=python` |
 | **P2** | Full (`5530955` — voiceover + thumbnail, 3 routes) | `STAGE_BACKEND_P2=python` |
 | **P3** | Full (`5531703` — studio parent enrich + legacy create) | `STAGE_BACKEND_P3=python` |
@@ -144,9 +144,7 @@ One `POST /stages/r5` polls up to **5** outputs in `Rendering` with a `Remotion_
 
 ## RR1 behavior (review email)
 
-One `POST /stages/rr1` finds up to **10** review-eligible Platform Outputs (rendered video or native photo sets), builds one HTML email with decision buttons, sends via Gmail API, then stamps `Review_Status=Review Sent` and `Review_Email_Sent_At`.
-
-Requires Google OAuth refresh token with **Gmail send** scope. Decision webhooks default to the existing Make hook URL.
+Ready-for-review Gmail is **off**. `POST /stages/rr1` returns skipped (`review_email_disabled`). Review happens in Studio Pipeline. Set `REVIEW_EMAIL_ENABLED = True` in `rr1/constants.py` to restore the old batched email.
 
 ## RR2 behavior (review decision)
 
