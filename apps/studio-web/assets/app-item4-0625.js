@@ -232,7 +232,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.366-preprod-ai";
+  const BUILD_ID = "item4-0.6.367-preprod-ai-hardening";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -3235,7 +3235,9 @@
   function syncFinishedMediaHeadings() {
     const video = ezIsFinishedVideo();
     const ai = item4AiGenerationRequestActive(activeProductionRequest);
-    const heading = ai ? "AI Images" : (ezIsClipRequest() ? "Photos and clips" : (video ? "Video" : "Photos"));
+    const aiOnly = item4AiOnlyRequestActive(activeProductionRequest);
+    const mixedAi = ai && !aiOnly;
+    const heading = aiOnly ? "AI Images" : (mixedAi ? "Photos + AI Images" : (ezIsClipRequest() ? "Photos and clips" : (video ? "Video" : "Photos")));
     const mediaH = $("item4MediaHeading");
     if (mediaH) mediaH.textContent = heading;
     const step = $("productionStepMedia");
@@ -3319,12 +3321,22 @@
   }
 
   function item4AiRequestedCount(record = activeProductionRequest) {
-    const exact = Number(record?.carousel_slide_count_exact || $("ezCarouselSlideExact")?.value || 0);
-    if (Number.isFinite(exact) && exact > 0) return Math.max(1, Math.min(20, Math.round(exact)));
     const parsed = ezPlanApi()?.parseEzOriginNotes?.(record?.production_notes || "");
     if (parsed?.inputKind === "single-ai") return 1;
+    if (parsed?.inputKind === "mixed" && Number(parsed?.aiCount) > 0) {
+      return Math.max(1, Math.min(20, Math.round(Number(parsed.aiCount))));
+    }
+    const exact = Number(record?.carousel_slide_count_exact || $("ezCarouselSlideExact")?.value || 0);
+    if (Number.isFinite(exact) && exact > 0) return Math.max(1, Math.min(20, Math.round(exact)));
     if (Number(parsed?.aiCount) > 0) return Math.max(1, Math.min(20, Math.round(Number(parsed.aiCount))));
     return parsed?.inputKind === "multiple-ai" ? 5 : 1;
+  }
+
+  function item4AiOnlyRequestActive(record = activeProductionRequest) {
+    const notes = String(record?.production_notes || "");
+    if (/ez-input=mixed/i.test(notes)) return false;
+    if (/ez-input=(?:single-ai|multiple-ai)/i.test(notes)) return true;
+    return String(record?.carousel_image_mode || $("ezCarouselImageMode")?.value || "").trim() === "Make AI Generated";
   }
 
   function syncItem4AiGenerationUi(status = item4Workspace) {
@@ -3411,8 +3423,10 @@
     const requestId = String(activeProductionRequest?.id || "");
     const requestStatus = String(activeProductionRequest?.status || "Draft");
     const assets = Array.isArray(status?.assets) ? status.assets : [];
+    const target = item4AiRequestedCount(activeProductionRequest);
+    const aiCount = assets.filter((asset) => /^studio_ai/i.test(String(asset?.source || ""))).length;
     if (!requestId || !["Draft", "Ready"].includes(requestStatus)) return;
-    if (!item4AiGenerationRequestActive(activeProductionRequest) || assets.length) return;
+    if (!item4AiGenerationRequestActive(activeProductionRequest) || aiCount >= target) return;
     if (item4AiAutoStarted.has(requestId) || item4AiGenerationInFlight) return;
     item4AiAutoStarted.add(requestId);
     Promise.resolve().then(() => generateItem4AiImages({ automatic: true }));
@@ -3423,8 +3437,9 @@
     const hint = $("item4MediaKindHint");
     const zone = $("item4UploadZone");
     const aiMode = item4AiGenerationRequestActive(activeProductionRequest);
+    const aiOnly = item4AiOnlyRequestActive(activeProductionRequest);
     syncItem4AiGenerationUi(item4Workspace);
-    if (aiMode) {
+    if (aiOnly) {
       if (grid) grid.hidden = true;
       if (hint) hint.hidden = true;
       if (zone) zone.hidden = true;
