@@ -1,0 +1,51 @@
+name: Verify Pre-production AI Live
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "deploy/verify-preprod-ai.txt"
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Run targeted source tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --test apps/studio-web/preproduction-ai.test.mjs
+          python -m pip install -q pytest
+          python -m pytest services/pipeline-runner/tests/test_sai1_market.py -q
+          python -m py_compile services/pipeline-runner/app.py
+
+      - name: Wait for live pipeline runner with AI image job
+        shell: bash
+        run: |
+          set -euo pipefail
+          for i in $(seq 1 24); do
+            code=$(curl -sS --max-time 20 -o /tmp/health.json -w '%{http_code}' https://pipeline.chicagoshining.com/health || true)
+            if [[ "$code" == "200" ]] && jq -e '.ok == true and any(.jobs[]?; .name == "studio-ai-image")' /tmp/health.json >/dev/null 2>&1; then
+              jq '{ok,service,version,openai_account,jobs}' /tmp/health.json
+              exit 0
+            fi
+            echo "waiting for pipeline-runner deploy (attempt $i/24, http=$code)"
+            sleep 25
+          done
+          echo "pipeline-runner live health never exposed studio-ai-image" >&2
+          cat /tmp/health.json 2>/dev/null || true
+          exit 1
