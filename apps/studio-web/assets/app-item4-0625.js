@@ -160,6 +160,8 @@
   const ezDirty = new Set();
   let ezIdeaIdentitySaveTimer = null;
   let item4Uploading = false;
+  let item4AiGenerationInFlight = false;
+  const item4AiAutoStarted = new Set();
   let item4UploadBatchTotal = 0;
   let item4UploadBatchDone = 0;
   let item4PendingUploads = [];
@@ -230,7 +232,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.363-insights-ai";
+  const BUILD_ID = "item4-0.6.366-preprod-ai";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -3309,10 +3311,124 @@
     if (!quiet && nextKind) setRequestMessage();
   }
 
+  function item4AiGenerationRequestActive(record = activeProductionRequest) {
+    const mode = String(record?.carousel_image_mode || $("ezCarouselImageMode")?.value || "").trim();
+    const notes = String(record?.production_notes || "");
+    return mode === "Make AI Generated" || /ez-input=(?:single-ai|multiple-ai|mixed)/i.test(notes);
+  }
+
+  function item4AiRequestedCount(record = activeProductionRequest) {
+    const exact = Number(record?.carousel_slide_count_exact || $("ezCarouselSlideExact")?.value || 0);
+    if (Number.isFinite(exact) && exact > 0) return Math.max(1, Math.min(20, Math.round(exact)));
+    const parsed = ezPlanApi()?.parseEzOriginNotes?.(record?.production_notes || "");
+    if (parsed?.inputKind === "single-ai") return 1;
+    if (Number(parsed?.aiCount) > 0) return Math.max(1, Math.min(20, Math.round(Number(parsed.aiCount))));
+    return parsed?.inputKind === "multiple-ai" ? 5 : 1;
+  }
+
+  function syncItem4AiGenerationUi(status = item4Workspace) {
+    const panel = $("item4AiGenerationPanel");
+    const title = $("item4AiGenerationTitle");
+    const hint = $("item4AiGenerationHint");
+    const generate = $("item4GenerateAiImages");
+    const regenerate = $("item4RegenerateAiImages");
+    if (!panel) return;
+    const active = item4AiGenerationRequestActive(activeProductionRequest);
+    panel.hidden = !active;
+    if (!active) return;
+    const count = item4AiRequestedCount(activeProductionRequest);
+    const assets = Array.isArray(status?.assets) ? status.assets : [];
+    const aiAssets = assets.filter((asset) => /^studio_ai/i.test(String(asset?.source || "")));
+    if (title) title.textContent = aiAssets.length ? "AI images" : "Generate AI images";
+    if (hint) {
+      hint.textContent = item4AiGenerationInFlight
+        ? `Generating ${Math.min(aiAssets.length + 1, count)} of ${count}…`
+        : aiAssets.length >= count
+          ? `${aiAssets.length} AI image${aiAssets.length === 1 ? "" : "s"} ready. Review them below before approval.`
+          : `${aiAssets.length} of ${count} AI images ready. Studio can generate the rest now.`;
+    }
+    if (generate) {
+      generate.hidden = aiAssets.length >= count;
+      generate.disabled = item4AiGenerationInFlight;
+      generate.textContent = item4AiGenerationInFlight ? "Generating…" : (aiAssets.length ? "Generate remaining" : "Generate AI images");
+    }
+    if (regenerate) {
+      regenerate.hidden = aiAssets.length === 0;
+      regenerate.disabled = item4AiGenerationInFlight;
+    }
+  }
+
+  async function generateItem4AiImages({ reset = false, automatic = false } = {}) {
+    if (!activeProductionRequest?.id || item4AiGenerationInFlight || !item4AiGenerationRequestActive(activeProductionRequest)) return;
+    const requestId = activeProductionRequest.id;
+    const target = item4AiRequestedCount(activeProductionRequest);
+    item4AiGenerationInFlight = true;
+    syncItem4AiGenerationUi(item4Workspace);
+    setRequestMessage(automatic ? `Generating ${target} AI images…` : `Generating AI images…`, "success");
+    let first = true;
+    try {
+      for (let guard = 0; guard < target + 2; guard += 1) {
+        const result = await api(`/api/production-requests/${encodeURIComponent(requestId)}/generate-ai-masters`, {
+          method: "POST",
+          body: JSON.stringify({ reset: Boolean(reset && first) }),
+          timeoutMs: 120000,
+          retries: 0,
+        });
+        first = false;
+        if (result?.production_request) activeProductionRequest = result.production_request;
+        if (Array.isArray(result?.assets)) {
+          item4Workspace = {
+            ...(item4Workspace || {}),
+            assets: result.assets,
+            assets_status: result.completed ? "Ready" : "Uploading",
+          };
+          renderItem4Assets(item4Workspace);
+          renderEzPhotoStrip();
+        }
+        syncItem4AiGenerationUi(item4Workspace);
+        const done = Number(result?.generated_count || 0);
+        const requested = Number(result?.requested_count || target);
+        setRequestMessage(
+          result?.completed
+            ? `${done} AI image${done === 1 ? "" : "s"} ready. Review them below, then approve when you are happy.`
+            : `Generating AI images… ${done} of ${requested} ready.`,
+          "success"
+        );
+        if (result?.completed) break;
+      }
+      await loadItem4Workspace(activeProductionRequest);
+    } catch (error) {
+      if (automatic) item4AiAutoStarted.delete(requestId);
+      setRequestMessage(error.message || "AI image generation failed.", "error-text");
+    } finally {
+      item4AiGenerationInFlight = false;
+      syncItem4AiGenerationUi(item4Workspace);
+    }
+  }
+
+  function maybeGenerateItem4AiImages(status = item4Workspace) {
+    const requestId = String(activeProductionRequest?.id || "");
+    const requestStatus = String(activeProductionRequest?.status || "Draft");
+    const assets = Array.isArray(status?.assets) ? status.assets : [];
+    if (!requestId || !["Draft", "Ready"].includes(requestStatus)) return;
+    if (!item4AiGenerationRequestActive(activeProductionRequest) || assets.length) return;
+    if (item4AiAutoStarted.has(requestId) || item4AiGenerationInFlight) return;
+    item4AiAutoStarted.add(requestId);
+    Promise.resolve().then(() => generateItem4AiImages({ automatic: true }));
+  }
+
   function syncPrMediaKindUi() {
     const grid = $("item4MediaKindGrid");
     const hint = $("item4MediaKindHint");
     const zone = $("item4UploadZone");
+    const aiMode = item4AiGenerationRequestActive(activeProductionRequest);
+    syncItem4AiGenerationUi(item4Workspace);
+    if (aiMode) {
+      if (grid) grid.hidden = true;
+      if (hint) hint.hidden = true;
+      if (zone) zone.hidden = true;
+      return;
+    }
     const assetCount = Array.isArray(item4Workspace?.assets) ? item4Workspace.assets.length : 0;
     const hasAssets = assetCount > 0;
     const parsed = ezPlanApi()?.parseEzOriginNotes(activeProductionRequest?.production_notes);
@@ -7858,6 +7974,8 @@
       item4BridgePreflight = null;
       renderItem4Workspace(status);
       syncPrMediaKindUi();
+      syncItem4AiGenerationUi(status);
+      maybeGenerateItem4AiImages(status);
       if ((ezIsOriginRecord() || ezAutoPlanAfterUpload || ezStarting)
         && !ezIsAzFinishedPath()
         && ezMasterSetReadyForPlan()
@@ -8734,6 +8852,13 @@
       }
     });
   }
+
+  $("item4GenerateAiImages")?.addEventListener("click", () => generateItem4AiImages({ automatic: false }));
+  $("item4RegenerateAiImages")?.addEventListener("click", () => {
+    const count = item4AiRequestedCount(activeProductionRequest);
+    if (!window.confirm(`Regenerate all ${count} AI images? The current AI images will be replaced.`)) return;
+    generateItem4AiImages({ reset: true, automatic: false });
+  });
 
   async function buildItem4Plan() {
     if (!activeProductionRequest?.id) return;
