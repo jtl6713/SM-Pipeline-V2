@@ -421,7 +421,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.368-finished-passthrough-repair",
+          version: "0.10.369-finished-passthrough-zero-row-heal",
           studio_desk_inventory_v1: true,
           studio_desk_activity_v1: true,
           studio_tiktok_complete_v1: true,
@@ -2723,6 +2723,7 @@ function normalizedContentStage(record, outputRecords = null) {
 
   const fields = record?.fields || {};
   const value = (name) => String(fields[name] || "").toLowerCase();
+  if (value("Content_Status").includes("archived")) return "Archived";
   if (value("Review_Status").includes("ready for review") || value("Carousel_Review_Status").includes("ready for review") || value("Carousel_Review_Status").includes("review sent")) return "Review";
   if (value("Render_Status").includes("render")) return value("Render_Status").includes("rendered") ? "Review" : "Rendering";
   if (["needs assets", "partial match"].some((s) => value("Asset_Match_Status").includes(s))) return "Assets Needed";
@@ -4049,8 +4050,10 @@ async function syncProductionRequestOutputs(request, env, url, authorization) {
       continue;
     }
     if (finishedVideo) {
-      const latest = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, productionRequestId).catch(() => null);
-      if (!azLock?.token || !azOutputLockHeld(String(f(latest || {}, "Production_Notes") || ""), azLock.token)) continue;
+      // Lock ownership is decided once at function entry. Do not re-check the
+      // note token here: overlapping workspace + cron calls can overwrite that
+      // token after acquisition and otherwise starve all writers at zero rows.
+      if (!azLock?.acquired) continue;
       if (!shouldCreateFinishedOutput(finishedEnabledKeysFromRows(existing), destKey)) continue;
     }
     const created = await airtableFetch(env, PRODUCTION_REQUEST_OUTPUT_TABLE, "", {
@@ -7443,8 +7446,10 @@ async function item4SyncPlanOutputs(env, requestRecord, items, { schedules = nul
       continue;
     }
     if (finishedVideo) {
-      const latest = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, productionRequestId).catch(() => null);
-      if (!azLock?.token || !azOutputLockHeld(String(f(latest || {}, "Production_Notes") || ""), azLock.token)) continue;
+      // Lock ownership is decided once at function entry. Do not re-check the
+      // note token here: overlapping workspace + cron calls can overwrite that
+      // token after acquisition and otherwise starve all writers at zero rows.
+      if (!azLock?.acquired) continue;
       if (!shouldCreateFinishedOutput(finishedEnabledKeysFromRows(existing), destKey)) continue;
     }
     const created = await airtableFetch(env, PRODUCTION_REQUEST_OUTPUT_TABLE, "", {
