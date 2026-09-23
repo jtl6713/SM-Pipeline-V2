@@ -421,7 +421,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.369-finished-passthrough-zero-row-heal",
+          version: "0.10.368-production-lifecycle-repair",
           studio_desk_inventory_v1: true,
           studio_desk_activity_v1: true,
           studio_tiktok_complete_v1: true,
@@ -2879,11 +2879,12 @@ function mapContent(record, outputRecords = null) {
     voiceover_url: f(record, "Voiceover_URL"),
     thumbnail_url: f(record, "Thumbnail_URL"),
     output_links: f(record, "Platform Outputs") || [],
+    production_request_links: f(record, "Production Requests") || f(record, "Production_Request") || [],
     created_at: f(record, "Created_At"),
     content_profile_links: f(record, "Content_Profile") || [],
     brand_name: f(record, "Brand_Name") || [],
     market_name: f(record, "Market_Name") || [],
-    lifecycle_complete: Boolean(rollup?.lifecycle_complete),
+    lifecycle_complete: normalizedContentStage(record, linkedOutputs) === "Archived" || Boolean(rollup?.lifecycle_complete),
     output_state_counts: rollup?.output_state_counts || null,
   };
 }
@@ -18446,8 +18447,10 @@ async function listContent(request, env, url, authorization) {
   const outputsByContent = new Map();
   try {
     const outputs = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
-      limit: Math.max(100, clampLimit(url, 200, 200)),
+      limit: Math.max(200, clampLimit(url, 300, 300)),
       filterFormula: contentProfileFilterFormula(profile),
+      sortField: "Output_ID",
+      sortDirection: "desc",
     });
     for (const output of outputs) {
       const contentId = studioFirstLinkedId(f(output, "Content_Item"));
@@ -29074,7 +29077,12 @@ async function dashboard(request, env, url, authorization) {
   const formula = contentProfileFilterFormula(profile);
   const ideas = (await listRecords(env, env.AIRTABLE_IDEA_TABLE_ID, { limit: 100, sortField: "Create_Date", filterFormula: formula })).map(mapIdea);
   const contentRows = await listRecords(env, env.AIRTABLE_CONTENT_TABLE_ID, { limit: 100, sortField: "Created_At", filterFormula: formula });
-  const outputRows = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, { limit: 100, filterFormula: formula });
+  const outputRows = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
+    limit: 200,
+    filterFormula: formula,
+    sortField: "Output_ID",
+    sortDirection: "desc",
+  });
   const outputsByContent = new Map();
   for (const output of outputRows) {
     const contentId = studioFirstLinkedId(f(output, "Content_Item"));
