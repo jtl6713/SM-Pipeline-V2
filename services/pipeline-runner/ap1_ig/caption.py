@@ -7,6 +7,7 @@ from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 from ap0.public_cover import graph_fetchable_cover_url
 from ap1_ig.constants import THUMB_OFFSET_MS
 from carousel.timeutil import chicago_now
+from p3.helpers import caption_with_hashtags
 from render.fields import field_str
 
 
