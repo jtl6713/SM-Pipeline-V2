@@ -211,6 +211,14 @@ export default {
 
       if (
         request.method === "POST" &&
+        url.pathname === "/tiktok/analytics/videos"
+      ) {
+        requirePipelineSecret(request, env);
+        return fetchOwnedVideoAnalytics(request, env);
+      }
+
+      if (
+        request.method === "POST" &&
         url.pathname === "/tiktok/draft/photo/init"
       ) {
         requirePipelineSecret(request, env);
@@ -371,7 +379,7 @@ async function startOAuth(env) {
   const params = new URLSearchParams({
     client_key: env.TIKTOK_CLIENT_KEY,
     response_type: "code",
-    scope: "user.info.basic,video.publish,video.upload",
+    scope: "user.info.basic,video.publish,video.upload,video.list",
     redirect_uri: REDIRECT_URI,
     state,
     disable_auto_auth: "1",
@@ -502,6 +510,7 @@ async function handleCallback(url, env) {
     "user.info.basic",
     "video.publish",
     "video.upload",
+    "video.list",
   ];
 
   const missingScopes =
@@ -1304,6 +1313,7 @@ async function publicStatus(env) {
         "user.info.basic",
         "video.publish",
         "video.upload",
+        "video.list",
       ].every(
         (scope) =>
           scopes.includes(scope),
@@ -1385,6 +1395,67 @@ async function fetchCreatorInfoWithToken(
   }
 
   return data.data;
+}
+
+async function fetchOwnedVideoAnalytics(request, env) {
+  const input = await readRequestJson(request);
+  const tokens = await readJson(env.TIKTOK_AUTH, TOKEN_KEY);
+  const scopes = parseScopes(tokens?.scope || "");
+  if (!scopes.includes("video.list")) {
+    throw new HttpError(403, "TikTok analytics requires the video.list permission. Reconnect TikTok to grant it.");
+  }
+  const accessToken = await getValidAccessToken(env);
+  const videoIds = Array.isArray(input.video_ids)
+    ? [...new Set(input.video_ids.map((value) => String(value || "").trim()).filter(Boolean))].slice(0, 20)
+    : [];
+  const fields = [
+    "id",
+    "create_time",
+    "share_url",
+    "video_description",
+    "duration",
+    "title",
+    "like_count",
+    "comment_count",
+    "share_count",
+    "view_count",
+    "is_aigc",
+  ].join(",");
+  const queryMode = videoIds.length > 0;
+  const endpoint = queryMode
+    ? "https://open.tiktokapis.com/v2/video/query/?fields=" + encodeURIComponent(fields)
+    : "https://open.tiktokapis.com/v2/video/list/?fields=" + encodeURIComponent(fields);
+  const response = await fetch(endpoint, {
+    method: "POST",
+    headers: {
+      Authorization: "Bearer " + accessToken,
+      "Content-Type": "application/json; charset=UTF-8",
+      Accept: "application/json",
+    },
+    body: JSON.stringify(queryMode ? { filters: { video_ids: videoIds } } : { max_count: 20 }),
+  });
+  const data = await parseJsonResponse(response);
+  if (!response.ok || (data?.error?.code && data.error.code !== "ok")) {
+    throw new HttpError(
+      response.status || 400,
+      data?.error?.message || data?.error?.code || "TikTok Display API video lookup failed",
+    );
+  }
+  const videos = Array.isArray(data?.data?.videos) ? data.data.videos : [];
+  return json({
+    ok: true,
+    source: "tiktok-display-api",
+    videos: videos.map((video) => ({
+      id: String(video.id || ""),
+      published_at: video.create_time ? new Date(Number(video.create_time) * 1000).toISOString() : null,
+      views: video.view_count ?? null,
+      likes: video.like_count ?? null,
+      comments: video.comment_count ?? null,
+      shares: video.share_count ?? null,
+      duration_sec: video.duration ?? null,
+      platform_metrics: video,
+    })),
+  });
 }
 
 async function getValidAccessToken(env) {
