@@ -1,21 +1,22 @@
 # Thumbnail style guidance
 
-ChicagoShining grid covers (P2 / Studio finished-cover generation) use designed block-letter title cards, not raw photo crops.
+ChicagoShining grid covers (P2 / Studio finished-cover generation) are photorealistic title cards with restrained lettering, not raw photo crops and not luxury-ad CGI.
 
 ## Mix (operator preference)
 
 | Style | Share | When |
 | --- | --- | --- |
-| **Gold / black-and-gold sophisticated lettering** | **≥ ~80%** of posts | Default. Metallic gold or black-and-gold block letters, slightly arched or refined; elegant cinematic composition (dusk skyline, water reflections, architecture, moody city light). |
+| **Photoreal scene + restrained gold / black-and-gold lettering** | **≥ ~80%** of posts | Default. Real-camera look (natural light, real textures). Soft brushed or matte gold, or black letters with a thin gold edge. Quiet and sophisticated. Lettering stays secondary to the photo. |
 | **Colorful glossy 3D lettering** | **≤ ~20%** of posts | Only when the subject clearly calls for high-energy / playful treatment. Do not make bright multicolor “candy” 3D the default. |
 
-Gold themes have been performing better than colorful 3D themes. Prefer premium, stylish sophistication over loud rainbow block letters unless variety is intentional.
+Gold themes have been performing well, but the treatment should stay understated. Prefer a real photograph with quiet gold type over chrome foil, glow, sparkle, giant arched 3D slabs, or gold-on-everything.
 
 ## Always
 
+- Photorealistic scene — not illustrated, CGI, painterly, or plastic.
 - Large, mobile-readable title text near center or slightly below center.
 - Keep text inside safe margins; avoid the top and bottom 10% of the frame.
-- High contrast and polished production look.
+- Do not let lettering dominate the frame.
 - No fake logos, watermarks, platform UI, cluttered microtext, or distorted letters.
 - Official ChicagoShining branding/watermarking is applied downstream — do not invent a logo in the image.
 
