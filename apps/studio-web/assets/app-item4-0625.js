@@ -1902,8 +1902,20 @@
       const result = await api("/api/ideas/generate", {
         method: "POST",
         body: JSON.stringify({ count, quality }),
-        timeoutMs: 30000,
+        timeoutMs: 120000,
       });
+      if (result.completed || result.status === "Complete") {
+        ideaGenerationInFlight = false;
+        if (button) {
+          button.disabled = false;
+          button.textContent = "Generate Ideas";
+        }
+        const generated = Math.max(0, Number(result.created_count || result.requested_count || count));
+        setIdeaGenerateMessage(`${generated} idea${generated === 1 ? "" : "s"} created.`, "success");
+        if ($("ideaGenerateComplete")) $("ideaGenerateComplete").hidden = false;
+        await Promise.all([loadIdeas(), loadDashboard()]);
+        return;
+      }
       activeIdeaGenerationBatchId = result.batch_record_id;
       if (!activeIdeaGenerationBatchId) throw new Error("Studio did not return an idea batch ID.");
       setIdeaGenerateMessage(`0 of ${count} complete`);
