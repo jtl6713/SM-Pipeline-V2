@@ -66,10 +66,13 @@ def process_request(
     if dry_run:
         return {"processed": False, "dry_run": True, **preview}
 
+    settings = load_settings()
+    if not settings.get("i2_email_enabled"):
+        return {"processed": False, "reason": "email_disabled", **preview}
+
     hook = review_url()
     if not hook:
         raise RuntimeError("I2 needs I3_WEBHOOK_TOKEN or I3_WEBHOOK_URL")
-    settings = load_settings()
     to_addr = str(settings.get("i2_email_to") or DEFAULT_I2_EMAIL_TO).strip()
     send = GmailClient().send_html(
         to=to_addr,

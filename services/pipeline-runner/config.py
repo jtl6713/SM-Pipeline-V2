@@ -127,6 +127,7 @@ def load_settings() -> dict[str, Any]:
         "openai_i1_model": os.environ.get("OPENAI_I1_MODEL", "gpt-5"),
         "openai_p1_model": os.environ.get("OPENAI_P1_MODEL", "gpt-5"),
         "i2_email_to": os.environ.get("I2_EMAIL_TO", ""),
+        "i2_email_enabled": os.environ.get("I2_EMAIL_ENABLED", "false").strip().lower() in {"1", "true", "yes"},
         "i2_webhook_url": os.environ.get("I2_WEBHOOK_URL", ""),
         "i3_webhook_url": os.environ.get("I3_WEBHOOK_URL", ""),
         "i3_webhook_token": os.environ.get("I3_WEBHOOK_TOKEN", ""),
