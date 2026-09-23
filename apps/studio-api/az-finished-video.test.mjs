@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import path from "node:path";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
 
 import {
   AZ_EXPECTED_OUTPUT_COUNT,
@@ -26,6 +29,9 @@ import {
   shouldCreateFinishedOutput,
   uniquePlanItems,
 } from "./az-finished-video.mjs";
+
+const here = path.dirname(fileURLToPath(import.meta.url));
+const worker = fs.readFileSync(path.join(here, "worker.js"), "utf8");
 
 test("AZ origin stamp keeps finished-video passthrough and auto-queue", () => {
   const stamp = azOriginStamp();
@@ -176,4 +182,25 @@ test("az output lock is last-writer token and expires", () => {
   const overwritten = mergeAzOutputLock(notes, later);
   assert.equal(azOutputLockHeld(overwritten, token), false);
   assert.equal(azOutputLockHeld(overwritten, later), true);
+});
+
+
+test("promotion repairs missing Production Request Outputs from the saved plan", () => {
+  const reconcile = worker.slice(
+    worker.indexOf("async function item4ReconcileEnabledPlanOutputs"),
+    worker.indexOf("async function acquireAzOutputLock"),
+  );
+  assert.match(reconcile, /if \(!enabledRows\.length\)/);
+  assert.match(reconcile, /Studio_Output_Plan_JSON/);
+  assert.match(reconcile, /await item4SyncPlanOutputs\(env, requestRecord, planItems\)/);
+});
+
+test("finished-video output sync can take over a fresh lock only when no rows exist", () => {
+  const sync = worker.slice(
+    worker.indexOf("async function item4SyncPlanOutputs"),
+    worker.indexOf("async function buildItem4OutputPlan"),
+  );
+  assert.match(sync, /if \(!lockedRows\.length\)/);
+  assert.match(sync, /mergeAzOutputLock/);
+  assert.match(sync, /azOutputLockHeld/);
 });
