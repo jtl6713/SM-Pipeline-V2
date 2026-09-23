@@ -39,3 +39,22 @@ test("every finished video uses resumable multipart upload", () => {
   assert.doesNotMatch(decision, /ITEM4_DIRECT_UPLOAD_MAX_BYTES/);
   assert.match(app, /Array\.isArray\(result\?\.assets\)[\s\S]*item4ApplyAssetsLocally\(result\.assets\)/);
 });
+
+
+test("finished-video production save keeps a video content type", () => {
+  const infer = app.slice(
+    app.indexOf("function inferredMasterContentType"),
+    app.indexOf("function syncHiddenMasterContentType"),
+  );
+  assert.match(infer, /ezIsFinishedVideo\(\) \|\| ezIsClipRequest\(\)/);
+  assert.match(infer, /return "Vertical Short Video"/);
+});
+
+test("finished-video production player can use the persisted public MP4", () => {
+  const playable = app.slice(
+    app.indexOf("function item4PlayableClipSrc"),
+    app.indexOf("function item4ClipDurationBadgeHtml"),
+  );
+  assert.match(playable, /preview_public_url \|\| asset\?\.url/);
+  assert.match(playable, /media\\\.chicagoshining\\\.com/);
+});
