@@ -28,6 +28,7 @@ if (!clientId || !clientSecret) {
 const scopes = [
   "https://www.googleapis.com/auth/youtube.upload",
   "https://www.googleapis.com/auth/youtube.readonly",
+  "https://www.googleapis.com/auth/yt-analytics.readonly",
   // Required for privacy updates, scheduled publish changes, and videos.delete remediation.
   "https://www.googleapis.com/auth/youtube.force-ssl",
 ];
@@ -47,7 +48,7 @@ authUrl.searchParams.set("include_granted_scopes", "true");
 console.log("\nOpen this URL in a browser:\n");
 console.log(authUrl.toString());
 console.log("\nAuthorize with the Google account that owns/manages the target YouTube channel.");
-console.log("Requested scopes: YouTube upload + read-only status access.\n");
+console.log("Requested scopes: YouTube upload + read-only channel + YouTube Analytics access.\n");
 
 const redirect = new URL(redirectUri);
 
