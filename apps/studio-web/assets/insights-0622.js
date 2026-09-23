@@ -9,6 +9,7 @@
     sampled: [],
     loading: false,
     loadedAt: null,
+    connections: null,
   };
 
   const DAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
@@ -30,9 +31,19 @@
       .replace(/'/g, "&#39;");
   }
 
-  function num(value) {
+  function maybeNum(value) {
+    if (value === null || value === undefined || value === "") return null;
     const n = Number(value);
-    return Number.isFinite(n) ? n : 0;
+    return Number.isFinite(n) ? n : null;
+  }
+
+  function num(value) {
+    return maybeNum(value) ?? 0;
+  }
+
+  function metricCompact(value) {
+    const n = maybeNum(value);
+    return n == null ? "—" : compact(n);
   }
 
   function compact(value) {
@@ -115,15 +126,25 @@
     const contentById = new Map(state.content.map((row) => [row.id, row]));
     state.enriched = state.outputs.map((row) => {
       const content = row.content || contentById.get(row.content_item_id) || {};
-      const views = num(row.insights_views);
-      const reach = num(row.insights_reach);
-      const likes = num(row.insights_likes);
-      const comments = num(row.insights_comments);
-      const shares = num(row.insights_shares);
-      const saves = num(row.insights_saves);
-      const interactions = likes + comments + shares + saves;
-      const denominator = views > 0 ? views : (reach > 0 ? reach : 0);
-      const engagementRate = denominator > 0 ? interactions / denominator * 100 : null;
+      const viewsMetric = maybeNum(row.insights_views);
+      const reachMetric = maybeNum(row.insights_reach);
+      const likesMetric = maybeNum(row.insights_likes);
+      const commentsMetric = maybeNum(row.insights_comments);
+      const sharesMetric = maybeNum(row.insights_shares);
+      const savesMetric = maybeNum(row.insights_saves);
+      const totalInteractionsMetric = maybeNum(row.insights_total_interactions);
+      const views = viewsMetric ?? 0;
+      const reach = reachMetric ?? 0;
+      const likes = likesMetric ?? 0;
+      const comments = commentsMetric ?? 0;
+      const shares = sharesMetric ?? 0;
+      const saves = savesMetric ?? 0;
+      const interactions = totalInteractionsMetric ?? (likesMetric != null || commentsMetric != null || sharesMetric != null || savesMetric != null
+        ? [likesMetric, commentsMetric, sharesMetric, savesMetric].filter((value) => value != null).reduce((sum, value) => sum + value, 0)
+        : 0);
+      const interactionsKnown = totalInteractionsMetric != null || likesMetric != null || commentsMetric != null || sharesMetric != null || savesMetric != null;
+      const denominator = viewsMetric != null && views > 0 ? views : (reachMetric != null && reach > 0 ? reach : 0);
+      const engagementRate = denominator > 0 && interactionsKnown ? interactions / denominator * 100 : null;
       const published = row.published_at ? new Date(row.published_at) : null;
       const themes = Array.isArray(content.content_themes)
         ? content.content_themes.map(normalizeChoice).filter(Boolean)
@@ -138,7 +159,15 @@
         shares,
         saves,
         interactions,
+        viewsKnown: viewsMetric != null,
+        reachKnown: reachMetric != null,
+        likesKnown: likesMetric != null,
+        commentsKnown: commentsMetric != null,
+        sharesKnown: sharesMetric != null,
+        savesKnown: savesMetric != null,
+        interactionsKnown,
         engagementRate,
+        milestones: row.insights_milestones || {},
         analyticsPresent: analyticsPresent(row),
         publishedDate: published && !Number.isNaN(published.getTime()) ? published : null,
         contentType: normalizeChoice(content.content_type) || row.platform_output_type || "Unknown",
@@ -171,10 +200,10 @@
   }
 
   function metricValue(row, metric) {
-    if (metric === "interactions") return row.interactions;
-    if (metric === "engagement") return Number.isFinite(row.engagementRate) ? row.engagementRate : 0;
-    if (metric === "reach") return row.reach;
-    return row.views;
+    if (metric === "interactions") return row.interactionsKnown ? row.interactions : null;
+    if (metric === "engagement") return Number.isFinite(row.engagementRate) ? row.engagementRate : null;
+    if (metric === "reach") return row.reachKnown ? row.reach : null;
+    return row.viewsKnown ? row.views : null;
   }
 
   function metricLabel(metric) {
@@ -202,19 +231,25 @@
   function groupStats(rows, getter, metric = "views") {
     const groups = groupRows(rows, getter);
     return [...groups.entries()].map(([name, items]) => {
-      const total = items.reduce((sum, row) => sum + metricValue(row, metric), 0);
-      const interactions = items.reduce((sum, row) => sum + row.interactions, 0);
-      const views = items.reduce((sum, row) => sum + row.views, 0);
+      const metricRows = items.map((row) => ({ row, value: metricValue(row, metric) })).filter((entry) => entry.value != null);
+      const total = metricRows.reduce((sum, entry) => sum + entry.value, 0);
+      const viewRows = items.filter((row) => row.viewsKnown);
+      const interactionRows = items.filter((row) => row.interactionsKnown && row.viewsKnown);
+      const views = viewRows.reduce((sum, row) => sum + row.views, 0);
+      const interactions = interactionRows.reduce((sum, row) => sum + row.interactions, 0);
+      const engagementViews = interactionRows.reduce((sum, row) => sum + row.views, 0);
       return {
         name,
-        count: items.length,
+        count: metricRows.length,
+        group_count: items.length,
         total,
-        average: items.length ? total / items.length : 0,
+        average: metricRows.length ? total / metricRows.length : null,
         views,
+        views_count: viewRows.length,
         interactions,
-        engagementRate: views > 0 ? interactions / views * 100 : null,
+        engagementRate: engagementViews > 0 ? interactions / engagementViews * 100 : null,
       };
-    }).sort((a, b) => b.average - a.average);
+    }).filter((row) => row.count > 0).sort((a, b) => (b.average ?? -Infinity) - (a.average ?? -Infinity));
   }
 
   function renderCoverage() {
@@ -234,13 +269,49 @@
       "Missing analytics are treated as unknown, never as zero performance.</span>";
   }
 
+  function renderConnections() {
+    const target = $("insightsConnections");
+    if (!target) return;
+    if (!state.connections) {
+      target.innerHTML = "<div class='insights-empty'>Connection status is loading.</div>";
+      return;
+    }
+    if (state.connections.error) {
+      target.innerHTML = "<div class='insights-empty'>" + esc(state.connections.error) + "</div>";
+      return;
+    }
+    const connections = state.connections.connections || {};
+    const order = ["instagram", "facebook", "youtube", "tiktok"];
+    target.innerHTML = order.map((key) => {
+      const item = connections[key] || {};
+      const status = String(item.status || "error");
+      const label = status === "connected" ? "Connected" : status === "needs_authorization" ? "Needs authorization" : "Error";
+      const account = item.account_name || item.account_id || "Account not confirmed";
+      const sync = item.last_successful_sync ? "Last sync " + dateTimeLabel(item.last_successful_sync) : "No successful analytics sync yet";
+      const error = item.last_error || item.error || "";
+      const reconnect = item.reconnect_url
+        ? "<a class='secondary-button insights-reconnect' target='_blank' rel='noopener' href='" + esc(item.reconnect_url) + "'>Reconnect</a>"
+        : (status === "needs_authorization" ? "<span class='insights-action-note'>Authorization required</span>" : "");
+      return "<article class='insights-connection " + esc(status) + "'>" +
+        "<div class='insights-connection-head'><strong>" + esc(item.platform || key) + "</strong><span>" + esc(label) + "</span></div>" +
+        "<div class='insights-connection-account'>" + esc(account) + "</div>" +
+        "<small>" + esc(sync) + "</small>" +
+        (error ? "<p>" + esc(error) + "</p>" : "") +
+        reconnect +
+        "</article>";
+    }).join("");
+  }
+
   function renderKpis() {
     const target = $("insightsKpis");
     if (!target) return;
     const rows = state.sampled;
-    const views = rows.reduce((sum, row) => sum + row.views, 0);
-    const interactions = rows.reduce((sum, row) => sum + row.interactions, 0);
-    const reach = rows.reduce((sum, row) => sum + row.reach, 0);
+    const viewRows = rows.filter((row) => row.viewsKnown);
+    const interactionRows = rows.filter((row) => row.interactionsKnown);
+    const reachRows = rows.filter((row) => row.reachKnown);
+    const views = viewRows.reduce((sum, row) => sum + row.views, 0);
+    const interactions = interactionRows.reduce((sum, row) => sum + row.interactions, 0);
+    const reach = reachRows.reduce((sum, row) => sum + row.reach, 0);
     const rateRows = rows.filter((row) => Number.isFinite(row.engagementRate));
     const rate = rateRows.length
       ? rateRows.reduce((sum, row) => sum + row.engagementRate, 0) / rateRows.length
@@ -251,9 +322,9 @@
       .sort((a, b) => b - a)[0];
     const cards = [
       { label: "Posts sampled", value: compact(rows.length), hint: state.published.length + " published in filter" },
-      { label: "Views", value: compact(views), hint: reach ? compact(reach) + " total reach" : "Stored platform views" },
-      { label: "Interactions", value: compact(interactions), hint: "Likes + comments + shares + saves" },
-      { label: "Avg engagement", value: rate == null ? "—" : percent(rate), hint: "Interactions ÷ views/reach" },
+      { label: "Views", value: viewRows.length ? compact(views) : "—", hint: "Known on " + viewRows.length + " post" + (viewRows.length === 1 ? "" : "s") + (reachRows.length ? " · reach known on " + reachRows.length : "") },
+      { label: "Interactions", value: interactionRows.length ? compact(interactions) : "—", hint: "Known likes/comments/shares/saves · n=" + interactionRows.length },
+      { label: "Avg engagement", value: rate == null ? "—" : percent(rate), hint: "Known interactions ÷ known views/reach · n=" + rateRows.length },
       { label: "Latest metric pull", value: fresh ? dateLabel(new Date(fresh)) : "—", hint: fresh ? dateTimeLabel(new Date(fresh)) : "No sampled timestamp" },
     ];
     target.innerHTML = cards.map((card) =>
@@ -269,8 +340,10 @@
     const byDate = new Map();
     state.sampled.forEach((row) => {
       if (!row.publishedDate) return;
+      const value = metricValue(row, metric);
+      if (value == null) return;
       const key = row.publishedDate.toISOString().slice(0, 10);
-      byDate.set(key, (byDate.get(key) || 0) + metricValue(row, metric));
+      byDate.set(key, (byDate.get(key) || 0) + value);
     });
     const points = [...byDate.entries()].sort((a, b) => a[0].localeCompare(b[0]));
     if (!points.length) {
@@ -336,6 +409,7 @@
     if (!target) return;
     const metric = String($("insightsMetric")?.value || "views");
     const rows = [...state.sampled]
+      .filter((row) => metricValue(row, metric) != null)
       .sort((a, b) => metricValue(b, metric) - metricValue(a, metric))
       .slice(0, 8);
     if (!rows.length) {
@@ -429,15 +503,16 @@
   function renderTiming() {
     const target = $("insightsTiming");
     if (!target) return;
-    if (!state.sampled.length) {
-      target.innerHTML = "<div class='insights-empty'>No timing data in the current filter.</div>";
+    const timingRows = state.sampled.filter((row) => row.viewsKnown);
+    if (!timingRows.length) {
+      target.innerHTML = "<div class='insights-empty'>No timing data with known views in the current filter.</div>";
       return;
     }
     const cells = [];
     let maxAvg = 0;
     DAY_NAMES.forEach((day, dayIndex) => {
       TIME_BUCKETS.forEach((bucket) => {
-        const rows = state.sampled.filter((row) => {
+        const rows = timingRows.filter((row) => {
           if (!row.publishedDate) return false;
           const d = row.publishedDate;
           return d.getDay() === dayIndex && d.getHours() >= bucket.start && d.getHours() < bucket.end;
@@ -464,19 +539,25 @@
   function renderPostsTable() {
     const target = $("insightsPostsTable");
     if (!target) return;
-    const rows = [...state.sampled].sort((a, b) => b.views - a.views).slice(0, 40);
+    const rows = [...state.sampled].sort((a, b) => (b.viewsKnown ? b.views : -1) - (a.viewsKnown ? a.views : -1)).slice(0, 40);
     if (!rows.length) {
       target.innerHTML = "<div class='insights-empty'>No posts with stored analytics in this filter.</div>";
       return;
     }
-    target.innerHTML = "<table class='insights-table'><thead><tr><th>Post</th><th>Platform</th><th>Views</th><th>Interactions</th><th>Engagement</th><th>Data as of</th></tr></thead><tbody>" +
+    const growth = (row) => {
+      const m = row.milestones || {};
+      const piece = (label, value) => label + " " + metricCompact(value?.views);
+      return [piece("24h", m.h24), piece("7d", m.d7), piece("30d", m.d30)].join(" · ");
+    };
+    target.innerHTML = "<table class='insights-table'><thead><tr><th>Post</th><th>Platform</th><th>Views</th><th>Interactions</th><th>Engagement</th><th>Growth snapshots</th><th>Data as of</th></tr></thead><tbody>" +
       rows.map((row) => {
         const title = row.platform_post_url
           ? "<a target='_blank' rel='noopener' href='" + esc(row.platform_post_url) + "'>" + esc(row.title) + " ↗</a>"
           : esc(row.title);
         return "<tr><td><strong>" + title + "</strong><small>" + esc(dateLabel(row.published_at)) + "</small></td>" +
-          "<td>" + esc(row.platform || "—") + "</td><td>" + esc(compact(row.views)) + "</td>" +
-          "<td>" + esc(compact(row.interactions)) + "</td><td>" + esc(row.engagementRate == null ? "—" : percent(row.engagementRate)) + "</td>" +
+          "<td>" + esc(row.platform || "—") + "</td><td>" + esc(row.viewsKnown ? compact(row.views) : "—") + "</td>" +
+          "<td>" + esc(row.interactionsKnown ? compact(row.interactions) : "—") + "</td><td>" + esc(row.engagementRate == null ? "—" : percent(row.engagementRate)) + "</td>" +
+          "<td><small>" + esc(growth(row)) + "</small></td>" +
           "<td>" + esc(dateTimeLabel(row.insights_as_of)) + "</td></tr>";
       }).join("") + "</tbody></table>";
   }
@@ -493,8 +574,10 @@
 
   function analystContext() {
     const evidence = evidenceGroups();
-    const views = state.sampled.reduce((sum, r) => sum + r.views, 0);
-    const interactions = state.sampled.reduce((sum, r) => sum + r.interactions, 0);
+    const viewRows = state.sampled.filter((r) => r.viewsKnown);
+    const interactionRows = state.sampled.filter((r) => r.interactionsKnown);
+    const views = viewRows.reduce((sum, r) => sum + r.views, 0);
+    const interactions = interactionRows.reduce((sum, r) => sum + r.interactions, 0);
     const coverage = state.published.length ? state.sampled.length / state.published.length * 100 : 0;
     const compactGroup = (rows) => rows.slice(0, 10).map((r) => ({
       name: r.name,
@@ -515,7 +598,12 @@
         coverage_percent: Number(coverage.toFixed(1)),
         note: "Missing analytics are unknown, not zero.",
       },
-      totals: { views: Math.round(views), interactions: Math.round(interactions) },
+      totals: {
+        views: viewRows.length ? Math.round(views) : null,
+        views_sample_size: viewRows.length,
+        interactions: interactionRows.length ? Math.round(interactions) : null,
+        interactions_sample_size: interactionRows.length,
+      },
       platforms: compactGroup(evidence.byPlatform),
       content_types: compactGroup(evidence.byType),
       locations: compactGroup(evidence.byLocation),
@@ -525,12 +613,14 @@
         title: r.title,
         platform: r.platform,
         published_at: r.published_at,
-        views: r.views,
-        likes: r.likes,
-        comments: r.comments,
-        shares: r.shares,
-        saves: r.saves,
-        interactions: r.interactions,
+        views: r.viewsKnown ? r.views : null,
+        reach: r.reachKnown ? r.reach : null,
+        likes: r.likesKnown ? r.likes : null,
+        comments: r.commentsKnown ? r.comments : null,
+        shares: r.sharesKnown ? r.shares : null,
+        saves: r.savesKnown ? r.saves : null,
+        interactions: r.interactionsKnown ? r.interactions : null,
+        milestones: r.milestones || {},
         engagement_rate: r.engagementRate == null ? null : Number(r.engagementRate.toFixed(2)),
         content_type: r.contentType,
         location: r.location || null,
@@ -685,6 +775,7 @@
   function renderAll() {
     applyFilters();
     renderCoverage();
+    renderConnections();
     renderKpis();
     renderTrend();
     renderPlatform();
@@ -709,12 +800,14 @@
     const status = $("insightsStatus");
     if (status) status.textContent = "Loading performance data…";
     try {
-      let posts = null;
-      try {
-        posts = await fetchJson("/api/insights/posts?limit=500");
-      } catch {
-        posts = null;
-      }
+      const [postsResult, connectionsResult] = await Promise.allSettled([
+        fetchJson("/api/insights/posts?limit=500"),
+        fetchJson("/api/insights/connections"),
+      ]);
+      const posts = postsResult.status === "fulfilled" ? postsResult.value : null;
+      state.connections = connectionsResult.status === "fulfilled"
+        ? connectionsResult.value
+        : { error: connectionsResult.reason?.message || "Could not load account connection status." };
       if (posts && Array.isArray(posts.records)) {
         state.outputs = posts.records;
         state.content = [];
