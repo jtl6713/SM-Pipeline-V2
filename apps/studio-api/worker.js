@@ -7411,7 +7411,12 @@ async function item4SyncPlanOutputs(env, requestRecord, items, { schedules = nul
   const wanted = new Set();
   const now = new Date().toISOString();
   const scheduleOverrides = studioScheduleOverridesFromPayload({ schedules });
-  // Finished-file passthrough must materialize its six destination rows before\n  // doing any broad schedule-occupancy reads. The final AZ approval path performs\n  // its own conflict-aware scheduling, so an empty local occupancy map is safe here\n  // and avoids exhausting the Worker subrequest budget while the output lock is held.\n  const occupied = finishedVideo ? {} : await studioOccupiedSchedulesOrEmpty(env);\n  const stamps = studioBuildSuggestedScheduleMap(uniqueItems.map((item) => {
+  // Finished-file passthrough must materialize its six destination rows before
+  // doing any broad schedule-occupancy reads. The final AZ approval path performs
+  // its own conflict-aware scheduling, so an empty local occupancy map is safe here
+  // and avoids exhausting the Worker subrequest budget while the output lock is held.
+  const occupied = finishedVideo ? {} : await studioOccupiedSchedulesOrEmpty(env);
+  const stamps = studioBuildSuggestedScheduleMap(uniqueItems.map((item) => {
     const key = `${item.platform}::${item.output_type}`;
     const current = byKey.get(finishedVideo ? canonicalFinishedDestinationKey(item.platform, item.output_type) : key);
     return {
@@ -7532,7 +7537,8 @@ async function buildItem4OutputPlan(request, env, url, authorization) {
     Carousel_Slide_Count_Exact: keepExact ? Number(f(record, "Carousel_Slide_Count_Exact") || photoCount) : photoCount,
     Carousel_Slide_Count_Min:null, Carousel_Slide_Count_Max:null,
     Video_Clip_Count_Mode:"Exact", Video_Clip_Count_Exact:maxCount, Video_Clip_Count_Min:null, Video_Clip_Count_Max:null,
-    Studio_Output_Plan_JSON:JSON.stringify(plan), Studio_Output_Plan_Status:needsReview?"Needs Review":"Ready",\n    Studio_Variant_Manifest_JSON:null, Studio_Variant_Status:finishedVideo?"Not Needed":"None", Studio_Variant_Updated_At:null, Studio_Variant_Error:null,
+    Studio_Output_Plan_JSON:JSON.stringify(plan), Studio_Output_Plan_Status:needsReview?"Needs Review":"Ready",
+    Studio_Variant_Manifest_JSON:null, Studio_Variant_Status:finishedVideo?"Not Needed":"None", Studio_Variant_Updated_At:null, Studio_Variant_Error:null,
     Studio_Item4_State:needsReview?"Assets Ready":"Plan Ready",
   });
   const rows=await outputRowsForProductionRequest(env,recordId);
