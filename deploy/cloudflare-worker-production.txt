@@ -526,3 +526,4 @@ Finished-video hard cap six Worker deploy: 2026-09-20 — Concurrent plan-sync a
 2026-09-23 deploy Studio API Worker 0.10.364 first-party analytics reconciled with Python I1, Facebook cap, photoreal thumbnails, and RR1 disablement
 2026-09-23 deploy Worker 0.10.365 pre-production AI image generation inside Production
 2026-09-23 redeploy Worker 0.10.365 after pre-production AI validation pass
+2026-09-23 deploy Worker 0.10.366 finished-video passthrough missing-output self-heal
