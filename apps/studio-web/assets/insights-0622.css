@@ -673,3 +673,124 @@
     grid-template-columns: 1fr;
   }
 }
+
+
+.insights-connections-panel {
+  margin-bottom: 14px;
+}
+
+.insights-connections {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.insights-connection {
+  min-width: 0;
+  border: 1px solid #d8e3e4;
+  border-radius: 12px;
+  padding: 12px;
+  background: #fff;
+}
+
+.insights-connection.connected {
+  border-color: #a9d4cd;
+  background: #f5fbfa;
+}
+
+.insights-connection.needs_authorization {
+  border-color: #e7cf92;
+  background: #fffaf0;
+}
+
+.insights-connection.error {
+  border-color: #e0b1b1;
+  background: #fff7f7;
+}
+
+.insights-connection-head {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.insights-connection-head strong {
+  color: var(--insights-navy);
+  font-size: 13px;
+}
+
+.insights-connection-head span {
+  border-radius: 999px;
+  padding: 4px 7px;
+  background: #e8efef;
+  color: #596a72;
+  font-size: 9px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.insights-connection.connected .insights-connection-head span {
+  background: #dcefeb;
+  color: #176a63;
+}
+
+.insights-connection.needs_authorization .insights-connection-head span {
+  background: #f6e7b9;
+  color: #755f19;
+}
+
+.insights-connection.error .insights-connection-head span {
+  background: #f2dddd;
+  color: #8b3535;
+}
+
+.insights-connection-account {
+  overflow: hidden;
+  margin-top: 10px;
+  color: var(--insights-ink);
+  font-size: 12px;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.insights-connection small {
+  display: block;
+  margin-top: 4px;
+  color: var(--insights-muted);
+  font-size: 10px;
+}
+
+.insights-connection p {
+  margin: 8px 0 0;
+  color: #845f27;
+  font-size: 10px;
+  line-height: 1.35;
+}
+
+.insights-reconnect {
+  display: inline-block;
+  margin-top: 9px;
+  text-decoration: none;
+}
+
+.insights-action-note {
+  display: block;
+  margin-top: 9px;
+  color: #755f19;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+@media (max-width: 1180px) {
+  .insights-connections {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 760px) {
+  .insights-connections {
+    grid-template-columns: 1fr;
+  }
+}
