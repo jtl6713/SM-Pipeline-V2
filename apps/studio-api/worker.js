@@ -407,7 +407,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.362-thumb-photo-real",
+          version: "0.10.363-disable-review-email",
           studio_desk_inventory_v1: true,
           studio_desk_activity_v1: true,
           studio_tiktok_complete_v1: true,
@@ -9737,11 +9737,6 @@ async function resumeStalePlatformOutputs(env, options = {}) {
       key: "LETTER",
       formula: `AND({Test_Run_ID}=BLANK(),{Render_Status}="Native Photo Route",OR({Output_Status}="Ready for Review",{Output_Status}="In Production"),${stale})`,
       run: () => item4PulseLetterPython(env, { maxRuns: 8 }),
-    },
-    {
-      key: "RR1",
-      formula: `AND(${STUDIO_RR1_WORK_FORMULA},${stale})`,
-      run: () => item4PulseRR1Python(env, { maxRuns: 10 }),
     },
   ];
   for (const job of jobs) {
@@ -23391,7 +23386,6 @@ async function cadenceHasRenderWork(env) {
     cadenceQueueHasWork(env, outputTable, { formula: STUDIO_R3_WORK_FORMULA }),
     cadenceQueueHasWork(env, outputTable, { formula: STUDIO_R4_WORK_FORMULA }),
     cadenceQueueHasWork(env, outputTable, { view: "R5 - Rendering Jobs to Poll", formula: "{Test_Run_ID}=BLANK()" }),
-    cadenceQueueHasWork(env, outputTable, { formula: STUDIO_RR1_WORK_FORMULA }),
   ]);
   return checks.some(Boolean);
 }
@@ -24018,7 +24012,6 @@ async function pulseStudioContinuationJobs(env, options = {}) {
     { id: PHASE6_R4_SCENARIO_ID, key: "T1", table: outputTable, formula: STUDIO_T1_WORK_FORMULA, skipStories: true },
     { id: PHASE6_R4_SCENARIO_ID, key: "R4", table: outputTable, formula: STUDIO_R4_WORK_FORMULA, skipStories: true },
     { id: PHASE6_R3_SCENARIO_ID, key: "R3", table: outputTable, formula: STUDIO_R3_WORK_FORMULA, skipStories: true },
-    { id: PHASE6_RR1_SCENARIO_ID, key: "RR1", table: outputTable, formula: STUDIO_RR1_WORK_FORMULA },
     { id: 5528742, key: "P1", table: contentTable, view: "P1 - Ready for Package Generation", formula: "{Test_Run_ID}=BLANK()" },
     { id: PHASE6_R2_SCENARIO_ID, key: "R2", table: outputTable, formula: STUDIO_R2_WORK_FORMULA, skipPhotoSequence: true },
   ];
@@ -24103,11 +24096,6 @@ async function pulseStudioContinuationJobs(env, options = {}) {
       }
       if (job.key === "R3" && pipelineStageBackend(env, "R3").mode === "python") {
         await item4PulseR3Python(env, { maxRuns: 10 });
-        pulses.push({ key: job.key, pulsed: true, backend: "python", matched: eligible.length });
-        continue;
-      }
-      if (job.key === "RR1" && pipelineStageBackend(env, "RR1").mode === "python") {
-        await item4PulseRR1Python(env, { maxRuns: 10 });
         pulses.push({ key: job.key, pulsed: true, backend: "python", matched: eligible.length });
         continue;
       }
