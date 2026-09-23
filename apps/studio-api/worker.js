@@ -421,7 +421,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.366-finished-passthrough-repair",
+          version: "0.10.367-finished-passthrough-repair",
           studio_desk_inventory_v1: true,
           studio_desk_activity_v1: true,
           studio_tiktok_complete_v1: true,
@@ -7393,26 +7393,12 @@ async function item4SyncPlanOutputs(env, requestRecord, items, { schedules = nul
     azLock = await acquireAzOutputLock(env, requestRecord);
     requestRecord = azLock.record;
     if (!azLock.acquired) {
-      let lockedRows = await outputRowsForProductionRequest(env, productionRequestId, { includeInactive: true });
-      await item4CollapseDuplicatePlanOutputs(env, lockedRows, { finishedVideo: true });
-      lockedRows = await outputRowsForProductionRequest(env, productionRequestId, { includeInactive: true });
-
-      // A fresh AZ lock with zero rows means an earlier sync claimed the lock but
-      // never materialized a destination. Take over the empty transaction safely:
-      // each create below rechecks the current token, so only the last writer acts.
-      if (!lockedRows.length) {
-        const token = azOutputLockToken();
-        const latest = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, productionRequestId).catch(() => requestRecord);
-        const takeover = await item4UpdateRequestState(env, productionRequestId, {
-          Production_Notes: mergeAzOutputLock(String(f(latest || requestRecord, "Production_Notes") || ""), token),
-        });
-        const held = azOutputLockHeld(String(f(takeover, "Production_Notes") || ""), token);
-        if (held) {
-          azLock = { acquired: true, record: takeover, token };
-          requestRecord = takeover;
-        }
-      }
-      if (!azLock.acquired) return;
+      await item4CollapseDuplicatePlanOutputs(
+        env,
+        await outputRowsForProductionRequest(env, productionRequestId, { includeInactive: true }),
+        { finishedVideo: true }
+      );
+      return;
     }
   }
   let existing = await outputRowsForProductionRequest(env, productionRequestId, { includeInactive: true });
