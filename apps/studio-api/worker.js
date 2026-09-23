@@ -407,7 +407,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.360-insights-dashboard",
+          version: "0.10.361-idea-python-direct",
           studio_desk_inventory_v1: true,
           studio_desk_activity_v1: true,
           studio_tiktok_complete_v1: true,
@@ -31194,37 +31194,68 @@ async function startStudioIdeaGeneration(request, env, authorization, ctx = null
   try { payload = await request.json(); } catch { throw new HttpError(400, "Request body must be valid JSON"); }
   const count = Number(payload?.count);
   const quality = String(payload?.quality || "Highest Quality").trim();
-  if (!Number.isInteger(count) || count < STUDIO_IDEA_MIN_COUNT || count > STUDIO_IDEA_MAX_COUNT) throw new HttpError(400, "Idea count must be a whole number from 1 to 10");
-  if (!STUDIO_IDEA_ALLOWED_QUALITIES.has(quality)) throw new HttpError(400, "Quality must be Highest Quality, Balanced, or Quantity");
-
-  if (pipelineStageBackend(env, "I1").mode !== "python") {
-    const scenario = await phase6ScenarioState(env, STUDIO_IDEA_I1_SCENARIO_ID);
-    if (scenario?.isActive) {
-      throw new HttpError(409, "The scheduled idea generator is currently active. Try manual generation after that run finishes.");
-    }
+  if (!Number.isInteger(count) || count < STUDIO_IDEA_MIN_COUNT || count > STUDIO_IDEA_MAX_COUNT) {
+    throw new HttpError(400, "Idea count must be a whole number from 1 to 10");
   }
-  const profile = await studioIdeaEnabledProfile(env, authorization, requestedProfileId(null, payload));
-  const batch = await studioIdeaCreateBatch(env, profile, count, quality, authorization);
+  if (!STUDIO_IDEA_ALLOWED_QUALITIES.has(quality)) {
+    throw new HttpError(400, "Quality must be Highest Quality, Balanced, or Quantity");
+  }
+
+  const profileId = requestedProfileId(null, payload);
+  const profile = await resolveWorkingContentProfile(env, authorization, profileId);
+  if (!Boolean(f(profile, "Active"))) throw new HttpError(409, "The selected content profile is not active");
+
+  // I1 is Python-owned in production. Manual Studio generation should call the
+  // current pipeline stage directly instead of touching retired Make scenario
+  // state, temporary Make blueprints, or the legacy manual batch overrides.
+  let pulse;
   try {
-    await studioIdeaSetProfileOverrides(env, profile.id, batch.id, count, quality);
+    pulse = await item4PulsePipelineStage(env, "i1", {
+      extra: {
+        profile_record_id: profile.id,
+        requested_count: count,
+        quality,
+        trigger_i2: true,
+      },
+    }, "I1");
   } catch (error) {
-    await studioIdeaUpdateBatch(env, batch.id, { Status: "Failed", Completed_At: new Date().toISOString(), Error: String(error?.message || error).slice(0, 10000) });
-    throw error;
+    console.error("Studio idea generation could not reach Python I1", error);
+    throw error instanceof HttpError
+      ? error
+      : new HttpError(502, `Python I1 request failed: ${String(error?.message || error)}`);
   }
 
-  const task = studioIdeaExecuteBatch(env, profile, batch).catch((error) => console.error("Manual idea generation background task failed", error));
-  if (ctx?.waitUntil) ctx.waitUntil(task); else await task;
+  const { response, payload: result } = pulse;
+  if (!response.ok || result?.status === "error") {
+    throw new HttpError(
+      response.status >= 400 ? response.status : 502,
+      result?.message || result?.error || `Python I1 returned HTTP ${response.status}`
+    );
+  }
+
+  const run = result?.details?.run || {};
+  const created = Math.max(0, Number(run.created_count || 0));
+  if (created < count) {
+    throw new HttpError(
+      502,
+      run.reason
+        ? `Python I1 created ${created} of ${count} requested ideas (${run.reason}).`
+        : `Python I1 created ${created} of ${count} requested ideas.`
+    );
+  }
 
   return respond(request, env, {
     ok: true,
     accepted: true,
-    batch_record_id: batch.id,
-    batch_id: String(f(batch, "Batch_ID") || ""),
+    completed: true,
+    status: "Complete",
+    created_count: created,
     requested_count: count,
     quality,
-    status: "Pending",
-    message: "Idea generation started.",
-  }, 202);
+    profile_record_id: profile.id,
+    backend: "python",
+    message: `${created} idea${created === 1 ? "" : "s"} created.`,
+  }, 200);
 }
 
 async function studioIdeaGenerationStatus(request, env, url) {
