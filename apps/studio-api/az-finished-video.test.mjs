@@ -205,3 +205,20 @@ test("finished-video output sync preserves a fresh single-owner lock", () => {
   assert.match(sync, /return;/);
   assert.doesNotMatch(sync, /if \(!lockedRows\.length\)/);
 });
+
+
+test("finished-video destination sync skips the broad occupancy read while holding its output lock", () => {
+  const sync = worker.slice(
+    worker.indexOf("async function item4SyncPlanOutputs"),
+    worker.indexOf("async function buildItem4OutputPlan"),
+  );
+  assert.match(sync, /const occupied = finishedVideo \? \{\} : await studioOccupiedSchedulesOrEmpty\(env\)/);
+});
+
+test("finished-video plan rebuild keeps variants Not Needed", () => {
+  const plan = worker.slice(
+    worker.indexOf("async function buildItem4OutputPlan"),
+    worker.indexOf("async function getItem4OutputPlan"),
+  );
+  assert.match(plan, /Studio_Variant_Status:finishedVideo\?"Not Needed":"None"/);
+});
