@@ -36,6 +36,7 @@ def process_request(
     covered_text: str = "(none)",
     needed: int = 0,
     total: int | None = None,
+    market: str = "Chicago",
     dry_run: bool = False,
 ) -> dict[str, Any]:
     needed_count = max(0, int(needed))
@@ -45,11 +46,13 @@ def process_request(
         covered_text=covered_text or "(none)",
         needed=needed_count,
         total=total_count,
+        market=str(market or "Chicago").strip() or "Chicago",
     )
     preview = {
         "make_scenario_id": MAKE_SCENARIO_ID,
         "make_scenario_name": MAKE_SCENARIO_NAME,
         "title": title,
+        "market": str(market or "Chicago").strip() or "Chicago",
         "needed": needed_count,
         "total": total_count,
         "prompt_chars": len(prompt),
