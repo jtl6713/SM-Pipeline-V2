@@ -529,3 +529,4 @@ Finished-video hard cap six Worker deploy: 2026-09-20 — Concurrent plan-sync a
 2026-09-23 deploy Worker 0.10.366 finished-video passthrough missing-output self-heal
 2026-09-23 redeploy Worker 0.10.366 after finished-video output-sync syntax correction
 2026-09-23 deploy Worker 0.10.367 finished-video self-heal with single-owner output lock
+2026-09-23 deploy Worker 0.10.368 finished-video low-subrequest destination hardening
