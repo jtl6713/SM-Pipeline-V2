@@ -75,6 +75,7 @@ def health():
             "ok": True,
             "service": "pipeline-runner",
             "version": settings["service_version"],
+            "openai_account": settings.get("openai_account"),
             "t1_shorten_to_footage": True,
             "stages_registered": len(STAGE_NAMES),
             "stages_implemented": sum(1 for name in STAGE_NAMES if is_implemented(name)),
