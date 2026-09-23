@@ -20,6 +20,7 @@ from integrations.google_drive import GoogleDriveClient
 from studio_produce.ops_alert import send_produce_escalation
 from studio_produce.processor import resume_job, start_job
 from studio_compress.processor import start_job as start_studio_compress
+from ttd.client import TikTokDraftClient, load_tiktok_settings
 
 logger = logging.getLogger("pipeline-runner")
 settings = load_settings()
@@ -74,7 +75,7 @@ def health():
             "ok": True,
             "service": "pipeline-runner",
             "version": settings["service_version"],
-	    "openai_account": settings.get("openai_account"),
+            "openai_account": settings.get("openai_account"),
             "t1_shorten_to_footage": True,
             "stages_registered": len(STAGE_NAMES),
             "stages_implemented": sum(1 for name in STAGE_NAMES if is_implemented(name)),
@@ -89,6 +90,7 @@ def health():
                 {"name": "studio-asset-library", "path": "/jobs/studio-asset-library"},
                 {"name": "studio-asset-library-rename", "path": "/jobs/studio-asset-library-rename"},
                 {"name": "autonomous-pick", "path": "/jobs/autonomous-pick"},
+                {"name": "tiktok-analytics", "path": "/jobs/tiktok-analytics"},
             ],
         }
     )
@@ -463,6 +465,37 @@ def run_studio_asset_library_rename():
         result.get("google_drive_file_id"),
         result.get("filename"),
     )
+    return jsonify(result), 200
+
+
+@app.post("/jobs/tiktok-analytics")
+def run_tiktok_analytics():
+    error_response, status = _verify_secret()
+    if error_response is not None:
+        return error_response, status
+    payload = request.get_json(silent=True) or {}
+    profile = str(payload.get("profile") or payload.get("theme") or "chicago").strip()
+    video_ids = payload.get("video_ids") or []
+    if isinstance(video_ids, str):
+        video_ids = [video_ids]
+    if not isinstance(video_ids, list):
+        return jsonify({"error": "video_ids must be an array"}), 422
+    # Reuse the existing TTD credential resolver. The Studio caller never sees
+    # the TikTok worker secret; it only authenticates to this runner.
+    synthetic_output = {"fields": {"Profile_Name": profile}}
+    try:
+        resolved = load_tiktok_settings(
+            pipeline_settings(AirtableClient()),
+            output=synthetic_output,
+            client=AirtableClient(),
+        )
+        client = TikTokDraftClient(base_url=resolved["url"], secret=resolved["secret"])
+        upstream_status, result = client.analytics_videos([str(item) for item in video_ids])
+    except Exception as exc:
+        logger.exception("tiktok-analytics failed")
+        return jsonify({"error": str(exc)}), 502
+    if upstream_status >= 400:
+        return jsonify(result), upstream_status
     return jsonify(result), 200
 
 
