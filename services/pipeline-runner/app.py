@@ -11,6 +11,7 @@ from stages import a1p, c3b, i3, r2, rr2, smv1, ttd4
 from stages.registry import STAGE_NAMES, get_handler, is_implemented
 from audio.backfill import process_request as backfill_audio_leading_silence
 from i1.openai_ideas import generate_ideas
+from carousel.image_gen import build_c2_prompt, generate_carousel_png
 from studio_music.processor import ingest_studio_music, trash_studio_music
 from airtable.client import AirtableClient
 from item4.clip_poster import ensure_request_clip_posters
@@ -89,6 +90,7 @@ def health():
                 {"name": "studio-music-library", "path": "/jobs/studio-music-library"},
                 {"name": "studio-asset-library", "path": "/jobs/studio-asset-library"},
                 {"name": "studio-asset-library-rename", "path": "/jobs/studio-asset-library-rename"},
+                {"name": "studio-ai-image", "path": "/jobs/studio-ai-image"},
                 {"name": "autonomous-pick", "path": "/jobs/autonomous-pick"},
                 {"name": "tiktok-analytics", "path": "/jobs/tiktok-analytics"},
             ],
@@ -497,6 +499,33 @@ def run_tiktok_analytics():
     if upstream_status >= 400:
         return jsonify(result), upstream_status
     return jsonify(result), 200
+
+
+@app.post("/jobs/studio-ai-image")
+def run_studio_ai_image():
+    error_response, status = _verify_secret()
+    if error_response is not None:
+        return error_response, status
+    payload = request.get_json(silent=True) or {}
+    prompt = str(payload.get("prompt") or "").strip()
+    platform = str(payload.get("platform") or "TikTok").strip() or "TikTok"
+    ratio = str(payload.get("ratio") or "9:16").strip() or "9:16"
+    if not prompt:
+        return jsonify({"error": "prompt is required"}), 422
+    try:
+        built = build_c2_prompt(prompt, platform=platform, ratio=ratio)
+        png = generate_carousel_png(built, ratio=ratio)
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 422
+    except Exception as exc:
+        logger.exception("studio-ai-image failed")
+        return jsonify({"error": str(exc)}), 502
+    logger.info("job=studio-ai-image platform=%s ratio=%s bytes=%s", platform, ratio, len(png))
+    return Response(
+        png,
+        mimetype="image/png",
+        headers={"Cache-Control": "no-store"},
+    )
 
 
 @app.post("/jobs/autonomous-pick")
