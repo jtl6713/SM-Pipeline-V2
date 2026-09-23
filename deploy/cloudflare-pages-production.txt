@@ -557,4 +557,4 @@ Variant prepare copy Pages deploy: 2026-09-20 — Approve prompt says Prepare fi
 2026-09-21 deploy Studio UI 0.6.361 Pipeline schedule grid collapsed by default
 2026-09-21 deploy Studio UI 0.6.362 idea delete button stays Delete until pressed
 2026-09-21 deploy Studio UI 0.6.363 Post Insights dashboard + grounded AI Performance Analyst
-2026-09-22 deploy Studio UI 0.6.364 first-party account connections, null-safe comparisons, and 24h/7d/30d lifecycle snapshots
+2026-09-23 deploy Studio UI 0.6.365 first-party analytics reconciled with current idea-generation UI
