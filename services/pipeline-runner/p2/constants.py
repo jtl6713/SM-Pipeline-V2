@@ -26,16 +26,20 @@ THUMBNAIL_PROMPT_SUFFIX = """
 IMPORTANT BRANDING RULE:
 Do not invent, draw, simulate, approximate, or generate any ChicagoShining logo or watermark in the image. Official branding/watermarking is handled downstream by production assets.
 
+PHOTOREALISM:
+The scene must look like a real photograph of the place or subject — natural camera, real light, real textures, believable weather and materials. Do not make it illustrated, CGI, painterly, plastic, or like a luxury-ad composite.
+
 CHICAGOSHINING THUMBNAIL TEXT STYLE:
-When the thumbnail includes text, use bold, high-impact block lettering with this mix:
-1) DEFAULT (≥ ~80% of posts): premium gold or black-and-gold lettering — metallic gold, slightly arched or refined block letters, sophisticated and cinematic (elegant city light, dusk skyline, reflective water, architectural drama). Prefer this stylish gold look over colorful 3D.
+When the thumbnail includes text, use clean, readable block lettering with this mix:
+1) DEFAULT (≥ ~80% of posts): restrained gold or black-and-gold lettering — soft brushed or matte gold, or black letters with a thin gold edge. Quiet and sophisticated. Keep lettering secondary to the photo. Do not use chrome, mirror-foil, glow, sparkle, giant arched 3D slabs, or gold-on-everything.
 2) OCCASIONAL (≤ ~20% of posts): colorful glossy 3D block lettering only when the subject clearly calls for high-energy playful treatment. Do not default to bright multicolor candy 3D letters.
 
-Text should be large, readable on mobile, visually dramatic, and placed near the center or slightly lower than center. Keep text inside safe margins and avoid the top and bottom 10% of the image.
+Text should be large enough to read on a phone and placed near the center or slightly lower than center. Keep text inside safe margins and avoid the top and bottom 10% of the image. Do not let lettering dominate the frame.
 
 PRODUCTION-SAFE THUMBNAIL RULES:
 - Preserve the creative intent of the Thumbnail_Prompt.
-- Create a polished, high-contrast ChicagoShining social thumbnail / promo still.
+- Create a photorealistic ChicagoShining social thumbnail / promo still.
 - Keep important subjects and any readable text inside safe margins.
 - Avoid placing key text in the top or bottom 10% of the image.
-- Do not include fake platform UI, fake logos, fake watermarks, cluttered microtext, or distorted lettering."""
+- Do not include fake platform UI, fake logos, fake watermarks, cluttered microtext, or distorted lettering.
+- Avoid hyper-stylized cinematic grading, heavy bloom, or over-the-top luxury gold treatment."""

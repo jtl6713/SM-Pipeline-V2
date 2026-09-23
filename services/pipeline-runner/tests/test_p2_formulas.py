@@ -106,6 +106,9 @@ def test_thumbnail_prompt_suffix():
     prompt = build_thumbnail_prompt("Rainy Chicago skyline")
     assert "Rainy Chicago skyline" in prompt
     assert "IMPORTANT BRANDING RULE" in prompt
+    assert "PHOTOREALISM" in prompt
+    assert "restrained gold" in prompt
+    assert "luxury-ad" in prompt
 
 
 def test_p2_trigger_p3_uses_local_python_when_flagged(monkeypatch):
