@@ -195,12 +195,13 @@ test("promotion repairs missing Production Request Outputs from the saved plan",
   assert.match(reconcile, /await item4SyncPlanOutputs\(env, requestRecord, planItems\)/);
 });
 
-test("finished-video output sync can take over a fresh lock only when no rows exist", () => {
+test("finished-video output sync preserves a fresh single-owner lock", () => {
   const sync = worker.slice(
     worker.indexOf("async function item4SyncPlanOutputs"),
     worker.indexOf("async function buildItem4OutputPlan"),
   );
-  assert.match(sync, /if \(!lockedRows\.length\)/);
-  assert.match(sync, /mergeAzOutputLock/);
-  assert.match(sync, /azOutputLockHeld/);
+  assert.match(sync, /if \(!azLock\.acquired\)/);
+  assert.match(sync, /item4CollapseDuplicatePlanOutputs/);
+  assert.match(sync, /return;/);
+  assert.doesNotMatch(sync, /if \(!lockedRows\.length\)/);
 });
