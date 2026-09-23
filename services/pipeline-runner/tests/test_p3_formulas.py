@@ -88,7 +88,7 @@ def test_studio_enrichment_copies_parent_package():
     }
     fields = build_studio_enrichment_fields(parent, output)
     assert fields["Output_Title"] == "Requested title"
-    assert fields["Output_Caption"] == "Parent caption"
+    assert fields["Output_Caption"] == "Parent caption\n\n#chicago"
     assert fields["Output_Hashtags"] == "#chicago"
     assert fields["Thumbnail_URL"] == "https://example.com/thumb.png"
     assert fields["Voiceover_URL"] == "https://example.com/vo.mp3"
