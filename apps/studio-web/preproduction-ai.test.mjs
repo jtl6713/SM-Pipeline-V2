@@ -20,7 +20,7 @@ test("pre-production AI images have their own Production UI", async () => {
   assert.match(app, /\/generate-ai-masters/);
   assert.match(app, /maybeGenerateItem4AiImages\(status\)/);
   assert.match(app, /Review them below, then approve when you are happy/);
-  assert.match(app, /BUILD_ID = "item4-0\.6\.367-preprod-ai-hardening"/);
+  assert.match(app, /BUILD_ID = "item4-0\.6\.368-homepage-output-titles"/);
 });
 
 test("pure AI requests hide manual media while mixed requests keep it available", async () => {
