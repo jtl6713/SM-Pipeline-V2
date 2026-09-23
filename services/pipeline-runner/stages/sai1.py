@@ -24,6 +24,7 @@ def run(request: StageRequest) -> StageResult:
         process=process_request,
         kwargs={
             "title": str(request.extra.get("title") or "").strip(),
+            "market": str(request.extra.get("market") or "Chicago").strip() or "Chicago",
             "covered_text": str(request.extra.get("covered_text") or "(none)"),
             "needed": needed_int,
             "total": total_int,
