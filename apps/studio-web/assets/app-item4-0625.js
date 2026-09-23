@@ -6467,8 +6467,16 @@
   }
 
   function item4PlayableClipSrc(asset) {
-    return item4ClipStreamUrl(asset) || item4HeldClipObjectUrl(asset);
+    const routed = item4ClipStreamUrl(asset) || item4HeldClipObjectUrl(asset);
+    if (routed) return routed;
+
+    // Finished-video passthrough masters live directly on the Studio media domain
+    // and may not have a Media Asset/Drive record. Use that public MP4 as the
+    // Production player source after the original browser session ends.
+    const publicUrl = String(asset?.preview_public_url || asset?.url || "").trim();
+    return /^https:\/\/media\.chicagoshining\.com\//i.test(publicUrl) ? publicUrl : "";
   }
+
 
   function item4ClipDurationBadgeHtml(seconds) {
     const label = formatLibraryClipDuration(seconds);
@@ -10391,10 +10399,15 @@
   });
 
   function inferredMasterContentType() {
+    // Finished files and clip-built pieces are video regardless of source count.
+    // The old count-only inference turned a single finished MP4 back into Feed Post
+    // on the quiet save immediately before Approve.
+    if (ezIsFinishedVideo() || ezIsClipRequest()) return "Vertical Short Video";
     const count = Number(item4Workspace?.assets?.length || ezStagedFiles.length || 0);
     return ezPlanApi()?.ezMasterContentType?.(count)
       || (count <= 1 ? "Feed Post" : "Photo Set");
   }
+
 
   function syncHiddenMasterContentType() {
     const select = $("prContentType");
