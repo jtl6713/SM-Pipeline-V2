@@ -28,7 +28,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          node --test apps/studio-web/preproduction-ai.test.mjs
+          node --test apps/studio-web/preproduction-ai.test.mjs apps/studio-api/preproduction-ai.test.mjs
           python -m pip install -q pytest
           python -m pytest services/pipeline-runner/tests/test_sai1_market.py -q
           python -m py_compile services/pipeline-runner/app.py
