@@ -16,6 +16,7 @@ from rr1.constants import (
     MAKE_SCENARIO_NAME,
     MAX_RECORDS,
     OUTPUT_STATUS_READY,
+    REVIEW_EMAIL_ENABLED,
     REVIEW_STATUS_SENT,
 )
 from rr1.email_builder import build_review_card, build_review_email_html, review_email_subject
@@ -68,6 +69,13 @@ def process_batch(
     max_runs: int = MAX_RECORDS,
     dry_run: bool = False,
 ) -> dict[str, Any]:
+    if not REVIEW_EMAIL_ENABLED:
+        return {
+            "processed": False,
+            "reason": "review_email_disabled",
+            "make_scenario_id": MAKE_SCENARIO_ID,
+        }
+
     client = AirtableClient()
     cfg = _settings()
     outputs = select_outputs(
