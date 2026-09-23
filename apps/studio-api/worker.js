@@ -421,7 +421,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.365-preprod-ai",
+          version: "0.10.366-finished-passthrough-repair",
           studio_desk_inventory_v1: true,
           studio_desk_activity_v1: true,
           studio_tiktok_complete_v1: true,
@@ -7337,16 +7337,31 @@ async function item4DisableUnsupportedCompanions(env, requestRecord) {
 
 async function item4ReconcileEnabledPlanOutputs(env, requestRecord) {
   await item4DisableUnsupportedCompanions(env, requestRecord);
-  const rows = await outputRowsForProductionRequest(env, requestRecord.id);
-  const enabled = rows
-    .filter((row) => Boolean(f(row, "Enabled")))
-    .map((row) => ({
-      platform: String(f(row, "Platform") || "").trim(),
-      output_type: String(f(row, "Output_Type") || "").trim(),
-    }));
+  let rows = await outputRowsForProductionRequest(env, requestRecord.id);
+  let enabledRows = rows.filter((row) => Boolean(f(row, "Enabled")));
+
+  // The saved Item 4 plan is authoritative. If a plan-sync race/interruption left
+  // no destination rows, rebuild them before bridge validation instead of
+  // deadlocking promotion on "Choose at least one enabled Production Request Output."
+  if (!enabledRows.length) {
+    const plan = item4ParseJson(f(requestRecord, "Studio_Output_Plan_JSON"), null);
+    const planItems = Array.isArray(plan?.items) ? plan.items : [];
+    if (planItems.length) {
+      await item4SyncPlanOutputs(env, requestRecord, planItems);
+      requestRecord = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, requestRecord.id).catch(() => requestRecord);
+      rows = await outputRowsForProductionRequest(env, requestRecord.id);
+      enabledRows = rows.filter((row) => Boolean(f(row, "Enabled")));
+    }
+  }
+
+  const enabled = enabledRows.map((row) => ({
+    platform: String(f(row, "Platform") || "").trim(),
+    output_type: String(f(row, "Output_Type") || "").trim(),
+  }));
   const updated = await item4ReconcilePlanWithEnabledOutputs(env, requestRecord, enabled);
   return item4RelinkVariantQueueOutputs(env, updated);
 }
+
 
 async function acquireAzOutputLock(env, requestRecord) {
   const notes = String(f(requestRecord, "Production_Notes") || "");
@@ -7378,13 +7393,26 @@ async function item4SyncPlanOutputs(env, requestRecord, items, { schedules = nul
     azLock = await acquireAzOutputLock(env, requestRecord);
     requestRecord = azLock.record;
     if (!azLock.acquired) {
-      await item4CollapseDuplicatePlanOutputs(
-        env,
-        await outputRowsForProductionRequest(env, productionRequestId, { includeInactive: true }),
-        { finishedVideo: true }
-      );
-      return;
-    }
+      let lockedRows = await outputRowsForProductionRequest(env, productionRequestId, { includeInactive: true });
+      await item4CollapseDuplicatePlanOutputs(env, lockedRows, { finishedVideo: true });
+      lockedRows = await outputRowsForProductionRequest(env, productionRequestId, { includeInactive: true });
+
+      // A fresh AZ lock with zero rows means an earlier sync claimed the lock but
+      // never materialized a destination. Take over the empty transaction safely:
+      // each create below rechecks the current token, so only the last writer acts.
+      if (!lockedRows.length) {
+        const token = azOutputLockToken();
+        const latest = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, productionRequestId).catch(() => requestRecord);
+        const takeover = await item4UpdateRequestState(env, productionRequestId, {
+          Production_Notes: mergeAzOutputLock(String(f(latest || requestRecord, "Production_Notes") || ""), token),
+        });
+        const held = azOutputLockHeld(String(f(takeover, "Production_Notes") || ""), token);
+        if (held) {
+          azLock = { acquired: true, record: takeover, token };
+          requestRecord = takeover;
+        }
+      }
+      if (!azLock.acquired) return;
   }
   let existing = await outputRowsForProductionRequest(env, productionRequestId, { includeInactive: true });
   await item4CollapseDuplicatePlanOutputs(env, existing, { finishedVideo });
