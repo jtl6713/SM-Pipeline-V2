@@ -7413,6 +7413,7 @@ async function item4SyncPlanOutputs(env, requestRecord, items, { schedules = nul
         }
       }
       if (!azLock.acquired) return;
+    }
   }
   let existing = await outputRowsForProductionRequest(env, productionRequestId, { includeInactive: true });
   await item4CollapseDuplicatePlanOutputs(env, existing, { finishedVideo });
