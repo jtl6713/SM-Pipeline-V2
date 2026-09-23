@@ -192,7 +192,8 @@ export default {
       const isProductionRequestSyncDirectivesRoute = /^\/api\/production-requests\/rec[A-Za-z0-9]+\/sync-directives$/.test(url.pathname);
       const isProductionRequestCollectionRoute = url.pathname === "/api/production-requests";
       const isProductionRequestOutputsRoute = /^\/api\/production-requests\/rec[A-Za-z0-9]+\/outputs$/.test(url.pathname);
-      const isProductionRequestAiMastersRoute = /^\/api\/production-requests\/rec[A-Za-z0-9]+\/generate-ai-masters$/.test(url.pathname);\n      const isItem4AssetsRoute = /^\/api\/production-requests\/rec[A-Za-z0-9]+\/assets$/.test(url.pathname);
+      const isProductionRequestAiMastersRoute = /^\/api\/production-requests\/rec[A-Za-z0-9]+\/generate-ai-masters$/.test(url.pathname);
+      const isItem4AssetsRoute = /^\/api\/production-requests\/rec[A-Za-z0-9]+\/assets$/.test(url.pathname);
       const isItem4LibraryAssetsRoute = /^\/api\/production-requests\/rec[A-Za-z0-9]+\/assets\/library$/.test(url.pathname);
       const isItem4AssetsReorderRoute = /^\/api\/production-requests\/rec[A-Za-z0-9]+\/assets\/reorder$/.test(url.pathname);
       const isItem4UploadSessionRoute = /^\/api\/production-requests\/rec[A-Za-z0-9]+\/assets\/upload-session$/.test(url.pathname);
