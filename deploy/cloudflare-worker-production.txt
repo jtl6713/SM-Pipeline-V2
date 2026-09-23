@@ -522,3 +522,4 @@ Finished-video hard cap six Worker deploy: 2026-09-20 — Concurrent plan-sync a
 2026-09-21 deploy Studio API Worker 0.10.360 expose post analytics + grounded Insights chat
 2026-09-22 deploy Facebook image cap + retry-loop hardening. Studio API source commit 6792d88.
 2026-09-22 deploy Worker 0.10.362 photorealistic thumbnails with restrained gold lettering
+2026-09-23 deploy Worker 0.10.363 disable Ready-for-Review Gmail (RR1); review in Studio Pipeline
