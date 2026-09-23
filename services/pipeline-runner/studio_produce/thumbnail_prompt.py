@@ -4,13 +4,16 @@ from __future__ import annotations
 
 from typing import Any
 
-# Prefer gold / sophisticated lettering (~80%); colorful 3D only as occasional variety.
+# Photorealistic scene; restrained gold lettering (~80%); colorful 3D only as occasional variety.
 THUMBNAIL_LETTER_STYLE_RULE = (
-    "Lettering mix: for at least ~80% of covers use premium gold or black-and-gold block "
-    "lettering — metallic gold, slightly arched or refined, sophisticated and cinematic. "
-    "Use colorful glossy 3D block lettering for at most ~20% of covers, and only when the "
-    "subject clearly calls for high-energy playful treatment. Do not default to bright "
-    "multicolor candy 3D letters. Prefer stylish gold sophistication."
+    "Photorealism: the scene must look like a real photograph (natural camera, real light, "
+    "real textures). Do not make it illustrated, CGI, painterly, plastic, or luxury-ad composite. "
+    "Lettering mix: for at least ~80% of covers use restrained gold or black-and-gold block "
+    "lettering — soft brushed or matte gold, or black letters with a thin gold edge. Quiet and "
+    "sophisticated; keep lettering secondary to the photo. Do not use chrome, mirror-foil, glow, "
+    "sparkle, giant arched 3D slabs, or gold-on-everything. Use colorful glossy 3D block lettering "
+    "for at most ~20% of covers, and only when the subject clearly calls for high-energy playful "
+    "treatment. Do not default to bright multicolor candy 3D letters."
 )
 
 # Back-compat alias for older imports/tests.
@@ -64,8 +67,8 @@ def build_finished_thumbnail_prompt(
             f"Post context: {caption[:500]}" if caption else "",
             THUMBNAIL_LETTER_STYLE_RULE,
             f"Compose for a {orientation} {ratio} platform cover that matches the video frame.",
-            "Text must be large and readable on a phone, near the center or slightly below center, inside safe margins, and not in the top or bottom 10%.",
-            "Polished, high-contrast, and dramatic. Do not invent logos, watermarks, platform UI, or distorted letters.",
+            "Text must be large and readable on a phone, near the center or slightly below center, inside safe margins, and not in the top or bottom 10%. Do not let lettering dominate the frame.",
+            "Photorealistic and readable. Do not invent logos, watermarks, platform UI, or distorted letters.",
         )
         if part
     )
