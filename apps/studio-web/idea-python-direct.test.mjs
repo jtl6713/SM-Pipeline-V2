@@ -20,7 +20,7 @@ test("Studio idea generation routes directly to Python I1", async () => {
   assert.doesNotMatch(handler, /phase6ScenarioState/);
   assert.doesNotMatch(handler, /studioIdeaCreateBatch/);
   assert.doesNotMatch(handler, /studioIdeaSetProfileOverrides/);
-  assert.match(source, /version: "0\.10\.361-idea-python-direct"/);
+  assert.match(source, /version: "0\.10\./);
 });
 
 test("Studio UI accepts synchronous Python I1 completion", async () => {

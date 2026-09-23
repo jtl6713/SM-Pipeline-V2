@@ -232,7 +232,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.367-preprod-ai-hardening";
+  const BUILD_ID = "item4-0.6.368-homepage-output-titles";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -14490,6 +14490,13 @@
     return `<th class="pipeline-col-head${filtered ? " is-filtered" : ""}"><div class="pipeline-col-head-stack">${title}${filter}</div></th>`;
   }
 
+  function pipelineOutputListTitle(record) {
+    const id = String(record?.output_id || "").trim();
+    const title = String(record?.output_title || record?.content_title || "").trim();
+    const idLabel = id ? `Output ${id}` : "Output";
+    return title ? `${idLabel} · ${title}` : idLabel;
+  }
+
   function renderOutputsTable(target, records) {
     phase6HideTooltip();
     const isPipeline = target?.id === "outputsList";
@@ -14524,7 +14531,7 @@
       const creativeCell = isPipeline ? `<td class="creative-output-action-cell"><button type="button" class="creative-button" data-creative-output-id="${escapeHtml(r.id)}" ${canOpen ? "" : "disabled"} title="${canOpen ? "" : notReadyTitle}">${canOpen ? "Open review" : notReadyLabel}</button>${scheduleCell}</td>` : "";
       const rowOpen = isPipeline && canOpen ? ` class="pipeline-open-row" data-open-output-id="${escapeHtml(r.id)}" tabindex="0"` : "";
       const subtleParts = [r.publish_method, timing].filter(Boolean).map((part) => escapeHtml(String(part)));
-      return `<tr${rowOpen}><td><div class="title-cell">Output ${value(r.output_id)}</div><div class="subtle">${subtleParts.join(" · ") || "—"}</div>${postLink}</td><td>${value(r.platform)}</td>${typeCell}<td>${badge(pipelineStudioStateLabel(r))}${isPipeline ? `${pipelineTiktokCompleteCell(r)}${pipelineYoutubeCompleteCell(r)}` : ""}</td><td>${value(pipelineRenderLabel(r))}</td><td>${value(r.review_status)}</td><td>${value(r.platform_publish_status || r.publish_status)}</td><td>${pipelineProgressCell(r, groupRecords)}</td>${creativeCell}</tr>`;
+      return `<tr${rowOpen}><td><div class="title-cell">${escapeHtml(pipelineOutputListTitle(r))}</div><div class="subtle">${subtleParts.join(" · ") || "—"}</div>${postLink}</td><td>${value(r.platform)}</td>${typeCell}<td>${badge(pipelineStudioStateLabel(r))}${isPipeline ? `${pipelineTiktokCompleteCell(r)}${pipelineYoutubeCompleteCell(r)}` : ""}</td><td>${value(pipelineRenderLabel(r))}</td><td>${value(r.review_status)}</td><td>${value(r.platform_publish_status || r.publish_status)}</td><td>${pipelineProgressCell(r, groupRecords)}</td>${creativeCell}</tr>`;
     };
     const body = isPipeline
       ? (() => {
@@ -14670,8 +14677,7 @@
     const time = Number.isFinite(when.getTime())
       ? when.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })
       : "";
-    const output = record?.output_id ? `Output ${record.output_id}` : "Output";
-    return [output, record?.platform, time, record?.output_title].filter(Boolean).join(" · ");
+    return [pipelineOutputListTitle(record), record?.platform, time].filter(Boolean).join(" · ");
   }
 
   function renderPipelineScheduleGrid(records = pipelineScheduleGridRecords, error = "") {
