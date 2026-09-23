@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-PROMPT_TEMPLATE = """You are the ChicagoShining Studio AI slide themer and caption writer for SM Pipeline V2.
+PROMPT_TEMPLATE = """You are the Studio AI slide themer and caption writer for SM Pipeline V2.
 
 Return strict JSON only. No markdown. No explanations.
 
@@ -25,7 +25,7 @@ Return exactly this structure:
 SLIDE REQUIREMENTS
 - slides array length must be exactly the REQUESTED COUNT below. Not more, not fewer.
 - If REQUESTED COUNT is 0, return an empty slides array and still return voiceover_script, post_caption and hashtags.
-- Each slide must name ONE specific, real, well-known Chicago thing to do, attraction, or experience.
+- Each slide must name ONE specific, real, well-known thing to do, attraction, or experience in the TARGET MARKET.
 - Never repeat or paraphrase anything in ALREADY COVERED. Those slots are taken. Choose genuinely different activities, in different parts of the city where possible.
 - All slides must fit the VIDEO TITLE theme. If the title is about things to do, every slide must be an actual thing a visitor can go do, not a generic skyline or river view.
 - Slides must be distinct from each other.
@@ -36,7 +36,7 @@ ON-PHOTO CAPTION RULES (the slides[].caption field)
 - No hashtags, no emoji, no trailing punctuation, no numbering, no quotes.
 
 IMAGE PROMPT RULES
-- Photorealistic travel photograph of that specific thing to do, in Chicago, on-brand for ChicagoShining: polished, bright, cinematic, realistic travel-guide look.
+- Photorealistic travel photograph of that specific thing to do, in the TARGET MARKET, on-brand for the active Shining profile: polished, bright, cinematic, realistic travel-guide look.
 - The subject must be clearly recognizable as the thing named in the caption.
 - Composed for a vertical frame with the key subject inside safe margins and clear headroom, because a caption is overlaid on the photo downstream.
 - Never ask for rendered text, captions, labels, titles, borders, logos, app UI, watermarks, or graphic overlays of any kind. Watermarking happens downstream.
@@ -62,7 +62,10 @@ POST CAPTION RULES (the post_caption field)
 HASHTAG RULES (the hashtags field)
 - Return 8 to 12 hashtags as a single space separated string, each starting with #.
 - No commas, no line breaks, no duplicates, no spaces inside a tag.
-- Mix broad Chicago and travel tags with tags specific to the things actually featured.
+- Mix broad TARGET MARKET and travel tags with tags specific to the things actually featured.
+
+TARGET MARKET
+{market}
 
 VIDEO TITLE
 {title}
@@ -87,8 +90,9 @@ FINAL SELF-CHECK BEFORE RETURNING
 - Output is valid JSON only."""
 
 
-def build_themer_prompt(*, title: str, covered_text: str, needed: int, total: int) -> str:
+def build_themer_prompt(*, title: str, covered_text: str, needed: int, total: int, market: str = "Chicago") -> str:
     return PROMPT_TEMPLATE.format(
+        market=market or "Chicago",
         title=title or "",
         covered_text=covered_text or "(none)",
         needed=int(needed),
