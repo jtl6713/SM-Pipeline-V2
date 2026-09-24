@@ -6755,6 +6755,13 @@ async function studioPromoteDuePublishStatus(env, record) {
   const platform = String(f(record, "Platform") || "").trim();
   const tiktok = String(f(record, "TikTok_Draft_Status") || "").trim();
   const fields = {};
+  if (
+    String(f(record, "Review_Status") || "").trim() === "Approved"
+    && String(f(record, "Output_Status") || "").trim() !== "Approved for Publishing"
+    && String(f(record, "Output_Status") || "").trim() !== "Published"
+  ) {
+    fields.Output_Status = "Approved for Publishing";
+  }
   if (platform === "TikTok" && tiktok === "Waiting for Schedule" && studioTikTokInboxIsDue(record)) {
     fields.TikTok_Draft_Status = "Ready for Assets";
   }
@@ -33882,6 +33889,9 @@ async function scheduleStudioPublishOutput(request, env, url, authorization, ctx
     },
   );
   if (!manualScheduleOverride) fields.Studio_Scheduled_At = null;
+  if (String(f(existing, "Review_Status") || "").trim() === "Approved") {
+    fields.Output_Status = "Approved for Publishing";
+  }
   fields.Publish_Error_Message = "";
   const updated = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, match[1], {
     method: "PATCH",
