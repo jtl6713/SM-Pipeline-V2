@@ -88,6 +88,7 @@ def candidate_summary(row: dict[str, Any], *, kind: str) -> dict[str, Any]:
         "google_drive_url": _field(row, "Google Drive URL"),
         "quality_score": row.get("fields", {}).get("Quality_Score"),
         "usefulness_score": row.get("fields", {}).get("Usefulness_Score"),
+        "duration_seconds": row.get("fields", {}).get("Duration_Seconds"),
     }
 
 
