@@ -1,1 +1,1 @@
-2026-09-24 diagnose pre-production AI route after Phase 2A method error - rerun 2
+2026-09-24 diagnose handler after click reached Worker but produced 0 assets
