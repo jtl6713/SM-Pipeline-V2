@@ -39,6 +39,7 @@ def _aggregate_candidates(rows: list[dict[str, Any]], *, kind: str) -> str:
                     f"asset_role: {fields.get('Asset_Role', '')}",
                     f"quality_score: {fields.get('Quality_Score', '')}",
                     f"usefulness_score: {fields.get('Usefulness_Score', '')}",
+                    f"duration_seconds: {fields.get('Duration_Seconds', '')}",
                     f"topic: {fields.get('Topic', '')}",
                     f"location: {fields.get('Location', '')}",
                     f"asset_description: {fields.get('Asset Description', '')}",
