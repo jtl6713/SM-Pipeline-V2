@@ -6,6 +6,7 @@ import {
   analyticsMeasurementBucket,
   analyticsNextSyncAt,
   analyticsObservationKey,
+  fetchFacebookOwnedPostAnalytics,
   nativePlatformId,
   normalizeAnalyticsSnapshot,
   sanitizeAnalyticsError,
@@ -62,4 +63,50 @@ test("analytics errors redact bearer and token query values", () => {
   const msg = sanitizeAnalyticsError("bad https://x?access_token=secret123 Authorization: Bearer xyz.abc");
   assert.equal(msg.includes("secret123"), false);
   assert.equal(msg.includes("xyz.abc"), false);
+});
+
+test("Facebook owned analytics works for video-style objects without reactions", async () => {
+  const requested = [];
+  const json = (body, status = 200) => new Response(JSON.stringify(body), {
+    status,
+    headers: { "Content-Type": "application/json" },
+  });
+  const fetchImpl = async (rawUrl) => {
+    const url = new URL(rawUrl);
+    requested.push(url.toString());
+    if (url.pathname.endsWith("/123456789/insights")) {
+      return json({
+        data: [
+          { name: "post_media_view", values: [{ value: 900 }] },
+          { name: "post_total_media_view_unique", values: [{ value: 700 }] },
+        ],
+      });
+    }
+    const fields = url.searchParams.get("fields") || "";
+    if (fields.includes("likes.limit(0).summary(true)")) {
+      return json({
+        id: "123456789",
+        created_time: "2026-09-20T12:00:00+0000",
+        permalink_url: "https://www.facebook.com/reel/123456789",
+        likes: { summary: { total_count: 12 } },
+        comments: { summary: { total_count: 3 } },
+        shares: { count: 2 },
+      });
+    }
+    return json({ id: "123456789", created_time: "2026-09-20T12:00:00+0000" });
+  };
+
+  const result = await fetchFacebookOwnedPostAnalytics({
+    postId: "123456789",
+    token: "test-token",
+    fetchImpl,
+  });
+
+  assert.equal(result.views, 900);
+  assert.equal(result.reach, 700);
+  assert.equal(result.likes, 12);
+  assert.equal(result.comments, 3);
+  assert.equal(result.shares, 2);
+  assert.equal(result.total_interactions, 17);
+  assert.equal(requested.some((url) => url.includes("reactions")), false);
 });
