@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from airtable.client import AirtableClient
+from airtable.constants import PIPELINE_SETTINGS_TABLE
 
 SETTING_NAME = "AI_API_PREFERRED_PROVIDER"
+_LOG = logging.getLogger(__name__)
 
 
 def account_to_provider(account: str) -> str:
@@ -28,8 +31,8 @@ def get_preferred_account(settings: dict[str, Any], override: str | None = None)
     fallback = str(settings.get("openai_account") or "PRIMARY").strip().upper()
     try:
         rows = AirtableClient(settings).list_records(
-            "Pipeline Settings",
-            formula=f"AND({{Active}}=1,{{Setting_Name}}='{SETTING_NAME}')",
+            PIPELINE_SETTINGS_TABLE,
+            formula=f'AND({{Active}}=1,{{Setting_Name}}="{SETTING_NAME}")',
             max_records=1,
             fields=["Setting_Name", "Setting_Value", "Active"],
         )
@@ -37,6 +40,6 @@ def get_preferred_account(settings: dict[str, Any], override: str | None = None)
             value = str((rows[0].get("fields") or {}).get("Setting_Value") or "").strip()
             if value:
                 return provider_to_account(value)
-    except Exception:
-        pass
+    except Exception as exc:
+        _LOG.warning("Could not read Studio AI API preference; using startup default: %s", type(exc).__name__)
     return fallback if fallback in {"PRIMARY", "SECONDARY"} else "PRIMARY"
