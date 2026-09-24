@@ -17,6 +17,11 @@ test("Worker exposes pre-production AI master generation route", async () => {
   assert.match(source, /source:\s*"studio_ai_preproduction"/);
 });
 
+test("pre-production AI POST route is admitted by the global method allowlist", async () => {
+  const source = await readFile(workerPath, "utf8");
+  assert.match(source, /isProductionRequestAiMastersRoute && request\.method === "POST"/);
+});
+
 test("pre-production AI generation uses the pipeline runner image job", async () => {
   const source = await readFile(workerPath, "utf8");
   assert.match(source, /\/jobs\/studio-ai-image/);

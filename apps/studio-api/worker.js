@@ -356,6 +356,7 @@ export default {
         isAssetLibraryClassifyAllWrite ||
         isAssetLibraryDurationWrite ||
         isPublishedLibraryReleaseWrite ||
+        (isProductionRequestAiMastersRoute && request.method === "POST") ||
         isItem4AssetDeleteWrite ||
         isItem4AssetPosterWrite ||
         isItem4PlanWrite ||
@@ -421,7 +422,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.368-production-lifecycle-repair",
+          version: "0.10.370-preprod-ai-method-allowlist",
           studio_desk_inventory_v1: true,
           studio_desk_activity_v1: true,
           studio_tiktok_complete_v1: true,
