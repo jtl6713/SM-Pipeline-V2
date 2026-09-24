@@ -1,0 +1,1 @@
+2026-09-24 fix pre-production AI POST method allowlist after Phase 2A 405
