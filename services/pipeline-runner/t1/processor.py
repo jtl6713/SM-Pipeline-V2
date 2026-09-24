@@ -13,6 +13,7 @@ from ap0.public_cover import drive_file_id_from_url
 from integrations.google_drive import GoogleDriveClient
 from render.fields import field, field_str, first_linked_id, json_text
 from render.settings import get_timing_defaults
+from r2.candidates import fetch_music_candidates
 from audio.voiceover_duration import (
     measured_voiceover_seconds,
     voiceover_exceeds_video,
@@ -27,6 +28,7 @@ from t1.apply import (
     music_is_enabled,
     music_url,
     resolve_rules,
+    snap_timeline_to_beats,
     voiceover_end_seconds,
 )
 from t1.client import TimingEngineClient
@@ -114,6 +116,121 @@ def _write_audio(content: bytes) -> Path:
     handle.write(content)
     handle.close()
     return Path(handle.name)
+
+
+def _timeline_end_seconds(response: dict[str, Any]) -> float:
+    timeline = response.get("timeline") if isinstance(response.get("timeline"), dict) else {}
+    metadata = timeline.get("metadata") if isinstance(timeline.get("metadata"), dict) else {}
+    for value in (
+        metadata.get("timeline_end_seconds"),
+        timeline.get("duration_seconds"),
+        (response.get("window") or {}).get("duration_seconds") if isinstance(response.get("window"), dict) else None,
+    ):
+        try:
+            number = float(value or 0)
+        except (TypeError, ValueError):
+            number = 0.0
+        if number > 0:
+            return number
+    return 0.0
+
+
+def _asset_duration_seconds(asset: dict[str, Any]) -> float:
+    try:
+        value = float((asset.get("fields") or {}).get("Duration_Seconds") or 0)
+    except (TypeError, ValueError):
+        return 0.0
+    return value if value > 0 else 0.0
+
+
+def _cache_asset_duration(client: AirtableClient, asset_id: str, seconds: float) -> None:
+    if not asset_id.startswith("rec") or seconds <= 0:
+        return
+    try:
+        client.update_record(
+            MEDIA_ASSETS_TABLE,
+            asset_id,
+            {"Duration_Seconds": round(seconds, 3)},
+            typecast=True,
+        )
+    except Exception:
+        pass
+
+
+def _candidate_drive_id(asset: dict[str, Any]) -> str:
+    return field_str(asset, "Google Drive File ID") or drive_file_id_from_url(field_str(asset, "Google Drive URL"))
+
+
+def _candidate_music_url(asset: dict[str, Any]) -> str:
+    return field_str(asset, "Google Drive URL")
+
+
+def _create_timing_for_asset(
+    *,
+    asset: dict[str, Any] | None,
+    fallback_drive_id: str,
+    fallback_url: str,
+    request_body: dict[str, Any],
+    timing_client: TimingEngineClient,
+    drive: GoogleDriveClient,
+) -> tuple[dict[str, Any], float]:
+    path: Path | None = None
+    body = dict(request_body)
+    try:
+        drive_id = _candidate_drive_id(asset or {}) or fallback_drive_id
+        url = _candidate_music_url(asset or {}) or fallback_url
+        if drive_id:
+            content, _mime = drive.download_file(drive_id)
+            path = _write_audio(content)
+            body["music_path"] = str(path)
+            body.pop("music_url", None)
+        else:
+            body["music_url"] = url
+            body.pop("music_path", None)
+        response = timing_client.create_timeline(body)
+        return response, _timeline_end_seconds(response)
+    finally:
+        if path and path.exists():
+            path.unlink(missing_ok=True)
+
+
+def _find_long_enough_music(
+    *,
+    client: AirtableClient,
+    selected_asset_id: str,
+    required_seconds: float,
+    request_body: dict[str, Any],
+    timing_client: TimingEngineClient,
+    drive: GoogleDriveClient,
+) -> tuple[dict[str, Any] | None, dict[str, Any] | None, float]:
+    candidates = fetch_music_candidates(client)
+    known = [
+        row for row in candidates
+        if row.get("id") != selected_asset_id and _asset_duration_seconds(row) + 0.05 >= required_seconds
+    ]
+    unknown = [
+        row for row in candidates
+        if row.get("id") != selected_asset_id and _asset_duration_seconds(row) <= 0
+    ]
+    short_known = [
+        row for row in candidates
+        if row.get("id") != selected_asset_id and 0 < _asset_duration_seconds(row) + 0.05 < required_seconds
+    ]
+    for asset in [*known, *unknown, *short_known]:
+        if not _candidate_drive_id(asset) and not _candidate_music_url(asset):
+            continue
+        response, seconds = _create_timing_for_asset(
+            asset=asset,
+            fallback_drive_id="",
+            fallback_url="",
+            request_body=request_body,
+            timing_client=timing_client,
+            drive=drive,
+        )
+        _cache_asset_duration(client, str(asset.get("id") or ""), seconds)
+        if seconds + 0.05 >= required_seconds:
+            return asset, response, seconds
+    return None, None, 0.0
 
 
 def process_one(
@@ -226,15 +343,75 @@ def process_one(
 
     audio_path: Path | None = None
     try:
+        drive_client = drive or GoogleDriveClient()
+        timing_engine = timing_client or TimingEngineClient(engine_url)
+        selected_asset_id = field_str(output, "Selected_Music_Media_Asset_ID")
+        selected_asset = (
+            client.get_record(MEDIA_ASSETS_TABLE, selected_asset_id)
+            if selected_asset_id.startswith("rec")
+            else None
+        )
         drive_id = _music_drive_id(client, output)
-        if drive_id:
-            content, _mime = (drive or GoogleDriveClient()).download_file(drive_id)
-            audio_path = _write_audio(content)
-            request_body["music_path"] = str(audio_path)
-        else:
-            request_body["music_url"] = music_url(output)
-        response = (timing_client or TimingEngineClient(engine_url)).create_timeline(request_body)
-        scenes = scene_times_for_clips(clips, drive=drive or GoogleDriveClient()) if has_video else {}
+        response, selected_track_seconds = _create_timing_for_asset(
+            asset=selected_asset,
+            fallback_drive_id=drive_id,
+            fallback_url=music_url(output),
+            request_body=request_body,
+            timing_client=timing_engine,
+            drive=drive_client,
+        )
+        if selected_asset_id:
+            _cache_asset_duration(client, selected_asset_id, selected_track_seconds)
+
+        music_guard = {
+            "required_seconds": round(duration, 3),
+            "selected_track_seconds": round(selected_track_seconds, 3),
+            "replacement": None,
+            "fallback": "",
+        }
+        if selected_track_seconds + 0.05 < duration:
+            replacement, replacement_response, replacement_seconds = _find_long_enough_music(
+                client=client,
+                selected_asset_id=selected_asset_id,
+                required_seconds=duration,
+                request_body=request_body,
+                timing_client=timing_engine,
+                drive=drive_client,
+            )
+            if replacement and replacement_response:
+                replacement_id = str(replacement.get("id") or "")
+                replacement_url = _candidate_music_url(replacement)
+                response = replacement_response
+                selected_track_seconds = replacement_seconds
+                music_guard["replacement"] = {
+                    "media_asset_record_id": replacement_id,
+                    "asset_name": field_str(replacement, "Asset Name"),
+                    "duration_seconds": round(replacement_seconds, 3),
+                }
+                client.update_record(
+                    PLATFORM_OUTPUTS_TABLE,
+                    output["id"],
+                    {
+                        "Selected_Music_Media_Asset_ID": replacement_id,
+                        "Selected_Music_URL": replacement_url,
+                        "Music_URL": replacement_url,
+                    },
+                    typecast=True,
+                )
+                fields_ref = output.setdefault("fields", {})
+                fields_ref["Selected_Music_Media_Asset_ID"] = replacement_id
+                fields_ref["Selected_Music_URL"] = replacement_url
+                fields_ref["Music_URL"] = replacement_url
+            else:
+                music_guard["fallback"] = "no_qualifying_track_found"
+
+        response = snap_timeline_to_beats(
+            response,
+            clip_count=max(1, len(clips)),
+            fps=30,
+            requested_duration=duration,
+        )
+        scenes = scene_times_for_clips(clips, drive=drive_client) if has_video else {}
         timed = (
             expand_to_timeline(clips, response, scene_times=scenes)
             if has_video
@@ -246,7 +423,10 @@ def process_one(
             "Timing_Error_Message": "",
             "Timing_Rules_JSON": json_text(rules),
             "Timing_Timeline_JSON": json_text(response.get("timeline") or response),
-            "Timing_Analysis_JSON": analysis_payload(response),
+            "Timing_Analysis_JSON": json.dumps(
+                {**json.loads(analysis_payload(response)), "music_duration_guard": music_guard},
+                separators=(",", ":"),
+            ),
             "Music_BPM": response.get("bpm"),
             "Music_Duration_Seconds": duration,
             "Render_Clip_List_JSON": json_text(timed),
