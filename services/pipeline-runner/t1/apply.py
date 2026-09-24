@@ -172,3 +172,141 @@ def analysis_payload(response: dict[str, Any]) -> str:
         },
         separators=(",", ":"),
     )
+
+
+def snap_timeline_to_beats(
+    response: dict[str, Any],
+    *,
+    clip_count: int,
+    fps: int = 30,
+    requested_duration: float | None = None,
+) -> dict[str, Any]:
+    """Rebuild equal-beat clip boundaries on actual detected beats.
+
+    The timing service can return beat metadata whose suggested boundaries are correct
+    while the clip durations remain equal to the first interval. This post-pass keeps
+    the requested overall duration but moves each transition onto a nearby strong beat.
+    """
+    if clip_count <= 1 or not isinstance(response, dict):
+        return response
+    beats_raw = response.get("beats_in_window") or response.get("beats") or []
+    if not isinstance(beats_raw, list) or not beats_raw:
+        return response
+    strengths_raw = response.get("beat_strengths") or []
+    window = response.get("window") if isinstance(response.get("window"), dict) else {}
+    try:
+        window_start = float(window.get("start_seconds") or 0)
+    except (TypeError, ValueError):
+        window_start = 0.0
+    beats: list[tuple[float, float]] = []
+    for index, raw in enumerate(beats_raw):
+        try:
+            beat = float(raw) - window_start
+        except (TypeError, ValueError):
+            continue
+        if beat <= 0:
+            continue
+        try:
+            strength = float(strengths_raw[index]) if index < len(strengths_raw) else 0.0
+        except (TypeError, ValueError):
+            strength = 0.0
+        beats.append((beat, max(0.0, min(1.0, strength))))
+    if len(beats) < clip_count - 1:
+        return response
+
+    timeline = response.get("timeline") if isinstance(response.get("timeline"), dict) else response
+    plan_clips = timeline.get("clips") if isinstance(timeline.get("clips"), list) else []
+    if not plan_clips:
+        return response
+    try:
+        end = float(requested_duration or timeline.get("duration_seconds") or 0)
+    except (TypeError, ValueError):
+        end = 0.0
+    if end <= 0:
+        end = max(beat for beat, _strength in beats)
+    if end <= 0:
+        return response
+
+    available = [(beat, strength) for beat, strength in beats if 0 < beat < end]
+    if len(available) < clip_count - 1:
+        return response
+
+    min_gap = max(0.35, end / max(clip_count * 4, 1))
+    boundaries = [0.0]
+    selected: list[float] = []
+    for index in range(1, clip_count):
+        ideal = end * index / clip_count
+        remaining = clip_count - index - 1
+        latest = end - (remaining + 1) * min_gap
+        prior = boundaries[-1]
+        candidates = [
+            (beat, strength)
+            for beat, strength in available
+            if beat > prior + min_gap and beat < latest + 1e-6
+        ]
+        if not candidates:
+            return response
+        # Prefer proximity to the evenly spaced target, then favor a stronger beat.
+        beat, _strength = min(
+            candidates,
+            key=lambda item: (
+                abs(item[0] - ideal) - (0.35 * item[1]),
+                abs(item[0] - ideal),
+            ),
+        )
+        boundaries.append(beat)
+        selected.append(beat)
+    boundaries.append(end)
+
+    frame_bounds = [0]
+    for value in boundaries[1:]:
+        frame = max(frame_bounds[-1] + 1, int(round(value * max(1, fps))))
+        frame_bounds.append(frame)
+    rebuilt: list[dict[str, Any]] = []
+    transitions: list[dict[str, Any]] = []
+    for index in range(clip_count):
+        original = plan_clips[index] if index < len(plan_clips) and isinstance(plan_clips[index], dict) else {}
+        start_frame = frame_bounds[index]
+        end_frame = frame_bounds[index + 1]
+        duration_frames = max(1, end_frame - start_frame)
+        item = dict(original)
+        item.update({
+            "index": index,
+            "start_frame": start_frame,
+            "start_seconds": round(start_frame / max(1, fps), 4),
+            "duration_frames": duration_frames,
+            "duration_seconds": round(duration_frames / max(1, fps), 4),
+        })
+        if index > 0:
+            transition = item.get("transition") if isinstance(item.get("transition"), dict) else {"type": "fade", "duration_frames": 2}
+            transition = dict(transition)
+            # A long dissolve masks the beat. Keep beat-snapped changes crisp.
+            transition["duration_frames"] = min(6, max(2, int(transition.get("duration_frames") or transition.get("durationFrames") or 2)))
+            item["transition"] = transition
+            transitions.append({
+                "at_seconds": round(start_frame / max(1, fps), 4),
+                "type": str(transition.get("type") or "fade"),
+                "duration_frames": transition["duration_frames"],
+            })
+        rebuilt.append(item)
+
+    timeline["clips"] = rebuilt
+    timeline["transitions"] = transitions
+    timeline["duration_frames"] = frame_bounds[-1]
+    timeline["duration_seconds"] = round(frame_bounds[-1] / max(1, fps), 4)
+    metadata = timeline.get("metadata") if isinstance(timeline.get("metadata"), dict) else {}
+    metadata = dict(metadata)
+    metadata["beat_snap_v2"] = {
+        "enabled": True,
+        "selected_transition_seconds": [round(value, 4) for value in selected],
+        "requested_duration_seconds": round(end, 4),
+        "strategy": "strong_near_even",
+    }
+    timeline["metadata"] = metadata
+    if timeline is not response:
+        response["timeline"] = timeline
+    response_meta = response.get("metadata") if isinstance(response.get("metadata"), dict) else {}
+    response_meta = dict(response_meta)
+    response_meta["beat_snap_v2"] = metadata["beat_snap_v2"]
+    response["metadata"] = response_meta
+    return response
