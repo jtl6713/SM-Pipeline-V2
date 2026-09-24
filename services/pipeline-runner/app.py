@@ -563,7 +563,7 @@ def run_autonomous_pick():
     if not prompt:
         return jsonify({"error": "prompt is required"}), 422
     try:
-        generated = generate_ideas(prompt, preferred_account=preferred_provider)
+        generated = (generate_ideas(prompt, preferred_account=preferred_provider) if preferred_provider else generate_ideas(prompt))
     except Exception as exc:
         logger.exception("autonomous-pick failed")
         return jsonify({"error": str(exc)}), 502
