@@ -1,0 +1,1 @@
+2026-09-24 validate weekly schedule spread and explicit save behavior
