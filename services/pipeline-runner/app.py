@@ -7,6 +7,8 @@ import os
 from flask import Flask, Response, jsonify, request
 
 from config import StageRequest, load_settings
+from ai_api_preference import account_to_provider, get_preferred_account
+from ai_api_status import snapshot as ai_api_status_snapshot
 from stages import a1p, c3b, i3, r2, rr2, smv1, ttd4
 from stages.registry import STAGE_NAMES, get_handler, is_implemented
 from audio.backfill import process_request as backfill_audio_leading_silence
@@ -94,6 +96,28 @@ def health():
                 {"name": "autonomous-pick", "path": "/jobs/autonomous-pick"},
                 {"name": "tiktok-analytics", "path": "/jobs/tiktok-analytics"},
             ],
+        }
+    )
+
+
+@app.get("/ai-api/status")
+def ai_api_status():
+    error_response, status = _verify_secret()
+    if error_response is not None:
+        return error_response, status
+    preferred_account = get_preferred_account(settings)
+    preferred_provider = account_to_provider(preferred_account)
+    failover_provider = "Azure" if preferred_provider == "OpenAI" else "OpenAI"
+    runtime = ai_api_status_snapshot()
+    return jsonify(
+        {
+            "ok": True,
+            "preferred_provider": preferred_provider,
+            "failover_provider": failover_provider,
+            "current_provider": runtime.get("provider"),
+            "failover_active": bool(runtime.get("failover")),
+            "last_success_at": runtime.get("last_success_at"),
+            "status_code": runtime.get("status_code"),
         }
     )
 
@@ -535,10 +559,11 @@ def run_autonomous_pick():
         return error_response, status
     payload = request.get_json(silent=True) or {}
     prompt = str(payload.get("prompt") or "").strip()
+    preferred_provider = str(payload.get("preferred_provider") or "").strip() or None
     if not prompt:
         return jsonify({"error": "prompt is required"}), 422
     try:
-        generated = generate_ideas(prompt)
+        generated = generate_ideas(prompt, preferred_account=preferred_provider)
     except Exception as exc:
         logger.exception("autonomous-pick failed")
         return jsonify({"error": str(exc)}), 502
