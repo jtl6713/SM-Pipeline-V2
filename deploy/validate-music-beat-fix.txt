@@ -1,1 +1,3 @@
 2026-09-23 validate music duration guard and beat snap
+
+2026-09-24 validate exact audio duration guard and no-loop refusal
