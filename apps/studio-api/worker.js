@@ -238,6 +238,7 @@ export default {
       const isOpsDeskInventoryRoute = url.pathname === "/api/ops/desk/inventory";
       const isOpsDeskActivityRoute = url.pathname === "/api/ops/desk/activity";
       const isOpsDeskModeRoute = url.pathname === "/api/ops/desk/mode";
+      const isAiApiRoute = url.pathname === "/api/ai-api";
       const isOpsLibraryCrossScopeRoute = url.pathname === "/api/ops/library/cross-scope";
       const isOperationsResetRenderUrlsRoute = url.pathname === "/api/operations/reset-render-urls";
       const isOperationsRetryAssetSelectionRoute = url.pathname === "/api/operations/retry-asset-selection";
@@ -315,6 +316,7 @@ export default {
       const isOperationsCompressWrite = isOperationsCompressRoute && request.method === "POST";
       const isOpsAzNavyPierKickWrite = isOpsAzNavyPierKickRoute && request.method === "POST";
       const isOpsDeskModeWrite = isOpsDeskModeRoute && request.method === "PATCH";
+      const isAiApiWrite = isAiApiRoute && request.method === "PATCH";
       const isOperationsResetRenderUrlsWrite = isOperationsResetRenderUrlsRoute && request.method === "POST";
       const isOperationsRetryAssetSelectionWrite = isOperationsRetryAssetSelectionRoute && request.method === "POST";
       const isOperationsMakeAdminBridgeWrite = isOperationsMakeAdminBridgeRoute && request.method === "POST";
@@ -382,6 +384,7 @@ export default {
         isOperationsCompressWrite ||
         isOpsAzNavyPierKickWrite ||
         isOpsDeskModeWrite ||
+        isAiApiWrite ||
         isOperationsResetRenderUrlsWrite ||
         isOperationsRetryAssetSelectionWrite ||
         isOperationsMakeAdminBridgeWrite ||
@@ -748,6 +751,17 @@ export default {
         if (request.method === "GET") return await adminRepairControlStatus(request, env);
         assertWriteRequest(request, env);
         return await adminRepairControl(request, env, authorization);
+      }
+
+      if (isAiApiRoute) {
+        requireAnyPermission(authorization, ["tenant_admin", "publishing_control", "production_configure"]);
+        if (request.method === "GET") return getStudioAiApiStatus(request, env);
+        if (request.method === "PATCH") {
+          requirePermission(authorization, "tenant_admin");
+          assertWriteRequest(request, env);
+          return patchStudioAiApiPreference(request, env);
+        }
+        throw new HttpError(405, "Method not allowed");
       }
 
       if (isOpsDeskInventoryRoute) {
@@ -32614,6 +32628,61 @@ async function getStudioDeskActivity(request, env) {
       error: String(error?.message || error),
     });
   }
+}
+
+async function studioAiApiRunnerStatus(env) {
+  const runnerUrl = String(env.PIPELINE_RUNNER_URL || "").trim().replace(/\/+$/, "");
+  if (!runnerUrl) return null;
+  const secret = String(env.PIPELINE_RUNNER_SHARED_SECRET || "");
+  try {
+    const response = await fetch(runnerUrl + "/ai-api/status", {
+      method: "GET",
+      headers: {
+        Accept: "application/json",
+        ...(secret ? { "X-Pipeline-Secret": secret } : {}),
+      },
+      signal: AbortSignal.timeout(4000),
+    });
+    if (!response.ok) return null;
+    return await response.json().catch(() => null);
+  } catch {
+    return null;
+  }
+}
+
+async function getStudioAiApiStatus(request, env) {
+  const row = await studioSettingsByName(env, "AI_API_PREFERRED_PROVIDER").catch(() => null);
+  const raw = String(row ? f(row, "Setting_Value") || "" : "").trim().toLowerCase();
+  const preferredProvider = raw === "azure" ? "Azure" : "OpenAI";
+  const runner = await studioAiApiRunnerStatus(env);
+  return respond(request, env, {
+    ok: true,
+    preferred_provider: preferredProvider,
+    failover_provider: preferredProvider === "OpenAI" ? "Azure" : "OpenAI",
+    current_provider: runner?.current_provider || null,
+    failover_active: Boolean(runner?.failover_active),
+    last_success_at: runner?.last_success_at || null,
+    runner_connected: Boolean(runner?.ok),
+  });
+}
+
+async function patchStudioAiApiPreference(request, env) {
+  let payload;
+  try { payload = await request.json(); } catch { throw new HttpError(400, "Request body must be valid JSON"); }
+  const raw = String(payload?.preferred_provider || payload?.provider || "").trim().toLowerCase();
+  if (!["openai", "azure"].includes(raw)) throw new HttpError(400, "preferred_provider must be OpenAI or Azure");
+  const provider = raw === "azure" ? "Azure" : "OpenAI";
+  await studioUpsertSetting(
+    env,
+    "AI_API_PREFERRED_PROVIDER",
+    provider,
+    "Preferred AI API for normal Pipeline Runner workloads. The other provider is automatic failover."
+  );
+  return respond(request, env, {
+    ok: true,
+    preferred_provider: provider,
+    failover_provider: provider === "OpenAI" ? "Azure" : "OpenAI",
+  });
 }
 
 async function patchStudioDeskMode(request, env) {
