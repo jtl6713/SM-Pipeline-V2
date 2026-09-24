@@ -422,7 +422,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.371-schedule-override",
+          version: "0.10.372-schedule-spread",
           studio_desk_inventory_v1: true,
           studio_desk_activity_v1: true,
           studio_tiktok_complete_v1: true,
@@ -451,6 +451,7 @@ export default {
           studio_clip_frame_passthrough_v1: true,
           studio_review_schedule_override_v1: true,
           studio_manual_schedule_override_v2: true,
+          studio_schedule_spread_v2: true,
           studio_insights_best_times_v1: true,
           studio_prefill_suggested_schedules_v1: true,
           studio_insights_similar_times_v1: true,
@@ -6591,7 +6592,7 @@ function studioFinishedVariantsSkipped(record) {
   return status === "Ready" || status === "Not Needed" || status === "None";
 }
 
-const STUDIO_SCHEDULE_GAP_MS = 90 * 60 * 1000;
+const STUDIO_SCHEDULE_GAP_MS = 3 * 60 * 60 * 1000;
 
 function studioScheduleMs(value) {
   const ms = Date.parse(value);
@@ -14577,13 +14578,31 @@ function studioOccupiedForPlatform(occupiedByPlatform, platform) {
   return [];
 }
 
-function studioScoreAnalyticsSlot({ preferred, windowIndex, crowding, platformCrowding, dayIndex }) {
+function studioScheduleTimeCrowding(ms, occupiedMs, radiusMinutes = 90) {
+  const target = studioChicagoDateTimeParts(new Date(ms));
+  const targetMinutes = target.hour * 60 + target.minute;
+  let count = 0;
+  for (const other of occupiedMs || []) {
+    if (!Number.isFinite(other)) continue;
+    const parts = studioChicagoDateTimeParts(new Date(other));
+    const otherMinutes = parts.hour * 60 + parts.minute;
+    const raw = Math.abs(targetMinutes - otherMinutes);
+    const distance = Math.min(raw, 1440 - raw);
+    if (distance <= radiusMinutes) count += 1;
+  }
+  return count;
+}
+
+function studioScoreAnalyticsSlot({ preferred, windowIndex, crowding, platformCrowding, timeCrowding, dayIndex }) {
   let score = 100;
-  score += preferred ? 40 : 0;
-  score += Math.max(0, 16 - windowIndex * 6);
-  score -= Math.min(platformCrowding, 4) * 6;
-  score -= Math.min(crowding, 6) * 2;
-  score -= dayIndex * 2;
+  score += preferred ? 18 : 0;
+  score += Math.max(0, 12 - windowIndex * 5);
+  score += platformCrowding === 0 ? 14 : 0;
+  score += crowding === 0 ? 8 : 0;
+  score -= Math.min(platformCrowding, 4) * 42;
+  score -= Math.min(crowding, 8) * 12;
+  score -= Math.min(timeCrowding, 6) * 8;
+  score -= dayIndex * 1.5;
   return score;
 }
 
@@ -14597,11 +14616,10 @@ function studioPickBalancedSuggestedIso(windows, now = new Date(), options = {})
   const nowMs = now.getTime() + leadMs;
   const horizon = studioSuggestHorizon(now, options.horizonDays || STUDIO_SUGGEST_HORIZON_DAYS);
 
-  const collect = (preferredOnly) => {
+  const collect = () => {
     let best = null;
     for (const civil of horizon) {
       const preferred = !daysPref.length || daysPref.includes(civil.weekday);
-      if (preferredOnly && daysPref.length && !preferred) continue;
       const crowding = studioOccupiedOnCivilDay(occupiedMs, civil).length;
       const platformCrowding = studioOccupiedOnCivilDay(platformOccupiedMs, civil).length;
       for (let windowIndex = 0; windowIndex < windowList.length; windowIndex++) {
@@ -14614,6 +14632,7 @@ function studioPickBalancedSuggestedIso(windows, now = new Date(), options = {})
           windowIndex,
           crowding,
           platformCrowding,
+          timeCrowding: studioScheduleTimeCrowding(ms, occupiedMs),
           dayIndex: civil.index,
         });
         if (!best || score > best.score) best = { score, ms };
@@ -14622,10 +14641,8 @@ function studioPickBalancedSuggestedIso(windows, now = new Date(), options = {})
     return best;
   };
 
-  const preferred = collect(true);
-  if (preferred) return new Date(preferred.ms).toISOString();
-  const openWindow = collect(false);
-  if (openWindow) return new Date(openWindow.ms).toISOString();
+  const balanced = collect();
+  if (balanced) return new Date(balanced.ms).toISOString();
   const first = String(windowList[0] || "12:00-13:00");
   const start = first.split("-")[0] || "12:00";
   const [hh, mm] = start.split(":").map((n) => Number(n) || 0);
