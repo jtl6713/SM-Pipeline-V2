@@ -50,3 +50,13 @@ test("Pipeline schedule overview defaults collapsed", () => {
   assert.match(html, /id="pipelineScheduleGridToggle" aria-expanded="false"[^>]*>Expand<\/button>/);
   assert.match(app, /let pipelineScheduleGridOpen = false/);
 });
+
+
+test("manual schedule overrides have explicit save controls", () => {
+  const here = path.dirname(fileURLToPath(import.meta.url));
+  const app = fs.readFileSync(path.join(here, "assets", "app-item4-0625.js"), "utf8");
+  assert.match(app, /data-pipeline-schedule-save/);
+  assert.match(app, /manual_schedule_override:\s*true/);
+  assert.match(app, /function creativeCanSetSchedule/);
+  assert.match(app, /Manual schedule overrides are kept exactly as entered/);
+});
