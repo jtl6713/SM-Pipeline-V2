@@ -6,10 +6,9 @@ import json
 import re
 from typing import Any
 
-import requests
-
 from a3.constants import OPENAI_MODEL
 from config import load_settings
+from openai_responses import post_responses
 
 
 def _extract_json(text: str) -> dict[str, Any]:
@@ -52,13 +51,9 @@ def classify_asset(prompt: str, *, image_urls: list[str] | None = None, max_outp
     for url in (image_urls or [])[:8]:
         if url:
             content.append({"type": "input_image", "image_url": url})
-    response = requests.post(
-        "https://api.openai.com/v1/responses",
-        headers={
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json",
-        },
-        json={
+    response = post_responses(
+        settings,
+        {
             "model": model,
             "input": [{"role": "user", "content": content}],
             "store": False,

@@ -6,9 +6,8 @@ import json
 import re
 from typing import Any
 
-import requests
-
 from config import load_settings
+from openai_responses import post_responses
 from sai1.constants import OPENAI_MODEL
 
 
@@ -48,13 +47,9 @@ def generate_themes(prompt: str) -> dict[str, Any]:
     if not api_key:
         raise RuntimeError("OPENAI_API_KEY is required for SAI1 slide theming")
     model = str(settings.get("openai_sai1_model") or OPENAI_MODEL)
-    response = requests.post(
-        "https://api.openai.com/v1/responses",
-        headers={
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json",
-        },
-        json={
+    response = post_responses(
+        settings,
+        {
             "model": model,
             "input": prompt,
             "store": False,
