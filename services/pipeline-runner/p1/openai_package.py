@@ -7,7 +7,7 @@ import re
 from typing import Any
 
 from config import load_settings
-from openai_responses import post_responses
+from ai_api_router import post_responses
 from p1.constants import DEFAULT_MAX_OUTPUT_TOKENS, OPENAI_MODEL
 from render.fields import field, field_str
 
