@@ -1,3 +1,0 @@
-2026-09-24 validate weekly schedule spread and explicit save behavior
-
-2026-09-24 rerun after AZ cleanup and updated spread expectations
