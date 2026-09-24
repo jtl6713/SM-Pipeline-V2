@@ -422,7 +422,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.370-preprod-ai-method-allowlist",
+          version: "0.10.371-schedule-override",
           studio_desk_inventory_v1: true,
           studio_desk_activity_v1: true,
           studio_tiktok_complete_v1: true,
@@ -450,6 +450,7 @@ export default {
           studio_finished_passthrough_resume_v1: true,
           studio_clip_frame_passthrough_v1: true,
           studio_review_schedule_override_v1: true,
+          studio_manual_schedule_override_v2: true,
           studio_insights_best_times_v1: true,
           studio_prefill_suggested_schedules_v1: true,
           studio_insights_similar_times_v1: true,
@@ -6676,6 +6677,7 @@ function studioPublishScheduleFields(payload = {}, record = null, options = {}) 
   const occupiedMs = Array.isArray(options.occupiedMs) ? options.occupiedMs : null;
   const raw = payload?.scheduled_post_date;
   const immediate = raw === undefined || raw === null || String(raw).trim() === "" || String(raw).trim().toLowerCase() === "immediate";
+  const exactOverride = options.exactOverride === true && !immediate;
   let requestedIso = "";
   if (immediate) {
     requestedIso = new Date().toISOString();
@@ -6684,7 +6686,7 @@ function studioPublishScheduleFields(payload = {}, record = null, options = {}) 
     if (Number.isNaN(Date.parse(value))) throw new HttpError(400, "Scheduled date/time is invalid");
     requestedIso = new Date(value).toISOString();
   }
-  const resolvedIso = occupiedMs ? studioNextOpenScheduleIso(requestedIso, occupiedMs) : requestedIso;
+  const resolvedIso = occupiedMs && !exactOverride ? studioNextOpenScheduleIso(requestedIso, occupiedMs) : requestedIso;
   const bumped = Date.parse(resolvedIso) - Date.parse(requestedIso) >= 60 * 1000;
   if (immediate && !bumped && !options.forceWrite) return {};
   const iso = resolvedIso;
@@ -6693,6 +6695,7 @@ function studioPublishScheduleFields(payload = {}, record = null, options = {}) 
     Scheduled_Post_Date: iso,
     Publish_Status: due ? "Ready to Publish" : "Ready to Schedule",
   };
+  if (exactOverride) fields.Studio_Scheduled_At = iso;
   const platform = String(f(record, "Platform") || "").trim();
   if (platform === "YouTube") {
     fields.YouTube_Scheduled_Publish_At = iso;
@@ -28669,7 +28672,16 @@ async function approveOutputRecordForPublishing(env, existing, note, stamp, payl
     const occupied = await studioLoadOccupiedSchedules(env, { excludeIds: [id] });
     occupiedMs = occupied[platform] || [];
   }
-  const scheduleFields = studioPublishScheduleFields(payload || {}, record, { occupiedMs });
+  const markerIso = String(f(record, "Studio_Scheduled_At") || "").trim();
+  const requestedRaw = String(payload?.scheduled_post_date || "").trim();
+  const requestedMs = requestedRaw && requestedRaw.toLowerCase() !== "immediate" ? Date.parse(requestedRaw) : NaN;
+  const markerMs = markerIso ? Date.parse(markerIso) : NaN;
+  const manualScheduleOverride = payload?.manual_schedule_override === true
+    || (!Number.isNaN(requestedMs) && !Number.isNaN(markerMs) && Math.abs(requestedMs - markerMs) < 60000);
+  const scheduleFields = studioPublishScheduleFields(payload || {}, record, {
+    occupiedMs,
+    exactOverride: manualScheduleOverride,
+  });
   const scheduledIso = scheduleFields.Scheduled_Post_Date || f(record, "Scheduled_Post_Date");
   const fields = {
     Review_Status: "Approved",
@@ -33783,11 +33795,21 @@ async function scheduleStudioPublishOutput(request, env, url, authorization, ctx
   if (published) throw new HttpError(409, "Published outputs cannot be rescheduled");
   const platform = String(f(existing, "Platform") || "").trim();
   const occupied = await studioLoadOccupiedSchedules(env, { excludeIds: [match[1]] });
+  const manualScheduleOverride = Boolean(
+    payload?.manual_schedule_override === true
+    && value
+    && value.toLowerCase() !== "immediate"
+  );
   const fields = studioPublishScheduleFields(
     { scheduled_post_date: value || "immediate" },
     existing,
-    { occupiedMs: studioOccupiedForPlatform(occupied, platform), forceWrite: true },
+    {
+      occupiedMs: studioOccupiedForPlatform(occupied, platform),
+      forceWrite: true,
+      exactOverride: manualScheduleOverride,
+    },
   );
+  if (!manualScheduleOverride) fields.Studio_Scheduled_At = null;
   fields.Publish_Error_Message = "";
   const updated = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, match[1], {
     method: "PATCH",
