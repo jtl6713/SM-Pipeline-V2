@@ -422,7 +422,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.374-youtube-metadata-guard",
+          version: "0.10.375-publish-now-state-fix",
           studio_desk_inventory_v1: true,
           studio_desk_activity_v1: true,
           studio_tiktok_complete_v1: true,
@@ -2573,8 +2573,19 @@ function normalizedOutputState(record) {
   // Review-ready native stills / finished files beat leftover retry flags and stale error text.
   // Stale Review Sent must not win while Remotion is still In Production, or while
   // lettering / the 3D cover is still missing.
+  const approvedOrScheduledEarly =
+    has("Review_Status", "approved")
+    || has("Output_Status", "approved for publishing")
+    || has("Publish_Status", "ready to schedule")
+    || has("Publish_Status", "ready to publish")
+    || has("Publish_Status", "scheduled")
+    || has("Publish_Status", "publishing")
+    || has("Publish_Status", "published")
+    || has("TikTok_Draft_Status", "waiting for schedule")
+    || has("TikTok_Draft_Status", "draft delivered");
   if (
     readyForReviewIntent
+    && !approvedOrScheduledEarly
     && studioOutputHasReviewableDeliverable(record)
     && !outputDeadEarly
     && !publishDeadEarly
@@ -33857,11 +33868,15 @@ async function scheduleStudioPublishOutput(request, env, url, authorization, ctx
     && value
     && value.toLowerCase() !== "immediate"
   );
+  const publishNowImmediate = Boolean(
+    payload?.publish_now === true
+    && (!value || value.toLowerCase() === "immediate")
+  );
   const fields = studioPublishScheduleFields(
     { scheduled_post_date: value || "immediate" },
     existing,
     {
-      occupiedMs: studioOccupiedForPlatform(occupied, platform),
+      occupiedMs: publishNowImmediate ? null : studioOccupiedForPlatform(occupied, platform),
       forceWrite: true,
       exactOverride: manualScheduleOverride,
     },
