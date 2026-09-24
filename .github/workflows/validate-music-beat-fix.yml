@@ -1,0 +1,32 @@
+name: Validate Music Duration and Beat Fix
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'deploy/validate-music-beat-fix.txt'
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: services/pipeline-runner
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          sparse-checkout: |
+            services/pipeline-runner
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install
+        run: pip install -r requirements.txt pytest
+      - name: Compile
+        run: python -m py_compile r2/candidates.py r2/prompt_builder.py r2/processor.py t1/apply.py t1/processor.py
+      - name: Tests
+        run: pytest -q tests/test_r2_music_duration_guard.py tests/test_t1_beat_snap.py tests/test_r4_render_request.py
