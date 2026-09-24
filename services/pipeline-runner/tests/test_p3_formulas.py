@@ -40,6 +40,7 @@ def test_seeded_outputs_formula_uses_content_id():
     formula = p3_seeded_outputs_formula("95")
     assert 'FIND(",95,",' in formula
     assert '{Output_Status}="Planned"' in formula
+    assert '{Output_Status}="In Production"' in formula
     assert "{Production_Request_Output}!=BLANK()" in formula
 
 
