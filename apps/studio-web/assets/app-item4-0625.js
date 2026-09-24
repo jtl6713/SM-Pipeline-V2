@@ -232,7 +232,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.370-production-lifecycle-repair";
+  const BUILD_ID = "item4-0.6.371-schedule-override";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -13443,15 +13443,27 @@
     return status === "Approved for Publishing" || review === "Approved";
   }
 
+  function creativeCanSetSchedule(output = activeCreativeOutput) {
+    if (!output || output.do_not_publish || creativeIsPublished(output)) return false;
+    return creativeCanReschedule(output) || creativeCanApproveForPublishing(output);
+  }
+
   function syncCreativeScheduleActions(output = activeCreativeOutput) {
     const box = $("creativeScheduleActions");
     const hint = $("creativeScheduleHint");
-    const can = creativeCanReschedule(output);
-    if (box) box.hidden = !can;
+    const save = $("creativeSaveSchedule");
+    const publishNow = $("creativePublishNow");
+    const canSave = creativeCanSetSchedule(output);
+    const canPublishNow = creativeCanReschedule(output);
+    if (box) box.hidden = !canSave;
+    if (save) save.hidden = !canSave;
+    if (publishNow) publishNow.hidden = !canPublishNow;
     if (hint) {
-      hint.textContent = can
-        ? "This output is already approved. Save schedule keeps the new time. Publish now sends it as soon as the slot is open."
-        : "Immediate publishes as soon as you approve. Schedule uses your local time.";
+      hint.textContent = canPublishNow
+        ? "This output is already approved. Save schedule locks the exact time you enter. Publish now sends it immediately."
+        : canSave
+          ? "Set the date and time, then click Save schedule. Manual schedule overrides are kept exactly as entered."
+          : "Immediate publishes as soon as you approve. Schedule uses your local time.";
     }
   }
 
@@ -13470,7 +13482,7 @@
     const mode = document.querySelector("input[name='creativeScheduleMode']:checked")?.value || "immediate";
     const raw = String($("creativeScheduleAt")?.value || "").trim();
     if (mode !== "schedule" || !raw) return { scheduled_post_date: "" };
-    return { scheduled_post_date: new Date(raw).toISOString() };
+    return { scheduled_post_date: new Date(raw).toISOString(), manual_schedule_override: true };
   }
 
   function rememberPipelineScheduleDrafts() {
@@ -13619,17 +13631,44 @@
   }
 
   function bindPipelineScheduleInputs(root) {
-    (root || document).querySelectorAll("[data-pipeline-schedule]").forEach((input) => {
+    const scope = root || document;
+    scope.querySelectorAll("[data-pipeline-schedule]").forEach((input) => {
       const keepOnRow = (event) => event.stopPropagation();
       input.addEventListener("click", keepOnRow);
       input.addEventListener("mousedown", keepOnRow);
       input.addEventListener("pointerdown", keepOnRow);
-      input.addEventListener("keydown", keepOnRow);
+      input.addEventListener("input", () => {
+        const id = input.dataset.pipelineSchedule;
+        if (id) pipelineScheduleDrafts.set(id, String(input.value || "").trim());
+        const status = input.parentElement?.querySelector("[data-pipeline-schedule-status]");
+        if (status) status.textContent = "Unsaved";
+      });
+      input.addEventListener("keydown", (event) => {
+        keepOnRow(event);
+        if (event.key !== "Enter") return;
+        event.preventDefault();
+        savePipelineScheduleInput(input).catch((error) => {
+          setPipelineLiveHint(error.message || "Could not save schedule.");
+        });
+      });
       input.addEventListener("change", () => {
         savePipelineScheduleInput(input).catch((error) => {
           setPipelineLiveHint(error.message || "Could not save schedule.");
         });
       });
+    });
+    scope.querySelectorAll("[data-pipeline-schedule-save]").forEach((button) => {
+      const keepOnRow = (event) => event.stopPropagation();
+      button.addEventListener("click", (event) => {
+        keepOnRow(event);
+        const id = button.dataset.pipelineScheduleSave;
+        const input = scope.querySelector(`[data-pipeline-schedule="${id}"]`);
+        savePipelineScheduleInput(input).catch((error) => {
+          setPipelineLiveHint(error.message || "Could not save schedule.");
+        });
+      });
+      button.addEventListener("mousedown", keepOnRow);
+      button.addEventListener("pointerdown", keepOnRow);
     });
   }
 
@@ -13660,7 +13699,7 @@
     try {
       const result = await api(`/api/operations/outputs/${encodeURIComponent(id)}/schedule`, {
         method: "POST",
-        body: JSON.stringify({ scheduled_post_date: new Date(parsed).toISOString() }),
+        body: JSON.stringify({ scheduled_post_date: new Date(parsed).toISOString(), manual_schedule_override: true }),
       });
       if (result?.record) applySavedPipelineSchedule(result.record);
       if (status) status.textContent = "Saved";
@@ -14563,7 +14602,7 @@
       const ready = /ready for review/i.test(String(r.studio_state || r.output_status || r.review_status || ""));
       const scheduleValue = pipelineScheduleInputValue(r);
       const scheduleCell = isPipeline && (ready || creativeCanReschedule(r))
-        ? `<div class="subtle pipeline-schedule-cell">Time <input type="datetime-local" data-pipeline-schedule="${escapeHtml(r.id)}" value="${escapeHtml(scheduleValue)}" title="Pick a time to save it. Leave empty only until you approve."> <span data-pipeline-schedule-status aria-live="polite"></span><div class="pipeline-schedule-suggest" data-pipeline-schedule-suggest="${escapeHtml(r.id)}"></div><button type="button" class="text-button" data-pipeline-use-suggested="${escapeHtml(r.id)}" hidden>Use suggested</button></div>`
+        ? `<div class="subtle pipeline-schedule-cell">Time <input type="datetime-local" data-pipeline-schedule="${escapeHtml(r.id)}" value="${escapeHtml(scheduleValue)}" title="Choose the exact publish time."> <button type="button" class="secondary-button pipeline-schedule-save" data-pipeline-schedule-save="${escapeHtml(r.id)}">Save</button> <span data-pipeline-schedule-status aria-live="polite"></span><div class="pipeline-schedule-suggest" data-pipeline-schedule-suggest="${escapeHtml(r.id)}"></div><button type="button" class="text-button" data-pipeline-use-suggested="${escapeHtml(r.id)}" hidden>Use suggested</button></div>`
         : "";
       const creativeCell = isPipeline ? `<td class="creative-output-action-cell"><button type="button" class="creative-button" data-creative-output-id="${escapeHtml(r.id)}" ${canOpen ? "" : "disabled"} title="${canOpen ? "" : notReadyTitle}">${canOpen ? "Open review" : notReadyLabel}</button>${scheduleCell}</td>` : "";
       const rowOpen = isPipeline && canOpen ? ` class="pipeline-open-row" data-open-output-id="${escapeHtml(r.id)}" tabindex="0"` : "";
@@ -17839,6 +17878,18 @@
     const target = $("outputsList");
     if (target) renderOutputsTable(target, pipelineOutputs);
   });
+  $("creativeScheduleAt")?.addEventListener("input", () => {
+    document.querySelectorAll("input[name='creativeScheduleMode']").forEach((radio) => {
+      radio.checked = radio.value === "schedule";
+    });
+    syncCreativeScheduleActions(activeCreativeOutput);
+  });
+  $("creativeScheduleAt")?.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter") return;
+    event.preventDefault();
+    submitCreativeScheduleChange(false);
+  });
+
   $("creativeUseSuggestedTime")?.addEventListener("click", () => {
     const input = $("creativeScheduleAt");
     const record = activeCreativeOutput;
@@ -17858,8 +17909,8 @@
     const record = activeCreativeOutput;
     const id = activeCreativeOutputId || record?.id;
     if (!id) return;
-    if (!creativeCanReschedule(record)) {
-      phase6Message("This output cannot be rescheduled.", "error-text");
+    if (publishNow ? !creativeCanReschedule(record) : !creativeCanSetSchedule(record)) {
+      phase6Message(publishNow ? "This output cannot be published now." : "This output cannot be scheduled.", "error-text");
       return;
     }
     const payload = publishNow
