@@ -1,1 +1,1 @@
-2026-09-24 diagnose handler after click reached Worker but produced 0 assets
+2026-09-24 inspect AI requested-count mismatch after 2 of 5 completed
