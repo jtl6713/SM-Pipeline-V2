@@ -24132,7 +24132,7 @@ async function cadenceRepairInProgress(env) {
 async function pulseStudioP3ForPlannedOutputs(env) {
   const rows = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
     limit: 25,
-    filterFormula: 'AND({Test_Run_ID}=BLANK(),NOT({Do_Not_Publish}),{Output_Status}="Planned",{Production_Request_Output}!=BLANK(),{Content_Item}!=BLANK())',
+    filterFormula: 'AND({Test_Run_ID}=BLANK(),NOT({Do_Not_Publish}),OR({Output_Status}="Planned",{Output_Status}="In Production"),{Production_Request_Output}!=BLANK(),{Content_Item}!=BLANK())',
   }).catch(() => []);
   const parentIds = [...new Set((rows || []).flatMap((row) => {
     const linked = f(row, "Content_Item");

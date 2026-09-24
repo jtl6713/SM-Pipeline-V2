@@ -36,7 +36,7 @@ def p3_seeded_outputs_formula(content_id: str) -> str:
     token = _quote(str(content_id))
     return (
         f'AND(FIND(",{token},", "," & ARRAYJOIN({{Content_Item}}) & ",")>0,'
-        f'{{Production_Request_Output}}!=BLANK(),{{Output_Status}}="Planned")'
+        f'{{Production_Request_Output}}!=BLANK(),OR({{Output_Status}}="Planned",{{Output_Status}}="In Production"))'
     )
 
 

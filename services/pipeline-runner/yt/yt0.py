@@ -5,12 +5,12 @@ from __future__ import annotations
 from typing import Any
 
 from airtable.client import AirtableClient
-from airtable.constants import PLATFORM_OUTPUTS_TABLE
+from airtable.constants import CONTENT_ITEMS_TABLE, PLATFORM_OUTPUTS_TABLE
 from asset.helpers import parse_int
 from carousel.timeutil import iso_utc, stamp_minutes
 from item4.settings import PipelineSettings
 from publish.location import resolve_publish_location
-from render.fields import field, field_str
+from render.fields import field, field_str, first_linked_id
 from yt.common import preview, valid_record_id
 from yt.constants import (
     MAKE_YT0_ID,
@@ -28,6 +28,40 @@ from yt.constants import (
 )
 from yt.eligibility import package_source_url, yt0_eligibility_reason
 from yt.package import package_fields, youtube_defaults
+
+
+def _hydrate_parent_hashtags(
+    client: AirtableClient,
+    output: dict[str, Any],
+    *,
+    persist: bool = True,
+) -> str:
+    """Fill a missing output hashtag package from the linked Content Item.
+
+    Studio can seed Platform Outputs before the parent hashtag generation/enrichment
+    finishes. YT0 is the final packaging boundary, so never send an empty YouTube
+    hashtag/tag package when the parent already has hashtags.
+    """
+    if field_str(output, "Output_Hashtags"):
+        return ""
+    parent_id = first_linked_id(field(output, "Content_Item"))
+    if not parent_id:
+        return ""
+    try:
+        parent = client.get_record(CONTENT_ITEMS_TABLE, parent_id)
+    except Exception:
+        return ""
+    hashtags = field_str(parent, "Hashtags")
+    if not hashtags:
+        return ""
+    output.setdefault("fields", {})["Output_Hashtags"] = hashtags
+    if persist:
+        client.update_record(
+            PLATFORM_OUTPUTS_TABLE,
+            str(output.get("id") or ""),
+            {"Output_Hashtags": hashtags},
+        )
+    return hashtags
 
 
 def process_request(
@@ -53,6 +87,9 @@ def process_request(
     output = client.get_record(PLATFORM_OUTPUTS_TABLE, record_id)
     if test_run_id and field_str(output, "Test_Run_ID") != test_run_id:
         return {"processed": False, "reason": "test_run_mismatch", **result}
+
+    backfilled_hashtags = _hydrate_parent_hashtags(client, output, persist=not dry_run)
+    result["hashtags_backfilled"] = bool(backfilled_hashtags)
 
     reason = yt0_eligibility_reason(
         output,
