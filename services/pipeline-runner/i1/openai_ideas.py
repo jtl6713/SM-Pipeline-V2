@@ -6,10 +6,9 @@ import json
 import re
 from typing import Any
 
-import requests
-
 from config import load_settings
 from i1.constants import OPENAI_MODEL
+from openai_responses import post_responses
 
 
 def _extract_json(text: str) -> dict[str, Any]:
@@ -48,13 +47,9 @@ def generate_ideas(prompt: str) -> dict[str, Any]:
     if not api_key:
         raise RuntimeError("OPENAI_API_KEY is required for I1 idea generation")
     model = str(settings.get("openai_i1_model") or settings.get("openai_sai1_model") or OPENAI_MODEL)
-    response = requests.post(
-        "https://api.openai.com/v1/responses",
-        headers={
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json",
-        },
-        json={
+    response = post_responses(
+        settings,
+        {
             "model": model,
             "input": prompt,
             "store": False,

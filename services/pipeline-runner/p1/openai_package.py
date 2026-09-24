@@ -6,9 +6,8 @@ import json
 import re
 from typing import Any
 
-import requests
-
 from config import load_settings
+from openai_responses import post_responses
 from p1.constants import DEFAULT_MAX_OUTPUT_TOKENS, OPENAI_MODEL
 from render.fields import field, field_str
 
@@ -59,13 +58,9 @@ def generate_package(prompt_row: dict[str, Any], runtime_context: str) -> dict[s
         f"{runtime_context}\n\n"
         f"REQUIRED OUTPUT STRUCTURE\n{field_str(prompt_row, 'JSON Schema')}"
     )
-    response = requests.post(
-        "https://api.openai.com/v1/responses",
-        headers={
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json",
-        },
-        json={
+    response = post_responses(
+        settings,
+        {
             "model": model,
             "instructions": field_str(prompt_row, "System Prompt"),
             "input": user,
