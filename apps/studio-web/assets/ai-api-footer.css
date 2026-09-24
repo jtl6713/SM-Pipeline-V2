@@ -1,0 +1,9 @@
+.studio-footer-meta #aiApiFooter{display:inline-flex;align-items:center;gap:7px;white-space:nowrap}
+.ai-api-footer-label{display:inline-flex;align-items:center;gap:4px}
+.ai-api-dot{font-size:.78em}
+.ai-api-failover{opacity:.68;font-size:.82em}
+.ai-api-toggle{border:1px solid color-mix(in srgb,currentColor 22%,transparent);background:transparent;color:inherit;border-radius:999px;padding:3px 8px;font:inherit;font-size:.82em;cursor:pointer}
+.ai-api-toggle:hover{background:color-mix(in srgb,currentColor 7%,transparent)}
+.ai-api-toggle:disabled{opacity:.55;cursor:wait}
+.ai-api-current{opacity:.68;font-size:.82em}
+@media(max-width:760px){.ai-api-current{display:none}.studio-footer-meta #aiApiFooter{white-space:normal}}

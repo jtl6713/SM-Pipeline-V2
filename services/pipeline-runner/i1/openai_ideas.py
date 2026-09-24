@@ -8,7 +8,7 @@ from typing import Any
 
 from config import load_settings
 from i1.constants import OPENAI_MODEL
-from openai_responses import post_responses
+from ai_api_router import post_responses
 
 
 def _extract_json(text: str) -> dict[str, Any]:
@@ -41,11 +41,8 @@ def _output_text(payload: dict[str, Any]) -> str:
     raise RuntimeError("OpenAI I1 response had no output text")
 
 
-def generate_ideas(prompt: str) -> dict[str, Any]:
+def generate_ideas(prompt: str, *, preferred_account: str | None = None) -> dict[str, Any]:
     settings = load_settings()
-    api_key = str(settings.get("openai_api_key") or "").strip()
-    if not api_key:
-        raise RuntimeError("OPENAI_API_KEY is required for I1 idea generation")
     model = str(settings.get("openai_i1_model") or settings.get("openai_sai1_model") or OPENAI_MODEL)
     response = post_responses(
         settings,
@@ -57,6 +54,7 @@ def generate_ideas(prompt: str) -> dict[str, Any]:
             "text": {"format": {"type": "json_object"}},
         },
         timeout=300,
+        preferred_account=preferred_account,
     )
     if not response.ok:
         detail = (response.text or "").strip()[:400]

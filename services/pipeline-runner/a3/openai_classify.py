@@ -8,7 +8,7 @@ from typing import Any
 
 from a3.constants import OPENAI_MODEL
 from config import load_settings
-from openai_responses import post_responses
+from ai_api_router import post_responses
 
 
 def _extract_json(text: str) -> dict[str, Any]:
@@ -43,9 +43,6 @@ def _output_text(payload: dict[str, Any]) -> str:
 
 def classify_asset(prompt: str, *, image_urls: list[str] | None = None, max_output_tokens: int = 4000) -> dict[str, Any]:
     settings = load_settings()
-    api_key = str(settings.get("openai_api_key") or "").strip()
-    if not api_key:
-        raise RuntimeError("OPENAI_API_KEY is required for A3 classification")
     model = str(settings.get("openai_a3_model") or OPENAI_MODEL)
     content: list[dict[str, Any]] = [{"type": "input_text", "text": prompt}]
     for url in (image_urls or [])[:8]:

@@ -7,7 +7,7 @@ import re
 from typing import Any
 
 from config import load_settings
-from openai_responses import post_responses
+from ai_api_router import post_responses
 from sai1.constants import OPENAI_MODEL
 
 
@@ -43,9 +43,6 @@ def _output_text(payload: dict[str, Any]) -> str:
 
 def generate_themes(prompt: str) -> dict[str, Any]:
     settings = load_settings()
-    api_key = str(settings.get("openai_api_key") or "").strip()
-    if not api_key:
-        raise RuntimeError("OPENAI_API_KEY is required for SAI1 slide theming")
     model = str(settings.get("openai_sai1_model") or OPENAI_MODEL)
     response = post_responses(
         settings,
