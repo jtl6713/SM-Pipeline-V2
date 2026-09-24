@@ -202,6 +202,7 @@
   const pipelineGroupOpen = new Map();
   let pipelineArchivedSectionOpen = false;
   const pipelineScheduleDrafts = new Map();
+  const pipelineScheduleDirty = new Set();
   const pipelineTiktokUrlDrafts = new Map();
   const pipelineYoutubeUrlDrafts = new Map();
   let pipelineViewFilter = "all";
@@ -232,7 +233,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.371-schedule-override";
+  const BUILD_ID = "item4-0.6.372-schedule-spread";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -13500,6 +13501,7 @@
     if (!id) return;
     const local = formatDateTimeLocalInput(record.scheduled_post_date);
     pipelineScheduleDrafts.set(id, local);
+    pipelineScheduleDirty.delete(id);
     const input = document.querySelector(`[data-pipeline-schedule="${id}"]`);
     if (input) input.value = local;
     pipelineOutputs = (pipelineOutputs || []).map((row) => (row.id === id ? { ...row, ...record } : row));
@@ -13637,24 +13639,24 @@
       input.addEventListener("click", keepOnRow);
       input.addEventListener("mousedown", keepOnRow);
       input.addEventListener("pointerdown", keepOnRow);
+      input.addEventListener("keydown", keepOnRow);
       input.addEventListener("input", () => {
         const id = input.dataset.pipelineSchedule;
-        if (id) pipelineScheduleDrafts.set(id, String(input.value || "").trim());
+        if (id) {
+          pipelineScheduleDrafts.set(id, String(input.value || "").trim());
+          pipelineScheduleDirty.add(id);
+        }
         const status = input.parentElement?.querySelector("[data-pipeline-schedule-status]");
-        if (status) status.textContent = "Unsaved";
-      });
-      input.addEventListener("keydown", (event) => {
-        keepOnRow(event);
-        if (event.key !== "Enter") return;
-        event.preventDefault();
-        savePipelineScheduleInput(input).catch((error) => {
-          setPipelineLiveHint(error.message || "Could not save schedule.");
-        });
+        if (status) status.textContent = "Unsaved — click Save";
       });
       input.addEventListener("change", () => {
-        savePipelineScheduleInput(input).catch((error) => {
-          setPipelineLiveHint(error.message || "Could not save schedule.");
-        });
+        const id = input.dataset.pipelineSchedule;
+        if (id) {
+          pipelineScheduleDrafts.set(id, String(input.value || "").trim());
+          pipelineScheduleDirty.add(id);
+        }
+        const status = input.parentElement?.querySelector("[data-pipeline-schedule-status]");
+        if (status) status.textContent = "Unsaved — click Save";
       });
     });
     scope.querySelectorAll("[data-pipeline-schedule-save]").forEach((button) => {
@@ -13691,7 +13693,8 @@
     }
     const previousMs = Date.parse(record.scheduled_post_date || "");
     if (!Number.isNaN(previousMs) && Math.abs(previousMs - parsed) < 60000) {
-      if (status) status.textContent = "";
+      pipelineScheduleDirty.delete(id);
+      if (status) status.textContent = "Saved";
       return;
     }
     input.dataset.saving = "1";
@@ -13719,15 +13722,28 @@
   function collectPipelineSchedules() {
     rememberPipelineScheduleDrafts();
     const map = {};
+    const persisted = new Map((pipelineOutputs || []).map((record) => [
+      record.id,
+      String(record.scheduled_post_date || record.scheduled_at || record.youtube_scheduled_publish_at || "").trim(),
+    ]));
     pipelineScheduleDrafts.forEach((raw, id) => {
-      map[id] = raw ? new Date(raw).toISOString() : "";
+      if (pipelineScheduleDirty.has(id)) {
+        const saved = persisted.get(id) || "";
+        map[id] = saved && !Number.isNaN(Date.parse(saved)) ? new Date(saved).toISOString() : "";
+        return;
+      }
+      map[id] = raw && !Number.isNaN(Date.parse(raw)) ? new Date(raw).toISOString() : "";
     });
-    document.querySelectorAll("[data-pipeline-schedule]").forEach((input) => {
-      const id = input.dataset.pipelineSchedule;
-      const raw = String(input.value || "").trim();
-      map[id] = raw ? new Date(raw).toISOString() : "";
-    });
+    for (const [id, saved] of persisted.entries()) {
+      if (map[id] !== undefined) continue;
+      map[id] = saved && !Number.isNaN(Date.parse(saved)) ? new Date(saved).toISOString() : "";
+    }
     return map;
+  }
+
+  function pipelineHasUnsavedSchedules(records = pipelineOutputs) {
+    const ids = new Set((records || []).map((record) => record?.id).filter(Boolean));
+    return [...pipelineScheduleDirty].some((id) => ids.has(id));
   }
 
   const PIPELINE_DEFAULT_SCHEDULES_KEY = "studio.pipeline.useDefaultSchedules";
@@ -13760,7 +13776,7 @@
     return Boolean(String(record.scheduled_post_date || "").trim());
   }
 
-  const PIPELINE_SCHEDULE_GAP_MS = 90 * 60 * 1000;
+  const PIPELINE_SCHEDULE_GAP_MS = 3 * 60 * 60 * 1000;
 
   function pipelineRecordScheduleIso(record) {
     if (!record?.id) return "";
@@ -13992,8 +14008,14 @@
     if (!input || !iso) return false;
     const local = formatDateTimeLocalInput(iso);
     if (!local) return false;
+    const id = input.dataset.pipelineSchedule;
     input.value = local;
-    input.dispatchEvent(new Event("change", { bubbles: true }));
+    if (id) {
+      pipelineScheduleDrafts.set(id, local);
+      pipelineScheduleDirty.delete(id);
+    }
+    const status = input.parentElement?.querySelector("[data-pipeline-schedule-status]");
+    if (status) status.textContent = "Suggested";
     return true;
   }
 
@@ -14086,6 +14108,10 @@
     const button = $("pipelineApproveAll");
     const ready = pipelineManualApprovableOutputs();
     if (!ready.length) return;
+    if (pipelineHasUnsavedSchedules(ready)) {
+      setPipelineLiveHint("Save the edited schedule time before approving.");
+      return;
+    }
     if (pipelineUseDefaultSchedules()) {
       setPipelineLiveHint("Applying default schedules…");
       await applyDefaultSchedulesToReadyRows();
@@ -14097,8 +14123,8 @@
       return `• ${pipelineOutputLabel(record)} — ${when}`;
     }).join("\n");
     const scheduleNote = pipelineUseDefaultSchedules()
-      ? "Default schedules fill empty times. Same-platform posts stay at least 90 minutes apart. A time already on a row is kept unless it clashes.\n\n"
-      : "Empty times publish now. Same-platform posts still stay at least 90 minutes apart.\n\n";
+      ? "Default schedules fill empty times. Automatic schedules spread across the week and keep same-platform posts at least 3 hours apart. A saved manual time is kept exactly.\n\n"
+      : "Empty times publish now. Automatic schedules still keep same-platform posts at least 3 hours apart.\n\n";
     const confirmed = window.confirm(
       `Approve ${ready.length} output${ready.length === 1 ? "" : "s"} for publishing?\n\n${scheduleNote}Instagram, Facebook, and YouTube will auto-publish publicly. TikTok will be saved as a draft.\n\n${list}`
     );
@@ -14146,6 +14172,10 @@
     const groupRecords = (pipelineOutputs || []).filter((record) => pipelineContentGroupKey(record) === groupKey);
     const ready = pipelineManualApprovableOutputs(groupRecords);
     if (!ready.length) return;
+    if (pipelineHasUnsavedSchedules(ready)) {
+      setPipelineLiveHint("Save the edited schedule time before approving this content.");
+      return;
+    }
     if (pipelineUseDefaultSchedules()) {
       setPipelineLiveHint("Applying default schedules for this content…");
       await applyDefaultSchedulesToReadyRows(groupRecords);
