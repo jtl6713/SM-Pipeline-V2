@@ -7,7 +7,7 @@ import re
 from typing import Any
 
 from config import load_settings
-from openai_responses import post_responses
+from ai_api_router import post_responses
 from sai1.constants import OPENAI_MODEL
 
 
