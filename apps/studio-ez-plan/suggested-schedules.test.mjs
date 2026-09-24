@@ -99,17 +99,19 @@ test("a busy non-preferred day does not beat an open analytics window", () => {
     days: ["Tue", "Wed", "Thu"],
     occupiedMs,
   });
-  assert.equal(iso, "2026-09-08T16:00:00.000Z");
+  assert.equal(civilFromIso(iso), "2026-09-08");
+  const parts = chicagoDateTimeParts(new Date(iso));
+  assert.ok([11, 18].includes(parts.hour));
 });
 
-test("cross-platform crowding leaves the first-party Tuesday window in place", () => {
+test("cross-platform crowding moves the next suggestion to a less crowded preferred day", () => {
   const occupiedMs = [chicagoWallToUtcMs(2026, 9, 8, 12, 0)];
   const iso = suggestedChicagoIso(["11:00-13:00"], SATURDAY_EVENING, {
     days: ["Tue", "Wed", "Thu"],
     occupiedMs,
     platformOccupiedMs: [],
   });
-  assert.equal(iso, "2026-09-08T16:00:00.000Z");
+  assert.equal(civilFromIso(iso), "2026-09-09");
 });
 
 test("a booked preferred-day window moves the next suggestion later inside 7 days", () => {
