@@ -44,9 +44,6 @@ def _output_text(payload: dict[str, Any]) -> str:
 
 def generate_package(prompt_row: dict[str, Any], runtime_context: str) -> dict[str, Any]:
     settings = load_settings()
-    api_key = str(settings.get("openai_api_key") or "").strip()
-    if not api_key:
-        raise RuntimeError("OPENAI_API_KEY is required for P1 package generation")
     model = field_str(prompt_row, "Model") or str(settings.get("openai_p1_model") or OPENAI_MODEL)
     max_tokens = field(prompt_row, "Max Output Tokens") or DEFAULT_MAX_OUTPUT_TOKENS
     try:
