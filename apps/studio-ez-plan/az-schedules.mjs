@@ -3,6 +3,7 @@ import {
   chicagoDateTimeParts,
   chicagoWallToUtcMs,
   industryBestWindows,
+  pickBalancedSuggestedIso,
 } from "./suggested-schedules.mjs";
 
 export const AZ_HORIZON_DAYS = 7;
@@ -167,6 +168,41 @@ function assignMainTimes(mains, civil, bestTimesByKey, occupiedMs, now) {
 }
 
 export function buildAzCampaignSchedule(items, { occupiedMs = [], bestTimesByKey = {}, now = new Date() } = {}) {
+  const list = Array.isArray(items) ? items : [];
+  const ordered = [
+    ...list.filter((item) => !isStoryType(item.output_type)),
+    ...list.filter((item) => isStoryType(item.output_type)),
+  ];
+  const stamps = new Map();
+  const reservedAll = [...(occupiedMs || [])].filter((ms) => Number.isFinite(ms));
+  const reservedByPlatform = {};
+  for (const item of ordered) {
+    const platform = String(item.platform || "").trim();
+    const outputType = String(item.output_type || "").trim();
+    if (!platform || !outputType) continue;
+    const key = scheduleKey(platform, outputType);
+    const suggested = bestTimesByKey[key] || industryBestWindows(platform, outputType);
+    const iso = pickBalancedSuggestedIso(suggested.windows || ["12:00-13:00"], now, {
+      days: suggested.days || [],
+      occupiedMs: reservedAll,
+      platformOccupiedMs: reservedByPlatform[platform] || [],
+    });
+    stamps.set(key, iso);
+    const ms = Date.parse(iso);
+    if (Number.isFinite(ms)) {
+      reservedAll.push(ms);
+      (reservedByPlatform[platform] ||= []).push(ms);
+    }
+  }
+  const scheduledDays = [...new Set([...stamps.values()].map((iso) => chicagoCivilFromMs(Date.parse(iso)).key))];
+  return {
+    stamps,
+    campaign: scheduledDays.length ? { key: scheduledDays[0] } : null,
+    rationale: scheduledDays.length
+      ? `spread across ${scheduledDays.length} day${scheduledDays.length === 1 ? "" : "s"} in the next ${AZ_HORIZON_DAYS} days`
+      : "no open schedule in the next 7 days",
+  };
+} = {}) {
   const list = Array.isArray(items) ? items : [];
   const mains = list.filter((item) => !isStoryType(item.output_type));
   const stories = list.filter((item) => isStoryType(item.output_type));
