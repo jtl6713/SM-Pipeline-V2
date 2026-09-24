@@ -9,6 +9,7 @@ from typing import Any
 import requests
 
 from ai_api_preference import account_to_provider, get_preferred_account
+from ai_api_status import record_success
 from openai_responses import post_responses as _post_responses
 
 FAILOVER_HTTP_STATUSES = {408, 429, 500, 502, 503, 504}
@@ -46,9 +47,24 @@ def post_responses(
             type(exc).__name__,
             account_to_provider(failover),
         )
-        return _post_responses(_settings_for_account(settings, failover), body, timeout=timeout)
+        failover_response = _post_responses(_settings_for_account(settings, failover), body, timeout=timeout)
+        if failover_response.ok:
+            record_success(
+                provider=account_to_provider(failover),
+                preferred_provider=account_to_provider(preferred),
+                failover=True,
+                status_code=failover_response.status_code,
+            )
+        return failover_response
 
     if response.status_code not in FAILOVER_HTTP_STATUSES:
+        if response.ok:
+            record_success(
+                provider=account_to_provider(preferred),
+                preferred_provider=account_to_provider(preferred),
+                failover=False,
+                status_code=response.status_code,
+            )
         return response
 
     _LOG.warning(
@@ -57,4 +73,12 @@ def post_responses(
         response.status_code,
         account_to_provider(failover),
     )
-    return _post_responses(_settings_for_account(settings, failover), body, timeout=timeout)
+    failover_response = _post_responses(_settings_for_account(settings, failover), body, timeout=timeout)
+    if failover_response.ok:
+        record_success(
+            provider=account_to_provider(failover),
+            preferred_provider=account_to_provider(preferred),
+            failover=True,
+            status_code=failover_response.status_code,
+        )
+    return failover_response
