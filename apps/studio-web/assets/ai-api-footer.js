@@ -14,7 +14,8 @@
     host.innerHTML = [
       '<span class="ai-api-footer-label"><strong>AI API:</strong> <span class="ai-api-dot" aria-hidden="true">🟢</span> ',
       '<strong class="ai-api-provider">' + current + '</strong> <strong>Preferred</strong></span>',
-      '<button type="button" class="ai-api-toggle" id="aiApiToggle">Prefer ' + next + '</button>',
+      '<span class="ai-api-failover">' + next + ' Failover</span>',
+      '<button type="button" class="ai-api-toggle" id="aiApiToggle">Make ' + next + ' Preferred</button>',
       currentProvider ? '<span class="ai-api-current" title="Provider that handled the most recent successful AI request">Current: ' + currentProvider + (failover ? ' (failover)' : '') + '</span>' : ''
     ].join("");
     document.getElementById("aiApiToggle")?.addEventListener("click", toggle);
@@ -53,7 +54,7 @@
     } catch (error) {
       if (button) {
         button.disabled = false;
-        button.textContent = "Prefer " + next;
+        button.textContent = "Make " + next + " Preferred";
         button.title = error?.message || "Could not switch AI API";
       }
     }
