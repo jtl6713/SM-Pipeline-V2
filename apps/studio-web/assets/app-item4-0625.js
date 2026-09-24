@@ -5417,7 +5417,7 @@
     }).join("");
     ezWizardShowForm(
       `${rows ? `<div class="ez-wizard-schedules">${rows}</div>` : ""}
-       <p class="subtle">Same-platform posts stay at least 90 minutes apart. Finished-video (AZ) auto-schedules after cover + caption — no Approve publish step. Other Studio requests still wait for Ready for Review → Approve publish.</p>
+       <p class="subtle">Automatic schedules spread across the week and keep same-platform posts at least 3 hours apart. Finished-video (AZ) auto-schedules after cover + caption — no Approve publish step. Other Studio requests still wait for Ready for Review → Approve publish.</p>
        <div class="ez-wizard-form-actions"><button type="submit">Continue</button></div>`,
       () => {
         const schedules = {};
@@ -12010,7 +12010,7 @@
     creativeRequestChanges: "Save the current music and voiceover levels and render a new preview. Approve stays locked until that preview is ready.",
     "Save draft": "Save these edits as a draft without creating a new rendered preview. Unavailable in watch-only review.",
     creativeApprovePreview: "Approve this output for publishing. Immediate is the default. Set a local date and time to override. Instagram, Facebook, and YouTube auto-publish; TikTok is a draft.",
-    pipelineApproveAll: "Approve every Ready for Review output. Immediate is the default unless Use default schedules is on. Same-platform times stay 90 minutes apart. Instagram, Facebook, and YouTube auto-publish; TikTok is a draft.",
+    pipelineApproveAll: "Approve every Ready for Review output. Immediate is the default unless Use default schedules is on. Automatic schedules spread across the week; same-platform times stay at least 3 hours apart. Instagram, Facebook, and YouTube auto-publish; TikTok is a draft.",
     creativeUnlockTitles: "Unlock per-photo titles after approval so you can start a new title version. Publishing stays locked.",
     closeCreativeEditor: "Close the creative editor. Unsaved changes are not preserved.",
   };
@@ -12154,7 +12154,7 @@
     syncProductionRequestDirectives: "Copy advanced options from this form onto the requested platform outputs.",
     promoteProductionRequest: "Approve this request and send it into the production pipeline. Publishing stays a later step.",
     pipelineApproveAll: "Approve every Ready for Review output on this page. Leave Use default schedules off to publish now; turn it on to fill empty times from each platform’s suggested slot. A time you already typed still wins.",
-    pipelineUseDefaultSchedules: "When on, Approve All uses each platform’s suggested publish window for any row that does not already have a time. Studio then moves a time later if that platform already has a post within 90 minutes. Off means empty times publish now, still staggered if two rows on the same platform would go at once. New requests already come with suggested times filled in.",
+    pipelineUseDefaultSchedules: "When on, Approve All uses each platform’s suggested publish window for any row that does not already have a time. Studio then spreads automatic times across days and keeps same-platform posts at least 3 hours apart. Off means empty times publish now, still staggered if two rows on the same platform would go at once. New requests already come with suggested times filled in.",
     prVoicePreview: "Play a short sample of the selected voice. This does not generate your script.",
     prMusicPreview: "Play a preview of the selected music track.",
     savePrOverride: "Save overrides for this one platform output without changing the master defaults.",
@@ -14188,8 +14188,8 @@
     }).join("\n");
     const title = String(groupRecords[0]?.output_title || groupRecords[0]?.content_title || "this content").trim() || "this content";
     const scheduleNote = pipelineUseDefaultSchedules()
-      ? "Default schedules fill empty times. Same-platform posts stay at least 90 minutes apart. A time already on a row is kept unless it clashes.\n\n"
-      : "Empty times publish now. Same-platform posts still stay at least 90 minutes apart.\n\n";
+      ? "Default schedules fill empty times. Automatic schedules spread across the week and keep same-platform posts at least 3 hours apart. A time already on a row is kept unless it clashes.\n\n"
+      : "Empty times publish now. Automatic schedules still keep same-platform posts at least 3 hours apart.\n\n";
     const confirmed = window.confirm(
       `Approve ${ready.length} ready output${ready.length === 1 ? "" : "s"} for “${title}”?\n\n${scheduleNote}Only this content item is included. Instagram, Facebook, and YouTube will auto-publish publicly. TikTok will be saved as a draft.\n\n${list}`
     );
