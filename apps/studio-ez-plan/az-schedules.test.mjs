@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { industryBestWindows, planScheduleItems } from "./suggested-schedules.mjs";
-import { AZ_STORY_OFFSET_MS, buildAzCampaignSchedule, chicagoCivilFromMs } from "./az-schedules.mjs";
+import { buildAzCampaignSchedule, chicagoCivilFromMs } from "./az-schedules.mjs";
 
 const SATURDAY_EVENING = new Date("2026-09-05T19:35:00-05:00");
 
@@ -18,21 +18,18 @@ function azItems() {
   });
 }
 
-test("AZ keeps one campaign day and puts Stories 10 minutes after the matching Reel", () => {
+test("AZ spreads package outputs across several days and separates same-platform Story", () => {
   const { stamps, campaign } = buildAzCampaignSchedule(azItems(), { occupiedMs: [], now: SATURDAY_EVENING });
   assert.ok(campaign?.key);
-  const igReel = Date.parse(stamps.get("Instagram::Reel"));
-  const igStory = Date.parse(stamps.get("Instagram::Story"));
-  const fbReel = Date.parse(stamps.get("Facebook::Reel"));
-  const fbStory = Date.parse(stamps.get("Facebook::Story"));
-  assert.equal(igStory - igReel, AZ_STORY_OFFSET_MS);
-  assert.equal(fbStory - fbReel, AZ_STORY_OFFSET_MS);
-  const days = new Set(
-    [stamps.get("Instagram::Reel"), stamps.get("Facebook::Reel"), stamps.get("TikTok::Video Draft"), stamps.get("YouTube::Short")]
-      .map((iso) => chicagoCivilFromMs(Date.parse(iso)).key)
-  );
-  assert.equal(days.size, 1);
-  assert.equal([...days][0], campaign.key);
+  const allDays = new Set([...stamps.values()].map((iso) => chicagoCivilFromMs(Date.parse(iso)).key));
+  assert.ok(allDays.size >= 4, "six-output package should be spread across the week");
+
+  const igReelDay = chicagoCivilFromMs(Date.parse(stamps.get("Instagram::Reel"))).key;
+  const igStoryDay = chicagoCivilFromMs(Date.parse(stamps.get("Instagram::Story"))).key;
+  const fbReelDay = chicagoCivilFromMs(Date.parse(stamps.get("Facebook::Reel"))).key;
+  const fbStoryDay = chicagoCivilFromMs(Date.parse(stamps.get("Facebook::Story"))).key;
+  assert.notEqual(igStoryDay, igReelDay);
+  assert.notEqual(fbStoryDay, fbReelDay);
 });
 
 test("AZ does not land at noon when another post is already at 11:30 the next day", () => {
