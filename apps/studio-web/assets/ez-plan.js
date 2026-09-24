@@ -348,7 +348,7 @@
     return packages;
   }
 
-  const EZ_SCHEDULE_GAP_MS = 90 * 60 * 1000;
+  const EZ_SCHEDULE_GAP_MS = 3 * 60 * 60 * 1000;
   const EZ_SUGGEST_HORIZON_DAYS = 7;
   const EZ_SUGGEST_LEAD_MS = 10 * 60 * 1000;
 
@@ -440,13 +440,31 @@
     return (occupiedMs || []).some((other) => Number.isFinite(other) && Math.abs(other - ms) < gapMs);
   }
 
-  function ezScoreAnalyticsSlot({ preferred, windowIndex, crowding, platformCrowding, dayIndex }) {
+  function ezTimeCrowding(ms, occupiedMs, radiusMinutes = 90) {
+    const target = ezChicagoDateTimeParts(new Date(ms));
+    const targetMinutes = target.hour * 60 + target.minute;
+    let count = 0;
+    for (const other of occupiedMs || []) {
+      if (!Number.isFinite(other)) continue;
+      const parts = ezChicagoDateTimeParts(new Date(other));
+      const otherMinutes = parts.hour * 60 + parts.minute;
+      const raw = Math.abs(targetMinutes - otherMinutes);
+      const distance = Math.min(raw, 1440 - raw);
+      if (distance <= radiusMinutes) count += 1;
+    }
+    return count;
+  }
+
+  function ezScoreAnalyticsSlot({ preferred, windowIndex, crowding, platformCrowding, timeCrowding, dayIndex }) {
     let score = 100;
-    score += preferred ? 40 : 0;
-    score += Math.max(0, 16 - windowIndex * 6);
-    score -= Math.min(platformCrowding, 4) * 6;
-    score -= Math.min(crowding, 6) * 2;
-    score -= dayIndex * 2;
+    score += preferred ? 18 : 0;
+    score += Math.max(0, 12 - windowIndex * 5);
+    score += platformCrowding === 0 ? 14 : 0;
+    score += crowding === 0 ? 8 : 0;
+    score -= Math.min(platformCrowding, 4) * 42;
+    score -= Math.min(crowding, 8) * 12;
+    score -= Math.min(timeCrowding, 6) * 8;
+    score -= dayIndex * 1.5;
     return score;
   }
 
@@ -471,11 +489,10 @@
       });
     }
 
-    const collect = (preferredOnly) => {
+    const collect = () => {
       let best = null;
       for (const civil of horizon) {
         const preferred = !daysPref.length || daysPref.includes(civil.weekday);
-        if (preferredOnly && daysPref.length && !preferred) continue;
         const crowding = ezOccupiedOnDay(occupiedMs, civil).length;
         const platformCrowding = ezOccupiedOnDay(platformOccupiedMs, civil).length;
         for (let windowIndex = 0; windowIndex < windowList.length; windowIndex++) {
@@ -489,6 +506,7 @@
             windowIndex,
             crowding,
             platformCrowding,
+            timeCrowding: ezTimeCrowding(ms, occupiedMs),
             dayIndex: civil.index,
           });
           if (!best || score > best.score) best = { score, ms };
@@ -497,10 +515,8 @@
       return best;
     };
 
-    const preferred = collect(true);
-    if (preferred) return new Date(preferred.ms).toISOString();
-    const openWindow = collect(false);
-    if (openWindow) return new Date(openWindow.ms).toISOString();
+    const balanced = collect();
+    if (balanced) return new Date(balanced.ms).toISOString();
     const first = String(windowList[0] || "12:00-13:00");
     const start = first.split("-")[0] || "12:00";
     const [hh, mm] = start.split(":").map((n) => Number(n) || 0);
