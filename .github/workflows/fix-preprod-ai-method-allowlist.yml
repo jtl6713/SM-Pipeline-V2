@@ -1,0 +1,93 @@
+name: Fix Pre-production AI Method Allowlist
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'deploy/fix-preprod-ai-method-allowlist.txt'
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Patch Worker allowlist and regression test
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+
+          worker = Path('apps/studio-api/worker.js')
+          s = worker.read_text(encoding='utf-8')
+
+          route = 'const isProductionRequestAiMastersRoute = /^\\/api\\/production-requests\\/rec[A-Za-z0-9]+\\/generate-ai-masters$/.test(url.pathname);'
+          if route not in s:
+              raise SystemExit('AI masters route declaration missing')
+
+          old = '        isItem4AssetDeleteWrite ||\n'
+          new = '        (isProductionRequestAiMastersRoute && request.method === "POST") ||\n' + old
+          if new not in s:
+              if old not in s:
+                  raise SystemExit('allowedMethod insertion anchor missing')
+              s = s.replace(old, new, 1)
+
+          old_version = 'version: "0.10.368-production-lifecycle-repair"'
+          new_version = 'version: "0.10.370-preprod-ai-method-allowlist"'
+          if new_version not in s:
+              if old_version not in s:
+                  raise SystemExit('Worker version anchor missing')
+              s = s.replace(old_version, new_version, 1)
+
+          worker.write_text(s, encoding='utf-8')
+
+          test = Path('apps/studio-api/preproduction-ai.test.mjs')
+          t = test.read_text(encoding='utf-8')
+          marker = 'test("pre-production AI generation uses the pipeline runner image job", async () => {'
+          regression = '''test("pre-production AI POST route is admitted by the global method allowlist", async () => {
+            const source = await readFile(workerPath, "utf8");
+            assert.match(source, /isProductionRequestAiMastersRoute && request\\.method === "POST"/);
+          });
+
+          '''
+          if 'global method allowlist' not in t:
+              if marker not in t:
+                  raise SystemExit('API test insertion anchor missing')
+              t = t.replace(marker, regression + marker, 1)
+              test.write_text(t, encoding='utf-8')
+
+          deploy = Path('deploy/cloudflare-worker-production.txt')
+          with deploy.open('a', encoding='utf-8') as f:
+              f.write('\\n2026-09-24 deploy Worker 0.10.370 pre-production AI POST method allowlist fix\\n')
+          PY
+
+      - name: Test Worker source
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --test apps/studio-api/preproduction-ai.test.mjs
+          mkdir -p /tmp/studio-check
+          cp apps/studio-api/worker.js /tmp/studio-check/worker.mjs
+          cp apps/studio-api/*.mjs /tmp/studio-check/
+          rm -f /tmp/studio-check/*.test.mjs
+          node --check /tmp/studio-check/worker.mjs
+
+      - name: Commit fix
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add apps/studio-api/worker.js apps/studio-api/preproduction-ai.test.mjs deploy/cloudflare-worker-production.txt
+          git diff --cached --check
+          git commit -m "Fix pre-production AI POST method allowlist"
+          git push origin HEAD:main
