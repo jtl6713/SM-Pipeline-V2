@@ -202,28 +202,4 @@ export function buildAzCampaignSchedule(items, { occupiedMs = [], bestTimesByKey
       ? `spread across ${scheduledDays.length} day${scheduledDays.length === 1 ? "" : "s"} in the next ${AZ_HORIZON_DAYS} days`
       : "no open schedule in the next 7 days",
   };
-} = {}) {
-  const list = Array.isArray(items) ? items : [];
-  const mains = list.filter((item) => !isStoryType(item.output_type));
-  const stories = list.filter((item) => isStoryType(item.output_type));
-  const picked = pickCampaignDay(mains, bestTimesByKey, occupiedMs, now);
-  const stamps = new Map();
-  if (!picked?.civil) {
-    return { stamps, campaign: null, rationale: "no open campaign day in the next 7 days" };
-  }
-  const assigned = assignMainTimes(mains, picked.civil, bestTimesByKey, occupiedMs, now);
-  for (const [key, iso] of assigned) stamps.set(key, iso);
-  for (const story of stories) {
-    const reel = mains.find((item) => String(item.platform) === String(story.platform));
-    const reelIso = reel ? assigned.get(scheduleKey(reel.platform, reel.output_type)) : null;
-    const base = reelIso ? Date.parse(reelIso) : null;
-    if (!Number.isFinite(base)) continue;
-    stamps.set(scheduleKey(story.platform, story.output_type), new Date(base + AZ_STORY_OFFSET_MS).toISOString());
-  }
-  void WEEKDAYS;
-  return {
-    stamps,
-    campaign: picked.civil,
-    rationale: `campaign ${picked.civil.key} (${picked.civil.weekday}); spaced from other posts over ${AZ_HORIZON_DAYS} days`,
-  };
 }
