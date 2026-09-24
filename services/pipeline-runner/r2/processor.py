@@ -28,6 +28,58 @@ def _first_linked_id(value: Any) -> str | None:
     return None
 
 
+def _positive_number(record: dict[str, Any] | None, name: str) -> float:
+    if not record:
+        return 0.0
+    try:
+        value = float(record.get("fields", {}).get(name) or 0)
+    except (TypeError, ValueError):
+        return 0.0
+    return value if value > 0 else 0.0
+
+
+def _required_music_seconds(
+    output: dict[str, Any],
+    content_item: dict[str, Any] | None,
+) -> float:
+    seconds = [
+        _positive_number(output, "Studio_Effective_Video_Duration_Seconds"),
+        _positive_number(output, "Video_Duration_Seconds_Override"),
+        _positive_number(output, "Target_Final_Length"),
+        _positive_number(content_item, "Content_Duration"),
+    ]
+    frames = _positive_number(output, "Render_Total_Frames")
+    if frames:
+        seconds.append(frames / 30.0)
+    return max(seconds or [0.0])
+
+
+def _music_duration(row: dict[str, Any]) -> float:
+    try:
+        value = float(row.get("fields", {}).get("Duration_Seconds") or 0)
+    except (TypeError, ValueError):
+        return 0.0
+    return value if value > 0 else 0.0
+
+
+def _duration_eligible_music(
+    rows: list[dict[str, Any]],
+    required_seconds: float,
+) -> tuple[list[dict[str, Any]], bool]:
+    if required_seconds <= 0:
+        return rows, False
+    known = [row for row in rows if _music_duration(row) > 0]
+    qualifying = [
+        row for row in known
+        if _music_duration(row) + 0.05 >= required_seconds
+    ]
+    if qualifying:
+        return qualifying, False
+    # Keep the old catalog as a last resort when durations have not been measured yet
+    # or there truly is no long-enough track. T1 performs a second hard guard before render.
+    return rows, True
+
+
 def select_next_output(
     client: AirtableClient,
     *,
@@ -65,11 +117,23 @@ def process_one(
     video_candidates = fetch_video_candidates(client)
     music_candidates = fetch_music_candidates(client)
 
+    content_item_id = _first_linked_id(output.get("fields", {}).get("Content_Item"))
+    content_item = (
+        client.get_record(CONTENT_ITEMS_TABLE, content_item_id) if content_item_id else None
+    )
+    required_music_seconds = _required_music_seconds(output, content_item)
+    music_candidates, music_duration_fallback = _duration_eligible_music(
+        music_candidates,
+        required_music_seconds,
+    )
+
     preview = {
         "output_record_id": output_id,
         "output_id": _field(output, "Output_ID"),
         "video_candidate_count": len(video_candidates),
         "music_candidate_count": len(music_candidates),
+        "required_music_seconds": round(required_music_seconds, 3) if required_music_seconds else 0,
+        "music_duration_fallback": music_duration_fallback,
         "make_scenario_id": MAKE_SCENARIO_ID,
         "make_scenario_name": MAKE_SCENARIO_NAME,
     }
@@ -88,11 +152,6 @@ def process_one(
             **preview,
         }
 
-    content_item_id = _first_linked_id(output.get("fields", {}).get("Content_Item"))
-    content_item = (
-        client.get_record(CONTENT_ITEMS_TABLE, content_item_id) if content_item_id else None
-    )
-
     mark_selecting(client, output)
     selection = select_canonical_package(
         output=output,
@@ -107,6 +166,19 @@ def process_one(
         parsed=selection["parsed"],
         video_candidate_count=len(video_candidates),
     )
+    if music_duration_fallback and required_music_seconds > 0:
+        refreshed = client.get_record(PLATFORM_OUTPUTS_TABLE, output_id)
+        prior = str(refreshed.get("fields", {}).get("Asset_Selection_Notes") or "").rstrip()
+        note = (
+            f"Music duration guard fallback: no catalog track with a measured duration "
+            f">= {required_music_seconds:.2f}s was available to R2. "
+            "T1 will verify the selected track before render and replace it if a longer track exists."
+        )
+        client.update_record(
+            PLATFORM_OUTPUTS_TABLE,
+            output_id,
+            {"Asset_Selection_Notes": f"{prior}\n{note}".strip()[:10000]},
+        )
 
     parsed = selection["parsed"]
     p4_result = None
