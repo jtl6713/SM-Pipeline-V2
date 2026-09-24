@@ -99,6 +99,80 @@ def test_azure_key_is_not_sent_as_bearer(monkeypatch, openai_env):
     assert FAKE_AZURE_KEY not in authorization
 
 
+class _Status(_Response):
+    def __init__(self, status_code):
+        self.status_code = status_code
+        self.ok = 200 <= status_code < 300
+        self.text = "failed"
+
+
+def test_primary_account_fails_over_to_secondary(monkeypatch, openai_env):
+    openai_env(account="PRIMARY", provider="azure")
+    calls = []
+
+    def fake_post(url, headers, json, timeout):
+        calls.append({"url": url, "model": json["model"], "headers": headers})
+        return _Status(503) if len(calls) == 1 else _Response()
+
+    monkeypatch.setattr("openai_responses.requests.post", fake_post)
+    settings = load_settings()
+    response = post_responses(settings, {"model": "gpt-5", "input": "prompt"})
+
+    assert response.ok
+    assert [call["url"] for call in calls] == [PRIMARY_URL, AZURE_URL]
+    assert calls[0]["model"] == "gpt-5"
+    assert calls[0]["headers"]["Authorization"] == f"Bearer {FAKE_PRIMARY_KEY}"
+    assert calls[1]["model"] == "gpt-5.4"
+    assert calls[1]["headers"]["api-key"] == FAKE_AZURE_KEY
+    assert settings["openai_account"] == "PRIMARY"
+
+
+def test_quality_agent_prefers_secondary_then_primary(monkeypatch, openai_env):
+    openai_env(account="PRIMARY", provider="azure")
+    calls = []
+
+    def fake_post(url, headers, json, timeout):
+        calls.append(url)
+        return _Status(503) if len(calls) == 1 else _Response()
+
+    monkeypatch.setattr("openai_responses.requests.post", fake_post)
+    settings = load_settings()
+    post_responses(settings, {"model": "gpt-5", "input": "quality"}, preferred_account="SECONDARY")
+
+    assert calls == [AZURE_URL, PRIMARY_URL]
+    assert settings["openai_account"] == "PRIMARY"
+
+
+def test_quality_agent_secondary_success_skips_primary(monkeypatch, openai_env):
+    openai_env(account="PRIMARY", provider="azure")
+    calls = []
+
+    def fake_post(url, headers, json, timeout):
+        calls.append(url)
+        return _Response()
+
+    monkeypatch.setattr("openai_responses.requests.post", fake_post)
+    post_responses(load_settings(), {"model": "gpt-5", "input": "quality"}, preferred_account="SECONDARY")
+
+    assert calls == [AZURE_URL]
+
+
+def test_quality_agent_secondary_failure_calls_primary_once(monkeypatch, openai_env):
+    openai_env(account="PRIMARY", provider="azure")
+    calls = []
+
+    def fake_post(url, headers, json, timeout):
+        calls.append({"url": url, "model": json["model"]})
+        return _Status(429) if len(calls) == 1 else _Response()
+
+    monkeypatch.setattr("openai_responses.requests.post", fake_post)
+    post_responses(load_settings(), {"model": "gpt-5.5", "input": "quality"}, preferred_account="SECONDARY")
+
+    assert [call["url"] for call in calls] == [AZURE_URL, PRIMARY_URL]
+    assert calls[0]["model"] == "gpt-5.4"
+    assert calls[1]["model"] == "gpt-5.5"
+
+
 def test_account_switch_changes_provider_without_stage_changes(monkeypatch, openai_env):
     captured = {}
 
