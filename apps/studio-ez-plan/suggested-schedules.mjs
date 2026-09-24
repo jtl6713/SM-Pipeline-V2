@@ -1,4 +1,4 @@
-export const SUGGESTED_SCHEDULE_GAP_MS = 90 * 60 * 1000;
+export const SUGGESTED_SCHEDULE_GAP_MS = 3 * 60 * 60 * 1000;
 export const SUGGESTED_HORIZON_DAYS = 7;
 export const SUGGESTED_LEAD_MS = 10 * 60 * 1000;
 
@@ -112,13 +112,31 @@ export function flattenOccupiedByPlatform(occupiedByPlatform) {
   return Object.values(occupiedByPlatform || {}).flat().filter((ms) => Number.isFinite(ms));
 }
 
-function scoreAnalyticsSlot({ preferred, windowIndex, crowding, platformCrowding, dayIndex }) {
+function timeCrowding(ms, occupiedMs, radiusMinutes = 90) {
+  const target = chicagoDateTimeParts(new Date(ms));
+  const targetMinutes = target.hour * 60 + target.minute;
+  let count = 0;
+  for (const other of occupiedMs || []) {
+    if (!Number.isFinite(other)) continue;
+    const parts = chicagoDateTimeParts(new Date(other));
+    const otherMinutes = parts.hour * 60 + parts.minute;
+    const raw = Math.abs(targetMinutes - otherMinutes);
+    const distance = Math.min(raw, 1440 - raw);
+    if (distance <= radiusMinutes) count += 1;
+  }
+  return count;
+}
+
+function scoreAnalyticsSlot({ preferred, windowIndex, crowding, platformCrowding, timeCrowding: sameTimeCrowding, dayIndex }) {
   let score = 100;
-  score += preferred ? 40 : 0;
-  score += Math.max(0, 16 - windowIndex * 6);
-  score -= Math.min(platformCrowding, 4) * 6;
-  score -= Math.min(crowding, 6) * 2;
-  score -= dayIndex * 2;
+  score += preferred ? 18 : 0;
+  score += Math.max(0, 12 - windowIndex * 5);
+  score += platformCrowding === 0 ? 14 : 0;
+  score += crowding === 0 ? 8 : 0;
+  score -= Math.min(platformCrowding, 4) * 42;
+  score -= Math.min(crowding, 8) * 12;
+  score -= Math.min(sameTimeCrowding, 6) * 8;
+  score -= dayIndex * 1.5;
   return score;
 }
 
@@ -132,11 +150,10 @@ export function pickBalancedSuggestedIso(windows, now = new Date(), options = {}
   const nowMs = now.getTime() + leadMs;
   const horizon = listHorizonCivils(now, options.horizonDays || SUGGESTED_HORIZON_DAYS);
 
-  const collect = (preferredOnly) => {
+  const collect = () => {
     let best = null;
     for (const civil of horizon) {
       const preferred = !daysPref.length || daysPref.includes(civil.weekday);
-      if (preferredOnly && daysPref.length && !preferred) continue;
       const crowding = occupiedOnDay(occupiedMs, civil).length;
       const platformCrowding = occupiedOnDay(platformOccupiedMs, civil).length;
       for (let windowIndex = 0; windowIndex < windowList.length; windowIndex++) {
@@ -144,11 +161,13 @@ export function pickBalancedSuggestedIso(windows, now = new Date(), options = {}
         const ms = chicagoWallToUtcMs(civil.year, civil.month, civil.day, hour, minute);
         if (ms <= nowMs) continue;
         if (scheduleConflicts(ms, platformOccupiedMs, gapMs)) continue;
+        const sameTimeCrowding = timeCrowding(ms, occupiedMs);
         const score = scoreAnalyticsSlot({
           preferred,
           windowIndex,
           crowding,
           platformCrowding,
+          timeCrowding: sameTimeCrowding,
           dayIndex: civil.index,
         });
         if (!best || score > best.score) best = { score, ms };
@@ -157,10 +176,8 @@ export function pickBalancedSuggestedIso(windows, now = new Date(), options = {}
     return best;
   };
 
-  const preferred = collect(true);
-  if (preferred) return new Date(preferred.ms).toISOString();
-  const openWindow = collect(false);
-  if (openWindow) return new Date(openWindow.ms).toISOString();
+  const balanced = collect();
+  if (balanced) return new Date(balanced.ms).toISOString();
   return nextOpenScheduleIso(suggestedChicagoIsoFallback(windowList, now, leadMs), platformOccupiedMs, gapMs);
 }
 
