@@ -240,7 +240,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.374-calendar-current-week";
+  const BUILD_ID = "item4-0.6.375-clean-enterprise";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -1260,9 +1260,21 @@
     return String(value || "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
   }
 
+  function statusTone(value) {
+    const s = String(value || "").trim().toLowerCase();
+    if (!s || s === "unknown") return "neutral";
+    if (/fail|error|overdue|blocked|escalat|rejected|do not use/.test(s)) return "danger";
+    if (/draft|not started|inactive|idle|skipped|not needed|not ready|locked|removed/.test(s)) return "neutral";
+    if (/need|attention|hold|waiting|retry|manual|changes requested|review|trying/.test(s)) return "attention";
+    if (/render|process|upload|progress|classifying|in production|rerender/.test(s)) return "attention";
+    if (/schedul|^ready\b|ready to/.test(s)) return "ready";
+    if (/publish|complete|success|approved|available|classified|delivered/.test(s)) return "success";
+    return "neutral";
+  }
+
   function badge(value) {
     const safe = escapeHtml(value || "Unknown");
-    return `<span class="badge ${stateClass(value)}">${safe}</span>`;
+    return `<span class="badge tone-${statusTone(value)} ${stateClass(value)}">${safe}</span>`;
   }
 
   function pipelineIsRetryingRender(record) {
@@ -14648,7 +14660,7 @@
       const ready = /ready for review/i.test(String(r.studio_state || r.output_status || r.review_status || ""));
       const scheduleValue = pipelineScheduleInputValue(r);
       const scheduleCell = isPipeline && (ready || creativeCanReschedule(r))
-        ? `<div class="subtle pipeline-schedule-cell">Time <div class="pipeline-schedule-controls"><input type="datetime-local" data-pipeline-schedule="${escapeHtml(r.id)}" value="${escapeHtml(scheduleValue)}" title="Choose the exact publish time."><button type="button" class="secondary-button pipeline-calendar-button" data-pipeline-schedule-calendar="${escapeHtml(r.id)}">📅 Calendar</button><button type="button" class="secondary-button pipeline-schedule-save" data-pipeline-schedule-save="${escapeHtml(r.id)}">Save</button></div><span data-pipeline-schedule-status aria-live="polite"></span><div class="pipeline-schedule-suggest" data-pipeline-schedule-suggest="${escapeHtml(r.id)}"></div><button type="button" class="text-button" data-pipeline-use-suggested="${escapeHtml(r.id)}" hidden>Use suggested</button></div>`
+        ? `<div class="pipeline-schedule-cell"><span class="field-label">Scheduled time</span><div class="pipeline-schedule-controls"><input type="datetime-local" data-pipeline-schedule="${escapeHtml(r.id)}" value="${escapeHtml(scheduleValue)}" title="Choose the exact publish time, then Save."><button type="button" class="secondary-button pipeline-calendar-button" data-pipeline-schedule-calendar="${escapeHtml(r.id)}">📅 Calendar</button><button type="button" class="secondary-button pipeline-schedule-save" data-pipeline-schedule-save="${escapeHtml(r.id)}">Save</button></div><span data-pipeline-schedule-status aria-live="polite"></span><div class="pipeline-schedule-suggest" data-pipeline-schedule-suggest="${escapeHtml(r.id)}"></div><button type="button" class="secondary-button" data-pipeline-use-suggested="${escapeHtml(r.id)}" hidden>Use suggested</button></div>`
         : "";
       const creativeCell = isPipeline ? `<td class="creative-output-action-cell"><button type="button" class="creative-button" data-creative-output-id="${escapeHtml(r.id)}" ${canOpen ? "" : "disabled"} title="${canOpen ? "" : notReadyTitle}">${canOpen ? "Open review" : notReadyLabel}</button>${scheduleCell}</td>` : "";
       const rowOpen = isPipeline && canOpen ? ` class="pipeline-open-row" data-open-output-id="${escapeHtml(r.id)}" tabindex="0"` : "";
@@ -15298,7 +15310,7 @@
         const preview = r.preview_url || r.google_drive_url;
         const sizeLabel = r.file_size_mb ? `${value(r.file_size_mb)} MB` : (r.file_extension || "mp3");
         const favored = Boolean(r.favorite);
-        return `<article class="music-card${favored ? " is-favorite" : ""}"><div class="music-card-head"><h3>${value(r.display_name || r.name)}</h3><button type="button" class="music-favorite-button" data-music-favorite="${escapeHtml(r.id)}" data-favorite="${favored ? "true" : "false"}" aria-pressed="${favored ? "true" : "false"}" aria-label="${favored ? "Remove from favorites" : "Add to favorites"}">${favored ? "★" : "☆"}</button></div>${r.display_name && r.display_name !== r.name ? `<div class="raw-filename">${value(r.name)}</div>` : ""}<div class="music-meta">${value(r.mime_type || "audio/mpeg")} · ${sizeLabel} · ${value(r.rights_status)}</div><div class="subtle">${value(r.description, "No description yet")}</div>${preview ? `<audio class="music-preview" controls preload="metadata" src="${escapeHtml(preview)}"></audio>` : `<div class="subtle">No preview URL available.</div>`}<div class="music-actions">${r.google_drive_url && !r.studio_uploaded ? `<a class="link-button" target="_blank" rel="noopener" href="${escapeHtml(r.google_drive_url)}">Open source</a>` : (r.studio_uploaded ? `<span class="badge ready-for-review">Studio upload</span>` : "")}<span class="badge ${r.do_not_use ? "failed" : "published"}">${r.do_not_use ? "Do not use" : "Available"}</span><button type="button" class="text-button music-delete-button" data-music-delete="${escapeHtml(r.id)}" data-music-name="${escapeHtml(r.display_name || r.name || "this track")}">Delete</button></div></article>`;
+        return `<article class="music-card${favored ? " is-favorite" : ""}"><div class="music-card-head"><h3>${value(r.display_name || r.name)}</h3><button type="button" class="music-favorite-button" data-music-favorite="${escapeHtml(r.id)}" data-favorite="${favored ? "true" : "false"}" aria-pressed="${favored ? "true" : "false"}" aria-label="${favored ? "Remove from favorites" : "Add to favorites"}">${favored ? "★" : "☆"}</button></div>${r.display_name && r.display_name !== r.name ? `<div class="raw-filename">${value(r.name)}</div>` : ""}<div class="music-meta">${value(r.mime_type || "audio/mpeg")} · ${sizeLabel} · ${value(r.rights_status)}</div><div class="subtle">${value(r.description, "No description yet")}</div>${preview ? `<audio class="music-preview" controls preload="metadata" src="${escapeHtml(preview)}"></audio>` : `<div class="subtle">No preview URL available.</div>`}<div class="music-actions">${r.google_drive_url && !r.studio_uploaded ? `<a class="link-button" target="_blank" rel="noopener" href="${escapeHtml(r.google_drive_url)}">Open source</a>` : (r.studio_uploaded ? `<span class="badge ready-for-review">Studio upload</span>` : "")}<span class="badge ${r.do_not_use ? "failed" : "published"}">${r.do_not_use ? "Do not use" : "Available"}</span><button type="button" class="danger-button music-delete-button" data-music-delete="${escapeHtml(r.id)}" data-music-name="${escapeHtml(r.display_name || r.name || "this track")}">Delete</button></div></article>`;
       }).join("");
       bindMusicPlayers(target);
       target.querySelectorAll("[data-music-favorite]").forEach((button) => {
@@ -15939,7 +15951,7 @@
       : "";
     const release = r.file_released
       ? ""
-      : `<button type="button" class="text-button danger" data-library-release="${escapeHtml(r.id)}" data-library-name="${escapeHtml(r.name || "this published file")}" data-library-platform="${escapeHtml(r.platform || "this")}" data-library-output-type="${escapeHtml(r.platform_output_type || "output")}">Remove Drive copy</button>`;
+      : `<button type="button" class="danger-button" data-library-release="${escapeHtml(r.id)}" data-library-name="${escapeHtml(r.name || "this published file")}" data-library-platform="${escapeHtml(r.platform || "this")}" data-library-output-type="${escapeHtml(r.platform_output_type || "output")}">Remove Drive copy</button>`;
     return `<article class="library-card" data-library-id="${escapeHtml(r.id)}" data-library-record-type="platform_output"><div class="library-card-media"${playAttrs}>${media}<em class="library-kind ${badgeClass}">${badge}</em></div><h3>${value(r.name)}</h3><div class="library-meta">${meta}</div><div class="music-actions">${live}${drive}${release}</div></article>`;
   }
 
@@ -16175,7 +16187,7 @@
       r.content_profile_name ? `<span>${escapeHtml(r.content_profile_name)}</span>` : "",
     ].filter(Boolean).join("");
     const classify = libraryNeedsManualClassify(r) ? libraryProfileSelectHtml(r) : "";
-    return `<article class="library-card" data-library-id="${escapeHtml(r.id)}" data-library-record-type="media_asset" data-library-needs-duration="${needsDuration}"><div class="library-card-media"${playAttrs}>${media}<em class="library-kind">${video ? "Clip" : "Photo"}</em></div><h3>${value(r.name)}</h3><div class="library-meta">${meta}</div><div class="subtle">${value(r.description, "No description yet")}</div>${classify}<div class="music-actions">${r.google_drive_url ? `<a class="link-button" target="_blank" rel="noopener" href="${escapeHtml(r.google_drive_url)}">Open in Drive</a>` : ""}${r.studio_uploaded ? `<span class="badge ready-for-review">Studio upload</span>` : ""}${libraryClassificationBadge(r)}<span class="badge ${r.do_not_use ? "failed" : "published"}">${r.do_not_use ? "Do not use" : "Available"}</span><button type="button" class="text-button" data-library-rename="${escapeHtml(r.id)}" data-library-name="${escapeHtml(r.name || "")}">Rename</button><button type="button" class="text-button" data-library-delete="${escapeHtml(r.id)}" data-library-name="${escapeHtml(r.name || "this asset")}">Delete</button></div></article>`;
+    return `<article class="library-card" data-library-id="${escapeHtml(r.id)}" data-library-record-type="media_asset" data-library-needs-duration="${needsDuration}"><div class="library-card-media"${playAttrs}>${media}<em class="library-kind">${video ? "Clip" : "Photo"}</em></div><h3>${value(r.name)}</h3><div class="library-meta">${meta}</div><div class="subtle">${value(r.description, "No description yet")}</div>${classify}<div class="music-actions">${r.google_drive_url ? `<a class="link-button" target="_blank" rel="noopener" href="${escapeHtml(r.google_drive_url)}">Open in Drive</a>` : ""}${r.studio_uploaded ? `<span class="badge ready-for-review">Studio upload</span>` : ""}${libraryClassificationBadge(r)}<span class="badge ${r.do_not_use ? "failed" : "published"}">${r.do_not_use ? "Do not use" : "Available"}</span><button type="button" class="secondary-button" data-library-rename="${escapeHtml(r.id)}" data-library-name="${escapeHtml(r.name || "")}">Rename</button><button type="button" class="danger-button" data-library-delete="${escapeHtml(r.id)}" data-library-name="${escapeHtml(r.name || "this asset")}">Delete</button></div></article>`;
   }
 
   function renderLibraryCards(records) {
@@ -16885,7 +16897,7 @@
         const timed = similarAccountRunAllowed(platform);
         const groupMode = timed ? "manual" : "review only";
         const groupRun = canEdit && similarAccountRunAllowed(platform)
-        ? `<button type="button" class="text-button" data-watchlist-run-platform="${escapeHtml(platform)}" ${queueBusy ? "disabled" : ""} title="Fetch every ${escapeHtml(platform)} handle one at a time">Run this platform</button>`
+        ? `<button type="button" class="secondary-button" data-watchlist-run-platform="${escapeHtml(platform)}" ${queueBusy ? "disabled" : ""} title="Fetch every ${escapeHtml(platform)} handle one at a time">Run this platform</button>`
         : "";
       const cards = rows.map(({ account, index }) => {
         const profileUrl = similarAccountProfileUrl(account);
@@ -16902,7 +16914,7 @@
       <article class="ops-profile-card${statusClass}">
         <div><strong>${handle}</strong><div class="subtle" title="${escapeHtml(account.error || "")}">${escapeHtml(watchlistProfileLabel(account.profile))}${account.source ? ` · ${escapeHtml(account.source)}` : ""}${account.status ? ` · ${escapeHtml(similarAccountStatusLabel(account.status))}` : ""}</div></div>
         <button type="button" class="secondary-button" data-watchlist-run="${index}" ${canEdit && timed && !queueBusy ? "" : "disabled"} title="${timed ? "Fetch this account now and add its public posts to analytics" : "Public post analytics are unavailable for this platform"}">Run analytics</button>
-        <button type="button" class="text-button" data-watchlist-remove="${index}" ${canEdit && !queueBusy ? "" : "disabled"}>Remove</button>
+        <button type="button" class="danger-button" data-watchlist-remove="${index}" ${canEdit && !queueBusy ? "" : "disabled"}>Remove</button>
       </article>`;
       }).join("");
       return `<section class="ops-watchlist-group"><h4>${escapeHtml(platform)} · ${groupMode} · ${rows.length}${groupRun}</h4>${cards}</section>`;
@@ -17628,7 +17640,7 @@
           <label class="ops-profile-color"><span>Background</span>
             <input type="color" data-ops-bg-color value="${escapeHtml(color)}" ${canEdit ? "" : "disabled"} aria-label="Background color for ${escapeHtml(profile.name || "profile")}">
           </label>
-          <button type="button" class="text-button" data-ops-bg-reset ${canEdit ? "" : "disabled"} ${custom ? "" : "hidden"}>Reset</button>
+          <button type="button" class="secondary-button" data-ops-bg-reset ${canEdit ? "" : "disabled"} ${custom ? "" : "hidden"}>Reset</button>
           <label><input type="checkbox" data-ops-idea-toggle ${profile.idea_generation_enabled ? "checked" : ""} ${canEdit ? "" : "disabled"}> Daily ideas</label>
           <label><input type="checkbox" data-ops-autonomous-toggle ${profile.autonomous_produce_enabled ? "checked" : ""} ${canEdit ? "" : "disabled"}> Autonomous produce</label>
           <label>Limit <input type="number" min="1" max="10" step="1" value="${escapeHtml(String(profile.daily_idea_limit || 5))}" data-ops-idea-limit ${canEdit ? "" : "disabled"}></label>
