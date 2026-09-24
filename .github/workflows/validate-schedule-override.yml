@@ -1,0 +1,32 @@
+name: Validate Schedule Override Fix
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'deploy/validate-schedule-override.txt'
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Validate Studio UI and Worker syntax
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp apps/studio-web/assets/app-item4-0625.js /tmp/app.mjs
+          node --check /tmp/app.mjs
+          cp apps/studio-api/worker.js /tmp/worker.mjs
+          cp apps/studio-api/*.mjs /tmp/
+          rm -f /tmp/*.test.mjs
+          node --check /tmp/worker.mjs
+      - name: Run schedule override regressions
+        run: node --test apps/studio-web/pipeline-schedule-grid.test.mjs apps/studio-api/schedule-override.test.mjs
