@@ -1,4 +1,5 @@
 from t1.apply import snap_timeline_to_beats
+from t1.processor import _audio_duration_seconds
 
 
 def test_snap_timeline_uses_detected_beats_and_respects_requested_duration():
@@ -50,3 +51,12 @@ def test_snap_timeline_uses_detected_beats_and_respects_requested_duration():
         assert any(abs(transition["at_seconds"] - beat) <= (1 / 30 + 0.001) for beat in beats)
         assert transition["duration_frames"] <= 6
     assert timeline["metadata"]["beat_snap_v2"]["enabled"] is True
+
+
+def test_actual_music_duration_uses_samples_not_last_detected_beat():
+    response = {
+        "metadata": {"samples": 661500, "sr": 22050, "timeline_end_seconds": 29.559},
+        "window": {"duration_seconds": 30.0},
+        "timeline": {"duration_seconds": 30.0, "metadata": {"timeline_end_seconds": 29.559}},
+    }
+    assert _audio_duration_seconds(response) == 30.0
