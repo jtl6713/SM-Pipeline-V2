@@ -422,7 +422,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.373-platform-calendar",
+          version: "0.10.374-youtube-metadata-guard",
           studio_desk_inventory_v1: true,
           studio_desk_activity_v1: true,
           studio_tiktok_complete_v1: true,
@@ -27601,24 +27601,35 @@ async function studioRunPublishOrchestrator(env, target) {
 // The platform handoff emails present the caption as a copy-and-paste block, so a blank
 // Output_Caption reaches you as an empty box with nothing to post. Guarantee one at dispatch.
 async function studioEnsureOutputCaption(env, record) {
-  if (String(f(record, "Output_Caption") || "").trim()) return record;
+  const existingCaption = String(f(record, "Output_Caption") || "").trim();
+  const existingHashtags = String(f(record, "Output_Hashtags") || "").trim();
+  if (existingCaption && existingHashtags) return record;
+
   const parentId = (f(record, "Content_Item") || [])[0] || null;
   const parent = parentId
     ? await airtableFetch(env, env.AIRTABLE_CONTENT_TABLE_ID, parentId).catch(() => null)
     : null;
-  const caption = String(f(parent || {}, "Caption") || "").trim()
-    || String(f(record, "Output_Title") || "").trim();
-  if (!caption) return record;
-  const fields = { Output_Caption: caption };
-  const hashtags = String(f(parent || {}, "Hashtags") || "").trim();
-  if (hashtags && !String(f(record, "Output_Hashtags") || "").trim()) fields.Output_Hashtags = hashtags;
+
+  const fields = {};
+  if (!existingCaption) {
+    const caption = String(f(parent || {}, "Caption") || "").trim()
+      || String(f(record, "Output_Title") || "").trim();
+    if (caption) fields.Output_Caption = caption;
+  }
+
+  if (!existingHashtags) {
+    const hashtags = String(f(parent || {}, "Hashtags") || "").trim();
+    if (hashtags) fields.Output_Hashtags = hashtags;
+  }
+
+  if (!Object.keys(fields).length) return record;
   try {
     return await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, record.id, {
       method: "PATCH",
       body: JSON.stringify({ fields, typecast: true }),
     });
   } catch (error) {
-    console.warn("output caption backfill failed", record.id, error);
+    console.warn("output caption/hashtag backfill failed", record.id, error);
     return record;
   }
 }
