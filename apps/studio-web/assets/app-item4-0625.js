@@ -17913,11 +17913,8 @@
       radio.checked = radio.value === "schedule";
     });
     syncCreativeScheduleActions(activeCreativeOutput);
-  });
-  $("creativeScheduleAt")?.addEventListener("keydown", (event) => {
-    if (event.key !== "Enter") return;
-    event.preventDefault();
-    submitCreativeScheduleChange(false);
+    const hint = $("creativeScheduleHint");
+    if (hint) hint.textContent = "Unsaved — finish editing the date/time, then click Save schedule.";
   });
 
   $("creativeUseSuggestedTime")?.addEventListener("click", () => {
