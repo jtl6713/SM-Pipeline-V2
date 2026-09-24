@@ -9,7 +9,7 @@
  <link rel="preconnect" href="https://fonts.googleapis.com">
  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@1,600;1,700&family=Inter:wght@400;500;600;700;800&family=Oswald:wght@500&display=swap">
- <link rel="stylesheet" href="/assets/styles-phase7-0621.css?v=0.6.361-schedule-collapsed">
+ <link rel="stylesheet" href="/assets/styles-phase7-0621.css?v=0.6.373-platform-calendar">
  <link rel="stylesheet" href="/assets/insights-0622.css?v=0.6.363-insights-ai">
 </head>
 <body>
@@ -1026,6 +1026,7 @@
  <label><input type="radio" name="creativeScheduleMode" value="immediate" checked> Immediate</label>
  <label><input type="radio" name="creativeScheduleMode" value="schedule"> Schedule</label>
  <input type="datetime-local" id="creativeScheduleAt">
+ <button type="button" class="secondary-button creative-schedule-calendar-button" id="creativeScheduleCalendar">📅 Calendar</button>
  <button type="button" class="secondary-button" id="creativeSaveSchedule">Save schedule</button>
  </div>
  <p class="subtle" id="creativeScheduleHint">Immediate publishes as soon as you approve. Schedule uses your local time.</p>
@@ -1074,6 +1075,40 @@
  </div>
  <div id="outputsList" class="table-wrap"></div>
  </section>
+
+ <div class="platform-calendar-backdrop" id="platformCalendarBackdrop" hidden>
+ <section class="platform-calendar-dialog" id="platformCalendarDialog" role="dialog" aria-modal="true" aria-labelledby="platformCalendarTitle" aria-describedby="platformCalendarSummary">
+ <header class="platform-calendar-header">
+ <div>
+ <span class="eyebrow">Platform schedule</span>
+ <h2 id="platformCalendarTitle">Choose a publish time</h2>
+ <p id="platformCalendarSummary">Loading scheduled posts…</p>
+ </div>
+ <button type="button" class="icon-button" id="platformCalendarClose" aria-label="Close scheduling calendar">×</button>
+ </header>
+ <div class="platform-calendar-toolbar">
+ <div class="platform-calendar-week-controls">
+ <button type="button" class="secondary-button" id="platformCalendarPrevious">← Previous week</button>
+ <button type="button" class="text-button" id="platformCalendarDefaultWeek">Week around 7 days out</button>
+ <button type="button" class="secondary-button" id="platformCalendarNext">Next week →</button>
+ </div>
+ <strong id="platformCalendarWeekLabel"></strong>
+ </div>
+ <div class="platform-calendar-grid-wrap" id="platformCalendarGrid"><div class="empty">Loading calendar…</div></div>
+ <div class="platform-calendar-footer">
+ <div class="platform-calendar-selection">
+ <label class="form-field"><span>Selected date and time</span><input type="datetime-local" id="platformCalendarManualTime" step="1800"></label>
+ <p class="subtle" id="platformCalendarSelectionText">Click a 30-minute slot or enter a time manually.</p>
+ <p class="platform-calendar-warning" id="platformCalendarWarning" aria-live="polite"></p>
+ <p class="form-message" id="platformCalendarMessage" aria-live="polite"></p>
+ </div>
+ <div class="platform-calendar-actions">
+ <button type="button" class="secondary-button" id="platformCalendarCancel">Cancel</button>
+ <button type="button" class="primary-button" id="platformCalendarSave" disabled>Save Schedule</button>
+ </div>
+ </div>
+ </section>
+ </div>
  </section>
 
  <section id="page-insights" class="page">
@@ -1916,7 +1951,7 @@
  </nav>
  <div class="studio-footer-meta">
  <span id="apiStatus" class="topbar-status">Connecting…</span>
- <span id="uiBuildLabel">UI build 0.6.372</span>
+ <span id="uiBuildLabel">UI build 0.6.373</span>
  <span id="workerBuildLabel">Worker …</span> </div>
  </footer>
 
@@ -2069,7 +2104,8 @@
  <script src="/assets/config-0621.js?v=0.6.344-idea-mixed-media"></script>
  <script src="/assets/ez-plan.js?v=0.6.345-vertical-reel-story"></script>
  <script src="/assets/pipeline-schedule-grid-0622.js?v=0.6.361-schedule-collapsed"></script>
- <script src="/assets/app-item4-0625.js?v=0.6.372-schedule-spread"></script>
+ <script src="/assets/platform-schedule-calendar-0924.js?v=0.6.373-platform-calendar"></script>
+ <script src="/assets/app-item4-0625.js?v=0.6.373-platform-calendar"></script>
  <script src="/assets/insights-0622.js?v=0.6.365-first-party-analytics-reconciled"></script>
 </body>
 </html>

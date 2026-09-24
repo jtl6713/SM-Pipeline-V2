@@ -203,6 +203,13 @@
   let pipelineArchivedSectionOpen = false;
   const pipelineScheduleDrafts = new Map();
   const pipelineScheduleDirty = new Set();
+  let platformCalendarOutputId = null;
+  let platformCalendarPlatform = "";
+  let platformCalendarWeek = null;
+  let platformCalendarRecords = [];
+  let platformCalendarSelectedIso = "";
+  let platformCalendarReturnFocus = null;
+  let platformCalendarLoadToken = 0;
   const pipelineTiktokUrlDrafts = new Map();
   const pipelineYoutubeUrlDrafts = new Map();
   let pipelineViewFilter = "all";
@@ -233,7 +240,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.372-schedule-spread";
+  const BUILD_ID = "item4-0.6.373-platform-calendar";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -11933,7 +11940,7 @@
   }
 
   function setCreativeBusy(busy) {
-    ["saveCreativeEditor", "creativeRequestChanges", "creativeApprovePreview", "reloadCreativeEditor", "creativeUnlockTitles", "creativeSaveSchedule", "creativePublishNow"].forEach((id) => {
+    ["saveCreativeEditor", "creativeRequestChanges", "creativeApprovePreview", "reloadCreativeEditor", "creativeUnlockTitles", "creativeScheduleCalendar", "creativeSaveSchedule", "creativePublishNow"].forEach((id) => {
       const button = $(id);
       if (button) {
         button.disabled = Boolean(busy);
@@ -13646,7 +13653,7 @@
           pipelineScheduleDrafts.set(id, String(input.value || "").trim());
           pipelineScheduleDirty.add(id);
         }
-        const status = input.parentElement?.querySelector("[data-pipeline-schedule-status]");
+        const status = input.closest(".pipeline-schedule-cell")?.querySelector("[data-pipeline-schedule-status]");
         if (status) status.textContent = "Unsaved — click Save";
       });
       input.addEventListener("change", () => {
@@ -13655,7 +13662,7 @@
           pipelineScheduleDrafts.set(id, String(input.value || "").trim());
           pipelineScheduleDirty.add(id);
         }
-        const status = input.parentElement?.querySelector("[data-pipeline-schedule-status]");
+        const status = input.closest(".pipeline-schedule-cell")?.querySelector("[data-pipeline-schedule-status]");
         if (status) status.textContent = "Unsaved — click Save";
       });
     });
@@ -13672,6 +13679,15 @@
       button.addEventListener("mousedown", keepOnRow);
       button.addEventListener("pointerdown", keepOnRow);
     });
+    scope.querySelectorAll("[data-pipeline-schedule-calendar]").forEach((button) => {
+      const keepOnRow = (event) => event.stopPropagation();
+      button.addEventListener("click", (event) => {
+        keepOnRow(event);
+        openPlatformScheduleCalendar(button.dataset.pipelineScheduleCalendar, button);
+      });
+      button.addEventListener("mousedown", keepOnRow);
+      button.addEventListener("pointerdown", keepOnRow);
+    });
   }
 
   async function savePipelineScheduleInput(input) {
@@ -13681,7 +13697,7 @@
     if (!record) return;
     const raw = String(input.value || "").trim();
     pipelineScheduleDrafts.set(id, raw);
-    const status = input.parentElement?.querySelector("[data-pipeline-schedule-status]");
+    const status = input.closest(".pipeline-schedule-cell")?.querySelector("[data-pipeline-schedule-status]");
     if (!raw) {
       if (status) status.textContent = "";
       return;
@@ -14632,7 +14648,7 @@
       const ready = /ready for review/i.test(String(r.studio_state || r.output_status || r.review_status || ""));
       const scheduleValue = pipelineScheduleInputValue(r);
       const scheduleCell = isPipeline && (ready || creativeCanReschedule(r))
-        ? `<div class="subtle pipeline-schedule-cell">Time <input type="datetime-local" data-pipeline-schedule="${escapeHtml(r.id)}" value="${escapeHtml(scheduleValue)}" title="Choose the exact publish time."> <button type="button" class="secondary-button pipeline-schedule-save" data-pipeline-schedule-save="${escapeHtml(r.id)}">Save</button> <span data-pipeline-schedule-status aria-live="polite"></span><div class="pipeline-schedule-suggest" data-pipeline-schedule-suggest="${escapeHtml(r.id)}"></div><button type="button" class="text-button" data-pipeline-use-suggested="${escapeHtml(r.id)}" hidden>Use suggested</button></div>`
+        ? `<div class="subtle pipeline-schedule-cell">Time <div class="pipeline-schedule-controls"><input type="datetime-local" data-pipeline-schedule="${escapeHtml(r.id)}" value="${escapeHtml(scheduleValue)}" title="Choose the exact publish time."><button type="button" class="secondary-button pipeline-calendar-button" data-pipeline-schedule-calendar="${escapeHtml(r.id)}">📅 Calendar</button><button type="button" class="secondary-button pipeline-schedule-save" data-pipeline-schedule-save="${escapeHtml(r.id)}">Save</button></div><span data-pipeline-schedule-status aria-live="polite"></span><div class="pipeline-schedule-suggest" data-pipeline-schedule-suggest="${escapeHtml(r.id)}"></div><button type="button" class="text-button" data-pipeline-use-suggested="${escapeHtml(r.id)}" hidden>Use suggested</button></div>`
         : "";
       const creativeCell = isPipeline ? `<td class="creative-output-action-cell"><button type="button" class="creative-button" data-creative-output-id="${escapeHtml(r.id)}" ${canOpen ? "" : "disabled"} title="${canOpen ? "" : notReadyTitle}">${canOpen ? "Open review" : notReadyLabel}</button>${scheduleCell}</td>` : "";
       const rowOpen = isPipeline && canOpen ? ` class="pipeline-open-row" data-open-output-id="${escapeHtml(r.id)}" tabindex="0"` : "";
@@ -14866,6 +14882,237 @@
     pipelineScheduleGridRecords = pipelineScheduleGridRecords.filter((row) => row.id !== record.id);
     if (String(record.scheduled_post_date || "").trim()) pipelineScheduleGridRecords.push(record);
     renderPipelineScheduleGrid(pipelineScheduleGridRecords);
+  }
+
+  function activePlatformCalendarRecord() {
+    return (pipelineOutputs || []).find((row) => row.id === platformCalendarOutputId)
+      || (activeCreativeOutput?.id === platformCalendarOutputId ? activeCreativeOutput : null);
+  }
+
+  function platformCalendarEventLabel(record) {
+    const contentId = String(record?.content_id || "").trim();
+    const outputId = String(record?.output_id || "").trim();
+    const title = String(record?.content_title || record?.output_title || "Untitled").trim();
+    const prefix = contentId ? `Content ${contentId}` : outputId ? `Output ${outputId}` : "Scheduled";
+    return `${prefix} – ${title}`;
+  }
+
+  function platformCalendarSlotLabel(slotIndex) {
+    const helper = globalThis.PlatformScheduleCalendar;
+    const date = helper?.slotDate ? helper.slotDate(new Date(2000, 0, 1), slotIndex) : new Date(2000, 0, 1, 0, slotIndex * 30);
+    return date.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+  }
+
+  function platformCalendarWeekLabel(windowValue) {
+    const first = windowValue?.days?.[0];
+    const last = windowValue?.days?.[6];
+    if (!first || !last) return "";
+    const sameYear = first.getFullYear() === last.getFullYear();
+    const start = first.toLocaleDateString(undefined, { month: "short", day: "numeric", year: sameYear ? undefined : "numeric" });
+    const end = last.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
+    return `${start} – ${end}`;
+  }
+
+  function updatePlatformCalendarSelection({ rerender = false } = {}) {
+    const helper = globalThis.PlatformScheduleCalendar;
+    const input = $("platformCalendarManualTime");
+    const save = $("platformCalendarSave");
+    const text = $("platformCalendarSelectionText");
+    const warning = $("platformCalendarWarning");
+    const message = $("platformCalendarMessage");
+    const raw = String(input?.value || "").trim();
+    const selected = raw ? new Date(raw) : null;
+    const stamp = selected?.getTime();
+    platformCalendarSelectedIso = Number.isFinite(stamp) ? selected.toISOString() : "";
+    if (message) message.textContent = "";
+    if (!platformCalendarSelectedIso) {
+      if (text) text.textContent = "Click a 30-minute slot or enter a time manually.";
+      if (warning) warning.textContent = "";
+      if (save) save.disabled = true;
+      if (rerender) renderPlatformScheduleCalendar();
+      return;
+    }
+    const past = stamp <= Date.now();
+    if (text) {
+      text.textContent = past
+        ? "Choose a future date and time."
+        : `Schedule for ${selected.toLocaleString(undefined, { weekday: "short", month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" })}`;
+    }
+    const spacing = helper?.spacingWarning?.(
+      selected,
+      platformCalendarRecords,
+      platformCalendarPlatform,
+      platformCalendarOutputId,
+    );
+    if (warning) warning.textContent = spacing?.message || "";
+    if (save) save.disabled = past;
+    if (rerender) renderPlatformScheduleCalendar();
+  }
+
+  function renderPlatformScheduleCalendar({ loading = false, error = "" } = {}) {
+    const helper = globalThis.PlatformScheduleCalendar;
+    const target = $("platformCalendarGrid");
+    const summary = $("platformCalendarSummary");
+    const weekLabel = $("platformCalendarWeekLabel");
+    const record = activePlatformCalendarRecord();
+    if (!target || !helper?.aggregateBySlot || !platformCalendarWeek) return;
+    if (weekLabel) weekLabel.textContent = platformCalendarWeekLabel(platformCalendarWeek);
+    if (loading) {
+      target.innerHTML = '<div class="empty">Loading scheduled posts…</div>';
+      if (summary) summary.textContent = `${platformCalendarPlatform || "Platform"} · loading the week around seven days out…`;
+      return;
+    }
+    if (error) {
+      target.innerHTML = `<div class="error">${escapeHtml(error)}</div>`;
+      if (summary) summary.textContent = `${platformCalendarPlatform || "Platform"} schedule could not be loaded.`;
+      return;
+    }
+
+    const visibleRecords = helper.recordsForPlatform(platformCalendarRecords, platformCalendarPlatform)
+      .filter((item) => helper.inWindow(item.scheduled_post_date, platformCalendarWeek));
+    if (summary) {
+      const output = record?.output_id ? `Output ${record.output_id}` : "This output";
+      summary.textContent = `${output} · ${platformCalendarPlatform} · ${visibleRecords.length} scheduled post${visibleRecords.length === 1 ? "" : "s"} this week · 30-minute slots`;
+    }
+    const slots = helper.aggregateBySlot(platformCalendarRecords, platformCalendarPlatform);
+    const selectedKey = platformCalendarSelectedIso ? helper.slotKey(new Date(platformCalendarSelectedIso)) : "";
+    const head = platformCalendarWeek.days.map((day) => (
+      `<th scope="col"><span class="platform-calendar-day-name">${escapeHtml(day.toLocaleDateString(undefined, { weekday: "short" }))}</span><span class="platform-calendar-day-date">${escapeHtml(day.toLocaleDateString(undefined, { month: "short", day: "numeric" }))}</span></th>`
+    )).join("");
+    const rows = Array.from({ length: 48 }, (_, slotIndex) => {
+      const cells = platformCalendarWeek.days.map((day) => {
+        const slot = helper.slotDate(day, slotIndex);
+        const key = helper.slotKey(slot);
+        const events = slots.get(key) || [];
+        const spacing = helper.spacingWarning(slot, platformCalendarRecords, platformCalendarPlatform, platformCalendarOutputId);
+        const isPast = slot.getTime() <= Date.now();
+        const eventHtml = events.map((item) => {
+          const label = platformCalendarEventLabel(item);
+          const own = item.id === platformCalendarOutputId;
+          return `<span class="platform-calendar-event${own ? " is-target" : ""}" title="${escapeHtml(label)}">${escapeHtml(label)}</span>`;
+        }).join("");
+        const classes = [
+          "platform-calendar-slot-button",
+          events.length ? "has-scheduled" : "",
+          spacing ? "has-nearby" : "",
+          selectedKey === key ? "is-selected" : "",
+        ].filter(Boolean).join(" ");
+        const title = spacing?.message || (events.length ? events.map(platformCalendarEventLabel).join("\n") : "Choose this time");
+        return `<td><button type="button" class="${classes}" data-platform-calendar-slot="${escapeHtml(slot.toISOString())}" title="${escapeHtml(title)}"${isPast ? " disabled" : ""}>${eventHtml || '<span class="platform-calendar-slot-add">＋</span>'}</button></td>`;
+      }).join("");
+      return `<tr><th scope="row" class="platform-calendar-slot-label">${escapeHtml(platformCalendarSlotLabel(slotIndex))}</th>${cells}</tr>`;
+    }).join("");
+    target.innerHTML = `<table class="platform-calendar-table"><thead><tr><th class="platform-calendar-hour-head" scope="col">Time</th>${head}</tr></thead><tbody>${rows}</tbody></table>`;
+    target.querySelectorAll("[data-platform-calendar-slot]").forEach((button) => {
+      button.addEventListener("click", () => {
+        const input = $("platformCalendarManualTime");
+        if (!input) return;
+        input.value = formatDateTimeLocalInput(button.dataset.platformCalendarSlot);
+        updatePlatformCalendarSelection({ rerender: true });
+      });
+    });
+  }
+
+  async function loadPlatformScheduleCalendarWeek() {
+    const helper = globalThis.PlatformScheduleCalendar;
+    if (!helper || !platformCalendarWeek || !platformCalendarOutputId) return;
+    const token = ++platformCalendarLoadToken;
+    renderPlatformScheduleCalendar({ loading: true });
+    const padding = helper.DEFAULT_WARNING_MS || (3 * 60 * 60 * 1000);
+    const start = new Date(platformCalendarWeek.start.getTime() - padding);
+    const end = new Date(platformCalendarWeek.end.getTime() + padding);
+    try {
+      const params = new URLSearchParams({ start: start.toISOString(), end: end.toISOString() });
+      const result = await api(`/api/outputs/schedule-grid?${params.toString()}`);
+      if (token !== platformCalendarLoadToken || !platformCalendarOutputId) return;
+      platformCalendarRecords = result?.records || [];
+      renderPlatformScheduleCalendar();
+      updatePlatformCalendarSelection();
+    } catch (error) {
+      if (token !== platformCalendarLoadToken || !platformCalendarOutputId) return;
+      renderPlatformScheduleCalendar({ error: error.message || "Could not load this platform schedule." });
+    }
+  }
+
+  function openPlatformScheduleCalendar(outputId, opener = null) {
+    const helper = globalThis.PlatformScheduleCalendar;
+    const record = (pipelineOutputs || []).find((row) => row.id === outputId)
+      || (activeCreativeOutput?.id === outputId ? activeCreativeOutput : null);
+    if (!helper?.defaultWeek || !record || record.do_not_publish || creativeIsPublished(record)) return;
+    platformCalendarOutputId = record.id;
+    platformCalendarPlatform = String(record.platform || "Platform").trim() || "Platform";
+    platformCalendarWeek = helper.defaultWeek(new Date());
+    platformCalendarRecords = [];
+    platformCalendarReturnFocus = opener instanceof HTMLElement ? opener : document.activeElement;
+    const rowInput = document.querySelector(`[data-pipeline-schedule="${record.id}"]`);
+    const raw = String(rowInput?.value || pipelineScheduleDrafts.get(record.id) || formatDateTimeLocalInput(record.scheduled_post_date) || "").trim();
+    const input = $("platformCalendarManualTime");
+    if (input) input.value = raw;
+    const backdrop = $("platformCalendarBackdrop");
+    if (backdrop) backdrop.hidden = false;
+    document.body.classList.add("platform-calendar-open");
+    $("platformCalendarClose")?.focus();
+    updatePlatformCalendarSelection();
+    loadPlatformScheduleCalendarWeek();
+  }
+
+  function closePlatformScheduleCalendar() {
+    platformCalendarLoadToken += 1;
+    platformCalendarOutputId = null;
+    platformCalendarPlatform = "";
+    platformCalendarWeek = null;
+    platformCalendarRecords = [];
+    platformCalendarSelectedIso = "";
+    const backdrop = $("platformCalendarBackdrop");
+    if (backdrop) backdrop.hidden = true;
+    document.body.classList.remove("platform-calendar-open");
+    const focus = platformCalendarReturnFocus;
+    platformCalendarReturnFocus = null;
+    if (focus instanceof HTMLElement && focus.isConnected) focus.focus();
+  }
+
+  function shiftPlatformScheduleCalendarWeek(days) {
+    const helper = globalThis.PlatformScheduleCalendar;
+    if (!helper?.addLocalDays || !platformCalendarWeek) return;
+    platformCalendarWeek = helper.weekContaining(helper.addLocalDays(platformCalendarWeek.start, days));
+    loadPlatformScheduleCalendarWeek();
+  }
+
+  async function savePlatformScheduleCalendar() {
+    const id = platformCalendarOutputId;
+    const record = activePlatformCalendarRecord();
+    const save = $("platformCalendarSave");
+    const message = $("platformCalendarMessage");
+    if (!id || !record || !platformCalendarSelectedIso || Date.parse(platformCalendarSelectedIso) <= Date.now()) return;
+    if (save) save.disabled = true;
+    if (message) message.textContent = "Saving schedule…";
+    try {
+      const result = await api(`/api/operations/outputs/${encodeURIComponent(id)}/schedule`, {
+        method: "POST",
+        body: JSON.stringify({ scheduled_post_date: platformCalendarSelectedIso, manual_schedule_override: true }),
+      });
+      if (result?.record) {
+        applySavedPipelineSchedule(result.record);
+        if (activeCreativeOutput?.id === id) {
+          activeCreativeOutput = { ...activeCreativeOutput, ...result.record };
+          const creativeInput = $("creativeScheduleAt");
+          if (creativeInput) creativeInput.value = formatDateTimeLocalInput(result.record.scheduled_post_date);
+          document.querySelectorAll("input[name='creativeScheduleMode']").forEach((radio) => {
+            radio.checked = radio.value === "schedule";
+          });
+          renderCreativeOutputMeta(activeCreativeOutput);
+          syncCreativeScheduleActions(activeCreativeOutput);
+        }
+      }
+      const rowStatus = document.querySelector(`[data-pipeline-schedule="${id}"]`)?.closest(".pipeline-schedule-cell")?.querySelector("[data-pipeline-schedule-status]");
+      if (rowStatus) rowStatus.textContent = "Saved";
+      setPipelineLiveHint("Schedule saved.");
+      closePlatformScheduleCalendar();
+      refreshPipelineOutputs({ silent: true, force: true }).catch(() => {});
+    } catch (error) {
+      if (message) message.textContent = error.message || "Could not save schedule.";
+      if (save) save.disabled = false;
+    }
   }
 
   function pipelinePageActive() {
@@ -17931,6 +18178,26 @@
       radio.checked = radio.value === "schedule";
     });
   });
+  $("creativeScheduleCalendar")?.addEventListener("click", (event) => {
+    openPlatformScheduleCalendar(activeCreativeOutputId, event.currentTarget);
+  });
+  $("platformCalendarClose")?.addEventListener("click", closePlatformScheduleCalendar);
+  $("platformCalendarCancel")?.addEventListener("click", closePlatformScheduleCalendar);
+  $("platformCalendarSave")?.addEventListener("click", () => {
+    savePlatformScheduleCalendar();
+  });
+  $("platformCalendarPrevious")?.addEventListener("click", () => shiftPlatformScheduleCalendarWeek(-7));
+  $("platformCalendarNext")?.addEventListener("click", () => shiftPlatformScheduleCalendarWeek(7));
+  $("platformCalendarDefaultWeek")?.addEventListener("click", () => {
+    const helper = globalThis.PlatformScheduleCalendar;
+    if (!helper?.defaultWeek) return;
+    platformCalendarWeek = helper.defaultWeek(new Date());
+    loadPlatformScheduleCalendarWeek();
+  });
+  $("platformCalendarManualTime")?.addEventListener("input", () => updatePlatformCalendarSelection({ rerender: true }));
+  $("platformCalendarBackdrop")?.addEventListener("click", (event) => {
+    if (event.target === event.currentTarget) closePlatformScheduleCalendar();
+  });
 
   async function submitCreativeScheduleChange(publishNow) {
     const record = activeCreativeOutput;
@@ -18127,7 +18394,11 @@
   phase6BindTooltipTarget($("pipelineUseDefaultSchedulesLabel"), PRODUCTION_BUTTON_HELP.pipelineUseDefaultSchedules);
   window.addEventListener("scroll", phase6HideTooltip, true);
   window.addEventListener("resize", phase6HideTooltip);
-  document.addEventListener("keydown", (e) => { if (e.key === "Escape") phase6HideTooltip(); });
+  document.addEventListener("keydown", (e) => {
+    if (e.key !== "Escape") return;
+    phase6HideTooltip();
+    if (!$("platformCalendarBackdrop")?.hidden) closePlatformScheduleCalendar();
+  });
 
   checkHealth().finally(() => loadDashboard());
   $("studioProfileSelect")?.addEventListener("change", (event) => {

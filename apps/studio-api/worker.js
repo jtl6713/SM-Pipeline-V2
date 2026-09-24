@@ -422,7 +422,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.372-schedule-spread",
+          version: "0.10.373-platform-calendar",
           studio_desk_inventory_v1: true,
           studio_desk_activity_v1: true,
           studio_tiktok_complete_v1: true,
@@ -452,6 +452,7 @@ export default {
           studio_review_schedule_override_v1: true,
           studio_manual_schedule_override_v2: true,
           studio_schedule_spread_v2: true,
+          studio_platform_calendar_v1: true,
           studio_insights_best_times_v1: true,
           studio_prefill_suggested_schedules_v1: true,
           studio_insights_similar_times_v1: true,
@@ -18559,6 +18560,25 @@ const OUTPUT_LIST_FIELDS = [
   "Review_Decision_At",
 ];
 
+async function scheduleGridContentById(env, outputRecords) {
+  const ids = [...new Set((outputRecords || [])
+    .map((record) => studioFirstLinkedId(f(record, "Content_Item")))
+    .filter((id) => /^rec[A-Za-z0-9]+$/.test(String(id || ""))))];
+  const byId = new Map();
+  for (let index = 0; index < ids.length; index += 40) {
+    const batch = ids.slice(index, index + 40);
+    const formulaParts = batch.map((id) => `RECORD_ID()="${airtableFormulaEscape(id)}"`);
+    const filterFormula = formulaParts.length === 1 ? formulaParts[0] : `OR(${formulaParts.join(",")})`;
+    const records = await listRecords(env, env.AIRTABLE_CONTENT_TABLE_ID, {
+      limit: batch.length,
+      filterFormula,
+      fields: ["Content_ID", "Content_Title"],
+    });
+    for (const record of records) byId.set(record.id, record);
+  }
+  return byId;
+}
+
 async function listOutputScheduleGrid(request, env, url, authorization) {
   const profile = await resolveWorkingContentProfile(env, authorization, requestedProfileId(url));
   const rawStart = String(url.searchParams.get("start") || "").trim();
@@ -18586,24 +18606,33 @@ async function listOutputScheduleGrid(request, env, url, authorization) {
       "Scheduled_Post_Date",
       "Publish_Status",
       "Output_Status",
+      "Content_Item",
     ],
     sortField: "Scheduled_Post_Date",
     sortDirection: "asc",
   });
+  const contentById = await scheduleGridContentById(env, records);
 
   return respond(request, env, {
     ok: true,
     start: new Date(startMs).toISOString(),
     end: endIso,
-    records: records.map((record) => ({
-      id: record.id,
-      output_id: f(record, "Output_ID"),
-      platform: f(record, "Platform"),
-      output_title: f(record, "Output_Title"),
-      scheduled_post_date: f(record, "Scheduled_Post_Date"),
-      publish_status: f(record, "Publish_Status"),
-      output_status: f(record, "Output_Status"),
-    })),
+    records: records.map((record) => {
+      const contentItemId = studioFirstLinkedId(f(record, "Content_Item"));
+      const content = contentById.get(contentItemId);
+      return {
+        id: record.id,
+        output_id: f(record, "Output_ID"),
+        platform: f(record, "Platform"),
+        output_title: f(record, "Output_Title"),
+        content_item_id: contentItemId || null,
+        content_id: content ? f(content, "Content_ID") : null,
+        content_title: content ? f(content, "Content_Title") : f(record, "Output_Title"),
+        scheduled_post_date: f(record, "Scheduled_Post_Date"),
+        publish_status: f(record, "Publish_Status"),
+        output_status: f(record, "Output_Status"),
+      };
+    }),
     profile: mapStudioContentProfile(profile),
   });
 }

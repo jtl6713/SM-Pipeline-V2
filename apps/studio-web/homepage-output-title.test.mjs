@@ -30,5 +30,7 @@ test("homepage output list helper keeps the ID and adds the title", () => {
 test("live Studio JS renders output title in the recent-outputs list", () => {
   assert.match(app, /function pipelineOutputListTitle\(/);
   assert.match(app, /title-cell">\$\{escapeHtml\(pipelineOutputListTitle\(r\)\)\}/);
-  assert.match(html, /0\.6\.368-homepage-output-titles/);
+  const build = app.match(/BUILD_ID = "item4-([^"]+)"/)?.[1];
+  assert.ok(build);
+  assert.match(html, new RegExp(`app-item4-0625\\.js\\?v=${build.replace(/[.*+?^${}()|[\\]\\]/g, "\\$&")}`));
 });

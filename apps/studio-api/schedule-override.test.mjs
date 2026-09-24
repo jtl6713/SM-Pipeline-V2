@@ -19,3 +19,10 @@ test("approval preserves a previously saved manual schedule marker", () => {
   assert.match(source, /Math\.abs\(requestedMs - markerMs\) < 60000/);
   assert.match(source, /exactOverride: manualScheduleOverride/);
 });
+
+test("schedule grid returns linked Content ID and title for calendar labels", () => {
+  assert.match(source, /async function scheduleGridContentById/);
+  assert.match(source, /fields: \["Content_ID", "Content_Title"\]/);
+  assert.match(source, /content_id: content \? f\(content, "Content_ID"\) : null/);
+  assert.match(source, /content_title: content \? f\(content, "Content_Title"\)/);
+});
