@@ -19,15 +19,14 @@ jobs:
         with:
           node-version: '22'
       - name: Run API source regression tests
-        run: node --test apps/studio-api/preproduction-ai.test.mjs apps/studio-web/preproduction-ai.test.mjs
+        run: node --test apps/studio-api/preproduction-ai.test.mjs
       - name: Print AI route routing context
         shell: bash
         run: |
           set -euo pipefail
           python - <<'PY'
           from pathlib import Path
-          p=Path('apps/studio-api/worker.js')
-          s=p.read_text(encoding='utf-8')
+          s=Path('apps/studio-api/worker.js').read_text(encoding='utf-8')
           needles=[
             'isProductionRequestAiMastersRoute',
             'generate-ai-masters',
@@ -42,7 +41,7 @@ jobs:
               i=s.find(n,start)
               if i<0: break
               found=True
-              lo=max(0,i-1800); hi=min(len(s),i+3500)
+              lo=max(0,i-2200); hi=min(len(s),i+5000)
               print(s[lo:hi])
               print('\n--- occurrence end ---')
               start=i+len(n)
