@@ -1,4 +1,4 @@
-name: Diagnose Pre-production AI Route
+name: Diagnose Pre-production AI Count
 
 on:
   push:
@@ -15,30 +15,21 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v6
-      - name: Print pre-production AI handler and helpers
+      - name: Print AI count logic
         shell: bash
         run: |
           set -euo pipefail
           python - <<'PY'
           from pathlib import Path
           s=Path('apps/studio-api/worker.js').read_text(encoding='utf-8')
-          def show(start_needle,end_needle,label):
-              a=s.find(start_needle)
-              b=s.find(end_needle,a+1) if a>=0 else -1
-              print(f'===== {label} =====')
-              if a<0:
-                  print('START NOT FOUND'); return
-              if b<0:
-                  b=min(len(s),a+30000)
-              print(s[a:b])
-          show('async function generateItem4PreProductionAiMaster','async function item4SeedAiCarouselSlides','generate-handler')
-          for needle in ['/jobs/studio-ai-image','PIPELINE_RUNNER_SHARED_SECRET','PIPELINE_RUNNER_URL','AI image generation failed']:
-              print(f'===== SEARCH {needle} =====')
-              pos=0
+          needles=['item4PreProductionAiRequestedCount','item4ParseEzOrigin','Carousel_Slide_Count_Exact']
+          for n in needles:
+              print(f'===== {n} =====')
+              start=0
               while True:
-                  i=s.find(needle,pos)
+                  i=s.find(n,start)
                   if i<0: break
-                  print(s[max(0,i-1800):min(len(s),i+4200)])
+                  print(s[max(0,i-1800):min(len(s),i+4500)])
                   print('---')
-                  pos=i+len(needle)
+                  start=i+len(n)
           PY
