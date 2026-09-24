@@ -540,3 +540,4 @@ Finished-video hard cap six Worker deploy: 2026-09-20 — Concurrent plan-sync a
 2026-09-24 deploy Worker 0.10.372 weekly schedule spread
 
 2026-09-24 deploy Worker 0.10.373 Platform Output calendar content labels
+2026-09-24 deploy Worker 0.10.374 YouTube thumbnail upload enabled + live caption/hashtag metadata guard
