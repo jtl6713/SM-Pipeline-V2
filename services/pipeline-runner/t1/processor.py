@@ -118,21 +118,45 @@ def _write_audio(content: bytes) -> Path:
     return Path(handle.name)
 
 
-def _timeline_end_seconds(response: dict[str, Any]) -> float:
+def _audio_duration_seconds(response: dict[str, Any]) -> float:
+    """Return the actual decoded music duration, not the final detected beat.
+
+    The timing engine's timeline_end_seconds is the last usable beat and can be
+    several hundred milliseconds before EOF. Using that value as track length
+    incorrectly rejects a 30.0s track whose final detected beat is at 29.559s.
+    """
     timeline = response.get("timeline") if isinstance(response.get("timeline"), dict) else {}
-    metadata = timeline.get("metadata") if isinstance(timeline.get("metadata"), dict) else {}
-    for value in (
-        metadata.get("timeline_end_seconds"),
-        timeline.get("duration_seconds"),
-        (response.get("window") or {}).get("duration_seconds") if isinstance(response.get("window"), dict) else None,
-    ):
+    meta_candidates = []
+    if isinstance(response.get("metadata"), dict):
+        meta_candidates.append(response.get("metadata") or {})
+    if isinstance(timeline.get("metadata"), dict):
+        meta_candidates.append(timeline.get("metadata") or {})
+    for metadata in meta_candidates:
         try:
-            number = float(value or 0)
+            samples = float(metadata.get("samples") or 0)
+            sr = float(metadata.get("sr") or 0)
         except (TypeError, ValueError):
-            number = 0.0
-        if number > 0:
-            return number
-    return 0.0
+            samples = sr = 0.0
+        if samples > 0 and sr > 0:
+            return samples / sr
+    window = response.get("window") if isinstance(response.get("window"), dict) else {}
+    try:
+        window_duration = float(window.get("duration_seconds") or 0)
+    except (TypeError, ValueError):
+        window_duration = 0.0
+    if window_duration > 0:
+        return window_duration
+    try:
+        timeline_duration = float(timeline.get("duration_seconds") or 0)
+    except (TypeError, ValueError):
+        timeline_duration = 0.0
+    if timeline_duration > 0:
+        return timeline_duration
+    metadata = timeline.get("metadata") if isinstance(timeline.get("metadata"), dict) else {}
+    try:
+        return max(0.0, float(metadata.get("timeline_end_seconds") or 0))
+    except (TypeError, ValueError):
+        return 0.0
 
 
 def _asset_duration_seconds(asset: dict[str, Any]) -> float:
@@ -188,7 +212,7 @@ def _create_timing_for_asset(
             body["music_url"] = url
             body.pop("music_path", None)
         response = timing_client.create_timeline(body)
-        return response, _timeline_end_seconds(response)
+        return response, _audio_duration_seconds(response)
     finally:
         if path and path.exists():
             path.unlink(missing_ok=True)
@@ -433,35 +457,22 @@ def process_one(
             "Render_Total_Frames": total_frames,
             "Selected_Clip_Count": len(timed),
         }
-        timeline = response.get("timeline") if isinstance(response.get("timeline"), dict) else {}
-        meta = timeline.get("metadata") if isinstance(timeline.get("metadata"), dict) else {}
-        try:
-            beat_end = float(meta.get("timeline_end_seconds") or 0)
-        except (TypeError, ValueError):
-            beat_end = 0
-        if beat_end > 0 and beat_end + 0.05 < duration:
-            if vo_end and voiceover_exceeds_video(
-                voiceover_seconds=vo_end,
-                video_seconds=beat_end,
-                tail_seconds=tail_seconds,
-            ):
-                message = voiceover_exceeds_video_message(
-                    voiceover_seconds=vo_end,
-                    video_seconds=beat_end,
-                    tail_seconds=tail_seconds,
-                    context="music track length",
-                )
-                client.update_record(
-                    PLATFORM_OUTPUTS_TABLE,
-                    output["id"],
-                    {"Timing_Status": STATUS_FAILED, "Timing_Error_Message": message[:10000]},
-                    typecast=True,
-                )
-                return {"processed": False, "reason": "voiceover_exceeds_video", "error": message, **preview}
-            # Drop leftover beats so the last still/clip is not longer than the others.
-            fields["Music_Duration_Seconds"] = round(beat_end, 3)
-            fields["Studio_Effective_Video_Duration_Seconds"] = round(beat_end, 3)
-        elif footage_capped:
+        audio_duration = _audio_duration_seconds(response)
+        if audio_duration > 0:
+            fields["Music_Duration_Seconds"] = round(audio_duration, 3)
+        if audio_duration > 0 and audio_duration + 0.05 < duration:
+            message = (
+                f"Selected music is {audio_duration:.2f}s but the video requires {duration:.2f}s. "
+                "No qualifying replacement track was found; refusing to loop short music."
+            )
+            client.update_record(
+                PLATFORM_OUTPUTS_TABLE,
+                output["id"],
+                {"Timing_Status": STATUS_FAILED, "Timing_Error_Message": message[:10000]},
+                typecast=True,
+            )
+            return {"processed": False, "reason": "music_shorter_than_video", "error": message, **preview}
+        if footage_capped:
             # Keep Remotion from re-padding an explicit owner duration past the footage.
             fields["Studio_Effective_Video_Duration_Seconds"] = duration
         client.update_record(PLATFORM_OUTPUTS_TABLE, output["id"], fields, typecast=True)
