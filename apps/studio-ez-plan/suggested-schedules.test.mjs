@@ -125,7 +125,7 @@ test("a booked preferred-day window moves the next suggestion later inside 7 day
   assert.equal(iso, "2026-09-09T16:00:00.000Z");
 });
 
-test("a typed Reel time wins, and a Story still stays 90 minutes off that platform", () => {
+test("a typed Reel time wins, and a Story stays at least three hours off that platform", () => {
   const stamps = buildSuggestedScheduleMap([
     { platform: "Instagram", output_type: "Reel", scheduled_at: "2026-09-06T21:00:00.000Z" },
     { platform: "Instagram", output_type: "Story" },
@@ -134,5 +134,31 @@ test("a typed Reel time wins, and a Story still stays 90 minutes off that platfo
   const story = Date.parse(stamps.get("Instagram::Story"));
   const reel = Date.parse(stamps.get("Instagram::Reel"));
   assert.ok(Number.isFinite(story));
-  assert.ok(Math.abs(story - reel) >= 90 * 60 * 1000);
+  assert.ok(Math.abs(story - reel) >= 3 * 60 * 60 * 1000);
+});
+
+test("same-platform posts prefer different days before doubling up", () => {
+  const first = suggestedChicagoIso(["12:00-13:00", "18:00-20:00"], SATURDAY_EVENING, {
+    days: ["Tue", "Wed", "Thu"],
+  });
+  const second = suggestedChicagoIso(["12:00-13:00", "18:00-20:00"], SATURDAY_EVENING, {
+    days: ["Tue", "Wed", "Thu"],
+    occupiedMs: [Date.parse(first)],
+    platformOccupiedMs: [Date.parse(first)],
+  });
+  assert.notEqual(civilFromIso(second), civilFromIso(first));
+});
+
+test("repeated suggestions rotate time windows as well as days", () => {
+  const first = suggestedChicagoIso(["12:00-13:00", "18:00-20:00"], SATURDAY_EVENING, {
+    days: ["Tue", "Wed", "Thu"],
+  });
+  const second = suggestedChicagoIso(["12:00-13:00", "18:00-20:00"], SATURDAY_EVENING, {
+    days: ["Tue", "Wed", "Thu"],
+    occupiedMs: [Date.parse(first)],
+    platformOccupiedMs: [],
+  });
+  const firstParts = chicagoDateTimeParts(new Date(first));
+  const secondParts = chicagoDateTimeParts(new Date(second));
+  assert.notEqual(secondParts.hour, firstParts.hour);
 });
