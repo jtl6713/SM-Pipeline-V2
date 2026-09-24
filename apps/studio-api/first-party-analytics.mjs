@@ -205,17 +205,58 @@ export async function fetchInstagramOwnedMediaAnalytics({ postId, token, version
 export async function fetchFacebookOwnedPostAnalytics({ postId, token, version = "v26.0", fetchImpl = fetch }) {
   const id = String(postId || "").trim();
   if (!id) throw new Error("Facebook post ID is missing");
-  const base = await metaGet(id, {
-    token, version, fetchImpl,
-    params: { fields: "id,created_time,permalink_url,reactions.limit(0).summary(true),comments.limit(0).summary(true),shares" },
-  });
+
+  let base = {};
+  try {
+    base = await metaGet(id, {
+      token, version, fetchImpl,
+      params: { fields: "id,created_time,permalink_url,likes.limit(0).summary(true),comments.limit(0).summary(true),shares" },
+    });
+  } catch {
+    // Facebook Page posts, videos, and Reels do not expose an identical field
+    // surface. A missing engagement field must not prevent the media insights
+    // snapshot itself from being collected.
+    base = await metaGet(id, {
+      token, version, fetchImpl,
+      params: { fields: "id,created_time,permalink_url" },
+    });
+  }
+
+  const readSummary = async (field) => {
+    try {
+      const body = await metaGet(id, {
+        token, version, fetchImpl,
+        params: { fields: `${field}.limit(0).summary(true)` },
+      });
+      return nullableNumber(body?.[field]?.summary?.total_count);
+    } catch {
+      return null;
+    }
+  };
+  const readShares = async () => {
+    try {
+      const body = await metaGet(id, {
+        token, version, fetchImpl,
+        params: { fields: "shares" },
+      });
+      return nullableNumber(body?.shares?.count);
+    } catch {
+      return null;
+    }
+  };
+
+  let likes = nullableNumber(base.likes?.summary?.total_count);
+  if (likes === null) likes = await readSummary("likes");
+  if (likes === null) likes = await readSummary("reactions");
+  let comments = nullableNumber(base.comments?.summary?.total_count);
+  if (comments === null) comments = await readSummary("comments");
+  let shares = nullableNumber(base.shares?.count);
+  if (shares === null) shares = await readShares();
+
   const media = await metaInsightMetrics(`${id}/insights`,
     ["post_media_view", "post_total_media_view_unique"],
     { token, version, fetchImpl, params: { period: "lifetime" } }
   ).catch(() => ({}));
-  const likes = nullableNumber(base.reactions?.summary?.total_count);
-  const comments = nullableNumber(base.comments?.summary?.total_count);
-  const shares = nullableNumber(base.shares?.count);
   return {
     id,
     published_at: base.created_time || null,
