@@ -572,3 +572,5 @@ Variant prepare copy Pages deploy: 2026-09-20 — Approve prompt says Prepare fi
 2026-09-24 deploy UI 0.6.372 weekly schedule spread and explicit save-only date editing
 
 2026-09-24 deploy UI 0.6.373 Platform Output weekly calendar scheduling
+
+2026-09-24 deploy UI 0.6.374 calendar current-week default and 5 AM viewport

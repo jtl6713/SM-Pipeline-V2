@@ -35,7 +35,7 @@
 
   function defaultWeek(nowValue) {
     const now = nowValue instanceof Date ? new Date(nowValue.getTime()) : new Date(nowValue || Date.now());
-    return weekContaining(addLocalDays(now, 7));
+    return weekContaining(now);
   }
 
   function slotDate(day, slotIndex) {

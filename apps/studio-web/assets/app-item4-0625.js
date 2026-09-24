@@ -240,7 +240,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.373-platform-calendar";
+  const BUILD_ID = "item4-0.6.374-calendar-current-week";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -14949,7 +14949,7 @@
     if (rerender) renderPlatformScheduleCalendar();
   }
 
-  function renderPlatformScheduleCalendar({ loading = false, error = "" } = {}) {
+  function renderPlatformScheduleCalendar({ loading = false, error = "", scrollToHour = null } = {}) {
     const helper = globalThis.PlatformScheduleCalendar;
     const target = $("platformCalendarGrid");
     const summary = $("platformCalendarSummary");
@@ -14959,7 +14959,7 @@
     if (weekLabel) weekLabel.textContent = platformCalendarWeekLabel(platformCalendarWeek);
     if (loading) {
       target.innerHTML = '<div class="empty">Loading scheduled posts…</div>';
-      if (summary) summary.textContent = `${platformCalendarPlatform || "Platform"} · loading the week around seven days out…`;
+      if (summary) summary.textContent = `${platformCalendarPlatform || "Platform"} · loading the current week…`;
       return;
     }
     if (error) {
@@ -15002,6 +15002,7 @@
       }).join("");
       return `<tr><th scope="row" class="platform-calendar-slot-label">${escapeHtml(platformCalendarSlotLabel(slotIndex))}</th>${cells}</tr>`;
     }).join("");
+    const previousScrollTop = target.scrollTop;
     target.innerHTML = `<table class="platform-calendar-table"><thead><tr><th class="platform-calendar-hour-head" scope="col">Time</th>${head}</tr></thead><tbody>${rows}</tbody></table>`;
     target.querySelectorAll("[data-platform-calendar-slot]").forEach((button) => {
       button.addEventListener("click", () => {
@@ -15011,6 +15012,13 @@
         updatePlatformCalendarSelection({ rerender: true });
       });
     });
+    if (Number.isFinite(scrollToHour)) {
+      const row = target.querySelector(`tbody tr:nth-child(${Math.max(0, Math.min(47, Math.round(scrollToHour * 2))) + 1})`);
+      const headerHeight = target.querySelector("thead")?.offsetHeight || 0;
+      target.scrollTop = Math.max(0, (row?.offsetTop || 0) - headerHeight);
+    } else {
+      target.scrollTop = previousScrollTop;
+    }
   }
 
   async function loadPlatformScheduleCalendarWeek() {
@@ -15026,7 +15034,7 @@
       const result = await api(`/api/outputs/schedule-grid?${params.toString()}`);
       if (token !== platformCalendarLoadToken || !platformCalendarOutputId) return;
       platformCalendarRecords = result?.records || [];
-      renderPlatformScheduleCalendar();
+      renderPlatformScheduleCalendar({ scrollToHour: 5 });
       updatePlatformCalendarSelection();
     } catch (error) {
       if (token !== platformCalendarLoadToken || !platformCalendarOutputId) return;
