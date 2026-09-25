@@ -8,6 +8,7 @@ import {
   ezIdeaSummary,
   ezMasterContentType,
   ezOriginNotes,
+  ezPackageFromContentType,
   ezPhotoCountKind,
   ezPlanFromPhotoCount,
   ezCanonicalOutputType,
@@ -46,9 +47,37 @@ test("slides package is swipeable stills and a YouTube rendered video", () => {
   assert.equal(plan.overrides.Facebook, "Multi-Image Post");
   assert.equal(plan.overrides.TikTok, "Multi-Photo");
   assert.equal(plan.overrides.YouTube, "Slideshow Video");
+  assert.equal(plan.master_content_type, "Carousel");
   assert.deepEqual(plan.extras || [], []);
   assert.ok(!Object.values(plan.overrides).includes("Reel"));
   assert.ok(!Object.values(plan.overrides).includes("Slideshow Reel"));
+});
+
+test("Carousel content type without packageId recommends native stills, not Reels", () => {
+  const plan = ezPlanFromPhotoCount({ photoCount: 6, contentType: "Carousel" });
+  assert.equal(plan.overrides.Instagram, "Carousel");
+  assert.equal(plan.overrides.Facebook, "Multi-Image Post");
+  assert.equal(plan.overrides.TikTok, "Multi-Photo");
+  assert.equal(plan.overrides.YouTube, "Slideshow Video");
+  assert.equal(plan.master_content_type, "Carousel");
+  assert.deepEqual(plan.extras || [], []);
+});
+
+test("Feed Post content type without packageId recommends single stills", () => {
+  const plan = ezPlanFromPhotoCount({ photoCount: 1, contentType: "Feed Post" });
+  assert.equal(plan.overrides.Instagram, "Single Image");
+  assert.equal(plan.overrides.Facebook, "Single Image");
+  assert.equal(plan.overrides.TikTok, "Single Photo");
+  assert.equal(plan.master_content_type, "Feed Post");
+  assert.deepEqual(plan.extras || [], []);
+});
+
+test("ezPackageFromContentType maps Carousel/Feed Post to slides", () => {
+  assert.equal(ezPackageFromContentType("Carousel"), "slides");
+  assert.equal(ezPackageFromContentType("Feed Post"), "slides");
+  assert.equal(ezPackageFromContentType("Photo Set"), "video");
+  assert.equal(ezPackageFromContentType("Vertical Short Video"), "video");
+  assert.equal(ezPackageFromContentType(""), "");
 });
 
 test("video package from photos uses Facebook Reel plus Stories", () => {
