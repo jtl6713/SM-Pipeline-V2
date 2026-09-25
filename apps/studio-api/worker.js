@@ -18251,7 +18251,7 @@ async function approveIdeaAndWaitForPhotos(request, env, record, input, authoriz
     },
     promotion_state: "waiting_for_photos",
     handoff: "photo-wait",
-    message: `Approved. Waiting for at least ${input.carousel_slide_count_min} high-confidence photos (will take up to ${input.carousel_slide_count_max}).`,
+    message: `Approved. Listening for at least ${input.carousel_slide_count_min} high-confidence photos (will take up to ${input.carousel_slide_count_max}).`,
     record: mapIdea(updatedIdea),
     production_request: mapProductionRequest(draft),
   }, 202);
@@ -18275,6 +18275,49 @@ function ideaPhotoWatchRange(idea, contentType) {
   return { min: 5, max: 10 };
 }
 
+const IDEA_AUTO_LISTEN_STATUSES = new Set(["Generated", "Sent for Review"]);
+
+function ideaAutoListenContentType(idea) {
+  const status = String(f(idea, "Candidate_Status") || "").trim();
+  if (!IDEA_AUTO_LISTEN_STATUSES.has(status)) return null;
+  if (promotionCompleted(idea)) return null;
+  if (String(f(idea, "Studio_Photo_Wait_Status") || "").trim()) return null;
+  if (firstIdeaProductionRequestId(idea)) return null;
+
+  // Respect any operator configuration already saved on the idea.
+  const configuredType = String(f(idea, "Production_Content_Type") || "").trim();
+  const configuredImageMode = String(f(idea, "Production_Carousel_Image_Mode") || "").trim();
+  const configuredCountMode = String(f(idea, "Production_Carousel_Slide_Count_Mode") || "").trim();
+  const configuredCount = Number(f(idea, "Production_Carousel_Slide_Count") || 0);
+  if (configuredType || configuredImageMode || configuredCountMode || configuredCount > 0) return null;
+
+  return arrayOrEmpty(f(idea, "Suggested_Format"))
+    .map((value) => String(value || "").trim())
+    .find((value) => IDEA_PHOTO_WAIT_TYPES.has(value)) || null;
+}
+
+async function autoListenIdeaPhotosIfEligible(env, idea) {
+  const contentType = ideaAutoListenContentType(idea);
+  if (!contentType) return { armed: false, idea };
+  const { min, max } = ideaPhotoWatchRange(idea, contentType);
+  const updated = await airtableFetch(env, env.AIRTABLE_IDEA_TABLE_ID, idea.id, {
+    method: "PATCH",
+    body: JSON.stringify({
+      fields: {
+        Production_Content_Type: contentType,
+        Production_Carousel_Image_Mode: "Manual Upload",
+        Production_Carousel_Slide_Count_Mode: "Target range",
+        Production_Carousel_Slide_Count_Min: min,
+        Production_Carousel_Slide_Count_Max: max,
+        Production_Carousel_Slide_Count: max,
+        Studio_Photo_Wait_Status: "Waiting",
+      },
+      typecast: true,
+    }),
+  });
+  return { armed: true, idea: updated, content_type: contentType, min, max };
+}
+
 async function watchIdeaPhotosRoute(request, env, url, authorization) {
   let payload = {};
   try { payload = await request.json(); } catch { payload = {}; }
@@ -18282,7 +18325,7 @@ async function watchIdeaPhotosRoute(request, env, url, authorization) {
   const idea = await loadAuthorizedIdea(env, recordId, authorization);
   if (promotionCompleted(idea)) throw new HttpError(409, "This idea is already in production");
   if (String(f(idea, "Candidate_Status") || "").trim() === "On Hold") {
-    throw new HttpError(409, "Restore this idea before watching for photos");
+    throw new HttpError(409, "Restore this idea before listening for photos");
   }
 
   const contentType = IDEA_PHOTO_WAIT_TYPES.has(String(payload?.content_type || "").trim())
@@ -18333,7 +18376,7 @@ async function watchIdeaPhotosRoute(request, env, url, authorization) {
       : null,
     message: result.action === "ready"
       ? "Matching photos are ready. Open Production to set rules and approve."
-      : `Studio is watching for ${min}–${max} matching photos.`,
+      : `Studio is listening for ${min}–${max} matching photos.`,
   }, result.action === "ready" ? 200 : 202);
 }
 
@@ -18344,7 +18387,7 @@ async function matchIdeaPhotosRoute(request, env, url, authorization) {
   const idea = await loadAuthorizedIdea(env, recordId, authorization);
   const waitStatus = String(f(idea, "Studio_Photo_Wait_Status") || "").trim();
   if (waitStatus !== "Waiting" && waitStatus !== "Ready") {
-    throw new HttpError(409, "This idea is not waiting for matching photos");
+    throw new HttpError(409, "This idea is not listening for matching photos");
   }
   const result = await evaluateAndMaybeAttachWaitingIdeaPhotos(env, idea, {
     authorization,
@@ -18495,6 +18538,38 @@ async function applyLibraryAssetsToProductionRequest(env, requestRecord, mediaId
   return { record: updated, assets, appended: appended.length };
 }
 
+async function createBackgroundDraftForIdea(env, idea) {
+  const profileId = firstLinkedRecordId(f(idea, "Content_Profile"));
+  if (!profileId) return null;
+
+  const profile = await airtableFetch(env, STUDIO_IDEA_PROFILE_TABLE_ID, profileId);
+  const organizationId = firstLinkedRecordId(f(profile, "Organization"));
+  const brandId = firstLinkedRecordId(f(profile, "Brand"));
+  if (!organizationId || !brandId) return null;
+
+  const now = new Date().toISOString();
+  const defaults = productionRequestDefaultsFromIdea(idea);
+  const cleaned = await cleanProductionRequestPayload(defaults, env);
+  const fields = {
+    Production_Request_ID: makeProductionRequestId(),
+    Idea_Candidate: [idea.id],
+    Test_Run_ID: String(f(idea, "Test_Run_ID") || "").trim() || null,
+    Organization: [organizationId],
+    Brand: [brandId],
+    Created_At: now,
+    Studio_Master_Asset_Status: "None",
+    Studio_Master_Asset_Count: 0,
+    Studio_Output_Plan_Status: "Needs Plan",
+    Studio_Item4_State: "Draft",
+    ...productionRequestFields(cleaned, now),
+  };
+
+  return airtableFetch(env, PRODUCTION_REQUEST_TABLE, "", {
+    method: "POST",
+    body: JSON.stringify({ fields, typecast: true }),
+  });
+}
+
 async function evaluateAndMaybeAttachWaitingIdeaPhotos(env, idea, { authorization = null, force = false, productionRequest = null } = {}) {
   const min = Number(f(idea, "Production_Carousel_Slide_Count_Min") || 0);
   const max = Number(f(idea, "Production_Carousel_Slide_Count_Max") || 0);
@@ -18526,6 +18601,13 @@ async function evaluateAndMaybeAttachWaitingIdeaPhotos(env, idea, { authorizatio
   if (decision.action === "ready") {
     if (!requestRecord && authorization) {
       requestRecord = await createDraftForIdea(env, idea, authorization);
+    }
+    if (!requestRecord && !authorization) {
+      try {
+        requestRecord = await createBackgroundDraftForIdea(env, idea);
+      } catch (error) {
+        console.warn("idea photo-listen background draft failed", idea.id, error);
+      }
     }
     if (!requestRecord) {
       matchJson.action = "wait";
@@ -18589,20 +18671,44 @@ async function evaluateAndMaybeAttachWaitingIdeaPhotos(env, idea, { authorizatio
 }
 
 async function runWaitingIdeaPhotoMatches(env, { limit = 8 } = {}) {
+  const scanLimit = Math.max(1, Number(limit) || 8);
+  const candidates = await listRecords(env, env.AIRTABLE_IDEA_TABLE_ID, {
+    limit: scanLimit,
+    filterFormula: "AND({Studio_Photo_Wait_Status}=BLANK(),{Promoted_Content_Record_ID}=BLANK(),{Candidate_Status}!='On Hold')",
+    sortField: "Create_Date",
+    sortDirection: "desc",
+  });
+
+  let autoListeningStarted = 0;
+  for (const idea of candidates) {
+    try {
+      const armed = await autoListenIdeaPhotosIfEligible(env, idea);
+      if (armed.armed) autoListeningStarted += 1;
+    } catch (error) {
+      console.warn("idea auto-listen setup failed", idea.id, error);
+    }
+  }
+
   const records = await listRecords(env, env.AIRTABLE_IDEA_TABLE_ID, {
-    limit: Math.max(1, Number(limit) || 8),
+    limit: scanLimit,
     filterFormula: "AND({Studio_Photo_Wait_Status}='Waiting',{Promoted_Content_Record_ID}=BLANK(),{Candidate_Status}!='On Hold')",
+    sortField: "Create_Date",
+    sortDirection: "desc",
   });
   const results = [];
   for (const idea of records) {
     try {
       results.push(await evaluateAndMaybeAttachWaitingIdeaPhotos(env, idea, { force: false }));
     } catch (error) {
-      console.warn("idea photo-wait evaluate failed", idea.id, error);
+      console.warn("idea photo-listen evaluate failed", idea.id, error);
       results.push({ action: "error", idea_id: idea.id, error: error?.message || String(error) });
     }
   }
-  return { evaluated: results.length, ready: results.filter((row) => row.action === "ready").length };
+  return {
+    auto_listening_started: autoListeningStarted,
+    evaluated: results.length,
+    ready: results.filter((row) => row.action === "ready").length,
+  };
 }
 
 
