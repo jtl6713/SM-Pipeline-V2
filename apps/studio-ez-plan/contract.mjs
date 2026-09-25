@@ -64,6 +64,16 @@ export function ezPhotoCountKind(count) {
   return n <= 1 ? EZ_INPUTS.SINGLE_PHOTO : EZ_INPUTS.MULTIPLE_PHOTOS;
 }
 
+/** Map Master_Content_Type onto the EZ package recommend used for /plan. */
+export function ezPackageFromContentType(contentType) {
+  const type = String(contentType || "").trim();
+  if (type === "Carousel" || type === "Feed Post") return "slides";
+  if (type === "Vertical Short Video" || type === "Longform Video" || type === "Photo Set" || type === "Story") {
+    return "video";
+  }
+  return "";
+}
+
 export function ezDefaultPassMap(photoCount, packageId, { clipInput = false, finishedVideo = false, inputKind = "" } = {}) {
   const clip = Boolean(clipInput) || ezIsClipInput(inputKind);
   const finished = Boolean(finishedVideo) || String(inputKind || "") === EZ_INPUTS.FINISHED_VIDEO;
@@ -81,17 +91,29 @@ export function ezDefaultPassMap(photoCount, packageId, { clipInput = false, fin
   return n <= 1 ? { ...EZ_PHOTO_PASSES.single } : { ...EZ_PHOTO_PASSES.video };
 }
 
-export function ezMasterContentType(photoCount) {
-  return (Math.max(0, Number(photoCount) || 0) <= 1) ? "Feed Post" : "Photo Set";
+export function ezMasterContentType(photoCount, packageId = "") {
+  const pkg = String(packageId || "").trim().toLowerCase();
+  const n = Math.max(0, Number(photoCount) || 0);
+  if (pkg === "slides") return n <= 1 ? "Feed Post" : "Carousel";
+  return n <= 1 ? "Feed Post" : "Photo Set";
 }
 
 /**
  * Photo-count-aware /plan body. Client can POST this as { platforms, overrides }
  * so the live Worker honors EZ defaults before the planner itself is deployed.
  */
-export function ezPlanFromPhotoCount({ photoCount, platforms, packageId, clipInput = false, finishedVideo = false, inputKind = "" } = {}) {
+export function ezPlanFromPhotoCount({
+  photoCount,
+  platforms,
+  packageId,
+  contentType = "",
+  clipInput = false,
+  finishedVideo = false,
+  inputKind = "",
+} = {}) {
   const count = Math.max(0, Number(photoCount) || 0);
-  const defaults = ezDefaultPassMap(count, packageId, { clipInput, finishedVideo, inputKind });
+  const pkg = String(packageId || "").trim().toLowerCase() || ezPackageFromContentType(contentType);
+  const defaults = ezDefaultPassMap(count, pkg, { clipInput, finishedVideo, inputKind });
   const requested = Array.isArray(platforms) && platforms.length
     ? [...new Set(platforms.map((value) => String(value || "").trim()).filter(Boolean))]
     : Object.keys(defaults);
@@ -101,12 +123,11 @@ export function ezPlanFromPhotoCount({ photoCount, platforms, packageId, clipInp
     if (!outputType) continue;
     items.push({ platform, output_type: outputType });
   }
-  const pkg = String(packageId || "").trim().toLowerCase();
   const extras = (pkg === "video" || (!pkg && count > 1)) ? [...EZ_VIDEO_STORY_EXTRAS] : [];
   return {
     photo_count: count,
     photo_count_kind: ezPhotoCountKind(count),
-    master_content_type: ezMasterContentType(count),
+    master_content_type: ezMasterContentType(count, pkg),
     youtube_enabled: Boolean(defaults.YouTube),
     platforms: items.map((item) => item.platform),
     overrides: Object.fromEntries(items.map((item) => [item.platform, item.output_type])),

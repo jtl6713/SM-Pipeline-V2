@@ -428,7 +428,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.375-publish-now-state-fix",
+          version: "0.10.376-recommend-carousel-slides",
           studio_desk_inventory_v1: true,
           studio_desk_activity_v1: true,
           studio_tiktok_complete_v1: true,
@@ -7090,6 +7090,21 @@ function item4PackageOverrides(packageId, photoCount, { hasVideo = false } = {})
   return null;
 }
 
+/** Infer video vs slides package when /plan omits package and notes lack ez-package=. */
+function item4ResolvePackageId(record, payloadPackage = "") {
+  const fromPayload = String(payloadPackage || "").trim().toLowerCase();
+  if (fromPayload === "video" || fromPayload === "slides" || fromPayload === "custom") return fromPayload;
+  const notes = String(f(record, "Production_Notes") || "");
+  const fromNotes = /ez-package=(video|slides|custom)/i.exec(notes)?.[1];
+  if (fromNotes) return String(fromNotes).toLowerCase();
+  const contentType = String(f(record, "Master_Content_Type") || "").trim();
+  if (contentType === "Carousel" || contentType === "Feed Post") return "slides";
+  if (contentType === "Vertical Short Video" || contentType === "Longform Video" || contentType === "Photo Set" || contentType === "Story") {
+    return "video";
+  }
+  return "";
+}
+
 function item4DefaultOutputType(platform, photoCount, { hasVideo = false, packageId = "" } = {}) {
   const packaged = item4PackageOverrides(packageId, photoCount, { hasVideo });
   if (packaged) return packaged[platform] || null;
@@ -7544,7 +7559,7 @@ async function buildItem4OutputPlan(request, env, url, authorization) {
   const requestedPlatforms=Array.isArray(payload.platforms)&&payload.platforms.length?payload.platforms:["Instagram","Facebook","TikTok","YouTube"];
   const platforms=[...new Set(requestedPlatforms.map(x=>String(x||"").trim()).filter(Boolean))];
   const overrides=payload.overrides&&typeof payload.overrides==="object"?payload.overrides:{};
-  const packageId=String(payload.package || payload.package_id || "").trim().toLowerCase();
+  const packageId=item4ResolvePackageId(record, payload.package || payload.package_id || "");
   const mappingIndex=await item4MappingIndex(env);
   const items=[];
   let needsReview=false;
@@ -7553,7 +7568,13 @@ async function buildItem4OutputPlan(request, env, url, authorization) {
     const requested = item4IsCompanionOutputType(requestedRaw) ? "" : requestedRaw;
     const fallback = item4DefaultOutputType(platform, photoCount, { hasVideo, packageId });
     if (!requested && !fallback) continue;
-    const chosen = item4PlanChoice(platform, requested || fallback, photoCount, { hasVideo, packageId });
+    // When the request is a Carousel/slides idea, ignore stale video overrides from an
+    // older Recommend pass so native stills win.
+    let effectiveRequested = requested;
+    if (packageId === "slides" && !hasVideo && requested && !item4IsNativeStillOutput(platform, requested) && requested !== "Slideshow Video") {
+      effectiveRequested = "";
+    }
+    const chosen = item4PlanChoice(platform, effectiveRequested || fallback, photoCount, { hasVideo, packageId });
     items.push(item4PlanItemFromChoice(platform, chosen, photoCount, mappingIndex));
     if (!items[items.length - 1].aspect_ratio) needsReview = true;
   }
@@ -7562,7 +7583,10 @@ async function buildItem4OutputPlan(request, env, url, authorization) {
     extrasPayload.push("Instagram::Story", "Facebook::Story");
   }
   const extras = item4NormalizePlanExtras(extrasPayload, platforms, items)
-    .filter((extra) => !hasVideo || extra.companion || !item4IsNativeStillOutput(extra.platform, extra.output_type));
+    .filter((extra) => !hasVideo || extra.companion || !item4IsNativeStillOutput(extra.platform, extra.output_type))
+    // Carousel / slides recommend must not keep leftover IG/FB Story companions from a
+    // prior video-default Recommend pass.
+    .filter((extra) => packageId !== "slides" || !item4IsCompanionOutputType(extra.output_type));
   for (const extra of extras) {
     try {
       const chosen = item4PlanChoice(extra.platform, extra.output_type, photoCount, { hasVideo });
@@ -7589,8 +7613,15 @@ async function buildItem4OutputPlan(request, env, url, authorization) {
   const keepExact = keepAiMode && Number(f(record, "Carousel_Slide_Count_Exact") || 0) >= photoCount;
   const maxCount=Math.min(15,Math.max(1,photoCount));
   const requestedMasterContentType = String(f(record, "Master_Content_Type") || "").trim();
+  let masterContentType = requestedMasterContentType;
+  if (packageId === "slides") {
+    const slidesType = photoCount <= 1 ? "Feed Post" : "Carousel";
+    if (!masterContentType || masterContentType === "Photo Set") masterContentType = slidesType;
+  } else if (!masterContentType) {
+    masterContentType = photoCount <= 1 ? "Feed Post" : "Photo Set";
+  }
   record=await item4UpdateRequestState(env,recordId,{
-    Master_Content_Type:requestedMasterContentType || (photoCount<=1?"Feed Post":"Photo Set"), Target_Platforms:plannedItems.map(item=>item.platform),
+    Master_Content_Type:masterContentType, Target_Platforms:plannedItems.map(item=>item.platform),
     Carousel_Image_Mode: keepAiMode ? "Make AI Generated" : "Manual Upload",
     Carousel_Slide_Count_Mode:"Exact",
     Carousel_Slide_Count_Exact: keepExact ? Number(f(record, "Carousel_Slide_Count_Exact") || photoCount) : photoCount,

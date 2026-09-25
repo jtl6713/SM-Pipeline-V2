@@ -240,7 +240,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.375-clean-enterprise-matched-photo-preview";
+  const BUILD_ID = "item4-0.6.376-recommend-carousel-slides";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -2910,12 +2910,21 @@
   }
 
   function currentEzPackageId() {
-    return String(
+    const explicit = String(
       ezWizardPending?.packageId
       || ezWizardAnswers?.packageId
       || ezPlanApi()?.parseEzOriginNotes?.($("prProductionNotes")?.value || $("ezProductionNotes")?.value)?.packageId
       || ""
+    ).trim().toLowerCase();
+    if (explicit === "video" || explicit === "slides" || explicit === "custom") return explicit;
+    // Ideas created as Carousel/Feed Post have no ez-package= tag; infer slides so
+    // Recommend formats keeps swipeable stills instead of flipping to Reels+Stories.
+    const contentType = String(
+      $("prContentType")?.value
+      || activeProductionRequest?.content_type
+      || ""
     ).trim();
+    return String(ezPlanApi()?.ezPackageFromContentType?.(contentType) || "").trim().toLowerCase();
   }
 
   function ezPlanCountOptions() {
@@ -2937,6 +2946,7 @@
       photoCount,
       platforms,
       packageId: currentEzPackageId(),
+      contentType: String($("prContentType")?.value || activeProductionRequest?.content_type || "").trim(),
       ...ezPlanCountOptions(),
     }) || { overrides: {}, platforms: platforms || [] };
     item4PlanOverrides = { ...item4PlanOverrides, ...planned.overrides };
@@ -2950,6 +2960,7 @@
     const planned = ezPlanApi()?.ezPlanFromPhotoCount({
       photoCount: count,
       packageId: currentEzPackageId(),
+      contentType: String($("prContentType")?.value || activeProductionRequest?.content_type || "").trim(),
       ...ezPlanCountOptions(),
     });
     if (planned?.platforms?.length) return planned.platforms;
@@ -9473,8 +9484,24 @@
   }
 
   function recommendedOutputFor(platform) {
-    const contentType = String($("prContentType")?.value || "").trim();
+    const contentType = String($("prContentType")?.value || activeProductionRequest?.content_type || "").trim();
     if (contentType === "Vertical Short Video") {
+      return OUTPUT_DEFAULTS_BY_CONTENT_TYPE[contentType]?.[platform] || "";
+    }
+    // Carousel / Feed Post must stay on native stills even when photo-count planning
+    // would otherwise default multi-photo ideas to vertical video + Stories.
+    if (contentType === "Carousel" || contentType === "Feed Post") {
+      const planned = ezPlanApi()?.ezPlanFromPhotoCount({
+        photoCount: item4Workspace?.assets?.length
+          || (usingEzPlatforms() ? ezStagedFiles.length : 0)
+          || ezPlanApi()?.ezWizardPhotoCount?.(ezWizardPending || ezWizardAnswers)
+          || 0,
+        platforms: [platform],
+        packageId: "slides",
+        contentType,
+        ...ezPlanCountOptions(),
+      });
+      if (planned?.overrides?.[platform]) return planned.overrides[platform];
       return OUTPUT_DEFAULTS_BY_CONTENT_TYPE[contentType]?.[platform] || "";
     }
     const wizardCount = ezPlanApi()?.ezWizardPhotoCount?.(ezWizardPending || ezWizardAnswers) || 0;
@@ -9484,6 +9511,7 @@
         photoCount: count,
         platforms: [platform],
         packageId: currentEzPackageId(),
+        contentType,
         ...ezPlanCountOptions(),
       });
       if (planned?.overrides?.[platform]) return planned.overrides[platform];
@@ -10503,7 +10531,18 @@
     // on the quiet save immediately before Approve.
     if (ezIsFinishedVideo() || ezIsClipRequest()) return "Vertical Short Video";
     const count = Number(item4Workspace?.assets?.length || ezStagedFiles.length || 0);
-    return ezPlanApi()?.ezMasterContentType?.(count)
+    const packageId = String(
+      ezWizardPending?.packageId
+      || ezWizardAnswers?.packageId
+      || ezPlanApi()?.parseEzOriginNotes?.($("prProductionNotes")?.value || $("ezProductionNotes")?.value)?.packageId
+      || ""
+    ).trim().toLowerCase();
+    if (packageId === "slides") {
+      return ezPlanApi()?.ezMasterContentType?.(count, "slides")
+        || (count <= 1 ? "Feed Post" : "Carousel");
+    }
+    if (packageId === "video") return "Vertical Short Video";
+    return ezPlanApi()?.ezMasterContentType?.(count, packageId)
       || (count <= 1 ? "Feed Post" : "Photo Set");
   }
 
@@ -10513,6 +10552,16 @@
     const inferred = inferredMasterContentType();
     const current = String(select?.value || "").trim();
     const fromRecord = String(activeProductionRequest?.content_type || "").trim();
+    const stillsIntent = ["Carousel", "Feed Post"].includes(current)
+      || ["Carousel", "Feed Post"].includes(fromRecord);
+    const count = Number(item4Workspace?.assets?.length || ezStagedFiles.length || 0);
+    // Uploading masters must not rewrite an idea created as Carousel into Photo Set
+    // (Photo Set recommends Reels; Carousel keeps swipeable stills).
+    if (stillsIntent && currentEzPackageId() !== "video") {
+      const next = count > 0 ? (count <= 1 ? "Feed Post" : "Carousel") : (current || fromRecord);
+      if (select && select.value !== next) select.value = next;
+      return next;
+    }
     const next = (item4Workspace?.assets?.length || ezStagedFiles.length)
       ? inferred
       : (current || fromRecord || inferred);
