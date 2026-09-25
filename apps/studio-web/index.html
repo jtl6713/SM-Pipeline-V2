@@ -2000,7 +2000,7 @@
  <div class="idea-media-chooser">
  <button type="button" class="primary-button" id="configureProductionButton">Add new media</button>
  <button type="button" class="secondary-button" id="useExistingLibraryButton">Use existing</button>
- <button type="button" class="secondary-button" id="watchIdeaPhotosButton">Watch for photos</button>
+ <button type="button" class="secondary-button" id="watchIdeaPhotosButton">Listen for photos</button>
  </div>
  </div>
 
@@ -2074,9 +2074,9 @@
  <label class="form-field" id="promoteCarouselExactWrap"><span>Slide count</span><input id="promoteCarouselSlideCount" type="number" min="1" max="20" value="5"></label>
  <label class="form-field range-count" id="promoteCarouselMinWrap" hidden><span>Minimum photos</span><input id="promoteCarouselSlideMin" type="number" min="1" max="20" value="3"></label>
  <label class="form-field range-count" id="promoteCarouselMaxWrap" hidden><span>Maximum photos</span><input id="promoteCarouselSlideMax" type="number" min="1" max="20" value="10"></label>
- <label class="form-field"><span>Image mode</span><select id="promoteCarouselImageMode"><option value="Make AI Generated">Make AI Generated</option><option value="Manual Upload">Manual Upload</option><option value="Wait for matching photos">Wait for matching photos</option></select></label>
+ <label class="form-field"><span>Image mode</span><select id="promoteCarouselImageMode"><option value="Make AI Generated">Make AI Generated</option><option value="Manual Upload">Manual Upload</option><option value="Wait for matching photos">Listen for photos</option></select></label>
  </div>
- <p class="subtle" id="promotePhotoWaitHint" hidden>Approve keeps this idea waiting. Studio attaches every high-confidence still up to the maximum once the minimum is met. You still set production rules and approve rendering later.</p>
+ <p class="subtle" id="promotePhotoWaitHint" hidden>Studio listens only to media already uploaded to the Studio library. It attaches high-confidence stills up to the maximum once the minimum is met. You can still change the selected assets, set production rules, and approve rendering later.</p>
  </div>
 
  <label class="form-field"><span>Production notes <em>optional</em></span><textarea id="promoteProductionNotes" maxlength="3000" rows="3" placeholder="Optional direction for production."></textarea></label>
@@ -2109,7 +2109,7 @@
  <script src="/assets/ez-plan.js?v=0.6.345-vertical-reel-story"></script>
  <script src="/assets/pipeline-schedule-grid-0622.js?v=0.6.361-schedule-collapsed"></script>
  <script src="/assets/platform-schedule-calendar-0924.js?v=0.6.375-clean-enterprise"></script>
- <script src="/assets/app-item4-0625.js?v=0.6.375-clean-enterprise-photo-wait-title"></script>
+ <script src="/assets/app-item4-0625.js?v=0.6.375-clean-enterprise-auto-photo-listen"></script>
  <script src="/assets/insights-0622.js?v=0.6.365-first-party-analytics-reconciled"></script>
  <script src="/assets/ai-api-footer.js?v=0.6.376-ai-api"></script>
 </body>
