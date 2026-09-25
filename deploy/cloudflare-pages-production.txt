@@ -589,3 +589,5 @@ Variant prepare copy Pages deploy: 2026-09-20 — Approve prompt says Prepare fi
 2026-09-25 deploy Studio Pages matched-photo preview in Manage Idea (PR #329).
 
 Recommend Carousel slides Pages deploy: 2026-09-25 - Recommend formats keeps Carousel/Feed Post as native stills (not Reels+Stories). UI 0.6.376-recommend-carousel-slides.
+
+Miami Mary voice Pipeline Pages deploy: 2026-09-25 - Open Review default voice follows Production/profile narration (Miami=Mary). UI 0.6.377-miami-mary-voice-pipeline.
