@@ -102,17 +102,50 @@ def draft_type_for_photos(count: int) -> str:
     return DRAFT_TYPE_SINGLE if count == 1 else DRAFT_TYPE_CAROUSEL
 
 
-def pending_share_formula(record_id: str) -> str:
+def _profile_names(record: dict[str, Any] | None) -> list[str]:
+    raw = field(record or {}, "Content_Profile")
+    values: list[str] = []
+    if isinstance(raw, list):
+        values = [str(item).strip() for item in raw if str(item).strip()]
+    elif isinstance(raw, dict):
+        nested = raw.get("valuesByLinkedRecordId")
+        if isinstance(nested, dict):
+            for items in nested.values():
+                if isinstance(items, list):
+                    for item in items:
+                        if isinstance(item, dict):
+                            name = str(item.get("name") or "").strip()
+                            if name:
+                                values.append(name)
+                        elif str(item or "").strip():
+                            values.append(str(item).strip())
+        elif str(raw.get("name") or "").strip():
+            values.append(str(raw.get("name")).strip())
+    elif str(raw or "").strip():
+        values = [str(raw).strip()]
+    return list(dict.fromkeys(values))
+
+
+def pending_share_formula(record_id: str, record: dict[str, Any] | None = None) -> str:
     safe = str(record_id or "").replace("\\", "\\\\").replace('"', '\\"')
-    return (
-        'OR(AND({Platform}="TikTok",{Manual_Completion_Status}="Required",'
-        '{TikTok_Draft_Status}="Draft Delivered — Manual Action Required"),'
-        f'RECORD_ID()="{safe}")'
+    pending = (
+        'AND({Platform}="TikTok",{Manual_Completion_Status}="Required",'
+        '{TikTok_Draft_Status}="Draft Delivered — Manual Action Required"'
     )
+    profiles = _profile_names(record)
+    if profiles:
+        clauses = []
+        for profile in profiles:
+            escaped = profile.replace("\\", "\\\\").replace('"', '\\"')
+            clauses.append(f'FIND("{escaped}",ARRAYJOIN({{Content_Profile}}))>0')
+        profile_filter = clauses[0] if len(clauses) == 1 else f'OR({",".join(clauses)})'
+        pending += f',{profile_filter}'
+    pending += ")"
+    return f'OR({pending},RECORD_ID()="{safe}")'
 
 
-def pending_manual_share_count(client: AirtableClient, record_id: str) -> int:
-    rows = client.list_records(PLATFORM_OUTPUTS_TABLE, formula=pending_share_formula(record_id), max_records=20)
+def pending_manual_share_count(client: AirtableClient, record_id: str, record: dict[str, Any] | None = None) -> int:
+    rows = client.list_records(PLATFORM_OUTPUTS_TABLE, formula=pending_share_formula(record_id, record), max_records=20)
     return max(0, len(rows) - 1)
 
 
