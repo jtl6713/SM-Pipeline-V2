@@ -10972,7 +10972,9 @@
     const promote = ideaShowPromoteAction(r)
       ? `<button type="button" class="manage-button promote-row-button" data-idea-id="${escapeHtml(r.id)}" data-idea-action="promote">Promote</button>`
       : "";
-    return `<tr class="${r.is_on_hold ? "idea-row-held" : ""}"><td><div class="title-cell">${value(r.title)}</div><div class="subtle">${value(r.summary, "")}${r.created_at ? `${r.summary ? " · " : ""}Created ${dateValue(r.created_at)}` : ""}</div></td><td>${badge(ideaStatusLabel(r))}</td><td>${value(r.content_type)}</td><td>${join(r.platforms)}</td><td>${ideaStructureLabel(r)}</td><td><div class="subtle">${escapeHtml(ideaProductionLabel(r))}</div></td><td><div class="idea-row-actions">${promote}<button type="button" class="manage-button" data-idea-id="${escapeHtml(r.id)}">Manage</button></div></td></tr>`;
+    const waitingForPhotos = String(r?.photo_wait_status || "").trim() === "Waiting";
+    const title = `${value(r.title)}${waitingForPhotos ? ' <span class="subtle">(Waiting for photos)</span>' : ""}`;
+    return `<tr class="${r.is_on_hold ? "idea-row-held" : ""}"><td><div class="title-cell">${title}</div><div class="subtle">${value(r.summary, "")}${r.created_at ? `${r.summary ? " · " : ""}Created ${dateValue(r.created_at)}` : ""}</div></td><td>${badge(ideaStatusLabel(r))}</td><td>${value(r.content_type)}</td><td>${join(r.platforms)}</td><td>${ideaStructureLabel(r)}</td><td><div class="subtle">${escapeHtml(ideaProductionLabel(r))}</div></td><td><div class="idea-row-actions">${promote}<button type="button" class="manage-button" data-idea-id="${escapeHtml(r.id)}">Manage</button></div></td></tr>`;
   }
 
   function partitionIdeaRecords(records) {
