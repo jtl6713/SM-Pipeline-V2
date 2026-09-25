@@ -240,7 +240,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.375-clean-enterprise-photo-wait-title";
+  const BUILD_ID = "item4-0.6.375-auto-listen-photos";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -2039,7 +2039,7 @@
   function ideaStatusLabel(idea) {
     if (idea?.is_on_hold) return "On Hold";
     if (ideaIsPromoted(idea)) return "In production";
-    if (String(idea?.photo_wait_status || "") === "Waiting") return "Waiting for photos";
+    if (String(idea?.photo_wait_status || "") === "Waiting") return "Listening for photos";
     if (String(idea?.photo_wait_status || "") === "Ready") return "Photos ready";
     const status = String(idea?.status || "").trim();
     if (status === "Sent for Review" || status === "Generated") return "Ready to produce";
@@ -2125,7 +2125,7 @@
     if ($("promotePhotoWaitHint")) $("promotePhotoWaitHint").hidden = !wait.waits;
     const promoteButton = $("promoteIdeaButton");
     if (promoteButton && !ideaIsPromoted(activeIdea) && !activeIdea?.is_on_hold && !ideaPhotoWaitActive(activeIdea)) {
-      promoteButton.textContent = wait.waits ? "Approve and wait for photos" : "Promote to production";
+      promoteButton.textContent = wait.waits ? "Approve and listen for photos" : "Promote to production";
     }
     if (wait.image_mode === "Wait for matching photos" && $("promoteCarouselSlideMode")) {
       $("promoteCarouselSlideMode").value = "Target range";
@@ -2150,7 +2150,7 @@
       ["Slides", ideaPhotoWaitActive(idea) || idea?.carousel_slide_count_mode === "Target range"
         ? `${idea?.carousel_slide_count_min || "?"}–${idea?.carousel_slide_count_max || "?"} photos`
         : idea?.carousel_slide_count],
-      ["Photo wait", idea?.photo_wait_status],
+      ["Photo listening", idea?.photo_wait_status],
       ["Matched", idea?.photo_match?.high_count != null ? `${idea.photo_match.high_count} high-confidence` : null],
       ["Clips", idea?.video_clip_count],
       ["Voiceover", idea?.include_voiceover],
@@ -2267,8 +2267,8 @@
       watchPhotosButton.hidden = promoted;
       watchPhotosButton.disabled = promoted || Boolean(idea?.is_on_hold) || waitStatus === "Waiting" || waitStatus === "Ready";
       watchPhotosButton.textContent = waitStatus === "Waiting"
-        ? "Watching for photos"
-        : (waitStatus === "Ready" ? "Photos ready" : "Watch for photos");
+        ? "Listening for photos"
+        : (waitStatus === "Ready" ? "Photos ready" : "Listen for photos");
     }
     restoreIdeaLibraryPickerAfterDrawerUpdate(idea, pickerWasOpen ? {
       selected: preservedSelected,
@@ -2309,8 +2309,8 @@
       const high = Number(idea?.photo_match?.high_count || 0);
       const min = Number(idea?.carousel_slide_count_min || 0);
       const max = Number(idea?.carousel_slide_count_max || 0);
-      $("promoteIdeaButton").textContent = "Waiting for photos";
-      setManageMessage(`Approved and waiting. ${high} / ${min || "?"} high-confidence matches so far. When it runs it will take up to ${max || "?"} photos, then you set production rules.`, "");
+      $("promoteIdeaButton").textContent = "Listening for photos";
+      setManageMessage(`Listening for photos. ${high} / ${min || "?"} high-confidence matches so far. Studio will take up to ${max || "?"} photos, then you set production rules.`, "");
     } else if (String(idea?.photo_wait_status || "") === "Ready") {
       $("promoteIdeaButton").textContent = "Photos ready";
       const count = Array.isArray(idea?.matched_media_asset_links) ? idea.matched_media_asset_links.length : (idea?.photo_match?.selected?.length || 0);
@@ -2592,7 +2592,7 @@
     const button = $("watchIdeaPhotosButton");
     button.disabled = true;
     button.textContent = "Starting watch…";
-    setManageMessage("Watching the media library for strong matches…", "");
+    setManageMessage("Listening to the Studio media library for strong matches…", "");
     try {
       const result = await api(`/api/ideas/${encodeURIComponent(activeIdea.id)}/watch-photos`, {
         method: "POST",
@@ -2606,12 +2606,12 @@
         const matched = result.photo_wait?.selected?.length || result.record?.matched_media_asset_links?.length || 0;
         setManageMessage(`Found ${matched} matching photo${matched === 1 ? "" : "s"}. The idea is now ready in Production for rules and approval.`, "success");
       } else {
-        setManageMessage(`Photo watch is on. Studio will keep looking until it has at least ${min || "the minimum"} strong matches, using up to ${max || "the maximum"}.`, "success");
+        setManageMessage(`Photo listening is on. Studio will keep looking until it has at least ${min || "the minimum"} strong matches, using up to ${max || "the maximum"}.`, "success");
       }
     } catch (error) {
-      setManageMessage(error.message || "Could not start photo watch.", "error-text");
+      setManageMessage(error.message || "Could not start photo listening.", "error-text");
       button.disabled = false;
-      button.textContent = "Watch for photos";
+      button.textContent = "Listen for photos";
     }
   });
 
@@ -5558,7 +5558,7 @@
           switchToPage("ideas");
           updateIdeaDrawer(result.record || idea);
           openIdeaDrawer(result.record || idea);
-          setManageMessage(result.message || `Approved. Waiting for ${answers.photoCountMin}–${answers.photoCountMax} matching photos.`, "success");
+          setManageMessage(result.message || `Approved. Listening for ${answers.photoCountMin}–${answers.photoCountMax} matching photos.`, "success");
           loadIdeas().catch(() => {});
           return;
         }
@@ -10973,7 +10973,7 @@
       ? `<button type="button" class="manage-button promote-row-button" data-idea-id="${escapeHtml(r.id)}" data-idea-action="promote">Promote</button>`
       : "";
     const waitingForPhotos = String(r?.photo_wait_status || "").trim() === "Waiting";
-    const title = `${value(r.title)}${waitingForPhotos ? ' <span class="subtle">(Waiting for photos)</span>' : ""}`;
+    const title = `${value(r.title)}${waitingForPhotos ? ' <span class="subtle">(Listening for photos)</span>' : ""}`;
     return `<tr class="${r.is_on_hold ? "idea-row-held" : ""}"><td><div class="title-cell">${title}</div><div class="subtle">${value(r.summary, "")}${r.created_at ? `${r.summary ? " · " : ""}Created ${dateValue(r.created_at)}` : ""}</div></td><td>${badge(ideaStatusLabel(r))}</td><td>${value(r.content_type)}</td><td>${join(r.platforms)}</td><td>${ideaStructureLabel(r)}</td><td><div class="subtle">${escapeHtml(ideaProductionLabel(r))}</div></td><td><div class="idea-row-actions">${promote}<button type="button" class="manage-button" data-idea-id="${escapeHtml(r.id)}">Manage</button></div></td></tr>`;
   }
 
@@ -12160,11 +12160,11 @@
     promoteVideoClipCount: "How many stills or clips to use. Auto lets the pipeline pick from the attached photos and the profile default.",
     promoteVoiceoverTail: "Seconds of picture and music after narration ends. Spoken length here is Video duration minus this tail. If you later set Voiceover duration on Production, that spoken length wins and this tail is extra after it. If speech + tail is longer than Video duration, Video duration still wins.",
     promoteProductionNotes: "Optional direction for pacing, style, or what to emphasize. Saved with the idea and copied onto the production request.",
-    promoteCarouselSlideMode: "Exact uses a fixed slide count. Target range approves the idea and waits until enough high-confidence photos exist.",
+    promoteCarouselSlideMode: "Exact uses a fixed slide count. Target range listens until enough high-confidence photos exist.",
     promoteCarouselSlideCount: "Exact number of slides or photos to attach.",
     promoteCarouselSlideMin: "Minimum high-confidence photos before this idea opens Production.",
     promoteCarouselSlideMax: "Maximum photos to attach when matching runs.",
-    promoteCarouselImageMode: "AI generated creates slides. Manual Upload uses attached photos. Wait for matching photos auto-attaches related library stills.",
+    promoteCarouselImageMode: "AI generated creates slides. Manual Upload uses attached photos. Listen for photos auto-attaches related Studio library stills.",
     editIdeaTitle: "Name this idea in the Ideas list. This is not the on-post title used on Instagram or YouTube.",
     editIdeaSummary: "Required before Promote. Used to write captions and the spoken script.",
     ideaLibrarySearch: "Search Drive stills by place or name. Suggested photos stay checked until you uncheck them.",
