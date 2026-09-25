@@ -1435,6 +1435,11 @@ export default {
         console.warn("facebook native cover reconcile cron failed", error);
       }
       try {
+        await autoListenOpenPhotoIdeas(env, { limit: 12 });
+      } catch (error) {
+        console.warn("idea automatic photo listening failed", error);
+      }
+      try {
         await runWaitingIdeaPhotoMatches(env, { limit: 8 });
       } catch (error) {
         console.warn("idea photo-wait matcher failed", error);
@@ -18251,7 +18256,7 @@ async function approveIdeaAndWaitForPhotos(request, env, record, input, authoriz
     },
     promotion_state: "waiting_for_photos",
     handoff: "photo-wait",
-    message: `Approved. Waiting for at least ${input.carousel_slide_count_min} high-confidence photos (will take up to ${input.carousel_slide_count_max}).`,
+    message: `Approved. Listening for at least ${input.carousel_slide_count_min} high-confidence photos in the Studio media library (will take up to ${input.carousel_slide_count_max}).`,
     record: mapIdea(updatedIdea),
     production_request: mapProductionRequest(draft),
   }, 202);
@@ -18275,6 +18280,82 @@ function ideaPhotoWatchRange(idea, contentType) {
   return { min: 5, max: 10 };
 }
 
+function ideaPhotoAutoListenContentType(idea) {
+  // Automatic listening is intentionally limited to still-first formats.
+  // It scans only Studio Media Assets already uploaded by the user; it never
+  // accesses a device photo library or camera roll.
+  const configured = String(f(idea, "Production_Content_Type") || "").trim();
+  if (["Carousel", "Photo Set", "Feed Post"].includes(configured)) return configured;
+  const suggested = arrayOrEmpty(f(idea, "Suggested_Format"))
+    .map((value) => String(value || "").trim())
+    .find((value) => ["Carousel", "Photo Set", "Feed Post"].includes(value));
+  return suggested || null;
+}
+
+function ideaHasExplicitPhotoProductionConfig(idea) {
+  return Boolean(
+    String(f(idea, "Production_Content_Type") || "").trim()
+    || String(f(idea, "Production_Carousel_Image_Mode") || "").trim()
+    || String(f(idea, "Production_Carousel_Slide_Count_Mode") || "").trim()
+    || Number(f(idea, "Production_Carousel_Slide_Count") || 0)
+    || Number(f(idea, "Production_Carousel_Slide_Count_Min") || 0)
+    || Number(f(idea, "Production_Carousel_Slide_Count_Max") || 0)
+  );
+}
+
+async function autoListenOpenPhotoIdeas(env, { limit = 12 } = {}) {
+  const candidates = await listRecords(env, env.AIRTABLE_IDEA_TABLE_ID, {
+    limit: Math.max(1, Number(limit) || 12),
+    sortField: "Create_Date",
+    sortDirection: "desc",
+    filterFormula: "AND({Studio_Photo_Wait_Status}=BLANK(),{Promoted_Content_Record_ID}=BLANK(),OR({Candidate_Status}='Generated',{Candidate_Status}='Sent for Review'))",
+  });
+
+  const eligible = candidates.filter((idea) =>
+    !ideaHasExplicitPhotoProductionConfig(idea) && Boolean(ideaPhotoAutoListenContentType(idea))
+  );
+  if (!eligible.length) return { evaluated: candidates.length, started: 0, ready: 0 };
+
+  const authorization = await resolveStudioCronAuthorization(env);
+  const results = [];
+  for (const idea of eligible) {
+    try {
+      const contentType = ideaPhotoAutoListenContentType(idea);
+      const range = ideaPhotoWatchRange(idea, contentType);
+      const updatedIdea = await airtableFetch(env, env.AIRTABLE_IDEA_TABLE_ID, idea.id, {
+        method: "PATCH",
+        body: JSON.stringify({
+          fields: {
+            Production_Content_Type: contentType,
+            Production_Carousel_Image_Mode: "Manual Upload",
+            Production_Carousel_Slide_Count_Mode: "Target range",
+            Production_Carousel_Slide_Count_Min: range.min,
+            Production_Carousel_Slide_Count_Max: range.max,
+            Production_Carousel_Slide_Count: range.max,
+            Studio_Photo_Wait_Status: "Waiting",
+          },
+          typecast: true,
+        }),
+      });
+      const draft = await findDraftProductionRequestForIdea(env, idea.id)
+        || await createDraftForIdea(env, updatedIdea, authorization);
+      results.push(await evaluateAndMaybeAttachWaitingIdeaPhotos(env, updatedIdea, {
+        authorization,
+        force: false,
+        productionRequest: draft,
+      }));
+    } catch (error) {
+      console.warn("idea automatic photo listening failed", idea.id, error);
+      results.push({ action: "error", idea_id: idea.id, error: error?.message || String(error) });
+    }
+  }
+  return {
+    evaluated: candidates.length,
+    started: results.length,
+    ready: results.filter((row) => row.action === "ready").length,
+  };
+}
+
 async function watchIdeaPhotosRoute(request, env, url, authorization) {
   let payload = {};
   try { payload = await request.json(); } catch { payload = {}; }
@@ -18282,7 +18363,7 @@ async function watchIdeaPhotosRoute(request, env, url, authorization) {
   const idea = await loadAuthorizedIdea(env, recordId, authorization);
   if (promotionCompleted(idea)) throw new HttpError(409, "This idea is already in production");
   if (String(f(idea, "Candidate_Status") || "").trim() === "On Hold") {
-    throw new HttpError(409, "Restore this idea before watching for photos");
+    throw new HttpError(409, "Restore this idea before listening for photos");
   }
 
   const contentType = IDEA_PHOTO_WAIT_TYPES.has(String(payload?.content_type || "").trim())
@@ -18333,7 +18414,7 @@ async function watchIdeaPhotosRoute(request, env, url, authorization) {
       : null,
     message: result.action === "ready"
       ? "Matching photos are ready. Open Production to set rules and approve."
-      : `Studio is watching for ${min}–${max} matching photos.`,
+      : `Studio is listening for ${min}–${max} matching photos already in the Studio media library.`,
   }, result.action === "ready" ? 200 : 202);
 }
 
@@ -18344,7 +18425,7 @@ async function matchIdeaPhotosRoute(request, env, url, authorization) {
   const idea = await loadAuthorizedIdea(env, recordId, authorization);
   const waitStatus = String(f(idea, "Studio_Photo_Wait_Status") || "").trim();
   if (waitStatus !== "Waiting" && waitStatus !== "Ready") {
-    throw new HttpError(409, "This idea is not waiting for matching photos");
+    throw new HttpError(409, "This idea is not listening for matching photos");
   }
   const result = await evaluateAndMaybeAttachWaitingIdeaPhotos(env, idea, {
     authorization,
