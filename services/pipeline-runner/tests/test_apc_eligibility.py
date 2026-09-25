@@ -1,5 +1,6 @@
 from datetime import timedelta
 
+from apc.ap4c import _expired_media_error, _expired_media_reset
 from apc.assets import public_asset_url, r2_object_key, saved_public_url, source_image_url
 from apc.common import expected_child_count, is_due, publish_caption, reconcile_caption
 from carousel.timeutil import iso_utc, utc_now
@@ -101,3 +102,26 @@ def test_asset_and_caption_helpers():
     assert reconcile_caption(_record(Output_Caption="Hello", Output_Hashtags="#Chicago")) == "Hello\n\n#Chicago"
     assert expected_child_count(_record(IG_Carousel_Child_Count=3), 3) == 3
     assert expected_child_count(_record(), 4) == 4
+
+
+def test_ap4c_expired_media_restarts_container_chain():
+    payload = {
+        "error": {
+            "message": "Timeout",
+            "code": -2,
+            "error_subcode": 2207020,
+            "error_user_title": "Expired Media",
+            "error_user_msg": "The media you are trying to access has expired. Please try to upload again.",
+        }
+    }
+    assert _expired_media_error(payload) is True
+    assert _expired_media_error({"error": {"message": "Temporary error"}}) is False
+
+    reset = _expired_media_reset(_record(IG_Carousel_Retry_Count=4), "AP4C media_publish failed", payload)
+    assert reset["IG_Carousel_Status"] == "Assets Ready"
+    assert reset["IG_Carousel_Parent_Status"] == "Not Created"
+    assert reset["IG_Carousel_Parent_Container_ID"] == ""
+    assert reset["IG_Carousel_Children_Ready_Count"] == 0
+    assert reset["Publish_Retry_Eligible"] is True
+    assert reset["IG_Carousel_Retry_Count"] == 5
+    assert "recreate fresh child containers" in reset["IG_Carousel_Error_Message"]
