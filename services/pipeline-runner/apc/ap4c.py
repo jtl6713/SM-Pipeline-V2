@@ -11,10 +11,12 @@ from apc.constants import (
     ERROR_AP4C,
     MAKE_AP4C_ID,
     MAKE_AP4C_NAME,
+    PARENT_NOT_CREATED,
     PUBLISH_STATUS_FAILED,
     REPLACE_MANUAL,
     RETRY_MINUTES,
     STAGE_AP4C,
+    STATUS_ASSETS_READY,
     STATUS_MANUAL_FALLBACK,
     STATUS_PARENT_READY,
     STATUS_PUBLISHING,
@@ -25,6 +27,44 @@ from asset.helpers import parse_int
 from carousel.timeutil import iso_utc
 from item4.settings import PipelineSettings
 from render.fields import field, field_str
+
+
+def _expired_media_error(payload: Any) -> bool:
+    if not isinstance(payload, dict):
+        return False
+    error = payload.get("error") if isinstance(payload.get("error"), dict) else {}
+    code = str(error.get("code") or "").strip()
+    subcode = str(error.get("error_subcode") or "").strip()
+    if code == "-2" and subcode == "2207020":
+        return True
+    text = " ".join(
+        str(error.get(key) or "")
+        for key in ("message", "error_user_title", "error_user_msg")
+    ).casefold()
+    return "expired" in text and "media" in text
+
+
+def _expired_media_reset(output: dict[str, Any], message: str, payload: Any) -> dict[str, Any]:
+    return {
+        **unlock_fields(),
+        "IG_Carousel_Status": STATUS_ASSETS_READY,
+        "Publish_Next_Retry_At": retry_at(RETRY_MINUTES),
+        "Publish_Retry_Eligible": True,
+        "IG_Carousel_Error_Stage": ERROR_AP4C,
+        "IG_Carousel_Retry_Count": (parse_int(field(output, "IG_Carousel_Retry_Count"), 0) or 0) + 1,
+        "IG_Carousel_Error_Message": (
+            f"{message}. Instagram reported expired media; AP1C will recreate fresh child containers "
+            "and AP3C will create a fresh parent before publishing."
+        ),
+        "IG_Carousel_Next_Retry_At": retry_at(RETRY_MINUTES),
+        "IG_Carousel_Children_Ready_Count": 0,
+        "IG_Carousel_Parent_Status": PARENT_NOT_CREATED,
+        "IG_Carousel_Parent_Container_ID": "",
+        "IG_Carousel_Parent_Created_At": None,
+        "IG_Carousel_Parent_Last_Checked_At": None,
+        "IG_Carousel_Parent_Poll_Attempt_Count": 0,
+        "IG_Carousel_Parent_Response_JSON": response_json(payload),
+    }
 
 
 def _replace_fail(output: dict[str, Any], message: str, payload: Any) -> dict[str, Any]:
@@ -156,6 +196,16 @@ def process_request(
         return result
 
     message = f"AP4C media_publish failed. HTTP {status_code}: {error_message(payload, status_code)}"
+    if not replace and _expired_media_error(payload):
+        client.update_record(
+            PLATFORM_OUTPUTS_TABLE,
+            record_id,
+            _expired_media_reset(output, message, payload),
+            typecast=True,
+        )
+        result.update({"processed": True, "needs_children": True, "expired_media": True})
+        return result
+
     if replace:
         client.update_record(PLATFORM_OUTPUTS_TABLE, record_id, _replace_fail(output, message, payload), typecast=True)
         result.update({"processed": True, "manual_fallback": True})
