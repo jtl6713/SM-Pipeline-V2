@@ -21,10 +21,28 @@ def setting_is_true(value: str) -> bool:
     return str(value or "").strip().casefold() in {"true", "1", "yes", "on"}
 
 
-def youtube_thumbnail_publish_enabled(settings: PipelineSettings | None = None) -> bool:
-    """YouTube thumbnails.set is paused unless this setting is explicitly on."""
+def youtube_thumbnail_publish_enabled(
+    settings: PipelineSettings | None = None,
+    record: dict[str, Any] | None = None,
+) -> bool:
+    """Attach native grid covers via thumbnails.set whenever the surface requires one.
+
+    Explicit ``YOUTUBE_AUTO_UPLOAD_THUMBNAIL=false`` still pauses non-cover uploads.
+    YouTube Shorts / Reels-style outputs always upload the 3D cover (Output 909 skipped
+    thumbnails.set while the flag defaulted off).
+    """
+    if record is not None and native_grid_cover_required(record):
+        return True
     raw = settings.get("YOUTUBE_AUTO_UPLOAD_THUMBNAIL") if settings is not None else ""
     return setting_is_true(raw)
+
+
+def youtube_publish_at(output: dict[str, Any]) -> str:
+    """Operator-locked Studio_Scheduled_At wins over occupancy-bumped YouTube fields."""
+    marker = field_str(output, "Studio_Scheduled_At")
+    if marker:
+        return marker
+    return field_str(output, "YouTube_Scheduled_Publish_At") or field_str(output, "Scheduled_Post_Date")
 
 
 def youtube_defaults(settings: PipelineSettings) -> dict[str, str]:

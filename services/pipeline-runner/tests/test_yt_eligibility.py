@@ -92,12 +92,34 @@ def test_ytp1_and_poll_gates():
     assert yts3_eligibility_reason(short) is None
 
 
-def test_youtube_thumbnail_publish_defaults_off():
+def test_youtube_thumbnail_publish_defaults_off_except_native_covers():
     assert youtube_thumbnail_publish_enabled() is False
     assert youtube_thumbnail_publish_enabled({"YOUTUBE_AUTO_UPLOAD_THUMBNAIL": "true"}) is True
     assert youtube_thumbnail_publish_enabled({"YOUTUBE_AUTO_UPLOAD_THUMBNAIL": "0"}) is False
+    short = _record(Platform_Output_Type="YouTube Short")
+    assert youtube_thumbnail_publish_enabled(record=short) is True
+    assert youtube_thumbnail_publish_enabled({"YOUTUBE_AUTO_UPLOAD_THUMBNAIL": "0"}, record=short) is True
     assert yts2_needs_videos_list(False) is False
     assert yts2_needs_videos_list(True) is True
+
+
+def test_youtube_publish_at_prefers_operator_marker():
+    from yt.package import youtube_publish_at
+
+    assert youtube_publish_at(
+        _record(
+            Studio_Scheduled_At="2026-09-25T13:30:00.000Z",
+            YouTube_Scheduled_Publish_At="2026-09-28T19:00:00.000Z",
+            Scheduled_Post_Date="2026-09-28T19:00:00.000Z",
+        )
+    ) == "2026-09-25T13:30:00.000Z"
+    assert youtube_publish_at(
+        _record(
+            YouTube_Scheduled_Publish_At="2026-09-28T19:00:00.000Z",
+            Scheduled_Post_Date="2026-09-27T19:00:00.000Z",
+        )
+    ) == "2026-09-28T19:00:00.000Z"
+    assert youtube_publish_at(_record(Scheduled_Post_Date="2026-09-27T19:00:00.000Z")) == "2026-09-27T19:00:00.000Z"
 
 
 def test_vertical_still_is_required_for_shorts():

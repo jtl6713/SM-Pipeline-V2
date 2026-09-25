@@ -240,7 +240,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.377-miami-mary-voice-pipeline";
+  const BUILD_ID = "item4-0.6.378-yt-schedule-thumb-handoff";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -1569,9 +1569,20 @@
     return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
   }
 
+  /** Operator-locked Studio_Scheduled_At wins over occupancy-bumped Scheduled_Post_Date. */
+  function studioEffectiveScheduleIso(record) {
+    return String(
+      record?.scheduled_at
+      || record?.scheduled_post_date
+      || record?.youtube_scheduled_publish_at
+      || ""
+    ).trim();
+  }
+
   function studioOutputTimingLabel(record) {
     const parts = [];
-    if (record?.scheduled_post_date) parts.push(`Scheduled ${formatStudioDateTime(record.scheduled_post_date)}`);
+    const scheduled = studioEffectiveScheduleIso(record);
+    if (scheduled) parts.push(`Scheduled ${formatStudioDateTime(scheduled)}`);
     if (record?.published_at) parts.push(`Published ${formatStudioDateTime(record.published_at)}`);
     return parts.join(" · ");
   }
@@ -12580,7 +12591,9 @@
       ["Review", output.review_status || "—"],
       ["Publish safety", output.do_not_publish ? "Do Not Publish" : "Publishing enabled"],
     ];
-    if (output.scheduled_post_date) rows.push(["Scheduled", formatStudioDateTime(output.scheduled_post_date)]);
+    if (output.scheduled_post_date || output.scheduled_at || output.youtube_scheduled_publish_at) {
+      rows.push(["Scheduled", formatStudioDateTime(studioEffectiveScheduleIso(output))]);
+    }
     if (output.published_at) rows.push(["Published", formatStudioDateTime(output.published_at)]);
     if (output.review_decision_at) rows.push(["Review decision", formatStudioDateTime(output.review_decision_at)]);
     if (output.studio_preview_updated_at) rows.push(["Preview updated", formatStudioDateTime(output.studio_preview_updated_at)]);
@@ -13302,8 +13315,8 @@
     $("creativeEditorPanel").scrollIntoView({ behavior: "smooth", block: "start" });
     setCreativeBusy(false);
     refreshCreativeScheduleHint(output);
-    if ($("creativeScheduleAt") && output.scheduled_post_date) {
-      $("creativeScheduleAt").value = formatDateTimeLocalInput(output.scheduled_post_date);
+    if ($("creativeScheduleAt") && studioEffectiveScheduleIso(output)) {
+      $("creativeScheduleAt").value = formatDateTimeLocalInput(studioEffectiveScheduleIso(output));
       document.querySelectorAll("input[name='creativeScheduleMode']").forEach((radio) => {
         radio.checked = radio.value === "schedule";
       });
@@ -13654,7 +13667,7 @@
   function applySavedPipelineSchedule(record) {
     const id = record?.id;
     if (!id) return;
-    const local = formatDateTimeLocalInput(record.scheduled_post_date);
+    const local = formatDateTimeLocalInput(studioEffectiveScheduleIso(record));
     pipelineScheduleDrafts.set(id, local);
     pipelineScheduleDirty.delete(id);
     const input = document.querySelector(`[data-pipeline-schedule="${id}"]`);
@@ -13784,7 +13797,7 @@
 
   function pipelineScheduleInputValue(record) {
     if (pipelineScheduleDrafts.has(record.id)) return pipelineScheduleDrafts.get(record.id);
-    return formatDateTimeLocalInput(record.scheduled_post_date);
+    return formatDateTimeLocalInput(studioEffectiveScheduleIso(record));
   }
 
   function bindPipelineScheduleInputs(root) {
@@ -13855,7 +13868,7 @@
       if (status) status.textContent = "Invalid time";
       return;
     }
-    const previousMs = Date.parse(record.scheduled_post_date || "");
+    const previousMs = Date.parse(studioEffectiveScheduleIso(record) || "");
     if (!Number.isNaN(previousMs) && Math.abs(previousMs - parsed) < 60000) {
       pipelineScheduleDirty.delete(id);
       if (status) status.textContent = "Saved";
@@ -13873,7 +13886,7 @@
       setPipelineLiveHint("Schedule saved.");
       refreshPipelineOutputs({ silent: true, force: true }).catch(() => {});
     } catch (error) {
-      const previous = formatDateTimeLocalInput(record.scheduled_post_date);
+      const previous = formatDateTimeLocalInput(studioEffectiveScheduleIso(record));
       input.value = previous;
       pipelineScheduleDrafts.set(id, previous);
       if (status) status.textContent = error.message || "Not saved";
@@ -13888,7 +13901,7 @@
     const map = {};
     const persisted = new Map((pipelineOutputs || []).map((record) => [
       record.id,
-      String(record.scheduled_post_date || record.scheduled_at || record.youtube_scheduled_publish_at || "").trim(),
+      studioEffectiveScheduleIso(record),
     ]));
     pipelineScheduleDrafts.forEach((raw, id) => {
       if (pipelineScheduleDirty.has(id)) {
@@ -13937,7 +13950,7 @@
     const input = document.querySelector(`[data-pipeline-schedule="${record.id}"]`);
     if (input) return Boolean(String(input.value || "").trim());
     if (pipelineScheduleDrafts.has(record.id)) return Boolean(String(pipelineScheduleDrafts.get(record.id) || "").trim());
-    return Boolean(String(record.scheduled_post_date || "").trim());
+    return Boolean(studioEffectiveScheduleIso(record));
   }
 
   const PIPELINE_SCHEDULE_GAP_MS = 3 * 60 * 60 * 1000;
@@ -13949,7 +13962,7 @@
       ? String(input.value || "").trim()
       : (pipelineScheduleDrafts.has(record.id)
         ? String(pipelineScheduleDrafts.get(record.id) || "").trim()
-        : String(record.scheduled_post_date || record.scheduled_at || record.youtube_scheduled_publish_at || "").trim());
+        : studioEffectiveScheduleIso(record));
     if (!raw) return "";
     const ms = Date.parse(raw);
     return Number.isNaN(ms) ? "" : new Date(ms).toISOString();
@@ -15201,7 +15214,7 @@
     platformCalendarRecords = [];
     platformCalendarReturnFocus = opener instanceof HTMLElement ? opener : document.activeElement;
     const rowInput = document.querySelector(`[data-pipeline-schedule="${record.id}"]`);
-    const raw = String(rowInput?.value || pipelineScheduleDrafts.get(record.id) || formatDateTimeLocalInput(record.scheduled_post_date) || "").trim();
+    const raw = String(rowInput?.value || pipelineScheduleDrafts.get(record.id) || formatDateTimeLocalInput(studioEffectiveScheduleIso(record)) || "").trim();
     const input = $("platformCalendarManualTime");
     if (input) input.value = raw;
     const backdrop = $("platformCalendarBackdrop");
@@ -15252,7 +15265,7 @@
         if (activeCreativeOutput?.id === id) {
           activeCreativeOutput = { ...activeCreativeOutput, ...result.record };
           const creativeInput = $("creativeScheduleAt");
-          if (creativeInput) creativeInput.value = formatDateTimeLocalInput(result.record.scheduled_post_date);
+          if (creativeInput) creativeInput.value = formatDateTimeLocalInput(studioEffectiveScheduleIso(result.record));
           document.querySelectorAll("input[name='creativeScheduleMode']").forEach((radio) => {
             radio.checked = radio.value === "schedule";
           });
@@ -17901,12 +17914,13 @@
         record.final_file_url ? `<a class="table-link" target="_blank" rel="noopener" href="${escapeHtml(record.final_file_url)}">Final file</a>` : "",
         record.thumbnail_url ? `<a class="table-link" target="_blank" rel="noopener" href="${escapeHtml(record.thumbnail_url)}">Thumbnail</a>` : "",
       ].filter(Boolean).join(" · ");
-      const scheduledHint = record.scheduled_post_date
-        ? `<div class="subtle">Current schedule: ${dateValue(record.scheduled_post_date)}</div>`
+      const effectiveSchedule = studioEffectiveScheduleIso(record);
+      const scheduledHint = effectiveSchedule
+        ? `<div class="subtle">Current schedule: ${dateValue(effectiveSchedule)}</div>`
         : "";
-      const inputValue = formatDateTimeLocalInput(record.scheduled_post_date);
+      const inputValue = formatDateTimeLocalInput(effectiveSchedule);
       const action = kind === "schedule"
-        ? `${scheduledHint}<form class="ops-inline-form" data-ops-schedule="${escapeHtml(record.id)}"><input type="datetime-local" required value="${escapeHtml(inputValue)}"><button type="submit" class="secondary-button">${record.scheduled_post_date ? "Update date" : "Set date"}</button></form>`
+        ? `${scheduledHint}<form class="ops-inline-form" data-ops-schedule="${escapeHtml(record.id)}"><input type="datetime-local" required value="${escapeHtml(inputValue)}"><button type="submit" class="secondary-button">${effectiveSchedule ? "Update date" : "Set date"}</button></form>`
         : `<form class="ops-inline-form" data-ops-published="${escapeHtml(record.id)}"><input type="url" required placeholder="https://… live post URL"><button type="submit" class="secondary-button">Mark published</button></form>`;
       return `<tr><td><div class="title-cell">Output ${value(record.output_id)} · ${value(record.output_title)}</div><div class="subtle">${links || "No file links"}</div><div class="ops-kit">${escapeHtml(opsKitText(record) || "No caption yet")}</div></td><td>${value(record.platform)}</td><td>${badge(record.studio_state || record.publish_status)}</td><td>${action}</td></tr>`;
     }).join("")}</tbody></table>`;
@@ -17915,9 +17929,14 @@
         event.preventDefault();
         const input = form.querySelector("input");
         try {
+          const parsed = Date.parse(input.value);
+          if (Number.isNaN(parsed)) throw new Error("Scheduled date/time is invalid");
           await api(`/api/operations/outputs/${encodeURIComponent(form.dataset.opsSchedule)}/schedule`, {
             method: "POST",
-            body: JSON.stringify({ scheduled_post_date: input.value }),
+            body: JSON.stringify({
+              scheduled_post_date: new Date(parsed).toISOString(),
+              manual_schedule_override: true,
+            }),
           });
           setOperationsMessage("Schedule date saved.");
           loadOperations(true);
@@ -18388,8 +18407,8 @@
         applySavedPipelineSchedule(activeCreativeOutput);
         renderCreativeOutputMeta(activeCreativeOutput);
         syncCreativeScheduleActions(activeCreativeOutput);
-        if ($("creativeScheduleAt") && activeCreativeOutput.scheduled_post_date) {
-          $("creativeScheduleAt").value = formatDateTimeLocalInput(activeCreativeOutput.scheduled_post_date);
+        if ($("creativeScheduleAt") && studioEffectiveScheduleIso(activeCreativeOutput)) {
+          $("creativeScheduleAt").value = formatDateTimeLocalInput(studioEffectiveScheduleIso(activeCreativeOutput));
           if (!publishNow && payload.scheduled_post_date) {
             document.querySelectorAll("input[name='creativeScheduleMode']").forEach((radio) => {
               radio.checked = radio.value === "schedule";

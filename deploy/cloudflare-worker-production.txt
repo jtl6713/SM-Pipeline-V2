@@ -553,3 +553,5 @@ Finished-video hard cap six Worker deploy: 2026-09-20 — Concurrent plan-sync a
 Recommend Carousel slides Worker deploy: 2026-09-25 - /plan infers slides from Master_Content_Type=Carousel and drops stale video overrides/Stories. Worker 0.10.376-recommend-carousel-slides.
 
 Miami Mary voice Pipeline Worker deploy: 2026-09-25 - Resolve narration from Production Request / Content Item / Content Profile before Kate fallback; stamp slide voice on AI carousel seed; clear legacy Voice=Kate when Mary/Hank is set. Worker 0.10.377-miami-mary-voice-pipeline.
+
+YouTube schedule+thumb handoff Worker deploy: 2026-09-25 — Approve keeps Studio_Scheduled_At exactly (no occupancy bump over operator lock); YTP1 publishAt prefers marker; Shorts always thumbnails.set. Worker 0.10.378-yt-schedule-thumb-handoff.

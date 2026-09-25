@@ -16,8 +16,9 @@ test("manual output schedule route preserves the requested time exactly", () => 
 
 test("approval preserves a previously saved manual schedule marker", () => {
   assert.match(source, /const markerIso = String\(f\(record, "Studio_Scheduled_At"\)/);
-  assert.match(source, /Math\.abs\(requestedMs - markerMs\) < 60000/);
-  assert.match(source, /exactOverride: manualScheduleOverride/);
+  assert.match(source, /const existingScheduleIso = String\(/);
+  assert.match(source, /else if \(markerIso\) \{\s*requestedRaw = markerIso;\s*exactOverride = true;/);
+  assert.match(source, /studio_yt_manual_schedule_lock_v1: true/);
 });
 
 test("schedule grid returns linked Content ID and title for calendar labels", () => {

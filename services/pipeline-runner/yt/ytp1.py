@@ -24,7 +24,7 @@ from yt.constants import (
     UPLOAD_UPLOADING,
 )
 from yt.eligibility import upload_source_url, ytp1_eligibility_reason
-from yt.package import youtube_tags
+from yt.package import youtube_publish_at, youtube_tags
 
 
 def process_request(
@@ -65,7 +65,9 @@ def process_request(
     # YouTube requires privacyStatus=private when publishAt is set. Studio keeps
     # YouTube_Privacy_Status as the desired end-state (public for scheduled posts);
     # coerce only the upload payload so the channel releases publicly at publishAt.
-    publish_at = field_str(output, "YouTube_Scheduled_Publish_At")
+    # Prefer Studio_Scheduled_At when the operator locked a time (Output 909 kept the
+    # Sep-25 marker while YouTube_Scheduled_Publish_At stayed on the occupancy bump).
+    publish_at = youtube_publish_at(output)
     desired_privacy = field_str(output, "YouTube_Privacy_Status") or "public"
     upload_privacy = "private" if publish_at else desired_privacy
     payload = {
@@ -91,26 +93,30 @@ def process_request(
     result["job_id"] = job_id
     now = iso_utc()
     if 200 <= status_code <= 299 and job_id:
+        sync_fields: dict[str, Any] = {
+            "YouTube_Stage": STAGE_YT2,
+            "Publish_Status": PUBLISH_STATUS_PUBLISHING,
+            "Publish_Locked_At": None,
+            "Publish_Locked_By": "",
+            "Publish_Error_Stage": "",
+            "Publish_Error_Message": "",
+            "Publish_Next_Retry_At": retry_at(POLL_RETRY_MINUTES),
+            "YouTube_Error_Message": "",
+            "YouTube_Response_JSON": response_json(body),
+            "YouTube_Upload_Job_ID": job_id,
+            "YouTube_Upload_Status": UPLOAD_UPLOADING,
+            "Publish_Retry_Eligible": False,
+            "YouTube_Package_Status": PACKAGE_UPLOADING,
+            "YouTube_Upload_Started_At": now,
+            "YouTube_Upload_Progress_Percent": body.get("progressPercent") if body.get("progressPercent") is not None else 0,
+        }
+        if publish_at:
+            sync_fields["YouTube_Scheduled_Publish_At"] = publish_at
+            sync_fields["Scheduled_Post_Date"] = publish_at
         client.update_record(
             PLATFORM_OUTPUTS_TABLE,
             record_id,
-            {
-                "YouTube_Stage": STAGE_YT2,
-                "Publish_Status": PUBLISH_STATUS_PUBLISHING,
-                "Publish_Locked_At": None,
-                "Publish_Locked_By": "",
-                "Publish_Error_Stage": "",
-                "Publish_Error_Message": "",
-                "Publish_Next_Retry_At": retry_at(POLL_RETRY_MINUTES),
-                "YouTube_Error_Message": "",
-                "YouTube_Response_JSON": response_json(body),
-                "YouTube_Upload_Job_ID": job_id,
-                "YouTube_Upload_Status": UPLOAD_UPLOADING,
-                "Publish_Retry_Eligible": False,
-                "YouTube_Package_Status": PACKAGE_UPLOADING,
-                "YouTube_Upload_Started_At": now,
-                "YouTube_Upload_Progress_Percent": body.get("progressPercent") if body.get("progressPercent") is not None else 0,
-            },
+            sync_fields,
         )
         result["needs_poll"] = True
         result["youtube_stage"] = STAGE_YT2
