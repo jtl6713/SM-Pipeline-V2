@@ -2713,7 +2713,7 @@
         if (result.photo_wait?.action === "ready" && result.production_request) {
           setManageMessage(result.message || "Photos matched. Open Production to set rules.", "success");
         } else {
-          setManageMessage(result.message || "Approved. Waiting for high-confidence photos.", "success");
+          setManageMessage(result.message || "Approved. Listening for high-confidence photos in the Studio media library.", "success");
         }
         return;
       }
@@ -5558,7 +5558,7 @@
           switchToPage("ideas");
           updateIdeaDrawer(result.record || idea);
           openIdeaDrawer(result.record || idea);
-          setManageMessage(result.message || `Approved. Waiting for ${answers.photoCountMin}–${answers.photoCountMax} matching photos.`, "success");
+          setManageMessage(result.message || `Approved. Listening for ${answers.photoCountMin}–${answers.photoCountMax} matching photos in the Studio media library.`, "success");
           loadIdeas().catch(() => {});
           return;
         }
