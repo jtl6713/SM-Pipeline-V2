@@ -77,7 +77,7 @@ def process_request(
 
     settings = PipelineSettings(client)
     limit = parse_int(settings.get("TIKTOK_DRAFT_SAFE_PENDING_LIMIT"), DEFAULT_SAFE_PENDING_LIMIT) or DEFAULT_SAFE_PENDING_LIMIT
-    pending = pending_manual_share_count(client, record_id)
+    pending = pending_manual_share_count(client, record_id, output)
     result["pending_manual_shares"] = pending
     result["safe_pending_limit"] = limit
     if dry_run:
