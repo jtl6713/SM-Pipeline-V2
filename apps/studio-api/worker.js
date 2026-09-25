@@ -181,6 +181,7 @@ export default {
       const isIdeaHoldRoute = /^\/api\/ideas\/rec[A-Za-z0-9]+\/hold$/.test(url.pathname);
       const isIdeaRestoreRoute = /^\/api\/ideas\/rec[A-Za-z0-9]+\/restore$/.test(url.pathname);
       const isIdeaPromoteRoute = /^\/api\/ideas\/rec[A-Za-z0-9]+\/promote$/.test(url.pathname);
+      const isIdeaWatchPhotosRoute = /^\/api\/ideas\/rec[A-Za-z0-9]+\/watch-photos$/.test(url.pathname);
       const isIdeaMatchPhotosRoute = /^\/api\/ideas\/rec[A-Za-z0-9]+\/match-photos$/.test(url.pathname);
       const isIdeaLibrarySuggestionsRoute = /^\/api\/ideas\/rec[A-Za-z0-9]+\/library-suggestions$/.test(url.pathname);
       const isIdeaProductionRequestRoute = /^\/api\/ideas\/rec[A-Za-z0-9]+\/production-request$/.test(url.pathname);
@@ -280,6 +281,7 @@ export default {
       const isIdeaDeleteRoute = isIdeaRecordRoute && request.method === "DELETE";
       const isIdeaHoldWrite = (isIdeaHoldRoute || isIdeaRestoreRoute) && request.method === "POST";
       const isIdeaPromoteWrite = isIdeaPromoteRoute && request.method === "POST";
+      const isIdeaWatchPhotosWrite = isIdeaWatchPhotosRoute && request.method === "POST";
       const isIdeaMatchPhotosWrite = isIdeaMatchPhotosRoute && request.method === "POST";
       const isProductionRequestCreateWrite =
         (isIdeaProductionRequestRoute || isProductionRequestCollectionRoute) && request.method === "POST";
@@ -335,6 +337,7 @@ export default {
         isIdeaDeleteRoute ||
         isIdeaHoldWrite ||
         isIdeaPromoteWrite ||
+        isIdeaWatchPhotosWrite ||
         isIdeaMatchPhotosWrite ||
         isProductionRequestCreateWrite ||
         isProductionRequestEditWrite ||
@@ -978,6 +981,13 @@ export default {
         assertWriteRequest(request, env);
         requirePermission(authorization, "ideas_edit");
         return restoreIdea(request, env, url, authorization);
+      }
+
+      if (isIdeaWatchPhotosRoute) {
+        assertWriteRequest(request, env);
+        requirePermission(authorization, "ideas_promote");
+        requirePermission(authorization, "production_configure");
+        return watchIdeaPhotosRoute(request, env, url, authorization);
       }
 
       if (isIdeaMatchPhotosRoute) {
@@ -11132,6 +11142,22 @@ async function loadIdeaTitlesByRecordId(env, ideaIds) {
   return titles;
 }
 
+async function loadIdeaPhotoWaitStatesByRecordId(env, ideaIds) {
+  const unique = [...new Set((Array.isArray(ideaIds) ? ideaIds : [])
+    .map((id) => String(id || "").trim())
+    .filter((id) => /^rec[A-Za-z0-9]+$/.test(id)))];
+  const states = new Map();
+  await Promise.all(unique.map(async (id) => {
+    try {
+      const idea = await airtableFetch(env, env.AIRTABLE_IDEA_TABLE_ID, id);
+      states.set(id, String(f(idea, "Studio_Photo_Wait_Status") || "").trim());
+    } catch (error) {
+      console.warn("Idea photo-wait lookup skipped", id, error);
+    }
+  }));
+  return states;
+}
+
 function mapProductionRequest(record, ideaTitle = null) {
   const links = (name) => Array.isArray(f(record, name)) ? f(record, name) : [];
   return {
@@ -11765,13 +11791,22 @@ async function listProductionRequests(request, env, url, authorization) {
       membershipAllowsBrand(authorization, brandLinks) &&
       (!profileBrandIds.size || brandLinks.some((id) => profileBrandIds.has(id)));
   });
-  const ideaTitles = await loadIdeaTitlesByRecordId(env, filtered.map(ideaRecordIdFromProductionRequest));
+  const ideaIds = filtered.map(ideaRecordIdFromProductionRequest);
+  const [ideaTitles, photoWaitStates] = await Promise.all([
+    loadIdeaTitlesByRecordId(env, ideaIds),
+    loadIdeaPhotoWaitStatesByRecordId(env, ideaIds),
+  ]);
+  const visible = filtered.filter((record) => {
+    const ideaId = ideaRecordIdFromProductionRequest(record);
+    return !ideaId || photoWaitStates.get(ideaId) !== "Waiting";
+  });
   return respond(request, env, {
     ok: true,
-    records: filtered.map((record) => mapProductionRequestSummary(
+    records: visible.map((record) => mapProductionRequestSummary(
       record,
       ideaTitles.get(ideaRecordIdFromProductionRequest(record)) || null
     )),
+    photo_watch_waiting_count: filtered.length - visible.length,
   });
 }
 
@@ -18222,6 +18257,86 @@ async function approveIdeaAndWaitForPhotos(request, env, record, input, authoriz
   }, 202);
 }
 
+function ideaPhotoWatchContentType(idea) {
+  const configured = String(f(idea, "Production_Content_Type") || "").trim();
+  if (IDEA_PHOTO_WAIT_TYPES.has(configured)) return configured;
+  const suggested = arrayOrEmpty(f(idea, "Suggested_Format"))
+    .map((value) => String(value || "").trim())
+    .find((value) => IDEA_PHOTO_WAIT_TYPES.has(value));
+  return suggested || "Carousel";
+}
+
+function ideaPhotoWatchRange(idea, contentType) {
+  const storedMin = Number(f(idea, "Production_Carousel_Slide_Count_Min") || 0);
+  const storedMax = Number(f(idea, "Production_Carousel_Slide_Count_Max") || 0);
+  if (storedMin > 0 && storedMax >= storedMin) return { min: storedMin, max: storedMax };
+  if (contentType === "Feed Post") return { min: 1, max: 4 };
+  if (contentType === "Carousel") return { min: 5, max: 8 };
+  return { min: 5, max: 10 };
+}
+
+async function watchIdeaPhotosRoute(request, env, url, authorization) {
+  let payload = {};
+  try { payload = await request.json(); } catch { payload = {}; }
+  const recordId = ideaRecordIdFromPath(url);
+  const idea = await loadAuthorizedIdea(env, recordId, authorization);
+  if (promotionCompleted(idea)) throw new HttpError(409, "This idea is already in production");
+  if (String(f(idea, "Candidate_Status") || "").trim() === "On Hold") {
+    throw new HttpError(409, "Restore this idea before watching for photos");
+  }
+
+  const contentType = IDEA_PHOTO_WAIT_TYPES.has(String(payload?.content_type || "").trim())
+    ? String(payload.content_type).trim()
+    : ideaPhotoWatchContentType(idea);
+  const defaults = ideaPhotoWatchRange(idea, contentType);
+  const requestedMin = Number(payload?.min);
+  const requestedMax = Number(payload?.max);
+  const min = Number.isFinite(requestedMin) && requestedMin >= 1 && requestedMin <= 20
+    ? Math.trunc(requestedMin)
+    : defaults.min;
+  const maxCandidate = Number.isFinite(requestedMax) && requestedMax >= min && requestedMax <= 20
+    ? Math.trunc(requestedMax)
+    : defaults.max;
+  const max = Math.max(min, maxCandidate);
+
+  const fields = {
+    Production_Content_Type: contentType,
+    Production_Carousel_Image_Mode: "Manual Upload",
+    Production_Carousel_Slide_Count_Mode: "Target range",
+    Production_Carousel_Slide_Count_Min: min,
+    Production_Carousel_Slide_Count_Max: max,
+    Production_Carousel_Slide_Count: max,
+    Studio_Photo_Wait_Status: "Waiting",
+  };
+  if (!String(f(idea, "Idea_Summary") || "").trim()) {
+    fields.Idea_Summary = String(f(idea, "Candidate_Title") || "Photo-based idea").trim();
+  }
+
+  const updatedIdea = await airtableFetch(env, env.AIRTABLE_IDEA_TABLE_ID, idea.id, {
+    method: "PATCH",
+    body: JSON.stringify({ fields, typecast: true }),
+  });
+  const draft = await existingDraftForIdea(env, updatedIdea.id, authorization)
+    || await createDraftForIdea(env, updatedIdea, authorization);
+  const result = await evaluateAndMaybeAttachWaitingIdeaPhotos(env, updatedIdea, {
+    authorization,
+    force: false,
+    productionRequest: draft,
+  });
+  return respond(request, env, {
+    ok: true,
+    watching: result.action !== "ready",
+    photo_wait: { ...result, min, max },
+    record: mapIdea(result.idea || updatedIdea),
+    production_request: result.action === "ready" && result.production_request
+      ? mapProductionRequest(result.production_request)
+      : null,
+    message: result.action === "ready"
+      ? "Matching photos are ready. Open Production to set rules and approve."
+      : `Studio is watching for ${min}–${max} matching photos.`,
+  }, result.action === "ready" ? 200 : 202);
+}
+
 async function matchIdeaPhotosRoute(request, env, url, authorization) {
   let payload = {};
   try { payload = await request.json(); } catch { payload = {}; }
@@ -18476,7 +18591,7 @@ async function evaluateAndMaybeAttachWaitingIdeaPhotos(env, idea, { authorizatio
 async function runWaitingIdeaPhotoMatches(env, { limit = 8 } = {}) {
   const records = await listRecords(env, env.AIRTABLE_IDEA_TABLE_ID, {
     limit: Math.max(1, Number(limit) || 8),
-    filterFormula: "AND({Candidate_Status}='Approved',{Studio_Photo_Wait_Status}='Waiting',{Promoted_Content_Record_ID}=BLANK())",
+    filterFormula: "AND({Studio_Photo_Wait_Status}='Waiting',{Promoted_Content_Record_ID}=BLANK(),{Candidate_Status}!='On Hold')",
   });
   const results = [];
   for (const idea of records) {
