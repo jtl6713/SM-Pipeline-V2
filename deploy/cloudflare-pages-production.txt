@@ -579,3 +579,5 @@ Variant prepare copy Pages deploy: 2026-09-20 — Approve prompt says Prepare fi
 2026-09-24 deploy Studio Pages AI API preferred-provider footer (PR #323).
 
 2026-09-24 deploy Studio Pages one-click Idea photo watch (PR #325).
+
+2026-09-24 deploy Studio Pages waiting-for-photos title label (PR #326).
