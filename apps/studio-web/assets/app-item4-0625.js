@@ -240,7 +240,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.375-clean-enterprise-auto-photo-listen";
+  const BUILD_ID = "item4-0.6.375-clean-enterprise-matched-photo-preview";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -2192,6 +2192,47 @@
     return [...new Set([...fromField, ...fromLinks, ...noted].map((id) => String(id || "").trim()).filter((id) => /^rec[A-Za-z0-9]+$/.test(id)))];
   }
 
+  function renderIdeaMatchedPhotos(idea) {
+    const wrap = $("ideaMatchedPhotos");
+    const grid = $("ideaMatchedPhotosGrid");
+    const heading = $("ideaMatchedPhotosHeading");
+    const hint = $("ideaMatchedPhotosHint");
+    if (!wrap || !grid) return;
+
+    const ready = String(idea?.photo_wait_status || "").trim() === "Ready";
+    const ids = ready
+      ? [...new Set([
+          ...(Array.isArray(idea?.matched_media_asset_links) ? idea.matched_media_asset_links : []),
+          ...(Array.isArray(idea?.photo_match?.selected) ? idea.photo_match.selected.map((row) => row?.id) : []),
+        ].map((id) => String(id || "").trim()).filter((id) => /^rec[A-Za-z0-9]+$/.test(id)))]
+      : [];
+
+    wrap.hidden = ids.length < 1;
+    if (!ids.length) {
+      grid.innerHTML = "";
+      if (heading) heading.textContent = "Selected photos";
+      return;
+    }
+
+    if (heading) heading.textContent = `Selected photos (${ids.length})`;
+    if (hint) hint.textContent = "These photos were selected automatically and are already attached to the Production draft. Open Production to add, remove, or reorder them before approval.";
+
+    const items = ids.map((id, index) => ({
+      id,
+      name: `Selected photo ${index + 1}`,
+      media_kind: "photo",
+      preview_path: `/api/media-assets/${encodeURIComponent(id)}/preview`,
+    }));
+    grid.innerHTML = items.map((item, index) => {
+      const preview = ideaLibraryPreviewUrl(item);
+      return `<div class="idea-library-card" data-library-id="${escapeHtml(item.id)}" data-selected="true">
+        <img src="${escapeHtml(preview)}" alt="Selected photo ${index + 1}" loading="lazy">
+        <span>Photo ${index + 1}</span>
+      </div>`;
+    }).join("");
+    bindLibraryPickerPreviews(grid, items);
+  }
+
   function updateIdeaDrawer(idea) {
     const sameIdea = Boolean(activeIdea?.id && idea?.id && activeIdea.id === idea.id);
     const picker = $("ideaLibraryPicker");
@@ -2240,6 +2281,7 @@
     $("promoteProductionNotes").value = ideaUserProductionNotes(idea);
     syncPromotionPanels();
     fillIdeaProductionSnapshot(idea);
+    renderIdeaMatchedPhotos(idea);
 
     const promoted = ideaIsPromoted(idea);
     const modifiable = ideaCanModify(idea);
