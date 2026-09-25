@@ -33,9 +33,17 @@
     return { start, end, days };
   }
 
+  function sevenDayWindow(value) {
+    const start = value instanceof Date ? new Date(value.getTime()) : new Date(value || Date.now());
+    start.setHours(0, 0, 0, 0);
+    const end = addLocalDays(start, 7);
+    const days = Array.from({ length: 7 }, (_, index) => addLocalDays(start, index));
+    return { start, end, days };
+  }
+
   function defaultWeek(nowValue) {
     const now = nowValue instanceof Date ? new Date(nowValue.getTime()) : new Date(nowValue || Date.now());
-    return weekContaining(now);
+    return sevenDayWindow(now);
   }
 
   function slotDate(day, slotIndex) {
@@ -127,6 +135,7 @@
     slotKey,
     spacingWarning,
     startOfLocalWeek,
+    sevenDayWindow,
     weekContaining,
   };
 })(typeof globalThis !== "undefined" ? globalThis : window);

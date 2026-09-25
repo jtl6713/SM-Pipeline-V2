@@ -240,7 +240,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.378-miami-mary-voice-pipeline";
+  const BUILD_ID = "item4-0.6.379-platform-calendar-today";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -15120,13 +15120,17 @@
       .filter((item) => helper.inWindow(item.scheduled_post_date, platformCalendarWeek));
     if (summary) {
       const output = record?.output_id ? `Output ${record.output_id}` : "This output";
-      summary.textContent = `${output} · ${platformCalendarPlatform} · ${visibleRecords.length} scheduled post${visibleRecords.length === 1 ? "" : "s"} this week · 30-minute slots`;
+      summary.textContent = `${output} · ${platformCalendarPlatform} · ${visibleRecords.length} scheduled post${visibleRecords.length === 1 ? "" : "s"} in these 7 days · 30-minute slots`;
     }
     const slots = helper.aggregateBySlot(platformCalendarRecords, platformCalendarPlatform);
     const selectedKey = platformCalendarSelectedIso ? helper.slotKey(new Date(platformCalendarSelectedIso)) : "";
-    const head = platformCalendarWeek.days.map((day) => (
-      `<th scope="col"><span class="platform-calendar-day-name">${escapeHtml(day.toLocaleDateString(undefined, { weekday: "short" }))}</span><span class="platform-calendar-day-date">${escapeHtml(day.toLocaleDateString(undefined, { month: "short", day: "numeric" }))}</span></th>`
-    )).join("");
+    const todayKey = helper.localDayKey(new Date());
+    const head = platformCalendarWeek.days.map((day) => {
+      const dayName = helper.localDayKey(day) === todayKey
+        ? "Today"
+        : day.toLocaleDateString(undefined, { weekday: "short" });
+      return `<th scope="col"><span class="platform-calendar-day-name">${escapeHtml(dayName)}</span><span class="platform-calendar-day-date">${escapeHtml(day.toLocaleDateString(undefined, { month: "short", day: "numeric" }))}</span></th>`;
+    }).join("");
     const rows = Array.from({ length: 48 }, (_, slotIndex) => {
       const cells = platformCalendarWeek.days.map((day) => {
         const slot = helper.slotDate(day, slotIndex);
@@ -15182,7 +15186,7 @@
       const result = await api(`/api/outputs/schedule-grid?${params.toString()}`);
       if (token !== platformCalendarLoadToken || !platformCalendarOutputId) return;
       platformCalendarRecords = result?.records || [];
-      renderPlatformScheduleCalendar({ scrollToHour: 5 });
+      renderPlatformScheduleCalendar({ scrollToHour: 0 });
       updatePlatformCalendarSelection();
     } catch (error) {
       if (token !== platformCalendarLoadToken || !platformCalendarOutputId) return;
@@ -15230,7 +15234,7 @@
   function shiftPlatformScheduleCalendarWeek(days) {
     const helper = globalThis.PlatformScheduleCalendar;
     if (!helper?.addLocalDays || !platformCalendarWeek) return;
-    platformCalendarWeek = helper.weekContaining(helper.addLocalDays(platformCalendarWeek.start, days));
+    platformCalendarWeek = helper.sevenDayWindow(helper.addLocalDays(platformCalendarWeek.start, days));
     loadPlatformScheduleCalendarWeek();
   }
 

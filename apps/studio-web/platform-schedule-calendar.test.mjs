@@ -8,11 +8,12 @@ await import("./assets/platform-schedule-calendar-0924.js");
 const calendar = globalThis.PlatformScheduleCalendar;
 const here = path.dirname(fileURLToPath(import.meta.url));
 
-test("calendar defaults to the current local week", () => {
+test("calendar defaults to a rolling seven-day window starting Today", () => {
   const now = new Date(2026, 8, 24, 9, 15, 0, 0);
   const week = calendar.defaultWeek(now);
   assert.equal(week.days.length, 7);
-  assert.equal(week.start.getDay(), 0);
+  assert.equal(calendar.localDayKey(week.start), calendar.localDayKey(now));
+  assert.equal(calendar.localDayKey(week.days[0]), calendar.localDayKey(now));
   assert.equal(calendar.inWindow(now, week), true);
   assert.equal(calendar.inWindow(calendar.addLocalDays(now, 7), week), false);
   assert.equal(week.start.getHours(), 0);
@@ -53,6 +54,9 @@ test("Platform Outputs expose a save-only calendar workflow", () => {
   assert.match(app, /manual_schedule_override:\s*true/);
   assert.match(app, /function openPlatformScheduleCalendar/);
   assert.match(app, /function savePlatformScheduleCalendar/);
-  assert.match(app, /renderPlatformScheduleCalendar\(\{ scrollToHour: 5 \}\)/);
+  assert.match(app, /renderPlatformScheduleCalendar\(\{ scrollToHour: 0 \}\)/);
+  assert.match(html, /id="platformCalendarDefaultWeek">Today<\/button>/);
+  assert.match(app, /dayName = helper\.localDayKey\(day\) === todayKey/);
+  assert.match(app, /platformCalendarWeek = helper\.sevenDayWindow/);
   assert.doesNotMatch(app, /data-platform-calendar-slot[\s\S]{0,500}api\(/);
 });
