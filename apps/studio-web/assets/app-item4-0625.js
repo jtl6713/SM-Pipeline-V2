@@ -2261,6 +2261,15 @@
       useExistingButton.disabled = promoted || Boolean(idea?.is_on_hold);
       useExistingButton.hidden = promoted;
     }
+    const watchPhotosButton = $("watchIdeaPhotosButton");
+    if (watchPhotosButton) {
+      const waitStatus = String(idea?.photo_wait_status || "").trim();
+      watchPhotosButton.hidden = promoted;
+      watchPhotosButton.disabled = promoted || Boolean(idea?.is_on_hold) || waitStatus === "Waiting" || waitStatus === "Ready";
+      watchPhotosButton.textContent = waitStatus === "Waiting"
+        ? "Watching for photos"
+        : (waitStatus === "Ready" ? "Photos ready" : "Watch for photos");
+    }
     restoreIdeaLibraryPickerAfterDrawerUpdate(idea, pickerWasOpen ? {
       selected: preservedSelected,
       items: preservedItems,
@@ -2576,6 +2585,34 @@
   $("promoteCarouselImageMode")?.addEventListener("change", syncPromotionPanels);
   ["promoteVoiceover", "promoteVideoDuration", "promoteVoiceoverTail"].forEach((id) => {
     $(id)?.addEventListener("change", syncPromoteTimingHint);
+  });
+
+  $("watchIdeaPhotosButton")?.addEventListener("click", async () => {
+    if (!activeIdea?.id) return;
+    const button = $("watchIdeaPhotosButton");
+    button.disabled = true;
+    button.textContent = "Starting watch…";
+    setManageMessage("Watching the media library for strong matches…", "");
+    try {
+      const result = await api(`/api/ideas/${encodeURIComponent(activeIdea.id)}/watch-photos`, {
+        method: "POST",
+        body: JSON.stringify({}),
+      });
+      updateIdeaDrawer(result.record);
+      await Promise.all([loadIdeas(), loadDashboard(), loadProductionRequests()]);
+      const min = Number(result.photo_wait?.min || result.record?.carousel_slide_count_min || 0);
+      const max = Number(result.photo_wait?.max || result.record?.carousel_slide_count_max || 0);
+      if (result.photo_wait?.action === "ready") {
+        const matched = result.photo_wait?.selected?.length || result.record?.matched_media_asset_links?.length || 0;
+        setManageMessage(`Found ${matched} matching photo${matched === 1 ? "" : "s"}. The idea is now ready in Production for rules and approval.`, "success");
+      } else {
+        setManageMessage(`Photo watch is on. Studio will keep looking until it has at least ${min || "the minimum"} strong matches, using up to ${max || "the maximum"}.`, "success");
+      }
+    } catch (error) {
+      setManageMessage(error.message || "Could not start photo watch.", "error-text");
+      button.disabled = false;
+      button.textContent = "Watch for photos";
+    }
   });
 
   $("matchIdeaPhotosButton")?.addEventListener("click", async () => {
