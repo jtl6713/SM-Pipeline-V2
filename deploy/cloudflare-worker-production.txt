@@ -551,3 +551,5 @@ Finished-video hard cap six Worker deploy: 2026-09-20 — Concurrent plan-sync a
 2026-09-24 deploy Studio API automatic photo listening (PR #327).
 
 Recommend Carousel slides Worker deploy: 2026-09-25 - /plan infers slides from Master_Content_Type=Carousel and drops stale video overrides/Stories. Worker 0.10.376-recommend-carousel-slides.
+
+Miami Mary voice Pipeline Worker deploy: 2026-09-25 - Resolve narration from Production Request / Content Item / Content Profile before Kate fallback; stamp slide voice on AI carousel seed; clear legacy Voice=Kate when Mary/Hank is set. Worker 0.10.377-miami-mary-voice-pipeline.

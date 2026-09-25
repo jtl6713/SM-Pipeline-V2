@@ -240,7 +240,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.376-recommend-carousel-slides";
+  const BUILD_ID = "item4-0.6.377-miami-mary-voice-pipeline";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -13044,8 +13044,14 @@
     const defaultMotion = settings.default_motion || creativeSlides[0]?.motion?.type || "none";
     const defaultTransition = settings.default_transition || creativeSlides[0]?.transition?.type || "fade";
     const firstVoiceSlide = creativeSlides.find((s) => s.voiceover?.voice_id || s.voiceover?.voice);
-    const defaultVoiceId = settings.default_voice_id || firstVoiceSlide?.voiceover?.voice_id || creativeOptions.default_voice_id || "xVQH621DS3eyBYrseRt5";
-    const defaultVoiceName = settings.default_voice || firstVoiceSlide?.voiceover?.voice || "Kate";
+    const defaultVoiceId = settings.default_voice_id
+      || firstVoiceSlide?.voiceover?.voice_id
+      || creativeOptions.default_voice_id
+      || "xVQH621DS3eyBYrseRt5";
+    const defaultVoiceName = settings.default_voice
+      || firstVoiceSlide?.voiceover?.voice
+      || creativeOptions.default_voice
+      || "Kate";
     $("creativeDefaultMotion").innerHTML = phase6OptionList(creativeOptions.motions || [], defaultMotion, { label: phase6MotionLabel });
     $("creativeDefaultTransition").innerHTML = phase6OptionList(creativeOptions.transitions || [], defaultTransition, { label: phase6TransitionLabel });
     $("creativeDefaultVoice").innerHTML = phase6VoiceOptionList(creativeOptions.voices || [], defaultVoiceId, defaultVoiceName);

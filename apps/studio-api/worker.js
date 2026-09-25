@@ -428,7 +428,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.376-recommend-carousel-slides",
+          version: "0.10.377-miami-mary-voice-pipeline",
           studio_desk_inventory_v1: true,
           studio_desk_activity_v1: true,
           studio_tiktok_complete_v1: true,
@@ -12530,7 +12530,13 @@ async function syncProductionRequestDirectivesToContentItem(env, requestRecord, 
   if (requestedVoice.voice_id) {
     fields.Voice_ID = requestedVoice.voice_id;
     fields.Voice_Name = requestedVoice.voice_name;
-    if (requestedVoice.voice_choice) fields.Voice = requestedVoice.voice_choice;
+    if (requestedVoice.voice_choice) {
+      fields.Voice = requestedVoice.voice_choice;
+    } else {
+      // Legacy Voice is Kate/George only. Clear the Airtable default Kate when the
+      // authoritative voice is Mary/Hank/etc so Pipeline does not display the wrong name.
+      fields.Voice = null;
+    }
   }
 
   const contentItem = await airtableFetch(env, env.AIRTABLE_CONTENT_TABLE_ID, contentItemId, {
@@ -13517,6 +13523,7 @@ async function item4SeedAiCarouselSlides(env, parentId, requestRecord, needed, t
   const title = item4StudioThemeTitle(requestRecord, parentRecord)
     || String(f(requestRecord, "Production_Request_ID") || "Chicago").trim();
   const caption = String(f(requestRecord, "Requested_Caption") || "").trim();
+  const narration = phase6NarrationVoiceFromRequest(requestRecord, parentRecord);
   const created = [];
   for (let i = 0; i < missing; i += 1) {
     const n = afterLive.length + created.length + 1;
@@ -13534,6 +13541,8 @@ async function item4SeedAiCarouselSlides(env, parentId, requestRecord, needed, t
       "Image Generation Mode": "Make AI Generated",
       "Image Source": "Make AI Generated",
       "Content Item": [parentId],
+      Slide_Voice_ID: narration.voice_id || null,
+      Slide_Voice_Name: narration.voice_name || null,
     };
     if (theme?.caption) fields.Studio_Slide_Caption = theme.caption;
     const row = await airtableFetch(env, "Carousel Slides", "", {
@@ -22078,6 +22087,86 @@ const PHASE6_VOICES = ["Kate", "George"]; // legacy display fallback only
 const PHASE6_VOICE_CATALOG_TABLE = "ElevenLabs Voices";
 const PHASE6_DEFAULT_VOICE_ID = "xVQH621DS3eyBYrseRt5";
 const PHASE6_GEORGE_VOICE_ID = "JBFqnCBsd6RMkjVDRZzb";
+
+function phase6NarrationVoiceFallback(voiceId, voiceName) {
+  const id = String(voiceId || "").trim();
+  const name = String(voiceName || "").trim();
+  if (id) return { voice_id: id, voice_name: name || id };
+  return { voice_id: PHASE6_DEFAULT_VOICE_ID, voice_name: "Kate" };
+}
+
+/**
+ * Prefer Production Request / Content Item Voice_ID, then the Content Profile
+ * default narration voice (Miami=Mary). Do not fall through to Kate while those
+ * are present — Pipeline Open Review used to ignore them and show Kate.
+ */
+async function phase6ResolveNarrationVoice(env, outputRecord, parentRecord = null) {
+  const fromOutput = phase6NarrationVoiceFallback(
+    f(outputRecord || {}, "Voice_ID"),
+    f(outputRecord || {}, "Voice_Name")
+  );
+  if (fromOutput.voice_id && fromOutput.voice_id !== PHASE6_DEFAULT_VOICE_ID) return fromOutput;
+
+  let parent = parentRecord;
+  const parentId = studioFirstLinkedId(f(outputRecord || {}, "Content_Item"));
+  if (!parent && parentId) {
+    try {
+      parent = await airtableFetch(env, env.AIRTABLE_CONTENT_TABLE_ID, parentId);
+    } catch (error) {
+      console.warn("phase6ResolveNarrationVoice parent load failed", parentId, error);
+    }
+  }
+  if (parent) {
+    const fromParent = phase6NarrationVoiceFallback(f(parent, "Voice_ID"), f(parent, "Voice_Name"));
+    if (fromParent.voice_id && fromParent.voice_id !== PHASE6_DEFAULT_VOICE_ID) return fromParent;
+
+    const prId = studioFirstLinkedId(f(parent, "Production_Request"))
+      || studioFirstLinkedId(f(parent, "Production Requests"));
+    if (prId) {
+      try {
+        const requestRecord = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, prId);
+        const fromRequest = phase6NarrationVoiceFallback(
+          f(requestRecord, "Voice_ID"),
+          f(requestRecord, "Voice_Name")
+        );
+        if (fromRequest.voice_id && fromRequest.voice_id !== PHASE6_DEFAULT_VOICE_ID) return fromRequest;
+      } catch (error) {
+        console.warn("phase6ResolveNarrationVoice production request load failed", prId, error);
+      }
+    }
+
+    const profileId = studioFirstLinkedId(f(parent, "Content_Profile"));
+    if (profileId) {
+      try {
+        const profile = await airtableFetch(env, "Content Profiles", profileId);
+        const fromProfile = phase6NarrationVoiceFallback(
+          f(profile, "Default_Narration_Voice_ID"),
+          f(profile, "Default_Narration_Voice_Name")
+        );
+        if (fromProfile.voice_id) return fromProfile;
+      } catch (error) {
+        console.warn("phase6ResolveNarrationVoice profile load failed", profileId, error);
+      }
+    }
+
+    if (fromParent.voice_id) return fromParent;
+  }
+  return fromOutput.voice_id ? fromOutput : { voice_id: PHASE6_DEFAULT_VOICE_ID, voice_name: "Kate" };
+}
+
+function phase6NarrationVoiceFromRequest(requestRecord, parentRecord = null) {
+  const fromRequest = phase6NarrationVoiceFallback(
+    f(requestRecord || {}, "Voice_ID"),
+    f(requestRecord || {}, "Voice_Name")
+  );
+  if (fromRequest.voice_id && fromRequest.voice_id !== PHASE6_DEFAULT_VOICE_ID) return fromRequest;
+  const fromParent = phase6NarrationVoiceFallback(
+    f(parentRecord || {}, "Voice_ID"),
+    f(parentRecord || {}, "Voice_Name")
+  );
+  if (fromParent.voice_id && fromParent.voice_id !== PHASE6_DEFAULT_VOICE_ID) return fromParent;
+  return fromRequest.voice_id ? fromRequest : (fromParent.voice_id ? fromParent : { voice_id: PHASE6_DEFAULT_VOICE_ID, voice_name: "Kate" });
+}
 const PHASE6_P0202_SCENARIO_ID = 5893683;
 const PHASE6_R2_SCENARIO_ID = 5569495;
 const PHASE6_R3_SCENARIO_ID = 5557966;
@@ -22210,12 +22299,31 @@ function phase6SlidePreviewUrl(slide, ratio) {
     f(slide, "Current Image URL") || f(slide, "AI Image URL") || null;
 }
 
-function mapPhase6CreativeSlide(slide, targetRatio = null, defaultVoiceoverVolume = 1, platform = "") {
+function mapPhase6CreativeSlide(slide, targetRatio = null, defaultVoiceoverVolume = 1, platform = "", preferredVoice = null) {
   const directives = phase6ParseJson(f(slide, "Creative_Directives_JSON"), {}) || {};
   const overlay = directives.overlay && typeof directives.overlay === "object" ? directives.overlay : {};
   const voiceover = directives.voiceover && typeof directives.voiceover === "object" ? directives.voiceover : {};
   const motion = directives.motion && typeof directives.motion === "object" ? directives.motion : {};
   const transition = directives.transition && typeof directives.transition === "object" ? directives.transition : {};
+  const preferredId = String(preferredVoice?.voice_id || "").trim();
+  const preferredName = String(preferredVoice?.voice_name || "").trim();
+  const legacyName = String(f(slide, "Slide_Voice") || phase6Text(voiceover.voice, 80) || "").trim().toLowerCase();
+  const slideVoiceId = String(
+    f(slide, "Slide_Voice_ID")
+    || phase6Text(voiceover.voiceId, 120)
+    || ""
+  ).trim();
+  const resolvedVoiceId = slideVoiceId
+    || preferredId
+    || (legacyName === "george" ? PHASE6_GEORGE_VOICE_ID : "")
+    || PHASE6_DEFAULT_VOICE_ID;
+  const resolvedVoiceName = String(
+    f(slide, "Slide_Voice_Name")
+    || f(slide, "Slide_Voice")
+    || phase6Text(voiceover.voice, 120)
+    || preferredName
+    || (resolvedVoiceId === PHASE6_GEORGE_VOICE_ID ? "George" : resolvedVoiceId === PHASE6_DEFAULT_VOICE_ID ? "Kate" : resolvedVoiceId)
+  ).trim() || "Kate";
   const variants = {
     "4:5": phase6VariantForRatio(slide, "4:5"),
     "9:16": phase6VariantForRatio(slide, "9:16"),
@@ -22256,8 +22364,8 @@ function mapPhase6CreativeSlide(slide, targetRatio = null, defaultVoiceoverVolum
     voiceover: {
       enabled: voiceover.enabled !== false && String(f(slide, "Slide_Voiceover_Status") || "") !== "Not Requested",
       text: f(slide, "Slide_Voiceover_Text") || phase6Text(voiceover.text, 5000),
-      voice_id: f(slide, "Slide_Voice_ID") || phase6Text(voiceover.voiceId, 120) || (String(f(slide, "Slide_Voice") || phase6Text(voiceover.voice, 80)).toLowerCase() === "george" ? PHASE6_GEORGE_VOICE_ID : PHASE6_DEFAULT_VOICE_ID),
-      voice: f(slide, "Slide_Voice_Name") || f(slide, "Slide_Voice") || phase6Text(voiceover.voice, 120) || "Kate",
+      voice_id: resolvedVoiceId,
+      voice: resolvedVoiceName,
       url: f(slide, "Slide_Voiceover_URL"),
       duration_seconds: f(slide, "Slide_Voiceover_Duration_Seconds"),
       status: f(slide, "Slide_Voiceover_Status"),
@@ -22280,11 +22388,14 @@ function mapPhase6CreativeSlide(slide, targetRatio = null, defaultVoiceoverVolum
   };
 }
 
-function phase6VirtualSlidesFromSelectedAssets(outputRecord) {
+function phase6VirtualSlidesFromSelectedAssets(outputRecord, preferredVoice = null) {
   const parsed = phase6ParseJson(f(outputRecord, "Selected_Assets_JSON"), null) || {};
   const clips = selectedVisualClips(outputRecord);
   const ratio = String(f(outputRecord, "Aspect_Ratio") || "").trim() || null;
   const fps = Number(parsed.fps || 30) || 30;
+  const narration = preferredVoice?.voice_id
+    ? preferredVoice
+    : phase6NarrationVoiceFallback(f(outputRecord, "Voice_ID"), f(outputRecord, "Voice_Name"));
   return clips.map((clip, index) => {
     const url = clip.url || clip.src || clip.google_drive_url || null;
     const durationFrames = Number(clip.durationFrames || clip.duration_frames || 0);
@@ -22330,8 +22441,8 @@ function phase6VirtualSlidesFromSelectedAssets(outputRecord) {
         return {
           enabled: itemVoiceoverOn,
           text: "",
-          voice_id: PHASE6_DEFAULT_VOICE_ID,
-          voice: String(f(outputRecord, "Voice_Name") || "Kate"),
+          voice_id: narration.voice_id || PHASE6_DEFAULT_VOICE_ID,
+          voice: narration.voice_name || String(f(outputRecord, "Voice_Name") || "Kate"),
           url: itemVoiceoverUrl || null,
           duration_seconds: null,
           status: itemVoiceoverUrl ? "Item voiceover" : (itemVoiceoverOn ? "Requested" : "Not Requested"),
@@ -22354,14 +22465,15 @@ function phase6VirtualSlidesFromSelectedAssets(outputRecord) {
   }).sort((a, b) => Number(a.order || 0) - Number(b.order || 0));
 }
 
-async function phase6SlidesForOutput(env, outputRecord) {
+async function phase6SlidesForOutput(env, outputRecord, preferredVoice = null) {
+  const narration = preferredVoice || await phase6ResolveNarrationVoice(env, outputRecord);
   const ids = Array.isArray(f(outputRecord, "Carousel Slides")) ? f(outputRecord, "Carousel Slides") : [];
-  if (!ids.length) return phase6VirtualSlidesFromSelectedAssets(outputRecord);
+  if (!ids.length) return phase6VirtualSlidesFromSelectedAssets(outputRecord, narration);
   const records = await Promise.all(ids.map(id => airtableFetch(env, PHASE6_CAROUSEL_SLIDES_TABLE, id)));
   const ratio = String(f(outputRecord, "Aspect_Ratio") || "").trim() || null;
   const platform = String(f(outputRecord, "Platform") || "").trim();
   const defaultVoiceoverVolume = phase6ResolvedVoiceoverVolume(outputRecord);
-  return records.map(record => mapPhase6CreativeSlide(record, ratio, defaultVoiceoverVolume, platform))
+  return records.map(record => mapPhase6CreativeSlide(record, ratio, defaultVoiceoverVolume, platform, narration))
     .sort((a, b) => Number(a.order || 0) - Number(b.order || 0));
 }
 
@@ -22763,8 +22875,9 @@ async function getOutputCreative(request, env, url, authorization) {
   const id = phase6RecordIdFromPath(url);
   const record = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, id);
   const output = mapPhase6CreativeOutput(record);
+  const narration = await phase6ResolveNarrationVoice(env, record);
   const [slides, voiceCatalog] = await Promise.all([
-    phase6SlidesForOutput(env, record),
+    phase6SlidesForOutput(env, record, narration),
     phase6VoiceCatalog(env),
   ]);
   const handoff = phase6CreativeHandoffStatus(record, slides);
@@ -22787,7 +22900,8 @@ async function getOutputCreative(request, env, url, authorization) {
       voice_catalog_live: voiceCatalog.live_connected,
       voice_catalog_configured: voiceCatalog.live_configured,
       voice_catalog_error: voiceCatalog.live_error,
-      default_voice_id: voiceCatalog.default_voice_id,
+      default_voice_id: narration.voice_id || voiceCatalog.default_voice_id,
+      default_voice: narration.voice_name || "Kate",
       ratio_canvases: {"9:16":"1080x1920","4:5":"1080x1350","1:1":"1080x1080","16:9":"1920x1080"},
     },
     safety: {
