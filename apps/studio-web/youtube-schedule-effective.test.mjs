@@ -20,6 +20,6 @@ test("ops schedule form locks the exact operator time", () => {
 });
 
 test("build id and cache bust for yt schedule thumb handoff", () => {
-  assert.match(app, /BUILD_ID = "item4-0\.6\.381-production-unlimited-assets"/);
-  assert.match(html, /app-item4-0625\.js\?v=0\.6\.381-production-unlimited-assets/);
+  assert.match(app, /BUILD_ID = "item4-0\.6\.382-display-text-repair-scope"/);
+  assert.match(html, /app-item4-0625\.js\?v=0\.6\.382-display-text-repair-scope/);
 });
