@@ -34,3 +34,11 @@ test("live Studio JS renders output title in the recent-outputs list", () => {
   assert.ok(build);
   assert.match(html, new RegExp(`app-item4-0625\\.js\\?v=${build.replace(/[.*+?^${}()|[\\]\\]/g, "\\$&")}`));
 });
+
+test("creative editor heading shows platform, output number, and title with bullets", () => {
+  assert.match(app, /function creativeEditorOutputHeading\(output = \{\}\)/);
+  assert.match(app, /output\?\.output_title \|\| output\?\.content_title/);
+  assert.match(app, /return parts\.join\(" • "\)/);
+  assert.match(app, /creativeEditorTitle"\)\.textContent = creativeEditorOutputHeading\(output\)/);
+});
+

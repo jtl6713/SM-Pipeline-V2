@@ -240,7 +240,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.382-display-text-repair-scope";
+  const BUILD_ID = "item4-0.6.383-creative-output-heading";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -13285,6 +13285,16 @@
     fallbackToDrive();
   }
 
+  function creativeEditorOutputHeading(output = {}) {
+    const platform = String(output?.platform || "Creative review").trim() || "Creative review";
+    const outputId = String(output?.output_id ?? "").trim();
+    const title = String(output?.output_title || output?.content_title || "").trim();
+    const parts = [platform];
+    if (outputId) parts.push(`Output ${outputId}`);
+    if (title) parts.push(title);
+    return parts.join(" • ");
+  }
+
   function populateCreativeEditor(data) {
     activeCreativeOutput = data.output || null;
     creativeSlides = Array.isArray(data.slides) ? data.slides : [];
@@ -13292,7 +13302,7 @@
     creativeTitleLock = data.title_lock || data.output?.creative_settings?.title_lock || null;
     const output = activeCreativeOutput || {};
     const titleLocked = Boolean(creativeTitleLock?.locked);
-    $("creativeEditorTitle").textContent = `Output ${output.output_id ?? ""} · ${output.platform || "Creative review"}`;
+    $("creativeEditorTitle").textContent = creativeEditorOutputHeading(output);
     $("creativeEditorSubtitle").textContent = `${creativeIsFinishedVideo(output) ? "Uploaded video" : (output.platform_output_type || output.format || "Photo sequence")}${output.aspect_ratio ? ` · ${output.aspect_ratio}` : ""} · creative review`;
     $("creativeSafetyBadge").textContent = output.do_not_publish
       ? (titleLocked ? "Titles locked" : "Publishing locked")
