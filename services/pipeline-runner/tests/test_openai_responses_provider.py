@@ -107,6 +107,10 @@ def test_account_switch_changes_provider_without_stage_changes(monkeypatch, open
         return _Response()
 
     monkeypatch.setattr("openai_responses.requests.post", fake_post)
+    monkeypatch.setattr(
+        "ai_api_router.get_preferred_account",
+        lambda settings, override=None: str(settings.get("openai_account") or "PRIMARY"),
+    )
 
     openai_env(account="PRIMARY")
     generate_ideas("primary prompt")
