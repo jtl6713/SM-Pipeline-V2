@@ -428,7 +428,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.377-miami-mary-voice-pipeline",
+          version: "0.10.378-idea-auto-photo-listen",
           studio_desk_inventory_v1: true,
           studio_desk_activity_v1: true,
           studio_tiktok_complete_v1: true,
@@ -18321,14 +18321,14 @@ function ideaPhotoWatchRange(idea, contentType) {
 }
 
 function ideaPhotoAutoListenContentType(idea) {
-  // Automatic listening is intentionally limited to still-first formats.
-  // It scans only Studio Media Assets already uploaded by the user; it never
-  // accesses a device photo library or camera roll.
+  // Generated media ideas listen only to Studio Media Assets already uploaded
+  // by the user; this never accesses a device photo library or camera roll.
+  const supported = ["Carousel", "Photo Set", "Feed Post", "Vertical Short Video"];
   const configured = String(f(idea, "Production_Content_Type") || "").trim();
-  if (["Carousel", "Photo Set", "Feed Post"].includes(configured)) return configured;
+  if (supported.includes(configured)) return configured;
   const suggested = arrayOrEmpty(f(idea, "Suggested_Format"))
     .map((value) => String(value || "").trim())
-    .find((value) => ["Carousel", "Photo Set", "Feed Post"].includes(value));
+    .find((value) => supported.includes(value));
   return suggested || null;
 }
 
@@ -18714,10 +18714,14 @@ async function runWaitingIdeaPhotoMatches(env, { limit = 8 } = {}) {
     limit: Math.max(1, Number(limit) || 8),
     filterFormula: "AND({Studio_Photo_Wait_Status}='Waiting',{Promoted_Content_Record_ID}=BLANK(),{Candidate_Status}!='On Hold')",
   });
+  const authorization = records.length ? await resolveStudioCronAuthorization(env) : null;
   const results = [];
   for (const idea of records) {
     try {
-      results.push(await evaluateAndMaybeAttachWaitingIdeaPhotos(env, idea, { force: false }));
+      results.push(await evaluateAndMaybeAttachWaitingIdeaPhotos(env, idea, {
+        authorization,
+        force: false,
+      }));
     } catch (error) {
       console.warn("idea photo-wait evaluate failed", idea.id, error);
       results.push({ action: "error", idea_id: idea.id, error: error?.message || String(error) });
@@ -32410,6 +32414,49 @@ async function startStudioIdeaGeneration(request, env, authorization, ctx = null
     );
   }
 
+  const createdIds = Array.isArray(run.created_record_ids)
+    ? run.created_record_ids.map((id) => String(id || "").trim()).filter((id) => /^rec[A-Za-z0-9]+$/.test(id))
+    : [];
+  const photoListening = [];
+  for (const ideaId of createdIds) {
+    try {
+      let idea = await airtableFetch(env, env.AIRTABLE_IDEA_TABLE_ID, ideaId);
+      const contentType = ideaPhotoAutoListenContentType(idea);
+      if (!contentType) continue;
+      let waitStatus = String(f(idea, "Studio_Photo_Wait_Status") || "").trim();
+      if (!waitStatus && !ideaHasExplicitPhotoProductionConfig(idea)) {
+        const range = ideaPhotoWatchRange(idea, contentType);
+        idea = await airtableFetch(env, env.AIRTABLE_IDEA_TABLE_ID, idea.id, {
+          method: "PATCH",
+          body: JSON.stringify({
+            fields: {
+              Production_Content_Type: contentType,
+              Production_Carousel_Image_Mode: "Manual Upload",
+              Production_Carousel_Slide_Count_Mode: "Target range",
+              Production_Carousel_Slide_Count_Min: range.min,
+              Production_Carousel_Slide_Count_Max: range.max,
+              Production_Carousel_Slide_Count: range.max,
+              Studio_Photo_Wait_Status: "Waiting",
+            },
+            typecast: true,
+          }),
+        });
+        waitStatus = "Waiting";
+      }
+      if (!["Waiting", "Ready"].includes(waitStatus)) continue;
+      const draft = await existingDraftForIdea(env, idea.id, authorization)
+        || await createDraftForIdea(env, idea, authorization);
+      photoListening.push(await evaluateAndMaybeAttachWaitingIdeaPhotos(env, idea, {
+        authorization,
+        force: false,
+        productionRequest: draft,
+      }));
+    } catch (error) {
+      console.warn("generated idea automatic photo listening failed", ideaId, error);
+      photoListening.push({ action: "error", idea_id: ideaId, error: error?.message || String(error) });
+    }
+  }
+
   return respond(request, env, {
     ok: true,
     accepted: true,
@@ -32420,7 +32467,9 @@ async function startStudioIdeaGeneration(request, env, authorization, ctx = null
     quality,
     profile_record_id: profile.id,
     backend: "python",
-    message: `${created} idea${created === 1 ? "" : "s"} created.`,
+    photo_listening_started: photoListening.filter((row) => row.action !== "error").length,
+    photo_matches_ready: photoListening.filter((row) => row.action === "ready").length,
+    message: `${created} idea${created === 1 ? "" : "s"} created. Photo-capable ideas are listening automatically.`,
   }, 200);
 }
 
