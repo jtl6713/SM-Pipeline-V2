@@ -3445,11 +3445,11 @@
     const parsed = ezPlanApi()?.parseEzOriginNotes?.(record?.production_notes || "");
     if (parsed?.inputKind === "single-ai") return 1;
     if (parsed?.inputKind === "mixed" && Number(parsed?.aiCount) > 0) {
-      return Math.max(1, Math.min(20, Math.round(Number(parsed.aiCount))));
+      return Math.max(1, Math.round(Number(parsed.aiCount)));
     }
     const exact = Number(record?.carousel_slide_count_exact || $("ezCarouselSlideExact")?.value || 0);
-    if (Number.isFinite(exact) && exact > 0) return Math.max(1, Math.min(20, Math.round(exact)));
-    if (Number(parsed?.aiCount) > 0) return Math.max(1, Math.min(20, Math.round(Number(parsed.aiCount))));
+    if (Number.isFinite(exact) && exact > 0) return Math.max(1, Math.round(exact));
+    if (Number(parsed?.aiCount) > 0) return Math.max(1, Math.round(Number(parsed.aiCount)));
     return parsed?.inputKind === "multiple-ai" ? 5 : 1;
   }
 
@@ -3466,25 +3466,28 @@
     const hint = $("item4AiGenerationHint");
     const generate = $("item4GenerateAiImages");
     const regenerate = $("item4RegenerateAiImages");
+    const quantity = $("item4AiAddCount");
     if (!panel) return;
-    const active = item4AiGenerationRequestActive(activeProductionRequest);
-    panel.hidden = !active;
-    if (!active) return;
-    const count = item4AiRequestedCount(activeProductionRequest);
+    const editable = Boolean(activeProductionRequest?.id) && item4RequestEditable(activeProductionRequest);
+    panel.hidden = !editable;
+    if (!editable) return;
+    const automatic = item4AiGenerationRequestActive(activeProductionRequest);
+    const suggested = item4AiRequestedCount(activeProductionRequest);
     const assets = Array.isArray(status?.assets) ? status.assets : [];
     const aiAssets = assets.filter((asset) => /^studio_ai/i.test(String(asset?.source || "")));
-    if (title) title.textContent = aiAssets.length ? "AI images" : "Generate AI images";
+    if (title) title.textContent = aiAssets.length ? "Add more AI images" : "Generate AI images";
     if (hint) {
       hint.textContent = item4AiGenerationInFlight
-        ? `Generating ${Math.min(aiAssets.length + 1, count)} of ${count}…`
-        : aiAssets.length >= count
-          ? `${aiAssets.length} AI image${aiAssets.length === 1 ? "" : "s"} ready. Review them below before approval.`
-          : `${aiAssets.length} of ${count} AI images ready. Studio can generate the rest now.`;
+        ? "Generating AI images one at a time…"
+        : automatic && aiAssets.length < suggested
+          ? `${aiAssets.length} AI image${aiAssets.length === 1 ? "" : "s"} ready. The initial structure suggests ${suggested}, but that does not limit the Production asset pool.`
+          : `${aiAssets.length} AI image${aiAssets.length === 1 ? "" : "s"} in the asset pool. Add any quantity; the structure is only a recommendation.`;
     }
+    if (quantity) quantity.disabled = item4AiGenerationInFlight;
     if (generate) {
-      generate.hidden = aiAssets.length >= count;
+      generate.hidden = false;
       generate.disabled = item4AiGenerationInFlight;
-      generate.textContent = item4AiGenerationInFlight ? "Generating…" : (aiAssets.length ? "Generate remaining" : "Generate AI images");
+      generate.textContent = item4AiGenerationInFlight ? "Generating…" : "Generate AI images";
     }
     if (regenerate) {
       regenerate.hidden = aiAssets.length === 0;
@@ -3492,19 +3495,41 @@
     }
   }
 
-  async function generateItem4AiImages({ reset = false, automatic = false } = {}) {
-    if (!activeProductionRequest?.id || item4AiGenerationInFlight || !item4AiGenerationRequestActive(activeProductionRequest)) return;
+  async function generateItem4AiImages({ reset = false, automatic = false, addCount = null, replaceCount = null } = {}) {
+    if (!activeProductionRequest?.id || item4AiGenerationInFlight) return;
     const requestId = activeProductionRequest.id;
-    const target = item4AiRequestedCount(activeProductionRequest);
+    const assets = Array.isArray(item4Workspace?.assets) ? item4Workspace.assets : [];
+    const currentAiCount = assets.filter((asset) => /^studio_ai/i.test(String(asset?.source || ""))).length;
+    const requestedAdditional = addCount == null ? null : Math.round(Number(addCount));
+    const requestedReplacement = replaceCount == null ? null : Math.round(Number(replaceCount));
+    if (requestedAdditional != null && (!Number.isFinite(requestedAdditional) || requestedAdditional < 1)) {
+      setRequestMessage("Enter at least 1 AI image to generate.", "error-text");
+      return;
+    }
+    const target = automatic
+      ? item4AiRequestedCount(activeProductionRequest)
+      : requestedReplacement != null
+        ? requestedReplacement
+        : currentAiCount + (requestedAdditional || 1);
+    if (!Number.isFinite(target) || target < 1) {
+      setRequestMessage("Enter at least 1 AI image to generate.", "error-text");
+      return;
+    }
     item4AiGenerationInFlight = true;
     syncItem4AiGenerationUi(item4Workspace);
-    setRequestMessage(automatic ? `Generating ${target} AI images…` : `Generating AI images…`, "success");
+    const batchLabel = automatic
+      ? `Generating the suggested ${target} AI images…`
+      : `Generating ${requestedReplacement != null ? requestedReplacement : (requestedAdditional || 1)} AI image${(requestedReplacement != null ? requestedReplacement : (requestedAdditional || 1)) === 1 ? "" : "s"}…`;
+    setRequestMessage(batchLabel, "success");
     let first = true;
     try {
       for (let guard = 0; guard < target + 2; guard += 1) {
         const result = await api(`/api/production-requests/${encodeURIComponent(requestId)}/generate-ai-masters`, {
           method: "POST",
-          body: JSON.stringify({ reset: Boolean(reset && first) }),
+          body: JSON.stringify({
+            reset: Boolean(reset && first),
+            target_ai_count: target,
+          }),
           timeoutMs: 120000,
           retries: 0,
         });
@@ -3524,7 +3549,7 @@
         const requested = Number(result?.requested_count || target);
         setRequestMessage(
           result?.completed
-            ? `${done} AI image${done === 1 ? "" : "s"} ready. Review them below, then approve when you are happy.`
+            ? `${done} AI image${done === 1 ? "" : "s"} now in the Production asset pool.`
             : `Generating AI images… ${done} of ${requested} ready.`,
           "success"
         );
@@ -3557,15 +3582,7 @@
     const grid = $("item4MediaKindGrid");
     const hint = $("item4MediaKindHint");
     const zone = $("item4UploadZone");
-    const aiMode = item4AiGenerationRequestActive(activeProductionRequest);
-    const aiOnly = item4AiOnlyRequestActive(activeProductionRequest);
     syncItem4AiGenerationUi(item4Workspace);
-    if (aiOnly) {
-      if (grid) grid.hidden = true;
-      if (hint) hint.hidden = true;
-      if (zone) zone.hidden = true;
-      return;
-    }
     const assetCount = Array.isArray(item4Workspace?.assets) ? item4Workspace.assets.length : 0;
     const hasAssets = assetCount > 0;
     const parsed = ezPlanApi()?.parseEzOriginNotes(activeProductionRequest?.production_notes);
@@ -8998,11 +9015,16 @@
     });
   }
 
-  $("item4GenerateAiImages")?.addEventListener("click", () => generateItem4AiImages({ automatic: false }));
+  $("item4GenerateAiImages")?.addEventListener("click", () => {
+    const count = Math.round(Number($("item4AiAddCount")?.value || 1));
+    generateItem4AiImages({ automatic: false, addCount: count });
+  });
   $("item4RegenerateAiImages")?.addEventListener("click", () => {
-    const count = item4AiRequestedCount(activeProductionRequest);
-    if (!window.confirm(`Regenerate all ${count} AI images? The current AI images will be replaced.`)) return;
-    generateItem4AiImages({ reset: true, automatic: false });
+    const assets = Array.isArray(item4Workspace?.assets) ? item4Workspace.assets : [];
+    const count = assets.filter((asset) => /^studio_ai/i.test(String(asset?.source || ""))).length;
+    if (!count) return;
+    if (!window.confirm(`Regenerate all ${count} AI images? The current AI-generated images will be replaced; uploaded and library assets will stay.`)) return;
+    generateItem4AiImages({ reset: true, automatic: false, replaceCount: count });
   });
 
   async function buildItem4Plan() {
@@ -9993,7 +10015,9 @@
   }
 
   function libraryPickerMaxCount() {
-    return 60;
+    // The Production asset pool has no product-level quantity ceiling.
+    // This value is used only while seeding suggested library selections.
+    return Number.POSITIVE_INFINITY;
   }
 
   async function fetchLibraryBrowse(query = "", ideaId = null) {
