@@ -69,7 +69,18 @@ export function capFinishedPlanItems(items) {
 export function shouldCreateFinishedOutput(existingKeys, wantedKey) {
   const key = String(wantedKey || "").trim();
   if (!key || !FINISHED_DESTINATION_KEYS.includes(key)) return false;
-  const live = new Set((existingKeys || []).map((item) => String(item || "").trim()).filter(Boolean));
+  // Airtable/worker callers can return a single key, Set, object, or null here.
+  // Normalize before iterating so finished-video promotion can never fail on .map().
+  const rows = Array.isArray(existingKeys)
+    ? existingKeys
+    : existingKeys instanceof Set
+      ? [...existingKeys]
+      : existingKeys == null || existingKeys === ""
+        ? []
+        : typeof existingKeys === "object"
+          ? Object.values(existingKeys)
+          : [existingKeys];
+  const live = new Set(rows.map((item) => String(item || "").trim()).filter(Boolean));
   if (live.has(key)) return false;
   return live.size < AZ_EXPECTED_OUTPUT_COUNT;
 }
