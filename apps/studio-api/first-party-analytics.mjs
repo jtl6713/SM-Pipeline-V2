@@ -87,7 +87,7 @@ export function normalizeAnalyticsSnapshot(platform, raw = {}, context = {}) {
 export function nativePlatformId(platform, fields = {}) {
   const name = String(platform || fields.Platform || "").toLowerCase();
   if (name === "youtube") return String(fields.YouTube_Video_ID || fields.Platform_Post_ID || fields.Platform_Media_ID || "").trim() || null;
-  if (name === "instagram") return String(fields.Platform_Media_ID || fields.Platform_Post_ID || fields.IG_Carousel_Published_Media_ID || fields.IG_Story_Post_ID || "").trim() || null;
+  if (name === "instagram") return String(fields.IG_Carousel_Published_Media_ID || fields.IG_Story_Post_ID || fields.Platform_Post_ID || fields.Platform_Media_ID || "").trim() || null;
   if (name === "facebook") return String(fields.FB_Slideshow_Meta_Video_ID || fields.Platform_Post_ID || fields.Platform_Media_ID || "").trim() || null;
   if (name === "tiktok") {
     const direct = String(fields.Platform_Post_ID || fields.Platform_Media_ID || fields.Manual_Published_URL || "").trim();
