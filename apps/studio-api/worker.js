@@ -428,7 +428,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.381-production-unlimited-assets",
+          version: "0.10.381-nonchicago-insights-connections",
           studio_desk_inventory_v1: true,
           studio_desk_activity_v1: true,
           studio_tiktok_complete_v1: true,
@@ -16189,15 +16189,22 @@ async function getInsightsConnections(request, env, url, authorization) {
         const ig = await studioInsightsMetaIdentity(settings.INSTAGRAM_BUSINESS_ACCOUNT_ID, token, version, "id,username,name");
         result.instagram.account_name = ig?.username ? "@" + ig.username : (ig?.name || null);
         result.instagram.account_id = ig?.id || settings.INSTAGRAM_BUSINESS_ACCOUNT_ID;
+        result.instagram.status = "connected";
+        // Account identity is the authorization proof. A single historical output
+        // can contain a container/legacy media ID that is no longer queryable; that
+        // must not paint the whole account as unauthorized.
         const sample = recentOutputForPlatform("Instagram");
         if (sample) {
-          await fetchInstagramOwnedMediaAnalytics({
-            postId: nativePlatformId("Instagram", studioOutputNativeIdFields(sample)),
-            token,
-            version,
-          });
+          try {
+            await fetchInstagramOwnedMediaAnalytics({
+              postId: nativePlatformId("Instagram", studioOutputNativeIdFields(sample)),
+              token,
+              version,
+            });
+          } catch (sampleError) {
+            result.instagram.sync_warning = sanitizeAnalyticsError(sampleError);
+          }
         }
-        result.instagram.status = "connected";
       } catch (error) {
         Object.assign(result.instagram, studioInsightsConnectionStateFromError(error));
       }
@@ -16217,6 +16224,11 @@ async function getInsightsConnections(request, env, url, authorization) {
             ...(secret ? { "X-SM-Pipeline-Key": secret } : {}),
           },
         });
+        if (response.status === 404) {
+          result.youtube.status = "error";
+          result.youtube.error = "YouTube uploader is reachable but is running an older build without /youtube/oauth/status. Sync and restart this profile's uploader service.";
+          return;
+        }
         const body = await studioInsightsSafeJson(response);
         result.youtube.account_name = body?.channel_title || null;
         result.youtube.account_id = body?.channel_id || result.youtube.account_id;
