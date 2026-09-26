@@ -8,7 +8,7 @@ from studio_produce.job import derive_route, finished_origin_kind, is_finished_r
 from studio_produce.queue import master_transfer_id, rebuild_variant_manifest, required_ratios, ratios_for_asset, variant_transfer_id
 from studio_produce.media import asset_is_video, playable_url, remotion_clip_url
 from studio_produce.queue import rebuild_variant_manifest
-from studio_produce.stamp import assign_clip_frames, finished_source_package, is_native_photo, photo_sequence_url, source_package, stamp_fields
+from studio_produce.stamp import assign_clip_frames, duration_seconds, finished_source_package, is_native_photo, output_effective, photo_sequence_url, source_package, stamp_fields
 from studio_produce.steps import (
     _is_delay_render_failure,
     pick_resume_step,
@@ -963,3 +963,34 @@ def test_finished_thumbnail_prompt_prefers_gold_lettering():
     assert COLORFUL_3D_RULE in prompt
     assert "restrained gold" in prompt
     assert "chrome" in prompt.lower()
+
+
+def test_legacy_output_effective_keeps_parent_preferred_music_url():
+    parent = {
+        "fields": {
+            "Preferred_Music_URL": "https://drive.example/music.mp3",
+            "Include_Voiceover": "Yes",
+            "Voiceover_Duration_Seconds": 32.28,
+        }
+    }
+    request = {"fields": {"Voiceover_Mode": "Yes", "Background_Music_Mode": "Yes", "Video_Duration_Seconds": 30}}
+    output = {"fields": {"Studio_Effective_Voiceover_Mode": "Yes", "Studio_Effective_Background_Music_Mode": "Yes"}}
+    effective = output_effective(output, request, parent)
+    assert effective["music_url"] == "https://drive.example/music.mp3"
+    assert effective["voiceover_duration_seconds"] == 32.28
+
+
+def test_duration_extends_requested_video_to_voiceover_plus_tail():
+    effective = {
+        "voiceover_mode": "Yes",
+        "video_duration_seconds": 30,
+        "voiceover_duration_seconds": 32.28,
+        "voiceover_tail_seconds": 2,
+    }
+    assert duration_seconds(
+        story=False,
+        clip_count=10,
+        effective=effective,
+        request={"fields": {"Video_Duration_Seconds": 30}},
+        output={"fields": {}},
+    ) == 34.3
