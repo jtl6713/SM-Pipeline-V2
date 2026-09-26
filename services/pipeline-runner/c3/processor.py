@@ -6,7 +6,7 @@ from typing import Any
 
 from airtable.client import AirtableClient
 from airtable.constants import CAROUSEL_SLIDES_TABLE, CONTENT_ITEMS_TABLE
-from c3.constants import MAKE_SCENARIO_ID, MAKE_SCENARIO_NAME, SLIDES_TABLE_URL
+from c3.constants import C3_EMAIL_ENABLED, MAKE_SCENARIO_ID, MAKE_SCENARIO_NAME, SLIDES_TABLE_URL
 from c3.email_builder import review_email_html, review_subject
 from carousel.constants import DEFAULT_C3_EMAIL_TO, SETTING_C3B_REVIEW_URL
 from carousel.mapping import c3_include_slide
@@ -57,6 +57,8 @@ def process_request(
         return {"processed": False, "reason": "test_mode_email_suppressed", **preview}
     if dry_run:
         return {"processed": False, "dry_run": True, **preview}
+    if not C3_EMAIL_ENABLED:
+        return {"processed": False, "reason": "email_disabled", **preview}
 
     review_url = _review_url()
     if not review_url:

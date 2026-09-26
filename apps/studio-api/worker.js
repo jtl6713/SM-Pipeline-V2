@@ -428,7 +428,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.378-idea-auto-photo-listen",
+          version: "0.10.379-branch-reconcile",
           studio_desk_inventory_v1: true,
           studio_desk_activity_v1: true,
           studio_tiktok_complete_v1: true,
@@ -32410,7 +32410,7 @@ async function startStudioIdeaGeneration(request, env, authorization, ctx = null
         profile_record_id: profile.id,
         requested_count: count,
         quality,
-        trigger_i2: true,
+        trigger_i2: false,
       },
     }, "I1");
   } catch (error) {

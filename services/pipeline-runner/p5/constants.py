@@ -1,3 +1,5 @@
+# Asset-needs reminders stay in Studio / Airtable. Do not send P5 Gmail.
+P5_EMAIL_ENABLED = False
 MAKE_SCENARIO_ID = 5536624
 MAKE_SCENARIO_NAME = "P5 - Open Asset Needs Reminder - Daisy Chain v1"
 MAKE_HOOK_ID = 2567869

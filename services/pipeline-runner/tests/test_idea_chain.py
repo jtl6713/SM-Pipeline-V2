@@ -177,7 +177,6 @@ def test_i1_does_not_chain_i2_when_email_disabled(monkeypatch):
         "generate_ideas",
         lambda _prompt: {"parsed": {"ideas": [{"candidate_title": "Riverwalk at dusk"}]}},
     )
-    monkeypatch.setattr(i1p, "load_settings", lambda: {"i2_email_enabled": False})
     monkeypatch.setattr(i1p, "trigger_next", boom_trigger)
 
     result = i1p.process_request(profile_record_id="recPROFILE", trigger_i2=True)

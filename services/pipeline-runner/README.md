@@ -28,10 +28,10 @@ Python stage workers that replace Make.com scenarios for SM Pipeline V2.
 | **RR2** | Full (`5576353` — review decision webhook) | `STAGE_BACKEND_RR2=python` |
 | **R2B** | Full (`5576620` — retry asset selection, max 10) | `STAGE_BACKEND_R2B=python` |
 | **P4** | Full (`5533802` — asset-need coverage) | `STAGE_BACKEND_P4=python`; R2 calls Python in-process |
-| **P5** | Full (`5536624` — open-shot reminder email) | `STAGE_BACKEND_P5=python`; P4 daisy-chains Python P5 |
+| **P5** | Full (`5536624` — open-shot reminder email) | Disabled — no Gmail; shots stay in Airtable |
 | **SAI1** | Full (`6023816` — Studio AI slide themer, request/response) | `STAGE_BACKEND_SAI1=python` |
 | **C2** | Full (`5582071` — exact-parent AI slide images) | `STAGE_BACKEND_C2=python` |
-| **C3** | Full (`5587853` — one-parent review email) | `STAGE_BACKEND_C3=python`; C2 daisy-chains Python C3 |
+| **C3** | Full (`5587853` — one-parent review email) | Disabled — review in Studio Pipeline |
 | **C3B** | Full (`5592384` — review buttons) | `STAGE_BACKEND_C3B=python`. Hook: `/hooks/c3b/<C3B_WEBHOOK_TOKEN>` |
 | **C4** | Full (`5587860` — decision router → C5/C6/C7) | `STAGE_BACKEND_C4=python` |
 | **C5** | Full (`5582074` — regenerate rejected slides) | `STAGE_BACKEND_C5=python` |
@@ -40,7 +40,7 @@ Python stage workers that replace Make.com scenarios for SM Pipeline V2.
 | **C8** | Full (`5589822` — create/update platform outputs) | `STAGE_BACKEND_C8=python` |
 | **C9** | Full (`5589932` — Ready to Publish) | `STAGE_BACKEND_C9=python` |
 | **I1** | Full (`5514334` — daily/manual idea slate) | `STAGE_BACKEND_I1=python` |
-| **I2** | Full (`5516968` — idea review email) | `STAGE_BACKEND_I2=python`; email off unless `I2_EMAIL_ENABLED=true` |
+| **I2** | Full (`5516968` — idea review email) | Disabled — ideas stay in Studio |
 | **I3** | Full (`5517182` — email + Studio promote decisions) | `STAGE_BACKEND_I3=python`. Hook: `/hooks/i3/<I3_WEBHOOK_TOKEN>` |
 | **I4** | Full (`5524092` — promote Content Item) | `STAGE_BACKEND_I4=python`; I3 daisy-chains Python I4 |
 | **A2** | Full (`5531974` — Drive intake + MIME routing) | `STAGE_BACKEND_A2=python` |
@@ -142,9 +142,11 @@ POST body built in `r4/render_request.py`; Remotion client in `render/remotion_c
 
 One `POST /stages/r5` polls up to **5** outputs in `Rendering` with a `Remotion_Status_URL`. On complete: download MP4, upload to Google Drive final folder, cleanup Remotion job, PUT R2 studio preview cache, set `Studio_Preview_*` fields. Failed jobs write validation errors and reset status.
 
-## RR1 behavior (review email)
+## Operational email
 
-Ready-for-review Gmail is **off**. `POST /stages/rr1` returns skipped (`review_email_disabled`). Review happens in Studio Pipeline. Set `REVIEW_EMAIL_ENABLED = True` in `rr1/constants.py` to restore the old batched email.
+The only Gmail the runner sends is **TTD3** (TikTok inbox draft / paste the public URL). `GmailClient.send_html` refuses every other purpose.
+
+Ready-for-review (RR1), idea review (I2), carousel review (C3), asset-need (P4/P5), and produce-escalation Gmail are **off**. Review those in Studio Pipeline. TikTok still needs the handoff email because the operator has to paste the live URL.
 
 ## RR2 behavior (review decision)
 

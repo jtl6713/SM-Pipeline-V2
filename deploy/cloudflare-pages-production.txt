@@ -597,3 +597,4 @@ Sticky footer + bottom horizontal scroll Pages deploy: 2026-09-25 - Keep the Stu
 Platform output calendar Pages deploy: 2026-09-25 - Individual output calendar starts with Today, uses a rolling 7-day window, labels Today explicitly, and opens at midnight/top of the full-day grid. UI 0.6.379-platform-calendar-today. Source commit 04291bf6a0c9ad3f045e969ff3158192bc0106a9.
 
 YouTube schedule+thumb handoff Pages deploy: 2026-09-25 — Pipeline/Open Review show and edit Studio_Scheduled_At when locked; ops schedule sends manual_schedule_override. UI 0.6.378-yt-schedule-thumb-handoff.
+2026-09-25 deploy Studio UI 0.6.380 branch reconcile — YouTube operator schedule lock plus TikTok-only email footer bump.

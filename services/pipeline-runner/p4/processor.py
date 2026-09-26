@@ -39,6 +39,7 @@ from p4.constants import (
     MAKE_SCENARIO_ID,
     MAKE_SCENARIO_NAME,
     MEDIA_CANDIDATE_LIMIT,
+    P4_EMAIL_ENABLED,
     P5_CHICAGO_HOUR_BEFORE,
 )
 from p4.coverage import (
@@ -158,7 +159,9 @@ def _maybe_trigger_p5(*, dry_run: bool, trigger_p5: bool) -> dict[str, Any] | No
     hour = _chicago_now().hour
     if hour >= P5_CHICAGO_HOUR_BEFORE:
         return {"skipped": "outside_p5_chicago_window", "chicago_hour": hour}
-    if dry_run or not trigger_p5:
+    from p5.constants import P5_EMAIL_ENABLED
+
+    if dry_run or not trigger_p5 or not P5_EMAIL_ENABLED:
         return {"skipped": "dry_run_or_disabled", "chicago_hour": hour}
     from p5.processor import process_batch
 
@@ -313,7 +316,7 @@ def process_one(
             aspect_ratios=aspect_ratios,
         )
         route = "create"
-        if not field_str(output, "Test_Run_ID"):
+        if not field_str(output, "Test_Run_ID") and P4_EMAIL_ENABLED:
             settings = load_settings()
             to_addr = (
                 field_str(organization, "Primary_Contact_Email")

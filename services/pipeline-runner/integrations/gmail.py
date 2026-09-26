@@ -7,6 +7,10 @@ import requests
 
 from config import load_settings
 
+# Only TikTok inbox drafts need Gmail — operator pastes the public URL.
+PURPOSE_TIKTOK_HANDOFF = "ttd3_tiktok_handoff"
+ALLOWED_EMAIL_PURPOSES = frozenset({PURPOSE_TIKTOK_HANDOFF})
+
 
 class GmailClient:
     """Send HTML email via Gmail API using the same OAuth refresh token as Drive."""
@@ -46,7 +50,16 @@ class GmailClient:
         self._access_token = token
         return token
 
-    def send_html(self, *, to: str, subject: str, html_body: str) -> dict:
+    def send_html(
+        self,
+        *,
+        to: str,
+        subject: str,
+        html_body: str,
+        purpose: str = "",
+    ) -> dict:
+        if purpose not in ALLOWED_EMAIL_PURPOSES:
+            return {"id": None, "skipped": True, "reason": "email_disabled", "purpose": purpose}
         message = EmailMessage()
         message["To"] = to
         message["Subject"] = subject
