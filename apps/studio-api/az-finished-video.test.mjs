@@ -79,6 +79,14 @@ test("uniquePlanItems keeps one row per platform and output type", () => {
   ]);
 });
 
+test("shouldCreateFinishedOutput normalizes scalar and object existing keys", () => {
+  assert.equal(shouldCreateFinishedOutput("Instagram::Reel", "Instagram::Reel"), false);
+  assert.equal(shouldCreateFinishedOutput("Instagram::Reel", "Facebook::Reel"), true);
+  assert.equal(shouldCreateFinishedOutput({ first: "Instagram::Reel" }, "Instagram::Reel"), false);
+  assert.equal(shouldCreateFinishedOutput(new Set(["Instagram::Reel"]), "Facebook::Reel"), true);
+  assert.equal(shouldCreateFinishedOutput(null, "YouTube::Short"), true);
+});
+
 test("pickDuplicateOutputKeepers disables extra same-key rows", () => {
   const { keepers, extras } = pickDuplicateOutputKeepers([
     { id: "recIG2", platform: "Instagram", output_type: "Reel", has_platform_output: true, output_order: 1, created_at: "2026-09-20T15:23:47Z" },
