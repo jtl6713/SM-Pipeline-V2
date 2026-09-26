@@ -1,7 +1,10 @@
+import inspect
+
 from datetime import datetime, timedelta, timezone
 
 from stages.registry import STAGE_NAMES, is_implemented
-from ttd.assets import draft_type_for_photos, is_photo_route, is_video_route, pending_share_formula, photo_manifest, video_manifest
+from ttd import ttd1 as ttd1_module
+from ttd.assets import draft_type_for_photos, is_photo_route, is_video_route, photo_manifest, video_manifest
 from ttd.eligibility import (
     ttd0_eligibility_reason,
     ttd1_eligibility_reason,
@@ -241,14 +244,9 @@ def test_az_publish_package_email():
     assert sibling_status_line(yt).startswith("<li><b>YouTube Short:</b> live")
 
 
-def test_pending_tiktok_share_limit_is_scoped_to_profile():
-    nyc = _record(Content_Profile=["NYC - New York City"])
-    formula = pending_share_formula("recABCDEFGHIJKLMN", nyc)
-    assert '{Platform}="TikTok"' in formula
-    assert '{Manual_Completion_Status}="Required"' in formula
-    assert '{TikTok_Draft_Status}="Draft Delivered — Manual Action Required"' in formula
-    assert 'FIND("NYC - New York City",ARRAYJOIN({Content_Profile}))>0' in formula
-    assert 'RECORD_ID()="recABCDEFGHIJKLMN"' in formula
 
-    fallback = pending_share_formula("recABCDEFGHIJKLMN", _record())
-    assert "Content_Profile" not in fallback
+def test_ttd1_has_no_internal_pending_draft_guard():
+    source = inspect.getsource(ttd1_module.process_request)
+    assert "TIKTOK_DRAFT_SAFE_PENDING_LIMIT" not in source
+    assert "pending_manual_share_count" not in source
+    assert "pending-share safety limit reached" not in source

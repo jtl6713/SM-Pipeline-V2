@@ -11,7 +11,7 @@ from carousel.timeutil import iso_utc, stamp_minutes
 from item4.settings import PipelineSettings
 from publish.location import resolve_publish_location
 from render.fields import field, field_str
-from ttd.assets import is_video_route, parse_photo_images, pending_manual_share_count, video_source_url
+from ttd.assets import is_video_route, parse_photo_images, video_source_url
 from ttd.client import (
     TikTokDraftClient,
     TikTokDraftError,
@@ -22,7 +22,6 @@ from ttd.client import (
 from ttd.common import append_note, preview, response_json, retry_at, unlock_fields, valid_record_id
 from ttd.constants import (
     CAPACITY_RETRY_MINUTES,
-    DEFAULT_SAFE_PENDING_LIMIT,
     DRAFT_TYPE_VIDEO,
     INIT_RETRY_MINUTES,
     MAKE_TTD1_ID,
@@ -76,10 +75,6 @@ def process_request(
         return {"processed": False, "reason": reason, **result}
 
     settings = PipelineSettings(client)
-    limit = parse_int(settings.get("TIKTOK_DRAFT_SAFE_PENDING_LIMIT"), DEFAULT_SAFE_PENDING_LIMIT) or DEFAULT_SAFE_PENDING_LIMIT
-    pending = pending_manual_share_count(client, record_id, output)
-    result["pending_manual_shares"] = pending
-    result["safe_pending_limit"] = limit
     if dry_run:
         return {"processed": False, "dry_run": True, **result}
 
@@ -102,24 +97,6 @@ def process_request(
             "Last_Publish_Attempt_At": now,
         },
     )
-
-    if pending >= limit:
-        client.update_record(
-            PLATFORM_OUTPUTS_TABLE,
-            record_id,
-            {
-                **unlock_fields(),
-                "Publish_Status": PUBLISH_STATUS_FAILED,
-                "Publish_Error_Stage": STAGE_CAPACITY,
-                "TikTok_Draft_Status": STATUS_RETRY,
-                "Publish_Error_Message": (
-                    f"TikTok pending-share safety limit reached. Pending manual shares: {pending}; safe limit: {limit}."
-                ),
-                "Publish_Next_Retry_At": retry_at(CAPACITY_RETRY_MINUTES),
-                "Publish_Retry_Eligible": True,
-            },
-        )
-        return {"processed": True, "retry": True, "reason": "capacity", **result}
 
     try:
         worker = load_tiktok_settings(settings, output, client=client)
