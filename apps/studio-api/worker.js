@@ -432,7 +432,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.388-idea-auto-listen-all",
+          version: "0.10.389-ai-image-prompt-guidance",
           studio_desk_inventory_v1: true,
           studio_desk_activity_v1: true,
           studio_tiktok_complete_v1: true,
@@ -13617,6 +13617,7 @@ async function generateItem4PreProductionAiMaster(request, env, url, authorizati
   const body = await request.json().catch(() => ({}));
   const requestedTarget = Math.round(Number(body?.target_ai_count || 0));
   const requestedAdd = Math.round(Number(body?.add_ai_count || 0));
+  const promptGuidance = String(body?.prompt_guidance || "").trim().slice(0, 2000);
   const explicitAiAdd = (Number.isFinite(requestedTarget) && requestedTarget > 0)
     || (Number.isFinite(requestedAdd) && requestedAdd > 0);
   if (String(f(record, "Carousel_Image_Mode") || "").trim() !== "Make AI Generated" && !explicitAiAdd) {
@@ -13685,11 +13686,20 @@ async function generateItem4PreProductionAiMaster(request, env, url, authorizati
   }
   const nextIndex = generated.length + 1;
   const caption = String(themes?.slides?.[0]?.caption || "").trim();
-  const prompt = String(themes?.slides?.[0]?.imagePrompt || "").trim() || [
-    `Photorealistic ${context.market} travel/social media photograph for "${context.title}".`,
-    `Create image ${nextIndex} of ${desiredAiCount} as a distinct complementary scene.`,
-    "Natural camera, realistic light and textures. No logos, watermarks, UI, or burned-in text.",
-  ].join(" ");
+  const themedPrompt = String(themes?.slides?.[0]?.imagePrompt || "").trim();
+  const prompt = promptGuidance
+    ? [
+        `Primary user direction: ${promptGuidance}`,
+        `Context: this image supports ${context.market} social content titled "${context.title}".`,
+        `Create image ${nextIndex} of ${desiredAiCount}; when generating multiple images, vary the composition while following the same user direction.`,
+        themedPrompt ? `Studio suggestion, secondary to the user's direction: ${themedPrompt}` : "",
+        "Follow the user's requested subject and style. No logos, watermarks, or UI. Avoid burned-in text unless the user explicitly asks for it.",
+      ].filter(Boolean).join(" ")
+    : themedPrompt || [
+        `Photorealistic ${context.market} travel/social media photograph for "${context.title}".`,
+        `Create image ${nextIndex} of ${desiredAiCount} as a distinct complementary scene.`,
+        "Natural camera, realistic light and textures. No logos, watermarks, UI, or burned-in text.",
+      ].join(" ");
   const ratio = item4PreProductionAiRatio(record);
   const image = await item4GeneratePreProductionImageBytes(env, prompt, ratio);
   const stamp = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 7)}`;
