@@ -467,6 +467,10 @@
  <div class="item4-upload-zone item4-ai-generation-panel" id="item4AiGenerationPanel" hidden>
  <div class="item4-upload-icon" aria-hidden="true">AI</div>
  <div><strong id="item4AiGenerationTitle">Generate AI images</strong><span id="item4AiGenerationHint">Studio will create the requested images before approval.</span></div>
+ <label class="form-field" style="min-width:110px;max-width:150px;margin:0;">
+ <span>Quantity to add</span>
+ <input id="item4AiAddCount" type="number" min="1" step="1" value="1" inputmode="numeric" aria-label="AI images to add">
+ </label>
  <div class="item4-upload-actions">
  <button type="button" class="primary-button" id="item4GenerateAiImages">Generate AI images</button>
  <button type="button" class="secondary-button" id="item4RegenerateAiImages" hidden>Regenerate all</button>
@@ -476,7 +480,7 @@
  <input id="item4MediaInput" type="file" accept="image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence" multiple hidden>
  <input id="item4ClipInput" type="file" accept="video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm" multiple hidden>
  <div class="item4-upload-icon" aria-hidden="true">+</div>
- <div> <strong id="item4UploadTitle">Drop photos</strong><span id="item4UploadHint">Up to 20</span></div>
+ <div> <strong id="item4UploadTitle">Drop photos</strong><span id="item4UploadHint">Add as many as you want</span></div>
  <div class="item4-upload-actions">
  <button type="button" class="primary-button" id="item4ChooseMedia">Choose photos</button>
  <button type="button" class="secondary-button" id="item4ChooseLibrary">From library</button>
@@ -1959,7 +1963,7 @@
  <div class="studio-footer-meta">
  <span id="aiApiFooter" aria-live="polite"><strong>AI API:</strong> loading…</span>
  <span id="apiStatus" class="topbar-status">Connecting…</span>
- <span id="uiBuildLabel">UI build 0.6.381</span>
+ <span id="uiBuildLabel">UI build 0.6.386</span>
  <span id="workerBuildLabel">Worker …</span> </div>
  </footer>
 
@@ -2120,7 +2124,7 @@
  <script src="/assets/ez-plan.js?v=0.6.376-recommend-carousel-slides"></script>
  <script src="/assets/pipeline-schedule-grid-0622.js?v=0.6.361-schedule-collapsed"></script>
  <script src="/assets/platform-schedule-calendar-0924.js?v=0.6.380-branch-reconcile"></script>
- <script src="/assets/app-item4-0625.js?v=0.6.381-production-unlimited-assets"></script>
+ <script src="/assets/app-item4-0625.js?v=0.6.386-production-unlimited-assets-complete"></script>
  <script src="/assets/insights-0622.js?v=0.6.365-first-party-analytics-reconciled"></script>
  <script src="/assets/ai-api-footer.js?v=0.6.376-ai-api"></script>
  <script src="/assets/sticky-footer-scroll.js?v=0.6.378-sticky-footer-scroll"></script>
