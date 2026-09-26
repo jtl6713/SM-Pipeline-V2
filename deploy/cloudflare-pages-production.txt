@@ -598,4 +598,4 @@ Platform output calendar Pages deploy: 2026-09-25 - Individual output calendar s
 
 YouTube schedule+thumb handoff Pages deploy: 2026-09-25 — Pipeline/Open Review show and edit Studio_Scheduled_At when locked; ops schedule sends manual_schedule_override. UI 0.6.378-yt-schedule-thumb-handoff.
 2026-09-25 deploy Studio UI 0.6.380 branch reconcile — YouTube operator schedule lock plus TikTok-only email footer bump.
-2026-09-25 deploy Studio UI 0.6.381 Insights panel padding — add breathing room around KPI text, charts, lists, and connection cards.
+2026-09-25 deploy Insights CSS padding refresh — add breathing room around KPI text, charts, lists, and connection cards; preserve Studio UI 0.6.380.
