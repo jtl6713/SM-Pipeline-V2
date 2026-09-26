@@ -1,4 +1,4 @@
 Deploy Studio API Worker production
-Reason: YouTube quota-aware Insights connection status
-Source merge: 0b2c3424bd6a0dff53b96c8eee36a61ba656b3ce
+Reason: Facebook Insights page-scoped ID and metrics fix
+Source merge: 02a8c47d3d7481725583f6d07fa51b47ff8f5b27
 Requested: 2026-09-25
