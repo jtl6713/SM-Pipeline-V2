@@ -35,3 +35,8 @@ test("Insights cards keep content away from panel frames", () => {
   assert.match(css, /\.insights-kpi\s*\{[^}]*padding:\s*17px 18px/s);
   assert.match(css, /\.insights-connections-panel\s*\{[^}]*padding:\s*18px 20px 20px/s);
 });
+
+
+test("connected account cards do not show reconnect", () => {
+  assert.match(insightsSource, /status !== "connected" && item\.reconnect_url/);
+});
