@@ -42,8 +42,6 @@ test("creative editor heading shows platform, output number, and title with bull
   assert.match(app, /creativeEditorTitle"\)\.textContent = creativeEditorOutputHeading\(output\)/);
 });
 
-
-
 test("opening a platform output jumps immediately to the top of the page", () => {
   const openEditor = app.match(/async function openCreativeEditor\(recordId\) \{[\s\S]*?const data = await api/);
   assert.ok(openEditor, "openCreativeEditor should be present");
