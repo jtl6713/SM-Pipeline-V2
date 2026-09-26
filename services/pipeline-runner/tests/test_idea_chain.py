@@ -2,6 +2,7 @@ from config import StageRequest
 from i2.email_builder import candidate_card, review_action_url
 from i3.decisions import carousel_fields, config_approve_fields, reject_fields, video_fields
 from i4.processor import _content_item_fields
+from i1.processor import _candidate_fields
 from idea.mapping import normalize_content_type, resolve_tri_state, route_for_payload, split_platforms
 from idea.prompt import build_i1_prompt
 from stages.i3 import run as run_i3
@@ -214,3 +215,46 @@ def test_i3_and_i4_skip_without_airtable():
     i4_missing = run_i4(StageRequest())
     assert i4_missing.status == "skipped"
     assert i4_missing.details["run"]["reason"] == "missing_record_id"
+
+
+def test_i1_generated_photo_capable_ideas_auto_listen_for_library_photos():
+    carousel = _candidate_fields(
+        {
+            "candidate_title": "Pilsen wall details",
+            "suggested_format": ["Carousel"],
+            "suggested_platforms": ["Instagram"],
+        },
+        profile_id="recPROFILE",
+        batch_id=None,
+        test_run_id=None,
+    )
+    assert carousel["Production_Content_Type"] == "Carousel"
+    assert carousel["Production_Carousel_Image_Mode"] == "Manual Upload"
+    assert carousel["Production_Carousel_Slide_Count_Mode"] == "Target range"
+    assert carousel["Production_Carousel_Slide_Count_Min"] == 5
+    assert carousel["Production_Carousel_Slide_Count_Max"] == 8
+    assert carousel["Studio_Photo_Wait_Status"] == "Waiting"
+
+    short = _candidate_fields(
+        {
+            "candidate_title": "Brooklyn Bridge blue hour",
+            "suggested_format": ["Vertical Short Video"],
+        },
+        profile_id="recPROFILE",
+        batch_id=None,
+        test_run_id=None,
+    )
+    assert short["Production_Content_Type"] == "Vertical Short Video"
+    assert short["Studio_Photo_Wait_Status"] == "Waiting"
+
+    text_only = _candidate_fields(
+        {
+            "candidate_title": "Chicago hot take",
+            "suggested_format": ["Thread"],
+        },
+        profile_id="recPROFILE",
+        batch_id=None,
+        test_run_id=None,
+    )
+    assert "Studio_Photo_Wait_Status" not in text_only
+    assert "Production_Carousel_Image_Mode" not in text_only
