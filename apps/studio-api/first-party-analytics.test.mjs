@@ -251,7 +251,7 @@ test("TikTok missing IDs are discovered before analytics failure", () => {
   const helperStart = workerSource.indexOf(marker);
   assert.ok(helperStart >= 0);
   const helper = workerSource.slice(helperStart, helperStart + 5200);
-  assert.match(helper, /tiktok\.com\\\/t\\\//i);
+  assert.match(helper, /tiktok\.com\/t\//i);
   assert.match(helper, /videoIds: \[\]/);
   assert.match(helper, /12 \* 3600000/);
 
