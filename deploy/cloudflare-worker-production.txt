@@ -1,4 +1,4 @@
 Deploy Studio API Worker production
-Reason: correct Worker version to 0.10.385 after TikTok Insights discovery merge
-Source merge: f8e46a2028fe7074ba93a9feeaa5c9856e14b58c
-Requested: 2026-09-25
+Reason: deploy finished-video pass-through promotion fix for Idea Candidate #425
+Source merge: 0aeadef2c59739794dbb055c72c143c70d877da5
+Requested: 2026-09-26
