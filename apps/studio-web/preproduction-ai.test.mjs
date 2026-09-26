@@ -39,3 +39,17 @@ test("mixed AI count uses requested AI slots rather than total slide count", asy
   assert.match(app, /const aiCount = assets\.filter\(\(asset\) => \/\^studio_ai\/i\.test/);
   assert.match(app, /aiCount >= target/);
 });
+
+test("Production AI description is sent as prompt guidance", async () => {
+  const [app, html] = await Promise.all([
+    readFile(appPath, "utf8"),
+    readFile(indexPath, "utf8"),
+  ]);
+
+  assert.match(html, /id="item4AiPrompt"/);
+  assert.match(html, /Describe what you want the AI image to be/);
+  assert.match(app, /const promptGuidance = String\(\$\("item4AiPrompt"\)\?\.value \|\| ""\)\.trim\(\)/);
+  assert.match(app, /prompt_guidance:\s*promptGuidanceText/);
+  assert.match(app, /promptInput\.disabled = item4AiGenerationInFlight/);
+});
+
