@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import test from "node:test";
+import test from "node:test";\nimport fs from "node:fs";
 import {
   analyticsAgeHours,
   analyticsCadenceForAgeHours,
@@ -109,4 +109,27 @@ test("Facebook owned analytics works for video-style objects without reactions",
   assert.equal(result.shares, 2);
   assert.equal(result.total_interactions, 17);
   assert.equal(requested.some((url) => url.includes("reactions")), false);
+});
+
+
+const workerSource = fs.readFileSync(new URL("./worker.js", import.meta.url), "utf8");
+
+test("connection status helper does not reference sweep-local counters", () => {
+  const start = workerSource.indexOf("function studioInsightsLatestSyncByPlatform(rows) {");
+  const end = workerSource.indexOf("\n\nasync function getInsightsConnections", start);
+  assert.ok(start >= 0 && end > start);
+  const helper = workerSource.slice(start, end);
+  assert.doesNotMatch(helper, /\bconsidered\b|\blimit\b/);
+});
+
+test("first-party analytics sweep allocates work independently by content profile", () => {
+  const start = workerSource.indexOf("async function studioSweepPublishedInsights(env, options = {}) {");
+  const end = workerSource.indexOf("\n\nasync function studioFetchOutputInsights", start);
+  assert.ok(start >= 0 && end > start);
+  const sweep = workerSource.slice(start, end);
+  assert.match(sweep, /listContentProfileRecords/);
+  assert.match(sweep, /contentProfileFilterFormula\(profileRecord\)/);
+  assert.match(sweep, /perProfileLimit/);
+  assert.match(sweep, /Round-robin execution/);
+  assert.match(sweep, /Insights_As_Of/);
 });
