@@ -56,3 +56,16 @@ test("pre-production AI supports explicit additive targets without a Production 
   assert.match(handler, /generated\.length \+ requestedAdd/);
   assert.doesNotMatch(handler, /A Production Request can contain at most/);
 });
+
+test("user prompt guidance takes priority while preserving Studio context", async () => {
+  const source = await readFile(workerPath, "utf8");
+  const start = source.indexOf("async function generateItem4PreProductionAiMaster");
+  const end = source.indexOf("async function item4SeedAiCarouselSlides", start);
+  assert.ok(start >= 0 && end > start);
+  const handler = source.slice(start, end);
+  assert.match(handler, /body\?\.prompt_guidance/);
+  assert.match(handler, /Primary user direction:/);
+  assert.match(handler, /secondary to the user's direction/);
+  assert.match(handler, /Avoid burned-in text unless the user explicitly asks for it/);
+});
+
