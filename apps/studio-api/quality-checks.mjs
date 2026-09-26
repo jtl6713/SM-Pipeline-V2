@@ -9,6 +9,7 @@ export const QUALITY_HEALS = Object.freeze([
   "drain_intake",
   "remove_ingestion_parent",
   "resume_produce",
+  "requeue_failed",
   "ticket_only",
   "none",
 ]);
@@ -118,6 +119,22 @@ export const QUALITY_CHECKS = Object.freeze([
     kind: "publish_never_dispatch",
     actor: "worker_heal",
     heal: "none",
+  }),
+  check({
+    id: "publish_failed_transient",
+    title: "Check for Failed or retry-eligible publishes (Instagram IN_PROGRESS, timeouts) that Worker should requeue",
+    lane: "service",
+    kind: "publish_failed_transient",
+    actor: "worker_heal",
+    heal: "requeue_failed",
+  }),
+  check({
+    id: "render_failed",
+    title: "Check for Render_Status=Failed outputs that Worker should requeue to Ready for Render",
+    lane: "service",
+    kind: "render_failed",
+    actor: "worker_heal",
+    heal: "requeue_failed",
   }),
   check({
     id: "native_cover_missing",

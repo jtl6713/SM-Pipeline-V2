@@ -17,6 +17,7 @@ import {
   classifyAzNotAutoFinished,
   classifyAutonomousRfrGate,
   classifyPublishDispatch,
+  classifyPublishFailed,
   classifyNativeCover,
   classifyRfrLockedMissingDeliverable,
   classifyTesterNightly,
@@ -111,6 +112,15 @@ test("render, orphan, crop, autonomous, and health classifiers", () => {
     voiceover_required: true,
     voiceover_url: "https://drive.google.com/uc?id=vo",
   }, now).kind, "render_ready_no_job");
+  const failedRender = classifyRenderRow({
+    id: "recRFail",
+    render_status: "Failed",
+    remotion_job_id: "job-crash",
+    render_error: "Command failed with exit code 1",
+  }, now);
+  assert.equal(failedRender.kind, "render_failed");
+  assert.equal(failedRender.class, "transient");
+  assert.equal(failedRender.actor, "worker_heal");
   assert.equal(classifyRenderRow({
     id: "recR2",
     render_status: "Rendering",
@@ -256,6 +266,36 @@ test("promoted advancement is origin-aware and does not treat Ready for Review a
     platform: "TikTok",
     last_modified: "2026-09-07T03:00:00Z",
   }, now), null);
+  const ig796 = classifyPublishFailed({
+    id: "recHsN9TCoV8HsAdT",
+    output_id: 796,
+    output_status: "Approved for Publishing",
+    publish_status: "Ready to Publish",
+    publish_retry_eligible: true,
+    publish_error: "Instagram Reel create failed. Meta status_code: IN_PROGRESS. Status: In Progress: Media is still being processed.",
+  });
+  assert.equal(ig796.kind, "publish_failed_transient");
+  assert.equal(ig796.class, "transient");
+  assert.equal(ig796.actor, "worker_heal");
+  assert.equal(ig796.fingerprint, fingerprint("publish_failed_transient", "recHsN9TCoV8HsAdT", "in_progress"));
+  assert.equal(classifyPublishDispatch({
+    id: "recHsN9TCoV8HsAdT",
+    output_status: "Approved for Publishing",
+    platform: "Instagram",
+    publish_status: "Ready to Publish",
+    publish_retry_eligible: true,
+    publish_error: "Instagram Reel create failed. Meta status_code: IN_PROGRESS.",
+    last_modified: "2026-09-07T03:00:00Z",
+  }, now), null);
+  assert.ok(CLASSIFIER_KINDS.includes("publish_failed_transient"));
+  assert.ok(CLASSIFIER_KINDS.includes("render_failed"));
+  assert.equal(classifyPublishFailed({
+    id: "recHsN9TCoV8HsAdT",
+    output_status: "Approved for Publishing",
+    publish_status: "Ready to Publish",
+    publish_retry_eligible: true,
+    publish_error: "Instagram Reel create failed. Meta status_code: ERROR. Status: Error: Media upload has failed with error code 2207082",
+  }).class, "transient");
   assert.equal(classifyNativeCover({
     id: "recCvr",
     output_status: "Published",

@@ -16,7 +16,10 @@ import {
   classifyProduceJob,
   classifyPromotedNotRfr,
   classifyPublishDispatch,
+  classifyPublishFailed,
   classifyRenderRow,
+  deskTransientPublishError,
+  deskTransientRenderError,
   classifyRfrLockedMissingDeliverable,
   classifyTesterCatalogAssert,
   classifyTesterNightly,
@@ -428,7 +431,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.385-tiktok-owned-video-discovery",
+          version: "0.10.386-failed-auto-heal",
           studio_desk_inventory_v1: true,
           studio_desk_activity_v1: true,
           studio_tiktok_complete_v1: true,
@@ -1361,6 +1364,11 @@ export default {
         console.warn("studio stuck-render heal failed", error);
       }
       try {
+        await studioHealFailedStatuses(env, { limit: 6 });
+      } catch (error) {
+        console.warn("studio failed-status heal failed", error);
+      }
+      try {
         await advanceStudioProductionOutputs(env, { waitMs: 0 });
       } catch (error) {
         console.warn("studio continuation listener failed", error);
@@ -1409,6 +1417,11 @@ export default {
         await studioReconcilePublishingInstagramStories(env);
       } catch (error) {
         console.warn("instagram story poll reconcile cron failed", error);
+      }
+      try {
+        await studioReconcilePublishingInstagramReels(env);
+      } catch (error) {
+        console.warn("instagram reel in-progress reconcile cron failed", error);
       }
       try {
         await studioReconcileFacebookSlideshows(env);
@@ -9861,8 +9874,130 @@ async function healStuckStudioRenders(env) {
       pulses.push({ key: "R5_LONG_RENDER", id: row.id, error: error instanceof Error ? error.message : String(error) });
     }
   }
+  const failedRenders = await listRecords(env, outputTable, {
+    limit: 6,
+    sortField: "Output_ID",
+    sortDirection: "desc",
+    filterFormula: 'AND({Test_Run_ID}=BLANK(),{Render_Status}="Failed")',
+  }).catch(() => []);
+  for (const row of failedRenders || []) {
+    const err = String(f(row, "Remotion_Error_Message") || f(row, "Final_File_Error_Message") || "");
+    if (!deskTransientRenderError(err)) continue;
+    try {
+      await airtableFetch(env, outputTable, row.id, {
+        method: "PATCH",
+        body: JSON.stringify({
+          fields: {
+            Render_Status: "Ready for Render",
+            Remotion_Job_ID: "",
+            Remotion_Error_Message: "",
+            Final_File_Error_Message: "",
+          },
+          typecast: true,
+        }),
+      });
+      const payload = await item4PulseR4Python(env, { outputRecordId: row.id });
+      pulses.push({ key: "R4_FAILED_REQUEUE", id: row.id, payload });
+    } catch (error) {
+      pulses.push({ key: "R4_FAILED_REQUEUE", id: row.id, error: error instanceof Error ? error.message : String(error) });
+    }
+  }
   if (pulses.length) {
     console.log("Studio stuck-render heal", JSON.stringify({
+      count: pulses.length,
+      pulses: pulses.map((row) => ({ key: row.key, id: row.id, error: row.error || null })),
+    }));
+  }
+  return pulses;
+}
+
+async function studioHealFailedStatuses(env, options = {}) {
+  const limit = Math.max(1, Math.min(8, Number(options.limit || 6)));
+  const outputTable = env.AIRTABLE_OUTPUT_TABLE_ID;
+  const pulses = [];
+  const failedPublish = await listRecords(env, outputTable, {
+    limit,
+    sortField: "Output_ID",
+    sortDirection: "desc",
+    filterFormula: 'AND({Test_Run_ID}=BLANK(),{Published_At}=BLANK(),{Do_Not_Publish}=0,{Auto_Publish_Enabled}=1,OR({Publish_Status}="Failed",AND({Publish_Error_Message}!="",OR({Publish_Status}="Ready to Publish",{Publish_Status}="Publishing"))))',
+  }).catch(() => []);
+  for (const row of failedPublish || []) {
+    const err = String(f(row, "Publish_Error_Message") || "");
+    const status = String(f(row, "Publish_Status") || "").trim();
+    if (status !== "Failed" && !deskTransientPublishError(err)) continue;
+    if (status === "Failed" && err && !deskTransientPublishError(err)) continue;
+    const corruptUpload = /2207082|media upload has failed/i.test(err);
+    const alreadyRetried = Number(f(row, "Publish_Attempt_Count") || 0) >= 2
+      || Number(f(row, "Studio_Publish_Dispatch_Count") || 0) >= 2;
+    if (corruptUpload && alreadyRetried && String(f(row, "Render_Status") || "") !== "Rendering") {
+      try {
+        await airtableFetch(env, outputTable, row.id, {
+          method: "PATCH",
+          body: JSON.stringify({
+            fields: {
+              Render_Status: "Ready for Render",
+              Remotion_Job_ID: "",
+              Remotion_Error_Message: "",
+              Platform_Media_ID: "",
+              Publish_Status: "Ready to Publish",
+              Publish_Error_Message: "",
+              Publish_Locked_By: "",
+              Publish_Locked_At: null,
+              Studio_Publish_Dispatch_Count: 0,
+            },
+            typecast: true,
+          }),
+        });
+        const payload = await item4PulseR4Python(env, { outputRecordId: row.id });
+        pulses.push({ key: "R4_CORRUPT_PUBLISH_MP4", id: row.id, payload });
+      } catch (error) {
+        pulses.push({
+          key: "R4_CORRUPT_PUBLISH_MP4",
+          id: row.id,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+      continue;
+    }
+    try {
+      await airtableFetch(env, outputTable, row.id, {
+        method: "PATCH",
+        body: JSON.stringify({
+          fields: {
+            Publish_Status: "Ready to Publish",
+            Publish_Error_Message: "",
+            Publish_Locked_By: "",
+            Publish_Locked_At: null,
+            Publish_Started_At: null,
+            Publish_Retry_Eligible: true,
+            Publish_Next_Retry_At: null,
+            Studio_Publish_Dispatch_Count: 0,
+            Platform_Media_ID: /in_progress|still being processed/i.test(err)
+              ? (f(row, "Platform_Media_ID") || "")
+              : "",
+          },
+          typecast: true,
+        }),
+      });
+      const refreshed = await airtableFetch(env, outputTable, row.id).catch(() => row);
+      const dispatched = await studioDispatchApprovedPublishNow(env, refreshed);
+      pulses.push({
+        key: "PUBLISH_FAILED_REQUEUE",
+        id: row.id,
+        ok: dispatched?.ok !== false,
+        target: dispatched?.target || dispatched?.skipped || null,
+        message: dispatched?.message || null,
+      });
+    } catch (error) {
+      pulses.push({
+        key: "PUBLISH_FAILED_REQUEUE",
+        id: row.id,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+  if (pulses.length) {
+    console.log("Studio failed-status heal", JSON.stringify({
       count: pulses.length,
       pulses: pulses.map((row) => ({ key: row.key, id: row.id, error: row.error || null })),
     }));
@@ -25681,6 +25816,9 @@ async function pulseOnDemandRenderChain(env, options = {}) {
   try { pulses.push(...await healStuckStudioRenders(env)); } catch (error) {
     pulses.push({ key: "STUDIO_STUCK_RENDER", error: error instanceof Error ? error.message : String(error) });
   }
+  try { pulses.push(...await studioHealFailedStatuses(env, { limit: 4 })); } catch (error) {
+    pulses.push({ key: "STUDIO_FAILED_STATUS", error: error instanceof Error ? error.message : String(error) });
+  }
   try { pulses.push(...await resumeStaleStudioProductionJobs(env, options)); } catch (error) {
     pulses.push({ key: "STUDIO_PRODUCE", error: error instanceof Error ? error.message : String(error) });
   }
@@ -29132,6 +29270,38 @@ async function studioReconcilePublishingInstagramStories(env, options = {}) {
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       console.warn("instagram story poll reconcile failed", row.id, error);
+      results.push({ id: row.id, error: message });
+    }
+  }
+  return results;
+}
+
+async function studioReconcilePublishingInstagramReels(env, options = {}) {
+  if (pipelineStageBackend(env, "AP1_IG").mode !== "python") return [];
+  const limit = Number(options.limit || 4);
+  let rows = [];
+  try {
+    rows = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
+      limit,
+      filterFormula: 'AND({Test_Run_ID}=BLANK(),{Platform}="Instagram",{Do_Not_Publish}=0,{Auto_Publish_Enabled}=1,{Published_At}=BLANK(),{Platform_Post_ID}="",{Platform_Media_ID}!="",OR({Platform_Output_Type}="Instagram Reel",{Studio_Output_Type}="Reel"),OR({Publish_Status}="Publishing",AND({Publish_Status}="Ready to Publish",{Publish_Retry_Eligible}=1)))',
+    });
+  } catch (error) {
+    console.warn("instagram reel in-progress reconcile scan failed", error);
+    return [];
+  }
+  const results = [];
+  for (const row of rows) {
+    try {
+      const pulsed = await studioPulseAp1IgReel(env, row);
+      results.push({
+        id: row.id,
+        ok: pulsed?.ok !== false,
+        skipped: pulsed?.skipped || null,
+        post_id: pulsed?.post_id || null,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.warn("instagram reel in-progress reconcile failed", row.id, error);
       results.push({ id: row.id, error: message });
     }
   }
@@ -32836,6 +33006,9 @@ function mapDeskInventoryOutput(record, contentToRequest = new Map()) {
       || studioFirstLinkedId(f(record, "Production Requests")),
     content_item_id: studioFirstLinkedId(f(record, "Content_Item")),
     cover_attached: note.includes("facebook-cover=attached"),
+    publish_error: f(record, "Publish_Error_Message"),
+    publish_retry_eligible: Boolean(f(record, "Publish_Retry_Eligible")),
+    render_error: f(record, "Remotion_Error_Message") || f(record, "Final_File_Error_Message"),
   };
 }
 
@@ -33033,6 +33206,30 @@ async function gatherStudioDeskInventory(env) {
   scanned("publish_never_dispatch");
   for (const record of approvedDispatch || []) {
     push(classifyPublishDispatch(mapOut(record), nowMs));
+    push(classifyPublishFailed(mapOut(record)));
+  }
+  try {
+    const failedRows = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
+      limit: 12,
+      sortField: "Output_ID",
+      sortDirection: "desc",
+      filterFormula: 'AND({Test_Run_ID}=BLANK(),OR({Render_Status}="Failed",{Publish_Status}="Failed",AND({Publish_Error_Message}!="",{Published_At}=BLANK())))',
+    }).catch(() => []);
+    scanned("render_failed", "publish_failed_transient");
+    for (const record of failedRows || []) {
+      push(classifyRenderRow({
+        id: record.id,
+        render_status: f(record, "Render_Status"),
+        remotion_job_id: f(record, "Remotion_Job_ID"),
+        final_file_url: f(record, "Final_File_URL"),
+        output_status: f(record, "Output_Status"),
+        render_error: f(record, "Remotion_Error_Message") || f(record, "Final_File_Error_Message"),
+        output_id: f(record, "Output_ID"),
+      }, nowMs));
+      push(classifyPublishFailed(mapOut(record)));
+    }
+  } catch (error) {
+    console.warn("desk failed-status scan failed", error);
   }
   scanned("native_cover_missing");
   for (const record of publishedCovers || []) {

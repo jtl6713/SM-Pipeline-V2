@@ -94,5 +94,7 @@ def test_ig_pub_orch_branches_match_make():
     assert IGPUB_BRANCHES[4].formula == IGPUB_POLL_FORMULA
     assert '{Publish_Status}="Ready to Schedule"' in IGPUB_DUE_FORMULA
     assert '{Platform_Output_Type}="Instagram Reel"' in IGPUB_AP1_FORMULA
+    assert '{Platform_Media_ID}!=""' in IGPUB_AP1_FORMULA
+    assert '{Publish_Status}="Publishing"' in IGPUB_AP1_FORMULA
     assert '{IG_Story_Status}="Publishing"' in IGPUB_POLL_FORMULA
     assert "Ready to Publish because its schedule is due" in IGPUB_PROMOTE_NOTE

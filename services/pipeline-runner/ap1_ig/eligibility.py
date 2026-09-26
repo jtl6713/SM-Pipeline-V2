@@ -7,6 +7,7 @@ from ap1_ig.constants import (
     PLATFORM,
     PLATFORM_OUTPUT_TYPE,
     PUBLISH_METHOD,
+    PUBLISH_STATUS_PUBLISHING,
     PUBLISH_STATUS_READY,
     REVIEW_STATUS,
 )
@@ -43,12 +44,18 @@ def eligibility_reason(
         return "do_not_publish"
     if field_str(record, "Published_At"):
         return "already_published"
-    if _ci(field_str(record, "Publish_Status")) != _ci(PUBLISH_STATUS_READY):
+    if field_str(record, "Platform_Post_ID"):
+        return "already_has_platform_post"
+    publish_status = _ci(field_str(record, "Publish_Status"))
+    existing_container = field_str(record, "Platform_Media_ID")
+    resuming = bool(existing_container) and publish_status in {
+        _ci(PUBLISH_STATUS_READY),
+        _ci(PUBLISH_STATUS_PUBLISHING),
+    }
+    if publish_status != _ci(PUBLISH_STATUS_READY) and not resuming:
         return "publish_status_not_ready"
     if not field_str(record, "Publish_Asset_URL"):
         return "missing_publish_asset_url"
-    if field_str(record, "Platform_Post_ID"):
-        return "already_has_platform_post"
     requested_txn = str(replace_transaction_id or "").strip()
     record_txn = field_str(record, "Replace_Transaction_ID")
     if requested_txn != record_txn:

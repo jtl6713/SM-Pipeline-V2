@@ -37,6 +37,11 @@ def test_ap1_ig_is_registered():
 def test_ap1_ig_eligible_reel():
     assert is_eligible(_eligible())
     assert eligibility_reason(_eligible()) is None
+    assert is_eligible(_eligible(
+        Publish_Status="Publishing",
+        Platform_Media_ID="17890000000000000",
+    ))
+    assert eligibility_reason(_eligible(Publish_Status="Publishing")) == "publish_status_not_ready"
 
 
 def test_ap1_ig_gate_failures():

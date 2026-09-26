@@ -33,6 +33,14 @@ def review_fields_after_successful_render(output: dict[str, Any]) -> dict[str, s
     return {}
 
 
+def output_status_after_successful_render(output: dict[str, Any]) -> str:
+    review = field_str(output, "Review_Status").strip().casefold()
+    current = field_str(output, "Output_Status").strip()
+    if review == "approved" or current in {"Approved for Publishing", "Published"}:
+        return "Approved for Publishing"
+    return "Ready for Review"
+
+
 def _classify_status(status: dict[str, Any]) -> str:
     payload = _status_payload(status)
     raw = str(payload.get("status") or "").strip().lower()
@@ -198,7 +206,7 @@ def process_one_output(
                 "Final_File_Error_Message": "",
                 "Remotion_Error_Message": "",
                 "Final_File_ID": file_id,
-                "Output_Status": "Ready for Review",
+                "Output_Status": output_status_after_successful_render(output),
                 "Output_Filename": field_str(output, "Output_Filename"),
                 "Final_File_Storage_Status": "Uploaded",
                 "Render_Server_URL": render_url,
@@ -226,13 +234,14 @@ def process_one_output(
     except Exception as exc:
         message = str(exc) or "Render completed, but final Google Drive upload did not complete."
         existing_url = field_str(output, "Final_File_URL")
-        if existing_url and "404" in message.lower():
+        same_job = field_str(output, "Remotion_Job_ID") == job_id
+        if existing_url and "404" in message.lower() and same_job:
             client.update_record(
                 PLATFORM_OUTPUTS_TABLE,
                 output["id"],
                 {
                     "Render_Status": "Rendered",
-                    "Output_Status": "Ready for Review",
+                    "Output_Status": output_status_after_successful_render(output),
                     "Final_File_Error_Message": "",
                     "Remotion_Error_Message": "",
                     **review_fields_after_successful_render(output),

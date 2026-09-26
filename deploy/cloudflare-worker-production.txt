@@ -2,3 +2,8 @@ Deploy Studio API Worker production
 Reason: deploy finished-video pass-through promotion fix for Idea Candidate #425
 Source merge: 0aeadef2c59739794dbb055c72c143c70d877da5
 Requested: 2026-09-26
+
+Deploy Studio API Worker production
+Reason: Quality Agent + Worker auto-heal Failed render/publish (796 IN_PROGRESS)
+Worker: 0.10.386-failed-auto-heal
+Requested: 2026-09-26T10:13:00-05:00

@@ -69,12 +69,37 @@ export function deskModeAllows(mode, action) {
 export function errorClassFromText(text) {
   const value = String(text || "").trim().toLowerCase();
   if (!value) return "unknown";
+  if (/(in_progress|still being processed|still in progress)/i.test(value)) return "in_progress";
   if (/(timed?\s*out|timeout|connectionpool|connection reset|502|503|504)/i.test(value)) return "transient_http";
+  if (/exit code 1|delayrender|request closed/i.test(value)) return "render_crash";
   if (/clip count mismatch/i.test(value)) return "clip_count_mismatch";
   if (/no_eligible_p2_route/i.test(value)) return "no_eligible_p2_route";
   if (/heal budget|retries exhausted|escalated/i.test(value)) return "heal_exhausted";
   const compact = value.replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 48);
   return compact || "unknown";
+}
+
+export function deskTransientRenderError(text) {
+  const value = String(text || "");
+  if (/clip count mismatch/i.test(value)) return false;
+  if (/missing composition|no clips|invalid props/i.test(value)) return false;
+  if (!value.trim()) return true;
+  const errorClass = errorClassFromText(value);
+  return errorClass === "transient_http"
+    || errorClass === "render_crash"
+    || /exit code 1|delayrender|request closed|timed?\s*out|timeout|502|503|504|econnreset|connection reset/i.test(value);
+}
+
+export function deskTransientPublishError(text) {
+  const value = String(text || "");
+  if (!value.trim()) return false;
+  if (/copyright|permission denied|invalid video|unsupported format|video too long|duplicate/i.test(value)) {
+    return false;
+  }
+  const errorClass = errorClassFromText(value);
+  return errorClass === "transient_http"
+    || errorClass === "in_progress"
+    || /in_progress|still being processed|still in progress|timed?\s*out|timeout|502|503|504|10053|connection aborted|econnreset|capacity|try again|2207082|media upload has failed/i.test(value);
 }
 
 export function fingerprint(kind, recordId, errorClass) {
@@ -144,6 +169,22 @@ export function classifyRenderRow(row, nowMs = Date.now()) {
   const modified = Date.parse(String(row?.last_modified || row?.updated_at || ""));
   const ageMs = Number.isFinite(modified) ? nowMs - modified : Infinity;
 
+  if (renderStatus === "Failed") {
+    const err = String(row?.render_error || row?.error || "");
+    const transient = deskTransientRenderError(err);
+    const errorClass = errorClassFromText(err || "render_failed");
+    return {
+      kind: "render_failed",
+      class: transient ? "transient" : "code_bug",
+      record_id: recordId || null,
+      fingerprint: fingerprint("render_failed", recordId, errorClass),
+      actor: transient ? "worker_heal" : "desk_agent",
+      output_id: row?.output_id || null,
+      diagnosis: transient
+        ? "Render_Status=Failed with a transient Remotion crash. Worker requeues Ready for Render and pulses R4."
+        : "Render_Status=Failed with a non-retryable error. Desk must fix the payload before requeue.",
+    };
+  }
   if (renderStatus === "Ready for Render" && !jobId && row?.voiceover_required && !String(row?.voiceover_url || "").trim()) {
     // R4 returns waiting_for_voiceover on every pulse; re-pulsing R4 cannot heal it.
     // Worker copies the parent voiceover down or re-arms the P2 selector and resumes produce at audio.
@@ -457,7 +498,34 @@ export function classifyAutonomousRfrGate({ notes, outputs = [], requestId } = {
   };
 }
 
+export function classifyPublishFailed(row) {
+  if (row?.published_at) return null;
+  const outputStatus = String(row?.output_status || "").trim();
+  const publish = String(row?.publish_status || "").trim();
+  if (outputStatus && !["Approved for Publishing", "Failed"].includes(outputStatus)) return null;
+  const error = String(row?.publish_error || "").trim();
+  const failed = publish === "Failed" || outputStatus === "Failed";
+  const retryableReady = publish === "Ready to Publish" && (Boolean(row?.publish_retry_eligible) || Boolean(error));
+  if (!failed && !retryableReady) return null;
+  if (!error && !failed) return null;
+  const transient = deskTransientPublishError(error) || (failed && !error);
+  const recordId = String(row?.id || row?.record_id || "").trim();
+  const errorClass = errorClassFromText(error || "publish_failed");
+  return {
+    kind: "publish_failed_transient",
+    class: transient ? "transient" : "code_bug",
+    record_id: recordId || null,
+    fingerprint: fingerprint("publish_failed_transient", recordId, errorClass),
+    actor: transient ? "worker_heal" : "desk_agent",
+    output_id: row?.output_id || null,
+    diagnosis: transient
+      ? "Publish looks Failed (Failed status or retry-eligible error such as Instagram IN_PROGRESS). Worker resets the dispatch cap, requeues Ready to Publish, and pulses the publisher. Do not Approve again."
+      : "Publish Failed with a non-retryable platform error. Desk must fix the asset or Graph settings before retry.",
+  };
+}
+
 export function classifyPublishDispatch(row, nowMs = Date.now()) {
+  if (classifyPublishFailed(row)) return null;
   const recordId = String(row?.id || row?.record_id || "").trim();
   const outputStatus = String(row?.output_status || "").trim();
   const platform = String(row?.platform || "").trim();
@@ -646,6 +714,8 @@ export const CLASSIFIER_KINDS = Object.freeze([
   "az_not_auto_finished",
   "autonomous_rfr_gate",
   "publish_never_dispatch",
+  "publish_failed_transient",
+  "render_failed",
   "native_cover_missing",
   "rfr_locked_missing_deliverable",
   "health_down",

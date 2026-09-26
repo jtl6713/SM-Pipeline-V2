@@ -150,19 +150,56 @@ def process_request(
             token=settings["token"],
             version=settings["version"],
         )
-        try:
-            created = graph.create_reel(body)
-        except InstagramGraphError as exc:
-            # Invalid curated/search place IDs must not block the publish.
-            if body.get("location_id") and "LOCATION" in str(exc).upper():
-                body = {k: v for k, v in body.items() if k != "location_id"}
-                preview["location_tag_dropped"] = str(exc)
+        creation_id = field_str(output, "Platform_Media_ID")
+        created = {"id": creation_id} if creation_id else {}
+        if creation_id:
+            preview["resumed_container_id"] = creation_id
+        else:
+            try:
                 created = graph.create_reel(body)
-            else:
-                raise
-        creation_id = str(created.get("id") or "").strip()
-        graph.wait_for_container(creation_id)
-        published = graph.publish(creation_id)
+            except InstagramGraphError as exc:
+                # Invalid curated/search place IDs must not block the publish.
+                if body.get("location_id") and "LOCATION" in str(exc).upper():
+                    body = {k: v for k, v in body.items() if k != "location_id"}
+                    preview["location_tag_dropped"] = str(exc)
+                    created = graph.create_reel(body)
+                else:
+                    raise
+            creation_id = str(created.get("id") or "").strip()
+            if creation_id:
+                client.update_record(
+                    PLATFORM_OUTPUTS_TABLE,
+                    output["id"],
+                    {"Platform_Media_ID": creation_id},
+                    typecast=True,
+                )
+                output["fields"] = {**(output.get("fields") or {}), "Platform_Media_ID": creation_id}
+        try:
+            graph.wait_for_container(creation_id, attempts=12, delay_s=5.0)
+        except InstagramGraphError as exc:
+            if _is_in_progress(exc):
+                _mark_processing(client, output, creation_id, exc)
+                return {
+                    "processed": False,
+                    "reason": "container_in_progress",
+                    "creation_id": creation_id,
+                    "attempt_count": attempt,
+                    **preview,
+                }
+            raise
+        try:
+            published = graph.publish(creation_id)
+        except InstagramGraphError as exc:
+            if _is_in_progress(exc) or "not ready" in str(exc).lower():
+                _mark_processing(client, output, creation_id, exc)
+                return {
+                    "processed": False,
+                    "reason": "container_in_progress",
+                    "creation_id": creation_id,
+                    "attempt_count": attempt,
+                    **preview,
+                }
+            raise
         media_id = str(published.get("id") or creation_id).strip()
         meta = graph.media_meta(media_id)
         permalink = str(meta.get("permalink") or created.get("permalink") or "").strip()
@@ -241,6 +278,45 @@ def process_request(
     }
 
 
+def _is_in_progress(exc: Exception) -> bool:
+    code = str(getattr(exc, "status_code", "") or "").upper()
+    text = f"{exc} {getattr(exc, 'status', '')}".upper()
+    return code == "IN_PROGRESS" or "STILL BEING PROCESSED" in text or "STILL IN PROGRESS" in text
+
+
+def _mark_processing(
+    client: AirtableClient,
+    output: dict[str, Any],
+    creation_id: str,
+    exc: Exception,
+) -> None:
+    retry_at = utc_now() + timedelta(minutes=1)
+    notes = _append_notes(
+        field_str(output, "Output_Notes"),
+        (
+            f"AP1-IG Instagram container {creation_id} still processing at {stamp_minutes()}. "
+            "Publish lock cleared; next pulse resumes wait+publish instead of creating a second Reel."
+        ),
+    )
+    client.update_record(
+        PLATFORM_OUTPUTS_TABLE,
+        output["id"],
+        {
+            "Publish_Locked_By": "",
+            "Publish_Locked_At": None,
+            "Publish_Started_At": None,
+            "Publish_Status": PUBLISH_STATUS_PUBLISHING,
+            "Platform_Media_ID": creation_id,
+            "Publish_Retry_Eligible": True,
+            "Publish_Next_Retry_At": iso_utc(retry_at),
+            "Publish_Error_Message": "",
+            "Last_Publish_Attempt_At": iso_utc(),
+            "Output_Notes": notes,
+        },
+        typecast=True,
+    )
+
+
 def _mark_failed(client: AirtableClient, output: dict[str, Any], exc: Exception) -> None:
     status_code = getattr(exc, "status_code", "") or "unknown"
     status = getattr(exc, "status", "") or str(exc) or "No status returned"
@@ -300,6 +376,7 @@ def _mark_failed(client: AirtableClient, output: dict[str, Any], exc: Exception)
                 "Publish_Status": PUBLISH_STATUS_READY,
                 "Publish_Retry_Eligible": True,
                 "Publish_Next_Retry_At": iso_utc(retry_at),
+                "Platform_Media_ID": "",
             }
         )
     client.update_record(PLATFORM_OUTPUTS_TABLE, output["id"], fields, typecast=True)
