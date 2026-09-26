@@ -1,4 +1,4 @@
 Deploy Studio API Worker production
-Reason: TikTok Insights native video ID discovery
-Source merge: 74e722bae3d1d1878a34640fe8ffacc5ce3ece17
+Reason: correct Worker version to 0.10.385 after TikTok Insights discovery merge
+Source merge: f8e46a2028fe7074ba93a9feeaa5c9856e14b58c
 Requested: 2026-09-25
