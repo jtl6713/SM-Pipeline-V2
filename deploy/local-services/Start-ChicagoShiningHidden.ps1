@@ -195,7 +195,7 @@ if ($cfg.Kind -eq 'node') {
 elseif ($cfg.Kind -eq 'python') {
     $filePath = Join-Path $runtime '.venv\Scripts\python.exe'
     if (-not (Test-Path -LiteralPath $filePath)) { $filePath = (Get-Command python.exe -ErrorAction Stop).Source }
-    $argumentList = if ($cfg.DashB) { @('-B', 'app.py') } else { @('app.py') }
+    $argumentList = if ($cfg.ContainsKey('DashB') -and $cfg.DashB) { @('-B', 'app.py') } else { @('app.py') }
 }
 elseif ($cfg.Kind -eq 'uvicorn') {
     $filePath = Join-Path $runtime '.venv\Scripts\python.exe'
@@ -207,10 +207,11 @@ else {
 }
 
 $saved = @{}
-if ($cfg.ExtraEnv) {
-    foreach ($key in $cfg.ExtraEnv.Keys) {
+$extraEnv = if ($cfg.ContainsKey('ExtraEnv')) { $cfg.ExtraEnv } else { $null }
+if ($extraEnv) {
+    foreach ($key in $extraEnv.Keys) {
         $saved[$key] = [Environment]::GetEnvironmentVariable($key, 'Process')
-        [Environment]::SetEnvironmentVariable($key, [string]$cfg.ExtraEnv[$key], 'Process')
+        [Environment]::SetEnvironmentVariable($key, [string]$extraEnv[$key], 'Process')
     }
 }
 
@@ -218,7 +219,7 @@ Write-Host ("Starting {0} hidden on port {1}" -f $cfg.Name, $cfg.Port)
 try {
     $p = Start-Process -FilePath $filePath -WorkingDirectory $runtime -ArgumentList $argumentList -WindowStyle Hidden -RedirectStandardOutput $outLog -RedirectStandardError $errLog -PassThru
 } finally {
-    if ($cfg.ExtraEnv) {
+    if ($extraEnv) {
         foreach ($key in $saved.Keys) {
             [Environment]::SetEnvironmentVariable($key, $saved[$key], 'Process')
         }

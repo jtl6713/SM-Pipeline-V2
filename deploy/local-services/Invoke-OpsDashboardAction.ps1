@@ -66,6 +66,25 @@ $Ports = @{
     'ops-dashboard' = 3361
 }
 
+function Stop-CatalogListeners {
+    if (-not (Test-Path -LiteralPath $PortGuard -PathType Leaf)) {
+        throw "Missing port guard: $PortGuard"
+    }
+    . $PortGuard
+    $failed = $false
+    foreach ($name in $Startable) {
+        if ($name -eq 'ops-dashboard') { continue }
+        try {
+            Stop-ListenerOnPort -Port ([int]$Ports[$name]) -ServiceName $name
+        } catch {
+            Write-Host $_.Exception.Message
+            $failed = $true
+        }
+    }
+    if ($failed) { return 1 }
+    return 0
+}
+
 function Assert-Service([string[]]$Allowed) {
     if ([string]::IsNullOrWhiteSpace($Service)) {
         throw "Action $Action requires -Service."
@@ -180,6 +199,10 @@ switch ($Action) {
     }
     'stop-all' {
         $code = Invoke-Ps1 $StopHelper @()
+        # Sweep catalog ports after the stock helper so a newly added
+        # service (YouTube Uploader LA :3341) cannot be left listening.
+        $sweep = Stop-CatalogListeners
+        if ($sweep -ne 0 -and $code -eq 0) { $code = $sweep }
     }
     'verify' {
         $code = Invoke-Ps1 $VerifyPs1 @()
