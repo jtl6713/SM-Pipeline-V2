@@ -240,7 +240,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.383-creative-output-heading";
+  const BUILD_ID = "item4-0.6.384-mobile-output-scroll-top";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -13346,7 +13346,6 @@
     $("creativeEditorPanel").classList.toggle("title-edit-locked", titleLocked);
     $("creativeEditorPanel").classList.toggle("watch-only", !output.do_not_publish);
     syncCreativeStoryTeaserChrome(output);
-    $("creativeEditorPanel").scrollIntoView({ behavior: "smooth", block: "start" });
     setCreativeBusy(false);
     refreshCreativeScheduleHint(output);
     if ($("creativeScheduleAt") && studioEffectiveScheduleIso(output)) {
@@ -13389,6 +13388,7 @@
     if (activeCreativeOutputId !== recordId) creativeSlideCollapsed.clear();
     activeCreativeOutputId = recordId;
     $("creativeEditorPanel").hidden = false;
+    window.scrollTo(0, 0);
     $("creativeEditorTitle").textContent = "Loading creative review…";
     $("creativeSlidesList").innerHTML = '<div class="empty">Loading creative directives…</div>';
     phase6Message("Loading saved creative values…");
