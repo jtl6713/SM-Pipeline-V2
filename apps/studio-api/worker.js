@@ -428,7 +428,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.380-insights-all-profiles",
+          version: "0.10.381-production-unlimited-assets",
           studio_desk_inventory_v1: true,
           studio_desk_activity_v1: true,
           studio_tiktok_complete_v1: true,
@@ -4276,7 +4276,7 @@ async function updateProductionRequestOutput(request, env, url, authorization) {
 
 const ITEM4_MEDIA_PUBLIC_BASE = "https://media.chicagoshining.com";
 const ITEM4_MAPPING_TABLE = "Platform Output Mappings";
-const ITEM4_MAX_FILES = 60;
+const ITEM4_MAX_FILES_PER_UPLOAD_REQUEST = 60;
 const ITEM4_MAX_FILE_BYTES = 25 * 1024 * 1024;
 const ITEM4_MAX_TOTAL_BYTES = 150 * 1024 * 1024;
 const ITEM4_MAX_CLIP_FILE_BYTES = 200 * 1024 * 1024;
@@ -5507,10 +5507,11 @@ async function uploadItem4MasterAssets(request, env, url, authorization, ctx) {
   try { form = await request.formData(); } catch { throw new HttpError(400, "Could not read uploaded media"); }
   const files = form.getAll("files").filter(value => value && typeof value.arrayBuffer === "function");
   if (!files.length) throw new HttpError(400, "Choose at least one file");
-  if (files.length > ITEM4_MAX_FILES) throw new HttpError(400, `Upload no more than ${ITEM4_MAX_FILES} files at once`);
+  if (files.length > ITEM4_MAX_FILES_PER_UPLOAD_REQUEST) {
+    throw new HttpError(400, `Send no more than ${ITEM4_MAX_FILES_PER_UPLOAD_REQUEST} files in one upload request`);
+  }
 
   const existing = item4AssetManifest(record);
-  if (existing.length + files.length > ITEM4_MAX_FILES) throw new HttpError(400, `A Production Request can contain at most ${ITEM4_MAX_FILES} master assets`);
   const meta = item4ParseJson(form.get("metadata"), []);
   const metadata = Array.isArray(meta) ? meta : [];
   const requestedKind = String(form.get("origin_kind") || "").trim().toLowerCase();
@@ -6365,9 +6366,6 @@ async function attachItem4LibraryAssets(request, env, url, authorization) {
       record: mapProductionRequest(record),
       message: "Selected library stills were already attached.",
     });
-  }
-  if (existing.length + incoming.length > ITEM4_MAX_FILES) {
-    throw new HttpError(400, `A Production Request can contain at most ${ITEM4_MAX_FILES} master assets`);
   }
   const appended = [];
   for (const mediaId of incoming) {
@@ -13315,12 +13313,16 @@ async function generateItem4PreProductionAiMaster(request, env, url, authorizati
   if (!["Draft", "Ready"].includes(status)) {
     throw new HttpError(409, "AI images can only be generated before this request is promoted");
   }
-  if (String(f(record, "Carousel_Image_Mode") || "").trim() !== "Make AI Generated") {
-    throw new HttpError(409, "This request is not configured for AI-generated images");
+  const body = await request.json().catch(() => ({}));
+  const requestedTarget = Math.round(Number(body?.target_ai_count || 0));
+  const requestedAdd = Math.round(Number(body?.add_ai_count || 0));
+  const explicitAiAdd = (Number.isFinite(requestedTarget) && requestedTarget > 0)
+    || (Number.isFinite(requestedAdd) && requestedAdd > 0);
+  if (String(f(record, "Carousel_Image_Mode") || "").trim() !== "Make AI Generated" && !explicitAiAdd) {
+    throw new HttpError(409, "This request is not configured for automatic AI image generation");
   }
   if (!env.STUDIO_MEDIA) throw new HttpError(503, "Studio media storage is not configured");
 
-  const body = await request.json().catch(() => ({}));
   const reset = Boolean(body?.reset);
   let assets = item4AssetManifest(record);
   if (reset) {
@@ -13353,10 +13355,14 @@ async function generateItem4PreProductionAiMaster(request, env, url, authorizati
   const origin = item4ParseEzOrigin(record);
   const requestedTotal = item4PreProductionAiRequestedCount(record);
   const manualCount = assets.filter((asset) => !/^studio_ai/i.test(String(asset?.source || ""))).length;
-  const desiredAiCount = origin.inputKind === "mixed" && origin.aiCount
-    ? origin.aiCount
-    : Math.max(0, requestedTotal - manualCount);
   const generated = assets.filter((asset) => /^studio_ai/i.test(String(asset?.source || "")));
+  const desiredAiCount = Number.isFinite(requestedTarget) && requestedTarget > 0
+    ? requestedTarget
+    : Number.isFinite(requestedAdd) && requestedAdd > 0
+      ? generated.length + requestedAdd
+      : origin.inputKind === "mixed" && origin.aiCount
+        ? origin.aiCount
+        : Math.max(0, requestedTotal - manualCount);
   if (generated.length >= desiredAiCount) {
     return respond(request, env, {
       ok: true,
