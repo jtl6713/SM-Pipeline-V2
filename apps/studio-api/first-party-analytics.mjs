@@ -88,7 +88,7 @@ export function nativePlatformId(platform, fields = {}) {
   const name = String(platform || fields.Platform || "").toLowerCase();
   if (name === "youtube") return String(fields.YouTube_Video_ID || fields.Platform_Post_ID || fields.Platform_Media_ID || "").trim() || null;
   if (name === "instagram") return String(fields.IG_Carousel_Published_Media_ID || fields.IG_Story_Post_ID || fields.Platform_Post_ID || fields.Platform_Media_ID || "").trim() || null;
-  if (name === "facebook") return String(fields.FB_Slideshow_Meta_Video_ID || fields.Platform_Post_ID || fields.Platform_Media_ID || "").trim() || null;
+  if (name === "facebook") return String(fields.FB_Slideshow_Meta_Video_ID || fields.Platform_Media_ID || fields.Platform_Post_ID || "").trim() || null;
   if (name === "tiktok") {
     const direct = String(fields.Platform_Post_ID || fields.Platform_Media_ID || fields.Manual_Published_URL || "").trim();
     if (/^\d{8,}$/.test(direct)) return direct;
@@ -202,25 +202,44 @@ export async function fetchInstagramOwnedMediaAnalytics({ postId, token, version
   };
 }
 
-export async function fetchFacebookOwnedPostAnalytics({ postId, token, version = "v26.0", fetchImpl = fetch }) {
-  const id = String(postId || "").trim();
-  if (!id) throw new Error("Facebook post ID is missing");
+export async function fetchFacebookOwnedPostAnalytics({ postId, pageId = "", token, version = "v26.0", fetchImpl = fetch }) {
+  const rawId = String(postId || "").trim();
+  if (!rawId) throw new Error("Facebook post ID is missing");
+  const page = String(pageId || "").trim();
 
-  let base = {};
-  try {
-    base = await metaGet(id, {
-      token, version, fetchImpl,
-      params: { fields: "id,created_time,permalink_url,likes.limit(0).summary(true),comments.limit(0).summary(true),shares" },
-    });
-  } catch {
-    // Facebook Page posts, videos, and Reels do not expose an identical field
-    // surface. A missing engagement field must not prevent the media insights
-    // snapshot itself from being collected.
-    base = await metaGet(id, {
-      token, version, fetchImpl,
-      params: { fields: "id,created_time,permalink_url" },
-    });
+  // Page post IDs are canonically page-scoped (PAGE_ID_POST_ID). Some publish
+  // paths store only the trailing post ID, while Reels/media IDs remain directly
+  // addressable. Try the page-scoped form first, then the raw ID.
+  const ids = [];
+  if (page && /^\d+$/.test(rawId) && !rawId.includes("_")) ids.push(page + "_" + rawId);
+  ids.push(rawId);
+  const candidates = [...new Set(ids)];
+
+  let id = rawId;
+  let base = null;
+  let lastBaseError = null;
+  for (const candidate of candidates) {
+    try {
+      base = await metaGet(candidate, {
+        token, version, fetchImpl,
+        params: { fields: "id,created_time,permalink_url,likes.limit(0).summary(true),comments.limit(0).summary(true),shares" },
+      });
+      id = candidate;
+      break;
+    } catch (richError) {
+      try {
+        base = await metaGet(candidate, {
+          token, version, fetchImpl,
+          params: { fields: "id,created_time,permalink_url" },
+        });
+        id = candidate;
+        break;
+      } catch (basicError) {
+        lastBaseError = basicError || richError;
+      }
+    }
   }
+  if (!base) throw lastBaseError || new Error("Facebook object could not be loaded");
 
   const readSummary = async (field) => {
     try {
@@ -245,7 +264,31 @@ export async function fetchFacebookOwnedPostAnalytics({ postId, token, version =
     }
   };
 
-  let likes = nullableNumber(base.likes?.summary?.total_count);
+  const media = await metaInsightMetrics(`${id}/insights`,
+    [
+      "post_media_view",
+      "post_total_media_view_unique",
+      "post_reactions_like_total",
+      "post_reactions_love_total",
+      "post_reactions_wow_total",
+      "post_reactions_haha_total",
+      "post_reactions_sorry_total",
+      "post_reactions_anger_total",
+    ],
+    { token, version, fetchImpl, params: { period: "lifetime" } }
+  ).catch(() => ({}));
+
+  const reactionTotal = sumKnown([
+    media.post_reactions_like_total,
+    media.post_reactions_love_total,
+    media.post_reactions_wow_total,
+    media.post_reactions_haha_total,
+    media.post_reactions_sorry_total,
+    media.post_reactions_anger_total,
+  ]);
+
+  let likes = reactionTotal;
+  if (likes === null) likes = nullableNumber(base.likes?.summary?.total_count);
   if (likes === null) likes = await readSummary("likes");
   if (likes === null) likes = await readSummary("reactions");
   let comments = nullableNumber(base.comments?.summary?.total_count);
@@ -253,10 +296,6 @@ export async function fetchFacebookOwnedPostAnalytics({ postId, token, version =
   let shares = nullableNumber(base.shares?.count);
   if (shares === null) shares = await readShares();
 
-  const media = await metaInsightMetrics(`${id}/insights`,
-    ["post_media_view", "post_total_media_view_unique"],
-    { token, version, fetchImpl, params: { period: "lifetime" } }
-  ).catch(() => ({}));
   return {
     id,
     published_at: base.created_time || null,
@@ -267,7 +306,12 @@ export async function fetchFacebookOwnedPostAnalytics({ postId, token, version =
     shares,
     total_interactions: sumKnown([likes, comments, shares]),
     source: "facebook-page-owned-post",
-    platform_metrics: { ...media, permalink_url: base.permalink_url || null },
+    platform_metrics: {
+      ...media,
+      raw_post_id: rawId,
+      resolved_post_id: id,
+      permalink_url: base.permalink_url || null,
+    },
   };
 }
 
