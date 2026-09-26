@@ -63,7 +63,7 @@
   border: 1px solid var(--insights-line);
   border-left-width: 5px;
   border-radius: 12px;
-  padding: 12px 14px;
+  padding: 16px 18px;
   background: #fff;
   color: var(--insights-ink);
 }
@@ -93,7 +93,7 @@
   display: grid;
   gap: 5px;
   min-height: 108px;
-  padding: 15px;
+  padding: 17px 18px;
   border: 1px solid var(--insights-line);
   border-radius: 14px;
   background: linear-gradient(180deg, #fff, #f7fbfb);
@@ -129,6 +129,8 @@
 .insights-card {
   grid-column: span 6;
   min-width: 0;
+  box-sizing: border-box;
+  padding: 18px 20px 20px;
 }
 
 .insights-card.wide {
@@ -676,7 +678,9 @@
 
 
 .insights-connections-panel {
+  box-sizing: border-box;
   margin-bottom: 14px;
+  padding: 18px 20px 20px;
 }
 
 .insights-connections {
@@ -689,7 +693,7 @@
   min-width: 0;
   border: 1px solid #d8e3e4;
   border-radius: 12px;
-  padding: 12px;
+  padding: 14px 16px;
   background: #fff;
 }
 
@@ -792,5 +796,22 @@
 @media (max-width: 760px) {
   .insights-connections {
     grid-template-columns: 1fr;
+  }
+}
+
+
+/* Keep Insights content away from panel frames without wasting mobile space. */
+@media (max-width: 760px) {
+  .insights-card,
+  .insights-connections-panel {
+    padding: 14px 15px 16px;
+  }
+
+  .insights-kpi {
+    padding: 15px 16px;
+  }
+
+  .insights-coverage {
+    padding: 14px 15px;
   }
 }

@@ -28,3 +28,10 @@ test("Insights page has responsive dashboard styling", () => {
   assert.match(css, /\.insights-scatter/);
   assert.match(css, /@media \(max-width: 760px\)/);
 });
+
+
+test("Insights cards keep content away from panel frames", () => {
+  assert.match(css, /\.insights-card\s*\{[^}]*padding:\s*18px 20px 20px/s);
+  assert.match(css, /\.insights-kpi\s*\{[^}]*padding:\s*17px 18px/s);
+  assert.match(css, /\.insights-connections-panel\s*\{[^}]*padding:\s*18px 20px 20px/s);
+});
