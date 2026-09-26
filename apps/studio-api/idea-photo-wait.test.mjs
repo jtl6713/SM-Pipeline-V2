@@ -240,3 +240,38 @@ test("idea save persists checked library stills and does not drop origin", () =>
   assert.match(fields.Production_Config_Notes, /Keep the river light/);
   assert.doesNotMatch(fields.Production_Config_Notes, /recOld/);
 });
+
+
+test("explicit AI image mode stops listening and clears auto-matched library photos", () => {
+  const fields = ideaProductionConfigFields({
+    save_production_config: true,
+    platforms: ["Instagram"],
+    content_type: "Carousel",
+    carousel_slide_count_mode: "Exact",
+    carousel_slide_count: 6,
+    carousel_image_mode: "Make AI Generated",
+  }, "media_asset_ids=recOldA,recOldB\nKeep the neon look.");
+
+  assert.equal(fields.Production_Carousel_Image_Mode, "Make AI Generated");
+  assert.equal(fields.Production_Carousel_Slide_Count_Mode, "Exact");
+  assert.equal(fields.Production_Carousel_Slide_Count, 6);
+  assert.equal(fields.Studio_Photo_Wait_Status, null);
+  assert.equal(fields.Studio_Photo_Match_JSON, null);
+  assert.deepEqual(fields.Studio_Matched_Media_Assets, []);
+  assert.equal(fields.Production_Config_Notes, "Keep the neon look.");
+});
+
+test("explicit listen mode keeps the automatic listener enabled", () => {
+  const fields = ideaProductionConfigFields({
+    save_production_config: true,
+    platforms: ["Instagram"],
+    content_type: "Carousel",
+    carousel_slide_count_min: 3,
+    carousel_slide_count_max: 8,
+    carousel_image_mode: "Wait for matching photos",
+  });
+
+  assert.equal(fields.Production_Carousel_Image_Mode, "Manual Upload");
+  assert.equal(fields.Production_Carousel_Slide_Count_Mode, "Target range");
+  assert.equal(fields.Studio_Photo_Wait_Status, "Waiting");
+});
