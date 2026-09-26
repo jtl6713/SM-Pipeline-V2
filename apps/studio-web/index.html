@@ -467,6 +467,10 @@
  <div class="item4-upload-zone item4-ai-generation-panel" id="item4AiGenerationPanel" hidden>
  <div class="item4-upload-icon" aria-hidden="true">AI</div>
  <div><strong id="item4AiGenerationTitle">Generate AI images</strong><span id="item4AiGenerationHint">Studio will create the requested images before approval.</span></div>
+ <label class="form-field" style="min-width:280px;flex:1 1 360px;margin:0;">
+ <span>Describe what you want the AI image to be</span>
+ <textarea id="item4AiPrompt" rows="3" maxlength="2000" placeholder="Example: Sunset view of the Chicago River from the bridge, cinematic, realistic, no text" aria-label="Describe the AI image"></textarea>
+ </label>
  <label class="form-field" style="min-width:110px;max-width:150px;margin:0;">
  <span>Quantity to add</span>
  <input id="item4AiAddCount" type="number" min="1" step="1" value="1" inputmode="numeric" aria-label="AI images to add">
@@ -1963,7 +1967,7 @@
  <div class="studio-footer-meta">
  <span id="aiApiFooter" aria-live="polite"><strong>AI API:</strong> loading…</span>
  <span id="apiStatus" class="topbar-status">Connecting…</span>
- <span id="uiBuildLabel">UI build 0.6.382</span>
+ <span id="uiBuildLabel">UI build 0.6.385</span>
  <span id="workerBuildLabel">Worker …</span> </div>
  </footer>
 
@@ -2124,7 +2128,7 @@
  <script src="/assets/ez-plan.js?v=0.6.376-recommend-carousel-slides"></script>
  <script src="/assets/pipeline-schedule-grid-0622.js?v=0.6.361-schedule-collapsed"></script>
  <script src="/assets/platform-schedule-calendar-0924.js?v=0.6.380-branch-reconcile"></script>
- <script src="/assets/app-item4-0625.js?v=0.6.384-mobile-output-scroll-top"></script>
+ <script src="/assets/app-item4-0625.js?v=0.6.385-ai-prompt-guidance"></script>
  <script src="/assets/insights-0622.js?v=0.6.365-first-party-analytics-reconciled"></script>
  <script src="/assets/ai-api-footer.js?v=0.6.376-ai-api"></script>
  <script src="/assets/sticky-footer-scroll.js?v=0.6.378-sticky-footer-scroll"></script>
