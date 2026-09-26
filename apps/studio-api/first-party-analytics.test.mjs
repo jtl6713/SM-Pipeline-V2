@@ -50,6 +50,7 @@ test("native IDs prefer platform-specific fields", () => {
   assert.equal(nativePlatformId("YouTube", { Platform_Post_ID: "urlish", YouTube_Video_ID: "abc123" }), "abc123");
   assert.equal(nativePlatformId("Instagram", { Platform_Post_ID: "1", Platform_Media_ID: "2" }), "1");
   assert.equal(nativePlatformId("Instagram", { Platform_Post_ID: "1", Platform_Media_ID: "2", IG_Carousel_Published_Media_ID: "3" }), "3");
+  assert.equal(nativePlatformId("Facebook", { Platform_Post_ID: "story-url-id", Platform_Media_ID: "story-media-id" }), "story-media-id");
   assert.equal(nativePlatformId("TikTok", { Platform_Post_ID: "https://www.tiktok.com/@x/video/777777777777" }), "777777777777");
 });
 
@@ -161,4 +162,67 @@ test("studio treats healthy YouTube analytics as connected even when Data API qu
   assert.match(block, /"connected"/);
   assert.match(block, /data_api_quota_exceeded/);
   assert.match(block, /analytics remain connected/);
+});
+
+
+test("Facebook owned analytics resolves page-scoped post IDs and current media-view metrics", async () => {
+  const requested = [];
+  const json = (body, status = 200) => new Response(JSON.stringify(body), {
+    status,
+    headers: { "Content-Type": "application/json" },
+  });
+  const fetchImpl = async (rawUrl) => {
+    const url = new URL(rawUrl);
+    requested.push(url.pathname + "?" + url.searchParams.toString());
+    if (url.pathname.endsWith("/1406705239181984_1328690532508711")) {
+      return json({
+        id: "1406705239181984_1328690532508711",
+        created_time: "2026-09-25T07:31:50+0000",
+        likes: { summary: { total_count: 2 } },
+        comments: { summary: { total_count: 1 } },
+        shares: { count: 1 },
+      });
+    }
+    if (url.pathname.endsWith("/1406705239181984_1328690532508711/insights")) {
+      return json({
+        data: [
+          { name: "post_media_view", values: [{ value: 321 }] },
+          { name: "post_total_media_view_unique", values: [{ value: 200 }] },
+          { name: "post_reactions_like_total", values: [{ value: 3 }] },
+          { name: "post_reactions_love_total", values: [{ value: 1 }] },
+        ],
+      });
+    }
+    return json({ error: { code: 100, message: "Unsupported get request" } }, 400);
+  };
+  const result = await fetchFacebookOwnedPostAnalytics({
+    postId: "1328690532508711",
+    pageId: "1406705239181984",
+    token: "test-token",
+    fetchImpl,
+  });
+  assert.equal(result.id, "1406705239181984_1328690532508711");
+  assert.equal(result.views, 321);
+  assert.equal(result.reach, 200);
+  assert.equal(result.likes, 4);
+  assert.equal(result.comments, 1);
+  assert.equal(result.shares, 1);
+  assert.equal(result.total_interactions, 6);
+  assert.equal(requested.some((url) => url.includes("1406705239181984_1328690532508711")), true);
+});
+
+test("Facebook native ID prefers media ID for story-style outputs", () => {
+  assert.equal(
+    nativePlatformId("Facebook", { Platform_Post_ID: "story-url-id", Platform_Media_ID: "story-media-id" }),
+    "story-media-id"
+  );
+});
+
+test("Facebook connection status treats sample-post failures as warnings", () => {
+  const start = workerSource.indexOf('const page = await studioInsightsMetaIdentity(settings.FACEBOOK_PAGE_ID');
+  assert.ok(start >= 0);
+  const block = workerSource.slice(start, start + 2200);
+  assert.match(block, /result\.facebook\.status = "connected"/);
+  assert.match(block, /result\.facebook\.sync_warning/);
+  assert.match(block, /pageId: result\.facebook\.account_id/);
 });

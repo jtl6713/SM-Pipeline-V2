@@ -16099,6 +16099,7 @@ async function getInsightsConnections(request, env, url, authorization) {
   const settings = await studioActivePipelineSettings(env, [
     "FACEBOOK_PAGE_ID",
     "FACEBOOK_PAGE_ACCESS_TOKEN",
+    "FACEBOOK_PAGE_ID",
     "FACEBOOK_GRAPH_API_VERSION",
     "INSTAGRAM_BUSINESS_ACCOUNT_ID",
     "YOUTUBE_CHANNEL_ID",
@@ -16167,15 +16168,23 @@ async function getInsightsConnections(request, env, url, authorization) {
         const page = await studioInsightsMetaIdentity(settings.FACEBOOK_PAGE_ID, token, version, "id,name");
         result.facebook.account_name = page?.name || null;
         result.facebook.account_id = page?.id || settings.FACEBOOK_PAGE_ID;
+        result.facebook.status = "connected";
+        // Page identity is the authorization proof. Individual historical posts,
+        // Reels, or Stories can age out or use a media-specific object ID without
+        // meaning the Page token is unauthorized.
         const sample = recentOutputForPlatform("Facebook");
         if (sample) {
-          await fetchFacebookOwnedPostAnalytics({
-            postId: nativePlatformId("Facebook", studioOutputNativeIdFields(sample)),
-            token,
-            version,
-          });
+          try {
+            await fetchFacebookOwnedPostAnalytics({
+              postId: nativePlatformId("Facebook", studioOutputNativeIdFields(sample)),
+              pageId: result.facebook.account_id,
+              token,
+              version,
+            });
+          } catch (sampleError) {
+            result.facebook.sync_warning = sanitizeAnalyticsError(sampleError);
+          }
         }
-        result.facebook.status = "connected";
       } catch (error) {
         Object.assign(result.facebook, studioInsightsConnectionStateFromError(error));
       }
@@ -16850,6 +16859,7 @@ async function studioFetchOwnedOutputAnalytics(env, row, { platform, postId, pub
   if (platform === "Facebook") {
     return fetchFacebookOwnedPostAnalytics({
       postId,
+      pageId: settings.FACEBOOK_PAGE_ID,
       token: settings.FACEBOOK_PAGE_ACCESS_TOKEN || env.FACEBOOK_PAGE_ACCESS_TOKEN,
       version,
     });
