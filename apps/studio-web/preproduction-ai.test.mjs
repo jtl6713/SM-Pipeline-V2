@@ -19,19 +19,17 @@ test("pre-production AI images have their own Production UI", async () => {
   assert.match(html, /id="item4RegenerateAiImages"/);
   assert.match(app, /\/generate-ai-masters/);
   assert.match(app, /maybeGenerateItem4AiImages\(status\)/);
-  assert.match(app, /Review them below, then approve when you are happy/);
+  assert.match(app, /Add any quantity; the structure is only a recommendation/);
   assert.match(app, /BUILD_ID = "item4-\d+\.\d+\.\d+-[^"]+"/);
 });
 
-test("pure AI requests hide manual media while mixed requests keep it available", async () => {
+test("AI generation stays available alongside uploaded and library media", async () => {
   const app = await readFile(appPath, "utf8");
 
-  assert.match(app, /function item4AiOnlyRequestActive/);
-  assert.match(app, /if \(\/ez-input=mixed\/i\.test\(notes\)\) return false/);
-  assert.match(app, /const aiOnly = item4AiOnlyRequestActive\(activeProductionRequest\)/);
-  assert.match(app, /if \(aiOnly\) \{/);
-  assert.match(app, /const mixedAi = ai && !aiOnly/);
-  assert.match(app, /"Photos \+ AI Images"/);
+  assert.match(app, /panel\.hidden = !editable/);
+  assert.match(app, /currentAiCount \+ \(requestedAdditional \|\| 1\)/);
+  assert.match(app, /uploaded and library assets will stay/);
+  assert.doesNotMatch(app, /if \(aiOnly\) \{/);
 });
 
 test("mixed AI count uses requested AI slots rather than total slide count", async () => {
