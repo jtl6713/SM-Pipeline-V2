@@ -17,6 +17,8 @@ logger = logging.getLogger("pipeline-runner.studio-produce.ops-alert")
 
 DEFAULT_OPS_EMAIL_TO = "chicagoshining@gmail.com"
 STUDIO_REQUEST_URL = "https://studio.chicagoshining.com/"
+# Produce failures stay in Studio / the desk. Do not send escalation Gmail.
+OPS_ALERT_EMAIL_ENABLED = False
 
 
 def _html_escape(value: Any) -> str:
@@ -74,13 +76,17 @@ def send_produce_escalation(
         "email_to": to_addr,
         "subject": subject,
     }
-    try:
-        send = GmailClient().send_html(to=to_addr, subject=subject, html_body=html_body)
-        result["gmail_message_id"] = send.get("id")
-    except Exception as exc:
-        logger.exception("ops alert email failed request=%s", request_id)
-        result["ok"] = False
-        result["email_error"] = str(exc)
+    if not OPS_ALERT_EMAIL_ENABLED:
+        result["email_skipped"] = True
+        result["email_reason"] = "email_disabled"
+    else:
+        try:
+            send = GmailClient().send_html(to=to_addr, subject=subject, html_body=html_body)
+            result["gmail_message_id"] = send.get("id")
+        except Exception as exc:
+            logger.exception("ops alert email failed request=%s", request_id)
+            result["ok"] = False
+            result["email_error"] = str(exc)
 
     webhook = str(settings.get("produce_heal_webhook_url") or "").strip()
     if webhook:

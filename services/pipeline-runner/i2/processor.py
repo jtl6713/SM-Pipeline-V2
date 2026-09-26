@@ -7,7 +7,7 @@ from typing import Any
 from airtable.client import AirtableClient
 from airtable.constants import SOURCE_CANDIDATES_TABLE
 from config import load_settings
-from i2.constants import MAKE_SCENARIO_ID, MAKE_SCENARIO_NAME
+from i2.constants import I2_EMAIL_ENABLED, MAKE_SCENARIO_ID, MAKE_SCENARIO_NAME
 from i2.email_builder import review_email_html, review_subject
 from idea.constants import DEFAULT_I2_EMAIL_TO, I2_REVIEW_VIEW
 from integrations.gmail import GmailClient
@@ -66,9 +66,9 @@ def process_request(
     if dry_run:
         return {"processed": False, "dry_run": True, **preview}
 
-    settings = load_settings()
-    if not settings.get("i2_email_enabled"):
+    if not I2_EMAIL_ENABLED:
         return {"processed": False, "reason": "email_disabled", **preview}
+    settings = load_settings()
 
     hook = review_url()
     if not hook:

@@ -34,7 +34,11 @@ def run(request: StageRequest) -> StageResult:
         return StageResult(
             stage="p5",
             status="skipped",
-            message="No open Asset Request Shots matched the P5 reminder selector",
+            message=(
+                "P5 reminder email is disabled"
+                if result.get("reason") == "email_disabled"
+                else "No open Asset Request Shots matched the P5 reminder selector"
+            ),
             details={
                 "make_scenario_id": MAKE_SCENARIO_ID,
                 "selector_formula": p5_production_formula(),

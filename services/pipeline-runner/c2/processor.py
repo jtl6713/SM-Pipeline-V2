@@ -102,7 +102,9 @@ def process_request(
             generated.append(slide["id"])
 
         chain = None
-        if trigger_c3 and generated:
+        from c3.constants import C3_EMAIL_ENABLED
+
+        if trigger_c3 and generated and C3_EMAIL_ENABLED:
             payload = {
                 "content_record_id": parent["id"],
                 "content_id": field(parent, "Content_ID"),

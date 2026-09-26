@@ -8,7 +8,14 @@ from airtable.client import AirtableClient
 from airtable.constants import ASSET_REQUEST_SHOTS_TABLE, CONTENT_ITEMS_TABLE
 from config import load_settings
 from integrations.gmail import GmailClient
-from p5.constants import DEFAULT_EMAIL_TO, MAKE_SCENARIO_ID, MAKE_SCENARIO_NAME, MAX_RECORDS, OPEN_SHOTS_VIEW
+from p5.constants import (
+    DEFAULT_EMAIL_TO,
+    MAKE_SCENARIO_ID,
+    MAKE_SCENARIO_NAME,
+    MAX_RECORDS,
+    OPEN_SHOTS_VIEW,
+    P5_EMAIL_ENABLED,
+)
 from p5.email_builder import reminder_html, reminder_subject, shot_card
 from p5.formulas import p5_production_formula
 from render.fields import field, field_str, first_linked_id
@@ -44,6 +51,8 @@ def process_batch(*, dry_run: bool = False, max_records: int = MAX_RECORDS) -> d
         return {"processed": False, "reason": "no_open_asset_request_shots", **preview}
     if dry_run:
         return {"processed": False, "dry_run": True, **preview}
+    if not P5_EMAIL_ENABLED:
+        return {"processed": False, "reason": "email_disabled", **preview}
 
     cards: list[str] = []
     titles: dict[str, str] = {}

@@ -7,7 +7,6 @@ from typing import Any
 from airtable.client import AirtableClient
 from airtable.constants import CONTENT_PROFILES_TABLE, SOURCE_CANDIDATES_TABLE
 from carousel.timeutil import chicago_now
-from config import load_settings
 from i1.constants import MAKE_SCENARIO_ID, MAKE_SCENARIO_NAME
 from i1.openai_ideas import generate_ideas
 from idea.chain import trigger_next
@@ -120,7 +119,9 @@ def process_request(
         return {"processed": False, "reason": "no_ideas_created", **preview}
 
     next_result = None
-    if trigger_i2 and load_settings().get("i2_email_enabled"):
+    from i2.constants import I2_EMAIL_ENABLED
+
+    if trigger_i2 and I2_EMAIL_ENABLED:
         from i2.processor import process_request as process_i2
 
         next_result = trigger_next(

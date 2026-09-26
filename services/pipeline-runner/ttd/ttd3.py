@@ -7,7 +7,7 @@ from typing import Any
 from airtable.client import AirtableClient
 from airtable.constants import CONTENT_PROFILES_TABLE, PLATFORM_OUTPUTS_TABLE
 from carousel.timeutil import iso_utc, stamp_minutes
-from integrations.gmail import GmailClient
+from integrations.gmail import PURPOSE_TIKTOK_HANDOFF, GmailClient
 from item4.settings import PipelineSettings
 from publish.location import resolve_publish_location
 from render.fields import field, field_str, first_linked_id
@@ -126,7 +126,14 @@ def process_request(
     )
     result["subject"] = subject
     try:
-        send = GmailClient().send_html(to=to_addr, subject=subject, html_body=html_body)
+        send = GmailClient().send_html(
+            to=to_addr,
+            subject=subject,
+            html_body=html_body,
+            purpose=PURPOSE_TIKTOK_HANDOFF,
+        )
+        if send.get("skipped"):
+            raise RuntimeError("TTD3 Gmail send was blocked by the operational-email allowlist")
         result["gmail_id"] = send.get("id")
     except Exception as exc:
         client.update_record(
