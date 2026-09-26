@@ -428,7 +428,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.379-branch-reconcile",
+          version: "0.10.365-insights-all-profiles",
           studio_desk_inventory_v1: true,
           studio_desk_activity_v1: true,
           studio_tiktok_complete_v1: true,
@@ -16876,7 +16876,7 @@ async function studioSweepPublishedInsights(env, options = {}) {
       limit: 250,
       sortField: "Published_At",
       sortDirection: "desc",
-      filterFormula: "AND(" + profileFormula + ",{Test_Run_ID}=BLANK(),{Published_At}!="",{Do_Not_Publish}=0,OR({Insights_Next_Sync_At}=BLANK(),IS_BEFORE({Insights_Next_Sync_At},NOW())))",
+      filterFormula: 'AND(' + profileFormula + ',{Test_Run_ID}=BLANK(),{Published_At}!="",{Do_Not_Publish}=0,OR({Insights_Next_Sync_At}=BLANK(),IS_BEFORE({Insights_Next_Sync_At},NOW())))',
     }).catch(() => []);
 
     scanned += rows.length;
