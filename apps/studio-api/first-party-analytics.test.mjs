@@ -48,7 +48,8 @@ test("normalization keeps unavailable metrics null instead of zero", () => {
 
 test("native IDs prefer platform-specific fields", () => {
   assert.equal(nativePlatformId("YouTube", { Platform_Post_ID: "urlish", YouTube_Video_ID: "abc123" }), "abc123");
-  assert.equal(nativePlatformId("Instagram", { Platform_Post_ID: "1", Platform_Media_ID: "2" }), "1");\n  assert.equal(nativePlatformId("Instagram", { Platform_Post_ID: "1", Platform_Media_ID: "2", IG_Carousel_Published_Media_ID: "3" }), "3");
+  assert.equal(nativePlatformId("Instagram", { Platform_Post_ID: "1", Platform_Media_ID: "2" }), "1");
+  assert.equal(nativePlatformId("Instagram", { Platform_Post_ID: "1", Platform_Media_ID: "2", IG_Carousel_Published_Media_ID: "3" }), "3");
   assert.equal(nativePlatformId("TikTok", { Platform_Post_ID: "https://www.tiktok.com/@x/video/777777777777" }), "777777777777");
 });
 
