@@ -10,3 +10,5 @@ Display text repair scope fix: 2026-09-26 - keeps startDisplayTextRepair startup
 Creative editor output heading: 2026-09-26 - show Platform • Output N • Title in creative review. UI 0.6.383. Source merge 7ed6f81.
 
 Mobile output scroll-to-top: 2026-09-26 - opening a Platform Pipeline output now jumps immediately to the top before creative data loads, removing the long smooth-scroll animation on mobile. UI 0.6.384. Source merge e99e531.
+
+Production AI prompt guidance: 2026-09-26 - adds a description box for user-directed AI images in Production. UI 0.6.385. Source merge 4f23723.
