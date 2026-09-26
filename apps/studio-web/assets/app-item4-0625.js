@@ -240,7 +240,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.384-mobile-output-scroll-top";
+  const BUILD_ID = "item4-0.6.385-ai-prompt-guidance";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -3467,6 +3467,7 @@
     const generate = $("item4GenerateAiImages");
     const regenerate = $("item4RegenerateAiImages");
     const quantity = $("item4AiAddCount");
+    const promptInput = $("item4AiPrompt");
     if (!panel) return;
     const editable = Boolean(activeProductionRequest?.id) && item4RequestEditable(activeProductionRequest);
     panel.hidden = !editable;
@@ -3484,6 +3485,7 @@
           : `${aiAssets.length} AI image${aiAssets.length === 1 ? "" : "s"} in the asset pool. Add any quantity; the structure is only a recommendation.`;
     }
     if (quantity) quantity.disabled = item4AiGenerationInFlight;
+    if (promptInput) promptInput.disabled = item4AiGenerationInFlight;
     if (generate) {
       generate.hidden = false;
       generate.disabled = item4AiGenerationInFlight;
@@ -3495,13 +3497,14 @@
     }
   }
 
-  async function generateItem4AiImages({ reset = false, automatic = false, addCount = null, replaceCount = null } = {}) {
+  async function generateItem4AiImages({ reset = false, automatic = false, addCount = null, replaceCount = null, promptGuidance = "" } = {}) {
     if (!activeProductionRequest?.id || item4AiGenerationInFlight) return;
     const requestId = activeProductionRequest.id;
     const assets = Array.isArray(item4Workspace?.assets) ? item4Workspace.assets : [];
     const currentAiCount = assets.filter((asset) => /^studio_ai/i.test(String(asset?.source || ""))).length;
     const requestedAdditional = addCount == null ? null : Math.round(Number(addCount));
     const requestedReplacement = replaceCount == null ? null : Math.round(Number(replaceCount));
+    const promptGuidanceText = automatic ? "" : String(promptGuidance || "").trim();
     if (requestedAdditional != null && (!Number.isFinite(requestedAdditional) || requestedAdditional < 1)) {
       setRequestMessage("Enter at least 1 AI image to generate.", "error-text");
       return;
@@ -3529,6 +3532,7 @@
           body: JSON.stringify({
             reset: Boolean(reset && first),
             target_ai_count: target,
+            prompt_guidance: promptGuidanceText,
           }),
           timeoutMs: 120000,
           retries: 0,
@@ -9017,14 +9021,16 @@
 
   $("item4GenerateAiImages")?.addEventListener("click", () => {
     const count = Math.round(Number($("item4AiAddCount")?.value || 1));
-    generateItem4AiImages({ automatic: false, addCount: count });
+    const promptGuidance = String($("item4AiPrompt")?.value || "").trim();
+    generateItem4AiImages({ automatic: false, addCount: count, promptGuidance });
   });
   $("item4RegenerateAiImages")?.addEventListener("click", () => {
     const assets = Array.isArray(item4Workspace?.assets) ? item4Workspace.assets : [];
     const count = assets.filter((asset) => /^studio_ai/i.test(String(asset?.source || ""))).length;
     if (!count) return;
     if (!window.confirm(`Regenerate all ${count} AI images? The current AI-generated images will be replaced; uploaded and library assets will stay.`)) return;
-    generateItem4AiImages({ reset: true, automatic: false, replaceCount: count });
+    const promptGuidance = String($("item4AiPrompt")?.value || "").trim();
+    generateItem4AiImages({ reset: true, automatic: false, replaceCount: count, promptGuidance });
   });
 
   async function buildItem4Plan() {
