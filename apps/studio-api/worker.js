@@ -18,6 +18,7 @@ import {
   classifyPublishDispatch,
   classifyPublishFailed,
   classifyRenderRow,
+  deskRecoverableEscalatedError,
   deskTransientPublishError,
   deskTransientRenderError,
   classifyRfrLockedMissingDeliverable,
@@ -431,7 +432,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.386-failed-auto-heal",
+          version: "0.10.387-escalated-auto-heal",
           studio_desk_inventory_v1: true,
           studio_desk_activity_v1: true,
           studio_tiktok_complete_v1: true,
@@ -1462,6 +1463,11 @@ export default {
         await resumeStaleStudioProductionJobs(env);
       } catch (error) {
         console.warn("studio produce watchdog failed", error);
+      }
+      try {
+        await studioHealEscalatedProduce(env, { limit: 4 });
+      } catch (error) {
+        console.warn("studio escalated-produce heal failed", error);
       }
       try {
         await item4DrainAllPendingWork(env, { maxMs: ITEM4_DRAIN_CRON_BUDGET_MS });
@@ -5977,7 +5983,7 @@ const IDEA_LIBRARY_NAMED_PLACES = [
   "central park", "times square", "brooklyn bridge", "statue of liberty",
   "high line", "washington square", "bryant park", "grand central",
   "one world trade", "santa monica pier", "griffith observatory",
-  "venice beach", "rodeo drive", "hollywood sign",
+  "venice beach", "venice canals", "rodeo drive", "hollywood sign",
 ];
 
 function ideaLibraryTokens(text) {
@@ -10000,6 +10006,166 @@ async function studioHealFailedStatuses(env, options = {}) {
     console.log("Studio failed-status heal", JSON.stringify({
       count: pulses.length,
       pulses: pulses.map((row) => ({ key: row.key, id: row.id, error: row.error || null })),
+    }));
+  }
+  return pulses;
+}
+
+function studioMediaIdsFromSourcePackage(raw) {
+  const parsed = item4ParseJson(raw, null);
+  const ids = [];
+  const push = (value) => {
+    const id = String(value || "").trim();
+    if (/^rec[A-Za-z0-9]{14}$/.test(id) && !ids.includes(id)) ids.push(id);
+  };
+  if (Array.isArray(parsed)) {
+    for (const row of parsed) {
+      if (typeof row === "string") push(row);
+      else if (row && typeof row === "object") {
+        push(row.media_asset_record_id || row.media_asset_id || row.id);
+      }
+    }
+    return ids;
+  }
+  if (parsed && typeof parsed === "object") {
+    for (const row of parsed.assets || parsed.selected || parsed.items || []) {
+      if (typeof row === "string") push(row);
+      else if (row && typeof row === "object") {
+        push(row.media_asset_record_id || row.media_asset_id || row.id);
+      }
+    }
+  }
+  return ids;
+}
+
+function studioIdeaProxyFromProduceRequest(requestRecord, parent) {
+  return {
+    id: requestRecord.id,
+    fields: {
+      Candidate_Title: f(requestRecord, "Requested_Title") || f(parent, "Content_Title") || "",
+      Primary_Location: f(requestRecord, "Primary_Location") || f(parent, "Primary_Location") || "",
+      Idea_Summary: f(parent, "Idea_Summary") || f(requestRecord, "Production_Notes") || "",
+      Content_Profile: f(parent, "Content_Profile") || f(requestRecord, "Brand") || [],
+      Production_Carousel_Slide_Count_Min: Number(f(requestRecord, "Carousel_Slide_Count_Min") || 5) || 5,
+      Production_Carousel_Slide_Count_Max: Number(f(requestRecord, "Carousel_Slide_Count_Max") || 10) || 10,
+    },
+  };
+}
+
+async function studioRecoverEscalatedMasters(env, requestRecord) {
+  const existing = item4ParseJson(f(requestRecord, "Studio_Master_Assets_JSON"), []);
+  if (Array.isArray(existing) && existing.length) {
+    return { ok: true, attached: 0, already: existing.length };
+  }
+  const contentId = studioFirstLinkedId(f(requestRecord, "Promoted_Content_Item"))
+    || studioFirstLinkedId(f(requestRecord, "Content Items"));
+  let parent = null;
+  if (contentId) {
+    parent = await airtableFetch(env, env.AIRTABLE_CONTENT_TABLE_ID, contentId).catch(() => null);
+  }
+  const fromParent = studioMediaIdsFromSourcePackage(f(parent, "Studio_Source_Selected_Assets_JSON"));
+  if (fromParent.length) {
+    const attached = await applyLibraryAssetsToProductionRequest(env, requestRecord, fromParent, { replaceWaitAssets: false });
+    return { ok: attached.assets.length > 0, attached: attached.appended, already: attached.assets.length - attached.appended };
+  }
+  const idea = studioIdeaProxyFromProduceRequest(requestRecord, parent);
+  const matches = await rankStillsForIdeaPhotoWait(env, idea);
+  const min = Number(idea.fields.Production_Carousel_Slide_Count_Min || 5) || 5;
+  const max = Number(idea.fields.Production_Carousel_Slide_Count_Max || 10) || 10;
+  const decision = selectMatchedPhotos({ matches, min, max, pendingBatchIds: [], force: true });
+  const selected = (decision.action === "ready" ? decision.selected : sortHighConfidenceMatches(matches).slice(0, max))
+    .map((row) => row.id)
+    .filter(Boolean);
+  if (!selected.length) return { ok: false, attached: 0, already: 0 };
+  const attached = await applyLibraryAssetsToProductionRequest(env, requestRecord, selected, { replaceWaitAssets: false });
+  return { ok: attached.assets.length > 0, attached: attached.appended, already: attached.assets.length - attached.appended };
+}
+
+async function studioHealEscalatedProduce(env, options = {}) {
+  const limit = Math.max(1, Math.min(6, Number(options.limit || 4)));
+  const rows = await listRecords(env, PRODUCTION_REQUEST_TABLE, {
+    limit,
+    sortField: "Updated_At",
+    sortDirection: "desc",
+    filterFormula: `AND({Test_Run_ID}=BLANK(),{Request_Status}!="Cancelled",{Studio_Production_Job_JSON}!="",OR(FIND('"step":"escalated"',{Studio_Production_Job_JSON}),FIND('"step": "escalated"',{Studio_Production_Job_JSON})))`,
+  }).catch(() => []);
+  const pulses = [];
+  for (const row of rows || []) {
+    const job = parseStudioProductionJob(row);
+    if (String(job?.step || "").trim() !== "escalated") continue;
+    const err = String(job?.error || job?.heal?.last_block_error || "");
+    if (/clip count mismatch/i.test(err) || !deskRecoverableEscalatedError(err || "escalated")) {
+      pulses.push({ key: "STUDIO_ESCALATED", id: row.id, skipped: "not_recoverable" });
+      continue;
+    }
+    if (/no studio master photos to crop/i.test(err)) {
+      try {
+        const recovered = await studioRecoverEscalatedMasters(env, row);
+        if (!recovered.ok) {
+          pulses.push({ key: "STUDIO_ESCALATED", id: row.id, skipped: "no_masters_to_recover" });
+          continue;
+        }
+      } catch (error) {
+        pulses.push({
+          key: "STUDIO_ESCALATED",
+          id: row.id,
+          error: error instanceof Error ? error.message : String(error),
+        });
+        continue;
+      }
+    }
+    if (/no platform outputs found/i.test(err)) {
+      const contentId = studioFirstLinkedId(f(row, "Promoted_Content_Item"))
+        || studioFirstLinkedId(f(row, "Content Items"));
+      const parent = contentId
+        ? await airtableFetch(env, env.AIRTABLE_CONTENT_TABLE_ID, contentId).catch(() => null)
+        : null;
+      const outputs = Array.isArray(f(parent, "Platform Outputs")) ? f(parent, "Platform Outputs") : [];
+      if (!outputs.length) {
+        pulses.push({ key: "STUDIO_ESCALATED", id: row.id, skipped: "no_outputs" });
+        continue;
+      }
+    }
+    const heal = studioProduceHealState(job);
+    const nextJob = {
+      ...job,
+      step: "blocked",
+      attempt: 1,
+      updated_at: new Date().toISOString(),
+      error: null,
+      detail: "Resuming after escalated heal",
+      percent: Math.max(Number(job?.percent) || 0, 12),
+      heal: {
+        ...heal,
+        resume_count: 0,
+        last_resume_at: new Date().toISOString(),
+        last_block_error: err || heal.last_block_error,
+        last_step: "escalated",
+        escalated_at: null,
+      },
+    };
+    try {
+      await airtableFetch(env, PRODUCTION_REQUEST_TABLE, row.id, {
+        method: "PATCH",
+        body: JSON.stringify({
+          fields: { Studio_Production_Job_JSON: JSON.stringify(nextJob), Updated_At: new Date().toISOString() },
+          typecast: false,
+        }),
+      });
+      const pulsed = await enqueueStudioProductionJob(env, row.id, { resume: true });
+      pulses.push({ key: "STUDIO_ESCALATED", id: row.id, resumed: true, payload: pulsed?.payload || pulsed || null });
+    } catch (error) {
+      pulses.push({
+        key: "STUDIO_ESCALATED",
+        id: row.id,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+  if (pulses.length) {
+    console.log("Studio escalated-produce heal", JSON.stringify({
+      count: pulses.length,
+      pulses: pulses.map((row) => ({ key: row.key, id: row.id, skipped: row.skipped || null, error: row.error || null })),
     }));
   }
   return pulses;
@@ -25822,6 +25988,9 @@ async function pulseOnDemandRenderChain(env, options = {}) {
   try { pulses.push(...await resumeStaleStudioProductionJobs(env, options)); } catch (error) {
     pulses.push({ key: "STUDIO_PRODUCE", error: error instanceof Error ? error.message : String(error) });
   }
+  try { pulses.push(...await studioHealEscalatedProduce(env, { limit: 4 })); } catch (error) {
+    pulses.push({ key: "STUDIO_ESCALATED", error: error instanceof Error ? error.message : String(error) });
+  }
   try { pulses.push(...await resumeStalePlatformOutputs(env, options)); } catch (error) {
     pulses.push({ key: "STUDIO_OUTPUTS", error: error instanceof Error ? error.message : String(error) });
   }
@@ -33103,7 +33272,16 @@ async function gatherStudioDeskInventory(env) {
   };
 
   scanned("produce_stale", "produce_escalated", "produce_clip_mismatch");
-  for (const record of produceRows || []) {
+  const escalatedRows = await listRecords(env, PRODUCTION_REQUEST_TABLE, {
+    limit: 8,
+    sortField: "Updated_At",
+    sortDirection: "desc",
+    filterFormula: `AND({Test_Run_ID}=BLANK(),{Request_Status}!="Cancelled",{Studio_Production_Job_JSON}!="",OR(FIND('"step":"escalated"',{Studio_Production_Job_JSON}),FIND('"step": "escalated"',{Studio_Production_Job_JSON})))`,
+  }).catch(() => []);
+  const produceSeen = new Set();
+  for (const record of [...(produceRows || []), ...(escalatedRows || [])]) {
+    if (produceSeen.has(record.id)) continue;
+    produceSeen.add(record.id);
     const job = parseStudioProductionJob(record) || {};
     push(classifyProduceJob({ ...job, request_id: record.id }, nowMs));
   }

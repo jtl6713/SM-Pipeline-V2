@@ -69,8 +69,23 @@ test("produce jobs escalate after heal budget then stay transient while retries 
     heal: { resume_count: 5, max_resumes: 5 },
   }, now);
   assert.equal(escalated.kind, "produce_escalated");
-  assert.equal(escalated.class, "code_bug");
+  assert.equal(escalated.class, "transient");
+  assert.equal(escalated.actor, "worker_heal");
   assert.equal(escalated.fingerprint, fingerprint("produce_escalated", "recJob1", "heal_exhausted"));
+  const missingMasters = classifyProduceJob({
+    request_id: "reckHkuJfs1F6eTAN",
+    step: "escalated",
+    job_id: "spj-38c8a6861134",
+    updated_at: "2026-09-24T07:31:30.657Z",
+    error: "No Studio master photos to crop",
+    heal: { resume_count: 5, max_resumes: 5 },
+  }, now);
+  assert.equal(missingMasters.kind, "produce_escalated");
+  assert.equal(missingMasters.class, "transient");
+  assert.equal(missingMasters.actor, "worker_heal");
+  assert.equal(missingMasters.fingerprint, fingerprint("produce_escalated", "reckHkuJfs1F6eTAN", "missing_masters"));
+  assert.equal(errorClassFromText("No Studio master photos to crop"), "missing_masters");
+  assert.equal(errorClassFromText("No Platform Outputs found for this Production Request"), "missing_outputs");
   const mismatch = classifyProduceJob({
     request_id: "reccEj6eVXPPKalJd",
     step: "blocked",

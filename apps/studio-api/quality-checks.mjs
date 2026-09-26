@@ -162,11 +162,11 @@ export const QUALITY_CHECKS = Object.freeze([
   }),
   check({
     id: "produce_escalated",
-    title: "Check for escalated studio-produce jobs after heal budget is exhausted",
+    title: "Check for escalated studio-produce jobs and un-park them when the block is recoverable",
     lane: "service",
     kind: "produce_escalated",
-    actor: "desk_agent",
-    heal: "ticket_only",
+    actor: "worker_heal",
+    heal: "resume_produce",
   }),
   check({
     id: "produce_clip_mismatch",

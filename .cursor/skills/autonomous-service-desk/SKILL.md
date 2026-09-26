@@ -61,6 +61,12 @@ Job JSON says `Rendering 0/N` (~62%), heal `resume_count` climbs to `max_resumes
 
 Auto-correct: Worker `studioHealReadyNoJobVoiceover` (inside `healStuckStudioRenders`, `VO_STUCK_READY`) copies the parent `Voiceover_URL` down when it exists; otherwise sets parent `Content_Status=Ready for Voiceover`, `Voiceover_Status=Ready`, `Script_Status=Generated`, pulses P2, and resumes studio-produce (`pick_resume_step` now lands on `audio`; `step_render` runs P2 inline and treats `waiting_for_voiceover` as a wait). Cover writes (Worker `studioCoverContentStatusFields`, `thumbnail.cover_content_status_fields`) no longer clobber `Ready for Voiceover` while `Voiceover_URL` is blank. If the same fingerprint returns after a heal tick, it is a `code_bug`: attach parent field values (`Content_Status`, `Voiceover_Status`, `Voiceover_Script` present?, `Voiceover_URL`) and the P2 pulse result. Do not Approve. Skip rows whose parent `Voiceover_Status` is Not Needed / Skipped.
 
+## Watch: Escalated — needs investigation
+
+Parent `Studio_Production_Job_JSON.step=escalated` after five Worker resumes. Pipeline paints **Escalated — needs investigation** on every sibling output. Worker `resumeStaleStudioProductionJobs` used to skip this terminal step, so the row parked forever even when the block was recoverable (empty `Studio_Master_Assets_JSON` while library stills exist; outputs created after a "No Platform Outputs" block; transient HTTP that exhausted the budget). Kind `produce_escalated`, class `transient` when `deskRecoverableEscalatedError` matches, actor `worker_heal`. Clip-count mismatch stays `produce_clip_mismatch` / `code_bug`. Skip `Request_Status=Cancelled`.
+
+Auto-correct: Worker `studioHealEscalatedProduce` rematches library stills (never fill-crop variants) for `No Studio master photos to crop`, resets `heal.resume_count`, writes `step=blocked`, and resumes studio-produce. Proven: Venice Canals CI 144 / `reckHkuJfs1F6eTAN` / outputs 849–854; Grand Central CI 143 / `recHAECHLOYQHE3Yc`. If rematch finds zero masters, leave the ticket as `data_repair` — do not re-burn the heal budget.
+
 ## Observe (`observe`)
 
 Ticket only. No git, no deploy, no restart, no Airtable writes, no Make pulses, no Studio Approve.

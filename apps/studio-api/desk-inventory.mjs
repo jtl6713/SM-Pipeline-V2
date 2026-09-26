@@ -73,6 +73,8 @@ export function errorClassFromText(text) {
   if (/(timed?\s*out|timeout|connectionpool|connection reset|502|503|504)/i.test(value)) return "transient_http";
   if (/exit code 1|delayrender|request closed/i.test(value)) return "render_crash";
   if (/clip count mismatch/i.test(value)) return "clip_count_mismatch";
+  if (/no studio master photos to crop/i.test(value)) return "missing_masters";
+  if (/no platform outputs found/i.test(value)) return "missing_outputs";
   if (/no_eligible_p2_route/i.test(value)) return "no_eligible_p2_route";
   if (/heal budget|retries exhausted|escalated/i.test(value)) return "heal_exhausted";
   const compact = value.replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 48);
@@ -106,6 +108,23 @@ export function fingerprint(kind, recordId, errorClass) {
   return [kind, recordId || "-", errorClass || "unknown"].join(":");
 }
 
+export function deskRecoverableEscalatedError(text) {
+  const value = String(text || "");
+  if (/clip count mismatch/i.test(value)) return false;
+  if (/missing composition|no clips|invalid props/i.test(value)) return false;
+  const errorClass = errorClassFromText(value);
+  if (errorClass === "clip_count_mismatch") return false;
+  return errorClass === "transient_http"
+    || errorClass === "render_crash"
+    || errorClass === "in_progress"
+    || errorClass === "heal_exhausted"
+    || errorClass === "missing_masters"
+    || errorClass === "missing_outputs"
+    || deskTransientRenderError(value)
+    || deskTransientPublishError(value)
+    || /retries exhausted|produce retries exhausted/i.test(value);
+}
+
 export function classifyProduceJob(job, nowMs = Date.now(), staleAfterMs = STALE_PRODUCE_MS) {
   if (!job || typeof job !== "object") return null;
   const step = String(job.step || "").trim();
@@ -134,15 +153,19 @@ export function classifyProduceJob(job, nowMs = Date.now(), staleAfterMs = STALE
   }
 
   if (step === "escalated" || (step === "blocked" && resumeCount >= maxResumes)) {
+    const recoverable = deskRecoverableEscalatedError(error || step);
     return {
       kind: "produce_escalated",
-      class: "code_bug",
+      class: recoverable ? "transient" : "code_bug",
       record_id: recordId || null,
       fingerprint: fingerprint("produce_escalated", recordId, errorClass),
       step,
       resume_count: resumeCount,
       error: error || null,
-      actor: "desk_agent",
+      actor: recoverable ? "worker_heal" : "desk_agent",
+      diagnosis: recoverable
+        ? "Produce parked Escalated after the heal budget. Worker rematches missing masters when needed, resets resume_count, and resumes studio-produce."
+        : "Produce escalated with a non-retryable payload error. Desk must fix the job before resume.",
     };
   }
   if (step === "blocked" || stale || !job.job_id) {
@@ -334,12 +357,13 @@ export function classifyAutonomousRequest({ status, notes, job, nowMs = Date.now
     }
     const step = String(job?.step || "").trim();
     if (requestStatus === "Promoted" && (!job?.job_id || !step || step === "blocked" || step === "escalated")) {
+      const recoverable = step !== "escalated" || deskRecoverableEscalatedError(job?.error || step);
       return {
         kind: "autonomous_produce_gap",
-        class: step === "escalated" ? "code_bug" : "transient",
+        class: recoverable ? "transient" : "code_bug",
         record_id: recordId || null,
         fingerprint: fingerprint("autonomous_produce_gap", recordId, step || "no_job"),
-        actor: step === "escalated" ? "desk_agent" : "worker_heal",
+        actor: recoverable ? "worker_heal" : "desk_agent",
       };
     }
   }
@@ -348,12 +372,13 @@ export function classifyAutonomousRequest({ status, notes, job, nowMs = Date.now
     const updated = Date.parse(String(job?.updated_at || ""));
     const stale = !job || !Number.isFinite(updated) || (nowMs - updated) >= STALE_PRODUCE_MS;
     if (step === "escalated" || (stale && step !== "done")) {
+      const recoverable = step !== "escalated" || deskRecoverableEscalatedError(job?.error || step);
       return {
         kind: "az_stalled",
-        class: step === "escalated" ? "code_bug" : "transient",
+        class: recoverable ? "transient" : "code_bug",
         record_id: recordId || null,
         fingerprint: fingerprint("az_stalled", recordId, step || requestStatus.toLowerCase()),
-        actor: step === "escalated" ? "desk_agent" : "worker_heal",
+        actor: recoverable ? "worker_heal" : "desk_agent",
       };
     }
   }
