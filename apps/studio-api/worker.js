@@ -428,7 +428,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.381-nonchicago-insights-connections",
+          version: "0.10.382-youtube-quota-aware-status",
           studio_desk_inventory_v1: true,
           studio_desk_activity_v1: true,
           studio_tiktok_complete_v1: true,
@@ -16232,11 +16232,18 @@ async function getInsightsConnections(request, env, url, authorization) {
         const body = await studioInsightsSafeJson(response);
         result.youtube.account_name = body?.channel_title || null;
         result.youtube.account_id = body?.channel_id || result.youtube.account_id;
-        result.youtube.status = body?.refresh_ok && body?.analytics_read_ok ? "connected"
-          : body?.refresh_ok ? "needs_authorization" : "needs_authorization";
-        result.youtube.error = body?.analytics_read_ok
+        result.youtube.status = body?.refresh_ok && body?.analytics_read_ok
+          ? "connected"
+          : "needs_authorization";
+        result.youtube.error = result.youtube.status === "connected"
           ? null
           : (body?.analytics_error || body?.error || "YouTube Analytics authorization is required.");
+        if (result.youtube.status === "connected" && body?.data_api_quota_exceeded) {
+          result.youtube.sync_warning = "YouTube Data API quota exceeded; analytics remain connected, but channel identity is temporarily unavailable.";
+        } else if (result.youtube.status === "connected" && body?.channel_identity_error) {
+          result.youtube.sync_warning = "Analytics are connected; channel identity check is temporarily unavailable: "
+            + String(body.channel_identity_error).slice(0, 240);
+        }
       } catch (error) {
         Object.assign(result.youtube, studioInsightsConnectionStateFromError(error));
       }
