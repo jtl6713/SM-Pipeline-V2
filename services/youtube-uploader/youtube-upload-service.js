@@ -8,7 +8,7 @@ const { URL } = require("url");
 
 const { spawnSync } = require("child_process");
 
-const SERVICE_VERSION = "2026-09-22-first-party-analytics";
+const SERVICE_VERSION = "2026-09-25-quota-aware-oauth-status";
 const MIN_REFRESH_TOKEN_LENGTH = 40;
 const ENV_PATH = path.join(process.cwd(), ".env");
 
@@ -223,25 +223,48 @@ async function oauthStatus() {
     access_token_expires_in: null,
     channel_id: "",
     channel_title: "",
+    channel_identity_ok: false,
+    channel_identity_error: null,
+    data_api_quota_exceeded: false,
     error: null,
     checked_at: now(),
     google_consent_publishing: "not_visible_from_token_api",
     durable_requirement:
       "Google OAuth consent screen must be In production. Testing-mode refresh tokens expire after 7 days.",
   };
+
+  let refreshed;
   try {
-    const refreshed = await refreshAccessToken();
+    refreshed = await refreshAccessToken();
     result.refresh_ok = true;
     result.ok = true;
     result.access_token_expires_in = refreshed.expiresIn;
+  } catch (error) {
+    result.error = error instanceof Error ? error.message : String(error);
+    return result;
+  }
+
+  // Channel identity uses the YouTube Data API, whose quota is independent from
+  // YouTube Analytics. Quota exhaustion must not make healthy OAuth/Analytics
+  // look unauthorized.
+  try {
     const channel = await linkedChannelId(refreshed.token);
     result.channel_id = channel.channelId;
     result.channel_title = channel.channelTitle;
-    const analyticsStatus = await analyticsReadStatus(refreshed.token);
-    result.analytics_read_ok = analyticsStatus.ok;
-    result.analytics_error = analyticsStatus.error;
+    result.channel_identity_ok = true;
   } catch (error) {
-    result.error = error instanceof Error ? error.message : String(error);
+    const message = error instanceof Error ? error.message : String(error);
+    result.channel_identity_error = message;
+    result.data_api_quota_exceeded = /quotaExceeded|exceeded your .*quota/i.test(message);
+  }
+
+  // Always test Analytics independently, even when channels.list is unavailable.
+  const analyticsStatus = await analyticsReadStatus(refreshed.token);
+  result.analytics_read_ok = analyticsStatus.ok;
+  result.analytics_error = analyticsStatus.error;
+
+  if (!result.analytics_read_ok && !result.error) {
+    result.error = result.analytics_error || "YouTube Analytics authorization is unavailable.";
   }
   return result;
 }
