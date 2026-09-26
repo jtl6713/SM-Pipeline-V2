@@ -441,6 +441,7 @@ export default {
           studio_ig_carousel_due_publish_v1: true,
           studio_schedule_spacing_v1: true,
           studio_open_review_reschedule_v1: true,
+          studio_yt_manual_schedule_lock_v1: true,
           studio_insights_watchlist_v2: true,
           studio_idea_library_pick_v1: true,
           studio_library_browse_v1: true,
@@ -29107,15 +29108,39 @@ async function approveOutputRecordForPublishing(env, existing, note, stamp, payl
     occupiedMs = occupied[platform] || [];
   }
   const markerIso = String(f(record, "Studio_Scheduled_At") || "").trim();
-  const requestedRaw = String(payload?.scheduled_post_date || "").trim();
-  const requestedMs = requestedRaw && requestedRaw.toLowerCase() !== "immediate" ? Date.parse(requestedRaw) : NaN;
-  const markerMs = markerIso ? Date.parse(markerIso) : NaN;
-  const manualScheduleOverride = payload?.manual_schedule_override === true
-    || (!Number.isNaN(requestedMs) && !Number.isNaN(markerMs) && Math.abs(requestedMs - markerMs) < 60000);
-  const scheduleFields = studioPublishScheduleFields(payload || {}, record, {
-    occupiedMs,
-    exactOverride: manualScheduleOverride,
-  });
+  const existingScheduleIso = String(
+    f(record, "Scheduled_Post_Date") || f(record, "YouTube_Scheduled_Publish_At") || ""
+  ).trim();
+  const rawIn = String(payload?.scheduled_post_date || "").trim();
+  const publishNowImmediate = Boolean(
+    payload?.publish_now === true || rawIn.toLowerCase() === "immediate"
+  );
+  // Empty approve payloads used to mean "now", then occupancy bumped Scheduled_Post_Date
+  // / YouTube_Scheduled_Publish_At away from Studio_Scheduled_At (Output 909: marker Sep-25,
+  // YouTube still got Sep-28). Keep a locked operator time exactly; otherwise preserve the
+  // existing slot instead of inventing a new immediate time.
+  let requestedRaw = rawIn;
+  let exactOverride = false;
+  if (publishNowImmediate) {
+    requestedRaw = "immediate";
+  } else if (payload?.manual_schedule_override === true && requestedRaw) {
+    exactOverride = true;
+  } else if (markerIso) {
+    requestedRaw = markerIso;
+    exactOverride = true;
+  } else if (!requestedRaw && existingScheduleIso) {
+    requestedRaw = existingScheduleIso;
+  } else if (!requestedRaw) {
+    requestedRaw = "immediate";
+  }
+  const scheduleFields = studioPublishScheduleFields(
+    { ...(payload || {}), scheduled_post_date: requestedRaw },
+    record,
+    {
+      occupiedMs,
+      exactOverride,
+    },
+  );
   const scheduledIso = scheduleFields.Scheduled_Post_Date || f(record, "Scheduled_Post_Date");
   const fields = {
     Review_Status: "Approved",

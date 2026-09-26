@@ -101,7 +101,7 @@ def process_request(
         return {"processed": False, "dry_run": True, **result}
 
     pipeline_settings = PipelineSettings(client)
-    thumb_publish = youtube_thumbnail_publish_enabled(pipeline_settings)
+    thumb_publish = youtube_thumbnail_publish_enabled(pipeline_settings, record=output)
     result["thumbnail_publish"] = thumb_publish
     now = iso_utc()
     if not yts2_needs_videos_list(thumb_publish):

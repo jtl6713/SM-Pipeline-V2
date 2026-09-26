@@ -113,7 +113,7 @@ def process_request(
             client.update_record(PLATFORM_OUTPUTS_TABLE, record_id, fields, typecast=True)
             result["channel_mismatch"] = True
             return {"processed": True, "manual_publish_required": True, **result}
-        thumb_publish = youtube_thumbnail_publish_enabled(pipeline_settings)
+        thumb_publish = youtube_thumbnail_publish_enabled(pipeline_settings, record=output)
         skip_list = not yts2_needs_videos_list(thumb_publish)
         fields = {
             "YouTube_Video_ID": video_id,
