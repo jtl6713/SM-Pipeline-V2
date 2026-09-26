@@ -380,14 +380,26 @@ export function ideaProductionConfigFields(payload, existingNotes = "") {
     if (imageModeRaw === "Wait for matching photos" && !fields.Production_Carousel_Slide_Count_Mode) {
       fields.Production_Carousel_Slide_Count_Mode = "Target range";
     }
+    if (imageModeRaw === "Wait for matching photos") {
+      fields.Studio_Photo_Wait_Status = "Waiting";
+    } else if (imageMode === "Make AI Generated" || fields.Production_Carousel_Slide_Count_Mode === "Exact") {
+      // Explicit AI/exact choices take control away from the automatic library listener.
+      // AI mode also clears automatically matched library stills so requested AI quantity wins.
+      fields.Studio_Photo_Wait_Status = null;
+      fields.Studio_Photo_Match_JSON = null;
+      if (imageMode === "Make AI Generated") {
+        fields.Studio_Matched_Media_Assets = [];
+      }
+    }
   }
 
-  const libraryIds = ideaLibraryAssetIdsFromPayload(payload);
-  if (libraryIds) {
+  const libraryIdsRaw = ideaLibraryAssetIdsFromPayload(payload);
+  const libraryIds = imageModeRaw === "Make AI Generated" ? [] : libraryIdsRaw;
+  if (libraryIds !== null) {
     fields.Studio_Matched_Media_Assets = libraryIds;
   }
 
-  if (Object.prototype.hasOwnProperty.call(payload, "production_notes") || libraryIds) {
+  if (Object.prototype.hasOwnProperty.call(payload, "production_notes") || libraryIds !== null) {
     const userNotes = Object.prototype.hasOwnProperty.call(payload, "production_notes")
       ? payload.production_notes
       : undefined;
