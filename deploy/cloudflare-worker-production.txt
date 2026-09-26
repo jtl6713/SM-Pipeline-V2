@@ -1,4 +1,4 @@
 Deploy Studio API Worker production
-Reason: non-Chicago Instagram/YouTube Insights connection fixes
-Source merge: e3dc3f56fb67d3962d47f24681f492473b208859
+Reason: YouTube quota-aware Insights connection status
+Source merge: 0b2c3424bd6a0dff53b96c8eee36a61ba656b3ce
 Requested: 2026-09-25
