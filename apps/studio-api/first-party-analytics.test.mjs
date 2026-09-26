@@ -134,3 +134,30 @@ test("first-party analytics sweep allocates work independently by content profil
   assert.match(sweep, /Round-robin execution/);
   assert.match(sweep, /Insights_As_Of/);
 });
+
+
+const youtubeUploaderSource = fs.readFileSync(
+  new URL("../../services/youtube-uploader/youtube-upload-service.js", import.meta.url),
+  "utf8"
+);
+
+test("youtube uploader tests analytics independently from channel identity", () => {
+  const start = youtubeUploaderSource.indexOf("async function oauthStatus() {");
+  const end = youtubeUploaderSource.indexOf("\n\nasync function deleteVideo", start);
+  assert.ok(start >= 0 && end > start);
+  const status = youtubeUploaderSource.slice(start, end);
+  assert.match(status, /channel_identity_error/);
+  assert.match(status, /data_api_quota_exceeded/);
+  assert.match(status, /Always test Analytics independently/);
+  assert.match(status, /const analyticsStatus = await analyticsReadStatus\(refreshed\.token\)/);
+});
+
+test("studio treats healthy YouTube analytics as connected even when Data API quota is exhausted", () => {
+  const marker = 'result.youtube.status = body?.refresh_ok && body?.analytics_read_ok';
+  const start = workerSource.indexOf(marker);
+  assert.ok(start >= 0);
+  const block = workerSource.slice(start, start + 1800);
+  assert.match(block, /"connected"/);
+  assert.match(block, /data_api_quota_exceeded/);
+  assert.match(block, /analytics remain connected/);
+});
