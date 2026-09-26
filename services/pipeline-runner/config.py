@@ -35,11 +35,11 @@ def load_settings() -> dict[str, Any]:
             "OPENAI_ACCOUNT must be PRIMARY or SECONDARY"
         )
 
-    openai_api_key = os.environ.get(
-        f"OPENAI_API_KEY_{openai_account}", ""
-    ).strip()
+    openai_api_key_primary = os.environ.get("OPENAI_API_KEY_PRIMARY", "").strip()
+    openai_api_key_secondary = os.environ.get("OPENAI_API_KEY_SECONDARY", "").strip()
+    openai_api_key = openai_api_key_primary if openai_account == "PRIMARY" else openai_api_key_secondary
 
-    # Temporary backward-compatible fallback
+    # Temporary backward-compatible fallback for the selected account only.
     if not openai_api_key:
         openai_api_key = os.environ.get(
             "OPENAI_API_KEY", ""
@@ -67,7 +67,9 @@ def load_settings() -> dict[str, Any]:
         "google_client_secret": os.environ.get("GOOGLE_CLIENT_SECRET", ""),
         "google_refresh_token": os.environ.get("GOOGLE_REFRESH_TOKEN", ""),
         "openai_account": openai_account,
-	"openai_api_key": openai_api_key,
+        "openai_api_key": openai_api_key,
+        "openai_api_key_primary": openai_api_key_primary,
+        "openai_api_key_secondary": openai_api_key_secondary,
         "openai_secondary_provider": os.environ.get("OPENAI_SECONDARY_PROVIDER", "").strip().lower(),
         "openai_secondary_endpoint": os.environ.get("OPENAI_SECONDARY_ENDPOINT", "").strip().rstrip("/"),
         "openai_secondary_api_version": os.environ.get("OPENAI_SECONDARY_API_VERSION", "").strip(),
