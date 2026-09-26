@@ -1,4 +1,4 @@
 Deploy Studio API Worker production
-Reason: Facebook Insights page-scoped ID and metrics fix
-Source merge: 02a8c47d3d7481725583f6d07fa51b47ff8f5b27
+Reason: Account Connections account-health-only cleanup
+Source merge: 7c5d399cb042cbdb96dbee04ddfef47a706cbdcc
 Requested: 2026-09-25
