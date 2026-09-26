@@ -1,4 +1,4 @@
 Deploy Studio API Worker production
-Reason: Account Connections account-health-only cleanup
-Source merge: 7c5d399cb042cbdb96dbee04ddfef47a706cbdcc
+Reason: TikTok Insights native video ID discovery
+Source merge: 74e722bae3d1d1878a34640fe8ffacc5ce3ece17
 Requested: 2026-09-25
