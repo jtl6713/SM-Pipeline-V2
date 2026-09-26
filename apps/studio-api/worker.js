@@ -428,7 +428,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.382-youtube-quota-aware-status",
+          version: "0.10.384-account-health-only",
           studio_desk_inventory_v1: true,
           studio_desk_activity_v1: true,
           studio_tiktok_complete_v1: true,
@@ -16283,7 +16283,13 @@ async function getInsightsConnections(request, env, url, authorization) {
     const activity = sync[item.platform] || {};
     item.last_successful_sync = activity.last_successful_sync || null;
     item.last_attempt = activity.last_attempt || null;
-    item.last_error = activity.last_error || null;
+
+    // Account Connections is an account-health surface, not a per-post failure log.
+    // Once the account itself is connected, historical post/story sync failures stay
+    // in output diagnostics and must not appear as an account-level error.
+    item.last_error = item.status === "connected"
+      ? null
+      : (activity.last_error || null);
   }
 
   return respond(request, env, {
