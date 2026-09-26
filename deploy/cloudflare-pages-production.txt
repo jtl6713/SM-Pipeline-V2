@@ -2,3 +2,5 @@ Deploy Studio Web production
 Reason: hide Reconnect for connected Insights accounts
 Source merge: dac5017012c7eec420494b03f6397892b4a02408
 Requested: 2026-09-25
+
+Production unlimited asset controls UI deploy: 2026-09-26 - adds quantity-to-add for AI images with no max, removes stale 'Up to 20' copy, and keeps uploaded/library/AI assets additive in Production. PR #347 merge 2e589d9.
