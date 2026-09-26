@@ -289,7 +289,7 @@
       const account = item.account_name || item.account_id || "Account not confirmed";
       const sync = item.last_successful_sync ? "Last sync " + dateTimeLabel(item.last_successful_sync) : "No successful analytics sync yet";
       const error = item.last_error || item.error || "";
-      const reconnect = item.reconnect_url
+      const reconnect = status !== "connected" && item.reconnect_url
         ? "<a class='secondary-button insights-reconnect' target='_blank' rel='noopener' href='" + esc(item.reconnect_url) + "'>Reconnect</a>"
         : (status === "needs_authorization" ? "<span class='insights-action-note'>Authorization required</span>" : "");
       return "<article class='insights-connection " + esc(status) + "'>" +
