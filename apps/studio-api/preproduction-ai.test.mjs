@@ -43,3 +43,12 @@ test("pre-production AI assets persist on the Production Request before approval
   assert.match(handler, /production_request:\s*mapProductionRequest\(record\)/);
   assert.match(handler, /completed:\s*generatedNow >= desiredAiCount/);
 });
+
+
+test("pre-production AI supports explicit additive targets without a 20-image product cap", async () => {
+  const source = await readFile(workerPath, "utf8");
+  assert.match(source, /target_ai_count/);
+  assert.match(source, /add_ai_count/);
+  assert.doesNotMatch(source, /A Production Request can contain at most/);
+  assert.doesNotMatch(source, /Math\.min\(20, Math\.round\(exact\)\)/);
+});
