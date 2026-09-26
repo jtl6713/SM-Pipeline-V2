@@ -1,6 +1,9 @@
+import inspect
+
 from datetime import datetime, timedelta, timezone
 
 from stages.registry import STAGE_NAMES, is_implemented
+from ttd import ttd1 as ttd1_module
 from ttd.assets import draft_type_for_photos, is_photo_route, is_video_route, photo_manifest, video_manifest
 from ttd.eligibility import (
     ttd0_eligibility_reason,
@@ -240,3 +243,10 @@ def test_az_publish_package_email():
     assert "youtube.com/watch?v=abc123" in html
     assert sibling_status_line(yt).startswith("<li><b>YouTube Short:</b> live")
 
+
+
+def test_ttd1_has_no_internal_pending_draft_guard():
+    source = inspect.getsource(ttd1_module.process_request)
+    assert "TIKTOK_DRAFT_SAFE_PENDING_LIMIT" not in source
+    assert "pending_manual_share_count" not in source
+    assert "pending-share safety limit reached" not in source
