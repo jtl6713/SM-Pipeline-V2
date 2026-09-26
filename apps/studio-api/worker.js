@@ -140,7 +140,7 @@ import {
   summarizeObservations,
   youtubePublishedAfterIso,
 } from "./autonomous-produce.mjs";
-import { ideaProductionConfigFields, parseIdeaMachineNotes, parseIdeaNotedMediaIds } from "./idea-photo-wait.mjs";
+import { ideaAutoListenContentType, ideaProductionConfigFields, parseIdeaMachineNotes, parseIdeaNotedMediaIds } from "./idea-photo-wait.mjs";
 import {
   STUDIO_PUBLISH_RECONCILE_SCHEDULE_FORMULA,
   STUDIO_TIKTOK_INBOX_DUE_FORMULA,
@@ -432,7 +432,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.387-escalated-auto-heal",
+          version: "0.10.388-idea-auto-listen-all",
           studio_desk_inventory_v1: true,
           studio_desk_activity_v1: true,
           studio_tiktok_complete_v1: true,
@@ -18809,13 +18809,12 @@ function ideaPhotoWatchRange(idea, contentType) {
 function ideaPhotoAutoListenContentType(idea) {
   // Generated media ideas listen only to Studio Media Assets already uploaded
   // by the user; this never accesses a device photo library or camera roll.
-  const supported = ["Carousel", "Photo Set", "Feed Post", "Vertical Short Video"];
-  const configured = String(f(idea, "Production_Content_Type") || "").trim();
-  if (supported.includes(configured)) return configured;
-  const suggested = arrayOrEmpty(f(idea, "Suggested_Format"))
-    .map((value) => String(value || "").trim())
-    .find((value) => supported.includes(value));
-  return suggested || null;
+  // Story / Thread / Text / Flyer / Thumbnail map to Feed Post so I1 variety
+  // still starts Listening for photos instead of staying Ready to produce.
+  return ideaAutoListenContentType({
+    productionContentType: f(idea, "Production_Content_Type"),
+    suggestedFormats: arrayOrEmpty(f(idea, "Suggested_Format")),
+  });
 }
 
 function ideaHasExplicitPhotoProductionConfig(idea) {
@@ -18837,9 +18836,7 @@ async function autoListenOpenPhotoIdeas(env, { limit = 12 } = {}) {
     filterFormula: "AND({Studio_Photo_Wait_Status}=BLANK(),{Promoted_Content_Record_ID}=BLANK(),OR({Candidate_Status}='Generated',{Candidate_Status}='Sent for Review'))",
   });
 
-  const eligible = candidates.filter((idea) =>
-    !ideaHasExplicitPhotoProductionConfig(idea) && Boolean(ideaPhotoAutoListenContentType(idea))
-  );
+  const eligible = candidates.filter((idea) => !ideaHasExplicitPhotoProductionConfig(idea));
   if (!eligible.length) return { evaluated: candidates.length, started: 0, ready: 0 };
 
   const authorization = await resolveStudioCronAuthorization(env);
@@ -32970,7 +32967,6 @@ async function startStudioIdeaGeneration(request, env, authorization, ctx = null
     try {
       let idea = await airtableFetch(env, env.AIRTABLE_IDEA_TABLE_ID, ideaId);
       const contentType = ideaPhotoAutoListenContentType(idea);
-      if (!contentType) continue;
       let waitStatus = String(f(idea, "Studio_Photo_Wait_Status") || "").trim();
       if (!waitStatus && !ideaHasExplicitPhotoProductionConfig(idea)) {
         const range = ideaPhotoWatchRange(idea, contentType);
@@ -33017,7 +33013,7 @@ async function startStudioIdeaGeneration(request, env, authorization, ctx = null
     backend: "python",
     photo_listening_started: photoListening.filter((row) => row.action !== "error").length,
     photo_matches_ready: photoListening.filter((row) => row.action === "ready").length,
-    message: `${created} idea${created === 1 ? "" : "s"} created. Photo-capable ideas are listening automatically.`,
+    message: `${created} idea${created === 1 ? "" : "s"} created. Ideas are listening for photos automatically.`,
   }, 200);
 }
 

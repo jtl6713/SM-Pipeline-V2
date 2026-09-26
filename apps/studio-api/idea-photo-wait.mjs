@@ -165,6 +165,34 @@ export function rankIdeaLibraryFields({
 
 export const IDEA_PHOTO_WAIT_TYPES = new Set(["Carousel", "Photo Set", "Feed Post"]);
 
+export const IDEA_AUTO_LISTEN_TYPES = ["Carousel", "Photo Set", "Feed Post", "Vertical Short Video"];
+
+const IDEA_AUTO_LISTEN_FORMAT_MAP = {
+  "Carousel": "Carousel",
+  "Photo Set": "Photo Set",
+  "Feed Post": "Feed Post",
+  "Vertical Short Video": "Vertical Short Video",
+  "Story": "Feed Post",
+  "Thread": "Feed Post",
+  "Text Post": "Feed Post",
+  "Event / Flyer Post": "Feed Post",
+  "Thumbnail / Promo Still": "Feed Post",
+  "Longform Video": "Vertical Short Video",
+};
+
+export function ideaAutoListenContentType({ productionContentType, suggestedFormats } = {}) {
+  const configured = String(productionContentType || "").trim();
+  if (IDEA_AUTO_LISTEN_TYPES.includes(configured)) return configured;
+  if (IDEA_AUTO_LISTEN_FORMAT_MAP[configured]) return IDEA_AUTO_LISTEN_FORMAT_MAP[configured];
+  const formats = Array.isArray(suggestedFormats) ? suggestedFormats : [];
+  for (const raw of formats) {
+    const value = String(raw || "").trim();
+    if (IDEA_AUTO_LISTEN_TYPES.includes(value)) return value;
+    if (IDEA_AUTO_LISTEN_FORMAT_MAP[value]) return IDEA_AUTO_LISTEN_FORMAT_MAP[value];
+  }
+  return "Carousel";
+}
+
 export function ideaPhotoWaitApplies(input = {}) {
   const contentType = String(input.content_type || "").trim();
   const mode = String(input.carousel_slide_count_mode || "").trim();

@@ -12,3 +12,8 @@ Deploy Studio API Worker production
 Reason: Quality Agent + Worker auto-heal Escalated produce (Venice 144 missing masters)
 Worker: 0.10.387-escalated-auto-heal
 Requested: 2026-09-26T10:22:00-05:00
+
+Deploy Studio API Worker production
+Reason: Generate AI ideas always start Listening for photos (Thread/Story/Text map to Feed Post)
+Worker: 0.10.388-idea-auto-listen-all
+Requested: 2026-09-26T11:05:00-05:00

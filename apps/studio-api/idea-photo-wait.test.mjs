@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   buildIdeaLibraryKeys,
+  ideaAutoListenContentType,
   ideaPhotoWaitApplies,
   ideaProductionConfigFields,
   mergeIdeaProductionNotes,
@@ -10,6 +11,38 @@ import {
   rankIdeaLibraryFields,
   selectMatchedPhotos,
 } from "./idea-photo-wait.mjs";
+
+test("generated ideas always get a listen-capable content type", () => {
+  assert.equal(ideaAutoListenContentType({
+    suggestedFormats: ["Thread"],
+  }), "Feed Post");
+  assert.equal(ideaAutoListenContentType({
+    suggestedFormats: ["Story"],
+  }), "Feed Post");
+  assert.equal(ideaAutoListenContentType({
+    suggestedFormats: ["Text Post"],
+  }), "Feed Post");
+  assert.equal(ideaAutoListenContentType({
+    suggestedFormats: ["Event / Flyer Post"],
+  }), "Feed Post");
+  assert.equal(ideaAutoListenContentType({
+    suggestedFormats: ["Thumbnail / Promo Still"],
+  }), "Feed Post");
+  assert.equal(ideaAutoListenContentType({
+    suggestedFormats: ["Longform Video"],
+  }), "Vertical Short Video");
+  assert.equal(ideaAutoListenContentType({
+    suggestedFormats: ["Carousel"],
+  }), "Carousel");
+  assert.equal(ideaAutoListenContentType({
+    suggestedFormats: ["Vertical Short Video"],
+  }), "Vertical Short Video");
+  assert.equal(ideaAutoListenContentType({}), "Carousel");
+  assert.equal(ideaAutoListenContentType({
+    productionContentType: "Photo Set",
+    suggestedFormats: ["Thread"],
+  }), "Photo Set");
+});
 
 test("wait-range applies only to real-photo image ideas", () => {
   assert.equal(ideaPhotoWaitApplies({
