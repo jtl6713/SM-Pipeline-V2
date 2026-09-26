@@ -13,7 +13,7 @@ MAKE_TTD3_ID = TTD3_SCENARIO_ID
 MAKE_TTD4_ID = TTD4_SCENARIO_ID
 
 MAKE_TTD0_NAME = "TTD0 - Prepare TikTok Draft Asset Set v1.2.4 - Stable Quoted JSON Manifest"
-MAKE_TTD1_NAME = "TTD1 - Initialize TikTok Draft Delivery v1.0.2 - Valid Photo JSON"
+MAKE_TTD1_NAME = "TTD1 - Initialize TikTok Draft Delivery v1.0.3 - No Internal Pending Cap"
 MAKE_TTD2_NAME = "TTD2 - Poll TikTok Draft Processing v1.0.1"
 MAKE_TTD3_NAME = "TTD3 - Send TikTok Draft Handoff Email v1.0"
 MAKE_TTD4_NAME = "TTD4 - TikTok Manual Completion Handler v1.0.1 - TikTok URL Guard"
@@ -21,7 +21,6 @@ MAKE_TTD4_NAME = "TTD4 - TikTok Manual Completion Handler v1.0.1 - TikTok URL Gu
 DEFAULT_WORKER_BASE_URL = "https://auth.chicagoshining.com"
 DEFAULT_MEDIA_PREFIX = "https://media.chicagoshining.com/"
 DEFAULT_MAX_PHOTOS = 35
-DEFAULT_SAFE_PENDING_LIMIT = 5
 DEFAULT_POLL_DELAY_MINUTES = 2
 DEFAULT_MAX_POLL_ATTEMPTS = 20
 DEFAULT_EMAIL_TO = "chicagoshining@gmail.com"
