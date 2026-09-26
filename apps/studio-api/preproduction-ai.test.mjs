@@ -43,3 +43,16 @@ test("pre-production AI assets persist on the Production Request before approval
   assert.match(handler, /production_request:\s*mapProductionRequest\(record\)/);
   assert.match(handler, /completed:\s*generatedNow >= desiredAiCount/);
 });
+
+
+test("pre-production AI supports explicit additive targets without a Production asset-pool cap", async () => {
+  const source = await readFile(workerPath, "utf8");
+  const start = source.indexOf("async function generateItem4PreProductionAiMaster");
+  const end = source.indexOf("async function item4SeedAiCarouselSlides", start);
+  assert.ok(start >= 0 && end > start);
+  const handler = source.slice(start, end);
+  assert.match(handler, /target_ai_count/);
+  assert.match(handler, /add_ai_count/);
+  assert.match(handler, /generated\.length \+ requestedAdd/);
+  assert.doesNotMatch(handler, /A Production Request can contain at most/);
+});
