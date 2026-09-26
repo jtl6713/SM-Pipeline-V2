@@ -226,3 +226,14 @@ test("Facebook connection status treats sample-post failures as warnings", () =>
   assert.match(block, /result\.facebook\.sync_warning/);
   assert.match(block, /pageId: result\.facebook\.account_id/);
 });
+
+
+test("connected account cards hide historical per-post errors", () => {
+  const marker = "Account Connections is an account-health surface";
+  const start = workerSource.indexOf(marker);
+  assert.ok(start >= 0);
+  const block = workerSource.slice(start - 500, start + 1200);
+  assert.match(block, /item\.last_error = item\.status === "connected"/);
+  assert.match(block, /\? null/);
+  assert.match(block, /activity\.last_error/);
+});
