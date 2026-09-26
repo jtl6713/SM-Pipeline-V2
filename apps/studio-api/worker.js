@@ -16117,6 +16117,7 @@ async function getInsightsConnections(request, env, url, authorization) {
       "Platform",
       "Platform_Post_ID",
       "Platform_Media_ID",
+      "Platform_Post_URL",
       "YouTube_Video_ID",
       "TikTok_Draft_Public_Post_IDs_JSON",
       "IG_Carousel_Published_Media_ID",
@@ -16783,6 +16784,7 @@ function studioOutputNativeIdFields(row) {
     Platform: f(row, "Platform"),
     Platform_Post_ID: f(row, "Platform_Post_ID"),
     Platform_Media_ID: f(row, "Platform_Media_ID"),
+    Platform_Post_URL: f(row, "Platform_Post_URL"),
     YouTube_Video_ID: f(row, "YouTube_Video_ID"),
     TikTok_Draft_Public_Post_IDs_JSON: f(row, "TikTok_Draft_Public_Post_IDs_JSON"),
     IG_Carousel_Published_Media_ID: f(row, "IG_Carousel_Published_Media_ID"),
@@ -16845,6 +16847,62 @@ async function studioPersistFirstPartySnapshot(env, row, snapshot, { profile, pr
     measurement_bucket: snapshot.measurement_bucket,
     age_hours: snapshot.age_hours,
   }));
+}
+
+async function studioResolveTikTokOwnedVideoId(env, row, { profile, publishedAt }) {
+  const fields = studioOutputNativeIdFields(row);
+  const immediate = nativePlatformId("TikTok", fields);
+  if (immediate) return immediate;
+
+  // TikTok completion commonly stores a tiktok.com/t/... share URL rather than
+  // the numeric video ID. First try resolving that redirect to the canonical
+  // /@user/video/<id> URL.
+  const urlCandidates = [
+    fields.Platform_Post_URL,
+    fields.Manual_Published_URL,
+    fields.Platform_Post_ID,
+  ].map((value) => String(value || "").trim()).filter(Boolean);
+
+  for (const candidate of urlCandidates) {
+    const direct = candidate.match(/\/video\/(\d{8,})/);
+    if (direct) return direct[1];
+    if (!/^https?:\/\/(?:www\.)?tiktok\.com\/t\//i.test(candidate)) continue;
+    try {
+      const response = await fetch(candidate, {
+        method: "GET",
+        redirect: "follow",
+        headers: { "User-Agent": "Mozilla/5.0" },
+      });
+      const resolved = String(response.url || "");
+      const match = resolved.match(/\/video\/(\d{8,})/);
+      if (match) return match[1];
+    } catch {}
+  }
+
+  // Reliable fallback: video.list can return the creator's latest owned videos
+  // without an ID. Match by publish time. This is specifically for completed
+  // drafts where the short share URL never exposed the numeric post ID to us.
+  try {
+    const body = await fetchTikTokOwnedVideoAnalytics({
+      pipelineRunnerUrl: env.PIPELINE_RUNNER_URL,
+      pipelineRunnerSecret: env.PIPELINE_RUNNER_SHARED_SECRET,
+      profile,
+      videoIds: [],
+    });
+    const videos = Array.isArray(body?.videos) ? body.videos : [];
+    const target = Date.parse(String(publishedAt || ""));
+    if (!Number.isFinite(target)) return null;
+    const candidates = videos
+      .map((video) => ({
+        video,
+        delta: Math.abs(Date.parse(String(video?.published_at || "")) - target),
+      }))
+      .filter((entry) => Number.isFinite(entry.delta) && entry.delta <= 12 * 3600000)
+      .sort((left, right) => left.delta - right.delta);
+    return String(candidates[0]?.video?.id || "").trim() || null;
+  } catch {
+    return null;
+  }
 }
 
 async function studioFetchOwnedOutputAnalytics(env, row, { platform, postId, publishedAt, profile }) {
@@ -16965,9 +17023,28 @@ async function studioSweepPublishedInsights(env, options = {}) {
     const { row, profile, profileId } = candidate;
     const platform = String(f(row, "Platform") || "").trim();
     const publishedAt = f(row, "Published_At");
-    const postId = nativePlatformId(platform, studioOutputNativeIdFields(row));
+    let postId = nativePlatformId(platform, studioOutputNativeIdFields(row));
     considered += 1;
     const attemptedAt = new Date().toISOString();
+
+    if (!postId && platform === "TikTok") {
+      postId = await studioResolveTikTokOwnedVideoId(env, row, { profile, publishedAt });
+      if (postId) {
+        // Persist the discovered numeric ID so all future analytics pulls are
+        // deterministic and do not have to resolve the short share URL again.
+        await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, row.id, {
+          method: "PATCH",
+          body: JSON.stringify({
+            fields: {
+              Platform_Post_ID: postId,
+              Insights_Last_Error: null,
+              Insights_Next_Sync_At: null,
+            },
+            typecast: true,
+          }),
+        }).catch(() => null);
+      }
+    }
 
     if (!postId) {
       const retryAt = new Date(Date.now() + 24 * 3600000).toISOString();

@@ -90,7 +90,7 @@ export function nativePlatformId(platform, fields = {}) {
   if (name === "instagram") return String(fields.IG_Carousel_Published_Media_ID || fields.IG_Story_Post_ID || fields.Platform_Post_ID || fields.Platform_Media_ID || "").trim() || null;
   if (name === "facebook") return String(fields.FB_Slideshow_Meta_Video_ID || fields.Platform_Media_ID || fields.Platform_Post_ID || "").trim() || null;
   if (name === "tiktok") {
-    const direct = String(fields.Platform_Post_ID || fields.Platform_Media_ID || fields.Manual_Published_URL || "").trim();
+    const direct = String(fields.Platform_Post_ID || fields.Platform_Media_ID || fields.Platform_Post_URL || fields.Manual_Published_URL || "").trim();
     if (/^\d{8,}$/.test(direct)) return direct;
     try {
       const parsed = JSON.parse(String(fields.TikTok_Draft_Public_Post_IDs_JSON || "[]"));

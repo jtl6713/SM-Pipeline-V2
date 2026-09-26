@@ -237,3 +237,27 @@ test("connected account cards hide historical per-post errors", () => {
   assert.match(block, /\? null/);
   assert.match(block, /activity\.last_error/);
 });
+
+
+test("TikTok native ID can use the published URL", () => {
+  assert.equal(
+    nativePlatformId("TikTok", { Platform_Post_URL: "https://www.tiktok.com/@miamishining/video/7654321098765432109" }),
+    "7654321098765432109"
+  );
+});
+
+test("TikTok missing IDs are discovered before analytics failure", () => {
+  const marker = "async function studioResolveTikTokOwnedVideoId";
+  const helperStart = workerSource.indexOf(marker);
+  assert.ok(helperStart >= 0);
+  const helper = workerSource.slice(helperStart, helperStart + 5200);
+  assert.match(helper, /tiktok\.com\/t\//i);
+  assert.match(helper, /videoIds: \[\]/);
+  assert.match(helper, /12 \* 3600000/);
+
+  const sweepStart = workerSource.indexOf('if (!postId && platform === "TikTok")');
+  assert.ok(sweepStart >= 0);
+  const sweep = workerSource.slice(sweepStart, sweepStart + 1800);
+  assert.match(sweep, /studioResolveTikTokOwnedVideoId/);
+  assert.match(sweep, /Platform_Post_ID: postId/);
+});
