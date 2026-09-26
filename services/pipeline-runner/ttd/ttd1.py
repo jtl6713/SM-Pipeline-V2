@@ -132,6 +132,7 @@ def process_request(
             body={"error": str(exc)},
             stage=STAGE_TTD1,
             message=str(exc),
+            attempt=attempt,
         )
 
     publish_id = publish_id_from(body)
@@ -177,6 +178,7 @@ def process_request(
         stage=STAGE_CAPACITY if capacity else STAGE_TTD1 if stage_prefix == STAGE_TTD1 else stage_prefix,
         message=f"TikTok {'video' if result.get('draft_kind') == 'video' else 'photo'} draft initialization failed. HTTP {status_code}: {body}",
         capacity=capacity,
+        attempt=attempt,
     )
 
 
@@ -191,6 +193,7 @@ def _init_failure(
     stage: str,
     message: str,
     capacity: bool = False,
+    attempt: int = 0,
 ) -> dict[str, Any]:
     replace = bool(field_str(output, "Replace_Transaction_ID"))
     if replace:
@@ -219,7 +222,7 @@ def _init_failure(
         result["manual_fallback"] = True
         return {"processed": True, "terminal": True, **result}
 
-    if status_code in {401, 403}:
+    if status_code in {401, 403} and attempt >= 5:
         client.update_record(
             PLATFORM_OUTPUTS_TABLE,
             record_id,

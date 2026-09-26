@@ -86,6 +86,7 @@ test("produce jobs escalate after heal budget then stay transient while retries 
   assert.equal(missingMasters.fingerprint, fingerprint("produce_escalated", "reckHkuJfs1F6eTAN", "missing_masters"));
   assert.equal(errorClassFromText("No Studio master photos to crop"), "missing_masters");
   assert.equal(errorClassFromText("No Platform Outputs found for this Production Request"), "missing_outputs");
+  assert.equal(errorClassFromText("TikTok photo draft initialization failed. HTTP 401: Unauthorized"), "transient_http");
   const mismatch = classifyProduceJob({
     request_id: "reccEj6eVXPPKalJd",
     step: "blocked",
@@ -311,6 +312,42 @@ test("promoted advancement is origin-aware and does not treat Ready for Review a
     publish_retry_eligible: true,
     publish_error: "Instagram Reel create failed. Meta status_code: ERROR. Status: Error: Media upload has failed with error code 2207082",
   }).class, "transient");
+  const vizcaya908 = classifyPublishFailed({
+    id: "recuOQs6TgAXJqxRI",
+    output_id: 908,
+    output_status: "Approved for Publishing",
+    publish_status: "Failed",
+    publish_error: "TikTok photo draft initialization failed. HTTP 401: {'ok': False, 'error': 'Unauthorized', 'worker_version': 'v5.1-tiktok-caption-diagnostics'}",
+    last_publish_attempt_at: "2026-09-26T08:47:24.000Z",
+  }, now);
+  assert.equal(vizcaya908.kind, "publish_failed_transient");
+  assert.equal(vizcaya908.class, "transient");
+  assert.equal(vizcaya908.actor, "worker_heal");
+  assert.equal(vizcaya908.fingerprint, fingerprint("publish_failed_transient", "recuOQs6TgAXJqxRI", "transient_http"));
+  const staleFailed = classifyPublishFailed({
+    id: "recStaleFail",
+    output_status: "Approved for Publishing",
+    publish_status: "Failed",
+    publish_error: "Some unknown publisher error that is not in the transient list",
+    last_publish_attempt_at: "2026-09-26T12:00:00.000Z",
+  }, Date.parse("2026-09-26T13:05:00.000Z"));
+  assert.equal(staleFailed.class, "transient");
+  assert.equal(staleFailed.actor, "worker_heal");
+  assert.equal(staleFailed.fingerprint, fingerprint("publish_failed_transient", "recStaleFail", "stale_failed"));
+  assert.equal(classifyPublishFailed({
+    id: "recFreshUnknown",
+    output_status: "Approved for Publishing",
+    publish_status: "Failed",
+    publish_error: "Some unknown publisher error that is not in the transient list",
+    last_publish_attempt_at: "2026-09-26T13:00:00.000Z",
+  }, Date.parse("2026-09-26T13:05:00.000Z")).class, "code_bug");
+  assert.equal(classifyPublishFailed({
+    id: "recCopyright",
+    output_status: "Approved for Publishing",
+    publish_status: "Failed",
+    publish_error: "copyright claim on this video",
+    last_publish_attempt_at: "2026-09-26T08:00:00.000Z",
+  }, Date.parse("2026-09-26T13:05:00.000Z")).class, "code_bug");
   assert.equal(classifyNativeCover({
     id: "recCvr",
     output_status: "Published",

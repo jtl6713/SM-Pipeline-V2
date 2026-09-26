@@ -122,7 +122,7 @@ export const QUALITY_CHECKS = Object.freeze([
   }),
   check({
     id: "publish_failed_transient",
-    title: "Check for Failed or retry-eligible publishes (Instagram IN_PROGRESS, timeouts) that Worker should requeue",
+    title: "Check for Failed or retry-eligible publishes (Instagram IN_PROGRESS, HTTP 401, or Failed for more than an hour) that Worker should requeue",
     lane: "service",
     kind: "publish_failed_transient",
     actor: "worker_heal",
@@ -130,7 +130,7 @@ export const QUALITY_CHECKS = Object.freeze([
   }),
   check({
     id: "render_failed",
-    title: "Check for Render_Status=Failed outputs that Worker should requeue to Ready for Render",
+    title: "Check for Render_Status=Failed outputs (including Failed for more than an hour) that Worker should requeue to Ready for Render",
     lane: "service",
     kind: "render_failed",
     actor: "worker_heal",

@@ -18,6 +18,7 @@ import {
   classifyPublishDispatch,
   classifyPublishFailed,
   classifyRenderRow,
+  deskFailedNeedsHeal,
   deskRecoverableEscalatedError,
   deskTransientPublishError,
   deskTransientRenderError,
@@ -432,7 +433,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.389-ai-image-prompt-guidance",
+          version: "0.10.390-failed-stale-1h",
           studio_desk_inventory_v1: true,
           studio_desk_activity_v1: true,
           studio_tiktok_complete_v1: true,
@@ -9888,7 +9889,10 @@ async function healStuckStudioRenders(env) {
   }).catch(() => []);
   for (const row of failedRenders || []) {
     const err = String(f(row, "Remotion_Error_Message") || f(row, "Final_File_Error_Message") || "");
-    if (!deskTransientRenderError(err)) continue;
+    if (!deskFailedNeedsHeal({
+      render_error: err,
+      last_modified: f(row, "Last_Modified") || f(row, "Updated_At") || f(row, "Last_Render_Attempt_At"),
+    })) continue;
     try {
       await airtableFetch(env, outputTable, row.id, {
         method: "PATCH",
@@ -9930,8 +9934,13 @@ async function studioHealFailedStatuses(env, options = {}) {
   for (const row of failedPublish || []) {
     const err = String(f(row, "Publish_Error_Message") || "");
     const status = String(f(row, "Publish_Status") || "").trim();
-    if (status !== "Failed" && !deskTransientPublishError(err)) continue;
-    if (status === "Failed" && err && !deskTransientPublishError(err)) continue;
+    const needsHeal = deskFailedNeedsHeal({
+      publish_error: err,
+      last_publish_attempt_at: f(row, "Last_Publish_Attempt_At"),
+      last_modified: f(row, "Last_Modified") || f(row, "Updated_At"),
+    });
+    if (status !== "Failed" && !deskTransientPublishError(err) && !needsHeal) continue;
+    if (status === "Failed" && !needsHeal) continue;
     const corruptUpload = /2207082|media upload has failed/i.test(err);
     const alreadyRetried = Number(f(row, "Publish_Attempt_Count") || 0) >= 2
       || Number(f(row, "Studio_Publish_Dispatch_Count") || 0) >= 2;
@@ -9966,6 +9975,11 @@ async function studioHealFailedStatuses(env, options = {}) {
       continue;
     }
     try {
+      const tiktokParked = String(f(row, "Platform") || "") === "TikTok"
+        && (
+          /unauthorized|authentication failure|(^|[^0-9])401([^0-9]|$)/i.test(err)
+          || String(f(row, "TikTok_Draft_Status") || "") === "Manual Fallback"
+        );
       await airtableFetch(env, outputTable, row.id, {
         method: "PATCH",
         body: JSON.stringify({
@@ -9981,6 +9995,11 @@ async function studioHealFailedStatuses(env, options = {}) {
             Platform_Media_ID: /in_progress|still being processed/i.test(err)
               ? (f(row, "Platform_Media_ID") || "")
               : "",
+            ...(tiktokParked ? {
+              TikTok_Draft_Status: "Ready for Delivery",
+              Manual_Fallback_Required: false,
+              Publish_Error_Stage: "",
+            } : {}),
           },
           typecast: true,
         }),
@@ -33177,6 +33196,7 @@ function mapDeskInventoryOutput(record, contentToRequest = new Map()) {
     thumbnail_mode: f(record, "Studio_Effective_Thumbnail_Mode"),
     test_run_id: f(record, "Test_Run_ID"),
     last_modified: f(record, "Last_Modified") || f(record, "Updated_At") || "1970-01-01T00:00:00Z",
+    last_publish_attempt_at: f(record, "Last_Publish_Attempt_At"),
     request_id: studioOutputProductionRequestId(record, contentToRequest)
       || studioFirstLinkedId(f(record, "Production Requests")),
     content_item_id: studioFirstLinkedId(f(record, "Content_Item")),
@@ -33390,7 +33410,7 @@ async function gatherStudioDeskInventory(env) {
   scanned("publish_never_dispatch");
   for (const record of approvedDispatch || []) {
     push(classifyPublishDispatch(mapOut(record), nowMs));
-    push(classifyPublishFailed(mapOut(record)));
+    push(classifyPublishFailed(mapOut(record), nowMs));
   }
   try {
     const failedRows = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
@@ -33410,7 +33430,7 @@ async function gatherStudioDeskInventory(env) {
         render_error: f(record, "Remotion_Error_Message") || f(record, "Final_File_Error_Message"),
         output_id: f(record, "Output_ID"),
       }, nowMs));
-      push(classifyPublishFailed(mapOut(record)));
+      push(classifyPublishFailed(mapOut(record), nowMs));
     }
   } catch (error) {
     console.warn("desk failed-status scan failed", error);

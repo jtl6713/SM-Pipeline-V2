@@ -23,3 +23,8 @@ Reason: honor user descriptions as primary guidance for Production AI image gene
 Worker: 0.10.389-ai-image-prompt-guidance
 Source merge: 4f23723a9c00fad33d378a0ecd2f91a86ab41a01
 Requested: 2026-09-26T11:41:00-05:00
+
+Deploy Studio API Worker production
+Reason: Quality Agent + Worker heal Failed outputs older than 1 hour (908 TikTok 401)
+Worker: 0.10.390-failed-stale-1h
+Requested: 2026-09-26T14:40:00-05:00
