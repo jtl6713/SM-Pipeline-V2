@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import json
+import math
 from typing import TYPE_CHECKING, Any
 
 from studio_produce.constants import PLATFORM_OUTPUTS_TABLE
+from audio.voiceover_duration import measured_voiceover_seconds
 from render.fields import field, field_str
 from studio_produce.constants import NATIVE_OUTPUT_TYPES, STORY_OUTPUT_TYPES
 from studio_produce.context import expected_photo_count, master_assets, variant_manifest
@@ -69,18 +71,34 @@ def directive_yes(value: Any) -> bool:
 
 
 def output_effective(output: dict[str, Any], request: dict[str, Any], parent: dict[str, Any] | None) -> dict[str, Any]:
+    voiceover_mode = field_str(output, "Studio_Effective_Voiceover_Mode") or field_str(request, "Voiceover_Mode") or "Yes"
+    voiceover_duration = (
+        field(output, "Studio_Effective_Voiceover_Duration_Seconds")
+        or field(request, "Voiceover_Duration_Seconds")
+        or field(parent or {}, "Voiceover_Duration_Seconds")
+        or 0
+    )
+    if directive_yes(voiceover_mode) and not voiceover_duration and field_str(parent or {}, "Voiceover_URL"):
+        voiceover_duration = measured_voiceover_seconds(output, parent, probe=True) or 0
     return {
         "platform": field_str(output, "Platform"),
         "output_type": field_str(output, "Studio_Output_Type") or field_str(output, "Output_Type"),
-        "voiceover_mode": field_str(output, "Studio_Effective_Voiceover_Mode") or field_str(request, "Voiceover_Mode") or "Yes",
+        "voiceover_mode": voiceover_mode,
         "thumbnail_mode": field_str(output, "Studio_Effective_Thumbnail_Mode") or field_str(request, "Thumbnail_Mode") or "Yes",
         "background_music_mode": field_str(output, "Studio_Effective_Background_Music_Mode") or field_str(request, "Background_Music_Mode") or "Yes",
         "video_duration_seconds": field(output, "Studio_Effective_Video_Duration_Seconds") or field(request, "Video_Duration_Seconds") or 0,
-        "voiceover_duration_seconds": field(output, "Studio_Effective_Voiceover_Duration_Seconds") or field(request, "Voiceover_Duration_Seconds") or field(parent or {}, "Voiceover_Duration_Seconds") or 0,
+        "voiceover_duration_seconds": voiceover_duration,
+        "voiceover_tail_seconds": field(output, "Studio_Effective_Voiceover_Tail_Seconds") or field(request, "Voiceover_Tail_Seconds") or field(parent or {}, "Voiceover_Tail_Seconds") or 2,
         "music_start_seconds": field(output, "Studio_Effective_Music_Start_Seconds") or field(request, "Music_Start_Seconds") or field(parent or {}, "Music_Start_Seconds") or 0,
         "requested_title": field_str(output, "Studio_Effective_Requested_Title") or field_str(request, "Requested_Title") or field_str(parent or {}, "Content_Title"),
         "requested_caption": field_str(output, "Studio_Effective_Requested_Caption") or field_str(request, "Requested_Caption") or field_str(parent or {}, "Caption"),
-        "music_url": field_str(output, "Music_URL") or field_str(output, "Preferred_Music_URL") or field_str(parent or {}, "Selected_Music_URL"),
+        "music_url": (
+            field_str(output, "Music_URL")
+            or field_str(output, "Preferred_Music_URL")
+            or field_str(parent or {}, "Selected_Music_URL")
+            or field_str(parent or {}, "Preferred_Music_URL")
+            or field_str(parent or {}, "Music_URL")
+        ),
     }
 
 
@@ -106,8 +124,19 @@ def duration_seconds(
         stored_n = float(stored)
     except (TypeError, ValueError):
         stored_n = 0
-    # Owner-set duration on the Production Request (including 30) is authoritative.
+    # A requested duration is a target, but narration must never be truncated.
+    # Extend to the next whole frame when measured/stored voiceover + tail is longer.
     if stored_n > 0:
+        if directive_yes(effective.get("voiceover_mode")):
+            try:
+                voice_n = float(effective.get("voiceover_duration_seconds") or 0)
+                tail_n = float(effective.get("voiceover_tail_seconds") or 0)
+            except (TypeError, ValueError):
+                voice_n = 0
+                tail_n = 0
+            if voice_n > 0:
+                required = math.ceil((voice_n + max(0.0, tail_n)) * FPS) / FPS
+                return max(stored_n, required)
         return stored_n
     if clip_count <= 1:
         return SINGLE_STILL_SECONDS
