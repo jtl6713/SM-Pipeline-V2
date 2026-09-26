@@ -24,6 +24,31 @@ def _as_select_list(value: Any) -> list[str]:
     return [text] if text else []
 
 
+PHOTO_LISTEN_FORMAT_RANGES: dict[str, tuple[int, int]] = {
+    "Carousel": (5, 8),
+    "Photo Set": (5, 10),
+    "Feed Post": (1, 4),
+    "Vertical Short Video": (5, 10),
+}
+
+
+def _auto_photo_listen_fields(idea: dict[str, Any]) -> dict[str, Any]:
+    formats = _as_select_list(idea.get("suggested_format"))
+    content_type = next((value for value in formats if value in PHOTO_LISTEN_FORMAT_RANGES), "")
+    if not content_type:
+        return {}
+    minimum, maximum = PHOTO_LISTEN_FORMAT_RANGES[content_type]
+    return {
+        "Production_Content_Type": content_type,
+        "Production_Carousel_Image_Mode": "Manual Upload",
+        "Production_Carousel_Slide_Count_Mode": "Target range",
+        "Production_Carousel_Slide_Count_Min": minimum,
+        "Production_Carousel_Slide_Count_Max": maximum,
+        "Production_Carousel_Slide_Count": maximum,
+        "Studio_Photo_Wait_Status": "Waiting",
+    }
+
+
 def _candidate_fields(
     idea: dict[str, Any],
     *,
@@ -47,6 +72,7 @@ def _candidate_fields(
         "Why_This_Should_Work": str(idea.get("why_this_should_work") or "").strip(),
         "Duplicate_Risk": str(idea.get("duplicate_risk") or "Low").strip() or "Low",
         "Content_Profile": [profile_id],
+        **_auto_photo_listen_fields(idea),
     }
     score = parse_int(idea.get("priority_score"))
     if score is not None:

@@ -24,3 +24,13 @@ test("Photo listening stays in Ideas until enough matches and then surfaces in P
   assert.match(worker, /runWaitingIdeaPhotoMatches/);
   assert.match(worker, /Studio media library/);
 });
+
+
+test("generated media ideas start listening automatically and the cron can create their draft", () => {
+  assert.match(worker, /created_record_ids/);
+  assert.match(worker, /Photo-capable ideas are listening automatically/);
+  assert.match(worker, /generated idea automatic photo listening failed/);
+  assert.match(worker, /Vertical Short Video/);
+  assert.match(worker, /const authorization = records\.length \? await resolveStudioCronAuthorization\(env\) : null/);
+  assert.match(worker, /evaluateAndMaybeAttachWaitingIdeaPhotos\(env, idea, \{\s*authorization,/);
+});
