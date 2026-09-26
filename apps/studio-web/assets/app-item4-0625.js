@@ -240,7 +240,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.381-production-unlimited-assets";
+  const BUILD_ID = "item4-0.6.382-display-text-repair-scope";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -18608,11 +18608,12 @@
     const profile = studioProfiles.find((item) => item.id === event.target.value);
     if (profile) applyStudioProfile(profile, { reload: true });
   });
-})();
 
-// v0.6.17 display-text normalization startup
-if (document.readyState === "loading") {
-  document.addEventListener("DOMContentLoaded", () => startDisplayTextRepair(), { once: true });
-} else {
-  startDisplayTextRepair();
-}
+  // Display-text normalization must start inside this closure because
+  // startDisplayTextRepair is intentionally private to the Studio app.
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", () => startDisplayTextRepair(), { once: true });
+  } else {
+    startDisplayTextRepair();
+  }
+})();
