@@ -428,7 +428,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.379-branch-reconcile",
+          version: "0.10.380-insights-all-profiles",
           studio_desk_inventory_v1: true,
           studio_desk_activity_v1: true,
           studio_tiktok_complete_v1: true,
@@ -16070,7 +16070,6 @@ function studioInsightsConnectionStateFromError(error) {
 function studioInsightsLatestSyncByPlatform(rows) {
   const result = {};
   for (const row of rows || []) {
-    if (considered >= limit) break;
     const platform = String(f(row, "Platform") || "").trim();
     if (!platform) continue;
     const current = result[platform] || { last_successful_sync: null, last_attempt: null, last_error: null };
@@ -16855,25 +16854,80 @@ async function studioFetchOwnedOutputAnalytics(env, row, { platform, postId, pub
 }
 
 async function studioSweepPublishedInsights(env, options = {}) {
-  const limit = Math.max(1, Math.min(12, Number(options.limit) || 8));
-  const rows = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
-    limit: Math.min(60, limit * 5),
-    sortField: "Published_At",
-    sortDirection: "desc",
-    filterFormula: 'AND({Test_Run_ID}=BLANK(),{Published_At}!="",{Do_Not_Publish}=0,OR({Insights_Next_Sync_At}=BLANK(),IS_BEFORE({Insights_Next_Sync_At},NOW())))',
-  }).catch(() => []);
+  const perProfileLimit = Math.max(1, Math.min(25, Number(options.limit) || 8));
+  const profileRecords = (await listContentProfileRecords(env).catch(() => []))
+    .filter((record) => Boolean(f(record, "Active")));
+
+  let scanned = 0;
   let updated = 0;
   let failed = 0;
   let considered = 0;
   const profiles = new Set();
-  for (const row of rows || []) {
+  const profileStats = {};
+  const groups = [];
+
+  for (const profileRecord of profileRecords) {
+    const profile = studioThemeForProfile(profileRecord);
+    const profileId = profileRecord.id;
+    const profileFormula = contentProfileFilterFormula(profileRecord);
+    const rows = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
+      // Scan a generous backlog independently for every active profile. This is
+      // deliberately not a global limit: Chicago must never crowd out another brand.
+      limit: 250,
+      sortField: "Published_At",
+      sortDirection: "desc",
+      filterFormula: 'AND(' + profileFormula + ',{Test_Run_ID}=BLANK(),{Published_At}!="",{Do_Not_Publish}=0,OR({Insights_Next_Sync_At}=BLANK(),IS_BEFORE({Insights_Next_Sync_At},NOW())))',
+    }).catch(() => []);
+
+    scanned += rows.length;
+    const eligible = rows.filter((row) => {
+      const platform = String(f(row, "Platform") || "").trim();
+      return ["Instagram", "Facebook", "YouTube", "TikTok"].includes(platform) && Boolean(f(row, "Published_At"));
+    });
+
+    // Prioritize outputs that have never received a successful analytics snapshot,
+    // then continue lifecycle refreshes. This makes backfill converge quickly while
+    // retaining the age-based refresh cadence for already sampled posts.
+    eligible.sort((a, b) => {
+      const aMissing = f(a, "Insights_As_Of") ? 1 : 0;
+      const bMissing = f(b, "Insights_As_Of") ? 1 : 0;
+      if (aMissing !== bMissing) return aMissing - bMissing;
+      const aNext = Date.parse(String(f(a, "Insights_Next_Sync_At") || f(a, "Published_At") || "")) || 0;
+      const bNext = Date.parse(String(f(b, "Insights_Next_Sync_At") || f(b, "Published_At") || "")) || 0;
+      return aNext - bNext;
+    });
+
+    const selected = eligible.slice(0, perProfileLimit);
+    profileStats[profile] = {
+      profile_id: profileId,
+      scanned: rows.length,
+      eligible: eligible.length,
+      selected: selected.length,
+      updated: 0,
+      failed: 0,
+    };
+    groups.push({ profile, profileId, rows: selected });
+  }
+
+  // Round-robin execution keeps provider/API work interleaved by profile even when
+  // one brand has a much larger backlog.
+  const queue = [];
+  const maxGroupSize = Math.max(0, ...groups.map((group) => group.rows.length));
+  for (let index = 0; index < maxGroupSize; index += 1) {
+    for (const group of groups) {
+      const row = group.rows[index];
+      if (row) queue.push({ row, profile: group.profile, profileId: group.profileId });
+    }
+  }
+
+  for (const candidate of queue) {
+    const { row, profile, profileId } = candidate;
     const platform = String(f(row, "Platform") || "").trim();
-    if (!["Instagram", "Facebook", "YouTube", "TikTok"].includes(platform)) continue;
     const publishedAt = f(row, "Published_At");
     const postId = nativePlatformId(platform, studioOutputNativeIdFields(row));
-    if (!publishedAt) continue;
     considered += 1;
     const attemptedAt = new Date().toISOString();
+
     if (!postId) {
       const retryAt = new Date(Date.now() + 24 * 3600000).toISOString();
       await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, row.id, {
@@ -16888,10 +16942,10 @@ async function studioSweepPublishedInsights(env, options = {}) {
         }),
       }).catch(() => null);
       failed += 1;
+      if (profileStats[profile]) profileStats[profile].failed += 1;
       continue;
     }
-    const profile = await studioThemeForPublishRecord(env, row);
-    const profileId = await studioContentProfileRecordIdForOutput(env, row);
+
     const outputType = String(f(row, "Platform_Output_Type") || f(row, "Studio_Output_Type") || "").trim();
     const caption = String(f(row, "Output_Caption") || "").trim();
     try {
@@ -16920,8 +16974,10 @@ async function studioSweepPublishedInsights(env, options = {}) {
       });
       profiles.add(profile);
       updated += 1;
+      if (profileStats[profile]) profileStats[profile].updated += 1;
     } catch (error) {
       failed += 1;
+      if (profileStats[profile]) profileStats[profile].failed += 1;
       const retryAt = new Date(Date.now() + 6 * 3600000).toISOString();
       await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, row.id, {
         method: "PATCH",
@@ -16937,7 +16993,17 @@ async function studioSweepPublishedInsights(env, options = {}) {
       console.warn("first-party analytics row failed", row.id, sanitizeAnalyticsError(error));
     }
   }
-  return { scanned: (rows || []).length, considered, updated, failed, profiles: [...profiles] };
+
+  return {
+    scanned,
+    considered,
+    updated,
+    failed,
+    profiles: [...profiles],
+    active_profiles: profileRecords.length,
+    per_profile_limit: perProfileLimit,
+    profile_stats: profileStats,
+  };
 }
 
 async function studioFetchOutputInsights(platform, postId, creds) {
