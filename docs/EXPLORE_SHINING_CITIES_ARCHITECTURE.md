@@ -10,6 +10,7 @@ Canonical website source:
 - Application: `apps/explore-shining-cities/`
 - Production: https://exploreshiningcities.com
 - Website CI/deployment workflows are owned by the website repository.
+- Until that repo has Cloudflare secrets, `Deploy Explore From Website Repo` in this repository publishes `jtl6713/chicagoshining-website` to Pages.
 
 `SM-Pipeline-V2` remains the system of record for Studio, pipeline orchestration, asset/media processing, social publishing, and the future website-publication workflow.
 

@@ -1,0 +1,90 @@
+name: Deploy Explore From Website Repo
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "deploy/explore-shining-cities-production.txt"
+      - ".github/workflows/deploy-explore-from-website-repo.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: explore-shining-cities-production
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      PAGES_PROJECT: explore-shining-cities
+      PUBLIC_DOMAIN: exploreshiningcities.com
+    steps:
+      - name: Checkout website repository
+        uses: actions/checkout@v6
+        with:
+          repository: jtl6713/chicagoshining-website
+          token: ${{ secrets.WEBSITE_REPO_TOKEN }}
+          path: website
+
+      - name: Copy Cloudflare secrets onto the website repo
+        env:
+          GH_TOKEN: ${{ secrets.WEBSITE_REPO_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          printf '%s' "$CLOUDFLARE_API_TOKEN" | gh secret set CLOUDFLARE_API_TOKEN --repo jtl6713/chicagoshining-website
+          printf '%s' "$CLOUDFLARE_ACCOUNT_ID" | gh secret set CLOUDFLARE_ACCOUNT_ID --repo jtl6713/chicagoshining-website
+
+      - name: Use Node 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: website/apps/explore-shining-cities/package.json
+
+      - name: Validate and build public site
+        working-directory: website/apps/explore-shining-cities
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm install --no-audit --no-fund
+          npm run validate
+          npm run build
+          test -s dist/index.html
+          grep -Fq "1ZwltMhC5DmiIwK84hXQs75PSXNE3Wyjp" dist/index.html
+          grep -Fq "114SyH5ij06L-strTC1BEuzYbx6KslICY" dist/index.html
+          ! grep -Fq "1jw3qIVCM5ObJnc_RbgmTA1uKmZdcYok2" dist/index.html
+
+      - name: Deploy static site to Pages production
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "${CLOUDFLARE_API_TOKEN:-}"
+          test -n "${CLOUDFLARE_ACCOUNT_ID:-}"
+          npx --yes wrangler@latest pages deploy website/apps/explore-shining-cities/dist \
+            --project-name="$PAGES_PROJECT" \
+            --branch=main \
+            --commit-dirty=true
+
+      - name: Verify production Miami photos
+        shell: bash
+        run: |
+          set -euo pipefail
+          for ATTEMPT in $(seq 1 18); do
+            curl -sS -L -o /tmp/live.html "https://$PUBLIC_DOMAIN/"
+            if grep -Fq "1ZwltMhC5DmiIwK84hXQs75PSXNE3Wyjp" /tmp/live.html \
+              && grep -Fq "114SyH5ij06L-strTC1BEuzYbx6KslICY" /tmp/live.html \
+              && ! grep -Fq "1jw3qIVCM5ObJnc_RbgmTA1uKmZdcYok2" /tmp/live.html; then
+              echo "LIVE Miami photos: PASS"
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "Live homepage still has the old Miami map after deploy." >&2
+          exit 1

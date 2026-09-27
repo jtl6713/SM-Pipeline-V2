@@ -1,0 +1,3 @@
+Deploy Explore Shining Cities production from chicagoshining-website
+Reason: live site still serves Little Havana 21 map; website repo deploy had no Cloudflare secrets
+Requested: 2026-09-27T01:58:00-05:00
