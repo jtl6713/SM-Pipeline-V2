@@ -69,3 +69,17 @@ test("user prompt guidance takes priority while preserving Studio context", asyn
   assert.match(handler, /Avoid burned-in text unless the user explicitly asks for it/);
 });
 
+
+test("deleting an AI master disables automatic regeneration and clears stale links", async () => {
+  const source = await readFile(workerPath, "utf8");
+  const start = source.indexOf("async function deleteItem4MasterAsset");
+  const end = source.indexOf("async function uploadItem4ClipPoster", start);
+  assert.ok(start >= 0 && end > start);
+  const handler = source.slice(start, end);
+
+  assert.match(handler, /deletedAiAsset/);
+  assert.match(handler, /Carousel_Image_Mode = "Manual Upload"/);
+  assert.match(handler, /ez-ai-auto=off/i);
+  assert.match(handler, /Studio_Master_Media_Assets/);
+  assert.match(handler, /Studio_Platform_Variant_Assets:\s*\[\]/);
+});
