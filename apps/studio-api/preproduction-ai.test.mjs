@@ -84,3 +84,67 @@ test("deleting an AI master disables automatic regeneration and clears stale lin
   assert.match(handler, /Studio_Master_Media_Assets/);
   assert.match(handler, /Studio_Platform_Variant_Assets:\s*\[\]/);
 });
+
+
+test("Production AI inherits the Production profile and reuses Asset Manager numbering", async () => {
+  const source = await readFile(workerPath, "utf8");
+  const start = source.indexOf("async function generateItem4PreProductionAiMaster");
+  const end = source.indexOf("async function item4SeedAiCarouselSlides", start);
+  assert.ok(start >= 0 && end > start);
+  const handler = source.slice(start, end);
+
+  assert.match(handler, /body\?\.asset_name_base/);
+  assert.match(handler, /item4ProductionProfileRecord\(env, record, preferredProfileId\)/);
+  assert.match(handler, /mediaAssetProfileScopeFormula\(productionProfile\.id/);
+  assert.match(handler, /listLibraryBatchExistingNames\(env, assetBase, profileScope\)/);
+  assert.match(handler, /allocateLibraryBatchNames\(assetBase, 1/);
+  assert.match(handler, /library_asset_name:\s*assetName/);
+  assert.match(handler, /content_profile_id:\s*productionProfile\.id/);
+
+  const createStart = source.indexOf("async function item4CreateMasterMediaAsset");
+  const createEnd = source.indexOf("async function item4SanitizeStudioImageMediaAsset", createStart);
+  assert.ok(createStart >= 0 && createEnd > createStart);
+  const creator = source.slice(createStart, createEnd);
+  assert.match(creator, /asset\?\.library_asset_name/);
+  assert.match(creator, /Content_Profile:\s*\[profileId\]/);
+});
+
+test("Production profile resolution falls back to the linked Idea", async () => {
+  const source = await readFile(workerPath, "utf8");
+  const start = source.indexOf("async function item4ProductionProfileRecord");
+  const end = source.indexOf("function studioAssetHasChicagoWatermark", start);
+  assert.ok(start >= 0 && end > start);
+  const resolver = source.slice(start, end);
+
+  assert.match(resolver, /Idea_Candidate/);
+  assert.match(resolver, /Content_Profile/);
+  assert.match(resolver, /Production Requests do not currently carry a Content_Profile field/);
+});
+
+test("background master reconciliation cannot resurrect a deleted Production asset", async () => {
+  const source = await readFile(workerPath, "utf8");
+  const start = source.indexOf("async function item4ReconcileMasterAuthority");
+  const end = source.indexOf("async function item4UpdateRequestState", start);
+  assert.ok(start >= 0 && end > start);
+  const handler = source.slice(start, end);
+
+  assert.match(handler, /Re-read the operator's current manifest before committing reconciliation/);
+  assert.match(handler, /latestRecord = await airtableFetch/);
+  assert.match(handler, /latestAssets = item4AssetManifest\(latestRecord\)/);
+  assert.match(handler, /processedById/);
+  assert.match(handler, /reconciledAssets = latestAssets\.map/);
+  assert.match(handler, /Studio_Master_Assets_JSON:\s*JSON\.stringify\(reconciledAssets\)/);
+});
+
+test("an AI delete that lands during image generation wins before commit", async () => {
+  const source = await readFile(workerPath, "utf8");
+  const start = source.indexOf("async function generateItem4PreProductionAiMaster");
+  const end = source.indexOf("async function item4SeedAiCarouselSlides", start);
+  assert.ok(start >= 0 && end > start);
+  const handler = source.slice(start, end);
+
+  assert.match(handler, /latestBeforeAiCommit/);
+  assert.match(handler, /aiDeleteDuringGeneration/);
+  assert.match(handler, /ez-ai-auto=off/i);
+  assert.match(handler, /cancelled:\s*true/);
+});
