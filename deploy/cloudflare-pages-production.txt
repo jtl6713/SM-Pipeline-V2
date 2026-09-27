@@ -30,3 +30,4 @@ Existing Production platform authority: 2026-09-26 - hydrates hidden EZ platform
 Quality Agent recap: 2026-09-26 - Operations Recap shows pipeline blocks and what Quality Agent did, in everyday language. UI 0.6.393.
 
 Quality Agent recap dates: 2026-09-26 - each recap card shows date found, date resolved, and how it was resolved. UI 0.6.394.
+2026-09-26 Studio UI 0.6.395: Creative Editor clip posters + inline playback
