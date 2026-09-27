@@ -3438,6 +3438,7 @@
   function item4AiGenerationRequestActive(record = activeProductionRequest) {
     const mode = String(record?.carousel_image_mode || $("ezCarouselImageMode")?.value || "").trim();
     const notes = String(record?.production_notes || "");
+    if (/ez-ai-auto=off/i.test(notes)) return false;
     return mode === "Make AI Generated" || /ez-input=(?:single-ai|multiple-ai|mixed)/i.test(notes);
   }
 
