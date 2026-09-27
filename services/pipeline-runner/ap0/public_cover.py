@@ -39,7 +39,7 @@ NATIVE_GRID_COVER_OUTPUTS = {
 }
 
 
-YOUTUBE_THUMB_MAX_BYTES = 2 * 1024 * 1024
+YOUTUBE_THUMB_MAX_BYTES = 50 * 1024 * 1024
 
 
 def native_grid_cover_required(record: dict[str, Any]) -> bool:

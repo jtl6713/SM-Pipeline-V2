@@ -235,6 +235,10 @@ export function youtubeCompleteEligibility(record = {}) {
 
 export function youtubeNeedsUrlEntry(record = {}) {
   if (youtubeCompleteEligibility(record) !== null) return false;
+  const knownUrl = parseYouTubeVideoId(record.platform_post_url)
+    || parseYouTubeVideoId(record.manual_published_url);
+  const knownId = String(record.youtube_video_id || record.platform_post_id || "").trim();
+  if (knownUrl || YOUTUBE_VIDEO_ID_RE.test(knownId)) return false;
   const publish = String(record.publish_status || "").trim().toLowerCase();
   const stage = String(record.youtube_stage || "").trim().toLowerCase();
   const studio = String(record.studio_state || "").trim().toLowerCase();

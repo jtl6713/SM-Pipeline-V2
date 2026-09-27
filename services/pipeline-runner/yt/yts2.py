@@ -56,11 +56,22 @@ def thumbnail_fallback_source(output: dict[str, Any], *, cover_required: bool) -
 
 
 def vertical_still_attached(body: Any) -> bool:
+    """Treat a successful supported thumbnails.set response as cover acceptance.
+
+    Older builds attempted an additional private YouTube Studio youtubei call and
+    required its studioVerticalStill payload. The supported Data API returns a
+    thumbnailSetResponse with items; that response is now authoritative.
+    """
     if not isinstance(body, dict):
         return False
     if body.get("studioVerticalStillError"):
         return False
-    return bool(body.get("studioVerticalStill"))
+    if body.get("studioVerticalStill"):
+        return True
+    if body.get("apiThumbnailAccepted") is True:
+        return True
+    items = body.get("items")
+    return body.get("kind") == "youtube#thumbnailSetResponse" and isinstance(items, list) and bool(items)
 
 
 def process_request(

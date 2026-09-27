@@ -9,6 +9,7 @@ from yt.common import (
     next_pacific_midnight_iso,
 )
 from yt.constants import PUBLISH_STATUS_MANUAL_PUBLISH_REQUIRED, STAGE_YT1
+from yt.yts2 import vertical_still_attached
 
 PACIFIC = ZoneInfo("America/Los_Angeles")
 
@@ -47,3 +48,13 @@ def test_manual_publish_required_fields_park_until_midnight():
     assert fields["Manual_Completion_Status"] == "Required"
     assert fields["Publish_Error_Stage"] == "YTP1"
     assert fields["Publish_Next_Retry_At"].endswith("Z")
+
+
+def test_supported_thumbnail_set_response_counts_as_attached():
+    body = {
+        "kind": "youtube#thumbnailSetResponse",
+        "items": [{"default": {"url": "https://i.ytimg.com/example.jpg"}}],
+        "apiThumbnailAccepted": True,
+    }
+    assert vertical_still_attached(body)
+    assert not vertical_still_attached({"kind": "youtube#thumbnailSetResponse", "items": []})
