@@ -440,7 +440,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.406-private-drive-watermark-heal",
+          version: "0.10.407-private-drive-watermark-park",
           studio_desk_inventory_v1: true,
           studio_desk_activity_v1: true,
           studio_tiktok_complete_v1: true,
@@ -566,6 +566,7 @@ export default {
           studio_native_photo_brand_on_approve_v1: true,
           studio_all_visual_watermark_v1: true,
           studio_private_drive_watermark_heal_v1: true,
+          studio_private_drive_watermark_park_v1: true,
           studio_idea_chain_python_gates_v1: true,
           studio_music_catalog_fallback_v1: true,
           studio_music_upload_v1: true,
@@ -10283,9 +10284,34 @@ function studioPrivateDriveWatermarkSignature(row) {
   const props = String(f(row, "Remotion_Props_JSON") || "");
   const err = String(f(row, "Remotion_Error_Message") || f(row, "Final_File_Error_Message") || "");
   const propsMatch = /"watermarkUrl"\s*:\s*"https?:\/\/(?:drive|docs)\.google\.com/i.test(props);
-  const errorMatch = /watermark/i.test(err)
-    && /drive\.google\.com|ERR_BLOCKED_BY_ORB|HTTP status code:\s*403|Error loading image with src/i.test(err);
+  const errorMatch = /PRIVATE_DRIVE_WATERMARK/i.test(err)
+    || (/watermark/i.test(err)
+      && /drive\.google\.com|ERR_BLOCKED_BY_ORB|HTTP status code:\s*403|Error loading image with src/i.test(err));
   return propsMatch || errorMatch;
+}
+
+function studioChicagoWatermarkOutput(row) {
+  const brand = String(f(row, "Brand_Text") || "");
+  const profile = JSON.stringify(f(row, "Content_Profile") || "");
+  return /chicagoshining/i.test(`${brand} ${profile}`);
+}
+
+async function studioParkChicagoWatermarkRender(env, row) {
+  await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, row.id, {
+    method: "PATCH",
+    body: JSON.stringify({
+      fields: {
+        Render_Status: "Blocked",
+        Output_Status: "In Production",
+        Remotion_Job_ID: "",
+        Remotion_Status_URL: "",
+        Remotion_Props_JSON: "",
+        Remotion_Error_Message: "PRIVATE_DRIVE_WATERMARK: waiting for Remotion watermark localization; old renderer cannot fetch drive.google.com watermark safely.",
+        Final_File_Error_Message: "",
+      },
+      typecast: true,
+    }),
+  });
 }
 
 async function studioRemotionPrivateDriveLocalizationReady() {
@@ -10340,7 +10366,7 @@ async function healStuckStudioRenders(env) {
     limit: 12,
     sortField: "Output_ID",
     sortDirection: "desc",
-    filterFormula: 'AND({Test_Run_ID}=BLANK(),FIND("drive.google.com",{Remotion_Props_JSON}&"")>0,OR({Render_Status}="Failed",{Render_Status}="Rendering",{Render_Status}="Ready for Render"))',
+    filterFormula: 'AND({Test_Run_ID}=BLANK(),OR(FIND("drive.google.com",{Remotion_Props_JSON}&"")>0,FIND("PRIVATE_DRIVE_WATERMARK",{Remotion_Error_Message}&"")>0),OR({Render_Status}="Blocked",{Render_Status}="Failed",{Render_Status}="Rendering",{Render_Status}="Ready for Render"))',
   }).catch(() => []);
   let privateDriveRequeues = 0;
   for (const row of privateDriveWatermarkRows || []) {
@@ -10389,6 +10415,15 @@ async function healStuckStudioRenders(env) {
     filterFormula: `AND(${STUDIO_R4_WORK_FORMULA},{Remotion_Job_ID}="")`,
   }).catch(() => []);
   for (const row of readyNoJob || []) {
+    if (!rendererSupportsPrivateDrive && studioChicagoWatermarkOutput(row)) {
+      try {
+        await studioParkChicagoWatermarkRender(env, row);
+        pulses.push({ key: "R4_PRIVATE_DRIVE_WATERMARK", id: row.id, skipped: "parked_until_renderer_updated" });
+      } catch (error) {
+        pulses.push({ key: "R4_PRIVATE_DRIVE_WATERMARK", id: row.id, error: error instanceof Error ? error.message : String(error) });
+      }
+      continue;
+    }
     try {
       const vo = await studioHealReadyNoJobVoiceover(env, row, voCache);
       if (vo) {
