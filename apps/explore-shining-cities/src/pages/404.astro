@@ -1,0 +1,16 @@
+---
+import BaseLayout from "../layouts/BaseLayout.astro";
+import { SITE } from "../data/site.mjs";
+---
+<BaseLayout title={`Page not found | ${SITE.name}`} description="The page you requested could not be found.">
+  <section class="page-hero">
+    <div class="shell page-hero__inner">
+      <p class="eyebrow">404</p>
+      <h1>This view is off the map.</h1>
+      <p>The page may have moved, but there are plenty of cities and stories still worth exploring.</p>
+      <div class="hero-actions">
+        <a class="button button--light" href="/">Explore the cities</a>
+      </div>
+    </div>
+  </section>
+</BaseLayout>
