@@ -1059,3 +1059,44 @@ def test_duration_extends_requested_video_to_voiceover_plus_tail():
         request={"fields": {"Video_Duration_Seconds": 30}},
         output={"fields": {}},
     ) == 34.3
+
+
+def test_recovery_audio_uses_parent_music_and_keeps_voiceover_on_photo_story():
+    parent = {
+        "fields": {
+            "Voiceover_URL": "https://drive.google.com/uc?id=voice",
+            "Preferred_Music_URL": "https://drive.google.com/uc?id=music",
+        }
+    }
+    request = {"fields": {"Voiceover_Mode": "Yes", "Background_Music_Mode": "Yes"}}
+    output = {
+        "fields": {
+            "Platform": "Instagram",
+            "Studio_Output_Type": "Story",
+            "Studio_Effective_Voiceover_Mode": "Yes",
+            "Studio_Effective_Background_Music_Mode": "Yes",
+        }
+    }
+
+    effective = output_effective(output, request, parent)
+    assert effective["music_url"] == "https://drive.google.com/uc?id=music"
+
+    fields = stamp_fields(
+        {
+            "native": False,
+            "story": True,
+            "story_teaser": False,
+            "clip_count": 1,
+            "total_frames": 300,
+            "clips": [{"url": "https://media.example/one.jpg", "media_asset_record_id": "recPHOTO00000001"}],
+            "effective": {**effective, "voiceover_mode": "Yes"},
+            "render_clip_list_json": "[]",
+            "selected_assets_json": "{}",
+            "output_filename": "studio-story.mp4",
+        },
+        parent,
+    )
+    assert fields["Voiceover_URL"] == "https://drive.google.com/uc?id=voice"
+    assert fields["Music_URL"] == "https://drive.google.com/uc?id=music"
+    assert fields["Music_Volume"] == 0.6
+

@@ -12139,7 +12139,7 @@
         ["Length", duration],
         ["Source", "First vertical photo"],
         ["Motion", "Slight zoom"],
-        ["Voiceover", "Off"],
+        ["Voiceover", creativeVoiceoverOn(output) ? "On" : "Off"],
         ["Music", creativeMusicLabel(output, kind)],
         ["Change mix", "Use Audio below, then Apply mix & rerender"],
       ],
