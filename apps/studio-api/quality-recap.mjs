@@ -1,0 +1,247 @@
+/** Plain-language Quality Agent recap for Operations. No Airtable I/O. */
+
+const SKIP_KINDS = new Set([
+  "tester_nightly",
+  "tester_catalog_assert",
+  "autonomous_rfr_gate",
+]);
+
+const SERVICE_LABELS = {
+  "pipeline-runner": "the main pipeline",
+  "remotion-renderer": "video rendering",
+  "frame-extractor": "frame extraction",
+  "video-compressor": "video compression",
+  "timing-engine": "timing",
+  "watermark": "watermarks",
+  "voiceover-normalizer": "voiceover",
+  "youtube-uploader": "YouTube upload",
+};
+
+const COPY = {
+  publish_failed_transient: {
+    found: "A post failed while sending to Instagram, Facebook, TikTok, or YouTube.",
+    action: "Restarted the send.",
+  },
+  publish_never_dispatch: {
+    found: "An approved post never started sending.",
+    action: "Started the send.",
+  },
+  render_failed: {
+    found: "A video failed while it was being built.",
+    action: "Queued the video to build again.",
+  },
+  render_ready_no_job: {
+    found: "A video was ready to build, but the build never started.",
+    action: "Started the video build.",
+  },
+  render_ready_waiting_voiceover: {
+    found: "A video is waiting on a voiceover that never finished.",
+    action: "Restarted the voiceover, then the video build.",
+  },
+  render_long: {
+    found: "A video has been building for a long time.",
+    action: "Checked the render machine and nudged the build.",
+  },
+  produce_stale: {
+    found: "A production job stopped moving.",
+    action: "Restarted production.",
+  },
+  produce_escalated: {
+    found: "A production job was stuck and marked for investigation.",
+    action: "Attached missing photos when they were in the library, then restarted production.",
+  },
+  produce_clip_mismatch: {
+    found: "A video was built with the wrong number of clips.",
+    action: "Flagged it so the clip list can be fixed before another build.",
+  },
+  produce_orphan: {
+    found: "A post is In Production with no job running.",
+    action: "Started production again.",
+  },
+  promoted_not_rfr: {
+    found: "Approved work is not moving toward Ready for Review.",
+    action: "Restarted production so it can finish.",
+  },
+  autonomous_stalled: {
+    found: "An automatic idea is sitting in approval instead of moving forward.",
+    action: "Moved it through production so it can reach Ready for Review.",
+  },
+  autonomous_produce_gap: {
+    found: "An automatic idea was promoted, but production never started.",
+    action: "Started production.",
+  },
+  autonomous_topic_collision: {
+    found: "Two automatic ideas used the same landmark.",
+    action: "Kept the original package and parked the extra one.",
+  },
+  az_stalled: {
+    found: "A finished-video job stalled.",
+    action: "Restarted the finished-video path.",
+  },
+  az_not_auto_finished: {
+    found: "A finished video has a cover and caption but was not scheduled.",
+    action: "Scheduled it and sent it on.",
+  },
+  rfr_locked_missing_deliverable: {
+    found: "A post looks Ready for Review, but the review file or cover is missing.",
+    action: "Staged the cover and finished the review file.",
+  },
+  native_cover_missing: {
+    found: "A Reel or Short published without the grid cover.",
+    action: "Flagged it so the cover can be attached on the platform.",
+  },
+  youtube_private_source_fail: {
+    found: "A YouTube Short could not upload because the video file was private.",
+    action: "Made a public copy and restarted the YouTube upload.",
+  },
+  intake_parked: {
+    found: "New photos or videos are still sitting in the intake folder.",
+    action: "Started processing the folder.",
+  },
+  intake_processed_residue: {
+    found: "Old intake leftovers are still in the system after the files were processed.",
+    action: "Cleaned up the leftovers.",
+  },
+  intake_oversize: {
+    found: "A video in the intake folder is too large to import as-is.",
+    action: "Queued it for compression.",
+  },
+  crop_stale: {
+    found: "A photo crop has been running too long.",
+    action: "Restarted the crop.",
+  },
+  crop_parked: {
+    found: "A photo crop stopped with an error.",
+    action: "Flagged it so the photo can be recropped.",
+  },
+  variant_preparing: {
+    found: "Photo variants are stuck in Preparing.",
+    action: "Restarted the crop and variant step.",
+  },
+  variant_heic_sprite: {
+    found: "A vertical crop looks like two photos stacked.",
+    action: "Flagged it so the original iPhone photo can be decoded and recropped.",
+  },
+  health_down: {
+    found: "A Studio service is offline.",
+    action: "Restarted the service.",
+  },
+};
+
+const DEFAULT_COPY = {
+  found: "Something in the pipeline stopped moving.",
+  action: "Logged it and tried the usual restart.",
+};
+
+export function qualityRecapItemLabel(row = {}) {
+  const outputId = row.output_id;
+  if (outputId != null && String(outputId).trim() !== "") return `Post ${String(outputId).trim()}`;
+  const service = SERVICE_LABELS[String(row.record_id || "").trim()];
+  if (service) return service;
+  const contentId = row.content_item_id;
+  if (contentId != null && String(contentId).trim() !== "") return `Item ${String(contentId).trim()}`;
+  return "";
+}
+
+export function qualityRecapCopy(kind) {
+  return COPY[String(kind || "").trim()] || DEFAULT_COPY;
+}
+
+export function qualityRecapStatus({ actor, class: klass, open } = {}) {
+  if (!open) return { label: "Handled", tone: "ok" };
+  if (klass === "infra_down") return { label: "Service is down", tone: "alert" };
+  if (klass === "code_bug" || klass === "data_repair" || actor === "desk_agent") {
+    return { label: "Needs you", tone: "alert" };
+  }
+  return { label: "Retrying now", tone: "work" };
+}
+
+function eventBody(event) {
+  return event?.payload && typeof event.payload === "object" && !Array.isArray(event.payload)
+    ? event.payload
+    : {};
+}
+
+function asIncident(row) {
+  if (!row || typeof row !== "object") return null;
+  const kind = String(row.kind || "").trim();
+  if (!kind || SKIP_KINDS.has(kind)) return null;
+  return {
+    kind,
+    class: row.class || null,
+    actor: row.actor || null,
+    record_id: row.record_id || row.id || null,
+    fingerprint: row.fingerprint || [kind, row.record_id || row.id || "-", row.class || "unknown"].join(":"),
+    output_id: row.output_id || null,
+    content_item_id: row.content_item_id || null,
+    when: row.updated_at || row.created_at || null,
+  };
+}
+
+function incidentFromEvent(event) {
+  const body = eventBody(event);
+  return asIncident({
+    ...body,
+    created_at: event?.created_at || body.at || body.created_at || null,
+  });
+}
+
+export function buildQualityRecap({ incidents = [], events = [], limit = 12 } = {}) {
+  const open = [];
+  const openByFingerprint = new Map();
+  for (const raw of incidents) {
+    const row = asIncident(raw);
+    if (!row) continue;
+    open.push(row);
+    openByFingerprint.set(row.fingerprint, row);
+  }
+
+  const cards = [];
+  const seen = new Set();
+  const pushCard = (row, { open: isOpen, when } = {}) => {
+    if (!row || seen.has(row.fingerprint)) return;
+    seen.add(row.fingerprint);
+    const copy = qualityRecapCopy(row.kind);
+    const label = qualityRecapItemLabel(row);
+    const status = qualityRecapStatus({ actor: row.actor, class: row.class, open: isOpen });
+    cards.push({
+      fingerprint: row.fingerprint,
+      kind: row.kind,
+      record_id: row.record_id,
+      output_id: row.output_id,
+      found: label ? `${copy.found} (${label})` : copy.found,
+      action: copy.action,
+      status: status.label,
+      tone: status.tone,
+      when: when || row.when || null,
+      open: Boolean(isOpen),
+    });
+  };
+
+  for (const row of open) pushCard(row, { open: true, when: row.when });
+  const sortedEvents = [...(Array.isArray(events) ? events : [])].sort((left, right) => {
+    return Date.parse(right?.created_at || 0) - Date.parse(left?.created_at || 0);
+  });
+  for (const event of sortedEvents) {
+    const row = incidentFromEvent(event);
+    if (!row) continue;
+    pushCard(row, {
+      open: openByFingerprint.has(row.fingerprint),
+      when: row.when,
+    });
+  }
+
+  const limited = cards.slice(0, Math.max(1, Number(limit) || 12));
+  const openCount = limited.filter((row) => row.open).length;
+  let empty_copy = "";
+  if (!limited.length) {
+    empty_copy = "Quality Agent has not found a pipeline block recently.";
+  } else if (!openCount) {
+    empty_copy = "Nothing is blocked right now. Recent work is below.";
+  }
+  return {
+    open_count: openCount,
+    cards: limited,
+    empty_copy,
+  };
+}

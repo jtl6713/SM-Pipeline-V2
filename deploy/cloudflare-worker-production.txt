@@ -41,3 +41,8 @@ Worker: 0.10.390-production-watermark-guarantee
 Source merge: aa547df02bc90ebfa110368d0b4dea9c12fcbd9a
 Requested: 2026-09-26T20:49:00-05:00
 
+Deploy Studio API Worker production
+Reason: Operations Quality Agent recap in everyday language
+Worker: 0.10.392-quality-recap
+Requested: 2026-09-26T22:40:00-05:00
+

@@ -240,7 +240,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.392-youtube-thumbnail-url-state";
+  const BUILD_ID = "item4-0.6.393-quality-recap";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -17411,15 +17411,16 @@
   }
 
   const OPS_CONTROL_TABS = ["desk", "profiles", "produce", "intake", "analytics", "schedule", "publish", "oversized", "repair"];
-  const OPS_AGENT_TABS = ["guide", "catalog", "activity"];
+  const OPS_AGENT_TABS = ["recap", "guide", "catalog", "activity"];
   let operationsControlTab = "desk";
-  let operationsAgentTab = "guide";
+  let operationsAgentTab = "recap";
   let operationsVoiceOptions = [];
   let operationsMusicOptions = [];
 
   function parseOperationsLocation() {
     const raw = location.hash.replace(/^#/, "").trim().toLowerCase();
-    if (raw === "agent" || raw === "agent-guide") return { view: "agent", tab: "guide" };
+    if (raw === "agent" || raw === "agent-recap") return { view: "agent", tab: "recap" };
+    if (raw === "agent-guide") return { view: "agent", tab: "guide" };
     if (raw === "agent-catalog" || raw === "agent-inventory" || raw === "agent-checks") return { view: "agent", tab: "catalog" };
     if (raw === "agent-activity") return { view: "agent", tab: "activity" };
     if (raw === "ideas") return { view: "control", tab: "profiles" };
@@ -17431,6 +17432,7 @@
     if (view === "agent") {
       if (tab === "catalog") return "#agent-catalog";
       if (tab === "activity") return "#agent-activity";
+      if (tab === "guide") return "#agent-guide";
       return "#agent";
     }
     if (tab && tab !== "desk") return `#${tab}`;
@@ -17536,6 +17538,7 @@
       if (agentMeta) agentMeta.textContent = "Desk inventory is unavailable.";
       if (agentCounts) agentCounts.innerHTML = "";
       renderOperationsQualityChecks(null);
+      renderOperationsQualityRecap(null);
       return;
     }
     const summary = desk.summary || {};
@@ -17560,6 +17563,7 @@
     const agentCounts = $("operationsAgentDeskCounts");
     if (agentCounts) agentCounts.innerHTML = chipHtml;
     renderOperationsQualityChecks(desk);
+    renderOperationsQualityRecap(desk);
   }
 
   function formatQualityCheckTime(value) {
@@ -17578,6 +17582,33 @@
     if (lane === "tester") return "Tester lane";
     if (lane === "both") return "Both lanes";
     return "Service lane";
+  }
+
+  function renderOperationsQualityRecap(desk) {
+    const lists = [$("operationsDeskRecap"), $("operationsAgentRecap")].filter(Boolean);
+    const leads = [$("operationsDeskRecapLead"), $("operationsAgentRecapLead")].filter(Boolean);
+    const recap = desk?.recap && typeof desk.recap === "object" ? desk.recap : null;
+    const cards = Array.isArray(recap?.cards) ? recap.cards : [];
+    const openCount = Number(recap?.open_count) || 0;
+    const lead = !desk
+      ? "Recap is unavailable."
+      : (recap?.empty_copy || (openCount
+        ? `${openCount} pipeline block${openCount === 1 ? "" : "s"} right now.`
+        : "Nothing is blocked right now."));
+    for (const node of leads) node.textContent = lead;
+    const html = cards.length
+      ? cards.map((card) => {
+        const when = formatQualityCheckTime(card.when);
+        const tone = card.tone === "alert" || card.tone === "ok" || card.tone === "work" ? card.tone : "";
+        return `<li${tone ? ` data-tone="${escapeHtml(tone)}"` : ""}>
+          <span class="ops-recap-status">${escapeHtml(card.status || "")}</span>
+          <p class="ops-recap-found"><strong>Found.</strong> ${escapeHtml(card.found || "")}</p>
+          <p class="ops-recap-did"><strong>What we did.</strong> ${escapeHtml(card.action || "")}</p>
+          ${when ? `<p class="ops-recap-when">${escapeHtml(when)}</p>` : ""}
+        </li>`;
+      }).join("")
+      : "";
+    for (const list of lists) list.innerHTML = html;
   }
 
   function renderOperationsQualityChecks(desk) {

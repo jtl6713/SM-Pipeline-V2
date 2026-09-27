@@ -1,6 +1,7 @@
 /** Pure classifiers for the Quality Agent inventory. No Airtable I/O. */
 
 import { attachQualityChecks, assertQualityCatalog, QUALITY_CHECKS } from "./quality-checks.mjs";
+import { buildQualityRecap } from "./quality-recap.mjs";
 
 export const DESK_SCHEMA = "studio.desk-inventory.1";
 export const DESK_SETTING_NAME = "STUDIO_DESK_MODE";
@@ -890,6 +891,7 @@ export function buildDeskInventoryPayload({
   caps,
   generatedAt,
   scannedKinds,
+  activityEvents,
 } = {}) {
   const generated = generatedAt || new Date().toISOString();
   const rows = Array.isArray(incidents) ? incidents.filter(Boolean) : [];
@@ -906,5 +908,6 @@ export function buildDeskInventoryPayload({
     health: Array.isArray(health) ? health : [],
     incidents: rows,
     checks: attachQualityChecks(rows, { generatedAt: generated, scannedKinds }),
+    recap: buildQualityRecap({ incidents: rows, events: activityEvents }),
   };
 }

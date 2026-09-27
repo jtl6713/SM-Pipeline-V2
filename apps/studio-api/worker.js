@@ -433,7 +433,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.391-asset-delete-authority",
+          version: "0.10.392-quality-recap",
           studio_desk_inventory_v1: true,
           studio_desk_activity_v1: true,
           studio_tiktok_complete_v1: true,
@@ -33551,10 +33551,13 @@ async function gatherStudioDeskInventory(env) {
 
   scanned("tester_catalog_assert");
   push(classifyTesterCatalogAssert());
+  let activityEvents = [];
   try {
     const endpoint = String(env.TASKS_ACTIVITY_URL || "https://tasks.chicagoshining.com/agent-activity/log-event").replace(/\/$/, "");
     const tester = await fetchTaskActivityEvents(endpoint, "github_actions", 20);
     const results = await fetchTaskActivityEvents(endpoint, "test_result", 20);
+    const deskTickets = await fetchTaskActivityEvents(endpoint, "desk_incident", 40);
+    activityEvents = deskTickets.events || [];
     scanned("tester_nightly");
     push(classifyTesterNightly([...(tester.events || []), ...(results.events || [])], nowMs));
   } catch (error) {
@@ -33569,6 +33572,7 @@ async function gatherStudioDeskInventory(env) {
     health,
     caps,
     scannedKinds,
+    activityEvents,
   });
 }
 

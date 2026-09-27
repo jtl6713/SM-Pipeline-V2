@@ -531,5 +531,8 @@ test("inventory payload summarizes escalate counts without inventing work", () =
   assert.equal(payload.summary.needs_desk, true);
   assert.ok(Array.isArray(payload.checks));
   assert.equal(payload.checks.some((row) => row.kind === "produce_escalated" && row.status === "finding"), true);
+  assert.equal(payload.recap.open_count, 2);
+  assert.equal(payload.recap.cards[0].status, "Needs you");
+  assert.match(payload.recap.cards[0].found, /stuck and marked for investigation/i);
   assert.equal(summarizeIncidents([]).total, 0);
 });
