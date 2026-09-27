@@ -1,11 +1,16 @@
 {
-  "correlation_id": "KICK-326-TTD0-DUE-PUBLISH-20260901",
+  "correlation_id": "REPAIR-CONTENT-241-FANOUT-20260927",
   "requests": [
     {
-      "name": "publish-kick-326",
+      "name": "repair-content-241-promotion-fanout",
       "method": "POST",
-      "path": "/api/operations/outputs/recPgNwCVSncmXDbE/publish-kick",
+      "path": "/api/production-requests/recVAxLIuTsHHuDZK/promote",
       "body": {}
+    },
+    {
+      "name": "verify-production-request-outputs",
+      "method": "GET",
+      "path": "/api/production-requests/recVAxLIuTsHHuDZK/outputs"
     }
   ]
 }
