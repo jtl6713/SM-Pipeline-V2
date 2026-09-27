@@ -86,3 +86,9 @@ Reason: Approve 500 again — skip Ready preflight relink/queue scan
 Worker: 0.10.400-promote-ready-preflight
 Requested: 2026-09-27T01:52:00-05:00
 
+
+Deploy Studio API Worker production
+Reason: Quality Agent repairs Studio-only /api/media-assets render sources before rerender
+Worker: render-unfetchable-source-auto-heal
+Source merge: 3676f4fea17960cbdad5f1cd4b8fccce930f7a4e
+Requested: 2026-09-27T07:24:00-05:00
