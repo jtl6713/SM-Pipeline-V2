@@ -7,7 +7,6 @@ import logging
 from typing import Any
 
 from asset.helpers import uc_download_url
-from asset.routing import a3_needs_jpeg_preview
 from render.fields import field_str
 
 logger = logging.getLogger(__name__)
