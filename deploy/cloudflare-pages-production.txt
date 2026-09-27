@@ -43,3 +43,9 @@ Reason: pause photo listening while Manage Idea is open; resume on close
 UI: 0.6.401-manage-photo-pause
 Source merge: 882ebc4f962380b5aeec07cce0c97ec733c10a72
 Requested: 2026-09-27T08:41:00-05:00
+
+Deploy Studio Pages production
+Reason: make Manage Idea photo removals authoritative while photo listening is temporarily paused; never resume when entering Production
+UI: 0.6.402-manage-photo-selection-authority
+Source merge: 797c74b85adaa48efd5d04c45623eebae2190029
+Requested: 2026-09-27T09:08:00-05:00
