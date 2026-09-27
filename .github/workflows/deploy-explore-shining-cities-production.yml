@@ -141,7 +141,19 @@ jobs:
             echo "Attached domain: $DOMAIN"
           done
 
-      - name: Ensure Pages DNS records
+      - name: Retry Pages custom-domain validation
+        shell: bash
+        run: |
+          set -euo pipefail
+          API="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/pages/projects/$PAGES_PROJECT/domains"
+          AUTH="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
+          for DOMAIN in "$PUBLIC_DOMAIN" "$WWW_DOMAIN"; do
+            curl -fsS -X PATCH "$API/$DOMAIN" -H "$AUTH" -o "/tmp/domain-retry-$DOMAIN.json"
+            jq -e '.success == true' "/tmp/domain-retry-$DOMAIN.json" >/dev/null
+            jq -c '.result | {name,status,certificate_authority,validation_data,verification_data}' "/tmp/domain-retry-$DOMAIN.json"
+          done
+
+      - name: Ensure Pages DNS records when authorized
         shell: bash
         env:
           ZONE_ID: ${{ steps.zone.outputs.zone_id }}
@@ -151,9 +163,21 @@ jobs:
           AUTH="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
           DNS_API="https://api.cloudflare.com/client/v4/zones/$ZONE_ID/dns_records"
           TARGET="$PAGES_PROJECT.pages.dev"
+          DNS_API_STATE=ok
 
           for DOMAIN in "$PUBLIC_DOMAIN" "$WWW_DOMAIN"; do
-            curl -fsS "$DNS_API?name=$DOMAIN&per_page=100" -H "$AUTH" -o "/tmp/dns-$DOMAIN.json"
+            CODE=$(curl -sS -o "/tmp/dns-$DOMAIN.json" -w "%{http_code}" "$DNS_API?name=$DOMAIN&per_page=100" -H "$AUTH" || true)
+            if [[ "$CODE" == "403" ]]; then
+              DNS_API_STATE=denied
+              echo "::warning::Cloudflare token cannot read/write DNS for $DOMAIN (HTTP 403). Pages validation will still be retried."
+              echo "Expected Pages DNS target: $DOMAIN -> $TARGET"
+              break
+            fi
+            if [[ "$CODE" != "200" ]]; then
+              echo "DNS lookup failed for $DOMAIN (HTTP $CODE)." >&2
+              cat "/tmp/dns-$DOMAIN.json" >&2 || true
+              exit 1
+            fi
 
             MATCH_ID=$(jq -r --arg d "$DOMAIN" --arg target "$TARGET" '
               .result[]?
@@ -195,28 +219,50 @@ jobs:
             echo "Created Pages DNS: $DOMAIN -> $TARGET"
           done
 
+          echo "EXPLORE_DNS_API=$DNS_API_STATE" >> "$GITHUB_ENV"
+
       - name: Wait for domain activation
         shell: bash
         run: |
           set -euo pipefail
           API="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/pages/projects/$PAGES_PROJECT/domains"
           AUTH="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
-          for ATTEMPT in $(seq 1 180); do
+          MAX_ATTEMPTS=180
+          if [[ "${EXPLORE_DNS_API:-ok}" == "denied" ]]; then
+            MAX_ATTEMPTS=24
+          fi
+
+          for ATTEMPT in $(seq 1 "$MAX_ATTEMPTS"); do
             curl -fsS "$API" -H "$AUTH" -o /tmp/domains.json
             APEX=$(jq -r --arg d "$PUBLIC_DOMAIN" '.result[]? | select(.name == $d) | .status' /tmp/domains.json)
             WWW=$(jq -r --arg d "$WWW_DOMAIN" '.result[]? | select(.name == $d) | .status' /tmp/domains.json)
             echo "domain_status attempt=$ATTEMPT apex=${APEX:-missing} www=${WWW:-missing}"
+            if (( ATTEMPT == 1 || ATTEMPT % 6 == 0 )); then
+              jq -c '.result[] | {name,status,validation_data,verification_data}' /tmp/domains.json
+            fi
             if [[ "$APEX" == "active" && "$WWW" == "active" ]]; then
               exit 0
             fi
             if [[ "$APEX" == "error" || "$WWW" == "error" || "$APEX" == "blocked" || "$WWW" == "blocked" ]]; then
-              jq -c '.result[] | {name,status,validation_data}' /tmp/domains.json >&2
+              jq -c '.result[] | {name,status,validation_data,verification_data}' /tmp/domains.json >&2
               exit 1
             fi
             sleep 5
           done
+
+          APEX_CODE=$(curl -sS -L -o /tmp/apex-live -w "%{http_code}" "https://$PUBLIC_DOMAIN/" || true)
+          WWW_CODE=$(curl -sS -L -o /tmp/www-live -w "%{http_code}" "https://$WWW_DOMAIN/" || true)
+          if [[ "$APEX_CODE" == "200" && "$WWW_CODE" == "200" ]] && grep -Fq "Explore Shining Cities" /tmp/apex-live; then
+            echo "Pages API is still pending, but both public domains are serving the production site."
+            exit 0
+          fi
+
           echo "Custom domains did not become active within the verification window." >&2
-          jq -c '.result[] | {name,status,validation_data}' /tmp/domains.json >&2
+          jq -c '.result[] | {name,status,validation_data,verification_data}' /tmp/domains.json >&2
+          if [[ "${EXPLORE_DNS_API:-ok}" == "denied" ]]; then
+            echo "BLOCKER: CLOUDFLARE_API_TOKEN needs Zone DNS Edit for exploreshiningcities.com, or the DNS records must be created manually." >&2
+            echo "Required proxied CNAMEs: $PUBLIC_DOMAIN -> $PAGES_PROJECT.pages.dev and $WWW_DOMAIN -> $PAGES_PROJECT.pages.dev" >&2
+          fi
           exit 1
 
       - name: Verify production routes and canonical redirect
