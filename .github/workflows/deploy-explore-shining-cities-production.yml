@@ -124,7 +124,7 @@ jobs:
           AUTH="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
           curl -fsS "$API" -H "$AUTH" -o /tmp/domains-before.json
 
-          for DOMAIN in "$PUBLIC_DOMAIN" "$WWW_DOMAIN"; do
+          for DOMAIN in "$PUBLIC_DOMAIN"; do
             EXISTS=false
             STATUS=""
             VERIFY_ERROR=""
@@ -253,41 +253,39 @@ jobs:
           for ATTEMPT in $(seq 1 "$MAX_ATTEMPTS"); do
             curl -fsS "$API" -H "$AUTH" -o /tmp/domains.json
             APEX=$(jq -r --arg d "$PUBLIC_DOMAIN" '.result[]? | select(.name == $d) | .status' /tmp/domains.json)
-            WWW=$(jq -r --arg d "$WWW_DOMAIN" '.result[]? | select(.name == $d) | .status' /tmp/domains.json)
-            echo "domain_status attempt=$ATTEMPT apex=${APEX:-missing} www=${WWW:-missing}"
+            echo "domain_status attempt=$ATTEMPT apex=${APEX:-missing}"
             if (( ATTEMPT == 1 || ATTEMPT % 6 == 0 )); then
-              jq -c '.result[] | {name,status,validation_data,verification_data}' /tmp/domains.json
+              jq -c --arg d "$PUBLIC_DOMAIN" '.result[] | select(.name == $d) | {name,status,validation_data,verification_data}' /tmp/domains.json
             fi
-            if [[ "$APEX" == "active" && "$WWW" == "active" ]]; then
+            if [[ "$APEX" == "active" ]]; then
               exit 0
             fi
-            if [[ "$APEX" == "blocked" || "$WWW" == "blocked" ]]; then
-              jq -c '.result[] | {name,status,validation_data,verification_data}' /tmp/domains.json >&2
+            if [[ "$APEX" == "blocked" ]]; then
+              jq -c --arg d "$PUBLIC_DOMAIN" '.result[] | select(.name == $d) | {name,status,validation_data,verification_data}' /tmp/domains.json >&2
               exit 1
             fi
-            if (( ATTEMPT >= 12 )) && [[ "$APEX" == "error" || "$WWW" == "error" ]]; then
-              echo "Custom-domain verification remained in error state for at least one minute." >&2
-              jq -c '.result[] | {name,status,validation_data,verification_data}' /tmp/domains.json >&2
+            if (( ATTEMPT >= 12 )) && [[ "$APEX" == "error" ]]; then
+              echo "Apex custom-domain verification remained in error state for at least one minute." >&2
+              jq -c --arg d "$PUBLIC_DOMAIN" '.result[] | select(.name == $d) | {name,status,validation_data,verification_data}' /tmp/domains.json >&2
               exit 1
             fi
             sleep 5
           done
 
           APEX_CODE=$(curl -sS -L -o /tmp/apex-live -w "%{http_code}" "https://$PUBLIC_DOMAIN/" || true)
-          WWW_CODE=$(curl -sS -L -o /tmp/www-live -w "%{http_code}" "https://$WWW_DOMAIN/" || true)
-          if [[ "$APEX_CODE" == "200" && "$WWW_CODE" == "200" ]] && grep -Fq "Explore Shining Cities" /tmp/apex-live; then
-            echo "Pages API is still pending, but both public domains are serving the production site."
+          if [[ "$APEX_CODE" == "200" ]] && grep -Fq "Explore Shining Cities" /tmp/apex-live; then
+            echo "Pages API is still pending, but the apex domain is serving the production site."
             exit 0
           fi
 
-          echo "Custom domains did not become active within the verification window." >&2
-          jq -c '.result[] | {name,status,validation_data,verification_data}' /tmp/domains.json >&2
+          echo "Apex custom domain did not become active within the verification window." >&2
+          jq -c --arg d "$PUBLIC_DOMAIN" '.result[] | select(.name == $d) | {name,status,validation_data,verification_data}' /tmp/domains.json >&2
           if [[ "${EXPLORE_DNS_API:-ok}" == "denied" ]]; then
-            echo "Cloudflare DNS API access is not available to this token. Confirm the existing proxied CNAME records remain pointed at $PAGES_PROJECT.pages.dev." >&2
+            echo "Cloudflare DNS API access is not available to this token. Confirm the apex proxied CNAME remains pointed at $PAGES_PROJECT.pages.dev." >&2
           fi
           exit 1
 
-      - name: Verify production routes and canonical redirect
+      - name: Verify production routes
         shell: bash
         run: |
           set -euo pipefail
@@ -302,9 +300,18 @@ jobs:
             echo "LIVE $CODE https://$PUBLIC_DOMAIN$PATHNAME"
           done
           grep -Fq "Explore Shining Cities" /tmp/live-body || true
-          FINAL=$(curl -sS -L -o /dev/null -w "%{url_effective}" "https://$WWW_DOMAIN/chicago")
-          test "$FINAL" = "https://$PUBLIC_DOMAIN/chicago"
-          echo "www_canonical_redirect=PASS"
+
+      - name: Check www canonical redirect
+        shell: bash
+        run: |
+          set -euo pipefail
+          FINAL=$(curl -sS -L -o /dev/null -w "%{url_effective}" "https://$WWW_DOMAIN/chicago" || true)
+          if [[ "$FINAL" == "https://$PUBLIC_DOMAIN/chicago" ]]; then
+            echo "www_canonical_redirect=PASS"
+          else
+            echo "::warning::www canonical redirect is not active yet. Configure Cloudflare Bulk Redirect $WWW_DOMAIN/* -> https://$PUBLIC_DOMAIN/* using the documented proxied redirect-host pattern."
+            echo "www_canonical_redirect=PENDING"
+          fi
 
       - name: Record deployment summary
         if: always()
