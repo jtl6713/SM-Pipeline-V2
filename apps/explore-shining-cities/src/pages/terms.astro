@@ -1,0 +1,22 @@
+---
+import BaseLayout from "../layouts/BaseLayout.astro";
+import { SITE } from "../data/site.mjs";
+---
+<BaseLayout title={`Terms | ${SITE.name}`} description="Terms of use for Explore Shining Cities.">
+  <section class="page-hero page-hero--short">
+    <div class="shell page-hero__inner"><p class="eyebrow">Terms</p><h1>Terms of use</h1></div>
+  </section>
+  <section class="section">
+    <div class="shell legal-copy">
+      <p><strong>Last updated:</strong> September 26, 2026</p>
+      <h2>Site content</h2>
+      <p>Explore Shining Cities provides editorial and visual city-discovery content for general informational purposes. Details about places, events and access can change; verify time-sensitive information with the venue or official source before relying on it.</p>
+      <h2>Media and trademarks</h2>
+      <p>Unless otherwise indicated, original Shining Cities media and branding remain the property of their respective rights holders and may not be republished commercially without permission.</p>
+      <h2>External services</h2>
+      <p>Links to social networks, maps, video platforms and other third-party services are provided for convenience. Those services operate under their own terms.</p>
+      <h2>Changes</h2>
+      <p>These terms may be updated as the Explore Shining Cities network and its public publishing capabilities expand.</p>
+    </div>
+  </section>
+</BaseLayout>

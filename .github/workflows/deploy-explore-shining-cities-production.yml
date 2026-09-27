@@ -1,0 +1,191 @@
+name: Deploy Explore Shining Cities Production
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "apps/explore-shining-cities/**"
+      - ".github/workflows/deploy-explore-shining-cities-production.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: explore-shining-cities-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      PAGES_PROJECT: explore-shining-cities
+      PUBLIC_DOMAIN: exploreshiningcities.com
+      WWW_DOMAIN: www.exploreshoiningcities.com
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Use Node 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: apps/explore-shining-cities/package.json
+
+      - name: Validate and build public site
+        working-directory: apps/explore-shining-cities
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm install --no-audit --no-fund
+          npm run validate
+          npm run build
+          test -s dist/index.html
+          test -s dist/chicago/index.html
+          test -s dist/los-angeles/index.html
+          test -s dist/miami/index.html
+          test -s dist/new-york/index.html
+          test -s dist/sitemap.xml
+          test -s dist/robots.txt
+
+      - name: Verify Cloudflare zone
+        id: zone
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "${CLOUDFLARE_API_TOKEN:-}"
+          test -n "${CLOUDFLARE_ACCOUNT_ID:-}"
+          AUTH="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
+          curl -fsS "https://api.cloudflare.com/client/v4/zones?name=$PUBLIC_DOMAIN&account.id=$CLOUDFLARE_ACCOUNT_ID" \
+            -H "$AUTH" -o /tmp/zone.json
+          ZONE_ID=$(jq -r '.result[0].id // empty' /tmp/zone.json)
+          ZONE_STATUS=$(jq -r '.result[0].status // empty' /tmp/zone.json)
+          if [[ -z "$ZONE_ID" ]]; then
+            echo "Cloudflare zone $PUBLIC_DOMAIN was not found in this account." >&2
+            echo "Add the domain to the existing Cloudflare account before retrying." >&2
+            exit 1
+          fi
+          if [[ "$ZONE_STATUS" != "active" ]]; then
+            echo "Cloudflare zone $PUBLIC_DOMAIN exists but is not active (status=$ZONE_STATUS)." >&2
+            jq -c '.result[0] | {name,status,name_servers,original_name_servers}' /tmp/zone.json || true
+            exit 1
+          fi
+          echo "zone_id=$ZONE_ID" >> "$GITHUB_OUTPUT"
+          echo "Cloudflare zone: PASS ($PUBLIC_DOMAIN, $ZONE_STATUS)"
+
+      - name: Create or reuse isolated Pages project
+        shell: bash
+        run: |
+          set -euo pipefail
+          API="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/pages/projects"
+          AUTH="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
+          CODE=$(curl -sS -o /tmp/pages-project.json -w "%{http_code}" "$API/$PAGES_PROJECT" -H "$AUTH" || true)
+          if [[ "$CODE" == "404" ]]; then
+            curl -fsS -X POST "$API" \
+              -H "$AUTH" -H "Content-Type: application/json" \
+              --data "{"name":"$PAGES_PROJECT","production_branch":"main"}" \
+              -o /tmp/pages-project-create.json
+            jq -e '.success == true and .result.name == env.PAGES_PROJECT' /tmp/pages-project-create.json >/dev/null
+            echo "Pages project created: $PAGES_PROJECT"
+          elif [[ "$CODE" == "200" ]]; then
+            jq -e '.success == true and .result.name == env.PAGES_PROJECT' /tmp/pages-project.json >/dev/null
+            echo "Pages project reused: $PAGES_PROJECT"
+          else
+            echo "Unexpected Pages project lookup HTTP $CODE" >&2
+            cat /tmp/pages-project.json >&2 || true
+            exit 1
+          fi
+
+      - name: Deploy static site to Pages production
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx --yes wrangler@latest pages deploy apps/explore-shining-cities/dist \
+            --project-name="$PAGES_PROJECT" \
+            --branch=main \
+            --commit-hash="$GITHUB_SHA" \
+            --commit-message="Explore Shining Cities production deployment" \
+            --commit-dirty=false
+
+      - name: Attach custom domains
+        shell: bash
+        run: |
+          set -euo pipefail
+          API="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/pages/projects/$PAGES_PROJECT/domains"
+          AUTH="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
+          curl -fsS "$API" -H "$AUTH" -o /tmp/domains-before.json
+          for DOMAIN in "$PUBLIC_DOMAIN" "$WWW_DOMAIN"; do
+            if jq -e --arg d "$DOMAIN" '.result[]? | select(.name == $d)' /tmp/domains-before.json >/dev/null; then
+              echo "Domain already attached: $DOMAIN"
+              continue
+            fi
+            CODE=$(curl -sS -o "/tmp/domain-${DOMAIN}.json" -w "%{http_code}" -X POST "$API" \
+              -H "$AUTH" -H "Content-Type: application/json" \
+              --data "{"name":"$DOMAIN"}")
+            if [[ "$CODE" -lt 200 || "$CODE" -ge 300 ]]; then
+              echo "Failed to attach $DOMAIN (HTTP $CODE)" >&2
+              cat "/tmp/domain-${DOMAIN}.json" >&2
+              exit 1
+            fi
+            jq -e '.success == true' "/tmp/domain-${DOMAIN}.json" >/dev/null
+            echo "Attached domain: $DOMAIN"
+          done
+
+      - name: Wait for domain activation
+        shell: bash
+        run: |
+          set -euo pipefail
+          API="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/pages/projects/$PAGES_PROJECT/domains"
+          AUTH="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
+          for ATTEMPT in $(seq 1 30); do
+            curl -fsS "$API" -H "$AUTH" -o /tmp/domains.json
+            APEX=$(jq -r --arg d "$PUBLIC_DOMAIN" '.result[]? | select(.name == $d) | .status' /tmp/domains.json)
+            WWW=$(jq -r --arg d "$WWW_DOMAIN" '.result[]? | select(.name == $d) | .status' /tmp/domains.json)
+            echo "domain_status attempt=$ATTEMPT apex=${APEX:-missing} www=${WWW:-missing}"
+            if [[ "$APEX" == "active" && "$WWW" == "active" ]]; then
+              exit 0
+            fi
+            if [[ "$APEX" == "error" || "$WWW" == "error" || "$APEX" == "blocked" || "$WWW" == "blocked" ]]; then
+              jq -c '.result[] | {name,status,validation_data}' /tmp/domains.json >&2
+              exit 1
+            fi
+            sleep 5
+          done
+          echo "Custom domains did not become active within the verification window." >&2
+          jq -c '.result[] | {name,status,validation_data}' /tmp/domains.json >&2
+          exit 1
+
+      - name: Verify production routes and canonical redirect
+        shell: bash
+        run: |
+          set -euo pipefail
+          for PATHNAME in "/" "/chicago" "/los-angeles" "/miami" "/new-york" "/chicago/riverwalk" "/miami/vizcaya" "/los-angeles/griffith-observatory" "/new-york/central-park" "/sitemap.xml" "/robots.txt"; do
+            CODE=000
+            for ATTEMPT in $(seq 1 12); do
+              CODE=$(curl -sS -L -o /tmp/live-body -w "%{http_code}" "https://$PUBLIC_DOMAIN$PATHNAME" || true)
+              [[ "$CODE" == "200" ]] && break
+              sleep 5
+            done
+            test "$CODE" = "200"
+            echo "LIVE $CODE https://$PUBLIC_DOMAIN$PATHNAME"
+          done
+          grep -Fq "Explore Shining Cities" /tmp/live-body || true
+          FINAL=$(curl -sS -L -o /dev/null -w "%{url_effective}" "https://$WWW_DOMAIN/chicago")
+          test "$FINAL" = "https://$PUBLIC_DOMAIN/chicago"
+          echo "www_canonical_redirect=PASS"
+
+      - name: Record deployment summary
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo "### Explore Shining Cities production"
+            echo "- Pages project: `$PAGES_PROJECT`"
+            echo "- Primary domain: https://$PUBLIC_DOMAIN"
+            echo "- Canonical www redirect: https://$WWW_DOMAIN -> https://$PUBLIC_DOMAIN"
+            echo "- Source commit: `$GITHUB_SHA`"
+          } >> "$GITHUB_STEP_SUMMARY"
