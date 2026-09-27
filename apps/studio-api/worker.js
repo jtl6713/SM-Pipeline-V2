@@ -10282,7 +10282,7 @@ async function studioRepairUnfetchableRenderSources(env, row) {
 function studioPrivateDriveWatermarkSignature(row) {
   const props = String(f(row, "Remotion_Props_JSON") || "");
   const err = String(f(row, "Remotion_Error_Message") || f(row, "Final_File_Error_Message") || "");
-  const propsMatch = /"watermarkUrl"\s*:\s*"https?:\\/\\/(?:drive|docs)\.google\.com/i.test(props);
+  const propsMatch = /"watermarkUrl"\s*:\s*"https?:\/\/(?:drive|docs)\.google\.com/i.test(props);
   const errorMatch = /watermark/i.test(err)
     && /drive\.google\.com|ERR_BLOCKED_BY_ORB|HTTP status code:\s*403|Error loading image with src/i.test(err);
   return propsMatch || errorMatch;
