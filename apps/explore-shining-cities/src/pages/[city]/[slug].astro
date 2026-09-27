@@ -44,14 +44,6 @@ const articleSchema = {
 };
 ---
 <BaseLayout title={title} description={description} image={story.image} city={city} schema={articleSchema}>
-  <nav class="shell breadcrumbs" aria-label="Breadcrumb">
-    <a href="/">Explore Shining Cities</a>
-    <span aria-hidden="true">/</span>
-    <a href={`/${city.slug}`}>{city.name}</a>
-    <span aria-hidden="true">/</span>
-    <span aria-current="page">{story.title}</span>
-  </nav>
-
   <MediaHero
     image={story.image}
     alt={story.imageAlt}
@@ -62,6 +54,14 @@ const articleSchema = {
     secondaryHref={`/${city.slug}`}
     secondaryLabel={`More ${city.name}`}
   />
+
+  <nav class="shell breadcrumbs breadcrumbs--after-hero" aria-label="Breadcrumb">
+    <a href="/">Explore Shining Cities</a>
+    <span aria-hidden="true">/</span>
+    <a href={`/${city.slug}`}>{city.name}</a>
+    <span aria-hidden="true">/</span>
+    <span aria-current="page">{story.title}</span>
+  </nav>
 
   <article class="section article">
     <div class="shell article-grid">
