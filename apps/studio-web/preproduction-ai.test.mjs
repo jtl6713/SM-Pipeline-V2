@@ -53,3 +53,18 @@ test("Production AI description is sent as prompt guidance", async () => {
   assert.match(app, /promptInput\.disabled = item4AiGenerationInFlight/);
 });
 
+
+test("manual AI asset deletion disables automatic top-up", async () => {
+  const app = await readFile(appPath, "utf8");
+
+  assert.match(app, /ez-ai-auto=off/i);
+  assert.match(app, /carousel_image_mode:\s*"Manual Upload"/);
+  assert.match(app, /automatic && !item4AiGenerationRequestActive\(activeProductionRequest\)/);
+});
+
+test("pending Production deletes stay hidden during workspace refresh", async () => {
+  const app = await readFile(appPath, "utf8");
+
+  assert.match(app, /item4PendingRemoves\.size && Array\.isArray\(next\.assets\)/);
+  assert.match(app, /!item4PendingRemoves\.has\(String\(asset\?\.id \|\| ""\)\)/);
+});
