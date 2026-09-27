@@ -440,7 +440,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.404-ai-profile-naming-delete-authority",
+          version: "0.10.405-promotion-fanout-authority",
           studio_desk_inventory_v1: true,
           studio_desk_activity_v1: true,
           studio_tiktok_complete_v1: true,
@@ -1384,6 +1384,11 @@ export default {
         await studioHealFailedStatuses(env, { limit: 6 });
       } catch (error) {
         console.warn("studio failed-status heal failed", error);
+      }
+      try {
+        await studioHealPromotedMissingFanout(env, { limit: 8 });
+      } catch (error) {
+        console.warn("studio promoted fanout heal failed", error);
       }
       try {
         await advanceStudioProductionOutputs(env, { waitMs: 0 });
@@ -18604,22 +18609,31 @@ async function fanoutProductionRequestOutputsToContentItems(env, requestRecord, 
   return {enabled_output_count:outputRows.length,routed_count:routed,blocked_count:blocked,remaining,work_items:workItems,single_parent_mode:true};
 }
 
-async function completeProductionRequestPromotionSideEffects(env, requestRecordId, requestRecord, contentItemId) {
+async function completeProductionRequestPromotionSideEffects(env, requestRecordId, requestRecord, contentItemId, options = {}) {
   let current = requestRecord;
-  const directiveBridge = await syncProductionRequestDirectivesToContentItem(
-    env,
-    current,
-    contentItemId
-  );
+  let directiveBridge = options.directiveBridge || null;
+  let outputFanout = options.outputFanout || null;
 
-  const outputFanout = await fanoutProductionRequestOutputsToContentItems(
-    env,
-    current,
-    contentItemId,
-    studioFinishedOriginKind(current) === "finished-video"
-      ? { onlyMissing: true, limit: AZ_EXPECTED_OUTPUT_COUNT }
-      : {}
-  );
+  if (!options.skipRouting) {
+    directiveBridge = await syncProductionRequestDirectivesToContentItem(
+      env,
+      current,
+      contentItemId
+    );
+
+    outputFanout = await fanoutProductionRequestOutputsToContentItems(
+      env,
+      current,
+      contentItemId,
+      studioFinishedOriginKind(current) === "finished-video"
+        ? { onlyMissing: true, limit: AZ_EXPECTED_OUTPUT_COUNT }
+        : {}
+    );
+  }
+
+  if (options.routingOnly) {
+    return { requestRecord: current, directiveBridge, outputFanout };
+  }
 
   // Seed and theme the AI slots first. P2 speaks the script that arming stamps,
   // so the themed narration has to exist before either of them runs or the
@@ -18665,6 +18679,24 @@ async function completeProductionRequestPromotionSideEffects(env, requestRecordI
     }
   }
   return { requestRecord: current, directiveBridge, outputFanout };
+}
+
+function assertProductionRequestFanoutComplete(outputFanout) {
+  const enabled = Number(outputFanout?.enabled_output_count || 0);
+  const routed = Number(outputFanout?.routed_count || 0);
+  const blocked = Number(outputFanout?.blocked_count || 0);
+  const remaining = Number(outputFanout?.remaining || 0);
+  const already = outputFanout?.already === true;
+
+  if (enabled < 1) {
+    throw new HttpError(409, "Promotion created the Content Item, but there are no enabled outputs to route into the Platform Pipeline.");
+  }
+  if (blocked > 0 || remaining > 0 || (routed < 1 && !already)) {
+    throw new HttpError(
+      409,
+      `Promotion created the Content Item, but Platform Output routing is incomplete (${routed}/${enabled} routed, ${blocked} blocked, ${remaining} remaining). The request is not complete and can be retried safely.`
+    );
+  }
 }
 
 async function finalizeProductionRequestPromotion(env, requestRecordId, ideaRecord, ctx = null) {
@@ -18729,41 +18761,51 @@ async function finalizeProductionRequestPromotion(env, requestRecordId, ideaReco
     }
   }
 
+  let requestRecord = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, requestRecordId);
+  let directiveBridge = null;
+  let outputFanout = null;
+
+  if (contentItemId) {
+    // Platform Pipeline routing is authoritative for a successful promotion.
+    // Do it synchronously before stamping Promoted so waitUntil cannot create a
+    // false-success state where the Content Item exists but has zero outputs.
+    const routing = await completeProductionRequestPromotionSideEffects(
+      env,
+      requestRecordId,
+      requestRecord,
+      contentItemId,
+      { routingOnly: true }
+    );
+    requestRecord = routing.requestRecord || requestRecord;
+    directiveBridge = routing.directiveBridge;
+    outputFanout = routing.outputFanout;
+    assertProductionRequestFanoutComplete(outputFanout);
+  }
+
   const fields = {
     Request_Status: "Promoted",
     Active: true,
   };
   if (contentItemId) fields.Promoted_Content_Item = [contentItemId];
-
-  let requestRecord = await updateProductionRequestPromotionState(env, requestRecordId, fields);
-
-  let directiveBridge = null;
-  let outputFanout = null;
+  requestRecord = await updateProductionRequestPromotionState(env, requestRecordId, fields);
 
   if (contentItemId) {
-    // Unlock Approve as soon as Promoted is stamped. Directive sync, Platform
-    // Output fanout, and produce enqueue continue in waitUntil.
-    if (ctx && typeof ctx.waitUntil === "function") {
-      ctx.waitUntil(completeProductionRequestPromotionSideEffects(
-        env,
-        requestRecordId,
-        requestRecord,
-        contentItemId
-      ).catch((error) => {
-        console.warn("Studio promote side-effects deferred", requestRecordId, error);
-      }));
-      outputFanout = { deferred: true, routed_count: 0, remaining: null };
-    } else {
-      const completed = await completeProductionRequestPromotionSideEffects(
-        env,
-        requestRecordId,
-        requestRecord,
-        contentItemId
-      );
-      requestRecord = completed.requestRecord;
-      directiveBridge = completed.directiveBridge;
-      outputFanout = completed.outputFanout;
-    }
+    const continuation = completeProductionRequestPromotionSideEffects(
+      env,
+      requestRecordId,
+      requestRecord,
+      contentItemId,
+      {
+        skipRouting: true,
+        directiveBridge,
+        outputFanout,
+      }
+    ).catch((error) => {
+      console.warn("Studio promote post-routing side-effects deferred", requestRecordId, error);
+      return null;
+    });
+    if (ctx && typeof ctx.waitUntil === "function") ctx.waitUntil(continuation);
+    else await continuation;
   }
 
   return { requestRecord, contentItemId, directiveBridge, outputFanout };
@@ -25738,6 +25780,48 @@ function cadenceScheduleSync(ctx, env, options = {}) {
   });
   if (ctx && typeof ctx.waitUntil === "function") ctx.waitUntil(run);
   return run;
+}
+
+async function studioHealPromotedMissingFanout(env, { limit = 8 } = {}) {
+  const requests = await listRecords(env, PRODUCTION_REQUEST_TABLE, {
+    limit,
+    sortField: "Updated_At",
+    sortDirection: "desc",
+    filterFormula: 'AND({Test_Run_ID}=BLANK(),{Active}=1,{Request_Status}="Promoted",{Promoted_Content_Item}!=BLANK())',
+  }).catch(() => []);
+  const healed = [];
+  for (const requestRecord of requests || []) {
+    try {
+      const parentId = studioFirstLinkedId(f(requestRecord, "Promoted_Content_Item"));
+      if (!parentId) continue;
+      const enabled = (await outputRowsForProductionRequest(env, requestRecord.id))
+        .filter((row) => Boolean(f(row, "Enabled")));
+      if (!enabled.length) continue;
+      const missing = enabled.filter((row) =>
+        !arrayOrEmpty(f(row, "Platform_Output")).some((id) => /^rec[A-Za-z0-9]+$/.test(String(id || "")))
+      );
+      if (!missing.length) continue;
+      const fanout = await fanoutProductionRequestOutputsToContentItems(env, requestRecord, parentId);
+      if (Number(fanout?.routed_count || 0) > 0) {
+        try { await enqueueStudioProductionJob(env, requestRecord.id); } catch {}
+      }
+      healed.push({
+        request_id: requestRecord.id,
+        content_item_id: parentId,
+        missing_before: missing.length,
+        routed: Number(fanout?.routed_count || 0),
+        blocked: Number(fanout?.blocked_count || 0),
+        remaining: Number(fanout?.remaining || 0),
+      });
+    } catch (error) {
+      healed.push({
+        request_id: requestRecord?.id || null,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+  if (healed.length) console.log("Studio promoted fanout heal", JSON.stringify({ count: healed.length, healed }));
+  return healed;
 }
 
 function continueParkedProductionAfterPromote(ctx, env, requestId = null) {
