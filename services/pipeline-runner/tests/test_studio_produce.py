@@ -46,6 +46,35 @@ def test_delay_render_failure_requeues_exit_code_1():
     assert not _is_delay_render_failure({"fields": {"Remotion_Error_Message": "asset 404"}})
 
 
+def test_measured_voiceover_duration_overrides_requested_target_and_extends_render():
+    output = {"fields": {"Studio_Effective_Voiceover_Mode": "Yes"}}
+    request = {
+        "fields": {
+            "Voiceover_Mode": "Yes",
+            "Voiceover_Duration_Seconds": 15,
+            "Video_Duration_Seconds": 30,
+            "Voiceover_Tail_Seconds": 2,
+        }
+    }
+    parent = {
+        "fields": {
+            "Voiceover_URL": "https://example.test/voice.mp3",
+            "Voiceover_Duration_Seconds": 32.28,
+            "Preferred_Music_URL": "https://example.test/music.mp3",
+        }
+    }
+    effective = output_effective(output, request, parent)
+    assert effective["voiceover_duration_seconds"] == 32.28
+    assert effective["music_url"] == "https://example.test/music.mp3"
+    assert duration_seconds(
+        story=False,
+        clip_count=10,
+        effective=effective,
+        request=request,
+        output=output,
+    ) == 34.3
+
+
 def test_render_progress_detail_counts_ready_outputs():
     rows = [
         {"fields": {"Output_Status": "Ready for Review", "Final_File_URL": "https://example/a.mp4"}},
