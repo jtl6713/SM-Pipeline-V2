@@ -37,3 +37,9 @@ Quality Agent recap IDs: 2026-09-26 - each recap card names the Content item, Co
 Quality Agent recap dispatch cause: 2026-09-26 - recap no longer treats future scheduled posts as never-sent, and names YouTube quota / missing file instead of kicking. UI 0.6.397.
 
 2026-09-26 Studio UI 0.6.398: live YouTube quota is not Manual Action Required (1001 / 994)
+
+Deploy Studio Pages production
+Reason: pause photo listening while Manage Idea is open; resume on close
+UI: 0.6.401-manage-photo-pause
+Source merge: 882ebc4f962380b5aeec07cce0c97ec733c10a72
+Requested: 2026-09-27T08:41:00-05:00
