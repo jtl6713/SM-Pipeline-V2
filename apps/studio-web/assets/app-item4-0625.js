@@ -187,8 +187,12 @@
   const API_TRANSIENT_RETRY_MS = 3000;
   const ITEM4_POLL_EXTRA_WINDOWS = 2;
   const ITEM4_POLL_EXTRA_MS = 15000;
+  // When the browser poll window expires mid-prepare, automatically re-POST
+  // Retry remaining a few times so large frame batches do not need a click.
+  const ITEM4_VARIANT_AUTO_RETRIES = 3;
   let item4MasterExtraWindows = 0;
   let item4VariantExtraWindows = 0;
+  let item4VariantAutoRetries = 0;
   const item4PreviewFailures = new Map();
   const item4CropDrafts = new Map();
   let item4CropRequestId = null;
@@ -242,7 +246,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.403-faster-frames-save";
+  const BUILD_ID = "item4-0.6.404-prepare-auto-retry";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -7554,7 +7558,7 @@
     const count = targetCount ? `${readyCount} of ${targetCount} ready` : `${readyCount} ready`;
     progress.hidden = false;
     progress.dataset.heal = "preparing";
-    progress.innerHTML = `<strong>${clips ? "Attaching clip frames" : "Preparing platform crops"}</strong><span>${escapeHtml(count)} · ${escapeHtml(elapsed)} elapsed. This page updates automatically. Click Retry remaining if the count stops moving.</span>`;
+    progress.innerHTML = `<strong>${clips ? "Attaching clip frames" : "Preparing platform crops"}</strong><span>${escapeHtml(count)} · ${escapeHtml(elapsed)} elapsed. This page updates automatically. Studio retries leftovers on its own if the count stops moving.</span>`;
     ensureItem4PrepareClock();
   }
 
@@ -7685,8 +7689,8 @@
         ? "Choose platforms first."
         : variantStatus === "Preparing"
           ? (clipRequest
-            ? `Studio is attaching clip frames (${readyCount}/${targetCount || "?"}). Click Retry remaining if the count stops moving.`
-            : `Studio is preparing crops in the background (${readyCount}/${targetCount || "?"}). Click Retry remaining if the count stops moving.`)
+            ? `Studio is attaching clip frames (${readyCount}/${targetCount || "?"}). Leftover frames retry automatically if the count stops moving.`
+            : `Studio is preparing crops in the background (${readyCount}/${targetCount || "?"}). Leftover crops retry automatically if the count stops moving.`)
           : variantStatus === "Error"
             ? "Preparation stopped. Click Retry to send the leftover crops again. The originals are still safe."
             : variantStatus === "Ready"
@@ -8156,6 +8160,17 @@
       const decision = item4NextStatusPoll(Date.now() - item4VariantPollStartedAt, ITEM4_VARIANT_POLL_TIMEOUT_MS, item4VariantExtraWindows);
       if (!decision.continue) {
         stopItem4VariantPolling();
+        const auto = item4NextVariantAutoRetry(item4VariantAutoRetries);
+        if ((state === "Preparing" || state === "Error") && auto.retry) {
+          item4VariantAutoRetries = auto.attempt;
+          setRequestMessage(clips
+            ? `Clip frames still attaching (${readyCount}/${targetCount || "?"}). Automatic retry ${item4VariantAutoRetries}/${ITEM4_VARIANT_AUTO_RETRIES}…`
+            : `Platform media still preparing (${readyCount}/${targetCount || "?"}). Automatic retry ${item4VariantAutoRetries}/${ITEM4_VARIANT_AUTO_RETRIES}…`, "success");
+          prepareItem4Variants({ autoRetry: true }).catch((error) => {
+            console.warn("Item 4 automatic prepare retry deferred", error);
+          });
+          return;
+        }
         setRequestMessage(clips
           ? "Clip frames are still attaching. Click Retry remaining if the count has not moved."
           : "Platform media is still reconciling. Click Retry remaining if the count has not moved.", "success");
@@ -8187,10 +8202,18 @@
     item4VariantPollTimer = setTimeout(pollItem4Variants, 800);
   }
 
+  function item4NextVariantAutoRetry(attempt) {
+    const current = Math.max(0, Number(attempt) || 0);
+    if (current >= ITEM4_VARIANT_AUTO_RETRIES) {
+      return { retry: false, attempt: current };
+    }
+    return { retry: true, attempt: current + 1 };
+  }
+
   function item4PreparingInBackgroundMessage() {
     return item4WorkspaceHasClips(item4Workspace || {})
-      ? "Attaching clip frames. Watch the elapsed timer — if the count stops moving, click Retry remaining."
-      : "Platform media is preparing in the background. If the count stops moving, click Retry remaining.";
+      ? "Attaching clip frames. Watch the elapsed timer — Studio retries leftover frames automatically if the count stops moving."
+      : "Platform media is preparing in the background. Studio retries leftover crops automatically if the count stops moving.";
   }
 
   function item4IsRetryablePrepareFailure(error, status) {
@@ -8204,7 +8227,7 @@
       || /attaching .* clip frames/i.test(message);
   }
 
-  async function prepareItem4Variants() {
+  async function prepareItem4Variants({ autoRetry = false } = {}) {
     if (!activeProductionRequest?.id || item4PreparingVariants) return;
     if (item4MastersNeedSave(item4Workspace || {})) {
       const message = item4UnsavedPrepareMessage();
@@ -8212,18 +8235,20 @@
       item4ShowVariantError(message);
       return;
     }
+    if (!autoRetry) item4VariantAutoRetries = 0;
     item4PreparingVariants = true;
     item4ShowVariantError("");
     renderItem4Variants(item4Workspace || {});
     setRequestMessage(item4WorkspaceHasClips(item4Workspace || {})
-      ? "Starting clip-frame attach…"
-      : "Starting platform-media preparation…", "success");
+      ? (autoRetry ? `Automatic retry ${item4VariantAutoRetries}/${ITEM4_VARIANT_AUTO_RETRIES}: attaching leftover clip frames…` : "Starting clip-frame attach…")
+      : (autoRetry ? `Automatic retry ${item4VariantAutoRetries}/${ITEM4_VARIANT_AUTO_RETRIES}: preparing leftover platform crops…` : "Starting platform-media preparation…"), "success");
     try {
-      const result = await api(`/api/production-requests/${encodeURIComponent(activeProductionRequest.id)}/variants`, {method:"POST",body:JSON.stringify({ crops: collectItem4Crops(), retry: ["Preparing", "Error"].includes(String(item4Workspace?.variant_status || "")) }),timeoutMs:45000});
+      const result = await api(`/api/production-requests/${encodeURIComponent(activeProductionRequest.id)}/variants`, {method:"POST",body:JSON.stringify({ crops: collectItem4Crops(), retry: autoRetry || ["Preparing", "Error"].includes(String(item4Workspace?.variant_status || "")) }),timeoutMs:45000});
       if (result.production_request) activeProductionRequest = result.production_request;
       await loadItem4Workspace(activeProductionRequest);
       if (item4Workspace?.variant_status === "Ready") {
         stopItem4VariantPolling();
+        item4VariantAutoRetries = 0;
         setRequestMessage(result.message || (item4WorkspaceHasClips(item4Workspace || {})
           ? "Clip frames are ready. Clips skip photo crops."
           : "Platform-ready media prepared. Review the crops below."), "success");
@@ -12653,7 +12678,7 @@
     item4LibraryAddButton: "Apply checked Drive stills: add new checks and remove unchecked ones.",
     item4LibraryCancelButton: "Close the Drive library picker without attaching more stills.",
     item4BuildPlan: "Recommend the strongest format for each selected platform from the photos you uploaded.",
-    item4PrepareVariants: "Create the cropped 4:5, 9:16, 1:1, or 16:9 versions required by the plan. If a run stalls, Retry remaining requeues leftover crops. Files must finish saving to Google Drive first. Drag each photo to keep the important part in frame.",
+    item4PrepareVariants: "Create the cropped 4:5, 9:16, 1:1, or 16:9 versions required by the plan. If a run stalls, Studio and the Quality Agent automatically requeue leftover crops (Retry remaining still works if you want to nudge sooner). Files must finish saving to Google Drive first. Drag each photo to keep the important part in frame.",
     closeProductionRequest: "Close this request and return to the draft list. Saved photos stay in Studio.",
     saveIdeaButton: "Save the title, summary, checked library stills, platforms, and these options. Save does not drop photo selections.",
     holdIdeaButton: "Put this idea on hold so it stays out of the active queue without deleting it.",

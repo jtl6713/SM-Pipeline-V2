@@ -950,12 +950,14 @@ export function classifyHealthTarget(target, probe) {
 export function classifyPreparingGap(row) {
   const recordId = String(row?.id || "").trim();
   const status = String(row?.studio_variant_status || "").trim();
-  if (status !== "Preparing") return null;
+  // Preparing = in-flight crops; Error = parked leftovers that used to need a
+  // manual "Retry remaining" click. Both are Worker/Quality Agent heal work.
+  if (status !== "Preparing" && status !== "Error") return null;
   return withDeskIdentity({
     kind: "variant_preparing",
     class: "transient",
     record_id: recordId || null,
-    fingerprint: fingerprint("variant_preparing", recordId, "preparing"),
+    fingerprint: fingerprint("variant_preparing", recordId, status === "Error" ? "error" : "preparing"),
     actor: "worker_heal",
   }, row);
 }

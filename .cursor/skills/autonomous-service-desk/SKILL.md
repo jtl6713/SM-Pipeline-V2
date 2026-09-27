@@ -117,6 +117,12 @@ Call `deskMayAutomerge` mentally with the changed paths. Refuse unless every pat
 - Harvest a new autonomous idea while Draft/Ready/Submitted `origin=autonomous` work is in flight
 - Recreate deleted same-place autonomous extras (Lincoln Park Zoo 2026-09-07: Free Zoo Escape / Birds to Rhinos / Quick Stroll). Keep Worth the trip.
 
+## Watch: Preparing crops / clip frames need a manual Retry remaining
+
+Production Prepare can finish the first drain budget and leave leftover Failed/Error queue rows while the parent stays `Studio_Variant_Status=Preparing` (or flips to `Error`). The browser poll window then expires and used to ask the operator to click **Retry remaining**. Kind `variant_preparing`, class `transient`, actor `worker_heal`.
+
+Auto-correct: Worker `item4HealIncompletePreparingVariants` / `item4ResumePendingVariants` requeues Failed/Error leftovers (`item4RequeueFailedVariantsForHeal`), resets parked Error parents back to Preparing, and drains a larger SMV1 batch. Studio UI also auto-POSTs Retry remaining up to three times when the poll window expires. Same fingerprint after heal ticks while ready/target is frozen → `code_bug`.
+
 ## Recurrence watches (2026-09-07)
 
 Read `docs/handoffs/autonomous-same-topic-harvest.md` on every tick. Inventory now emits these kinds:
