@@ -10,6 +10,7 @@ export const QUALITY_HEALS = Object.freeze([
   "remove_ingestion_parent",
   "resume_produce",
   "requeue_failed",
+  "repair_render_sources",
   "diagnose_then_one_send",
   "wait_pacific_midnight",
   "ticket_only",
@@ -145,6 +146,14 @@ export const QUALITY_CHECKS = Object.freeze([
     kind: "render_failed",
     actor: "worker_heal",
     heal: "requeue_failed",
+  }),
+  check({
+    id: "render_unfetchable_source",
+    title: "Check for render manifests containing Studio-only /api/media-assets stream URLs that Remotion cannot fetch",
+    lane: "service",
+    kind: "render_unfetchable_source",
+    actor: "worker_heal",
+    heal: "repair_render_sources",
   }),
   check({
     id: "native_cover_missing",
