@@ -15,7 +15,7 @@ MAKE_YTS3_ID = YTS3_SCENARIO_ID
 MAKE_YT0_NAME = "YT0 - Validate and Prepare YouTube Package v1.4 - YTP1 Handoff"
 MAKE_YTP1_NAME = "YTP1 - Start YouTube Upload v1.4 - Public Publish Asset First"
 MAKE_YTS1_NAME = "YTS1 - Poll YouTube Upload Job v1.2 - Retryable Poll Errors + Terminal Job Failure"
-MAKE_YTS2_NAME = "YTS2 - Poll YouTube Processing and Optional Thumbnail v1.4 - Auto JPEG Under 2MB"
+MAKE_YTS2_NAME = "YTS2 - Poll YouTube Processing and Optional Thumbnail v1.5 - Supported Custom Thumbnail API"
 MAKE_YTS3_NAME = "YTS3 - Finalize YouTube Publish v1.1 - Existing Setting Alignment"
 
 PUBLISH_LOCKED_BY = "YT0"
@@ -24,7 +24,7 @@ DEFAULT_PRIVACY = "private"
 RETRY_MINUTES = 5
 POLL_RETRY_MINUTES = 1
 PROCESSING_RETRY_MINUTES = 5
-THUMBNAIL_MAX_BYTES = 1_900_000
+THUMBNAIL_MAX_BYTES = 50 * 1024 * 1024
 THUMBNAIL_QUALITY_FLOOR = 72
 
 STAGE_YT0 = "YT0"
