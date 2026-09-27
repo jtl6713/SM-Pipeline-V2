@@ -91,3 +91,9 @@ UI: 0.6.405-story-audio-catalog
 Requested: 2026-09-27T10:27:23-05:00
 
 Production AI profile naming + delete authority. UI 0.6.406-ai-profile-naming-delete-authority. Requested: 2026-09-27T21:43:20Z
+
+Deploy Studio Pages production
+Reason: Prepare Frames auto-builds a missing output plan when assets are already Ready; fixes the Rainy Museum plan deadlock
+UI: 0.6.406-ai-profile-naming-delete-authority + prepare-autoplan
+Source merge: d83b17fd3401d9ba054f5e0a8f049d32a4b9a7c3
+Requested: 2026-09-27T17:16:00-05:00
