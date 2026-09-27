@@ -240,7 +240,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.391-existing-platform-authority";
+  const BUILD_ID = "item4-0.6.392-youtube-thumbnail-url-state";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -12881,6 +12881,11 @@
     const output = String(record?.output_status || "").trim().toLowerCase();
     const stage = String(record?.youtube_stage || "").trim().toLowerCase();
     if (publish === "published" || publish === "published privately" || output === "published" || stage === "complete") return false;
+    // The uploader already stores YouTube_Video_ID as soon as upload completes,
+    // and the API may also have Platform_Post_URL / Manual_Published_URL. In
+    // those cases Studio already knows the URL; do not ask the operator to paste
+    // the same value back into the form.
+    if (youtubeLiveUrl(record)) return false;
     const manual = String(record?.manual_completion_status || "").trim().toLowerCase();
     const studio = String(record?.studio_state || pipelineStudioStateLabel(record) || "").trim().toLowerCase();
     if (manual === "required" || studio.includes("manual action")) return true;
