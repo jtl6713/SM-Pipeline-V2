@@ -440,7 +440,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.403-prepare-auto-retry",
+          version: "0.10.404-ai-profile-naming-delete-authority",
           studio_desk_inventory_v1: true,
           studio_desk_activity_v1: true,
           studio_tiktok_complete_v1: true,
@@ -5115,13 +5115,20 @@ async function item4FindMasterMediaAsset(env, transferId) {
   return rows[0] || null;
 }
 
-async function item4CreateMasterMediaAsset(env, recordId, asset, driveId, driveUrl, transferId) {
+async function item4CreateMasterMediaAsset(env, recordId, asset, driveId, driveUrl, transferId, requestRecord = null) {
+  let profileId = String(asset?.content_profile_id || "").trim();
+  if (!/^rec[A-Za-z0-9]+$/.test(profileId)) {
+    const owner = requestRecord || await airtableFetch(env, PRODUCTION_REQUEST_TABLE, recordId);
+    const profile = await item4ProductionProfileRecord(env, owner);
+    profileId = String(profile?.id || "").trim();
+  }
+  const assetName = String(asset?.library_asset_name || asset?.name || "photo").trim() || "photo";
   const body = await airtableFetch(env, ITEM4_MEDIA_ASSET_TABLE, "", {
     method: "POST",
     body: JSON.stringify({
       records: [{
         fields: {
-          "Asset Name": String(asset.name || "photo"),
+          "Asset Name": assetName,
           Media_Class: item4LooksLikeVideoAsset(asset) ? "Video" : "Image",
           "Google Drive URL": driveUrl,
           "Google Drive File ID": driveId,
@@ -5141,6 +5148,7 @@ async function item4CreateMasterMediaAsset(env, recordId, asset, driveId, driveU
           Raw_Source_Eligibility: "Not Applicable",
           Asset_Description: "Studio Item 4 authoritative master original preserved in Google Drive.",
           Studio_Transfer_ID: transferId,
+          ...(profileId ? { Content_Profile: [profileId] } : {}),
         },
       }],
       typecast: true,
@@ -5195,7 +5203,7 @@ async function item4ReconcileMasterAuthority(env, recordId, record = null) {
   const nextAssets = [];
   const mediaAssetIds = [];
   let readyCount = 0;
-  let failedError = null;
+  const failedErrorsByAsset = new Map();
 
   for (const asset of assets) {
     const transferId = item4MasterTransferId(recordId, asset.id);
@@ -5221,8 +5229,11 @@ async function item4ReconcileMasterAuthority(env, recordId, record = null) {
       previewUrl = "";
     }
 
-    if (q && item4QueueStatus(q) === "Failed" && !failedError) {
-      failedError = String(f(q, "Error_Message") || `${asset.name || "Master photo"} failed Google Drive authority handoff`);
+    if (q && item4QueueStatus(q) === "Failed") {
+      failedErrorsByAsset.set(
+        String(asset?.id || ""),
+        String(f(q, "Error_Message") || `${asset.name || "Master photo"} failed Google Drive authority handoff`)
+      );
     }
 
     if (q && ["Drive Uploaded", "Ready"].includes(item4QueueStatus(q))) {
@@ -5233,7 +5244,7 @@ async function item4ReconcileMasterAuthority(env, recordId, record = null) {
       if (driveId && !mediaAssetId) {
         let mediaAsset = await item4FindMasterMediaAsset(env, transferId);
         if (!mediaAsset) {
-          mediaAsset = await item4CreateMasterMediaAsset(env, recordId, asset, driveId, driveUrl, transferId);
+          mediaAsset = await item4CreateMasterMediaAsset(env, recordId, asset, driveId, driveUrl, transferId, currentRecord);
         }
         mediaAssetId = mediaAsset?.id || "";
       }
@@ -5308,15 +5319,54 @@ async function item4ReconcileMasterAuthority(env, recordId, record = null) {
     });
   }
 
-  const status = failedError ? "Error" : readyCount === assets.length ? "Ready" : "Uploading";
-  currentRecord = await item4UpdateRequestState(env, recordId, {
-    Studio_Master_Assets_JSON: JSON.stringify(nextAssets),
-    Studio_Master_Asset_Count: nextAssets.length,
-    Studio_Master_Asset_Status: status,
-    Studio_Master_Media_Assets: [...new Set(mediaAssetIds)],
-    Studio_Item4_State: failedError ? "Error" : readyCount === assets.length ? "Assets Ready" : "Draft",
+  // Re-read the operator's current manifest before committing reconciliation.
+  // Drive preservation runs in the background; without this guard, a stale
+  // reconcile that started before DELETE can write a removed image back into
+  // Production moments after the operator deletes it.
+  const latestRecord = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, recordId).catch(() => currentRecord);
+  const latestAssets = item4AssetManifest(latestRecord)
+    .slice()
+    .sort((a, b) => Number(a.order || 0) - Number(b.order || 0));
+  const processedById = new Map(nextAssets.map((asset) => [String(asset?.id || ""), asset]));
+  const reconciledAssets = latestAssets.map((asset, index) => {
+    const processed = processedById.get(String(asset?.id || ""));
+    return { ...(processed || asset), order: index + 1 };
   });
-  return { record: currentRecord, assets: nextAssets, status, ready_count: readyCount, target_count: assets.length, error: failedError };
+  const reconciledMediaAssetIds = [...new Set(
+    reconciledAssets.map((asset) => String(asset?.media_asset_record_id || "").trim()).filter(Boolean)
+  )];
+  const reconciledReadyCount = reconciledAssets.filter((asset) =>
+    String(asset?.google_drive_file_id || "").trim() && String(asset?.media_asset_record_id || "").trim()
+  ).length;
+  const failedError = reconciledAssets
+    .map((asset) => failedErrorsByAsset.get(String(asset?.id || "")) || "")
+    .find(Boolean) || null;
+  const status = !reconciledAssets.length
+    ? "None"
+    : failedError
+      ? "Error"
+      : reconciledReadyCount === reconciledAssets.length
+        ? "Ready"
+        : "Uploading";
+  currentRecord = await item4UpdateRequestState(env, recordId, {
+    Studio_Master_Assets_JSON: JSON.stringify(reconciledAssets),
+    Studio_Master_Asset_Count: reconciledAssets.length,
+    Studio_Master_Asset_Status: status,
+    Studio_Master_Media_Assets: reconciledMediaAssetIds,
+    Studio_Item4_State: failedError
+      ? "Error"
+      : reconciledAssets.length && reconciledReadyCount === reconciledAssets.length
+        ? "Assets Ready"
+        : "Draft",
+  });
+  return {
+    record: currentRecord,
+    assets: reconciledAssets,
+    status,
+    ready_count: reconciledReadyCount,
+    target_count: reconciledAssets.length,
+    error: failedError,
+  };
 }
 
 async function item4UpdateRequestState(env, recordId, fields) {
@@ -6503,11 +6553,49 @@ function studioProfileRequiresChicagoWatermark(profile) {
   return normalized.startsWith("chicagoshining");
 }
 
-async function item4ProductionProfileRecord(env, requestRecord) {
-  const profileId = studioFirstLinkedId(f(requestRecord || {}, "Content_Profile"));
+async function item4ProductionProfileRecord(env, requestRecord, preferredProfileId = "") {
+  let profileId = studioFirstLinkedId(f(requestRecord || {}, "Content_Profile"));
+
+  // Production Requests do not currently carry a Content_Profile field in Airtable.
+  // The linked Idea is the authoritative profile owner while the request is in Production.
+  if (!profileId) {
+    const ideaId = firstLinkedRecordId(f(requestRecord || {}, "Idea_Candidate"));
+    if (ideaId) {
+      try {
+        const idea = await airtableFetch(env, env.AIRTABLE_IDEA_TABLE_ID, ideaId);
+        profileId = firstLinkedRecordId(f(idea, "Content_Profile"));
+      } catch (error) {
+        console.warn("Production profile lookup from Idea skipped", ideaId, error?.message || error);
+      }
+    }
+  }
+
+  // Promoted/legacy requests can fall back to their Content Item.
+  if (!profileId) {
+    const contentId = firstLinkedRecordId(f(requestRecord || {}, "Promoted_Content_Item"))
+      || firstLinkedRecordId(f(requestRecord || {}, "Content Items"));
+    if (contentId && env.AIRTABLE_CONTENT_TABLE_ID) {
+      try {
+        const content = await airtableFetch(env, env.AIRTABLE_CONTENT_TABLE_ID, contentId);
+        profileId = firstLinkedRecordId(f(content, "Content_Profile"));
+      } catch (error) {
+        console.warn("Production profile lookup from Content Item skipped", contentId, error?.message || error);
+      }
+    }
+  }
+
+  const preferred = String(preferredProfileId || "").trim();
+  if (!profileId && /^rec[A-Za-z0-9]+$/.test(preferred)) profileId = preferred;
   if (!profileId) return null;
+
   const profiles = await listContentProfileRecords(env).catch(() => []);
-  return profiles.find((row) => row.id === profileId) || null;
+  const cached = profiles.find((row) => row.id === profileId);
+  if (cached) return cached;
+  try {
+    return await airtableFetch(env, "Content Profiles", profileId);
+  } catch {
+    return null;
+  }
 }
 
 function studioAssetHasChicagoWatermark(record) {
@@ -14095,6 +14183,12 @@ async function generateItem4PreProductionAiMaster(request, env, url, authorizati
   const requestedTarget = Math.round(Number(body?.target_ai_count || 0));
   const requestedAdd = Math.round(Number(body?.add_ai_count || 0));
   const promptGuidance = String(body?.prompt_guidance || "").trim().slice(0, 2000);
+  const preferredProfileId = requestedProfileId(url, body);
+  const productionProfile = await item4ProductionProfileRecord(env, record, preferredProfileId)
+    || await resolveWorkingContentProfile(env, authorization, preferredProfileId || null);
+  if (!productionProfile?.id) {
+    throw new HttpError(409, "This Production Request does not have a Content Profile");
+  }
   const explicitAiAdd = (Number.isFinite(requestedTarget) && requestedTarget > 0)
     || (Number.isFinite(requestedAdd) && requestedAdd > 0);
   if (String(f(record, "Carousel_Image_Mode") || "").trim() !== "Make AI Generated" && !explicitAiAdd) {
@@ -14154,6 +14248,23 @@ async function generateItem4PreProductionAiMaster(request, env, url, authorizati
   }
 
   const context = await item4PreProductionAiContext(env, record);
+  const requestedAssetBase = String(body?.asset_name_base || "").trim();
+  const normalizedAssetBase = normalizeLibraryBatchBase(requestedAssetBase || context.title || "Studio AI");
+  if (!normalizedAssetBase.ok) throw new HttpError(400, normalizedAssetBase.error);
+  const assetBase = normalizedAssetBase.name;
+  const profileScope = mediaAssetProfileScopeFormula(productionProfile.id, {
+    crossScope: false,
+    includeUnscoped: false,
+    profileName: f(productionProfile, "Profile_Name") || "",
+  });
+  const catalogNames = await listLibraryBatchExistingNames(env, assetBase, profileScope);
+  const manifestNames = assets
+    .map((asset) => String(asset?.library_asset_name || asset?.name || "").trim())
+    .filter(Boolean);
+  const allocatedNames = allocateLibraryBatchNames(assetBase, 1, [...catalogNames, ...manifestNames]);
+  const assetName = allocatedNames[0];
+  if (!assetName) throw new HttpError(500, "Could not allocate the next Asset Manager name for this AI image");
+
   const pseudoParent = { fields: { Content_Title: context.title, Hook: context.title, Market_Name: context.market } };
   let themes = null;
   try {
@@ -14179,9 +14290,33 @@ async function generateItem4PreProductionAiMaster(request, env, url, authorizati
       ].join(" ");
   const ratio = item4PreProductionAiRatio(record);
   const image = await item4GeneratePreProductionImageBytes(env, prompt, ratio);
+
+  // Image generation is slow enough that the operator can delete an AI master
+  // while this request is in flight. Re-read the manifest before committing.
+  // A delete stamps ez-ai-auto=off; if an asset disappeared since this request
+  // started, the delete wins and this generated image is discarded.
+  const latestBeforeAiCommit = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, recordId).catch(() => record);
+  const latestBeforeAiAssets = item4AssetManifest(latestBeforeAiCommit);
+  const originalAssetIds = new Set(assets.map((asset) => String(asset?.id || "")).filter(Boolean));
+  const latestAssetIds = new Set(latestBeforeAiAssets.map((asset) => String(asset?.id || "")).filter(Boolean));
+  const aiDeleteDuringGeneration = /ez-ai-auto=off/i.test(String(f(latestBeforeAiCommit, "Production_Notes") || ""))
+    && [...originalAssetIds].some((id) => !latestAssetIds.has(id));
+  if (aiDeleteDuringGeneration) {
+    return respond(request, env, {
+      ok: true,
+      completed: true,
+      cancelled: true,
+      requested_count: desiredAiCount,
+      generated_count: latestBeforeAiAssets.filter((asset) => /^studio_ai/i.test(String(asset?.source || ""))).length,
+      assets: latestBeforeAiAssets,
+      production_request: mapProductionRequest(latestBeforeAiCommit),
+      message: "AI generation stopped because an image was deleted.",
+    });
+  }
+
   const stamp = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 7)}`;
   const id = `aipre${stamp}`;
-  const name = `studio-ai-${String(nextIndex).padStart(2, "0")}.png`;
+  const name = `${assetName}.png`;
   const key = `studio/master-assets/${recordId}/${id}-${item4SafeFileName(name)}`;
   await env.STUDIO_MEDIA.put(key, image.bytes, {
     httpMetadata: { contentType: image.contentType },
@@ -14200,6 +14335,8 @@ async function generateItem4PreProductionAiMaster(request, env, url, authorizati
     url: `${ITEM4_MEDIA_PUBLIC_BASE}/${key}`,
     uploaded_at: new Date().toISOString(),
     source: "studio_ai_preproduction",
+    library_asset_name: assetName,
+    content_profile_id: productionProfile.id,
     caption_mode: "ai",
     caption,
     ai_prompt: prompt,
@@ -14246,6 +14383,10 @@ async function generateItem4PreProductionAiMaster(request, env, url, authorizati
     generated_count: generatedNow,
     assets: nextAssets,
     production_request: mapProductionRequest(record),
+    content_profile_id: productionProfile.id,
+    content_profile_name: String(f(productionProfile, "Profile_Name") || "").trim() || null,
+    asset_name: assetName,
+    asset_name_base: assetBase,
     message: generatedNow >= desiredAiCount
       ? `${generatedNow} AI image${generatedNow === 1 ? "" : "s"} ready.`
       : `${generatedNow} of ${desiredAiCount} AI images ready.`,

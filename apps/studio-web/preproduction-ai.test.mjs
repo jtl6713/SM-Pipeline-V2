@@ -68,3 +68,27 @@ test("pending Production deletes stay hidden during workspace refresh", async ()
   assert.match(app, /item4PendingRemoves\.size && Array\.isArray\(next\.assets\)/);
   assert.match(app, /!item4PendingRemoves\.has\(String\(asset\?\.id \|\| ""\)\)/);
 });
+
+
+test("Production AI exposes Asset Manager sequential naming and sends the active profile", async () => {
+  const [app, html] = await Promise.all([
+    readFile(appPath, "utf8"),
+    readFile(indexPath, "utf8"),
+  ]);
+
+  assert.match(html, /id="item4AiAssetBaseName"/);
+  assert.match(html, /Uses Asset Manager numbering automatically/);
+  assert.match(app, /const assetNameBase = String\(\$\("item4AiAssetBaseName"\)\?\.value \|\| ""\)\.trim\(\)/);
+  assert.match(app, /asset_name_base:\s*assetNameBaseText/);
+  assert.match(app, /content_profile_id:\s*selectedProfileId/);
+});
+
+test("deleting an AI image cancels manual and automatic generation batches", async () => {
+  const app = await readFile(appPath, "utf8");
+
+  assert.match(app, /const item4AiGenerationCancelled = new Set\(\)/);
+  assert.match(app, /item4AiGenerationCancelled\.add\(requestId\)/);
+  assert.match(app, /if \(item4AiGenerationCancelled\.has\(requestId\)\) break/);
+  assert.match(app, /if \(!automatic\) item4AiGenerationCancelled\.delete\(requestId\)/);
+  assert.match(app, /result\?\.cancelled \|\| item4AiGenerationCancelled\.has\(requestId\)/);
+});
