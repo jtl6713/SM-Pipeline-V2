@@ -1,0 +1,22 @@
+---
+import BaseLayout from "../layouts/BaseLayout.astro";
+import { SITE } from "../data/site.mjs";
+---
+<BaseLayout title={`Privacy | ${SITE.name}`} description="Privacy information for Explore Shining Cities.">
+  <section class="page-hero page-hero--short">
+    <div class="shell page-hero__inner"><p class="eyebrow">Privacy</p><h1>Privacy at Explore Shining Cities</h1></div>
+  </section>
+  <section class="section">
+    <div class="shell legal-copy">
+      <p><strong>Last updated:</strong> September 26, 2026</p>
+      <h2>Information we collect</h2>
+      <p>Explore Shining Cities is designed to collect as little information as practical. The site may use first-party or privacy-focused traffic analytics to understand page visits, device types, general geography, referral sources and engagement.</p>
+      <h2>External links</h2>
+      <p>City pages may link to social platforms or video services. Those services have their own privacy practices and policies.</p>
+      <h2>Analytics</h2>
+      <p>Where enabled, analytics are used to improve the site and understand which cities and stories are useful to visitors. The public site does not expose internal Studio or production metadata.</p>
+      <h2>Changes</h2>
+      <p>This notice may be updated as the site adds new features, contact options or publishing capabilities.</p>
+    </div>
+  </section>
+</BaseLayout>

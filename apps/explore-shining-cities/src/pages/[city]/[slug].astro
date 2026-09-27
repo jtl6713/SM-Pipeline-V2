@@ -1,0 +1,112 @@
+---
+import BaseLayout from "../../layouts/BaseLayout.astro";
+import MediaHero from "../../components/MediaHero.astro";
+import StoryCard from "../../components/StoryCard.astro";
+import { SITE, cities, publishedStories, getCity, getCityStories } from "../../data/site.mjs";
+
+export function getStaticPaths() {
+  return publishedStories.map((story) => ({
+    params: { city: story.city, slug: story.slug },
+    props: { story }
+  }));
+}
+
+const { story } = Astro.props;
+const city = getCity(story.city);
+const related = getCityStories(story.city).filter((item) => item.slug !== story.slug).slice(0, 3);
+const title = `${story.title} | ${city.brand}`;
+const description = story.summary;
+const storyUrl = `${SITE.url}/${story.city}/${story.slug}`;
+const articleSchema = {
+  "@context": "https://schema.org",
+  "@type": "Article",
+  headline: story.title,
+  description: story.summary,
+  image: [story.image],
+  datePublished: story.published,
+  dateModified: story.updated,
+  mainEntityOfPage: storyUrl,
+  isPartOf: {
+    "@type": "WebSite",
+    name: SITE.name,
+    url: SITE.url
+  },
+  about: {
+    "@type": "Place",
+    name: story.location,
+    address: {
+      "@type": "PostalAddress",
+      addressLocality: city.name,
+      addressRegion: city.state,
+      addressCountry: "US"
+    }
+  }
+};
+---
+<BaseLayout title={title} description={description} image={story.image} city={city} schema={articleSchema}>
+  <nav class="shell breadcrumbs" aria-label="Breadcrumb">
+    <a href="/">Explore Shining Cities</a>
+    <span aria-hidden="true">/</span>
+    <a href={`/${city.slug}`}>{city.name}</a>
+    <span aria-hidden="true">/</span>
+    <span aria-current="page">{story.title}</span>
+  </nav>
+
+  <MediaHero
+    image={story.image}
+    alt={story.imageAlt}
+    eyebrow={story.kicker}
+    title={story.title}
+    copy={story.summary}
+    compact={true}
+    secondaryHref={`/${city.slug}`}
+    secondaryLabel={`More ${city.name}`}
+  />
+
+  <article class="section article">
+    <div class="shell article-grid">
+      <div class="article-main">
+        <p class="article-deck">{story.description}</p>
+        <h2>What makes it shine</h2>
+        <div class="highlight-grid">
+          {story.highlights.map((item) => <div class="highlight"><span aria-hidden="true">✦</span><p>{item}</p></div>)}
+        </div>
+
+        <div class="article-copy">
+          <h2>Explore the scene</h2>
+          <p>
+            Start with the wide view, then look for the details that give the place its character. Shining Cities is built around visual discovery: how a destination changes with your angle, the hour and the movement around it.
+          </p>
+          <p>
+            This page is part of a growing city guide. As new approved material is published through the Shining Cities ecosystem, galleries, video and related stories can be added here without changing the route structure.
+          </p>
+        </div>
+      </div>
+
+      <aside class="place-card" aria-label="Location details">
+        <p class="eyebrow">At a glance</p>
+        <dl>
+          <div><dt>City</dt><dd><a href={`/${city.slug}`}>{city.name}</a></dd></div>
+          <div><dt>Area</dt><dd>{story.neighborhood}</dd></div>
+          <div><dt>Location</dt><dd>{story.location}</dd></div>
+          <div><dt>Updated</dt><dd><time datetime={story.updated}>{story.updated}</time></dd></div>
+        </dl>
+        <div class="pill-row">
+          {story.categories.map((category) => <span class="pill">{category}</span>)}
+        </div>
+      </aside>
+    </div>
+  </article>
+
+  {related.length > 0 && (
+    <section class="section section--dark">
+      <div class="shell">
+        <p class="eyebrow">Keep exploring {city.name}</p>
+        <h2 class="related-heading">More places that shine</h2>
+        <div class="story-grid">
+          {related.map((item) => <StoryCard story={item} city={city} />)}
+        </div>
+      </div>
+    </section>
+  )}
+</BaseLayout>

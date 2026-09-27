@@ -1,0 +1,59 @@
+---
+import BaseLayout from "../layouts/BaseLayout.astro";
+import { SITE, cities } from "../data/site.mjs";
+---
+<BaseLayout title={`About | ${SITE.name}`} description="About Explore Shining Cities and the city brands behind the network.">
+  <section class="page-hero">
+    <div class="shell page-hero__inner">
+      <p class="eyebrow">About</p>
+      <h1>A city media network built around what makes a place memorable.</h1>
+      <p>Explore Shining Cities brings together distinct city brands under one shared discovery experience.</p>
+    </div>
+  </section>
+
+  <section class="section">
+    <div class="shell prose-grid">
+      <div>
+        <p class="eyebrow">Our point of view</p>
+        <h2>See familiar cities with fresh eyes.</h2>
+      </div>
+      <div class="prose">
+        <p>
+          We focus on the visual character of a city: neighborhoods, landmarks, architecture, waterfronts, culture, food, events and the everyday moments between them.
+        </p>
+        <p>
+          The goal is not to reproduce a tourism bureau or generic travel blog. Each Shining city keeps its own identity while sharing a clean, editorial platform designed for discovery.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <section class="section section--tint">
+    <div class="shell">
+      <p class="eyebrow">The network</p>
+      <div class="brand-list">
+        {cities.map((city) => (
+          <a href={`/${city.slug}`} style={`--brand-accent:${city.accent}`}>
+            <span>{city.brand}</span>
+            <small>{city.name}</small>
+          </a>
+        ))}
+      </div>
+    </div>
+  </section>
+
+  <section class="section" id="contact">
+    <div class="shell prose-grid">
+      <div>
+        <p class="eyebrow">Contact</p>
+        <h2>Connect with the city you care about.</h2>
+      </div>
+      <div class="prose">
+        <p>
+          For collaborations, location suggestions and city-specific questions, use the active social link on the relevant city page. Additional network contact options will be published here as the umbrella brand expands.
+        </p>
+        <p><a class="text-link" href="/#cities">Choose a city →</a></p>
+      </div>
+    </div>
+  </section>
+</BaseLayout>

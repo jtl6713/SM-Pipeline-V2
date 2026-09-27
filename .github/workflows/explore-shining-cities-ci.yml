@@ -1,0 +1,45 @@
+name: Explore Shining Cities CI
+
+on:
+  pull_request:
+    paths:
+      - "apps/explore-shining-cities/**"
+      - "docs/EXPLORE_SHINING_CITIES_ARCHITECTURE.md"
+      - ".github/workflows/explore-shining-cities-ci.yml"
+  push:
+    branches:
+      - main
+    paths:
+      - "apps/explore-shining-cities/**"
+      - "docs/EXPLORE_SHINING_CITIES_ARCHITECTURE.md"
+      - ".github/workflows/explore-shining-cities-ci.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  validate-public-web:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: apps/explore-shining-cities
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Use Node 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: apps/explore-shining-cities/package.json
+
+      - name: Install
+        run: npm install --no-audit --no-fund
+
+      - name: Validate public projection
+        run: npm run validate
+
+      - name: Build static site
+        run: npm run build
