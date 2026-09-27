@@ -32,9 +32,11 @@ test("YouTube-only saved Longform clip requests remain longform during hydration
   assert.match(app, /String\(\$\("prContentType"\)\?\.value \|\| activeProductionRequest\?\.content_type \|\| ""\)\.trim\(\) === "Longform Video"/);
 });
 
-test("Studio build is 0.6.391 existing platform authority", () => {
+test("Studio build label and cache key stay aligned with the active bundle", () => {
   const build = app.match(/BUILD_ID = "item4-([^"]+)"/)?.[1];
-  assert.equal(build, "0.6.391-existing-platform-authority");
-  assert.match(html, /UI build 0\.6\.391/);
+  const uiBuild = html.match(/UI build (0\.6\.\d+)/)?.[1];
+  assert.ok(build);
+  assert.ok(uiBuild);
+  assert.equal(uiBuild, build.match(/^0\.6\.\d+/)?.[0]);
   assert.ok(html.includes(`/assets/app-item4-0625.js?v=${build}`));
 });
