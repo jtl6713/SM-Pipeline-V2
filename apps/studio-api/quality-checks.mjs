@@ -229,11 +229,11 @@ export const QUALITY_CHECKS = Object.freeze([
   }),
   check({
     id: "variant_preparing",
-    title: "Check for variant rows stuck in Preparing",
+    title: "Check for variant rows stuck in Preparing or Error (auto Retry remaining)",
     lane: "service",
     kind: "variant_preparing",
     actor: "worker_heal",
-    heal: "resume_produce",
+    heal: "requeue_failed",
   }),
   check({
     id: "crop_stale",

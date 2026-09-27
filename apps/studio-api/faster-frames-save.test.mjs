@@ -11,8 +11,10 @@ const app = fs.readFileSync(
   "utf8"
 );
 
-test("health advertises faster-frames-save worker build", () => {
-  assert.match(worker, /version: "0\.10\.402-faster-frames-save"/);
+test("health advertises current worker build with faster-frames helpers", () => {
+  assert.match(worker, /version: "0\.10\.403-prepare-auto-retry"/);
+  assert.match(worker, /airtableBatchCreate/);
+  assert.match(worker, /mapProductionRequestLight/);
 });
 
 test("variant queue upserts use Airtable batch helpers", () => {
@@ -112,7 +114,7 @@ test("PATCH save can return a light production request payload", () => {
 });
 
 test("UI polls GET /variants during Prepare and skips Save reload waterfall", () => {
-  assert.match(app, /BUILD_ID = "item4-0\.6\.403-faster-frames-save"/);
+  assert.match(app, /BUILD_ID = "item4-0\.6\.404-prepare-auto-retry"/);
   assert.match(app, /pollItem4Variants/);
   const poll = app.slice(
     app.indexOf("async function pollItem4Variants"),

@@ -440,7 +440,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.402-faster-frames-save",
+          version: "0.10.403-prepare-auto-retry",
           studio_desk_inventory_v1: true,
           studio_desk_activity_v1: true,
           studio_tiktok_complete_v1: true,
@@ -8171,6 +8171,38 @@ async function item4RequeueTransientVariantFailures(env, rows) {
   return next;
 }
 
+// Quality Agent / Worker heal: same effect as Production "Retry remaining" —
+// requeue every Failed/Error crop that still lacks Drive authority so large
+// frame batches do not park until a human clicks the button.
+async function item4RequeueFailedVariantsForHeal(env, rows) {
+  const next = [];
+  for (const row of Array.isArray(rows) ? rows : []) {
+    const status = item4QueueStatus(row);
+    if (!["Failed", "Error"].includes(status) || item4QueueRowHasAuthority(row)) {
+      next.push(row);
+      continue;
+    }
+    try {
+      const updated = await airtableFetch(env, ITEM4_VARIANT_QUEUE_TABLE, row.id, {
+        method: "PATCH",
+        body: JSON.stringify({
+          fields: {
+            Transfer_Status: "Pending",
+            Attempt_Count: 0,
+            Error_Message: "Requeued by Quality Agent prepare heal so leftover frames can finish without a manual Retry.",
+          },
+          typecast: true,
+        }),
+      });
+      next.push(updated || row);
+    } catch (error) {
+      console.warn("Item 4 heal variant requeue failed", row.id, error);
+      next.push(row);
+    }
+  }
+  return next;
+}
+
 async function item4RequeueStaleProcessing(env, rows) {
   const now = Date.now();
   const next = [];
@@ -11616,28 +11648,38 @@ async function item4ResumePendingVariants(env, recordId, record = null) {
 
   // Photos added after Prepare can sit at 23/27 forever: drain only sees existing
   // queue rows, and this resume path used to refuse to create the missing ones.
+  const parentStatus = String(f(currentRecord, "Studio_Variant_Status") || "").trim();
   const missingKeys = [...expectedIds].filter((id) => !scoped.some((row) => String(f(row, "Transfer_ID") || "").trim() === id));
-  if (missingKeys.length && String(f(currentRecord, "Studio_Variant_Status") || "") === "Preparing") {
+  if (missingKeys.length && (parentStatus === "Preparing" || parentStatus === "Error")) {
     const outputRows = await outputRowsForProductionRequest(env, recordId);
     await item4UpsertVariantQueue(env, recordId, assets, ratios, outputRows, plan);
     const refreshed = await item4VariantQueueRows(env, recordId);
     scoped = refreshed.filter((row) => expectedIds.has(String(f(row, "Transfer_ID") || "").trim()));
   }
 
-  const failed = scoped.filter((row) => item4QueueStatus(row) === "Failed");
-  const outstanding = scoped.filter(item4QueueRowIsOutstanding);
-  if (failed.length && !outstanding.length) {
-    const reconciled = await item4ReconcileVariants(env, recordId, currentRecord);
-    return { attempted: false, reason: "variant-failure-present", record: reconciled.record, execution_ids: [] };
+  // Match Production "Retry remaining": Failed/Error leftovers and stalled
+  // Processing claims become Pending again before we drain SMV1.
+  scoped = await item4RequeueFailedVariantsForHeal(env, scoped);
+  scoped = await item4RequeueStaleProcessing(env, scoped);
+
+  if (parentStatus === "Error") {
+    currentRecord = await item4UpdateRequestState(env, recordId, {
+      Studio_Variant_Status: "Preparing",
+      Studio_Variant_Error: null,
+      Studio_Item4_State: "Plan Ready",
+    });
   }
 
+  const outstanding = scoped.filter(item4QueueRowIsOutstanding);
   if (!outstanding.length) {
     const reconciled = await item4ReconcileVariants(env, recordId, currentRecord);
     return { attempted: false, reason: "no-pending-variants", record: reconciled.record, execution_ids: [] };
   }
 
-  const maxRuns = Math.min(20, Math.max(1, outstanding.length + 2));
-  const executionIds = await item4DrainVariantWorker(env, recordId, maxRuns, { maxMs: ITEM4_DRAIN_STATUS_BUDGET_MS });
+  // Large prepare batches (many photos × ratios) need more drain slots than the
+  // old 20-cap or the browser poll window expires and asks for a manual Retry.
+  const maxRuns = Math.min(40, Math.max(4, outstanding.length + 4));
+  const executionIds = await item4DrainVariantWorker(env, recordId, maxRuns, { maxMs: ITEM4_DRAIN_CRON_BUDGET_MS });
   const reconciled = await item4ReconcileVariants(env, recordId);
   return {
     attempted: true,
@@ -11651,17 +11693,42 @@ async function item4ResumePendingVariants(env, recordId, record = null) {
 }
 
 async function item4HealIncompletePreparingVariants(env) {
-  const rows = await listRecords(env, PRODUCTION_REQUEST_TABLE, {
-    limit: 8,
-    sortField: "Updated_At",
-    sortDirection: "desc",
-    filterFormula: 'AND({Test_Run_ID}=BLANK(),{Studio_Variant_Status}="Preparing")',
-  }).catch(() => []);
+  const [preparing, errored] = await Promise.all([
+    listRecords(env, PRODUCTION_REQUEST_TABLE, {
+      limit: 12,
+      sortField: "Updated_At",
+      sortDirection: "desc",
+      filterFormula: 'AND({Test_Run_ID}=BLANK(),{Studio_Variant_Status}="Preparing")',
+    }).catch(() => []),
+    listRecords(env, PRODUCTION_REQUEST_TABLE, {
+      limit: 8,
+      sortField: "Updated_At",
+      sortDirection: "desc",
+      filterFormula: 'AND({Test_Run_ID}=BLANK(),{Studio_Variant_Status}="Error")',
+    }).catch(() => []),
+  ]);
+  const seen = new Set();
+  const rows = [];
+  for (const row of [...(preparing || []), ...(errored || [])]) {
+    if (!row?.id || seen.has(row.id)) continue;
+    seen.add(row.id);
+    rows.push(row);
+  }
   const pulses = [];
-  for (const row of rows || []) {
+  for (const row of rows) {
     try {
       const result = await item4ResumePendingVariants(env, row.id, row);
-      if (result?.attempted) pulses.push({ id: row.id, reason: result.reason, ready: result.ready_count, target: result.target_count });
+      if (result?.attempted) {
+        pulses.push({
+          id: row.id,
+          reason: result.reason,
+          ready: result.ready_count,
+          target: result.target_count,
+          status: result.variant_status,
+        });
+      } else if (result?.reason) {
+        pulses.push({ id: row.id, reason: result.reason, attempted: false });
+      }
     } catch (error) {
       pulses.push({ id: row.id, error: error instanceof Error ? error.message : String(error) });
     }
@@ -33947,8 +34014,8 @@ async function gatherStudioDeskInventory(env) {
       filterFormula: 'AND({Test_Run_ID}=BLANK(),{Output_Status}="In Production",{Remotion_Job_ID}="",{Published_At}=BLANK())',
     }).catch(() => []),
     listRecords(env, PRODUCTION_REQUEST_TABLE, {
-      limit: 8,
-      filterFormula: 'AND({Test_Run_ID}=BLANK(),{Studio_Variant_Status}="Preparing")',
+      limit: 12,
+      filterFormula: 'AND({Test_Run_ID}=BLANK(),OR({Studio_Variant_Status}="Preparing",{Studio_Variant_Status}="Error"))',
     }).catch(() => []),
     listRecords(env, ITEM4_VARIANT_QUEUE_TABLE, {
       limit: 8,

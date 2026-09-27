@@ -120,3 +120,8 @@ Retry Studio API Worker production
 Reason: spending limit raised; retry Worker 0.10.402-faster-frames-save
 Source merge: 4c6416aba98be12b52a3e8a09d7d20195e8fe845
 Requested: 2026-09-27T09:45:26-05:00
+
+Deploy Studio API Worker production
+Reason: Quality Agent requeues Failed/Error leftover frames without manual Retry remaining
+Worker: 0.10.403-prepare-auto-retry
+Requested: 2026-09-27T10:55:00-05:00
