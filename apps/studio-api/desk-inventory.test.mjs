@@ -160,6 +160,14 @@ test("render, orphan, crop, autonomous, and health classifiers", () => {
   assert.equal(privateDriveWatermark.class, "data_repair");
   assert.equal(privateDriveWatermark.actor, "worker_heal");
   assert.match(privateDriveWatermark.diagnosis, /ERR_BLOCKED_BY_ORB/);
+  const parkedDriveWatermark = classifyRenderRow({
+    id: "recRWatermarkParked",
+    render_status: "Blocked",
+    remotion_job_id: "",
+    render_error: "PRIVATE_DRIVE_WATERMARK: waiting for Remotion watermark localization; old renderer cannot fetch drive.google.com watermark safely.",
+  }, now);
+  assert.equal(parkedDriveWatermark.kind, "render_private_drive_watermark");
+  assert.equal(parkedDriveWatermark.actor, "worker_heal");
   assert.equal(classifyRenderRow({
     id: "recR2",
     render_status: "Rendering",
