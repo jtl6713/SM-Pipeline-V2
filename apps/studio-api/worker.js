@@ -145,7 +145,7 @@ import {
   summarizeObservations,
   youtubePublishedAfterIso,
 } from "./autonomous-produce.mjs";
-import { ideaAutoListenContentType, ideaProductionConfigFields, mergeProductionRequestNotes, parseIdeaMachineNotes, parseIdeaNotedMediaIds, productionNotesForPromotionHandoff, productionPhotoWaitAutoOff, productionPhotoWaitRejectedIds, shouldAttachPhotoWaitAssets, withProductionPhotoWaitManual } from "./idea-photo-wait.mjs";
+import { ideaAutoListenContentType, ideaManagePhotoPauseActive, ideaProductionConfigFields, mergeProductionRequestNotes, parseIdeaMachineNotes, parseIdeaNotedMediaIds, productionNotesForPromotionHandoff, productionPhotoWaitAutoOff, productionPhotoWaitRejectedIds, shouldAttachPhotoWaitAssets, withIdeaManagePhotoPause, withoutIdeaManagePhotoPause, withProductionPhotoWaitManual } from "./idea-photo-wait.mjs";
 import {
   STUDIO_PUBLISH_RECONCILE_SCHEDULE_FORMULA,
   STUDIO_TIKTOK_INBOX_DUE_FORMULA,
@@ -191,6 +191,7 @@ export default {
       const isIdeaRestoreRoute = /^\/api\/ideas\/rec[A-Za-z0-9]+\/restore$/.test(url.pathname);
       const isIdeaPromoteRoute = /^\/api\/ideas\/rec[A-Za-z0-9]+\/promote$/.test(url.pathname);
       const isIdeaWatchPhotosRoute = /^\/api\/ideas\/rec[A-Za-z0-9]+\/watch-photos$/.test(url.pathname);
+      const isIdeaPhotoListeningSessionRoute = /^\/api\/ideas\/rec[A-Za-z0-9]+\/photo-listening-session$/.test(url.pathname);
       const isIdeaMatchPhotosRoute = /^\/api\/ideas\/rec[A-Za-z0-9]+\/match-photos$/.test(url.pathname);
       const isIdeaLibrarySuggestionsRoute = /^\/api\/ideas\/rec[A-Za-z0-9]+\/library-suggestions$/.test(url.pathname);
       const isIdeaProductionRequestRoute = /^\/api\/ideas\/rec[A-Za-z0-9]+\/production-request$/.test(url.pathname);
@@ -291,6 +292,7 @@ export default {
       const isIdeaHoldWrite = (isIdeaHoldRoute || isIdeaRestoreRoute) && request.method === "POST";
       const isIdeaPromoteWrite = isIdeaPromoteRoute && request.method === "POST";
       const isIdeaWatchPhotosWrite = isIdeaWatchPhotosRoute && request.method === "POST";
+      const isIdeaPhotoListeningSessionWrite = isIdeaPhotoListeningSessionRoute && request.method === "POST";
       const isIdeaMatchPhotosWrite = isIdeaMatchPhotosRoute && request.method === "POST";
       const isProductionRequestCreateWrite =
         (isIdeaProductionRequestRoute || isProductionRequestCollectionRoute) && request.method === "POST";
@@ -347,6 +349,7 @@ export default {
         isIdeaHoldWrite ||
         isIdeaPromoteWrite ||
         isIdeaWatchPhotosWrite ||
+        isIdeaPhotoListeningSessionWrite ||
         isIdeaMatchPhotosWrite ||
         isProductionRequestCreateWrite ||
         isProductionRequestEditWrite ||
@@ -992,6 +995,13 @@ export default {
         assertWriteRequest(request, env);
         requirePermission(authorization, "ideas_edit");
         return restoreIdea(request, env, url, authorization);
+      }
+
+      if (isIdeaPhotoListeningSessionRoute) {
+        assertWriteRequest(request, env);
+        requirePermission(authorization, "ideas_edit");
+        requirePermission(authorization, "production_configure");
+        return ideaPhotoListeningSessionRoute(request, env, url, authorization);
       }
 
       if (isIdeaWatchPhotosRoute) {
@@ -2832,6 +2842,7 @@ function mapIdea(record) {
     carousel_slide_count_max: f(record, "Production_Carousel_Slide_Count_Max"),
     carousel_image_mode: f(record, "Production_Carousel_Image_Mode"),
     photo_wait_status: f(record, "Studio_Photo_Wait_Status") || null,
+    photo_listening_paused: ideaManagePhotoPauseActive(f(record, "Production_Config_Notes")),
     photo_match: parseIdeaPhotoMatchJson(f(record, "Studio_Photo_Match_JSON")),
     matched_media_asset_links: f(record, "Studio_Matched_Media_Assets") || [],
     library_asset_ids: [...new Set([
@@ -12188,31 +12199,14 @@ async function getOrCreateProductionRequestForIdea(request, env, url, authorizat
   try { preferredProfileId = requestedProfileId(url, await request.clone().json().catch(() => ({}))); } catch { preferredProfileId = requestedProfileId(url); }
   const existing = await existingDraftForIdea(env, ideaRecordId, authorization);
   if (existing) {
-    let record = existing;
-    const masterCount = Number(f(existing, "Studio_Master_Asset_Count") || item4AssetManifest(existing).length || 0);
-    const waitStatus = String(f(idea, "Studio_Photo_Wait_Status") || "").trim();
-    // Empty draft + photo-wait idea: rematch/reattach so Production shows stills again
-    // after a bad scanner pass wiped Studio_Master_Assets_JSON. Never restore photos
-    // the operator already deleted (DuSable Bridge PR-20260926014919-4TU04T).
-    const photoWaitLocked = productionPhotoWaitAutoOff(f(existing, "Production_Notes"));
-    if (!photoWaitLocked && masterCount === 0 && (waitStatus === "Waiting" || waitStatus === "Ready")) {
-      try {
-        const rematch = await evaluateAndMaybeAttachWaitingIdeaPhotos(env, idea, {
-          authorization,
-          force: true,
-          productionRequest: existing,
-        });
-        if (rematch?.production_request) record = rematch.production_request;
-      } catch (error) {
-        console.warn("photo-wait rehydrate on open failed", ideaRecordId, error);
-      }
-    }
-    record = await maybeHealDraftNarrationVoice(env, record, idea, authorization, preferredProfileId);
+    const locked = await lockIdeaPhotoListeningForProduction(env, idea, existing);
+    const record = await maybeHealDraftNarrationVoice(env, locked.request, locked.idea, authorization, preferredProfileId);
     return respond(request, env, { ok: true, created: false, record: mapProductionRequest(record) });
   }
 
   const created = await createDraftForIdea(env, idea, authorization, null, { preferredProfileId });
-  return respond(request, env, { ok: true, created: true, record: mapProductionRequest(created) }, 201);
+  const locked = await lockIdeaPhotoListeningForProduction(env, idea, created);
+  return respond(request, env, { ok: true, created: true, record: mapProductionRequest(locked.request) }, 201);
 }
 
 async function createProductionRequestFromBody(request, env, authorization, url) {
@@ -12226,7 +12220,8 @@ async function createProductionRequestFromBody(request, env, authorization, url)
   const preferredProfileId = requestedProfileId(url, payload);
   const existing = await existingDraftForIdea(env, ideaRecordId, authorization);
   if (existing) {
-    const healed = await maybeHealDraftNarrationVoice(env, existing, idea, authorization, preferredProfileId);
+    const locked = await lockIdeaPhotoListeningForProduction(env, idea, existing);
+    const healed = await maybeHealDraftNarrationVoice(env, locked.request, locked.idea, authorization, preferredProfileId);
     return respond(request, env, { ok: true, created: false, record: mapProductionRequest(healed) });
   }
 
@@ -12239,7 +12234,8 @@ async function createProductionRequestFromBody(request, env, authorization, url)
   }
   input.voice_explicit = explicitVoice;
   const created = await createDraftForIdea(env, idea, authorization, input, { preferredProfileId });
-  return respond(request, env, { ok: true, created: true, record: mapProductionRequest(created) }, 201);
+  const locked = await lockIdeaPhotoListeningForProduction(env, idea, created);
+  return respond(request, env, { ok: true, created: true, record: mapProductionRequest(locked.request) }, 201);
 }
 
 
@@ -12321,15 +12317,16 @@ async function getProductionRequest(request, env, url, authorization) {
   if (ideaId) {
     try {
       const idea = await loadAuthorizedIdea(env, ideaId, authorization);
+      const locked = await lockIdeaPhotoListeningForProduction(env, idea, record);
       record = await maybeHealDraftNarrationVoice(
         env,
-        record,
-        idea,
+        locked.request,
+        locked.idea,
         authorization,
         requestedProfileId(url)
       );
     } catch (error) {
-      console.warn("production request voice heal skipped", recordId, error);
+      console.warn("production request listener/voice heal skipped", recordId, error);
     }
   }
   const ideaTitles = await loadIdeaTitlesByRecordId(env, [ideaId]);
@@ -18920,6 +18917,97 @@ async function promoteIdeaViaI3I4(request, env, url, authorization) {
   }, promoted ? 200 : 202);
 }
 
+async function ideaPhotoListeningSessionRoute(request, env, url, authorization) {
+  let payload = {};
+  try { payload = await request.json(); } catch { payload = {}; }
+  const action = String(payload?.action || "").trim().toLowerCase();
+  if (!["pause", "resume"].includes(action)) throw new HttpError(400, "action must be pause or resume");
+  const recordId = ideaRecordIdFromPath(url);
+  let idea = await loadAuthorizedIdea(env, recordId, authorization);
+  const waitStatus = String(f(idea, "Studio_Photo_Wait_Status") || "").trim();
+  const notes = String(f(idea, "Production_Config_Notes") || "");
+  if (promotionCompleted(idea) || waitStatus === "Not Needed") {
+    return respond(request, env, {
+      ok: true,
+      paused: false,
+      permanent: true,
+      record: mapIdea(idea),
+    });
+  }
+
+  const nextNotes = action === "pause"
+    ? withIdeaManagePhotoPause(notes, { ttlMinutes: 30 })
+    : withoutIdeaManagePhotoPause(notes);
+  if (nextNotes !== (notes || null)) {
+    idea = await airtableFetch(env, env.AIRTABLE_IDEA_TABLE_ID, recordId, {
+      method: "PATCH",
+      body: JSON.stringify({
+        fields: { Production_Config_Notes: nextNotes },
+        typecast: true,
+      }),
+    });
+  }
+  return respond(request, env, {
+    ok: true,
+    paused: action === "pause" && ideaManagePhotoPauseActive(f(idea, "Production_Config_Notes")),
+    permanent: false,
+    record: mapIdea(idea),
+  });
+}
+
+async function lockIdeaPhotoListeningForProduction(env, idea, requestRecord) {
+  let record = requestRecord;
+  const selectedIds = Array.isArray(f(idea, "Studio_Matched_Media_Assets"))
+    ? f(idea, "Studio_Matched_Media_Assets").map((id) => String(id || "").trim()).filter((id) => /^rec[A-Za-z0-9]+$/.test(id))
+    : [];
+  const masterCount = Number(f(record, "Studio_Master_Asset_Count") || item4AssetManifest(record).length || 0);
+
+  // Transfer the exact set the operator sees in Manage Idea once, but never rematch
+  // or introduce a newly discovered photo as the Production workspace opens.
+  if (!masterCount && selectedIds.length && !productionPhotoWaitAutoOff(f(record, "Production_Notes"))) {
+    try {
+      const attached = await applyLibraryAssetsToProductionRequest(
+        env,
+        record,
+        selectedIds,
+        { replaceWaitAssets: true }
+      );
+      record = attached.record;
+    } catch (error) {
+      console.warn("idea selected-photo handoff to Production failed", idea.id, error);
+    }
+  }
+
+  const requestNotes = String(f(record, "Production_Notes") || "").trim();
+  const lockedNotes = withProductionPhotoWaitManual(requestNotes);
+  if (lockedNotes !== requestNotes) {
+    record = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, record.id, {
+      method: "PATCH",
+      body: JSON.stringify({
+        fields: { Production_Notes: lockedNotes },
+        typecast: true,
+      }),
+    });
+  }
+
+  const configNotes = withoutIdeaManagePhotoPause(f(idea, "Production_Config_Notes"));
+  const currentWaitStatus = String(f(idea, "Studio_Photo_Wait_Status") || "").trim();
+  let updatedIdea = idea;
+  if (currentWaitStatus !== "Not Needed" || configNotes !== (f(idea, "Production_Config_Notes") || null)) {
+    updatedIdea = await airtableFetch(env, env.AIRTABLE_IDEA_TABLE_ID, idea.id, {
+      method: "PATCH",
+      body: JSON.stringify({
+        fields: {
+          Studio_Photo_Wait_Status: "Not Needed",
+          Production_Config_Notes: configNotes,
+        },
+        typecast: true,
+      }),
+    });
+  }
+  return { idea: updatedIdea, request: record };
+}
+
 async function getAuthorizedIdeaRoute(request, env, url, authorization) {
   const recordId = ideaRecordIdFromPath(url);
   const record = await loadAuthorizedIdea(env, recordId, authorization);
@@ -19293,6 +19381,17 @@ async function applyLibraryAssetsToProductionRequest(env, requestRecord, mediaId
 }
 
 async function evaluateAndMaybeAttachWaitingIdeaPhotos(env, idea, { authorization = null, force = false, productionRequest = null } = {}) {
+  // Always refresh before matching. Manage Idea writes a short-lived pause token and
+  // entering Production writes a permanent Not Needed/ez-photo-wait=off lock.
+  idea = await airtableFetch(env, env.AIRTABLE_IDEA_TABLE_ID, idea.id).catch(() => idea);
+  const waitStatusNow = String(f(idea, "Studio_Photo_Wait_Status") || "").trim();
+  if (ideaManagePhotoPauseActive(f(idea, "Production_Config_Notes"))) {
+    return { action: "paused", idea, production_request: productionRequest || null, skipped: true };
+  }
+  if (waitStatusNow === "Not Needed") {
+    return { action: "manual", idea, production_request: productionRequest || null, skipped: true };
+  }
+
   let requestRecord = productionRequest
     || (authorization ? await existingDraftForIdea(env, idea.id, authorization) : null)
     || await findDraftProductionRequestForIdea(env, idea.id);
@@ -19323,8 +19422,23 @@ async function evaluateAndMaybeAttachWaitingIdeaPhotos(env, idea, { authorizatio
     })),
   };
 
+  // Re-check after ranking because the operator may have opened Manage Idea or
+  // entered Production while the library scan was running.
+  idea = await airtableFetch(env, env.AIRTABLE_IDEA_TABLE_ID, idea.id).catch(() => idea);
+  if (ideaManagePhotoPauseActive(f(idea, "Production_Config_Notes"))) {
+    return { ...decision, action: "paused", idea, production_request: requestRecord, skipped: true };
+  }
+  if (String(f(idea, "Studio_Photo_Wait_Status") || "").trim() === "Not Needed") {
+    return { ...decision, action: "manual", idea, production_request: requestRecord, skipped: true };
+  }
+  if (requestRecord) {
+    requestRecord = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, requestRecord.id).catch(() => requestRecord);
+  }
   const requestNotes = requestRecord ? String(f(requestRecord, "Production_Notes") || "").trim() : "";
   const autoOff = productionPhotoWaitAutoOff(requestNotes);
+  if (autoOff) {
+    return { ...decision, action: "manual", idea, production_request: requestRecord, skipped: true };
+  }
   const rejectedIds = new Set(productionPhotoWaitRejectedIds(requestNotes));
 
   if (decision.action === "ready") {

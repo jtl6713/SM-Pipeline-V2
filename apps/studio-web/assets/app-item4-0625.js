@@ -5,6 +5,8 @@
   const $ = (id) => document.getElementById(id);
   let activeIdea = null;
   let ideasCache = [];
+  let ideaPhotoManagePauseTimer = null;
+  let ideaPhotoManagePauseIdeaId = null;
 
   function ideaIdFromRequest(record) {
     return record?.idea_record_id
@@ -240,7 +242,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.398-youtube-live-quota";
+  const BUILD_ID = "item4-0.6.401-manage-photo-pause";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -2086,6 +2088,63 @@
     return wait === "Waiting" || wait === "Ready";
   }
 
+  function clearIdeaPhotoManagePauseTimer() {
+    if (ideaPhotoManagePauseTimer) window.clearInterval(ideaPhotoManagePauseTimer);
+    ideaPhotoManagePauseTimer = null;
+  }
+
+  async function setIdeaPhotoManagePause(ideaId, action) {
+    if (!ideaId) return null;
+    const result = await api(`/api/ideas/${encodeURIComponent(ideaId)}/photo-listening-session`, {
+      method: "POST",
+      body: JSON.stringify({ action }),
+    });
+    if (activeIdea?.id === ideaId && result?.record) {
+      activeIdea = { ...activeIdea, ...result.record };
+    }
+    return result;
+  }
+
+  async function startIdeaPhotoManagePause(idea) {
+    clearIdeaPhotoManagePauseTimer();
+    const id = String(idea?.id || "").trim();
+    if (!id || ideaIsPromoted(idea) || !ideaPhotoWaitActive(idea)) {
+      ideaPhotoManagePauseIdeaId = null;
+      return;
+    }
+    ideaPhotoManagePauseIdeaId = id;
+    const pulse = async () => {
+      if (ideaPhotoManagePauseIdeaId !== id || activeIdea?.id !== id) return;
+      try {
+        const result = await setIdeaPhotoManagePause(id, "pause");
+        if (result?.paused && activeIdea?.id === id) {
+          setManageMessage(
+            "Automatic photo listening is paused while Manage Idea is open. Remove or uncheck photos without them being added back. Close Manage Idea to resume listening; opening Production stops listening permanently.",
+            ""
+          );
+        }
+      } catch (error) {
+        console.warn("Manage Idea photo-listening pause failed", error);
+      }
+    };
+    await pulse();
+    ideaPhotoManagePauseTimer = window.setInterval(pulse, 5 * 60 * 1000);
+  }
+
+  async function stopIdeaPhotoManagePause({ resume = true } = {}) {
+    clearIdeaPhotoManagePauseTimer();
+    const id = ideaPhotoManagePauseIdeaId;
+    ideaPhotoManagePauseIdeaId = null;
+    if (!resume || !id) return;
+    try {
+      await setIdeaPhotoManagePause(id, "resume");
+    } catch (error) {
+      // The server pause expires automatically after 30 minutes, so a dropped
+      // close request cannot leave the idea paused forever.
+      console.warn("Manage Idea photo-listening resume failed", error);
+    }
+  }
+
   function ideaPhotoWaitPayload() {
     const contentType = $("promoteContentType")?.value || "";
     const imageMode = $("promoteCarouselImageMode")?.value || "";
@@ -2498,6 +2557,7 @@
 
   function openIdeaDrawer(idea, { focusPromote = false } = {}) {
     updateIdeaDrawer(idea);
+    startIdeaPhotoManagePause(idea).catch((error) => console.warn("Manage Idea pause start failed", error));
     $("ideaDrawerBackdrop").hidden = false;
     $("ideaManageDrawer").classList.add("open");
     $("ideaManageDrawer").setAttribute("aria-hidden", "false");
@@ -2524,6 +2584,7 @@
         return false;
       }
     }
+    await stopIdeaPhotoManagePause({ resume: true });
     $("ideaManageDrawer").classList.remove("open");
     $("ideaManageDrawer").setAttribute("aria-hidden", "true");
     $("ideaDrawerBackdrop").hidden = true;

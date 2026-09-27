@@ -250,6 +250,35 @@ export function selectMatchedPhotos({ matches, min, max, pendingBatchIds, force 
   };
 }
 
+export const IDEA_MANAGE_PHOTO_PAUSE_RE = /^ez-photo-manage-pause=([^\n]+)$/im;
+
+export function ideaManagePhotoPauseUntil(notes) {
+  const match = String(notes || "").match(IDEA_MANAGE_PHOTO_PAUSE_RE);
+  if (!match) return null;
+  const ms = Date.parse(String(match[1] || "").trim());
+  return Number.isFinite(ms) ? ms : null;
+}
+
+export function ideaManagePhotoPauseActive(notes, nowMs = Date.now()) {
+  const until = ideaManagePhotoPauseUntil(notes);
+  return Number.isFinite(until) && until > nowMs;
+}
+
+export function withIdeaManagePhotoPause(notes, { nowMs = Date.now(), ttlMinutes = 30 } = {}) {
+  const until = new Date(nowMs + Math.max(5, Number(ttlMinutes) || 30) * 60 * 1000).toISOString();
+  const token = `ez-photo-manage-pause=${until}`;
+  const lines = String(notes || "").split(/\r?\n/).filter((line) => !IDEA_MANAGE_PHOTO_PAUSE_RE.test(line.trim()));
+  return [token, ...lines.filter((line) => String(line || "").trim())].join("\n").slice(0, 3000);
+}
+
+export function withoutIdeaManagePhotoPause(notes) {
+  return String(notes || "")
+    .split(/\r?\n/)
+    .filter((line) => !IDEA_MANAGE_PHOTO_PAUSE_RE.test(line.trim()))
+    .join("\n")
+    .trim() || null;
+}
+
 export const PHOTO_WAIT_AUTO_OFF_RE = /ez-photo-wait=off/i;
 
 export function productionPhotoWaitAutoOff(notes) {
@@ -336,7 +365,7 @@ function ideaSaveInt(value, min, max, label) {
   return Math.trunc(number);
 }
 
-export const IDEA_MACHINE_NOTE_PREFIX = /^(origin|media_asset_ids|cited_trend|cluster|ez-input)=/i;
+export const IDEA_MACHINE_NOTE_PREFIX = /^(origin|media_asset_ids|cited_trend|cluster|ez-input|ez-photo-manage-pause)=/i;
 
 export function parseIdeaMachineNotes(notes) {
   const machine = [];

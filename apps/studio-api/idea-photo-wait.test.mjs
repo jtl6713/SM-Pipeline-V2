@@ -5,6 +5,8 @@ import {
   buildIdeaLibraryKeys,
   ideaAutoListenContentType,
   ideaPhotoWaitApplies,
+  ideaManagePhotoPauseActive,
+  ideaManagePhotoPauseUntil,
   ideaProductionConfigFields,
   mergeIdeaProductionNotes,
   parseIdeaNotedMediaIds,
@@ -15,6 +17,8 @@ import {
   rankIdeaLibraryFields,
   selectMatchedPhotos,
   shouldAttachPhotoWaitAssets,
+  withIdeaManagePhotoPause,
+  withoutIdeaManagePhotoPause,
   withProductionPhotoWaitManual,
 } from "./idea-photo-wait.mjs";
 
@@ -329,4 +333,29 @@ test("explicit listen mode keeps the automatic listener enabled", () => {
   assert.equal(fields.Production_Carousel_Image_Mode, "Manual Upload");
   assert.equal(fields.Production_Carousel_Slide_Count_Mode, "Target range");
   assert.equal(fields.Studio_Photo_Wait_Status, "Waiting");
+});
+
+
+test("Manage Idea pause token is temporary, preserved by save, and removable", () => {
+  const now = Date.parse("2026-09-27T13:00:00.000Z");
+  const paused = withIdeaManagePhotoPause(
+    "origin=autonomous\nmedia_asset_ids=recStillA\nKeep the bridge shot.",
+    { nowMs: now, ttlMinutes: 30 }
+  );
+  assert.equal(ideaManagePhotoPauseActive(paused, now + 5 * 60 * 1000), true);
+  assert.equal(ideaManagePhotoPauseActive(paused, now + 31 * 60 * 1000), false);
+  assert.equal(
+    new Date(ideaManagePhotoPauseUntil(paused)).toISOString(),
+    "2026-09-27T13:30:00.000Z"
+  );
+
+  const saved = mergeIdeaProductionNotes(paused, "Keep the bridge shot.", null);
+  assert.match(saved, /ez-photo-manage-pause=/);
+  assert.match(saved, /origin=autonomous/);
+  assert.match(saved, /media_asset_ids=recStillA/);
+
+  const resumed = withoutIdeaManagePhotoPause(saved);
+  assert.doesNotMatch(resumed, /ez-photo-manage-pause=/);
+  assert.match(resumed, /origin=autonomous/);
+  assert.match(resumed, /Keep the bridge shot/);
 });
