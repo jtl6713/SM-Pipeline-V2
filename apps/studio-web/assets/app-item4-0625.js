@@ -164,6 +164,7 @@
   let item4Uploading = false;
   let item4AiGenerationInFlight = false;
   const item4AiAutoStarted = new Set();
+  const item4AiGenerationCancelled = new Set();
   let item4UploadBatchTotal = 0;
   let item4UploadBatchDone = 0;
   let item4PendingUploads = [];
@@ -246,7 +247,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.405-story-audio-catalog";
+  const BUILD_ID = "item4-0.6.406-ai-profile-naming-delete-authority";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -3589,6 +3590,7 @@
     const regenerate = $("item4RegenerateAiImages");
     const quantity = $("item4AiAddCount");
     const promptInput = $("item4AiPrompt");
+    const nameInput = $("item4AiAssetBaseName");
     if (!panel) return;
     const editable = Boolean(activeProductionRequest?.id) && item4RequestEditable(activeProductionRequest);
     panel.hidden = !editable;
@@ -3607,6 +3609,14 @@
     }
     if (quantity) quantity.disabled = item4AiGenerationInFlight;
     if (promptInput) promptInput.disabled = item4AiGenerationInFlight;
+    if (nameInput) {
+      nameInput.disabled = item4AiGenerationInFlight;
+      if (!nameInput.value) {
+        nameInput.placeholder = activeProductionRequest?.idea_title
+          || activeProductionRequest?.requested_title
+          || "Leave blank to use the Production title";
+      }
+    }
     if (generate) {
       generate.hidden = false;
       generate.disabled = item4AiGenerationInFlight;
@@ -3618,14 +3628,16 @@
     }
   }
 
-  async function generateItem4AiImages({ reset = false, automatic = false, addCount = null, replaceCount = null, promptGuidance = "" } = {}) {
+  async function generateItem4AiImages({ reset = false, automatic = false, addCount = null, replaceCount = null, promptGuidance = "", assetNameBase = "" } = {}) {
     if (!activeProductionRequest?.id || item4AiGenerationInFlight) return;
     const requestId = activeProductionRequest.id;
+    if (!automatic) item4AiGenerationCancelled.delete(requestId);
     const assets = Array.isArray(item4Workspace?.assets) ? item4Workspace.assets : [];
     const currentAiCount = assets.filter((asset) => /^studio_ai/i.test(String(asset?.source || ""))).length;
     const requestedAdditional = addCount == null ? null : Math.round(Number(addCount));
     const requestedReplacement = replaceCount == null ? null : Math.round(Number(replaceCount));
     const promptGuidanceText = automatic ? "" : String(promptGuidance || "").trim();
+    const assetNameBaseText = automatic ? "" : String(assetNameBase || "").trim();
     if (requestedAdditional != null && (!Number.isFinite(requestedAdditional) || requestedAdditional < 1)) {
       setRequestMessage("Enter at least 1 AI image to generate.", "error-text");
       return;
@@ -3648,8 +3660,9 @@
     let first = true;
     try {
       for (let guard = 0; guard < target + 2; guard += 1) {
-        // Manual removal of an AI asset switches the request out of auto-generation.
-        // If a generation batch was already running, stop before creating another image.
+        // Deleting an AI image cancels the current generation batch, manual or automatic.
+        // A future explicit Generate click clears this cancellation and starts a new batch.
+        if (item4AiGenerationCancelled.has(requestId)) break;
         if (automatic && !item4AiGenerationRequestActive(activeProductionRequest)) break;
         const result = await api(`/api/production-requests/${encodeURIComponent(requestId)}/generate-ai-masters`, {
           method: "POST",
@@ -3657,6 +3670,8 @@
             reset: Boolean(reset && first),
             target_ai_count: target,
             prompt_guidance: promptGuidanceText,
+            asset_name_base: assetNameBaseText,
+            content_profile_id: selectedProfileId,
           }),
           timeoutMs: 120000,
           retries: 0,
@@ -3681,6 +3696,10 @@
             : `Generating AI images… ${done} of ${requested} ready.`,
           "success"
         );
+        if (result?.cancelled || item4AiGenerationCancelled.has(requestId)) {
+          setRequestMessage(result?.message || "AI generation stopped after the image was deleted.", "success");
+          break;
+        }
         if (result?.completed) break;
       }
       await loadItem4Workspace(activeProductionRequest);
@@ -9247,6 +9266,7 @@
         carousel_image_mode: "Manual Upload",
       };
       item4AiAutoStarted.add(requestId);
+      item4AiGenerationCancelled.add(requestId);
     }
     item4RemoveDrain = item4RemoveDrain.then(async () => {
       try {
@@ -9281,7 +9301,8 @@
   $("item4GenerateAiImages")?.addEventListener("click", () => {
     const count = Math.round(Number($("item4AiAddCount")?.value || 1));
     const promptGuidance = String($("item4AiPrompt")?.value || "").trim();
-    generateItem4AiImages({ automatic: false, addCount: count, promptGuidance });
+    const assetNameBase = String($("item4AiAssetBaseName")?.value || "").trim();
+    generateItem4AiImages({ automatic: false, addCount: count, promptGuidance, assetNameBase });
   });
   $("item4RegenerateAiImages")?.addEventListener("click", () => {
     const assets = Array.isArray(item4Workspace?.assets) ? item4Workspace.assets : [];
@@ -9289,7 +9310,8 @@
     if (!count) return;
     if (!window.confirm(`Regenerate all ${count} AI images? The current AI-generated images will be replaced; uploaded and library assets will stay.`)) return;
     const promptGuidance = String($("item4AiPrompt")?.value || "").trim();
-    generateItem4AiImages({ reset: true, automatic: false, replaceCount: count, promptGuidance });
+    const assetNameBase = String($("item4AiAssetBaseName")?.value || "").trim();
+    generateItem4AiImages({ reset: true, automatic: false, replaceCount: count, promptGuidance, assetNameBase });
   });
 
   async function buildItem4Plan() {
