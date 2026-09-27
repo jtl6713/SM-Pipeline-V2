@@ -440,7 +440,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.403-prepare-auto-retry",
+          version: "0.10.404-airtable-low-burn",
           studio_desk_inventory_v1: true,
           studio_desk_activity_v1: true,
           studio_tiktok_complete_v1: true,
@@ -462,6 +462,7 @@ export default {
           studio_a3_heic_jpeg_v1: true,
           studio_intake_parked_heal_v1: true,
           studio_quality_agent_v1: true,
+          studio_airtable_low_burn_cron_v1: true,
           studio_oversized_list_refresh_v1: true,
           studio_library_published_files_v1: true,
           studio_native_grid_cover_v1: true,
@@ -1355,10 +1356,12 @@ export default {
     }
   },
   async scheduled(event, env, ctx) {
-    // Diagnose in-flight production first so Ready-for-Render / Rendering
-    // rows cannot sit forever. Publish reconcile stays next so due posts still
-    // dispatch in the same tick when budget remains. Daily ideas stay on a
-    // separate waitUntil so they cannot block P2/Remotion.
+    // Airtable free/Team monthly call caps require a thinner cron than the old
+    // */2 megapass. Light ticks keep publish rescue + stuck produce/render/crop
+    // alive; heavy ticks (UTC :00 / :30) own insights, idea photo matchers,
+    // A1S/A2 ingestion, and one-off ops patches. Daily ideas stay on a separate
+    // waitUntil so they cannot block P2/Remotion.
+    const cadence = studioCronAirtableCadence(new Date(), event?.cron || "");
     ctx.waitUntil((async () => {
       try {
         await studioReconcileOverdueScheduledPublishes(env, { limit: 12 });
@@ -1370,10 +1373,12 @@ export default {
       } catch (error) {
         console.warn("facebook reel priority reconcile cron failed", error);
       }
-      try {
-        await opsForceAzNavyPierTitle(env);
-      } catch (error) {
-        console.warn("ops az navy pier title patch failed", error);
+      if (cadence.heavy) {
+        try {
+          await opsForceAzNavyPierTitle(env);
+        } catch (error) {
+          console.warn("ops az navy pier title patch failed", error);
+        }
       }
       try {
         await healStuckStudioRenders(env);
@@ -1405,10 +1410,12 @@ export default {
       } catch (error) {
         console.warn("AZ finished-video resume failed", error);
       }
-      try {
-        await item4PulsePipelineStage(env, "a1s", { extra: { live_status: true } }, "A1S");
-      } catch (error) {
-        console.warn("a1s compression watchdog failed", error);
+      if (cadence.ingest) {
+        try {
+          await item4PulsePipelineStage(env, "a1s", { extra: { live_status: true } }, "A1S");
+        } catch (error) {
+          console.warn("a1s compression watchdog failed", error);
+        }
       }
       // Due publishes first. Item4 drain + autonomous produce were running before
       // this block and routinely exhausted the isolate budget, so scheduled TikTok /
@@ -1465,15 +1472,17 @@ export default {
       } catch (error) {
         console.warn("facebook native cover reconcile cron failed", error);
       }
-      try {
-        await autoListenOpenPhotoIdeas(env, { limit: 12 });
-      } catch (error) {
-        console.warn("idea automatic photo listening failed", error);
-      }
-      try {
-        await runWaitingIdeaPhotoMatches(env, { limit: 8 });
-      } catch (error) {
-        console.warn("idea photo-wait matcher failed", error);
+      if (cadence.heavy) {
+        try {
+          await autoListenOpenPhotoIdeas(env, { limit: 12 });
+        } catch (error) {
+          console.warn("idea automatic photo listening failed", error);
+        }
+        try {
+          await runWaitingIdeaPhotoMatches(env, { limit: 8 });
+        } catch (error) {
+          console.warn("idea photo-wait matcher failed", error);
+        }
       }
       try {
         await resumeStaleStudioProductionJobs(env);
@@ -1485,15 +1494,20 @@ export default {
       } catch (error) {
         console.warn("studio escalated-produce heal failed", error);
       }
+      let item4Drain = null;
       try {
-        await item4DrainAllPendingWork(env, { maxMs: ITEM4_DRAIN_CRON_BUDGET_MS });
+        item4Drain = await item4DrainAllPendingWork(env, { maxMs: ITEM4_DRAIN_CRON_BUDGET_MS });
       } catch (error) {
         console.warn("item4 pending crop drain cron failed", error);
       }
-      try {
-        await item4HealIncompletePreparingVariants(env);
-      } catch (error) {
-        console.warn("item4 preparing variant-gap heal failed", error);
+      // Preparing-gap heal lists Production Requests every call; skip on light
+      // ticks when the drain scan already found nothing outstanding.
+      if (cadence.heavy || (item4Drain?.request_ids || []).length) {
+        try {
+          await item4HealIncompletePreparingVariants(env);
+        } catch (error) {
+          console.warn("item4 preparing variant-gap heal failed", error);
+        }
       }
       try {
         await runStudioAutonomousProduce(null, env, { permissions: { tenant_admin: true } }, ctx, {
@@ -1508,42 +1522,46 @@ export default {
       } catch (error) {
         console.warn("production cadence cron failed", error);
       }
-      let firstPartyAnalyticsSweep = null;
-      try {
-        firstPartyAnalyticsSweep = await studioSweepPublishedInsights(env, { limit: 8 });
-      } catch (error) {
-        console.warn("insights sweep cron failed", error);
-      }
-      // Similar-account collection remains manual. First-party lifecycle snapshots are
-      // persisted by the sweep; refresh learned patterns only for profiles that changed.
-      for (const profile of firstPartyAnalyticsSweep?.profiles || []) {
+      if (cadence.insights) {
+        let firstPartyAnalyticsSweep = null;
         try {
-          await studioRecomputeInsightsLearned(env, { profile });
+          firstPartyAnalyticsSweep = await studioSweepPublishedInsights(env, { limit: 8 });
         } catch (error) {
-          console.warn("insights learned-model recompute failed", profile, error);
+          console.warn("insights sweep cron failed", error);
+        }
+        // Similar-account collection remains manual. First-party lifecycle snapshots are
+        // persisted by the sweep; refresh learned patterns only for profiles that changed.
+        for (const profile of firstPartyAnalyticsSweep?.profiles || []) {
+          try {
+            await studioRecomputeInsightsLearned(env, { profile });
+          } catch (error) {
+            console.warn("insights learned-model recompute failed", profile, error);
+          }
+        }
+        try {
+          // search.list is ~100 quota units. At most once per day from cron; Ops can still force discover.
+          await studioDiscoverYoutubeChicagoCreators(env, { theme: "chicago", limit: 5, scheduled: true });
+        } catch (error) {
+          console.warn("insights youtube discovery cron failed", error);
         }
       }
-      try {
-        // search.list is ~100 quota units. At most once per day from cron; Ops can still force discover.
-        await studioDiscoverYoutubeChicagoCreators(env, { theme: "chicago", limit: 5, scheduled: true });
-      } catch (error) {
-        console.warn("insights youtube discovery cron failed", error);
-      }
-      try {
-        // After publish work: start the next oversized Ingestion clip so a Drive dump
-        // does not wait for Process intake folder. live_status above only resumes jobs.
-        await item4PulsePipelineStage(env, "a1s", { extra: {} }, "A1S");
-      } catch (error) {
-        console.warn("a1s ingestion scan failed", error);
-      }
-      try {
-        // Eligible leftover files (already-small clips, HEICs, compressed replacements)
-        // must leave Ingestion without a human clicking Process intake.
-        await item4PulsePipelineStage(env, "a2", {
-          extra: { drain: true, trigger_a2b: true, wait_for_next: false },
-        }, "A2");
-      } catch (error) {
-        console.warn("a2 ingestion drain failed", error);
+      if (cadence.ingest) {
+        try {
+          // After publish work: start the next oversized Ingestion clip so a Drive dump
+          // does not wait for Process intake folder. live_status above only resumes jobs.
+          await item4PulsePipelineStage(env, "a1s", { extra: {} }, "A1S");
+        } catch (error) {
+          console.warn("a1s ingestion scan failed", error);
+        }
+        try {
+          // Eligible leftover files (already-small clips, HEICs, compressed replacements)
+          // must leave Ingestion without a human clicking Process intake.
+          await item4PulsePipelineStage(env, "a2", {
+            extra: { drain: true, trigger_a2b: true, wait_for_next: false },
+          }, "A2");
+        } catch (error) {
+          console.warn("a2 ingestion drain failed", error);
+        }
       }
     })());
     ctx.waitUntil(runStudioDailyIdeas(null, env, { permissions: { tenant_admin: true } }, ctx, {
@@ -1554,6 +1572,19 @@ export default {
     }));
   },
 };
+
+/** Light vs heavy Airtable spend for Worker cron (UTC minute buckets on five-minute ticks). */
+function studioCronAirtableCadence(now = new Date(), cronExpr = "") {
+  const date = now && typeof now.getUTCMinutes === "function" ? now : new Date(now);
+  const minute = Number(date.getUTCMinutes()) || 0;
+  const cron = String(cronExpr || "").trim();
+  // Dedicated heavy cron expressions always run the full pass.
+  if (cron === "0 * * * *" || cron === "30 * * * *") {
+    return { heavy: true, insights: true, ingest: true, minute, cron };
+  }
+  const heavy = minute === 0 || minute === 30;
+  return { heavy, insights: heavy, ingest: heavy, minute, cron };
+}
 
 class HttpError extends Error {
   constructor(status, message) {
@@ -17758,9 +17789,9 @@ async function studioSweepPublishedInsights(env, options = {}) {
     const profileId = profileRecord.id;
     const profileFormula = contentProfileFilterFormula(profileRecord);
     const rows = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
-      // Scan a generous backlog independently for every active profile. This is
-      // deliberately not a global limit: Chicago must never crowd out another brand.
-      limit: 250,
+      // Only need enough backlog to pick perProfileLimit due rows. A 250-row
+      // scan every cron tick was a top Airtable credit burner (3 pages/profile).
+      limit: Math.max(perProfileLimit * 4, 40),
       sortField: "Published_At",
       sortDirection: "desc",
       filterFormula: 'AND(' + profileFormula + ',{Test_Run_ID}=BLANK(),{Published_At}!="",{Do_Not_Publish}=0,OR({Insights_Next_Sync_At}=BLANK(),IS_BEFORE({Insights_Next_Sync_At},NOW())))',

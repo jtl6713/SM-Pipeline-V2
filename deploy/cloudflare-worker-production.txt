@@ -125,3 +125,8 @@ Deploy Studio API Worker production
 Reason: Quality Agent requeues Failed/Error leftover frames without manual Retry remaining
 Worker: 0.10.403-prepare-auto-retry
 Requested: 2026-09-27T10:55:00-05:00
+
+Deploy Studio API Worker production
+Reason: Cut Airtable API burn — cron */5 + heavy/light insights/ingest gates
+Worker: 0.10.404-airtable-low-burn
+Requested: 2026-09-27T14:30:00-05:00
