@@ -1,10 +1,34 @@
 {
-  "correlation_id": "MX1-GET-227-AFTER-GRAPH-20260824",
+  "correlation_id": "RAINY-MUSEUM-PLAN-FRAMES-REPAIR-20260927",
   "requests": [
     {
-      "name": "get-227-creative-after-graph",
+      "name": "build-rainy-museum-plan",
+      "method": "POST",
+      "path": "/api/production-requests/recVAxLIuTsHHuDZK/plan",
+      "body": {
+        "platforms": [
+          "Instagram",
+          "Facebook",
+          "TikTok",
+          "YouTube"
+        ],
+        "package": "slides",
+        "skip_fbs1_guard": true
+      }
+    },
+    {
+      "name": "prepare-rainy-museum-frames",
+      "method": "POST",
+      "path": "/api/production-requests/recVAxLIuTsHHuDZK/variants",
+      "body": {
+        "crops": {},
+        "retry": false
+      }
+    },
+    {
+      "name": "check-rainy-museum-frames",
       "method": "GET",
-      "path": "/api/outputs/rec6Wk2Sel4frhWSm/creative"
+      "path": "/api/production-requests/recVAxLIuTsHHuDZK/variants"
     }
   ]
 }
