@@ -49,3 +49,8 @@ Reason: make Manage Idea photo removals authoritative while photo listening is t
 UI: 0.6.402-manage-photo-selection-authority
 Source merge: 797c74b85adaa48efd5d04c45623eebae2190029
 Requested: 2026-09-27T09:08:00-05:00
+
+Retry Studio Pages production
+Reason: previous run failed before any runner steps/logs were created; retry same UI 0.6.402 deployment
+Source merge: 797c74b85adaa48efd5d04c45623eebae2190029
+Requested: 2026-09-27T09:12:00-05:00
