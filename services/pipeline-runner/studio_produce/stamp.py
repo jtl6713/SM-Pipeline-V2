@@ -74,8 +74,10 @@ def output_effective(output: dict[str, Any], request: dict[str, Any], parent: di
     voiceover_mode = field_str(output, "Studio_Effective_Voiceover_Mode") or field_str(request, "Voiceover_Mode") or "Yes"
     voiceover_duration = (
         field(output, "Studio_Effective_Voiceover_Duration_Seconds")
-        or field(request, "Voiceover_Duration_Seconds")
+        # The parent value is measured from the actual synthesized file; the request
+        # value is only the requested script target and can be shorter.
         or field(parent or {}, "Voiceover_Duration_Seconds")
+        or field(request, "Voiceover_Duration_Seconds")
         or 0
     )
     if directive_yes(voiceover_mode) and not voiceover_duration and field_str(parent or {}, "Voiceover_URL"):
