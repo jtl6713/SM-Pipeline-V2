@@ -1096,7 +1096,7 @@ def test_recovery_audio_uses_parent_music_and_keeps_voiceover_on_photo_story():
         },
         parent,
     )
-    assert fields["Voiceover_URL"] == "https://drive.google.com/uc?id=voice"
+    assert fields["Voiceover_URL"] is None  # Stories stay music-only; VO stays on the main Reel
     assert fields["Music_URL"] == "https://drive.google.com/uc?id=music"
     assert fields["Music_Volume"] == 0.6
 
