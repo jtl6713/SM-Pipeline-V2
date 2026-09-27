@@ -22,6 +22,7 @@ import {
   deskRecoverableEscalatedError,
   deskTransientPublishError,
   deskTransientRenderError,
+  deskWorkIdentity,
   classifyRfrLockedMissingDeliverable,
   classifyTesterCatalogAssert,
   classifyTesterNightly,
@@ -433,7 +434,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.393-quality-recap-dates",
+          version: "0.10.394-quality-recap-ids",
           studio_desk_inventory_v1: true,
           studio_desk_activity_v1: true,
           studio_tiktok_complete_v1: true,
@@ -2116,7 +2117,11 @@ function studioYoutubePublicSourceUrl(record) {
 function mapYoutubePrivateSourceDeskRow(record) {
   return {
     id: record?.id,
+    output_id: f(record, "Output_ID"),
+    output_title: f(record, "Output_Title"),
+    content_item_id: studioFirstLinkedId(f(record, "Content_Item")),
     platform: f(record, "Platform"),
+    platform_output_type: f(record, "Platform_Output_Type") || f(record, "Studio_Output_Type"),
     output_status: f(record, "Output_Status"),
     publish_status: f(record, "Publish_Status"),
     youtube_stage: f(record, "YouTube_Stage"),
@@ -33192,11 +33197,123 @@ async function probeDeskHealthTarget(target) {
   }
 }
 
-function mapDeskInventoryOutput(record, contentToRequest = new Map()) {
+function deskContentRecIdsFromRecords(records = []) {
+  const ids = [];
+  for (const record of records || []) {
+    const content = studioFirstLinkedId(f(record, "Content_Item"));
+    const promoted = studioFirstLinkedId(f(record, "Promoted_Content_Item"));
+    if (content) ids.push(content);
+    if (promoted) ids.push(promoted);
+  }
+  return ids;
+}
+
+async function loadDeskContentById(env, recIds) {
+  const unique = [...new Set((recIds || []).map((id) => String(id || "").trim()).filter((id) => /^rec[A-Za-z0-9]+$/.test(id)))];
+  const map = new Map();
+  if (!unique.length || !env.AIRTABLE_CONTENT_TABLE_ID) return map;
+  await Promise.all(unique.slice(0, 40).map(async (id) => {
+    const record = await airtableFetch(env, env.AIRTABLE_CONTENT_TABLE_ID, id).catch(() => null);
+    if (!record?.id) return;
+    map.set(id, {
+      content_item_id: id,
+      content_id: f(record, "Content_ID"),
+      content_title: String(f(record, "Content_Title") || "").trim() || null,
+    });
+  }));
+  return map;
+}
+
+function deskRequestWorkIdentity(record, contentById = new Map()) {
+  const contentItemId = studioFirstLinkedId(f(record, "Promoted_Content_Item"));
+  const content = contentById.get(contentItemId) || {};
+  return deskWorkIdentity({
+    content_item_id: contentItemId,
+    content_id: content.content_id ?? null,
+    content_title: content.content_title || String(f(record, "Requested_Title") || "").trim() || null,
+  });
+}
+
+function deskEventRecordId(event) {
+  const body = event?.payload && typeof event.payload === "object" ? event.payload : {};
+  const direct = String(body.record_id || "").trim();
+  if (/^rec[A-Za-z0-9]+$/.test(direct)) return direct;
+  const fingerprint = String(body.fingerprint || "").trim();
+  const rec = fingerprint.split(":")[1] || "";
+  return /^rec[A-Za-z0-9]+$/.test(rec) ? rec : "";
+}
+
+const DESK_OUTPUT_IDENTITY_KINDS = new Set([
+  "publish_failed_transient",
+  "publish_never_dispatch",
+  "render_failed",
+  "render_ready_no_job",
+  "render_ready_waiting_voiceover",
+  "render_long",
+  "produce_orphan",
+  "rfr_locked_missing_deliverable",
+  "native_cover_missing",
+  "youtube_private_source_fail",
+]);
+
+async function enrichDeskActivityIdentity(env, events, identityByRecord, contentById) {
+  const rows = Array.isArray(events) ? events : [];
+  const missing = [];
+  for (const event of rows) {
+    const recId = deskEventRecordId(event);
+    if (!recId || identityByRecord.has(recId)) continue;
+    const body = event?.payload && typeof event.payload === "object" ? event.payload : {};
+    if (body.content_id != null && body.output_id != null) continue;
+    missing.push({
+      recId,
+      kind: String(body.kind || String(body.fingerprint || "").split(":")[0] || ""),
+    });
+  }
+  const unique = [...new Map(missing.map((row) => [row.recId, row])).values()].slice(0, 12);
+  await Promise.all(unique.map(async ({ recId, kind }) => {
+    if (!kind || DESK_OUTPUT_IDENTITY_KINDS.has(kind)) {
+      const output = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, recId).catch(() => null);
+      if (output?.id) {
+        const mapped = mapDeskInventoryOutput(output, new Map(), contentById);
+        if (mapped.content_item_id && !contentById.has(mapped.content_item_id)) {
+          const extra = await loadDeskContentById(env, [mapped.content_item_id]);
+          extra.forEach((value, key) => contentById.set(key, value));
+        }
+        const content = contentById.get(mapped.content_item_id) || {};
+        identityByRecord.set(recId, deskWorkIdentity({
+          ...mapped,
+          content_id: content.content_id ?? mapped.content_id,
+          content_title: content.content_title || mapped.content_title,
+        }));
+        return;
+      }
+    }
+    const request = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, recId).catch(() => null);
+    if (request?.id) {
+      if (!contentById.has(studioFirstLinkedId(f(request, "Promoted_Content_Item")))) {
+        const extra = await loadDeskContentById(env, [studioFirstLinkedId(f(request, "Promoted_Content_Item"))]);
+        extra.forEach((value, key) => contentById.set(key, value));
+      }
+      identityByRecord.set(recId, deskRequestWorkIdentity(request, contentById));
+    }
+  }));
+  return rows.map((event) => {
+    const recId = deskEventRecordId(event);
+    const ident = recId ? identityByRecord.get(recId) : null;
+    if (!ident) return event;
+    const body = event?.payload && typeof event.payload === "object" ? event.payload : {};
+    return { ...event, payload: { ...ident, ...body } };
+  });
+}
+
+function mapDeskInventoryOutput(record, contentToRequest = new Map(), contentById = new Map()) {
   const note = String(f(record, "Studio_Publish_Dispatch_Note") || "");
+  const contentItemId = studioFirstLinkedId(f(record, "Content_Item"));
+  const content = contentById.get(contentItemId) || {};
   return {
     id: record.id,
     output_id: f(record, "Output_ID"),
+    output_title: f(record, "Output_Title"),
     output_status: f(record, "Output_Status"),
     render_status: f(record, "Render_Status"),
     remotion_job_id: f(record, "Remotion_Job_ID"),
@@ -33216,7 +33333,11 @@ function mapDeskInventoryOutput(record, contentToRequest = new Map()) {
     last_publish_attempt_at: f(record, "Last_Publish_Attempt_At"),
     request_id: studioOutputProductionRequestId(record, contentToRequest)
       || studioFirstLinkedId(f(record, "Production Requests")),
-    content_item_id: studioFirstLinkedId(f(record, "Content_Item")),
+    content_item_id: contentItemId,
+    content_id: content.content_id ?? null,
+    content_title: content.content_title || String(f(record, "Output_Title") || "").trim() || null,
+    voiceover_required: studioOutputVoiceoverRequired(record),
+    voiceover_url: f(record, "Voiceover_URL"),
     cover_attached: note.includes("facebook-cover=attached"),
     publish_error: f(record, "Publish_Error_Message"),
     publish_retry_eligible: Boolean(f(record, "Publish_Retry_Eligible")),
@@ -33321,47 +33442,56 @@ async function gatherStudioDeskInventory(env) {
     sortDirection: "desc",
     filterFormula: `AND({Test_Run_ID}=BLANK(),{Request_Status}!="Cancelled",{Studio_Production_Job_JSON}!="",OR(FIND('"step":"escalated"',{Studio_Production_Job_JSON}),FIND('"step": "escalated"',{Studio_Production_Job_JSON})))`,
   }).catch(() => []);
+  const contentToRequest = new Map();
+  for (const record of [...(promotedRows || []), ...(autonomousPromoted || []), ...(azRows || []), ...(autonomousRows || []), ...(produceRows || []), ...(escalatedRows || [])]) {
+    const contentId = studioFirstLinkedId(f(record, "Promoted_Content_Item"));
+    if (contentId && !contentToRequest.has(contentId)) contentToRequest.set(contentId, record.id);
+  }
+  const contentById = await loadDeskContentById(env, [
+    ...deskContentRecIdsFromRecords([
+      ...(produceRows || []),
+      ...(escalatedRows || []),
+      ...(readyNoJob || []),
+      ...(longRendering || []),
+      ...(orphans || []),
+      ...(preparing || []),
+      ...(autonomousRows || []),
+      ...(azRows || []),
+      ...(promotedRows || []),
+      ...(autonomousPromoted || []),
+      ...(notRfrOutputs || []),
+      ...(azReadyOutputs || []),
+      ...(approvedDispatch || []),
+      ...(publishedCovers || []),
+    ]),
+    ...contentToRequest.keys(),
+  ]);
+  const mapOut = (record) => mapDeskInventoryOutput(record, contentToRequest, contentById);
+  const requestIdentity = (record) => deskRequestWorkIdentity(record, contentById);
   const produceSeen = new Set();
   for (const record of [...(produceRows || []), ...(escalatedRows || [])]) {
     if (produceSeen.has(record.id)) continue;
     produceSeen.add(record.id);
     const job = parseStudioProductionJob(record) || {};
-    push(classifyProduceJob({ ...job, request_id: record.id }, nowMs));
+    push(classifyProduceJob({ ...job, request_id: record.id, ...requestIdentity(record) }, nowMs));
   }
   scanned("render_ready_no_job", "render_ready_waiting_voiceover", "render_long", "produce_orphan");
   for (const record of readyNoJob || []) {
-    push(classifyRenderRow({
-      id: record.id,
-      render_status: f(record, "Render_Status"),
-      remotion_job_id: f(record, "Remotion_Job_ID"),
-      final_file_url: f(record, "Final_File_URL"),
-      output_status: f(record, "Output_Status"),
-      voiceover_required: studioOutputVoiceoverRequired(record),
-      voiceover_url: f(record, "Voiceover_URL"),
-      output_id: f(record, "Output_ID"),
-      content_item_id: studioFirstLinkedId(f(record, "Content_Item")),
-    }, nowMs));
+    push(classifyRenderRow(mapOut(record), nowMs));
   }
   for (const record of longRendering || []) {
-    push(classifyRenderRow({
-      id: record.id,
-      render_status: f(record, "Render_Status"),
-      remotion_job_id: f(record, "Remotion_Job_ID"),
-      final_file_url: f(record, "Final_File_URL"),
-      last_modified: "1970-01-01T00:00:00Z",
-    }, nowMs));
+    push(classifyRenderRow({ ...mapOut(record), last_modified: "1970-01-01T00:00:00Z" }, nowMs));
   }
   for (const record of orphans || []) {
-    push(classifyRenderRow({
-      id: record.id,
-      output_status: f(record, "Output_Status"),
-      remotion_job_id: f(record, "Remotion_Job_ID"),
-      published_at: f(record, "Published_At"),
-    }, nowMs));
+    push(classifyRenderRow(mapOut(record), nowMs));
   }
   scanned("variant_preparing");
   for (const record of preparing || []) {
-    push(classifyPreparingGap({ id: record.id, studio_variant_status: f(record, "Studio_Variant_Status") }));
+    push(classifyPreparingGap({
+      id: record.id,
+      studio_variant_status: f(record, "Studio_Variant_Status"),
+      ...requestIdentity(record),
+    }));
   }
   scanned("crop_stale", "crop_parked");
   for (const record of [...(cropProcessing || []), ...(cropError || [])]) {
@@ -33379,17 +33509,11 @@ async function gatherStudioDeskInventory(env) {
     push(classifyAutonomousRequest({
       status: f(record, "Request_Status"),
       notes: studioRequestNotesText(record),
-      job: { ...job, request_id: record.id },
+      job: { ...job, request_id: record.id, ...requestIdentity(record) },
       nowMs,
     }));
   }
 
-  const contentToRequest = new Map();
-  for (const record of [...(promotedRows || []), ...(autonomousPromoted || []), ...(azRows || []), ...(autonomousRows || [])]) {
-    const contentId = studioFirstLinkedId(f(record, "Promoted_Content_Item"));
-    if (contentId && !contentToRequest.has(contentId)) contentToRequest.set(contentId, record.id);
-  }
-  const mapOut = (record) => mapDeskInventoryOutput(record, contentToRequest);
   const notRfr = (notRfrOutputs || []).map(mapOut);
   const azReady = (azReadyOutputs || []).map(mapOut);
   scanned("promoted_not_rfr");
@@ -33438,15 +33562,7 @@ async function gatherStudioDeskInventory(env) {
     }).catch(() => []);
     scanned("render_failed", "publish_failed_transient");
     for (const record of failedRows || []) {
-      push(classifyRenderRow({
-        id: record.id,
-        render_status: f(record, "Render_Status"),
-        remotion_job_id: f(record, "Remotion_Job_ID"),
-        final_file_url: f(record, "Final_File_URL"),
-        output_status: f(record, "Output_Status"),
-        render_error: f(record, "Remotion_Error_Message") || f(record, "Final_File_Error_Message"),
-        output_id: f(record, "Output_ID"),
-      }, nowMs));
+      push(classifyRenderRow(mapOut(record), nowMs));
       push(classifyPublishFailed(mapOut(record), nowMs));
     }
   } catch (error) {
@@ -33526,7 +33642,10 @@ async function gatherStudioDeskInventory(env) {
     }).catch(() => []);
     scanned("youtube_private_source_fail");
     for (const record of youtubeFailed || []) {
-      push(classifyYoutubePrivateSourceFail(mapYoutubePrivateSourceDeskRow(record)));
+      push(classifyYoutubePrivateSourceFail({
+        ...mapOut(record),
+        ...mapYoutubePrivateSourceDeskRow(record),
+      }));
     }
   } catch (error) {
     console.warn("desk youtube private-source scan failed", error);
@@ -33563,6 +33682,27 @@ async function gatherStudioDeskInventory(env) {
   } catch (error) {
     console.warn("desk tester nightly scan failed", error);
   }
+
+  const identityByRecord = new Map();
+  const rememberIdentity = (id, ident) => {
+    if (!id || !ident) return;
+    const prev = identityByRecord.get(id) || {};
+    const next = { ...prev };
+    for (const [key, value] of Object.entries(ident)) {
+      if (value != null && value !== "") next[key] = value;
+    }
+    identityByRecord.set(id, next);
+  };
+  for (const record of [...(readyNoJob || []), ...(longRendering || []), ...(orphans || []), ...(notRfrOutputs || []), ...(azReadyOutputs || []), ...(approvedDispatch || []), ...(publishedCovers || [])]) {
+    const mapped = mapOut(record);
+    rememberIdentity(record.id, deskWorkIdentity(mapped));
+    if (mapped.request_id) rememberIdentity(mapped.request_id, deskWorkIdentity(mapped));
+  }
+  for (const record of [...(produceRows || []), ...(escalatedRows || []), ...(autonomousRows || []), ...(azRows || []), ...(promotedRows || []), ...(autonomousPromoted || []), ...(preparing || [])]) {
+    rememberIdentity(record.id, requestIdentity(record));
+  }
+  for (const row of incidents) rememberIdentity(row.record_id, deskWorkIdentity(row));
+  activityEvents = await enrichDeskActivityIdentity(env, activityEvents, identityByRecord, contentById);
 
   return buildDeskInventoryPayload({
     mode,

@@ -270,12 +270,23 @@ test("promoted advancement is origin-aware and does not treat Ready for Review a
     requestId: "recA6",
     outputs: [{ id: "pub1", output_status: "Published", review_status: "", published_at: "2026-09-07T03:00:00Z" }],
   }).kind, "autonomous_rfr_gate");
-  assert.equal(classifyPublishDispatch({
+  const neverSent = classifyPublishDispatch({
     id: "recP1",
+    output_id: 908,
+    output_title: "Vizcaya Rainy Day Plan",
     output_status: "Approved for Publishing",
     platform: "Instagram",
+    platform_output_type: "Reel",
+    content_id: 209,
+    content_title: "Vizcaya Rainy Day Plan",
     last_modified: "2026-09-07T03:00:00Z",
-  }, now).kind, "publish_never_dispatch");
+  }, now);
+  assert.equal(neverSent.kind, "publish_never_dispatch");
+  assert.equal(neverSent.output_id, 908);
+  assert.equal(neverSent.content_id, 209);
+  assert.equal(neverSent.content_title, "Vizcaya Rainy Day Plan");
+  assert.equal(neverSent.platform, "Instagram");
+  assert.equal(neverSent.platform_output_type, "Reel");
   assert.equal(classifyPublishDispatch({
     id: "recP2",
     output_status: "Approved for Publishing",

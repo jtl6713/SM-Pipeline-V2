@@ -133,13 +133,53 @@ const DEFAULT_COPY = {
   action: "Logged it and tried the usual restart.",
 };
 
+const IDENTITY_KEYS = [
+  "output_id",
+  "output_title",
+  "platform",
+  "platform_output_type",
+  "content_id",
+  "content_title",
+  "content_item_id",
+];
+
+function cleanRecapText(value) {
+  const text = String(value == null ? "" : value).trim();
+  return text || null;
+}
+
+function cleanRecapId(value) {
+  if (value == null || value === "") return null;
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  const text = String(value).trim();
+  if (!text) return null;
+  const numeric = Number(text);
+  if (Number.isFinite(numeric) && String(numeric) === text) return numeric;
+  return text;
+}
+
+export function qualityRecapOutputLabel(row = {}) {
+  const type = [row.platform, row.platform_output_type].filter(Boolean).join(" ").replace(/\s+/g, " ").trim();
+  if (type) return type;
+  return cleanRecapText(row.output_title) || "";
+}
+
 export function qualityRecapItemLabel(row = {}) {
-  const outputId = row.output_id;
-  if (outputId != null && String(outputId).trim() !== "") return `Post ${String(outputId).trim()}`;
+  const content = cleanRecapText(row.content_title);
+  const contentId = cleanRecapId(row.content_id);
+  const output = qualityRecapOutputLabel(row);
+  const outputId = cleanRecapId(row.output_id);
+  const parts = [];
+  if (content) parts.push(content);
+  else if (contentId != null) parts.push(`Content ID ${contentId}`);
+  if (output) parts.push(output);
+  else if (outputId != null) parts.push(`Platform Output ID ${outputId}`);
+  if (parts.length) return parts.join(" · ");
   const service = SERVICE_LABELS[String(row.record_id || "").trim()];
   if (service) return service;
-  const contentId = row.content_item_id;
-  if (contentId != null && String(contentId).trim() !== "") return `Item ${String(contentId).trim()}`;
+  if (outputId != null) return `Platform Output ID ${outputId}`;
+  const linked = cleanRecapText(row.content_item_id);
+  if (linked && !/^rec[A-Za-z0-9]+$/.test(linked)) return `Content ID ${linked}`;
   return "";
 }
 
@@ -172,10 +212,23 @@ function asIncident(row) {
     actor: row.actor || null,
     record_id: row.record_id || row.id || null,
     fingerprint: row.fingerprint || [kind, row.record_id || row.id || "-", row.class || "unknown"].join(":"),
-    output_id: row.output_id || null,
-    content_item_id: row.content_item_id || null,
+    output_id: cleanRecapId(row.output_id),
+    output_title: cleanRecapText(row.output_title),
+    platform: cleanRecapText(row.platform),
+    platform_output_type: cleanRecapText(row.platform_output_type || row.studio_output_type),
+    content_id: cleanRecapId(row.content_id),
+    content_title: cleanRecapText(row.content_title),
+    content_item_id: cleanRecapText(row.content_item_id),
     when: row.updated_at || row.created_at || null,
   };
+}
+
+function mergeIncidentRow(current, next) {
+  const merged = { ...current, ...next };
+  for (const key of IDENTITY_KEYS) {
+    if (next[key] == null || next[key] === "") merged[key] = current[key] ?? next[key] ?? null;
+  }
+  return merged;
 }
 
 function incidentFromEvent(event) {
@@ -209,7 +262,7 @@ export function buildQualityRecap({ incidents = [], events = [], limit = 12, gen
   const remember = (row, extraTimes = []) => {
     if (!row) return;
     const current = byFingerprint.get(row.fingerprint) || { row, times: [], open: false };
-    current.row = { ...current.row, ...row };
+    current.row = mergeIncidentRow(current.row, row);
     current.times.push(row.when, ...extraTimes);
     byFingerprint.set(row.fingerprint, current);
   };
@@ -232,19 +285,28 @@ export function buildQualityRecap({ incidents = [], events = [], limit = 12, gen
 
   const cards = [...byFingerprint.values()].map(({ row, times, open: isOpen }) => {
     const copy = qualityRecapCopy(row.kind);
-    const label = qualityRecapItemLabel(row);
     const status = qualityRecapStatus({ actor: row.actor, class: row.class, open: isOpen });
     const foundAt = earliestIso(times, checkedAt);
     const lastSeen = latestIso(times, foundAt);
     const resolvedAt = isOpen
       ? null
       : (stampMs(lastSeen) === stampMs(foundAt) ? checkedAt : lastSeen);
+    const contentTitle = cleanRecapText(row.content_title);
+    const contentId = cleanRecapId(row.content_id);
+    const outputLabel = qualityRecapOutputLabel(row) || null;
+    const outputId = cleanRecapId(row.output_id);
     return {
       fingerprint: row.fingerprint,
       kind: row.kind,
       record_id: row.record_id,
-      output_id: row.output_id,
-      found: label ? `${copy.found} (${label})` : copy.found,
+      content_title: contentTitle,
+      content_id: contentId,
+      output_title: cleanRecapText(row.output_title),
+      output_label: outputLabel,
+      output_id: outputId,
+      platform: cleanRecapText(row.platform),
+      platform_output_type: cleanRecapText(row.platform_output_type),
+      found: copy.found,
       action: copy.action,
       resolved_how: copy.action,
       status: status.label,

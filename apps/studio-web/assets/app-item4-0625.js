@@ -240,7 +240,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.394-quality-recap-dates";
+  const BUILD_ID = "item4-0.6.395-quality-recap-ids";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -17604,9 +17604,21 @@
           : (formatQualityCheckTime(card.resolved_at) || formatQualityCheckTime(card.when) || "Unknown");
         const resolvedHow = card.resolved_how || card.action || "";
         const tone = card.tone === "alert" || card.tone === "ok" || card.tone === "work" ? card.tone : "";
+        const outputName = card.output_label || [card.platform, card.platform_output_type].filter(Boolean).join(" ") || card.output_title || "";
+        const identity = [
+          card.content_title ? `<p class="ops-recap-id"><strong>Content item.</strong> ${escapeHtml(card.content_title)}</p>` : "",
+          card.content_id != null && String(card.content_id).trim() !== ""
+            ? `<p class="ops-recap-id"><strong>Content ID.</strong> ${escapeHtml(String(card.content_id))}</p>`
+            : "",
+          outputName ? `<p class="ops-recap-id"><strong>Platform output.</strong> ${escapeHtml(outputName)}</p>` : "",
+          card.output_id != null && String(card.output_id).trim() !== ""
+            ? `<p class="ops-recap-id"><strong>Platform Output ID.</strong> ${escapeHtml(String(card.output_id))}</p>`
+            : "",
+        ].join("");
         return `<li${tone ? ` data-tone="${escapeHtml(tone)}"` : ""}>
           <span class="ops-recap-status">${escapeHtml(card.status || "")}</span>
           <p class="ops-recap-found"><strong>Found.</strong> ${escapeHtml(card.found || "")}</p>
+          ${identity}
           <p class="ops-recap-when"><strong>Date issue found.</strong> ${escapeHtml(foundAt)}</p>
           <p class="ops-recap-when"><strong>Date issue resolved.</strong> ${escapeHtml(resolvedAt)}</p>
           <p class="ops-recap-did"><strong>How it was resolved.</strong> ${escapeHtml(resolvedHow)}</p>

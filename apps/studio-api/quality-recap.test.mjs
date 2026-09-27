@@ -12,15 +12,50 @@ test("recap uses everyday words and names the post", () => {
       record_id: "recuOQs6TgAXJqxRI",
       fingerprint: "publish_failed_transient:recuOQs6TgAXJqxRI:transient_http",
       output_id: 908,
+      output_title: "Vizcaya Rainy Day Plan",
+      platform: "TikTok",
+      platform_output_type: "Slideshow",
+      content_id: 209,
+      content_title: "Vizcaya Rainy Day Plan",
     }],
   });
   assert.equal(recap.open_count, 1);
   assert.equal(recap.cards[0].status, "Retrying now");
   assert.match(recap.cards[0].found, /failed while sending/i);
-  assert.match(recap.cards[0].found, /Post 908/);
+  assert.equal(recap.cards[0].content_title, "Vizcaya Rainy Day Plan");
+  assert.equal(recap.cards[0].content_id, 209);
+  assert.equal(recap.cards[0].output_label, "TikTok Slideshow");
+  assert.equal(recap.cards[0].output_id, 908);
   assert.match(recap.cards[0].action, /Restarted the send/);
-  assert.equal(qualityRecapItemLabel({ output_id: 908 }), "Post 908");
+  assert.equal(qualityRecapItemLabel({
+    content_title: "Vizcaya Rainy Day Plan",
+    output_id: 908,
+    platform: "TikTok",
+    platform_output_type: "Slideshow",
+  }), "Vizcaya Rainy Day Plan · TikTok Slideshow");
   assert.equal(qualityRecapCopy("produce_escalated").found.includes("investigation"), true);
+});
+
+test("recap names the content item and platform output on a never-sent post", () => {
+  const recap = buildQualityRecap({
+    incidents: [{
+      kind: "publish_never_dispatch",
+      class: "transient",
+      actor: "worker_heal",
+      record_id: "recNeverSent",
+      fingerprint: "publish_never_dispatch:recNeverSent:approved_not_dispatched",
+      output_id: 908,
+      platform: "Instagram",
+      platform_output_type: "Reel",
+      content_id: 209,
+      content_title: "Vizcaya Rainy Day Plan",
+    }],
+  });
+  assert.match(recap.cards[0].found, /never started sending/i);
+  assert.equal(recap.cards[0].content_title, "Vizcaya Rainy Day Plan");
+  assert.equal(recap.cards[0].content_id, 209);
+  assert.equal(recap.cards[0].output_label, "Instagram Reel");
+  assert.equal(recap.cards[0].output_id, 908);
 });
 
 test("recap marks handled tickets that are no longer open", () => {

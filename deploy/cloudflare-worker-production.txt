@@ -51,3 +51,8 @@ Reason: Recap cards include date found, date resolved, and how it was resolved
 Worker: 0.10.393-quality-recap-dates
 Requested: 2026-09-26T22:50:00-05:00
 
+Deploy Studio API Worker production
+Reason: Recap cards name the Content item, Content ID, Platform output, and Platform Output ID
+Worker: 0.10.394-quality-recap-ids
+Requested: 2026-09-26T22:55:00-05:00
+

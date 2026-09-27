@@ -132,6 +132,51 @@ export function fingerprint(kind, recordId, errorClass) {
   return [kind, recordId || "-", errorClass || "unknown"].join(":");
 }
 
+function deskIdentityValue(value) {
+  if (value == null) return null;
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  const text = String(value).trim();
+  if (!text) return null;
+  const numeric = Number(text);
+  if (Number.isFinite(numeric) && String(numeric) === text) return numeric;
+  return text;
+}
+
+export function deskWorkIdentity(row = {}) {
+  const source = row && typeof row === "object" ? row : {};
+  const firstOutput = Array.isArray(source.outputs)
+    ? source.outputs.find((item) => item && typeof item === "object")
+    : null;
+  const pick = firstOutput || source;
+  const clean = (value) => {
+    const text = String(value || "").trim();
+    return text || null;
+  };
+  return {
+    output_id: deskIdentityValue(pick.output_id ?? source.output_id),
+    output_title: clean(pick.output_title || source.output_title),
+    platform: clean(pick.platform || source.platform),
+    platform_output_type: clean(
+      pick.platform_output_type
+      || pick.studio_output_type
+      || source.platform_output_type
+      || source.studio_output_type
+    ),
+    content_id: deskIdentityValue(pick.content_id ?? source.content_id),
+    content_title: clean(pick.content_title || source.content_title),
+    content_item_id: clean(pick.content_item_id || source.content_item_id),
+  };
+}
+
+export function withDeskIdentity(incident, row) {
+  if (!incident) return incident;
+  const next = { ...incident };
+  for (const [key, value] of Object.entries(deskWorkIdentity(row))) {
+    if (value != null && value !== "") next[key] = value;
+  }
+  return next;
+}
+
 export function deskRecoverableEscalatedError(text) {
   const value = String(text || "");
   if (/clip count mismatch/i.test(value)) return false;
@@ -164,7 +209,7 @@ export function classifyProduceJob(job, nowMs = Date.now(), staleAfterMs = STALE
 
   // Remotion expectedClipCount vs clips.length. Worker heal retries cannot fix this.
   if (errorClass === "clip_count_mismatch" && (step === "blocked" || step === "escalated")) {
-    return {
+    return withDeskIdentity({
       kind: "produce_clip_mismatch",
       class: "code_bug",
       record_id: recordId || null,
@@ -173,12 +218,12 @@ export function classifyProduceJob(job, nowMs = Date.now(), staleAfterMs = STALE
       resume_count: resumeCount,
       error: error || null,
       actor: "desk_agent",
-    };
+    }, job);
   }
 
   if (step === "escalated" || (step === "blocked" && resumeCount >= maxResumes)) {
     const recoverable = deskRecoverableEscalatedError(error || step);
-    return {
+    return withDeskIdentity({
       kind: "produce_escalated",
       class: recoverable ? "transient" : "code_bug",
       record_id: recordId || null,
@@ -190,10 +235,10 @@ export function classifyProduceJob(job, nowMs = Date.now(), staleAfterMs = STALE
       diagnosis: recoverable
         ? "Produce parked Escalated after the heal budget. Worker rematches missing masters when needed, resets resume_count, and resumes studio-produce."
         : "Produce escalated with a non-retryable payload error. Desk must fix the job before resume.",
-    };
+    }, job);
   }
   if (step === "blocked" || stale || !job.job_id) {
-    return {
+    return withDeskIdentity({
       kind: "produce_stale",
       class: "transient",
       record_id: recordId || null,
@@ -202,7 +247,7 @@ export function classifyProduceJob(job, nowMs = Date.now(), staleAfterMs = STALE
       resume_count: resumeCount,
       error: error || null,
       actor: "worker_heal",
-    };
+    }, job);
   }
   return null;
 }
@@ -222,59 +267,56 @@ export function classifyRenderRow(row, nowMs = Date.now()) {
     const errorClass = heal && failedAgeMs(row, nowMs) >= STALE_FAILED_MS && !deskTransientRenderError(err) && err.trim()
       ? "stale_failed"
       : errorClassFromText(err || "render_failed");
-    return {
+    return withDeskIdentity({
       kind: "render_failed",
       class: heal ? "transient" : "code_bug",
       record_id: recordId || null,
       fingerprint: fingerprint("render_failed", recordId, errorClass),
       actor: heal ? "worker_heal" : "desk_agent",
-      output_id: row?.output_id || null,
       diagnosis: heal
         ? "Render_Status=Failed (transient crash, or Failed for more than an hour). Worker requeues Ready for Render and pulses R4."
         : "Render_Status=Failed with a non-retryable error. Desk must fix the payload before requeue.",
-    };
+    }, row);
   }
   if (renderStatus === "Ready for Render" && !jobId && row?.voiceover_required && !String(row?.voiceover_url || "").trim()) {
     // R4 returns waiting_for_voiceover on every pulse; re-pulsing R4 cannot heal it.
     // Worker copies the parent voiceover down or re-arms the P2 selector and resumes produce at audio.
-    return {
+    return withDeskIdentity({
       kind: "render_ready_waiting_voiceover",
       class: "transient",
       record_id: recordId || null,
       fingerprint: fingerprint("render_ready_waiting_voiceover", recordId, "no_voiceover_url"),
       actor: "worker_heal",
-      output_id: row?.output_id || null,
-      content_item_id: row?.content_item_id || null,
       diagnosis: "Ready for Render with no Remotion job; output wants narration but Voiceover_URL is blank. "
         + "Check parent Content_Status (P2 needs \"Ready for Voiceover\"; \"Thumbnail Ready\" switches P2 off) and Voiceover_Status.",
-    };
+    }, row);
   }
   if (renderStatus === "Ready for Render" && !jobId) {
-    return {
+    return withDeskIdentity({
       kind: "render_ready_no_job",
       class: "transient",
       record_id: recordId || null,
       fingerprint: fingerprint("render_ready_no_job", recordId, "no_job"),
       actor: "worker_heal",
-    };
+    }, row);
   }
   if (renderStatus === "Rendering" && jobId && !finalUrl && ageMs >= STALE_RENDER_MINUTES * 60 * 1000) {
-    return {
+    return withDeskIdentity({
       kind: "render_long",
       class: "infra_down",
       record_id: recordId || null,
       fingerprint: fingerprint("render_long", recordId, "still_rendering"),
       actor: "local_companion",
-    };
+    }, row);
   }
   if (outputStatus === "In Production" && !jobId && !row?.published_at) {
-    return {
+    return withDeskIdentity({
       kind: "produce_orphan",
       class: "transient",
       record_id: recordId || null,
       fingerprint: fingerprint("produce_orphan", recordId, "in_production_no_job"),
       actor: "worker_heal",
-    };
+    }, row);
   }
   return null;
 }
@@ -357,14 +399,14 @@ export function classifyYoutubePrivateSourceFail(row) {
   if (!explicit401 && !stuckYt1 && !terminal && !ap0Abort) return null;
   if (!stuckYt1 && !terminal && ap0Abort && !driveFinal) return null;
   const recordId = String(row.id || row.record_id || "").trim();
-  return {
+  return withDeskIdentity({
     kind: "youtube_private_source_fail",
     class: "transient",
     record_id: recordId || null,
     fingerprint: fingerprint("youtube_private_source_fail", recordId, stuckYt1 ? "yt1_drive" : (ap0Abort ? "ap0_abort" : "source_401")),
     actor: "worker_heal",
     diagnosis: "YouTube Approved for Publishing has no video id and no public MP4; Graph/YouTube cannot fetch Drive. Stream the Drive final to publish/ (not a one-shot Windows PUT), clear a stale YouTube_Upload_Job_ID, then pulse YTP1. Keep the native 3D cover; do not send thumb_offset.",
-  };
+  }, row);
 }
 
 export function classifyAutonomousRequest({ status, notes, job, nowMs = Date.now() } = {}) {
@@ -373,24 +415,24 @@ export function classifyAutonomousRequest({ status, notes, job, nowMs = Date.now
   const recordId = String(job?.request_id || "").trim();
   if (text.includes("origin=autonomous")) {
     if (["Draft", "Ready", "Submitted"].includes(requestStatus)) {
-      return {
+      return withDeskIdentity({
         kind: "autonomous_stalled",
         class: "code_bug",
         record_id: recordId || null,
         fingerprint: fingerprint("autonomous_stalled", recordId, requestStatus.toLowerCase()),
         actor: "desk_agent",
-      };
+      }, job);
     }
     const step = String(job?.step || "").trim();
     if (requestStatus === "Promoted" && (!job?.job_id || !step || step === "blocked" || step === "escalated")) {
       const recoverable = step !== "escalated" || deskRecoverableEscalatedError(job?.error || step);
-      return {
+      return withDeskIdentity({
         kind: "autonomous_produce_gap",
         class: recoverable ? "transient" : "code_bug",
         record_id: recordId || null,
         fingerprint: fingerprint("autonomous_produce_gap", recordId, step || "no_job"),
         actor: recoverable ? "worker_heal" : "desk_agent",
-      };
+      }, job);
     }
   }
   if (/origin=az-finished-video/i.test(text) && requestStatus && requestStatus !== "Cancelled") {
@@ -399,13 +441,13 @@ export function classifyAutonomousRequest({ status, notes, job, nowMs = Date.now
     const stale = !job || !Number.isFinite(updated) || (nowMs - updated) >= STALE_PRODUCE_MS;
     if (step === "escalated" || (stale && step !== "done")) {
       const recoverable = step !== "escalated" || deskRecoverableEscalatedError(job?.error || step);
-      return {
+      return withDeskIdentity({
         kind: "az_stalled",
         class: recoverable ? "transient" : "code_bug",
         record_id: recordId || null,
         fingerprint: fingerprint("az_stalled", recordId, step || requestStatus.toLowerCase()),
         actor: recoverable ? "worker_heal" : "desk_agent",
-      };
+      }, job);
     }
   }
   return null;
@@ -493,14 +535,14 @@ export function classifyPromotedNotRfr({ status, notes, outputs = [], requestId,
   });
   if (!stuck.length) return null;
   const recordId = String(requestId || stuck[0]?.request_id || stuck[0]?.id || "").trim();
-  return {
+  return withDeskIdentity({
     kind: "promoted_not_rfr",
     class: "transient",
     record_id: recordId || null,
     fingerprint: fingerprint("promoted_not_rfr", recordId, origin || "in_production"),
     origin,
     actor: "worker_heal",
-  };
+  }, stuck[0]);
 }
 
 export function classifyAzNotAutoFinished({ status, notes, outputs = [], requestId } = {}) {
@@ -517,13 +559,13 @@ export function classifyAzNotAutoFinished({ status, notes, outputs = [], request
   if (!ready.length) return null;
   if (ready.every(outputPastReview)) return null;
   const recordId = String(requestId || "").trim();
-  return {
+  return withDeskIdentity({
     kind: "az_not_auto_finished",
     class: "transient",
     record_id: recordId || null,
     fingerprint: fingerprint("az_not_auto_finished", recordId, "ready_not_queued"),
     actor: "worker_heal",
-  };
+  }, ready[0]);
 }
 
 export function classifyAutonomousRfrGate({ notes, outputs = [], requestId } = {}) {
@@ -540,13 +582,13 @@ export function classifyAutonomousRfrGate({ notes, outputs = [], requestId } = {
   });
   if (!leaked.length) return null;
   const recordId = String(requestId || leaked[0]?.id || "").trim();
-  return {
+  return withDeskIdentity({
     kind: "autonomous_rfr_gate",
     class: "code_bug",
     record_id: recordId || null,
     fingerprint: fingerprint("autonomous_rfr_gate", recordId, "auto_published"),
     actor: "desk_agent",
-  };
+  }, leaked[0]);
 }
 
 export function classifyPublishFailed(row, nowMs = Date.now()) {
@@ -570,17 +612,16 @@ export function classifyPublishFailed(row, nowMs = Date.now()) {
   const errorClass = heal && stale && error && !deskTransientPublishError(error)
     ? "stale_failed"
     : errorClassFromText(error || "publish_failed");
-  return {
+  return withDeskIdentity({
     kind: "publish_failed_transient",
     class: heal ? "transient" : "code_bug",
     record_id: recordId || null,
     fingerprint: fingerprint("publish_failed_transient", recordId, errorClass),
     actor: heal ? "worker_heal" : "desk_agent",
-    output_id: row?.output_id || null,
     diagnosis: heal
       ? "Publish is Failed (retryable error such as Instagram IN_PROGRESS / HTTP 401, or Failed for more than an hour). Worker clears TikTok Manual Fallback when needed, requeues Ready to Publish, and pulses the publisher. Do not Approve again."
       : "Publish Failed with a non-retryable platform error. Desk must fix the asset or Graph settings before retry.",
-  };
+  }, row);
 }
 
 export function classifyPublishDispatch(row, nowMs = Date.now()) {
@@ -592,13 +633,13 @@ export function classifyPublishDispatch(row, nowMs = Date.now()) {
   if (row?.published_at || ["Published", "Publishing"].includes(String(row?.publish_status || "").trim())) return null;
   if (platform === "TikTok") return null;
   if (outputAgeMs(row, nowMs) < STALE_RENDER_MINUTES * 60 * 1000) return null;
-  return {
+  return withDeskIdentity({
     kind: "publish_never_dispatch",
     class: "transient",
     record_id: recordId || null,
     fingerprint: fingerprint("publish_never_dispatch", recordId, "approved_not_dispatched"),
     actor: "worker_heal",
-  };
+  }, row);
 }
 
 export function deskDesignedCoverUrl(url) {
@@ -651,16 +692,15 @@ export function classifyRfrLockedMissingDeliverable(row, nowMs = Date.now(), ext
   const sibling = storyOpen
     ? " Sibling Stories already Open review while cover-required destinations stay Preparing Assets."
     : "";
-  return {
+  return withDeskIdentity({
     kind: "rfr_locked_missing_deliverable",
     class: stale ? "code_bug" : "transient",
     record_id: recordId || null,
     fingerprint: fingerprint("rfr_locked_missing_deliverable", outputId, blocker),
     actor: stale ? "desk_agent" : "worker_heal",
     blocker,
-    output_id: row?.output_id || null,
     diagnosis: `Labels say ${outputStatus || renderStatus || reviewStatus} but Open review is locked (${blocker}). Ignore the Ready for Review badge; trust creative_available.${sibling}${group} Worker must stage a public 3D still to media.chicagoshining.com/publish or studio/previews, stamp cover-required siblings, and stamp a blank Output_Caption from the Content Item. Do not Approve. Do not send thumb_offset.`,
-  };
+  }, row);
 }
 
 export function classifyNativeCover(row) {
@@ -679,22 +719,22 @@ export function classifyNativeCover(row) {
     && !/ITEM4-VARIANT-fill-crop/i.test(thumb);
   if (platform === "Facebook") {
     if (row?.cover_attached) return null;
-    return {
+    return withDeskIdentity({
       kind: "native_cover_missing",
       class: "code_bug",
       record_id: recordId || null,
       fingerprint: fingerprint("native_cover_missing", recordId, publicCover ? "cover_not_attached" : "missing_public_cover"),
       actor: "desk_agent",
-    };
+    }, row);
   }
   if (publicCover) return null;
-  return {
+  return withDeskIdentity({
     kind: "native_cover_missing",
     class: "code_bug",
     record_id: recordId || null,
     fingerprint: fingerprint("native_cover_missing", recordId, "missing_public_cover"),
     actor: "desk_agent",
-  };
+  }, row);
 }
 
 export function classifyTesterNightly(events, nowMs = Date.now(), maxAgeMs = TESTER_NIGHTLY_MAX_AGE_MS) {
@@ -806,13 +846,13 @@ export function classifyPreparingGap(row) {
   const recordId = String(row?.id || "").trim();
   const status = String(row?.studio_variant_status || "").trim();
   if (status !== "Preparing") return null;
-  return {
+  return withDeskIdentity({
     kind: "variant_preparing",
     class: "transient",
     record_id: recordId || null,
     fingerprint: fingerprint("variant_preparing", recordId, "preparing"),
     actor: "worker_heal",
-  };
+  }, row);
 }
 
 export function parseDeskCaps(raw, chicagoDate) {
