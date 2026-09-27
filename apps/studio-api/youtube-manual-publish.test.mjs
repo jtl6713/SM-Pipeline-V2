@@ -137,7 +137,13 @@ test("Studio can close a quota-parked YouTube row with a live URL", () => {
     youtube_video_id: "jRARA4azmDs",
   };
   assert.equal(youtubeCompleteEligibility(waiting), null);
-  assert.equal(youtubeNeedsUrlEntry(waiting), true);
+  assert.equal(youtubeNeedsUrlEntry(waiting), false);
+  assert.equal(youtubeNeedsUrlEntry({ ...waiting, youtube_video_id: "" }), true);
+  assert.equal(youtubeNeedsUrlEntry({
+    ...waiting,
+    youtube_video_id: "",
+    platform_post_url: "https://www.youtube.com/watch?v=jRARA4azmDs",
+  }), false);
   assert.equal(youtubeCompleteEligibility({ ...waiting, publish_status: "Published" }), "already_published");
   assert.equal(youtubeNeedsUrlEntry({ platform: "YouTube", publish_status: "", youtube_stage: "", studio_state: "Ready for Review" }), false);
 });
