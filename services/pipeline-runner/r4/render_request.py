@@ -7,6 +7,31 @@ from render.fields import field, field_str, parse_json_field
 from audio.voiceover_duration import voiceover_is_disabled
 
 
+def _text_value(value: Any) -> str:
+    if isinstance(value, list):
+        for item in value:
+            text = _text_value(item)
+            if text:
+                return text
+        return ""
+    if isinstance(value, dict):
+        for key in ("name", "label", "value"):
+            text = str(value.get(key) or "").strip()
+            if text:
+                return text
+        return ""
+    return str(value or "").strip()
+
+
+def brand_text(output: dict[str, Any], content_item: dict[str, Any] | None = None) -> str:
+    for record in (output, content_item or {}):
+        for name in ("Brand_Text", "Brand_Name", "Profile_Name"):
+            text = _text_value(field(record, name))
+            if text:
+                return text
+    return ""
+
+
 def _cover_url(output: dict[str, Any]) -> str:
     thumb = field_str(output, "Thumbnail_URL")
     clip1 = field_str(output, "Clip_1_URL")
@@ -162,7 +187,12 @@ def _black_frame_guard(output: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def build_p020_request(output: dict[str, Any], *, default_music: float) -> dict[str, Any]:
+def build_p020_request(
+    output: dict[str, Any],
+    content_item: dict[str, Any] | None = None,
+    *,
+    default_music: float,
+) -> dict[str, Any]:
     width, height = _dimensions(field_str(output, "Aspect_Ratio"))
     music_url = field_str(output, "Music_URL")
     music_enabled = bool(music_url)
@@ -178,7 +208,7 @@ def build_p020_request(output: dict[str, Any], *, default_music: float) -> dict[
         "filename": field_str(output, "Output_Filename"),
         "compositionId": field_str(output, "Composition_ID"),
         "titleText": field_str(output, "Title_Text"),
-        "brandText": field_str(output, "Brand_Text"),
+        "brandText": brand_text(output, content_item),
         "coverUrl": cover,
         "thumbnailUrl": cover,
         "initialFramePolicy": "first_visual_frame",
@@ -230,7 +260,7 @@ def build_voiceover_request(
         "filename": field_str(output, "Output_Filename"),
         "compositionId": field_str(output, "Composition_ID"),
         "titleText": field_str(output, "Title_Text"),
-        "brandText": field_str(output, "Brand_Text"),
+        "brandText": brand_text(output, content_item),
         "coverUrl": cover,
         "thumbnailUrl": cover,
         "initialFramePolicy": "first_visual_frame",
@@ -264,7 +294,12 @@ def build_voiceover_request(
     }
 
 
-def build_no_voiceover_request(output: dict[str, Any], *, default_music: float) -> dict[str, Any]:
+def build_no_voiceover_request(
+    output: dict[str, Any],
+    content_item: dict[str, Any] | None = None,
+    *,
+    default_music: float,
+) -> dict[str, Any]:
     width, height = _dimensions(field_str(output, "Aspect_Ratio"))
     music_url = field_str(output, "Music_URL")
     music_volume = _music_volume(output, default_music) if music_url else 0.0
@@ -275,7 +310,7 @@ def build_no_voiceover_request(output: dict[str, Any], *, default_music: float) 
         "filename": field_str(output, "Output_Filename"),
         "compositionId": field_str(output, "Composition_ID"),
         "titleText": field_str(output, "Title_Text"),
-        "brandText": field_str(output, "Brand_Text"),
+        "brandText": brand_text(output, content_item),
         "coverUrl": cover,
         "thumbnailUrl": cover,
         "initialFramePolicy": "first_visual_frame",
@@ -300,7 +335,7 @@ def choose_render_request(
 ) -> tuple[str, dict[str, Any]]:
     vo = "" if voiceover_is_disabled(output, content_item) else voiceover_url(output, content_item)
     if field_str(output, "Creative_Render_Manifest_JSON"):
-        payload = build_p020_request(output, default_music=default_music)
+        payload = build_p020_request(output, content_item, default_music=default_music)
         if vo:
             attach_voiceover(
                 payload,
@@ -318,6 +353,6 @@ def choose_render_request(
             default_voice=default_voice,
         ), output)
     return "no_voiceover", attach_timing_plan(
-        build_no_voiceover_request(output, default_music=default_music),
+        build_no_voiceover_request(output, content_item, default_music=default_music),
         output,
     )
