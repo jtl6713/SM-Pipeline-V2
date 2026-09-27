@@ -1,6 +1,6 @@
 from r4.constants import R4_CLEAR_FIELDS
 from r4.formulas import r4_exact_output_formula, r4_production_formula
-from r4.processor import _eligible_exact_output
+from r4.processor import _eligible_exact_output, repair_studio_stream_render_sources
 from r4.render_request import brand_text, choose_render_request, expected_clip_count, voiceover_is_required
 
 
@@ -194,3 +194,58 @@ def test_r4_explicit_output_brand_wins_over_parent_brand():
     assert route == "no_voiceover"
     assert payload["brandText"] == "NewYorkShining"
 
+
+
+
+class _RepairClient:
+    def __init__(self):
+        self.updates = []
+
+    def get_record(self, table, record_id):
+        assert table == "tblSITCujCsJTNcDe"
+        assert record_id == "recVIDEO1234567890"
+        return {
+            "id": record_id,
+            "fields": {
+                "Google Drive File ID": "drive123",
+                "Google Drive URL": "https://drive.google.com/uc?export=download&id=drive123",
+            },
+        }
+
+    def update_record(self, table, record_id, fields, **kwargs):
+        self.updates.append((table, record_id, fields))
+        return {"id": record_id, "fields": fields}
+
+
+def test_r4_repairs_studio_relative_stream_url_before_remotion():
+    import json
+
+    client = _RepairClient()
+    output = {
+        "id": "recOUTPUT123456789",
+        "fields": {
+            "Render_Clip_List_JSON": json.dumps([
+                {
+                    "mediaAssetRecordId": "recVIDEO1234567890",
+                    "url": "/api/media-assets/recVIDEO1234567890/stream",
+                    "src": "/api/media-assets/recVIDEO1234567890/stream",
+                },
+                {
+                    "mediaAssetRecordId": "recPUBLIC123456789",
+                    "url": "https://media.chicagoshining.com/publish/already-public.mp4",
+                    "src": "https://media.chicagoshining.com/publish/already-public.mp4",
+                },
+            ])
+        },
+    }
+
+    repaired, unresolved = repair_studio_stream_render_sources(client, output)
+
+    assert repaired == 1
+    assert unresolved == []
+    clips = json.loads(output["fields"]["Render_Clip_List_JSON"])
+    assert clips[0]["url"] == "https://drive.google.com/uc?export=download&id=drive123"
+    assert clips[0]["src"] == clips[0]["url"]
+    assert clips[0]["googleDriveFileId"] == "drive123"
+    assert clips[1]["url"].startswith("https://media.chicagoshining.com/")
+    assert client.updates
