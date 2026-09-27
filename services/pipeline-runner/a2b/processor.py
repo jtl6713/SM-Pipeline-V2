@@ -3,16 +3,15 @@
 from __future__ import annotations
 
 from datetime import timedelta
-from typing import Any
+from typing import Any, Iterable
 
+from a2.dedupe import airtable_quote
 from a2b.constants import MAKE_SCENARIO_ID, MAKE_SCENARIO_NAME
 from airtable.client import AirtableClient
 from airtable.constants import MEDIA_ASSETS_TABLE
 from asset.chain import daisy_payload, trigger_next
 from asset.constants import (
     A2B_DRIVE_PAGE_SIZE,
-    A2B_EXISTING_MAX_RECORDS,
-    A2B_EXISTING_VIEW,
     GDRIVE_INGESTION_FOLDER,
     GDRIVE_VIDEO_FOLDER,
 )
@@ -22,22 +21,61 @@ from carousel.timeutil import chicago_now, iso_ms
 from integrations.google_drive import GoogleDriveClient
 from render.fields import field_str
 
+# Keep OR() formulas short; A2B Drive page size is 20 so one chunk covers a pulse.
+_A2B_EXISTING_LOOKUP_CHUNK = 25
 
-def _existing_drive_ids(client: AirtableClient) -> set[str]:
-    rows = client.list_records(
-        MEDIA_ASSETS_TABLE,
-        view=A2B_EXISTING_VIEW,
-        max_records=A2B_EXISTING_MAX_RECORDS,
-        fields=["Google Drive File ID"],
-        sort_field="Intake_Date",
-        sort_direction="asc",
-    )
-    ids: set[str] = set()
-    for row in rows:
-        drive_id = field_str(row, "Google Drive File ID")
-        if drive_id:
-            ids.add(drive_id)
-    return ids
+
+def _unique_drive_ids(candidate_ids: Iterable[str]) -> list[str]:
+    cleaned: list[str] = []
+    seen: set[str] = set()
+    for raw in candidate_ids:
+        drive_id = str(raw or "").strip()
+        if not drive_id or drive_id in seen:
+            continue
+        seen.add(drive_id)
+        cleaned.append(drive_id)
+    return cleaned
+
+
+def existing_drive_id_formula(candidate_ids: Iterable[str]) -> str | None:
+    """Airtable filter that matches any candidate Google Drive File ID."""
+    cleaned = _unique_drive_ids(candidate_ids)
+    if not cleaned:
+        return None
+    parts = [f"{{Google Drive File ID}}={airtable_quote(drive_id)}" for drive_id in cleaned]
+    if len(parts) == 1:
+        return parts[0]
+    return f"OR({','.join(parts)})"
+
+
+def _existing_drive_ids(client: AirtableClient, candidate_ids: Iterable[str]) -> set[str]:
+    """Return Drive file IDs that already have a Media Asset row.
+
+    Lookup is scoped to the current Drive listing. The previous view scan capped
+    at the oldest 1000 Intake_Date rows, so once the catalog grew past that the
+    hourly A2B pulse re-created the same recent videos every run (Needs Profile spike).
+    """
+    cleaned = _unique_drive_ids(candidate_ids)
+    if not cleaned:
+        return set()
+    found: set[str] = set()
+    for index in range(0, len(cleaned), _A2B_EXISTING_LOOKUP_CHUNK):
+        chunk = cleaned[index : index + _A2B_EXISTING_LOOKUP_CHUNK]
+        formula = existing_drive_id_formula(chunk)
+        if not formula:
+            continue
+        rows = client.list_records(
+            MEDIA_ASSETS_TABLE,
+            formula=formula,
+            # Allow many duplicate rows per Drive ID while the backlog is cleaned up.
+            max_records=max(100, len(chunk) * 50),
+            fields=["Google Drive File ID"],
+        )
+        for row in rows:
+            drive_id = field_str(row, "Google Drive File ID")
+            if drive_id:
+                found.add(drive_id)
+    return found
 
 
 def _backfill_fields(file: dict[str, Any], *, batch_id: str) -> dict[str, Any]:
@@ -99,7 +137,7 @@ def process_request(
     preview["file_ids"] = [str(item.get("id") or "") for item in files]
     preview["files_found"] = bool(files)
     client = AirtableClient()
-    existing = _existing_drive_ids(client)
+    existing = _existing_drive_ids(client, preview["file_ids"])
     preview["existing_drive_id_count"] = len(existing)
     routes = []
     for item in files:
