@@ -240,7 +240,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.388-native-clip-aspect";
+  const BUILD_ID = "item4-0.6.389-output-scope-authority";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -6225,6 +6225,12 @@
     document.querySelectorAll("[data-ez-platform]").forEach((input) => {
       input.addEventListener("change", () => {
         syncItem4PlatformsFromEz();
+        const activePlatforms = ezSelectedPlatforms();
+        item4ScopePlanStateToPlatforms(activePlatforms);
+        updateOutputMatrixSummary();
+        if (activeProductionRequest?.id && productionOutputMatrixLoaded) {
+          saveProductionRequestOutputs().catch(() => {});
+        }
         if ((ezIsOriginRecord() || ezStarting) && ezMasterSetReadyForPlan() && !ezIsAzFinishedPath()) {
           maybeAutoEzPlan(true);
         }
@@ -9095,6 +9101,9 @@
     }
     if (!platforms.length) { setRequestMessage("Choose at least one platform.", "error-text"); return; }
     seedPlatformToggles(platforms);
+    item4ScopePlanStateToPlatforms(platforms);
+    const activeOverrides = item4PlanOverridesForPlatforms(platforms);
+    item4PlanOverrides = { ...activeOverrides };
     const button = $("item4BuildPlan");
     if (button) { button.disabled = true; button.textContent = "Building plan…"; }
     setRequestMessage("Building the platform plan…");
@@ -9103,8 +9112,8 @@
         method: "POST",
         body: JSON.stringify({
           platforms,
-          overrides: item4PlanOverrides,
-          extras: item4EnabledExtraPairs(),
+          overrides: activeOverrides,
+          extras: item4EnabledExtraPairs(platforms),
           package: currentEzPackageId(),
           skip_fbs1_guard: true,
           schedules: ezWizardAnswers?.schedules || null,
@@ -9248,10 +9257,46 @@
     });
   }
 
-  function item4EnabledExtraPairs() {
+  function item4PlanOverridesForPlatforms(platforms) {
+    const allowed = new Set(
+      (Array.isArray(platforms) ? platforms : [])
+        .map((value) => String(value || "").trim())
+        .filter(Boolean)
+    );
+    if (!allowed.size) return { ...(item4PlanOverrides || {}) };
+    return Object.fromEntries(
+      Object.entries(item4PlanOverrides || {}).filter(([platform]) => allowed.has(platform))
+    );
+  }
+
+  function item4ScopePlanStateToPlatforms(platforms) {
+    const allowed = new Set(
+      (Array.isArray(platforms) ? platforms : [])
+        .map((value) => String(value || "").trim())
+        .filter(Boolean)
+    );
+    if (!allowed.size) return;
+    item4PlanOverrides = item4PlanOverridesForPlatforms([...allowed]);
+    ezPinnedExtraOutputs = (Array.isArray(ezPinnedExtraOutputs) ? ezPinnedExtraOutputs : [])
+      .filter((key) => allowed.has(String(key || "").split("::", 1)[0]));
+    outputMatrixInputs().forEach((input) => {
+      if (!allowed.has(String(input.dataset.platform || ""))) input.checked = false;
+    });
+    document.querySelectorAll("[data-ez-output]").forEach((input) => {
+      if (!allowed.has(String(input.dataset.platform || ""))) input.checked = false;
+    });
+  }
+
+  function item4EnabledExtraPairs(platforms = item4SelectedPlatforms()) {
     item4DropUnsupportedStoryChecks(false);
+    const allowed = new Set(
+      (Array.isArray(platforms) ? platforms : [])
+        .map((value) => String(value || "").trim())
+        .filter(Boolean)
+    );
     return selectedOutputMatrix()
       .filter((row) => {
+        if (allowed.size && !allowed.has(row.platform)) return false;
         if (row.platform === "TikTok" && row.output_type === "Story") return false;
         const primary = item4PlanOverrides?.[row.platform] || recommendedOutputFor(row.platform);
         return row.output_type !== primary;
@@ -10615,11 +10660,29 @@
     }
   });
 
+  function item4YouTubeLongformSelected() {
+    const selected = usingEzPlatforms() ? ezSelectedPlatforms() : item4SelectedPlatforms();
+    const fallback = selected.length ? selected : selectedRequestPlatforms();
+    const platforms = [...new Set(fallback.map((value) => String(value || "").trim()).filter(Boolean))];
+    if (platforms.length !== 1 || platforms[0] !== "YouTube") return false;
+    if (selectedOutputMatrix().some((row) => row.platform === "YouTube" && row.output_type === "Standard Video")) {
+      return true;
+    }
+    if (item4PlanOverrides?.YouTube === "Standard Video") return true;
+    return Boolean(
+      item4Workspace?.plan?.items?.some((item) =>
+        item && !item.companion && item.platform === "YouTube" && item.output_type === "Standard Video"
+      )
+    );
+  }
+
   function inferredMasterContentType() {
     // Finished files and clip-built pieces are video regardless of source count.
-    // The old count-only inference turned a single finished MP4 back into Feed Post
-    // on the quiet save immediately before Approve.
-    if (ezIsFinishedVideo() || ezIsClipRequest()) return "Vertical Short Video";
+    // YouTube Standard-only clip requests are longform and must not be silently
+    // rewritten to Vertical Short Video during quiet-save.
+    if (ezIsFinishedVideo() || ezIsClipRequest()) {
+      return item4YouTubeLongformSelected() ? "Longform Video" : "Vertical Short Video";
+    }
     const count = Number(item4Workspace?.assets?.length || ezStagedFiles.length || 0);
     const packageId = String(
       ezWizardPending?.packageId
