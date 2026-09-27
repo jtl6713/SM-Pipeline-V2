@@ -149,6 +149,17 @@ test("render, orphan, crop, autonomous, and health classifiers", () => {
   assert.equal(badSource.class, "data_repair");
   assert.equal(badSource.actor, "worker_heal");
   assert.match(badSource.diagnosis, /Google Drive URL/);
+  const privateDriveWatermark = classifyRenderRow({
+    id: "recRWatermark",
+    render_status: "Failed",
+    remotion_job_id: "job-watermark",
+    remotion_props_json: '{"watermarkUrl":"https://drive.google.com/uc?export=download&id=abc123","watermarkRequired":true}',
+    render_error: "Remotion render failed with exit code 1",
+  }, now);
+  assert.equal(privateDriveWatermark.kind, "render_private_drive_watermark");
+  assert.equal(privateDriveWatermark.class, "data_repair");
+  assert.equal(privateDriveWatermark.actor, "worker_heal");
+  assert.match(privateDriveWatermark.diagnosis, /ERR_BLOCKED_BY_ORB/);
   assert.equal(classifyRenderRow({
     id: "recR2",
     render_status: "Rendering",
@@ -364,6 +375,7 @@ test("promoted advancement is origin-aware and does not treat Ready for Review a
   assert.ok(CLASSIFIER_KINDS.includes("publish_failed_transient"));
   assert.ok(CLASSIFIER_KINDS.includes("render_failed"));
   assert.ok(CLASSIFIER_KINDS.includes("render_unfetchable_source"));
+  assert.ok(CLASSIFIER_KINDS.includes("render_private_drive_watermark"));
   assert.equal(classifyPublishFailed({
     id: "recHsN9TCoV8HsAdT",
     output_status: "Approved for Publishing",
