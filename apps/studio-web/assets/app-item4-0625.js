@@ -242,7 +242,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.402-manage-photo-selection-authority";
+  const BUILD_ID = "item4-0.6.403-faster-frames-save";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -8093,12 +8093,33 @@
     }
     if (!item4VariantPollStartedAt) item4VariantPollStartedAt = Date.now();
     try {
-      await loadItem4Workspace(activeProductionRequest);
-      const state = item4Workspace?.variant_status || "None";
+      const variantStatus = await api(`/api/production-requests/${encodeURIComponent(activeProductionRequest.id)}/variants`);
+      const state = String(variantStatus?.status || item4Workspace?.variant_status || "None");
+      const manifest = variantStatus?.manifest || null;
+      const progressReady = Number(variantStatus?.progress?.ready || manifest?.ready_count || 0);
+      const progressTarget = Number(variantStatus?.progress?.target || manifest?.target_count || 0);
+      item4Workspace = {
+        ...(item4Workspace || {}),
+        variant_status: state,
+        variant_updated_at: variantStatus?.updated_at || item4Workspace?.variant_updated_at || null,
+        variant_error: variantStatus?.error || null,
+        variants: manifest || item4Workspace?.variants || {
+          ready_count: progressReady,
+          target_count: progressTarget,
+        },
+      };
+      if (item4Workspace.variants && !item4Workspace.variants.ready_count && progressReady) {
+        item4Workspace.variants.ready_count = progressReady;
+      }
+      if (item4Workspace.variants && !item4Workspace.variants.target_count && progressTarget) {
+        item4Workspace.variants.target_count = progressTarget;
+      }
       const clips = item4WorkspaceHasClips(item4Workspace || {});
       updateItem4VariantProgress(item4Workspace || {});
+      renderItem4Variants(item4Workspace || {});
       if (state === "Ready") {
         stopItem4VariantPolling();
+        await loadItem4Workspace(activeProductionRequest).catch(() => {});
         setRequestMessage(clips
           ? "Clip frames are ready. Clips skip photo crops."
           : "Platform-ready media is complete. Review the prepared crops below.", "success");
@@ -8106,11 +8127,13 @@
       }
       if (state === "Error") {
         stopItem4VariantPolling();
-        setRequestMessage(item4Workspace?.variant_error || "Platform-media preparation needs attention.", "error-text");
+        await loadItem4Workspace(activeProductionRequest).catch(() => {});
+        setRequestMessage(item4Workspace?.variant_error || variantStatus?.error || "Platform-media preparation needs attention.", "error-text");
         return;
       }
       if (state === "None" && !item4PreparingVariants) {
         stopItem4VariantPolling();
+        await loadItem4Workspace(activeProductionRequest).catch(() => {});
         const unsaved = item4MastersNeedSave(item4Workspace || {});
         const message = unsaved
           ? item4UnsavedPrepareMessage()
@@ -8122,8 +8145,8 @@
         renderItem4Variants(item4Workspace || {});
         return;
       }
-      const readyCount = Number(item4Workspace?.variants?.ready_count || 0);
-      const targetCount = Number(item4Workspace?.variants?.target_count || 0);
+      const readyCount = progressReady;
+      const targetCount = progressTarget;
       const elapsed = item4FormatElapsed(Date.now() - item4VariantPollStartedAt);
       if (state === "Preparing") {
         setRequestMessage(clips
@@ -10957,6 +10980,18 @@
     return coerceForceExactTextModes(payload);
   }
 
+  function mergeProductionRequestRecord(previous, next) {
+    if (!next) return previous || null;
+    if (!previous) return next;
+    return {
+      ...previous,
+      ...next,
+      studio_master_assets: next.studio_master_assets ?? previous.studio_master_assets,
+      studio_output_plan: next.studio_output_plan ?? previous.studio_output_plan,
+      studio_variant_manifest: next.studio_variant_manifest ?? previous.studio_variant_manifest,
+    };
+  }
+
   async function saveActiveProductionRequest({ quiet = false } = {}) {
     if (!activeProductionRequest?.id) throw new Error("No Production Request is open");
     if (!["Draft", "Ready"].includes(String(activeProductionRequest.status || "Draft"))) {
@@ -10972,18 +11007,29 @@
     if (!quiet) setRequestMessage();
 
     try {
+      const payload = { ...productionRequestPayload(), light: true };
       const result = await api(`/api/production-requests/${encodeURIComponent(activeProductionRequest.id)}`, {
         method: "PATCH",
-        body: JSON.stringify(productionRequestPayload()),
+        body: JSON.stringify(payload),
       });
-      activeProductionRequest = result.record;
+      activeProductionRequest = mergeProductionRequestRecord(activeProductionRequest, result.record);
       ezDirty.clear();
-      if (quiet) return activeProductionRequest;
-      await saveProductionRequestOutputs(result.record);
+      if (quiet) {
+        setProductionRequestControlState(activeProductionRequest);
+        return activeProductionRequest;
+      }
+      const outputsResult = await saveProductionRequestOutputs(result.record);
+      if (outputsResult?.production_request) {
+        activeProductionRequest = mergeProductionRequestRecord(activeProductionRequest, outputsResult.production_request);
+      }
+      if (Array.isArray(outputsResult?.records)) {
+        productionRequestOutputs = outputsResult.records;
+        syncLegacyPlatformsFromOutputMatrix();
+        updateOutputMatrixSummary();
+        renderProductionRequestOutputCards();
+      }
       populateProductionRequestForm(activeProductionRequest);
-      await loadProductionRequestOutputs(activeProductionRequest);
-      await loadItem4Workspace(activeProductionRequest);
-      await loadProductionRequests();
+      setProductionRequestControlState(activeProductionRequest);
       setRequestMessage("Production Request draft and requested platform outputs saved.", "success");
       return activeProductionRequest;
     } finally {

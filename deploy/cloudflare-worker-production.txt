@@ -100,3 +100,8 @@ Source merge: 882ebc4f962380b5aeec07cce0c97ec733c10a72
 Requested: 2026-09-27T08:41:00-05:00
 
 Watermark-all-visuals Worker deploy: 2026-09-27 — Library/ingest ChicagoShining watermarking + Remotion cover with persistent brand. Worker 0.10.401-watermark-all-visuals.
+
+Deploy Studio API Worker production
+Reason: batch variant/output Airtable writes, faster Prepare return, deferred promote fanout
+Worker: 0.10.402-faster-frames-save
+Requested: 2026-09-27T09:00:00-05:00
