@@ -4,9 +4,9 @@ import json
 import math
 from typing import TYPE_CHECKING, Any
 
-from studio_produce.constants import PLATFORM_OUTPUTS_TABLE
+from studio_produce.constants import CONTENT_ITEMS_TABLE, PLATFORM_OUTPUTS_TABLE, PRODUCTION_REQUESTS_TABLE
 from audio.voiceover_duration import measured_voiceover_seconds
-from render.fields import field, field_str
+from render.fields import field, field_str, first_linked_id
 from studio_produce.constants import NATIVE_OUTPUT_TYPES, STORY_OUTPUT_TYPES
 from studio_produce.context import expected_photo_count, master_assets, variant_manifest
 from studio_produce.job import finished_origin_kind, parse_json
@@ -96,10 +96,11 @@ def output_effective(output: dict[str, Any], request: dict[str, Any], parent: di
         "requested_caption": field_str(output, "Studio_Effective_Requested_Caption") or field_str(request, "Requested_Caption") or field_str(parent or {}, "Caption"),
         "music_url": (
             field_str(output, "Music_URL")
+            or field_str(output, "Selected_Music_URL")
             or field_str(output, "Preferred_Music_URL")
-            or field_str(parent or {}, "Selected_Music_URL")
             or field_str(parent or {}, "Preferred_Music_URL")
             or field_str(parent or {}, "Music_URL")
+            or field_str(parent or {}, "Selected_Music_URL")
         ),
     }
 
@@ -151,6 +152,102 @@ def _master_for_source(masters: list[dict[str, Any]], source: dict[str, Any]) ->
         if str(master.get("id") or "") == source_id:
             return master
     return source
+
+
+def _candidate_duration(row: dict[str, Any]) -> float:
+    try:
+        return float(field(row, "Duration_Seconds") or 0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _required_music_seconds(request: dict[str, Any], parent: dict[str, Any] | None) -> float:
+    for raw in (
+        field(request, "Video_Duration_Seconds"),
+        field(parent or {}, "Content_Duration"),
+    ):
+        try:
+            value = float(raw or 0)
+        except (TypeError, ValueError):
+            value = 0
+        if value > 0:
+            return value
+    return 0.0
+
+
+def ensure_catalog_music(
+    client: "AirtableClient",
+    request: dict[str, Any],
+    parent: dict[str, Any] | None,
+    outputs: list[dict[str, Any]],
+) -> str:
+    """Resolve the promised catalog fallback before Studio Produce stamps renders."""
+    wants_music = str(field_str(request, "Background_Music_Mode") or "Yes").strip().lower() not in {"no", "false", "0"}
+    if not wants_music:
+        return ""
+
+    for output in outputs:
+        existing = output_effective(output, request, parent).get("music_url")
+        if existing:
+            return str(existing)
+
+    from r2.candidates import fetch_music_candidates
+    from r2.constants import MEDIA_ASSETS_TABLE
+
+    selected_id = first_linked_id(field(request, "Selected_Music_Asset"))
+    if not selected_id and parent:
+        selected_id = first_linked_id(field(parent, "Preferred_Music_Asset"))
+
+    chosen = None
+    if selected_id:
+        try:
+            selected = client.get_record(MEDIA_ASSETS_TABLE, selected_id)
+            if field_str(selected, "Google Drive URL"):
+                chosen = selected
+        except Exception:
+            chosen = None
+
+    if chosen is None:
+        candidates = fetch_music_candidates(client)
+        required = _required_music_seconds(request, parent)
+        duration_ok = [
+            row for row in candidates
+            if _candidate_duration(row) <= 0 or _candidate_duration(row) + 0.05 >= required
+        ]
+        pool = duration_ok or candidates
+        if pool:
+            pool = sorted(
+                pool,
+                key=lambda row: (
+                    0 if field(row, "Studio_Favorite") is True else 1,
+                    abs((_candidate_duration(row) or required) - required) if required else 0,
+                    field_str(row, "Asset Name").lower(),
+                ),
+            )
+            chosen = pool[0]
+
+    if not chosen:
+        return ""
+
+    music_id = str(chosen.get("id") or "").strip()
+    music_url = field_str(chosen, "Google Drive URL")
+    if not music_id or not music_url:
+        return ""
+
+    request_patch = {"Selected_Music_Asset": [music_id]}
+    client.update_record(PRODUCTION_REQUESTS_TABLE, request["id"], request_patch, typecast=True)
+    request.setdefault("fields", {}).update(request_patch)
+
+    if parent:
+        parent_patch = {
+            "Preferred_Music_Asset": [music_id],
+            "Preferred_Music_URL": music_url,
+            "Music_URL": music_url,
+        }
+        client.update_record(CONTENT_ITEMS_TABLE, parent["id"], parent_patch, typecast=True)
+        parent.setdefault("fields", {}).update(parent_patch)
+
+    return music_url
 
 
 def _music_requested(effective: dict[str, Any]) -> bool:
@@ -928,6 +1025,7 @@ def stamp_outputs(
     outputs: list[dict[str, Any]],
     parent: dict[str, Any] | None,
 ) -> dict[str, Any]:
+    ensure_catalog_music(client, request, parent, outputs)
     stamped = 0
     missing = []
     for output in outputs:

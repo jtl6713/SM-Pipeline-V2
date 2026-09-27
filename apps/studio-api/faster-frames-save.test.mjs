@@ -114,7 +114,7 @@ test("PATCH save can return a light production request payload", () => {
 });
 
 test("UI polls GET /variants during Prepare and skips Save reload waterfall", () => {
-  assert.match(app, /BUILD_ID = "item4-0\.6\.404-prepare-auto-retry"/);
+  assert.match(app, /BUILD_ID = "item4-0\.6\.405-story-audio-catalog"/);
   assert.match(app, /pollItem4Variants/);
   const poll = app.slice(
     app.indexOf("async function pollItem4Variants"),
