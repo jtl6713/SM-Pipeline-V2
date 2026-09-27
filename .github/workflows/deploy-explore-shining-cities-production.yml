@@ -13,7 +13,7 @@ permissions:
 
 concurrency:
   group: explore-shining-cities-production
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   deploy:
@@ -139,6 +139,60 @@ jobs:
             fi
             jq -e '.success == true' "/tmp/domain-${DOMAIN}.json" >/dev/null
             echo "Attached domain: $DOMAIN"
+          done
+
+      - name: Ensure Pages DNS records
+        shell: bash
+        env:
+          ZONE_ID: ${{ steps.zone.outputs.zone_id }}
+        run: |
+          set -euo pipefail
+          test -n "${ZONE_ID:-}"
+          AUTH="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
+          DNS_API="https://api.cloudflare.com/client/v4/zones/$ZONE_ID/dns_records"
+          TARGET="$PAGES_PROJECT.pages.dev"
+
+          for DOMAIN in "$PUBLIC_DOMAIN" "$WWW_DOMAIN"; do
+            curl -fsS "$DNS_API?name=$DOMAIN&per_page=100" -H "$AUTH" -o "/tmp/dns-$DOMAIN.json"
+
+            MATCH_ID=$(jq -r --arg d "$DOMAIN" --arg target "$TARGET" '
+              .result[]?
+              | select(.type == "CNAME" and .name == $d and .content == $target)
+              | .id
+            ' "/tmp/dns-$DOMAIN.json" | head -n 1)
+
+            if [[ -n "$MATCH_ID" ]]; then
+              MATCH_PROXIED=$(jq -r --arg id "$MATCH_ID" '.result[] | select(.id == $id) | .proxied // false' "/tmp/dns-$DOMAIN.json")
+              if [[ "$MATCH_PROXIED" != "true" ]]; then
+                jq -n --arg type "CNAME" --arg name "$DOMAIN" --arg content "$TARGET"                   '{type:$type,name:$name,content:$content,ttl:1,proxied:true}' > "/tmp/dns-$DOMAIN-payload.json"
+                curl -fsS -X PUT "$DNS_API/$MATCH_ID" -H "$AUTH" -H "Content-Type: application/json"                   --data-binary @"/tmp/dns-$DOMAIN-payload.json" -o "/tmp/dns-$DOMAIN-update.json"
+                jq -e '.success == true' "/tmp/dns-$DOMAIN-update.json" >/dev/null
+                echo "Updated Pages DNS proxy: $DOMAIN -> $TARGET"
+              else
+                echo "Pages DNS already correct: $DOMAIN -> $TARGET"
+              fi
+              continue
+            fi
+
+            CONFLICT_IDS=$(jq -r --arg d "$DOMAIN" '
+              .result[]?
+              | select(.name == $d and (.type == "A" or .type == "AAAA" or .type == "CNAME"))
+              | .id
+            ' "/tmp/dns-$DOMAIN.json")
+
+            if [[ -n "$CONFLICT_IDS" ]]; then
+              echo "Replacing existing web-address records for $DOMAIN with the Pages target."
+              while IFS= read -r RECORD_ID; do
+                [[ -n "$RECORD_ID" ]] || continue
+                curl -fsS -X DELETE "$DNS_API/$RECORD_ID" -H "$AUTH" -o "/tmp/dns-delete-$RECORD_ID.json"
+                jq -e '.success == true' "/tmp/dns-delete-$RECORD_ID.json" >/dev/null
+              done <<< "$CONFLICT_IDS"
+            fi
+
+            jq -n --arg type "CNAME" --arg name "$DOMAIN" --arg content "$TARGET"               '{type:$type,name:$name,content:$content,ttl:1,proxied:true}' > "/tmp/dns-$DOMAIN-payload.json"
+            curl -fsS -X POST "$DNS_API" -H "$AUTH" -H "Content-Type: application/json"               --data-binary @"/tmp/dns-$DOMAIN-payload.json" -o "/tmp/dns-$DOMAIN-create.json"
+            jq -e '.success == true' "/tmp/dns-$DOMAIN-create.json" >/dev/null
+            echo "Created Pages DNS: $DOMAIN -> $TARGET"
           done
 
       - name: Wait for domain activation
