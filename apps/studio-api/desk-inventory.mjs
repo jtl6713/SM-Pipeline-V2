@@ -267,7 +267,7 @@ export function classifyRenderRow(row, nowMs = Date.now()) {
   const renderClipList = String(row?.render_clip_list_json || "");
   const remotionProps = String(row?.remotion_props_json || "");
   const renderErrorText = String(row?.render_error || row?.error || "");
-  const privateDriveWatermark = /"watermarkUrl"\s*:\s*"https?:\\/\\/(?:drive|docs)\.google\.com/i.test(remotionProps)
+  const privateDriveWatermark = /"watermarkUrl"\s*:\s*"https?:\/\/(?:drive|docs)\.google\.com/i.test(remotionProps)
     || (/watermark/i.test(renderErrorText) && /drive\.google\.com|ERR_BLOCKED_BY_ORB|HTTP status code:\s*403/i.test(renderErrorText));
   if (
     privateDriveWatermark
