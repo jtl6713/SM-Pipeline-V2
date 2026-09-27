@@ -74,3 +74,8 @@ Retry Studio Pages production
 Reason: GitHub Actions billing/spending limit blocked prior runs; retry UI 0.6.403-faster-frames-save after authorization
 Source merge: 4c6416aba98be12b52a3e8a09d7d20195e8fe845
 Requested: 2026-09-27T09:40:00-05:00
+
+Retry Studio Pages production
+Reason: spending limit raised; retry UI 0.6.403-faster-frames-save
+Source merge: 4c6416aba98be12b52a3e8a09d7d20195e8fe845
+Requested: 2026-09-27T09:45:26-05:00
