@@ -30,6 +30,15 @@ test("async poster repair repaints the Frames gallery", () => {
   assert.match(app, /if \(\$\("item4VariantGallery"\)\) renderItem4Variants\(item4Workspace\)/);
 });
 
+test("Creative Editor renders source video clips with posters and playable streams", () => {
+  assert.match(app, /function phase6CreativeSlideIsVideo\(slide = \{\}\)/);
+  assert.match(app, /function phase6CreativeSlidePosterCandidates\(slide = \{\}\)/);
+  assert.match(app, /function phase6CreativeSlideStreamUrl\(slide = \{\}\)/);
+  assert.match(app, /const previewHtml = isVideo\s*\? \(item4ClipPlayerHtml\(\{/);
+  assert.match(app, /item4BindClipPlayers\(target\)/);
+  assert.match(html, /<h3>Media \/ slide sequence<\/h3>/);
+});
+
 test("Studio build and app cache key stay aligned after clip preview playback changes", () => {
   const build = app.match(/BUILD_ID = "item4-([^"]+)"/)?.[1];
   const uiBuild = html.match(/UI build (0\.6\.\d+)/)?.[1];
