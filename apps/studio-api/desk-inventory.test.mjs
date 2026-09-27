@@ -10,6 +10,7 @@ import {
   classifyCropRow,
   classifyAutonomousRequest,
   classifyAutonomousTopicCollision,
+  classifyYoutubeCoverQuota,
   classifyYoutubePrivateSourceFail,
   classifyHealthTarget,
   classifyIntakeResidue,
@@ -523,6 +524,41 @@ test("promoted advancement is origin-aware and does not treat Ready for Review a
     youtube_stage: "YT1",
     final_file_url: "https://drive.google.com/file/d/abc/view",
     publish_asset_url: "https://media.chicagoshining.com/publish/recPublicYt.mp4",
+  }), null);
+});
+
+test("YouTube cover quota on a live Short is not operator work", () => {
+  const output1001 = classifyYoutubeCoverQuota({
+    id: "recbvjtX95IioyxOi",
+    output_id: 1001,
+    output_title: "How the Sign Changes",
+    content_id: 227,
+    content_title: "How the Sign Changes",
+    platform: "YouTube",
+    output_status: "Approved for Publishing",
+    publish_status: "Publishing",
+    youtube_video_id: "EwRNnNZO0Xc",
+    publish_error_stage: "YTS2_THUMBNAIL",
+    publish_error: "Temporary error uploading YouTube thumbnail.",
+    youtube_error: "YTS2 thumbnail upload/compression failed. HTTP 500: thumbnails.set failed 403 quotaExceeded",
+  });
+  assert.equal(output1001.kind, "youtube_cover_quota");
+  assert.equal(output1001.class, "transient");
+  assert.equal(output1001.actor, "worker_heal");
+  assert.equal(output1001.fingerprint, fingerprint("youtube_cover_quota", "recbvjtX95IioyxOi", "quota"));
+  assert.equal(output1001.output_id, 1001);
+  assert.equal(output1001.content_id, 227);
+  assert.equal(classifyYoutubeCoverQuota({
+    platform: "YouTube",
+    youtube_video_id: "EwRNnNZO0Xc",
+    publish_error_stage: "YTS2_THUMBNAIL",
+    youtube_error: "backendError",
+  }), null);
+  assert.equal(classifyYoutubeCoverQuota({
+    platform: "YouTube",
+    youtube_video_id: "",
+    publish_error_stage: "YTS2_THUMBNAIL",
+    youtube_error: "quotaExceeded",
   }), null);
 });
 

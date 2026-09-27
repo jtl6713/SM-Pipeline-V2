@@ -2,6 +2,7 @@
 
 import { attachQualityChecks, assertQualityCatalog, QUALITY_CHECKS } from "./quality-checks.mjs";
 import { buildQualityRecap } from "./quality-recap.mjs";
+import { youtubeLooksLikeQuotaOrWrapped403 } from "./youtube-manual-publish.mjs";
 
 export const DESK_SCHEMA = "studio.desk-inventory.1";
 export const DESK_SETTING_NAME = "STUDIO_DESK_MODE";
@@ -380,6 +381,34 @@ export function classifyAutonomousTopicCollision(collision) {
     extra_titles: extras.map((row) => String(row?.title || "").trim()).filter(Boolean),
     diagnosis: `Same-place autonomous harvest leaked on "${place}". Keep ${keep?.title || "the non-autonomous or oldest package"}; do not enqueue or recreate extras. Unpublished origin=autonomous extras may be Cancelled. Do not delete library stills or published posts.`,
   };
+}
+
+export function classifyYoutubeCoverQuota(row) {
+  if (String(row?.platform || "").trim() !== "YouTube") return null;
+  if (row?.published_at || /published/i.test(String(row?.publish_status || "")) || /published/i.test(String(row?.output_status || ""))) {
+    return null;
+  }
+  const videoId = String(row?.youtube_video_id || "").trim();
+  if (!/^[A-Za-z0-9_-]{11}$/.test(videoId)) return null;
+  const stage = String(row?.publish_error_stage || "").trim();
+  const error = `${stage} ${row?.publish_error || ""} ${row?.youtube_error || ""}`;
+  if (!/YTS2_THUMBNAIL|thumbnail/i.test(error)) return null;
+  if (!youtubeLooksLikeQuotaOrWrapped403({
+    Platform: "YouTube",
+    Publish_Error_Stage: stage,
+    Publish_Error_Message: row?.publish_error,
+    YouTube_Error_Message: row?.youtube_error,
+  })) return null;
+  const recordId = String(row?.id || row?.record_id || "").trim();
+  return withDeskIdentity({
+    kind: "youtube_cover_quota",
+    class: "transient",
+    record_id: recordId || null,
+    fingerprint: fingerprint("youtube_cover_quota", recordId, "quota"),
+    actor: "worker_heal",
+    youtube_video_id: videoId,
+    diagnosis: "YouTube Short already uploaded (video id present). YTS2 thumbnails.set hit daily quota. Studio paints Manual Action Required, but the operator has nothing to do. Do not re-upload. Worker parks until Pacific midnight, then pulses YTS2 only to attach the public 3D cover. Proven: Output 1001 / CI 227 / recbvjtX95IioyxOi / EwRNnNZO0Xc.",
+  }, row);
 }
 
 export function classifyYoutubePrivateSourceFail(row) {
@@ -883,6 +912,7 @@ export const CLASSIFIER_KINDS = Object.freeze([
   "tester_catalog_assert",
   "autonomous_topic_collision",
   "youtube_private_source_fail",
+  "youtube_cover_quota",
 ]);
 
 export function classifyHealthTarget(target, probe) {

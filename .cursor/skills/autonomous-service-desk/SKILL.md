@@ -75,6 +75,14 @@ Parent `Studio_Production_Job_JSON.step=escalated` after five Worker resumes. Pi
 
 Auto-correct: Worker `studioHealEscalatedProduce` rematches library stills (never fill-crop variants) for `No Studio master photos to crop`, resets `heal.resume_count`, writes `step=blocked`, and resumes studio-produce. Proven: Venice Canals CI 144 / `reckHkuJfs1F6eTAN` / outputs 849–854; Grand Central CI 143 / `recHAECHLOYQHE3Yc`. If rematch finds zero masters, leave the ticket as `data_repair` — do not re-burn the heal budget.
 
+## Watch: YouTube Manual Action Required, live Short, cover quota
+
+Studio **Manual Action Required** on a YouTube Short that already has `YouTube_Video_ID` and `YTS2_THUMBNAIL` + `thumbnails.set failed 403` / `quotaExceeded` is **not operator work**. The Short is live. Only the native 3D cover is waiting for Pacific midnight quota reset. Kind `youtube_cover_quota`, class `transient`, actor `worker_heal`. Do not re-upload. Do not send `thumb_offset`. Do not kick YTP1.
+
+Proven fixture: Output **1001** / Content Item 227 How the Sign Changes / `recbvjtX95IioyxOi` / video `EwRNnNZO0Xc`. YTS2 used a short retry; Worker re-pulsed YTS2 while Publishing and burned quota. Heal formula used to omit `YTS2_THUMBNAIL`.
+
+Auto-correct: Worker parks until Pacific midnight (keep YT2 / Uploaded / Publishing), then pulses **YTS2 only**. Fingerprint `youtube_cover_quota:<output_rec>:quota`. Same fingerprint after a midnight cover fail → `code_bug`.
+
 ## Observe (`observe`)
 
 Ticket only. No git, no deploy, no restart, no Airtable writes, no Make pulses, no Studio Approve.
@@ -137,3 +145,9 @@ Auto-correct: Worker `studioHealRfrMissingDeliverable` stages the existing Drive
 YouTube Approved for Publishing, no `YouTube_Video_ID`, `YouTube_Stage` is YT1 (Failed **or Ready to Publish**) or Terminal Error, Drive `Final_File_URL`, no public `Publish_Asset_URL`. Output 375 (Worth the trip Short `recRxp28DYcT9SEMW`) stuck this way: heal matched only Failed, Windows AP0 aborted a 121MB one-shot PUT (`10053`), then YTP1 saw a stale upload job id.
 
 Auto-correct: leave to Worker `studioHealFailedYoutubeSourceDownloads` (Drive Range GET → R2 multipart `publish/` → reset YT1 → YTP1). After processing, `thumbnails.set` the 3D cover. Do **not** send `thumb_offset`. If the row is still missing a public MP4 after a later tick, that is a `code_bug`.
+
+### `youtube_cover_quota` (`transient` → Worker heal)
+
+Live YouTube Short (`YouTube_Video_ID` present, YT2 / Uploaded). `Publish_Error_Stage=YTS2_THUMBNAIL` and `thumbnails.set` hit daily quota. Studio painted Manual Action Required because any YouTube quota/403 used to win the badge. Operator has nothing to do.
+
+Auto-correct: Worker `studioParkStaleYoutubeQuotaPolls` + YTS2 `cover_quota_park_fields` wait until Pacific midnight, then YTS2-only `thumbnails.set` of the public 3D still. Keep `Publish_Status=Publishing`. Do not flip to Manual Publish Required. Do not re-upload. Fingerprint `youtube_cover_quota:<output_rec>:quota`. Proven: Output 1001 / CI 227 / `recbvjtX95IioyxOi` / `EwRNnNZO0Xc`.

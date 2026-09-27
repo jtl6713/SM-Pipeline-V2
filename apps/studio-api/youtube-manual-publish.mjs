@@ -1,10 +1,13 @@
 /** Detect / park YouTube publish rows that need manual action instead of Failed. */
 
 export const YOUTUBE_QUOTA_OR_WRAPPED_403_RE =
-  /quotaExceeded|dailyLimitExceeded|uploadLimitExceeded|rateLimitExceeded|userRateLimitExceeded|youtube\.quota|quota.?exceeded|exceeded your.{0,80}?quota|queries per day|videos\.(?:list|insert|update|delete)\s+failed\s+403|\bfailed 403\b/i;
+  /quotaExceeded|dailyLimitExceeded|uploadLimitExceeded|rateLimitExceeded|userRateLimitExceeded|youtube\.quota|quota.?exceeded|exceeded your.{0,80}?quota|queries per day|videos\.(?:list|insert|update|delete)\s+failed\s+403|thumbnails\.set\s+failed\s+403|\bfailed 403\b/i;
 
 export const YOUTUBE_STALE_QUOTA_POLL_HEAL_FORMULA =
-  'AND({Test_Run_ID}=BLANK(),{Platform}="YouTube",{Do_Not_Publish}=0,{Publish_Status}!="Manual Publish Required",{Publish_Status}!="Published",OR(FIND("YTS2_POLL",UPPER({Publish_Error_Stage}&""))>0,FIND("YTS1",UPPER({Publish_Error_Stage}&""))>0,FIND("YTP1",UPPER({Publish_Error_Stage}&""))>0),OR(FIND("quota",LOWER({YouTube_Error_Message}&""))>0,FIND("failed 403",LOWER({YouTube_Error_Message}&""))>0,FIND("quota",LOWER({Publish_Error_Message}&""))>0))';
+  'AND({Test_Run_ID}=BLANK(),{Platform}="YouTube",{Do_Not_Publish}=0,{Publish_Status}!="Manual Publish Required",{Publish_Status}!="Published",OR(FIND("YTS2_POLL",UPPER({Publish_Error_Stage}&""))>0,FIND("YTS2_THUMBNAIL",UPPER({Publish_Error_Stage}&""))>0,FIND("YTS1",UPPER({Publish_Error_Stage}&""))>0,FIND("YTP1",UPPER({Publish_Error_Stage}&""))>0),OR(FIND("quota",LOWER({YouTube_Error_Message}&""))>0,FIND("failed 403",LOWER({YouTube_Error_Message}&""))>0,FIND("quota",LOWER({Publish_Error_Message}&""))>0))';
+
+const YOUTUBE_VIDEO_ID_RE = /^[A-Za-z0-9_-]{11}$/;
+const YOUTUBE_COVER_QUOTA_RE = /YTS2_THUMBNAIL|thumbnail/i;
 
 /** Manual YouTube rows that already carry a live video id but were never closed out. */
 export const YOUTUBE_MANUAL_LIVE_VIDEO_HEAL_FORMULA =
@@ -41,9 +44,19 @@ export function outputTerminalPublishedFields(fields = {}) {
     || stage === "complete";
 }
 
+/** Live Short whose only remaining failure is thumbnails.set quota. Operator has nothing to do. */
+export function youtubeCoverQuotaOnly(fields = {}) {
+  const videoId = fieldText(fields, "YouTube_Video_ID");
+  if (!YOUTUBE_VIDEO_ID_RE.test(videoId)) return false;
+  if (!YOUTUBE_COVER_QUOTA_RE.test(youtubeErrorBlob(fields))) return false;
+  return youtubeLooksLikeQuotaOrWrapped403(fields);
+}
+
 /** True when Studio should show Manual Action Required, not Failed. */
 export function youtubeManualActionRequired(fields = {}) {
   if (outputTerminalPublishedFields(fields)) return false;
+  // Output 1001: video is live; cover quota is an automatic midnight retry, not operator work.
+  if (youtubeCoverQuotaOnly(fields)) return false;
   const publish = fieldText(fields, "Publish_Status").toLowerCase();
   if (publish.includes("manual publish required")) return true;
   if (fields.Manual_Fallback_Required === true || fields.Manual_Fallback_Required === 1) return true;
@@ -54,6 +67,29 @@ export function youtubeManualActionRequired(fields = {}) {
     return true;
   }
   return false;
+}
+
+/** Park a live Short's cover retry until Pacific midnight without asking the operator to publish. */
+export function youtubeCoverQuotaParkFields({
+  youtubeMessage = "",
+  nextRetryAt = nextPacificMidnightIso(),
+} = {}) {
+  return {
+    YouTube_Stage: "YT2",
+    Publish_Status: "Publishing",
+    Publish_Locked_At: null,
+    Publish_Locked_By: "",
+    Publish_Error_Stage: "YTS2_THUMBNAIL",
+    Publish_Error_Message: "YouTube cover will retry after Pacific midnight. The Short is already live. No operator action.",
+    Publish_Next_Retry_At: nextRetryAt,
+    YouTube_Error_Message: youtubeMessage,
+    YouTube_Upload_Status: "Uploaded",
+    Publish_Retry_Eligible: true,
+    Manual_Fallback_Required: false,
+    Manual_Completion_Status: "Not Required",
+    YouTube_Thumbnail_Status: "Pending",
+    YouTube_Processing_Status: "Succeeded",
+  };
 }
 
 /**
@@ -124,8 +160,6 @@ export function manualPublishRequiredFields({
     Manual_Completion_Status: "Required",
   };
 }
-
-const YOUTUBE_VIDEO_ID_RE = /^[A-Za-z0-9_-]{11}$/;
 
 export function parseYouTubeVideoId(url) {
   const value = String(url || "").trim();

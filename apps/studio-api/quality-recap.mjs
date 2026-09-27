@@ -94,6 +94,10 @@ const COPY = {
     found: "A YouTube Short could not upload because the video file was private.",
     action: "Made a public copy and restarted the YouTube upload.",
   },
+  youtube_cover_quota: {
+    found: "A YouTube Short is already live. The grid cover hit the daily send limit.",
+    action: "Nothing to do. The cover retries after Pacific midnight. The Short is not re-sent.",
+  },
   intake_parked: {
     found: "New photos or videos are still sitting in the intake folder.",
     action: "Started processing the folder.",
@@ -221,9 +225,9 @@ export function qualityRecapCopy(kind, row = {}) {
   return COPY[key] || DEFAULT_COPY;
 }
 
-export function qualityRecapStatus({ actor, class: klass, open, blocker } = {}) {
+export function qualityRecapStatus({ actor, class: klass, open, blocker, kind } = {}) {
   if (!open) return { label: "Handled", tone: "ok" };
-  if (blocker === "youtube_quota") return { label: "Waiting on YouTube", tone: "work" };
+  if (blocker === "youtube_quota" || kind === "youtube_cover_quota") return { label: "Waiting on YouTube", tone: "work" };
   if (klass === "infra_down") return { label: "Service is down", tone: "alert" };
   if (klass === "code_bug" || klass === "data_repair" || actor === "desk_agent") {
     return { label: "Needs you", tone: "alert" };
@@ -331,7 +335,7 @@ export function buildQualityRecap({ incidents = [], events = [], limit = 12, gen
 
   const cards = [...byFingerprint.values()].map(({ row, times, open: isOpen }) => {
     const copy = qualityRecapCopy(row.kind, row);
-    const status = qualityRecapStatus({ actor: row.actor, class: row.class, open: isOpen, blocker: row.blocker });
+    const status = qualityRecapStatus({ actor: row.actor, class: row.class, open: isOpen, blocker: row.blocker, kind: row.kind });
     const foundAt = earliestIso(times, checkedAt);
     const lastSeen = latestIso(times, foundAt);
     const resolvedAt = isOpen

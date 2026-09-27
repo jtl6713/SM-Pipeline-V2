@@ -11,6 +11,7 @@ export const QUALITY_HEALS = Object.freeze([
   "resume_produce",
   "requeue_failed",
   "diagnose_then_one_send",
+  "wait_pacific_midnight",
   "ticket_only",
   "none",
 ]);
@@ -103,6 +104,14 @@ export const QUALITY_CHECKS = Object.freeze([
     kind: "youtube_private_source_fail",
     actor: "worker_heal",
     heal: "resume_produce",
+  }),
+  check({
+    id: "youtube_cover_quota",
+    title: "Check for live YouTube Shorts whose 3D cover hit daily thumbnails.set quota (not operator work)",
+    lane: "service",
+    kind: "youtube_cover_quota",
+    actor: "worker_heal",
+    heal: "wait_pacific_midnight",
   }),
   check({
     id: "autonomous_rfr_gate",

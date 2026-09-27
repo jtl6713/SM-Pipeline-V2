@@ -26,6 +26,7 @@ import {
   classifyRfrLockedMissingDeliverable,
   classifyTesterCatalogAssert,
   classifyTesterNightly,
+  classifyYoutubeCoverQuota,
   classifyYoutubePrivateSourceFail,
   parseDeskCaps,
   parseDeskMode,
@@ -70,6 +71,8 @@ import {
   manualPublishRequiredFields,
   youtubeCompleteEligibility,
   youtubeLiveVideoIdFromFields,
+  youtubeCoverQuotaOnly,
+  youtubeCoverQuotaParkFields,
   youtubeManualActionRequired,
   youtubeManualCloseFields,
   youtubeManualLiveVideoHealCandidate,
@@ -434,7 +437,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.395-quality-recap-dispatch-cause",
+          version: "0.10.396-youtube-cover-quota",
           studio_desk_inventory_v1: true,
           studio_desk_activity_v1: true,
           studio_tiktok_complete_v1: true,
@@ -28872,19 +28875,30 @@ async function studioParkStaleYoutubeQuotaPolls(env, options = {}) {
     try {
       const videoId = String(f(row, "YouTube_Video_ID") || "").trim();
       const stage = String(f(row, "Publish_Error_Stage") || "").trim() || "YTS2_QUOTA";
-      const errorStage = /ytp1/i.test(stage) ? "YTP1" : /yts1/i.test(stage) ? "YTS1_QUOTA" : "YTS2_QUOTA";
-      const fields = manualPublishRequiredFields({
-        errorStage,
-        publishMessage: "YouTube API quota exhausted. Manual publish required until the next automatic retry after Pacific midnight.",
-        youtubeMessage: String(f(row, "YouTube_Error_Message") || f(row, "Publish_Error_Message") || "").trim(),
-        youtubeStage: videoId ? "YT2" : "YT1",
-        uploadStatus: videoId ? "Uploaded" : "Failed",
-      });
+      const youtubeMessage = String(f(row, "YouTube_Error_Message") || f(row, "Publish_Error_Message") || "").trim();
+      const coverQuota = youtubeCoverQuotaOnly(row.fields || row)
+        || (/yts2_thumbnail|thumbnail/i.test(stage) && /^[A-Za-z0-9_-]{11}$/.test(videoId));
+      const errorStage = coverQuota
+        ? "YTS2_THUMBNAIL"
+        : /ytp1/i.test(stage) ? "YTP1" : /yts1/i.test(stage) ? "YTS1_QUOTA" : "YTS2_QUOTA";
+      const fields = coverQuota
+        ? youtubeCoverQuotaParkFields({ youtubeMessage })
+        : manualPublishRequiredFields({
+          errorStage,
+          publishMessage: "YouTube API quota exhausted. Manual publish required until the next automatic retry after Pacific midnight.",
+          youtubeMessage,
+          youtubeStage: videoId ? "YT2" : "YT1",
+          uploadStatus: videoId ? "Uploaded" : "Failed",
+        });
       await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, row.id, {
         method: "PATCH",
         body: JSON.stringify({ fields, typecast: true }),
       });
-      results.push({ id: row.id, stage: "manual_publish_park", error_stage: errorStage });
+      results.push({
+        id: row.id,
+        stage: coverQuota ? "cover_quota_park" : "manual_publish_park",
+        error_stage: errorStage,
+      });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       console.warn("youtube stale quota-poll park failed", row.id, error);
@@ -33254,6 +33268,7 @@ const DESK_OUTPUT_IDENTITY_KINDS = new Set([
   "rfr_locked_missing_deliverable",
   "native_cover_missing",
   "youtube_private_source_fail",
+  "youtube_cover_quota",
 ]);
 
 async function enrichDeskActivityIdentity(env, events, identityByRecord, contentById) {
@@ -33344,6 +33359,9 @@ function mapDeskInventoryOutput(record, contentToRequest = new Map(), contentByI
     voiceover_url: f(record, "Voiceover_URL"),
     cover_attached: note.includes("facebook-cover=attached"),
     publish_error: f(record, "Publish_Error_Message"),
+    publish_error_stage: f(record, "Publish_Error_Stage"),
+    youtube_error: f(record, "YouTube_Error_Message"),
+    youtube_video_id: f(record, "YouTube_Video_ID"),
     publish_retry_eligible: Boolean(f(record, "Publish_Retry_Eligible")),
     render_error: f(record, "Remotion_Error_Message") || f(record, "Final_File_Error_Message"),
   };
@@ -33556,6 +33574,7 @@ async function gatherStudioDeskInventory(env) {
   for (const record of approvedDispatch || []) {
     push(classifyPublishDispatch(mapOut(record), nowMs));
     push(classifyPublishFailed(mapOut(record), nowMs));
+    push(classifyYoutubeCoverQuota(mapOut(record)));
   }
   try {
     const failedRows = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
@@ -33653,6 +33672,19 @@ async function gatherStudioDeskInventory(env) {
     }
   } catch (error) {
     console.warn("desk youtube private-source scan failed", error);
+  }
+
+  try {
+    const youtubeCoverQuota = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
+      limit: 8,
+      filterFormula: YOUTUBE_STALE_QUOTA_POLL_HEAL_FORMULA,
+    }).catch(() => []);
+    scanned("youtube_cover_quota");
+    for (const record of youtubeCoverQuota || []) {
+      push(classifyYoutubeCoverQuota(mapOut(record)));
+    }
+  } catch (error) {
+    console.warn("desk youtube cover-quota scan failed", error);
   }
 
   try {

@@ -10,6 +10,8 @@ import {
   youtubeCompleteEligibility,
   youtubeLiveVideoIdFromFields,
   youtubeLooksLikeQuotaOrWrapped403,
+  youtubeCoverQuotaOnly,
+  youtubeCoverQuotaParkFields,
   youtubeManualActionRequired,
   youtubeManualCloseFields,
   outputTerminalPublishedFields,
@@ -116,7 +118,30 @@ test("manualPublishRequiredFields parks until Pacific midnight", () => {
   assert.equal(fields.Manual_Completion_Status, "Required");
   assert.equal(fields.Publish_Next_Retry_At, "2026-09-13T07:00:00.000Z");
   assert.match(YOUTUBE_STALE_QUOTA_POLL_HEAL_FORMULA, /YTS2_POLL/);
+  assert.match(YOUTUBE_STALE_QUOTA_POLL_HEAL_FORMULA, /YTS2_THUMBNAIL/);
   assert.match(YOUTUBE_STALE_QUOTA_POLL_HEAL_FORMULA, /failed 403/);
+});
+
+test("live Short cover quota is not Manual Action Required", () => {
+  const fields = {
+    Platform: "YouTube",
+    Publish_Status: "Publishing",
+    YouTube_Video_ID: "EwRNnNZO0Xc",
+    Publish_Error_Stage: "YTS2_THUMBNAIL",
+    Publish_Error_Message: "Temporary error uploading YouTube thumbnail.",
+    YouTube_Error_Message: "YTS2 thumbnail upload/compression failed. HTTP 500: thumbnails.set failed 403 quotaExceeded",
+  };
+  assert.equal(youtubeCoverQuotaOnly(fields), true);
+  assert.equal(youtubeManualActionRequired(fields), false);
+  const parked = youtubeCoverQuotaParkFields({
+    youtubeMessage: fields.YouTube_Error_Message,
+    nextRetryAt: "2026-09-27T07:00:00.000Z",
+  });
+  assert.equal(parked.Publish_Status, "Publishing");
+  assert.equal(parked.Publish_Error_Stage, "YTS2_THUMBNAIL");
+  assert.equal(parked.Manual_Fallback_Required, false);
+  assert.equal(parked.Publish_Next_Retry_At, "2026-09-27T07:00:00.000Z");
+  assert.match(parked.Publish_Error_Message, /already live/i);
 });
 
 test("parses watch, shorts, and youtu.be URLs", () => {

@@ -10,9 +10,14 @@ from carousel.timeutil import iso_utc, utc_now
 from render.fields import json_text
 from yt.constants import (
     PACKAGE_READY,
+    PROCESSING_SUCCEEDED,
     PUBLISH_STATUS_MANUAL_PUBLISH_REQUIRED,
+    PUBLISH_STATUS_PUBLISHING,
     STAGE_YT1,
+    STAGE_YT2,
+    THUMB_PENDING,
     UPLOAD_FAILED,
+    UPLOAD_UPLOADED,
 )
 
 RECORD_ID_PREFIX = "rec"
@@ -23,6 +28,7 @@ _QUOTA_RE = re.compile(
     r"queries per day|"
     # YouTube uploader wraps Google 403 as HTTP 500 + "videos.list failed 403".
     r"videos\.(?:list|insert|update|delete)\s+failed\s+403|"
+    r"thumbnails\.set\s+failed\s+403|"
     r"\bfailed 403\b",
     re.IGNORECASE,
 )
@@ -118,6 +124,40 @@ def manual_publish_required_fields(
         fields["YouTube_Upload_Job_ID"] = ""
     if package_status is not None:
         fields["YouTube_Package_Status"] = package_status
+    if extra:
+        fields.update(extra)
+    return fields
+
+
+COVER_QUOTA_MESSAGE = (
+    "YouTube cover will retry after Pacific midnight. The Short is already live. No operator action."
+)
+
+
+def cover_quota_park_fields(
+    *,
+    youtube_message: str,
+    body: Any = None,
+    extra: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Park thumbnails.set quota on a live Short until Pacific midnight. Not operator work."""
+    fields: dict[str, Any] = {
+        "YouTube_Stage": STAGE_YT2,
+        "Publish_Status": PUBLISH_STATUS_PUBLISHING,
+        "Publish_Locked_At": None,
+        "Publish_Locked_By": "",
+        "Publish_Error_Stage": "YTS2_THUMBNAIL",
+        "Publish_Error_Message": COVER_QUOTA_MESSAGE,
+        "Publish_Next_Retry_At": next_pacific_midnight_iso(),
+        "YouTube_Error_Message": youtube_message,
+        "YouTube_Response_JSON": response_json(body) if body is not None else "",
+        "YouTube_Upload_Status": UPLOAD_UPLOADED,
+        "Publish_Retry_Eligible": True,
+        "Manual_Fallback_Required": False,
+        "Manual_Completion_Status": "Not Required",
+        "YouTube_Thumbnail_Status": THUMB_PENDING,
+        "YouTube_Processing_Status": PROCESSING_SUCCEEDED,
+    }
     if extra:
         fields.update(extra)
     return fields

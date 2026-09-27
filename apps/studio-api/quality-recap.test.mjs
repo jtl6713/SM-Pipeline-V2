@@ -90,6 +90,28 @@ test("recap hides calendar holds and names YouTube quota instead of kicking", ()
   assert.equal(recap.cards[0].status, "Waiting on YouTube");
 });
 
+test("recap says nothing to do when a live Short is waiting on cover quota", () => {
+  const recap = buildQualityRecap({
+    incidents: [{
+      kind: "youtube_cover_quota",
+      class: "transient",
+      actor: "worker_heal",
+      fingerprint: "youtube_cover_quota:recbvjtX95IioyxOi:quota",
+      record_id: "recbvjtX95IioyxOi",
+      output_id: 1001,
+      platform: "YouTube",
+      platform_output_type: "Short",
+      content_id: 227,
+      content_title: "How the Sign Changes",
+    }],
+  });
+  assert.equal(recap.cards[0].status, "Waiting on YouTube");
+  assert.match(recap.cards[0].found, /already live/i);
+  assert.match(recap.cards[0].action, /Nothing to do/i);
+  assert.equal(recap.cards[0].content_id, 227);
+  assert.equal(recap.cards[0].output_id, 1001);
+});
+
 test("recap marks handled tickets that are no longer open", () => {
   const recap = buildQualityRecap({
     incidents: [],

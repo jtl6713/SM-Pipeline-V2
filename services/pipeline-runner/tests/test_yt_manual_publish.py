@@ -4,6 +4,7 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 
 from yt.common import (
+    cover_quota_park_fields,
     is_quota_exceeded,
     manual_publish_required_fields,
     next_pacific_midnight_iso,
@@ -21,7 +22,21 @@ def test_is_quota_exceeded_detects_google_reasons():
     # Uploader often returns HTTP 500 with the Google status embedded in the message.
     assert is_quota_exceeded(500, {"error": "videos.list failed 403"})
     assert is_quota_exceeded("YTS2 poll failed. HTTP 500: {'error': 'videos.list failed 403'}")
+    assert is_quota_exceeded(500, {"error": "thumbnails.set failed 403"})
     assert not is_quota_exceeded(500, {"error": "backendError"})
+
+
+def test_cover_quota_park_fields_keep_live_short():
+    fields = cover_quota_park_fields(
+        youtube_message="YTS2 thumbnail upload/compression failed. HTTP 500: thumbnails.set failed 403",
+        body={"error": "thumbnails.set failed 403"},
+    )
+    assert fields["YouTube_Stage"] == "YT2"
+    assert fields["Publish_Status"] == "Publishing"
+    assert fields["Publish_Error_Stage"] == "YTS2_THUMBNAIL"
+    assert fields["Manual_Fallback_Required"] is False
+    assert "already live" in fields["Publish_Error_Message"]
+    assert fields["Publish_Next_Retry_At"].endswith("Z")
 
 
 def test_next_pacific_midnight_iso_rolls_forward():

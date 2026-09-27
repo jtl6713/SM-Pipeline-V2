@@ -17,6 +17,7 @@ from yt.client import (
     processing_status,
 )
 from yt.common import (
+    cover_quota_park_fields,
     is_quota_exceeded,
     manual_publish_required_fields,
     preview,
@@ -248,6 +249,21 @@ def process_request(
                 ),
             )
             return {"processed": True, "terminal": True, **result}
+        youtube_message = f"YTS2 thumbnail upload/compression failed. HTTP {thumb_code}: {thumb_body}"
+        if is_quota_exceeded(thumb_code, thumb_body) or thumb_code == 403:
+            client.update_record(
+                PLATFORM_OUTPUTS_TABLE,
+                record_id,
+                cover_quota_park_fields(
+                    youtube_message=youtube_message,
+                    body=thumb_body,
+                    extra={
+                        "YouTube_Last_Checked_At": now,
+                    },
+                ),
+            )
+            result["still_processing"] = True
+            return {"processed": True, "retry": True, "reason": "cover_quota", **result}
         client.update_record(
             PLATFORM_OUTPUTS_TABLE,
             record_id,
@@ -258,7 +274,7 @@ def process_request(
                 "Publish_Error_Stage": "YTS2_THUMBNAIL",
                 "Publish_Error_Message": "Temporary error uploading YouTube thumbnail.",
                 "Publish_Next_Retry_At": retry_at(RETRY_MINUTES),
-                "YouTube_Error_Message": f"YTS2 thumbnail upload/compression failed. HTTP {thumb_code}: {thumb_body}",
+                "YouTube_Error_Message": youtube_message,
                 "YouTube_Response_JSON": response_json(thumb_body),
                 "Publish_Retry_Eligible": True,
                 "YouTube_Last_Checked_At": now,
