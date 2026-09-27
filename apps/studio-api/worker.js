@@ -433,7 +433,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.390-failed-stale-1h",
+          version: "0.10.391-asset-delete-authority",
           studio_desk_inventory_v1: true,
           studio_desk_activity_v1: true,
           studio_tiktok_complete_v1: true,
@@ -5847,21 +5847,38 @@ async function deleteItem4MasterAsset(request, env, url, authorization) {
     }
   }
   const remaining = assets.filter(x => x.id !== assetId).map((x,i) => ({...x, order:i+1}));
-  const updated = await item4UpdateRequestState(env, recordId, {
+  const remainingMediaAssetIds = [...new Set(
+    remaining.map((asset) => String(asset?.media_asset_record_id || "").trim()).filter(Boolean)
+  )];
+  const deletedAiAsset = /^studio_ai/i.test(String(target?.source || ""));
+  const updateFields = {
     Studio_Master_Assets_JSON: JSON.stringify(remaining),
     Studio_Master_Asset_Count: remaining.length,
     Studio_Master_Asset_Status: remaining.length ? "Ready" : "None",
+    Studio_Master_Media_Assets: remainingMediaAssetIds,
     Studio_Output_Plan_Status: "Needs Plan",
     Studio_Output_Plan_JSON: null,
     Studio_Variant_Manifest_JSON: null,
     Studio_Variant_Status: "None",
     Studio_Variant_Updated_At: null,
     Studio_Variant_Error: null,
+    Studio_Platform_Variant_Assets: [],
     Studio_Item4_State: remaining.length ? "Assets Ready" : "Draft",
-  });
+  };
+  if (deletedAiAsset) {
+    // An explicit delete is stronger than the original AI quantity recommendation.
+    // Persist an auto-off marker so opening/refocusing Production cannot regenerate it.
+    updateFields.Carousel_Image_Mode = "Manual Upload";
+    const notes = String(f(record, "Production_Notes") || "").trim();
+    updateFields.Production_Notes = /ez-ai-auto=off/i.test(notes)
+      ? notes
+      : `${notes}${notes ? "; " : ""}ez-ai-auto=off`;
+  }
+  const updated = await item4UpdateRequestState(env, recordId, updateFields);
   return respond(request, env, {
     ok: true,
     deleted: true,
+    ai_auto_generation_disabled: deletedAiAsset,
     assets: remaining,
     record: mapProductionRequest(updated),
     production_request: mapProductionRequest(updated),

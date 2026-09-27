@@ -240,7 +240,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.386-classify-watch-fix";
+  const BUILD_ID = "item4-0.6.387-asset-delete-authority";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -3438,6 +3438,7 @@
   function item4AiGenerationRequestActive(record = activeProductionRequest) {
     const mode = String(record?.carousel_image_mode || $("ezCarouselImageMode")?.value || "").trim();
     const notes = String(record?.production_notes || "");
+    if (/ez-ai-auto=off/i.test(notes)) return false;
     return mode === "Make AI Generated" || /ez-input=(?:single-ai|multiple-ai|mixed)/i.test(notes);
   }
 
@@ -3527,6 +3528,9 @@
     let first = true;
     try {
       for (let guard = 0; guard < target + 2; guard += 1) {
+        // Manual removal of an AI asset switches the request out of auto-generation.
+        // If a generation batch was already running, stop before creating another image.
+        if (automatic && !item4AiGenerationRequestActive(activeProductionRequest)) break;
         const result = await api(`/api/production-requests/${encodeURIComponent(requestId)}/generate-ai-masters`, {
           method: "POST",
           body: JSON.stringify({
@@ -7773,6 +7777,13 @@
 
   function mergeItem4WorkspaceStatus(incoming) {
     const next = incoming && typeof incoming === "object" ? { ...incoming } : {};
+    // A focus/visibility refresh can land while DELETE requests are still draining.
+    // Keep the user's optimistic removals authoritative until each server delete settles.
+    if (item4PendingRemoves.size && Array.isArray(next.assets)) {
+      next.assets = next.assets.filter((asset) =>
+        !item4PendingRemoves.has(String(asset?.id || ""))
+      );
+    }
     const incomingAssets = Array.isArray(next.assets) ? next.assets : [];
     const currentAssets = Array.isArray(item4Workspace?.assets) ? item4Workspace.assets : [];
     const uploading = item4Uploading
@@ -8989,6 +9000,16 @@
     setEzMessage(incomplete || "Photo removed.", incomplete ? "success" : "");
 
     const requestId = activeProductionRequest.id;
+    if (/^studio_ai/i.test(String(removed?.source || ""))) {
+      // Treat an explicit user delete as stronger than the original AI target.
+      // The API persists the same switch; this local update blocks a stale tab from
+      // immediately topping the deleted image back up before the DELETE returns.
+      activeProductionRequest = {
+        ...activeProductionRequest,
+        carousel_image_mode: "Manual Upload",
+      };
+      item4AiAutoStarted.add(requestId);
+    }
     item4RemoveDrain = item4RemoveDrain.then(async () => {
       try {
         const result = await api(
