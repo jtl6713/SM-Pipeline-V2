@@ -264,6 +264,22 @@ export function classifyRenderRow(row, nowMs = Date.now()) {
   const outputStatus = String(row?.output_status || "").trim();
   const modified = Date.parse(String(row?.last_modified || row?.updated_at || ""));
   const ageMs = Number.isFinite(modified) ? nowMs - modified : Infinity;
+  const renderClipList = String(row?.render_clip_list_json || "");
+  if (
+    renderClipList.includes("/api/media-assets/")
+    && ["Ready for Render", "Rendering", "Failed"].includes(renderStatus)
+  ) {
+    return withDeskIdentity({
+      kind: "render_unfetchable_source",
+      class: "data_repair",
+      record_id: recordId || null,
+      fingerprint: fingerprint("render_unfetchable_source", recordId, "studio_relative_media_url"),
+      actor: "worker_heal",
+      diagnosis: "Render_Clip_List_JSON contains a Studio-only /api/media-assets/.../stream URL. "
+        + "The remote Remotion renderer cannot fetch that path. Resolve the linked Media Asset to its Google Drive URL, "
+        + "persist the repaired manifest, clear the stale Remotion job, and pulse R4.",
+    }, row);
+  }
 
   if (renderStatus === "Failed") {
     const err = String(row?.render_error || row?.error || "");
@@ -902,6 +918,7 @@ export const CLASSIFIER_KINDS = Object.freeze([
   "publish_never_dispatch",
   "publish_failed_transient",
   "render_failed",
+  "render_unfetchable_source",
   "native_cover_missing",
   "rfr_locked_missing_deliverable",
   "health_down",

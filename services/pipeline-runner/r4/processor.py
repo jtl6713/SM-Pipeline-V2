@@ -6,7 +6,7 @@ import json
 from typing import Any
 
 from airtable.client import AirtableClient
-from airtable.constants import CONTENT_ITEMS_TABLE, PLATFORM_OUTPUTS_TABLE
+from airtable.constants import CONTENT_ITEMS_TABLE, MEDIA_ASSETS_TABLE, PLATFORM_OUTPUTS_TABLE
 from r4.constants import MAKE_SCENARIO_ID, MAKE_SCENARIO_NAME, MAX_RECORDS, R4_CLEAR_FIELDS
 from r4.formulas import r4_exact_output_formula, r4_production_formula
 from audio.voiceover_duration import validate_voiceover_for_render, voiceover_is_disabled
@@ -14,6 +14,92 @@ from r4.render_request import choose_render_request, timing_blocks_render, voice
 from render.fields import field_str, first_linked_id
 from render.remotion_client import RemotionClient
 from render.settings import get_render_server_url, get_render_volumes
+
+
+STUDIO_STREAM_PREFIX = "/api/media-assets/"
+DRIVE_DOWNLOAD_URL = "https://drive.google.com/uc?export=download&id={file_id}"
+
+
+def _studio_stream_media_id(value: Any) -> str:
+    text = str(value or "").strip()
+    if not text.startswith(STUDIO_STREAM_PREFIX):
+        return ""
+    tail = text[len(STUDIO_STREAM_PREFIX):]
+    record_id = tail.split("/", 1)[0].strip()
+    return record_id if record_id.startswith("rec") else ""
+
+
+def repair_studio_stream_render_sources(
+    client: AirtableClient,
+    output: dict[str, Any],
+) -> tuple[int, list[str]]:
+    """Replace Studio-relative stream URLs before sending a render to Remotion.
+
+    Studio preview routes such as /api/media-assets/rec.../stream are browser-local
+    and cannot be fetched by the remote Remotion renderer. Legacy/stale manifests
+    can still contain them even though current stamping emits absolute sources.
+    Resolve those clips through Media Assets' Google Drive authority and persist
+    the repaired manifest so retries do not repeat the same bad payload.
+    """
+    raw = (output.get("fields") or {}).get("Render_Clip_List_JSON")
+    if not str(raw or "").strip():
+        return 0, []
+    try:
+        clips = json.loads(str(raw))
+    except json.JSONDecodeError:
+        return 0, []
+    if not isinstance(clips, list):
+        return 0, []
+
+    asset_cache: dict[str, dict[str, Any]] = {}
+    repaired = 0
+    unresolved: list[str] = []
+    for clip in clips:
+        if not isinstance(clip, dict):
+            continue
+        url = str(clip.get("url") or "").strip()
+        src = str(clip.get("src") or "").strip()
+        if not (url.startswith(STUDIO_STREAM_PREFIX) or src.startswith(STUDIO_STREAM_PREFIX)):
+            continue
+        media_id = str(
+            clip.get("mediaAssetRecordId")
+            or clip.get("media_asset_record_id")
+            or _studio_stream_media_id(url)
+            or _studio_stream_media_id(src)
+            or ""
+        ).strip()
+        if not media_id.startswith("rec"):
+            unresolved.append(media_id or url or src or "unknown")
+            continue
+        asset = asset_cache.get(media_id)
+        if asset is None:
+            try:
+                asset = client.get_record(MEDIA_ASSETS_TABLE, media_id)
+            except Exception:
+                asset = {}
+            asset_cache[media_id] = asset
+        drive_id = field_str(asset, "Google Drive File ID")
+        drive_url = field_str(asset, "Google Drive URL")
+        if not drive_url and drive_id:
+            drive_url = DRIVE_DOWNLOAD_URL.format(file_id=drive_id)
+        if not drive_url.startswith(("http://", "https://")):
+            unresolved.append(media_id)
+            continue
+        clip["url"] = drive_url
+        clip["src"] = drive_url
+        if drive_id and not str(clip.get("googleDriveFileId") or "").strip():
+            clip["googleDriveFileId"] = drive_id
+        repaired += 1
+
+    if repaired:
+        rendered = json.dumps(clips, separators=(",", ":"))
+        client.update_record(
+            PLATFORM_OUTPUTS_TABLE,
+            output["id"],
+            {"Render_Clip_List_JSON": rendered},
+        )
+        output.setdefault("fields", {})["Render_Clip_List_JSON"] = rendered
+    return repaired, unresolved
 
 
 def _eligible_exact_output(
@@ -80,6 +166,32 @@ def process_one(
             "processed": False,
             "reason": "no_eligible_platform_output",
             "make_scenario_id": MAKE_SCENARIO_ID,
+        }
+
+    repaired_sources, unresolved_sources = repair_studio_stream_render_sources(client, output)
+    if unresolved_sources:
+        message = (
+            "Remotion source repair could not resolve Studio-only media URL(s): "
+            + ", ".join(unresolved_sources[:10])
+        )
+        client.update_record(
+            PLATFORM_OUTPUTS_TABLE,
+            output["id"],
+            {
+                "Render_Status": "Blocked",
+                "Remotion_Error_Message": message[:10000],
+            },
+            typecast=True,
+        )
+        return {
+            "processed": False,
+            "reason": "unfetchable_render_source",
+            "error": message,
+            "repaired_sources": repaired_sources,
+            "output_record_id": output["id"],
+            "output_id": field_str(output, "Output_ID"),
+            "make_scenario_id": MAKE_SCENARIO_ID,
+            "make_scenario_name": MAKE_SCENARIO_NAME,
         }
 
     music_default, voice_default = get_render_volumes(client)

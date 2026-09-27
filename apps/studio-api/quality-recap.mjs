@@ -30,6 +30,10 @@ const COPY = {
     found: "A video failed while it was being built.",
     action: "Queued the video to build again.",
   },
+  render_unfetchable_source: {
+    found: "A video was trying to render with a Studio-only media URL that the render server cannot fetch.",
+    action: "Replaced the Studio-only source with the asset's Google Drive URL, cleared the stale render job, and rebuilt the video.",
+  },
   render_ready_no_job: {
     found: "A video was ready to build, but the build never started.",
     action: "Started the video build.",

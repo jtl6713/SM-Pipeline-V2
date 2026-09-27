@@ -138,6 +138,17 @@ test("render, orphan, crop, autonomous, and health classifiers", () => {
   assert.equal(failedRender.kind, "render_failed");
   assert.equal(failedRender.class, "transient");
   assert.equal(failedRender.actor, "worker_heal");
+  const badSource = classifyRenderRow({
+    id: "recRBadSource",
+    render_status: "Rendering",
+    remotion_job_id: "job-bad-source",
+    render_clip_list_json: '[{"url":"/api/media-assets/recVideo/stream"}]',
+    last_modified: "2026-09-07T03:59:00Z",
+  }, now);
+  assert.equal(badSource.kind, "render_unfetchable_source");
+  assert.equal(badSource.class, "data_repair");
+  assert.equal(badSource.actor, "worker_heal");
+  assert.match(badSource.diagnosis, /Google Drive URL/);
   assert.equal(classifyRenderRow({
     id: "recR2",
     render_status: "Rendering",
@@ -352,6 +363,7 @@ test("promoted advancement is origin-aware and does not treat Ready for Review a
   }, now), null);
   assert.ok(CLASSIFIER_KINDS.includes("publish_failed_transient"));
   assert.ok(CLASSIFIER_KINDS.includes("render_failed"));
+  assert.ok(CLASSIFIER_KINDS.includes("render_unfetchable_source"));
   assert.equal(classifyPublishFailed({
     id: "recHsN9TCoV8HsAdT",
     output_status: "Approved for Publishing",
