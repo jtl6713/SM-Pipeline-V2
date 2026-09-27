@@ -560,6 +560,17 @@ test("YouTube cover quota on a live Short is not operator work", () => {
     publish_error_stage: "YTS2_THUMBNAIL",
     youtube_error: "quotaExceeded",
   }), null);
+  const output994 = classifyYoutubeCoverQuota({
+    id: "recXCJSdgdyjp01bg",
+    output_id: 994,
+    platform: "YouTube",
+    publish_status: "Manual Publish Required",
+    youtube_video_id: "JL2sm6Zy1YY",
+    publish_error_stage: "YTS2_QUOTA",
+    youtube_error: "YTS2 poll blocked by quota/HTTP 403: videos.list failed 403 quotaExceeded",
+  });
+  assert.equal(output994.kind, "youtube_cover_quota");
+  assert.equal(output994.fingerprint, fingerprint("youtube_cover_quota", "recXCJSdgdyjp01bg", "quota"));
 });
 
 test("phase 4 automerge stays gated to allowlisted paths, caps, and mode", () => {

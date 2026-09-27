@@ -77,11 +77,11 @@ Auto-correct: Worker `studioHealEscalatedProduce` rematches library stills (neve
 
 ## Watch: YouTube Manual Action Required, live Short, cover quota
 
-Studio **Manual Action Required** on a YouTube Short that already has `YouTube_Video_ID` and `YTS2_THUMBNAIL` + `thumbnails.set failed 403` / `quotaExceeded` is **not operator work**. The Short is live. Only the native 3D cover is waiting for Pacific midnight quota reset. Kind `youtube_cover_quota`, class `transient`, actor `worker_heal`. Do not re-upload. Do not send `thumb_offset`. Do not kick YTP1.
+Studio **Manual Action Required** on a YouTube Short that already has `YouTube_Video_ID` and quota (`YTS2_THUMBNAIL` / `YTS2_QUOTA` / `YTS2_POLL` + `403` / `quotaExceeded`) is **not operator work**. The Short is live. Poll or `thumbnails.set` is waiting for Pacific midnight. Kind `youtube_cover_quota`, class `transient`, actor `worker_heal`. Do not re-upload. Do not send `thumb_offset`. Do not kick YTP1.
 
-Proven fixture: Output **1001** / Content Item 227 How the Sign Changes / `recbvjtX95IioyxOi` / video `EwRNnNZO0Xc`. YTS2 used a short retry; Worker re-pulsed YTS2 while Publishing and burned quota. Heal formula used to omit `YTS2_THUMBNAIL`.
+Proven fixtures: Output **1001** / CI 227 / `EwRNnNZO0Xc` (cover, then YTS2 rewrote it to poll quota); Output **994** DUMBO / `JL2sm6Zy1YY`. Worker 0.10.396 still painted Manual Action Required because `Publish_Status=Manual Publish Required` won after the poll rewrite.
 
-Auto-correct: Worker parks until Pacific midnight (keep YT2 / Uploaded / Publishing), then pulses **YTS2 only**. Fingerprint `youtube_cover_quota:<output_rec>:quota`. Same fingerprint after a midnight cover fail → `code_bug`.
+Auto-correct: Worker parks until Pacific midnight (keep YT2 / Uploaded / **Publishing** — clear manual flags), then pulses **YTS2 only**. Fingerprint `youtube_cover_quota:<output_rec>:quota`. Same fingerprint after a midnight fail → `code_bug`.
 
 ## Observe (`observe`)
 
@@ -148,6 +148,6 @@ Auto-correct: leave to Worker `studioHealFailedYoutubeSourceDownloads` (Drive Ra
 
 ### `youtube_cover_quota` (`transient` → Worker heal)
 
-Live YouTube Short (`YouTube_Video_ID` present, YT2 / Uploaded). `Publish_Error_Stage=YTS2_THUMBNAIL` and `thumbnails.set` hit daily quota. Studio painted Manual Action Required because any YouTube quota/403 used to win the badge. Operator has nothing to do.
+Live YouTube Short (`YouTube_Video_ID` present, YT2 / Uploaded). `YTS2_THUMBNAIL` / `YTS2_QUOTA` / `YTS2_POLL` plus quota/403. Studio painted Manual Action Required because `Publish_Status=Manual Publish Required` won even after the Short was live. Operator has nothing to do.
 
-Auto-correct: Worker `studioParkStaleYoutubeQuotaPolls` + YTS2 `cover_quota_park_fields` wait until Pacific midnight, then YTS2-only `thumbnails.set` of the public 3D still. Keep `Publish_Status=Publishing`. Do not flip to Manual Publish Required. Do not re-upload. Fingerprint `youtube_cover_quota:<output_rec>:quota`. Proven: Output 1001 / CI 227 / `recbvjtX95IioyxOi` / `EwRNnNZO0Xc`.
+Auto-correct: Worker `studioParkStaleYoutubeQuotaPolls` + YTS2 `cover_quota_park_fields` wait until Pacific midnight, then YTS2-only. Keep `Publish_Status=Publishing`. Clear manual flags. Do not re-upload. Fingerprint `youtube_cover_quota:<output_rec>:quota`. Proven: Output 1001 / `EwRNnNZO0Xc`; Output 994 / `JL2sm6Zy1YY`.

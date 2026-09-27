@@ -391,8 +391,6 @@ export function classifyYoutubeCoverQuota(row) {
   const videoId = String(row?.youtube_video_id || "").trim();
   if (!/^[A-Za-z0-9_-]{11}$/.test(videoId)) return null;
   const stage = String(row?.publish_error_stage || "").trim();
-  const error = `${stage} ${row?.publish_error || ""} ${row?.youtube_error || ""}`;
-  if (!/YTS2_THUMBNAIL|thumbnail/i.test(error)) return null;
   if (!youtubeLooksLikeQuotaOrWrapped403({
     Platform: "YouTube",
     Publish_Error_Stage: stage,
@@ -407,7 +405,7 @@ export function classifyYoutubeCoverQuota(row) {
     fingerprint: fingerprint("youtube_cover_quota", recordId, "quota"),
     actor: "worker_heal",
     youtube_video_id: videoId,
-    diagnosis: "YouTube Short already uploaded (video id present). YTS2 thumbnails.set hit daily quota. Studio paints Manual Action Required, but the operator has nothing to do. Do not re-upload. Worker parks until Pacific midnight, then pulses YTS2 only to attach the public 3D cover. Proven: Output 1001 / CI 227 / recbvjtX95IioyxOi / EwRNnNZO0Xc.",
+    diagnosis: "YouTube Short already uploaded (video id present). YTS2 hit daily quota on poll or thumbnails.set. Studio paints Manual Action Required, but the operator has nothing to do. Do not re-upload. Worker parks until Pacific midnight, then pulses YTS2 only. Proven: Output 1001 / CI 227 / recbvjtX95IioyxOi / EwRNnNZO0Xc. Same class: Output 994 / JL2sm6Zy1YY.",
   }, row);
 }
 

@@ -66,3 +66,8 @@ Reason: Output 1001 cover quota is not operator work; park thumbnails.set until 
 Worker: 0.10.396-youtube-cover-quota
 Requested: 2026-09-26T23:30:00-05:00
 
+Deploy Studio API Worker production
+Reason: Live Short poll quota (1001/994) must not keep Manual Action Required
+Worker: 0.10.397-youtube-live-quota
+Requested: 2026-09-26T23:35:00-05:00
+

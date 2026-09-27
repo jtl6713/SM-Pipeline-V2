@@ -71,8 +71,8 @@ import {
   manualPublishRequiredFields,
   youtubeCompleteEligibility,
   youtubeLiveVideoIdFromFields,
-  youtubeCoverQuotaOnly,
   youtubeCoverQuotaParkFields,
+  youtubeLiveQuotaOnly,
   youtubeManualActionRequired,
   youtubeManualCloseFields,
   youtubeManualLiveVideoHealCandidate,
@@ -437,7 +437,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.396-youtube-cover-quota",
+          version: "0.10.397-youtube-live-quota",
           studio_desk_inventory_v1: true,
           studio_desk_activity_v1: true,
           studio_tiktok_complete_v1: true,
@@ -2656,6 +2656,12 @@ function normalizedOutputState(record) {
   // Output 550 was Published while Manual_Fallback_Required stayed true — manual
   // must not beat Published. Output 372 had the same pattern with FB error text.
   if (has("Publish_Status", "published") || has("Output_Status", "published") || has("FB_Publish_Status", "published") || has("FB_Slideshow_Status", "published") || has("TikTok_Draft_Status", "publish complete") || text("YouTube_Stage") === "Complete") return "Published";
+
+  // Live Short + daily quota is an automatic midnight retry. Do not paint
+  // Manual Action Required even when YTS2 left Publish_Status=Manual Publish Required.
+  if (youtubeLiveQuotaOnly(fields) && youtubeVideoReady) {
+    return "Platform Processing";
+  }
 
   // YouTube Manual Publish Required must win over leftover YouTube_Error_Message,
   // otherwise Studio keeps painting a red Failed badge after we park the row.
@@ -28876,13 +28882,13 @@ async function studioParkStaleYoutubeQuotaPolls(env, options = {}) {
       const videoId = String(f(row, "YouTube_Video_ID") || "").trim();
       const stage = String(f(row, "Publish_Error_Stage") || "").trim() || "YTS2_QUOTA";
       const youtubeMessage = String(f(row, "YouTube_Error_Message") || f(row, "Publish_Error_Message") || "").trim();
-      const coverQuota = youtubeCoverQuotaOnly(row.fields || row)
-        || (/yts2_thumbnail|thumbnail/i.test(stage) && /^[A-Za-z0-9_-]{11}$/.test(videoId));
-      const errorStage = coverQuota
-        ? "YTS2_THUMBNAIL"
+      const liveQuota = Boolean(videoId)
+        && (youtubeLiveQuotaOnly(row.fields || row) || /yts2_quota|yts2_thumbnail|yts2_poll|thumbnail|quota/i.test(stage));
+      const errorStage = liveQuota
+        ? (/yts2_thumbnail|thumbnail/i.test(stage) ? "YTS2_THUMBNAIL" : "YTS2_QUOTA")
         : /ytp1/i.test(stage) ? "YTP1" : /yts1/i.test(stage) ? "YTS1_QUOTA" : "YTS2_QUOTA";
-      const fields = coverQuota
-        ? youtubeCoverQuotaParkFields({ youtubeMessage })
+      const fields = liveQuota
+        ? youtubeCoverQuotaParkFields({ errorStage, youtubeMessage })
         : manualPublishRequiredFields({
           errorStage,
           publishMessage: "YouTube API quota exhausted. Manual publish required until the next automatic retry after Pacific midnight.",
@@ -28896,7 +28902,7 @@ async function studioParkStaleYoutubeQuotaPolls(env, options = {}) {
       });
       results.push({
         id: row.id,
-        stage: coverQuota ? "cover_quota_park" : "manual_publish_park",
+        stage: liveQuota ? "cover_quota_park" : "manual_publish_park",
         error_stage: errorStage,
       });
     } catch (error) {

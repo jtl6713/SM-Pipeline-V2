@@ -33,7 +33,7 @@ def test_cover_quota_park_fields_keep_live_short():
     )
     assert fields["YouTube_Stage"] == "YT2"
     assert fields["Publish_Status"] == "Publishing"
-    assert fields["Publish_Error_Stage"] == "YTS2_THUMBNAIL"
+    assert fields["Publish_Error_Stage"] == "YTS2_QUOTA"
     assert fields["Manual_Fallback_Required"] is False
     assert "already live" in fields["Publish_Error_Message"]
     assert fields["Publish_Next_Retry_At"].endswith("Z")

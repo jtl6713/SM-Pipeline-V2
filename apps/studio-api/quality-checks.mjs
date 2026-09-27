@@ -107,7 +107,7 @@ export const QUALITY_CHECKS = Object.freeze([
   }),
   check({
     id: "youtube_cover_quota",
-    title: "Check for live YouTube Shorts whose 3D cover hit daily thumbnails.set quota (not operator work)",
+    title: "Check for live YouTube Shorts whose poll or cover hit daily quota (not operator work)",
     lane: "service",
     kind: "youtube_cover_quota",
     actor: "worker_heal",

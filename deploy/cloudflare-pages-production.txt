@@ -35,3 +35,5 @@ Quality Agent recap IDs: 2026-09-26 - each recap card names the Content item, Co
 2026-09-26 Studio UI 0.6.396: Creative Editor clip posters + inline playback
 
 Quality Agent recap dispatch cause: 2026-09-26 - recap no longer treats future scheduled posts as never-sent, and names YouTube quota / missing file instead of kicking. UI 0.6.397.
+
+2026-09-26 Studio UI 0.6.398: live YouTube quota is not Manual Action Required (1001 / 994)

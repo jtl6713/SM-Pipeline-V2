@@ -257,6 +257,7 @@ def process_request(
                 cover_quota_park_fields(
                     youtube_message=youtube_message,
                     body=thumb_body,
+                    error_stage="YTS2_THUMBNAIL",
                     extra={
                         "YouTube_Last_Checked_At": now,
                     },
@@ -361,20 +362,15 @@ def process_request(
 
     if is_quota_exceeded(status_code, body) or status_code == 403:
         # Keep the uploaded video id; park until Pacific midnight instead of
-        # burning more quota with short retries.
-        fields = manual_publish_required_fields(
-            error_stage="YTS2_QUOTA",
-            publish_message="YouTube API quota exhausted while polling processing. Manual publish required until the next automatic retry after Pacific midnight.",
+        # asking the operator to republish a Short that is already live.
+        fields = cover_quota_park_fields(
             youtube_message=f"YTS2 poll blocked by quota/HTTP {status_code}: {body}",
             body=body,
-            youtube_stage=STAGE_YT2,
-            clear_upload_job=False,
-            upload_status=UPLOAD_UPLOADED,
-            package_status=None,
+            error_stage="YTS2_QUOTA",
             extra={"YouTube_Last_Checked_At": now},
         )
         client.update_record(PLATFORM_OUTPUTS_TABLE, record_id, fields, typecast=True)
-        return {"processed": True, "manual_publish_required": True, **result}
+        return {"processed": True, "retry": True, "reason": "live_quota", **result}
 
     client.update_record(
         PLATFORM_OUTPUTS_TABLE,

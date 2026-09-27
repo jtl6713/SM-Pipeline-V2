@@ -95,8 +95,8 @@ const COPY = {
     action: "Made a public copy and restarted the YouTube upload.",
   },
   youtube_cover_quota: {
-    found: "A YouTube Short is already live. The grid cover hit the daily send limit.",
-    action: "Nothing to do. The cover retries after Pacific midnight. The Short is not re-sent.",
+    found: "A YouTube Short is already live. YouTube hit the daily send limit while finishing the cover or status check.",
+    action: "Nothing to do. YouTube retries after Pacific midnight. The Short is not re-sent.",
   },
   intake_parked: {
     found: "New photos or videos are still sitting in the intake folder.",

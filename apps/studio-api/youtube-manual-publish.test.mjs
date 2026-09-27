@@ -12,6 +12,7 @@ import {
   youtubeLooksLikeQuotaOrWrapped403,
   youtubeCoverQuotaOnly,
   youtubeCoverQuotaParkFields,
+  youtubeLiveQuotaOnly,
   youtubeManualActionRequired,
   youtubeManualCloseFields,
   outputTerminalPublishedFields,
@@ -119,6 +120,7 @@ test("manualPublishRequiredFields parks until Pacific midnight", () => {
   assert.equal(fields.Publish_Next_Retry_At, "2026-09-13T07:00:00.000Z");
   assert.match(YOUTUBE_STALE_QUOTA_POLL_HEAL_FORMULA, /YTS2_POLL/);
   assert.match(YOUTUBE_STALE_QUOTA_POLL_HEAL_FORMULA, /YTS2_THUMBNAIL/);
+  assert.match(YOUTUBE_STALE_QUOTA_POLL_HEAL_FORMULA, /YTS2_QUOTA/);
   assert.match(YOUTUBE_STALE_QUOTA_POLL_HEAL_FORMULA, /failed 403/);
 });
 
@@ -134,6 +136,7 @@ test("live Short cover quota is not Manual Action Required", () => {
   assert.equal(youtubeCoverQuotaOnly(fields), true);
   assert.equal(youtubeManualActionRequired(fields), false);
   const parked = youtubeCoverQuotaParkFields({
+    errorStage: "YTS2_THUMBNAIL",
     youtubeMessage: fields.YouTube_Error_Message,
     nextRetryAt: "2026-09-27T07:00:00.000Z",
   });
@@ -142,6 +145,21 @@ test("live Short cover quota is not Manual Action Required", () => {
   assert.equal(parked.Manual_Fallback_Required, false);
   assert.equal(parked.Publish_Next_Retry_At, "2026-09-27T07:00:00.000Z");
   assert.match(parked.Publish_Error_Message, /already live/i);
+});
+
+test("live Short poll quota is not Manual Action Required even after YTS2 parks the row", () => {
+  const fields = {
+    Platform: "YouTube",
+    Publish_Status: "Manual Publish Required",
+    YouTube_Video_ID: "JL2sm6Zy1YY",
+    Publish_Error_Stage: "YTS2_QUOTA",
+    Manual_Fallback_Required: true,
+    Manual_Completion_Status: "Required",
+    Publish_Error_Message: "YouTube API quota exhausted while polling processing. Manual publish required until the next automatic retry after Pacific midnight.",
+    YouTube_Error_Message: "YTS2 poll blocked by quota/HTTP 403: videos.list failed 403 quotaExceeded",
+  };
+  assert.equal(youtubeLiveQuotaOnly(fields), true);
+  assert.equal(youtubeManualActionRequired(fields), false);
 });
 
 test("parses watch, shorts, and youtu.be URLs", () => {

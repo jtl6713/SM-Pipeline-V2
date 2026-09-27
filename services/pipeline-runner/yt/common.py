@@ -130,7 +130,7 @@ def manual_publish_required_fields(
 
 
 COVER_QUOTA_MESSAGE = (
-    "YouTube cover will retry after Pacific midnight. The Short is already live. No operator action."
+    "YouTube quota resets after Pacific midnight. The Short is already live. No operator action."
 )
 
 
@@ -138,15 +138,16 @@ def cover_quota_park_fields(
     *,
     youtube_message: str,
     body: Any = None,
+    error_stage: str = "YTS2_QUOTA",
     extra: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Park thumbnails.set quota on a live Short until Pacific midnight. Not operator work."""
+    """Park quota on a live Short until Pacific midnight. Not operator work."""
     fields: dict[str, Any] = {
         "YouTube_Stage": STAGE_YT2,
         "Publish_Status": PUBLISH_STATUS_PUBLISHING,
+        "Publish_Error_Stage": error_stage,
         "Publish_Locked_At": None,
         "Publish_Locked_By": "",
-        "Publish_Error_Stage": "YTS2_THUMBNAIL",
         "Publish_Error_Message": COVER_QUOTA_MESSAGE,
         "Publish_Next_Retry_At": next_pacific_midnight_iso(),
         "YouTube_Error_Message": youtube_message,
