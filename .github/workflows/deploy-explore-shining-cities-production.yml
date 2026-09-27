@@ -116,18 +116,43 @@ jobs:
             --commit-message="Explore Shining Cities production deployment" \
             --commit-dirty=false
 
-      - name: Attach custom domains
+      - name: Attach or reset custom domains
         shell: bash
         run: |
           set -euo pipefail
           API="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/pages/projects/$PAGES_PROJECT/domains"
           AUTH="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
           curl -fsS "$API" -H "$AUTH" -o /tmp/domains-before.json
+
           for DOMAIN in "$PUBLIC_DOMAIN" "$WWW_DOMAIN"; do
+            EXISTS=false
+            STATUS=""
+            VERIFY_ERROR=""
+
             if jq -e --arg d "$DOMAIN" '.result[]? | select(.name == $d)' /tmp/domains-before.json >/dev/null; then
-              echo "Domain already attached: $DOMAIN"
+              EXISTS=true
+              STATUS=$(jq -r --arg d "$DOMAIN" '.result[]? | select(.name == $d) | .status // ""' /tmp/domains-before.json)
+              VERIFY_ERROR=$(jq -r --arg d "$DOMAIN" '.result[]? | select(.name == $d) | .verification_data.error_message // ""' /tmp/domains-before.json)
+            fi
+
+            if [[ "$EXISTS" == "true" && ( "$STATUS" == "error" || "$VERIFY_ERROR" == "CNAME record not set" ) ]]; then
+              echo "Resetting stale Pages domain association: $DOMAIN (status=$STATUS verification=$VERIFY_ERROR)"
+              CODE=$(curl -sS -o "/tmp/domain-${DOMAIN}-delete.json" -w "%{http_code}" -X DELETE "$API/$DOMAIN" -H "$AUTH" || true)
+              if [[ "$CODE" -lt 200 || "$CODE" -ge 300 ]]; then
+                echo "Failed to detach stale domain $DOMAIN (HTTP $CODE)" >&2
+                cat "/tmp/domain-${DOMAIN}-delete.json" >&2 || true
+                exit 1
+              fi
+              jq -e '.success == true' "/tmp/domain-${DOMAIN}-delete.json" >/dev/null
+              EXISTS=false
+              sleep 2
+            fi
+
+            if [[ "$EXISTS" == "true" ]]; then
+              echo "Domain already attached and healthy enough to validate: $DOMAIN (status=$STATUS)"
               continue
             fi
+
             jq -n --arg name "$DOMAIN" '{name:$name}' > "/tmp/domain-${DOMAIN}-payload.json"
             CODE=$(curl -sS -o "/tmp/domain-${DOMAIN}.json" -w "%{http_code}" -X POST "$API" \
               -H "$AUTH" -H "Content-Type: application/json" \
@@ -138,9 +163,9 @@ jobs:
               exit 1
             fi
             jq -e '.success == true' "/tmp/domain-${DOMAIN}.json" >/dev/null
+            jq -c '.result | {name,status,validation_data,verification_data}' "/tmp/domain-${DOMAIN}.json"
             echo "Attached domain: $DOMAIN"
           done
-
       - name: Retry Pages custom-domain validation
         shell: bash
         run: |
