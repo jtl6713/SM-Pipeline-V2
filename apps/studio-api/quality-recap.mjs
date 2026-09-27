@@ -23,8 +23,8 @@ const COPY = {
     action: "Restarted the send.",
   },
   publish_never_dispatch: {
-    found: "An approved post never started sending.",
-    action: "Started the send.",
+    found: "An approved post is due and the send never started.",
+    action: "Queued the send because the scheduled time is due.",
   },
   render_failed: {
     found: "A video failed while it was being built.",
@@ -128,6 +128,33 @@ const COPY = {
   },
 };
 
+const PUBLISH_DISPATCH_COPY = {
+  never_attempted: {
+    found: "An approved post is due and the send never started.",
+    action: "Queued the send because the scheduled time is due.",
+  },
+  youtube_quota: {
+    found: "A YouTube Short hit the daily API send limit.",
+    action: "Stopped kicking. YouTube retries automatically after Pacific midnight.",
+  },
+  youtube_thumbnail: {
+    found: "A YouTube Short uploaded, but the cover still failed to attach.",
+    action: "Stopped kicking the video send. The cover is a separate retry.",
+  },
+  missing_asset: {
+    found: "An approved post could not send because the platform cannot fetch the file.",
+    action: "Stopped kicking. A public file has to be staged before another send.",
+  },
+  dispatch_exhausted: {
+    found: "An approved post is due, but several send attempts did not land.",
+    action: "Stopped kicking. Needs a look at the last send note instead of another pulse.",
+  },
+  dispatch_skipped: {
+    found: "An approved post is due, but the sender skipped it.",
+    action: "Stopped kicking. The last send note is the reason, not another pulse.",
+  },
+};
+
 const DEFAULT_COPY = {
   found: "Something in the pipeline stopped moving.",
   action: "Logged it and tried the usual restart.",
@@ -141,6 +168,9 @@ const IDENTITY_KEYS = [
   "content_id",
   "content_title",
   "content_item_id",
+  "blocker",
+  "scheduled_post_date",
+  "dispatch_note",
 ];
 
 function cleanRecapText(value) {
@@ -183,12 +213,17 @@ export function qualityRecapItemLabel(row = {}) {
   return "";
 }
 
-export function qualityRecapCopy(kind) {
-  return COPY[String(kind || "").trim()] || DEFAULT_COPY;
+export function qualityRecapCopy(kind, row = {}) {
+  const key = String(kind || "").trim();
+  if (key === "publish_never_dispatch") {
+    return PUBLISH_DISPATCH_COPY[String(row.blocker || "").trim()] || PUBLISH_DISPATCH_COPY.never_attempted;
+  }
+  return COPY[key] || DEFAULT_COPY;
 }
 
-export function qualityRecapStatus({ actor, class: klass, open } = {}) {
+export function qualityRecapStatus({ actor, class: klass, open, blocker } = {}) {
   if (!open) return { label: "Handled", tone: "ok" };
+  if (blocker === "youtube_quota") return { label: "Waiting on YouTube", tone: "work" };
   if (klass === "infra_down") return { label: "Service is down", tone: "alert" };
   if (klass === "code_bug" || klass === "data_repair" || actor === "desk_agent") {
     return { label: "Needs you", tone: "alert" };
@@ -219,6 +254,9 @@ function asIncident(row) {
     content_id: cleanRecapId(row.content_id),
     content_title: cleanRecapText(row.content_title),
     content_item_id: cleanRecapText(row.content_item_id),
+    blocker: cleanRecapText(row.blocker),
+    scheduled_post_date: cleanRecapText(row.scheduled_post_date),
+    dispatch_note: cleanRecapText(row.dispatch_note || row.studio_publish_dispatch_note),
     when: row.updated_at || row.created_at || null,
   };
 }
@@ -267,9 +305,17 @@ export function buildQualityRecap({ incidents = [], events = [], limit = 12, gen
     byFingerprint.set(row.fingerprint, current);
   };
 
+  const skipScheduledHold = (row) => {
+    if (!row || row.kind !== "publish_never_dispatch") return false;
+    if (row.blocker === "scheduled_hold" || row.blocker === "auto_publish_off") return true;
+    if (row.blocker && row.blocker !== "never_attempted") return false;
+    const scheduled = Date.parse(String(row.scheduled_post_date || ""));
+    return Number.isFinite(scheduled) && scheduled > Date.parse(checkedAt) + 120000;
+  };
+
   for (const raw of incidents) {
     const row = asIncident(raw);
-    if (!row) continue;
+    if (!row || skipScheduledHold(row)) continue;
     remember(row);
     byFingerprint.get(row.fingerprint).open = true;
   }
@@ -279,13 +325,13 @@ export function buildQualityRecap({ incidents = [], events = [], limit = 12, gen
   });
   for (const event of sortedEvents) {
     const row = incidentFromEvent(event);
-    if (!row) continue;
+    if (!row || skipScheduledHold(row)) continue;
     remember(row, [event?.created_at, eventBody(event).resolved_at]);
   }
 
   const cards = [...byFingerprint.values()].map(({ row, times, open: isOpen }) => {
-    const copy = qualityRecapCopy(row.kind);
-    const status = qualityRecapStatus({ actor: row.actor, class: row.class, open: isOpen });
+    const copy = qualityRecapCopy(row.kind, row);
+    const status = qualityRecapStatus({ actor: row.actor, class: row.class, open: isOpen, blocker: row.blocker });
     const foundAt = earliestIso(times, checkedAt);
     const lastSeen = latestIso(times, foundAt);
     const resolvedAt = isOpen

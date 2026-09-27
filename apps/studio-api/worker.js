@@ -434,7 +434,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.394-quality-recap-ids",
+          version: "0.10.395-quality-recap-dispatch-cause",
           studio_desk_inventory_v1: true,
           studio_desk_activity_v1: true,
           studio_tiktok_complete_v1: true,
@@ -33331,6 +33331,10 @@ function mapDeskInventoryOutput(record, contentToRequest = new Map(), contentByI
     test_run_id: f(record, "Test_Run_ID"),
     last_modified: f(record, "Last_Modified") || f(record, "Updated_At") || "1970-01-01T00:00:00Z",
     last_publish_attempt_at: f(record, "Last_Publish_Attempt_At"),
+    scheduled_post_date: f(record, "Scheduled_Post_Date"),
+    auto_publish_enabled: f(record, "Auto_Publish_Enabled") !== false && f(record, "Auto_Publish_Enabled") !== 0,
+    dispatch_count: f(record, "Studio_Publish_Dispatch_Count"),
+    dispatch_note: note,
     request_id: studioOutputProductionRequestId(record, contentToRequest)
       || studioFirstLinkedId(f(record, "Production Requests")),
     content_item_id: contentItemId,

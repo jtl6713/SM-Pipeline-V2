@@ -10,6 +10,7 @@ export const QUALITY_HEALS = Object.freeze([
   "remove_ingestion_parent",
   "resume_produce",
   "requeue_failed",
+  "diagnose_then_one_send",
   "ticket_only",
   "none",
 ]);
@@ -114,11 +115,11 @@ export const QUALITY_CHECKS = Object.freeze([
   }),
   check({
     id: "publish_never_dispatch",
-    title: "Check for Approved-for-Publishing outputs that never dispatch",
+    title: "Check for due Approved-for-Publishing outputs that never dispatch (ignore future calendar holds)",
     lane: "service",
     kind: "publish_never_dispatch",
     actor: "worker_heal",
-    heal: "none",
+    heal: "diagnose_then_one_send",
   }),
   check({
     id: "publish_failed_transient",

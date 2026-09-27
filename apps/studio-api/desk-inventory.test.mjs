@@ -282,11 +282,46 @@ test("promoted advancement is origin-aware and does not treat Ready for Review a
     last_modified: "2026-09-07T03:00:00Z",
   }, now);
   assert.equal(neverSent.kind, "publish_never_dispatch");
+  assert.equal(neverSent.blocker, "never_attempted");
   assert.equal(neverSent.output_id, 908);
   assert.equal(neverSent.content_id, 209);
   assert.equal(neverSent.content_title, "Vizcaya Rainy Day Plan");
   assert.equal(neverSent.platform, "Instagram");
   assert.equal(neverSent.platform_output_type, "Reel");
+  assert.equal(classifyPublishDispatch({
+    id: "recScheduledHold",
+    output_status: "Approved for Publishing",
+    platform: "Instagram",
+    publish_status: "Ready to Schedule",
+    scheduled_post_date: "2026-10-03T11:30:00.000Z",
+    auto_publish_enabled: true,
+    last_modified: "2026-09-07T03:00:00Z",
+  }, now), null);
+  const quotaHold = classifyPublishDispatch({
+    id: "recYtQuota",
+    output_status: "Approved for Publishing",
+    platform: "YouTube",
+    publish_status: "Manual Publish Required",
+    publish_error: "YouTube API quota exhausted while polling processing.",
+    scheduled_post_date: "2026-09-30T12:00:00.000Z",
+    last_modified: "2026-09-07T03:00:00Z",
+  }, now);
+  assert.equal(quotaHold.blocker, "youtube_quota");
+  assert.equal(quotaHold.actor, "worker_heal");
+  assert.match(quotaHold.diagnosis, /Do not kick/i);
+  const exhausted = classifyPublishDispatch({
+    id: "recKickCap",
+    output_status: "Approved for Publishing",
+    platform: "Instagram",
+    publish_status: "Ready to Publish",
+    scheduled_post_date: "2026-09-07T03:00:00Z",
+    dispatch_count: 4,
+    dispatch_note: "skipped: missing-public-mp4",
+    last_modified: "2026-09-07T03:00:00Z",
+  }, now);
+  assert.equal(exhausted.blocker, "missing_asset");
+  assert.equal(exhausted.class, "code_bug");
+  assert.equal(exhausted.actor, "desk_agent");
   assert.equal(classifyPublishDispatch({
     id: "recP2",
     output_status: "Approved for Publishing",

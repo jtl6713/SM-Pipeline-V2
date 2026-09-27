@@ -43,7 +43,8 @@ test("recap names the content item and platform output on a never-sent post", ()
       class: "transient",
       actor: "worker_heal",
       record_id: "recNeverSent",
-      fingerprint: "publish_never_dispatch:recNeverSent:approved_not_dispatched",
+      fingerprint: "publish_never_dispatch:recNeverSent:never_attempted",
+      blocker: "never_attempted",
       output_id: 908,
       platform: "Instagram",
       platform_output_type: "Reel",
@@ -51,11 +52,42 @@ test("recap names the content item and platform output on a never-sent post", ()
       content_title: "Vizcaya Rainy Day Plan",
     }],
   });
-  assert.match(recap.cards[0].found, /never started sending/i);
+  assert.match(recap.cards[0].found, /due and the send never started/i);
+  assert.match(recap.cards[0].action, /Queued the send/i);
   assert.equal(recap.cards[0].content_title, "Vizcaya Rainy Day Plan");
   assert.equal(recap.cards[0].content_id, 209);
   assert.equal(recap.cards[0].output_label, "Instagram Reel");
   assert.equal(recap.cards[0].output_id, 908);
+});
+
+test("recap hides calendar holds and names YouTube quota instead of kicking", () => {
+  const recap = buildQualityRecap({
+    incidents: [
+      {
+        kind: "publish_never_dispatch",
+        fingerprint: "publish_never_dispatch:recHold:scheduled_hold",
+        blocker: "scheduled_hold",
+        scheduled_post_date: "2026-10-03T11:30:00.000Z",
+        output_id: 1016,
+      },
+      {
+        kind: "publish_never_dispatch",
+        class: "transient",
+        actor: "worker_heal",
+        fingerprint: "publish_never_dispatch:recQuota:youtube_quota",
+        blocker: "youtube_quota",
+        output_id: 994,
+        content_title: "Down Under the Brooklyn Bridge (DUMBO)",
+        platform: "YouTube",
+        platform_output_type: "Short",
+      },
+    ],
+    generatedAt: "2026-09-27T04:20:00.000Z",
+  });
+  assert.equal(recap.cards.length, 1);
+  assert.match(recap.cards[0].found, /daily API send limit/i);
+  assert.match(recap.cards[0].action, /Stopped kicking/i);
+  assert.equal(recap.cards[0].status, "Waiting on YouTube");
 });
 
 test("recap marks handled tickets that are no longer open", () => {

@@ -165,6 +165,9 @@ export function deskWorkIdentity(row = {}) {
     content_id: deskIdentityValue(pick.content_id ?? source.content_id),
     content_title: clean(pick.content_title || source.content_title),
     content_item_id: clean(pick.content_item_id || source.content_item_id),
+    scheduled_post_date: clean(pick.scheduled_post_date || source.scheduled_post_date),
+    dispatch_note: clean(pick.dispatch_note || source.dispatch_note || source.studio_publish_dispatch_note),
+    dispatch_count: deskIdentityValue(pick.dispatch_count ?? source.dispatch_count ?? source.studio_publish_dispatch_count),
   };
 }
 
@@ -624,6 +627,55 @@ export function classifyPublishFailed(row, nowMs = Date.now()) {
   }, row);
 }
 
+export const PUBLISH_DISPATCH_GRACE_MS = 120000;
+export const PUBLISH_DISPATCH_KICK_CAP = 3;
+
+export function deskPublishIsDue(row, nowMs = Date.now(), graceMs = PUBLISH_DISPATCH_GRACE_MS) {
+  const raw = String(row?.scheduled_post_date || "").trim();
+  if (!raw) return true;
+  const ms = Date.parse(raw);
+  if (!Number.isFinite(ms)) return true;
+  return ms <= nowMs + graceMs;
+}
+
+export function deskPublishDispatchBlocker(row, nowMs = Date.now()) {
+  const publish = String(row?.publish_status || "").trim();
+  const error = String(row?.publish_error || "").trim();
+  const note = String(row?.dispatch_note || row?.studio_publish_dispatch_note || "").trim();
+  const text = `${publish} ${error} ${note}`;
+  const count = Math.max(0, Number(row?.dispatch_count || row?.studio_publish_dispatch_count) || 0);
+  if (/manual publish required/i.test(publish) || /quota exhausted/i.test(text)) return "youtube_quota";
+  if (/thumbnail/i.test(error) && /youtube/i.test(String(row?.platform || ""))) return "youtube_thumbnail";
+  if (!deskPublishIsDue(row, nowMs)) return "scheduled_hold";
+  if (row?.auto_publish_enabled === false) return "auto_publish_off";
+  if (/skipped:\s*(no-dispatch|missing-|no-final|no-webhook|missing-cdn|missing-public)/i.test(note)) {
+    return "missing_asset";
+  }
+  if (count >= PUBLISH_DISPATCH_KICK_CAP) return "dispatch_exhausted";
+  if (/skipped:/i.test(note) && !/skipped:\s*scheduled-hold|held until/i.test(note)) return "dispatch_skipped";
+  return "never_attempted";
+}
+
+function publishDispatchDiagnosis(blocker, row) {
+  const note = String(row?.dispatch_note || row?.studio_publish_dispatch_note || row?.publish_error || "").trim();
+  if (blocker === "youtube_quota") {
+    return "YouTube API quota exhausted (Manual Publish Required). Do not kick. Worker retries after Pacific midnight.";
+  }
+  if (blocker === "youtube_thumbnail") {
+    return "YouTube video send already started; the cover attach failed. Do not re-dispatch the video. Retry thumbnails.set only.";
+  }
+  if (blocker === "missing_asset") {
+    return `Publisher skipped because the platform cannot fetch the file. Last note: ${note || "missing public asset"}. Stage a public copy; do not pulse again.`;
+  }
+  if (blocker === "dispatch_exhausted") {
+    return `Due Approved for Publishing was kicked ${Number(row?.dispatch_count || row?.studio_publish_dispatch_count) || "several"} times and still did not send. Last note: ${note || "none"}. Stop pulsing; fix the skip reason.`;
+  }
+  if (blocker === "dispatch_skipped") {
+    return `Publisher skipped the due send. Last note: ${note || "skipped"}. Stop pulsing until that skip is fixed.`;
+  }
+  return "Due Approved for Publishing with no successful dispatch receipt. Queue one send; if it returns skip/fail, diagnose that note instead of kicking again.";
+}
+
 export function classifyPublishDispatch(row, nowMs = Date.now()) {
   if (classifyPublishFailed(row, nowMs)) return null;
   const recordId = String(row?.id || row?.record_id || "").trim();
@@ -632,13 +684,21 @@ export function classifyPublishDispatch(row, nowMs = Date.now()) {
   if (outputStatus !== "Approved for Publishing") return null;
   if (row?.published_at || ["Published", "Publishing"].includes(String(row?.publish_status || "").trim())) return null;
   if (platform === "TikTok") return null;
-  if (outputAgeMs(row, nowMs) < STALE_RENDER_MINUTES * 60 * 1000) return null;
+  const blocker = deskPublishDispatchBlocker(row, nowMs);
+  if (blocker === "scheduled_hold" || blocker === "auto_publish_off") return null;
+  if (blocker === "never_attempted" && outputAgeMs(row, nowMs) < STALE_RENDER_MINUTES * 60 * 1000) return null;
+  const needsDesk = blocker === "dispatch_exhausted" || blocker === "missing_asset" || blocker === "dispatch_skipped";
   return withDeskIdentity({
     kind: "publish_never_dispatch",
-    class: "transient",
+    class: needsDesk ? "code_bug" : "transient",
     record_id: recordId || null,
-    fingerprint: fingerprint("publish_never_dispatch", recordId, "approved_not_dispatched"),
-    actor: "worker_heal",
+    fingerprint: fingerprint("publish_never_dispatch", recordId, blocker),
+    actor: needsDesk ? "desk_agent" : "worker_heal",
+    blocker,
+    scheduled_post_date: row?.scheduled_post_date || null,
+    dispatch_count: Number(row?.dispatch_count || row?.studio_publish_dispatch_count) || 0,
+    dispatch_note: String(row?.dispatch_note || row?.studio_publish_dispatch_note || "").trim() || null,
+    diagnosis: publishDispatchDiagnosis(blocker, row),
   }, row);
 }
 
