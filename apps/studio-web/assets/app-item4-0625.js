@@ -242,7 +242,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.401-manage-photo-pause";
+  const BUILD_ID = "item4-0.6.402-manage-photo-selection-authority";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -2555,9 +2555,16 @@
     return merged;
   }
 
-  function openIdeaDrawer(idea, { focusPromote = false } = {}) {
+  async function openIdeaDrawer(idea, { focusPromote = false } = {}) {
     updateIdeaDrawer(idea);
-    startIdeaPhotoManagePause(idea).catch((error) => console.warn("Manage Idea pause start failed", error));
+    // Establish the server-side pause before exposing editable photo controls.
+    // This closes the race where a cron match can land between opening Manage Idea
+    // and the operator's first delete/uncheck.
+    try {
+      await startIdeaPhotoManagePause(idea);
+    } catch (error) {
+      console.warn("Manage Idea pause start failed", error);
+    }
     $("ideaDrawerBackdrop").hidden = false;
     $("ideaManageDrawer").classList.add("open");
     $("ideaManageDrawer").setAttribute("aria-hidden", "false");
@@ -2575,7 +2582,7 @@
     }, 80);
   }
 
-  async function closeIdeaDrawer({ save = true } = {}) {
+  async function closeIdeaDrawer({ save = true, resumePhotoListening = true } = {}) {
     if (save && activeIdea?.id && ideaCanModify(activeIdea) && (managedIdeaDraftDirty() || managedIdeaProductionDirty())) {
       try {
         await saveManagedIdeaIdentity({ quiet: true, reloadList: true });
@@ -2584,7 +2591,7 @@
         return false;
       }
     }
-    await stopIdeaPhotoManagePause({ resume: true });
+    await stopIdeaPhotoManagePause({ resume: resumePhotoListening });
     $("ideaManageDrawer").classList.remove("open");
     $("ideaManageDrawer").setAttribute("aria-hidden", "true");
     $("ideaDrawerBackdrop").hidden = true;
@@ -2875,7 +2882,7 @@
         method: "DELETE",
         body: JSON.stringify({}),
       });
-      await closeIdeaDrawer({ save: false });
+      await closeIdeaDrawer({ save: false, resumePhotoListening: false });
       await Promise.all([loadIdeas(), loadDashboard()]);
     } catch (e) {
       setManageMessage(e.message, "error-text");
@@ -10128,7 +10135,7 @@
           body: JSON.stringify({}),
         });
       }
-      await closeIdeaDrawer({ save: false });
+      await closeIdeaDrawer({ save: false, resumePhotoListening: false });
       activeIdea = idea;
       ezEntryPath = "configure";
       switchToPage("content");
@@ -10215,7 +10222,10 @@
   function restoreIdeaLibraryPickerAfterDrawerUpdate(idea, preserved) {
     const persisted = ideaLibraryIdsFromIdea(idea);
     if (preserved) {
-      ideaLibrarySelected = new Set([...(preserved.selected || []), ...persisted]);
+      // While Manage Idea is open, the operator's current checks are authoritative.
+      // Do not union the server's previously matched ids back in: that resurrects
+      // photos the operator just unchecked even though photo listening is paused.
+      ideaLibrarySelected = new Set(preserved.selected || []);
       ideaLibraryPickerItems = preserved.items || [];
       ideaLibrarySuggestedIds = preserved.suggested || new Set();
       ideaLibrarySeeded = Boolean(preserved.seeded);

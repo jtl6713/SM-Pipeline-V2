@@ -71,3 +71,16 @@ test("Entering Production permanently disables photo listening without rematchin
   assert.match(worker, /Transfer the exact set the operator sees in Manage Idea once/);
   assert.doesNotMatch(worker, /photo-wait rehydrate on open failed/);
 });
+
+
+test("Manage Idea keeps the operator's unchecked photos authoritative during drawer refresh", () => {
+  assert.match(app, /ideaLibrarySelected = new Set\(preserved\.selected \|\| \[\]\)/);
+  assert.doesNotMatch(app, /ideaLibrarySelected = new Set\(\[\.\.\.\(preserved\.selected \|\| \[\]\), \.\.\.persisted\]\)/);
+  assert.match(app, /async function openIdeaDrawer[\s\S]*?await startIdeaPhotoManagePause\(idea\)/);
+});
+
+test("Entering Production closes Manage Idea without resuming automatic photo listening", () => {
+  assert.match(app, /closeIdeaDrawer\(\{ save: false, resumePhotoListening: false \}\)/);
+  assert.match(app, /async function closeIdeaDrawer\(\{ save = true, resumePhotoListening = true \} = \{\}\)/);
+  assert.match(app, /stopIdeaPhotoManagePause\(\{ resume: resumePhotoListening \}\)/);
+});
