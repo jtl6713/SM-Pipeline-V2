@@ -90,9 +90,46 @@ class AirtableClient:
         import requests
 
         url = f"{self._api_root}/{self._base_id}/{table_id}"
-        body: dict[str, Any] = {"records": [{"fields": item} for item in records]}
-        if typecast:
-            body["typecast"] = True
-        response = requests.post(url, headers=self._headers, json=body, timeout=60)
-        response.raise_for_status()
-        return response.json().get("records", [])
+        created: list[dict[str, Any]] = []
+        for start in range(0, len(records), 10):
+            chunk = records[start : start + 10]
+            body: dict[str, Any] = {"records": [{"fields": item} for item in chunk]}
+            if typecast:
+                body["typecast"] = True
+            response = requests.post(url, headers=self._headers, json=body, timeout=60)
+            response.raise_for_status()
+            created.extend(response.json().get("records", []))
+        return created
+
+    def update_records(
+        self,
+        table_id: str,
+        records: list[dict[str, Any]],
+        *,
+        typecast: bool = True,
+    ) -> list[dict[str, Any]]:
+        """Batch PATCH up to 10 Airtable records per request.
+
+        Each item must be ``{"id": "...", "fields": {...}}``.
+        """
+        import requests
+
+        url = f"{self._api_root}/{self._base_id}/{table_id}"
+        updated: list[dict[str, Any]] = []
+        for start in range(0, len(records), 10):
+            chunk = records[start : start + 10]
+            body: dict[str, Any] = {
+                "records": [
+                    {"id": str(item["id"]), "fields": dict(item.get("fields") or {})}
+                    for item in chunk
+                    if item.get("id")
+                ]
+            }
+            if not body["records"]:
+                continue
+            if typecast:
+                body["typecast"] = True
+            response = requests.patch(url, headers=self._headers, json=body, timeout=60)
+            response.raise_for_status()
+            updated.extend(response.json().get("records", []))
+        return updated

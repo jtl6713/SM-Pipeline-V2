@@ -158,7 +158,8 @@ def upsert_variant_queue(
             max_records=100,
         )
     }
-    created = 0
+    creates: list[dict[str, Any]] = []
+    updates: list[dict[str, Any]] = []
     for asset in assets:
         if asset_is_video(asset):
             continue
@@ -198,32 +199,37 @@ def upsert_variant_queue(
             if current:
                 status = field_str(current, "Transfer_Status")
                 if status not in {"Ready", "Drive Uploaded", "Processing"}:
-                    client.update_record(MEDIA_TRANSFER_QUEUE_TABLE, current["id"], fields, typecast=True)
-                    created += 1
+                    updates.append({"id": current["id"], "fields": fields})
                 continue
-            client.create_records(MEDIA_TRANSFER_QUEUE_TABLE, [fields], typecast=True)
-            created += 1
+            creates.append(fields)
     keep = set()
     for asset in assets:
         asset_ratios = ratios_for_asset(plan, asset, assets) if plan is not None else ratios
         for ratio in asset_ratios:
             keep.add(variant_transfer_id(request_id, str(asset.get("id")), ratio))
+    drops: list[dict[str, Any]] = []
     for transfer_id, row in existing.items():
         if transfer_id in keep:
             continue
         status = field_str(row, "Transfer_Status")
         if status not in {"Pending", "Processing"}:
             continue
-        client.update_record(
-            MEDIA_TRANSFER_QUEUE_TABLE,
-            row["id"],
+        drops.append(
             {
-                "Transfer_Status": "Error",
-                "Error_Message": "Dropped — this ratio is not required for the current plan or cover.",
-            },
-            typecast=True,
+                "id": row["id"],
+                "fields": {
+                    "Transfer_Status": "Error",
+                    "Error_Message": "Dropped — this ratio is not required for the current plan or cover.",
+                },
+            }
         )
-    return created
+    if updates:
+        client.update_records(MEDIA_TRANSFER_QUEUE_TABLE, updates, typecast=True)
+    if creates:
+        client.create_records(MEDIA_TRANSFER_QUEUE_TABLE, creates, typecast=True)
+    if drops:
+        client.update_records(MEDIA_TRANSFER_QUEUE_TABLE, drops, typecast=True)
+    return len(creates) + len(updates)
 
 
 def outstanding_count(rows: list[dict[str, Any]]) -> int:
