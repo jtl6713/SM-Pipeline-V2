@@ -240,7 +240,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.389-output-scope-authority";
+  const BUILD_ID = "item4-0.6.390-clip-preview-playback";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -6426,8 +6426,12 @@
         const candidates = [];
         const local = item4LocalClipPoster(asset?.name) || item4LocalClipPoster(asset?.id);
         const poster = String(asset?.poster_url || "").trim();
+        const driveThumb = item4DriveThumbnailUrl(asset?.google_drive_file_id);
         if (local) candidates.push(local);
         if (item4ClipPosterLooksReal(poster)) candidates.push(poster);
+        // Drive can produce a still thumbnail for video files. Keep it as a
+        // fallback when a persisted poster is missing or has gone stale.
+        if (driveThumb) candidates.push(driveThumb);
         return [...new Set(candidates.filter(Boolean))];
       }
       const candidates = [];
@@ -6448,6 +6452,34 @@
     }
   }
 
+  function item4PreserveClipPlayerAfterPosterFailure(img) {
+    const player = img?.closest?.("[data-item4-clip-player]");
+    if (!player) return false;
+    const video = player.querySelector("video");
+    const stream = String(video?.dataset?.item4Stream || video?.getAttribute("src") || "").trim();
+
+    // A broken poster must never destroy the playable clip. Drop only the
+    // failed image and let the video element become the visual fallback.
+    try { img.remove(); } catch {}
+    if (video && stream) {
+      video.dataset.item4Stream = stream;
+      video.preload = "auto";
+      if (!video.currentSrc && !video.getAttribute("src")) video.src = stream;
+      try { video.load(); } catch {}
+    }
+
+    // A syntactically valid R2 poster URL can still point at a missing object.
+    // Clear it in memory so the existing poster generator will rebuild it from
+    // the authoritative clip stream, then repaint Frames when it succeeds.
+    const card = player.closest("[data-item4-asset]");
+    const asset = item4MasterAsset(card?.dataset?.item4Asset);
+    if (asset) {
+      asset.poster_url = "";
+      window.setTimeout(() => item4EnsureClipPosters([asset]), 0);
+    }
+    return true;
+  }
+
   function item4BindPreviewImage(img, { placeholder, candidates, failureKey } = {}) {
     const chain = (Array.isArray(candidates) && candidates.length
       ? candidates
@@ -6465,6 +6497,7 @@
     // Only suppress while cooldown is active. After cooldown, retry even if
     // earlier attempts hit ITEM4_PREVIEW_RETRY_MAX (previews often become Ready later).
     if (blocked?.exhaustedAt && Date.now() - blocked.exhaustedAt < ITEM4_POLL_EXTRA_MS) {
+      if (item4PreserveClipPlayerAfterPosterFailure(img)) return;
       const host = img.closest(".item4-thumb, .item4-variant-image-wrap");
       if (host && typeof placeholder === "function") host.innerHTML = placeholder();
       return;
@@ -6508,6 +6541,7 @@
       }
       recorded.exhaustedAt = Date.now();
       item4PreviewFailures.set(key, recorded);
+      if (item4PreserveClipPlayerAfterPosterFailure(img)) return;
       const host = img.closest(".item4-thumb, .item4-variant-image-wrap");
       if (host && typeof placeholder === "function") host.innerHTML = placeholder();
       else {
@@ -6647,7 +6681,7 @@
       ? `<img src="${escapeHtml(previewUrl)}" alt="${escapeHtml(name || "Clip")}" loading="lazy" class="item4-clip-poster"${asset ? ` data-item4-preview-image data-preview-src="${escapeHtml(previewUrl)}" data-preview-failure-key="${escapeHtml(String(asset.id || asset.media_asset_record_id || previewUrl))}"` : ""}>`
       : "";
     const video = src
-      ? `<video muted playsinline class="item4-clip-video"${preload ? ` src="${escapeHtml(src)}" preload="metadata"` : ` preload="none" data-item4-stream="${escapeHtml(src)}"`}></video>`
+      ? `<video muted playsinline class="item4-clip-video" data-item4-stream="${escapeHtml(src)}"${preload ? ` src="${escapeHtml(src)}" preload="metadata"` : ` preload="none"`}></video>`
       : "";
     if (!img && !video) return "";
     return `<div class="item4-clip-poster-wrap" data-item4-clip-player data-clip-key="${escapeHtml(String(asset?.id || asset?.media_asset_record_id || name || ""))}">
@@ -6740,13 +6774,16 @@
       const ensureSrc = () => {
         if (!video) return false;
         const pending = String(video.dataset.item4Stream || "").trim();
-        if (!pending) return false;
         if (video.dataset.item4Failed === "1") {
           video.removeAttribute("src");
           try { video.load(); } catch {}
           delete video.dataset.item4Failed;
         }
+        // Preloaded Production cards already have src=. That is a valid,
+        // playable source and must not be rejected just because it was not
+        // deferred through data-item4-stream.
         if (video.currentSrc || video.getAttribute("src")) return true;
+        if (!pending) return false;
         video.src = pending;
         return true;
       };
@@ -8470,6 +8507,9 @@
     item4AssetStripSignature = "";
     renderItem4Assets(item4Workspace);
     renderEzPhotoStrip();
+    // Frames is a separate gallery. Repaint it too so a poster that finishes
+    // asynchronously replaces the generic/fallback video view immediately.
+    if ($("item4VariantGallery")) renderItem4Variants(item4Workspace);
   }
 
   async function item4FillClipPoster(asset) {
