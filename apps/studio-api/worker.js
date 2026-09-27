@@ -14290,6 +14290,30 @@ async function generateItem4PreProductionAiMaster(request, env, url, authorizati
       ].join(" ");
   const ratio = item4PreProductionAiRatio(record);
   const image = await item4GeneratePreProductionImageBytes(env, prompt, ratio);
+
+  // Image generation is slow enough that the operator can delete an AI master
+  // while this request is in flight. Re-read the manifest before committing.
+  // A delete stamps ez-ai-auto=off; if an asset disappeared since this request
+  // started, the delete wins and this generated image is discarded.
+  const latestBeforeAiCommit = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, recordId).catch(() => record);
+  const latestBeforeAiAssets = item4AssetManifest(latestBeforeAiCommit);
+  const originalAssetIds = new Set(assets.map((asset) => String(asset?.id || "")).filter(Boolean));
+  const latestAssetIds = new Set(latestBeforeAiAssets.map((asset) => String(asset?.id || "")).filter(Boolean));
+  const aiDeleteDuringGeneration = /ez-ai-auto=off/i.test(String(f(latestBeforeAiCommit, "Production_Notes") || ""))
+    && [...originalAssetIds].some((id) => !latestAssetIds.has(id));
+  if (aiDeleteDuringGeneration) {
+    return respond(request, env, {
+      ok: true,
+      completed: true,
+      cancelled: true,
+      requested_count: desiredAiCount,
+      generated_count: latestBeforeAiAssets.filter((asset) => /^studio_ai/i.test(String(asset?.source || ""))).length,
+      assets: latestBeforeAiAssets,
+      production_request: mapProductionRequest(latestBeforeAiCommit),
+      message: "AI generation stopped because an image was deleted.",
+    });
+  }
+
   const stamp = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 7)}`;
   const id = `aipre${stamp}`;
   const name = `${assetName}.png`;
