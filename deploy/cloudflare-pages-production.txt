@@ -16,3 +16,5 @@ Production AI prompt guidance: 2026-09-26 - adds a description box for user-dire
 Asset Manager classification watch repair: 2026-09-26 - expires stale session classification watches, prunes terminal/missing records, and avoids false "Classifying 1 of 2 remaining" banners. UI 0.6.386. Source merge 05b5cfc.
 
 Studio classification build ID alignment: 2026-09-26 - aligns app BUILD_ID with UI 0.6.386 so the Pages verifier and browser cache-bust use the same build. Source merge 5ee215b.
+
+Production asset deletion authority: 2026-09-26 - keeps deleted assets hidden while DELETEs drain and stops AI assets from automatically reappearing after explicit removal. UI 0.6.387. Source merge 5ba473c.
