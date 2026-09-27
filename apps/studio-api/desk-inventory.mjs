@@ -908,6 +908,6 @@ export function buildDeskInventoryPayload({
     health: Array.isArray(health) ? health : [],
     incidents: rows,
     checks: attachQualityChecks(rows, { generatedAt: generated, scannedKinds }),
-    recap: buildQualityRecap({ incidents: rows, events: activityEvents }),
+    recap: buildQualityRecap({ incidents: rows, events: activityEvents, generatedAt: generated }),
   };
 }

@@ -36,11 +36,41 @@ test("recap marks handled tickets that are no longer open", () => {
         record_id: "reckHkuJfs1F6eTAN",
       },
     }],
+    generatedAt: "2026-09-26T22:40:00.000Z",
   });
   assert.equal(recap.open_count, 0);
   assert.equal(recap.cards[0].status, "Handled");
+  assert.equal(recap.cards[0].found_at, "2026-09-26T19:36:41.586Z");
+  assert.equal(recap.cards[0].resolved_at, "2026-09-26T22:40:00.000Z");
+  assert.equal(recap.cards[0].resolved_how, recap.cards[0].action);
   assert.match(recap.empty_copy, /Nothing is blocked/i);
   assert.match(recap.cards[0].action, /Restarted production|missing photos/i);
+});
+
+test("open recap cards keep a found date and say still open", () => {
+  const recap = buildQualityRecap({
+    incidents: [{
+      kind: "publish_failed_transient",
+      class: "transient",
+      actor: "worker_heal",
+      fingerprint: "publish_failed_transient:recuOQs6TgAXJqxRI:transient_http",
+      output_id: 908,
+      created_at: "2026-09-26T08:47:24.000Z",
+    }],
+    events: [{
+      created_at: "2026-09-26T08:47:24.000Z",
+      payload: {
+        kind: "publish_failed_transient",
+        fingerprint: "publish_failed_transient:recuOQs6TgAXJqxRI:transient_http",
+        output_id: 908,
+      },
+    }],
+    generatedAt: "2026-09-26T22:40:00.000Z",
+  });
+  assert.equal(recap.cards[0].found_at, "2026-09-26T08:47:24.000Z");
+  assert.equal(recap.cards[0].resolved_at, null);
+  assert.equal(recap.cards[0].resolved_label, "Still open");
+  assert.match(recap.cards[0].resolved_how, /Restarted the send/);
 });
 
 test("recap skips tester noise and asks for help on desk-only blocks", () => {

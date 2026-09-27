@@ -46,3 +46,8 @@ Reason: Operations Quality Agent recap in everyday language
 Worker: 0.10.392-quality-recap
 Requested: 2026-09-26T22:40:00-05:00
 
+Deploy Studio API Worker production
+Reason: Recap cards include date found, date resolved, and how it was resolved
+Worker: 0.10.393-quality-recap-dates
+Requested: 2026-09-26T22:50:00-05:00
+

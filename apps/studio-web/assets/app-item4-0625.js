@@ -240,7 +240,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.393-quality-recap";
+  const BUILD_ID = "item4-0.6.394-quality-recap-dates";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -17598,13 +17598,18 @@
     for (const node of leads) node.textContent = lead;
     const html = cards.length
       ? cards.map((card) => {
-        const when = formatQualityCheckTime(card.when);
+        const foundAt = formatQualityCheckTime(card.found_at) || "Unknown";
+        const resolvedAt = card.open
+          ? (card.resolved_label || "Still open")
+          : (formatQualityCheckTime(card.resolved_at) || formatQualityCheckTime(card.when) || "Unknown");
+        const resolvedHow = card.resolved_how || card.action || "";
         const tone = card.tone === "alert" || card.tone === "ok" || card.tone === "work" ? card.tone : "";
         return `<li${tone ? ` data-tone="${escapeHtml(tone)}"` : ""}>
           <span class="ops-recap-status">${escapeHtml(card.status || "")}</span>
           <p class="ops-recap-found"><strong>Found.</strong> ${escapeHtml(card.found || "")}</p>
-          <p class="ops-recap-did"><strong>What we did.</strong> ${escapeHtml(card.action || "")}</p>
-          ${when ? `<p class="ops-recap-when">${escapeHtml(when)}</p>` : ""}
+          <p class="ops-recap-when"><strong>Date issue found.</strong> ${escapeHtml(foundAt)}</p>
+          <p class="ops-recap-when"><strong>Date issue resolved.</strong> ${escapeHtml(resolvedAt)}</p>
+          <p class="ops-recap-did"><strong>How it was resolved.</strong> ${escapeHtml(resolvedHow)}</p>
         </li>`;
       }).join("")
       : "";

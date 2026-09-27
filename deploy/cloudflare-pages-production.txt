@@ -28,3 +28,5 @@ Production clip preview playback: 2026-09-26 - preserves playable video when pos
 Existing Production platform authority: 2026-09-26 - hydrates hidden EZ platform controls from saved request/output state and prevents New Content defaults from overwriting existing YouTube-only drafts. UI 0.6.391.
 
 Quality Agent recap: 2026-09-26 - Operations Recap shows pipeline blocks and what Quality Agent did, in everyday language. UI 0.6.393.
+
+Quality Agent recap dates: 2026-09-26 - each recap card shows date found, date resolved, and how it was resolved. UI 0.6.394.

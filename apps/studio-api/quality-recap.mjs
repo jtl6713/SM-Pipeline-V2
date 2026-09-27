@@ -186,50 +186,79 @@ function incidentFromEvent(event) {
   });
 }
 
-export function buildQualityRecap({ incidents = [], events = [], limit = 12 } = {}) {
-  const open = [];
-  const openByFingerprint = new Map();
+function stampMs(value) {
+  const parsed = Date.parse(String(value || ""));
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function earliestIso(values, fallback) {
+  const times = values.map(stampMs).filter((value) => value != null);
+  if (!times.length) return fallback || null;
+  return new Date(Math.min(...times)).toISOString();
+}
+
+function latestIso(values, fallback) {
+  const times = values.map(stampMs).filter((value) => value != null);
+  if (!times.length) return fallback || null;
+  return new Date(Math.max(...times)).toISOString();
+}
+
+export function buildQualityRecap({ incidents = [], events = [], limit = 12, generatedAt } = {}) {
+  const checkedAt = generatedAt || new Date().toISOString();
+  const byFingerprint = new Map();
+  const remember = (row, extraTimes = []) => {
+    if (!row) return;
+    const current = byFingerprint.get(row.fingerprint) || { row, times: [], open: false };
+    current.row = { ...current.row, ...row };
+    current.times.push(row.when, ...extraTimes);
+    byFingerprint.set(row.fingerprint, current);
+  };
+
   for (const raw of incidents) {
     const row = asIncident(raw);
     if (!row) continue;
-    open.push(row);
-    openByFingerprint.set(row.fingerprint, row);
+    remember(row);
+    byFingerprint.get(row.fingerprint).open = true;
   }
 
-  const cards = [];
-  const seen = new Set();
-  const pushCard = (row, { open: isOpen, when } = {}) => {
-    if (!row || seen.has(row.fingerprint)) return;
-    seen.add(row.fingerprint);
+  const sortedEvents = [...(Array.isArray(events) ? events : [])].sort((left, right) => {
+    return Date.parse(left?.created_at || 0) - Date.parse(right?.created_at || 0);
+  });
+  for (const event of sortedEvents) {
+    const row = incidentFromEvent(event);
+    if (!row) continue;
+    remember(row, [event?.created_at, eventBody(event).resolved_at]);
+  }
+
+  const cards = [...byFingerprint.values()].map(({ row, times, open: isOpen }) => {
     const copy = qualityRecapCopy(row.kind);
     const label = qualityRecapItemLabel(row);
     const status = qualityRecapStatus({ actor: row.actor, class: row.class, open: isOpen });
-    cards.push({
+    const foundAt = earliestIso(times, checkedAt);
+    const lastSeen = latestIso(times, foundAt);
+    const resolvedAt = isOpen
+      ? null
+      : (stampMs(lastSeen) === stampMs(foundAt) ? checkedAt : lastSeen);
+    return {
       fingerprint: row.fingerprint,
       kind: row.kind,
       record_id: row.record_id,
       output_id: row.output_id,
       found: label ? `${copy.found} (${label})` : copy.found,
       action: copy.action,
+      resolved_how: copy.action,
       status: status.label,
       tone: status.tone,
-      when: when || row.when || null,
+      found_at: foundAt,
+      resolved_at: resolvedAt,
+      resolved_label: isOpen ? "Still open" : null,
+      when: foundAt,
       open: Boolean(isOpen),
-    });
-  };
-
-  for (const row of open) pushCard(row, { open: true, when: row.when });
-  const sortedEvents = [...(Array.isArray(events) ? events : [])].sort((left, right) => {
-    return Date.parse(right?.created_at || 0) - Date.parse(left?.created_at || 0);
+    };
+  }).sort((left, right) => {
+    if (left.open !== right.open) return left.open ? -1 : 1;
+    return Date.parse(right.found_at || 0) - Date.parse(left.found_at || 0);
   });
-  for (const event of sortedEvents) {
-    const row = incidentFromEvent(event);
-    if (!row) continue;
-    pushCard(row, {
-      open: openByFingerprint.has(row.fingerprint),
-      when: row.when,
-    });
-  }
 
   const limited = cards.slice(0, Math.max(1, Number(limit) || 12));
   const openCount = limited.filter((row) => row.open).length;
