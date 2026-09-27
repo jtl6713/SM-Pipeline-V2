@@ -19,7 +19,7 @@ const DEFAULT_MUSIC_END_FADE_SECONDS = 0.5;
 const PIPELINE_RUNNER_INTERNAL_URL = String(
     process.env.PIPELINE_RUNNER_INTERNAL_URL || 'http://127.0.0.1:3350'
 ).replace(/\/$/, '');
-const SERVICE_VERSION = '2026-09-20-music-60pct';
+const SERVICE_VERSION = '2026-09-27-private-drive-image-localization';
 const PROJECT_DIR = __dirname;
 const PUBLIC_DIR = path.join(PROJECT_DIR, 'public');
 const OUT_DIR = path.join(PROJECT_DIR, 'out');
@@ -146,6 +146,25 @@ function sanitizeOutputFilename(value) {
     }
 
     return cleaned;
+}
+
+function googleDriveFileIdFromUrl(rawUrl) {
+    const text = String(rawUrl || '').trim();
+    if (!text) return '';
+    try {
+        const parsed = new URL(text);
+        const host = parsed.hostname.toLowerCase();
+        if (!host.includes('drive.google.com') && !host.includes('docs.google.com') && !host.includes('googleusercontent.com')) {
+            return '';
+        }
+        const queryId = String(parsed.searchParams.get('id') || '').trim();
+        if (/^[A-Za-z0-9_-]+$/.test(queryId)) return queryId;
+        const fileMatch = parsed.pathname.match(/\/file\/d\/([A-Za-z0-9_-]+)/i);
+        if (fileMatch) return fileMatch[1];
+        const dMatch = parsed.pathname.match(/\/d\/([A-Za-z0-9_-]+)/i);
+        if (dMatch) return dMatch[1];
+    } catch {}
+    return '';
 }
 
 function getExtensionFromUrl(rawUrl, fallbackExt) {
@@ -458,15 +477,22 @@ async function rewriteClipAssets({ clips, jobId, jobAssetDir, job }) {
         const clip = clips[index];
         const clipId = clip.id || `clip-${index + 1}`;
         const mediaKind = String(clip.mediaKind || clip.media_kind || '').trim().toLowerCase();
-        const driveFileId = mediaKind === 'video'
-            ? String(clip.googleDriveFileId || clip.google_drive_file_id || '').trim()
-            : '';
+        const driveFileId = String(
+            clip.googleDriveFileId
+            || clip.google_drive_file_id
+            || googleDriveFileIdFromUrl(clip.url)
+            || googleDriveFileIdFromUrl(clip.src)
+            || ''
+        ).trim();
         const sourceUrl = driveFileId
             ? `${PIPELINE_RUNNER_INTERNAL_URL}/internal/drive-media/${encodeURIComponent(driveFileId)}`
             : clip.url;
 
         if (isHttpUrl(sourceUrl)) {
-            const ext = driveFileId ? '.mp4' : getExtensionFromUrl(sourceUrl, '.mp4');
+            const fallbackExt = mediaKind === 'video' ? '.mp4' : '.jpg';
+            const ext = driveFileId
+                ? (mediaKind === 'video' ? '.mp4' : getExtensionFromUrl(clip.url || clip.src || '', fallbackExt))
+                : getExtensionFromUrl(sourceUrl, fallbackExt);
             const baseName = sanitizeSimpleName(clipId, `clip-${index + 1}`);
             const filename = makeUniqueFilename(`${baseName}${ext}`, usedFilenames);
             const destination = path.join(jobAssetDir, filename);
@@ -644,6 +670,53 @@ async function rewriteVoiceoverAsset({ voiceover, jobAssetDir, job }) {
     throw new Error('Voiceover must include either src or url.');
 }
 
+async function rewriteWatermarkAsset({ watermarkUrl, jobAssetDir, job }) {
+    const raw = String(watermarkUrl || '').trim();
+    if (!raw) return '';
+
+    const driveFileId = googleDriveFileIdFromUrl(raw);
+    const sourceUrl = driveFileId
+        ? `${PIPELINE_RUNNER_INTERNAL_URL}/internal/drive-media/${encodeURIComponent(driveFileId)}`
+        : raw;
+
+    if (!isHttpUrl(sourceUrl)) return raw;
+
+    const ext = getExtensionFromUrl(raw, '.png');
+    const safeExt = /\.(png|jpe?g|webp)$/i.test(ext) ? ext : '.png';
+    const destination = path.join(jobAssetDir, `watermark${safeExt}`);
+
+    appendLog(
+        job,
+        driveFileId
+            ? 'Downloading watermark from private Drive authority'
+            : `Downloading watermark from ${sourceUrl}`
+    );
+    await downloadUrlToFile(sourceUrl, destination);
+    appendLog(job, `Downloaded watermark to ${toProjectRelative(destination)}`);
+    return toPublicSrc(destination);
+}
+
+function compactRemotionFailure(job, exitCode) {
+    const chunks = Array.isArray(job?.logs) ? job.logs : [];
+    const clean = (value) => String(value || '')
+        .replace(/\u001b\[[0-9;]*m/g, '')
+        .replace(/\s+/g, ' ')
+        .trim();
+    const candidates = [];
+    for (const chunk of chunks.slice(-24)) {
+        for (const line of String(chunk || '').split(/\r?\n/)) {
+            const text = clean(line);
+            if (!text) continue;
+            if (/Error loading image with src:|ERR_BLOCKED_BY_ORB|Download failed 403|HTTP status code: 403/i.test(text)) {
+                candidates.push(text);
+            }
+        }
+    }
+    const detail = candidates[candidates.length - 1] || '';
+    const base = `Remotion render failed with exit code ${exitCode}`;
+    return detail ? `${base}: ${detail}`.slice(0, 2000) : base;
+}
+
 async function buildRewrittenProps({ body, jobId, job }) {
     if (String(body.compositionId || '') === 'ARM-SMOKE') {
         const filename = sanitizeOutputFilename(body.filename || 'arm-smoke.mp4');
@@ -695,6 +768,12 @@ async function buildRewrittenProps({ body, jobId, job }) {
 
     const rewrittenVoiceover = await rewriteVoiceoverAsset({
         voiceover: normalizeVoiceover(body),
+        jobAssetDir,
+        job,
+    });
+
+    const rewrittenWatermarkUrl = await rewriteWatermarkAsset({
+        watermarkUrl: body.watermarkUrl,
         jobAssetDir,
         job,
     });
@@ -863,6 +942,12 @@ async function buildRewrittenProps({ body, jobId, job }) {
         props.voiceover = rewrittenVoiceover;
     }
 
+    if (rewrittenWatermarkUrl) {
+        props.watermarkUrl = rewrittenWatermarkUrl;
+    } else {
+        delete props.watermarkUrl;
+    }
+
     if (
         rewrittenVoiceover &&
         typeof rewrittenVoiceover.volume === 'number'
@@ -949,7 +1034,7 @@ function runRemotionRender({ jobId, compositionId, filename, propsFilePath }) {
                 resolve();
             } else {
                 job.status = 'failed';
-                job.error = `Remotion render failed with exit code ${code}`;
+                job.error = compactRemotionFailure(job, code);
                 appendLog(job, job.error);
                 notifyStudioR5Done(job);
                 reject(new Error(job.error));
@@ -967,6 +1052,8 @@ app.get('/health', async (req, res) => {
         voiceoverAwareDuration: true,
         defaultVoiceoverTailSeconds: DEFAULT_VOICEOVER_TAIL_SECONDS,
         postVoiceoverMusicBoost: true,
+        privateDriveImageLocalization: true,
+        watermarkLocalization: true,
         cleanup: {
             enabled: true,
             staleHours: remotionCleanup.staleHours,

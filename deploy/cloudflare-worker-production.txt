@@ -132,3 +132,9 @@ Deploy Studio API Worker production
 Reason: make Platform Output fanout authoritative before promotion success; Quality Agent heals promoted requests missing outputs
 Worker: 0.10.405-promotion-fanout-authority
 Requested: 2026-09-27T17:45:00-05:00
+
+Deploy Studio API Worker production
+Reason: Quality Agent autonomously detects and heals private Google Drive watermark 403 / ERR_BLOCKED_BY_ORB render failures; parks until Remotion localization support is live, then staggered R4 requeue
+Worker: 0.10.406-private-drive-watermark-heal
+Remotion: 2026-09-27-private-drive-image-localization
+Requested: 2026-09-27
