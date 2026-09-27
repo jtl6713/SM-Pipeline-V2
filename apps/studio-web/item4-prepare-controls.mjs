@@ -15,10 +15,11 @@ export function item4PrepareButtonView({
   readyCount = 0,
   targetCount = 0,
   inFlight = false,
+  canAutoPlan = false,
 } = {}) {
   const planReady = String(planStatus || "") === "Ready";
   const count = `${Number(readyCount || 0)}/${targetCount || "?"}`;
-  if (!planReady) {
+  if (!planReady && !canAutoPlan) {
     return { disabled: true, label: "Prepare", retry: false };
   }
   if (inFlight) {

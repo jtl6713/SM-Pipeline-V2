@@ -22,6 +22,21 @@ test("stuck 23/27 prepare stays clickable as Retry remaining", () => {
   assert.equal(view.label, "Retry remaining (23/27)");
 });
 
+
+test("assets-ready request with a missing plan keeps Prepare clickable for auto-plan", () => {
+  assert.deepEqual(item4PrepareButtonView({
+    planStatus: "Needs Plan",
+    variantStatus: "None",
+    canAutoPlan: true,
+  }), { disabled: false, label: "Prepare", retry: false });
+
+  assert.deepEqual(item4PrepareButtonView({
+    planStatus: "Needs Plan",
+    variantStatus: "None",
+    canAutoPlan: false,
+  }), { disabled: true, label: "Prepare", retry: false });
+});
+
 test("in-flight POST still locks the button", () => {
   const view = item4PrepareButtonView({
     planStatus: "Ready",
