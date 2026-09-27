@@ -85,11 +85,16 @@ jobs:
           AUTH="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
           CODE=$(curl -sS -o /tmp/pages-project.json -w "%{http_code}" "$API/$PAGES_PROJECT" -H "$AUTH" || true)
           if [[ "$CODE" == "404" ]]; then
-            curl -fsS -X POST "$API" \
+            jq -n --arg name "$PAGES_PROJECT" '{name:$name,production_branch:"main"}' > /tmp/pages-project-create-payload.json
+            CREATE_CODE=$(curl -sS -o /tmp/pages-project-create.json -w "%{http_code}" -X POST "$API" \
               -H "$AUTH" -H "Content-Type: application/json" \
-              --data "{"name":"$PAGES_PROJECT","production_branch":"main"}" \
-              -o /tmp/pages-project-create.json
-            jq -e '.success == true and .result.name == env.PAGES_PROJECT' /tmp/pages-project-create.json >/dev/null
+              --data-binary @/tmp/pages-project-create-payload.json)
+            if [[ "$CREATE_CODE" -lt 200 || "$CREATE_CODE" -ge 300 ]]; then
+              echo "Pages project create failed (HTTP $CREATE_CODE)" >&2
+              jq -c '{success,errors,messages}' /tmp/pages-project-create.json >&2 || cat /tmp/pages-project-create.json >&2
+              exit 1
+            fi
+            jq -e --arg p "$PAGES_PROJECT" '.success == true and .result.name == $p' /tmp/pages-project-create.json >/dev/null
             echo "Pages project created: $PAGES_PROJECT"
           elif [[ "$CODE" == "200" ]]; then
             jq -e '.success == true and .result.name == env.PAGES_PROJECT' /tmp/pages-project.json >/dev/null
