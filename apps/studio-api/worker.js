@@ -12317,15 +12317,16 @@ async function getProductionRequest(request, env, url, authorization) {
   if (ideaId) {
     try {
       const idea = await loadAuthorizedIdea(env, ideaId, authorization);
+      const locked = await lockIdeaPhotoListeningForProduction(env, idea, record);
       record = await maybeHealDraftNarrationVoice(
         env,
-        record,
-        idea,
+        locked.request,
+        locked.idea,
         authorization,
         requestedProfileId(url)
       );
     } catch (error) {
-      console.warn("production request voice heal skipped", recordId, error);
+      console.warn("production request listener/voice heal skipped", recordId, error);
     }
   }
   const ideaTitles = await loadIdeaTitlesByRecordId(env, [ideaId]);
