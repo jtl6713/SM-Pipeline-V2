@@ -23,7 +23,27 @@ def test_heic_classification_uses_drive_jpeg_data_url():
     assert url.startswith("data:image/jpeg;base64,")
 
 
-def test_jpeg_classification_keeps_drive_download_url():
+def test_jpeg_classification_uses_authenticated_drive_thumbnail():
+    url = classification_image_url(
+        {
+            "fields": {
+                "Google Drive File ID": "driveHeic",
+                "MIME_Type": "image/jpeg",
+                "Asset Name": "skyline.jpg",
+                "File_Extension": "jpg",
+            }
+        },
+        drive=_ThumbDrive(),
+    )
+    assert url.startswith("data:image/jpeg;base64,")
+
+
+class _NoThumbDrive:
+    def download_thumbnail(self, file_id, *, size="w720"):
+        return None
+
+
+def test_public_image_falls_back_to_drive_download_url_when_thumbnail_missing():
     url = classification_image_url(
         {
             "fields": {
@@ -33,6 +53,6 @@ def test_jpeg_classification_keeps_drive_download_url():
                 "File_Extension": "jpg",
             }
         },
-        drive=_ThumbDrive(),
+        drive=_NoThumbDrive(),
     )
     assert url == "https://drive.google.com/uc?export=download&id=driveJpeg"
