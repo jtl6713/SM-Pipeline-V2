@@ -30,9 +30,11 @@ test("async poster repair repaints the Frames gallery", () => {
   assert.match(app, /if \(\$\("item4VariantGallery"\)\) renderItem4Variants\(item4Workspace\)/);
 });
 
-test("Studio build is 0.6.390 clip preview playback", () => {
+test("Studio build and app cache key stay aligned after clip preview playback changes", () => {
   const build = app.match(/BUILD_ID = "item4-([^"]+)"/)?.[1];
-  assert.equal(build, "0.6.390-clip-preview-playback");
-  assert.match(html, /UI build 0\.6\.390/);
+  const uiBuild = html.match(/UI build (0\.6\.\d+)/)?.[1];
+  assert.ok(build);
+  assert.ok(uiBuild);
+  assert.equal(uiBuild, build.match(/^0\.6\.\d+/)?.[0]);
   assert.ok(html.includes(`/assets/app-item4-0625.js?v=${build}`));
 });
