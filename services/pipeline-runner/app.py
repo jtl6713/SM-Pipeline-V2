@@ -91,6 +91,7 @@ def health():
                 {"name": "studio-produce-ops-alert", "path": "/jobs/studio-produce/ops-alert"},
                 {"name": "studio-music-library", "path": "/jobs/studio-music-library"},
                 {"name": "studio-asset-library", "path": "/jobs/studio-asset-library"},
+                {"name": "studio-asset-watermark", "path": "/jobs/studio-asset-watermark"},
                 {"name": "studio-asset-library-rename", "path": "/jobs/studio-asset-library-rename"},
                 {"name": "studio-ai-image", "path": "/jobs/studio-ai-image"},
                 {"name": "autonomous-pick", "path": "/jobs/autonomous-pick"},
@@ -431,12 +432,18 @@ def run_studio_asset_library():
     upload = request.files.get("file")
     filename = str(request.form.get("filename") or getattr(upload, "filename", "") or "").strip()
     mime_type = str(request.form.get("mime_type") or getattr(upload, "mimetype", "") or "").strip()
+    profile_name = str(request.form.get("profile_name") or request.form.get("content_profile_name") or "").strip()
     content = upload.read() if upload else b""
     if not content:
         return jsonify({"error": "file is required"}), 422
     from studio_library.processor import ingest_studio_library_asset
     try:
-        result = ingest_studio_library_asset(content=content, filename=filename, mime_type=mime_type)
+        result = ingest_studio_library_asset(
+            content=content,
+            filename=filename,
+            mime_type=mime_type,
+            profile_name=profile_name,
+        )
     except ValueError as exc:
         return jsonify({"error": str(exc)}), 422
     except Exception as exc:
@@ -449,6 +456,38 @@ def run_studio_asset_library():
         result.get("kind"),
     )
     return jsonify(result), 201
+
+
+@app.post("/jobs/studio-asset-watermark")
+def run_studio_asset_watermark():
+    error_response, status = _verify_secret()
+    if error_response is not None:
+        return error_response, status
+    payload = request.get_json(silent=True) or {}
+    file_id = str(payload.get("google_drive_file_id") or payload.get("file_id") or "").strip()
+    filename = str(payload.get("filename") or payload.get("name") or "asset").strip()
+    mime_type = str(payload.get("mime_type") or "").strip()
+    profile_name = str(payload.get("profile_name") or payload.get("content_profile_name") or "").strip()
+    from studio_library.processor import watermark_existing_drive_asset
+    try:
+        result = watermark_existing_drive_asset(
+            file_id=file_id,
+            filename=filename,
+            mime_type=mime_type,
+            profile_name=profile_name,
+        )
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 422
+    except Exception as exc:
+        logger.exception("studio-asset-watermark failed")
+        return jsonify({"error": str(exc)}), 502
+    logger.info(
+        "job=studio-asset-watermark source=%s output=%s profile=%s",
+        file_id,
+        result.get("google_drive_file_id"),
+        profile_name,
+    )
+    return jsonify(result), 200
 
 
 @app.post("/jobs/studio-asset-library-delete")

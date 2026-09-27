@@ -162,7 +162,7 @@ def upsert_variant_queue(
     for asset in assets:
         if asset_is_video(asset):
             continue
-        drive_id = str(asset.get("google_drive_file_id") or "").strip()
+        drive_id = str(asset.get("source_google_drive_file_id") or asset.get("google_drive_file_id") or "").strip()
         media_id = str(asset.get("media_asset_record_id") or "").strip()
         if not drive_id or not media_id:
             raise RuntimeError(f"{asset.get('name') or 'Master photo'} is missing Drive authority")
@@ -394,10 +394,12 @@ def reconcile_master_authority(
         transfer_id = master_transfer_id(request_id, str(asset.get("id")))
         queue = by_transfer.get(transfer_id)
         drive_id = str(asset.get("google_drive_file_id") or "").strip()
+        source_drive_id = str(asset.get("source_google_drive_file_id") or "").strip()
         drive_url = str(asset.get("google_drive_url") or "").strip()
         media_id = str(asset.get("media_asset_record_id") or "").strip()
         preview_url = str(asset.get("preview_url") or asset.get("url") or "").strip()
         if queue:
+            source_drive_id = source_drive_id or field_str(queue, "Source_Drive_File_ID")
             preview_url = field_str(queue, "Preview_URL") or preview_url
             status = field_str(queue, "Transfer_Status")
             if status == "Failed" and not failed:
@@ -419,6 +421,7 @@ def reconcile_master_authority(
         next_assets.append({
             **asset,
             "google_drive_file_id": drive_id or None,
+            "source_google_drive_file_id": source_drive_id or None,
             "google_drive_url": drive_url or None,
             "media_asset_record_id": media_id or None,
             "preview_url": preview_url or None,

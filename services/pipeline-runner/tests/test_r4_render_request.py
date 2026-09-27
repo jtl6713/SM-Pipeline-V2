@@ -1,6 +1,6 @@
 from r4.constants import R4_CLEAR_FIELDS
 from r4.formulas import r4_exact_output_formula, r4_production_formula
-from r4.processor import _eligible_exact_output, repair_studio_stream_render_sources
+from r4.processor import _eligible_exact_output, repair_studio_stream_render_sources, render_watermark_url
 from r4.render_request import brand_text, choose_render_request, expected_clip_count, voiceover_is_required
 
 
@@ -176,6 +176,24 @@ def test_r4_p020_uses_reduced_ducked_music_default():
     assert route == "p020_manifest"
     assert payload["music"]["volume"] == 0.6
     assert payload["music"]["duckingMultiplier"] == 0.084
+
+def test_r4_adds_official_watermark_only_for_chicagoshining(monkeypatch):
+    class _Client:
+        def __init__(self, profile_name):
+            self.profile_name = profile_name
+
+        def get_record(self, _table, _record_id):
+            return {"id": "recPROFILE", "fields": {"Profile_Name": self.profile_name}}
+
+    monkeypatch.setattr("r4.processor.brand_watermark_url", lambda _client: "https://example.com/chicago-watermark.png")
+
+    output = {"fields": {"Content_Profile": ["recPROFILE"]}}
+    assert render_watermark_url(_Client("ChicagoShining - Chicago"), output, None) == (
+        "https://example.com/chicago-watermark.png"
+    )
+    assert render_watermark_url(_Client("New York Shining"), output, None) == ""
+    assert render_watermark_url(_Client("Miami Shining"), output, None) == ""
+
 
 def test_r4_brand_text_falls_back_to_content_profile_brand():
     output = _photo_output()
