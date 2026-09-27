@@ -471,6 +471,11 @@
  <span>Describe what you want the AI image to be</span>
  <textarea id="item4AiPrompt" rows="3" maxlength="2000" placeholder="Example: Sunset view of the Chicago River from the bridge, cinematic, realistic, no text" aria-label="Describe the AI image"></textarea>
  </label>
+ <label class="form-field" style="min-width:240px;flex:1 1 280px;margin:0;">
+ <span>Asset name</span>
+ <input id="item4AiAssetBaseName" type="text" maxlength="120" placeholder="Leave blank to use the Production title" aria-label="AI asset name base">
+ <small>Uses Asset Manager numbering automatically — for example, Field Museum 9, Field Museum 10, …</small>
+ </label>
  <label class="form-field" style="min-width:110px;max-width:150px;margin:0;">
  <span>Quantity to add</span>
  <input id="item4AiAddCount" type="number" min="1" step="1" value="1" inputmode="numeric" aria-label="AI images to add">
@@ -1978,7 +1983,7 @@
  <div class="studio-footer-meta">
  <span id="aiApiFooter" aria-live="polite"><strong>AI API:</strong> loading…</span>
  <span id="apiStatus" class="topbar-status">Connecting…</span>
- <span id="uiBuildLabel">UI build 0.6.405</span>
+ <span id="uiBuildLabel">UI build 0.6.406</span>
  <span id="workerBuildLabel">Worker …</span> </div>
  </footer>
 
@@ -2139,7 +2144,7 @@
  <script src="/assets/ez-plan.js?v=0.6.376-recommend-carousel-slides"></script>
  <script src="/assets/pipeline-schedule-grid-0622.js?v=0.6.361-schedule-collapsed"></script>
  <script src="/assets/platform-schedule-calendar-0924.js?v=0.6.380-branch-reconcile"></script>
- <script src="/assets/app-item4-0625.js?v=0.6.405-story-audio-catalog"></script>
+ <script src="/assets/app-item4-0625.js?v=0.6.406-ai-profile-naming-delete-authority"></script>
  <script src="/assets/insights-0622.js?v=0.6.365-first-party-analytics-reconciled"></script>
  <script src="/assets/ai-api-footer.js?v=0.6.376-ai-api"></script>
  <script src="/assets/sticky-footer-scroll.js?v=0.6.378-sticky-footer-scroll"></script>
