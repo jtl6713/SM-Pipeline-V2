@@ -1,0 +1,148 @@
+name: Configure ops-dashboard hostname
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "deploy/local-services/configure-ops-dashboard-hostname.ps1"
+      - ".github/workflows/configure-ops-dashboard-hostname.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: configure-ops-dashboard-hostname
+  cancel-in-progress: false
+
+jobs:
+  configure:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      ACCOUNT_ID: cbb5651c94e9bd2efc4594dc87229acb
+      TUNNEL_ID: f7a22f0f-f760-4e16-a085-3538d22981f1
+    steps:
+      - name: Validate Cloudflare secrets
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "${CLOUDFLARE_API_TOKEN:-}"
+          test -n "${CLOUDFLARE_ACCOUNT_ID:-}"
+
+      - name: Fix tunnel ingress for ops (:3361) and watermark (:3011)
+        shell: bash
+        run: |
+          set -euo pipefail
+          AUTH="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
+          curl -fsS \
+            "https://api.cloudflare.com/client/v4/accounts/$ACCOUNT_ID/cfd_tunnel/$TUNNEL_ID/configurations" \
+            -H "$AUTH" -o /tmp/tunnel-before.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          payload = json.loads(Path("/tmp/tunnel-before.json").read_text())
+          ingress = payload.get("result", {}).get("config", {}).get("ingress") or []
+          desired = {
+              "ops.chicagoshining.com": "http://localhost:3361",
+              "watermark.chicagoshining.com": "http://localhost:3011",
+          }
+          kept = []
+          for rule in ingress:
+              host = rule.get("hostname") or ""
+              if host in desired:
+                  continue
+              if not host and str(rule.get("service", "")).startswith("http_status:"):
+                  continue
+              kept.append(rule)
+          for host, service in desired.items():
+              kept.append({"hostname": host, "service": service, "originRequest": {}})
+          kept.append({"service": "http_status:404"})
+          Path("/tmp/tunnel-after.json").write_text(json.dumps({"config": {"ingress": kept}}))
+          print("desired=", desired)
+          print("ingress_count_before=", len(ingress), "after=", len(kept))
+          PY
+          curl -fsS -X PUT \
+            "https://api.cloudflare.com/client/v4/accounts/$ACCOUNT_ID/cfd_tunnel/$TUNNEL_ID/configurations" \
+            -H "$AUTH" -H "Content-Type: application/json" \
+            --data-binary @/tmp/tunnel-after.json -o /tmp/tunnel-put.json
+          jq -e ".success == true" /tmp/tunnel-put.json >/dev/null
+          echo "tunnel_ingress=updated"
+
+      - name: Ensure DNS CNAMEs
+        shell: bash
+        run: |
+          set -euo pipefail
+          AUTH="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
+          TARGET="${TUNNEL_ID}.cfargotunnel.com"
+          if ! curl -fsS "https://api.cloudflare.com/client/v4/zones?name=chicagoshining.com" -H "$AUTH" -o /tmp/zone.json; then
+            {
+              echo "## Ops / watermark DNS needs manual step"
+              echo ""
+              echo "Tunnel ingress is configured. \`CLOUDFLARE_API_TOKEN\` cannot read zone DNS (403)."
+              echo "Confirm proxied CNAMEs exist:"
+              echo "- \`ops\` -> \`${TARGET}\`"
+              echo "- \`watermark\` -> \`${TARGET}\`"
+            } >> "$GITHUB_STEP_SUMMARY"
+            echo "dns_cname=manual_required"
+            exit 0
+          fi
+          ZONE_ID=$(jq -er ".result[0].id" /tmp/zone.json)
+          for HOSTNAME in ops.chicagoshining.com watermark.chicagoshining.com; do
+            curl -fsS "https://api.cloudflare.com/client/v4/zones/$ZONE_ID/dns_records?name=${HOSTNAME}" -H "$AUTH" -o /tmp/dns-before.json
+            EXISTING=$(jq -r '.result[0].id // empty' /tmp/dns-before.json)
+            BODY=$(jq -nc --arg name "$HOSTNAME" --arg content "$TARGET" '{type:"CNAME",name:$name,content:$content,proxied:true,ttl:1}')
+            if [[ -n "$EXISTING" ]]; then
+              curl -fsS -X PUT "https://api.cloudflare.com/client/v4/zones/$ZONE_ID/dns_records/$EXISTING" \
+                -H "$AUTH" -H "Content-Type: application/json" --data "$BODY" -o /tmp/dns-put.json
+            else
+              curl -fsS -X POST "https://api.cloudflare.com/client/v4/zones/$ZONE_ID/dns_records" \
+                -H "$AUTH" -H "Content-Type: application/json" --data "$BODY" -o /tmp/dns-put.json
+            fi
+            if jq -e ".success == true" /tmp/dns-put.json >/dev/null 2>&1; then
+              echo "dns_cname=${HOSTNAME}->${TARGET}"
+            else
+              cat /tmp/dns-put.json || true
+              echo "dns_cname_${HOSTNAME}=manual_required"
+            fi
+          done
+
+      - name: Verify public health when listeners are up
+        shell: bash
+        run: |
+          set -euo pipefail
+          check_one() {
+            local host="$1"
+            local needle="$2"
+            local code body
+            code=$(curl -sS -o /tmp/health.json -w "%{http_code}" "https://${host}/health" || true)
+            body=$(cat /tmp/health.json 2>/dev/null || true)
+            if [[ "$code" == "200" ]] && grep -qi "$needle" <<<"$body"; then
+              echo "${host}=PASS"
+              return 0
+            fi
+            echo "${host}=WAIT code=${code} body=$(echo "$body" | tr '\n' ' ' | head -c 160)"
+            return 1
+          }
+          ops_ok=0
+          wm_ok=0
+          for i in $(seq 1 12); do
+            check_one ops.chicagoshining.com ops && ops_ok=1 || true
+            check_one watermark.chicagoshining.com watermark && wm_ok=1 || true
+            if [[ "$ops_ok" -eq 1 && "$wm_ok" -eq 1 ]]; then
+              echo "public_health=PASS"
+              exit 0
+            fi
+            sleep 5
+          done
+          {
+            echo "## Public health waiting on Windows listeners"
+            echo ""
+            echo "- \`ops.chicagoshining.com\` must hit Ops Dashboard on \`localhost:3361\` (not watermark)."
+            echo "- \`watermark.chicagoshining.com\` must hit carousel watermark on \`localhost:3011\`."
+            echo "- Start/restart those local services on the tunnel host if health is still wrong."
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "public_health=WAITING_FOR_LOCAL_LISTENER"
