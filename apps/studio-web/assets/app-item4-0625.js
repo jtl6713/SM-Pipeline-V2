@@ -240,7 +240,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.395-quality-recap-ids";
+  const BUILD_ID = "item4-0.6.396-creative-clip-previews";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -13058,6 +13058,86 @@
     return status || "—";
   }
 
+  function phase6CreativeSlideMedia(slide = {}) {
+    const nested = [slide?.source_asset, slide?.media_asset, slide?.asset]
+      .find((row) => row && typeof row === "object") || {};
+    const nestedId = String(nested?.id || "").trim();
+    const slideId = String(slide?.id || "").trim();
+    const recordId = String(
+      slide?.media_asset_record_id
+      || nested?.media_asset_record_id
+      || slide?.source_media_asset_id
+      || nested?.source_media_asset_id
+      || (/^rec[A-Za-z0-9]+$/.test(nestedId) ? nestedId : "")
+      || (/^rec[A-Za-z0-9]+$/.test(slideId) ? slideId : "")
+      || ""
+    ).trim();
+    return {
+      ...nested,
+      ...slide,
+      id: slideId || nestedId,
+      name: slide?.name || nested?.name || "Clip",
+      media_kind: slide?.media_kind || nested?.media_kind || "",
+      mime_type: slide?.mime_type || nested?.mime_type || "",
+      media_asset_record_id: recordId,
+      poster_url: slide?.poster_url || nested?.poster_url || slide?.preview_image_url || nested?.preview_image_url || "",
+      preview_url: slide?.preview_url || nested?.preview_url || "",
+      url: slide?.url || nested?.url || slide?.source_url || nested?.source_url || "",
+      google_drive_file_id: slide?.google_drive_file_id || nested?.google_drive_file_id || "",
+      google_drive_url: slide?.google_drive_url || nested?.google_drive_url || "",
+      duration_seconds: slide?.duration_seconds ?? nested?.duration_seconds ?? 0,
+    };
+  }
+
+  function phase6CreativeSlideIsVideo(slide = {}) {
+    const media = phase6CreativeSlideMedia(slide);
+    if (item4AssetLooksLikeVideo(media)) return true;
+    if (String(media.mime_type || "").toLowerCase().startsWith("video/")) return true;
+    const urls = [
+      media.stream_url,
+      media.preview_stream_url,
+      media.video_url,
+      media.url,
+      media.preview_url,
+      media.google_drive_url,
+    ].map((value) => String(value || "").trim()).filter(Boolean);
+    if (urls.some((value) => /\.(mp4|mov|m4v|webm)(?:[?#]|$)/i.test(value))) return true;
+    return Boolean(media.poster_url && (media.media_asset_record_id || media.stream_url || media.preview_stream_url));
+  }
+
+  function phase6CreativeSlidePosterCandidates(slide = {}) {
+    const media = phase6CreativeSlideMedia(slide);
+    const candidates = item4AssetPreviewCandidates(media);
+    const extra = [
+      media.poster_url,
+      media.preview_image_url,
+      media.thumbnail_url,
+      media.still_url,
+    ].map((value) => String(value || "").trim()).filter((value) => value && item4PreviewUrlLooksLikeImage(value));
+    return [...new Set([...candidates, ...extra])];
+  }
+
+  function phase6CreativeSlideStreamUrl(slide = {}) {
+    const media = phase6CreativeSlideMedia(slide);
+    const routed = item4ClipStreamUrl(media);
+    if (routed) return routed;
+    const candidates = [
+      media.stream_url,
+      media.preview_stream_url,
+      media.video_url,
+      media.source_url,
+      media.url,
+      media.preview_url,
+      media.google_drive_url,
+    ].map((value) => String(value || "").trim()).filter(Boolean);
+    for (const candidate of candidates) {
+      if (item4PreviewUrlLooksLikeImage(candidate)) continue;
+      if (candidate.startsWith("/")) return `${apiBase}${candidate}`;
+      if (/^https?:\/\//i.test(candidate)) return candidate;
+    }
+    return "";
+  }
+
   function renderCreativeSlides() {
     const target = $("creativeSlidesList");
     $("creativeSlideCount").textContent = `${creativeSlides.length} slide${creativeSlides.length === 1 ? "" : "s"}`;
@@ -13087,16 +13167,30 @@
       const voiceover = slide.voiceover || {};
       const audioStatus = phase6SlideAudioStatus(slide, activeCreativeOutput);
       const variants = slide.variants || {};
-      const preview = slide.preview_url;
+      const media = phase6CreativeSlideMedia(slide);
+      const preview = String(media.preview_url || "").trim();
+      const isVideo = phase6CreativeSlideIsVideo(slide);
+      const previewCandidates = isVideo ? phase6CreativeSlidePosterCandidates(slide) : [preview].filter(Boolean);
+      const poster = previewCandidates[0] || "";
+      const stream = isVideo ? phase6CreativeSlideStreamUrl(slide) : "";
       const variantChips = ["4:5", "9:16", "1:1", "16:9"].map((ratio) => {
         const exact = Boolean(variants[ratio]);
         const current = ratio === targetRatio;
         const label = current ? (exact ? `${ratio} target · exact` : `${ratio} target · source/crop`) : (exact ? `${ratio} exact` : `${ratio} source-ready`);
         return `<span class="variant-chip ${exact ? "ready" : ""} ${current ? "target" : ""}">${escapeHtml(label)}</span>`;
       }).join("");
-      const previewHtml = preview
-        ? `<img src="${escapeHtml(preview)}" alt="${escapeHtml(slide.name || `Slide ${index + 1}`)}">`
-        : '<div class="slide-preview-placeholder">No preview image available</div>';
+      const previewHtml = isVideo
+        ? (item4ClipPlayerHtml({
+          previewUrl: poster,
+          streamUrl: stream,
+          name: media.name || slide.name || `Clip ${index + 1}`,
+          durationSeconds: media.duration_seconds,
+          asset: media,
+          preload: false,
+        }) || '<div class="slide-preview-placeholder">Clip preview unavailable</div>')
+        : (preview
+          ? `<img src="${escapeHtml(preview)}" alt="${escapeHtml(slide.name || `Slide ${index + 1}`)}">`
+          : '<div class="slide-preview-placeholder">No preview image available</div>');
       const titlePreviewHtml = phase6OverlayPreviewHtml({
         enabled: overlay.enabled,
         text: overlay.text,
@@ -13222,8 +13316,20 @@
       card.querySelector('[data-field="overlay_style"]')?.addEventListener("change", (event) => {
         if (event.target.value === "No Text") card.querySelector('[data-field="overlay_enabled"]').checked = false;
       });
+      const slide = creativeSlides.find((row) => String(row?.id || "") === String(card.dataset.slideId || ""));
+      if (slide && phase6CreativeSlideIsVideo(slide)) {
+        const media = phase6CreativeSlideMedia(slide);
+        const candidates = phase6CreativeSlidePosterCandidates(slide);
+        card.querySelectorAll("[data-item4-preview-image]").forEach((img) => {
+          item4BindPreviewImage(img, {
+            candidates,
+            failureKey: `creative-slide:${String(media.media_asset_record_id || media.id || card.dataset.slideId || "")}`,
+          });
+        });
+      }
       phase6BindOverlayPreview(card);
     });
+    item4BindClipPlayers(target);
     renderCreativeRatioPanel();
   }
 
