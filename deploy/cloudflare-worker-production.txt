@@ -28,3 +28,9 @@ Deploy Studio API Worker production
 Reason: Quality Agent + Worker heal Failed outputs older than 1 hour (908 TikTok 401)
 Worker: 0.10.390-failed-stale-1h
 Requested: 2026-09-26T14:40:00-05:00
+
+Deploy Studio API Worker production
+Reason: make Production asset deletion authoritative and disable AI auto-regeneration after explicit removal
+Worker: 0.10.391-asset-delete-authority
+Source merge: 5ba473c2d7f6d05108e9e3c15b14e8b830437055
+Requested: 2026-09-26
