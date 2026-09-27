@@ -24,6 +24,8 @@ export const categories = [
 
 const driveImage = (id, width = 1800) =>
   `https://drive.google.com/thumbnail?id=${encodeURIComponent(id)}&sz=w${width}`;
+// Heroes must be anyone-with-link library originals. Private fill-crop
+// variants 404 in the public browser (Miami Little Havana 21 crop).
 
 export const cities = [
   {
@@ -74,7 +76,7 @@ export const cities = [
     state: "Florida",
     accent: "#59d6df",
     accentSoft: "#dffbff",
-    hero: driveImage("1oeY9j0U90L3ELVNgSXZLdsceSWDRFkyt"),
+    hero: driveImage("1jw3qIVCM5ObJnc_RbgmTA1uKmZdcYok2"),
     heroAlt: "A vivid Little Havana street scene in Miami.",
     eyebrow: "Culture · waterfront · tropical detail",
     description:
@@ -197,14 +199,14 @@ export const stories = [
       "Little Havana is a place to explore at walking pace. Look beyond a single landmark and the neighborhood opens up through signs, storefronts, public art, gathering places and the street-level rhythm of Miami.",
     neighborhood: "Little Havana",
     location: "Little Havana, Miami, Florida",
-    image: driveImage("1oeY9j0U90L3ELVNgSXZLdsceSWDRFkyt"),
+    image: driveImage("1jw3qIVCM5ObJnc_RbgmTA1uKmZdcYok2"),
     imageAlt: "A colorful street scene in Little Havana, Miami.",
     categories: ["Neighborhoods", "Food & Drink", "Hidden Gems"],
     highlights: ["Street culture", "Colorful visual identity", "Food and gathering places"],
     published: "2026-09-26",
     updated: "2026-09-26",
     websiteStatus: "published",
-    source: { mediaAssetId: "recZ68XJcyKNwxyrH", driveFileId: "1oeY9j0U90L3ELVNgSXZLdsceSWDRFkyt" }
+    source: { mediaAssetId: "recZ68XJcyKNwxyrH", driveFileId: "1jw3qIVCM5ObJnc_RbgmTA1uKmZdcYok2" }
   },
   {
     city: "miami",

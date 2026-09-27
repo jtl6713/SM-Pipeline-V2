@@ -1,6 +1,31 @@
 import { cities, stories } from "../src/data/site.mjs";
 
 const errors = [];
+
+function driveFileIdFromUrl(url) {
+  const match = String(url || "").match(/[?&]id=([^&]+)/);
+  return match ? decodeURIComponent(match[1]) : "";
+}
+
+async function assertPublicDriveImage(url, label) {
+  const fileId = driveFileIdFromUrl(url);
+  if (!fileId) {
+    errors.push(`${label} is not a Drive image URL`);
+    return;
+  }
+  try {
+    const response = await fetch(`https://lh3.googleusercontent.com/d/${fileId}=w200`, {
+      method: "HEAD",
+      redirect: "follow",
+    });
+    const type = String(response.headers.get("content-type") || "");
+    if (!response.ok || !type.startsWith("image/")) {
+      errors.push(`${label} is not publicly readable (${response.status} ${type || "no type"}). Use an anyone-with-link library original, not a private fill-crop.`);
+    }
+  } catch (error) {
+    errors.push(`${label} could not be checked: ${error.message}`);
+  }
+}
 const citySlugs = new Set(cities.map((city) => city.slug));
 const routes = new Set();
 
@@ -28,6 +53,10 @@ for (const story of stories) {
   if (story.websiteStatus === "published" && (!story.source?.mediaAssetId || !story.source?.driveFileId)) {
     errors.push(`${route} is published without a traceable source media asset`);
   }
+}
+
+for (const city of cities) {
+  await assertPublicDriveImage(city.hero, `/${city.slug} hero`);
 }
 
 if (errors.length) {
