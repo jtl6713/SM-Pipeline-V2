@@ -6455,10 +6455,11 @@
     readyCount = 0,
     targetCount = 0,
     inFlight = false,
+    canAutoPlan = false,
   } = {}) {
     const planReady = String(planStatus || "") === "Ready";
     const count = `${Number(readyCount || 0)}/${targetCount || "?"}`;
-    if (!planReady) {
+    if (!planReady && !canAutoPlan) {
       return { disabled: true, label: "Prepare", retry: false };
     }
     if (inFlight) {
@@ -7699,13 +7700,17 @@
         readyCount,
         targetCount,
         inFlight: item4PreparingVariants,
+        canAutoPlan: Boolean(status?.assets?.length) && String(status?.assets_status || "") === "Ready",
       });
       button.disabled = view.disabled;
       button.textContent = view.label;
     }
     if (hint) {
+      const canAutoPlan = Boolean(status?.assets?.length) && String(status?.assets_status || "") === "Ready";
       hint.textContent = status?.plan_status !== "Ready"
-        ? "Choose platforms first."
+        ? (canAutoPlan
+          ? "Click Prepare. Studio will build the platform plan first, then prepare frames."
+          : "Finish adding media before preparing frames.")
         : variantStatus === "Preparing"
           ? (clipRequest
             ? `Studio is attaching clip frames (${readyCount}/${targetCount || "?"}). Leftover frames retry automatically if the count stops moving.`
@@ -8253,6 +8258,14 @@
       setRequestMessage(message, "error-text");
       item4ShowVariantError(message);
       return;
+    }
+    if (String(item4Workspace?.plan_status || "") !== "Ready") {
+      setRequestMessage("Building the platform plan before preparing frames…", "success");
+      await buildItem4Plan();
+      if (String(item4Workspace?.plan_status || "") !== "Ready") {
+        renderItem4Variants(item4Workspace || {});
+        return;
+      }
     }
     if (!autoRetry) item4VariantAutoRetries = 0;
     item4PreparingVariants = true;
