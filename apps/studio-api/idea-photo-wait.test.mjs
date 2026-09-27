@@ -8,8 +8,12 @@ import {
   ideaProductionConfigFields,
   mergeIdeaProductionNotes,
   parseIdeaNotedMediaIds,
+  productionPhotoWaitAutoOff,
+  productionPhotoWaitRejectedIds,
   rankIdeaLibraryFields,
   selectMatchedPhotos,
+  shouldAttachPhotoWaitAssets,
+  withProductionPhotoWaitManual,
 } from "./idea-photo-wait.mjs";
 
 test("generated ideas always get a listen-capable content type", () => {
@@ -140,6 +144,19 @@ test("same intake batch still classifying does not lock the set", () => {
   });
   assert.equal(forced.action, "ready");
   assert.equal(forced.selected.length, 3);
+});
+
+test("operator photo deletes lock photo-wait so cron cannot restore or reshuffle", () => {
+  assert.equal(shouldAttachPhotoWaitAssets({ action: "wait_batch" }), false);
+  assert.equal(shouldAttachPhotoWaitAssets({ action: "wait" }), false);
+  assert.equal(shouldAttachPhotoWaitAssets({ action: "ready" }), true);
+  assert.equal(shouldAttachPhotoWaitAssets({ action: "ready", autoOff: true }), false);
+  const notes = withProductionPhotoWaitManual("", ["recAbcdefghijklm1", "not-an-id"]);
+  assert.match(notes, /ez-photo-wait=off/);
+  assert.deepEqual(productionPhotoWaitRejectedIds(notes), ["recAbcdefghijklm1"]);
+  assert.equal(productionPhotoWaitAutoOff(notes), true);
+  const again = withProductionPhotoWaitManual(notes, ["recNopqrstuvwxyz2"]);
+  assert.deepEqual(productionPhotoWaitRejectedIds(again), ["recAbcdefghijklm1", "recNopqrstuvwxyz2"]);
 });
 
 test("CTA idea keys ignore cars/ride and keep train subject words", () => {

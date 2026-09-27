@@ -71,3 +71,8 @@ Reason: Live Short poll quota (1001/994) must not keep Manual Action Required
 Worker: 0.10.397-youtube-live-quota
 Requested: 2026-09-26T23:35:00-05:00
 
+Deploy Studio API Worker production
+Reason: Stop photo-wait cron from restoring deleted Production stills (DuSable Bridge)
+Worker: 0.10.398-photo-wait-manual-lock
+Requested: 2026-09-27T00:50:00-05:00
+

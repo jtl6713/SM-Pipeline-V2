@@ -145,7 +145,7 @@ import {
   summarizeObservations,
   youtubePublishedAfterIso,
 } from "./autonomous-produce.mjs";
-import { ideaAutoListenContentType, ideaProductionConfigFields, parseIdeaMachineNotes, parseIdeaNotedMediaIds } from "./idea-photo-wait.mjs";
+import { ideaAutoListenContentType, ideaProductionConfigFields, parseIdeaMachineNotes, parseIdeaNotedMediaIds, productionPhotoWaitAutoOff, productionPhotoWaitRejectedIds, shouldAttachPhotoWaitAssets, withProductionPhotoWaitManual } from "./idea-photo-wait.mjs";
 import {
   STUDIO_PUBLISH_RECONCILE_SCHEDULE_FORMULA,
   STUDIO_TIKTOK_INBOX_DUE_FORMULA,
@@ -437,7 +437,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.397-youtube-live-quota",
+          version: "0.10.398-photo-wait-manual-lock",
           studio_desk_inventory_v1: true,
           studio_desk_activity_v1: true,
           studio_tiktok_complete_v1: true,
@@ -5865,6 +5865,7 @@ async function deleteItem4MasterAsset(request, env, url, authorization) {
     remaining.map((asset) => String(asset?.media_asset_record_id || "").trim()).filter(Boolean)
   )];
   const deletedAiAsset = /^studio_ai/i.test(String(target?.source || ""));
+  const deletedMediaId = String(target?.media_asset_record_id || "").trim();
   const updateFields = {
     Studio_Master_Assets_JSON: JSON.stringify(remaining),
     Studio_Master_Asset_Count: remaining.length,
@@ -5883,10 +5884,28 @@ async function deleteItem4MasterAsset(request, env, url, authorization) {
     // An explicit delete is stronger than the original AI quantity recommendation.
     // Persist an auto-off marker so opening/refocusing Production cannot regenerate it.
     updateFields.Carousel_Image_Mode = "Manual Upload";
-    const notes = String(f(record, "Production_Notes") || "").trim();
-    updateFields.Production_Notes = /ez-ai-auto=off/i.test(notes)
-      ? notes
-      : `${notes}${notes ? "; " : ""}ez-ai-auto=off`;
+  }
+  const notes = String(f(record, "Production_Notes") || "").trim();
+  const nextNotes = withProductionPhotoWaitManual(
+    deletedAiAsset && !/ez-ai-auto=off/i.test(notes)
+      ? `${notes}${notes ? "; " : ""}ez-ai-auto=off`
+      : notes,
+    deletedMediaId ? [deletedMediaId] : []
+  );
+  if (nextNotes !== notes) updateFields.Production_Notes = nextNotes;
+  const ideaId = firstLinkedRecordId(f(record, "Idea_Candidate"));
+  if (ideaId) {
+    try {
+      await airtableFetch(env, env.AIRTABLE_IDEA_TABLE_ID, ideaId, {
+        method: "PATCH",
+        body: JSON.stringify({
+          fields: { Studio_Photo_Wait_Status: "Not Needed" },
+          typecast: true,
+        }),
+      });
+    } catch (error) {
+      console.warn("photo-wait lock idea status failed", ideaId, error);
+    }
   }
   const updated = await item4UpdateRequestState(env, recordId, updateFields);
   return respond(request, env, {
@@ -12076,8 +12095,10 @@ async function getOrCreateProductionRequestForIdea(request, env, url, authorizat
     const masterCount = Number(f(existing, "Studio_Master_Asset_Count") || item4AssetManifest(existing).length || 0);
     const waitStatus = String(f(idea, "Studio_Photo_Wait_Status") || "").trim();
     // Empty draft + photo-wait idea: rematch/reattach so Production shows stills again
-    // after fast-remove or a bad scanner pass wiped Studio_Master_Assets_JSON.
-    if (masterCount === 0 && (waitStatus === "Waiting" || waitStatus === "Ready")) {
+    // after a bad scanner pass wiped Studio_Master_Assets_JSON. Never restore photos
+    // the operator already deleted (DuSable Bridge PR-20260926014919-4TU04T).
+    const photoWaitLocked = productionPhotoWaitAutoOff(f(existing, "Production_Notes"));
+    if (!photoWaitLocked && masterCount === 0 && (waitStatus === "Waiting" || waitStatus === "Ready")) {
       try {
         const rematch = await evaluateAndMaybeAttachWaitingIdeaPhotos(env, idea, {
           authorization,
@@ -19160,6 +19181,13 @@ async function applyLibraryAssetsToProductionRequest(env, requestRecord, mediaId
 }
 
 async function evaluateAndMaybeAttachWaitingIdeaPhotos(env, idea, { authorization = null, force = false, productionRequest = null } = {}) {
+  let requestRecord = productionRequest
+    || (authorization ? await existingDraftForIdea(env, idea.id, authorization) : null)
+    || await findDraftProductionRequestForIdea(env, idea.id);
+  if (requestRecord && productionPhotoWaitAutoOff(f(requestRecord, "Production_Notes"))) {
+    return { action: "manual", idea, production_request: requestRecord, skipped: true };
+  }
+
   const min = Number(f(idea, "Production_Carousel_Slide_Count_Min") || 0);
   const max = Number(f(idea, "Production_Carousel_Slide_Count_Max") || 0);
   const matches = await rankStillsForIdeaPhotoWait(env, idea);
@@ -19183,9 +19211,9 @@ async function evaluateAndMaybeAttachWaitingIdeaPhotos(env, idea, { authorizatio
     })),
   };
 
-  let requestRecord = productionRequest
-    || (authorization ? await existingDraftForIdea(env, idea.id, authorization) : null)
-    || await findDraftProductionRequestForIdea(env, idea.id);
+  const requestNotes = requestRecord ? String(f(requestRecord, "Production_Notes") || "").trim() : "";
+  const autoOff = productionPhotoWaitAutoOff(requestNotes);
+  const rejectedIds = new Set(productionPhotoWaitRejectedIds(requestNotes));
 
   if (decision.action === "ready") {
     if (!requestRecord && authorization) {
@@ -19206,13 +19234,16 @@ async function evaluateAndMaybeAttachWaitingIdeaPhotos(env, idea, { authorizatio
       });
       return { ...decision, action: "wait", idea: ideaOnly, production_request: null };
     }
-    const attached = await applyLibraryAssetsToProductionRequest(
-      env,
-      requestRecord,
-      decision.selected.map((row) => row.id),
-      { replaceWaitAssets: true }
-    );
-    requestRecord = attached.record;
+    const attachIds = decision.selected.map((row) => row.id).filter((id) => !rejectedIds.has(id));
+    if (shouldAttachPhotoWaitAssets({ action: decision.action, autoOff }) && attachIds.length) {
+      const attached = await applyLibraryAssetsToProductionRequest(
+        env,
+        requestRecord,
+        attachIds,
+        { replaceWaitAssets: !autoOff }
+      );
+      requestRecord = attached.record;
+    }
     const ideaReady = await airtableFetch(env, env.AIRTABLE_IDEA_TABLE_ID, idea.id, {
       method: "PATCH",
       body: JSON.stringify({
@@ -19228,16 +19259,9 @@ async function evaluateAndMaybeAttachWaitingIdeaPhotos(env, idea, { authorizatio
     return { ...decision, idea: ideaReady, production_request: requestRecord, match: matchJson };
   }
 
-  const keepHighIds = sortHighConfidenceMatches(matches).map((row) => row.id);
-  if (requestRecord) {
-    const existingCount = item4AssetManifest(requestRecord).length;
-    // Never wipe existing masters when the scanner temporarily finds zero highs
-    // (e.g. fill-crop flood). Only rewrite when we have highs or the strip is empty.
-    if (keepHighIds.length || existingCount === 0) {
-      const stripped = await applyLibraryAssetsToProductionRequest(env, requestRecord, keepHighIds, { replaceWaitAssets: true });
-      requestRecord = stripped.record;
-    }
-  }
+  const keepHighIds = sortHighConfidenceMatches(matches).map((row) => row.id).filter((id) => !rejectedIds.has(id));
+  // wait / wait_batch must not rewrite a draft. DuSable Bridge had high_count 63
+  // while intake was still running; cron replaced the strip and undeleted photos.
   const ideaWaiting = await airtableFetch(env, env.AIRTABLE_IDEA_TABLE_ID, idea.id, {
     method: "PATCH",
     body: JSON.stringify({

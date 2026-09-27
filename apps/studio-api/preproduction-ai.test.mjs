@@ -80,6 +80,7 @@ test("deleting an AI master disables automatic regeneration and clears stale lin
   assert.match(handler, /deletedAiAsset/);
   assert.match(handler, /Carousel_Image_Mode = "Manual Upload"/);
   assert.match(handler, /ez-ai-auto=off/i);
+  assert.match(handler, /ez-photo-wait=off|withProductionPhotoWaitManual/);
   assert.match(handler, /Studio_Master_Media_Assets/);
   assert.match(handler, /Studio_Platform_Variant_Assets:\s*\[\]/);
 });

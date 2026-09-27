@@ -250,6 +250,45 @@ export function selectMatchedPhotos({ matches, min, max, pendingBatchIds, force 
   };
 }
 
+export const PHOTO_WAIT_AUTO_OFF_RE = /ez-photo-wait=off/i;
+
+export function productionPhotoWaitAutoOff(notes) {
+  return PHOTO_WAIT_AUTO_OFF_RE.test(String(notes || ""));
+}
+
+export function productionPhotoWaitRejectedIds(notes) {
+  const match = String(notes || "").match(/ez-photo-reject=([^\n;]+)/i);
+  if (!match) return [];
+  return [...new Set(
+    match[1].split(/[,\s]+/).map((value) => String(value || "").trim()).filter((id) => /^rec[A-Za-z0-9]+$/.test(id))
+  )];
+}
+
+export function withProductionPhotoWaitManual(notes, rejectedIds = []) {
+  let next = String(notes || "").trim();
+  if (!PHOTO_WAIT_AUTO_OFF_RE.test(next)) {
+    next = next ? `${next}; ez-photo-wait=off` : "ez-photo-wait=off";
+  }
+  const merged = [...new Set([
+    ...productionPhotoWaitRejectedIds(next),
+    ...rejectedIds.map((id) => String(id || "").trim()).filter((id) => /^rec[A-Za-z0-9]+$/.test(id)),
+  ])];
+  if (merged.length) {
+    if (/ez-photo-reject=/i.test(next)) {
+      next = next.replace(/ez-photo-reject=[^\n;]+/i, `ez-photo-reject=${merged.join(",")}`);
+    } else {
+      next = `${next}; ez-photo-reject=${merged.join(",")}`;
+    }
+  }
+  return next.slice(0, 10000);
+}
+
+/** Wait/batch ticks must not rewrite a draft the operator is already cleaning up. */
+export function shouldAttachPhotoWaitAssets({ action, autoOff = false } = {}) {
+  if (autoOff) return false;
+  return String(action || "").trim() === "ready";
+}
+
 const IDEA_SAVE_CONTENT_TYPES = new Set([
   "Vertical Short Video",
   "Story",

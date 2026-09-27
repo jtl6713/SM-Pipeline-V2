@@ -28,9 +28,17 @@ test("Photo listening stays in Ideas until enough matches and then surfaces in P
 
 test("generated media ideas start listening automatically and the cron can create their draft", () => {
   assert.match(worker, /created_record_ids/);
-  assert.match(worker, /Photo-capable ideas are listening automatically/);
+  assert.match(worker, /autoListenOpenPhotoIdeas/);
   assert.match(worker, /generated idea automatic photo listening failed/);
   assert.match(worker, /Vertical Short Video/);
   assert.match(worker, /const authorization = records\.length \? await resolveStudioCronAuthorization\(env\) : null/);
   assert.match(worker, /evaluateAndMaybeAttachWaitingIdeaPhotos\(env, idea, \{\s*authorization,/);
+});
+
+test("photo-wait cron cannot restore stills the operator deleted", () => {
+  assert.match(worker, /wait \/ wait_batch must not rewrite a draft/);
+  assert.match(worker, /shouldAttachPhotoWaitAssets/);
+  assert.match(worker, /ez-photo-wait=off|withProductionPhotoWaitManual/);
+  assert.match(worker, /action: "manual"/);
+  assert.match(worker, /Studio_Photo_Wait_Status: "Not Needed"/);
 });
