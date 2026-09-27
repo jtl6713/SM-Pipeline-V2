@@ -9874,10 +9874,104 @@ async function studioHealReadyNoJobVoiceover(env, row, cache = { parents: new Ma
   };
 }
 
+function studioStreamMediaAssetId(value) {
+  const text = String(value || "").trim();
+  const match = text.match(/^\/api\/media-assets\/(rec[A-Za-z0-9]+)\/stream(?:\?|$)/);
+  return match ? match[1] : "";
+}
+
+async function studioRepairUnfetchableRenderSources(env, row) {
+  const raw = String(f(row, "Render_Clip_List_JSON") || "").trim();
+  if (!raw || !raw.includes("/api/media-assets/")) return { repaired: 0, unresolved: [] };
+  let clips;
+  try { clips = JSON.parse(raw); } catch { return { repaired: 0, unresolved: ["invalid-json"] }; }
+  if (!Array.isArray(clips)) return { repaired: 0, unresolved: ["not-an-array"] };
+
+  const cache = new Map();
+  const unresolved = [];
+  let repaired = 0;
+  for (const clip of clips) {
+    if (!clip || typeof clip !== "object") continue;
+    const url = String(clip.url || "").trim();
+    const src = String(clip.src || "").trim();
+    if (!url.startsWith("/api/media-assets/") && !src.startsWith("/api/media-assets/")) continue;
+    const mediaId = String(
+      clip.mediaAssetRecordId
+      || clip.media_asset_record_id
+      || studioStreamMediaAssetId(url)
+      || studioStreamMediaAssetId(src)
+      || ""
+    ).trim();
+    if (!/^rec[A-Za-z0-9]+$/.test(mediaId)) {
+      unresolved.push(mediaId || url || src || "unknown");
+      continue;
+    }
+    let asset = cache.get(mediaId);
+    if (!asset) {
+      asset = await airtableFetch(env, env.AIRTABLE_MEDIA_TABLE_ID, mediaId).catch(() => null);
+      cache.set(mediaId, asset || {});
+    }
+    const driveId = String(f(asset, "Google Drive File ID") || "").trim();
+    const driveUrl = String(f(asset, "Google Drive URL") || "").trim()
+      || (driveId ? `https://drive.google.com/uc?export=download&id=${driveId}` : "");
+    if (!/^https?:\/\//i.test(driveUrl)) {
+      unresolved.push(mediaId);
+      continue;
+    }
+    clip.url = driveUrl;
+    clip.src = driveUrl;
+    if (driveId && !String(clip.googleDriveFileId || "").trim()) clip.googleDriveFileId = driveId;
+    repaired += 1;
+  }
+
+  if (!repaired || unresolved.length) return { repaired, unresolved };
+  await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, row.id, {
+    method: "PATCH",
+    body: JSON.stringify({
+      fields: {
+        Render_Clip_List_JSON: JSON.stringify(clips),
+        Render_Status: "Ready for Render",
+        Output_Status: "In Production",
+        Remotion_Job_ID: "",
+        Remotion_Status_URL: "",
+        Remotion_Props_JSON: "",
+        Remotion_Error_Message: "",
+        Final_File_Error_Message: "",
+        Final_File_URL: "",
+        Final_File_ID: "",
+        Output_URL: "",
+        Final_File_Storage_Status: null,
+      },
+      typecast: true,
+    }),
+  });
+  return { repaired, unresolved: [] };
+}
+
 async function healStuckStudioRenders(env) {
   const outputTable = env.AIRTABLE_OUTPUT_TABLE_ID;
   const pulses = [];
   const voCache = { parents: new Map(), requests: new Map() };
+  const invalidSourceRows = await listRecords(env, outputTable, {
+    limit: 12,
+    sortField: "Output_ID",
+    sortDirection: "desc",
+    filterFormula: 'AND({Test_Run_ID}=BLANK(),FIND("/api/media-assets/",{Render_Clip_List_JSON}&"")>0,OR({Render_Status}="Ready for Render",{Render_Status}="Rendering",{Render_Status}="Failed"))',
+  }).catch(() => []);
+  for (const row of invalidSourceRows || []) {
+    try {
+      const repair = await studioRepairUnfetchableRenderSources(env, row);
+      if (repair.unresolved.length) {
+        pulses.push({ key: "R4_UNFETCHABLE_SOURCE_REPAIR", id: row.id, error: `unresolved: ${repair.unresolved.join(", ")}` });
+        continue;
+      }
+      if (!repair.repaired) continue;
+      const payload = await item4PulseR4Python(env, { outputRecordId: row.id });
+      pulses.push({ key: "R4_UNFETCHABLE_SOURCE_REPAIR", id: row.id, payload, repaired: repair.repaired });
+    } catch (error) {
+      pulses.push({ key: "R4_UNFETCHABLE_SOURCE_REPAIR", id: row.id, error: error instanceof Error ? error.message : String(error) });
+    }
+  }
   const readyNoJob = await listRecords(env, outputTable, {
     limit: 8,
     sortField: "Output_ID",
@@ -33309,6 +33403,7 @@ const DESK_OUTPUT_IDENTITY_KINDS = new Set([
   "publish_failed_transient",
   "publish_never_dispatch",
   "render_failed",
+  "render_unfetchable_source",
   "render_ready_no_job",
   "render_ready_waiting_voiceover",
   "render_long",
@@ -33412,6 +33507,7 @@ function mapDeskInventoryOutput(record, contentToRequest = new Map(), contentByI
     youtube_video_id: f(record, "YouTube_Video_ID"),
     publish_retry_eligible: Boolean(f(record, "Publish_Retry_Eligible")),
     render_error: f(record, "Remotion_Error_Message") || f(record, "Final_File_Error_Message"),
+    render_clip_list_json: f(record, "Render_Clip_List_JSON"),
   };
 }
 
@@ -33424,7 +33520,7 @@ function deskOutputsForRequest(outputs, requestId) {
 async function gatherStudioDeskInventory(env) {
   const chicago = chicagoNowParts();
   const nowMs = Date.now();
-  const [modeRow, capsRow, produceRows, readyNoJob, longRendering, orphans, preparing, cropProcessing, cropError, autonomousRows, azRows, promotedRows, autonomousPromoted, notRfrOutputs, azReadyOutputs, approvedDispatch, publishedCovers] = await Promise.all([
+  const [modeRow, capsRow, produceRows, readyNoJob, invalidRenderSources, longRendering, orphans, preparing, cropProcessing, cropError, autonomousRows, azRows, promotedRows, autonomousPromoted, notRfrOutputs, azReadyOutputs, approvedDispatch, publishedCovers] = await Promise.all([
     studioSettingsByName(env, DESK_SETTING_NAME).catch(() => null),
     studioSettingsByName(env, DESK_CAPS_SETTING_NAME).catch(() => null),
     listRecords(env, PRODUCTION_REQUEST_TABLE, {
@@ -33436,6 +33532,12 @@ async function gatherStudioDeskInventory(env) {
     listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
       limit: 8,
       filterFormula: 'AND({Test_Run_ID}=BLANK(),{Render_Status}="Ready for Render",{Remotion_Job_ID}="")',
+    }).catch(() => []),
+    listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
+      limit: 12,
+      sortField: "Output_ID",
+      sortDirection: "desc",
+      filterFormula: 'AND({Test_Run_ID}=BLANK(),FIND("/api/media-assets/",{Render_Clip_List_JSON}&"")>0,OR({Render_Status}="Ready for Render",{Render_Status}="Rendering",{Render_Status}="Failed"))',
     }).catch(() => []),
     listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
       limit: 8,
@@ -33522,6 +33624,7 @@ async function gatherStudioDeskInventory(env) {
       ...(produceRows || []),
       ...(escalatedRows || []),
       ...(readyNoJob || []),
+      ...(invalidRenderSources || []),
       ...(longRendering || []),
       ...(orphans || []),
       ...(preparing || []),
@@ -33545,7 +33648,10 @@ async function gatherStudioDeskInventory(env) {
     const job = parseStudioProductionJob(record) || {};
     push(classifyProduceJob({ ...job, request_id: record.id, ...requestIdentity(record) }, nowMs));
   }
-  scanned("render_ready_no_job", "render_ready_waiting_voiceover", "render_long", "produce_orphan");
+  scanned("render_ready_no_job", "render_ready_waiting_voiceover", "render_unfetchable_source", "render_long", "produce_orphan");
+  for (const record of invalidRenderSources || []) {
+    push(classifyRenderRow(mapOut(record), nowMs));
+  }
   for (const record of readyNoJob || []) {
     push(classifyRenderRow(mapOut(record), nowMs));
   }
