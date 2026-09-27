@@ -143,3 +143,8 @@ Deploy Studio API Worker production
 Reason: regex syntax correction for private Drive watermark autonomous recovery rule
 Worker: 0.10.406-private-drive-watermark-heal
 Requested: 2026-09-27 hotfix
+
+Deploy Studio API Worker production
+Reason: park ChicagoShining Ready-for-Render outputs until Remotion private Drive watermark localization is live; release autonomously after health gate
+Worker: 0.10.407-private-drive-watermark-park
+Requested: 2026-09-27
