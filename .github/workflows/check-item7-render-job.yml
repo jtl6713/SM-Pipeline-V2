@@ -1,4 +1,4 @@
-name: Diagnose Current Remotion Burst
+name: Verify Remotion Localization Live
 
 on:
   push:
@@ -10,141 +10,17 @@ permissions:
   contents: read
 
 jobs:
-  check:
+  verify:
     runs-on: ubuntu-latest
-    timeout-minutes: 8
+    timeout-minutes: 4
     steps:
-      - uses: actions/checkout@v6
-      - name: Inspect current render jobs
+      - name: Check live Remotion localization capability
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p evidence
-          failed=0
-          JOB='job-20260927231655-053d0e2f'
-          code=$(curl -sS --max-time 30 -o "evidence/$JOB.json" -w '%{http_code}' "https://render.chicagoshining.com/status/$JOB" || true)
-          echo "=== $JOB http=$code ==="
-          if [[ "$code" == "200" ]]; then
-            jq -c '{jobId,status,createdAt,updatedAt,completedAt,exitCode,error,renderUrl,log_tail:((.logs//[])[-18:])}' "evidence/$JOB.json" || cat "evidence/$JOB.json"
-          else
-            failed=1
-            cat "evidence/$JOB.json" 2>/dev/null || true
-          fi
-          JOB='job-20260927231537-33de0b97'
-          code=$(curl -sS --max-time 30 -o "evidence/$JOB.json" -w '%{http_code}' "https://render.chicagoshining.com/status/$JOB" || true)
-          echo "=== $JOB http=$code ==="
-          if [[ "$code" == "200" ]]; then
-            jq -c '{jobId,status,createdAt,updatedAt,completedAt,exitCode,error,renderUrl,log_tail:((.logs//[])[-18:])}' "evidence/$JOB.json" || cat "evidence/$JOB.json"
-          else
-            failed=1
-            cat "evidence/$JOB.json" 2>/dev/null || true
-          fi
-          JOB='job-20260927231546-400c08e4'
-          code=$(curl -sS --max-time 30 -o "evidence/$JOB.json" -w '%{http_code}' "https://render.chicagoshining.com/status/$JOB" || true)
-          echo "=== $JOB http=$code ==="
-          if [[ "$code" == "200" ]]; then
-            jq -c '{jobId,status,createdAt,updatedAt,completedAt,exitCode,error,renderUrl,log_tail:((.logs//[])[-18:])}' "evidence/$JOB.json" || cat "evidence/$JOB.json"
-          else
-            failed=1
-            cat "evidence/$JOB.json" 2>/dev/null || true
-          fi
-          JOB='job-20260927231701-93097bb3'
-          code=$(curl -sS --max-time 30 -o "evidence/$JOB.json" -w '%{http_code}' "https://render.chicagoshining.com/status/$JOB" || true)
-          echo "=== $JOB http=$code ==="
-          if [[ "$code" == "200" ]]; then
-            jq -c '{jobId,status,createdAt,updatedAt,completedAt,exitCode,error,renderUrl,log_tail:((.logs//[])[-18:])}' "evidence/$JOB.json" || cat "evidence/$JOB.json"
-          else
-            failed=1
-            cat "evidence/$JOB.json" 2>/dev/null || true
-          fi
-          JOB='job-20260927232124-9b330eb8'
-          code=$(curl -sS --max-time 30 -o "evidence/$JOB.json" -w '%{http_code}' "https://render.chicagoshining.com/status/$JOB" || true)
-          echo "=== $JOB http=$code ==="
-          if [[ "$code" == "200" ]]; then
-            jq -c '{jobId,status,createdAt,updatedAt,completedAt,exitCode,error,renderUrl,log_tail:((.logs//[])[-18:])}' "evidence/$JOB.json" || cat "evidence/$JOB.json"
-          else
-            failed=1
-            cat "evidence/$JOB.json" 2>/dev/null || true
-          fi
-          JOB='job-20260927231648-9738d91a'
-          code=$(curl -sS --max-time 30 -o "evidence/$JOB.json" -w '%{http_code}' "https://render.chicagoshining.com/status/$JOB" || true)
-          echo "=== $JOB http=$code ==="
-          if [[ "$code" == "200" ]]; then
-            jq -c '{jobId,status,createdAt,updatedAt,completedAt,exitCode,error,renderUrl,log_tail:((.logs//[])[-18:])}' "evidence/$JOB.json" || cat "evidence/$JOB.json"
-          else
-            failed=1
-            cat "evidence/$JOB.json" 2>/dev/null || true
-          fi
-          JOB='job-20260927231109-1d5686f8'
-          code=$(curl -sS --max-time 30 -o "evidence/$JOB.json" -w '%{http_code}' "https://render.chicagoshining.com/status/$JOB" || true)
-          echo "=== $JOB http=$code ==="
-          if [[ "$code" == "200" ]]; then
-            jq -c '{jobId,status,createdAt,updatedAt,completedAt,exitCode,error,renderUrl,log_tail:((.logs//[])[-18:])}' "evidence/$JOB.json" || cat "evidence/$JOB.json"
-          else
-            failed=1
-            cat "evidence/$JOB.json" 2>/dev/null || true
-          fi
-          JOB='job-20260927231115-268b796f'
-          code=$(curl -sS --max-time 30 -o "evidence/$JOB.json" -w '%{http_code}' "https://render.chicagoshining.com/status/$JOB" || true)
-          echo "=== $JOB http=$code ==="
-          if [[ "$code" == "200" ]]; then
-            jq -c '{jobId,status,createdAt,updatedAt,completedAt,exitCode,error,renderUrl,log_tail:((.logs//[])[-18:])}' "evidence/$JOB.json" || cat "evidence/$JOB.json"
-          else
-            failed=1
-            cat "evidence/$JOB.json" 2>/dev/null || true
-          fi
-          JOB='job-20260927231450-8d449d50'
-          code=$(curl -sS --max-time 30 -o "evidence/$JOB.json" -w '%{http_code}' "https://render.chicagoshining.com/status/$JOB" || true)
-          echo "=== $JOB http=$code ==="
-          if [[ "$code" == "200" ]]; then
-            jq -c '{jobId,status,createdAt,updatedAt,completedAt,exitCode,error,renderUrl,log_tail:((.logs//[])[-18:])}' "evidence/$JOB.json" || cat "evidence/$JOB.json"
-          else
-            failed=1
-            cat "evidence/$JOB.json" 2>/dev/null || true
-          fi
-          JOB='job-20260927231504-e54dd207'
-          code=$(curl -sS --max-time 30 -o "evidence/$JOB.json" -w '%{http_code}' "https://render.chicagoshining.com/status/$JOB" || true)
-          echo "=== $JOB http=$code ==="
-          if [[ "$code" == "200" ]]; then
-            jq -c '{jobId,status,createdAt,updatedAt,completedAt,exitCode,error,renderUrl,log_tail:((.logs//[])[-18:])}' "evidence/$JOB.json" || cat "evidence/$JOB.json"
-          else
-            failed=1
-            cat "evidence/$JOB.json" 2>/dev/null || true
-          fi
-          JOB='job-20260927231511-3f5875fa'
-          code=$(curl -sS --max-time 30 -o "evidence/$JOB.json" -w '%{http_code}' "https://render.chicagoshining.com/status/$JOB" || true)
-          echo "=== $JOB http=$code ==="
-          if [[ "$code" == "200" ]]; then
-            jq -c '{jobId,status,createdAt,updatedAt,completedAt,exitCode,error,renderUrl,log_tail:((.logs//[])[-18:])}' "evidence/$JOB.json" || cat "evidence/$JOB.json"
-          else
-            failed=1
-            cat "evidence/$JOB.json" 2>/dev/null || true
-          fi
-          JOB='job-20260927231101-6eb1002e'
-          code=$(curl -sS --max-time 30 -o "evidence/$JOB.json" -w '%{http_code}' "https://render.chicagoshining.com/status/$JOB" || true)
-          echo "=== $JOB http=$code ==="
-          if [[ "$code" == "200" ]]; then
-            jq -c '{jobId,status,createdAt,updatedAt,completedAt,exitCode,error,renderUrl,log_tail:((.logs//[])[-18:])}' "evidence/$JOB.json" || cat "evidence/$JOB.json"
-          else
-            failed=1
-            cat "evidence/$JOB.json" 2>/dev/null || true
-          fi
-          JOB='job-20260927231530-c3f85c3b'
-          code=$(curl -sS --max-time 30 -o "evidence/$JOB.json" -w '%{http_code}' "https://render.chicagoshining.com/status/$JOB" || true)
-          echo "=== $JOB http=$code ==="
-          if [[ "$code" == "200" ]]; then
-            jq -c '{jobId,status,createdAt,updatedAt,completedAt,exitCode,error,renderUrl,log_tail:((.logs//[])[-18:])}' "evidence/$JOB.json" || cat "evidence/$JOB.json"
-          else
-            failed=1
-            cat "evidence/$JOB.json" 2>/dev/null || true
-          fi
-
-          exit "$failed"
-      - name: Save evidence
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: current-remotion-burst-${{ github.run_id }}
-          path: evidence/
-          if-no-files-found: warn
-          retention-days: 7
+          code=$(curl -sS --max-time 20 -o /tmp/health.json -w '%{http_code}' 'https://render.chicagoshining.com/health' || true)
+          echo "http=$code"
+          cat /tmp/health.json | jq . || cat /tmp/health.json
+          test "$code" = 200
+          jq -e '.ok==true and .privateDriveImageLocalization==true and .watermarkLocalization==true and (.version|contains("private-drive-image-localization"))' /tmp/health.json >/dev/null
+          echo "remotion_private_drive_localization=PASS"
