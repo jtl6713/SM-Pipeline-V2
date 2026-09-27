@@ -32,3 +32,4 @@ Quality Agent recap: 2026-09-26 - Operations Recap shows pipeline blocks and wha
 Quality Agent recap dates: 2026-09-26 - each recap card shows date found, date resolved, and how it was resolved. UI 0.6.394.
 
 Quality Agent recap IDs: 2026-09-26 - each recap card names the Content item, Content ID, Platform output, and Platform Output ID. UI 0.6.395.
+2026-09-26 Studio UI 0.6.396: Creative Editor clip posters + inline playback
