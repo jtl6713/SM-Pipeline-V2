@@ -51,3 +51,23 @@ test("Approve skips variant rewrite when crops are already Ready", () => {
   assert.match(worker, /async function item4VariantQueueRows[\s\S]*?limit: 500/);
   assert.match(worker, /productionNotesForPromotionHandoff/);
 });
+
+
+test("Manage Idea pauses automatic photo listening and close resumes it", () => {
+  assert.match(worker, /photo-listening-session/);
+  assert.match(worker, /withIdeaManagePhotoPause/);
+  assert.match(worker, /withoutIdeaManagePhotoPause/);
+  assert.match(worker, /ideaManagePhotoPauseActive/);
+  assert.match(app, /startIdeaPhotoManagePause/);
+  assert.match(app, /stopIdeaPhotoManagePause/);
+  assert.match(app, /Automatic photo listening is paused while Manage Idea is open/);
+  assert.match(app, /setInterval\(pulse, 5 \* 60 \* 1000\)/);
+});
+
+test("Entering Production permanently disables photo listening without rematching deleted photos", () => {
+  assert.match(worker, /lockIdeaPhotoListeningForProduction/);
+  assert.match(worker, /Studio_Photo_Wait_Status: "Not Needed"/);
+  assert.match(worker, /withProductionPhotoWaitManual\(requestNotes\)/);
+  assert.match(worker, /Transfer the exact set the operator sees in Manage Idea once/);
+  assert.doesNotMatch(worker, /photo-wait rehydrate on open failed/);
+});
