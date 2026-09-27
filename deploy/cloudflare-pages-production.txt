@@ -18,3 +18,5 @@ Asset Manager classification watch repair: 2026-09-26 - expires stale session cl
 Studio classification build ID alignment: 2026-09-26 - aligns app BUILD_ID with UI 0.6.386 so the Pages verifier and browser cache-bust use the same build. Source merge 5ee215b.
 
 Production asset deletion authority: 2026-09-26 - keeps deleted assets hidden while DELETEs drain and stops AI assets from automatically reappearing after explicit removal. UI 0.6.387. Source merge 5ba473c.
+
+Production native clip aspect previews: 2026-09-26 - renders no-crop clip cards at the source/native aspect ratio instead of hard-coded 9:16; UI 0.6.388. Source merge d566891 (#360).
