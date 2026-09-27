@@ -12,3 +12,5 @@ Creative editor output heading: 2026-09-26 - show Platform • Output N • Titl
 Mobile output scroll-to-top: 2026-09-26 - opening a Platform Pipeline output now jumps immediately to the top before creative data loads, removing the long smooth-scroll animation on mobile. UI 0.6.384. Source merge e99e531.
 
 Production AI prompt guidance: 2026-09-26 - adds a description box for user-directed AI images in Production. UI 0.6.385. Source merge 4f23723.
+
+Asset Manager classification watch repair: 2026-09-26 - expires stale session classification watches, prunes terminal/missing records, and avoids false "Classifying 1 of 2 remaining" banners. UI 0.6.386. Source merge 05b5cfc.
