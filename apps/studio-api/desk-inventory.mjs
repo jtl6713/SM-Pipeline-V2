@@ -265,6 +265,25 @@ export function classifyRenderRow(row, nowMs = Date.now()) {
   const modified = Date.parse(String(row?.last_modified || row?.updated_at || ""));
   const ageMs = Number.isFinite(modified) ? nowMs - modified : Infinity;
   const renderClipList = String(row?.render_clip_list_json || "");
+  const remotionProps = String(row?.remotion_props_json || "");
+  const renderErrorText = String(row?.render_error || row?.error || "");
+  const privateDriveWatermark = /"watermarkUrl"\s*:\s*"https?:\\/\\/(?:drive|docs)\.google\.com/i.test(remotionProps)
+    || (/watermark/i.test(renderErrorText) && /drive\.google\.com|ERR_BLOCKED_BY_ORB|HTTP status code:\s*403/i.test(renderErrorText));
+  if (
+    privateDriveWatermark
+    && ["Ready for Render", "Rendering", "Failed"].includes(renderStatus)
+  ) {
+    return withDeskIdentity({
+      kind: "render_private_drive_watermark",
+      class: "data_repair",
+      record_id: recordId || null,
+      fingerprint: fingerprint("render_private_drive_watermark", recordId, "drive_403_or_orb"),
+      actor: "worker_heal",
+      diagnosis: "Remotion received the ChicagoShining watermark as a private Google Drive URL. Chromium can return HTTP 403 / ERR_BLOCKED_BY_ORB. "
+        + "Keep the output parked until the renderer advertises privateDriveImageLocalization + watermarkLocalization, then clear the stale render job and requeue R4. "
+        + "The renderer must fetch the watermark through the authenticated Pipeline Runner and render from its local copy.",
+    }, row);
+  }
   if (
     renderClipList.includes("/api/media-assets/")
     && ["Ready for Render", "Rendering", "Failed"].includes(renderStatus)
@@ -919,6 +938,7 @@ export const CLASSIFIER_KINDS = Object.freeze([
   "publish_failed_transient",
   "render_failed",
   "render_unfetchable_source",
+  "render_private_drive_watermark",
   "native_cover_missing",
   "rfr_locked_missing_deliverable",
   "health_down",
