@@ -166,18 +166,14 @@ jobs:
             jq -c '.result | {name,status,validation_data,verification_data}' "/tmp/domain-${DOMAIN}.json"
             echo "Attached domain: $DOMAIN"
           done
-      - name: Retry Pages custom-domain validation
+      - name: Inspect Pages custom-domain validation
         shell: bash
         run: |
           set -euo pipefail
           API="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/pages/projects/$PAGES_PROJECT/domains"
           AUTH="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
-          for DOMAIN in "$PUBLIC_DOMAIN" "$WWW_DOMAIN"; do
-            curl -fsS -X PATCH "$API/$DOMAIN" -H "$AUTH" -o "/tmp/domain-retry-$DOMAIN.json"
-            jq -e '.success == true' "/tmp/domain-retry-$DOMAIN.json" >/dev/null
-            jq -c '.result | {name,status,certificate_authority,validation_data,verification_data}' "/tmp/domain-retry-$DOMAIN.json"
-          done
-
+          curl -fsS "$API" -H "$AUTH" -o /tmp/domains-after-attach.json
+          jq -c '.result[] | {name,status,certificate_authority,validation_data,verification_data}' /tmp/domains-after-attach.json
       - name: Ensure Pages DNS records when authorized
         shell: bash
         env:
@@ -194,7 +190,7 @@ jobs:
             CODE=$(curl -sS -o "/tmp/dns-$DOMAIN.json" -w "%{http_code}" "$DNS_API?name=$DOMAIN&per_page=100" -H "$AUTH" || true)
             if [[ "$CODE" == "403" ]]; then
               DNS_API_STATE=denied
-              echo "::warning::Cloudflare token cannot read/write DNS for $DOMAIN (HTTP 403). Pages validation will still be retried."
+              echo "::warning::Cloudflare token cannot read/write DNS for $DOMAIN (HTTP 403). Continuing with Pages status checks against the manually configured DNS records."
               echo "Expected Pages DNS target: $DOMAIN -> $TARGET"
               break
             fi
@@ -253,9 +249,6 @@ jobs:
           API="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/pages/projects/$PAGES_PROJECT/domains"
           AUTH="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
           MAX_ATTEMPTS=180
-          if [[ "${EXPLORE_DNS_API:-ok}" == "denied" ]]; then
-            MAX_ATTEMPTS=24
-          fi
 
           for ATTEMPT in $(seq 1 "$MAX_ATTEMPTS"); do
             curl -fsS "$API" -H "$AUTH" -o /tmp/domains.json
@@ -268,7 +261,12 @@ jobs:
             if [[ "$APEX" == "active" && "$WWW" == "active" ]]; then
               exit 0
             fi
-            if [[ "$APEX" == "error" || "$WWW" == "error" || "$APEX" == "blocked" || "$WWW" == "blocked" ]]; then
+            if [[ "$APEX" == "blocked" || "$WWW" == "blocked" ]]; then
+              jq -c '.result[] | {name,status,validation_data,verification_data}' /tmp/domains.json >&2
+              exit 1
+            fi
+            if (( ATTEMPT >= 12 )) && [[ "$APEX" == "error" || "$WWW" == "error" ]]; then
+              echo "Custom-domain verification remained in error state for at least one minute." >&2
               jq -c '.result[] | {name,status,validation_data,verification_data}' /tmp/domains.json >&2
               exit 1
             fi
@@ -285,8 +283,7 @@ jobs:
           echo "Custom domains did not become active within the verification window." >&2
           jq -c '.result[] | {name,status,validation_data,verification_data}' /tmp/domains.json >&2
           if [[ "${EXPLORE_DNS_API:-ok}" == "denied" ]]; then
-            echo "BLOCKER: CLOUDFLARE_API_TOKEN needs Zone DNS Edit for exploreshiningcities.com, or the DNS records must be created manually." >&2
-            echo "Required proxied CNAMEs: $PUBLIC_DOMAIN -> $PAGES_PROJECT.pages.dev and $WWW_DOMAIN -> $PAGES_PROJECT.pages.dev" >&2
+            echo "Cloudflare DNS API access is not available to this token. Confirm the existing proxied CNAME records remain pointed at $PAGES_PROJECT.pages.dev." >&2
           fi
           exit 1
 
