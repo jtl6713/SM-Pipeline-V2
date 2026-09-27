@@ -42,3 +42,10 @@ test("photo-wait cron cannot restore stills the operator deleted", () => {
   assert.match(worker, /action: "manual"/);
   assert.match(worker, /Studio_Photo_Wait_Status: "Not Needed"/);
 });
+
+test("Approve skips variant rewrite when crops are already Ready", () => {
+  assert.match(worker, /37-still Bridge drafts already have Ready crops/);
+  assert.match(worker, /if \(!autonomousPlanVariantsReady\(requestRecord\)\)/);
+  assert.match(worker, /async function item4VariantQueueRows[\s\S]*?limit: 500/);
+  assert.match(worker, /productionNotesForPromotionHandoff/);
+});

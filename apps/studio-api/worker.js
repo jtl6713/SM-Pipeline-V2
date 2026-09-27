@@ -145,7 +145,7 @@ import {
   summarizeObservations,
   youtubePublishedAfterIso,
 } from "./autonomous-produce.mjs";
-import { ideaAutoListenContentType, ideaProductionConfigFields, parseIdeaMachineNotes, parseIdeaNotedMediaIds, productionPhotoWaitAutoOff, productionPhotoWaitRejectedIds, shouldAttachPhotoWaitAssets, withProductionPhotoWaitManual } from "./idea-photo-wait.mjs";
+import { ideaAutoListenContentType, ideaProductionConfigFields, mergeProductionRequestNotes, parseIdeaMachineNotes, parseIdeaNotedMediaIds, productionNotesForPromotionHandoff, productionPhotoWaitAutoOff, productionPhotoWaitRejectedIds, shouldAttachPhotoWaitAssets, withProductionPhotoWaitManual } from "./idea-photo-wait.mjs";
 import {
   STUDIO_PUBLISH_RECONCILE_SCHEDULE_FORMULA,
   STUDIO_TIKTOK_INBOX_DUE_FORMULA,
@@ -437,7 +437,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.398-photo-wait-manual-lock",
+          version: "0.10.399-promote-ready-skip",
           studio_desk_inventory_v1: true,
           studio_desk_activity_v1: true,
           studio_tiktok_complete_v1: true,
@@ -8047,11 +8047,12 @@ function item4SameRecordIds(left, right) {
   return a.length === b.length && a.every((id, index) => id === b[index]);
 }
 
-async function item4RelinkVariantQueueOutputs(env, record) {
+async function item4RelinkVariantQueueOutputs(env, record, { maxPatches = 12 } = {}) {
   const plan = item4ParseJson(f(record, "Studio_Output_Plan_JSON"), null);
   if (!plan?.items?.length) return record;
   const outputRows = await outputRowsForProductionRequest(env, record.id);
   const queueRows = await item4VariantQueueRows(env, record.id);
+  let patched = 0;
   for (const row of queueRows) {
     if (String(f(row, "Asset_Kind") || "").trim() !== "Platform Variant") continue;
     const ratio = String(f(row, "Aspect_Ratio") || "").trim();
@@ -8063,13 +8064,15 @@ async function item4RelinkVariantQueueOutputs(env, record) {
       method: "PATCH",
       body: JSON.stringify({ fields: { Target_Production_Request_Outputs: wanted }, typecast: true }),
     });
+    patched += 1;
+    if (patched >= maxPatches) break;
   }
   return record;
 }
 
 async function item4VariantQueueRows(env, recordId) {
   return listRecords(env, ITEM4_VARIANT_QUEUE_TABLE, {
-    limit: 100,
+    limit: 500,
     filterFormula: `{Production_Request_Record_ID}='${String(recordId).replace(/'/g, "\\'")}'`,
   });
 }
@@ -12254,6 +12257,7 @@ async function updateProductionRequest(request, env, url, authorization) {
   }
 
   const input = await cleanProductionRequestPayload({ ...mapProductionRequest(existing), ...payload }, env);
+  input.production_notes = mergeProductionRequestNotes(f(existing, "Production_Notes"), input.production_notes);
   const now = new Date().toISOString();
   const fields = productionRequestFields(input, now, { status });
   const slideCaptions = item4NormalizeSlideCaptions(payload?.slide_captions);
@@ -12481,10 +12485,7 @@ async function item4SourceToProductionBridgePreflight(env, requestRecord, ideaRe
     }
   }
 
-  const queueRows = await listRecords(env, ITEM4_VARIANT_QUEUE_TABLE, {
-    limit: 100,
-    filterFormula: `{Production_Request_Record_ID}='${String(requestRecord.id).replace(/'/g, "\\'")}'`,
-  });
+  const queueRows = await item4VariantQueueRows(env, requestRecord.id);
   const variantQueueRows = queueRows.filter(row =>
     String(f(row, "Asset_Kind") || "").trim() === "Platform Variant" &&
     String(f(row, "Transfer_Status") || "").trim() === "Ready"
@@ -18367,14 +18368,23 @@ async function promoteProductionRequestViaI3I4(request, env, url, authorization,
     item4ParseJson(f(requestRecord, "Studio_Master_Assets_JSON"), []).length > 0;
 
   if (hasItem4Source) {
-    requestRecord = await item4ReconcileEnabledPlanOutputs(env, requestRecord);
-    requestRecord = await ensureItem4VariantsReadyForPromotion(
-      env,
-      requestRecordId,
-      requestRecord,
-      authorization,
-      ctx
-    );
+    // 37-still Bridge drafts already have Ready crops. Re-running plan
+    // relink + variant upsert on Approve exhausts the Worker and returns 500.
+    if (!autonomousPlanVariantsReady(requestRecord)) {
+      try {
+        requestRecord = await item4ReconcileEnabledPlanOutputs(env, requestRecord);
+        requestRecord = await ensureItem4VariantsReadyForPromotion(
+          env,
+          requestRecordId,
+          requestRecord,
+          authorization,
+          ctx
+        );
+      } catch (error) {
+        if (error instanceof HttpError) throw error;
+        throw new HttpError(409, error?.message || "Could not finish platform media before approve. Wait a moment and try again.");
+      }
+    }
     const bridgePreflight = await item4SourceToProductionBridgePreflight(env, requestRecord, ideaRecord);
     if (!bridgePreflight.ready) {
       throw new HttpError(
@@ -18697,7 +18707,8 @@ function promotionWebhookUrl(env, recordId, input) {
   webhook.searchParams.set("include_background_music", input.include_background_music);
   webhook.searchParams.set("include_thumbnail", input.include_thumbnail);
   webhook.searchParams.set("voiceover_tail_seconds", String(input.voiceover_tail_seconds));
-  if (input.production_notes) webhook.searchParams.set("production_config_notes", input.production_notes);
+  const handoffNotes = productionNotesForPromotionHandoff(input.production_notes);
+  if (handoffNotes) webhook.searchParams.set("production_config_notes", handoffNotes);
 
   if (input.content_type === "Carousel") {
     // Reuse the production I3 carousel-submit branch. I3 owns the Airtable

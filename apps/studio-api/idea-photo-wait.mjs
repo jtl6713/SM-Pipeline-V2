@@ -289,6 +289,30 @@ export function shouldAttachPhotoWaitAssets({ action, autoOff = false } = {}) {
   return String(action || "").trim() === "ready";
 }
 
+export function stripProductionPhotoWaitTokens(notes) {
+  return String(notes || "")
+    .replace(/;?\s*ez-photo-wait=off/gi, "")
+    .replace(/;?\s*ez-photo-reject=[^\n;]+/gi, "")
+    .replace(/;?\s*ez-ai-auto=off/gi, "")
+    .replace(/^;+\s*|;+\s*$/g, "")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+}
+
+export function productionNotesForPromotionHandoff(notes) {
+  return stripProductionPhotoWaitTokens(notes).slice(0, 500);
+}
+
+export function mergeProductionRequestNotes(existing, incoming) {
+  const prev = String(existing || "").trim();
+  const next = incoming === undefined || incoming === null
+    ? prev
+    : String(incoming).trim();
+  const rejected = productionPhotoWaitRejectedIds(prev);
+  if (!productionPhotoWaitAutoOff(prev) && !rejected.length) return next;
+  return withProductionPhotoWaitManual(stripProductionPhotoWaitTokens(next), rejected);
+}
+
 const IDEA_SAVE_CONTENT_TYPES = new Set([
   "Vertical Short Video",
   "Story",

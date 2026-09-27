@@ -8,6 +8,8 @@ import {
   ideaProductionConfigFields,
   mergeIdeaProductionNotes,
   parseIdeaNotedMediaIds,
+  mergeProductionRequestNotes,
+  productionNotesForPromotionHandoff,
   productionPhotoWaitAutoOff,
   productionPhotoWaitRejectedIds,
   rankIdeaLibraryFields,
@@ -157,6 +159,9 @@ test("operator photo deletes lock photo-wait so cron cannot restore or reshuffle
   assert.equal(productionPhotoWaitAutoOff(notes), true);
   const again = withProductionPhotoWaitManual(notes, ["recNopqrstuvwxyz2"]);
   assert.deepEqual(productionPhotoWaitRejectedIds(again), ["recAbcdefghijklm1", "recNopqrstuvwxyz2"]);
+  const locked = withProductionPhotoWaitManual("Keep the river shots", ["recAbcdefghijklm1"]);
+  assert.match(mergeProductionRequestNotes(locked, "Keep the river shots"), /ez-photo-wait=off/);
+  assert.equal(productionNotesForPromotionHandoff(locked), "Keep the river shots");
 });
 
 test("CTA idea keys ignore cars/ride and keep train subject words", () => {

@@ -76,3 +76,8 @@ Reason: Stop photo-wait cron from restoring deleted Production stills (DuSable B
 Worker: 0.10.398-photo-wait-manual-lock
 Requested: 2026-09-27T00:50:00-05:00
 
+Deploy Studio API Worker production
+Reason: Approve 500 on 37-still Bridge draft — skip Ready variant rewrite
+Worker: 0.10.399-promote-ready-skip
+Requested: 2026-09-27T01:05:00-05:00
+
