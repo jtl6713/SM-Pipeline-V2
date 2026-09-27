@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import math
 from typing import Any
 
 from airtable.client import AirtableClient
-from airtable.constants import CONTENT_ITEMS_TABLE, PRODUCTION_REQUESTS_TABLE
-from audio.voiceover_duration import probe_audio_duration_bytes, validate_voiceover_for_owner_cap
+from airtable.constants import CONTENT_ITEMS_TABLE, PLATFORM_OUTPUTS_TABLE, PRODUCTION_REQUESTS_TABLE
+from audio.voiceover_duration import probe_audio_duration_bytes, validate_voiceover_for_owner_cap, voiceover_tail_seconds
 from branding.watermark import apply_watermark_bytes, brand_watermark_bytes
 from config import load_settings
 from integrations.google_drive import GoogleDriveClient
@@ -29,11 +30,73 @@ from p2.formulas import (
 from p2.normalizer_client import normalization_details, normalize_voiceover
 from p2.stale_clears import stale_media_run_clears
 from p2.thumbnail_client import generate_thumbnail_png
-from render.fields import field_str, first_linked_id
+from render.fields import field_str, first_linked_id, linked_ids
 
 
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def _required_video_seconds_for_voiceover(measured_seconds: float, tail_seconds: float) -> float:
+    """Return a frame-aligned minimum duration that preserves narration plus tail."""
+    return math.ceil((max(0.0, measured_seconds) + max(0.0, tail_seconds)) * 30.0) / 30.0
+
+
+def _extend_video_duration_for_voiceover(
+    client: AirtableClient,
+    item: dict[str, Any],
+    request: dict[str, Any] | None,
+    measured_seconds: float,
+) -> float:
+    """Extend non-Story production targets instead of rejecting long synthesized narration."""
+    required = _required_video_seconds_for_voiceover(
+        measured_seconds,
+        voiceover_tail_seconds(item, request),
+    )
+
+    current_content = float((item.get("fields") or {}).get("Content_Duration") or 0)
+    if required > current_content:
+        client.update_record(
+            CONTENT_ITEMS_TABLE,
+            item["id"],
+            {"Content_Duration": required},
+            typecast=True,
+        )
+
+    if request:
+        current_request = float((request.get("fields") or {}).get("Video_Duration_Seconds") or 0)
+        if required > current_request:
+            client.update_record(
+                PRODUCTION_REQUESTS_TABLE,
+                request["id"],
+                {"Video_Duration_Seconds": required},
+                typecast=True,
+            )
+
+    for output_id in linked_ids((item.get("fields") or {}).get("Platform Outputs")):
+        output = client.get_record(PLATFORM_OUTPUTS_TABLE, output_id)
+        output_type = (
+            field_str(output, "Studio_Output_Type")
+            or field_str(output, "Output_Type")
+            or field_str(output, "Format")
+        ).lower()
+        if "story" in output_type:
+            continue
+        mode = field_str(output, "Studio_Effective_Voiceover_Mode").strip().lower()
+        if mode in {"no", "false", "0"}:
+            continue
+        client.update_record(
+            PLATFORM_OUTPUTS_TABLE,
+            output_id,
+            {
+                "Studio_Effective_Video_Duration_Seconds": required,
+                "Target_Final_Length": required,
+                "Voiceover_Duration_Seconds": round(measured_seconds, 3),
+                "Studio_Effective_Voiceover_Duration_Seconds": round(measured_seconds, 3),
+            },
+            typecast=True,
+        )
+    return required
 
 
 def _load_content_item(
@@ -239,24 +302,10 @@ def process_request(
         request=request,
     )
     if cap_error:
-        client.update_record(
-            CONTENT_ITEMS_TABLE,
-            item["id"],
-            {
-                "Voiceover_Status": "Failed",
-                "Voiceover_Normalization_Status": "Rejected",
-                "Voiceover_Normalization_Details": (
-                    f"{normalization_details(norm_payload)} | Audio duration {measured_seconds:.3f}s | {cap_error}"
-                )[:10000],
-            },
-            typecast=True,
-        )
-        return {
-            **preview,
-            "reason": "voiceover_exceeds_video",
-            "error": cap_error,
-            "voiceover_seconds": measured_seconds,
-        }
+        # The synthesized file is the truth. Do not fail production because speech
+        # ran longer than the planning target; extend every non-Story video target
+        # to fit the narration plus the configured tail.
+        _extend_video_duration_for_voiceover(client, item, request, measured_seconds)
     voice_file = drive.upload_and_share(
         VOICEOVER_DRIVE_FOLDER_ID,
         f"{content_id}_voice_normalized.mp3",
