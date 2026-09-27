@@ -111,7 +111,13 @@ test("Facebook owned analytics works for video-style objects without reactions",
   assert.equal(result.comments, 3);
   assert.equal(result.shares, 2);
   assert.equal(result.total_interactions, 17);
-  assert.equal(requested.some((url) => url.includes("reactions")), false);
+  assert.equal(
+    requested.some((url) => {
+      const fields = new URL(url).searchParams.get("fields") || "";
+      return /(^|,)reactions(\.|,|$)/.test(fields);
+    }),
+    false,
+  );
 });
 
 

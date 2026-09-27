@@ -38,5 +38,5 @@ test("Insights cards keep content away from panel frames", () => {
 
 
 test("connected account cards do not show reconnect", () => {
-  assert.match(insightsSource, /status !== "connected" && item\.reconnect_url/);
+  assert.match(client, /status !== "connected" && item\.reconnect_url/);
 });
