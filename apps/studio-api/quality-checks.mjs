@@ -156,6 +156,14 @@ export const QUALITY_CHECKS = Object.freeze([
     heal: "repair_render_sources",
   }),
   check({
+    id: "render_private_drive_watermark",
+    title: "Check for Remotion renders using a private Google Drive watermark that Chromium cannot load (403 / ERR_BLOCKED_BY_ORB)",
+    lane: "service",
+    kind: "render_private_drive_watermark",
+    actor: "worker_heal",
+    heal: "repair_render_sources",
+  }),
+  check({
     id: "native_cover_missing",
     title: "Check for Reels/Shorts that published without attaching the 3D native cover",
     lane: "both",
