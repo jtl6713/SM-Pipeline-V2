@@ -57,13 +57,24 @@ def create_master_media_asset(
         "Asset_Role": "Raw Footage" if is_video else "Other",
         "Raw_Source_Eligibility": "Eligible" if is_video else "Not Applicable",
         "Asset_Description": (
-            "Studio Item 4 authoritative master clip preserved in Google Drive."
-            if is_video
-            else "Studio Item 4 authoritative master original preserved in Google Drive."
+            (
+                f"Studio Item 4 ChicagoShining watermarked {'clip' if is_video else 'photo'} derivative. "
+                f"[watermarked:{str(fields.get('Watermark_Profile') or 'ChicagoShining')}] "
+                f"Source master Drive ID: {str(fields.get('Source_Master_Drive_File_ID') or '').strip()}"
+            ).strip()
+            if fields.get("Watermark_Profile")
+            else (
+                "Studio Item 4 authoritative master clip preserved in Google Drive."
+                if is_video
+                else "Studio Item 4 authoritative master original preserved in Google Drive."
+            )
         ),
         "Studio_Transfer_ID": transfer_id,
         "Classification_Status": "Needs Classification",
     }
+    profile = fields.get("Content_Profile")
+    if profile:
+        body["Content_Profile"] = profile
     return client.create_records(MEDIA_ASSETS_TABLE, [body])[0]
 
 
@@ -101,7 +112,17 @@ def create_variant_media_asset(
         ),
         "Studio_Transfer_ID": transfer_id,
     }
-    source = find_by_drive_file_id(client, str(fields.get("Source_Drive_File_ID") or ""))
+    source = None
+    linked = fields.get("Source_Media_Asset") or []
+    if isinstance(linked, list) and linked:
+        linked_id = linked[0].get("id") if isinstance(linked[0], dict) else linked[0]
+        if linked_id:
+            try:
+                source = client.get_record(MEDIA_ASSETS_TABLE, str(linked_id))
+            except Exception:
+                source = None
+    if not source:
+        source = find_by_drive_file_id(client, str(fields.get("Source_Drive_File_ID") or ""))
     body.update(classification_fields_from_source(source))
     return client.create_records(MEDIA_ASSETS_TABLE, [body])[0]
 

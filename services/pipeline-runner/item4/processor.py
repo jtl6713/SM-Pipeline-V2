@@ -3,10 +3,22 @@ from __future__ import annotations
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
 from airtable.client import AirtableClient
-from airtable.constants import MEDIA_TRANSFER_QUEUE_TABLE
+from airtable.constants import (
+    CONTENT_PROFILES_TABLE,
+    MEDIA_TRANSFER_QUEUE_TABLE,
+    PRODUCTION_REQUESTS_TABLE,
+)
+from asset.constants import GDRIVE_STUDIO_INTAKE_FOLDER
+from branding.watermark import (
+    brand_watermark_bytes,
+    profile_requires_watermark,
+    watermark_media_bytes,
+    watermark_photo_bytes,
+)
 from integrations.google_drive import GoogleDriveClient
 from integrations.r2_upload import R2UploadClient
 from integrations.variant_service import VariantServiceClient, rasterize_still_bytes
@@ -20,6 +32,42 @@ from item4.sources import resolve_master_source
 
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def _first_linked_id(value: Any) -> str:
+    if isinstance(value, list) and value:
+        first = value[0]
+        if isinstance(first, dict):
+            return str(first.get("id") or "").strip()
+        return str(first or "").strip()
+    return ""
+
+
+def _production_profile(client: AirtableClient, fields: dict[str, Any]) -> tuple[str, str]:
+    request_id = str(fields.get("Production_Request_Record_ID") or "").strip()
+    if not request_id:
+        return "", ""
+    try:
+        request_record = client.get_record(PRODUCTION_REQUESTS_TABLE, request_id)
+        profile_id = _first_linked_id(field(request_record, "Content_Profile"))
+        if not profile_id:
+            return "", ""
+        profile = client.get_record(CONTENT_PROFILES_TABLE, profile_id)
+        return profile_id, str(field(profile, "Profile_Name") or "").strip()
+    except Exception:
+        return "", ""
+
+
+def _with_extension(filename: str, extension: str) -> str:
+    source = Path(str(filename or "asset"))
+    stem = source.stem or "asset"
+    ext = str(extension or "").strip().lstrip(".")
+    return f"{stem}.{ext}" if ext else source.name
+
+
+def _source_master_name(filename: str) -> str:
+    source = Path(str(filename or "asset"))
+    return f"{source.stem or 'asset'}__source{source.suffix}"
 
 
 def _media_asset_id(fields: dict[str, Any] | None) -> str:
@@ -284,25 +332,77 @@ def _process_master_pending(
 
     _claim_row(client, record_id, fields)
     content, mime = resolve_master_source(fields, settings)
+    profile_id, profile_name = _production_profile(client, fields)
+    media_fields = dict(fields)
+    if profile_id:
+        media_fields["Content_Profile"] = [profile_id]
+
+    source_drive_id = str(fields.get("Source_Drive_File_ID") or "").strip()
+    watermarked = profile_requires_watermark(profile_name)
+    if watermarked:
+        if not source_drive_id:
+            source_uploaded = drive.upload_file(
+                GDRIVE_STUDIO_INTAKE_FOLDER,
+                _source_master_name(filename),
+                content,
+                mime,
+            )
+            source_drive_id = str(source_uploaded.get("id") or "").strip()
+            if not source_drive_id:
+                raise RuntimeError("ChicagoShining source master could not be preserved in Google Drive")
+            client.update_record(
+                MEDIA_TRANSFER_QUEUE_TABLE,
+                record_id,
+                {"Source_Drive_File_ID": source_drive_id},
+            )
+        mark = brand_watermark_bytes(client)
+        branded = watermark_media_bytes(
+            content,
+            mark,
+            filename=filename,
+            mime_type=mime,
+        )
+        content = bytes(branded.get("bytes") or b"")
+        mime = str(branded.get("mime_type") or mime)
+        filename = _with_extension(filename, str(branded.get("extension") or ""))
+        media_fields.update(
+            {
+                "Source_MIME_Type": mime,
+                "Source_Extension": str(branded.get("extension") or "").lower(),
+                "Source_Size_Bytes": len(content),
+                "Target_File_Name": filename,
+                "Watermark_Profile": profile_name,
+                "Source_Master_Drive_File_ID": source_drive_id,
+            }
+        )
+
     uploaded = drive.upload_file(folder_id, filename, content, mime)
     drive_id = str(uploaded.get("id") or "")
     drive_url = str(uploaded.get("webViewLink") or f"https://drive.google.com/file/d/{drive_id}/view")
     media_asset_id = ensure_media_asset(
-        client, fields, drive_id, drive_url, transfer_id, kind="Master Original"
+        client, media_fields, drive_id, drive_url, transfer_id, kind="Master Original"
     )
+    update_fields = {
+        "Transfer_Status": "Ready",
+        "Drive_File_ID": drive_id,
+        "Drive_URL": drive_url,
+        "Media_Asset_Record_ID": media_asset_id,
+        "Generated_Media_Asset": [media_asset_id],
+        "Completed_At": _now_iso(),
+        "Error_Message": None,
+        "Preview_Status": "Pending",
+    }
+    if source_drive_id:
+        update_fields["Source_Drive_File_ID"] = source_drive_id
+    if watermarked:
+        update_fields["Source_MIME_Type"] = mime
+        update_fields["Source_Extension"] = Path(filename).suffix.lower().lstrip(".")
+        update_fields["Source_Size_Bytes"] = len(content)
+        update_fields["Target_File_Name"] = filename
     client.update_record(
         MEDIA_TRANSFER_QUEUE_TABLE,
         record_id,
-        {
-            "Transfer_Status": "Ready",
-            "Drive_File_ID": drive_id,
-            "Drive_URL": drive_url,
-            "Media_Asset_Record_ID": media_asset_id,
-            "Generated_Media_Asset": [media_asset_id],
-            "Completed_At": _now_iso(),
-            "Error_Message": None,
-            "Preview_Status": "Pending",
-        },
+        update_fields,
     )
     return {
         "route": "master_pending",
@@ -327,6 +427,13 @@ def _complete_variant_upload(
     folder_id = str(fields.get("Target_Drive_Folder_ID") or "").strip()
     filename = str(fields.get("Target_File_Name") or "variant.jpg")
     ratio = str(fields.get("Aspect_Ratio") or "").strip()
+    _profile_id, profile_name = _production_profile(client, fields)
+    if profile_requires_watermark(profile_name):
+        rendered = watermark_photo_bytes(
+            rendered,
+            brand_watermark_bytes(client),
+            output_format="jpeg",
+        )
     uploaded = drive.upload_file(folder_id, filename, rendered, "image/jpeg")
     drive_id = str(uploaded.get("id") or "")
     drive_url = str(uploaded.get("webViewLink") or f"https://drive.google.com/file/d/{drive_id}/view")

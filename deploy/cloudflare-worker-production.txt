@@ -93,8 +93,12 @@ Worker: render-unfetchable-source-auto-heal
 Source merge: 3676f4fea17960cbdad5f1cd4b8fccce930f7a4e
 Requested: 2026-09-27T07:24:00-05:00
 
+<<<<<<< HEAD
 Deploy Studio API Worker production
 Reason: pause idea photo listening during Manage Idea; permanently lock listener when Production opens
 Worker: manage-idea-photo-pause
 Source merge: 882ebc4f962380b5aeec07cce0c97ec733c10a72
 Requested: 2026-09-27T08:41:00-05:00
+=======
+Watermark-all-visuals merge Worker deploy: 2026-09-27 — Rebased onto main; library/ingest watermarking + Remotion cover with persistent brand. Worker 0.10.401-watermark-all-visuals.
+>>>>>>> e94a061c (Guarantee ChicagoShining watermarks on photos and clips.)

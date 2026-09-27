@@ -440,7 +440,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.400-promote-ready-preflight",
+          version: "0.10.401-watermark-all-visuals",
           studio_desk_inventory_v1: true,
           studio_desk_activity_v1: true,
           studio_tiktok_complete_v1: true,
@@ -5128,12 +5128,14 @@ async function item4ReconcileMasterAuthority(env, recordId, record = null) {
     const transferId = item4MasterTransferId(recordId, asset.id);
     const q = byTransferId.get(transferId) || null;
     let driveId = String(asset?.google_drive_file_id || "").trim();
+    let sourceDriveId = String(asset?.source_google_drive_file_id || "").trim();
     let driveUrl = String(asset?.google_drive_url || "").trim();
     let mediaAssetId = String(asset?.media_asset_record_id || "").trim();
     let previewUrl = String(asset?.preview_url || "").trim();
     let posterUrl = String(asset?.poster_url || "").trim();
     let posterKey = String(asset?.poster_r2_key || "").trim();
     if (q) {
+      sourceDriveId = sourceDriveId || String(f(q, "Source_Drive_File_ID") || "").trim();
       const queuedPreview = String(f(q, "Preview_URL") || "").trim();
       if (item4LooksLikeVideoAsset(asset)) {
         if (item4LooksLikeImagePreviewUrl(queuedPreview)) posterUrl = posterUrl || queuedPreview;
@@ -5220,6 +5222,7 @@ async function item4ReconcileMasterAuthority(env, recordId, record = null) {
     nextAssets.push({
       ...asset,
       google_drive_file_id: driveId || null,
+      source_google_drive_file_id: sourceDriveId || null,
       google_drive_url: driveUrl || null,
       media_asset_record_id: mediaAssetId || null,
       preview_url: previewUrl || null,
@@ -6420,6 +6423,88 @@ function ideaLibraryRejectReason(record, { allowVideo = false } = {}) {
   return null;
 }
 
+function studioProfileRequiresChicagoWatermark(profile) {
+  const normalized = String(f(profile || {}, "Profile_Name") || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "");
+  return normalized.startsWith("chicagoshining");
+}
+
+async function item4ProductionProfileRecord(env, requestRecord) {
+  const profileId = studioFirstLinkedId(f(requestRecord || {}, "Content_Profile"));
+  if (!profileId) return null;
+  const profiles = await listContentProfileRecords(env).catch(() => []);
+  return profiles.find((row) => row.id === profileId) || null;
+}
+
+function studioAssetHasChicagoWatermark(record) {
+  return /\[watermarked:chicagoshining[^\]]*\]/i.test(String(f(record || {}, "Asset_Description") || ""));
+}
+
+function studioAssetSourceDriveId(record) {
+  const description = String(f(record || {}, "Asset_Description") || "");
+  return String(/Source master Drive ID:\s*([A-Za-z0-9_-]+)/i.exec(description)?.[1] || "").trim();
+}
+
+async function ensureChicagoWatermarkedLibraryAssetForProfile(env, media, profile) {
+  if (!studioProfileRequiresChicagoWatermark(profile)) return media;
+  if (studioAssetHasChicagoWatermark(media)) return media;
+
+  const driveId = googleDriveFileId(media);
+  if (!driveId) throw new HttpError(409, "ChicagoShining assets must have a Google Drive master before they can be watermarked");
+  const runnerUrl = String(env.PIPELINE_RUNNER_URL || "").trim().replace(/\/+$/, "");
+  if (!runnerUrl) throw new HttpError(503, "Pipeline runner is required to watermark ChicagoShining assets");
+  const secret = String(env.PIPELINE_RUNNER_SHARED_SECRET || "");
+  const profileName = String(f(profile, "Profile_Name") || "ChicagoShining").trim();
+  const filename = String(f(media, "Asset Name") || "asset").trim();
+  const mimeType = String(f(media, "MIME_Type") || "").trim();
+  let response;
+  try {
+    response = await fetch(`${runnerUrl}/jobs/studio-asset-watermark`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...(secret ? { "X-Pipeline-Secret": secret } : {}),
+      },
+      body: JSON.stringify({
+        google_drive_file_id: driveId,
+        filename,
+        mime_type: mimeType,
+        profile_name: profileName,
+      }),
+    });
+  } catch (error) {
+    throw new HttpError(503, `Pipeline runner unreachable for ChicagoShining watermarking (${error instanceof Error ? error.message : "network error"})`);
+  }
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok || !payload?.watermarked || !payload?.google_drive_file_id) {
+    throw new HttpError(
+      response.status >= 400 ? response.status : 502,
+      payload?.error || payload?.message || "ChicagoShining watermarking did not produce a branded derivative",
+    );
+  }
+  const priorDescription = String(f(media, "Asset_Description") || "").trim();
+  const marker = `[watermarked:${profileName}] Source master Drive ID: ${driveId}`;
+  const fields = {
+    "Google Drive File ID": String(payload.google_drive_file_id),
+    "Google Drive URL": String(payload.google_drive_url || "").trim()
+      || `https://drive.google.com/file/d/${String(payload.google_drive_file_id)}/view`,
+    MIME_Type: String(payload.mime_type || mimeType || "application/octet-stream"),
+    File_Extension: item4FileExtension(payload.filename || filename) || f(media, "File_Extension") || null,
+    File_Size_Bytes: Number(payload.file_size_bytes || 0) || f(media, "File_Size_Bytes") || null,
+    Asset_Description: [priorDescription, marker].filter(Boolean).join("\n"),
+  };
+  return airtableFetch(env, env.AIRTABLE_MEDIA_TABLE_ID || ITEM4_MEDIA_ASSET_TABLE, media.id, {
+    method: "PATCH",
+    body: JSON.stringify({ fields, typecast: true }),
+  });
+}
+
+async function ensureChicagoWatermarkedLibraryAsset(env, media, requestRecord) {
+  const profile = await item4ProductionProfileRecord(env, requestRecord);
+  return ensureChicagoWatermarkedLibraryAssetForProfile(env, media, profile);
+}
+
 async function attachItem4LibraryAssets(request, env, url, authorization) {
   const recordId = item4RequestIdFromPath(url);
   const record = await loadAuthorizedProductionRequest(env, recordId, authorization);
@@ -6450,7 +6535,8 @@ async function attachItem4LibraryAssets(request, env, url, authorization) {
   }
   const appended = [];
   for (const mediaId of incoming) {
-    const media = await airtableFetch(env, env.AIRTABLE_MEDIA_TABLE_ID || ITEM4_MEDIA_ASSET_TABLE, mediaId);
+    let media = await airtableFetch(env, env.AIRTABLE_MEDIA_TABLE_ID || ITEM4_MEDIA_ASSET_TABLE, mediaId);
+    media = await ensureChicagoWatermarkedLibraryAsset(env, media, record);
     const reject = ideaLibraryRejectReason(media, { allowVideo });
     if (reject) throw new HttpError(409, reject);
     const driveId = googleDriveFileId(media);
@@ -6476,6 +6562,7 @@ async function attachItem4LibraryAssets(request, env, url, authorization) {
       size_bytes: ideaLibraryFileBytes(media) || null,
       focal_point: "center",
       google_drive_file_id: driveId,
+      source_google_drive_file_id: studioAssetSourceDriveId(media) || null,
       google_drive_url: driveUrl || null,
       media_asset_record_id: media.id,
       preview_url: `/api/media-assets/${media.id}/preview`,
@@ -8111,7 +8198,7 @@ async function item4UpsertVariantQueue(env, recordId, assets, ratios, outputRows
   const expected = [];
   for (const asset of assets) {
     if (item4LooksLikeVideoAsset(asset)) continue;
-    const sourceDriveId = String(asset?.google_drive_file_id || "").trim();
+    const sourceDriveId = String(asset?.source_google_drive_file_id || asset?.google_drive_file_id || "").trim();
     const sourceMediaAssetId = String(asset?.media_asset_record_id || "").trim();
 
     if (!sourceDriveId) {
@@ -19324,7 +19411,8 @@ async function applyLibraryAssetsToProductionRequest(env, requestRecord, mediaId
   const appended = [];
   for (const mediaId of mediaIds) {
     if (already.has(mediaId)) continue;
-    const media = await airtableFetch(env, env.AIRTABLE_MEDIA_TABLE_ID || ITEM4_MEDIA_ASSET_TABLE, mediaId);
+    let media = await airtableFetch(env, env.AIRTABLE_MEDIA_TABLE_ID || ITEM4_MEDIA_ASSET_TABLE, mediaId);
+    media = await ensureChicagoWatermarkedLibraryAsset(env, media, requestRecord);
     const reject = ideaLibraryRejectReason(media);
     if (reject) continue;
     const driveId = googleDriveFileId(media);
@@ -19342,6 +19430,7 @@ async function applyLibraryAssetsToProductionRequest(env, requestRecord, mediaId
       size_bytes: ideaLibraryFileBytes(media) || null,
       focal_point: "center",
       google_drive_file_id: driveId,
+      source_google_drive_file_id: studioAssetSourceDriveId(media) || null,
       google_drive_url: driveUrl || null,
       media_asset_record_id: media.id,
       preview_url: `/api/media-assets/${media.id}/preview`,
@@ -20462,7 +20551,7 @@ async function listAssetLibrary(request, env, url, authorization) {
   });
 }
 
-async function promoteStudioAssetToDrive(env, { filename, bytes, contentType }) {
+async function promoteStudioAssetToDrive(env, { filename, bytes, contentType, profileName = "" }) {
   const runnerUrl = String(env.PIPELINE_RUNNER_URL || "").trim().replace(/\/+$/, "");
   if (!runnerUrl) {
     throw new HttpError(503, "Pipeline runner is required to store assets in Google Drive");
@@ -20471,6 +20560,7 @@ async function promoteStudioAssetToDrive(env, { filename, bytes, contentType }) 
   const form = new FormData();
   form.set("filename", filename);
   form.set("mime_type", contentType || "");
+  form.set("profile_name", String(profileName || ""));
   form.set("file", new Blob([bytes], { type: contentType || "application/octet-stream" }), filename);
   let response;
   try {
@@ -20584,7 +20674,14 @@ async function uploadAssetLibraryItems(request, env, authorization, ctx) {
       filename: driveFilename,
       bytes,
       contentType: item4NormalizedMimeType(file),
+      profileName: f(uploadProfile, "Profile_Name") || "",
     });
+    if (studioProfileRequiresChicagoWatermark(uploadProfile) && !drive?.watermarked) {
+      throw new HttpError(
+        503,
+        "ChicagoShining watermarking is not active on the Pipeline Runner. The asset was not added to the Studio library."
+      );
+    }
     const durationSeconds = isVideo
       ? (coerceLibraryDurationSeconds(drive.duration_seconds) || formDuration)
       : null;
@@ -20598,7 +20695,7 @@ async function uploadAssetLibraryItems(request, env, authorization, ctx) {
             "Google Drive URL": drive.google_drive_url,
             "Google Drive File ID": drive.google_drive_file_id,
             MIME_Type: drive.mime_type || item4NormalizedMimeType(file),
-            File_Extension: extension,
+            File_Extension: item4FileExtension(drive.filename || driveFilename) || extension,
             File_Size_Bytes: Number(drive.file_size_bytes || file.size || 0) || null,
             Duration_Seconds: durationSeconds,
             Intake_Status: "Created",
@@ -20613,7 +20710,12 @@ async function uploadAssetLibraryItems(request, env, authorization, ctx) {
             Asset_Role: isVideo ? "Raw Footage" : "Other",
             Raw_Source_Eligibility: isVideo ? "Eligible" : "Not Applicable",
             Location: location || null,
-            Asset_Description: description || "Studio Asset Manager upload stored in Google Drive.",
+            Asset_Description: [
+              description,
+              drive.watermarked
+                ? `[watermarked:${String(drive.watermark_profile || f(uploadProfile, "Profile_Name") || "ChicagoShining")}] Source master Drive ID: ${String(drive.source_google_drive_file_id || "").trim()}`
+                : "",
+            ].filter(Boolean).join("\n") || "Studio Asset Manager upload stored in Google Drive.",
             Studio_Transfer_ID: `LIB-${id}`,
             Content_Profile: [uploadProfile.id],
           },
@@ -20772,8 +20874,12 @@ async function assignLibraryAssetProfile(request, env, url, authorization, ctx) 
   // classify=false saves the profile only (dropdown change). "Classify all" runs A3 later.
   const shouldClassify = payload?.classify !== false;
   const profile = await resolveWorkingContentProfile(env, authorization, profileId);
-  const record = await airtableFetch(env, env.AIRTABLE_MEDIA_TABLE_ID, recordId);
+  let record = await airtableFetch(env, env.AIRTABLE_MEDIA_TABLE_ID, recordId);
   assertLibrarySourceAsset(record);
+  // Assigning an existing source asset to ChicagoShining is itself a branding
+  // boundary. Upgrade it before saving the profile so the catalog never claims
+  // a ChicagoShining asset is ready while its canonical file is unwatermarked.
+  record = await ensureChicagoWatermarkedLibraryAssetForProfile(env, record, profile);
   const updated = await airtableFetch(env, env.AIRTABLE_MEDIA_TABLE_ID, recordId, {
     method: "PATCH",
     body: JSON.stringify({

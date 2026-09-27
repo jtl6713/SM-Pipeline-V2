@@ -3,6 +3,10 @@
 from __future__ import annotations
 
 from io import BytesIO
+from pathlib import Path
+import subprocess
+import tempfile
+
 import requests
 from PIL import Image
 
@@ -22,6 +26,130 @@ DEFAULT_SCALE = 0.12
 DEFAULT_MARGIN = 30
 DEFAULT_OPACITY = 1.0
 BRANDED_PATH_MARKERS = ("/lettered/", "/watermarked/")
+
+
+VIDEO_EXTENSIONS = {".mp4", ".mov", ".m4v", ".webm"}
+
+
+def profile_requires_watermark(profile_name: str) -> bool:
+    """ChicagoShining visuals must always use the official watermark."""
+    normalized = "".join(ch for ch in str(profile_name or "").lower() if ch.isalnum())
+    return normalized.startswith("chicagoshining")
+
+
+def _media_extension(filename: str) -> str:
+    return Path(str(filename or "")).suffix.lower()
+
+
+def watermark_video_bytes(
+    video_bytes: bytes,
+    watermark_bytes: bytes,
+    *,
+    filename: str = "clip.mp4",
+    position: str = DEFAULT_POSITION,
+    scale: float = DEFAULT_SCALE,
+    margin: int = DEFAULT_MARGIN,
+) -> bytes:
+    """Burn the official watermark into every frame of a video clip."""
+    if not video_bytes:
+        raise RuntimeError("Video watermark input was empty")
+    if not watermark_bytes:
+        raise RuntimeError("Video watermark asset was empty")
+    suffix = _media_extension(filename)
+    if suffix not in VIDEO_EXTENSIONS:
+        suffix = ".mp4"
+    overlay_xy = {
+        "top-left": f"{int(margin)}:{int(margin)}",
+        "top-right": f"main_w-overlay_w-{int(margin)}:{int(margin)}",
+        "bottom-left": f"{int(margin)}:main_h-overlay_h-{int(margin)}",
+        "bottom-right": f"main_w-overlay_w-{int(margin)}:main_h-overlay_h-{int(margin)}",
+        "center": "(main_w-overlay_w)/2:(main_h-overlay_h)/2",
+    }.get(str(position or DEFAULT_POSITION), f"{int(margin)}:{int(margin)}")
+    with tempfile.TemporaryDirectory(prefix="studio-watermark-") as tmp:
+        root = Path(tmp)
+        source = root / f"source{suffix}"
+        mark = root / "watermark.png"
+        output = root / "watermarked.mp4"
+        source.write_bytes(video_bytes)
+        mark.write_bytes(watermark_bytes)
+        filter_graph = (
+            f"[1:v][0:v]scale2ref=w=main_w*{float(scale or DEFAULT_SCALE)}:h=-1[wm][base];"
+            f"[base][wm]overlay={overlay_xy}:format=auto[outv]"
+        )
+        completed = subprocess.run(
+            [
+                "ffmpeg",
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-y",
+                "-i",
+                str(source),
+                "-i",
+                str(mark),
+                "-filter_complex",
+                filter_graph,
+                "-map",
+                "[outv]",
+                "-map",
+                "0:a?",
+                "-c:v",
+                "libx264",
+                "-preset",
+                "medium",
+                "-crf",
+                "19",
+                "-pix_fmt",
+                "yuv420p",
+                "-c:a",
+                "aac",
+                "-b:a",
+                "192k",
+                "-movflags",
+                "+faststart",
+                str(output),
+            ],
+            capture_output=True,
+            check=False,
+            timeout=900,
+        )
+        if completed.returncode != 0 or not output.exists() or output.stat().st_size < 100:
+            detail = completed.stderr.decode("utf-8", errors="replace")[-1000:]
+            raise RuntimeError(f"Video watermark ffmpeg failed: {detail or 'no output'}")
+        return output.read_bytes()
+
+
+def watermark_media_bytes(
+    media_bytes: bytes,
+    watermark_bytes: bytes,
+    *,
+    filename: str = "",
+    mime_type: str = "",
+) -> dict:
+    """Return a publication-safe watermarked derivative for a photo or video."""
+    ext = _media_extension(filename)
+    mime = str(mime_type or "").strip().lower()
+    is_video = mime.startswith("video/") or ext in VIDEO_EXTENSIONS
+    if is_video:
+        branded = watermark_video_bytes(media_bytes, watermark_bytes, filename=filename)
+        return {
+            "bytes": branded,
+            "mime_type": "video/mp4",
+            "extension": "mp4",
+            "watermarked": True,
+        }
+
+    from integrations.variant_service import rasterize_still_bytes
+
+    raster = rasterize_still_bytes(media_bytes, ext=ext.lstrip("."))
+    output_format = "png" if ext == ".png" else "jpeg"
+    branded = watermark_photo_bytes(raster, watermark_bytes, output_format=output_format)
+    return {
+        "bytes": branded,
+        "mime_type": "image/png" if output_format == "png" else "image/jpeg",
+        "extension": "png" if output_format == "png" else "jpg",
+        "watermarked": True,
+    }
 
 
 def already_branded_url(url: str) -> bool:

@@ -188,6 +188,8 @@ export type ChicagoShiningPhotoSequenceProps = {
   spokenCaptionWordsPerPage?: number;
   titleText?: string;
   brandText?: string;
+  watermarkUrl?: string;
+  watermarkRequired?: boolean;
 };
 
 const clamp01 = (value: unknown, fallback: number): number => {
@@ -1013,6 +1015,7 @@ const ImageSegment: React.FC<{
           />
         </Sequence>
       ) : null}
+
     </AbsoluteFill>
   );
 };
@@ -1312,6 +1315,8 @@ React.FC<ChicagoShiningPhotoSequenceProps> = ({
   spokenCaptionWordsPerPage = 4,
   titleText = "",
   brandText = "",
+  watermarkUrl = "",
+  watermarkRequired = false,
 }) => {
   const {fps} = useVideoConfig();
 
@@ -1502,6 +1507,10 @@ React.FC<ChicagoShiningPhotoSequenceProps> = ({
   const cleanVoiceoverText = String(voiceoverText ?? "").trim();
   const cleanTitleText = String(titleText ?? "").trim();
   const cleanBrandText = String(brandText ?? "").trim();
+  const watermarkSource = resolveSource(watermarkUrl);
+  if (watermarkRequired && !watermarkSource) {
+    throw new Error("ChicagoShining watermark is required but no watermarkUrl was provided.");
+  }
   const normalizedCaptionTrackMode = String(captionTrackMode ?? "")
     .trim()
     .toLowerCase();
@@ -1607,6 +1616,21 @@ React.FC<ChicagoShiningPhotoSequenceProps> = ({
         </Sequence>
       ) : null}
 
+      {watermarkRequired && watermarkSource ? (
+        <AbsoluteFill style={{pointerEvents: "none"}}>
+          <Img
+            src={watermarkSource}
+            style={{
+              position: "absolute",
+              top: 30,
+              left: 30,
+              width: "12%",
+              height: "auto",
+              objectFit: "contain",
+            }}
+          />
+        </AbsoluteFill>
+      ) : null}
       <PersistentBrandWatermark
         text={cleanBrandText}
         targetAspectRatio={resolvedTargetAspectRatio}
