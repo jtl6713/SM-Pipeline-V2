@@ -24,3 +24,5 @@ Production native clip aspect previews: 2026-09-26 - renders no-crop clip cards 
 YouTube-only production output authority: 2026-09-26 - removes deselected-platform overrides and extra outputs before planning, persists platform removals immediately, and preserves Longform Video for YouTube Standard-only clip requests. UI 0.6.389.
 
 Production clip preview playback: 2026-09-26 - preserves playable video when posters fail, adds Drive thumbnail fallback and poster self-heal, and fixes click-to-play for preloaded clips. UI 0.6.390.
+
+Existing Production platform authority: 2026-09-26 - hydrates hidden EZ platform controls from saved request/output state and prevents New Content defaults from overwriting existing YouTube-only drafts. UI 0.6.391.

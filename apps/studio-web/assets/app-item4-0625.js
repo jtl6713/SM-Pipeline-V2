@@ -240,7 +240,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.390-clip-preview-playback";
+  const BUILD_ID = "item4-0.6.391-existing-platform-authority";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -2905,8 +2905,43 @@
     return ezIsOriginRecord();
   }
 
+  function item4SavedPlatformAuthority(record = activeProductionRequest) {
+    const requestPlatforms = selectedRequestPlatforms();
+    if (requestPlatforms.length) return requestPlatforms;
+    const saved = (Array.isArray(record?.platforms) ? record.platforms : [])
+      .map((value) => String(value || "").trim())
+      .filter(Boolean);
+    if (saved.length) return [...new Set(saved)];
+    const planned = (item4Workspace?.plan?.items || [])
+      .map((item) => String(item?.platform || "").trim())
+      .filter(Boolean);
+    if (planned.length) return [...new Set(planned)];
+    return item4SelectedPlatforms();
+  }
+
+  function item4HydrateEzPlatforms(platforms) {
+    const selected = new Set(
+      (Array.isArray(platforms) ? platforms : [])
+        .map((value) => String(value || "").trim())
+        .filter(Boolean)
+    );
+    document.querySelectorAll("[data-ez-platform]").forEach((input) => {
+      input.checked = selected.has(String(input.value || ""));
+    });
+  }
+
   function ezSelectedPlatforms() {
     if (!usingEzPlatforms()) return item4SelectedPlatforms();
+
+    // Existing requests opened in Configure have hidden EZ checkboxes. Those
+    // controls start with HTML defaults and must never outrank the request that
+    // was actually saved. The EZ checkboxes are authoritative only while the
+    // operator is actively using New Content.
+    if (activeProductionRequest?.id && ezEntryPath !== "content" && !ezStarting) {
+      const saved = item4SavedPlatformAuthority(activeProductionRequest);
+      if (saved.length) return saved;
+    }
+
     const boxes = Array.from(document.querySelectorAll("[data-ez-platform]"));
     if (!boxes.length) return item4SelectedPlatforms();
     return boxes.filter((input) => input.checked && !input.disabled).map((input) => input.value);
@@ -2995,6 +3030,19 @@
       const platforms = planned.platforms.length ? planned.platforms : selected;
       return platforms.length ? platforms : defaultPlanPlatforms(count);
     }
+
+    // Rebuilding/updating an existing request must preserve its chosen
+    // destinations. Hidden New Content defaults are not a valid fallback here.
+    if (activeProductionRequest?.id && ezEntryPath !== "content" && !ezStarting) {
+      const authoritative = (Array.isArray(selected) && selected.length)
+        ? selected
+        : item4SavedPlatformAuthority(activeProductionRequest);
+      if (authoritative.length) {
+        applyEzPlanOverrides(count, authoritative);
+        return authoritative;
+      }
+    }
+
     const defaults = defaultPlanPlatforms(count);
     const boxes = Array.from(document.querySelectorAll("[data-ez-platform]"));
     const platforms = boxes.length
@@ -9649,6 +9697,7 @@
         input.checked = selectedPlatforms.has(input.value);
       }
     });
+    item4HydrateEzPlatforms([...selectedPlatforms]);
   }
 
   function clearOutputMatrix() {
@@ -9926,11 +9975,13 @@
     $("productionRequestStatus").textContent = record.status || "Draft";
     $("productionRequestStatus").className = `badge ${stateClass(record.status || "Draft")}`;
 
+    const recordPlatforms = Array.isArray(record.platforms) ? record.platforms : [];
+    document.querySelectorAll('input[name="prPlatform"]').forEach(input => {
+      input.checked = recordPlatforms.includes(input.value);
+    });
+    item4HydrateEzPlatforms(recordPlatforms);
     setSelectValue("prContentType", record.content_type, "");
     syncHiddenMasterContentType();
-    document.querySelectorAll('input[name="prPlatform"]').forEach(input => {
-      input.checked = Array.isArray(record.platforms) && record.platforms.includes(input.value);
-    });
     setSelectValue("prVoiceover", record.voiceover_mode, "Yes");
     setSelectValue("prMusicMode", record.background_music_mode, "Yes");
     setSelectValue("prThumbnail", record.thumbnail_mode, "Yes");
@@ -9973,10 +10024,6 @@
     if (["multiple-photos", "single-photo", "photos-and-clips", "video-clips", "finished-video", "finished-stills"].includes(intakeKind)) {
       if (ezEntryPath === "content") {
         selectEzInput(intakeKind, { resetPlatforms: false });
-        document.querySelectorAll("[data-ez-platform]").forEach((input) => {
-          input.checked = Array.isArray(record.platforms) && record.platforms.includes(input.value);
-        });
-        syncEzYouTubeAvailability(false);
         if (parsed?.captionMode) {
           ezCaptionDefault = parsed.captionMode;
           renderEzCaptionUi();
@@ -9984,6 +10031,8 @@
       } else {
         selectPrMediaKind(intakeKind, { quiet: true });
       }
+      syncEzYouTubeAvailability(false);
+      item4HydrateEzPlatforms(recordPlatforms);
     }
     hydrateEzConfigFromRequest(record);
     // Always start collapsed; operators can expand when they need the matrix.
@@ -10705,6 +10754,9 @@
     const fallback = selected.length ? selected : selectedRequestPlatforms();
     const platforms = [...new Set(fallback.map((value) => String(value || "").trim()).filter(Boolean))];
     if (platforms.length !== 1 || platforms[0] !== "YouTube") return false;
+    if (String($("prContentType")?.value || activeProductionRequest?.content_type || "").trim() === "Longform Video") {
+      return true;
+    }
     if (selectedOutputMatrix().some((row) => row.platform === "YouTube" && row.output_type === "Standard Video")) {
       return true;
     }
