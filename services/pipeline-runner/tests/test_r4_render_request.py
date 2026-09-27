@@ -1,7 +1,7 @@
 from r4.constants import R4_CLEAR_FIELDS
 from r4.formulas import r4_exact_output_formula, r4_production_formula
 from r4.processor import _eligible_exact_output
-from r4.render_request import choose_render_request, expected_clip_count, voiceover_is_required
+from r4.render_request import brand_text, choose_render_request, expected_clip_count, voiceover_is_required
 
 
 def test_r4_production_formula_requires_render_package():
@@ -176,3 +176,21 @@ def test_r4_p020_uses_reduced_ducked_music_default():
     assert route == "p020_manifest"
     assert payload["music"]["volume"] == 0.6
     assert payload["music"]["duckingMultiplier"] == 0.084
+
+def test_r4_brand_text_falls_back_to_content_profile_brand():
+    output = _photo_output()
+    output["fields"].pop("Brand_Text", None)
+    parent = {"fields": {"Brand_Name": ["ChicagoShining"], "Profile_Name": "ChicagoShining"}}
+    route, payload = choose_render_request(output, parent, default_music=0.35, default_voice=1.0)
+    assert route == "no_voiceover"
+    assert payload["brandText"] == "ChicagoShining"
+    assert brand_text(output, parent) == "ChicagoShining"
+
+
+def test_r4_explicit_output_brand_wins_over_parent_brand():
+    output = _photo_output(Brand_Text="NewYorkShining")
+    parent = {"fields": {"Brand_Name": ["ChicagoShining"]}}
+    route, payload = choose_render_request(output, parent, default_music=0.35, default_voice=1.0)
+    assert route == "no_voiceover"
+    assert payload["brandText"] == "NewYorkShining"
+

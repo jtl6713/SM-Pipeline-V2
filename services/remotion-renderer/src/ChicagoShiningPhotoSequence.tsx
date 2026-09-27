@@ -1250,6 +1250,48 @@ const SpokenCaptionTrack: React.FC<{
   );
 };
 
+const PersistentBrandWatermark: React.FC<{
+  text: string;
+  targetAspectRatio: PhotoSequenceAspectRatio;
+}> = ({text, targetAspectRatio}) => {
+  const label = String(text ?? "").trim();
+  if (!label) return null;
+  const compact = targetAspectRatio === "16:9";
+  return (
+    <AbsoluteFill
+      style={{
+        pointerEvents: "none",
+        alignItems: "flex-start",
+        justifyContent: "flex-start",
+        paddingTop: compact ? "3.2%" : "5.0%",
+        paddingLeft: compact ? "2.4%" : "4.0%",
+        zIndex: 1000,
+      }}
+    >
+      <div
+        data-brand-watermark="persistent"
+        style={{
+          color: "rgba(255,255,255,.96)",
+          fontFamily: "Arial, Helvetica, sans-serif",
+          fontSize: compact ? 30 : 34,
+          fontWeight: 850,
+          letterSpacing: 1.1,
+          lineHeight: 1,
+          padding: compact ? "8px 13px" : "9px 15px",
+          borderRadius: 999,
+          backgroundColor: "rgba(0,0,0,.28)",
+          border: "1px solid rgba(255,255,255,.32)",
+          boxShadow: "0 3px 16px rgba(0,0,0,.34)",
+          textShadow: "0 2px 8px rgba(0,0,0,.82)",
+          opacity: 0.84,
+        }}
+      >
+        {label}
+      </div>
+    </AbsoluteFill>
+  );
+};
+
 export const ChicagoShiningPhotoSequence:
 React.FC<ChicagoShiningPhotoSequenceProps> = ({
   clips,
@@ -1564,6 +1606,11 @@ React.FC<ChicagoShiningPhotoSequenceProps> = ({
           />
         </Sequence>
       ) : null}
+
+      <PersistentBrandWatermark
+        text={cleanBrandText}
+        targetAspectRatio={resolvedTargetAspectRatio}
+      />
     </AbsoluteFill>
   );
 };

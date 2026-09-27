@@ -557,6 +557,7 @@ export default {
           studio_ig_fb_photo_dispatch_v1: true,
           studio_native_still_no_mix_handoff_v1: true,
           studio_native_photo_brand_on_approve_v1: true,
+          studio_all_visual_watermark_v1: true,
           studio_idea_chain_python_gates_v1: true,
           studio_music_catalog_fallback_v1: true,
           studio_music_upload_v1: true,
@@ -2048,7 +2049,6 @@ function studioOutputIsNativePhoto(record) {
 }
 
 function studioNativeStillsNeedLettering(record) {
-  if (studioIsFinishedPassthrough(record)) return false;
   const renderStatus = String(f(record, "Render_Status") || "").trim();
   if (renderStatus !== "Native Photo Route" && !studioOutputIsNativePhoto(record)) return false;
   const clips = selectedVisualClips(record);
@@ -29661,7 +29661,7 @@ async function approveOutputRecordForPublishing(env, existing, note, stamp, payl
   }
   const existingNotes = String(f(existing, "Review_Notes") || "").trim();
   let record = existing;
-  if (studioOutputIsNativePhoto(record) && !studioIsFinishedPassthrough(record)) {
+  if (studioOutputIsNativePhoto(record)) {
     await item4PulseLetterPython(env, { outputRecordId: record.id }).catch((error) => {
       console.warn("native photo branding before publish approval failed", record.id, error);
     });
