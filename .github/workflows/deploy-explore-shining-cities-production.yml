@@ -128,9 +128,10 @@ jobs:
               echo "Domain already attached: $DOMAIN"
               continue
             fi
+            jq -n --arg name "$DOMAIN" '{name:$name}' > "/tmp/domain-${DOMAIN}-payload.json"
             CODE=$(curl -sS -o "/tmp/domain-${DOMAIN}.json" -w "%{http_code}" -X POST "$API" \
               -H "$AUTH" -H "Content-Type: application/json" \
-              --data "{"name":"$DOMAIN"}")
+              --data-binary @"/tmp/domain-${DOMAIN}-payload.json")
             if [[ "$CODE" -lt 200 || "$CODE" -ge 300 ]]; then
               echo "Failed to attach $DOMAIN (HTTP $CODE)" >&2
               cat "/tmp/domain-${DOMAIN}.json" >&2
@@ -189,7 +190,7 @@ jobs:
         run: |
           {
             echo "### Explore Shining Cities production"
-            echo "- Pages project: `$PAGES_PROJECT`"
+            echo "- Pages project: $PAGES_PROJECT"
             echo "- Primary domain: https://$PUBLIC_DOMAIN"
             echo "- Canonical www redirect: https://$WWW_DOMAIN -> https://$PUBLIC_DOMAIN"
             echo "- Source commit: `$GITHUB_SHA`"
