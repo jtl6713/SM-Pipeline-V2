@@ -1868,6 +1868,8 @@ body:has(#page-content.active) .studio-footer-links button:hover{
 #item4VariantProgress[data-heal="preparing"]{background:#fff8df;border-color:#ead89e;color:#5c4a12}
 .item4-variant-image-wrap .item4-clip-poster-wrap{position:absolute;inset:0;height:auto}
 .item4-variant-thumb.item4-variant-clip .item4-crop-hint{color:#5c4a12}
+.item4-variant-thumb.item4-variant-clip .item4-clip-poster-wrap img,
+.item4-variant-thumb.item4-variant-clip .item4-clip-poster-wrap video{object-fit:contain;background:#000}
 
 #page-content .item4-media-kind-grid{
   margin:0;

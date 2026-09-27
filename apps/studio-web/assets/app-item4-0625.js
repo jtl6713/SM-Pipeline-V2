@@ -240,7 +240,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.387-asset-delete-authority";
+  const BUILD_ID = "item4-0.6.388-native-clip-aspect";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -6709,6 +6709,12 @@
       const video = wrap.querySelector("video");
       const play = wrap.querySelector("[data-item4-play]");
       const applyDuration = () => {
+        const nativeFrame = wrap.closest("[data-item4-native-clip-frame]");
+        const nativeWidth = Number(video?.videoWidth || 0);
+        const nativeHeight = Number(video?.videoHeight || 0);
+        if (nativeFrame && nativeWidth > 0 && nativeHeight > 0) {
+          nativeFrame.style.aspectRatio = `${nativeWidth} / ${nativeHeight}`;
+        }
         const seconds = Number(video?.duration || 0);
         if (!Number.isFinite(seconds) || seconds <= 0) return;
         item4RememberClipDuration(wrap.dataset.clipKey, seconds);
@@ -7393,7 +7399,28 @@
     ensureItem4PrepareClock();
   }
 
-  function item4VariantClipThumb(asset) {
+  function item4ClipPreviewRatio(asset, status = item4Workspace) {
+    const width = Number(asset?.width || asset?.source_width || asset?.video_width || 0);
+    const height = Number(asset?.height || asset?.source_height || asset?.video_height || 0);
+    if (Number.isFinite(width) && width > 0 && Number.isFinite(height) && height > 0) {
+      return `${width} / ${height}`;
+    }
+    const declared = String(asset?.aspect_ratio || asset?.aspectRatio || "").trim();
+    const declaredMatch = declared.match(/^(\d+(?:\.\d+)?)\s*[:/]\s*(\d+(?:\.\d+)?)$/);
+    if (declaredMatch) return `${declaredMatch[1]} / ${declaredMatch[2]}`;
+    const orientation = String(asset?.orientation || "").trim().toLowerCase();
+    if (orientation === "landscape") return "16 / 9";
+    if (orientation === "portrait") return "9 / 16";
+    if (orientation === "square") return "1 / 1";
+    const planRatios = item4PlanRatios(status);
+    if (planRatios.length === 1) {
+      const planMatch = String(planRatios[0] || "").match(/^(\d+(?:\.\d+)?)\s*[:/]\s*(\d+(?:\.\d+)?)$/);
+      if (planMatch) return `${planMatch[1]} / ${planMatch[2]}`;
+    }
+    return "16 / 9";
+  }
+
+  function item4VariantClipThumb(asset, status = item4Workspace) {
     const master = item4MasterAsset(asset?.id) || asset || {};
     const previewUrl = item4AssetPreviewUrl(master);
     const streamUrl = item4PlayableClipSrc(master);
@@ -7406,8 +7433,9 @@
       preload: Boolean(streamUrl),
     }) || item4AssetPlaceholder(master, "Clip saved");
     const assetId = master.id || "";
+    const cssRatio = item4ClipPreviewRatio(master, status);
     return `<article class="item4-variant-thumb item4-variant-clip" data-item4-asset="${escapeHtml(assetId)}">
-      <div class="item4-variant-image-wrap" style="aspect-ratio:9 / 16">${visual}</div>
+      <div class="item4-variant-image-wrap" data-item4-native-clip-frame style="aspect-ratio:${escapeHtml(cssRatio)}">${visual}</div>
       <p class="item4-crop-hint">Clips skip photo crops. The same file is used for each platform frame.</p>
       <div class="item4-variant-meta">
         <strong>Clip ${escapeHtml(master.order || "")}</strong>
@@ -7533,7 +7561,7 @@
       return;
     }
     const clipSection = clipAssets.length
-      ? `<section class="item4-ratio-group"><div class="item4-ratio-heading"><div><strong>Clips</strong><span>${clipAssets.length} clip${clipAssets.length === 1 ? "" : "s"} · no crop</span></div></div><div class="item4-variant-strip">${clipAssets.map(item4VariantClipThumb).join("")}</div></section>`
+      ? `<section class="item4-ratio-group"><div class="item4-ratio-heading"><div><strong>Clips</strong><span>${clipAssets.length} clip${clipAssets.length === 1 ? "" : "s"} · no crop</span></div></div><div class="item4-variant-strip">${clipAssets.map((asset) => item4VariantClipThumb(asset, status)).join("")}</div></section>`
       : "";
     const photoSections = photoAssets.length
       ? ratios.map((ratio) => {
