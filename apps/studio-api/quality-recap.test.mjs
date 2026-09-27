@@ -179,3 +179,25 @@ test("recap skips tester noise and asks for help on desk-only blocks", () => {
   assert.equal(recap.cards[0].status, "Needs you");
   assert.equal(recap.cards[0].tone, "alert");
 });
+
+
+test("recap explains Studio-only render-source repair", () => {
+  const recap = buildQualityRecap({
+    incidents: [{
+      kind: "render_unfetchable_source",
+      class: "data_repair",
+      actor: "worker_heal",
+      fingerprint: "render_unfetchable_source:rec1017:studio_relative_media_url",
+      output_id: 1017,
+      content_id: 231,
+      content_title: "Chicago Bridge Secrets",
+      platform: "Instagram",
+      platform_output_type: "Reel",
+    }],
+  });
+  assert.equal(recap.cards.length, 1);
+  assert.match(recap.cards[0].found, /Studio-only media URL/i);
+  assert.match(recap.cards[0].action, /Google Drive URL/i);
+  assert.equal(recap.cards[0].content_id, 231);
+  assert.equal(recap.cards[0].output_id, 1017);
+});
