@@ -30,9 +30,11 @@ test("YouTube Standard-only clip requests remain longform", () => {
   assert.match(app, /return item4YouTubeLongformSelected\(\) \? "Longform Video" : "Vertical Short Video"/);
 });
 
-test("Studio build and app cache key are aligned for output scope authority", () => {
+test("Studio build and app cache key stay aligned after output scope authority changes", () => {
   const build = app.match(/BUILD_ID = "item4-([^"]+)"/)?.[1];
-  assert.equal(build, "0.6.389-output-scope-authority");
-  assert.match(html, /UI build 0\.6\.389/);
+  const uiBuild = html.match(/UI build (0\.6\.\d+)/)?.[1];
+  assert.ok(build);
+  assert.ok(uiBuild);
+  assert.equal(uiBuild, build.match(/^0\.6\.\d+/)?.[0]);
   assert.ok(html.includes(`/assets/app-item4-0625.js?v=${build}`));
 });
