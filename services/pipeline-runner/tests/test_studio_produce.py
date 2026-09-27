@@ -2,6 +2,7 @@ import json
 from datetime import datetime, timezone
 
 from render.fields import first_linked_id, linked_ids
+from p2.processor import _extend_video_duration_for_voiceover
 from studio_produce.constants import STEP_LABELS, STEP_PERCENT
 from studio_produce.context import outputs_formula
 from studio_produce.job import derive_route, finished_origin_kind, is_finished_route, job_is_stale, job_is_terminal, new_job, next_step, parse_job, with_step
@@ -44,6 +45,41 @@ def test_delay_render_failure_requeues_exit_code_1():
         {"fields": {"Final_File_Error_Message": "delayRender() call was not cleared"}}
     )
     assert not _is_delay_render_failure({"fields": {"Remotion_Error_Message": "asset 404"}})
+
+
+def test_p2_extends_non_story_outputs_instead_of_rejecting_long_voiceover():
+    class FakeClient:
+        def __init__(self):
+            self.updates = []
+            self.outputs = {
+                "recReel": {"id": "recReel", "fields": {"Studio_Output_Type": "Reel", "Studio_Effective_Voiceover_Mode": "Yes"}},
+                "recStory": {"id": "recStory", "fields": {"Studio_Output_Type": "Story", "Studio_Effective_Voiceover_Mode": "No"}},
+            }
+
+        def update_record(self, table, record_id, fields, typecast=False):
+            self.updates.append((table, record_id, fields))
+            return {"id": record_id, "fields": fields}
+
+        def get_record(self, table, record_id):
+            return self.outputs[record_id]
+
+    client = FakeClient()
+    item = {
+        "id": "recContent",
+        "fields": {
+            "Content_Duration": 30,
+            "Voiceover_Tail_Seconds": 2,
+            "Platform Outputs": [{"id": "recReel"}, {"id": "recStory"}],
+        },
+    }
+    request = {"id": "recRequest", "fields": {"Video_Duration_Seconds": 30}}
+    required = _extend_video_duration_for_voiceover(client, item, request, 32.28)
+
+    assert required == 34.3
+    assert any(record_id == "recContent" and fields.get("Content_Duration") == 34.3 for _, record_id, fields in client.updates)
+    assert any(record_id == "recRequest" and fields.get("Video_Duration_Seconds") == 34.3 for _, record_id, fields in client.updates)
+    assert any(record_id == "recReel" and fields.get("Studio_Effective_Video_Duration_Seconds") == 34.3 for _, record_id, fields in client.updates)
+    assert not any(record_id == "recStory" for _, record_id, _ in client.updates)
 
 
 def test_measured_voiceover_duration_overrides_requested_target_and_extends_render():
