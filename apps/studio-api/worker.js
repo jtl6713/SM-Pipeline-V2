@@ -437,7 +437,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.399-promote-ready-skip",
+          version: "0.10.400-promote-ready-preflight",
           studio_desk_inventory_v1: true,
           studio_desk_activity_v1: true,
           studio_tiktok_complete_v1: true,
@@ -12348,10 +12348,15 @@ function item4BridgePlanKey(platform, outputType) {
 }
 
 async function item4SourceToProductionBridgePreflight(env, requestRecord, ideaRecord = null) {
-  try {
-    requestRecord = await item4RelinkVariantQueueOutputs(env, requestRecord);
-  } catch (error) {
-    console.warn("Item 4 destination relink deferred before bridge preflight", error);
+  const variantsAlreadyReady = autonomousPlanVariantsReady(requestRecord);
+  // Ready 37-still drafts already have crops. Relink + queue scans here
+  // exhaust the Worker and 500 Approve.
+  if (!variantsAlreadyReady) {
+    try {
+      requestRecord = await item4RelinkVariantQueueOutputs(env, requestRecord);
+    } catch (error) {
+      console.warn("Item 4 destination relink deferred before bridge preflight", error);
+    }
   }
 
   const issues = [];
@@ -12485,6 +12490,7 @@ async function item4SourceToProductionBridgePreflight(env, requestRecord, ideaRe
     }
   }
 
+  if (!variantsAlreadyReady) {
   const queueRows = await item4VariantQueueRows(env, requestRecord.id);
   const variantQueueRows = queueRows.filter(row =>
     String(f(row, "Asset_Kind") || "").trim() === "Platform Variant" &&
@@ -12505,6 +12511,7 @@ async function item4SourceToProductionBridgePreflight(env, requestRecord, ideaRe
     if (!matching.length || missingLinks.length) {
       issues.push(`${routeRow.platform} / ${routeRow.output_type} is not fully linked from the ${routeRow.aspect_ratio} source variants to its Production Request Output.`);
     }
+  }
   }
   } else {
     notes.push("Finished file passthrough. Crops, Remotion, and lettering are skipped.");

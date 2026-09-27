@@ -81,3 +81,8 @@ Reason: Approve 500 on 37-still Bridge draft — skip Ready variant rewrite
 Worker: 0.10.399-promote-ready-skip
 Requested: 2026-09-27T01:05:00-05:00
 
+Deploy Studio API Worker production
+Reason: Approve 500 again — skip Ready preflight relink/queue scan
+Worker: 0.10.400-promote-ready-preflight
+Requested: 2026-09-27T01:52:00-05:00
+
