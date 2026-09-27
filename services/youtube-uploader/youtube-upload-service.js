@@ -8,7 +8,7 @@ const { URL } = require("url");
 
 const { spawnSync } = require("child_process");
 
-const SERVICE_VERSION = "2026-09-25-quota-aware-oauth-status";
+const SERVICE_VERSION = "2026-09-26-supported-thumbnail-api";
 const MIN_REFRESH_TOKEN_LENGTH = 40;
 const ENV_PATH = path.join(process.cwd(), ".env");
 
@@ -498,7 +498,7 @@ function ffmpegJpeg(asset, vf, maxBytes) {
   return null;
 }
 
-function prepareYoutubeThumbnail(asset, { vertical = false, maxBytes = 2097152 } = {}) {
+function prepareYoutubeThumbnail(asset, { vertical = false, maxBytes = 50 * 1024 * 1024 } = {}) {
   const size = probeImageSize(asset) || {};
   const portrait = Boolean(vertical) || Number(size.height) > Number(size.width);
   const box = portrait ? { width: 1080, height: 1920 } : { width: 1280, height: 720 };
@@ -563,8 +563,8 @@ async function setThumbnail(videoId, sourceUrl, fallbackSourceUrl = null, { vert
     try {
       const downloaded = await tryDownload(url);
       const next = prepareYoutubeThumbnail(downloaded, { vertical });
-      if (next.body.length > 2097152) {
-        lastError = new Error(`Thumbnail exceeds 2 MB (${next.body.length} bytes)`);
+      if (next.body.length > 50 * 1024 * 1024) {
+        lastError = new Error(`Thumbnail exceeds 50 MB (${next.body.length} bytes)`);
         continue;
       }
       asset = next;
@@ -587,9 +587,12 @@ async function setThumbnail(videoId, sourceUrl, fallbackSourceUrl = null, { vert
   const text = await response.text();
   if (!response.ok) throw new Error(`thumbnails.set failed ${response.status}: ${text}`);
   const data = JSON.parse(text);
-  if (vertical) {
-    data.studioVerticalStill = await setStudioVerticalStill(videoId, asset, token);
-  }
+  // thumbnails.set is the supported YouTube Data API contract for custom video
+  // thumbnails, including custom Shorts thumbnails. Do not chain a private
+  // studio.youtube.com youtubei call: that endpoint is session-internal and can
+  // reject a valid OAuth upload after thumbnails.set already succeeded.
+  data.apiThumbnailAccepted = true;
+  data.requestedVertical = Boolean(vertical);
   return data;
 }
 
