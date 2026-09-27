@@ -19,6 +19,7 @@ from carousel.constants import (
 )
 from config import load_settings
 from item4.settings import pipeline_settings
+from integrations.google_drive import GoogleDriveClient
 from render.fields import field_str
 
 DEFAULT_POSITION = "top-left"
@@ -175,7 +176,28 @@ def brand_watermark_url(client: AirtableClient) -> str:
 
 
 def brand_watermark_bytes(client: AirtableClient) -> bytes:
-    url = brand_watermark_url(client)
+    """Load the official watermark using authenticated Drive first.
+
+    Asset Manager ingestion runs on the local Pipeline Runner. The catalog's
+    Google Drive URL is not guaranteed to be anonymously downloadable, so a
+    plain requests.get() can fail even though the runner itself has Drive
+    credentials. Prefer the stored Drive file ID and authenticated Drive
+    download; retain URL download only for legacy watermark rows.
+    """
+    rows = client.list_records(MEDIA_ASSETS_TABLE, view=C6_WATERMARK_ASSET_VIEW, max_records=1)
+    if not rows:
+        raise RuntimeError("C6 watermark asset view returned no active branding watermark")
+    row = rows[0]
+    drive_id = field_str(row, "Google Drive File ID")
+    if drive_id:
+        content, _mime_type = GoogleDriveClient().download_file(drive_id)
+        if not content:
+            raise RuntimeError("C6 watermark Drive download was empty")
+        return content
+
+    url = field_str(row, "Google Drive URL")
+    if not url:
+        raise RuntimeError("C6 watermark asset is missing Google Drive File ID and URL")
     response = requests.get(url, timeout=120)
     response.raise_for_status()
     if not response.content:

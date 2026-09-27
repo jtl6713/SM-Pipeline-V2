@@ -144,3 +144,31 @@ def test_existing_chicago_asset_gets_watermarked_derivative(monkeypatch):
     assert result["watermarked"] is True
     assert result["google_drive_file_id"] == "wmDrive2"
     assert result["source_google_drive_file_id"] == "rawDrive1"
+
+
+def test_brand_watermark_bytes_prefers_authenticated_drive(monkeypatch):
+    from branding import watermark as watermark_module
+
+    class _Airtable:
+        def list_records(self, *_args, **_kwargs):
+            return [{
+                "id": "recWatermark",
+                "fields": {
+                    "Google Drive File ID": "driveWatermark1",
+                    "Google Drive URL": "https://drive.google.com/uc?export=download&id=driveWatermark1",
+                },
+            }]
+
+    class _Drive:
+        def download_file(self, file_id):
+            assert file_id == "driveWatermark1"
+            return b"official-watermark", "image/png"
+
+    monkeypatch.setattr(watermark_module, "GoogleDriveClient", lambda: _Drive())
+    monkeypatch.setattr(
+        watermark_module.requests,
+        "get",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("public URL should not be used")),
+    )
+
+    assert watermark_module.brand_watermark_bytes(_Airtable()) == b"official-watermark"
