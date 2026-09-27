@@ -84,3 +84,8 @@ Deploy Studio Pages production
 Reason: Production UI auto-retries leftover frame prep when the poll window expires
 UI: 0.6.404-prepare-auto-retry
 Requested: 2026-09-27T10:55:00-05:00
+
+Deploy Studio Pages production
+Reason: Story review shows real voiceover on/off; produce stamp resolves catalog music when URL missing
+UI: 0.6.405-story-audio-catalog
+Requested: 2026-09-27T10:27:23-05:00
