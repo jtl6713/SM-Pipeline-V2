@@ -34,3 +34,10 @@ Reason: make Production asset deletion authoritative and disable AI auto-regener
 Worker: 0.10.391-asset-delete-authority
 Source merge: 5ba473c2d7f6d05108e9e3c15b14e8b830437055
 Requested: 2026-09-26
+
+Deploy Studio API Worker production
+Reason: guarantee watermark branding across native still approval and all rendered ChicagoShining visuals
+Worker: 0.10.390-production-watermark-guarantee
+Source merge: aa547df02bc90ebfa110368d0b4dea9c12fcbd9a
+Requested: 2026-09-26T20:49:00-05:00
+
