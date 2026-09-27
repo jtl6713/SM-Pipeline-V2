@@ -1,94 +1,59 @@
-# Explore Shining Cities public-site architecture
+# Explore Shining Cities website integration boundary
 
-## Decision
+## Canonical source
 
-Add `apps/explore-shining-cities` as a sibling application in SM-Pipeline-V2.
+The customer-facing Explore Shining Cities frontend no longer lives in this repository.
 
-This avoids coupling the public site to `apps/studio-web` or `apps/studio-api` while keeping source control, review, Cloudflare deployment practices and future pipeline integration in the same ecosystem.
+Canonical website source:
 
-## Runtime boundary
+- Repository: `jtl6713/chicagoshining-website`
+- Application: `apps/explore-shining-cities/`
+- Production: https://exploreshiningcities.com
+- Website CI/deployment workflows are owned by the website repository.
 
-The public site is statically generated. It has no runtime dependency on Airtable, Studio API, pipeline-runner, uploader services, OAuth callbacks, tunnels, Remotion or publishing workers.
+`SM-Pipeline-V2` remains the system of record for Studio, pipeline orchestration, asset/media processing, social publishing, and the future website-publication workflow.
 
-That boundary is intentional:
+## Integration contract
+
+The public website must not read pipeline runtime state, Airtable credentials, uploader endpoints, OAuth secrets, tunnel services, or other production-only data directly.
+
+The intended flow is:
 
 ```
-Production system
-Airtable / Studio / pipeline workflow
-          |
-          | explicit website-publish action (future)
-          v
-Public publication projection
-          |
-          | build / cache invalidation
-          v
-Explore Shining Cities static site
+SM-Pipeline-V2
+Studio / Airtable / pipeline
+        |
+        | explicit website publish action
+        v
+Public website projection
+        |
+        | stable public contract
+        v
+jtl6713/chicagoshining-website
+apps/explore-shining-cities
+        |
+        v
+Cloudflare Pages
 ```
 
-The publication projection is the contract. Production-only fields never cross it.
+The publication projection should contain only public-safe data such as:
 
-## City model
+- stable public content id
+- city slug
+- content slug
+- website publication status
+- title, summary, and editorial body
+- public media derivative URLs
+- categories and tags
+- location / neighborhood metadata
+- social / YouTube links
+- published and updated timestamps
+- SEO metadata
 
-A city is configuration, not an application:
+## Ownership rule
 
-- route slug
-- display name
-- existing Shining brand identity
-- visual accent
-- hero media
-- editorial intro
-- featured categories
-- neighborhoods / areas
-- verified social links
+Website presentation, routing, SEO, static generation, and Cloudflare Pages deployment belong in `chicagoshining-website`.
 
-Shared templates generate city and content-detail routes. Adding a future city such as Boston should require a city config plus public content, not copied pages.
+Pipeline logic that decides *what* should be published and prepares the public projection belongs in `SM-Pipeline-V2`.
 
-## Launch projection
-
-Phase one stores curated public records in `src/data/site.mjs`. Each record references an existing active Media Asset by internal source identifiers for traceability, but those identifiers are not rendered in public HTML.
-
-This is not intended to become the permanent CMS. It establishes the public schema before Studio gets a website-publish destination.
-
-## Media
-
-Google Drive + Media Assets remain durable authority in line with existing repo rules. Launch content uses Drive-backed image delivery.
-
-Recommended next step after launch:
-
-1. Add a website derivative job for approved assets.
-2. Produce web sizes/formats into the existing Cloudflare media delivery layer.
-3. Put only the public derivative URL in the publication projection.
-4. Keep Drive file ID as internal lineage.
-5. Cache immutable derivatives aggressively.
-
-## Cloudflare
-
-Use a new Cloudflare Pages project with root directory `apps/explore-shining-cities`. No Worker route is needed for phase one.
-
-Production custom domains:
-
-- `exploreshoiningcities.com`
-- `www.exploreshoiningcities.com` -> canonical apex redirect
-
-Do not change current `chicagoshining.com` routes or technical hostnames.
-
-A future `studio.exploreshoiningcities.com`, `api.exploreshoiningcities.com`, or `media.exploreshoiningcities.com` migration is explicitly separate work.
-
-## SEO and analytics
-
-Built in:
-
-- canonical URLs
-- unique city/detail titles and descriptions
-- Open Graph / social metadata
-- JSON-LD
-- semantic headings
-- breadcrumbs
-- sitemap.xml
-- robots.txt
-- strong internal linking
-- optional Cloudflare Web Analytics beacon
-
-## Safety
-
-The public site has no credentials and no write access. It cannot mutate Airtable, publish social content, call uploader endpoints, change pipeline state or affect Studio behavior.
+Do not reintroduce the frontend application or website deployment workflow into this repository.
