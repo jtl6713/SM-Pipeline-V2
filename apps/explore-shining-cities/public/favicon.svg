@@ -1,5 +1,0 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Explore Shining Cities">
-  <rect width="64" height="64" rx="14" fill="#0a0d10"/>
-  <path d="M32 8l4.6 14.8L52 27.4l-15.4 4.8L32 48l-4.6-15.8L12 27.4l15.4-4.6L32 8z" fill="#fff"/>
-  <circle cx="32" cy="32" r="5" fill="#ff625b"/>
-</svg>
