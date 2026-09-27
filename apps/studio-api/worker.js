@@ -440,7 +440,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.405-promotion-fanout-authority",
+          version: "0.10.406-private-drive-watermark-heal",
           studio_desk_inventory_v1: true,
           studio_desk_activity_v1: true,
           studio_tiktok_complete_v1: true,
@@ -565,6 +565,7 @@ export default {
           studio_native_still_no_mix_handoff_v1: true,
           studio_native_photo_brand_on_approve_v1: true,
           studio_all_visual_watermark_v1: true,
+          studio_private_drive_watermark_heal_v1: true,
           studio_idea_chain_python_gates_v1: true,
           studio_music_catalog_fallback_v1: true,
           studio_music_upload_v1: true,
@@ -10278,10 +10279,89 @@ async function studioRepairUnfetchableRenderSources(env, row) {
   return { repaired, unresolved: [] };
 }
 
+function studioPrivateDriveWatermarkSignature(row) {
+  const props = String(f(row, "Remotion_Props_JSON") || "");
+  const err = String(f(row, "Remotion_Error_Message") || f(row, "Final_File_Error_Message") || "");
+  const propsMatch = /"watermarkUrl"\s*:\s*"https?:\\/\\/(?:drive|docs)\.google\.com/i.test(props);
+  const errorMatch = /watermark/i.test(err)
+    && /drive\.google\.com|ERR_BLOCKED_BY_ORB|HTTP status code:\s*403|Error loading image with src/i.test(err);
+  return propsMatch || errorMatch;
+}
+
+async function studioRemotionPrivateDriveLocalizationReady() {
+  try {
+    const response = await fetch("https://render.chicagoshining.com/health", {
+      method: "GET",
+      headers: { Accept: "application/json", "Cache-Control": "no-cache" },
+    });
+    if (!response.ok) return false;
+    const payload = await response.json().catch(() => ({}));
+    return payload?.privateDriveImageLocalization === true
+      && payload?.watermarkLocalization === true;
+  } catch {
+    return false;
+  }
+}
+
+async function studioResetPrivateDriveWatermarkRender(env, row) {
+  await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, row.id, {
+    method: "PATCH",
+    body: JSON.stringify({
+      fields: {
+        Render_Status: "Ready for Render",
+        Output_Status: "In Production",
+        Remotion_Job_ID: "",
+        Remotion_Status_URL: "",
+        Remotion_Props_JSON: "",
+        Remotion_Error_Message: "",
+        Final_File_Error_Message: "",
+        Final_File_URL: "",
+        Final_File_ID: "",
+        Output_URL: "",
+        Final_File_Storage_Status: null,
+      },
+      typecast: true,
+    }),
+  });
+}
+
 async function healStuckStudioRenders(env) {
   const outputTable = env.AIRTABLE_OUTPUT_TABLE_ID;
   const pulses = [];
   const voCache = { parents: new Map(), requests: new Map() };
+  const rendererSupportsPrivateDrive = await studioRemotionPrivateDriveLocalizationReady();
+
+  // Exact regression signature: ChicagoShining watermark was embedded in
+  // Remotion_Props_JSON as a private Drive URL. Chromium then fails it with
+  // Google 403 / ERR_BLOCKED_BY_ORB. Do not blindly loop R4 while the old
+  // renderer is still live. Once health advertises localization support, clear
+  // the stale job and requeue a small batch each tick.
+  const privateDriveWatermarkRows = await listRecords(env, outputTable, {
+    limit: 12,
+    sortField: "Output_ID",
+    sortDirection: "desc",
+    filterFormula: 'AND({Test_Run_ID}=BLANK(),FIND("drive.google.com",{Remotion_Props_JSON}&"")>0,OR({Render_Status}="Failed",{Render_Status}="Rendering",{Render_Status}="Ready for Render"))',
+  }).catch(() => []);
+  let privateDriveRequeues = 0;
+  for (const row of privateDriveWatermarkRows || []) {
+    if (!studioPrivateDriveWatermarkSignature(row)) continue;
+    if (!rendererSupportsPrivateDrive) {
+      pulses.push({ key: "R4_PRIVATE_DRIVE_WATERMARK", id: row.id, skipped: "renderer_not_updated" });
+      continue;
+    }
+    if (privateDriveRequeues >= 3) {
+      pulses.push({ key: "R4_PRIVATE_DRIVE_WATERMARK", id: row.id, skipped: "staggered_to_next_tick" });
+      continue;
+    }
+    try {
+      await studioResetPrivateDriveWatermarkRender(env, row);
+      const payload = await item4PulseR4Python(env, { outputRecordId: row.id });
+      privateDriveRequeues += 1;
+      pulses.push({ key: "R4_PRIVATE_DRIVE_WATERMARK", id: row.id, payload, repaired: true });
+    } catch (error) {
+      pulses.push({ key: "R4_PRIVATE_DRIVE_WATERMARK", id: row.id, error: error instanceof Error ? error.message : String(error) });
+    }
+  }
   const invalidSourceRows = await listRecords(env, outputTable, {
     limit: 12,
     sortField: "Output_ID",
@@ -10365,6 +10445,12 @@ async function healStuckStudioRenders(env) {
     filterFormula: 'AND({Test_Run_ID}=BLANK(),{Render_Status}="Failed")',
   }).catch(() => []);
   for (const row of failedRenders || []) {
+    if (studioPrivateDriveWatermarkSignature(row)) {
+      if (!rendererSupportsPrivateDrive) {
+        pulses.push({ key: "R4_FAILED_REQUEUE", id: row.id, skipped: "private_drive_watermark_renderer_not_updated" });
+      }
+      continue;
+    }
     const err = String(f(row, "Remotion_Error_Message") || f(row, "Final_File_Error_Message") || "");
     if (!deskFailedNeedsHeal({
       render_error: err,
@@ -34199,6 +34285,7 @@ function mapDeskInventoryOutput(record, contentToRequest = new Map(), contentByI
     publish_retry_eligible: Boolean(f(record, "Publish_Retry_Eligible")),
     render_error: f(record, "Remotion_Error_Message") || f(record, "Final_File_Error_Message"),
     render_clip_list_json: f(record, "Render_Clip_List_JSON"),
+    remotion_props_json: f(record, "Remotion_Props_JSON"),
   };
 }
 
@@ -34339,7 +34426,7 @@ async function gatherStudioDeskInventory(env) {
     const job = parseStudioProductionJob(record) || {};
     push(classifyProduceJob({ ...job, request_id: record.id, ...requestIdentity(record) }, nowMs));
   }
-  scanned("render_ready_no_job", "render_ready_waiting_voiceover", "render_unfetchable_source", "render_long", "produce_orphan");
+  scanned("render_ready_no_job", "render_ready_waiting_voiceover", "render_unfetchable_source", "render_private_drive_watermark", "render_long", "produce_orphan");
   for (const record of invalidRenderSources || []) {
     push(classifyRenderRow(mapOut(record), nowMs));
   }
