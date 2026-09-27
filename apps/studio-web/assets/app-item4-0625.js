@@ -15625,17 +15625,24 @@
   }
 
   const LIBRARY_CLASSIFY_WATCH_KEY = "studioLibraryClassifyWatch";
-  const libraryClassifyWatch = { ids: new Set(), total: 0 };
+  const LIBRARY_CLASSIFY_WATCH_MAX_AGE_MS = 15 * 60 * 1000;
+  const libraryClassifyWatch = { ids: new Set(), total: 0, startedAt: 0 };
+
+  function libraryClassifyWatchIsFresh(startedAt = libraryClassifyWatch.startedAt) {
+    const stamp = Number(startedAt || 0);
+    return Number.isFinite(stamp) && stamp > 0 && Date.now() - stamp < LIBRARY_CLASSIFY_WATCH_MAX_AGE_MS;
+  }
 
   function persistLibraryClassifyWatch() {
     try {
-      if (!libraryClassifyWatch.ids.size) {
+      if (!libraryClassifyWatch.ids.size || !libraryClassifyWatchIsFresh()) {
         sessionStorage.removeItem(LIBRARY_CLASSIFY_WATCH_KEY);
         return;
       }
       sessionStorage.setItem(LIBRARY_CLASSIFY_WATCH_KEY, JSON.stringify({
         ids: [...libraryClassifyWatch.ids],
         total: libraryClassifyWatch.total,
+        started_at: libraryClassifyWatch.startedAt,
       }));
     } catch { /* ignore */ }
   }
@@ -15643,12 +15650,27 @@
   function restoreLibraryClassifyWatch() {
     try {
       const parsed = JSON.parse(sessionStorage.getItem(LIBRARY_CLASSIFY_WATCH_KEY) || "null");
+      const startedAt = Number(parsed?.started_at || 0);
+      // Old builds persisted watched IDs forever. Legacy or expired watches are UI
+      // history, not proof that the user just uploaded anything.
+      if (!libraryClassifyWatchIsFresh(startedAt)) {
+        sessionStorage.removeItem(LIBRARY_CLASSIFY_WATCH_KEY);
+        libraryClassifyWatch.ids.clear();
+        libraryClassifyWatch.total = 0;
+        libraryClassifyWatch.startedAt = 0;
+        return;
+      }
       const ids = Array.isArray(parsed?.ids) ? parsed.ids : [];
       ids.forEach((id) => {
         if (/^rec[A-Za-z0-9]+$/.test(id)) libraryClassifyWatch.ids.add(id);
       });
       libraryClassifyWatch.total = Math.max(Number(parsed?.total) || 0, libraryClassifyWatch.ids.size);
-    } catch { /* ignore */ }
+      libraryClassifyWatch.startedAt = startedAt;
+    } catch {
+      libraryClassifyWatch.ids.clear();
+      libraryClassifyWatch.total = 0;
+      libraryClassifyWatch.startedAt = 0;
+    }
     if (libraryClassifyWatch.ids.size) scheduleLibraryClassifyPoll(true);
   }
 
@@ -15668,8 +15690,7 @@
   }
 
   function libraryClassificationInProgress(status) {
-    const value = String(status || "").trim();
-    return value !== "Classified" && value !== "Classification Error";
+    return String(status || "").trim() === "Processing";
   }
 
   function watchLibraryClassification(ids) {
@@ -15677,6 +15698,7 @@
     if (!next.length) return;
     next.forEach((id) => libraryClassifyWatch.ids.add(id));
     libraryClassifyWatch.total = Math.max(libraryClassifyWatch.total, libraryClassifyWatch.ids.size);
+    libraryClassifyWatch.startedAt = Date.now();
     persistLibraryClassifyWatch();
     syncLibraryClassifyStatusMessage(libraryClassifyWatch.ids.size);
     scheduleLibraryClassifyPoll(true);
@@ -15685,6 +15707,7 @@
   function clearLibraryClassificationWatch() {
     libraryClassifyWatch.ids.clear();
     libraryClassifyWatch.total = 0;
+    libraryClassifyWatch.startedAt = 0;
     persistLibraryClassifyWatch();
   }
 
@@ -16282,8 +16305,15 @@
         if (libraryClassificationInProgress(record.classification_status)) still += 1;
       }
       if (watchIds.length) {
-        const seen = new Set(records.map((record) => record.id).filter(Boolean));
-        still += watchIds.filter((id) => !seen.has(id)).length;
+        const activeIds = records
+          .filter((record) => watchIds.includes(record.id) && libraryClassificationInProgress(record.classification_status))
+          .map((record) => record.id);
+        // Finished, failed, re-queued, or deleted rows must leave the watch immediately.
+        // Missing rows used to count forever, which is how "1 of 2 remaining" became stale.
+        libraryClassifyWatch.ids.clear();
+        activeIds.forEach((id) => libraryClassifyWatch.ids.add(id));
+        persistLibraryClassifyWatch();
+        still = activeIds.length;
         syncLibraryClassifyStatusMessage(still);
       } else {
         const visible = [...document.querySelectorAll("#libraryList [data-library-classification]")]
