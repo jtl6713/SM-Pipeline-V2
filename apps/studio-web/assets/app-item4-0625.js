@@ -247,7 +247,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.411-video-carousel-count-guard";
+  const BUILD_ID = "item4-0.6.412-pipeline-open-outputs";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -15965,7 +15965,7 @@
     }
     try {
       const [outputsResult, contentResult, scheduleResult] = await Promise.all([
-        api("/api/outputs?limit=100"),
+        api("/api/outputs?limit=250"),
         api("/api/content?limit=100"),
         api(pipelineScheduleGridApiPath()).catch((error) => ({ records: [], schedule_error: error?.message || "Schedule view unavailable" })),
       ]);

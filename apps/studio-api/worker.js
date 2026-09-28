@@ -445,7 +445,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.414-la-tiktok-auth-signature",
+          version: "0.10.415-pipeline-open-outputs",
           studio_desk_inventory_v1: true,
           studio_desk_activity_v1: true,
           studio_tiktok_complete_v1: true,
@@ -3585,6 +3585,25 @@ function contentProfileFilterFormula(profile) {
   const parts = [`FIND("${id}", ARRAYJOIN({Content_Profile})&"")`];
   if (name) parts.push(`FIND("${name}", ARRAYJOIN({Content_Profile})&"")`);
   return parts.length === 1 ? parts[0] : `OR(${parts.join(",")})`;
+}
+
+// Keep unfinished / scheduled / draft-delivered rows on Pipeline even after newer
+// packages push them past the newest-N window (CI 206 / outputs 887–892 fell off
+// when Output_ID crossed ~1034 while the UI only fetched newest 100).
+function studioPipelineOpenOutputFormula(profile) {
+  const open = 'AND({Test_Run_ID}=BLANK(),{Output_Status}!="Skipped",OR({Published_At}=BLANK(),{Output_Status}!="Published",{Publish_Status}!="Published"))';
+  const profileFormula = contentProfileFilterFormula(profile);
+  return profileFormula ? `AND(${profileFormula},${open})` : open;
+}
+
+function mergePipelineOutputRecords(newest = [], open = []) {
+  const byId = new Map();
+  for (const row of [...open, ...newest]) {
+    if (row?.id) byId.set(row.id, row);
+  }
+  return [...byId.values()].sort(
+    (a, b) => Number(f(b, "Output_ID") || 0) - Number(f(a, "Output_ID") || 0)
+  );
 }
 
 function studioApproveAllCandidateFormula(profile) {
@@ -20573,16 +20592,31 @@ async function listOutputScheduleGrid(request, env, url, authorization) {
 
 async function listOutputs(request, env, url, authorization, ctx = null) {
   const profile = await resolveWorkingContentProfile(env, authorization, requestedProfileId(url));
-  // Newest first. An unsorted maxRecords=100 page returns older rows and can
-  // hide a package's latest Platform Outputs (Streeterville 424/425) so Pipeline
-  // only shows the earlier four destinations.
-  const records = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
-    limit: clampLimit(url, 100, 100),
-    filterFormula: contentProfileFilterFormula(profile),
+  // Newest first, plus unfinished rows that would otherwise age out of the page.
+  // CI 206 (Muscle Beach / outputs 887–892) disappeared once Output_ID hit 1133
+  // while Pipeline only loaded the newest 100 rows.
+  const limit = clampLimit(url, 200, 250);
+  const listOpts = {
     fields: OUTPUT_LIST_FIELDS,
     sortField: "Output_ID",
     sortDirection: "desc",
-  });
+  };
+  const [newest, open] = await Promise.all([
+    listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
+      ...listOpts,
+      limit,
+      filterFormula: contentProfileFilterFormula(profile),
+    }),
+    listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
+      ...listOpts,
+      limit: Math.max(limit, 250),
+      filterFormula: studioPipelineOpenOutputFormula(profile),
+    }).catch((error) => {
+      console.warn("pipeline open-output scan failed", error);
+      return [];
+    }),
+  ]);
+  const records = mergePipelineOutputRecords(newest, open);
   const healed = [];
   let manualLiveHealBudget = 5;
   let staleManualHealBudget = 8;

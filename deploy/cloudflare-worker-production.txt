@@ -196,3 +196,8 @@ Deploy LA TikTok auth signature Quality recovery
 Reason: Classify TikTok Manual Fallback / HTTP 401 as tiktok_auth_signature so Quality Agent aligns PIPELINE_SECRET_SHA256 and republishes. Worker 0.10.414-la-tiktok-auth-signature. Proven: Outputs 889/937/963 LA.
 Worker: 0.10.414-la-tiktok-auth-signature
 Requested: 2026-09-28T13:35:00Z
+
+Keep unfinished Pipeline packages visible past newest-100 window
+Reason: Content 206 (Muscle Beach / 887-892) disappeared once Output_ID reached 1133. Merge open unfinished outputs into /api/outputs.
+Worker: 0.10.415-pipeline-open-outputs
+Requested: 2026-09-28T13:50:00Z
