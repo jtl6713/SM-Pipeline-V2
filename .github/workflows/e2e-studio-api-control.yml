@@ -162,7 +162,8 @@ jobs:
             def redact:
               walk(if type=="object" then with_entries(if (.key|test("token|secret|password|api[_-]?key|authorization|webhook|pat$|completion";"i")) then .value="[REDACTED]" else . end) else . end);
             {ok,correlation_id,results:[.results[]|{name,path,method,status,ok,body:(.body|redact)}]}
-          ' /tmp/result.json | head -c 24000
+          ' /tmp/result.json > /tmp/result-sanitized.json
+          head -c 24000 /tmp/result-sanitized.json
           echo
           jq -e '.ok==true' /tmp/result.json >/dev/null
 
