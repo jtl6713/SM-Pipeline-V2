@@ -168,3 +168,8 @@ Deploy Studio API Worker production
 Reason: Stop treating Access-gated Studio watermark URL as Remotion-ready; require Drive localization health flags
 Worker: 0.10.411-watermark-drive-authority
 Requested: 2026-09-28T01:42:00Z
+
+Deploy Studio API Worker production
+Reason: Preserve mediaKind/googleDriveFileId on Render_Clip_List_JSON so Remotion does not save Drive MP4 clips as .jpg (CI 242 studio-source-12)
+Worker: 0.10.412-clip-media-kind
+Requested: 2026-09-28T03:05:00Z

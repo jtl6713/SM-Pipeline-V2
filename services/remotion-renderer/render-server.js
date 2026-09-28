@@ -19,7 +19,7 @@ const DEFAULT_MUSIC_END_FADE_SECONDS = 0.5;
 const PIPELINE_RUNNER_INTERNAL_URL = String(
     process.env.PIPELINE_RUNNER_INTERNAL_URL || 'http://127.0.0.1:3350'
 ).replace(/\/$/, '');
-const SERVICE_VERSION = '2026-09-28-watermark-expect-image';
+const SERVICE_VERSION = '2026-09-28-clip-media-kind';
 const PROJECT_DIR = __dirname;
 const PUBLIC_DIR = path.join(PROJECT_DIR, 'public');
 const OUT_DIR = path.join(PROJECT_DIR, 'out');
@@ -624,6 +624,35 @@ function downloadUrlToFile(rawUrl, destinationFilePath, redirectsLeft = 5, optio
     });
 }
 
+function inferClipMediaKind(clip) {
+    const explicit = String(clip?.mediaKind || clip?.media_kind || '').trim().toLowerCase();
+    if (explicit === 'video' || explicit === 'photo' || explicit === 'image') {
+        return explicit === 'image' ? 'photo' : explicit;
+    }
+    const name = String(clip?.assetName || clip?.asset_name || clip?.fileName || clip?.file_name || '').trim();
+    if (/\.(mp4|mov|m4v|webm)$/i.test(name)) return 'video';
+    const src = String(clip?.src || clip?.url || '').trim();
+    if (/\.(mp4|mov|m4v|webm)(\?|#|$)/i.test(src)) return 'video';
+    return 'photo';
+}
+
+function sniffIsMp4File(filePath) {
+    try {
+        const fd = fs.openSync(filePath, 'r');
+        try {
+            const header = Buffer.alloc(12);
+            const bytesRead = fs.readSync(fd, header, 0, 12, 0);
+            if (bytesRead < 8) return false;
+            // ISO BMFF: size(4) + 'ftyp'(4)
+            return header.toString('ascii', 4, 8) === 'ftyp';
+        } finally {
+            fs.closeSync(fd);
+        }
+    } catch {
+        return false;
+    }
+}
+
 async function rewriteClipAssets({ clips, jobId, jobAssetDir, job }) {
     if (!Array.isArray(clips) || clips.length === 0) {
         throw new Error('Request body must include a non-empty clips array.');
@@ -635,7 +664,7 @@ async function rewriteClipAssets({ clips, jobId, jobAssetDir, job }) {
     for (let index = 0; index < clips.length; index += 1) {
         const clip = clips[index];
         const clipId = clip.id || `clip-${index + 1}`;
-        const mediaKind = String(clip.mediaKind || clip.media_kind || '').trim().toLowerCase();
+        let mediaKind = inferClipMediaKind(clip);
         const driveFileId = String(
             clip.googleDriveFileId
             || clip.google_drive_file_id
@@ -649,9 +678,13 @@ async function rewriteClipAssets({ clips, jobId, jobAssetDir, job }) {
 
         if (isHttpUrl(sourceUrl)) {
             const fallbackExt = mediaKind === 'video' ? '.mp4' : '.jpg';
-            const ext = driveFileId
-                ? (mediaKind === 'video' ? '.mp4' : getExtensionFromUrl(clip.url || clip.src || '', fallbackExt))
-                : getExtensionFromUrl(sourceUrl, fallbackExt);
+            const nameExt = path.extname(String(clip.assetName || clip.asset_name || '')).toLowerCase();
+            const extFromName = nameExt && /^[.][a-z0-9]+$/i.test(nameExt) ? nameExt : '';
+            const ext = mediaKind === 'video'
+                ? (extFromName || '.mp4')
+                : (driveFileId
+                    ? (extFromName || getExtensionFromUrl(clip.url || clip.src || '', fallbackExt))
+                    : (extFromName || getExtensionFromUrl(sourceUrl, fallbackExt)));
             const baseName = sanitizeSimpleName(clipId, `clip-${index + 1}`);
             const filename = makeUniqueFilename(`${baseName}${ext}`, usedFilenames);
             const destination = path.join(jobAssetDir, filename);
@@ -659,14 +692,38 @@ async function rewriteClipAssets({ clips, jobId, jobAssetDir, job }) {
             appendLog(
                 job,
                 driveFileId
-                    ? `Downloading video clip ${clipId} from private Drive authority`
+                    ? `Downloading ${mediaKind} clip ${clipId} from private Drive authority`
                     : `Downloading clip ${clipId} from ${sourceUrl}`
             );
             await downloadUrlToFile(sourceUrl, destination);
+
+            // CI 242: Drive uc?id= + missing mediaKind saved MP4 bytes as .jpg; Remotion Img failed.
+            if (mediaKind !== 'video' && sniffIsMp4File(destination)) {
+                const videoName = makeUniqueFilename(`${baseName}.mp4`, usedFilenames);
+                const videoPath = path.join(jobAssetDir, videoName);
+                fs.renameSync(destination, videoPath);
+                mediaKind = 'video';
+                appendLog(
+                    job,
+                    `Clip ${clipId} bytes are MP4 (ftyp); renamed to ${toProjectRelative(videoPath)} and mediaKind=video`
+                );
+                const rewrittenClip = {
+                    ...clip,
+                    mediaKind: 'video',
+                    media_kind: 'video',
+                    src: toPublicSrc(videoPath),
+                };
+                delete rewrittenClip.url;
+                rewrittenClips.push(rewrittenClip);
+                continue;
+            }
+
             appendLog(job, `Downloaded clip ${clipId} to ${toProjectRelative(destination)}`);
 
             const rewrittenClip = {
                 ...clip,
+                mediaKind,
+                media_kind: mediaKind,
                 src: toPublicSrc(destination),
             };
 

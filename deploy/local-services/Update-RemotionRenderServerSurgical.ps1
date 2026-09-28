@@ -1,4 +1,4 @@
-# Surgical Remotion update — job-assets ffprobe path + Drive watermark.
+# Surgical Remotion update — clip mediaKind inference + Drive watermark + ffprobe path.
 # Do NOT run full Deploy-SMService (public/job-assets backup hang).
 # Usage (from an elevated or normal PowerShell on the render PC):
 #   powershell -NoProfile -ExecutionPolicy Bypass -File ".\deploy\local-services\Update-RemotionRenderServerSurgical.ps1"
@@ -36,7 +36,7 @@ Write-Host "  $src"
 Write-Host "  -> $dst"
 Copy-Item -Force $src $dst
 
-$expected = "2026-09-28-job-assets-ffprobe-path"
+$expected = "2026-09-28-clip-media-kind"
 if (-not (Select-String -Path $dst -SimpleMatch $expected -Quiet)) {
     throw "Copied render-server.js does not contain SERVICE_VERSION $expected"
 }

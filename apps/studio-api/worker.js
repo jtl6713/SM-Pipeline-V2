@@ -441,7 +441,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.411-watermark-drive-authority",
+          version: "0.10.412-clip-media-kind",
           studio_desk_inventory_v1: true,
           studio_desk_activity_v1: true,
           studio_tiktok_complete_v1: true,
@@ -15399,6 +15399,14 @@ function item4StudioSourcePackageForOutput(requestRecord, outputRow, effective, 
     id:c.id, order:c.order, mediaAssetRecordId:c.media_asset_record_id,
     assetName:c.asset_name, url:c.url, src:c.src, startFrame:c.startFrame,
     durationFrames:c.durationFrames, motionStyle:c.motionStyle, fitMode:c.fitMode,
+    // Preserve video vs photo — Remotion saved Drive MP4 as .jpg when this was stripped (CI 242).
+    mediaKind: c.mediaKind || c.media_kind || undefined,
+    media_kind: c.media_kind || c.mediaKind || undefined,
+    googleDriveFileId: c.google_drive_file_id || c.googleDriveFileId || undefined,
+    google_drive_file_id: c.google_drive_file_id || c.googleDriveFileId || undefined,
+    startFromSeconds: c.startFromSeconds ?? c.start_from_seconds ?? undefined,
+    inSeconds: c.inSeconds ?? c.in_seconds ?? undefined,
+    in_seconds: c.in_seconds ?? c.inSeconds ?? undefined,
     overlay: c.overlay || undefined,
     caption: c.caption || "",
   }));
