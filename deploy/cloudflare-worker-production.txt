@@ -173,3 +173,9 @@ Deploy Studio API Worker production
 Reason: Preserve mediaKind/googleDriveFileId on Render_Clip_List_JSON so Remotion does not save Drive MP4 clips as .jpg (CI 242 studio-source-12)
 Worker: 0.10.412-clip-media-kind
 Requested: 2026-09-28T03:05:00Z
+
+
+Deploy Studio API Worker production
+Reason: Ignore irrelevant stale carousel count fields on video Production Request saves; prevents 25-source video drafts from failing validation
+Worker: video-carousel-count-guard
+Requested: 2026-09-27T22:45:00-05:00
