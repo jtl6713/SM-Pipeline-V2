@@ -191,3 +191,8 @@ Reason: Force Download Cover onto a separate line beneath Open post metadata
 UI: 0.6.420-cover-new-line
 Source merge: 69b7da3e3ce820516617f6f321621737ed6e1aeb
 Requested: 2026-09-28
+
+Deploy Studio Pages production
+Reason: Keep Download Cover on a new line beneath Open post in Pipeline output rows
+Source merge: 5d00d6d831b9155cb49115386ec1967510379562
+Requested: 2026-09-28
