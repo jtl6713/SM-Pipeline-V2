@@ -260,3 +260,9 @@ Reason: Explicitly deploy bot repair commit because bot commits do not recursive
 Source repair: cbe78ec89a2cc9345ce7d224f9290af61b27700f
 Worker: 0.10.422-unlimited-production-slides
 Requested: 2026-09-28T16:20:00-05:00
+
+
+Deploy Studio API Worker production
+Reason: Force exact narration is execution authority; invalidate stale P2 audio when saved exact script changes and make canonical Voiceover_Script match Production
+Worker: 0.10.423-force-exact-voiceover-authority
+Requested: 2026-09-28

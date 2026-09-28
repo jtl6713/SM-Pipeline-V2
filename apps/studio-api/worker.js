@@ -453,7 +453,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.422-unlimited-production-slides",
+          version: "0.10.423-force-exact-voiceover-authority",
           studio_desk_inventory_v1: true,
           studio_desk_activity_v1: true,
           studio_tiktok_complete_v1: true,
@@ -13813,6 +13813,19 @@ async function syncProductionRequestDirectivesToContentItem(env, requestRecord, 
   const music = await productionRequestPreferredMusic(env, requestRecord);
   const appliedAt = new Date().toISOString();
   const snapshot = productionRequestDirectiveSnapshot(requestRecord, music);
+  const existingContentItem = await airtableFetch(env, env.AIRTABLE_CONTENT_TABLE_ID, contentItemId);
+  const requestedScriptMode = String(f(requestRecord, "Script_Mode") || "AI decides").trim();
+  const requestedScript = String(f(requestRecord, "Requested_Script") || "").trim();
+  const previousRequestedScriptMode = String(f(existingContentItem, "Requested_Script_Mode") || "").trim();
+  const previousRequestedScript = String(f(existingContentItem, "Requested_Script") || "").trim();
+  const previousVoiceoverScript = String(f(existingContentItem, "Voiceover_Script") || "").trim();
+  const exactScriptChanged = requestedScriptMode === "Force exact"
+    && Boolean(requestedScript)
+    && (
+      previousRequestedScriptMode !== "Force exact"
+      || previousRequestedScript !== requestedScript
+      || previousVoiceoverScript !== requestedScript
+    );
 
   const fields = {
     Production_Request: [requestRecord.id],
@@ -13845,6 +13858,26 @@ async function syncProductionRequestDirectivesToContentItem(env, requestRecord, 
     Production_Request_Directives_JSON: JSON.stringify(snapshot),
     Production_Request_Applied_At: appliedAt,
   };
+
+  // Force exact is execution authority, not merely descriptive metadata. If the
+  // exact request changed after P2 already generated audio, discard that stale
+  // audio so P2 must synthesize the saved exact script before any render can run.
+  if (requestedScriptMode === "Force exact" && requestedScript) {
+    fields.Voiceover_Script = requestedScript;
+    fields.Script_Status = "Generated";
+    if (item4StudioDirectiveYes(f(requestRecord, "Voiceover_Mode"))) {
+      fields.Voiceover_Status = "Ready";
+      fields.Content_Status = "Ready for Voiceover";
+    }
+    if (exactScriptChanged && String(f(existingContentItem, "Voiceover_URL") || "").trim()) {
+      fields.Voiceover_URL = null;
+      fields.Voiceover_Google_Drive_File_ID = null;
+      fields.Voiceover_Normalization_Status = null;
+      fields.Voiceover_Normalization_Details = null;
+      fields.Voiceover_Normalized_At = null;
+      fields.Voiceover_Duration_Seconds = null;
+    }
+  }
 
   const requestedVoice = requestedVoiceFromProductionRequest(requestRecord);
   if (requestedVoice.voice_id) {
