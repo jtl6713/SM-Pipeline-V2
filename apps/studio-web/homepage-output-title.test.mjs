@@ -48,3 +48,11 @@ test("opening a platform output jumps immediately to the top of the page", () =>
   assert.match(openEditor[0], /creativeEditorPanel"\)\.hidden = false;\s*window\.scrollTo\(0, 0\);/);
   assert.doesNotMatch(app, /creativeEditorPanel"\)\.scrollIntoView\(\{ behavior: "smooth"/);
 });
+
+
+test("pipeline output shows Download Cover directly under schedule or post metadata when a thumbnail exists", () => {
+  assert.match(app, /const coverDownloadUrl = phase6ThumbnailDownloadUrl\(r\)/);
+  assert.match(app, /pipeline-cover-download/);
+  assert.match(app, />Download Cover<\/a>/);
+  assert.match(app, /\$\{postLink\}\$\{coverLink\}/);
+});
