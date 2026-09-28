@@ -179,3 +179,9 @@ Deploy Studio API Worker production
 Reason: Ignore irrelevant stale carousel count fields on video Production Request saves; prevents 25-source video drafts from failing validation
 Worker: video-carousel-count-guard
 Requested: 2026-09-27T22:45:00-05:00
+
+
+Deploy Studio API Worker production
+Reason: Quality Agent must park terminal TikTok 401/403 auth failures instead of resetting Manual Fallback to Ready for Delivery and creating an unbounded TTD1 retry storm (output 927 reached 298 attempts)
+Worker: tiktok-auth-terminal-fence
+Requested: 2026-09-28T07:01:00-05:00
