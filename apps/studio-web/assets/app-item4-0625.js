@@ -11386,45 +11386,61 @@
             return;
           }
 
-          // Always refetch the full Production Request before hydrate. Draft-list
-          // summaries used to omit voice_id; opening from the card then showed Kate
-          // and quiet-save overwrote Admin Hank. Full GET is the voice authority.
-          let fullRecord = record;
-          try {
-            const fresh = await api(`/api/production-requests/${encodeURIComponent(record.id)}`);
-            if (fresh?.record?.id) fullRecord = fresh.record;
-          } catch (error) {
-            console.warn("production request voice refresh failed; using list card", error);
-          }
+          const idleText = button.textContent || "Continue";
+          button.disabled = true;
+          button.textContent = "Opening…";
 
-          const ideaId = ideaIdFromRequest(fullRecord);
-          activeIdea = ideaId ? ideasCache.find((idea) => idea.id === ideaId) || null : null;
-          populateProductionRequestForm(fullRecord);
-          await loadProductionRequestOutputs(fullRecord);
-          await loadItem4Workspace(fullRecord);
-
-          // Refresh music choices only after the workspace is visible.
           try {
-            await Promise.all([ensureProductionRequestMusic(), loadEzAudioOptions()]);
-            const musicId = Array.isArray(fullRecord.selected_music_asset_links)
-              ? fullRecord.selected_music_asset_links[0]
-              : "";
-            if ($("prMusicAsset")) $("prMusicAsset").value = musicId || "";
-            if (fullRecord.voiceover_mode === "Yes") {
-              applyVoiceToSelects(fullRecord.voice_id || resolvedDefaultVoice().voice_id, fullRecord.voice_name || resolvedDefaultVoice().voice_name);
+            // Always refetch the full Production Request before hydrate. Draft-list
+            // summaries used to omit voice_id; opening from the card then showed Kate
+            // and quiet-save overwrote Admin Hank. Full GET is the voice authority.
+            let fullRecord = record;
+            try {
+              const fresh = await api(`/api/production-requests/${encodeURIComponent(record.id)}`);
+              if (fresh?.record?.id) fullRecord = fresh.record;
+            } catch (error) {
+              console.warn("production request voice refresh failed; using list card", error);
             }
-            syncRequestVoiceUi();
-          } catch (e) {
-            setRequestMessage(
-              `Production Request opened. Music catalogue refresh failed: ${e.message}`,
-              "error-text"
-            );
-          }
 
-          $("productionRequestWorkspace")?.scrollIntoView({
-            behavior: "smooth",
-            block: "start"
-          });
+            const ideaId = ideaIdFromRequest(fullRecord);
+            activeIdea = ideaId ? ideasCache.find((idea) => idea.id === ideaId) || null : null;
+            populateProductionRequestForm(fullRecord);
+
+            // Continue used to hydrate a hidden workspace and then scroll to it,
+            // which made the button appear to do nothing. Reveal the workspace first;
+            // outputs/assets can finish loading afterward.
+            showProductionRequestWorkspace();
+            $("productionRequestWorkspace")?.scrollIntoView({
+              behavior: "smooth",
+              block: "start"
+            });
+
+            await loadProductionRequestOutputs(fullRecord);
+            await loadItem4Workspace(fullRecord);
+
+            // Refresh music choices only after the workspace is visible.
+            try {
+              await Promise.all([ensureProductionRequestMusic(), loadEzAudioOptions()]);
+              const musicId = Array.isArray(fullRecord.selected_music_asset_links)
+                ? fullRecord.selected_music_asset_links[0]
+                : "";
+              if ($("prMusicAsset")) $("prMusicAsset").value = musicId || "";
+              if (fullRecord.voiceover_mode === "Yes") {
+                applyVoiceToSelects(fullRecord.voice_id || resolvedDefaultVoice().voice_id, fullRecord.voice_name || resolvedDefaultVoice().voice_name);
+              }
+              syncRequestVoiceUi();
+            } catch (e) {
+              setRequestMessage(
+                `Production Request opened. Music catalogue refresh failed: ${e.message}`,
+                "error-text"
+              );
+            }
+          } catch (error) {
+            setRequestMessage(error.message || "Could not open this Production Request.", "error-text");
+          } finally {
+            button.disabled = false;
+            button.textContent = idleText;
+          }
         });
       });
       productionDecorateTooltips(target);
