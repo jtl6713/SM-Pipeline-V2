@@ -212,3 +212,8 @@ Keep unfinished Pipeline packages (CI 206 siblings) on active list
 Reason: Open unfinished + sibling outputs for packages like CI 206; archive only fully Published groups.
 Worker: 0.10.417-pipeline-open-packages
 Requested: 2026-09-28T14:30:00Z
+
+TikTok Resend draft button + Output 847 LA inbox republish
+Reason: /api/outputs/:id/tiktok-resend rearms and dispatches; Worker 0.10.418. E2E kick Output 847.
+Worker: 0.10.418-tiktok-draft-resend
+Requested: 2026-09-28T15:30:00Z

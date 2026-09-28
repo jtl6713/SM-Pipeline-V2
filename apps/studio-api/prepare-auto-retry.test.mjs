@@ -35,7 +35,7 @@ test("Worker heal requeues Failed/Error leftovers like Retry remaining", () => {
   assert.match(worker, /Requeued by Quality Agent prepare heal/);
   assert.match(worker, /Studio_Variant_Status\}="Error"/);
   assert.match(worker, /Math\.min\(40,/);
-  assert.match(worker, /0\.10\.417-pipeline-open-packages/);
+  assert.match(worker, /0\.10\.418-tiktok-draft-resend/);
   assert.match(worker, /item4HealIncompletePreparingVariants/);
 });
 
@@ -44,5 +44,5 @@ test("Production UI auto-retries prepare when the poll window expires", () => {
   assert.match(app, /item4NextVariantAutoRetry/);
   assert.match(app, /prepareItem4Variants\(\{ autoRetry: true \}\)/);
   assert.match(app, /Automatic retry \$\{item4VariantAutoRetries\}\/\$\{ITEM4_VARIANT_AUTO_RETRIES\}/);
-  assert.match(app, /BUILD_ID = "item4-0\.6\.414-pipeline-open-packages"/);
+  assert.match(app, /BUILD_ID = "item4-0\.6\.415-tiktok-draft-resend"/);
 });

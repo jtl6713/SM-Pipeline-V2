@@ -1,10 +1,10 @@
 {
-  "correlation_id": "OUTPUT-927-POST-MIAMI-AUTH-ALIGNMENT-RETRY2-20260928",
+  "correlation_id": "LA-TIKTOK-847-INBOX-RESEND-20260928",
   "requests": [
     {
-      "name": "kick-output-927-after-auth-alignment",
+      "name": "kick-output-847-grand-central-market-inbox",
       "method": "POST",
-      "path": "/api/operations/outputs/recj63HvnUhy7bmnr/publish-kick",
+      "path": "/api/operations/outputs/recrsNsRc06CO0Ngi/publish-kick",
       "body": {}
     }
   ]

@@ -155,3 +155,8 @@ Keep unfinished Pipeline packages (CI 206 siblings) on active list
 Reason: Open unfinished outputs + sibling package rows; fully complete stay in Archive. Content 206 TikTok 889 Draft Delivered.
 UI: 0.6.414-pipeline-open-packages
 Requested: 2026-09-28T14:30:00Z
+
+TikTok Resend draft button + Output 847 LA inbox republish
+Reason: Manual Pipeline control to rearm Ready for Delivery and dispatch TTD; footer 0.6.415.
+UI: 0.6.415-tiktok-draft-resend
+Requested: 2026-09-28T15:30:00Z

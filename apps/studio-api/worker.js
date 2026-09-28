@@ -153,6 +153,11 @@ import {
   studioTikTokArmedDraftStatus,
   studioTikTokInboxIsDue,
 } from "./tiktok-inbox-schedule.mjs";
+import {
+  tiktokResendEligibility,
+  tiktokResendRearmFields,
+  TIKTOK_RESEND_ERRORS,
+} from "./tiktok-resend.mjs";
 
 import {
   analyticsObservationKey,
@@ -232,6 +237,7 @@ export default {
       const isOutputCreativeReviewRoute = /^\/api\/outputs\/rec[A-Za-z0-9]+\/creative\/review$/.test(url.pathname);
       const isOutputApproveAllRoute = url.pathname === "/api/outputs/approve-all";
       const isOutputTiktokCompleteRoute = /^\/api\/outputs\/rec[A-Za-z0-9]+\/tiktok-complete$/.test(url.pathname);
+      const isOutputTiktokResendRoute = /^\/api\/outputs\/rec[A-Za-z0-9]+\/tiktok-resend$/.test(url.pathname);
       const isOutputYoutubeCompleteRoute = /^\/api\/outputs\/rec[A-Za-z0-9]+\/youtube-complete$/.test(url.pathname);
       const isOutputCreativeContinueRoute = /^\/api\/outputs\/rec[A-Za-z0-9]+\/creative\/render\/continue$/.test(url.pathname);
       const isOutputCreativeHandoffStatusRoute = /^\/api\/outputs\/rec[A-Za-z0-9]+\/creative\/handoff\/status$/.test(url.pathname);
@@ -319,6 +325,7 @@ export default {
       const isOutputCreativeReviewWrite = isOutputCreativeReviewRoute && request.method === "POST";
       const isOutputApproveAllWrite = isOutputApproveAllRoute && request.method === "POST";
       const isOutputTiktokCompleteWrite = isOutputTiktokCompleteRoute && request.method === "POST";
+      const isOutputTiktokResendWrite = isOutputTiktokResendRoute && request.method === "POST";
       const isOutputYoutubeCompleteWrite = isOutputYoutubeCompleteRoute && request.method === "POST";
       const isOutputCreativeContinueWrite = isOutputCreativeContinueRoute && request.method === "POST";
       const isAdminMakeDeployWrite = isAdminMakeDeployRoute && request.method === "POST";
@@ -387,6 +394,7 @@ export default {
         isOutputCreativeReviewWrite ||
         isOutputApproveAllWrite ||
         isOutputTiktokCompleteWrite ||
+        isOutputTiktokResendWrite ||
         isOutputYoutubeCompleteWrite ||
         isOutputCreativeContinueWrite ||
         (isAdminMakeDeployRoute && request.method === "GET") ||
@@ -445,10 +453,11 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.417-pipeline-open-packages",
+          version: "0.10.418-tiktok-draft-resend",
           studio_desk_inventory_v1: true,
           studio_desk_activity_v1: true,
           studio_tiktok_complete_v1: true,
+          studio_tiktok_draft_resend_v1: true,
           studio_youtube_complete_v1: true,
           studio_auto_compress_v1: true,
           studio_autonomous_produce_v1: true,
@@ -1279,6 +1288,12 @@ export default {
         assertWriteRequest(request, env);
         requireAnyPermission(authorization, ["outputs_review", "publishing_control"]);
         return markStudioTiktokComplete(request, env, url);
+      }
+
+      if (isOutputTiktokResendWrite) {
+        assertWriteRequest(request, env);
+        requireAnyPermission(authorization, ["outputs_review", "publishing_control"]);
+        return resendStudioTiktokDraft(request, env, url, authorization, ctx);
       }
 
       if (isOutputYoutubeCompleteWrite) {
@@ -36717,6 +36732,48 @@ async function markStudioTiktokComplete(request, env, url) {
     musicCompleted: payload?.music_completed,
   });
   return respond(request, env, { ok: true, published: true, record: mapOutput(updated) });
+}
+
+async function resendStudioTiktokDraft(request, env, url, authorization, ctx = null) {
+  const match = /^\/api\/outputs\/(rec[A-Za-z0-9]+)\/tiktok-resend$/.exec(url.pathname);
+  if (!match) throw new HttpError(400, "Invalid output path");
+  const existing = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, match[1]);
+  if (!existing?.id) throw new HttpError(404, "Platform Output was not found");
+  const reason = tiktokResendEligibility(tiktokCompleteViewFromRecord(existing));
+  if (reason) {
+    throw new HttpError(
+      reason === "do_not_publish" || reason === "already_published" || reason === "not_approved" ? 409 : 400,
+      TIKTOK_RESEND_ERRORS[reason] || reason,
+    );
+  }
+  const fields = tiktokResendRearmFields({
+    now: new Date().toISOString(),
+    existingNotes: f(existing, "Output_Notes"),
+  });
+  const rearmed = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, match[1], {
+    method: "PATCH",
+    body: JSON.stringify({ fields, typecast: true }),
+  });
+  const dispatch = await studioDispatchApprovedPublishNow(env, rearmed);
+  if (ctx && typeof ctx.waitUntil === "function") {
+    ctx.waitUntil(studioDispatchApprovedPublishTail(env, rearmed, dispatch).catch((error) => {
+      console.warn("tiktok-resend tail failed", match[1], error);
+    }));
+  }
+  const refreshed = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, match[1]).catch(() => rearmed);
+  return respond(request, env, {
+    ok: true,
+    resent: true,
+    output_id: match[1],
+    dispatch: {
+      ok: dispatch?.ok !== false,
+      skipped: dispatch?.skipped || null,
+      target: dispatch?.target || dispatch?.plan?.target || null,
+      held_until: dispatch?.held_until || null,
+      message: dispatch?.message || null,
+    },
+    record: mapOutput(refreshed),
+  });
 }
 
 async function markStudioOutputPublished(request, env, url, authorization) {
