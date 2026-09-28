@@ -15474,6 +15474,10 @@
     const sortedSource = isDashboard ? sortedPipelineRecords(source) : source;
     const pipelineRow = (r, groupRecords) => {
       const postLink = r.platform_post_url ? `<a class="table-link" target="_blank" rel="noopener" href="${escapeHtml(r.platform_post_url)}">Open post ↗</a>` : "";
+      const coverDownloadUrl = phase6ThumbnailDownloadUrl(r);
+      const coverLink = coverDownloadUrl
+        ? `<a class="table-link pipeline-cover-download" target="_blank" rel="noopener" download href="${escapeHtml(coverDownloadUrl)}">Download Cover</a>`
+        : "";
       const timing = studioOutputTimingLabel(r);
       const typeCell = isPipeline ? `<td><div>${value(r.platform_output_type || r.format)}</div><div class="subtle">${value(r.aspect_ratio)}</div></td>` : "";
       const canOpen = Boolean(r.creative_available);
@@ -15492,7 +15496,7 @@
       const creativeCell = isPipeline ? `<td class="creative-output-action-cell"><button type="button" class="creative-button" data-creative-output-id="${escapeHtml(r.id)}" ${canOpen ? "" : "disabled"} title="${canOpen ? "" : notReadyTitle}">${canOpen ? "Open review" : notReadyLabel}</button>${scheduleCell}</td>` : "";
       const rowOpen = isPipeline && canOpen ? ` class="pipeline-open-row" data-open-output-id="${escapeHtml(r.id)}" tabindex="0"` : "";
       const subtleParts = [r.publish_method, timing].filter(Boolean).map((part) => escapeHtml(String(part)));
-      return `<tr${rowOpen}><td><div class="title-cell">${escapeHtml(pipelineOutputListTitle(r))}</div><div class="subtle">${subtleParts.join(" · ") || "—"}</div>${postLink}</td><td>${value(r.platform)}</td>${typeCell}<td>${badge(pipelineStudioStateLabel(r))}${isPipeline ? `${pipelineTiktokCompleteCell(r)}${pipelineYoutubeCompleteCell(r)}` : ""}</td><td>${value(pipelineRenderLabel(r))}</td><td>${value(r.review_status)}</td><td>${value(pipelinePublishStatusLabel(r))}</td><td>${pipelineProgressCell(r, groupRecords)}</td>${creativeCell}</tr>`;
+      return `<tr${rowOpen}><td><div class="title-cell">${escapeHtml(pipelineOutputListTitle(r))}</div><div class="subtle">${subtleParts.join(" · ") || "—"}</div>${postLink}${coverLink}</td><td>${value(r.platform)}</td>${typeCell}<td>${badge(pipelineStudioStateLabel(r))}${isPipeline ? `${pipelineTiktokCompleteCell(r)}${pipelineYoutubeCompleteCell(r)}` : ""}</td><td>${value(pipelineRenderLabel(r))}</td><td>${value(r.review_status)}</td><td>${value(pipelinePublishStatusLabel(r))}</td><td>${pipelineProgressCell(r, groupRecords)}</td>${creativeCell}</tr>`;
     };
     const body = isPipeline
       ? (() => {
