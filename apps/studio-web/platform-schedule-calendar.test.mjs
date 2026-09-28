@@ -60,3 +60,12 @@ test("Platform Outputs expose a save-only calendar workflow", () => {
   assert.match(app, /platformCalendarWeek = helper\.sevenDayWindow/);
   assert.doesNotMatch(app, /data-platform-calendar-slot[\s\S]{0,500}api\(/);
 });
+
+
+test("publish status labels follow schedule state", () => {
+  const app = fs.readFileSync(path.join(here, "assets", "app-item4-0625.js"), "utf8");
+  assert.match(app, /function pipelinePublishStatusLabel/);
+  assert.match(app, /Needs Schedule/);
+  assert.match(app, /Scheduled/);
+  assert.match(app, /Ready to Publish/);
+});
