@@ -14,7 +14,7 @@ from typing import Any
 
 import requests
 
-from ai_api_preference import account_to_provider, get_preferred_account
+from ai_api_preference import account_to_provider, cross_provider_failover_enabled, get_preferred_account
 from ai_api_status import record_success
 
 FAILOVER_HTTP_STATUSES = {408, 429, 500, 502, 503, 504}
@@ -80,6 +80,7 @@ def post_image_generation(
 ) -> requests.Response:
     preferred = get_preferred_account(settings, preferred_account)
     alternate = "SECONDARY" if preferred == "PRIMARY" else "PRIMARY"
+    allow_failover = cross_provider_failover_enabled(settings)
     requested_model = str(body.get("model") or "")
 
     def call(account: str) -> requests.Response:
@@ -103,6 +104,15 @@ def post_image_generation(
                 preferred_provider=account_to_provider(preferred),
                 failover=False,
                 status_code=response.status_code,
+            )
+        return response
+
+    # Cross-provider spend is opt-in. With Azure Preferred, a transient Azure
+    # failure must not silently become a PRIMARY OpenAI charge.
+    if not allow_failover:
+        if response is None:
+            raise requests.ConnectionError(
+                f"{account_to_provider(preferred)} image provider failed and cross-provider failover is disabled"
             )
         return response
 
