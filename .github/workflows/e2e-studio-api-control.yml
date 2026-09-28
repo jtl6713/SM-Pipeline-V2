@@ -36,7 +36,7 @@ jobs:
           jq -e '.correlation_id|type=="string" and length>0' deploy/e2e-studio-api-command.json >/dev/null
           jq -e '.requests|type=="array" and length>0 and length<=12' deploy/e2e-studio-api-command.json >/dev/null
           jq -e 'all(.requests[]; (.method=="GET" or .method=="POST" or .method=="PATCH" or .method=="PUT") and (.path|type=="string"))' deploy/e2e-studio-api-command.json >/dev/null
-          jq -e 'all(.requests[]; (.path|test("^/api/production-requests/(recc9H8SXdUnKEMhQ|recVAxLIuTsHHuDZK|recZkbX3A0vk9Z2Wb|receXUsiQZLMlJzAX)(/|$)|^/api/production-request-outputs/rec(D15PEl3x8LnZ7G|GvE1SHoxXPs5Aa|GZm1Si8GhHPP13|wvxu6GketzHWiF)(/|$)|^/api/outputs/rec[A-Za-z0-9]+/(preview|creative)(/|$)")))' deploy/e2e-studio-api-command.json >/dev/null
+          jq -e 'all(.requests[]; (.path|test("^/api/production-requests/(recc9H8SXdUnKEMhQ|recVAxLIuTsHHuDZK|recZkbX3A0vk9Z2Wb|receXUsiQZLMlJzAX)(/|$)|^/api/production-request-outputs/rec(D15PEl3x8LnZ7G|GvE1SHoxXPs5Aa|GZm1Si8GhHPP13|wvxu6GketzHWiF)(/|$)|^/api/outputs/rec[A-Za-z0-9]+/(preview|creative)(/|$)|^/api/operations/outputs/recj63HvnUhy7bmnr/publish-kick$")))' deploy/e2e-studio-api-command.json >/dev/null
 
       - name: Capture production deployment identity
         shell: bash
