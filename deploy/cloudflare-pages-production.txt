@@ -156,6 +156,11 @@ Reason: Open unfinished outputs + sibling package rows; fully complete stay in A
 UI: 0.6.414-pipeline-open-packages
 Requested: 2026-09-28T14:30:00Z
 
+Deploy Studio Pages production
+Reason: Quality Agent recap auto-refresh every minute, rolling past-hour relevance, date/platform filters, profile header, one-line content/output identity, and collapsed Found cards
+UI: 0.6.415-quality-recap
+Source merge: 2c0befab977477409146356452befaf5d7f876b1
+Requested: 2026-09-28
 TikTok Resend draft button + Output 847 LA inbox republish
 Reason: Manual Pipeline control to rearm Ready for Delivery and dispatch TTD; footer 0.6.415.
 UI: 0.6.415-tiktok-draft-resend
