@@ -150,3 +150,8 @@ Reason: Drop Selected_Assets_JSON + Creative_Render_Manifest_JSON from /api/outp
 UI: 0.6.413-pipeline-list-lean
 Requested: 2026-09-28T14:10:00Z
 
+
+Keep unfinished Pipeline packages (CI 206 siblings) on active list
+Reason: Open unfinished outputs + sibling package rows; fully complete stay in Archive. Content 206 TikTok 889 Draft Delivered.
+UI: 0.6.414-pipeline-open-packages
+Requested: 2026-09-28T14:30:00Z

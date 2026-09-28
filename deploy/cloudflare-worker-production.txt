@@ -207,3 +207,8 @@ Reason: Lean OUTPUT_LIST_FIELDS (no Selected_Assets_JSON / Creative_Render_Manif
 Worker: 0.10.416-pipeline-list-lean
 Requested: 2026-09-28T14:10:00Z
 
+
+Keep unfinished Pipeline packages (CI 206 siblings) on active list
+Reason: Open unfinished + sibling outputs for packages like CI 206; archive only fully Published groups.
+Worker: 0.10.417-pipeline-open-packages
+Requested: 2026-09-28T14:30:00Z
