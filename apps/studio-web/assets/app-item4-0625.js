@@ -15473,7 +15473,7 @@
     }
     const sortedSource = isDashboard ? sortedPipelineRecords(source) : source;
     const pipelineRow = (r, groupRecords) => {
-      const postLink = r.platform_post_url ? `<a class="table-link" target="_blank" rel="noopener" href="${escapeHtml(r.platform_post_url)}">Open post ↗</a>` : "";
+      const postLink = r.platform_post_url ? `<div class="pipeline-post-link-row"><a class="table-link" target="_blank" rel="noopener" href="${escapeHtml(r.platform_post_url)}">Open post ↗</a></div>` : "";
       const coverDownloadUrl = phase6ThumbnailDownloadUrl(r);
       const coverLink = coverDownloadUrl
         ? `<div class="pipeline-cover-download-row"><a class="table-link pipeline-cover-download" target="_blank" rel="noopener" download href="${escapeHtml(coverDownloadUrl)}">Download Cover</a></div>`
