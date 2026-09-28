@@ -69,3 +69,10 @@ test("production media supports drag-and-drop reorder with persisted asset_ids",
   assert.match(app, /moveItem4AssetTo\(draggedId, targetIndex\)/);
   assert.match(app, /body: JSON\.stringify\(\{ asset_ids: ordered\.map\(\(asset\) => asset\.id\) \}\)/);
 });
+
+
+test("Production library never auto-checks new recommendations after entry", () => {
+  assert.match(app, /item4LibrarySelected = new Set\(item4AttachedMediaIds\(\)\)/);
+  assert.match(app, /Once an idea is in Production, the attached asset set is authoritative/);
+  assert.match(app, /seedLibrarySelection\([\s\S]*?item4AttachedMediaIds\(\)[\s\S]*?false\s*\)/);
+});
