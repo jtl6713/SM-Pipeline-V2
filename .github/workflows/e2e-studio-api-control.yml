@@ -143,7 +143,7 @@ jobs:
             ready=$(curl -sS --max-time 20 -o /tmp/ready.json -w '%{http_code}' "$URL/ready" || true)
             echo "bridge_ready_attempt=$i/$BRIDGE_RETRY_MAX http=$ready"
             [[ "$ready" == "200" ]] && break
-            if [[ "$ready" != "404" && "$ready" != "000" && "$ready" != "502" && "$ready" != "503" && "$ready" != "504" && "$ready" != "530" && "$ready" != "1033" ]]; then
+            if [[ "$ready" != "404" && "$ready" != "000" && "$ready" != "500" && "$ready" != "502" && "$ready" != "503" && "$ready" != "504" && "$ready" != "520" && "$ready" != "521" && "$ready" != "522" && "$ready" != "523" && "$ready" != "524" && "$ready" != "530" && "$ready" != "1033" ]]; then
               echo "bridge gave up (non-retryable) last_http=$ready"
               exit 1
             fi
