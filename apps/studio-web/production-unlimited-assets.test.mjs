@@ -24,3 +24,26 @@ test("Production asset pool has no UI quantity ceiling", async () => {
   assert.match(html, /item4UploadHint">Add as many as you want</);
   assert.doesNotMatch(html, /item4UploadHint">Up to 20</);
 });
+
+
+test("Production slide-count controls do not cap stills at 20", async () => {
+  const html = await readFile(htmlPath, "utf8");
+  for (const id of [
+    "ezCarouselSlideExact",
+    "ezCarouselSlideMin",
+    "ezCarouselSlideMax",
+    "prOverrideSlideExact",
+    "prOverrideSlideMin",
+    "prOverrideSlideMax",
+    "prCarouselSlideExact",
+    "prCarouselSlideMin",
+    "prCarouselSlideMax",
+    "promoteCarouselSlideCount",
+    "promoteCarouselSlideMin",
+    "promoteCarouselSlideMax",
+  ]) {
+    const input = html.match(new RegExp(`<input[^>]*id="${id}"[^>]*>`))?.[0] || "";
+    assert.ok(input, `${id} should be present`);
+    assert.doesNotMatch(input, /\smax="20"/);
+  }
+});
