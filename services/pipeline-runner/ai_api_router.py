@@ -8,7 +8,7 @@ from typing import Any
 
 import requests
 
-from ai_api_preference import account_to_provider, get_preferred_account
+from ai_api_preference import account_to_provider, cross_provider_failover_enabled, get_preferred_account
 from ai_api_status import record_success
 from openai_responses import post_responses as _post_responses
 
@@ -37,10 +37,18 @@ def post_responses(
     """Use the preferred provider first, then the other provider once on transient failure."""
     preferred = get_preferred_account(settings, preferred_account)
     failover = "SECONDARY" if preferred == "PRIMARY" else "PRIMARY"
+    allow_failover = cross_provider_failover_enabled(settings)
 
     try:
         response = _post_responses(_settings_for_account(settings, preferred), body, timeout=timeout)
     except (requests.Timeout, requests.ConnectionError) as exc:
+        if not allow_failover:
+            _LOG.warning(
+                "AI API %s failed (%s); cross-provider failover is disabled",
+                account_to_provider(preferred),
+                type(exc).__name__,
+            )
+            raise
         _LOG.warning(
             "AI API %s failed (%s); retrying %s",
             account_to_provider(preferred),
@@ -65,6 +73,14 @@ def post_responses(
                 failover=False,
                 status_code=response.status_code,
             )
+        return response
+
+    if not allow_failover:
+        _LOG.warning(
+            "AI API %s failed (%s); cross-provider failover is disabled",
+            account_to_provider(preferred),
+            response.status_code,
+        )
         return response
 
     _LOG.warning(
