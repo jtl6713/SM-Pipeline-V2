@@ -247,7 +247,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.416-tiktok-draft-resend";
+  const BUILD_ID = "item4-0.6.417-pipeline-tiktok-open-fallback";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -15214,9 +15214,20 @@
   }
 
   function filteredPipelineRecords(records) {
-    return (records || []).filter((record) => (
-      pipelineRecordMatchesFilter(record) && pipelineRecordMatchesColumnFilters(record, pipelineColumnFilters, records)
-    ));
+    const all = records || [];
+    // Keep every sibling on a matching package. Filtering by Published/Active row
+    // alone hid TikTok 847 (Published) from Content 143 while IG/FB siblings stayed
+    // Ready to Schedule.
+    const matchingKeys = new Set(
+      all
+        .filter((record) => (
+          pipelineRecordMatchesFilter(record)
+          && pipelineRecordMatchesColumnFilters(record, pipelineColumnFilters, all)
+        ))
+        .map((record) => pipelineContentGroupKey(record))
+    );
+    if (!matchingKeys.size) return [];
+    return all.filter((record) => matchingKeys.has(pipelineContentGroupKey(record)));
   }
 
   function pipelineColumnFilterSummary() {

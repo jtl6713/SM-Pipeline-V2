@@ -168,3 +168,8 @@ Requested: 2026-09-28T15:30:00Z
 
 Merge conflict resolution: bump UI past main quality-recap to 0.6.416-tiktok-draft-resend
 Requested: 2026-09-28T15:45:00Z
+
+Keep Content 143 / TikTok Manual Fallback packages on Pipeline
+Reason: Open formula includes Manual Fallback; open scan limit 1000; UI keeps Published siblings in unfinished groups. Footer 0.6.417.
+UI: 0.6.417-pipeline-tiktok-open-fallback
+Requested: 2026-09-28T15:55:00Z
