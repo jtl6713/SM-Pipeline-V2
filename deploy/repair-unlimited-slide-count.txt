@@ -2,3 +2,4 @@ Repair unlimited Production slide count
 Requested: 2026-09-28
 Reason: Production save fails when exact slide count exceeds legacy Worker max 20.
 Retry: 2026-09-28T20:49Z
+Retry bridge preflight repair: 2026-09-28T15:54:00-05:00
