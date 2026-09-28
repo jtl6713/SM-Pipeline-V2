@@ -53,6 +53,6 @@ test("opening a platform output jumps immediately to the top of the page", () =>
 test("pipeline output shows Download Cover directly under schedule or post metadata when a thumbnail exists", () => {
   assert.match(app, /const coverDownloadUrl = phase6ThumbnailDownloadUrl\(r\)/);
   assert.match(app, /pipeline-cover-download/);
-  assert.match(app, />Download Cover<\/a>/);
+  assert.match(app, /pipeline-cover-download-row/);
   assert.match(app, /\$\{postLink\}\$\{coverLink\}/);
 });
