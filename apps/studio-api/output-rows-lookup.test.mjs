@@ -51,3 +51,15 @@ test("pipeline output list must sort newest Output_ID first", () => {
   assert.deepEqual(page.slice(0, 2), [425, 424]);
   assert.ok(page.includes(424) && page.includes(425));
 });
+
+test("pipeline list merges open older packages that fall outside newest-N", () => {
+  // CI 206 / outputs 887–892 aged out once newest Output_ID reached 1133 and
+  // Pipeline only loaded the newest 100 rows. Keep unfinished rows via merge.
+  const newest = Array.from({ length: 100 }, (_, i) => 1133 - i); // 1133..1034
+  const openOlder = [892, 891, 889, 887];
+  const merged = [...new Set([...openOlder, ...newest])].sort((a, b) => b - a);
+  assert.ok(!newest.includes(889));
+  assert.ok(merged.includes(889));
+  assert.ok(merged.includes(887));
+  assert.equal(merged[0], 1133);
+});

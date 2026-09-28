@@ -184,8 +184,8 @@
   const ITEM4_MASTER_POLL_TIMEOUT_MS = 180000;
   const ITEM4_PREVIEW_RETRY_MAX = 3;
   const ITEM4_PREVIEW_RETRY_MS = 1200;
-  const API_TRANSIENT_RETRY_MAX = 12;
-  const API_TRANSIENT_RETRY_MS = 3000;
+  const API_TRANSIENT_RETRY_MAX = 3;
+  const API_TRANSIENT_RETRY_MS = 1500;
   const ITEM4_POLL_EXTRA_WINDOWS = 2;
   const ITEM4_POLL_EXTRA_MS = 15000;
   // When the browser poll window expires mid-prepare, automatically re-POST
@@ -247,7 +247,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.411-video-carousel-count-guard";
+  const BUILD_ID = "item4-0.6.414-pipeline-open-packages";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -1637,8 +1637,14 @@
 
   async function checkHealth() {
     try {
-      const [health, session] = await Promise.all([api("/api/health"), api("/api/session")]);
-      studioSession = session;
+      const [healthResult, sessionResult] = await Promise.allSettled([
+        api("/api/health", { timeoutMs: 8000, retries: 1 }),
+        api("/api/session", { timeoutMs: 8000, retries: 1 }),
+      ]);
+      const health = healthResult.status === "fulfilled" ? healthResult.value : null;
+      const session = sessionResult.status === "fulfilled" ? sessionResult.value : null;
+      if (!health && !session) throw (healthResult.reason || sessionResult.reason || new Error("API unavailable"));
+      studioSession = session || studioSession;
       try { await loadStudioProfiles(); } catch {}
       const navOps = $("navOperations");
       const footerOps = $("footerOperations");
@@ -1646,15 +1652,17 @@
       if (navOps) navOps.hidden = !showOps;
       if (footerOps) footerOps.hidden = !showOps;
       if (workerBuildLabel) {
-        workerBuildLabel.textContent = formatWorkerBuild(health.version);
-        workerBuildLabel.title = String(health.version || "").trim() || "Studio API Worker";
+        workerBuildLabel.textContent = formatWorkerBuild(health?.version);
+        workerBuildLabel.title = String(health?.version || "").trim() || (health ? "Studio API Worker" : "Could not reach /api/health");
       }
-      if (!health.airtable_configured) {
+      if (!health) {
+        $("apiStatus").textContent = session?.authorized ? "Session ok · health slow" : "API partial";
+      } else if (!health.airtable_configured) {
         $("apiStatus").textContent = "API needs Airtable configuration";
-      } else if (session.authorized && session.user?.display_name) {
+      } else if (session?.authorized && session.user?.display_name) {
         $("apiStatus").textContent = normalizeDisplayText(`${session.user.display_name} · ${session.role || "Member"} · ${session.brand?.name || "Studio"}`);
         $("apiStatus").title = "Authenticated by Cloudflare Access and authorized by Studio membership";
-      } else if (session.authenticated && session.email) {
+      } else if (session?.authenticated && session.email) {
         $("apiStatus").textContent = `Signed in · ${session.email}`;
         $("apiStatus").title = "Authenticated by Cloudflare Access; same-origin Studio API connected";
       } else {
@@ -15964,14 +15972,29 @@
       setPipelineLiveHint("Refreshing…");
     }
     try {
-      const [outputsResult, contentResult, scheduleResult] = await Promise.all([
-        api("/api/outputs?limit=100"),
-        api("/api/content?limit=100"),
-        api(pipelineScheduleGridApiPath()).catch((error) => ({ records: [], schedule_error: error?.message || "Schedule view unavailable" })),
+      const [outputsSettled, contentSettled, scheduleSettled] = await Promise.all([
+        api("/api/outputs?limit=250", { timeoutMs: 20000, retries: 2 }).then(
+          (value) => ({ ok: true, value }),
+          (error) => ({ ok: false, error }),
+        ),
+        api("/api/content?limit=100", { timeoutMs: 20000, retries: 2 }).then(
+          (value) => ({ ok: true, value }),
+          (error) => ({ ok: false, error }),
+        ),
+        api(pipelineScheduleGridApiPath(), { timeoutMs: 15000, retries: 1 }).then(
+          (value) => ({ ok: true, value }),
+          (error) => ({ ok: false, error }),
+        ),
       ]);
+      if (!outputsSettled.ok) throw outputsSettled.error || new Error("Outputs unavailable");
+      const outputsResult = outputsSettled.value;
+      const contentResult = contentSettled.ok ? contentSettled.value : { records: [] };
+      const scheduleResult = scheduleSettled.ok
+        ? scheduleSettled.value
+        : { records: [], schedule_error: scheduleSettled.error?.message || "Schedule view unavailable" };
       const records = outputsResult?.records || [];
       const contentRecords = contentResult?.records || [];
-      const scheduleError = String(scheduleResult?.schedule_error || "");
+      const scheduleError = String(scheduleResult?.schedule_error || (!scheduleSettled.ok ? (scheduleSettled.error?.message || "Schedule view unavailable") : ""));
       pipelineScheduleGridRecords = scheduleError
         ? records.filter((row) => String(row?.scheduled_post_date || "").trim())
         : (scheduleResult?.records || []);

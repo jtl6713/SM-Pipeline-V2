@@ -445,7 +445,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.414-la-tiktok-auth-signature",
+          version: "0.10.417-pipeline-open-packages",
           studio_desk_inventory_v1: true,
           studio_desk_activity_v1: true,
           studio_tiktok_complete_v1: true,
@@ -3585,6 +3585,82 @@ function contentProfileFilterFormula(profile) {
   const parts = [`FIND("${id}", ARRAYJOIN({Content_Profile})&"")`];
   if (name) parts.push(`FIND("${name}", ARRAYJOIN({Content_Profile})&"")`);
   return parts.length === 1 ? parts[0] : `OR(${parts.join(",")})`;
+}
+
+// Keep unfinished / scheduled / draft-delivered rows on Pipeline even after newer
+// packages push them past the newest-N window (CI 206 / outputs 887–892 fell off
+// when Output_ID crossed ~1034 while the UI only fetched newest 100).
+// Fully Published packages stay off this scan so they only appear in Archive when
+// they are still inside the newest-N window.
+function studioPipelineOpenOutputFormula(profile) {
+  const open = 'AND({Test_Run_ID}=BLANK(),{Output_Status}!="Skipped",OR({Published_At}=BLANK(),{Output_Status}!="Published",{Publish_Status}!="Published",FIND("Manual Action",{TikTok_Draft_Status}&"")))';
+  const profileFormula = contentProfileFilterFormula(profile);
+  return profileFormula ? `AND(${profileFormula},${open})` : open;
+}
+
+function mergePipelineOutputRecords(newest = [], open = []) {
+  const byId = new Map();
+  for (const row of [...open, ...newest]) {
+    if (row?.id) byId.set(row.id, row);
+  }
+  return [...byId.values()].sort(
+    (a, b) => Number(f(b, "Output_ID") || 0) - Number(f(a, "Output_ID") || 0)
+  );
+}
+
+function studioPipelineContentIdsFromOutputs(records = []) {
+  return [...new Set(
+    (records || [])
+      .map((record) => studioFirstLinkedId(f(record, "Content_Item")))
+      .filter((id) => /^rec[A-Za-z0-9]+$/.test(String(id || "")))
+  )];
+}
+
+async function listPipelineOutputsForContentIds(env, profile, contentIds, listOpts = {}) {
+  const ids = [...new Set((contentIds || []).filter((id) => /^rec[A-Za-z0-9]+$/.test(String(id || ""))))];
+  if (!ids.length) return [];
+  const profileFormula = contentProfileFilterFormula(profile);
+  const rows = [];
+  for (let index = 0; index < ids.length; index += 20) {
+    const batch = ids.slice(index, index + 20);
+    const contentOr = batch
+      .map((id) => `FIND("${airtableFormulaEscape(id)}", ARRAYJOIN({Content_Item})&"")`)
+      .join(",");
+    const contentClause = batch.length === 1 ? contentOr : `OR(${contentOr})`;
+    const filterFormula = profileFormula
+      ? `AND({Test_Run_ID}=BLANK(),${profileFormula},${contentClause})`
+      : `AND({Test_Run_ID}=BLANK(),${contentClause})`;
+    const batchRows = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
+      ...listOpts,
+      limit: Math.max(40, batch.length * 12),
+      filterFormula,
+    }).catch((error) => {
+      console.warn("pipeline sibling-output scan failed", error);
+      return [];
+    });
+    rows.push(...batchRows);
+  }
+  return rows;
+}
+
+async function listPipelineContentByIds(env, contentIds = []) {
+  const ids = [...new Set((contentIds || []).filter((id) => /^rec[A-Za-z0-9]+$/.test(String(id || ""))))];
+  if (!ids.length) return [];
+  const rows = [];
+  for (let index = 0; index < ids.length; index += 40) {
+    const batch = ids.slice(index, index + 40);
+    const formulaParts = batch.map((id) => `RECORD_ID()="${airtableFormulaEscape(id)}"`);
+    const filterFormula = formulaParts.length === 1 ? formulaParts[0] : `OR(${formulaParts.join(",")})`;
+    const batchRows = await listRecords(env, env.AIRTABLE_CONTENT_TABLE_ID, {
+      limit: batch.length,
+      filterFormula,
+    }).catch((error) => {
+      console.warn("pipeline open-content scan failed", error);
+      return [];
+    });
+    rows.push(...batchRows);
+  }
+  return rows;
 }
 
 function studioApproveAllCandidateFormula(profile) {
@@ -20395,19 +20471,50 @@ async function runWaitingIdeaPhotoMatches(env, { limit = 8 } = {}) {
 
 async function listContent(request, env, url, authorization) {
   const profile = await resolveWorkingContentProfile(env, authorization, requestedProfileId(url));
-  const records = await listRecords(env, env.AIRTABLE_CONTENT_TABLE_ID, {
-    limit: clampLimit(url),
-    sortField: "Created_At",
-    filterFormula: contentProfileFilterFormula(profile),
-  });
-  const outputsByContent = new Map();
-  try {
-    const outputs = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
-      limit: Math.max(200, clampLimit(url, 300, 300)),
-      filterFormula: contentProfileFilterFormula(profile),
+  const profileFormula = contentProfileFilterFormula(profile);
+  const [newest, openOutputs] = await Promise.all([
+    listRecords(env, env.AIRTABLE_CONTENT_TABLE_ID, {
+      limit: clampLimit(url),
+      sortField: "Created_At",
+      filterFormula: profileFormula,
+    }),
+    listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
+      limit: 250,
       sortField: "Output_ID",
       sortDirection: "desc",
-    });
+      fields: ["Content_Item", "Output_ID", "Output_Status", "Publish_Status", "Published_At", "TikTok_Draft_Status"],
+      filterFormula: studioPipelineOpenOutputFormula(profile),
+    }).catch((error) => {
+      console.warn("content open-output scan failed", error);
+      return [];
+    }),
+  ]);
+  const openContentIds = studioPipelineContentIdsFromOutputs(openOutputs);
+  const missingIds = openContentIds.filter((id) => !newest.some((row) => row.id === id));
+  const openContent = missingIds.length ? await listPipelineContentByIds(env, missingIds) : [];
+  const byId = new Map();
+  for (const row of [...newest, ...openContent]) {
+    if (row?.id) byId.set(row.id, row);
+  }
+  const records = [...byId.values()];
+  const outputsByContent = new Map();
+  try {
+    const siblingOutputs = openContentIds.length
+      ? await listPipelineOutputsForContentIds(env, profile, openContentIds, {
+          fields: ["Output_ID", "Content_Item", "Platform", "Output_Status", "Publish_Status", "Published_At"],
+          sortField: "Output_ID",
+          sortDirection: "desc",
+        })
+      : [];
+    const outputs = mergePipelineOutputRecords(
+      await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
+        limit: Math.max(200, clampLimit(url, 300, 300)),
+        filterFormula: profileFormula,
+        sortField: "Output_ID",
+        sortDirection: "desc",
+      }).catch(() => []),
+      siblingOutputs,
+    );
     for (const output of outputs) {
       const contentId = studioFirstLinkedId(f(output, "Content_Item"));
       if (!contentId) continue;
@@ -20473,12 +20580,14 @@ const OUTPUT_LIST_FIELDS = [
   "Content_Profile",
   "Carousel Slides",
   "Composition_ID",
-  "Selected_Assets_JSON",
-  "Creative_Render_Manifest_JSON",
+  // Keep Pipeline list lean: Selected_Assets_JSON / Creative_Render_Manifest_JSON
+  // are multi‑KB per row and stall mobile /api/outputs (Connecting… / Loading outputs…).
+  // Creative detail routes still fetch the full record when opened.
   "Publish_Retry_Eligible",
   "Asset_Selection_Retry_Eligible",
   "Asset_Selection_Status",
   "Manual_Completion_Status",
+  "Manual_Fallback_Required",
   "Music_Status",
   "Publish_Error_Stage",
   "Publish_Error_Message",
@@ -20573,66 +20682,92 @@ async function listOutputScheduleGrid(request, env, url, authorization) {
 
 async function listOutputs(request, env, url, authorization, ctx = null) {
   const profile = await resolveWorkingContentProfile(env, authorization, requestedProfileId(url));
-  // Newest first. An unsorted maxRecords=100 page returns older rows and can
-  // hide a package's latest Platform Outputs (Streeterville 424/425) so Pipeline
-  // only shows the earlier four destinations.
-  const records = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
-    limit: clampLimit(url, 100, 100),
-    filterFormula: contentProfileFilterFormula(profile),
+  // Newest first, plus unfinished rows that would otherwise age out of the page.
+  // CI 206 (Muscle Beach / outputs 887–892) disappeared once Output_ID hit 1133
+  // while Pipeline only loaded the newest 100 rows. Fully complete packages stay
+  // in Archive (UI partition) when still inside newest-N; aged complete packages
+  // are not re-fetched.
+  const limit = clampLimit(url, 200, 250);
+  const listOpts = {
     fields: OUTPUT_LIST_FIELDS,
     sortField: "Output_ID",
     sortDirection: "desc",
-  });
-  const healed = [];
-  let manualLiveHealBudget = 5;
-  let staleManualHealBudget = 8;
-  for (const record of records) {
-    let current = await phase6RestoreProductionReviewReady(env, record);
-    if (staleManualHealBudget > 0 && staleManualFlagsOnPublishedFields(current?.fields || current)) {
-      staleManualHealBudget -= 1;
-      current = await healStaleManualFlagsOnPublishedRecord(env, current);
-    }
-    if (manualLiveHealBudget > 0 && youtubeManualLiveVideoHealCandidate(current?.fields || current)) {
-      manualLiveHealBudget -= 1;
-      current = await healYoutubeManualWithLiveVideoRecord(env, current, { autoHealed: true });
-    }
-    healed.push(current);
-  }
-  const jobs = await loadStudioProductionJobsForOutputs(env, healed);
+  };
+  const [newest, open] = await Promise.all([
+    listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
+      ...listOpts,
+      limit,
+      filterFormula: contentProfileFilterFormula(profile),
+    }),
+    listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
+      ...listOpts,
+      limit: Math.max(limit, 250),
+      filterFormula: studioPipelineOpenOutputFormula(profile),
+    }).catch((error) => {
+      console.warn("pipeline open-output scan failed", error);
+      return [];
+    }),
+  ]);
+  // Pull every sibling on unfinished packages (Published FB/YT next to TikTok draft).
+  const openContentIds = studioPipelineContentIdsFromOutputs(open);
+  const siblings = openContentIds.length
+    ? await listPipelineOutputsForContentIds(env, profile, openContentIds, listOpts)
+    : [];
+  const records = mergePipelineOutputRecords(newest, mergePipelineOutputRecords(open, siblings));
+  // Return the Pipeline table immediately. Per-row heals / produce enqueue run in
+  // waitUntil so a heal storm cannot leave Studio stuck on Loading outputs…
+  const jobs = await loadStudioProductionJobsForOutputs(env, records);
   if (ctx && typeof ctx.waitUntil === "function") {
-    const stalled = healed.filter((record) =>
-      /^in production$/i.test(String(f(record, "Output_Status") || ""))
-      && !String(f(record, "Remotion_Job_ID") || "").trim()
-    );
-    if (stalled.length) {
-      ctx.waitUntil((async () => {
-        const requestIds = [];
-        for (const record of stalled) {
-          let requestId = studioOutputProductionRequestId(record);
-          if (!requestId) {
-            const contentId = studioFirstLinkedId(f(record, "Content_Item"));
-            if (!contentId) continue;
-            try {
-              const parent = await airtableFetch(env, env.AIRTABLE_CONTENT_TABLE_ID, contentId);
-              requestId = studioFirstLinkedId(f(parent, "Production_Request"))
-                || studioFirstLinkedId(f(parent, "Production Requests"));
-            } catch {
-              continue;
-            }
+    ctx.waitUntil((async () => {
+      let manualLiveHealBudget = 5;
+      let staleManualHealBudget = 8;
+      for (const record of records.slice(0, 40)) {
+        let current = record;
+        try {
+          current = await phase6RestoreProductionReviewReady(env, current);
+          if (staleManualHealBudget > 0 && staleManualFlagsOnPublishedFields(current?.fields || current)) {
+            staleManualHealBudget -= 1;
+            current = await healStaleManualFlagsOnPublishedRecord(env, current);
           }
-          if (requestId && !requestIds.includes(requestId)) requestIds.push(requestId);
+          if (manualLiveHealBudget > 0 && youtubeManualLiveVideoHealCandidate(current?.fields || current)) {
+            manualLiveHealBudget -= 1;
+            current = await healYoutubeManualWithLiveVideoRecord(env, current, { autoHealed: true });
+          }
+        } catch (error) {
+          console.warn("pipeline list heal skipped", record?.id, error);
         }
-        for (const requestId of requestIds.slice(0, 4)) {
-          try { await enqueueStudioProductionJob(env, requestId); } catch (error) {
-            console.warn("Pipeline produce enqueue failed", requestId, error);
+      }
+      const stalled = records.filter((record) =>
+        /^in production$/i.test(String(f(record, "Output_Status") || ""))
+        && !String(f(record, "Remotion_Job_ID") || "").trim()
+      );
+      if (!stalled.length) return;
+      const requestIds = [];
+      for (const record of stalled) {
+        let requestId = studioOutputProductionRequestId(record);
+        if (!requestId) {
+          const contentId = studioFirstLinkedId(f(record, "Content_Item"));
+          if (!contentId) continue;
+          try {
+            const parent = await airtableFetch(env, env.AIRTABLE_CONTENT_TABLE_ID, contentId);
+            requestId = studioFirstLinkedId(f(parent, "Production_Request"))
+              || studioFirstLinkedId(f(parent, "Production Requests"));
+          } catch {
+            continue;
           }
         }
-      })());
-    }
+        if (requestId && !requestIds.includes(requestId)) requestIds.push(requestId);
+      }
+      for (const requestId of requestIds.slice(0, 4)) {
+        try { await enqueueStudioProductionJob(env, requestId); } catch (error) {
+          console.warn("Pipeline produce enqueue failed", requestId, error);
+        }
+      }
+    })());
   }
   return respond(request, env, {
     ok: true,
-    records: healed.map((record) => mapOutput(record, jobs.get(record))),
+    records: records.map((record) => mapOutput(record, jobs.get(record))),
     profile: mapStudioContentProfile(profile),
   });
 }

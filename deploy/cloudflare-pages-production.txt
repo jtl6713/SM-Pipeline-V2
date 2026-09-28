@@ -139,3 +139,19 @@ UI: 0.6.411-video-carousel-count-guard
 Requested: 2026-09-27T22:45:00-05:00
 
 Align Studio BUILD_ID with index cache key (0.6.411) for hermetic CI; NYC TikTok auth PR #412
+
+Keep unfinished Pipeline packages visible past newest-100 window
+Reason: UI requests /api/outputs?limit=250; footer 0.6.412-pipeline-open-outputs.
+UI: 0.6.412-pipeline-open-outputs
+Requested: 2026-09-28T13:50:00Z
+
+Unstick Pipeline Loading outputs / Connecting
+Reason: Drop Selected_Assets_JSON + Creative_Render_Manifest_JSON from /api/outputs list; shorter bootstrap retries; footer 0.6.413-pipeline-list-lean.
+UI: 0.6.413-pipeline-list-lean
+Requested: 2026-09-28T14:10:00Z
+
+
+Keep unfinished Pipeline packages (CI 206 siblings) on active list
+Reason: Open unfinished outputs + sibling package rows; fully complete stay in Archive. Content 206 TikTok 889 Draft Delivered.
+UI: 0.6.414-pipeline-open-packages
+Requested: 2026-09-28T14:30:00Z
