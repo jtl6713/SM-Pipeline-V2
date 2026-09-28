@@ -1,8 +1,8 @@
 {
-  "correlation_id": "OUTPUT-927-CONTROLLED-TIKTOK-RETRY-20260928",
+  "correlation_id": "OUTPUT-927-POST-MIAMI-AUTH-ALIGNMENT-20260928",
   "requests": [
     {
-      "name": "kick-output-927",
+      "name": "kick-output-927-after-auth-alignment",
       "method": "POST",
       "path": "/api/operations/outputs/recj63HvnUhy7bmnr/publish-kick",
       "body": {}
