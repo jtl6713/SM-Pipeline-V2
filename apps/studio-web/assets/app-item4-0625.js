@@ -247,7 +247,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.422-production-drag-reorder";
+  const BUILD_ID = "item4-0.6.423-production-selection-authority";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -10819,12 +10819,15 @@
       ...suggested.map((item) => item.id).filter(Boolean),
     ]);
     item4LibraryItems = mergeLibraryPickerItems(suggested, matches, [...attachedItems, ...browse]);
+    // Once an idea is in Production, the attached asset set is authoritative.
+    // Suggestions may still be displayed, but they must never become checked
+    // automatically. Only the operator can add another asset in Production.
     item4LibrarySelected = seedLibrarySelection(
       item4LibrarySelected,
       suggested,
       [...item4AttachedMediaIds()],
       libraryPickerMaxCount(),
-      !item4LibrarySeeded
+      false
     );
     item4LibrarySeeded = true;
     renderItem4LibraryPicker();
@@ -10850,6 +10853,10 @@
       return;
     }
     const picker = $("item4LibraryPicker");
+    // Reopening the Production picker starts from what is actually attached,
+    // not from prior recommendations. This prevents suggested media from
+    // reappearing as checked after Apply selection.
+    item4LibrarySelected = new Set(item4AttachedMediaIds());
     if (picker) picker.hidden = false;
     picker?.scrollIntoView({ block: "nearest" });
     try {
