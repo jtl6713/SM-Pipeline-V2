@@ -69,6 +69,7 @@ def test_azure_preferred_missing_image_deployment_fails_closed(monkeypatch):
 def test_transient_azure_image_failure_can_fail_over_once(monkeypatch):
     calls = []
     monkeypatch.setattr(ai_image_router, "get_preferred_account", lambda settings, override=None: "SECONDARY")
+    monkeypatch.setattr(ai_image_router, "cross_provider_failover_enabled", lambda settings: True)
 
     def fake_post(url, headers, json, timeout):
         calls.append(url)
@@ -80,3 +81,19 @@ def test_transient_azure_image_failure_can_fail_over_once(monkeypatch):
     assert len(calls) == 2
     assert "/openai/v1/images/generations" in calls[0]
     assert calls[1] == "https://api.openai.com/v1/images/generations"
+
+
+def test_transient_azure_image_failure_does_not_touch_primary_by_default(monkeypatch):
+    calls = []
+    monkeypatch.setattr(ai_image_router, "get_preferred_account", lambda settings, override=None: "SECONDARY")
+    monkeypatch.setattr(ai_image_router, "cross_provider_failover_enabled", lambda settings: False)
+
+    def fake_post(url, headers, json, timeout):
+        calls.append(url)
+        return _Response(503)
+
+    monkeypatch.setattr(requests, "post", fake_post)
+    response = post_image_generation(_settings(), {"model": "gpt-image-1.5", "prompt": "x"})
+    assert response.status_code == 503
+    assert len(calls) == 1
+    assert "/openai/v1/images/generations" in calls[0]
