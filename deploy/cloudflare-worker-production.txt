@@ -212,3 +212,8 @@ Keep unfinished Pipeline packages (CI 206 siblings) on active list
 Reason: Open unfinished + sibling outputs for packages like CI 206; archive only fully Published groups.
 Worker: 0.10.417-pipeline-open-packages
 Requested: 2026-09-28T14:30:00Z
+
+Deploy Studio API Worker production
+Reason: Quality Agent recap retains profile identity and broader recent history for past-hour/date-range filtering
+Source merge: 2c0befab977477409146356452befaf5d7f876b1
+Requested: 2026-09-28
