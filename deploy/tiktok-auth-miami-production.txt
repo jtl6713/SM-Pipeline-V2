@@ -1,0 +1,2 @@
+Deploy Miami TikTok auth Worker with safe pipeline-secret fingerprint alignment for output 927. Preserve existing Worker bindings/secrets and verify health.
+Requested: 2026-09-28T07:20:00-05:00
