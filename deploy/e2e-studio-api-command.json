@@ -1,52 +1,11 @@
 {
-  "correlation_id": "BRIDGES-VIDEO-COUNT-GUARD-PROOF-20260927",
+  "correlation_id": "OUTPUT-927-CONTROLLED-TIKTOK-RETRY-20260928",
   "requests": [
     {
-      "name": "prove-video-save-with-stale-carousel-25",
-      "method": "PATCH",
-      "path": "/api/production-requests/receXUsiQZLMlJzAX",
-      "body": {
-        "content_type": "Vertical Short Video",
-        "platforms": [
-          "Instagram",
-          "Facebook",
-          "TikTok",
-          "YouTube"
-        ],
-        "voiceover_mode": "Yes",
-        "background_music_mode": "Yes",
-        "thumbnail_mode": "Yes",
-        "video_duration_seconds": "30",
-        "video_clip_count_mode": "Exact",
-        "video_clip_count_exact": "15",
-        "video_clip_count_min": "",
-        "video_clip_count_max": "",
-        "carousel_slide_count_mode": "Exact",
-        "carousel_slide_count_exact": "25",
-        "carousel_slide_count_min": "",
-        "carousel_slide_count_max": "",
-        "carousel_image_mode": "Manual Upload",
-        "voiceover_tail_seconds": "2",
-        "voiceover_duration_seconds": "15",
-        "music_start_seconds": "0",
-        "selected_music_asset_id": "",
-        "voice_id": "xVQH621DS3eyBYrseRt5",
-        "voice_name": "Kate - English Female Voice With Soft Accent",
-        "title_mode": "AI decides",
-        "requested_title": "",
-        "caption_mode": "AI decides",
-        "requested_caption": "",
-        "script_mode": "AI decides",
-        "requested_script": "",
-        "primary_location": "DuSable Bridge",
-        "production_notes": "ez-photo-wait=off",
-        "light": true
-      }
-    },
-    {
-      "name": "verify-normalized-request",
-      "method": "GET",
-      "path": "/api/production-requests/receXUsiQZLMlJzAX"
+      "name": "kick-output-927",
+      "method": "POST",
+      "path": "/api/operations/outputs/recj63HvnUhy7bmnr/publish-kick",
+      "body": {}
     }
   ]
 }
