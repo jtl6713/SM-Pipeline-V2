@@ -102,3 +102,9 @@ Deploy Studio Pages production
 Reason: Align app-item4 cache-bust query with BUILD_ID after hermetic pin hygiene
 UI: item4-0.6.406-ai-profile-naming-delete-authority
 Requested: 2026-09-28T00:55:00Z
+
+
+Deploy Studio Pages production
+Reason: strict AI provider footer cache-bust; show non-selected provider as Standby · disabled when cross-provider failover is off
+UI: 0.6.407-ai-strict-provider
+Requested: 2026-09-27T21:06:00-05:00
