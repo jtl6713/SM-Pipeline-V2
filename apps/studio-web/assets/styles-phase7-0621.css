@@ -3042,3 +3042,5 @@ body.platform-calendar-open { overflow: hidden; }
   .platform-calendar-actions { display: grid; grid-template-columns: 1fr 1fr; width: 100%; }
   .platform-calendar-table { min-width: 900px; }
 }
+
+.pipeline-cover-download{display:block;width:max-content;margin-top:3px}
