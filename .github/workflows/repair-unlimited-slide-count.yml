@@ -1,0 +1,118 @@
+name: Repair Unlimited Production Slide Count
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'deploy/repair-unlimited-slide-count.txt'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: repair-unlimited-production-slide-count
+  cancel-in-progress: false
+
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v6
+        with:
+          ref: main
+
+      - name: Remove Worker 20-slide ceiling
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+
+          worker_path = Path("apps/studio-api/worker.js")
+          worker = worker_path.read_text()
+
+          replacements = {
+              'nullableInt(slideExactCoerced, 1, 20, "Exact carousel slide count")':
+                  'nullableInt(slideExactCoerced, 1, Number.MAX_SAFE_INTEGER, "Exact carousel slide count")',
+              'nullableInt(payload?.carousel_slide_count_min, 1, 20, "Minimum carousel slide count")':
+                  'nullableInt(payload?.carousel_slide_count_min, 1, Number.MAX_SAFE_INTEGER, "Minimum carousel slide count")',
+              'nullableInt(payload?.carousel_slide_count_max, 1, 20, "Maximum carousel slide count")':
+                  'nullableInt(payload?.carousel_slide_count_max, 1, Number.MAX_SAFE_INTEGER, "Maximum carousel slide count")',
+          }
+
+          for old, new in replacements.items():
+              count = worker.count(old)
+              if count != 1:
+                  raise SystemExit(f"Expected exactly one match for {old!r}, found {count}")
+              worker = worker.replace(old, new)
+
+          old_version = 'version: "0.10.419-pipeline-tiktok-open-fallback"'
+          new_version = 'version: "0.10.420-unlimited-slide-count"'
+          count = worker.count(old_version)
+          if count != 1:
+              raise SystemExit(f"Expected one Worker version marker, found {count}")
+          worker = worker.replace(old_version, new_version)
+          worker_path.write_text(worker)
+
+          for test_path in Path("apps/studio-api").glob("*.test.mjs"):
+              text = test_path.read_text()
+              text = text.replace(
+                  r'0\.10\.419-pipeline-tiktok-open-fallback',
+                  r'0\.10\.420-unlimited-slide-count',
+              )
+              text = text.replace(
+                  '0.10.419-pipeline-tiktok-open-fallback',
+                  '0.10.420-unlimited-slide-count',
+              )
+              test_path.write_text(text)
+
+          regression = Path("apps/studio-api/production-unlimited-slide-count.test.mjs")
+          regression.write_text(r'''import test from "node:test";
+import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
+import { fileURLToPath } from "node:url";
+import path from "node:path";
+
+const here = path.dirname(fileURLToPath(import.meta.url));
+
+test("Production slide-count validation accepts all attached stills beyond 20", async () => {
+  const worker = await readFile(path.join(here, "worker.js"), "utf8");
+  const start = worker.indexOf("async function cleanProductionRequestPayload");
+  const end = worker.indexOf("function productionRequestFields", start);
+  assert.ok(start >= 0 && end > start);
+  const handler = worker.slice(start, end);
+  assert.match(handler, /nullableInt\(slideExactCoerced, 1, Number\.MAX_SAFE_INTEGER, "Exact carousel slide count"\)/);
+  assert.match(handler, /nullableInt\(payload\?\.carousel_slide_count_min, 1, Number\.MAX_SAFE_INTEGER, "Minimum carousel slide count"\)/);
+  assert.match(handler, /nullableInt\(payload\?\.carousel_slide_count_max, 1, Number\.MAX_SAFE_INTEGER, "Maximum carousel slide count"\)/);
+});
+''')
+
+          deploy = Path("deploy/cloudflare-worker-production.txt")
+          deploy.write_text(deploy.read_text() + """
+
+Deploy Studio API Worker production
+Reason: Remove legacy 20-slide Production validation ceiling so slideshow requests can save all attached stills
+Worker: 0.10.420-unlimited-slide-count
+Requested: 2026-09-28
+""")
+          PY
+
+      - name: Run focused tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --test apps/studio-api/production-unlimited-slide-count.test.mjs apps/studio-api/video-carousel-count-guard.test.mjs
+          node --check apps/studio-api/worker.js
+
+      - name: Commit repair and production deploy trigger
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add apps/studio-api/worker.js apps/studio-api/*.test.mjs deploy/cloudflare-worker-production.txt
+          git diff --cached --quiet && exit 0
+          git commit -m "Remove legacy 20-slide Worker limit"
+          git push origin HEAD:main
