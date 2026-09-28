@@ -1237,9 +1237,28 @@ input, select, textarea, button {
 .ops-desk-chip[data-tone="alert"]{border-color:#e3b6b6;background:#fdf6f6;color:#7a2e2e}
 .ops-desk-chip[data-tone="ok"]{border-color:#b7d8d3;color:var(--teal-dark)}
 .ops-recap{padding:0 20px 8px}
+.ops-recap-toolbar{display:flex;flex-wrap:wrap;gap:10px;align-items:flex-end;padding:0 20px 14px}
+.ops-recap-toolbar .form-field{margin:0;min-width:170px}
+.ops-recap-toolbar .form-field span{font-size:.72rem;font-weight:800;color:var(--muted)}
+.ops-recap-toolbar input,.ops-recap-toolbar select{min-height:38px}
+.ops-recap-profile{display:grid;gap:2px;min-width:220px;padding:7px 0 6px}
+.ops-recap-profile span{font-size:.7rem;font-weight:800;letter-spacing:.05em;text-transform:uppercase;color:var(--muted)}
+.ops-recap-profile strong{font-size:.95rem}
+.ops-recap-refresh-meta{margin:0 0 9px auto;font-size:.76rem}
 .ops-recap-list{list-style:none;margin:0;padding:0 20px 18px;display:grid;gap:12px}
 .ops-recap .ops-recap-list{padding-left:0;padding-right:0}
-.ops-recap-list li{border:1px solid var(--line);border-radius:14px;padding:14px 16px;background:#fbfdfd;display:grid;gap:8px}
+.ops-recap-list li{border:1px solid var(--line);border-radius:14px;padding:0;background:#fbfdfd;display:block;overflow:hidden}
+.ops-recap-card{display:block}
+.ops-recap-card>summary{list-style:none;cursor:pointer;padding:14px 16px;display:grid;grid-template-columns:auto 1fr;align-items:start;gap:8px 12px}
+.ops-recap-card>summary::-webkit-details-marker{display:none}
+.ops-recap-card>summary::after{content:"▾";grid-column:2;grid-row:1;justify-self:end;color:var(--muted);font-size:.9rem;transition:transform .15s ease}
+.ops-recap-card[open]>summary::after{transform:rotate(180deg)}
+.ops-recap-card>summary:hover{background:rgba(255,255,255,.55)}
+.ops-recap-summary-title{margin:0;grid-column:1 / -1;font-size:.95rem;line-height:1.42;font-weight:700}
+.ops-recap-card-body{border-top:1px solid var(--line);padding:12px 16px 14px;display:grid;gap:8px}
+.ops-recap-profile-line{margin:0;font-size:.78rem;font-weight:800;color:var(--teal-dark)}
+.ops-recap-identity-line{margin:0;font-size:.84rem;line-height:1.4;color:var(--ink)}
+.ops-recap-list li{border:1px solid var(--line);border-radius:14px;padding:0;background:#fbfdfd;display:block;overflow:hidden}
 .ops-recap-list li[data-tone="alert"]{border-color:#ead0d0;background:#fff8f8}
 .ops-recap-list li[data-tone="ok"]{border-color:#b7d8d3;background:#f4fbf9}
 .ops-recap-list li[data-tone="work"]{border-color:#e2d4a8;background:#fffaf0}
