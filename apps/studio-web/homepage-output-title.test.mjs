@@ -76,3 +76,20 @@ test("Production library never auto-checks new recommendations after entry", () 
   assert.match(app, /Once an idea is in Production, the attached asset set is authoritative/);
   assert.match(app, /seedLibrarySelection\([\s\S]*?item4AttachedMediaIds\(\)[\s\S]*?false\s*\)/);
 });
+
+
+test("Production source ordering is drag-only with no arrow controls", () => {
+  assert.match(app, /data-item4-drag-handle/);
+  assert.match(app, /function bindItem4AssetDragReorder\(host, sortedAssets\)/);
+  assert.doesNotMatch(app, /data-item4-reorder=/);
+  assert.doesNotMatch(app, /aria-label="Move earlier"/);
+  assert.doesNotMatch(app, /aria-label="Move later"/);
+});
+
+test("Production shows a live narration duration estimate", () => {
+  assert.match(app, /function narrationEstimateSeconds\(text\)/);
+  assert.match(app, /Math\.round\(\(words \/ 150\) \* 60\)/);
+  assert.match(app, /function syncProductionNarrationEstimate\(\)/);
+  assert.match(app, /prRequestedScript/);
+  assert.match(app, /prNarrationEstimate/);
+});
