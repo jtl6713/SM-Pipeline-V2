@@ -22,6 +22,10 @@ const COPY = {
     found: "A post failed while sending to Instagram, Facebook, TikTok, or YouTube.",
     action: "Restarted the send.",
   },
+  tiktok_auth_signature: {
+    found: "A TikTok draft failed because the city auth Worker rejected the pipeline secret (HTTP 401).",
+    action: "Aligned the auth Worker signature, then rearmed and republished the draft once.",
+  },
   publish_never_dispatch: {
     found: "An approved post is due and the send never started.",
     action: "Queued the send because the scheduled time is due.",

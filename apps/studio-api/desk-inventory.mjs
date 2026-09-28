@@ -657,8 +657,40 @@ export function classifyAutonomousRfrGate({ notes, outputs = [], requestId } = {
   }, leaked[0]);
 }
 
+export function isTikTokAuthSignatureFailure(row) {
+  const platform = String(row?.platform || "").trim();
+  if (platform !== "TikTok") return false;
+  const draft = String(row?.tiktok_draft_status || "").trim();
+  const error = String(row?.publish_error || "").trim();
+  if (draft === "Manual Fallback") {
+    return /(^|[^0-9])401([^0-9]|$)|unauthorized|authentication failure/i.test(error) || !error;
+  }
+  return /(^|[^0-9])401([^0-9]|$)|unauthorized|authentication failure/i.test(error)
+    && /TTD1|tiktok.*(draft|init)|photo draft|video draft/i.test(`${error} ${row?.publish_error_stage || ""}`);
+}
+
+export function classifyTikTokAuthSignature(row) {
+  if (row?.published_at) return null;
+  if (!isTikTokAuthSignatureFailure(row)) return null;
+  const publish = String(row?.publish_status || "").trim();
+  const outputStatus = String(row?.output_status || "").trim();
+  const draft = String(row?.tiktok_draft_status || "").trim();
+  const failed = publish === "Failed" || outputStatus === "Failed" || draft === "Manual Fallback";
+  if (!failed) return null;
+  const recordId = String(row?.id || row?.record_id || "").trim();
+  return withDeskIdentity({
+    kind: "tiktok_auth_signature",
+    class: "code_bug",
+    record_id: recordId || null,
+    fingerprint: fingerprint("tiktok_auth_signature", recordId, "pipeline_secret"),
+    actor: "desk_agent",
+    diagnosis: "TikTok auth Worker rejected X-Pipeline-Secret (HTTP 401 / Manual Fallback). Worker cron must not unbounded-retry. Quality Agent checks the city auth Worker for PIPELINE_SECRET_SHA256 fingerprint alignment (LA/NYC/Miami), ensures LA_TIKTOK_PIPELINE_SECRET (or city secret) matches the established pipeline secret, deploys the auth Worker if needed, then rearms TikTok_Draft_Status=Ready for Delivery once and republishes. Proven: Output 908 Miami Vizcaya; Outputs 889/937/963 LA Beverly Hills / Venice / Muscle Beach.",
+  }, row);
+}
+
 export function classifyPublishFailed(row, nowMs = Date.now()) {
   if (row?.published_at) return null;
+  if (classifyTikTokAuthSignature(row)) return null;
   const outputStatus = String(row?.output_status || "").trim();
   const publish = String(row?.publish_status || "").trim();
   if (outputStatus && !["Approved for Publishing", "Failed"].includes(outputStatus)) return null;
@@ -685,7 +717,7 @@ export function classifyPublishFailed(row, nowMs = Date.now()) {
     fingerprint: fingerprint("publish_failed_transient", recordId, errorClass),
     actor: heal ? "worker_heal" : "desk_agent",
     diagnosis: heal
-      ? "Publish is Failed (retryable error such as Instagram IN_PROGRESS / HTTP 401, or Failed for more than an hour). Worker clears TikTok Manual Fallback when needed, requeues Ready to Publish, and pulses the publisher. Do not Approve again."
+      ? "Publish is Failed (retryable error such as Instagram IN_PROGRESS / HTTP 401 on Graph, or Failed for more than an hour). Worker requeues Ready to Publish and pulses the publisher. TikTok auth-worker 401 / Manual Fallback is classified separately as tiktok_auth_signature. Do not Approve again."
       : "Publish Failed with a non-retryable platform error. Desk must fix the asset or Graph settings before retry.",
   }, row);
 }
@@ -937,6 +969,7 @@ export const CLASSIFIER_KINDS = Object.freeze([
   "autonomous_rfr_gate",
   "publish_never_dispatch",
   "publish_failed_transient",
+  "tiktok_auth_signature",
   "render_failed",
   "render_unfetchable_source",
   "render_private_drive_watermark",

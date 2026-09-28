@@ -17,6 +17,7 @@ import {
   classifyPromotedNotRfr,
   classifyPublishDispatch,
   classifyPublishFailed,
+  classifyTikTokAuthSignature,
   classifyRenderRow,
   deskFailedNeedsHeal,
   deskRecoverableEscalatedError,
@@ -444,7 +445,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.413-miami-tiktok-secret-sync",
+          version: "0.10.414-la-tiktok-auth-signature",
           studio_desk_inventory_v1: true,
           studio_desk_activity_v1: true,
           studio_tiktok_complete_v1: true,
@@ -10700,6 +10701,9 @@ async function studioHealFailedStatuses(env, options = {}) {
     // TTD1 deliberately parks repeated 401/403 failures after five attempts.
     // Quality recovery must never undo that terminal fence or it creates an
     // unbounded auth retry storm (output 927 reached hundreds of attempts).
+    // Desk inventory classifies these as tiktok_auth_signature (code_bug) so
+    // Quality Agent aligns PIPELINE_SECRET_SHA256 on the city auth Worker,
+    // then rearms Ready for Delivery once and republishes.
     if (tiktokTerminalAuthFailure) {
       pulses.push({ key: "TIKTOK_AUTH_PARKED", id: row.id, skipped: "terminal_auth_failure" });
       continue;
@@ -34439,6 +34443,7 @@ function deskEventRecordId(event) {
 
 const DESK_OUTPUT_IDENTITY_KINDS = new Set([
   "publish_failed_transient",
+  "tiktok_auth_signature",
   "publish_never_dispatch",
   "render_failed",
   "render_unfetchable_source",
@@ -34541,6 +34546,7 @@ function mapDeskInventoryOutput(record, contentToRequest = new Map(), contentByI
     cover_attached: note.includes("facebook-cover=attached"),
     publish_error: f(record, "Publish_Error_Message"),
     publish_error_stage: f(record, "Publish_Error_Stage"),
+    tiktok_draft_status: f(record, "TikTok_Draft_Status"),
     youtube_error: f(record, "YouTube_Error_Message"),
     youtube_video_id: f(record, "YouTube_Video_ID"),
     publish_retry_eligible: Boolean(f(record, "Publish_Retry_Eligible")),
@@ -34766,6 +34772,7 @@ async function gatherStudioDeskInventory(env) {
   scanned("publish_never_dispatch");
   for (const record of approvedDispatch || []) {
     push(classifyPublishDispatch(mapOut(record), nowMs));
+    push(classifyTikTokAuthSignature(mapOut(record)));
     push(classifyPublishFailed(mapOut(record), nowMs));
     push(classifyYoutubeCoverQuota(mapOut(record)));
   }
@@ -34776,9 +34783,10 @@ async function gatherStudioDeskInventory(env) {
       sortDirection: "desc",
       filterFormula: 'AND({Test_Run_ID}=BLANK(),OR({Render_Status}="Failed",{Publish_Status}="Failed",AND({Publish_Error_Message}!="",{Published_At}=BLANK())))',
     }).catch(() => []);
-    scanned("render_failed", "publish_failed_transient");
+    scanned("render_failed", "publish_failed_transient", "tiktok_auth_signature");
     for (const record of failedRows || []) {
       push(classifyRenderRow(mapOut(record), nowMs));
+      push(classifyTikTokAuthSignature(mapOut(record)));
       push(classifyPublishFailed(mapOut(record), nowMs));
     }
   } catch (error) {
