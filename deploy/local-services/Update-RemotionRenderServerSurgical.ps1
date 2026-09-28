@@ -4,22 +4,15 @@
 #   powershell -NoProfile -ExecutionPolicy Bypass -File ".\deploy\local-services\Update-RemotionRenderServerSurgical.ps1"
 
 param(
-    [string]$RepoRoot = "",
-    [string]$ServiceRoot = ""
+    [string]$RepoRoot = 'D:\Content Creation\ChicagoShining Pipeline\Source Control\SM-Pipeline-V2',
+    [string]$PipelineRoot = 'D:\Content Creation\ChicagoShining Pipeline',
+    [string]$ServiceRoot = ''
 )
 
 $ErrorActionPreference = "Stop"
 
-if (-not $RepoRoot) {
-    $here = Split-Path -Parent $MyInvocation.MyCommand.Path
-    $RepoRoot = (Resolve-Path (Join-Path $here "..\..")).Path
-}
 if (-not $ServiceRoot) {
-    $pipelineRoot = Split-Path -Parent $RepoRoot
-    if ((Split-Path -Leaf $RepoRoot) -ieq "sm-pipeline-v2") {
-        $pipelineRoot = Split-Path -Parent $RepoRoot
-    }
-    $ServiceRoot = Join-Path $pipelineRoot "Services\Remotion_Renderer"
+    $ServiceRoot = Join-Path $PipelineRoot 'Services\Remotion_Renderer'
 }
 
 $src = Join-Path $RepoRoot "services\remotion-renderer\render-server.js"
