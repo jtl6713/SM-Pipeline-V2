@@ -1339,7 +1339,7 @@
  <button type="button" class="ops-card-tab" role="tab" id="operationsTabProduce" data-ops-tab="produce" aria-controls="operationsProducePanel" aria-selected="false" tabindex="-1">Autonomous produce</button>
  <button type="button" class="ops-card-tab" role="tab" id="operationsTabIntake" data-ops-tab="intake" aria-controls="operationsIntakePanel" aria-selected="false" tabindex="-1">Library intake</button>
  <button type="button" class="ops-card-tab" role="tab" id="operationsTabAnalytics" data-ops-tab="analytics" aria-controls="operationsAnalyticsPanel" aria-selected="false" tabindex="-1">Analytics</button>
- <button type="button" class="ops-card-tab" role="tab" id="operationsTabSchedule" data-ops-tab="schedule" aria-controls="operationsSchedulePanel" aria-selected="false" tabindex="-1">Ready to schedule</button>
+ <button type="button" class="ops-card-tab" role="tab" id="operationsTabSchedule" data-ops-tab="schedule" aria-controls="operationsSchedulePanel" aria-selected="false" tabindex="-1">Needs schedule</button>
  <button type="button" class="ops-card-tab" role="tab" id="operationsTabPublish" data-ops-tab="publish" aria-controls="operationsPublishPanel" aria-selected="false" tabindex="-1">Ready to publish</button>
  <button type="button" class="ops-card-tab" role="tab" id="operationsTabOversized" data-ops-tab="oversized" aria-controls="operationsOversizedPanel" aria-selected="false" tabindex="-1">Oversized videos</button>
  <button type="button" class="ops-card-tab" role="tab" id="operationsTabRepair" data-ops-tab="repair" aria-controls="operationsRepairPanel" aria-selected="false" tabindex="-1">Render repair</button>
@@ -1455,7 +1455,7 @@
  </div>
  </div>
  <div class="ops-tab-panel" id="operationsSchedulePanel" data-ops-tab-panel="schedule" role="tabpanel" aria-labelledby="operationsTabSchedule" hidden>
- <div class="panel-heading"><div><h2>Ready to schedule</h2><p>Approved outputs that still need a post date. Set the time here instead of waiting for a reminder email.</p></div></div>
+ <div class="panel-heading"><div><h2>Needs schedule</h2><p>Approved outputs that do not yet have a post date. Once a time is saved, the Publish status shows Scheduled until it becomes due.</p></div></div>
  <div id="operationsScheduleList" class="table-wrap"></div>
  </div>
  <div class="ops-tab-panel" id="operationsPublishPanel" data-ops-tab-panel="publish" role="tabpanel" aria-labelledby="operationsTabPublish" hidden>
@@ -1997,7 +1997,7 @@
  <div class="studio-footer-meta">
  <span id="aiApiFooter" aria-live="polite"><strong>AI API:</strong> loading…</span>
  <span id="apiStatus" class="topbar-status">Connecting…</span>
- <span id="uiBuildLabel">UI build 0.6.417</span>
+ <span id="uiBuildLabel">UI build 0.6.418</span>
  <span id="workerBuildLabel">Worker …</span> </div>
  </footer>
 
@@ -2158,7 +2158,7 @@
  <script src="/assets/ez-plan.js?v=0.6.376-recommend-carousel-slides"></script>
  <script src="/assets/pipeline-schedule-grid-0622.js?v=0.6.361-schedule-collapsed"></script>
  <script src="/assets/platform-schedule-calendar-0924.js?v=0.6.380-branch-reconcile"></script>
- <script src="/assets/app-item4-0625.js?v=0.6.417-pipeline-tiktok-open-fallback"></script>
+ <script src="/assets/app-item4-0625.js?v=0.6.418-schedule-status"></script>
  <script src="/assets/insights-0622.js?v=0.6.365-first-party-analytics-reconciled"></script>
  <script src="/assets/ai-api-footer.js?v=0.6.407-ai-strict-provider"></script>
  <script src="/assets/sticky-footer-scroll.js?v=0.6.378-sticky-footer-scroll"></script>
