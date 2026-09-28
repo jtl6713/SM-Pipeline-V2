@@ -9,7 +9,7 @@
  <link rel="preconnect" href="https://fonts.googleapis.com">
  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@1,600;1,700&family=Inter:wght@400;500;600;700;800&family=Oswald:wght@500&display=swap">
- <link rel="stylesheet" href="/assets/styles-phase7-0621.css?v=0.6.423-production-selection-authority">
+ <link rel="stylesheet" href="/assets/styles-phase7-0621.css?v=0.6.424-unlimited-slide-count">
  <link rel="stylesheet" href="/assets/insights-0622.css?v=0.6.381-insights-padding">
  <link rel="stylesheet" href="/assets/clean-enterprise.css?v=0.6.375-clean-enterprise">
  <link rel="stylesheet" href="/assets/ai-api-footer.css?v=0.6.376-ai-api">
@@ -370,9 +370,9 @@
  <strong>Carousel / photo sequence</strong>
  <label class="form-field"><span>Slide count</span><select id="ezCarouselSlideMode"><option>AI decides</option><option>Exact</option><option>Target range</option></select></label>
  <div class="count-inputs">
- <label class="form-field exact-count" hidden><span>Exact</span><input type="number" id="ezCarouselSlideExact" min="1" max="20"></label>
- <label class="form-field range-count" hidden><span>Min</span><input type="number" id="ezCarouselSlideMin" min="1" max="20"></label>
- <label class="form-field range-count" hidden><span>Max</span><input type="number" id="ezCarouselSlideMax" min="1" max="20"></label>
+ <label class="form-field exact-count" hidden><span>Exact</span><input type="number" id="ezCarouselSlideExact" min="1"></label>
+ <label class="form-field range-count" hidden><span>Min</span><input type="number" id="ezCarouselSlideMin" min="1"></label>
+ <label class="form-field range-count" hidden><span>Max</span><input type="number" id="ezCarouselSlideMax" min="1"></label>
  </div>
  <label class="form-field"><span>Image mode</span><select id="ezCarouselImageMode"><option>Manual Upload</option><option>Make AI Generated</option></select></label>
  </div>
@@ -701,13 +701,13 @@
  </select>
  </label>
  <label>Exact
- <input id="prOverrideSlideExact" type="number" min="1" max="20" step="1" placeholder="Inherit">
+ <input id="prOverrideSlideExact" type="number" min="1" step="1" placeholder="Inherit">
  </label>
  <label>Min
- <input id="prOverrideSlideMin" type="number" min="1" max="20" step="1" placeholder="Inherit">
+ <input id="prOverrideSlideMin" type="number" min="1" step="1" placeholder="Inherit">
  </label>
  <label>Max
- <input id="prOverrideSlideMax" type="number" min="1" max="20" step="1" placeholder="Inherit">
+ <input id="prOverrideSlideMax" type="number" min="1" step="1" placeholder="Inherit">
  </label>
  <label>Image mode
  <select id="prOverrideImageMode">
@@ -809,9 +809,9 @@
  <strong>Carousel / photo sequence</strong>
  <label class="form-field"><span>Slide count</span><select id="prCarouselSlideMode"><option>AI decides</option><option>Exact</option><option>Target range</option></select></label>
  <div class="count-inputs">
- <label class="form-field exact-count"><span>Exact</span><input type="number" id="prCarouselSlideExact" min="1" max="20"></label>
- <label class="form-field range-count"><span>Min</span><input type="number" id="prCarouselSlideMin" min="1" max="20"></label>
- <label class="form-field range-count"><span>Max</span><input type="number" id="prCarouselSlideMax" min="1" max="20"></label>
+ <label class="form-field exact-count"><span>Exact</span><input type="number" id="prCarouselSlideExact" min="1"></label>
+ <label class="form-field range-count"><span>Min</span><input type="number" id="prCarouselSlideMin" min="1"></label>
+ <label class="form-field range-count"><span>Max</span><input type="number" id="prCarouselSlideMax" min="1"></label>
  </div>
  <label class="form-field"><span>Image mode</span><select id="prCarouselImageMode"><option>Make AI Generated</option><option>Manual Upload</option></select></label>
  </div>
@@ -2120,9 +2120,9 @@
  <div class="promotion-subpanel" id="carouselPromotionOptions" hidden>
  <div class="promotion-grid">
  <label class="form-field"><span>Slide count mode</span><select id="promoteCarouselSlideMode"><option value="Exact">Exact</option><option value="Target range">Target range</option></select></label>
- <label class="form-field" id="promoteCarouselExactWrap"><span>Slide count</span><input id="promoteCarouselSlideCount" type="number" min="1" max="20" value="5"></label>
- <label class="form-field range-count" id="promoteCarouselMinWrap" hidden><span>Minimum photos</span><input id="promoteCarouselSlideMin" type="number" min="1" max="20" value="3"></label>
- <label class="form-field range-count" id="promoteCarouselMaxWrap" hidden><span>Maximum photos</span><input id="promoteCarouselSlideMax" type="number" min="1" max="20" value="10"></label>
+ <label class="form-field" id="promoteCarouselExactWrap"><span>Slide count</span><input id="promoteCarouselSlideCount" type="number" min="1" value="5"></label>
+ <label class="form-field range-count" id="promoteCarouselMinWrap" hidden><span>Minimum photos</span><input id="promoteCarouselSlideMin" type="number" min="1" value="3"></label>
+ <label class="form-field range-count" id="promoteCarouselMaxWrap" hidden><span>Maximum photos</span><input id="promoteCarouselSlideMax" type="number" min="1" value="10"></label>
  <label class="form-field"><span>Image mode</span><select id="promoteCarouselImageMode"><option value="Make AI Generated">Make AI Generated</option><option value="Manual Upload">Manual Upload</option><option value="Wait for matching photos">Listen for photos</option></select></label>
  </div>
  <p class="subtle" id="promotePhotoWaitHint" hidden>Studio listens only to media already uploaded to the Studio library. It attaches high-confidence stills up to the maximum once the minimum is met. You can still change the selected assets, set production rules, and approve rendering later.</p>
@@ -2158,7 +2158,7 @@
  <script src="/assets/ez-plan.js?v=0.6.376-recommend-carousel-slides"></script>
  <script src="/assets/pipeline-schedule-grid-0622.js?v=0.6.361-schedule-collapsed"></script>
  <script src="/assets/platform-schedule-calendar-0924.js?v=0.6.380-branch-reconcile"></script>
- <script src="/assets/app-item4-0625.js?v=0.6.423-production-selection-authority"></script>
+ <script src="/assets/app-item4-0625.js?v=0.6.424-unlimited-slide-count"></script>
  <script src="/assets/insights-0622.js?v=0.6.365-first-party-analytics-reconciled"></script>
  <script src="/assets/ai-api-footer.js?v=0.6.407-ai-strict-provider"></script>
  <script src="/assets/sticky-footer-scroll.js?v=0.6.378-sticky-footer-scroll"></script>
