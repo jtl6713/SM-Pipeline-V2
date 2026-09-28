@@ -173,3 +173,9 @@ Keep Content 143 / TikTok Manual Fallback packages on Pipeline
 Reason: Open formula includes Manual Fallback; open scan limit 1000; UI keeps Published siblings in unfinished groups. Footer 0.6.417.
 UI: 0.6.417-pipeline-tiktok-open-fallback
 Requested: 2026-09-28T15:55:00Z
+
+Deploy Studio Pages production
+Reason: Normalize schedule publish labels — Needs Schedule before scheduling, Scheduled after future time saved, Ready to Publish when due
+UI: 0.6.418-schedule-status
+Source merge: b242c404a368fa82843675c8e324040c55e3fb40
+Requested: 2026-09-28
