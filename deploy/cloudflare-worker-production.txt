@@ -266,3 +266,9 @@ Deploy Studio API Worker production
 Reason: Force exact narration is execution authority; invalidate stale P2 audio when saved exact script changes and make canonical Voiceover_Script match Production
 Worker: 0.10.423-force-exact-voiceover-authority
 Requested: 2026-09-28
+
+Redeploy Worker after Force exact voiceover authority repair
+Reason: Explicitly deploy bot repair commit; prevent stale AI narration from surviving a saved Force exact script
+Source repair: 7f9e52c5b610cf2f69a7c7e78f040950fef3aef3
+Worker: 0.10.423-force-exact-voiceover-authority
+Requested: 2026-09-28T16:58:00-05:00
