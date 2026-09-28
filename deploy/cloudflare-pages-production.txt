@@ -137,3 +137,5 @@ Deploy Studio Pages production
 Reason: Video Production saves no longer derive/submit carousel slide counts from the number of selected source photos
 UI: 0.6.411-video-carousel-count-guard
 Requested: 2026-09-27T22:45:00-05:00
+
+Align Studio BUILD_ID with index cache key (0.6.411) for hermetic CI; NYC TikTok auth PR #412
