@@ -50,9 +50,10 @@ test("opening a platform output jumps immediately to the top of the page", () =>
 });
 
 
-test("pipeline output shows Download Cover directly under schedule or post metadata when a thumbnail exists", () => {
+test("pipeline output puts Download Cover on a new line when Open post is present", () => {
   assert.match(app, /const coverDownloadUrl = phase6ThumbnailDownloadUrl\(r\)/);
   assert.match(app, /pipeline-cover-download/);
-  assert.match(app, /pipeline-cover-download-row/);
-  assert.match(app, /\$\{postLink\}\$\{coverLink\}/);
+  assert.match(app, /pipeline-post-action-links/);
+  assert.match(app, /postLink && coverLink \? "<br>" : ""/);
+  assert.match(app, /\$\{actionLinks\}<\/td>/);
 });
