@@ -57,3 +57,15 @@ test("pipeline output puts Download Cover on a new line when Open post is presen
   assert.match(app, /postLink && coverLink \? "<br>" : ""/);
   assert.match(app, /\$\{actionLinks\}<\/td>/);
 });
+
+
+test("production media supports drag-and-drop reorder with persisted asset_ids", () => {
+  assert.match(app, /draggable="true"/);
+  assert.match(app, /data-item4-drag-handle/);
+  assert.match(app, /function bindItem4AssetDragReorder\(host, sortedAssets\)/);
+  assert.match(app, /addEventListener\("dragstart"/);
+  assert.match(app, /addEventListener\("drop"/);
+  assert.match(app, /addEventListener\("pointerdown"/);
+  assert.match(app, /moveItem4AssetTo\(draggedId, targetIndex\)/);
+  assert.match(app, /body: JSON\.stringify\(\{ asset_ids: ordered\.map\(\(asset\) => asset\.id\) \}\)/);
+});
