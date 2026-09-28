@@ -1589,6 +1589,16 @@
     ).trim();
   }
 
+  function pipelinePublishStatusLabel(record) {
+    const raw = String(record?.platform_publish_status || record?.publish_status || "").trim();
+    if (!/^(Waiting for Schedule|Ready to Schedule)$/i.test(raw)) return raw;
+    const scheduled = studioEffectiveScheduleIso(record);
+    if (!scheduled) return "Needs Schedule";
+    const when = Date.parse(scheduled);
+    if (Number.isFinite(when) && when <= Date.now()) return "Ready to Publish";
+    return "Scheduled";
+  }
+
   function studioOutputTimingLabel(record) {
     const parts = [];
     const scheduled = studioEffectiveScheduleIso(record);
@@ -15177,7 +15187,7 @@
     if (key === "state") return pipelineColumnDisplayBucket(pipelineStudioStateLabel(record) || record?.studio_state);
     if (key === "render") return pipelineColumnDisplayBucket(pipelineRenderLabel(record));
     if (key === "review") return pipelineColumnDisplayBucket(record?.review_status);
-    if (key === "publish") return pipelineColumnDisplayBucket(record?.platform_publish_status || record?.publish_status);
+    if (key === "publish") return pipelineColumnDisplayBucket(pipelinePublishStatusLabel(record));
     if (key === "progress") return pipelineColumnDisplayBucket(pipelineProgressFilterValue(record, records));
     if (key === "creative") return pipelineColumnDisplayBucket(pipelineCreativeFilterValue(record));
     return "—";
@@ -15482,7 +15492,7 @@
       const creativeCell = isPipeline ? `<td class="creative-output-action-cell"><button type="button" class="creative-button" data-creative-output-id="${escapeHtml(r.id)}" ${canOpen ? "" : "disabled"} title="${canOpen ? "" : notReadyTitle}">${canOpen ? "Open review" : notReadyLabel}</button>${scheduleCell}</td>` : "";
       const rowOpen = isPipeline && canOpen ? ` class="pipeline-open-row" data-open-output-id="${escapeHtml(r.id)}" tabindex="0"` : "";
       const subtleParts = [r.publish_method, timing].filter(Boolean).map((part) => escapeHtml(String(part)));
-      return `<tr${rowOpen}><td><div class="title-cell">${escapeHtml(pipelineOutputListTitle(r))}</div><div class="subtle">${subtleParts.join(" · ") || "—"}</div>${postLink}</td><td>${value(r.platform)}</td>${typeCell}<td>${badge(pipelineStudioStateLabel(r))}${isPipeline ? `${pipelineTiktokCompleteCell(r)}${pipelineYoutubeCompleteCell(r)}` : ""}</td><td>${value(pipelineRenderLabel(r))}</td><td>${value(r.review_status)}</td><td>${value(r.platform_publish_status || r.publish_status)}</td><td>${pipelineProgressCell(r, groupRecords)}</td>${creativeCell}</tr>`;
+      return `<tr${rowOpen}><td><div class="title-cell">${escapeHtml(pipelineOutputListTitle(r))}</div><div class="subtle">${subtleParts.join(" · ") || "—"}</div>${postLink}</td><td>${value(r.platform)}</td>${typeCell}<td>${badge(pipelineStudioStateLabel(r))}${isPipeline ? `${pipelineTiktokCompleteCell(r)}${pipelineYoutubeCompleteCell(r)}` : ""}</td><td>${value(pipelineRenderLabel(r))}</td><td>${value(r.review_status)}</td><td>${value(pipelinePublishStatusLabel(r))}</td><td>${pipelineProgressCell(r, groupRecords)}</td>${creativeCell}</tr>`;
     };
     const body = isPipeline
       ? (() => {
@@ -18845,7 +18855,7 @@
       const action = kind === "schedule"
         ? `${scheduledHint}<form class="ops-inline-form" data-ops-schedule="${escapeHtml(record.id)}"><input type="datetime-local" required value="${escapeHtml(inputValue)}"><button type="submit" class="secondary-button">${effectiveSchedule ? "Update date" : "Set date"}</button></form>`
         : `<form class="ops-inline-form" data-ops-published="${escapeHtml(record.id)}"><input type="url" required placeholder="https://… live post URL"><button type="submit" class="secondary-button">Mark published</button></form>`;
-      return `<tr><td><div class="title-cell">Output ${value(record.output_id)} · ${value(record.output_title)}</div><div class="subtle">${links || "No file links"}</div><div class="ops-kit">${escapeHtml(opsKitText(record) || "No caption yet")}</div></td><td>${value(record.platform)}</td><td>${badge(record.studio_state || record.publish_status)}</td><td>${action}</td></tr>`;
+      return `<tr><td><div class="title-cell">Output ${value(record.output_id)} · ${value(record.output_title)}</div><div class="subtle">${links || "No file links"}</div><div class="ops-kit">${escapeHtml(opsKitText(record) || "No caption yet")}</div></td><td>${value(record.platform)}</td><td>${badge(record.studio_state || pipelinePublishStatusLabel(record))}</td><td>${action}</td></tr>`;
     }).join("")}</tbody></table>`;
     target.querySelectorAll("[data-ops-schedule]").forEach((form) => {
       form.addEventListener("submit", async (event) => {
