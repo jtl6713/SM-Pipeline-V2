@@ -247,7 +247,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.419-download-cover";
+  const BUILD_ID = "item4-0.6.420-cover-new-line";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -15476,7 +15476,7 @@
       const postLink = r.platform_post_url ? `<a class="table-link" target="_blank" rel="noopener" href="${escapeHtml(r.platform_post_url)}">Open post ↗</a>` : "";
       const coverDownloadUrl = phase6ThumbnailDownloadUrl(r);
       const coverLink = coverDownloadUrl
-        ? `<a class="table-link pipeline-cover-download" target="_blank" rel="noopener" download href="${escapeHtml(coverDownloadUrl)}">Download Cover</a>`
+        ? `<div class="pipeline-cover-download-row"><a class="table-link pipeline-cover-download" target="_blank" rel="noopener" download href="${escapeHtml(coverDownloadUrl)}">Download Cover</a></div>`
         : "";
       const timing = studioOutputTimingLabel(r);
       const typeCell = isPipeline ? `<td><div>${value(r.platform_output_type || r.format)}</div><div class="subtle">${value(r.aspect_ratio)}</div></td>` : "";
