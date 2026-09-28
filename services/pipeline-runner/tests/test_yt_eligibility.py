@@ -17,7 +17,7 @@ from yt.package import (
     youtube_tags,
     youtube_thumbnail_publish_enabled,
 )
-from yt.yts2 import thumbnail_fallback_source, vertical_still_attached, yts2_needs_videos_list
+from yt.yts2 import recovered_processing_status, thumbnail_fallback_source, vertical_still_attached, yts2_needs_videos_list
 
 
 def _record(**fields):
@@ -187,3 +187,21 @@ def test_required_youtube_grid_cover_never_falls_back_to_clip_frame():
     output = _record(Clip_1_URL="https://example.com/clip-frame.jpg")
     assert thumbnail_fallback_source(output, cover_required=True) is None
     assert thumbnail_fallback_source(output, cover_required=False) == "https://example.com/clip-frame.jpg"
+
+
+def test_empty_videos_list_preserves_confirmed_processing_success():
+    status, recovered = recovered_processing_status(
+        {"kind": "youtube#videoListResponse", "items": [], "pageInfo": {"totalResults": 0}},
+        "Succeeded",
+    )
+    assert status == "succeeded"
+    assert recovered is True
+
+
+def test_empty_videos_list_does_not_invent_success_without_prior_confirmation():
+    status, recovered = recovered_processing_status(
+        {"kind": "youtube#videoListResponse", "items": [], "pageInfo": {"totalResults": 0}},
+        "Not Started",
+    )
+    assert status == ""
+    assert recovered is False
