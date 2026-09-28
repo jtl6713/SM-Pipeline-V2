@@ -65,9 +65,17 @@ Auto-correct: Worker `studioHealReadyNoJobVoiceover` (inside `healStuckStudioRen
 
 Any Platform Output with `Publish_Status=Failed` or `Render_Status=Failed` for **≥ 60 minutes** is a finding, even when the error text is not in the old transient list. Kind `publish_failed_transient` / `render_failed`, class `transient`, actor `worker_heal`, error class `stale_failed` when the message itself is not retryable. Copyright / permission denied / invalid video / unsupported format / video too long / duplicate stay `code_bug`.
 
-HTTP **401 / Unauthorized** on TikTok draft init (`TikTok photo draft initialization failed. HTTP 401`) used to park forever: TTD1 wrote `TikTok_Draft_Status=Manual Fallback` and `Publish_Retry_Eligible=false`, then Worker heal skipped it as non-transient. Proven fixture: Output **908** / Content Item 209 / `recuOQs6TgAXJqxRI` (Miami Vizcaya Rainy Day Plan, `TTD1_PHOTO_INIT`, last attempt 2026-09-26 08:47 UTC). The 401 body is the TikTok auth Worker rejecting `X-Pipeline-Secret` (`worker_version=v5.1-tiktok-caption-diagnostics`), not a Graph copyright block.
+HTTP **401 / Unauthorized** on TikTok draft init (`TikTok photo draft initialization failed. HTTP 401`) used to park forever: TTD1 wrote `TikTok_Draft_Status=Manual Fallback` and `Publish_Retry_Eligible=false`, then Worker heal skipped it as non-transient. Proven fixture: Output **908** / Content Item 209 / `recuOQs6TgAXJqxRI` (Miami Vizcaya Rainy Day Plan, `TTD1_PHOTO_INIT`, last attempt 2026-09-26 08:47 UTC). Later LA video drafts **889 / 937 / 963** hit the same auth-worker body (`worker_version=v5.1-tiktok-caption-diagnostics`). The 401 is the TikTok auth Worker rejecting `X-Pipeline-Secret`, not a Graph copyright block.
 
-Auto-correct: Worker `studioHealFailedStatuses` / Failed-render requeue treats stale Failed and 401 as healable. For TikTok Manual Fallback / 401 it resets `TikTok_Draft_Status=Ready for Delivery`, clears `Manual_Fallback_Required`, and pulses TTD1. TTD1 retries 401/403 until attempt 5, then Manual Fallback. If the same 401 fingerprint returns after a later tick, the Miami/LA/NYC `TIKTOK_MAKE_SHARED_SECRET` does not match `TIKTOK_PIPELINE_SECRET` — that is `code_bug` / secret repair, not another silent park.
+Classify as `tiktok_auth_signature` / `code_bug` / actor `desk_agent` (not `publish_failed_transient`). Worker cron **must keep** the terminal Manual Fallback fence (`TIKTOK_AUTH_PARKED`) so attempts cannot storm (Output 927). Quality Agent owns recovery:
+
+1. Ticket fingerprint `tiktok_auth_signature:<output_rec>:pipeline_secret`.
+2. Confirm the city auth Worker (`auth-la` / `auth-miami` / `auth-nyc`) accepts the established pipeline secret via `PIPELINE_SECRET_SHA256` fingerprint (legacy `TIKTOK_MAKE_SHARED_SECRET` alone is not enough when Make and the Python runner diverge).
+3. Ensure `LA_TIKTOK_PIPELINE_SECRET` / `MIAMI_TIKTOK_PIPELINE_SECRET` / `NYC_TIKTOK_PIPELINE_SECRET` (or shared `TIKTOK_PIPELINE_SECRET`) matches that fingerprint. Deploy the city auth Worker from `deploy/tiktok-auth-*-production.txt` when the fingerprint gate is missing.
+4. After auth is aligned: rearm once — `TikTok_Draft_Status=Ready for Delivery`, clear `Manual_Fallback_Required`, `Publish_Status=Ready to Publish`, `Publish_Retry_Eligible=true`, reset `Publish_Attempt_Count` to 0, clear the 401 error fields — then pulse TTD1 / publish-kick. Do not unbounded-retry from Worker heal.
+5. Same fingerprint after a successful auth deploy + one rearm → escalate to Joseph (token/OAuth issue, not signature).
+
+Auto-correct for ordinary Graph/transient Failed publishes remains Worker `studioHealFailedStatuses`. TikTok Manual Fallback / auth-worker 401 is **not** that path.
 
 ## Watch: Escalated — needs investigation
 

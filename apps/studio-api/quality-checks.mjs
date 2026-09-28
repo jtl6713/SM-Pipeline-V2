@@ -13,6 +13,7 @@ export const QUALITY_HEALS = Object.freeze([
   "repair_render_sources",
   "diagnose_then_one_send",
   "wait_pacific_midnight",
+  "align_signature_then_rearm",
   "ticket_only",
   "none",
 ]);
@@ -138,6 +139,14 @@ export const QUALITY_CHECKS = Object.freeze([
     kind: "publish_failed_transient",
     actor: "worker_heal",
     heal: "requeue_failed",
+  }),
+  check({
+    id: "tiktok_auth_signature",
+    title: "Check for TikTok Manual Fallback / HTTP 401 Unauthorized from the city auth Worker (pipeline secret signature mismatch)",
+    lane: "both",
+    kind: "tiktok_auth_signature",
+    actor: "desk_agent",
+    heal: "align_signature_then_rearm",
   }),
   check({
     id: "render_failed",

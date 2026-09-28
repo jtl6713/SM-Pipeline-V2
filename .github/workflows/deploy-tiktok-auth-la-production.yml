@@ -1,0 +1,161 @@
+name: Deploy LA TikTok Auth Worker
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'deploy/tiktok-auth-la-production.txt'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tiktok-auth-la-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      TARGET_WORKER: chicagoshining-tiktok-auth-la
+      WRANGLER_VERSION: 4.123.0
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Validate source
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp apps/tiktok-auth-la/worker.js /tmp/la-worker.mjs
+          node --check /tmp/la-worker.mjs
+          grep -q 'PIPELINE_SECRET_SHA256' apps/tiktok-auth-la/worker.js
+          grep -q 'fingerprintMatch' apps/tiktok-auth-la/worker.js
+
+      - name: Capture current live version and bindings
+        shell: bash
+        run: |
+          set -euo pipefail
+          API="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/$TARGET_WORKER"
+          AUTH="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
+          curl -fsS "$API/deployments" -H "$AUTH" -o /tmp/deployments-before.json
+          PREV=$(jq -er '.result.deployments[0].versions|max_by(.percentage)|.version_id' /tmp/deployments-before.json)
+          printf '%s' "$PREV" >/tmp/previous-version.txt
+          curl -fsS "$API/versions/$PREV" -H "$AUTH" -o /tmp/version-before.json
+          jq -e '.success==true' /tmp/version-before.json >/dev/null
+          jq -c '[.result.resources.bindings[]?|{name,type}]|sort_by(.name)' /tmp/version-before.json >/tmp/bindings-before.json
+          jq -e 'map(.name)|index("TIKTOK_AUTH")!=null and index("TIKTOK_CLIENT_KEY")!=null and index("TIKTOK_CLIENT_SECRET")!=null and index("TIKTOK_MAKE_SHARED_SECRET")!=null and index("TIKTOK_OAUTH_STATE_SECRET")!=null' /tmp/bindings-before.json >/dev/null
+          echo "baseline_binding_contract=PASS"
+
+      - name: Install pinned Wrangler
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/wrangler-la
+          cd /tmp/wrangler-la
+          npm init -y >/dev/null 2>&1
+          npm install --no-save "wrangler@$WRANGLER_VERSION" >/dev/null
+          test "$(./node_modules/.bin/wrangler --version | tr -d '\r\n')" = "$WRANGLER_VERSION"
+
+      - name: Deploy source preserving existing secrets and vars
+        shell: bash
+        run: |
+          set -euo pipefail
+          /tmp/wrangler-la/node_modules/.bin/wrangler deploy \
+            --config apps/tiktok-auth-la/wrangler.jsonc \
+            --keep-vars \
+            --message "LA TikTok pipeline auth alignment ${GITHUB_SHA}" \
+            >/tmp/deploy.log 2>&1
+
+      - name: Verify bindings and health
+        shell: bash
+        run: |
+          set -euo pipefail
+          API="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/$TARGET_WORKER"
+          AUTH="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
+          NEW=""
+          for i in $(seq 1 10); do
+            curl -fsS "$API/deployments" -H "$AUTH" -o /tmp/deployments-after.json
+            NEW=$(jq -er '.result.deployments[0].versions|max_by(.percentage)|.version_id' /tmp/deployments-after.json)
+            [[ "$NEW" != "$(cat /tmp/previous-version.txt)" ]] && break
+            sleep 2
+          done
+          test -n "${NEW:-}"
+          curl -fsS "$API/versions/$NEW" -H "$AUTH" -o /tmp/version-after.json
+          jq -c '[.result.resources.bindings[]?|{name,type}]|sort_by(.name)' /tmp/version-after.json >/tmp/bindings-after.json
+          if ! cmp -s /tmp/bindings-before.json /tmp/bindings-after.json; then
+            echo "binding contract changed; rolling back" >&2
+            PREV=$(cat /tmp/previous-version.txt)
+            cat >/tmp/rollback.json <<EOF
+          {"strategy":"percentage","versions":[{"version_id":"$PREV","percentage":100}],"annotations":{"workers/message":"Rollback LA TikTok auth deploy after binding drift"}}
+          EOF
+            curl -fsS -X POST "$API/deployments?force=true" -H "$AUTH" -H 'Content-Type: application/json' --data-binary @/tmp/rollback.json >/tmp/rollback-result.json
+            exit 1
+          fi
+          code=000
+          for i in $(seq 1 10); do
+            code=$(curl -sS --max-time 20 -o /tmp/health.json -w '%{http_code}' 'https://auth-la.chicagoshining.com/health' || true)
+            [[ "$code" == "200" ]] && jq -e '.ok==true' /tmp/health.json >/dev/null 2>&1 && break
+            sleep 2
+          done
+          test "$code" = "200"
+          jq -e '.ok==true' /tmp/health.json >/dev/null
+          echo "la_tiktok_worker_deploy=PASS"
+
+      - name: Rearm LA TikTok drafts 889/937/963 after auth alignment
+        env:
+          AIRTABLE_PAT: ${{ secrets.AIRTABLE_PAT }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          PAT=$(printf '%s' "${AIRTABLE_PAT:-}" | tr -d '\r\n')
+          if [ -z "$PAT" ]; then
+            echo "AIRTABLE_PAT missing; skip rearm of 889/937/963"
+            exit 0
+          fi
+          ROOT="https://api.airtable.com/v0/appe33zkZn35yirTL/tblrlPeboBthkplH0"
+          python - <<'PY' >/tmp/la-rearm.json
+          import json
+          records = []
+          for rec in ["rect8fjS3MmqDvpvZ", "recOrS8vLYhZY7Y3b", "recjcpGYFqRNEJtin"]:
+              records.append({
+                  "id": rec,
+                  "fields": {
+                      "TikTok_Draft_Status": "Ready for Delivery",
+                      "Publish_Status": "Ready to Publish",
+                      "Manual_Fallback_Required": False,
+                      "Publish_Retry_Eligible": True,
+                      "Publish_Attempt_Count": 0,
+                      "Studio_Publish_Dispatch_Count": 0,
+                      "Publish_Error_Message": "",
+                      "Publish_Error_Stage": "",
+                      "Publish_Locked_By": "",
+                      "Publish_Locked_At": None,
+                      "Publish_Started_At": None,
+                      "Publish_Next_Retry_At": None,
+                  },
+              })
+          print(json.dumps({"records": records, "typecast": True}, separators=(",", ":")))
+          PY
+          code=$(curl -sS -o /tmp/la-rearm-result.json -w '%{http_code}' -X PATCH "$ROOT" \
+            -H "Authorization: Bearer $PAT" \
+            -H 'Content-Type: application/json' \
+            --data-binary @/tmp/la-rearm.json)
+          echo "la_rearm_http=$code"
+          test "$code" -ge 200 -a "$code" -lt 300
+          jq -e '.records|length==3' /tmp/la-rearm-result.json >/dev/null
+          echo "la_tiktok_889_937_963_rearm=PASS"
+
+      - name: Upload sanitized deployment evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: la-tiktok-auth-${{ github.run_id }}
+          path: |
+            /tmp/bindings-before.json
+            /tmp/bindings-after.json
+            /tmp/health.json
+          if-no-files-found: ignore
+          retention-days: 14

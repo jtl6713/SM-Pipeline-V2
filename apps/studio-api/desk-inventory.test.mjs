@@ -19,6 +19,7 @@ import {
   classifyAutonomousRfrGate,
   classifyPublishDispatch,
   classifyPublishFailed,
+  classifyTikTokAuthSignature,
   classifyNativeCover,
   classifyRfrLockedMissingDeliverable,
   classifyTesterNightly,
@@ -394,15 +395,41 @@ test("promoted advancement is origin-aware and does not treat Ready for Review a
   const vizcaya908 = classifyPublishFailed({
     id: "recuOQs6TgAXJqxRI",
     output_id: 908,
+    platform: "TikTok",
     output_status: "Approved for Publishing",
     publish_status: "Failed",
+    tiktok_draft_status: "Manual Fallback",
     publish_error: "TikTok photo draft initialization failed. HTTP 401: {'ok': False, 'error': 'Unauthorized', 'worker_version': 'v5.1-tiktok-caption-diagnostics'}",
     last_publish_attempt_at: "2026-09-26T08:47:24.000Z",
   }, now);
-  assert.equal(vizcaya908.kind, "publish_failed_transient");
-  assert.equal(vizcaya908.class, "transient");
-  assert.equal(vizcaya908.actor, "worker_heal");
-  assert.equal(vizcaya908.fingerprint, fingerprint("publish_failed_transient", "recuOQs6TgAXJqxRI", "transient_http"));
+  assert.equal(vizcaya908, null);
+  const vizcayaSig = classifyTikTokAuthSignature({
+    id: "recuOQs6TgAXJqxRI",
+    output_id: 908,
+    platform: "TikTok",
+    output_status: "Approved for Publishing",
+    publish_status: "Failed",
+    tiktok_draft_status: "Manual Fallback",
+    publish_error: "TikTok photo draft initialization failed. HTTP 401: {'ok': False, 'error': 'Unauthorized', 'worker_version': 'v5.1-tiktok-caption-diagnostics'}",
+    last_publish_attempt_at: "2026-09-26T08:47:24.000Z",
+  });
+  assert.equal(vizcayaSig.kind, "tiktok_auth_signature");
+  assert.equal(vizcayaSig.class, "code_bug");
+  assert.equal(vizcayaSig.actor, "desk_agent");
+  assert.equal(vizcayaSig.fingerprint, fingerprint("tiktok_auth_signature", "recuOQs6TgAXJqxRI", "pipeline_secret"));
+  const la963 = classifyTikTokAuthSignature({
+    id: "rect8fjS3MmqDvpvZ",
+    output_id: 963,
+    platform: "TikTok",
+    output_status: "Approved for Publishing",
+    publish_status: "Failed",
+    tiktok_draft_status: "Manual Fallback",
+    publish_error_stage: "TTD1_VIDEO_INIT",
+    publish_error: "TikTok video draft initialization failed. HTTP 401: {'ok': False, 'error': 'Unauthorized', 'worker_version': 'v5.1-tiktok-caption-diagnostics'}",
+  });
+  assert.equal(la963.kind, "tiktok_auth_signature");
+  assert.equal(la963.fingerprint, fingerprint("tiktok_auth_signature", "rect8fjS3MmqDvpvZ", "pipeline_secret"));
+  assert.ok(CLASSIFIER_KINDS.includes("tiktok_auth_signature"));
   const staleFailed = classifyPublishFailed({
     id: "recStaleFail",
     output_status: "Approved for Publishing",

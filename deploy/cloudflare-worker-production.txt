@@ -191,3 +191,8 @@ Deploy Studio API Worker production
 Reason: owner-only Miami TikTok pipeline-secret sync operation so repair can use Studio's Airtable authority without a GitHub Airtable credential
 Worker: 0.10.413-miami-tiktok-secret-sync
 Requested: 2026-09-28T07:18:00-05:00
+
+Deploy LA TikTok auth signature Quality recovery
+Reason: Classify TikTok Manual Fallback / HTTP 401 as tiktok_auth_signature so Quality Agent aligns PIPELINE_SECRET_SHA256 and republishes. Worker 0.10.414-la-tiktok-auth-signature. Proven: Outputs 889/937/963 LA.
+Worker: 0.10.414-la-tiktok-auth-signature
+Requested: 2026-09-28T13:35:00Z
