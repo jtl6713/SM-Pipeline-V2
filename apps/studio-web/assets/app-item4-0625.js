@@ -247,7 +247,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.424-unlimited-slide-count";
+  const BUILD_ID = "item4-0.6.425-narration-estimate-drag-only";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -4331,6 +4331,38 @@
     const text = String($("ezRequestedScript")?.value || "").trim();
     return mode !== "AI decides" || Boolean(text);
   }
+  function narrationEstimateSeconds(text) {
+    const clean = String(text || "").trim();
+    if (!clean) return 0;
+    const words = clean.split(/\s+/).filter(Boolean).length;
+    if (!words) return 0;
+    return Math.max(1, Math.round((words / 150) * 60));
+  }
+
+  function narrationEstimateLabel(seconds) {
+    const value = Math.max(0, Number(seconds || 0));
+    if (!value) return "";
+    if (value < 60) return `~${value} sec`;
+    const mins = Math.floor(value / 60);
+    const secs = value % 60;
+    return secs ? `~${mins} min ${secs} sec` : `~${mins} min`;
+  }
+
+  function syncProductionNarrationEstimate() {
+    const target = $("prNarrationEstimate");
+    if (!target) return;
+    const text = String($("prRequestedScript")?.value || "").trim();
+    const words = text ? text.split(/\s+/).filter(Boolean).length : 0;
+    const seconds = narrationEstimateSeconds(text);
+    if (seconds) {
+      target.textContent = `Estimated narration: ${narrationEstimateLabel(seconds)} · ${words} word${words === 1 ? "" : "s"} · based on ~150 words/minute`;
+      return;
+    }
+    const targetSeconds = Number($("prVoiceoverDuration")?.value || activeProductionRequest?.voiceover_duration_seconds || 0);
+    target.textContent = targetSeconds > 0
+      ? `No script entered yet · current voiceover target: ${narrationEstimateLabel(targetSeconds)}`
+      : "No script entered yet · narration estimate will appear as you type.";
+  }
 
   function ezCaptionIsCustomized() {
     const mode = $("ezCaptionMode")?.value || "AI decides";
@@ -7072,14 +7104,8 @@
     const captionField = showCaption ? item4CaptionField(asset.id) : "";
     const canRemove = asset.id && !String(asset.id).startsWith("local:");
     const canReorder = canRemove && total > 1;
-    const orderControls = canReorder
-      ? `<div class="item4-asset-order" role="group" aria-label="Reorder ${isVideo ? "clip" : "photo"} ${Number(asset.order || index + 1)}">
-          <button type="button" class="item4-asset-order-btn" data-item4-reorder="${escapeHtml(asset.id)}" data-dir="up" ${index <= 0 ? "disabled" : ""} aria-label="Move earlier">↑</button>
-          <button type="button" class="item4-asset-order-btn" data-item4-reorder="${escapeHtml(asset.id)}" data-dir="down" ${index >= total - 1 ? "disabled" : ""} aria-label="Move later">↓</button>
-        </div>`
-      : "";
     return `<article class="item4-asset-card${showCaption ? " with-caption" : ""}${canReorder ? " is-reorderable" : ""}" data-item4-asset="${escapeHtml(asset.id)}" ${canReorder ? 'draggable="true"' : ""}>
-      <div class="item4-thumb">${visual}${canReorder ? `<button type="button" class="item4-asset-drag-handle" data-item4-drag-handle="${escapeHtml(asset.id)}" aria-label="Drag to reorder" title="Drag to reorder">⋮⋮</button>` : ""}${orderControls}</div>
+      <div class="item4-thumb">${visual}${canReorder ? `<button type="button" class="item4-asset-drag-handle" data-item4-drag-handle="${escapeHtml(asset.id)}" aria-label="Drag to reorder" title="Drag to reorder">⋮⋮</button>` : ""}</div>
       <div class="item4-asset-meta"><strong>${escapeHtml(asset.name || (isVideo ? "Clip" : "Photo"))}</strong><span>${escapeHtml(isVideo ? `Clip ${asset.order || ""}` : `Photo ${asset.order || ""}`)} · ${escapeHtml(dims)}${durationNote}${formatNote}</span></div>
       ${captionField}
       ${canRemove ? `<button type="button" class="item4-remove-asset" data-remove-item4-asset="${escapeHtml(asset.id)}" title="${ezIsFinishedVideo() ? "Remove this video" : "Remove this photo"}">×</button>` : ""}
@@ -7133,15 +7159,6 @@
     } finally {
       item4ReorderBusy = false;
     }
-  }
-
-  async function reorderItem4Asset(assetId, direction) {
-    const assets = (Array.isArray(item4Workspace?.assets) ? item4Workspace.assets : [])
-      .slice()
-      .sort((a, b) => Number(a.order || 0) - Number(b.order || 0));
-    const index = assets.findIndex((asset) => String(asset.id || "") === String(assetId || ""));
-    if (index < 0) return;
-    return moveItem4AssetTo(assetId, direction === "up" ? index - 1 : index + 1);
   }
 
   let item4DraggedAssetId = "";
@@ -7265,7 +7282,7 @@
     } else {
       item4AssetStripSignature = signature;
       host.innerHTML = sortedAssets.length
-        ? `${sortedAssets.length > 1 ? `<p class="item4-reorder-hint">Drag photos into the order you want. ↑ ↓ remain available for fine adjustment.</p>` : ""}${sortedAssets.map((asset, index) => item4AssetThumb(asset, { index, total: sortedAssets.length })).join("")}`
+        ? `${sortedAssets.length > 1 ? `<p class="item4-reorder-hint">Drag photos into the order you want.</p>` : ""}${sortedAssets.map((asset, index) => item4AssetThumb(asset, { index, total: sortedAssets.length })).join("")}`
         : '<div class="empty compact-empty"></div>';
     }
     host.querySelectorAll("[data-item4-preview-image]").forEach((img) => {
@@ -7278,13 +7295,6 @@
       });
     });
     host.querySelectorAll("[data-remove-item4-asset]").forEach(button => button.addEventListener("click", () => removeItem4Asset(button.dataset.removeItem4Asset)));
-    host.querySelectorAll("[data-item4-reorder]").forEach((button) => {
-      button.addEventListener("click", (event) => {
-        event.preventDefault();
-        event.stopPropagation();
-        reorderItem4Asset(button.dataset.item4Reorder, button.dataset.dir);
-      });
-    });
     bindItem4AssetDragReorder(host, sortedAssets);
     item4BindClipPlayers(host);
     bindEzCaptionInputs(host);
@@ -10284,6 +10294,7 @@
     ezSlideCaptionHealDone = false;
     setSelectValue("prScriptMode", record.script_mode, "AI decides");
     $("prRequestedScript").value = record.requested_script || "";
+    syncProductionNarrationEstimate();
     $("prProductionNotes").value = record.production_notes || "";
     hydratePrimaryLocationFromSources({ record, idea: activeIdea, force: true });
     const musicId = Array.isArray(record.selected_music_asset_links) ? record.selected_music_asset_links[0] : "";
@@ -11297,6 +11308,11 @@
   });
 
   $("savePrOverride")?.addEventListener("click", saveProductionRequestOutputOverride);
+
+  $("prRequestedScript")?.addEventListener("input", syncProductionNarrationEstimate);
+  $("prRequestedScript")?.addEventListener("change", syncProductionNarrationEstimate);
+  $("prVoiceoverDuration")?.addEventListener("input", syncProductionNarrationEstimate);
+  $("prVoiceoverDuration")?.addEventListener("change", syncProductionNarrationEstimate);
 
   $("productionRequestForm")?.addEventListener("submit", async (event) => {
     event.preventDefault();
