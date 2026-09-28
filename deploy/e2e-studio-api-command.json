@@ -1,34 +1,214 @@
 {
-  "correlation_id": "BRIDGES-500-DIAG-RETRY-20260927",
+  "correlation_id": "BRIDGES-WRITE-DIAG-20260927",
   "requests": [
     {
-      "name": "get-request",
-      "method": "GET",
+      "name": "patch-request",
+      "method": "PATCH",
       "path": "/api/production-requests/receXUsiQZLMlJzAX",
+      "body": {
+        "content_type": "Vertical Short Video",
+        "platforms": [
+          "Instagram",
+          "Facebook",
+          "TikTok",
+          "YouTube"
+        ],
+        "voiceover_mode": "Yes",
+        "background_music_mode": "Yes",
+        "thumbnail_mode": "Yes",
+        "video_duration_seconds": "30",
+        "video_clip_count_mode": "Exact",
+        "video_clip_count_exact": "15",
+        "video_clip_count_min": "",
+        "video_clip_count_max": "",
+        "carousel_slide_count_mode": "Exact",
+        "carousel_slide_count_exact": "25",
+        "carousel_slide_count_min": "",
+        "carousel_slide_count_max": "",
+        "carousel_image_mode": "Manual Upload",
+        "voiceover_tail_seconds": "2",
+        "voiceover_duration_seconds": "15",
+        "music_start_seconds": "0",
+        "selected_music_asset_id": "",
+        "voice_id": "xVQH621DS3eyBYrseRt5",
+        "voice_name": "Kate - English Female Voice With Soft Accent",
+        "title_mode": "AI decides",
+        "requested_title": "",
+        "caption_mode": "AI decides",
+        "requested_caption": "",
+        "script_mode": "AI decides",
+        "requested_script": "",
+        "primary_location": "DuSable Bridge",
+        "production_notes": "ez-photo-wait=off",
+        "slide_captions": [
+          {
+            "id": "c50e5b1cccad4823b5",
+            "mode": "ai",
+            "text": ""
+          },
+          {
+            "id": "97d66fd8f71a4f8bad",
+            "mode": "ai",
+            "text": ""
+          },
+          {
+            "id": "c5c3c583ab2b48018d",
+            "mode": "ai",
+            "text": ""
+          },
+          {
+            "id": "88ccd4b8ef1e4ac98b",
+            "mode": "ai",
+            "text": ""
+          },
+          {
+            "id": "b1b3f8776fed4d6986",
+            "mode": "ai",
+            "text": ""
+          },
+          {
+            "id": "85c2330970614fa0b9",
+            "mode": "ai",
+            "text": ""
+          },
+          {
+            "id": "732a0ee71f17498480",
+            "mode": "ai",
+            "text": ""
+          },
+          {
+            "id": "e0bc5cbae4a74980a8",
+            "mode": "ai",
+            "text": ""
+          },
+          {
+            "id": "8d4ea38b8d45422db1",
+            "mode": "ai",
+            "text": ""
+          },
+          {
+            "id": "f8ac7025672a486da7",
+            "mode": "ai",
+            "text": ""
+          },
+          {
+            "id": "2e8458df8ef24cf381",
+            "mode": "ai",
+            "text": ""
+          },
+          {
+            "id": "21d4355d8c7b4e629e",
+            "mode": "ai",
+            "text": ""
+          },
+          {
+            "id": "73420582bbce49abb1",
+            "mode": "ai",
+            "text": ""
+          },
+          {
+            "id": "6e1bcca039034befb0",
+            "mode": "ai",
+            "text": ""
+          },
+          {
+            "id": "214e333320a54dbab8",
+            "mode": "ai",
+            "text": ""
+          },
+          {
+            "id": "1bfd234ae79c4b1da8",
+            "mode": "ai",
+            "text": ""
+          },
+          {
+            "id": "1bf1dfd8fd2f4ee28d",
+            "mode": "ai",
+            "text": ""
+          },
+          {
+            "id": "a8d23dd5173e44559b",
+            "mode": "ai",
+            "text": ""
+          },
+          {
+            "id": "c3672cd239774208ae",
+            "mode": "ai",
+            "text": ""
+          },
+          {
+            "id": "8e99c6ec3c094fe8bb",
+            "mode": "ai",
+            "text": ""
+          },
+          {
+            "id": "659352674abd43f888",
+            "mode": "ai",
+            "text": ""
+          },
+          {
+            "id": "207d2b0d5dbe401baf",
+            "mode": "ai",
+            "text": ""
+          },
+          {
+            "id": "49455a675dae405b82",
+            "mode": "ai",
+            "text": ""
+          },
+          {
+            "id": "7b18e8d248fd4cc5b2",
+            "mode": "ai",
+            "text": ""
+          },
+          {
+            "id": "935526b991384db693",
+            "mode": "ai",
+            "text": ""
+          }
+        ],
+        "light": true
+      },
       "continue_on_error": true
     },
     {
-      "name": "get-outputs",
-      "method": "GET",
+      "name": "put-outputs",
+      "method": "PUT",
       "path": "/api/production-requests/receXUsiQZLMlJzAX/outputs",
-      "continue_on_error": true
-    },
-    {
-      "name": "get-item4",
-      "method": "GET",
-      "path": "/api/production-requests/receXUsiQZLMlJzAX/item4",
-      "continue_on_error": true
-    },
-    {
-      "name": "get-variants",
-      "method": "GET",
-      "path": "/api/production-requests/receXUsiQZLMlJzAX/variants",
-      "continue_on_error": true
-    },
-    {
-      "name": "get-bridge-preflight",
-      "method": "GET",
-      "path": "/api/production-requests/receXUsiQZLMlJzAX/bridge-preflight",
+      "body": {
+        "outputs": [
+          {
+            "platform": "Instagram",
+            "output_type": "Reel",
+            "enabled": true
+          },
+          {
+            "platform": "Instagram",
+            "output_type": "Story",
+            "enabled": true
+          },
+          {
+            "platform": "Facebook",
+            "output_type": "Reel",
+            "enabled": true
+          },
+          {
+            "platform": "Facebook",
+            "output_type": "Story",
+            "enabled": true
+          },
+          {
+            "platform": "TikTok",
+            "output_type": "Video Draft",
+            "enabled": true
+          },
+          {
+            "platform": "YouTube",
+            "output_type": "Short",
+            "enabled": true
+          }
+        ]
+      },
       "continue_on_error": true
     }
   ]
