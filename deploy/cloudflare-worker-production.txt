@@ -232,3 +232,8 @@ Deploy Studio API Worker production
 Reason: Remove legacy 20-slide Production validation ceiling so slideshow requests can save all attached stills
 Worker: 0.10.420-unlimited-slide-count
 Requested: 2026-09-28
+
+Redeploy Worker after unlimited-slide repair commit
+Reason: GitHub Actions bot commit does not recursively trigger push workflows; explicitly deploy 0.10.420-unlimited-slide-count
+Source repair: 211a7481929f494252f4caadb2313a6820c24d5c
+Requested: 2026-09-28T15:53:00-05:00
