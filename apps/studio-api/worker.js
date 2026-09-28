@@ -10647,6 +10647,18 @@ async function studioHealFailedStatuses(env, options = {}) {
   for (const row of failedPublish || []) {
     const err = String(f(row, "Publish_Error_Message") || "");
     const status = String(f(row, "Publish_Status") || "").trim();
+    const tiktokTerminalAuthFailure = String(f(row, "Platform") || "") === "TikTok"
+      && (
+        /unauthorized|authentication failure|(^|[^0-9])401([^0-9]|$)|(^|[^0-9])403([^0-9]|$)/i.test(err)
+        || String(f(row, "TikTok_Draft_Status") || "") === "Manual Fallback"
+      );
+    // TTD1 deliberately parks repeated 401/403 failures after five attempts.
+    // Quality recovery must never undo that terminal fence or it creates an
+    // unbounded auth retry storm (output 927 reached hundreds of attempts).
+    if (tiktokTerminalAuthFailure) {
+      pulses.push({ key: "TIKTOK_AUTH_PARKED", id: row.id, skipped: "terminal_auth_failure" });
+      continue;
+    }
     const needsHeal = deskFailedNeedsHeal({
       publish_error: err,
       last_publish_attempt_at: f(row, "Last_Publish_Attempt_At"),
@@ -10688,11 +10700,6 @@ async function studioHealFailedStatuses(env, options = {}) {
       continue;
     }
     try {
-      const tiktokParked = String(f(row, "Platform") || "") === "TikTok"
-        && (
-          /unauthorized|authentication failure|(^|[^0-9])401([^0-9]|$)/i.test(err)
-          || String(f(row, "TikTok_Draft_Status") || "") === "Manual Fallback"
-        );
       await airtableFetch(env, outputTable, row.id, {
         method: "PATCH",
         body: JSON.stringify({
@@ -10708,11 +10715,6 @@ async function studioHealFailedStatuses(env, options = {}) {
             Platform_Media_ID: /in_progress|still being processed/i.test(err)
               ? (f(row, "Platform_Media_ID") || "")
               : "",
-            ...(tiktokParked ? {
-              TikTok_Draft_Status: "Ready for Delivery",
-              Manual_Fallback_Required: false,
-              Publish_Error_Stage: "",
-            } : {}),
           },
           typecast: true,
         }),
