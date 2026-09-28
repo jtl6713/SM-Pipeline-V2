@@ -247,7 +247,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.414-pipeline-open-packages";
+  const BUILD_ID = "item4-0.6.415-quality-recap";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -980,11 +980,14 @@
   document.addEventListener("visibilitychange", () => {
     if (document.hidden) {
       stopIntakeFormRefresh();
+      stopOperationsQualityPoll();
       return;
     }
     if (activeNavPage() === "operations") {
       startIntakeFormRefresh();
+      startOperationsQualityPoll();
       refreshLibraryIntakeForm().catch(() => {});
+      refreshOperationsQualityAgent({ silent: true }).catch(() => {});
     }
   });
   function intakeIsFinished(status) {
@@ -17947,18 +17950,132 @@
     return "Service lane";
   }
 
+  let operationsQualityDeskSnapshot = null;
+  let operationsQualityActivitySnapshot = null;
+  let operationsQualityPollTimer = null;
+  let operationsQualityRefreshInFlight = false;
+  let operationsQualityUseRollingHour = true;
+  let operationsCanEditProfiles = false;
+  const OPERATIONS_QUALITY_POLL_MS = 60000;
+
+  function operationsQualityProfileLabel() {
+    const option = $("studioProfileSelect")?.selectedOptions?.[0];
+    const optionText = String(option?.textContent || "").trim();
+    if (optionText) return optionText;
+    const profile = studioProfiles.find((item) => item.id === selectedProfileId);
+    return String(profile?.profile_name || profile?.name || profile?.city_label || profile?.theme || "All profiles").trim();
+  }
+
+  function qualityRecapLocalInputValue(value) {
+    const date = value instanceof Date ? value : new Date(value);
+    if (!Number.isFinite(date.getTime())) return "";
+    const local = new Date(date.getTime() - date.getTimezoneOffset() * 60000);
+    return local.toISOString().slice(0, 16);
+  }
+
+  function syncOperationsQualityRollingRange() {
+    if (!operationsQualityUseRollingHour) return;
+    const now = new Date();
+    const from = new Date(now.getTime() - 60 * 60 * 1000);
+    const fromNode = $("operationsAgentRecapFrom");
+    const toNode = $("operationsAgentRecapTo");
+    if (fromNode) fromNode.value = qualityRecapLocalInputValue(from);
+    if (toNode) toNode.value = qualityRecapLocalInputValue(now);
+  }
+
+  function operationsQualityRange() {
+    syncOperationsQualityRollingRange();
+    const fromRaw = String($("operationsAgentRecapFrom")?.value || "").trim();
+    const toRaw = String($("operationsAgentRecapTo")?.value || "").trim();
+    const now = Date.now();
+    const from = fromRaw ? new Date(fromRaw).getTime() : now - 60 * 60 * 1000;
+    const to = toRaw ? new Date(toRaw).getTime() : now;
+    return {
+      from: Number.isFinite(from) ? from : now - 60 * 60 * 1000,
+      to: Number.isFinite(to) ? to : now,
+    };
+  }
+
+  function operationsQualityCardMatchesRange(card, range) {
+    const found = Date.parse(String(card?.found_at || card?.when || ""));
+    const resolved = card?.open ? Date.now() : Date.parse(String(card?.resolved_at || card?.when || ""));
+    const start = Number.isFinite(found) ? found : -Infinity;
+    const finish = Number.isFinite(resolved) ? resolved : (card?.open ? Date.now() : start);
+    return start <= range.to && finish >= range.from;
+  }
+
+  function operationsQualityFilteredCards(cards) {
+    const platform = String($("operationsAgentRecapPlatform")?.value || "").trim().toLowerCase();
+    const range = operationsQualityRange();
+    return (Array.isArray(cards) ? cards : []).filter((card) => {
+      const cardPlatform = String(card?.platform || "").trim().toLowerCase();
+      if (platform && cardPlatform !== platform) return false;
+      return operationsQualityCardMatchesRange(card, range);
+    });
+  }
+
+  function updateOperationsQualityProfileHeader() {
+    const node = $("operationsAgentProfileName");
+    if (node) node.textContent = operationsQualityProfileLabel();
+  }
+
+  function bindOperationsQualityRecapFilters() {
+    const from = $("operationsAgentRecapFrom");
+    const to = $("operationsAgentRecapTo");
+    const platform = $("operationsAgentRecapPlatform");
+    const pastHour = $("operationsAgentRecapPastHour");
+    if (from && !from.dataset.qualityBound) {
+      from.dataset.qualityBound = "1";
+      from.addEventListener("change", () => {
+        operationsQualityUseRollingHour = false;
+        renderOperationsQualityRecap(operationsQualityDeskSnapshot);
+      });
+    }
+    if (to && !to.dataset.qualityBound) {
+      to.dataset.qualityBound = "1";
+      to.addEventListener("change", () => {
+        operationsQualityUseRollingHour = false;
+        renderOperationsQualityRecap(operationsQualityDeskSnapshot);
+      });
+    }
+    if (platform && !platform.dataset.qualityBound) {
+      platform.dataset.qualityBound = "1";
+      platform.addEventListener("change", () => renderOperationsQualityRecap(operationsQualityDeskSnapshot));
+    }
+    if (pastHour && !pastHour.dataset.qualityBound) {
+      pastHour.dataset.qualityBound = "1";
+      pastHour.addEventListener("click", () => {
+        operationsQualityUseRollingHour = true;
+        syncOperationsQualityRollingRange();
+        renderOperationsQualityRecap(operationsQualityDeskSnapshot);
+      });
+    }
+  }
+
   function renderOperationsQualityRecap(desk) {
+    operationsQualityDeskSnapshot = desk || operationsQualityDeskSnapshot;
+    bindOperationsQualityRecapFilters();
+    updateOperationsQualityProfileHeader();
+    syncOperationsQualityRollingRange();
     const lists = [$("operationsDeskRecap"), $("operationsAgentRecap")].filter(Boolean);
     const leads = [$("operationsDeskRecapLead"), $("operationsAgentRecapLead")].filter(Boolean);
     const recap = desk?.recap && typeof desk.recap === "object" ? desk.recap : null;
-    const cards = Array.isArray(recap?.cards) ? recap.cards : [];
-    const openCount = Number(recap?.open_count) || 0;
+    const allCards = Array.isArray(recap?.cards) ? recap.cards : [];
+    const cards = operationsQualityFilteredCards(allCards);
+    const openCount = cards.filter((row) => row?.open).length;
+    const range = operationsQualityRange();
+    const platform = String($("operationsAgentRecapPlatform")?.value || "").trim();
+    const rangeLabel = operationsQualityUseRollingHour
+      ? "past hour"
+      : `${formatQualityCheckTime(new Date(range.from).toISOString())} through ${formatQualityCheckTime(new Date(range.to).toISOString())}`;
+    const filterLabel = platform ? ` on ${platform}` : "";
     const lead = !desk
       ? "Recap is unavailable."
-      : (recap?.empty_copy || (openCount
-        ? `${openCount} pipeline block${openCount === 1 ? "" : "s"} right now.`
-        : "Nothing is blocked right now."));
+      : (cards.length
+        ? `${cards.length} relevant item${cards.length === 1 ? "" : "s"} for the ${rangeLabel}${filterLabel}; ${openCount} still open.`
+        : `No Quality Agent items match the ${rangeLabel}${filterLabel}.`);
     for (const node of leads) node.textContent = lead;
+
     const html = cards.length
       ? cards.map((card) => {
         const foundAt = formatQualityCheckTime(card.found_at) || "Unknown";
@@ -17967,28 +18084,72 @@
           : (formatQualityCheckTime(card.resolved_at) || formatQualityCheckTime(card.when) || "Unknown");
         const resolvedHow = card.resolved_how || card.action || "";
         const tone = card.tone === "alert" || card.tone === "ok" || card.tone === "work" ? card.tone : "";
-        const outputName = card.output_label || [card.platform, card.platform_output_type].filter(Boolean).join(" ") || card.output_title || "";
-        const identity = [
-          card.content_title ? `<p class="ops-recap-id"><strong>Content item.</strong> ${escapeHtml(card.content_title)}</p>` : "",
-          card.content_id != null && String(card.content_id).trim() !== ""
-            ? `<p class="ops-recap-id"><strong>Content ID.</strong> ${escapeHtml(String(card.content_id))}</p>`
-            : "",
-          outputName ? `<p class="ops-recap-id"><strong>Platform output.</strong> ${escapeHtml(outputName)}</p>` : "",
-          card.output_id != null && String(card.output_id).trim() !== ""
-            ? `<p class="ops-recap-id"><strong>Platform Output ID.</strong> ${escapeHtml(String(card.output_id))}</p>`
-            : "",
-        ].join("");
+        const outputName = card.output_title || card.output_label || [card.platform, card.platform_output_type].filter(Boolean).join(" ") || "";
+        const profileName = card.profile_name || operationsQualityProfileLabel();
+        const contentId = card.content_id != null && String(card.content_id).trim() !== "" ? String(card.content_id) : "—";
+        const contentName = String(card.content_title || "—").trim();
+        const outputId = card.output_id != null && String(card.output_id).trim() !== "" ? String(card.output_id) : "—";
+        const identity = `Content Item ID ${contentId} · Content Item Name ${contentName} · Platform Output ID ${outputId} · Platform Output Name ${outputName || "—"}`;
         return `<li${tone ? ` data-tone="${escapeHtml(tone)}"` : ""}>
-          <span class="ops-recap-status">${escapeHtml(card.status || "")}</span>
-          <p class="ops-recap-found"><strong>Found.</strong> ${escapeHtml(card.found || "")}</p>
-          ${identity}
-          <p class="ops-recap-when"><strong>Date issue found.</strong> ${escapeHtml(foundAt)}</p>
-          <p class="ops-recap-when"><strong>Date issue resolved.</strong> ${escapeHtml(resolvedAt)}</p>
-          <p class="ops-recap-did"><strong>How it was resolved.</strong> ${escapeHtml(resolvedHow)}</p>
+          <details class="ops-recap-card">
+            <summary>
+              <span class="ops-recap-status">${escapeHtml(card.status || "")}</span>
+              <p class="ops-recap-summary-title"><strong>Found.</strong> ${escapeHtml(card.found || "")}</p>
+            </summary>
+            <div class="ops-recap-card-body">
+              <p class="ops-recap-profile-line">Profile: ${escapeHtml(profileName)}</p>
+              <p class="ops-recap-identity-line">${escapeHtml(identity)}</p>
+              <p class="ops-recap-when"><strong>Date issue found.</strong> ${escapeHtml(foundAt)}</p>
+              <p class="ops-recap-when"><strong>Date issue resolved.</strong> ${escapeHtml(resolvedAt)}</p>
+              <p class="ops-recap-did"><strong>How it was resolved.</strong> ${escapeHtml(resolvedHow)}</p>
+            </div>
+          </details>
         </li>`;
       }).join("")
       : "";
     for (const list of lists) list.innerHTML = html;
+  }
+
+  async function refreshOperationsQualityAgent({ silent = true } = {}) {
+    if (operationsQualityRefreshInFlight || document.hidden || activeNavPage() !== "operations") return;
+    operationsQualityRefreshInFlight = true;
+    try {
+      const [desk, activity] = await Promise.all([
+        api("/api/ops/desk/inventory").catch(() => null),
+        api("/api/ops/desk/activity").catch(() => null),
+      ]);
+      if (desk) {
+        operationsQualityDeskSnapshot = desk;
+        renderOperationsDesk(desk, operationsCanEditProfiles);
+      }
+      if (activity) {
+        operationsQualityActivitySnapshot = activity;
+        renderOperationsAgentActivity(activity);
+      }
+      const meta = $("operationsAgentRefreshMeta");
+      if (meta) {
+        const stamp = new Date().toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
+        meta.textContent = `Auto-refreshes every minute · refreshed ${stamp}`;
+      }
+    } catch (error) {
+      if (!silent) setOperationsMessage(error.message || "Could not refresh Quality Agent.", "error-text");
+    } finally {
+      operationsQualityRefreshInFlight = false;
+    }
+  }
+
+  function startOperationsQualityPoll() {
+    if (operationsQualityPollTimer) return;
+    syncOperationsQualityRollingRange();
+    operationsQualityPollTimer = setInterval(() => {
+      refreshOperationsQualityAgent({ silent: true }).catch(() => {});
+    }, OPERATIONS_QUALITY_POLL_MS);
+  }
+
+  function stopOperationsQualityPoll() {
+    if (!operationsQualityPollTimer) return;
+    clearInterval(operationsQualityPollTimer);
+    operationsQualityPollTimer = null;
   }
 
   function renderOperationsQualityChecks(desk) {
@@ -18746,9 +18907,13 @@
         (Array.isArray(musicResult?.records) ? musicResult.records : []).filter((record) => !record.do_not_use)
       );
       operationsTimezone = data.timezone || null;
-      renderOperationsDesk(desk, Boolean(data.can_edit_profiles));
-      renderLibraryCrossScopeToggle(Boolean(data.library_include_cross_scope), Boolean(data.can_edit_profiles));
+      operationsCanEditProfiles = Boolean(data.can_edit_profiles);
+      operationsQualityDeskSnapshot = desk;
+      operationsQualityActivitySnapshot = activity;
+      renderOperationsDesk(desk, operationsCanEditProfiles);
+      renderLibraryCrossScopeToggle(Boolean(data.library_include_cross_scope), operationsCanEditProfiles);
       renderOperationsAgentActivity(activity);
+      startOperationsQualityPoll();
       if (meta) {
         const tz = data.timezone || studioTimezone();
         const today = data.chicago_date ? formatStudioDate(data.chicago_date, { timeZone: tz, weekday: true }) : "—";
@@ -18946,8 +19111,10 @@
       stopIntakePoll();
       stopCompressionPoll();
       stopIntakeFormRefresh();
+      stopOperationsQualityPoll();
     } else {
       startIntakeFormRefresh();
+      startOperationsQualityPoll();
     }
     if (page === "home" || page === "dashboard") return loadDashboard();
     if (page === "ideas") return loadIdeas();

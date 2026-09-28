@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 const here = path.dirname(fileURLToPath(import.meta.url));
 const html = fs.readFileSync(path.join(here, "index.html"), "utf8");
 const config = fs.readFileSync(path.join(here, "assets", "config-0621.js"), "utf8");
+const app = fs.readFileSync(path.join(here, "assets", "app-item4-0625.js"), "utf8");
 
 test("Operations copy uses Quality Agent as the operator-facing umbrella", () => {
   assert.match(html, />Quality Agent</);
@@ -17,6 +18,13 @@ test("Operations copy uses Quality Agent as the operator-facing umbrella", () =>
   assert.match(html, /id="operationsTabActivity"[^>]*>Activity log</);
   assert.match(html, /id="operationsDeskChecks"/);
   assert.match(html, /id="operationsAgentDeskChecks"/);
+  assert.match(html, /id="operationsAgentRecapFrom"/);
+  assert.match(html, /id="operationsAgentRecapTo"/);
+  assert.match(html, /id="operationsAgentRecapPlatform"/);
+  assert.match(html, /id="operationsAgentProfileName"/);
+  assert.match(app, /OPERATIONS_QUALITY_POLL_MS = 60000/);
+  assert.match(app, /Content Item ID .*Content Item Name .*Platform Output ID .*Platform Output Name/);
+  assert.match(app, /<details class="ops-recap-card">/);
   assert.match(html, /Quality Agent — service lane/);
   assert.match(html, /HOURLY-Local-Services\.bat/);
   assert.match(html, /id="operationsTabDesk"[^>]*>Service desk</);
