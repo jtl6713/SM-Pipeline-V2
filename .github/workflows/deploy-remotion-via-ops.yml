@@ -95,3 +95,5 @@ jobs:
           done
           cat /tmp/remotion-health.json || true
           exit 6
+
+# Trigger: deploy job-assets-serialize for CI 239-242 (2026-09-28T01:13Z)
