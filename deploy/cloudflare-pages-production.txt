@@ -114,3 +114,9 @@ Deploy Studio Pages production
 Reason: Open Production timeout recovery; reuse the current draft instead of creating duplicates after a browser timeout
 UI: 0.6.408-open-production-timeout-recovery
 Requested: 2026-09-27T22:20:00-05:00
+
+
+Deploy Studio Pages production
+Reason: Production Continue now reveals the hidden workspace before loading outputs/assets; adds visible error handling
+UI: 0.6.409-production-continue-open
+Requested: 2026-09-27T22:32:00-05:00
