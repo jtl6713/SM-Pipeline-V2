@@ -445,7 +445,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.415-pipeline-open-outputs",
+          version: "0.10.416-pipeline-list-lean",
           studio_desk_inventory_v1: true,
           studio_desk_activity_v1: true,
           studio_tiktok_complete_v1: true,
@@ -20492,12 +20492,14 @@ const OUTPUT_LIST_FIELDS = [
   "Content_Profile",
   "Carousel Slides",
   "Composition_ID",
-  "Selected_Assets_JSON",
-  "Creative_Render_Manifest_JSON",
+  // Keep Pipeline list lean: Selected_Assets_JSON / Creative_Render_Manifest_JSON
+  // are multi‑KB per row and stall mobile /api/outputs (Connecting… / Loading outputs…).
+  // Creative detail routes still fetch the full record when opened.
   "Publish_Retry_Eligible",
   "Asset_Selection_Retry_Eligible",
   "Asset_Selection_Status",
   "Manual_Completion_Status",
+  "Manual_Fallback_Required",
   "Music_Status",
   "Publish_Error_Stage",
   "Publish_Error_Message",
@@ -20617,56 +20619,60 @@ async function listOutputs(request, env, url, authorization, ctx = null) {
     }),
   ]);
   const records = mergePipelineOutputRecords(newest, open);
-  const healed = [];
-  let manualLiveHealBudget = 5;
-  let staleManualHealBudget = 8;
-  for (const record of records) {
-    let current = await phase6RestoreProductionReviewReady(env, record);
-    if (staleManualHealBudget > 0 && staleManualFlagsOnPublishedFields(current?.fields || current)) {
-      staleManualHealBudget -= 1;
-      current = await healStaleManualFlagsOnPublishedRecord(env, current);
-    }
-    if (manualLiveHealBudget > 0 && youtubeManualLiveVideoHealCandidate(current?.fields || current)) {
-      manualLiveHealBudget -= 1;
-      current = await healYoutubeManualWithLiveVideoRecord(env, current, { autoHealed: true });
-    }
-    healed.push(current);
-  }
-  const jobs = await loadStudioProductionJobsForOutputs(env, healed);
+  // Return the Pipeline table immediately. Per-row heals / produce enqueue run in
+  // waitUntil so a heal storm cannot leave Studio stuck on Loading outputs…
+  const jobs = await loadStudioProductionJobsForOutputs(env, records);
   if (ctx && typeof ctx.waitUntil === "function") {
-    const stalled = healed.filter((record) =>
-      /^in production$/i.test(String(f(record, "Output_Status") || ""))
-      && !String(f(record, "Remotion_Job_ID") || "").trim()
-    );
-    if (stalled.length) {
-      ctx.waitUntil((async () => {
-        const requestIds = [];
-        for (const record of stalled) {
-          let requestId = studioOutputProductionRequestId(record);
-          if (!requestId) {
-            const contentId = studioFirstLinkedId(f(record, "Content_Item"));
-            if (!contentId) continue;
-            try {
-              const parent = await airtableFetch(env, env.AIRTABLE_CONTENT_TABLE_ID, contentId);
-              requestId = studioFirstLinkedId(f(parent, "Production_Request"))
-                || studioFirstLinkedId(f(parent, "Production Requests"));
-            } catch {
-              continue;
-            }
+    ctx.waitUntil((async () => {
+      let manualLiveHealBudget = 5;
+      let staleManualHealBudget = 8;
+      for (const record of records.slice(0, 40)) {
+        let current = record;
+        try {
+          current = await phase6RestoreProductionReviewReady(env, current);
+          if (staleManualHealBudget > 0 && staleManualFlagsOnPublishedFields(current?.fields || current)) {
+            staleManualHealBudget -= 1;
+            current = await healStaleManualFlagsOnPublishedRecord(env, current);
           }
-          if (requestId && !requestIds.includes(requestId)) requestIds.push(requestId);
+          if (manualLiveHealBudget > 0 && youtubeManualLiveVideoHealCandidate(current?.fields || current)) {
+            manualLiveHealBudget -= 1;
+            current = await healYoutubeManualWithLiveVideoRecord(env, current, { autoHealed: true });
+          }
+        } catch (error) {
+          console.warn("pipeline list heal skipped", record?.id, error);
         }
-        for (const requestId of requestIds.slice(0, 4)) {
-          try { await enqueueStudioProductionJob(env, requestId); } catch (error) {
-            console.warn("Pipeline produce enqueue failed", requestId, error);
+      }
+      const stalled = records.filter((record) =>
+        /^in production$/i.test(String(f(record, "Output_Status") || ""))
+        && !String(f(record, "Remotion_Job_ID") || "").trim()
+      );
+      if (!stalled.length) return;
+      const requestIds = [];
+      for (const record of stalled) {
+        let requestId = studioOutputProductionRequestId(record);
+        if (!requestId) {
+          const contentId = studioFirstLinkedId(f(record, "Content_Item"));
+          if (!contentId) continue;
+          try {
+            const parent = await airtableFetch(env, env.AIRTABLE_CONTENT_TABLE_ID, contentId);
+            requestId = studioFirstLinkedId(f(parent, "Production_Request"))
+              || studioFirstLinkedId(f(parent, "Production Requests"));
+          } catch {
+            continue;
           }
         }
-      })());
-    }
+        if (requestId && !requestIds.includes(requestId)) requestIds.push(requestId);
+      }
+      for (const requestId of requestIds.slice(0, 4)) {
+        try { await enqueueStudioProductionJob(env, requestId); } catch (error) {
+          console.warn("Pipeline produce enqueue failed", requestId, error);
+        }
+      }
+    })());
   }
   return respond(request, env, {
     ok: true,
-    records: healed.map((record) => mapOutput(record, jobs.get(record))),
+    records: records.map((record) => mapOutput(record, jobs.get(record))),
     profile: mapStudioContentProfile(profile),
   });
 }

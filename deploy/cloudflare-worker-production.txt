@@ -201,3 +201,9 @@ Keep unfinished Pipeline packages visible past newest-100 window
 Reason: Content 206 (Muscle Beach / 887-892) disappeared once Output_ID reached 1133. Merge open unfinished outputs into /api/outputs.
 Worker: 0.10.415-pipeline-open-outputs
 Requested: 2026-09-28T13:50:00Z
+
+Unstick Pipeline Loading outputs / Connecting
+Reason: Lean OUTPUT_LIST_FIELDS (no Selected_Assets_JSON / Creative_Render_Manifest_JSON) and move list heals to waitUntil so /api/outputs returns before mobile timeouts.
+Worker: 0.10.416-pipeline-list-lean
+Requested: 2026-09-28T14:10:00Z
+

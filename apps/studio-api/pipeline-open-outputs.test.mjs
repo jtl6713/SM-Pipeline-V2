@@ -13,7 +13,7 @@ test("Pipeline keeps unfinished packages via open-output merge", async () => {
   assert.match(worker, /function mergePipelineOutputRecords/);
   assert.match(worker, /CI 206/);
   assert.match(worker, /clampLimit\(url, 200, 250\)/);
-  assert.match(worker, /version: "0\.10\.415-pipeline-open-outputs"/);
+  assert.match(worker, /version: "0\.10\.416-pipeline-list-lean"/);
   assert.match(app, /\/api\/outputs\?limit=250/);
-  assert.match(app, /BUILD_ID = "item4-0\.6\.412-pipeline-open-outputs"/);
+  assert.match(app, /BUILD_ID = "item4-0\.6\.413-pipeline-list-lean"/);
 });

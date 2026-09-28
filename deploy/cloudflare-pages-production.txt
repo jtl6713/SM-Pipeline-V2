@@ -144,3 +144,9 @@ Keep unfinished Pipeline packages visible past newest-100 window
 Reason: UI requests /api/outputs?limit=250; footer 0.6.412-pipeline-open-outputs.
 UI: 0.6.412-pipeline-open-outputs
 Requested: 2026-09-28T13:50:00Z
+
+Unstick Pipeline Loading outputs / Connecting
+Reason: Drop Selected_Assets_JSON + Creative_Render_Manifest_JSON from /api/outputs list; shorter bootstrap retries; footer 0.6.413-pipeline-list-lean.
+UI: 0.6.413-pipeline-list-lean
+Requested: 2026-09-28T14:10:00Z
+
