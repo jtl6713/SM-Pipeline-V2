@@ -247,7 +247,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.425-narration-estimate-drag-only";
+  const BUILD_ID = "item4-0.6.426-output-selection-authority";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -9462,6 +9462,7 @@
 
   async function buildItem4Plan() {
     if (!activeProductionRequest?.id) return;
+    const manualOutputSelection = productionOutputMatrixLoaded ? productionOutputSelectionKeys() : [];
     syncItem4PlatformsFromEz();
     const selected = ezSelectedPlatforms().length ? ezSelectedPlatforms() : item4SelectedPlatforms();
     const wizardCount = ezPlanApi()?.ezWizardPhotoCount?.(ezWizardPending || ezWizardAnswers) || 0;
@@ -9499,6 +9500,10 @@
       renderProductionRequestOutputCards();
       await loadItem4Workspace(activeProductionRequest);
       await loadProductionRequestOutputs(activeProductionRequest);
+      if (manualOutputSelection.length) {
+        restoreProductionOutputSelection(manualOutputSelection);
+        await saveProductionRequestOutputs(activeProductionRequest);
+      }
       setRequestMessage(result.message || "Platform plan ready.", "success");
     } catch (error) {
       setRequestMessage(
@@ -9627,6 +9632,31 @@
         ...(scheduled_at ? { scheduled_at } : {}),
       };
     });
+  }
+
+  function productionOutputSelectionKeys() {
+    return selectedOutputMatrix().map((row) => `${row.platform}::${row.output_type}`);
+  }
+
+  function restoreProductionOutputSelection(keys) {
+    const wanted = new Set(Array.isArray(keys) ? keys : []);
+    if (!wanted.size) return false;
+    outputMatrixInputs().forEach((input) => {
+      input.checked = wanted.has(`${input.dataset.platform}::${input.value}`);
+    });
+    syncLegacyPlatformsFromOutputMatrix();
+    updateOutputMatrixSummary();
+    return true;
+  }
+
+  function productionOutputSelectionIsVideoPhotoSet() {
+    const selected = selectedOutputMatrix();
+    if (!selected.length) return false;
+    const nativeStillTypes = new Set(["Single Image", "Carousel", "Multi-Image Post", "Multi-Photo", "Single Photo"]);
+    const renderedVideoTypes = new Set(["Reel", "Story", "Video Draft", "Short", "Slideshow Reel", "Slideshow Video"]);
+    const hasNativeStill = selected.some((row) => nativeStillTypes.has(row.output_type));
+    const hasRenderedVideo = selected.some((row) => renderedVideoTypes.has(row.output_type));
+    return hasRenderedVideo && !hasNativeStill;
   }
 
   function item4PlanOverridesForPlatforms(platforms) {
@@ -11112,9 +11142,17 @@
     const inferred = inferredMasterContentType();
     const current = String(select?.value || "").trim();
     const fromRecord = String(activeProductionRequest?.content_type || "").trim();
+    const count = Number(item4Workspace?.assets?.length || ezStagedFiles.length || 0);
+    // In Production, the operator's explicit output matrix is authoritative.
+    // A still-source piece rendered as Reels/Stories/Shorts/slideshow video is a
+    // Photo Set, not a native Carousel, even if an older draft was labeled Carousel.
+    if (!ezIsFinishedVideo() && !ezIsClipRequest() && productionOutputSelectionIsVideoPhotoSet()) {
+      const next = "Photo Set";
+      if (select && select.value !== next) select.value = next;
+      return next;
+    }
     const stillsIntent = ["Carousel", "Feed Post"].includes(current)
       || ["Carousel", "Feed Post"].includes(fromRecord);
-    const count = Number(item4Workspace?.assets?.length || ezStagedFiles.length || 0);
     // Uploading masters must not rewrite an idea created as Carousel into Photo Set
     // (Photo Set recommends Reels; Carousel keeps swipeable stills).
     if (stillsIntent && currentEzPackageId() !== "video") {
@@ -11259,6 +11297,7 @@
         renderProductionRequestOutputCards();
       }
       populateProductionRequestForm(activeProductionRequest);
+      if (outputsResult) productionOutputMatrixLoaded = true;
       setProductionRequestControlState(activeProductionRequest);
       setRequestMessage("Production Request draft and requested platform outputs saved.", "success");
       return activeProductionRequest;
@@ -11295,9 +11334,12 @@
   });
 
   $("prContentType")?.addEventListener("change", () => {
+    // Never replace an operator's explicit output choices. Only seed a platform
+    // that currently has no selected output at all.
     document.querySelectorAll('input[name="prPlatform"]:checked').forEach(input => {
       if (!["Instagram","Facebook","TikTok","YouTube"].includes(input.value)) return;
-      applyDefaultOutputsForPlatform(input.value, { replace: true });
+      const platformInputs = outputMatrixInputs().filter((row) => row.dataset.platform === input.value);
+      if (!platformInputs.some((row) => row.checked)) applyDefaultOutputsForPlatform(input.value);
     });
     updateOutputMatrixSummary();
   });
