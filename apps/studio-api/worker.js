@@ -453,7 +453,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.421-unlimited-slide-bridge",
+          version: "0.10.422-unlimited-production-slides",
           studio_desk_inventory_v1: true,
           studio_desk_activity_v1: true,
           studio_tiktok_complete_v1: true,
@@ -4487,9 +4487,9 @@ function cleanProductionRequestOutputPatch(payload) {
   intField("video_clip_count_min_override", "Video_Clip_Count_Min_Override", 1, 60, "Minimum video clip count override");
   intField("video_clip_count_max_override", "Video_Clip_Count_Max_Override", 1, 60, "Maximum video clip count override");
   choiceField("carousel_slide_count_mode_override", "Carousel_Slide_Count_Mode_Override", PRO_OUTPUT_COUNT_MODES);
-  intField("carousel_slide_count_exact_override", "Carousel_Slide_Count_Exact_Override", 1, 20, "Exact carousel slide count override");
-  intField("carousel_slide_count_min_override", "Carousel_Slide_Count_Min_Override", 1, 20, "Minimum carousel slide count override");
-  intField("carousel_slide_count_max_override", "Carousel_Slide_Count_Max_Override", 1, 20, "Maximum carousel slide count override");
+  intField("carousel_slide_count_exact_override", "Carousel_Slide_Count_Exact_Override", 1, Number.MAX_SAFE_INTEGER, "Exact carousel slide count override");
+  intField("carousel_slide_count_min_override", "Carousel_Slide_Count_Min_Override", 1, Number.MAX_SAFE_INTEGER, "Minimum carousel slide count override");
+  intField("carousel_slide_count_max_override", "Carousel_Slide_Count_Max_Override", 1, Number.MAX_SAFE_INTEGER, "Maximum carousel slide count override");
   choiceField("carousel_image_mode_override", "Carousel_Image_Mode_Override", PRO_OUTPUT_CAROUSEL_IMAGE_MODES);
   numField("voiceover_tail_seconds_override", "Voiceover_Tail_Seconds_Override", 0, 10, "Voiceover tail override");
   choiceField("title_mode_override", "Title_Mode_Override", PRO_OUTPUT_TEXT_MODES);
@@ -14183,8 +14183,7 @@ function outputWorkItemIssues(outputRow, route, effective) {
 
   if (effective.carousel_slide_count_mode === "Exact" &&
       (!Number.isInteger(effective.carousel_slide_count_exact) ||
-       effective.carousel_slide_count_exact < 1 ||
-       effective.carousel_slide_count_exact > 20)) {
+       effective.carousel_slide_count_exact < 1)) {
     issues.push("Exact carousel slide count is invalid.");
   }
 
@@ -14192,7 +14191,6 @@ function outputWorkItemIssues(outputRow, route, effective) {
       (!Number.isInteger(effective.carousel_slide_count_min) ||
        !Number.isInteger(effective.carousel_slide_count_max) ||
        effective.carousel_slide_count_min < 1 ||
-       effective.carousel_slide_count_max > 20 ||
        effective.carousel_slide_count_min > effective.carousel_slide_count_max)) {
     issues.push("Carousel slide-count range is invalid.");
   }
@@ -14570,10 +14568,10 @@ async function item4EnsureStudioPostCaption(env, requestRecord, parentId) {
 
 function item4PreProductionAiRequestedCount(record) {
   const exact = Number(f(record, "Carousel_Slide_Count_Exact") || 0);
-  if (Number.isFinite(exact) && exact > 0) return Math.max(1, Math.min(20, Math.round(exact)));
+  if (Number.isFinite(exact) && exact > 0) return Math.max(1, Math.round(exact));
   const origin = item4ParseEzOrigin(record);
   if (origin.inputKind === "single-ai") return 1;
-  if (origin.aiCount) return Math.max(1, Math.min(20, Math.round(origin.aiCount)));
+  if (origin.aiCount) return Math.max(1, Math.round(origin.aiCount));
   return origin.inputKind === "multiple-ai" ? 5 : 1;
 }
 
@@ -19710,8 +19708,8 @@ function cleanPromotionPayload(payload) {
   let carouselSlideCount = Number(payload?.carousel_slide_count ?? 5);
   if (!Number.isFinite(carouselSlideCount)) carouselSlideCount = 5;
   carouselSlideCount = Math.trunc(carouselSlideCount);
-  if (carouselSlideCount < 1 || carouselSlideCount > 20) {
-    throw new HttpError(400, "Carousel slide count must be between 1 and 20");
+  if (carouselSlideCount < 1) {
+    throw new HttpError(400, "Carousel slide count must be at least 1");
   }
 
   const carouselImageModeRaw = String(payload?.carousel_image_mode || "Make AI Generated").trim();
@@ -19731,8 +19729,8 @@ function cleanPromotionPayload(payload) {
     throw new HttpError(400, "Carousel slide count mode must be Exact or Target range");
   }
 
-  let carouselSlideCountMin = nullableInt(payload?.carousel_slide_count_min, 1, 20, "Minimum photo count");
-  let carouselSlideCountMax = nullableInt(payload?.carousel_slide_count_max, 1, 20, "Maximum photo count");
+  let carouselSlideCountMin = nullableInt(payload?.carousel_slide_count_min, 1, Number.MAX_SAFE_INTEGER, "Minimum photo count");
+  let carouselSlideCountMax = nullableInt(payload?.carousel_slide_count_max, 1, Number.MAX_SAFE_INTEGER, "Maximum photo count");
   if (carouselSlideCountMode === "Target range") {
     if (carouselSlideCountMin === null || carouselSlideCountMax === null) {
       throw new HttpError(400, "Enter both minimum and maximum photo counts");
@@ -20150,10 +20148,10 @@ async function watchIdeaPhotosRoute(request, env, url, authorization) {
   const defaults = ideaPhotoWatchRange(idea, contentType);
   const requestedMin = Number(payload?.min);
   const requestedMax = Number(payload?.max);
-  const min = Number.isFinite(requestedMin) && requestedMin >= 1 && requestedMin <= 20
+  const min = Number.isFinite(requestedMin) && requestedMin >= 1
     ? Math.trunc(requestedMin)
     : defaults.min;
-  const maxCandidate = Number.isFinite(requestedMax) && requestedMax >= min && requestedMax <= 20
+  const maxCandidate = Number.isFinite(requestedMax) && requestedMax >= min
     ? Math.trunc(requestedMax)
     : defaults.max;
   const max = Math.max(min, maxCandidate);

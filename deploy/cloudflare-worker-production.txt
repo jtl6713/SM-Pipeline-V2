@@ -248,3 +248,9 @@ Redeploy Worker after bridge-limit repair commit
 Reason: GitHub Actions bot commit does not recursively trigger deploy workflow; explicitly deploy 0.10.421-unlimited-slide-bridge
 Source repair: 9a29a57c8907b4b6195de8010988597d5dd122db
 Requested: 2026-09-28T16:10:00-05:00
+
+
+Deploy Studio API Worker production
+Reason: Remove all remaining internal 20-slide Production ceilings from Approve, bridge, output validation, overrides, AI count, and photo-listening directives
+Worker: 0.10.422-unlimited-production-slides
+Requested: 2026-09-28

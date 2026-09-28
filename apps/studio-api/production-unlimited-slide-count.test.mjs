@@ -30,3 +30,28 @@ test("bridge preflight accepts carousel counts above 20", async () => {
   assert.doesNotMatch(handler, /max > 20/);
   assert.doesNotMatch(handler, /from 1 through 20/);
 });
+
+
+test("approve path has no internal 20-slide ceiling", async () => {
+  const worker = await readFile(path.join(here, "worker.js"), "utf8");
+
+  const promoteStart = worker.indexOf("function cleanPromotionPayload");
+  const promoteEnd = worker.indexOf("function promotionWebhookUrl", promoteStart);
+  assert.ok(promoteStart >= 0 && promoteEnd > promoteStart);
+  const promotion = worker.slice(promoteStart, promoteEnd);
+  assert.doesNotMatch(promotion, /> 20/);
+  assert.doesNotMatch(promotion, /1, 20/);
+  assert.match(promotion, /Carousel slide count must be at least 1/);
+
+  const workStart = worker.indexOf("function outputWorkItemIssues");
+  const workEnd = worker.indexOf("async function buildOutputWorkItemEffective", workStart);
+  assert.ok(workStart >= 0 && workEnd > workStart);
+  const work = worker.slice(workStart, workEnd);
+  assert.doesNotMatch(work, /> 20/);
+
+  const overrideStart = worker.indexOf("function cleanProductionRequestOutputPatch");
+  const overrideEnd = worker.indexOf("async function getProductionRequestOutput", overrideStart);
+  assert.ok(overrideStart >= 0 && overrideEnd > overrideStart);
+  const overrides = worker.slice(overrideStart, overrideEnd);
+  assert.doesNotMatch(overrides, /Carousel_Slide_Count_.*1, 20/);
+});
