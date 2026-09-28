@@ -19,7 +19,7 @@ const DEFAULT_MUSIC_END_FADE_SECONDS = 0.5;
 const PIPELINE_RUNNER_INTERNAL_URL = String(
     process.env.PIPELINE_RUNNER_INTERNAL_URL || 'http://127.0.0.1:3350'
 ).replace(/\/$/, '');
-const SERVICE_VERSION = '2026-09-28-job-assets-serialize';
+const SERVICE_VERSION = '2026-09-28-clip-media-kind';
 const PROJECT_DIR = __dirname;
 const PUBLIC_DIR = path.join(PROJECT_DIR, 'public');
 const OUT_DIR = path.join(PROJECT_DIR, 'out');
@@ -33,6 +33,13 @@ const MAX_CONCURRENT_REMOTION_RENDERS = Math.max(
     1,
     Number(process.env.REMOTION_MAX_CONCURRENT || 1) || 1,
 );
+// Media Asset recTnq3abS2rcsTzK — hard-pinned (ignore env; a wrong override once
+// pointed Remotion at a music-library MP3 as the brand watermark).
+const CHICAGO_WATERMARK_DRIVE_FILE_ID = '1WQyd5W1__HkaEkWyC38IMErW8702Rd4u';
+const STUDIO_BRAND_WATERMARK_HOST_MARKERS = [
+    'studio.chicagoshining.com/api/public/branding/watermark',
+    'media.chicagoshining.com/studio/previews/branding/',
+];
 
 app.set('trust proxy', true);
 
@@ -276,11 +283,41 @@ function resolvePublicAssetPath(src) {
         return undefined;
     }
 
-    if (path.isAbsolute(src)) {
-        return src;
+    const trimmed = src.trim();
+    // toPublicSrc returns http://127.0.0.1:PORT/job-assets/... so Remotion can
+    // fetch outside public/. ffprobe must use the real filesystem path — never
+    // path.join(public/, "http://...") which on Windows becomes
+    // public\http:\127.0.0.1:...\voiceover.mp3 (CI 239–242 Blocked).
+    if (/^https?:\/\//i.test(trimmed)) {
+        try {
+            const parsed = new URL(trimmed);
+            const pathname = decodeURIComponent(parsed.pathname || '');
+            if (pathname.startsWith(`${RENDER_ASSETS_URL_PREFIX}/`)) {
+                const under = pathname.slice(RENDER_ASSETS_URL_PREFIX.length + 1);
+                const jobPath = path.join(RENDER_ASSETS_DIR, under);
+                if (fs.existsSync(jobPath)) return jobPath;
+            }
+            if (pathname.startsWith('/render-assets/')) {
+                const under = pathname.slice('/render-assets/'.length);
+                const jobPath = path.join(RENDER_ASSETS_DIR, under);
+                if (fs.existsSync(jobPath)) return jobPath;
+                const legacy = path.join(PUBLIC_DIR, 'render-assets', under);
+                if (fs.existsSync(legacy)) return legacy;
+            }
+        } catch {}
+        return undefined;
     }
 
-    const normalized = src.replace(/^[/\\]+/, '');
+    // Windows treats "http:..." as an absolute path; still never ffprobe a URL.
+    if (/^[a-zA-Z][a-zA-Z0-9+.-]*:/i.test(trimmed) && !/^[a-zA-Z]:[\\/]/.test(trimmed)) {
+        return undefined;
+    }
+
+    if (path.isAbsolute(trimmed)) {
+        return trimmed;
+    }
+
+    const normalized = trimmed.replace(/^[/\\]+/, '');
     if (normalized.startsWith('job-assets/') || normalized.startsWith('render-assets/')) {
         const under = normalized.replace(/^(job-assets|render-assets)\//, '');
         const jobPath = path.join(RENDER_ASSETS_DIR, under);
@@ -458,7 +495,45 @@ async function ensureDirectories() {
     await fsp.mkdir(RENDER_ASSETS_DIR, { recursive: true });
 }
 
-function downloadUrlToFile(rawUrl, destinationFilePath, redirectsLeft = 5) {
+function isStudioBrandWatermarkUrl(rawUrl) {
+    const href = String(rawUrl || '').trim().toLowerCase();
+    if (!href) return false;
+    return STUDIO_BRAND_WATERMARK_HOST_MARKERS.some((marker) => href.includes(marker));
+}
+
+function assertDownloadedImageFile(filePath, sourceUrl) {
+    const fd = fs.openSync(filePath, 'r');
+    try {
+        const header = Buffer.alloc(16);
+        const bytesRead = fs.readSync(fd, header, 0, 16, 0);
+        const slice = header.subarray(0, bytesRead);
+        const isPng = slice.length >= 8
+            && slice[0] === 0x89 && slice[1] === 0x50 && slice[2] === 0x4e && slice[3] === 0x47;
+        const isJpeg = slice.length >= 3
+            && slice[0] === 0xff && slice[1] === 0xd8 && slice[2] === 0xff;
+        const isWebp = slice.length >= 12
+            && slice.toString('ascii', 0, 4) === 'RIFF'
+            && slice.toString('ascii', 8, 12) === 'WEBP';
+        const isGif = slice.length >= 6
+            && (slice.toString('ascii', 0, 6) === 'GIF87a' || slice.toString('ascii', 0, 6) === 'GIF89a');
+        if (!isPng && !isJpeg && !isWebp && !isGif) {
+            const sniff = slice.toString('utf8').slice(0, 48).replace(/\s+/g, ' ');
+            throw new Error(
+                `Downloaded watermark is not an image (got "${sniff}" from ${sourceUrl}). `
+                + 'Studio Access HTML or an empty body was saved as watermark.png.'
+            );
+        }
+    } finally {
+        fs.closeSync(fd);
+    }
+    const size = fs.statSync(filePath).size;
+    if (size < 80) {
+        throw new Error(`Downloaded watermark too small (${size} bytes) from ${sourceUrl}`);
+    }
+}
+
+function downloadUrlToFile(rawUrl, destinationFilePath, redirectsLeft = 5, options = {}) {
+    const expectImage = Boolean(options && options.expectImage);
     return new Promise((resolve, reject) => {
         const client = rawUrl.startsWith('https://') ? https : http;
 
@@ -467,6 +542,9 @@ function downloadUrlToFile(rawUrl, destinationFilePath, redirectsLeft = 5) {
             {
                 headers: {
                     'User-Agent': 'SM-Pipeline-V2-Remotion-Render-Server',
+                    Accept: expectImage
+                        ? 'image/png,image/jpeg,image/webp,image/*;q=0.8,*/*;q=0.5'
+                        : '*/*',
                 },
             },
             (response) => {
@@ -484,7 +562,7 @@ function downloadUrlToFile(rawUrl, destinationFilePath, redirectsLeft = 5) {
                     const redirectedUrl = new URL(response.headers.location, rawUrl).toString();
                     response.resume();
 
-                    downloadUrlToFile(redirectedUrl, destinationFilePath, redirectsLeft - 1)
+                    downloadUrlToFile(redirectedUrl, destinationFilePath, redirectsLeft - 1, options)
                         .then(resolve)
                         .catch(reject);
 
@@ -497,12 +575,37 @@ function downloadUrlToFile(rawUrl, destinationFilePath, redirectsLeft = 5) {
                     return;
                 }
 
+                const contentType = String(response.headers['content-type'] || '').toLowerCase();
+                if (expectImage && (contentType.includes('text/html') || contentType.includes('application/json'))) {
+                    response.resume();
+                    reject(new Error(
+                        `Download returned ${contentType || 'non-image'} for ${rawUrl} `
+                        + '(likely Cloudflare Access HTML, not the watermark PNG)'
+                    ));
+                    return;
+                }
+
                 const fileStream = fs.createWriteStream(destinationFilePath);
 
                 response.pipe(fileStream);
 
                 fileStream.on('finish', () => {
-                    fileStream.close(() => resolve(destinationFilePath));
+                    fileStream.close(() => {
+                        try {
+                            if (expectImage) {
+                                assertDownloadedImageFile(destinationFilePath, rawUrl);
+                            } else {
+                                const size = fs.statSync(destinationFilePath).size;
+                                if (size < 32) {
+                                    throw new Error(`Downloaded file too small (${size} bytes) from ${rawUrl}`);
+                                }
+                            }
+                            resolve(destinationFilePath);
+                        } catch (error) {
+                            try { fs.unlinkSync(destinationFilePath); } catch {}
+                            reject(error);
+                        }
+                    });
                 });
 
                 fileStream.on('error', (error) => {
@@ -521,6 +624,35 @@ function downloadUrlToFile(rawUrl, destinationFilePath, redirectsLeft = 5) {
     });
 }
 
+function inferClipMediaKind(clip) {
+    const explicit = String(clip?.mediaKind || clip?.media_kind || '').trim().toLowerCase();
+    if (explicit === 'video' || explicit === 'photo' || explicit === 'image') {
+        return explicit === 'image' ? 'photo' : explicit;
+    }
+    const name = String(clip?.assetName || clip?.asset_name || clip?.fileName || clip?.file_name || '').trim();
+    if (/\.(mp4|mov|m4v|webm)$/i.test(name)) return 'video';
+    const src = String(clip?.src || clip?.url || '').trim();
+    if (/\.(mp4|mov|m4v|webm)(\?|#|$)/i.test(src)) return 'video';
+    return 'photo';
+}
+
+function sniffIsMp4File(filePath) {
+    try {
+        const fd = fs.openSync(filePath, 'r');
+        try {
+            const header = Buffer.alloc(12);
+            const bytesRead = fs.readSync(fd, header, 0, 12, 0);
+            if (bytesRead < 8) return false;
+            // ISO BMFF: size(4) + 'ftyp'(4)
+            return header.toString('ascii', 4, 8) === 'ftyp';
+        } finally {
+            fs.closeSync(fd);
+        }
+    } catch {
+        return false;
+    }
+}
+
 async function rewriteClipAssets({ clips, jobId, jobAssetDir, job }) {
     if (!Array.isArray(clips) || clips.length === 0) {
         throw new Error('Request body must include a non-empty clips array.');
@@ -532,7 +664,7 @@ async function rewriteClipAssets({ clips, jobId, jobAssetDir, job }) {
     for (let index = 0; index < clips.length; index += 1) {
         const clip = clips[index];
         const clipId = clip.id || `clip-${index + 1}`;
-        const mediaKind = String(clip.mediaKind || clip.media_kind || '').trim().toLowerCase();
+        let mediaKind = inferClipMediaKind(clip);
         const driveFileId = String(
             clip.googleDriveFileId
             || clip.google_drive_file_id
@@ -546,9 +678,13 @@ async function rewriteClipAssets({ clips, jobId, jobAssetDir, job }) {
 
         if (isHttpUrl(sourceUrl)) {
             const fallbackExt = mediaKind === 'video' ? '.mp4' : '.jpg';
-            const ext = driveFileId
-                ? (mediaKind === 'video' ? '.mp4' : getExtensionFromUrl(clip.url || clip.src || '', fallbackExt))
-                : getExtensionFromUrl(sourceUrl, fallbackExt);
+            const nameExt = path.extname(String(clip.assetName || clip.asset_name || '')).toLowerCase();
+            const extFromName = nameExt && /^[.][a-z0-9]+$/i.test(nameExt) ? nameExt : '';
+            const ext = mediaKind === 'video'
+                ? (extFromName || '.mp4')
+                : (driveFileId
+                    ? (extFromName || getExtensionFromUrl(clip.url || clip.src || '', fallbackExt))
+                    : (extFromName || getExtensionFromUrl(sourceUrl, fallbackExt)));
             const baseName = sanitizeSimpleName(clipId, `clip-${index + 1}`);
             const filename = makeUniqueFilename(`${baseName}${ext}`, usedFilenames);
             const destination = path.join(jobAssetDir, filename);
@@ -556,14 +692,38 @@ async function rewriteClipAssets({ clips, jobId, jobAssetDir, job }) {
             appendLog(
                 job,
                 driveFileId
-                    ? `Downloading video clip ${clipId} from private Drive authority`
+                    ? `Downloading ${mediaKind} clip ${clipId} from private Drive authority`
                     : `Downloading clip ${clipId} from ${sourceUrl}`
             );
             await downloadUrlToFile(sourceUrl, destination);
+
+            // CI 242: Drive uc?id= + missing mediaKind saved MP4 bytes as .jpg; Remotion Img failed.
+            if (mediaKind !== 'video' && sniffIsMp4File(destination)) {
+                const videoName = makeUniqueFilename(`${baseName}.mp4`, usedFilenames);
+                const videoPath = path.join(jobAssetDir, videoName);
+                fs.renameSync(destination, videoPath);
+                mediaKind = 'video';
+                appendLog(
+                    job,
+                    `Clip ${clipId} bytes are MP4 (ftyp); renamed to ${toProjectRelative(videoPath)} and mediaKind=video`
+                );
+                const rewrittenClip = {
+                    ...clip,
+                    mediaKind: 'video',
+                    media_kind: 'video',
+                    src: toPublicSrc(videoPath),
+                };
+                delete rewrittenClip.url;
+                rewrittenClips.push(rewrittenClip);
+                continue;
+            }
+
             appendLog(job, `Downloaded clip ${clipId} to ${toProjectRelative(destination)}`);
 
             const rewrittenClip = {
                 ...clip,
+                mediaKind,
+                media_kind: mediaKind,
                 src: toPublicSrc(destination),
             };
 
@@ -730,24 +890,28 @@ async function rewriteWatermarkAsset({ watermarkUrl, jobAssetDir, job }) {
     const raw = String(watermarkUrl || '').trim();
     if (!raw) return '';
 
-    const driveFileId = googleDriveFileIdFromUrl(raw);
-    const sourceUrl = driveFileId
-        ? `${PIPELINE_RUNNER_INTERNAL_URL}/internal/drive-media/${encodeURIComponent(driveFileId)}`
-        : raw;
+    // ChicagoShining brand watermark is a single known Drive PNG. Never trust an
+    // arbitrary Drive id from props — R4/catalog have sent VO/music/clip ids and
+    // Remotion then saved ID3/MP4 bytes as watermark.png (CI 239–243).
+    const extractedId = googleDriveFileIdFromUrl(raw);
+    const driveFileId = CHICAGO_WATERMARK_DRIVE_FILE_ID;
+    if (extractedId && extractedId !== driveFileId) {
+        appendLog(
+            job,
+            `Ignoring non-brand watermark Drive id ${extractedId}; using authority ${driveFileId}`
+        );
+    } else if (isStudioBrandWatermarkUrl(raw) || !extractedId) {
+        appendLog(job, `Using Chicago brand watermark Drive authority ${driveFileId}`);
+    }
+
+    const sourceUrl = `${PIPELINE_RUNNER_INTERNAL_URL}/internal/drive-media/${encodeURIComponent(driveFileId)}`;
 
     if (!isHttpUrl(sourceUrl)) return raw;
 
-    const ext = getExtensionFromUrl(raw, '.png');
-    const safeExt = /\.(png|jpe?g|webp)$/i.test(ext) ? ext : '.png';
-    const destination = path.join(jobAssetDir, `watermark${safeExt}`);
+    const destination = path.join(jobAssetDir, 'watermark.png');
 
-    appendLog(
-        job,
-        driveFileId
-            ? 'Downloading watermark from private Drive authority'
-            : `Downloading watermark from ${sourceUrl}`
-    );
-    await downloadUrlToFile(sourceUrl, destination);
+    appendLog(job, `Downloading watermark from private Drive authority (${driveFileId})`);
+    await downloadUrlToFile(sourceUrl, destination, 5, { expectImage: true });
     appendLog(job, `Downloaded watermark to ${toProjectRelative(destination)}`);
     return toPublicSrc(destination);
 }

@@ -12,7 +12,7 @@ const app = fs.readFileSync(
 );
 
 test("health advertises current worker build with faster-frames helpers", () => {
-  assert.match(worker, /version: "0\.10\.410-airtable-low-burn"/);
+  assert.match(worker, /version: "0\.10\.412-clip-media-kind"/);
   assert.match(worker, /airtableBatchCreate/);
   assert.match(worker, /mapProductionRequestLight/);
 });
@@ -116,7 +116,7 @@ test("PATCH save can return a light production request payload", () => {
 });
 
 test("UI polls GET /variants during Prepare and skips Save reload waterfall", () => {
-  assert.match(app, /BUILD_ID = "item4-0\.6\.406-ai-profile-naming-delete-authority"/);
+  assert.match(app, /BUILD_ID = "item4-0\.6\.410-production-open-nonblocking"/);
   assert.match(app, /pollItem4Variants/);
   const poll = app.slice(
     app.indexOf("async function pollItem4Variants"),

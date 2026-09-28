@@ -441,7 +441,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.410-airtable-low-burn",
+          version: "0.10.412-clip-media-kind",
           studio_desk_inventory_v1: true,
           studio_desk_activity_v1: true,
           studio_tiktok_complete_v1: true,
@@ -10426,6 +10426,9 @@ async function studioParkChicagoWatermarkRender(env, row) {
 }
 
 async function studioRemotionPrivateDriveLocalizationReady(env = null) {
+  // Remotion must localize Drive watermarks via pipeline-runner. Do NOT treat the
+  // Studio Access-gated /api/public/branding/watermark.png URL as ready — that
+  // path saved Cloudflare HTML as watermark.png and parked CI 239–243.
   try {
     const response = await fetch("https://render.chicagoshining.com/health", {
       method: "GET",
@@ -10438,19 +10441,6 @@ async function studioRemotionPrivateDriveLocalizationReady(env = null) {
       }
     }
   } catch {}
-
-  // Safe bridge while an older Remotion process is still running: if the
-  // authoritative watermark Media Asset points at the public brand-only route,
-  // Chromium no longer needs to fetch a private Google Drive URL.
-  if (env?.AIRTABLE_MEDIA_TABLE_ID) {
-    try {
-      const record = await airtableFetch(env, env.AIRTABLE_MEDIA_TABLE_ID, STUDIO_CHICAGO_WATERMARK_MEDIA_ASSET_ID);
-      const source = String(f(record, "Google Drive URL") || "").trim();
-      if (source === STUDIO_CHICAGO_WATERMARK_PUBLIC_URL || source.startsWith(`${ITEM4_MEDIA_PUBLIC_BASE}/studio/previews/branding/`)) {
-        return true;
-      }
-    } catch {}
-  }
   return false;
 }
 
@@ -15418,6 +15408,14 @@ function item4StudioSourcePackageForOutput(requestRecord, outputRow, effective, 
     id:c.id, order:c.order, mediaAssetRecordId:c.media_asset_record_id,
     assetName:c.asset_name, url:c.url, src:c.src, startFrame:c.startFrame,
     durationFrames:c.durationFrames, motionStyle:c.motionStyle, fitMode:c.fitMode,
+    // Preserve video vs photo — Remotion saved Drive MP4 as .jpg when this was stripped (CI 242).
+    mediaKind: c.mediaKind || c.media_kind || undefined,
+    media_kind: c.media_kind || c.mediaKind || undefined,
+    googleDriveFileId: c.google_drive_file_id || c.googleDriveFileId || undefined,
+    google_drive_file_id: c.google_drive_file_id || c.googleDriveFileId || undefined,
+    startFromSeconds: c.startFromSeconds ?? c.start_from_seconds ?? undefined,
+    inSeconds: c.inSeconds ?? c.in_seconds ?? undefined,
+    in_seconds: c.in_seconds ?? c.inSeconds ?? undefined,
     overlay: c.overlay || undefined,
     caption: c.caption || "",
   }));

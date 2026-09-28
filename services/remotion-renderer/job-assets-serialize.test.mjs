@@ -23,5 +23,43 @@ test("Remotion renders are serialized to one concurrent child", () => {
   assert.match(serverSrc, /acquireRemotionSlot/);
   assert.match(serverSrc, /releaseRemotionSlot/);
   assert.match(serverSrc, /jobAssetsOutsidePublic: true/);
-  assert.match(serverSrc, /2026-09-28-job-assets-serialize/);
+  assert.match(serverSrc, /2026-09-28-watermark-expect-image/);
+});
+
+test("resolvePublicAssetPath maps http job-assets URLs to the filesystem for ffprobe", () => {
+  const start = serverSrc.indexOf("function resolvePublicAssetPath");
+  const end = serverSrc.indexOf("function probeMediaDurationSeconds", start);
+  assert.ok(start >= 0 && end > start);
+  const fn = serverSrc.slice(start, end);
+  assert.ok(fn.includes("new URL(trimmed)"));
+  assert.ok(fn.includes("RENDER_ASSETS_URL_PREFIX"));
+  assert.ok(fn.includes("path.join(RENDER_ASSETS_DIR, under)"));
+  assert.ok(fn.includes("public\\http:"));
+});
+
+test("watermark localization prefers Drive File ID over Access-gated Studio branding URL", () => {
+  assert.match(serverSrc, /CHICAGO_WATERMARK_DRIVE_FILE_ID/);
+  assert.match(serverSrc, /1WQyd5W1__HkaEkWyC38IMErW8702Rd4u/);
+  assert.match(serverSrc, /isStudioBrandWatermarkUrl/);
+  assert.match(serverSrc, /assertDownloadedImageFile/);
+  assert.match(serverSrc, /expectImage:\s*true/);
+  assert.match(serverSrc, /contentType\.includes\('text\/html'\)/);
+  const start = serverSrc.indexOf("async function rewriteWatermarkAsset");
+  const end = serverSrc.indexOf("function compactRemotionFailure", start);
+  assert.ok(start >= 0 && end > start);
+  const fn = serverSrc.slice(start, end);
+  assert.match(fn, /CHICAGO_WATERMARK_DRIVE_FILE_ID/);
+  assert.match(fn, /\/internal\/drive-media\//);
+  assert.match(fn, /Ignoring non-brand watermark Drive id/);
+  assert.match(fn, /expectImage:\s*true/);
+});
+
+test("image assert is watermark-only so music/VO MP3 downloads are allowed", () => {
+  const start = serverSrc.indexOf("function downloadUrlToFile");
+  const end = serverSrc.indexOf("async function rewriteClipAssets", start);
+  assert.ok(start >= 0 && end > start);
+  const fn = serverSrc.slice(start, end);
+  assert.match(fn, /expectImage/);
+  assert.match(fn, /if \(expectImage\)/);
+  assert.match(fn, /Accept: expectImage/);
 });
