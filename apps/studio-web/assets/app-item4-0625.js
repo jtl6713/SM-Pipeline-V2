@@ -10213,11 +10213,30 @@
         });
         result = await createEzProductionRequest(idea.id, payload);
       } else {
-        result = await api(`/api/ideas/${encodeURIComponent(idea.id)}/production-request`, {
-          method: "POST",
-          body: JSON.stringify({}),
-          timeoutMs: 120000,
-        });
+        try {
+          result = await api(`/api/ideas/${encodeURIComponent(idea.id)}/production-request`, {
+            method: "POST",
+            body: JSON.stringify({}),
+            timeoutMs: 35000,
+          });
+        } catch (error) {
+          // Creating a Production Request is server-side work. The Worker can finish
+          // creating the draft after the browser's request times out. Recover that
+          // just-created/current draft instead of showing an error that invites a
+          // second click and another duplicate Production Request.
+          if (!isTimeoutError(error)) throw error;
+          const listing = await api("/api/production-requests?limit=100", { timeoutMs: 30000 });
+          const drafts = (listing?.records || [])
+            .filter((record) => ideaIdFromRequest(record) === idea.id)
+            .filter((record) => ["Draft", "Ready", "Submitted"].includes(String(record?.status || "").trim()))
+            .sort((a, b) => {
+              const bt = Date.parse(b?.updated_at || b?.created_at || "") || 0;
+              const at = Date.parse(a?.updated_at || a?.created_at || "") || 0;
+              return bt - at;
+            });
+          if (!drafts.length) throw error;
+          result = { record: drafts[0], created: false, recovered_after_timeout: true };
+        }
       }
       await closeIdeaDrawer({ save: false, resumePhotoListening: false });
       activeIdea = idea;
