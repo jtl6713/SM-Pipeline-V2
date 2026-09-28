@@ -1,4 +1,4 @@
-name: Inspect Current Remotion Jobs 239
+name: Cleanup Failed Remotion Jobs
 
 on:
   push:
@@ -10,21 +10,48 @@ permissions:
   contents: read
 
 jobs:
-  inspect:
+  cleanup:
     runs-on: ubuntu-latest
-    timeout-minutes: 4
+    timeout-minutes: 5
     steps:
-      - name: Check health and current jobs
+      - name: Cleanup known failed Remotion jobs
         shell: bash
         run: |
           set -euo pipefail
-          echo '=== health ==='
+          echo '=== health before ==='
           curl -sS --max-time 20 'https://render.chicagoshining.com/health' | jq -c .
-          echo '=== job-20260928002112-832e29b7 ==='
-          curl -sS --max-time 20 'https://render.chicagoshining.com/status/job-20260928002112-832e29b7' | jq -c '{jobId,status,createdAt,updatedAt,completedAt,exitCode,error,props:{watermarkUrl:.props.watermarkUrl,watermarkRequired:.props.watermarkRequired},log_tail:((.logs//[])[-25:])}'
-          echo '=== job-20260928002100-7ae0a134 ==='
-          curl -sS --max-time 20 'https://render.chicagoshining.com/status/job-20260928002100-7ae0a134' | jq -c '{jobId,status,createdAt,updatedAt,completedAt,exitCode,error,props:{watermarkUrl:.props.watermarkUrl,watermarkRequired:.props.watermarkRequired},log_tail:((.logs//[])[-25:])}'
-          echo '=== job-20260928002049-db37a26d ==='
-          curl -sS --max-time 20 'https://render.chicagoshining.com/status/job-20260928002049-db37a26d' | jq -c '{jobId,status,createdAt,updatedAt,completedAt,exitCode,error,props:{watermarkUrl:.props.watermarkUrl,watermarkRequired:.props.watermarkRequired},log_tail:((.logs//[])[-25:])}'
-          echo '=== job-20260928001947-5598e891 ==='
-          curl -sS --max-time 20 'https://render.chicagoshining.com/status/job-20260928001947-5598e891' | jq -c '{jobId,status,createdAt,updatedAt,completedAt,exitCode,error,props:{watermarkUrl:.props.watermarkUrl,watermarkRequired:.props.watermarkRequired},log_tail:((.logs//[])[-25:])}'
+          echo '=== cleanup job-20260927231655-053d0e2f ==='
+          curl -sS --max-time 20 -X POST 'https://render.chicagoshining.com/cleanup/job-20260927231655-053d0e2f' -H 'Content-Type: application/json' --data '{}' | jq -c '{jobId,ok,removed,errors}'
+          echo '=== cleanup job-20260927231537-33de0b97 ==='
+          curl -sS --max-time 20 -X POST 'https://render.chicagoshining.com/cleanup/job-20260927231537-33de0b97' -H 'Content-Type: application/json' --data '{}' | jq -c '{jobId,ok,removed,errors}'
+          echo '=== cleanup job-20260927231546-400c08e4 ==='
+          curl -sS --max-time 20 -X POST 'https://render.chicagoshining.com/cleanup/job-20260927231546-400c08e4' -H 'Content-Type: application/json' --data '{}' | jq -c '{jobId,ok,removed,errors}'
+          echo '=== cleanup job-20260927231701-93097bb3 ==='
+          curl -sS --max-time 20 -X POST 'https://render.chicagoshining.com/cleanup/job-20260927231701-93097bb3' -H 'Content-Type: application/json' --data '{}' | jq -c '{jobId,ok,removed,errors}'
+          echo '=== cleanup job-20260927232124-9b330eb8 ==='
+          curl -sS --max-time 20 -X POST 'https://render.chicagoshining.com/cleanup/job-20260927232124-9b330eb8' -H 'Content-Type: application/json' --data '{}' | jq -c '{jobId,ok,removed,errors}'
+          echo '=== cleanup job-20260927231648-9738d91a ==='
+          curl -sS --max-time 20 -X POST 'https://render.chicagoshining.com/cleanup/job-20260927231648-9738d91a' -H 'Content-Type: application/json' --data '{}' | jq -c '{jobId,ok,removed,errors}'
+          echo '=== cleanup job-20260927231109-1d5686f8 ==='
+          curl -sS --max-time 20 -X POST 'https://render.chicagoshining.com/cleanup/job-20260927231109-1d5686f8' -H 'Content-Type: application/json' --data '{}' | jq -c '{jobId,ok,removed,errors}'
+          echo '=== cleanup job-20260927231115-268b796f ==='
+          curl -sS --max-time 20 -X POST 'https://render.chicagoshining.com/cleanup/job-20260927231115-268b796f' -H 'Content-Type: application/json' --data '{}' | jq -c '{jobId,ok,removed,errors}'
+          echo '=== cleanup job-20260927231450-8d449d50 ==='
+          curl -sS --max-time 20 -X POST 'https://render.chicagoshining.com/cleanup/job-20260927231450-8d449d50' -H 'Content-Type: application/json' --data '{}' | jq -c '{jobId,ok,removed,errors}'
+          echo '=== cleanup job-20260927231504-e54dd207 ==='
+          curl -sS --max-time 20 -X POST 'https://render.chicagoshining.com/cleanup/job-20260927231504-e54dd207' -H 'Content-Type: application/json' --data '{}' | jq -c '{jobId,ok,removed,errors}'
+          echo '=== cleanup job-20260927231511-3f5875fa ==='
+          curl -sS --max-time 20 -X POST 'https://render.chicagoshining.com/cleanup/job-20260927231511-3f5875fa' -H 'Content-Type: application/json' --data '{}' | jq -c '{jobId,ok,removed,errors}'
+          echo '=== cleanup job-20260927231101-6eb1002e ==='
+          curl -sS --max-time 20 -X POST 'https://render.chicagoshining.com/cleanup/job-20260927231101-6eb1002e' -H 'Content-Type: application/json' --data '{}' | jq -c '{jobId,ok,removed,errors}'
+          echo '=== cleanup job-20260927231530-c3f85c3b ==='
+          curl -sS --max-time 20 -X POST 'https://render.chicagoshining.com/cleanup/job-20260927231530-c3f85c3b' -H 'Content-Type: application/json' --data '{}' | jq -c '{jobId,ok,removed,errors}'
+          echo '=== cleanup job-20260928002112-832e29b7 ==='
+          curl -sS --max-time 20 -X POST 'https://render.chicagoshining.com/cleanup/job-20260928002112-832e29b7' -H 'Content-Type: application/json' --data '{}' | jq -c '{jobId,ok,removed,errors}'
+          echo '=== cleanup job-20260928002100-7ae0a134 ==='
+          curl -sS --max-time 20 -X POST 'https://render.chicagoshining.com/cleanup/job-20260928002100-7ae0a134' -H 'Content-Type: application/json' --data '{}' | jq -c '{jobId,ok,removed,errors}'
+          echo '=== cleanup job-20260928002049-db37a26d ==='
+          curl -sS --max-time 20 -X POST 'https://render.chicagoshining.com/cleanup/job-20260928002049-db37a26d' -H 'Content-Type: application/json' --data '{}' | jq -c '{jobId,ok,removed,errors}'
+
+          echo '=== health after ==='
+          curl -sS --max-time 20 'https://render.chicagoshining.com/health' | jq -c .
