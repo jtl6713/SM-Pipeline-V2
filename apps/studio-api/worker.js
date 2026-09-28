@@ -185,6 +185,7 @@ export default {
       const isVoicePreviewRoute = /^\/api\/voices\/[A-Za-z0-9_-]+\/preview$/.test(url.pathname);
       const isMediaAssetPreviewRoute = /^\/api\/media-assets\/rec[A-Za-z0-9]+\/preview$/.test(url.pathname);
       const isMediaAssetStreamRoute = /^\/api\/media-assets\/rec[A-Za-z0-9]+\/stream$/.test(url.pathname);
+      const isPublicBrandWatermarkRoute = url.pathname === "/api/public/branding/watermark.png";
       const isMediaLibraryStillsRoute = url.pathname === "/api/media-assets/library-stills";
       const isIdeaRecordRoute = /^\/api\/ideas\/rec[A-Za-z0-9]+$/.test(url.pathname);
       const isIdeaHoldRoute = /^\/api\/ideas\/rec[A-Za-z0-9]+\/hold$/.test(url.pathname);
@@ -341,7 +342,7 @@ export default {
       const isInsightsChatWrite = isInsightsChatRoute && request.method === "POST";
       const allowedMethod =
         request.method === "GET" ||
-        (request.method === "HEAD" && (isMusicPreviewRoute || isMediaAssetPreviewRoute || isMediaAssetStreamRoute || isOutputPreviewRoute || isVoicePreviewRoute)) ||
+        (request.method === "HEAD" && (isMusicPreviewRoute || isMediaAssetPreviewRoute || isMediaAssetStreamRoute || isPublicBrandWatermarkRoute || isOutputPreviewRoute || isVoicePreviewRoute)) ||
         isIdeaCreateRoute ||
         isIdeaGenerateWrite ||
         isIdeaEditRoute ||
@@ -440,7 +441,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.408-r4-watermark-gate",
+          version: "0.10.409-public-brand-watermark",
           studio_desk_inventory_v1: true,
           studio_desk_activity_v1: true,
           studio_tiktok_complete_v1: true,
@@ -568,6 +569,7 @@ export default {
           studio_private_drive_watermark_heal_v1: true,
           studio_private_drive_watermark_park_v1: true,
           studio_r4_private_drive_watermark_gate_v1: true,
+          studio_public_brand_watermark_v1: true,
           studio_idea_chain_python_gates_v1: true,
           studio_music_catalog_fallback_v1: true,
           studio_music_upload_v1: true,
@@ -711,6 +713,11 @@ export default {
           item4_source_to_production_bridge: "validated-preflight-v1",
           item4_promotion_summary_backfill: true,
         });
+      }
+
+      if (isPublicBrandWatermarkRoute) {
+        requireConfig(env);
+        return publicChicagoShiningWatermark(request, env);
       }
 
       if (url.pathname === "/api/session") {
@@ -4401,6 +4408,9 @@ async function updateProductionRequestOutput(request, env, url, authorization) {
 
 
 const ITEM4_MEDIA_PUBLIC_BASE = "https://media.chicagoshining.com";
+const STUDIO_CHICAGO_WATERMARK_MEDIA_ASSET_ID = "recTnq3abS2rcsTzK";
+const STUDIO_CHICAGO_WATERMARK_R2_KEY = "studio/previews/branding/chicagoshining-watermark.png";
+const STUDIO_CHICAGO_WATERMARK_PUBLIC_URL = "https://studio.chicagoshining.com/api/public/branding/watermark.png";
 const ITEM4_MAPPING_TABLE = "Platform Output Mappings";
 const ITEM4_MAX_FILES_PER_UPLOAD_REQUEST = 60;
 const ITEM4_MAX_FILE_BYTES = 25 * 1024 * 1024;
@@ -4595,6 +4605,75 @@ async function item4GoogleAccessToken(env) {
     console.warn("Item 4 Google token refresh failed", error);
     return "";
   }
+}
+
+async function studioFetchAuthenticatedDriveImageBytes(driveId, env) {
+  const id = String(driveId || "").trim();
+  if (!id) throw new HttpError(404, "Brand watermark Drive file ID is missing");
+  const token = await item4GoogleAccessToken(env);
+  if (!token) throw new HttpError(503, "Google Drive authentication is not configured for the brand watermark");
+  const response = await fetch(
+    `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(id)}?alt=media&supportsAllDrives=true`,
+    {
+      method: "GET",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Accept: "image/png,image/webp,image/jpeg,image/*;q=0.9",
+      },
+      redirect: "follow",
+    }
+  );
+  const contentType = String(response.headers.get("Content-Type") || "").split(";")[0].trim().toLowerCase();
+  if (!response.ok || !contentType.startsWith("image/")) {
+    try { await response.body?.cancel(); } catch {}
+    throw new HttpError(response.status || 502, `Brand watermark Drive fetch failed (${response.status || "unknown"})`);
+  }
+  const bytes = await response.arrayBuffer();
+  if (!bytes || bytes.byteLength < 80) throw new HttpError(502, "Brand watermark Drive file was empty");
+  return { bytes, contentType: contentType || "image/png" };
+}
+
+async function studioEnsurePublicChicagoWatermark(env) {
+  if (!env?.STUDIO_MEDIA) throw new HttpError(503, "Studio media storage is not configured");
+  let object = await env.STUDIO_MEDIA.get(STUDIO_CHICAGO_WATERMARK_R2_KEY);
+  if (object) return object;
+
+  const record = await airtableFetch(env, env.AIRTABLE_MEDIA_TABLE_ID, STUDIO_CHICAGO_WATERMARK_MEDIA_ASSET_ID);
+  const driveId = String(f(record, "Google Drive File ID") || "").trim();
+  const grabbed = await studioFetchAuthenticatedDriveImageBytes(driveId, env);
+  await env.STUDIO_MEDIA.put(STUDIO_CHICAGO_WATERMARK_R2_KEY, grabbed.bytes, {
+    httpMetadata: {
+      contentType: grabbed.contentType || "image/png",
+      cacheControl: "public, max-age=31536000, immutable",
+    },
+    customMetadata: {
+      role: "chicagoshining-brand-watermark",
+      sourceMediaAssetId: STUDIO_CHICAGO_WATERMARK_MEDIA_ASSET_ID,
+      sourceDriveFileId: driveId,
+    },
+  });
+  object = await env.STUDIO_MEDIA.get(STUDIO_CHICAGO_WATERMARK_R2_KEY);
+  if (!object) throw new HttpError(502, "Brand watermark public cache write did not persist");
+  return object;
+}
+
+async function publicChicagoShiningWatermark(request, env) {
+  const object = await studioEnsurePublicChicagoWatermark(env);
+  const headers = new Headers();
+  object.writeHttpMetadata?.(headers);
+  headers.set("Content-Type", headers.get("Content-Type") || "image/png");
+  headers.set("Cache-Control", "public, max-age=31536000, immutable");
+  headers.set("Access-Control-Allow-Origin", "*");
+  headers.set("Cross-Origin-Resource-Policy", "cross-origin");
+  headers.set("X-Content-Type-Options", "nosniff");
+  headers.set("X-Studio-Branding-Source", "authenticated-drive-r2-cache");
+  headers.set("X-Studio-Branding-Record", STUDIO_CHICAGO_WATERMARK_MEDIA_ASSET_ID);
+  if (object.httpEtag) headers.set("ETag", object.httpEtag);
+  if (request.method === "HEAD") {
+    try { await object.body?.cancel(); } catch {}
+    return new Response(null, { status: 200, headers });
+  }
+  return new Response(object.body, { status: 200, headers });
 }
 
 async function item4FetchDriveThumbnailBytes(driveId, env = null) {
@@ -10315,19 +10394,33 @@ async function studioParkChicagoWatermarkRender(env, row) {
   });
 }
 
-async function studioRemotionPrivateDriveLocalizationReady() {
+async function studioRemotionPrivateDriveLocalizationReady(env = null) {
   try {
     const response = await fetch("https://render.chicagoshining.com/health", {
       method: "GET",
       headers: { Accept: "application/json", "Cache-Control": "no-cache" },
     });
-    if (!response.ok) return false;
-    const payload = await response.json().catch(() => ({}));
-    return payload?.privateDriveImageLocalization === true
-      && payload?.watermarkLocalization === true;
-  } catch {
-    return false;
+    if (response.ok) {
+      const payload = await response.json().catch(() => ({}));
+      if (payload?.privateDriveImageLocalization === true && payload?.watermarkLocalization === true) {
+        return true;
+      }
+    }
+  } catch {}
+
+  // Safe bridge while an older Remotion process is still running: if the
+  // authoritative watermark Media Asset points at the public brand-only route,
+  // Chromium no longer needs to fetch a private Google Drive URL.
+  if (env?.AIRTABLE_MEDIA_TABLE_ID) {
+    try {
+      const record = await airtableFetch(env, env.AIRTABLE_MEDIA_TABLE_ID, STUDIO_CHICAGO_WATERMARK_MEDIA_ASSET_ID);
+      const source = String(f(record, "Google Drive URL") || "").trim();
+      if (source === STUDIO_CHICAGO_WATERMARK_PUBLIC_URL || source.startsWith(`${ITEM4_MEDIA_PUBLIC_BASE}/studio/previews/branding/`)) {
+        return true;
+      }
+    } catch {}
   }
+  return false;
 }
 
 async function studioResetPrivateDriveWatermarkRender(env, row) {
@@ -10356,7 +10449,7 @@ async function healStuckStudioRenders(env) {
   const outputTable = env.AIRTABLE_OUTPUT_TABLE_ID;
   const pulses = [];
   const voCache = { parents: new Map(), requests: new Map() };
-  const rendererSupportsPrivateDrive = await studioRemotionPrivateDriveLocalizationReady();
+  const rendererSupportsPrivateDrive = await studioRemotionPrivateDriveLocalizationReady(env);
 
   // Exact regression signature: ChicagoShining watermark was embedded in
   // Remotion_Props_JSON as a private Drive URL. Chromium then fails it with
@@ -10942,7 +11035,7 @@ async function item4PulseT1Python(env, options = {}) {
 }
 
 async function studioGateR4ForPrivateDriveWatermark(env, options = {}) {
-  const rendererReady = await studioRemotionPrivateDriveLocalizationReady();
+  const rendererReady = await studioRemotionPrivateDriveLocalizationReady(env);
   if (rendererReady) return { renderer_ready: true, parked: [] };
 
   const parked = [];

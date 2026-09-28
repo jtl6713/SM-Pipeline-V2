@@ -153,3 +153,8 @@ Deploy Studio API Worker production
 Reason: central R4 gate prevents any continuation/cadence path from launching ChicagoShining renders until Remotion private Drive watermark localization is live
 Worker: 0.10.408-r4-watermark-gate
 Requested: 2026-09-28
+
+Deploy Studio API Worker production
+Reason: expose only the official ChicagoShining watermark through authenticated Drive -> R2 cache so old Remotion can render without Google Drive 403/ORB; Quality Agent may safely release parked renders when this public source is authoritative
+Worker: 0.10.409-public-brand-watermark
+Requested: 2026-09-28
