@@ -50,6 +50,23 @@ def yts2_needs_videos_list(thumb_publish: bool) -> bool:
     return bool(thumb_publish)
 
 
+def recovered_processing_status(body: Any, prior_status: str) -> tuple[str, bool]:
+    """Preserve a previously confirmed success across an empty 200 videos.list.
+
+    YouTube can transiently return an empty items array after an upload has
+    already reported processing succeeded. That is not evidence the binary
+    failed, and downgrading it to a poll error leaves an otherwise valid Short
+    stuck in YT2.
+    """
+    status = processing_status(body).casefold()
+    items = body.get("items") if isinstance(body, dict) else None
+    empty_items = isinstance(items, list) and not items
+    prior_succeeded = str(prior_status or "").strip().casefold() == "succeeded"
+    if not status and empty_items and prior_succeeded:
+        return "succeeded", True
+    return status, False
+
+
 def thumbnail_fallback_source(output: dict[str, Any], *, cover_required: bool) -> str | None:
     if cover_required:
         return None
@@ -137,9 +154,13 @@ def process_request(
     settings = load_uploader_settings(pipeline_settings, output, client=client)
     uploader = YouTubeUploaderClient(base_url=settings["url"], secret=settings["secret"])
     status_code, body = uploader.video_status(video_id)
-    status = processing_status(body).casefold()
+    status, recovered_empty_list = recovered_processing_status(
+        body,
+        field_str(output, "YouTube_Processing_Status"),
+    )
     result["http_status"] = status_code
     result["processing_status"] = status
+    result["recovered_empty_video_list"] = recovered_empty_list
     thumb_status = field_str(output, "YouTube_Thumbnail_Status")
     thumb_url = field_str(output, "Thumbnail_URL")
     from ap0.public_cover import (
