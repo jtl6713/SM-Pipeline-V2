@@ -108,3 +108,9 @@ Deploy Studio Pages production
 Reason: strict AI provider footer cache-bust; show non-selected provider as Standby · disabled when cross-provider failover is off
 UI: 0.6.407-ai-strict-provider
 Requested: 2026-09-27T21:06:00-05:00
+
+
+Deploy Studio Pages production
+Reason: Open Production timeout recovery; reuse the current draft instead of creating duplicates after a browser timeout
+UI: 0.6.408-open-production-timeout-recovery
+Requested: 2026-09-27T22:20:00-05:00
