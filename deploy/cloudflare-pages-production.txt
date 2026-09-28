@@ -201,3 +201,9 @@ Deploy Studio Pages production
 Reason: Ship Production source-still drag reorder, authoritative Production selections, and unlimited slideshow counts
 UI: 0.6.424-unlimited-slide-count
 Requested: 2026-09-28
+
+
+Deploy Studio Pages production
+Reason: Remove source-still up/down arrows now that drag reorder is live, and add live script/narration duration estimate to Production
+UI: 0.6.425-narration-estimate-drag-only
+Requested: 2026-09-28
