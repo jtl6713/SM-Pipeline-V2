@@ -23,7 +23,7 @@ test("Remotion renders are serialized to one concurrent child", () => {
   assert.match(serverSrc, /acquireRemotionSlot/);
   assert.match(serverSrc, /releaseRemotionSlot/);
   assert.match(serverSrc, /jobAssetsOutsidePublic: true/);
-  assert.match(serverSrc, /2026-09-28-job-assets-ffprobe-path/);
+  assert.match(serverSrc, /2026-09-28-watermark-drive-pin/);
 });
 
 test("resolvePublicAssetPath maps http job-assets URLs to the filesystem for ffprobe", () => {
@@ -49,4 +49,5 @@ test("watermark localization prefers Drive File ID over Access-gated Studio bran
   const fn = serverSrc.slice(start, end);
   assert.match(fn, /CHICAGO_WATERMARK_DRIVE_FILE_ID/);
   assert.match(fn, /\/internal\/drive-media\//);
+  assert.match(fn, /Ignoring non-brand watermark Drive id/);
 });

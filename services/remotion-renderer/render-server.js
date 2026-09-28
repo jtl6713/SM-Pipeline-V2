@@ -19,7 +19,7 @@ const DEFAULT_MUSIC_END_FADE_SECONDS = 0.5;
 const PIPELINE_RUNNER_INTERNAL_URL = String(
     process.env.PIPELINE_RUNNER_INTERNAL_URL || 'http://127.0.0.1:3350'
 ).replace(/\/$/, '');
-const SERVICE_VERSION = '2026-09-28-job-assets-ffprobe-path';
+const SERVICE_VERSION = '2026-09-28-watermark-drive-pin';
 const PROJECT_DIR = __dirname;
 const PUBLIC_DIR = path.join(PROJECT_DIR, 'public');
 const OUT_DIR = path.join(PROJECT_DIR, 'out');
@@ -826,30 +826,27 @@ async function rewriteWatermarkAsset({ watermarkUrl, jobAssetDir, job }) {
     const raw = String(watermarkUrl || '').trim();
     if (!raw) return '';
 
-    // Studio/public branding URLs are Access-gated from Remotion's host and
-    // previously wrote Cloudflare HTML into watermark.png. Always prefer the
-    // authenticated Drive file via pipeline-runner.
-    let driveFileId = googleDriveFileIdFromUrl(raw);
-    if (!driveFileId && (isStudioBrandWatermarkUrl(raw) || /watermark/i.test(raw))) {
-        driveFileId = CHICAGO_WATERMARK_DRIVE_FILE_ID;
+    // ChicagoShining brand watermark is a single known Drive PNG. Never trust an
+    // arbitrary Drive id from props — R4/catalog have sent VO/music/clip ids and
+    // Remotion then saved ID3/MP4 bytes as watermark.png (CI 239–243).
+    const extractedId = googleDriveFileIdFromUrl(raw);
+    const driveFileId = CHICAGO_WATERMARK_DRIVE_FILE_ID;
+    if (extractedId && extractedId !== driveFileId) {
+        appendLog(
+            job,
+            `Ignoring non-brand watermark Drive id ${extractedId}; using authority ${driveFileId}`
+        );
+    } else if (isStudioBrandWatermarkUrl(raw) || !extractedId) {
+        appendLog(job, `Using Chicago brand watermark Drive authority ${driveFileId}`);
     }
 
-    const sourceUrl = driveFileId
-        ? `${PIPELINE_RUNNER_INTERNAL_URL}/internal/drive-media/${encodeURIComponent(driveFileId)}`
-        : raw;
+    const sourceUrl = `${PIPELINE_RUNNER_INTERNAL_URL}/internal/drive-media/${encodeURIComponent(driveFileId)}`;
 
     if (!isHttpUrl(sourceUrl)) return raw;
 
-    const ext = driveFileId ? '.png' : getExtensionFromUrl(raw, '.png');
-    const safeExt = /\.(png|jpe?g|webp)$/i.test(ext) ? ext : '.png';
-    const destination = path.join(jobAssetDir, `watermark${safeExt}`);
+    const destination = path.join(jobAssetDir, 'watermark.png');
 
-    appendLog(
-        job,
-        driveFileId
-            ? `Downloading watermark from private Drive authority (${driveFileId})`
-            : `Downloading watermark from ${sourceUrl}`
-    );
+    appendLog(job, `Downloading watermark from private Drive authority (${driveFileId})`);
     await downloadUrlToFile(sourceUrl, destination);
     appendLog(job, `Downloaded watermark to ${toProjectRelative(destination)}`);
     return toPublicSrc(destination);
