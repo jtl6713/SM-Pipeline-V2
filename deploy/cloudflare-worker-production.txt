@@ -243,3 +243,8 @@ Deploy Studio API Worker production
 Reason: Remove second legacy 20-slide ceiling in source-to-production bridge compatibility preflight
 Worker: 0.10.421-unlimited-slide-bridge
 Requested: 2026-09-28
+
+Redeploy Worker after bridge-limit repair commit
+Reason: GitHub Actions bot commit does not recursively trigger deploy workflow; explicitly deploy 0.10.421-unlimited-slide-bridge
+Source repair: 9a29a57c8907b4b6195de8010988597d5dd122db
+Requested: 2026-09-28T16:10:00-05:00
