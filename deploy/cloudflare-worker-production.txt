@@ -254,3 +254,9 @@ Deploy Studio API Worker production
 Reason: Remove all remaining internal 20-slide Production ceilings from Approve, bridge, output validation, overrides, AI count, and photo-listening directives
 Worker: 0.10.422-unlimited-production-slides
 Requested: 2026-09-28
+
+Redeploy Worker after comprehensive unlimited-slide repair
+Reason: Explicitly deploy bot repair commit because bot commits do not recursively trigger production deploy workflows
+Source repair: cbe78ec89a2cc9345ce7d224f9290af61b27700f
+Worker: 0.10.422-unlimited-production-slides
+Requested: 2026-09-28T16:20:00-05:00
