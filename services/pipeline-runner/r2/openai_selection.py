@@ -1,4 +1,4 @@
-"""OpenAI canonical selection — Make module 7/8 port."""
+"""R2 canonical selection routed through the runtime OpenAI/Azure preference."""
 
 from __future__ import annotations
 
@@ -6,8 +6,7 @@ import json
 import re
 from typing import Any
 
-import requests
-
+from ai_api_router import post_responses
 from config import load_settings
 from r2.constants import MAKE_SCENARIO_ID
 from r2.prompt_builder import build_prompt
@@ -20,33 +19,47 @@ def _extract_json(text: str) -> dict[str, Any]:
         text = re.sub(r"\s*```$", "", text)
     parsed = json.loads(text)
     if not isinstance(parsed, dict):
-        raise ValueError("OpenAI response was not a JSON object")
+        raise ValueError("AI response was not a JSON object")
     return parsed
+
+
+def _output_text(payload: dict[str, Any]) -> str:
+    direct = str(payload.get("output_text") or "").strip()
+    if direct:
+        return direct
+    chunks: list[str] = []
+    for item in payload.get("output") or []:
+        if not isinstance(item, dict):
+            continue
+        for part in item.get("content") or []:
+            if not isinstance(part, dict):
+                continue
+            value = part.get("text") or part.get("output_text")
+            if value:
+                chunks.append(str(value))
+    if chunks:
+        return "\n".join(chunks).strip()
+    raise RuntimeError("R2 AI response had no output text")
 
 
 def _call_openai(prompt: str) -> tuple[str, dict[str, Any]]:
     settings = load_settings()
-    api_key = settings.get("openai_api_key", "").strip()
-    if not api_key:
-        raise RuntimeError("OPENAI_API_KEY is required for R2 asset selection")
-    model = settings.get("openai_r2_model", "gpt-4.1")
-    response = requests.post(
-        "https://api.openai.com/v1/chat/completions",
-        headers={
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json",
-        },
-        json={
+    model = str(settings.get("openai_r2_model") or "gpt-4.1")
+    response = post_responses(
+        settings,
+        {
             "model": model,
-            "messages": [{"role": "user", "content": prompt}],
-            "response_format": {"type": "json_object"},
-            "max_tokens": 14000,
+            "input": prompt,
+            "store": False,
+            "max_output_tokens": 14000,
+            "text": {"format": {"type": "json_object"}},
         },
         timeout=300,
     )
-    response.raise_for_status()
-    payload = response.json()
-    content = payload["choices"][0]["message"]["content"]
+    if not response.ok:
+        detail = (response.text or "").strip()[:400]
+        raise RuntimeError(f"R2 AI selection failed ({response.status_code}): {detail}")
+    content = _output_text(response.json())
     return content, _extract_json(content)
 
 
