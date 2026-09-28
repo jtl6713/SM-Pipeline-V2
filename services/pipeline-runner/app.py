@@ -7,7 +7,7 @@ import os
 from flask import Flask, Response, jsonify, request
 
 from config import StageRequest, load_settings
-from ai_api_preference import account_to_provider, get_preferred_account
+from ai_api_preference import account_to_provider, cross_provider_failover_enabled, get_preferred_account
 from ai_api_status import snapshot as ai_api_status_snapshot
 from stages import a1p, c3b, i3, r2, rr2, smv1, ttd4
 from stages.registry import STAGE_NAMES, get_handler, is_implemented
@@ -115,6 +115,7 @@ def ai_api_status():
             "ok": True,
             "preferred_provider": preferred_provider,
             "failover_provider": failover_provider,
+            "failover_enabled": cross_provider_failover_enabled(settings),
             "current_provider": runtime.get("provider"),
             "failover_active": bool(runtime.get("failover")),
             "last_success_at": runtime.get("last_success_at"),
