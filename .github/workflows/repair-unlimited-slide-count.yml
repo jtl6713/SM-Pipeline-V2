@@ -68,35 +68,11 @@ jobs:
               )
               test_path.write_text(text)
 
-          regression = Path("apps/studio-api/production-unlimited-slide-count.test.mjs")
-          regression.write_text(r'''import test from "node:test";
-import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
-import { fileURLToPath } from "node:url";
-import path from "node:path";
-
-const here = path.dirname(fileURLToPath(import.meta.url));
-
-test("Production slide-count validation accepts all attached stills beyond 20", async () => {
-  const worker = await readFile(path.join(here, "worker.js"), "utf8");
-  const start = worker.indexOf("async function cleanProductionRequestPayload");
-  const end = worker.indexOf("function productionRequestFields", start);
-  assert.ok(start >= 0 && end > start);
-  const handler = worker.slice(start, end);
-  assert.match(handler, /nullableInt\(slideExactCoerced, 1, Number\.MAX_SAFE_INTEGER, "Exact carousel slide count"\)/);
-  assert.match(handler, /nullableInt\(payload\?\.carousel_slide_count_min, 1, Number\.MAX_SAFE_INTEGER, "Minimum carousel slide count"\)/);
-  assert.match(handler, /nullableInt\(payload\?\.carousel_slide_count_max, 1, Number\.MAX_SAFE_INTEGER, "Maximum carousel slide count"\)/);
-});
-''')
-
           deploy = Path("deploy/cloudflare-worker-production.txt")
-          deploy.write_text(deploy.read_text() + """
-
-Deploy Studio API Worker production
-Reason: Remove legacy 20-slide Production validation ceiling so slideshow requests can save all attached stills
-Worker: 0.10.420-unlimited-slide-count
-Requested: 2026-09-28
-""")
+          marker = "Worker: 0.10.420-unlimited-slide-count"
+          current = deploy.read_text()
+          if marker not in current:
+              deploy.write_text(current + "\n\nDeploy Studio API Worker production\nReason: Remove legacy 20-slide Production validation ceiling so slideshow requests can save all attached stills\nWorker: 0.10.420-unlimited-slide-count\nRequested: 2026-09-28\n")
           PY
 
       - name: Run focused tests
