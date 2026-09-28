@@ -180,6 +180,7 @@ const IDENTITY_KEYS = [
   "content_id",
   "content_title",
   "content_item_id",
+  "profile_name",
   "blocker",
   "scheduled_post_date",
   "dispatch_note",
@@ -266,6 +267,7 @@ function asIncident(row) {
     content_id: cleanRecapId(row.content_id),
     content_title: cleanRecapText(row.content_title),
     content_item_id: cleanRecapText(row.content_item_id),
+    profile_name: cleanRecapText(row.profile_name || row.content_profile_name || row.profile),
     blocker: cleanRecapText(row.blocker),
     scheduled_post_date: cleanRecapText(row.scheduled_post_date),
     dispatch_note: cleanRecapText(row.dispatch_note || row.studio_publish_dispatch_note),
@@ -306,7 +308,7 @@ function latestIso(values, fallback) {
   return new Date(Math.max(...times)).toISOString();
 }
 
-export function buildQualityRecap({ incidents = [], events = [], limit = 12, generatedAt } = {}) {
+export function buildQualityRecap({ incidents = [], events = [], limit = 250, generatedAt } = {}) {
   const checkedAt = generatedAt || new Date().toISOString();
   const byFingerprint = new Map();
   const remember = (row, extraTimes = []) => {
@@ -359,6 +361,7 @@ export function buildQualityRecap({ incidents = [], events = [], limit = 12, gen
       record_id: row.record_id,
       content_title: contentTitle,
       content_id: contentId,
+      profile_name: cleanRecapText(row.profile_name),
       output_title: cleanRecapText(row.output_title),
       output_label: outputLabel,
       output_id: outputId,
