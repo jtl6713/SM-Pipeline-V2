@@ -1,15 +1,25 @@
 {
-  "correlation_id": "CULTURAL-CENTER-DIAGNOSE-20260927",
+  "correlation_id": "CULTURAL-CENTER-PLAN-REPAIR-20260927",
   "requests": [
     {
-      "name": "get-cultural-center-item4",
-      "method": "GET",
-      "path": "/api/production-requests/recZkbX3A0vk9Z2Wb/item4"
+      "name": "repair-cultural-center-plan",
+      "method": "POST",
+      "path": "/api/production-requests/recZkbX3A0vk9Z2Wb/plan",
+      "body": {
+        "platforms": [
+          "Instagram",
+          "Facebook",
+          "TikTok",
+          "YouTube"
+        ],
+        "package": "slides",
+        "skip_fbs1_guard": true
+      }
     },
     {
-      "name": "get-cultural-center-variants",
+      "name": "verify-cultural-center-item4",
       "method": "GET",
-      "path": "/api/production-requests/recZkbX3A0vk9Z2Wb/variants"
+      "path": "/api/production-requests/recZkbX3A0vk9Z2Wb/item4"
     }
   ]
 }
