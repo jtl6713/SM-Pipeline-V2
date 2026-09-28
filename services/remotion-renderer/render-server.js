@@ -19,7 +19,7 @@ const DEFAULT_MUSIC_END_FADE_SECONDS = 0.5;
 const PIPELINE_RUNNER_INTERNAL_URL = String(
     process.env.PIPELINE_RUNNER_INTERNAL_URL || 'http://127.0.0.1:3350'
 ).replace(/\/$/, '');
-const SERVICE_VERSION = '2026-09-28-watermark-hard-pin';
+const SERVICE_VERSION = '2026-09-28-watermark-expect-image';
 const PROJECT_DIR = __dirname;
 const PUBLIC_DIR = path.join(PROJECT_DIR, 'public');
 const OUT_DIR = path.join(PROJECT_DIR, 'out');
@@ -532,7 +532,8 @@ function assertDownloadedImageFile(filePath, sourceUrl) {
     }
 }
 
-function downloadUrlToFile(rawUrl, destinationFilePath, redirectsLeft = 5) {
+function downloadUrlToFile(rawUrl, destinationFilePath, redirectsLeft = 5, options = {}) {
+    const expectImage = Boolean(options && options.expectImage);
     return new Promise((resolve, reject) => {
         const client = rawUrl.startsWith('https://') ? https : http;
 
@@ -541,7 +542,9 @@ function downloadUrlToFile(rawUrl, destinationFilePath, redirectsLeft = 5) {
             {
                 headers: {
                     'User-Agent': 'SM-Pipeline-V2-Remotion-Render-Server',
-                    Accept: 'image/png,image/jpeg,image/webp,image/*;q=0.8,*/*;q=0.5',
+                    Accept: expectImage
+                        ? 'image/png,image/jpeg,image/webp,image/*;q=0.8,*/*;q=0.5'
+                        : '*/*',
                 },
             },
             (response) => {
@@ -559,7 +562,7 @@ function downloadUrlToFile(rawUrl, destinationFilePath, redirectsLeft = 5) {
                     const redirectedUrl = new URL(response.headers.location, rawUrl).toString();
                     response.resume();
 
-                    downloadUrlToFile(redirectedUrl, destinationFilePath, redirectsLeft - 1)
+                    downloadUrlToFile(redirectedUrl, destinationFilePath, redirectsLeft - 1, options)
                         .then(resolve)
                         .catch(reject);
 
@@ -573,7 +576,7 @@ function downloadUrlToFile(rawUrl, destinationFilePath, redirectsLeft = 5) {
                 }
 
                 const contentType = String(response.headers['content-type'] || '').toLowerCase();
-                if (contentType.includes('text/html') || contentType.includes('application/json')) {
+                if (expectImage && (contentType.includes('text/html') || contentType.includes('application/json'))) {
                     response.resume();
                     reject(new Error(
                         `Download returned ${contentType || 'non-image'} for ${rawUrl} `
@@ -589,7 +592,14 @@ function downloadUrlToFile(rawUrl, destinationFilePath, redirectsLeft = 5) {
                 fileStream.on('finish', () => {
                     fileStream.close(() => {
                         try {
-                            assertDownloadedImageFile(destinationFilePath, rawUrl);
+                            if (expectImage) {
+                                assertDownloadedImageFile(destinationFilePath, rawUrl);
+                            } else {
+                                const size = fs.statSync(destinationFilePath).size;
+                                if (size < 32) {
+                                    throw new Error(`Downloaded file too small (${size} bytes) from ${rawUrl}`);
+                                }
+                            }
                             resolve(destinationFilePath);
                         } catch (error) {
                             try { fs.unlinkSync(destinationFilePath); } catch {}
@@ -844,7 +854,7 @@ async function rewriteWatermarkAsset({ watermarkUrl, jobAssetDir, job }) {
     const destination = path.join(jobAssetDir, 'watermark.png');
 
     appendLog(job, `Downloading watermark from private Drive authority (${driveFileId})`);
-    await downloadUrlToFile(sourceUrl, destination);
+    await downloadUrlToFile(sourceUrl, destination, 5, { expectImage: true });
     appendLog(job, `Downloaded watermark to ${toProjectRelative(destination)}`);
     return toPublicSrc(destination);
 }
