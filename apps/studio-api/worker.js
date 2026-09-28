@@ -247,6 +247,7 @@ export default {
       const isOperationsCompressRoute = url.pathname === "/api/operations/compress";
       const isOperationsCompressionStatusRoute = url.pathname === "/api/operations/compression";
       const isOpsAzNavyPierKickRoute = url.pathname === "/api/ops/az-navy-pier-kick";
+      const isOpsMiamiTikTokSecretRoute = url.pathname === "/api/ops/tiktok/miami/pipeline-secret";
       const isOpsDeskInventoryRoute = url.pathname === "/api/ops/desk/inventory";
       const isOpsDeskActivityRoute = url.pathname === "/api/ops/desk/activity";
       const isOpsDeskModeRoute = url.pathname === "/api/ops/desk/mode";
@@ -329,6 +330,7 @@ export default {
       const isOperationsOutputPublishKickWrite = isOperationsOutputPublishKickRoute && request.method === "POST";
       const isOperationsCompressWrite = isOperationsCompressRoute && request.method === "POST";
       const isOpsAzNavyPierKickWrite = isOpsAzNavyPierKickRoute && request.method === "POST";
+      const isOpsMiamiTikTokSecretWrite = isOpsMiamiTikTokSecretRoute && request.method === "POST";
       const isOpsDeskModeWrite = isOpsDeskModeRoute && request.method === "PATCH";
       const isAiApiWrite = isAiApiRoute && request.method === "PATCH";
       const isOperationsResetRenderUrlsWrite = isOperationsResetRenderUrlsRoute && request.method === "POST";
@@ -399,6 +401,7 @@ export default {
         isOperationsOutputPublishKickWrite ||
         isOperationsCompressWrite ||
         isOpsAzNavyPierKickWrite ||
+        isOpsMiamiTikTokSecretWrite ||
         isOpsDeskModeWrite ||
         isAiApiWrite ||
         isOperationsResetRenderUrlsWrite ||
@@ -441,7 +444,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.412-clip-media-kind",
+          version: "0.10.413-miami-tiktok-secret-sync",
           studio_desk_inventory_v1: true,
           studio_desk_activity_v1: true,
           studio_tiktok_complete_v1: true,
@@ -876,6 +879,12 @@ export default {
         const phase = String(url.searchParams.get("phase") || "auto").trim().toLowerCase() || "auto";
         const result = await opsForceAzNavyPierTitle(env, { phase });
         return respond(request, env, result);
+      }
+
+      if (isOpsMiamiTikTokSecretRoute) {
+        requirePermission(authorization, "tenant_admin");
+        assertWriteRequest(request, env);
+        return syncMiamiTikTokPipelineSecret(request, env);
       }
 
       if (isOperationsResetRenderUrlsRoute) {
@@ -8511,6 +8520,42 @@ async function item4VariantQueueRows(env, recordId) {
   return listRecords(env, ITEM4_VARIANT_QUEUE_TABLE, {
     limit: 500,
     filterFormula: `{Production_Request_Record_ID}='${String(recordId).replace(/'/g, "\\'")}'`,
+  });
+}
+
+async function syncMiamiTikTokPipelineSecret(request, env) {
+  const payload = await readJsonBody(request);
+  const secret = String(payload?.secret || "").trim();
+  if (secret.length < 32) throw new HttpError(400, "Miami TikTok pipeline secret is missing or too short");
+
+  const settingName = "MIAMI_TIKTOK_PIPELINE_SECRET";
+  const rows = await listRecords(env, "Pipeline Settings", {
+    limit: 2,
+    filterFormula: `{Setting_Name}='${settingName}'`,
+  });
+  const fields = {
+    Setting_Name: settingName,
+    Setting_Value: secret,
+    Active: true,
+    Notes: "Miami TikTok Worker shared pipeline secret. Synchronized by owner-only Studio repair operation; value is never returned.",
+  };
+
+  if (rows[0]?.id) {
+    await airtableFetch(env, "Pipeline Settings", rows[0].id, {
+      method: "PATCH",
+      body: JSON.stringify({ fields, typecast: true }),
+    });
+  } else {
+    await airtableFetch(env, "Pipeline Settings", "", {
+      method: "POST",
+      body: JSON.stringify({ fields, typecast: true }),
+    });
+  }
+
+  return respond(request, env, {
+    ok: true,
+    setting_name: settingName,
+    synchronized: true,
   });
 }
 
