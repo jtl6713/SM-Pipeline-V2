@@ -1,0 +1,33 @@
+name: Repair Force Exact Voiceover Authority
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'deploy/repair-force-exact-voiceover-authority.txt'
+
+permissions:
+  contents: write
+
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: main
+      - name: Patch Worker narration authority
+        run: python repair/scripts/patch_force_exact_voiceover_authority.py
+      - name: Run focused tests
+        run: |
+          node --test apps/studio-api/force-exact-voiceover-authority.test.mjs
+          node --check apps/studio-api/worker.js
+      - name: Commit repair
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add apps/studio-api/worker.js apps/studio-api/*.test.mjs deploy/cloudflare-worker-production.txt
+          git diff --cached --quiet && exit 0
+          git commit -m "Make Force exact narration authoritative"
+          git push origin HEAD:main
