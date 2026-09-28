@@ -453,7 +453,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.420-unlimited-slide-count",
+          version: "0.10.421-unlimited-slide-bridge",
           studio_desk_inventory_v1: true,
           studio_desk_activity_v1: true,
           studio_tiktok_complete_v1: true,
@@ -13623,8 +13623,8 @@ function productionRequestCompatibilityIssues(record) {
     }
 
     if (mode === "Exact") {
-      if (!Number.isInteger(exact) || exact < 1 || exact > 20) {
-        issues.push("Enter an exact carousel slide count from 1 through 20.");
+      if (!Number.isInteger(exact) || exact < 1) {
+        issues.push("Enter a valid exact carousel slide count of 1 or more.");
       }
     }
 
@@ -13633,10 +13633,9 @@ function productionRequestCompatibilityIssues(record) {
         !Number.isInteger(min) ||
         !Number.isInteger(max) ||
         min < 1 ||
-        max > 20 ||
         min > max
       ) {
-        issues.push("Enter a valid carousel slide-count range from 1 through 20 with minimum less than or equal to maximum.");
+        issues.push("Enter a valid carousel slide-count range with minimum at least 1 and minimum less than or equal to maximum.");
       }
     }
   }
