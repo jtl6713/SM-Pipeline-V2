@@ -4813,7 +4813,13 @@
       payload.video_clip_count_mode = "AI decides";
       payload.video_clip_count_exact = "";
     }
-    if (payload.carousel_slide_count_mode === "Exact" && String(payload.carousel_slide_count_exact).trim() === "") {
+    const slideCountApplies = ["Carousel", "Photo Set", "Feed Post"].includes(String(payload.content_type || "").trim());
+    if (!slideCountApplies) {
+      payload.carousel_slide_count_mode = "AI decides";
+      payload.carousel_slide_count_exact = "";
+      payload.carousel_slide_count_min = "";
+      payload.carousel_slide_count_max = "";
+    } else if (payload.carousel_slide_count_mode === "Exact" && String(payload.carousel_slide_count_exact).trim() === "") {
       payload.carousel_slide_count_exact = item4Workspace?.assets?.length || ezStagedFiles.length || 2;
     }
     if (payload.caption_mode === "Leave blank" || captionFields.mode === "none") {
@@ -11036,7 +11042,16 @@
       payload.video_clip_count_mode = activeProductionRequest?.video_clip_count_mode || "AI decides";
       payload.video_clip_count_exact = activeProductionRequest?.video_clip_count_exact ?? "";
     }
-    if (payload.carousel_slide_count_mode === "Exact" && !String(payload.carousel_slide_count_exact || "").trim()) {
+    const slideCountApplies = ["Carousel", "Photo Set", "Feed Post"].includes(String(payload.content_type || "").trim());
+    if (!slideCountApplies) {
+      // Carousel structure is irrelevant to video requests. Never let the number
+      // of selected source photos become an invalid carousel count on save.
+      payload.carousel_slide_count_mode = "AI decides";
+      payload.carousel_slide_count_exact = "";
+      payload.carousel_slide_count_min = "";
+      payload.carousel_slide_count_max = "";
+    }
+    if (slideCountApplies && payload.carousel_slide_count_mode === "Exact" && !String(payload.carousel_slide_count_exact || "").trim()) {
       payload.carousel_slide_count_exact = activeProductionRequest?.carousel_slide_count_exact
         || item4Workspace?.assets?.length
         || ezStagedFiles.length
