@@ -166,6 +166,16 @@ export function deskWorkIdentity(row = {}) {
     content_id: deskIdentityValue(pick.content_id ?? source.content_id),
     content_title: clean(pick.content_title || source.content_title),
     content_item_id: clean(pick.content_item_id || source.content_item_id),
+    profile_name: clean(
+      pick.profile_name
+      || pick.content_profile_name
+      || pick.content_profile
+      || pick.profile
+      || source.profile_name
+      || source.content_profile_name
+      || source.content_profile
+      || source.profile
+    ),
     scheduled_post_date: clean(pick.scheduled_post_date || source.scheduled_post_date),
     dispatch_note: clean(pick.dispatch_note || source.dispatch_note || source.studio_publish_dispatch_note),
     dispatch_count: deskIdentityValue(pick.dispatch_count ?? source.dispatch_count ?? source.studio_publish_dispatch_count),

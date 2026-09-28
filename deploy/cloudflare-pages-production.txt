@@ -160,3 +160,6 @@ TikTok Resend draft button + Output 847 LA inbox republish
 Reason: Manual Pipeline control to rearm Ready for Delivery and dispatch TTD; footer 0.6.415.
 UI: 0.6.415-tiktok-draft-resend
 Requested: 2026-09-28T15:30:00Z
+
+Merge conflict resolution: bump UI past main quality-recap to 0.6.416-tiktok-draft-resend
+Requested: 2026-09-28T15:45:00Z
