@@ -207,3 +207,9 @@ Deploy Studio Pages production
 Reason: Remove source-still up/down arrows now that drag reorder is live, and add live script/narration duration estimate to Production
 UI: 0.6.425-narration-estimate-drag-only
 Requested: 2026-09-28
+
+
+Deploy Studio Pages production
+Reason: Keep operator-selected IG/FB Stories and YouTube Short + Slideshow Video authoritative; classify still-source rendered-video packages as Photo Set, not Carousel
+UI: 0.6.426-output-selection-authority
+Requested: 2026-09-28
