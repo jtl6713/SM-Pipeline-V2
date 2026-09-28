@@ -247,7 +247,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.421-cover-line-break";
+  const BUILD_ID = "item4-0.6.422-production-drag-reorder";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -7078,8 +7078,8 @@
           <button type="button" class="item4-asset-order-btn" data-item4-reorder="${escapeHtml(asset.id)}" data-dir="down" ${index >= total - 1 ? "disabled" : ""} aria-label="Move later">↓</button>
         </div>`
       : "";
-    return `<article class="item4-asset-card${showCaption ? " with-caption" : ""}" data-item4-asset="${escapeHtml(asset.id)}">
-      <div class="item4-thumb">${visual}${orderControls}</div>
+    return `<article class="item4-asset-card${showCaption ? " with-caption" : ""}${canReorder ? " is-reorderable" : ""}" data-item4-asset="${escapeHtml(asset.id)}" ${canReorder ? 'draggable="true"' : ""}>
+      <div class="item4-thumb">${visual}${canReorder ? `<button type="button" class="item4-asset-drag-handle" data-item4-drag-handle="${escapeHtml(asset.id)}" aria-label="Drag to reorder" title="Drag to reorder">⋮⋮</button>` : ""}${orderControls}</div>
       <div class="item4-asset-meta"><strong>${escapeHtml(asset.name || (isVideo ? "Clip" : "Photo"))}</strong><span>${escapeHtml(isVideo ? `Clip ${asset.order || ""}` : `Photo ${asset.order || ""}`)} · ${escapeHtml(dims)}${durationNote}${formatNote}</span></div>
       ${captionField}
       ${canRemove ? `<button type="button" class="item4-remove-asset" data-remove-item4-asset="${escapeHtml(asset.id)}" title="${ezIsFinishedVideo() ? "Remove this video" : "Remove this photo"}">×</button>` : ""}
@@ -7088,18 +7088,18 @@
 
   let item4ReorderBusy = false;
 
-  async function reorderItem4Asset(assetId, direction) {
+  async function moveItem4AssetTo(assetId, targetIndex) {
     if (!activeProductionRequest?.id || item4ReorderBusy) return;
     const assets = (Array.isArray(item4Workspace?.assets) ? item4Workspace.assets : [])
       .slice()
       .sort((a, b) => Number(a.order || 0) - Number(b.order || 0));
     const index = assets.findIndex((asset) => String(asset.id || "") === String(assetId || ""));
     if (index < 0) return;
-    const target = direction === "up" ? index - 1 : index + 1;
-    if (target < 0 || target >= assets.length) return;
+    const boundedTarget = Math.max(0, Math.min(Number(targetIndex), assets.length - 1));
+    if (!Number.isFinite(boundedTarget) || boundedTarget === index) return;
     const next = assets.slice();
     const [moved] = next.splice(index, 1);
-    next.splice(target, 0, moved);
+    next.splice(boundedTarget, 0, moved);
     const ordered = next.map((asset, orderIndex) => ({ ...asset, order: orderIndex + 1 }));
     const previous = item4Workspace;
     item4ReorderBusy = true;
@@ -7123,7 +7123,7 @@
         renderItem4Assets(item4Workspace);
         renderEzPhotoStrip();
       }
-      setRequestMessage(`Photo order updated (${target + 1} of ${ordered.length}). Rebuild frames if you already prepared variants.`, "success");
+      setRequestMessage(`Photo order updated (${boundedTarget + 1} of ${ordered.length}). Rebuild frames if you already prepared variants.`, "success");
     } catch (error) {
       item4Workspace = previous;
       item4AssetStripSignature = "";
@@ -7133,6 +7133,101 @@
     } finally {
       item4ReorderBusy = false;
     }
+  }
+
+  async function reorderItem4Asset(assetId, direction) {
+    const assets = (Array.isArray(item4Workspace?.assets) ? item4Workspace.assets : [])
+      .slice()
+      .sort((a, b) => Number(a.order || 0) - Number(b.order || 0));
+    const index = assets.findIndex((asset) => String(asset.id || "") === String(assetId || ""));
+    if (index < 0) return;
+    return moveItem4AssetTo(assetId, direction === "up" ? index - 1 : index + 1);
+  }
+
+  let item4DraggedAssetId = "";
+
+  function clearItem4DragState(host) {
+    item4DraggedAssetId = "";
+    host?.querySelectorAll(".is-dragging, .is-drag-over").forEach((node) => {
+      node.classList.remove("is-dragging", "is-drag-over");
+    });
+  }
+
+  function bindItem4AssetDragReorder(host, sortedAssets) {
+    if (!host || sortedAssets.length < 2) return;
+    host.querySelectorAll(".item4-asset-card.is-reorderable").forEach((card) => {
+      card.addEventListener("dragstart", (event) => {
+        if (item4ReorderBusy) {
+          event.preventDefault();
+          return;
+        }
+        item4DraggedAssetId = String(card.dataset.item4Asset || "");
+        if (!item4DraggedAssetId) {
+          event.preventDefault();
+          return;
+        }
+        card.classList.add("is-dragging");
+        if (event.dataTransfer) {
+          event.dataTransfer.effectAllowed = "move";
+          event.dataTransfer.setData("text/plain", item4DraggedAssetId);
+        }
+      });
+      card.addEventListener("dragover", (event) => {
+        if (!item4DraggedAssetId || item4DraggedAssetId === String(card.dataset.item4Asset || "")) return;
+        event.preventDefault();
+        if (event.dataTransfer) event.dataTransfer.dropEffect = "move";
+        host.querySelectorAll(".is-drag-over").forEach((node) => node.classList.remove("is-drag-over"));
+        card.classList.add("is-drag-over");
+      });
+      card.addEventListener("dragleave", () => card.classList.remove("is-drag-over"));
+      card.addEventListener("drop", (event) => {
+        event.preventDefault();
+        const draggedId = item4DraggedAssetId || event.dataTransfer?.getData("text/plain") || "";
+        const targetId = String(card.dataset.item4Asset || "");
+        const targetIndex = sortedAssets.findIndex((asset) => String(asset.id || "") === targetId);
+        clearItem4DragState(host);
+        if (draggedId && targetIndex >= 0 && draggedId !== targetId) moveItem4AssetTo(draggedId, targetIndex);
+      });
+      card.addEventListener("dragend", () => clearItem4DragState(host));
+    });
+
+    host.querySelectorAll("[data-item4-drag-handle]").forEach((handle) => {
+      handle.addEventListener("pointerdown", (event) => {
+        if (event.pointerType === "mouse" || item4ReorderBusy) return;
+        const draggedId = String(handle.dataset.item4DragHandle || "");
+        const sourceCard = handle.closest("[data-item4-asset]");
+        if (!draggedId || !sourceCard) return;
+        item4DraggedAssetId = draggedId;
+        sourceCard.classList.add("is-dragging");
+        handle.setPointerCapture?.(event.pointerId);
+        event.preventDefault();
+
+        const onMove = (moveEvent) => {
+          const under = document.elementFromPoint(moveEvent.clientX, moveEvent.clientY)?.closest?.("[data-item4-asset]");
+          host.querySelectorAll(".is-drag-over").forEach((node) => node.classList.remove("is-drag-over"));
+          if (under && under !== sourceCard && host.contains(under)) under.classList.add("is-drag-over");
+        };
+        const onEnd = (endEvent) => {
+          handle.removeEventListener("pointermove", onMove);
+          handle.removeEventListener("pointerup", onEnd);
+          handle.removeEventListener("pointercancel", onCancel);
+          const under = document.elementFromPoint(endEvent.clientX, endEvent.clientY)?.closest?.("[data-item4-asset]");
+          const targetId = String(under?.dataset?.item4Asset || "");
+          const targetIndex = sortedAssets.findIndex((asset) => String(asset.id || "") === targetId);
+          clearItem4DragState(host);
+          if (targetIndex >= 0 && targetId && targetId !== draggedId) moveItem4AssetTo(draggedId, targetIndex);
+        };
+        const onCancel = () => {
+          handle.removeEventListener("pointermove", onMove);
+          handle.removeEventListener("pointerup", onEnd);
+          handle.removeEventListener("pointercancel", onCancel);
+          clearItem4DragState(host);
+        };
+        handle.addEventListener("pointermove", onMove);
+        handle.addEventListener("pointerup", onEnd);
+        handle.addEventListener("pointercancel", onCancel);
+      });
+    });
   }
 
   function renderItem4Assets(status) {
@@ -7170,7 +7265,7 @@
     } else {
       item4AssetStripSignature = signature;
       host.innerHTML = sortedAssets.length
-        ? `${sortedAssets.length > 1 ? `<p class="item4-reorder-hint">Use ↑ ↓ on each photo to set carousel order.</p>` : ""}${sortedAssets.map((asset, index) => item4AssetThumb(asset, { index, total: sortedAssets.length })).join("")}`
+        ? `${sortedAssets.length > 1 ? `<p class="item4-reorder-hint">Drag photos into the order you want. ↑ ↓ remain available for fine adjustment.</p>` : ""}${sortedAssets.map((asset, index) => item4AssetThumb(asset, { index, total: sortedAssets.length })).join("")}`
         : '<div class="empty compact-empty"></div>';
     }
     host.querySelectorAll("[data-item4-preview-image]").forEach((img) => {
@@ -7190,6 +7285,7 @@
         reorderItem4Asset(button.dataset.item4Reorder, button.dataset.dir);
       });
     });
+    bindItem4AssetDragReorder(host, sortedAssets);
     item4BindClipPlayers(host);
     bindEzCaptionInputs(host);
     productionDecorateTooltips(host);
