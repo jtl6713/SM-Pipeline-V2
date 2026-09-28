@@ -10216,6 +10216,7 @@
         result = await api(`/api/ideas/${encodeURIComponent(idea.id)}/production-request`, {
           method: "POST",
           body: JSON.stringify({}),
+          timeoutMs: 120000,
         });
       }
       await closeIdeaDrawer({ save: false, resumePhotoListening: false });
