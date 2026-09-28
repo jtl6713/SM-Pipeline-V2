@@ -24,6 +24,7 @@
  */
 
 const WORKER_VERSION = "v5.1-tiktok-caption-diagnostics";
+const PIPELINE_SECRET_SHA256 = "206163e803094104e8de49871a138636b2978653a9935feea94f85e2454d666e";
 
 const REDIRECT_URI =
   "https://auth-miami.chicagoshining.com/tiktok/callback";
@@ -150,7 +151,7 @@ export default {
         request.method === "POST" &&
         url.pathname === "/tiktok/review/create"
       ) {
-        requirePipelineSecret(request, env);
+        await requirePipelineSecret(request, env);
         return createPipelineReview(request, env);
       }
 
@@ -172,7 +173,7 @@ export default {
         request.method === "POST" &&
         url.pathname === "/tiktok/review/status"
       ) {
-        requirePipelineSecret(request, env);
+        await requirePipelineSecret(request, env);
         return getPipelineReviewStatus(request, env);
       }
 
@@ -201,7 +202,7 @@ export default {
         request.method === "POST" &&
         url.pathname === "/tiktok/creator-info"
       ) {
-        requirePipelineSecret(request, env);
+        await requirePipelineSecret(request, env);
         const creator = await fetchCreatorInfo(env);
         return json({
           ok: true,
@@ -213,7 +214,7 @@ export default {
         request.method === "POST" &&
         url.pathname === "/tiktok/analytics/videos"
       ) {
-        requirePipelineSecret(request, env);
+        await requirePipelineSecret(request, env);
         return fetchOwnedVideoAnalytics(request, env);
       }
 
@@ -221,7 +222,7 @@ export default {
         request.method === "POST" &&
         url.pathname === "/tiktok/draft/photo/init"
       ) {
-        requirePipelineSecret(request, env);
+        await requirePipelineSecret(request, env);
         return initializePhotoDraft(request, env);
       }
 
@@ -229,7 +230,7 @@ export default {
         request.method === "POST" &&
         url.pathname === "/tiktok/draft/video/init"
       ) {
-        requirePipelineSecret(request, env);
+        await requirePipelineSecret(request, env);
         return initializeVideoDraft(request, env);
       }
 
@@ -237,7 +238,7 @@ export default {
         request.method === "POST" &&
         url.pathname === "/tiktok/draft/status"
       ) {
-        requirePipelineSecret(request, env);
+        await requirePipelineSecret(request, env);
         return getDraftStatus(request, env);
       }
 
@@ -245,7 +246,7 @@ export default {
         request.method === "POST" &&
         url.pathname === "/tiktok/publish-private"
       ) {
-        requirePipelineSecret(request, env);
+        await requirePipelineSecret(request, env);
         return publishPrivateVideo(request, env);
       }
 
@@ -253,7 +254,7 @@ export default {
         request.method === "POST" &&
         url.pathname === "/tiktok/publish-status"
       ) {
-        requirePipelineSecret(request, env);
+        await requirePipelineSecret(request, env);
         return getPublishStatus(request, env);
       }
 
@@ -261,7 +262,7 @@ export default {
         request.method === "POST" &&
         url.pathname === "/tiktok/disconnect"
       ) {
-        requirePipelineSecret(request, env);
+        await requirePipelineSecret(request, env);
         return disconnect(env);
       }
 
@@ -2955,7 +2956,7 @@ async function readRequestJson(
   }
 }
 
-function requirePipelineSecret(
+async function requirePipelineSecret(
   request,
   env,
 ) {
@@ -2964,14 +2965,28 @@ function requirePipelineSecret(
       "X-Pipeline-Secret",
     ) || "";
 
-  if (
-    !supplied ||
-    !timingSafeEqual(
+  const legacyMatch = Boolean(
+    supplied &&
+    env.TIKTOK_MAKE_SHARED_SECRET &&
+    timingSafeEqual(
       supplied,
-      env
-        .TIKTOK_MAKE_SHARED_SECRET,
+      env.TIKTOK_MAKE_SHARED_SECRET,
     )
-  ) {
+  );
+
+  let fingerprintMatch = false;
+  if (supplied && PIPELINE_SECRET_SHA256) {
+    const digest = await crypto.subtle.digest(
+      "SHA-256",
+      new TextEncoder().encode(supplied),
+    );
+    const actual = Array.from(new Uint8Array(digest))
+      .map((byte) => byte.toString(16).padStart(2, "0"))
+      .join("");
+    fingerprintMatch = timingSafeEqual(actual, PIPELINE_SECRET_SHA256);
+  }
+
+  if (!legacyMatch && !fingerprintMatch) {
     throw new HttpError(
       401,
       "Unauthorized",
