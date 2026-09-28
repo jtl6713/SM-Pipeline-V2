@@ -185,3 +185,9 @@ Reason: Add Download Cover link beneath output schedule/Open post metadata when 
 UI: 0.6.419-download-cover
 Source merge: 644e038f93c66eb4cee84cb344d4f58d76053917
 Requested: 2026-09-28
+
+Deploy Studio Pages production
+Reason: Force Download Cover onto a separate line beneath Open post metadata
+UI: 0.6.420-cover-new-line
+Source merge: 69b7da3e3ce820516617f6f321621737ed6e1aeb
+Requested: 2026-09-28
