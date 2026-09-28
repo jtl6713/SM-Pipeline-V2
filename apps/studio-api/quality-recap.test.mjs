@@ -17,6 +17,7 @@ test("recap uses everyday words and names the post", () => {
       platform_output_type: "Slideshow",
       content_id: 209,
       content_title: "Vizcaya Rainy Day Plan",
+      profile_name: "MiamiShining - Miami",
     }],
   });
   assert.equal(recap.open_count, 1);
@@ -24,6 +25,7 @@ test("recap uses everyday words and names the post", () => {
   assert.match(recap.cards[0].found, /failed while sending/i);
   assert.equal(recap.cards[0].content_title, "Vizcaya Rainy Day Plan");
   assert.equal(recap.cards[0].content_id, 209);
+  assert.equal(recap.cards[0].profile_name, "MiamiShining - Miami");
   assert.equal(recap.cards[0].output_label, "TikTok Slideshow");
   assert.equal(recap.cards[0].output_id, 908);
   assert.match(recap.cards[0].action, /Restarted the send/);
