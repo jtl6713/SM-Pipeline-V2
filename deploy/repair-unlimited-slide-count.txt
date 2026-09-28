@@ -4,3 +4,4 @@ Reason: Production save fails when exact slide count exceeds legacy Worker max 2
 Retry: 2026-09-28T20:49Z
 Retry bridge preflight repair: 2026-09-28T15:54:00-05:00
 Retry bridge repair via script: 2026-09-28T15:56:00-05:00
+Comprehensive retry: 2026-09-28T16:18:00-05:00
