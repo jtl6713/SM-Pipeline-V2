@@ -453,7 +453,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.419-pipeline-tiktok-open-fallback",
+          version: "0.10.420-unlimited-slide-count",
           studio_desk_inventory_v1: true,
           studio_desk_activity_v1: true,
           studio_tiktok_complete_v1: true,
@@ -12693,9 +12693,9 @@ async function cleanProductionRequestPayload(payload, env) {
   if (slideCountApplies) {
     const slideExactRaw = payload?.carousel_slide_count_exact;
     const slideExactCoerced = (slideExactRaw === 0 || slideExactRaw === "0") ? 1 : slideExactRaw;
-    carouselSlideCountExact = nullableInt(slideExactCoerced, 1, 20, "Exact carousel slide count");
-    carouselSlideCountMin = nullableInt(payload?.carousel_slide_count_min, 1, 20, "Minimum carousel slide count");
-    carouselSlideCountMax = nullableInt(payload?.carousel_slide_count_max, 1, 20, "Maximum carousel slide count");
+    carouselSlideCountExact = nullableInt(slideExactCoerced, 1, Number.MAX_SAFE_INTEGER, "Exact carousel slide count");
+    carouselSlideCountMin = nullableInt(payload?.carousel_slide_count_min, 1, Number.MAX_SAFE_INTEGER, "Minimum carousel slide count");
+    carouselSlideCountMax = nullableInt(payload?.carousel_slide_count_max, 1, Number.MAX_SAFE_INTEGER, "Maximum carousel slide count");
 
     if (carouselSlideCountMode === "AI decides") {
       carouselSlideCountExact = carouselSlideCountMin = carouselSlideCountMax = null;

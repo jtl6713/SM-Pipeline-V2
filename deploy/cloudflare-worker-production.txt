@@ -226,3 +226,9 @@ Keep Content 143 / TikTok Manual Fallback packages on Pipeline
 Reason: studioPipelineOpenOutputFormula Manual Fallback + 1000 open scan; Worker 0.10.419. Auth-signature TikToks already Published (847/889/937/963/etc).
 Worker: 0.10.419-pipeline-tiktok-open-fallback
 Requested: 2026-09-28T15:55:00Z
+
+
+Deploy Studio API Worker production
+Reason: Remove legacy 20-slide Production validation ceiling so slideshow requests can save all attached stills
+Worker: 0.10.420-unlimited-slide-count
+Requested: 2026-09-28
