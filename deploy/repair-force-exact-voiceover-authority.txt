@@ -1,0 +1,3 @@
+Repair Force exact voiceover authority
+Requested: 2026-09-28
+Content 256 exposed stale generated audio surviving a later saved exact script.
