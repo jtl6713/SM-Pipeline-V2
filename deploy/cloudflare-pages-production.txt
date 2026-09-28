@@ -179,3 +179,9 @@ Reason: Normalize schedule publish labels — Needs Schedule before scheduling, 
 UI: 0.6.418-schedule-status
 Source merge: b242c404a368fa82843675c8e324040c55e3fb40
 Requested: 2026-09-28
+
+Deploy Studio Pages production
+Reason: Add Download Cover link beneath output schedule/Open post metadata when Thumbnail_URL is available
+UI: 0.6.419-download-cover
+Source merge: 644e038f93c66eb4cee84cb344d4f58d76053917
+Requested: 2026-09-28
