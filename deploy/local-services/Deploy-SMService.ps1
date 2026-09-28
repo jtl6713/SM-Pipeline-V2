@@ -51,7 +51,29 @@ $ServiceMap = @{
         StartKind = 'node'
         StartFile = 'render-server.js'
         DependencyKind = 'node'
-        RuntimeDirs = @('node_modules','.cache','out','render-assets','render-props','renders','output','outputs','tmp','temp','logs')
+        # Exclude multi-GB runtime trees from New-SourceBackup / Get-SafeLiveFiles.
+        # Top-level render-assets alone is not enough: live boxes still hold
+        # public\render-assets (legacy), job-assets (current), and public-empty.
+        # Recursing those during step 4/8 hangs the Ops deploy for hours.
+        RuntimeDirs = @(
+            'node_modules',
+            '.cache',
+            'out',
+            'dist',
+            'build',
+            'public',
+            'public\render-assets',
+            'job-assets',
+            'public-empty',
+            'render-assets',
+            'render-props',
+            'renders',
+            'output',
+            'outputs',
+            'tmp',
+            'temp',
+            'logs'
+        )
     }
     'watermark' = @{
         DisplayName = 'Watermark'
