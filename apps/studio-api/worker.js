@@ -440,7 +440,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.407-private-drive-watermark-park",
+          version: "0.10.408-r4-watermark-gate",
           studio_desk_inventory_v1: true,
           studio_desk_activity_v1: true,
           studio_tiktok_complete_v1: true,
@@ -567,6 +567,7 @@ export default {
           studio_all_visual_watermark_v1: true,
           studio_private_drive_watermark_heal_v1: true,
           studio_private_drive_watermark_park_v1: true,
+          studio_r4_private_drive_watermark_gate_v1: true,
           studio_idea_chain_python_gates_v1: true,
           studio_music_catalog_fallback_v1: true,
           studio_music_upload_v1: true,
@@ -10940,7 +10941,54 @@ async function item4PulseT1Python(env, options = {}) {
   return payload;
 }
 
+async function studioGateR4ForPrivateDriveWatermark(env, options = {}) {
+  const rendererReady = await studioRemotionPrivateDriveLocalizationReady();
+  if (rendererReady) return { renderer_ready: true, parked: [] };
+
+  const parked = [];
+  const parkOne = async (row) => {
+    if (!row || !studioChicagoWatermarkOutput(row)) return false;
+    await studioParkChicagoWatermarkRender(env, row);
+    parked.push({ id: row.id, output_id: f(row, "Output_ID") || null });
+    return true;
+  };
+
+  if (options.outputRecordId) {
+    const row = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, options.outputRecordId).catch(() => null);
+    if (row) await parkOne(row);
+    return { renderer_ready: false, parked };
+  }
+
+  // Global R4 pulses use the pipeline-runner's own selector. Park every
+  // ChicagoShining Ready-for-Render row visible in the newest batch first so
+  // that selector cannot accidentally launch one against the old renderer.
+  const rows = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
+    limit: 50,
+    sortField: "Output_ID",
+    sortDirection: "desc",
+    filterFormula: 'AND({Test_Run_ID}=BLANK(),{Render_Status}="Ready for Render",{Remotion_Job_ID}="")',
+  }).catch(() => []);
+  for (const row of rows || []) {
+    try { await parkOne(row); } catch (error) {
+      console.warn("R4 private Drive watermark gate park failed", row?.id, error);
+    }
+  }
+  return { renderer_ready: false, parked };
+}
+
 async function item4PulseR4Python(env, options = {}) {
+  const gate = await studioGateR4ForPrivateDriveWatermark(env, options);
+  if (options.outputRecordId && gate.parked.length) {
+    return {
+      status: "skipped",
+      message: "R4 parked until Remotion private Drive watermark localization is live",
+      details: {
+        reason: "private_drive_watermark_renderer_not_updated",
+        parked: gate.parked,
+      },
+    };
+  }
+
   const body = { extra: {} };
   if (options.outputRecordId) body.output_record_id = options.outputRecordId;
   if (options.testRunId) body.test_run_id = options.testRunId;
