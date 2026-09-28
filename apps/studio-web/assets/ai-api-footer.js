@@ -11,10 +11,11 @@
       ? payload.current_provider
       : null;
     const failover = Boolean(payload.failover_active);
+    const failoverEnabled = Boolean(payload.failover_enabled);
     host.innerHTML = [
       '<span class="ai-api-footer-label"><strong>AI API:</strong> <span class="ai-api-dot" aria-hidden="true">🟢</span> ',
       '<strong class="ai-api-provider">' + current + '</strong> <strong>Preferred</strong></span>',
-      '<span class="ai-api-failover">' + next + ' Failover</span>',
+      '<span class="ai-api-failover">' + (failoverEnabled ? (next + ' Failover') : (next + ' Standby · disabled')) + '</span>',
       '<button type="button" class="ai-api-toggle" id="aiApiToggle">Make ' + next + ' Preferred</button>',
       currentProvider ? '<span class="ai-api-current" title="Provider that handled the most recent successful AI request">Current: ' + currentProvider + (failover ? ' (failover)' : '') + '</span>' : ''
     ].join("");
