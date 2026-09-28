@@ -360,6 +360,32 @@ def overlay_from_caption(text: str) -> dict[str, Any] | None:
     }
 
 
+def collapse_repeated_scene_caption_overlays(clips: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Keep one intro lower-third when every scene repeats the same caption.
+
+    Variant/asset metadata can accidentally stamp the parent title onto every
+    photo. Rendering that as a scene caption produces a lower-third covering
+    the entire Reel/Short. A repeated identical caption across every clip is
+    treated as one intro label; genuinely different per-scene captions remain.
+    """
+    rows = list(clips or [])
+    if len(rows) < 2:
+        return rows
+    texts = []
+    for clip in rows:
+        overlay = clip.get("overlay") if isinstance(clip.get("overlay"), dict) else {}
+        texts.append(str(overlay.get("text") or clip.get("caption") or "").strip())
+    nonempty = [text for text in texts if text]
+    if len(nonempty) != len(rows) or len(set(nonempty)) != 1:
+        return rows
+    for index, clip in enumerate(rows):
+        if index == 0:
+            continue
+        clip["overlay"] = None
+        clip["caption"] = ""
+    return rows
+
+
 def pick_variant(source: dict[str, Any], ratio: str) -> dict[str, Any] | None:
     variants = source.get("variants") if isinstance(source.get("variants"), dict) else {}
     wanted = str(ratio or "").replace("x", ":")
@@ -816,6 +842,8 @@ def source_package(
             "caption": (overlay or {}).get("text") or "",
         })
         start += frames
+    if not story:
+        built = collapse_repeated_scene_caption_overlays(built)
     if (not story) and has_video and (not _music_requested(effective)):
         try:
             owner_set = float(effective.get("video_duration_seconds") or 0) > 0
