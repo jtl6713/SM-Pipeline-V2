@@ -9,7 +9,7 @@ from studio_produce.job import derive_route, finished_origin_kind, is_finished_r
 from studio_produce.queue import master_transfer_id, rebuild_variant_manifest, required_ratios, ratios_for_asset, variant_transfer_id
 from studio_produce.media import asset_is_video, playable_url, remotion_clip_url
 from studio_produce.queue import rebuild_variant_manifest
-from studio_produce.stamp import assign_clip_frames, duration_seconds, finished_source_package, is_native_photo, output_effective, photo_sequence_url, source_package, stamp_fields
+from studio_produce.stamp import assign_clip_frames, collapse_repeated_scene_caption_overlays, duration_seconds, finished_source_package, is_native_photo, output_effective, photo_sequence_url, source_package, stamp_fields
 from studio_produce.steps import (
     _is_delay_render_failure,
     pick_resume_step,
@@ -1100,3 +1100,26 @@ def test_recovery_audio_uses_parent_music_and_keeps_voiceover_on_photo_story():
     assert fields["Music_URL"] == "https://drive.google.com/uc?id=music"
     assert fields["Music_Volume"] == 0.6
 
+
+
+def test_repeated_identical_scene_caption_is_intro_only():
+    clips = [
+        {"overlay": {"enabled": True, "text": "DuSable Bridge"}, "caption": "DuSable Bridge"},
+        {"overlay": {"enabled": True, "text": "DuSable Bridge"}, "caption": "DuSable Bridge"},
+        {"overlay": {"enabled": True, "text": "DuSable Bridge"}, "caption": "DuSable Bridge"},
+    ]
+    fixed = collapse_repeated_scene_caption_overlays(clips)
+    assert fixed[0]["overlay"]["text"] == "DuSable Bridge"
+    assert fixed[1]["overlay"] is None
+    assert fixed[1]["caption"] == ""
+    assert fixed[2]["overlay"] is None
+
+
+def test_distinct_scene_captions_are_preserved():
+    clips = [
+        {"overlay": {"enabled": True, "text": "DuSable Bridge"}, "caption": "DuSable Bridge"},
+        {"overlay": {"enabled": True, "text": "Bridge Raised"}, "caption": "Bridge Raised"},
+    ]
+    fixed = collapse_repeated_scene_caption_overlays(clips)
+    assert fixed[0]["overlay"]["text"] == "DuSable Bridge"
+    assert fixed[1]["overlay"]["text"] == "Bridge Raised"
