@@ -12,7 +12,7 @@ const app = fs.readFileSync(
 );
 
 test("health advertises current worker build with faster-frames helpers", () => {
-  assert.match(worker, /version: "0\.10\.410-airtable-low-burn"/);
+  assert.match(worker, /version: "0\.10\.412-clip-media-kind"/);
   assert.match(worker, /airtableBatchCreate/);
   assert.match(worker, /mapProductionRequestLight/);
 });
