@@ -247,7 +247,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.415-quality-recap";
+  const BUILD_ID = "item4-0.6.416-tiktok-draft-resend";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -13110,6 +13110,25 @@
       || draft.includes("manual completion received");
   }
 
+  function tiktokNeedsDraftResend(record) {
+    if (String(record?.platform || "").trim().toLowerCase() !== "tiktok") return false;
+    if (record?.do_not_publish) return false;
+    const publish = String(record?.publish_status || "").trim().toLowerCase();
+    const output = String(record?.output_status || "").trim().toLowerCase();
+    const draft = String(record?.tiktok_draft_status || "").trim().toLowerCase();
+    if (publish === "published" || output === "published" || draft === "published") return false;
+    return output === "approved for publishing";
+  }
+
+  async function submitTiktokDraftResend(recordId) {
+    return api(`/api/outputs/${encodeURIComponent(recordId)}/tiktok-resend`, {
+      method: "POST",
+      body: JSON.stringify({}),
+      timeoutMs: 60000,
+      retries: 1,
+    });
+  }
+
   function tiktokLiveUrl(record) {
     return String(record?.platform_post_url || record?.manual_published_url || "").trim();
   }
@@ -14303,9 +14322,15 @@
   }
 
   function pipelineTiktokCompleteCell(record) {
-    if (!tiktokNeedsUrlEntry(record)) return "";
-    const current = pipelineTiktokUrlDraft(record);
-    return `<form class="pipeline-tiktok-complete" data-tiktok-complete="${escapeHtml(record.id)}"><label><span>TikTok URL</span><input type="url" required placeholder="https://www.tiktok.com/@…/video/…" value="${escapeHtml(current)}" autocomplete="url"></label><button type="submit" class="secondary-button pipeline-tiktok-save">Save URL</button><span class="pipeline-tiktok-complete-msg" aria-live="polite"></span></form>`;
+    const parts = [];
+    if (tiktokNeedsDraftResend(record)) {
+      parts.push(`<div class="pipeline-tiktok-resend" data-tiktok-resend="${escapeHtml(record.id)}"><button type="button" class="secondary-button pipeline-tiktok-resend-btn">Resend draft to TikTok</button><span class="pipeline-tiktok-complete-msg" aria-live="polite"></span></div>`);
+    }
+    if (tiktokNeedsUrlEntry(record)) {
+      const current = pipelineTiktokUrlDraft(record);
+      parts.push(`<form class="pipeline-tiktok-complete" data-tiktok-complete="${escapeHtml(record.id)}"><label><span>TikTok URL</span><input type="url" required placeholder="https://www.tiktok.com/@…/video/…" value="${escapeHtml(current)}" autocomplete="url"></label><button type="submit" class="secondary-button pipeline-tiktok-save">Save URL</button><span class="pipeline-tiktok-complete-msg" aria-live="polite"></span></form>`);
+    }
+    return parts.join("");
   }
 
   function pipelineYoutubeCompleteCell(record) {
@@ -14315,6 +14340,38 @@
   }
 
   function bindPipelineTiktokComplete(root) {
+    (root || document).querySelectorAll("[data-tiktok-resend]").forEach((wrap) => {
+      const keepOnRow = (event) => event.stopPropagation();
+      wrap.addEventListener("click", keepOnRow);
+      wrap.addEventListener("mousedown", keepOnRow);
+      wrap.addEventListener("pointerdown", keepOnRow);
+      const button = wrap.querySelector(".pipeline-tiktok-resend-btn");
+      const message = wrap.querySelector(".pipeline-tiktok-complete-msg");
+      button?.addEventListener("click", async (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        const id = wrap.dataset.tiktokResend;
+        if (!id || !button) return;
+        if (!window.confirm("Resend this TikTok draft to the inbox?\n\nTikTok will receive a fresh draft. Approve/publish it in the TikTok app, then paste the live URL here if needed.")) return;
+        button.disabled = true;
+        if (message) {
+          message.classList.remove("error-text");
+          message.textContent = "Sending…";
+        }
+        try {
+          await submitTiktokDraftResend(id);
+          if (message) message.textContent = "Sent — check TikTok inbox";
+          await refreshPipelineOutputs({ silent: true });
+        } catch (error) {
+          if (message) {
+            message.textContent = error.message || "Could not resend draft.";
+            message.classList.add("error-text");
+          }
+        } finally {
+          button.disabled = false;
+        }
+      });
+    });
     (root || document).querySelectorAll("[data-tiktok-complete]").forEach((form) => {
       const keepOnRow = (event) => event.stopPropagation();
       form.addEventListener("click", keepOnRow);
@@ -15525,7 +15582,7 @@
       refreshPipelineScheduleSuggestions(source);
       target.querySelectorAll("[data-open-output-id]").forEach((row) => {
         row.addEventListener("click", (event) => {
-          if (event.target.closest("a, button, input, select, textarea, label, .pipeline-schedule-cell, .pipeline-tiktok-complete")) return;
+          if (event.target.closest("a, button, input, select, textarea, label, .pipeline-schedule-cell, .pipeline-tiktok-complete, .pipeline-tiktok-resend")) return;
           openCreativeEditor(row.dataset.openOutputId);
         });
         row.addEventListener("keydown", (event) => {

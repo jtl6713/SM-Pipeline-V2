@@ -16,10 +16,10 @@ test("Pipeline keeps unfinished packages via open-output merge", async () => {
   assert.match(worker, /CI 206/);
   assert.match(worker, /Pull every sibling on unfinished packages/);
   assert.match(worker, /clampLimit\(url, 200, 250\)/);
-  assert.match(worker, /version: "0\.10\.417-pipeline-open-packages"/);
+  assert.match(worker, /version: "0\.10\.418-tiktok-draft-resend"/);
   assert.match(worker, /FIND\("Manual Action",\{TikTok_Draft_Status\}/);
   assert.match(app, /\/api\/outputs\?limit=250/);
-  assert.match(app, /BUILD_ID = "item4-0\.6\.415-quality-recap"/);
+  assert.match(app, /BUILD_ID = "item4-0\.6\.416-tiktok-draft-resend"/);
   assert.match(app, /function partitionPipelineGroups/);
   assert.match(app, /pipelineContentGroupFullyPublished/);
 });

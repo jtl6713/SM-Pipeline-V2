@@ -161,3 +161,10 @@ Reason: Quality Agent recap auto-refresh every minute, rolling past-hour relevan
 UI: 0.6.415-quality-recap
 Source merge: 2c0befab977477409146356452befaf5d7f876b1
 Requested: 2026-09-28
+TikTok Resend draft button + Output 847 LA inbox republish
+Reason: Manual Pipeline control to rearm Ready for Delivery and dispatch TTD; footer 0.6.415.
+UI: 0.6.415-tiktok-draft-resend
+Requested: 2026-09-28T15:30:00Z
+
+Merge conflict resolution: bump UI past main quality-recap to 0.6.416-tiktok-draft-resend
+Requested: 2026-09-28T15:45:00Z

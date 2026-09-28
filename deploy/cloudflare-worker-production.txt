@@ -217,3 +217,7 @@ Deploy Studio API Worker production
 Reason: Quality Agent recap retains profile identity and broader recent history for past-hour/date-range filtering
 Source merge: 2c0befab977477409146356452befaf5d7f876b1
 Requested: 2026-09-28
+TikTok Resend draft button + Output 847 LA inbox republish
+Reason: /api/outputs/:id/tiktok-resend rearms and dispatches; Worker 0.10.418. E2E kick Output 847.
+Worker: 0.10.418-tiktok-draft-resend
+Requested: 2026-09-28T15:30:00Z
