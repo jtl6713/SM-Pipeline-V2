@@ -185,3 +185,9 @@ Deploy Studio API Worker production
 Reason: Quality Agent must park terminal TikTok 401/403 auth failures instead of resetting Manual Fallback to Ready for Delivery and creating an unbounded TTD1 retry storm (output 927 reached 298 attempts)
 Worker: tiktok-auth-terminal-fence
 Requested: 2026-09-28T07:01:00-05:00
+
+
+Deploy Studio API Worker production
+Reason: owner-only Miami TikTok pipeline-secret sync operation so repair can use Studio's Airtable authority without a GitHub Airtable credential
+Worker: 0.10.413-miami-tiktok-secret-sync
+Requested: 2026-09-28T07:18:00-05:00
