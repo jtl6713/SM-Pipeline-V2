@@ -93,3 +93,20 @@ test("Production shows a live narration duration estimate", () => {
   assert.match(app, /prRequestedScript/);
   assert.match(app, /prNarrationEstimate/);
 });
+
+
+test("Production manual output matrix stays authoritative over plan recommendations", () => {
+  assert.match(app, /function productionOutputSelectionKeys\(\)/);
+  assert.match(app, /function restoreProductionOutputSelection\(keys\)/);
+  assert.match(app, /const manualOutputSelection = productionOutputMatrixLoaded \? productionOutputSelectionKeys\(\) : \[\]/);
+  assert.match(app, /restoreProductionOutputSelection\(manualOutputSelection\)/);
+  assert.match(app, /await saveProductionRequestOutputs\(activeProductionRequest\)/);
+  assert.doesNotMatch(app, /applyDefaultOutputsForPlatform\(input\.value, \{ replace: true \}\)/);
+});
+
+test("Rendered still-source video outputs classify as Photo Set instead of Carousel", () => {
+  assert.match(app, /function productionOutputSelectionIsVideoPhotoSet\(\)/);
+  assert.match(app, /nativeStillTypes = new Set\(\["Single Image", "Carousel", "Multi-Image Post", "Multi-Photo", "Single Photo"\]\)/);
+  assert.match(app, /renderedVideoTypes = new Set\(\["Reel", "Story", "Video Draft", "Short", "Slideshow Reel", "Slideshow Video"\]\)/);
+  assert.match(app, /const next = "Photo Set"/);
+});
