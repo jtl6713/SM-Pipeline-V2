@@ -67,10 +67,11 @@ jobs:
           js=f'''export default {{
             async fetch(request, env) {{
               const incoming = new URL(request.url);
-              if (incoming.pathname === {route} + "/ready") {{
+              const requestPath = incoming.pathname.replace(/\\/+$/, "") || "/";
+              if (requestPath === {route} + "/ready") {{
                 return new Response(JSON.stringify({{ok:true,ready:true}}), {{status:200,headers:{{"Content-Type":"application/json","Cache-Control":"no-store"}}}});
               }}
-              if (incoming.pathname !== {route}) return new Response("Not found", {{status:404}});
+              if (requestPath !== {route}) return new Response("Not found", {{status:404}});
               const requests = {requests};
               const results = [];
               for (const spec of requests) {{

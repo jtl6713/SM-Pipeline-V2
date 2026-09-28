@@ -158,3 +158,8 @@ Deploy Studio API Worker production
 Reason: expose only the official ChicagoShining watermark through authenticated Drive -> R2 cache so old Remotion can render without Google Drive 403/ORB; Quality Agent may safely release parked renders when this public source is authoritative
 Worker: 0.10.409-public-brand-watermark
 Requested: 2026-09-28
+
+Deploy Studio API Worker production
+Reason: Cut Airtable API burn — cron */5 + heavy/light insights/ingest gates; align hermetic version pins
+Worker: 0.10.410-airtable-low-burn
+Requested: 2026-09-28T00:55:00Z

@@ -97,3 +97,8 @@ Reason: Prepare Frames auto-builds a missing output plan when assets are already
 UI: 0.6.406-ai-profile-naming-delete-authority + prepare-autoplan
 Source merge: d83b17fd3401d9ba054f5e0a8f049d32a4b9a7c3
 Requested: 2026-09-27T17:16:00-05:00
+
+Deploy Studio Pages production
+Reason: Align app-item4 cache-bust query with BUILD_ID after hermetic pin hygiene
+UI: item4-0.6.406-ai-profile-naming-delete-authority
+Requested: 2026-09-28T00:55:00Z

@@ -98,7 +98,7 @@ jobs:
             'compatibility_date':'2026-08-02',
             'workers_dev':False,
             'keep_vars':True,
-            'triggers':{'crons':['*/2 * * * *']},
+            'triggers':{'crons':['*/5 * * * *']},
             'observability':{'enabled':True,'head_sampling_rate':1},
             'r2_buckets':[{'binding':'STUDIO_MEDIA','bucket_name':bucket}],
             'secrets':{'required':['AIRTABLE_PAT']}

@@ -12,7 +12,7 @@ const app = fs.readFileSync(
 );
 
 test("health advertises current worker build with faster-frames helpers", () => {
-  assert.match(worker, /version: "0\.10\.404-ai-profile-naming-delete-authority"/);
+  assert.match(worker, /version: "0\.10\.410-airtable-low-burn"/);
   assert.match(worker, /airtableBatchCreate/);
   assert.match(worker, /mapProductionRequestLight/);
 });
@@ -100,7 +100,9 @@ test("manual promote waits fewer I3/I4 polls and defers fanout", () => {
     worker.indexOf("function item4StaleMediaRunClears")
   );
   assert.match(finalize, /completeProductionRequestPromotionSideEffects/);
-  assert.match(finalize, /outputFanout = \{ deferred: true/);
+  assert.match(finalize, /routingOnly: true/);
+  assert.match(finalize, /ctx\.waitUntil\(continuation\)/);
+  assert.match(finalize, /Studio promote post-routing side-effects deferred/);
 });
 
 test("PATCH save can return a light production request payload", () => {
