@@ -1,4 +1,4 @@
-name: Verify Remotion Localization Live
+name: Inspect Current Remotion Jobs 239
 
 on:
   push:
@@ -10,18 +10,21 @@ permissions:
   contents: read
 
 jobs:
-  verify:
+  inspect:
     runs-on: ubuntu-latest
     timeout-minutes: 4
     steps:
-      - name: Check live Remotion localization capability
+      - name: Check health and current jobs
         shell: bash
         run: |
           set -euo pipefail
-          code=$(curl -sS --max-time 20 -o /tmp/health.json -w '%{http_code}' 'https://render.chicagoshining.com/health' || true)
-          echo "http=$code"
-          cat /tmp/health.json | jq . || cat /tmp/health.json
-          test "$code" = 200
-          jq -e '.ok==true and .privateDriveImageLocalization==true and .watermarkLocalization==true and (.version|contains("private-drive-image-localization"))' /tmp/health.json >/dev/null
-          echo "remotion_private_drive_localization=PASS"
-          echo "verified_after_worker_010407=true"
+          echo '=== health ==='
+          curl -sS --max-time 20 'https://render.chicagoshining.com/health' | jq -c .
+          echo '=== job-20260928002112-832e29b7 ==='
+          curl -sS --max-time 20 'https://render.chicagoshining.com/status/job-20260928002112-832e29b7' | jq -c '{jobId,status,createdAt,updatedAt,completedAt,exitCode,error,props:{watermarkUrl:.props.watermarkUrl,watermarkRequired:.props.watermarkRequired},log_tail:((.logs//[])[-25:])}'
+          echo '=== job-20260928002100-7ae0a134 ==='
+          curl -sS --max-time 20 'https://render.chicagoshining.com/status/job-20260928002100-7ae0a134' | jq -c '{jobId,status,createdAt,updatedAt,completedAt,exitCode,error,props:{watermarkUrl:.props.watermarkUrl,watermarkRequired:.props.watermarkRequired},log_tail:((.logs//[])[-25:])}'
+          echo '=== job-20260928002049-db37a26d ==='
+          curl -sS --max-time 20 'https://render.chicagoshining.com/status/job-20260928002049-db37a26d' | jq -c '{jobId,status,createdAt,updatedAt,completedAt,exitCode,error,props:{watermarkUrl:.props.watermarkUrl,watermarkRequired:.props.watermarkRequired},log_tail:((.logs//[])[-25:])}'
+          echo '=== job-20260928001947-5598e891 ==='
+          curl -sS --max-time 20 'https://render.chicagoshining.com/status/job-20260928001947-5598e891' | jq -c '{jobId,status,createdAt,updatedAt,completedAt,exitCode,error,props:{watermarkUrl:.props.watermarkUrl,watermarkRequired:.props.watermarkRequired},log_tail:((.logs//[])[-25:])}'
