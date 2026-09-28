@@ -11378,7 +11378,7 @@
 
       const byId = new Map(drafts.map(record => [record.id, record]));
       target.querySelectorAll("[data-pr-id]").forEach(button => {
-        button.addEventListener("click", async () => {
+        button.addEventListener("click", () => {
           const record = byId.get(button.dataset.prId);
 
           if (!record) {
@@ -11386,41 +11386,53 @@
             return;
           }
 
+          const ideaId = ideaIdFromRequest(record);
+          activeIdea = ideaId ? ideasCache.find((idea) => idea.id === ideaId) || null : null;
+
+          // Navigation must never wait on a backend hydration call. Open the draft
+          // immediately from the list record, then refresh richer data in the background.
+          ezEntryPath = "configure";
+          populateProductionRequestForm(record);
+          showProductionRequestWorkspace();
+          $("productionRequestWorkspace")?.scrollIntoView({
+            behavior: "smooth",
+            block: "start"
+          });
+          setRequestMessage("Opening draft… loading the latest details.", "success");
+
           const idleText = button.textContent || "Continue";
           button.disabled = true;
           button.textContent = "Opening…";
 
-          try {
-            // Always refetch the full Production Request before hydrate. Draft-list
-            // summaries used to omit voice_id; opening from the card then showed Kate
-            // and quiet-save overwrote Admin Hank. Full GET is the voice authority.
+          (async () => {
             let fullRecord = record;
             try {
-              const fresh = await api(`/api/production-requests/${encodeURIComponent(record.id)}`);
-              if (fresh?.record?.id) fullRecord = fresh.record;
+              const fresh = await api(`/api/production-requests/${encodeURIComponent(record.id)}`, { timeoutMs: 12000, retries: 0 });
+              if (fresh?.record?.id) {
+                fullRecord = fresh.record;
+                const freshIdeaId = ideaIdFromRequest(fullRecord);
+                activeIdea = freshIdeaId ? ideasCache.find((idea) => idea.id === freshIdeaId) || activeIdea : activeIdea;
+                populateProductionRequestForm(fullRecord);
+                showProductionRequestWorkspace();
+              }
             } catch (error) {
-              console.warn("production request voice refresh failed; using list card", error);
+              console.warn("production request detail refresh timed out; keeping list-record workspace open", error);
             }
 
-            const ideaId = ideaIdFromRequest(fullRecord);
-            activeIdea = ideaId ? ideasCache.find((idea) => idea.id === ideaId) || null : null;
-            populateProductionRequestForm(fullRecord);
+            const hydration = await Promise.allSettled([
+              loadProductionRequestOutputs(fullRecord),
+              loadItem4Workspace(fullRecord),
+              ensureProductionRequestMusic(),
+              loadEzAudioOptions(),
+            ]);
 
-            // Continue used to hydrate a hidden workspace and then scroll to it,
-            // which made the button appear to do nothing. Reveal the workspace first;
-            // outputs/assets can finish loading afterward.
-            showProductionRequestWorkspace();
-            $("productionRequestWorkspace")?.scrollIntoView({
-              behavior: "smooth",
-              block: "start"
-            });
-
-            await loadProductionRequestOutputs(fullRecord);
-            await loadItem4Workspace(fullRecord);
-
-            // Refresh music choices only after the workspace is visible.
-            try {
-              await Promise.all([ensureProductionRequestMusic(), loadEzAudioOptions()]);
+            const failed = hydration.filter((entry) => entry.status === "rejected");
+            if (failed.length) {
+              setRequestMessage(
+                `Draft opened. ${failed.length} background section${failed.length === 1 ? "" : "s"} could not refresh yet; use Refresh if something looks incomplete.`,
+                "error-text"
+              );
+            } else {
               const musicId = Array.isArray(fullRecord.selected_music_asset_links)
                 ? fullRecord.selected_music_asset_links[0]
                 : "";
@@ -11429,18 +11441,12 @@
                 applyVoiceToSelects(fullRecord.voice_id || resolvedDefaultVoice().voice_id, fullRecord.voice_name || resolvedDefaultVoice().voice_name);
               }
               syncRequestVoiceUi();
-            } catch (e) {
-              setRequestMessage(
-                `Production Request opened. Music catalogue refresh failed: ${e.message}`,
-                "error-text"
-              );
+              setRequestMessage("Draft opened.", "success");
             }
-          } catch (error) {
-            setRequestMessage(error.message || "Could not open this Production Request.", "error-text");
-          } finally {
+
             button.disabled = false;
             button.textContent = idleText;
-          }
+          })();
         });
       });
       productionDecorateTooltips(target);
