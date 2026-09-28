@@ -23,7 +23,7 @@ test("Remotion renders are serialized to one concurrent child", () => {
   assert.match(serverSrc, /acquireRemotionSlot/);
   assert.match(serverSrc, /releaseRemotionSlot/);
   assert.match(serverSrc, /jobAssetsOutsidePublic: true/);
-  assert.match(serverSrc, /2026-09-28-watermark-drive-pin/);
+  assert.match(serverSrc, /2026-09-28-watermark-hard-pin/);
 });
 
 test("resolvePublicAssetPath maps http job-assets URLs to the filesystem for ffprobe", () => {

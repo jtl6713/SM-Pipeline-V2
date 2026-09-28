@@ -19,7 +19,7 @@ const DEFAULT_MUSIC_END_FADE_SECONDS = 0.5;
 const PIPELINE_RUNNER_INTERNAL_URL = String(
     process.env.PIPELINE_RUNNER_INTERNAL_URL || 'http://127.0.0.1:3350'
 ).replace(/\/$/, '');
-const SERVICE_VERSION = '2026-09-28-watermark-drive-pin';
+const SERVICE_VERSION = '2026-09-28-watermark-hard-pin';
 const PROJECT_DIR = __dirname;
 const PUBLIC_DIR = path.join(PROJECT_DIR, 'public');
 const OUT_DIR = path.join(PROJECT_DIR, 'out');
@@ -33,12 +33,9 @@ const MAX_CONCURRENT_REMOTION_RENDERS = Math.max(
     1,
     Number(process.env.REMOTION_MAX_CONCURRENT || 1) || 1,
 );
-// Media Asset recTnq3abS2rcsTzK. Studio public branding URL is Cloudflare Access
-// gated from this host — downloading it writes HTML as "watermark.png" and
-// Remotion fails with Error loading image. Always use authenticated Drive.
-const CHICAGO_WATERMARK_DRIVE_FILE_ID = String(
-    process.env.CHICAGO_WATERMARK_DRIVE_FILE_ID || '1WQyd5W1__HkaEkWyC38IMErW8702Rd4u'
-).trim();
+// Media Asset recTnq3abS2rcsTzK — hard-pinned (ignore env; a wrong override once
+// pointed Remotion at a music-library MP3 as the brand watermark).
+const CHICAGO_WATERMARK_DRIVE_FILE_ID = '1WQyd5W1__HkaEkWyC38IMErW8702Rd4u';
 const STUDIO_BRAND_WATERMARK_HOST_MARKERS = [
     'studio.chicagoshining.com/api/public/branding/watermark',
     'media.chicagoshining.com/studio/previews/branding/',
