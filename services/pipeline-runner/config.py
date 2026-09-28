@@ -74,6 +74,8 @@ def load_settings() -> dict[str, Any]:
         "openai_secondary_endpoint": os.environ.get("OPENAI_SECONDARY_ENDPOINT", "").strip().rstrip("/"),
         "openai_secondary_api_version": os.environ.get("OPENAI_SECONDARY_API_VERSION", "").strip(),
         "openai_secondary_deployment": os.environ.get("OPENAI_SECONDARY_DEPLOYMENT", "").strip(),
+        "openai_secondary_image_deployment": os.environ.get("OPENAI_SECONDARY_IMAGE_DEPLOYMENT", "").strip(),
+        "openai_secondary_image_api_version": os.environ.get("OPENAI_SECONDARY_IMAGE_API_VERSION", "preview").strip(),
         "openai_r2_model": os.environ.get("OPENAI_R2_MODEL", "gpt-4.1"),
         "openai_p4_model": os.environ.get("OPENAI_P4_MODEL", "gpt-4o"),
         "openai_sai1_model": os.environ.get("OPENAI_SAI1_MODEL", "gpt-5"),
