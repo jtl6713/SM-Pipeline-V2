@@ -1,19 +1,35 @@
 {
-  "correlation_id": "CULTURAL-CENTER-FRAMES-REPAIR-20260927",
+  "correlation_id": "BRIDGES-500-DIAG-20260927",
   "requests": [
     {
-      "name": "prepare-cultural-center-frames",
-      "method": "POST",
-      "path": "/api/production-requests/recZkbX3A0vk9Z2Wb/variants",
-      "body": {
-        "crops": {},
-        "retry": false
-      }
+      "name": "get-request",
+      "method": "GET",
+      "path": "/api/production-requests/receXUsiQZLMlJzAX",
+      "continue_on_error": true
     },
     {
-      "name": "verify-cultural-center-frames",
+      "name": "get-outputs",
       "method": "GET",
-      "path": "/api/production-requests/recZkbX3A0vk9Z2Wb/variants"
+      "path": "/api/production-requests/receXUsiQZLMlJzAX/outputs",
+      "continue_on_error": true
+    },
+    {
+      "name": "get-item4",
+      "method": "GET",
+      "path": "/api/production-requests/receXUsiQZLMlJzAX/item4",
+      "continue_on_error": true
+    },
+    {
+      "name": "get-variants",
+      "method": "GET",
+      "path": "/api/production-requests/receXUsiQZLMlJzAX/variants",
+      "continue_on_error": true
+    },
+    {
+      "name": "get-bridge-preflight",
+      "method": "GET",
+      "path": "/api/production-requests/receXUsiQZLMlJzAX/bridge-preflight",
+      "continue_on_error": true
     }
   ]
 }
