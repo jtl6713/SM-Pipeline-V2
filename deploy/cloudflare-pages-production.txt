@@ -131,3 +131,9 @@ Deploy Studio Pages production
 Reason: Align BUILD_ID / UI label / script cache key to 0.6.410-production-open-nonblocking (hermetic pin drift on main)
 UI: 0.6.410-production-open-nonblocking
 Requested: 2026-09-28T03:42:00Z
+
+
+Deploy Studio Pages production
+Reason: Video Production saves no longer derive/submit carousel slide counts from the number of selected source photos
+UI: 0.6.411-video-carousel-count-guard
+Requested: 2026-09-27T22:45:00-05:00
