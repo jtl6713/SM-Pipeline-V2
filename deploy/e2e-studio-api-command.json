@@ -1,10 +1,22 @@
 {
-  "correlation_id": "OUTPUT-927-POST-MIAMI-AUTH-ALIGNMENT-RETRY2-20260928",
+  "correlation_id": "LA-TIKTOK-889-937-963-INBOX-KICK-20260928",
   "requests": [
     {
-      "name": "kick-output-927-after-auth-alignment",
+      "name": "kick-output-963-beverly-hills-inbox",
       "method": "POST",
-      "path": "/api/operations/outputs/recj63HvnUhy7bmnr/publish-kick",
+      "path": "/api/operations/outputs/rect8fjS3MmqDvpvZ/publish-kick",
+      "body": {}
+    },
+    {
+      "name": "kick-output-937-venice-canals-inbox",
+      "method": "POST",
+      "path": "/api/operations/outputs/recOrS8vLYhZY7Y3b/publish-kick",
+      "body": {}
+    },
+    {
+      "name": "kick-output-889-muscle-beach-inbox",
+      "method": "POST",
+      "path": "/api/operations/outputs/recjcpGYFqRNEJtin/publish-kick",
       "body": {}
     }
   ]
