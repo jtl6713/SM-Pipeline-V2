@@ -126,3 +126,8 @@ Deploy Studio Pages production
 Reason: Production Continue opens immediately from list data and hydrates details/assets asynchronously; slow GETs no longer block navigation
 UI: 0.6.410-production-open-nonblocking
 Requested: 2026-09-27T22:36:00-05:00
+
+Deploy Studio Pages production
+Reason: Align BUILD_ID / UI label / script cache key to 0.6.410-production-open-nonblocking (hermetic pin drift on main)
+UI: 0.6.410-production-open-nonblocking
+Requested: 2026-09-28T03:42:00Z
