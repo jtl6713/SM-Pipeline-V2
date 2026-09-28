@@ -24,3 +24,4 @@ jobs:
           test "$code" = 200
           jq -e '.ok==true and .privateDriveImageLocalization==true and .watermarkLocalization==true and (.version|contains("private-drive-image-localization"))' /tmp/health.json >/dev/null
           echo "remotion_private_drive_localization=PASS"
+          echo "verified_after_worker_010407=true"
