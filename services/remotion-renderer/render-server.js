@@ -19,12 +19,20 @@ const DEFAULT_MUSIC_END_FADE_SECONDS = 0.5;
 const PIPELINE_RUNNER_INTERNAL_URL = String(
     process.env.PIPELINE_RUNNER_INTERNAL_URL || 'http://127.0.0.1:3350'
 ).replace(/\/$/, '');
-const SERVICE_VERSION = '2026-09-27-private-drive-image-localization';
+const SERVICE_VERSION = '2026-09-28-job-assets-serialize';
 const PROJECT_DIR = __dirname;
 const PUBLIC_DIR = path.join(PROJECT_DIR, 'public');
 const OUT_DIR = path.join(PROJECT_DIR, 'out');
 const RENDER_PROPS_DIR = path.join(PROJECT_DIR, 'render-props');
-const RENDER_ASSETS_DIR = path.join(PUBLIC_DIR, 'render-assets');
+// Keep job media OUT of public/. Remotion copies public/ into every Chrome
+// bundle; putting multi-GB render-assets there caused "Copying public dir 5GB"
+// and Chrome connect timeouts when Content 239–242 burst concurrent renders.
+const RENDER_ASSETS_DIR = path.join(PROJECT_DIR, 'job-assets');
+const RENDER_ASSETS_URL_PREFIX = '/job-assets';
+const MAX_CONCURRENT_REMOTION_RENDERS = Math.max(
+    1,
+    Number(process.env.REMOTION_MAX_CONCURRENT || 1) || 1,
+);
 
 app.set('trust proxy', true);
 
@@ -38,6 +46,9 @@ app.use('/out', express.static(OUT_DIR));
 // It is also useful for the controlled V4 remote URL test.
 app.use(express.static(PUBLIC_DIR));
 
+// Job-local clips/music/VO/watermarks — outside public/, fetched by Remotion via HTTP.
+app.use(RENDER_ASSETS_URL_PREFIX, express.static(RENDER_ASSETS_DIR));
+
 const jobs = new Map();
 const remotionCleanup = registerRemotionCleanup({
     app,
@@ -47,6 +58,37 @@ const remotionCleanup = registerRemotionCleanup({
     renderPropsDir: RENDER_PROPS_DIR,
     renderAssetsDir: RENDER_ASSETS_DIR,
 });
+
+let activeRemotionRenders = 0;
+const remotionRenderWaiters = [];
+
+function acquireRemotionSlot(job) {
+    return new Promise((resolve) => {
+        const tryAcquire = () => {
+            if (activeRemotionRenders < MAX_CONCURRENT_REMOTION_RENDERS) {
+                activeRemotionRenders += 1;
+                appendLog(
+                    job,
+                    `Acquired Remotion slot (${activeRemotionRenders}/${MAX_CONCURRENT_REMOTION_RENDERS})`,
+                );
+                resolve();
+                return;
+            }
+            appendLog(
+                job,
+                `Waiting for Remotion slot (${activeRemotionRenders}/${MAX_CONCURRENT_REMOTION_RENDERS} busy, queue=${remotionRenderWaiters.length + 1})`,
+            );
+            remotionRenderWaiters.push(tryAcquire);
+        };
+        tryAcquire();
+    });
+}
+
+function releaseRemotionSlot() {
+    activeRemotionRenders = Math.max(0, activeRemotionRenders - 1);
+    const next = remotionRenderWaiters.shift();
+    if (next) next();
+}
 
 function nowIso() {
     return new Date().toISOString();
@@ -199,6 +241,13 @@ function makeUniqueFilename(filename, usedFilenames) {
 }
 
 function toPublicSrc(absoluteFilePath) {
+    // Prefer absolute HTTP URLs under /job-assets so Remotion never needs these
+    // files inside public/ (staticFile + public-dir copy).
+    const relativeToJobAssets = path.relative(RENDER_ASSETS_DIR, absoluteFilePath);
+    if (relativeToJobAssets && !relativeToJobAssets.startsWith('..') && !path.isAbsolute(relativeToJobAssets)) {
+        const posix = relativeToJobAssets.split(path.sep).join('/');
+        return `http://127.0.0.1:${PORT}${RENDER_ASSETS_URL_PREFIX}/${posix}`;
+    }
     return path
         .relative(PUBLIC_DIR, absoluteFilePath)
         .split(path.sep)
@@ -232,6 +281,13 @@ function resolvePublicAssetPath(src) {
     }
 
     const normalized = src.replace(/^[/\\]+/, '');
+    if (normalized.startsWith('job-assets/') || normalized.startsWith('render-assets/')) {
+        const under = normalized.replace(/^(job-assets|render-assets)\//, '');
+        const jobPath = path.join(RENDER_ASSETS_DIR, under);
+        if (fs.existsSync(jobPath)) return jobPath;
+        const legacy = path.join(PUBLIC_DIR, 'render-assets', under);
+        if (fs.existsSync(legacy)) return legacy;
+    }
     return path.join(PUBLIC_DIR, normalized);
 }
 
@@ -980,67 +1036,81 @@ async function savePropsFile({ jobId, props }) {
 function runRemotionRender({ jobId, compositionId, filename, propsFilePath }) {
     const job = jobs.get(jobId);
 
-    return new Promise((resolve, reject) => {
-        const outputRelative = `out/${filename}`;
-        const propsRelative = `./${toProjectRelative(propsFilePath)}`;
+    return (async () => {
+        await acquireRemotionSlot(job);
+        try {
+            await new Promise((resolve, reject) => {
+                const outputRelative = `out/${filename}`;
+                const propsRelative = `./${toProjectRelative(propsFilePath)}`;
 
-        const browser = String(process.env.REMOTION_BROWSER_EXECUTABLE || '').trim();
-        const browserFlag = browser ? ` --browser-executable="${browser}"` : '';
-        const command =
-            `npx remotion render src/index.ts ${compositionId} ` +
-            `"${outputRelative}" ` +
-            `"--props=${propsRelative}" ` +
-            `--overwrite${browserFlag}`;
+                const browser = String(process.env.REMOTION_BROWSER_EXECUTABLE || '').trim();
+                const browserFlag = browser ? ` --browser-executable="${browser}"` : '';
+                // Empty public-dir keeps Remotion from copying multi-GB job assets.
+                // Clips/music/VO/watermark are absolute http://127.0.0.1:PORT/job-assets/... URLs.
+                const emptyPublicDir = path.join(PROJECT_DIR, 'public-empty');
+                fs.mkdirSync(emptyPublicDir, { recursive: true });
+                const command =
+                    `npx remotion render src/index.ts ${compositionId} ` +
+                    `"${outputRelative}" ` +
+                    `"--props=${propsRelative}" ` +
+                    `--public-dir="${emptyPublicDir}" ` +
+                    `--overwrite${browserFlag}`;
 
-        job.status = 'rendering';
-        job.renderCommand = command;
-        job.updatedAt = nowIso();
+                job.status = 'rendering';
+                job.renderCommand = command;
+                job.updatedAt = nowIso();
 
-        appendLog(job, `Starting Remotion render: ${command}`);
+                appendLog(job, `Starting Remotion render: ${command}`);
 
-        const child = spawn(command, {
-            cwd: PROJECT_DIR,
-            shell: true,
-            windowsHide: true,
-        });
+                const child = spawn(command, {
+                    cwd: PROJECT_DIR,
+                    shell: true,
+                    windowsHide: true,
+                });
+                job.childPid = child.pid || null;
 
-        child.stdout.on('data', (data) => {
-            appendLog(job, data.toString());
-        });
+                child.stdout.on('data', (data) => {
+                    appendLog(job, data.toString());
+                });
 
-        child.stderr.on('data', (data) => {
-            appendLog(job, data.toString());
-        });
+                child.stderr.on('data', (data) => {
+                    appendLog(job, data.toString());
+                });
 
-        child.on('error', (error) => {
-            job.status = 'failed';
-            job.error = error.message;
-            job.updatedAt = nowIso();
+                child.on('error', (error) => {
+                    job.status = 'failed';
+                    job.error = error.message;
+                    job.updatedAt = nowIso();
 
-            appendLog(job, `Render process error: ${error.message}`);
-            notifyStudioR5Done(job);
-            reject(error);
-        });
+                    appendLog(job, `Render process error: ${error.message}`);
+                    notifyStudioR5Done(job);
+                    reject(error);
+                });
 
-        child.on('close', (code) => {
-            job.exitCode = code;
-            job.updatedAt = nowIso();
+                child.on('close', (code) => {
+                    job.exitCode = code;
+                    job.updatedAt = nowIso();
+                    job.childPid = null;
 
-            if (code === 0) {
-                job.status = 'completed';
-                job.completedAt = nowIso();
-                appendLog(job, `Render completed: ${outputRelative}`);
-                notifyStudioR5Done(job);
-                resolve();
-            } else {
-                job.status = 'failed';
-                job.error = compactRemotionFailure(job, code);
-                appendLog(job, job.error);
-                notifyStudioR5Done(job);
-                reject(new Error(job.error));
-            }
-        });
-    });
+                    if (code === 0) {
+                        job.status = 'completed';
+                        job.completedAt = nowIso();
+                        appendLog(job, `Render completed: ${outputRelative}`);
+                        notifyStudioR5Done(job);
+                        resolve();
+                    } else {
+                        job.status = 'failed';
+                        job.error = compactRemotionFailure(job, code);
+                        appendLog(job, job.error);
+                        notifyStudioR5Done(job);
+                        reject(new Error(job.error));
+                    }
+                });
+            });
+        } finally {
+            releaseRemotionSlot();
+        }
+    })();
 }
 
 app.get('/health', async (req, res) => {
@@ -1054,6 +1124,10 @@ app.get('/health', async (req, res) => {
         postVoiceoverMusicBoost: true,
         privateDriveImageLocalization: true,
         watermarkLocalization: true,
+        jobAssetsOutsidePublic: true,
+        remotionMaxConcurrent: MAX_CONCURRENT_REMOTION_RENDERS,
+        remotionActiveRenders: activeRemotionRenders,
+        remotionQueuedRenders: remotionRenderWaiters.length,
         cleanup: {
             enabled: true,
             staleHours: remotionCleanup.staleHours,
