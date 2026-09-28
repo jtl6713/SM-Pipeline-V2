@@ -12511,7 +12511,10 @@ async function cleanProductionRequestPayload(payload, env) {
   const thumbnailMode = normalizeChoice(payload?.thumbnail_mode, PR_THUMBNAIL_MODES, "Yes", "Thumbnail mode");
 
   const videoClipCountMode = normalizeChoice(payload?.video_clip_count_mode, PR_COUNT_MODES, "AI decides", "Video clip count mode");
-  const carouselSlideCountMode = normalizeChoice(payload?.carousel_slide_count_mode, PR_COUNT_MODES, "AI decides", "Carousel slide count mode");
+  const slideCountApplies = ["Carousel", "Photo Set", "Feed Post"].includes(contentType);
+  const carouselSlideCountMode = slideCountApplies
+    ? normalizeChoice(payload?.carousel_slide_count_mode, PR_COUNT_MODES, "AI decides", "Carousel slide count mode")
+    : "AI decides";
 
   const videoDurationSeconds = nullableInt(payload?.video_duration_seconds, 5, 600, "Video duration");
   const voiceoverDurationSeconds = nullableNumber(payload?.voiceover_duration_seconds, 1, 600, "Voiceover duration");
@@ -12534,21 +12537,27 @@ async function cleanProductionRequestPayload(payload, env) {
     videoClipCountExact = null;
   }
 
-  const slideExactRaw = payload?.carousel_slide_count_exact;
-  const slideExactCoerced = (slideExactRaw === 0 || slideExactRaw === "0") ? 1 : slideExactRaw;
-  let carouselSlideCountExact = nullableInt(slideExactCoerced, 1, 20, "Exact carousel slide count");
-  let carouselSlideCountMin = nullableInt(payload?.carousel_slide_count_min, 1, 20, "Minimum carousel slide count");
-  let carouselSlideCountMax = nullableInt(payload?.carousel_slide_count_max, 1, 20, "Maximum carousel slide count");
+  let carouselSlideCountExact = null;
+  let carouselSlideCountMin = null;
+  let carouselSlideCountMax = null;
 
-  if (carouselSlideCountMode === "AI decides") {
-    carouselSlideCountExact = carouselSlideCountMin = carouselSlideCountMax = null;
-  } else if (carouselSlideCountMode === "Exact") {
-    if (carouselSlideCountExact === null) throw new HttpError(400, "Enter the exact carousel slide count");
-    carouselSlideCountMin = carouselSlideCountMax = null;
-  } else {
-    if (carouselSlideCountMin === null || carouselSlideCountMax === null) throw new HttpError(400, "Enter both minimum and maximum carousel slide counts");
-    if (carouselSlideCountMin > carouselSlideCountMax) throw new HttpError(400, "Minimum carousel slide count cannot exceed maximum");
-    carouselSlideCountExact = null;
+  if (slideCountApplies) {
+    const slideExactRaw = payload?.carousel_slide_count_exact;
+    const slideExactCoerced = (slideExactRaw === 0 || slideExactRaw === "0") ? 1 : slideExactRaw;
+    carouselSlideCountExact = nullableInt(slideExactCoerced, 1, 20, "Exact carousel slide count");
+    carouselSlideCountMin = nullableInt(payload?.carousel_slide_count_min, 1, 20, "Minimum carousel slide count");
+    carouselSlideCountMax = nullableInt(payload?.carousel_slide_count_max, 1, 20, "Maximum carousel slide count");
+
+    if (carouselSlideCountMode === "AI decides") {
+      carouselSlideCountExact = carouselSlideCountMin = carouselSlideCountMax = null;
+    } else if (carouselSlideCountMode === "Exact") {
+      if (carouselSlideCountExact === null) throw new HttpError(400, "Enter the exact carousel slide count");
+      carouselSlideCountMin = carouselSlideCountMax = null;
+    } else {
+      if (carouselSlideCountMin === null || carouselSlideCountMax === null) throw new HttpError(400, "Enter both minimum and maximum carousel slide counts");
+      if (carouselSlideCountMin > carouselSlideCountMax) throw new HttpError(400, "Minimum carousel slide count cannot exceed maximum");
+      carouselSlideCountExact = null;
+    }
   }
 
   const carouselImageMode = normalizeChoice(
