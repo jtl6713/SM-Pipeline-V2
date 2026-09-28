@@ -56,6 +56,52 @@ def caption_locked(request: dict[str, Any]) -> bool:
     return "force exact" in field_str(request, "Caption_Mode").lower()
 
 
+def script_locked(request: dict[str, Any]) -> bool:
+    return "force exact" in field_str(request, "Script_Mode").lower()
+
+
+def exact_requested_script(request: dict[str, Any]) -> str:
+    if not script_locked(request):
+        return ""
+    return field_str(request, "Requested_Script").strip()
+
+
+def enforce_exact_voiceover_script(
+    client: AirtableClient,
+    request: dict[str, Any],
+    parent: dict[str, Any],
+) -> dict[str, Any]:
+    """Make Force exact script the canonical P2 input before any AI script generation."""
+    exact = exact_requested_script(request)
+    if not exact:
+        return parent
+
+    current = field_str(parent, "Voiceover_Script").strip()
+    stale_audio = bool(field_str(parent, "Voiceover_URL")) and current != exact
+    patch: dict[str, Any] = {}
+    if current != exact:
+        patch["Voiceover_Script"] = exact
+    if field_str(parent, "Script_Status") != "Generated":
+        patch["Script_Status"] = "Generated"
+    if stale_audio:
+        patch.update({
+            "Voiceover_URL": None,
+            "Voiceover_Google_Drive_File_ID": None,
+            "Voiceover_Normalization_Status": None,
+            "Voiceover_Normalization_Details": None,
+            "Voiceover_Normalized_At": None,
+            "Voiceover_Duration_Seconds": None,
+        })
+    if field_str(parent, "Voiceover_Status") != "Ready" or stale_audio:
+        patch["Voiceover_Status"] = "Ready"
+    if field_str(parent, "Content_Status") != "Ready for Voiceover" or stale_audio:
+        patch["Content_Status"] = "Ready for Voiceover"
+    if patch:
+        client.update_record(CONTENT_ITEMS_TABLE, parent["id"], patch, typecast=True)
+        parent = client.get_record(CONTENT_ITEMS_TABLE, parent["id"])
+    return parent
+
+
 def voiceover_required(request: dict[str, Any], parent: dict[str, Any] | None) -> bool:
     status = field_str(parent or {}, "Voiceover_Status")
     if status in {"Not Needed", "Skipped"}:
@@ -81,6 +127,7 @@ def rearm_voiceover_parent(client: AirtableClient, request: dict[str, Any], pare
     Ready" while Voiceover_URL was still blank, which silently switched P2 off
     and left R4 returning waiting_for_voiceover forever (Output 432).
     """
+    parent = enforce_exact_voiceover_script(client, request, parent)
     if not field_str(parent, "Voiceover_Script"):
         ensure_voiceover_script(client, request, parent)
         parent = client.get_record(CONTENT_ITEMS_TABLE, parent["id"])
@@ -329,6 +376,10 @@ def seed_ai_slides(
 
 def ensure_voiceover_script(client: AirtableClient, request: dict[str, Any], parent: dict[str, Any], themes: dict[str, Any] | None = None) -> dict[str, Any]:
     """SAI1 for voiceover script when uploaded photos skipped themes (caption already set)."""
+    parent = enforce_exact_voiceover_script(client, request, parent)
+    exact = exact_requested_script(request)
+    if exact:
+        return themes or {}
     if field_str(parent, "Voiceover_URL") or field_str(parent, "Voiceover_Script"):
         return themes or {}
     if themes and str(themes.get("voiceover_script") or "").strip():
@@ -391,6 +442,8 @@ def step_themes(client: AirtableClient, ctx: dict[str, Any]) -> str:
     assets = master_assets(request)
     expected = expected_photo_count(request, assets)
     needed = max(0, expected - len(assets)) if route in {"ai", "mixed"} else 0
+    parent = enforce_exact_voiceover_script(client, request, parent)
+    ctx["parent"] = parent
     need_caption = not caption_locked(request) and not field_str(parent, "Caption")
     need_script = voiceover_required(request, parent) and not field_str(parent, "Voiceover_Script") and not field_str(parent, "Voiceover_URL")
     if not needed and not need_caption and not need_script:
