@@ -15,6 +15,28 @@ def test_profile_watermark_rule_is_chicagoshining_only():
     assert not profile_requires_watermark("LA Shining")
 
 
+def test_brand_watermark_url_prefers_drive_file_id_over_studio_public_url():
+    class _Client:
+        def list_records(self, _table, view=None, max_records=None):
+            return [
+                {
+                    "id": "recTnq3abS2rcsTzK",
+                    "fields": {
+                        "Google Drive File ID": "1WQyd5W1__HkaEkWyC38IMErW8702Rd4u",
+                        "Google Drive URL": (
+                            "https://studio.chicagoshining.com/api/public/branding/watermark.png"
+                        ),
+                    },
+                }
+            ]
+
+    url = watermark_module.brand_watermark_url(_Client())
+    assert url == (
+        "https://drive.google.com/uc?export=download&id=1WQyd5W1__HkaEkWyC38IMErW8702Rd4u"
+    )
+    assert "studio.chicagoshining.com" not in url
+
+
 def test_video_watermark_burns_overlay_and_keeps_optional_audio(monkeypatch):
     command = []
 

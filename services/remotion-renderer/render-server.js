@@ -19,7 +19,7 @@ const DEFAULT_MUSIC_END_FADE_SECONDS = 0.5;
 const PIPELINE_RUNNER_INTERNAL_URL = String(
     process.env.PIPELINE_RUNNER_INTERNAL_URL || 'http://127.0.0.1:3350'
 ).replace(/\/$/, '');
-const SERVICE_VERSION = '2026-09-28-job-assets-serialize';
+const SERVICE_VERSION = '2026-09-28-job-assets-ffprobe-path';
 const PROJECT_DIR = __dirname;
 const PUBLIC_DIR = path.join(PROJECT_DIR, 'public');
 const OUT_DIR = path.join(PROJECT_DIR, 'out');
@@ -33,6 +33,16 @@ const MAX_CONCURRENT_REMOTION_RENDERS = Math.max(
     1,
     Number(process.env.REMOTION_MAX_CONCURRENT || 1) || 1,
 );
+// Media Asset recTnq3abS2rcsTzK. Studio public branding URL is Cloudflare Access
+// gated from this host — downloading it writes HTML as "watermark.png" and
+// Remotion fails with Error loading image. Always use authenticated Drive.
+const CHICAGO_WATERMARK_DRIVE_FILE_ID = String(
+    process.env.CHICAGO_WATERMARK_DRIVE_FILE_ID || '1WQyd5W1__HkaEkWyC38IMErW8702Rd4u'
+).trim();
+const STUDIO_BRAND_WATERMARK_HOST_MARKERS = [
+    'studio.chicagoshining.com/api/public/branding/watermark',
+    'media.chicagoshining.com/studio/previews/branding/',
+];
 
 app.set('trust proxy', true);
 
@@ -276,11 +286,41 @@ function resolvePublicAssetPath(src) {
         return undefined;
     }
 
-    if (path.isAbsolute(src)) {
-        return src;
+    const trimmed = src.trim();
+    // toPublicSrc returns http://127.0.0.1:PORT/job-assets/... so Remotion can
+    // fetch outside public/. ffprobe must use the real filesystem path — never
+    // path.join(public/, "http://...") which on Windows becomes
+    // public\http:\127.0.0.1:...\voiceover.mp3 (CI 239–242 Blocked).
+    if (/^https?:\/\//i.test(trimmed)) {
+        try {
+            const parsed = new URL(trimmed);
+            const pathname = decodeURIComponent(parsed.pathname || '');
+            if (pathname.startsWith(`${RENDER_ASSETS_URL_PREFIX}/`)) {
+                const under = pathname.slice(RENDER_ASSETS_URL_PREFIX.length + 1);
+                const jobPath = path.join(RENDER_ASSETS_DIR, under);
+                if (fs.existsSync(jobPath)) return jobPath;
+            }
+            if (pathname.startsWith('/render-assets/')) {
+                const under = pathname.slice('/render-assets/'.length);
+                const jobPath = path.join(RENDER_ASSETS_DIR, under);
+                if (fs.existsSync(jobPath)) return jobPath;
+                const legacy = path.join(PUBLIC_DIR, 'render-assets', under);
+                if (fs.existsSync(legacy)) return legacy;
+            }
+        } catch {}
+        return undefined;
     }
 
-    const normalized = src.replace(/^[/\\]+/, '');
+    // Windows treats "http:..." as an absolute path; still never ffprobe a URL.
+    if (/^[a-zA-Z][a-zA-Z0-9+.-]*:/i.test(trimmed) && !/^[a-zA-Z]:[\\/]/.test(trimmed)) {
+        return undefined;
+    }
+
+    if (path.isAbsolute(trimmed)) {
+        return trimmed;
+    }
+
+    const normalized = trimmed.replace(/^[/\\]+/, '');
     if (normalized.startsWith('job-assets/') || normalized.startsWith('render-assets/')) {
         const under = normalized.replace(/^(job-assets|render-assets)\//, '');
         const jobPath = path.join(RENDER_ASSETS_DIR, under);
@@ -458,6 +498,43 @@ async function ensureDirectories() {
     await fsp.mkdir(RENDER_ASSETS_DIR, { recursive: true });
 }
 
+function isStudioBrandWatermarkUrl(rawUrl) {
+    const href = String(rawUrl || '').trim().toLowerCase();
+    if (!href) return false;
+    return STUDIO_BRAND_WATERMARK_HOST_MARKERS.some((marker) => href.includes(marker));
+}
+
+function assertDownloadedImageFile(filePath, sourceUrl) {
+    const fd = fs.openSync(filePath, 'r');
+    try {
+        const header = Buffer.alloc(16);
+        const bytesRead = fs.readSync(fd, header, 0, 16, 0);
+        const slice = header.subarray(0, bytesRead);
+        const isPng = slice.length >= 8
+            && slice[0] === 0x89 && slice[1] === 0x50 && slice[2] === 0x4e && slice[3] === 0x47;
+        const isJpeg = slice.length >= 3
+            && slice[0] === 0xff && slice[1] === 0xd8 && slice[2] === 0xff;
+        const isWebp = slice.length >= 12
+            && slice.toString('ascii', 0, 4) === 'RIFF'
+            && slice.toString('ascii', 8, 12) === 'WEBP';
+        const isGif = slice.length >= 6
+            && (slice.toString('ascii', 0, 6) === 'GIF87a' || slice.toString('ascii', 0, 6) === 'GIF89a');
+        if (!isPng && !isJpeg && !isWebp && !isGif) {
+            const sniff = slice.toString('utf8').slice(0, 48).replace(/\s+/g, ' ');
+            throw new Error(
+                `Downloaded watermark is not an image (got "${sniff}" from ${sourceUrl}). `
+                + 'Studio Access HTML or an empty body was saved as watermark.png.'
+            );
+        }
+    } finally {
+        fs.closeSync(fd);
+    }
+    const size = fs.statSync(filePath).size;
+    if (size < 80) {
+        throw new Error(`Downloaded watermark too small (${size} bytes) from ${sourceUrl}`);
+    }
+}
+
 function downloadUrlToFile(rawUrl, destinationFilePath, redirectsLeft = 5) {
     return new Promise((resolve, reject) => {
         const client = rawUrl.startsWith('https://') ? https : http;
@@ -467,6 +544,7 @@ function downloadUrlToFile(rawUrl, destinationFilePath, redirectsLeft = 5) {
             {
                 headers: {
                     'User-Agent': 'SM-Pipeline-V2-Remotion-Render-Server',
+                    Accept: 'image/png,image/jpeg,image/webp,image/*;q=0.8,*/*;q=0.5',
                 },
             },
             (response) => {
@@ -497,12 +575,30 @@ function downloadUrlToFile(rawUrl, destinationFilePath, redirectsLeft = 5) {
                     return;
                 }
 
+                const contentType = String(response.headers['content-type'] || '').toLowerCase();
+                if (contentType.includes('text/html') || contentType.includes('application/json')) {
+                    response.resume();
+                    reject(new Error(
+                        `Download returned ${contentType || 'non-image'} for ${rawUrl} `
+                        + '(likely Cloudflare Access HTML, not the watermark PNG)'
+                    ));
+                    return;
+                }
+
                 const fileStream = fs.createWriteStream(destinationFilePath);
 
                 response.pipe(fileStream);
 
                 fileStream.on('finish', () => {
-                    fileStream.close(() => resolve(destinationFilePath));
+                    fileStream.close(() => {
+                        try {
+                            assertDownloadedImageFile(destinationFilePath, rawUrl);
+                            resolve(destinationFilePath);
+                        } catch (error) {
+                            try { fs.unlinkSync(destinationFilePath); } catch {}
+                            reject(error);
+                        }
+                    });
                 });
 
                 fileStream.on('error', (error) => {
@@ -730,21 +826,28 @@ async function rewriteWatermarkAsset({ watermarkUrl, jobAssetDir, job }) {
     const raw = String(watermarkUrl || '').trim();
     if (!raw) return '';
 
-    const driveFileId = googleDriveFileIdFromUrl(raw);
+    // Studio/public branding URLs are Access-gated from Remotion's host and
+    // previously wrote Cloudflare HTML into watermark.png. Always prefer the
+    // authenticated Drive file via pipeline-runner.
+    let driveFileId = googleDriveFileIdFromUrl(raw);
+    if (!driveFileId && (isStudioBrandWatermarkUrl(raw) || /watermark/i.test(raw))) {
+        driveFileId = CHICAGO_WATERMARK_DRIVE_FILE_ID;
+    }
+
     const sourceUrl = driveFileId
         ? `${PIPELINE_RUNNER_INTERNAL_URL}/internal/drive-media/${encodeURIComponent(driveFileId)}`
         : raw;
 
     if (!isHttpUrl(sourceUrl)) return raw;
 
-    const ext = getExtensionFromUrl(raw, '.png');
+    const ext = driveFileId ? '.png' : getExtensionFromUrl(raw, '.png');
     const safeExt = /\.(png|jpe?g|webp)$/i.test(ext) ? ext : '.png';
     const destination = path.join(jobAssetDir, `watermark${safeExt}`);
 
     appendLog(
         job,
         driveFileId
-            ? 'Downloading watermark from private Drive authority'
+            ? `Downloading watermark from private Drive authority (${driveFileId})`
             : `Downloading watermark from ${sourceUrl}`
     );
     await downloadUrlToFile(sourceUrl, destination);

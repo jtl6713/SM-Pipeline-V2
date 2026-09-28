@@ -166,12 +166,22 @@ def watermark_service_url() -> str:
 
 
 def brand_watermark_url(client: AirtableClient) -> str:
+    """Return a Remotion-localizable watermark URL.
+
+    Prefer the Drive File ID. Catalog rows sometimes store an Access-gated Studio
+    public branding URL in Google Drive URL; Remotion downloading that writes
+    Cloudflare HTML as watermark.png and fails with Error loading image.
+    """
     rows = client.list_records(MEDIA_ASSETS_TABLE, view=C6_WATERMARK_ASSET_VIEW, max_records=1)
     if not rows:
         raise RuntimeError("C6 watermark asset view returned no active branding watermark")
-    url = field_str(rows[0], "Google Drive URL")
+    row = rows[0]
+    drive_id = field_str(row, "Google Drive File ID")
+    if drive_id:
+        return f"https://drive.google.com/uc?export=download&id={drive_id}"
+    url = field_str(row, "Google Drive URL")
     if not url:
-        raise RuntimeError("C6 watermark asset is missing Google Drive URL")
+        raise RuntimeError("C6 watermark asset is missing Google Drive File ID and URL")
     return url
 
 

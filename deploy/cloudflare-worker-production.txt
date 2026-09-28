@@ -163,3 +163,8 @@ Deploy Studio API Worker production
 Reason: Cut Airtable API burn — cron */5 + heavy/light insights/ingest gates; align hermetic version pins
 Worker: 0.10.410-airtable-low-burn
 Requested: 2026-09-28T00:55:00Z
+
+Deploy Studio API Worker production
+Reason: Stop treating Access-gated Studio watermark URL as Remotion-ready; require Drive localization health flags
+Worker: 0.10.411-watermark-drive-authority
+Requested: 2026-09-28T01:42:00Z
