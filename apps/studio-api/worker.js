@@ -453,11 +453,12 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.418-tiktok-draft-resend",
+          version: "0.10.419-pipeline-tiktok-open-fallback",
           studio_desk_inventory_v1: true,
           studio_desk_activity_v1: true,
           studio_tiktok_complete_v1: true,
           studio_tiktok_draft_resend_v1: true,
+          studio_pipeline_tiktok_open_fallback_v1: true,
           studio_youtube_complete_v1: true,
           studio_auto_compress_v1: true,
           studio_autonomous_produce_v1: true,
@@ -2821,6 +2822,7 @@ function normalizedOutputState(record) {
   if (
     has("Publish_Status", "manual publish required")
     || has("TikTok_Draft_Status", "manual action")
+    || has("TikTok_Draft_Status", "manual fallback")
     || has("Manual_Completion_Status", "required")
     || has("Music_Status", "manual action")
     || fields.Manual_Fallback_Required
@@ -3607,8 +3609,23 @@ function contentProfileFilterFormula(profile) {
 // when Output_ID crossed ~1034 while the UI only fetched newest 100).
 // Fully Published packages stay off this scan so they only appear in Archive when
 // they are still inside the newest-N window.
+// TikTok Manual Fallback (auth-signature 401 park) must stay open — FIND("Manual Action")
+// does not match "Manual Fallback", which is why CI 143 / Output 847 vanished.
+const STUDIO_PIPELINE_OPEN_OUTPUT_LIMIT = 1000;
+
 function studioPipelineOpenOutputFormula(profile) {
-  const open = 'AND({Test_Run_ID}=BLANK(),{Output_Status}!="Skipped",OR({Published_At}=BLANK(),{Output_Status}!="Published",{Publish_Status}!="Published",FIND("Manual Action",{TikTok_Draft_Status}&"")))';
+  const open = 'AND({Test_Run_ID}=BLANK(),{Output_Status}!="Skipped",OR('
+    + '{Published_At}=BLANK(),'
+    + '{Output_Status}!="Published",'
+    + '{Publish_Status}!="Published",'
+    + '{Publish_Status}="Failed",'
+    + '{Manual_Fallback_Required}=1,'
+    + 'FIND("Manual Action",{TikTok_Draft_Status}&""),'
+    + 'FIND("Manual Fallback",{TikTok_Draft_Status}&""),'
+    + 'FIND("Draft Delivered",{TikTok_Draft_Status}&""),'
+    + '{TikTok_Draft_Status}="Ready for Delivery",'
+    + '{TikTok_Draft_Status}="Retry Pending"'
+    + '))';
   const profileFormula = contentProfileFilterFormula(profile);
   return profileFormula ? `AND(${profileFormula},${open})` : open;
 }
@@ -20494,10 +20511,10 @@ async function listContent(request, env, url, authorization) {
       filterFormula: profileFormula,
     }),
     listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
-      limit: 250,
+      limit: STUDIO_PIPELINE_OPEN_OUTPUT_LIMIT,
       sortField: "Output_ID",
       sortDirection: "desc",
-      fields: ["Content_Item", "Output_ID", "Output_Status", "Publish_Status", "Published_At", "TikTok_Draft_Status"],
+      fields: ["Content_Item", "Output_ID", "Output_Status", "Publish_Status", "Published_At", "TikTok_Draft_Status", "Manual_Fallback_Required"],
       filterFormula: studioPipelineOpenOutputFormula(profile),
     }).catch((error) => {
       console.warn("content open-output scan failed", error);
@@ -20716,7 +20733,9 @@ async function listOutputs(request, env, url, authorization, ctx = null) {
     }),
     listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
       ...listOpts,
-      limit: Math.max(limit, 250),
+      // Cap used to be max(limit, 250) newest-open only; older unfinished packages
+      // (CI 143 / Output 847 Manual Fallback) aged out once >250 Ready-to-Schedule rows existed.
+      limit: STUDIO_PIPELINE_OPEN_OUTPUT_LIMIT,
       filterFormula: studioPipelineOpenOutputFormula(profile),
     }).catch((error) => {
       console.warn("pipeline open-output scan failed", error);

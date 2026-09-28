@@ -22,7 +22,7 @@ function loadCadenceHelper() {
 }
 
 test("Worker health advertises airtable low-burn cron build", () => {
-  assert.match(worker, /version: "0\.10\.418-tiktok-draft-resend"/);
+  assert.match(worker, /version: "0\.10\.419-pipeline-tiktok-open-fallback"/);
   assert.match(worker, /studio_airtable_low_burn_cron_v1: true/);
   assert.match(worker, /studioCronAirtableCadence/);
 });
