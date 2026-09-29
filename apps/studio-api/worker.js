@@ -453,7 +453,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.423-force-exact-voiceover-authority",
+          version: "0.10.424-thumbnail-ai-router",
           studio_desk_inventory_v1: true,
           studio_desk_activity_v1: true,
           studio_tiktok_complete_v1: true,
@@ -35251,11 +35251,15 @@ async function getStudioAiApiStatus(request, env) {
   const row = await studioSettingsByName(env, "AI_API_PREFERRED_PROVIDER").catch(() => null);
   const raw = String(row ? f(row, "Setting_Value") || "" : "").trim().toLowerCase();
   const preferredProvider = raw === "azure" ? "Azure" : "OpenAI";
+  const failoverRow = await studioSettingsByName(env, "AI_API_CROSS_PROVIDER_FAILOVER").catch(() => null);
+  const failoverRaw = String(failoverRow ? f(failoverRow, "Setting_Value") || "" : "").trim().toLowerCase();
+  const failoverEnabled = ["1", "true", "yes", "on", "enabled"].includes(failoverRaw);
   const runner = await studioAiApiRunnerStatus(env);
   return respond(request, env, {
     ok: true,
     preferred_provider: preferredProvider,
     failover_provider: preferredProvider === "OpenAI" ? "Azure" : "OpenAI",
+    failover_enabled: runner?.failover_enabled != null ? Boolean(runner.failover_enabled) : failoverEnabled,
     current_provider: runner?.current_provider || null,
     failover_active: Boolean(runner?.failover_active),
     last_success_at: runner?.last_success_at || null,

@@ -1,4 +1,8 @@
-"""OpenAI thumbnail generation — Make module 8 port."""
+"""Provider-routed thumbnail generation — Make module 8 port.
+
+Must honor Studio AI_API_PREFERRED_PROVIDER (Azure Preferred = SECONDARY).
+Hardcoding api.openai.com charged PRIMARY even when Preferred was Azure.
+"""
 
 from __future__ import annotations
 
@@ -7,8 +11,8 @@ import io
 from typing import Any
 
 import requests
-from PIL import Image
 
+from ai_image_router import post_image_generation
 from config import load_settings
 from p2.constants import OPENAI_IMAGE_MODEL, OPENAI_IMAGE_QUALITY, THUMBNAIL_PROMPT_SUFFIX
 
@@ -55,6 +59,8 @@ def build_thumbnail_prompt(thumbnail_prompt: str, *, aspect_ratio: str = "9:16")
 
 def fit_png_to_ratio(png_bytes: bytes, aspect_ratio: str = "9:16") -> bytes:
     """Center-crop / cover-scale PNG to the platform canvas (e.g. 1080x1920 for 9:16)."""
+    from PIL import Image
+
     target_w, target_h = canvas_for_ratio(aspect_ratio)
     image = Image.open(io.BytesIO(png_bytes)).convert("RGBA")
     src_w, src_h = image.size
@@ -72,17 +78,10 @@ def fit_png_to_ratio(png_bytes: bytes, aspect_ratio: str = "9:16") -> bytes:
 
 def generate_thumbnail_png(thumbnail_prompt: str, *, aspect_ratio: str = "9:16") -> bytes:
     settings = load_settings()
-    api_key = str(settings.get("openai_api_key") or "").strip()
-    if not api_key:
-        raise RuntimeError("OPENAI_API_KEY is required for P2 thumbnail generation")
     size = image_size_for_ratio(aspect_ratio)
-    response = requests.post(
-        "https://api.openai.com/v1/images/generations",
-        headers={
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json",
-        },
-        json={
+    response = post_image_generation(
+        settings,
+        {
             "model": OPENAI_IMAGE_MODEL,
             "prompt": build_thumbnail_prompt(thumbnail_prompt, aspect_ratio=aspect_ratio),
             "n": 1,
@@ -96,11 +95,11 @@ def generate_thumbnail_png(thumbnail_prompt: str, *, aspect_ratio: str = "9:16")
     )
     if not response.ok:
         detail = (response.text or "").strip()[:400]
-        raise RuntimeError(f"OpenAI image generation failed ({response.status_code}): {detail}")
+        raise RuntimeError(f"AI image generation failed ({response.status_code}): {detail}")
     payload = response.json()
     data = payload.get("data") or []
     if not data:
-        raise RuntimeError("OpenAI image generation returned no data")
+        raise RuntimeError("AI image generation returned no data")
     item = data[0]
     b64 = item.get("b64_json")
     if b64:
@@ -108,7 +107,7 @@ def generate_thumbnail_png(thumbnail_prompt: str, *, aspect_ratio: str = "9:16")
     else:
         url = str(item.get("url") or "").strip()
         if not url:
-            raise RuntimeError("OpenAI image generation returned neither b64_json nor url")
+            raise RuntimeError("AI image generation returned neither b64_json nor url")
         image_response = requests.get(url, timeout=300)
         image_response.raise_for_status()
         raw = image_response.content

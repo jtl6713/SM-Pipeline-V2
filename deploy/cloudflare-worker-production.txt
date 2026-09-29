@@ -272,3 +272,8 @@ Reason: Explicitly deploy bot repair commit; prevent stale AI narration from sur
 Source repair: 7f9e52c5b610cf2f69a7c7e78f040950fef3aef3
 Worker: 0.10.423-force-exact-voiceover-authority
 Requested: 2026-09-28T16:58:00-05:00
+
+Route P2 thumbnails through Azure Preferred AI image router
+Reason: thumbnail_client hardcoding api.openai.com charged PRIMARY despite AI_API_PREFERRED_PROVIDER=Azure. Worker also exposes failover_enabled.
+Worker: thumbnail-ai-router
+Requested: 2026-09-29T01:30:00Z
