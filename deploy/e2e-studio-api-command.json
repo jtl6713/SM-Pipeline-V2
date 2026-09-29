@@ -1,74 +1,20 @@
 {
-  "correlation_id": "CONTENT-263-LONG-VIDEO-TIMING-RECOVERY-20260929",
+  "correlation_id": "CONTENT-263-REMAINING-LONG-VIDEO-RECOVERY-20260929",
   "requests": [
     {
-      "name": "263-ig-reel-continue-1",
-      "method": "POST",
-      "path": "/api/outputs/rech0yEQhQHvbxSfK/creative/render/continue",
-      "body": {}
-    },
-    {
-      "name": "263-ig-reel-continue-2",
-      "method": "POST",
-      "path": "/api/outputs/rech0yEQhQHvbxSfK/creative/render/continue",
-      "body": {}
-    },
-    {
-      "name": "263-ig-reel-continue-3",
-      "method": "POST",
-      "path": "/api/outputs/rech0yEQhQHvbxSfK/creative/render/continue",
-      "body": {}
-    },
-    {
-      "name": "263-fb-reel-continue-1",
+      "name": "263-fb-reel-continue",
       "method": "POST",
       "path": "/api/outputs/recitkWdyJzuyahDE/creative/render/continue",
       "body": {}
     },
     {
-      "name": "263-fb-reel-continue-2",
-      "method": "POST",
-      "path": "/api/outputs/recitkWdyJzuyahDE/creative/render/continue",
-      "body": {}
-    },
-    {
-      "name": "263-fb-reel-continue-3",
-      "method": "POST",
-      "path": "/api/outputs/recitkWdyJzuyahDE/creative/render/continue",
-      "body": {}
-    },
-    {
-      "name": "263-tiktok-continue-1",
+      "name": "263-tiktok-continue",
       "method": "POST",
       "path": "/api/outputs/recihZYCI3HIIalc3/creative/render/continue",
       "body": {}
     },
     {
-      "name": "263-tiktok-continue-2",
-      "method": "POST",
-      "path": "/api/outputs/recihZYCI3HIIalc3/creative/render/continue",
-      "body": {}
-    },
-    {
-      "name": "263-tiktok-continue-3",
-      "method": "POST",
-      "path": "/api/outputs/recihZYCI3HIIalc3/creative/render/continue",
-      "body": {}
-    },
-    {
-      "name": "263-youtube-short-continue-1",
-      "method": "POST",
-      "path": "/api/outputs/reczJjZxB8EKmvKLS/creative/render/continue",
-      "body": {}
-    },
-    {
-      "name": "263-youtube-short-continue-2",
-      "method": "POST",
-      "path": "/api/outputs/reczJjZxB8EKmvKLS/creative/render/continue",
-      "body": {}
-    },
-    {
-      "name": "263-youtube-short-continue-3",
+      "name": "263-youtube-short-continue",
       "method": "POST",
       "path": "/api/outputs/reczJjZxB8EKmvKLS/creative/render/continue",
       "body": {}
