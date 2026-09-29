@@ -1,39 +1,77 @@
 {
-  "correlation_id": "VIZCAYA-BEYOND-MANSION-REPAIR-20260928",
+  "correlation_id": "CONTENT-263-LONG-VIDEO-TIMING-RECOVERY-20260929",
   "requests": [
     {
-      "name": "build-vizcaya-plan",
+      "name": "263-ig-reel-continue-1",
       "method": "POST",
-      "path": "/api/production-requests/recQ4i32VI2EZShVm/plan",
-      "body": {
-        "platforms": [
-          "YouTube",
-          "Facebook"
-        ],
-        "overrides": {},
-        "extras": [],
-        "package": "video",
-        "skip_fbs1_guard": true
-      }
+      "path": "/api/outputs/rech0yEQhQHvbxSfK/creative/render/continue",
+      "body": {}
     },
     {
-      "name": "prepare-vizcaya-frames",
+      "name": "263-ig-reel-continue-2",
       "method": "POST",
-      "path": "/api/production-requests/recQ4i32VI2EZShVm/variants",
-      "body": {
-        "crops": {},
-        "retry": false
-      }
+      "path": "/api/outputs/rech0yEQhQHvbxSfK/creative/render/continue",
+      "body": {}
     },
     {
-      "name": "check-vizcaya-frames",
-      "method": "GET",
-      "path": "/api/production-requests/recQ4i32VI2EZShVm/variants"
+      "name": "263-ig-reel-continue-3",
+      "method": "POST",
+      "path": "/api/outputs/rech0yEQhQHvbxSfK/creative/render/continue",
+      "body": {}
     },
     {
-      "name": "check-vizcaya-item4",
-      "method": "GET",
-      "path": "/api/production-requests/recQ4i32VI2EZShVm/item4"
+      "name": "263-fb-reel-continue-1",
+      "method": "POST",
+      "path": "/api/outputs/recitkWdyJzuyahDE/creative/render/continue",
+      "body": {}
+    },
+    {
+      "name": "263-fb-reel-continue-2",
+      "method": "POST",
+      "path": "/api/outputs/recitkWdyJzuyahDE/creative/render/continue",
+      "body": {}
+    },
+    {
+      "name": "263-fb-reel-continue-3",
+      "method": "POST",
+      "path": "/api/outputs/recitkWdyJzuyahDE/creative/render/continue",
+      "body": {}
+    },
+    {
+      "name": "263-tiktok-continue-1",
+      "method": "POST",
+      "path": "/api/outputs/recihZYCI3HIIalc3/creative/render/continue",
+      "body": {}
+    },
+    {
+      "name": "263-tiktok-continue-2",
+      "method": "POST",
+      "path": "/api/outputs/recihZYCI3HIIalc3/creative/render/continue",
+      "body": {}
+    },
+    {
+      "name": "263-tiktok-continue-3",
+      "method": "POST",
+      "path": "/api/outputs/recihZYCI3HIIalc3/creative/render/continue",
+      "body": {}
+    },
+    {
+      "name": "263-youtube-short-continue-1",
+      "method": "POST",
+      "path": "/api/outputs/reczJjZxB8EKmvKLS/creative/render/continue",
+      "body": {}
+    },
+    {
+      "name": "263-youtube-short-continue-2",
+      "method": "POST",
+      "path": "/api/outputs/reczJjZxB8EKmvKLS/creative/render/continue",
+      "body": {}
+    },
+    {
+      "name": "263-youtube-short-continue-3",
+      "method": "POST",
+      "path": "/api/outputs/reczJjZxB8EKmvKLS/creative/render/continue",
+      "body": {}
     }
   ]
 }
