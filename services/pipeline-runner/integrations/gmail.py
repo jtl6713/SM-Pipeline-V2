@@ -67,14 +67,24 @@ class GmailClient:
         message = EmailMessage(policy=SMTP)
         message["To"] = to
         message["Subject"] = subject
-        message.set_content("ChicagoShining review email — open in an HTML-capable client.")
-        message.add_alternative(html_body, subtype="html")
+        # Send one HTML MIME entity rather than multipart/alternative. Some iOS/
+        # IMAP paths have exposed the multipart boundary and quoted-printable HTML
+        # as literal body text even though Gmail accepted the RFC envelope. A
+        # single HTML entity removes that failure mode while retaining formatting.
+        message.set_content(html_body, subtype="html", charset="utf-8", cte="base64")
         raw_bytes = message.as_bytes(policy=SMTP)
         parsed = BytesParser(policy=SMTP).parsebytes(raw_bytes)
-        content_types = [part.get_content_type() for part in parsed.iter_parts()] if parsed.is_multipart() else []
-        if parsed.get_content_type() != "multipart/alternative" or content_types != ["text/plain", "text/html"]:
+        if parsed.is_multipart() or parsed.get_content_type() != "text/html":
             raise RuntimeError(
-                f"Malformed Gmail MIME envelope: top={parsed.get_content_type()} parts={content_types}"
+                f"Malformed Gmail MIME envelope: top={parsed.get_content_type()} multipart={parsed.is_multipart()}"
+            )
+        if parsed.get_content_charset() != "utf-8":
+            raise RuntimeError(
+                f"Malformed Gmail MIME charset: {parsed.get_content_charset()}"
+            )
+        if parsed.get("Content-Transfer-Encoding", "").lower() != "base64":
+            raise RuntimeError(
+                f"Malformed Gmail transfer encoding: {parsed.get('Content-Transfer-Encoding')}"
             )
         # SMTP policy guarantees RFC-compliant CRLF line endings. This matters for
         # Gmail Sent copies opened through iOS/IMAP clients, which can expose raw
