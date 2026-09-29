@@ -8409,7 +8409,9 @@
       : (autoRetry ? `Automatic retry ${item4VariantAutoRetries}/${ITEM4_VARIANT_AUTO_RETRIES}: preparing leftover platform crops…` : "Starting platform-media preparation…"), "success");
     try {
       const result = await api(`/api/production-requests/${encodeURIComponent(activeProductionRequest.id)}/variants`, {method:"POST",body:JSON.stringify({ crops: collectItem4Crops(), retry: autoRetry || ["Preparing", "Error"].includes(String(item4Workspace?.variant_status || "")) }),timeoutMs:45000});
-      if (result.production_request) activeProductionRequest = result.production_request;
+      if (result.production_request) {
+      activeProductionRequest = mergeProductionRequestRecord(activeProductionRequest, result.production_request);
+    }
       await loadItem4Workspace(activeProductionRequest);
       if (item4Workspace?.variant_status === "Ready") {
         stopItem4VariantPolling();
@@ -11276,6 +11278,14 @@
 
     try {
       const payload = { ...productionRequestPayload(), light: true };
+      const savedTextDirections = {
+        title_mode: payload.title_mode,
+        requested_title: payload.requested_title,
+        caption_mode: payload.caption_mode,
+        requested_caption: payload.requested_caption,
+        script_mode: payload.script_mode,
+        requested_script: payload.requested_script,
+      };
       const result = await api(`/api/production-requests/${encodeURIComponent(activeProductionRequest.id)}`, {
         method: "PATCH",
         body: JSON.stringify(payload),
@@ -11283,6 +11293,7 @@
       activeProductionRequest = mergeProductionRequestRecord(activeProductionRequest, result.record);
       ezDirty.clear();
       if (quiet) {
+        activeProductionRequest = { ...activeProductionRequest, ...savedTextDirections };
         setProductionRequestControlState(activeProductionRequest);
         return activeProductionRequest;
       }
@@ -11290,6 +11301,10 @@
       if (outputsResult?.production_request) {
         activeProductionRequest = mergeProductionRequestRecord(activeProductionRequest, outputsResult.production_request);
       }
+      // The operator's just-saved text directions are execution authority for
+      // this save cycle. A platform-output sync response may be partial or stale,
+      // but it must never repaint Title / Caption / Script blank after Save.
+      activeProductionRequest = { ...activeProductionRequest, ...savedTextDirections };
       if (Array.isArray(outputsResult?.records)) {
         productionRequestOutputs = outputsResult.records;
         syncLegacyPlatformsFromOutputMatrix();
