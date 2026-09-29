@@ -95,7 +95,9 @@ test("Vertical Short Video defaults Instagram and Facebook to Reel plus Story", 
   assert.match(app, /"Vertical Short Video": \{Instagram:"Reel", Facebook:"Reel"/);
   assert.match(app, /verticalShort && \["Instagram", "Facebook"\]\.includes\(platform\) && primary === "Reel"/);
   assert.match(app, /defaults\.push\("Story"\)/);
-  assert.match(app, /applyDefaultOutputsForPlatform\(input\.value, \{ replace: true \}\)/);
+  // Existing configure-mode requests must not wipe saved destinations on platform toggle.
+  assert.match(app, /applyDefaultOutputsForPlatform\(input\.value\);/);
+  assert.doesNotMatch(app, /applyDefaultOutputsForPlatform\(input\.value, \{ replace: true \}\)/);
 });
 
 test("review audio defaults use sixty percent of the previous mix", () => {
