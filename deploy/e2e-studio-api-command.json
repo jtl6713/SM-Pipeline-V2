@@ -1,11 +1,28 @@
 {
-  "correlation_id": "LA-TIKTOK-847-INBOX-RESEND-20260928",
+  "correlation_id": "VIZCAYA-BEYOND-MANSION-SAVE-500-20260928",
   "requests": [
     {
-      "name": "kick-output-847-grand-central-market-inbox",
-      "method": "POST",
-      "path": "/api/operations/outputs/recrsNsRc06CO0Ngi/publish-kick",
-      "body": {}
+      "name": "get-vizcaya-item4",
+      "method": "GET",
+      "path": "/api/production-requests/recQ4i32VI2EZShVm/item4"
+    },
+    {
+      "name": "get-vizcaya-outputs",
+      "method": "GET",
+      "path": "/api/production-requests/recQ4i32VI2EZShVm/outputs"
+    },
+    {
+      "name": "replay-light-save",
+      "method": "PATCH",
+      "path": "/api/production-requests/recQ4i32VI2EZShVm",
+      "body": {
+        "light": true
+      }
+    },
+    {
+      "name": "get-vizcaya-item4-after-save",
+      "method": "GET",
+      "path": "/api/production-requests/recQ4i32VI2EZShVm/item4"
     }
   ]
 }
