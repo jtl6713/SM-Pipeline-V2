@@ -10,6 +10,7 @@ def test_runtime_ai_stages_do_not_hardcode_primary_openai_endpoints():
         ROOT / "p4" / "openai_plan.py",
         ROOT / "r2" / "openai_selection.py",
         ROOT / "carousel" / "image_gen.py",
+        ROOT / "p2" / "thumbnail_client.py",
     ]
     for path in routed:
         source = path.read_text(encoding="utf-8")
@@ -25,3 +26,10 @@ def test_image_generation_uses_runtime_router():
     source = (ROOT / "carousel" / "image_gen.py").read_text(encoding="utf-8")
     assert "from ai_image_router import post_image_generation" in source
     assert "post_image_generation(" in source
+
+
+def test_thumbnail_generation_uses_runtime_router():
+    source = (ROOT / "p2" / "thumbnail_client.py").read_text(encoding="utf-8")
+    assert "from ai_image_router import post_image_generation" in source
+    assert "post_image_generation(" in source
+    assert "https://api.openai.com" not in source
