@@ -11,17 +11,28 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def _load_thumbnail_client(monkeypatch_modules: dict[str, types.ModuleType]):
-    for name, module in monkeypatch_modules.items():
-        sys.modules[name] = module
-    # Ensure package path resolution for p2.constants / ai_image_router siblings.
-    if str(ROOT) not in sys.path:
-        sys.path.insert(0, str(ROOT))
-    path = ROOT / "p2" / "thumbnail_client.py"
-    spec = importlib.util.spec_from_file_location("p2_thumbnail_client_under_test", path)
-    module = importlib.util.module_from_spec(spec)
-    assert spec.loader is not None
-    spec.loader.exec_module(module)
-    return module
+    """Load thumbnail_client with stubs, then restore sys.modules so later tests keep real PIL."""
+    previous = {name: sys.modules.get(name) for name in monkeypatch_modules}
+    try:
+        for name, module in monkeypatch_modules.items():
+            sys.modules[name] = module
+        if str(ROOT) not in sys.path:
+            sys.path.insert(0, str(ROOT))
+        # Drop a previously imported real/fake module so we always reload under stubs.
+        sys.modules.pop("p2_thumbnail_client_under_test", None)
+        path = ROOT / "p2" / "thumbnail_client.py"
+        spec = importlib.util.spec_from_file_location("p2_thumbnail_client_under_test", path)
+        module = importlib.util.module_from_spec(spec)
+        assert spec.loader is not None
+        spec.loader.exec_module(module)
+        return module
+    finally:
+        for name, prior in previous.items():
+            if prior is None:
+                sys.modules.pop(name, None)
+            else:
+                sys.modules[name] = prior
+        sys.modules.pop("p2_thumbnail_client_under_test", None)
 
 
 def test_generate_thumbnail_png_uses_image_router():
@@ -48,17 +59,13 @@ def test_generate_thumbnail_png_uses_image_router():
     config.load_settings = lambda: {"openai_account": "PRIMARY"}
 
     requests_mod = types.ModuleType("requests")
-    pil = types.ModuleType("PIL")
-    pil_image = types.ModuleType("PIL.Image")
-    pil.Image = pil_image
 
-    # p2.constants is a real local module; leave it importable.
+    # Do not stub PIL here — fit_png_to_ratio is swapped after load, and leaving a fake
+    # PIL.Image in sys.modules broke hermetic test_public_cover (Image.new missing).
     module = _load_thumbnail_client({
         "ai_image_router": ai_image_router,
         "config": config,
         "requests": requests_mod,
-        "PIL": pil,
-        "PIL.Image": pil_image,
     })
     module.fit_png_to_ratio = lambda raw, aspect_ratio="9:16": b"fitted-png"
 
