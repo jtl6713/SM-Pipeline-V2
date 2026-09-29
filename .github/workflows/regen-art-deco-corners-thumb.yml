@@ -1,0 +1,165 @@
+name: Regen Art Deco Corners 9x16 thumbnail
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'deploy/regen-art-deco-corners-thumb.txt'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: regen-art-deco-corners-thumb
+  cancel-in-progress: false
+
+jobs:
+  regenerate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      AIRTABLE_PAT: ${{ secrets.AIRTABLE_PAT }}
+      PIPELINE_RUNNER_SHARED_SECRET: ${{ secrets.PIPELINE_RUNNER_SHARED_SECRET }}
+      R2_UPLOAD_WORKER_SECRET: ${{ secrets.R2_UPLOAD_WORKER_SECRET }}
+      CONTENT_ITEM_ID: recWW8grZAuz19RLl
+      AIRTABLE_BASE_ID: appe33zkZn35yirTL
+      CONTENT_TABLE_ID: tblwzN9AXWvmKVKPs
+      OUTPUT_TABLE_ID: tblrlPeboBthkplH0
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Pulse P2 silent thumbnail
+        id: p2
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "${PIPELINE_RUNNER_SHARED_SECRET:-}"
+          test -n "${AIRTABLE_PAT:-}"
+          body=$(python3 - <<'PY'
+          import json, os
+          print(json.dumps({
+            "content_item_record_id": os.environ["CONTENT_ITEM_ID"],
+            "content_record_id": os.environ["CONTENT_ITEM_ID"],
+            "source": "art-deco-corners-9x16-thumb-regen",
+          }))
+          PY
+          )
+          http_code=$(curl --silent --show-error --max-time 300 \
+            -o /tmp/p2.json -w '%{http_code}' \
+            -X POST 'https://pipeline.chicagoshining.com/stages/p2' \
+            -H "Content-Type: application/json" \
+            -H "X-Pipeline-Secret: $PIPELINE_RUNNER_SHARED_SECRET" \
+            --data "$body")
+          echo "http_code=$http_code" >> "$GITHUB_OUTPUT"
+          echo "P2 HTTP $http_code"
+          head -c 4000 /tmp/p2.json || true
+          echo
+          test "$http_code" -ge 200 -a "$http_code" -lt 300
+          python3 - <<'PY'
+          import json
+          payload = json.load(open("/tmp/p2.json"))
+          status = str(payload.get("status") or "")
+          run = (payload.get("details") or {}).get("run") or {}
+          if status != "ok" or not run.get("processed"):
+              raise SystemExit(f"P2 did not process: {payload}")
+          print("processed", run.get("route"), run.get("thumbnail_drive_file_id"))
+          PY
+
+      - name: Stage public 9x16 cover and restore voiceover flag
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "${R2_UPLOAD_WORKER_SECRET:-}"
+          python3 - <<'PY'
+          import json, os, re, urllib.parse, urllib.request
+
+          pat = os.environ["AIRTABLE_PAT"]
+          base = os.environ["AIRTABLE_BASE_ID"]
+          content_table = os.environ["CONTENT_TABLE_ID"]
+          content_id = os.environ["CONTENT_ITEM_ID"]
+          output_table = os.environ["OUTPUT_TABLE_ID"]
+          upload_secret = os.environ["R2_UPLOAD_WORKER_SECRET"]
+
+          def airtable(method, path, body=None):
+              req = urllib.request.Request(
+                  f"https://api.airtable.com/v0/{base}/{path}",
+                  data=None if body is None else json.dumps(body).encode(),
+                  headers={
+                      "Authorization": f"Bearer {pat}",
+                      "Content-Type": "application/json",
+                  },
+                  method=method,
+              )
+              with urllib.request.urlopen(req, timeout=60) as resp:
+                  return json.load(resp)
+
+          parent = airtable("GET", f"{content_table}/{content_id}")
+          fields = parent.get("fields") or {}
+          drive_id = str(fields.get("Thumbnail_Google_Drive_File_ID") or "").strip()
+          thumb_url = str(fields.get("Thumbnail_URL") or "").strip()
+          if not drive_id:
+              m = re.search(r"[?&]id=([A-Za-z0-9_-]+)", thumb_url)
+              drive_id = m.group(1) if m else ""
+          if not drive_id:
+              raise SystemExit(f"No Drive thumbnail id after P2: {thumb_url!r}")
+
+          dl = urllib.request.urlopen(
+              f"https://drive.google.com/uc?export=download&id={drive_id}",
+              timeout=120,
+          )
+          png = dl.read()
+          if len(png) < 1000 or png[:8] != b"\x89PNG\r\n\x1a\n":
+              raise SystemExit(f"Drive download did not return PNG ({len(png)} bytes)")
+
+          key = f"studio/previews/thumbnails/{content_id}/cover-9x16.png"
+          put = urllib.request.Request(
+              "https://chicagoshining-r2-upload.joseph-t-logan.workers.dev/?key="
+              + urllib.parse.quote(key, safe=""),
+              data=png,
+              method="PUT",
+              headers={
+                  "Content-Type": "image/png",
+                  "x-pipeline-secret": upload_secret,
+              },
+          )
+          with urllib.request.urlopen(put, timeout=120) as resp:
+              put_body = json.load(resp)
+          if not put_body.get("ok"):
+              raise SystemExit(f"R2 upload failed: {put_body}")
+
+          public = f"https://media.chicagoshining.com/{key}"
+          airtable(
+              "PATCH",
+              f"{content_table}/{content_id}",
+              {
+                  "fields": {
+                      "Thumbnail_URL": public,
+                      "Thumbnail_Status": "Generated",
+                      "Include_Thumbnail": "Yes",
+                      "Include_Voiceover": "Yes",
+                  },
+                  "typecast": True,
+              },
+          )
+
+          linked = fields.get("Platform Outputs") or []
+          for oid in linked:
+              out = airtable("GET", f"{output_table}/{oid}")
+              ofields = out.get("fields") or {}
+              otype = str(
+                  ofields.get("Studio_Output_Type")
+                  or ofields.get("Platform_Output_Type")
+                  or ""
+              ).lower()
+              if "story" in otype:
+                  continue
+              airtable(
+                  "PATCH",
+                  f"{output_table}/{oid}",
+                  {"fields": {"Thumbnail_URL": public}, "typecast": True},
+              )
+              print("stamped", oid, otype)
+
+          print("public_cover", public)
+          PY
