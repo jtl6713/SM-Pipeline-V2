@@ -13141,7 +13141,19 @@ async function listProductionRequests(request, env, url, authorization) {
   const filtered = records.filter(record => {
     const orgLinks = Array.isArray(f(record, "Organization")) ? f(record, "Organization") : [];
     const brandLinks = Array.isArray(f(record, "Brand")) ? f(record, "Brand") : [];
-    return orgLinks.includes(authorization?.organization?.record_id) &&
+    const status = String(f(record, "Request_Status") || "").trim();
+    const title = String(f(record, "Requested_Title") || "").trim();
+    const ideaLinks = Array.isArray(f(record, "Idea_Candidate")) ? f(record, "Idea_Candidate") : [];
+    const promotedLinks = Array.isArray(f(record, "Promoted_Content_Item")) ? f(record, "Promoted_Content_Item") : [];
+    const contentLinks = Array.isArray(f(record, "Content Items")) ? f(record, "Content Items") : [];
+    const detachedBlankDraft =
+      status === "Draft" &&
+      !title &&
+      ideaLinks.length === 0 &&
+      promotedLinks.length === 0 &&
+      contentLinks.length === 0;
+    return !detachedBlankDraft &&
+      orgLinks.includes(authorization?.organization?.record_id) &&
       membershipAllowsBrand(authorization, brandLinks) &&
       (!profileBrandIds.size || brandLinks.some((id) => profileBrandIds.has(id)));
   });
