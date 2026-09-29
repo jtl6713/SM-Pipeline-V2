@@ -1,26 +1,37 @@
 {
-  "correlation_id": "VIZCAYA-BEYOND-MANSION-SAVE-500-20260928",
+  "correlation_id": "VIZCAYA-BEYOND-MANSION-REPAIR-20260928",
   "requests": [
     {
-      "name": "get-vizcaya-item4",
-      "method": "GET",
-      "path": "/api/production-requests/recQ4i32VI2EZShVm/item4"
-    },
-    {
-      "name": "get-vizcaya-outputs",
-      "method": "GET",
-      "path": "/api/production-requests/recQ4i32VI2EZShVm/outputs"
-    },
-    {
-      "name": "replay-light-save",
-      "method": "PATCH",
-      "path": "/api/production-requests/recQ4i32VI2EZShVm",
+      "name": "build-vizcaya-plan",
+      "method": "POST",
+      "path": "/api/production-requests/recQ4i32VI2EZShVm/plan",
       "body": {
-        "light": true
+        "platforms": [
+          "YouTube",
+          "Facebook"
+        ],
+        "overrides": {},
+        "extras": [],
+        "package": "video",
+        "skip_fbs1_guard": true
       }
     },
     {
-      "name": "get-vizcaya-item4-after-save",
+      "name": "prepare-vizcaya-frames",
+      "method": "POST",
+      "path": "/api/production-requests/recQ4i32VI2EZShVm/variants",
+      "body": {
+        "crops": {},
+        "retry": false
+      }
+    },
+    {
+      "name": "check-vizcaya-frames",
+      "method": "GET",
+      "path": "/api/production-requests/recQ4i32VI2EZShVm/variants"
+    },
+    {
+      "name": "check-vizcaya-item4",
       "method": "GET",
       "path": "/api/production-requests/recQ4i32VI2EZShVm/item4"
     }

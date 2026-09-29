@@ -12827,7 +12827,13 @@ function productionRequestFields(input, nowIso, { status = "Draft" } = {}) {
 function productionRequestDefaultsFromIdea(idea) {
   return {
     content_type: String(f(idea, "Production_Content_Type") || "").trim() || null,
-    platforms: Array.isArray(f(idea, "Production_Target_Platforms")) ? f(idea, "Production_Target_Platforms") : [],
+    platforms: (() => {
+      const productionPlatforms = Array.isArray(f(idea, "Production_Target_Platforms"))
+        ? f(idea, "Production_Target_Platforms")
+        : [];
+      if (productionPlatforms.length) return productionPlatforms;
+      return Array.isArray(f(idea, "Suggested_Platforms")) ? f(idea, "Suggested_Platforms") : [];
+    })(),
     voiceover_mode: String(f(idea, "Production_Include_Voiceover") || "Yes").trim() || "Yes",
     background_music_mode: String(f(idea, "Production_Include_Background_Music") || "Yes").trim() || "Yes",
     thumbnail_mode: String(f(idea, "Production_Include_Thumbnail") || "Yes").trim() || "Yes",

@@ -277,3 +277,7 @@ Route P2 thumbnails through Azure Preferred AI image router
 Reason: thumbnail_client hardcoding api.openai.com charged PRIMARY despite AI_API_PREFERRED_PROVIDER=Azure. Worker also exposes failover_enabled.
 Worker: thumbnail-ai-router
 Requested: 2026-09-29T01:30:00Z
+
+Deploy Studio API Worker production
+Reason: Preserve Suggested_Platforms when Production_Target_Platforms is blank so Production Save/plan/frame flow cannot lose destinations
+Requested: 2026-09-28
