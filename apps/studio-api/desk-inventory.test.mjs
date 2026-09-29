@@ -22,6 +22,7 @@ import {
   classifyTikTokAuthSignature,
   classifyNativeCover,
   classifyRfrLockedMissingDeliverable,
+  classifyNativePhotoReviewStrand,
   classifyTesterNightly,
   classifyTesterCatalogAssert,
   originFromNotes,
@@ -687,4 +688,48 @@ test("inventory payload summarizes escalate counts without inventing work", () =
   assert.equal(payload.recap.cards[0].status, "Needs you");
   assert.match(payload.recap.cards[0].found, /stuck and marked for investigation/i);
   assert.equal(summarizeIncidents([]).total, 0);
+});
+
+
+test("native photo review strand only heals scheduled complete output after sibling approval", () => {
+  const row = {
+    id: "recNativeStrand01",
+    output_id: 1208,
+    output_status: "Ready for Review",
+    render_status: "Native Photo Route",
+    scheduled_post_date: "2026-10-05T23:00:00.000Z",
+    thumbnail_url: "https://media.chicagoshining.com/studio/previews/thumbnails/cover.png",
+    platform: "Instagram",
+    studio_output_type: "Instagram Carousel",
+    content_item_id: "recContent265",
+  };
+  const sibling = {
+    id: "recSibling1209",
+    output_status: "Approved for Publishing",
+    render_status: "Native Photo Route",
+    content_item_id: "recContent265",
+  };
+  assert.equal(classifyNativePhotoReviewStrand(row, [row]), null);
+  const incident = classifyNativePhotoReviewStrand(row, [row, sibling]);
+  assert.equal(incident.kind, "native_photo_review_strand");
+  assert.equal(incident.actor, "worker_heal");
+});
+
+test("native photo review strand does not bypass missing deliverables or unscheduled review", () => {
+  const base = {
+    id: "recNativeStrand02",
+    output_id: 1208,
+    output_status: "Ready for Review",
+    render_status: "Native Photo Route",
+    platform: "Instagram",
+    studio_output_type: "Instagram Carousel",
+    content_item_id: "recContent265",
+  };
+  const sibling = { id: "recSibling", output_status: "Approved for Publishing" };
+  assert.equal(classifyNativePhotoReviewStrand(base, [base, sibling]), null);
+  assert.equal(classifyNativePhotoReviewStrand({
+    ...base,
+    scheduled_post_date: "2026-10-05T23:00:00.000Z",
+    thumbnail_url: "",
+  }, [base, sibling]), null);
 });

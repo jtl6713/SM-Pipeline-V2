@@ -94,6 +94,10 @@ const COPY = {
     found: "A post looks Ready for Review, but the review file or cover is missing.",
     action: "Staged the cover and finished the review file.",
   },
+  native_photo_review_strand: {
+    found: "A scheduled native-photo post was complete, but stayed Ready for Review after the same content package had already been approved.",
+    action: "Promoted the stranded output to Approved for Publishing without changing its assets or schedule.",
+  },
   native_cover_missing: {
     found: "A Reel or Short published without the grid cover.",
     action: "Flagged it so the cover can be attached on the platform.",

@@ -11,6 +11,7 @@ export const QUALITY_HEALS = Object.freeze([
   "resume_produce",
   "requeue_failed",
   "repair_render_sources",
+  "promote_native_photo_review_strand",
   "diagnose_then_one_send",
   "wait_pacific_midnight",
   "align_signature_then_rearm",
@@ -171,6 +172,14 @@ export const QUALITY_CHECKS = Object.freeze([
     kind: "render_private_drive_watermark",
     actor: "worker_heal",
     heal: "repair_render_sources",
+  }),
+  check({
+    id: "native_photo_review_strand",
+    title: "Check for complete scheduled native-photo outputs stranded at Ready for Review after sibling approval",
+    lane: "service",
+    kind: "native_photo_review_strand",
+    actor: "worker_heal",
+    heal: "promote_native_photo_review_strand",
   }),
   check({
     id: "native_cover_missing",

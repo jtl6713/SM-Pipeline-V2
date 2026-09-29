@@ -868,6 +868,33 @@ export function classifyRfrLockedMissingDeliverable(row, nowMs = Date.now(), ext
   }, row);
 }
 
+export function classifyNativePhotoReviewStrand(row, siblings = []) {
+  if (String(row?.test_run_id || "").trim()) return null;
+  if (String(row?.output_status || "").trim() !== "Ready for Review") return null;
+  if (!/native photo route/i.test(String(row?.render_status || ""))) return null;
+  if (!String(row?.scheduled_post_date || "").trim()) return null;
+  if (deskReviewBlocker(row)) return null;
+  const peerApproved = (Array.isArray(siblings) ? siblings : []).some((sibling) => {
+    if (!sibling || sibling.id === row.id) return false;
+    const status = String(sibling.output_status || "").trim();
+    return status === "Approved for Publishing"
+      || status === "Published"
+      || Boolean(sibling.published_at);
+  });
+  if (!peerApproved) return null;
+  const recordId = String(row?.id || row?.record_id || "").trim();
+  const outputId = String(row?.output_id || recordId || "").trim();
+  return withDeskIdentity({
+    kind: "native_photo_review_strand",
+    class: "transient",
+    record_id: recordId || null,
+    fingerprint: fingerprint("native_photo_review_strand", outputId, "scheduled_peer_approved"),
+    actor: "worker_heal",
+    blocker: "scheduled_peer_approved",
+    diagnosis: "Native-photo output is complete and scheduled, but remained Ready for Review after a sibling for the same Content Item advanced to Approved for Publishing/Published. Promote this stranded output once; do not render or alter assets.",
+  }, row);
+}
+
 export function classifyNativeCover(row) {
   const recordId = String(row?.id || row?.record_id || "").trim();
   const outputStatus = String(row?.output_status || "").trim();
