@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import base64
 from email.message import EmailMessage
+from email.policy import SMTP
+from email.parser import BytesParser
 
 import requests
 
@@ -62,12 +64,25 @@ class GmailClient:
     ) -> dict:
         if purpose not in ALLOWED_EMAIL_PURPOSES:
             return {"id": None, "skipped": True, "reason": "email_disabled", "purpose": purpose}
-        message = EmailMessage()
+        message = EmailMessage(policy=SMTP)
         message["To"] = to
         message["Subject"] = subject
         message.set_content("ChicagoShining review email — open in an HTML-capable client.")
         message.add_alternative(html_body, subtype="html")
-        raw = base64.urlsafe_b64encode(message.as_bytes()).decode("ascii")
+        raw_bytes = message.as_bytes(policy=SMTP)
+        parsed = BytesParser(policy=SMTP).parsebytes(raw_bytes)
+        content_types = [part.get_content_type() for part in parsed.iter_parts()] if parsed.is_multipart() else []
+        if parsed.get_content_type() != "multipart/alternative" or content_types != ["text/plain", "text/html"]:
+            raise RuntimeError(
+                f"Malformed Gmail MIME envelope: top={parsed.get_content_type()} parts={content_types}"
+            )
+        # SMTP policy guarantees RFC-compliant CRLF line endings. This matters for
+        # Gmail Sent copies opened through iOS/IMAP clients, which can expose raw
+        # multipart boundaries when LF-only message bodies are combined with Gmail's
+        # CRLF-added transport headers.
+        if b"\n" in raw_bytes.replace(b"\r\n", b""):
+            raise RuntimeError("Malformed Gmail MIME envelope: bare LF line endings remain")
+        raw = base64.urlsafe_b64encode(raw_bytes).decode("ascii")
         token = self.access_token()
         response = requests.post(
             "https://gmail.googleapis.com/gmail/v1/users/me/messages/send",
