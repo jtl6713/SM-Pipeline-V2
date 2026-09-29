@@ -55,6 +55,7 @@ def _call_openai(prompt: str) -> tuple[str, dict[str, Any]]:
             "text": {"format": {"type": "json_object"}},
         },
         timeout=300,
+        stage="R2",
     )
     if not response.ok:
         detail = (response.text or "").strip()[:400]

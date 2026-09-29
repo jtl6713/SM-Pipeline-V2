@@ -7,9 +7,11 @@ import requests
 
 from config import load_settings
 
-# Only TikTok inbox drafts need Gmail — operator pastes the public URL.
+# TikTok inbox drafts need Gmail — operator pastes the public URL.
+# PRIMARY OpenAI usage alerts are also allowlisted so Joseph sees unexpected spend.
 PURPOSE_TIKTOK_HANDOFF = "ttd3_tiktok_handoff"
-ALLOWED_EMAIL_PURPOSES = frozenset({PURPOSE_TIKTOK_HANDOFF})
+PURPOSE_PRIMARY_AI_USAGE = "primary_ai_usage"
+ALLOWED_EMAIL_PURPOSES = frozenset({PURPOSE_TIKTOK_HANDOFF, PURPOSE_PRIMARY_AI_USAGE})
 
 
 class GmailClient:

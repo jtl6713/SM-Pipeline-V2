@@ -281,3 +281,7 @@ Requested: 2026-09-29T01:30:00Z
 Deploy Studio API Worker production
 Reason: Preserve Suggested_Platforms when Production_Target_Platforms is blank so Production Save/plan/frame flow cannot lose destinations
 Requested: 2026-09-28
+
+Deploy Studio API Worker production
+Reason: Expose last_primary_* AI status fields for PRIMARY OpenAI usage alerts (Worker 0.10.425)
+Requested: 2026-09-29

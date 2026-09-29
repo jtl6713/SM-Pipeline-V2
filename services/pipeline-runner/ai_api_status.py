@@ -13,6 +13,7 @@ _state: dict[str, Any] = {
     "failover": False,
     "status_code": None,
     "last_success_at": None,
+    "last_primary": None,
 }
 
 
@@ -25,6 +26,29 @@ def record_success(*, provider: str, preferred_provider: str, failover: bool, st
             status_code=status_code,
             last_success_at=datetime.now(timezone.utc).isoformat(),
         )
+
+
+def record_primary_hit(
+    *,
+    stage: str,
+    kind: str,
+    model: str,
+    preferred_provider: str,
+    failover: bool,
+    status_code: int | None,
+    error: str | None = None,
+) -> None:
+    with _lock:
+        _state["last_primary"] = {
+            "stage": stage,
+            "kind": kind,
+            "model": model,
+            "preferred_provider": preferred_provider,
+            "failover": bool(failover),
+            "status_code": status_code,
+            "error": error,
+            "at": datetime.now(timezone.utc).isoformat(),
+        }
 
 
 def snapshot() -> dict[str, Any]:

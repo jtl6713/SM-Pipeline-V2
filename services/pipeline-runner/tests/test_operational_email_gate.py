@@ -1,4 +1,4 @@
-from integrations.gmail import PURPOSE_TIKTOK_HANDOFF, GmailClient
+from integrations.gmail import PURPOSE_PRIMARY_AI_USAGE, PURPOSE_TIKTOK_HANDOFF, ALLOWED_EMAIL_PURPOSES, GmailClient
 from i2.constants import I2_EMAIL_ENABLED
 from c3.constants import C3_EMAIL_ENABLED
 from p4.constants import P4_EMAIL_ENABLED
@@ -7,7 +7,7 @@ from rr1.constants import REVIEW_EMAIL_ENABLED
 from studio_produce.ops_alert import OPS_ALERT_EMAIL_ENABLED, send_produce_escalation
 
 
-def test_only_tiktok_handoff_purpose_is_allowed():
+def test_only_allowlisted_email_purposes_are_accepted():
     skipped = GmailClient().send_html(
         to="nobody@example.com",
         subject="should not send",
@@ -16,6 +16,7 @@ def test_only_tiktok_handoff_purpose_is_allowed():
     )
     assert skipped["skipped"] is True
     assert skipped["reason"] == "email_disabled"
+    assert ALLOWED_EMAIL_PURPOSES == frozenset({PURPOSE_TIKTOK_HANDOFF, PURPOSE_PRIMARY_AI_USAGE})
 
 
 def test_blank_purpose_is_blocked():
@@ -29,6 +30,7 @@ def test_blank_purpose_is_blocked():
 
 def test_non_tiktok_email_flags_are_off():
     assert PURPOSE_TIKTOK_HANDOFF == "ttd3_tiktok_handoff"
+    assert PURPOSE_PRIMARY_AI_USAGE == "primary_ai_usage"
     assert I2_EMAIL_ENABLED is False
     assert C3_EMAIL_ENABLED is False
     assert P4_EMAIL_ENABLED is False

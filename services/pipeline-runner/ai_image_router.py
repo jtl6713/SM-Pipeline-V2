@@ -8,6 +8,7 @@ alternate image provider is actually configured.
 
 from __future__ import annotations
 
+import logging
 import os
 from urllib.parse import urlencode
 from typing import Any
@@ -16,9 +17,11 @@ import requests
 
 from ai_api_preference import account_to_provider, cross_provider_failover_enabled, get_preferred_account
 from ai_api_status import record_success
+from ai_primary_alert import notify_primary_used
 
 FAILOVER_HTTP_STATUSES = {408, 429, 500, 502, 503, 504}
 PRIMARY_IMAGES_URL = "https://api.openai.com/v1/images/generations"
+_LOG = logging.getLogger(__name__)
 
 
 def _primary_key(settings: dict[str, Any]) -> str:
@@ -71,12 +74,39 @@ def _target(settings: dict[str, Any], account: str, requested_model: str) -> tup
     )
 
 
+def _alert_if_primary(
+    account: str,
+    *,
+    stage: str,
+    model: str,
+    preferred: str,
+    failover: bool,
+    status_code: int | None = None,
+    error: str | None = None,
+) -> None:
+    if str(account).strip().upper() != "PRIMARY":
+        return
+    try:
+        notify_primary_used(
+            stage=stage or "unknown",
+            kind="images",
+            model=model,
+            preferred_provider=account_to_provider(preferred),
+            failover=failover,
+            status_code=status_code,
+            error=error,
+        )
+    except Exception as exc:
+        _LOG.warning("PRIMARY image usage alert failed: %s", type(exc).__name__)
+
+
 def post_image_generation(
     settings: dict[str, Any],
     body: dict[str, Any],
     *,
     timeout: int = 300,
     preferred_account: str | None = None,
+    stage: str = "unknown",
 ) -> requests.Response:
     preferred = get_preferred_account(settings, preferred_account)
     alternate = "SECONDARY" if preferred == "PRIMARY" else "PRIMARY"
@@ -91,11 +121,29 @@ def post_image_generation(
 
     try:
         response = call(preferred)
-    except (requests.Timeout, requests.ConnectionError):
+    except (requests.Timeout, requests.ConnectionError) as exc:
+        _alert_if_primary(
+            preferred,
+            stage=stage,
+            model=requested_model,
+            preferred=preferred,
+            failover=False,
+            error=type(exc).__name__,
+        )
         response = None
     except RuntimeError:
         # Configuration errors must not trigger surprise cross-provider spend.
         raise
+
+    if response is not None:
+        _alert_if_primary(
+            preferred,
+            stage=stage,
+            model=requested_model,
+            preferred=preferred,
+            failover=False,
+            status_code=response.status_code,
+        )
 
     if response is not None and response.status_code not in FAILOVER_HTTP_STATUSES:
         if response.ok:
@@ -117,7 +165,26 @@ def post_image_generation(
         return response
 
     # Only transient runtime failures can use the alternate provider.
-    failover_response = call(alternate)
+    try:
+        failover_response = call(alternate)
+    except (requests.Timeout, requests.ConnectionError) as failover_exc:
+        _alert_if_primary(
+            alternate,
+            stage=stage,
+            model=requested_model,
+            preferred=preferred,
+            failover=True,
+            error=type(failover_exc).__name__,
+        )
+        raise
+    _alert_if_primary(
+        alternate,
+        stage=stage,
+        model=requested_model,
+        preferred=preferred,
+        failover=True,
+        status_code=failover_response.status_code,
+    )
     if failover_response.ok:
         record_success(
             provider=account_to_provider(alternate),

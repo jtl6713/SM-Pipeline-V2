@@ -59,6 +59,7 @@ def classify_asset(prompt: str, *, image_urls: list[str] | None = None, max_outp
             "text": {"format": {"type": "json_object"}},
         },
         timeout=300,
+        stage="A3",
     )
     if not response.ok:
         detail = (response.text or "").strip()[:400]

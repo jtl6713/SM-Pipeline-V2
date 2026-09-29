@@ -54,6 +54,7 @@ def generate_themes(prompt: str) -> dict[str, Any]:
             "text": {"format": {"type": "json_object"}},
         },
         timeout=300,
+        stage="SAI1",
     )
     if not response.ok:
         detail = (response.text or "").strip()[:400]

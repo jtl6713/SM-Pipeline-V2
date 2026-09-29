@@ -12,12 +12,24 @@
       : null;
     const failover = Boolean(payload.failover_active);
     const failoverEnabled = Boolean(payload.failover_enabled);
+    const primaryStage = String(payload.last_primary_stage || "").trim();
+    const primaryKind = String(payload.last_primary_kind || "").trim();
+    const primaryAt = String(payload.last_primary_at || "").trim();
+    const primaryFailover = Boolean(payload.last_primary_failover);
+    const primaryBits = [];
+    if (primaryStage) primaryBits.push(primaryStage);
+    if (primaryKind) primaryBits.push(primaryKind);
+    if (primaryFailover) primaryBits.push("failover");
+    const primaryLabel = primaryBits.length
+      ? ('<span class="ai-api-primary-hit" title="Last PRIMARY OpenAI hit' + (primaryAt ? (" at " + primaryAt) : "") + '">PRIMARY hit: ' + primaryBits.join(" · ") + "</span>")
+      : "";
     host.innerHTML = [
       '<span class="ai-api-footer-label"><strong>AI API:</strong> <span class="ai-api-dot" aria-hidden="true">🟢</span> ',
       '<strong class="ai-api-provider">' + current + '</strong> <strong>Preferred</strong></span>',
       '<span class="ai-api-failover">' + (failoverEnabled ? (next + ' Failover') : (next + ' Standby · disabled')) + '</span>',
       '<button type="button" class="ai-api-toggle" id="aiApiToggle">Make ' + next + ' Preferred</button>',
-      currentProvider ? '<span class="ai-api-current" title="Provider that handled the most recent successful AI request">Current: ' + currentProvider + (failover ? ' (failover)' : '') + '</span>' : ''
+      currentProvider ? '<span class="ai-api-current" title="Provider that handled the most recent successful AI request">Current: ' + currentProvider + (failover ? ' (failover)' : '') + '</span>' : '',
+      primaryLabel
     ].join("");
     document.getElementById("aiApiToggle")?.addEventListener("click", toggle);
   }

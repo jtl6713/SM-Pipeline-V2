@@ -217,3 +217,7 @@ Requested: 2026-09-28
 Deploy Studio Web production
 Reason: Production Save must preserve the operator's just-saved Title, Caption, and Script directions through platform-output synchronization instead of repainting them blank from a stale/partial response
 Requested: 2026-09-28T23:02:00-05:00
+
+Deploy Studio Web production
+Reason: Surface last PRIMARY OpenAI hit stage in AI API footer and ship primary-usage alert UI
+Requested: 2026-09-29
