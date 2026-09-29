@@ -285,3 +285,7 @@ Requested: 2026-09-28
 Deploy Studio API Worker production
 Reason: Expose last_primary_* AI status fields for PRIMARY OpenAI usage alerts (Worker 0.10.425)
 Requested: 2026-09-29
+
+Deploy Studio API Worker production
+Reason: Draft list must suppress detached blank Production Requests so stale/legacy orphan records never surface as Untitled piece
+Requested: 2026-09-29T00:14:00-05:00
