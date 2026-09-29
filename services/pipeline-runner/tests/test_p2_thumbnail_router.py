@@ -49,7 +49,7 @@ def test_generate_thumbnail_png_uses_image_router():
 
     ai_image_router = types.ModuleType("ai_image_router")
 
-    def post_image_generation(settings, body, *, timeout=300, preferred_account=None):
+    def post_image_generation(settings, body, *, timeout=300, preferred_account=None, stage=None):
         calls.append({"model": body.get("model"), "size": body.get("size"), "timeout": timeout})
         return FakeResponse()
 

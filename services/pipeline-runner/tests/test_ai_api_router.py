@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import pytest
 import requests
 
 import ai_api_router
@@ -12,6 +13,11 @@ class _Response:
         self.status_code = status_code
         self.ok = 200 <= status_code < 300
         self.text = ""
+
+
+@pytest.fixture(autouse=True)
+def _silence_primary_alerts(monkeypatch):
+    monkeypatch.setattr(ai_api_router, "notify_primary_used", lambda **_kwargs: None)
 
 
 def test_openai_preferred_success_does_not_call_azure(monkeypatch):

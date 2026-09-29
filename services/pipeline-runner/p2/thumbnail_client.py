@@ -92,6 +92,7 @@ def generate_thumbnail_png(thumbnail_prompt: str, *, aspect_ratio: str = "9:16")
             "output_format": "png",
         },
         timeout=300,
+        stage="P2",
     )
     if not response.ok:
         detail = (response.text or "").strip()[:400]

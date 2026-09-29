@@ -110,6 +110,7 @@ def ai_api_status():
     preferred_provider = account_to_provider(preferred_account)
     failover_provider = "Azure" if preferred_provider == "OpenAI" else "OpenAI"
     runtime = ai_api_status_snapshot()
+    last_primary = runtime.get("last_primary") if isinstance(runtime.get("last_primary"), dict) else None
     return jsonify(
         {
             "ok": True,
@@ -120,6 +121,10 @@ def ai_api_status():
             "failover_active": bool(runtime.get("failover")),
             "last_success_at": runtime.get("last_success_at"),
             "status_code": runtime.get("status_code"),
+            "last_primary_stage": (last_primary or {}).get("stage"),
+            "last_primary_kind": (last_primary or {}).get("kind"),
+            "last_primary_at": (last_primary or {}).get("at"),
+            "last_primary_failover": bool((last_primary or {}).get("failover")),
         }
     )
 

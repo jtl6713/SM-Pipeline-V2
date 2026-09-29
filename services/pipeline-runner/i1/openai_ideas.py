@@ -55,6 +55,7 @@ def generate_ideas(prompt: str, *, preferred_account: str | None = None) -> dict
         },
         timeout=300,
         preferred_account=preferred_account,
+        stage="I1",
     )
     if not response.ok:
         detail = (response.text or "").strip()[:400]

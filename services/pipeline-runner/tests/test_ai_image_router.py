@@ -8,6 +8,11 @@ from ai_image_router import post_image_generation
 from ai_api_preference import get_preferred_account
 
 
+@pytest.fixture(autouse=True)
+def _silence_primary_alerts(monkeypatch):
+    monkeypatch.setattr(ai_image_router, "notify_primary_used", lambda **_kwargs: None)
+
+
 class _Response:
     def __init__(self, status_code: int, payload=None):
         self.status_code = status_code

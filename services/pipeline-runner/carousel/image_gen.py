@@ -51,6 +51,7 @@ def generate_carousel_png(prompt: str, *, ratio: str) -> bytes:
             "output_format": "png",
         },
         timeout=300,
+        stage="carousel",
     )
     if not response.ok:
         detail = (response.text or "").strip()[:400]

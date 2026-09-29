@@ -67,6 +67,7 @@ def generate_package(prompt_row: dict[str, Any], runtime_context: str) -> dict[s
             "text": {"format": {"type": "json_object"}},
         },
         timeout=300,
+        stage="P1",
     )
     if not response.ok:
         detail = (response.text or "").strip()[:400]

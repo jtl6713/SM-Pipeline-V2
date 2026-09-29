@@ -66,6 +66,7 @@ def plan_asset_request(messages: list[dict[str, str]]) -> dict[str, Any]:
             "text": {"format": {"type": "json_object"}},
         },
         timeout=300,
+        stage="P4",
     )
     if not response.ok:
         detail = (response.text or "").strip()[:400]

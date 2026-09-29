@@ -6,4 +6,5 @@
 .ai-api-toggle:hover{background:color-mix(in srgb,currentColor 7%,transparent)}
 .ai-api-toggle:disabled{opacity:.55;cursor:wait}
 .ai-api-current{opacity:.68;font-size:.82em}
-@media(max-width:760px){.ai-api-current{display:none}.studio-footer-meta #aiApiFooter{white-space:normal}}
+.ai-api-primary-hit{opacity:.9;font-size:.82em;color:#b45309}
+@media(max-width:760px){.ai-api-current,.ai-api-primary-hit{display:none}.studio-footer-meta #aiApiFooter{white-space:normal}}

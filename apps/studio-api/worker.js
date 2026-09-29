@@ -453,7 +453,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.424-thumbnail-ai-router",
+          version: "0.10.425-primary-ai-alert",
           studio_desk_inventory_v1: true,
           studio_desk_activity_v1: true,
           studio_tiktok_complete_v1: true,
@@ -35269,6 +35269,10 @@ async function getStudioAiApiStatus(request, env) {
     current_provider: runner?.current_provider || null,
     failover_active: Boolean(runner?.failover_active),
     last_success_at: runner?.last_success_at || null,
+    last_primary_stage: runner?.last_primary_stage || null,
+    last_primary_kind: runner?.last_primary_kind || null,
+    last_primary_at: runner?.last_primary_at || null,
+    last_primary_failover: Boolean(runner?.last_primary_failover),
     runner_connected: Boolean(runner?.ok),
   });
 }
