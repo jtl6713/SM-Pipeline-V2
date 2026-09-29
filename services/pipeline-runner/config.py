@@ -27,7 +27,7 @@ def _without_retired_make_urls(settings: dict[str, Any]) -> dict[str, Any]:
 @lru_cache
 def load_settings() -> dict[str, Any]:
     openai_account = os.environ.get(
-        "OPENAI_ACCOUNT", "PRIMARY"
+        "OPENAI_ACCOUNT", "SECONDARY"
     ).strip().upper()
 
     if openai_account not in {"PRIMARY", "SECONDARY"}:

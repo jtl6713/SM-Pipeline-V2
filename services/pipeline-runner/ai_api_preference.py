@@ -29,7 +29,7 @@ def provider_to_account(provider: str) -> str:
 def get_preferred_account(settings: dict[str, Any], override: str | None = None) -> str:
     if override:
         return provider_to_account(override)
-    fallback = str(settings.get("openai_account") or "PRIMARY").strip().upper()
+    fallback = str(settings.get("openai_account") or "SECONDARY").strip().upper()
     try:
         rows = AirtableClient(settings).list_records(
             PIPELINE_SETTINGS_TABLE,
@@ -43,7 +43,7 @@ def get_preferred_account(settings: dict[str, Any], override: str | None = None)
                 return provider_to_account(value)
     except Exception as exc:
         _LOG.warning("Could not read Studio AI API preference; using startup default: %s", type(exc).__name__)
-    return fallback if fallback in {"PRIMARY", "SECONDARY"} else "PRIMARY"
+    return fallback if fallback in {"PRIMARY", "SECONDARY"} else "SECONDARY"
 
 
 def cross_provider_failover_enabled(settings: dict[str, Any]) -> bool:
