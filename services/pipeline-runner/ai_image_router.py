@@ -131,9 +131,19 @@ def post_image_generation(
             error=type(exc).__name__,
         )
         response = None
-    except RuntimeError:
-        # Configuration errors must not trigger surprise cross-provider spend.
-        raise
+    except RuntimeError as exc:
+        # A preferred-provider configuration gap is an availability failure.
+        # If cross-provider failover is explicitly enabled, use the alternate
+        # configured provider instead of blocking the entire production job.
+        # When failover is disabled, preserve the hard stop.
+        if not allow_failover:
+            raise
+        _LOG.warning(
+            "Preferred image provider unavailable due to configuration: %s; failing over to %s",
+            str(exc),
+            alternate,
+        )
+        response = None
 
     if response is not None:
         _alert_if_primary(
