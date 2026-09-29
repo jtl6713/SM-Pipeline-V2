@@ -213,3 +213,7 @@ Deploy Studio Pages production
 Reason: Keep operator-selected IG/FB Stories and YouTube Short + Slideshow Video authoritative; classify still-source rendered-video packages as Photo Set, not Carousel
 UI: 0.6.426-output-selection-authority
 Requested: 2026-09-28
+
+Deploy Studio Web production
+Reason: Production Save must preserve the operator's just-saved Title, Caption, and Script directions through platform-output synchronization instead of repainting them blank from a stale/partial response
+Requested: 2026-09-28T23:02:00-05:00
