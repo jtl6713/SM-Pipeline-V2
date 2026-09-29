@@ -1,0 +1,3 @@
+Repair no-verbatim still-caption voiceover contract
+Requested: 2026-09-28
+Still captions may guide scene focus but must never be concatenated, repeated, or treated as narration copy.
