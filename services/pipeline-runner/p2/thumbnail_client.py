@@ -11,7 +11,6 @@ import io
 from typing import Any
 
 import requests
-from PIL import Image
 
 from ai_image_router import post_image_generation
 from config import load_settings
@@ -60,6 +59,8 @@ def build_thumbnail_prompt(thumbnail_prompt: str, *, aspect_ratio: str = "9:16")
 
 def fit_png_to_ratio(png_bytes: bytes, aspect_ratio: str = "9:16") -> bytes:
     """Center-crop / cover-scale PNG to the platform canvas (e.g. 1080x1920 for 9:16)."""
+    from PIL import Image
+
     target_w, target_h = canvas_for_ratio(aspect_ratio)
     image = Image.open(io.BytesIO(png_bytes)).convert("RGBA")
     src_w, src_h = image.size
