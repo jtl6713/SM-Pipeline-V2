@@ -5,18 +5,23 @@ from email.parser import BytesParser
 from email.policy import SMTP
 
 
-def test_tiktok_handoff_mime_uses_smtp_crlf_and_valid_alternative():
+def test_tiktok_handoff_mime_uses_single_base64_html_entity():
+    html = '<div><b>Profile:</b> LA — Los Angeles</div><p>TikTok accepted the asset package.</p>'
     message = EmailMessage(policy=SMTP)
     message["To"] = "chicagoshining@gmail.com"
-    message["Subject"] = "TikTok Draft #989 — NYC — Ready in Inbox"
-    message.set_content("ChicagoShining review email — open in an HTML-capable client.")
-    message.add_alternative("<div><b>Profile:</b> NYC</div>", subtype="html")
+    message["Subject"] = "TikTok Draft #1000 — LA — Ready in Inbox"
+    message.set_content(html, subtype="html", charset="utf-8", cte="base64")
 
     raw = message.as_bytes(policy=SMTP)
     parsed = BytesParser(policy=SMTP).parsebytes(raw)
 
-    assert parsed.get_content_type() == "multipart/alternative"
-    assert [part.get_content_type() for part in parsed.iter_parts()] == ["text/plain", "text/html"]
+    assert not parsed.is_multipart()
+    assert parsed.get_content_type() == "text/html"
+    assert parsed.get_content_charset() == "utf-8"
+    assert parsed["Content-Transfer-Encoding"].lower() == "base64"
+    assert parsed.get_content().strip() == html
+    assert b"multipart/alternative" not in raw
+    assert b"boundary=" not in raw
+    assert b"quoted-printable" not in raw
     assert b"\r\n" in raw
     assert b"\n" not in raw.replace(b"\r\n", b"")
-    assert b"Content-Type: multipart/alternative;" in raw
