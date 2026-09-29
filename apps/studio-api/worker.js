@@ -12,6 +12,7 @@ import {
   classifyHealthTarget,
   classifyIntakeResidue,
   classifyNativeCover,
+  classifyNativePhotoReviewStrand,
   classifyPreparingGap,
   classifyProduceJob,
   classifyPromotedNotRfr,
@@ -1425,6 +1426,11 @@ export default {
         await studioHealFailedStatuses(env, { limit: 6 });
       } catch (error) {
         console.warn("studio failed-status heal failed", error);
+      }
+      try {
+        await studioHealNativePhotoReviewStrands(env, { limit: 8 });
+      } catch (error) {
+        console.warn("studio native-photo review-strand heal failed", error);
       }
       try {
         await studioHealPromotedMissingFanout(env, { limit: 8 });
@@ -10786,6 +10792,43 @@ async function healStuckStudioRenders(env) {
     }));
   }
   return pulses;
+}
+
+async function studioHealNativePhotoReviewStrands(env, options = {}) {
+  const limit = Math.max(1, Math.min(12, Number(options.limit || 8)));
+  const outputTable = env.AIRTABLE_OUTPUT_TABLE_ID;
+  const rows = await listRecords(env, outputTable, {
+    limit: Math.max(limit * 4, 20),
+    sortField: "Output_ID",
+    sortDirection: "desc",
+    filterFormula: 'AND({Test_Run_ID}=BLANK(),{Published_At}=BLANK(),{Do_Not_Publish}=0,{Render_Status}="Native Photo Route",OR({Output_Status}="Ready for Review",{Output_Status}="Approved for Publishing",{Output_Status}="Published"))',
+  }).catch(() => []);
+  const mapped = (rows || []).map((record) => mapDeskInventoryOutput(record));
+  const byContent = new Map();
+  for (const row of mapped) {
+    const key = String(row.content_item_id || "").trim();
+    if (!key) continue;
+    if (!byContent.has(key)) byContent.set(key, []);
+    byContent.get(key).push(row);
+  }
+  const healed = [];
+  for (const row of mapped) {
+    if (healed.length >= limit) break;
+    const siblings = byContent.get(String(row.content_item_id || "").trim()) || [];
+    const incident = classifyNativePhotoReviewStrand(row, siblings);
+    if (!incident) continue;
+    try {
+      await airtableFetch(env, outputTable, row.id, {
+        method: "PATCH",
+        body: JSON.stringify({ fields: { Output_Status: "Approved for Publishing" }, typecast: true }),
+      });
+      healed.push({ key: "NATIVE_PHOTO_REVIEW_STRAND", id: row.id, output_id: row.output_id || null, fingerprint: incident.fingerprint });
+    } catch (error) {
+      healed.push({ key: "NATIVE_PHOTO_REVIEW_STRAND", id: row.id, output_id: row.output_id || null, error: error instanceof Error ? error.message : String(error) });
+    }
+  }
+  if (healed.length) console.log("Studio native-photo review-strand heal", JSON.stringify({ count: healed.length, healed }));
+  return healed;
 }
 
 async function studioHealFailedStatuses(env, options = {}) {
@@ -35021,7 +35064,7 @@ async function gatherStudioDeskInventory(env) {
       sortDirection: "desc",
       filterFormula: 'AND({Test_Run_ID}=BLANK(),{Published_At}=BLANK(),OR({Output_Status}="Ready for Review",{Review_Status}="Review Sent",{Render_Status}="Rendered",{Render_Status}="Native Photo Route"))',
     }).catch(() => []);
-    scanned("rfr_locked_missing_deliverable");
+    scanned("rfr_locked_missing_deliverable", "native_photo_review_strand");
     const mapped = (rfrLockedRows || []).map(mapOut);
     const byContent = new Map();
     for (const row of mapped) {
@@ -35041,6 +35084,7 @@ async function gatherStudioDeskInventory(env) {
         story_open_review: storyOpen,
         group_progress: sibs.length ? `${sibs.length - lockedCount}/${sibs.length}` : null,
       }));
+      push(classifyNativePhotoReviewStrand(row, sibs));
     }
   } catch (error) {
     console.warn("desk rfr locked missing deliverable scan failed", error);
