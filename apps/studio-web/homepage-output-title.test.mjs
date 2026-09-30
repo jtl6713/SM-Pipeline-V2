@@ -123,3 +123,10 @@ test("Home dashboard exposes only actionable counts and filtered destinations", 
   assert.match(source, /if \(filter === "manual"\) return state === "Manual Action Required"/);
   assert.match(source, /if \(filter === "failed"\) return state === "Failed"/);
 });
+
+
+test("idea photo matching tolerates slow server work without surfacing signal timed out", () => {
+  assert.match(source, /match-photos[\\s\\S]*timeoutMs: 120000/);
+  assert.match(source, /if \(isTimeoutError\(error\)\)/);
+  assert.match(source, /Listening is still active; Studio will keep checking automatically/);
+});
