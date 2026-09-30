@@ -147,9 +147,14 @@ test("Home metric cards use count tones and poll every few seconds", () => {
   assert.doesNotMatch(app, /await api\("\/api\/dashboard"/);
   assert.match(app, /function scheduledContentByPlatform\(/);
   assert.match(app, /function renderScheduledContentOverview\(/);
+  assert.match(app, /const preferred = \["Facebook", "Instagram", "TikTok", "YouTube"\]/);
+  assert.match(app, /count: counts\.get\(platform\) \|\| 0/);
+  assert.match(app, /dashboardInflight && !dashboardLastRefreshAt/);
   assert.match(html, /<h1>Scheduled content<\/h1>/);
   assert.match(html, /id="studioHubScheduled"/);
   assert.match(html, /id="studioHubLive"/);
+  assert.match(html, /studio-hub-hello-head/);
+  assert.match(html, /studio-hub-scheduled-platform">YouTube/);
   assert.doesNotMatch(html, /<h1>Overview<\/h1>/);
   const css = fs.readFileSync(path.join(here, "assets", "styles-phase7-0621.css"), "utf8");
   assert.match(css, /\.metric-button\.metric-tone-ok/);
@@ -157,10 +162,11 @@ test("Home metric cards use count tones and poll every few seconds", () => {
   assert.match(css, /\.metric-button\.metric-tone-critical/);
   assert.match(css, /\.studio-hub-scheduled/);
   assert.match(css, /\.studio-hub-live/);
+  assert.match(css, /\.studio-hub-hello-head/);
   const build = app.match(/BUILD_ID = "item4-([^"]+)"/)?.[1];
   assert.ok(build);
   assert.match(html, new RegExp(`app-item4-0625\\.js\\?v=${build.replace(/[.*+?^${}()|[\\]\\^]/g, "\\$&")}`));
-  assert.match(html, /styles-phase7-0621\.css\?v=0\.6\.440-home-scheduled-live/);
+  assert.match(html, /styles-phase7-0621\.css\?v=0\.6\.441-home-scheduled-platforms/);
 });
 
 
