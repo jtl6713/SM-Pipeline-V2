@@ -12,6 +12,7 @@ export const QUALITY_HEALS = Object.freeze([
   "requeue_failed",
   "repair_render_sources",
   "promote_native_photo_review_strand",
+  "complete_native_photo_approve",
   "diagnose_then_one_send",
   "wait_pacific_midnight",
   "align_signature_then_rearm",
@@ -189,6 +190,14 @@ export const QUALITY_CHECKS = Object.freeze([
     kind: "native_photo_review_strand",
     actor: "worker_heal",
     heal: "promote_native_photo_review_strand",
+  }),
+  check({
+    id: "native_photo_approve_incomplete",
+    title: "Check for native-photo outputs marked Approved for Publishing without Review/Publish arming or carousel slides",
+    lane: "service",
+    kind: "native_photo_approve_incomplete",
+    actor: "worker_heal",
+    heal: "complete_native_photo_approve",
   }),
   check({
     id: "native_cover_missing",
