@@ -250,7 +250,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.430-calendar-drag-drop";
+  const BUILD_ID = "item4-0.6.431-calendar-ready-tray";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -14800,26 +14800,20 @@
     return [...pipelineScheduleDirty].some((id) => ids.has(id));
   }
 
-  const PIPELINE_DEFAULT_SCHEDULES_KEY = "studio.pipeline.useDefaultSchedules";
-
   function pipelineUseDefaultSchedules() {
     return Boolean($("pipelineUseDefaultSchedules")?.checked);
   }
 
   function persistPipelineUseDefaultSchedules() {
-    const on = pipelineUseDefaultSchedules();
-    try { window.sessionStorage.setItem(PIPELINE_DEFAULT_SCHEDULES_KEY, on ? "1" : "0"); } catch {}
-    return on;
+    return pipelineUseDefaultSchedules();
   }
 
   function restorePipelineUseDefaultSchedules() {
     const box = $("pipelineUseDefaultSchedules");
     if (!box) return;
-    try {
-      box.checked = window.sessionStorage.getItem(PIPELINE_DEFAULT_SCHEDULES_KEY) !== "0";
-    } catch {
-      box.checked = true;
-    }
+    // Start every Pipeline visit with no client-side default schedule suggestions.
+    // Persisted schedules still render from the server record.
+    box.checked = false;
   }
 
   function pipelineRowHasSchedule(record) {
@@ -14939,6 +14933,31 @@
       guard += 1;
     }
     return new Date(ms).toISOString();
+  }
+
+  function resetPipelineScheduleOccupancyFromPersisted(records = pipelineOutputs) {
+    for (const key of Object.keys(pipelineServerOccupiedMs)) delete pipelineServerOccupiedMs[key];
+    for (const record of records || []) {
+      const iso = studioEffectiveScheduleIso(record);
+      if (!iso || record?.do_not_publish || creativeIsPublished(record)) continue;
+      rememberBookedScheduleMs(record.platform, iso);
+    }
+  }
+
+  function clearDefaultSchedulesFromUnapprovedRows(records = pipelineOutputs) {
+    const clearable = pipelineApprovableOutputs(records);
+    for (const record of clearable) {
+      if (!record?.id || studioEffectiveScheduleIso(record)) continue;
+      pipelineScheduleDrafts.delete(record.id);
+      pipelineScheduleDirty.delete(record.id);
+      const input = document.querySelector(`[data-pipeline-schedule="${record.id}"]`);
+      if (!input) continue;
+      input.value = "";
+      const status = input.closest(".pipeline-schedule-cell")?.querySelector("[data-pipeline-schedule-status]");
+      if (status) status.textContent = "";
+    }
+    resetPipelineScheduleOccupancyFromPersisted();
+    renderPipelineScheduleGrid(pipelineScheduleGridRecords);
   }
 
   async function applyDefaultSchedulesToReadyRows(records = pipelineOutputs) {
@@ -15126,7 +15145,7 @@
           useBtn.dataset.suggestedDays = JSON.stringify(hint.days);
           useBtn.dataset.suggestedWindows = JSON.stringify(hint.windows);
         }
-        if (pipelineUseDefaultSchedules() && iso && !pipelineRowHasSchedule(record)) {
+        if (pipelineUseDefaultSchedules() && iso && creativeCanApproveForPublishing(record) && !pipelineRowHasSchedule(record)) {
           const input = document.querySelector(`[data-pipeline-schedule="${id}"]`);
           const openIso = nextOpenScheduleIso(iso, pipelineOccupiedScheduleMs(record.platform, record.id), hint);
           if (applySuggestedIsoToScheduleInput(input, openIso)) rememberBookedScheduleMs(record.platform, openIso);
@@ -15920,7 +15939,7 @@
   function pipelineUnscheduledScheduleRecords() {
     return (pipelineOutputs || [])
       .filter((record) => creativeCanSetSchedule(record))
-      .filter((record) => !pipelineRecordScheduleIso(record))
+      .filter((record) => !studioEffectiveScheduleIso(record))
       .slice()
       .sort((left, right) => {
         const leftId = Number(left?.output_id);
@@ -16115,7 +16134,7 @@
       const rangeEnd = lastDay.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
       summary.textContent = error
         ? `${total} scheduled in the loaded Pipeline rows · schedule service retrying · ${timezone}`
-        : `${total} scheduled output${total === 1 ? "" : "s"} · ${unscheduled.length} unscheduled · Today through ${rangeEnd} · ${timezone}`;
+        : `${total} scheduled output${total === 1 ? "" : "s"} · ${unscheduled.length} ready to schedule · Today through ${rangeEnd} · ${timezone}`;
     }
 
     const now = new Date();
@@ -16140,7 +16159,7 @@
       return `<tr><th scope="row" class="pipeline-schedule-hour">${escapeHtml(pipelineScheduleSlotLabel(slotIndex))}</th>${cellsHtml}</tr>`;
     }).join("");
 
-    const tray = `<section class="pipeline-schedule-unscheduled" aria-label="Unscheduled outputs"><div class="pipeline-schedule-unscheduled-copy"><strong>Unscheduled outputs</strong><span>Drag a bubble into a 30-minute slot. Click a bubble, then a slot, if you prefer not to drag.</span></div><div class="pipeline-schedule-unscheduled-list">${unscheduled.length ? unscheduled.map((record) => pipelineScheduleEntryMarkup(record, { unscheduled: true })).join("") : '<span class="subtle">No ready outputs are waiting for a schedule.</span>'}</div></section>`;
+    const tray = `<section class="pipeline-schedule-unscheduled" aria-label="Ready to schedule"><div class="pipeline-schedule-unscheduled-copy"><strong>Ready to schedule</strong><span>Outputs stay here until a schedule is saved. Use default schedules can fill intelligent row suggestions without removing them from this tray, or drag a bubble directly into a 30-minute slot.</span></div><div class="pipeline-schedule-unscheduled-list">${unscheduled.length ? unscheduled.map((record) => pipelineScheduleEntryMarkup(record, { unscheduled: true })).join("") : '<span class="subtle">No ready outputs are waiting for a saved schedule.</span>'}</div></section>`;
     target.innerHTML = `${tray}<div class="pipeline-schedule-grid-scroll"><table class="pipeline-schedule-grid-table"><thead><tr><th class="pipeline-hour-head" scope="col">Time</th>${head}</tr></thead><tbody>${rows}</tbody></table></div>`;
     bindPipelineScheduleGridInteractions(target);
     syncPipelineScheduleSelectionVisual(target);
@@ -19713,9 +19732,16 @@
   });
   restorePipelineUseDefaultSchedules();
   $("pipelineUseDefaultSchedules")?.addEventListener("change", () => {
-    persistPipelineUseDefaultSchedules();
-    if (!pipelineUseDefaultSchedules()) return;
-    applyDefaultSchedulesToReadyRows().catch(() => {});
+    const useDefaults = persistPipelineUseDefaultSchedules();
+    clearDefaultSchedulesFromUnapprovedRows();
+    if (!useDefaults) {
+      setPipelineLiveHint("Default schedule suggestions cleared. Ready outputs are back in the scheduling tray.");
+      return;
+    }
+    setPipelineLiveHint("Creating intelligent default schedules for unapproved outputs…");
+    applyDefaultSchedulesToReadyRows()
+      .then(() => setPipelineLiveHint("Default schedule suggestions added. They remain unsaved until you approve or save a schedule."))
+      .catch((error) => setPipelineLiveHint(error?.message || "Could not create default schedule suggestions."));
   });
   $("pipelineFilterClear")?.addEventListener("click", () => {
     pipelineViewFilter = "all";
