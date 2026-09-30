@@ -35,7 +35,7 @@ test("Worker heal requeues Failed/Error leftovers like Retry remaining", () => {
   assert.match(worker, /Requeued by Quality Agent prepare heal/);
   assert.match(worker, /Studio_Variant_Status\}="Error"/);
   assert.match(worker, /Math\.min\(40,/);
-  assert.match(worker, /0.10.429-idea-find-images-now/);
+  assert.match(worker, /0.10.430-idea-photo-five-minute-poll/);
   assert.match(worker, /item4HealIncompletePreparingVariants/);
 });
 
