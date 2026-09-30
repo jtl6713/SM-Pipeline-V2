@@ -168,7 +168,7 @@ test("Home metric cards use count tones and poll every few seconds", () => {
   const build = app.match(/BUILD_ID = "item4-([^"]+)"/)?.[1];
   assert.ok(build);
   assert.match(html, new RegExp(`app-item4-0625\\.js\\?v=${build.replace(/[.*+?^${}()|[\\]\\^]/g, "\\$&")}`));
-  assert.match(html, /styles-phase7-0621\.css\?v=0\.6\.442-home-refresh-inflight/);
+  assert.match(html, /styles-phase7-0621\.css\?v=0\.6\.443-idea-find-images-now/);
 });
 
 test("Home refresh clears inflight instead of wrapping the fetch promise", async () => {
