@@ -1139,7 +1139,12 @@ def source_package(
         })
     if omitted or not clips:
         return None
-    ai_motion = _ai_directed_motion(clips, render_settings, render_overrides)
+    native_route = (not has_video) and is_native_photo(
+        effective["platform"],
+        effective["output_type"],
+        field_str(output, "Platform_Output_Type"),
+    )
+    ai_motion = {} if native_route else _ai_directed_motion(clips, render_settings, render_overrides)
     clip_frames, total_frames = assign_clip_frames(
         clips,
         story=story,
@@ -1236,7 +1241,7 @@ def source_package(
                 clip["startFrame"] = start
                 start += int(clip.get("durationFrames") or 0)
             total_frames = sum(int(clip.get("durationFrames") or 0) for clip in built) or total_frames
-    native = (not has_video) and is_native_photo(effective["platform"], effective["output_type"], field_str(output, "Platform_Output_Type"))
+    native = native_route
     composition_id = None if native else "ChicagoShiningPhotoSequence"
     safe_type = "".join(ch if ch.isalnum() else "-" for ch in effective["output_type"].lower()).strip("-") or "output"
     filename = f"studio-{field_str(request, 'Production_Request_ID') or request['id']}-{effective['platform'].lower()}-{safe_type}.mp4"
