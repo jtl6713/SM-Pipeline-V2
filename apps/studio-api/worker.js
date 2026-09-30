@@ -31609,12 +31609,14 @@ async function dashboard(request, env, url, authorization) {
       || review === "Pending"
       || output === "Ready for Review";
   }).length;
-  const ideasNotInProduction = ideas.filter((idea) => {
-    const status = String(idea.status || idea.idea_status || "").trim().toLowerCase();
-    const promoted = Boolean(idea.promoted_content_item_id)
-      || (Array.isArray(idea.promoted_content_item_links) && idea.promoted_content_item_links.length > 0);
-    return !promoted && status !== "archived" && status !== "deleted";
-  }).length;
+  // Keep the Home count identical to the Ideas tab's "Current ideas"
+  // population. The tab considers an idea promoted when either the canonical
+  // promoted record ID or Content Items linkage exists; Candidate_Status is
+  // presentation state and must not independently determine this count.
+  const ideasNotInProduction = ideas.filter((idea) => !(
+    Boolean(idea?.promoted_content_record_id)
+    || (Array.isArray(idea?.content_item_links) && idea.content_item_links.length > 0)
+  )).length;
 
   return respond(request, env, {
     ok: true,
