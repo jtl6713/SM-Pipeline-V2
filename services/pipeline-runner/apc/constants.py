@@ -34,6 +34,8 @@ DEFAULT_RECONCILE_MAX_ATTEMPTS = 5
 DEFAULT_R2_PREFIX = "publish/instagram-carousel"
 PUBLIC_MEDIA_BASE = "https://media.chicagoshining.com"
 MAX_SLIDES = 20
+# Instagram Graph carousel parent requires 2–10 children (#100 too many attachments).
+IG_GRAPH_MAX_CHILDREN = 10
 
 RETRY_MINUTES = 2
 

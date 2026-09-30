@@ -19,6 +19,7 @@ import {
   classifyAutonomousRfrGate,
   classifyPublishDispatch,
   classifyPublishFailed,
+  classifyIgCarouselTooManyChildren,
   classifyTikTokAuthSignature,
   classifyNativeCover,
   classifyRfrLockedMissingDeliverable,
@@ -431,6 +432,38 @@ test("promoted advancement is origin-aware and does not treat Ready for Review a
   assert.equal(la963.kind, "tiktok_auth_signature");
   assert.equal(la963.fingerprint, fingerprint("tiktok_auth_signature", "rect8fjS3MmqDvpvZ", "pipeline_secret"));
   assert.ok(CLASSIFIER_KINDS.includes("tiktok_auth_signature"));
+  const ig1235 = classifyIgCarouselTooManyChildren({
+    id: "recVphOmGqaxIYHSD",
+    output_id: 1235,
+    platform: "Instagram",
+    studio_output_type: "Carousel",
+    platform_output_type: "Instagram Carousel",
+    output_status: "Approved for Publishing",
+    publish_status: "Ready to Schedule",
+    ig_carousel_status: "Children Ready",
+    ig_carousel_error_stage: "AP3C Parent Creation",
+    ig_carousel_error: "AP3C parent creation failed. HTTP 400: (#100) Unsupported post type. The post has too little or too many attachments to qualify as a carousel",
+    ig_carousel_child_count: 12,
+    image_count: 12,
+  });
+  assert.equal(ig1235.kind, "ig_carousel_too_many_children");
+  assert.equal(ig1235.class, "transient");
+  assert.equal(ig1235.actor, "worker_heal");
+  assert.equal(ig1235.fingerprint, fingerprint("ig_carousel_too_many_children", "recVphOmGqaxIYHSD", "12"));
+  assert.equal(classifyPublishFailed({
+    id: "recVphOmGqaxIYHSD",
+    platform: "Instagram",
+    studio_output_type: "Carousel",
+    platform_output_type: "Instagram Carousel",
+    output_status: "Approved for Publishing",
+    publish_status: "Failed",
+    publish_error: "AP3C parent creation failed. HTTP 400: (#100) Unsupported post type. The post has too little or too many attachments to qualify as a carousel",
+    ig_carousel_error: "AP3C parent creation failed. HTTP 400: (#100) Unsupported post type. The post has too little or too many attachments to qualify as a carousel",
+    ig_carousel_error_stage: "AP3C Parent Creation",
+    ig_carousel_status: "Children Ready",
+    ig_carousel_child_count: 12,
+  }, now), null);
+  assert.ok(CLASSIFIER_KINDS.includes("ig_carousel_too_many_children"));
   const staleFailed = classifyPublishFailed({
     id: "recStaleFail",
     output_status: "Approved for Publishing",

@@ -698,9 +698,40 @@ export function classifyTikTokAuthSignature(row) {
   }, row);
 }
 
+export function isIgCarouselTooManyChildren(row) {
+  const platform = String(row?.platform || "").trim();
+  if (platform !== "Instagram") return false;
+  const type = `${row?.studio_output_type || ""} ${row?.platform_output_type || ""}`;
+  if (!/carousel/i.test(type)) return false;
+  if (row?.published_at || String(row?.ig_carousel_status || "").trim() === "Published") return false;
+  const err = `${row?.ig_carousel_error || row?.publish_error || ""}`;
+  const stage = `${row?.ig_carousel_error_stage || row?.publish_error_stage || ""}`;
+  const count = Number(row?.ig_carousel_child_count || row?.image_count || 0) || 0;
+  if (/too little or too many attachments/i.test(err)) return true;
+  if (count > 10 && /AP3C/i.test(stage)) return true;
+  if (count > 10 && String(row?.ig_carousel_status || "").trim() === "Children Ready") return true;
+  return false;
+}
+
+export function classifyIgCarouselTooManyChildren(row) {
+  if (row?.published_at) return null;
+  if (!isIgCarouselTooManyChildren(row)) return null;
+  const recordId = String(row?.id || row?.record_id || "").trim();
+  const count = Number(row?.ig_carousel_child_count || row?.image_count || 0) || "unknown";
+  return withDeskIdentity({
+    kind: "ig_carousel_too_many_children",
+    class: "transient",
+    record_id: recordId || null,
+    fingerprint: fingerprint("ig_carousel_too_many_children", recordId, String(count)),
+    actor: "worker_heal",
+    diagnosis: "Instagram Graph carousel parent (AP3C) rejected the package: (#100) too little or too many attachments. Graph allows 2–10 children; this output has more than 10 FINISHED children (cover may be slide 1). Facebook planning already clamps Image_Count to 10; IG carousel stamp/AP3C must clamp too. Worker heal stamps IG_Carousel_Child_Count=Image_Count=10, clears the AP3C error, and re-pulses AP3C; AP3C keeps cover/order-1 and the next 9 child container IDs. Proven: Output 1235 / Millennium Park Fewer Crowds / recVphOmGqaxIYHSD (12 children).",
+  }, row);
+}
+
 export function classifyPublishFailed(row, nowMs = Date.now()) {
   if (row?.published_at) return null;
   if (classifyTikTokAuthSignature(row)) return null;
+  if (classifyIgCarouselTooManyChildren(row)) return null;
   const outputStatus = String(row?.output_status || "").trim();
   const publish = String(row?.publish_status || "").trim();
   if (outputStatus && !["Approved for Publishing", "Failed"].includes(outputStatus)) return null;
@@ -783,6 +814,7 @@ function publishDispatchDiagnosis(blocker, row) {
 
 export function classifyPublishDispatch(row, nowMs = Date.now()) {
   if (classifyPublishFailed(row, nowMs)) return null;
+  if (classifyIgCarouselTooManyChildren(row)) return null;
   const recordId = String(row?.id || row?.record_id || "").trim();
   const outputStatus = String(row?.output_status || "").trim();
   const platform = String(row?.platform || "").trim();
@@ -1007,6 +1039,7 @@ export const CLASSIFIER_KINDS = Object.freeze([
   "publish_never_dispatch",
   "publish_failed_transient",
   "tiktok_auth_signature",
+  "ig_carousel_too_many_children",
   "render_failed",
   "render_unfetchable_source",
   "render_private_drive_watermark",

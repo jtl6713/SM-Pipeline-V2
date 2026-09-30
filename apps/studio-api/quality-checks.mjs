@@ -15,6 +15,7 @@ export const QUALITY_HEALS = Object.freeze([
   "diagnose_then_one_send",
   "wait_pacific_midnight",
   "align_signature_then_rearm",
+  "clamp_children_then_requeue",
   "ticket_only",
   "none",
 ]);
@@ -148,6 +149,14 @@ export const QUALITY_CHECKS = Object.freeze([
     kind: "tiktok_auth_signature",
     actor: "desk_agent",
     heal: "align_signature_then_rearm",
+  }),
+  check({
+    id: "ig_carousel_too_many_children",
+    title: "Check for Instagram carousels stuck at AP3C because Graph received more than 10 children",
+    lane: "service",
+    kind: "ig_carousel_too_many_children",
+    actor: "worker_heal",
+    heal: "clamp_children_then_requeue",
   }),
   check({
     id: "render_failed",

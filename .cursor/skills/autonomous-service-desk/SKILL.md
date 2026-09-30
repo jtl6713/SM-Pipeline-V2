@@ -77,6 +77,14 @@ Classify as `tiktok_auth_signature` / `code_bug` / actor `desk_agent` (not `publ
 
 Auto-correct for ordinary Graph/transient Failed publishes remains Worker `studioHealFailedStatuses`. TikTok Manual Fallback / auth-worker 401 is **not** that path.
 
+## Watch: Instagram carousel AP3C too many attachments
+
+Instagram Carousel stuck at `IG_Carousel_Status=Children Ready` with `IG_Carousel_Error_Stage=AP3C Parent Creation` and Graph `(#100) Unsupported post type. The post has too little or too many attachments` means the package sent more than **10** child container IDs. Instagram Graph allows **2–10** carousel children. Facebook planning already clamps `Image_Count` to 10; IG carousel stamp used to pass the full clip count through (12 on Output **1235** / Millennium Park Fewer Crowds / `recVphOmGqaxIYHSD`).
+
+Kind `ig_carousel_too_many_children`, class `transient`, actor `worker_heal`, fingerprint `ig_carousel_too_many_children:<output_rec>:<child_count>`.
+
+Auto-correct: Worker `studioHealIgCarouselTooManyChildren` stamps `IG_Carousel_Child_Count=Image_Count=10`, clears the AP3C error, and pulses AP3C. AP3C / AP0C / AP1C clamp to the first 10 slides by Current Order (keep cover as slide 1) before `create_parent`. Re-pulsing AP3C without the clamp storms the same #100. Same fingerprint after a successful clamp + AP3C → `code_bug`.
+
 ## Watch: Escalated — needs investigation
 
 Parent `Studio_Production_Job_JSON.step=escalated` after five Worker resumes. Pipeline paints **Escalated — needs investigation** on every sibling output. Worker `resumeStaleStudioProductionJobs` used to skip this terminal step, so the row parked forever even when the block was recoverable (empty `Studio_Master_Assets_JSON` while library stills exist; outputs created after a "No Platform Outputs" block; transient HTTP that exhausted the budget). Kind `produce_escalated`, class `transient` when `deskRecoverableEscalatedError` matches, actor `worker_heal`. Clip-count mismatch stays `produce_clip_mismatch` / `code_bug`. Skip `Request_Status=Cancelled`.

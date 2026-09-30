@@ -4,6 +4,7 @@ from datetime import timedelta
 from typing import Any
 
 from asset.helpers import parse_int
+from apc.constants import IG_GRAPH_MAX_CHILDREN
 from carousel.timeutil import iso_utc, parse_utc, utc_now
 from render.fields import field, field_str, json_text
 
@@ -78,6 +79,18 @@ def expected_child_count(record: dict[str, Any], ready_count: int = 0) -> int:
         if count > 1:
             return count
     return ready_count if ready_count > 1 else 0
+
+
+def clamp_ig_graph_children(
+    slides: list[dict[str, Any]],
+    max_children: int = IG_GRAPH_MAX_CHILDREN,
+) -> tuple[list[dict[str, Any]], bool]:
+    """Keep cover/first Current Order, drop trailing slides past Graph's max of 10."""
+    rows = list(slides or [])
+    limit = max(2, int(max_children or IG_GRAPH_MAX_CHILDREN))
+    if len(rows) <= limit:
+        return rows, False
+    return rows[:limit], True
 
 
 def publish_caption(record: dict[str, Any]) -> str:
