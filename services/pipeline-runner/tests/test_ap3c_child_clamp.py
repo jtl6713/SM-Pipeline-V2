@@ -100,4 +100,6 @@ def test_ap3c_caps_twelve_finished_children_before_graph(monkeypatch):
 
 
 def test_expected_child_count_still_reads_raw_fields():
-    assert expected_child_count(_record(IG_Carousel_Child_Count=12), 12) == 12
+    # Main (#456) clamps expected_child_count to MAX_SLIDES / Graph max 10.
+    assert expected_child_count(_record(IG_Carousel_Child_Count=12), 12) == IG_GRAPH_MAX_CHILDREN
+    assert expected_child_count(_record(IG_Carousel_Child_Count=8), 8) == 8
