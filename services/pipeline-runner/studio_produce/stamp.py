@@ -172,6 +172,7 @@ _AI_MOTION_CHOICES = {
     "pan_up",
     "pan_down",
 }
+_AI_MOTION_CACHE: dict[str, dict[int, dict[str, str]]] = {}
 
 
 def _ai_directed_motion(
@@ -191,6 +192,20 @@ def _ai_directed_motion(
             pending.append((index, item))
     if not pending:
         return {}
+
+    cache_key = json.dumps(
+        {
+            "clips": [(index, str(item.get("url") or "")) for index, item in pending],
+            "preset": settings.get("preset", "auto"),
+            "intensity": settings.get("intensity", "normal"),
+            "pacing": settings.get("pacing", "normal"),
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    cached = _AI_MOTION_CACHE.get(cache_key)
+    if cached is not None:
+        return {index: dict(value) for index, value in cached.items()}
 
     directed: dict[int, dict[str, str]] = {}
     try:
@@ -240,6 +255,10 @@ def _ai_directed_motion(
                 "motion": motion,
                 "reason": str(row.get("reason") or "").strip()[:240],
             }
+    if directed:
+        if len(_AI_MOTION_CACHE) >= 128:
+            _AI_MOTION_CACHE.pop(next(iter(_AI_MOTION_CACHE)))
+        _AI_MOTION_CACHE[cache_key] = {index: dict(value) for index, value in directed.items()}
     return directed
 
 
