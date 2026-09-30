@@ -252,7 +252,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.437-home-awaiting-approval";
+  const BUILD_ID = "item4-0.6.438-ig-carousel-native-approve";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -10194,7 +10194,9 @@
     });
 
     productionRequestOutputs = Array.isArray(result.records) ? result.records : [];
-    if (result.production_request) activeProductionRequest = result.production_request;
+    if (result.production_request) {
+      activeProductionRequest = mergeProductionRequestRecord(activeProductionRequest, result.production_request);
+    }
     syncLegacyPlatformsFromOutputMatrix();
     updateOutputMatrixSummary();
     renderProductionRequestOutputCards();

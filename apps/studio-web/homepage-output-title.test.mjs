@@ -113,23 +113,23 @@ test("Rendered still-source video outputs classify as Photo Set instead of Carou
 
 
 test("Home dashboard exposes only actionable counts and filtered destinations", () => {
-  assert.match(source, /label: "Manual Action Required".*filter: "manual"/s);
-  assert.match(source, /label: "Failed".*filter: "failed"/s);
-  assert.match(source, /label: "Awaiting Approval".*filter: "approval"/s);
-  assert.match(source, /label: "Ideas Not Yet in Production".*page: "ideas"/s);
-  assert.doesNotMatch(source, /label: "Platform outputs"/);
-  assert.doesNotMatch(source, /label: "Active outputs"/);
-  assert.doesNotMatch(source, /label: "Published"/);
-  assert.match(source, /if \(filter === "manual"\) return state === "Manual Action Required"/);
-  assert.match(source, /if \(filter === "failed"\) return state === "Failed"/);
-  assert.match(source, /if \(filter === "approval"\) return creativeCanApproveForPublishing\(record\) && !pipelineRecordIsAzAutoQueue\(record\)/);
-  assert.match(source, /const awaitingApprovalCount = outputs\.filter\(\(record\) => pipelineRecordMatchesFilter\(record, "approval"\)\)\.length/);
-  assert.doesNotMatch(source, /filter === "approval"[^\n]*review_status[^\n]*Pending/);
+  assert.match(app, /label: "Manual Action Required".*filter: "manual"/s);
+  assert.match(app, /label: "Failed".*filter: "failed"/s);
+  assert.match(app, /label: "Awaiting Approval".*filter: "approval"/s);
+  assert.match(app, /label: "Ideas Not Yet in Production".*page: "ideas"/s);
+  assert.doesNotMatch(app, /label: "Platform outputs"/);
+  assert.doesNotMatch(app, /label: "Active outputs"/);
+  assert.doesNotMatch(app, /label: "Published"/);
+  assert.match(app, /if \(filter === "manual"\) return state === "Manual Action Required"/);
+  assert.match(app, /if \(filter === "failed"\) return state === "Failed"/);
+  assert.match(app, /if \(filter === "approval"\) return creativeCanApproveForPublishing\(record\) && !pipelineRecordIsAzAutoQueue\(record\)/);
+  assert.match(app, /const awaitingApprovalCount = outputs\.filter\(\(record\) => pipelineRecordMatchesFilter\(record, "approval"\)\)\.length/);
+  assert.doesNotMatch(app, /filter === "approval"[^\n]*review_status[^\n]*Pending/);
 });
 
 
 test("idea photo matching tolerates slow server work without surfacing signal timed out", () => {
-  assert.match(source, /match-photos[\\s\\S]*timeoutMs: 120000/);
-  assert.match(source, /if \(isTimeoutError\(error\)\)/);
-  assert.match(source, /Listening is still active; Studio will keep checking automatically/);
+  assert.match(app, /match-photos[\s\S]*timeoutMs: 120000/);
+  assert.match(app, /if \(isTimeoutError\(error\)\)/);
+  assert.match(app, /Listening is still active; Studio will keep checking automatically/);
 });
