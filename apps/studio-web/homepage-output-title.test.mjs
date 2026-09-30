@@ -113,23 +113,45 @@ test("Rendered still-source video outputs classify as Photo Set instead of Carou
 
 
 test("Home dashboard exposes only actionable counts and filtered destinations", () => {
-  assert.match(source, /label: "Manual Action Required".*filter: "manual"/s);
-  assert.match(source, /label: "Failed".*filter: "failed"/s);
-  assert.match(source, /label: "Awaiting Approval".*filter: "approval"/s);
-  assert.match(source, /label: "Ideas Not Yet in Production".*page: "ideas"/s);
-  assert.doesNotMatch(source, /label: "Platform outputs"/);
-  assert.doesNotMatch(source, /label: "Active outputs"/);
-  assert.doesNotMatch(source, /label: "Published"/);
-  assert.match(source, /if \(filter === "manual"\) return state === "Manual Action Required"/);
-  assert.match(source, /if \(filter === "failed"\) return state === "Failed"/);
-  assert.match(source, /if \(filter === "approval"\) return creativeCanApproveForPublishing\(record\) && !pipelineRecordIsAzAutoQueue\(record\)/);
-  assert.match(source, /const awaitingApprovalCount = outputs\.filter\(\(record\) => pipelineRecordMatchesFilter\(record, "approval"\)\)\.length/);
-  assert.doesNotMatch(source, /filter === "approval"[^\n]*review_status[^\n]*Pending/);
+  assert.match(app, /label: "Manual Action Required".*filter: "manual"/s);
+  assert.match(app, /label: "Failed".*filter: "failed"/s);
+  assert.match(app, /label: "Awaiting Approval".*filter: "approval"/s);
+  assert.match(app, /label: "Ideas Not Yet in Production".*page: "ideas"/s);
+  assert.doesNotMatch(app, /label: "Platform outputs"/);
+  assert.doesNotMatch(app, /label: "Active outputs"/);
+  assert.doesNotMatch(app, /label: "Published"/);
+  assert.match(app, /if \(filter === "manual"\) return state === "Manual Action Required"/);
+  assert.match(app, /if \(filter === "failed"\) return state === "Failed"/);
+  assert.match(app, /if \(filter === "approval"\) return creativeCanApproveForPublishing\(record\) && !pipelineRecordIsAzAutoQueue\(record\)/);
+  assert.match(app, /const awaitingApprovalCount = outputs\.filter\(\(record\) => pipelineRecordMatchesFilter\(record, "approval"\)\)\.length/);
+  assert.doesNotMatch(app, /filter === "approval"[^\n]*review_status[^\n]*Pending/);
+});
+
+test("Home metric cards use count tones and poll every few seconds", () => {
+  assert.match(app, /function dashboardCardTone\(view, number\)/);
+  assert.match(app, /if \(view === "manual" \|\| view === "failed"\)/);
+  assert.match(app, /if \(count <= 2\) return "warn"/);
+  assert.match(app, /if \(view === "approval"\)/);
+  assert.match(app, /if \(count <= 5\) return "warn"/);
+  assert.match(app, /if \(view === "ideas"\)/);
+  assert.match(app, /if \(count <= 4\) return "warn"/);
+  assert.match(app, /metric-tone-\$\{escapeHtml\(tone\)\}/);
+  assert.match(app, /const DASHBOARD_POLL_MS = 5000/);
+  assert.match(app, /function scheduleDashboardPoll\(/);
+  assert.match(app, /loadDashboard\(true\)/);
+  const css = fs.readFileSync(path.join(here, "assets", "styles-phase7-0621.css"), "utf8");
+  assert.match(css, /\.metric-button\.metric-tone-ok/);
+  assert.match(css, /\.metric-button\.metric-tone-warn/);
+  assert.match(css, /\.metric-button\.metric-tone-critical/);
+  const build = app.match(/BUILD_ID = "item4-([^"]+)"/)?.[1];
+  assert.ok(build);
+  assert.match(html, new RegExp(`app-item4-0625\\.js\\?v=${build.replace(/[.*+?^${}()|[\\]\\^]/g, "\\$&")}`));
+  assert.match(html, /styles-phase7-0621\.css\?v=0\.6\.438-home-card-tones/);
 });
 
 
 test("idea photo matching tolerates slow server work without surfacing signal timed out", () => {
-  assert.match(source, /match-photos[\\s\\S]*timeoutMs: 120000/);
-  assert.match(source, /if \(isTimeoutError\(error\)\)/);
-  assert.match(source, /Listening is still active; Studio will keep checking automatically/);
+  assert.match(app, /match-photos[\s\S]*timeoutMs: 120000/);
+  assert.match(app, /if \(isTimeoutError\(error\)\)/);
+  assert.match(app, /Listening is still active; Studio will keep checking automatically/);
 });

@@ -1216,9 +1216,9 @@ input, select, textarea, button {
 #creativeRenderPreviewStill[hidden]{display:none!important}
 
 .metric-button{appearance:none;display:block;width:100%;text-align:left;font:inherit;color:inherit;cursor:pointer}
-.metric-button:hover{border-color:var(--teal);background:var(--teal-soft)}
+.metric-button:hover{filter:brightness(0.98)}
 .metric-button:focus-visible{outline:2px solid var(--teal);outline-offset:2px}
-.metric-button.is-selected{border-color:var(--teal);background:var(--teal-soft);box-shadow:0 0 0 3px var(--teal-soft)}
+.metric-button.is-selected{box-shadow:0 0 0 3px rgba(1,37,89,.28)}
 .pipeline-filter-bar{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 16px;border-bottom:1px solid var(--line);background:#f9fbfb;font-size:.82rem;font-weight:700;color:var(--muted)}
 .pipeline-filter-bar[hidden]{display:none!important}
 .pipeline-filter-bar .secondary-button{padding:7px 10px;font-size:.78rem}
@@ -2488,13 +2488,36 @@ body{
   -webkit-backdrop-filter:blur(16px);
 }
 .metric-button.is-selected{
-  background:#012559;
-  color:#fff;
+  box-shadow:0 0 0 3px rgba(1,37,89,.28),0 10px 26px rgba(15,35,70,.08);
 }
-.metric-button.is-selected .metric-label{color:rgba(255,255,255,.7)}
-.metric-button.is-selected .metric-value{color:#fff}
 .metric-label{font-weight:700;letter-spacing:.02em}
 .metric-value{font-size:1.55rem}
+.metric-button.metric-tone-ok{
+  background:#e8f7ef;
+  color:#067647;
+  border:1px solid #abefc6;
+}
+.metric-button.metric-tone-ok .metric-label{color:#067647}
+.metric-button.metric-tone-ok .metric-value{color:#067647}
+.metric-button.metric-tone-warn{
+  background:var(--amber-soft);
+  color:var(--amber);
+  border:1px solid #f5d78a;
+}
+.metric-button.metric-tone-warn .metric-label{color:var(--amber)}
+.metric-button.metric-tone-warn .metric-value{color:var(--amber)}
+.metric-button.metric-tone-critical{
+  background:var(--red-soft);
+  color:var(--red);
+  border:1px solid #f0b4ad;
+}
+.metric-button.metric-tone-critical .metric-label{color:var(--red)}
+.metric-button.metric-tone-critical .metric-value{color:var(--red)}
+.metric-button.metric-tone-ok:hover,
+.metric-button.metric-tone-warn:hover,
+.metric-button.metric-tone-critical:hover{
+  filter:brightness(0.98);
+}
 
 #page-ideas .page-heading,
 #page-outputs .page-heading,
