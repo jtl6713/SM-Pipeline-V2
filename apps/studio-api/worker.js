@@ -18,6 +18,7 @@ import {
   classifyPromotedNotRfr,
   classifyPublishDispatch,
   classifyPublishFailed,
+  classifyIgCarouselTooManyChildren,
   classifyTikTokAuthSignature,
   classifyRenderRow,
   deskFailedNeedsHeal,
@@ -454,7 +455,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.425-primary-ai-alert",
+          version: "0.10.426-ig-carousel-max-children",
           studio_desk_inventory_v1: true,
           studio_desk_activity_v1: true,
           studio_tiktok_complete_v1: true,
@@ -1426,6 +1427,11 @@ export default {
         await studioHealFailedStatuses(env, { limit: 6 });
       } catch (error) {
         console.warn("studio failed-status heal failed", error);
+      }
+      try {
+        await studioHealIgCarouselTooManyChildren(env, { limit: 4 });
+      } catch (error) {
+        console.warn("studio IG carousel child-count heal failed", error);
       }
       try {
         await studioHealNativePhotoReviewStrands(env, { limit: 8 });
@@ -2547,8 +2553,10 @@ function studioPublishHandoffFields(record, options = {}) {
     fields.Publish_Status = armedPublish;
     fields.Image_Output_Selected = true;
     if (clipCount) {
-      fields.Image_Count = clipCount;
-      fields.IG_Carousel_Child_Count = clipCount;
+      // Instagram Graph carousel parent allows 2–10 children (#100 too many attachments).
+      const igCarouselCount = Math.max(1, Math.min(Number(clipCount) || 1, 10));
+      fields.Image_Count = igCarouselCount;
+      fields.IG_Carousel_Child_Count = igCarouselCount;
     }
   }
   if (platform === "Instagram" && (outputType === "Single Image" || mapping === "Instagram Feed Post") && outputType !== "Carousel" && mapping !== "Instagram Carousel") {
@@ -10938,6 +10946,79 @@ async function studioHealFailedStatuses(env, options = {}) {
   }
   if (pulses.length) {
     console.log("Studio failed-status heal", JSON.stringify({
+      count: pulses.length,
+      pulses: pulses.map((row) => ({ key: row.key, id: row.id, error: row.error || null })),
+    }));
+  }
+  return pulses;
+}
+
+async function studioHealIgCarouselTooManyChildren(env, options = {}) {
+  const limit = Math.max(1, Math.min(6, Number(options.limit || 4)));
+  const outputTable = env.AIRTABLE_OUTPUT_TABLE_ID;
+  const pulses = [];
+  const rows = await listRecords(env, outputTable, {
+    limit,
+    sortField: "Output_ID",
+    sortDirection: "desc",
+    filterFormula: 'AND({Test_Run_ID}=BLANK(),{Platform}="Instagram",{Published_At}=BLANK(),{Do_Not_Publish}=0,{IG_Carousel_Parent_Container_ID}="",OR({Studio_Output_Type}="Carousel",{Platform_Output_Type}="Instagram Carousel"),OR(FIND("too little or too many attachments",{IG_Carousel_Error_Message}&"")>0,AND({IG_Carousel_Child_Count}>10,{IG_Carousel_Status}="Children Ready")))',
+  }).catch(() => []);
+  for (const row of rows || []) {
+    const mapped = {
+      id: row.id,
+      platform: f(row, "Platform"),
+      studio_output_type: f(row, "Studio_Output_Type"),
+      platform_output_type: f(row, "Platform_Output_Type"),
+      ig_carousel_status: f(row, "IG_Carousel_Status"),
+      ig_carousel_error: f(row, "IG_Carousel_Error_Message"),
+      ig_carousel_error_stage: f(row, "IG_Carousel_Error_Stage"),
+      ig_carousel_child_count: f(row, "IG_Carousel_Child_Count"),
+      image_count: f(row, "Image_Count"),
+      published_at: f(row, "Published_At"),
+    };
+    if (!classifyIgCarouselTooManyChildren(mapped)) continue;
+    const prior = Number(f(row, "IG_Carousel_Child_Count") || f(row, "Image_Count") || 0) || 0;
+    const capped = Math.min(10, Math.max(2, prior > 10 ? 10 : prior || 10));
+    try {
+      await airtableFetch(env, outputTable, row.id, {
+        method: "PATCH",
+        body: JSON.stringify({
+          fields: {
+            IG_Carousel_Child_Count: capped,
+            Image_Count: capped,
+            IG_Carousel_Status: "Children Ready",
+            IG_Carousel_Error_Stage: "",
+            IG_Carousel_Error_Message: "",
+            IG_Carousel_Next_Retry_At: null,
+            Publish_Retry_Eligible: true,
+            Publish_Next_Retry_At: null,
+            Publish_Locked_By: "",
+            Publish_Locked_At: null,
+            Publish_Started_At: null,
+          },
+          typecast: true,
+        }),
+      });
+      const refreshed = await airtableFetch(env, outputTable, row.id).catch(() => row);
+      const payload = await studioPulseAp3c(env, refreshed);
+      pulses.push({
+        key: "IG_CAROUSEL_CLAMP_AP3C",
+        id: row.id,
+        prior_child_count: prior,
+        capped_child_count: capped,
+        ok: payload?.ok !== false,
+        payload,
+      });
+    } catch (error) {
+      pulses.push({
+        key: "IG_CAROUSEL_CLAMP_AP3C",
+        id: row.id,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+  if (pulses.length) {
+    console.log("Studio IG carousel child-count heal", JSON.stringify({
       count: pulses.length,
       pulses: pulses.map((row) => ({ key: row.key, id: row.id, error: row.error || null })),
     }));
@@ -27656,6 +27737,9 @@ async function pulseOnDemandRenderChain(env, options = {}) {
   try { pulses.push(...await studioHealFailedStatuses(env, { limit: 4 })); } catch (error) {
     pulses.push({ key: "STUDIO_FAILED_STATUS", error: error instanceof Error ? error.message : String(error) });
   }
+  try { pulses.push(...await studioHealIgCarouselTooManyChildren(env, { limit: 4 })); } catch (error) {
+    pulses.push({ key: "STUDIO_IG_CAROUSEL_CLAMP", error: error instanceof Error ? error.message : String(error) });
+  }
   try { pulses.push(...await resumeStaleStudioProductionJobs(env, options)); } catch (error) {
     pulses.push({ key: "STUDIO_PRODUCE", error: error instanceof Error ? error.message : String(error) });
   }
@@ -35005,6 +35089,11 @@ function mapDeskInventoryOutput(record, contentToRequest = new Map(), contentByI
     cover_attached: note.includes("facebook-cover=attached"),
     publish_error: f(record, "Publish_Error_Message"),
     publish_error_stage: f(record, "Publish_Error_Stage"),
+    ig_carousel_status: f(record, "IG_Carousel_Status"),
+    ig_carousel_error: f(record, "IG_Carousel_Error_Message"),
+    ig_carousel_error_stage: f(record, "IG_Carousel_Error_Stage"),
+    ig_carousel_child_count: f(record, "IG_Carousel_Child_Count"),
+    image_count: f(record, "Image_Count"),
     tiktok_draft_status: f(record, "TikTok_Draft_Status"),
     youtube_error: f(record, "YouTube_Error_Message"),
     youtube_video_id: f(record, "YouTube_Video_ID"),
@@ -35232,6 +35321,7 @@ async function gatherStudioDeskInventory(env) {
   for (const record of approvedDispatch || []) {
     push(classifyPublishDispatch(mapOut(record), nowMs));
     push(classifyTikTokAuthSignature(mapOut(record)));
+    push(classifyIgCarouselTooManyChildren(mapOut(record)));
     push(classifyPublishFailed(mapOut(record), nowMs));
     push(classifyYoutubeCoverQuota(mapOut(record)));
   }
@@ -35242,14 +35332,29 @@ async function gatherStudioDeskInventory(env) {
       sortDirection: "desc",
       filterFormula: 'AND({Test_Run_ID}=BLANK(),OR({Render_Status}="Failed",{Publish_Status}="Failed",AND({Publish_Error_Message}!="",{Published_At}=BLANK())))',
     }).catch(() => []);
-    scanned("render_failed", "publish_failed_transient", "tiktok_auth_signature");
+    scanned("render_failed", "publish_failed_transient", "tiktok_auth_signature", "ig_carousel_too_many_children");
     for (const record of failedRows || []) {
       push(classifyRenderRow(mapOut(record), nowMs));
       push(classifyTikTokAuthSignature(mapOut(record)));
+      push(classifyIgCarouselTooManyChildren(mapOut(record)));
       push(classifyPublishFailed(mapOut(record), nowMs));
     }
   } catch (error) {
     console.warn("desk failed-status scan failed", error);
+  }
+  try {
+    const igCarouselOverRows = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
+      limit: 12,
+      sortField: "Output_ID",
+      sortDirection: "desc",
+      filterFormula: 'AND({Test_Run_ID}=BLANK(),{Platform}="Instagram",{Published_At}=BLANK(),OR({Studio_Output_Type}="Carousel",{Platform_Output_Type}="Instagram Carousel"),OR(FIND("too little or too many attachments",{IG_Carousel_Error_Message}&"")>0,AND({IG_Carousel_Child_Count}>10,{IG_Carousel_Status}="Children Ready")))',
+    }).catch(() => []);
+    scanned("ig_carousel_too_many_children");
+    for (const record of igCarouselOverRows || []) {
+      push(classifyIgCarouselTooManyChildren(mapOut(record)));
+    }
+  } catch (error) {
+    console.warn("desk IG carousel child-count scan failed", error);
   }
   scanned("native_cover_missing");
   for (const record of publishedCovers || []) {

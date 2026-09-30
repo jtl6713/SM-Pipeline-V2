@@ -75,3 +75,6 @@ jobs:
           exit 6
 
 # Trigger: deploy TikTok handoff MIME fix f9d3326
+
+# Trigger pipeline-runner deploy for AP3C/AP0C/AP1C IG Graph max-10 child clamp (Output 1235)
+# 2026-09-30T04:00:00-05:00

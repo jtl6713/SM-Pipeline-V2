@@ -7,12 +7,21 @@ from typing import Any
 from airtable.client import AirtableClient
 from airtable.constants import CAROUSEL_SLIDES_TABLE, PLATFORM_OUTPUTS_TABLE
 from apc.assets import child_ids, current_order, list_child_slides, list_final_slides
-from apc.common import expected_child_count, preview, response_json, retry_at, unlock_fields, valid_record_id
+from apc.common import (
+    clamp_ig_graph_children,
+    expected_child_count,
+    preview,
+    response_json,
+    retry_at,
+    unlock_fields,
+    valid_record_id,
+)
 from apc.constants import (
     CHILD_CREATING,
     CHILD_IN_PROGRESS,
     CHILD_RETRY,
     ERROR_AP1C,
+    IG_GRAPH_MAX_CHILDREN,
     MAKE_AP1C_ID,
     MAKE_AP1C_NAME,
     RETRY_MINUTES,
@@ -98,6 +107,19 @@ def process_request(
     )
 
     slides = list_final_slides(client, field_str(output, "Output_ID") or field(output, "Output_ID"))
+    slides, capped = clamp_ig_graph_children(slides, IG_GRAPH_MAX_CHILDREN)
+    if capped:
+        client.update_record(
+            PLATFORM_OUTPUTS_TABLE,
+            record_id,
+            {"IG_Carousel_Child_Count": len(slides), "Image_Count": len(slides)},
+            typecast=True,
+        )
+        output.setdefault("fields", {})
+        output["fields"]["IG_Carousel_Child_Count"] = len(slides)
+        output["fields"]["Image_Count"] = len(slides)
+        result["children_capped"] = True
+        result["expected_child_count"] = len(slides)
     settings = PipelineSettings(client)
     graph = InstagramCarouselClient(**load_instagram_settings(settings, output, client=client))
     for slide in slides:
@@ -161,8 +183,9 @@ def process_request(
         return {"processed": True, "needs_children": True, **result}
 
     created = list_child_slides(client, field_str(output, "Output_ID") or field(output, "Output_ID"))
+    created, _ = clamp_ig_graph_children(created, IG_GRAPH_MAX_CHILDREN)
     created_count = len(child_ids(created))
-    expected = expected_child_count(output, created_count)
+    expected = min(expected_child_count(output, created_count), IG_GRAPH_MAX_CHILDREN)
     if created_count != expected or created_count <= 1:
         _reset_parent(
             client,
