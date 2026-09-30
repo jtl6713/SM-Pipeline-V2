@@ -42,7 +42,7 @@ test("already-listening ideas are matched on every five-minute Worker tick", () 
     scheduledBody,
     /if \(cadence\.heavy\) \{[\s\S]{0,700}?autoListenOpenPhotoIdeas[\s\S]{0,500}?\n\s*\}[\s\S]{0,250}?Existing listeners react[\s\S]{0,350}?runWaitingIdeaPhotoMatches\(env, \{ limit: 12 \}\)/
   );
-  assert.match(worker, /five-minute Worker tick/);
+  assert.match(worker, /five-minute\s+Worker tick/);
 });
 
 test("generated media ideas start listening automatically and the cron can create their draft", () => {
