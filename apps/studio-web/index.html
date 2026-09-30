@@ -9,7 +9,7 @@
  <link rel="preconnect" href="https://fonts.googleapis.com">
  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@1,600;1,700&family=Inter:wght@400;500;600;700;800&family=Oswald:wght@500&display=swap">
- <link rel="stylesheet" href="/assets/styles-phase7-0621.css?v=0.6.446-render-controls-tabs">
+ <link rel="stylesheet" href="/assets/styles-phase7-0621.css?v=0.6.447-per-photo-ai-motion">
  <link rel="stylesheet" href="/assets/insights-0622.css?v=0.6.381-insights-padding">
  <link rel="stylesheet" href="/assets/clean-enterprise.css?v=0.6.375-clean-enterprise">
  <link rel="stylesheet" href="/assets/ai-api-footer.css?v=0.6.427-primary-ai-alert">
@@ -639,8 +639,22 @@
  <input id="prRenderBeatSync" type="checkbox" checked>
  <span><strong>Beat sync when available</strong><small>Keep image changes aligned to music timing when the pipeline has beat data.</small></span>
  </label>
+ <label class="production-render-toggle">
+ <input id="prRenderAiMotion" type="checkbox">
+ <span><strong>AI-direct motion per photo</strong><small>Studio examines each still and chooses an appropriate pan, zoom, Ken Burns move, or hold. Explicit photo overrides always win.</small></span>
+ </label>
  </div>
- <p class="ez-option-hint">These settings are stored with this Production Request and become clip-level render instructions. A future per-frame editor can override any individual still without changing the global style.</p>
+ <div class="production-render-frame-section">
+ <div class="request-section-heading item4-heading-row">
+ <div>
+ <h4>Per-photo overrides</h4>
+ <p>Leave a field on Inherit to use AI direction (when enabled) or the global Rendering settings above.</p>
+ </div>
+ <button type="button" class="secondary-button" id="prRenderClearFrameOverrides">Clear overrides</button>
+ </div>
+ <div class="production-render-frame-list" id="prRenderFrameOverrides"><div class="empty compact-empty">Add photos in Media to configure individual motion.</div></div>
+ </div>
+ <p class="ez-option-hint">Global settings remain the default. Per-photo motion, transition, and fit overrides are stored with this Production Request and stamped into each Remotion clip.</p>
  </div>
 
  <div class="form-message" id="productionRequestMessage" aria-live="polite"></div>
@@ -2260,7 +2274,7 @@
  <script src="/assets/ez-plan.js?v=0.6.376-recommend-carousel-slides"></script>
  <script src="/assets/pipeline-schedule-grid-0622.js?v=0.6.436-production-open-light"></script>
  <script src="/assets/platform-schedule-calendar-0924.js?v=0.6.380-branch-reconcile"></script>
- <script src="/assets/app-item4-0625.js?v=0.6.446-render-controls-tabs"></script>
+ <script src="/assets/app-item4-0625.js?v=0.6.447-per-photo-ai-motion"></script>
  <script src="/assets/insights-0622.js?v=0.6.365-first-party-analytics-reconciled"></script>
  <script src="/assets/ai-api-footer.js?v=0.6.427-primary-ai-alert"></script>
  <script src="/assets/sticky-footer-scroll.js?v=0.6.378-sticky-footer-scroll"></script>
