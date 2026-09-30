@@ -671,7 +671,13 @@
     }
     if (next === "support") $("studioHelpLink")?.setAttribute("aria-current", "page");
     else $("studioHelpLink")?.removeAttribute("aria-current");
-    if (next === "outputs") pipelineViewFilter = "all";
+    if (next === "outputs") {
+      pipelineViewFilter = "all";
+      if (previous !== "outputs") {
+        restorePipelineUseDefaultSchedules();
+        clearDefaultSchedulesFromUnapprovedRows();
+      }
+    }
     if (next !== "outputs") {
       clearPipelineColumnFilters();
       stopPipelinePoll();
