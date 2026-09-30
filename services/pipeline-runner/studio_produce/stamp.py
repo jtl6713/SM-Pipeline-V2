@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import math
+import re
 from typing import TYPE_CHECKING, Any
 
 from studio_produce.constants import CONTENT_ITEMS_TABLE, PLATFORM_OUTPUTS_TABLE, PRODUCTION_REQUESTS_TABLE
@@ -30,6 +31,162 @@ STORY_TEASER_SECONDS = 10
 SINGLE_STILL_SECONDS = 5
 PHOTO_FLOOR_SECONDS = 3
 FPS = 30
+
+_RENDER_SETTINGS_RE = re.compile(r"(?:^|\n)\[render-settings\]\s*([^\n]*)", re.I)
+_RENDER_DEFAULTS = {
+    "preset": "auto",
+    "motion": "auto",
+    "transition": "auto",
+    "transition_seconds": "",
+    "duration_mode": "auto",
+    "duration_seconds": "3",
+    "intensity": "normal",
+    "pacing": "normal",
+    "fit": "smart_crop",
+    "beat_sync": "on",
+}
+_RENDER_PRESETS = {
+    "cinematic": {
+        "motion": "ken_burns",
+        "transition": "crossfade",
+        "transition_seconds": "0.6",
+        "intensity": "subtle",
+        "pacing": "relaxed",
+        "fit": "smart_crop",
+        "beat_sync": "on",
+    },
+    "elegant": {
+        "motion": "slow_zoom_in",
+        "transition": "dissolve",
+        "transition_seconds": "0.65",
+        "intensity": "subtle",
+        "pacing": "relaxed",
+        "fit": "smart_crop",
+        "beat_sync": "on",
+    },
+    "energetic": {
+        "motion": "ken_burns",
+        "transition": "push",
+        "transition_seconds": "0.3",
+        "intensity": "dramatic",
+        "pacing": "fast",
+        "fit": "cover",
+        "beat_sync": "on",
+    },
+    "documentary": {
+        "motion": "pan_right",
+        "transition": "crossfade",
+        "transition_seconds": "0.45",
+        "intensity": "subtle",
+        "pacing": "normal",
+        "fit": "smart_crop",
+        "beat_sync": "on",
+    },
+    "minimal": {
+        "motion": "static",
+        "transition": "crossfade",
+        "transition_seconds": "0.35",
+        "intensity": "subtle",
+        "pacing": "relaxed",
+        "fit": "contain",
+        "beat_sync": "off",
+    },
+}
+
+
+def render_settings_from_request(request: dict[str, Any] | None) -> dict[str, str]:
+    settings = dict(_RENDER_DEFAULTS)
+    notes = field_str(request or {}, "Production_Notes")
+    match = _RENDER_SETTINGS_RE.search(notes)
+    if not match:
+        return settings
+
+    parsed: dict[str, str] = {}
+    for part in str(match.group(1) or "").split(";"):
+        key, sep, value = part.partition("=")
+        key = key.strip().lower()
+        value = value.strip().lower()
+        if sep and key in settings and value:
+            parsed[key] = value
+
+    preset = parsed.get("preset", "auto")
+    if preset in _RENDER_PRESETS:
+        settings.update(_RENDER_PRESETS[preset])
+    settings.update(parsed)
+    return settings
+
+
+def _render_float(settings: dict[str, str], key: str, default: float = 0.0) -> float:
+    try:
+        return float(settings.get(key) or default)
+    except (TypeError, ValueError):
+        return default
+
+
+def _render_motion(settings: dict[str, str], index: int, *, story: bool, video: bool) -> str:
+    if video:
+        return "none"
+    motion = settings.get("motion", "auto")
+    if motion == "auto":
+        return "slowZoom" if story else "none"
+    if motion == "static":
+        return "none"
+    if motion == "slow_zoom_in":
+        return "slowZoom"
+    if motion == "slow_zoom_out":
+        return "slowZoomOut"
+    if motion == "pan_left":
+        return "panLeft"
+    if motion == "pan_right":
+        return "panRight"
+    if motion == "pan_up":
+        return "panUp"
+    if motion == "pan_down":
+        return "panDown"
+    if motion == "ken_burns":
+        return "kenBurnsLeft" if index % 2 == 0 else "kenBurnsRight"
+    return "slowZoom" if story else "none"
+
+
+def _render_fit(settings: dict[str, str], *, story: bool, video: bool) -> str | None:
+    if video:
+        return None
+    fit = settings.get("fit", "smart_crop")
+    if fit == "cover":
+        return "fill_crop"
+    if fit == "contain":
+        return "full_with_solid_background"
+    # Smart crop intentionally preserves the proven legacy route. Stories fill;
+    # other photo videos show the full prepared variant on a solid background.
+    return "fill_crop" if story else "full_with_solid_background"
+
+
+def _render_transition(settings: dict[str, str], index: int) -> dict[str, Any] | None:
+    transition = settings.get("transition", "auto")
+    if transition == "auto":
+        return None
+    mapping = {
+        "crossfade": "fade",
+        "dissolve": "dissolve",
+        "zoom": "zoom",
+        "blur_fade": "blurFade",
+        "dip_black": "dipBlack",
+        "none": "none",
+    }
+    if transition == "slide":
+        kind = "slideLeft" if index % 2 == 0 else "slideRight"
+    elif transition == "push":
+        kind = "pushLeft" if index % 2 == 0 else "pushRight"
+    else:
+        kind = mapping.get(transition, "fade")
+    result: dict[str, Any] = {"type": kind}
+    seconds = _render_float(settings, "transition_seconds", 0)
+    if seconds > 0:
+        result["durationFrames"] = max(1, round(seconds * FPS))
+    elif settings.get("pacing") in {"relaxed", "fast"}:
+        factor = 1.2 if settings.get("pacing") == "relaxed" else 0.75
+        result["durationFrames"] = max(1, round(12 * factor))
+    return result
 
 
 def is_native_photo(platform: str, output_type: str, mapping: str = "") -> bool:
@@ -269,6 +426,7 @@ def assign_clip_frames(
     video_indexes = [index for index, kind in enumerate(kinds) if kind == "video"]
     photo_indexes = [index for index, kind in enumerate(kinds) if kind != "video"]
     frames = [0] * len(clips)
+    render_settings = render_settings_from_request(request)
     native_video = []
     for index in video_indexes:
         source = clips[index].get("source") or {}
@@ -276,6 +434,14 @@ def assign_clip_frames(
         native_video.append(max(1, round((end - start) * FPS)))
         frames[index] = native_video[-1]
     video_total = sum(native_video)
+    if render_settings.get("duration_mode") == "fixed" and photo_indexes:
+        fixed_seconds = max(1.0, min(15.0, _render_float(render_settings, "duration_seconds", 3.0)))
+        fixed_frames = max(1, round(fixed_seconds * FPS))
+        for index in photo_indexes:
+            frames[index] = fixed_frames
+        total = sum(frames)
+        return frames, max(1, total)
+
     owner = duration_seconds(
         story=story,
         clip_count=len(clips),
@@ -293,7 +459,9 @@ def assign_clip_frames(
     elif owner_set:
         target = max(len(clips), round(float(stored) * FPS))
     else:
-        photo_seconds = PHOTO_FLOOR_SECONDS * max(1, len(photo_indexes)) if photo_indexes else 0
+        pacing = render_settings.get("pacing", "normal")
+        pace_factor = 1.2 if pacing == "relaxed" else (0.8 if pacing == "fast" else 1.0)
+        photo_seconds = PHOTO_FLOOR_SECONDS * pace_factor * max(1, len(photo_indexes)) if photo_indexes else 0
         target = video_total + max(len(photo_indexes), round(photo_seconds * FPS))
         if not video_indexes:
             target = max(len(clips), round(owner * FPS))
@@ -747,6 +915,7 @@ def source_package(
         for asset in masters
         if str(asset.get("caption") or "").strip()
     }
+    render_settings = render_settings_from_request(request)
     clips = []
     omitted = []
     has_video = False
@@ -769,7 +938,7 @@ def source_package(
             )
             or ""
         ).strip()
-        fit_mode = None if video else ("fill_crop" if story else "full_with_solid_background")
+        fit_mode = _render_fit(render_settings, story=story, video=video)
         if not url or not media_id.startswith("rec"):
             omitted.append(str(source.get("id") or source.get("name") or "unknown"))
             continue
@@ -811,6 +980,17 @@ def source_package(
         in_seconds = float(item["in_seconds"] or 0)
         out_seconds = in_seconds + (frames / fps) if video else item["out_seconds"]
         source_duration = float(item.get("source_duration_seconds") or 0) or max(out_seconds or 0, in_seconds)
+        motion_style = _render_motion(render_settings, index, story=story, video=video)
+        transition = _render_transition(render_settings, index)
+        render_directive = {
+            "preset": render_settings.get("preset", "auto"),
+            "motion": render_settings.get("motion", "auto"),
+            "transition": render_settings.get("transition", "auto"),
+            "intensity": render_settings.get("intensity", "normal"),
+            "pacing": render_settings.get("pacing", "normal"),
+            "fit": render_settings.get("fit", "smart_crop"),
+            "beatSync": render_settings.get("beat_sync", "on") != "off",
+        }
         built.append({
             "id": f"studio-source-{index + 1}",
             "order": int((item["source"] or {}).get("order") or index + 1),
@@ -822,7 +1002,11 @@ def source_package(
             "src": item["url"],
             "startFrame": start,
             "durationFrames": frames,
-            "motionStyle": "none" if video else ("slowZoom" if story else "none"),
+            "motionStyle": motion_style,
+            "motion": {"type": motion_style, "intensity": render_settings.get("intensity", "normal")},
+            "transition": transition,
+            "renderDirective": render_directive,
+            "beatSync": render_settings.get("beat_sync", "on") != "off",
             "fitMode": item.get("fit_mode"),
             "media_kind": item["media_kind"],
             "mediaKind": item["media_kind"],
@@ -872,6 +1056,10 @@ def source_package(
             "startFrame": clip["startFrame"],
             "durationFrames": clip["durationFrames"],
             "motionStyle": clip["motionStyle"],
+            "motion": clip.get("motion") or None,
+            "transition": clip.get("transition") or None,
+            "renderDirective": clip.get("renderDirective") or None,
+            "beatSync": clip.get("beatSync", True),
             "fitMode": clip.get("fitMode") or clip.get("fit_mode"),
             "mediaKind": clip.get("media_kind") or "photo",
             "media_kind": clip.get("media_kind") or "photo",
