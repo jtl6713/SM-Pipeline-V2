@@ -13,11 +13,13 @@ import {
   classifyIntakeResidue,
   classifyNativeCover,
   classifyNativePhotoReviewStrand,
+  classifyNativePhotoApproveIncomplete,
   classifyPreparingGap,
   classifyProduceJob,
   classifyPromotedNotRfr,
   classifyPublishDispatch,
   classifyPublishFailed,
+  classifyIgCarouselTooManyChildren,
   classifyTikTokAuthSignature,
   classifyRenderRow,
   deskFailedNeedsHeal,
@@ -454,7 +456,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.425-primary-ai-alert",
+          version: "0.10.428-ig-carousel-and-native-approve",
           studio_desk_inventory_v1: true,
           studio_desk_activity_v1: true,
           studio_tiktok_complete_v1: true,
@@ -1426,6 +1428,11 @@ export default {
         await studioHealFailedStatuses(env, { limit: 6 });
       } catch (error) {
         console.warn("studio failed-status heal failed", error);
+      }
+      try {
+        await studioHealIgCarouselTooManyChildren(env, { limit: 4 });
+      } catch (error) {
+        console.warn("studio IG carousel child-count heal failed", error);
       }
       try {
         await studioHealNativePhotoReviewStrands(env, { limit: 8 });
@@ -2547,8 +2554,10 @@ function studioPublishHandoffFields(record, options = {}) {
     fields.Publish_Status = armedPublish;
     fields.Image_Output_Selected = true;
     if (clipCount) {
-      fields.Image_Count = clipCount;
-      fields.IG_Carousel_Child_Count = clipCount;
+      // Instagram Graph carousel parent allows 2–10 children (#100 too many attachments).
+      const igCarouselCount = Math.max(1, Math.min(Number(clipCount) || 1, 10));
+      fields.Image_Count = igCarouselCount;
+      fields.IG_Carousel_Child_Count = igCarouselCount;
     }
   }
   if (platform === "Instagram" && (outputType === "Single Image" || mapping === "Instagram Feed Post") && outputType !== "Carousel" && mapping !== "Instagram Carousel") {
@@ -3257,6 +3266,7 @@ function mapOutput(record, job = null) {
     preview_kind: studioPreviewKind(record),
     output_url: f(record, "Output_URL"),
     platform_post_url: f(record, "Platform_Post_URL"),
+    platform_post_id: f(record, "Platform_Post_ID"),
     published_at: f(record, "Published_At"),
     insights_views: f(record, "Insights_Views"),
     insights_likes: f(record, "Insights_Likes"),
@@ -10794,6 +10804,38 @@ async function healStuckStudioRenders(env) {
   return pulses;
 }
 
+async function studioCompleteNativePhotoPublishArming(env, record, note = "Native photo approve-incomplete heal") {
+  const stamp = new Date().toISOString();
+  let current = record;
+  if (studioOutputIsNativePhoto(current)) {
+    await item4PulseLetterPython(env, { outputRecordId: current.id }).catch((error) => {
+      console.warn("native photo branding before incomplete-approve heal failed", current.id, error);
+    });
+    current = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, current.id).catch(() => current);
+  }
+  const prepared = await studioEnsureNativePublishSlides(env, current);
+  const scheduledIso = String(f(prepared, "Scheduled_Post_Date") || f(current, "Scheduled_Post_Date") || "").trim();
+  const existingNotes = String(f(prepared, "Review_Notes") || f(current, "Review_Notes") || "").trim();
+  const handoff = studioPublishHandoffFields(prepared, { scheduledPostDate: scheduledIso });
+  const fields = {
+    Review_Status: "Approved",
+    Output_Status: "Approved for Publishing",
+    Publish_Status: studioArmedPublishStatus(prepared, scheduledIso),
+    Publish_Method: "Automated",
+    Auto_Publish_Enabled: true,
+    Do_Not_Publish: false,
+    Review_Decision_At: stamp,
+    Review_Notes: [existingNotes, note, `Studio Pipeline completed native-photo approve arming at ${stamp}.`].filter(Boolean).join("\n\n"),
+    ...handoff,
+  };
+  // Prefer schedule-aware Publish_Status from handoff when present.
+  if (handoff.Publish_Status) fields.Publish_Status = handoff.Publish_Status;
+  return airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, prepared.id || current.id, {
+    method: "PATCH",
+    body: JSON.stringify({ fields, typecast: true }),
+  });
+}
+
 async function studioHealNativePhotoReviewStrands(env, options = {}) {
   const limit = Math.max(1, Math.min(12, Number(options.limit || 8)));
   const outputTable = env.AIRTABLE_OUTPUT_TABLE_ID;
@@ -10812,22 +10854,56 @@ async function studioHealNativePhotoReviewStrands(env, options = {}) {
     byContent.get(key).push(row);
   }
   const healed = [];
+  const stamp = new Date().toISOString();
   for (const row of mapped) {
     if (healed.length >= limit) break;
     const siblings = byContent.get(String(row.content_item_id || "").trim()) || [];
-    const incident = classifyNativePhotoReviewStrand(row, siblings);
-    if (!incident) continue;
+    const strand = classifyNativePhotoReviewStrand(row, siblings);
+    const incomplete = classifyNativePhotoApproveIncomplete(row);
+    if (!strand && !incomplete) continue;
+    const live = (rows || []).find((record) => record.id === row.id) || row;
     try {
-      await airtableFetch(env, outputTable, row.id, {
-        method: "PATCH",
-        body: JSON.stringify({ fields: { Output_Status: "Approved for Publishing" }, typecast: true }),
-      });
-      healed.push({ key: "NATIVE_PHOTO_REVIEW_STRAND", id: row.id, output_id: row.output_id || null, fingerprint: incident.fingerprint });
+      if (strand && String(row.output_status || "").trim() === "Ready for Review") {
+        await approveOutputRecordForPublishing(
+          env,
+          live,
+          "Native photo review-strand heal (full approve)",
+          stamp,
+          {},
+        );
+        healed.push({
+          key: "NATIVE_PHOTO_REVIEW_STRAND",
+          id: row.id,
+          output_id: row.output_id || null,
+          fingerprint: strand.fingerprint,
+          mode: "full_approve",
+        });
+        continue;
+      }
+      if (incomplete) {
+        await studioCompleteNativePhotoPublishArming(
+          env,
+          live,
+          "Native photo approve-incomplete heal (finish arming)",
+        );
+        healed.push({
+          key: "NATIVE_PHOTO_APPROVE_INCOMPLETE",
+          id: row.id,
+          output_id: row.output_id || null,
+          fingerprint: incomplete.fingerprint,
+          mode: "complete_arming",
+        });
+      }
     } catch (error) {
-      healed.push({ key: "NATIVE_PHOTO_REVIEW_STRAND", id: row.id, output_id: row.output_id || null, error: error instanceof Error ? error.message : String(error) });
+      healed.push({
+        key: strand ? "NATIVE_PHOTO_REVIEW_STRAND" : "NATIVE_PHOTO_APPROVE_INCOMPLETE",
+        id: row.id,
+        output_id: row.output_id || null,
+        error: error instanceof Error ? error.message : String(error),
+      });
     }
   }
-  if (healed.length) console.log("Studio native-photo review-strand heal", JSON.stringify({ count: healed.length, healed }));
+  if (healed.length) console.log("Studio native-photo review/approve heal", JSON.stringify({ count: healed.length, healed }));
   return healed;
 }
 
@@ -10938,6 +11014,79 @@ async function studioHealFailedStatuses(env, options = {}) {
   }
   if (pulses.length) {
     console.log("Studio failed-status heal", JSON.stringify({
+      count: pulses.length,
+      pulses: pulses.map((row) => ({ key: row.key, id: row.id, error: row.error || null })),
+    }));
+  }
+  return pulses;
+}
+
+async function studioHealIgCarouselTooManyChildren(env, options = {}) {
+  const limit = Math.max(1, Math.min(6, Number(options.limit || 4)));
+  const outputTable = env.AIRTABLE_OUTPUT_TABLE_ID;
+  const pulses = [];
+  const rows = await listRecords(env, outputTable, {
+    limit,
+    sortField: "Output_ID",
+    sortDirection: "desc",
+    filterFormula: 'AND({Test_Run_ID}=BLANK(),{Platform}="Instagram",{Published_At}=BLANK(),{Do_Not_Publish}=0,{IG_Carousel_Parent_Container_ID}="",OR({Studio_Output_Type}="Carousel",{Platform_Output_Type}="Instagram Carousel"),OR(FIND("too little or too many attachments",{IG_Carousel_Error_Message}&"")>0,AND({IG_Carousel_Child_Count}>10,{IG_Carousel_Status}="Children Ready")))',
+  }).catch(() => []);
+  for (const row of rows || []) {
+    const mapped = {
+      id: row.id,
+      platform: f(row, "Platform"),
+      studio_output_type: f(row, "Studio_Output_Type"),
+      platform_output_type: f(row, "Platform_Output_Type"),
+      ig_carousel_status: f(row, "IG_Carousel_Status"),
+      ig_carousel_error: f(row, "IG_Carousel_Error_Message"),
+      ig_carousel_error_stage: f(row, "IG_Carousel_Error_Stage"),
+      ig_carousel_child_count: f(row, "IG_Carousel_Child_Count"),
+      image_count: f(row, "Image_Count"),
+      published_at: f(row, "Published_At"),
+    };
+    if (!classifyIgCarouselTooManyChildren(mapped)) continue;
+    const prior = Number(f(row, "IG_Carousel_Child_Count") || f(row, "Image_Count") || 0) || 0;
+    const capped = Math.min(10, Math.max(2, prior > 10 ? 10 : prior || 10));
+    try {
+      await airtableFetch(env, outputTable, row.id, {
+        method: "PATCH",
+        body: JSON.stringify({
+          fields: {
+            IG_Carousel_Child_Count: capped,
+            Image_Count: capped,
+            IG_Carousel_Status: "Children Ready",
+            IG_Carousel_Error_Stage: "",
+            IG_Carousel_Error_Message: "",
+            IG_Carousel_Next_Retry_At: null,
+            Publish_Retry_Eligible: true,
+            Publish_Next_Retry_At: null,
+            Publish_Locked_By: "",
+            Publish_Locked_At: null,
+            Publish_Started_At: null,
+          },
+          typecast: true,
+        }),
+      });
+      const refreshed = await airtableFetch(env, outputTable, row.id).catch(() => row);
+      const payload = await studioPulseAp3c(env, refreshed);
+      pulses.push({
+        key: "IG_CAROUSEL_CLAMP_AP3C",
+        id: row.id,
+        prior_child_count: prior,
+        capped_child_count: capped,
+        ok: payload?.ok !== false,
+        payload,
+      });
+    } catch (error) {
+      pulses.push({
+        key: "IG_CAROUSEL_CLAMP_AP3C",
+        id: row.id,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+  if (pulses.length) {
+    console.log("Studio IG carousel child-count heal", JSON.stringify({
       count: pulses.length,
       pulses: pulses.map((row) => ({ key: row.key, id: row.id, error: row.error || null })),
     }));
@@ -27656,6 +27805,9 @@ async function pulseOnDemandRenderChain(env, options = {}) {
   try { pulses.push(...await studioHealFailedStatuses(env, { limit: 4 })); } catch (error) {
     pulses.push({ key: "STUDIO_FAILED_STATUS", error: error instanceof Error ? error.message : String(error) });
   }
+  try { pulses.push(...await studioHealIgCarouselTooManyChildren(env, { limit: 4 })); } catch (error) {
+    pulses.push({ key: "STUDIO_IG_CAROUSEL_CLAMP", error: error instanceof Error ? error.message : String(error) });
+  }
   try { pulses.push(...await resumeStaleStudioProductionJobs(env, options)); } catch (error) {
     pulses.push({ key: "STUDIO_PRODUCE", error: error instanceof Error ? error.message : String(error) });
   }
@@ -28379,6 +28531,9 @@ async function studioAttachFacebookNativeCover(env, record) {
   const last = { status: response.status, payload };
   if (response.ok && !payload?.error) {
       const published = /published/i.test(String(f(record, "Publish_Status") || "")) || Boolean(f(record, "Published_At"));
+      const postId = String(f(record, "Platform_Post_ID") || videoId || "").trim();
+      const storedPostUrl = String(f(record, "Platform_Post_URL") || "").trim();
+      const postUrl = storedPostUrl || (postId ? `https://www.facebook.com/reel/${encodeURIComponent(postId)}/` : "");
       const note = [String(f(record, "Studio_Publish_Dispatch_Note") || "").trim(), STUDIO_FB_COVER_ATTACHED_MARK]
         .filter(Boolean)
         .join("\n")
@@ -28397,6 +28552,10 @@ async function studioAttachFacebookNativeCover(env, record) {
             }).slice(0, 90000),
             Publish_Error_Stage: "",
             Publish_Error_Message: "",
+            // The cover-heal path may be the first code path to confirm the Reel is live.
+            // Always retain enough Facebook identity for Studio's generic Open post link.
+            ...(postId ? { Platform_Post_ID: postId } : {}),
+            ...(postUrl ? { Platform_Post_URL: postUrl } : {}),
             // Stale FBS2 staging errors must not keep painting Failed after a live Reel exists.
             FB_Slideshow_Error_Message: "",
             Publish_Asset_Error_Message: "",
@@ -28409,7 +28568,7 @@ async function studioAttachFacebookNativeCover(env, record) {
           },
         }),
       });
-    return { ok: true, attached: true, video_id: videoId, cover_url: coverUrl, status: response.status };
+    return { ok: true, attached: true, video_id: videoId, cover_url: coverUrl, post_url: postUrl || null, status: response.status };
   }
   const message = last.payload?.error?.message || `thumbnail attach ${last.status}`;
   if (!/published/i.test(String(f(record, "Publish_Status") || "")) && !f(record, "Published_At")) {
@@ -34992,7 +35151,11 @@ function mapDeskInventoryOutput(record, contentToRequest = new Map(), contentByI
     last_modified: f(record, "Last_Modified") || f(record, "Updated_At") || "1970-01-01T00:00:00Z",
     last_publish_attempt_at: f(record, "Last_Publish_Attempt_At"),
     scheduled_post_date: f(record, "Scheduled_Post_Date"),
-    auto_publish_enabled: f(record, "Auto_Publish_Enabled") !== false && f(record, "Auto_Publish_Enabled") !== 0,
+    auto_publish_enabled: Boolean(f(record, "Auto_Publish_Enabled")),
+    do_not_publish: Boolean(f(record, "Do_Not_Publish")),
+    carousel_slide_count: Array.isArray(f(record, "Carousel Slides")) ? f(record, "Carousel Slides").length : 0,
+    ig_carousel_status: f(record, "IG_Carousel_Status"),
+    fb_publish_status: f(record, "FB_Publish_Status"),
     dispatch_count: f(record, "Studio_Publish_Dispatch_Count"),
     dispatch_note: note,
     request_id: studioOutputProductionRequestId(record, contentToRequest)
@@ -35005,6 +35168,11 @@ function mapDeskInventoryOutput(record, contentToRequest = new Map(), contentByI
     cover_attached: note.includes("facebook-cover=attached"),
     publish_error: f(record, "Publish_Error_Message"),
     publish_error_stage: f(record, "Publish_Error_Stage"),
+    ig_carousel_status: f(record, "IG_Carousel_Status"),
+    ig_carousel_error: f(record, "IG_Carousel_Error_Message"),
+    ig_carousel_error_stage: f(record, "IG_Carousel_Error_Stage"),
+    ig_carousel_child_count: f(record, "IG_Carousel_Child_Count"),
+    image_count: f(record, "Image_Count"),
     tiktok_draft_status: f(record, "TikTok_Draft_Status"),
     youtube_error: f(record, "YouTube_Error_Message"),
     youtube_video_id: f(record, "YouTube_Video_ID"),
@@ -35232,6 +35400,7 @@ async function gatherStudioDeskInventory(env) {
   for (const record of approvedDispatch || []) {
     push(classifyPublishDispatch(mapOut(record), nowMs));
     push(classifyTikTokAuthSignature(mapOut(record)));
+    push(classifyIgCarouselTooManyChildren(mapOut(record)));
     push(classifyPublishFailed(mapOut(record), nowMs));
     push(classifyYoutubeCoverQuota(mapOut(record)));
   }
@@ -35242,14 +35411,29 @@ async function gatherStudioDeskInventory(env) {
       sortDirection: "desc",
       filterFormula: 'AND({Test_Run_ID}=BLANK(),OR({Render_Status}="Failed",{Publish_Status}="Failed",AND({Publish_Error_Message}!="",{Published_At}=BLANK())))',
     }).catch(() => []);
-    scanned("render_failed", "publish_failed_transient", "tiktok_auth_signature");
+    scanned("render_failed", "publish_failed_transient", "tiktok_auth_signature", "ig_carousel_too_many_children");
     for (const record of failedRows || []) {
       push(classifyRenderRow(mapOut(record), nowMs));
       push(classifyTikTokAuthSignature(mapOut(record)));
+      push(classifyIgCarouselTooManyChildren(mapOut(record)));
       push(classifyPublishFailed(mapOut(record), nowMs));
     }
   } catch (error) {
     console.warn("desk failed-status scan failed", error);
+  }
+  try {
+    const igCarouselOverRows = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
+      limit: 12,
+      sortField: "Output_ID",
+      sortDirection: "desc",
+      filterFormula: 'AND({Test_Run_ID}=BLANK(),{Platform}="Instagram",{Published_At}=BLANK(),OR({Studio_Output_Type}="Carousel",{Platform_Output_Type}="Instagram Carousel"),OR(FIND("too little or too many attachments",{IG_Carousel_Error_Message}&"")>0,AND({IG_Carousel_Child_Count}>10,{IG_Carousel_Status}="Children Ready")))',
+    }).catch(() => []);
+    scanned("ig_carousel_too_many_children");
+    for (const record of igCarouselOverRows || []) {
+      push(classifyIgCarouselTooManyChildren(mapOut(record)));
+    }
+  } catch (error) {
+    console.warn("desk IG carousel child-count scan failed", error);
   }
   scanned("native_cover_missing");
   for (const record of publishedCovers || []) {
@@ -35263,7 +35447,7 @@ async function gatherStudioDeskInventory(env) {
       sortDirection: "desc",
       filterFormula: 'AND({Test_Run_ID}=BLANK(),{Published_At}=BLANK(),OR({Output_Status}="Ready for Review",{Review_Status}="Review Sent",{Render_Status}="Rendered",{Render_Status}="Native Photo Route"))',
     }).catch(() => []);
-    scanned("rfr_locked_missing_deliverable", "native_photo_review_strand");
+    scanned("rfr_locked_missing_deliverable", "native_photo_review_strand", "native_photo_approve_incomplete");
     const mapped = (rfrLockedRows || []).map(mapOut);
     const byContent = new Map();
     for (const row of mapped) {
@@ -35284,9 +35468,24 @@ async function gatherStudioDeskInventory(env) {
         group_progress: sibs.length ? `${sibs.length - lockedCount}/${sibs.length}` : null,
       }));
       push(classifyNativePhotoReviewStrand(row, sibs));
+      push(classifyNativePhotoApproveIncomplete(row));
     }
   } catch (error) {
     console.warn("desk rfr locked missing deliverable scan failed", error);
+  }
+  try {
+    const unarmedNative = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
+      limit: 20,
+      sortField: "Output_ID",
+      sortDirection: "desc",
+      filterFormula: 'AND({Test_Run_ID}=BLANK(),{Published_At}=BLANK(),{Do_Not_Publish}=0,{Render_Status}="Native Photo Route",{Output_Status}="Approved for Publishing",OR({Review_Status}=BLANK(),{Review_Status}!="Approved",{Publish_Status}=BLANK(),{Auto_Publish_Enabled}=0))',
+    }).catch(() => []);
+    scanned("native_photo_approve_incomplete");
+    for (const record of unarmedNative || []) {
+      push(classifyNativePhotoApproveIncomplete(mapOut(record)));
+    }
+  } catch (error) {
+    console.warn("desk native-photo approve-incomplete scan failed", error);
   }
 
   try {

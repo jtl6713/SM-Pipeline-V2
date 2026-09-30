@@ -7,9 +7,19 @@ from typing import Any
 from airtable.client import AirtableClient
 from airtable.constants import PLATFORM_OUTPUTS_TABLE
 from apc.assets import child_ids, list_finished_children
-from apc.common import expected_child_count, preview, publish_caption, response_json, retry_at, unlock_fields, valid_record_id
+from apc.common import (
+    clamp_ig_graph_children,
+    expected_child_count,
+    preview,
+    publish_caption,
+    response_json,
+    retry_at,
+    unlock_fields,
+    valid_record_id,
+)
 from apc.constants import (
     ERROR_AP3C,
+    IG_GRAPH_MAX_CHILDREN,
     MAKE_AP3C_ID,
     MAKE_AP3C_NAME,
     PARENT_IN_PROGRESS,
@@ -75,8 +85,30 @@ def process_request(
     )
 
     children = list_finished_children(client, field_str(output, "Output_ID") or field(output, "Output_ID"))
+    requested_count = len(child_ids(children))
+    children, capped = clamp_ig_graph_children(children, IG_GRAPH_MAX_CHILDREN)
     ids = child_ids(children)
     expected = expected_child_count(output, len(ids))
+    if capped or expected > IG_GRAPH_MAX_CHILDREN:
+        # Graph rejects >10 attachments (#100). Keep cover/order-1 through slide 10.
+        expected = len(ids)
+        client.update_record(
+            PLATFORM_OUTPUTS_TABLE,
+            record_id,
+            {
+                "IG_Carousel_Child_Count": expected,
+                "Image_Count": expected,
+                "Output_Notes": (
+                    f"{field_str(output, 'Output_Notes')}\n\n"
+                    f"AP3C clamped Instagram carousel children from {requested_count} to {expected} "
+                    f"(Graph max {IG_GRAPH_MAX_CHILDREN}; keep cover as slide 1)."
+                ).strip(),
+            },
+            typecast=True,
+        )
+        result["children_capped"] = True
+        result["requested_child_count"] = requested_count
+        result["expected_child_count"] = expected
     if len(ids) != expected or len(ids) <= 1:
         client.update_record(
             PLATFORM_OUTPUTS_TABLE,

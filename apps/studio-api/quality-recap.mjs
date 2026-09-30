@@ -26,6 +26,10 @@ const COPY = {
     found: "A TikTok draft failed because the city auth Worker rejected the pipeline secret (HTTP 401).",
     action: "Aligned the auth Worker signature, then rearmed and republished the draft once.",
   },
+  ig_carousel_too_many_children: {
+    found: "An Instagram carousel had more than 10 slides, so Instagram refused to create the parent album.",
+    action: "Kept the cover as slide 1, trimmed to 10 slides, and retried the parent create.",
+  },
   publish_never_dispatch: {
     found: "An approved post is due and the send never started.",
     action: "Queued the send because the scheduled time is due.",
@@ -96,7 +100,11 @@ const COPY = {
   },
   native_photo_review_strand: {
     found: "A scheduled native-photo post was complete, but stayed Ready for Review after the same content package had already been approved.",
-    action: "Promoted the stranded output to Approved for Publishing without changing its assets or schedule.",
+    action: "Ran the full approve path so Review, Auto Publish, schedule status, and slides are armed.",
+  },
+  native_photo_approve_incomplete: {
+    found: "A photo post shows Approved for Publishing, but publish was never armed (no Review Approved / Ready to Schedule / slides).",
+    action: "Finished approve arming and created the carousel slides so the publisher can run.",
   },
   native_cover_missing: {
     found: "A Reel or Short published without the grid cover.",

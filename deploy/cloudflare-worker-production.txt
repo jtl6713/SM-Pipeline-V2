@@ -325,3 +325,12 @@ Deploy Studio API Worker production
 Reason: Normalize legacy Idea platform labels such as YouTube Shorts / Instagram Reels / Facebook Reels to canonical Production platforms before validation. Fixes Wabash Mural Sprint Production Request creation.
 Requested: 2026-09-29
 Source before deploy: 21ebad04cc480982079dbb8fc50e6b0dd62fd4ca
+
+Deploy Studio API Worker production
+Reason: Output 1235 IG carousel AP3C Graph #100 too many attachments — clamp children to 10 + Quality Agent signature ig_carousel_too_many_children (Worker 0.10.426-ig-carousel-max-children)
+Requested: 2026-09-30T04:00:00-05:00
+
+Deploy Studio API Worker production
+Reason: Output 1245 native-photo approve incomplete — full approve arming + Quality Agent signature native_photo_approve_incomplete (Worker 0.10.428-ig-carousel-and-native-approve)
+Requested: 2026-09-30T04:10:00-05:00
+

@@ -698,9 +698,40 @@ export function classifyTikTokAuthSignature(row) {
   }, row);
 }
 
+export function isIgCarouselTooManyChildren(row) {
+  const platform = String(row?.platform || "").trim();
+  if (platform !== "Instagram") return false;
+  const type = `${row?.studio_output_type || ""} ${row?.platform_output_type || ""}`;
+  if (!/carousel/i.test(type)) return false;
+  if (row?.published_at || String(row?.ig_carousel_status || "").trim() === "Published") return false;
+  const err = `${row?.ig_carousel_error || row?.publish_error || ""}`;
+  const stage = `${row?.ig_carousel_error_stage || row?.publish_error_stage || ""}`;
+  const count = Number(row?.ig_carousel_child_count || row?.image_count || 0) || 0;
+  if (/too little or too many attachments/i.test(err)) return true;
+  if (count > 10 && /AP3C/i.test(stage)) return true;
+  if (count > 10 && String(row?.ig_carousel_status || "").trim() === "Children Ready") return true;
+  return false;
+}
+
+export function classifyIgCarouselTooManyChildren(row) {
+  if (row?.published_at) return null;
+  if (!isIgCarouselTooManyChildren(row)) return null;
+  const recordId = String(row?.id || row?.record_id || "").trim();
+  const count = Number(row?.ig_carousel_child_count || row?.image_count || 0) || "unknown";
+  return withDeskIdentity({
+    kind: "ig_carousel_too_many_children",
+    class: "transient",
+    record_id: recordId || null,
+    fingerprint: fingerprint("ig_carousel_too_many_children", recordId, String(count)),
+    actor: "worker_heal",
+    diagnosis: "Instagram Graph carousel parent (AP3C) rejected the package: (#100) too little or too many attachments. Graph allows 2–10 children; this output has more than 10 FINISHED children (cover may be slide 1). Facebook planning already clamps Image_Count to 10; IG carousel stamp/AP3C must clamp too. Worker heal stamps IG_Carousel_Child_Count=Image_Count=10, clears the AP3C error, and re-pulses AP3C; AP3C keeps cover/order-1 and the next 9 child container IDs. Proven: Output 1235 / Millennium Park Fewer Crowds / recVphOmGqaxIYHSD (12 children).",
+  }, row);
+}
+
 export function classifyPublishFailed(row, nowMs = Date.now()) {
   if (row?.published_at) return null;
   if (classifyTikTokAuthSignature(row)) return null;
+  if (classifyIgCarouselTooManyChildren(row)) return null;
   const outputStatus = String(row?.output_status || "").trim();
   const publish = String(row?.publish_status || "").trim();
   if (outputStatus && !["Approved for Publishing", "Failed"].includes(outputStatus)) return null;
@@ -783,6 +814,7 @@ function publishDispatchDiagnosis(blocker, row) {
 
 export function classifyPublishDispatch(row, nowMs = Date.now()) {
   if (classifyPublishFailed(row, nowMs)) return null;
+  if (classifyIgCarouselTooManyChildren(row)) return null;
   const recordId = String(row?.id || row?.record_id || "").trim();
   const outputStatus = String(row?.output_status || "").trim();
   const platform = String(row?.platform || "").trim();
@@ -891,7 +923,47 @@ export function classifyNativePhotoReviewStrand(row, siblings = []) {
     fingerprint: fingerprint("native_photo_review_strand", outputId, "scheduled_peer_approved"),
     actor: "worker_heal",
     blocker: "scheduled_peer_approved",
-    diagnosis: "Native-photo output is complete and scheduled, but remained Ready for Review after a sibling for the same Content Item advanced to Approved for Publishing/Published. Promote this stranded output once; do not render or alter assets.",
+    diagnosis: "Native-photo output is complete and scheduled, but remained Ready for Review after a sibling for the same Content Item advanced to Approved for Publishing/Published. Run the full approve path (Review_Status, Auto_Publish_Enabled, Publish_Status, native slides/handoff); do not only flip Output_Status.",
+  }, row);
+}
+
+export function isNativePhotoApproveIncomplete(row) {
+  if (String(row?.test_run_id || "").trim()) return false;
+  if (String(row?.output_status || "").trim() !== "Approved for Publishing") return false;
+  if (row?.published_at || String(row?.publish_status || "").trim() === "Published") return false;
+  if (!/native photo route/i.test(String(row?.render_status || ""))) return false;
+  if (Boolean(row?.do_not_publish)) return false;
+  const review = String(row?.review_status || "").trim();
+  const publish = String(row?.publish_status || "").trim();
+  const publishArmed = ["Ready to Schedule", "Ready to Publish", "Publishing"].includes(publish);
+  const reviewOk = review === "Approved";
+  // Strand heal used to PATCH Output_Status only, leaving Review/Publish/Auto_Publish blank
+  // (Output 1245 Getty Center IG Carousel / reccuk3Nj4jOQX5c1).
+  if (!reviewOk || !publishArmed) return true;
+  const type = `${row?.studio_output_type || ""} ${row?.platform_output_type || ""}`;
+  if (/carousel|multi-image|photo set|multi-photo/i.test(type)) {
+    const slides = Number(row?.carousel_slide_count || 0) || 0;
+    const igStatus = String(row?.ig_carousel_status || "").trim();
+    const fbStatus = String(row?.fb_publish_status || "").trim();
+    const ttStatus = String(row?.tiktok_draft_status || "").trim();
+    if (/instagram/i.test(String(row?.platform || "")) && (!slides || !igStatus)) return true;
+    if (/facebook/i.test(String(row?.platform || "")) && (!slides || !fbStatus)) return true;
+    if (/tiktok/i.test(String(row?.platform || "")) && (!slides || !ttStatus)) return true;
+  }
+  return false;
+}
+
+export function classifyNativePhotoApproveIncomplete(row) {
+  if (!isNativePhotoApproveIncomplete(row)) return null;
+  const recordId = String(row?.id || row?.record_id || "").trim();
+  const outputId = String(row?.output_id || recordId || "").trim();
+  return withDeskIdentity({
+    kind: "native_photo_approve_incomplete",
+    class: "transient",
+    record_id: recordId || null,
+    fingerprint: fingerprint("native_photo_approve_incomplete", recordId || outputId, "unarmed"),
+    actor: "worker_heal",
+    diagnosis: "Native-photo output shows Approved for Publishing but publish was never armed (missing Review_Status=Approved and/or Publish_Status Ready to Schedule/Publish, and often zero Carousel Slides / blank IG_Carousel_Status). Cause: studioHealNativePhotoReviewStrands only flipped Output_Status. Complete approve via approveOutputRecordForPublishing / slide handoff. Proven: Output 1245 / Getty Center Sunset Poll / reccuk3Nj4jOQX5c1.",
   }, row);
 }
 
@@ -1007,10 +1079,13 @@ export const CLASSIFIER_KINDS = Object.freeze([
   "publish_never_dispatch",
   "publish_failed_transient",
   "tiktok_auth_signature",
+  "ig_carousel_too_many_children",
   "render_failed",
   "render_unfetchable_source",
   "render_private_drive_watermark",
   "native_cover_missing",
+  "native_photo_review_strand",
+  "native_photo_approve_incomplete",
   "rfr_locked_missing_deliverable",
   "health_down",
   "variant_preparing",

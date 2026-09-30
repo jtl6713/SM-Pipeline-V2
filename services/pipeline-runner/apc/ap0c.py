@@ -17,7 +17,15 @@ from apc.assets import (
     saved_public_url,
     source_image_url,
 )
-from apc.common import append_note, expected_child_count, preview, retry_at, unlock_fields, valid_record_id
+from apc.common import (
+    append_note,
+    clamp_ig_graph_children,
+    expected_child_count,
+    preview,
+    retry_at,
+    unlock_fields,
+    valid_record_id,
+)
 from apc.constants import (
     ASSET_FAILED,
     ASSET_PREPARING,
@@ -25,6 +33,7 @@ from apc.constants import (
     CHILD_NOT_CREATED,
     DEFAULT_R2_PREFIX,
     ERROR_AP0C,
+    IG_GRAPH_MAX_CHILDREN,
     MAKE_AP0C_ID,
     MAKE_AP0C_NAME,
     RETRY_MINUTES,
@@ -129,6 +138,19 @@ def process_request(
     if not slides:
         _fail_parent(client, output, "AP0C found no C9 final slides for this output.")
         return {"processed": True, "needs_assets": True, "ready": False, **result}
+    slides, capped = clamp_ig_graph_children(slides, IG_GRAPH_MAX_CHILDREN)
+    if capped:
+        client.update_record(
+            PLATFORM_OUTPUTS_TABLE,
+            record_id,
+            {"IG_Carousel_Child_Count": len(slides), "Image_Count": len(slides)},
+            typecast=True,
+        )
+        output.setdefault("fields", {})
+        output["fields"]["IG_Carousel_Child_Count"] = len(slides)
+        output["fields"]["Image_Count"] = len(slides)
+        result["children_capped"] = True
+        result["expected_child_count"] = len(slides)
 
     uploader = R2UploadClient()
     for slide in slides:
@@ -196,8 +218,9 @@ def process_request(
         )
 
     ready = list_ready_public_assets(client, field_str(output, "Output_ID") or field(output, "Output_ID"))
+    ready, _ = clamp_ig_graph_children(ready, IG_GRAPH_MAX_CHILDREN)
     ready_count = len(ready)
-    expected = expected_child_count(output, ready_count)
+    expected = min(expected_child_count(output, ready_count), IG_GRAPH_MAX_CHILDREN)
     if ready_count != expected or ready_count <= 1:
         _fail_parent(
             client,
