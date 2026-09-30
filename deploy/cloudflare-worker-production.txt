@@ -295,3 +295,9 @@ Deploy Studio API Worker production
 Reason: Ship Home actionable dashboard metrics matching Studio UI 0.6.428 and Quality Agent native-photo strand recovery
 Source: current main
 Requested: 2026-09-29
+
+
+Deploy Studio API Worker production
+Reason: Correct Home Ideas Not Yet in Production count to match Ideas tab Current ideas exactly
+Source merge: 17cce3b3210769582d2e180c1aa36349a2a8a5b2
+Requested: 2026-09-29
