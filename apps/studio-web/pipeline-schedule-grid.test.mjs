@@ -147,6 +147,7 @@ test("platform colors are visually distinct and the ready tray stays visible whi
   assert.match(css, /pipeline-schedule-entry\[data-platform="facebook"\][^\n]*border-color: #1877f2/);
   assert.match(css, /pipeline-schedule-entry\[data-platform="tiktok"\][^\n]*border-color: #111827/);
   assert.match(css, /pipeline-schedule-entry\[data-platform="youtube"\][^\n]*border-color: #ff0000/);
+  assert.match(css, /pipeline-schedule-legend input\[type="checkbox"\][^\n]*appearance: auto !important/);
   assert.match(css, /pipeline-schedule-collapsed \.pipeline-schedule-grid-scroll,[\s\S]{0,120}display: none/);
   assert.doesNotMatch(css, /pipeline-schedule-collapsed #pipelineScheduleGridBody \{ display: none; \}/);
 });

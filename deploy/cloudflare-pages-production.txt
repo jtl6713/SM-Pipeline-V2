@@ -252,3 +252,10 @@ Deploy Studio Pages production
 Reason: Make the Ready to schedule tray visible while the calendar is collapsed and strengthen IG/FB/TT/YT color coding across bubbles and legend
 UI: 0.6.432-calendar-platform-colors
 Requested: 2026-09-29
+
+
+Deploy Studio Pages production
+Reason: Make IG/FB/TT/YT platform filter checkboxes explicitly visible and ship the calendar platform-filter UI
+UI: 0.6.434-calendar-filter-checkboxes
+Source before deploy: 4ed70d2c62ed7d4b80d4ff24702bb3e59f973d11
+Requested: 2026-09-29
