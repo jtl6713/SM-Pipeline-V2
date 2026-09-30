@@ -2405,6 +2405,12 @@ body{
   backdrop-filter:blur(16px);
   -webkit-backdrop-filter:blur(16px);
 }
+.studio-hub-hello-head{
+  display:flex;
+  align-items:baseline;
+  justify-content:space-between;
+  gap:10px;
+}
 .studio-hub-hello h1{
   margin:0;
   font-size:1.7rem;
@@ -2453,11 +2459,13 @@ body{
 }
 .studio-hub-live{
   margin:0;
-  font-size:.72rem;
+  font-size:.68rem;
   letter-spacing:.04em;
   text-transform:uppercase;
   font-weight:700;
   color:#7b8798;
+  white-space:nowrap;
+  flex:0 0 auto;
 }
 .studio-hub-hello .secondary-button{
   align-self:flex-start;

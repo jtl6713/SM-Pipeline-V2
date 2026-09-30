@@ -252,7 +252,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.440-home-scheduled-live";
+  const BUILD_ID = "item4-0.6.441-home-scheduled-platforms";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -1732,8 +1732,10 @@
       hint.textContent = "";
       return;
     }
-    if (dashboardInflight) {
-      hint.textContent = "Refreshing…";
+    // Keep the last "Updated …" text during background polls so Refreshing
+    // never looks like a missing fourth platform under the scheduled list.
+    if (dashboardInflight && !dashboardLastRefreshAt) {
+      hint.textContent = "Loading…";
       return;
     }
     if (!dashboardLastRefreshAt) {
@@ -1802,14 +1804,14 @@
       const platform = String(record?.platform || "").trim() || "Other";
       counts.set(platform, (counts.get(platform) || 0) + 1);
     }
+    // Always show the four Studio platforms so YouTube never disappears into
+    // a live-hint slot when its scheduled count is currently zero.
     const preferred = ["Facebook", "Instagram", "TikTok", "YouTube"];
-    const rows = [];
-    for (const platform of preferred) {
-      if (counts.has(platform)) {
-        rows.push({ platform, count: counts.get(platform) });
-        counts.delete(platform);
-      }
-    }
+    const rows = preferred.map((platform) => ({
+      platform,
+      count: counts.get(platform) || 0,
+    }));
+    for (const platform of preferred) counts.delete(platform);
     for (const platform of [...counts.keys()].sort((a, b) => a.localeCompare(b))) {
       rows.push({ platform, count: counts.get(platform) });
     }
@@ -1820,10 +1822,6 @@
     const host = $("studioHubScheduled");
     if (!host) return;
     const rows = scheduledContentByPlatform(outputs);
-    if (!rows.length) {
-      host.innerHTML = `<li class="studio-hub-scheduled-empty">No scheduled posts right now.</li>`;
-      return;
-    }
     host.innerHTML = rows.map((row) => (
       `<li><span class="studio-hub-scheduled-platform">${escapeHtml(row.platform)}</span>`
       + `<span class="studio-hub-scheduled-count">${row.count}</span></li>`
