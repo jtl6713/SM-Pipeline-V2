@@ -1,16 +1,10 @@
 {
-  "correlation_id": "REPAIR-CONTENT-241-FANOUT-20260927",
+  "correlation_id": "IDEA-LIST-LIVE-DIAG-20260929",
   "requests": [
     {
-      "name": "repair-content-241-promotion-fanout",
-      "method": "POST",
-      "path": "/api/production-requests/recVAxLIuTsHHuDZK/promote",
-      "body": {}
-    },
-    {
-      "name": "verify-production-request-outputs",
+      "name": "list-current-ideas",
       "method": "GET",
-      "path": "/api/production-requests/recVAxLIuTsHHuDZK/outputs"
+      "path": "/api/ideas?limit=30"
     }
   ]
 }
