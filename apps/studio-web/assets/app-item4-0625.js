@@ -252,7 +252,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.444-idea-find-images-visible";
+  const BUILD_ID = "item4-0.6.445-youtube-scheduled-count";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -1788,7 +1788,16 @@
 
   function pipelineRecordIsScheduled(record) {
     if (!record || record.do_not_publish) return false;
-    if (creativeIsPublished(record)) return false;
+    const platform = String(record?.platform || "").trim().toLowerCase();
+    if (creativeIsPublished(record)) {
+      // YouTube uploads immediately, then YouTube holds the video until Studio's
+      // scheduled publish time. Keep those already-uploaded future videos in the
+      // homepage Scheduled count instead of dropping them as "Published".
+      if (platform !== "youtube") return false;
+      const scheduled = studioEffectiveScheduleIso(record);
+      const scheduledAt = Date.parse(scheduled);
+      return Boolean(scheduled) && Number.isFinite(scheduledAt) && scheduledAt > Date.now();
+    }
     const state = String(record?.studio_state || "").trim();
     if (state === "Scheduled") return true;
     const publish = String(record?.publish_status || "").trim();
