@@ -24,6 +24,7 @@ import {
   classifyNativeCover,
   classifyRfrLockedMissingDeliverable,
   classifyNativePhotoReviewStrand,
+  classifyNativePhotoApproveIncomplete,
   classifyTesterNightly,
   classifyTesterCatalogAssert,
   originFromNotes,
@@ -765,4 +766,43 @@ test("native photo review strand does not bypass missing deliverables or unsched
     scheduled_post_date: "2026-10-05T23:00:00.000Z",
     thumbnail_url: "",
   }, [base, sibling]), null);
+});
+
+test("native photo approve incomplete catches Output 1245 half-armed AFP", () => {
+  const ig1245 = classifyNativePhotoApproveIncomplete({
+    id: "reccuk3Nj4jOQX5c1",
+    output_id: 1245,
+    output_status: "Approved for Publishing",
+    render_status: "Native Photo Route",
+    platform: "Instagram",
+    studio_output_type: "Carousel",
+    platform_output_type: "Instagram Carousel",
+    review_status: "",
+    publish_status: "",
+    auto_publish_enabled: false,
+    carousel_slide_count: 0,
+    ig_carousel_status: "",
+    scheduled_post_date: "2026-10-01T23:00:00.000Z",
+    thumbnail_url: "https://media.chicagoshining.com/studio/previews/thumbnails/cover.png",
+  });
+  assert.equal(ig1245.kind, "native_photo_approve_incomplete");
+  assert.equal(ig1245.class, "transient");
+  assert.equal(ig1245.actor, "worker_heal");
+  assert.equal(ig1245.fingerprint, fingerprint("native_photo_approve_incomplete", "reccuk3Nj4jOQX5c1", "unarmed"));
+  assert.equal(classifyNativePhotoApproveIncomplete({
+    id: "recArmed",
+    output_id: 1246,
+    output_status: "Approved for Publishing",
+    render_status: "Native Photo Route",
+    platform: "Facebook",
+    studio_output_type: "Multi-Image Post",
+    platform_output_type: "Facebook Photo Set",
+    review_status: "Approved",
+    publish_status: "Ready to Schedule",
+    auto_publish_enabled: true,
+    carousel_slide_count: 5,
+    fb_publish_status: "Ready for Assets",
+  }), null);
+  assert.ok(CLASSIFIER_KINDS.includes("native_photo_approve_incomplete"));
+  assert.ok(CLASSIFIER_KINDS.includes("native_photo_review_strand"));
 });

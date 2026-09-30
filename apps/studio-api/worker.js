@@ -13,6 +13,7 @@ import {
   classifyIntakeResidue,
   classifyNativeCover,
   classifyNativePhotoReviewStrand,
+  classifyNativePhotoApproveIncomplete,
   classifyPreparingGap,
   classifyProduceJob,
   classifyPromotedNotRfr,
@@ -455,7 +456,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.426-ig-carousel-max-children",
+          version: "0.10.428-ig-carousel-and-native-approve",
           studio_desk_inventory_v1: true,
           studio_desk_activity_v1: true,
           studio_tiktok_complete_v1: true,
@@ -10802,6 +10803,38 @@ async function healStuckStudioRenders(env) {
   return pulses;
 }
 
+async function studioCompleteNativePhotoPublishArming(env, record, note = "Native photo approve-incomplete heal") {
+  const stamp = new Date().toISOString();
+  let current = record;
+  if (studioOutputIsNativePhoto(current)) {
+    await item4PulseLetterPython(env, { outputRecordId: current.id }).catch((error) => {
+      console.warn("native photo branding before incomplete-approve heal failed", current.id, error);
+    });
+    current = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, current.id).catch(() => current);
+  }
+  const prepared = await studioEnsureNativePublishSlides(env, current);
+  const scheduledIso = String(f(prepared, "Scheduled_Post_Date") || f(current, "Scheduled_Post_Date") || "").trim();
+  const existingNotes = String(f(prepared, "Review_Notes") || f(current, "Review_Notes") || "").trim();
+  const handoff = studioPublishHandoffFields(prepared, { scheduledPostDate: scheduledIso });
+  const fields = {
+    Review_Status: "Approved",
+    Output_Status: "Approved for Publishing",
+    Publish_Status: studioArmedPublishStatus(prepared, scheduledIso),
+    Publish_Method: "Automated",
+    Auto_Publish_Enabled: true,
+    Do_Not_Publish: false,
+    Review_Decision_At: stamp,
+    Review_Notes: [existingNotes, note, `Studio Pipeline completed native-photo approve arming at ${stamp}.`].filter(Boolean).join("\n\n"),
+    ...handoff,
+  };
+  // Prefer schedule-aware Publish_Status from handoff when present.
+  if (handoff.Publish_Status) fields.Publish_Status = handoff.Publish_Status;
+  return airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, prepared.id || current.id, {
+    method: "PATCH",
+    body: JSON.stringify({ fields, typecast: true }),
+  });
+}
+
 async function studioHealNativePhotoReviewStrands(env, options = {}) {
   const limit = Math.max(1, Math.min(12, Number(options.limit || 8)));
   const outputTable = env.AIRTABLE_OUTPUT_TABLE_ID;
@@ -10820,22 +10853,56 @@ async function studioHealNativePhotoReviewStrands(env, options = {}) {
     byContent.get(key).push(row);
   }
   const healed = [];
+  const stamp = new Date().toISOString();
   for (const row of mapped) {
     if (healed.length >= limit) break;
     const siblings = byContent.get(String(row.content_item_id || "").trim()) || [];
-    const incident = classifyNativePhotoReviewStrand(row, siblings);
-    if (!incident) continue;
+    const strand = classifyNativePhotoReviewStrand(row, siblings);
+    const incomplete = classifyNativePhotoApproveIncomplete(row);
+    if (!strand && !incomplete) continue;
+    const live = (rows || []).find((record) => record.id === row.id) || row;
     try {
-      await airtableFetch(env, outputTable, row.id, {
-        method: "PATCH",
-        body: JSON.stringify({ fields: { Output_Status: "Approved for Publishing" }, typecast: true }),
-      });
-      healed.push({ key: "NATIVE_PHOTO_REVIEW_STRAND", id: row.id, output_id: row.output_id || null, fingerprint: incident.fingerprint });
+      if (strand && String(row.output_status || "").trim() === "Ready for Review") {
+        await approveOutputRecordForPublishing(
+          env,
+          live,
+          "Native photo review-strand heal (full approve)",
+          stamp,
+          {},
+        );
+        healed.push({
+          key: "NATIVE_PHOTO_REVIEW_STRAND",
+          id: row.id,
+          output_id: row.output_id || null,
+          fingerprint: strand.fingerprint,
+          mode: "full_approve",
+        });
+        continue;
+      }
+      if (incomplete) {
+        await studioCompleteNativePhotoPublishArming(
+          env,
+          live,
+          "Native photo approve-incomplete heal (finish arming)",
+        );
+        healed.push({
+          key: "NATIVE_PHOTO_APPROVE_INCOMPLETE",
+          id: row.id,
+          output_id: row.output_id || null,
+          fingerprint: incomplete.fingerprint,
+          mode: "complete_arming",
+        });
+      }
     } catch (error) {
-      healed.push({ key: "NATIVE_PHOTO_REVIEW_STRAND", id: row.id, output_id: row.output_id || null, error: error instanceof Error ? error.message : String(error) });
+      healed.push({
+        key: strand ? "NATIVE_PHOTO_REVIEW_STRAND" : "NATIVE_PHOTO_APPROVE_INCOMPLETE",
+        id: row.id,
+        output_id: row.output_id || null,
+        error: error instanceof Error ? error.message : String(error),
+      });
     }
   }
-  if (healed.length) console.log("Studio native-photo review-strand heal", JSON.stringify({ count: healed.length, healed }));
+  if (healed.length) console.log("Studio native-photo review/approve heal", JSON.stringify({ count: healed.length, healed }));
   return healed;
 }
 
@@ -35076,7 +35143,11 @@ function mapDeskInventoryOutput(record, contentToRequest = new Map(), contentByI
     last_modified: f(record, "Last_Modified") || f(record, "Updated_At") || "1970-01-01T00:00:00Z",
     last_publish_attempt_at: f(record, "Last_Publish_Attempt_At"),
     scheduled_post_date: f(record, "Scheduled_Post_Date"),
-    auto_publish_enabled: f(record, "Auto_Publish_Enabled") !== false && f(record, "Auto_Publish_Enabled") !== 0,
+    auto_publish_enabled: Boolean(f(record, "Auto_Publish_Enabled")),
+    do_not_publish: Boolean(f(record, "Do_Not_Publish")),
+    carousel_slide_count: Array.isArray(f(record, "Carousel Slides")) ? f(record, "Carousel Slides").length : 0,
+    ig_carousel_status: f(record, "IG_Carousel_Status"),
+    fb_publish_status: f(record, "FB_Publish_Status"),
     dispatch_count: f(record, "Studio_Publish_Dispatch_Count"),
     dispatch_note: note,
     request_id: studioOutputProductionRequestId(record, contentToRequest)
@@ -35368,7 +35439,7 @@ async function gatherStudioDeskInventory(env) {
       sortDirection: "desc",
       filterFormula: 'AND({Test_Run_ID}=BLANK(),{Published_At}=BLANK(),OR({Output_Status}="Ready for Review",{Review_Status}="Review Sent",{Render_Status}="Rendered",{Render_Status}="Native Photo Route"))',
     }).catch(() => []);
-    scanned("rfr_locked_missing_deliverable", "native_photo_review_strand");
+    scanned("rfr_locked_missing_deliverable", "native_photo_review_strand", "native_photo_approve_incomplete");
     const mapped = (rfrLockedRows || []).map(mapOut);
     const byContent = new Map();
     for (const row of mapped) {
@@ -35389,9 +35460,24 @@ async function gatherStudioDeskInventory(env) {
         group_progress: sibs.length ? `${sibs.length - lockedCount}/${sibs.length}` : null,
       }));
       push(classifyNativePhotoReviewStrand(row, sibs));
+      push(classifyNativePhotoApproveIncomplete(row));
     }
   } catch (error) {
     console.warn("desk rfr locked missing deliverable scan failed", error);
+  }
+  try {
+    const unarmedNative = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
+      limit: 20,
+      sortField: "Output_ID",
+      sortDirection: "desc",
+      filterFormula: 'AND({Test_Run_ID}=BLANK(),{Published_At}=BLANK(),{Do_Not_Publish}=0,{Render_Status}="Native Photo Route",{Output_Status}="Approved for Publishing",OR({Review_Status}=BLANK(),{Review_Status}!="Approved",{Publish_Status}=BLANK(),{Auto_Publish_Enabled}=0))',
+    }).catch(() => []);
+    scanned("native_photo_approve_incomplete");
+    for (const record of unarmedNative || []) {
+      push(classifyNativePhotoApproveIncomplete(mapOut(record)));
+    }
+  } catch (error) {
+    console.warn("desk native-photo approve-incomplete scan failed", error);
   }
 
   try {

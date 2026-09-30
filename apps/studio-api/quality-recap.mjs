@@ -100,7 +100,11 @@ const COPY = {
   },
   native_photo_review_strand: {
     found: "A scheduled native-photo post was complete, but stayed Ready for Review after the same content package had already been approved.",
-    action: "Promoted the stranded output to Approved for Publishing without changing its assets or schedule.",
+    action: "Ran the full approve path so Review, Auto Publish, schedule status, and slides are armed.",
+  },
+  native_photo_approve_incomplete: {
+    found: "A photo post shows Approved for Publishing, but publish was never armed (no Review Approved / Ready to Schedule / slides).",
+    action: "Finished approve arming and created the carousel slides so the publisher can run.",
   },
   native_cover_missing: {
     found: "A Reel or Short published without the grid cover.",

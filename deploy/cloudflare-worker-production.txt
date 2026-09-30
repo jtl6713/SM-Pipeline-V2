@@ -330,3 +330,7 @@ Deploy Studio API Worker production
 Reason: Output 1235 IG carousel AP3C Graph #100 too many attachments — clamp children to 10 + Quality Agent signature ig_carousel_too_many_children (Worker 0.10.426-ig-carousel-max-children)
 Requested: 2026-09-30T04:00:00-05:00
 
+Deploy Studio API Worker production
+Reason: Output 1245 native-photo approve incomplete — full approve arming + Quality Agent signature native_photo_approve_incomplete (Worker 0.10.428-ig-carousel-and-native-approve)
+Requested: 2026-09-30T04:10:00-05:00
+

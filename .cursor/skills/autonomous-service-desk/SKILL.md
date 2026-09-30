@@ -85,6 +85,14 @@ Kind `ig_carousel_too_many_children`, class `transient`, actor `worker_heal`, fi
 
 Auto-correct: Worker `studioHealIgCarouselTooManyChildren` stamps `IG_Carousel_Child_Count=Image_Count=10`, clears the AP3C error, and pulses AP3C. AP3C / AP0C / AP1C clamp to the first 10 slides by Current Order (keep cover as slide 1) before `create_parent`. Re-pulsing AP3C without the clamp storms the same #100. Same fingerprint after a successful clamp + AP3C → `code_bug`.
 
+## Watch: Native-photo Approved for Publishing but publish never armed
+
+Native Photo Route output with `Output_Status=Approved for Publishing` but blank `Review_Status`, blank `Publish_Status`, unchecked `Auto_Publish_Enabled`, and (for carousels) zero `Carousel Slides` / blank `IG_Carousel_Status` is **not** ready to publish. Worker `studioHealNativePhotoReviewStrands` used to PATCH only `Output_Status`, skipping `approveOutputRecordForPublishing` (Review Approved, Auto Publish, Ready to Schedule, `studioEnsureNativePublishSlides`, IG/FB/TT handoff). Sibling outputs on the same Content Item may already be fully armed.
+
+Kind `native_photo_approve_incomplete`, class `transient`, actor `worker_heal`, fingerprint `native_photo_approve_incomplete:<output_rec>:unarmed`. Strand still at Ready for Review remains `native_photo_review_strand` — heal must call full approve, not Output_Status alone.
+
+Auto-correct: Worker `studioCompleteNativePhotoPublishArming` / full `approveOutputRecordForPublishing`. Proven: Output **1245** Getty Center Sunset Poll IG Carousel / `reccuk3Nj4jOQX5c1` (siblings 1246–1248 armed). Same fingerprint after arming → `code_bug`.
+
 ## Watch: Escalated — needs investigation
 
 Parent `Studio_Production_Job_JSON.step=escalated` after five Worker resumes. Pipeline paints **Escalated — needs investigation** on every sibling output. Worker `resumeStaleStudioProductionJobs` used to skip this terminal step, so the row parked forever even when the block was recoverable (empty `Studio_Master_Assets_JSON` while library stills exist; outputs created after a "No Platform Outputs" block; transient HTTP that exhausted the budget). Kind `produce_escalated`, class `transient` when `deskRecoverableEscalatedError` matches, actor `worker_heal`. Clip-count mismatch stays `produce_clip_mismatch` / `code_bug`. Skip `Request_Status=Cancelled`.
