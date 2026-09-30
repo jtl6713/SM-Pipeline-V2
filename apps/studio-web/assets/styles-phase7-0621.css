@@ -3271,3 +3271,98 @@ body.platform-calendar-open { overflow: hidden; }
     grid-template-columns:1fr;
   }
 }
+
+
+/* Per-photo rendering overrides + AI motion (0.6.447) */
+.production-render-frame-section{
+  margin-top:18px;
+  padding-top:16px;
+  border-top:1px solid var(--line, #d9dee8);
+}
+.production-render-frame-section .request-section-heading{
+  align-items:flex-start;
+  margin-bottom:12px;
+}
+.production-render-frame-section h4{
+  margin:0 0 4px;
+}
+.production-render-frame-section p{
+  margin:0;
+}
+.production-render-frame-list{
+  display:grid;
+  gap:10px;
+}
+.production-render-frame-card{
+  display:grid;
+  grid-template-columns:72px minmax(160px,1fr) repeat(3,minmax(140px,1fr));
+  gap:12px;
+  align-items:end;
+  padding:12px;
+  border:1px solid var(--line, #d9dee8);
+  border-radius:12px;
+  background:var(--surface, #fff);
+}
+.production-render-frame-preview{
+  width:72px;
+  height:72px;
+  border-radius:9px;
+  overflow:hidden;
+  background:var(--surface-soft, #f7f8fb);
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  font-size:11px;
+  text-align:center;
+}
+.production-render-frame-preview img{
+  width:100%;
+  height:100%;
+  object-fit:cover;
+  display:block;
+}
+.production-render-frame-meta{
+  min-width:0;
+  align-self:center;
+}
+.production-render-frame-meta strong,
+.production-render-frame-meta small{
+  display:block;
+}
+.production-render-frame-meta strong{
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+}
+.production-render-frame-meta small{
+  margin-top:3px;
+  opacity:.68;
+}
+.production-render-frame-card .form-field{
+  margin:0;
+}
+.production-render-frame-card select{
+  width:100%;
+}
+@media (max-width:1100px){
+  .production-render-frame-card{
+    grid-template-columns:64px minmax(150px,1fr) repeat(2,minmax(140px,1fr));
+  }
+  .production-render-frame-card .production-render-frame-fit{
+    grid-column:3 / 5;
+  }
+}
+@media (max-width:720px){
+  .production-render-frame-card{
+    grid-template-columns:56px minmax(0,1fr);
+    align-items:start;
+  }
+  .production-render-frame-preview{
+    width:56px;
+    height:56px;
+  }
+  .production-render-frame-card .form-field,
+  .production-render-frame-card .production-render-frame-fit{
+    grid-column:1 / -1;
+  }
+}
