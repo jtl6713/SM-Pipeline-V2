@@ -326,3 +326,9 @@ Reason: Count future-scheduled YouTube uploads on Home Scheduled content and ali
 UI: 0.6.445-youtube-scheduled-count
 Source before deploy: 682685c0bb161dc9cc67edc5d3f66c190e570014
 Requested: 2026-09-30
+
+Deploy Studio Pages production
+Reason: Ship per-photo Rendering overrides and AI-directed motion controls from PR #467
+UI: 0.6.447-per-photo-ai-motion
+Source merge: 152c11d8ad116aafc95b97c0b2b142e20293debb
+Requested: 2026-09-30T13:54:00-05:00
