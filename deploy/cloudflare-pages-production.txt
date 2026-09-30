@@ -246,3 +246,9 @@ Deploy Studio Pages production
 Reason: Default Pipeline schedules now start empty; Use default schedules explicitly fills/clears intelligent unapproved-output suggestions; unsaved outputs remain in Ready to schedule tray
 UI: 0.6.431-calendar-ready-tray
 Requested: 2026-09-29
+
+
+Deploy Studio Pages production
+Reason: Make the Ready to schedule tray visible while the calendar is collapsed and strengthen IG/FB/TT/YT color coding across bubbles and legend
+UI: 0.6.432-calendar-platform-colors
+Requested: 2026-09-29
