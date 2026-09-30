@@ -9,7 +9,7 @@
  <link rel="preconnect" href="https://fonts.googleapis.com">
  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@1,600;1,700&family=Inter:wght@400;500;600;700;800&family=Oswald:wght@500&display=swap">
- <link rel="stylesheet" href="/assets/styles-phase7-0621.css?v=0.6.426-output-selection-authority">
+ <link rel="stylesheet" href="/assets/styles-phase7-0621.css?v=0.6.430-calendar-drag-drop">
  <link rel="stylesheet" href="/assets/insights-0622.css?v=0.6.381-insights-padding">
  <link rel="stylesheet" href="/assets/clean-enterprise.css?v=0.6.375-clean-enterprise">
  <link rel="stylesheet" href="/assets/ai-api-footer.css?v=0.6.427-primary-ai-alert">
@@ -910,8 +910,9 @@
  <div class="panel-heading pipeline-schedule-overview-heading">
  <div>
  <span class="eyebrow">Rolling 7-day view</span>
- <h2>Scheduled publishing by hour</h2>
+ <h2>Drag-and-drop publishing calendar</h2>
  <p id="pipelineScheduleGridSummary">Loading the next seven days…</p>
+ <p class="subtle">Drag an output bubble into a 30-minute slot. Hover or focus a bubble to see its full Platform Output name and ID. You can also click a bubble, then click a slot.</p>
  </div>
  <div class="pipeline-schedule-overview-actions">
  <div class="pipeline-schedule-legend" aria-label="Platform abbreviations">
@@ -922,6 +923,7 @@
  </div>
  <div id="pipelineScheduleGridBody">
  <div id="pipelineScheduleGrid" class="pipeline-schedule-grid-wrap"><div class="empty">Loading schedule…</div></div>
+ <p class="form-message" id="pipelineScheduleGridMessage" aria-live="polite"></p>
  </div>
  </section>
 
@@ -1997,7 +1999,7 @@
  <div class="studio-footer-meta">
  <span id="aiApiFooter" aria-live="polite"><strong>AI API:</strong> loading…</span>
  <span id="apiStatus" class="topbar-status">Connecting…</span>
- <span id="uiBuildLabel">UI build 0.6.427</span>
+ <span id="uiBuildLabel">UI build 0.6.430</span>
  <span id="workerBuildLabel">Worker …</span> </div>
  </footer>
 
@@ -2156,9 +2158,9 @@
 
  <script src="/assets/config-0621.js?v=0.6.344-idea-mixed-media"></script>
  <script src="/assets/ez-plan.js?v=0.6.376-recommend-carousel-slides"></script>
- <script src="/assets/pipeline-schedule-grid-0622.js?v=0.6.361-schedule-collapsed"></script>
+ <script src="/assets/pipeline-schedule-grid-0622.js?v=0.6.430-calendar-drag-drop"></script>
  <script src="/assets/platform-schedule-calendar-0924.js?v=0.6.380-branch-reconcile"></script>
- <script src="/assets/app-item4-0625.js?v=0.6.429-photo-match-timeout-recovery"></script>
+ <script src="/assets/app-item4-0625.js?v=0.6.430-calendar-drag-drop"></script>
  <script src="/assets/insights-0622.js?v=0.6.365-first-party-analytics-reconciled"></script>
  <script src="/assets/ai-api-footer.js?v=0.6.427-primary-ai-alert"></script>
  <script src="/assets/sticky-footer-scroll.js?v=0.6.378-sticky-footer-scroll"></script>
