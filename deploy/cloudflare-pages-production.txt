@@ -286,3 +286,9 @@ Deploy Studio Pages production
 Reason: Home metric cards use green/yellow/red count tones and refresh every 5s
 UI: 0.6.438-home-card-tones
 Requested: 2026-09-30
+
+
+Deploy Studio Pages production
+Reason: Home metric cards use wall-clock 5s live poll that cannot stack or stall
+UI: 0.6.439-home-card-live-poll
+Requested: 2026-09-30
