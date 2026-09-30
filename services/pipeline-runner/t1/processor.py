@@ -101,12 +101,8 @@ def _skip_fields(reason: str) -> dict[str, Any]:
 
 
 def _beat_sync_disabled(output: dict[str, Any]) -> bool:
-    clips = clip_list(output)
-    return bool(clips) and all(
-        not bool(clip.get("beatSync", True))
-        for clip in clips
-        if isinstance(clip, dict)
-    )
+    clips = [clip for clip in clip_list(output) if isinstance(clip, dict)]
+    return bool(clips) and all(not bool(clip.get("beatSync", True)) for clip in clips)
 
 
 def _music_drive_id(client: AirtableClient, output: dict[str, Any]) -> str:
