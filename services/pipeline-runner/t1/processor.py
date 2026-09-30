@@ -100,6 +100,11 @@ def _skip_fields(reason: str) -> dict[str, Any]:
     }
 
 
+def _beat_sync_disabled(output: dict[str, Any]) -> bool:
+    clips = [clip for clip in clip_list(output) if isinstance(clip, dict)]
+    return bool(clips) and all(not bool(clip.get("beatSync", True)) for clip in clips)
+
+
 def _music_drive_id(client: AirtableClient, output: dict[str, Any]) -> str:
     for name in ("Selected_Music_Media_Asset_ID", "Preferred_Music_Media_Asset_ID"):
         asset_id = field_str(output, name)
@@ -303,6 +308,12 @@ def process_one(
         )
         return {"processed": True, "reused_timeline": True, **preview}
     clips = clip_list(output)
+    if _beat_sync_disabled(output):
+        reason = "beat_sync_disabled"
+        if dry_run:
+            return {"processed": False, "dry_run": True, "skip": reason, **preview}
+        client.update_record(PLATFORM_OUTPUTS_TABLE, output["id"], _skip_fields(reason), typecast=True)
+        return {"processed": True, "skipped": reason, **preview}
     if not music_is_enabled(output):
         reason = "no_music"
         if dry_run:

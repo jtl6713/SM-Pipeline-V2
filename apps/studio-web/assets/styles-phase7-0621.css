@@ -3176,3 +3176,98 @@ body.platform-calendar-open { overflow: hidden; }
 .pipeline-cover-download-row{display:block;margin-top:3px}
 
 .pipeline-post-link-row{display:block;margin-top:3px}
+
+
+/* Production workspace tabs + rendering controls (0.6.446) */
+.production-workspace-tabs{
+  display:flex;
+  gap:8px;
+  flex-wrap:wrap;
+  align-items:center;
+  margin:0 0 18px;
+  padding:8px;
+  border:1px solid var(--line, #d9dee8);
+  border-radius:14px;
+  background:var(--surface-soft, #f7f8fb);
+  position:sticky;
+  top:8px;
+  z-index:12;
+}
+.production-workspace-tab{
+  appearance:none;
+  border:1px solid transparent;
+  border-radius:10px;
+  padding:10px 14px;
+  background:transparent;
+  color:inherit;
+  font:inherit;
+  font-weight:700;
+  cursor:pointer;
+}
+.production-workspace-tab:hover{
+  background:rgba(15,23,42,.06);
+}
+.production-workspace-tab.active,
+.production-workspace-tab[aria-selected="true"]{
+  background:var(--surface, #fff);
+  border-color:var(--line, #d9dee8);
+  box-shadow:0 1px 4px rgba(15,23,42,.09);
+}
+.production-workspace-tab:focus-visible{
+  outline:3px solid rgba(37,99,235,.24);
+  outline-offset:2px;
+}
+[data-production-workspace-panel][hidden]{
+  display:none !important;
+}
+.production-render-settings{
+  min-height:220px;
+}
+.production-render-grid{
+  display:grid;
+  grid-template-columns:repeat(3,minmax(180px,1fr));
+  gap:14px;
+  align-items:end;
+}
+.production-render-toggle{
+  display:flex;
+  align-items:flex-start;
+  gap:10px;
+  min-height:44px;
+  padding:12px 14px;
+  border:1px solid var(--line, #d9dee8);
+  border-radius:10px;
+  background:var(--surface-soft, #f7f8fb);
+  cursor:pointer;
+}
+.production-render-toggle input{
+  margin-top:3px;
+}
+.production-render-toggle span{
+  display:flex;
+  flex-direction:column;
+  gap:3px;
+}
+.production-render-toggle small{
+  opacity:.72;
+  line-height:1.3;
+}
+@media (max-width:900px){
+  .production-workspace-tabs{
+    position:static;
+    flex-wrap:nowrap;
+    overflow-x:auto;
+    scrollbar-width:thin;
+  }
+  .production-workspace-tab{
+    white-space:nowrap;
+  }
+  .production-render-grid{
+    grid-template-columns:repeat(2,minmax(160px,1fr));
+  }
+}
+@media (max-width:620px){
+  .production-render-grid{
+    grid-template-columns:1fr;
+  }
+}
