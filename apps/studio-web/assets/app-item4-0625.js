@@ -252,7 +252,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.442-home-refresh-inflight";
+  const BUILD_ID = "item4-0.6.443-idea-find-images-now";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -2361,7 +2361,7 @@
         const result = await setIdeaPhotoManagePause(id, "pause");
         if (result?.paused && activeIdea?.id === id) {
           setManageMessage(
-            "Automatic photo listening is paused while Manage Idea is open. Remove or uncheck photos without them being added back. Close Manage Idea to resume listening; opening Production stops listening permanently.",
+            "Automatic photo listening is paused while Manage Idea is open so your removals stay authoritative. Use Find images now for an immediate one-time scan. Close Manage Idea to resume automatic listening; opening Production stops listening permanently.",
             ""
           );
         }
@@ -2664,7 +2664,7 @@
       const min = Number(idea?.carousel_slide_count_min || 0);
       const max = Number(idea?.carousel_slide_count_max || 0);
       $("promoteIdeaButton").textContent = "Listening for photos";
-      setManageMessage(`Listening in the Studio media library. ${high} / ${min || "?"} high-confidence matches so far. Studio will use up to ${max || "?"} photos, then you can edit the selected assets and set production rules.`, "");
+      setManageMessage(`Listening in the Studio media library. ${high} / ${min || "?"} high-confidence matches so far. Automatic matching runs about every 30 minutes; use Find images now for an immediate scan. Studio will use up to ${max || "?"} photos, then you can edit the selected assets and set production rules.`, "");
     } else if (String(idea?.photo_wait_status || "") === "Ready") {
       $("promoteIdeaButton").textContent = "Photos ready";
       const count = Array.isArray(idea?.matched_media_asset_links) ? idea.matched_media_asset_links.length : (idea?.photo_match?.selected?.length || 0);
@@ -2982,7 +2982,7 @@
     if (!activeIdea?.id) return;
     const button = $("matchIdeaPhotosButton");
     button.disabled = true;
-    button.textContent = "Matching…";
+    button.textContent = "Finding…";
     try {
       const result = await api(`/api/ideas/${encodeURIComponent(activeIdea.id)}/match-photos`, {
         method: "POST",
@@ -3024,7 +3024,7 @@
         setManageMessage(error.message || "Could not match photos.", "error-text");
       }
     } finally {
-      button.textContent = "Match photos now";
+      button.textContent = "Find images now";
       if (activeIdea && String(activeIdea.photo_wait_status || "") === "Waiting") button.disabled = false;
     }
   });
@@ -12039,8 +12039,11 @@
       ? `<button type="button" class="manage-button promote-row-button" data-idea-id="${escapeHtml(r.id)}" data-idea-action="promote">Promote</button>`
       : "";
     const listeningForPhotos = String(r?.photo_wait_status || "").trim() === "Waiting";
+    const findImages = listeningForPhotos
+      ? `<button type="button" class="manage-button find-images-row-button" data-idea-find-images="${escapeHtml(r.id)}">Find images now</button>`
+      : "";
     const title = `${value(r.title)}${listeningForPhotos ? ' <span class="subtle">(Listening for photos)</span>' : ""}`;
-    return `<tr class="${r.is_on_hold ? "idea-row-held" : ""}"><td><div class="title-cell">${title}</div><div class="subtle">${value(r.summary, "")}${r.created_at ? `${r.summary ? " · " : ""}Created ${dateValue(r.created_at)}` : ""}</div></td><td>${badge(ideaStatusLabel(r))}</td><td>${value(r.content_type)}</td><td>${join(r.platforms)}</td><td>${ideaStructureLabel(r)}</td><td><div class="subtle">${escapeHtml(ideaProductionLabel(r))}</div></td><td><div class="idea-row-actions">${promote}<button type="button" class="manage-button" data-idea-id="${escapeHtml(r.id)}">Manage</button></div></td></tr>`;
+    return `<tr class="${r.is_on_hold ? "idea-row-held" : ""}"><td><div class="title-cell">${title}</div><div class="subtle">${value(r.summary, "")}${r.created_at ? `${r.summary ? " · " : ""}Created ${dateValue(r.created_at)}` : ""}</div></td><td>${badge(ideaStatusLabel(r))}</td><td>${value(r.content_type)}</td><td>${join(r.platforms)}</td><td>${ideaStructureLabel(r)}</td><td><div class="subtle">${escapeHtml(ideaProductionLabel(r))}</div></td><td><div class="idea-row-actions">${promote}<div class="idea-row-action-stack"><button type="button" class="manage-button" data-idea-id="${escapeHtml(r.id)}">Manage</button>${findImages}</div></div></td></tr>`;
   }
 
   function partitionIdeaRecords(records) {
@@ -12113,6 +12116,33 @@
     });
 
     const byId = new Map([...sortedActive, ...sortedArchived].map((record) => [record.id, record]));
+    target.querySelectorAll("[data-idea-find-images]").forEach((button) => {
+      button.addEventListener("click", async (event) => {
+        event.stopPropagation();
+        const idea = byId.get(button.dataset.ideaFindImages);
+        if (!idea?.id) return;
+        button.disabled = true;
+        button.textContent = "Finding…";
+        try {
+          const result = await api(`/api/ideas/${encodeURIComponent(idea.id)}/match-photos`, {
+            method: "POST",
+            body: JSON.stringify({ force: true }),
+            timeoutMs: 120000,
+          });
+          if (result?.record && activeIdea?.id === idea.id) updateIdeaDrawer(result.record);
+          await Promise.all([loadIdeas(), loadDashboard(), loadProductionRequests()]);
+        } catch (error) {
+          console.warn("Find images now failed", error);
+          if (isTimeoutError(error)) {
+            await sleepMs(1500);
+            await Promise.all([loadIdeas(), loadDashboard(), loadProductionRequests()]).catch(() => {});
+          } else {
+            button.disabled = false;
+            button.textContent = "Try again";
+          }
+        }
+      });
+    });
     target.querySelectorAll("[data-idea-id]").forEach((button) => {
       button.addEventListener("click", () => {
         const idea = byId.get(button.dataset.ideaId);
