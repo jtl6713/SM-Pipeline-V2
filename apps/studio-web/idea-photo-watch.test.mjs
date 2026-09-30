@@ -140,3 +140,9 @@ test("Entering Production closes Manage Idea without resuming automatic photo li
   assert.match(app, /async function closeIdeaDrawer\(\{ save = true, resumePhotoListening = true \} = \{\}\)/);
   assert.match(app, /stopIdeaPhotoManagePause\(\{ resume: resumePhotoListening \}\)/);
 });
+
+
+test("Find images now is immediately visible beside the listening control", () => {
+  assert.match(html, /id="watchIdeaPhotosButton"[\s\S]*?id="matchIdeaPhotosButton"[^>]*>Find images now</);
+  assert.match(app, /Automatic matching runs every 5 minutes/);
+});

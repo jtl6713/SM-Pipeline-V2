@@ -252,7 +252,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.443-idea-find-images-now";
+  const BUILD_ID = "item4-0.6.444-idea-find-images-visible";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -2664,7 +2664,7 @@
       const min = Number(idea?.carousel_slide_count_min || 0);
       const max = Number(idea?.carousel_slide_count_max || 0);
       $("promoteIdeaButton").textContent = "Listening for photos";
-      setManageMessage(`Listening in the Studio media library. ${high} / ${min || "?"} high-confidence matches so far. Automatic matching runs about every 30 minutes; use Find images now for an immediate scan. Studio will use up to ${max || "?"} photos, then you can edit the selected assets and set production rules.`, "");
+      setManageMessage(`Listening in the Studio media library. ${high} / ${min || "?"} high-confidence matches so far. Automatic matching runs every 5 minutes; use Find images now for an immediate scan. Studio will use up to ${max || "?"} photos, then you can edit the selected assets and set production rules.`, "");
     } else if (String(idea?.photo_wait_status || "") === "Ready") {
       $("promoteIdeaButton").textContent = "Photos ready";
       const count = Array.isArray(idea?.matched_media_asset_links) ? idea.matched_media_asset_links.length : (idea?.photo_match?.selected?.length || 0);

@@ -315,3 +315,8 @@ Deploy Studio Pages production
 Reason: Add Find images now under Manage for photo-listening ideas
 UI: 0.6.443-idea-find-images-now
 Requested: 2026-09-30
+
+Deploy Studio Pages production
+Reason: Make Find images now immediately visible beside Listen for photos in Manage Idea; correct copy to 5-minute automatic matching; strengthen no-cache headers after custom-domain purge auth failures
+UI: 0.6.444-idea-find-images-visible
+Requested: 2026-09-30
