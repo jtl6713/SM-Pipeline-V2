@@ -141,7 +141,10 @@ test("Home metric cards use count tones and poll every few seconds", () => {
   assert.match(app, /function ensureDashboardPoll\(/);
   assert.match(app, /Promise\.resolve\(tick\)\.finally\(scheduleDashboardPoll\)/);
   assert.match(app, /const tick = dashboardInflight \? Promise\.resolve\(\) : loadDashboard\(true\)/);
-  assert.match(app, /api\("\/api\/outputs\?limit=250", \{ timeoutMs: 20000, retries: 2 \}/);
+  assert.match(app, /if \(!force && dashboardInflight && dashboardInflightKey === key\)/);
+  assert.match(app, /dashboardInflight = run;/);
+  assert.doesNotMatch(app, /dashboardInflight = run\.finally/);
+  assert.match(app, /api\(`\/api\/outputs\?limit=250&_=\$\{stamp\}`, \{ timeoutMs: 20000, retries: 2 \}/);
   assert.match(app, /showStudioPage\("outputs", \{ pipelineFilter: nextFilter \}\)/);
   assert.match(app, /pipelineOutputs = dashboardCache\.outputs\.slice\(\)/);
   assert.doesNotMatch(app, /await api\("\/api\/dashboard"/);
@@ -149,7 +152,6 @@ test("Home metric cards use count tones and poll every few seconds", () => {
   assert.match(app, /function renderScheduledContentOverview\(/);
   assert.match(app, /const preferred = \["Facebook", "Instagram", "TikTok", "YouTube"\]/);
   assert.match(app, /count: counts\.get\(platform\) \|\| 0/);
-  assert.match(app, /dashboardInflight && !dashboardLastRefreshAt/);
   assert.match(html, /<h1>Scheduled content<\/h1>/);
   assert.match(html, /id="studioHubScheduled"/);
   assert.match(html, /id="studioHubLive"/);
@@ -166,7 +168,25 @@ test("Home metric cards use count tones and poll every few seconds", () => {
   const build = app.match(/BUILD_ID = "item4-([^"]+)"/)?.[1];
   assert.ok(build);
   assert.match(html, new RegExp(`app-item4-0625\\.js\\?v=${build.replace(/[.*+?^${}()|[\\]\\^]/g, "\\$&")}`));
-  assert.match(html, /styles-phase7-0621\.css\?v=0\.6\.441-home-scheduled-platforms/);
+  assert.match(html, /styles-phase7-0621\.css\?v=0\.6\.442-home-refresh-inflight/);
+});
+
+test("Home refresh clears inflight instead of wrapping the fetch promise", async () => {
+  let dashboardInflight = null;
+  const run = Promise.resolve("fresh");
+  dashboardInflight = run;
+  await run.finally(() => {
+    if (dashboardInflight === run) dashboardInflight = null;
+  });
+  assert.equal(dashboardInflight, null);
+
+  let leaked = null;
+  const first = Promise.resolve("stale");
+  leaked = first.finally(() => {
+    if (leaked === first) leaked = null;
+  });
+  await leaked;
+  assert.notEqual(leaked, null);
 });
 
 
