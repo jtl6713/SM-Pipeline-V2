@@ -3881,8 +3881,10 @@
   }
 
   function collectProductionFrameOverridesFromUi() {
+    const cards = Array.from(document.querySelectorAll("[data-render-frame-asset]"));
+    if (!cards.length) return productionRenderFrameOverrides || {};
     const next = {};
-    document.querySelectorAll("[data-render-frame-asset]").forEach((card) => {
+    cards.forEach((card) => {
       const assetId = String(card.dataset.renderFrameAsset || "").trim();
       if (!assetId) return;
       const value = {};
