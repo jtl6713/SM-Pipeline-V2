@@ -38,13 +38,10 @@ test("Photo listening stays in Ideas until enough matches and then surfaces in P
 test("already-listening ideas are matched on every five-minute Worker tick", () => {
   const scheduledStart = worker.indexOf("async scheduled(event, env, ctx)");
   const scheduledBody = worker.slice(scheduledStart, worker.indexOf("class HttpError", scheduledStart));
-  const autoStart = scheduledBody.indexOf("await autoListenOpenPhotoIdeas");
-  const matchStart = scheduledBody.indexOf("await runWaitingIdeaPhotoMatches");
-  assert.ok(autoStart >= 0);
-  assert.ok(matchStart > autoStart);
-  const between = scheduledBody.slice(autoStart, matchStart);
-  assert.match(between, /cadence\.heavy/);
-  assert.match(scheduledBody, /runWaitingIdeaPhotoMatches\(env, \{ limit: 12 \}\)/);
+  assert.match(
+    scheduledBody,
+    /if \(cadence\.heavy\) \{[\s\S]{0,700}?autoListenOpenPhotoIdeas[\s\S]{0,500}?\n\s*\}[\s\S]{0,250}?Existing listeners react[\s\S]{0,350}?runWaitingIdeaPhotoMatches\(env, \{ limit: 12 \}\)/
+  );
   assert.match(worker, /five-minute Worker tick/);
 });
 
