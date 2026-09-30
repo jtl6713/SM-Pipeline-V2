@@ -334,3 +334,8 @@ Deploy Studio API Worker production
 Reason: Output 1245 native-photo approve incomplete — full approve arming + Quality Agent signature native_photo_approve_incomplete (Worker 0.10.428-ig-carousel-and-native-approve)
 Requested: 2026-09-30T04:10:00-05:00
 
+
+Deploy Studio API Worker production
+Reason: Allow explicit Find images now to bypass temporary Manage Idea photo-listening pause
+Worker: 0.10.429-idea-find-images-now
+Requested: 2026-09-30

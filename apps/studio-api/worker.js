@@ -456,7 +456,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.428-ig-carousel-and-native-approve",
+          version: "0.10.429-idea-find-images-now",
           studio_desk_inventory_v1: true,
           studio_desk_activity_v1: true,
           studio_tiktok_complete_v1: true,
@@ -20778,7 +20778,9 @@ async function evaluateAndMaybeAttachWaitingIdeaPhotos(env, idea, { authorizatio
   // entering Production writes a permanent Not Needed/ez-photo-wait=off lock.
   idea = await airtableFetch(env, env.AIRTABLE_IDEA_TABLE_ID, idea.id).catch(() => idea);
   const waitStatusNow = String(f(idea, "Studio_Photo_Wait_Status") || "").trim();
-  if (ideaManagePhotoPauseActive(f(idea, "Production_Config_Notes"))) {
+  // Manage Idea pauses background matching so deleted/unselected photos stay authoritative.
+  // An explicit Find images now request is user-directed and may bypass only this temporary pause.
+  if (!force && ideaManagePhotoPauseActive(f(idea, "Production_Config_Notes"))) {
     return { action: "paused", idea, production_request: productionRequest || null, skipped: true };
   }
   if (waitStatusNow === "Not Needed") {
@@ -20818,7 +20820,7 @@ async function evaluateAndMaybeAttachWaitingIdeaPhotos(env, idea, { authorizatio
   // Re-check after ranking because the operator may have opened Manage Idea or
   // entered Production while the library scan was running.
   idea = await airtableFetch(env, env.AIRTABLE_IDEA_TABLE_ID, idea.id).catch(() => idea);
-  if (ideaManagePhotoPauseActive(f(idea, "Production_Config_Notes"))) {
+  if (!force && ideaManagePhotoPauseActive(f(idea, "Production_Config_Notes"))) {
     return { ...decision, action: "paused", idea, production_request: requestRecord, skipped: true };
   }
   if (String(f(idea, "Studio_Photo_Wait_Status") || "").trim() === "Not Needed") {

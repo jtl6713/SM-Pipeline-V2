@@ -310,3 +310,8 @@ Deploy Studio Pages production
 Reason: Home poll and Refresh were no-ops because dashboardInflight never cleared after the first fetch
 UI: 0.6.442-home-refresh-inflight
 Requested: 2026-09-30
+
+Deploy Studio Pages production
+Reason: Add Find images now under Manage for photo-listening ideas
+UI: 0.6.443-idea-find-images-now
+Requested: 2026-09-30
