@@ -228,3 +228,10 @@ Reason: Ship Home actionable counts and filtered Pipeline links
 UI: 0.6.428-home-action-counts
 Source merge: 961acd14c36d88d5f92a99788995a1bed6dfe2d5
 Requested: 2026-09-29
+
+
+Deploy Studio Pages production
+Reason: Fix Manage Idea photo matching signal timeout and preserve active listening
+UI: 0.6.429-photo-match-timeout-recovery
+Source merge: 944aa21699281c19bc4c0f3cd9242dea39124f45
+Requested: 2026-09-29
