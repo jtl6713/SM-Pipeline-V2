@@ -35,8 +35,20 @@
     return key ? key.slice(0, 2).toUpperCase() : "??";
   }
 
-  function cellKey(date) {
-    return `${dayKey(date)}-${pad(date.getHours())}`;
+  function slotDate(day, slotIndex) {
+    const date = day instanceof Date ? new Date(day.getTime()) : new Date(day);
+    date.setHours(0, Number(slotIndex || 0) * 30, 0, 0);
+    return date;
+  }
+
+  function slotKey(value) {
+    const date = value instanceof Date ? value : new Date(value);
+    const minutes = date.getMinutes() < 30 ? 0 : 30;
+    return `${dayKey(date)}-${pad(date.getHours())}-${pad(minutes)}`;
+  }
+
+  function cellKey(value) {
+    return slotKey(value);
   }
 
   function aggregate(records, windowValue) {
@@ -49,12 +61,13 @@
       const when = new Date(raw);
       const stamp = when.getTime();
       if (!raw || !Number.isFinite(stamp) || stamp < startMs || stamp >= endMs) continue;
-      const key = cellKey(when);
+      const key = slotKey(when);
       const platform = String(record?.platform || "Other").trim() || "Other";
       const current = cells.get(key) || { total: 0, platforms: {}, records: [] };
       current.total += 1;
       current.platforms[platform] = (current.platforms[platform] || 0) + 1;
       current.records.push(record);
+      current.records.sort((left, right) => Date.parse(left.scheduled_post_date || "") - Date.parse(right.scheduled_post_date || ""));
       cells.set(key, current);
     }
     return cells;
@@ -64,6 +77,8 @@
     dayKey,
     sevenDayWindow,
     platformCode,
+    slotDate,
+    slotKey,
     cellKey,
     aggregate,
   };
