@@ -64,11 +64,28 @@ test("Manage Idea pauses automatic photo listening and close resumes it", () => 
   assert.match(app, /setInterval\(pulse, 5 \* 60 \* 1000\)/);
 });
 
-test("Entering Production permanently disables photo listening without rematching deleted photos", () => {
+test("Entering Production opens before selected-photo hydration and permanently stops listening", () => {
   assert.match(worker, /lockIdeaPhotoListeningForProduction/);
   assert.match(worker, /Studio_Photo_Wait_Status: "Not Needed"/);
+  assert.match(worker, /queueIdeaProductionAfterOpen/);
+  assert.match(worker, /ctx\.waitUntil\(task\)/);
+  assert.match(worker, /background_handoff: true/);
+  assert.match(worker, /hydrateIdeaProductionAfterOpen/);
   assert.match(worker, /withProductionPhotoWaitManual\(requestNotes\)/);
-  assert.match(worker, /Transfer the exact set the operator sees in Manage Idea once/);
+  assert.match(worker, /replaceWaitAssets: true/);
+  assert.match(worker, /Transfer the exact set the operator sees in Manage Idea/);
+
+  const lockStart = worker.indexOf("async function lockIdeaPhotoListeningForProduction");
+  const lockEnd = worker.indexOf("function ideaSelectedPhotoIds", lockStart);
+  const lockBody = worker.slice(lockStart, lockEnd);
+  assert.doesNotMatch(lockBody, /applyLibraryAssetsToProductionRequest/);
+
+  const openStart = worker.indexOf("async function getOrCreateProductionRequestForIdea");
+  const openEnd = worker.indexOf("async function createProductionRequestFromBody", openStart);
+  const openBody = worker.slice(openStart, openEnd);
+  assert.doesNotMatch(openBody, /await maybeHealDraftNarrationVoice/);
+  assert.doesNotMatch(openBody, /await applyLibraryAssetsToProductionRequest/);
+  assert.match(openBody, /queueIdeaProductionAfterOpen/);
   assert.doesNotMatch(worker, /photo-wait rehydrate on open failed/);
 });
 

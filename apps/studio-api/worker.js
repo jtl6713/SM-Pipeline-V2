@@ -1057,14 +1057,14 @@ export default {
       if (isIdeaProductionRequestRoute) {
         assertWriteRequest(request, env);
         requirePermission(authorization, "production_configure");
-        return getOrCreateProductionRequestForIdea(request, env, url, authorization);
+        return getOrCreateProductionRequestForIdea(request, env, url, authorization, ctx);
       }
 
       if (isProductionRequestCollectionRoute) {
         if (request.method === "POST") {
           assertWriteRequest(request, env);
           requirePermission(authorization, "production_configure");
-          return createProductionRequestFromBody(request, env, authorization, url);
+          return createProductionRequestFromBody(request, env, authorization, url, ctx);
         }
         // Item 4 opens by loading the Production Request collection before a
         // specific request/status route is necessarily selected. Trigger the Make
@@ -1214,7 +1214,7 @@ export default {
           requirePermission(authorization, "production_configure");
           return updateProductionRequest(request, env, url, authorization);
         }
-        const response = await getProductionRequest(request, env, url, authorization);
+        const response = await getProductionRequest(request, env, url, authorization, ctx);
         cadenceScheduleSync(ctx, env);
         return response;
       }
@@ -13069,7 +13069,7 @@ async function createDraftForIdea(env, idea, authorization, input = null, { pref
   });
 }
 
-async function getOrCreateProductionRequestForIdea(request, env, url, authorization) {
+async function getOrCreateProductionRequestForIdea(request, env, url, authorization, ctx = null) {
   const ideaRecordId = ideaRecordIdFromPath(url);
   const idea = await loadAuthorizedIdea(env, ideaRecordId, authorization);
   if (promotionCompleted(idea)) {
@@ -13083,17 +13083,31 @@ async function getOrCreateProductionRequestForIdea(request, env, url, authorizat
   try { preferredProfileId = requestedProfileId(url, await request.clone().json().catch(() => ({}))); } catch { preferredProfileId = requestedProfileId(url); }
   const existing = await existingDraftForIdea(env, ideaRecordId, authorization);
   if (existing) {
+    // Open Production must stay lightweight. Only stop future photo-listener writes
+    // on the critical path; watermarking / exact selected-photo transfer / voice heal
+    // continue idempotently in waitUntil after the draft has already been returned.
     const locked = await lockIdeaPhotoListeningForProduction(env, idea, existing);
-    const record = await maybeHealDraftNarrationVoice(env, locked.request, locked.idea, authorization, preferredProfileId);
-    return respond(request, env, { ok: true, created: false, record: mapProductionRequest(record) });
+    queueIdeaProductionAfterOpen(ctx, env, locked.idea, locked.request, authorization, preferredProfileId);
+    return respond(request, env, {
+      ok: true,
+      created: false,
+      background_handoff: true,
+      record: mapProductionRequest(locked.request),
+    });
   }
 
   const created = await createDraftForIdea(env, idea, authorization, null, { preferredProfileId });
   const locked = await lockIdeaPhotoListeningForProduction(env, idea, created);
-  return respond(request, env, { ok: true, created: true, record: mapProductionRequest(locked.request) }, 201);
+  queueIdeaProductionAfterOpen(ctx, env, locked.idea, locked.request, authorization, preferredProfileId);
+  return respond(request, env, {
+    ok: true,
+    created: true,
+    background_handoff: true,
+    record: mapProductionRequest(locked.request),
+  }, 201);
 }
 
-async function createProductionRequestFromBody(request, env, authorization, url) {
+async function createProductionRequestFromBody(request, env, authorization, url, ctx = null) {
   let payload;
   try { payload = await request.json(); } catch { throw new HttpError(400, "Request body must be valid JSON"); }
   const ideaRecordId = String(payload?.idea_record_id || "").trim();
@@ -13105,8 +13119,13 @@ async function createProductionRequestFromBody(request, env, authorization, url)
   const existing = await existingDraftForIdea(env, ideaRecordId, authorization);
   if (existing) {
     const locked = await lockIdeaPhotoListeningForProduction(env, idea, existing);
-    const healed = await maybeHealDraftNarrationVoice(env, locked.request, locked.idea, authorization, preferredProfileId);
-    return respond(request, env, { ok: true, created: false, record: mapProductionRequest(healed) });
+    queueIdeaProductionAfterOpen(ctx, env, locked.idea, locked.request, authorization, preferredProfileId);
+    return respond(request, env, {
+      ok: true,
+      created: false,
+      background_handoff: true,
+      record: mapProductionRequest(locked.request),
+    });
   }
 
   const explicitVoice = Boolean(payload?.voice_explicit)
@@ -13119,7 +13138,13 @@ async function createProductionRequestFromBody(request, env, authorization, url)
   input.voice_explicit = explicitVoice;
   const created = await createDraftForIdea(env, idea, authorization, input, { preferredProfileId });
   const locked = await lockIdeaPhotoListeningForProduction(env, idea, created);
-  return respond(request, env, { ok: true, created: true, record: mapProductionRequest(locked.request) }, 201);
+  queueIdeaProductionAfterOpen(ctx, env, locked.idea, locked.request, authorization, preferredProfileId);
+  return respond(request, env, {
+    ok: true,
+    created: true,
+    background_handoff: true,
+    record: mapProductionRequest(locked.request),
+  }, 201);
 }
 
 
@@ -13219,7 +13244,7 @@ async function listProductionRequests(request, env, url, authorization) {
   });
 }
 
-async function getProductionRequest(request, env, url, authorization) {
+async function getProductionRequest(request, env, url, authorization, ctx = null) {
   const recordId = productionRequestRecordIdFromPath(url);
   let record = await loadAuthorizedProductionRequest(env, recordId, authorization);
   const ideaId = ideaRecordIdFromProductionRequest(record);
@@ -13227,20 +13252,16 @@ async function getProductionRequest(request, env, url, authorization) {
     try {
       const idea = await loadAuthorizedIdea(env, ideaId, authorization);
       const locked = await lockIdeaPhotoListeningForProduction(env, idea, record);
-      record = await maybeHealDraftNarrationVoice(
-        env,
-        locked.request,
-        locked.idea,
-        authorization,
-        requestedProfileId(url)
-      );
+      record = locked.request;
+      queueIdeaProductionAfterOpen(ctx, env, locked.idea, locked.request, authorization, requestedProfileId(url));
     } catch (error) {
-      console.warn("production request listener/voice heal skipped", recordId, error);
+      console.warn("production request listener lock skipped", recordId, error);
     }
   }
   const ideaTitles = await loadIdeaTitlesByRecordId(env, [ideaId]);
   return respond(request, env, {
     ok: true,
+    background_handoff: Boolean(ideaId),
     record: mapProductionRequest(record, ideaTitles.get(ideaId) || null),
   });
 }
@@ -20022,15 +20043,82 @@ async function ideaPhotoListeningSessionRoute(request, env, url, authorization) 
 }
 
 async function lockIdeaPhotoListeningForProduction(env, idea, requestRecord) {
-  let record = requestRecord;
-  const selectedIds = Array.isArray(f(idea, "Studio_Matched_Media_Assets"))
-    ? f(idea, "Studio_Matched_Media_Assets").map((id) => String(id || "").trim()).filter((id) => /^rec[A-Za-z0-9]+$/.test(id))
-    : [];
-  const masterCount = Number(f(record, "Studio_Master_Asset_Count") || item4AssetManifest(record).length || 0);
+  // Critical path for Open Production: one small Idea update only.
+  // The exact selected-photo transfer can involve watermarking, Drive and Airtable
+  // calls, so it must never hold the browser request open.
+  const configNotes = withoutIdeaManagePhotoPause(f(idea, "Production_Config_Notes"));
+  const currentWaitStatus = String(f(idea, "Studio_Photo_Wait_Status") || "").trim();
+  let updatedIdea = idea;
+  if (currentWaitStatus !== "Not Needed" || configNotes !== (f(idea, "Production_Config_Notes") || null)) {
+    try {
+      updatedIdea = await airtableFetch(env, env.AIRTABLE_IDEA_TABLE_ID, idea.id, {
+        method: "PATCH",
+        body: JSON.stringify({
+          fields: {
+            Studio_Photo_Wait_Status: "Not Needed",
+            Production_Config_Notes: configNotes,
+          },
+          typecast: true,
+        }),
+      });
+    } catch (error) {
+      // Opening the Production workspace is more important than this bookkeeping
+      // write. Background hydration retries the lock and records the permanent
+      // request-side ez-photo-wait=off guard.
+      console.warn("idea photo-listener lock deferred after Production open", idea.id, error);
+    }
+  }
+  return { idea: updatedIdea, request: requestRecord };
+}
 
-  // Transfer the exact set the operator sees in Manage Idea once, but never rematch
-  // or introduce a newly discovered photo as the Production workspace opens.
-  if (!masterCount && selectedIds.length && !productionPhotoWaitAutoOff(f(record, "Production_Notes"))) {
+function ideaSelectedPhotoIds(idea) {
+  return Array.isArray(f(idea, "Studio_Matched_Media_Assets"))
+    ? [...new Set(f(idea, "Studio_Matched_Media_Assets")
+      .map((id) => String(id || "").trim())
+      .filter((id) => /^rec[A-Za-z0-9]+$/.test(id)))]
+    : [];
+}
+
+function sameIdeaPhotoWaitSelection(requestRecord, selectedIds) {
+  const existingWaitIds = item4AssetManifest(requestRecord)
+    .filter((asset) => String(asset?.source || "") === "idea_photo_wait")
+    .map((asset) => String(asset?.media_asset_record_id || "").trim())
+    .filter((id) => /^rec[A-Za-z0-9]+$/.test(id));
+  const expected = new Set(selectedIds || []);
+  return existingWaitIds.length === expected.size && existingWaitIds.every((id) => expected.has(id));
+}
+
+async function hydrateIdeaProductionAfterOpen(env, idea, requestRecord, authorization, preferredProfileId = null) {
+  let currentIdea = await airtableFetch(env, env.AIRTABLE_IDEA_TABLE_ID, idea.id).catch(() => idea);
+  let record = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, requestRecord.id).catch(() => requestRecord);
+
+  // Retry the lightweight lock if the foreground request could not persist it.
+  const locked = await lockIdeaPhotoListeningForProduction(env, currentIdea, record);
+  currentIdea = locked.idea;
+  record = locked.request;
+
+  // Permanent request-side guard prevents any photo-wait cron from restoring or
+  // reshuffling the operator's chosen set after Production has opened.
+  const requestNotes = String(f(record, "Production_Notes") || "").trim();
+  const lockedNotes = withProductionPhotoWaitManual(requestNotes);
+  if (lockedNotes !== requestNotes) {
+    try {
+      record = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, record.id, {
+        method: "PATCH",
+        body: JSON.stringify({
+          fields: { Production_Notes: lockedNotes },
+          typecast: true,
+        }),
+      });
+    } catch (error) {
+      console.warn("production photo-wait request lock deferred", record.id, error);
+    }
+  }
+
+  // Transfer the exact set the operator sees in Manage Idea, but do it after the
+  // workspace is already open. The comparison makes this safe to repeat.
+  const selectedIds = ideaSelectedPhotoIds(currentIdea);
+  if (!sameIdeaPhotoWaitSelection(record, selectedIds)) {
     try {
       const attached = await applyLibraryAssetsToProductionRequest(
         env,
@@ -20040,38 +20128,42 @@ async function lockIdeaPhotoListeningForProduction(env, idea, requestRecord) {
       );
       record = attached.record;
     } catch (error) {
-      console.warn("idea selected-photo handoff to Production failed", idea.id, error);
+      console.warn("background selected-photo handoff to Production failed", currentIdea.id, error);
     }
   }
 
-  const requestNotes = String(f(record, "Production_Notes") || "").trim();
-  const lockedNotes = withProductionPhotoWaitManual(requestNotes);
-  if (lockedNotes !== requestNotes) {
-    record = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, record.id, {
-      method: "PATCH",
-      body: JSON.stringify({
-        fields: { Production_Notes: lockedNotes },
-        typecast: true,
-      }),
-    });
+  // Voice/profile healing is also nonessential to the initial screen open.
+  try {
+    record = await maybeHealDraftNarrationVoice(
+      env,
+      record,
+      currentIdea,
+      authorization,
+      preferredProfileId
+    );
+  } catch (error) {
+    console.warn("background production narration voice heal failed", record.id, error);
   }
+  return record;
+}
 
-  const configNotes = withoutIdeaManagePhotoPause(f(idea, "Production_Config_Notes"));
-  const currentWaitStatus = String(f(idea, "Studio_Photo_Wait_Status") || "").trim();
-  let updatedIdea = idea;
-  if (currentWaitStatus !== "Not Needed" || configNotes !== (f(idea, "Production_Config_Notes") || null)) {
-    updatedIdea = await airtableFetch(env, env.AIRTABLE_IDEA_TABLE_ID, idea.id, {
-      method: "PATCH",
-      body: JSON.stringify({
-        fields: {
-          Studio_Photo_Wait_Status: "Not Needed",
-          Production_Config_Notes: configNotes,
-        },
-        typecast: true,
-      }),
-    });
+function queueIdeaProductionAfterOpen(ctx, env, idea, requestRecord, authorization, preferredProfileId = null) {
+  const task = hydrateIdeaProductionAfterOpen(
+    env,
+    idea,
+    requestRecord,
+    authorization,
+    preferredProfileId
+  ).catch((error) => {
+    console.warn("background Production-open hydration failed", requestRecord?.id || idea?.id, error);
+  });
+  if (ctx && typeof ctx.waitUntil === "function") {
+    ctx.waitUntil(task);
+  } else {
+    // All HTTP entry points pass ctx; keep a nonblocking fallback for direct tests
+    // and internal callers rather than regressing Open Production into a wait.
+    void task;
   }
-  return { idea: updatedIdea, request: record };
 }
 
 async function getAuthorizedIdeaRoute(request, env, url, authorization) {
