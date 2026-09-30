@@ -307,3 +307,9 @@ Deploy Studio API Worker production
 Reason: Make Open Production nonblocking. Stop photo listening on the critical path, then transfer/watermark the exact matched-photo set and heal voice settings idempotently in ctx.waitUntil.
 Requested: 2026-09-29
 Source before deploy: 41ff7c8aad8243c10b7c6dc1b5d95bbf01678794
+
+
+Deploy Studio API Worker production
+Reason: Open existing Photos Ready Production Requests directly; make Production Request GET/open lightweight; add separate permanent photo-listener stop action.
+Requested: 2026-09-29
+Source before deploy: a315171b1ab6de8e463225b2a792e79ff4319b37

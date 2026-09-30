@@ -64,29 +64,30 @@ test("Manage Idea pauses automatic photo listening and close resumes it", () => 
   assert.match(app, /setInterval\(pulse, 5 \* 60 \* 1000\)/);
 });
 
-test("Entering Production opens before selected-photo hydration and permanently stops listening", () => {
-  assert.match(worker, /lockIdeaPhotoListeningForProduction/);
+test("Open Production prefers the existing draft and never blocks on photo hydration", () => {
+  assert.match(app, /findExistingProductionRequestForIdea/);
+  assert.match(app, /idea\?\.production_request_id/);
+  assert.match(app, /opened_existing: true/);
+  assert.match(app, /recovered_after_failure: true/);
+  assert.match(app, /Number\(error\?\.status \|\| 0\) >= 500/);
+  assert.match(app, /showProductionRequestWorkspace\(\)/);
+  assert.match(app, /Promise\.allSettled\(\[/);
+  assert.match(app, /stopIdeaPhotoListeningAfterProductionOpen/);
+  assert.match(app, /action: "stop"/);
+  assert.match(worker, /action must be pause, resume, or stop/);
   assert.match(worker, /Studio_Photo_Wait_Status: "Not Needed"/);
-  assert.match(worker, /queueIdeaProductionAfterOpen/);
-  assert.match(worker, /ctx\.waitUntil\(task\)/);
-  assert.match(worker, /background_handoff: true/);
-  assert.match(worker, /hydrateIdeaProductionAfterOpen/);
-  assert.match(worker, /withProductionPhotoWaitManual\(requestNotes\)/);
-  assert.match(worker, /replaceWaitAssets: true/);
-  assert.match(worker, /Transfer the exact set the operator sees in Manage Idea/);
 
-  const lockStart = worker.indexOf("async function lockIdeaPhotoListeningForProduction");
-  const lockEnd = worker.indexOf("function ideaSelectedPhotoIds", lockStart);
-  const lockBody = worker.slice(lockStart, lockEnd);
-  assert.doesNotMatch(lockBody, /applyLibraryAssetsToProductionRequest/);
+  const getStart = worker.indexOf("async function getProductionRequest");
+  const getEnd = worker.indexOf("async function updateProductionRequest", getStart);
+  const getBody = worker.slice(getStart, getEnd);
+  assert.doesNotMatch(getBody, /queueIdeaProductionAfterOpen/);
+  assert.doesNotMatch(getBody, /applyLibraryAssetsToProductionRequest/);
 
   const openStart = worker.indexOf("async function getOrCreateProductionRequestForIdea");
   const openEnd = worker.indexOf("async function createProductionRequestFromBody", openStart);
   const openBody = worker.slice(openStart, openEnd);
-  assert.doesNotMatch(openBody, /await maybeHealDraftNarrationVoice/);
-  assert.doesNotMatch(openBody, /await applyLibraryAssetsToProductionRequest/);
-  assert.match(openBody, /queueIdeaProductionAfterOpen/);
-  assert.doesNotMatch(worker, /photo-wait rehydrate on open failed/);
+  assert.doesNotMatch(openBody, /queueIdeaProductionAfterOpen/);
+  assert.doesNotMatch(openBody, /lockIdeaPhotoListeningForProduction/);
 });
 
 

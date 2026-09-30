@@ -252,7 +252,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.434-calendar-filter-checkboxes";
+  const BUILD_ID = "item4-0.6.435-production-open-existing-draft";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -10401,6 +10401,43 @@
     syncFinishedMediaHeadings();
   }
 
+  async function findExistingProductionRequestForIdea(idea) {
+    const directId = String(idea?.production_request_id || "").trim();
+    if (directId) {
+      try {
+        const direct = await api(`/api/production-requests/${encodeURIComponent(directId)}`, {
+          timeoutMs: 12000,
+          retries: 0,
+        });
+        if (direct?.record?.id) return direct.record;
+      } catch (error) {
+        console.warn("direct Production Request open failed; trying list recovery", error);
+      }
+    }
+    const listing = await api("/api/production-requests?limit=100", { timeoutMs: 20000, retries: 0 });
+    const drafts = (listing?.records || [])
+      .filter((record) => ideaIdFromRequest(record) === idea.id)
+      .filter((record) => ["Draft", "Ready", "Submitted"].includes(String(record?.status || "").trim()))
+      .sort((a, b) => {
+        const bt = Date.parse(b?.updated_at || b?.created_at || "") || 0;
+        const at = Date.parse(a?.updated_at || a?.created_at || "") || 0;
+        return bt - at;
+      });
+    return drafts[0] || null;
+  }
+
+  function stopIdeaPhotoListeningAfterProductionOpen(ideaId) {
+    if (!ideaId) return;
+    api(`/api/ideas/${encodeURIComponent(ideaId)}/photo-listening-session`, {
+      method: "POST",
+      body: JSON.stringify({ action: "stop" }),
+      timeoutMs: 12000,
+      retries: 0,
+    }).catch((error) => {
+      console.warn("permanent photo-listener stop deferred after Production opened", error);
+    });
+  }
+
   async function openProductionRequestForIdea(idea, { fromWizard = false } = {}) {
     if (!idea?.id) return;
     const button = $("configureProductionButton");
@@ -10408,7 +10445,7 @@
       button.disabled = true;
       button.textContent = "Opening…";
     }
-    setManageMessage("Opening Phase 2B Production Request…", "");
+    setManageMessage("Opening Production…", "");
     if (fromWizard) ezWizardSetMessage("Opening production…");
 
     try {
@@ -10421,41 +10458,49 @@
         });
         result = await createEzProductionRequest(idea.id, payload);
       } else {
-        try {
-          result = await api(`/api/ideas/${encodeURIComponent(idea.id)}/production-request`, {
-            method: "POST",
-            body: JSON.stringify({}),
-            timeoutMs: 35000,
-          });
-        } catch (error) {
-          // Creating a Production Request is server-side work. The Worker can finish
-          // creating the draft after the browser's request times out. Recover that
-          // just-created/current draft instead of showing an error that invites a
-          // second click and another duplicate Production Request.
-          if (!isTimeoutError(error)) throw error;
-          const listing = await api("/api/production-requests?limit=100", { timeoutMs: 30000 });
-          const drafts = (listing?.records || [])
-            .filter((record) => ideaIdFromRequest(record) === idea.id)
-            .filter((record) => ["Draft", "Ready", "Submitted"].includes(String(record?.status || "").trim()))
-            .sort((a, b) => {
-              const bt = Date.parse(b?.updated_at || b?.created_at || "") || 0;
-              const at = Date.parse(a?.updated_at || a?.created_at || "") || 0;
-              return bt - at;
+        const existing = await findExistingProductionRequestForIdea(idea).catch(() => null);
+        if (existing) {
+          result = { record: existing, created: false, opened_existing: true };
+        } else {
+          try {
+            result = await api(`/api/ideas/${encodeURIComponent(idea.id)}/production-request`, {
+              method: "POST",
+              body: JSON.stringify({}),
+              timeoutMs: 20000,
+              retries: 0,
             });
-          if (!drafts.length) throw error;
-          result = { record: drafts[0], created: false, recovered_after_timeout: true };
+          } catch (error) {
+            const recoverable = isTimeoutError(error) || Number(error?.status || 0) >= 500;
+            if (!recoverable) throw error;
+            const recovered = await findExistingProductionRequestForIdea(idea).catch(() => null);
+            if (!recovered) throw error;
+            result = { record: recovered, created: false, recovered_after_failure: true };
+          }
         }
       }
+
+      if (!result?.record?.id) throw new Error("Production Request could not be resolved.");
+
       await closeIdeaDrawer({ save: false, resumePhotoListening: false });
       activeIdea = idea;
       ezEntryPath = "configure";
       switchToPage("content");
       populateProductionRequestForm(result.record);
       showProductionRequestWorkspace();
+      setEzAdvancedOpen(false);
+      setRequestMessage("Production opened. Loading media and outputs…", "success");
       if (fromWizard) ezWizardSetMessage("Loading the draft…");
-      await loadProductionRequestOutputs(result.record);
-      await loadItem4Workspace(result.record);
+
+      // Once the workspace is visible, stop automatic matching permanently in a
+      // separate small request. A failure here must never close/block Production.
+      stopIdeaPhotoListeningAfterProductionOpen(idea.id);
+
+      const hydration = await Promise.allSettled([
+        loadProductionRequestOutputs(result.record),
+        loadItem4Workspace(result.record),
+      ]);
       const assetCount = Array.isArray(item4Workspace?.assets) ? item4Workspace.assets.length : 0;
+
       if (ezWizardPending) {
         const extras = ezWizardPending.planned?.extras || [];
         applyEzExtraOutputs(extras);
@@ -10467,11 +10512,20 @@
           ezAutoPlanAfterUpload = true;
           await maybeAutoEzPlan(true);
         }
-      } else if (!assetCount) selectPrMediaKind(null, { quiet: true });
-      else syncPrMediaKindUi();
+      } else if (!assetCount) {
+        selectPrMediaKind(null, { quiet: true });
+      } else {
+        syncPrMediaKindUi();
+      }
+
       loadProductionRequests().catch(() => {});
-      setEzAdvancedOpen(false);
-      if (ezWizardPending) {
+      const failedHydration = hydration.filter((entry) => entry.status === "rejected");
+      if (failedHydration.length) {
+        setRequestMessage(
+          `Production is open. ${failedHydration.length} background section${failedHydration.length === 1 ? "" : "s"} will refresh again automatically.`,
+          "success"
+        );
+      } else if (ezWizardPending) {
         const needsUpload = ezPlanApi()?.ezWizardRequiresUploads?.(ezWizardPending);
         if (!needsUpload) {
           setRequestMessage("Studio will generate the images. You can still add a title, script, or notes before you approve.", "success");

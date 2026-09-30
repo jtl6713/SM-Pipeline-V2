@@ -13083,27 +13083,18 @@ async function getOrCreateProductionRequestForIdea(request, env, url, authorizat
   try { preferredProfileId = requestedProfileId(url, await request.clone().json().catch(() => ({}))); } catch { preferredProfileId = requestedProfileId(url); }
   const existing = await existingDraftForIdea(env, ideaRecordId, authorization);
   if (existing) {
-    // Open Production must stay lightweight. Only stop future photo-listener writes
-    // on the critical path; watermarking / exact selected-photo transfer / voice heal
-    // continue idempotently in waitUntil after the draft has already been returned.
-    const locked = await lockIdeaPhotoListeningForProduction(env, idea, existing);
-    queueIdeaProductionAfterOpen(ctx, env, locked.idea, locked.request, authorization, preferredProfileId);
     return respond(request, env, {
       ok: true,
       created: false,
-      background_handoff: true,
-      record: mapProductionRequest(locked.request),
+      record: mapProductionRequest(existing),
     });
   }
 
   const created = await createDraftForIdea(env, idea, authorization, null, { preferredProfileId });
-  const locked = await lockIdeaPhotoListeningForProduction(env, idea, created);
-  queueIdeaProductionAfterOpen(ctx, env, locked.idea, locked.request, authorization, preferredProfileId);
   return respond(request, env, {
     ok: true,
     created: true,
-    background_handoff: true,
-    record: mapProductionRequest(locked.request),
+    record: mapProductionRequest(created),
   }, 201);
 }
 
@@ -13118,13 +13109,10 @@ async function createProductionRequestFromBody(request, env, authorization, url,
   const preferredProfileId = requestedProfileId(url, payload);
   const existing = await existingDraftForIdea(env, ideaRecordId, authorization);
   if (existing) {
-    const locked = await lockIdeaPhotoListeningForProduction(env, idea, existing);
-    queueIdeaProductionAfterOpen(ctx, env, locked.idea, locked.request, authorization, preferredProfileId);
     return respond(request, env, {
       ok: true,
       created: false,
-      background_handoff: true,
-      record: mapProductionRequest(locked.request),
+      record: mapProductionRequest(existing),
     });
   }
 
@@ -13137,13 +13125,10 @@ async function createProductionRequestFromBody(request, env, authorization, url,
   }
   input.voice_explicit = explicitVoice;
   const created = await createDraftForIdea(env, idea, authorization, input, { preferredProfileId });
-  const locked = await lockIdeaPhotoListeningForProduction(env, idea, created);
-  queueIdeaProductionAfterOpen(ctx, env, locked.idea, locked.request, authorization, preferredProfileId);
   return respond(request, env, {
     ok: true,
     created: true,
-    background_handoff: true,
-    record: mapProductionRequest(locked.request),
+    record: mapProductionRequest(created),
   }, 201);
 }
 
@@ -13245,23 +13230,13 @@ async function listProductionRequests(request, env, url, authorization) {
 }
 
 async function getProductionRequest(request, env, url, authorization, ctx = null) {
+  void ctx;
   const recordId = productionRequestRecordIdFromPath(url);
-  let record = await loadAuthorizedProductionRequest(env, recordId, authorization);
+  const record = await loadAuthorizedProductionRequest(env, recordId, authorization);
   const ideaId = ideaRecordIdFromProductionRequest(record);
-  if (ideaId) {
-    try {
-      const idea = await loadAuthorizedIdea(env, ideaId, authorization);
-      const locked = await lockIdeaPhotoListeningForProduction(env, idea, record);
-      record = locked.request;
-      queueIdeaProductionAfterOpen(ctx, env, locked.idea, locked.request, authorization, requestedProfileId(url));
-    } catch (error) {
-      console.warn("production request listener lock skipped", recordId, error);
-    }
-  }
   const ideaTitles = await loadIdeaTitlesByRecordId(env, [ideaId]);
   return respond(request, env, {
     ok: true,
-    background_handoff: Boolean(ideaId),
     record: mapProductionRequest(record, ideaTitles.get(ideaId) || null),
   });
 }
@@ -20008,7 +19983,7 @@ async function ideaPhotoListeningSessionRoute(request, env, url, authorization) 
   let payload = {};
   try { payload = await request.json(); } catch { payload = {}; }
   const action = String(payload?.action || "").trim().toLowerCase();
-  if (!["pause", "resume"].includes(action)) throw new HttpError(400, "action must be pause or resume");
+  if (!["pause", "resume", "stop"].includes(action)) throw new HttpError(400, "action must be pause, resume, or stop");
   const recordId = ideaRecordIdFromPath(url);
   let idea = await loadAuthorizedIdea(env, recordId, authorization);
   const waitStatus = String(f(idea, "Studio_Photo_Wait_Status") || "").trim();
@@ -20025,11 +20000,15 @@ async function ideaPhotoListeningSessionRoute(request, env, url, authorization) 
   const nextNotes = action === "pause"
     ? withIdeaManagePhotoPause(notes, { ttlMinutes: 30 })
     : withoutIdeaManagePhotoPause(notes);
-  if (nextNotes !== (notes || null)) {
+  const stopping = action === "stop";
+  if (stopping || nextNotes !== (notes || null)) {
     idea = await airtableFetch(env, env.AIRTABLE_IDEA_TABLE_ID, recordId, {
       method: "PATCH",
       body: JSON.stringify({
-        fields: { Production_Config_Notes: nextNotes },
+        fields: {
+          ...(stopping ? { Studio_Photo_Wait_Status: "Not Needed" } : {}),
+          Production_Config_Notes: nextNotes,
+        },
         typecast: true,
       }),
     });
@@ -20037,7 +20016,7 @@ async function ideaPhotoListeningSessionRoute(request, env, url, authorization) 
   return respond(request, env, {
     ok: true,
     paused: action === "pause" && ideaManagePhotoPauseActive(f(idea, "Production_Config_Notes")),
-    permanent: false,
+    permanent: stopping || String(f(idea, "Studio_Photo_Wait_Status") || "").trim() === "Not Needed",
     record: mapIdea(idea),
   });
 }

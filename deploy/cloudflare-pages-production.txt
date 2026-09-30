@@ -259,3 +259,10 @@ Reason: Make IG/FB/TT/YT platform filter checkboxes explicitly visible and ship 
 UI: 0.6.434-calendar-filter-checkboxes
 Source before deploy: 4ed70d2c62ed7d4b80d4ff24702bb3e59f973d11
 Requested: 2026-09-29
+
+
+Deploy Studio Pages production
+Reason: Open existing Production Request before any heavy hydration; recover from server 500s and load media/outputs after the workspace is visible.
+UI: 0.6.435-production-open-existing-draft
+Requested: 2026-09-29
+Source before deploy: a315171b1ab6de8e463225b2a792e79ff4319b37
