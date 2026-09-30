@@ -15,6 +15,15 @@ test("Ideas exposes one-click photo listening", () => {
   assert.match(app, /Listening for photos/);
 });
 
+
+test("Find images now is available from the Ideas row and bypasses only the temporary Manage pause", () => {
+  assert.match(app, /data-idea-find-images/);
+  assert.match(app, /Find images now/);
+  assert.match(app, /body: JSON\.stringify\(\{ force: true \}\)/);
+  assert.match(worker, /!force && ideaManagePhotoPauseActive/);
+  assert.match(worker, /explicit Find images now request is user-directed/);
+});
+
 test("Photo listening stays in Ideas until enough matches and then surfaces in Production", () => {
   assert.match(worker, /isIdeaWatchPhotosRoute/);
   assert.match(worker, /Studio_Photo_Wait_Status:\s*"Waiting"/);
