@@ -4,6 +4,7 @@ import json
 import math
 import re
 from typing import TYPE_CHECKING, Any
+from urllib.parse import unquote
 
 from studio_produce.constants import CONTENT_ITEMS_TABLE, PLATFORM_OUTPUTS_TABLE, PRODUCTION_REQUESTS_TABLE
 from audio.voiceover_duration import measured_voiceover_seconds
@@ -33,6 +34,7 @@ PHOTO_FLOOR_SECONDS = 3
 FPS = 30
 
 _RENDER_SETTINGS_RE = re.compile(r"(?:^|\n)\[render-settings\]\s*([^\n]*)", re.I)
+_RENDER_OVERRIDES_RE = re.compile(r"(?:^|\n)\[render-overrides\]\s*([^\n]*)", re.I)
 _RENDER_DEFAULTS = {
     "preset": "auto",
     "motion": "auto",
@@ -44,6 +46,7 @@ _RENDER_DEFAULTS = {
     "pacing": "normal",
     "fit": "smart_crop",
     "beat_sync": "on",
+    "ai_motion": "off",
 }
 _RENDER_PRESETS = {
     "cinematic": {
@@ -114,6 +117,130 @@ def render_settings_from_request(request: dict[str, Any] | None) -> dict[str, st
         settings.update(_RENDER_PRESETS[preset])
     settings.update(parsed)
     return settings
+
+
+def render_overrides_from_request(request: dict[str, Any] | None) -> dict[str, dict[str, str]]:
+    notes = field_str(request or {}, "Production_Notes")
+    match = _RENDER_OVERRIDES_RE.search(notes)
+    if not match:
+        return {}
+    try:
+        parsed = json.loads(unquote(str(match.group(1) or "").strip()))
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return {}
+    if not isinstance(parsed, dict):
+        return {}
+    allowed = {"motion", "transition", "fit"}
+    cleaned: dict[str, dict[str, str]] = {}
+    for raw_asset_id, raw_value in parsed.items():
+        asset_id = str(raw_asset_id or "").strip()
+        if not asset_id or not isinstance(raw_value, dict):
+            continue
+        value = {
+            str(key).strip(): str(item or "").strip().lower()
+            for key, item in raw_value.items()
+            if str(key).strip() in allowed and str(item or "").strip()
+        }
+        if value:
+            cleaned[asset_id] = value
+    return cleaned
+
+
+def _render_override_for_item(
+    overrides: dict[str, dict[str, str]],
+    item: dict[str, Any],
+) -> dict[str, str]:
+    source = item.get("source") if isinstance(item.get("source"), dict) else {}
+    for candidate in (
+        source.get("id"),
+        source.get("media_asset_record_id"),
+        item.get("media_asset_id"),
+    ):
+        key = str(candidate or "").strip()
+        if key and key in overrides:
+            return dict(overrides[key])
+    return {}
+
+
+_AI_MOTION_CHOICES = {
+    "static",
+    "ken_burns",
+    "slow_zoom_in",
+    "slow_zoom_out",
+    "pan_left",
+    "pan_right",
+    "pan_up",
+    "pan_down",
+}
+
+
+def _ai_directed_motion(
+    clips: list[dict[str, Any]],
+    settings: dict[str, str],
+    overrides: dict[str, dict[str, str]],
+) -> dict[int, dict[str, str]]:
+    if settings.get("ai_motion", "off") != "on":
+        return {}
+    pending: list[tuple[int, dict[str, Any]]] = []
+    for index, item in enumerate(clips):
+        if item.get("media_kind") == "video":
+            continue
+        if _render_override_for_item(overrides, item).get("motion"):
+            continue
+        if str(item.get("url") or "").startswith(("http://", "https://")):
+            pending.append((index, item))
+    if not pending:
+        return {}
+
+    directed: dict[int, dict[str, str]] = {}
+    try:
+        from a3.openai_classify import classify_asset
+    except Exception:
+        return {}
+
+    for offset in range(0, len(pending), 8):
+        batch = pending[offset:offset + 8]
+        prompt = (
+            "You are a social-video motion director. Examine the still images in the exact order supplied. "
+            "Choose one tasteful motion for each image from: static, ken_burns, slow_zoom_in, slow_zoom_out, "
+            "pan_left, pan_right, pan_up, pan_down. Preserve faces, signs, architecture, and important text; "
+            "prefer static or a gentle zoom for text-heavy images, and use directional pans only when the "
+            "composition clearly benefits. Avoid repeating the same move unnecessarily. "
+            f"Global preset={settings.get('preset','auto')}, intensity={settings.get('intensity','normal')}, "
+            f"pacing={settings.get('pacing','normal')}. "
+            'Return JSON only as {"motions":[{"index":1,"motion":"slow_zoom_in","reason":"short reason"}]}. '
+            "Index is 1-based within this batch and every supplied image must have one entry."
+        )
+        try:
+            result = classify_asset(
+                prompt,
+                image_urls=[str(item.get("url") or "") for _, item in batch],
+                max_output_tokens=1600,
+            )
+            parsed = result.get("parsed") if isinstance(result, dict) else {}
+            rows = parsed.get("motions") if isinstance(parsed, dict) else []
+        except Exception:
+            continue
+        if not isinstance(rows, list):
+            continue
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            try:
+                local_index = int(row.get("index") or 0) - 1
+            except (TypeError, ValueError):
+                continue
+            if local_index < 0 or local_index >= len(batch):
+                continue
+            motion = str(row.get("motion") or "").strip().lower()
+            if motion not in _AI_MOTION_CHOICES:
+                continue
+            global_index = batch[local_index][0]
+            directed[global_index] = {
+                "motion": motion,
+                "reason": str(row.get("reason") or "").strip()[:240],
+            }
+    return directed
 
 
 def _render_float(settings: dict[str, str], key: str, default: float = 0.0) -> float:
@@ -937,6 +1064,7 @@ def source_package(
         if str(asset.get("caption") or "").strip()
     }
     render_settings = render_settings_from_request(request)
+    render_overrides = render_overrides_from_request(request)
     clips = []
     omitted = []
     has_video = False
@@ -959,7 +1087,14 @@ def source_package(
             )
             or ""
         ).strip()
-        fit_mode = _render_fit(render_settings, story=story, video=video)
+        frame_override = _render_override_for_item(
+            render_overrides,
+            {"source": merged, "media_asset_id": media_id},
+        )
+        fit_settings = dict(render_settings)
+        if frame_override.get("fit"):
+            fit_settings["fit"] = frame_override["fit"]
+        fit_mode = _render_fit(fit_settings, story=story, video=video)
         if not url or not media_id.startswith("rec"):
             omitted.append(str(source.get("id") or source.get("name") or "unknown"))
             continue
@@ -981,9 +1116,11 @@ def source_package(
             "source_in_seconds": in_seconds,
             "source_out_seconds": out_seconds,
             "source_duration_seconds": source_duration_seconds(merged),
+            "render_override": frame_override,
         })
     if omitted or not clips:
         return None
+    ai_motion = _ai_directed_motion(clips, render_settings, render_overrides)
     clip_frames, total_frames = assign_clip_frames(
         clips,
         story=story,
@@ -1001,16 +1138,34 @@ def source_package(
         in_seconds = float(item["in_seconds"] or 0)
         out_seconds = in_seconds + (frames / fps) if video else item["out_seconds"]
         source_duration = float(item.get("source_duration_seconds") or 0) or max(out_seconds or 0, in_seconds)
-        motion_style = _render_motion(render_settings, index, story=story, video=video)
-        transition = _render_transition(render_settings, index)
+        frame_override = item.get("render_override") if isinstance(item.get("render_override"), dict) else {}
+        motion_settings = dict(render_settings)
+        motion_source = "global"
+        motion_reason = ""
+        if frame_override.get("motion"):
+            motion_settings["motion"] = frame_override["motion"]
+            motion_source = "frame_override"
+        elif index in ai_motion:
+            motion_settings["motion"] = ai_motion[index]["motion"]
+            motion_source = "ai"
+            motion_reason = ai_motion[index].get("reason", "")
+        transition_settings = dict(render_settings)
+        if frame_override.get("transition"):
+            transition_settings["transition"] = frame_override["transition"]
+        motion_style = _render_motion(motion_settings, index, story=story, video=video)
+        transition = _render_transition(transition_settings, index)
         render_directive = {
             "preset": render_settings.get("preset", "auto"),
             "motion": render_settings.get("motion", "auto"),
             "transition": render_settings.get("transition", "auto"),
             "intensity": render_settings.get("intensity", "normal"),
             "pacing": render_settings.get("pacing", "normal"),
-            "fit": render_settings.get("fit", "smart_crop"),
+            "fit": frame_override.get("fit") or render_settings.get("fit", "smart_crop"),
             "beatSync": render_settings.get("beat_sync", "on") != "off",
+            "aiMotion": render_settings.get("ai_motion", "off") == "on",
+            "motionSource": motion_source,
+            "motionReason": motion_reason or None,
+            "frameOverride": frame_override or None,
         }
         built.append({
             "id": f"studio-source-{index + 1}",
