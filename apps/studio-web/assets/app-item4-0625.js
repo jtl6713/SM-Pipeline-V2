@@ -252,7 +252,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.446-render-controls-tabs";
+  const BUILD_ID = "item4-0.6.447-per-photo-ai-motion";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -3773,6 +3773,7 @@
   }
 
   let productionWorkspaceTab = "media";
+  let productionRenderFrameOverrides = {};
 
   const PRODUCTION_RENDER_DEFAULTS = Object.freeze({
     preset: "auto",
@@ -3785,6 +3786,7 @@
     pacing: "normal",
     fit: "smart_crop",
     beat_sync: "on",
+    ai_motion: "off",
   });
 
   const PRODUCTION_RENDER_PRESETS = Object.freeze({
@@ -3825,9 +3827,38 @@
     return settings;
   }
 
+  function normalizeProductionRenderOverride(value) {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+    const next = {};
+    const motion = String(value.motion || "").trim();
+    const transition = String(value.transition || "").trim();
+    const fit = String(value.fit || "").trim();
+    if (motion) next.motion = motion;
+    if (transition) next.transition = transition;
+    if (fit) next.fit = fit;
+    return next;
+  }
+
+  function parseProductionRenderOverrides(notes) {
+    const match = /(?:^|\n)\[render-overrides\]\s*([^\n]*)/i.exec(String(notes || ""));
+    if (!match) return {};
+    try {
+      const parsed = JSON.parse(decodeURIComponent(String(match[1] || "").trim()));
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
+      return Object.fromEntries(
+        Object.entries(parsed)
+          .map(([assetId, value]) => [String(assetId || "").trim(), normalizeProductionRenderOverride(value)])
+          .filter(([assetId, value]) => assetId && Object.keys(value).length)
+      );
+    } catch {
+      return {};
+    }
+  }
+
   function stripProductionRenderSettings(notes) {
     return String(notes || "")
       .replace(/(?:^|\n)\[render-settings\]\s*[^\n]*(?=\n|$)/ig, "")
+      .replace(/(?:^|\n)\[render-overrides\]\s*[^\n]*(?=\n|$)/ig, "")
       .replace(/^\s*\n/, "")
       .replace(/\n{3,}/g, "\n\n")
       .trim();
@@ -3845,16 +3876,39 @@
       pacing: $("prRenderPacing")?.value || "normal",
       fit: $("prRenderFit")?.value || "smart_crop",
       beat_sync: $("prRenderBeatSync")?.checked === false ? "off" : "on",
+      ai_motion: $("prRenderAiMotion")?.checked ? "on" : "off",
     };
+  }
+
+  function collectProductionFrameOverridesFromUi() {
+    const next = {};
+    document.querySelectorAll("[data-render-frame-asset]").forEach((card) => {
+      const assetId = String(card.dataset.renderFrameAsset || "").trim();
+      if (!assetId) return;
+      const value = {};
+      card.querySelectorAll("[data-render-frame-field]").forEach((input) => {
+        const field = String(input.dataset.renderFrameField || "").trim();
+        const selected = String(input.value || "").trim();
+        if (field && selected) value[field] = selected;
+      });
+      const normalized = normalizeProductionRenderOverride(value);
+      if (Object.keys(normalized).length) next[assetId] = normalized;
+    });
+    productionRenderFrameOverrides = next;
+    return next;
   }
 
   function mergeProductionRenderSettings(notes) {
     const clean = stripProductionRenderSettings(notes);
     const settings = collectProductionRenderSettings();
+    const overrides = collectProductionFrameOverridesFromUi();
     const directive = "[render-settings] " + Object.entries(settings)
       .map(([key, value]) => key + "=" + (String(value || "auto").trim() || "auto"))
       .join("; ");
-    return [clean, directive].filter(Boolean).join("\n");
+    const frameDirective = Object.keys(overrides).length
+      ? "[render-overrides] " + encodeURIComponent(JSON.stringify(overrides))
+      : "";
+    return [clean, directive, frameDirective].filter(Boolean).join("\n");
   }
 
   function syncProductionRenderUi() {
@@ -3880,6 +3934,7 @@
     setSelectValue("prRenderPacing", next.pacing, "normal");
     setSelectValue("prRenderFit", next.fit, "smart_crop");
     if ($("prRenderBeatSync")) $("prRenderBeatSync").checked = next.beat_sync !== "off";
+    if ($("prRenderAiMotion")) $("prRenderAiMotion").checked = next.ai_motion === "on";
     syncProductionRenderUi();
   }
 
@@ -3893,6 +3948,72 @@
       ...PRODUCTION_RENDER_DEFAULTS,
       ...(PRODUCTION_RENDER_PRESETS[key] || {}),
       preset: key,
+    });
+  }
+
+  function productionRenderOption(value, label, selected) {
+    return `<option value="${escapeHtml(value)}"${value === selected ? " selected" : ""}>${escapeHtml(label)}</option>`;
+  }
+
+  function renderProductionFrameOverrides(status = item4Workspace) {
+    const host = $("prRenderFrameOverrides");
+    if (!host) return;
+    const assets = (Array.isArray(status?.assets) ? status.assets : [])
+      .filter((asset) => asset && !item4AssetLooksLikeVideo(asset))
+      .slice()
+      .sort((a, b) => Number(a.order || 0) - Number(b.order || 0));
+    const clear = $("prRenderClearFrameOverrides");
+    if (clear) clear.disabled = !Object.keys(productionRenderFrameOverrides || {}).length;
+    if (!assets.length) {
+      host.innerHTML = '<div class="empty compact-empty">Add photos in Media to configure individual motion.</div>';
+      return;
+    }
+    host.innerHTML = assets.map((asset, index) => {
+      const assetId = String(asset.id || asset.media_asset_record_id || "").trim();
+      const override = normalizeProductionRenderOverride(productionRenderFrameOverrides?.[assetId]);
+      const name = String(asset.name || asset.file_name || `Photo ${index + 1}`);
+      const preview = item4AssetPreviewUrl(asset);
+      const visual = preview
+        ? `<img src="${escapeHtml(preview)}" alt="" loading="lazy">`
+        : "<span>No preview</span>";
+      return `<div class="production-render-frame-card" data-render-frame-asset="${escapeHtml(assetId)}">
+        <div class="production-render-frame-preview">${visual}</div>
+        <div class="production-render-frame-meta"><strong>#${index + 1} · ${escapeHtml(name)}</strong><small>${escapeHtml(assetId || "Pending asset")}</small></div>
+        <label class="form-field"><span>Motion</span><select data-render-frame-field="motion">
+          ${productionRenderOption("", "Inherit / AI", override.motion || "")}
+          ${productionRenderOption("static", "Static", override.motion || "")}
+          ${productionRenderOption("ken_burns", "Ken Burns", override.motion || "")}
+          ${productionRenderOption("slow_zoom_in", "Slow Zoom In", override.motion || "")}
+          ${productionRenderOption("slow_zoom_out", "Slow Zoom Out", override.motion || "")}
+          ${productionRenderOption("pan_left", "Pan Left", override.motion || "")}
+          ${productionRenderOption("pan_right", "Pan Right", override.motion || "")}
+          ${productionRenderOption("pan_up", "Pan Up", override.motion || "")}
+          ${productionRenderOption("pan_down", "Pan Down", override.motion || "")}
+        </select></label>
+        <label class="form-field"><span>Transition</span><select data-render-frame-field="transition">
+          ${productionRenderOption("", "Inherit", override.transition || "")}
+          ${productionRenderOption("crossfade", "Crossfade", override.transition || "")}
+          ${productionRenderOption("dissolve", "Dissolve", override.transition || "")}
+          ${productionRenderOption("slide", "Slide", override.transition || "")}
+          ${productionRenderOption("push", "Push", override.transition || "")}
+          ${productionRenderOption("zoom", "Zoom", override.transition || "")}
+          ${productionRenderOption("blur_fade", "Blur Fade", override.transition || "")}
+          ${productionRenderOption("dip_black", "Dip to Black", override.transition || "")}
+          ${productionRenderOption("none", "None", override.transition || "")}
+        </select></label>
+        <label class="form-field production-render-frame-fit"><span>Image fit</span><select data-render-frame-field="fit">
+          ${productionRenderOption("", "Inherit", override.fit || "")}
+          ${productionRenderOption("smart_crop", "Smart Crop", override.fit || "")}
+          ${productionRenderOption("cover", "Cover", override.fit || "")}
+          ${productionRenderOption("contain", "Contain", override.fit || "")}
+        </select></label>
+      </div>`;
+    }).join("");
+    host.querySelectorAll("[data-render-frame-field]").forEach((input) => {
+      input.addEventListener("change", () => {
+        collectProductionFrameOverridesFromUi();
+        if (clear) clear.disabled = !Object.keys(productionRenderFrameOverrides || {}).length;
+      });
     });
   }
 
@@ -7647,6 +7768,7 @@
     }
     hydrateEzCaptionDrafts(status);
     const sortedAssets = assets.slice().sort((a, b) => Number(a.order || 0) - Number(b.order || 0));
+    renderProductionFrameOverrides({ ...(status || {}), assets: sortedAssets });
     const signature = sortedAssets.map((asset) => `${asset.id}|${asset.order}|${asset.name}|${asset.poster_url || ""}|${asset.preview_url || ""}|${asset.google_drive_file_id || ""}`).join(";");
     if (!assets.length && (item4Uploading || ezStagedFiles.length || String(status?.assets_status || "") === "Uploading")) {
       item4AssetStripSignature = "";
@@ -10707,7 +10829,9 @@
     $("prRequestedScript").value = record.requested_script || "";
     syncProductionNarrationEstimate();
     const renderSettings = parseProductionRenderSettings(record.production_notes || "");
+    productionRenderFrameOverrides = parseProductionRenderOverrides(record.production_notes || "");
     hydrateProductionRenderSettings(renderSettings);
+    renderProductionFrameOverrides({ assets: record.studio_master_assets || item4Workspace?.assets || [] });
     $("prProductionNotes").value = stripProductionRenderSettings(record.production_notes || "");
     hydratePrimaryLocationFromSources({ record, idea: activeIdea, force: true });
     const musicId = Array.isArray(record.selected_music_asset_links) ? record.selected_music_asset_links[0] : "";
@@ -11447,7 +11571,12 @@
     "prRenderPacing",
     "prRenderFit",
     "prRenderBeatSync",
+    "prRenderAiMotion",
   ].forEach((id) => $(id)?.addEventListener("change", syncProductionRenderUi));
+  $("prRenderClearFrameOverrides")?.addEventListener("click", () => {
+    productionRenderFrameOverrides = {};
+    renderProductionFrameOverrides(item4Workspace);
+  });
 
   $("item4PrepareVariants")?.addEventListener("click", prepareItem4Variants);
   document.querySelectorAll("[data-pr-input]").forEach((button) => {
