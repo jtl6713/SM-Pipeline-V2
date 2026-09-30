@@ -240,3 +240,9 @@ Deploy Studio Pages production
 Reason: Add drag-and-drop Pipeline scheduling calendar with 30-minute slots, unscheduled output tray, and full Platform Output name/ID hover/focus tooltips
 UI: 0.6.430-calendar-drag-drop
 Requested: 2026-09-29
+
+
+Deploy Studio Pages production
+Reason: Default Pipeline schedules now start empty; Use default schedules explicitly fills/clears intelligent unapproved-output suggestions; unsaved outputs remain in Ready to schedule tray
+UI: 0.6.431-calendar-ready-tray
+Requested: 2026-09-29
