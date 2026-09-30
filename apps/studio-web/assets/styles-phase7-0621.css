@@ -2960,7 +2960,8 @@ body:has(#page-content.active) .studio-footer-links button:hover{
 .pipeline-schedule-overview-heading { align-items: flex-start; gap: 18px; }
 .pipeline-schedule-overview-actions { display: flex; align-items: flex-start; justify-content: flex-end; gap: 14px; flex-wrap: wrap; }
 .pipeline-schedule-legend { display: flex; gap: 10px; flex-wrap: wrap; color: var(--muted, #667085); font-size: 12px; }
-.pipeline-schedule-legend span { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
+.pipeline-schedule-legend label { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; cursor: pointer; user-select: none; }
+.pipeline-schedule-legend input[type="checkbox"] { width: 14px; height: 14px; margin: 0 2px 0 0; cursor: pointer; accent-color: var(--teal, #08715a); }
 .pipeline-schedule-legend b,
 .pipeline-schedule-chip { display: inline-flex; align-items: center; justify-content: center; min-width: 26px; min-height: 22px; padding: 2px 6px; border-radius: 999px; border: 1px solid rgba(100, 116, 139, .24); font-size: 11px; font-weight: 800; line-height: 1; }
 .pipeline-schedule-grid-wrap { overflow-x: auto; border: 1px solid var(--border, #e5e7eb); border-radius: 12px; background: var(--panel, #fff); }
@@ -3024,11 +3025,11 @@ body:has(#page-content.active) .studio-footer-links button:hover{
 .pipeline-schedule-entry[data-platform="tiktok"] .pipeline-schedule-entry-code { background: #111827; color: #fff; }
 .pipeline-schedule-entry[data-platform="youtube"] .pipeline-schedule-entry-code { background: #ff0000; color: #fff; }
 
-.pipeline-schedule-legend span[data-platform] { padding: 3px 7px; border: 1px solid transparent; border-radius: 999px; }
-.pipeline-schedule-legend span[data-platform="instagram"] { background: #fdf2f8; border-color: #c13584; color: #7a1f58; }
-.pipeline-schedule-legend span[data-platform="facebook"] { background: #eff6ff; border-color: #1877f2; color: #174ea6; }
-.pipeline-schedule-legend span[data-platform="tiktok"] { background: #f3f4f6; border-color: #111827; color: #111827; }
-.pipeline-schedule-legend span[data-platform="youtube"] { background: #fff1f2; border-color: #ff0000; color: #b91c1c; }
+.pipeline-schedule-legend label[data-platform] { padding: 3px 7px; border: 1px solid transparent; border-radius: 999px; }
+.pipeline-schedule-legend label[data-platform="instagram"] { background: #fdf2f8; border-color: #c13584; color: #7a1f58; }
+.pipeline-schedule-legend label[data-platform="facebook"] { background: #eff6ff; border-color: #1877f2; color: #174ea6; }
+.pipeline-schedule-legend label[data-platform="tiktok"] { background: #f3f4f6; border-color: #111827; color: #111827; }
+.pipeline-schedule-legend label[data-platform="youtube"] { background: #fff1f2; border-color: #ff0000; color: #b91c1c; }
 .pipeline-schedule-cell { min-height: 42px; }
 .pipeline-schedule-cell-inner { min-height: 38px; flex-direction: column; align-items: stretch; justify-content: flex-start; gap: 4px; }
 .pipeline-schedule-cell[role="button"] { cursor: pointer; }

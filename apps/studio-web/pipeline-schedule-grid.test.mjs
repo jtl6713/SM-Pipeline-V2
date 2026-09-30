@@ -96,6 +96,22 @@ test("Pipeline calendar supports drag/drop scheduling with full output identity 
   assert.match(app, /pipelineUnscheduledScheduleRecords/);
 });
 
+test("platform legend checkboxes filter scheduled bubbles and ready tray without changing saved schedules", () => {
+  const here = path.dirname(fileURLToPath(import.meta.url));
+  const html = fs.readFileSync(path.join(here, "index.html"), "utf8");
+  const app = fs.readFileSync(path.join(here, "assets", "app-item4-0625.js"), "utf8");
+  assert.match(html, /data-pipeline-schedule-platform-filter="instagram" checked/);
+  assert.match(html, /data-pipeline-schedule-platform-filter="facebook" checked/);
+  assert.match(html, /data-pipeline-schedule-platform-filter="tiktok" checked/);
+  assert.match(html, /data-pipeline-schedule-platform-filter="youtube" checked/);
+  assert.match(app, /const pipelineScheduleVisiblePlatforms = new Set\(PIPELINE_SCHEDULE_PLATFORM_KEYS\)/);
+  assert.match(app, /function pipelineScheduleRecordVisible/);
+  assert.match(app, /visibleRecords = \(Array\.isArray\(records\) \? records : \[\]\)\.filter\(pipelineScheduleRecordVisible\)/);
+  assert.match(app, /pipelineUnscheduledScheduleRecords\(\)\.filter\(pipelineScheduleRecordVisible\)/);
+  assert.match(app, /checkbox\.addEventListener\("change"/);
+  assert.match(app, /renderPipelineScheduleGrid\(pipelineScheduleGridRecords\)/);
+});
+
 test("30-minute schedule grid exposes slot helpers", () => {
   const day = new Date(2026, 8, 21, 0, 0, 0, 0);
   assert.equal(grid.slotDate(day, 31).getHours(), 15);
@@ -123,10 +139,10 @@ test("platform colors are visually distinct and the ready tray stays visible whi
   const here = path.dirname(fileURLToPath(import.meta.url));
   const html = fs.readFileSync(path.join(here, "index.html"), "utf8");
   const css = fs.readFileSync(path.join(here, "assets", "styles-phase7-0621.css"), "utf8");
-  assert.match(html, /data-platform="instagram"><b>IG<\/b>/);
-  assert.match(html, /data-platform="facebook"><b>FB<\/b>/);
-  assert.match(html, /data-platform="tiktok"><b>TT<\/b>/);
-  assert.match(html, /data-platform="youtube"><b>YT<\/b>/);
+  assert.match(html, /data-platform="instagram"><input[^>]*data-pipeline-schedule-platform-filter="instagram"[^>]*checked><b>IG<\/b>/);
+  assert.match(html, /data-platform="facebook"><input[^>]*data-pipeline-schedule-platform-filter="facebook"[^>]*checked><b>FB<\/b>/);
+  assert.match(html, /data-platform="tiktok"><input[^>]*data-pipeline-schedule-platform-filter="tiktok"[^>]*checked><b>TT<\/b>/);
+  assert.match(html, /data-platform="youtube"><input[^>]*data-pipeline-schedule-platform-filter="youtube"[^>]*checked><b>YT<\/b>/);
   assert.match(css, /pipeline-schedule-entry\[data-platform="instagram"\][^\n]*border-color: #c13584/);
   assert.match(css, /pipeline-schedule-entry\[data-platform="facebook"\][^\n]*border-color: #1877f2/);
   assert.match(css, /pipeline-schedule-entry\[data-platform="tiktok"\][^\n]*border-color: #111827/);

@@ -201,6 +201,8 @@
   let pipelineContentRecords = [];
   let pipelineScheduleGridRecords = [];
   let pipelineScheduleGridOpen = false;
+  const PIPELINE_SCHEDULE_PLATFORM_KEYS = ["instagram", "facebook", "tiktok", "youtube"];
+  const pipelineScheduleVisiblePlatforms = new Set(PIPELINE_SCHEDULE_PLATFORM_KEYS);
   let pipelineScheduleDragOutputId = "";
   let pipelineScheduleSelectedOutputId = "";
   const pipelineScheduleMovePending = new Set();
@@ -250,7 +252,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.432-calendar-platform-colors";
+  const BUILD_ID = "item4-0.6.433-calendar-platform-filters";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -16122,6 +16124,30 @@
     });
   }
 
+  function pipelineSchedulePlatformKey(record) {
+    return String(record?.platform || "").trim().toLowerCase();
+  }
+
+  function pipelineScheduleRecordVisible(record) {
+    const key = pipelineSchedulePlatformKey(record);
+    return !PIPELINE_SCHEDULE_PLATFORM_KEYS.includes(key) || pipelineScheduleVisiblePlatforms.has(key);
+  }
+
+  function bindPipelineSchedulePlatformFilters() {
+    document.querySelectorAll("[data-pipeline-schedule-platform-filter]").forEach((checkbox) => {
+      const key = String(checkbox.dataset.pipelineSchedulePlatformFilter || "").trim().toLowerCase();
+      if (!key) return;
+      checkbox.checked = pipelineScheduleVisiblePlatforms.has(key);
+      if (checkbox.dataset.bound) return;
+      checkbox.dataset.bound = "true";
+      checkbox.addEventListener("change", () => {
+        if (checkbox.checked) pipelineScheduleVisiblePlatforms.add(key);
+        else pipelineScheduleVisiblePlatforms.delete(key);
+        renderPipelineScheduleGrid(pipelineScheduleGridRecords);
+      });
+    });
+  }
+
   function renderPipelineScheduleGrid(records = pipelineScheduleGridRecords, error = "") {
     const target = $("pipelineScheduleGrid");
     const summary = $("pipelineScheduleGridSummary");
@@ -16130,10 +16156,12 @@
     const helper = globalThis.PipelineScheduleGrid;
     if (!target || !helper?.sevenDayWindow || !helper?.aggregate || !helper?.slotDate || !helper?.slotKey) return;
 
+    bindPipelineSchedulePlatformFilters();
     const windowValue = helper.sevenDayWindow(new Date());
-    const cells = helper.aggregate(records, windowValue);
+    const visibleRecords = (Array.isArray(records) ? records : []).filter(pipelineScheduleRecordVisible);
+    const cells = helper.aggregate(visibleRecords, windowValue);
     const total = [...cells.values()].reduce((sum, cell) => sum + Number(cell?.total || 0), 0);
-    const unscheduled = pipelineUnscheduledScheduleRecords();
+    const unscheduled = pipelineUnscheduledScheduleRecords().filter(pipelineScheduleRecordVisible);
     const lastDay = windowValue.days[6];
     const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || "local time";
     if (summary) {
