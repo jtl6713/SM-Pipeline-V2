@@ -102,6 +102,8 @@ def test_asset_and_caption_helpers():
     assert reconcile_caption(_record(Output_Caption="Hello", Output_Hashtags="#Chicago")) == "Hello\n\n#Chicago"
     assert expected_child_count(_record(IG_Carousel_Child_Count=3), 3) == 3
     assert expected_child_count(_record(), 4) == 4
+    assert expected_child_count(_record(IG_Carousel_Child_Count=12), 12) == 10
+    assert expected_child_count(_record(Image_Count=20), 20) == 10
 
 
 def test_ap4c_expired_media_restarts_container_chain():
