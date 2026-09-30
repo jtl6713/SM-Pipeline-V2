@@ -252,7 +252,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.441-home-scheduled-platforms";
+  const BUILD_ID = "item4-0.6.442-home-refresh-inflight";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -713,7 +713,11 @@
     button.addEventListener("click", () => loadPage(button.dataset.refresh, true));
   });
 
-  $("refreshDashboard").addEventListener("click", () => loadDashboard(true));
+  $("refreshDashboard").addEventListener("click", () => {
+    dashboardLastRefreshAt = 0;
+    updateDashboardLiveHint();
+    loadDashboard(true);
+  });
   $("operationsResetRenderUrls")?.addEventListener("click", async () => {
     try {
       setOperationsMessage("Resetting stale Remotion URLs…");
@@ -1709,6 +1713,7 @@
 
   let dashboardInflight = null;
   let dashboardInflightKey = "";
+  let dashboardLoadGeneration = 0;
 
   function homePageActive() {
     return isHubPage(studioPage);
@@ -1732,10 +1737,8 @@
       hint.textContent = "";
       return;
     }
-    // Keep the last "Updated …" text during background polls so Refreshing
-    // never looks like a missing fourth platform under the scheduled list.
-    if (dashboardInflight && !dashboardLastRefreshAt) {
-      hint.textContent = "Loading…";
+    if (dashboardInflight) {
+      hint.textContent = dashboardLastRefreshAt ? "Refreshing…" : "Loading…";
       return;
     }
     if (!dashboardLastRefreshAt) {
@@ -1830,12 +1833,13 @@
 
   async function loadDashboard(force = false) {
     const key = selectedProfileId || "default";
-    // Never stack home reads. Forced polls coalesce onto the in-flight fetch.
-    if (dashboardInflight && dashboardInflightKey === key) {
+    // Background polls coalesce. Refresh / force always starts a new read.
+    if (!force && dashboardInflight && dashboardInflightKey === key) {
       ensureDashboardPoll();
       updateDashboardLiveHint();
       return dashboardInflight;
     }
+    const generation = ++dashboardLoadGeneration;
     const list = $("recentOutputs");
     const run = (async () => {
       updateDashboardLiveHint();
@@ -1844,16 +1848,18 @@
       }
       try {
         // Use the same lean Pipeline outputs feed so Home cards match Pipeline filters.
+        const stamp = Date.now();
         const [outputsSettled, ideasSettled] = await Promise.all([
-          api("/api/outputs?limit=250", { timeoutMs: 20000, retries: 2 }).then(
+          api(`/api/outputs?limit=250&_=${stamp}`, { timeoutMs: 20000, retries: 2 }).then(
             (value) => ({ ok: true, value }),
             (error) => ({ ok: false, error }),
           ),
-          api("/api/ideas?limit=100", { timeoutMs: 15000, retries: 1 }).then(
+          api(`/api/ideas?limit=100&_=${stamp}`, { timeoutMs: 15000, retries: 1 }).then(
             (value) => ({ ok: true, value }),
             (error) => ({ ok: false, error }),
           ),
         ]);
+        if (generation !== dashboardLoadGeneration) return;
         if (!outputsSettled.ok) throw outputsSettled.error || new Error("Outputs unavailable");
         const outputs = Array.isArray(outputsSettled.value?.records) ? outputsSettled.value.records : [];
         const ideas = ideasSettled.ok
@@ -1875,6 +1881,7 @@
         renderDashboardPanel();
         updateDashboardLiveHint();
       } catch (e) {
+        if (generation !== dashboardLoadGeneration) return;
         renderScheduledContentOverview(dashboardCache.outputs || []);
         renderDashboardMetrics();
         updateDashboardLiveHint();
@@ -1883,14 +1890,20 @@
         }
       }
     })();
+    // Assign the fetch promise itself. Wrapping with .finally() and comparing
+    // back to `run` left dashboardInflight stuck forever, so polls and Refresh
+    // returned the first resolved promise and never fetched again.
     dashboardInflightKey = key;
-    dashboardInflight = run.finally(() => {
+    dashboardInflight = run;
+    run.finally(() => {
       if (dashboardInflight === run) {
         dashboardInflight = null;
         dashboardInflightKey = "";
       }
-      ensureDashboardPoll();
-      updateDashboardLiveHint();
+      if (generation === dashboardLoadGeneration) {
+        ensureDashboardPoll();
+        updateDashboardLiveHint();
+      }
     });
     return dashboardInflight;
   }

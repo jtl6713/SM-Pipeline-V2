@@ -304,3 +304,9 @@ Deploy Studio Pages production
 Reason: Always show Facebook/Instagram/TikTok/YouTube on Scheduled content; move live hint out of the list
 UI: 0.6.441-home-scheduled-platforms
 Requested: 2026-09-30
+
+
+Deploy Studio Pages production
+Reason: Home poll and Refresh were no-ops because dashboardInflight never cleared after the first fetch
+UI: 0.6.442-home-refresh-inflight
+Requested: 2026-09-30
