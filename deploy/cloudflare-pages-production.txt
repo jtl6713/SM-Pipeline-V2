@@ -320,3 +320,9 @@ Deploy Studio Pages production
 Reason: Make Find images now immediately visible beside Listen for photos in Manage Idea; correct copy to 5-minute automatic matching; strengthen no-cache headers after custom-domain purge auth failures
 UI: 0.6.444-idea-find-images-visible
 Requested: 2026-09-30
+
+Deploy Studio Pages production
+Reason: Count future-scheduled YouTube uploads on Home Scheduled content and align visible UI build label/cache key
+UI: 0.6.445-youtube-scheduled-count
+Source before deploy: 682685c0bb161dc9cc67edc5d3f66c190e570014
+Requested: 2026-09-30
