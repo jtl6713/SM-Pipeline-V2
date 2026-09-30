@@ -33,7 +33,7 @@ DEFAULT_MAX_POLL_ATTEMPTS = 20
 DEFAULT_RECONCILE_MAX_ATTEMPTS = 5
 DEFAULT_R2_PREFIX = "publish/instagram-carousel"
 PUBLIC_MEDIA_BASE = "https://media.chicagoshining.com"
-MAX_SLIDES = 20
+MAX_SLIDES = 10
 
 RETRY_MINUTES = 2
 
