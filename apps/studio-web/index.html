@@ -9,7 +9,7 @@
  <link rel="preconnect" href="https://fonts.googleapis.com">
  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@1,600;1,700&family=Inter:wght@400;500;600;700;800&family=Oswald:wght@500&display=swap">
- <link rel="stylesheet" href="/assets/styles-phase7-0621.css?v=0.6.431-calendar-ready-tray">
+ <link rel="stylesheet" href="/assets/styles-phase7-0621.css?v=0.6.432-calendar-platform-colors">
  <link rel="stylesheet" href="/assets/insights-0622.css?v=0.6.381-insights-padding">
  <link rel="stylesheet" href="/assets/clean-enterprise.css?v=0.6.375-clean-enterprise">
  <link rel="stylesheet" href="/assets/ai-api-footer.css?v=0.6.427-primary-ai-alert">
@@ -912,13 +912,13 @@
  <span class="eyebrow">Rolling 7-day view</span>
  <h2>Drag-and-drop publishing calendar</h2>
  <p id="pipelineScheduleGridSummary">Loading the next seven days…</p>
- <p class="subtle">Drag an output bubble into a 30-minute slot. Hover or focus a bubble to see its full Platform Output name and ID. You can also click a bubble, then click a slot.</p>
+ <p class="subtle">The Ready to schedule tray stays visible below. Click Show calendar to reveal the 7-day grid, then drag an output bubble into a 30-minute slot. Hover or focus a bubble to see its full Platform Output name and ID.</p>
  </div>
  <div class="pipeline-schedule-overview-actions">
  <div class="pipeline-schedule-legend" aria-label="Platform abbreviations">
- <span><b>IG</b> Instagram</span><span><b>FB</b> Facebook</span><span><b>TT</b> TikTok</span><span><b>YT</b> YouTube</span>
+ <span data-platform="instagram"><b>IG</b> Instagram</span><span data-platform="facebook"><b>FB</b> Facebook</span><span data-platform="tiktok"><b>TT</b> TikTok</span><span data-platform="youtube"><b>YT</b> YouTube</span>
  </div>
- <button type="button" class="secondary-button" id="pipelineScheduleGridToggle" aria-expanded="false" aria-controls="pipelineScheduleGridBody">Expand</button>
+ <button type="button" class="secondary-button" id="pipelineScheduleGridToggle" aria-expanded="false" aria-controls="pipelineScheduleGridBody">Show calendar</button>
  </div>
  </div>
  <div id="pipelineScheduleGridBody">
@@ -1999,7 +1999,7 @@
  <div class="studio-footer-meta">
  <span id="aiApiFooter" aria-live="polite"><strong>AI API:</strong> loading…</span>
  <span id="apiStatus" class="topbar-status">Connecting…</span>
- <span id="uiBuildLabel">UI build 0.6.431</span>
+ <span id="uiBuildLabel">UI build 0.6.432</span>
  <span id="workerBuildLabel">Worker …</span> </div>
  </footer>
 
@@ -2158,9 +2158,9 @@
 
  <script src="/assets/config-0621.js?v=0.6.344-idea-mixed-media"></script>
  <script src="/assets/ez-plan.js?v=0.6.376-recommend-carousel-slides"></script>
- <script src="/assets/pipeline-schedule-grid-0622.js?v=0.6.431-calendar-ready-tray"></script>
+ <script src="/assets/pipeline-schedule-grid-0622.js?v=0.6.432-calendar-platform-colors"></script>
  <script src="/assets/platform-schedule-calendar-0924.js?v=0.6.380-branch-reconcile"></script>
- <script src="/assets/app-item4-0625.js?v=0.6.431-calendar-ready-tray"></script>
+ <script src="/assets/app-item4-0625.js?v=0.6.432-calendar-platform-colors"></script>
  <script src="/assets/insights-0622.js?v=0.6.365-first-party-analytics-reconciled"></script>
  <script src="/assets/ai-api-footer.js?v=0.6.427-primary-ai-alert"></script>
  <script src="/assets/sticky-footer-scroll.js?v=0.6.378-sticky-footer-scroll"></script>

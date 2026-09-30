@@ -50,7 +50,7 @@ test("Pipeline schedule overview defaults collapsed", () => {
   const html = fs.readFileSync(path.join(here, "index.html"), "utf8");
   const app = fs.readFileSync(path.join(here, "assets", "app-item4-0625.js"), "utf8");
   assert.match(html, /pipeline-schedule-overview pipeline-schedule-collapsed/);
-  assert.match(html, /id="pipelineScheduleGridToggle" aria-expanded="false"[^>]*>Expand<\/button>/);
+  assert.match(html, /id="pipelineScheduleGridToggle" aria-expanded="false"[^>]*>Show calendar<\/button>/);
   assert.match(app, /let pipelineScheduleGridOpen = false/);
 });
 
@@ -116,4 +116,21 @@ test("default schedule suggestions start off, clear on untick, and do not hide r
   assert.match(app, /<strong>Ready to schedule<\/strong>/);
   assert.match(app, /clearDefaultSchedulesFromUnapprovedRows\(\);[\s\S]{0,240}if \(!useDefaults\)/);
   assert.match(app, /if \(next === "outputs"\)[\s\S]{0,220}previous !== "outputs"[\s\S]{0,220}restorePipelineUseDefaultSchedules\(\)[\s\S]{0,120}clearDefaultSchedulesFromUnapprovedRows\(\)/);
+});
+
+
+test("platform colors are visually distinct and the ready tray stays visible while the grid is collapsed", () => {
+  const here = path.dirname(fileURLToPath(import.meta.url));
+  const html = fs.readFileSync(path.join(here, "index.html"), "utf8");
+  const css = fs.readFileSync(path.join(here, "assets", "styles-phase7-0621.css"), "utf8");
+  assert.match(html, /data-platform="instagram"><b>IG<\/b>/);
+  assert.match(html, /data-platform="facebook"><b>FB<\/b>/);
+  assert.match(html, /data-platform="tiktok"><b>TT<\/b>/);
+  assert.match(html, /data-platform="youtube"><b>YT<\/b>/);
+  assert.match(css, /pipeline-schedule-entry\[data-platform="instagram"\][^\n]*border-color: #c13584/);
+  assert.match(css, /pipeline-schedule-entry\[data-platform="facebook"\][^\n]*border-color: #1877f2/);
+  assert.match(css, /pipeline-schedule-entry\[data-platform="tiktok"\][^\n]*border-color: #111827/);
+  assert.match(css, /pipeline-schedule-entry\[data-platform="youtube"\][^\n]*border-color: #ff0000/);
+  assert.match(css, /pipeline-schedule-collapsed \.pipeline-schedule-grid-scroll,[\s\S]{0,120}display: none/);
+  assert.doesNotMatch(css, /pipeline-schedule-collapsed #pipelineScheduleGridBody \{ display: none; \}/);
 });
