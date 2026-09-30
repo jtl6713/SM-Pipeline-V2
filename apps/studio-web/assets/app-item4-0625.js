@@ -247,7 +247,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.426-output-selection-authority";
+  const BUILD_ID = "item4-0.6.428-home-action-counts";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -1737,12 +1737,10 @@
   function dashboardCards() {
     const m = dashboardCache.metrics || {};
     return [
-      { view: "ideas", label: "Ideas", page: "ideas", number: m.ideas },
-      { view: "content", label: "Content items", page: "content", number: m.content_items },
-      { view: "all", label: "Platform outputs", page: "outputs", filter: "all", number: m.platform_outputs },
-      { view: "active", label: "Active outputs", page: "outputs", filter: "active", number: m.active_outputs },
-      { view: "attention", label: "Needs attention", page: "outputs", filter: "attention", number: m.attention_outputs },
-      { view: "published", label: "Published", page: "outputs", filter: "published", number: m.published_outputs },
+      { view: "manual", label: "Manual Action Required", page: "outputs", filter: "manual", number: m.manual_action_required },
+      { view: "failed", label: "Failed", page: "outputs", filter: "failed", number: m.failed_outputs },
+      { view: "approval", label: "Awaiting Approval", page: "outputs", filter: "approval", number: m.awaiting_approval },
+      { view: "ideas", label: "Ideas Not Yet in Production", page: "ideas", number: m.ideas_not_in_production },
     ];
   }
 
@@ -1801,11 +1799,17 @@
   }
 
   function openDashboardCard(page, filter) {
-    const next = dashboardViewForCard(page, filter);
-    dashboardView = dashboardView === next ? "recent" : next;
-    renderDashboardMetrics();
-    renderDashboardPanel();
-    $("recentOutputs")?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    if (page === "ideas") {
+      showStudioPage("ideas");
+      return;
+    }
+    if (page === "outputs") {
+      showStudioPage("outputs");
+      pipelineViewFilter = filter || "all";
+      clearPipelineColumnFilters();
+      renderPipeline();
+      return;
+    }
   }
 
   function ideaPathMode() {
@@ -15301,6 +15305,9 @@
   function pipelineFilterLabel(filter = pipelineViewFilter) {
     if (filter === "active") return "Active outputs";
     if (filter === "attention") return "Needs attention";
+    if (filter === "manual") return "Manual Action Required";
+    if (filter === "failed") return "Failed";
+    if (filter === "approval") return "Awaiting Approval";
     if (filter === "published") return "Published";
     return "All outputs";
   }
@@ -15310,6 +15317,9 @@
     if (!filter || filter === "all") return true;
     if (filter === "published") return state === "Published";
     if (filter === "attention") return ["Failed", "Retry Pending", "Manual Action Required"].includes(state);
+    if (filter === "manual") return state === "Manual Action Required";
+    if (filter === "failed") return state === "Failed";
+    if (filter === "approval") return state === "Ready for Review" || state === "Awaiting Approval" || String(record?.review_status || "").trim() === "Pending" || String(record?.output_status || "").trim() === "Ready for Review";
     if (filter === "active") return !["Published", "Skipped", "Failed"].includes(state);
     return true;
   }

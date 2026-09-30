@@ -110,3 +110,16 @@ test("Rendered still-source video outputs classify as Photo Set instead of Carou
   assert.match(app, /renderedVideoTypes = new Set\(\["Reel", "Story", "Video Draft", "Short", "Slideshow Reel", "Slideshow Video"\]\)/);
   assert.match(app, /const next = "Photo Set"/);
 });
+
+
+test("Home dashboard exposes only actionable counts and filtered destinations", () => {
+  assert.match(source, /label: "Manual Action Required".*filter: "manual"/s);
+  assert.match(source, /label: "Failed".*filter: "failed"/s);
+  assert.match(source, /label: "Awaiting Approval".*filter: "approval"/s);
+  assert.match(source, /label: "Ideas Not Yet in Production".*page: "ideas"/s);
+  assert.doesNotMatch(source, /label: "Platform outputs"/);
+  assert.doesNotMatch(source, /label: "Active outputs"/);
+  assert.doesNotMatch(source, /label: "Published"/);
+  assert.match(source, /if \(filter === "manual"\) return state === "Manual Action Required"/);
+  assert.match(source, /if \(filter === "failed"\) return state === "Failed"/);
+});

@@ -31598,6 +31598,23 @@ async function dashboard(request, env, url, authorization) {
   const published = mappedOutputs.filter((o) => o.studio_state === "Published").length;
   const attention = mappedOutputs.filter((o) => attentionStates.has(o.studio_state)).length;
   const active = mappedOutputs.filter((o) => !["Published", "Skipped", "Failed"].includes(o.studio_state)).length;
+  const manualAction = mappedOutputs.filter((o) => o.studio_state === "Manual Action Required").length;
+  const failed = mappedOutputs.filter((o) => o.studio_state === "Failed").length;
+  const awaitingApproval = mappedOutputs.filter((o) => {
+    const state = String(o.studio_state || "").trim();
+    const review = String(o.review_status || "").trim();
+    const output = String(o.output_status || "").trim();
+    return state === "Ready for Review"
+      || state === "Awaiting Approval"
+      || review === "Pending"
+      || output === "Ready for Review";
+  }).length;
+  const ideasNotInProduction = ideas.filter((idea) => {
+    const status = String(idea.status || idea.idea_status || "").trim().toLowerCase();
+    const promoted = Boolean(idea.promoted_content_item_id)
+      || (Array.isArray(idea.promoted_content_item_links) && idea.promoted_content_item_links.length > 0);
+    return !promoted && status !== "archived" && status !== "deleted";
+  }).length;
 
   return respond(request, env, {
     ok: true,
@@ -31608,6 +31625,10 @@ async function dashboard(request, env, url, authorization) {
       active_outputs: active,
       attention_outputs: attention,
       published_outputs: published,
+      manual_action_required: manualAction,
+      failed_outputs: failed,
+      awaiting_approval: awaitingApproval,
+      ideas_not_in_production: ideasNotInProduction,
     },
     ideas,
     content,
