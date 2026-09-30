@@ -3266,6 +3266,7 @@ function mapOutput(record, job = null) {
     preview_kind: studioPreviewKind(record),
     output_url: f(record, "Output_URL"),
     platform_post_url: f(record, "Platform_Post_URL"),
+    platform_post_id: f(record, "Platform_Post_ID"),
     published_at: f(record, "Published_At"),
     insights_views: f(record, "Insights_Views"),
     insights_likes: f(record, "Insights_Likes"),
@@ -28530,6 +28531,9 @@ async function studioAttachFacebookNativeCover(env, record) {
   const last = { status: response.status, payload };
   if (response.ok && !payload?.error) {
       const published = /published/i.test(String(f(record, "Publish_Status") || "")) || Boolean(f(record, "Published_At"));
+      const postId = String(f(record, "Platform_Post_ID") || videoId || "").trim();
+      const storedPostUrl = String(f(record, "Platform_Post_URL") || "").trim();
+      const postUrl = storedPostUrl || (postId ? `https://www.facebook.com/reel/${encodeURIComponent(postId)}/` : "");
       const note = [String(f(record, "Studio_Publish_Dispatch_Note") || "").trim(), STUDIO_FB_COVER_ATTACHED_MARK]
         .filter(Boolean)
         .join("\n")
@@ -28548,6 +28552,10 @@ async function studioAttachFacebookNativeCover(env, record) {
             }).slice(0, 90000),
             Publish_Error_Stage: "",
             Publish_Error_Message: "",
+            // The cover-heal path may be the first code path to confirm the Reel is live.
+            // Always retain enough Facebook identity for Studio's generic Open post link.
+            ...(postId ? { Platform_Post_ID: postId } : {}),
+            ...(postUrl ? { Platform_Post_URL: postUrl } : {}),
             // Stale FBS2 staging errors must not keep painting Failed after a live Reel exists.
             FB_Slideshow_Error_Message: "",
             Publish_Asset_Error_Message: "",
@@ -28560,7 +28568,7 @@ async function studioAttachFacebookNativeCover(env, record) {
           },
         }),
       });
-    return { ok: true, attached: true, video_id: videoId, cover_url: coverUrl, status: response.status };
+    return { ok: true, attached: true, video_id: videoId, cover_url: coverUrl, post_url: postUrl || null, status: response.status };
   }
   const message = last.payload?.error?.message || `thumbnail attach ${last.status}`;
   if (!/published/i.test(String(f(record, "Publish_Status") || "")) && !f(record, "Published_At")) {
