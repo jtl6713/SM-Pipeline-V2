@@ -252,7 +252,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.436-production-open-light";
+  const BUILD_ID = "item4-0.6.437-home-awaiting-approval";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -1720,7 +1720,7 @@
           metrics: m,
           ideas: Array.isArray(data.ideas) ? data.ideas : [],
           content: Array.isArray(data.content) ? data.content : [],
-          outputs: Array.isArray(data.outputs) && data.outputs.length ? data.outputs : (data.recent_outputs || []),
+          outputs: Array.isArray(data.outputs) ? data.outputs : (data.recent_outputs || []),
         };
         renderDashboardMetrics();
         renderDashboardPanel();
@@ -1747,10 +1747,14 @@
 
   function dashboardCards() {
     const m = dashboardCache.metrics || {};
+    const outputs = Array.isArray(dashboardCache.outputs) ? dashboardCache.outputs : [];
+    const manualActionCount = outputs.filter((record) => pipelineRecordMatchesFilter(record, "manual")).length;
+    const failedCount = outputs.filter((record) => pipelineRecordMatchesFilter(record, "failed")).length;
+    const awaitingApprovalCount = outputs.filter((record) => pipelineRecordMatchesFilter(record, "approval")).length;
     return [
-      { view: "manual", label: "Manual Action Required", page: "outputs", filter: "manual", number: m.manual_action_required },
-      { view: "failed", label: "Failed", page: "outputs", filter: "failed", number: m.failed_outputs },
-      { view: "approval", label: "Awaiting Approval", page: "outputs", filter: "approval", number: m.awaiting_approval },
+      { view: "manual", label: "Manual Action Required", page: "outputs", filter: "manual", number: manualActionCount },
+      { view: "failed", label: "Failed", page: "outputs", filter: "failed", number: failedCount },
+      { view: "approval", label: "Awaiting Approval", page: "outputs", filter: "approval", number: awaitingApprovalCount },
       { view: "ideas", label: "Ideas Not Yet in Production", page: "ideas", number: m.ideas_not_in_production },
     ];
   }
@@ -15430,7 +15434,7 @@
     if (filter === "attention") return ["Failed", "Retry Pending", "Manual Action Required"].includes(state);
     if (filter === "manual") return state === "Manual Action Required";
     if (filter === "failed") return state === "Failed";
-    if (filter === "approval") return state === "Ready for Review" || state === "Awaiting Approval" || String(record?.review_status || "").trim() === "Pending" || String(record?.output_status || "").trim() === "Ready for Review";
+    if (filter === "approval") return creativeCanApproveForPublishing(record) && !pipelineRecordIsAzAutoQueue(record);
     if (filter === "active") return !["Published", "Skipped", "Failed"].includes(state);
     return true;
   }
