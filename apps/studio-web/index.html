@@ -9,7 +9,7 @@
  <link rel="preconnect" href="https://fonts.googleapis.com">
  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@1,600;1,700&family=Inter:wght@400;500;600;700;800&family=Oswald:wght@500&display=swap">
- <link rel="stylesheet" href="/assets/styles-phase7-0621.css?v=0.6.444-idea-find-images-visible">
+ <link rel="stylesheet" href="/assets/styles-phase7-0621.css?v=0.6.446-render-controls-tabs">
  <link rel="stylesheet" href="/assets/insights-0622.css?v=0.6.381-insights-padding">
  <link rel="stylesheet" href="/assets/clean-enterprise.css?v=0.6.375-clean-enterprise">
  <link rel="stylesheet" href="/assets/ai-api-footer.css?v=0.6.427-primary-ai-alert">
@@ -448,7 +448,13 @@
  </ol>
 
  <form id="productionRequestForm" class="production-request-form production-studio-form">
- <div class="request-section item4-master-media-section production-step-card">
+ <nav class="production-workspace-tabs" id="productionWorkspaceTabs" role="tablist" aria-label="Production workspace">
+ <button type="button" class="production-workspace-tab active" role="tab" aria-selected="true" data-production-workspace-tab="media">Media</button>
+ <button type="button" class="production-workspace-tab" role="tab" aria-selected="false" tabindex="-1" data-production-workspace-tab="formats">Platforms &amp; Frames</button>
+ <button type="button" class="production-workspace-tab" role="tab" aria-selected="false" tabindex="-1" data-production-workspace-tab="rendering">Rendering</button>
+ <button type="button" class="production-workspace-tab" role="tab" aria-selected="false" tabindex="-1" data-production-workspace-tab="details">Details</button>
+ </nav>
+ <div class="request-section item4-master-media-section production-step-card" data-production-workspace-panel="media">
  <div class="request-section-heading item4-heading-row">
  <h3 id="item4MediaHeading">Photos</h3>
  <span class="item4-state-pill" id="item4AssetStatus" data-state="idle">No media yet</span>
@@ -519,7 +525,7 @@
  <div class="item4-asset-strip" id="item4AssetStrip"><div class="empty compact-empty"></div></div>
  </div>
 
- <div class="request-section item4-output-plan-section production-step-card">
+ <div class="request-section item4-output-plan-section production-step-card" data-production-workspace-panel="formats" hidden>
  <div class="request-section-heading item4-heading-row">
  <h3>Platforms</h3>
  <span class="item4-state-pill" id="item4PlanStatus" data-state="idle">Not started</span>
@@ -537,7 +543,7 @@
  <span>Frame each post next.</span>
  </div>
  </div>
- <div class="request-section item4-variant-section production-step-card">
+ <div class="request-section item4-variant-section production-step-card" data-production-workspace-panel="formats" hidden>
  <div class="request-section-heading item4-heading-row">
  <h3>Frames</h3>
  <span class="item4-state-pill" id="item4VariantStatus" data-state="idle">Waiting</span>
@@ -551,6 +557,92 @@
  <div class="item4-variant-gallery" id="item4VariantGallery"><div class="empty compact-empty"></div></div>
  </div>
 
+ <div class="request-section production-render-settings production-step-card" data-production-workspace-panel="rendering" hidden>
+ <div class="request-section-heading item4-heading-row">
+ <div>
+ <h3>Still image rendering</h3>
+ <p>Choose an overall style for rendered photo videos. Auto keeps the current Studio behavior.</p>
+ </div>
+ <span class="item4-state-pill" id="prRenderStyleSummary" data-state="idle">Auto</span>
+ </div>
+ <div class="production-render-grid">
+ <label class="form-field"><span>Rendering preset</span>
+ <select id="prRenderPreset">
+ <option value="auto" selected>Auto / current behavior</option>
+ <option value="cinematic">Cinematic</option>
+ <option value="elegant">Elegant</option>
+ <option value="energetic">Energetic</option>
+ <option value="documentary">Documentary</option>
+ <option value="minimal">Minimal</option>
+ </select>
+ </label>
+ <label class="form-field"><span>Motion style</span>
+ <select id="prRenderMotion">
+ <option value="auto" selected>Auto</option>
+ <option value="static">Static</option>
+ <option value="ken_burns">Ken Burns</option>
+ <option value="slow_zoom_in">Slow Zoom In</option>
+ <option value="slow_zoom_out">Slow Zoom Out</option>
+ <option value="pan_left">Pan Left</option>
+ <option value="pan_right">Pan Right</option>
+ <option value="pan_up">Pan Up</option>
+ <option value="pan_down">Pan Down</option>
+ </select>
+ </label>
+ <label class="form-field"><span>Transition</span>
+ <select id="prRenderTransition">
+ <option value="auto" selected>Auto</option>
+ <option value="crossfade">Crossfade</option>
+ <option value="dissolve">Dissolve</option>
+ <option value="slide">Slide</option>
+ <option value="push">Push</option>
+ <option value="zoom">Zoom</option>
+ <option value="blur_fade">Blur Fade</option>
+ <option value="dip_black">Dip to Black</option>
+ <option value="none">None</option>
+ </select>
+ </label>
+ <label class="form-field"><span>Transition duration (seconds)</span>
+ <input id="prRenderTransitionDuration" type="number" min="0.1" max="2" step="0.05" placeholder="Auto">
+ </label>
+ <label class="form-field"><span>Image duration</span>
+ <select id="prRenderImageDurationMode">
+ <option value="auto" selected>Auto from video timing</option>
+ <option value="fixed">Fixed per still</option>
+ </select>
+ </label>
+ <label class="form-field" id="prRenderImageDurationSecondsWrap" hidden><span>Seconds per still</span>
+ <input id="prRenderImageDurationSeconds" type="number" min="1" max="15" step="0.25" value="3">
+ </label>
+ <label class="form-field"><span>Motion intensity</span>
+ <select id="prRenderIntensity">
+ <option value="subtle">Subtle</option>
+ <option value="normal" selected>Normal</option>
+ <option value="dramatic">Dramatic</option>
+ </select>
+ </label>
+ <label class="form-field"><span>Pacing</span>
+ <select id="prRenderPacing">
+ <option value="relaxed">Relaxed</option>
+ <option value="normal" selected>Normal</option>
+ <option value="fast">Fast</option>
+ </select>
+ </label>
+ <label class="form-field"><span>Image fit</span>
+ <select id="prRenderFit">
+ <option value="smart_crop" selected>Smart Crop</option>
+ <option value="cover">Cover</option>
+ <option value="contain">Contain</option>
+ </select>
+ </label>
+ <label class="production-render-toggle">
+ <input id="prRenderBeatSync" type="checkbox" checked>
+ <span><strong>Beat sync when available</strong><small>Keep image changes aligned to music timing when the pipeline has beat data.</small></span>
+ </label>
+ </div>
+ <p class="ez-option-hint">These settings are stored with this Production Request and become clip-level render instructions. A future per-frame editor can override any individual still without changing the global style.</p>
+ </div>
+
  <div class="form-message" id="productionRequestMessage" aria-live="polite"></div>
  <div class="form-message" id="productionPromotionCompatibility"></div>
  <div class="request-actions production-studio-actions">
@@ -560,7 +652,7 @@
  <button type="button" class="primary-button" id="promoteProductionRequest">Approve</button>
  </div>
 
- <details class="ez-advanced production-advanced" id="ezAdvancedOptions">
+ <details class="ez-advanced production-advanced" id="ezAdvancedOptions" data-production-workspace-panel="details" hidden>
  <summary>More options</summary>
  <p class="ez-advanced-note">Outputs, audio, wording, and notes.</p>
 
@@ -2168,7 +2260,7 @@
  <script src="/assets/ez-plan.js?v=0.6.376-recommend-carousel-slides"></script>
  <script src="/assets/pipeline-schedule-grid-0622.js?v=0.6.436-production-open-light"></script>
  <script src="/assets/platform-schedule-calendar-0924.js?v=0.6.380-branch-reconcile"></script>
- <script src="/assets/app-item4-0625.js?v=0.6.445-youtube-scheduled-count"></script>
+ <script src="/assets/app-item4-0625.js?v=0.6.446-render-controls-tabs"></script>
  <script src="/assets/insights-0622.js?v=0.6.365-first-party-analytics-reconciled"></script>
  <script src="/assets/ai-api-footer.js?v=0.6.427-primary-ai-alert"></script>
  <script src="/assets/sticky-footer-scroll.js?v=0.6.378-sticky-footer-scroll"></script>
