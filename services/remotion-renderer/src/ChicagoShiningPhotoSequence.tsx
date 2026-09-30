@@ -89,9 +89,14 @@ export type PhotoSequenceFocalPoint =
 export type PhotoSequenceTransitionType =
   | "none"
   | "fade"
+  | "dissolve"
   | "slideLeft"
   | "slideRight"
-  | "zoom";
+  | "pushLeft"
+  | "pushRight"
+  | "zoom"
+  | "blurFade"
+  | "dipBlack";
 
 export type PhotoSequenceTransition = {
   type?: PhotoSequenceTransitionType;
@@ -140,6 +145,7 @@ export type ChicagoShiningPhotoClip = {
   motionStyle?: string;
   motion?: {
     type?: PhotoSequenceMotion;
+    intensity?: "subtle" | "normal" | "dramatic";
   };
   voiceover?: {
     enabled?: boolean;
@@ -803,6 +809,9 @@ const ImageSegment: React.FC<{
   const {entering, exiting} = useTransitionProgress();
 
   const motionType = resolveMotionType(clip);
+  const motionIntensity = String(clip.motion?.intensity ?? "normal").trim().toLowerCase();
+  const motionFactor =
+    motionIntensity === "subtle" ? 0.65 : motionIntensity === "dramatic" ? 1.45 : 1;
   const progress = interpolate(
     frame,
     [0, Math.max(1, durationInFrames - 1)],
@@ -810,37 +819,43 @@ const ImageSegment: React.FC<{
     {extrapolateLeft: "clamp", extrapolateRight: "clamp"},
   );
 
+  const zoomDelta = 0.045 * motionFactor;
+  const panScaleDelta = 0.08 * motionFactor;
+  const kenBurnsDelta = 0.07 * motionFactor;
+  const panTravel = 8 * motionFactor;
+  const kenBurnsTravel = 6 * motionFactor;
+
   const motionScale =
     motionType === "none"
       ? 1
       : motionType === "slowZoomOut"
-        ? 1.045 - 0.045 * progress
+        ? 1 + zoomDelta - zoomDelta * progress
         : motionType === "panLeft" ||
             motionType === "panRight" ||
             motionType === "panUp" ||
             motionType === "panDown"
-          ? 1.08
+          ? 1 + panScaleDelta
           : motionType === "kenBurnsLeft" ||
               motionType === "kenBurnsRight"
-            ? 1 + 0.07 * progress
-            : 1 + 0.045 * progress;
+            ? 1 + kenBurnsDelta * progress
+            : 1 + zoomDelta * progress;
 
   const translateX =
     motionType === "panLeft"
-      ? 4 - 8 * progress
+      ? panTravel / 2 - panTravel * progress
       : motionType === "panRight"
-        ? -4 + 8 * progress
+        ? -panTravel / 2 + panTravel * progress
         : motionType === "kenBurnsLeft"
-          ? 3 - 6 * progress
+          ? kenBurnsTravel / 2 - kenBurnsTravel * progress
           : motionType === "kenBurnsRight"
-            ? -3 + 6 * progress
+            ? -kenBurnsTravel / 2 + kenBurnsTravel * progress
             : 0;
 
   const translateY =
     motionType === "panUp"
-      ? 4 - 8 * progress
+      ? panTravel / 2 - panTravel * progress
       : motionType === "panDown"
-        ? -4 + 8 * progress
+        ? -panTravel / 2 + panTravel * progress
         : 0;
 
   const mediaTransform =
@@ -854,6 +869,15 @@ const ImageSegment: React.FC<{
   const transitionExitScale =
     exitTransitionType === "zoom" ? 1 + exiting * 0.03 : 1;
   const nativeTransitionScale = transitionEntryScale * transitionExitScale;
+  const transitionBlur =
+    (entryTransitionType === "blurFade" ? (1 - entering) * 10 : 0) +
+    (exitTransitionType === "blurFade" ? exiting * 10 : 0);
+  const dipBlackOpacity =
+    entryTransitionType === "dipBlack"
+      ? Math.pow(entering, 2)
+      : exitTransitionType === "dipBlack"
+        ? Math.pow(1 - exiting, 2)
+        : 1;
 
   // Preserve the pre-existing first-scene reveal. There is no adjacent scene
   // before clip 1, so this is an intro reveal rather than an interscene
@@ -869,15 +893,16 @@ const ImageSegment: React.FC<{
   const introOpacity =
     !introTransitionType || introTransitionType === "none"
       ? 1
-      : introTransitionType === "fade"
+      : ["fade", "dissolve", "blurFade", "dipBlack"].includes(introTransitionType)
         ? introProgress
         : Math.min(1, 0.4 + introProgress * 0.6);
   const introTranslateX =
-    introTransitionType === "slideLeft"
+    introTransitionType === "slideLeft" || introTransitionType === "pushLeft"
       ? (1 - introProgress) * 12
-      : introTransitionType === "slideRight"
+      : introTransitionType === "slideRight" || introTransitionType === "pushRight"
         ? -(1 - introProgress) * 12
         : 0;
+  const introBlur = introTransitionType === "blurFade" ? (1 - introProgress) * 10 : 0;
   const introScale =
     introTransitionType === "zoom" ? 0.96 + introProgress * 0.04 : 1;
 
@@ -907,7 +932,8 @@ const ImageSegment: React.FC<{
     <AbsoluteFill
       style={{
         backgroundColor: "black",
-        opacity: introOpacity,
+        opacity: introOpacity * dipBlackOpacity,
+        filter: (introBlur + transitionBlur) > 0 ? `blur(${introBlur + transitionBlur}px)` : undefined,
         transform: `translateX(${introTranslateX}%) scale(${introScale * nativeTransitionScale})`,
       }}
     >
@@ -1444,7 +1470,7 @@ React.FC<ChicagoShiningPhotoSequenceProps> = ({
     });
     const transitionKey = `transition-${index}-${outgoingTransition.type}`;
 
-    if (outgoingTransition.type === "slideLeft") {
+    if (outgoingTransition.type === "slideLeft" || outgoingTransition.type === "pushLeft") {
       transitionSeriesItems.push(
         <TransitionSeries.Transition
           key={transitionKey}
@@ -1455,7 +1481,7 @@ React.FC<ChicagoShiningPhotoSequenceProps> = ({
       return;
     }
 
-    if (outgoingTransition.type === "slideRight") {
+    if (outgoingTransition.type === "slideRight" || outgoingTransition.type === "pushRight") {
       transitionSeriesItems.push(
         <TransitionSeries.Transition
           key={transitionKey}
