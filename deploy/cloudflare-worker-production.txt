@@ -313,3 +313,9 @@ Deploy Studio API Worker production
 Reason: Open existing Photos Ready Production Requests directly; make Production Request GET/open lightweight; add separate permanent photo-listener stop action.
 Requested: 2026-09-29
 Source before deploy: a315171b1ab6de8e463225b2a792e79ff4319b37
+
+
+Deploy Studio API Worker production
+Reason: Make Production Request light/list mapping truly lightweight by never parsing master asset, plan, variant, or publish JSON before the workspace opens.
+Requested: 2026-09-29
+Source before deploy: 938f0da2bcdec2b8f60c82e2683215fdfd06601c

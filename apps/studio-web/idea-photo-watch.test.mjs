@@ -64,6 +64,26 @@ test("Manage Idea pauses automatic photo listening and close resumes it", () => 
   assert.match(app, /setInterval\(pulse, 5 \* 60 \* 1000\)/);
 });
 
+test("Production open/list mappers never parse heavy Item 4 JSON on the critical path", () => {
+  const lightStart = worker.indexOf("function mapProductionRequestLight");
+  const lightEnd = worker.indexOf("function mapProductionRequestSummary", lightStart);
+  const lightBody = worker.slice(lightStart, lightEnd);
+  assert.doesNotMatch(lightBody, /mapProductionRequest\(/);
+  assert.doesNotMatch(lightBody, /item4ParseJson/);
+  assert.doesNotMatch(lightBody, /Studio_Master_Assets_JSON/);
+  assert.doesNotMatch(lightBody, /Studio_Output_Plan_JSON/);
+  assert.doesNotMatch(lightBody, /Studio_Variant_Manifest_JSON/);
+
+  const summaryStart = worker.indexOf("function mapProductionRequestSummary");
+  const summaryEnd = worker.indexOf("async function listProductionRequests", summaryStart);
+  const summaryBody = worker.slice(summaryStart, summaryEnd);
+  assert.match(summaryBody, /mapProductionRequestLight\(record, ideaTitle\)/);
+  assert.doesNotMatch(summaryBody, /mapProductionRequest\(record, ideaTitle\)/);
+
+  assert.match(app, /production-requests\/\$\{encodeURIComponent\(directId\)\}\?fields=light/);
+  assert.match(worker, /url\.searchParams\.get\("fields"\)/);
+});
+
 test("Open Production prefers the existing draft and never blocks on photo hydration", () => {
   assert.match(app, /findExistingProductionRequestForIdea/);
   assert.match(app, /idea\?\.production_request_id/);

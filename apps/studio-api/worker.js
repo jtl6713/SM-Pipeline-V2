@@ -13086,7 +13086,7 @@ async function getOrCreateProductionRequestForIdea(request, env, url, authorizat
     return respond(request, env, {
       ok: true,
       created: false,
-      record: mapProductionRequest(existing),
+      record: mapProductionRequestLight(existing),
     });
   }
 
@@ -13094,7 +13094,7 @@ async function getOrCreateProductionRequestForIdea(request, env, url, authorizat
   return respond(request, env, {
     ok: true,
     created: true,
-    record: mapProductionRequest(created),
+    record: mapProductionRequestLight(created),
   }, 201);
 }
 
@@ -13112,7 +13112,7 @@ async function createProductionRequestFromBody(request, env, authorization, url,
     return respond(request, env, {
       ok: true,
       created: false,
-      record: mapProductionRequest(existing),
+      record: mapProductionRequestLight(existing),
     });
   }
 
@@ -13128,26 +13128,76 @@ async function createProductionRequestFromBody(request, env, authorization, url,
   return respond(request, env, {
     ok: true,
     created: true,
-    record: mapProductionRequest(created),
+    record: mapProductionRequestLight(created),
   }, 201);
 }
 
 
 function mapProductionRequestLight(record, ideaTitle = null) {
-  const mapped = mapProductionRequest(record, ideaTitle);
-  // Omit multi-MB JSON blobs on Save/status responses; the open workspace already
-  // holds masters/plan/manifest and merges these fields back locally.
-  const {
-    studio_master_assets: _assets,
-    studio_output_plan: _plan,
-    studio_variant_manifest: _manifest,
-    ...light
-  } = mapped;
-  return light;
+  // Critical-path mapper for opening/listing Production Requests.
+  // Do NOT call mapProductionRequest here: that parses multi-MB asset, plan,
+  // variant and publish JSON fields before discarding them, which can exhaust
+  // the Worker on large photo ideas such as Wabash Mural Spring.
+  const links = (name) => Array.isArray(f(record, name)) ? f(record, name) : [];
+  return {
+    id: record.id,
+    production_request_id: f(record, "Production_Request_ID"),
+    test_run_id: f(record, "Test_Run_ID") || null,
+    idea_candidate_links: links("Idea_Candidate"),
+    idea_record_id: links("Idea_Candidate")[0] || null,
+    idea_title: ideaTitle || String(f(record, "Idea_Title") || "").trim() || null,
+    organization_links: links("Organization"),
+    brand_links: links("Brand"),
+    created_by_links: links("Created_By"),
+    status: f(record, "Request_Status"),
+    content_type: f(record, "Master_Content_Type"),
+    platforms: f(record, "Target_Platforms") || [],
+    voiceover_mode: f(record, "Voiceover_Mode"),
+    voice_id: f(record, "Voice_ID") || null,
+    voice_name: f(record, "Voice_Name") || null,
+    background_music_mode: f(record, "Background_Music_Mode"),
+    thumbnail_mode: f(record, "Thumbnail_Mode"),
+    video_duration_seconds: f(record, "Video_Duration_Seconds"),
+    voiceover_duration_seconds: f(record, "Voiceover_Duration_Seconds"),
+    music_start_seconds: f(record, "Music_Start_Seconds"),
+    video_clip_count_mode: f(record, "Video_Clip_Count_Mode"),
+    video_clip_count_exact: f(record, "Video_Clip_Count_Exact"),
+    video_clip_count_min: f(record, "Video_Clip_Count_Min"),
+    video_clip_count_max: f(record, "Video_Clip_Count_Max"),
+    carousel_slide_count_mode: f(record, "Carousel_Slide_Count_Mode"),
+    carousel_slide_count_exact: f(record, "Carousel_Slide_Count_Exact"),
+    carousel_slide_count_min: f(record, "Carousel_Slide_Count_Min"),
+    carousel_slide_count_max: f(record, "Carousel_Slide_Count_Max"),
+    carousel_image_mode: f(record, "Carousel_Image_Mode"),
+    voiceover_tail_seconds: f(record, "Voiceover_Tail_Seconds"),
+    selected_music_asset_links: links("Selected_Music_Asset"),
+    title_mode: f(record, "Title_Mode"),
+    requested_title: f(record, "Requested_Title"),
+    caption_mode: f(record, "Caption_Mode"),
+    requested_caption: f(record, "Requested_Caption"),
+    script_mode: f(record, "Script_Mode"),
+    requested_script: f(record, "Requested_Script"),
+    primary_location: String(f(record, "Primary_Location") || "").trim() || null,
+    production_notes: f(record, "Production_Notes"),
+    created_at: f(record, "Created_At"),
+    updated_at: f(record, "Updated_At"),
+    submitted_at: f(record, "Submitted_At"),
+    promoted_content_item_links: links("Promoted_Content_Item"),
+    active: Boolean(f(record, "Active")),
+    studio_master_asset_count: Number(f(record, "Studio_Master_Asset_Count") || 0),
+    studio_master_asset_status: f(record, "Studio_Master_Asset_Status") || "None",
+    studio_output_plan_status: f(record, "Studio_Output_Plan_Status") || "Needs Plan",
+    studio_variant_status: f(record, "Studio_Variant_Status") || "None",
+    studio_variant_updated_at: f(record, "Studio_Variant_Updated_At") || null,
+    studio_variant_error: f(record, "Studio_Variant_Error") || null,
+    studio_item4_state: f(record, "Studio_Item4_State") || "Draft",
+    studio_publish_batch_id: f(record, "Studio_Publish_Batch_ID") || null,
+    studio_publish_requested_at: f(record, "Studio_Publish_Requested_At") || null,
+  };
 }
 
 function mapProductionRequestSummary(record, ideaTitle = null) {
-  const mapped = mapProductionRequest(record, ideaTitle);
+  const mapped = mapProductionRequestLight(record, ideaTitle);
   return {
     id: mapped.id,
     production_request_id: mapped.production_request_id,
@@ -13161,15 +13211,33 @@ function mapProductionRequestSummary(record, ideaTitle = null) {
     status: mapped.status,
     content_type: mapped.content_type,
     platforms: mapped.platforms,
-    // Voice fields must ride the draft list: Continue opens from this summary, and a
-    // missing voice_id made the UI fall back to Kate then quiet-save over Admin Hank.
     voiceover_mode: mapped.voiceover_mode,
     voice_id: mapped.voice_id,
     voice_name: mapped.voice_name,
     background_music_mode: mapped.background_music_mode,
+    thumbnail_mode: mapped.thumbnail_mode,
     video_duration_seconds: mapped.video_duration_seconds,
+    voiceover_duration_seconds: mapped.voiceover_duration_seconds,
+    music_start_seconds: mapped.music_start_seconds,
+    video_clip_count_mode: mapped.video_clip_count_mode,
+    video_clip_count_exact: mapped.video_clip_count_exact,
+    video_clip_count_min: mapped.video_clip_count_min,
+    video_clip_count_max: mapped.video_clip_count_max,
     carousel_slide_count_mode: mapped.carousel_slide_count_mode,
     carousel_slide_count_exact: mapped.carousel_slide_count_exact,
+    carousel_slide_count_min: mapped.carousel_slide_count_min,
+    carousel_slide_count_max: mapped.carousel_slide_count_max,
+    carousel_image_mode: mapped.carousel_image_mode,
+    voiceover_tail_seconds: mapped.voiceover_tail_seconds,
+    selected_music_asset_links: mapped.selected_music_asset_links,
+    title_mode: mapped.title_mode,
+    requested_title: mapped.requested_title,
+    caption_mode: mapped.caption_mode,
+    requested_caption: mapped.requested_caption,
+    script_mode: mapped.script_mode,
+    requested_script: mapped.requested_script,
+    primary_location: mapped.primary_location,
+    production_notes: mapped.production_notes,
     created_at: mapped.created_at,
     updated_at: mapped.updated_at,
     submitted_at: mapped.submitted_at,
@@ -13179,6 +13247,8 @@ function mapProductionRequestSummary(record, ideaTitle = null) {
     studio_master_asset_status: mapped.studio_master_asset_status,
     studio_output_plan_status: mapped.studio_output_plan_status,
     studio_variant_status: mapped.studio_variant_status,
+    studio_variant_updated_at: mapped.studio_variant_updated_at,
+    studio_variant_error: mapped.studio_variant_error,
     studio_item4_state: mapped.studio_item4_state,
   };
 }
@@ -13235,9 +13305,12 @@ async function getProductionRequest(request, env, url, authorization, ctx = null
   const record = await loadAuthorizedProductionRequest(env, recordId, authorization);
   const ideaId = ideaRecordIdFromProductionRequest(record);
   const ideaTitles = await loadIdeaTitlesByRecordId(env, [ideaId]);
+  const light = String(url.searchParams.get("fields") || "").trim().toLowerCase() === "light";
   return respond(request, env, {
     ok: true,
-    record: mapProductionRequest(record, ideaTitles.get(ideaId) || null),
+    record: light
+      ? mapProductionRequestLight(record, ideaTitles.get(ideaId) || null)
+      : mapProductionRequest(record, ideaTitles.get(ideaId) || null),
   });
 }
 

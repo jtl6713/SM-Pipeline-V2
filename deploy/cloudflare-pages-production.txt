@@ -266,3 +266,10 @@ Reason: Open existing Production Request before any heavy hydration; recover fro
 UI: 0.6.435-production-open-existing-draft
 Requested: 2026-09-29
 Source before deploy: a315171b1ab6de8e463225b2a792e79ff4319b37
+
+
+Deploy Studio Pages production
+Reason: Open linked Production Request with ?fields=light so large matched-photo ideas cannot 500 before Production is visible.
+UI: 0.6.436-production-open-light
+Requested: 2026-09-29
+Source before deploy: 938f0da2bcdec2b8f60c82e2683215fdfd06601c
