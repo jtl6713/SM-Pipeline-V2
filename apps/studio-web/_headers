@@ -1,8 +1,12 @@
 /
-  Cache-Control: no-store
+  Cache-Control: no-store, no-cache, max-age=0, must-revalidate
+  CDN-Cache-Control: no-store
+  Cloudflare-CDN-Cache-Control: no-store
 
 /index.html
-  Cache-Control: no-store
+  Cache-Control: no-store, no-cache, max-age=0, must-revalidate
+  CDN-Cache-Control: no-store
+  Cloudflare-CDN-Cache-Control: no-store
 
 # Do not use immutable year-long caching for Studio assets. Filenames are
 # reused across deploys; immutable + same path left operators on stale UI
