@@ -1,7 +1,10 @@
 from studio_produce.stamp import (
+    _ai_directed_motion,
     _render_fit,
     _render_motion,
+    _render_override_for_item,
     _render_transition,
+    render_overrides_from_request,
     render_settings_from_request,
 )
 from t1.processor import _beat_sync_disabled
@@ -67,3 +70,70 @@ def test_beat_sync_off_is_carried_by_render_clip_contract():
     }
     assert _beat_sync_disabled(disabled) is True
     assert _beat_sync_disabled(enabled) is False
+
+
+
+def test_per_photo_render_overrides_parse_and_match_source_asset():
+    import json
+    from urllib.parse import quote
+
+    encoded = quote(json.dumps({
+        "recSourceA": {"motion": "pan_left", "transition": "none", "fit": "contain"},
+        "recSourceB": {"motion": ""},
+    }), safe="")
+    overrides = render_overrides_from_request(_request(f"[render-overrides] {encoded}"))
+    assert overrides == {
+        "recSourceA": {"motion": "pan_left", "transition": "none", "fit": "contain"},
+    }
+    item = {
+        "source": {"id": "recSourceA"},
+        "media_asset_id": "recMediaA",
+    }
+    assert _render_override_for_item(overrides, item)["motion"] == "pan_left"
+
+
+def test_ai_motion_is_opt_in_and_skips_explicit_frame_override(monkeypatch):
+    seen = {}
+
+    def fake_classify(prompt, *, image_urls=None, max_output_tokens=0):
+        seen["prompt"] = prompt
+        seen["urls"] = list(image_urls or [])
+        return {
+            "parsed": {
+                "motions": [
+                    {"index": 1, "motion": "slow_zoom_in", "reason": "centered skyline"},
+                ]
+            }
+        }
+
+    import a3.openai_classify as openai_classify
+    monkeypatch.setattr(openai_classify, "classify_asset", fake_classify)
+
+    clips = [
+        {
+            "source": {"id": "recA"},
+            "media_asset_id": "recMediaA",
+            "media_kind": "photo",
+            "url": "https://media.example/a.jpg",
+        },
+        {
+            "source": {"id": "recB"},
+            "media_asset_id": "recMediaB",
+            "media_kind": "photo",
+            "url": "https://media.example/b.jpg",
+        },
+    ]
+    overrides = {"recB": {"motion": "pan_right"}}
+    settings = {
+        "ai_motion": "on",
+        "preset": "cinematic",
+        "intensity": "subtle",
+        "pacing": "relaxed",
+    }
+    directed = _ai_directed_motion(clips, settings, overrides)
+    assert directed[0]["motion"] == "slow_zoom_in"
+    assert 1 not in directed
+    assert seen["urls"] == ["https://media.example/a.jpg"]
+
+    settings["ai_motion"] = "off"
+    assert _ai_directed_motion(clips, settings, overrides) == {}

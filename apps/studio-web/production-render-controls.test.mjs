@@ -30,6 +30,9 @@ test("Production exposes configurable still rendering controls", async () => {
     "prRenderPacing",
     "prRenderFit",
     "prRenderBeatSync",
+    "prRenderAiMotion",
+    "prRenderClearFrameOverrides",
+    "prRenderFrameOverrides",
   ]) {
     assert.match(html, new RegExp(`id="${id}"`));
   }
@@ -46,4 +49,17 @@ test("Rendering settings persist inside Production Request notes without showing
   assert.match(app, /\[render-settings\]/);
   assert.match(app, /production_notes:\s*mergeProductionRenderSettings/);
   assert.match(app, /hydrateProductionRenderSettings\(renderSettings\)/);
+});
+
+
+test("Production supports per-photo render overrides and AI-directed motion", async () => {
+  const app = await readFile(appPath, "utf8");
+  assert.match(app, /function parseProductionRenderOverrides\(/);
+  assert.match(app, /function renderProductionFrameOverrides\(/);
+  assert.match(app, /function collectProductionFrameOverridesFromUi\(/);
+  assert.match(app, /\[render-overrides\]/);
+  assert.match(app, /ai_motion:/);
+  assert.match(app, /data-render-frame-field="motion"/);
+  assert.match(app, /data-render-frame-field="transition"/);
+  assert.match(app, /data-render-frame-field="fit"/);
 });
