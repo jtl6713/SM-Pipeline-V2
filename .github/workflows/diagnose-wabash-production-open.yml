@@ -49,11 +49,15 @@ jobs:
               headers.set("Content-Type","application/json");
               payload=JSON.stringify(body||{});
             }
-            const r=await env.STUDIO_API.fetch(new Request("https://studio.chicagoshining.com"+path,{method,headers,body:payload}));
-            const text=await r.text();
-            let parsed;
-            try{ parsed=text?JSON.parse(text):null; }catch{ parsed={raw:text.slice(0,1000)}; }
-            return {path,method,status:r.status,ok:r.ok,body:parsed};
+            try{
+              const r=await env.STUDIO_API.fetch(new Request("https://studio.chicagoshining.com"+path,{method,headers,body:payload}));
+              const text=await r.text();
+              let parsed;
+              try{ parsed=text?JSON.parse(text):null; }catch{ parsed={raw:text.slice(0,1000)}; }
+              return {path,method,status:r.status,ok:r.ok,body:parsed,threw:false};
+            }catch(error){
+              return {path,method,status:599,ok:false,body:{error:String(error&&error.message||error)},threw:true};
+            }
           }
           function slim(result){
             const body=result&&result.body||{};
@@ -161,14 +165,13 @@ jobs:
           sleep 7
           code=$(curl -sS --max-time 120 -o /tmp/result.json -w '%{http_code}' "$URL/execute" || true)
           echo "bridge_http=$code"
-          test "$code" = 200
           echo '---WABASH_RESULT---'
-          jq . /tmp/result.json
+          if jq empty /tmp/result.json >/dev/null 2>&1; then jq . /tmp/result.json; else cat /tmp/result.json || true; fi
           sleep 7
           kill "$TAILPID" 2>/dev/null || true
           wait "$TAILPID" 2>/dev/null || true
           echo '---TAIL_ERRORS_AND_LOGS---'
-          cat /tmp/tail.log
+          cat /tmp/tail.log || true
           test -s /tmp/result.json
 
       - name: Delete diagnostic bridge
