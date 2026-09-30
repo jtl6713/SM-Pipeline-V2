@@ -56,3 +56,17 @@ def test_runtime_preference_falls_back_to_startup_default_on_airtable_error(monk
     monkeypatch.setattr(ai_api_preference, "AirtableClient", FakeClient)
 
     assert ai_api_preference.get_preferred_account({"openai_account": "SECONDARY"}) == "SECONDARY"
+
+
+def test_missing_startup_account_defaults_to_azure_not_primary(monkeypatch):
+    class FakeClient:
+        def __init__(self, settings):
+            pass
+
+        def list_records(self, table_id, **kwargs):
+            raise RuntimeError("simulated")
+
+    monkeypatch.setattr(ai_api_preference, "AirtableClient", FakeClient)
+
+    assert ai_api_preference.get_preferred_account({}) == "SECONDARY"
+    assert ai_api_preference.get_preferred_account({"openai_account": "bogus"}) == "SECONDARY"

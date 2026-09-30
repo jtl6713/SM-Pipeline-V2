@@ -104,32 +104,23 @@ def test_transient_azure_image_failure_does_not_touch_primary_by_default(monkeyp
     assert "/openai/v1/images/generations" in calls[0]
 
 
-def test_missing_preferred_azure_config_falls_back_when_enabled(monkeypatch):
+def test_missing_preferred_azure_config_fails_closed_even_when_failover_enabled(monkeypatch):
     settings = {
         "openai_secondary_provider": "azure",
         "openai_secondary_endpoint": "",
         "openai_secondary_image_deployment": "",
-        "ai_api_cross_provider_failover": "true",
         "openai_api_key_primary": "primary-key",
     }
+    called = False
 
-    class Response:
-        ok = True
-        status_code = 200
+    def fake_post(*args, **kwargs):
+        nonlocal called
+        called = True
+        return _Response(200)
 
-    calls = []
-
-    def fake_post(url, headers=None, json=None, timeout=None):
-        calls.append((url, headers, json))
-        return Response()
-
-    monkeypatch.setattr("ai_image_router.requests.post", fake_post)
-    monkeypatch.setattr("ai_image_router.get_preferred_account", lambda *_args, **_kwargs: "SECONDARY")
-    monkeypatch.setattr("ai_image_router.cross_provider_failover_enabled", lambda *_args, **_kwargs: True)
-    monkeypatch.setattr("ai_image_router._alert_if_primary", lambda *args, **kwargs: None)
-    monkeypatch.setattr("ai_image_router.record_success", lambda **kwargs: None)
-
-    response = post_image_generation(settings, {"model": "gpt-image-1", "prompt": "test"})
-    assert response.ok
-    assert len(calls) == 1
-    assert calls[0][0] == PRIMARY_IMAGES_URL
+    monkeypatch.setattr(ai_image_router, "get_preferred_account", lambda *_args, **_kwargs: "SECONDARY")
+    monkeypatch.setattr(ai_image_router, "cross_provider_failover_enabled", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr(requests, "post", fake_post)
+    with pytest.raises(RuntimeError, match="Refusing to fall through to PRIMARY"):
+        post_image_generation(settings, {"model": "gpt-image-1.5", "prompt": "test"})
+    assert called is False
