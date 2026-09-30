@@ -1,10 +1,11 @@
 {
-  "correlation_id": "IDEA-LIST-LIVE-DIAG-20260929",
+  "correlation_id": "OUTPUT-1235-AP3C-RECOVERY-20260930",
   "requests": [
     {
-      "name": "list-current-ideas",
-      "method": "GET",
-      "path": "/api/ideas?limit=30"
+      "name": "kick-output-1235",
+      "method": "POST",
+      "path": "/api/operations/outputs/recVphOmGqaxIYHSD/publish-kick",
+      "body": {}
     }
   ]
 }
