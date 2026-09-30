@@ -122,6 +122,9 @@ test("Home dashboard exposes only actionable counts and filtered destinations", 
   assert.doesNotMatch(source, /label: "Published"/);
   assert.match(source, /if \(filter === "manual"\) return state === "Manual Action Required"/);
   assert.match(source, /if \(filter === "failed"\) return state === "Failed"/);
+  assert.match(source, /if \(filter === "approval"\) return creativeCanApproveForPublishing\(record\) && !pipelineRecordIsAzAutoQueue\(record\)/);
+  assert.match(source, /const awaitingApprovalCount = outputs\.filter\(\(record\) => pipelineRecordMatchesFilter\(record, "approval"\)\)\.length/);
+  assert.doesNotMatch(source, /filter === "approval"[^\n]*review_status[^\n]*Pending/);
 });
 
 
