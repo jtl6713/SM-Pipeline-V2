@@ -250,7 +250,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.431-calendar-ready-tray";
+  const BUILD_ID = "item4-0.6.432-calendar-platform-colors";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -16172,7 +16172,7 @@
 
     if (panel) panel.classList.toggle("pipeline-schedule-collapsed", !pipelineScheduleGridOpen);
     if (toggle) {
-      toggle.textContent = pipelineScheduleGridOpen ? "Collapse" : "Expand";
+      toggle.textContent = pipelineScheduleGridOpen ? "Hide calendar" : "Show calendar";
       toggle.setAttribute("aria-expanded", pipelineScheduleGridOpen ? "true" : "false");
       if (!toggle.dataset.bound) {
         toggle.dataset.bound = "true";
