@@ -247,7 +247,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.428-home-action-counts";
+  const BUILD_ID = "item4-0.6.429-photo-match-timeout-recovery";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -2775,6 +2775,9 @@
       const result = await api(`/api/ideas/${encodeURIComponent(activeIdea.id)}/match-photos`, {
         method: "POST",
         body: JSON.stringify({ force: true }),
+        // Matching can scan/rank a large Studio library and may also attach
+        // watermarked assets. The generic 25s write timeout is too short.
+        timeoutMs: 120000,
       });
       updateIdeaDrawer(result.record);
       await Promise.all([loadIdeas(), loadDashboard(), loadProductionRequests()]);
@@ -2783,7 +2786,31 @@
         : `Still listening. ${result.photo_wait?.high_count || 0} high-confidence matches so far.`,
         result.photo_wait?.action === "ready" ? "success" : "");
     } catch (error) {
-      setManageMessage(error.message || "Could not match photos.", "error-text");
+      if (isTimeoutError(error)) {
+        // A timed-out POST may still finish server-side. Do not tell the user
+        // that photo listening failed or encourage a duplicate write. Refresh
+        // the authoritative idea state and leave listening armed.
+        try {
+          await sleepMs(1500);
+          const refreshed = await api(`/api/ideas/${encodeURIComponent(activeIdea.id)}`, {
+            timeoutMs: 30000,
+            retries: 2,
+          });
+          if (refreshed?.record) updateIdeaDrawer(refreshed.record);
+          await Promise.all([loadIdeas(), loadDashboard(), loadProductionRequests()]);
+          const status = String(refreshed?.record?.photo_wait_status || activeIdea?.photo_wait_status || "").trim();
+          setManageMessage(
+            status === "Ready"
+              ? "Photos finished matching after the request took longer than expected. Open Production to continue."
+              : "Photo matching is taking longer than expected. Listening is still active; Studio will keep checking automatically.",
+            status === "Ready" ? "success" : ""
+          );
+        } catch (_refreshError) {
+          setManageMessage("Photo matching is taking longer than expected. Listening remains active and will continue automatically.", "");
+        }
+      } else {
+        setManageMessage(error.message || "Could not match photos.", "error-text");
+      }
     } finally {
       button.textContent = "Match photos now";
       if (activeIdea && String(activeIdea.photo_wait_status || "") === "Waiting") button.disabled = false;
