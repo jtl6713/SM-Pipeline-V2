@@ -221,3 +221,10 @@ Requested: 2026-09-28T23:02:00-05:00
 Deploy Studio Web production
 Reason: Surface last PRIMARY OpenAI hit stage in AI API footer and ship primary-usage alert UI
 Requested: 2026-09-29
+
+
+Deploy Studio Pages production
+Reason: Ship Home actionable counts and filtered Pipeline links
+UI: 0.6.428-home-action-counts
+Source merge: 961acd14c36d88d5f92a99788995a1bed6dfe2d5
+Requested: 2026-09-29
