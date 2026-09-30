@@ -4,6 +4,7 @@ from datetime import timedelta
 from typing import Any
 
 from asset.helpers import parse_int
+from apc.constants import MAX_SLIDES
 from carousel.timeutil import iso_utc, parse_utc, utc_now
 from render.fields import field, field_str, json_text
 
@@ -76,8 +77,8 @@ def expected_child_count(record: dict[str, Any], ready_count: int = 0) -> int:
     for name in ("IG_Carousel_Child_Count", "Image_Count", "Selected_Clip_Count"):
         count = parse_int(field(record, name), 0) or 0
         if count > 1:
-            return count
-    return ready_count if ready_count > 1 else 0
+            return min(count, MAX_SLIDES)
+    return min(ready_count, MAX_SLIDES) if ready_count > 1 else 0
 
 
 def publish_caption(record: dict[str, Any]) -> str:
