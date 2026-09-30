@@ -15899,7 +15899,13 @@
     const platformSlug = platform.toLowerCase().replace(/[^a-z0-9]+/g, "-");
     const platformCode = helper?.platformCode ? helper.platformCode(platform) : platform.slice(0, 2).toUpperCase();
     const outputId = pipelineScheduleEntryOutputId(record) || pipelineScheduleEntryOutputId(fullRecord);
-    const title = pipelineScheduleEntryTitle(record) || pipelineScheduleEntryTitle(fullRecord);
+    const title = String(
+      record?.output_title
+      || record?.content_title
+      || fullRecord?.output_title
+      || fullRecord?.content_title
+      || "Untitled"
+    ).trim() || "Untitled";
     const tooltip = pipelineScheduleEntryTooltip({ ...fullRecord, ...record, output_id: outputId, output_title: title, platform });
     const classes = [
       "pipeline-schedule-entry",
