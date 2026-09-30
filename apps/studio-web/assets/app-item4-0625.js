@@ -252,11 +252,13 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.438-ig-carousel-native-approve";
+  const BUILD_ID = "item4-0.6.439-ig-carousel-native-approve-home-tones";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
   const ITEM4_ACCEPT_MIXED = `${ITEM4_ACCEPT_PHOTOS},${ITEM4_ACCEPT_VIDEOS}`;
+  const DASHBOARD_POLL_MS = 5000;
+  let dashboardPollTimer = null;
 
   function item4AcceptForKind(kind = ezIntakeKind) {
     const next = String(kind || "").trim();
@@ -685,6 +687,7 @@
       stopPipelinePoll();
     }
     if (next !== "content") stopProductionPoll();
+    if (!isHubPage(next)) stopDashboardPoll();
     if (next === "support") {
       const requested = String(options.supportDoc || "").trim();
       showSupportDoc(requested || (previous === "support" ? currentSupportDoc() : supportDocForPage(previous)));
@@ -1704,14 +1707,34 @@
   let dashboardInflight = null;
   let dashboardInflightKey = "";
 
+  function homePageActive() {
+    return isHubPage(studioPage);
+  }
+
+  function stopDashboardPoll() {
+    if (dashboardPollTimer) {
+      clearTimeout(dashboardPollTimer);
+      dashboardPollTimer = null;
+    }
+  }
+
+  function scheduleDashboardPoll() {
+    stopDashboardPoll();
+    if (!homePageActive() || document.hidden) return;
+    dashboardPollTimer = setTimeout(() => {
+      dashboardPollTimer = null;
+      if (!homePageActive() || document.hidden) return;
+      loadDashboard(true);
+    }, DASHBOARD_POLL_MS);
+  }
+
   async function loadDashboard(force = false) {
     const key = selectedProfileId || "default";
     if (dashboardInflight && dashboardInflightKey === key && !force) return dashboardInflight;
-    const metrics = $("metrics");
     const list = $("recentOutputs");
     const run = (async () => {
       renderDashboardMetrics();
-      list.innerHTML = '<div class="empty">Loading pipeline data…</div>';
+      if (list && !force) list.innerHTML = '<div class="empty">Loading pipeline data…</div>';
       try {
         const data = await api("/api/dashboard");
         if (selectedProfileId && data.profile?.id && data.profile.id !== selectedProfileId) return;
@@ -1726,7 +1749,9 @@
         renderDashboardPanel();
       } catch (e) {
         renderDashboardMetrics();
-        list.innerHTML = `<div class="error">${escapeHtml(e.message)}</div>`;
+        if (list) list.innerHTML = `<div class="error">${escapeHtml(e.message)}</div>`;
+      } finally {
+        if (homePageActive()) scheduleDashboardPoll();
       }
     })();
     dashboardInflightKey = key;
@@ -1745,6 +1770,26 @@
     return filter || "all";
   }
 
+  function dashboardCardTone(view, number) {
+    const count = Number(number) || 0;
+    if (view === "manual" || view === "failed") {
+      if (count <= 0) return "ok";
+      if (count <= 2) return "warn";
+      return "critical";
+    }
+    if (view === "approval") {
+      if (count <= 0) return "ok";
+      if (count <= 5) return "warn";
+      return "critical";
+    }
+    if (view === "ideas") {
+      if (count <= 0) return "ok";
+      if (count <= 4) return "warn";
+      return "critical";
+    }
+    return "ok";
+  }
+
   function dashboardCards() {
     const m = dashboardCache.metrics || {};
     const outputs = Array.isArray(dashboardCache.outputs) ? dashboardCache.outputs : [];
@@ -1756,7 +1801,7 @@
       { view: "failed", label: "Failed", page: "outputs", filter: "failed", number: failedCount },
       { view: "approval", label: "Awaiting Approval", page: "outputs", filter: "approval", number: awaitingApprovalCount },
       { view: "ideas", label: "Ideas Not Yet in Production", page: "ideas", number: m.ideas_not_in_production },
-    ];
+    ].map((card) => ({ ...card, tone: dashboardCardTone(card.view, card.number) }));
   }
 
   function renderDashboardMetrics() {
@@ -1764,7 +1809,8 @@
     if (!metrics) return;
     metrics.innerHTML = dashboardCards().map((card) => {
       const selected = dashboardView === card.view;
-      return `<button type="button" class="metric metric-button${selected ? " is-selected" : ""}" data-dash-page="${escapeHtml(card.page)}" data-dash-filter="${escapeHtml(card.filter || "")}" aria-pressed="${selected ? "true" : "false"}" title="Show ${escapeHtml(card.label)}"><div class="metric-label">${escapeHtml(card.label)}</div><div class="metric-value">${card.number ?? 0}</div></button>`;
+      const tone = card.tone || "ok";
+      return `<button type="button" class="metric metric-button metric-tone-${escapeHtml(tone)}${selected ? " is-selected" : ""}" data-dash-page="${escapeHtml(card.page)}" data-dash-filter="${escapeHtml(card.filter || "")}" data-tone="${escapeHtml(tone)}" aria-pressed="${selected ? "true" : "false"}" title="Show ${escapeHtml(card.label)}"><div class="metric-label">${escapeHtml(card.label)}</div><div class="metric-value">${card.number ?? 0}</div></button>`;
     }).join("");
     metrics.querySelectorAll("[data-dash-page]").forEach((button) => {
       button.addEventListener("click", () => openDashboardCard(button.dataset.dashPage, button.dataset.dashFilter));
@@ -20069,12 +20115,14 @@
     if (document.hidden) {
       stopPipelinePoll();
       stopProductionPoll();
+      stopDashboardPoll();
       if (pipelinePageActive()) setPipelineLiveHint("Paused while this tab is in the background");
       if (productionPageActive()) setProductionLiveHint("Paused while this tab is in the background");
       return;
     }
     if (pipelinePageActive()) refreshPipelineOutputs({ silent: true }).finally(schedulePipelinePoll);
     if (productionPageActive()) refreshProductionPage({ silent: true }).finally(scheduleProductionPoll);
+    if (homePageActive()) loadDashboard(true);
   });
 
   phase6DecorateTooltips(document);
