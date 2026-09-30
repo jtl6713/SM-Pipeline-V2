@@ -10240,7 +10240,9 @@
     });
 
     productionRequestOutputs = Array.isArray(result.records) ? result.records : [];
-    if (result.production_request) activeProductionRequest = result.production_request;
+    if (result.production_request) {
+      activeProductionRequest = mergeProductionRequestRecord(activeProductionRequest, result.production_request);
+    }
     syncLegacyPlatformsFromOutputMatrix();
     updateOutputMatrixSummary();
     renderProductionRequestOutputCards();
