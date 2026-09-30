@@ -201,6 +201,9 @@
   let pipelineContentRecords = [];
   let pipelineScheduleGridRecords = [];
   let pipelineScheduleGridOpen = false;
+  let pipelineScheduleDragOutputId = "";
+  let pipelineScheduleSelectedOutputId = "";
+  const pipelineScheduleMovePending = new Set();
   let pipelineSort = { key: "output", dir: "desc" };
   let ideasSort = { key: "idea", dir: "desc" };
   let ideasCurrentSectionOpen = true;
@@ -247,7 +250,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.429-photo-match-timeout-recovery";
+  const BUILD_ID = "item4-0.6.430-calendar-drag-drop";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -15847,6 +15850,14 @@
     return date.toLocaleTimeString(undefined, { hour: "numeric" });
   }
 
+  function pipelineScheduleSlotLabel(slotIndex) {
+    const helper = globalThis.PipelineScheduleGrid;
+    const date = helper?.slotDate
+      ? helper.slotDate(new Date(2000, 0, 1), slotIndex)
+      : new Date(2000, 0, 1, 0, Number(slotIndex || 0) * 30, 0, 0);
+    return date.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+  }
+
   function pipelineScheduleDayHeader(date, index) {
     const weekday = index === 0 ? "Today" : date.toLocaleDateString(undefined, { weekday: "short" });
     const day = date.toLocaleDateString(undefined, { month: "short", day: "numeric" });
@@ -15861,54 +15872,278 @@
     return [pipelineOutputListTitle(record), record?.platform, time].filter(Boolean).join(" · ");
   }
 
+  function pipelineScheduleEntryOutputId(record) {
+    return String(record?.output_id || record?.id || "").trim();
+  }
+
+  function pipelineScheduleEntryTitle(record) {
+    return String(record?.output_title || record?.content_title || "Untitled").trim() || "Untitled";
+  }
+
+  function pipelineScheduleEntryTooltip(record) {
+    const outputId = pipelineScheduleEntryOutputId(record) || "unknown";
+    const title = pipelineScheduleEntryTitle(record);
+    const platform = String(record?.platform || "Platform").trim() || "Platform";
+    return `${title} · Platform Output ID ${outputId} · ${platform}`;
+  }
+
+  function pipelineScheduleEntryMarkup(record, { unscheduled = false } = {}) {
+    const helper = globalThis.PipelineScheduleGrid;
+    const recordId = String(record?.id || "").trim();
+    if (!recordId) return "";
+    const fullRecord = (pipelineOutputs || []).find((row) => row.id === recordId) || record;
+    const canMove = creativeCanSetSchedule(fullRecord);
+    const pending = pipelineScheduleMovePending.has(recordId);
+    const selected = pipelineScheduleSelectedOutputId === recordId;
+    const platform = String(record?.platform || fullRecord?.platform || "Platform").trim() || "Platform";
+    const platformSlug = platform.toLowerCase().replace(/[^a-z0-9]+/g, "-");
+    const platformCode = helper?.platformCode ? helper.platformCode(platform) : platform.slice(0, 2).toUpperCase();
+    const outputId = pipelineScheduleEntryOutputId(record) || pipelineScheduleEntryOutputId(fullRecord);
+    const title = String(
+      record?.output_title
+      || record?.content_title
+      || fullRecord?.output_title
+      || fullRecord?.content_title
+      || "Untitled"
+    ).trim() || "Untitled";
+    const tooltip = pipelineScheduleEntryTooltip({ ...fullRecord, ...record, output_id: outputId, output_title: title, platform });
+    const classes = [
+      "pipeline-schedule-entry",
+      unscheduled ? "is-unscheduled" : "",
+      selected ? "is-selected" : "",
+      pending ? "is-saving" : "",
+      canMove ? "is-movable" : "is-locked",
+    ].filter(Boolean).join(" ");
+    return `<button type="button" class="${classes}" data-pipeline-schedule-entry="${escapeHtml(recordId)}" data-platform="${escapeHtml(platformSlug)}" data-schedule-tooltip="${escapeHtml(tooltip)}" aria-label="${escapeHtml(tooltip)}" draggable="${canMove && !pending ? "true" : "false"}"${pending ? " disabled" : ""}><span class="pipeline-schedule-entry-code">${escapeHtml(platformCode)}</span><span class="pipeline-schedule-entry-text">${escapeHtml(outputId ? `${outputId} · ${title}` : title)}</span></button>`;
+  }
+
+  function pipelineUnscheduledScheduleRecords() {
+    return (pipelineOutputs || [])
+      .filter((record) => creativeCanSetSchedule(record))
+      .filter((record) => !pipelineRecordScheduleIso(record))
+      .slice()
+      .sort((left, right) => {
+        const leftId = Number(left?.output_id);
+        const rightId = Number(right?.output_id);
+        if (Number.isFinite(leftId) && Number.isFinite(rightId)) return leftId - rightId;
+        return pipelineScheduleEntryTitle(left).localeCompare(pipelineScheduleEntryTitle(right));
+      });
+  }
+
+  function setPipelineScheduleGridMessage(text, isError = false) {
+    const message = $("pipelineScheduleGridMessage");
+    if (!message) return;
+    message.textContent = text || "";
+    message.classList.toggle("error-text", Boolean(isError));
+  }
+
+  function syncPipelineScheduleSelectionVisual(root = $("pipelineScheduleGrid")) {
+    root?.querySelectorAll?.("[data-pipeline-schedule-entry]").forEach((button) => {
+      const selected = button.dataset.pipelineScheduleEntry === pipelineScheduleSelectedOutputId;
+      button.classList.toggle("is-selected", selected);
+      button.setAttribute("aria-pressed", selected ? "true" : "false");
+    });
+  }
+
+  async function savePipelineScheduleFromGrid(outputId, scheduleIso) {
+    const id = String(outputId || "").trim();
+    const record = (pipelineOutputs || []).find((row) => row.id === id);
+    const stamp = Date.parse(scheduleIso || "");
+    if (!id || !record || !creativeCanSetSchedule(record)) {
+      setPipelineScheduleGridMessage("That output cannot be rescheduled from the calendar.", true);
+      return;
+    }
+    if (!Number.isFinite(stamp) || stamp <= Date.now()) {
+      setPipelineScheduleGridMessage("Choose a future 30-minute slot.", true);
+      return;
+    }
+    if (pipelineScheduleMovePending.has(id)) return;
+
+    const priorIso = pipelineRecordScheduleIso(record);
+    if (priorIso && Math.abs(Date.parse(priorIso) - stamp) < 60000) {
+      setPipelineScheduleGridMessage(`Platform Output ${pipelineScheduleEntryOutputId(record)} is already in that slot.`);
+      return;
+    }
+
+    const helper = globalThis.PlatformScheduleCalendar;
+    const spacing = helper?.spacingWarning?.(
+      new Date(stamp),
+      pipelineScheduleGridRecords,
+      record.platform,
+      id,
+    );
+
+    pipelineScheduleMovePending.add(id);
+    renderPipelineScheduleGrid(pipelineScheduleGridRecords);
+    setPipelineScheduleGridMessage(`Saving Platform Output ${pipelineScheduleEntryOutputId(record)}…`);
+
+    let finalMessage = "";
+    let finalError = false;
+    try {
+      const result = await api(`/api/operations/outputs/${encodeURIComponent(id)}/schedule`, {
+        method: "POST",
+        body: JSON.stringify({ scheduled_post_date: new Date(stamp).toISOString(), manual_schedule_override: true }),
+      });
+      const saved = result?.record || { ...record, scheduled_post_date: new Date(stamp).toISOString() };
+      applySavedPipelineSchedule(saved);
+      if (activeCreativeOutput?.id === id) {
+        activeCreativeOutput = { ...activeCreativeOutput, ...saved };
+        const creativeInput = $("creativeScheduleAt");
+        if (creativeInput) creativeInput.value = formatDateTimeLocalInput(studioEffectiveScheduleIso(saved));
+        renderCreativeOutputMeta(activeCreativeOutput);
+        syncCreativeScheduleActions(activeCreativeOutput);
+      }
+      pipelineScheduleSelectedOutputId = id;
+      const slotText = new Date(stamp).toLocaleString(undefined, {
+        weekday: "short",
+        month: "short",
+        day: "numeric",
+        hour: "numeric",
+        minute: "2-digit",
+      });
+      finalMessage = `Platform Output ${pipelineScheduleEntryOutputId(record)} scheduled for ${slotText}.${spacing?.message ? ` ${spacing.message}` : ""}`;
+      setPipelineLiveHint("Schedule saved.");
+      refreshPipelineOutputs({ silent: true, force: true }).catch(() => {});
+    } catch (error) {
+      finalError = true;
+      finalMessage = error.message || "Could not save the schedule. The output stayed in its previous slot.";
+    } finally {
+      pipelineScheduleMovePending.delete(id);
+      pipelineScheduleDragOutputId = "";
+      renderPipelineScheduleGrid(pipelineScheduleGridRecords);
+      setPipelineScheduleGridMessage(finalMessage, finalError);
+    }
+  }
+
+  function bindPipelineScheduleGridInteractions(target) {
+    if (!target) return;
+
+    target.querySelectorAll("[data-pipeline-schedule-entry]").forEach((button) => {
+      const id = button.dataset.pipelineScheduleEntry || "";
+      const tooltip = button.dataset.scheduleTooltip || "Platform output";
+      phase6BindTooltipTarget(button, tooltip);
+      button.addEventListener("click", (event) => {
+        event.stopPropagation();
+        if (!id || button.classList.contains("is-locked")) return;
+        pipelineScheduleSelectedOutputId = id;
+        syncPipelineScheduleSelectionVisual(target);
+        const record = (pipelineOutputs || []).find((row) => row.id === id);
+        setPipelineScheduleGridMessage(`Selected Platform Output ${pipelineScheduleEntryOutputId(record)}. Click a future slot or drag it there.`);
+      });
+      button.addEventListener("dragstart", (event) => {
+        if (!id || button.getAttribute("draggable") !== "true") {
+          event.preventDefault();
+          return;
+        }
+        pipelineScheduleDragOutputId = id;
+        pipelineScheduleSelectedOutputId = id;
+        button.classList.add("is-dragging");
+        syncPipelineScheduleSelectionVisual(target);
+        if (event.dataTransfer) {
+          event.dataTransfer.effectAllowed = "move";
+          event.dataTransfer.setData("text/plain", id);
+        }
+      });
+      button.addEventListener("dragend", () => {
+        pipelineScheduleDragOutputId = "";
+        button.classList.remove("is-dragging");
+        target.querySelectorAll(".is-drop-target").forEach((cell) => cell.classList.remove("is-drop-target"));
+      });
+    });
+
+    const moveSelectedToCell = (cell) => {
+      const iso = cell?.dataset?.pipelineScheduleDrop || "";
+      const id = pipelineScheduleDragOutputId || pipelineScheduleSelectedOutputId;
+      if (!iso || !id) {
+        setPipelineScheduleGridMessage("Select an output bubble first, then choose a future slot.");
+        return;
+      }
+      savePipelineScheduleFromGrid(id, iso);
+    };
+
+    target.querySelectorAll("[data-pipeline-schedule-drop]").forEach((cell) => {
+      cell.addEventListener("dragover", (event) => {
+        if (!pipelineScheduleDragOutputId) return;
+        event.preventDefault();
+        if (event.dataTransfer) event.dataTransfer.dropEffect = "move";
+        cell.classList.add("is-drop-target");
+      });
+      cell.addEventListener("dragenter", (event) => {
+        if (!pipelineScheduleDragOutputId) return;
+        event.preventDefault();
+        cell.classList.add("is-drop-target");
+      });
+      cell.addEventListener("dragleave", (event) => {
+        if (event.relatedTarget && cell.contains(event.relatedTarget)) return;
+        cell.classList.remove("is-drop-target");
+      });
+      cell.addEventListener("drop", (event) => {
+        event.preventDefault();
+        cell.classList.remove("is-drop-target");
+        const transferred = event.dataTransfer?.getData("text/plain") || "";
+        if (transferred) pipelineScheduleDragOutputId = transferred;
+        moveSelectedToCell(cell);
+      });
+      cell.addEventListener("click", (event) => {
+        if (event.target.closest("[data-pipeline-schedule-entry]")) return;
+        moveSelectedToCell(cell);
+      });
+      cell.addEventListener("keydown", (event) => {
+        if (event.target.closest("[data-pipeline-schedule-entry]")) return;
+        if (event.key !== "Enter" && event.key !== " ") return;
+        event.preventDefault();
+        moveSelectedToCell(cell);
+      });
+    });
+  }
+
   function renderPipelineScheduleGrid(records = pipelineScheduleGridRecords, error = "") {
     const target = $("pipelineScheduleGrid");
     const summary = $("pipelineScheduleGridSummary");
     const panel = $("pipelineScheduleOverview");
     const toggle = $("pipelineScheduleGridToggle");
     const helper = globalThis.PipelineScheduleGrid;
-    if (!target || !helper?.sevenDayWindow || !helper?.aggregate) return;
+    if (!target || !helper?.sevenDayWindow || !helper?.aggregate || !helper?.slotDate || !helper?.slotKey) return;
 
     const windowValue = helper.sevenDayWindow(new Date());
     const cells = helper.aggregate(records, windowValue);
     const total = [...cells.values()].reduce((sum, cell) => sum + Number(cell?.total || 0), 0);
+    const unscheduled = pipelineUnscheduledScheduleRecords();
     const lastDay = windowValue.days[6];
     const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || "local time";
     if (summary) {
       const rangeEnd = lastDay.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
       summary.textContent = error
         ? `${total} scheduled in the loaded Pipeline rows · schedule service retrying · ${timezone}`
-        : `${total} scheduled output${total === 1 ? "" : "s"} · Today through ${rangeEnd} · ${timezone}`;
+        : `${total} scheduled output${total === 1 ? "" : "s"} · ${unscheduled.length} unscheduled · Today through ${rangeEnd} · ${timezone}`;
     }
 
     const now = new Date();
-    const nowKey = helper.cellKey(now);
-    const platforms = ["Instagram", "Facebook", "TikTok", "YouTube"];
+    const nowKey = helper.slotKey(now);
     const head = windowValue.days.map((date, index) => `<th scope="col">${pipelineScheduleDayHeader(date, index)}</th>`).join("");
-    const rows = Array.from({ length: 24 }, (_, hour) => {
+    const rows = Array.from({ length: 48 }, (_, slotIndex) => {
       const cellsHtml = windowValue.days.map((day) => {
-        const date = new Date(day);
-        date.setHours(hour, 0, 0, 0);
-        const key = helper.cellKey(date);
+        const date = helper.slotDate(day, slotIndex);
+        const key = helper.slotKey(date);
         const cell = cells.get(key);
-        const entries = cell?.platforms || {};
-        const platformNames = [
-          ...platforms.filter((name) => entries[name]),
-          ...Object.keys(entries).filter((name) => !platforms.includes(name)).sort(),
-        ];
-        const chips = platformNames.map((name) => {
-          const count = Number(entries[name] || 0);
-          const slug = String(name || "").trim().toLowerCase().replace(/[^a-z0-9]+/g, "-");
-          return `<span class="pipeline-schedule-chip" data-platform="${escapeHtml(slug)}" title="${escapeHtml(name)}">${escapeHtml(helper.platformCode(name))} ${count}</span>`;
-        }).join("");
-        const titles = (cell?.records || []).map(pipelineScheduleRecordTitle).join("\n");
-        const totalLabel = cell?.total > 1 ? `<span class="pipeline-schedule-total">${cell.total} total</span>` : "";
-        return `<td class="pipeline-schedule-cell${cell?.total ? " has-scheduled" : " is-empty"}${key === nowKey ? " is-current-hour" : ""}" title="${escapeHtml(titles)}"><div class="pipeline-schedule-cell-inner">${chips}${totalLabel}</div></td>`;
+        const isPast = date.getTime() <= Date.now();
+        const bubbles = (cell?.records || []).map((record) => pipelineScheduleEntryMarkup(record)).join("");
+        const classes = [
+          "pipeline-schedule-cell",
+          cell?.total ? "has-scheduled" : "is-empty",
+          key === nowKey ? "is-current-hour" : "",
+          isPast ? "is-past" : "",
+        ].filter(Boolean).join(" ");
+        const aria = `Schedule selected output for ${date.toLocaleString(undefined, { weekday: "long", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}`;
+        return `<td class="${classes}"${isPast ? "" : ` data-pipeline-schedule-drop="${escapeHtml(date.toISOString())}" tabindex="0" role="button" aria-label="${escapeHtml(aria)}"`}><div class="pipeline-schedule-cell-inner">${bubbles || '<span class="pipeline-schedule-slot-empty">Drop here</span>'}</div></td>`;
       }).join("");
-      return `<tr><th scope="row" class="pipeline-schedule-hour">${escapeHtml(pipelineScheduleHourLabel(hour))}</th>${cellsHtml}</tr>`;
+      return `<tr><th scope="row" class="pipeline-schedule-hour">${escapeHtml(pipelineScheduleSlotLabel(slotIndex))}</th>${cellsHtml}</tr>`;
     }).join("");
 
-    target.innerHTML = `<table class="pipeline-schedule-grid-table"><thead><tr><th class="pipeline-hour-head" scope="col">Hour</th>${head}</tr></thead><tbody>${rows}</tbody></table>`;
+    const tray = `<section class="pipeline-schedule-unscheduled" aria-label="Unscheduled outputs"><div class="pipeline-schedule-unscheduled-copy"><strong>Unscheduled outputs</strong><span>Drag a bubble into a 30-minute slot. Click a bubble, then a slot, if you prefer not to drag.</span></div><div class="pipeline-schedule-unscheduled-list">${unscheduled.length ? unscheduled.map((record) => pipelineScheduleEntryMarkup(record, { unscheduled: true })).join("") : '<span class="subtle">No ready outputs are waiting for a schedule.</span>'}</div></section>`;
+    target.innerHTML = `${tray}<div class="pipeline-schedule-grid-scroll"><table class="pipeline-schedule-grid-table"><thead><tr><th class="pipeline-hour-head" scope="col">Time</th>${head}</tr></thead><tbody>${rows}</tbody></table></div>`;
+    bindPipelineScheduleGridInteractions(target);
+    syncPipelineScheduleSelectionVisual(target);
 
     if (panel) panel.classList.toggle("pipeline-schedule-collapsed", !pipelineScheduleGridOpen);
     if (toggle) {
