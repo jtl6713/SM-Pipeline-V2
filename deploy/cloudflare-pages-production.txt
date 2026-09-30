@@ -280,3 +280,9 @@ Reason: Correct Home Awaiting Approval count to match actual manual-approval row
 UI: 0.6.437-home-awaiting-approval
 Source merge: cbf59df3171195567692fe8e353b62d9315254d9
 Requested: 2026-09-29
+
+
+Deploy Studio Pages production
+Reason: Home metric cards use green/yellow/red count tones and refresh every 5s
+UI: 0.6.438-home-card-tones
+Requested: 2026-09-30

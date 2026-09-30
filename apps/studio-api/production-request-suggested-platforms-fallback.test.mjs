@@ -12,12 +12,13 @@ test("production draft falls back to Suggested_Platforms when explicit targets a
   const end = worker.indexOf("function suggestPrimaryLocationFromIdea", start);
   const fn = worker.slice(start, end);
   assert.match(fn, /Production_Target_Platforms/);
-  assert.match(fn, /if \(productionPlatforms\.length\) return productionPlatforms/);
+  assert.match(fn, /if \(productionPlatforms\.length\) return canonicalProductionPlatforms\(productionPlatforms\)/);
   assert.match(fn, /Suggested_Platforms/);
 });
 
 
-test("legacy output-style platform labels normalize to Production platforms", () => {
+test("legacy output-style platform labels normalize to Production platforms", async () => {
+  const worker = await readFile(path.join(here, "worker.js"), "utf8");
   assert.match(worker, /\["youtube shorts", "YouTube"\]/i);
   assert.match(worker, /\["instagram reels", "Instagram"\]/i);
   assert.match(worker, /\["facebook reels", "Facebook"\]/i);
