@@ -138,7 +138,9 @@ test("Home metric cards use count tones and poll every few seconds", () => {
   assert.match(app, /metric-tone-\$\{escapeHtml\(tone\)\}/);
   assert.match(app, /const DASHBOARD_POLL_MS = 5000/);
   assert.match(app, /function scheduleDashboardPoll\(/);
-  assert.match(app, /loadDashboard\(true\)/);
+  assert.match(app, /function ensureDashboardPoll\(/);
+  assert.match(app, /Promise\.resolve\(tick\)\.finally\(scheduleDashboardPoll\)/);
+  assert.match(app, /const tick = dashboardInflight \? Promise\.resolve\(\) : loadDashboard\(true\)/);
   const css = fs.readFileSync(path.join(here, "assets", "styles-phase7-0621.css"), "utf8");
   assert.match(css, /\.metric-button\.metric-tone-ok/);
   assert.match(css, /\.metric-button\.metric-tone-warn/);
@@ -146,7 +148,7 @@ test("Home metric cards use count tones and poll every few seconds", () => {
   const build = app.match(/BUILD_ID = "item4-([^"]+)"/)?.[1];
   assert.ok(build);
   assert.match(html, new RegExp(`app-item4-0625\\.js\\?v=${build.replace(/[.*+?^${}()|[\\]\\^]/g, "\\$&")}`));
-  assert.match(html, /styles-phase7-0621\.css\?v=0\.6\.438-home-card-tones/);
+  assert.match(html, /styles-phase7-0621\.css\?v=0\.6\.439-home-card-live-poll/);
 });
 
 

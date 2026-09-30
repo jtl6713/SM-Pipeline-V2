@@ -252,7 +252,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.438-home-card-tones";
+  const BUILD_ID = "item4-0.6.439-home-card-live-poll";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -1721,22 +1721,35 @@
   function scheduleDashboardPoll() {
     stopDashboardPoll();
     if (!homePageActive() || document.hidden) return;
+    // Wall-clock cadence: tick every few seconds even when Airtable is slow.
+    // Skip overlapping fetches so polls cannot stack and starve the loop.
     dashboardPollTimer = setTimeout(() => {
       dashboardPollTimer = null;
       if (!homePageActive() || document.hidden) return;
-      loadDashboard(true);
+      const tick = dashboardInflight ? Promise.resolve() : loadDashboard(true);
+      Promise.resolve(tick).finally(scheduleDashboardPoll);
     }, DASHBOARD_POLL_MS);
+  }
+
+  function ensureDashboardPoll() {
+    if (!homePageActive() || document.hidden || dashboardPollTimer) return;
+    scheduleDashboardPoll();
   }
 
   async function loadDashboard(force = false) {
     const key = selectedProfileId || "default";
-    if (dashboardInflight && dashboardInflightKey === key && !force) return dashboardInflight;
+    // Never stack dashboard reads. Forced polls coalesce onto the in-flight fetch.
+    if (dashboardInflight && dashboardInflightKey === key) {
+      ensureDashboardPoll();
+      return dashboardInflight;
+    }
     const list = $("recentOutputs");
     const run = (async () => {
-      renderDashboardMetrics();
-      if (list && !force) list.innerHTML = '<div class="empty">Loading pipeline data…</div>';
+      if (list && !force && !(dashboardCache.outputs || []).length) {
+        list.innerHTML = '<div class="empty">Loading pipeline data…</div>';
+      }
       try {
-        const data = await api("/api/dashboard");
+        const data = await api("/api/dashboard", { timeoutMs: 20000, retries: 1 });
         if (selectedProfileId && data.profile?.id && data.profile.id !== selectedProfileId) return;
         const m = data.metrics || {};
         dashboardCache = {
@@ -1749,9 +1762,9 @@
         renderDashboardPanel();
       } catch (e) {
         renderDashboardMetrics();
-        if (list) list.innerHTML = `<div class="error">${escapeHtml(e.message)}</div>`;
-      } finally {
-        if (homePageActive()) scheduleDashboardPoll();
+        if (list && !(dashboardCache.outputs || []).length) {
+          list.innerHTML = `<div class="error">${escapeHtml(e.message)}</div>`;
+        }
       }
     })();
     dashboardInflightKey = key;
@@ -1760,6 +1773,7 @@
         dashboardInflight = null;
         dashboardInflightKey = "";
       }
+      ensureDashboardPoll();
     });
     return dashboardInflight;
   }
