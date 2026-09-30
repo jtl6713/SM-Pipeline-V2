@@ -115,4 +115,5 @@ test("default schedule suggestions start off, clear on untick, and do not hide r
   assert.match(app, /\.filter\(\(record\) => !studioEffectiveScheduleIso\(record\)\)/);
   assert.match(app, /<strong>Ready to schedule<\/strong>/);
   assert.match(app, /clearDefaultSchedulesFromUnapprovedRows\(\);[\s\S]{0,240}if \(!useDefaults\)/);
+  assert.match(app, /if \(next === "outputs"\)[\s\S]{0,220}previous !== "outputs"[\s\S]{0,220}restorePipelineUseDefaultSchedules\(\)[\s\S]{0,120}clearDefaultSchedulesFromUnapprovedRows\(\)/);
 });
