@@ -15,6 +15,12 @@ test("UI prefers Studio_Scheduled_At over occupancy-bumped Scheduled_Post_Date",
   assert.match(app, /creativeScheduleAt[\s\S]*studioEffectiveScheduleIso\(output\)/);
 });
 
+test("homepage keeps future YouTube uploads in Scheduled count", () => {
+  assert.match(app, /creativeIsPublished\(record\)[\s\S]*platform !== "youtube"/);
+  assert.match(app, /creativeIsPublished\(record\)[\s\S]*studioEffectiveScheduleIso\(record\)/);
+  assert.match(app, /scheduledAt > Date\.now\(\)/);
+});
+
 test("ops schedule form locks the exact operator time", () => {
   assert.match(app, /data-ops-schedule[\s\S]*manual_schedule_override:\s*true/);
 });
