@@ -273,3 +273,10 @@ Reason: Open linked Production Request with ?fields=light so large matched-photo
 UI: 0.6.436-production-open-light
 Requested: 2026-09-29
 Source before deploy: 938f0da2bcdec2b8f60c82e2683215fdfd06601c
+
+
+Deploy Studio Pages production
+Reason: Correct Home Awaiting Approval count to match actual manual-approval rows in Pipeline
+UI: 0.6.437-home-awaiting-approval
+Source merge: cbf59df3171195567692fe8e353b62d9315254d9
+Requested: 2026-09-29
