@@ -339,3 +339,8 @@ Deploy Studio API Worker production
 Reason: Allow explicit Find images now to bypass temporary Manage Idea photo-listening pause
 Worker: 0.10.429-idea-find-images-now
 Requested: 2026-09-30
+
+Deploy Studio API Worker production
+Reason: Poll already-listening Ideas for newly uploaded photos every five minutes
+Worker: 0.10.430-idea-photo-five-minute-poll
+Requested: 2026-09-30
