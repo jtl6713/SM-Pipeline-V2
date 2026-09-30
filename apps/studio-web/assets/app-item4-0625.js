@@ -252,13 +252,15 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.439-home-card-live-poll";
+  const BUILD_ID = "item4-0.6.440-home-scheduled-live";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
   const ITEM4_ACCEPT_MIXED = `${ITEM4_ACCEPT_PHOTOS},${ITEM4_ACCEPT_VIDEOS}`;
   const DASHBOARD_POLL_MS = 5000;
   let dashboardPollTimer = null;
+  let dashboardLastRefreshAt = 0;
+  let dashboardLiveHintTimer = null;
 
   function item4AcceptForKind(kind = ezIntakeKind) {
     const next = String(kind || "").trim();
@@ -676,7 +678,8 @@
     if (next === "support") $("studioHelpLink")?.setAttribute("aria-current", "page");
     else $("studioHelpLink")?.removeAttribute("aria-current");
     if (next === "outputs") {
-      pipelineViewFilter = "all";
+      const requestedFilter = String(options.pipelineFilter || "").trim();
+      pipelineViewFilter = requestedFilter || "all";
       if (previous !== "outputs") {
         restorePipelineUseDefaultSchedules();
         clearDefaultSchedulesFromUnapprovedRows();
@@ -1716,11 +1719,42 @@
       clearTimeout(dashboardPollTimer);
       dashboardPollTimer = null;
     }
+    if (dashboardLiveHintTimer) {
+      clearInterval(dashboardLiveHintTimer);
+      dashboardLiveHintTimer = null;
+    }
+  }
+
+  function updateDashboardLiveHint() {
+    const hint = $("studioHubLive");
+    if (!hint) return;
+    if (!homePageActive()) {
+      hint.textContent = "";
+      return;
+    }
+    if (dashboardInflight) {
+      hint.textContent = "Refreshing…";
+      return;
+    }
+    if (!dashboardLastRefreshAt) {
+      hint.textContent = "Live";
+      return;
+    }
+    const seconds = Math.max(0, Math.floor((Date.now() - dashboardLastRefreshAt) / 1000));
+    if (seconds < 2) hint.textContent = "Updated just now";
+    else if (seconds < 60) hint.textContent = `Updated ${seconds}s ago`;
+    else hint.textContent = `Updated ${Math.floor(seconds / 60)}m ago`;
   }
 
   function scheduleDashboardPoll() {
-    stopDashboardPoll();
-    if (!homePageActive() || document.hidden) return;
+    if (dashboardPollTimer) {
+      clearTimeout(dashboardPollTimer);
+      dashboardPollTimer = null;
+    }
+    if (!homePageActive() || document.hidden) {
+      stopDashboardPoll();
+      return;
+    }
     // Wall-clock cadence: tick every few seconds even when Airtable is slow.
     // Skip overlapping fetches so polls cannot stack and starve the loop.
     dashboardPollTimer = setTimeout(() => {
@@ -1729,6 +1763,10 @@
       const tick = dashboardInflight ? Promise.resolve() : loadDashboard(true);
       Promise.resolve(tick).finally(scheduleDashboardPoll);
     }, DASHBOARD_POLL_MS);
+    if (!dashboardLiveHintTimer) {
+      dashboardLiveHintTimer = setInterval(updateDashboardLiveHint, 1000);
+    }
+    updateDashboardLiveHint();
   }
 
   function ensureDashboardPoll() {
@@ -1736,32 +1774,112 @@
     scheduleDashboardPoll();
   }
 
+  function ideasNotInProductionCount(ideas = []) {
+    return (ideas || []).filter((idea) => !(
+      Boolean(idea?.promoted_content_record_id)
+      || (Array.isArray(idea?.content_item_links) && idea.content_item_links.length > 0)
+    )).length;
+  }
+
+  function pipelineRecordIsScheduled(record) {
+    if (!record || record.do_not_publish) return false;
+    if (creativeIsPublished(record)) return false;
+    const state = String(record?.studio_state || "").trim();
+    if (state === "Scheduled") return true;
+    const publish = String(record?.publish_status || "").trim();
+    if (/^(Ready to Schedule|Scheduled|Waiting for Schedule|Ready to Publish)$/i.test(publish)) return true;
+    return Boolean(
+      String(record?.scheduled_post_date || "").trim()
+      || String(record?.youtube_scheduled_publish_at || "").trim()
+      || String(record?.scheduled_at || "").trim()
+    );
+  }
+
+  function scheduledContentByPlatform(outputs = []) {
+    const counts = new Map();
+    for (const record of outputs || []) {
+      if (!pipelineRecordIsScheduled(record)) continue;
+      const platform = String(record?.platform || "").trim() || "Other";
+      counts.set(platform, (counts.get(platform) || 0) + 1);
+    }
+    const preferred = ["Facebook", "Instagram", "TikTok", "YouTube"];
+    const rows = [];
+    for (const platform of preferred) {
+      if (counts.has(platform)) {
+        rows.push({ platform, count: counts.get(platform) });
+        counts.delete(platform);
+      }
+    }
+    for (const platform of [...counts.keys()].sort((a, b) => a.localeCompare(b))) {
+      rows.push({ platform, count: counts.get(platform) });
+    }
+    return rows;
+  }
+
+  function renderScheduledContentOverview(outputs = dashboardCache.outputs) {
+    const host = $("studioHubScheduled");
+    if (!host) return;
+    const rows = scheduledContentByPlatform(outputs);
+    if (!rows.length) {
+      host.innerHTML = `<li class="studio-hub-scheduled-empty">No scheduled posts right now.</li>`;
+      return;
+    }
+    host.innerHTML = rows.map((row) => (
+      `<li><span class="studio-hub-scheduled-platform">${escapeHtml(row.platform)}</span>`
+      + `<span class="studio-hub-scheduled-count">${row.count}</span></li>`
+    )).join("");
+  }
+
   async function loadDashboard(force = false) {
     const key = selectedProfileId || "default";
-    // Never stack dashboard reads. Forced polls coalesce onto the in-flight fetch.
+    // Never stack home reads. Forced polls coalesce onto the in-flight fetch.
     if (dashboardInflight && dashboardInflightKey === key) {
       ensureDashboardPoll();
+      updateDashboardLiveHint();
       return dashboardInflight;
     }
     const list = $("recentOutputs");
     const run = (async () => {
+      updateDashboardLiveHint();
       if (list && !force && !(dashboardCache.outputs || []).length) {
         list.innerHTML = '<div class="empty">Loading pipeline data…</div>';
       }
       try {
-        const data = await api("/api/dashboard", { timeoutMs: 20000, retries: 1 });
-        if (selectedProfileId && data.profile?.id && data.profile.id !== selectedProfileId) return;
-        const m = data.metrics || {};
+        // Use the same lean Pipeline outputs feed so Home cards match Pipeline filters.
+        const [outputsSettled, ideasSettled] = await Promise.all([
+          api("/api/outputs?limit=250", { timeoutMs: 20000, retries: 2 }).then(
+            (value) => ({ ok: true, value }),
+            (error) => ({ ok: false, error }),
+          ),
+          api("/api/ideas?limit=100", { timeoutMs: 15000, retries: 1 }).then(
+            (value) => ({ ok: true, value }),
+            (error) => ({ ok: false, error }),
+          ),
+        ]);
+        if (!outputsSettled.ok) throw outputsSettled.error || new Error("Outputs unavailable");
+        const outputs = Array.isArray(outputsSettled.value?.records) ? outputsSettled.value.records : [];
+        const ideas = ideasSettled.ok
+          ? (Array.isArray(ideasSettled.value?.records) ? ideasSettled.value.records : [])
+          : (dashboardCache.ideas || []);
+        if (selectedProfileId && outputsSettled.value?.profile?.id && outputsSettled.value.profile.id !== selectedProfileId) return;
         dashboardCache = {
-          metrics: m,
-          ideas: Array.isArray(data.ideas) ? data.ideas : [],
-          content: Array.isArray(data.content) ? data.content : [],
-          outputs: Array.isArray(data.outputs) ? data.outputs : (data.recent_outputs || []),
+          metrics: {
+            ...(dashboardCache.metrics || {}),
+            ideas_not_in_production: ideasNotInProductionCount(ideas),
+          },
+          ideas,
+          content: dashboardCache.content || [],
+          outputs,
         };
+        dashboardLastRefreshAt = Date.now();
+        renderScheduledContentOverview(outputs);
         renderDashboardMetrics();
         renderDashboardPanel();
+        updateDashboardLiveHint();
       } catch (e) {
+        renderScheduledContentOverview(dashboardCache.outputs || []);
         renderDashboardMetrics();
+        updateDashboardLiveHint();
         if (list && !(dashboardCache.outputs || []).length) {
           list.innerHTML = `<div class="error">${escapeHtml(e.message)}</div>`;
         }
@@ -1774,6 +1892,7 @@
         dashboardInflightKey = "";
       }
       ensureDashboardPoll();
+      updateDashboardLiveHint();
     });
     return dashboardInflight;
   }
@@ -1879,10 +1998,17 @@
       return;
     }
     if (page === "outputs") {
-      showStudioPage("outputs");
-      pipelineViewFilter = filter || "all";
+      const nextFilter = String(filter || "all").trim() || "all";
+      // Seed Pipeline from the same Home snapshot so tile counts match the filter instantly.
+      if (Array.isArray(dashboardCache.outputs) && dashboardCache.outputs.length) {
+        pipelineOutputs = dashboardCache.outputs.slice();
+      }
       clearPipelineColumnFilters();
-      renderPipeline();
+      showStudioPage("outputs", { pipelineFilter: nextFilter });
+      const target = $("outputsList");
+      if (target && pipelineOutputs.length) {
+        renderOutputsTable(target, pipelineOutputs);
+      }
       return;
     }
   }

@@ -2417,6 +2417,48 @@ body{
   font-size:.9rem;
   line-height:1.45;
 }
+.studio-hub-scheduled{
+  list-style:none;
+  margin:2px 0 0;
+  padding:0;
+  display:flex;
+  flex-direction:column;
+  gap:6px;
+  flex:1 1 auto;
+}
+.studio-hub-scheduled li{
+  display:flex;
+  align-items:baseline;
+  justify-content:space-between;
+  gap:12px;
+  margin:0;
+  padding:0;
+  font-size:.95rem;
+  line-height:1.35;
+  color:#012559;
+}
+.studio-hub-scheduled-platform{
+  font-weight:650;
+}
+.studio-hub-scheduled-count{
+  font-variant-numeric:tabular-nums;
+  font-weight:800;
+  font-size:1.05rem;
+  color:#012559;
+}
+.studio-hub-scheduled-empty{
+  color:#64748b;
+  font-size:.88rem;
+  font-weight:500;
+}
+.studio-hub-live{
+  margin:0;
+  font-size:.72rem;
+  letter-spacing:.04em;
+  text-transform:uppercase;
+  font-weight:700;
+  color:#7b8798;
+}
 .studio-hub-hello .secondary-button{
   align-self:flex-start;
   margin-top:4px;
@@ -2737,7 +2779,9 @@ body:has(#page-content.active) .studio-footer-links button:hover{
     border-radius:18px;
   }
   .studio-hub-hello h1{font-size:1.35rem}
-  .studio-hub-hello p{display:none}
+  .studio-hub-hello > p:not(.studio-hub-kicker):not(.studio-hub-live){display:none}
+  .studio-hub-scheduled{gap:4px}
+  .studio-hub-scheduled li{font-size:.88rem}
   .studio-hub-top .metrics{
     flex:1 1 100%;
     min-width:0;
