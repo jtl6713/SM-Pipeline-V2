@@ -102,3 +102,17 @@ test("30-minute schedule grid exposes slot helpers", () => {
   assert.equal(grid.slotDate(day, 31).getMinutes(), 30);
   assert.match(grid.slotKey(new Date(2026, 8, 21, 15, 47)), /-15-30$/);
 });
+
+
+test("default schedule suggestions start off, clear on untick, and do not hide ready outputs from the tray", () => {
+  const here = path.dirname(fileURLToPath(import.meta.url));
+  const app = fs.readFileSync(path.join(here, "assets", "app-item4-0625.js"), "utf8");
+  assert.match(app, /function restorePipelineUseDefaultSchedules\(\)[\s\S]{0,260}box\.checked = false/);
+  assert.match(app, /function clearDefaultSchedulesFromUnapprovedRows/);
+  assert.match(app, /pipelineScheduleDrafts\.delete\(record\.id\)/);
+  assert.match(app, /pipelineScheduleDirty\.delete\(record\.id\)/);
+  assert.match(app, /creativeCanApproveForPublishing\(record\) && !pipelineRowHasSchedule\(record\)/);
+  assert.match(app, /\.filter\(\(record\) => !studioEffectiveScheduleIso\(record\)\)/);
+  assert.match(app, /<strong>Ready to schedule<\/strong>/);
+  assert.match(app, /clearDefaultSchedulesFromUnapprovedRows\(\);[\s\S]{0,240}if \(!useDefaults\)/);
+});
