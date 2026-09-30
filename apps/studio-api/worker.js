@@ -456,7 +456,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.429-idea-find-images-now",
+          version: "0.10.430-idea-photo-five-minute-poll",
           studio_desk_inventory_v1: true,
           studio_desk_activity_v1: true,
           studio_tiktok_complete_v1: true,
@@ -1532,11 +1532,13 @@ export default {
         } catch (error) {
           console.warn("idea automatic photo listening failed", error);
         }
-        try {
-          await runWaitingIdeaPhotoMatches(env, { limit: 8 });
-        } catch (error) {
-          console.warn("idea photo-wait matcher failed", error);
-        }
+      }
+      // Existing listeners react to newly ingested media on every five-minute
+      // Worker tick. Starting brand-new listeners stays on the lower-cost heavy cadence.
+      try {
+        await runWaitingIdeaPhotoMatches(env, { limit: 12 });
+      } catch (error) {
+        console.warn("idea photo-wait matcher failed", error);
       }
       try {
         await resumeStaleStudioProductionJobs(env);
