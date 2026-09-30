@@ -644,6 +644,27 @@ def _clip_overlay_signature(raw: Any) -> tuple[str, ...]:
     return tuple(signature)
 
 
+def _clip_render_signature(raw: Any) -> tuple[str, ...]:
+    parsed = raw
+    if isinstance(raw, str):
+        parsed = parse_json(raw, []) or []
+    signature: list[str] = []
+    for clip in parsed if isinstance(parsed, list) else []:
+        if not isinstance(clip, dict):
+            continue
+        render_bits = {
+            "durationFrames": clip.get("durationFrames"),
+            "motionStyle": clip.get("motionStyle"),
+            "motion": clip.get("motion"),
+            "transition": clip.get("transition"),
+            "renderDirective": clip.get("renderDirective"),
+            "beatSync": clip.get("beatSync", True),
+            "fitMode": clip.get("fitMode"),
+        }
+        signature.append(json.dumps(render_bits, sort_keys=True, separators=(",", ":")))
+    return tuple(signature)
+
+
 def _remotion_fetchable(url: str) -> bool:
     value = str(url or "").strip()
     return value.startswith(("http://", "https://")) and not value.startswith("/api/media-assets/")
@@ -1159,10 +1180,13 @@ def stamp_fields(
     new_stills = _clip_still_urls(package.get("render_clip_list_json"))
     old_overlays = _clip_overlay_texts(field(existing_record, "Render_Clip_List_JSON"))
     new_overlays = _clip_overlay_texts(package.get("render_clip_list_json"))
+    old_render = _clip_render_signature(field(existing_record, "Render_Clip_List_JSON"))
+    new_render = _clip_render_signature(package.get("render_clip_list_json"))
     recropped = bool(new_stills) and bool(old_stills) and new_stills != old_stills
     overlay_changed = bool(new_overlays) and new_overlays != old_overlays
-    if recropped:
-        fields["Timing_Status"] = "Pending"
+    render_changed = bool(new_render) and new_render != old_render
+    if recropped or render_changed:
+        fields["Timing_Status"] = "Pending" if _music_requested(package.get("effective") or {}) else "Skipped"
         fields["Timing_Timeline_JSON"] = None
         fields["Timing_Error_Message"] = None
     elif existing_timing in {"Ready", "Skipped"} or existing_timeline:
