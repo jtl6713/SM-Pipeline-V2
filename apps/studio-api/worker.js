@@ -12496,6 +12496,36 @@ const PR_CONTENT_TYPES = new Set([
   "Longform Video","Thumbnail / Promo Still","Event / Flyer Post","Photo Set"
 ]);
 const PR_PLATFORMS = new Set(["Instagram","Facebook","TikTok","YouTube","Threads","X","Lemon8"]);
+const PR_PLATFORM_ALIASES = new Map([
+  ["instagram reel", "Instagram"],
+  ["instagram reels", "Instagram"],
+  ["instagram story", "Instagram"],
+  ["instagram stories", "Instagram"],
+  ["facebook reel", "Facebook"],
+  ["facebook reels", "Facebook"],
+  ["facebook story", "Facebook"],
+  ["facebook stories", "Facebook"],
+  ["tiktok video", "TikTok"],
+  ["tiktok videos", "TikTok"],
+  ["youtube short", "YouTube"],
+  ["youtube shorts", "YouTube"],
+  ["youtube video", "YouTube"],
+  ["youtube videos", "YouTube"],
+  ["twitter", "X"],
+]);
+
+function canonicalProductionPlatform(value) {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+  if (PR_PLATFORMS.has(raw)) return raw;
+  return PR_PLATFORM_ALIASES.get(raw.toLowerCase()) || raw;
+}
+
+function canonicalProductionPlatforms(values) {
+  return [...new Set((Array.isArray(values) ? values : [])
+    .map(canonicalProductionPlatform)
+    .filter(Boolean))];
+}
 const PR_TRISTATE = new Set(["Use Profile Default","Yes","No"]);
 const PR_THUMBNAIL_MODES = new Set(["Use Profile Default","Yes","No","Use photo frame"]);
 const PR_COUNT_MODES = new Set(["AI decides","Exact","Target range"]);
@@ -12694,7 +12724,7 @@ async function cleanProductionRequestPayload(payload, env) {
     : null;
 
   const platformsRaw = Array.isArray(payload?.platforms) ? payload.platforms : [];
-  const platforms = [...new Set(platformsRaw.map(v => String(v || "").trim()).filter(Boolean))];
+  const platforms = canonicalProductionPlatforms(platformsRaw);
   const invalidPlatforms = platforms.filter(v => !PR_PLATFORMS.has(v));
   if (invalidPlatforms.length) throw new HttpError(400, `Unsupported platform(s): ${invalidPlatforms.join(", ")}`);
 
@@ -12874,8 +12904,10 @@ function productionRequestDefaultsFromIdea(idea) {
       const productionPlatforms = Array.isArray(f(idea, "Production_Target_Platforms"))
         ? f(idea, "Production_Target_Platforms")
         : [];
-      if (productionPlatforms.length) return productionPlatforms;
-      return Array.isArray(f(idea, "Suggested_Platforms")) ? f(idea, "Suggested_Platforms") : [];
+      if (productionPlatforms.length) return canonicalProductionPlatforms(productionPlatforms);
+      return canonicalProductionPlatforms(
+        Array.isArray(f(idea, "Suggested_Platforms")) ? f(idea, "Suggested_Platforms") : []
+      );
     })(),
     voiceover_mode: String(f(idea, "Production_Include_Voiceover") || "Yes").trim() || "Yes",
     background_music_mode: String(f(idea, "Production_Include_Background_Music") || "Yes").trim() || "Yes",

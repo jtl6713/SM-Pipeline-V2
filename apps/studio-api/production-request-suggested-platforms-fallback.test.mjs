@@ -15,3 +15,13 @@ test("production draft falls back to Suggested_Platforms when explicit targets a
   assert.match(fn, /if \(productionPlatforms\.length\) return productionPlatforms/);
   assert.match(fn, /Suggested_Platforms/);
 });
+
+
+test("legacy output-style platform labels normalize to Production platforms", () => {
+  assert.match(worker, /\["youtube shorts", "YouTube"\]/i);
+  assert.match(worker, /\["instagram reels", "Instagram"\]/i);
+  assert.match(worker, /\["facebook reels", "Facebook"\]/i);
+  assert.match(worker, /function canonicalProductionPlatform/);
+  assert.match(worker, /const platforms = canonicalProductionPlatforms\(platformsRaw\)/);
+  assert.match(worker, /if \(productionPlatforms\.length\) return canonicalProductionPlatforms\(productionPlatforms\)/);
+});

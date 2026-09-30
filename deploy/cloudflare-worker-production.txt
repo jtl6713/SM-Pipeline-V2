@@ -319,3 +319,9 @@ Deploy Studio API Worker production
 Reason: Make Production Request light/list mapping truly lightweight by never parsing master asset, plan, variant, or publish JSON before the workspace opens.
 Requested: 2026-09-29
 Source before deploy: 938f0da2bcdec2b8f60c82e2683215fdfd06601c
+
+
+Deploy Studio API Worker production
+Reason: Normalize legacy Idea platform labels such as YouTube Shorts / Instagram Reels / Facebook Reels to canonical Production platforms before validation. Fixes Wabash Mural Sprint Production Request creation.
+Requested: 2026-09-29
+Source before deploy: 21ebad04cc480982079dbb8fc50e6b0dd62fd4ca
