@@ -97,3 +97,8 @@ jobs:
           exit 6
 
 # Trigger: deploy job-assets-serialize for CI 239-242 (2026-09-28T01:13Z)
+
+# Trigger remotion-renderer deploy for Timed Script Render Mode
+# Source merge 5abf33dba79d9d983f1ccbc611f70c1fb285be18
+# Expected health version 2026-10-01-timed-script-authoritative
+# 2026-10-01T17:16:00Z

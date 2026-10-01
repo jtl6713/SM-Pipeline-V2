@@ -82,3 +82,7 @@ jobs:
 # Trigger pipeline-runner deploy for AP2C ordered first-10 child selection + pending-only timeout (Output 1298)
 # Source merge bf9bfc25d9f03e67f9d3b5480b9b6887e2b13fe2
 # 2026-09-30
+
+# Trigger pipeline-runner deploy for Timed Script Render Mode
+# Source merge 5abf33dba79d9d983f1ccbc611f70c1fb285be18
+# 2026-10-01T17:16:00Z
