@@ -364,3 +364,8 @@ Deploy Studio API Worker production
 Reason: Show AP1C Meta throttling as Retry Pending and enable Quality Agent 30-minute cooldown for Output 1298
 Source merge: db2ba8eace15eb2585e6d4c1325282006c81c06c
 Requested: 2026-10-01
+
+Deploy Studio API Worker production
+Reason: Park Meta AP1C throttling in Retry Pending during cooldown and auto-release after cooldown (Output 1298)
+Source merge: 8d610e2d493d95636be826bfef79bc068e871f79
+Requested: 2026-10-01
