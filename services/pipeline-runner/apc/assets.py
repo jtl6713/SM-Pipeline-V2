@@ -42,7 +42,15 @@ def list_output_slides(
 
 
 def list_final_slides(client: AirtableClient, output_id: str) -> list[dict[str, Any]]:
-    return list_output_slides(client, output_id, view=C9_FINAL_SLIDES_VIEW)
+    # Airtable applies max_records before our Python sort. Fetch beyond the
+    # Instagram Graph limit, sort by Current Order, then keep the first 10.
+    rows = list_output_slides(
+        client,
+        output_id,
+        view=C9_FINAL_SLIDES_VIEW,
+        max_records=max(40, MAX_SLIDES * 4),
+    )
+    return rows[:MAX_SLIDES]
 
 
 def list_child_slides(client: AirtableClient, output_id: str) -> list[dict[str, Any]]:
