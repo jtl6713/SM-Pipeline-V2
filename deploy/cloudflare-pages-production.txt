@@ -338,3 +338,9 @@ Reason: Hide Home refresh-age/countdown indicator while preserving 5-second auto
 UI: 0.6.448-home-refresh-quiet
 Source merge: c79d342b16e9ca73fe9a8d080eab991812abebe2
 Requested: 2026-09-30T21:59:00-05:00
+
+Deploy Studio Pages production
+Reason: Reduce Home Airtable polling pressure; 15-second refresh with automatic failure backoff
+UI: 0.6.449-home-airtable-backoff
+Source merge: f2b9d7111aebefa6676a47fa9147fc0a3770c0d5
+Requested: 2026-09-30T22:38:00-05:00
