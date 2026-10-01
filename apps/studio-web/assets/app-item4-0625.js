@@ -252,7 +252,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.447-per-photo-ai-motion";
+  const BUILD_ID = "item4-0.6.448-home-refresh-quiet";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -260,7 +260,6 @@
   const DASHBOARD_POLL_MS = 5000;
   let dashboardPollTimer = null;
   let dashboardLastRefreshAt = 0;
-  let dashboardLiveHintTimer = null;
 
   function item4AcceptForKind(kind = ezIntakeKind) {
     const next = String(kind || "").trim();
@@ -1724,31 +1723,13 @@
       clearTimeout(dashboardPollTimer);
       dashboardPollTimer = null;
     }
-    if (dashboardLiveHintTimer) {
-      clearInterval(dashboardLiveHintTimer);
-      dashboardLiveHintTimer = null;
-    }
   }
 
   function updateDashboardLiveHint() {
     const hint = $("studioHubLive");
     if (!hint) return;
-    if (!homePageActive()) {
-      hint.textContent = "";
-      return;
-    }
-    if (dashboardInflight) {
-      hint.textContent = dashboardLastRefreshAt ? "Refreshing…" : "Loading…";
-      return;
-    }
-    if (!dashboardLastRefreshAt) {
-      hint.textContent = "Live";
-      return;
-    }
-    const seconds = Math.max(0, Math.floor((Date.now() - dashboardLastRefreshAt) / 1000));
-    if (seconds < 2) hint.textContent = "Updated just now";
-    else if (seconds < 60) hint.textContent = `Updated ${seconds}s ago`;
-    else hint.textContent = `Updated ${Math.floor(seconds / 60)}m ago`;
+    hint.hidden = true;
+    hint.textContent = "";
   }
 
   function scheduleDashboardPoll() {
@@ -1768,9 +1749,6 @@
       const tick = dashboardInflight ? Promise.resolve() : loadDashboard(true);
       Promise.resolve(tick).finally(scheduleDashboardPoll);
     }, DASHBOARD_POLL_MS);
-    if (!dashboardLiveHintTimer) {
-      dashboardLiveHintTimer = setInterval(updateDashboardLiveHint, 1000);
-    }
     updateDashboardLiveHint();
   }
 
