@@ -6,7 +6,7 @@ from typing import Any
 
 from airtable.client import AirtableClient
 from airtable.constants import CAROUSEL_SLIDES_TABLE, PLATFORM_OUTPUTS_TABLE
-from apc.assets import child_ids, current_order, list_child_slides, list_final_slides
+from apc.assets import current_order, list_final_slides
 from apc.common import (
     clamp_ig_graph_children,
     expected_child_count,
@@ -122,6 +122,7 @@ def process_request(
         result["expected_child_count"] = len(slides)
     settings = PipelineSettings(client)
     graph = InstagramCarouselClient(**load_instagram_settings(settings, output, client=client))
+    created_child_ids: list[str] = []
     for slide in slides:
         client.update_record(
             CAROUSEL_SLIDES_TABLE,
@@ -167,6 +168,7 @@ def process_request(
                 },
                 typecast=True,
             )
+            created_child_ids.append(child_id)
             continue
         message = f"AP1C child creation failed for slide {current_order(slide)}. HTTP {status_code}: {error_message(payload, status_code)}"
         client.update_record(
@@ -182,10 +184,12 @@ def process_request(
         _reset_parent(client, output, message)
         return {"processed": True, "needs_children": True, **result}
 
-    created = list_child_slides(client, field_str(output, "Output_ID") or field(output, "Output_ID"))
-    created, _ = clamp_ig_graph_children(created, IG_GRAPH_MAX_CHILDREN)
-    created_count = len(child_ids(created))
-    expected = min(expected_child_count(output, created_count), IG_GRAPH_MAX_CHILDREN)
+    # Graph returned these IDs synchronously in this request. Treat that as the
+    # creation authority instead of immediately rereading Airtable; Airtable can
+    # briefly lag the final slide write and report 9/10 even though all 10 child
+    # containers were created successfully (NYC Output 1298).
+    created_count = len(set(created_child_ids))
+    expected = min(expected_child_count(output, len(slides)), IG_GRAPH_MAX_CHILDREN)
     if created_count != expected or created_count <= 1:
         _reset_parent(
             client,
