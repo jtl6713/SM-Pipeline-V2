@@ -38,19 +38,34 @@ from item4.settings import PipelineSettings
 from render.fields import field, field_str
 
 
-def _reset_parent(client: AirtableClient, output: dict[str, Any], message: str) -> None:
+AP1C_RATE_LIMIT_RETRY_MINUTES = 30
+
+
+def _is_rate_limited(message: str) -> bool:
+    text = str(message or "").casefold()
+    return "too many actions" in text or "rate limit" in text or "request limit" in text
+
+
+def _reset_parent(
+    client: AirtableClient,
+    output: dict[str, Any],
+    message: str,
+    *,
+    retry_minutes: int = RETRY_MINUTES,
+) -> None:
+    retry_stamp = retry_at(retry_minutes)
     client.update_record(
         PLATFORM_OUTPUTS_TABLE,
         output["id"],
         {
             **unlock_fields(),
             "IG_Carousel_Status": STATUS_ASSETS_READY,
-            "Publish_Next_Retry_At": retry_at(RETRY_MINUTES),
+            "Publish_Next_Retry_At": retry_stamp,
             "Publish_Retry_Eligible": True,
             "IG_Carousel_Error_Stage": ERROR_AP1C,
             "IG_Carousel_Retry_Count": (parse_int(field(output, "IG_Carousel_Retry_Count"), 0) or 0) + 1,
             "IG_Carousel_Error_Message": message,
-            "IG_Carousel_Next_Retry_At": retry_at(RETRY_MINUTES),
+            "IG_Carousel_Next_Retry_At": retry_stamp,
         },
         typecast=True,
     )
@@ -122,8 +137,18 @@ def process_request(
         result["expected_child_count"] = len(slides)
     settings = PipelineSettings(client)
     graph = InstagramCarouselClient(**load_instagram_settings(settings, output, client=client))
-    created_child_ids: list[str] = []
+    retained_child_ids: list[str] = []
+    created_now = 0
     for slide in slides:
+        existing_id = field_str(slide, "IG_Child_Container_ID")
+        existing_status = field_str(slide, "IG_Child_Container_Status").strip().casefold()
+        # Preserve healthy/in-flight children. AP1C retries must create only
+        # missing or terminal children; recreating already-good children caused
+        # Meta "User is performing too many actions" throttling on NYC 1298.
+        if existing_id and existing_status not in {"error", "expired"}:
+            retained_child_ids.append(existing_id)
+            continue
+
         client.update_record(
             CAROUSEL_SLIDES_TABLE,
             slide["id"],
@@ -168,9 +193,11 @@ def process_request(
                 },
                 typecast=True,
             )
-            created_child_ids.append(child_id)
+            retained_child_ids.append(child_id)
+            created_now += 1
             continue
-        message = f"AP1C child creation failed for slide {current_order(slide)}. HTTP {status_code}: {error_message(payload, status_code)}"
+        graph_error = error_message(payload, status_code)
+        message = f"AP1C child creation failed for slide {current_order(slide)}. HTTP {status_code}: {graph_error}"
         client.update_record(
             CAROUSEL_SLIDES_TABLE,
             slide["id"],
@@ -181,14 +208,20 @@ def process_request(
             },
             typecast=True,
         )
-        _reset_parent(client, output, message)
-        return {"processed": True, "needs_children": True, **result}
+        retry_minutes = AP1C_RATE_LIMIT_RETRY_MINUTES if _is_rate_limited(graph_error) else RETRY_MINUTES
+        _reset_parent(client, output, message, retry_minutes=retry_minutes)
+        return {
+            "processed": True,
+            "needs_children": True,
+            "rate_limited": _is_rate_limited(graph_error),
+            "retry_minutes": retry_minutes,
+            "retained_count": len(set(retained_child_ids)),
+            **result,
+        }
 
-    # Graph returned these IDs synchronously in this request. Treat that as the
-    # creation authority instead of immediately rereading Airtable; Airtable can
-    # briefly lag the final slide write and report 9/10 even though all 10 child
-    # containers were created successfully (NYC Output 1298).
-    created_count = len(set(created_child_ids))
+    # Count the children preserved from prior attempts plus any created now.
+    # Do not immediately reread Airtable: its final write can briefly lag.
+    created_count = len(set(retained_child_ids))
     expected = min(expected_child_count(output, len(slides)), IG_GRAPH_MAX_CHILDREN)
     if created_count != expected or created_count <= 1:
         _reset_parent(
@@ -215,5 +248,11 @@ def process_request(
         },
         typecast=True,
     )
-    result.update({"processed": True, "needs_child_poll": True, "created_count": created_count})
+    result.update({
+        "processed": True,
+        "needs_child_poll": True,
+        "created_count": created_count,
+        "created_now": created_now,
+        "retained_count": created_count - created_now,
+    })
     return result

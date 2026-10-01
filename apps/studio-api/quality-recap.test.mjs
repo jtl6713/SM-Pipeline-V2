@@ -249,3 +249,26 @@ test("recap explains AP2C child poll recovery", () => {
   assert.match(recap.cards[0].action, /recreated the children once/i);
   assert.equal(recap.cards[0].output_id, 1298);
 });
+
+
+test("recap explains Instagram AP1C rate limiting without hammering Meta", () => {
+  const recap = buildQualityRecap({
+    incidents: [{
+      kind: "ig_carousel_rate_limited",
+      class: "transient",
+      actor: "worker_heal",
+      fingerprint: "ig_carousel_rate_limited:recvDSuJr2B4cuzfV:meta_actions",
+      record_id: "recvDSuJr2B4cuzfV",
+      output_id: 1298,
+      output_title: "Rainy Day Museum Mile",
+      platform: "Instagram",
+      platform_output_type: "Instagram Carousel",
+      profile_name: "NYC - New York City",
+    }],
+  });
+  assert.equal(recap.open_count, 1);
+  assert.match(recap.cards[0].found, /temporarily throttled/i);
+  assert.match(recap.cards[0].action, /Preserved the healthy child containers/i);
+  assert.match(recap.cards[0].action, /30 minutes/i);
+  assert.match(recap.cards[0].action, /missing or terminal child/i);
+});

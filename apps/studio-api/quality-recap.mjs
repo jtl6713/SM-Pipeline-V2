@@ -38,6 +38,10 @@ const COPY = {
     found: "Instagram child polling reported a terminal child or timeout, sometimes because an overflow slide or finished sibling distorted the poll count.",
     action: "Checked only the required ordered children. If they are valid, continued AP2C; if a required child is actually missing or terminal, recreated the children once with AP1C.",
   },
+  ig_carousel_rate_limited: {
+    found: "Meta temporarily throttled Instagram carousel child creation because AP1C made too many creation requests.",
+    action: "Preserved the healthy child containers, backed off for at least 30 minutes, and will retry only the missing or terminal child instead of rebuilding the carousel.",
+  },
   publish_never_dispatch: {
     found: "An approved post is due and the send never started.",
     action: "Queued the send because the scheduled time is due.",
