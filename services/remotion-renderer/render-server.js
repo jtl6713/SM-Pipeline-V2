@@ -7,6 +7,7 @@ const https = require('https');
 const crypto = require('crypto');
 const { spawn } = require('child_process');
 const { registerRemotionCleanup } = require('./remotion-cleanup');
+const { authoritativeRenderPlan } = require('./authoritative-duration');
 
 const app = express();
 
@@ -19,7 +20,7 @@ const DEFAULT_MUSIC_END_FADE_SECONDS = 0.5;
 const PIPELINE_RUNNER_INTERNAL_URL = String(
     process.env.PIPELINE_RUNNER_INTERNAL_URL || 'http://127.0.0.1:3350'
 ).replace(/\/$/, '');
-const SERVICE_VERSION = '2026-09-28-clip-media-kind';
+const SERVICE_VERSION = '2026-10-01-timed-script-authoritative';
 const PROJECT_DIR = __dirname;
 const PUBLIC_DIR = path.join(PROJECT_DIR, 'public');
 const OUT_DIR = path.join(PROJECT_DIR, 'out');
@@ -1061,8 +1062,18 @@ async function buildRewrittenProps({ body, jobId, job }) {
         );
     }
 
-    const hasTimingPlan = Boolean(body.timingPlan && typeof body.timingPlan === 'object');
-    const adjustedClips = hasTimingPlan
+    const authoritativePlan = authoritativeRenderPlan(body, rewrittenClips);
+    if (authoritativePlan) {
+        finalDurationFrames = authoritativePlan.finalDurationFrames;
+        effectiveTailSeconds = 0;
+        appendLog(
+            job,
+            `Authoritative timed script: locking ${finalDurationFrames} frames ` +
+            `and keeping imported scene boundaries.`
+        );
+    }
+    const hasTimingPlan = !authoritativePlan && Boolean(body.timingPlan && typeof body.timingPlan === 'object');
+    const adjustedClips = (authoritativePlan || hasTimingPlan)
         ? rewrittenClips.map((clip) => ({
             ...clip,
             durationFrames: Math.max(1, Math.round(toFiniteNumber(clip.durationFrames, 1))),
@@ -1071,7 +1082,12 @@ async function buildRewrittenProps({ body, jobId, job }) {
             rewrittenClips,
             finalDurationFrames
         );
-    if (hasTimingPlan) {
+    if (authoritativePlan) {
+        finalDurationFrames = adjustedClips.reduce(
+            (sum, clip) => sum + Math.max(1, Math.round(toFiniteNumber(clip.durationFrames, 1))),
+            0
+        );
+    } else if (hasTimingPlan) {
         const timedTotal = adjustedClips.reduce(
             (sum, clip) => sum + Math.max(1, Math.round(toFiniteNumber(clip.durationFrames, 1))),
             0
@@ -1141,6 +1157,7 @@ async function buildRewrittenProps({ body, jobId, job }) {
         durationInFrames: finalDurationFrames,
         requestedDurationFrames,
         voiceoverTailSeconds: effectiveTailSeconds,
+        ...(authoritativePlan ? { endHoldFrames: 0, timingMode: "authoritative", timingSource: "timed_script" } : {}),
         voiceoverDurationSeconds,
         voiceoverEndFrame,
         postVoiceoverMusicVolume,

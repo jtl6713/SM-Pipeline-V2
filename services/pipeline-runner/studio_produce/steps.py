@@ -57,10 +57,20 @@ def caption_locked(request: dict[str, Any]) -> bool:
 
 
 def script_locked(request: dict[str, Any]) -> bool:
-    return "force exact" in field_str(request, "Script_Mode").lower()
+    if "force exact" in field_str(request, "Script_Mode").lower():
+        return True
+    from studio_produce.timed_script import timed_script_from_request
+
+    return timed_script_from_request(request) is not None
 
 
 def exact_requested_script(request: dict[str, Any]) -> str:
+    from studio_produce.timed_script import exact_voiceover_text, timed_script_from_request
+
+    timeline = timed_script_from_request(request)
+    if timeline:
+        # Suggested-still descriptions stay out of narration even if Script_Mode was left on AI decides.
+        return exact_voiceover_text(timeline)
     if not script_locked(request):
         return ""
     return field_str(request, "Requested_Script").strip()

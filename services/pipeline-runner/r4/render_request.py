@@ -142,6 +142,10 @@ def voiceover_is_required(output: dict[str, Any], content_item: dict[str, Any] |
 
 
 def duration_is_explicit(output: dict[str, Any]) -> bool:
+    from studio_produce.timed_script import output_uses_authoritative_timing
+
+    if output_uses_authoritative_timing(output):
+        return True
     override = field(output, "Video_Duration_Seconds_Override")
     if override is not None and str(override).strip() != "":
         return True
@@ -326,6 +330,22 @@ def build_no_voiceover_request(
     }
 
 
+def apply_authoritative_timing(payload: dict[str, Any], output: dict[str, Any]) -> dict[str, Any]:
+    """Imported scene timing wins over voiceover-tail extension and beat redistribution."""
+    from studio_produce.timed_script import output_uses_authoritative_timing
+
+    if not output_uses_authoritative_timing(output):
+        return payload
+    body = dict(payload)
+    body["timingMode"] = "authoritative"
+    body["timingSource"] = "timed_script"
+    body["durationIsExplicit"] = True
+    body["voiceoverTailSeconds"] = 0
+    body["endHoldFrames"] = 0
+    body.pop("timingPlan", None)
+    return body
+
+
 def choose_render_request(
     output: dict[str, Any],
     content_item: dict[str, Any] | None,
@@ -344,15 +364,15 @@ def choose_render_request(
                 default_voice=default_voice,
                 url=vo,
             )
-        return "p020_manifest", attach_timing_plan(payload, output)
+        return "p020_manifest", apply_authoritative_timing(attach_timing_plan(payload, output), output)
     if vo:
-        return "voiceover", attach_timing_plan(build_voiceover_request(
+        return "voiceover", apply_authoritative_timing(attach_timing_plan(build_voiceover_request(
             output,
             content_item,
             default_music=default_music,
             default_voice=default_voice,
-        ), output)
-    return "no_voiceover", attach_timing_plan(
+        ), output), output)
+    return "no_voiceover", apply_authoritative_timing(attach_timing_plan(
         build_no_voiceover_request(output, content_item, default_music=default_music),
         output,
-    )
+    ), output)
