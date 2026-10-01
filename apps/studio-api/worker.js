@@ -11303,14 +11303,47 @@ async function studioHealIgCarouselChildPollFailure(env, options = {}) {
       continue;
     }
 
-    const required = slides
+    const ordered = slides
       .filter((slide) => !Boolean(f(slide, "Deleted From Carousel")))
-      .sort((a, b) => Number(f(a, "Current Order") || f(a, "Slide Number") || 0) - Number(f(b, "Current Order") || f(b, "Slide Number") || 0))
-      .slice(0, expected);
+      .sort((a, b) => Number(f(a, "Current Order") || f(a, "Slide Number") || 0) - Number(f(b, "Current Order") || f(b, "Slide Number") || 0));
+    const required = ordered.slice(0, expected);
+    const overflow = ordered.slice(expected);
     const missing = required.filter((slide) => !String(f(slide, "IG_Child_Container_ID") || "").trim());
     const terminal = required.filter((slide) => /^(ERROR|EXPIRED)$/i.test(String(f(slide, "IG_Child_Container_Status") || "").trim()));
 
     try {
+      // Make the recovery self-contained even when the local runner has not yet
+      // been redeployed: remove overflow rows from the active Instagram carousel
+      // and reset historical poll attempts so old AP2C code cannot immediately
+      // trip its max-attempt guard again.
+      for (const slide of overflow) {
+        await airtableFetch(env, PHASE6_CAROUSEL_SLIDES_TABLE, slide.id, {
+          method: "PATCH",
+          body: JSON.stringify({
+            fields: {
+              "Deleted From Carousel": true,
+              IG_Child_Container_ID: "",
+              IG_Child_Container_Status: "Not Created",
+              IG_Child_Container_Attempt_Count: 0,
+              IG_Child_Container_Error: "",
+              IG_Carousel_Item_Ready: false,
+            },
+            typecast: true,
+          }),
+        });
+      }
+      for (const slide of required) {
+        await airtableFetch(env, PHASE6_CAROUSEL_SLIDES_TABLE, slide.id, {
+          method: "PATCH",
+          body: JSON.stringify({
+            fields: {
+              IG_Child_Container_Attempt_Count: 0,
+            },
+            typecast: true,
+          }),
+        });
+      }
+
       if (required.length === expected && !missing.length && !terminal.length) {
         await airtableFetch(env, outputTable, row.id, {
           method: "PATCH",
@@ -11365,6 +11398,7 @@ async function studioHealIgCarouselChildPollFailure(env, options = {}) {
         key: "IG_AP2C_CHILD_POLL",
         id: row.id,
         expected_children: expected,
+        overflow_children_removed: overflow.length,
         missing_children: missing.length,
         terminal_children: terminal.length,
         action: "recreate_required_children_once_ap1c",
@@ -11390,6 +11424,7 @@ async function studioHealIgCarouselChildPollFailure(env, options = {}) {
         id: row.id,
         action: row.action || null,
         expected_children: row.expected_children ?? null,
+        overflow_children_removed: row.overflow_children_removed ?? null,
         missing_children: row.missing_children ?? null,
         terminal_children: row.terminal_children ?? null,
         error: row.error || null,
