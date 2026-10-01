@@ -359,3 +359,8 @@ Deploy Studio API Worker production
 Reason: Make AP2C Quality Agent recovery self-contained (overflow cleanup + poll-attempt reset) from PR #472
 Source merge: b15040f6d16902d4562790e5446223672bffddc5
 Requested: 2026-09-30
+
+Deploy Studio API Worker production
+Reason: Show AP1C Meta throttling as Retry Pending and enable Quality Agent 30-minute cooldown for Output 1298
+Source merge: db2ba8eace15eb2585e6d4c1325282006c81c06c
+Requested: 2026-10-01
