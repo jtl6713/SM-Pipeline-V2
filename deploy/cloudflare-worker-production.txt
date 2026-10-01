@@ -354,3 +354,8 @@ Deploy Studio API Worker production
 Reason: Ship AP2C child-poll Quality Agent recovery and Output 1298 fix from PR #471
 Source merge: bf9bfc25d9f03e67f9d3b5480b9b6887e2b13fe2
 Requested: 2026-09-30
+
+Deploy Studio API Worker production
+Reason: Make AP2C Quality Agent recovery self-contained (overflow cleanup + poll-attempt reset) from PR #472
+Source merge: b15040f6d16902d4562790e5446223672bffddc5
+Requested: 2026-09-30
