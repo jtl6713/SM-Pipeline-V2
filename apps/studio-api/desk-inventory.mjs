@@ -760,11 +760,41 @@ export function classifyIgCarouselChildVerificationRace(row) {
   }, row);
 }
 
+
+export function isIgCarouselChildPollFailure(row) {
+  const platform = String(row?.platform || "").trim();
+  if (platform !== "Instagram") return false;
+  const type = `${row?.studio_output_type || ""} ${row?.platform_output_type || ""}`;
+  if (!/carousel/i.test(type)) return false;
+  if (row?.published_at || String(row?.ig_carousel_status || "").trim() === "Published") return false;
+  const err = String(row?.ig_carousel_error || row?.publish_error || "");
+  return /AP2C verified terminal child failure or poll timeout|AP2C verified child-count mismatch/i.test(err);
+}
+
+export function classifyIgCarouselChildPollFailure(row) {
+  if (!isIgCarouselChildPollFailure(row)) return null;
+  const recordId = String(row?.id || row?.record_id || "").trim();
+  const err = String(row?.ig_carousel_error || row?.publish_error || "");
+  const counts = err.match(/Finished:\s*(\d+);\s*terminal:\s*(\d+);\s*max attempts:\s*(\d+)/i);
+  return withDeskIdentity({
+    kind: "ig_carousel_child_poll_failure",
+    class: "transient",
+    record_id: recordId || null,
+    fingerprint: fingerprint("ig_carousel_child_poll_failure", recordId, counts ? `${counts[1]}_finished_${counts[2]}_terminal` : "child_count_mismatch"),
+    actor: "worker_heal",
+    diagnosis: "AP2C reported a terminal child or timeout. Inspect only the first expected Instagram children in Current Order and ignore deleted/overflow slides. If every required child ID exists and none is terminal, clear the stale AP2C error, keep Children Processing, and pulse AP2C. If a required child is genuinely ERROR/EXPIRED or missing, return the parent to Assets Ready and rerun AP1C once. Timeout is based on unfinished required children only; FINISHED siblings must not exhaust the poll budget. Proven: NYC Output 1298 / Rainy Day Museum Mile.",
+    finished_child_count: counts ? Number(counts[1]) : null,
+    terminal_child_count: counts ? Number(counts[2]) : null,
+    max_attempts: counts ? Number(counts[3]) : null,
+  }, row);
+}
+
 export function classifyPublishFailed(row, nowMs = Date.now()) {
   if (row?.published_at) return null;
   if (classifyTikTokAuthSignature(row)) return null;
   if (classifyIgCarouselTooManyChildren(row)) return null;
   if (classifyIgCarouselChildVerificationRace(row)) return null;
+  if (classifyIgCarouselChildPollFailure(row)) return null;
   const outputStatus = String(row?.output_status || "").trim();
   const publish = String(row?.publish_status || "").trim();
   if (outputStatus && !["Approved for Publishing", "Failed"].includes(outputStatus)) return null;
@@ -1114,6 +1144,7 @@ export const CLASSIFIER_KINDS = Object.freeze([
   "tiktok_auth_signature",
   "ig_carousel_too_many_children",
   "ig_carousel_child_verification_race",
+  "ig_carousel_child_poll_failure",
   "render_failed",
   "render_unfetchable_source",
   "render_private_drive_watermark",
