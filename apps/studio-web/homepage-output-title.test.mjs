@@ -127,7 +127,7 @@ test("Home dashboard exposes only actionable counts and filtered destinations", 
   assert.doesNotMatch(app, /filter === "approval"[^\n]*review_status[^\n]*Pending/);
 });
 
-test("Home metric cards use count tones and poll every few seconds", () => {
+test("Home metric cards use count tones and Airtable-safe polling", () => {
   assert.match(app, /function dashboardCardTone\(view, number\)/);
   assert.match(app, /if \(view === "manual" \|\| view === "failed"\)/);
   assert.match(app, /if \(count <= 2\) return "warn"/);
@@ -136,7 +136,9 @@ test("Home metric cards use count tones and poll every few seconds", () => {
   assert.match(app, /if \(view === "ideas"\)/);
   assert.match(app, /if \(count <= 4\) return "warn"/);
   assert.match(app, /metric-tone-\$\{escapeHtml\(tone\)\}/);
-  assert.match(app, /const DASHBOARD_POLL_MS = 5000/);
+  assert.match(app, /const DASHBOARD_POLL_MS = 15000/);
+  assert.match(app, /const DASHBOARD_POLL_MAX_MS = 60000/);
+  assert.match(app, /let dashboardPollDelayMs = DASHBOARD_POLL_MS/);
   assert.match(app, /function scheduleDashboardPoll\(/);
   assert.match(app, /function ensureDashboardPoll\(/);
   assert.match(app, /Promise\.resolve\(tick\)\.finally\(scheduleDashboardPoll\)/);
