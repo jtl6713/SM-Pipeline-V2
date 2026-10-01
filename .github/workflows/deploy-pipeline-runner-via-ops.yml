@@ -78,3 +78,7 @@ jobs:
 
 # Trigger pipeline-runner deploy for AP3C/AP0C/AP1C IG Graph max-10 child clamp (Output 1235)
 # 2026-09-30T04:00:00-05:00
+
+# Trigger pipeline-runner deploy for AP2C ordered first-10 child selection + pending-only timeout (Output 1298)
+# Source merge bf9bfc25d9f03e67f9d3b5480b9b6887e2b13fe2
+# 2026-09-30
