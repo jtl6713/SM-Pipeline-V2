@@ -252,13 +252,15 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.448-home-refresh-quiet";
+  const BUILD_ID = "item4-0.6.449-home-airtable-backoff";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
   const ITEM4_ACCEPT_MIXED = `${ITEM4_ACCEPT_PHOTOS},${ITEM4_ACCEPT_VIDEOS}`;
-  const DASHBOARD_POLL_MS = 5000;
+  const DASHBOARD_POLL_MS = 15000;
+  const DASHBOARD_POLL_MAX_MS = 60000;
   let dashboardPollTimer = null;
+  let dashboardPollDelayMs = DASHBOARD_POLL_MS;
   let dashboardLastRefreshAt = 0;
 
   function item4AcceptForKind(kind = ezIntakeKind) {
@@ -1748,7 +1750,7 @@
       if (!homePageActive() || document.hidden) return;
       const tick = dashboardInflight ? Promise.resolve() : loadDashboard(true);
       Promise.resolve(tick).finally(scheduleDashboardPoll);
-    }, DASHBOARD_POLL_MS);
+    }, dashboardPollDelayMs);
     updateDashboardLiveHint();
   }
 
@@ -1863,12 +1865,17 @@
           outputs,
         };
         dashboardLastRefreshAt = Date.now();
+        dashboardPollDelayMs = DASHBOARD_POLL_MS;
         renderScheduledContentOverview(outputs);
         renderDashboardMetrics();
         renderDashboardPanel();
         updateDashboardLiveHint();
       } catch (e) {
         if (generation !== dashboardLoadGeneration) return;
+        dashboardPollDelayMs = Math.min(
+          DASHBOARD_POLL_MAX_MS,
+          Math.max(DASHBOARD_POLL_MS, dashboardPollDelayMs * 2),
+        );
         renderScheduledContentOverview(dashboardCache.outputs || []);
         renderDashboardMetrics();
         updateDashboardLiveHint();
