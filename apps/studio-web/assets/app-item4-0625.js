@@ -252,7 +252,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.451-timed-script-save";
+  const BUILD_ID = "item4-0.6.452-timed-script-narration";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -3976,11 +3976,82 @@
     }
   }
 
+  function timedScriptStorageKey(requestId = activeProductionRequest?.id) {
+    const id = String(requestId || "").trim();
+    return id ? `studio-timed-script:${id}` : "";
+  }
+
+  function rememberTimedScript(timeline, requestId = activeProductionRequest?.id) {
+    const key = timedScriptStorageKey(requestId);
+    if (!key) return;
+    try {
+      if (!timeline?.segments?.length) sessionStorage.removeItem(key);
+      else sessionStorage.setItem(key, JSON.stringify(timeline));
+    } catch {
+      // Private browsing can reject sessionStorage. The in-memory timeline still saves.
+    }
+  }
+
+  function recallTimedScript(requestId = activeProductionRequest?.id) {
+    const key = timedScriptStorageKey(requestId);
+    const api = window.StudioTimedScript;
+    if (!key || !api) return null;
+    try {
+      return api.normalizeTimeline(sessionStorage.getItem(key) || "") || null;
+    } catch {
+      return null;
+    }
+  }
+
+  function flushTimedScriptEditor() {
+    const api = window.StudioTimedScript;
+    if (!api || !productionTimedScript?.segments?.length) return;
+    const scenes = Array.from(document.querySelectorAll("[data-timed-scene]"));
+    if (!scenes.length) return;
+    const segments = productionTimedScript.segments.map((segment) => ({ ...segment }));
+    let changed = false;
+    scenes.forEach((scene) => {
+      const index = Number(scene.dataset.timedScene);
+      const segment = segments[index];
+      if (!segment) return;
+      const voice = scene.querySelector("[data-timed-field='voiceover']");
+      const start = scene.querySelector("[data-timed-field='start']");
+      const end = scene.querySelector("[data-timed-field='end']");
+      const asset = scene.querySelector("[data-timed-field='asset']");
+      if (voice && voice.value !== (segment.voiceover_text || "")) {
+        segment.voiceover_text = voice.value;
+        changed = true;
+      }
+      if (start) {
+        const parsed = api.parseClock(start.value);
+        if (parsed != null && parsed !== segment.start_seconds) {
+          segment.start_seconds = parsed;
+          changed = true;
+        }
+      }
+      if (end) {
+        const parsed = api.parseClock(end.value);
+        if (parsed != null && parsed !== segment.end_seconds) {
+          segment.end_seconds = parsed;
+          changed = true;
+        }
+      }
+      if (asset && asset.value !== (segment.asset_id || "")) {
+        segment.asset_id = asset.value;
+        changed = true;
+      }
+    });
+    if (!changed) return;
+    const next = api.buildTimeline(segments);
+    if (next.segments.length) productionTimedScript = next;
+  }
+
   function commitTimedScript(timeline, { resequence = false } = {}) {
     const api = window.StudioTimedScript;
     if (!api) return;
     const next = resequence ? resequenceTimedScript(timeline) : api.buildTimeline(timeline?.segments || []);
     productionTimedScript = next.segments.length ? next : null;
+    rememberTimedScript(productionTimedScript);
     if (productionTimedScript) {
       if ($("prScriptMode")) $("prScriptMode").value = "Force exact";
       if ($("prRequestedScript")) $("prRequestedScript").value = api.exactVoiceoverText(productionTimedScript);
@@ -11103,7 +11174,7 @@
     syncProductionNarrationEstimate();
     const renderSettings = parseProductionRenderSettings(record.production_notes || "");
     productionRenderFrameOverrides = parseProductionRenderOverrides(record.production_notes || "");
-    productionTimedScript = parseProductionTimedScript(record.production_notes || "");
+    productionTimedScript = parseProductionTimedScript(record.production_notes || "") || recallTimedScript(record.id);
     timedScriptAssetSignature = "";
     hydrateProductionRenderSettings(renderSettings);
     renderProductionFrameOverrides({ assets: record.studio_master_assets || item4Workspace?.assets || [] });
@@ -11838,6 +11909,7 @@
   $("prImportTimedScript")?.addEventListener("click", openTimedScriptImporter);
   $("prClearTimedScript")?.addEventListener("click", () => {
     productionTimedScript = null;
+    rememberTimedScript(null);
     syncProductionRenderUi();
     renderTimedScriptReview();
   });
@@ -12082,6 +12154,7 @@
   }
 
   function productionRequestPayload() {
+    flushTimedScriptEditor();
     if (usingEzPlatforms() || ezEntryPath === "content") {
       const voiceoverMode = resolvedAudioMode("voiceover");
       const musicMode = resolvedAudioMode("music");
@@ -12177,6 +12250,9 @@
       if ($("prVoiceover")) $("prVoiceover").value = "Yes";
     } else {
       payload.video_duration_seconds = wholeVideoDurationSeconds(payload.video_duration_seconds);
+    }
+    if (timedScriptActive() && !/\[timed-script\]/i.test(String(payload.production_notes || ""))) {
+      throw new Error("The timed script is still only on this page. Apply it again, then Save.");
     }
     return coerceForceExactTextModes(payload);
   }

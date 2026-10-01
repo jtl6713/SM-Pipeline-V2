@@ -459,7 +459,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.431-timed-script-save",
+          version: "0.10.432-timed-script-narration",
           studio_desk_inventory_v1: true,
           studio_desk_activity_v1: true,
           studio_tiktok_complete_v1: true,
@@ -14499,8 +14499,11 @@ function productionRequestCompatibilityIssues(record) {
   }
 
   const notes = String(f(record, "Production_Notes") || "").trim();
-  if (notes.length > 3000) {
-    issues.push("Production notes must be 3000 characters or fewer.");
+  // Timed Script Mode stores the authoritative timeline on this field. The NYC
+  // subway table is about 3.6k characters, so the old 3000 cap rejected Approve
+  // after a successful Save. Match the save validator.
+  if (notes.length > 10000) {
+    issues.push("Production notes must be 10000 characters or fewer.");
   }
 
   return issues;
@@ -20531,7 +20534,7 @@ function cleanPromotionPayload(payload) {
   const includeBackgroundMusic = tri(payload?.include_background_music, "Background music");
   const includeThumbnail = tri(payload?.include_thumbnail, "Thumbnail");
   const productionNotes = String(payload?.production_notes || "").trim();
-  if (productionNotes.length > 3000) throw new HttpError(400, "Production notes must be 3000 characters or fewer");
+  if (productionNotes.length > 10000) throw new HttpError(400, "Production notes must be 10000 characters or fewer");
 
   let videoDuration = Number(payload?.video_duration ?? 30);
   if (!Number.isFinite(videoDuration)) videoDuration = 30;

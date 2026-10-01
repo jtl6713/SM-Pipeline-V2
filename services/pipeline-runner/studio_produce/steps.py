@@ -319,7 +319,17 @@ def apply_caption(client: AirtableClient, parent: dict[str, Any], outputs: list[
             client.update_record(PLATFORM_OUTPUTS_TABLE, output["id"], patch, typecast=True)
 
 
-def apply_voiceover_script(client: AirtableClient, parent: dict[str, Any], themes: dict[str, Any] | None) -> None:
+def apply_voiceover_script(
+    client: AirtableClient,
+    parent: dict[str, Any],
+    themes: dict[str, Any] | None,
+    *,
+    locked: bool = False,
+) -> None:
+    # Timed Script / Force exact narration is already on the parent. Theme
+    # generation must not replace those words with an AI script.
+    if locked:
+        return
     script = str((themes or {}).get("voiceover_script") or "").strip()
     if not script or field_str(parent, "Voiceover_URL"):
         return
@@ -380,7 +390,7 @@ def seed_ai_slides(
     if created:
         pin_ids = [row["id"] for row in live + created]
         client.update_record(CONTENT_ITEMS_TABLE, parent["id"], {"Carousel Slides": pin_ids}, typecast=True)
-    apply_voiceover_script(client, parent, themes)
+    apply_voiceover_script(client, parent, themes, locked=script_locked(request))
     return live + created
 
 
@@ -481,9 +491,12 @@ def step_themes(client: AirtableClient, ctx: dict[str, Any]) -> str:
         slides = ctx["slides"]
         ctx["slides"] = seed_ai_slides(client, request, parent, slides, needed, themes)
     else:
-        apply_voiceover_script(client, parent, themes)
+        apply_voiceover_script(client, parent, themes, locked=script_locked(request))
     if not caption_locked(request):
         apply_caption(client, parent, ctx["outputs"], themes)
+    if script_locked(request):
+        parent = enforce_exact_voiceover_script(client, request, parent)
+        ctx["parent"] = parent
     if need_script and not field_str(parent, "Voiceover_Script") and not field_str(ctx.get("parent") or parent, "Voiceover_Script"):
         parent = client.get_record(CONTENT_ITEMS_TABLE, parent["id"])
         ctx["parent"] = parent
