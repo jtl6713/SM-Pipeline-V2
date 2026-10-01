@@ -728,10 +728,43 @@ export function classifyIgCarouselTooManyChildren(row) {
   }, row);
 }
 
+
+export function isIgCarouselChildVerificationRace(row) {
+  const platform = String(row?.platform || "").trim();
+  if (platform !== "Instagram") return false;
+  const type = `${row?.studio_output_type || ""} ${row?.platform_output_type || ""}`;
+  if (!/carousel/i.test(type)) return false;
+  if (row?.published_at || String(row?.ig_carousel_status || "").trim() === "Published") return false;
+  const err = String(row?.ig_carousel_error || row?.publish_error || "");
+  const stage = String(row?.ig_carousel_error_stage || row?.publish_error_stage || "");
+  return /AP1C child-ID verification mismatch\.\s*Created\/retained:\s*\d+;\s*expected:\s*\d+/i.test(err)
+    && /AP1C/i.test(stage || "AP1C");
+}
+
+export function classifyIgCarouselChildVerificationRace(row) {
+  if (!isIgCarouselChildVerificationRace(row)) return null;
+  const recordId = String(row?.id || row?.record_id || "").trim();
+  const err = String(row?.ig_carousel_error || row?.publish_error || "");
+  const match = err.match(/Created\/retained:\s*(\d+);\s*expected:\s*(\d+)/i);
+  const created = match ? Number(match[1]) : null;
+  const expected = match ? Number(match[2]) : null;
+  return withDeskIdentity({
+    kind: "ig_carousel_child_verification_race",
+    class: "transient",
+    record_id: recordId || null,
+    fingerprint: fingerprint("ig_carousel_child_verification_race", recordId, `${created ?? "x"}_of_${expected ?? "x"}`),
+    actor: "worker_heal",
+    diagnosis: "AP1C created Instagram child containers, then its immediate Airtable verification read saw fewer child IDs than expected. Verify the first expected (max 10) linked carousel slides. If all required IG_Child_Container_ID values exist, preserve them, clear the stale AP1C error/locks, set IG_Carousel_Status=Children Processing, mark AP1C complete, and pulse AP2C. Only rerun AP1C once when a required child ID is genuinely missing. Proven: NYC Output 1298 / Rainy Day Museum Mile (9 observed immediately, all 10 IDs present moments later).",
+    observed_child_count: created,
+    expected_child_count: expected,
+  }, row);
+}
+
 export function classifyPublishFailed(row, nowMs = Date.now()) {
   if (row?.published_at) return null;
   if (classifyTikTokAuthSignature(row)) return null;
   if (classifyIgCarouselTooManyChildren(row)) return null;
+  if (classifyIgCarouselChildVerificationRace(row)) return null;
   const outputStatus = String(row?.output_status || "").trim();
   const publish = String(row?.publish_status || "").trim();
   if (outputStatus && !["Approved for Publishing", "Failed"].includes(outputStatus)) return null;
@@ -1080,6 +1113,7 @@ export const CLASSIFIER_KINDS = Object.freeze([
   "publish_failed_transient",
   "tiktok_auth_signature",
   "ig_carousel_too_many_children",
+  "ig_carousel_child_verification_race",
   "render_failed",
   "render_unfetchable_source",
   "render_private_drive_watermark",
