@@ -12,7 +12,7 @@ const app = fs.readFileSync(
 );
 
 test("health advertises current worker build with faster-frames helpers", () => {
-  assert.match(worker, /version: "0.10.430-idea-photo-five-minute-poll"/);
+  assert.match(worker, /version: "0.10.431-timed-script-save"/);
   assert.match(worker, /airtableBatchCreate/);
   assert.match(worker, /mapProductionRequestLight/);
 });
@@ -115,8 +115,25 @@ test("PATCH save can return a light production request payload", () => {
   assert.match(update, /mapProductionRequestLight\(updated\)/);
 });
 
+test("fractional video duration is stored as a whole-number cap and save errors stay JSON", () => {
+  assert.match(worker, /function nullableWholeSeconds/);
+  assert.match(worker, /nullableWholeSeconds\(payload\?\.video_duration_seconds, 5, 600, "Video duration"\)/);
+  const route = worker.slice(
+    worker.indexOf("if (isProductionRequestRecordRoute) {"),
+    worker.indexOf("if (isIdeaPromoteRoute) {")
+  );
+  assert.match(route, /return await updateProductionRequest\(request, env, url, authorization\)/);
+  const outputs = worker.slice(
+    worker.indexOf("if (isProductionRequestOutputsRoute) {"),
+    worker.indexOf("if (isProductionRequestOutputRecordRoute) {")
+  );
+  assert.match(outputs, /return await syncProductionRequestOutputs\(request, env, url, authorization\)/);
+  assert.match(app, /function wholeVideoDurationSeconds/);
+  assert.match(app, /wholeVideoDurationSeconds\(productionTimedScript\.duration_seconds, \{ ceil: true \}\)/);
+});
+
 test("UI polls GET /variants during Prepare and skips Save reload waterfall", () => {
-  assert.match(app, /BUILD_ID = "item4-0.6.450-timed-script"/);
+  assert.match(app, /BUILD_ID = "item4-0.6.451-timed-script-save"/);
   assert.match(app, /pollItem4Variants/);
   const poll = app.slice(
     app.indexOf("async function pollItem4Variants"),
