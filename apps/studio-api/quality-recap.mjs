@@ -30,6 +30,10 @@ const COPY = {
     found: "An Instagram carousel had more than 10 slides, so Instagram refused to create the parent album.",
     action: "Kept the cover as slide 1, trimmed to 10 slides, and retried the parent create.",
   },
+  ig_carousel_child_verification_race: {
+    found: "Instagram created the carousel children, but AP1C's immediate Airtable check briefly saw fewer child IDs and marked the post failed.",
+    action: "Verified the required child IDs, kept the existing containers, cleared the stale AP1C error, and advanced to child processing. If an ID is truly missing, rerun AP1C once.",
+  },
   publish_never_dispatch: {
     found: "An approved post is due and the send never started.",
     action: "Queued the send because the scheduled time is due.",
