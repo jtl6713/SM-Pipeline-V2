@@ -226,3 +226,26 @@ test("recap explains AP1C child verification race and safe recovery", () => {
   assert.match(recap.cards[0].action, /rerun AP1C once/i);
   assert.equal(recap.cards[0].output_id, 1298);
 });
+
+
+test("recap explains AP2C child poll recovery", () => {
+  const recap = buildQualityRecap({
+    incidents: [{
+      kind: "ig_carousel_child_poll_failure",
+      class: "transient",
+      actor: "worker_heal",
+      fingerprint: "ig_carousel_child_poll_failure:recvDSuJr2B4cuzfV:9_finished_1_terminal",
+      record_id: "recvDSuJr2B4cuzfV",
+      output_id: 1298,
+      output_title: "Rainy Day Museum Mile",
+      platform: "Instagram",
+      platform_output_type: "Instagram Carousel",
+      profile_name: "NYC - New York City",
+    }],
+  });
+  assert.equal(recap.open_count, 1);
+  assert.match(recap.cards[0].found, /terminal child or timeout/i);
+  assert.match(recap.cards[0].action, /required ordered children/i);
+  assert.match(recap.cards[0].action, /recreated the children once/i);
+  assert.equal(recap.cards[0].output_id, 1298);
+});
