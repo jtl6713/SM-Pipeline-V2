@@ -2,7 +2,7 @@ from datetime import timedelta
 
 from apc.ap2c import _pending_max_attempts
 from apc.ap4c import _expired_media_error, _expired_media_reset
-from apc.assets import public_asset_url, r2_object_key, saved_public_url, source_image_url
+from apc.assets import list_child_slides, list_final_slides, public_asset_url, r2_object_key, saved_public_url, source_image_url
 from apc.common import expected_child_count, is_due, publish_caption, reconcile_caption
 from carousel.timeutil import iso_utc, utc_now
 from apc.eligibility import (
@@ -50,6 +50,13 @@ def test_ap0c_gates():
 def test_later_stage_gates():
     assert ap1c_eligibility_reason(_record(IG_Carousel_Status="Assets Ready", Publish_Method="Automated", Auto_Publish_Enabled=True)) is None
     assert ap1c_eligibility_reason(_record(IG_Carousel_Status="Ready for Asset Prep", Publish_Method="Automated", Auto_Publish_Enabled=True)) == "carousel_assets_not_ready"
+    ap1_future = iso_utc(utc_now() + timedelta(minutes=30))
+    assert ap1c_eligibility_reason(_record(
+        IG_Carousel_Status="Assets Ready",
+        Publish_Method="Automated",
+        Auto_Publish_Enabled=True,
+        IG_Carousel_Next_Retry_At=ap1_future,
+    )) == "not_due"
     assert ap2c_eligibility_reason(_record(IG_Carousel_Status="Children Processing")) is None
     assert ap2c_eligibility_reason(_record(IG_Carousel_Status="Children Processing", IG_Carousel_Due_Now=0)) is None
     future = iso_utc(utc_now() + timedelta(minutes=10))
@@ -130,14 +137,17 @@ def test_ap4c_expired_media_restarts_container_chain():
     assert "recreate fresh child containers" in reset["IG_Carousel_Error_Message"]
 
 
-def test_ap1c_verification_uses_graph_ids_not_immediate_airtable_reread():
+def test_ap1c_preserves_existing_children_and_backs_off_rate_limit():
     from pathlib import Path
 
     source = (Path(__file__).resolve().parents[1] / "apc" / "ap1c.py").read_text(encoding="utf-8")
-    assert "created_child_ids.append(child_id)" in source
-    assert "created_count = len(set(created_child_ids))" in source
-    assert "created = list_child_slides" not in source
-    assert "NYC Output 1298" in source
+    assert "retained_child_ids.append(existing_id)" in source
+    assert "retained_child_ids.append(child_id)" in source
+    assert "created_count = len(set(retained_child_ids))" in source
+    assert "AP1C_RATE_LIMIT_RETRY_MINUTES = 30" in source
+    assert '"too many actions" in text' in source
+    assert "recreating already-good children caused" in source
+    assert "NYC 1298" in source
 
 
 class _FakeSlideClient:
@@ -180,3 +190,14 @@ def test_ap2c_timeout_counts_only_unfinished_required_children():
     assert _pending_max_attempts([
         _record(IG_Child_Container_Status="FINISHED", IG_Child_Container_Attempt_Count=18),
     ]) == 0
+
+
+def test_ap1c_orders_final_slides_before_graph_clamp():
+    rows = [
+        _record(**{"Current Order": 11, "Slide Number": 11}),
+        *[_record(**{"Current Order": order, "Slide Number": order}) for order in range(1, 11)],
+    ]
+    client = _FakeSlideClient(rows)
+    selected = list_final_slides(client, "1298")
+    assert client.max_records_seen[0] >= 11
+    assert [row["fields"]["Current Order"] for row in selected] == list(range(1, 11))
