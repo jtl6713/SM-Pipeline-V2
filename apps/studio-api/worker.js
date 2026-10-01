@@ -22,6 +22,7 @@ import {
   classifyIgCarouselTooManyChildren,
   classifyIgCarouselChildVerificationRace,
   classifyIgCarouselChildPollFailure,
+  classifyIgCarouselRateLimited,
   classifyTikTokAuthSignature,
   classifyRenderRow,
   deskFailedNeedsHeal,
@@ -1447,6 +1448,11 @@ export default {
         console.warn("studio IG AP2C child-poll heal failed", error);
       }
       try {
+        await studioHealIgCarouselRateLimit(env, { limit: 4 });
+      } catch (error) {
+        console.warn("studio IG AP1C rate-limit heal failed", error);
+      }
+      try {
         await studioHealNativePhotoReviewStrands(env, { limit: 8 });
       } catch (error) {
         console.warn("studio native-photo review-strand heal failed", error);
@@ -2759,6 +2765,8 @@ function normalizedOutputState(record) {
   const youtubeVideoReady = Boolean(text("YouTube_Video_ID"))
     && (has("YouTube_Upload_Status", "uploaded") || has("YouTube_Processing_Status", "succeeded"));
   const thumbnailOnlyError = /thumb/i.test(text("Publish_Error_Stage") + " " + text("YouTube_Error_Message") + " " + text("Publish_Error_Message"));
+  const igCarouselRateLimited = retryablePublish
+    && /user is performing too many actions|rate limit|request limit/i.test(text("IG_Carousel_Error_Message"));
 
   const errors = [
     "Publish_Error_Message", "Remotion_Error_Message", "Final_File_Error_Message",
@@ -2830,6 +2838,9 @@ function normalizedOutputState(record) {
   if (youtubeManualActionRequired(fields)) {
     return "Manual Action Required";
   }
+
+  // Meta action throttling is a timed automatic retry, not a terminal failure.
+  if (igCarouselRateLimited) return "Retry Pending";
 
   if ((errors || explicitFailed) && !(retryablePublish && thumbnailOnlyError && youtubeVideoReady)) {
     const output = text("Output_Status").toLowerCase();
@@ -11429,6 +11440,96 @@ async function studioHealIgCarouselChildPollFailure(env, options = {}) {
         terminal_children: row.terminal_children ?? null,
         error: row.error || null,
       })),
+    }));
+  }
+  return pulses;
+}
+
+
+async function studioHealIgCarouselRateLimit(env, options = {}) {
+  const limit = Math.max(1, Math.min(6, Number(options.limit || 4)));
+  const outputTable = env.AIRTABLE_OUTPUT_TABLE_ID;
+  const pulses = [];
+  const rows = await listRecords(env, outputTable, {
+    limit,
+    sortField: "Output_ID",
+    sortDirection: "desc",
+    filterFormula: 'AND({Test_Run_ID}=BLANK(),{Platform}="Instagram",{Published_At}=BLANK(),{Do_Not_Publish}=0,FIND("User is performing too many actions",{IG_Carousel_Error_Message}&"")>0)',
+  }).catch(() => []);
+
+  const minimumBackoffMs = 30 * 60 * 1000;
+  for (const row of rows || []) {
+    const mapped = {
+      id: row.id,
+      platform: f(row, "Platform"),
+      studio_output_type: f(row, "Studio_Output_Type"),
+      platform_output_type: f(row, "Platform_Output_Type"),
+      ig_carousel_status: f(row, "IG_Carousel_Status"),
+      ig_carousel_error: f(row, "IG_Carousel_Error_Message"),
+      ig_carousel_error_stage: f(row, "IG_Carousel_Error_Stage"),
+      published_at: f(row, "Published_At"),
+    };
+    if (!classifyIgCarouselRateLimited(mapped)) continue;
+
+    const lastAttemptMs = Date.parse(String(f(row, "Last_Publish_Attempt_At") || ""));
+    const currentRetryMs = Date.parse(String(
+      f(row, "IG_Carousel_Next_Retry_At")
+      || f(row, "Publish_Next_Retry_At")
+      || ""
+    ));
+    const hasSafeBackoff = Number.isFinite(lastAttemptMs)
+      && Number.isFinite(currentRetryMs)
+      && (currentRetryMs - lastAttemptMs) >= (minimumBackoffMs - 60000);
+
+    if (hasSafeBackoff) {
+      pulses.push({
+        key: "IG_AP1C_RATE_LIMIT",
+        id: row.id,
+        action: "wait_existing_backoff",
+        retry_at: new Date(currentRetryMs).toISOString(),
+      });
+      continue;
+    }
+
+    const baseMs = Number.isFinite(lastAttemptMs)
+      ? Math.max(Date.now(), lastAttemptMs)
+      : Date.now();
+    const retryAt = new Date(baseMs + minimumBackoffMs).toISOString();
+    try {
+      await airtableFetch(env, outputTable, row.id, {
+        method: "PATCH",
+        body: JSON.stringify({
+          fields: {
+            IG_Carousel_Status: "Assets Ready",
+            Publish_Next_Retry_At: retryAt,
+            Publish_Retry_Eligible: true,
+            IG_Carousel_Next_Retry_At: retryAt,
+            Publish_Locked_By: "",
+            Publish_Locked_At: null,
+            Publish_Started_At: null,
+          },
+          typecast: true,
+        }),
+      });
+      pulses.push({
+        key: "IG_AP1C_RATE_LIMIT",
+        id: row.id,
+        action: "backoff_30m_preserve_children",
+        retry_at: retryAt,
+      });
+    } catch (error) {
+      pulses.push({
+        key: "IG_AP1C_RATE_LIMIT",
+        id: row.id,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  if (pulses.length) {
+    console.log("Studio IG AP1C rate-limit heal", JSON.stringify({
+      count: pulses.length,
+      pulses,
     }));
   }
   return pulses;
@@ -28156,6 +28257,9 @@ async function pulseOnDemandRenderChain(env, options = {}) {
   try { pulses.push(...await studioHealIgCarouselChildPollFailure(env, { limit: 4 })); } catch (error) {
     pulses.push({ key: "STUDIO_IG_AP2C_CHILD_POLL", error: error instanceof Error ? error.message : String(error) });
   }
+  try { pulses.push(...await studioHealIgCarouselRateLimit(env, { limit: 4 })); } catch (error) {
+    pulses.push({ key: "STUDIO_IG_AP1C_RATE_LIMIT", error: error instanceof Error ? error.message : String(error) });
+  }
   try { pulses.push(...await resumeStaleStudioProductionJobs(env, options)); } catch (error) {
     pulses.push({ key: "STUDIO_PRODUCE", error: error instanceof Error ? error.message : String(error) });
   }
@@ -35759,13 +35863,14 @@ async function gatherStudioDeskInventory(env) {
       sortDirection: "desc",
       filterFormula: 'AND({Test_Run_ID}=BLANK(),OR({Render_Status}="Failed",{Publish_Status}="Failed",AND({Publish_Error_Message}!="",{Published_At}=BLANK()),AND({IG_Carousel_Error_Message}!="",{Published_At}=BLANK())))',
     }).catch(() => []);
-    scanned("render_failed", "publish_failed_transient", "tiktok_auth_signature", "ig_carousel_too_many_children", "ig_carousel_child_verification_race", "ig_carousel_child_poll_failure");
+    scanned("render_failed", "publish_failed_transient", "tiktok_auth_signature", "ig_carousel_too_many_children", "ig_carousel_child_verification_race", "ig_carousel_child_poll_failure", "ig_carousel_rate_limited");
     for (const record of failedRows || []) {
       push(classifyRenderRow(mapOut(record), nowMs));
       push(classifyTikTokAuthSignature(mapOut(record)));
       push(classifyIgCarouselTooManyChildren(mapOut(record)));
       push(classifyIgCarouselChildVerificationRace(mapOut(record)));
       push(classifyIgCarouselChildPollFailure(mapOut(record)));
+      push(classifyIgCarouselRateLimited(mapOut(record)));
       push(classifyPublishFailed(mapOut(record), nowMs));
     }
   } catch (error) {
