@@ -132,7 +132,14 @@ def process_request(
     stored = list_child_slides(client, field_str(output, "Output_ID") or field(output, "Output_ID"))
     finished = sum(1 for slide in stored if child_finished(slide))
     terminal = sum(1 for slide in stored if child_terminal(slide))
-    attempts = max((parse_int(field(slide, "IG_Child_Container_Attempt_Count"), 0) or 0) for slide in stored) if stored else 0
+    pending = [slide for slide in stored if not child_finished(slide)]
+    # Finished children can accumulate more polls than a slower remaining child.
+    # Timeout must follow the unfinished required children, not the max attempt
+    # count of already-FINISHED siblings (NYC Output 1298).
+    attempts = max(
+        (parse_int(field(slide, "IG_Child_Container_Attempt_Count"), 0) or 0)
+        for slide in pending
+    ) if pending else 0
     expected = expected_child_count(output, len(stored))
     if len(stored) != expected:
         client.update_record(
