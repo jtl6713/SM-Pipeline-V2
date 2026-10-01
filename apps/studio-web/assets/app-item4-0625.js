@@ -252,7 +252,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.450-timed-script";
+  const BUILD_ID = "item4-0.6.451-timed-script-save";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -12073,6 +12073,14 @@
     return next;
   }
 
+  function wholeVideoDurationSeconds(value, { ceil = false } = {}) {
+    if (value === null || value === undefined || String(value).trim() === "") return "";
+    const n = Number(value);
+    if (!Number.isFinite(n)) return value;
+    const whole = ceil ? Math.ceil(n - 1e-9) : Math.round(n);
+    return Math.min(600, Math.max(5, whole));
+  }
+
   function productionRequestPayload() {
     if (usingEzPlatforms() || ezEntryPath === "content") {
       const voiceoverMode = resolvedAudioMode("voiceover");
@@ -12155,7 +12163,10 @@
     }
     if (timedScriptActive()) {
       payload.voiceover_mode = "Yes";
-      payload.video_duration_seconds = productionTimedScript.duration_seconds;
+      // The duration field is a whole-number cap. Exact scene boundaries stay
+      // in the timed-script directive. Ceiling keeps a 90.4s timeline from
+      // being stored as 90 and trimmed.
+      payload.video_duration_seconds = wholeVideoDurationSeconds(productionTimedScript.duration_seconds, { ceil: true });
       payload.voiceover_tail_seconds = 0;
       payload.script_mode = "Force exact";
       payload.requested_script = window.StudioTimedScript?.exactVoiceoverText?.(productionTimedScript) || payload.requested_script;
@@ -12164,6 +12175,8 @@
       if ($("prVideoDuration")) $("prVideoDuration").value = payload.video_duration_seconds;
       if ($("prVoiceoverTail")) $("prVoiceoverTail").value = 0;
       if ($("prVoiceover")) $("prVoiceover").value = "Yes";
+    } else {
+      payload.video_duration_seconds = wholeVideoDurationSeconds(payload.video_duration_seconds);
     }
     return coerceForceExactTextModes(payload);
   }

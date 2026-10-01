@@ -459,7 +459,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.430-idea-photo-five-minute-poll",
+          version: "0.10.431-timed-script-save",
           studio_desk_inventory_v1: true,
           studio_desk_activity_v1: true,
           studio_tiktok_complete_v1: true,
@@ -1178,7 +1178,7 @@ export default {
         if (request.method === "PUT") {
           assertWriteRequest(request, env);
           requirePermission(authorization, "production_configure");
-          return syncProductionRequestOutputs(request, env, url, authorization);
+          return await syncProductionRequestOutputs(request, env, url, authorization);
         }
         return listProductionRequestOutputs(request, env, url, authorization);
       }
@@ -1217,7 +1217,7 @@ export default {
         if (request.method === "PATCH") {
           assertWriteRequest(request, env);
           requirePermission(authorization, "production_configure");
-          return updateProductionRequest(request, env, url, authorization);
+          return await updateProductionRequest(request, env, url, authorization);
         }
         const response = await getProductionRequest(request, env, url, authorization, ctx);
         cadenceScheduleSync(ctx, env);
@@ -13313,6 +13313,21 @@ function nullableInt(value, min, max, label) {
   return n;
 }
 
+// Timed-script lengths can be fractional seconds (90.4). The Airtable duration
+// field is a whole-number cap, so store the ceiling. 90 stays 90.
+function nullableWholeSeconds(value, min, max, label) {
+  if (value === null || value === undefined || String(value).trim() === "") return null;
+  const n = Number(value);
+  if (!Number.isFinite(n)) {
+    throw new HttpError(400, `${label} must be a whole number from ${min} to ${max}`);
+  }
+  const whole = Math.ceil(n - 1e-9);
+  if (whole < min || whole > max) {
+    throw new HttpError(400, `${label} must be a whole number from ${min} to ${max}`);
+  }
+  return whole;
+}
+
 function nullableNumber(value, min, max, label) {
   if (value === null || value === undefined || String(value).trim() === "") return null;
   const n = Number(value);
@@ -13378,7 +13393,7 @@ async function cleanProductionRequestPayload(payload, env) {
     ? normalizeChoice(payload?.carousel_slide_count_mode, PR_COUNT_MODES, "AI decides", "Carousel slide count mode")
     : "AI decides";
 
-  const videoDurationSeconds = nullableInt(payload?.video_duration_seconds, 5, 600, "Video duration");
+  const videoDurationSeconds = nullableWholeSeconds(payload?.video_duration_seconds, 5, 600, "Video duration");
   const voiceoverDurationSeconds = nullableNumber(payload?.voiceover_duration_seconds, 1, 600, "Voiceover duration");
   const musicStartSeconds = nullableNumber(payload?.music_start_seconds, 0, 3600, "Music start");
   let voiceoverTailSeconds = nullableNumber(payload?.voiceover_tail_seconds, 0, 300, "Voiceover tail");

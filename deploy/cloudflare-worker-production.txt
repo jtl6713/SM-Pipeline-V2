@@ -369,3 +369,8 @@ Deploy Studio API Worker production
 Reason: Park Meta AP1C throttling in Retry Pending during cooldown and auto-release after cooldown (Output 1298)
 Source merge: 8d610e2d493d95636be826bfef79bc068e871f79
 Requested: 2026-10-01
+
+Deploy Studio API Worker production
+Reason: Accept fractional timed-script video duration as a whole-number cap, and return JSON errors from Production Request save instead of a blank 500.
+Worker: 0.10.431-timed-script-save
+Requested: 2026-10-01T18:00:00Z
