@@ -18,6 +18,7 @@ export const QUALITY_HEALS = Object.freeze([
   "align_signature_then_rearm",
   "clamp_children_then_requeue",
   "verify_children_then_advance",
+  "backoff_then_retry_missing_child",
   "ticket_only",
   "none",
 ]);
@@ -175,6 +176,14 @@ export const QUALITY_CHECKS = Object.freeze([
     kind: "ig_carousel_child_poll_failure",
     actor: "worker_heal",
     heal: "verify_children_then_advance",
+  }),
+  check({
+    id: "ig_carousel_rate_limited",
+    title: "Check for Meta AP1C 'User is performing too many actions' throttling",
+    lane: "service",
+    kind: "ig_carousel_rate_limited",
+    actor: "worker_heal",
+    heal: "backoff_then_retry_missing_child",
   }),
   check({
     id: "render_failed",
