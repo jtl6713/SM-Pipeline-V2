@@ -169,6 +169,14 @@ export const QUALITY_CHECKS = Object.freeze([
     heal: "verify_children_then_advance",
   }),
   check({
+    id: "ig_carousel_child_poll_failure",
+    title: "Check for AP2C terminal child or timeout failures after Instagram child creation",
+    lane: "service",
+    kind: "ig_carousel_child_poll_failure",
+    actor: "worker_heal",
+    heal: "verify_children_then_advance",
+  }),
+  check({
     id: "render_failed",
     title: "Check for Render_Status=Failed outputs (including Failed for more than an hour) that Worker should requeue to Ready for Render",
     lane: "service",

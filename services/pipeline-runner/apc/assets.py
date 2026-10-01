@@ -46,15 +46,26 @@ def list_final_slides(client: AirtableClient, output_id: str) -> list[dict[str, 
 
 
 def list_child_slides(client: AirtableClient, output_id: str) -> list[dict[str, Any]]:
-    return list_output_slides(client, output_id, extra='{IG_Child_Container_ID}!=BLANK()')
+    # Airtable applies max_records before our Python sort. Fetch beyond Graph's
+    # 10-child limit, sort deterministically by Current Order, then keep the
+    # first 10. Otherwise a stale overflow slide can displace a real child.
+    rows = list_output_slides(
+        client,
+        output_id,
+        extra='{IG_Child_Container_ID}!=BLANK()',
+        max_records=max(40, MAX_SLIDES * 4),
+    )
+    return rows[:MAX_SLIDES]
 
 
 def list_finished_children(client: AirtableClient, output_id: str) -> list[dict[str, Any]]:
-    return list_output_slides(
+    rows = list_output_slides(
         client,
         output_id,
         extra=f'{{IG_Child_Container_Status}}="{CHILD_FINISHED}",{{IG_Child_Container_ID}}!=BLANK()',
+        max_records=max(40, MAX_SLIDES * 4),
     )
+    return rows[:MAX_SLIDES]
 
 
 def list_ready_public_assets(client: AirtableClient, output_id: str) -> list[dict[str, Any]]:

@@ -21,6 +21,7 @@ import {
   classifyPublishFailed,
   classifyIgCarouselTooManyChildren,
   classifyIgCarouselChildVerificationRace,
+  classifyIgCarouselChildPollFailure,
   classifyTikTokAuthSignature,
   classifyRenderRow,
   deskFailedNeedsHeal,
@@ -1439,6 +1440,11 @@ export default {
         await studioHealIgCarouselChildVerificationRace(env, { limit: 4 });
       } catch (error) {
         console.warn("studio IG AP1C verification-race heal failed", error);
+      }
+      try {
+        await studioHealIgCarouselChildPollFailure(env, { limit: 4 });
+      } catch (error) {
+        console.warn("studio IG AP2C child-poll heal failed", error);
       }
       try {
         await studioHealNativePhotoReviewStrands(env, { limit: 8 });
@@ -11243,6 +11249,149 @@ async function studioHealIgCarouselChildVerificationRace(env, options = {}) {
         action: row.action || null,
         verified_children: row.verified_children ?? null,
         expected_children: row.expected_children ?? null,
+        error: row.error || null,
+      })),
+    }));
+  }
+  return pulses;
+}
+
+
+async function studioHealIgCarouselChildPollFailure(env, options = {}) {
+  const limit = Math.max(1, Math.min(6, Number(options.limit || 4)));
+  const outputTable = env.AIRTABLE_OUTPUT_TABLE_ID;
+  const pulses = [];
+  const rows = await listRecords(env, outputTable, {
+    limit,
+    sortField: "Output_ID",
+    sortDirection: "desc",
+    filterFormula: 'AND({Test_Run_ID}=BLANK(),{Platform}="Instagram",{Published_At}=BLANK(),{Do_Not_Publish}=0,OR(FIND("AP2C verified terminal child failure or poll timeout",{IG_Carousel_Error_Message}&"")>0,FIND("AP2C verified child-count mismatch",{IG_Carousel_Error_Message}&"")>0))',
+  }).catch(() => []);
+
+  for (const row of rows || []) {
+    const mapped = {
+      id: row.id,
+      platform: f(row, "Platform"),
+      studio_output_type: f(row, "Studio_Output_Type"),
+      platform_output_type: f(row, "Platform_Output_Type"),
+      ig_carousel_status: f(row, "IG_Carousel_Status"),
+      ig_carousel_error: f(row, "IG_Carousel_Error_Message"),
+      ig_carousel_error_stage: f(row, "IG_Carousel_Error_Stage"),
+      ig_carousel_child_count: f(row, "IG_Carousel_Child_Count"),
+      image_count: f(row, "Image_Count"),
+      published_at: f(row, "Published_At"),
+    };
+    const incident = classifyIgCarouselChildPollFailure(mapped);
+    if (!incident) continue;
+
+    const expected = Math.min(10, Math.max(2, Number(
+      f(row, "IG_Carousel_Child_Count")
+      || f(row, "Image_Count")
+      || incident.finished_child_count
+      || 0
+    ) || 0));
+    const linked = arrayOrEmpty(f(row, "Carousel Slides"));
+    let slides = [];
+    try {
+      slides = await Promise.all(linked.map((id) => airtableFetch(env, PHASE6_CAROUSEL_SLIDES_TABLE, id)));
+    } catch (error) {
+      pulses.push({
+        key: "IG_AP2C_CHILD_POLL",
+        id: row.id,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      continue;
+    }
+
+    const required = slides
+      .filter((slide) => !Boolean(f(slide, "Deleted From Carousel")))
+      .sort((a, b) => Number(f(a, "Current Order") || f(a, "Slide Number") || 0) - Number(f(b, "Current Order") || f(b, "Slide Number") || 0))
+      .slice(0, expected);
+    const missing = required.filter((slide) => !String(f(slide, "IG_Child_Container_ID") || "").trim());
+    const terminal = required.filter((slide) => /^(ERROR|EXPIRED)$/i.test(String(f(slide, "IG_Child_Container_Status") || "").trim()));
+
+    try {
+      if (required.length === expected && !missing.length && !terminal.length) {
+        await airtableFetch(env, outputTable, row.id, {
+          method: "PATCH",
+          body: JSON.stringify({
+            fields: {
+              IG_Carousel_Status: "Children Processing",
+              Publish_Next_Retry_At: null,
+              Publish_Retry_Eligible: true,
+              IG_Carousel_Error_Stage: "",
+              IG_Carousel_Error_Message: "",
+              IG_Carousel_Next_Retry_At: null,
+              Publish_Locked_By: "",
+              Publish_Locked_At: null,
+              Publish_Started_At: null,
+            },
+            typecast: true,
+          }),
+        });
+        const refreshed = await airtableFetch(env, outputTable, row.id).catch(() => row);
+        const payload = await studioPulseAp2c(env, refreshed);
+        pulses.push({
+          key: "IG_AP2C_CHILD_POLL",
+          id: row.id,
+          expected_children: expected,
+          action: "preserve_required_children_and_continue_ap2c",
+          ok: payload?.ok !== false,
+          payload,
+        });
+        continue;
+      }
+
+      await airtableFetch(env, outputTable, row.id, {
+        method: "PATCH",
+        body: JSON.stringify({
+          fields: {
+            IG_Carousel_Status: "Assets Ready",
+            Publish_Next_Retry_At: null,
+            Publish_Retry_Eligible: true,
+            IG_Carousel_Error_Stage: "",
+            IG_Carousel_Error_Message: "",
+            IG_Carousel_Next_Retry_At: null,
+            Publish_Locked_By: "",
+            Publish_Locked_At: null,
+            Publish_Started_At: null,
+          },
+          typecast: true,
+        }),
+      });
+      const refreshed = await airtableFetch(env, outputTable, row.id).catch(() => row);
+      const payload = await studioPulseAp1c(env, refreshed);
+      pulses.push({
+        key: "IG_AP2C_CHILD_POLL",
+        id: row.id,
+        expected_children: expected,
+        missing_children: missing.length,
+        terminal_children: terminal.length,
+        action: "recreate_required_children_once_ap1c",
+        ok: payload?.ok !== false,
+        payload,
+      });
+    } catch (error) {
+      pulses.push({
+        key: "IG_AP2C_CHILD_POLL",
+        id: row.id,
+        expected_children: expected,
+        missing_children: missing.length,
+        terminal_children: terminal.length,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  if (pulses.length) {
+    console.log("Studio IG AP2C child-poll heal", JSON.stringify({
+      count: pulses.length,
+      pulses: pulses.map((row) => ({
+        id: row.id,
+        action: row.action || null,
+        expected_children: row.expected_children ?? null,
+        missing_children: row.missing_children ?? null,
+        terminal_children: row.terminal_children ?? null,
         error: row.error || null,
       })),
     }));
@@ -27969,6 +28118,9 @@ async function pulseOnDemandRenderChain(env, options = {}) {
   try { pulses.push(...await studioHealIgCarouselChildVerificationRace(env, { limit: 4 })); } catch (error) {
     pulses.push({ key: "STUDIO_IG_AP1C_VERIFY_RACE", error: error instanceof Error ? error.message : String(error) });
   }
+  try { pulses.push(...await studioHealIgCarouselChildPollFailure(env, { limit: 4 })); } catch (error) {
+    pulses.push({ key: "STUDIO_IG_AP2C_CHILD_POLL", error: error instanceof Error ? error.message : String(error) });
+  }
   try { pulses.push(...await resumeStaleStudioProductionJobs(env, options)); } catch (error) {
     pulses.push({ key: "STUDIO_PRODUCE", error: error instanceof Error ? error.message : String(error) });
   }
@@ -35572,12 +35724,13 @@ async function gatherStudioDeskInventory(env) {
       sortDirection: "desc",
       filterFormula: 'AND({Test_Run_ID}=BLANK(),OR({Render_Status}="Failed",{Publish_Status}="Failed",AND({Publish_Error_Message}!="",{Published_At}=BLANK()),AND({IG_Carousel_Error_Message}!="",{Published_At}=BLANK())))',
     }).catch(() => []);
-    scanned("render_failed", "publish_failed_transient", "tiktok_auth_signature", "ig_carousel_too_many_children", "ig_carousel_child_verification_race");
+    scanned("render_failed", "publish_failed_transient", "tiktok_auth_signature", "ig_carousel_too_many_children", "ig_carousel_child_verification_race", "ig_carousel_child_poll_failure");
     for (const record of failedRows || []) {
       push(classifyRenderRow(mapOut(record), nowMs));
       push(classifyTikTokAuthSignature(mapOut(record)));
       push(classifyIgCarouselTooManyChildren(mapOut(record)));
       push(classifyIgCarouselChildVerificationRace(mapOut(record)));
+      push(classifyIgCarouselChildPollFailure(mapOut(record)));
       push(classifyPublishFailed(mapOut(record), nowMs));
     }
   } catch (error) {

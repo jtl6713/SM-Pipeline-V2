@@ -34,6 +34,10 @@ const COPY = {
     found: "Instagram created the carousel children, but AP1C's immediate Airtable check briefly saw fewer child IDs and marked the post failed.",
     action: "Verified the required child IDs, kept the existing containers, cleared the stale AP1C error, and advanced to child processing. If an ID is truly missing, rerun AP1C once.",
   },
+  ig_carousel_child_poll_failure: {
+    found: "Instagram child polling reported a terminal child or timeout, sometimes because an overflow slide or finished sibling distorted the poll count.",
+    action: "Checked only the required ordered children. If they are valid, continued AP2C; if a required child is actually missing or terminal, recreated the children once with AP1C.",
+  },
   publish_never_dispatch: {
     found: "An approved post is due and the send never started.",
     action: "Queued the send because the scheduled time is due.",

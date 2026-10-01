@@ -21,6 +21,7 @@ import {
   classifyPublishFailed,
   classifyIgCarouselTooManyChildren,
   classifyIgCarouselChildVerificationRace,
+  classifyIgCarouselChildPollFailure,
   classifyTikTokAuthSignature,
   classifyNativeCover,
   classifyRfrLockedMissingDeliverable,
@@ -488,6 +489,29 @@ test("promoted advancement is origin-aware and does not treat Ready for Review a
   assert.equal(ig1298.expected_child_count, 10);
   assert.match(ig1298.diagnosis, /preserve them/i);
   assert.ok(CLASSIFIER_KINDS.includes("ig_carousel_child_verification_race"));
+  const ig1298Poll = classifyIgCarouselChildPollFailure({
+    id: "recvDSuJr2B4cuzfV",
+    output_id: 1298,
+    output_title: "Rainy Day Museum Mile",
+    platform: "Instagram",
+    studio_output_type: "Carousel",
+    platform_output_type: "Instagram Carousel",
+    output_status: "Approved for Publishing",
+    publish_status: "Ready to Schedule",
+    ig_carousel_status: "Assets Ready",
+    ig_carousel_error_stage: "AP2C Child Polling",
+    ig_carousel_error: "AP2C verified terminal child failure or poll timeout. Finished: 9; terminal: 1; max attempts: 18. AP1C will recreate children.",
+    ig_carousel_child_count: 10,
+    image_count: 10,
+  });
+  assert.equal(ig1298Poll.kind, "ig_carousel_child_poll_failure");
+  assert.equal(ig1298Poll.class, "transient");
+  assert.equal(ig1298Poll.actor, "worker_heal");
+  assert.equal(ig1298Poll.finished_child_count, 9);
+  assert.equal(ig1298Poll.terminal_child_count, 1);
+  assert.equal(ig1298Poll.max_attempts, 18);
+  assert.match(ig1298Poll.diagnosis, /unfinished required children only/i);
+  assert.ok(CLASSIFIER_KINDS.includes("ig_carousel_child_poll_failure"));
   assert.equal(classifyPublishFailed({
     id: "recvDSuJr2B4cuzfV",
     platform: "Instagram",

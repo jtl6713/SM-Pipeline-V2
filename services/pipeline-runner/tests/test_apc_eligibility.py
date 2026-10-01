@@ -1,5 +1,6 @@
 from datetime import timedelta
 
+from apc.ap2c import _pending_max_attempts
 from apc.ap4c import _expired_media_error, _expired_media_reset
 from apc.assets import public_asset_url, r2_object_key, saved_public_url, source_image_url
 from apc.common import expected_child_count, is_due, publish_caption, reconcile_caption
@@ -137,3 +138,45 @@ def test_ap1c_verification_uses_graph_ids_not_immediate_airtable_reread():
     assert "created_count = len(set(created_child_ids))" in source
     assert "created = list_child_slides" not in source
     assert "NYC Output 1298" in source
+
+
+class _FakeSlideClient:
+    def __init__(self, rows):
+        self.rows = rows
+        self.max_records_seen = []
+
+    def list_records(self, _table, *, formula=None, view=None, max_records=None):
+        self.max_records_seen.append(max_records)
+        return list(self.rows[:max_records])
+
+
+def test_ap2c_orders_all_linked_children_before_graph_clamp():
+    # Reproduce NYC Output 1298: an overflow slide can arrive before a required
+    # first-10 slide unless we fetch beyond 10, sort, and then clamp.
+    rows = [
+        _record(**{"Current Order": 11, "Slide Number": 11, "IG_Child_Container_ID": "child-11"}),
+        *[
+            _record(**{
+                "Current Order": order,
+                "Slide Number": order,
+                "IG_Child_Container_ID": f"child-{order}",
+            })
+            for order in range(1, 11)
+        ],
+    ]
+    client = _FakeSlideClient(rows)
+    selected = list_child_slides(client, "1298")
+    assert client.max_records_seen[0] >= 11
+    assert [row["fields"]["Current Order"] for row in selected] == list(range(1, 11))
+
+
+def test_ap2c_timeout_counts_only_unfinished_required_children():
+    slides = [
+        _record(IG_Child_Container_Status="FINISHED", IG_Child_Container_Attempt_Count=18),
+        _record(IG_Child_Container_Status="FINISHED", IG_Child_Container_Attempt_Count=18),
+        _record(IG_Child_Container_Status="IN_PROGRESS", IG_Child_Container_Attempt_Count=15),
+    ]
+    assert _pending_max_attempts(slides) == 15
+    assert _pending_max_attempts([
+        _record(IG_Child_Container_Status="FINISHED", IG_Child_Container_Attempt_Count=18),
+    ]) == 0
