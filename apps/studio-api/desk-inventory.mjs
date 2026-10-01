@@ -789,12 +789,37 @@ export function classifyIgCarouselChildPollFailure(row) {
   }, row);
 }
 
+
+export function isIgCarouselRateLimited(row) {
+  const platform = String(row?.platform || "").trim();
+  if (platform !== "Instagram") return false;
+  const type = `${row?.studio_output_type || ""} ${row?.platform_output_type || ""}`;
+  if (!/carousel/i.test(type)) return false;
+  if (row?.published_at || String(row?.ig_carousel_status || "").trim() === "Published") return false;
+  const err = String(row?.ig_carousel_error || row?.publish_error || "");
+  return /user is performing too many actions|rate limit|request limit/i.test(err);
+}
+
+export function classifyIgCarouselRateLimited(row) {
+  if (!isIgCarouselRateLimited(row)) return null;
+  const recordId = String(row?.id || row?.record_id || "").trim();
+  return withDeskIdentity({
+    kind: "ig_carousel_rate_limited",
+    class: "transient",
+    record_id: recordId || null,
+    fingerprint: fingerprint("ig_carousel_rate_limited", recordId, "meta_actions"),
+    actor: "worker_heal",
+    diagnosis: "Meta throttled AP1C child creation. Do not recreate healthy child containers. Preserve every required child ID that is not ERROR/EXPIRED, back off at least 30 minutes, then create only missing/terminal children. AP1C must honor IG_Carousel_Next_Retry_At before trying again. Proven: NYC Output 1298 / Rainy Day Museum Mile.",
+  }, row);
+}
+
 export function classifyPublishFailed(row, nowMs = Date.now()) {
   if (row?.published_at) return null;
   if (classifyTikTokAuthSignature(row)) return null;
   if (classifyIgCarouselTooManyChildren(row)) return null;
   if (classifyIgCarouselChildVerificationRace(row)) return null;
   if (classifyIgCarouselChildPollFailure(row)) return null;
+  if (classifyIgCarouselRateLimited(row)) return null;
   const outputStatus = String(row?.output_status || "").trim();
   const publish = String(row?.publish_status || "").trim();
   if (outputStatus && !["Approved for Publishing", "Failed"].includes(outputStatus)) return null;
@@ -1145,6 +1170,7 @@ export const CLASSIFIER_KINDS = Object.freeze([
   "ig_carousel_too_many_children",
   "ig_carousel_child_verification_race",
   "ig_carousel_child_poll_failure",
+  "ig_carousel_rate_limited",
   "render_failed",
   "render_unfetchable_source",
   "render_private_drive_watermark",
