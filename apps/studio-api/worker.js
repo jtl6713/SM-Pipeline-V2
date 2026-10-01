@@ -11481,13 +11481,63 @@ async function studioHealIgCarouselRateLimit(env, options = {}) {
       && Number.isFinite(currentRetryMs)
       && (currentRetryMs - lastAttemptMs) >= (minimumBackoffMs - 60000);
 
-    if (hasSafeBackoff) {
+    if (hasSafeBackoff && currentRetryMs > Date.now()) {
+      // Park the parent in a state old AP1C versions cannot consume. This
+      // prevents a pre-fix local runner from ignoring the retry timestamp and
+      // hammering Meta during the cooldown.
+      if (String(f(row, "IG_Carousel_Status") || "").trim() !== "Retry Pending") {
+        await airtableFetch(env, outputTable, row.id, {
+          method: "PATCH",
+          body: JSON.stringify({
+            fields: {
+              IG_Carousel_Status: "Retry Pending",
+              Publish_Retry_Eligible: true,
+              Publish_Locked_By: "",
+              Publish_Locked_At: null,
+              Publish_Started_At: null,
+            },
+            typecast: true,
+          }),
+        });
+      }
       pulses.push({
         key: "IG_AP1C_RATE_LIMIT",
         id: row.id,
         action: "wait_existing_backoff",
         retry_at: new Date(currentRetryMs).toISOString(),
       });
+      continue;
+    }
+
+    if (hasSafeBackoff && currentRetryMs <= Date.now()) {
+      try {
+        await airtableFetch(env, outputTable, row.id, {
+          method: "PATCH",
+          body: JSON.stringify({
+            fields: {
+              IG_Carousel_Status: "Assets Ready",
+              Publish_Next_Retry_At: null,
+              Publish_Retry_Eligible: true,
+              IG_Carousel_Next_Retry_At: null,
+              Publish_Locked_By: "",
+              Publish_Locked_At: null,
+              Publish_Started_At: null,
+            },
+            typecast: true,
+          }),
+        });
+        pulses.push({
+          key: "IG_AP1C_RATE_LIMIT",
+          id: row.id,
+          action: "release_backoff_for_single_retry",
+        });
+      } catch (error) {
+        pulses.push({
+          key: "IG_AP1C_RATE_LIMIT",
+          id: row.id,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
       continue;
     }
 
@@ -11500,7 +11550,7 @@ async function studioHealIgCarouselRateLimit(env, options = {}) {
         method: "PATCH",
         body: JSON.stringify({
           fields: {
-            IG_Carousel_Status: "Assets Ready",
+            IG_Carousel_Status: "Retry Pending",
             Publish_Next_Retry_At: retryAt,
             Publish_Retry_Eligible: true,
             IG_Carousel_Next_Retry_At: retryAt,
