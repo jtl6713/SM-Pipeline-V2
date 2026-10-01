@@ -349,3 +349,8 @@ Deploy Studio API Worker production
 Reason: Ship AP1C child-verification race Quality Agent detection and auto-heal from PR #470
 Source merge: 38a6398decf19e1ba8fcc453385e578138ceb287
 Requested: 2026-09-30T23:25:00-05:00
+
+Deploy Studio API Worker production
+Reason: Ship AP2C child-poll Quality Agent recovery and Output 1298 fix from PR #471
+Source merge: bf9bfc25d9f03e67f9d3b5480b9b6887e2b13fe2
+Requested: 2026-09-30
