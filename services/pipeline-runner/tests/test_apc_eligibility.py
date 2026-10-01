@@ -127,3 +127,13 @@ def test_ap4c_expired_media_restarts_container_chain():
     assert reset["Publish_Retry_Eligible"] is True
     assert reset["IG_Carousel_Retry_Count"] == 5
     assert "recreate fresh child containers" in reset["IG_Carousel_Error_Message"]
+
+
+def test_ap1c_verification_uses_graph_ids_not_immediate_airtable_reread():
+    from pathlib import Path
+
+    source = (Path(__file__).resolve().parents[1] / "apc" / "ap1c.py").read_text(encoding="utf-8")
+    assert "created_child_ids.append(child_id)" in source
+    assert "created_count = len(set(created_child_ids))" in source
+    assert "created = list_child_slides" not in source
+    assert "NYC Output 1298" in source
