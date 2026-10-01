@@ -79,6 +79,8 @@ def ap1c_eligibility_reason(record: dict[str, Any]) -> str | None:
         return "do_not_publish"
     if field_str(record, "Platform_Post_ID"):
         return "already_has_platform_post"
+    if not is_due(record):
+        return "not_due"
     return None
 
 
