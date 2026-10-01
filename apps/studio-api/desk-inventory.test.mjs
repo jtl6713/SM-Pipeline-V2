@@ -22,6 +22,7 @@ import {
   classifyIgCarouselTooManyChildren,
   classifyIgCarouselChildVerificationRace,
   classifyIgCarouselChildPollFailure,
+  classifyIgCarouselRateLimited,
   classifyTikTokAuthSignature,
   classifyNativeCover,
   classifyRfrLockedMissingDeliverable,
@@ -512,6 +513,37 @@ test("promoted advancement is origin-aware and does not treat Ready for Review a
   assert.equal(ig1298Poll.max_attempts, 18);
   assert.match(ig1298Poll.diagnosis, /unfinished required children only/i);
   assert.ok(CLASSIFIER_KINDS.includes("ig_carousel_child_poll_failure"));
+  const ig1298Rate = classifyIgCarouselRateLimited({
+    id: "recvDSuJr2B4cuzfV",
+    output_id: 1298,
+    output_title: "Rainy Day Museum Mile",
+    platform: "Instagram",
+    studio_output_type: "Carousel",
+    platform_output_type: "Instagram Carousel",
+    output_status: "Approved for Publishing",
+    publish_status: "Ready to Schedule",
+    publish_retry_eligible: true,
+    ig_carousel_status: "Assets Ready",
+    ig_carousel_error_stage: "AP1C Child Creation",
+    ig_carousel_error: "AP1C child creation failed for slide 1. HTTP 400: User is performing too many actions",
+  });
+  assert.equal(ig1298Rate.kind, "ig_carousel_rate_limited");
+  assert.equal(ig1298Rate.class, "transient");
+  assert.equal(ig1298Rate.actor, "worker_heal");
+  assert.match(ig1298Rate.diagnosis, /back off at least 30 minutes/i);
+  assert.match(ig1298Rate.diagnosis, /Preserve every required child ID/i);
+  assert.ok(CLASSIFIER_KINDS.includes("ig_carousel_rate_limited"));
+  assert.equal(classifyPublishFailed({
+    id: "recvDSuJr2B4cuzfV",
+    platform: "Instagram",
+    studio_output_type: "Carousel",
+    platform_output_type: "Instagram Carousel",
+    output_status: "Failed",
+    publish_status: "Failed",
+    publish_error: "AP1C child creation failed for slide 1. HTTP 400: User is performing too many actions",
+    ig_carousel_error_stage: "AP1C Child Creation",
+    ig_carousel_error: "AP1C child creation failed for slide 1. HTTP 400: User is performing too many actions",
+  }, now), null);
   assert.equal(classifyPublishFailed({
     id: "recvDSuJr2B4cuzfV",
     platform: "Instagram",
