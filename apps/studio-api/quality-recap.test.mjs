@@ -203,3 +203,26 @@ test("recap explains Studio-only render-source repair", () => {
   assert.equal(recap.cards[0].content_id, 231);
   assert.equal(recap.cards[0].output_id, 1017);
 });
+
+
+test("recap explains AP1C child verification race and safe recovery", () => {
+  const recap = buildQualityRecap({
+    incidents: [{
+      kind: "ig_carousel_child_verification_race",
+      class: "transient",
+      actor: "worker_heal",
+      fingerprint: "ig_carousel_child_verification_race:recvDSuJr2B4cuzfV:9_of_10",
+      record_id: "recvDSuJr2B4cuzfV",
+      output_id: 1298,
+      output_title: "Rainy Day Museum Mile",
+      platform: "Instagram",
+      platform_output_type: "Instagram Carousel",
+      profile_name: "NYC - New York City",
+    }],
+  });
+  assert.equal(recap.open_count, 1);
+  assert.match(recap.cards[0].found, /immediate Airtable check/i);
+  assert.match(recap.cards[0].action, /kept the existing containers/i);
+  assert.match(recap.cards[0].action, /rerun AP1C once/i);
+  assert.equal(recap.cards[0].output_id, 1298);
+});
