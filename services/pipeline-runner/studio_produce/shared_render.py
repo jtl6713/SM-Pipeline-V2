@@ -46,6 +46,8 @@ def _normalized_clip_key(raw: str) -> str:
         return hashlib.sha256(text.encode("utf-8")).hexdigest()
     if isinstance(payload, list):
         normalized = []
+        from studio_produce.timed_script import clip_is_authoritative
+
         for clip in payload:
             if not isinstance(clip, dict):
                 continue
@@ -53,14 +55,21 @@ def _normalized_clip_key(raw: str) -> str:
             overlay_text = ""
             if overlay:
                 overlay_text = str(overlay.get("text") or "").strip()
-            normalized.append(
-                {
-                    "url": str(clip.get("url") or clip.get("src") or "").strip(),
-                    # Ignore per-output durationFrames — T1 can extend one sibling while others
-                    # still carry a stale stamp total and must stay in the same shared render.
-                    "overlay": overlay_text,
-                }
-            )
+            row = {
+                "url": str(clip.get("url") or clip.get("src") or "").strip(),
+                # Ignore per-output durationFrames — T1 can extend one sibling while others
+                # still carry a stale stamp total and must stay in the same shared render.
+                "overlay": overlay_text,
+            }
+            if clip_is_authoritative(clip):
+                # Authoritative timelines are the render contract. Identical scene
+                # lengths still share one render; different lengths must not.
+                try:
+                    row["durationFrames"] = int(clip.get("durationFrames") or 0)
+                except (TypeError, ValueError):
+                    row["durationFrames"] = 0
+                row["timingMode"] = "authoritative"
+            normalized.append(row)
         return hashlib.sha256(json.dumps(normalized, sort_keys=True).encode("utf-8")).hexdigest()
     return hashlib.sha256(json.dumps(payload, sort_keys=True).encode("utf-8")).hexdigest()
 

@@ -308,6 +308,14 @@ def process_one(
         )
         return {"processed": True, "reused_timeline": True, **preview}
     clips = clip_list(output)
+    from studio_produce.timed_script import clips_use_authoritative_timing
+
+    if clips_use_authoritative_timing(clips):
+        reason = "authoritative_timing"
+        if dry_run:
+            return {"processed": False, "dry_run": True, "skip": reason, **preview}
+        client.update_record(PLATFORM_OUTPUTS_TABLE, output["id"], _skip_fields(reason), typecast=True)
+        return {"processed": True, "skipped": reason, **preview}
     if _beat_sync_disabled(output):
         reason = "beat_sync_disabled"
         if dry_run:

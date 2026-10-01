@@ -13,6 +13,10 @@ from studio_produce.constants import NATIVE_OUTPUT_TYPES, STORY_OUTPUT_TYPES
 from studio_produce.context import expected_photo_count, master_assets, variant_manifest
 from studio_produce.job import finished_origin_kind, parse_json
 from studio_produce.thumbnail import is_designed_cover_url
+from studio_produce.timed_script import (
+    segment_duration_frames,
+    timed_script_from_request,
+)
 from studio_produce.media import (
     asset_is_video,
     asset_media_kind,
@@ -553,6 +557,41 @@ def ensure_catalog_music(
     return music_url
 
 
+def _clip_matches_asset(clip: dict[str, Any], asset_id: str) -> bool:
+    wanted = str(asset_id or "").strip()
+    if not wanted:
+        return False
+    source = clip.get("source") if isinstance(clip.get("source"), dict) else {}
+    candidates = {
+        str(source.get("id") or "").strip(),
+        str(source.get("media_asset_record_id") or "").strip(),
+        str(clip.get("media_asset_id") or "").strip(),
+    }
+    candidates.discard("")
+    return wanted in candidates
+
+
+def clips_for_timed_script(
+    clips: list[dict[str, Any]],
+    timeline: dict[str, Any] | None,
+) -> list[dict[str, Any]] | None:
+    """Order stills by the imported timeline. Unresolved scenes refuse the stamp."""
+    segments = (timeline or {}).get("segments") if isinstance(timeline, dict) else None
+    if not isinstance(segments, list) or not segments:
+        return clips
+    ordered: list[dict[str, Any]] = []
+    for segment in segments:
+        if not isinstance(segment, dict):
+            return None
+        match = next((clip for clip in clips if _clip_matches_asset(clip, str(segment.get("asset_id") or ""))), None)
+        if not match:
+            return None
+        copied = dict(match)
+        copied["timed_segment"] = segment
+        ordered.append(copied)
+    return ordered
+
+
 def _music_requested(effective: dict[str, Any]) -> bool:
     mode = str(effective.get("background_music_mode") or "").strip().lower()
     if mode in {"no", "false", "0"}:
@@ -580,6 +619,12 @@ def assign_clip_frames(
         native_video.append(max(1, round((end - start) * FPS)))
         frames[index] = native_video[-1]
     video_total = sum(native_video)
+    timeline = None if story or video_indexes else timed_script_from_request(request)
+    if timeline and len(timeline.get("segments") or []) == len(clips):
+        # Imported scene boundaries win over pacing, fixed duration, and owner length.
+        frames = [segment_duration_frames(segment) for segment in timeline["segments"]]
+        if frames and all(frame >= 1 for frame in frames):
+            return frames, sum(frames)
     if render_settings.get("duration_mode") == "fixed" and photo_indexes:
         fixed_seconds = max(1.0, min(15.0, _render_float(render_settings, "duration_seconds", 3.0)))
         fixed_frames = max(1, round(fixed_seconds * FPS))
@@ -1084,6 +1129,7 @@ def source_package(
     }
     render_settings = render_settings_from_request(request)
     render_overrides = render_overrides_from_request(request)
+    timed_script = None if story else timed_script_from_request(request)
     clips = []
     omitted = []
     has_video = False
@@ -1145,6 +1191,14 @@ def source_package(
         field_str(output, "Platform_Output_Type"),
     )
     ai_motion = {} if native_route else _ai_directed_motion(clips, render_settings, render_overrides)
+    authoritative = bool(timed_script) and not story and not native_route and not has_video
+    if authoritative:
+        ordered = clips_for_timed_script(clips, timed_script)
+        if not ordered:
+            return None
+        if any(segment_duration_frames(segment) < 1 for segment in timed_script.get("segments") or []):
+            return None
+        clips = ordered
     clip_frames, total_frames = assign_clip_frames(
         clips,
         story=story,
@@ -1178,6 +1232,8 @@ def source_package(
             transition_settings["transition"] = frame_override["transition"]
         motion_style = _render_motion(motion_settings, index, story=story, video=video)
         transition = _render_transition(transition_settings, index)
+        segment = item.get("timed_segment") if isinstance(item.get("timed_segment"), dict) else None
+        beat_sync = False if authoritative else render_settings.get("beat_sync", "on") != "off"
         render_directive = {
             "preset": render_settings.get("preset", "auto"),
             "motion": render_settings.get("motion", "auto"),
@@ -1185,11 +1241,13 @@ def source_package(
             "intensity": render_settings.get("intensity", "normal"),
             "pacing": render_settings.get("pacing", "normal"),
             "fit": frame_override.get("fit") or render_settings.get("fit", "smart_crop"),
-            "beatSync": render_settings.get("beat_sync", "on") != "off",
+            "beatSync": beat_sync,
             "aiMotion": render_settings.get("ai_motion", "off") == "on",
             "motionSource": motion_source,
             "motionReason": motion_reason or None,
             "frameOverride": frame_override or None,
+            "timingMode": "authoritative" if authoritative else None,
+            "timingSource": "timed_script" if authoritative else None,
         }
         built.append({
             "id": f"studio-source-{index + 1}",
@@ -1206,7 +1264,13 @@ def source_package(
             "motion": {"type": motion_style, "intensity": render_settings.get("intensity", "normal")},
             "transition": transition,
             "renderDirective": render_directive,
-            "beatSync": render_settings.get("beat_sync", "on") != "off",
+            "beatSync": beat_sync,
+            "timingMode": "authoritative" if authoritative else None,
+            "timingSource": "timed_script" if authoritative else None,
+            "sceneStartSeconds": None if not segment else segment.get("start_seconds"),
+            "sceneEndSeconds": None if not segment else segment.get("end_seconds"),
+            "voiceoverText": None if not segment else segment.get("voiceover_text") or "",
+            "suggestedVisual": None if not segment else segment.get("suggested_visual") or "",
             "fitMode": item.get("fit_mode"),
             "media_kind": item["media_kind"],
             "mediaKind": item["media_kind"],
@@ -1260,6 +1324,12 @@ def source_package(
             "transition": clip.get("transition") or None,
             "renderDirective": clip.get("renderDirective") or None,
             "beatSync": clip.get("beatSync", True),
+            "timingMode": clip.get("timingMode") or None,
+            "timingSource": clip.get("timingSource") or None,
+            "sceneStartSeconds": clip.get("sceneStartSeconds"),
+            "sceneEndSeconds": clip.get("sceneEndSeconds"),
+            "voiceoverText": clip.get("voiceoverText") or None,
+            "suggestedVisual": clip.get("suggestedVisual") or None,
             "fitMode": clip.get("fitMode") or clip.get("fit_mode"),
             "mediaKind": clip.get("media_kind") or "photo",
             "media_kind": clip.get("media_kind") or "photo",
@@ -1306,6 +1376,7 @@ def source_package(
         "render_clip_list_json": json.dumps(clip_list),
         "native": native,
         "story": story,
+        "timed_script": authoritative,
         "effective": effective,
     }
 
@@ -1334,9 +1405,9 @@ def stamp_fields(
         "Selected_Assets_JSON": package.get("selected_assets_json"),
         "Render_Clip_List_JSON": package.get("render_clip_list_json"),
         "Render_Total_Frames": package.get("total_frames") or 0,
-        "Clip_1_Duration_Frames": per if clips else 0,
-        "Clip_2_Duration_Frames": per if len(clips) > 1 else 0,
-        "Clip_3_Duration_Frames": per if len(clips) > 2 else 0,
+        "Clip_1_Duration_Frames": int(clips[0].get("durationFrames") or per or 0) if clips else 0,
+        "Clip_2_Duration_Frames": int(clips[1].get("durationFrames") or per or 0) if len(clips) > 1 else 0,
+        "Clip_3_Duration_Frames": int(clips[2].get("durationFrames") or per or 0) if len(clips) > 2 else 0,
         "Voiceover_URL": field_str(parent or {}, "Voiceover_URL") or None if (
             directive_yes(package.get("effective", {}).get("voiceover_mode")) and not package.get("story")
         ) else None,
@@ -1352,6 +1423,12 @@ def stamp_fields(
         ),
         "Voiceover_Duration_Seconds": package.get("effective", {}).get("voiceover_duration_seconds") or None,
     }
+    authoritative = bool(package.get("timed_script"))
+    if authoritative:
+        # Beat sync must not rewrite imported scene lengths. Music can still play.
+        fields["Timing_Status"] = "Skipped"
+        fields["Timing_Timeline_JSON"] = None
+        fields["Timing_Error_Message"] = None
     existing_record = existing if isinstance(existing, dict) and "fields" in existing else {"fields": existing or {}}
     existing_timing = field_str(existing_record, "Timing_Status")
     existing_timeline = field_str(existing_record, "Timing_Timeline_JSON")
@@ -1364,7 +1441,9 @@ def stamp_fields(
     recropped = bool(new_stills) and bool(old_stills) and new_stills != old_stills
     overlay_changed = bool(new_overlays) and new_overlays != old_overlays
     render_changed = bool(new_render) and new_render != old_render
-    if recropped or render_changed:
+    if authoritative:
+        pass
+    elif recropped or render_changed:
         fields["Timing_Status"] = "Pending" if _music_requested(package.get("effective") or {}) else "Skipped"
         fields["Timing_Timeline_JSON"] = None
         fields["Timing_Error_Message"] = None

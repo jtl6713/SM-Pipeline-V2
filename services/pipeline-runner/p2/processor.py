@@ -282,9 +282,17 @@ def process_request(
             **_preview(item, route=route),
         }
 
+    request = None
+    request_id = first_linked_id(item.get("fields", {}).get("Production Requests"))
+    if request_id:
+        request = client.get_record(PRODUCTION_REQUESTS_TABLE, request_id)
+    from studio_produce.timed_script import speech_speed_for_timeline, timed_script_from_request
+
+    timeline = timed_script_from_request(request)
     raw_mp3 = synthesize_voiceover_by_id(
         field_str(item, "Voiceover_Script"),
         voice_id=resolve_content_voice_id(item),
+        speed=speech_speed_for_timeline(timeline),
     )
     norm_payload, normalized_mp3 = normalize_voiceover(
         raw_mp3,
@@ -292,19 +300,17 @@ def process_request(
         normalizer_base_url=normalizer_url,
     )
     measured_seconds = probe_audio_duration_bytes(normalized_mp3)
-    request = None
-    request_id = first_linked_id(item.get("fields", {}).get("Production Requests"))
-    if request_id:
-        request = client.get_record(PRODUCTION_REQUESTS_TABLE, request_id)
     cap_error = validate_voiceover_for_owner_cap(
         voiceover_seconds=measured_seconds,
         content_item=item,
         request=request,
     )
-    if cap_error:
+    if cap_error and not timeline:
         # The synthesized file is the truth. Do not fail production because speech
         # ran longer than the planning target; extend every non-Story video target
         # to fit the narration plus the configured tail.
+        # Timed Script Mode keeps the imported length. The review UI flags overruns
+        # instead of silently stretching the master timeline.
         _extend_video_duration_for_voiceover(client, item, request, measured_seconds)
     voice_file = drive.upload_and_share(
         VOICEOVER_DRIVE_FOLDER_ID,

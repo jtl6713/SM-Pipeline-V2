@@ -124,6 +124,11 @@ def resolve_rules(
 
 
 def apply_timeline(clips: list[dict[str, Any]], timeline: dict[str, Any]) -> list[dict[str, Any]]:
+    from studio_produce.timed_script import clips_use_authoritative_timing
+
+    if clips_use_authoritative_timing(clips):
+        # Imported scene lengths are the master timeline. Beat metadata must not move them.
+        return [dict(clip) for clip in clips if isinstance(clip, dict)]
     if clips_have_video(clips):
         return expand_to_timeline(clips, timeline)
     plan = timeline.get("timeline") or timeline

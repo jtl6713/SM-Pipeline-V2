@@ -1,0 +1,430 @@
+"""Timed Script Render Mode.
+
+Imported scene timestamps and voiceover lines are stored as a structured
+``[timed-script]`` directive on Production Request notes, alongside the existing
+``[render-settings]`` and ``[render-overrides]`` directives. The visible notes
+field stays free of that payload because Studio strips the directive before
+showing it.
+
+When the directive is present, scene boundaries are authoritative: pacing,
+fixed image duration, beat sync, and narration-length inference must not
+rewrite them. Suggested-still text is assignment context only and is never
+narration.
+"""
+
+from __future__ import annotations
+
+import json
+import re
+from typing import Any
+from urllib.parse import unquote
+
+from render.fields import field_str
+
+FPS = 30
+WORDS_PER_MINUTE = 150
+MAX_SLIGHT_SPEECH_RATE = 1.15
+MAX_SPEECH_RATE = 1.2
+MIN_SPEECH_RATE = 0.7
+MIN_SCENE_SECONDS = 1.0
+BOUNDARY_EPSILON_SECONDS = 0.05
+
+_TIMED_SCRIPT_RE = re.compile(r"(?:^|\n)\[timed-script\]\s*([^\n]*)", re.I)
+_RANGE_RE = re.compile(
+    r"^\s*(\d{1,2}:\d{2}(?::\d{2})?)\s*[\u2012\u2013\u2014\-]\s*(\d{1,2}:\d{2}(?::\d{2})?)\s*$"
+)
+_SEPARATOR_CELL_RE = re.compile(r"^:?-{3,}:?$")
+
+
+def _round_seconds(value: float) -> float:
+    return round(float(value) + 0.0, 3)
+
+
+def parse_clock(value: str) -> float | None:
+    text = str(value or "").strip()
+    if not re.fullmatch(r"\d{1,2}:\d{2}(?::\d{2})?", text):
+        return None
+    parts = [int(part) for part in text.split(":")]
+    if len(parts) == 2:
+        minutes, seconds = parts
+        if seconds > 59:
+            return None
+        return float(minutes * 60 + seconds)
+    if len(parts) == 3:
+        hours, minutes, seconds = parts
+        if minutes > 59 or seconds > 59:
+            return None
+        return float(hours * 3600 + minutes * 60 + seconds)
+    return None
+
+
+def format_clock(seconds: float) -> str:
+    total = max(0, int(round(float(seconds or 0))))
+    minutes, secs = divmod(total, 60)
+    hours, minutes = divmod(minutes, 60)
+    if hours:
+        return f"{hours}:{minutes:02d}:{secs:02d}"
+    return f"{minutes}:{secs:02d}"
+
+
+def parse_time_range(value: str) -> tuple[float, float] | None:
+    match = _RANGE_RE.match(str(value or "").strip())
+    if not match:
+        return None
+    start = parse_clock(match.group(1))
+    end = parse_clock(match.group(2))
+    if start is None or end is None:
+        return None
+    return start, end
+
+
+def _strip_wrapping_quotes(value: str) -> str:
+    text = str(value or "").replace("\u00a0", " ").strip()
+    pairs = (('"', '"'), ("'", "'"), ("\u201c", "\u201d"), ("\u2018", "\u2019"))
+    for left, right in pairs:
+        if len(text) >= 2 and text.startswith(left) and text.endswith(right):
+            return text[1:-1].strip()
+    return text
+
+
+def _cells(line: str) -> list[str]:
+    raw = str(line or "").strip()
+    if "|" not in raw:
+        return []
+    parts = [part.replace("\u00a0", " ").strip() for part in raw.split("|")]
+    if parts and parts[0] == "":
+        parts = parts[1:]
+    if parts and parts[-1] == "":
+        parts = parts[:-1]
+    return parts
+
+
+def _is_separator(cells: list[str]) -> bool:
+    return bool(cells) and all(_SEPARATOR_CELL_RE.match(cell.replace(" ", "")) for cell in cells)
+
+
+def _header_indexes(cells: list[str]) -> dict[str, int] | None:
+    labels = [cell.strip().lower() for cell in cells]
+    if not labels or not any("time" in label for label in labels):
+        return None
+    indexes = {"time": 0, "voiceover": 1 if len(labels) > 1 else 0, "visual": 2 if len(labels) > 2 else 1}
+    for index, label in enumerate(labels):
+        if "time" in label:
+            indexes["time"] = index
+        elif any(token in label for token in ("voice", "narrat", "script")):
+            indexes["voiceover"] = index
+        elif any(token in label for token in ("still", "visual", "scene", "suggest")):
+            indexes["visual"] = index
+    return indexes
+
+
+def estimate_narration_seconds(text: str, speech_rate: float = 1.0) -> float:
+    words = [word for word in str(text or "").split() if word]
+    if not words:
+        return 0.0
+    try:
+        rate = float(speech_rate or 1.0)
+    except (TypeError, ValueError):
+        rate = 1.0
+    if rate <= 0:
+        rate = 1.0
+    return (len(words) / WORDS_PER_MINUTE) * 60.0 / rate
+
+
+def narration_fit(segment: dict[str, Any]) -> dict[str, Any]:
+    duration = float(segment.get("duration_seconds") or 0)
+    rate = float(segment.get("speech_rate") or 1.0)
+    estimated = estimate_narration_seconds(str(segment.get("voiceover_text") or ""), rate)
+    spare = _round_seconds(duration - estimated)
+    overrun = spare < -BOUNDARY_EPSILON_SECONDS
+    return {
+        "scene_seconds": _round_seconds(duration),
+        "narration_seconds": _round_seconds(estimated),
+        "spare_seconds": spare,
+        "status": "over" if overrun else "ready",
+        "speech_rate": _round_seconds(rate),
+        "message": (
+            f"Narration exceeds scene by {abs(spare):.1f} sec"
+            if overrun
+            else f"Scene: {duration:.1f} sec • VO: {estimated:.1f} sec • Spare: {max(0.0, spare):.1f} sec"
+        ),
+    }
+
+
+def segment_duration_frames(segment: dict[str, Any], fps: int = FPS) -> int:
+    start = int(round(float(segment.get("start_seconds") or 0) * fps))
+    end = int(round(float(segment.get("end_seconds") or 0) * fps))
+    return end - start
+
+
+def validate_timeline(segments: list[dict[str, Any]]) -> list[str]:
+    issues: list[str] = []
+    rows = [segment for segment in segments if isinstance(segment, dict)]
+    if not rows:
+        return ["No timeline scenes to validate."]
+    previous_end: float | None = None
+    for index, segment in enumerate(rows, start=1):
+        try:
+            start = float(segment.get("start_seconds"))
+            end = float(segment.get("end_seconds"))
+        except (TypeError, ValueError):
+            issues.append(f"Scene {index}: invalid timestamps.")
+            previous_end = None
+            continue
+        if start < 0 or end < 0:
+            issues.append(f"Scene {index}: invalid timestamps.")
+        if end < start:
+            issues.append(f"Scene {index}: end {format_clock(end)} is before start {format_clock(start)}.")
+        elif end == start or float(segment.get("duration_seconds") or 0) <= 0:
+            issues.append(f"Scene {index}: zero-length scene.")
+        elif float(segment.get("duration_seconds") or 0) + 1e-9 < MIN_SCENE_SECONDS:
+            issues.append(
+                f"Scene {index}: duration is under {MIN_SCENE_SECONDS:.1f} sec. "
+                "The renderer keeps each scene at least 1 second, so this boundary would move."
+            )
+        if previous_end is not None:
+            gap = start - previous_end
+            if gap > BOUNDARY_EPSILON_SECONDS:
+                issues.append(f"Gap of {gap:.1f} sec between scene {index - 1} and scene {index}.")
+            elif gap < -BOUNDARY_EPSILON_SECONDS:
+                issues.append(f"Overlap of {abs(gap):.1f} sec between scene {index - 1} and scene {index}.")
+        previous_end = end
+    return issues
+
+
+def _empty_timeline() -> dict[str, Any]:
+    return {
+        "mode": "timed_script",
+        "timing_mode": "authoritative",
+        "timing_source": "timed_script",
+        "duration_seconds": 0,
+        "force_exact_voiceover": True,
+        "segments": [],
+    }
+
+
+def build_timeline(segments: list[dict[str, Any]]) -> dict[str, Any]:
+    timeline = _empty_timeline()
+    cleaned: list[dict[str, Any]] = []
+    for index, raw in enumerate(segments, start=1):
+        if not isinstance(raw, dict):
+            continue
+        try:
+            start = float(raw.get("start_seconds"))
+            end = float(raw.get("end_seconds"))
+        except (TypeError, ValueError):
+            continue
+        try:
+            rate = float(raw.get("speech_rate") or 1.0)
+        except (TypeError, ValueError):
+            rate = 1.0
+        rate = min(MAX_SPEECH_RATE, max(MIN_SPEECH_RATE, rate))
+        asset_id = str(raw.get("asset_id") or "").strip()
+        segment = {
+            "index": index,
+            "start_seconds": _round_seconds(start),
+            "end_seconds": _round_seconds(end),
+            "duration_seconds": _round_seconds(end - start),
+            "voiceover_text": _strip_wrapping_quotes(str(raw.get("voiceover_text") or "")),
+            "suggested_visual": str(raw.get("suggested_visual") or "").strip(),
+            "asset_id": asset_id,
+            "speech_rate": _round_seconds(rate),
+            "force_exact_voiceover": True,
+        }
+        cleaned.append(segment)
+    timeline["segments"] = cleaned
+    timeline["duration_seconds"] = _round_seconds(max((segment["end_seconds"] for segment in cleaned), default=0))
+    return timeline
+
+
+def parse_timed_script_markdown(text: str) -> dict[str, Any]:
+    """Parse a Markdown table of time, voiceover, and suggested still."""
+    errors: list[str] = []
+    header: dict[str, int] | None = None
+    raw_segments: list[dict[str, Any]] = []
+    saw_row = False
+    for line_number, line in enumerate(str(text or "").splitlines(), start=1):
+        if not str(line).strip():
+            continue
+        cells = _cells(line)
+        if not cells:
+            continue
+        if _is_separator(cells):
+            continue
+        if header is None and _header_indexes(cells):
+            header = _header_indexes(cells)
+            continue
+        saw_row = True
+        indexes = header or {"time": 0, "voiceover": 1, "visual": 2}
+        if len(cells) <= indexes["time"]:
+            errors.append(f"Line {line_number}: could not read a time range.")
+            continue
+        parsed = parse_time_range(cells[indexes["time"]])
+        if not parsed:
+            errors.append(f"Line {line_number}: invalid timestamp '{cells[indexes['time']]}'. Use 0:00–0:07.")
+            continue
+        start, end = parsed
+        voiceover = ""
+        visual = ""
+        if len(cells) > indexes["voiceover"]:
+            voiceover = _strip_wrapping_quotes(cells[indexes["voiceover"]])
+        if len(cells) > indexes["visual"]:
+            visual = cells[indexes["visual"]].strip()
+        raw_segments.append({
+            "start_seconds": start,
+            "end_seconds": end,
+            "voiceover_text": voiceover,
+            "suggested_visual": visual,
+            "asset_id": "",
+            "speech_rate": 1.0,
+        })
+    if not saw_row and not raw_segments:
+        errors.append("No timed-script rows found. Paste a Markdown table with Time, Voiceover, and Suggested still.")
+    timeline = build_timeline(raw_segments) if raw_segments else None
+    issues = validate_timeline(timeline["segments"]) if timeline else []
+    return {
+        "ok": not errors and not issues and bool(timeline and timeline["segments"]),
+        "errors": errors,
+        "issues": issues,
+        "timeline": timeline,
+    }
+
+
+def normalize_timeline(raw: Any) -> dict[str, Any] | None:
+    if isinstance(raw, str):
+        try:
+            raw = json.loads(raw)
+        except json.JSONDecodeError:
+            return None
+    if not isinstance(raw, dict):
+        return None
+    segments = raw.get("segments")
+    if not isinstance(segments, list) or not segments:
+        return None
+    timeline = build_timeline(segments)
+    if not timeline["segments"]:
+        return None
+    return timeline
+
+
+def timed_script_from_request(request: dict[str, Any] | None) -> dict[str, Any] | None:
+    notes = field_str(request or {}, "Production_Notes")
+    match = _TIMED_SCRIPT_RE.search(notes)
+    if not match:
+        return None
+    payload = str(match.group(1) or "").strip()
+    if not payload:
+        return None
+    decoded = unquote(payload)
+    timeline = normalize_timeline(decoded)
+    if timeline:
+        return timeline
+    return normalize_timeline(payload)
+
+
+def directive_line(timeline: dict[str, Any] | None) -> str:
+    normalized = normalize_timeline(timeline)
+    if not normalized:
+        return ""
+    return "[timed-script] " + json.dumps(normalized, separators=(",", ":"), ensure_ascii=False)
+
+
+def strip_timed_script_directive(notes: str) -> str:
+    cleaned = _TIMED_SCRIPT_RE.sub("", str(notes or ""))
+    cleaned = re.sub(r"\n{3,}", "\n\n", cleaned).strip()
+    return cleaned
+
+
+def exact_voiceover_text(timeline: dict[str, Any] | None) -> str:
+    """Join authoritative narration. Suggested-still text is never included."""
+    if not timeline:
+        return ""
+    parts = []
+    for segment in timeline.get("segments") or []:
+        if not isinstance(segment, dict):
+            continue
+        text = str(segment.get("voiceover_text") or "").strip()
+        if text:
+            parts.append(text)
+    return " ".join(parts).strip()
+
+
+def slight_speech_rate(segment: dict[str, Any]) -> float:
+    """Cap a single scene at a small speed-up. Does not rewrite the words."""
+    duration = float(segment.get("duration_seconds") or 0)
+    estimate = estimate_narration_seconds(str(segment.get("voiceover_text") or ""), 1.0)
+    if duration <= 0 or estimate <= duration + BOUNDARY_EPSILON_SECONDS:
+        return 1.0
+    needed = estimate / duration
+    return _round_seconds(min(MAX_SLIGHT_SPEECH_RATE, max(1.0, needed)))
+
+
+def speech_speed_for_timeline(timeline: dict[str, Any] | None) -> float:
+    if not timeline:
+        return 1.0
+    rates = []
+    for segment in timeline.get("segments") or []:
+        if not isinstance(segment, dict):
+            continue
+        try:
+            rates.append(float(segment.get("speech_rate") or 1.0))
+        except (TypeError, ValueError):
+            continue
+    if not rates:
+        return 1.0
+    return min(MAX_SPEECH_RATE, max(MIN_SPEECH_RATE, max(rates)))
+
+
+def suggested_visuals(timeline: dict[str, Any] | None) -> list[str]:
+    if not timeline:
+        return []
+    return [
+        str(segment.get("suggested_visual") or "").strip()
+        for segment in timeline.get("segments") or []
+        if isinstance(segment, dict)
+    ]
+
+
+def assign_stills_in_order(timeline: dict[str, Any], assets: list[dict[str, Any]]) -> dict[str, Any]:
+    """Map scenes 1:1 when the imported scene count equals the Production still count."""
+    normalized = normalize_timeline(timeline)
+    if not normalized:
+        return timeline
+    ordered = sorted(
+        [asset for asset in assets or [] if isinstance(asset, dict)],
+        key=lambda asset: int(asset.get("order") or 0),
+    )
+    segments = normalized["segments"]
+    if ordered and len(ordered) == len(segments):
+        for segment, asset in zip(segments, ordered):
+            if not str(segment.get("asset_id") or "").strip():
+                segment["asset_id"] = str(asset.get("id") or asset.get("media_asset_record_id") or "").strip()
+    return normalized
+
+
+def clip_is_authoritative(clip: dict[str, Any] | None) -> bool:
+    if not isinstance(clip, dict):
+        return False
+    directive = clip.get("renderDirective") if isinstance(clip.get("renderDirective"), dict) else {}
+    tokens = [
+        clip.get("timingMode"),
+        clip.get("timing_mode"),
+        clip.get("timingSource"),
+        clip.get("timing_source"),
+        directive.get("timingMode"),
+        directive.get("timingSource"),
+    ]
+    folded = {str(token or "").strip().lower() for token in tokens}
+    return "authoritative" in folded or "timed_script" in folded
+
+
+def clips_use_authoritative_timing(clips: list[Any] | None) -> bool:
+    rows = [clip for clip in clips or [] if isinstance(clip, dict)]
+    return bool(rows) and any(clip_is_authoritative(clip) for clip in rows)
+
+
+def output_uses_authoritative_timing(output: dict[str, Any] | None) -> bool:
+    from render.fields import field, parse_json_field
+
+    parsed = parse_json_field(field(output or {}, "Render_Clip_List_JSON"))
+    return clips_use_authoritative_timing(parsed if isinstance(parsed, list) else [])

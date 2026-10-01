@@ -31,7 +31,7 @@ def resolve_content_voice_id(item: dict[str, Any] | None) -> str:
     return voice_id_for_name(legacy_name)
 
 
-def synthesize_voiceover_by_id(text: str, *, voice_id: str) -> bytes:
+def synthesize_voiceover_by_id(text: str, *, voice_id: str, speed: float = 1.0) -> bytes:
     settings = load_settings()
     api_key = str(settings.get("elevenlabs_api_key") or "").strip()
     if not api_key:
@@ -39,6 +39,11 @@ def synthesize_voiceover_by_id(text: str, *, voice_id: str) -> bytes:
     voice_id = str(voice_id or "").strip()
     if not voice_id:
         raise RuntimeError("ElevenLabs voice_id is required")
+    try:
+        speech_speed = float(speed or 1.0)
+    except (TypeError, ValueError):
+        speech_speed = 1.0
+    speech_speed = min(1.2, max(0.7, speech_speed))
     response = requests.post(
         f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}",
         headers={
@@ -53,7 +58,7 @@ def synthesize_voiceover_by_id(text: str, *, voice_id: str) -> bytes:
             "voice_settings": {
                 "stability": 0.5,
                 "similarity_boost": 0.75,
-                "speed": 1.0,
+                "speed": speech_speed,
                 "use_speaker_boost": False,
             },
             "apply_text_normalization": "auto",

@@ -252,7 +252,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.449-home-airtable-backoff";
+  const BUILD_ID = "item4-0.6.450-timed-script";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -3759,6 +3759,8 @@
 
   let productionWorkspaceTab = "media";
   let productionRenderFrameOverrides = {};
+  let productionTimedScript = null;
+  let productionTimedScriptDraft = null;
 
   const PRODUCTION_RENDER_DEFAULTS = Object.freeze({
     preset: "auto",
@@ -3844,6 +3846,7 @@
     return String(notes || "")
       .replace(/(?:^|\n)\[render-settings\]\s*[^\n]*(?=\n|$)/ig, "")
       .replace(/(?:^|\n)\[render-overrides\]\s*[^\n]*(?=\n|$)/ig, "")
+      .replace(/(?:^|\n)\[timed-script\]\s*[^\n]*(?=\n|$)/ig, "")
       .replace(/^\s*\n/, "")
       .replace(/\n{3,}/g, "\n\n")
       .trim();
@@ -3895,18 +3898,36 @@
     const frameDirective = Object.keys(overrides).length
       ? "[render-overrides] " + encodeURIComponent(JSON.stringify(overrides))
       : "";
-    return [clean, directive, frameDirective].filter(Boolean).join("\n");
+    const timedDirective = window.StudioTimedScript?.directiveLine?.(productionTimedScript) || "";
+    return [clean, directive, frameDirective, timedDirective].filter(Boolean).join("\n");
+  }
+
+  function timedScriptActive() {
+    return Boolean(productionTimedScript && Array.isArray(productionTimedScript.segments) && productionTimedScript.segments.length);
+  }
+
+  function productionStillAssets(status = item4Workspace) {
+    const fromStatus = Array.isArray(status?.assets) ? status.assets : [];
+    const fromRequest = Array.isArray(activeProductionRequest?.studio_master_assets) ? activeProductionRequest.studio_master_assets : [];
+    const assets = (fromStatus.length ? fromStatus : fromRequest)
+      .filter((asset) => asset && !item4AssetLooksLikeVideo(asset));
+    return assets.slice().sort((a, b) => Number(a.order || 0) - Number(b.order || 0));
   }
 
   function syncProductionRenderUi() {
     const fixed = $("prRenderImageDurationMode")?.value === "fixed";
     if ($("prRenderImageDurationSecondsWrap")) $("prRenderImageDurationSecondsWrap").hidden = !fixed;
     const summary = $("prRenderStyleSummary");
+    const timed = timedScriptActive();
     if (summary) {
       const preset = $("prRenderPreset")?.selectedOptions?.[0]?.textContent || "Auto";
-      summary.textContent = preset.replace(" / current behavior", "");
-      summary.dataset.state = $("prRenderPreset")?.value === "auto" ? "idle" : "ready";
+      summary.textContent = timed ? "Timed script" : preset.replace(" / current behavior", "");
+      summary.dataset.state = timed || $("prRenderPreset")?.value !== "auto" ? "ready" : "idle";
     }
+    ["prRenderImageDurationMode", "prRenderImageDurationSeconds", "prRenderPacing", "prRenderBeatSync"].forEach((id) => {
+      const input = $(id);
+      if (input) input.disabled = timed;
+    });
   }
 
   function hydrateProductionRenderSettings(settings = PRODUCTION_RENDER_DEFAULTS) {
@@ -3940,6 +3961,262 @@
 
   function productionRenderOption(value, label, selected) {
     return `<option value="${escapeHtml(value)}"${value === selected ? " selected" : ""}>${escapeHtml(label)}</option>`;
+  }
+
+  function parseProductionTimedScript(notes) {
+    const match = /(?:^|\n)\[timed-script\]\s*([^\n]*)/i.exec(String(notes || ""));
+    if (!match || !window.StudioTimedScript) return null;
+    const raw = String(match[1] || "").trim();
+    const direct = window.StudioTimedScript.normalizeTimeline(raw);
+    if (direct) return direct;
+    try {
+      return window.StudioTimedScript.normalizeTimeline(decodeURIComponent(raw));
+    } catch {
+      return null;
+    }
+  }
+
+  function commitTimedScript(timeline, { resequence = false } = {}) {
+    const api = window.StudioTimedScript;
+    if (!api) return;
+    const next = resequence ? resequenceTimedScript(timeline) : api.buildTimeline(timeline?.segments || []);
+    productionTimedScript = next.segments.length ? next : null;
+    if (productionTimedScript) {
+      if ($("prScriptMode")) $("prScriptMode").value = "Force exact";
+      if ($("prRequestedScript")) $("prRequestedScript").value = api.exactVoiceoverText(productionTimedScript);
+      if ($("prVideoDuration")) $("prVideoDuration").value = productionTimedScript.duration_seconds;
+      if ($("prVoiceoverTail")) $("prVoiceoverTail").value = 0;
+      if ($("prVoiceover")) $("prVoiceover").value = "Yes";
+      syncProductionNarrationEstimate();
+    }
+    syncProductionRenderUi();
+    renderTimedScriptReview();
+  }
+
+  function resequenceTimedScript(timeline) {
+    const api = window.StudioTimedScript;
+    let cursor = 0;
+    const segments = (timeline?.segments || []).map((segment) => {
+      const duration = Math.max(0, Number(segment.duration_seconds) || 0);
+      const next = {
+        ...segment,
+        start_seconds: cursor,
+        end_seconds: roundTimedSeconds(cursor + duration),
+      };
+      cursor = next.end_seconds;
+      return next;
+    });
+    return api.buildTimeline(segments);
+  }
+
+  function roundTimedSeconds(value) {
+    return Math.round((Number(value) || 0) * 1000) / 1000;
+  }
+
+  function timedScriptAssetLabel(asset, index) {
+    return `#${index + 1} · ${String(asset?.name || asset?.file_name || "Still")}`;
+  }
+
+  function renderTimedScriptReview() {
+    const summary = $("prTimedScriptSummary");
+    const host = $("prTimedScriptReview");
+    const clear = $("prClearTimedScript");
+    if (!summary || !host) return;
+    const api = window.StudioTimedScript;
+    const active = timedScriptActive() && api;
+    if (clear) clear.hidden = !active;
+    if (!active) {
+      summary.hidden = true;
+      summary.innerHTML = "";
+      host.hidden = true;
+      host.innerHTML = "";
+      return;
+    }
+    const segments = productionTimedScript.segments;
+    const issues = api.validateTimeline(segments);
+    const assets = productionStillAssets();
+    const unresolved = segments.filter((segment) => !String(segment.asset_id || "").trim()).length;
+    const fits = segments.filter((segment) => api.narrationFit(segment).status === "ready").length;
+    summary.hidden = false;
+    host.hidden = false;
+    summary.innerHTML = `
+      <div class="timed-script-summary">
+        <strong>${segments.length} scenes · ${Number(productionTimedScript.duration_seconds).toFixed(1)} sec · Force exact narration</strong>
+        <span>${fits} of ${segments.length} narration windows fit${unresolved ? ` · ${unresolved} still${unresolved === 1 ? "" : "s"} unassigned` : ""}</span>
+      </div>
+      <div class="timed-script-bar" aria-hidden="true">
+        ${segments.map((segment, index) => {
+          const fit = api.narrationFit(segment);
+          const width = Math.max(4, Number(segment.duration_seconds) || 0);
+          return `<span class="timed-script-bar-segment ${fit.status === "over" ? "is-over" : "is-ready"}" style="flex:${width}" title="Scene ${index + 1} · ${Number(segment.duration_seconds).toFixed(1)} sec">${index + 1}</span>`;
+        }).join("")}
+      </div>
+      ${issues.length ? `<div class="timed-script-issues">${issues.map((issue) => `<p>${escapeHtml(issue)}</p>`).join("")}</div>` : ""}
+      <p class="ez-option-hint">Scene timing is authoritative. Beat sync, pacing, and automatic image duration will not move these boundaries. Drag a still onto a scene, or choose it from the list.</p>
+      <div class="timed-script-pool" id="prTimedScriptPool">
+        ${assets.map((asset, index) => {
+          const assetId = String(asset.id || asset.media_asset_record_id || "").trim();
+          const preview = item4AssetPreviewUrl(asset);
+          const visual = preview ? `<img src="${escapeHtml(preview)}" alt="">` : "<span>No preview</span>";
+          return `<button type="button" class="timed-script-still" draggable="true" data-timed-asset="${escapeHtml(assetId)}">${visual}<small>${escapeHtml(timedScriptAssetLabel(asset, index))}</small></button>`;
+        }).join("") || '<div class="empty compact-empty">Add photos in Media, then assign them to scenes.</div>'}
+      </div>`;
+    host.innerHTML = segments.map((segment, index) => {
+      const fit = api.narrationFit(segment);
+      const assetId = String(segment.asset_id || "").trim();
+      const assetIndex = assets.findIndex((asset) => String(asset.id || asset.media_asset_record_id || "") === assetId);
+      const asset = assetIndex >= 0 ? assets[assetIndex] : null;
+      const preview = asset ? item4AssetPreviewUrl(asset) : "";
+      const visual = preview ? `<img src="${escapeHtml(preview)}" alt="">` : `<span>${assetId ? "No preview" : "Unassigned"}</span>`;
+      const options = [`<option value="">Unassigned</option>`].concat(assets.map((item, itemIndex) => {
+        const id = String(item.id || item.media_asset_record_id || "").trim();
+        return `<option value="${escapeHtml(id)}"${id === assetId ? " selected" : ""}>${escapeHtml(timedScriptAssetLabel(item, itemIndex))}</option>`;
+      })).join("");
+      return `<details class="timed-script-scene ${assetId ? "" : "is-unresolved"} ${fit.status === "over" ? "is-over" : "is-ready"}">
+        <summary>
+          <span class="timed-script-scene-thumb">${visual}</span>
+          <span><strong>Scene ${index + 1} — ${escapeHtml(api.formatClock(segment.start_seconds))} → ${escapeHtml(api.formatClock(segment.end_seconds))} — ${Number(segment.duration_seconds).toFixed(1)} sec</strong><small>${escapeHtml(fit.message)}</small></span>
+        </summary>
+        <div class="timed-script-scene-body" data-timed-scene="${index}" data-timed-drop="${index}">
+          <label class="form-field"><span>Start</span><input data-timed-field="start" value="${escapeHtml(api.formatClock(segment.start_seconds))}"></label>
+          <label class="form-field"><span>End</span><input data-timed-field="end" value="${escapeHtml(api.formatClock(segment.end_seconds))}"></label>
+          <label class="form-field timed-script-voice"><span>Voiceover</span><textarea data-timed-field="voiceover" rows="3">${escapeHtml(segment.voiceover_text || "")}</textarea></label>
+          <label class="form-field"><span>Still</span><select data-timed-field="asset">${options}</select></label>
+          <p class="timed-script-visual"><span>Suggested visual</span> ${escapeHtml(segment.suggested_visual || "None")}</p>
+          <div class="timed-script-scene-actions">
+            <button type="button" class="secondary-button" data-timed-action="rate" title="Speeds the whole narration track up slightly so this scene can fit. The words stay the same.">Increase speech rate slightly</button>
+            <button type="button" class="secondary-button" data-timed-action="extend">Extend this scene</button>
+            <button type="button" class="secondary-button" data-timed-action="up">Move earlier</button>
+            <button type="button" class="secondary-button" data-timed-action="down">Move later</button>
+            <button type="button" class="secondary-button" data-timed-action="delete">Delete scene</button>
+          </div>
+        </div>
+      </details>`;
+    }).join("") + `<div class="timed-script-scene-actions"><button type="button" class="secondary-button" id="prTimedScriptAdd">Add scene</button><button type="button" class="secondary-button" id="prTimedScriptMatch">Match stills in order</button></div>`;
+    bindTimedScriptReview(host, summary);
+  }
+
+  function bindTimedScriptReview(host, summary) {
+    const api = window.StudioTimedScript;
+    summary.querySelectorAll("[data-timed-asset]").forEach((card) => {
+      card.addEventListener("dragstart", (event) => {
+        event.dataTransfer?.setData("text/plain", card.dataset.timedAsset || "");
+        event.dataTransfer?.setData("application/x-studio-still", card.dataset.timedAsset || "");
+      });
+    });
+    host.querySelectorAll("[data-timed-drop]").forEach((zone) => {
+      zone.addEventListener("dragover", (event) => {
+        event.preventDefault();
+        zone.classList.add("is-drop-target");
+      });
+      zone.addEventListener("dragleave", () => zone.classList.remove("is-drop-target"));
+      zone.addEventListener("drop", (event) => {
+        event.preventDefault();
+        zone.classList.remove("is-drop-target");
+        const assetId = event.dataTransfer?.getData("application/x-studio-still") || event.dataTransfer?.getData("text/plain") || "";
+        const index = Number(zone.dataset.timedDrop);
+        if (!assetId || !productionTimedScript?.segments?.[index]) return;
+        const segments = productionTimedScript.segments.map((segment) => ({ ...segment }));
+        segments[index].asset_id = assetId;
+        commitTimedScript({ segments });
+      });
+    });
+    host.querySelectorAll("[data-timed-field]").forEach((input) => {
+      input.addEventListener("change", () => {
+        const scene = input.closest("[data-timed-scene]");
+        const index = Number(scene?.dataset.timedScene);
+        const segment = productionTimedScript?.segments?.[index];
+        if (!segment) return;
+        const segments = productionTimedScript.segments.map((item) => ({ ...item }));
+        const field = input.dataset.timedField;
+        if (field === "start" || field === "end") {
+          const parsed = api.parseClock(input.value);
+          if (parsed == null) {
+            input.setCustomValidity("Use m:ss, such as 0:07 or 1:10.");
+            input.reportValidity();
+            return;
+          }
+          input.setCustomValidity("");
+          segments[index][field === "start" ? "start_seconds" : "end_seconds"] = parsed;
+        } else if (field === "voiceover") {
+          segments[index].voiceover_text = input.value;
+        } else if (field === "asset") {
+          segments[index].asset_id = input.value;
+        }
+        commitTimedScript({ segments });
+      });
+    });
+    host.querySelectorAll("[data-timed-action]").forEach((button) => {
+      button.addEventListener("click", () => {
+        const scene = button.closest("[data-timed-scene]");
+        const index = Number(scene?.dataset.timedScene);
+        const segments = (productionTimedScript?.segments || []).map((segment) => ({ ...segment }));
+        const action = button.dataset.timedAction;
+        if (!segments[index]) return;
+        if (action === "rate") {
+          segments[index].speech_rate = api.slightSpeechRate(segments[index]);
+          commitTimedScript({ segments });
+        } else if (action === "extend") {
+          const needed = api.estimateNarrationSeconds(segments[index].voiceover_text, segments[index].speech_rate || 1);
+          const delta = Math.max(0, needed - Number(segments[index].duration_seconds || 0));
+          if (delta > 0.05) {
+            segments[index].end_seconds = Number(segments[index].end_seconds) + delta;
+            for (let cursor = index + 1; cursor < segments.length; cursor += 1) {
+              segments[cursor].start_seconds = Number(segments[cursor].start_seconds) + delta;
+              segments[cursor].end_seconds = Number(segments[cursor].end_seconds) + delta;
+            }
+          }
+          commitTimedScript({ segments });
+        } else if (action === "delete") {
+          segments.splice(index, 1);
+          commitTimedScript({ segments }, { resequence: true });
+        } else if (action === "up" && index > 0) {
+          const [moved] = segments.splice(index, 1);
+          segments.splice(index - 1, 0, moved);
+          commitTimedScript({ segments }, { resequence: true });
+        } else if (action === "down" && index < segments.length - 1) {
+          const [moved] = segments.splice(index, 1);
+          segments.splice(index + 1, 0, moved);
+          commitTimedScript({ segments }, { resequence: true });
+        }
+      });
+    });
+    $("prTimedScriptAdd")?.addEventListener("click", () => {
+      const segments = (productionTimedScript?.segments || []).map((segment) => ({ ...segment }));
+      const end = segments.reduce((max, segment) => Math.max(max, Number(segment.end_seconds) || 0), 0);
+      segments.push({
+        start_seconds: end,
+        end_seconds: end + 5,
+        voiceover_text: "",
+        suggested_visual: "",
+        asset_id: "",
+        speech_rate: 1,
+      });
+      commitTimedScript({ segments });
+    });
+    $("prTimedScriptMatch")?.addEventListener("click", () => {
+      const cleared = {
+        ...productionTimedScript,
+        segments: (productionTimedScript?.segments || []).map((segment) => ({ ...segment, asset_id: "" })),
+      };
+      commitTimedScript(api.assignStillsInOrder(cleared, productionStillAssets()));
+    });
+  }
+
+  function openTimedScriptImporter() {
+    productionTimedScriptDraft = null;
+    const message = $("prTimedScriptParseMessage");
+    const apply = $("prTimedScriptApply");
+    if (message) message.textContent = "";
+    if (apply) apply.disabled = true;
+    const backdrop = $("prTimedScriptBackdrop");
+    if (backdrop) backdrop.hidden = false;
+    $("prTimedScriptInput")?.focus();
+  }
+
+  function closeTimedScriptImporter() {
+    const backdrop = $("prTimedScriptBackdrop");
+    if (backdrop) backdrop.hidden = true;
   }
 
   function renderProductionFrameOverrides(status = item4Workspace) {
@@ -4002,6 +4279,15 @@
         if (clear) clear.disabled = !Object.keys(productionRenderFrameOverrides || {}).length;
       });
     });
+    syncTimedScriptWithAssets();
+  }
+
+  let timedScriptAssetSignature = "";
+  function syncTimedScriptWithAssets() {
+    const signature = productionStillAssets().map((asset) => String(asset.id || asset.media_asset_record_id || "")).join("|");
+    if (signature === timedScriptAssetSignature) return;
+    timedScriptAssetSignature = signature;
+    renderTimedScriptReview();
   }
 
   function showProductionRequestWorkspace() {
@@ -10817,6 +11103,8 @@
     syncProductionNarrationEstimate();
     const renderSettings = parseProductionRenderSettings(record.production_notes || "");
     productionRenderFrameOverrides = parseProductionRenderOverrides(record.production_notes || "");
+    productionTimedScript = parseProductionTimedScript(record.production_notes || "");
+    timedScriptAssetSignature = "";
     hydrateProductionRenderSettings(renderSettings);
     renderProductionFrameOverrides({ assets: record.studio_master_assets || item4Workspace?.assets || [] });
     $("prProductionNotes").value = stripProductionRenderSettings(record.production_notes || "");
@@ -11547,6 +11835,41 @@
       }
     });
   });
+  $("prImportTimedScript")?.addEventListener("click", openTimedScriptImporter);
+  $("prClearTimedScript")?.addEventListener("click", () => {
+    productionTimedScript = null;
+    syncProductionRenderUi();
+    renderTimedScriptReview();
+  });
+  $("prTimedScriptClose")?.addEventListener("click", closeTimedScriptImporter);
+  $("prTimedScriptBackdrop")?.addEventListener("click", (event) => {
+    if (event.target === $("prTimedScriptBackdrop")) closeTimedScriptImporter();
+  });
+  $("prTimedScriptParse")?.addEventListener("click", () => {
+    const api = window.StudioTimedScript;
+    const message = $("prTimedScriptParseMessage");
+    const apply = $("prTimedScriptApply");
+    if (!api) {
+      if (message) message.textContent = "Timed script parser is not loaded.";
+      return;
+    }
+    const parsed = api.parseTimedScriptMarkdown($("prTimedScriptInput")?.value || "");
+    productionTimedScriptDraft = parsed.timeline;
+    const lines = [...(parsed.errors || []), ...(parsed.issues || [])];
+    if (message) {
+      message.textContent = lines.length
+        ? lines.join(" ")
+        : `Parsed ${parsed.timeline.segments.length} scenes totaling ${Number(parsed.timeline.duration_seconds).toFixed(1)} seconds.`;
+    }
+    if (apply) apply.disabled = !parsed.timeline?.segments?.length;
+  });
+  $("prTimedScriptApply")?.addEventListener("click", () => {
+    if (!productionTimedScriptDraft?.segments?.length || !window.StudioTimedScript) return;
+    const assigned = window.StudioTimedScript.assignStillsInOrder(productionTimedScriptDraft, productionStillAssets());
+    closeTimedScriptImporter();
+    setProductionWorkspaceTab("rendering");
+    commitTimedScript(assigned);
+  });
   $("prRenderPreset")?.addEventListener("change", (event) => applyProductionRenderPreset(event.target.value));
   $("prRenderImageDurationMode")?.addEventListener("change", syncProductionRenderUi);
   [
@@ -11788,8 +12111,10 @@
       requested_title: $("prRequestedTitle").value.trim(),
       caption_mode: $("prCaptionMode").value,
       requested_caption: $("prRequestedCaption").value.trim(),
-      script_mode: $("prScriptMode").value,
-      requested_script: $("prRequestedScript").value.trim(),
+      script_mode: timedScriptActive() ? "Force exact" : $("prScriptMode").value,
+      requested_script: timedScriptActive()
+        ? (window.StudioTimedScript?.exactVoiceoverText?.(productionTimedScript) || "")
+        : $("prRequestedScript").value.trim(),
       primary_location: currentPrimaryLocationValue(),
       production_notes: mergeProductionRenderSettings($("prProductionNotes").value.trim()),
       slide_captions: collectEzSlideCaptionRecords(),
@@ -11827,6 +12152,18 @@
         requested_caption: " ",
       });
       payload.production_notes = mergeProductionRenderSettings($("prProductionNotes").value.trim());
+    }
+    if (timedScriptActive()) {
+      payload.voiceover_mode = "Yes";
+      payload.video_duration_seconds = productionTimedScript.duration_seconds;
+      payload.voiceover_tail_seconds = 0;
+      payload.script_mode = "Force exact";
+      payload.requested_script = window.StudioTimedScript?.exactVoiceoverText?.(productionTimedScript) || payload.requested_script;
+      if ($("prScriptMode")) $("prScriptMode").value = "Force exact";
+      if ($("prRequestedScript")) $("prRequestedScript").value = payload.requested_script;
+      if ($("prVideoDuration")) $("prVideoDuration").value = payload.video_duration_seconds;
+      if ($("prVoiceoverTail")) $("prVoiceoverTail").value = 0;
+      if ($("prVoiceover")) $("prVoiceover").value = "Yes";
     }
     return coerceForceExactTextModes(payload);
   }

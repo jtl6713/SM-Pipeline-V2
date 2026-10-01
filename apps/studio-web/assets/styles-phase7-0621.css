@@ -3366,3 +3366,34 @@ body.platform-calendar-open { overflow: hidden; }
     grid-column:1 / -1;
   }
 }
+
+.production-timed-script{margin:14px 0 8px;padding-top:8px;border-top:1px solid rgba(1,37,89,.12)}
+.production-timed-script h4{margin:0 0 4px}
+.production-timed-script-actions{display:flex;gap:8px;flex-wrap:wrap}
+.timed-script-summary{display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:8px}
+.timed-script-bar{display:flex;gap:3px;height:28px;margin:8px 0}
+.timed-script-bar-segment{display:flex;align-items:center;justify-content:center;min-width:18px;border-radius:6px;color:#fff;font-size:12px;background:#012559}
+.timed-script-bar-segment.is-over{background:#8a2b2b}
+.timed-script-issues{margin:8px 0;padding:8px 10px;border-radius:8px;background:#fff4f4;color:#8a2b2b}
+.timed-script-issues p{margin:0 0 4px}
+.timed-script-pool{display:flex;gap:8px;overflow:auto;padding-bottom:6px}
+.timed-script-still{display:flex;flex-direction:column;gap:4px;width:84px;padding:4px;border:1px solid rgba(1,37,89,.16);border-radius:10px;background:#fff;cursor:grab}
+.timed-script-still img,.timed-script-scene-thumb img{width:100%;height:72px;object-fit:cover;border-radius:8px;background:#012559}
+.timed-script-still small{font-size:11px;line-height:1.2}
+.timed-script-scene{border:1px solid rgba(1,37,89,.14);border-radius:12px;margin:8px 0;background:#fff}
+.timed-script-scene.is-unresolved{border-color:#8a2b2b;background:#fff8f8}
+.timed-script-scene summary{display:flex;gap:10px;align-items:center;padding:8px 10px;cursor:pointer}
+.timed-script-scene summary small{display:block;color:#345}
+.timed-script-scene.is-over summary small{color:#8a2b2b}
+.timed-script-scene-thumb{width:54px;height:54px;flex:0 0 54px;border-radius:8px;overflow:hidden;background:#e8eef6;display:flex;align-items:center;justify-content:center;font-size:11px;text-align:center}
+.timed-script-scene-thumb img{height:54px}
+.timed-script-scene-body{display:grid;grid-template-columns:120px 120px minmax(0,1fr);gap:10px;padding:0 10px 10px}
+.timed-script-voice{grid-column:1 / -1}
+.timed-script-scene-body.is-drop-target{outline:2px dashed #012559}
+.timed-script-visual{grid-column:1 / -1;margin:0;color:#345}
+.timed-script-scene-actions{display:flex;flex-wrap:wrap;gap:8px;grid-column:1 / -1}
+.timed-script-dialog{width:min(860px,100%)}
+.timed-script-dialog textarea{width:100%;margin:12px 0}
+@media(max-width:760px){
+  .timed-script-scene-body{grid-template-columns:1fr 1fr}
+}
