@@ -20,6 +20,7 @@ import {
   classifyPublishDispatch,
   classifyPublishFailed,
   classifyIgCarouselTooManyChildren,
+  classifyIgCarouselChildVerificationRace,
   classifyTikTokAuthSignature,
   classifyNativeCover,
   classifyRfrLockedMissingDeliverable,
@@ -465,6 +466,39 @@ test("promoted advancement is origin-aware and does not treat Ready for Review a
     ig_carousel_child_count: 12,
   }, now), null);
   assert.ok(CLASSIFIER_KINDS.includes("ig_carousel_too_many_children"));
+  const ig1298 = classifyIgCarouselChildVerificationRace({
+    id: "recvDSuJr2B4cuzfV",
+    output_id: 1298,
+    output_title: "Rainy Day Museum Mile",
+    platform: "Instagram",
+    studio_output_type: "Carousel",
+    platform_output_type: "Instagram Carousel",
+    output_status: "Approved for Publishing",
+    publish_status: "Ready to Schedule",
+    ig_carousel_status: "Assets Ready",
+    ig_carousel_error_stage: "AP1C Child Creation",
+    ig_carousel_error: "AP1C child-ID verification mismatch. Created/retained: 9; expected: 10.",
+    ig_carousel_child_count: 10,
+    image_count: 10,
+  });
+  assert.equal(ig1298.kind, "ig_carousel_child_verification_race");
+  assert.equal(ig1298.class, "transient");
+  assert.equal(ig1298.actor, "worker_heal");
+  assert.equal(ig1298.observed_child_count, 9);
+  assert.equal(ig1298.expected_child_count, 10);
+  assert.match(ig1298.diagnosis, /preserve them/i);
+  assert.ok(CLASSIFIER_KINDS.includes("ig_carousel_child_verification_race"));
+  assert.equal(classifyPublishFailed({
+    id: "recvDSuJr2B4cuzfV",
+    platform: "Instagram",
+    studio_output_type: "Carousel",
+    platform_output_type: "Instagram Carousel",
+    output_status: "Failed",
+    publish_status: "Failed",
+    publish_error: "AP1C child-ID verification mismatch. Created/retained: 9; expected: 10.",
+    ig_carousel_error_stage: "AP1C Child Creation",
+    ig_carousel_error: "AP1C child-ID verification mismatch. Created/retained: 9; expected: 10.",
+  }, now), null);
   const staleFailed = classifyPublishFailed({
     id: "recStaleFail",
     output_status: "Approved for Publishing",

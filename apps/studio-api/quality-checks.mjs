@@ -17,6 +17,7 @@ export const QUALITY_HEALS = Object.freeze([
   "wait_pacific_midnight",
   "align_signature_then_rearm",
   "clamp_children_then_requeue",
+  "verify_children_then_advance",
   "ticket_only",
   "none",
 ]);
@@ -158,6 +159,14 @@ export const QUALITY_CHECKS = Object.freeze([
     kind: "ig_carousel_too_many_children",
     actor: "worker_heal",
     heal: "clamp_children_then_requeue",
+  }),
+  check({
+    id: "ig_carousel_child_verification_race",
+    title: "Check for AP1C child-ID verification mismatches after Instagram child creation",
+    lane: "service",
+    kind: "ig_carousel_child_verification_race",
+    actor: "worker_heal",
+    heal: "verify_children_then_advance",
   }),
   check({
     id: "render_failed",
