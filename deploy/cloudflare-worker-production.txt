@@ -344,3 +344,8 @@ Deploy Studio API Worker production
 Reason: Poll already-listening Ideas for newly uploaded photos every five minutes
 Worker: 0.10.430-idea-photo-five-minute-poll
 Requested: 2026-09-30
+
+Deploy Studio API Worker production
+Reason: Ship AP1C child-verification race Quality Agent detection and auto-heal from PR #470
+Source merge: 38a6398decf19e1ba8fcc453385e578138ceb287
+Requested: 2026-09-30T23:25:00-05:00
