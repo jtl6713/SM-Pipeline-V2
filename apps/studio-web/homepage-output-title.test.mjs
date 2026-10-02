@@ -170,7 +170,7 @@ test("Home metric cards use count tones and Airtable-safe polling", () => {
   const build = app.match(/BUILD_ID = "item4-([^"]+)"/)?.[1];
   assert.ok(build);
   assert.match(html, new RegExp(`app-item4-0625\\.js\\?v=${build.replace(/[.*+?^${}()|[\\]\\^]/g, "\\$&")}`));
-  assert.match(html, /styles-phase7-0621\.css\?v=0\.6\.450-timed-script/);
+  assert.match(html, /styles-phase7-0621\.css\?v=0\.6\.453-timed-script-mobile/);
 });
 
 test("Home refresh clears inflight instead of wrapping the fetch promise", async () => {
