@@ -355,6 +355,58 @@ def strip_timed_script_directive(notes: str) -> str:
     return cleaned
 
 
+def notes_with_timed_script(notes: str, timeline: dict[str, Any] | None) -> str:
+    """Replace or append the ``[timed-script]`` directive while keeping other notes."""
+    line = directive_line(timeline)
+    cleaned = strip_timed_script_directive(notes)
+    if not line:
+        return cleaned
+    if cleaned:
+        return f"{cleaned}\n{line}".strip()
+    return line
+
+
+def apply_measured_durations(
+    timeline: dict[str, Any] | None,
+    measured_seconds: list[float],
+) -> dict[str, Any] | None:
+    """Rebuild authoritative scene windows from measured per-scene voiceover lengths.
+
+    Imported clock ranges are planning hints only. Once ElevenLabs has spoken each
+    scene, still ``durationFrames`` must follow the real audio — not 150 WPM estimates.
+    """
+    normalized = normalize_timeline(timeline)
+    if not normalized:
+        return None
+    segments = [segment for segment in normalized.get("segments") or [] if isinstance(segment, dict)]
+    if not segments or len(measured_seconds) != len(segments):
+        raise ValueError(
+            f"measured duration count {len(measured_seconds)} does not match "
+            f"timed-script scene count {len(segments)}"
+        )
+    rebuilt: list[dict[str, Any]] = []
+    cursor = 0.0
+    for segment, raw_seconds in zip(segments, measured_seconds):
+        try:
+            seconds = float(raw_seconds)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"invalid measured duration {raw_seconds!r}") from exc
+        seconds = max(MIN_SCENE_SECONDS, seconds)
+        start = cursor
+        end = cursor + seconds
+        rebuilt.append({
+            **segment,
+            "start_seconds": start,
+            "end_seconds": end,
+            "duration_seconds": seconds,
+            "speech_rate": 1.0,
+            "force_exact_voiceover": True,
+            "measured_voiceover_seconds": _round_seconds(seconds),
+        })
+        cursor = end
+    return build_timeline(rebuilt)
+
+
 def exact_voiceover_text(timeline: dict[str, Any] | None) -> str:
     """Join authoritative narration. Suggested-still text is never included."""
     if not timeline:

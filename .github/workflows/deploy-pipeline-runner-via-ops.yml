@@ -82,3 +82,6 @@ jobs:
 # Trigger pipeline-runner deploy for AP2C ordered first-10 child selection + pending-only timeout (Output 1298)
 # Source merge bf9bfc25d9f03e67f9d3b5480b9b6887e2b13fe2
 # 2026-09-30
+
+# Trigger pipeline-runner deploy for timed-script per-scene measured VO (NYC CI 290 scene3 ~13s vs 20s)
+# 2026-10-02T19:00:00Z service_version=2026-10-02-timed-script-measured-vo

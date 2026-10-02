@@ -302,6 +302,52 @@ def test_slight_speech_rate_does_not_change_words():
     assert text == segment["voiceover_text"]
 
 
+def test_apply_measured_durations_rebuilds_scene_windows_from_real_tts():
+    """NYC bug: scripted scene 3 at 20s while concat VO put that line at ~13s.
+
+    Live CI 290: 20 * (62.508 / 93) ≈ 13.44. Fixture plan is 90s; same ratio proof.
+    """
+    from studio_produce.timed_script import apply_measured_durations, notes_with_timed_script
+
+    timeline = parse_timed_script_markdown(NYC_SUBWAY_SCRIPT)["timeline"]
+    assert timeline["segments"][2]["start_seconds"] == 20
+    plan_total = float(timeline["duration_seconds"])
+    assert plan_total == 90
+    measured_total = 62.508
+    measured = [duration * measured_total / plan_total for duration in EXPECTED_DURATIONS]
+    # Keep last scene as residual so rounding cannot drift the total.
+    measured = [round(seconds, 3) for seconds in measured[:-1]]
+    measured.append(round(measured_total - sum(measured), 3))
+    assert abs(sum(measured) - measured_total) < 1e-6
+    rebuilt = apply_measured_durations(timeline, measured)
+    assert rebuilt is not None
+    expected_scene3 = 20.0 * measured_total / plan_total
+    assert abs(rebuilt["segments"][2]["start_seconds"] - expected_scene3) < 0.05
+    assert abs(rebuilt["duration_seconds"] - measured_total) < 0.05
+    notes = notes_with_timed_script(
+        "[render-settings] beat_sync=off\nez-photo-wait=off",
+        rebuilt,
+    )
+    request = _photo_request(notes, count=8)
+    package = source_package(request, {"id": "recPO", "fields": {"Platform": "Instagram", "Studio_Output_Type": "Reel", "Aspect_Ratio": "9:16", "Platform_Output_Type": "Reel"}}, None)
+    clips = json.loads(package["render_clip_list_json"])
+    assert clips[2]["sceneStartSeconds"] == rebuilt["segments"][2]["start_seconds"]
+    assert abs(clips[2]["startFrame"] / 30 - expected_scene3) < 0.08
+    assert clips[2]["voiceoverText"].startswith("Before you go down the stairs")
+
+def test_notes_with_timed_script_preserves_trailer_tokens_on_new_lines():
+    from studio_produce.timed_script import notes_with_timed_script
+
+    timeline = parse_timed_script_markdown(NYC_SUBWAY_SCRIPT)["timeline"]
+    notes = notes_with_timed_script(
+        "[render-settings] beat_sync=off\n[timed-script] {\"mode\":\"timed_script\",\"segments\":[]}\nez-photo-wait=off",
+        timeline,
+    )
+    assert "ez-photo-wait=off" in notes
+    assert notes.count("[timed-script]") == 1
+    assert '"duration_seconds":90' in notes or '"duration_seconds":90.0' in notes
+
+
 def _photo_request(notes: str, count: int = 8):
     masters = []
     manifest = []
