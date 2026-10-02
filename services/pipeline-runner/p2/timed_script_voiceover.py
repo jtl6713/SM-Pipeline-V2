@@ -5,11 +5,25 @@ from __future__ import annotations
 from typing import Any, Callable
 
 from audio.concat_mp3 import concat_mp3_bytes
-from audio.voiceover_duration import probe_audio_duration_bytes
-from studio_produce.timed_script import apply_measured_durations
+from audio.fit_duration import fit_mp3_to_duration_bytes
+from studio_produce.timed_script import (
+    MAX_SPEECH_RATE,
+    MIN_SPEECH_RATE,
+    normalize_timeline,
+)
 
 
 SynthesizeFn = Callable[..., bytes]
+
+
+def _scene_speech_rate(segment: dict[str, Any]) -> float:
+    try:
+        rate = float(segment.get("speech_rate") or 1.0)
+    except (TypeError, ValueError):
+        rate = 1.0
+    if rate <= 0:
+        rate = 1.0
+    return min(MAX_SPEECH_RATE, max(MIN_SPEECH_RATE, rate))
 
 
 def synthesize_timed_script_voiceover(
@@ -18,31 +32,36 @@ def synthesize_timed_script_voiceover(
     voice_id: str,
     synthesize: SynthesizeFn,
 ) -> tuple[bytes, dict[str, Any], list[float]]:
-    """Generate one ElevenLabs file per scene, measure each, concat for Remotion.
+    """Generate one ElevenLabs file per scene, fit each to the imported window, concat.
 
-    Speaks each scene at rate 1.0 so still durations can follow the measured MP3
-    lengths instead of imported clock estimates / 150 WPM guesses.
+    The imported timeline is the clock for both stills and narration. Scene N audio
+    must occupy exactly ``duration_seconds`` so \"Before you go down the stairs\"
+    starts at the same second as scene 3 on the import (NYC: 20s, not ~13s).
     """
-    segments = [segment for segment in timeline.get("segments") or [] if isinstance(segment, dict)]
+    normalized = normalize_timeline(timeline)
+    if not normalized:
+        raise RuntimeError("timed-script timeline is invalid")
+    segments = [segment for segment in normalized.get("segments") or [] if isinstance(segment, dict)]
     if not segments:
         raise RuntimeError("timed-script timeline has no scenes")
 
     parts: list[bytes] = []
-    measured: list[float] = []
+    window_seconds: list[float] = []
     for index, segment in enumerate(segments, start=1):
         text = str(segment.get("voiceover_text") or "").strip()
         if not text:
             raise RuntimeError(f"timed-script scene {index} has empty voiceover text")
-        raw = synthesize(text, voice_id=voice_id, speed=1.0)
+        try:
+            target = float(segment.get("duration_seconds") or 0)
+        except (TypeError, ValueError):
+            target = 0.0
+        if target < 1.0:
+            raise RuntimeError(f"timed-script scene {index} has invalid duration {target}")
+        raw = synthesize(text, voice_id=voice_id, speed=_scene_speech_rate(segment))
         if not raw:
             raise RuntimeError(f"timed-script scene {index} returned empty audio")
-        seconds = probe_audio_duration_bytes(raw)
-        if seconds <= 0:
-            raise RuntimeError(f"timed-script scene {index} measured duration was {seconds}")
-        parts.append(raw)
-        measured.append(float(seconds))
+        fitted = fit_mp3_to_duration_bytes(raw, target)
+        parts.append(fitted)
+        window_seconds.append(target)
 
-    measured_timeline = apply_measured_durations(timeline, measured)
-    if not measured_timeline:
-        raise RuntimeError("failed to rebuild timed-script windows from measured durations")
-    return concat_mp3_bytes(parts), measured_timeline, measured
+    return concat_mp3_bytes(parts), normalized, window_seconds

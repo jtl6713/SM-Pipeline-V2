@@ -99,7 +99,7 @@ def _extend_video_duration_for_voiceover(
     return required
 
 
-def _persist_measured_timed_script(
+def _persist_timed_script_import_durations(
     client: AirtableClient,
     *,
     item: dict[str, Any],
@@ -107,20 +107,22 @@ def _persist_measured_timed_script(
     timeline: dict[str, Any],
     measured_seconds: float,
 ) -> None:
-    """Write measured scene windows back so stamp/R4 use real TTS lengths."""
-    from studio_produce.timed_script import notes_with_timed_script
-
-    total = round(float(timeline.get("duration_seconds") or measured_seconds), 3)
+    """Keep import scene windows; stamp video/VO targets to that same total clock."""
+    total = round(float(timeline.get("duration_seconds") or 0), 3)
+    if total <= 0:
+        total = round(float(measured_seconds), 3)
     spoken = round(float(measured_seconds), 3)
     if request:
-        notes = field_str(request, "Production_Notes")
-        patch: dict[str, Any] = {
-            "Production_Notes": notes_with_timed_script(notes, timeline),
-            "Video_Duration_Seconds": total,
-            "Voiceover_Duration_Seconds": spoken,
-            "Voiceover_Tail_Seconds": 0,
-        }
-        client.update_record(PRODUCTION_REQUESTS_TABLE, request["id"], patch, typecast=True)
+        client.update_record(
+            PRODUCTION_REQUESTS_TABLE,
+            request["id"],
+            {
+                "Video_Duration_Seconds": total,
+                "Voiceover_Duration_Seconds": spoken,
+                "Voiceover_Tail_Seconds": 0,
+            },
+            typecast=True,
+        )
     client.update_record(
         CONTENT_ITEMS_TABLE,
         item["id"],
@@ -347,14 +349,13 @@ def process_request(
     )
 
     timeline = timed_script_from_request(request)
-    measured_timeline = None
-    segment_seconds: list[float] = []
+    import_timeline = None
+    scene_windows: list[float] = []
     voice_id = resolve_content_voice_id(item)
     if timeline and timeline.get("segments"):
-        # Per-scene TTS + measured durations. A single concat at an estimated
-        # speech_rate leaves scene N audio landing early/late vs still windows
-        # (NYC CI 290: scene 3 at ~13s audio vs 20s script window).
-        raw_mp3, measured_timeline, segment_seconds = synthesize_timed_script_voiceover(
+        # Per-scene TTS fitted to the imported windows. A single concat left
+        # scene 3 audio at ~13s while the still/import clock said 20s (NYC CI 290).
+        raw_mp3, import_timeline, scene_windows = synthesize_timed_script_voiceover(
             timeline,
             voice_id=voice_id,
             synthesize=synthesize_voiceover_by_id,
@@ -371,26 +372,24 @@ def process_request(
         normalizer_base_url=normalizer_url,
     )
     measured_seconds = probe_audio_duration_bytes(normalized_mp3)
-    if measured_timeline and segment_seconds:
-        # Loudness normalization can nudge total length by a few ms. Scale the
-        # measured scene windows so still boundaries still sum to the final file.
-        raw_sum = sum(segment_seconds) or measured_seconds
-        scale = measured_seconds / raw_sum if raw_sum > 0 else 1.0
-        scaled = [max(1.0, seconds * scale) for seconds in segment_seconds]
-        drift = measured_seconds - sum(scaled)
-        scaled[-1] = max(1.0, scaled[-1] + drift)
-        from studio_produce.timed_script import apply_measured_durations
+    if import_timeline and scene_windows:
+        from audio.fit_duration import fit_mp3_to_duration_bytes
 
-        measured_timeline = apply_measured_durations(timeline, scaled) or measured_timeline
-        _persist_measured_timed_script(
+        # Loudnorm can nudge total length. Re-lock the full file to the import
+        # total so still boundaries and VO stay on the same clock.
+        import_total = float(import_timeline.get("duration_seconds") or sum(scene_windows))
+        if import_total > 0 and abs(measured_seconds - import_total) > 0.05:
+            normalized_mp3 = fit_mp3_to_duration_bytes(normalized_mp3, import_total)
+            measured_seconds = probe_audio_duration_bytes(normalized_mp3)
+        _persist_timed_script_import_durations(
             client,
             item=item,
             request=request,
-            timeline=measured_timeline,
+            timeline=import_timeline,
             measured_seconds=measured_seconds,
         )
-        scene_detail = ",".join(f"{seconds:.2f}" for seconds in scaled)
-        norm_details_extra = f" | Timed-script scenes [{scene_detail}]s"
+        scene_detail = ",".join(f"{seconds:.2f}" for seconds in scene_windows)
+        norm_details_extra = f" | Timed-script import windows [{scene_detail}]s"
     else:
         norm_details_extra = ""
         if not timeline:
