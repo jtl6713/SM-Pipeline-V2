@@ -3063,6 +3063,7 @@ body:has(#page-content.active) .studio-footer-links button:hover{
 .pipeline-schedule-chip[data-platform="youtube"] { background: rgba(239, 68, 68, .10); }
 .pipeline-schedule-total { color: var(--muted, #667085); font-weight: 800; font-size: 10px; }
 .pipeline-schedule-collapsed #pipelineScheduleGridBody { display: block; }
+.pipeline-schedule-collapsed .pipeline-schedule-window-toolbar,
 .pipeline-schedule-collapsed .pipeline-schedule-grid-scroll,
 .pipeline-schedule-collapsed #pipelineScheduleGridMessage { display: none; }
 .pipeline-schedule-collapsed .pipeline-schedule-unscheduled { margin-bottom: 0; }
@@ -3072,6 +3073,19 @@ body:has(#page-content.active) .studio-footer-links button:hover{
   .pipeline-schedule-grid-table { min-width: 840px; }
 }
 
+
+
+.pipeline-schedule-window-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; padding: 10px 12px; border: 1px solid var(--border, #e5e7eb); border-radius: 12px; background: rgba(8, 113, 90, .045); }
+.pipeline-schedule-window-controls { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.pipeline-schedule-window-controls .secondary-button,
+.pipeline-schedule-window-controls .text-button { min-height: 34px; }
+.pipeline-schedule-window-controls .text-button[disabled] { opacity: .52; cursor: default; }
+.pipeline-schedule-window-range { color: var(--teal-dark, #075e4b); white-space: nowrap; }
+.pipeline-schedule-window-hint { flex: 1 1 100%; color: var(--muted, #667085); font-size: 11px; line-height: 1.35; }
+@media (max-width: 720px) {
+  .pipeline-schedule-window-toolbar { align-items: flex-start; }
+  .pipeline-schedule-window-range { flex-basis: 100%; }
+}
 
 /* Drag-and-drop scheduler enhancements */
 .pipeline-schedule-grid-wrap { overflow: visible; border: 0; border-radius: 0; background: transparent; }

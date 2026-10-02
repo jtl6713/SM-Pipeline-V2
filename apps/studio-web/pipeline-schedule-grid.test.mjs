@@ -17,6 +17,15 @@ test("seven-day window starts at local midnight and has seven columns", () => {
   assert.equal(grid.dayKey(window.days[6]), "2026-09-27");
 });
 
+test("seven-day window can be anchored beyond the initial week", () => {
+  const future = grid.sevenDayWindow(new Date(2026, 8, 28, 0, 0, 0, 0));
+  assert.equal(grid.dayKey(future.days[0]), "2026-09-28");
+  assert.equal(grid.dayKey(future.days[6]), "2026-10-04");
+  const later = grid.sevenDayWindow(new Date(2026, 9, 5, 0, 0, 0, 0));
+  assert.equal(grid.dayKey(later.days[0]), "2026-10-05");
+  assert.equal(grid.dayKey(later.days[6]), "2026-10-11");
+});
+
 test("aggregate counts scheduled outputs by local 30-minute slot and platform", () => {
   const now = new Date(2026, 8, 21, 10, 0, 0, 0);
   const window = grid.sevenDayWindow(now);
@@ -150,4 +159,23 @@ test("platform colors are visually distinct and the ready tray stays visible whi
   assert.match(css, /pipeline-schedule-legend input\[type="checkbox"\][^\n]*appearance: auto !important/);
   assert.match(css, /pipeline-schedule-collapsed \.pipeline-schedule-grid-scroll,[\s\S]{0,120}display: none/);
   assert.doesNotMatch(css, /pipeline-schedule-collapsed #pipelineScheduleGridBody \{ display: none; \}/);
+});
+
+test("global Pipeline calendar navigates across rolling seven-day windows", () => {
+  const here = path.dirname(fileURLToPath(import.meta.url));
+  const app = fs.readFileSync(path.join(here, "assets", "app-item4-0625.js"), "utf8");
+  const html = fs.readFileSync(path.join(here, "index.html"), "utf8");
+  const css = fs.readFileSync(path.join(here, "assets", "styles-phase7-0621.css"), "utf8");
+  assert.match(app, /let pipelineScheduleGridAnchorDate = null/);
+  assert.match(app, /function shiftPipelineScheduleGridWindow\(days\)/);
+  assert.match(app, /function resetPipelineScheduleGridWindow\(\)/);
+  assert.match(app, /data-pipeline-schedule-window-shift="-7"/);
+  assert.match(app, /data-pipeline-schedule-window-shift="7"/);
+  assert.match(app, /data-pipeline-schedule-window-today/);
+  assert.match(app, /pipelineScheduleGridAnchorDate instanceof Date/);
+  assert.match(app, /loadPipelineScheduleGridWindow/);
+  assert.match(app, /scheduleGeneration === pipelineScheduleGridLoadGeneration/);
+  assert.match(html, /Use Previous 7 days, Today, or Next 7 days to move across the schedule/);
+  assert.match(css, /\.pipeline-schedule-window-toolbar/);
+  assert.match(css, /pipeline-schedule-collapsed \.pipeline-schedule-window-toolbar/);
 });
