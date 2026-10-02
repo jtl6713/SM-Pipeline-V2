@@ -1,18 +1,110 @@
 {
   "services": [
-    { "id": "frame-extractor", "name": "Frame Extractor", "port": 3334, "publicUrl": "https://frames.chicagoshining.com", "deployable": true },
-    { "id": "remotion-renderer", "name": "Remotion Renderer", "port": 3333, "publicUrl": "https://render.chicagoshining.com", "deployable": true },
-    { "id": "watermark", "name": "Watermark", "port": 3011, "publicUrl": "https://watermark.chicagoshining.com", "deployable": true },
-    { "id": "voiceover-normalizer", "name": "Voiceover Normalizer", "port": 3012, "publicUrl": "https://voiceover.chicagoshining.com", "deployable": true },
-    { "id": "youtube-uploader", "name": "YouTube Uploader Chicago", "port": 3340, "publicUrl": "https://youtube-upload.chicagoshining.com", "deployable": true },
-    { "id": "youtube-uploader-la", "name": "YouTube Uploader LA", "port": 3341, "publicUrl": "https://youtube-upload-la.chicagoshining.com", "deployable": true },
-    { "id": "youtube-uploader-nyc", "name": "YouTube Uploader NYC", "port": 3342, "publicUrl": "https://youtube-upload-nyc.chicagoshining.com", "deployable": true },
-    { "id": "youtube-uploader-miami", "name": "YouTube Uploader Miami", "port": 3343, "publicUrl": "https://youtube-upload-miami.chicagoshining.com", "deployable": true },
-    { "id": "pipeline-runner", "name": "Pipeline Runner", "port": 3350, "publicUrl": "https://pipeline.chicagoshining.com", "deployable": true },
-    { "id": "video-compressor", "name": "Video Compressor", "port": 3335, "publicUrl": "https://compress.chicagoshining.com", "deployable": false },
-    { "id": "timing-engine", "name": "Timing Engine", "port": 3336, "publicUrl": "https://timing.chicagoshining.com", "deployable": true },
-    { "id": "task-organizer", "name": "Task Organizer", "port": 3360, "publicUrl": null, "deployable": false },
-    { "id": "ops-dashboard", "name": "Ops Dashboard", "port": 3361, "publicUrl": "https://ops.chicagoshining.com", "deployable": true }
+    {
+      "id": "frame-extractor",
+      "name": "Frame Extractor",
+      "port": 3334,
+      "publicUrl": "https://frames.chicagoshining.com",
+      "deployable": true,
+      "runtimePath": "Services\\Frame_Extractor"
+    },
+    {
+      "id": "remotion-renderer",
+      "name": "Remotion Renderer",
+      "port": 3333,
+      "publicUrl": "https://render.chicagoshining.com",
+      "deployable": true,
+      "runtimePath": "Services\\Remotion_Renderer"
+    },
+    {
+      "id": "watermark",
+      "name": "Watermark",
+      "port": 3011,
+      "publicUrl": "https://watermark.chicagoshining.com",
+      "deployable": true,
+      "runtimePath": "Services\\Watermark"
+    },
+    {
+      "id": "voiceover-normalizer",
+      "name": "Voiceover Normalizer",
+      "port": 3012,
+      "publicUrl": "https://voiceover.chicagoshining.com",
+      "deployable": true,
+      "runtimePath": "Services\\voiceover-normalizer\\service"
+    },
+    {
+      "id": "youtube-uploader",
+      "name": "YouTube Uploader Chicago",
+      "port": 3340,
+      "publicUrl": "https://youtube-upload.chicagoshining.com",
+      "deployable": true,
+      "runtimePath": "Services\\youtube-uploader\\service"
+    },
+    {
+      "id": "youtube-uploader-la",
+      "name": "YouTube Uploader LA",
+      "port": 3341,
+      "publicUrl": "https://youtube-upload-la.chicagoshining.com",
+      "deployable": true,
+      "runtimePath": "Services\\youtube-uploader-la\\service"
+    },
+    {
+      "id": "youtube-uploader-nyc",
+      "name": "YouTube Uploader NYC",
+      "port": 3342,
+      "publicUrl": "https://youtube-upload-nyc.chicagoshining.com",
+      "deployable": true,
+      "runtimePath": "Services\\youtube-uploader-nyc\\service"
+    },
+    {
+      "id": "youtube-uploader-miami",
+      "name": "YouTube Uploader Miami",
+      "port": 3343,
+      "publicUrl": "https://youtube-upload-miami.chicagoshining.com",
+      "deployable": true,
+      "runtimePath": "Services\\youtube-uploader-miami\\service"
+    },
+    {
+      "id": "pipeline-runner",
+      "name": "Pipeline Runner",
+      "port": 3350,
+      "publicUrl": "https://pipeline.chicagoshining.com",
+      "deployable": true,
+      "runtimePath": "Services\\pipeline-runner\\service"
+    },
+    {
+      "id": "video-compressor",
+      "name": "Video Compressor",
+      "port": 3335,
+      "publicUrl": "https://compress.chicagoshining.com",
+      "deployable": false,
+      "runtimePath": "Services\\Video_Compressor"
+    },
+    {
+      "id": "timing-engine",
+      "name": "Timing Engine",
+      "port": 3336,
+      "publicUrl": "https://timing.chicagoshining.com",
+      "deployable": true,
+      "runtimePath": "Services\\timing-engine\\service"
+    },
+    {
+      "id": "task-organizer",
+      "name": "Task Organizer",
+      "port": 3360,
+      "publicUrl": null,
+      "deployable": false,
+      "runtimePath": "Source Control\\chicago-shining-task-organizer",
+      "gitCheckout": true
+    },
+    {
+      "id": "ops-dashboard",
+      "name": "Ops Dashboard",
+      "port": 3361,
+      "publicUrl": "https://ops.chicagoshining.com",
+      "deployable": true,
+      "runtimePath": "Services\\ops-dashboard"
+    }
   ],
   "actions": [
     {
