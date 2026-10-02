@@ -25,11 +25,17 @@ jobs:
       EXPECTED_VERSION: 2026-10-02-service-versions
     steps:
       - name: Deploy Ops Dashboard through its allowlisted deploy action
+        id: ops_deploy
         shell: bash
         run: |
           set -euo pipefail
           BASE='https://ops.chicagoshining.com'
-          selected=''
+          echo 'started=0' >> "$GITHUB_OUTPUT"
+          if [[ -z "${OPS_TOKEN_A:-}" && -z "${OPS_TOKEN_B:-}" && -z "${OPS_TOKEN_C:-}" ]]; then
+            echo '::warning::Ops Dashboard deploy skipped because no OPS_DASHBOARD_TOKEN, DASHBOARD_TOKEN, or OPS_TOKEN repository secret is configured.'
+            exit 0
+          fi
+          selected='
           for candidate in "${OPS_TOKEN_A:-}" "${OPS_TOKEN_B:-}" "${OPS_TOKEN_C:-}"; do
             if [[ -z "$candidate" ]]; then continue; fi
             code=$(curl -sS --max-time 20 -o /tmp/catalog.json -w '%{http_code}' \
@@ -63,8 +69,10 @@ jobs:
             exit 3
           done
           test "$started" = "1"
+          echo 'started=1' >> "$GITHUB_OUTPUT"
 
       - name: Verify restarted Ops Dashboard version
+        if: steps.ops_deploy.outputs.started == '1'
         shell: bash
         run: |
           set -euo pipefail
