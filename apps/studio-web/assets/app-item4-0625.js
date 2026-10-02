@@ -201,6 +201,8 @@
   let pipelineContentRecords = [];
   let pipelineScheduleGridRecords = [];
   let pipelineScheduleGridOpen = false;
+  let pipelineScheduleGridAnchorDate = null;
+  let pipelineScheduleGridLoadGeneration = 0;
   const PIPELINE_SCHEDULE_PLATFORM_KEYS = ["instagram", "facebook", "tiktok", "youtube"];
   const pipelineScheduleVisiblePlatforms = new Set(PIPELINE_SCHEDULE_PLATFORM_KEYS);
   let pipelineScheduleDragOutputId = "";
@@ -252,7 +254,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.454-timed-script-requeue";
+  const BUILD_ID = "item4-0.6.455-pipeline-calendar-nav";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -16938,7 +16940,93 @@
 
   function pipelineScheduleWindow() {
     const helper = globalThis.PipelineScheduleGrid;
-    return helper?.sevenDayWindow ? helper.sevenDayWindow(new Date()) : null;
+    const anchor = pipelineScheduleGridAnchorDate instanceof Date
+      ? pipelineScheduleGridAnchorDate
+      : new Date();
+    return helper?.sevenDayWindow ? helper.sevenDayWindow(anchor) : null;
+  }
+
+  function pipelineScheduleWindowLabel(windowValue = pipelineScheduleWindow()) {
+    const first = windowValue?.days?.[0];
+    const last = windowValue?.days?.[6];
+    if (!first || !last) return "";
+    const sameYear = first.getFullYear() === last.getFullYear();
+    const start = first.toLocaleDateString(undefined, {
+      month: "short",
+      day: "numeric",
+      year: sameYear ? undefined : "numeric",
+    });
+    const end = last.toLocaleDateString(undefined, {
+      month: "short",
+      day: "numeric",
+      year: "numeric",
+    });
+    return `${start} – ${end}`;
+  }
+
+  function pipelineScheduleWindowStartsToday(windowValue = pipelineScheduleWindow()) {
+    const helper = globalThis.PipelineScheduleGrid;
+    const first = windowValue?.days?.[0];
+    if (!first || !helper?.dayKey) return false;
+    return helper.dayKey(first) === helper.dayKey(new Date());
+  }
+
+  async function loadPipelineScheduleGridWindow(message = "") {
+    const generation = ++pipelineScheduleGridLoadGeneration;
+    if (message) setPipelineScheduleGridMessage(message);
+    try {
+      const result = await api(pipelineScheduleGridApiPath(), { timeoutMs: 15000, retries: 1 });
+      if (generation !== pipelineScheduleGridLoadGeneration) return;
+      pipelineScheduleGridRecords = result?.records || [];
+      renderPipelineScheduleGrid(pipelineScheduleGridRecords, String(result?.schedule_error || ""));
+      const selected = (pipelineOutputs || []).find((row) => row.id === pipelineScheduleSelectedOutputId);
+      if (selected) {
+        setPipelineScheduleGridMessage(
+          `Selected Platform Output ${pipelineScheduleEntryOutputId(selected)}. Choose a future slot in ${pipelineScheduleWindowLabel()}.`
+        );
+      } else if (message) {
+        setPipelineScheduleGridMessage("");
+      }
+    } catch (error) {
+      if (generation !== pipelineScheduleGridLoadGeneration) return;
+      const fallback = (pipelineOutputs || []).filter((row) => String(row?.scheduled_post_date || "").trim());
+      pipelineScheduleGridRecords = fallback;
+      renderPipelineScheduleGrid(fallback, error?.message || "Schedule view unavailable");
+      setPipelineScheduleGridMessage(error?.message || "Could not load that 7-day window.", true);
+    }
+  }
+
+  async function shiftPipelineScheduleGridWindow(days) {
+    const windowValue = pipelineScheduleWindow();
+    const start = windowValue?.start ? new Date(windowValue.start.getTime()) : new Date();
+    start.setHours(0, 0, 0, 0);
+    start.setDate(start.getDate() + Number(days || 0));
+    pipelineScheduleGridAnchorDate = start;
+    await loadPipelineScheduleGridWindow(
+      `Loading ${pipelineScheduleWindowLabel()}…`
+    );
+  }
+
+  async function resetPipelineScheduleGridWindow() {
+    pipelineScheduleGridAnchorDate = null;
+    await loadPipelineScheduleGridWindow("Loading today and the next 6 days…");
+  }
+
+  function bindPipelineScheduleGridWindowControls(target) {
+    if (!target) return;
+    target.querySelectorAll("[data-pipeline-schedule-window-shift]").forEach((button) => {
+      button.addEventListener("click", () => {
+        const days = Number(button.dataset.pipelineScheduleWindowShift || 0);
+        shiftPipelineScheduleGridWindow(days).catch((error) => {
+          setPipelineScheduleGridMessage(error?.message || "Could not change calendar window.", true);
+        });
+      });
+    });
+    target.querySelector("[data-pipeline-schedule-window-today]")?.addEventListener("click", () => {
+      resetPipelineScheduleGridWindow().catch((error) => {
+        setPipelineScheduleGridMessage(error?.message || "Could not return to today.", true);
+      });
+    });
   }
 
   function pipelineScheduleHourLabel(hour) {
@@ -16954,8 +17042,12 @@
     return date.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
   }
 
-  function pipelineScheduleDayHeader(date, index) {
-    const weekday = index === 0 ? "Today" : date.toLocaleDateString(undefined, { weekday: "short" });
+  function pipelineScheduleDayHeader(date) {
+    const helper = globalThis.PipelineScheduleGrid;
+    const isToday = helper?.dayKey
+      ? helper.dayKey(date) === helper.dayKey(new Date())
+      : false;
+    const weekday = isToday ? "Today" : date.toLocaleDateString(undefined, { weekday: "short" });
     const day = date.toLocaleDateString(undefined, { month: "short", day: "numeric" });
     return `<span class="pipeline-schedule-day-label">${escapeHtml(weekday)}</span><span class="pipeline-schedule-day-date">${escapeHtml(day)}</span>`;
   }
@@ -17231,18 +17323,17 @@
     const cells = helper.aggregate(visibleRecords, windowValue);
     const total = [...cells.values()].reduce((sum, cell) => sum + Number(cell?.total || 0), 0);
     const unscheduled = pipelineUnscheduledScheduleRecords().filter(pipelineScheduleRecordVisible);
-    const lastDay = windowValue.days[6];
     const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || "local time";
+    const rangeLabel = pipelineScheduleWindowLabel(windowValue);
     if (summary) {
-      const rangeEnd = lastDay.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
       summary.textContent = error
-        ? `${total} scheduled in the loaded Pipeline rows · schedule service retrying · ${timezone}`
-        : `${total} scheduled output${total === 1 ? "" : "s"} · ${unscheduled.length} ready to schedule · Today through ${rangeEnd} · ${timezone}`;
+        ? `${total} scheduled in the loaded Pipeline rows · schedule service retrying · ${rangeLabel} · ${timezone}`
+        : `${total} scheduled output${total === 1 ? "" : "s"} · ${unscheduled.length} ready to schedule · ${rangeLabel} · ${timezone}`;
     }
 
     const now = new Date();
     const nowKey = helper.slotKey(now);
-    const head = windowValue.days.map((date, index) => `<th scope="col">${pipelineScheduleDayHeader(date, index)}</th>`).join("");
+    const head = windowValue.days.map((date) => `<th scope="col">${pipelineScheduleDayHeader(date)}</th>`).join("");
     const rows = Array.from({ length: 48 }, (_, slotIndex) => {
       const cellsHtml = windowValue.days.map((day) => {
         const date = helper.slotDate(day, slotIndex);
@@ -17262,8 +17353,10 @@
       return `<tr><th scope="row" class="pipeline-schedule-hour">${escapeHtml(pipelineScheduleSlotLabel(slotIndex))}</th>${cellsHtml}</tr>`;
     }).join("");
 
+    const windowToolbar = `<div class="pipeline-schedule-window-toolbar" aria-label="Calendar date range controls"><div class="pipeline-schedule-window-controls"><button type="button" class="secondary-button" data-pipeline-schedule-window-shift="-7">← Previous 7 days</button><button type="button" class="text-button" data-pipeline-schedule-window-today${pipelineScheduleWindowStartsToday(windowValue) ? ' disabled aria-current="date"' : ""}>Today</button><button type="button" class="secondary-button" data-pipeline-schedule-window-shift="7">Next 7 days →</button></div><strong class="pipeline-schedule-window-range">${escapeHtml(rangeLabel)}</strong><span class="pipeline-schedule-window-hint">Select a bubble, change the 7-day window if needed, then click its destination slot.</span></div>`;
     const tray = `<section class="pipeline-schedule-unscheduled" aria-label="Ready to schedule"><div class="pipeline-schedule-unscheduled-copy"><strong>Ready to schedule</strong><span>Outputs stay here until a schedule is saved. Use default schedules can fill intelligent row suggestions without removing them from this tray, or drag a bubble directly into a 30-minute slot.</span></div><div class="pipeline-schedule-unscheduled-list">${unscheduled.length ? unscheduled.map((record) => pipelineScheduleEntryMarkup(record, { unscheduled: true })).join("") : '<span class="subtle">No ready outputs are waiting for a saved schedule.</span>'}</div></section>`;
-    target.innerHTML = `${tray}<div class="pipeline-schedule-grid-scroll"><table class="pipeline-schedule-grid-table"><thead><tr><th class="pipeline-hour-head" scope="col">Time</th>${head}</tr></thead><tbody>${rows}</tbody></table></div>`;
+    target.innerHTML = `${windowToolbar}${tray}<div class="pipeline-schedule-grid-scroll"><table class="pipeline-schedule-grid-table"><thead><tr><th class="pipeline-hour-head" scope="col">Time</th>${head}</tr></thead><tbody>${rows}</tbody></table></div>`;
+    bindPipelineScheduleGridWindowControls(target);
     bindPipelineScheduleGridInteractions(target);
     syncPipelineScheduleSelectionVisual(target);
 
@@ -17630,6 +17723,8 @@
       setPipelineLiveHint("Refreshing…");
     }
     try {
+      const scheduleGeneration = pipelineScheduleGridLoadGeneration;
+      const schedulePath = pipelineScheduleGridApiPath();
       const [outputsSettled, contentSettled, scheduleSettled] = await Promise.all([
         api("/api/outputs?limit=250", { timeoutMs: 20000, retries: 2 }).then(
           (value) => ({ ok: true, value }),
@@ -17639,7 +17734,7 @@
           (value) => ({ ok: true, value }),
           (error) => ({ ok: false, error }),
         ),
-        api(pipelineScheduleGridApiPath(), { timeoutMs: 15000, retries: 1 }).then(
+        api(schedulePath, { timeoutMs: 15000, retries: 1 }).then(
           (value) => ({ ok: true, value }),
           (error) => ({ ok: false, error }),
         ),
@@ -17653,10 +17748,12 @@
       const records = outputsResult?.records || [];
       const contentRecords = contentResult?.records || [];
       const scheduleError = String(scheduleResult?.schedule_error || (!scheduleSettled.ok ? (scheduleSettled.error?.message || "Schedule view unavailable") : ""));
-      pipelineScheduleGridRecords = scheduleError
-        ? records.filter((row) => String(row?.scheduled_post_date || "").trim())
-        : (scheduleResult?.records || []);
-      renderPipelineScheduleGrid(pipelineScheduleGridRecords, scheduleError);
+      if (scheduleGeneration === pipelineScheduleGridLoadGeneration) {
+        pipelineScheduleGridRecords = scheduleError
+          ? records.filter((row) => String(row?.scheduled_post_date || "").trim())
+          : (scheduleResult?.records || []);
+        renderPipelineScheduleGrid(pipelineScheduleGridRecords, scheduleError);
+      }
       const unchanged = !force
         && silent
         && target.querySelector("table")
