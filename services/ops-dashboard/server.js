@@ -36,6 +36,7 @@ const TOKEN = String(process.env.DASHBOARD_TOKEN || '').trim();
 const PIPELINE_ROOT = process.env.PIPELINE_ROOT || 'D:\\Content Creation\\ChicagoShining Pipeline';
 const REPO_ROOT = process.env.REPO_ROOT || path.resolve(ROOT, '..', '..');
 const ACTION_PS1 = path.join(REPO_ROOT, 'deploy', 'local-services', 'Invoke-OpsDashboardAction.ps1');
+const OPS_DASHBOARD_VERSION = '2026-10-02-service-versions';
 
 const catalog = JSON.parse(fs.readFileSync(CATALOG_PATH, 'utf8'));
 const actionsById = new Map(catalog.actions.map((a) => [a.id, a]));
@@ -102,7 +103,7 @@ async function probeHttp(url, timeoutMs = 4000) {
   try {
     const res = await fetch(url, { signal: ac.signal, redirect: 'manual' });
     const text = await res.text();
-    return { ok: res.ok, status: res.status, body: text.slice(0, 240) };
+    return { ok: res.ok, status: res.status, body: text.slice(0, 4096) };
   } catch (err) {
     return { ok: false, status: 0, body: String(err && err.message ? err.message : err) };
   } finally {
@@ -110,6 +111,126 @@ async function probeHttp(url, timeoutMs = 4000) {
   }
 }
 
+function parseJsonObject(text) {
+  try {
+    const value = JSON.parse(String(text || ''));
+    return value && typeof value === 'object' && !Array.isArray(value) ? value : null;
+  } catch {
+    return null;
+  }
+}
+
+function firstVersionValue(...healthBodies) {
+  const keys = ['version', 'service_version', 'build_version', 'buildVersion', 'build_id', 'buildId', 'revision'];
+  for (const body of healthBodies) {
+    if (!body) continue;
+    for (const key of keys) {
+      const value = body[key];
+      if (value !== null && value !== undefined && String(value).trim()) return String(value).trim();
+    }
+  }
+  return '';
+}
+
+function serviceRuntimeRoot(svc) {
+  const relative = String((svc && svc.runtimePath) || '').trim();
+  if (!relative) return '';
+  const normalized = relative.replace(/[\\/]+/g, path.sep);
+  return path.resolve(PIPELINE_ROOT, normalized);
+}
+
+function resolveGitDir(repoRoot) {
+  const marker = path.join(repoRoot, '.git');
+  try {
+    const stat = fs.statSync(marker);
+    if (stat.isDirectory()) return marker;
+    if (!stat.isFile()) return '';
+    const text = fs.readFileSync(marker, 'utf8').trim();
+    const match = text.match(/^gitdir:\s*(.+)$/i);
+    if (!match) return '';
+    return path.resolve(repoRoot, match[1].trim());
+  } catch {
+    return '';
+  }
+}
+
+function readGitHead(repoRoot) {
+  const gitDir = resolveGitDir(repoRoot);
+  if (!gitDir) return '';
+  try {
+    const head = fs.readFileSync(path.join(gitDir, 'HEAD'), 'utf8').trim();
+    if (/^[0-9a-f]{40}$/i.test(head)) return head;
+    const match = head.match(/^ref:\s*(.+)$/i);
+    if (!match) return '';
+    const refName = match[1].trim();
+    const looseRef = path.join(gitDir, ...refName.split('/'));
+    if (fs.existsSync(looseRef)) {
+      const value = fs.readFileSync(looseRef, 'utf8').trim();
+      if (/^[0-9a-f]{40}$/i.test(value)) return value;
+    }
+    const packed = path.join(gitDir, 'packed-refs');
+    if (fs.existsSync(packed)) {
+      for (const line of fs.readFileSync(packed, 'utf8').split(/\r?\n/)) {
+        if (!line || line.startsWith('#') || line.startsWith('^')) continue;
+        const parts = line.trim().split(/\s+/, 2);
+        const sha = parts[0];
+        const ref = parts[1];
+        if (ref === refName && /^[0-9a-f]{40}$/i.test(sha)) return sha;
+      }
+    }
+  } catch {
+    return '';
+  }
+  return '';
+}
+
+function deployedVersionInfo(svc) {
+  const runtimeRoot = serviceRuntimeRoot(svc);
+  if (!runtimeRoot) return { commit: '', short: '', deployedAt: '', source: '' };
+  const manifestPath = path.join(runtimeRoot, '.smv2-deployment.json');
+  try {
+    if (fs.existsSync(manifestPath)) {
+      const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+      const commit = String(manifest.deployed_commit || '').trim();
+      const short = String(manifest.deployed_commit_short || '').trim() || commit.slice(0, 7);
+      return {
+        commit,
+        short,
+        deployedAt: String(manifest.deployed_at_utc || '').trim(),
+        source: 'deployment-manifest',
+      };
+    }
+  } catch {
+    // A bad or partially written manifest should not break the entire Ops status page.
+  }
+  if (svc && svc.gitCheckout) {
+    const commit = readGitHead(runtimeRoot);
+    return { commit, short: commit.slice(0, 7), deployedAt: '', source: commit ? 'git-head' : '' };
+  }
+  return { commit: '', short: '', deployedAt: '', source: '' };
+}
+
+function buildServiceVersionInfo(svc, localHealth, publicHealth) {
+  const localBody = parseJsonObject(localHealth && localHealth.body);
+  const publicBody = parseJsonObject(publicHealth && publicHealth.body);
+  const localVersion = firstVersionValue(localBody);
+  const publicVersion = firstVersionValue(publicBody);
+  const deployed = deployedVersionInfo(svc);
+  const runtimeVersion = localVersion || publicVersion;
+  const displayVersion = runtimeVersion || deployed.short || '';
+  const versionSource = localVersion ? 'local-health' : publicVersion ? 'public-health' : deployed.source;
+  return {
+    runtimeVersion: runtimeVersion || null,
+    localVersion: localVersion || null,
+    publicVersion: publicVersion || null,
+    deployedCommit: deployed.commit || null,
+    deployedCommitShort: deployed.short || null,
+    deployedAt: deployed.deployedAt || null,
+    version: displayVersion || null,
+    versionSource: versionSource || null,
+    versionMismatch: Boolean(localVersion && publicVersion && localVersion !== publicVersion),
+  };
+}
 function mimeFor(filePath) {
   const ext = path.extname(filePath).toLowerCase();
   if (ext === '.html') return 'text/html; charset=utf-8';
@@ -255,7 +376,7 @@ const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://${req.headers.host || '127.0.0.1'}`);
 
   if (req.method === 'GET' && url.pathname === '/health') {
-    json(res, 200, { ok: true, service: 'ops-dashboard', host: os.hostname() });
+    json(res, 200, { ok: true, service: 'ops-dashboard', version: OPS_DASHBOARD_VERSION, host: os.hostname() });
     return;
   }
 
@@ -297,25 +418,34 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (req.method === 'GET' && url.pathname === '/api/status') {
-      const rows = [];
-      for (const svc of catalog.services) {
+      const rows = await Promise.all(catalog.services.map(async (svc) => {
         const localUp = await probePort(svc.port);
-        let publicHealth = null;
-        if (svc.publicUrl && svc.publicUrl.startsWith('https://')) {
-          publicHealth = await probeHttp(`${svc.publicUrl.replace(/\/$/, '')}/health`);
-        }
-        rows.push({
+        const localUrl = 'http://127.0.0.1:' + svc.port + '/health';
+        const publicUrl = svc.publicUrl && svc.publicUrl.startsWith('https://')
+          ? svc.publicUrl.replace(/\/$/, '') + '/health'
+          : '';
+        const pair = await Promise.all([
+          localUp ? probeHttp(localUrl, 1800) : Promise.resolve(null),
+          publicUrl ? probeHttp(publicUrl) : Promise.resolve(null),
+        ]);
+        const localHealth = pair[0];
+        const publicHealth = pair[1];
+        const versionInfo = buildServiceVersionInfo(svc, localHealth, publicHealth);
+        return {
           id: svc.id,
           name: svc.name,
           port: svc.port,
           publicUrl: svc.publicUrl,
           localUp,
+          localHealthOk: localHealth ? localHealth.ok : null,
           publicOk: publicHealth ? publicHealth.ok : null,
           publicStatus: publicHealth ? publicHealth.status : null,
-        });
-      }
+          ...versionInfo,
+        };
+      }));
       json(res, 200, {
         ok: true,
+        version: OPS_DASHBOARD_VERSION,
         hostname: os.hostname(),
         activeJobId,
         rows,
