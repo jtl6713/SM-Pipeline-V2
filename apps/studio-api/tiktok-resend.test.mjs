@@ -63,10 +63,10 @@ test("Worker and Pipeline UI advertise TikTok draft resend", async () => {
   const worker = await readFile(path.join(here, "worker.js"), "utf8");
   const app = await readFile(path.join(here, "../studio-web/assets/app-item4-0625.js"), "utf8");
   assert.match(worker, /studio_tiktok_draft_resend_v1: true/);
-  assert.match(worker, /version: "0.10.435-timed-script-requeue"/);
+  assert.match(worker, /version: "0.10.436-timed-script-measured-vo"/);
   assert.match(worker, /function resendStudioTiktokDraft/);
   assert.match(worker, /\/tiktok-resend\$/);
-  assert.match(app, /BUILD_ID = "item4-0.6.456-calendar-text-polish"/);
+  assert.match(app, /BUILD_ID = "item4-0.6.457-timed-script-measured-vo"/);
   assert.match(app, /Resend draft to TikTok/);
   assert.match(app, /\/tiktok-resend/);
   assert.match(app, /function tiktokNeedsDraftResend/);
