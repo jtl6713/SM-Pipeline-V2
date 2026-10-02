@@ -384,3 +384,8 @@ Deploy Studio API Worker production
 Reason: Replace narration on a promoted request that is still Awaiting Approval, then render again without publishing.
 Worker: 0.10.433-timed-script-mobile
 Requested: 2026-10-02T11:40:00Z
+
+Deploy Studio API Worker production
+Reason: Allow Use this timeline to save a timed script. Phase 2A was rejecting that POST before the handler ran.
+Worker: 0.10.434-timed-script-apply
+Requested: 2026-10-02T12:05:00Z

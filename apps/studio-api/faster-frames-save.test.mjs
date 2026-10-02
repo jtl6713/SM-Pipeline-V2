@@ -12,7 +12,7 @@ const app = fs.readFileSync(
 );
 
 test("health advertises current worker build with faster-frames helpers", () => {
-  assert.match(worker, /version: "0.10.433-timed-script-mobile"/);
+  assert.match(worker, /version: "0.10.434-timed-script-apply"/);
   assert.match(worker, /airtableBatchCreate/);
   assert.match(worker, /mapProductionRequestLight/);
 });
@@ -137,6 +137,7 @@ test("fractional video duration is stored as a whole-number cap and save errors 
   assert.match(app, /control\.id === "prTimedScriptInput"/);
   assert.match(worker, /function applyPromotedTimedScriptRoute/);
   assert.match(worker, /\/timed-script\$/);
+  assert.match(worker, /isProductionRequestTimedScriptWrite/);
 });
 
 test("UI polls GET /variants during Prepare and skips Save reload waterfall", () => {
