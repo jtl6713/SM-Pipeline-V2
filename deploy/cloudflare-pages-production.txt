@@ -380,3 +380,9 @@ Reason: Let the global Pipeline publishing calendar navigate beyond the initial 
 UI: 0.6.455-pipeline-calendar-nav
 Source merge: 2a72701af298dc1981517b01aa2ae2bc9f7e0ca6
 Requested: 2026-10-02T16:45:00Z
+
+Deploy Studio Pages production
+Reason: Polish Pipeline and platform calendar date spacing, typography, padding, and mobile wrapping
+UI: 0.6.456-calendar-text-polish
+Source merge: 7b2f5e7452467ecace712330497949e093ec49e0
+Requested: 2026-10-02T17:06:00Z
