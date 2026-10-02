@@ -48,6 +48,11 @@
     .svc:last-child { border-bottom: 0; }
     .name { font-weight: 600; }
     .port { color: var(--muted); font-size: 12px; }
+    .version-line { display: flex; gap: 7px; flex-wrap: wrap; align-items: center; margin-top: 3px; font-size: 11px; color: #d8c690; }
+    .version-line strong { color: var(--ink); font-weight: 650; }
+    .version-source { color: #8d7a52; }
+    .version-drift { color: var(--warn); font-weight: 650; }
+    .build { font-family: Consolas, "SFMono-Regular", monospace; color: #c5b071; }
     .pill {
       min-width: 64px; text-align: center;
       border-radius: 999px; padding: 3px 8px; font-size: 11px; letter-spacing: 0.04em;
@@ -173,6 +178,35 @@
       return data;
     }
 
+    function escapeHtml(value) {
+      return String(value == null ? "" : value)
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;")
+        .replaceAll("'", "&#039;");
+    }
+
+    function versionMarkup(row) {
+      const version = row.version || "not reported";
+      const source = row.versionSource === "local-health"
+        ? "runtime"
+        : row.versionSource === "public-health"
+          ? "public runtime"
+          : row.versionSource === "deployment-manifest"
+            ? "deployed commit"
+            : row.versionSource === "git-head"
+              ? "git HEAD"
+              : "unknown source";
+      const build = row.deployedCommitShort && row.deployedCommitShort !== version
+        ? '<span class="build">build ' + escapeHtml(row.deployedCommitShort) + '</span>'
+        : "";
+      const drift = row.versionMismatch
+        ? '<span class="version-drift">LOCAL/PUBLIC VERSION MISMATCH</span>'
+        : "";
+      return '<div class="version-line"><span>Version <strong>' + escapeHtml(version) + '</strong></span><span class="version-source">' + escapeHtml(source) + '</span>' + build + drift + '</div>';
+    }
+
     function pill(ok, labelYes, labelNo, unknown) {
       if (ok === true) return `<span class="pill up">${labelYes}</span>`;
       if (ok === false) return `<span class="pill down">${labelNo}</span>`;
@@ -184,8 +218,9 @@
       $("status").innerHTML = data.rows.map((row) => `
         <div class="svc">
           <div>
-            <div class="name">${row.name}</div>
-            <div class="port">:${row.port}${row.publicUrl ? " · " + row.publicUrl.replace("https://","") : ""}</div>
+            <div class="name">${escapeHtml(row.name)}</div>
+            <div class="port">:${escapeHtml(row.port)}${row.publicUrl ? " · " + escapeHtml(row.publicUrl.replace("https://","")) : ""}</div>
+            ${versionMarkup(row)}
           </div>
           ${pill(row.localUp, "LOCAL", "DOWN", "—")}
           ${pill(row.publicOk, "PUBLIC", "DOWN", "NO PUBLIC")}

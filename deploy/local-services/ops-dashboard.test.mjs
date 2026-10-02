@@ -49,3 +49,32 @@ test("dashboard server binds loopback and allowlists actions", () => {
   assert.match(server, /Unknown action/);
   assert.doesNotMatch(server, /eval\(/);
 });
+
+
+test("Ops dashboard reports the version/build each listener is actually running", () => {
+  const server = fs.readFileSync(
+    path.join(repo, "services", "ops-dashboard", "server.js"),
+    "utf8"
+  );
+  const html = fs.readFileSync(
+    path.join(repo, "services", "ops-dashboard", "public", "index.html"),
+    "utf8"
+  );
+  for (const service of catalog.services) {
+    assert.equal(typeof service.runtimePath, "string");
+    assert.ok(service.runtimePath.length > 0);
+  }
+  assert.match(server, /OPS_DASHBOARD_VERSION = '2026-10-02-service-versions'/);
+  assert.match(server, /\.smv2-deployment\.json/);
+  assert.match(server, /function readGitHead/);
+  assert.match(server, /function buildServiceVersionInfo/);
+  assert.match(server, /localVersion/);
+  assert.match(server, /publicVersion/);
+  assert.match(server, /deployedCommitShort/);
+  assert.match(server, /versionMismatch/);
+  assert.match(server, /127\.0\.0\.1:' \+ svc\.port \+ '\/health'/);
+  assert.match(server, /version: OPS_DASHBOARD_VERSION/);
+  assert.match(html, /function versionMarkup/);
+  assert.match(html, /Version <strong>/);
+  assert.match(html, /LOCAL\/PUBLIC VERSION MISMATCH/);
+});

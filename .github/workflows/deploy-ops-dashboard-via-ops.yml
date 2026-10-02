@@ -1,0 +1,81 @@
+name: Deploy Ops Dashboard via Ops Dashboard
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'services/ops-dashboard/**'
+      - '.github/workflows/deploy-ops-dashboard-via-ops.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: chicagoshining-ops-dashboard-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      OPS_TOKEN_A: ${{ secrets.OPS_DASHBOARD_TOKEN }}
+      OPS_TOKEN_B: ${{ secrets.DASHBOARD_TOKEN }}
+      OPS_TOKEN_C: ${{ secrets.OPS_TOKEN }}
+      EXPECTED_VERSION: 2026-10-02-service-versions
+    steps:
+      - name: Deploy Ops Dashboard through its allowlisted deploy action
+        shell: bash
+        run: |
+          set -euo pipefail
+          BASE='https://ops.chicagoshining.com'
+          selected=''
+          for candidate in "${OPS_TOKEN_A:-}" "${OPS_TOKEN_B:-}" "${OPS_TOKEN_C:-}"; do
+            if [[ -z "$candidate" ]]; then continue; fi
+            code=$(curl -sS --max-time 20 -o /tmp/catalog.json -w '%{http_code}' \
+              -H "Authorization: Bearer $candidate" "$BASE/api/catalog" || true)
+            if [[ "$code" == "200" ]] && jq -e '.ok==true' /tmp/catalog.json >/dev/null 2>&1; then
+              selected="$candidate"
+              break
+            fi
+          done
+          test -n "$selected"
+
+          started=0
+          for attempt in $(seq 1 12); do
+            code=$(curl -sS --max-time 30 -o /tmp/run.json -w '%{http_code}' \
+              -X POST "$BASE/api/run" \
+              -H "Authorization: Bearer $selected" \
+              -H 'Content-Type: application/json' \
+              --data '{"action":"deploy","service":"ops-dashboard","confirm":true}' || true)
+            if [[ "$code" == "202" ]] && jq -e '.ok==true' /tmp/run.json >/dev/null 2>&1; then
+              started=1
+              jq -c '{ok,job:{id:.job.id,status:.job.status}}' /tmp/run.json
+              break
+            fi
+            if [[ "$code" == "409" ]]; then
+              echo "ops_dashboard_busy=1 attempt=$attempt"
+              sleep 10
+              continue
+            fi
+            echo "Unexpected Ops deploy response HTTP $code"
+            cat /tmp/run.json || true
+            exit 3
+          done
+          test "$started" = "1"
+
+      - name: Verify restarted Ops Dashboard version
+        shell: bash
+        run: |
+          set -euo pipefail
+          BASE='https://ops.chicagoshining.com'
+          for i in $(seq 1 36); do
+            code=$(curl -sS --max-time 20 -o /tmp/health.json -w '%{http_code}' "$BASE/health" || true)
+            if [[ "$code" == "200" ]] && jq -e --arg v "$EXPECTED_VERSION" '.ok==true and .version==$v' /tmp/health.json >/dev/null 2>&1; then
+              jq -c '{ok,service,version,host}' /tmp/health.json
+              exit 0
+            fi
+            sleep 5
+          done
+          cat /tmp/health.json || true
+          exit 4
