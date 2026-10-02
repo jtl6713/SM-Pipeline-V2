@@ -177,7 +177,7 @@ def test_r4_p020_uses_reduced_ducked_music_default():
     assert payload["music"]["volume"] == 0.6
     assert payload["music"]["duckingMultiplier"] == 0.084
 
-def test_r4_adds_official_watermark_only_for_chicagoshining(monkeypatch):
+def test_r4_adds_official_watermark_for_every_remotion_render(monkeypatch):
     class _Client:
         def __init__(self, profile_name):
             self.profile_name = profile_name
@@ -191,8 +191,12 @@ def test_r4_adds_official_watermark_only_for_chicagoshining(monkeypatch):
     assert render_watermark_url(_Client("ChicagoShining - Chicago"), output, None) == (
         "https://example.com/chicago-watermark.png"
     )
-    assert render_watermark_url(_Client("New York Shining"), output, None) == ""
-    assert render_watermark_url(_Client("Miami Shining"), output, None) == ""
+    assert render_watermark_url(_Client("NYC - New York City"), output, None) == (
+        "https://example.com/chicago-watermark.png"
+    )
+    assert render_watermark_url(_Client("Miami - Miami"), output, None) == (
+        "https://example.com/chicago-watermark.png"
+    )
 
 
 def test_r4_brand_text_falls_back_to_content_profile_brand():

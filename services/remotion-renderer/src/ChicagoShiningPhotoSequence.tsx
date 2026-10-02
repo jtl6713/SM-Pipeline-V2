@@ -1642,10 +1642,11 @@ React.FC<ChicagoShiningPhotoSequenceProps> = ({
         </Sequence>
       ) : null}
 
-      {watermarkRequired && watermarkSource ? (
-        <AbsoluteFill style={{pointerEvents: "none"}}>
+      {watermarkSource ? (
+        <AbsoluteFill style={{pointerEvents: "none", zIndex: 1000}}>
           <Img
             src={watermarkSource}
+            data-brand-watermark="logo"
             style={{
               position: "absolute",
               top: 30,
@@ -1656,11 +1657,12 @@ React.FC<ChicagoShiningPhotoSequenceProps> = ({
             }}
           />
         </AbsoluteFill>
-      ) : null}
-      <PersistentBrandWatermark
-        text={cleanBrandText}
-        targetAspectRatio={resolvedTargetAspectRatio}
-      />
+      ) : (
+        <PersistentBrandWatermark
+          text={cleanBrandText}
+          targetAspectRatio={resolvedTargetAspectRatio}
+        />
+      )}
     </AbsoluteFill>
   );
 };
