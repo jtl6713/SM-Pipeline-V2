@@ -315,6 +315,7 @@ export default {
       const isProductionRequestEditWrite = isProductionRequestRecordRoute && request.method === "PATCH";
       const isProductionRequestPromoteWrite = isProductionRequestPromoteRoute && request.method === "POST";
       const isProductionRequestSyncDirectivesWrite = isProductionRequestSyncDirectivesRoute && request.method === "POST";
+      const isProductionRequestTimedScriptWrite = isProductionRequestTimedScriptRoute && request.method === "POST";
       const isProductionRequestOutputsSyncWrite = isProductionRequestOutputsRoute && request.method === "PUT";
       const isItem4AssetsUploadWrite = isItem4AssetsRoute && request.method === "POST";
       const isItem4LibraryAssetsWrite = isItem4LibraryAssetsRoute && request.method === "POST";
@@ -373,6 +374,7 @@ export default {
         isProductionRequestEditWrite ||
         isProductionRequestPromoteWrite ||
         isProductionRequestSyncDirectivesWrite ||
+        isProductionRequestTimedScriptWrite ||
         isProductionRequestOutputsSyncWrite ||
         isItem4AssetsUploadWrite ||
         isItem4LibraryAssetsWrite ||
@@ -460,7 +462,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.433-timed-script-mobile",
+          version: "0.10.434-timed-script-apply",
           studio_desk_inventory_v1: true,
           studio_desk_activity_v1: true,
           studio_tiktok_complete_v1: true,
