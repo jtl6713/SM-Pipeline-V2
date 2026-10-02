@@ -369,3 +369,8 @@ Deploy Studio Pages production
 Reason: Keep the timed-script box editable on an approved request so mobile paste works, and apply that script onto the piece waiting for approval.
 UI: 0.6.453-timed-script-mobile
 Requested: 2026-10-02T11:40:00Z
+
+Deploy Studio Pages production
+Reason: On a promoted request, Render this script is the save. Save and Approve stay locked.
+UI: 0.6.454-timed-script-requeue
+Requested: 2026-10-02T16:20:00Z

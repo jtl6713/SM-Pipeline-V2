@@ -389,3 +389,8 @@ Deploy Studio API Worker production
 Reason: Allow Use this timeline to save a timed script. Phase 2A was rejecting that POST before the handler ran.
 Worker: 0.10.434-timed-script-apply
 Requested: 2026-10-02T12:05:00Z
+
+Deploy Studio API Worker production
+Reason: Requeue the linked platform videos when a timed script is applied to a promoted request. The old lookup missed them, so the render never started.
+Worker: 0.10.435-timed-script-requeue
+Requested: 2026-10-02T16:20:00Z

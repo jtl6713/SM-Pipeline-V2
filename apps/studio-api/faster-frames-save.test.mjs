@@ -12,7 +12,7 @@ const app = fs.readFileSync(
 );
 
 test("health advertises current worker build with faster-frames helpers", () => {
-  assert.match(worker, /version: "0.10.434-timed-script-apply"/);
+  assert.match(worker, /version: "0.10.435-timed-script-requeue"/);
   assert.match(worker, /airtableBatchCreate/);
   assert.match(worker, /mapProductionRequestLight/);
 });
@@ -138,10 +138,14 @@ test("fractional video duration is stored as a whole-number cap and save errors 
   assert.match(worker, /function applyPromotedTimedScriptRoute/);
   assert.match(worker, /\/timed-script\$/);
   assert.match(worker, /isProductionRequestTimedScriptWrite/);
+  assert.match(worker, /function loadContentPlatformOutputs/);
+  assert.match(worker, /Platform Outputs/);
+  assert.match(app, /id="prRenderTimedScript"|prRenderTimedScript/);
+  assert.match(app, /function savePromotedTimedScript/);
 });
 
 test("UI polls GET /variants during Prepare and skips Save reload waterfall", () => {
-  assert.match(app, /BUILD_ID = "item4-0.6.453-timed-script-mobile"/);
+  assert.match(app, /BUILD_ID = "item4-0.6.454-timed-script-requeue"/);
   assert.match(app, /pollItem4Variants/);
   const poll = app.slice(
     app.indexOf("async function pollItem4Variants"),
