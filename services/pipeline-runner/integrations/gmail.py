@@ -68,10 +68,12 @@ class GmailClient:
         message["To"] = to
         message["Subject"] = subject
         # Send one HTML MIME entity rather than multipart/alternative. Some iOS/
-        # IMAP paths have exposed the multipart boundary and quoted-printable HTML
-        # as literal body text even though Gmail accepted the RFC envelope. A
-        # single HTML entity removes that failure mode while retaining formatting.
-        message.set_content(html_body, subtype="html", charset="utf-8", cte="base64")
+        # IMAP paths have exposed multipart boundaries as literal body text.
+        # Do not MIME-base64 encode the HTML part: iOS Mail has also been observed
+        # exposing that inner base64 payload (for example "PGRpdi..." for "<div...")
+        # instead of decoding it. The Gmail API already base64url-encodes the whole
+        # RFC message for transport, so an 8bit UTF-8 HTML entity is sufficient.
+        message.set_content(html_body, subtype="html", charset="utf-8", cte="8bit")
         raw_bytes = message.as_bytes(policy=SMTP)
         parsed = BytesParser(policy=SMTP).parsebytes(raw_bytes)
         if parsed.is_multipart() or parsed.get_content_type() != "text/html":
@@ -82,7 +84,7 @@ class GmailClient:
             raise RuntimeError(
                 f"Malformed Gmail MIME charset: {parsed.get_content_charset()}"
             )
-        if parsed.get("Content-Transfer-Encoding", "").lower() != "base64":
+        if parsed.get("Content-Transfer-Encoding", "").lower() != "8bit":
             raise RuntimeError(
                 f"Malformed Gmail transfer encoding: {parsed.get('Content-Transfer-Encoding')}"
             )

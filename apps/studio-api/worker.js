@@ -214,6 +214,7 @@ export default {
       const isProductionRequestPromoteRoute = /^\/api\/production-requests\/rec[A-Za-z0-9]+\/promote$/.test(url.pathname);
       const isProductionRequestBridgePreflightRoute = /^\/api\/production-requests\/rec[A-Za-z0-9]+\/bridge-preflight$/.test(url.pathname);
       const isProductionRequestSyncDirectivesRoute = /^\/api\/production-requests\/rec[A-Za-z0-9]+\/sync-directives$/.test(url.pathname);
+      const isProductionRequestTimedScriptRoute = /^\/api\/production-requests\/rec[A-Za-z0-9]+\/timed-script$/.test(url.pathname);
       const isProductionRequestCollectionRoute = url.pathname === "/api/production-requests";
       const isProductionRequestOutputsRoute = /^\/api\/production-requests\/rec[A-Za-z0-9]+\/outputs$/.test(url.pathname);
       const isProductionRequestAiMastersRoute = /^\/api\/production-requests\/rec[A-Za-z0-9]+\/generate-ai-masters$/.test(url.pathname);
@@ -314,6 +315,7 @@ export default {
       const isProductionRequestEditWrite = isProductionRequestRecordRoute && request.method === "PATCH";
       const isProductionRequestPromoteWrite = isProductionRequestPromoteRoute && request.method === "POST";
       const isProductionRequestSyncDirectivesWrite = isProductionRequestSyncDirectivesRoute && request.method === "POST";
+      const isProductionRequestTimedScriptWrite = isProductionRequestTimedScriptRoute && request.method === "POST";
       const isProductionRequestOutputsSyncWrite = isProductionRequestOutputsRoute && request.method === "PUT";
       const isItem4AssetsUploadWrite = isItem4AssetsRoute && request.method === "POST";
       const isItem4LibraryAssetsWrite = isItem4LibraryAssetsRoute && request.method === "POST";
@@ -372,6 +374,7 @@ export default {
         isProductionRequestEditWrite ||
         isProductionRequestPromoteWrite ||
         isProductionRequestSyncDirectivesWrite ||
+        isProductionRequestTimedScriptWrite ||
         isProductionRequestOutputsSyncWrite ||
         isItem4AssetsUploadWrite ||
         isItem4LibraryAssetsWrite ||
@@ -459,7 +462,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.431-timed-script-vo-duration",
+          version: "0.10.436-timed-script-vo-duration",
           studio_desk_inventory_v1: true,
           studio_desk_activity_v1: true,
           studio_tiktok_complete_v1: true,
@@ -1178,7 +1181,7 @@ export default {
         if (request.method === "PUT") {
           assertWriteRequest(request, env);
           requirePermission(authorization, "production_configure");
-          return syncProductionRequestOutputs(request, env, url, authorization);
+          return await syncProductionRequestOutputs(request, env, url, authorization);
         }
         return listProductionRequestOutputs(request, env, url, authorization);
       }
@@ -1195,7 +1198,14 @@ export default {
       if (isProductionRequestSyncDirectivesRoute) {
         assertWriteRequest(request, env);
         requirePermission(authorization, "production_configure");
-        return syncProductionRequestDirectivesRoute(request, env, url, authorization);
+        return await syncProductionRequestDirectivesRoute(request, env, url, authorization);
+      }
+
+      if (isProductionRequestTimedScriptRoute) {
+        assertWriteRequest(request, env);
+        requirePermission(authorization, "production_configure");
+        if (request.method !== "POST") throw new HttpError(405, "Method not allowed");
+        return await applyPromotedTimedScriptRoute(request, env, url, authorization);
       }
 
       if (isProductionRequestBridgePreflightRoute) {
@@ -1217,7 +1227,7 @@ export default {
         if (request.method === "PATCH") {
           assertWriteRequest(request, env);
           requirePermission(authorization, "production_configure");
-          return updateProductionRequest(request, env, url, authorization);
+          return await updateProductionRequest(request, env, url, authorization);
         }
         const response = await getProductionRequest(request, env, url, authorization, ctx);
         cadenceScheduleSync(ctx, env);
@@ -13313,6 +13323,21 @@ function nullableInt(value, min, max, label) {
   return n;
 }
 
+// Timed-script lengths can be fractional seconds (90.4). The Airtable duration
+// field is a whole-number cap, so store the ceiling. 90 stays 90.
+function nullableWholeSeconds(value, min, max, label) {
+  if (value === null || value === undefined || String(value).trim() === "") return null;
+  const n = Number(value);
+  if (!Number.isFinite(n)) {
+    throw new HttpError(400, `${label} must be a whole number from ${min} to ${max}`);
+  }
+  const whole = Math.ceil(n - 1e-9);
+  if (whole < min || whole > max) {
+    throw new HttpError(400, `${label} must be a whole number from ${min} to ${max}`);
+  }
+  return whole;
+}
+
 function nullableNumber(value, min, max, label) {
   if (value === null || value === undefined || String(value).trim() === "") return null;
   const n = Number(value);
@@ -13378,7 +13403,7 @@ async function cleanProductionRequestPayload(payload, env) {
     ? normalizeChoice(payload?.carousel_slide_count_mode, PR_COUNT_MODES, "AI decides", "Carousel slide count mode")
     : "AI decides";
 
-  const videoDurationSeconds = nullableInt(payload?.video_duration_seconds, 5, 600, "Video duration");
+  const videoDurationSeconds = nullableWholeSeconds(payload?.video_duration_seconds, 5, 600, "Video duration");
   const voiceoverDurationSeconds = nullableNumber(payload?.voiceover_duration_seconds, 1, 600, "Voiceover duration");
   const musicStartSeconds = nullableNumber(payload?.music_start_seconds, 0, 3600, "Music start");
   let voiceoverTailSeconds = nullableNumber(payload?.voiceover_tail_seconds, 0, 300, "Voiceover tail");
@@ -14484,8 +14509,11 @@ function productionRequestCompatibilityIssues(record) {
   }
 
   const notes = String(f(record, "Production_Notes") || "").trim();
-  if (notes.length > 3000) {
-    issues.push("Production notes must be 3000 characters or fewer.");
+  // Timed Script Mode stores the authoritative timeline on this field. The NYC
+  // subway table is about 3.6k characters, so the old 3000 cap rejected Approve
+  // after a successful Save. Match the save validator.
+  if (notes.length > 10000) {
+    issues.push("Production notes must be 10000 characters or fewer.");
   }
 
   return issues;
@@ -14542,6 +14570,129 @@ function productionRequestSyncRecordIdFromPath(url) {
   const match = url.pathname.match(/\/api\/production-requests\/(rec[A-Za-z0-9]+)\/sync-directives$/);
   if (!match) throw new HttpError(400, "Invalid Production Request directive-sync route");
   return match[1];
+}
+
+function productionRequestTimedScriptRecordIdFromPath(url) {
+  const match = url.pathname.match(/\/api\/production-requests\/(rec[A-Za-z0-9]+)\/timed-script$/);
+  if (!match) throw new HttpError(400, "Invalid timed-script route");
+  return match[1];
+}
+
+async function loadContentPlatformOutputs(env, contentId) {
+  const content = await airtableFetch(env, env.AIRTABLE_CONTENT_TABLE_ID, contentId);
+  const links = f(content, "Platform Outputs");
+  const ids = [...new Set((Array.isArray(links) ? links : [])
+    .map((id) => String(id || "").trim())
+    .filter((id) => /^rec[A-Za-z0-9]+$/.test(id)))].slice(0, 50);
+  if (!ids.length) return [];
+  return Promise.all(ids.map((id) => airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, id)));
+}
+
+function outputNeedsTimedScriptRerender(record) {
+  if (outputAlreadyApprovedForPublishing(record)) return false;
+  const outputStatus = String(f(record, "Output_Status") || "").trim();
+  return outputStatus === "Ready for Review"
+    || outputStatus === "In Production"
+    || Boolean(String(f(record, "Final_File_URL") || "").trim())
+    || Boolean(String(f(record, "Studio_Preview_URL") || "").trim());
+}
+
+function outputAlreadyApprovedForPublishing(record) {
+  const output = String(f(record, "Output_Status") || "").trim().toLowerCase();
+  const publish = String(f(record, "Publish_Status") || "").trim().toLowerCase();
+  return output === "published"
+    || output === "approved for publishing"
+    || publish === "published"
+    || publish === "publishing";
+}
+
+async function applyPromotedTimedScriptRoute(request, env, url, authorization) {
+  let payload;
+  try { payload = await request.json(); } catch { throw new HttpError(400, "Request body must be valid JSON"); }
+
+  const recordId = productionRequestTimedScriptRecordIdFromPath(url);
+  const existing = await loadAuthorizedProductionRequest(env, recordId, authorization);
+  const status = String(f(existing, "Request_Status") || "").trim();
+  if (status !== "Promoted") {
+    throw new HttpError(409, "Save this draft, then Approve. A timed script can replace narration only after the request is already in production.");
+  }
+
+  const notes = mergeProductionRequestNotes(
+    f(existing, "Production_Notes"),
+    String(payload?.production_notes || "")
+  );
+  if (!/\[timed-script\]/i.test(notes)) {
+    throw new HttpError(400, "Paste a timed script before applying it.");
+  }
+  if (notes.length > 10000) throw new HttpError(400, "Production notes must be 10000 characters or fewer");
+
+  const script = String(payload?.requested_script || "").trim();
+  if (!script) throw new HttpError(400, "The timed script has no narration.");
+  if (script.length > 25000) throw new HttpError(400, "Requested script must be 25000 characters or fewer");
+  const videoDurationSeconds = nullableWholeSeconds(payload?.video_duration_seconds, 5, 600, "Video duration");
+
+  const contentId = studioFirstLinkedId(f(existing, "Promoted_Content_Item"));
+  if (!contentId) throw new HttpError(409, "This request has no content item to re-render.");
+
+  // ARRAYJOIN on the linked Content Item returns the display name, not the
+  // record id, so a FIND(rec...) lookup misses every finished video and the
+  // resume job immediately reports done.
+  const outputs = await loadContentPlatformOutputs(env, contentId);
+  if (!outputs.length) {
+    throw new HttpError(409, "This piece has no platform videos to render again.");
+  }
+  if (outputs.some(outputAlreadyApprovedForPublishing)) {
+    throw new HttpError(409, "This piece is already approved for publishing, so the timed script was not changed.");
+  }
+
+  const now = new Date().toISOString();
+  const updated = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, recordId, {
+    method: "PATCH",
+    body: JSON.stringify({
+      fields: {
+        Production_Notes: notes,
+        Script_Mode: "Force exact",
+        Requested_Script: script,
+        Video_Duration_Seconds: videoDurationSeconds,
+        Voiceover_Tail_Seconds: 0,
+        Voiceover_Mode: "Yes",
+        Updated_At: now,
+      },
+      typecast: true,
+    }),
+  });
+
+  await syncProductionRequestDirectivesToContentItem(env, updated, contentId);
+
+  const resetRows = outputs
+    .filter((output) => outputNeedsTimedScriptRerender(output))
+    .map((output) => ({
+      id: output.id,
+      fields: studioSharedRenderRerenderFields(),
+    }));
+  if (!resetRows.length) {
+    throw new HttpError(409, "This piece is not waiting in review, so the timed script was not sent back to render.");
+  }
+  await airtableBatchUpdate(env, env.AIRTABLE_OUTPUT_TABLE_ID, resetRows, { typecast: true });
+
+  let rerenderError = "";
+  try {
+    await enqueueStudioProductionJob(env, recordId, { resume: true });
+  } catch (error) {
+    rerenderError = error instanceof Error ? error.message : String(error || "render did not restart");
+  }
+
+  return respond(request, env, {
+    ok: true,
+    applied: true,
+    rerender_started: !rerenderError,
+    production_request: mapProductionRequestLight(updated),
+    content_item_record_id: contentId,
+    outputs_requeued: resetRows.length,
+    message: rerenderError
+      ? `Your script is saved. Rendering did not restart: ${rerenderError}`
+      : "Your script is saved. This piece left Awaiting Approval and is rendering again. It does not publish.",
+  });
 }
 
 async function productionRequestPreferredMusic(env, requestRecord) {
@@ -20516,7 +20667,7 @@ function cleanPromotionPayload(payload) {
   const includeBackgroundMusic = tri(payload?.include_background_music, "Background music");
   const includeThumbnail = tri(payload?.include_thumbnail, "Thumbnail");
   const productionNotes = String(payload?.production_notes || "").trim();
-  if (productionNotes.length > 3000) throw new HttpError(400, "Production notes must be 3000 characters or fewer");
+  if (productionNotes.length > 10000) throw new HttpError(400, "Production notes must be 10000 characters or fewer");
 
   let videoDuration = Number(payload?.video_duration ?? 30);
   if (!Number.isFinite(videoDuration)) videoDuration = 30;

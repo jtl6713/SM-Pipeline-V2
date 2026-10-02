@@ -201,6 +201,8 @@
   let pipelineContentRecords = [];
   let pipelineScheduleGridRecords = [];
   let pipelineScheduleGridOpen = false;
+  let pipelineScheduleGridAnchorDate = null;
+  let pipelineScheduleGridLoadGeneration = 0;
   const PIPELINE_SCHEDULE_PLATFORM_KEYS = ["instagram", "facebook", "tiktok", "youtube"];
   const pipelineScheduleVisiblePlatforms = new Set(PIPELINE_SCHEDULE_PLATFORM_KEYS);
   let pipelineScheduleDragOutputId = "";
@@ -252,7 +254,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.451-timed-script-vo-duration";
+  const BUILD_ID = "item4-0.6.457-timed-script-vo-duration";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -3902,6 +3904,12 @@
     return [clean, directive, frameDirective, timedDirective].filter(Boolean).join("\n");
   }
 
+  function productionRequestIsPromoted(record = activeProductionRequest) {
+    const recordId = String(record?.id || "");
+    if (item4PromotedRequestIds.has(recordId)) return true;
+    return String(record?.status || "") === "Promoted";
+  }
+
   function timedScriptActive() {
     return Boolean(productionTimedScript && Array.isArray(productionTimedScript.segments) && productionTimedScript.segments.length);
   }
@@ -3976,11 +3984,82 @@
     }
   }
 
+  function timedScriptStorageKey(requestId = activeProductionRequest?.id) {
+    const id = String(requestId || "").trim();
+    return id ? `studio-timed-script:${id}` : "";
+  }
+
+  function rememberTimedScript(timeline, requestId = activeProductionRequest?.id) {
+    const key = timedScriptStorageKey(requestId);
+    if (!key) return;
+    try {
+      if (!timeline?.segments?.length) sessionStorage.removeItem(key);
+      else sessionStorage.setItem(key, JSON.stringify(timeline));
+    } catch {
+      // Private browsing can reject sessionStorage. The in-memory timeline still saves.
+    }
+  }
+
+  function recallTimedScript(requestId = activeProductionRequest?.id) {
+    const key = timedScriptStorageKey(requestId);
+    const api = window.StudioTimedScript;
+    if (!key || !api) return null;
+    try {
+      return api.normalizeTimeline(sessionStorage.getItem(key) || "") || null;
+    } catch {
+      return null;
+    }
+  }
+
+  function flushTimedScriptEditor() {
+    const api = window.StudioTimedScript;
+    if (!api || !productionTimedScript?.segments?.length) return;
+    const scenes = Array.from(document.querySelectorAll("[data-timed-scene]"));
+    if (!scenes.length) return;
+    const segments = productionTimedScript.segments.map((segment) => ({ ...segment }));
+    let changed = false;
+    scenes.forEach((scene) => {
+      const index = Number(scene.dataset.timedScene);
+      const segment = segments[index];
+      if (!segment) return;
+      const voice = scene.querySelector("[data-timed-field='voiceover']");
+      const start = scene.querySelector("[data-timed-field='start']");
+      const end = scene.querySelector("[data-timed-field='end']");
+      const asset = scene.querySelector("[data-timed-field='asset']");
+      if (voice && voice.value !== (segment.voiceover_text || "")) {
+        segment.voiceover_text = voice.value;
+        changed = true;
+      }
+      if (start) {
+        const parsed = api.parseClock(start.value);
+        if (parsed != null && parsed !== segment.start_seconds) {
+          segment.start_seconds = parsed;
+          changed = true;
+        }
+      }
+      if (end) {
+        const parsed = api.parseClock(end.value);
+        if (parsed != null && parsed !== segment.end_seconds) {
+          segment.end_seconds = parsed;
+          changed = true;
+        }
+      }
+      if (asset && asset.value !== (segment.asset_id || "")) {
+        segment.asset_id = asset.value;
+        changed = true;
+      }
+    });
+    if (!changed) return;
+    const next = api.buildTimeline(segments);
+    if (next.segments.length) productionTimedScript = next;
+  }
+
   function commitTimedScript(timeline, { resequence = false } = {}) {
     const api = window.StudioTimedScript;
     if (!api) return;
     const next = resequence ? resequenceTimedScript(timeline) : api.buildTimeline(timeline?.segments || []);
     productionTimedScript = next.segments.length ? next : null;
+    rememberTimedScript(productionTimedScript);
     if (productionTimedScript) {
       if ($("prScriptMode")) $("prScriptMode").value = "Force exact";
       if ($("prRequestedScript")) $("prRequestedScript").value = api.exactVoiceoverText(productionTimedScript);
@@ -4021,10 +4100,13 @@
     const summary = $("prTimedScriptSummary");
     const host = $("prTimedScriptReview");
     const clear = $("prClearTimedScript");
+    const renderAgain = $("prRenderTimedScript");
     if (!summary || !host) return;
     const api = window.StudioTimedScript;
     const active = timedScriptActive() && api;
+    const promoted = productionRequestIsPromoted();
     if (clear) clear.hidden = !active;
+    if (renderAgain) renderAgain.hidden = !(active && promoted);
     if (!active) {
       summary.hidden = true;
       summary.innerHTML = "";
@@ -4042,6 +4124,7 @@
     summary.innerHTML = `
       <div class="timed-script-summary">
         <strong>${segments.length} scenes · ${Number(productionTimedScript.duration_seconds).toFixed(1)} sec · Force exact narration</strong>
+        ${promoted ? `<span>This piece is already in production. Render this script writes the narration and starts again. Save and Approve stay locked. It does not publish.</span>` : ""}
         <span>${fits} of ${segments.length} narration windows fit${unresolved ? ` · ${unresolved} still${unresolved === 1 ? "" : "s"} unassigned` : ""}</span>
       </div>
       <div class="timed-script-bar" aria-hidden="true">
@@ -4210,8 +4293,14 @@
     if (message) message.textContent = "";
     if (apply) apply.disabled = true;
     const backdrop = $("prTimedScriptBackdrop");
+    if (backdrop && backdrop.parentElement !== document.body) document.body.appendChild(backdrop);
     if (backdrop) backdrop.hidden = false;
-    $("prTimedScriptInput")?.focus();
+    const input = $("prTimedScriptInput");
+    if (input) {
+      input.disabled = false;
+      input.readOnly = false;
+      input.focus();
+    }
   }
 
   function closeTimedScriptImporter() {
@@ -10940,8 +11029,17 @@
     if (form) {
       form.querySelectorAll("input, select, textarea").forEach((control) => {
         if (control.matches("[data-ez-asset-caption], [data-ez-caption-mode], #ezIdeaTitle, #ezIdeaSummary, #ezPrimaryLocation, #prPrimaryLocation")) return;
+        // A promoted piece locks the form, including this paste box. iOS then
+        // refuses paste. The importer stays editable so a replacement script
+        // can be applied onto the piece that is still Awaiting Approval.
+        if (control.id === "prTimedScriptInput" || control.closest("#prTimedScriptBackdrop") || control.matches("[data-timed-field]")) return;
         control.disabled = !editable;
       });
+    }
+    const timedScriptInput = $("prTimedScriptInput");
+    if (timedScriptInput) {
+      timedScriptInput.disabled = false;
+      timedScriptInput.readOnly = false;
     }
     syncNativeVideoCoverRule();
     syncEzIdeaIdentityFields();
@@ -11103,7 +11201,7 @@
     syncProductionNarrationEstimate();
     const renderSettings = parseProductionRenderSettings(record.production_notes || "");
     productionRenderFrameOverrides = parseProductionRenderOverrides(record.production_notes || "");
-    productionTimedScript = parseProductionTimedScript(record.production_notes || "");
+    productionTimedScript = parseProductionTimedScript(record.production_notes || "") || recallTimedScript(record.id);
     timedScriptAssetSignature = "";
     hydrateProductionRenderSettings(renderSettings);
     renderProductionFrameOverrides({ assets: record.studio_master_assets || item4Workspace?.assets || [] });
@@ -11838,6 +11936,7 @@
   $("prImportTimedScript")?.addEventListener("click", openTimedScriptImporter);
   $("prClearTimedScript")?.addEventListener("click", () => {
     productionTimedScript = null;
+    rememberTimedScript(null);
     syncProductionRenderUi();
     renderTimedScriptReview();
   });
@@ -11863,13 +11962,62 @@
     }
     if (apply) apply.disabled = !parsed.timeline?.segments?.length;
   });
-  $("prTimedScriptApply")?.addEventListener("click", () => {
+  async function savePromotedTimedScript() {
+    if (!timedScriptActive()) {
+      setRequestMessage("Import a timed script first.", "error-text");
+      return;
+    }
+    if (!productionRequestIsPromoted()) {
+      setRequestMessage("Timeline applied. Save, then Approve. This does not publish.", "success");
+      return;
+    }
+    if (!activeProductionRequest?.id) {
+      setRequestMessage("Open the production request first.", "error-text");
+      return;
+    }
+    const button = $("prRenderTimedScript");
+    if (button) button.disabled = true;
+    setRequestMessage("Saving your script and starting the render again…", "success");
+    try {
+      const payload = productionRequestPayload();
+      const result = await api(`/api/production-requests/${encodeURIComponent(activeProductionRequest.id)}/timed-script`, {
+        method: "POST",
+        body: JSON.stringify({
+          production_notes: payload.production_notes,
+          requested_script: payload.requested_script,
+          video_duration_seconds: payload.video_duration_seconds,
+          script_mode: "Force exact",
+        }),
+      });
+      if (result.production_request) {
+        activeProductionRequest = mergeProductionRequestRecord(activeProductionRequest, result.production_request);
+      }
+      activeProductionRequest = {
+        ...activeProductionRequest,
+        production_notes: payload.production_notes,
+        requested_script: payload.requested_script,
+        script_mode: "Force exact",
+        video_duration_seconds: payload.video_duration_seconds,
+      };
+      rememberTimedScript(productionTimedScript);
+      renderTimedScriptReview();
+      setRequestMessage(result.message || "Your script is saved and rendering again.", result.rerender_started === false ? "error-text" : "success");
+    } catch (error) {
+      setRequestMessage(error.message || "The timed script was not saved.", "error-text");
+    } finally {
+      if (button) button.disabled = false;
+    }
+  }
+
+  $("prTimedScriptApply")?.addEventListener("click", async () => {
     if (!productionTimedScriptDraft?.segments?.length || !window.StudioTimedScript) return;
     const assigned = window.StudioTimedScript.assignStillsInOrder(productionTimedScriptDraft, productionStillAssets());
     closeTimedScriptImporter();
     setProductionWorkspaceTab("rendering");
     commitTimedScript(assigned);
+    await savePromotedTimedScript();
   });
+  $("prRenderTimedScript")?.addEventListener("click", () => savePromotedTimedScript());
   $("prRenderPreset")?.addEventListener("change", (event) => applyProductionRenderPreset(event.target.value));
   $("prRenderImageDurationMode")?.addEventListener("change", syncProductionRenderUi);
   [
@@ -12073,7 +12221,16 @@
     return next;
   }
 
+  function wholeVideoDurationSeconds(value, { ceil = false } = {}) {
+    if (value === null || value === undefined || String(value).trim() === "") return "";
+    const n = Number(value);
+    if (!Number.isFinite(n)) return value;
+    const whole = ceil ? Math.ceil(n - 1e-9) : Math.round(n);
+    return Math.min(600, Math.max(5, whole));
+  }
+
   function productionRequestPayload() {
+    flushTimedScriptEditor();
     if (usingEzPlatforms() || ezEntryPath === "content") {
       const voiceoverMode = resolvedAudioMode("voiceover");
       const musicMode = resolvedAudioMode("music");
@@ -12155,7 +12312,10 @@
     }
     if (timedScriptActive()) {
       payload.voiceover_mode = "Yes";
-      payload.video_duration_seconds = productionTimedScript.duration_seconds;
+      // The duration field is a whole-number cap. Exact scene boundaries stay
+      // in the timed-script directive. Ceiling keeps a 90.4s timeline from
+      // being stored as 90 and trimmed.
+      payload.video_duration_seconds = wholeVideoDurationSeconds(productionTimedScript.duration_seconds, { ceil: true });
       payload.voiceover_tail_seconds = 0;
       payload.script_mode = "Force exact";
       payload.requested_script = window.StudioTimedScript?.exactVoiceoverText?.(productionTimedScript) || payload.requested_script;
@@ -12164,6 +12324,11 @@
       if ($("prVideoDuration")) $("prVideoDuration").value = payload.video_duration_seconds;
       if ($("prVoiceoverTail")) $("prVoiceoverTail").value = 0;
       if ($("prVoiceover")) $("prVoiceover").value = "Yes";
+    } else {
+      payload.video_duration_seconds = wholeVideoDurationSeconds(payload.video_duration_seconds);
+    }
+    if (timedScriptActive() && !/\[timed-script\]/i.test(String(payload.production_notes || ""))) {
+      throw new Error("The timed script is still only on this page. Apply it again, then Save.");
     }
     return coerceForceExactTextModes(payload);
   }
@@ -16775,7 +16940,93 @@
 
   function pipelineScheduleWindow() {
     const helper = globalThis.PipelineScheduleGrid;
-    return helper?.sevenDayWindow ? helper.sevenDayWindow(new Date()) : null;
+    const anchor = pipelineScheduleGridAnchorDate instanceof Date
+      ? pipelineScheduleGridAnchorDate
+      : new Date();
+    return helper?.sevenDayWindow ? helper.sevenDayWindow(anchor) : null;
+  }
+
+  function pipelineScheduleWindowLabel(windowValue = pipelineScheduleWindow()) {
+    const first = windowValue?.days?.[0];
+    const last = windowValue?.days?.[6];
+    if (!first || !last) return "";
+    const sameYear = first.getFullYear() === last.getFullYear();
+    const start = first.toLocaleDateString(undefined, {
+      month: "short",
+      day: "numeric",
+      year: sameYear ? undefined : "numeric",
+    });
+    const end = last.toLocaleDateString(undefined, {
+      month: "short",
+      day: "numeric",
+      year: "numeric",
+    });
+    return `${start} – ${end}`;
+  }
+
+  function pipelineScheduleWindowStartsToday(windowValue = pipelineScheduleWindow()) {
+    const helper = globalThis.PipelineScheduleGrid;
+    const first = windowValue?.days?.[0];
+    if (!first || !helper?.dayKey) return false;
+    return helper.dayKey(first) === helper.dayKey(new Date());
+  }
+
+  async function loadPipelineScheduleGridWindow(message = "") {
+    const generation = ++pipelineScheduleGridLoadGeneration;
+    if (message) setPipelineScheduleGridMessage(message);
+    try {
+      const result = await api(pipelineScheduleGridApiPath(), { timeoutMs: 15000, retries: 1 });
+      if (generation !== pipelineScheduleGridLoadGeneration) return;
+      pipelineScheduleGridRecords = result?.records || [];
+      renderPipelineScheduleGrid(pipelineScheduleGridRecords, String(result?.schedule_error || ""));
+      const selected = (pipelineOutputs || []).find((row) => row.id === pipelineScheduleSelectedOutputId);
+      if (selected) {
+        setPipelineScheduleGridMessage(
+          `Selected Platform Output ${pipelineScheduleEntryOutputId(selected)}. Choose a future slot in ${pipelineScheduleWindowLabel()}.`
+        );
+      } else if (message) {
+        setPipelineScheduleGridMessage("");
+      }
+    } catch (error) {
+      if (generation !== pipelineScheduleGridLoadGeneration) return;
+      const fallback = (pipelineOutputs || []).filter((row) => String(row?.scheduled_post_date || "").trim());
+      pipelineScheduleGridRecords = fallback;
+      renderPipelineScheduleGrid(fallback, error?.message || "Schedule view unavailable");
+      setPipelineScheduleGridMessage(error?.message || "Could not load that 7-day window.", true);
+    }
+  }
+
+  async function shiftPipelineScheduleGridWindow(days) {
+    const windowValue = pipelineScheduleWindow();
+    const start = windowValue?.start ? new Date(windowValue.start.getTime()) : new Date();
+    start.setHours(0, 0, 0, 0);
+    start.setDate(start.getDate() + Number(days || 0));
+    pipelineScheduleGridAnchorDate = start;
+    await loadPipelineScheduleGridWindow(
+      `Loading ${pipelineScheduleWindowLabel()}…`
+    );
+  }
+
+  async function resetPipelineScheduleGridWindow() {
+    pipelineScheduleGridAnchorDate = null;
+    await loadPipelineScheduleGridWindow("Loading today and the next 6 days…");
+  }
+
+  function bindPipelineScheduleGridWindowControls(target) {
+    if (!target) return;
+    target.querySelectorAll("[data-pipeline-schedule-window-shift]").forEach((button) => {
+      button.addEventListener("click", () => {
+        const days = Number(button.dataset.pipelineScheduleWindowShift || 0);
+        shiftPipelineScheduleGridWindow(days).catch((error) => {
+          setPipelineScheduleGridMessage(error?.message || "Could not change calendar window.", true);
+        });
+      });
+    });
+    target.querySelector("[data-pipeline-schedule-window-today]")?.addEventListener("click", () => {
+      resetPipelineScheduleGridWindow().catch((error) => {
+        setPipelineScheduleGridMessage(error?.message || "Could not return to today.", true);
+      });
+    });
   }
 
   function pipelineScheduleHourLabel(hour) {
@@ -16791,8 +17042,12 @@
     return date.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
   }
 
-  function pipelineScheduleDayHeader(date, index) {
-    const weekday = index === 0 ? "Today" : date.toLocaleDateString(undefined, { weekday: "short" });
+  function pipelineScheduleDayHeader(date) {
+    const helper = globalThis.PipelineScheduleGrid;
+    const isToday = helper?.dayKey
+      ? helper.dayKey(date) === helper.dayKey(new Date())
+      : false;
+    const weekday = isToday ? "Today" : date.toLocaleDateString(undefined, { weekday: "short" });
     const day = date.toLocaleDateString(undefined, { month: "short", day: "numeric" });
     return `<span class="pipeline-schedule-day-label">${escapeHtml(weekday)}</span><span class="pipeline-schedule-day-date">${escapeHtml(day)}</span>`;
   }
@@ -17068,18 +17323,17 @@
     const cells = helper.aggregate(visibleRecords, windowValue);
     const total = [...cells.values()].reduce((sum, cell) => sum + Number(cell?.total || 0), 0);
     const unscheduled = pipelineUnscheduledScheduleRecords().filter(pipelineScheduleRecordVisible);
-    const lastDay = windowValue.days[6];
     const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || "local time";
+    const rangeLabel = pipelineScheduleWindowLabel(windowValue);
     if (summary) {
-      const rangeEnd = lastDay.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
       summary.textContent = error
-        ? `${total} scheduled in the loaded Pipeline rows · schedule service retrying · ${timezone}`
-        : `${total} scheduled output${total === 1 ? "" : "s"} · ${unscheduled.length} ready to schedule · Today through ${rangeEnd} · ${timezone}`;
+        ? `${total} scheduled in the loaded Pipeline rows · schedule service retrying · ${rangeLabel} · ${timezone}`
+        : `${total} scheduled output${total === 1 ? "" : "s"} · ${unscheduled.length} ready to schedule · ${rangeLabel} · ${timezone}`;
     }
 
     const now = new Date();
     const nowKey = helper.slotKey(now);
-    const head = windowValue.days.map((date, index) => `<th scope="col">${pipelineScheduleDayHeader(date, index)}</th>`).join("");
+    const head = windowValue.days.map((date) => `<th scope="col">${pipelineScheduleDayHeader(date)}</th>`).join("");
     const rows = Array.from({ length: 48 }, (_, slotIndex) => {
       const cellsHtml = windowValue.days.map((day) => {
         const date = helper.slotDate(day, slotIndex);
@@ -17099,8 +17353,10 @@
       return `<tr><th scope="row" class="pipeline-schedule-hour">${escapeHtml(pipelineScheduleSlotLabel(slotIndex))}</th>${cellsHtml}</tr>`;
     }).join("");
 
+    const windowToolbar = `<div class="pipeline-schedule-window-toolbar" aria-label="Calendar date range controls"><div class="pipeline-schedule-window-controls"><button type="button" class="secondary-button" data-pipeline-schedule-window-shift="-7">← Previous 7 days</button><button type="button" class="text-button" data-pipeline-schedule-window-today${pipelineScheduleWindowStartsToday(windowValue) ? ' disabled aria-current="date"' : ""}>Today</button><button type="button" class="secondary-button" data-pipeline-schedule-window-shift="7">Next 7 days →</button></div><strong class="pipeline-schedule-window-range">${escapeHtml(rangeLabel)}</strong><span class="pipeline-schedule-window-hint">Select a bubble, change the 7-day window if needed, then click its destination slot.</span></div>`;
     const tray = `<section class="pipeline-schedule-unscheduled" aria-label="Ready to schedule"><div class="pipeline-schedule-unscheduled-copy"><strong>Ready to schedule</strong><span>Outputs stay here until a schedule is saved. Use default schedules can fill intelligent row suggestions without removing them from this tray, or drag a bubble directly into a 30-minute slot.</span></div><div class="pipeline-schedule-unscheduled-list">${unscheduled.length ? unscheduled.map((record) => pipelineScheduleEntryMarkup(record, { unscheduled: true })).join("") : '<span class="subtle">No ready outputs are waiting for a saved schedule.</span>'}</div></section>`;
-    target.innerHTML = `${tray}<div class="pipeline-schedule-grid-scroll"><table class="pipeline-schedule-grid-table"><thead><tr><th class="pipeline-hour-head" scope="col">Time</th>${head}</tr></thead><tbody>${rows}</tbody></table></div>`;
+    target.innerHTML = `${windowToolbar}${tray}<div class="pipeline-schedule-grid-scroll"><table class="pipeline-schedule-grid-table"><thead><tr><th class="pipeline-hour-head" scope="col">Time</th>${head}</tr></thead><tbody>${rows}</tbody></table></div>`;
+    bindPipelineScheduleGridWindowControls(target);
     bindPipelineScheduleGridInteractions(target);
     syncPipelineScheduleSelectionVisual(target);
 
@@ -17467,6 +17723,8 @@
       setPipelineLiveHint("Refreshing…");
     }
     try {
+      const scheduleGeneration = pipelineScheduleGridLoadGeneration;
+      const schedulePath = pipelineScheduleGridApiPath();
       const [outputsSettled, contentSettled, scheduleSettled] = await Promise.all([
         api("/api/outputs?limit=250", { timeoutMs: 20000, retries: 2 }).then(
           (value) => ({ ok: true, value }),
@@ -17476,7 +17734,7 @@
           (value) => ({ ok: true, value }),
           (error) => ({ ok: false, error }),
         ),
-        api(pipelineScheduleGridApiPath(), { timeoutMs: 15000, retries: 1 }).then(
+        api(schedulePath, { timeoutMs: 15000, retries: 1 }).then(
           (value) => ({ ok: true, value }),
           (error) => ({ ok: false, error }),
         ),
@@ -17490,10 +17748,12 @@
       const records = outputsResult?.records || [];
       const contentRecords = contentResult?.records || [];
       const scheduleError = String(scheduleResult?.schedule_error || (!scheduleSettled.ok ? (scheduleSettled.error?.message || "Schedule view unavailable") : ""));
-      pipelineScheduleGridRecords = scheduleError
-        ? records.filter((row) => String(row?.scheduled_post_date || "").trim())
-        : (scheduleResult?.records || []);
-      renderPipelineScheduleGrid(pipelineScheduleGridRecords, scheduleError);
+      if (scheduleGeneration === pipelineScheduleGridLoadGeneration) {
+        pipelineScheduleGridRecords = scheduleError
+          ? records.filter((row) => String(row?.scheduled_post_date || "").trim())
+          : (scheduleResult?.records || []);
+        renderPipelineScheduleGrid(pipelineScheduleGridRecords, scheduleError);
+      }
       const unchanged = !force
         && silent
         && target.querySelector("table")

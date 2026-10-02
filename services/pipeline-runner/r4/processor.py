@@ -8,11 +8,10 @@ from typing import Any
 from airtable.client import AirtableClient
 from airtable.constants import (
     CONTENT_ITEMS_TABLE,
-    CONTENT_PROFILES_TABLE,
     MEDIA_ASSETS_TABLE,
     PLATFORM_OUTPUTS_TABLE,
 )
-from branding.watermark import brand_watermark_url, profile_requires_watermark
+from branding.watermark import brand_watermark_url
 from r4.constants import MAKE_SCENARIO_ID, MAKE_SCENARIO_NAME, MAX_RECORDS, R4_CLEAR_FIELDS
 from r4.formulas import r4_exact_output_formula, r4_production_formula
 from audio.voiceover_duration import validate_voiceover_for_render, voiceover_is_disabled
@@ -113,14 +112,9 @@ def render_watermark_url(
     output: dict[str, Any],
     content_item: dict[str, Any] | None,
 ) -> str:
-    profile_id = first_linked_id(field(output, "Content_Profile"))
-    if not profile_id and content_item:
-        profile_id = first_linked_id(field(content_item, "Content_Profile"))
-    if not profile_id:
-        return ""
-    profile = client.get_record(CONTENT_PROFILES_TABLE, profile_id)
-    if not profile_requires_watermark(field_str(profile, "Profile_Name")):
-        return ""
+    # Remotion photo renders always burn the official Chicago Shining logo
+    # top-left. Library still burn-in stays profile-gated elsewhere.
+    _ = output, content_item
     return brand_watermark_url(client)
 
 

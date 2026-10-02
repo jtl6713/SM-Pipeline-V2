@@ -20,7 +20,7 @@ const DEFAULT_MUSIC_END_FADE_SECONDS = 0.5;
 const PIPELINE_RUNNER_INTERNAL_URL = String(
     process.env.PIPELINE_RUNNER_INTERNAL_URL || 'http://127.0.0.1:3350'
 ).replace(/\/$/, '');
-const SERVICE_VERSION = '2026-10-01-timed-script-authoritative';
+const SERVICE_VERSION = '2026-10-02-render-logo-watermark';
 const PROJECT_DIR = __dirname;
 const PUBLIC_DIR = path.join(PROJECT_DIR, 'public');
 const OUT_DIR = path.join(PROJECT_DIR, 'out');
