@@ -462,7 +462,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.434-timed-script-apply",
+          version: "0.10.435-timed-script-requeue",
           studio_desk_inventory_v1: true,
           studio_desk_activity_v1: true,
           studio_tiktok_complete_v1: true,
@@ -14578,6 +14578,25 @@ function productionRequestTimedScriptRecordIdFromPath(url) {
   return match[1];
 }
 
+async function loadContentPlatformOutputs(env, contentId) {
+  const content = await airtableFetch(env, env.AIRTABLE_CONTENT_TABLE_ID, contentId);
+  const links = f(content, "Platform Outputs");
+  const ids = [...new Set((Array.isArray(links) ? links : [])
+    .map((id) => String(id || "").trim())
+    .filter((id) => /^rec[A-Za-z0-9]+$/.test(id)))].slice(0, 50);
+  if (!ids.length) return [];
+  return Promise.all(ids.map((id) => airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, id)));
+}
+
+function outputNeedsTimedScriptRerender(record) {
+  if (outputAlreadyApprovedForPublishing(record)) return false;
+  const outputStatus = String(f(record, "Output_Status") || "").trim();
+  return outputStatus === "Ready for Review"
+    || outputStatus === "In Production"
+    || Boolean(String(f(record, "Final_File_URL") || "").trim())
+    || Boolean(String(f(record, "Studio_Preview_URL") || "").trim());
+}
+
 function outputAlreadyApprovedForPublishing(record) {
   const output = String(f(record, "Output_Status") || "").trim().toLowerCase();
   const publish = String(f(record, "Publish_Status") || "").trim().toLowerCase();
@@ -14615,11 +14634,14 @@ async function applyPromotedTimedScriptRoute(request, env, url, authorization) {
   const contentId = studioFirstLinkedId(f(existing, "Promoted_Content_Item"));
   if (!contentId) throw new HttpError(409, "This request has no content item to re-render.");
 
-  const outputs = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
-    limit: 50,
-    filterFormula: `AND({Test_Run_ID}=BLANK(),FIND("${contentId}", ARRAYJOIN({Content_Item})))`,
-  }).catch(() => []);
-  if ((outputs || []).some(outputAlreadyApprovedForPublishing)) {
+  // ARRAYJOIN on the linked Content Item returns the display name, not the
+  // record id, so a FIND(rec...) lookup misses every finished video and the
+  // resume job immediately reports done.
+  const outputs = await loadContentPlatformOutputs(env, contentId);
+  if (!outputs.length) {
+    throw new HttpError(409, "This piece has no platform videos to render again.");
+  }
+  if (outputs.some(outputAlreadyApprovedForPublishing)) {
     throw new HttpError(409, "This piece is already approved for publishing, so the timed script was not changed.");
   }
 
@@ -14642,34 +14664,16 @@ async function applyPromotedTimedScriptRoute(request, env, url, authorization) {
 
   await syncProductionRequestDirectivesToContentItem(env, updated, contentId);
 
-  const resetRows = (outputs || [])
-    .filter((output) => !outputAlreadyApprovedForPublishing(output))
-    .filter((output) => {
-      const outputStatus = String(f(output, "Output_Status") || "").trim();
-      return outputStatus === "Ready for Review"
-        || outputStatus === "In Production"
-        || Boolean(String(f(output, "Final_File_URL") || "").trim());
-    })
+  const resetRows = outputs
+    .filter((output) => outputNeedsTimedScriptRerender(output))
     .map((output) => ({
       id: output.id,
-      fields: {
-        Output_Status: "In Production",
-        Render_Status: "Ready for Render",
-        Review_Status: null,
-        Remotion_Job_ID: "",
-        Remotion_Status_URL: "",
-        Remotion_Props_JSON: "",
-        Remotion_Error_Message: "",
-        Final_File_Error_Message: "",
-        Final_File_URL: "",
-        Final_File_ID: "",
-        Output_URL: "",
-        Studio_Preview_URL: "",
-      },
+      fields: studioSharedRenderRerenderFields(),
     }));
-  if (resetRows.length) {
-    await airtableBatchUpdate(env, env.AIRTABLE_OUTPUT_TABLE_ID, resetRows, { typecast: true });
+  if (!resetRows.length) {
+    throw new HttpError(409, "This piece is not waiting in review, so the timed script was not sent back to render.");
   }
+  await airtableBatchUpdate(env, env.AIRTABLE_OUTPUT_TABLE_ID, resetRows, { typecast: true });
 
   let rerenderError = "";
   try {

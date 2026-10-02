@@ -252,7 +252,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.453-timed-script-mobile";
+  const BUILD_ID = "item4-0.6.454-timed-script-requeue";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -3902,6 +3902,12 @@
     return [clean, directive, frameDirective, timedDirective].filter(Boolean).join("\n");
   }
 
+  function productionRequestIsPromoted(record = activeProductionRequest) {
+    const recordId = String(record?.id || "");
+    if (item4PromotedRequestIds.has(recordId)) return true;
+    return String(record?.status || "") === "Promoted";
+  }
+
   function timedScriptActive() {
     return Boolean(productionTimedScript && Array.isArray(productionTimedScript.segments) && productionTimedScript.segments.length);
   }
@@ -4092,10 +4098,13 @@
     const summary = $("prTimedScriptSummary");
     const host = $("prTimedScriptReview");
     const clear = $("prClearTimedScript");
+    const renderAgain = $("prRenderTimedScript");
     if (!summary || !host) return;
     const api = window.StudioTimedScript;
     const active = timedScriptActive() && api;
+    const promoted = productionRequestIsPromoted();
     if (clear) clear.hidden = !active;
+    if (renderAgain) renderAgain.hidden = !(active && promoted);
     if (!active) {
       summary.hidden = true;
       summary.innerHTML = "";
@@ -4113,6 +4122,7 @@
     summary.innerHTML = `
       <div class="timed-script-summary">
         <strong>${segments.length} scenes · ${Number(productionTimedScript.duration_seconds).toFixed(1)} sec · Force exact narration</strong>
+        ${promoted ? `<span>This piece is already in production. Render this script writes the narration and starts again. Save and Approve stay locked. It does not publish.</span>` : ""}
         <span>${fits} of ${segments.length} narration windows fit${unresolved ? ` · ${unresolved} still${unresolved === 1 ? "" : "s"} unassigned` : ""}</span>
       </div>
       <div class="timed-script-bar" aria-hidden="true">
@@ -11950,19 +11960,21 @@
     }
     if (apply) apply.disabled = !parsed.timeline?.segments?.length;
   });
-  $("prTimedScriptApply")?.addEventListener("click", async () => {
-    if (!productionTimedScriptDraft?.segments?.length || !window.StudioTimedScript) return;
-    const assigned = window.StudioTimedScript.assignStillsInOrder(productionTimedScriptDraft, productionStillAssets());
-    closeTimedScriptImporter();
-    setProductionWorkspaceTab("rendering");
-    commitTimedScript(assigned);
-    const status = String(activeProductionRequest?.status || "Draft");
-    if (["Draft", "Ready"].includes(status)) {
+  async function savePromotedTimedScript() {
+    if (!timedScriptActive()) {
+      setRequestMessage("Import a timed script first.", "error-text");
+      return;
+    }
+    if (!productionRequestIsPromoted()) {
       setRequestMessage("Timeline applied. Save, then Approve. This does not publish.", "success");
       return;
     }
-    const apply = $("prTimedScriptApply");
-    if (apply) apply.disabled = true;
+    if (!activeProductionRequest?.id) {
+      setRequestMessage("Open the production request first.", "error-text");
+      return;
+    }
+    const button = $("prRenderTimedScript");
+    if (button) button.disabled = true;
     setRequestMessage("Saving your script and starting the render again…", "success");
     try {
       const payload = productionRequestPayload();
@@ -11986,11 +11998,24 @@
         video_duration_seconds: payload.video_duration_seconds,
       };
       rememberTimedScript(productionTimedScript);
+      renderTimedScriptReview();
       setRequestMessage(result.message || "Your script is saved and rendering again.", result.rerender_started === false ? "error-text" : "success");
     } catch (error) {
       setRequestMessage(error.message || "The timed script was not saved.", "error-text");
+    } finally {
+      if (button) button.disabled = false;
     }
+  }
+
+  $("prTimedScriptApply")?.addEventListener("click", async () => {
+    if (!productionTimedScriptDraft?.segments?.length || !window.StudioTimedScript) return;
+    const assigned = window.StudioTimedScript.assignStillsInOrder(productionTimedScriptDraft, productionStillAssets());
+    closeTimedScriptImporter();
+    setProductionWorkspaceTab("rendering");
+    commitTimedScript(assigned);
+    await savePromotedTimedScript();
   });
+  $("prRenderTimedScript")?.addEventListener("click", () => savePromotedTimedScript());
   $("prRenderPreset")?.addEventListener("change", (event) => applyProductionRenderPreset(event.target.value));
   $("prRenderImageDurationMode")?.addEventListener("change", syncProductionRenderUi);
   [
