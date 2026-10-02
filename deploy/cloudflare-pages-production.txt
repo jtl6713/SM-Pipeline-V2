@@ -354,3 +354,8 @@ Deploy Studio Pages production
 Reason: Align Studio footer label with Timed Script UI 0.6.450
 UI: 0.6.450-timed-script
 Requested: 2026-10-01T17:06:00Z
+
+Deploy Studio Pages production
+Reason: Timed-script VO-driven still durations — tolerate trailing ez-photo-wait on [timed-script] line; overwrite stale scene asset_ids
+UI: 0.6.451-timed-script-vo-duration
+Requested: 2026-10-02T18:30:00Z

@@ -120,6 +120,55 @@ def test_eight_scenes_map_to_eight_stills_and_suggested_visual_is_not_narration(
     assert "phone tapping" not in exact_requested_script(request)
 
 
+def test_timed_script_survives_trailing_photo_wait_tokens_on_same_line():
+    """Live NYC bug: ez-photo-wait appended with '; ' onto the timed-script line."""
+    timeline = assign_stills_in_order(
+        parse_timed_script_markdown(NYC_SUBWAY_SCRIPT)["timeline"],
+        [{"id": f"still-{index}", "order": index} for index in range(1, 9)],
+    )
+    # Stale asset_ids that do not match master order (scene 1 pointed at still-3).
+    stale = json.loads(json.dumps(timeline))
+    stale["segments"][0]["asset_id"] = "still-3"
+    notes = (
+        "[render-settings] preset=auto; duration_mode=auto; pacing=normal; beat_sync=off\n"
+        f"{directive_line(stale)}; ez-photo-wait=off; ez-photo-reject=recW7moQtdrPbNXg1,recbSIPdykCogPqZr"
+    )
+    request = _photo_request(notes, count=8)
+    parsed = timed_script_from_request(request)
+    assert parsed is not None
+    assert parsed["duration_seconds"] == 90
+    assert [segment_duration_frames(segment) for segment in parsed["segments"]] == [
+        210, 390, 390, 390, 360, 360, 360, 240
+    ]
+    output = {
+        "id": "recPO",
+        "fields": {
+            "Platform": "Instagram",
+            "Studio_Output_Type": "Reel",
+            "Aspect_Ratio": "9:16",
+            "Platform_Output_Type": "Reel",
+        },
+    }
+    package = source_package(request, output, None)
+    assert package is not None
+    clips = json.loads(package["render_clip_list_json"])
+    # Positional fallback keeps master still order; durations follow VO windows.
+    assert [clip["durationFrames"] for clip in clips] == [210, 390, 390, 390, 360, 360, 360, 240]
+    assert clips[0]["durationFrames"] == 210
+    assert package["total_frames"] == 2700
+    assert all(clip["timingSource"] == "timed_script" for clip in clips)
+
+
+def test_assign_stills_in_order_overwrites_stale_asset_ids():
+    parsed = parse_timed_script_markdown(NYC_SUBWAY_SCRIPT)
+    stale = parsed["timeline"]
+    stale["segments"][0]["asset_id"] = "old-wrong-id"
+    assets = [{"id": f"still-{index}", "order": index} for index in range(1, 9)]
+    timeline = assign_stills_in_order(stale, assets)
+    assert timeline["segments"][0]["asset_id"] == "still-1"
+    assert [segment["asset_id"] for segment in timeline["segments"]] == [f"still-{index}" for index in range(1, 9)]
+
+
 def test_authoritative_timing_survives_stamp_and_ignores_pacing_and_beat_sync():
     timeline = assign_stills_in_order(
         parse_timed_script_markdown(NYC_SUBWAY_SCRIPT)["timeline"],

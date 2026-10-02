@@ -459,7 +459,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.430-idea-photo-five-minute-poll",
+          version: "0.10.431-timed-script-vo-duration",
           studio_desk_inventory_v1: true,
           studio_desk_activity_v1: true,
           studio_tiktok_complete_v1: true,

@@ -369,3 +369,8 @@ Deploy Studio API Worker production
 Reason: Park Meta AP1C throttling in Retry Pending during cooldown and auto-release after cooldown (Output 1298)
 Source merge: 8d610e2d493d95636be826bfef79bc068e871f79
 Requested: 2026-10-01
+
+Deploy Studio API Worker production
+Reason: Append ez-photo-wait on a new line so timed-script JSON stays parseable (NYC CI 290 / Output 1331)
+Source branch: cursor/timed-script-vo-duration-0270
+Requested: 2026-10-02T18:30:00Z

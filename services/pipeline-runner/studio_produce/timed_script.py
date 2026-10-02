@@ -290,11 +290,31 @@ def parse_timed_script_markdown(text: str) -> dict[str, Any]:
     }
 
 
+def _parse_json_object(text: str) -> Any | None:
+    """Parse the first JSON object even when trailing note tokens follow it.
+
+    Live Production Notes often look like:
+    ``[timed-script] {...}; ez-photo-wait=off; ez-photo-reject=rec...``
+    because photo-wait tokens were appended with ``; `` onto the same line.
+    ``json.loads`` rejects that; ``raw_decode`` keeps the timeline readable.
+    """
+    payload = str(text or "").strip()
+    if not payload:
+        return None
+    start = payload.find("{")
+    if start < 0:
+        return None
+    try:
+        value, _end = json.JSONDecoder().raw_decode(payload[start:])
+    except json.JSONDecodeError:
+        return None
+    return value
+
+
 def normalize_timeline(raw: Any) -> dict[str, Any] | None:
     if isinstance(raw, str):
-        try:
-            raw = json.loads(raw)
-        except json.JSONDecodeError:
+        raw = _parse_json_object(raw)
+        if raw is None:
             return None
     if not isinstance(raw, dict):
         return None
@@ -386,7 +406,12 @@ def suggested_visuals(timeline: dict[str, Any] | None) -> list[str]:
 
 
 def assign_stills_in_order(timeline: dict[str, Any], assets: list[dict[str, Any]]) -> dict[str, Any]:
-    """Map scenes 1:1 when the imported scene count equals the Production still count."""
+    """Map scenes 1:1 when the imported scene count equals the Production still count.
+
+    Overwrite stale asset_ids. Force exact / VO-driven stamps keep still order
+    matched to narration scenes; blank-only fills left older ids in place and
+    reordered clips away from the operator's master order.
+    """
     normalized = normalize_timeline(timeline)
     if not normalized:
         return timeline
@@ -397,8 +422,7 @@ def assign_stills_in_order(timeline: dict[str, Any], assets: list[dict[str, Any]
     segments = normalized["segments"]
     if ordered and len(ordered) == len(segments):
         for segment, asset in zip(segments, ordered):
-            if not str(segment.get("asset_id") or "").strip():
-                segment["asset_id"] = str(asset.get("id") or asset.get("media_asset_record_id") or "").strip()
+            segment["asset_id"] = str(asset.get("id") or asset.get("media_asset_record_id") or "").strip()
     return normalized
 
 
