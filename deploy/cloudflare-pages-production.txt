@@ -374,3 +374,9 @@ Deploy Studio Pages production
 Reason: On a promoted request, Render this script is the save. Save and Approve stay locked.
 UI: 0.6.454-timed-script-requeue
 Requested: 2026-10-02T16:20:00Z
+
+Deploy Studio Pages production
+Reason: Let the global Pipeline publishing calendar navigate beyond the initial rolling 7 days while preserving the selected output across Previous/Today/Next windows
+UI: 0.6.455-pipeline-calendar-nav
+Source merge: 2a72701af298dc1981517b01aa2ae2bc9f7e0ca6
+Requested: 2026-10-02T16:45:00Z
