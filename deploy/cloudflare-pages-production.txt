@@ -359,3 +359,8 @@ Deploy Studio Pages production
 Reason: Timed script Save was returning a blank 500 when video duration was not a whole number. Store a whole-number cap and show the real error.
 UI: 0.6.451-timed-script-save
 Requested: 2026-10-01T18:00:00Z
+
+Deploy Studio Pages production
+Reason: Keep a timed script across refresh and attach it on Save so Approve cannot render an AI script the operator did not write.
+UI: 0.6.452-timed-script-narration
+Requested: 2026-10-01T21:30:00Z

@@ -4,7 +4,7 @@ from urllib.parse import quote
 from r4.render_request import choose_render_request
 from studio_produce.shared_render import build_shared_render_plan, render_equivalence_key
 from studio_produce.stamp import source_package, stamp_fields
-from studio_produce.steps import exact_requested_script
+from studio_produce.steps import apply_voiceover_script, exact_requested_script
 from studio_produce.timed_script import (
     assign_stills_in_order,
     directive_line,
@@ -296,3 +296,23 @@ def _photo_request(notes: str, count: int = 8):
             }),
         },
     }
+
+
+def test_theme_generation_does_not_replace_a_locked_timed_script():
+    class Client:
+        def __init__(self):
+            self.writes = []
+
+        def update_record(self, *args, **kwargs):
+            self.writes.append(args)
+
+    client = Client()
+    parent = {"id": "recParent", "fields": {"Voiceover_Script": "Exact subway narration.", "Voiceover_URL": ""}}
+    apply_voiceover_script(
+        client,
+        parent,
+        {"voiceover_script": "A short guide the operator never typed."},
+        locked=True,
+    )
+    assert client.writes == []
+    assert parent["fields"]["Voiceover_Script"] == "Exact subway narration."
