@@ -371,6 +371,32 @@ Source merge: 8d610e2d493d95636be826bfef79bc068e871f79
 Requested: 2026-10-01
 
 Deploy Studio API Worker production
-Reason: Append ez-photo-wait on a new line so timed-script JSON stays parseable (NYC CI 290 / Output 1331)
-Source branch: cursor/timed-script-vo-duration-0270
-Requested: 2026-10-02T18:30:00Z
+Reason: Accept fractional timed-script video duration as a whole-number cap, and return JSON errors from Production Request save instead of a blank 500.
+Worker: 0.10.431-timed-script-save
+Requested: 2026-10-01T18:00:00Z
+
+Deploy Studio API Worker production
+Reason: Allow a timed-script Production Request through Approve. The NYC timeline is longer than the old 3000-character notes cap.
+Worker: 0.10.432-timed-script-narration
+Requested: 2026-10-01T21:30:00Z
+
+Deploy Studio API Worker production
+Reason: Replace narration on a promoted request that is still Awaiting Approval, then render again without publishing.
+Worker: 0.10.433-timed-script-mobile
+Requested: 2026-10-02T11:40:00Z
+
+Deploy Studio API Worker production
+Reason: Allow Use this timeline to save a timed script. Phase 2A was rejecting that POST before the handler ran.
+Worker: 0.10.434-timed-script-apply
+Requested: 2026-10-02T12:05:00Z
+
+Deploy Studio API Worker production
+Reason: Requeue the linked platform videos when a timed script is applied to a promoted request. The old lookup missed them, so the render never started.
+Worker: 0.10.435-timed-script-requeue
+Requested: 2026-10-02T16:20:00Z
+
+Deploy Studio API Worker production
+Reason: Timed-script per-scene VO fitted to import windows (NYC CI 290 scene3 at 20s)
+Worker: 0.10.436-timed-script-measured-vo
+Source branch: cursor/timed-script-measured-vo-0270
+Requested: 2026-10-02T19:10:00Z

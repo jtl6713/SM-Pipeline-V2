@@ -95,5 +95,8 @@ def test_remotion_sequence_has_persistent_required_watermark_overlay():
     assert "watermarkUrl?: string;" in source
     assert "watermarkRequired?: boolean;" in source
     assert "watermarkRequired && !watermarkSource" in source
-    assert "watermarkRequired && watermarkSource" in source
+    assert "watermarkSource ?" in source
+    assert 'data-brand-watermark="logo"' in source
     assert 'width: "12%"' in source
+    assert "top: 30" in source
+    assert "left: 30" in source

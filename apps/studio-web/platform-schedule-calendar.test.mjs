@@ -47,6 +47,7 @@ test("spacing warning reports the nearest same-platform post and ignores the edi
 test("Platform Outputs expose a save-only calendar workflow", () => {
   const html = fs.readFileSync(path.join(here, "index.html"), "utf8");
   const app = fs.readFileSync(path.join(here, "assets", "app-item4-0625.js"), "utf8");
+  const css = fs.readFileSync(path.join(here, "assets", "styles-phase7-0621.css"), "utf8");
   assert.match(html, /id="platformCalendarDialog"[^>]*role="dialog"/);
   assert.match(html, /id="platformCalendarSave"[^>]*>Save Schedule/);
   assert.match(html, /id="creativeScheduleCalendar"[^>]*>📅 Calendar/);
@@ -58,6 +59,9 @@ test("Platform Outputs expose a save-only calendar workflow", () => {
   assert.match(html, /id="platformCalendarDefaultWeek">Today<\/button>/);
   assert.match(app, /dayName = helper\.localDayKey\(day\) === todayKey/);
   assert.match(app, /platformCalendarWeek = helper\.sevenDayWindow/);
+  assert.match(css, /#platformCalendarWeekLabel \{[^}]*padding: 7px 11px;[^}]*border-radius: 10px;/);
+  assert.match(css, /\.platform-calendar-table thead th \{[^}]*padding: 10px 10px;/);
+  assert.match(css, /\.platform-calendar-day-date \{[^}]*margin-top: 4px;/);
   assert.doesNotMatch(app, /data-platform-calendar-slot[\s\S]{0,500}api\(/);
 });
 
