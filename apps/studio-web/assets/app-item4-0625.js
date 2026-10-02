@@ -252,7 +252,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.452-timed-script-narration";
+  const BUILD_ID = "item4-0.6.453-timed-script-mobile";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -4281,8 +4281,14 @@
     if (message) message.textContent = "";
     if (apply) apply.disabled = true;
     const backdrop = $("prTimedScriptBackdrop");
+    if (backdrop && backdrop.parentElement !== document.body) document.body.appendChild(backdrop);
     if (backdrop) backdrop.hidden = false;
-    $("prTimedScriptInput")?.focus();
+    const input = $("prTimedScriptInput");
+    if (input) {
+      input.disabled = false;
+      input.readOnly = false;
+      input.focus();
+    }
   }
 
   function closeTimedScriptImporter() {
@@ -11011,8 +11017,17 @@
     if (form) {
       form.querySelectorAll("input, select, textarea").forEach((control) => {
         if (control.matches("[data-ez-asset-caption], [data-ez-caption-mode], #ezIdeaTitle, #ezIdeaSummary, #ezPrimaryLocation, #prPrimaryLocation")) return;
+        // A promoted piece locks the form, including this paste box. iOS then
+        // refuses paste. The importer stays editable so a replacement script
+        // can be applied onto the piece that is still Awaiting Approval.
+        if (control.id === "prTimedScriptInput" || control.closest("#prTimedScriptBackdrop") || control.matches("[data-timed-field]")) return;
         control.disabled = !editable;
       });
+    }
+    const timedScriptInput = $("prTimedScriptInput");
+    if (timedScriptInput) {
+      timedScriptInput.disabled = false;
+      timedScriptInput.readOnly = false;
     }
     syncNativeVideoCoverRule();
     syncEzIdeaIdentityFields();
@@ -11935,12 +11950,46 @@
     }
     if (apply) apply.disabled = !parsed.timeline?.segments?.length;
   });
-  $("prTimedScriptApply")?.addEventListener("click", () => {
+  $("prTimedScriptApply")?.addEventListener("click", async () => {
     if (!productionTimedScriptDraft?.segments?.length || !window.StudioTimedScript) return;
     const assigned = window.StudioTimedScript.assignStillsInOrder(productionTimedScriptDraft, productionStillAssets());
     closeTimedScriptImporter();
     setProductionWorkspaceTab("rendering");
     commitTimedScript(assigned);
+    const status = String(activeProductionRequest?.status || "Draft");
+    if (["Draft", "Ready"].includes(status)) {
+      setRequestMessage("Timeline applied. Save, then Approve. This does not publish.", "success");
+      return;
+    }
+    const apply = $("prTimedScriptApply");
+    if (apply) apply.disabled = true;
+    setRequestMessage("Saving your script and starting the render again…", "success");
+    try {
+      const payload = productionRequestPayload();
+      const result = await api(`/api/production-requests/${encodeURIComponent(activeProductionRequest.id)}/timed-script`, {
+        method: "POST",
+        body: JSON.stringify({
+          production_notes: payload.production_notes,
+          requested_script: payload.requested_script,
+          video_duration_seconds: payload.video_duration_seconds,
+          script_mode: "Force exact",
+        }),
+      });
+      if (result.production_request) {
+        activeProductionRequest = mergeProductionRequestRecord(activeProductionRequest, result.production_request);
+      }
+      activeProductionRequest = {
+        ...activeProductionRequest,
+        production_notes: payload.production_notes,
+        requested_script: payload.requested_script,
+        script_mode: "Force exact",
+        video_duration_seconds: payload.video_duration_seconds,
+      };
+      rememberTimedScript(productionTimedScript);
+      setRequestMessage(result.message || "Your script is saved and rendering again.", result.rerender_started === false ? "error-text" : "success");
+    } catch (error) {
+      setRequestMessage(error.message || "The timed script was not saved.", "error-text");
+    }
   });
   $("prRenderPreset")?.addEventListener("change", (event) => applyProductionRenderPreset(event.target.value));
   $("prRenderImageDurationMode")?.addEventListener("change", syncProductionRenderUi);

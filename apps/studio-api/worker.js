@@ -214,6 +214,7 @@ export default {
       const isProductionRequestPromoteRoute = /^\/api\/production-requests\/rec[A-Za-z0-9]+\/promote$/.test(url.pathname);
       const isProductionRequestBridgePreflightRoute = /^\/api\/production-requests\/rec[A-Za-z0-9]+\/bridge-preflight$/.test(url.pathname);
       const isProductionRequestSyncDirectivesRoute = /^\/api\/production-requests\/rec[A-Za-z0-9]+\/sync-directives$/.test(url.pathname);
+      const isProductionRequestTimedScriptRoute = /^\/api\/production-requests\/rec[A-Za-z0-9]+\/timed-script$/.test(url.pathname);
       const isProductionRequestCollectionRoute = url.pathname === "/api/production-requests";
       const isProductionRequestOutputsRoute = /^\/api\/production-requests\/rec[A-Za-z0-9]+\/outputs$/.test(url.pathname);
       const isProductionRequestAiMastersRoute = /^\/api\/production-requests\/rec[A-Za-z0-9]+\/generate-ai-masters$/.test(url.pathname);
@@ -459,7 +460,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.432-timed-script-narration",
+          version: "0.10.433-timed-script-mobile",
           studio_desk_inventory_v1: true,
           studio_desk_activity_v1: true,
           studio_tiktok_complete_v1: true,
@@ -1195,7 +1196,14 @@ export default {
       if (isProductionRequestSyncDirectivesRoute) {
         assertWriteRequest(request, env);
         requirePermission(authorization, "production_configure");
-        return syncProductionRequestDirectivesRoute(request, env, url, authorization);
+        return await syncProductionRequestDirectivesRoute(request, env, url, authorization);
+      }
+
+      if (isProductionRequestTimedScriptRoute) {
+        assertWriteRequest(request, env);
+        requirePermission(authorization, "production_configure");
+        if (request.method !== "POST") throw new HttpError(405, "Method not allowed");
+        return await applyPromotedTimedScriptRoute(request, env, url, authorization);
       }
 
       if (isProductionRequestBridgePreflightRoute) {
@@ -14560,6 +14568,125 @@ function productionRequestSyncRecordIdFromPath(url) {
   const match = url.pathname.match(/\/api\/production-requests\/(rec[A-Za-z0-9]+)\/sync-directives$/);
   if (!match) throw new HttpError(400, "Invalid Production Request directive-sync route");
   return match[1];
+}
+
+function productionRequestTimedScriptRecordIdFromPath(url) {
+  const match = url.pathname.match(/\/api\/production-requests\/(rec[A-Za-z0-9]+)\/timed-script$/);
+  if (!match) throw new HttpError(400, "Invalid timed-script route");
+  return match[1];
+}
+
+function outputAlreadyApprovedForPublishing(record) {
+  const output = String(f(record, "Output_Status") || "").trim().toLowerCase();
+  const publish = String(f(record, "Publish_Status") || "").trim().toLowerCase();
+  return output === "published"
+    || output === "approved for publishing"
+    || publish === "published"
+    || publish === "publishing";
+}
+
+async function applyPromotedTimedScriptRoute(request, env, url, authorization) {
+  let payload;
+  try { payload = await request.json(); } catch { throw new HttpError(400, "Request body must be valid JSON"); }
+
+  const recordId = productionRequestTimedScriptRecordIdFromPath(url);
+  const existing = await loadAuthorizedProductionRequest(env, recordId, authorization);
+  const status = String(f(existing, "Request_Status") || "").trim();
+  if (status !== "Promoted") {
+    throw new HttpError(409, "Save this draft, then Approve. A timed script can replace narration only after the request is already in production.");
+  }
+
+  const notes = mergeProductionRequestNotes(
+    f(existing, "Production_Notes"),
+    String(payload?.production_notes || "")
+  );
+  if (!/\[timed-script\]/i.test(notes)) {
+    throw new HttpError(400, "Paste a timed script before applying it.");
+  }
+  if (notes.length > 10000) throw new HttpError(400, "Production notes must be 10000 characters or fewer");
+
+  const script = String(payload?.requested_script || "").trim();
+  if (!script) throw new HttpError(400, "The timed script has no narration.");
+  if (script.length > 25000) throw new HttpError(400, "Requested script must be 25000 characters or fewer");
+  const videoDurationSeconds = nullableWholeSeconds(payload?.video_duration_seconds, 5, 600, "Video duration");
+
+  const contentId = studioFirstLinkedId(f(existing, "Promoted_Content_Item"));
+  if (!contentId) throw new HttpError(409, "This request has no content item to re-render.");
+
+  const outputs = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
+    limit: 50,
+    filterFormula: `AND({Test_Run_ID}=BLANK(),FIND("${contentId}", ARRAYJOIN({Content_Item})))`,
+  }).catch(() => []);
+  if ((outputs || []).some(outputAlreadyApprovedForPublishing)) {
+    throw new HttpError(409, "This piece is already approved for publishing, so the timed script was not changed.");
+  }
+
+  const now = new Date().toISOString();
+  const updated = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, recordId, {
+    method: "PATCH",
+    body: JSON.stringify({
+      fields: {
+        Production_Notes: notes,
+        Script_Mode: "Force exact",
+        Requested_Script: script,
+        Video_Duration_Seconds: videoDurationSeconds,
+        Voiceover_Tail_Seconds: 0,
+        Voiceover_Mode: "Yes",
+        Updated_At: now,
+      },
+      typecast: true,
+    }),
+  });
+
+  await syncProductionRequestDirectivesToContentItem(env, updated, contentId);
+
+  const resetRows = (outputs || [])
+    .filter((output) => !outputAlreadyApprovedForPublishing(output))
+    .filter((output) => {
+      const outputStatus = String(f(output, "Output_Status") || "").trim();
+      return outputStatus === "Ready for Review"
+        || outputStatus === "In Production"
+        || Boolean(String(f(output, "Final_File_URL") || "").trim());
+    })
+    .map((output) => ({
+      id: output.id,
+      fields: {
+        Output_Status: "In Production",
+        Render_Status: "Ready for Render",
+        Review_Status: null,
+        Remotion_Job_ID: "",
+        Remotion_Status_URL: "",
+        Remotion_Props_JSON: "",
+        Remotion_Error_Message: "",
+        Final_File_Error_Message: "",
+        Final_File_URL: "",
+        Final_File_ID: "",
+        Output_URL: "",
+        Studio_Preview_URL: "",
+      },
+    }));
+  if (resetRows.length) {
+    await airtableBatchUpdate(env, env.AIRTABLE_OUTPUT_TABLE_ID, resetRows, { typecast: true });
+  }
+
+  let rerenderError = "";
+  try {
+    await enqueueStudioProductionJob(env, recordId, { resume: true });
+  } catch (error) {
+    rerenderError = error instanceof Error ? error.message : String(error || "render did not restart");
+  }
+
+  return respond(request, env, {
+    ok: true,
+    applied: true,
+    rerender_started: !rerenderError,
+    production_request: mapProductionRequestLight(updated),
+    content_item_record_id: contentId,
+    outputs_requeued: resetRows.length,
+    message: rerenderError
+      ? `Your script is saved. Rendering did not restart: ${rerenderError}`
+      : "Your script is saved. This piece left Awaiting Approval and is rendering again. It does not publish.",
+  });
 }
 
 async function productionRequestPreferredMusic(env, requestRecord) {

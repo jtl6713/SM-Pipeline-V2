@@ -379,3 +379,8 @@ Deploy Studio API Worker production
 Reason: Allow a timed-script Production Request through Approve. The NYC timeline is longer than the old 3000-character notes cap.
 Worker: 0.10.432-timed-script-narration
 Requested: 2026-10-01T21:30:00Z
+
+Deploy Studio API Worker production
+Reason: Replace narration on a promoted request that is still Awaiting Approval, then render again without publishing.
+Worker: 0.10.433-timed-script-mobile
+Requested: 2026-10-02T11:40:00Z
