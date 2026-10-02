@@ -178,4 +178,7 @@ test("global Pipeline calendar navigates across rolling seven-day windows", () =
   assert.match(html, /Use Previous 7 days, Today, or Next 7 days to move across the schedule/);
   assert.match(css, /\.pipeline-schedule-window-toolbar/);
   assert.match(css, /pipeline-schedule-collapsed \.pipeline-schedule-window-toolbar/);
+  assert.match(css, /\.pipeline-schedule-window-range \{[^}]*padding: 7px 11px;[^}]*border-radius: 10px;/);
+  assert.match(css, /\.pipeline-schedule-grid-table thead th \{[^}]*padding: 10px 10px;/);
+  assert.match(css, /\.pipeline-schedule-day-date \{[^}]*margin-top: 4px;/);
 });
