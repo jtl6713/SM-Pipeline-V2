@@ -364,3 +364,8 @@ Deploy Studio Pages production
 Reason: Keep a timed script across refresh and attach it on Save so Approve cannot render an AI script the operator did not write.
 UI: 0.6.452-timed-script-narration
 Requested: 2026-10-01T21:30:00Z
+
+Deploy Studio Pages production
+Reason: Keep the timed-script box editable on an approved request so mobile paste works, and apply that script onto the piece waiting for approval.
+UI: 0.6.453-timed-script-mobile
+Requested: 2026-10-02T11:40:00Z
