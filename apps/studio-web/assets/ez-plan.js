@@ -372,6 +372,7 @@
   const EZ_SCHEDULE_GAP_MS = 3 * 60 * 60 * 1000;
   const EZ_SUGGEST_HORIZON_DAYS = 14;
   const EZ_PRIORITY_SCHEDULE_WINDOWS = ["05:30-07:00", "11:30-13:00", "16:30-18:00"];
+  const EZ_PRIORITY_WINDOW_OFFSETS_MINUTES = [0, 30, 60, 90];
   const EZ_SUGGEST_LEAD_MS = 10 * 60 * 1000;
 
   function ezIndustryBestWindows(platform, outputType) {
@@ -529,12 +530,18 @@
       for (const window of EZ_PRIORITY_SCHEDULE_WINDOWS) {
         const [start] = window.split("-");
         const [hh, mm] = start.split(":").map((n) => Number(n) || 0);
+        const startMinutes = hh * 60 + mm;
         for (let dayIndex = startDay; dayIndex < endDay; dayIndex++) {
           const civil = horizon[dayIndex];
           if (!civil) continue;
-          const ms = ezZonedWallToUtcMs(civil.year, civil.month, civil.day, hh, mm, timeZone);
-          if (ms <= nowMs || ezIsBlackoutLocalTime(ms, timeZone) || ezScheduleConflicts(ms, platformOccupiedMs)) continue;
-          return new Date(ms).toISOString();
+          for (const offsetMinutes of EZ_PRIORITY_WINDOW_OFFSETS_MINUTES) {
+            const totalMinutes = startMinutes + offsetMinutes;
+            const candidateHour = Math.floor(totalMinutes / 60);
+            const candidateMinute = totalMinutes % 60;
+            const ms = ezZonedWallToUtcMs(civil.year, civil.month, civil.day, candidateHour, candidateMinute, timeZone);
+            if (ms <= nowMs || ezIsBlackoutLocalTime(ms, timeZone) || ezScheduleConflicts(ms, platformOccupiedMs)) continue;
+            return new Date(ms).toISOString();
+          }
         }
       }
     }
