@@ -387,9 +387,23 @@
     return { days: ["Tue", "Wed", "Thu"], windows: ["11:00-13:00", "18:00-21:00"] };
   }
 
-  function ezChicagoDateTimeParts(date = new Date()) {
+  const EZ_DEFAULT_TIME_ZONE = "America/Chicago";
+  const EZ_SCHEDULE_BLACKOUT_START_MINUTES = 20 * 60;
+  const EZ_SCHEDULE_BLACKOUT_END_MINUTES = 3 * 60 + 30;
+
+  function ezNormalizeTimeZone(value) {
+    const zone = String(value || "").trim() || EZ_DEFAULT_TIME_ZONE;
+    try {
+      new Intl.DateTimeFormat("en-US", { timeZone: zone }).format(new Date());
+      return zone;
+    } catch {
+      return EZ_DEFAULT_TIME_ZONE;
+    }
+  }
+
+  function ezZonedDateTimeParts(date = new Date(), timeZone = EZ_DEFAULT_TIME_ZONE) {
     const parts = new Intl.DateTimeFormat("en-US", {
-      timeZone: "America/Chicago",
+      timeZone: ezNormalizeTimeZone(timeZone),
       year: "numeric",
       month: "2-digit",
       day: "2-digit",
@@ -398,26 +412,16 @@
       hourCycle: "h23",
     }).formatToParts(date);
     const get = (type) => Number(parts.find((part) => part.type === type)?.value);
-    return {
-      year: get("year"),
-      month: get("month"),
-      day: get("day"),
-      hour: get("hour"),
-      minute: get("minute"),
-    };
+    return { year: get("year"), month: get("month"), day: get("day"), hour: get("hour"), minute: get("minute") };
   }
 
-  function ezChicagoWallToUtcMs(year, month, day, hour, minute) {
+  function ezZonedWallToUtcMs(year, month, day, hour, minute, timeZone = EZ_DEFAULT_TIME_ZONE) {
     const want = Date.UTC(year, month - 1, day, hour, minute, 0, 0);
     let ms = want;
     const fmt = new Intl.DateTimeFormat("en-US", {
-      timeZone: "America/Chicago",
-      year: "numeric",
-      month: "2-digit",
-      day: "2-digit",
-      hour: "2-digit",
-      minute: "2-digit",
-      hourCycle: "h23",
+      timeZone: ezNormalizeTimeZone(timeZone),
+      year: "numeric", month: "2-digit", day: "2-digit",
+      hour: "2-digit", minute: "2-digit", hourCycle: "h23",
     });
     for (let i = 0; i < 8; i++) {
       const parts = fmt.formatToParts(new Date(ms));
@@ -436,18 +440,18 @@
     return { year: next.getUTCFullYear(), month: next.getUTCMonth() + 1, day: next.getUTCDate() };
   }
 
-  function ezChicagoWeekdayShort(date = new Date()) {
-    return new Intl.DateTimeFormat("en-US", { timeZone: "America/Chicago", weekday: "short" }).format(date);
+  function ezWeekdayShort(date = new Date(), timeZone = EZ_DEFAULT_TIME_ZONE) {
+    return new Intl.DateTimeFormat("en-US", { timeZone: ezNormalizeTimeZone(timeZone), weekday: "short" }).format(date);
   }
 
   function ezCivilKey(year, month, day) {
     return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
   }
 
-  function ezOccupiedOnDay(occupiedMs, civil) {
+  function ezOccupiedOnDay(occupiedMs, civil, timeZone = EZ_DEFAULT_TIME_ZONE) {
     return (occupiedMs || []).filter((ms) => {
       if (!Number.isFinite(ms)) return false;
-      const parts = ezChicagoDateTimeParts(new Date(ms));
+      const parts = ezZonedDateTimeParts(new Date(ms), timeZone);
       return ezCivilKey(parts.year, parts.month, parts.day) === civil.key;
     });
   }
@@ -461,13 +465,28 @@
     return (occupiedMs || []).some((other) => Number.isFinite(other) && Math.abs(other - ms) < gapMs);
   }
 
-  function ezTimeCrowding(ms, occupiedMs, radiusMinutes = 90) {
-    const target = ezChicagoDateTimeParts(new Date(ms));
+  function ezIsBlackoutLocalTime(ms, timeZone = EZ_DEFAULT_TIME_ZONE) {
+    if (!Number.isFinite(ms)) return false;
+    const parts = ezZonedDateTimeParts(new Date(ms), timeZone);
+    const minutes = parts.hour * 60 + parts.minute;
+    return minutes >= EZ_SCHEDULE_BLACKOUT_START_MINUTES || minutes <= EZ_SCHEDULE_BLACKOUT_END_MINUTES;
+  }
+
+  function ezAdvancePastBlackout(ms, timeZone = EZ_DEFAULT_TIME_ZONE) {
+    if (!Number.isFinite(ms) || !ezIsBlackoutLocalTime(ms, timeZone)) return ms;
+    const parts = ezZonedDateTimeParts(new Date(ms), timeZone);
+    let civil = { year: parts.year, month: parts.month, day: parts.day };
+    if (parts.hour >= 20) civil = ezAddCivilDays(civil.year, civil.month, civil.day, 1);
+    return ezZonedWallToUtcMs(civil.year, civil.month, civil.day, 4, 0, timeZone);
+  }
+
+  function ezTimeCrowding(ms, occupiedMs, radiusMinutes = 90, timeZone = EZ_DEFAULT_TIME_ZONE) {
+    const target = ezZonedDateTimeParts(new Date(ms), timeZone);
     const targetMinutes = target.hour * 60 + target.minute;
     let count = 0;
     for (const other of occupiedMs || []) {
       if (!Number.isFinite(other)) continue;
-      const parts = ezChicagoDateTimeParts(new Date(other));
+      const parts = ezZonedDateTimeParts(new Date(other), timeZone);
       const otherMinutes = parts.hour * 60 + parts.minute;
       const raw = Math.abs(targetMinutes - otherMinutes);
       const distance = Math.min(raw, 1440 - raw);
@@ -490,75 +509,60 @@
   }
 
   function ezPickBalancedSuggestedIso(windows, now = new Date(), options = {}) {
+    const timeZone = ezNormalizeTimeZone(options.timeZone);
     const daysPref = Array.isArray(options.days) ? options.days.filter(Boolean) : [];
     const occupiedMs = options.occupiedMs || [];
     const platformOccupiedMs = options.platformOccupiedMs || occupiedMs;
     const windowList = Array.isArray(windows) && windows.length ? windows : ["12:00-13:00"];
     const nowMs = now.getTime() + EZ_SUGGEST_LEAD_MS;
-    const chicago = ezChicagoDateTimeParts(now);
+    const local = ezZonedDateTimeParts(now, timeZone);
     const horizon = [];
     for (let i = 0; i < EZ_SUGGEST_HORIZON_DAYS; i++) {
-      const civilBase = i === 0
-        ? { year: chicago.year, month: chicago.month, day: chicago.day }
-        : ezAddCivilDays(chicago.year, chicago.month, chicago.day, i);
-      const noonMs = ezChicagoWallToUtcMs(civilBase.year, civilBase.month, civilBase.day, 12, 0);
-      horizon.push({
-        ...civilBase,
-        index: i,
-        weekday: ezChicagoWeekdayShort(new Date(noonMs)),
-        key: ezCivilKey(civilBase.year, civilBase.month, civilBase.day),
-      });
+      const civilBase = i === 0 ? { year: local.year, month: local.month, day: local.day } : ezAddCivilDays(local.year, local.month, local.day, i);
+      const noonMs = ezZonedWallToUtcMs(civilBase.year, civilBase.month, civilBase.day, 12, 0, timeZone);
+      horizon.push({ ...civilBase, index: i, weekday: ezWeekdayShort(new Date(noonMs), timeZone), key: ezCivilKey(civilBase.year, civilBase.month, civilBase.day) });
     }
 
-    const collect = () => {
-      let best = null;
-      for (const civil of horizon) {
-        const preferred = !daysPref.length || daysPref.includes(civil.weekday);
-        const crowding = ezOccupiedOnDay(occupiedMs, civil).length;
-        const platformCrowding = ezOccupiedOnDay(platformOccupiedMs, civil).length;
-        for (let windowIndex = 0; windowIndex < windowList.length; windowIndex++) {
-          const first = String(windowList[windowIndex] || "12:00-13:00").split("-")[0] || "12:00";
-          const [hh, mm] = first.split(":").map((n) => Number(n) || 0);
-          const ms = ezChicagoWallToUtcMs(civil.year, civil.month, civil.day, hh, mm || 0);
-          if (ms <= nowMs) continue;
-          if (ezScheduleConflicts(ms, platformOccupiedMs)) continue;
-          const score = ezScoreAnalyticsSlot({
-            preferred,
-            windowIndex,
-            crowding,
-            platformCrowding,
-            timeCrowding: ezTimeCrowding(ms, occupiedMs),
-            dayIndex: civil.index,
-          });
-          if (!best || score > best.score) best = { score, ms };
-        }
+    let best = null;
+    for (const civil of horizon) {
+      const preferred = !daysPref.length || daysPref.includes(civil.weekday);
+      const crowding = ezOccupiedOnDay(occupiedMs, civil, timeZone).length;
+      const platformCrowding = ezOccupiedOnDay(platformOccupiedMs, civil, timeZone).length;
+      for (let windowIndex = 0; windowIndex < windowList.length; windowIndex++) {
+        const first = String(windowList[windowIndex] || "12:00-13:00").split("-")[0] || "12:00";
+        const [hh, mm] = first.split(":").map((n) => Number(n) || 0);
+        const ms = ezZonedWallToUtcMs(civil.year, civil.month, civil.day, hh, mm || 0, timeZone);
+        if (ms <= nowMs || ezIsBlackoutLocalTime(ms, timeZone) || ezScheduleConflicts(ms, platformOccupiedMs)) continue;
+        const score = ezScoreAnalyticsSlot({ preferred, windowIndex, crowding, platformCrowding, timeCrowding: ezTimeCrowding(ms, occupiedMs, 90, timeZone), dayIndex: civil.index });
+        if (!best || score > best.score) best = { score, ms };
       }
-      return best;
-    };
+    }
+    if (best) return new Date(best.ms).toISOString();
 
-    const balanced = collect();
-    if (balanced) return new Date(balanced.ms).toISOString();
     const first = String(windowList[0] || "12:00-13:00");
     const start = first.split("-")[0] || "12:00";
     const [hh, mm] = start.split(":").map((n) => Number(n) || 0);
-    let civil = { year: chicago.year, month: chicago.month, day: chicago.day };
-    let ms = ezChicagoWallToUtcMs(civil.year, civil.month, civil.day, hh, mm || 0);
+    let civil = { year: local.year, month: local.month, day: local.day };
+    let ms = ezZonedWallToUtcMs(civil.year, civil.month, civil.day, hh, mm || 0, timeZone);
     if (ms <= nowMs) {
       civil = ezAddCivilDays(civil.year, civil.month, civil.day, 1);
-      ms = ezChicagoWallToUtcMs(civil.year, civil.month, civil.day, hh, mm || 0);
+      ms = ezZonedWallToUtcMs(civil.year, civil.month, civil.day, hh, mm || 0, timeZone);
     }
-    return ezNextOpenScheduleIso(new Date(ms).toISOString(), platformOccupiedMs);
+    return ezNextOpenScheduleIso(new Date(ms).toISOString(), platformOccupiedMs, EZ_SCHEDULE_GAP_MS, { timeZone });
   }
 
   function ezSuggestedChicagoIso(windows, now = new Date(), options = {}) {
     return ezPickBalancedSuggestedIso(windows, now, options);
   }
 
-  function ezNextOpenScheduleIso(candidateIso, occupiedMs, gapMs = EZ_SCHEDULE_GAP_MS) {
+  function ezNextOpenScheduleIso(candidateIso, occupiedMs, gapMs = EZ_SCHEDULE_GAP_MS, options = {}) {
+    const timeZone = ezNormalizeTimeZone(options.timeZone);
     let ms = Date.parse(candidateIso);
     if (Number.isNaN(ms)) ms = Date.now();
     let guard = 0;
-    while ((occupiedMs || []).some((other) => Number.isFinite(other) && Math.abs(other - ms) < gapMs) && guard < 36) {
+    while (guard < 72) {
+      ms = ezAdvancePastBlackout(ms, timeZone);
+      if (!ezScheduleConflicts(ms, occupiedMs, gapMs) && !ezIsBlackoutLocalTime(ms, timeZone)) break;
       ms += gapMs;
       guard += 1;
     }
@@ -585,7 +589,7 @@
     return items;
   }
 
-  function ezBuildSuggestedScheduleMap(items, occupiedByPlatform = {}, now = new Date()) {
+  function ezBuildSuggestedScheduleMap(items, occupiedByPlatform = {}, now = new Date(), options = {}) {
     const reserved = {};
     for (const [platform, times] of Object.entries(occupiedByPlatform || {})) {
       reserved[platform] = [...(times || [])];
@@ -614,6 +618,7 @@
         days: industry.days,
         occupiedMs: ezFlattenOccupied(reserved),
         platformOccupiedMs: reserved[platform] || [],
+        timeZone: options.timeZone,
       });
       stamps.set(key, iso);
       (reserved[platform] ||= []).push(Date.parse(iso));
@@ -708,5 +713,8 @@
     ezPlanScheduleItems,
     ezBuildSuggestedScheduleMap,
     ezPickBalancedSuggestedIso,
+    ezNextOpenScheduleIso,
+    ezIsBlackoutLocalTime,
+    ezNormalizeTimeZone,
   };
 })();
