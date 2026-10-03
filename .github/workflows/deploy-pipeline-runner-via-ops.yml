@@ -98,3 +98,7 @@ jobs:
 
 # Trigger pipeline-runner deploy for timed-script VO-driven measured scene durations (NYC CI 290)
 # 2026-10-03T03:20:00Z service_version=2026-10-03-timed-script-vo-driven
+
+# Trigger pipeline-runner deploy for TikTok text/plain handoff fix (Output 1304)
+# Source merge 3a0e5fee47312153233997edfcdc7d0afcef7795
+# 2026-10-03
