@@ -145,3 +145,23 @@ test("earlier day wins when days have equal profile load", () => {
   const localDay = new Intl.DateTimeFormat("en-US", { timeZone: zone, day: "2-digit" }).format(new Date(iso));
   assert.equal(localDay, "03");
 });
+
+
+test("widest-gap fallback never schedules beyond the rolling 14-day horizon", () => {
+  const zone = "America/Chicago";
+  const now = new Date("2026-10-03T08:00:00Z");
+  const occupied = [];
+  for (let dayOffset = 0; dayOffset < 14; dayOffset++) {
+    const base = new Date(Date.UTC(2026, 9, 3 + dayOffset, 0, 0, 0));
+    for (const hour of [10, 13, 16, 19, 22]) occupied.push(base.getTime() + hour * 60 * 60 * 1000);
+  }
+  const iso = plan.ezPickBalancedSuggestedIso([], now, {
+    timeZone: zone,
+    occupiedMs: occupied,
+    platformOccupiedMs: occupied,
+  });
+  if (iso) {
+    const horizonEnd = new Date("2026-10-17T05:00:00Z").getTime();
+    assert.ok(Date.parse(iso) < horizonEnd);
+  }
+});
