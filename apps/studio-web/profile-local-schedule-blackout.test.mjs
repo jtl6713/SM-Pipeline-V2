@@ -115,3 +115,33 @@ test("scheduler can use the inclusive end of each 90-minute priority window", ()
   assert.equal(local.hour, 7);
   assert.equal(local.minute, 0);
 });
+
+
+test("scheduler balances the seven-day band before stacking a busier day", () => {
+  const zone = "America/Chicago";
+  const now = new Date("2026-10-03T08:00:00Z");
+  const occupiedMs = [Date.parse("2026-10-03T10:30:00Z")];
+  const iso = plan.ezPickBalancedSuggestedIso([], now, {
+    timeZone: zone,
+    occupiedMs,
+    platformOccupiedMs: [],
+  });
+  const date = new Date(iso);
+  const localDay = new Intl.DateTimeFormat("en-US", { timeZone: zone, day: "2-digit" }).format(date);
+  const local = localParts(iso, zone);
+  assert.equal(localDay, "04");
+  assert.equal(local.hour, 5);
+  assert.equal(local.minute, 30);
+});
+
+test("earlier day wins when days have equal profile load", () => {
+  const zone = "America/Chicago";
+  const now = new Date("2026-10-03T08:00:00Z");
+  const iso = plan.ezPickBalancedSuggestedIso([], now, {
+    timeZone: zone,
+    occupiedMs: [],
+    platformOccupiedMs: [],
+  });
+  const localDay = new Intl.DateTimeFormat("en-US", { timeZone: zone, day: "2-digit" }).format(new Date(iso));
+  assert.equal(localDay, "03");
+});
