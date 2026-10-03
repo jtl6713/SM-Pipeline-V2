@@ -254,7 +254,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.461-priority-window-distribution";
+  const BUILD_ID = "item4-0.6.462-balanced-seven-day-scheduling";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -16001,13 +16001,13 @@
     return { days: read("suggestedDays"), windows: read("suggestedWindows") };
   }
 
-  function nextOpenScheduleIso(candidateIso, occupiedMs, hint = {}, gapMs = PIPELINE_SCHEDULE_GAP_MS) {
+  function nextOpenScheduleIso(candidateIso, occupiedMs, hint = {}, gapMs = PIPELINE_SCHEDULE_GAP_MS, allOccupiedMs = occupiedMs) {
     const picker = typeof window.ChicagoShiningEzPlan?.ezPickBalancedSuggestedIso === "function"
       ? window.ChicagoShiningEzPlan.ezPickBalancedSuggestedIso
       : null;
     if (picker) {
       return picker([], new Date(), {
-        occupiedMs,
+        occupiedMs: allOccupiedMs,
         platformOccupiedMs: occupiedMs,
         timeZone: workingStudioTimeZone(),
       });
@@ -16076,7 +16076,8 @@
         const platform = String(record.platform || "").trim().toLowerCase();
         const hint = suggestedTimeHint(data);
         rememberSuggestedHint(platform, hint);
-        const iso = nextOpenScheduleIso(suggested, reserved[platform] || [], hint);
+        const allReserved = Object.values(reserved).flat().filter(Number.isFinite);
+        const iso = nextOpenScheduleIso(suggested, reserved[platform] || [], hint, PIPELINE_SCHEDULE_GAP_MS, allReserved);
         const input = document.querySelector(`[data-pipeline-schedule="${record.id}"]`);
         if (input) applySuggestedIsoToScheduleInput(input, iso);
         else pipelineScheduleDrafts.set(record.id, formatDateTimeLocalInput(iso));
@@ -16105,7 +16106,8 @@
     for (const record of ordered) {
       const platform = String(record.platform || "").trim().toLowerCase();
       const requested = next[record.id] || new Date().toISOString();
-      const iso = nextOpenScheduleIso(requested, reserved[platform] || [], hintForPlatform(platform));
+      const allReserved = Object.values(reserved).flat().filter(Number.isFinite);
+      const iso = nextOpenScheduleIso(requested, reserved[platform] || [], hintForPlatform(platform), PIPELINE_SCHEDULE_GAP_MS, allReserved);
       next[record.id] = iso;
       (reserved[platform] ||= []).push(Date.parse(iso));
       rememberBookedScheduleMs(platform, iso);
