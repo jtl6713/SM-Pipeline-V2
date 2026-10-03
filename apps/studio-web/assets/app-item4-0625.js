@@ -15968,6 +15968,22 @@
     pipelineServerOccupiedMs[key] = [...set];
   }
 
+  function pipelineOccupiedScheduleBucketMs(record, excludeId = record?.id) {
+    const key = pipelineScheduleBucketKey(record);
+    if (!key) return [];
+    const taken = new Set();
+    for (const row of pipelineOutputs || []) {
+      if (!row?.id || row.id === excludeId) continue;
+      if (pipelineScheduleBucketKey(row) !== key || row.do_not_publish) continue;
+      const state = String(row.studio_state || row.publish_status || "");
+      if (/published/i.test(state)) continue;
+      const iso = pipelineRecordScheduleIso(row);
+      const ms = iso ? Date.parse(iso) : NaN;
+      if (!Number.isNaN(ms)) taken.add(ms);
+    }
+    return [...taken];
+  }
+
   function pipelineOccupiedScheduleMs(platform, excludeId) {
     const key = String(platform || "").trim().toLowerCase();
     if (!key) return [];
@@ -16245,7 +16261,7 @@
         }
         if (pipelineUseDefaultSchedules() && iso && creativeCanApproveForPublishing(record) && !pipelineRowHasSchedule(record)) {
           const input = document.querySelector(`[data-pipeline-schedule="${id}"]`);
-          const openIso = nextOpenScheduleIso(iso, pipelineOccupiedScheduleMs(record.platform, record.id), hint);
+          const openIso = nextOpenScheduleIso(iso, pipelineOccupiedScheduleBucketMs(record), hint);
           if (applySuggestedIsoToScheduleInput(input, openIso)) rememberBookedScheduleMs(record.platform, openIso);
         }
       } catch (error) {
@@ -16936,7 +16952,7 @@
           const record = (pipelineOutputs || []).find((row) => row.id === id);
           const input = target.querySelector(`[data-pipeline-schedule="${id}"]`);
           const hint = parseSuggestedHintDataset(button);
-          const openIso = nextOpenScheduleIso(iso, pipelineOccupiedScheduleMs(record?.platform, id), hint);
+          const openIso = nextOpenScheduleIso(iso, pipelineOccupiedScheduleBucketMs(record, id), hint);
           if (applySuggestedIsoToScheduleInput(input, openIso)) rememberBookedScheduleMs(record?.platform, openIso);
         });
       });
@@ -20971,7 +20987,7 @@
     const record = activeCreativeOutput;
     const openIso = nextOpenScheduleIso(
       creativeSuggestedIso,
-      pipelineOccupiedScheduleMs(record?.platform, record?.id),
+      pipelineOccupiedScheduleBucketMs(record),
       creativeSuggestedHint,
     );
     if (!applySuggestedIsoToScheduleInput(input, openIso)) return;
