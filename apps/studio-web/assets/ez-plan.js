@@ -513,7 +513,7 @@
   function ezWidestGapFallbackIso(local, nowMs, occupiedMs, platformOccupiedMs, timeZone) {
     const candidates = [];
     const sortedOccupied = (occupiedMs || []).filter(Number.isFinite).slice().sort((a, b) => a - b);
-    for (let dayOffset = 14; dayOffset < 42; dayOffset++) {
+    for (let dayOffset = 0; dayOffset < EZ_SUGGEST_HORIZON_DAYS; dayOffset++) {
       const civil = ezAddCivilDays(local.year, local.month, local.day, dayOffset);
       for (let minute = 4 * 60; minute < 20 * 60; minute += 30) {
         const hour = Math.floor(minute / 60);
@@ -582,13 +582,10 @@
       }
     }
 
-    // After the 14-day priority plan is full, use a future slot with the widest
-    // breathing room. Randomize only among equally-wide openings.
-    const wideOpenIso = ezWidestGapFallbackIso(local, nowMs, occupiedMs, platformOccupiedMs, timeZone);
-    if (wideOpenIso) return wideOpenIso;
-    const fallbackCivil = ezAddCivilDays(local.year, local.month, local.day, 14);
-    const fallbackMs = ezZonedWallToUtcMs(fallbackCivil.year, fallbackCivil.month, fallbackCivil.day, 4, 0, timeZone);
-    return ezNextOpenScheduleIso(new Date(fallbackMs).toISOString(), platformOccupiedMs, EZ_SCHEDULE_GAP_MS, { timeZone });
+    // Once the six priority passes are full, keep filling only inside the same
+    // rolling 14-day horizon. Choose among the widest remaining non-blackout
+    // openings; never push an automatic schedule beyond day 14.
+    return ezWidestGapFallbackIso(local, nowMs, occupiedMs, platformOccupiedMs, timeZone);
   }
 
   function ezSuggestedChicagoIso(windows, now = new Date(), options = {}) {
