@@ -531,9 +531,15 @@
         const [start] = window.split("-");
         const [hh, mm] = start.split(":").map((n) => Number(n) || 0);
         const startMinutes = hh * 60 + mm;
-        for (let dayIndex = startDay; dayIndex < endDay; dayIndex++) {
-          const civil = horizon[dayIndex];
-          if (!civil) continue;
+        const balancedDays = horizon
+          .slice(startDay, endDay)
+          .filter(Boolean)
+          .map((civil) => ({
+            civil,
+            occupiedCount: ezOccupiedOnDay(occupiedMs, civil, timeZone).length,
+          }))
+          .sort((a, b) => a.occupiedCount - b.occupiedCount || a.civil.index - b.civil.index);
+        for (const { civil } of balancedDays) {
           for (const offsetMinutes of EZ_PRIORITY_WINDOW_OFFSETS_MINUTES) {
             const totalMinutes = startMinutes + offsetMinutes;
             const candidateHour = Math.floor(totalMinutes / 60);
