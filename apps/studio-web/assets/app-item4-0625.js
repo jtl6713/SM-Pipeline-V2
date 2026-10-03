@@ -254,7 +254,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.463-widest-gap-fallback";
+  const BUILD_ID = "item4-0.6.464-rolling-14day-cap";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -16078,6 +16078,7 @@
         rememberSuggestedHint(platform, hint);
         const allReserved = Object.values(reserved).flat().filter(Number.isFinite);
         const iso = nextOpenScheduleIso(suggested, reserved[platform] || [], hint, PIPELINE_SCHEDULE_GAP_MS, allReserved);
+        if (!iso) continue;
         const input = document.querySelector(`[data-pipeline-schedule="${record.id}"]`);
         if (input) applySuggestedIsoToScheduleInput(input, iso);
         else pipelineScheduleDrafts.set(record.id, formatDateTimeLocalInput(iso));
@@ -16108,6 +16109,10 @@
       const requested = next[record.id] || new Date().toISOString();
       const allReserved = Object.values(reserved).flat().filter(Number.isFinite);
       const iso = nextOpenScheduleIso(requested, reserved[platform] || [], hintForPlatform(platform), PIPELINE_SCHEDULE_GAP_MS, allReserved);
+      if (!iso) {
+        delete next[record.id];
+        continue;
+      }
       next[record.id] = iso;
       (reserved[platform] ||= []).push(Date.parse(iso));
       rememberBookedScheduleMs(platform, iso);
