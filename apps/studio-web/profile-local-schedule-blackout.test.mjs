@@ -1,8 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
+globalThis.window = globalThis;
 await import("./assets/ez-plan.js");
-const plan = globalThis.window?.ChicagoShiningEzPlan || globalThis.ChicagoShiningEzPlan;
+const plan = globalThis.ChicagoShiningEzPlan;
 
 function localParts(iso, timeZone) {
   const parts = new Intl.DateTimeFormat("en-US", {
