@@ -510,6 +510,36 @@
     return score;
   }
 
+  function ezWidestGapFallbackIso(local, nowMs, occupiedMs, platformOccupiedMs, timeZone) {
+    const candidates = [];
+    const sortedOccupied = (occupiedMs || []).filter(Number.isFinite).slice().sort((a, b) => a - b);
+    for (let dayOffset = 14; dayOffset < 42; dayOffset++) {
+      const civil = ezAddCivilDays(local.year, local.month, local.day, dayOffset);
+      for (let minute = 4 * 60; minute < 20 * 60; minute += 30) {
+        const hour = Math.floor(minute / 60);
+        const min = minute % 60;
+        const ms = ezZonedWallToUtcMs(civil.year, civil.month, civil.day, hour, min, timeZone);
+        if (ms <= nowMs || ezIsBlackoutLocalTime(ms, timeZone) || ezScheduleConflicts(ms, platformOccupiedMs)) continue;
+        let previous = nowMs;
+        let next = ms + 24 * 60 * 60 * 1000;
+        for (const occupied of sortedOccupied) {
+          if (occupied <= ms && occupied > previous) previous = occupied;
+          if (occupied > ms) {
+            next = occupied;
+            break;
+          }
+        }
+        const clearance = Math.min(ms - previous, next - ms);
+        candidates.push({ ms, clearance });
+      }
+    }
+    if (!candidates.length) return "";
+    const widest = Math.max(...candidates.map((item) => item.clearance));
+    const best = candidates.filter((item) => item.clearance === widest);
+    const picked = best[Math.floor(Math.random() * best.length)];
+    return new Date(picked.ms).toISOString();
+  }
+
   function ezPickBalancedSuggestedIso(windows, now = new Date(), options = {}) {
     const timeZone = ezNormalizeTimeZone(options.timeZone);
     const occupiedMs = options.occupiedMs || [];
@@ -552,9 +582,12 @@
       }
     }
 
-    // If all six passes are full, continue safely after day 14 without entering the blackout.
+    // After the 14-day priority plan is full, use a future slot with the widest
+    // breathing room. Randomize only among equally-wide openings.
+    const wideOpenIso = ezWidestGapFallbackIso(local, nowMs, occupiedMs, platformOccupiedMs, timeZone);
+    if (wideOpenIso) return wideOpenIso;
     const fallbackCivil = ezAddCivilDays(local.year, local.month, local.day, 14);
-    const fallbackMs = ezZonedWallToUtcMs(fallbackCivil.year, fallbackCivil.month, fallbackCivil.day, 5, 30, timeZone);
+    const fallbackMs = ezZonedWallToUtcMs(fallbackCivil.year, fallbackCivil.month, fallbackCivil.day, 4, 0, timeZone);
     return ezNextOpenScheduleIso(new Date(fallbackMs).toISOString(), platformOccupiedMs, EZ_SCHEDULE_GAP_MS, { timeZone });
   }
 
