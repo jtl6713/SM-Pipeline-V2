@@ -27,7 +27,7 @@ from ttd.constants import (
 )
 from ttd.eligibility import ttd3_eligibility_reason
 from ttd.package import (
-    handoff_email_html,
+    handoff_email_text,
     handoff_email_subject,
     is_az_finished_video,
     profile_display_name,
@@ -117,7 +117,7 @@ def process_request(
             result["asset_link_count"] = len(asset_slides)
         except Exception as exc:
             result["asset_links_error"] = str(exc)
-    html_body = handoff_email_html(
+    text_body = handoff_email_text(
         output,
         location=location,
         siblings=siblings,
@@ -126,10 +126,11 @@ def process_request(
     )
     result["subject"] = subject
     try:
-        send = GmailClient().send_html(
+        result["email_format"] = "text/plain"
+        send = GmailClient().send_text(
             to=to_addr,
             subject=subject,
-            html_body=html_body,
+            text_body=text_body,
             purpose=PURPOSE_TIKTOK_HANDOFF,
         )
         if send.get("skipped"):
@@ -165,7 +166,7 @@ def process_request(
         record_id,
         {
             **unlock_fields(),
-            "Output_Notes": append_note(output, f"TTD3 handoff email sent at {stamp_minutes()}."),
+            "Output_Notes": append_note(output, f"TTD3 handoff email sent as text/plain at {stamp_minutes()}."),
             "Publish_Status": PUBLISH_STATUS_READY,
             "Publish_Error_Stage": "",
             "TikTok_Draft_Status": status,
