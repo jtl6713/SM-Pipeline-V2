@@ -401,3 +401,9 @@ Deploy Studio Pages production
 Reason: Remove obsolete Pipeline Use default schedules checkbox; rolling 14-day intelligent scheduling is always active
 UI: 0.6.465-auto-scheduling-no-toggle
 Requested: 2026-10-03
+
+
+Deploy Studio Pages production
+Reason: Schedule independently by Platform + Output Type while retaining profile-local blackout and rolling 14-day rules
+UI: 0.6.466-platform-output-type-scheduling
+Requested: 2026-10-03
