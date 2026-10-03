@@ -6,10 +6,11 @@ Imported scene timestamps and voiceover lines are stored as a structured
 field stays free of that payload because Studio strips the directive before
 showing it.
 
-When the directive is present, scene boundaries are authoritative: pacing,
-fixed image duration, beat sync, and narration-length inference must not
-rewrite them. Suggested-still text is assignment context only and is never
-narration.
+Import clocks are ordering/split hints. After P2 synthesizes per-scene
+voiceover, measured MP3 lengths rewrite each scene window so still N lasts
+exactly as long as scene N speech. Pacing, fixed image duration, and beat sync
+must not override those measured windows. Suggested-still text is assignment
+context only and is never narration.
 """
 
 from __future__ import annotations
@@ -290,11 +291,31 @@ def parse_timed_script_markdown(text: str) -> dict[str, Any]:
     }
 
 
+def _parse_json_object(text: str) -> Any | None:
+    """Parse the first JSON object even when trailing note tokens follow it.
+
+    Live Production Notes often look like:
+    ``[timed-script] {...}; ez-photo-wait=off; ez-photo-reject=rec...``
+    because photo-wait tokens were appended with ``; `` onto the same line.
+    ``json.loads`` rejects that; ``raw_decode`` keeps the timeline readable.
+    """
+    payload = str(text or "").strip()
+    if not payload:
+        return None
+    start = payload.find("{")
+    if start < 0:
+        return None
+    try:
+        value, _end = json.JSONDecoder().raw_decode(payload[start:])
+    except json.JSONDecodeError:
+        return None
+    return value
+
+
 def normalize_timeline(raw: Any) -> dict[str, Any] | None:
     if isinstance(raw, str):
-        try:
-            raw = json.loads(raw)
-        except json.JSONDecodeError:
+        raw = _parse_json_object(raw)
+        if raw is None:
             return None
     if not isinstance(raw, dict):
         return None
@@ -333,6 +354,58 @@ def strip_timed_script_directive(notes: str) -> str:
     cleaned = _TIMED_SCRIPT_RE.sub("", str(notes or ""))
     cleaned = re.sub(r"\n{3,}", "\n\n", cleaned).strip()
     return cleaned
+
+
+def notes_with_timed_script(notes: str, timeline: dict[str, Any] | None) -> str:
+    """Replace or append the ``[timed-script]`` directive while keeping other notes."""
+    line = directive_line(timeline)
+    cleaned = strip_timed_script_directive(notes)
+    if not line:
+        return cleaned
+    if cleaned:
+        return f"{cleaned}\n{line}".strip()
+    return line
+
+
+def apply_measured_durations(
+    timeline: dict[str, Any] | None,
+    measured_seconds: list[float],
+) -> dict[str, Any] | None:
+    """Rebuild authoritative scene windows from measured per-scene voiceover lengths.
+
+    Imported clock ranges are planning hints only. Once ElevenLabs has spoken each
+    scene, still ``durationFrames`` must follow the real audio — not 150 WPM estimates.
+    """
+    normalized = normalize_timeline(timeline)
+    if not normalized:
+        return None
+    segments = [segment for segment in normalized.get("segments") or [] if isinstance(segment, dict)]
+    if not segments or len(measured_seconds) != len(segments):
+        raise ValueError(
+            f"measured duration count {len(measured_seconds)} does not match "
+            f"timed-script scene count {len(segments)}"
+        )
+    rebuilt: list[dict[str, Any]] = []
+    cursor = 0.0
+    for segment, raw_seconds in zip(segments, measured_seconds):
+        try:
+            seconds = float(raw_seconds)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"invalid measured duration {raw_seconds!r}") from exc
+        seconds = max(MIN_SCENE_SECONDS, seconds)
+        start = cursor
+        end = cursor + seconds
+        rebuilt.append({
+            **segment,
+            "start_seconds": start,
+            "end_seconds": end,
+            "duration_seconds": seconds,
+            "speech_rate": 1.0,
+            "force_exact_voiceover": True,
+            "measured_voiceover_seconds": _round_seconds(seconds),
+        })
+        cursor = end
+    return build_timeline(rebuilt)
 
 
 def exact_voiceover_text(timeline: dict[str, Any] | None) -> str:
@@ -386,7 +459,12 @@ def suggested_visuals(timeline: dict[str, Any] | None) -> list[str]:
 
 
 def assign_stills_in_order(timeline: dict[str, Any], assets: list[dict[str, Any]]) -> dict[str, Any]:
-    """Map scenes 1:1 when the imported scene count equals the Production still count."""
+    """Map scenes 1:1 when the imported scene count equals the Production still count.
+
+    Overwrite stale asset_ids. Force exact / VO-driven stamps keep still order
+    matched to narration scenes; blank-only fills left older ids in place and
+    reordered clips away from the operator's master order.
+    """
     normalized = normalize_timeline(timeline)
     if not normalized:
         return timeline
@@ -397,8 +475,7 @@ def assign_stills_in_order(timeline: dict[str, Any], assets: list[dict[str, Any]
     segments = normalized["segments"]
     if ordered and len(ordered) == len(segments):
         for segment, asset in zip(segments, ordered):
-            if not str(segment.get("asset_id") or "").strip():
-                segment["asset_id"] = str(asset.get("id") or asset.get("media_asset_record_id") or "").strip()
+            segment["asset_id"] = str(asset.get("id") or asset.get("media_asset_record_id") or "").strip()
     return normalized
 
 

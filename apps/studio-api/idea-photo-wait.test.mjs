@@ -168,6 +168,18 @@ test("operator photo deletes lock photo-wait so cron cannot restore or reshuffle
   assert.equal(productionNotesForPromotionHandoff(locked), "Keep the river shots");
 });
 
+test("photo-wait tokens stay off the timed-script JSON line", () => {
+  const timed = '[timed-script] {"mode":"timed_script","timing_mode":"authoritative","timing_source":"timed_script","duration_seconds":7,"force_exact_voiceover":true,"segments":[{"index":1,"start_seconds":0,"end_seconds":7,"duration_seconds":7,"voiceover_text":"Hello","suggested_visual":"Sign","asset_id":"still-1","speech_rate":1,"force_exact_voiceover":true}]}';
+  const locked = withProductionPhotoWaitManual(timed, ["recAbcdefghijklm1"]);
+  assert.match(locked, /\[timed-script\] \{/);
+  assert.doesNotMatch(locked, /\[timed-script\][^\n]*ez-photo-wait/);
+  assert.match(locked, /\nez-photo-wait=off/);
+  assert.match(locked, /\nez-photo-reject=recAbcdefghijklm1/);
+  const jsonLine = locked.split(/\n/).find((line) => line.startsWith("[timed-script]"));
+  assert.ok(jsonLine);
+  JSON.parse(jsonLine.replace(/^\[timed-script\]\s*/, ""));
+});
+
 test("CTA idea keys ignore cars/ride and keep train subject words", () => {
   const keys = buildIdeaLibraryKeys({
     primaryLocation: "Chicago",

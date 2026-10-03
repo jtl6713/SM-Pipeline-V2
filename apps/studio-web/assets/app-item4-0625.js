@@ -254,7 +254,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.456-calendar-text-polish";
+  const BUILD_ID = "item4-0.6.458-timed-script-vo-driven";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -4135,7 +4135,7 @@
         }).join("")}
       </div>
       ${issues.length ? `<div class="timed-script-issues">${issues.map((issue) => `<p>${escapeHtml(issue)}</p>`).join("")}</div>` : ""}
-      <p class="ez-option-hint">Scene timing is authoritative. Beat sync, pacing, and automatic image duration will not move these boundaries. Drag a still onto a scene, or choose it from the list.</p>
+      <p class="ez-option-hint">Import times are planning hints. After voiceover, each still lasts as long as that scene's narration. Beat sync and pacing will not override those spoken lengths. Drag a still onto a scene, or choose it from the list.</p>
       <div class="timed-script-pool" id="prTimedScriptPool">
         ${assets.map((asset, index) => {
           const assetId = String(asset.id || asset.media_asset_record_id || "").trim();

@@ -294,22 +294,19 @@ export function productionPhotoWaitRejectedIds(notes) {
 }
 
 export function withProductionPhotoWaitManual(notes, rejectedIds = []) {
-  let next = String(notes || "").trim();
-  if (!PHOTO_WAIT_AUTO_OFF_RE.test(next)) {
-    next = next ? `${next}; ez-photo-wait=off` : "ez-photo-wait=off";
-  }
+  // Keep ez-* tokens on their own line. Appending with "; " onto a
+  // [timed-script] {...} line corrupts JSON and drops authoritative durations.
+  let next = stripProductionPhotoWaitTokens(notes);
+  const extras = ["ez-photo-wait=off"];
   const merged = [...new Set([
-    ...productionPhotoWaitRejectedIds(next),
+    ...productionPhotoWaitRejectedIds(String(notes || "")),
     ...rejectedIds.map((id) => String(id || "").trim()).filter((id) => /^rec[A-Za-z0-9]+$/.test(id)),
   ])];
   if (merged.length) {
-    if (/ez-photo-reject=/i.test(next)) {
-      next = next.replace(/ez-photo-reject=[^\n;]+/i, `ez-photo-reject=${merged.join(",")}`);
-    } else {
-      next = `${next}; ez-photo-reject=${merged.join(",")}`;
-    }
+    extras.push(`ez-photo-reject=${merged.join(",")}`);
   }
-  return next.slice(0, 10000);
+  if (!next) return extras.join("\n").slice(0, 10000);
+  return `${next}\n${extras.join("\n")}`.slice(0, 10000);
 }
 
 /** Wait/batch ticks must not rewrite a draft the operator is already cleaning up. */

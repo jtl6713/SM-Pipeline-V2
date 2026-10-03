@@ -394,3 +394,13 @@ Deploy Studio API Worker production
 Reason: Requeue the linked platform videos when a timed script is applied to a promoted request. The old lookup missed them, so the render never started.
 Worker: 0.10.435-timed-script-requeue
 Requested: 2026-10-02T16:20:00Z
+
+Deploy Studio API Worker production
+Reason: Timed-script per-scene VO fitted to import windows (NYC CI 290 scene3 at 20s)
+Worker: 0.10.436-timed-script-measured-vo
+Source branch: cursor/timed-script-measured-vo-0270
+Requested: 2026-10-02T19:10:00Z
+
+Worker: 0.10.437-timed-script-vo-driven
+Reason: Studio copy — timed-script durations follow narration.
+Source branch: cursor/timed-script-vo-driven-0270

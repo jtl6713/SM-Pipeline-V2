@@ -62,3 +62,21 @@ test("eight stills map in order and frames match the timeline", () => {
   assert.deepEqual([...timeline.segments.map((segment) => segment.asset_id)], assets.map((asset) => asset.id));
   assert.deepEqual([...timeline.segments.map((segment) => timed.segmentDurationFrames(segment))], [210, 390, 390, 390, 360, 360, 360, 240]);
 });
+
+test("normalizeTimeline tolerates trailing ez-photo-wait tokens after JSON", () => {
+  const parsed = timed.parseTimedScriptMarkdown(NYC_SUBWAY_SCRIPT);
+  const payload = timed.directiveLine(parsed.timeline).replace(/^\[timed-script\]\s*/i, "");
+  const dirty = `${payload}; ez-photo-wait=off; ez-photo-reject=recW7moQtdrPbNXg1`;
+  const timeline = timed.normalizeTimeline(dirty);
+  assert.equal(timeline.duration_seconds, 90);
+  assert.equal(timeline.segments.length, 8);
+  assert.equal(timed.segmentDurationFrames(timeline.segments[0]), 210);
+});
+
+test("assignStillsInOrder overwrites stale asset ids", () => {
+  const parsed = timed.parseTimedScriptMarkdown(NYC_SUBWAY_SCRIPT);
+  parsed.timeline.segments[0].asset_id = "stale-wrong";
+  const assets = Array.from({ length: 8 }, (_, index) => ({ id: `still-${index + 1}`, order: index + 1 }));
+  const timeline = timed.assignStillsInOrder(parsed.timeline, assets);
+  assert.equal(timeline.segments[0].asset_id, "still-1");
+});

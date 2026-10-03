@@ -120,6 +120,55 @@ def test_eight_scenes_map_to_eight_stills_and_suggested_visual_is_not_narration(
     assert "phone tapping" not in exact_requested_script(request)
 
 
+def test_timed_script_survives_trailing_photo_wait_tokens_on_same_line():
+    """Live NYC bug: ez-photo-wait appended with '; ' onto the timed-script line."""
+    timeline = assign_stills_in_order(
+        parse_timed_script_markdown(NYC_SUBWAY_SCRIPT)["timeline"],
+        [{"id": f"still-{index}", "order": index} for index in range(1, 9)],
+    )
+    # Stale asset_ids that do not match master order (scene 1 pointed at still-3).
+    stale = json.loads(json.dumps(timeline))
+    stale["segments"][0]["asset_id"] = "still-3"
+    notes = (
+        "[render-settings] preset=auto; duration_mode=auto; pacing=normal; beat_sync=off\n"
+        f"{directive_line(stale)}; ez-photo-wait=off; ez-photo-reject=recW7moQtdrPbNXg1,recbSIPdykCogPqZr"
+    )
+    request = _photo_request(notes, count=8)
+    parsed = timed_script_from_request(request)
+    assert parsed is not None
+    assert parsed["duration_seconds"] == 90
+    assert [segment_duration_frames(segment) for segment in parsed["segments"]] == [
+        210, 390, 390, 390, 360, 360, 360, 240
+    ]
+    output = {
+        "id": "recPO",
+        "fields": {
+            "Platform": "Instagram",
+            "Studio_Output_Type": "Reel",
+            "Aspect_Ratio": "9:16",
+            "Platform_Output_Type": "Reel",
+        },
+    }
+    package = source_package(request, output, None)
+    assert package is not None
+    clips = json.loads(package["render_clip_list_json"])
+    # Positional fallback keeps master still order; durations follow VO windows.
+    assert [clip["durationFrames"] for clip in clips] == [210, 390, 390, 390, 360, 360, 360, 240]
+    assert clips[0]["durationFrames"] == 210
+    assert package["total_frames"] == 2700
+    assert all(clip["timingSource"] == "timed_script" for clip in clips)
+
+
+def test_assign_stills_in_order_overwrites_stale_asset_ids():
+    parsed = parse_timed_script_markdown(NYC_SUBWAY_SCRIPT)
+    stale = parsed["timeline"]
+    stale["segments"][0]["asset_id"] = "old-wrong-id"
+    assets = [{"id": f"still-{index}", "order": index} for index in range(1, 9)]
+    timeline = assign_stills_in_order(stale, assets)
+    assert timeline["segments"][0]["asset_id"] == "still-1"
+    assert [segment["asset_id"] for segment in timeline["segments"]] == [f"still-{index}" for index in range(1, 9)]
+
+
 def test_authoritative_timing_survives_stamp_and_ignores_pacing_and_beat_sync():
     timeline = assign_stills_in_order(
         parse_timed_script_markdown(NYC_SUBWAY_SCRIPT)["timeline"],
@@ -251,6 +300,76 @@ def test_slight_speech_rate_does_not_change_words():
     assert rate <= 1.15
     assert estimate_narration_seconds(text, rate) <= estimate_narration_seconds(text, 1)
     assert text == segment["voiceover_text"]
+
+
+def test_import_timeline_parses_scene3_at_20_as_planning_hint():
+    """Import clocks remain useful for ordering until P2 rewrites from speech."""
+    from studio_produce.timed_script import notes_with_timed_script
+
+    timeline = parse_timed_script_markdown(NYC_SUBWAY_SCRIPT)["timeline"]
+    assert timeline["segments"][2]["start_seconds"] == 20
+    assert timeline["segments"][2]["voiceover_text"].startswith("Before you go down the stairs")
+    notes = notes_with_timed_script(
+        "[render-settings] beat_sync=off\nez-photo-wait=off",
+        timeline,
+    )
+    request = _photo_request(notes, count=8)
+    package = source_package(request, {"id": "recPO", "fields": {"Platform": "Instagram", "Studio_Output_Type": "Reel", "Aspect_Ratio": "9:16", "Platform_Output_Type": "Reel"}}, None)
+    clips = json.loads(package["render_clip_list_json"])
+    assert clips[2]["sceneStartSeconds"] == 20
+    assert clips[2]["startFrame"] == 600
+    assert clips[2]["durationFrames"] == 390
+    assert clips[2]["voiceoverText"].startswith("Before you go down the stairs")
+
+
+def test_apply_measured_durations_rewrites_import_20s_scene_to_spoken_13s():
+    """VO-driven: import scene3 @20s / 13s window; TTS 13s → still 13s at new start."""
+    from studio_produce.timed_script import apply_measured_durations, notes_with_timed_script
+
+    timeline = parse_timed_script_markdown(NYC_SUBWAY_SCRIPT)["timeline"]
+    assert timeline["segments"][2]["start_seconds"] == 20
+    # Per-scene spoken lengths (not proportional restamp of the 90s import).
+    spoken = [5.0, 9.0, 13.0, 11.0, 10.0, 8.0, 7.5, 4.5]
+    rebuilt = apply_measured_durations(timeline, spoken)
+    assert rebuilt is not None
+    assert rebuilt["segments"][2]["duration_seconds"] == 13.0
+    assert rebuilt["segments"][2]["start_seconds"] == 14.0  # 5+9, not import 20
+    assert rebuilt["duration_seconds"] == sum(spoken)
+    notes = notes_with_timed_script(
+        "[render-settings] beat_sync=off\nez-photo-wait=off",
+        rebuilt,
+    )
+    request = _photo_request(notes, count=8)
+    package = source_package(request, {"id": "recPO", "fields": {"Platform": "Instagram", "Studio_Output_Type": "Reel", "Aspect_Ratio": "9:16", "Platform_Output_Type": "Reel"}}, None)
+    clips = json.loads(package["render_clip_list_json"])
+    assert clips[2]["sceneStartSeconds"] == 14.0
+    assert clips[2]["startFrame"] == 420
+    assert clips[2]["durationFrames"] == 390  # 13s * 30fps
+    assert clips[2]["voiceoverText"].startswith("Before you go down the stairs")
+    assert sum(int(clip["durationFrames"]) for clip in clips) == round(sum(spoken) * 30)
+
+
+def test_apply_measured_durations_helper_rebuilds_when_explicitly_asked():
+    from studio_produce.timed_script import apply_measured_durations
+
+    timeline = parse_timed_script_markdown(NYC_SUBWAY_SCRIPT)["timeline"]
+    rebuilt = apply_measured_durations(timeline, [2.0] * 8)
+    assert rebuilt is not None
+    assert rebuilt["duration_seconds"] == 16
+    assert rebuilt["segments"][2]["start_seconds"] == 4
+
+
+def test_notes_with_timed_script_preserves_trailer_tokens_on_new_lines():
+    from studio_produce.timed_script import notes_with_timed_script
+
+    timeline = parse_timed_script_markdown(NYC_SUBWAY_SCRIPT)["timeline"]
+    notes = notes_with_timed_script(
+        "[render-settings] beat_sync=off\n[timed-script] {\"mode\":\"timed_script\",\"segments\":[]}\nez-photo-wait=off",
+        timeline,
+    )
+    assert "ez-photo-wait=off" in notes
+    assert notes.count("[timed-script]") == 1
+    assert '"duration_seconds":90' in notes or '"duration_seconds":90.0' in notes
 
 
 def _photo_request(notes: str, count: int = 8):

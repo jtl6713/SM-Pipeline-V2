@@ -99,6 +99,60 @@ def _extend_video_duration_for_voiceover(
     return required
 
 
+def _persist_measured_timed_script(
+    client: AirtableClient,
+    *,
+    item: dict[str, Any],
+    request: dict[str, Any] | None,
+    timeline: dict[str, Any],
+    measured_seconds: float,
+) -> None:
+    """Write measured scene windows back so stamp/R4 use real TTS lengths."""
+    from studio_produce.timed_script import notes_with_timed_script
+
+    total = round(float(timeline.get("duration_seconds") or measured_seconds), 3)
+    spoken = round(float(measured_seconds), 3)
+    if request:
+        notes = field_str(request, "Production_Notes")
+        patch: dict[str, Any] = {
+            "Production_Notes": notes_with_timed_script(notes, timeline),
+            "Video_Duration_Seconds": total,
+            "Voiceover_Duration_Seconds": spoken,
+            "Voiceover_Tail_Seconds": 0,
+        }
+        client.update_record(PRODUCTION_REQUESTS_TABLE, request["id"], patch, typecast=True)
+    client.update_record(
+        CONTENT_ITEMS_TABLE,
+        item["id"],
+        {
+            "Content_Duration": total,
+            "Voiceover_Duration_Seconds": spoken,
+        },
+        typecast=True,
+    )
+    for output_id in linked_ids((item.get("fields") or {}).get("Platform Outputs")):
+        output = client.get_record(PLATFORM_OUTPUTS_TABLE, output_id)
+        output_type = (
+            field_str(output, "Studio_Output_Type")
+            or field_str(output, "Output_Type")
+            or field_str(output, "Format")
+        ).lower()
+        if "story" in output_type:
+            continue
+        client.update_record(
+            PLATFORM_OUTPUTS_TABLE,
+            output_id,
+            {
+                "Studio_Effective_Video_Duration_Seconds": total,
+                "Target_Final_Length": total,
+                "Voiceover_Duration_Seconds": spoken,
+                "Studio_Effective_Voiceover_Duration_Seconds": spoken,
+                "Studio_Effective_Voiceover_Tail_Seconds": 0,
+            },
+            typecast=True,
+        )
+
+
 def _load_content_item(
     client: AirtableClient,
     *,
@@ -286,32 +340,70 @@ def process_request(
     request_id = first_linked_id(item.get("fields", {}).get("Production Requests"))
     if request_id:
         request = client.get_record(PRODUCTION_REQUESTS_TABLE, request_id)
-    from studio_produce.timed_script import speech_speed_for_timeline, timed_script_from_request
+    from p2.timed_script_voiceover import synthesize_timed_script_voiceover
+    from studio_produce.timed_script import (
+        speech_speed_for_timeline,
+        timed_script_from_request,
+    )
 
     timeline = timed_script_from_request(request)
-    raw_mp3 = synthesize_voiceover_by_id(
-        field_str(item, "Voiceover_Script"),
-        voice_id=resolve_content_voice_id(item),
-        speed=speech_speed_for_timeline(timeline),
-    )
+    measured_timeline = None
+    segment_seconds: list[float] = []
+    voice_id = resolve_content_voice_id(item)
+    if timeline and timeline.get("segments"):
+        # Per-scene TTS + measured durations. Import clocks are hints only —
+        # still N must last as long as scene N speech (NYC CI 290: import 20s
+        # while TTS spoke ~13s left ~15s of silence when stills stayed locked).
+        raw_mp3, measured_timeline, segment_seconds = synthesize_timed_script_voiceover(
+            timeline,
+            voice_id=voice_id,
+            synthesize=synthesize_voiceover_by_id,
+        )
+    else:
+        raw_mp3 = synthesize_voiceover_by_id(
+            field_str(item, "Voiceover_Script"),
+            voice_id=voice_id,
+            speed=speech_speed_for_timeline(timeline),
+        )
     norm_payload, normalized_mp3 = normalize_voiceover(
         raw_mp3,
         filename=f"{content_id}_voice.mp3",
         normalizer_base_url=normalizer_url,
     )
     measured_seconds = probe_audio_duration_bytes(normalized_mp3)
-    cap_error = validate_voiceover_for_owner_cap(
-        voiceover_seconds=measured_seconds,
-        content_item=item,
-        request=request,
-    )
-    if cap_error and not timeline:
-        # The synthesized file is the truth. Do not fail production because speech
-        # ran longer than the planning target; extend every non-Story video target
-        # to fit the narration plus the configured tail.
-        # Timed Script Mode keeps the imported length. The review UI flags overruns
-        # instead of silently stretching the master timeline.
-        _extend_video_duration_for_voiceover(client, item, request, measured_seconds)
+    if measured_timeline and segment_seconds:
+        # Loudness normalization can nudge total length by a few ms. Scale the
+        # measured scene windows so still boundaries still sum to the final file.
+        raw_sum = sum(segment_seconds) or measured_seconds
+        scale = measured_seconds / raw_sum if raw_sum > 0 else 1.0
+        scaled = [max(1.0, seconds * scale) for seconds in segment_seconds]
+        drift = measured_seconds - sum(scaled)
+        scaled[-1] = max(1.0, scaled[-1] + drift)
+        from studio_produce.timed_script import apply_measured_durations
+
+        measured_timeline = apply_measured_durations(timeline, scaled) or measured_timeline
+        _persist_measured_timed_script(
+            client,
+            item=item,
+            request=request,
+            timeline=measured_timeline,
+            measured_seconds=measured_seconds,
+        )
+        scene_detail = ",".join(f"{seconds:.2f}" for seconds in scaled)
+        norm_details_extra = f" | Timed-script VO-driven scenes [{scene_detail}]s"
+    else:
+        norm_details_extra = ""
+        if not timeline:
+            cap_error = validate_voiceover_for_owner_cap(
+                voiceover_seconds=measured_seconds,
+                content_item=item,
+                request=request,
+            )
+            if cap_error:
+                # The synthesized file is the truth. Do not fail production because speech
+                # ran longer than the planning target; extend every non-Story video target
+                # to fit the narration plus the configured tail.
+                _extend_video_duration_for_voiceover(client, item, request, measured_seconds)
     voice_file = drive.upload_and_share(
         VOICEOVER_DRIVE_FOLDER_ID,
         f"{content_id}_voice_normalized.mp3",
@@ -320,6 +412,7 @@ def process_request(
     )
     norm_details = (
         f"{normalization_details(norm_payload)} | Audio duration {measured_seconds:.3f}s"
+        f"{norm_details_extra}"
     )
     sent_at = _now_iso()
     want_thumbnail = item_wants_ai_thumbnail(item)

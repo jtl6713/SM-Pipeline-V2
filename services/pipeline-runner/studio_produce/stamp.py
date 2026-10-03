@@ -575,21 +575,40 @@ def clips_for_timed_script(
     clips: list[dict[str, Any]],
     timeline: dict[str, Any] | None,
 ) -> list[dict[str, Any]] | None:
-    """Order stills by the imported timeline. Unresolved scenes refuse the stamp."""
+    """Order stills by the imported timeline. Unresolved scenes refuse the stamp.
+
+    When every scene has a resolvable asset_id, honor that mapping. When ids are
+    stale/blank but scene count equals clip count, keep the current still order
+    (master order) and attach scene VO windows positionally so durations stay
+    synced to narration.
+    """
     segments = (timeline or {}).get("segments") if isinstance(timeline, dict) else None
     if not isinstance(segments, list) or not segments:
         return clips
     ordered: list[dict[str, Any]] = []
+    unresolved = False
     for segment in segments:
         if not isinstance(segment, dict):
             return None
         match = next((clip for clip in clips if _clip_matches_asset(clip, str(segment.get("asset_id") or ""))), None)
         if not match:
-            return None
+            unresolved = True
+            break
         copied = dict(match)
         copied["timed_segment"] = segment
         ordered.append(copied)
-    return ordered
+    if not unresolved and len(ordered) == len(segments):
+        return ordered
+    if len(clips) != len(segments):
+        return None
+    positional: list[dict[str, Any]] = []
+    for index, segment in enumerate(segments):
+        if not isinstance(segment, dict):
+            return None
+        copied = dict(clips[index])
+        copied["timed_segment"] = segment
+        positional.append(copied)
+    return positional
 
 
 def _music_requested(effective: dict[str, Any]) -> bool:
@@ -621,7 +640,8 @@ def assign_clip_frames(
     video_total = sum(native_video)
     timeline = None if story or video_indexes else timed_script_from_request(request)
     if timeline and len(timeline.get("segments") or []) == len(clips):
-        # Imported scene boundaries win over pacing, fixed duration, and owner length.
+        # Timed-script scene windows win over pacing/fixed/owner length.
+        # After P2, those windows are measured VO lengths (not raw import clocks).
         frames = [segment_duration_frames(segment) for segment in timeline["segments"]]
         if frames and all(frame >= 1 for frame in frames):
             return frames, sum(frames)

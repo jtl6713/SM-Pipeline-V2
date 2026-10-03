@@ -92,3 +92,9 @@ jobs:
 
 # Trigger pipeline-runner deploy for Remotion Chicago Shining logo on every render
 # 2026-10-02T16:45:00Z
+
+# Trigger pipeline-runner deploy for timed-script per-scene VO fitted to import windows (NYC CI 290)
+# 2026-10-02T19:05:00Z service_version=2026-10-02-timed-script-measured-vo
+
+# Trigger pipeline-runner deploy for timed-script VO-driven measured scene durations (NYC CI 290)
+# 2026-10-03T03:20:00Z service_version=2026-10-03-timed-script-vo-driven
