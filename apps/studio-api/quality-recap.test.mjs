@@ -36,6 +36,7 @@ test("recap uses everyday words and names the post", () => {
     platform_output_type: "Slideshow",
   }), "Vizcaya Rainy Day Plan · TikTok Slideshow");
   assert.equal(qualityRecapCopy("produce_escalated").found.includes("investigation"), true);
+  assert.match(qualityRecapCopy("drive_music_404").found, /background music file was deleted/i);
 });
 
 test("recap names the content item and platform output on a never-sent post", () => {

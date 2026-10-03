@@ -6,6 +6,8 @@ import {
   deskModeAllows,
   classifyProduceJob,
   errorClassFromText,
+  extractDriveMusic404FileId,
+  isDriveMusic404Error,
   classifyRenderRow,
   classifyCropRow,
   classifyAutonomousRequest,
@@ -108,6 +110,44 @@ test("produce jobs escalate after heal budget then stay transient while retries 
   assert.equal(mismatch.actor, "desk_agent");
   assert.equal(mismatch.fingerprint, fingerprint("produce_clip_mismatch", "reccEj6eVXPPKalJd", "clip_count_mismatch"));
   assert.equal(errorClassFromText("clip count mismatch before asset download"), "clip_count_mismatch");
+});
+
+test("deleted Drive library music is drive_music_404 data_repair, not Worker retry", () => {
+  const now = Date.parse("2026-10-03T14:00:00Z");
+  const remotionErr = "Remotion /render failed (500): Download failed 404 Drive 11XdsaVu9EB9p_H5y-Q1n1MEPa2ZMr11t";
+  const t1Err = "404 Client Error: Not Found for url: https://www.googleapis.com/drive/v3/files/11XdsaVu9EB9p_H5y-Q1n1MEPa2ZMr11t?alt=media&supportsAllDrives=true";
+  assert.equal(errorClassFromText(remotionErr), "drive_music_404");
+  assert.equal(errorClassFromText(t1Err), "drive_music_404");
+  assert.equal(extractDriveMusic404FileId(remotionErr), "11XdsaVu9EB9p_H5y-Q1n1MEPa2ZMr11t");
+  assert.equal(extractDriveMusic404FileId(t1Err), "11XdsaVu9EB9p_H5y-Q1n1MEPa2ZMr11t");
+  assert.equal(isDriveMusic404Error(remotionErr), true);
+  const blocked = classifyProduceJob({
+    request_id: "recrbAqjeyGcERgdf",
+    step: "blocked",
+    job_id: "spj-17372f47e6aa",
+    updated_at: "2026-10-03T13:50:00Z",
+    error: remotionErr,
+    heal: { resume_count: 5, max_resumes: 5, last_block_error: remotionErr },
+  }, now);
+  assert.equal(blocked.kind, "drive_music_404");
+  assert.equal(blocked.class, "data_repair");
+  assert.equal(blocked.actor, "desk_agent");
+  assert.equal(blocked.fingerprint, fingerprint("drive_music_404", "recrbAqjeyGcERgdf", "11XdsaVu9EB9p_H5y-Q1n1MEPa2ZMr11t"));
+  const render = classifyRenderRow({
+    id: "recj8NYksxakWJEJd",
+    render_status: "Failed",
+    remotion_job_id: "job-1",
+    render_error: remotionErr,
+  }, now);
+  assert.equal(render.kind, "drive_music_404");
+  assert.equal(render.fingerprint, fingerprint("drive_music_404", "recj8NYksxakWJEJd", "11XdsaVu9EB9p_H5y-Q1n1MEPa2ZMr11t"));
+  const t1 = classifyRenderRow({
+    id: "reczSvL8nKCVySr7J",
+    render_status: "Ready for Render",
+    remotion_job_id: "",
+    timing_error: t1Err,
+  }, now);
+  assert.equal(t1.kind, "drive_music_404");
 });
 
 test("render, orphan, crop, autonomous, and health classifiers", () => {

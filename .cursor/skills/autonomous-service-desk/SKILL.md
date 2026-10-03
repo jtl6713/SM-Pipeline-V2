@@ -51,6 +51,20 @@ If every Platform Output on a request shows Studio state Blocked (0/N rendered),
 
 After that mismatch is fixed, do **not** start four 28-clip Remotion jobs at once. Concurrent compositor load causes `delayRender` / `Request closed` / exit code 1 around frame ~848. Serialize R4 (one new render while any output is Rendering). Requeue Failed `exit code 1` to Ready for Render. Do not Approve publish.
 
+## Watch: Deleted library music (Drive 404)
+
+Remotion `/render failed (500): Download failed 404 Drive <id>` or T1 `404 Client Error: Not Found` on `drive/v3/files/<id>?alt=media` means the **library MP3 is gone from Drive**, not a share/ACL glitch. Kind `drive_music_404`, class `data_repair`, actor `desk_agent`, fingerprint `drive_music_404:<pr_or_output_rec>:<drive_file_id>`. Worker resume / Failed-render requeue cannot restore the file; they only burn the heal budget.
+
+Auto-correct:
+
+1. Ticket that fingerprint. Confirm Drive `get_file_metadata` + public `drive.usercontent.google.com/download?id=` are 404.
+2. Search Media Assets / Drive folder `GDRIVE_MUSIC_FOLDER` (`1mzNHcVmeXb6I2WybJD5iOTrJUDRQJIN3`) for a live copy of the same track. Do not put music on R2.
+3. Retarget the catalog Media Asset `Google Drive File ID` + `Google Drive URL`, the Content Item music file id + Music URL, and sibling Platform Output `Music_URL`s onto the live file.
+4. Reset produce `heal.resume_count` to 0, clear `job.error`, resume studio-produce. Do not Approve publish.
+5. If no live copy exists, leave the ticket as `data_repair`. Same fingerprint after a successful retarget + resume → `code_bug`.
+
+Proven: Content 298 Huntington Beach / `recrbAqjeyGcERgdf` / CKay Love Nwantiti Remix `11XdsaVu9EB9p_H5y-Q1n1MEPa2ZMr11t` → `love_nwantiti.mp3` `1hADVgqH1x5TyPUPea5jruEIVUe45__ew`.
+
 ## Watch: 9:16 fill-crop looks like two photos stacked
 
 Instagram/Facebook Reels (or any 9:16 photo-sequence) that show **two mismatched vertical halves with a horizontal seam** are a bad HEIC crop, not a Remotion letterbox. iPhone HEIC stills are a tile grid (many 512px HEVC tiles). Sending raw HEIC to Cloudflare Images, or `ffmpeg -map 0:v:0`, uses one/two tiles instead of the assembled 4032×3024 photo. Kind `variant_heic_sprite`, class `code_bug`. Fix: `ffmpeg_heic_still` in `integrations/variant_service.py` (default decode, **no** `-map`, `-frames:v 1 -update 1`) before the variant Worker. Recrop 9:16 rows (clear Drive authority so Item 4 does not reuse the stacked JPEG), restamp clip lists, requeue Ready for Render. Worker heal cannot fix pixels already in Drive. Proven: Lincoln Park Zoo `reccEj6eVXPPKalJd` IG Reel 370 / crop `1h1e7mcXSxPJGvgImBp1c_Y7iRjUyljtr`.

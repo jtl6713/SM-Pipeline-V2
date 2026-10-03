@@ -27,6 +27,7 @@ import {
   classifyRenderRow,
   deskFailedNeedsHeal,
   deskRecoverableEscalatedError,
+  isDriveMusic404Error,
   deskTransientPublishError,
   deskTransientRenderError,
   deskWorkIdentity,
@@ -485,8 +486,12 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
+<<<<<<< HEAD
           version: "0.10.446-timed-script-apply-remeasure",
           studio_mae_schedule_v1: true,
+=======
+          version: "0.10.438-drive-music-404",
+>>>>>>> 5c73a40a (Teach Quality Agent drive_music_404 for deleted library tracks.)
           studio_desk_inventory_v1: true,
           studio_desk_activity_v1: true,
           studio_tiktok_complete_v1: true,
@@ -10416,7 +10421,17 @@ async function resumeStaleStudioProductionJobs(env, options = {}) {
       const isBlocked = step === "blocked";
       const transientRenderBlock = isBlocked && isTransientRenderBlockError(blockError);
       const skippableBlock = isBlocked && /no_eligible_p2_route/i.test(blockError);
-      // Always retry blocked jobs (any failure class) until the heal budget is exhausted.
+      const music404Block = isBlocked && isDriveMusic404Error(blockError);
+      // Deleted library music is data_repair. Resume cannot restore the Drive file.
+      if (music404Block) {
+        pulses.push({
+          key: "STUDIO_PRODUCE",
+          request: requestId,
+          skipped: "drive_music_404",
+        });
+        continue;
+      }
+      // Always retry blocked jobs (any other failure class) until the heal budget is exhausted.
       const updated = Date.parse(String(job?.updated_at || ""));
       const stale =
         isBlocked ||
@@ -10896,6 +10911,10 @@ async function healStuckStudioRenders(env) {
       continue;
     }
     const err = String(f(row, "Remotion_Error_Message") || f(row, "Final_File_Error_Message") || "");
+    if (isDriveMusic404Error(err)) {
+      pulses.push({ key: "R4_FAILED_REQUEUE", id: row.id, skipped: "drive_music_404" });
+      continue;
+    }
     if (!deskFailedNeedsHeal({
       render_error: err,
       last_modified: f(row, "Last_Modified") || f(row, "Updated_At") || f(row, "Last_Render_Attempt_At"),
@@ -11767,7 +11786,7 @@ async function studioHealEscalatedProduce(env, options = {}) {
     const job = parseStudioProductionJob(row);
     if (String(job?.step || "").trim() !== "escalated") continue;
     const err = String(job?.error || job?.heal?.last_block_error || "");
-    if (/clip count mismatch/i.test(err) || !deskRecoverableEscalatedError(err || "escalated")) {
+    if (/clip count mismatch/i.test(err) || isDriveMusic404Error(err) || !deskRecoverableEscalatedError(err || "escalated")) {
       pulses.push({ key: "STUDIO_ESCALATED", id: row.id, skipped: "not_recoverable" });
       continue;
     }
@@ -35994,6 +36013,7 @@ const DESK_OUTPUT_IDENTITY_KINDS = new Set([
   "tiktok_auth_signature",
   "publish_never_dispatch",
   "render_failed",
+  "drive_music_404",
   "render_unfetchable_source",
   "render_ready_no_job",
   "render_ready_waiting_voiceover",
@@ -36108,6 +36128,8 @@ function mapDeskInventoryOutput(record, contentToRequest = new Map(), contentByI
     youtube_video_id: f(record, "YouTube_Video_ID"),
     publish_retry_eligible: Boolean(f(record, "Publish_Retry_Eligible")),
     render_error: f(record, "Remotion_Error_Message") || f(record, "Final_File_Error_Message"),
+    timing_error: f(record, "Timing_Error_Message"),
+    music_error: f(record, "Music_Error_Message"),
     render_clip_list_json: f(record, "Render_Clip_List_JSON"),
     remotion_props_json: f(record, "Remotion_Props_JSON"),
   };
@@ -36209,7 +36231,7 @@ async function gatherStudioDeskInventory(env) {
     for (const kind of kinds) scannedKinds.add(kind);
   };
 
-  scanned("produce_stale", "produce_escalated", "produce_clip_mismatch");
+  scanned("produce_stale", "produce_escalated", "produce_clip_mismatch", "drive_music_404");
   const escalatedRows = await listRecords(env, PRODUCTION_REQUEST_TABLE, {
     limit: 8,
     sortField: "Updated_At",
