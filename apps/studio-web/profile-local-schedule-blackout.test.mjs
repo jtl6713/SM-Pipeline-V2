@@ -13,14 +13,60 @@ function localParts(iso, timeZone) {
   return { hour: get("hour"), minute: get("minute") };
 }
 
-test("automatic suggestions respect each profile local timezone", () => {
-  const now = new Date("2026-10-03T12:00:00Z");
+test("automatic suggestions use the first-priority morning window in each profile timezone", () => {
+  const now = new Date("2026-10-03T08:00:00Z");
   for (const timeZone of ["America/Chicago", "America/New_York", "America/Los_Angeles"]) {
-    const iso = plan.ezPickBalancedSuggestedIso(["19:00-21:00"], now, { days: [], timeZone });
+    const iso = plan.ezPickBalancedSuggestedIso([], now, { timeZone });
     const local = localParts(iso, timeZone);
-    assert.equal(local.hour, 19);
+    assert.equal(local.hour, 5);
+    assert.equal(local.minute, 30);
     assert.equal(plan.ezIsBlackoutLocalTime(Date.parse(iso), timeZone), false);
   }
+});
+
+test("scheduler exhausts days 1-7 morning before using midday, then afternoon", () => {
+  const zone = "America/Chicago";
+  const now = new Date("2026-10-03T08:00:00Z");
+  const firstSevenMornings = [];
+  for (let day = 3; day <= 9; day++) {
+    const dd = String(day).padStart(2, "0");
+    firstSevenMornings.push(Date.parse(`2026-10-${dd}T10:30:00Z`)); // 5:30 AM CDT
+  }
+  const midday = plan.ezPickBalancedSuggestedIso([], now, { timeZone: zone, platformOccupiedMs: firstSevenMornings });
+  const local = localParts(midday, zone);
+  assert.equal(local.hour, 11);
+  assert.equal(local.minute, 30);
+
+  const firstSevenMidday = [];
+  for (let day = 3; day <= 9; day++) {
+    const dd = String(day).padStart(2, "0");
+    firstSevenMidday.push(Date.parse(`2026-10-${dd}T16:30:00Z`)); // 11:30 AM CDT
+  }
+  const afternoon = plan.ezPickBalancedSuggestedIso([], now, {
+    timeZone: zone,
+    platformOccupiedMs: [...firstSevenMornings, ...firstSevenMidday],
+  });
+  const afternoonLocal = localParts(afternoon, zone);
+  assert.equal(afternoonLocal.hour, 16);
+  assert.equal(afternoonLocal.minute, 30);
+});
+
+test("scheduler moves to days 8-14 only after all three first-week passes are exhausted", () => {
+  const zone = "America/Chicago";
+  const now = new Date("2026-10-03T08:00:00Z");
+  const occupied = [];
+  for (let day = 3; day <= 9; day++) {
+    const dd = String(day).padStart(2, "0");
+    occupied.push(Date.parse(`2026-10-${dd}T10:30:00Z`));
+    occupied.push(Date.parse(`2026-10-${dd}T16:30:00Z`));
+    occupied.push(Date.parse(`2026-10-${dd}T21:30:00Z`));
+  }
+  const iso = plan.ezPickBalancedSuggestedIso([], now, { timeZone: zone, platformOccupiedMs: occupied });
+  const localDate = new Intl.DateTimeFormat("en-CA", { timeZone: zone, year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(iso));
+  const local = localParts(iso, zone);
+  assert.equal(localDate, "10/10/2026");
+  assert.equal(local.hour, 5);
+  assert.equal(local.minute, 30);
 });
 
 test("8 PM through 3:30 AM is a blackout in profile local time", () => {
