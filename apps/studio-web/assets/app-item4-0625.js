@@ -254,7 +254,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.464-rolling-14day-cap";
+  const BUILD_ID = "item4-0.6.465-auto-scheduling-no-toggle";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -15880,7 +15880,8 @@
   }
 
   function pipelineUseDefaultSchedules() {
-    return Boolean($("pipelineUseDefaultSchedules")?.checked);
+    // Automatic scheduling is now the single Pipeline policy; no header toggle.
+    return true;
   }
 
   function persistPipelineUseDefaultSchedules() {
@@ -15888,11 +15889,7 @@
   }
 
   function restorePipelineUseDefaultSchedules() {
-    const box = $("pipelineUseDefaultSchedules");
-    if (!box) return;
-    // Start every Pipeline visit with no client-side default schedule suggestions.
-    // Persisted schedules still render from the server record.
-    box.checked = false;
+    // Header toggle retired: intelligent rolling-14-day scheduling is always active.
   }
 
   function pipelineRowHasSchedule(record) {
@@ -20951,18 +20948,6 @@
     approveAllPipelineOutputs().catch((e) => setPipelineLiveHint(e.message || "Approve All failed"));
   });
   restorePipelineUseDefaultSchedules();
-  $("pipelineUseDefaultSchedules")?.addEventListener("change", () => {
-    const useDefaults = persistPipelineUseDefaultSchedules();
-    clearDefaultSchedulesFromUnapprovedRows();
-    if (!useDefaults) {
-      setPipelineLiveHint("Default schedule suggestions cleared. Ready outputs are back in the scheduling tray.");
-      return;
-    }
-    setPipelineLiveHint("Creating intelligent default schedules for unapproved outputs…");
-    applyDefaultSchedulesToReadyRows()
-      .then(() => setPipelineLiveHint("Default schedule suggestions added. They remain unsaved until you approve or save a schedule."))
-      .catch((error) => setPipelineLiveHint(error?.message || "Could not create default schedule suggestions."));
-  });
   $("pipelineFilterClear")?.addEventListener("click", () => {
     pipelineViewFilter = "all";
     clearPipelineColumnFilters();
@@ -21208,7 +21193,6 @@
   phase6DecorateTooltips(document);
   productionDecorateTooltips($("page-content"));
   phase6BindTooltipTarget($("pipelineApproveAll"), PRODUCTION_BUTTON_HELP.pipelineApproveAll);
-  phase6BindTooltipTarget($("pipelineUseDefaultSchedulesLabel"), PRODUCTION_BUTTON_HELP.pipelineUseDefaultSchedules);
   window.addEventListener("scroll", phase6HideTooltip, true);
   window.addEventListener("resize", phase6HideTooltip);
   document.addEventListener("keydown", (e) => {
