@@ -6,10 +6,11 @@ Imported scene timestamps and voiceover lines are stored as a structured
 field stays free of that payload because Studio strips the directive before
 showing it.
 
-When the directive is present, scene boundaries are authoritative: pacing,
-fixed image duration, beat sync, and narration-length inference must not
-rewrite them. Suggested-still text is assignment context only and is never
-narration.
+Import clocks are ordering/split hints. After P2 synthesizes per-scene
+voiceover, measured MP3 lengths rewrite each scene window so still N lasts
+exactly as long as scene N speech. Pacing, fixed image duration, and beat sync
+must not override those measured windows. Suggested-still text is assignment
+context only and is never narration.
 """
 
 from __future__ import annotations

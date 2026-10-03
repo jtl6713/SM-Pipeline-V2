@@ -640,7 +640,8 @@ def assign_clip_frames(
     video_total = sum(native_video)
     timeline = None if story or video_indexes else timed_script_from_request(request)
     if timeline and len(timeline.get("segments") or []) == len(clips):
-        # Imported scene boundaries win over pacing, fixed duration, and owner length.
+        # Timed-script scene windows win over pacing/fixed/owner length.
+        # After P2, those windows are measured VO lengths (not raw import clocks).
         frames = [segment_duration_frames(segment) for segment in timeline["segments"]]
         if frames and all(frame >= 1 for frame in frames):
             return frames, sum(frames)

@@ -400,3 +400,7 @@ Reason: Timed-script per-scene VO fitted to import windows (NYC CI 290 scene3 at
 Worker: 0.10.436-timed-script-measured-vo
 Source branch: cursor/timed-script-measured-vo-0270
 Requested: 2026-10-02T19:10:00Z
+
+Worker: 0.10.437-timed-script-vo-driven
+Reason: Studio copy — timed-script durations follow narration.
+Source branch: cursor/timed-script-vo-driven-0270

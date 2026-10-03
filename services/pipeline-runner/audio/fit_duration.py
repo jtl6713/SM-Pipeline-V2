@@ -1,4 +1,9 @@
-"""Force an MP3 to an exact duration for Timed Script scene windows."""
+"""Force an MP3 to an exact duration (legacy helper).
+
+Timed Script Mode is VO-driven: stills follow measured per-scene speech, so
+P2 must not call this to pad/stretch narration into import windows. Kept for
+non-timed-script experiments or manual ops only.
+"""
 
 from __future__ import annotations
 

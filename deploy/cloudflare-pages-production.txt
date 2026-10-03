@@ -391,3 +391,7 @@ Deploy Studio Pages production
 Reason: Timed-script per-scene VO fitted to import windows so stills and narration share the same clock
 UI: 0.6.457-timed-script-measured-vo
 Requested: 2026-10-02T19:10:00Z
+
+UI: 0.6.458-timed-script-vo-driven
+Reason: Timed script stills follow spoken VO lengths (not import clocks).
+Source branch: cursor/timed-script-vo-driven-0270
