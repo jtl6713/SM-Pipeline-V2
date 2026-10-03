@@ -370,7 +370,8 @@
   }
 
   const EZ_SCHEDULE_GAP_MS = 3 * 60 * 60 * 1000;
-  const EZ_SUGGEST_HORIZON_DAYS = 7;
+  const EZ_SUGGEST_HORIZON_DAYS = 14;
+  const EZ_PRIORITY_SCHEDULE_WINDOWS = ["05:30-07:00", "11:30-13:00", "16:30-18:00"];
   const EZ_SUGGEST_LEAD_MS = 10 * 60 * 1000;
 
   function ezIndustryBestWindows(platform, outputType) {
@@ -510,45 +511,38 @@
 
   function ezPickBalancedSuggestedIso(windows, now = new Date(), options = {}) {
     const timeZone = ezNormalizeTimeZone(options.timeZone);
-    const daysPref = Array.isArray(options.days) ? options.days.filter(Boolean) : [];
     const occupiedMs = options.occupiedMs || [];
     const platformOccupiedMs = options.platformOccupiedMs || occupiedMs;
-    const windowList = Array.isArray(windows) && windows.length ? windows : ["12:00-13:00"];
     const nowMs = now.getTime() + EZ_SUGGEST_LEAD_MS;
     const local = ezZonedDateTimeParts(now, timeZone);
     const horizon = [];
     for (let i = 0; i < EZ_SUGGEST_HORIZON_DAYS; i++) {
       const civilBase = i === 0 ? { year: local.year, month: local.month, day: local.day } : ezAddCivilDays(local.year, local.month, local.day, i);
-      const noonMs = ezZonedWallToUtcMs(civilBase.year, civilBase.month, civilBase.day, 12, 0, timeZone);
-      horizon.push({ ...civilBase, index: i, weekday: ezWeekdayShort(new Date(noonMs), timeZone), key: ezCivilKey(civilBase.year, civilBase.month, civilBase.day) });
+      horizon.push({ ...civilBase, index: i, key: ezCivilKey(civilBase.year, civilBase.month, civilBase.day) });
     }
 
-    let best = null;
-    for (const civil of horizon) {
-      const preferred = !daysPref.length || daysPref.includes(civil.weekday);
-      const crowding = ezOccupiedOnDay(occupiedMs, civil, timeZone).length;
-      const platformCrowding = ezOccupiedOnDay(platformOccupiedMs, civil, timeZone).length;
-      for (let windowIndex = 0; windowIndex < windowList.length; windowIndex++) {
-        const first = String(windowList[windowIndex] || "12:00-13:00").split("-")[0] || "12:00";
-        const [hh, mm] = first.split(":").map((n) => Number(n) || 0);
-        const ms = ezZonedWallToUtcMs(civil.year, civil.month, civil.day, hh, mm || 0, timeZone);
-        if (ms <= nowMs || ezIsBlackoutLocalTime(ms, timeZone) || ezScheduleConflicts(ms, platformOccupiedMs)) continue;
-        const score = ezScoreAnalyticsSlot({ preferred, windowIndex, crowding, platformCrowding, timeCrowding: ezTimeCrowding(ms, occupiedMs, 90, timeZone), dayIndex: civil.index });
-        if (!best || score > best.score) best = { score, ms };
+    // Strict scheduling passes:
+    // 1-3: days 1-7 morning, midday, late afternoon.
+    // 4-6: days 8-14 morning, midday, late afternoon.
+    const dayBands = [[0, 7], [7, 14]];
+    for (const [startDay, endDay] of dayBands) {
+      for (const window of EZ_PRIORITY_SCHEDULE_WINDOWS) {
+        const [start] = window.split("-");
+        const [hh, mm] = start.split(":").map((n) => Number(n) || 0);
+        for (let dayIndex = startDay; dayIndex < endDay; dayIndex++) {
+          const civil = horizon[dayIndex];
+          if (!civil) continue;
+          const ms = ezZonedWallToUtcMs(civil.year, civil.month, civil.day, hh, mm, timeZone);
+          if (ms <= nowMs || ezIsBlackoutLocalTime(ms, timeZone) || ezScheduleConflicts(ms, platformOccupiedMs)) continue;
+          return new Date(ms).toISOString();
+        }
       }
     }
-    if (best) return new Date(best.ms).toISOString();
 
-    const first = String(windowList[0] || "12:00-13:00");
-    const start = first.split("-")[0] || "12:00";
-    const [hh, mm] = start.split(":").map((n) => Number(n) || 0);
-    let civil = { year: local.year, month: local.month, day: local.day };
-    let ms = ezZonedWallToUtcMs(civil.year, civil.month, civil.day, hh, mm || 0, timeZone);
-    if (ms <= nowMs) {
-      civil = ezAddCivilDays(civil.year, civil.month, civil.day, 1);
-      ms = ezZonedWallToUtcMs(civil.year, civil.month, civil.day, hh, mm || 0, timeZone);
-    }
-    return ezNextOpenScheduleIso(new Date(ms).toISOString(), platformOccupiedMs, EZ_SCHEDULE_GAP_MS, { timeZone });
+    // If all six passes are full, continue safely after day 14 without entering the blackout.
+    const fallbackCivil = ezAddCivilDays(local.year, local.month, local.day, 14);
+    const fallbackMs = ezZonedWallToUtcMs(fallbackCivil.year, fallbackCivil.month, fallbackCivil.day, 5, 30, timeZone);
+    return ezNextOpenScheduleIso(new Date(fallbackMs).toISOString(), platformOccupiedMs, EZ_SCHEDULE_GAP_MS, { timeZone });
   }
 
   function ezSuggestedChicagoIso(windows, now = new Date(), options = {}) {
@@ -613,9 +607,7 @@
         (reserved[platform] ||= []).push(Date.parse(iso));
         continue;
       }
-      const industry = ezIndustryBestWindows(platform, outputType);
-      const iso = ezPickBalancedSuggestedIso(industry.windows, now, {
-        days: industry.days,
+      const iso = ezPickBalancedSuggestedIso(EZ_PRIORITY_SCHEDULE_WINDOWS, now, {
         occupiedMs: ezFlattenOccupied(reserved),
         platformOccupiedMs: reserved[platform] || [],
         timeZone: options.timeZone,
