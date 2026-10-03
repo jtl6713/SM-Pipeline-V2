@@ -298,6 +298,176 @@ def cover_block(record: dict[str, Any]) -> str:
     )
 
 
+
+def ordered_asset_links_text(
+    record: dict[str, Any],
+    *,
+    slides: list[dict[str, Any]] | None = None,
+) -> str:
+    """Render the stored TikTok asset manifest as readable plain-text links."""
+    urls = _ordered_asset_urls(record)
+    if not urls:
+        return "No draft asset links were stored."
+
+    by_url: dict[str, str] = {}
+    for index, slide in enumerate(slides or []):
+        url = field_str(slide, "Asset_9x16_Public_URL")
+        if url and url not in by_url:
+            by_url[url] = _slide_label(slide, index)
+
+    is_video = _ci(field_str(record, "TikTok_Draft_Type")) == _ci(DRAFT_TYPE_VIDEO)
+    rows: list[str] = []
+    for index, url in enumerate(urls):
+        label = by_url.get(url) or ("Video draft asset" if is_video else f"Image {index + 1}")
+        rows.append(f"{index + 1}. {label}\n   {url}")
+    return "\n".join(rows)
+
+
+def cover_text(record: dict[str, Any]) -> str:
+    raw = field_str(record, "Thumbnail_URL")
+    public = graph_fetchable_cover_url(raw)
+    download = public or thumbnail_download_url(raw)
+    if not download:
+        return (
+            "3D grid cover: Not set on this output. Generate the thumbnail before posting "
+            "so you can set the cover in TikTok."
+        )
+    return (
+        "3D grid cover: TikTok's draft API cannot attach this automatically.\n"
+        f"Download cover image: {download}"
+    )
+
+
+def sibling_status_text(record: dict[str, Any]) -> str:
+    label = _output_surface(record)
+    permalink = field_str(record, "Platform_Post_URL")
+    publish = field_str(record, "Publish_Status")
+    if permalink and publish.casefold() in {"published", "published privately"}:
+        return f"- {label}: live — {permalink}"
+    when = chicago_publish_label(
+        field(record, "Scheduled_Post_Date") or field(record, "Recommended_Publication_At")
+    )
+    if when:
+        return f"- {label}: scheduled {when}"
+    status = publish or field_str(record, "Output_Status") or "in production"
+    return f"- {label}: {status}"
+
+
+def platform_status_text(siblings: list[dict[str, Any]] | None) -> str:
+    rows = [sibling_status_text(row) for row in (siblings or [])]
+    if rows:
+        return "\n".join(rows)
+    return (
+        "- Instagram, Facebook, and YouTube are on the same campaign day. "
+        "Check Pipeline if a permalink is not listed yet."
+    )
+
+
+def handoff_email_text(
+    record: dict[str, Any],
+    *,
+    location: PublishLocation | None = None,
+    siblings: list[dict[str, Any]] | None = None,
+    profile: dict[str, Any] | None = None,
+    asset_slides: list[dict[str, Any]] | None = None,
+) -> str:
+    """Client-safe TikTok handoff email body.
+
+    This intentionally contains no HTML. The handoff has repeatedly rendered raw
+    MIME/HTML in Apple Mail, so operational TikTok emails use a single text/plain
+    entity and full URLs instead of rich markup.
+    """
+    output_id = str(field(record, "Output_ID") or "")
+    title = field_str(record, "Output_Title") or "TikTok draft"
+    draft_type = field_str(record, "TikTok_Draft_Type") or ""
+    caption = caption_with_hashtags(
+        field_str(record, "Output_Caption"),
+        field_str(record, "Output_Hashtags"),
+    )
+    location_label = location.label if location else ""
+    publish_id = field_str(record, "TikTok_Draft_Publish_ID")
+    completion = field_str(record, "TikTok_Manual_Completion_URL")
+    when = recommended_publish_label(record)
+    count = image_count_label(record)
+    az = is_az_finished_video(record)
+    profile_name = profile_display_name(record, profile)
+    tiktok_handle = profile_tiktok_handle(profile)
+    destination = tiktok_handle or profile_name
+
+    heading = f"{profile_name} publish package" if az else "TikTok draft delivered — manual action required"
+    lines = [
+        heading,
+        "=" * len(heading),
+        "",
+        f"Profile: {profile_name}",
+    ]
+    if tiktok_handle:
+        lines.append(f"TikTok: {tiktok_handle}")
+
+    lines.extend(
+        [
+            "",
+            f"TikTok accepted the asset package and delivered it to the TikTok inbox for {destination}.",
+            "It has not been marked Published in Airtable." if not az else (
+                "TikTok cannot tell us when the inbox draft goes public. "
+                "Use Mark as Published after you post."
+            ),
+        ]
+    )
+
+    if az:
+        lines.extend(
+            [
+                "",
+                "SAME-PIECE STATUS",
+                platform_status_text(siblings),
+                "",
+                "TikTok Story must still be posted manually in the TikTok app.",
+            ]
+        )
+
+    lines.extend(
+        [
+            "",
+            f"OUTPUT #{output_id} — {title}",
+            "-" * min(72, max(20, len(f"OUTPUT #{output_id} — {title}"))),
+            f"Draft type: {draft_type}",
+            f"Number of images: {count}",
+            f"Recommended publishing time: {when}",
+        ]
+    )
+    if location_label:
+        lines.append(f"Suggested TikTok location: {location_label}")
+
+    lines.extend(
+        [
+            "",
+            cover_text(record),
+            "",
+            "CAPTION + HASHTAGS",
+            caption or "(none)",
+            "",
+            "ORDERED DRAFT ASSETS",
+            ordered_asset_links_text(record, slides=asset_slides),
+            "",
+            "POSTING STEPS",
+            "1. Open the TikTok inbox notification from SM Pipeline Social Publisher.",
+            "2. Review and edit the images/video and caption.",
+            "3. Download the 3D cover above and set it as the draft cover in TikTok.",
+            "4. Add the suggested location tag in TikTok when available.",
+            "5. Add music in TikTok before posting when music is requested.",
+            "6. Post manually.",
+            "7. Record the final TikTok URL using the Mark as Published link below.",
+        ]
+    )
+
+    if completion:
+        lines.extend(["", "MARK AS PUBLISHED", completion])
+    if publish_id:
+        lines.extend(["", f"Draft publish ID: {publish_id}"])
+
+    return "\n".join(lines).strip() + "\n"
+
 def handoff_email_html(
     record: dict[str, Any],
     *,
