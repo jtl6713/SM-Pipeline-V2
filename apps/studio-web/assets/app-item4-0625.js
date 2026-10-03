@@ -254,7 +254,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.466-platform-output-type-scheduling";
+  const BUILD_ID = "item4-0.6.467-content-schedule-regenerate";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -16355,6 +16355,72 @@
     }
   }
 
+  async function regeneratePipelineContentSchedule(groupKey, button = null) {
+    const nowMs = Date.now();
+    const groupRecords = (pipelineOutputs || []).filter((record) => pipelineContentGroupKey(record) === groupKey);
+    const eligible = groupRecords
+      .filter((record) => {
+        if (!record?.id || record.do_not_publish || creativeIsPublished(record)) return false;
+        const iso = pipelineRecordScheduleIso(record);
+        if (!iso) return true;
+        const ms = Date.parse(iso);
+        return Number.isFinite(ms) && ms > nowMs;
+      })
+      .sort((a, b) => pipelineOutputNumber(a) - pipelineOutputNumber(b));
+    if (!eligible.length) {
+      setPipelineLiveHint("No unpublished future or unscheduled outputs are eligible for regeneration.");
+      return;
+    }
+
+    const eligibleIds = new Set(eligible.map((record) => record.id));
+    const reserved = {};
+    for (const record of pipelineOutputs || []) {
+      if (eligibleIds.has(record.id) || record.do_not_publish || creativeIsPublished(record)) continue;
+      const bucket = pipelineScheduleBucketKey(record);
+      const iso = pipelineRecordScheduleIso(record);
+      const ms = iso ? Date.parse(iso) : NaN;
+      if (bucket && Number.isFinite(ms) && ms > nowMs) (reserved[bucket] ||= []).push(ms);
+    }
+
+    if (button) {
+      button.dataset.busy = "true";
+      button.disabled = true;
+      button.textContent = "Regenerating…";
+    }
+    setPipelineLiveHint(`Regenerating ${eligible.length} future schedule${eligible.length === 1 ? "" : "s"}…`);
+
+    let saved = 0;
+    let failed = 0;
+    for (const record of eligible) {
+      const bucket = pipelineScheduleBucketKey(record);
+      if (!bucket) { failed += 1; continue; }
+      const iso = nextOpenScheduleIso(new Date().toISOString(), reserved[bucket] || [], {}, PIPELINE_SCHEDULE_GAP_MS, reserved[bucket] || []);
+      if (!iso) { failed += 1; continue; }
+      try {
+        const result = await api(`/api/operations/outputs/${encodeURIComponent(record.id)}/schedule`, {
+          method: "POST",
+          body: JSON.stringify({ scheduled_post_date: iso, manual_schedule_override: false }),
+        });
+        const savedRecord = result?.record || { ...record, scheduled_post_date: iso, manual_schedule_override: false };
+        applySavedPipelineSchedule(savedRecord);
+        (reserved[bucket] ||= []).push(Date.parse(iso));
+        saved += 1;
+      } catch {
+        failed += 1;
+      }
+    }
+
+    await refreshPipelineOutputs({ silent: true, force: true });
+    if (button) {
+      button.dataset.busy = "false";
+      button.disabled = false;
+      button.textContent = "Regenerate Schedule";
+    }
+    setPipelineLiveHint(failed
+      ? `Regenerated ${saved} schedule${saved === 1 ? "" : "s"}; ${failed} could not be regenerated.`
+      : `Regenerated ${saved} future schedule${saved === 1 ? "" : "s"} for this content.`);
+  }
+
   async function approvePipelineContentGroup(groupKey, button = null) {
     const groupRecords = (pipelineOutputs || []).filter((record) => pipelineContentGroupKey(record) === groupKey);
     const ready = pipelineManualApprovableOutputs(groupRecords);
@@ -16718,7 +16784,16 @@
     const label = pipelineContentGroupLabel(group.records);
     const groupReady = pipelineManualApprovableOutputs(group.records);
     const approveButton = `<button type="button" class="secondary-button pipeline-group-approve" data-pipeline-group-approve="${escapeHtml(group.key)}" title="${groupReady.length ? "Approve only the ready outputs in this content item" : "No outputs in this content item are waiting for approval"}" ${groupReady.length ? "" : "disabled"}>Approve all${groupReady.length ? ` (${groupReady.length})` : ""}</button>`;
-    const header = `<tr class="pipeline-group-row"><td colspan="9"><div class="pipeline-group-head"><button type="button" class="pipeline-group-toggle" data-pipeline-group-toggle="${escapeHtml(group.key)}" aria-expanded="${open ? "true" : "false"}"><span class="pipeline-group-chevron" aria-hidden="true">${open ? "▾" : "▸"}</span><span class="pipeline-group-title">${escapeHtml(label)}</span></button>${approveButton}</div></td></tr>`;
+    const nowMs = Date.now();
+    const regeneratable = group.records.filter((record) => {
+      if (!record?.id || record.do_not_publish || creativeIsPublished(record)) return false;
+      const iso = pipelineRecordScheduleIso(record);
+      if (!iso) return true;
+      const ms = Date.parse(iso);
+      return Number.isFinite(ms) && ms > nowMs;
+    });
+    const regenerateButton = `<button type="button" class="secondary-button pipeline-group-regenerate" data-pipeline-group-regenerate="${escapeHtml(group.key)}" title="${regeneratable.length ? "Regenerate future or unscheduled outputs for this content using the rolling 14-day Platform + Output Type rules" : "No future or unscheduled unpublished outputs are eligible"}" ${regeneratable.length ? "" : "disabled"}>Regenerate Schedule${regeneratable.length ? ` (${regeneratable.length})` : ""}</button>`;
+    const header = `<tr class="pipeline-group-row"><td colspan="9"><div class="pipeline-group-head"><button type="button" class="pipeline-group-toggle" data-pipeline-group-toggle="${escapeHtml(group.key)}" aria-expanded="${open ? "true" : "false"}"><span class="pipeline-group-chevron" aria-hidden="true">${open ? "▾" : "▸"}</span><span class="pipeline-group-title">${escapeHtml(label)}</span></button>${approveButton}${regenerateButton}</div></td></tr>`;
     return `<tbody class="pipeline-output-group${open ? "" : " is-collapsed"}${isArchived ? " pipeline-archived-group" : ""}" data-pipeline-group="${escapeHtml(group.key)}">${header}${group.records.map((row) => pipelineRow(row, group.records)).join("")}</tbody>`;
   }
 
@@ -16923,6 +16998,19 @@
           button.setAttribute("aria-expanded", open ? "false" : "true");
           const chevron = button.querySelector(".pipeline-group-chevron");
           if (chevron) chevron.textContent = open ? "▸" : "▾";
+        });
+      });
+      target.querySelectorAll("[data-pipeline-group-regenerate]").forEach((button) => {
+        button.addEventListener("click", (event) => {
+          event.stopPropagation();
+          const key = button.dataset.pipelineGroupRegenerate;
+          if (!key || button.dataset.busy === "true") return;
+          regeneratePipelineContentSchedule(key, button).catch((error) => {
+            button.dataset.busy = "false";
+            button.disabled = false;
+            button.textContent = "Regenerate Schedule";
+            setPipelineLiveHint(error.message || "Regenerate schedule failed");
+          });
         });
       });
       target.querySelectorAll("[data-pipeline-group-approve]").forEach((button) => {
