@@ -254,7 +254,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.467-content-schedule-regenerate";
+  const BUILD_ID = "item4-0.6.468-regenerate-blackout-guard";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -16355,6 +16355,26 @@
     }
   }
 
+  function pipelineScheduleIsBlackout(iso, timeZone = workingStudioTimeZone()) {
+    const ms = Date.parse(iso || "");
+    if (!Number.isFinite(ms)) return true;
+    try {
+      const parts = new Intl.DateTimeFormat("en-US", {
+        timeZone,
+        hour: "2-digit",
+        minute: "2-digit",
+        hourCycle: "h23",
+      }).formatToParts(new Date(ms));
+      const hour = Number(parts.find((part) => part.type === "hour")?.value);
+      const minute = Number(parts.find((part) => part.type === "minute")?.value);
+      if (!Number.isFinite(hour) || !Number.isFinite(minute)) return true;
+      const localMinutes = hour * 60 + minute;
+      return localMinutes >= 20 * 60 || localMinutes <= 3 * 60 + 30;
+    } catch {
+      return true;
+    }
+  }
+
   async function regeneratePipelineContentSchedule(groupKey, button = null) {
     const nowMs = Date.now();
     const groupRecords = (pipelineOutputs || []).filter((record) => pipelineContentGroupKey(record) === groupKey);
@@ -16395,11 +16415,14 @@
       const bucket = pipelineScheduleBucketKey(record);
       if (!bucket) { failed += 1; continue; }
       const iso = nextOpenScheduleIso(new Date().toISOString(), reserved[bucket] || [], {}, PIPELINE_SCHEDULE_GAP_MS, reserved[bucket] || []);
-      if (!iso) { failed += 1; continue; }
+      // Hard invariant: regeneration must never persist an overnight blackout slot.
+      if (!iso || pipelineScheduleIsBlackout(iso)) { failed += 1; continue; }
       try {
         const result = await api(`/api/operations/outputs/${encodeURIComponent(record.id)}/schedule`, {
           method: "POST",
-          body: JSON.stringify({ scheduled_post_date: iso, manual_schedule_override: false }),
+          // Preserve the exact slot selected by the strict rolling-14-day picker.
+          // The schedule endpoint otherwise applies its legacy next-open adjustment.
+          body: JSON.stringify({ scheduled_post_date: iso, manual_schedule_override: true }),
         });
         const savedRecord = result?.record || { ...record, scheduled_post_date: iso, manual_schedule_override: false };
         applySavedPipelineSchedule(savedRecord);
