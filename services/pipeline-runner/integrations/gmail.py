@@ -54,6 +54,65 @@ class GmailClient:
         self._access_token = token
         return token
 
+    def send_text(
+        self,
+        *,
+        to: str,
+        subject: str,
+        text_body: str,
+        purpose: str = "",
+    ) -> dict:
+        """Send a single-part UTF-8 plain-text message via Gmail API.
+
+        TikTok handoff mail intentionally uses this path. Apple Mail has shown
+        multiple failure modes when the operational handoff is delivered as HTML
+        (raw multipart boundaries, literal inner base64, and literal HTML tags).
+        Plain text keeps the message readable on every client while preserving
+        full clickable URLs.
+        """
+        if purpose not in ALLOWED_EMAIL_PURPOSES:
+            return {"id": None, "skipped": True, "reason": "email_disabled", "purpose": purpose}
+        if purpose == PURPOSE_TIKTOK_HANDOFF:
+            lowered = str(text_body or "").casefold()
+            forbidden = ("<div", "<p", "<br", "<a ", "</")
+            if any(marker in lowered for marker in forbidden):
+                raise RuntimeError("TikTok handoff text body unexpectedly contains HTML markup")
+
+        message = EmailMessage(policy=SMTP)
+        message["To"] = to
+        message["Subject"] = subject
+        message.set_content(text_body, subtype="plain", charset="utf-8", cte="8bit")
+        raw_bytes = message.as_bytes(policy=SMTP)
+        parsed = BytesParser(policy=SMTP).parsebytes(raw_bytes)
+        if parsed.is_multipart() or parsed.get_content_type() != "text/plain":
+            raise RuntimeError(
+                f"Malformed Gmail text envelope: top={parsed.get_content_type()} multipart={parsed.is_multipart()}"
+            )
+        if parsed.get_content_charset() != "utf-8":
+            raise RuntimeError(
+                f"Malformed Gmail text charset: {parsed.get_content_charset()}"
+            )
+        if parsed.get("Content-Transfer-Encoding", "").lower() != "8bit":
+            raise RuntimeError(
+                f"Malformed Gmail text transfer encoding: {parsed.get('Content-Transfer-Encoding')}"
+            )
+        if b"\n" in raw_bytes.replace(b"\r\n", b""):
+            raise RuntimeError("Malformed Gmail text envelope: bare LF line endings remain")
+
+        raw = base64.urlsafe_b64encode(raw_bytes).decode("ascii")
+        token = self.access_token()
+        response = requests.post(
+            "https://gmail.googleapis.com/gmail/v1/users/me/messages/send",
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Content-Type": "application/json",
+            },
+            json={"raw": raw},
+            timeout=60,
+        )
+        response.raise_for_status()
+        return response.json()
+
     def send_html(
         self,
         *,
