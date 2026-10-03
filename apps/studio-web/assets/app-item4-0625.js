@@ -254,7 +254,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.460-14day-priority-scheduling";
+  const BUILD_ID = "item4-0.6.461-priority-window-distribution";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -16002,14 +16002,11 @@
   }
 
   function nextOpenScheduleIso(candidateIso, occupiedMs, hint = {}, gapMs = PIPELINE_SCHEDULE_GAP_MS) {
-    const days = Array.isArray(hint.days) ? hint.days.filter(Boolean) : [];
-    const windows = Array.isArray(hint.windows) ? hint.windows.filter(Boolean) : [];
     const picker = typeof window.ChicagoShiningEzPlan?.ezPickBalancedSuggestedIso === "function"
       ? window.ChicagoShiningEzPlan.ezPickBalancedSuggestedIso
       : null;
-    if (picker && (days.length || windows.length)) {
-      return picker(windows.length ? windows : ["12:00-13:00"], new Date(), {
-        days,
+    if (picker) {
+      return picker([], new Date(), {
         occupiedMs,
         platformOccupiedMs: occupiedMs,
         timeZone: workingStudioTimeZone(),
