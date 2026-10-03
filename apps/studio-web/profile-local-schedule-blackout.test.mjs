@@ -90,3 +90,28 @@ test("conflict fallback advances out of overnight blackout", () => {
   assert.equal(local.minute, 0);
   assert.equal(plan.ezIsBlackoutLocalTime(Date.parse(iso), zone), false);
 });
+
+
+test("scheduler uses 30-minute openings inside a priority window before dropping priorities", () => {
+  const zone = "America/Chicago";
+  const now = new Date("2026-10-03T08:00:00Z");
+  const occupied = [Date.parse("2026-10-03T10:30:00Z")]; // 5:30 AM local
+  const iso = plan.ezPickBalancedSuggestedIso([], now, { timeZone: zone, platformOccupiedMs: occupied });
+  const local = localParts(iso, zone);
+  assert.equal(local.hour, 6);
+  assert.equal(local.minute, 0);
+});
+
+test("scheduler can use the inclusive end of each 90-minute priority window", () => {
+  const zone = "America/Chicago";
+  const now = new Date("2026-10-03T08:00:00Z");
+  const occupied = [
+    Date.parse("2026-10-03T10:30:00Z"),
+    Date.parse("2026-10-03T11:00:00Z"),
+    Date.parse("2026-10-03T11:30:00Z"),
+  ];
+  const iso = plan.ezPickBalancedSuggestedIso([], now, { timeZone: zone, platformOccupiedMs: occupied });
+  const local = localParts(iso, zone);
+  assert.equal(local.hour, 7);
+  assert.equal(local.minute, 0);
+});
