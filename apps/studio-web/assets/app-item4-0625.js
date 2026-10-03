@@ -254,7 +254,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.458-timed-script-vo-driven";
+  const BUILD_ID = "item4-0.6.459-profile-local-schedule-blackout";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -15905,6 +15905,16 @@
 
   const PIPELINE_SCHEDULE_GAP_MS = 3 * 60 * 60 * 1000;
 
+  function workingStudioTimeZone() {
+    const profile = studioProfiles.find((item) => item.id === selectedProfileId) || null;
+    const explicit = String(profile?.timezone || profile?.time_zone || "").trim();
+    if (explicit) return explicit;
+    const theme = String(profile?.theme || workingStudioTheme() || "chicago").toLowerCase();
+    if (theme === "la") return "America/Los_Angeles";
+    if (theme === "nyc" || theme === "miami") return "America/New_York";
+    return "America/Chicago";
+  }
+
   function pipelineRecordScheduleIso(record) {
     if (!record?.id) return "";
     const input = document.querySelector(`[data-pipeline-schedule="${record.id}"]`);
@@ -16002,6 +16012,7 @@
         days,
         occupiedMs,
         platformOccupiedMs: occupiedMs,
+        timeZone: workingStudioTimeZone(),
       });
     }
     let ms = Date.parse(candidateIso);
@@ -16010,6 +16021,11 @@
     while ((occupiedMs || []).some((other) => Number.isFinite(other) && Math.abs(other - ms) < gapMs) && guard < 7) {
       ms += 24 * 60 * 60 * 1000;
       guard += 1;
+    }
+    const timeZone = workingStudioTimeZone();
+    const helper = window.ChicagoShiningEzPlan;
+    if (typeof helper?.ezNextOpenScheduleIso === "function") {
+      return helper.ezNextOpenScheduleIso(new Date(ms).toISOString(), occupiedMs, gapMs, { timeZone });
     }
     return new Date(ms).toISOString();
   }
