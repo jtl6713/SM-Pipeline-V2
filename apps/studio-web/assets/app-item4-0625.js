@@ -254,7 +254,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.465-auto-scheduling-no-toggle";
+  const BUILD_ID = "item4-0.6.466-platform-output-type-scheduling";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -15912,6 +15912,12 @@
     return "America/Chicago";
   }
 
+  function pipelineScheduleBucketKey(record) {
+    const platform = String(record?.platform || "").trim().toLowerCase();
+    const outputType = String(record?.platform_output_type || record?.studio_output_type || record?.format || "output").trim().toLowerCase();
+    return platform && outputType ? `${platform}::${outputType}` : platform;
+  }
+
   function pipelineRecordScheduleIso(record) {
     if (!record?.id) return "";
     const input = document.querySelector(`[data-pipeline-schedule="${record.id}"]`);
@@ -16054,15 +16060,12 @@
       .slice()
       .sort((a, b) => pipelineOutputNumber(a) - pipelineOutputNumber(b));
     const reserved = {};
-    for (const [platform, times] of Object.entries(pipelineServerOccupiedMs)) {
-      reserved[platform] = [...times];
-    }
     for (const record of pipelineOutputs || []) {
-      const platform = String(record.platform || "").trim().toLowerCase();
+      const bucket = pipelineScheduleBucketKey(record);
       const iso = pipelineRecordScheduleIso(record);
-      if (!platform || !iso) continue;
+      if (!bucket || !iso) continue;
       if (record.do_not_publish || /published/i.test(String(record.studio_state || record.publish_status || ""))) continue;
-      (reserved[platform] ||= []).push(Date.parse(iso));
+      (reserved[bucket] ||= []).push(Date.parse(iso));
     }
     for (const record of ready) {
       if (pipelineRowHasSchedule(record)) continue;
@@ -16071,15 +16074,16 @@
         const suggested = String(data?.suggested_iso || "").trim();
         if (!suggested) continue;
         const platform = String(record.platform || "").trim().toLowerCase();
+        const bucket = pipelineScheduleBucketKey(record);
         const hint = suggestedTimeHint(data);
         rememberSuggestedHint(platform, hint);
         const allReserved = Object.values(reserved).flat().filter(Number.isFinite);
-        const iso = nextOpenScheduleIso(suggested, reserved[platform] || [], hint, PIPELINE_SCHEDULE_GAP_MS, allReserved);
+        const iso = nextOpenScheduleIso(suggested, reserved[bucket] || [], hint, PIPELINE_SCHEDULE_GAP_MS, reserved[bucket] || []);
         if (!iso) continue;
         const input = document.querySelector(`[data-pipeline-schedule="${record.id}"]`);
         if (input) applySuggestedIsoToScheduleInput(input, iso);
         else pipelineScheduleDrafts.set(record.id, formatDateTimeLocalInput(iso));
-        (reserved[platform] ||= []).push(Date.parse(iso));
+        (reserved[bucket] ||= []).push(Date.parse(iso));
         rememberBookedScheduleMs(platform, iso);
       } catch {}
     }
@@ -16087,31 +16091,29 @@
 
   function staggerApproveAllSchedules(schedules, records) {
     const reserved = {};
-    for (const [platform, times] of Object.entries(pipelineServerOccupiedMs)) {
-      reserved[platform] = [...times];
-    }
     const approving = new Set((records || []).map((record) => record.id));
     for (const record of pipelineOutputs || []) {
       if (approving.has(record.id)) continue;
-      const platform = String(record.platform || "").trim().toLowerCase();
+      const bucket = pipelineScheduleBucketKey(record);
       const iso = pipelineRecordScheduleIso(record);
-      if (!platform || !iso) continue;
+      if (!bucket || !iso) continue;
       if (record.do_not_publish || /published/i.test(String(record.studio_state || record.publish_status || ""))) continue;
-      (reserved[platform] ||= []).push(Date.parse(iso));
+      (reserved[bucket] ||= []).push(Date.parse(iso));
     }
     const next = { ...(schedules || {}) };
     const ordered = (records || []).slice().sort((a, b) => pipelineOutputNumber(a) - pipelineOutputNumber(b));
     for (const record of ordered) {
       const platform = String(record.platform || "").trim().toLowerCase();
+      const bucket = pipelineScheduleBucketKey(record);
       const requested = next[record.id] || new Date().toISOString();
       const allReserved = Object.values(reserved).flat().filter(Number.isFinite);
-      const iso = nextOpenScheduleIso(requested, reserved[platform] || [], hintForPlatform(platform), PIPELINE_SCHEDULE_GAP_MS, allReserved);
+      const iso = nextOpenScheduleIso(requested, reserved[bucket] || [], hintForPlatform(platform), PIPELINE_SCHEDULE_GAP_MS, reserved[bucket] || []);
       if (!iso) {
         delete next[record.id];
         continue;
       }
       next[record.id] = iso;
-      (reserved[platform] ||= []).push(Date.parse(iso));
+      (reserved[bucket] ||= []).push(Date.parse(iso));
       rememberBookedScheduleMs(platform, iso);
       const input = document.querySelector(`[data-pipeline-schedule="${record.id}"]`);
       if (input) applySuggestedIsoToScheduleInput(input, iso);
