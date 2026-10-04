@@ -16525,14 +16525,18 @@
       // scan the whole profile across days before advancing to the next time band;
       // bucket-local pools were stacking IG/FB/TT/YT into the same dates/times.
       const occupied = [...fixedOccupiedMs, ...regeneratedOccupiedMs];
+      // Use the strict profile-wide picker directly. Never fall back to the legacy
+      // next-open scheduler here: that fallback packs records sequentially and can
+      // recreate the dense vertical stacks this bulk operation is meant to remove.
       const picker = window.ChicagoShiningEzPlan?.ezPickBalancedSuggestedIso;
-      const iso = typeof picker === "function"
-        ? picker([], new Date(), {
-            occupiedMs: occupied,
-            platformOccupiedMs: occupied,
-            timeZone: workingStudioTimeZone(),
-          })
-        : nextOpenScheduleIso(new Date().toISOString(), occupied, {}, PIPELINE_SCHEDULE_GAP_MS, occupied);
+      if (typeof picker !== "function") {
+        throw new Error("Strict 14-day schedule picker is unavailable; regeneration stopped before changing more schedules.");
+      }
+      const iso = picker([], new Date(), {
+        occupiedMs: occupied,
+        platformOccupiedMs: occupied,
+        timeZone: workingStudioTimeZone(),
+      });
       const stamp = Date.parse(iso || "");
       if (!iso || !Number.isFinite(stamp) || stamp > cutoffMs || pipelineScheduleIsBlackout(iso, workingStudioTimeZone())) {
         failed += 1;
