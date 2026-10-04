@@ -124,8 +124,8 @@
     return `${dayKey(date)}-${pad(date.getHours())}-${pad(minutes)}`;
   }
 
-  function cellKey(value) {
-    return slotKey(value);
+  function cellKey(value, timeZone = "") {
+    return slotKey(value, timeZone);
   }
 
   function aggregate(records, windowValue) {
