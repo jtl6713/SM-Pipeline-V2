@@ -17850,13 +17850,17 @@
       return;
     }
 
-    const visibleRecords = helper.recordsForPlatform(platformCalendarRecords, platformCalendarPlatform)
+    const schedulableCalendarRecords = (platformCalendarRecords || []).filter((item) => {
+      const fullRecord = (pipelineOutputs || []).find((row) => row?.id === item?.id) || item;
+      return !fullRecord?.do_not_publish && !creativeIsPublished(fullRecord);
+    });
+    const visibleRecords = helper.recordsForPlatform(schedulableCalendarRecords, platformCalendarPlatform)
       .filter((item) => helper.inWindow(item.scheduled_post_date, platformCalendarWeek));
     if (summary) {
       const output = record?.output_id ? `Output ${record.output_id}` : "This output";
       summary.textContent = `${output} · ${platformCalendarPlatform} · ${visibleRecords.length} scheduled post${visibleRecords.length === 1 ? "" : "s"} in these 7 days · 30-minute slots`;
     }
-    const slots = helper.aggregateBySlot(platformCalendarRecords, platformCalendarPlatform, "", workingStudioTimeZone());
+    const slots = helper.aggregateBySlot(schedulableCalendarRecords, platformCalendarPlatform, "", workingStudioTimeZone());
     const selectedKey = platformCalendarSelectedIso ? helper.slotKey(new Date(platformCalendarSelectedIso), workingStudioTimeZone()) : "";
     const todayKey = helper.localDayKey(new Date(), workingStudioTimeZone());
     const head = platformCalendarWeek.days.map((day) => {
@@ -17870,7 +17874,7 @@
         const slot = helper.slotDate(day, slotIndex, workingStudioTimeZone());
         const key = helper.slotKey(slot, workingStudioTimeZone());
         const events = slots.get(key) || [];
-        const spacing = helper.spacingWarning(slot, platformCalendarRecords, platformCalendarPlatform, platformCalendarOutputId);
+        const spacing = helper.spacingWarning(slot, schedulableCalendarRecords, platformCalendarPlatform, platformCalendarOutputId);
         const isPast = slot.getTime() <= Date.now();
         const eventHtml = events.map((item) => {
           const label = platformCalendarEventLabel(item);
