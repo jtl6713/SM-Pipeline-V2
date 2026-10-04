@@ -3,3 +3,4 @@ Deploy profile schedule regeneration fix PR #501 / fd0788a. Trigger Studio Pages
 Deploy UI 0.6.476 profile schedule pass/cache-bust fix. Strict profile-wide regeneration.
 Deploy UI 0.6.477 platform-independent profile scheduling.
 Deploy UI 0.6.478 hide published stale schedules from calendars.
+Deploy UI 0.6.479 published calendar status styling.
