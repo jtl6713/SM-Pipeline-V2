@@ -19,4 +19,17 @@ test("Force exact Production script invalidates stale generated voiceover", asyn
   assert.match(handler, /fields\.Voiceover_Google_Drive_File_ID = null/);
   assert.match(handler, /previousRequestedScript !== requestedScript/);
   assert.match(handler, /previousVoiceoverScript !== requestedScript/);
+  assert.match(handler, /timedScriptNotesChanged/);
+  assert.match(handler, /invalidateVoiceover/);
+  assert.match(handler, /options\.invalidateVoiceover/);
+});
+
+test("Promoted timed-script Apply always invalidates voiceover for remeasure", async () => {
+  const worker = await readFile(path.join(here, "worker.js"), "utf8");
+  const start = worker.indexOf("async function applyPromotedTimedScriptRoute");
+  const end = worker.indexOf("async function productionRequestPreferredMusic", start);
+  assert.ok(start >= 0 && end > start);
+  const handler = worker.slice(start, end);
+  assert.match(handler, /invalidateVoiceover:\s*true/);
+  assert.match(handler, /VO-driven/);
 });

@@ -485,7 +485,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.445-ideas-vo-approve",
+          version: "0.10.446-timed-script-apply-remeasure",
           studio_mae_schedule_v1: true,
           studio_desk_inventory_v1: true,
           studio_desk_activity_v1: true,
@@ -14757,7 +14757,12 @@ async function applyPromotedTimedScriptRoute(request, env, url, authorization) {
     }),
   });
 
-  await syncProductionRequestDirectivesToContentItem(env, updated, contentId);
+  // Timed-script still windows are VO-driven after P2. Always discard prior audio
+  // so Apply cannot restamp import/UI clocks against a shorter existing MP3
+  // (NYC Subway Etiquette CI 320: 23.6s notes vs 21.4s Voiceover_URL).
+  await syncProductionRequestDirectivesToContentItem(env, updated, contentId, {
+    invalidateVoiceover: true,
+  });
 
   const resetRows = outputs
     .filter((output) => outputNeedsTimedScriptRerender(output))
@@ -14853,7 +14858,7 @@ function productionRequestDirectiveSnapshot(requestRecord, music) {
   };
 }
 
-async function syncProductionRequestDirectivesToContentItem(env, requestRecord, contentItemId) {
+async function syncProductionRequestDirectivesToContentItem(env, requestRecord, contentItemId, options = {}) {
   if (!/^rec[A-Za-z0-9]+$/.test(String(contentItemId || ""))) {
     throw new HttpError(409, "A promoted Content Item is required before advanced directives can be applied");
   }
@@ -14867,6 +14872,9 @@ async function syncProductionRequestDirectivesToContentItem(env, requestRecord, 
   const previousRequestedScriptMode = String(f(existingContentItem, "Requested_Script_Mode") || "").trim();
   const previousRequestedScript = String(f(existingContentItem, "Requested_Script") || "").trim();
   const previousVoiceoverScript = String(f(existingContentItem, "Voiceover_Script") || "").trim();
+  const previousNotes = String(f(existingContentItem, "Production_Request_Notes") || "").trim();
+  const nextNotes = String(f(requestRecord, "Production_Notes") || "").trim();
+  const timedScriptNotesChanged = /\[timed-script\]/i.test(nextNotes) && previousNotes !== nextNotes;
   const exactScriptChanged = requestedScriptMode === "Force exact"
     && Boolean(requestedScript)
     && (
@@ -14874,6 +14882,13 @@ async function syncProductionRequestDirectivesToContentItem(env, requestRecord, 
       || previousRequestedScript !== requestedScript
       || previousVoiceoverScript !== requestedScript
     );
+  // Timed-script Apply can keep the same words while rewriting scene clocks.
+  // Those clocks are only hints until P2 measures speech — keep prior MP3 and
+  // stills desync (CI 320). Always drop VO when the timed-script directive moves
+  // or when the caller forces invalidation.
+  const invalidateVoiceover = Boolean(options.invalidateVoiceover)
+    || exactScriptChanged
+    || timedScriptNotesChanged;
 
   const fields = {
     Production_Request: [requestRecord.id],
@@ -14908,8 +14923,9 @@ async function syncProductionRequestDirectivesToContentItem(env, requestRecord, 
   };
 
   // Force exact is execution authority, not merely descriptive metadata. If the
-  // exact request changed after P2 already generated audio, discard that stale
-  // audio so P2 must synthesize the saved exact script before any render can run.
+  // exact script or timed-script timeline changed after P2 already generated
+  // audio, discard that stale audio so P2 remeasures and rewrites scene windows
+  // before stamp/R4 can render.
   if (requestedScriptMode === "Force exact" && requestedScript) {
     fields.Voiceover_Script = requestedScript;
     fields.Script_Status = "Generated";
@@ -14917,7 +14933,7 @@ async function syncProductionRequestDirectivesToContentItem(env, requestRecord, 
       fields.Voiceover_Status = "Ready";
       fields.Content_Status = "Ready for Voiceover";
     }
-    if (exactScriptChanged && String(f(existingContentItem, "Voiceover_URL") || "").trim()) {
+    if (invalidateVoiceover && String(f(existingContentItem, "Voiceover_URL") || "").trim()) {
       fields.Voiceover_URL = null;
       fields.Voiceover_Google_Drive_File_ID = null;
       fields.Voiceover_Normalization_Status = null;
