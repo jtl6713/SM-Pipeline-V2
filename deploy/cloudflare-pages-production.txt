@@ -425,3 +425,9 @@ Deploy Studio Pages production
 Reason: Fix top Pipeline calendar Previous/Next 7 days so visible date labels use the selected anchored window
 UI: 0.6.469-calendar-window-labels
 Requested: 2026-10-04
+
+
+Deploy Studio Pages production
+Reason: Calendar labels and schedule/suggested datetime-local fields must render in the selected profile timezone, not the browser timezone
+UI: 0.6.470-profile-timezone-calendar
+Requested: 2026-10-04
