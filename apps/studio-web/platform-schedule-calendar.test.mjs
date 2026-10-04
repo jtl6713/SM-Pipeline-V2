@@ -57,7 +57,7 @@ test("Platform Outputs expose a save-only calendar workflow", () => {
   assert.match(app, /function savePlatformScheduleCalendar/);
   assert.match(app, /renderPlatformScheduleCalendar\(\{ scrollToHour: 0 \}\)/);
   assert.match(html, /id="platformCalendarDefaultWeek">Today<\/button>/);
-  assert.match(app, /dayName = helper\.localDayKey\(day\) === todayKey/);
+  assert.match(app, /dayName = helper\.localDayKey\(day, workingStudioTimeZone\(\)\) === todayKey/);
   assert.match(app, /platformCalendarWeek = helper\.sevenDayWindow/);
   assert.match(css, /#platformCalendarWeekLabel \{[^}]*padding: 7px 11px;[^}]*border-radius: 10px;/);
   assert.match(css, /\.platform-calendar-table thead th \{[^}]*padding: 10px 10px;/);
