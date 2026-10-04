@@ -209,3 +209,26 @@ test("existing automatic schedule inside LA blackout is replaced using LA profil
   assert.notEqual(iso, items[0].scheduled_at);
   assert.equal(plan.ezIsBlackoutLocalTime(Date.parse(iso), zone), false);
 });
+
+
+test("strict profile-wide picker fills first 7-day morning pass before afternoon", () => {
+  const zone = "America/New_York";
+  const now = new Date("2026-10-04T12:00:00Z");
+  const occupied = [];
+  const picks = [];
+  for (let i = 0; i < 8; i++) {
+    const iso = plan.ezPickBalancedSuggestedIso([], now, {
+      occupiedMs: occupied,
+      platformOccupiedMs: occupied,
+      timeZone: zone,
+    });
+    picks.push(iso);
+    occupied.push(Date.parse(iso));
+  }
+  const local = picks.map((iso) => new Intl.DateTimeFormat("en-US", {
+    timeZone: zone, hour: "2-digit", minute: "2-digit", hourCycle: "h23",
+  }).format(new Date(iso)));
+  assert.ok(local.slice(0, 7).every((value) => value >= "05:30" && value <= "07:00"), local.join(", "));
+  assert.ok(local[7] >= "11:30", local.join(", "));
+  assert.ok(picks.every((iso) => !plan.ezIsBlackoutLocalTime(Date.parse(iso), zone)));
+});

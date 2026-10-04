@@ -16503,26 +16503,38 @@
     }
 
     const eligibleIds = new Set(eligible.map((record) => record.id));
-    const reserved = {};
+    // Profile-level regeneration is a COMPLETE rebuild of the selected future
+    // population. Do not let the rows being replaced reserve their old slots.
+    // Keep only genuinely fixed schedules outside the regenerated set.
+    const fixedOccupiedMs = [];
     for (const record of pipelineOutputs || []) {
       if (eligibleIds.has(record.id) || record.do_not_publish || creativeIsPublished(record)) continue;
-      const bucket = pipelineScheduleBucketKey(record);
       const iso = pipelineRecordScheduleIso(record);
       const ms = iso ? Date.parse(iso) : NaN;
-      if (bucket && Number.isFinite(ms) && ms > nowMs) (reserved[bucket] ||= []).push(ms);
+      if (Number.isFinite(ms) && ms > nowMs) fixedOccupiedMs.push(ms);
     }
+    const regeneratedOccupiedMs = [];
 
     button.disabled = true;
     button.textContent = "Regenerating…";
-    setPipelineScheduleGridMessage(`Regenerating ${eligible.length} post schedule${eligible.length === 1 ? "" : "s"} across ${selected.size} platform${selected.size === 1 ? "" : "s"}…`);
+    setPipelineScheduleGridMessage(`Rebuilding ${eligible.length} post schedule${eligible.length === 1 ? "" : "s"} for the active ${workingStudioCityLabel()} profile using the strict 14-day morning → afternoon → evening passes…`);
     let saved = 0;
     let failed = 0;
     for (const record of eligible) {
-      const bucket = pipelineScheduleBucketKey(record);
-      if (!bucket) { failed += 1; continue; }
-      const iso = nextOpenScheduleIso(new Date().toISOString(), reserved[bucket] || [], {}, PIPELINE_SCHEDULE_GAP_MS, reserved[bucket] || []);
+      // IMPORTANT: use ONE profile-wide occupancy pool. The pass algorithm must
+      // scan the whole profile across days before advancing to the next time band;
+      // bucket-local pools were stacking IG/FB/TT/YT into the same dates/times.
+      const occupied = [...fixedOccupiedMs, ...regeneratedOccupiedMs];
+      const picker = window.ChicagoShiningEzPlan?.ezPickBalancedSuggestedIso;
+      const iso = typeof picker === "function"
+        ? picker([], new Date(), {
+            occupiedMs: occupied,
+            platformOccupiedMs: occupied,
+            timeZone: workingStudioTimeZone(),
+          })
+        : nextOpenScheduleIso(new Date().toISOString(), occupied, {}, PIPELINE_SCHEDULE_GAP_MS, occupied);
       const stamp = Date.parse(iso || "");
-      if (!iso || !Number.isFinite(stamp) || stamp > cutoffMs || pipelineScheduleIsBlackout(iso)) {
+      if (!iso || !Number.isFinite(stamp) || stamp > cutoffMs || pipelineScheduleIsBlackout(iso, workingStudioTimeZone())) {
         failed += 1;
         continue;
       }
@@ -16533,7 +16545,7 @@
         });
         const savedRecord = result?.record || { ...record, scheduled_post_date: iso, manual_schedule_override: false };
         applySavedPipelineSchedule(savedRecord);
-        (reserved[bucket] ||= []).push(stamp);
+        regeneratedOccupiedMs.push(stamp);
         saved += 1;
       } catch {
         failed += 1;
