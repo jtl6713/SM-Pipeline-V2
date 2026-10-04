@@ -257,7 +257,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.480-youtube-future-published-calendar";
+  const BUILD_ID = "item4-0.6.481-timeline-forces-six-video-outputs";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -3368,7 +3368,22 @@
     });
   }
 
+  function item4HasTimedScript(record = activeProductionRequest) {
+    const notes = [
+      $("prProductionNotes")?.value,
+      $("ezProductionNotes")?.value,
+      record?.production_notes,
+      item4Workspace?.production_notes,
+    ].map((value) => String(value || "")).filter(Boolean).join("\n");
+    return /\[timed-script\]\s*\{/i.test(notes)
+      || /"mode"\s*:\s*"timed_script"/i.test(notes)
+      || /"timing_source"\s*:\s*"timed_script"/i.test(notes);
+  }
+
   function currentEzPackageId() {
+    // A submitted timeline is a render contract, not a still-post suggestion.
+    // It always forces the standard vertical-video package.
+    if (item4HasTimedScript()) return "video";
     const explicit = String(
       ezWizardPending?.packageId
       || ezWizardAnswers?.packageId
@@ -6240,10 +6255,12 @@
       captionFields = { ...captionFields, caption_mode: "AI decides", requested_caption: "" };
     }
     return coerceForceExactTextModes({
-      content_type: az
+      content_type: (az || item4HasTimedScript())
         ? "Vertical Short Video"
         : (planned?.master_content_type || helpers?.ezMasterContentType?.(count) || "Photo Set"),
-      platforms: az ? ["Instagram", "Facebook", "TikTok", "YouTube"] : (planned?.platforms || ezSelectedPlatforms()),
+      platforms: (az || item4HasTimedScript())
+        ? ["Instagram", "Facebook", "TikTok", "YouTube"]
+        : (planned?.platforms || ezSelectedPlatforms()),
       voiceover_mode: (finished || az) ? "No" : ($("ezAudioVoiceover")?.value || "Yes"),
       background_music_mode: (finished || az) ? "No" : ($("ezAudioMusic")?.value || "Yes"),
       thumbnail_mode: (finished || az) ? "Yes" : ($("ezThumbnail")?.value || "Yes"),
@@ -10982,6 +10999,9 @@
 
   function recommendedOutputFor(platform) {
     const contentType = String($("prContentType")?.value || activeProductionRequest?.content_type || "").trim();
+    if (item4HasTimedScript()) {
+      return OUTPUT_DEFAULTS_BY_CONTENT_TYPE["Vertical Short Video"]?.[platform] || "";
+    }
     if (contentType === "Vertical Short Video") {
       return OUTPUT_DEFAULTS_BY_CONTENT_TYPE[contentType]?.[platform] || "";
     }
@@ -11092,7 +11112,14 @@
   async function saveProductionRequestOutputs(record = activeProductionRequest) {
     if (!record?.id || !productionOutputMatrixLoaded) return null;
     item4DropUnsupportedStoryChecks(false);
-    let outputs = selectedOutputMatrix();
+    if (item4HasTimedScript(record) && $("prContentType")) {
+      $("prContentType").value = "Vertical Short Video";
+    }
+    // Timeline submissions always use the six standard vertical-video outputs:
+    // IG Reel + Story, FB Reel + Story, TikTok Video Draft, YouTube Short.
+    let outputs = item4HasTimedScript(record)
+      ? defaultOutputsForPlatforms(["Instagram", "Facebook", "TikTok", "YouTube"])
+      : selectedOutputMatrix();
     if (!outputs.length) {
       const planPlatforms = item4SelectedPlatforms();
       const requestPlatforms = selectedRequestPlatforms();
