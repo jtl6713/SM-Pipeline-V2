@@ -40,6 +40,7 @@ export const AUTONOMOUS_DEFAULT_MUSIC_ASSET_ID = "recT49crfrhMVfZAQ";
 export const AUTONOMOUS_DEFAULT_VIDEO_SECONDS = 30;
 export const AUTONOMOUS_DEFAULT_VOICEOVER_FRACTION = 0.5;
 export const AUTONOMOUS_DEFAULT_VOICEOVER_TAIL_SECONDS = 2;
+export const MIN_VOICEOVER_SECONDS = 4;
 
 function normalizeAirtableRecordId(value) {
   const id = String(value || "").trim();
@@ -281,7 +282,7 @@ export function autonomousPlanExtras() {
 export function autonomousDefaultVoiceoverSeconds(videoSeconds = AUTONOMOUS_DEFAULT_VIDEO_SECONDS) {
   const duration = Number(videoSeconds);
   const base = Number.isFinite(duration) && duration > 0 ? duration : AUTONOMOUS_DEFAULT_VIDEO_SECONDS;
-  return Math.max(1, Math.round(base * AUTONOMOUS_DEFAULT_VOICEOVER_FRACTION));
+  return Math.max(MIN_VOICEOVER_SECONDS, Math.round(base * AUTONOMOUS_DEFAULT_VOICEOVER_FRACTION));
 }
 
 export function autonomousDefaultVoiceoverTailSeconds(raw) {

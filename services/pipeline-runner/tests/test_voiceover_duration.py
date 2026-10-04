@@ -1,6 +1,9 @@
 from audio.voiceover_duration import (
+    MIN_VOICEOVER_SECONDS,
+    apply_min_voiceover_floor,
     owner_video_seconds,
     render_video_seconds,
+    required_voiceover_seconds,
     validate_voiceover_for_owner_cap,
     validate_voiceover_for_render,
     voiceover_exceeds_video,
@@ -80,3 +83,20 @@ def test_voiceover_exceeds_video_message_is_actionable():
         context="render duration",
     )
     assert "never run past" in message.lower()
+
+
+def test_required_voiceover_seconds_floors_short_speech_to_four():
+    assert MIN_VOICEOVER_SECONDS == 4.0
+    assert required_voiceover_seconds(1.625) == 4.0
+    assert required_voiceover_seconds(0.5) == 4.0
+    assert required_voiceover_seconds(15.0) == 15.0
+    assert required_voiceover_seconds(0) == 0.0
+    assert required_voiceover_seconds(None) == 0.0
+
+
+def test_apply_min_voiceover_floor_puts_remainder_on_last_scene():
+    # Content 312: five-word TTS ~1.625s must persist as a 4s track.
+    assert apply_min_voiceover_floor([1.625], 4.0) == [4.0]
+    assert apply_min_voiceover_floor([1.0, 0.6], 4.0) == [1.0, 3.0]
+    assert apply_min_voiceover_floor([10.0, 5.0], 15.0) == [10.0, 5.0]
+    assert apply_min_voiceover_floor([]) == []

@@ -1,8 +1,8 @@
-"""Force an MP3 to an exact duration (legacy helper).
+"""Force an MP3 to an exact duration.
 
-Timed Script Mode is VO-driven: stills follow measured per-scene speech, so
-P2 must not call this to pad/stretch narration into import windows. Kept for
-non-timed-script experiments or manual ops only.
+P2 pads spoken tracks shorter than ``MIN_VOICEOVER_SECONDS`` with trailing
+silence (never slowed speech). Timed Script stills follow measured per-scene
+speech — do not call this to stretch narration into import clocks.
 """
 
 from __future__ import annotations

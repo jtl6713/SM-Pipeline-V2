@@ -125,3 +125,28 @@ def test_p2_trigger_p3_uses_local_python_when_flagged(monkeypatch):
     assert result["backend"] == "python"
     assert result["content_item_record_id"] == "recP3TEST"
     load_settings.cache_clear()
+
+
+def test_pad_voiceover_to_minimum_pads_content_312_shape(monkeypatch):
+    from p2.processor import _pad_voiceover_to_minimum
+
+    calls = []
+
+    def fake_fit(data, target_seconds, **_kwargs):
+        calls.append(target_seconds)
+        return b"padded-mp3"
+
+    monkeypatch.setattr("p2.processor.fit_mp3_to_duration_bytes", fake_fit)
+    monkeypatch.setattr("p2.processor.probe_audio_duration_bytes", lambda _data: 4.0)
+
+    mp3, seconds, note = _pad_voiceover_to_minimum(b"short-mp3", 1.625)
+    assert mp3 == b"padded-mp3"
+    assert seconds == 4.0
+    assert calls == [4.0]
+    assert "1.625s" in note
+    assert "4.000s" in note
+
+    untouched, same, empty = _pad_voiceover_to_minimum(b"long-mp3", 15.0)
+    assert untouched == b"long-mp3"
+    assert same == 15.0
+    assert empty == ""

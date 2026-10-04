@@ -25,6 +25,7 @@ import {
   classifyIgCarouselRateLimited,
   classifyTikTokAuthSignature,
   classifyRenderRow,
+  classifyVoiceoverTooShort,
   deskFailedNeedsHeal,
   deskRecoverableEscalatedError,
   deskTransientPublishError,
@@ -109,6 +110,7 @@ import {
   AUTONOMOUS_DEFAULT_MUSIC_ASSET_ID,
   AUTONOMOUS_DEFAULT_VIDEO_SECONDS,
   AUTONOMOUS_DEFAULT_VOICEOVER_TAIL_SECONDS,
+  MIN_VOICEOVER_SECONDS,
   AUTONOMOUS_IDEA_CREATED_FIELD,
   AUTONOMOUS_RELATED_STILL_MIN,
   AUTONOMOUS_NEWS_FEEDS,
@@ -462,7 +464,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.438-manual-media-authority",
+          version: "0.10.439-voiceover-min-4s",
           studio_desk_inventory_v1: true,
           studio_desk_activity_v1: true,
           studio_tiktok_complete_v1: true,
@@ -13414,7 +13416,10 @@ async function cleanProductionRequestPayload(payload, env) {
     : "AI decides";
 
   const videoDurationSeconds = nullableWholeSeconds(payload?.video_duration_seconds, 5, 600, "Video duration");
-  const voiceoverDurationSeconds = nullableNumber(payload?.voiceover_duration_seconds, 1, 600, "Voiceover duration");
+  let voiceoverDurationSeconds = nullableNumber(payload?.voiceover_duration_seconds, 1, 600, "Voiceover duration");
+  if (voiceoverMode === "Yes" && voiceoverDurationSeconds != null && voiceoverDurationSeconds < MIN_VOICEOVER_SECONDS) {
+    voiceoverDurationSeconds = MIN_VOICEOVER_SECONDS;
+  }
   const musicStartSeconds = nullableNumber(payload?.music_start_seconds, 0, 3600, "Music start");
   let voiceoverTailSeconds = nullableNumber(payload?.voiceover_tail_seconds, 0, 300, "Voiceover tail");
   voiceoverTailSeconds = autonomousDefaultVoiceoverTailSeconds(voiceoverTailSeconds);
@@ -36014,6 +36019,24 @@ async function gatherStudioDeskInventory(env) {
   }
   for (const record of orphans || []) {
     push(classifyRenderRow(mapOut(record), nowMs));
+  }
+  scanned("voiceover_too_short");
+  const shortVoiceoverRows = await listRecords(env, env.AIRTABLE_CONTENT_TABLE_ID, {
+    limit: 12,
+    sortField: "Updated_At",
+    sortDirection: "desc",
+    filterFormula: 'AND({Test_Run_ID}=BLANK(),{Include_Voiceover}="Yes",{Voiceover_URL}!="",{Voiceover_Duration_Seconds}>0,{Voiceover_Duration_Seconds}<4)',
+  }).catch(() => []);
+  for (const record of shortVoiceoverRows || []) {
+    push(classifyVoiceoverTooShort({
+      id: record.id,
+      content_item_id: record.id,
+      content_id: f(record, "Content_ID"),
+      content_title: String(f(record, "Content_Title") || "").trim() || null,
+      include_voiceover: f(record, "Include_Voiceover"),
+      voiceover_url: f(record, "Voiceover_URL"),
+      voiceover_duration_seconds: f(record, "Voiceover_Duration_Seconds"),
+    }));
   }
   scanned("variant_preparing");
   for (const record of preparing || []) {

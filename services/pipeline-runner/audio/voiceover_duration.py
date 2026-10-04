@@ -11,6 +11,47 @@ from render.fields import field, field_str, parse_json_field
 
 DEFAULT_VOICEOVER_TAIL_SECONDS = 2.0
 DURATION_EPSILON_SECONDS = 0.05
+MIN_VOICEOVER_SECONDS = 4.0
+
+
+def required_voiceover_seconds(measured: float | None) -> float:
+    """Return the persisted VO length when a spoken track exists.
+
+    Spoken audio shorter than ``MIN_VOICEOVER_SECONDS`` must be padded (trailing
+    silence). Never slow speech to fill a planning target. Empty audio stays 0.
+    """
+    try:
+        value = float(measured or 0)
+    except (TypeError, ValueError):
+        value = 0.0
+    if value <= 0:
+        return 0.0
+    return max(MIN_VOICEOVER_SECONDS, value)
+
+
+def apply_min_voiceover_floor(
+    segment_seconds: list[float] | None,
+    total_seconds: float | None = None,
+) -> list[float]:
+    """Keep per-scene speech windows; put any 4s-floor remainder on the last still."""
+    values = []
+    for raw in segment_seconds or []:
+        try:
+            values.append(max(0.0, float(raw)))
+        except (TypeError, ValueError):
+            values.append(0.0)
+    if not values:
+        return values
+    current = sum(values)
+    try:
+        target = float(total_seconds) if total_seconds is not None else current
+    except (TypeError, ValueError):
+        target = current
+    floor = required_voiceover_seconds(target if target > 0 else current)
+    gap = floor - sum(values)
+    if gap > DURATION_EPSILON_SECONDS:
+        values[-1] = values[-1] + gap
+    return values
 
 
 def probe_audio_duration_bytes(data: bytes) -> float:

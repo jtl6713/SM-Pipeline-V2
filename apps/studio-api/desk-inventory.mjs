@@ -371,6 +371,26 @@ export function classifyRenderRow(row, nowMs = Date.now()) {
   return null;
 }
 
+export function classifyVoiceoverTooShort(row) {
+  const recordId = String(row?.id || row?.content_item_id || "").trim();
+  const include = String(row?.include_voiceover || "").trim().toLowerCase();
+  if (include && !["yes", "true", "1"].includes(include)) return null;
+  const url = String(row?.voiceover_url || "").trim();
+  if (!url) return null;
+  const seconds = Number(row?.voiceover_duration_seconds);
+  if (!Number.isFinite(seconds) || seconds <= 0 || seconds >= 4) return null;
+  return withDeskIdentity({
+    kind: "voiceover_too_short",
+    class: "data_repair",
+    record_id: recordId || null,
+    fingerprint: fingerprint("voiceover_too_short", recordId, "under_4s"),
+    actor: "desk_agent",
+    diagnosis: `Parent Voiceover_Duration_Seconds is ${seconds}s (minimum is 4s). `
+      + "Use the measured Content Item duration, not Studio_Effective_Voiceover_Duration_Seconds on outputs. "
+      + "P2 must pad trailing silence to 4s (never stretch speech). Clear Voiceover_URL, re-arm Content_Status=Ready for Voiceover, pulse P2, resume produce, and requeue Ready for Render. Do not Approve.",
+  }, row);
+}
+
 export function classifyCropRow(row, nowMs = Date.now()) {
   const recordId = String(row?.id || "").trim();
   const status = String(row?.transfer_status || "").trim();
@@ -1151,6 +1171,7 @@ export const CLASSIFIER_KINDS = Object.freeze([
   "produce_stale",
   "render_ready_no_job",
   "render_ready_waiting_voiceover",
+  "voiceover_too_short",
   "render_long",
   "produce_orphan",
   "crop_parked",

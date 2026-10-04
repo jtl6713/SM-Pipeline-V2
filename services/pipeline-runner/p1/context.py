@@ -226,6 +226,7 @@ def build_runtime_context(
         f"Effective Aspect Ratio: {options['aspect_ratio']}",
         "",
         "VOICEOVER TIMING POLICY",
+        "- When Effective Include Voiceover is Yes, spoken audio must never be shorter than 4 seconds. Write enough script for at least 4 seconds of speech at a natural rate. A five-word line is too short. P2 pads trailing silence if TTS still comes in under 4s; do not rely on that pad.",
         "- When Effective Include Voiceover is Yes, write the voiceover_script to fit approximately within Target Voiceover Duration. That target is the spoken length, not the full video.",
         "- Treat Effective Duration as the requested complete video length, including the visual/music ending after narration.",
         "- Reserve Effective Voiceover Tail Seconds for visuals and music only; do not place required narration in that tail.",

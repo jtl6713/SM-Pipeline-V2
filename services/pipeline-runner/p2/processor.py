@@ -8,7 +8,16 @@ from typing import Any
 
 from airtable.client import AirtableClient
 from airtable.constants import CONTENT_ITEMS_TABLE, PLATFORM_OUTPUTS_TABLE, PRODUCTION_REQUESTS_TABLE
-from audio.voiceover_duration import probe_audio_duration_bytes, validate_voiceover_for_owner_cap, voiceover_tail_seconds
+from audio.fit_duration import fit_mp3_to_duration_bytes
+from audio.voiceover_duration import (
+    DURATION_EPSILON_SECONDS,
+    MIN_VOICEOVER_SECONDS,
+    apply_min_voiceover_floor,
+    probe_audio_duration_bytes,
+    required_voiceover_seconds,
+    validate_voiceover_for_owner_cap,
+    voiceover_tail_seconds,
+)
 from branding.watermark import apply_watermark_bytes, brand_watermark_bytes
 from config import load_settings
 from integrations.google_drive import GoogleDriveClient
@@ -40,6 +49,21 @@ def _now_iso() -> str:
 def _required_video_seconds_for_voiceover(measured_seconds: float, tail_seconds: float) -> float:
     """Return a frame-aligned minimum duration that preserves narration plus tail."""
     return math.ceil((max(0.0, measured_seconds) + max(0.0, tail_seconds)) * 30.0) / 30.0
+
+
+def _pad_voiceover_to_minimum(mp3: bytes, measured_seconds: float) -> tuple[bytes, float, str]:
+    """Pad trailing silence so a spoken track is never shorter than 4 seconds."""
+    spoken = max(0.0, float(measured_seconds or 0))
+    floor = required_voiceover_seconds(spoken)
+    if spoken <= 0 or spoken + DURATION_EPSILON_SECONDS >= floor:
+        return mp3, spoken, ""
+    fitted = fit_mp3_to_duration_bytes(mp3, floor)
+    fitted_seconds = probe_audio_duration_bytes(fitted)
+    note = (
+        f" | Padded voiceover from {spoken:.3f}s to {fitted_seconds:.3f}s "
+        f"(min {MIN_VOICEOVER_SECONDS:.0f}s)"
+    )
+    return fitted, fitted_seconds, note
 
 
 def _extend_video_duration_for_voiceover(
@@ -371,12 +395,18 @@ def process_request(
         normalizer_base_url=normalizer_url,
     )
     measured_seconds = probe_audio_duration_bytes(normalized_mp3)
+    spoken_seconds = measured_seconds
+    normalized_mp3, measured_seconds, pad_note = _pad_voiceover_to_minimum(
+        normalized_mp3,
+        measured_seconds,
+    )
     if measured_timeline and segment_seconds:
-        # Loudness normalization can nudge total length by a few ms. Scale the
-        # measured scene windows so still boundaries still sum to the final file.
-        raw_sum = sum(segment_seconds) or measured_seconds
-        scale = measured_seconds / raw_sum if raw_sum > 0 else 1.0
+        # Loudness can nudge speech by a few ms. Scale scene windows to the
+        # spoken file, then put any 4s-floor remainder on the last still.
+        raw_sum = sum(segment_seconds) or spoken_seconds
+        scale = spoken_seconds / raw_sum if raw_sum > 0 else 1.0
         scaled = [max(1.0, seconds * scale) for seconds in segment_seconds]
+        scaled = apply_min_voiceover_floor(scaled, measured_seconds)
         drift = measured_seconds - sum(scaled)
         scaled[-1] = max(1.0, scaled[-1] + drift)
         from studio_produce.timed_script import apply_measured_durations
@@ -390,9 +420,9 @@ def process_request(
             measured_seconds=measured_seconds,
         )
         scene_detail = ",".join(f"{seconds:.2f}" for seconds in scaled)
-        norm_details_extra = f" | Timed-script VO-driven scenes [{scene_detail}]s"
+        norm_details_extra = f"{pad_note} | Timed-script VO-driven scenes [{scene_detail}]s"
     else:
-        norm_details_extra = ""
+        norm_details_extra = pad_note
         if not timeline:
             cap_error = validate_voiceover_for_owner_cap(
                 voiceover_seconds=measured_seconds,

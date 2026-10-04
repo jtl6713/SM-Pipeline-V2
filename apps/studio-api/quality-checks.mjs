@@ -282,6 +282,14 @@ export const QUALITY_CHECKS = Object.freeze([
     heal: "resume_produce",
   }),
   check({
+    id: "voiceover_too_short",
+    title: "Check for generated voiceovers shorter than 4 seconds",
+    lane: "service",
+    kind: "voiceover_too_short",
+    actor: "desk_agent",
+    heal: "resume_produce",
+  }),
+  check({
     id: "render_long",
     title: "Check for renders still in progress past the stale window",
     lane: "service",

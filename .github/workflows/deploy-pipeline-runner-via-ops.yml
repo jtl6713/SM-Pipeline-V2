@@ -102,3 +102,6 @@ jobs:
 # Trigger pipeline-runner deploy for TikTok text/plain handoff fix (Output 1304)
 # Source merge 3a0e5fee47312153233997edfcdc7d0afcef7795
 # 2026-10-03
+
+# Trigger pipeline-runner deploy for 4-second minimum voiceover pad (Content 312)
+# 2026-10-04T19:00:00Z service_version=2026-10-04-voiceover-min-4s

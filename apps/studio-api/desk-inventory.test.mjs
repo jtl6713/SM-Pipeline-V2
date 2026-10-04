@@ -7,6 +7,7 @@ import {
   classifyProduceJob,
   errorClassFromText,
   classifyRenderRow,
+  classifyVoiceoverTooShort,
   classifyCropRow,
   classifyAutonomousRequest,
   classifyAutonomousTopicCollision,
@@ -136,6 +137,33 @@ test("render, orphan, crop, autonomous, and health classifiers", () => {
     voiceover_required: true,
     voiceover_url: "https://drive.google.com/uc?id=vo",
   }, now).kind, "render_ready_no_job");
+  const shortVo = classifyVoiceoverTooShort({
+    id: "recIvd9w5LBc3mb7u",
+    content_item_id: "recIvd9w5LBc3mb7u",
+    content_id: 312,
+    content_title: "Grand Central: Look Up, Move Through",
+    include_voiceover: "Yes",
+    voiceover_url: "https://drive.google.com/file/d/1gRUQM8jyen-LYzlyVzaNoFs5Al-Yr_fx/view",
+    voiceover_duration_seconds: 1.625,
+  });
+  assert.equal(shortVo.kind, "voiceover_too_short");
+  assert.equal(shortVo.class, "data_repair");
+  assert.equal(shortVo.actor, "desk_agent");
+  assert.equal(shortVo.fingerprint, "voiceover_too_short:recIvd9w5LBc3mb7u:under_4s");
+  assert.match(shortVo.diagnosis, /4s/);
+  assert.equal(classifyVoiceoverTooShort({
+    id: "recIvd9w5LBc3mb7u",
+    include_voiceover: "Yes",
+    voiceover_url: "https://drive.google.com/file/d/vo",
+    voiceover_duration_seconds: 4,
+  }), null);
+  assert.equal(classifyVoiceoverTooShort({
+    id: "recStorySkip",
+    include_voiceover: "No",
+    voiceover_url: "https://drive.google.com/file/d/vo",
+    voiceover_duration_seconds: 1.6,
+  }), null);
+  assert.ok(CLASSIFIER_KINDS.includes("voiceover_too_short"));
   const failedRender = classifyRenderRow({
     id: "recRFail",
     render_status: "Failed",

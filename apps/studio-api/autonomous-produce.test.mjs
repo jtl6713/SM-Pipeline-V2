@@ -10,6 +10,7 @@ import {
   autonomousCanonicalContentType,
   autonomousPlanExtras,
   autonomousDefaultVoiceoverSeconds,
+  MIN_VOICEOVER_SECONDS,
   autonomousDefaultVoiceoverTailSeconds,
   AUTONOMOUS_DEFAULT_MUSIC_ASSET_ID,
   AUTONOMOUS_DEFAULT_VOICEOVER_TAIL_SECONDS,
@@ -224,6 +225,8 @@ test("YouTube mapper keeps titles and picker requires assets", () => {
     { platform: "Facebook", output_type: "Story" },
   ]);
   assert.equal(autonomousDefaultVoiceoverSeconds(30), 15);
+  assert.equal(autonomousDefaultVoiceoverSeconds(2), 4);
+  assert.equal(MIN_VOICEOVER_SECONDS, 4);
   assert.equal(AUTONOMOUS_DEFAULT_VOICEOVER_TAIL_SECONDS, 2);
   assert.equal(autonomousDefaultVoiceoverTailSeconds(), 2);
   assert.equal(autonomousDefaultVoiceoverTailSeconds(30 - 15), 2);
