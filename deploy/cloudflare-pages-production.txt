@@ -438,3 +438,9 @@ UI: 0.6.471-calendar-bulk-regenerate
 Requested: 2026-10-04
 
 Profile-timezone scheduling across calendars, schedule fields, and initial suggestions: 0.6.472-profile-timezone-schedules
+
+
+Deploy Studio Pages production
+Reason: Make selected profile timezone authoritative across scheduling calendars, slot labels, suggestions, and datetime inputs; preserve concurrent timezone work
+UI: 0.6.473-profile-timezone-authority
+Requested: 2026-10-04
