@@ -419,3 +419,9 @@ Deploy Studio Pages production
 Reason: Regenerate Schedule must preserve strict picker output and hard-reject 20:00-03:30 profile-local blackout slots
 UI: 0.6.468-regenerate-blackout-guard
 Requested: 2026-10-03
+
+
+Deploy Studio Pages production
+Reason: Fix top Pipeline calendar Previous/Next 7 days so visible date labels use the selected anchored window
+UI: 0.6.469-calendar-window-labels
+Requested: 2026-10-04
