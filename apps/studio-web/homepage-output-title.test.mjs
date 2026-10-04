@@ -175,6 +175,13 @@ test("Home metric cards use count tones and Airtable-safe polling", () => {
   assert.match(html, new RegExp(`timed-script\\.js\\?v=${escaped}`));
 });
 
+test("profile timezone bootstrap avoids a temporal-dead-zone crash", () => {
+  const timezone = app.match(/function studioTimezone\\(\\) \\{[\\s\\S]*?\\n  \\}/)?.[0];
+  assert.ok(timezone, "studioTimezone should be present");
+  assert.doesNotMatch(timezone, /operationsTimezone/);
+  assert.ok(app.indexOf('const hubDate') < app.indexOf('let operationsTimezone'));
+});
+
 test("Home refresh clears inflight instead of wrapping the fetch promise", async () => {
   let dashboardInflight = null;
   const run = Promise.resolve("fresh");
