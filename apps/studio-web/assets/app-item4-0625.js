@@ -16503,28 +16503,38 @@
     }
 
     const eligibleIds = new Set(eligible.map((record) => record.id));
-    // Profile-level regeneration is a COMPLETE rebuild of the selected future
-    // population. Do not let the rows being replaced reserve their old slots.
-    // Keep only genuinely fixed schedules outside the regenerated set.
-    const fixedOccupiedMs = [];
+    // Each platform is an independent publishing lane. A Facebook post must never
+    // consume an Instagram/TikTok/YouTube slot (and vice versa). Rebuild each
+    // selected platform separately, while preserving fixed schedules only from
+    // that same platform.
+    const fixedOccupiedByPlatform = {};
     for (const record of pipelineOutputs || []) {
       if (eligibleIds.has(record.id) || record.do_not_publish || creativeIsPublished(record)) continue;
+      const platform = pipelineSchedulePlatformKey(record);
       const iso = pipelineRecordScheduleIso(record);
       const ms = iso ? Date.parse(iso) : NaN;
-      if (Number.isFinite(ms) && ms > nowMs) fixedOccupiedMs.push(ms);
+      if (platform && Number.isFinite(ms) && ms > nowMs) (fixedOccupiedByPlatform[platform] ||= []).push(ms);
     }
-    const regeneratedOccupiedMs = [];
+    const regeneratedOccupiedByPlatform = {};
 
     button.disabled = true;
     button.textContent = "Regenerating…";
     setPipelineScheduleGridMessage(`Rebuilding ${eligible.length} post schedule${eligible.length === 1 ? "" : "s"} for the active ${workingStudioCityLabel()} profile using the strict 14-day morning → afternoon → evening passes…`);
     let saved = 0;
     let failed = 0;
-    for (const record of eligible) {
-      // IMPORTANT: use ONE profile-wide occupancy pool. The pass algorithm must
-      // scan the whole profile across days before advancing to the next time band;
-      // bucket-local pools were stacking IG/FB/TT/YT into the same dates/times.
-      const occupied = [...fixedOccupiedMs, ...regeneratedOccupiedMs];
+    // Process one platform completely before moving to the next selected platform.
+    // This lets every platform independently receive its own Monday 5:30 AM,
+    // Tuesday 5:30 AM, etc. slots.
+    const platformOrder = [...selected];
+    const orderedEligible = platformOrder.flatMap((platform) =>
+      eligible.filter((record) => pipelineSchedulePlatformKey(record) === platform)
+    );
+    for (const record of orderedEligible) {
+      const platform = pipelineSchedulePlatformKey(record);
+      const occupied = [
+        ...(fixedOccupiedByPlatform[platform] || []),
+        ...(regeneratedOccupiedByPlatform[platform] || []),
+      ];
       // Use the strict profile-wide picker directly. Never fall back to the legacy
       // next-open scheduler here: that fallback packs records sequentially and can
       // recreate the dense vertical stacks this bulk operation is meant to remove.
@@ -16549,7 +16559,7 @@
         });
         const savedRecord = result?.record || { ...record, scheduled_post_date: iso, manual_schedule_override: false };
         applySavedPipelineSchedule(savedRecord);
-        regeneratedOccupiedMs.push(stamp);
+        (regeneratedOccupiedByPlatform[platform] ||= []).push(stamp);
         saved += 1;
       } catch {
         failed += 1;
