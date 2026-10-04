@@ -5,4 +5,5 @@ Deploy UI 0.6.477 platform-independent profile scheduling.
 Deploy UI 0.6.478 hide published stale schedules from calendars.
 Deploy UI 0.6.479 published calendar status styling.
 Deploy UI 0.6.480 show future YouTube published uploads on calendars.
+Deploy UI 0.6.481 timeline forces six standard video outputs.
 Deploy UI 0.6.482 voiceover minimum 4 seconds. Spoken audio under 4s is not saved.
