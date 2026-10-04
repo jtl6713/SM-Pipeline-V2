@@ -315,6 +315,7 @@
     return `Worker ${match ? match[1] : raw}`;
   }
   if (workerBuildLabel) workerBuildLabel.textContent = "Worker …";
+  const STUDIO_DEFAULT_TIMEZONE = "America/Chicago";
   const hubDate = $("studioHubDate");
   if (hubDate) {
     hubDate.textContent = new Date().toLocaleDateString(undefined, {
@@ -1474,8 +1475,6 @@
 
   function value(v, fallback = "—") { return v === null || v === undefined || v === "" ? fallback : escapeHtml(v); }
   function join(v) { return Array.isArray(v) && v.length ? v.map(escapeHtml).join(", ") : "—"; }
-
-  const STUDIO_DEFAULT_TIMEZONE = "America/Chicago";
 
   function studioTimezone() {
     // The selected content profile is authoritative for all scheduling UI and conversions.
