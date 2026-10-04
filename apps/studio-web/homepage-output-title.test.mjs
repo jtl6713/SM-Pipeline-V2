@@ -179,6 +179,10 @@ test("profile timezone bootstrap avoids a temporal-dead-zone crash", () => {
   const timezone = app.match(/function studioTimezone\(\) \{[\s\S]*?\n  \}/)?.[0];
   assert.ok(timezone, "studioTimezone should be present");
   assert.doesNotMatch(timezone, /operationsTimezone/);
+  const defaultTimezone = app.indexOf('const STUDIO_DEFAULT_TIMEZONE = "America/Chicago";');
+  const hubDateInit = app.indexOf('const hubDate = $("studioHubDate");');
+  assert.ok(defaultTimezone >= 0, "the default profile timezone should be declared");
+  assert.ok(defaultTimezone < hubDateInit, "default timezone must be initialized before hubDate uses it");
   assert.ok(app.indexOf('const hubDate') < app.indexOf('let operationsTimezone'));
 });
 
