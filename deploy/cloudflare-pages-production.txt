@@ -1,2 +1,8 @@
 Deploy manual media authority fix 2026-10-04. UI 0.6.475 / API 0.10.438. Preserve operator deletes, selection and order. 38 targeted tests passed.
 Deploy profile schedule regeneration fix PR #501 / fd0788a. Trigger Studio Pages production deployment.
+
+Deploy Studio Pages production
+Reason: Keep footer UI build, index.html cache-bust queries, and app BUILD_ID in lockstep at 0.6.476
+UI: 0.6.476-footer-sync
+Requested: 2026-10-04T18:05:00Z
+

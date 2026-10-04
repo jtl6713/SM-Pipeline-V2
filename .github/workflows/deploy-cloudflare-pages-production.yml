@@ -46,6 +46,7 @@ jobs:
           }
           if (!app || !css) throw new Error('Pages baseline must include referenced application JS and CSS');
           NODE
+          node apps/studio-web/assert-footer-lockstep.mjs
           for file in apps/studio-web/assets/*.js; do
             [ -e "$file" ] || continue
             cp "$file" /tmp/"$(basename "$file" .js)".mjs
@@ -119,6 +120,16 @@ jobs:
           const expectedLabel = labelMatch[1];
           const buildIdMatch = fs.readFileSync(`apps/studio-web${expectedJsPath}`, 'utf8').match(/BUILD_ID\s*=\s*"([^"]+)"/);
           if (!buildIdMatch) throw new Error(`BUILD_ID missing in ${expectedJsPath}`);
+          const parsed = /^item4-(\d+\.\d+\.\d+)-(.+)$/.exec(buildIdMatch[1]);
+          if (!parsed) throw new Error(`BUILD_ID must be item4-<semver>-<slug>, got ${buildIdMatch[1]}`);
+          if (expectedLabel !== parsed[1]) {
+            throw new Error(`index.html UI build ${expectedLabel} does not match BUILD_ID ${parsed[1]}`);
+          }
+          const cacheKey = buildIdMatch[1].slice('item4-'.length);
+          const query = expectedJsUrl.split('?')[1] || '';
+          if (query !== `v=${cacheKey}`) {
+            throw new Error(`app-item4 cache-bust ${query || '(none)'} does not match BUILD_ID slug ${cacheKey}`);
+          }
           fs.writeFileSync('/tmp/pages-expected.json', JSON.stringify({
             expectedJsUrl,
             expectedJsPath,
