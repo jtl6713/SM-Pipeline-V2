@@ -646,9 +646,15 @@
       const existing = String(item.scheduled_at || "").trim();
       if (existing && !Number.isNaN(Date.parse(existing))) {
         const iso = new Date(existing).toISOString();
-        stamps.set(key, iso);
-        (reserved[platform] ||= []).push(Date.parse(iso));
-        continue;
+        const existingMs = Date.parse(iso);
+        // Existing automatic suggestions are only reusable when they are valid in
+        // the ACTIVE PROFILE timezone. A saved 2 AM LA slot must not survive just
+        // because the browser happens to be running in Chicago (or any other zone).
+        if (!ezIsBlackoutLocalTime(existingMs, options.timeZone)) {
+          stamps.set(key, iso);
+          (reserved[platform] ||= []).push(existingMs);
+          continue;
+        }
       }
       const iso = ezPickBalancedSuggestedIso(EZ_PRIORITY_SCHEDULE_WINDOWS, now, {
         occupiedMs: ezFlattenOccupied(reserved),
