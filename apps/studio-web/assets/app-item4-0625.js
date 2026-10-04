@@ -254,7 +254,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.468-regenerate-blackout-guard";
+  const BUILD_ID = "item4-0.6.469-calendar-window-labels";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -17464,7 +17464,9 @@
     if (!target || !helper?.sevenDayWindow || !helper?.aggregate || !helper?.slotDate || !helper?.slotKey) return;
 
     bindPipelineSchedulePlatformFilters();
-    const windowValue = helper.sevenDayWindow(new Date());
+    // Render the same anchored window used by Previous/Next 7 days and the schedule-grid API.
+    // Using new Date() here reset only the visible headers back to the current week after navigation.
+    const windowValue = pipelineScheduleWindow() || helper.sevenDayWindow(new Date());
     const visibleRecords = (Array.isArray(records) ? records : []).filter(pipelineScheduleRecordVisible);
     const cells = helper.aggregate(visibleRecords, windowValue);
     const total = [...cells.values()].reduce((sum, cell) => sum + Number(cell?.total || 0), 0);
