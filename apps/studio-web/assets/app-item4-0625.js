@@ -16388,6 +16388,115 @@
     }
   }
 
+  function ensurePipelineBulkRegenerateControl() {
+    const actions = document.querySelector(".pipeline-schedule-overview-actions");
+    const toggle = $("pipelineScheduleGridToggle");
+    if (!actions || !toggle || $("pipelineScheduleBulkRegenerate")) return;
+    const button = document.createElement("button");
+    button.type = "button";
+    button.id = "pipelineScheduleBulkRegenerate";
+    button.className = "secondary-button";
+    button.textContent = "Regenerate schedules";
+    button.title = "Regenerate upcoming schedules for the selected platforms, within the next 14 days.";
+    actions.insertBefore(button, toggle);
+    button.addEventListener("click", () => {
+      const platforms = [...pipelineScheduleVisiblePlatforms];
+      if (!platforms.length) {
+        setPipelineScheduleGridMessage("Select at least one platform using the calendar checkboxes.", true);
+        return;
+      }
+      const nowMs = Date.now();
+      const cutoffMs = nowMs + 14 * 24 * 60 * 60 * 1000;
+      const eligible = (pipelineOutputs || []).filter((record) => {
+        if (!record?.id || record.do_not_publish || creativeIsPublished(record)) return false;
+        if (!platforms.includes(pipelineSchedulePlatformKey(record))) return false;
+        const iso = pipelineRecordScheduleIso(record);
+        const ms = iso ? Date.parse(iso) : NaN;
+        return Number.isFinite(ms) && ms > nowMs && ms <= cutoffMs;
+      });
+      const platformNames = platforms.map((key) => key[0].toUpperCase() + key.slice(1)).join(", ");
+      if (!eligible.length) {
+        setPipelineScheduleGridMessage("No unpublished posts for the selected platforms are scheduled in the next 14 days.");
+        return;
+      }
+      const confirmed = window.confirm(
+        `You are about to change ${eligible.length} post schedule${eligible.length === 1 ? "" : "s"} for ${platformNames} in the next 14 days. Apply the current spacing and local-time blackout rules?\n\nOK to continue, or Cancel to leave every schedule unchanged.`
+      );
+      if (!confirmed) return;
+      regeneratePipelineSchedulesForPlatforms(platforms, button).catch((error) => {
+        button.disabled = false;
+        button.textContent = "Regenerate schedules";
+        setPipelineScheduleGridMessage(error?.message || "Could not regenerate schedules.", true);
+      });
+    });
+  }
+
+  async function regeneratePipelineSchedulesForPlatforms(platforms, button) {
+    const nowMs = Date.now();
+    const cutoffMs = nowMs + 14 * 24 * 60 * 60 * 1000;
+    const selected = new Set((platforms || []).map((key) => String(key || "").toLowerCase()));
+    const eligible = (pipelineOutputs || [])
+      .filter((record) => {
+        if (!record?.id || record.do_not_publish || creativeIsPublished(record)) return false;
+        if (!selected.has(pipelineSchedulePlatformKey(record))) return false;
+        const iso = pipelineRecordScheduleIso(record);
+        const ms = iso ? Date.parse(iso) : NaN;
+        return Number.isFinite(ms) && ms > nowMs && ms <= cutoffMs;
+      })
+      .sort((a, b) => Date.parse(pipelineRecordScheduleIso(a)) - Date.parse(pipelineRecordScheduleIso(b))
+        || pipelineOutputNumber(a) - pipelineOutputNumber(b));
+    if (!eligible.length) {
+      setPipelineScheduleGridMessage("No eligible unpublished posts remain in the selected 14-day window.");
+      return;
+    }
+
+    const eligibleIds = new Set(eligible.map((record) => record.id));
+    const reserved = {};
+    for (const record of pipelineOutputs || []) {
+      if (eligibleIds.has(record.id) || record.do_not_publish || creativeIsPublished(record)) continue;
+      const bucket = pipelineScheduleBucketKey(record);
+      const iso = pipelineRecordScheduleIso(record);
+      const ms = iso ? Date.parse(iso) : NaN;
+      if (bucket && Number.isFinite(ms) && ms > nowMs) (reserved[bucket] ||= []).push(ms);
+    }
+
+    button.disabled = true;
+    button.textContent = "Regenerating…";
+    setPipelineScheduleGridMessage(`Regenerating ${eligible.length} post schedule${eligible.length === 1 ? "" : "s"} across ${selected.size} platform${selected.size === 1 ? "" : "s"}…`);
+    let saved = 0;
+    let failed = 0;
+    for (const record of eligible) {
+      const bucket = pipelineScheduleBucketKey(record);
+      if (!bucket) { failed += 1; continue; }
+      const iso = nextOpenScheduleIso(new Date().toISOString(), reserved[bucket] || [], {}, PIPELINE_SCHEDULE_GAP_MS, reserved[bucket] || []);
+      const stamp = Date.parse(iso || "");
+      if (!iso || !Number.isFinite(stamp) || stamp > cutoffMs || pipelineScheduleIsBlackout(iso)) {
+        failed += 1;
+        continue;
+      }
+      try {
+        const result = await api(`/api/operations/outputs/${encodeURIComponent(record.id)}/schedule`, {
+          method: "POST",
+          body: JSON.stringify({ scheduled_post_date: iso, manual_schedule_override: true }),
+        });
+        const savedRecord = result?.record || { ...record, scheduled_post_date: iso, manual_schedule_override: false };
+        applySavedPipelineSchedule(savedRecord);
+        (reserved[bucket] ||= []).push(stamp);
+        saved += 1;
+      } catch {
+        failed += 1;
+      }
+    }
+
+    await refreshPipelineOutputs({ silent: true, force: true });
+    await loadPipelineScheduleGridWindow();
+    button.disabled = false;
+    button.textContent = "Regenerate schedules";
+    setPipelineScheduleGridMessage(failed
+      ? `Regenerated ${saved} schedule${saved === 1 ? "" : "s"}; ${failed} could not be regenerated.`
+      : `Regenerated ${saved} post schedule${saved === 1 ? "" : "s"} within the next 14 days.`);
+  }
+
   async function regeneratePipelineContentSchedule(groupKey, button = null) {
     const nowMs = Date.now();
     const groupRecords = (pipelineOutputs || []).filter((record) => pipelineContentGroupKey(record) === groupKey);
@@ -17477,6 +17586,7 @@
     const helper = globalThis.PipelineScheduleGrid;
     if (!target || !helper?.sevenDayWindow || !helper?.aggregate || !helper?.slotDate || !helper?.slotKey) return;
 
+    ensurePipelineBulkRegenerateControl();
     bindPipelineSchedulePlatformFilters();
     // Render the same anchored window used by Previous/Next 7 days and the schedule-grid API.
     // Using new Date() here reset only the visible headers back to the current week after navigation.
