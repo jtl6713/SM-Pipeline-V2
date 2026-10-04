@@ -2,3 +2,4 @@ Deploy manual media authority fix 2026-10-04. UI 0.6.475 / API 0.10.438. Preserv
 Deploy profile schedule regeneration fix PR #501 / fd0788a. Trigger Studio Pages production deployment.
 Deploy UI 0.6.476 profile schedule pass/cache-bust fix. Strict profile-wide regeneration.
 Deploy UI 0.6.477 platform-independent profile scheduling.
+Deploy UI 0.6.478 hide published stale schedules from calendars.
