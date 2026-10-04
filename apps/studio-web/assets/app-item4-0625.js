@@ -257,7 +257,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.478-hide-published-calendar-stale-schedules";
+  const BUILD_ID = "item4-0.6.479-published-calendar-status";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -17338,11 +17338,15 @@
       }
     } catch (error) {
       if (generation !== pipelineScheduleGridLoadGeneration) return;
-      const fallback = (pipelineOutputs || []).filter((row) =>
-        String(row?.scheduled_post_date || "").trim()
-        && !row?.do_not_publish
-        && !creativeIsPublished(row)
-      );
+      const fallback = (pipelineOutputs || []).filter((row) => {
+        const iso = String(row?.scheduled_post_date || "").trim();
+        if (!iso || row?.do_not_publish) return false;
+        if (creativeIsPublished(row)) {
+          const ms = Date.parse(iso);
+          return !Number.isFinite(ms) || ms <= Date.now();
+        }
+        return true;
+      });
       pipelineScheduleGridRecords = fallback;
       renderPipelineScheduleGrid(fallback, error?.message || "Schedule view unavailable");
       setPipelineScheduleGridMessage(error?.message || "Could not load that 7-day window.", true);
@@ -17452,15 +17456,27 @@
       || fullRecord?.content_title
       || "Untitled"
     ).trim() || "Untitled";
-    const tooltip = pipelineScheduleEntryTooltip({ ...fullRecord, ...record, output_id: outputId, output_title: title, platform });
+    const isPublished = creativeIsPublished(fullRecord);
+    const publishedAt = String(fullRecord?.published_at || fullRecord?.platform_published_at || "").trim();
+    const publishedLabel = isPublished
+      ? `Published${publishedAt && !Number.isNaN(Date.parse(publishedAt))
+        ? ` · ${new Date(publishedAt).toLocaleString(undefined, { timeZone: workingStudioTimeZone(), month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}`
+        : ""}`
+      : "";
+    const tooltipBase = pipelineScheduleEntryTooltip({ ...fullRecord, ...record, output_id: outputId, output_title: title, platform });
+    const tooltip = publishedLabel ? `${tooltipBase} · ${publishedLabel}` : tooltipBase;
     const classes = [
       "pipeline-schedule-entry",
       unscheduled ? "is-unscheduled" : "",
+      isPublished ? "is-published" : "",
       selected ? "is-selected" : "",
       pending ? "is-saving" : "",
       canMove ? "is-movable" : "is-locked",
     ].filter(Boolean).join(" ");
-    return `<button type="button" class="${classes}" data-pipeline-schedule-entry="${escapeHtml(recordId)}" data-platform="${escapeHtml(platformSlug)}" data-schedule-tooltip="${escapeHtml(tooltip)}" aria-label="${escapeHtml(tooltip)}" draggable="${canMove && !pending ? "true" : "false"}"${pending ? " disabled" : ""}><span class="pipeline-schedule-entry-code">${escapeHtml(platformCode)}</span><span class="pipeline-schedule-entry-text">${escapeHtml(outputId ? `${outputId} · ${title}` : title)}</span></button>`;
+    const statusMarkup = isPublished
+      ? '<span class="pipeline-schedule-entry-status" aria-label="Published">✓ Published</span>'
+      : "";
+    return `<button type="button" class="${classes}" data-pipeline-schedule-entry="${escapeHtml(recordId)}" data-platform="${escapeHtml(platformSlug)}" data-schedule-tooltip="${escapeHtml(tooltip)}" aria-label="${escapeHtml(tooltip)}" draggable="${canMove && !pending ? "true" : "false"}"${pending ? " disabled" : ""}><span class="pipeline-schedule-entry-code">${escapeHtml(platformCode)}</span><span class="pipeline-schedule-entry-text">${escapeHtml(outputId ? `${outputId} · ${title}` : title)}</span>${statusMarkup}</button>`;
   }
 
   function pipelineUnscheduledScheduleRecords() {
@@ -17650,10 +17666,14 @@
 
   function pipelineScheduleRecordVisible(record) {
     const fullRecord = (pipelineOutputs || []).find((row) => row?.id === record?.id) || record;
-    // Published and do-not-publish rows are historical, not future scheduling work.
-    // Some legacy rows retain a future Scheduled_Post_Date even after publishing;
-    // never let those stale timestamps appear on the active scheduling calendar.
-    if (fullRecord?.do_not_publish || creativeIsPublished(fullRecord)) return false;
+    if (fullRecord?.do_not_publish) return false;
+    // Published rows may remain visible as calendar history, but never show a
+    // stale FUTURE schedule after publication.
+    if (creativeIsPublished(fullRecord)) {
+      const iso = String(fullRecord?.scheduled_post_date || record?.scheduled_post_date || "").trim();
+      const ms = Date.parse(iso);
+      if (Number.isFinite(ms) && ms > Date.now()) return false;
+    }
     const key = pipelineSchedulePlatformKey(fullRecord);
     return !PIPELINE_SCHEDULE_PLATFORM_KEYS.includes(key) || pipelineScheduleVisiblePlatforms.has(key);
   }
@@ -17756,11 +17776,9 @@
   function syncPipelineScheduleGridRecord(record) {
     if (!record?.id) return;
     pipelineScheduleGridRecords = pipelineScheduleGridRecords.filter((row) => row.id !== record.id);
-    if (
-      String(record.scheduled_post_date || "").trim()
-      && !record?.do_not_publish
-      && !creativeIsPublished(record)
-    ) pipelineScheduleGridRecords.push(record);
+    const iso = String(record.scheduled_post_date || "").trim();
+    const publishedFuture = creativeIsPublished(record) && Number.isFinite(Date.parse(iso)) && Date.parse(iso) > Date.now();
+    if (iso && !record?.do_not_publish && !publishedFuture) pipelineScheduleGridRecords.push(record);
     renderPipelineScheduleGrid(pipelineScheduleGridRecords);
   }
 
@@ -17852,7 +17870,13 @@
 
     const schedulableCalendarRecords = (platformCalendarRecords || []).filter((item) => {
       const fullRecord = (pipelineOutputs || []).find((row) => row?.id === item?.id) || item;
-      return !fullRecord?.do_not_publish && !creativeIsPublished(fullRecord);
+      if (fullRecord?.do_not_publish) return false;
+      if (creativeIsPublished(fullRecord)) {
+        const iso = String(fullRecord?.scheduled_post_date || item?.scheduled_post_date || "").trim();
+        const ms = Date.parse(iso);
+        return !Number.isFinite(ms) || ms <= Date.now();
+      }
+      return true;
     });
     const visibleRecords = helper.recordsForPlatform(schedulableCalendarRecords, platformCalendarPlatform)
       .filter((item) => helper.inWindow(item.scheduled_post_date, platformCalendarWeek));
