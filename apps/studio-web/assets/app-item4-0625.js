@@ -254,7 +254,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.470-profile-timezone-calendar";
+  const BUILD_ID = "item4-0.6.472-profile-timezone-schedules";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -318,6 +318,7 @@
   const hubDate = $("studioHubDate");
   if (hubDate) {
     hubDate.textContent = new Date().toLocaleDateString(undefined, {
+      timeZone: workingStudioTimeZone(),
       weekday: "long",
       month: "long",
       day: "numeric",
@@ -1614,6 +1615,34 @@
     } catch {
       return "";
     }
+  }
+
+  function studioDateTimeLocalToIso(raw, timeZone = workingStudioTimeZone()) {
+    const match = String(raw || "").trim().match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2}))?$/);
+    if (!match) {
+      const stamp = Date.parse(String(raw || ""));
+      return Number.isFinite(stamp) ? new Date(stamp).toISOString() : "";
+    }
+    const [, y, mo, d, h, mi, sec = "0"] = match;
+    const wanted = Date.UTC(Number(y), Number(mo) - 1, Number(d), Number(h), Number(mi), Number(sec));
+    let stamp = wanted;
+    const format = new Intl.DateTimeFormat("en-CA", {
+      timeZone, year: "numeric", month: "2-digit", day: "2-digit",
+      hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23",
+    });
+    for (let attempt = 0; attempt < 8; attempt++) {
+      const parts = format.formatToParts(new Date(stamp));
+      const get = (type) => Number(parts.find((part) => part.type === type)?.value);
+      const represented = Date.UTC(get("year"), get("month") - 1, get("day"), get("hour"), get("minute"), get("second"));
+      const delta = wanted - represented;
+      if (!delta) return new Date(stamp).toISOString();
+      stamp += delta;
+    }
+    const parts = format.formatToParts(new Date(stamp));
+    const get = (type) => String(parts.find((part) => part.type === type)?.value || "").padStart(2, "0");
+    const resolved = `${get("year")}-${get("month")}-${get("day")}T${get("hour")}:${get("minute")}:${get("second")}`;
+    const wantedLocal = `${y}-${mo}-${d}T${h}:${mi}:${String(sec).padStart(2, "0")}`;
+    return resolved === wantedLocal ? new Date(stamp).toISOString() : "";
   }
 
   /** Operator-locked Studio_Scheduled_At wins over occupancy-bumped Scheduled_Post_Date. */
@@ -6610,7 +6639,7 @@
       return;
     }
 
-    prompt.textContent = "Suggested Chicago times are filled in. Change any before continuing.";
+    prompt.textContent = `Suggested times in ${studioTimezoneLabel()} are filled in. Change any before continuing.`;
     renderEzWizardChips([]);
     const planned = helpers?.ezWizardResolvePackage?.(ezWizardAnswers);
     const scheduleItems = helpers?.ezPlanScheduleItems?.(planned) || [];
@@ -6621,7 +6650,7 @@
       scheduleItems.map((item) => ({
         ...item,
         scheduled_at: saved[`${item.platform}::${item.output_type}`] || "",
-      }))
+      })), {}, new Date(), { timeZone: workingStudioTimeZone() }
     ) || new Map();
     const rows = scheduleItems.map((item) => {
       const key = `${item.platform}::${item.output_type}`;
@@ -6641,9 +6670,9 @@
           const key = String(input.getAttribute("data-schedule-key") || "").trim();
           const raw = String(input.value || "").trim();
           if (!key || !raw) return;
-          const ms = Date.parse(raw);
-          if (Number.isNaN(ms)) return;
-          schedules[key] = new Date(ms).toISOString();
+          const iso = studioDateTimeLocalToIso(raw);
+          if (!iso) return;
+          schedules[key] = iso;
         });
         ezWizardLogAdd("user", "Suggested times");
         Object.assign(ezWizardAnswers, { schedules });
@@ -10794,8 +10823,8 @@
     const scheduleHint = $("prOverrideScheduledHint");
     if (scheduleHint) {
       scheduleHint.textContent = row.scheduled_at
-        ? `Saved as ${formatStudioDateTime(row.scheduled_at)}. Picker uses your browser local time.`
-        : `Times display in ${studioTimezoneLabel()}. Picker uses your browser local time.`;
+        ? `Saved as ${formatStudioDateTime(row.scheduled_at)}. Picker uses ${studioTimezoneLabel()}.`
+        : `Times display in ${studioTimezoneLabel()}. Picker uses ${studioTimezoneLabel()}.`;
     }
 
     fillOverrideMusicChoices(row);
@@ -10856,7 +10885,7 @@
         output_notes: $("prOverrideNotes").value.trim(),
 
         publish_mode: $("prOverridePublishMode").value,
-        scheduled_at: scheduledRaw ? new Date(scheduledRaw).toISOString() : "",
+        scheduled_at: scheduledRaw ? studioDateTimeLocalToIso(scheduledRaw) : "",
       };
 
       const result = await api(`/api/production-request-outputs/${encodeURIComponent(recordId)}`, {
@@ -15582,7 +15611,7 @@
     const mode = document.querySelector("input[name='creativeScheduleMode']:checked")?.value || "immediate";
     const raw = String($("creativeScheduleAt")?.value || "").trim();
     if (mode !== "schedule" || !raw) return { scheduled_post_date: "" };
-    return { scheduled_post_date: new Date(raw).toISOString(), manual_schedule_override: true };
+    return { scheduled_post_date: studioDateTimeLocalToIso(raw), manual_schedule_override: true };
   }
 
   function rememberPipelineScheduleDrafts() {
@@ -15832,7 +15861,8 @@
       if (status) status.textContent = "";
       return;
     }
-    const parsed = Date.parse(raw);
+    const iso = studioDateTimeLocalToIso(raw);
+    const parsed = iso ? Date.parse(iso) : NaN;
     if (Number.isNaN(parsed)) {
       if (status) status.textContent = "Invalid time";
       return;
@@ -15848,7 +15878,7 @@
     try {
       const result = await api(`/api/operations/outputs/${encodeURIComponent(id)}/schedule`, {
         method: "POST",
-        body: JSON.stringify({ scheduled_post_date: new Date(parsed).toISOString(), manual_schedule_override: true }),
+        body: JSON.stringify({ scheduled_post_date: iso, manual_schedule_override: true }),
       });
       if (result?.record) applySavedPipelineSchedule(result.record);
       if (status) status.textContent = "Saved";
@@ -15878,7 +15908,7 @@
         map[id] = saved && !Number.isNaN(Date.parse(saved)) ? new Date(saved).toISOString() : "";
         return;
       }
-      map[id] = raw && !Number.isNaN(Date.parse(raw)) ? new Date(raw).toISOString() : "";
+      map[id] = studioDateTimeLocalToIso(raw);
     });
     for (const [id, saved] of persisted.entries()) {
       if (map[id] !== undefined) continue;
@@ -15916,13 +15946,7 @@
   const PIPELINE_SCHEDULE_GAP_MS = 3 * 60 * 60 * 1000;
 
   function workingStudioTimeZone() {
-    const profile = studioProfiles.find((item) => item.id === selectedProfileId) || null;
-    const explicit = String(profile?.timezone || profile?.time_zone || "").trim();
-    if (explicit) return explicit;
-    const theme = String(profile?.theme || workingStudioTheme() || "chicago").toLowerCase();
-    if (theme === "la") return "America/Los_Angeles";
-    if (theme === "nyc" || theme === "miami") return "America/New_York";
-    return "America/Chicago";
+    return studioTimezone();
   }
 
   function pipelineScheduleBucketKey(record) {
@@ -15940,8 +15964,7 @@
         ? String(pipelineScheduleDrafts.get(record.id) || "").trim()
         : studioEffectiveScheduleIso(record));
     if (!raw) return "";
-    const ms = Date.parse(raw);
-    return Number.isNaN(ms) ? "" : new Date(ms).toISOString();
+    return studioDateTimeLocalToIso(raw);
   }
 
   const pipelineServerOccupiedMs = {};
@@ -17211,20 +17234,23 @@
     const anchor = pipelineScheduleGridAnchorDate instanceof Date
       ? pipelineScheduleGridAnchorDate
       : new Date();
-    return helper?.sevenDayWindow ? helper.sevenDayWindow(anchor) : null;
+    return helper?.sevenDayWindow ? helper.sevenDayWindow(anchor, workingStudioTimeZone()) : null;
   }
 
   function pipelineScheduleWindowLabel(windowValue = pipelineScheduleWindow()) {
     const first = windowValue?.days?.[0];
     const last = windowValue?.days?.[6];
     if (!first || !last) return "";
-    const sameYear = first.getFullYear() === last.getFullYear();
+    const sameYear = new Intl.DateTimeFormat("en", { timeZone: workingStudioTimeZone(), year: "numeric" }).format(first) === new Intl.DateTimeFormat("en", { timeZone: workingStudioTimeZone(), year: "numeric" }).format(last);
+    const timeZone = workingStudioTimeZone();
     const start = first.toLocaleDateString(undefined, {
+      timeZone,
       month: "short",
       day: "numeric",
       year: sameYear ? undefined : "numeric",
     });
     const end = last.toLocaleDateString(undefined, {
+      timeZone: workingStudioTimeZone(),
       month: "short",
       day: "numeric",
       year: "numeric",
@@ -17236,7 +17262,7 @@
     const helper = globalThis.PipelineScheduleGrid;
     const first = windowValue?.days?.[0];
     if (!first || !helper?.dayKey) return false;
-    return helper.dayKey(first) === helper.dayKey(new Date());
+    return helper.dayKey(first, workingStudioTimeZone()) === helper.dayKey(new Date(), workingStudioTimeZone());
   }
 
   async function loadPipelineScheduleGridWindow(message = "") {
@@ -17266,10 +17292,14 @@
 
   async function shiftPipelineScheduleGridWindow(days) {
     const windowValue = pipelineScheduleWindow();
+    const helper = globalThis.PipelineScheduleGrid;
     const start = windowValue?.start ? new Date(windowValue.start.getTime()) : new Date();
-    start.setHours(0, 0, 0, 0);
-    start.setDate(start.getDate() + Number(days || 0));
-    pipelineScheduleGridAnchorDate = start;
+    pipelineScheduleGridAnchorDate = helper?.addDays
+      ? helper.addDays(start, Number(days || 0), workingStudioTimeZone())
+      : start;
+    if (!helper?.addDays) {
+      pipelineScheduleGridAnchorDate.setDate(pipelineScheduleGridAnchorDate.getDate() + Number(days || 0));
+    }
     await loadPipelineScheduleGridWindow(
       `Loading ${pipelineScheduleWindowLabel()}…`
     );
@@ -17298,16 +17328,16 @@
   }
 
   function pipelineScheduleHourLabel(hour) {
-    const date = new Date(2000, 0, 1, Number(hour) || 0, 0, 0, 0);
-    return date.toLocaleTimeString(undefined, { hour: "numeric" });
+    const date = new Date(Date.UTC(2000, 0, 1, Number(hour) || 0, 0, 0, 0));
+    return date.toLocaleTimeString(undefined, { timeZone: workingStudioTimeZone(), hour: "numeric" });
   }
 
   function pipelineScheduleSlotLabel(slotIndex) {
     const helper = globalThis.PipelineScheduleGrid;
     const date = helper?.slotDate
-      ? helper.slotDate(new Date(2000, 0, 1), slotIndex)
+      ? helper.slotDate(new Date(2000, 0, 1), slotIndex, workingStudioTimeZone())
       : new Date(2000, 0, 1, 0, Number(slotIndex || 0) * 30, 0, 0);
-    return date.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+    return date.toLocaleTimeString(undefined, { timeZone: workingStudioTimeZone(), hour: "numeric", minute: "2-digit" });
   }
 
   function pipelineScheduleDayHeader(date) {
@@ -17324,7 +17354,7 @@
   function pipelineScheduleRecordTitle(record) {
     const when = new Date(record?.scheduled_post_date || "");
     const time = Number.isFinite(when.getTime())
-      ? when.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })
+      ? when.toLocaleTimeString(undefined, { timeZone: workingStudioTimeZone(), hour: "numeric", minute: "2-digit" })
       : "";
     return [pipelineOutputListTitle(record), record?.platform, time].filter(Boolean).join(" · ");
   }
@@ -17452,6 +17482,7 @@
       }
       pipelineScheduleSelectedOutputId = id;
       const slotText = new Date(stamp).toLocaleString(undefined, {
+        timeZone: workingStudioTimeZone(),
         weekday: "short",
         month: "short",
         day: "numeric",
@@ -17590,7 +17621,7 @@
     bindPipelineSchedulePlatformFilters();
     // Render the same anchored window used by Previous/Next 7 days and the schedule-grid API.
     // Using new Date() here reset only the visible headers back to the current week after navigation.
-    const windowValue = pipelineScheduleWindow() || helper.sevenDayWindow(new Date());
+    const windowValue = pipelineScheduleWindow() || helper.sevenDayWindow(new Date(), workingStudioTimeZone());
     const visibleRecords = (Array.isArray(records) ? records : []).filter(pipelineScheduleRecordVisible);
     const cells = helper.aggregate(visibleRecords, windowValue);
     const total = [...cells.values()].reduce((sum, cell) => sum + Number(cell?.total || 0), 0);
@@ -17604,12 +17635,12 @@
     }
 
     const now = new Date();
-    const nowKey = helper.slotKey(now);
+    const nowKey = helper.slotKey(now, workingStudioTimeZone());
     const head = windowValue.days.map((date) => `<th scope="col">${pipelineScheduleDayHeader(date)}</th>`).join("");
     const rows = Array.from({ length: 48 }, (_, slotIndex) => {
       const cellsHtml = windowValue.days.map((day) => {
-        const date = helper.slotDate(day, slotIndex);
-        const key = helper.slotKey(date);
+        const date = helper.slotDate(day, slotIndex, workingStudioTimeZone());
+        const key = helper.slotKey(date, workingStudioTimeZone());
         const cell = cells.get(key);
         const isPast = date.getTime() <= Date.now();
         const bubbles = (cell?.records || []).map((record) => pipelineScheduleEntryMarkup(record)).join("");
@@ -17619,7 +17650,7 @@
           key === nowKey ? "is-current-hour" : "",
           isPast ? "is-past" : "",
         ].filter(Boolean).join(" ");
-        const aria = `Schedule selected output for ${date.toLocaleString(undefined, { weekday: "long", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}`;
+        const aria = `Schedule selected output for ${date.toLocaleString(undefined, { timeZone: workingStudioTimeZone(), weekday: "long", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}`;
         return `<td class="${classes}"${isPast ? "" : ` data-pipeline-schedule-drop="${escapeHtml(date.toISOString())}" tabindex="0" role="button" aria-label="${escapeHtml(aria)}"`}><div class="pipeline-schedule-cell-inner">${bubbles || '<span class="pipeline-schedule-slot-empty">Drop here</span>'}</div></td>`;
       }).join("");
       return `<tr><th scope="row" class="pipeline-schedule-hour">${escapeHtml(pipelineScheduleSlotLabel(slotIndex))}</th>${cellsHtml}</tr>`;
@@ -17680,17 +17711,18 @@
 
   function platformCalendarSlotLabel(slotIndex) {
     const helper = globalThis.PlatformScheduleCalendar;
-    const date = helper?.slotDate ? helper.slotDate(new Date(2000, 0, 1), slotIndex) : new Date(2000, 0, 1, 0, slotIndex * 30);
-    return date.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+    const date = helper?.slotDate ? helper.slotDate(new Date(2000, 0, 1), slotIndex, workingStudioTimeZone()) : new Date(2000, 0, 1, 0, slotIndex * 30);
+    return date.toLocaleTimeString(undefined, { timeZone: workingStudioTimeZone(), hour: "numeric", minute: "2-digit" });
   }
 
   function platformCalendarWeekLabel(windowValue) {
     const first = windowValue?.days?.[0];
     const last = windowValue?.days?.[6];
     if (!first || !last) return "";
-    const sameYear = first.getFullYear() === last.getFullYear();
-    const start = first.toLocaleDateString(undefined, { month: "short", day: "numeric", year: sameYear ? undefined : "numeric" });
-    const end = last.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
+    const timeZone = workingStudioTimeZone();
+    const sameYear = new Intl.DateTimeFormat("en", { timeZone, year: "numeric" }).format(first) === new Intl.DateTimeFormat("en", { timeZone, year: "numeric" }).format(last);
+    const start = first.toLocaleDateString("en-US", { timeZone, month: "short", day: "numeric", year: sameYear ? undefined : "numeric" });
+    const end = last.toLocaleDateString("en-US", { timeZone, month: "short", day: "numeric", year: "numeric" });
     return `${start} – ${end}`;
   }
 
@@ -17702,7 +17734,8 @@
     const warning = $("platformCalendarWarning");
     const message = $("platformCalendarMessage");
     const raw = String(input?.value || "").trim();
-    const selected = raw ? new Date(raw) : null;
+    const selectedIso = raw ? studioDateTimeLocalToIso(raw) : "";
+    const selected = selectedIso ? new Date(selectedIso) : null;
     const stamp = selected?.getTime();
     platformCalendarSelectedIso = Number.isFinite(stamp) ? selected.toISOString() : "";
     if (message) message.textContent = "";
@@ -17717,7 +17750,7 @@
     if (text) {
       text.textContent = past
         ? "Choose a future date and time."
-        : `Schedule for ${selected.toLocaleString(undefined, { weekday: "short", month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" })}`;
+        : `Schedule for ${selected.toLocaleString(undefined, { timeZone: workingStudioTimeZone(), weekday: "short", month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" })}`;
     }
     const spacing = helper?.spacingWarning?.(
       selected,
@@ -17755,19 +17788,19 @@
       const output = record?.output_id ? `Output ${record.output_id}` : "This output";
       summary.textContent = `${output} · ${platformCalendarPlatform} · ${visibleRecords.length} scheduled post${visibleRecords.length === 1 ? "" : "s"} in these 7 days · 30-minute slots`;
     }
-    const slots = helper.aggregateBySlot(platformCalendarRecords, platformCalendarPlatform);
-    const selectedKey = platformCalendarSelectedIso ? helper.slotKey(new Date(platformCalendarSelectedIso)) : "";
-    const todayKey = helper.localDayKey(new Date());
+    const slots = helper.aggregateBySlot(platformCalendarRecords, platformCalendarPlatform, "", workingStudioTimeZone());
+    const selectedKey = platformCalendarSelectedIso ? helper.slotKey(new Date(platformCalendarSelectedIso), workingStudioTimeZone()) : "";
+    const todayKey = helper.localDayKey(new Date(), workingStudioTimeZone());
     const head = platformCalendarWeek.days.map((day) => {
-      const dayName = helper.localDayKey(day) === todayKey
+      const dayName = helper.localDayKey(day, workingStudioTimeZone()) === todayKey
         ? "Today"
-        : day.toLocaleDateString(undefined, { weekday: "short" });
-      return `<th scope="col"><span class="platform-calendar-day-name">${escapeHtml(dayName)}</span><span class="platform-calendar-day-date">${escapeHtml(day.toLocaleDateString(undefined, { month: "short", day: "numeric" }))}</span></th>`;
+        : day.toLocaleDateString(undefined, { timeZone: workingStudioTimeZone(), weekday: "short" });
+      return `<th scope="col"><span class="platform-calendar-day-name">${escapeHtml(dayName)}</span><span class="platform-calendar-day-date">${escapeHtml(day.toLocaleDateString(undefined, { timeZone: workingStudioTimeZone(), month: "short", day: "numeric" }))}</span></th>`;
     }).join("");
     const rows = Array.from({ length: 48 }, (_, slotIndex) => {
       const cells = platformCalendarWeek.days.map((day) => {
-        const slot = helper.slotDate(day, slotIndex);
-        const key = helper.slotKey(slot);
+        const slot = helper.slotDate(day, slotIndex, workingStudioTimeZone());
+        const key = helper.slotKey(slot, workingStudioTimeZone());
         const events = slots.get(key) || [];
         const spacing = helper.spacingWarning(slot, platformCalendarRecords, platformCalendarPlatform, platformCalendarOutputId);
         const isPast = slot.getTime() <= Date.now();
@@ -17834,7 +17867,7 @@
     if (!helper?.defaultWeek || !record || record.do_not_publish || creativeIsPublished(record)) return;
     platformCalendarOutputId = record.id;
     platformCalendarPlatform = String(record.platform || "Platform").trim() || "Platform";
-    platformCalendarWeek = helper.defaultWeek(new Date());
+    platformCalendarWeek = helper.defaultWeek(new Date(), workingStudioTimeZone());
     platformCalendarRecords = [];
     platformCalendarReturnFocus = opener instanceof HTMLElement ? opener : document.activeElement;
     const rowInput = document.querySelector(`[data-pipeline-schedule="${record.id}"]`);
@@ -17867,7 +17900,7 @@
   function shiftPlatformScheduleCalendarWeek(days) {
     const helper = globalThis.PlatformScheduleCalendar;
     if (!helper?.addLocalDays || !platformCalendarWeek) return;
-    platformCalendarWeek = helper.sevenDayWindow(helper.addLocalDays(platformCalendarWeek.start, days));
+    platformCalendarWeek = helper.sevenDayWindow(helper.addLocalDays(platformCalendarWeek.start, days, workingStudioTimeZone()), workingStudioTimeZone());
     loadPlatformScheduleCalendarWeek();
   }
 
@@ -21246,7 +21279,7 @@
   $("platformCalendarDefaultWeek")?.addEventListener("click", () => {
     const helper = globalThis.PlatformScheduleCalendar;
     if (!helper?.defaultWeek) return;
-    platformCalendarWeek = helper.defaultWeek(new Date());
+    platformCalendarWeek = helper.defaultWeek(new Date(), workingStudioTimeZone());
     loadPlatformScheduleCalendarWeek();
   });
   $("platformCalendarManualTime")?.addEventListener("input", () => updatePlatformCalendarSelection({ rerender: true }));

@@ -182,3 +182,15 @@ test("global Pipeline calendar navigates across rolling seven-day windows", () =
   assert.match(css, /\.pipeline-schedule-grid-table thead th \{[^}]*padding: 10px 10px;/);
   assert.match(css, /\.pipeline-schedule-day-date \{[^}]*margin-top: 4px;/);
 });
+
+
+test("calendar grid windows and slots use the selected profile timezone", () => {
+  const zone = "America/Los_Angeles";
+  const now = new Date("2026-10-04T06:00:00Z"); // 11 PM on Oct 3 in Los Angeles
+  const window = grid.sevenDayWindow(now, zone);
+  assert.equal(window.start.toISOString(), "2026-10-03T07:00:00.000Z");
+  assert.equal(grid.dayKey(window.days[0], zone), "2026-10-03");
+  const fourAm = grid.slotDate(window.days[0], 8, zone);
+  assert.equal(fourAm.toISOString(), "2026-10-03T11:00:00.000Z");
+  assert.equal(grid.slotKey(fourAm, zone), "2026-10-03-04-00");
+});

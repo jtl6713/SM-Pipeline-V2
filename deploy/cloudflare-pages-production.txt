@@ -436,3 +436,5 @@ Deploy Studio Pages production
 Reason: Add bulk 14-day schedule regeneration for selected platforms from the overall Pipeline calendar, with confirmation count and profile-local blackout enforcement
 UI: 0.6.471-calendar-bulk-regenerate
 Requested: 2026-10-04
+
+Profile-timezone scheduling across calendars, schedule fields, and initial suggestions: 0.6.472-profile-timezone-schedules

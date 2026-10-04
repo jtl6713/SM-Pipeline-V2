@@ -57,7 +57,7 @@ test("Platform Outputs expose a save-only calendar workflow", () => {
   assert.match(app, /function savePlatformScheduleCalendar/);
   assert.match(app, /renderPlatformScheduleCalendar\(\{ scrollToHour: 0 \}\)/);
   assert.match(html, /id="platformCalendarDefaultWeek">Today<\/button>/);
-  assert.match(app, /dayName = helper\.localDayKey\(day\) === todayKey/);
+  assert.match(app, /dayName = helper\.localDayKey\(day, workingStudioTimeZone\(\)\) === todayKey/);
   assert.match(app, /platformCalendarWeek = helper\.sevenDayWindow/);
   assert.match(css, /#platformCalendarWeekLabel \{[^}]*padding: 7px 11px;[^}]*border-radius: 10px;/);
   assert.match(css, /\.platform-calendar-table thead th \{[^}]*padding: 10px 10px;/);
@@ -72,4 +72,16 @@ test("publish status labels follow schedule state", () => {
   assert.match(app, /Needs Schedule/);
   assert.match(app, /Scheduled/);
   assert.match(app, /Ready to Publish/);
+});
+
+
+test("platform calendar week, slot keys, and slot dates use profile timezone", () => {
+  const zone = "America/Los_Angeles";
+  const now = new Date("2026-10-04T06:00:00Z"); // 11 PM on Oct 3 in Los Angeles
+  const week = calendar.defaultWeek(now, zone);
+  assert.equal(week.start.toISOString(), "2026-10-03T07:00:00.000Z");
+  assert.equal(calendar.localDayKey(week.days[0], zone), "2026-10-03");
+  const fourAm = calendar.slotDate(week.days[0], 8, zone);
+  assert.equal(fourAm.toISOString(), "2026-10-03T11:00:00.000Z");
+  assert.equal(calendar.slotKey(fourAm, zone), "2026-10-03-04-00");
 });

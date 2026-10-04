@@ -165,3 +165,31 @@ test("widest-gap fallback never schedules beyond the rolling 14-day horizon", ()
     assert.ok(Date.parse(iso) < horizonEnd);
   }
 });
+
+
+test("initial suggested schedule map honors the active Los Angeles profile timezone", () => {
+  const zone = "America/Los_Angeles";
+  const now = new Date("2026-10-04T06:00:00Z"); // 11 PM on Oct 3 in Los Angeles
+  const items = ["Photo", "Reel", "Story"].map((output_type) => ({ platform: "Facebook", output_type, scheduled_at: "" }));
+  const schedules = plan.ezBuildSuggestedScheduleMap(items, {}, now, { timeZone: zone });
+  const values = [...schedules.values()];
+  assert.equal(values.length, items.length);
+  const localDate = (iso) => {
+    const parts = new Intl.DateTimeFormat("en-US", { timeZone: zone, year: "numeric", month: "2-digit", day: "2-digit" })
+      .formatToParts(new Date(iso)).reduce((out, part) => (out[part.type] = part.value, out), {});
+    return `${parts.year}-${parts.month}-${parts.day}`;
+  };
+  for (const iso of values) {
+    const date = localDate(iso);
+    const local = localParts(iso, zone);
+    assert.ok(date >= "2026-10-03" && date < "2026-10-17", `outside 14-day profile horizon: ${iso} (${date})`);
+    assert.equal(plan.ezIsBlackoutLocalTime(Date.parse(iso), zone), false);
+    assert.equal(local.hour, 5);
+    assert.equal(local.minute, 30);
+  }
+  for (let left = 0; left < values.length; left++) {
+    for (let right = left + 1; right < values.length; right++) {
+      assert.ok(Math.abs(Date.parse(values[left]) - Date.parse(values[right])) >= 3 * 60 * 60 * 1000);
+    }
+  }
+});
