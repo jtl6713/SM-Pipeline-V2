@@ -444,3 +444,8 @@ Deploy Studio Pages production
 Reason: Make selected profile timezone authoritative across scheduling calendars, slot labels, suggestions, and datetime inputs; preserve concurrent timezone work
 UI: 0.6.473-profile-timezone-authority
 Requested: 2026-10-04
+
+Deploy Studio Pages production
+Reason: Load the corrected Studio 0.6.473 bundle so profile selection and homepage data initialize again
+UI: 0.6.473-profile-timezone-authority
+Requested: 2026-10-04
