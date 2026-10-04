@@ -257,7 +257,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.475-manual-media-authority";
+  const BUILD_ID = "item4-0.6.478-hide-published-calendar-stale-schedules";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -17338,7 +17338,11 @@
       }
     } catch (error) {
       if (generation !== pipelineScheduleGridLoadGeneration) return;
-      const fallback = (pipelineOutputs || []).filter((row) => String(row?.scheduled_post_date || "").trim());
+      const fallback = (pipelineOutputs || []).filter((row) =>
+        String(row?.scheduled_post_date || "").trim()
+        && !row?.do_not_publish
+        && !creativeIsPublished(row)
+      );
       pipelineScheduleGridRecords = fallback;
       renderPipelineScheduleGrid(fallback, error?.message || "Schedule view unavailable");
       setPipelineScheduleGridMessage(error?.message || "Could not load that 7-day window.", true);
@@ -17645,7 +17649,12 @@
   }
 
   function pipelineScheduleRecordVisible(record) {
-    const key = pipelineSchedulePlatformKey(record);
+    const fullRecord = (pipelineOutputs || []).find((row) => row?.id === record?.id) || record;
+    // Published and do-not-publish rows are historical, not future scheduling work.
+    // Some legacy rows retain a future Scheduled_Post_Date even after publishing;
+    // never let those stale timestamps appear on the active scheduling calendar.
+    if (fullRecord?.do_not_publish || creativeIsPublished(fullRecord)) return false;
+    const key = pipelineSchedulePlatformKey(fullRecord);
     return !PIPELINE_SCHEDULE_PLATFORM_KEYS.includes(key) || pipelineScheduleVisiblePlatforms.has(key);
   }
 
@@ -17747,7 +17756,11 @@
   function syncPipelineScheduleGridRecord(record) {
     if (!record?.id) return;
     pipelineScheduleGridRecords = pipelineScheduleGridRecords.filter((row) => row.id !== record.id);
-    if (String(record.scheduled_post_date || "").trim()) pipelineScheduleGridRecords.push(record);
+    if (
+      String(record.scheduled_post_date || "").trim()
+      && !record?.do_not_publish
+      && !creativeIsPublished(record)
+    ) pipelineScheduleGridRecords.push(record);
     renderPipelineScheduleGrid(pipelineScheduleGridRecords);
   }
 
