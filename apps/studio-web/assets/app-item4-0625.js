@@ -257,7 +257,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.481-schedule-mae-rotation";
+  const BUILD_ID = "item4-0.6.482-manual-spread-only";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -16150,23 +16150,18 @@
     }
     for (const record of ready) {
       if (pipelineRowHasSchedule(record)) continue;
-      try {
-        const data = await fetchBestTimesForOutput(record);
-        const suggested = String(data?.suggested_iso || "").trim();
-        if (!suggested) continue;
-        const platform = String(record.platform || "").trim().toLowerCase();
-        const bucket = pipelineScheduleBucketKey(record);
-        const hint = suggestedTimeHint(data);
-        rememberSuggestedHint(platform, hint);
-        const allReserved = Object.values(reserved).flat().filter(Number.isFinite);
-        const iso = nextOpenScheduleIso(suggested, reserved[bucket] || [], hint, PIPELINE_SCHEDULE_GAP_MS, reserved[bucket] || []);
-        if (!iso) continue;
-        const input = document.querySelector(`[data-pipeline-schedule="${record.id}"]`);
-        if (input) applySuggestedIsoToScheduleInput(input, iso);
-        else pipelineScheduleDrafts.set(record.id, formatDateTimeLocalInput(iso));
-        (reserved[bucket] ||= []).push(Date.parse(iso));
-        rememberBookedScheduleMs(platform, iso);
-      } catch {}
+      // Manual morning → afternoon → evening spread only. Do not call best-times /
+      // industry / learned windows for placement.
+      const platform = String(record.platform || "").trim().toLowerCase();
+      const bucket = pipelineScheduleBucketKey(record);
+      if (!bucket) continue;
+      const iso = nextOpenScheduleIso(new Date().toISOString(), reserved[bucket] || [], {}, PIPELINE_SCHEDULE_GAP_MS, reserved[bucket] || []);
+      if (!iso || pipelineScheduleIsBlackout(iso)) continue;
+      const input = document.querySelector(`[data-pipeline-schedule="${record.id}"]`);
+      if (input) applySuggestedIsoToScheduleInput(input, iso);
+      else pipelineScheduleDrafts.set(record.id, formatDateTimeLocalInput(iso));
+      (reserved[bucket] ||= []).push(Date.parse(iso));
+      rememberBookedScheduleMs(platform, iso);
     }
   }
 
@@ -16207,29 +16202,20 @@
   let creativeSuggestedHint = {};
 
   function formatBestTimesSuggestion(data) {
-    const suggested = data?.suggested;
-    if (!suggested || typeof suggested !== "object") return "";
-    const days = Array.isArray(suggested.days) ? suggested.days.filter(Boolean) : [];
-    const windows = Array.isArray(suggested.windows) ? suggested.windows.filter(Boolean) : [];
-    if (!days.length || !windows.length) return "";
-    const sourceLabel = data.source === "first_party"
-      ? "your posts"
-      : data.source === "similar_accounts"
-        ? "similar accounts"
-        : data.source === "learned_model" || data.source === "blended"
-          ? "learned model"
-          : "industry default";
-    const similar = data?.similar;
-    const similarDays = Array.isArray(similar?.days) ? similar.days.filter(Boolean) : [];
-    const similarWindows = Array.isArray(similar?.windows) ? similar.windows.filter(Boolean) : [];
-    const similarNote = similar?.label && data.source !== "similar_accounts" && similarDays.length && similarWindows.length
-      ? ` Similar accounts: ${similarDays.join(", ")} · ${similarWindows.join(" or ")}.`
-      : "";
-    const captionNote = data?.caption?.label ? ` ${data.caption.label}.` : "";
+    const iso = String(data?.suggested_iso || "").trim();
+    const when = iso ? formatStudioDateTime(iso) : "";
     const occupiedNote = Number(data?.occupied_count) > 0
-      ? ` Stays in those best windows and avoids ${data.occupied_count} already scheduled ${data.occupied_count === 1 ? "post" : "posts"}.`
-      : " Stays in those best windows; later posts spread to the next open one.";
-    return `Suggested: ${days.join(", ")} · ${windows.join(" or ")} (${data.season_label || studioInsightsSeasonLabel(studioInsightsSeason())} · ${sourceLabel}).${similarNote}${captionNote}${occupiedNote} Now stays selected unless you pick a time.`;
+      ? ` Avoids ${data.occupied_count} already scheduled ${data.occupied_count === 1 ? "post" : "posts"}.`
+      : "";
+    const learning = data?.learning;
+    const learningNote = learning?.suggested
+      ? ` Learning from your posts is accumulating (${Number(learning.sample_size) || 0} samples) but is not used for scheduling yet.`
+      : ` Collecting your post outcomes for later learning${Number.isFinite(Number(learning?.sample_size)) ? ` (${Number(learning.sample_size)} samples so far)` : ""}.`;
+    if (when) {
+      return `Suggested: ${when} via manual morning / afternoon / evening spread.${occupiedNote}${learningNote}`;
+    }
+    return String(data?.note || "").trim()
+      || `Manual morning / afternoon / evening spread.${occupiedNote}${learningNote}`;
   }
 
   async function fetchBestTimesForOutput(record) {
@@ -16324,10 +16310,18 @@
           useBtn.dataset.suggestedDays = JSON.stringify(hint.days);
           useBtn.dataset.suggestedWindows = JSON.stringify(hint.windows);
         }
-        if (pipelineUseDefaultSchedules() && iso && creativeCanApproveForPublishing(record) && !pipelineRowHasSchedule(record)) {
+        if (pipelineUseDefaultSchedules() && creativeCanApproveForPublishing(record) && !pipelineRowHasSchedule(record)) {
           const input = document.querySelector(`[data-pipeline-schedule="${id}"]`);
-          const openIso = nextOpenScheduleIso(iso, pipelineOccupiedScheduleBucketMs(record), hint);
-          if (applySuggestedIsoToScheduleInput(input, openIso)) rememberBookedScheduleMs(record.platform, openIso);
+          const openIso = nextOpenScheduleIso(
+            new Date().toISOString(),
+            pipelineOccupiedScheduleBucketMs(record),
+            {},
+            PIPELINE_SCHEDULE_GAP_MS,
+            pipelineOccupiedScheduleBucketMs(record),
+          );
+          if (openIso && !pipelineScheduleIsBlackout(openIso) && applySuggestedIsoToScheduleInput(input, openIso)) {
+            rememberBookedScheduleMs(record.platform, openIso);
+          }
         }
       } catch (error) {
         suggestEl.textContent = error?.message ? `Suggestion unavailable (${error.message}).` : "Suggestion unavailable.";

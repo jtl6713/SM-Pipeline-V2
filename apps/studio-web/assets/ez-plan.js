@@ -375,18 +375,9 @@
   const EZ_PRIORITY_WINDOW_OFFSETS_MINUTES = [0, 30, 60, 90];
   const EZ_SUGGEST_LEAD_MS = 10 * 60 * 1000;
 
-  function ezIndustryBestWindows(platform, outputType) {
-    const p = String(platform || "").toLowerCase();
-    const t = String(outputType || "").toLowerCase();
-    if (p.includes("tiktok")) return { days: ["Mon", "Tue", "Wed", "Thu", "Fri"], windows: ["19:00-21:00"] };
-    if (p.includes("youtube") && (t.includes("standard") || t.includes("long"))) return { days: ["Mon", "Tue", "Wed", "Thu", "Fri"], windows: ["10:00-16:00"] };
-    if (p.includes("youtube")) return { days: ["Wed", "Thu", "Fri", "Sat"], windows: ["14:00-16:00", "20:00-22:00"] };
-    if (t.includes("story")) return { days: ["Mon", "Tue", "Wed", "Thu", "Fri"], windows: ["16:00-18:00", "19:00-21:00"] };
-    if (t.includes("carousel") || t.includes("single") || t.includes("feed") || t.includes("multi-image") || t.includes("photo")) {
-      return { days: ["Wed", "Thu"], windows: ["12:00-14:00", "18:00-20:00"] };
-    }
-    if (p.includes("facebook")) return { days: ["Tue", "Wed", "Thu"], windows: ["12:00-13:00", "18:00-20:00"] };
-    return { days: ["Tue", "Wed", "Thu"], windows: ["11:00-13:00", "18:00-21:00"] };
+  /** @deprecated Placement uses EZ_PRIORITY_SCHEDULE_WINDOWS only. */
+  function ezIndustryBestWindows(_platform, _outputType) {
+    return { days: [], windows: [...EZ_PRIORITY_SCHEDULE_WINDOWS] };
   }
 
   const EZ_DEFAULT_TIME_ZONE = "America/Chicago";

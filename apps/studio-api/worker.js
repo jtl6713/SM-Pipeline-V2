@@ -464,7 +464,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.440-schedule-mae-rotation",
+          version: "0.10.441-manual-spread-only",
           studio_desk_inventory_v1: true,
           studio_desk_activity_v1: true,
           studio_tiktok_complete_v1: true,
@@ -7320,7 +7320,7 @@ function studioNextOpenScheduleIso(candidateIso, occupiedMs, gapMs = STUDIO_SCHE
 const STUDIO_OCCUPIED_CACHE_MS = 45 * 1000;
 const STUDIO_OCCUPIED_LIST_LIMIT = 250;
 const STUDIO_OCCUPIED_LOOKBACK_MS = 12 * 60 * 60 * 1000;
-const STUDIO_OCCUPIED_HORIZON_MS = 10 * 24 * 60 * 60 * 1000;
+const STUDIO_OCCUPIED_HORIZON_MS = 14 * 24 * 60 * 60 * 1000;
 const STUDIO_OCCUPIED_FORMULA = 'AND({Test_Run_ID}=BLANK(),{Do_Not_Publish}=0,{Published_At}=BLANK(),OR({Scheduled_Post_Date}!="",{YouTube_Scheduled_Publish_At}!="",{Studio_Scheduled_At}!="",{Publish_Status}="Publishing",{Publish_Status}="Ready to Publish"))';
 let studioOccupiedScheduleCache = { at: 0, rows: null, inflight: null };
 
@@ -9268,47 +9268,41 @@ function studioAzScoreMain(civil, suggested, occupiedMs, now) {
   return { score, slot, preferred, crowding };
 }
 
-function studioBuildAzCampaignSchedule(items, { occupiedMs = [], bestTimesByKey = {}, now = new Date() } = {}) {
+function studioBuildAzCampaignSchedule(items, { occupiedMs = [], now = new Date() } = {}) {
+  // No industry / learned / similar best-times. Manual MAE spread only while we
+  // accumulate first-party outcomes for possible later use.
   const list = Array.isArray(items) ? items : [];
-  const mains = list.filter((item) => !studioAzIsStory(item.output_type));
-  const stories = list.filter((item) => studioAzIsStory(item.output_type));
-  const days = studioAzHorizon(now);
-  let best = null;
-  for (const civil of days) {
-    const parts = mains.map((item) => {
-      const key = studioAzScheduleKey(item.platform, item.output_type);
-      return studioAzScoreMain(civil, bestTimesByKey[key] || studioIndustryBestWindows(item.platform, item.output_type), occupiedMs, now);
-    });
-    if (!parts.length) continue;
-    const worst = Math.min(...parts.map((part) => part.score));
-    const avg = parts.reduce((sum, part) => sum + part.score, 0) / parts.length;
-    const crowding = studioAzOccupiedOnDay(occupiedMs, civil).length;
-    const total = avg + Math.min(0, worst) * 0.15 - crowding * 6;
-    if (!best || total > best.total) best = { civil, total, parts, crowding };
-  }
+  const ordered = [
+    ...list.filter((item) => !studioAzIsStory(item.output_type)),
+    ...list.filter((item) => studioAzIsStory(item.output_type)),
+  ];
   const stamps = new Map();
-  if (!best?.civil) return { stamps, campaign: null, rationale: "no open campaign day" };
-  const reserved = [...occupiedMs];
-  for (const item of mains) {
-    const key = studioAzScheduleKey(item.platform, item.output_type);
-    const suggested = bestTimesByKey[key] || studioIndustryBestWindows(item.platform, item.output_type);
-    const scored = studioAzScoreMain(best.civil, suggested, reserved, now);
-    const slot = scored.slot || studioAzWindowSlots(best.civil, suggested.windows || ["12:00-13:00"], now, reserved)[0];
-    if (!slot) continue;
-    stamps.set(key, slot.iso);
-    reserved.push(slot.ms);
+  const reservedAll = [...(occupiedMs || [])].filter((ms) => Number.isFinite(ms));
+  const reservedByPlatform = {};
+  for (const item of ordered) {
+    const platform = String(item.platform || "").trim();
+    const outputType = String(item.output_type || "").trim();
+    if (!platform || !outputType) continue;
+    const key = studioAzScheduleKey(platform, outputType);
+    const iso = studioPickBalancedSuggestedIso(STUDIO_PRIORITY_SCHEDULE_WINDOWS, now, {
+      occupiedMs: reservedAll,
+      platformOccupiedMs: reservedByPlatform[platform] || [],
+    });
+    if (!iso) continue;
+    stamps.set(key, iso);
+    const ms = Date.parse(iso);
+    if (Number.isFinite(ms)) {
+      reservedAll.push(ms);
+      (reservedByPlatform[platform] ||= []).push(ms);
+    }
   }
-  for (const story of stories) {
-    const reel = mains.find((item) => String(item.platform) === String(story.platform));
-    const reelIso = reel ? stamps.get(studioAzScheduleKey(reel.platform, reel.output_type)) : null;
-    const base = reelIso ? Date.parse(reelIso) : null;
-    if (!Number.isFinite(base)) continue;
-    stamps.set(studioAzScheduleKey(story.platform, story.output_type), new Date(base + AZ_STORY_OFFSET_MS).toISOString());
-  }
+  const scheduledDays = [...new Set([...stamps.values()].map((iso) => studioAzCivilFromMs(Date.parse(iso)).key))];
   return {
     stamps,
-    campaign: best.civil,
-    rationale: `campaign ${best.civil.key} (${best.civil.weekday}); spaced from other posts over ${AZ_HORIZON_DAYS} days`,
+    campaign: scheduledDays.length ? { key: scheduledDays[0] } : null,
+    rationale: scheduledDays.length
+      ? `manual morning/afternoon/evening spread across ${scheduledDays.length} day${scheduledDays.length === 1 ? "" : "s"}`
+      : "no open schedule in the manual 14-day horizon",
   };
 }
 
@@ -9337,39 +9331,9 @@ async function studioLoadAzOccupiedTimes(env, { excludeIds = [] } = {}) {
   return { allMs };
 }
 
-async function studioResolveAzBestTimes(env, platform, outputType) {
-  const industry = studioIndustryBestWindows(platform, outputType);
-  try {
-    const season = studioInsightsResolveSeason({ searchParams: new URLSearchParams() });
-    const [firstParty, learned] = await Promise.all([
-      studioInsightsLoadObservations(env, {
-        profile: "chicago",
-        platform,
-        output_type: outputType,
-        season,
-        source: "first_party",
-        limit: 120,
-      }).catch(() => []),
-      studioInsightsLoadLearned(env, {
-        profile: "chicago",
-        platform,
-        output_type: outputType,
-        season,
-        metric_type: "post_time",
-      }).catch(() => null),
-    ]);
-    const sample = (firstParty || []).filter((row) => row.views > 0 || row.likes > 0);
-    const heatmap = studioBuildSimilarHeatmap(sample);
-    if (heatmap.suggested && heatmap.sample_size >= STUDIO_SIMILAR_TIMES_MIN_SAMPLE) {
-      return { ...heatmap.suggested, source: "first_party" };
-    }
-    if (learned?.days?.length && learned?.windows?.length && learned.sample_size >= STUDIO_SIMILAR_TIMES_MIN_SAMPLE) {
-      return { days: learned.days, windows: learned.windows, label: learned.label || "learned model", source: "learned_model" };
-    }
-  } catch (error) {
-    console.warn("AZ best-times lookup failed", platform, outputType, error);
-  }
-  return { ...industry, source: "industry_default" };
+async function studioResolveAzBestTimes(_env, _platform, _outputType) {
+  // Learning continues elsewhere; AZ placement never consumes industry/learned windows.
+  return { ...studioManualSpreadWindows(), source: "manual_spread" };
 }
 
 async function azPlatformOutputsForRequest(env, requestId) {
@@ -17006,18 +16970,17 @@ function studioFinishedSeedOverlay(requestRecord, clips, nativeReady) {
 
 const STUDIO_SIMILAR_WATCHLIST_SETTING = "SIMILAR_ACCOUNT_WATCHLIST";
 
-function studioIndustryBestWindows(platform, outputType) {
-  const p = String(platform || "").toLowerCase();
-  const t = String(outputType || "").toLowerCase();
-  if (p.includes("tiktok")) return { days: ["Mon", "Tue", "Wed", "Thu", "Fri"], windows: ["19:00-21:00"], label: "TikTok weekday evenings" };
-  if (p.includes("youtube") && (t.includes("standard") || t.includes("long"))) return { days: ["Mon", "Tue", "Wed", "Thu", "Fri"], windows: ["10:00-16:00"], label: "YouTube standard weekday daytime" };
-  if (p.includes("youtube")) return { days: ["Wed", "Thu", "Fri", "Sat"], windows: ["14:00-16:00", "20:00-22:00"], label: "YouTube Short afternoon/evening" };
-  if (t.includes("story")) return { days: ["Mon", "Tue", "Wed", "Thu", "Fri"], windows: ["16:00-18:00", "19:00-21:00"], label: "Stories late afternoon/evening" };
-  if (t.includes("carousel") || t.includes("single") || t.includes("feed") || t.includes("multi-image") || t.includes("photo")) {
-    return { days: ["Wed", "Thu"], windows: ["12:00-14:00", "18:00-20:00"], label: "Feed/carousel midday or evening" };
-  }
-  if (p.includes("facebook")) return { days: ["Tue", "Wed", "Thu"], windows: ["12:00-13:00", "18:00-20:00"], label: "Facebook Reel lunch/evening" };
-  return { days: ["Tue", "Wed", "Thu"], windows: ["11:00-13:00", "18:00-21:00"], label: "Reel midday or evening" };
+/** @deprecated Placement uses manual MAE spread only. Stub kept for leftover callers. */
+function studioIndustryBestWindows(_platform, _outputType) {
+  return {
+    days: [],
+    windows: [...STUDIO_PRIORITY_SCHEDULE_WINDOWS],
+    label: "Manual morning / afternoon / evening spread",
+  };
+}
+
+function studioManualSpreadWindows() {
+  return studioIndustryBestWindows();
 }
 
 function studioChicagoDateTimeParts(date = new Date()) {
@@ -18980,44 +18943,45 @@ async function getInsightsBestTimes(request, env, url, authorization) {
   const platform = String(url.searchParams.get("platform") || "").trim();
   const outputType = String(url.searchParams.get("output_type") || "").trim();
   const season = studioInsightsResolveSeason(url);
-  const industry = studioIndustryBestWindows(platform, outputType);
   const seasonLabel = studioSeasonLabel(season);
+  const spread = studioManualSpreadWindows();
   const occupiedByPlatform = await studioOccupiedSchedulesOrEmpty(env);
   const occupiedOpts = {
     occupiedMs: studioFlattenOccupiedByPlatform(occupiedByPlatform),
     platformOccupiedMs: studioOccupiedForPlatform(occupiedByPlatform, platform),
   };
   const occupiedMsForClient = occupiedOpts.platformOccupiedMs;
-  const industryPayload = (theme = null, note = null) => ({
+  const placementIso = () => studioSuggestedLocalDatetime(STUDIO_PRIORITY_SCHEDULE_WINDOWS, new Date(), occupiedOpts);
+  const basePayload = (extra = {}) => ({
     ok: true,
     timezone: "America/Chicago",
     platform,
     output_type: outputType,
     season,
     season_label: seasonLabel,
-    source: "industry_default",
+    // Placement is always the manual MAE spread. Learning is returned separately
+    // and is never applied to scheduling yet.
+    placement_mode: "manual_spread",
+    source: "manual_spread",
     sample_size: 0,
-    suggested: {
-      days: industry.days,
-      windows: studioSanitizeScheduleWindows(industry.windows),
-      label: industry.label,
-    },
-    // Placement always uses the strict 14-day morning → afternoon → evening rotation.
-    suggested_iso: studioSuggestedLocalDatetime(STUDIO_PRIORITY_SCHEDULE_WINDOWS, new Date(), occupiedOpts),
+    suggested: spread,
+    suggested_iso: placementIso(),
     occupied_ms: occupiedMsForClient,
     occupied_count: occupiedMsForClient.length,
+    learning: null,
     similar: null,
     similar_sample_size: 0,
-    similar_profile: theme,
+    similar_profile: null,
     caption: null,
-    note: note || `Not enough ${seasonLabel.toLowerCase()} historical data yet. Showing the strict morning / afternoon / evening rotation in Chicago time, then skipping times already booked.`,
+    note: "Scheduling uses the manual morning / afternoon / evening spread. Your post outcomes are recorded for later learning and are not used for placement yet.",
+    ...extra,
   });
 
   try {
     const theme = await studioResolveSimilarTimesTheme(env, url, authorization);
     // Keep this route cheap: Pipeline fires one request per Ready row.
-    // No Airtable output dump, no legacy-cache migration, no second similar-posts pass for captions.
-    const [firstParty, learned, similar, captionLearned] = await Promise.all([
+    // First-party learning is read for visibility only — never for placement.
+    const [firstParty, learned, captionLearned] = await Promise.all([
       studioInsightsLoadObservations(env, {
         profile: theme,
         platform,
@@ -19039,10 +19003,6 @@ async function getInsightsBestTimes(request, env, url, authorization) {
         console.warn("best-times learned read failed", error);
         return null;
       }),
-      studioLoadSimilarTimesView(env, url, authorization).catch((error) => {
-        console.warn("best-times similar read failed", error);
-        return null;
-      }),
       studioInsightsLoadLearned(env, {
         profile: theme,
         platform,
@@ -19057,24 +19017,32 @@ async function getInsightsBestTimes(request, env, url, authorization) {
 
     const sample = (firstParty || []).filter((row) => row.views > 0 || row.likes > 0);
     const firstHeatmap = studioBuildSimilarHeatmap(sample);
-    const firstSuggested = firstHeatmap.sample_size >= STUDIO_SIMILAR_TIMES_MIN_SAMPLE ? firstHeatmap.suggested : null;
-    const useFirstParty = Boolean(firstSuggested);
-    const useLearned = !useFirstParty && learned?.days?.length && learned?.windows?.length && learned.sample_size >= STUDIO_SIMILAR_TIMES_MIN_SAMPLE;
-    const useSimilar = !useFirstParty && !useLearned && similar?.source === "similar_accounts" && similar.suggested;
-    const rawChosen = useFirstParty
-      ? { ...firstSuggested, label: `${seasonLabel} · your posts · ${firstSuggested.label}` }
-      : useLearned
-        ? { days: learned.days, windows: learned.windows, label: learned.label || `${seasonLabel} learned model` }
-        : useSimilar
-          ? similar.suggested
-          : industry;
-    // Keep analytics labels for the UI, but strip overnight buckets so operators
-    // never see 10pm–6am as a suggested publish window.
-    const chosen = {
-      ...rawChosen,
-      windows: studioSanitizeScheduleWindows(rawChosen?.windows || industry.windows),
-    };
-    const source = useFirstParty ? "first_party" : useLearned ? learned.source || "learned_model" : useSimilar ? "similar_accounts" : "industry_default";
+    const firstSuggested = firstHeatmap.sample_size >= STUDIO_SIMILAR_TIMES_MIN_SAMPLE
+      ? {
+          ...firstHeatmap.suggested,
+          windows: studioSanitizeScheduleWindows(firstHeatmap.suggested.windows),
+          label: `${seasonLabel} · your posts · ${firstHeatmap.suggested.label}`,
+        }
+      : null;
+    const learnedSuggested = learned?.days?.length && learned?.windows?.length && learned.sample_size >= STUDIO_SIMILAR_TIMES_MIN_SAMPLE
+      ? {
+          days: learned.days,
+          windows: studioSanitizeScheduleWindows(learned.windows),
+          label: learned.label || `${seasonLabel} learned model`,
+          sample_size: learned.sample_size,
+          source: learned.source || "learned_model",
+        }
+      : null;
+    const learning = firstSuggested
+      ? { source: "first_party", sample_size: firstHeatmap.sample_size, suggested: firstSuggested, applied_to_scheduling: false }
+      : learnedSuggested
+        ? { source: learnedSuggested.source, sample_size: learnedSuggested.sample_size, suggested: learnedSuggested, applied_to_scheduling: false }
+        : {
+            source: "collecting",
+            sample_size: sample.length,
+            suggested: null,
+            applied_to_scheduling: false,
+          };
     const captionFromSample = (!captionLearned?.caption_patterns && !captionLearned?.patterns)
       ? studioInsightsBuildCaptionLearned(sample)
       : null;
@@ -19101,34 +19069,22 @@ async function getInsightsBestTimes(request, env, url, authorization) {
             }
           : null;
 
-    return respond(request, env, {
-      ok: true,
-      timezone: "America/Chicago",
-      platform,
-      output_type: outputType,
-      season,
-      season_label: seasonLabel,
-      source,
-      sample_size: useFirstParty ? firstHeatmap.sample_size : useLearned ? learned.sample_size : useSimilar ? similar.sample_size : sample.length,
-      suggested: chosen,
-      suggested_iso: studioSuggestedLocalDatetime(STUDIO_PRIORITY_SCHEDULE_WINDOWS, new Date(), occupiedOpts),
-      occupied_ms: occupiedMsForClient,
-      occupied_count: occupiedMsForClient.length,
-      similar: similar?.suggested || null,
-      similar_sample_size: similar?.sample_size || 0,
-      similar_profile: similar?.profile || theme,
+    const learningNote = learning.suggested
+      ? ` Learning from your posts is accumulating (${learning.sample_size} samples) but is not used for placement yet.`
+      : ` Still collecting your post outcomes for later learning (${learning.sample_size} samples so far).`;
+
+    return respond(request, env, basePayload({
+      sample_size: learning.sample_size,
+      learning,
+      similar_profile: theme,
       caption,
-      note: useFirstParty
-        ? `${seasonLabel} analytics are from your published posts. Automatic placement still uses the strict morning / afternoon / evening rotation and skips times already booked.`
-        : useLearned
-          ? `${seasonLabel} analytics are from the learned historical model for ${platform || "this platform"}. Automatic placement still uses the strict morning / afternoon / evening rotation and skips times already booked.`
-          : useSimilar
-            ? `Analytics use public posts from similar ${similar.profile_label} accounts for ${seasonLabel.toLowerCase()}. Automatic placement still uses the strict morning / afternoon / evening rotation and skips times already booked.`
-            : `Not enough ${seasonLabel.toLowerCase()} historical data yet. Showing the strict morning / afternoon / evening rotation in Chicago time, then skipping times already booked.`,
-    });
+      note: `Scheduling uses the manual morning / afternoon / evening spread and skips times already booked.${learningNote}`,
+    }));
   } catch (error) {
-    console.warn("best-times failed; industry default", error);
-    return respond(request, env, industryPayload(null, `Suggestion service hiccuped; showing the strict morning / afternoon / evening rotation in Chicago time.`));
+    console.warn("best-times learning read failed; placement still uses manual spread", error);
+    return respond(request, env, basePayload({
+      note: "Scheduling uses the manual morning / afternoon / evening spread. Learning lookup hiccuped; placement is unchanged.",
+    }));
   }
 }
 

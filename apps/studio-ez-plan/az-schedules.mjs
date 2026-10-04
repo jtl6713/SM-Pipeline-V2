@@ -2,8 +2,9 @@ import {
   addCivilDays,
   chicagoDateTimeParts,
   chicagoWallToUtcMs,
-  industryBestWindows,
+  manualSpreadWindows,
   pickBalancedSuggestedIso,
+  PRIORITY_SCHEDULE_WINDOWS,
 } from "./suggested-schedules.mjs";
 
 export const AZ_HORIZON_DAYS = 7;
@@ -130,15 +131,14 @@ export function scoreMainOnDay(civil, suggested, occupiedMs, now) {
   return { score, slot, preferred, crowding };
 }
 
-export function pickCampaignDay(mains, bestTimesByKey, occupiedMs, now) {
+export function pickCampaignDay(mains, _bestTimesByKey, occupiedMs, now) {
   const days = listHorizonCivils(now);
+  const spread = manualSpreadWindows();
   let best = null;
   for (const civil of days) {
     const parts = [];
     for (const item of mains) {
-      const key = scheduleKey(item.platform, item.output_type);
-      const suggested = bestTimesByKey[key] || industryBestWindows(item.platform, item.output_type);
-      parts.push(scoreMainOnDay(civil, suggested, occupiedMs, now));
+      parts.push(scoreMainOnDay(civil, spread, occupiedMs, now));
     }
     if (!parts.length) continue;
     const worst = Math.min(...parts.map((part) => part.score));
@@ -152,14 +152,14 @@ export function pickCampaignDay(mains, bestTimesByKey, occupiedMs, now) {
   return best;
 }
 
-function assignMainTimes(mains, civil, bestTimesByKey, occupiedMs, now) {
+function assignMainTimes(mains, civil, _bestTimesByKey, occupiedMs, now) {
   const stamps = new Map();
   const reserved = [...(occupiedMs || [])];
+  const spread = manualSpreadWindows();
   for (const item of mains) {
     const key = scheduleKey(item.platform, item.output_type);
-    const suggested = bestTimesByKey[key] || industryBestWindows(item.platform, item.output_type);
-    const scored = scoreMainOnDay(civil, suggested, reserved, now);
-    const slot = scored.slot || windowCandidatesForDay(civil, suggested.windows || ["12:00-13:00"], now, reserved)[0];
+    const scored = scoreMainOnDay(civil, spread, reserved, now);
+    const slot = scored.slot || windowCandidatesForDay(civil, PRIORITY_SCHEDULE_WINDOWS, now, reserved)[0];
     if (!slot) continue;
     stamps.set(key, slot.iso);
     reserved.push(slot.ms);
@@ -167,7 +167,10 @@ function assignMainTimes(mains, civil, bestTimesByKey, occupiedMs, now) {
   return stamps;
 }
 
-export function buildAzCampaignSchedule(items, { occupiedMs = [], bestTimesByKey = {}, now = new Date() } = {}) {
+export function buildAzCampaignSchedule(items, { occupiedMs = [], now = new Date() } = {}) {
+  // Industry / learned / similar best-times are intentionally ignored.
+  // Placement is the manual morning → afternoon → evening spread while we learn
+  // from first-party outcomes for possible later use.
   const list = Array.isArray(items) ? items : [];
   const ordered = [
     ...list.filter((item) => !isStoryType(item.output_type)),
@@ -181,9 +184,7 @@ export function buildAzCampaignSchedule(items, { occupiedMs = [], bestTimesByKey
     const outputType = String(item.output_type || "").trim();
     if (!platform || !outputType) continue;
     const key = scheduleKey(platform, outputType);
-    const suggested = bestTimesByKey[key] || industryBestWindows(platform, outputType);
-    const iso = pickBalancedSuggestedIso(suggested.windows || ["12:00-13:00"], now, {
-      days: suggested.days || [],
+    const iso = pickBalancedSuggestedIso(PRIORITY_SCHEDULE_WINDOWS, now, {
       occupiedMs: reservedAll,
       platformOccupiedMs: reservedByPlatform[platform] || [],
     });
@@ -199,7 +200,7 @@ export function buildAzCampaignSchedule(items, { occupiedMs = [], bestTimesByKey
     stamps,
     campaign: scheduledDays.length ? { key: scheduledDays[0] } : null,
     rationale: scheduledDays.length
-      ? `spread across ${scheduledDays.length} day${scheduledDays.length === 1 ? "" : "s"} in the next ${AZ_HORIZON_DAYS} days`
-      : "no open schedule in the next 7 days",
+      ? `manual morning/afternoon/evening spread across ${scheduledDays.length} day${scheduledDays.length === 1 ? "" : "s"}`
+      : "no open schedule in the manual 14-day horizon",
   };
 }

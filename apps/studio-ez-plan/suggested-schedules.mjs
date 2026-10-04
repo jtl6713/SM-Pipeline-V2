@@ -18,18 +18,25 @@ export const DEFAULT_SCHEDULE_TIME_ZONE = "America/Chicago";
 /** Heatmap overnight buckets must never become schedule targets. */
 const OVERNIGHT_HEATMAP_WINDOWS = new Set(["00:00-06:00", "22:00-00:00"]);
 
-export function industryBestWindows(platform, outputType) {
-  const p = String(platform || "").toLowerCase();
-  const t = String(outputType || "").toLowerCase();
-  if (p.includes("tiktok")) return { days: ["Mon", "Tue", "Wed", "Thu", "Fri"], windows: ["19:00-21:00"], label: "TikTok weekday evenings" };
-  if (p.includes("youtube") && (t.includes("standard") || t.includes("long"))) return { days: ["Mon", "Tue", "Wed", "Thu", "Fri"], windows: ["10:00-16:00"], label: "YouTube standard weekday daytime" };
-  if (p.includes("youtube")) return { days: ["Wed", "Thu", "Fri", "Sat"], windows: ["14:00-16:00", "20:00-22:00"], label: "YouTube Short afternoon/evening" };
-  if (t.includes("story")) return { days: ["Mon", "Tue", "Wed", "Thu", "Fri"], windows: ["16:00-18:00", "19:00-21:00"], label: "Stories late afternoon/evening" };
-  if (t.includes("carousel") || t.includes("single") || t.includes("feed") || t.includes("multi-image") || t.includes("photo")) {
-    return { days: ["Wed", "Thu"], windows: ["12:00-14:00", "18:00-20:00"], label: "Feed/carousel midday or evening" };
-  }
-  if (p.includes("facebook")) return { days: ["Tue", "Wed", "Thu"], windows: ["12:00-13:00", "18:00-20:00"], label: "Facebook Reel lunch/evening" };
-  return { days: ["Tue", "Wed", "Thu"], windows: ["11:00-13:00", "18:00-21:00"], label: "Reel midday or evening" };
+/**
+ * @deprecated Placement no longer uses industry analytics windows.
+ * Kept as a safe stub so leftover callers still get the manual MAE spread.
+ * First-party learning is collected separately and is not applied to scheduling yet.
+ */
+export function industryBestWindows(_platform, _outputType) {
+  return {
+    days: [],
+    windows: [...PRIORITY_SCHEDULE_WINDOWS],
+    label: "Manual morning / afternoon / evening spread",
+  };
+}
+
+export function manualSpreadWindows() {
+  return {
+    days: [],
+    windows: [...PRIORITY_SCHEDULE_WINDOWS],
+    label: "Manual morning / afternoon / evening spread",
+  };
 }
 
 export function normalizeTimeZone(value) {
