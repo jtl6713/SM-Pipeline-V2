@@ -73,3 +73,15 @@ test("publish status labels follow schedule state", () => {
   assert.match(app, /Scheduled/);
   assert.match(app, /Ready to Publish/);
 });
+
+
+test("platform calendar week, slot keys, and slot dates use profile timezone", () => {
+  const zone = "America/Los_Angeles";
+  const now = new Date("2026-10-04T06:00:00Z"); // 11 PM on Oct 3 in Los Angeles
+  const week = calendar.defaultWeek(now, zone);
+  assert.equal(week.start.toISOString(), "2026-10-03T07:00:00.000Z");
+  assert.equal(calendar.localDayKey(week.days[0], zone), "2026-10-03");
+  const fourAm = calendar.slotDate(week.days[0], 8, zone);
+  assert.equal(fourAm.toISOString(), "2026-10-03T11:00:00.000Z");
+  assert.equal(calendar.slotKey(fourAm, zone), "2026-10-03-04-00");
+});
