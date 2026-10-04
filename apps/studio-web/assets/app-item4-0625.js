@@ -17901,9 +17901,17 @@
         const spacing = helper.spacingWarning(slot, schedulableCalendarRecords, platformCalendarPlatform, platformCalendarOutputId);
         const isPast = slot.getTime() <= Date.now();
         const eventHtml = events.map((item) => {
-          const label = platformCalendarEventLabel(item);
+          const fullItem = (pipelineOutputs || []).find((row) => row?.id === item?.id) || item;
+          const isPublished = creativeIsPublished(fullItem);
+          const baseLabel = platformCalendarEventLabel(item);
+          const label = isPublished ? `${baseLabel} · Published` : baseLabel;
           const own = item.id === platformCalendarOutputId;
-          return `<span class="platform-calendar-event${own ? " is-target" : ""}" title="${escapeHtml(label)}">${escapeHtml(label)}</span>`;
+          const classes = [
+            "platform-calendar-event",
+            own ? "is-target" : "",
+            isPublished ? "is-published" : "",
+          ].filter(Boolean).join(" ");
+          return `<span class="${classes}" title="${escapeHtml(label)}">${isPublished ? '<span class="platform-calendar-published-mark">✓ Published</span>' : ""}${escapeHtml(baseLabel)}</span>`;
         }).join("");
         const classes = [
           "platform-calendar-slot-button",
