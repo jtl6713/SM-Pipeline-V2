@@ -450,3 +450,4 @@ Reason: Load the corrected Studio 0.6.473 bundle so profile selection and homepa
 UI: 0.6.473-profile-timezone-authority
 Requested: 2026-10-04
 studio-startup-timezone-tdz-fix-20261004
+studio-startup-timezone-0.6.474-20261004
