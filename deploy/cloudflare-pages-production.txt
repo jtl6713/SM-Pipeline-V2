@@ -3,6 +3,7 @@ Deploy profile schedule regeneration fix PR #501 / fd0788a. Trigger Studio Pages
 Deploy UI 0.6.476 profile schedule pass/cache-bust fix. Strict profile-wide regeneration.
 Deploy UI 0.6.477 platform-independent profile scheduling.
 Deploy UI 0.6.478 hide published stale schedules from calendars.
-Deploy UI 0.6.480 4-second minimum voiceover. P2 pads trailing silence; Studio inputs min=4.
+Deploy UI 0.6.479 published calendar status styling.
+Deploy UI 0.6.480 show future YouTube published uploads on calendars.
 Deploy UI 0.6.481 schedule MAE rotation; ez-plan cache bust with Worker 0.10.440.
 Deploy UI 0.6.482 manual MAE spread only; learning is display/collect only.

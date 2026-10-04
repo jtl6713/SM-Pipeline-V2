@@ -1841,6 +1841,36 @@
     );
   }
 
+  function pipelineCalendarProjectedRecord(record) {
+    if (!record) return record;
+    const platform = String(record?.platform || "").trim().toLowerCase();
+    if (
+      platform === "youtube"
+      && creativeIsPublished(record)
+      && pipelineRecordIsScheduled(record)
+    ) {
+      const scheduled = studioEffectiveScheduleIso(record);
+      if (scheduled) {
+        // YouTube may already be uploaded/published into YouTube while its public
+        // release is still in the future. The home-page count already treats that
+        // as scheduled; project the same authoritative YouTube publish time into
+        // calendar rows without rewriting Airtable Scheduled_Post_Date.
+        return { ...record, scheduled_post_date: scheduled, calendar_published: true };
+      }
+    }
+    return record;
+  }
+
+  function mergeCalendarYouTubePublishedRows(records = []) {
+    const merged = new Map((records || []).map((row) => [row?.id, row]).filter(([id]) => id));
+    for (const source of pipelineOutputs || []) {
+      const projected = pipelineCalendarProjectedRecord(source);
+      if (!projected?.id || !projected?.calendar_published) continue;
+      merged.set(projected.id, { ...(merged.get(projected.id) || {}), ...projected });
+    }
+    return [...merged.values()];
+  }
+
   function scheduledContentByPlatform(outputs = []) {
     const counts = new Map();
     for (const record of outputs || []) {
@@ -17320,7 +17350,7 @@
     try {
       const result = await api(pipelineScheduleGridApiPath(), { timeoutMs: 15000, retries: 1 });
       if (generation !== pipelineScheduleGridLoadGeneration) return;
-      pipelineScheduleGridRecords = result?.records || [];
+      pipelineScheduleGridRecords = mergeCalendarYouTubePublishedRows(result?.records || []);
       renderPipelineScheduleGrid(pipelineScheduleGridRecords, String(result?.schedule_error || ""));
       const selected = (pipelineOutputs || []).find((row) => row.id === pipelineScheduleSelectedOutputId);
       if (selected) {
@@ -17332,15 +17362,16 @@
       }
     } catch (error) {
       if (generation !== pipelineScheduleGridLoadGeneration) return;
-      const fallback = (pipelineOutputs || []).filter((row) => {
-        const iso = String(row?.scheduled_post_date || "").trim();
-        if (!iso || row?.do_not_publish) return false;
+      const fallback = mergeCalendarYouTubePublishedRows((pipelineOutputs || []).filter((row) => {
+        const effective = studioEffectiveScheduleIso(row);
+        if (!effective || row?.do_not_publish) return false;
         if (creativeIsPublished(row)) {
-          const ms = Date.parse(iso);
+          if (pipelineRecordIsScheduled(row)) return true;
+          const ms = Date.parse(effective);
           return !Number.isFinite(ms) || ms <= Date.now();
         }
         return true;
-      });
+      }));
       pipelineScheduleGridRecords = fallback;
       renderPipelineScheduleGrid(fallback, error?.message || "Schedule view unavailable");
       setPipelineScheduleGridMessage(error?.message || "Could not load that 7-day window.", true);
@@ -17661,12 +17692,16 @@
   function pipelineScheduleRecordVisible(record) {
     const fullRecord = (pipelineOutputs || []).find((row) => row?.id === record?.id) || record;
     if (fullRecord?.do_not_publish) return false;
-    // Published rows may remain visible as calendar history, but never show a
-    // stale FUTURE schedule after publication.
+    // Published YouTube uploads with a future YouTube_Scheduled_Publish_At are
+    // intentionally visible: YouTube already has the asset, but the public release
+    // is still upcoming. Other published rows only remain as past calendar history.
     if (creativeIsPublished(fullRecord)) {
-      const iso = String(fullRecord?.scheduled_post_date || record?.scheduled_post_date || "").trim();
-      const ms = Date.parse(iso);
-      if (Number.isFinite(ms) && ms > Date.now()) return false;
+      const platform = pipelineSchedulePlatformKey(fullRecord);
+      if (!(platform === "youtube" && pipelineRecordIsScheduled(fullRecord))) {
+        const iso = String(fullRecord?.scheduled_post_date || record?.scheduled_post_date || "").trim();
+        const ms = Date.parse(iso);
+        if (Number.isFinite(ms) && ms > Date.now()) return false;
+      }
     }
     const key = pipelineSchedulePlatformKey(fullRecord);
     return !PIPELINE_SCHEDULE_PLATFORM_KEYS.includes(key) || pipelineScheduleVisiblePlatforms.has(key);
@@ -17866,6 +17901,8 @@
       const fullRecord = (pipelineOutputs || []).find((row) => row?.id === item?.id) || item;
       if (fullRecord?.do_not_publish) return false;
       if (creativeIsPublished(fullRecord)) {
+        const platform = pipelineSchedulePlatformKey(fullRecord);
+        if (platform === "youtube" && pipelineRecordIsScheduled(fullRecord)) return true;
         const iso = String(fullRecord?.scheduled_post_date || item?.scheduled_post_date || "").trim();
         const ms = Date.parse(iso);
         return !Number.isFinite(ms) || ms <= Date.now();
@@ -17949,7 +17986,7 @@
       const params = new URLSearchParams({ start: start.toISOString(), end: end.toISOString() });
       const result = await api(`/api/outputs/schedule-grid?${params.toString()}`);
       if (token !== platformCalendarLoadToken || !platformCalendarOutputId) return;
-      platformCalendarRecords = result?.records || [];
+      platformCalendarRecords = mergeCalendarYouTubePublishedRows(result?.records || []);
       renderPlatformScheduleCalendar({ scrollToHour: 0 });
       updatePlatformCalendarSelection();
     } catch (error) {
