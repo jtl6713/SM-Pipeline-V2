@@ -254,7 +254,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.469-calendar-window-labels";
+  const BUILD_ID = "item4-0.6.470-profile-timezone-calendar";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -1596,11 +1596,24 @@
     return escapeHtml(formatStudioDateTime(raw));
   }
 
-  function formatDateTimeLocalInput(raw) {
+  function formatDateTimeLocalInput(raw, timeZone = workingStudioTimeZone()) {
     const date = parseStudioDate(raw);
     if (!date) return "";
-    const pad = (n) => String(n).padStart(2, "0");
-    return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+    try {
+      const parts = new Intl.DateTimeFormat("en-US", {
+        timeZone,
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit",
+        hourCycle: "h23",
+      }).formatToParts(date);
+      const get = (type) => parts.find((part) => part.type === type)?.value || "";
+      return `${get("year")}-${get("month")}-${get("day")}T${get("hour")}:${get("minute")}`;
+    } catch {
+      return "";
+    }
   }
 
   /** Operator-locked Studio_Scheduled_At wins over occupancy-bumped Scheduled_Post_Date. */
@@ -17189,12 +17202,13 @@
   }
 
   function pipelineScheduleDayHeader(date) {
-    const helper = globalThis.PipelineScheduleGrid;
-    const isToday = helper?.dayKey
-      ? helper.dayKey(date) === helper.dayKey(new Date())
-      : false;
-    const weekday = isToday ? "Today" : date.toLocaleDateString(undefined, { weekday: "short" });
-    const day = date.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+    const timeZone = workingStudioTimeZone();
+    const dateKey = new Intl.DateTimeFormat("en-CA", { timeZone, year: "numeric", month: "2-digit", day: "2-digit" }).format(date);
+    const todayKey = new Intl.DateTimeFormat("en-CA", { timeZone, year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
+    const weekday = dateKey === todayKey
+      ? "Today"
+      : date.toLocaleDateString(undefined, { timeZone, weekday: "short" });
+    const day = date.toLocaleDateString(undefined, { timeZone, month: "short", day: "numeric" });
     return `<span class="pipeline-schedule-day-label">${escapeHtml(weekday)}</span><span class="pipeline-schedule-day-date">${escapeHtml(day)}</span>`;
   }
 
@@ -17471,7 +17485,7 @@
     const cells = helper.aggregate(visibleRecords, windowValue);
     const total = [...cells.values()].reduce((sum, cell) => sum + Number(cell?.total || 0), 0);
     const unscheduled = pipelineUnscheduledScheduleRecords().filter(pipelineScheduleRecordVisible);
-    const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || "local time";
+    const timezone = workingStudioTimeZone();
     const rangeLabel = pipelineScheduleWindowLabel(windowValue);
     if (summary) {
       summary.textContent = error
