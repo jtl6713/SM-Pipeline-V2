@@ -462,7 +462,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.437-timed-script-vo-driven",
+          version: "0.10.438-manual-media-authority",
           studio_desk_inventory_v1: true,
           studio_desk_activity_v1: true,
           studio_tiktok_complete_v1: true,
@@ -5610,7 +5610,7 @@ async function item4ReconcileMasterAuthority(env, recordId, record = null) {
   // Drive preservation runs in the background; without this guard, a stale
   // reconcile that started before DELETE can write a removed image back into
   // Production moments after the operator deletes it.
-  const latestRecord = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, recordId).catch(() => currentRecord);
+  const latestRecord = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, recordId);
   const latestAssets = item4AssetManifest(latestRecord)
     .slice()
     .sort((a, b) => Number(a.order || 0) - Number(b.order || 0));
@@ -5635,7 +5635,10 @@ async function item4ReconcileMasterAuthority(env, recordId, record = null) {
       : reconciledReadyCount === reconciledAssets.length
         ? "Ready"
         : "Uploading";
-  currentRecord = await item4UpdateRequestState(env, recordId, {
+  currentRecord = latestRecord;
+  if (JSON.stringify(reconciledAssets) !== JSON.stringify(latestAssets)
+    || String(f(latestRecord, "Studio_Master_Asset_Status") || "") !== status) {
+    currentRecord = await item4UpdateRequestState(env, recordId, {
     Studio_Master_Assets_JSON: JSON.stringify(reconciledAssets),
     Studio_Master_Asset_Count: reconciledAssets.length,
     Studio_Master_Asset_Status: status,
@@ -5646,6 +5649,7 @@ async function item4ReconcileMasterAuthority(env, recordId, record = null) {
         ? "Assets Ready"
         : "Draft",
   });
+  }
   return {
     record: currentRecord,
     assets: reconciledAssets,
@@ -6223,8 +6227,11 @@ async function reorderItem4MasterAssets(request, env, url, authorization) {
   let payload = {};
   try { payload = await request.json(); } catch { throw new HttpError(400, "Request body must be valid JSON"); }
   const recordId = item4RequestIdFromPath(url);
-  const record = await loadAuthorizedProductionRequest(env, recordId, authorization);
+  let record = await loadAuthorizedProductionRequest(env, recordId, authorization);
   assertEditableProductionRequest(record);
+  record = await item4UpdateRequestState(env, recordId, {
+    Production_Notes: withProductionPhotoWaitManual(f(record, "Production_Notes")),
+  });
   const assets = item4AssetManifest(record).slice().sort((a, b) => Number(a.order || 0) - Number(b.order || 0));
   const requested = Array.isArray(payload?.asset_ids)
     ? payload.asset_ids.map((id) => String(id || "").trim()).filter(Boolean)
@@ -6955,8 +6962,11 @@ async function ensureChicagoWatermarkedLibraryAsset(env, media, requestRecord) {
 
 async function attachItem4LibraryAssets(request, env, url, authorization) {
   const recordId = item4RequestIdFromPath(url);
-  const record = await loadAuthorizedProductionRequest(env, recordId, authorization);
+  let record = await loadAuthorizedProductionRequest(env, recordId, authorization);
   assertEditableProductionRequest(record);
+  record = await item4UpdateRequestState(env, recordId, {
+    Production_Notes: withProductionPhotoWaitManual(f(record, "Production_Notes")),
+  });
   let payload;
   try { payload = await request.json(); } catch { throw new HttpError(400, "Request body must be valid JSON"); }
   const ids = [...new Set((Array.isArray(payload?.media_asset_ids) ? payload.media_asset_ids : [])
@@ -20882,6 +20892,14 @@ async function ideaPhotoListeningSessionRoute(request, env, url, authorization) 
   if (!["pause", "resume", "stop"].includes(action)) throw new HttpError(400, "action must be pause, resume, or stop");
   const recordId = ideaRecordIdFromPath(url);
   let idea = await loadAuthorizedIdea(env, recordId, authorization);
+  if (action === "stop") {
+    const draft = await existingDraftForIdea(env, recordId, authorization);
+    if (draft && !productionPhotoWaitAutoOff(f(draft, "Production_Notes"))) {
+      await item4UpdateRequestState(env, draft.id, {
+        Production_Notes: withProductionPhotoWaitManual(f(draft, "Production_Notes")),
+      });
+    }
+  }
   const waitStatus = String(f(idea, "Studio_Photo_Wait_Status") || "").trim();
   const notes = String(f(idea, "Production_Config_Notes") || "");
   if (promotionCompleted(idea) || waitStatus === "Not Needed") {
@@ -21348,7 +21366,7 @@ async function unfinishedIntakeBatchIds(env, batchIds) {
   return pending;
 }
 
-async function applyLibraryAssetsToProductionRequest(env, requestRecord, mediaIds, { replaceWaitAssets = false } = {}) {
+async function applyLibraryAssetsToProductionRequest(env, requestRecord, mediaIds, { replaceWaitAssets = false, allowManagePaused = false } = {}) {
   const existingAll = item4AssetManifest(requestRecord);
   const existing = replaceWaitAssets
     ? existingAll.filter((asset) => String(asset?.source || "") !== "idea_photo_wait")
@@ -21388,6 +21406,16 @@ async function applyLibraryAssetsToProductionRequest(env, requestRecord, mediaId
       source: "idea_photo_wait",
     });
     already.add(media.id);
+  }
+  // Slow matching/watermark work must not commit over an operator edit.
+  const latest = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, requestRecord.id);
+  const ideaId = firstLinkedRecordId(f(latest, "Idea_Candidate"));
+  const latestIdea = ideaId ? await airtableFetch(env, env.AIRTABLE_IDEA_TABLE_ID, ideaId) : null;
+  if (productionPhotoWaitAutoOff(f(latest, "Production_Notes"))
+    || JSON.stringify(item4AssetManifest(latest)) !== JSON.stringify(existingAll)
+    || (latestIdea && (String(f(latestIdea, "Studio_Photo_Wait_Status") || "").trim() === "Not Needed"
+      || (!allowManagePaused && ideaManagePhotoPauseActive(f(latestIdea, "Production_Config_Notes")))))) {
+    return { record: latest, assets: item4AssetManifest(latest), appended: 0, skipped: true };
   }
   const assets = [...existing, ...appended];
   const allReady = assets.length > 0 && assets.every((asset) =>
@@ -21503,8 +21531,9 @@ async function evaluateAndMaybeAttachWaitingIdeaPhotos(env, idea, { authorizatio
         env,
         requestRecord,
         attachIds,
-        { replaceWaitAssets: !autoOff }
+        { replaceWaitAssets: !autoOff, allowManagePaused: force }
       );
+      if (attached.skipped) return { action: "manual", idea, production_request: attached.record, skipped: true };
       requestRecord = attached.record;
     }
     const ideaReady = await airtableFetch(env, env.AIRTABLE_IDEA_TABLE_ID, idea.id, {

@@ -58,6 +58,9 @@
   let productionRequestOutputs = [];
   let productionOutputMatrixLoaded = false;
   let item4Workspace = null;
+  let item4WorkspaceRequestId = null;
+  let item4WorkspaceRevision = 0;
+  let item4WorkspaceLoadSequence = 0;
   let item4BridgePreflight = null;
   let primaryLocationUserEdited = false;
 
@@ -254,7 +257,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.474-studio-startup-timezone";
+  const BUILD_ID = "item4-0.6.475-manual-media-authority";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -4605,6 +4608,7 @@
           retries: 0,
         });
         first = false;
+        if (activeProductionRequest?.id !== requestId || item4AiGenerationCancelled.has(requestId)) break;
         if (result?.production_request) activeProductionRequest = result.production_request;
         if (Array.isArray(result?.assets)) {
           item4Workspace = {
@@ -4630,7 +4634,7 @@
         }
         if (result?.completed) break;
       }
-      await loadItem4Workspace(activeProductionRequest);
+      await loadItem4Workspace(activeProductionRequest, { allowAssetChanges: !item4AiGenerationCancelled.has(requestId) });
     } catch (error) {
       if (automatic) item4AiAutoStarted.delete(requestId);
       setRequestMessage(error.message || "AI image generation failed.", "error-text");
@@ -8035,6 +8039,7 @@
     next.splice(boundedTarget, 0, moved);
     const ordered = next.map((asset, orderIndex) => ({ ...asset, order: orderIndex + 1 }));
     const previous = item4Workspace;
+    item4WorkspaceRevision += 1;
     item4ReorderBusy = true;
     item4Workspace = { ...(item4Workspace || {}), assets: ordered, assets_status: "Ready" };
     item4AssetStripSignature = "";
@@ -9454,10 +9459,27 @@
     }
   }
 
-  async function loadItem4Workspace(record = activeProductionRequest) {
+  async function loadItem4Workspace(record = activeProductionRequest, { allowAssetChanges = false } = {}) {
     if (!record?.id) return;
+    const revision = item4WorkspaceRevision;
+    const sequence = ++item4WorkspaceLoadSequence;
     try {
-      const status = mergeItem4WorkspaceStatus(await api(`/api/production-requests/${encodeURIComponent(record.id)}/item4`));
+      if (item4WorkspaceRequestId !== record.id) {
+        await stopIdeaPhotoListeningAfterProductionOpen(ideaIdFromRequest(record));
+      }
+      const incoming = await api(`/api/production-requests/${encodeURIComponent(record.id)}/item4`);
+      if (activeProductionRequest?.id !== record.id || revision !== item4WorkspaceRevision
+        || sequence !== item4WorkspaceLoadSequence || item4PendingRemoves.size || item4ReorderBusy) return;
+      const preserveAssets = item4WorkspaceRequestId === record.id && item4Workspace && !allowAssetChanges;
+      const status = mergeItem4WorkspaceStatus(incoming);
+      if (preserveAssets) {
+        // Status polling may enrich existing media, never change membership or order.
+        const byId = new Map((status.assets || []).map(asset => [String(asset.id), asset]));
+        status.assets = (item4Workspace.assets || []).map(asset => ({
+          ...asset, ...(byId.get(String(asset.id)) || {}), order: asset.order,
+        }));
+      }
+      item4WorkspaceRequestId = record.id;
       item4BridgePreflight = null;
       renderItem4Workspace(status);
       syncPrMediaKindUi();
@@ -9477,9 +9499,11 @@
         if (status?.variant_status !== "Ready") return;
         try {
           const variantStatus = await api(`/api/production-requests/${encodeURIComponent(record.id)}/variants`);
-          if (!variantStatus?.manifest) return;
+          if (!variantStatus?.manifest || activeProductionRequest?.id !== record.id
+            || revision !== item4WorkspaceRevision || sequence !== item4WorkspaceLoadSequence
+            || item4PendingRemoves.size || item4ReorderBusy) return;
           const enriched = {
-            ...status,
+            ...item4Workspace,
             variant_status: variantStatus.status || status.variant_status,
             variant_updated_at: variantStatus.updated_at || status.variant_updated_at,
             variant_error: variantStatus.error || null,
@@ -9510,7 +9534,7 @@
       if (!item4WorkspaceRetryTimer) {
         item4WorkspaceRetryTimer = window.setTimeout(() => {
           item4WorkspaceRetryTimer = 0;
-          if (activeProductionRequest?.id === record.id) loadItem4Workspace(record).catch(() => {});
+          if (activeProductionRequest?.id === record.id) loadItem4Workspace(record, { allowAssetChanges }).catch(() => {});
         }, 2000);
       }
     }
@@ -10122,7 +10146,7 @@
           if (Array.isArray(result?.assets)) {
             item4ApplyAssetsLocally(result.assets);
           } else {
-            await loadItem4Workspace(activeProductionRequest);
+            await loadItem4Workspace(activeProductionRequest, { allowAssetChanges: true });
           }
           ezStagedFiles = files.slice(index + 1);
           updateItem4MasterProgress(item4Workspace || {});
@@ -10299,6 +10323,7 @@
     const removed = previousAssets.find((row) => String(row?.id || "") === id);
     if (!removed) return;
 
+    item4WorkspaceRevision += 1;
     item4PendingRemoves.add(id);
     const nextAssets = previousAssets
       .filter((row) => String(row?.id || "") !== id)
@@ -10332,10 +10357,6 @@
         );
         if (result.production_request && activeProductionRequest?.id === requestId) {
           activeProductionRequest = result.production_request;
-        }
-        if (item4PendingRemoves.size <= 1 && Array.isArray(result.assets) && activeProductionRequest?.id === requestId) {
-          item4ApplyAssetsLocally(result.assets, { planNeedsRebuild: true });
-          item4RefreshAssetCountsAfterLocalRemove();
         }
       } catch (error) {
         if (activeProductionRequest?.id !== requestId) return;
@@ -11311,13 +11332,11 @@
 
   function stopIdeaPhotoListeningAfterProductionOpen(ideaId) {
     if (!ideaId) return;
-    api(`/api/ideas/${encodeURIComponent(ideaId)}/photo-listening-session`, {
+    return api(`/api/ideas/${encodeURIComponent(ideaId)}/photo-listening-session`, {
       method: "POST",
       body: JSON.stringify({ action: "stop" }),
       timeoutMs: 12000,
       retries: 0,
-    }).catch((error) => {
-      console.warn("permanent photo-listener stop deferred after Production opened", error);
     });
   }
 
@@ -11376,7 +11395,7 @@
 
       // Once the workspace is visible, stop automatic matching permanently in a
       // separate small request. A failure here must never close/block Production.
-      stopIdeaPhotoListeningAfterProductionOpen(idea.id);
+      // loadItem4Workspace locks photo listening for every Production entry path.
 
       const hydration = await Promise.allSettled([
         loadProductionRequestOutputs(result.record),
@@ -11659,7 +11678,7 @@
     ideaLibrarySelected = seedLibrarySelection(
       ideaLibrarySelected,
       suggested,
-      ideaLibraryIdsFromIdea(activeIdea),
+      ideaLibrarySeeded ? [] : ideaLibraryIdsFromIdea(activeIdea),
       libraryPickerMaxCount(),
       !ideaLibrarySeeded
     );
@@ -11812,7 +11831,11 @@
     bindLibraryPickerPreviews(grid, item4LibraryItems);
   }
 
+  let item4LibraryLoadSequence = 0;
+
   async function loadItem4LibraryStills(query = "") {
+    const sequence = ++item4LibraryLoadSequence;
+    const requestId = activeProductionRequest?.id;
     const grid = $("item4LibraryGrid");
     const hint = $("item4LibraryPickerHint");
     if (grid) grid.innerHTML = `<p class="idea-library-picker-hint">Loading suggested stills and the Drive library…</p>`;
@@ -11834,6 +11857,7 @@
         return [];
       }),
     ]);
+    if (sequence !== item4LibraryLoadSequence || activeProductionRequest?.id !== requestId) return;
     const suggested = ideaPack.suggested || [];
     const matches = ideaPack.matches || [];
     item4LibrarySuggestedIds = new Set([
@@ -11844,13 +11868,7 @@
     // Once an idea is in Production, the attached asset set is authoritative.
     // Suggestions may still be displayed, but they must never become checked
     // automatically. Only the operator can add another asset in Production.
-    item4LibrarySelected = seedLibrarySelection(
-      item4LibrarySelected,
-      suggested,
-      [...item4AttachedMediaIds()],
-      libraryPickerMaxCount(),
-      false
-    );
+    // Keep the current checked/unchecked choices across searches.
     item4LibrarySeeded = true;
     renderItem4LibraryPicker();
     if (!item4LibraryItems.length) {
@@ -11919,6 +11937,8 @@
   });
   $("item4LibraryAddButton")?.addEventListener("click", async () => {
     if (!activeProductionRequest?.id) return;
+    item4WorkspaceRevision += 1;
+    await item4RemoveDrain;
     const { toAdd, toRemove } = item4LibraryDiff();
     if (!toAdd.length && !toRemove.length) return;
     const button = $("item4LibraryAddButton");
@@ -11947,7 +11967,7 @@
           populateProductionRequestForm(result.record);
         }
       }
-      await loadItem4Workspace(activeProductionRequest);
+      await loadItem4Workspace(activeProductionRequest, { allowAssetChanges: true });
       const added = Number(result?.attached || toAdd.length);
       setRequestMessage(
         `Updated library stills: added ${added}, removed ${toRemove.length}.`,
@@ -12090,14 +12110,7 @@
       selectPrMediaKind(button.dataset.prInput);
     });
   });
-  document.addEventListener("visibilitychange", () => {
-    if (document.visibilityState !== "visible" || !activeProductionRequest?.id) return;
-    loadItem4Workspace(activeProductionRequest);
-  });
-  window.addEventListener("focus", () => {
-    if (!activeProductionRequest?.id) return;
-    loadItem4Workspace(activeProductionRequest);
-  });
+  // Returning to the tab must not reload the editor or replace user selections.
   const item4Drop = $("item4UploadZone");
   if (item4Drop) {
     ["dragenter","dragover"].forEach(type => item4Drop.addEventListener(type, event => { event.preventDefault(); item4Drop.classList.add("dragging"); }));
@@ -12183,6 +12196,8 @@
     productionRequestOutputs = [];
     productionOutputMatrixLoaded = false;
     item4Workspace = null;
+    item4WorkspaceRequestId = null;
+    item4WorkspaceRevision += 1;
     item4PlanOverrides = {};
     item4PreparingVariants = false;
     stopItem4VariantPolling();
@@ -21508,3 +21523,4 @@
     startDisplayTextRepair();
   }
 })();
+
