@@ -1,6 +1,22 @@
 export const SUGGESTED_SCHEDULE_GAP_MS = 3 * 60 * 60 * 1000;
-export const SUGGESTED_HORIZON_DAYS = 7;
+export const SUGGESTED_HORIZON_DAYS = 14;
 export const SUGGESTED_LEAD_MS = 10 * 60 * 1000;
+
+/** Strict rolling passes: morning → midday → late afternoon, days 1-7 then 8-14. */
+export const PRIORITY_SCHEDULE_WINDOWS = Object.freeze([
+  "05:30-07:00",
+  "11:30-13:00",
+  "16:30-18:00",
+]);
+export const PRIORITY_WINDOW_OFFSETS_MINUTES = Object.freeze([0, 30, 60, 90]);
+
+/** Local overnight blackout in the active profile timezone (default Chicago). */
+export const SCHEDULE_BLACKOUT_START_MINUTES = 20 * 60; // 8:00 PM
+export const SCHEDULE_BLACKOUT_END_MINUTES = 3 * 60 + 30; // 3:30 AM inclusive
+export const DEFAULT_SCHEDULE_TIME_ZONE = "America/Chicago";
+
+/** Heatmap overnight buckets must never become schedule targets. */
+const OVERNIGHT_HEATMAP_WINDOWS = new Set(["00:00-06:00", "22:00-00:00"]);
 
 export function industryBestWindows(platform, outputType) {
   const p = String(platform || "").toLowerCase();
@@ -16,9 +32,19 @@ export function industryBestWindows(platform, outputType) {
   return { days: ["Tue", "Wed", "Thu"], windows: ["11:00-13:00", "18:00-21:00"], label: "Reel midday or evening" };
 }
 
-export function chicagoDateTimeParts(date = new Date()) {
+export function normalizeTimeZone(value) {
+  const zone = String(value || "").trim() || DEFAULT_SCHEDULE_TIME_ZONE;
+  try {
+    new Intl.DateTimeFormat("en-US", { timeZone: zone }).format(new Date());
+    return zone;
+  } catch {
+    return DEFAULT_SCHEDULE_TIME_ZONE;
+  }
+}
+
+export function chicagoDateTimeParts(date = new Date(), timeZone = DEFAULT_SCHEDULE_TIME_ZONE) {
   const parts = new Intl.DateTimeFormat("en-US", {
-    timeZone: "America/Chicago",
+    timeZone: normalizeTimeZone(timeZone),
     year: "numeric",
     month: "2-digit",
     day: "2-digit",
@@ -36,11 +62,11 @@ export function chicagoDateTimeParts(date = new Date()) {
   };
 }
 
-export function chicagoWallToUtcMs(year, month, day, hour, minute) {
+export function chicagoWallToUtcMs(year, month, day, hour, minute, timeZone = DEFAULT_SCHEDULE_TIME_ZONE) {
   const want = Date.UTC(year, month - 1, day, hour, minute, 0, 0);
   let ms = want;
   const fmt = new Intl.DateTimeFormat("en-US", {
-    timeZone: "America/Chicago",
+    timeZone: normalizeTimeZone(timeZone),
     year: "numeric",
     month: "2-digit",
     day: "2-digit",
@@ -65,9 +91,9 @@ export function addCivilDays(year, month, day, delta) {
   return { year: next.getUTCFullYear(), month: next.getUTCMonth() + 1, day: next.getUTCDate() };
 }
 
-export function chicagoWeekdayShort(date = new Date()) {
+export function chicagoWeekdayShort(date = new Date(), timeZone = DEFAULT_SCHEDULE_TIME_ZONE) {
   return new Intl.DateTimeFormat("en-US", {
-    timeZone: "America/Chicago",
+    timeZone: normalizeTimeZone(timeZone),
     weekday: "short",
   }).format(date);
 }
@@ -82,28 +108,28 @@ export function parseWindowStart(window) {
   return { hour: hh, minute: mm || 0 };
 }
 
-export function listHorizonCivils(now = new Date(), horizonDays = SUGGESTED_HORIZON_DAYS) {
-  const chicago = chicagoDateTimeParts(now);
+export function listHorizonCivils(now = new Date(), horizonDays = SUGGESTED_HORIZON_DAYS, timeZone = DEFAULT_SCHEDULE_TIME_ZONE) {
+  const local = chicagoDateTimeParts(now, timeZone);
   const days = [];
   for (let i = 0; i < horizonDays; i++) {
     const civil = i === 0
-      ? { year: chicago.year, month: chicago.month, day: chicago.day }
-      : addCivilDays(chicago.year, chicago.month, chicago.day, i);
-    const noonMs = chicagoWallToUtcMs(civil.year, civil.month, civil.day, 12, 0);
+      ? { year: local.year, month: local.month, day: local.day }
+      : addCivilDays(local.year, local.month, local.day, i);
+    const noonMs = chicagoWallToUtcMs(civil.year, civil.month, civil.day, 12, 0, timeZone);
     days.push({
       ...civil,
       index: i,
-      weekday: chicagoWeekdayShort(new Date(noonMs)),
+      weekday: chicagoWeekdayShort(new Date(noonMs), timeZone),
       key: civilKey(civil.year, civil.month, civil.day),
     });
   }
   return days;
 }
 
-function occupiedOnDay(occupiedMs, civil) {
+function occupiedOnDay(occupiedMs, civil, timeZone = DEFAULT_SCHEDULE_TIME_ZONE) {
   return (occupiedMs || []).filter((ms) => {
     if (!Number.isFinite(ms)) return false;
-    const parts = chicagoDateTimeParts(new Date(ms));
+    const parts = chicagoDateTimeParts(new Date(ms), timeZone);
     return civilKey(parts.year, parts.month, parts.day) === civil.key;
   });
 }
@@ -112,103 +138,130 @@ export function flattenOccupiedByPlatform(occupiedByPlatform) {
   return Object.values(occupiedByPlatform || {}).flat().filter((ms) => Number.isFinite(ms));
 }
 
-function timeCrowding(ms, occupiedMs, radiusMinutes = 90) {
-  const target = chicagoDateTimeParts(new Date(ms));
-  const targetMinutes = target.hour * 60 + target.minute;
-  let count = 0;
-  for (const other of occupiedMs || []) {
-    if (!Number.isFinite(other)) continue;
-    const parts = chicagoDateTimeParts(new Date(other));
-    const otherMinutes = parts.hour * 60 + parts.minute;
-    const raw = Math.abs(targetMinutes - otherMinutes);
-    const distance = Math.min(raw, 1440 - raw);
-    if (distance <= radiusMinutes) count += 1;
+export function scheduleConflicts(ms, occupiedMs, gapMs = SUGGESTED_SCHEDULE_GAP_MS) {
+  if (!Number.isFinite(ms)) return false;
+  return (occupiedMs || []).some((other) => Number.isFinite(other) && Math.abs(other - ms) < gapMs);
+}
+
+export function isBlackoutLocalTime(ms, timeZone = DEFAULT_SCHEDULE_TIME_ZONE) {
+  if (!Number.isFinite(ms)) return false;
+  const parts = chicagoDateTimeParts(new Date(ms), timeZone);
+  const minutes = parts.hour * 60 + parts.minute;
+  return minutes >= SCHEDULE_BLACKOUT_START_MINUTES || minutes <= SCHEDULE_BLACKOUT_END_MINUTES;
+}
+
+export function advancePastBlackout(ms, timeZone = DEFAULT_SCHEDULE_TIME_ZONE) {
+  if (!Number.isFinite(ms) || !isBlackoutLocalTime(ms, timeZone)) return ms;
+  const parts = chicagoDateTimeParts(new Date(ms), timeZone);
+  let civil = { year: parts.year, month: parts.month, day: parts.day };
+  if (parts.hour >= 20) civil = addCivilDays(civil.year, civil.month, civil.day, 1);
+  return chicagoWallToUtcMs(civil.year, civil.month, civil.day, 4, 0, timeZone);
+}
+
+/** Drop overnight heatmap buckets so analytics never park posts at 11:30 PM / 2:30 AM. */
+export function sanitizeScheduleWindows(windows) {
+  const list = Array.isArray(windows) ? windows.map((item) => String(item || "").trim()).filter(Boolean) : [];
+  const safe = list.filter((window) => {
+    if (OVERNIGHT_HEATMAP_WINDOWS.has(window)) return false;
+    const { hour, minute } = parseWindowStart(window);
+    const startMinutes = hour * 60 + minute;
+    // Reject anything that starts inside the overnight blackout.
+    return !(startMinutes >= SCHEDULE_BLACKOUT_START_MINUTES || startMinutes <= SCHEDULE_BLACKOUT_END_MINUTES);
+  });
+  return safe.length ? safe : [...PRIORITY_SCHEDULE_WINDOWS];
+}
+
+function widestGapFallbackIso(local, nowMs, occupiedMs, platformOccupiedMs, timeZone, gapMs) {
+  const candidates = [];
+  const sortedOccupied = (occupiedMs || []).filter(Number.isFinite).slice().sort((a, b) => a - b);
+  for (let dayOffset = 0; dayOffset < SUGGESTED_HORIZON_DAYS; dayOffset++) {
+    const civil = addCivilDays(local.year, local.month, local.day, dayOffset);
+    for (let minute = 4 * 60; minute < 20 * 60; minute += 30) {
+      const hour = Math.floor(minute / 60);
+      const min = minute % 60;
+      const ms = chicagoWallToUtcMs(civil.year, civil.month, civil.day, hour, min, timeZone);
+      if (ms <= nowMs || isBlackoutLocalTime(ms, timeZone) || scheduleConflicts(ms, platformOccupiedMs, gapMs)) continue;
+      let previous = nowMs;
+      let next = ms + 24 * 60 * 60 * 1000;
+      for (const occupied of sortedOccupied) {
+        if (occupied <= ms && occupied > previous) previous = occupied;
+        if (occupied > ms) {
+          next = occupied;
+          break;
+        }
+      }
+      const clearance = Math.min(ms - previous, next - ms);
+      candidates.push({ ms, clearance });
+    }
   }
-  return count;
+  if (!candidates.length) return "";
+  const widest = Math.max(...candidates.map((item) => item.clearance));
+  const best = candidates.filter((item) => item.clearance === widest);
+  const picked = best[Math.floor(Math.random() * best.length)];
+  return new Date(picked.ms).toISOString();
 }
 
-function scoreAnalyticsSlot({ preferred, windowIndex, crowding, platformCrowding, timeCrowding: sameTimeCrowding, dayIndex }) {
-  let score = 100;
-  score += preferred ? 18 : 0;
-  score += Math.max(0, 12 - windowIndex * 5);
-  score += platformCrowding === 0 ? 14 : 0;
-  score += crowding === 0 ? 8 : 0;
-  score -= Math.min(platformCrowding, 4) * 42;
-  score -= Math.min(crowding, 8) * 12;
-  score -= Math.min(sameTimeCrowding, 6) * 8;
-  score -= dayIndex * 1.5;
-  return score;
-}
-
-export function pickBalancedSuggestedIso(windows, now = new Date(), options = {}) {
-  const daysPref = Array.isArray(options.days) ? options.days.filter(Boolean) : [];
+/**
+ * Strict profile scheduling:
+ * 1-3) days 1-7 morning, midday, late afternoon
+ * 4-6) days 8-14 morning, midday, late afternoon
+ * then widest non-blackout gap inside the same 14-day horizon.
+ *
+ * Industry / analytics `windows` and preferred `days` are ignored for automatic
+ * placement so overnight heatmap buckets cannot recreate 11:30 PM / 2:30 AM clumps.
+ */
+export function pickBalancedSuggestedIso(_windows, now = new Date(), options = {}) {
+  const timeZone = normalizeTimeZone(options.timeZone);
   const occupiedMs = options.occupiedMs || [];
   const platformOccupiedMs = options.platformOccupiedMs || occupiedMs;
   const gapMs = options.gapMs ?? SUGGESTED_SCHEDULE_GAP_MS;
   const leadMs = options.leadMs ?? SUGGESTED_LEAD_MS;
-  const windowList = Array.isArray(windows) && windows.length ? windows : ["12:00-13:00"];
   const nowMs = now.getTime() + leadMs;
-  const horizon = listHorizonCivils(now, options.horizonDays || SUGGESTED_HORIZON_DAYS);
+  const local = chicagoDateTimeParts(now, timeZone);
+  const horizon = listHorizonCivils(now, SUGGESTED_HORIZON_DAYS, timeZone);
 
-  const collect = () => {
-    let best = null;
-    for (const civil of horizon) {
-      const preferred = !daysPref.length || daysPref.includes(civil.weekday);
-      const crowding = occupiedOnDay(occupiedMs, civil).length;
-      const platformCrowding = occupiedOnDay(platformOccupiedMs, civil).length;
-      for (let windowIndex = 0; windowIndex < windowList.length; windowIndex++) {
-        const { hour, minute } = parseWindowStart(windowList[windowIndex]);
-        const ms = chicagoWallToUtcMs(civil.year, civil.month, civil.day, hour, minute);
-        if (ms <= nowMs) continue;
-        if (scheduleConflicts(ms, platformOccupiedMs, gapMs)) continue;
-        const sameTimeCrowding = timeCrowding(ms, occupiedMs);
-        const score = scoreAnalyticsSlot({
-          preferred,
-          windowIndex,
-          crowding,
-          platformCrowding,
-          timeCrowding: sameTimeCrowding,
-          dayIndex: civil.index,
-        });
-        if (!best || score > best.score) best = { score, ms };
+  const dayBands = [[0, 7], [7, 14]];
+  for (const [startDay, endDay] of dayBands) {
+    for (const window of PRIORITY_SCHEDULE_WINDOWS) {
+      const [start] = window.split("-");
+      const [hh, mm] = start.split(":").map((n) => Number(n) || 0);
+      const startMinutes = hh * 60 + mm;
+      const balancedDays = horizon
+        .slice(startDay, endDay)
+        .filter(Boolean)
+        .map((civil) => ({
+          civil,
+          occupiedCount: occupiedOnDay(occupiedMs, civil, timeZone).length,
+        }))
+        .sort((a, b) => a.occupiedCount - b.occupiedCount || a.civil.index - b.civil.index);
+      for (const { civil } of balancedDays) {
+        for (const offsetMinutes of PRIORITY_WINDOW_OFFSETS_MINUTES) {
+          const totalMinutes = startMinutes + offsetMinutes;
+          const candidateHour = Math.floor(totalMinutes / 60);
+          const candidateMinute = totalMinutes % 60;
+          const ms = chicagoWallToUtcMs(civil.year, civil.month, civil.day, candidateHour, candidateMinute, timeZone);
+          if (ms <= nowMs || isBlackoutLocalTime(ms, timeZone) || scheduleConflicts(ms, platformOccupiedMs, gapMs)) continue;
+          return new Date(ms).toISOString();
+        }
       }
     }
-    return best;
-  };
-
-  const balanced = collect();
-  if (balanced) return new Date(balanced.ms).toISOString();
-  return nextOpenScheduleIso(suggestedChicagoIsoFallback(windowList, now, leadMs), platformOccupiedMs, gapMs);
-}
-
-function suggestedChicagoIsoFallback(windows, now, leadMs = SUGGESTED_LEAD_MS) {
-  const first = String(windows?.[0] || "12:00-13:00");
-  const start = first.split("-")[0] || "12:00";
-  const [hh, mm] = start.split(":").map((n) => Number(n) || 0);
-  const chicago = chicagoDateTimeParts(now);
-  let civil = { year: chicago.year, month: chicago.month, day: chicago.day };
-  let ms = chicagoWallToUtcMs(civil.year, civil.month, civil.day, hh, mm || 0);
-  if (ms <= now.getTime() + leadMs) {
-    civil = addCivilDays(civil.year, civil.month, civil.day, 1);
-    ms = chicagoWallToUtcMs(civil.year, civil.month, civil.day, hh, mm || 0);
   }
-  return new Date(ms).toISOString();
+
+  return widestGapFallbackIso(local, nowMs, occupiedMs, platformOccupiedMs, timeZone, gapMs);
 }
 
 export function suggestedChicagoIso(windows, now = new Date(), options = {}) {
   return pickBalancedSuggestedIso(windows, now, options);
 }
 
-export function scheduleConflicts(ms, occupiedMs, gapMs = SUGGESTED_SCHEDULE_GAP_MS) {
-  if (!Number.isFinite(ms)) return false;
-  return (occupiedMs || []).some((other) => Number.isFinite(other) && Math.abs(other - ms) < gapMs);
-}
-
-export function nextOpenScheduleIso(candidateIso, occupiedMs, gapMs = SUGGESTED_SCHEDULE_GAP_MS) {
+export function nextOpenScheduleIso(candidateIso, occupiedMs, gapMs = SUGGESTED_SCHEDULE_GAP_MS, options = {}) {
+  const timeZone = normalizeTimeZone(options.timeZone);
   let ms = Date.parse(candidateIso);
   if (Number.isNaN(ms)) ms = Date.now();
   let guard = 0;
-  while (scheduleConflicts(ms, occupiedMs, gapMs) && guard < 36) {
+  while (guard < 72) {
+    ms = advancePastBlackout(ms, timeZone);
+    if (!scheduleConflicts(ms, occupiedMs, gapMs) && !isBlackoutLocalTime(ms, timeZone)) break;
     ms += gapMs;
     guard += 1;
   }
@@ -239,7 +292,8 @@ export function planScheduleItems(planned) {
   return items;
 }
 
-export function buildSuggestedScheduleMap(items, occupiedByPlatform = {}, now = new Date()) {
+export function buildSuggestedScheduleMap(items, occupiedByPlatform = {}, now = new Date(), options = {}) {
+  const timeZone = normalizeTimeZone(options.timeZone);
   const reserved = {};
   for (const [platform, times] of Object.entries(occupiedByPlatform || {})) {
     reserved[platform] = [...(times || [])];
@@ -258,15 +312,17 @@ export function buildSuggestedScheduleMap(items, occupiedByPlatform = {}, now = 
     const existing = String(item.scheduled_at || "").trim();
     if (existing && !Number.isNaN(Date.parse(existing))) {
       const iso = new Date(existing).toISOString();
-      stamps.set(key, iso);
-      (reserved[platform] ||= []).push(Date.parse(iso));
-      continue;
+      const existingMs = Date.parse(iso);
+      if (!isBlackoutLocalTime(existingMs, timeZone)) {
+        stamps.set(key, iso);
+        (reserved[platform] ||= []).push(existingMs);
+        continue;
+      }
     }
-    const industry = industryBestWindows(platform, outputType);
-    const iso = pickBalancedSuggestedIso(industry.windows, now, {
-      days: industry.days,
+    const iso = pickBalancedSuggestedIso(PRIORITY_SCHEDULE_WINDOWS, now, {
       occupiedMs: flattenOccupiedByPlatform(reserved),
       platformOccupiedMs: reserved[platform] || [],
+      timeZone,
     });
     stamps.set(key, iso);
     (reserved[platform] ||= []).push(Date.parse(iso));

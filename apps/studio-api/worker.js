@@ -464,7 +464,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.439-voiceover-min-4s",
+          version: "0.10.440-schedule-mae-rotation",
           studio_desk_inventory_v1: true,
           studio_desk_activity_v1: true,
           studio_tiktok_complete_v1: true,
@@ -7272,11 +7272,45 @@ function studioScheduleConflicts(ms, occupiedMs, gapMs = STUDIO_SCHEDULE_GAP_MS)
   return (occupiedMs || []).some((other) => Number.isFinite(other) && Math.abs(other - ms) < gapMs);
 }
 
+const STUDIO_SCHEDULE_BLACKOUT_START_MINUTES = 20 * 60; // 8:00 PM Chicago
+const STUDIO_SCHEDULE_BLACKOUT_END_MINUTES = 3 * 60 + 30; // 3:30 AM inclusive
+const STUDIO_PRIORITY_SCHEDULE_WINDOWS = Object.freeze(["05:30-07:00", "11:30-13:00", "16:30-18:00"]);
+const STUDIO_PRIORITY_WINDOW_OFFSETS_MINUTES = Object.freeze([0, 30, 60, 90]);
+const STUDIO_OVERNIGHT_HEATMAP_WINDOWS = new Set(["00:00-06:00", "22:00-00:00"]);
+
+function studioIsBlackoutLocalTime(ms) {
+  if (!Number.isFinite(ms)) return false;
+  const parts = studioChicagoDateTimeParts(new Date(ms));
+  const minutes = parts.hour * 60 + parts.minute;
+  return minutes >= STUDIO_SCHEDULE_BLACKOUT_START_MINUTES || minutes <= STUDIO_SCHEDULE_BLACKOUT_END_MINUTES;
+}
+
+function studioAdvancePastBlackout(ms) {
+  if (!Number.isFinite(ms) || !studioIsBlackoutLocalTime(ms)) return ms;
+  const parts = studioChicagoDateTimeParts(new Date(ms));
+  let civil = { year: parts.year, month: parts.month, day: parts.day };
+  if (parts.hour >= 20) civil = studioAddCivilDays(civil.year, civil.month, civil.day, 1);
+  return studioChicagoWallToUtcMs(civil.year, civil.month, civil.day, 4, 0);
+}
+
+function studioSanitizeScheduleWindows(windows) {
+  const list = Array.isArray(windows) ? windows.map((item) => String(item || "").trim()).filter(Boolean) : [];
+  const safe = list.filter((window) => {
+    if (STUDIO_OVERNIGHT_HEATMAP_WINDOWS.has(window)) return false;
+    const { hour, minute } = studioSuggestParseWindowStart(window);
+    const startMinutes = hour * 60 + minute;
+    return !(startMinutes >= STUDIO_SCHEDULE_BLACKOUT_START_MINUTES || startMinutes <= STUDIO_SCHEDULE_BLACKOUT_END_MINUTES);
+  });
+  return safe.length ? safe : [...STUDIO_PRIORITY_SCHEDULE_WINDOWS];
+}
+
 function studioNextOpenScheduleIso(candidateIso, occupiedMs, gapMs = STUDIO_SCHEDULE_GAP_MS) {
   let ms = studioScheduleMs(candidateIso);
   if (ms == null) ms = Date.now();
   let guard = 0;
-  while (studioScheduleConflicts(ms, occupiedMs, gapMs) && guard < 36) {
+  while (guard < 72) {
+    ms = studioAdvancePastBlackout(ms);
+    if (!studioScheduleConflicts(ms, occupiedMs, gapMs) && !studioIsBlackoutLocalTime(ms)) break;
     ms += gapMs;
     guard += 1;
   }
@@ -9696,10 +9730,10 @@ async function azAutoApproveIfReady(env, requestId, options = {}) {
     let iso = existingIso && !Number.isNaN(Date.parse(existingIso))
       ? new Date(existingIso).toISOString()
       : "";
-    if (!iso) {
-      const industry = studioIndustryBestWindows(platform, f(row, "Studio_Output_Type") || f(row, "Format"));
-      iso = studioSuggestedLocalDatetime(industry.windows || ["12:00-13:00"], new Date(), {
-        days: industry.days,
+    if (!iso || studioIsBlackoutLocalTime(Date.parse(iso))) {
+      // AZ auto-queue uses the same strict 14-day morning → afternoon → evening
+      // rotation as Pipeline regenerate — never industry overnight windows.
+      iso = studioSuggestedLocalDatetime(STUDIO_PRIORITY_SCHEDULE_WINDOWS, new Date(), {
         occupiedMs: reservedAll,
         platformOccupiedMs: occupiedMs,
       });
@@ -17035,7 +17069,7 @@ function studioAddCivilDays(year, month, day, delta) {
   return { year: next.getUTCFullYear(), month: next.getUTCMonth() + 1, day: next.getUTCDate() };
 }
 
-const STUDIO_SUGGEST_HORIZON_DAYS = 7;
+const STUDIO_SUGGEST_HORIZON_DAYS = 14;
 const STUDIO_SUGGEST_LEAD_MS = 10 * 60 * 1000;
 
 function studioSuggestCivilKey(year, month, day) {
@@ -17117,54 +17151,72 @@ function studioScoreAnalyticsSlot({ preferred, windowIndex, crowding, platformCr
   return score;
 }
 
-function studioPickBalancedSuggestedIso(windows, now = new Date(), options = {}) {
-  const daysPref = Array.isArray(options.days) ? options.days.filter(Boolean) : [];
+function studioWidestGapFallbackIso(local, nowMs, occupiedMs, platformOccupiedMs, gapMs) {
+  const candidates = [];
+  const sortedOccupied = (occupiedMs || []).filter(Number.isFinite).slice().sort((a, b) => a - b);
+  for (let dayOffset = 0; dayOffset < STUDIO_SUGGEST_HORIZON_DAYS; dayOffset++) {
+    const civil = studioAddCivilDays(local.year, local.month, local.day, dayOffset);
+    for (let minute = 4 * 60; minute < 20 * 60; minute += 30) {
+      const hour = Math.floor(minute / 60);
+      const min = minute % 60;
+      const ms = studioChicagoWallToUtcMs(civil.year, civil.month, civil.day, hour, min);
+      if (ms <= nowMs || studioIsBlackoutLocalTime(ms) || studioScheduleConflicts(ms, platformOccupiedMs, gapMs)) continue;
+      let previous = nowMs;
+      let next = ms + 24 * 60 * 60 * 1000;
+      for (const occupied of sortedOccupied) {
+        if (occupied <= ms && occupied > previous) previous = occupied;
+        if (occupied > ms) {
+          next = occupied;
+          break;
+        }
+      }
+      candidates.push({ ms, clearance: Math.min(ms - previous, next - ms) });
+    }
+  }
+  if (!candidates.length) return "";
+  const widest = Math.max(...candidates.map((item) => item.clearance));
+  const best = candidates.filter((item) => item.clearance === widest);
+  return new Date(best[Math.floor(Math.random() * best.length)].ms).toISOString();
+}
+
+function studioPickBalancedSuggestedIso(_windows, now = new Date(), options = {}) {
+  // Strict rolling 14-day morning → midday → late-afternoon passes. Industry and
+  // heatmap windows are intentionally ignored so overnight analytics buckets
+  // (22:00-00:00 / 00:00-06:00) cannot recreate 11:30 PM / 2:30 AM clumps.
   const occupiedMs = options.occupiedMs || [];
   const platformOccupiedMs = options.platformOccupiedMs || occupiedMs;
   const gapMs = options.gapMs ?? STUDIO_SCHEDULE_GAP_MS;
   const leadMs = options.leadMs ?? STUDIO_SUGGEST_LEAD_MS;
-  const windowList = Array.isArray(windows) && windows.length ? windows : ["12:00-13:00"];
   const nowMs = now.getTime() + leadMs;
-  const horizon = studioSuggestHorizon(now, options.horizonDays || STUDIO_SUGGEST_HORIZON_DAYS);
-
-  const collect = () => {
-    let best = null;
-    for (const civil of horizon) {
-      const preferred = !daysPref.length || daysPref.includes(civil.weekday);
-      const crowding = studioOccupiedOnCivilDay(occupiedMs, civil).length;
-      const platformCrowding = studioOccupiedOnCivilDay(platformOccupiedMs, civil).length;
-      for (let windowIndex = 0; windowIndex < windowList.length; windowIndex++) {
-        const { hour, minute } = studioSuggestParseWindowStart(windowList[windowIndex]);
-        const ms = studioChicagoWallToUtcMs(civil.year, civil.month, civil.day, hour, minute);
-        if (ms <= nowMs) continue;
-        if (studioScheduleConflicts(ms, platformOccupiedMs, gapMs)) continue;
-        const score = studioScoreAnalyticsSlot({
-          preferred,
-          windowIndex,
-          crowding,
-          platformCrowding,
-          timeCrowding: studioScheduleTimeCrowding(ms, occupiedMs),
-          dayIndex: civil.index,
-        });
-        if (!best || score > best.score) best = { score, ms };
+  const chicago = studioChicagoDateTimeParts(now);
+  const horizon = studioSuggestHorizon(now, STUDIO_SUGGEST_HORIZON_DAYS);
+  const dayBands = [[0, 7], [7, 14]];
+  for (const [startDay, endDay] of dayBands) {
+    for (const window of STUDIO_PRIORITY_SCHEDULE_WINDOWS) {
+      const { hour, minute } = studioSuggestParseWindowStart(window);
+      const startMinutes = hour * 60 + minute;
+      const balancedDays = horizon
+        .slice(startDay, endDay)
+        .filter(Boolean)
+        .map((civil) => ({
+          civil,
+          occupiedCount: studioOccupiedOnCivilDay(occupiedMs, civil).length,
+        }))
+        .sort((a, b) => a.occupiedCount - b.occupiedCount || a.civil.index - b.civil.index);
+      for (const { civil } of balancedDays) {
+        for (const offsetMinutes of STUDIO_PRIORITY_WINDOW_OFFSETS_MINUTES) {
+          const totalMinutes = startMinutes + offsetMinutes;
+          const candidateHour = Math.floor(totalMinutes / 60);
+          const candidateMinute = totalMinutes % 60;
+          const ms = studioChicagoWallToUtcMs(civil.year, civil.month, civil.day, candidateHour, candidateMinute);
+          if (ms <= nowMs || studioIsBlackoutLocalTime(ms) || studioScheduleConflicts(ms, platformOccupiedMs, gapMs)) continue;
+          return new Date(ms).toISOString();
+        }
       }
     }
-    return best;
-  };
-
-  const balanced = collect();
-  if (balanced) return new Date(balanced.ms).toISOString();
-  const first = String(windowList[0] || "12:00-13:00");
-  const start = first.split("-")[0] || "12:00";
-  const [hh, mm] = start.split(":").map((n) => Number(n) || 0);
-  const chicago = studioChicagoDateTimeParts(now);
-  let civil = { year: chicago.year, month: chicago.month, day: chicago.day };
-  let ms = studioChicagoWallToUtcMs(civil.year, civil.month, civil.day, hh, mm || 0);
-  if (ms <= nowMs) {
-    civil = studioAddCivilDays(civil.year, civil.month, civil.day, 1);
-    ms = studioChicagoWallToUtcMs(civil.year, civil.month, civil.day, hh, mm || 0);
   }
-  return studioNextOpenScheduleIso(new Date(ms).toISOString(), platformOccupiedMs, gapMs);
+  return studioWidestGapFallbackIso(chicago, nowMs, occupiedMs, platformOccupiedMs, gapMs)
+    || studioNextOpenScheduleIso(new Date(nowMs).toISOString(), platformOccupiedMs, gapMs);
 }
 
 function studioSuggestedLocalDatetime(windows, now = new Date(), options = {}) {
@@ -17207,13 +17259,15 @@ function studioBuildSuggestedScheduleMap(items, occupiedByPlatform = {}, now = n
     const existing = String(item.scheduled_at || "").trim();
     if (existing && !Number.isNaN(Date.parse(existing))) {
       const iso = new Date(existing).toISOString();
-      stamps.set(key, iso);
-      (reserved[platform] ||= []).push(Date.parse(iso));
-      continue;
+      const existingMs = Date.parse(iso);
+      // Do not reuse automatic stamps that land in the overnight blackout.
+      if (!studioIsBlackoutLocalTime(existingMs)) {
+        stamps.set(key, iso);
+        (reserved[platform] ||= []).push(existingMs);
+        continue;
+      }
     }
-    const industry = studioIndustryBestWindows(platform, outputType);
-    const iso = studioPickBalancedSuggestedIso(industry.windows, now, {
-      days: industry.days,
+    const iso = studioPickBalancedSuggestedIso(STUDIO_PRIORITY_SCHEDULE_WINDOWS, now, {
       occupiedMs: studioFlattenOccupiedByPlatform(reserved),
       platformOccupiedMs: reserved[platform] || [],
     });
@@ -18369,10 +18423,11 @@ function studioBuildSimilarTimesView({ accounts, cache, theme, platform, season,
     own_schedule: providedOwn && typeof providedOwn === "object"
       ? { total: Number(providedOwn.total) || 0, buckets: Array.isArray(providedOwn.buckets) ? providedOwn.buckets : [] }
       : { total: 0, buckets: [] },
-    suggested: heatmap.suggested,
+    suggested: heatmap.suggested
+      ? { ...heatmap.suggested, windows: studioSanitizeScheduleWindows(heatmap.suggested.windows) }
+      : null,
     suggested_iso: heatmap.suggested
-      ? studioSuggestedLocalDatetime(heatmap.suggested.windows, new Date(), {
-          days: heatmap.suggested.days,
+      ? studioSuggestedLocalDatetime(STUDIO_PRIORITY_SCHEDULE_WINDOWS, new Date(), {
           occupiedMs: occupiedMs || [],
         })
       : null,
@@ -18942,15 +18997,20 @@ async function getInsightsBestTimes(request, env, url, authorization) {
     season_label: seasonLabel,
     source: "industry_default",
     sample_size: 0,
-    suggested: industry,
-    suggested_iso: studioSuggestedLocalDatetime(industry.windows, new Date(), { days: industry.days, ...occupiedOpts }),
+    suggested: {
+      days: industry.days,
+      windows: studioSanitizeScheduleWindows(industry.windows),
+      label: industry.label,
+    },
+    // Placement always uses the strict 14-day morning → afternoon → evening rotation.
+    suggested_iso: studioSuggestedLocalDatetime(STUDIO_PRIORITY_SCHEDULE_WINDOWS, new Date(), occupiedOpts),
     occupied_ms: occupiedMsForClient,
     occupied_count: occupiedMsForClient.length,
     similar: null,
     similar_sample_size: 0,
     similar_profile: theme,
     caption: null,
-    note: note || `Not enough ${seasonLabel.toLowerCase()} historical data yet. Showing travel/city industry defaults in Chicago time, then skipping times already booked.`,
+    note: note || `Not enough ${seasonLabel.toLowerCase()} historical data yet. Showing the strict morning / afternoon / evening rotation in Chicago time, then skipping times already booked.`,
   });
 
   try {
@@ -19001,13 +19061,19 @@ async function getInsightsBestTimes(request, env, url, authorization) {
     const useFirstParty = Boolean(firstSuggested);
     const useLearned = !useFirstParty && learned?.days?.length && learned?.windows?.length && learned.sample_size >= STUDIO_SIMILAR_TIMES_MIN_SAMPLE;
     const useSimilar = !useFirstParty && !useLearned && similar?.source === "similar_accounts" && similar.suggested;
-    const chosen = useFirstParty
+    const rawChosen = useFirstParty
       ? { ...firstSuggested, label: `${seasonLabel} · your posts · ${firstSuggested.label}` }
       : useLearned
         ? { days: learned.days, windows: learned.windows, label: learned.label || `${seasonLabel} learned model` }
         : useSimilar
           ? similar.suggested
           : industry;
+    // Keep analytics labels for the UI, but strip overnight buckets so operators
+    // never see 10pm–6am as a suggested publish window.
+    const chosen = {
+      ...rawChosen,
+      windows: studioSanitizeScheduleWindows(rawChosen?.windows || industry.windows),
+    };
     const source = useFirstParty ? "first_party" : useLearned ? learned.source || "learned_model" : useSimilar ? "similar_accounts" : "industry_default";
     const captionFromSample = (!captionLearned?.caption_patterns && !captionLearned?.patterns)
       ? studioInsightsBuildCaptionLearned(sample)
@@ -19045,7 +19111,7 @@ async function getInsightsBestTimes(request, env, url, authorization) {
       source,
       sample_size: useFirstParty ? firstHeatmap.sample_size : useLearned ? learned.sample_size : useSimilar ? similar.sample_size : sample.length,
       suggested: chosen,
-      suggested_iso: studioSuggestedLocalDatetime(chosen.windows, new Date(), { days: chosen.days, ...occupiedOpts }),
+      suggested_iso: studioSuggestedLocalDatetime(STUDIO_PRIORITY_SCHEDULE_WINDOWS, new Date(), occupiedOpts),
       occupied_ms: occupiedMsForClient,
       occupied_count: occupiedMsForClient.length,
       similar: similar?.suggested || null,
@@ -19053,16 +19119,16 @@ async function getInsightsBestTimes(request, env, url, authorization) {
       similar_profile: similar?.profile || theme,
       caption,
       note: useFirstParty
-        ? `${seasonLabel} suggestion uses your published posts with insights stored in Studio Insights Observations. It stays in those best windows and skips times already booked.`
+        ? `${seasonLabel} analytics are from your published posts. Automatic placement still uses the strict morning / afternoon / evening rotation and skips times already booked.`
         : useLearned
-          ? `${seasonLabel} suggestion uses the learned historical model for ${platform || "this platform"}. It stays in those best windows and skips times already booked.`
+          ? `${seasonLabel} analytics are from the learned historical model for ${platform || "this platform"}. Automatic placement still uses the strict morning / afternoon / evening rotation and skips times already booked.`
           : useSimilar
-            ? `Suggestion uses public posts from similar ${similar.profile_label} accounts for ${seasonLabel.toLowerCase()}. It stays in those best windows and skips times already booked.`
-            : `Not enough ${seasonLabel.toLowerCase()} historical data yet. Showing travel/city industry defaults in Chicago time, then skipping times already booked.`,
+            ? `Analytics use public posts from similar ${similar.profile_label} accounts for ${seasonLabel.toLowerCase()}. Automatic placement still uses the strict morning / afternoon / evening rotation and skips times already booked.`
+            : `Not enough ${seasonLabel.toLowerCase()} historical data yet. Showing the strict morning / afternoon / evening rotation in Chicago time, then skipping times already booked.`,
     });
   } catch (error) {
     console.warn("best-times failed; industry default", error);
-    return respond(request, env, industryPayload(null, `Suggestion service hiccuped; showing industry defaults in Chicago time.`));
+    return respond(request, env, industryPayload(null, `Suggestion service hiccuped; showing the strict morning / afternoon / evening rotation in Chicago time.`));
   }
 }
 

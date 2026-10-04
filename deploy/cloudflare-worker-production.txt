@@ -1,1 +1,2 @@
 Deploy Worker 0.10.439 4-second minimum voiceover clamp and Quality Agent voiceover_too_short check.
+Deploy Worker 0.10.440 strict 14-day morning/afternoon/evening schedule rotation with overnight blackout.

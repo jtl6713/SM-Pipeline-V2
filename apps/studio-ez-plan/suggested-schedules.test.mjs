@@ -2,60 +2,129 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  PRIORITY_SCHEDULE_WINDOWS,
   SUGGESTED_HORIZON_DAYS,
   addCivilDays,
   buildSuggestedScheduleMap,
   chicagoDateTimeParts,
   chicagoWallToUtcMs,
   civilKey,
+  isBlackoutLocalTime,
   listHorizonCivils,
+  nextOpenScheduleIso,
+  pickBalancedSuggestedIso,
   planScheduleItems,
+  sanitizeScheduleWindows,
   suggestedChicagoIso,
 } from "./suggested-schedules.mjs";
 
-const SATURDAY_EVENING = new Date("2026-09-05T19:35:00-05:00");
+const NOW = new Date("2026-10-03T08:00:00Z");
 
-function civilFromIso(iso) {
-  const parts = chicagoDateTimeParts(new Date(iso));
-  return civilKey(parts.year, parts.month, parts.day);
+function localParts(iso, timeZone = "America/Chicago") {
+  const parts = chicagoDateTimeParts(new Date(iso), timeZone);
+  return { hour: parts.hour, minute: parts.minute, key: civilKey(parts.year, parts.month, parts.day) };
 }
 
-test("suggested windows use Chicago time, not UTC wall clock", () => {
-  const iso = suggestedChicagoIso(["11:00-13:00"], SATURDAY_EVENING);
-  assert.equal(iso, "2026-09-06T16:00:00.000Z");
+test("automatic suggestions start in the morning priority window", () => {
+  const iso = suggestedChicagoIso([], NOW, { timeZone: "America/Chicago" });
+  const local = localParts(iso);
+  assert.equal(local.hour, 5);
+  assert.equal(local.minute, 30);
+  assert.equal(isBlackoutLocalTime(Date.parse(iso)), false);
 });
 
-test("preferred weekdays can land later than tomorrow inside 7 days", () => {
-  const iso = suggestedChicagoIso(["11:00-13:00"], SATURDAY_EVENING, {
-    days: ["Tue", "Wed", "Thu"],
-  });
-  assert.equal(civilFromIso(iso), "2026-09-08");
-  assert.equal(iso, "2026-09-08T16:00:00.000Z");
-});
-
-test("a packed today and tomorrow moves the suggestion later in the 7-day horizon", () => {
-  const chicago = chicagoDateTimeParts(SATURDAY_EVENING);
-  const occupiedMs = [];
-  for (let i = 0; i < 2; i++) {
-    const civil = i === 0
-      ? { year: chicago.year, month: chicago.month, day: chicago.day }
-      : addCivilDays(chicago.year, chicago.month, chicago.day, i);
-    occupiedMs.push(chicagoWallToUtcMs(civil.year, civil.month, civil.day, 11, 0));
-    occupiedMs.push(chicagoWallToUtcMs(civil.year, civil.month, civil.day, 18, 0));
+test("scheduler exhausts days 1-7 morning before midday, then afternoon", () => {
+  const firstSevenMornings = [];
+  for (let day = 3; day <= 9; day++) {
+    firstSevenMornings.push(chicagoWallToUtcMs(2026, 10, day, 5, 30));
   }
-  const iso = suggestedChicagoIso(["11:00-13:00", "18:00-21:00"], SATURDAY_EVENING, {
-    days: ["Tue", "Wed", "Thu"],
-    occupiedMs,
+  const midday = pickBalancedSuggestedIso([], NOW, {
+    platformOccupiedMs: firstSevenMornings,
+    timeZone: "America/Chicago",
   });
-  const horizon = new Set(listHorizonCivils(SATURDAY_EVENING).map((day) => day.key));
-  assert.ok(horizon.has(civilFromIso(iso)));
-  assert.notEqual(civilFromIso(iso), "2026-09-05");
-  assert.notEqual(civilFromIso(iso), "2026-09-06");
-  const ageDays = (Date.parse(iso) - SATURDAY_EVENING.getTime()) / 86400000;
-  assert.ok(ageDays <= SUGGESTED_HORIZON_DAYS);
+  assert.deepEqual(localParts(midday), { hour: 11, minute: 30, key: "2026-10-03" });
+
+  const firstSevenMidday = [];
+  for (let day = 3; day <= 9; day++) {
+    firstSevenMidday.push(chicagoWallToUtcMs(2026, 10, day, 11, 30));
+  }
+  const afternoon = pickBalancedSuggestedIso([], NOW, {
+    platformOccupiedMs: [...firstSevenMornings, ...firstSevenMidday],
+    timeZone: "America/Chicago",
+  });
+  assert.equal(localParts(afternoon).hour, 16);
+  assert.equal(localParts(afternoon).minute, 30);
 });
 
-test("vertical video stamps stay in the 7-day window and spread across days", () => {
+test("days 8-14 morning only after first-week morning/midday/afternoon are full", () => {
+  const occupied = [];
+  for (let day = 3; day <= 9; day++) {
+    occupied.push(chicagoWallToUtcMs(2026, 10, day, 5, 30));
+    occupied.push(chicagoWallToUtcMs(2026, 10, day, 11, 30));
+    occupied.push(chicagoWallToUtcMs(2026, 10, day, 16, 30));
+  }
+  const iso = pickBalancedSuggestedIso([], NOW, {
+    platformOccupiedMs: occupied,
+    timeZone: "America/Chicago",
+  });
+  const local = localParts(iso);
+  assert.equal(local.key, "2026-10-10");
+  assert.equal(local.hour, 5);
+  assert.equal(local.minute, 30);
+});
+
+test("overnight heatmap windows are stripped before scheduling", () => {
+  assert.deepEqual(
+    sanitizeScheduleWindows(["22:00-00:00", "00:00-06:00", "11:00-13:00"]),
+    ["11:00-13:00"],
+  );
+  assert.deepEqual(sanitizeScheduleWindows(["22:00-00:00"]), [...PRIORITY_SCHEDULE_WINDOWS]);
+});
+
+test("industry overnight windows cannot produce 11:30 PM or 2:30 AM stamps", () => {
+  const occupied = [];
+  const picks = [];
+  for (let i = 0; i < 12; i++) {
+    const iso = pickBalancedSuggestedIso(["22:00-00:00", "00:00-06:00", "19:00-21:00"], NOW, {
+      occupiedMs: occupied,
+      platformOccupiedMs: occupied,
+      timeZone: "America/Chicago",
+    });
+    picks.push(iso);
+    occupied.push(Date.parse(iso));
+  }
+  for (const iso of picks) {
+    const local = localParts(iso);
+    assert.equal(isBlackoutLocalTime(Date.parse(iso)), false, iso);
+    assert.ok(local.hour >= 4 && local.hour < 20, `blackout-adjacent hour ${local.hour} from ${iso}`);
+    assert.notEqual(`${local.hour}:${local.minute}`, "23:30");
+    assert.notEqual(`${local.hour}:${local.minute}`, "2:30");
+  }
+});
+
+test("conflict fallback advances out of overnight blackout", () => {
+  const candidate = "2026-10-04T02:00:00Z"; // 9:00 PM CDT previous evening? wait 02:00Z = 9 PM CDT Oct 3
+  const occupied = [Date.parse(candidate)];
+  const iso = nextOpenScheduleIso(candidate, occupied, 3 * 60 * 60 * 1000, { timeZone: "America/Chicago" });
+  const local = localParts(iso);
+  assert.equal(isBlackoutLocalTime(Date.parse(iso)), false);
+  assert.ok(local.hour >= 4 && local.hour < 20);
+});
+
+test("buildSuggestedScheduleMap replaces blackout existing stamps", () => {
+  const stamps = buildSuggestedScheduleMap([
+    { platform: "Instagram", output_type: "Reel", scheduled_at: "2026-10-12T04:30:00.000Z" }, // 11:30 PM CDT
+    { platform: "Instagram", output_type: "Story" },
+  ], {}, NOW, { timeZone: "America/Chicago" });
+  const reel = stamps.get("Instagram::Reel");
+  const story = stamps.get("Instagram::Story");
+  assert.notEqual(reel, "2026-10-12T04:30:00.000Z");
+  assert.equal(isBlackoutLocalTime(Date.parse(reel)), false);
+  assert.equal(isBlackoutLocalTime(Date.parse(story)), false);
+  assert.ok(Math.abs(Date.parse(story) - Date.parse(reel)) >= 3 * 60 * 60 * 1000);
+});
+
+test("vertical video stamps stay in the 14-day horizon and never blackout", () => {
   const items = planScheduleItems({
     items: [
       { platform: "Instagram", output_type: "Reel" },
@@ -65,102 +134,32 @@ test("vertical video stamps stay in the 7-day window and spread across days", ()
     ],
     extras: ["Instagram::Story", "Facebook::Story"],
   });
-  assert.deepEqual(items.map((item) => `${item.platform}::${item.output_type}`), [
-    "Instagram::Reel",
-    "Facebook::Reel",
-    "TikTok::Video Draft",
-    "YouTube::Short",
-    "Instagram::Story",
-    "Facebook::Story",
-  ]);
-
-  const stamps = buildSuggestedScheduleMap(items, {}, SATURDAY_EVENING);
-  const horizon = new Set(listHorizonCivils(SATURDAY_EVENING).map((day) => day.key));
+  const stamps = buildSuggestedScheduleMap(items, {}, NOW, { timeZone: "America/Chicago" });
+  const horizon = new Set(listHorizonCivils(NOW).map((day) => day.key));
+  assert.equal(SUGGESTED_HORIZON_DAYS, 14);
   for (const iso of stamps.values()) {
-    assert.ok(Date.parse(iso) > SATURDAY_EVENING.getTime());
-    assert.ok(horizon.has(civilFromIso(iso)), `outside 7-day horizon: ${iso}`);
+    assert.ok(Date.parse(iso) > NOW.getTime());
+    assert.ok(horizon.has(localParts(iso).key), `outside 14-day horizon: ${iso}`);
+    assert.equal(isBlackoutLocalTime(Date.parse(iso)), false);
   }
-  const mainDays = new Set([
-    stamps.get("Instagram::Reel"),
-    stamps.get("Facebook::Reel"),
-    stamps.get("TikTok::Video Draft"),
-    stamps.get("YouTube::Short"),
-  ].map(civilFromIso));
-  assert.ok(mainDays.size >= 2, "empty calendar should not park every platform on one day");
 });
 
-test("a busy non-preferred day does not beat an open analytics window", () => {
-  const occupiedMs = [
-    chicagoWallToUtcMs(2026, 9, 6, 11, 0),
-    chicagoWallToUtcMs(2026, 9, 6, 18, 0),
-    chicagoWallToUtcMs(2026, 9, 7, 11, 0),
-  ];
-  const iso = suggestedChicagoIso(["11:00-13:00", "18:00-21:00"], SATURDAY_EVENING, {
-    days: ["Tue", "Wed", "Thu"],
-    occupiedMs,
-  });
-  assert.equal(civilFromIso(iso), "2026-09-08");
-  const parts = chicagoDateTimeParts(new Date(iso));
-  assert.ok([11, 18].includes(parts.hour));
-});
-
-test("cross-platform crowding moves the next suggestion to a less crowded preferred day", () => {
-  const occupiedMs = [chicagoWallToUtcMs(2026, 9, 8, 12, 0)];
-  const iso = suggestedChicagoIso(["11:00-13:00"], SATURDAY_EVENING, {
-    days: ["Tue", "Wed", "Thu"],
-    occupiedMs,
-    platformOccupiedMs: [],
-  });
-  assert.equal(civilFromIso(iso), "2026-09-09");
-});
-
-test("a booked preferred-day window moves the next suggestion later inside 7 days", () => {
-  const occupiedMs = [chicagoWallToUtcMs(2026, 9, 8, 11, 0)];
-  const iso = suggestedChicagoIso(["11:00-13:00"], SATURDAY_EVENING, {
-    days: ["Tue", "Wed", "Thu"],
-    occupiedMs,
-    platformOccupiedMs: occupiedMs,
-  });
-  const horizon = new Set(listHorizonCivils(SATURDAY_EVENING).map((day) => day.key));
-  assert.ok(horizon.has(civilFromIso(iso)));
-  assert.notEqual(iso, "2026-09-08T16:00:00.000Z");
-  assert.equal(iso, "2026-09-09T16:00:00.000Z");
-});
-
-test("a typed Reel time wins, and a Story stays at least three hours off that platform", () => {
-  const stamps = buildSuggestedScheduleMap([
-    { platform: "Instagram", output_type: "Reel", scheduled_at: "2026-09-06T21:00:00.000Z" },
-    { platform: "Instagram", output_type: "Story" },
-  ], {}, SATURDAY_EVENING);
-  assert.equal(stamps.get("Instagram::Reel"), "2026-09-06T21:00:00.000Z");
-  const story = Date.parse(stamps.get("Instagram::Story"));
-  const reel = Date.parse(stamps.get("Instagram::Reel"));
-  assert.ok(Number.isFinite(story));
-  assert.ok(Math.abs(story - reel) >= 3 * 60 * 60 * 1000);
-});
-
-test("same-platform posts prefer different days before doubling up", () => {
-  const first = suggestedChicagoIso(["12:00-13:00", "18:00-20:00"], SATURDAY_EVENING, {
-    days: ["Tue", "Wed", "Thu"],
-  });
-  const second = suggestedChicagoIso(["12:00-13:00", "18:00-20:00"], SATURDAY_EVENING, {
-    days: ["Tue", "Wed", "Thu"],
+test("same-platform posts prefer different days before stacking the same morning", () => {
+  const first = suggestedChicagoIso([], NOW, { timeZone: "America/Chicago" });
+  const second = suggestedChicagoIso([], NOW, {
     occupiedMs: [Date.parse(first)],
     platformOccupiedMs: [Date.parse(first)],
+    timeZone: "America/Chicago",
   });
-  assert.notEqual(civilFromIso(second), civilFromIso(first));
+  assert.notEqual(localParts(second).key, localParts(first).key);
+  assert.equal(localParts(second).hour, 5);
+  assert.equal(localParts(second).minute, 30);
 });
 
-test("repeated suggestions rotate time windows as well as days", () => {
-  const first = suggestedChicagoIso(["12:00-13:00", "18:00-20:00"], SATURDAY_EVENING, {
-    days: ["Tue", "Wed", "Thu"],
-  });
-  const second = suggestedChicagoIso(["12:00-13:00", "18:00-20:00"], SATURDAY_EVENING, {
-    days: ["Tue", "Wed", "Thu"],
-    occupiedMs: [Date.parse(first)],
-    platformOccupiedMs: [],
-  });
-  const firstParts = chicagoDateTimeParts(new Date(first));
-  const secondParts = chicagoDateTimeParts(new Date(second));
-  assert.notEqual(secondParts.hour, firstParts.hour);
+test("horizon helper returns 14 civil days", () => {
+  const days = listHorizonCivils(NOW);
+  assert.equal(days.length, 14);
+  assert.equal(days[0].key, "2026-10-03");
+  const last = addCivilDays(2026, 10, 3, 13);
+  assert.equal(days[13].key, civilKey(last.year, last.month, last.day));
 });
