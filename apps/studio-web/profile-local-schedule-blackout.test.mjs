@@ -193,3 +193,19 @@ test("initial suggested schedule map honors the active Los Angeles profile timez
     }
   }
 });
+
+
+test("existing automatic schedule inside LA blackout is replaced using LA profile time", () => {
+  const zone = "America/Los_Angeles";
+  const now = new Date("2026-10-04T17:00:00Z");
+  const items = [{
+    platform: "Facebook",
+    output_type: "Story",
+    scheduled_at: "2026-10-09T09:00:00.000Z", // 2:00 AM PDT — forbidden in LA.
+  }];
+  const schedules = plan.ezBuildSuggestedScheduleMap(items, {}, now, { timeZone: zone });
+  const iso = schedules.get("Facebook::Story");
+  assert.ok(iso);
+  assert.notEqual(iso, items[0].scheduled_at);
+  assert.equal(plan.ezIsBlackoutLocalTime(Date.parse(iso), zone), false);
+});

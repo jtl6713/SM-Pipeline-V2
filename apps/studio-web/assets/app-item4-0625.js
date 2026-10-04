@@ -15958,9 +15958,18 @@
   function pipelineRowHasSchedule(record) {
     if (!record?.id) return false;
     const input = document.querySelector(`[data-pipeline-schedule="${record.id}"]`);
-    if (input) return Boolean(String(input.value || "").trim());
-    if (pipelineScheduleDrafts.has(record.id)) return Boolean(String(pipelineScheduleDrafts.get(record.id) || "").trim());
-    return Boolean(studioEffectiveScheduleIso(record));
+    const raw = input
+      ? String(input.value || "").trim()
+      : (pipelineScheduleDrafts.has(record.id)
+        ? String(pipelineScheduleDrafts.get(record.id) || "").trim()
+        : studioEffectiveScheduleIso(record));
+    if (!raw) return false;
+    const iso = studioDateTimeLocalToIso(raw, workingStudioTimeZone());
+    // The profile timezone is the scheduling authority. Treat a future schedule
+    // inside 8:00 PM–3:30 AM in that profile as invalid/missing so the automatic
+    // scheduler replaces it instead of preserving a slot interpreted in the
+    // browser/user timezone.
+    return Boolean(iso) && !pipelineScheduleIsBlackout(iso, workingStudioTimeZone());
   }
 
   const PIPELINE_SCHEDULE_GAP_MS = 3 * 60 * 60 * 1000;
