@@ -431,3 +431,8 @@ Deploy Studio Pages production
 Reason: Calendar labels and schedule/suggested datetime-local fields must render in the selected profile timezone, not the browser timezone
 UI: 0.6.470-profile-timezone-calendar
 Requested: 2026-10-04
+
+Deploy Studio Pages production
+Reason: Add bulk 14-day schedule regeneration for selected platforms from the overall Pipeline calendar, with confirmation count and profile-local blackout enforcement
+UI: 0.6.471-calendar-bulk-regenerate
+Requested: 2026-10-04
