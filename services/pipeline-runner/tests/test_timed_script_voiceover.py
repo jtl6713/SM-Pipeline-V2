@@ -110,3 +110,33 @@ def test_three_scenes_different_spoken_lengths_total_is_sum():
     assert rebuilt["segments"][1]["start_seconds"] == 13.0
     assert rebuilt["segments"][2]["start_seconds"] == 38.0
     assert rebuilt["duration_seconds"] == sum(spoken)
+
+
+def test_timed_script_under_four_seconds_is_rewritten_and_not_kept_short(monkeypatch):
+    timeline = parse_timed_script_markdown(
+        "| Time | Voiceover | Suggested still |\n"
+        "| --- | --- | --- |\n"
+        "| 0:00–0:02 | Your quick tour between trains. | Hall |\n"
+    )["timeline"]
+
+    def fake_synthesize(text: str, *, voice_id: str, speed: float = 1.0) -> bytes:
+        return text.encode("utf-8")
+
+    def lengthen(text: str, *, measured_seconds: float) -> str:
+        assert measured_seconds < 4
+        return text + " Look up at the ceiling, then move through with the crowd."
+
+    monkeypatch.setattr(
+        "p2.timed_script_voiceover.probe_audio_duration_bytes",
+        lambda data: 1.625 if b"Look up" not in data else 4.4,
+    )
+    monkeypatch.setattr("p2.timed_script_voiceover.concat_mp3_bytes", lambda parts: b"".join(parts))
+
+    _audio, measured, seconds = synthesize_timed_script_voiceover(
+        timeline,
+        voice_id="voice-eve",
+        synthesize=fake_synthesize,
+        lengthen=lengthen,
+    )
+    assert sum(seconds) >= 4
+    assert measured["segments"][-1]["voiceover_text"].endswith("crowd.")

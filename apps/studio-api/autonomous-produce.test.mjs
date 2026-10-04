@@ -224,6 +224,7 @@ test("YouTube mapper keeps titles and picker requires assets", () => {
     { platform: "Facebook", output_type: "Story" },
   ]);
   assert.equal(autonomousDefaultVoiceoverSeconds(30), 15);
+  assert.equal(autonomousDefaultVoiceoverSeconds(6), 4);
   assert.equal(AUTONOMOUS_DEFAULT_VOICEOVER_TAIL_SECONDS, 2);
   assert.equal(autonomousDefaultVoiceoverTailSeconds(), 2);
   assert.equal(autonomousDefaultVoiceoverTailSeconds(30 - 15), 2);

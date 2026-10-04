@@ -1,4 +1,6 @@
 from audio.voiceover_duration import (
+    MIN_VOICEOVER_SECONDS,
+    VoiceoverTooShort,
     owner_video_seconds,
     render_video_seconds,
     validate_voiceover_for_owner_cap,
@@ -80,3 +82,63 @@ def test_voiceover_exceeds_video_message_is_actionable():
         context="render duration",
     )
     assert "never run past" in message.lower()
+
+
+def test_speak_until_minimum_rewrites_a_one_second_read_and_refuses_to_save_short_audio():
+    from p2.voiceover_floor import speak_until_minimum
+
+    calls = []
+
+    def synthesize(script: str) -> bytes:
+        calls.append(script)
+        return script.encode("utf-8")
+
+    def normalize(raw: bytes):
+        return {"ok": True}, raw
+
+    def probe(data: bytes) -> float:
+        text = data.decode("utf-8")
+        return 1.625 if text == "Your quick tour between trains." else 4.2
+
+    def lengthen(text: str, *, measured_seconds: float) -> str:
+        assert measured_seconds == 1.625
+        assert text.startswith("Your quick tour")
+        return "Your quick tour between trains. Look up at the ceiling, then move through with the crowd."
+
+    audio, seconds, script, _details = speak_until_minimum(
+        "Your quick tour between trains.",
+        synthesize=synthesize,
+        normalize=normalize,
+        probe=probe,
+        lengthen=lengthen,
+    )
+    assert seconds == 4.2
+    assert seconds >= MIN_VOICEOVER_SECONDS
+    assert b"Look up" in audio
+    assert script.startswith("Your quick tour")
+    assert len(calls) == 2
+
+
+def test_speak_until_minimum_does_not_return_a_short_file():
+    from p2.voiceover_floor import speak_until_minimum
+
+    def synthesize(script: str) -> bytes:
+        return b"short"
+
+    def normalize(raw: bytes):
+        return {}, raw
+
+    try:
+        speak_until_minimum(
+            "Too short.",
+            synthesize=synthesize,
+            normalize=normalize,
+            probe=lambda _data: 1.2,
+            lengthen=lambda text, measured_seconds: text + " Still too short to speak.",
+            attempts=2,
+        )
+    except VoiceoverTooShort as exc:
+        assert "Not saved" in str(exc)
+        assert "1.200s" in str(exc)
+    else:
+        raise AssertionError("short voiceover was returned")

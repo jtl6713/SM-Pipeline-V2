@@ -8,7 +8,14 @@ from typing import Any
 
 from airtable.client import AirtableClient
 from airtable.constants import CONTENT_ITEMS_TABLE, PLATFORM_OUTPUTS_TABLE, PRODUCTION_REQUESTS_TABLE
-from audio.voiceover_duration import probe_audio_duration_bytes, validate_voiceover_for_owner_cap, voiceover_tail_seconds
+from audio.voiceover_duration import (
+    DURATION_EPSILON_SECONDS,
+    MIN_VOICEOVER_SECONDS,
+    VoiceoverTooShort,
+    probe_audio_duration_bytes,
+    validate_voiceover_for_owner_cap,
+    voiceover_tail_seconds,
+)
 from branding.watermark import apply_watermark_bytes, brand_watermark_bytes
 from config import load_settings
 from integrations.google_drive import GoogleDriveClient
@@ -350,27 +357,50 @@ def process_request(
     measured_timeline = None
     segment_seconds: list[float] = []
     voice_id = resolve_content_voice_id(item)
+    spoken_script = field_str(item, "Voiceover_Script")
+    from p2.voiceover_floor import lengthen_voiceover_script, speak_until_minimum
+
     if timeline and timeline.get("segments"):
         # Per-scene TTS + measured durations. Import clocks are hints only —
         # still N must last as long as scene N speech (NYC CI 290: import 20s
         # while TTS spoke ~13s left ~15s of silence when stills stayed locked).
+        # The spoken total still cannot be under 4 seconds.
         raw_mp3, measured_timeline, segment_seconds = synthesize_timed_script_voiceover(
             timeline,
             voice_id=voice_id,
             synthesize=synthesize_voiceover_by_id,
         )
-    else:
-        raw_mp3 = synthesize_voiceover_by_id(
-            field_str(item, "Voiceover_Script"),
-            voice_id=voice_id,
-            speed=speech_speed_for_timeline(timeline),
+        norm_payload, normalized_mp3 = normalize_voiceover(
+            raw_mp3,
+            filename=f"{content_id}_voice.mp3",
+            normalizer_base_url=normalizer_url,
         )
-    norm_payload, normalized_mp3 = normalize_voiceover(
-        raw_mp3,
-        filename=f"{content_id}_voice.mp3",
-        normalizer_base_url=normalizer_url,
-    )
-    measured_seconds = probe_audio_duration_bytes(normalized_mp3)
+        measured_seconds = probe_audio_duration_bytes(normalized_mp3)
+    else:
+        speed = speech_speed_for_timeline(timeline)
+
+        def _synthesize(script: str) -> bytes:
+            return synthesize_voiceover_by_id(script, voice_id=voice_id, speed=speed)
+
+        def _normalize(raw: bytes):
+            return normalize_voiceover(
+                raw,
+                filename=f"{content_id}_voice.mp3",
+                normalizer_base_url=normalizer_url,
+            )
+
+        normalized_mp3, measured_seconds, spoken_script, norm_payload = speak_until_minimum(
+            spoken_script,
+            synthesize=_synthesize,
+            normalize=_normalize,
+            probe=probe_audio_duration_bytes,
+            lengthen=lengthen_voiceover_script,
+        )
+    if measured_seconds + DURATION_EPSILON_SECONDS < MIN_VOICEOVER_SECONDS:
+        raise VoiceoverTooShort(
+            f"Voiceover is {measured_seconds:.3f}s. Spoken audio must be at least "
+            f"{MIN_VOICEOVER_SECONDS:.0f} seconds. Not saved."
+        )
     if measured_timeline and segment_seconds:
         # Loudness normalization can nudge total length by a few ms. Scale the
         # measured scene windows so still boundaries still sum to the final file.
@@ -381,7 +411,7 @@ def process_request(
         scaled[-1] = max(1.0, scaled[-1] + drift)
         from studio_produce.timed_script import apply_measured_durations
 
-        measured_timeline = apply_measured_durations(timeline, scaled) or measured_timeline
+        measured_timeline = apply_measured_durations(measured_timeline or timeline, scaled) or measured_timeline
         _persist_measured_timed_script(
             client,
             item=item,
@@ -449,6 +479,8 @@ def process_request(
             "Voiceover_Normalization_Details": norm_details,
             "Voiceover_Duration_Seconds": round(measured_seconds, 3),
         }
+        if spoken_script and spoken_script != field_str(item, "Voiceover_Script"):
+            update_fields["Voiceover_Script"] = spoken_script
         p3_source = "P-series daisy chain (python)"
     else:
         update_fields = {
@@ -463,6 +495,8 @@ def process_request(
             "Voiceover_Normalization_Details": norm_details,
             "Voiceover_Duration_Seconds": round(measured_seconds, 3),
         }
+        if spoken_script and spoken_script != field_str(item, "Voiceover_Script"):
+            update_fields["Voiceover_Script"] = spoken_script
         p3_source = "P2 optional-thumbnail branch (python)"
 
     client.update_record(CONTENT_ITEMS_TABLE, latest["id"], update_fields, typecast=True)
