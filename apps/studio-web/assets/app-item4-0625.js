@@ -254,7 +254,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.472-profile-timezone-schedules";
+  const BUILD_ID = "item4-0.6.471-profile-timezone-authorityschedules";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -1478,9 +1478,15 @@
   const STUDIO_DEFAULT_TIMEZONE = "America/Chicago";
 
   function studioTimezone() {
-    if (operationsTimezone) return operationsTimezone;
+    // The selected content profile is authoritative for all scheduling UI and conversions.
+    // Operations metadata must never override the timezone of the profile currently being edited.
     const profile = studioProfiles.find((item) => item.id === selectedProfileId);
-    return profile?.timezone || STUDIO_DEFAULT_TIMEZONE;
+    const explicit = String(profile?.timezone || profile?.time_zone || "").trim();
+    if (explicit) return explicit;
+    const theme = String(profile?.theme || "").trim().toLowerCase();
+    if (theme === "la") return "America/Los_Angeles";
+    if (theme === "nyc" || theme === "miami") return "America/New_York";
+    return STUDIO_DEFAULT_TIMEZONE;
   }
 
   function studioTimezoneLabel(timeZone = studioTimezone()) {
