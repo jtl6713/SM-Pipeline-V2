@@ -11,6 +11,11 @@ from render.fields import field, field_str, parse_json_field
 
 DEFAULT_VOICEOVER_TAIL_SECONDS = 2.0
 DURATION_EPSILON_SECONDS = 0.05
+MIN_VOICEOVER_SECONDS = 4.0
+
+
+class VoiceoverTooShort(RuntimeError):
+    """Spoken audio is under 4 seconds. Callers must not save or render it."""
 
 
 def probe_audio_duration_bytes(data: bytes) -> float:

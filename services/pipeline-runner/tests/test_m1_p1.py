@@ -78,6 +78,11 @@ def test_p1_effective_options_and_status():
         production,
     )
     assert explicit["target_voiceover_duration"] == 15
+    floored = effective_options(
+        {"fields": {"Content_Duration": 30, "Include_Voiceover": "Yes", "Voiceover_Duration_Seconds": 1}},
+        production,
+    )
+    assert floored["target_voiceover_duration"] == 4
     assert explicit["voiceover_tail_seconds"] == 15
     assert content_status_for(options) == "Ready for Voiceover"
     assert content_status_for({"include_voiceover": "No", "include_thumbnail": "Yes"}) == "Ready for Thumbnail"

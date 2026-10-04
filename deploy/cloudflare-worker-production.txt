@@ -1,1 +1,2 @@
 Deploy manual media authority fix 2026-10-04. UI 0.6.475 / API 0.10.438. Preserve operator deletes, selection and order. 38 targeted tests passed.
+Deploy Worker 0.10.439-voiceover-min-4s. Requested voiceover duration cannot be under 4 seconds.

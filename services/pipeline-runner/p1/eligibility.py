@@ -98,8 +98,8 @@ def effective_options(item: dict[str, Any], production: dict[str, Any]) -> dict[
                 tail = max(0, int(round(duration_n - explicit_vo)))
         else:
             target_vo = duration_n - tail
-        if target_vo <= 1:
-            target_vo = 1
+        if target_vo < 4:
+            target_vo = 4
     return {
         "duration": duration,
         "clip_count": clip_count,

@@ -257,7 +257,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.481-timeline-forces-six-video-outputs";
+  const BUILD_ID = "item4-0.6.482-voiceover-min-4s";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -300,7 +300,7 @@
   }
   function defaultVoiceoverDuration(videoSeconds) {
     const n = Number(videoSeconds);
-    return Number.isFinite(n) && n > 0 ? Math.max(1, Math.round(n * 0.5)) : 15;
+    return Number.isFinite(n) && n > 0 ? Math.max(4, Math.round(n * 0.5)) : 15;
   }
   const PROFILE_STORAGE_KEY = "studio.content_profile_id";
   let selectedProfileId = "";
@@ -14122,7 +14122,7 @@
     ezThumbnail: "Rendered videos always get the 3D ChicagoShining grid cover on Instagram Reels, Facebook Reels, and YouTube Shorts. You do not add Carousel for that. This control only applies to still-only posts.",
     ezVoiceoverTail: "Picture and music after narration ends. Does not shorten an explicit Voiceover duration. If speech + tail is longer than Video duration, Video duration wins and the end is cut.",
     ezVideoDuration: "Hard cap for the finished video. Wins if Voiceover duration + Video after voiceover would run longer. Long uploads are trimmed or sliced to fit; with music, cuts land on beats.",
-    ezVoiceoverDuration: "Spoken narration length. This wins over Video after voiceover for how long speech lasts. If you set only this field, leftover time becomes the tail. If speech + tail is longer than Video duration, Video duration wins.",
+    ezVoiceoverDuration: "Spoken narration length. Minimum 4 seconds whenever voiceover is on. A one- or two-second read is not saved. This wins over Video after voiceover for how long speech lasts. If you set only this field, leftover time becomes the tail. If speech + tail is longer than Video duration, Video duration wins.",
     ezVideoClipMode: "How many clips Studio should aim for in a video. AI decides unless you force a count or range.",
     ezVideoClipExact: "Exact number of clips to use in the video.",
     ezVideoClipMin: "Minimum clip count when using a target range.",
@@ -14134,7 +14134,7 @@
     ezCarouselImageMode: "Use the photos you uploaded, or let Studio generate additional images.",
     ezProductionNotes: "Anything extra for pacing, style, or execution. Saved with the production request.",
     prVideoDuration: "Hard cap for the finished video. Wins if Voiceover duration + Video after voiceover would run longer. Autonomous runs stay at 30 seconds. Long uploads are trimmed or sliced to fit; with music, cuts land on beats.",
-    prVoiceoverDuration: "Spoken narration length. This wins over Video after voiceover for how long speech lasts. Autonomous defaults to half the video (15s of a 30s slideshow). If speech + tail is longer than Video duration, Video duration wins and the end is cut.",
+    prVoiceoverDuration: "Spoken narration length. Minimum 4 seconds whenever voiceover is on. A one- or two-second read is not saved. This wins over Video after voiceover for how long speech lasts. Autonomous defaults to half the video (15s of a 30s slideshow). If speech + tail is longer than Video duration, Video duration wins and the end is cut.",
     prMusicStart: "Seconds into the song file to skip before playback. The video still starts at 0:00; this only fast-forwards the track so you can skip the intro.",
     prVideoClipMode: "How many clips Studio should aim for in a video.",
     prVideoClipExact: "Exact number of clips to use in the video.",

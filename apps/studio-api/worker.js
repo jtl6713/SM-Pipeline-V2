@@ -462,7 +462,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.438-manual-media-authority",
+          version: "0.10.439-voiceover-min-4s",
           studio_desk_inventory_v1: true,
           studio_desk_activity_v1: true,
           studio_tiktok_complete_v1: true,
@@ -13414,7 +13414,10 @@ async function cleanProductionRequestPayload(payload, env) {
     : "AI decides";
 
   const videoDurationSeconds = nullableWholeSeconds(payload?.video_duration_seconds, 5, 600, "Video duration");
-  const voiceoverDurationSeconds = nullableNumber(payload?.voiceover_duration_seconds, 1, 600, "Voiceover duration");
+  let voiceoverDurationSeconds = nullableNumber(payload?.voiceover_duration_seconds, 1, 600, "Voiceover duration");
+  if (voiceoverMode === "Yes" && voiceoverDurationSeconds != null && voiceoverDurationSeconds < 4) {
+    voiceoverDurationSeconds = 4;
+  }
   const musicStartSeconds = nullableNumber(payload?.music_start_seconds, 0, 3600, "Music start");
   let voiceoverTailSeconds = nullableNumber(payload?.voiceover_tail_seconds, 0, 300, "Voiceover tail");
   voiceoverTailSeconds = autonomousDefaultVoiceoverTailSeconds(voiceoverTailSeconds);
