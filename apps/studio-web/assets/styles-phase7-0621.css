@@ -3102,6 +3102,41 @@ body:has(#page-content.active) .studio-footer-links button:hover{
 .pipeline-schedule-entry.is-dragging { opacity: .45; }
 .pipeline-schedule-entry.is-saving { opacity: .62; cursor: progress; }
 .pipeline-schedule-entry.is-selected { outline: 2px solid var(--teal, #08715a); outline-offset: 1px; }
+
+.pipeline-schedule-entry.is-published {
+  opacity: .78;
+  border-style: dashed;
+}
+
+.pipeline-schedule-entry-status {
+  flex: 0 0 auto;
+  margin-left: 4px;
+  padding: 2px 5px;
+  border-radius: 999px;
+  background: #dcfce7;
+  color: #166534;
+  font-size: 8px;
+  font-weight: 900;
+  line-height: 1.1;
+  white-space: nowrap;
+}
+
+.platform-calendar-event.is-published {
+  opacity: .78;
+  border-style: dashed;
+}
+
+.platform-calendar-published-mark {
+  display: inline-block;
+  margin-right: 5px;
+  padding: 1px 4px;
+  border-radius: 999px;
+  background: #dcfce7;
+  color: #166534;
+  font-size: 8px;
+  font-weight: 900;
+  white-space: nowrap;
+}
 .pipeline-schedule-entry:focus-visible { outline: 2px solid var(--teal, #08715a); outline-offset: 2px; }
 .pipeline-schedule-entry-code { flex: 0 0 auto; min-width: 24px; padding: 2px 4px; border-radius: 999px; background: rgba(100, 116, 139, .10); text-align: center; font-size: 9px; font-weight: 900; }
 .pipeline-schedule-entry-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
