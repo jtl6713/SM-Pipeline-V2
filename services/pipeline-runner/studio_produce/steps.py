@@ -420,18 +420,18 @@ def ensure_slide_voiceover_timeline(
     *,
     total: int | None = None,
 ) -> None:
-    """Store one timed-script scene per still before P2 measures the audio.
+    """Store per-still timing only for explicit per-slide narration.
 
-    Operator timed scripts are left alone. Footage and finished video keep the
-    media file's length. Spoken scene clocks here are placeholders; P2 replaces
-    them with the measured read. A silent scene keeps the writer's hold.
+    Operator timed scripts are left alone. Ordinary continuous narration must
+    stay a single TTS track; photo timing is distributed under that measured
+    audio. Footage and finished video keep the media file's length.
     """
     from studio_produce.timed_script import (
         SLIDE_VOICEOVER_SOURCE,
-        chunk_script_across_slides,
         exact_voiceover_text,
         notes_with_timed_script,
         slide_lines_from_themes,
+        strip_timed_script_directive,
         timed_script_from_request,
         timeline_from_slide_lines,
     )
@@ -452,10 +452,27 @@ def ensure_slide_voiceover_timeline(
     count = max(len(photos), expected_photo_count(request, photos), intended)
     if count < 1:
         return
+
+    # Ordinary narration is one continuous spoken track. Do not manufacture a
+    # timed-script scene per photo: when photos outnumber words/sentences that
+    # path turns words into isolated TTS clips and empty photo slots into
+    # silence (Content 322/325). Timed-script mode is reserved for an operator
+    # timed script or an explicit one-line-per-slide narration list.
+    raw_slide_voiceovers = (themes or {}).get("slide_voiceovers") if isinstance(themes, dict) else None
+    explicit_slide_voiceovers = isinstance(raw_slide_voiceovers, list) and len(raw_slide_voiceovers) == count
+    if not explicit_slide_voiceovers:
+        if existing and existing.get("source") == SLIDE_VOICEOVER_SOURCE:
+            notes = strip_timed_script_directive(field_str(request, "Production_Notes"))
+            client.update_record(
+                PRODUCTION_REQUESTS_TABLE,
+                request["id"],
+                {"Production_Notes": notes},
+                typecast=True,
+            )
+            request.setdefault("fields", {})["Production_Notes"] = notes
+        return
+
     lines = slide_lines_from_themes(themes, count)
-    if not lines:
-        script = field_str(parent, "Voiceover_Script") or exact_requested_script(request)
-        lines = chunk_script_across_slides(script, count) if script else []
     if len(lines) != count:
         return
     timeline = timeline_from_slide_lines(lines, photos)

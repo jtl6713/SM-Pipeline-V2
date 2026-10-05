@@ -430,7 +430,10 @@ def apply_measured_durations(
             "measured_voiceover_seconds": _round_seconds(seconds),
         })
         cursor = end
-    return build_timeline(rebuilt)
+    measured = build_timeline(rebuilt)
+    if normalized.get("source"):
+        measured["source"] = normalized.get("source")
+    return measured
 
 
 def exact_voiceover_text(timeline: dict[str, Any] | None) -> str:
