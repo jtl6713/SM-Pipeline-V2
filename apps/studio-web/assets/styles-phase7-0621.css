@@ -3185,8 +3185,15 @@ body:has(#page-content.active) .studio-footer-links button:hover{
 .pipeline-schedule-cell[role="button"]:focus-visible { background: var(--teal-soft, #e9f7f3); outline: 2px solid rgba(8, 113, 90, .45); outline-offset: -2px; }
 .pipeline-schedule-cell.is-drop-target { background: var(--teal-soft, #e9f7f3); box-shadow: inset 0 0 0 3px var(--teal, #08715a); }
 .pipeline-schedule-cell.is-past { background: rgba(148, 163, 184, .065); color: var(--muted, #667085); }
+.pipeline-schedule-cell.is-blackout,
+.pipeline-schedule-cell.is-blackout.is-empty { background: rgba(15, 23, 42, .14); color: var(--muted, #475569); }
+.pipeline-schedule-cell.is-blackout.has-scheduled { background: rgba(15, 23, 42, .18); }
+.pipeline-schedule-cell.is-blackout.is-past { background: rgba(15, 23, 42, .16); }
+.pipeline-schedule-hour.is-blackout,
+.pipeline-schedule-grid-table tr.is-blackout-row .pipeline-schedule-hour { background: rgba(15, 23, 42, .10); color: #334155; }
 .pipeline-schedule-slot-empty { display: block; padding: 8px 4px; color: var(--muted, #667085); font-size: 9px; font-weight: 700; text-align: center; opacity: .5; }
-.pipeline-schedule-cell.is-past .pipeline-schedule-slot-empty { visibility: hidden; }
+.pipeline-schedule-cell.is-past:not(.is-blackout) .pipeline-schedule-slot-empty { visibility: hidden; }
+.pipeline-schedule-cell.is-blackout .pipeline-schedule-slot-empty { opacity: .78; color: #475569; }
 #pipelineScheduleGridMessage { margin: 8px 2px 0; min-height: 1.2em; font-size: 12px; }
 @media (max-width: 720px) {
   .pipeline-schedule-unscheduled { grid-template-columns: 1fr; }
@@ -3211,15 +3218,22 @@ body.platform-calendar-open { overflow: hidden; }
 .platform-calendar-table thead th { position: sticky; top: 0; z-index: 3; padding: 10px 10px; background: #fff; text-align: center; }
 .platform-calendar-table .platform-calendar-hour-head { left: 0; z-index: 5; width: 76px; }
 .platform-calendar-slot-label { position: sticky; left: 0; z-index: 2; width: 76px; padding: 7px 8px !important; background: #fff; color: var(--muted); text-align: right; font-weight: 800; white-space: nowrap; }
+.platform-calendar-slot-label.is-blackout,
+.platform-calendar-table tr.is-blackout-row .platform-calendar-slot-label { background: rgba(15, 23, 42, .10); color: #334155; }
 .platform-calendar-day-name { display: block; color: var(--ink); font-size: 12px; font-weight: 900; line-height: 1.25; }
 .platform-calendar-day-date { display: block; margin-top: 4px; color: var(--muted); font-size: 11.5px; font-weight: 650; line-height: 1.3; letter-spacing: .01em; }
 .platform-calendar-slot-button { width: 100%; min-height: 44px; display: grid; align-content: center; gap: 3px; border: 0; border-radius: 0; padding: 5px; background: #fff; color: var(--ink); font: inherit; text-align: left; cursor: pointer; }
 .platform-calendar-slot-button:hover:not(:disabled),.platform-calendar-slot-button:focus-visible { position: relative; z-index: 1; background: var(--teal-soft); outline: 2px solid var(--teal); outline-offset: -2px; }
 .platform-calendar-slot-button:disabled { cursor: not-allowed; color: #98a2b3; background: #f5f6f7; }
+.platform-calendar-slot-button.is-blackout,
+.platform-calendar-slot-button.is-blackout:disabled { background: rgba(15, 23, 42, .14); color: #475569; }
+.platform-calendar-slot-button.is-blackout.has-scheduled { background: rgba(15, 23, 42, .18); }
 .platform-calendar-slot-button.has-scheduled { background: #f1f6ff; }
 .platform-calendar-slot-button.has-nearby { box-shadow: inset 3px 0 0 #e7b341; }
 .platform-calendar-slot-button.is-selected { position: relative; z-index: 1; background: #dcf3ed; outline: 3px solid var(--teal); outline-offset: -3px; }
+.platform-calendar-slot-button.is-blackout.is-selected { background: rgba(15, 23, 42, .20); outline-color: #64748b; }
 .platform-calendar-slot-add { color: var(--teal-dark); font-size: 11px; font-weight: 850; text-align: center; opacity: .78; }
+.platform-calendar-slot-button.is-blackout .platform-calendar-slot-add { color: #475569; opacity: .9; }
 .platform-calendar-event { display: block; overflow: hidden; padding: 3px 5px; border-radius: 6px; background: rgba(24, 90, 160, .12); color: #194f8a; font-size: 10px; font-weight: 800; line-height: 1.25; text-overflow: ellipsis; white-space: nowrap; }
 .platform-calendar-event.is-target { background: rgba(8, 113, 90, .14); color: var(--teal-dark); }
 .platform-calendar-footer { align-items: flex-end; border-top: 1px solid var(--line); background: #fff; }

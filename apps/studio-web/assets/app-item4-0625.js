@@ -258,7 +258,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.490-ideas-vo-approve";
+  const BUILD_ID = "item4-0.6.491-schedule-blackout-shade";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -17992,32 +17992,43 @@
     if (summary) {
       summary.textContent = error
         ? `${total} scheduled in the loaded Pipeline rows · schedule service retrying · ${rangeLabel} · ${timezone}`
-        : `${total} scheduled output${total === 1 ? "" : "s"} · ${unscheduled.length} ready to schedule · ${rangeLabel} · ${timezone}`;
+        : `${total} scheduled output${total === 1 ? "" : "s"} · ${unscheduled.length} ready to schedule · ${rangeLabel} · ${timezone} · darker rows 8 PM–3:30 AM are off limits`;
     }
 
     const now = new Date();
     const nowKey = helper.slotKey(now, workingStudioTimeZone());
     const head = windowValue.days.map((date) => `<th scope="col">${pipelineScheduleDayHeader(date)}</th>`).join("");
     const rows = Array.from({ length: 48 }, (_, slotIndex) => {
+      const sampleDay = windowValue.days[0];
+      const sampleSlot = sampleDay ? helper.slotDate(sampleDay, slotIndex, workingStudioTimeZone()) : null;
+      const rowBlackout = sampleSlot ? pipelineScheduleIsBlackout(sampleSlot.toISOString(), workingStudioTimeZone()) : false;
       const cellsHtml = windowValue.days.map((day) => {
         const date = helper.slotDate(day, slotIndex, workingStudioTimeZone());
         const key = helper.slotKey(date, workingStudioTimeZone());
         const cell = cells.get(key);
         const isPast = date.getTime() <= Date.now();
+        const isBlackout = pipelineScheduleIsBlackout(date.toISOString(), workingStudioTimeZone());
         const bubbles = (cell?.records || []).map((record) => pipelineScheduleEntryMarkup(record)).join("");
         const classes = [
           "pipeline-schedule-cell",
           cell?.total ? "has-scheduled" : "is-empty",
           key === nowKey ? "is-current-hour" : "",
           isPast ? "is-past" : "",
+          isBlackout ? "is-blackout" : "",
         ].filter(Boolean).join(" ");
-        const aria = `Schedule selected output for ${date.toLocaleString(undefined, { timeZone: workingStudioTimeZone(), weekday: "long", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}`;
-        return `<td class="${classes}"${isPast ? "" : ` data-pipeline-schedule-drop="${escapeHtml(date.toISOString())}" tabindex="0" role="button" aria-label="${escapeHtml(aria)}"`}><div class="pipeline-schedule-cell-inner">${bubbles || '<span class="pipeline-schedule-slot-empty">Drop here</span>'}</div></td>`;
+        const interactive = !isPast && !isBlackout;
+        const aria = isBlackout
+          ? `Off limits: ${date.toLocaleString(undefined, { timeZone: workingStudioTimeZone(), weekday: "long", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })} (8:00 PM–3:30 AM local)`
+          : `Schedule selected output for ${date.toLocaleString(undefined, { timeZone: workingStudioTimeZone(), weekday: "long", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}`;
+        const emptyLabel = isBlackout
+          ? '<span class="pipeline-schedule-slot-empty">Off limits</span>'
+          : '<span class="pipeline-schedule-slot-empty">Drop here</span>';
+        return `<td class="${classes}"${interactive ? ` data-pipeline-schedule-drop="${escapeHtml(date.toISOString())}" tabindex="0" role="button" aria-label="${escapeHtml(aria)}"` : ` aria-label="${escapeHtml(aria)}"`}><div class="pipeline-schedule-cell-inner">${bubbles || emptyLabel}</div></td>`;
       }).join("");
-      return `<tr><th scope="row" class="pipeline-schedule-hour">${escapeHtml(pipelineScheduleSlotLabel(slotIndex))}</th>${cellsHtml}</tr>`;
+      return `<tr${rowBlackout ? ' class="is-blackout-row"' : ""}><th scope="row" class="pipeline-schedule-hour${rowBlackout ? " is-blackout" : ""}"${rowBlackout ? ' title="Off limits: 8:00 PM–3:30 AM local"' : ""}>${escapeHtml(pipelineScheduleSlotLabel(slotIndex))}</th>${cellsHtml}</tr>`;
     }).join("");
 
-    const windowToolbar = `<div class="pipeline-schedule-window-toolbar" aria-label="Calendar date range controls"><div class="pipeline-schedule-window-controls"><button type="button" class="secondary-button" data-pipeline-schedule-window-shift="-7">← Previous 7 days</button><button type="button" class="text-button" data-pipeline-schedule-window-today${pipelineScheduleWindowStartsToday(windowValue) ? ' disabled aria-current="date"' : ""}>Today</button><button type="button" class="secondary-button" data-pipeline-schedule-window-shift="7">Next 7 days →</button></div><strong class="pipeline-schedule-window-range">${escapeHtml(rangeLabel)}</strong><span class="pipeline-schedule-window-hint">Select a bubble, change the 7-day window if needed, then click its destination slot.</span></div>`;
+    const windowToolbar = `<div class="pipeline-schedule-window-toolbar" aria-label="Calendar date range controls"><div class="pipeline-schedule-window-controls"><button type="button" class="secondary-button" data-pipeline-schedule-window-shift="-7">← Previous 7 days</button><button type="button" class="text-button" data-pipeline-schedule-window-today${pipelineScheduleWindowStartsToday(windowValue) ? ' disabled aria-current="date"' : ""}>Today</button><button type="button" class="secondary-button" data-pipeline-schedule-window-shift="7">Next 7 days →</button></div><strong class="pipeline-schedule-window-range">${escapeHtml(rangeLabel)}</strong><span class="pipeline-schedule-window-hint">Select a bubble, change the 7-day window if needed, then click its destination slot. Darker shaded hours (8:00 PM–3:30 AM local) are off limits.</span></div>`;
     const tray = `<section class="pipeline-schedule-unscheduled" aria-label="Ready to schedule"><div class="pipeline-schedule-unscheduled-copy"><strong>Ready to schedule</strong><span>Outputs stay here until a schedule is saved. Use default schedules can fill intelligent row suggestions without removing them from this tray, or drag a bubble directly into a 30-minute slot.</span></div><div class="pipeline-schedule-unscheduled-list">${unscheduled.length ? unscheduled.map((record) => pipelineScheduleEntryMarkup(record, { unscheduled: true })).join("") : '<span class="subtle">No ready outputs are waiting for a saved schedule.</span>'}</div></section>`;
     target.innerHTML = `${windowToolbar}${tray}<div class="pipeline-schedule-grid-scroll"><table class="pipeline-schedule-grid-table"><thead><tr><th class="pipeline-hour-head" scope="col">Time</th>${head}</tr></thead><tbody>${rows}</tbody></table></div>`;
     bindPipelineScheduleGridWindowControls(target);
@@ -18110,10 +18121,13 @@
       return;
     }
     const past = stamp <= Date.now();
+    const blackout = pipelineScheduleIsBlackout(platformCalendarSelectedIso, workingStudioTimeZone());
     if (text) {
       text.textContent = past
         ? "Choose a future date and time."
-        : `Schedule for ${selected.toLocaleString(undefined, { timeZone: workingStudioTimeZone(), weekday: "short", month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" })}`;
+        : blackout
+          ? "That time is off limits (8:00 PM–3:30 AM local). Pick another slot."
+          : `Schedule for ${selected.toLocaleString(undefined, { timeZone: workingStudioTimeZone(), weekday: "short", month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" })}`;
     }
     const spacing = helper?.spacingWarning?.(
       selected,
@@ -18121,8 +18135,12 @@
       platformCalendarPlatform,
       platformCalendarOutputId,
     );
-    if (warning) warning.textContent = spacing?.message || "";
-    if (save) save.disabled = past;
+    if (warning) {
+      warning.textContent = blackout
+        ? "Overnight blackout: 8:00 PM–3:30 AM local is shaded and not available."
+        : (spacing?.message || "");
+    }
+    if (save) save.disabled = past || blackout;
     if (rerender) renderPlatformScheduleCalendar();
   }
 
@@ -18173,12 +18191,16 @@
       return `<th scope="col"><span class="platform-calendar-day-name">${escapeHtml(dayName)}</span><span class="platform-calendar-day-date">${escapeHtml(day.toLocaleDateString(undefined, { timeZone: workingStudioTimeZone(), month: "short", day: "numeric" }))}</span></th>`;
     }).join("");
     const rows = Array.from({ length: 48 }, (_, slotIndex) => {
+      const sampleDay = platformCalendarWeek.days[0];
+      const sampleSlot = sampleDay ? helper.slotDate(sampleDay, slotIndex, workingStudioTimeZone()) : null;
+      const rowBlackout = sampleSlot ? pipelineScheduleIsBlackout(sampleSlot.toISOString(), workingStudioTimeZone()) : false;
       const cells = platformCalendarWeek.days.map((day) => {
         const slot = helper.slotDate(day, slotIndex, workingStudioTimeZone());
         const key = helper.slotKey(slot, workingStudioTimeZone());
         const events = slots.get(key) || [];
         const spacing = helper.spacingWarning(slot, schedulableCalendarRecords, platformCalendarPlatform, platformCalendarOutputId);
         const isPast = slot.getTime() <= Date.now();
+        const isBlackout = pipelineScheduleIsBlackout(slot.toISOString(), workingStudioTimeZone());
         const eventHtml = events.map((item) => {
           const fullItem = (pipelineOutputs || []).find((row) => row?.id === item?.id) || item;
           const isPublished = creativeIsPublished(fullItem);
@@ -18197,11 +18219,15 @@
           events.length ? "has-scheduled" : "",
           spacing ? "has-nearby" : "",
           selectedKey === key ? "is-selected" : "",
+          isBlackout ? "is-blackout" : "",
         ].filter(Boolean).join(" ");
-        const title = spacing?.message || (events.length ? events.map(platformCalendarEventLabel).join("\n") : "Choose this time");
-        return `<td><button type="button" class="${classes}" data-platform-calendar-slot="${escapeHtml(slot.toISOString())}" title="${escapeHtml(title)}"${isPast ? " disabled" : ""}>${eventHtml || '<span class="platform-calendar-slot-add">＋</span>'}</button></td>`;
+        const title = isBlackout
+          ? "Off limits: 8:00 PM–3:30 AM local"
+          : (spacing?.message || (events.length ? events.map(platformCalendarEventLabel).join("\n") : "Choose this time"));
+        const disabled = isPast || isBlackout;
+        return `<td><button type="button" class="${classes}" data-platform-calendar-slot="${escapeHtml(slot.toISOString())}" title="${escapeHtml(title)}"${disabled ? " disabled" : ""}>${eventHtml || (isBlackout ? '<span class="platform-calendar-slot-add">Off limits</span>' : '<span class="platform-calendar-slot-add">＋</span>')}</button></td>`;
       }).join("");
-      return `<tr><th scope="row" class="platform-calendar-slot-label">${escapeHtml(platformCalendarSlotLabel(slotIndex))}</th>${cells}</tr>`;
+      return `<tr${rowBlackout ? ' class="is-blackout-row"' : ""}><th scope="row" class="platform-calendar-slot-label${rowBlackout ? " is-blackout" : ""}"${rowBlackout ? ' title="Off limits: 8:00 PM–3:30 AM local"' : ""}>${escapeHtml(platformCalendarSlotLabel(slotIndex))}</th>${cells}</tr>`;
     }).join("");
     const previousScrollTop = target.scrollTop;
     target.innerHTML = `<table class="platform-calendar-table"><thead><tr><th class="platform-calendar-hour-head" scope="col">Time</th>${head}</tr></thead><tbody>${rows}</tbody></table>`;
