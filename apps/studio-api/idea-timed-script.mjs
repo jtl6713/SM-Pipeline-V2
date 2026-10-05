@@ -178,6 +178,7 @@ export function buildTimelineFromScenes(scenes) {
       voiceover_text: voiceover,
       suggested_visual: String(raw?.suggested_visual || "").trim(),
       asset_id: String(raw?.asset_id || raw?.media_asset_id || "").trim(),
+      shot_status: String(raw?.shot_status || "").trim() || (String(raw?.asset_id || raw?.media_asset_id || "").trim() ? "owned" : "suggestion"),
       speech_rate: 1,
       force_exact_voiceover: true,
     });
@@ -283,6 +284,109 @@ export function scenesFromModelPayload(payload, catalog) {
       asset_id: stillId(still),
     };
   }).filter((scene) => scene.voiceover_text || scene.suggested_visual);
+}
+
+/** Attach a library file only when the suggestion names that file. Leave the rest as a shot list. */
+export function assignOwnedScenes(scenes, stills) {
+  const pool = Array.isArray(stills) ? stills : [];
+  const used = new Set();
+  return (Array.isArray(scenes) ? scenes : []).map((scene) => {
+    const hintedId = String(scene?.media_asset_id || scene?.asset_id || "").trim();
+    const byId = hintedId
+      ? pool.find((still) => stillId(still) === hintedId && !used.has(hintedId))
+      : null;
+    const matched = byId || matchStillBySuggestedVisual(scene?.suggested_visual, pool, { usedIds: used });
+    const next = {
+      voiceover_text: String(scene?.voiceover_text || scene?.line || "").replace(/\s+/g, " ").trim(),
+      suggested_visual: String(scene?.suggested_visual || "").trim(),
+      media_asset_id: "",
+      asset_id: "",
+      shot_status: "suggestion",
+    };
+    if (!matched) return next;
+    const id = stillId(matched);
+    used.add(id);
+    return {
+      ...next,
+      media_asset_id: id,
+      asset_id: id,
+      suggested_visual: stillLabel(matched) || next.suggested_visual,
+      shot_status: "owned",
+    };
+  }).filter((scene) => scene.voiceover_text || scene.suggested_visual);
+}
+
+export function scenesFromProposalPayload(payload, catalog) {
+  const known = new Set((Array.isArray(catalog) ? catalog : []).map((still) => stillId(still)).filter(Boolean));
+  if (!payload || typeof payload !== "object" || !Array.isArray(payload.scenes)) return [];
+  return payload.scenes.map((scene) => {
+    const hinted = String(scene?.media_asset_id || scene?.asset_id || "").trim();
+    const owned = known.has(hinted);
+    return {
+      voiceover_text: String(scene?.voiceover_text || scene?.line || "").replace(/\s+/g, " ").trim(),
+      suggested_visual: String(scene?.suggested_visual || scene?.asset_name || "").trim(),
+      media_asset_id: owned ? hinted : "",
+      asset_id: owned ? hinted : "",
+      shot_status: owned ? "owned" : "suggestion",
+    };
+  }).filter((scene) => scene.voiceover_text || scene.suggested_visual);
+}
+
+export function fallbackProposalScenes(prompt, stills) {
+  const title = String(prompt || "").replace(/\s+/g, " ").trim() || "This place";
+  const owned = (Array.isArray(stills) ? stills : []).filter((still) => stillId(still) && stillLabel(still)).slice(0, 4);
+  const scenes = owned.map((still, index) => {
+    const spoken = spokenStillName(stillLabel(still));
+    return {
+      voiceover_text: index === 0
+        ? `${title}. Start with ${spoken}.`
+        : `Next, ${spoken}.`,
+      suggested_visual: stillLabel(still),
+      media_asset_id: stillId(still),
+      asset_id: stillId(still),
+      shot_status: "owned",
+    };
+  });
+  const suggestions = [
+    `Vertical frame of ${title} that is not in the library yet.`,
+    `Close detail that proves the point of ${title}.`,
+    `Hero frame of ${title} with clean space for a title.`,
+  ];
+  suggestions.forEach((visual, index) => {
+    const line = index === suggestions.length - 1
+      ? `Save ${title} for last.`
+      : `You still need a photo for this beat of ${title}.`;
+    scenes.push({
+      voiceover_text: line,
+      suggested_visual: visual,
+      media_asset_id: "",
+      asset_id: "",
+      shot_status: "suggestion",
+    });
+  });
+  return scenes.slice(0, IDEA_TIMED_SCRIPT_MAX_SCENES);
+}
+
+export function timedScriptFromNotes(notes) {
+  const match = /(?:^|\n)\[timed-script\]\s*(\{.*\})\s*(?:\n|$)/i.exec(String(notes || ""));
+  if (!match) return null;
+  try {
+    const parsed = JSON.parse(match[1]);
+    return parsed && typeof parsed === "object" ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+export function unassignedSuggestionCount(timeline) {
+  const segments = Array.isArray(timeline?.segments) ? timeline.segments : [];
+  return segments.filter((segment) => !String(segment?.asset_id || segment?.media_asset_id || "").trim()).length;
+}
+
+export function scriptedShortProposalReady(timeline) {
+  const segments = Array.isArray(timeline?.segments) ? timeline.segments : [];
+  if (segments.length < 2) return false;
+  return segments.every((segment) => String(segment?.voiceover_text || "").trim() && String(segment?.suggested_visual || "").trim());
 }
 
 export function ideaTimedScriptReady(timeline) {

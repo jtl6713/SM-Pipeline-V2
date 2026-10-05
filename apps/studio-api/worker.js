@@ -192,15 +192,20 @@ import {
   libraryQuotedPhrase,
 } from "./library-phrase.mjs";
 import {
+  assignOwnedScenes,
   assignScenesToStills,
   buildTimelineFromScenes,
   exactVoiceoverText,
+  fallbackProposalScenes,
   fallbackScenesFromStills,
   formatTimedScriptMarkdown,
   ideaTimedScriptReady,
   mergeTimedScriptNotes,
   pickTimelineCatalog,
   scenesFromModelPayload,
+  scriptedShortProposalReady,
+  timedScriptFromNotes,
+  unassignedSuggestionCount,
 } from "./idea-timed-script.mjs";
 
 const JSON_HEADERS = {
@@ -237,6 +242,8 @@ export default {
       const isIdeaLibrarySuggestionsRoute = /^\/api\/ideas\/rec[A-Za-z0-9]+\/library-suggestions$/.test(url.pathname);
       const isIdeaProductionRequestRoute = /^\/api\/ideas\/rec[A-Za-z0-9]+\/production-request$/.test(url.pathname);
       const isIdeaGenerateRoute = url.pathname === "/api/ideas/generate";
+      const isScriptedShortProposeRoute = url.pathname === "/api/scripted-short/propose";
+      const isScriptedShortAcceptRoute = url.pathname === "/api/scripted-short/accept";
       const isIdeaGenerateStatusRoute = /^\/api\/ideas\/generate\/rec[A-Za-z0-9]+$/.test(url.pathname);
       const isProductionRequestRecordRoute = /^\/api\/production-requests\/rec[A-Za-z0-9]+$/.test(url.pathname);
       const isProductionRequestPromoteRoute = /^\/api\/production-requests\/rec[A-Za-z0-9]+\/promote$/.test(url.pathname);
@@ -492,7 +499,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.450-quoted-library-name",
+          version: "0.10.451-scripted-short-proposal",
           studio_mae_schedule_v1: true,
           studio_desk_inventory_v1: true,
           studio_desk_activity_v1: true,
@@ -1041,6 +1048,21 @@ export default {
         assertWriteRequest(request, env);
         requirePermission(authorization, "ideas_create");
         return startStudioIdeaGeneration(request, env, authorization, ctx);
+      }
+
+      if (isScriptedShortProposeRoute) {
+        if (request.method !== "POST") throw new HttpError(405, "Method not allowed");
+        assertWriteRequest(request, env);
+        requirePermission(authorization, "ideas_create");
+        return proposeScriptedShortRoute(request, env, authorization);
+      }
+
+      if (isScriptedShortAcceptRoute) {
+        if (request.method !== "POST") throw new HttpError(405, "Method not allowed");
+        assertWriteRequest(request, env);
+        requirePermission(authorization, "ideas_create");
+        requirePermission(authorization, "production_configure");
+        return acceptScriptedShortRoute(request, env, authorization, ctx);
       }
 
       if (isIdeaGenerateStatusRoute) {
@@ -20532,6 +20554,15 @@ async function promoteProductionRequestViaI3I4(request, env, url, authorization,
   const requestRecordId = productionRequestPromotionRecordIdFromPath(url);
   let requestRecord = await loadAuthorizedProductionRequest(env, requestRecordId, authorization);
   const requestStatus = String(f(requestRecord, "Request_Status") || "").trim();
+  const proposalNotes = String(f(requestRecord, "Production_Notes") || "");
+  if (/scripted-short=proposal/i.test(proposalNotes)) {
+    const proposalTimeline = timedScriptFromNotes(proposalNotes);
+    if (!proposalTimeline) {
+      throw new HttpError(409, "The scripted short timeline is missing. Save the scenes before Approve.");
+    }
+    const unassigned = scriptedShortUnassignedMessage(proposalTimeline);
+    if (unassigned) throw new HttpError(409, unassigned);
+  }
 
   const ideaLinks = Array.isArray(f(requestRecord, "Idea_Candidate")) ? f(requestRecord, "Idea_Candidate") : [];
   if (ideaLinks.length !== 1) {
@@ -21470,6 +21501,198 @@ async function pulseIdeaTimedScriptWriter(env, idea, catalog) {
     source: "fallback",
     scenes: fallbackScenesFromStills({ title, summary, location }, catalog),
   };
+}
+
+function scriptedShortUnassignedMessage(timeline) {
+  const count = unassignedSuggestionCount(timeline);
+  if (!count) return "";
+  const shots = (timeline?.segments || [])
+    .filter((segment) => !String(segment?.asset_id || "").trim())
+    .map((segment) => String(segment?.suggested_visual || "").trim())
+    .filter(Boolean)
+    .slice(0, 3);
+  const list = shots.length ? ` Still needed: ${shots.join("; ")}.` : "";
+  return `Attach a photo to ${count} suggested scene${count === 1 ? "" : "s"} before Approve.${list} This does not publish.`;
+}
+
+async function proposeScriptedShortRoute(request, env, authorization) {
+  let payload = {};
+  try { payload = await request.json(); } catch { throw new HttpError(400, "Request body must be valid JSON"); }
+  const prompt = String(payload?.prompt || "").replace(/\s+/g, " ").trim();
+  if (prompt.length < 3) throw new HttpError(400, "Describe the short in a sentence.");
+  const synthetic = {
+    id: "scripted-short-proposal",
+    fields: {
+      Candidate_Title: prompt.slice(0, 160),
+      Idea_Summary: prompt.slice(0, 2000),
+    },
+  };
+  let catalog = [];
+  try {
+    catalog = (await rankStillsForIdeaPhotoWait(env, synthetic)).map(ideaTimedScriptCatalogRow);
+  } catch (error) {
+    console.warn("scripted short library rank failed", error);
+  }
+  const picked = pickTimelineCatalog(catalog);
+  const pool = picked.catalog.length ? picked.catalog : picked.selected;
+  let source = "fallback";
+  let scenes = [];
+  try {
+    const writer = await pulseIdeaTimedScriptWriter(env, synthetic, pool);
+    source = writer.source && writer.source !== "fallback" ? writer.source : "fallback";
+    scenes = assignOwnedScenes((writer.scenes || []).map((scene) => ({
+      voiceover_text: scene.voiceover_text,
+      suggested_visual: scene.suggested_visual,
+    })), pool);
+  } catch (error) {
+    console.warn("scripted short writer failed", error);
+  }
+  if (!scriptedShortProposalReady(buildTimelineFromScenes(scenes))) {
+    source = "fallback";
+    scenes = assignOwnedScenes(fallbackProposalScenes(prompt, pool), pool);
+  }
+  const timeline = buildTimelineFromScenes(scenes);
+  if (!scriptedShortProposalReady(timeline)) {
+    throw new HttpError(502, "Studio could not write a scripted short from that prompt.");
+  }
+  const owned = timeline.segments.length - unassignedSuggestionCount(timeline);
+  const suggestions = unassignedSuggestionCount(timeline);
+  return respond(request, env, {
+    ok: true,
+    source,
+    prompt,
+    markdown: formatTimedScriptMarkdown(timeline),
+    timeline,
+    duration_seconds: timeline.duration_seconds,
+    scene_count: timeline.segments.length,
+    owned_count: owned,
+    suggestion_count: suggestions,
+    message: suggestions
+      ? `${timeline.segments.length} scenes. ${owned} use a library file. ${suggestions} still need a photo you create. Estimated times are hints. The recorded voiceover sets the real length.`
+      : `${timeline.segments.length} scenes, all matched to library files. Estimated times are hints. The recorded voiceover sets the real length.`,
+  });
+}
+
+async function acceptScriptedShortRoute(request, env, authorization, ctx = null) {
+  let payload = {};
+  try { payload = await request.json(); } catch { throw new HttpError(400, "Request body must be valid JSON"); }
+  const prompt = String(payload?.prompt || "").replace(/\s+/g, " ").trim();
+  if (prompt.length < 3) throw new HttpError(400, "Describe the short in a sentence.");
+  const incoming = payload?.timeline;
+  if (!scriptedShortProposalReady(incoming)) {
+    throw new HttpError(400, "Accept needs the proposal timeline.");
+  }
+  const timeline = buildTimelineFromScenes(incoming.segments);
+  const profile = await resolveWorkingContentProfile(env, authorization, requestedProfileId(null, payload));
+  const title = prompt.slice(0, 160);
+  const idea = await airtableFetch(env, env.AIRTABLE_IDEA_TABLE_ID, "", {
+    method: "POST",
+    body: JSON.stringify({
+      fields: {
+        Candidate_Title: title,
+        Idea_Summary: prompt.slice(0, 2000),
+        Candidate_Status: "Approved",
+        Batch_Date: new Date().toISOString().slice(0, 10),
+        Content_Profile: [profile.id],
+        Production_Content_Type: "Vertical Short Video",
+        Production_Include_Voiceover: "Yes",
+        Production_Include_Background_Music: "Yes",
+        Production_Include_Thumbnail: "Yes",
+        Production_Video_Clip_Count: timeline.segments.length,
+      },
+      typecast: true,
+    }),
+  });
+  let requestRecord = await createDraftForIdea(env, idea, authorization, null, { preferredProfileId: profile.id });
+  const mediaIds = [...new Set(timeline.segments
+    .map((segment) => String(segment.asset_id || "").trim())
+    .filter((id) => /^rec[A-Za-z0-9]+$/.test(id)))];
+  if (mediaIds.length) {
+    const attached = await applyLibraryAssetsToProductionRequest(env, requestRecord, mediaIds, {
+      replaceWaitAssets: true,
+      allowManagePaused: true,
+      replaceAll: true,
+    });
+    requestRecord = attached.record;
+    const orderedAssets = item4AssetManifest(requestRecord)
+      .slice()
+      .sort((a, b) => Number(a.order || 0) - Number(b.order || 0));
+    const byMedia = new Map(orderedAssets.map((asset) => [String(asset?.media_asset_record_id || "").trim(), asset]));
+    timeline.segments.forEach((segment) => {
+      const matched = byMedia.get(String(segment.asset_id || "").trim());
+      if (matched?.id) {
+        segment.asset_id = String(matched.id);
+        segment.shot_status = "owned";
+      } else {
+        segment.asset_id = "";
+        segment.shot_status = "suggestion";
+      }
+    });
+  } else {
+    timeline.segments.forEach((segment) => {
+      segment.asset_id = "";
+      segment.shot_status = "suggestion";
+    });
+  }
+  const script = exactVoiceoverText(timeline);
+  const notes = withProductionPhotoWaitManual(mergeTimedScriptNotes("", timeline));
+  const stampedNotes = `${notes}\nidea-vo-timeline=1\nscripted-short=proposal`.trim();
+  const duration = Math.max(5, Math.round(Number(timeline.duration_seconds) || 0));
+  const missing = unassignedSuggestionCount(timeline);
+  requestRecord = await item4UpdateRequestState(env, requestRecord.id, {
+    Master_Content_Type: "Vertical Short Video",
+    Voiceover_Mode: "Yes",
+    Background_Music_Mode: "Yes",
+    Thumbnail_Mode: "Yes",
+    Selected_Music_Asset: [AUTONOMOUS_DEFAULT_MUSIC_ASSET_ID],
+    Script_Mode: "Force exact",
+    Requested_Script: script,
+    Requested_Title: title,
+    Video_Duration_Seconds: duration,
+    Voiceover_Tail_Seconds: 0,
+    Video_Clip_Count_Mode: "Exact",
+    Video_Clip_Count_Exact: timeline.segments.length,
+    Carousel_Image_Mode: "Manual Upload",
+    Production_Notes: stampedNotes.slice(0, 10000),
+    Request_Status: "Draft",
+    Studio_Item4_State: "Draft",
+  });
+  try {
+    const planCall = studioInternalJsonRequest(`/api/production-requests/${requestRecord.id}/plan`, {
+      platforms: [...AUTONOMOUS_STANDARD_PLATFORMS],
+      overrides: autonomousPlanOverrides("Vertical Short Video"),
+      extras: autonomousPlanExtras(),
+      package: "video",
+      skip_fbs1_guard: true,
+    });
+    await buildItem4OutputPlan(planCall.request, env, planCall.url, authorization);
+    requestRecord = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, requestRecord.id);
+  } catch (error) {
+    console.warn("scripted short plan failed", requestRecord.id, error);
+  }
+  if (!missing && String(f(requestRecord, "Studio_Output_Plan_Status") || "").trim() === "Ready") {
+    try {
+      const variantsCall = studioInternalJsonRequest(`/api/production-requests/${requestRecord.id}/variants`, {});
+      await prepareItem4Variants(variantsCall.request, env, variantsCall.url, authorization, ctx);
+      requestRecord = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, requestRecord.id);
+    } catch (error) {
+      console.warn("scripted short variant prepare failed", requestRecord.id, error);
+    }
+  }
+  requestRecord = await item4UpdateRequestState(env, requestRecord.id, {
+    Request_Status: "Draft",
+    Studio_Item4_State: String(f(requestRecord, "Studio_Output_Plan_Status") || "").trim() === "Ready" ? "Plan Ready" : "Draft",
+  });
+  return respond(request, env, {
+    ok: true,
+    suggestion_count: missing,
+    scene_count: timeline.segments.length,
+    record: mapIdea(idea),
+    production_request: mapProductionRequest(requestRecord),
+    message: missing
+      ? `Draft saved. ${missing} scene${missing === 1 ? "" : "s"} still need a photo. Attach those stills, then Approve. Estimated times are hints. This does not publish.`
+      : "Draft saved with the six short outputs, default voice, and default music. Approve on Production when you are ready. This does not publish.",
+  }, 201);
 }
 
 async function createIdeaTimedScriptRoute(request, env, url, authorization, ctx = null) {

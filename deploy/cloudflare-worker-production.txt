@@ -11,3 +11,4 @@ Deploy Worker 0.10.447-drive-music-404. Quality Agent detects deleted library mu
 Deploy Worker 0.10.448-schedule-occupancy-window. Occupancy query windows lookback/horizon and sorts nearest-first so MAE does not pile onto 5:30 AM.
 Deploy Worker 0.10.449-plan-mae-rotation. New production plans pick the next open MAE slot instead of reusing a taken 5:30.
 Deploy Worker 0.10.450-quoted-library-name. A quoted library search matches the asset name only.
+Deploy Worker 0.10.451-scripted-short-proposal. Accept a scripted short as a Draft and block Approve while a scene still needs a photo.

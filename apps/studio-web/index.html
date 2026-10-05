@@ -9,7 +9,7 @@
  <link rel="preconnect" href="https://fonts.googleapis.com">
  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@1,600;1,700&family=Inter:wght@400;500;600;700;800&family=Oswald:wght@500&display=swap">
- <link rel="stylesheet" href="/assets/styles-phase7-0621.css?v=0.6.494-master-calendar-blackout-collapse">
+ <link rel="stylesheet" href="/assets/styles-phase7-0621.css?v=0.6.499-scripted-short-proposal">
  <link rel="stylesheet" href="/assets/production-tablet-0622.css?v=0.6.493-ideas-vo-production-handoff">
  <link rel="stylesheet" href="/assets/insights-0622.css?v=0.6.381-insights-padding">
  <link rel="stylesheet" href="/assets/clean-enterprise.css?v=0.6.375-clean-enterprise">
@@ -142,6 +142,19 @@
  <div class="heading-actions"><button class="secondary-button" data-refresh="ideas">Refresh</button><button class="secondary-button" id="ideasRunAutonomous">Use unused photos</button><button class="secondary-button" id="ideasCreateTimelineButton">Create VO timeline</button><button class="secondary-button" id="generateIdeasButton">Generate AI ideas</button><button class="primary-button" id="newIdeaButton">+ New idea</button></div>
  </div>
  <div class="form-message ideas-autonomous-message" id="ideasAutonomousMessage" aria-live="polite"></div>
+ <section class="panel" id="scriptedShortPanel">
+ <div class="panel-heading"><div><h2>Script a short</h2><p>One prompt. Studio writes the spoken scenes and estimated timings, and either attaches a library file or leaves a shot you still need to create. Decline throws it away. Accept saves a Draft with the six short outputs, the default voice, and the default music. Approve stays locked until every scene has a photo. This does not publish.</p></div></div>
+ <form id="scriptedShortForm" class="idea-form">
+ <label class="form-field"><span>Prompt</span><textarea id="scriptedShortPrompt" maxlength="500" rows="3" placeholder="Staten Island Ferry tricks" required></textarea></label>
+ <div class="idea-generate-actions"><button type="submit" class="primary-button" id="scriptedShortPropose">Propose</button></div>
+ </form>
+ <div class="form-message" id="scriptedShortMessage" aria-live="polite"></div>
+ <div id="scriptedShortResult" hidden>
+ <p class="idea-timed-script-meta" id="scriptedShortMeta"></p>
+ <div id="scriptedShortScenes"></div>
+ <div class="idea-generate-actions"><button type="button" class="primary-button" id="scriptedShortAccept">Accept</button><button type="button" class="secondary-button" id="scriptedShortDecline">Decline</button></div>
+ </div>
+ </section>
  <section class="panel idea-generate-panel" id="ideaGeneratePanel" hidden>
  <form id="ideaGenerateForm" class="idea-generate-form">
  <div class="idea-generate-fields">
@@ -2140,7 +2153,7 @@
  <div class="studio-footer-meta">
  <span id="aiApiFooter" aria-live="polite"><strong>AI API:</strong> loading…</span>
  <span id="apiStatus" class="topbar-status">Connecting…</span>
- <span id="uiBuildLabel">UI build 0.6.498</span>
+ <span id="uiBuildLabel">UI build 0.6.499</span>
  <span id="workerBuildLabel">Worker …</span> </div>
  </footer>
 
@@ -2314,7 +2327,7 @@
  <script src="/assets/pipeline-schedule-grid-0622.js?v=0.6.475-manual-media-authority"></script>
  <script src="/assets/platform-schedule-calendar-0924.js?v=0.6.475-manual-media-authority"></script>
  <script src="/assets/timed-script.js?v=0.6.498-timed-script-spreadsheet"></script>
- <script src="/assets/app-item4-0625.js?v=0.6.498-timed-script-spreadsheet"></script>
+ <script src="/assets/app-item4-0625.js?v=0.6.499-scripted-short-proposal"></script>
  <script src="/assets/insights-0622.js?v=0.6.365-first-party-analytics-reconciled"></script>
  <script src="/assets/ai-api-footer.js?v=0.6.427-primary-ai-alert"></script>
  <script src="/assets/sticky-footer-scroll.js?v=0.6.378-sticky-footer-scroll"></script>

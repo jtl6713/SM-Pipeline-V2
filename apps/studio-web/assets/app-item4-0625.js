@@ -54,6 +54,7 @@
   let activeIdeaGenerationBatchId = null;
   let ideaGenerationPollTimer = null;
   let ideaGenerationInFlight = false;
+  let scriptedShortProposal = null;
   let activeProductionRequest = null;
   let productionRequestMusic = [];
   let productionRequestOutputs = [];
@@ -259,7 +260,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.498-timed-script-spreadsheet";
+  const BUILD_ID = "item4-0.6.499-scripted-short-proposal";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -2254,6 +2255,124 @@
     }
     setIdeasAutonomousMessage("Open an idea with Manage, then tap Create VO timeline. Studio writes the spoken script and picks named library stills.");
     $("ideasList")?.scrollIntoView({ behavior: "smooth", block: "start" });
+  });
+
+  function setScriptedShortMessage(message, kind = "") {
+    const node = $("scriptedShortMessage");
+    if (!node) return;
+    node.textContent = message || "";
+    node.className = `form-message${kind ? ` ${kind}` : ""}`;
+  }
+
+  function renderScriptedShortProposal(proposal) {
+    const result = $("scriptedShortResult");
+    const meta = $("scriptedShortMeta");
+    const host = $("scriptedShortScenes");
+    if (!result || !host) return;
+    if (!proposal?.timeline?.segments?.length) {
+      result.hidden = true;
+      host.innerHTML = "";
+      if (meta) meta.textContent = "";
+      return;
+    }
+    result.hidden = false;
+    const seconds = Number(proposal.duration_seconds || proposal.timeline.duration_seconds || 0);
+    const suggestions = Number(proposal.suggestion_count || 0);
+    if (meta) {
+      meta.textContent = `${proposal.scene_count || proposal.timeline.segments.length} scenes · about ${seconds.toFixed(0)} seconds estimated · ${suggestions} shot${suggestions === 1 ? "" : "s"} still to create. The recorded voiceover sets the real length.`;
+    }
+    host.innerHTML = proposal.timeline.segments.map((segment, index) => {
+      const owned = Boolean(String(segment.asset_id || "").trim()) && segment.shot_status !== "suggestion";
+      const clock = window.StudioTimedScript
+        ? `${window.StudioTimedScript.formatClock(segment.start_seconds)}–${window.StudioTimedScript.formatClock(segment.end_seconds)}`
+        : `${Number(segment.start_seconds || 0).toFixed(0)}s`;
+      return `<article class="scripted-short-scene">
+        <div><strong>Scene ${index + 1}</strong><small>${escapeHtml(clock)} · ${Number(segment.duration_seconds || 0).toFixed(1)}s hint</small></div>
+        <div><p>${escapeHtml(segment.voiceover_text || "")}</p><small class="${owned ? "scripted-short-owned" : "scripted-short-suggestion"}">${owned ? "Library file" : "Shot to create"}: ${escapeHtml(segment.suggested_visual || "")}</small></div>
+      </article>`;
+    }).join("");
+  }
+
+  function clearScriptedShortProposal() {
+    scriptedShortProposal = null;
+    renderScriptedShortProposal(null);
+  }
+
+  $("scriptedShortForm")?.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const prompt = String($("scriptedShortPrompt")?.value || "").trim();
+    const button = $("scriptedShortPropose");
+    if (prompt.length < 3) {
+      setScriptedShortMessage("Describe the short in a sentence.", "error-text");
+      return;
+    }
+    if (button) {
+      button.disabled = true;
+      button.textContent = "Writing…";
+    }
+    setScriptedShortMessage("Writing the script and matching library files…");
+    try {
+      const result = await api("/api/scripted-short/propose", {
+        method: "POST",
+        body: JSON.stringify({ prompt }),
+        timeoutMs: 150000,
+      });
+      scriptedShortProposal = result;
+      renderScriptedShortProposal(result);
+      setScriptedShortMessage(result.message || "Proposal ready. Accept keeps it. Decline throws it away.", "success");
+    } catch (error) {
+      clearScriptedShortProposal();
+      setScriptedShortMessage(error.message || "Could not write that short.", "error-text");
+    } finally {
+      if (button) {
+        button.disabled = false;
+        button.textContent = "Propose";
+      }
+    }
+  });
+
+  $("scriptedShortDecline")?.addEventListener("click", () => {
+    clearScriptedShortProposal();
+    setScriptedShortMessage("Proposal discarded.", "success");
+  });
+
+  $("scriptedShortAccept")?.addEventListener("click", async () => {
+    if (!scriptedShortProposal?.timeline) {
+      setScriptedShortMessage("Propose a short before accepting it.", "error-text");
+      return;
+    }
+    const button = $("scriptedShortAccept");
+    if (button) {
+      button.disabled = true;
+      button.textContent = "Saving…";
+    }
+    setScriptedShortMessage("Saving the draft. Approve stays off until every scene has a photo.");
+    try {
+      const result = await api("/api/scripted-short/accept", {
+        method: "POST",
+        body: JSON.stringify({
+          prompt: scriptedShortProposal.prompt || $("scriptedShortPrompt")?.value || "",
+          timeline: scriptedShortProposal.timeline,
+        }),
+        timeoutMs: 150000,
+      });
+      clearScriptedShortProposal();
+      setScriptedShortMessage(result.message || "Draft saved.", "success");
+      await Promise.all([loadIdeas(), loadDashboard(), loadProductionRequests()]).catch(() => {});
+      if (result.record?.id && result.production_request?.id) {
+        await openProductionRequestForIdea(result.record, {
+          productionRequest: result.production_request,
+          successMessage: result.message || "",
+        });
+      }
+    } catch (error) {
+      setScriptedShortMessage(error.message || "Could not save that draft.", "error-text");
+    } finally {
+      if (button) {
+        button.disabled = false;
+        button.textContent = "Accept";
+      }
+    }
   });
   $("generateIdeasButton")?.addEventListener("click", () => setIdeaGeneratorOpen(true, { reset: !ideaGenerationInFlight }));
   $("ideaGenerateCancel")?.addEventListener("click", () => setIdeaGeneratorOpen(false));
@@ -12974,6 +13093,14 @@
     if (item4Workspace?.assets?.length && item4Workspace?.plan_status !== "Ready") {
       setRequestMessage("Save the platform plan first, then click Approve again.", "error-text");
       return;
+    }
+    const proposalNotes = String($("prProductionNotes")?.value || activeProductionRequest?.production_notes || "");
+    if (/scripted-short=proposal/i.test(proposalNotes) && productionTimedScript?.segments?.length) {
+      const missing = productionTimedScript.segments.filter((segment) => !String(segment?.asset_id || "").trim()).length;
+      if (missing) {
+        setRequestMessage(`Attach a photo to ${missing} suggested scene${missing === 1 ? "" : "s"} before Approve. This does not publish.`, "error-text");
+        return;
+      }
     }
     if (item4Workspace?.assets?.length && !item4IsFinishedRequest() && item4Workspace?.variant_status !== "Ready" && item4Workspace?.variant_status !== "Not Needed") {
       setRequestMessage(`${item4VariantNotReadyCopy(item4Workspace?.variant_status)} Click Approve again when ready.`, "error-text");

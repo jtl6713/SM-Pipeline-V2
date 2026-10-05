@@ -4,16 +4,22 @@ import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import {
+  assignOwnedScenes,
   assignScenesToStills,
   buildTimelineFromScenes,
   exactVoiceoverText,
+  fallbackProposalScenes,
   fallbackScenesFromStills,
   formatTimedScriptMarkdown,
   ideaTimedScriptReady,
   mergeTimedScriptNotes,
   pickTimelineCatalog,
   scenesFromModelPayload,
+  scenesFromProposalPayload,
+  scriptedShortProposalReady,
   stillNameKey,
+  timedScriptFromNotes,
+  unassignedSuggestionCount,
 } from "./idea-timed-script.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -104,6 +110,43 @@ test("mergeTimedScriptNotes keeps ez tokens off the JSON line", () => {
   JSON.parse(merged.split("\n")[0].replace(/^\[timed-script\]\s*/, ""));
 });
 
+test("a scripted short keeps owned files and leaves unmatched shots unassigned", () => {
+  const scenes = assignOwnedScenes([
+    { voiceover_text: "Start on the platform.", suggested_visual: "UpperWestSide_72nd_platform.jpg" },
+    { voiceover_text: "You still need the ferry bow.", suggested_visual: "Vertical frame of the orange ferry that is not in the library yet." },
+  ], STILLS);
+  assert.equal(scenes[0].shot_status, "owned");
+  assert.equal(scenes[0].asset_id, "recWide1");
+  assert.equal(scenes[1].shot_status, "suggestion");
+  assert.equal(scenes[1].asset_id, "");
+  assert.match(scenes[1].suggested_visual, /not in the library/);
+  const timeline = buildTimelineFromScenes(scenes);
+  assert.equal(scriptedShortProposalReady(timeline), true);
+  assert.equal(unassignedSuggestionCount(timeline), 1);
+  assert.equal(timeline.segments[0].duration_seconds >= 4, true);
+  const notes = mergeTimedScriptNotes("scripted-short=proposal", timeline);
+  assert.equal(unassignedSuggestionCount(timedScriptFromNotes(notes)), 1);
+});
+
+test("proposal payload does not invent a library file for an unknown id", () => {
+  const scenes = scenesFromProposalPayload({
+    scenes: [
+      { voiceover_text: "Tap OMNY.", suggested_visual: "OMNY reader", media_asset_id: "recOmny2" },
+      { voiceover_text: "Need the bow.", suggested_visual: "Ferry bow", media_asset_id: "recMissing" },
+    ],
+  }, STILLS);
+  assert.equal(scenes[0].shot_status, "owned");
+  assert.equal(scenes[1].shot_status, "suggestion");
+  assert.equal(scenes[1].asset_id, "");
+});
+
+test("fallback proposal mixes library stills with shots still to create", () => {
+  const scenes = fallbackProposalScenes("Staten Island Ferry tricks", STILLS.slice(0, 2));
+  assert.ok(scenes.some((scene) => scene.shot_status === "owned"));
+  assert.ok(scenes.some((scene) => scene.shot_status === "suggestion"));
+  assert.match(scenes[0].voiceover_text, /Staten Island Ferry tricks/);
+});
+
 test("Worker advertises the idea timed-script route", async () => {
   const worker = await readFile(path.join(here, "worker.js"), "utf8");
   const app = await readFile(path.join(here, "../studio-web/assets/app-item4-0625.js"), "utf8");
@@ -130,6 +173,14 @@ test("Worker advertises the idea timed-script route", async () => {
   assert.match(html, /id="createIdeaTimelineButton"/);
   assert.match(html, /id="prVoiceoverHandoff"/);
   assert.match(html, /id="prOpenRenderingTab"/);
+  assert.match(html, /id="scriptedShortPropose"/);
+  assert.match(html, /id="scriptedShortAccept"/);
+  assert.match(html, /id="scriptedShortDecline"/);
+  assert.match(app, /\/api\/scripted-short\/propose/);
+  assert.match(app, /\/api\/scripted-short\/accept/);
+  assert.match(worker, /scripted-short\/propose/);
+  assert.match(worker, /scriptedShortUnassignedMessage/);
+  assert.match(worker, /scripted-short=proposal/);
   const css = await readFile(path.join(here, "../studio-web/assets/styles-phase7-0621.css"), "utf8");
   assert.match(css, /#page-ideas \.page-heading\{\s*flex-wrap:wrap;/);
   assert.match(css, /#page-ideas \.heading-actions\{/);
