@@ -22,6 +22,7 @@ from ttd.assets import (
     list_ready_slides,
     photo_manifest,
     photo_urls,
+    render_clip_photo_urls,
     video_manifest,
     video_source_url,
 )
@@ -117,6 +118,24 @@ def process_request(
         expected = expected_image_count(output, actual)
         result["slide_count"] = actual
         result["expected_image_count"] = expected
+
+        # Legacy/replayed carousel preparation can leave duplicate Carousel Slide
+        # rows linked to the same TikTok output. If that makes the slide-table
+        # count disagree with the approved output package, prefer the already
+        # stamped ordered Render_Clip_List_JSON when it contains exactly the
+        # expected number of public assets.
+        if expected is not None and actual != expected:
+            stamped_urls = render_clip_photo_urls(output)
+            if (
+                len(stamped_urls) == expected
+                and 0 < len(stamped_urls) <= max_photos
+                and all(is_public_publish_url(url) for url in stamped_urls)
+            ):
+                urls = stamped_urls
+                actual = len(urls)
+                result["slide_count"] = actual
+                result["asset_source"] = "render_clip_list_fallback"
+
         if actual < 1 or actual > max_photos or (expected is not None and actual != expected):
             client.update_record(
                 PLATFORM_OUTPUTS_TABLE,
