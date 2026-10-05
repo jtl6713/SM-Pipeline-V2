@@ -36,6 +36,23 @@ test("nyc subway markdown parses to 90 seconds and eight scenes", () => {
   assert.equal(narration.includes("skyline shot"), false);
 });
 
+test("markdown bold around a time range still parses", () => {
+  const parsed = timed.parseTimedScriptMarkdown(`
+| Time | Voiceover | Suggested still |
+| --- | --- | --- |
+| **0:00-0:07** | "At St. George, follow the signs." | **9:16 still:** ferry terminal |
+| **0:07-0:15** | "Coming back to Manhattan, switch sides." | Liberty from the return direction |
+`);
+  assert.equal(parsed.errors.length, 0);
+  assert.equal(parsed.ok, true);
+  assert.equal(parsed.timeline.segments.length, 2);
+  assert.equal(parsed.timeline.segments[0].start_seconds, 0);
+  assert.equal(parsed.timeline.segments[0].end_seconds, 7);
+  assert.equal(parsed.timeline.segments[1].start_seconds, 7);
+  assert.equal(parsed.timeline.segments[1].end_seconds, 15);
+  assert.match(parsed.timeline.segments[0].voiceover_text, /At St\. George/);
+});
+
 test("hyphen timestamps and validation messages", () => {
   const hyphen = timed.parseTimedScriptMarkdown(NYC_SUBWAY_SCRIPT.replaceAll("–", "-"));
   assert.equal(hyphen.ok, true);

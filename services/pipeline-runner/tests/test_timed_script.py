@@ -61,6 +61,17 @@ def test_hyphen_and_en_dash_and_minute_timestamps():
     assert parse_time_range("0:07-0:20") == (7, 20)
     assert parse_time_range("1:10–1:22") == (70, 82)
     assert parse_time_range("1:10-1:22") == (70, 82)
+    assert parse_time_range("**0:00-0:07**") == (0, 7)
+    assert parse_time_range("__1:05–1:13__") == (65, 73)
+    bold = parse_timed_script_markdown(
+        "| Time | Voiceover | Suggested still |\n"
+        "| --- | --- | --- |\n"
+        "| **0:00-0:07** | \"At St. George, follow the signs.\" | **9:16 still:** ferry terminal |\n"
+        "| **0:07-0:15** | \"Coming back to Manhattan, switch sides.\" | Liberty |\n"
+    )
+    assert bold["ok"] is True
+    assert bold["timeline"]["segments"][0]["end_seconds"] == 7
+    assert bold["timeline"]["segments"][1]["start_seconds"] == 7
     hyphen = NYC_SUBWAY_SCRIPT.replace("–", "-")
     parsed = parse_timed_script_markdown(hyphen)
     assert parsed["ok"] is True

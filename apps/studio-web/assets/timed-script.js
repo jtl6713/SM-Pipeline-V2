@@ -45,8 +45,12 @@
     return `${mins}:${String(secs).padStart(2, "0")}`;
   }
 
+  function stripMarkdownMarks(value) {
+    return String(value || "").replace(/\u00a0/g, " ").replace(/[*_`]/g, "").trim();
+  }
+
   function parseTimeRange(value) {
-    const match = RANGE_RE.exec(String(value || "").trim());
+    const match = RANGE_RE.exec(stripMarkdownMarks(value));
     if (!match) return null;
     const start = parseClock(match[1]);
     const end = parseClock(match[2]);

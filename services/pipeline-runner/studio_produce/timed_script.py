@@ -71,8 +71,12 @@ def format_clock(seconds: float) -> str:
     return f"{minutes}:{secs:02d}"
 
 
+def _strip_markdown_marks(value: str) -> str:
+    return re.sub(r"[*_`]", "", str(value or "").replace("\u00a0", " ")).strip()
+
+
 def parse_time_range(value: str) -> tuple[float, float] | None:
-    match = _RANGE_RE.match(str(value or "").strip())
+    match = _RANGE_RE.match(_strip_markdown_marks(value))
     if not match:
         return None
     start = parse_clock(match.group(1))
