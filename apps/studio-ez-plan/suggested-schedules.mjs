@@ -255,21 +255,24 @@ export function buildSuggestedScheduleMap(items, occupiedByPlatform = {}, now = 
     const outputType = String(item.output_type || "").trim();
     if (!platform || !outputType) continue;
     const key = `${platform}::${outputType}`;
+    const isStory = storyRank(outputType) === 1;
     const existing = String(item.scheduled_at || "").trim();
     if (existing && !Number.isNaN(Date.parse(existing))) {
       const iso = new Date(existing).toISOString();
       stamps.set(key, iso);
-      (reserved[platform] ||= []).push(Date.parse(iso));
+      // Stories may share a wall-clock slot; keep them out of the platform lane.
+      if (!isStory) (reserved[platform] ||= []).push(Date.parse(iso));
       continue;
     }
     const industry = industryBestWindows(platform, outputType);
     const iso = pickBalancedSuggestedIso(industry.windows, now, {
       days: industry.days,
-      occupiedMs: flattenOccupiedByPlatform(reserved),
-      platformOccupiedMs: reserved[platform] || [],
+      // Stories ignore occupancy so IG/FB Stories can share a slot with mains.
+      occupiedMs: isStory ? [] : flattenOccupiedByPlatform(reserved),
+      platformOccupiedMs: isStory ? [] : (reserved[platform] || []),
     });
     stamps.set(key, iso);
-    (reserved[platform] ||= []).push(Date.parse(iso));
+    if (!isStory) (reserved[platform] ||= []).push(Date.parse(iso));
   }
   return stamps;
 }

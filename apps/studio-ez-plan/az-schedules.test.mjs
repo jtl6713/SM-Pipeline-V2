@@ -18,18 +18,18 @@ function azItems() {
   });
 }
 
-test("AZ spreads package outputs across several days and separates same-platform Story", () => {
+test("AZ spreads package mains across several days; Stories may share a platform slot", () => {
   const { stamps, campaign } = buildAzCampaignSchedule(azItems(), { occupiedMs: [], now: SATURDAY_EVENING });
   assert.ok(campaign?.key);
-  const allDays = new Set([...stamps.values()].map((iso) => chicagoCivilFromMs(Date.parse(iso)).key));
-  assert.ok(allDays.size >= 4, "six-output package should be spread across the week");
+  const mainDays = new Set(
+    ["Instagram::Reel", "Facebook::Reel", "TikTok::Video Draft", "YouTube::Short"]
+      .map((key) => chicagoCivilFromMs(Date.parse(stamps.get(key))).key),
+  );
+  assert.ok(mainDays.size >= 3, "main outputs should be spread across the week");
 
-  const igReelDay = chicagoCivilFromMs(Date.parse(stamps.get("Instagram::Reel"))).key;
-  const igStoryDay = chicagoCivilFromMs(Date.parse(stamps.get("Instagram::Story"))).key;
-  const fbReelDay = chicagoCivilFromMs(Date.parse(stamps.get("Facebook::Reel"))).key;
-  const fbStoryDay = chicagoCivilFromMs(Date.parse(stamps.get("Facebook::Story"))).key;
-  assert.notEqual(igStoryDay, igReelDay);
-  assert.notEqual(fbStoryDay, fbReelDay);
+  // Stories are exempt from the platform lane and may land with other Stories / mains.
+  assert.ok(stamps.get("Instagram::Story"));
+  assert.ok(stamps.get("Facebook::Story"));
 });
 
 test("AZ does not land at noon when another post is already at 11:30 the next day", () => {

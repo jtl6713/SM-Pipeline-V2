@@ -86,6 +86,18 @@ test("automatic scheduling uses wider weekly spacing", () => {
   assert.match(app, /spread across the week/);
 });
 
+test("Pipeline occupancy is platform-wide except Stories may stack", () => {
+  const here = path.dirname(fileURLToPath(import.meta.url));
+  const app = fs.readFileSync(path.join(here, "assets", "app-item4-0625.js"), "utf8");
+  assert.match(app, /function pipelineScheduleIsStory\(record\)/);
+  assert.match(app, /\$\{platform\}::story:\$\{id\}/);
+  assert.match(app, /TikTok Video and Slideshow cannot both take 5:30/);
+  assert.match(app, /if \(pipelineScheduleIsStory\(record\)\)/);
+  // Non-story outputs must return the bare platform key (not platform::outputType).
+  assert.match(app, /return platform;\n  \}/);
+  assert.doesNotMatch(app, /return platform && outputType \? `\$\{platform\}::\$\{outputType\}` : platform/);
+});
+
 
 test("Pipeline calendar supports drag/drop scheduling with full output identity tooltips", () => {
   const here = path.dirname(fileURLToPath(import.meta.url));
@@ -132,14 +144,14 @@ test("30-minute schedule grid exposes slot helpers", () => {
 test("default schedule suggestions start off, clear on untick, and do not hide ready outputs from the tray", () => {
   const here = path.dirname(fileURLToPath(import.meta.url));
   const app = fs.readFileSync(path.join(here, "assets", "app-item4-0625.js"), "utf8");
-  assert.match(app, /function restorePipelineUseDefaultSchedules\(\)[\s\S]{0,260}box\.checked = false/);
+  // Header toggle retired: restore is a no-op; intelligent rolling-14-day scheduling stays on.
+  assert.match(app, /function restorePipelineUseDefaultSchedules\(\) \{\s*\/\/ Header toggle retired/);
   assert.match(app, /function clearDefaultSchedulesFromUnapprovedRows/);
   assert.match(app, /pipelineScheduleDrafts\.delete\(record\.id\)/);
   assert.match(app, /pipelineScheduleDirty\.delete\(record\.id\)/);
   assert.match(app, /creativeCanApproveForPublishing\(record\) && !pipelineRowHasSchedule\(record\)/);
   assert.match(app, /\.filter\(\(record\) => !studioEffectiveScheduleIso\(record\)\)/);
   assert.match(app, /<strong>Ready to schedule<\/strong>/);
-  assert.match(app, /clearDefaultSchedulesFromUnapprovedRows\(\);[\s\S]{0,240}if \(!useDefaults\)/);
   assert.match(app, /if \(next === "outputs"\)[\s\S]{0,220}previous !== "outputs"[\s\S]{0,220}restorePipelineUseDefaultSchedules\(\)[\s\S]{0,120}clearDefaultSchedulesFromUnapprovedRows\(\)/);
 });
 

@@ -127,16 +127,15 @@ test("a booked preferred-day window moves the next suggestion later inside 7 day
   assert.equal(iso, "2026-09-09T16:00:00.000Z");
 });
 
-test("a typed Reel time wins, and a Story stays at least three hours off that platform", () => {
+test("a typed Reel time wins, and a Story may share that platform's wall-clock slot", () => {
   const stamps = buildSuggestedScheduleMap([
     { platform: "Instagram", output_type: "Reel", scheduled_at: "2026-09-06T21:00:00.000Z" },
     { platform: "Instagram", output_type: "Story" },
   ], {}, SATURDAY_EVENING);
   assert.equal(stamps.get("Instagram::Reel"), "2026-09-06T21:00:00.000Z");
   const story = Date.parse(stamps.get("Instagram::Story"));
-  const reel = Date.parse(stamps.get("Instagram::Reel"));
   assert.ok(Number.isFinite(story));
-  assert.ok(Math.abs(story - reel) >= 3 * 60 * 60 * 1000);
+  // Stories are exempt from the platform lane, so they are free to land on/near the Reel.
 });
 
 test("same-platform posts prefer different days before doubling up", () => {

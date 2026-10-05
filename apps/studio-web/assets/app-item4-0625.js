@@ -257,7 +257,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.483-voiceover-drives-timing";
+  const BUILD_ID = "item4-0.6.484-schedule-platform-occupancy";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -16064,10 +16064,24 @@
     return studioTimezone();
   }
 
+  function pipelineScheduleIsStory(record) {
+    const outputType = String(
+      record?.platform_output_type || record?.studio_output_type || record?.format || "",
+    ).trim();
+    return /^story$/i.test(outputType) || /\bstory\b/i.test(outputType);
+  }
+
   function pipelineScheduleBucketKey(record) {
     const platform = String(record?.platform || "").trim().toLowerCase();
-    const outputType = String(record?.platform_output_type || record?.studio_output_type || record?.format || "output").trim().toLowerCase();
-    return platform && outputType ? `${platform}::${outputType}` : platform;
+    if (!platform) return "";
+    // IG/FB Stories may share a wall-clock slot with other Stories. Give each
+    // Story its own key so they never block each other. Every other output type
+    // shares one platform lane (TikTok Video and Slideshow cannot both take 5:30).
+    if (pipelineScheduleIsStory(record)) {
+      const id = String(record?.id || "").trim();
+      return id ? `${platform}::story:${id}` : `${platform}::story`;
+    }
+    return platform;
   }
 
   function pipelineRecordScheduleIso(record) {
@@ -16110,7 +16124,9 @@
     pipelineServerOccupiedMs[key] = [...set];
   }
 
-  function rememberBookedScheduleMs(platform, iso) {
+  function rememberBookedScheduleMs(platform, iso, record = null) {
+    // Stories may share a wall-clock slot; keep them out of the platform lane.
+    if (record && pipelineScheduleIsStory(record)) return;
     const key = String(platform || "").trim().toLowerCase();
     const ms = Date.parse(iso);
     if (!key || Number.isNaN(ms)) return;
@@ -16202,7 +16218,7 @@
     for (const record of records || []) {
       const iso = studioEffectiveScheduleIso(record);
       if (!iso || record?.do_not_publish || creativeIsPublished(record)) continue;
-      rememberBookedScheduleMs(record.platform, iso);
+      rememberBookedScheduleMs(record.platform, iso, record);
     }
   }
 
@@ -16251,7 +16267,7 @@
         if (input) applySuggestedIsoToScheduleInput(input, iso);
         else pipelineScheduleDrafts.set(record.id, formatDateTimeLocalInput(iso));
         (reserved[bucket] ||= []).push(Date.parse(iso));
-        rememberBookedScheduleMs(platform, iso);
+        rememberBookedScheduleMs(platform, iso, record);
       } catch {}
     }
   }
@@ -16281,7 +16297,7 @@
       }
       next[record.id] = iso;
       (reserved[bucket] ||= []).push(Date.parse(iso));
-      rememberBookedScheduleMs(platform, iso);
+      rememberBookedScheduleMs(platform, iso, record);
       const input = document.querySelector(`[data-pipeline-schedule="${record.id}"]`);
       if (input) applySuggestedIsoToScheduleInput(input, iso);
     }
@@ -16413,7 +16429,7 @@
         if (pipelineUseDefaultSchedules() && iso && creativeCanApproveForPublishing(record) && !pipelineRowHasSchedule(record)) {
           const input = document.querySelector(`[data-pipeline-schedule="${id}"]`);
           const openIso = nextOpenScheduleIso(iso, pipelineOccupiedScheduleBucketMs(record), hint);
-          if (applySuggestedIsoToScheduleInput(input, openIso)) rememberBookedScheduleMs(record.platform, openIso);
+          if (applySuggestedIsoToScheduleInput(input, openIso)) rememberBookedScheduleMs(record.platform, openIso, record);
         }
       } catch (error) {
         suggestEl.textContent = error?.message ? `Suggestion unavailable (${error.message}).` : "Suggestion unavailable.";
@@ -17350,7 +17366,7 @@
           const input = target.querySelector(`[data-pipeline-schedule="${id}"]`);
           const hint = parseSuggestedHintDataset(button);
           const openIso = nextOpenScheduleIso(iso, pipelineOccupiedScheduleBucketMs(record, id), hint);
-          if (applySuggestedIsoToScheduleInput(input, openIso)) rememberBookedScheduleMs(record?.platform, openIso);
+          if (applySuggestedIsoToScheduleInput(input, openIso)) rememberBookedScheduleMs(record?.platform, openIso, record);
         });
       });
       refreshPipelineScheduleSuggestions(source);
@@ -21458,7 +21474,7 @@
       creativeSuggestedHint,
     );
     if (!applySuggestedIsoToScheduleInput(input, openIso)) return;
-    rememberBookedScheduleMs(record?.platform, openIso);
+    rememberBookedScheduleMs(record?.platform, openIso, record);
     document.querySelectorAll("input[name='creativeScheduleMode']").forEach((radio) => {
       radio.checked = radio.value === "schedule";
     });
