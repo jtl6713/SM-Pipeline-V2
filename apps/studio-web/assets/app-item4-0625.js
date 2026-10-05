@@ -257,7 +257,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.487-schedule-mae-day";
+  const BUILD_ID = "item4-0.6.488-global-chicagoshining-watermark";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -550,8 +550,24 @@
     });
   }
 
+  const GLOBAL_STUDIO_WATERMARK_SRC = "/api/branding/logo";
+
+  function ensureGlobalStudioWatermark() {
+    const watermark = $("studioGlobalWatermark");
+    if (!watermark) return;
+    if (watermark.getAttribute("src") !== GLOBAL_STUDIO_WATERMARK_SRC) {
+      watermark.setAttribute("src", GLOBAL_STUDIO_WATERMARK_SRC);
+    }
+    watermark.hidden = false;
+    watermark.setAttribute("alt", "ChicagoShining watermark");
+    watermark.setAttribute("title", "ChicagoShining");
+  }
+
   function applyStudioProfile(profile, { reload = false } = {}) {
     if (!profile) return;
+    // The top-left watermark is intentionally global ChicagoShining branding.
+    // Never swap or hide it when the operator switches to LA, Miami, or NYC.
+    ensureGlobalStudioWatermark();
     selectedProfileId = profile.id;
     try { localStorage.setItem(PROFILE_STORAGE_KEY, profile.id); } catch {}
     document.documentElement.dataset.studioTheme = profile.theme || "chicago";
@@ -670,6 +686,8 @@
   }
 
   function showStudioPage(page, options = {}) {
+    // Every Studio page retains the same small ChicagoShining watermark.
+    ensureGlobalStudioWatermark();
     const next = String(page || "home");
     const previous = studioPage;
     studioPage = next;
