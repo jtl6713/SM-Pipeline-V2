@@ -124,6 +124,8 @@
 .idea-library-picker{margin-top:12px;border:1px solid var(--line);border-radius:14px;background:#fff;padding:12px 14px;display:grid;gap:10px}
 .idea-library-picker[hidden]{display:none!important}
 .idea-library-picker-hint{margin:0;font-size:.75rem;color:var(--muted);line-height:1.4}
+.idea-library-select-none{display:inline-flex;align-items:center;gap:7px;width:max-content;font-size:.76rem;font-weight:700;color:var(--ink);cursor:pointer}
+.idea-library-select-none input{margin:0;accent-color:var(--teal)}
 .idea-library-grid,.idea-library-picker-body{display:grid;gap:10px;max-height:360px;overflow:auto}
 .idea-library-cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(118px,1fr));gap:8px}
 .idea-library-section{margin:0;font-size:.68rem;font-weight:750;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
