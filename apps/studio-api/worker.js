@@ -338,6 +338,8 @@ export default {
       const isPublishedLibraryReleaseWrite = isPublishedLibraryReleaseRoute && request.method === "POST";
       const isIdeaCreateRoute = url.pathname === "/api/ideas" && request.method === "POST";
       const isIdeaGenerateWrite = isIdeaGenerateRoute && request.method === "POST";
+      const isScriptedShortProposeWrite = isScriptedShortProposeRoute && request.method === "POST";
+      const isScriptedShortAcceptWrite = isScriptedShortAcceptRoute && request.method === "POST";
       const isIdeaEditRoute = isIdeaRecordRoute && request.method === "PATCH";
       const isIdeaDeleteRoute = isIdeaRecordRoute && request.method === "DELETE";
       const isIdeaHoldWrite = (isIdeaHoldRoute || isIdeaRestoreRoute) && request.method === "POST";
@@ -399,6 +401,8 @@ export default {
         (request.method === "HEAD" && (isMusicPreviewRoute || isMediaAssetPreviewRoute || isMediaAssetStreamRoute || isPublicBrandWatermarkRoute || isOutputPreviewRoute || isVoicePreviewRoute)) ||
         isIdeaCreateRoute ||
         isIdeaGenerateWrite ||
+        isScriptedShortProposeWrite ||
+        isScriptedShortAcceptWrite ||
         isIdeaEditRoute ||
         isIdeaDeleteRoute ||
         isIdeaHoldWrite ||
@@ -499,7 +503,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.451-scripted-short-proposal",
+          version: "0.10.452-scripted-short-allow",
           studio_mae_schedule_v1: true,
           studio_desk_inventory_v1: true,
           studio_desk_activity_v1: true,

@@ -179,6 +179,8 @@ test("Worker advertises the idea timed-script route", async () => {
   assert.match(app, /\/api\/scripted-short\/propose/);
   assert.match(app, /\/api\/scripted-short\/accept/);
   assert.match(worker, /scripted-short\/propose/);
+  assert.match(worker, /isScriptedShortProposeWrite/);
+  assert.match(worker, /isScriptedShortAcceptWrite/);
   assert.match(worker, /scriptedShortUnassignedMessage/);
   assert.match(worker, /scripted-short=proposal/);
   const css = await readFile(path.join(here, "../studio-web/assets/styles-phase7-0621.css"), "utf8");
