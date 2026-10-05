@@ -3504,3 +3504,64 @@ body.platform-calendar-open { overflow: hidden; }
   .timed-script-scene-body{grid-template-columns:1fr 1fr}
   .timed-script-dialog textarea{min-height:42vh}
 }
+
+
+/* Master platform calendar: collapse off-limits overnight hours by default. */
+.pipeline-schedule-blackout-band th,
+.pipeline-schedule-blackout-band td {
+  padding: 0;
+  background: #111827;
+  border-color: #374151;
+}
+.pipeline-schedule-blackout-band-label {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  width: 72px;
+  padding: 7px 8px !important;
+  background: #111827 !important;
+  color: #d1d5db;
+  font-size: 10px;
+  font-weight: 800;
+  text-align: right;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+}
+.pipeline-schedule-blackout-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  width: 100%;
+  min-height: 34px;
+  padding: 7px 12px;
+  border: 0;
+  background: #111827;
+  color: #f9fafb;
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+.pipeline-schedule-blackout-toggle:hover,
+.pipeline-schedule-blackout-toggle:focus-visible {
+  background: #1f2937;
+  outline: 2px solid #9ca3af;
+  outline-offset: -2px;
+}
+.pipeline-schedule-blackout-toggle strong {
+  font-size: 11px;
+  font-weight: 850;
+}
+.pipeline-schedule-blackout-toggle span:last-child {
+  color: #cbd5e1;
+  font-weight: 650;
+}
+.pipeline-schedule-blackout-band.has-scheduled th,
+.pipeline-schedule-blackout-band.has-scheduled td,
+.pipeline-schedule-blackout-band.has-scheduled .pipeline-schedule-blackout-toggle {
+  background: #3f1d1d;
+}
+.pipeline-schedule-blackout-band.has-scheduled .pipeline-schedule-blackout-toggle span:last-child {
+  color: #fecaca;
+  font-weight: 800;
+}
