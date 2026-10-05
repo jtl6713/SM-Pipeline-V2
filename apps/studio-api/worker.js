@@ -172,6 +172,18 @@ import {
   normalizeAnalyticsSnapshot,
   sanitizeAnalyticsError,
 } from "./first-party-analytics.mjs";
+import {
+  MAE_DEFAULT_TIME_ZONE,
+  MAE_PRIORITY_SCHEDULE_WINDOWS,
+  maeBuildSuggestedScheduleMap,
+  maeIsBlackoutLocalTime,
+  maeIsPriorityLocalTime,
+  maeNextOpenScheduleIso,
+  maeNormalizeTimeZone,
+  maePickBalancedSuggestedIso,
+  maeScheduleConflicts,
+  maeTimeZoneFromTheme,
+} from "./mae-schedule.mjs";
 
 const JSON_HEADERS = {
   "Content-Type": "application/json; charset=UTF-8",
@@ -459,7 +471,8 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.441-schedule-platform-occupancy",
+          version: "0.10.443-schedule-mae-day",
+          studio_mae_schedule_v1: true,
           studio_desk_inventory_v1: true,
           studio_desk_activity_v1: true,
           studio_tiktok_complete_v1: true,
@@ -3611,6 +3624,25 @@ function studioCityLabel(theme, record) {
   return "Chicago";
 }
 
+function studioScheduleTimeZoneFromTheme(theme) {
+  return maeTimeZoneFromTheme(theme);
+}
+
+function studioScheduleTimeZoneFromPayload(payload, fallback = MAE_DEFAULT_TIME_ZONE) {
+  const raw = String(payload?.timezone || payload?.time_zone || "").trim();
+  return maeNormalizeTimeZone(raw || fallback);
+}
+
+async function studioScheduleTimeZoneForRecord(env, record, payload = null) {
+  if (payload?.timezone || payload?.time_zone) return studioScheduleTimeZoneFromPayload(payload);
+  try {
+    const profile = await item4ProductionProfileRecord(env, record);
+    if (profile) return studioScheduleTimeZoneFromTheme(studioThemeForProfile(profile));
+  } catch {}
+  const theme = await studioThemeForPublishRecord(env, record).catch(() => studioThemeForProfile(record));
+  return studioScheduleTimeZoneFromTheme(theme);
+}
+
 
 function normalizeStudioBackgroundColor(value) {
   const raw = String(value || "").trim();
@@ -4364,6 +4396,7 @@ async function syncProductionRequestOutputs(request, env, url, authorization) {
 
   const now = new Date().toISOString();
   const occupied = await studioOccupiedSchedulesOrEmpty(env);
+  const timeZone = await studioScheduleTimeZoneForRecord(env, parent, payload);
   const stamps = studioBuildSuggestedScheduleMap(planItems.map((item) => {
     const key = `${item.platform}::${item.output_type}`;
     const current = byKey.get(finishedVideo ? canonicalFinishedDestinationKey(item.platform, item.output_type) : key);
@@ -4372,7 +4405,7 @@ async function syncProductionRequestOutputs(request, env, url, authorization) {
       output_type: item.output_type,
       scheduled_at: scheduleOverrides.get(key) || (current ? f(current, "Scheduled_At") : "") || "",
     };
-  }), occupied);
+  }), occupied, new Date(), { timeZone });
 
   const patchRows = [];
   const createFields = [];
@@ -7267,15 +7300,13 @@ function studioScheduleConflicts(ms, occupiedMs, gapMs = STUDIO_SCHEDULE_GAP_MS)
   return (occupiedMs || []).some((other) => Number.isFinite(other) && Math.abs(other - ms) < gapMs);
 }
 
-function studioNextOpenScheduleIso(candidateIso, occupiedMs, gapMs = STUDIO_SCHEDULE_GAP_MS) {
-  let ms = studioScheduleMs(candidateIso);
-  if (ms == null) ms = Date.now();
-  let guard = 0;
-  while (studioScheduleConflicts(ms, occupiedMs, gapMs) && guard < 36) {
-    ms += gapMs;
-    guard += 1;
+function studioNextOpenScheduleIso(candidateIso, occupiedMs, gapMs = STUDIO_SCHEDULE_GAP_MS, options = {}) {
+  if (gapMs && typeof gapMs === "object") {
+    options = gapMs;
+    gapMs = STUDIO_SCHEDULE_GAP_MS;
   }
-  return new Date(ms).toISOString();
+  const timeZone = maeNormalizeTimeZone(options.timeZone);
+  return maeNextOpenScheduleIso(candidateIso, occupiedMs, gapMs, { timeZone, now: options.now });
 }
 
 const STUDIO_OCCUPIED_CACHE_MS = 45 * 1000;
@@ -7343,6 +7374,7 @@ async function studioLoadOccupiedSchedules(env, { excludeIds = [] } = {}) {
 
 function studioPublishScheduleFields(payload = {}, record = null, options = {}) {
   const occupiedMs = Array.isArray(options.occupiedMs) ? options.occupiedMs : null;
+  const timeZone = maeNormalizeTimeZone(options.timeZone || payload?.timezone || payload?.time_zone);
   const raw = payload?.scheduled_post_date;
   const immediate = raw === undefined || raw === null || String(raw).trim() === "" || String(raw).trim().toLowerCase() === "immediate";
   const exactOverride = options.exactOverride === true && !immediate;
@@ -7354,7 +7386,21 @@ function studioPublishScheduleFields(payload = {}, record = null, options = {}) 
     if (Number.isNaN(Date.parse(value))) throw new HttpError(400, "Scheduled date/time is invalid");
     requestedIso = new Date(value).toISOString();
   }
-  const resolvedIso = occupiedMs && !exactOverride ? studioNextOpenScheduleIso(requestedIso, occupiedMs) : requestedIso;
+  const requestedMs = Date.parse(requestedIso);
+  const blackout = maeIsBlackoutLocalTime(requestedMs, timeZone);
+  const offMae = !immediate && !maeIsPriorityLocalTime(requestedMs, timeZone);
+  const conflict = Boolean(occupiedMs) && maeScheduleConflicts(requestedMs, occupiedMs);
+  let resolvedIso = requestedIso;
+  if (!immediate && !(exactOverride && !blackout) && (blackout || offMae || conflict)) {
+    resolvedIso = studioNextOpenScheduleIso(requestedIso, occupiedMs || [], STUDIO_SCHEDULE_GAP_MS, { timeZone }) || requestedIso;
+    if (maeIsBlackoutLocalTime(Date.parse(resolvedIso), timeZone)) {
+      resolvedIso = maePickBalancedSuggestedIso(MAE_PRIORITY_SCHEDULE_WINDOWS, new Date(), {
+        occupiedMs: occupiedMs || [],
+        platformOccupiedMs: occupiedMs || [],
+        timeZone,
+      }) || resolvedIso;
+    }
+  }
   const bumped = Date.parse(resolvedIso) - Date.parse(requestedIso) >= 60 * 1000;
   if (immediate && !bumped && !options.forceWrite) return {};
   const iso = resolvedIso;
@@ -8114,6 +8160,7 @@ async function item4SyncPlanOutputs(env, requestRecord, items, { schedules = nul
   // its own conflict-aware scheduling, so an empty local occupancy map is safe here
   // and avoids exhausting the Worker subrequest budget while the output lock is held.
   const occupied = finishedVideo ? {} : await studioOccupiedSchedulesOrEmpty(env);
+  const timeZone = await studioScheduleTimeZoneForRecord(env, requestRecord);
   const stamps = studioBuildSuggestedScheduleMap(uniqueItems.map((item) => {
     const key = `${item.platform}::${item.output_type}`;
     const current = byKey.get(finishedVideo ? canonicalFinishedDestinationKey(item.platform, item.output_type) : key);
@@ -8122,7 +8169,7 @@ async function item4SyncPlanOutputs(env, requestRecord, items, { schedules = nul
       output_type: item.output_type,
       scheduled_at: scheduleOverrides.get(key) || (current ? f(current, "Scheduled_At") : "") || "",
     };
-  }), occupied);
+  }), occupied, new Date(), { timeZone });
   const patchRows = [];
   const createFields = [];
   for (let i=0; i<uniqueItems.length; i++) {
@@ -9680,10 +9727,12 @@ async function azAutoApproveIfReady(env, requestId, options = {}) {
     };
   }
   const remainingApprove = Math.max(0, assessed.filter((item) => item.ready).length - toApprove.length);
-  // One occupancy scan for the batch (cached). Empty occupiedMs used to stamp
-  // every AZ output onto the same industry window as already-scheduled posts.
+  // One occupancy scan for the batch (cached). MAE rotation in the profile
+  // timezone fills M1 then A1 then E1 then M2. Industry evening windows and
+  // +3h occupancy bumps are what used to land NYC at 12:00 AM / 1:00 AM.
   const occupiedByPlatform = await studioOccupiedSchedulesOrEmpty(env);
   const reservedAll = studioFlattenOccupiedByPlatform(occupiedByPlatform);
+  const timeZone = await studioScheduleTimeZoneForRecord(env, requestRecord);
   const stamp = new Date().toISOString();
   const approved = [];
   const scheduled = {};
@@ -9698,19 +9747,24 @@ async function azAutoApproveIfReady(env, requestId, options = {}) {
     let iso = existingIso && !Number.isNaN(Date.parse(existingIso))
       ? new Date(existingIso).toISOString()
       : "";
-    if (!iso) {
-      const industry = studioIndustryBestWindows(platform, outputType);
-      iso = studioSuggestedLocalDatetime(industry.windows || ["12:00-13:00"], new Date(), {
-        days: industry.days,
-        occupiedMs: reservedAll,
+    const existingMs = iso ? Date.parse(iso) : NaN;
+    if (
+      !iso
+      || maeIsBlackoutLocalTime(existingMs, timeZone)
+      || !maeIsPriorityLocalTime(existingMs, timeZone)
+    ) {
+      iso = studioSuggestedLocalDatetime(MAE_PRIORITY_SCHEDULE_WINDOWS, new Date(), {
+        occupiedMs: isStory ? [] : reservedAll,
         platformOccupiedMs: occupiedMs,
+        timeZone,
       });
     } else {
-      iso = studioNextOpenScheduleIso(iso, occupiedMs);
+      iso = studioNextOpenScheduleIso(iso, occupiedMs, STUDIO_SCHEDULE_GAP_MS, { timeZone });
     }
     await approveOutputRecordForPublishing(env, row, "AZ finished-video auto-queue", stamp, {
       scheduled_post_date: iso,
-    }, { occupiedMs });
+      timezone: timeZone,
+    }, { occupiedMs, timeZone });
     const booked = studioScheduleMs(iso) ?? Date.parse(iso);
     if (Number.isFinite(booked) && !isStory) {
       (occupiedByPlatform[platform] ||= []).push(booked);
@@ -17115,53 +17169,7 @@ function studioScoreAnalyticsSlot({ preferred, windowIndex, crowding, platformCr
 }
 
 function studioPickBalancedSuggestedIso(windows, now = new Date(), options = {}) {
-  const daysPref = Array.isArray(options.days) ? options.days.filter(Boolean) : [];
-  const occupiedMs = options.occupiedMs || [];
-  const platformOccupiedMs = options.platformOccupiedMs || occupiedMs;
-  const gapMs = options.gapMs ?? STUDIO_SCHEDULE_GAP_MS;
-  const leadMs = options.leadMs ?? STUDIO_SUGGEST_LEAD_MS;
-  const windowList = Array.isArray(windows) && windows.length ? windows : ["12:00-13:00"];
-  const nowMs = now.getTime() + leadMs;
-  const horizon = studioSuggestHorizon(now, options.horizonDays || STUDIO_SUGGEST_HORIZON_DAYS);
-
-  const collect = () => {
-    let best = null;
-    for (const civil of horizon) {
-      const preferred = !daysPref.length || daysPref.includes(civil.weekday);
-      const crowding = studioOccupiedOnCivilDay(occupiedMs, civil).length;
-      const platformCrowding = studioOccupiedOnCivilDay(platformOccupiedMs, civil).length;
-      for (let windowIndex = 0; windowIndex < windowList.length; windowIndex++) {
-        const { hour, minute } = studioSuggestParseWindowStart(windowList[windowIndex]);
-        const ms = studioChicagoWallToUtcMs(civil.year, civil.month, civil.day, hour, minute);
-        if (ms <= nowMs) continue;
-        if (studioScheduleConflicts(ms, platformOccupiedMs, gapMs)) continue;
-        const score = studioScoreAnalyticsSlot({
-          preferred,
-          windowIndex,
-          crowding,
-          platformCrowding,
-          timeCrowding: studioScheduleTimeCrowding(ms, occupiedMs),
-          dayIndex: civil.index,
-        });
-        if (!best || score > best.score) best = { score, ms };
-      }
-    }
-    return best;
-  };
-
-  const balanced = collect();
-  if (balanced) return new Date(balanced.ms).toISOString();
-  const first = String(windowList[0] || "12:00-13:00");
-  const start = first.split("-")[0] || "12:00";
-  const [hh, mm] = start.split(":").map((n) => Number(n) || 0);
-  const chicago = studioChicagoDateTimeParts(now);
-  let civil = { year: chicago.year, month: chicago.month, day: chicago.day };
-  let ms = studioChicagoWallToUtcMs(civil.year, civil.month, civil.day, hh, mm || 0);
-  if (ms <= nowMs) {
-    civil = studioAddCivilDays(civil.year, civil.month, civil.day, 1);
-    ms = studioChicagoWallToUtcMs(civil.year, civil.month, civil.day, hh, mm || 0);
-  }
-  return studioNextOpenScheduleIso(new Date(ms).toISOString(), platformOccupiedMs, gapMs);
+  return maePickBalancedSuggestedIso(windows, now, options);
 }
 
 function studioSuggestedLocalDatetime(windows, now = new Date(), options = {}) {
@@ -17185,42 +17193,8 @@ function studioScheduleOverridesFromPayload(payload) {
   return overrides;
 }
 
-function studioBuildSuggestedScheduleMap(items, occupiedByPlatform = {}, now = new Date()) {
-  const reserved = {};
-  for (const [platform, times] of Object.entries(occupiedByPlatform || {})) {
-    reserved[platform] = [...(times || [])];
-  }
-  const indexed = (items || []).map((item, index) => ({ item, index }));
-  indexed.sort((a, b) => {
-    const rank = studioScheduleStoryRank(a.item.output_type) - studioScheduleStoryRank(b.item.output_type);
-    return rank || a.index - b.index;
-  });
-  const stamps = new Map();
-  for (const { item } of indexed) {
-    const platform = String(item.platform || "").trim();
-    const outputType = String(item.output_type || "").trim();
-    if (!platform || !outputType) continue;
-    const key = `${platform}::${outputType}`;
-    const isStory = studioScheduleStoryRank(outputType) === 1;
-    const existing = String(item.scheduled_at || "").trim();
-    if (existing && !Number.isNaN(Date.parse(existing))) {
-      const iso = new Date(existing).toISOString();
-      stamps.set(key, iso);
-      // Stories may share a wall-clock slot; keep them out of the platform lane.
-      if (!isStory) (reserved[platform] ||= []).push(Date.parse(iso));
-      continue;
-    }
-    const industry = studioIndustryBestWindows(platform, outputType);
-    const iso = studioPickBalancedSuggestedIso(industry.windows, now, {
-      days: industry.days,
-      // Stories ignore occupancy so IG/FB Stories can share a slot with mains.
-      occupiedMs: isStory ? [] : studioFlattenOccupiedByPlatform(reserved),
-      platformOccupiedMs: isStory ? [] : (reserved[platform] || []),
-    });
-    stamps.set(key, iso);
-    if (!isStory) (reserved[platform] ||= []).push(Date.parse(iso));
-  }
-  return stamps;
+function studioBuildSuggestedScheduleMap(items, occupiedByPlatform = {}, now = new Date(), options = {}) {
+  return maeBuildSuggestedScheduleMap(items, occupiedByPlatform, now, options);
 }
 
 async function studioOccupiedSchedulesOrEmpty(env) {
@@ -18353,7 +18327,7 @@ function studioBuildSimilarTimesView({ accounts, cache, theme, platform, season,
     message = `${seasonLabel} timing for ${label} uses historical similar-account posts stored in Studio Insights. Suggested times never auto-apply.`;
   }
   return {
-    timezone: "America/Chicago",
+    timezone: studioScheduleTimeZoneFromTheme(theme),
     profile: theme,
     profile_label: label,
     season,
@@ -18370,12 +18344,10 @@ function studioBuildSimilarTimesView({ accounts, cache, theme, platform, season,
       ? { total: Number(providedOwn.total) || 0, buckets: Array.isArray(providedOwn.buckets) ? providedOwn.buckets : [] }
       : { total: 0, buckets: [] },
     suggested: heatmap.suggested,
-    suggested_iso: heatmap.suggested
-      ? studioSuggestedLocalDatetime(heatmap.suggested.windows, new Date(), {
-          days: heatmap.suggested.days,
+    suggested_iso: studioSuggestedLocalDatetime(MAE_PRIORITY_SCHEDULE_WINDOWS, new Date(), {
           occupiedMs: occupiedMs || [],
-        })
-      : null,
+          timeZone: studioScheduleTimeZoneFromTheme(theme),
+        }),
     caption: captionLearned,
     as_of: cache?.as_of || null,
     remaining_to_sweep: stale.length,
@@ -18928,33 +18900,36 @@ async function getInsightsBestTimes(request, env, url, authorization) {
   const industry = studioIndustryBestWindows(platform, outputType);
   const seasonLabel = studioSeasonLabel(season);
   const occupiedByPlatform = await studioOccupiedSchedulesOrEmpty(env);
+  const theme = await studioResolveSimilarTimesTheme(env, url, authorization).catch(() => "chicago");
+  const timeZone = maeNormalizeTimeZone(url.searchParams.get("timezone") || studioScheduleTimeZoneFromTheme(theme));
   const occupiedOpts = {
     occupiedMs: studioFlattenOccupiedByPlatform(occupiedByPlatform),
     platformOccupiedMs: studioOccupiedForPlatform(occupiedByPlatform, platform),
+    timeZone,
   };
   const occupiedMsForClient = occupiedOpts.platformOccupiedMs;
-  const industryPayload = (theme = null, note = null) => ({
+  const maeIso = () => studioSuggestedLocalDatetime(MAE_PRIORITY_SCHEDULE_WINDOWS, new Date(), occupiedOpts);
+  const industryPayload = (themeName = theme, note = null) => ({
     ok: true,
-    timezone: "America/Chicago",
+    timezone: timeZone,
     platform,
     output_type: outputType,
     season,
     season_label: seasonLabel,
-    source: "industry_default",
+    source: "mae_rotation",
     sample_size: 0,
-    suggested: industry,
-    suggested_iso: studioSuggestedLocalDatetime(industry.windows, new Date(), { days: industry.days, ...occupiedOpts }),
+    suggested: { days: [], windows: [...MAE_PRIORITY_SCHEDULE_WINDOWS], label: "MAE rotation (morning then afternoon then evening)" },
+    suggested_iso: maeIso(),
     occupied_ms: occupiedMsForClient,
     occupied_count: occupiedMsForClient.length,
     similar: null,
     similar_sample_size: 0,
-    similar_profile: theme,
+    similar_profile: themeName,
     caption: null,
-    note: note || `Not enough ${seasonLabel.toLowerCase()} historical data yet. Showing travel/city industry defaults in Chicago time, then skipping times already booked.`,
+    note: note || `${seasonLabel} stamps use the MAE rotation in ${timeZone}: fill mornings, then afternoons, then evenings, then week-2 mornings. Overnight 8:00 PM–3:30 AM is never used.`,
   });
 
   try {
-    const theme = await studioResolveSimilarTimesTheme(env, url, authorization);
     // Keep this route cheap: Pipeline fires one request per Ready row.
     // No Airtable output dump, no legacy-cache migration, no second similar-posts pass for captions.
     const [firstParty, learned, similar, captionLearned] = await Promise.all([
@@ -19001,14 +18976,6 @@ async function getInsightsBestTimes(request, env, url, authorization) {
     const useFirstParty = Boolean(firstSuggested);
     const useLearned = !useFirstParty && learned?.days?.length && learned?.windows?.length && learned.sample_size >= STUDIO_SIMILAR_TIMES_MIN_SAMPLE;
     const useSimilar = !useFirstParty && !useLearned && similar?.source === "similar_accounts" && similar.suggested;
-    const chosen = useFirstParty
-      ? { ...firstSuggested, label: `${seasonLabel} · your posts · ${firstSuggested.label}` }
-      : useLearned
-        ? { days: learned.days, windows: learned.windows, label: learned.label || `${seasonLabel} learned model` }
-        : useSimilar
-          ? similar.suggested
-          : industry;
-    const source = useFirstParty ? "first_party" : useLearned ? learned.source || "learned_model" : useSimilar ? "similar_accounts" : "industry_default";
     const captionFromSample = (!captionLearned?.caption_patterns && !captionLearned?.patterns)
       ? studioInsightsBuildCaptionLearned(sample)
       : null;
@@ -19037,32 +19004,26 @@ async function getInsightsBestTimes(request, env, url, authorization) {
 
     return respond(request, env, {
       ok: true,
-      timezone: "America/Chicago",
+      timezone: timeZone,
       platform,
       output_type: outputType,
       season,
       season_label: seasonLabel,
-      source,
+      source: "mae_rotation",
       sample_size: useFirstParty ? firstHeatmap.sample_size : useLearned ? learned.sample_size : useSimilar ? similar.sample_size : sample.length,
-      suggested: chosen,
-      suggested_iso: studioSuggestedLocalDatetime(chosen.windows, new Date(), { days: chosen.days, ...occupiedOpts }),
+      suggested: { days: [], windows: [...MAE_PRIORITY_SCHEDULE_WINDOWS], label: "MAE rotation (morning then afternoon then evening)" },
+      suggested_iso: maeIso(),
       occupied_ms: occupiedMsForClient,
       occupied_count: occupiedMsForClient.length,
       similar: similar?.suggested || null,
       similar_sample_size: similar?.sample_size || 0,
       similar_profile: similar?.profile || theme,
       caption,
-      note: useFirstParty
-        ? `${seasonLabel} suggestion uses your published posts with insights stored in Studio Insights Observations. It stays in those best windows and skips times already booked.`
-        : useLearned
-          ? `${seasonLabel} suggestion uses the learned historical model for ${platform || "this platform"}. It stays in those best windows and skips times already booked.`
-          : useSimilar
-            ? `Suggestion uses public posts from similar ${similar.profile_label} accounts for ${seasonLabel.toLowerCase()}. It stays in those best windows and skips times already booked.`
-            : `Not enough ${seasonLabel.toLowerCase()} historical data yet. Showing travel/city industry defaults in Chicago time, then skipping times already booked.`,
+      note: `${seasonLabel} stamps use the MAE rotation in ${timeZone}: fill week-1 mornings, then afternoons, then evenings, then week-2 mornings. Overnight 8:00 PM–3:30 AM is never used.`,
     });
   } catch (error) {
-    console.warn("best-times failed; industry default", error);
-    return respond(request, env, industryPayload(null, `Suggestion service hiccuped; showing industry defaults in Chicago time.`));
+    console.warn("best-times failed; MAE fallback", error);
+    return respond(request, env, industryPayload(theme, `Suggestion service hiccuped; MAE rotation in ${timeZone} is still applied.`));
   }
 }
 
@@ -32182,12 +32143,14 @@ async function approveOutputRecordForPublishing(env, existing, note, stamp, payl
   } else if (!requestedRaw) {
     requestedRaw = "immediate";
   }
+  const timeZone = options.timeZone || await studioScheduleTimeZoneForRecord(env, record, payload);
   const scheduleFields = studioPublishScheduleFields(
-    { ...(payload || {}), scheduled_post_date: requestedRaw },
+    { ...(payload || {}), scheduled_post_date: requestedRaw, timezone: timeZone },
     record,
     {
       occupiedMs,
       exactOverride,
+      timeZone,
     },
   );
   const scheduledIso = scheduleFields.Scheduled_Post_Date || f(record, "Scheduled_Post_Date");
@@ -37703,13 +37666,15 @@ async function scheduleStudioPublishOutput(request, env, url, authorization, ctx
     payload?.publish_now === true
     && (!value || value.toLowerCase() === "immediate")
   );
+  const timeZone = await studioScheduleTimeZoneForRecord(env, existing, payload);
   const fields = studioPublishScheduleFields(
-    { scheduled_post_date: value || "immediate" },
+    { scheduled_post_date: value || "immediate", timezone: timeZone },
     existing,
     {
       occupiedMs: publishNowImmediate ? null : studioOccupiedForPlatform(occupied, platform),
       forceWrite: true,
       exactOverride: manualScheduleOverride,
+      timeZone,
     },
   );
   if (!manualScheduleOverride) fields.Studio_Scheduled_At = null;

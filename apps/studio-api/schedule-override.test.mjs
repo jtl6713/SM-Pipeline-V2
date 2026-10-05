@@ -9,7 +9,7 @@ const source = fs.readFileSync(path.join(here, "worker.js"), "utf8");
 
 test("manual output schedule route preserves the requested time exactly", () => {
   assert.match(source, /exactOverride = options\.exactOverride === true && !immediate/);
-  assert.match(source, /occupiedMs && !exactOverride \? studioNextOpenScheduleIso/);
+  assert.match(source, /exactOverride && !blackout/);
   assert.match(source, /if \(exactOverride\) fields\.Studio_Scheduled_At = iso/);
   assert.match(source, /payload\?\.manual_schedule_override === true/);
 });

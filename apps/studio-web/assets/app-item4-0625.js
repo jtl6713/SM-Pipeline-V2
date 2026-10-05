@@ -257,7 +257,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.485-library-select-none";
+  const BUILD_ID = "item4-0.6.487-schedule-mae-day";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -15731,7 +15731,7 @@
     const mode = document.querySelector("input[name='creativeScheduleMode']:checked")?.value || "immediate";
     const raw = String($("creativeScheduleAt")?.value || "").trim();
     if (mode !== "schedule" || !raw) return { scheduled_post_date: "" };
-    return { scheduled_post_date: studioDateTimeLocalToIso(raw), manual_schedule_override: true };
+    return { scheduled_post_date: studioDateTimeLocalToIso(raw), manual_schedule_override: true, timezone: workingStudioTimeZone() };
   }
 
   function rememberPipelineScheduleDrafts() {
@@ -15998,7 +15998,7 @@
     try {
       const result = await api(`/api/operations/outputs/${encodeURIComponent(id)}/schedule`, {
         method: "POST",
-        body: JSON.stringify({ scheduled_post_date: iso, manual_schedule_override: true }),
+        body: JSON.stringify(pipelineSchedulePostBody(iso, { manual_schedule_override: true })),
       });
       if (result?.record) applySavedPipelineSchedule(result.record);
       if (status) status.textContent = "Saved";
@@ -16076,6 +16076,14 @@
 
   function workingStudioTimeZone() {
     return studioTimezone();
+  }
+
+  function pipelineSchedulePostBody(iso, extra = {}) {
+    return {
+      scheduled_post_date: iso,
+      timezone: workingStudioTimeZone(),
+      ...extra,
+    };
   }
 
   function pipelineScheduleIsStory(record) {
@@ -16276,7 +16284,7 @@
         rememberSuggestedHint(platform, hint);
         const allReserved = Object.values(reserved).flat().filter(Number.isFinite);
         const iso = nextOpenScheduleIso(suggested, reserved[bucket] || [], hint, PIPELINE_SCHEDULE_GAP_MS, reserved[bucket] || []);
-        if (!iso) continue;
+        if (!iso || pipelineScheduleIsBlackout(iso, workingStudioTimeZone())) continue;
         const input = document.querySelector(`[data-pipeline-schedule="${record.id}"]`);
         if (input) applySuggestedIsoToScheduleInput(input, iso);
         else pipelineScheduleDrafts.set(record.id, formatDateTimeLocalInput(iso));
@@ -16355,7 +16363,7 @@
     const key = `${selectedProfileId || ""}|${platform}|${outputType}|${season}`;
     if (pipelineBestTimesCache.has(key)) return pipelineBestTimesCache.get(key);
     const pending = api(
-      `/api/insights/best-times?platform=${encodeURIComponent(platform)}&output_type=${encodeURIComponent(outputType)}&season=${encodeURIComponent(season)}`,
+      `/api/insights/best-times?platform=${encodeURIComponent(platform)}&output_type=${encodeURIComponent(outputType)}&season=${encodeURIComponent(season)}&profile=${encodeURIComponent(String(studioProfiles.find((item) => item.id === selectedProfileId)?.theme || "").trim())}&timezone=${encodeURIComponent(workingStudioTimeZone())}`,
       { timeoutMs: 12000, retries: 1 }
     )
       .then((data) => {
@@ -16443,7 +16451,9 @@
         if (pipelineUseDefaultSchedules() && iso && creativeCanApproveForPublishing(record) && !pipelineRowHasSchedule(record)) {
           const input = document.querySelector(`[data-pipeline-schedule="${id}"]`);
           const openIso = nextOpenScheduleIso(iso, pipelineOccupiedScheduleBucketMs(record), hint);
-          if (applySuggestedIsoToScheduleInput(input, openIso)) rememberBookedScheduleMs(record.platform, openIso, record);
+          if (openIso && !pipelineScheduleIsBlackout(openIso, workingStudioTimeZone()) && applySuggestedIsoToScheduleInput(input, openIso)) {
+            rememberBookedScheduleMs(record.platform, openIso, record);
+          }
         }
       } catch (error) {
         suggestEl.textContent = error?.message ? `Suggestion unavailable (${error.message}).` : "Suggestion unavailable.";
@@ -16635,12 +16645,12 @@
 
     button.disabled = true;
     button.textContent = "Regenerating…";
-    setPipelineScheduleGridMessage(`Rebuilding ${eligible.length} post schedule${eligible.length === 1 ? "" : "s"} for the active ${workingStudioCityLabel()} profile using the strict 14-day morning → afternoon → evening passes…`);
+    setPipelineScheduleGridMessage(`Rebuilding ${eligible.length} post schedule${eligible.length === 1 ? "" : "s"} for the active ${workingStudioCityLabel()} profile using morning → afternoon → evening on each day…`);
     let saved = 0;
     let failed = 0;
     // Process one platform completely before moving to the next selected platform.
-    // This lets every platform independently receive its own Monday 5:30 AM,
-    // Tuesday 5:30 AM, etc. slots.
+    // Each platform walks M then A then E on a day before the next day, so two
+    // TikToks become Monday 5:30 and Monday 11:30, not two Monday mornings.
     const platformOrder = [...selected];
     const orderedEligible = platformOrder.flatMap((platform) =>
       eligible.filter((record) => pipelineSchedulePlatformKey(record) === platform)
@@ -16671,7 +16681,7 @@
       try {
         const result = await api(`/api/operations/outputs/${encodeURIComponent(record.id)}/schedule`, {
           method: "POST",
-          body: JSON.stringify({ scheduled_post_date: iso, manual_schedule_override: true }),
+          body: JSON.stringify(pipelineSchedulePostBody(iso, { manual_schedule_override: true })),
         });
         const savedRecord = result?.record || { ...record, scheduled_post_date: iso, manual_schedule_override: false };
         applySavedPipelineSchedule(savedRecord);
@@ -16738,7 +16748,7 @@
           method: "POST",
           // Preserve the exact slot selected by the strict rolling-14-day picker.
           // The schedule endpoint otherwise applies its legacy next-open adjustment.
-          body: JSON.stringify({ scheduled_post_date: iso, manual_schedule_override: true }),
+          body: JSON.stringify(pipelineSchedulePostBody(iso, { manual_schedule_override: true })),
         });
         const savedRecord = result?.record || { ...record, scheduled_post_date: iso, manual_schedule_override: false };
         applySavedPipelineSchedule(savedRecord);
@@ -17661,7 +17671,7 @@
     try {
       const result = await api(`/api/operations/outputs/${encodeURIComponent(id)}/schedule`, {
         method: "POST",
-        body: JSON.stringify({ scheduled_post_date: new Date(stamp).toISOString(), manual_schedule_override: true }),
+        body: JSON.stringify(pipelineSchedulePostBody(new Date(stamp).toISOString(), { manual_schedule_override: true })),
       });
       const saved = result?.record || { ...record, scheduled_post_date: new Date(stamp).toISOString() };
       applySavedPipelineSchedule(saved);
@@ -18142,7 +18152,7 @@
     try {
       const result = await api(`/api/operations/outputs/${encodeURIComponent(id)}/schedule`, {
         method: "POST",
-        body: JSON.stringify({ scheduled_post_date: platformCalendarSelectedIso, manual_schedule_override: true }),
+        body: JSON.stringify(pipelineSchedulePostBody(platformCalendarSelectedIso, { manual_schedule_override: true })),
       });
       if (result?.record) {
         applySavedPipelineSchedule(result.record);
@@ -21072,10 +21082,7 @@
           if (Number.isNaN(parsed)) throw new Error("Scheduled date/time is invalid");
           await api(`/api/operations/outputs/${encodeURIComponent(form.dataset.opsSchedule)}/schedule`, {
             method: "POST",
-            body: JSON.stringify({
-              scheduled_post_date: new Date(parsed).toISOString(),
-              manual_schedule_override: true,
-            }),
+            body: JSON.stringify(pipelineSchedulePostBody(new Date(parsed).toISOString(), { manual_schedule_override: true })),
           });
           setOperationsMessage("Schedule date saved.");
           loadOperations(true);

@@ -2,3 +2,5 @@ Deploy manual media authority fix 2026-10-04. UI 0.6.475 / API 0.10.438. Preserv
 Deploy Worker 0.10.439-voiceover-min-4s. Requested voiceover duration cannot be under 4 seconds.
 Deploy Worker 0.10.440-voiceover-drives-timing. Photo reels no longer stamp a 30s video, 15s voiceover, or tail.
 Deploy Worker 0.10.441-schedule-platform-occupancy. Occupancy ignores Stories; non-stories conflict by platform.
+Deploy Worker 0.10.442-schedule-mae-blackout. MAE rotation in profile time; never stamp 8PM–3:30AM.
+Deploy Worker 0.10.443-schedule-mae-day. Each day fills M then A then E before the next day.
