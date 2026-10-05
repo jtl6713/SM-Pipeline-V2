@@ -279,16 +279,72 @@
     return timeline.segments.map((segment) => String(segment.voiceover_text || "").trim()).filter(Boolean).join(" ").trim();
   }
 
-  function assignStillsInOrder(timeline, assets) {
+  function stillNameKey(value) {
+    return String(value || "")
+      .toLowerCase()
+      .replace(/\.[a-z0-9]{2,4}$/i, "")
+      .replace(/[^a-z0-9]+/g, "");
+  }
+
+  function assetId(asset) {
+    return String(asset?.id || asset?.media_asset_record_id || "").trim();
+  }
+
+  function assetName(asset) {
+    return String(asset?.name || asset?.filename || asset?.caption || "").trim();
+  }
+
+  function matchStillsBySuggestedName(timeline, assets) {
     const normalized = normalizeTimeline(timeline);
     if (!normalized) return timeline;
     const ordered = (Array.isArray(assets) ? assets : [])
       .filter((asset) => asset && typeof asset === "object")
       .slice()
       .sort((a, b) => Number(a.order || 0) - Number(b.order || 0));
-    if (ordered.length && ordered.length === normalized.segments.length) {
+    const used = new Set();
+    normalized.segments.forEach((segment) => {
+      const visual = stillNameKey(segment.suggested_visual);
+      if (!visual) return;
+      const exact = ordered.find((asset) => !used.has(assetId(asset)) && stillNameKey(assetName(asset)) === visual);
+      let match = exact || null;
+      if (!match) {
+        const contains = ordered.filter((asset) => {
+          const name = stillNameKey(assetName(asset));
+          return name && !used.has(assetId(asset)) && (name.includes(visual) || visual.includes(name)) && Math.min(name.length, visual.length) >= 8;
+        });
+        if (contains.length === 1) match = contains[0];
+      }
+      if (!match) return;
+      const id = assetId(match);
+      if (!id) return;
+      segment.asset_id = id;
+      used.add(id);
+    });
+    return normalized;
+  }
+
+  function assignStillsInOrder(timeline, assets) {
+    const named = matchStillsBySuggestedName(timeline, assets);
+    const normalized = normalizeTimeline(named) || named;
+    if (!normalized || !Array.isArray(normalized.segments)) return timeline;
+    const ordered = (Array.isArray(assets) ? assets : [])
+      .filter((asset) => asset && typeof asset === "object")
+      .slice()
+      .sort((a, b) => Number(a.order || 0) - Number(b.order || 0));
+    const knownIds = new Set(ordered.map((asset) => assetId(asset)).filter(Boolean));
+    normalized.segments.forEach((segment) => {
+      if (segment.asset_id && !knownIds.has(segment.asset_id)) segment.asset_id = "";
+    });
+    const used = new Set(normalized.segments.map((segment) => String(segment.asset_id || "").trim()).filter(Boolean));
+    const remaining = ordered.filter((asset) => assetId(asset) && !used.has(assetId(asset)));
+    const unresolved = normalized.segments.filter((segment) => !String(segment.asset_id || "").trim());
+    if (remaining.length && remaining.length === unresolved.length) {
+      unresolved.forEach((segment, index) => {
+        segment.asset_id = assetId(remaining[index]);
+      });
+    } else if (ordered.length && ordered.length === normalized.segments.length && !used.size) {
       normalized.segments.forEach((segment, index) => {
-        segment.asset_id = String(ordered[index].id || ordered[index].media_asset_record_id || "").trim();
+        segment.asset_id = assetId(ordered[index]);
       });
     }
     return normalized;
@@ -318,6 +374,7 @@
     estimateNarrationSeconds,
     exactVoiceoverText,
     formatClock,
+    matchStillsBySuggestedName,
     narrationFit,
     normalizeTimeline,
     parseClock,

@@ -169,6 +169,22 @@ def test_assign_stills_in_order_overwrites_stale_asset_ids():
     assert [segment["asset_id"] for segment in timeline["segments"]] == [f"still-{index}" for index in range(1, 9)]
 
 
+def test_assign_stills_matches_suggested_filenames_out_of_order():
+    parsed = parse_timed_script_markdown(
+        "| Time | Voiceover | Suggested still |\n"
+        "| --- | --- | --- |\n"
+        "| 0:00–0:05 | Start at 72nd Street. | UpperWestSide_72nd_platform.jpg |\n"
+        "| 0:05–0:12 | Tap OMNY and walk through. | OMNY_reader_closeup.jpg |\n"
+    )
+    assets = [
+        {"id": "recOmny2", "order": 1, "name": "OMNY_reader_closeup.jpg"},
+        {"id": "recWide1", "order": 2, "name": "UpperWestSide_72nd_platform.jpg"},
+    ]
+    timeline = assign_stills_in_order(parsed["timeline"], assets)
+    assert timeline["segments"][0]["asset_id"] == "recWide1"
+    assert timeline["segments"][1]["asset_id"] == "recOmny2"
+
+
 def test_authoritative_timing_survives_stamp_and_ignores_pacing_and_beat_sync():
     timeline = assign_stills_in_order(
         parse_timed_script_markdown(NYC_SUBWAY_SCRIPT)["timeline"],

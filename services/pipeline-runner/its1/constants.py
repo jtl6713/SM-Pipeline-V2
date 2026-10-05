@@ -1,0 +1,3 @@
+MAKE_SCENARIO_ID = 0
+MAKE_SCENARIO_NAME = "ITS1 - Idea Timed Script Timeline"
+OPENAI_MODEL = "gpt-5"

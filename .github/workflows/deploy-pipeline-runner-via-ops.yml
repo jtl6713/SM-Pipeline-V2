@@ -106,3 +106,6 @@ jobs:
 # Trigger pipeline-runner deploy for continuous photo voiceover timing fix (Content 322/325)
 # Source merge 65ac1dad198cd627163730880125be6fe0f35338
 # 2026-10-05
+
+# Trigger pipeline-runner deploy for ITS1 idea timed-script writer
+# 2026-10-05T03:20:00Z service_version=2026-10-05-idea-timed-script
