@@ -643,7 +643,22 @@ def assign_clip_frames(
         # After P2, those windows are measured VO lengths (not raw import clocks).
         frames = [segment_duration_frames(segment) for segment in timeline["segments"]]
         if frames and all(frame >= 1 for frame in frames):
-            return frames, sum(frames)
+            # Segment MP3 measurements can sum slightly shorter than the final
+            # continuous synthesized narration because of encoder padding/join
+            # boundaries. Never let authoritative timing end before the actual
+            # voiceover; preserve every earlier scene boundary and extend only
+            # the final scene by the missing frames.
+            try:
+                voice_n = float(effective.get("voiceover_duration_seconds") or 0)
+            except (TypeError, ValueError):
+                voice_n = 0
+            total = sum(frames)
+            if voice_n > 0:
+                required = max(1, math.ceil(voice_n * FPS))
+                if required > total:
+                    frames[-1] += required - total
+                    total = required
+            return frames, total
     photo_voice = (
         not story
         and not video_indexes
