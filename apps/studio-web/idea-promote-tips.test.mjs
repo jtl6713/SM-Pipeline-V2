@@ -9,10 +9,10 @@ const html = fs.readFileSync(path.join(here, "index.html"), "utf8");
 const config = fs.readFileSync(path.join(here, "assets", "config-0621.js"), "utf8");
 const app = fs.readFileSync(path.join(here, "assets", "app-item4-0625.js"), "utf8");
 
-test("idea promote drawer documents duration vs voiceover tail precedence", () => {
+test("idea promote drawer documents duration vs voiceover precedence", () => {
   assert.match(html, /id="promoteTimingHint"/);
-  assert.match(html, /id="promoteVoiceoverTail"/);
   assert.match(html, /id="promoteVideoDuration"/);
+  assert.doesNotMatch(html, /id="promoteVoiceoverTail"/);
   const uiBuild = html.match(/UI build (0\.6\.\d+)/)?.[1];
   const scriptBuild = html.match(/app-item4-0625\.js\?v=([^"]+)/)?.[1];
   const appBuild = app.match(/BUILD_ID = "item4-([^"]+)"/)?.[1];
@@ -26,13 +26,13 @@ test("idea promote drawer documents duration vs voiceover tail precedence", () =
   assert.match(html, /Photo Set turns stills into Reels|Photo Set/);
   assert.match(html, />Vertical Short Video</);
   assert.match(html, />Carousel</);
-  assert.match(config, /promoteVoiceoverTail: "Seconds of picture/);
-  assert.match(config, /Video duration still wins/);
-  assert.match(config, /prVoiceoverDuration: "Spoken narration length/);
+  assert.match(html, /recorded voiceover sets each slide and the total length/);
+  assert.match(config, /promoteVoiceoverTail: "Unused\. Photo reels follow the recorded voiceover/);
+  assert.match(config, /promoteVideoDuration: "Finished length for clip videos/);
+  assert.match(config, /prVoiceoverDuration: "Planning note for clip videos/);
   assert.match(config, /Help → Ideas has a graphic/);
   assert.match(app, /BUILD_ID = "item4-0\.6\.\d+[^"]*"/);
   assert.match(app, /function syncPromoteTimingHint/);
-  assert.match(app, /Video duration is the hard cap/);
   assert.match(app, /library_asset_ids/);
   assert.match(app, /restoreIdeaLibraryPickerAfterDrawerUpdate/);
 });

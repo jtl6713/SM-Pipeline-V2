@@ -9,7 +9,7 @@
  <link rel="preconnect" href="https://fonts.googleapis.com">
  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@1,600;1,700&family=Inter:wght@400;500;600;700;800&family=Oswald:wght@500&display=swap">
- <link rel="stylesheet" href="/assets/styles-phase7-0621.css?v=0.6.488-global-chicagoshining-watermark">
+ <link rel="stylesheet" href="/assets/styles-phase7-0621.css?v=0.6.490-ideas-vo-approve">
  <link rel="stylesheet" href="/assets/insights-0622.css?v=0.6.381-insights-padding">
  <link rel="stylesheet" href="/assets/clean-enterprise.css?v=0.6.375-clean-enterprise">
  <link rel="stylesheet" href="/assets/ai-api-footer.css?v=0.6.427-primary-ai-alert">
@@ -137,8 +137,8 @@
 
  <section id="page-ideas" class="page">
  <div class="page-heading">
- <div><span class="eyebrow">Intake</span><h1>Ideas</h1><p>Write or pick a brief, then Promote to production. No review email is required. Add photos first if you want new footage on the request. Use unused photos scans the library for a related 5–10 still set that has not been posted yet, writes the idea and caption, and runs it through to Ready for Review.</p></div>
- <div class="heading-actions"><button class="secondary-button" data-refresh="ideas">Refresh</button><button class="secondary-button" id="ideasRunAutonomous">Use unused photos</button><button class="secondary-button" id="generateIdeasButton">Generate AI ideas</button><button class="primary-button" id="newIdeaButton">+ New idea</button></div>
+ <div><span class="eyebrow">Intake</span><h1>Ideas</h1><p>Write or pick a brief, then Promote to production. No review email is required. <strong>Create VO timeline</strong> accepts the idea: writes the spoken script, attaches named library stills, and opens Production ready for Approve. Use unused photos scans unpublished 5–10 still sets through to Ready for Review.</p></div>
+ <div class="heading-actions"><button class="secondary-button" data-refresh="ideas">Refresh</button><button class="secondary-button" id="ideasRunAutonomous">Use unused photos</button><button class="secondary-button" id="ideasCreateTimelineButton">Create VO timeline</button><button class="secondary-button" id="generateIdeasButton">Generate AI ideas</button><button class="primary-button" id="newIdeaButton">+ New idea</button></div>
  </div>
  <div class="form-message ideas-autonomous-message" id="ideasAutonomousMessage" aria-live="polite"></div>
  <section class="panel idea-generate-panel" id="ideaGeneratePanel" hidden>
@@ -2137,7 +2137,7 @@
  <div class="studio-footer-meta">
  <span id="aiApiFooter" aria-live="polite"><strong>AI API:</strong> loading…</span>
  <span id="apiStatus" class="topbar-status">Connecting…</span>
- <span id="uiBuildLabel">UI build 0.6.488</span>
+ <span id="uiBuildLabel">UI build 0.6.490</span>
  <span id="workerBuildLabel">Worker …</span> </div>
  </footer>
 
@@ -2183,6 +2183,7 @@
  <div class="idea-media-chooser">
  <button type="button" class="primary-button" id="configureProductionButton">Add new media</button>
  <button type="button" class="secondary-button" id="useExistingLibraryButton">Use existing</button>
+ <button type="button" class="secondary-button" id="createIdeaTimelineButton">Create VO timeline</button>
  <button type="button" class="secondary-button" id="watchIdeaPhotosButton">Listen for photos</button>
  <button type="button" class="secondary-button" id="matchIdeaPhotosButton" hidden>Find images now</button>
  </div>
@@ -2192,6 +2193,13 @@
  <p class="idea-library-section"><strong id="ideaMatchedPhotosHeading">Selected photos</strong></p>
  <p class="idea-library-picker-hint" id="ideaMatchedPhotosHint">These photos were selected automatically. Open Production to add, remove, or reorder them before approval.</p>
  <div class="idea-library-cards" id="ideaMatchedPhotosGrid"></div>
+ </div>
+
+ <div class="idea-library-picker" id="ideaTimedScriptPreview" hidden>
+ <p class="idea-library-section"><strong>Voiceover timeline</strong></p>
+ <p class="idea-library-picker-hint" id="ideaTimedScriptHint">Studio wrote the spoken script, attached these named stills, and prepared Production Approve. Tap Approve on Production to render. This does not publish.</p>
+ <div class="idea-timed-script-meta" id="ideaTimedScriptMeta"></div>
+ <pre class="idea-timed-script-table" id="ideaTimedScriptTable"></pre>
  </div>
 
  <div class="idea-library-picker" id="ideaLibraryPicker" hidden>
@@ -2297,12 +2305,12 @@
  </div>
  </aside>
 
- <script src="/assets/config-0621.js?v=0.6.483-voiceover-drives-timing"></script>
- <script src="/assets/ez-plan.js?v=0.6.487-schedule-mae-day"></script>
+ <script src="/assets/config-0621.js?v=0.6.490-ideas-vo-approve"></script>
+ <script src="/assets/ez-plan.js?v=0.6.490-ideas-vo-approve"></script>
  <script src="/assets/pipeline-schedule-grid-0622.js?v=0.6.475-manual-media-authority"></script>
  <script src="/assets/platform-schedule-calendar-0924.js?v=0.6.475-manual-media-authority"></script>
- <script src="/assets/timed-script.js?v=0.6.475-manual-media-authority"></script>
- <script src="/assets/app-item4-0625.js?v=0.6.488-global-chicagoshining-watermark"></script>
+ <script src="/assets/timed-script.js?v=0.6.490-ideas-vo-approve"></script>
+ <script src="/assets/app-item4-0625.js?v=0.6.490-ideas-vo-approve"></script>
  <script src="/assets/insights-0622.js?v=0.6.365-first-party-analytics-reconciled"></script>
  <script src="/assets/ai-api-footer.js?v=0.6.427-primary-ai-alert"></script>
  <script src="/assets/sticky-footer-scroll.js?v=0.6.378-sticky-footer-scroll"></script>

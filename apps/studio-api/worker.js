@@ -149,7 +149,7 @@ import {
   summarizeObservations,
   youtubePublishedAfterIso,
 } from "./autonomous-produce.mjs";
-import { ideaAutoListenContentType, ideaManagePhotoPauseActive, ideaProductionConfigFields, mergeProductionRequestNotes, parseIdeaMachineNotes, parseIdeaNotedMediaIds, productionNotesForPromotionHandoff, productionPhotoWaitAutoOff, productionPhotoWaitRejectedIds, shouldAttachPhotoWaitAssets, withIdeaManagePhotoPause, withoutIdeaManagePhotoPause, withProductionPhotoWaitManual } from "./idea-photo-wait.mjs";
+import { ideaAutoListenContentType, ideaManagePhotoPauseActive, ideaProductionConfigFields, mergeIdeaProductionNotes, mergeProductionRequestNotes, parseIdeaMachineNotes, parseIdeaNotedMediaIds, productionNotesForPromotionHandoff, productionPhotoWaitAutoOff, productionPhotoWaitRejectedIds, shouldAttachPhotoWaitAssets, withIdeaManagePhotoPause, withoutIdeaManagePhotoPause, withProductionPhotoWaitManual } from "./idea-photo-wait.mjs";
 import {
   STUDIO_PUBLISH_RECONCILE_SCHEDULE_FORMULA,
   STUDIO_TIKTOK_INBOX_DUE_FORMULA,
@@ -184,6 +184,17 @@ import {
   maeScheduleConflicts,
   maeTimeZoneFromTheme,
 } from "./mae-schedule.mjs";
+import {
+  assignScenesToStills,
+  buildTimelineFromScenes,
+  exactVoiceoverText,
+  fallbackScenesFromStills,
+  formatTimedScriptMarkdown,
+  ideaTimedScriptReady,
+  mergeTimedScriptNotes,
+  pickTimelineCatalog,
+  scenesFromModelPayload,
+} from "./idea-timed-script.mjs";
 
 const JSON_HEADERS = {
   "Content-Type": "application/json; charset=UTF-8",
@@ -215,6 +226,7 @@ export default {
       const isIdeaWatchPhotosRoute = /^\/api\/ideas\/rec[A-Za-z0-9]+\/watch-photos$/.test(url.pathname);
       const isIdeaPhotoListeningSessionRoute = /^\/api\/ideas\/rec[A-Za-z0-9]+\/photo-listening-session$/.test(url.pathname);
       const isIdeaMatchPhotosRoute = /^\/api\/ideas\/rec[A-Za-z0-9]+\/match-photos$/.test(url.pathname);
+      const isIdeaTimedScriptRoute = /^\/api\/ideas\/rec[A-Za-z0-9]+\/timed-script$/.test(url.pathname);
       const isIdeaLibrarySuggestionsRoute = /^\/api\/ideas\/rec[A-Za-z0-9]+\/library-suggestions$/.test(url.pathname);
       const isIdeaProductionRequestRoute = /^\/api\/ideas\/rec[A-Za-z0-9]+\/production-request$/.test(url.pathname);
       const isIdeaGenerateRoute = url.pathname === "/api/ideas/generate";
@@ -319,6 +331,7 @@ export default {
       const isIdeaWatchPhotosWrite = isIdeaWatchPhotosRoute && request.method === "POST";
       const isIdeaPhotoListeningSessionWrite = isIdeaPhotoListeningSessionRoute && request.method === "POST";
       const isIdeaMatchPhotosWrite = isIdeaMatchPhotosRoute && request.method === "POST";
+      const isIdeaTimedScriptWrite = isIdeaTimedScriptRoute && request.method === "POST";
       const isProductionRequestCreateWrite =
         (isIdeaProductionRequestRoute || isProductionRequestCollectionRoute) && request.method === "POST";
       const isProductionRequestEditWrite = isProductionRequestRecordRoute && request.method === "PATCH";
@@ -379,6 +392,7 @@ export default {
         isIdeaWatchPhotosWrite ||
         isIdeaPhotoListeningSessionWrite ||
         isIdeaMatchPhotosWrite ||
+        isIdeaTimedScriptWrite ||
         isProductionRequestCreateWrite ||
         isProductionRequestEditWrite ||
         isProductionRequestPromoteWrite ||
@@ -471,7 +485,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.443-schedule-mae-day",
+          version: "0.10.445-ideas-vo-approve",
           studio_mae_schedule_v1: true,
           studio_desk_inventory_v1: true,
           studio_desk_activity_v1: true,
@@ -1065,6 +1079,13 @@ export default {
         assertWriteRequest(request, env);
         requirePermission(authorization, "production_configure");
         return matchIdeaPhotosRoute(request, env, url, authorization);
+      }
+
+      if (isIdeaTimedScriptRoute) {
+        if (request.method !== "POST") throw new HttpError(405, "Method not allowed");
+        assertWriteRequest(request, env);
+        requirePermission(authorization, "production_configure");
+        return createIdeaTimedScriptRoute(request, env, url, authorization, ctx);
       }
 
       if (isIdeaLibrarySuggestionsRoute) {
@@ -21260,6 +21281,247 @@ async function matchIdeaPhotosRoute(request, env, url, authorization) {
   });
 }
 
+function ideaTimedScriptCatalogRow(row) {
+  const record = row?.record || row;
+  return {
+    id: row?.id || record?.id,
+    name: String(f(record, "Asset Name") || row?.name || "").trim(),
+    location: String(f(record, "Location") || row?.location || "").trim(),
+    topic: String(f(record, "Topic") || row?.topic || "").trim(),
+    description: String(f(record, "Asset_Description") || row?.description || "").trim().slice(0, 180),
+    score: Number(row?.score || 0) || 0,
+    confidence: String(row?.confidence || "none"),
+  };
+}
+
+async function pulseIdeaTimedScriptWriter(env, idea, catalog) {
+  const title = String(f(idea, "Candidate_Title") || "").trim();
+  const summary = String(f(idea, "Idea_Summary") || "").trim();
+  const location = String(f(idea, "Primary_Location") || f(idea, "Neighborhood_or_Area") || "").trim();
+  const marketRaw = f(idea, "Market_Name");
+  const market = (Array.isArray(marketRaw) ? String(marketRaw[0] || "") : String(marketRaw || "")).trim() || "Chicago";
+  const compact = (catalog || []).map((row) => ({
+    id: row.id,
+    name: row.name,
+    location: row.location || "",
+    topic: row.topic || "",
+    description: row.description || "",
+  }));
+  try {
+    const { response, payload } = await item4PulsePipelineStage(env, "its1", {
+      source: "studio-idea-timed-script",
+      title,
+      summary,
+      location,
+      market,
+      catalog: compact,
+    }, "ITS1");
+    if (response.ok && payload?.status === "ok") {
+      const scenes = payload?.details?.run?.scenes || payload?.details?.themes?.scenes;
+      const parsed = scenesFromModelPayload({ scenes }, catalog);
+      if (parsed.length >= 2) return { source: "its1", scenes: parsed };
+    }
+  } catch (error) {
+    console.warn("ITS1 idea timed script pulse failed", idea?.id, error);
+  }
+  try {
+    const covered = compact.map((row, index) => `${index + 1}. ${row.name}${row.location ? ` — ${row.location}` : ""}`).join("\n");
+    const { response, payload } = await item4PulsePipelineStage(env, "sai1", {
+      source: "studio-idea-timed-script",
+      title,
+      market,
+      covered_text: covered || "(none)",
+      needed: 0,
+      total: compact.length,
+    }, "SAI1");
+    if (response.ok) {
+      const themes = payload?.details?.themes || payload?.details?.run?.themes || {};
+      const parsed = scenesFromModelPayload(themes, catalog);
+      if (parsed.length >= 2) return { source: "sai1", scenes: parsed };
+    }
+  } catch (error) {
+    console.warn("SAI1 idea timed script fallback failed", idea?.id, error);
+  }
+  return {
+    source: "fallback",
+    scenes: fallbackScenesFromStills({ title, summary, location }, catalog),
+  };
+}
+
+async function createIdeaTimedScriptRoute(request, env, url, authorization, ctx = null) {
+  const recordId = ideaRecordIdFromPath(url);
+  let idea = await loadAuthorizedIdea(env, recordId, authorization);
+  if (promotionCompleted(idea)) {
+    throw new HttpError(409, "This idea is already in production, so a new timeline was not written.");
+  }
+  if (String(f(idea, "Candidate_Status") || "").trim() === "On Hold") {
+    throw new HttpError(409, "Restore this idea before creating a timeline.");
+  }
+  const title = String(f(idea, "Candidate_Title") || "").trim();
+  if (!title) throw new HttpError(400, "Give this idea a title before creating a timeline.");
+  let summary = String(f(idea, "Idea_Summary") || "").trim();
+  const location = String(f(idea, "Primary_Location") || f(idea, "Neighborhood_or_Area") || "").trim();
+  if (!summary && !location) {
+    throw new HttpError(400, "Add a short summary or place name so Studio can describe the idea, pick stills, and write the voiceover.");
+  }
+  if (!summary) {
+    summary = location
+      ? `${title}. Shot around ${location}.`
+      : title;
+    idea = await airtableFetch(env, env.AIRTABLE_IDEA_TABLE_ID, idea.id, {
+      method: "PATCH",
+      body: JSON.stringify({ fields: { Idea_Summary: summary.slice(0, 2000) }, typecast: true }),
+    });
+  }
+
+  const ranked = (await rankStillsForIdeaPhotoWait(env, idea)).map(ideaTimedScriptCatalogRow);
+  const picked = pickTimelineCatalog(ranked);
+  if (picked.selected.length < 2) {
+    throw new HttpError(409, "No matching library stills yet. Add a place name to the idea or attach photos, then try again.");
+  }
+
+  const writer = await pulseIdeaTimedScriptWriter(env, idea, picked.catalog.length >= 4 ? picked.catalog : picked.selected);
+  const assigned = assignScenesToStills(writer.scenes, picked.catalog.length ? picked.catalog : picked.selected)
+    .filter((scene) => String(scene.voiceover_text || "").trim() && String(scene.media_asset_id || scene.asset_id || "").trim());
+  const scenes = assigned.length >= 2 ? assigned : fallbackScenesFromStills({
+    title,
+    summary,
+    location,
+  }, picked.selected);
+  const timeline = buildTimelineFromScenes(scenes);
+  if (!ideaTimedScriptReady(timeline)) {
+    throw new HttpError(502, "Studio could not build a voiceover timeline from the matching stills.");
+  }
+
+  const mediaIds = [...new Set(timeline.segments.map((segment) => String(segment.asset_id || "").trim()).filter((id) => /^rec[A-Za-z0-9]+$/.test(id)))];
+  if (mediaIds.length < 2) {
+    throw new HttpError(409, "The timeline did not resolve to library stills. Try again after more photos are classified.");
+  }
+
+  let requestRecord = await existingDraftForIdea(env, idea.id, authorization)
+    || await findDraftProductionRequestForIdea(env, idea.id)
+    || await createDraftForIdea(env, idea, authorization);
+  const attached = await applyLibraryAssetsToProductionRequest(env, requestRecord, mediaIds, {
+    replaceWaitAssets: true,
+    allowManagePaused: true,
+    replaceAll: true,
+  });
+  requestRecord = attached.record;
+  const orderedAssets = item4AssetManifest(requestRecord)
+    .slice()
+    .sort((a, b) => Number(a.order || 0) - Number(b.order || 0));
+  const byMedia = new Map(orderedAssets.map((asset) => [String(asset?.media_asset_record_id || "").trim(), asset]));
+  timeline.segments.forEach((segment, index) => {
+    const matched = byMedia.get(String(segment.asset_id || "").trim()) || orderedAssets[index];
+    if (matched?.id) segment.asset_id = String(matched.id);
+  });
+
+  const script = exactVoiceoverText(timeline);
+  const markdown = formatTimedScriptMarkdown(timeline);
+  const notes = withProductionPhotoWaitManual(mergeTimedScriptNotes(f(requestRecord, "Production_Notes"), timeline));
+  const stampedNotes = /idea-vo-timeline=/i.test(notes)
+    ? notes
+    : `${notes}\nidea-vo-timeline=1`.trim();
+  const duration = Math.max(5, Math.round(Number(timeline.duration_seconds) || 0));
+  requestRecord = await item4UpdateRequestState(env, requestRecord.id, {
+    Master_Content_Type: "Vertical Short Video",
+    Voiceover_Mode: "Yes",
+    Script_Mode: "Force exact",
+    Requested_Script: script,
+    Video_Duration_Seconds: duration,
+    Voiceover_Tail_Seconds: 0,
+    Video_Clip_Count_Mode: "Exact",
+    Video_Clip_Count_Exact: timeline.segments.length,
+    Carousel_Image_Mode: "Manual Upload",
+    Production_Notes: stampedNotes.slice(0, 10000),
+  });
+
+  // Accept the idea all the way to Production Approve: plan + crops, stills already attached.
+  // Do not I3/I4 promote — Joseph still taps Approve on Production.
+  if (String(f(requestRecord, "Studio_Output_Plan_Status") || "").trim() !== "Ready") {
+    const planCall = studioInternalJsonRequest(`/api/production-requests/${requestRecord.id}/plan`, {
+      platforms: [...AUTONOMOUS_STANDARD_PLATFORMS],
+      overrides: autonomousPlanOverrides("Vertical Short Video"),
+      extras: autonomousPlanExtras(),
+      package: "video",
+      skip_fbs1_guard: true,
+    });
+    await buildItem4OutputPlan(planCall.request, env, planCall.url, authorization);
+    requestRecord = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, requestRecord.id);
+  }
+
+  let variantStatus = String(f(requestRecord, "Studio_Variant_Status") || "").trim();
+  if (variantStatus !== "Ready" && variantStatus !== "Not Needed") {
+    let reconciled = await item4ReconcileVariants(env, requestRecord.id, requestRecord).catch(() => null);
+    if (reconciled?.record) requestRecord = reconciled.record;
+    const queued = Array.isArray(reconciled?.queue_rows) && reconciled.queue_rows.length;
+    if (!autonomousPlanVariantsReady(requestRecord, reconciled) && !queued) {
+      const variantsCall = studioInternalJsonRequest(`/api/production-requests/${requestRecord.id}/variants`, {});
+      await prepareItem4Variants(variantsCall.request, env, variantsCall.url, authorization, ctx);
+    }
+    requestRecord = await waitAutonomousVariantsReady(env, requestRecord.id, ctx, 50000);
+  }
+
+  const assetsCount = item4AssetManifest(requestRecord).length;
+  const planReady = String(f(requestRecord, "Studio_Output_Plan_Status") || "").trim() === "Ready";
+  variantStatus = String(f(requestRecord, "Studio_Variant_Status") || "").trim();
+  const variantsReady = variantStatus === "Ready"
+    || variantStatus === "Not Needed"
+    || autonomousPlanVariantsReady(requestRecord);
+  const readyForApproval = assetsCount >= 2 && planReady && variantsReady;
+  requestRecord = await item4UpdateRequestState(env, requestRecord.id, {
+    Request_Status: "Ready",
+    Studio_Master_Asset_Status: assetsCount >= 2 ? "Ready" : (f(requestRecord, "Studio_Master_Asset_Status") || "None"),
+    Studio_Item4_State: readyForApproval ? "Plan Ready" : (planReady ? "Plan Ready" : "Assets Ready"),
+  });
+
+  const ideaNotes = mergeIdeaProductionNotes(f(idea, "Production_Config_Notes"), undefined, mediaIds);
+  idea = await airtableFetch(env, env.AIRTABLE_IDEA_TABLE_ID, idea.id, {
+    method: "PATCH",
+    body: JSON.stringify({
+      fields: {
+        Production_Content_Type: "Vertical Short Video",
+        Production_Include_Voiceover: "Yes",
+        Production_Video_Clip_Count: timeline.segments.length,
+        Production_Carousel_Image_Mode: "Manual Upload",
+        Studio_Matched_Media_Assets: mediaIds,
+        Studio_Photo_Wait_Status: "Not Needed",
+        Production_Config_Notes: ideaNotes,
+        Candidate_Status: String(f(idea, "Candidate_Status") || "").trim() === "On Hold"
+          ? "On Hold"
+          : "Approved",
+      },
+      typecast: true,
+    }),
+  });
+
+  return respond(request, env, {
+    ok: true,
+    source: writer.source,
+    markdown,
+    requested_script: script,
+    duration_seconds: timeline.duration_seconds,
+    scene_count: timeline.segments.length,
+    ready_for_approval: readyForApproval,
+    waiting_variants: planReady && !variantsReady,
+    stills: mediaIds.map((id) => {
+      const row = (picked.catalog.find((item) => item.id === id) || picked.selected.find((item) => item.id === id) || {});
+      return {
+        id,
+        name: row.name || "",
+        location: row.location || "",
+        preview_path: `/api/media-assets/${id}/preview`,
+      };
+    }),
+    timeline,
+    record: mapIdea(idea),
+    production_request: mapProductionRequest(requestRecord),
+    message: readyForApproval
+      ? `Ready for Production Approve: ${timeline.segments.length} scenes, ${Number(timeline.duration_seconds).toFixed(0)} seconds, named stills attached. Open Production and tap Approve. This does not publish.`
+      : `Timeline and stills are on Production (${timeline.segments.length} scenes). Platform crops are still finishing — open Production and Approve when crops say Ready. This does not publish.`,
+  }, readyForApproval ? 200 : 202);
+}
+
 async function findDraftProductionRequestForIdea(env, ideaRecordId) {
   const records = await listRecords(env, PRODUCTION_REQUEST_TABLE, { limit: 100 });
   return records.find((record) => {
@@ -21332,9 +21594,11 @@ async function unfinishedIntakeBatchIds(env, batchIds) {
   return pending;
 }
 
-async function applyLibraryAssetsToProductionRequest(env, requestRecord, mediaIds, { replaceWaitAssets = false, allowManagePaused = false } = {}) {
+async function applyLibraryAssetsToProductionRequest(env, requestRecord, mediaIds, { replaceWaitAssets = false, allowManagePaused = false, replaceAll = false } = {}) {
   const existingAll = item4AssetManifest(requestRecord);
-  const existing = replaceWaitAssets
+  const existing = replaceAll
+    ? []
+    : replaceWaitAssets
     ? existingAll.filter((asset) => String(asset?.source || "") !== "idea_photo_wait")
     : existingAll;
   const already = new Set(existing.map((asset) => String(asset?.media_asset_record_id || "").trim()).filter(Boolean));
@@ -21377,10 +21641,10 @@ async function applyLibraryAssetsToProductionRequest(env, requestRecord, mediaId
   const latest = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, requestRecord.id);
   const ideaId = firstLinkedRecordId(f(latest, "Idea_Candidate"));
   const latestIdea = ideaId ? await airtableFetch(env, env.AIRTABLE_IDEA_TABLE_ID, ideaId) : null;
-  if (productionPhotoWaitAutoOff(f(latest, "Production_Notes"))
+  if (!replaceAll && (productionPhotoWaitAutoOff(f(latest, "Production_Notes"))
     || JSON.stringify(item4AssetManifest(latest)) !== JSON.stringify(existingAll)
     || (latestIdea && (String(f(latestIdea, "Studio_Photo_Wait_Status") || "").trim() === "Not Needed"
-      || (!allowManagePaused && ideaManagePhotoPauseActive(f(latestIdea, "Production_Config_Notes")))))) {
+      || (!allowManagePaused && ideaManagePhotoPauseActive(f(latestIdea, "Production_Config_Notes"))))))) {
     return { record: latest, assets: item4AssetManifest(latest), appended: 0, skipped: true };
   }
   const assets = [...existing, ...appended];

@@ -80,3 +80,19 @@ test("assignStillsInOrder overwrites stale asset ids", () => {
   const timeline = timed.assignStillsInOrder(parsed.timeline, assets);
   assert.equal(timeline.segments[0].asset_id, "still-1");
 });
+
+test("suggested filenames bind stills even when pool order differs", () => {
+  const parsed = timed.parseTimedScriptMarkdown(`
+| Time | Voiceover | Suggested still |
+| --- | --- | --- |
+| 0:00–0:05 | Start at 72nd Street. | UpperWestSide_72nd_platform.jpg |
+| 0:05–0:12 | Tap OMNY and walk through. | OMNY_reader_closeup.jpg |
+`);
+  const assets = [
+    { id: "recOmny2", order: 1, name: "OMNY_reader_closeup.jpg" },
+    { id: "recWide1", order: 2, name: "UpperWestSide_72nd_platform.jpg" },
+  ];
+  const timeline = timed.assignStillsInOrder(parsed.timeline, assets);
+  assert.equal(timeline.segments[0].asset_id, "recWide1");
+  assert.equal(timeline.segments[1].asset_id, "recOmny2");
+});

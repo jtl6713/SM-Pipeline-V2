@@ -4,6 +4,7 @@
   const apiBase = configuredBase || window.location.origin;
   const $ = (id) => document.getElementById(id);
   let activeIdea = null;
+  let ideaTimedScriptPreview = null;
   let ideasCache = [];
   let ideaPhotoManagePauseTimer = null;
   let ideaPhotoManagePauseIdeaId = null;
@@ -257,7 +258,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.488-global-chicagoshining-watermark";
+  const BUILD_ID = "item4-0.6.490-ideas-vo-approve";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -2245,6 +2246,14 @@
       /* message already shown */
     }
   });
+  $("ideasCreateTimelineButton")?.addEventListener("click", async () => {
+    if (activeIdea?.id && $("ideaManageDrawer")?.classList.contains("open")) {
+      await createIdeaTimedScript(activeIdea, { heading: true });
+      return;
+    }
+    setIdeasAutonomousMessage("Open an idea with Manage, then tap Create VO timeline. Studio writes the spoken script and picks named library stills.");
+    $("ideasList")?.scrollIntoView({ behavior: "smooth", block: "start" });
+  });
   $("generateIdeasButton")?.addEventListener("click", () => setIdeaGeneratorOpen(true, { reset: !ideaGenerationInFlight }));
   $("ideaGenerateCancel")?.addEventListener("click", () => setIdeaGeneratorOpen(false));
   $("ideaGenerateMore")?.addEventListener("click", () => setIdeaGeneratorOpen(true, { reset: true }));
@@ -2734,6 +2743,12 @@
       useExistingButton.disabled = promoted || Boolean(idea?.is_on_hold);
       useExistingButton.hidden = promoted;
     }
+    const timelineButton = $("createIdeaTimelineButton");
+    if (timelineButton) {
+      timelineButton.hidden = promoted;
+      timelineButton.disabled = promoted || Boolean(idea?.is_on_hold);
+    }
+    renderIdeaTimedScriptPreview(idea);
     const watchPhotosButton = $("watchIdeaPhotosButton");
     if (watchPhotosButton) {
       const waitStatus = String(idea?.photo_wait_status || "").trim();
@@ -3095,6 +3110,107 @@
       button.disabled = false;
       button.textContent = "Listen for photos";
     }
+  });
+
+  function renderIdeaTimedScriptPreview(idea) {
+    const panel = $("ideaTimedScriptPreview");
+    const table = $("ideaTimedScriptTable");
+    const meta = $("ideaTimedScriptMeta");
+    if (!panel) return;
+    const preview = ideaTimedScriptPreview && ideaTimedScriptPreview.ideaId === idea?.id
+      ? ideaTimedScriptPreview
+      : null;
+    if (!preview?.markdown) {
+      panel.hidden = true;
+      if (table) table.textContent = "";
+      if (meta) meta.textContent = "";
+      return;
+    }
+    panel.hidden = false;
+    if (meta) {
+      const scenes = Number(preview.scene_count || preview.timeline?.segments?.length || 0);
+      const seconds = Number(preview.duration_seconds || preview.timeline?.duration_seconds || 0);
+      meta.textContent = `${scenes} scene${scenes === 1 ? "" : "s"} · ${seconds.toFixed(0)} seconds · stills named in the table`;
+    }
+    if (table) table.textContent = preview.markdown;
+  }
+
+  async function createIdeaTimedScript(idea, { button = null, heading = false } = {}) {
+    const target = idea || activeIdea;
+    if (!target?.id) return;
+    const buttons = [
+      button,
+      $("createIdeaTimelineButton"),
+      heading ? $("ideasCreateTimelineButton") : null,
+    ].filter(Boolean);
+    const restore = buttons.map((node) => ({ node, text: node.textContent, disabled: node.disabled }));
+    buttons.forEach((node) => {
+      node.disabled = true;
+      node.textContent = "Building Production…";
+    });
+    const setMessage = heading ? setIdeasAutonomousMessage : setManageMessage;
+    setMessage("Accepting this idea: writing the voiceover timeline, attaching named stills, and preparing Production Approve…");
+    try {
+      const result = await api(`/api/ideas/${encodeURIComponent(target.id)}/timed-script`, {
+        method: "POST",
+        body: JSON.stringify({}),
+        timeoutMs: 150000,
+      });
+      ideaTimedScriptPreview = {
+        ideaId: target.id,
+        markdown: result.markdown || "",
+        timeline: result.timeline || null,
+        duration_seconds: result.duration_seconds,
+        scene_count: result.scene_count,
+        stills: result.stills || [],
+      };
+      if (result.record) {
+        activeIdea = result.record;
+        updateIdeaDrawer(result.record);
+      } else {
+        renderIdeaTimedScriptPreview(activeIdea);
+      }
+      if (Array.isArray(result.stills) && result.stills.length) {
+        ideaLibrarySelected = new Set(result.stills.map((row) => String(row.id || "")).filter(Boolean));
+      }
+      if ($("promoteContentType")) $("promoteContentType").value = "Vertical Short Video";
+      if ($("promoteVoiceover")) $("promoteVoiceover").value = "Yes";
+      syncPromotionPanels();
+      const success = result.message
+        || (result.ready_for_approval
+          ? "Ready for Production Approve. Stills are attached. Tap Approve on Production. This does not publish."
+          : "Timeline and stills are on Production. Crops may still be finishing — Approve when Ready. This does not publish.");
+      setMessage(success, "success");
+      if (heading) setManageMessage(success, "success");
+      await Promise.all([loadIdeas(), loadDashboard(), loadProductionRequests()]).catch(() => {});
+      if (result.production_request?.id || activeIdea?.id) {
+        await openProductionRequestForIdea(result.record || activeIdea).catch((error) => {
+          console.warn("Open Production after VO timeline failed", error);
+        });
+        if (result.ready_for_approval) {
+          setRequestMessage(success, "success");
+        } else if (result.waiting_variants) {
+          setRequestMessage("Timeline stills are attached. Waiting for platform crops, then tap Approve. This does not publish.", "success");
+        }
+      }
+    } catch (error) {
+      setMessage(error.message || "Could not create the voiceover timeline.", "error-text");
+      if (heading) setManageMessage(error.message || "Could not create the voiceover timeline.", "error-text");
+    } finally {
+      restore.forEach(({ node, text, disabled }) => {
+        node.textContent = text;
+        node.disabled = disabled;
+      });
+      if (activeIdea && !ideaIsPromoted(activeIdea) && !activeIdea.is_on_hold) {
+        const drawerButton = $("createIdeaTimelineButton");
+        if (drawerButton) drawerButton.disabled = false;
+      }
+    }
+  }
+
+  $("createIdeaTimelineButton")?.addEventListener("click", async () => {
+    if (!activeIdea?.id) return;
+    await createIdeaTimedScript(activeIdea);
   });
 
   $("matchIdeaPhotosButton")?.addEventListener("click", async () => {
@@ -13008,8 +13124,11 @@
     const findImages = listeningForPhotos
       ? `<button type="button" class="manage-button find-images-row-button" data-idea-find-images="${escapeHtml(r.id)}">Find images now</button>`
       : "";
+    const timeline = !ideaIsPromoted(r) && !r.is_on_hold
+      ? `<button type="button" class="manage-button find-images-row-button" data-idea-timeline="${escapeHtml(r.id)}">Create timeline</button>`
+      : "";
     const title = `${value(r.title)}${listeningForPhotos ? ' <span class="subtle">(Listening for photos)</span>' : ""}`;
-    return `<tr class="${r.is_on_hold ? "idea-row-held" : ""}"><td><div class="title-cell">${title}</div><div class="subtle">${value(r.summary, "")}${r.created_at ? `${r.summary ? " · " : ""}Created ${dateValue(r.created_at)}` : ""}</div></td><td>${badge(ideaStatusLabel(r))}</td><td>${value(r.content_type)}</td><td>${join(r.platforms)}</td><td>${ideaStructureLabel(r)}</td><td><div class="subtle">${escapeHtml(ideaProductionLabel(r))}</div></td><td><div class="idea-row-actions">${promote}<div class="idea-row-action-stack"><button type="button" class="manage-button" data-idea-id="${escapeHtml(r.id)}">Manage</button>${findImages}</div></div></td></tr>`;
+    return `<tr class="${r.is_on_hold ? "idea-row-held" : ""}"><td><div class="title-cell">${title}</div><div class="subtle">${value(r.summary, "")}${r.created_at ? `${r.summary ? " · " : ""}Created ${dateValue(r.created_at)}` : ""}</div></td><td>${badge(ideaStatusLabel(r))}</td><td>${value(r.content_type)}</td><td>${join(r.platforms)}</td><td>${ideaStructureLabel(r)}</td><td><div class="subtle">${escapeHtml(ideaProductionLabel(r))}</div></td><td><div class="idea-row-actions">${promote}<div class="idea-row-action-stack"><button type="button" class="manage-button" data-idea-id="${escapeHtml(r.id)}">Manage</button>${findImages}${timeline}</div></div></td></tr>`;
   }
 
   function partitionIdeaRecords(records) {
@@ -13107,6 +13226,15 @@
             button.textContent = "Try again";
           }
         }
+      });
+    });
+    target.querySelectorAll("[data-idea-timeline]").forEach((button) => {
+      button.addEventListener("click", async (event) => {
+        event.stopPropagation();
+        const idea = byId.get(button.dataset.ideaTimeline);
+        if (!idea?.id) return;
+        await openIdeaDrawer(idea);
+        await createIdeaTimedScript(idea, { button });
       });
     });
     target.querySelectorAll("[data-idea-id]").forEach((button) => {

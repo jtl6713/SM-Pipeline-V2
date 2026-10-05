@@ -620,8 +620,26 @@ def timeline_from_slide_lines(
     return timeline
 
 
+def _still_name_key(value: str) -> str:
+    text = re.sub(r"\.[a-z0-9]{2,4}$", "", str(value or "").strip(), flags=re.I)
+    return re.sub(r"[^a-z0-9]+", "", text.lower())
+
+
+def _asset_id(asset: dict[str, Any]) -> str:
+    return str(asset.get("id") or asset.get("media_asset_record_id") or "").strip()
+
+
+def _asset_name(asset: dict[str, Any]) -> str:
+    return str(
+        asset.get("name")
+        or asset.get("filename")
+        or asset.get("caption")
+        or ""
+    ).strip()
+
+
 def assign_stills_in_order(timeline: dict[str, Any], assets: list[dict[str, Any]]) -> dict[str, Any]:
-    """Map scenes 1:1 when the imported scene count equals the Production still count.
+    """Map scenes to stills by suggested filename, then fill leftovers in order.
 
     Overwrite stale asset_ids. Force exact / VO-driven stamps keep still order
     matched to narration scenes; blank-only fills left older ids in place and
@@ -635,9 +653,54 @@ def assign_stills_in_order(timeline: dict[str, Any], assets: list[dict[str, Any]
         key=lambda asset: int(asset.get("order") or 0),
     )
     segments = normalized["segments"]
-    if ordered and len(ordered) == len(segments):
+    used: set[str] = set()
+    for segment in segments:
+        visual = _still_name_key(str(segment.get("suggested_visual") or ""))
+        if not visual:
+            continue
+        match = next(
+            (
+                asset for asset in ordered
+                if _asset_id(asset) not in used and _still_name_key(_asset_name(asset)) == visual
+            ),
+            None,
+        )
+        if match is None:
+            contains = [
+                asset for asset in ordered
+                if _asset_id(asset) not in used
+                and visual
+                and (
+                    _still_name_key(_asset_name(asset)).find(visual) >= 0
+                    or visual.find(_still_name_key(_asset_name(asset))) >= 0
+                )
+                and min(len(_still_name_key(_asset_name(asset))), len(visual)) >= 8
+            ]
+            match = contains[0] if len(contains) == 1 else None
+        if match is None:
+            continue
+        asset_id = _asset_id(match)
+        if not asset_id:
+            continue
+        segment["asset_id"] = asset_id
+        used.add(asset_id)
+    remaining = [asset for asset in ordered if _asset_id(asset) and _asset_id(asset) not in used]
+    leftover = 0
+    known_ids = {_asset_id(asset) for asset in ordered if _asset_id(asset)}
+    for segment in segments:
+        current = str(segment.get("asset_id") or "").strip()
+        if current and current not in known_ids:
+            segment["asset_id"] = ""
+    used = {str(segment.get("asset_id") or "").strip() for segment in segments if str(segment.get("asset_id") or "").strip()}
+    remaining = [asset for asset in ordered if _asset_id(asset) and _asset_id(asset) not in used]
+    unresolved = [segment for segment in segments if not str(segment.get("asset_id") or "").strip()]
+    if remaining and len(remaining) == len(unresolved):
+        for segment in unresolved:
+            segment["asset_id"] = _asset_id(remaining[leftover])
+            leftover += 1
+    elif ordered and len(ordered) == len(segments) and not used:
         for segment, asset in zip(segments, ordered):
-            segment["asset_id"] = str(asset.get("id") or asset.get("media_asset_record_id") or "").strip()
+            segment["asset_id"] = _asset_id(asset)
     return normalized
 
 
