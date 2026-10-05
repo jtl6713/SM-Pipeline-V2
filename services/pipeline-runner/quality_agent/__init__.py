@@ -1,0 +1,1 @@
+"""Quality Agent signature helpers."""
