@@ -463,13 +463,27 @@ def ensure_slide_voiceover_timeline(
     if not explicit_slide_voiceovers:
         if existing and existing.get("source") == SLIDE_VOICEOVER_SOURCE:
             notes = strip_timed_script_directive(field_str(request, "Production_Notes"))
+            # The old slide-voiceover path forced the tail to zero. Once that
+            # stale auto timeline is removed and narration returns to the
+            # continuous-voiceover path, restore the configured/default tail
+            # instead of propagating the stale zero into every platform output.
+            try:
+                restored_tail = float(field(parent, "Voiceover_Tail_Seconds") or 0)
+            except (TypeError, ValueError):
+                restored_tail = 0.0
+            if restored_tail <= 0:
+                restored_tail = 2.0
+            patch = {
+                "Production_Notes": notes,
+                "Voiceover_Tail_Seconds": restored_tail,
+            }
             client.update_record(
                 PRODUCTION_REQUESTS_TABLE,
                 request["id"],
-                {"Production_Notes": notes},
+                patch,
                 typecast=True,
             )
-            request.setdefault("fields", {})["Production_Notes"] = notes
+            request.setdefault("fields", {}).update(patch)
         return
 
     lines = slide_lines_from_themes(themes, count)
