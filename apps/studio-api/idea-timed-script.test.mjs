@@ -115,4 +115,7 @@ test("Worker advertises the idea timed-script route", async () => {
   assert.match(app, /\/timed-script`/);
   assert.match(html, /id="ideasCreateTimelineButton"/);
   assert.match(html, /id="createIdeaTimelineButton"/);
+  const css = await readFile(path.join(here, "../studio-web/assets/styles-phase7-0621.css"), "utf8");
+  assert.match(css, /#page-ideas \.page-heading\{\s*flex-wrap:wrap;/);
+  assert.match(css, /#page-ideas \.heading-actions\{/);
 });

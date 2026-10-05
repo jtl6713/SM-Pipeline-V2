@@ -2589,6 +2589,18 @@ body{
 #page-support .page-heading{
   margin-bottom:20px;
 }
+#page-ideas .page-heading{
+  flex-wrap:wrap;
+}
+#page-ideas .page-heading > div:first-child{
+  flex:1 1 22rem;
+  min-width:min(100%, 18rem);
+}
+#page-ideas .heading-actions{
+  flex:0 1 auto;
+  max-width:100%;
+  justify-content:flex-end;
+}
 .library-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;padding:18px}
 .library-card{background:#fff;border:1px solid #e4ebf3;border-radius:14px;padding:12px}
 .library-card .library-meta{font-size:.78rem;color:var(--muted);margin:0 0 8px;display:flex;flex-wrap:wrap;gap:4px 10px}
