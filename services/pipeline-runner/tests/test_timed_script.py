@@ -3,7 +3,7 @@ from urllib.parse import quote
 
 from r4.render_request import choose_render_request
 from studio_produce.shared_render import build_shared_render_plan, render_equivalence_key
-from studio_produce.stamp import source_package, stamp_fields
+from studio_produce.stamp import clips_for_timed_script, source_package, stamp_fields
 from studio_produce.steps import apply_voiceover_script, exact_requested_script
 from studio_produce.timed_script import (
     assign_stills_in_order,
@@ -14,6 +14,7 @@ from studio_produce.timed_script import (
     parse_time_range,
     segment_duration_frames,
     slight_speech_rate,
+    still_name_matches,
     timed_script_from_request,
     validate_timeline,
 )
@@ -167,6 +168,73 @@ def test_assign_stills_in_order_overwrites_stale_asset_ids():
     timeline = assign_stills_in_order(stale, assets)
     assert timeline["segments"][0]["asset_id"] == "still-1"
     assert [segment["asset_id"] for segment in timeline["segments"]] == [f"still-{index}" for index in range(1, 9)]
+
+
+def test_still_name_matches_rejects_longer_numbers_and_containing_phrases():
+    manhattan = {"id": "manhattan-1", "name": "Upper West Side of Manhattan 1.png"}
+    ten = {"id": "uws-10", "name": "Upper West Side 10"}
+    nineteen = {"id": "uws-19", "file_name": "Upper West Side 19.heic"}
+    assert still_name_matches("Upper West Side 1", manhattan) is False
+    assert still_name_matches("Upper West Side 1", ten) is False
+    assert still_name_matches("**Upper West Side 19**", nineteen) is True
+
+
+def test_assign_stills_matches_suggested_names_and_ignores_extras():
+    parsed = parse_timed_script_markdown(
+        """
+| Time | Voiceover | Suggested still |
+| --- | --- | --- |
+| 0:00–0:06 | "Brownstones." | **Upper West Side 19** |
+| 0:06–0:12 | "Stoops." | Upper West Side 1 |
+"""
+    )
+    assets = [
+        {"id": "manhattan-1", "order": 1, "name": "Upper West Side of Manhattan 1.png"},
+        {"id": "uws-19", "order": 2, "name": "Upper West Side 19"},
+        {"id": "uws-1", "order": 3, "name": "Upper West Side 1.jpg"},
+        {"id": "uws-10", "order": 4, "name": "Upper West Side 10"},
+    ]
+    timeline = assign_stills_in_order(parsed["timeline"], assets)
+    assert [segment["asset_id"] for segment in timeline["segments"]] == ["uws-19", "uws-1"]
+    clips = [
+        {
+            "source": {"id": asset["id"], "name": asset["name"], "media_asset_record_id": asset["id"]},
+            "media_asset_id": asset["id"],
+        }
+        for asset in assets
+    ]
+    ordered = clips_for_timed_script(clips, {"segments": [
+        {"suggested_visual": "Upper West Side 19", "asset_id": ""},
+        {"suggested_visual": "Upper West Side 1", "asset_id": ""},
+    ]})
+    assert [clip["source"]["id"] for clip in ordered] == ["uws-19", "uws-1"]
+
+    request = _photo_request(directive_line(parsed["timeline"]), count=4)
+    names = {
+        "still-1": "Upper West Side of Manhattan 1.png",
+        "still-2": "Upper West Side 19.jpg",
+        "still-3": "Upper West Side 1.jpg",
+        "still-4": "Upper West Side 10.jpg",
+    }
+    masters = json.loads(request["fields"]["Studio_Master_Assets_JSON"])
+    for item in masters:
+        item["name"] = names[item["id"]]
+    request["fields"]["Studio_Master_Assets_JSON"] = json.dumps(masters)
+    manifest = json.loads(request["fields"]["Studio_Variant_Manifest_JSON"])
+    for item in manifest["assets"]:
+        item["name"] = names[item["id"]]
+        item["variants"]["9:16"]["file_name"] = names[item["id"]]
+    request["fields"]["Studio_Variant_Manifest_JSON"] = json.dumps(manifest)
+    package = source_package(
+        request,
+        {"id": "recPO", "fields": {"Platform": "Instagram", "Studio_Output_Type": "Reel", "Aspect_Ratio": "9:16", "Platform_Output_Type": "Reel"}},
+        None,
+    )
+    assert package is not None
+    stamped = json.loads(package["render_clip_list_json"])
+    assert [clip["source_asset_id"] for clip in stamped] == ["still-2", "still-3"]
+    assert package["clip_count"] == 2
+    assert [clip["durationFrames"] for clip in stamped] == [180, 180]
 
 
 def test_authoritative_timing_survives_stamp_and_ignores_pacing_and_beat_sync():

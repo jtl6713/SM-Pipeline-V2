@@ -102,3 +102,6 @@ jobs:
 # Trigger pipeline-runner deploy for TikTok text/plain handoff fix (Output 1304)
 # Source merge 3a0e5fee47312153233997edfcdc7d0afcef7795
 # 2026-10-03
+
+# Trigger pipeline-runner deploy for timed-script suggested-still name matching
+# 2026-10-05T02:10:00Z service_version=2026-10-05-timed-script-still-match

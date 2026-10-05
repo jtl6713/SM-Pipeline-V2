@@ -9,3 +9,4 @@ Deploy UI 0.6.481 timeline forces six standard video outputs.
 Deploy UI 0.6.482 voiceover minimum 4 seconds. Spoken audio under 4s is not saved.
 Deploy UI 0.6.483 voiceover drives slide timing. Photo reels follow the recorded voiceover.
 Deploy UI 0.6.484 schedule platform occupancy. Non-story outputs share a platform lane; IG/FB Stories may stack.
+Deploy UI 0.6.485 timed-script still matching. Suggested still names map to attached photos; extra photos are ignored.

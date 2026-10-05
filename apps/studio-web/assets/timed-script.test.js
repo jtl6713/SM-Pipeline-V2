@@ -63,6 +63,26 @@ test("eight stills map in order and frames match the timeline", () => {
   assert.deepEqual([...timeline.segments.map((segment) => timed.segmentDurationFrames(segment))], [210, 390, 390, 390, 360, 360, 360, 240]);
 });
 
+test("suggested still names win and extra attached photos are ignored", () => {
+  const parsed = timed.parseTimedScriptMarkdown(`
+| Time | Voiceover | Suggested still |
+| --- | --- | --- |
+| 0:00–0:06 | "Brownstones." | **Upper West Side 19** |
+| 0:06–0:12 | "Stoops." | Upper West Side 1 |
+`);
+  const extrasFirst = [
+    { id: "manhattan-1", order: 1, name: "Upper West Side of Manhattan 1.png" },
+    { id: "uws-19", order: 2, name: "Upper West Side 19" },
+    { id: "uws-1", order: 3, name: "Upper West Side 1.jpg" },
+    { id: "uws-10", order: 4, name: "Upper West Side 10" },
+  ];
+  const timeline = timed.assignStillsInOrder(parsed.timeline, extrasFirst);
+  assert.equal(timeline.segments[0].asset_id, "uws-19");
+  assert.equal(timeline.segments[1].asset_id, "uws-1");
+  assert.equal(timed.stillNameMatches("Upper West Side 1", extrasFirst[0]), false);
+  assert.equal(timed.stillNameMatches("Upper West Side 1", extrasFirst[3]), false);
+});
+
 test("normalizeTimeline tolerates trailing ez-photo-wait tokens after JSON", () => {
   const parsed = timed.parseTimedScriptMarkdown(NYC_SUBWAY_SCRIPT);
   const payload = timed.directiveLine(parsed.timeline).replace(/^\[timed-script\]\s*/i, "");

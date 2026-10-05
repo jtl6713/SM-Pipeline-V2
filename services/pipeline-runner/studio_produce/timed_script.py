@@ -617,12 +617,45 @@ def timeline_from_slide_lines(
     return timeline
 
 
-def assign_stills_in_order(timeline: dict[str, Any], assets: list[dict[str, Any]]) -> dict[str, Any]:
-    """Map scenes 1:1 when the imported scene count equals the Production still count.
+_STILL_KEY_RE = re.compile(r"\s+")
+_STILL_EXT_RE = re.compile(r"\.[a-z0-9]{2,4}$", re.I)
 
-    Overwrite stale asset_ids. Force exact / VO-driven stamps keep still order
-    matched to narration scenes; blank-only fills left older ids in place and
-    reordered clips away from the operator's master order.
+
+def still_match_key(value: str | None) -> str:
+    text = str(value or "")
+    text = text.replace("**", "")
+    for token in ('"', "“", "”", "'", "#"):
+        text = text.replace(token, " ")
+    text = _STILL_EXT_RE.sub("", text)
+    text = text.replace("_", " ").replace("-", " ")
+    return _STILL_KEY_RE.sub(" ", text).strip().lower()
+
+
+def _asset_still_id(asset: dict[str, Any]) -> str:
+    return str(asset.get("id") or asset.get("media_asset_record_id") or "").strip()
+
+
+def _asset_still_labels(asset: dict[str, Any]) -> list[str]:
+    return [
+        still_match_key(asset.get(key))
+        for key in ("name", "file_name", "filename", "title", "caption", "asset_name")
+        if still_match_key(asset.get(key))
+    ]
+
+
+def still_name_matches(suggested: str | None, asset: dict[str, Any] | None) -> bool:
+    want = still_match_key(suggested)
+    if not want or not isinstance(asset, dict):
+        return False
+    pattern = re.compile(rf"(?:^|\s){re.escape(want)}(?:\s|\.|$)")
+    return any(label == want or pattern.search(label) for label in _asset_still_labels(asset))
+
+
+def assign_stills_in_order(timeline: dict[str, Any], assets: list[dict[str, Any]]) -> dict[str, Any]:
+    """Map scenes to stills by Suggested still name, then fill leftovers in order.
+
+    Extra attached photos are ignored. Equal counts with no names still map 1:1
+    in master order so existing eight-scene fixtures keep working.
     """
     normalized = normalize_timeline(timeline)
     if not normalized:
@@ -632,9 +665,35 @@ def assign_stills_in_order(timeline: dict[str, Any], assets: list[dict[str, Any]
         key=lambda asset: int(asset.get("order") or 0),
     )
     segments = normalized["segments"]
-    if ordered and len(ordered) == len(segments):
-        for segment, asset in zip(segments, ordered):
-            segment["asset_id"] = str(asset.get("id") or asset.get("media_asset_record_id") or "").strip()
+    used: set[str] = set()
+
+    def take(asset: dict[str, Any]) -> str:
+        asset_id = _asset_still_id(asset)
+        if not asset_id or asset_id in used:
+            return ""
+        used.add(asset_id)
+        return asset_id
+
+    for segment in segments:
+        segment["asset_id"] = ""
+    for segment in segments:
+        match = next(
+            (
+                asset
+                for asset in ordered
+                if _asset_still_id(asset) not in used and still_name_matches(segment.get("suggested_visual"), asset)
+            ),
+            None,
+        )
+        if match:
+            segment["asset_id"] = take(match)
+    unused = [asset for asset in ordered if _asset_still_id(asset) not in used]
+    for segment in segments:
+        if str(segment.get("asset_id") or "").strip():
+            continue
+        if not unused:
+            break
+        segment["asset_id"] = take(unused.pop(0))
     return normalized
 
 

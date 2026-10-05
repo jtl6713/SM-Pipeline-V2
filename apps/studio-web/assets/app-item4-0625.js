@@ -257,7 +257,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.484-schedule-platform-occupancy";
+  const BUILD_ID = "item4-0.6.485-timed-script-still-match";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -4295,7 +4295,7 @@
           </div>
         </div>
       </details>`;
-    }).join("") + `<div class="timed-script-scene-actions"><button type="button" class="secondary-button" id="prTimedScriptAdd">Add scene</button><button type="button" class="secondary-button" id="prTimedScriptMatch">Match stills in order</button></div>`;
+    }).join("") + `<div class="timed-script-scene-actions"><button type="button" class="secondary-button" id="prTimedScriptAdd">Add scene</button><button type="button" class="secondary-button" id="prTimedScriptMatch">Match suggested stills</button></div>`;
     bindTimedScriptReview(host, summary);
   }
 
@@ -4431,10 +4431,16 @@
   function renderProductionFrameOverrides(status = item4Workspace) {
     const host = $("prRenderFrameOverrides");
     if (!host) return;
-    const assets = (Array.isArray(status?.assets) ? status.assets : [])
+    const allAssets = (Array.isArray(status?.assets) ? status.assets : [])
       .filter((asset) => asset && !item4AssetLooksLikeVideo(asset))
       .slice()
       .sort((a, b) => Number(a.order || 0) - Number(b.order || 0));
+    const sceneIds = timedScriptActive()
+      ? [...new Set((productionTimedScript.segments || []).map((segment) => String(segment.asset_id || "").trim()).filter(Boolean))]
+      : [];
+    const assets = sceneIds.length
+      ? sceneIds.map((id) => allAssets.find((asset) => String(asset.id || asset.media_asset_record_id || "") === id)).filter(Boolean)
+      : allAssets;
     const clear = $("prRenderClearFrameOverrides");
     if (clear) clear.disabled = !Object.keys(productionRenderFrameOverrides || {}).length;
     if (!assets.length) {

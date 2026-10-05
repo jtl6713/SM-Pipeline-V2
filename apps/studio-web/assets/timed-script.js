@@ -279,6 +279,40 @@
     return timeline.segments.map((segment) => String(segment.voiceover_text || "").trim()).filter(Boolean).join(" ").trim();
   }
 
+  function stillMatchKey(value) {
+    return String(value || "")
+      .replace(/\*\*/g, "")
+      .replace(/["“”'#]/g, " ")
+      .replace(/\.[a-z0-9]{2,4}$/i, "")
+      .replace(/[_-]+/g, " ")
+      .replace(/\s+/g, " ")
+      .trim()
+      .toLowerCase();
+  }
+
+  function assetStillId(asset) {
+    return String(asset?.id || asset?.media_asset_record_id || "").trim();
+  }
+
+  function assetStillLabels(asset) {
+    return [
+      asset?.name,
+      asset?.file_name,
+      asset?.filename,
+      asset?.title,
+      asset?.caption,
+      asset?.asset_name,
+    ].map(stillMatchKey).filter(Boolean);
+  }
+
+  function stillNameMatches(suggested, asset) {
+    const want = stillMatchKey(suggested);
+    if (!want) return false;
+    const escaped = want.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const phrase = new RegExp(`(?:^|\\s)${escaped}(?:\\s|\\.|$)`);
+    return assetStillLabels(asset).some((label) => label === want || phrase.test(label));
+  }
+
   function assignStillsInOrder(timeline, assets) {
     const normalized = normalizeTimeline(timeline);
     if (!normalized) return timeline;
@@ -286,11 +320,26 @@
       .filter((asset) => asset && typeof asset === "object")
       .slice()
       .sort((a, b) => Number(a.order || 0) - Number(b.order || 0));
-    if (ordered.length && ordered.length === normalized.segments.length) {
-      normalized.segments.forEach((segment, index) => {
-        segment.asset_id = String(ordered[index].id || ordered[index].media_asset_record_id || "").trim();
-      });
-    }
+    const used = new Set();
+    const take = (asset) => {
+      const id = assetStillId(asset);
+      if (!id || used.has(id)) return "";
+      used.add(id);
+      return id;
+    };
+    normalized.segments.forEach((segment) => {
+      segment.asset_id = "";
+    });
+    normalized.segments.forEach((segment) => {
+      const match = ordered.find((asset) => !used.has(assetStillId(asset)) && stillNameMatches(segment.suggested_visual, asset));
+      if (match) segment.asset_id = take(match);
+    });
+    const unused = ordered.filter((asset) => !used.has(assetStillId(asset)));
+    normalized.segments.forEach((segment) => {
+      if (String(segment.asset_id || "").trim()) return;
+      const next = unused.shift();
+      if (next) segment.asset_id = take(next);
+    });
     return normalized;
   }
 
@@ -313,6 +362,8 @@
 
   return {
     assignStillsInOrder,
+    stillMatchKey,
+    stillNameMatches,
     buildTimeline,
     directiveLine,
     estimateNarrationSeconds,

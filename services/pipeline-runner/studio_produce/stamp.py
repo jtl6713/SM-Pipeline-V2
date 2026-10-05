@@ -15,6 +15,7 @@ from studio_produce.job import finished_origin_kind, parse_json
 from studio_produce.thumbnail import is_designed_cover_url
 from studio_produce.timed_script import (
     segment_duration_frames,
+    still_name_matches,
     timed_script_from_request,
 )
 from studio_produce.media import (
@@ -570,44 +571,82 @@ def _clip_matches_asset(clip: dict[str, Any], asset_id: str) -> bool:
     return wanted in candidates
 
 
+def _clip_as_named_asset(clip: dict[str, Any]) -> dict[str, Any]:
+    source = clip.get("source") if isinstance(clip.get("source"), dict) else {}
+    return {
+        "id": source.get("id") or clip.get("media_asset_id") or "",
+        "name": source.get("name") or source.get("file_name") or clip.get("asset_name") or "",
+        "file_name": source.get("file_name") or "",
+        "caption": source.get("caption") or "",
+        "asset_name": clip.get("asset_name") or "",
+        "media_asset_record_id": source.get("media_asset_record_id") or "",
+    }
+
+
+def _clip_identity(clip: dict[str, Any]) -> str:
+    source = clip.get("source") if isinstance(clip.get("source"), dict) else {}
+    return str(
+        source.get("id")
+        or source.get("media_asset_record_id")
+        or clip.get("media_asset_id")
+        or id(clip)
+    )
+
+
 def clips_for_timed_script(
     clips: list[dict[str, Any]],
     timeline: dict[str, Any] | None,
 ) -> list[dict[str, Any]] | None:
-    """Order stills by the imported timeline. Unresolved scenes refuse the stamp.
+    """Order stills by the imported timeline. Extra attached photos are ignored.
 
-    When every scene has a resolvable asset_id, honor that mapping. When ids are
-    stale/blank but scene count equals clip count, keep the current still order
-    (master order) and attach scene VO windows positionally so durations stay
-    synced to narration.
+    Prefer each scene's asset_id, then Suggested still name, then leftover master
+    order. Unresolved scenes still refuse the stamp.
     """
     segments = (timeline or {}).get("segments") if isinstance(timeline, dict) else None
     if not isinstance(segments, list) or not segments:
         return clips
-    ordered: list[dict[str, Any]] = []
-    unresolved = False
-    for segment in segments:
-        if not isinstance(segment, dict):
-            return None
-        match = next((clip for clip in clips if _clip_matches_asset(clip, str(segment.get("asset_id") or ""))), None)
-        if not match:
-            unresolved = True
-            break
+    remaining = list(clips or [])
+    picked: list[dict[str, Any] | None] = [None] * len(segments)
+
+    def pull(index: int, match: dict[str, Any] | None) -> None:
+        if not match or picked[index] is not None:
+            return
         copied = dict(match)
-        copied["timed_segment"] = segment
-        ordered.append(copied)
-    if not unresolved and len(ordered) == len(segments):
-        return ordered
-    if len(clips) != len(segments):
-        return None
-    positional: list[dict[str, Any]] = []
+        copied["timed_segment"] = segments[index]
+        picked[index] = copied
+        identity = _clip_identity(match)
+        remaining[:] = [clip for clip in remaining if _clip_identity(clip) != identity]
+
     for index, segment in enumerate(segments):
         if not isinstance(segment, dict):
             return None
-        copied = dict(clips[index])
-        copied["timed_segment"] = segment
-        positional.append(copied)
-    return positional
+        wanted = str(segment.get("asset_id") or "").strip()
+        if not wanted:
+            continue
+        match = next((clip for clip in remaining if _clip_matches_asset(clip, wanted)), None)
+        pull(index, match)
+
+    for index, segment in enumerate(segments):
+        if picked[index] is not None:
+            continue
+        match = next(
+            (
+                clip
+                for clip in remaining
+                if still_name_matches(segment.get("suggested_visual"), _clip_as_named_asset(clip))
+            ),
+            None,
+        )
+        pull(index, match)
+
+    for index, segment in enumerate(segments):
+        if picked[index] is not None or not remaining:
+            continue
+        pull(index, remaining[0])
+
+    if any(item is None for item in picked):
+        return None
+    return picked
 
 
 def _music_requested(effective: dict[str, Any]) -> bool:
