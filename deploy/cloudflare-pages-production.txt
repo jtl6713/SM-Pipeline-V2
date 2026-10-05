@@ -23,3 +23,4 @@ Deploy UI 0.6.494 master calendar blackout collapse. Hide off-limits overnight r
 Deploy UI 0.6.495 plan creation uses MAE morning then afternoon then evening.
 Deploy UI 0.6.496 timed script import accepts bold markdown times so Use this timeline can enable.
 Deploy UI 0.6.497 quoted library search returns only that named set.
+Deploy UI 0.6.498 timed script import accepts a spreadsheet paste of Time, Voiceover, and still.

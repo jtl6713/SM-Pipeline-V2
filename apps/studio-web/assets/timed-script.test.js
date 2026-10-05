@@ -36,6 +36,35 @@ test("nyc subway markdown parses to 90 seconds and eight scenes", () => {
   assert.equal(narration.includes("skyline shot"), false);
 });
 
+test("spreadsheet paste of the Staten Island Ferry script is 13 voiceovers", () => {
+  const rows = [
+    ["Time", "Voiceover", "9:16 asset suggestion"],
+    ["0:00–0:07", "“Want one of New York City’s best views for absolutely nothing? Take the Staten Island Ferry—but know these tricks first.”", "Vertical clip preferred: orange ferry moving through harbor."],
+    ["0:07–0:15", "“Start at Whitehall Terminal at the southern tip of Manhattan. The ride to Staten Island takes about twenty-five minutes.”", "9:16 still or clip: Whitehall Terminal entrance/signage."],
+    ["0:15–0:23", "“And don’t buy a ticket. There is no ticket, no OMNY tap and no fare. The Staten Island Ferry is completely free.”", "9:16 clip: passengers walking into/through terminal."],
+    ["0:23–0:32", "“Leaving Manhattan, head for the right side of the ferry. That’s your best side for the Statue of Liberty.”", "9:16 still/clip: Statue of Liberty viewed from ferry railing."],
+    ["0:32–0:37", "“You’ll pass Lady Liberty…”", "9:16 close vertical still: Statue of Liberty with harbor below and sky above."],
+    ["0:37–0:42", "“…and Ellis Island, while Lower Manhattan starts shrinking behind you.”", "9:16 still/clip: Ellis Island, then quick vertical skyline view looking back toward Manhattan."],
+    ["0:42–0:50", "“For the skyline, look behind you as you leave Manhattan. Outdoor deck space gives you the best photos when it’s open.”", "Vertical clip preferred: camera looking back from ferry toward Lower Manhattan."],
+    ["0:50–0:58", "“If you’re sightseeing, avoid commuter rush hour. Staten Island to Manhattan is busiest in the morning…”", "9:16 terminal crowd clip: commuters boarding/waiting."],
+    ["0:58–1:05", "“…and the reverse is busiest after work. Midday is usually much easier.”", "9:16 calmer ferry/deck shot: sparse passengers, open seating or outdoor deck."],
+    ["1:05–1:13", "“At St. George, follow the signs for the return ferry.”", "9:16 still/clip: St. George Terminal signage, ideally including arrows/directional signs."],
+    ["1:13–1:20", "“Coming back to Manhattan, switch sides: the Statue is now on your left.”", "9:16 Statue clip/still: Liberty from return direction."],
+    ["1:20–1:27", "“And save the best view for last—the Manhattan skyline gets bigger and bigger straight ahead.”", "Vertical clip strongly preferred: approaching Lower Manhattan from the harbor."],
+    ["1:27–1:32", "“Twenty-five minutes each way, zero dollars, and one of the best harbor rides in New York.”", "9:16 hero still/clip: orange ferry + Manhattan skyline."],
+  ];
+  const parsed = timed.parseTimedScriptMarkdown(rows.map((row) => row.join("\t")).join("\n"));
+  assert.equal(parsed.errors.join(" "), "");
+  assert.equal(parsed.ok, true);
+  assert.equal(parsed.timeline.segments.length, 13);
+  assert.equal(parsed.timeline.duration_seconds, 92);
+  assert.match(parsed.timeline.segments[0].voiceover_text, /^Want one of New York City/);
+  assert.match(parsed.timeline.segments[4].voiceover_text, /^You’ll pass Lady Liberty/);
+  assert.match(parsed.timeline.segments[12].voiceover_text, /^Twenty-five minutes each way/);
+  assert.equal(parsed.timeline.segments[9].start_seconds, 65);
+  assert.equal(parsed.timeline.segments[9].end_seconds, 73);
+});
+
 test("markdown bold around a time range still parses", () => {
   const parsed = timed.parseTimedScriptMarkdown(`
 | Time | Voiceover | Suggested still |

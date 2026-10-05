@@ -68,11 +68,13 @@
   }
 
   function cells(line) {
-    const raw = String(line || "").trim();
-    if (!raw.includes("|")) return [];
-    let parts = raw.split("|").map((part) => part.replace(/\u00a0/g, " ").trim());
-    if (parts.length && parts[0] === "") parts = parts.slice(1);
-    if (parts.length && parts[parts.length - 1] === "") parts = parts.slice(0, -1);
+    const raw = String(line || "").replace(/\u00a0/g, " ").trim();
+    if (!raw) return [];
+    const splitOn = raw.includes("|") ? "|" : (raw.includes("\t") ? "\t" : "");
+    if (!splitOn) return [];
+    let parts = raw.split(splitOn).map((part) => part.replace(/\u00a0/g, " ").trim());
+    if (splitOn === "|" && parts.length && parts[0] === "") parts = parts.slice(1);
+    if (splitOn === "|" && parts.length && parts[parts.length - 1] === "") parts = parts.slice(0, -1);
     return parts;
   }
 
@@ -224,7 +226,7 @@
       });
     });
     if (!sawRow && !rawSegments.length) {
-      errors.push("No timed-script rows found. Paste a Markdown table with Time, Voiceover, and Suggested still.");
+      errors.push("No timed-script rows found. Paste a Markdown table or a spreadsheet copy with Time, Voiceover, and Suggested still.");
     }
     const timeline = rawSegments.length ? buildTimeline(rawSegments) : null;
     const issues = timeline ? validateTimeline(timeline.segments) : [];

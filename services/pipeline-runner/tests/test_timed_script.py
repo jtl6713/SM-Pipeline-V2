@@ -56,6 +56,32 @@ def test_nyc_subway_table_parses_exact_durations_and_total():
     assert sum(segment_duration_frames(segment) for segment in timeline["segments"]) == 2700
 
 
+def test_spreadsheet_paste_of_staten_island_ferry_is_thirteen_voiceovers():
+    rows = [
+        "Time\tVoiceover\t9:16 asset suggestion",
+        "0:00–0:07\t“Want one of New York City’s best views for absolutely nothing? Take the Staten Island Ferry—but know these tricks first.”\tVertical clip preferred: orange ferry.",
+        "0:07–0:15\t“Start at Whitehall Terminal at the southern tip of Manhattan.”\t9:16 still or clip: Whitehall Terminal.",
+        "0:15–0:23\t“And don’t buy a ticket. The Staten Island Ferry is completely free.”\t9:16 clip: passengers walking into the terminal.",
+        "0:23–0:32\t“Leaving Manhattan, head for the right side of the ferry.”\t9:16 still/clip: Statue of Liberty.",
+        "0:32–0:37\t“You’ll pass Lady Liberty…”\t9:16 close vertical still: Statue of Liberty.",
+        "0:37–0:42\t“…and Ellis Island, while Lower Manhattan starts shrinking behind you.”\t9:16 still/clip: Ellis Island.",
+        "0:42–0:50\t“For the skyline, look behind you as you leave Manhattan.”\tVertical clip preferred: looking back toward Lower Manhattan.",
+        "0:50–0:58\t“If you’re sightseeing, avoid commuter rush hour.”\t9:16 terminal crowd clip.",
+        "0:58–1:05\t“…and the reverse is busiest after work. Midday is usually much easier.”\t9:16 calmer ferry/deck shot.",
+        "1:05–1:13\t“At St. George, follow the signs for the return ferry.”\t9:16 still/clip: St. George Terminal signage.",
+        "1:13–1:20\t“Coming back to Manhattan, switch sides: the Statue is now on your left.”\t9:16 Statue clip/still: Liberty from return direction.",
+        "1:20–1:27\t“And save the best view for last—the Manhattan skyline gets bigger and bigger straight ahead.”\tVertical clip strongly preferred: approaching Lower Manhattan.",
+        "1:27–1:32\t“Twenty-five minutes each way, zero dollars, and one of the best harbor rides in New York.”\t9:16 hero still/clip: orange ferry + Manhattan skyline.",
+    ]
+    parsed = parse_timed_script_markdown("\n".join(rows))
+    assert parsed["ok"] is True
+    assert parsed["errors"] == []
+    assert len(parsed["timeline"]["segments"]) == 13
+    assert parsed["timeline"]["duration_seconds"] == 92
+    assert parsed["timeline"]["segments"][0]["voiceover_text"].startswith("Want one of New York City")
+    assert parsed["timeline"]["segments"][12]["voiceover_text"].startswith("Twenty-five minutes each way")
+
+
 def test_hyphen_and_en_dash_and_minute_timestamps():
     assert parse_time_range("0:00–0:07") == (0, 7)
     assert parse_time_range("0:07-0:20") == (7, 20)

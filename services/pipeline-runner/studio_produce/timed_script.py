@@ -96,13 +96,16 @@ def _strip_wrapping_quotes(value: str) -> str:
 
 
 def _cells(line: str) -> list[str]:
-    raw = str(line or "").strip()
-    if "|" not in raw:
+    raw = str(line or "").replace("\u00a0", " ").strip()
+    if not raw:
         return []
-    parts = [part.replace("\u00a0", " ").strip() for part in raw.split("|")]
-    if parts and parts[0] == "":
+    split_on = "|" if "|" in raw else ("\t" if "\t" in raw else "")
+    if not split_on:
+        return []
+    parts = [part.replace("\u00a0", " ").strip() for part in raw.split(split_on)]
+    if split_on == "|" and parts and parts[0] == "":
         parts = parts[1:]
-    if parts and parts[-1] == "":
+    if split_on == "|" and parts and parts[-1] == "":
         parts = parts[:-1]
     return parts
 
@@ -307,7 +310,7 @@ def parse_timed_script_markdown(text: str) -> dict[str, Any]:
             "speech_rate": 1.0,
         })
     if not saw_row and not raw_segments:
-        errors.append("No timed-script rows found. Paste a Markdown table with Time, Voiceover, and Suggested still.")
+        errors.append("No timed-script rows found. Paste a Markdown table or a spreadsheet copy with Time, Voiceover, and Suggested still.")
     timeline = build_timeline(raw_segments) if raw_segments else None
     issues = validate_timeline(timeline["segments"]) if timeline else []
     return {
