@@ -486,12 +486,8 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-<<<<<<< HEAD
-          version: "0.10.446-timed-script-apply-remeasure",
+          version: "0.10.447-drive-music-404",
           studio_mae_schedule_v1: true,
-=======
-          version: "0.10.438-drive-music-404",
->>>>>>> 5c73a40a (Teach Quality Agent drive_music_404 for deleted library tracks.)
           studio_desk_inventory_v1: true,
           studio_desk_activity_v1: true,
           studio_tiktok_complete_v1: true,
