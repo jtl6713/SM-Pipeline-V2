@@ -258,7 +258,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.489-ideas-vo-timeline";
+  const BUILD_ID = "item4-0.6.490-ideas-vo-approve";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -3146,15 +3146,15 @@
     const restore = buttons.map((node) => ({ node, text: node.textContent, disabled: node.disabled }));
     buttons.forEach((node) => {
       node.disabled = true;
-      node.textContent = "Writing timeline…";
+      node.textContent = "Building Production…";
     });
     const setMessage = heading ? setIdeasAutonomousMessage : setManageMessage;
-    setMessage("Writing a voiceover timeline and matching named library stills…");
+    setMessage("Accepting this idea: writing the voiceover timeline, attaching named stills, and preparing Production Approve…");
     try {
       const result = await api(`/api/ideas/${encodeURIComponent(target.id)}/timed-script`, {
         method: "POST",
         body: JSON.stringify({}),
-        timeoutMs: 120000,
+        timeoutMs: 150000,
       });
       ideaTimedScriptPreview = {
         ideaId: target.id,
@@ -3176,9 +3176,23 @@
       if ($("promoteContentType")) $("promoteContentType").value = "Vertical Short Video";
       if ($("promoteVoiceover")) $("promoteVoiceover").value = "Yes";
       syncPromotionPanels();
-      setMessage(result.message || "Timeline ready. Open Production, then Approve to render. This does not publish.", "success");
-      if (heading) setManageMessage(result.message || "Timeline ready.", "success");
+      const success = result.message
+        || (result.ready_for_approval
+          ? "Ready for Production Approve. Stills are attached. Tap Approve on Production. This does not publish."
+          : "Timeline and stills are on Production. Crops may still be finishing — Approve when Ready. This does not publish.");
+      setMessage(success, "success");
+      if (heading) setManageMessage(success, "success");
       await Promise.all([loadIdeas(), loadDashboard(), loadProductionRequests()]).catch(() => {});
+      if (result.production_request?.id || activeIdea?.id) {
+        await openProductionRequestForIdea(result.record || activeIdea).catch((error) => {
+          console.warn("Open Production after VO timeline failed", error);
+        });
+        if (result.ready_for_approval) {
+          setRequestMessage(success, "success");
+        } else if (result.waiting_variants) {
+          setRequestMessage("Timeline stills are attached. Waiting for platform crops, then tap Approve. This does not publish.", "success");
+        }
+      }
     } catch (error) {
       setMessage(error.message || "Could not create the voiceover timeline.", "error-text");
       if (heading) setManageMessage(error.message || "Could not create the voiceover timeline.", "error-text");

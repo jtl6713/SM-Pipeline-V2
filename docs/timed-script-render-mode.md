@@ -25,5 +25,5 @@ Narration fit is estimated at 150 words per minute. An overrun can be resolved b
 
 ## Ideas: Create VO timeline
 
-The Ideas page **Create VO timeline** button writes this table automatically. Studio ranks library stills for the open idea, asks the timed-script writer to pick specific Asset Names, and stores the `[timed-script]` directive plus those stills on a Production draft. Voiceover is on. Approve on Production to render. Nothing publishes from this button.
+The Ideas page **Create VO timeline** button accepts the idea for a stills+voiceover render. Studio ranks library stills, writes the timed voiceover table with exact Asset Names, attaches those stills to Production, builds the platform plan and crops, and leaves the request **Ready for Production Approve**. Joseph taps Approve on Production to start render. Nothing publishes from this button.
 

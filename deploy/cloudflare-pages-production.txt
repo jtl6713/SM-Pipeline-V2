@@ -15,3 +15,4 @@ Deploy UI 0.6.486 schedule MAE blackout. Worker+Pages use M1 then A1 then E1 the
 Deploy UI 0.6.487 schedule MAE day fill. Two TikToks become 5:30 then 11:30 the same day.
 Deploy UI 0.6.488 global ChicagoShining watermark on every Studio page/profile.
 Deploy UI 0.6.489 ideas VO timeline. Ideas page writes a timed voiceover script and picks named library stills.
+Deploy UI 0.6.490 ideas VO timeline advances to Production Approve with timeline stills attached.

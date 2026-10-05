@@ -12,7 +12,7 @@ const app = fs.readFileSync(
 );
 
 test("health advertises current worker build with faster-frames helpers", () => {
-  assert.match(worker, /version: "0.10.444-ideas-vo-timeline"/);
+  assert.match(worker, /version: "0.10.445-ideas-vo-approve"/);
   assert.match(worker, /airtableBatchCreate/);
   assert.match(worker, /mapProductionRequestLight/);
 });
@@ -145,7 +145,7 @@ test("fractional video duration is stored as a whole-number cap and save errors 
 });
 
 test("UI polls GET /variants during Prepare and skips Save reload waterfall", () => {
-  assert.match(app, /BUILD_ID = "item4-0.6.489-ideas-vo-timeline"/);
+  assert.match(app, /BUILD_ID = "item4-0.6.490-ideas-vo-approve"/);
   assert.match(app, /pollItem4Variants/);
   const poll = app.slice(
     app.indexOf("async function pollItem4Variants"),

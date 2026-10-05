@@ -485,7 +485,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.444-ideas-vo-timeline",
+          version: "0.10.445-ideas-vo-approve",
           studio_mae_schedule_v1: true,
           studio_desk_inventory_v1: true,
           studio_desk_activity_v1: true,
@@ -1085,7 +1085,7 @@ export default {
         if (request.method !== "POST") throw new HttpError(405, "Method not allowed");
         assertWriteRequest(request, env);
         requirePermission(authorization, "production_configure");
-        return createIdeaTimedScriptRoute(request, env, url, authorization);
+        return createIdeaTimedScriptRoute(request, env, url, authorization, ctx);
       }
 
       if (isIdeaLibrarySuggestionsRoute) {
@@ -21348,7 +21348,7 @@ async function pulseIdeaTimedScriptWriter(env, idea, catalog) {
   };
 }
 
-async function createIdeaTimedScriptRoute(request, env, url, authorization) {
+async function createIdeaTimedScriptRoute(request, env, url, authorization, ctx = null) {
   const recordId = ideaRecordIdFromPath(url);
   let idea = await loadAuthorizedIdea(env, recordId, authorization);
   if (promotionCompleted(idea)) {
@@ -21359,6 +21359,20 @@ async function createIdeaTimedScriptRoute(request, env, url, authorization) {
   }
   const title = String(f(idea, "Candidate_Title") || "").trim();
   if (!title) throw new HttpError(400, "Give this idea a title before creating a timeline.");
+  let summary = String(f(idea, "Idea_Summary") || "").trim();
+  const location = String(f(idea, "Primary_Location") || f(idea, "Neighborhood_or_Area") || "").trim();
+  if (!summary && !location) {
+    throw new HttpError(400, "Add a short summary or place name so Studio can describe the idea, pick stills, and write the voiceover.");
+  }
+  if (!summary) {
+    summary = location
+      ? `${title}. Shot around ${location}.`
+      : title;
+    idea = await airtableFetch(env, env.AIRTABLE_IDEA_TABLE_ID, idea.id, {
+      method: "PATCH",
+      body: JSON.stringify({ fields: { Idea_Summary: summary.slice(0, 2000) }, typecast: true }),
+    });
+  }
 
   const ranked = (await rankStillsForIdeaPhotoWait(env, idea)).map(ideaTimedScriptCatalogRow);
   const picked = pickTimelineCatalog(ranked);
@@ -21371,8 +21385,8 @@ async function createIdeaTimedScriptRoute(request, env, url, authorization) {
     .filter((scene) => String(scene.voiceover_text || "").trim() && String(scene.media_asset_id || scene.asset_id || "").trim());
   const scenes = assigned.length >= 2 ? assigned : fallbackScenesFromStills({
     title,
-    summary: f(idea, "Idea_Summary"),
-    location: f(idea, "Primary_Location") || f(idea, "Neighborhood_or_Area"),
+    summary,
+    location,
   }, picked.selected);
   const timeline = buildTimelineFromScenes(scenes);
   if (!ideaTimedScriptReady(timeline)) {
@@ -21405,6 +21419,9 @@ async function createIdeaTimedScriptRoute(request, env, url, authorization) {
   const script = exactVoiceoverText(timeline);
   const markdown = formatTimedScriptMarkdown(timeline);
   const notes = withProductionPhotoWaitManual(mergeTimedScriptNotes(f(requestRecord, "Production_Notes"), timeline));
+  const stampedNotes = /idea-vo-timeline=/i.test(notes)
+    ? notes
+    : `${notes}\nidea-vo-timeline=1`.trim();
   const duration = Math.max(5, Math.round(Number(timeline.duration_seconds) || 0));
   requestRecord = await item4UpdateRequestState(env, requestRecord.id, {
     Master_Content_Type: "Vertical Short Video",
@@ -21416,7 +21433,46 @@ async function createIdeaTimedScriptRoute(request, env, url, authorization) {
     Video_Clip_Count_Mode: "Exact",
     Video_Clip_Count_Exact: timeline.segments.length,
     Carousel_Image_Mode: "Manual Upload",
-    Production_Notes: notes.slice(0, 10000),
+    Production_Notes: stampedNotes.slice(0, 10000),
+  });
+
+  // Accept the idea all the way to Production Approve: plan + crops, stills already attached.
+  // Do not I3/I4 promote — Joseph still taps Approve on Production.
+  if (String(f(requestRecord, "Studio_Output_Plan_Status") || "").trim() !== "Ready") {
+    const planCall = studioInternalJsonRequest(`/api/production-requests/${requestRecord.id}/plan`, {
+      platforms: [...AUTONOMOUS_STANDARD_PLATFORMS],
+      overrides: autonomousPlanOverrides("Vertical Short Video"),
+      extras: autonomousPlanExtras(),
+      package: "video",
+      skip_fbs1_guard: true,
+    });
+    await buildItem4OutputPlan(planCall.request, env, planCall.url, authorization);
+    requestRecord = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, requestRecord.id);
+  }
+
+  let variantStatus = String(f(requestRecord, "Studio_Variant_Status") || "").trim();
+  if (variantStatus !== "Ready" && variantStatus !== "Not Needed") {
+    let reconciled = await item4ReconcileVariants(env, requestRecord.id, requestRecord).catch(() => null);
+    if (reconciled?.record) requestRecord = reconciled.record;
+    const queued = Array.isArray(reconciled?.queue_rows) && reconciled.queue_rows.length;
+    if (!autonomousPlanVariantsReady(requestRecord, reconciled) && !queued) {
+      const variantsCall = studioInternalJsonRequest(`/api/production-requests/${requestRecord.id}/variants`, {});
+      await prepareItem4Variants(variantsCall.request, env, variantsCall.url, authorization, ctx);
+    }
+    requestRecord = await waitAutonomousVariantsReady(env, requestRecord.id, ctx, 50000);
+  }
+
+  const assetsCount = item4AssetManifest(requestRecord).length;
+  const planReady = String(f(requestRecord, "Studio_Output_Plan_Status") || "").trim() === "Ready";
+  variantStatus = String(f(requestRecord, "Studio_Variant_Status") || "").trim();
+  const variantsReady = variantStatus === "Ready"
+    || variantStatus === "Not Needed"
+    || autonomousPlanVariantsReady(requestRecord);
+  const readyForApproval = assetsCount >= 2 && planReady && variantsReady;
+  requestRecord = await item4UpdateRequestState(env, requestRecord.id, {
+    Request_Status: "Ready",
+    Studio_Master_Asset_Status: assetsCount >= 2 ? "Ready" : (f(requestRecord, "Studio_Master_Asset_Status") || "None"),
+    Studio_Item4_State: readyForApproval ? "Plan Ready" : (planReady ? "Plan Ready" : "Assets Ready"),
   });
 
   const ideaNotes = mergeIdeaProductionNotes(f(idea, "Production_Config_Notes"), undefined, mediaIds);
@@ -21431,6 +21487,9 @@ async function createIdeaTimedScriptRoute(request, env, url, authorization) {
         Studio_Matched_Media_Assets: mediaIds,
         Studio_Photo_Wait_Status: "Not Needed",
         Production_Config_Notes: ideaNotes,
+        Candidate_Status: String(f(idea, "Candidate_Status") || "").trim() === "On Hold"
+          ? "On Hold"
+          : "Approved",
       },
       typecast: true,
     }),
@@ -21443,6 +21502,8 @@ async function createIdeaTimedScriptRoute(request, env, url, authorization) {
     requested_script: script,
     duration_seconds: timeline.duration_seconds,
     scene_count: timeline.segments.length,
+    ready_for_approval: readyForApproval,
+    waiting_variants: planReady && !variantsReady,
     stills: mediaIds.map((id) => {
       const row = (picked.catalog.find((item) => item.id === id) || picked.selected.find((item) => item.id === id) || {});
       return {
@@ -21455,8 +21516,10 @@ async function createIdeaTimedScriptRoute(request, env, url, authorization) {
     timeline,
     record: mapIdea(idea),
     production_request: mapProductionRequest(requestRecord),
-    message: `Timeline ready: ${timeline.segments.length} scenes, ${Number(timeline.duration_seconds).toFixed(0)} seconds, with named library stills. Open Production, then Approve to render. This does not publish.`,
-  });
+    message: readyForApproval
+      ? `Ready for Production Approve: ${timeline.segments.length} scenes, ${Number(timeline.duration_seconds).toFixed(0)} seconds, named stills attached. Open Production and tap Approve. This does not publish.`
+      : `Timeline and stills are on Production (${timeline.segments.length} scenes). Platform crops are still finishing — open Production and Approve when crops say Ready. This does not publish.`,
+  }, readyForApproval ? 200 : 202);
 }
 
 async function findDraftProductionRequestForIdea(env, ideaRecordId) {

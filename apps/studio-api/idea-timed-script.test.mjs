@@ -111,8 +111,14 @@ test("Worker advertises the idea timed-script route", async () => {
   assert.match(worker, /isIdeaTimedScriptRoute/);
   assert.match(worker, /createIdeaTimedScriptRoute/);
   assert.match(worker, /from "\.\/idea-timed-script\.mjs"/);
+  assert.match(worker, /ready_for_approval/);
+  assert.match(worker, /idea-vo-timeline=1/);
+  assert.match(worker, /waitAutonomousVariantsReady/);
+  assert.match(worker, /createIdeaTimedScriptRoute\(request, env, url, authorization, ctx\)/);
   assert.match(app, /ideasCreateTimelineButton/);
   assert.match(app, /\/timed-script`/);
+  assert.match(app, /openProductionRequestForIdea/);
+  assert.match(app, /ready_for_approval/);
   assert.match(html, /id="ideasCreateTimelineButton"/);
   assert.match(html, /id="createIdeaTimelineButton"/);
   const css = await readFile(path.join(here, "../studio-web/assets/styles-phase7-0621.css"), "utf8");
