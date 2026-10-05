@@ -586,8 +586,10 @@ def test_auto_slide_voiceover_timeline_is_removed_when_narration_is_not_explicit
     )
 
     assert "[timed-script]" not in request["fields"]["Production_Notes"]
+    assert request["fields"]["Voiceover_Tail_Seconds"] == 2.0
     assert len(client.writes) == 1
     assert "[timed-script]" not in client.writes[0][2]["Production_Notes"]
+    assert client.writes[0][2]["Voiceover_Tail_Seconds"] == 2.0
 
 
 def test_measured_auto_slide_timeline_preserves_source_marker():
