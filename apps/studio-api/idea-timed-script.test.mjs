@@ -119,8 +119,17 @@ test("Worker advertises the idea timed-script route", async () => {
   assert.match(app, /\/timed-script`/);
   assert.match(app, /openProductionRequestForIdea/);
   assert.match(app, /ready_for_approval/);
+  assert.match(app, /function rememberIdeaTimedScript/);
+  assert.match(app, /function recallIdeaTimedScript/);
+  assert.match(app, /productionRequest: result\.production_request/);
+  assert.match(app, /successMessage: success/);
+  assert.match(app, /timedScriptActive\(\) \? "rendering"/);
+  assert.match(app, /function syncProductionVoBanner/);
+  assert.match(app, /prOpenRenderingTab/);
   assert.match(html, /id="ideasCreateTimelineButton"/);
   assert.match(html, /id="createIdeaTimelineButton"/);
+  assert.match(html, /id="prVoiceoverHandoff"/);
+  assert.match(html, /id="prOpenRenderingTab"/);
   const css = await readFile(path.join(here, "../studio-web/assets/styles-phase7-0621.css"), "utf8");
   assert.match(css, /#page-ideas \.page-heading\{\s*flex-wrap:wrap;/);
   assert.match(css, /#page-ideas \.heading-actions\{/);

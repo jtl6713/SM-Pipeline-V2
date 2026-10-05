@@ -258,7 +258,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.492-ipad-layout";
+  const BUILD_ID = "item4-0.6.493-ideas-vo-production-handoff";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -3112,6 +3112,35 @@
     }
   });
 
+  function ideaTimedScriptStorageKey(ideaId) {
+    const id = String(ideaId || "").trim();
+    return id ? `studio-idea-timed-script:${id}` : "";
+  }
+
+  function rememberIdeaTimedScript(preview) {
+    const key = ideaTimedScriptStorageKey(preview?.ideaId);
+    if (!key) return;
+    try {
+      if (!preview?.markdown && !preview?.timeline) sessionStorage.removeItem(key);
+      else sessionStorage.setItem(key, JSON.stringify(preview));
+    } catch {
+      // Private browsing can reject sessionStorage. The in-memory preview still shows.
+    }
+  }
+
+  function recallIdeaTimedScript(ideaId) {
+    const key = ideaTimedScriptStorageKey(ideaId);
+    if (!key) return null;
+    try {
+      const parsed = JSON.parse(sessionStorage.getItem(key) || "null");
+      if (!parsed || typeof parsed !== "object") return null;
+      if (parsed.ideaId && parsed.ideaId !== ideaId) return null;
+      return parsed;
+    } catch {
+      return null;
+    }
+  }
+
   function renderIdeaTimedScriptPreview(idea) {
     const panel = $("ideaTimedScriptPreview");
     const table = $("ideaTimedScriptTable");
@@ -3119,7 +3148,10 @@
     if (!panel) return;
     const preview = ideaTimedScriptPreview && ideaTimedScriptPreview.ideaId === idea?.id
       ? ideaTimedScriptPreview
-      : null;
+      : recallIdeaTimedScript(idea?.id);
+    if (preview && (!ideaTimedScriptPreview || ideaTimedScriptPreview.ideaId !== idea?.id)) {
+      ideaTimedScriptPreview = preview;
+    }
     if (!preview?.markdown) {
       panel.hidden = true;
       if (table) table.textContent = "";
@@ -3164,6 +3196,10 @@
         scene_count: result.scene_count,
         stills: result.stills || [],
       };
+      rememberIdeaTimedScript(ideaTimedScriptPreview);
+      if (result.timeline && result.production_request?.id) {
+        rememberTimedScript(result.timeline, result.production_request.id);
+      }
       if (result.record) {
         activeIdea = result.record;
         updateIdeaDrawer(result.record);
@@ -3184,14 +3220,13 @@
       if (heading) setManageMessage(success, "success");
       await Promise.all([loadIdeas(), loadDashboard(), loadProductionRequests()]).catch(() => {});
       if (result.production_request?.id || activeIdea?.id) {
-        await openProductionRequestForIdea(result.record || activeIdea).catch((error) => {
+        await openProductionRequestForIdea(result.record || activeIdea, {
+          productionRequest: result.production_request,
+          successMessage: success,
+        }).catch((error) => {
           console.warn("Open Production after VO timeline failed", error);
         });
-        if (result.ready_for_approval) {
-          setRequestMessage(success, "success");
-        } else if (result.waiting_variants) {
-          setRequestMessage("Timeline stills are attached. Waiting for platform crops, then tap Approve. This does not publish.", "success");
-        }
+        setRequestMessage(success, "success");
       }
     } catch (error) {
       setMessage(error.message || "Could not create the voiceover timeline.", "error-text");
@@ -4358,6 +4393,7 @@
     if (!summary || !host) return;
     const api = window.StudioTimedScript;
     const active = timedScriptActive() && api;
+    syncProductionVoBanner();
     const promoted = productionRequestIsPromoted();
     if (clear) clear.hidden = !active;
     if (renderAgain) renderAgain.hidden = !(active && promoted);
@@ -4633,14 +4669,21 @@
     renderTimedScriptReview();
   }
 
+  function syncProductionVoBanner() {
+    const banner = $("prVoiceoverHandoff");
+    if (!banner) return;
+    banner.hidden = !timedScriptActive();
+  }
+
   function showProductionRequestWorkspace() {
     ezEntryPath = "configure";
     setPageContentSimple(false);
     hideEzFrontDoor();
     const workspace = $("productionRequestWorkspace");
     if (workspace) workspace.hidden = false;
-    setProductionWorkspaceTab(productionWorkspaceTab || "media");
+    setProductionWorkspaceTab(timedScriptActive() ? "rendering" : (productionWorkspaceTab || "media"));
     syncPrMediaKindUi();
+    syncProductionVoBanner();
   }
 
   function selectPrMediaKind(kind, { quiet = false } = {}) {
@@ -11488,10 +11531,23 @@
     syncProductionNarrationEstimate();
     const renderSettings = parseProductionRenderSettings(record.production_notes || "");
     productionRenderFrameOverrides = parseProductionRenderOverrides(record.production_notes || "");
-    productionTimedScript = parseProductionTimedScript(record.production_notes || "") || recallTimedScript(record.id);
+    productionTimedScript = parseProductionTimedScript(record.production_notes || "")
+      || recallTimedScript(record.id)
+      || window.StudioTimedScript?.normalizeTimeline?.(
+        (ideaTimedScriptPreview?.ideaId === activeIdea?.id ? ideaTimedScriptPreview?.timeline : null)
+        || recallIdeaTimedScript(activeIdea?.id)?.timeline
+        || null
+      )
+      || null;
+    if (productionTimedScript) rememberTimedScript(productionTimedScript, record.id);
     timedScriptAssetSignature = "";
     hydrateProductionRenderSettings(renderSettings);
     renderProductionFrameOverrides({ assets: record.studio_master_assets || item4Workspace?.assets || [] });
+    renderTimedScriptReview();
+    if (reveal && ezEntryPath !== "content" && timedScriptActive()) {
+      setProductionWorkspaceTab("rendering");
+    }
+    syncProductionVoBanner();
     $("prProductionNotes").value = stripProductionRenderSettings(record.production_notes || "");
     hydratePrimaryLocationFromSources({ record, idea: activeIdea, force: true });
     const musicId = Array.isArray(record.selected_music_asset_links) ? record.selected_music_asset_links[0] : "";
@@ -11532,7 +11588,18 @@
           timeoutMs: 12000,
           retries: 0,
         });
-        if (direct?.record?.id) return direct.record;
+        if (direct?.record?.id && (item4HasTimedScript(direct.record) || String(direct.record.voiceover_mode || "") === "Yes")) {
+          return direct.record;
+        }
+        if (direct?.record?.id) {
+          const listed = await api("/api/production-requests?limit=100", { timeoutMs: 20000, retries: 0 }).catch(() => null);
+          const timed = (listed?.records || [])
+            .filter((record) => ideaIdFromRequest(record) === idea.id)
+            .filter((record) => ["Draft", "Ready", "Submitted"].includes(String(record?.status || "").trim()))
+            .find((record) => item4HasTimedScript(record) || String(record?.voiceover_mode || "") === "Yes");
+          if (timed?.id) return timed;
+          return direct.record;
+        }
       } catch (error) {
         console.warn("direct Production Request open failed; trying list recovery", error);
       }
@@ -11542,6 +11609,9 @@
       .filter((record) => ideaIdFromRequest(record) === idea.id)
       .filter((record) => ["Draft", "Ready", "Submitted"].includes(String(record?.status || "").trim()))
       .sort((a, b) => {
+        const timedDiff = Number(item4HasTimedScript(b) || String(b?.voiceover_mode || "") === "Yes")
+          - Number(item4HasTimedScript(a) || String(a?.voiceover_mode || "") === "Yes");
+        if (timedDiff) return timedDiff;
         const bt = Date.parse(b?.updated_at || b?.created_at || "") || 0;
         const at = Date.parse(a?.updated_at || a?.created_at || "") || 0;
         return bt - at;
@@ -11559,7 +11629,7 @@
     });
   }
 
-  async function openProductionRequestForIdea(idea, { fromWizard = false } = {}) {
+  async function openProductionRequestForIdea(idea, { fromWizard = false, productionRequest = null, successMessage = "" } = {}) {
     if (!idea?.id) return;
     const button = $("configureProductionButton");
     if (button) {
@@ -11572,7 +11642,9 @@
     try {
       loadEzAudioOptions().catch(() => {});
       let result;
-      if (ezWizardPending) {
+      if (productionRequest?.id) {
+        result = { record: productionRequest, created: false, opened_existing: true, from_timed_script: true };
+      } else if (ezWizardPending) {
         applyEzWizardAnswersToIntake();
         const payload = ezWizardRequestPayload(ezWizardPending.planned, {
           fileCount: ezPlanApi()?.ezWizardPhotoCount?.(ezWizardPending) || 1,
@@ -11639,11 +11711,18 @@
         syncPrMediaKindUi();
       }
 
+      if (!ezWizardPending && timedScriptActive()) {
+        setProductionWorkspaceTab("rendering");
+        renderTimedScriptReview();
+        syncProductionVoBanner();
+      }
+
       loadProductionRequests().catch(() => {});
       const failedHydration = hydration.filter((entry) => entry.status === "rejected");
       if (failedHydration.length) {
         setRequestMessage(
-          `Production is open. ${failedHydration.length} background section${failedHydration.length === 1 ? "" : "s"} will refresh again automatically.`,
+          successMessage
+            || `Production is open. ${failedHydration.length} background section${failedHydration.length === 1 ? "" : "s"} will refresh again automatically.`,
           "success"
         );
       } else if (ezWizardPending) {
@@ -11661,8 +11740,13 @@
         } else {
           setRequestMessage("Add photos one at a time, or drop several together.", "success");
         }
+      } else if (successMessage) {
+        setRequestMessage(successMessage, "success");
       } else if (result.created) {
         setRequestMessage("Production Request draft created. Choose Single or Multiple photos, then upload.", "success");
+      } else if (timedScriptActive()) {
+        const scenes = productionTimedScript.segments.length;
+        setRequestMessage(`Voiceover timeline is attached (${scenes} scene${scenes === 1 ? "" : "s"}). Rendering is open. Tap Approve when Ready. This does not publish.`, "success");
       } else if (assetCount) {
         setRequestMessage(`Opened the draft with ${assetCount} matched photo${assetCount === 1 ? "" : "s"}.`, "success");
       } else {
@@ -12204,6 +12288,9 @@
     }
   });
   $("item4BuildPlan")?.addEventListener("click", buildItem4Plan);
+  $("prOpenRenderingTab")?.addEventListener("click", () => {
+    setProductionWorkspaceTab("rendering", { focus: true });
+  });
   document.querySelectorAll("[data-production-workspace-tab]").forEach((button) => {
     button.addEventListener("click", () => setProductionWorkspaceTab(button.dataset.productionWorkspaceTab, { focus: true }));
     button.addEventListener("keydown", (event) => {
