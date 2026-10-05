@@ -94,6 +94,21 @@ def video_manifest(source_url: str) -> str:
     return json_text({"source_url": source_url})
 
 
+def render_clip_photo_urls(record: dict[str, Any]) -> list[str]:
+    """Authoritative ordered photo URLs already stamped onto the Platform Output."""
+    parsed = parse_json_field(field(record, "Render_Clip_List_JSON"))
+    if not isinstance(parsed, list):
+        return []
+    urls: list[str] = []
+    for clip in parsed:
+        if not isinstance(clip, dict):
+            continue
+        url = str(clip.get("url") or clip.get("src") or "").strip()
+        if url:
+            urls.append(url)
+    return urls
+
+
 def expected_image_count(record: dict[str, Any], actual: int) -> int | None:
     return parse_int(field(record, "Image_Count"), None) if field(record, "Image_Count") not in (None, "") else actual
 
