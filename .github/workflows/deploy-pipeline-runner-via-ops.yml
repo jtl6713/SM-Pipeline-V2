@@ -112,3 +112,6 @@ jobs:
 
 # Trigger verified redeploy for Content 325 continuous-voiceover repair
 # 2026-10-05T04:35:00Z
+
+# Trigger pipeline-runner deploy for timed-script Apply remasure + Subway Etiquette CI 320
+# 2026-10-05T04:50:00Z service_version=2026-10-03-timed-script-vo-driven

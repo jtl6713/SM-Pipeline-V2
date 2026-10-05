@@ -6,3 +6,4 @@ Deploy Worker 0.10.442-schedule-mae-blackout. MAE rotation in profile time; neve
 Deploy Worker 0.10.443-schedule-mae-day. Each day fills M then A then E before the next morning.
 Deploy Worker 0.10.444-ideas-vo-timeline. Ideas Create VO timeline writes a timed script with named library stills.
 Deploy Worker 0.10.445-ideas-vo-approve. Ideas Create VO timeline attaches stills, builds plan/crops, stops at Production Approve.
+Deploy Worker 0.10.446-timed-script-apply-remeasure. Timed-script Apply always clears VO so P2 remeasures scene windows.
