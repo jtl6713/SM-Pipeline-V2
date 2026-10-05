@@ -22,3 +22,15 @@ def test_sai1_prompt_defaults_to_chicago_for_legacy_calls():
         total=1,
     )
     assert "TARGET MARKET\nChicago" in prompt
+
+
+def test_sai1_prompt_forbids_photo_n_placeholders_in_post_caption():
+    prompt = build_themer_prompt(
+        title="Roosevelt Island Tram Plan",
+        covered_text="1. Roosevelt Island Tram 1\n2. Roosevelt Island Tram 5",
+        needed=0,
+        total=2,
+        market="New York",
+    )
+    assert 'Never write placeholders such as "Photo 2"' in prompt
+    assert "use those names in the Featuring line" in prompt
