@@ -486,7 +486,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.447-drive-music-404",
+          version: "0.10.448-schedule-occupancy-window",
           studio_mae_schedule_v1: true,
           studio_desk_inventory_v1: true,
           studio_desk_activity_v1: true,
@@ -7335,7 +7335,23 @@ const STUDIO_OCCUPIED_CACHE_MS = 45 * 1000;
 const STUDIO_OCCUPIED_LIST_LIMIT = 250;
 const STUDIO_OCCUPIED_LOOKBACK_MS = 12 * 60 * 60 * 1000;
 const STUDIO_OCCUPIED_HORIZON_MS = 10 * 24 * 60 * 60 * 1000;
-const STUDIO_OCCUPIED_FORMULA = 'AND({Test_Run_ID}=BLANK(),{Do_Not_Publish}=0,{Published_At}=BLANK(),OR({Scheduled_Post_Date}!="",{YouTube_Scheduled_Publish_At}!="",{Studio_Scheduled_At}!="",{Publish_Status}="Publishing",{Publish_Status}="Ready to Publish"))';
+
+function studioOccupiedDateInWindowFormula(field, lookback, horizon) {
+  return `AND({${field}}!="",IS_AFTER({${field}},DATETIME_PARSE("${lookback}")),IS_BEFORE({${field}},DATETIME_PARSE("${horizon}")))`;
+}
+
+function studioOccupiedFilterFormula(now = Date.now()) {
+  const lookback = airtableFormulaEscape(new Date(now - STUDIO_OCCUPIED_LOOKBACK_MS - 1000).toISOString());
+  const horizon = airtableFormulaEscape(new Date(now + STUDIO_OCCUPIED_HORIZON_MS).toISOString());
+  const dates = ["Scheduled_Post_Date", "YouTube_Scheduled_Publish_At", "Studio_Scheduled_At"]
+    .map((field) => studioOccupiedDateInWindowFormula(field, lookback, horizon))
+    .join(",");
+  // DESC+250 used to fetch the farthest-future 250 rows; the 10-day client
+  // filter then dropped them, so today's MAE slots looked empty and every new
+  // NYC stamp piled onto 5:30 AM. Window the Airtable query and sort nearest-first.
+  return `AND({Test_Run_ID}=BLANK(),{Do_Not_Publish}=0,{Published_At}=BLANK(),OR(${dates},{Publish_Status}="Publishing",{Publish_Status}="Ready to Publish"))`;
+}
+
 let studioOccupiedScheduleCache = { at: 0, rows: null, inflight: null };
 
 function studioInvalidateOccupiedScheduleCache() {
@@ -7361,9 +7377,9 @@ async function studioLoadOccupiedScheduleRows(env) {
   studioOccupiedScheduleCache.inflight = listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
     limit: STUDIO_OCCUPIED_LIST_LIMIT,
     sortField: "Scheduled_Post_Date",
-    sortDirection: "desc",
-    filterFormula: STUDIO_OCCUPIED_FORMULA,
-    fields: ["Platform", "Scheduled_Post_Date", "YouTube_Scheduled_Publish_At", "Studio_Scheduled_At", "Publish_Status"],
+    sortDirection: "asc",
+    filterFormula: studioOccupiedFilterFormula(now),
+    fields: ["Platform", "Scheduled_Post_Date", "YouTube_Scheduled_Publish_At", "Studio_Scheduled_At", "Publish_Status", "Studio_Output_Type", "Format"],
   }).then((rows) => {
     studioOccupiedScheduleCache = { at: Date.now(), rows: rows || [], inflight: null };
     return studioOccupiedScheduleCache.rows;
