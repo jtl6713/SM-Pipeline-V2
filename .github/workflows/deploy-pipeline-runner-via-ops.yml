@@ -109,3 +109,6 @@ jobs:
 
 # Trigger pipeline-runner deploy for ITS1 idea timed-script writer
 # 2026-10-05T03:20:00Z service_version=2026-10-05-idea-timed-script
+
+# Trigger verified redeploy for Content 325 continuous-voiceover repair
+# 2026-10-05T04:35:00Z
