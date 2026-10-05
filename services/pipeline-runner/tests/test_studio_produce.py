@@ -82,6 +82,24 @@ def test_p2_extends_non_story_outputs_instead_of_rejecting_long_voiceover():
     assert not any(record_id == "recStory" for _, record_id, _ in client.updates)
 
 
+def test_output_effective_never_uses_stale_shorter_voiceover_duration():
+    output = {
+        "fields": {
+            "Studio_Effective_Voiceover_Mode": "Yes",
+            "Studio_Effective_Voiceover_Duration_Seconds": 29.257,
+        }
+    }
+    request = {"fields": {"Voiceover_Mode": "Yes", "Voiceover_Duration_Seconds": 29.257}}
+    parent = {
+        "fields": {
+            "Voiceover_URL": "https://example.test/voice.mp3",
+            "Voiceover_Duration_Seconds": 30.279,
+        }
+    }
+    effective = output_effective(output, request, parent)
+    assert effective["voiceover_duration_seconds"] == 30.279
+
+
 def test_measured_voiceover_duration_overrides_requested_target_and_extends_render():
     output = {"fields": {"Studio_Effective_Voiceover_Mode": "Yes"}}
     request = {
