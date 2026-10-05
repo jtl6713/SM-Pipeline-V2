@@ -135,6 +135,75 @@ def test_pending_timing_sibling_still_shares_one_render():
     assert plan["recYT"]["role"] == "sibling"
 
 
+def test_encoder_padding_frames_share_one_voiceover_render():
+    common = {
+        "Aspect_Ratio": "9:16",
+        "Composition_ID": "ChicagoShiningPhotoSequence",
+        "Music_URL": "https://media.chicagoshining.com/music.mp3",
+        "Voiceover_URL": "https://drive.google.com/uc?id=same-voice&export=download",
+        "Music_Volume": 0.6,
+        "Timing_Status": "Skipped",
+    }
+    long_clip = '[{"url":"https://media.chicagoshining.com/ferry.jpg","durationFrames":1654,"timingMode":"authoritative","timingSource":"timed_script"}]'
+    short_clip = '[{"url":"https://media.chicagoshining.com/ferry.jpg","durationFrames":1651,"timingMode":"authoritative","timingSource":"timed_script"}]'
+    ig = _output(
+        id="recIG",
+        Platform="Instagram",
+        Studio_Output_Type="Reel",
+        Output_ID="1601",
+        Render_Total_Frames=1654,
+        Render_Clip_List_JSON=long_clip,
+        **common,
+    )
+    yt = _output(
+        id="recYT",
+        Platform="YouTube",
+        Studio_Output_Type="Short",
+        Output_ID="1606",
+        Render_Total_Frames=1651,
+        Render_Clip_List_JSON=short_clip,
+        **common,
+    )
+    tt = _output(
+        id="recTT",
+        Platform="TikTok",
+        Studio_Output_Type="Video Draft",
+        Output_ID="1605",
+        Render_Total_Frames=1651,
+        Render_Clip_List_JSON=short_clip,
+        **common,
+    )
+    story = _output(
+        id="recST",
+        Platform="Instagram",
+        Studio_Output_Type="Story",
+        Output_ID="1602",
+        Render_Total_Frames=300,
+        Render_Clip_List_JSON=short_clip,
+        **common,
+    )
+    assert render_equivalence_key(ig) != render_equivalence_key(yt)
+    plan = build_shared_render_plan([yt, tt, ig, story])
+    assert plan["recIG"]["role"] == "canonical"
+    assert set(plan["recIG"]["sibling_ids"]) == {"recYT", "recTT"}
+    assert plan["recST"]["role"] == "solo"
+
+
+def test_different_voiceover_file_does_not_share_a_render():
+    clip = '[{"url":"https://media.chicagoshining.com/ferry.jpg","durationFrames":1654,"timingMode":"authoritative"}]'
+    base = {
+        "Aspect_Ratio": "9:16",
+        "Composition_ID": "ChicagoShiningPhotoSequence",
+        "Render_Total_Frames": 1654,
+        "Render_Clip_List_JSON": clip,
+        "Music_URL": "https://media.chicagoshining.com/music.mp3",
+        "Timing_Status": "Skipped",
+    }
+    ig = _output(id="recIG", Platform="Instagram", Studio_Output_Type="Reel", Voiceover_URL="https://example.com/a.mp3", **base)
+    yt = _output(id="recYT", Platform="YouTube", Studio_Output_Type="Short", Voiceover_URL="https://example.com/b.mp3", **base)
+    assert render_equivalence_key(ig) != render_equivalence_key(yt)
+
+
 def test_different_music_volume_splits_groups():
     clip = '[{"url":"https://media.chicagoshining.com/a.jpg","durationFrames":90}]'
     base = {

@@ -91,14 +91,16 @@ powershell -NoProfile -ExecutionPolicy Bypass -File ".\deploy\local-services\Inv
 Hourly keep-alive on this Windows machine (Task Scheduler task `ChicagoShining Desk Companion Hourly`, interactive logon):
 
 ```bat
-deploy\local-services\HOURLY-Local-Services.bat
+deploy\local-services\HOURLY-Local-Services-Hidden.vbs
 ```
+
+Task Scheduler starts that launcher with `wscript.exe` (window style 0). No console window and no focus steal. `HOURLY-Local-Services.bat` is only the manual visible runner.
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File ".\deploy\local-services\Register-DeskCompanionHourly.ps1"
 ```
 
-The hourly bat has **no** `pause` (Task Scheduler would hang). It does **not** STOP ALL + START ALL. Each tick: public `/health`; if a required probe is down, call the stock `start-chicagoshining-local-services.bat` then `verify-chicagoshining-local-services.bat`, then `Invoke-DeskCompanion.ps1 -RestartDown`. If `origin/main` moved and the checkout is clean, fast-forward pull (do not schedule `SYNC-Git-Main.bat`; it pauses) then PLAN+DEPLOY **one** changed service (`-DeployDown`) when mode is `infra+`. Dirty checkout: log and skip deploy. Never `reset --hard`. Cap: 1 service per tick, 2 per service per day. Logs: `Deployment Logs\Local Services\hourly-companion-YYYYMMDD.log`. Unregister with `-Unregister`. The PC must stay on and logged in (locked is OK). Cursor Automations cannot restart these Windows listeners.
+The scheduled task does not open a console. The manual bat has **no** `pause` (a visible Task Scheduler run would hang on it). It does **not** STOP ALL + START ALL. Each tick: public `/health`; if a required probe is down, call the stock `start-chicagoshining-local-services.bat` then `verify-chicagoshining-local-services.bat`, then `Invoke-DeskCompanion.ps1 -RestartDown`. If `origin/main` moved and the checkout is clean, fast-forward pull (do not schedule `SYNC-Git-Main.bat`; it pauses) then PLAN+DEPLOY **one** changed service (`-DeployDown`) when mode is `infra+`. Dirty checkout: log and skip deploy. Never `reset --hard`. Cap: 1 service per tick, 2 per service per day. Logs: `Deployment Logs\Local Services\hourly-companion-YYYYMMDD.log`. Unregister with `-Unregister`. The PC must stay on and logged in (locked is OK). Cursor Automations cannot restart these Windows listeners.
 
 Caps file: `D:\Content Creation\ChicagoShining Pipeline\Deployment Logs\Local Services\desk-caps.json`.
 

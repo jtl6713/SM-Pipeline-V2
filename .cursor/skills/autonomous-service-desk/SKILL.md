@@ -161,7 +161,7 @@ Local companion only, on the Windows machine:
 powershell -NoProfile -ExecutionPolicy Bypass -File ".\deploy\local-services\Invoke-DeskCompanion.ps1" -RestartDown
 ```
 
-Hourly Windows keep-alive (this PC, logged-in session): register `HOURLY-Local-Services.bat` via `Register-DeskCompanionHourly.ps1`. That bat has **no** `pause`. It does **not** STOP ALL. If a public `/health` is down, it calls the stock `start-chicagoshining-local-services.bat` then VERIFY, then `Invoke-DeskCompanion.ps1 -RestartDown`. If `origin/main` moved and the checkout is **clean**, SYNC (fast-forward pull) then PLAN+DEPLOY **one** changed service (`-DeployDown`) when mode is `infra+`. Dirty checkout: log and skip deploy. Never `git reset --hard`. Log: `Deployment Logs\Local Services\hourly-companion-YYYYMMDD.log`.
+Hourly Windows keep-alive (this PC, logged-in session): register it with `Register-DeskCompanionHourly.ps1`. The task runs `HOURLY-Local-Services-Hidden.vbs` through `wscript.exe` (window style 0) so no console takes focus. `HOURLY-Local-Services.bat` is the manual visible runner and has **no** `pause`. It does **not** STOP ALL. If a public `/health` is down, it calls the stock `start-chicagoshining-local-services.bat` then VERIFY, then `Invoke-DeskCompanion.ps1 -RestartDown`. If `origin/main` moved and the checkout is **clean**, SYNC (fast-forward pull) then PLAN+DEPLOY **one** changed service (`-DeployDown`) when mode is `infra+`. Dirty checkout: log and skip deploy. Never `git reset --hard`. Log: `Deployment Logs\Local Services\hourly-companion-YYYYMMDD.log`.
 
 ## Patch (`patch`)
 

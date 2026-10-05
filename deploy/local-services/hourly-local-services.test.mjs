@@ -13,6 +13,17 @@ test("hourly Quality Agent wrapper has no pause and wraps the companion runner",
   assert.match(bat, /Quality Agent hourly keep-alive/);
 });
 
+test("hourly task is registered through a hidden launcher", () => {
+  const reg = fs.readFileSync(path.join(here, "Register-DeskCompanionHourly.ps1"), "utf8");
+  const vbs = fs.readFileSync(path.join(here, "HOURLY-Local-Services-Hidden.vbs"), "utf8");
+  assert.match(reg, /wscript\.exe/);
+  assert.match(reg, /HOURLY-Local-Services-Hidden\.vbs/);
+  assert.doesNotMatch(reg, /New-ScheduledTaskAction -Execute \$Runner/);
+  assert.match(vbs, /Run-DeskCompanionHourly\.ps1/);
+  assert.match(vbs, /WindowStyle Hidden/);
+  assert.match(vbs, /shell\.Run\(command,\s*0,\s*True\)/);
+});
+
 test("hourly runner logs hourly-companion and skips deploy when dirty", () => {
   const ps1 = fs.readFileSync(path.join(here, "Run-DeskCompanionHourly.ps1"), "utf8");
   assert.match(ps1, /hourly-companion-/);

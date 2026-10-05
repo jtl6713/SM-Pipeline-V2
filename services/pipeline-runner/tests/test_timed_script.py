@@ -318,6 +318,39 @@ def test_photo_voiceover_timeline_ignores_stored_thirty_seconds():
     assert measured["segments"][2]["duration_seconds"] == 2.5
 
 
+def test_timed_script_extends_last_scene_to_probed_voiceover():
+    import math
+
+    from studio_produce.stamp import FPS, assign_clip_frames
+
+    notes = directive_line({
+        "mode": "timed_script",
+        "timing_mode": "authoritative",
+        "timing_source": "timed_script",
+        "duration_seconds": 55.03,
+        "segments": [{
+            "start_seconds": 0,
+            "end_seconds": 55.03,
+            "duration_seconds": 55.03,
+            "voiceover_text": "Twenty-five minutes each way.",
+        }],
+    })
+    frames, total = assign_clip_frames(
+        [{"source": {"media_kind": "photo"}}],
+        story=False,
+        effective={
+            "video_duration_seconds": 96,
+            "voiceover_mode": "Yes",
+            "voiceover_duration_seconds": 55.12,
+        },
+        request={"fields": {"Production_Notes": notes, "Voiceover_Mode": "Yes", "Video_Duration_Seconds": 96}},
+        output=None,
+    )
+    assert total == math.ceil(55.12 * FPS)
+    assert total == 1654
+    assert frames == [1654]
+
+
 def test_photo_voiceover_without_timeline_uses_measured_speech_not_owner_duration():
     from studio_produce.stamp import assign_clip_frames
 

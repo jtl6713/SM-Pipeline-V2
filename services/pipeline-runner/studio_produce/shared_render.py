@@ -13,6 +13,8 @@ from studio_produce.stamp import is_native_photo
 
 SHARED_RENDER_OUTPUT_TYPES = frozenset({"Reel", "Short", "Video Draft"})
 CANONICAL_PLATFORM_ORDER = ("Instagram", "Facebook", "YouTube", "TikTok")
+# Joined-MP3 encoder padding is a few frames, not a different edit.
+SHARED_RENDER_PADDING_FRAMES = 15
 
 
 def is_shared_render_eligible(output: dict[str, Any]) -> bool:
@@ -36,7 +38,7 @@ def is_shared_render_eligible(output: dict[str, Any]) -> bool:
     return True
 
 
-def _normalized_clip_key(raw: str) -> str:
+def _normalized_clip_key(raw: str, *, ignore_duration: bool = False) -> str:
     text = str(raw or "").strip()
     if not text:
         return ""
@@ -62,33 +64,80 @@ def _normalized_clip_key(raw: str) -> str:
                 "overlay": overlay_text,
             }
             if clip_is_authoritative(clip):
-                # Authoritative timelines are the render contract. Identical scene
-                # lengths still share one render; different lengths must not.
-                try:
-                    row["durationFrames"] = int(clip.get("durationFrames") or 0)
-                except (TypeError, ValueError):
-                    row["durationFrames"] = 0
                 row["timingMode"] = "authoritative"
+                # Same stills and the same voiceover file are one video. A few frames of
+                # joined-MP3 encoder padding must not start a second Remotion render.
+                # Without a voiceover URL, scene length is the clock and stays in the key.
+                if not ignore_duration:
+                    try:
+                        row["durationFrames"] = int(clip.get("durationFrames") or 0)
+                    except (TypeError, ValueError):
+                        row["durationFrames"] = 0
             normalized.append(row)
         return hashlib.sha256(json.dumps(normalized, sort_keys=True).encode("utf-8")).hexdigest()
     return hashlib.sha256(json.dumps(payload, sort_keys=True).encode("utf-8")).hexdigest()
 
 
-def render_equivalence_key(output: dict[str, Any]) -> str | None:
+def _authoritative_clips(output: dict[str, Any]) -> bool:
+    from studio_produce.timed_script import clips_use_authoritative_timing
+
+    raw = field_str(output, "Render_Clip_List_JSON")
+    try:
+        payload = json.loads(raw) if raw else None
+    except json.JSONDecodeError:
+        return False
+    return clips_use_authoritative_timing(payload if isinstance(payload, list) else [])
+
+
+def _frame_total(output: dict[str, Any]) -> int:
+    raw = field_str(output, "Render_Clip_List_JSON")
+    try:
+        payload = json.loads(raw) if raw else None
+    except json.JSONDecodeError:
+        payload = None
+    if isinstance(payload, list):
+        total = 0
+        counted = False
+        for clip in payload:
+            if not isinstance(clip, dict):
+                continue
+            try:
+                frames = int(clip.get("durationFrames") or 0)
+            except (TypeError, ValueError):
+                frames = 0
+            if frames > 0:
+                total += frames
+                counted = True
+        if counted:
+            return total
+    try:
+        stored = int(field(output, "Render_Total_Frames") or 0)
+    except (TypeError, ValueError):
+        stored = 0
+    return stored
+
+
+def render_equivalence_key(output: dict[str, Any], *, ignore_duration: bool = False) -> str | None:
     if not is_shared_render_eligible(output):
         return None
-    clip_key = _normalized_clip_key(field_str(output, "Render_Clip_List_JSON"))
+    voiceover = field_str(output, "Voiceover_URL")
+    clip_key = _normalized_clip_key(
+        field_str(output, "Render_Clip_List_JSON"),
+        ignore_duration=ignore_duration and bool(voiceover),
+    )
     if not clip_key:
         return None
     # Do not key on Timing_Status, Timing_Timeline_JSON, or Render_Total_Frames.
     # T1 often marks Instagram Ready + writes the timeline while YouTube/TikTok
     # still sit at Pending with the pre-T1 frame total (Content 484 / Output 2448).
     # Those rows are the same 9:16 short and must share one Remotion render.
+    # A few frames of joined-MP3 padding are handled by ignore_duration +
+    # _padding_clusters, not by putting the frame total back in this key.
     parts = [
         clip_key,
         field_str(output, "Composition_ID"),
         field_str(output, "Music_URL"),
-        field_str(output, "Voiceover_URL"),
+        voiceover,
         str(field(output, "Music_Volume") or ""),
         str(field(output, "Music_Ducked_Volume") or ""),
         str(field(output, "Voiceover_Render_Volume") or ""),
@@ -113,17 +162,48 @@ def pick_canonical(outputs: list[dict[str, Any]]) -> dict[str, Any]:
     return sorted(outputs, key=rank)[0]
 
 
+def _padding_clusters(rows: list[dict[str, Any]]) -> list[list[dict[str, Any]]]:
+    """Keep stamps that differ only by joined-MP3 padding in one render."""
+    ordered = sorted(rows, key=_frame_total)
+    clusters: list[list[dict[str, Any]]] = []
+    current: list[dict[str, Any]] = []
+    anchor: int | None = None
+    for row in ordered:
+        total = _frame_total(row)
+        if anchor is None or total - anchor <= SHARED_RENDER_PADDING_FRAMES:
+            current.append(row)
+            if anchor is None:
+                anchor = total
+            continue
+        clusters.append(current)
+        current = [row]
+        anchor = total
+    if current:
+        clusters.append(current)
+    return clusters
+
+
 def build_shared_render_plan(outputs: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
     plan: dict[str, dict[str, Any]] = {}
     grouped: dict[str, list[dict[str, Any]]] = {}
+    voiced: dict[str, list[dict[str, Any]]] = {}
     for row in outputs or []:
         if not row or not row.get("id"):
             continue
+        if field_str(row, "Voiceover_URL") and _authoritative_clips(row):
+            content_key = render_equivalence_key(row, ignore_duration=True)
+            if content_key:
+                voiced.setdefault(content_key, []).append(row)
+                continue
         key = render_equivalence_key(row)
         if not key:
             plan[row["id"]] = {"role": "solo", "canonical_id": row["id"], "sibling_ids": []}
             continue
         grouped.setdefault(key, []).append(row)
+
+    for rows in voiced.values():
+        for cluster in _padding_clusters(rows):
+            grouped.setdefault(f"voice:{id(cluster)}", []).extend(cluster)
 
     for group in grouped.values():
         if len(group) < 2:

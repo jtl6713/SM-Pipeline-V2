@@ -1701,12 +1701,42 @@ def stamp_fields(
     return fields
 
 
+def _parent_with_shared_voiceover_duration(parent: dict[str, Any] | None) -> dict[str, Any] | None:
+    """Probe the joined narration once and reuse that length for every output.
+
+    Per-scene MP3s sum a little short of the concatenated file. Stamping each
+    platform from its own cached duration lets YouTube and TikTok stay a few
+    frames behind Instagram and start a second render.
+    """
+    if not parent:
+        return parent
+    if not field_str(parent, "Voiceover_URL"):
+        return parent
+    probed = measured_voiceover_seconds(None, parent, probe=True) or 0
+    try:
+        probed_n = float(probed or 0)
+    except (TypeError, ValueError):
+        probed_n = 0
+    if probed_n <= 0:
+        return parent
+    fields = dict(parent.get("fields") or {})
+    try:
+        stored = float(fields.get("Voiceover_Duration_Seconds") or 0)
+    except (TypeError, ValueError):
+        stored = 0
+    if probed_n <= stored:
+        return parent
+    fields["Voiceover_Duration_Seconds"] = probed_n
+    return {**parent, "fields": fields}
+
+
 def stamp_outputs(
     client: AirtableClient,
     request: dict[str, Any],
     outputs: list[dict[str, Any]],
     parent: dict[str, Any] | None,
 ) -> dict[str, Any]:
+    parent = _parent_with_shared_voiceover_duration(parent)
     ensure_catalog_music(client, request, parent, outputs)
     stamped = 0
     missing = []
