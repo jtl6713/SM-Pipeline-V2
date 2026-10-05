@@ -47,10 +47,7 @@ test("MAE never stamps NYC midnight or 1 AM for YouTube/Instagram", () => {
     assert.ok(
       (local.hour === 5 && local.minute === 30)
       || (local.hour === 11 && local.minute === 30)
-      || (local.hour === 16 && local.minute === 30)
-      || local.hour === 6 || local.hour === 7
-      || local.hour === 12 || local.hour === 13
-      || local.hour === 17 || local.hour === 18,
+      || (local.hour === 16 && local.minute === 30),
       `off MAE: ${iso} ${local.hour}:${String(local.minute).padStart(2, "0")}`,
     );
   }
@@ -58,12 +55,12 @@ test("MAE never stamps NYC midnight or 1 AM for YouTube/Instagram", () => {
   assert.ok(!hours.includes(0) && !hours.includes(1) && !hours.includes(20) && !hours.includes(23), hours.join(","));
 });
 
-test("Worker MAE fills seven mornings before the first afternoon", () => {
+test("Worker MAE fills morning then afternoon then evening on the same day", () => {
   const zone = "America/New_York";
   const now = new Date("2026-10-04T08:00:00Z");
   const occupied = [];
   const locals = [];
-  for (let i = 0; i < 8; i++) {
+  for (let i = 0; i < 4; i++) {
     const iso = maePickBalancedSuggestedIso(MAE_PRIORITY_SCHEDULE_WINDOWS, now, {
       occupiedMs: occupied,
       platformOccupiedMs: occupied,
@@ -72,14 +69,40 @@ test("Worker MAE fills seven mornings before the first afternoon", () => {
     locals.push(localParts(iso, zone));
     occupied.push(Date.parse(iso));
   }
-  assert.ok(locals.slice(0, 7).every((part) => part.hour === 5 && part.minute === 30), JSON.stringify(locals.slice(0, 7)));
-  assert.equal(locals[7].hour, 11);
-  assert.equal(locals[7].minute, 30);
+  assert.deepEqual(locals.slice(0, 3).map((part) => `${part.hour}:${String(part.minute).padStart(2, "0")}`), [
+    "5:30",
+    "11:30",
+    "16:30",
+  ]);
+  assert.equal(locals[3].hour, 5);
+  assert.equal(locals[3].minute, 30);
 });
 
-test("blackout 12 AM NY is replaced with 5:30 AM NY, not +3h", () => {
+test("two TikToks take Monday morning then Monday afternoon, not two mornings", () => {
   const zone = "America/New_York";
-  const now = new Date("2026-10-04T16:00:00Z");
+  const now = new Date("2026-10-05T08:00:00Z"); // 4:00 AM EDT Monday
+  const stamps = maeBuildSuggestedScheduleMap(
+    [
+      { platform: "TikTok", output_type: "Video Draft", scheduled_at: "" },
+      { platform: "TikTok", output_type: "Multi-Photo", scheduled_at: "" },
+    ],
+    {},
+    now,
+    { timeZone: zone },
+  );
+  const first = localParts(stamps.get("TikTok::Video Draft"), zone);
+  const second = localParts(stamps.get("TikTok::Multi-Photo"), zone);
+  const dayOf = (iso) => new Intl.DateTimeFormat("en-CA", { timeZone: zone, year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(iso));
+  assert.equal(first.hour, 5);
+  assert.equal(first.minute, 30);
+  assert.equal(second.hour, 11);
+  assert.equal(second.minute, 30);
+  assert.equal(dayOf(stamps.get("TikTok::Video Draft")), dayOf(stamps.get("TikTok::Multi-Photo")));
+});
+
+test("blackout 12 AM NY is replaced with the next MAE slot, not +3h", () => {
+  const zone = "America/New_York";
+  const now = new Date("2026-10-04T08:00:00Z"); // 4:00 AM EDT, so 5:30 is still open
   const midnight = "2026-10-09T04:00:00.000Z"; // 12:00 AM EDT
   assert.equal(maeIsBlackoutLocalTime(Date.parse(midnight), zone), true);
   const iso = maeNextOpenScheduleIso(midnight, [], undefined, { timeZone: zone, now });
@@ -97,7 +120,7 @@ test("Chicago 23:00 would display as NY 12:00 AM and is rejected as blackout in 
 
 test("suggested map ignores industry 20:00 YouTube windows and uses MAE", () => {
   const zone = "America/New_York";
-  const now = new Date("2026-10-04T12:00:00Z");
+  const now = new Date("2026-10-04T08:00:00Z");
   const stamps = maeBuildSuggestedScheduleMap(
     [
       { platform: "YouTube", output_type: "Short", scheduled_at: "" },
@@ -132,7 +155,7 @@ test("existing blackout stamps are not reused", () => {
 test("Worker stamp paths use MAE not industry evening windows", () => {
   assert.match(worker, /from "\.\/mae-schedule\.mjs"/);
   assert.match(worker, /studio_mae_schedule_v1: true/);
-  assert.match(worker, /0\.10\.442-schedule-mae-blackout/);
+  assert.match(worker, /0\.10\.443-schedule-mae-day/);
   assert.match(worker, /MAE_PRIORITY_SCHEDULE_WINDOWS/);
   assert.doesNotMatch(
     worker.slice(worker.indexOf("function studioBuildSuggestedScheduleMap")),

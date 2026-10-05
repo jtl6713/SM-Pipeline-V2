@@ -1,13 +1,13 @@
 /** Strict MAE rotation in profile-local time.
- * Fill week-1 mornings, then afternoons, then evenings, then week-2 mornings:
- * M1… A1… E1… M2…
- * Never stamp 8:00 PM–3:30 AM local (inclusive).
+ * One platform post per day-part. Fill each day morning → afternoon → evening
+ * before the next day: M, A, E, then next-day M.
+ * Never stamp 8:00 PM–3:30 AM local (inclusive). Never two TikToks in Monday
+ * morning while Monday afternoon is empty.
  */
 
 export const MAE_SCHEDULE_GAP_MS = 3 * 60 * 60 * 1000;
 export const MAE_SUGGEST_HORIZON_DAYS = 14;
 export const MAE_PRIORITY_SCHEDULE_WINDOWS = Object.freeze(["05:30-07:00", "11:30-13:00", "16:30-18:00"]);
-export const MAE_PRIORITY_WINDOW_OFFSETS_MINUTES = Object.freeze([0, 30, 60, 90]);
 export const MAE_SUGGEST_LEAD_MS = 10 * 60 * 1000;
 export const MAE_DEFAULT_TIME_ZONE = "America/Chicago";
 export const MAE_SCHEDULE_BLACKOUT_START_MINUTES = 20 * 60;
@@ -109,15 +109,11 @@ export function maeIsBlackoutLocalTime(ms, timeZone = MAE_DEFAULT_TIME_ZONE) {
 }
 
 export function maeAllowedMinutes() {
-  const allowed = [];
-  for (const window of MAE_PRIORITY_SCHEDULE_WINDOWS) {
+  return MAE_PRIORITY_SCHEDULE_WINDOWS.map((window) => {
     const [start] = String(window).split("-");
     const [hh, mm] = start.split(":").map((n) => Number(n) || 0);
-    for (const offset of MAE_PRIORITY_WINDOW_OFFSETS_MINUTES) {
-      allowed.push(hh * 60 + mm + offset);
-    }
-  }
-  return allowed;
+    return hh * 60 + mm;
+  });
 }
 
 export function maeIsPriorityLocalTime(ms, timeZone = MAE_DEFAULT_TIME_ZONE) {
@@ -134,23 +130,18 @@ function maeWidestGapFallbackIso(local, nowMs, occupiedMs, platformOccupiedMs, t
     for (const window of MAE_PRIORITY_SCHEDULE_WINDOWS) {
       const [start] = window.split("-");
       const [hh, mm] = start.split(":").map((n) => Number(n) || 0);
-      for (const offset of MAE_PRIORITY_WINDOW_OFFSETS_MINUTES) {
-        const totalMinutes = hh * 60 + mm + offset;
-        const hour = Math.floor(totalMinutes / 60);
-        const min = totalMinutes % 60;
-        const ms = maeZonedWallToUtcMs(civil.year, civil.month, civil.day, hour, min, timeZone);
-        if (ms <= nowMs || maeIsBlackoutLocalTime(ms, timeZone) || maeScheduleConflicts(ms, platformOccupiedMs)) continue;
-        let previous = nowMs;
-        let next = ms + 24 * 60 * 60 * 1000;
-        for (const occupied of sortedOccupied) {
-          if (occupied <= ms && occupied > previous) previous = occupied;
-          if (occupied > ms) {
-            next = occupied;
-            break;
-          }
+      const ms = maeZonedWallToUtcMs(civil.year, civil.month, civil.day, hh, mm || 0, timeZone);
+      if (ms <= nowMs || maeIsBlackoutLocalTime(ms, timeZone) || maeScheduleConflicts(ms, platformOccupiedMs)) continue;
+      let previous = nowMs;
+      let next = ms + 24 * 60 * 60 * 1000;
+      for (const occupied of sortedOccupied) {
+        if (occupied <= ms && occupied > previous) previous = occupied;
+        if (occupied > ms) {
+          next = occupied;
+          break;
         }
-        candidates.push({ ms, clearance: Math.min(ms - previous, next - ms) });
       }
+      candidates.push({ ms, clearance: Math.min(ms - previous, next - ms) });
     }
   }
   if (!candidates.length) return "";
@@ -165,41 +156,19 @@ export function maePickBalancedSuggestedIso(_windows, now = new Date(), options 
   const platformOccupiedMs = options.platformOccupiedMs || occupiedMs;
   const nowMs = now.getTime() + (options.leadMs ?? MAE_SUGGEST_LEAD_MS);
   const local = maeZonedDateTimeParts(now, timeZone);
-  const horizon = [];
+
+  // Each civil day: morning, then afternoon, then evening. Then the next day.
+  // Two TikToks on Monday become 5:30 and 11:30, never two mornings with an empty A.
   for (let i = 0; i < MAE_SUGGEST_HORIZON_DAYS; i++) {
-    const civilBase = i === 0
+    const civil = i === 0
       ? { year: local.year, month: local.month, day: local.day }
       : maeAddCivilDays(local.year, local.month, local.day, i);
-    horizon.push({ ...civilBase, index: i, key: maeCivilKey(civilBase.year, civilBase.month, civilBase.day) });
-  }
-
-  // Strict scheduling passes:
-  // 1-3: days 1-7 morning, midday, late afternoon.
-  // 4-6: days 8-14 morning, midday, late afternoon.
-  const dayBands = [[0, 7], [7, 14]];
-  for (const [startDay, endDay] of dayBands) {
     for (const window of MAE_PRIORITY_SCHEDULE_WINDOWS) {
       const [start] = window.split("-");
       const [hh, mm] = start.split(":").map((n) => Number(n) || 0);
-      const startMinutes = hh * 60 + mm;
-      const balancedDays = horizon
-        .slice(startDay, endDay)
-        .filter(Boolean)
-        .map((civil) => ({
-          civil,
-          occupiedCount: maeOccupiedOnDay(occupiedMs, civil, timeZone).length,
-        }))
-        .sort((a, b) => a.occupiedCount - b.occupiedCount || a.civil.index - b.civil.index);
-      for (const { civil } of balancedDays) {
-        for (const offsetMinutes of MAE_PRIORITY_WINDOW_OFFSETS_MINUTES) {
-          const totalMinutes = startMinutes + offsetMinutes;
-          const candidateHour = Math.floor(totalMinutes / 60);
-          const candidateMinute = totalMinutes % 60;
-          const ms = maeZonedWallToUtcMs(civil.year, civil.month, civil.day, candidateHour, candidateMinute, timeZone);
-          if (ms <= nowMs || maeIsBlackoutLocalTime(ms, timeZone) || maeScheduleConflicts(ms, platformOccupiedMs)) continue;
-          return new Date(ms).toISOString();
-        }
-      }
+      const ms = maeZonedWallToUtcMs(civil.year, civil.month, civil.day, hh, mm || 0, timeZone);
+      if (ms <= nowMs || maeIsBlackoutLocalTime(ms, timeZone) || maeScheduleConflicts(ms, platformOccupiedMs)) continue;
+      return new Date(ms).toISOString();
     }
   }
 

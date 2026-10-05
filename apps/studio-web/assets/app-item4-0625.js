@@ -257,7 +257,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.486-schedule-mae-blackout";
+  const BUILD_ID = "item4-0.6.487-schedule-mae-day";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -16645,12 +16645,12 @@
 
     button.disabled = true;
     button.textContent = "Regenerating…";
-    setPipelineScheduleGridMessage(`Rebuilding ${eligible.length} post schedule${eligible.length === 1 ? "" : "s"} for the active ${workingStudioCityLabel()} profile using the strict 14-day morning → afternoon → evening passes…`);
+    setPipelineScheduleGridMessage(`Rebuilding ${eligible.length} post schedule${eligible.length === 1 ? "" : "s"} for the active ${workingStudioCityLabel()} profile using morning → afternoon → evening on each day…`);
     let saved = 0;
     let failed = 0;
     // Process one platform completely before moving to the next selected platform.
-    // This lets every platform independently receive its own Monday 5:30 AM,
-    // Tuesday 5:30 AM, etc. slots.
+    // Each platform walks M then A then E on a day before the next day, so two
+    // TikToks become Monday 5:30 and Monday 11:30, not two Monday mornings.
     const platformOrder = [...selected];
     const orderedEligible = platformOrder.flatMap((platform) =>
       eligible.filter((record) => pipelineSchedulePlatformKey(record) === platform)

@@ -372,7 +372,6 @@
   const EZ_SCHEDULE_GAP_MS = 3 * 60 * 60 * 1000;
   const EZ_SUGGEST_HORIZON_DAYS = 14;
   const EZ_PRIORITY_SCHEDULE_WINDOWS = ["05:30-07:00", "11:30-13:00", "16:30-18:00"];
-  const EZ_PRIORITY_WINDOW_OFFSETS_MINUTES = [0, 30, 60, 90];
   const EZ_SUGGEST_LEAD_MS = 10 * 60 * 1000;
 
   function ezIndustryBestWindows(platform, outputType) {
@@ -489,9 +488,7 @@
     for (const window of EZ_PRIORITY_SCHEDULE_WINDOWS) {
       const [start] = window.split("-");
       const [hh, mm] = start.split(":").map((n) => Number(n) || 0);
-      for (const offset of EZ_PRIORITY_WINDOW_OFFSETS_MINUTES) {
-        if (minutes === hh * 60 + mm + offset) return true;
-      }
+      if (minutes === hh * 60 + mm) return true;
     }
     return false;
   }
@@ -529,10 +526,10 @@
     const sortedOccupied = (occupiedMs || []).filter(Number.isFinite).slice().sort((a, b) => a - b);
     for (let dayOffset = 0; dayOffset < EZ_SUGGEST_HORIZON_DAYS; dayOffset++) {
       const civil = ezAddCivilDays(local.year, local.month, local.day, dayOffset);
-      for (let minute = 4 * 60; minute < 20 * 60; minute += 30) {
-        const hour = Math.floor(minute / 60);
-        const min = minute % 60;
-        const ms = ezZonedWallToUtcMs(civil.year, civil.month, civil.day, hour, min, timeZone);
+      for (const window of EZ_PRIORITY_SCHEDULE_WINDOWS) {
+        const [start] = window.split("-");
+        const [hh, mm] = start.split(":").map((n) => Number(n) || 0);
+        const ms = ezZonedWallToUtcMs(civil.year, civil.month, civil.day, hh, mm || 0, timeZone);
         if (ms <= nowMs || ezIsBlackoutLocalTime(ms, timeZone) || ezScheduleConflicts(ms, platformOccupiedMs)) continue;
         let previous = nowMs;
         let next = ms + 24 * 60 * 60 * 1000;
@@ -543,15 +540,13 @@
             break;
           }
         }
-        const clearance = Math.min(ms - previous, next - ms);
-        candidates.push({ ms, clearance });
+        candidates.push({ ms, clearance: Math.min(ms - previous, next - ms) });
       }
     }
     if (!candidates.length) return "";
     const widest = Math.max(...candidates.map((item) => item.clearance));
     const best = candidates.filter((item) => item.clearance === widest);
-    const picked = best[Math.floor(Math.random() * best.length)];
-    return new Date(picked.ms).toISOString();
+    return new Date(best[0].ms).toISOString();
   }
 
   function ezPickBalancedSuggestedIso(windows, now = new Date(), options = {}) {
@@ -560,45 +555,23 @@
     const platformOccupiedMs = options.platformOccupiedMs || occupiedMs;
     const nowMs = now.getTime() + EZ_SUGGEST_LEAD_MS;
     const local = ezZonedDateTimeParts(now, timeZone);
-    const horizon = [];
-    for (let i = 0; i < EZ_SUGGEST_HORIZON_DAYS; i++) {
-      const civilBase = i === 0 ? { year: local.year, month: local.month, day: local.day } : ezAddCivilDays(local.year, local.month, local.day, i);
-      horizon.push({ ...civilBase, index: i, key: ezCivilKey(civilBase.year, civilBase.month, civilBase.day) });
-    }
 
-    // Strict scheduling passes:
-    // 1-3: days 1-7 morning, midday, late afternoon.
-    // 4-6: days 8-14 morning, midday, late afternoon.
-    const dayBands = [[0, 7], [7, 14]];
-    for (const [startDay, endDay] of dayBands) {
+    // Each civil day: morning, then afternoon, then evening. Then the next day.
+    // Two TikToks become 5:30 then 11:30 the same day, never two Monday mornings
+    // with an empty afternoon.
+    for (let i = 0; i < EZ_SUGGEST_HORIZON_DAYS; i++) {
+      const civil = i === 0
+        ? { year: local.year, month: local.month, day: local.day }
+        : ezAddCivilDays(local.year, local.month, local.day, i);
       for (const window of EZ_PRIORITY_SCHEDULE_WINDOWS) {
         const [start] = window.split("-");
         const [hh, mm] = start.split(":").map((n) => Number(n) || 0);
-        const startMinutes = hh * 60 + mm;
-        const balancedDays = horizon
-          .slice(startDay, endDay)
-          .filter(Boolean)
-          .map((civil) => ({
-            civil,
-            occupiedCount: ezOccupiedOnDay(occupiedMs, civil, timeZone).length,
-          }))
-          .sort((a, b) => a.occupiedCount - b.occupiedCount || a.civil.index - b.civil.index);
-        for (const { civil } of balancedDays) {
-          for (const offsetMinutes of EZ_PRIORITY_WINDOW_OFFSETS_MINUTES) {
-            const totalMinutes = startMinutes + offsetMinutes;
-            const candidateHour = Math.floor(totalMinutes / 60);
-            const candidateMinute = totalMinutes % 60;
-            const ms = ezZonedWallToUtcMs(civil.year, civil.month, civil.day, candidateHour, candidateMinute, timeZone);
-            if (ms <= nowMs || ezIsBlackoutLocalTime(ms, timeZone) || ezScheduleConflicts(ms, platformOccupiedMs)) continue;
-            return new Date(ms).toISOString();
-          }
-        }
+        const ms = ezZonedWallToUtcMs(civil.year, civil.month, civil.day, hh, mm || 0, timeZone);
+        if (ms <= nowMs || ezIsBlackoutLocalTime(ms, timeZone) || ezScheduleConflicts(ms, platformOccupiedMs)) continue;
+        return new Date(ms).toISOString();
       }
     }
 
-    // Once the six priority passes are full, keep filling only inside the same
-    // rolling 14-day horizon. Choose among the widest remaining non-blackout
-    // openings; never push an automatic schedule beyond day 14.
     return ezWidestGapFallbackIso(local, nowMs, occupiedMs, platformOccupiedMs, timeZone);
   }
 

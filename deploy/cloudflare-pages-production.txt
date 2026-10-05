@@ -12,3 +12,4 @@ Deploy UI 0.6.484 schedule platform occupancy. Non-story outputs share a platfor
 Deploy UI 0.6.485 idea-library Select none transition control.
 Retry deploy UI 0.6.485 after Pages verification propagation lag.
 Deploy UI 0.6.486 schedule MAE blackout. Worker+Pages use M1 then A1 then E1 then M2 in profile time.
+Deploy UI 0.6.487 schedule MAE day fill. Two TikToks become 5:30 then 11:30 the same day.

@@ -83,7 +83,7 @@ test("8 PM through 3:30 AM is a blackout in profile local time", () => {
 
 test("conflict fallback re-picks MAE instead of walking into overnight blackout", () => {
   const zone = "America/Los_Angeles";
-  const now = new Date("2026-10-03T16:00:00Z"); // 9:00 AM PDT
+  const now = new Date("2026-10-03T12:00:00Z"); // 5:00 AM PDT, 5:30 still open
   const candidate = "2026-10-04T07:00:00Z"; // midnight PDT — blackout
   const occupied = [Date.parse(candidate)];
   const iso = plan.ezNextOpenScheduleIso(candidate, occupied, 3 * 60 * 60 * 1000, { timeZone: zone, now });
@@ -94,18 +94,19 @@ test("conflict fallback re-picks MAE instead of walking into overnight blackout"
 });
 
 
-test("scheduler prefers next-day morning over mid-window slots when 5:30 is taken", () => {
+test("scheduler uses same-day afternoon when morning is taken, not a second morning", () => {
   const zone = "America/Chicago";
   const now = new Date("2026-10-03T08:00:00Z");
   const occupied = [Date.parse("2026-10-03T10:30:00Z")]; // 5:30 AM local
   const iso = plan.ezPickBalancedSuggestedIso([], now, { timeZone: zone, platformOccupiedMs: occupied });
   const local = localParts(iso, zone);
-  // 3h gap blocks 6:00–7:00 same day; morning pass stays on 5:30 of the next open day.
-  assert.equal(local.hour, 5);
+  const localDate = new Intl.DateTimeFormat("en-CA", { timeZone: zone }).format(new Date(iso));
+  assert.equal(localDate, "2026-10-03");
+  assert.equal(local.hour, 11);
   assert.equal(local.minute, 30);
 });
 
-test("scheduler keeps morning-pass 5:30 when early window slots are occupied", () => {
+test("scheduler skips occupied 5:30 to 11:30 the same day", () => {
   const zone = "America/Chicago";
   const now = new Date("2026-10-03T08:00:00Z");
   const occupied = [
@@ -115,12 +116,12 @@ test("scheduler keeps morning-pass 5:30 when early window slots are occupied", (
   ];
   const iso = plan.ezPickBalancedSuggestedIso([], now, { timeZone: zone, platformOccupiedMs: occupied });
   const local = localParts(iso, zone);
-  assert.equal(local.hour, 5);
+  assert.equal(local.hour, 11);
   assert.equal(local.minute, 30);
 });
 
 
-test("scheduler balances the seven-day band before stacking a busier day", () => {
+test("scheduler uses today's morning even when another platform already has that day", () => {
   const zone = "America/Chicago";
   const now = new Date("2026-10-03T08:00:00Z");
   const occupiedMs = [Date.parse("2026-10-03T10:30:00Z")];
@@ -132,7 +133,7 @@ test("scheduler balances the seven-day band before stacking a busier day", () =>
   const date = new Date(iso);
   const localDay = new Intl.DateTimeFormat("en-US", { timeZone: zone, day: "2-digit" }).format(date);
   const local = localParts(iso, zone);
-  assert.equal(localDay, "04");
+  assert.equal(localDay, "03");
   assert.equal(local.hour, 5);
   assert.equal(local.minute, 30);
 });
@@ -187,14 +188,18 @@ test("initial suggested schedule map honors the active Los Angeles profile timez
     const local = localParts(iso, zone);
     assert.ok(date >= "2026-10-03" && date < "2026-10-17", `outside 14-day profile horizon: ${iso} (${date})`);
     assert.equal(plan.ezIsBlackoutLocalTime(Date.parse(iso), zone), false);
-    assert.equal(local.hour, 5);
-    assert.equal(local.minute, 30);
+    assert.ok(local.hour === 5 || local.hour === 11, `unexpected hour ${local.hour} for ${iso}`);
+    if (local.hour === 5) assert.equal(local.minute, 30);
   }
   const photo = Date.parse(schedules.get("Facebook::Photo"));
   const reel = Date.parse(schedules.get("Facebook::Reel"));
   const story = Date.parse(schedules.get("Facebook::Story"));
-  // Non-stories share one Facebook lane and must stay 3h apart.
+  // Non-stories share one Facebook lane: Photo 5:30, Reel 11:30.
   assert.ok(Math.abs(photo - reel) >= 3 * 60 * 60 * 1000);
+  const photoLocal = localParts(schedules.get("Facebook::Photo"), zone);
+  const reelLocal = localParts(schedules.get("Facebook::Reel"), zone);
+  assert.equal(photoLocal.hour, 5);
+  assert.equal(reelLocal.hour, 11);
   // Stories may land on the same wall-clock slot as other Facebook outputs.
   assert.equal(story, photo);
 });
@@ -225,6 +230,12 @@ test("Facebook and Instagram Stories may share a slot; other types share a platf
     now,
     { timeZone: zone },
   );
+  const ttVideo = localParts(tt.get("TikTok::Video Draft"), zone);
+  const ttPhoto = localParts(tt.get("TikTok::Multi-Photo"), zone);
+  assert.equal(ttVideo.hour, 11);
+  assert.equal(ttVideo.minute, 30);
+  assert.equal(ttPhoto.hour, 16);
+  assert.equal(ttPhoto.minute, 30);
   assert.ok(Math.abs(Date.parse(tt.get("TikTok::Video Draft")) - Date.parse(tt.get("TikTok::Multi-Photo"))) >= 3 * 60 * 60 * 1000);
 });
 
@@ -245,13 +256,12 @@ test("existing automatic schedule inside LA blackout is replaced using LA profil
 });
 
 
-test("strict profile-wide picker fills first 7-day morning pass before afternoon", () => {
+test("picker fills morning then afternoon then evening before the next day", () => {
   const zone = "America/New_York";
-  // Early enough that today's 5:30 AM NY is still in the future.
   const now = new Date("2026-10-04T08:00:00Z");
   const occupied = [];
   const picks = [];
-  for (let i = 0; i < 8; i++) {
+  for (let i = 0; i < 4; i++) {
     const iso = plan.ezPickBalancedSuggestedIso([], now, {
       occupiedMs: occupied,
       platformOccupiedMs: occupied,
@@ -263,7 +273,7 @@ test("strict profile-wide picker fills first 7-day morning pass before afternoon
   const local = picks.map((iso) => new Intl.DateTimeFormat("en-US", {
     timeZone: zone, hour: "2-digit", minute: "2-digit", hourCycle: "h23",
   }).format(new Date(iso)));
-  assert.ok(local.slice(0, 7).every((value) => value >= "05:30" && value <= "07:00"), local.join(", "));
-  assert.ok(local[7] >= "11:30", local.join(", "));
+  assert.deepEqual(local.slice(0, 3), ["05:30", "11:30", "16:30"]);
+  assert.equal(local[3], "05:30");
   assert.ok(picks.every((iso) => !plan.ezIsBlackoutLocalTime(Date.parse(iso), zone)));
 });
