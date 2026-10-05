@@ -259,7 +259,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.496-timed-script-bold-times";
+  const BUILD_ID = "item4-0.6.497-quoted-library-name";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -11905,7 +11905,27 @@
     return next;
   }
 
-  function renderLibraryPickerSections(items, selected, suggestedIds, idAttr) {
+  function libraryQuotedPhrase(query) {
+    const text = String(query || "").trim();
+    const wrapped = text.match(/^(?:"|“|”)([\s\S]+)(?:"|“|”)$/) || text.match(/^'([\s\S]+)'$/);
+    if (!wrapped) return "";
+    return String(wrapped[1] || "").replace(/\s+/g, " ").trim();
+  }
+
+  function libraryNameSort(left, right) {
+    return String(left || "").localeCompare(String(right || ""), undefined, { numeric: true, sensitivity: "base" });
+  }
+
+  function libraryItemsForQuotedName(items, query) {
+    const phrase = libraryQuotedPhrase(query);
+    if (!phrase) return { phrase: "", items };
+    const needle = phrase.toLowerCase();
+    const matched = (items || []).filter((item) => String(item?.name || "").toLowerCase().includes(needle));
+    matched.sort((a, b) => libraryNameSort(a.name, b.name));
+    return { phrase, items: matched };
+  }
+
+  function renderLibraryPickerSections(items, selected, suggestedIds, idAttr, { flat = false } = {}) {
     const suggested = items.filter((item) => suggestedIds.has(item.id));
     const more = items.filter((item) => !suggestedIds.has(item.id));
     const card = (item) => {
@@ -11935,6 +11955,11 @@
       </div>`;
     };
     const parts = [];
+    if (flat) {
+      return items.length
+        ? `<div class="idea-library-cards">${items.map(card).join("")}</div>`
+        : `<p class="idea-library-picker-hint">No library file is named with that quoted phrase.</p>`;
+    }
     if (suggested.length) {
       parts.push(`<div class="idea-library-block"><p class="idea-library-section">Suggested</p><div class="idea-library-cards">${suggested.map(card).join("")}</div></div>`);
     }
@@ -11955,18 +11980,22 @@
     const grid = $("ideaLibraryGrid");
     const hint = $("ideaLibraryPickerHint");
     if (!grid) return;
+    const phrase = libraryQuotedPhrase($("ideaLibrarySearch")?.value || "");
     grid.innerHTML = renderLibraryPickerSections(
       ideaLibraryPickerItems,
       ideaLibrarySelected,
       ideaLibrarySuggestedIds,
-      "data-library-id"
+      "data-library-id",
+      { flat: Boolean(phrase) }
     );
     if (hint) {
       const checked = ideaLibrarySelected.size;
       const suggested = ideaLibrarySuggestedIds.size;
-      hint.textContent = suggested
-        ? `${suggested} suggested. ${checked} checked. Uncheck to drop, search to add.`
-        : `No place match yet. ${checked} checked. Search the Drive library and check photos or clips to add.`;
+      hint.textContent = phrase
+        ? `${ideaLibraryPickerItems.length} named “${phrase}”. ${checked} checked.`
+        : (suggested
+          ? `${suggested} suggested. ${checked} checked. Uncheck to drop, search to add.`
+          : `No place match yet. ${checked} checked. Search the Drive library and check photos or clips to add.`);
     }
     syncIdeaLibraryContinue();
     item4BindClipPlayers(grid);
@@ -11986,11 +12015,14 @@
     ]);
     const suggested = ideaPack.suggested || [];
     const matches = ideaPack.matches || [];
-    ideaLibrarySuggestedIds = new Set(suggested.map((item) => item.id).filter(Boolean));
-    ideaLibraryPickerItems = mergeLibraryPickerItems(suggested, matches, browse);
+    const quoted = libraryItemsForQuotedName(mergeLibraryPickerItems(suggested, matches, browse), q);
+    ideaLibrarySuggestedIds = quoted.phrase
+      ? new Set()
+      : new Set(suggested.map((item) => item.id).filter(Boolean));
+    ideaLibraryPickerItems = quoted.items;
     ideaLibrarySelected = seedLibrarySelection(
       ideaLibrarySelected,
-      suggested,
+      quoted.phrase ? [] : suggested,
       ideaLibrarySeeded ? [] : ideaLibraryIdsFromIdea(activeIdea),
       libraryPickerMaxCount(),
       !ideaLibrarySeeded
@@ -12129,15 +12161,20 @@
     const grid = $("item4LibraryGrid");
     const hint = $("item4LibraryPickerHint");
     if (!grid) return;
+    const phrase = libraryQuotedPhrase($("item4LibrarySearch")?.value || "");
     grid.innerHTML = renderLibraryPickerSections(
       item4LibraryItems,
       item4LibrarySelected,
       item4LibrarySuggestedIds,
-      "data-item4-library-id"
+      "data-item4-library-id",
+      { flat: Boolean(phrase) }
     );
     if (hint) {
       const { toAdd, toRemove } = item4LibraryDiff();
-      hint.textContent = `${item4LibrarySuggestedIds.size} suggested. ${item4LibrarySelected.size} checked. Uncheck to remove, search to add.${toAdd.length || toRemove.length ? ` Apply will add ${toAdd.length} and remove ${toRemove.length}.` : ""}`;
+      const applyNote = toAdd.length || toRemove.length ? ` Apply will add ${toAdd.length} and remove ${toRemove.length}.` : "";
+      hint.textContent = phrase
+        ? `${item4LibraryItems.length} named “${phrase}”. ${item4LibrarySelected.size} checked.${applyNote}`
+        : `${item4LibrarySuggestedIds.size} suggested. ${item4LibrarySelected.size} checked. Uncheck to remove, search to add.${applyNote}`;
     }
     syncItem4LibraryAdd();
     item4BindClipPlayers(grid);
@@ -12173,11 +12210,17 @@
     if (sequence !== item4LibraryLoadSequence || activeProductionRequest?.id !== requestId) return;
     const suggested = ideaPack.suggested || [];
     const matches = ideaPack.matches || [];
-    item4LibrarySuggestedIds = new Set([
-      ...attachedItems.map((item) => item.id),
-      ...suggested.map((item) => item.id).filter(Boolean),
-    ]);
-    item4LibraryItems = mergeLibraryPickerItems(suggested, matches, [...attachedItems, ...browse]);
+    const quoted = libraryItemsForQuotedName(
+      mergeLibraryPickerItems(suggested, matches, [...attachedItems, ...browse]),
+      q
+    );
+    item4LibrarySuggestedIds = quoted.phrase
+      ? new Set()
+      : new Set([
+        ...attachedItems.map((item) => item.id),
+        ...suggested.map((item) => item.id).filter(Boolean),
+      ]);
+    item4LibraryItems = quoted.items;
     // Once an idea is in Production, the attached asset set is authoritative.
     // Suggestions may still be displayed, but they must never become checked
     // automatically. Only the operator can add another asset in Production.
@@ -14450,7 +14493,6 @@
     promoteCarouselImageMode: "AI generated creates slides. Manual Upload uses attached photos. Listen for photos auto-attaches related stills already uploaded to the Studio media library.",
     editIdeaTitle: "Name this idea in the Ideas list. This is not the on-post title used on Instagram or YouTube.",
     editIdeaSummary: "Required before Promote. Used to write captions and the spoken script.",
-    ideaLibrarySearch: "Search Drive stills by place or name. Suggested photos stay checked until you uncheck them.",
     prTitleMode: "AI decides writes the on-post title. Force exact uses your wording. AI improve keeps your draft and rewrites it.",
     prRequestedTitle: "The on-post title. Separate from the idea name.",
     prCaptionMode: "This is the post caption on Instagram, Facebook, TikTok, and YouTube. It is separate from the on-photo labels under each crop.",

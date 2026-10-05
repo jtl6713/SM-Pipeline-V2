@@ -44,7 +44,6 @@ window.CHICAGOSHINING_STUDIO_CONFIG = {
     item4LibraryAddButton: "Apply checked Drive stills to this request: add new checks and remove unchecked ones.",
     item4LibraryCancelButton: "Close the Drive library picker without attaching more stills.",
     ideaLibraryContinueButton: "Attach the selected Drive photos and Raw Footage clips to a Production request and open customize.",
-    ideaLibrarySearch: "Search Drive photos and clips by place or name. Suggested media stays checked until you uncheck it.",
     editIdeaTitle: "Name this idea in the Ideas list. This is not the on-post title used on Instagram or YouTube.",
     editIdeaSummary: "Required before Promote. Used to write captions and the spoken script. You can still edit this after saving.",
     promoteContentType: "Master format for this piece. Vertical Short Video and Longform Video show duration and clip count. Carousel, Photo Set, and Feed Post show slide options. Photo Set turns stills into Reels; Carousel keeps swipeable photos. Help → Ideas has a graphic of every type and what Pipeline builds.",
@@ -291,6 +290,8 @@ window.CHICAGOSHINING_STUDIO_CONFIG = {
   function decorateElement(element) {
     if (!(element instanceof Element)) return;
     if (element.closest?.(`#${TOOLTIP_ID}`)) return;
+    if (element.closest?.(".idea-library-card")) return;
+    if (element.id === "ideaLibrarySearch" || element.id === "item4LibrarySearch") return;
     if (element.id === "phase6ControlTooltip") return;
     if (element.dataset.studioTooltipLocked === "1") return;
     const description = cleanText(descriptionFor(element));

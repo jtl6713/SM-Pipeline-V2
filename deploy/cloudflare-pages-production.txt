@@ -22,3 +22,4 @@ Deploy UI 0.6.493 ideas VO production handoff. Open Rendering with the attached 
 Deploy UI 0.6.494 master calendar blackout collapse. Hide off-limits overnight rows by default with expandable audit bands.
 Deploy UI 0.6.495 plan creation uses MAE morning then afternoon then evening.
 Deploy UI 0.6.496 timed script import accepts bold markdown times so Use this timeline can enable.
+Deploy UI 0.6.497 quoted library search returns only that named set.

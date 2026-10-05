@@ -186,6 +186,12 @@ import {
   maeTimeZoneFromTheme,
 } from "./mae-schedule.mjs";
 import {
+  libraryAssetNameFindFormula,
+  libraryNameHasPhrase,
+  libraryNameSort,
+  libraryQuotedPhrase,
+} from "./library-phrase.mjs";
+import {
   assignScenesToStills,
   buildTimelineFromScenes,
   exactVoiceoverText,
@@ -486,7 +492,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.449-plan-mae-rotation",
+          version: "0.10.450-quoted-library-name",
           studio_mae_schedule_v1: true,
           studio_desk_inventory_v1: true,
           studio_desk_activity_v1: true,
@@ -6596,6 +6602,15 @@ function ideaLibraryAirtableEscape(value) {
   return String(value || "").replace(/\\/g, "\\\\").replace(/"/g, '\\"');
 }
 
+function ideaLibraryNamePhraseFormula(phrase, { includeVideo = false } = {}) {
+  const media = includeVideo
+    ? "OR({Media_Class}='Image',{Media_Class}='Graphic',{Media_Class}='Video')"
+    : "OR({Media_Class}='Image',{Media_Class}='Graphic')";
+  const notDerived = ideaLibraryExcludeDerivedStillFormula();
+  const base = `AND(${media},{Classification_Status}='Classified',{Active},NOT({Do_Not_Use}),${notDerived})`;
+  return `AND(${base},${libraryAssetNameFindFormula(phrase)})`;
+}
+
 function ideaLibraryFilterFormula(placeKeys, { includeVideo = false } = {}) {
   const media = includeVideo
     ? "OR({Media_Class}='Image',{Media_Class}='Graphic',{Media_Class}='Video')"
@@ -6763,9 +6778,10 @@ function mapIdeaLibraryAsset(record, row = {}) {
 async function getMediaLibraryStills(request, env, url, authorization) {
   if (!env.AIRTABLE_MEDIA_TABLE_ID) throw new HttpError(503, "Media Assets table is not configured");
   const query = String(url.searchParams.get("q") || "").trim();
+  const phrase = libraryQuotedPhrase(query);
   const includeVideo = ["1", "true", "video", "all", "clips"].includes(String(url.searchParams.get("include") || "").trim().toLowerCase());
   const ideaId = String(url.searchParams.get("idea_id") || "").trim();
-  const queryTokens = ideaLibraryTokens(query);
+  const queryTokens = phrase ? [] : ideaLibraryTokens(query);
   let idea = null;
   if (/^rec[A-Za-z0-9]+$/.test(ideaId)) {
     try { idea = await loadAuthorizedIdea(env, ideaId, authorization); } catch {}
@@ -6784,21 +6800,28 @@ async function getMediaLibraryStills(request, env, url, authorization) {
   for (const record of records) {
     const eligible = ideaLibraryIsEligibleImage(record) || (includeVideo && ideaLibraryIsEligibleVideo(record));
     if (!eligible) continue;
-    const haystack = ideaLibraryHaystack(record);
-    if (queryTokens.length && !queryTokens.some((token) => ideaLibraryHasToken(haystack, token))) continue;
+    const name = f(record, "Asset Name");
+    if (phrase) {
+      if (!libraryNameHasPhrase(name, phrase)) continue;
+    } else if (queryTokens.length) {
+      const haystack = ideaLibraryHaystack(record);
+      if (!queryTokens.some((token) => ideaLibraryHasToken(haystack, token))) continue;
+    }
     items.push(mapIdeaLibraryAsset(record, {
       score: 0,
       confidence: "browse",
-      match_reasons: queryTokens.length ? ["search_hit"] : ["library_browse"],
+      match_reasons: phrase ? ["name_phrase"] : (queryTokens.length ? ["search_hit"] : ["library_browse"]),
       preselected: false,
     }));
-    if (items.length >= 60) break;
   }
+  items.sort((a, b) => libraryNameSort(a.name, b.name));
+  const capped = items.slice(0, phrase ? 120 : 60);
   return respond(request, env, {
     ok: true,
     query: query || null,
-    count: items.length,
-    records: items,
+    phrase: phrase || null,
+    count: capped.length,
+    records: capped,
   });
 }
 
@@ -6807,6 +6830,7 @@ async function getIdeaLibrarySuggestions(request, env, url, authorization) {
   const ideaId = ideaRecordIdFromPath(url);
   const idea = await loadAuthorizedIdea(env, ideaId, authorization);
   const query = String(url.searchParams.get("q") || "").trim();
+  const phrase = libraryQuotedPhrase(query);
   const includeVideo = ["1", "true", "video", "all", "clips"].includes(
     String(url.searchParams.get("include") || "").trim().toLowerCase()
   );
@@ -6815,23 +6839,26 @@ async function getIdeaLibrarySuggestions(request, env, url, authorization) {
     f(idea, "Idea_Summary"),
     f(idea, "Primary_Location"),
   ].filter(Boolean).join(" "));
-  const queryTokens = ideaLibraryTokens(query);
+  const queryTokens = phrase ? [] : ideaLibraryTokens(query);
   const strongIdeaTokens = ideaLibraryStrongTokens(ideaTokens);
-  const { placeKeys, subjectKeys, scanKeys } = ideaLibraryMatchKeys(idea, query);
+  const { placeKeys, subjectKeys, scanKeys } = ideaLibraryMatchKeys(idea, phrase ? "" : query);
   const today = chicagoNowParts().date;
   // When the operator typed a search, filter Airtable on those tokens only.
+  // A quoted name is the whole Asset Name phrase, not an OR of "island" and "ferry".
   // Otherwise prefer named place keys so title nouns like "luxury" do not flood the scan.
   const filterKeys = queryTokens.length
     ? ideaLibraryStrongTokens(queryTokens)
     : (placeKeys.length ? placeKeys : scanKeys);
-  const scanLimit = filterKeys.length ? IDEA_LIBRARY_PLACE_FILTER_LIMIT : IDEA_LIBRARY_SCAN_LIMIT;
+  const scanLimit = phrase || filterKeys.length ? IDEA_LIBRARY_PLACE_FILTER_LIMIT : IDEA_LIBRARY_SCAN_LIMIT;
   const scopeFormula = await libraryProfileScopeFormula(env, authorization, url, { idea });
   const records = await listRecords(env, env.AIRTABLE_MEDIA_TABLE_ID, {
-    limit: scanLimit,
+    limit: phrase ? IDEA_LIBRARY_SCAN_LIMIT : scanLimit,
     sortField: "Intake_Date",
     sortDirection: "desc",
     filterFormula: combineAirtableFormulas(
-      ideaLibraryFilterFormula(filterKeys, { includeVideo }),
+      phrase
+        ? ideaLibraryNamePhraseFormula(phrase, { includeVideo })
+        : ideaLibraryFilterFormula(filterKeys, { includeVideo }),
       scopeFormula
     ),
   });
@@ -6840,6 +6867,19 @@ async function getIdeaLibrarySuggestions(request, env, url, authorization) {
     const eligible = ideaLibraryIsEligibleImage(record)
       || (includeVideo && ideaLibraryIsEligibleVideo(record));
     if (!eligible) continue;
+    if (phrase) {
+      const name = f(record, "Asset Name");
+      if (!libraryNameHasPhrase(name, phrase)) continue;
+      ranked.push({
+        record,
+        score: 1,
+        confidence: "low",
+        match_reasons: ["name_phrase"],
+        intake_batch_id: String(f(record, "Intake_Batch_ID") || "").trim() || null,
+        preselected: false,
+      });
+      continue;
+    }
     const row = ideaLibraryRankAsset(record, {
       placeKeys,
       subjectKeys,
@@ -6851,6 +6891,7 @@ async function getIdeaLibrarySuggestions(request, env, url, authorization) {
     if (row) ranked.push(row);
   }
   ranked.sort((a, b) => {
+    if (phrase) return libraryNameSort(f(a.record, "Asset Name"), f(b.record, "Asset Name"));
     const confidenceRank = { high: 3, medium: 2, low: 1, none: 0 };
     const confDiff = (confidenceRank[b.confidence] || 0) - (confidenceRank[a.confidence] || 0);
     if (confDiff) return confDiff;
@@ -6858,11 +6899,12 @@ async function getIdeaLibrarySuggestions(request, env, url, authorization) {
     if (a.preselected !== b.preselected) return a.preselected ? -1 : 1;
     return String(f(a.record, "Asset Name") || "").localeCompare(String(f(b.record, "Asset Name") || ""));
   });
-  const capped = ranked.slice(0, 40).map((row) => mapIdeaLibraryAsset(row.record, row));
+  const capped = ranked.slice(0, phrase ? 120 : 40).map((row) => mapIdeaLibraryAsset(row.record, row));
   return respond(request, env, {
     ok: true,
     idea_id: ideaId,
     query: query || null,
+    phrase: phrase || null,
     place_keys: placeKeys,
     subject_keys: subjectKeys,
     match_policy: {
@@ -22795,11 +22837,15 @@ function assetLibraryFilterFormula(query, kind, needsProfile = false) {
     parts.push("{Content_Profile}=BLANK()");
     parts.push("OR({Classification_Status}='Needs Classification',{Classification_Status}='Classification Error')");
   }
-  const needle = String(query || "").trim().toLowerCase();
+  const phrase = libraryQuotedPhrase(query);
+  const needle = String(phrase || query || "").trim().toLowerCase();
   if (needle) {
-    const escaped = ideaLibraryAirtableEscape(needle);
-    const hay = "LOWER(CONCATENATE({Asset Name},' ',{Location},' ',{Asset_Description}))";
-    parts.push(`FIND("${escaped}", ${hay})`);
+    if (phrase) parts.push(libraryAssetNameFindFormula(phrase));
+    else {
+      const escaped = ideaLibraryAirtableEscape(needle);
+      const hay = "LOWER(CONCATENATE({Asset Name},' ',{Location},' ',{Asset_Description}))";
+      parts.push(`FIND("${escaped}", ${hay})`);
+    }
   }
   return `AND(${parts.join(",")})`;
 }
