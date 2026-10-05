@@ -755,6 +755,38 @@ def test_assign_clip_frames_caps_five_long_videos_to_owner_duration():
     assert frames == [180, 180, 180, 180, 180]
 
 
+def test_authoritative_timed_script_extends_only_last_scene_for_full_voiceover():
+    timeline = {
+        "mode": "timed_script",
+        "timing_mode": "authoritative",
+        "timing_source": "timed_script",
+        "segments": [
+            {"start_seconds": 0, "end_seconds": 3, "duration_seconds": 3},
+            {"start_seconds": 3, "end_seconds": 6, "duration_seconds": 3},
+        ],
+    }
+    request = {
+        "fields": {
+            "Production_Notes": "[timed-script] " + json.dumps(timeline),
+            "Voiceover_Mode": "Yes",
+        }
+    }
+    clips = [
+        {"source": {"media_kind": "photo"}},
+        {"source": {"media_kind": "photo"}},
+    ]
+    frames, total = assign_clip_frames(
+        clips,
+        story=False,
+        effective={"voiceover_mode": "Yes", "voiceover_duration_seconds": 6.2},
+        request=request,
+        output=None,
+    )
+    assert frames[0] == 90
+    assert frames[1] == 96
+    assert total == 186
+
+
 def test_assign_clip_frames_trims_long_video_and_reserves_photo_floor():
     clips = [
         {"source": {"media_kind": "photo"}},
