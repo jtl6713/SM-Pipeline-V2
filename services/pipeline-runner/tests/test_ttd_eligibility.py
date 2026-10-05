@@ -250,3 +250,20 @@ def test_ttd1_has_no_internal_pending_draft_guard():
     assert "TIKTOK_DRAFT_SAFE_PENDING_LIMIT" not in source
     assert "pending_manual_share_count" not in source
     assert "pending-share safety limit reached" not in source
+
+
+def test_render_clip_photo_urls_preserves_stamped_order():
+    from ttd.assets import render_clip_photo_urls
+
+    record = {
+        "fields": {
+            "Render_Clip_List_JSON": (
+                '[{"url":"https://media.chicagoshining.com/a.jpg"},'
+                '{"src":"https://media.chicagoshining.com/b.jpg"}]'
+            )
+        }
+    }
+    assert render_clip_photo_urls(record) == [
+        "https://media.chicagoshining.com/a.jpg",
+        "https://media.chicagoshining.com/b.jpg",
+    ]
