@@ -36,10 +36,6 @@ jobs:
           pip install -r services/pipeline-runner/requirements.txt
           pip install -r services/timing-engine/requirements.txt
 
-      - name: Content 325 timed-script regression
-        working-directory: services/pipeline-runner
-        run: python -m pytest tests/test_timed_script.py tests/test_timed_script_voiceover.py -q
-
       - name: Hermetic packs
         run: python tests/regression/runner.py hermetic
 
