@@ -22,3 +22,10 @@
 - Production repairs require activation leases, operation/run budgets, exact allowlists, negative fixtures, deterministic cleanup, and an independent watchdog where scenario activation is involved.
 - Public publishing is denied by default during repair tests unless explicitly authorized for that test.
 - Never use a broad selector when an exact Platform Output / record address is available or can be added safely.
+
+## Quality Agent signature catalog
+
+- The Quality Agent must consult `docs/handoffs/Quality-Agent-Signatures.md` on every health/recovery scan.
+- Treat signature IDs in that catalog as durable operational contracts: check them proactively, not only after a row reaches Failed.
+- When a signature marks an automatic repair as safe, use the bounded repair described there and preserve authoritative media/order. If any safety precondition is missing, escalate rather than guessing.
+- Current signature: `QA-TT-DUPLICATE-SLIDES` detects the TikTok native-photo 2× linked-slide duplication pattern first observed on Platform Output 997.
