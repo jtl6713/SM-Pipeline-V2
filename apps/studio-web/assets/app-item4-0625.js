@@ -205,6 +205,7 @@
   let pipelineContentRecords = [];
   let pipelineScheduleGridRecords = [];
   let pipelineScheduleGridOpen = false;
+  let pipelineScheduleBlackoutHoursOpen = false;
   let pipelineScheduleGridAnchorDate = null;
   let pipelineScheduleGridLoadGeneration = 0;
   const PIPELINE_SCHEDULE_PLATFORM_KEYS = ["instagram", "facebook", "tiktok", "youtube"];
@@ -258,7 +259,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.493-ideas-vo-production-handoff";
+  const BUILD_ID = "item4-0.6.494-master-calendar-blackout-collapse";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -17750,6 +17751,15 @@
     });
   }
 
+  function bindPipelineScheduleBlackoutControls(target) {
+    target?.querySelectorAll?.("[data-pipeline-blackout-toggle]").forEach((button) => {
+      button.addEventListener("click", () => {
+        pipelineScheduleBlackoutHoursOpen = !pipelineScheduleBlackoutHoursOpen;
+        renderPipelineScheduleGrid(pipelineScheduleGridRecords);
+      });
+    });
+  }
+
   function pipelineScheduleHourLabel(hour) {
     const date = new Date(Date.UTC(2000, 0, 1, Number(hour) || 0, 0, 0, 0));
     return date.toLocaleTimeString(undefined, { timeZone: workingStudioTimeZone(), hour: "numeric" });
@@ -18079,7 +18089,7 @@
     if (summary) {
       summary.textContent = error
         ? `${total} scheduled in the loaded Pipeline rows · schedule service retrying · ${rangeLabel} · ${timezone}`
-        : `${total} scheduled output${total === 1 ? "" : "s"} · ${unscheduled.length} ready to schedule · ${rangeLabel} · ${timezone} · darker rows 8 PM–3:30 AM are off limits`;
+        : `${total} scheduled output${total === 1 ? "" : "s"} · ${unscheduled.length} ready to schedule · ${rangeLabel} · ${timezone} · blackout hours ${pipelineScheduleBlackoutHoursOpen ? "shown" : "collapsed"} (8 PM–3:30 AM, off limits)`;
     }
 
     const now = new Date();
@@ -18089,6 +18099,33 @@
       const sampleDay = windowValue.days[0];
       const sampleSlot = sampleDay ? helper.slotDate(sampleDay, slotIndex, workingStudioTimeZone()) : null;
       const rowBlackout = sampleSlot ? pipelineScheduleIsBlackout(sampleSlot.toISOString(), workingStudioTimeZone()) : false;
+      if (rowBlackout && !pipelineScheduleBlackoutHoursOpen) {
+        const previousSlot = slotIndex > 0 && sampleDay
+          ? helper.slotDate(sampleDay, slotIndex - 1, workingStudioTimeZone())
+          : null;
+        const startsCollapsedBand = slotIndex === 0
+          || !previousSlot
+          || !pipelineScheduleIsBlackout(previousSlot.toISOString(), workingStudioTimeZone());
+        if (!startsCollapsedBand) return "";
+        let bandEnd = slotIndex;
+        while (bandEnd + 1 < 48) {
+          const nextSlot = helper.slotDate(sampleDay, bandEnd + 1, workingStudioTimeZone());
+          if (!pipelineScheduleIsBlackout(nextSlot.toISOString(), workingStudioTimeZone())) break;
+          bandEnd += 1;
+        }
+        const hiddenSlots = Array.from({ length: bandEnd - slotIndex + 1 }, (_, offset) => slotIndex + offset);
+        const scheduledCount = hiddenSlots.reduce((sum, hiddenSlotIndex) => sum + windowValue.days.reduce((daySum, day) => {
+          const hiddenDate = helper.slotDate(day, hiddenSlotIndex, workingStudioTimeZone());
+          const hiddenKey = helper.slotKey(hiddenDate, workingStudioTimeZone());
+          return daySum + Number(cells.get(hiddenKey)?.total || 0);
+        }, 0), 0);
+        const bandLabel = `${pipelineScheduleSlotLabel(slotIndex)}–${pipelineScheduleSlotLabel(bandEnd)}`;
+        const auditLabel = scheduledCount
+          ? `${scheduledCount} scheduled item${scheduledCount === 1 ? "" : "s"} — expand to review`
+          : "Nothing scheduled";
+        const bandClass = scheduledCount ? " has-scheduled" : "";
+        return `<tr class="pipeline-schedule-blackout-band${bandClass}"><th scope="row" class="pipeline-schedule-blackout-band-label">Blackout</th><td colspan="${windowValue.days.length}"><button type="button" class="pipeline-schedule-blackout-toggle" data-pipeline-blackout-toggle aria-expanded="false" title="Expand the off-limits hours to audit scheduled items"><span aria-hidden="true">▶</span><strong>${escapeHtml(bandLabel)} hidden</strong><span>${escapeHtml(auditLabel)}</span></button></td></tr>`;
+      }
       const cellsHtml = windowValue.days.map((day) => {
         const date = helper.slotDate(day, slotIndex, workingStudioTimeZone());
         const key = helper.slotKey(date, workingStudioTimeZone());
@@ -18115,10 +18152,11 @@
       return `<tr${rowBlackout ? ' class="is-blackout-row"' : ""}><th scope="row" class="pipeline-schedule-hour${rowBlackout ? " is-blackout" : ""}"${rowBlackout ? ' title="Off limits: 8:00 PM–3:30 AM local"' : ""}>${escapeHtml(pipelineScheduleSlotLabel(slotIndex))}</th>${cellsHtml}</tr>`;
     }).join("");
 
-    const windowToolbar = `<div class="pipeline-schedule-window-toolbar" aria-label="Calendar date range controls"><div class="pipeline-schedule-window-controls"><button type="button" class="secondary-button" data-pipeline-schedule-window-shift="-7">← Previous 7 days</button><button type="button" class="text-button" data-pipeline-schedule-window-today${pipelineScheduleWindowStartsToday(windowValue) ? ' disabled aria-current="date"' : ""}>Today</button><button type="button" class="secondary-button" data-pipeline-schedule-window-shift="7">Next 7 days →</button></div><strong class="pipeline-schedule-window-range">${escapeHtml(rangeLabel)}</strong><span class="pipeline-schedule-window-hint">Select a bubble, change the 7-day window if needed, then click its destination slot. Darker shaded hours (8:00 PM–3:30 AM local) are off limits.</span></div>`;
+    const windowToolbar = `<div class="pipeline-schedule-window-toolbar" aria-label="Calendar date range controls"><div class="pipeline-schedule-window-controls"><button type="button" class="secondary-button" data-pipeline-schedule-window-shift="-7">← Previous 7 days</button><button type="button" class="text-button" data-pipeline-schedule-window-today${pipelineScheduleWindowStartsToday(windowValue) ? ' disabled aria-current="date"' : ""}>Today</button><button type="button" class="secondary-button" data-pipeline-schedule-window-shift="7">Next 7 days →</button><button type="button" class="secondary-button" data-pipeline-blackout-toggle aria-expanded="${pipelineScheduleBlackoutHoursOpen ? "true" : "false"}">${pipelineScheduleBlackoutHoursOpen ? "Hide blackout hours" : "Show blackout hours"}</button></div><strong class="pipeline-schedule-window-range">${escapeHtml(rangeLabel)}</strong><span class="pipeline-schedule-window-hint">Select a bubble, change the 7-day window if needed, then click its destination slot. Blackout hours (8:00 PM–3:30 AM local) are collapsed by default; expand them any time to verify nothing is scheduled there.</span></div>`;
     const tray = `<section class="pipeline-schedule-unscheduled" aria-label="Ready to schedule"><div class="pipeline-schedule-unscheduled-copy"><strong>Ready to schedule</strong><span>Outputs stay here until a schedule is saved. Use default schedules can fill intelligent row suggestions without removing them from this tray, or drag a bubble directly into a 30-minute slot.</span></div><div class="pipeline-schedule-unscheduled-list">${unscheduled.length ? unscheduled.map((record) => pipelineScheduleEntryMarkup(record, { unscheduled: true })).join("") : '<span class="subtle">No ready outputs are waiting for a saved schedule.</span>'}</div></section>`;
     target.innerHTML = `${windowToolbar}${tray}<div class="pipeline-schedule-grid-scroll"><table class="pipeline-schedule-grid-table"><thead><tr><th class="pipeline-hour-head" scope="col">Time</th>${head}</tr></thead><tbody>${rows}</tbody></table></div>`;
     bindPipelineScheduleGridWindowControls(target);
+    bindPipelineScheduleBlackoutControls(target);
     bindPipelineScheduleGridInteractions(target);
     syncPipelineScheduleSelectionVisual(target);
 
