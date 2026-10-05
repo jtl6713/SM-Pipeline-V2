@@ -93,6 +93,14 @@
   object-position:center !important;
   display:block !important;
 }
+
+.studio-global-watermark{
+  display:block !important;
+  visibility:visible !important;
+  opacity:1 !important;
+  filter:none !important;
+  flex:0 0 42px !important;
+}
 .brand-studio-copy{display:grid !important;gap:1px !important}
 .brand-studio-copy .brand-name{font-size:1rem !important}
 @media(max-width:760px){
