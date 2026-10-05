@@ -106,3 +106,6 @@ jobs:
 # Trigger pipeline-runner deploy for continuous photo voiceover timing fix (Content 322/325)
 # Source merge 65ac1dad198cd627163730880125be6fe0f35338
 # 2026-10-05
+
+# Trigger verified redeploy for Content 325 continuous-voiceover repair
+# 2026-10-05T04:35:00Z
