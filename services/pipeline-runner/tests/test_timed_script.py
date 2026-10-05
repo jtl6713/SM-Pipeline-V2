@@ -4,7 +4,7 @@ from urllib.parse import quote
 from r4.render_request import choose_render_request
 from studio_produce.shared_render import build_shared_render_plan, render_equivalence_key
 from studio_produce.stamp import source_package, stamp_fields
-from studio_produce.steps import apply_voiceover_script, exact_requested_script
+from studio_produce.steps import apply_voiceover_script, ensure_slide_voiceover_timeline, exact_requested_script
 from studio_produce.timed_script import (
     assign_stills_in_order,
     directive_line,
@@ -490,3 +490,101 @@ def test_theme_generation_does_not_replace_a_locked_timed_script():
     )
     assert client.writes == []
     assert parent["fields"]["Voiceover_Script"] == "Exact subway narration."
+
+
+def test_continuous_eight_word_voiceover_across_twelve_photos_stays_continuous():
+    """Regression for Content 325: ordinary narration must not become one word per still."""
+    class Client:
+        def __init__(self):
+            self.writes = []
+
+        def update_record(self, table, record_id, fields, typecast=False):
+            self.writes.append((table, record_id, fields, typecast))
+
+    script = "These architectural eyebrows do more than look stylish."
+    request = _photo_request("[render-settings] preset=auto; beat_sync=on", count=12)
+    request["fields"]["Voiceover_Mode"] = "Yes"
+    parent = {
+        "id": "recParent325",
+        "fields": {
+            "Voiceover_Script": script,
+            "Voiceover_Status": "Ready",
+            "Voiceover_URL": "",
+        },
+    }
+    client = Client()
+
+    ensure_slide_voiceover_timeline(
+        client,
+        request,
+        parent,
+        {"voiceover_script": script},
+        total=12,
+    )
+
+    assert "[timed-script]" not in request["fields"]["Production_Notes"]
+    assert client.writes == []
+
+
+def test_auto_slide_voiceover_timeline_is_removed_when_narration_is_not_explicit_per_slide():
+    """Stale auto timing must not keep word/silence segmentation alive on retries."""
+    from studio_produce.timed_script import timeline_from_slide_lines
+
+    class Client:
+        def __init__(self):
+            self.writes = []
+
+        def update_record(self, table, record_id, fields, typecast=False):
+            self.writes.append((table, record_id, fields, typecast))
+
+    script = "These architectural eyebrows do more than look stylish."
+    assets = [{"id": f"still-{index}", "order": index} for index in range(1, 13)]
+    auto_lines = [
+        {"line": word, "silent": False}
+        for word in script.rstrip(".").split()
+    ] + [
+        {"line": "", "silent": True, "hold_seconds": 2.5}
+        for _ in range(4)
+    ]
+    auto_timeline = timeline_from_slide_lines(auto_lines, assets)
+    assert auto_timeline["source"] == "slide_voiceover"
+
+    request = _photo_request(directive_line(auto_timeline), count=12)
+    request["fields"]["Voiceover_Mode"] = "Yes"
+    parent = {
+        "id": "recParent325",
+        "fields": {
+            "Voiceover_Script": script,
+            "Voiceover_Status": "Ready",
+            "Voiceover_URL": "",
+        },
+    }
+    client = Client()
+
+    ensure_slide_voiceover_timeline(
+        client,
+        request,
+        parent,
+        {"voiceover_script": script},
+        total=12,
+    )
+
+    assert "[timed-script]" not in request["fields"]["Production_Notes"]
+    assert len(client.writes) == 1
+    assert "[timed-script]" not in client.writes[0][2]["Production_Notes"]
+
+
+def test_measured_auto_slide_timeline_preserves_source_marker():
+    from studio_produce.timed_script import apply_measured_durations, timeline_from_slide_lines
+
+    planned = timeline_from_slide_lines(
+        [
+            {"line": "First continuous phrase.", "silent": False},
+            {"line": "Second continuous phrase.", "silent": False},
+        ],
+        [{"id": "still-1", "order": 1}, {"id": "still-2", "order": 2}],
+    )
+    assert planned["source"] == "slide_voiceover"
+    measured = apply_measured_durations(planned, [2.1, 2.4])
+    assert measured is not None
+    assert measured["source"] == "slide_voiceover"
