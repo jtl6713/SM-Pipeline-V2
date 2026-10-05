@@ -19,3 +19,4 @@ Deploy UI 0.6.490 ideas VO timeline advances to Production Approve with timeline
 Deploy UI 0.6.491 schedule blackout shade. Calendar hours 8PM–3:30AM local render darker as off limits.
 Deploy UI 0.6.492 iPad production workspace layout.
 Deploy UI 0.6.493 ideas VO production handoff. Open Rendering with the attached voiceover timeline instead of Media photos only.
+Retry deploy UI 0.6.494 ideas VO handoff live. Custom-domain cache purge failed after #514 so studio.chicagoshining.com could keep 0.6.492.
