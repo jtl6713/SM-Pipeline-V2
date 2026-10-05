@@ -11,6 +11,7 @@ from airtable.constants import PLATFORM_OUTPUTS_TABLE
 from asset.helpers import parse_int
 from carousel.timeutil import iso_utc, stamp_minutes
 from item4.settings import PipelineSettings
+from quality_agent.signatures import detect_tiktok_duplicate_slides
 from render.fields import field, field_str
 from ap0.eligibility import asset_plan
 from ap0.public_mp4 import ensure_public_mp4_url, is_public_publish_url
@@ -126,6 +127,14 @@ def process_request(
         # expected number of public assets.
         if expected is not None and actual != expected:
             stamped_urls = render_clip_photo_urls(output)
+            signature = detect_tiktok_duplicate_slides(
+                actual=actual,
+                expected=expected,
+                stamped_urls=stamped_urls,
+            )
+            if signature:
+                result["quality_signature"] = signature["id"]
+                result["quality_signature_details"] = signature
             if (
                 len(stamped_urls) == expected
                 and 0 < len(stamped_urls) <= max_photos
@@ -168,8 +177,13 @@ def process_request(
                 "Image_Count": actual,
                 "Output_Notes": append_note(
                     output,
-                    f"TTD0 v1.2.4 prepared {actual} ordered 9:16 TikTok photo asset(s) "
-                    f"and stored a stable quoted JSON string array at {stamp_minutes()}.",
+                    (
+                        f"{result.get('quality_signature')} recognized and auto-recovered; "
+                        if result.get("quality_signature")
+                        else ""
+                    )
+                    + f"TTD0 v1.2.4 prepared {actual} ordered 9:16 TikTok photo asset(s) "
+                    + f"and stored a stable quoted JSON string array at {stamp_minutes()}.",
                 ),
                 "Publish_Status": PUBLISH_STATUS_READY,
                 "TikTok_Draft_Type": draft_type_for_photos(actual),
