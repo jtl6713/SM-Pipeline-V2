@@ -65,6 +65,21 @@ test("Platform Outputs expose a save-only calendar workflow", () => {
   assert.doesNotMatch(app, /data-platform-calendar-slot[\s\S]{0,500}api\(/);
 });
 
+test("schedule calendars shade overnight blackout hours as off limits", () => {
+  const app = fs.readFileSync(path.join(here, "assets", "app-item4-0625.js"), "utf8");
+  const css = fs.readFileSync(path.join(here, "assets", "styles-phase7-0621.css"), "utf8");
+  const html = fs.readFileSync(path.join(here, "index.html"), "utf8");
+  assert.match(app, /isBlackout \? "is-blackout"/);
+  assert.match(app, /is-blackout-row/);
+  assert.match(app, /Off limits: 8:00 PM–3:30 AM local/);
+  assert.match(app, /save\.disabled = past \|\| blackout/);
+  assert.match(app, /interactive = !isPast && !isBlackout/);
+  assert.match(css, /\.pipeline-schedule-cell\.is-blackout/);
+  assert.match(css, /\.platform-calendar-slot-button\.is-blackout/);
+  assert.match(css, /rgba\(15, 23, 42, \.14\)/);
+  assert.match(html, /Darker shaded hours \(8:00 PM–3:30 AM local\) are off limits/);
+});
+
 
 test("publish status labels follow schedule state", () => {
   const app = fs.readFileSync(path.join(here, "assets", "app-item4-0625.js"), "utf8");
