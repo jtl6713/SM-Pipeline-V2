@@ -232,7 +232,8 @@ def test_assign_stills_matches_suggested_names_and_ignores_extras():
     )
     assert package is not None
     stamped = json.loads(package["render_clip_list_json"])
-    assert [clip["source_asset_id"] for clip in stamped] == ["still-2", "still-3"]
+    assert [clip["assetName"] for clip in stamped] == ["Upper West Side 19.jpg", "Upper West Side 1.jpg"]
+    assert [clip["mediaAssetRecordId"] for clip in stamped] == ["recSTILL0000002", "recSTILL0000003"]
     assert package["clip_count"] == 2
     assert [clip["durationFrames"] for clip in stamped] == [180, 180]
 
