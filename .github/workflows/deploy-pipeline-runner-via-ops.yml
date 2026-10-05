@@ -115,3 +115,6 @@ jobs:
 
 # Trigger pipeline-runner deploy for timed-script Apply remasure + Subway Etiquette CI 320
 # 2026-10-05T04:50:00Z service_version=2026-10-03-timed-script-vo-driven
+
+# Trigger pipeline-runner deploy for stale slide-timing tail restoration (Content 322/323)
+# 2026-10-05T05:05:00Z
