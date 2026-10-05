@@ -155,7 +155,7 @@ test("existing blackout stamps are not reused", () => {
 test("Worker stamp paths use MAE not industry evening windows", () => {
   assert.match(worker, /from "\.\/mae-schedule\.mjs"/);
   assert.match(worker, /studio_mae_schedule_v1: true/);
-  assert.match(worker, /0\.10\.445-ideas-vo-approve/);
+  assert.match(worker, /0\.10\.446-timed-script-apply-remeasure/);
   assert.match(worker, /MAE_PRIORITY_SCHEDULE_WINDOWS/);
   assert.doesNotMatch(
     worker.slice(worker.indexOf("function studioBuildSuggestedScheduleMap")),
