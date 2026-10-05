@@ -257,7 +257,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.484-schedule-platform-occupancy";
+  const BUILD_ID = "item4-0.6.485-library-select-none";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -11721,6 +11721,8 @@
   function syncIdeaLibraryContinue() {
     const button = $("ideaLibraryContinueButton");
     if (button) button.disabled = ideaLibrarySelected.size < 1;
+    const selectNone = $("ideaLibrarySelectNone");
+    if (selectNone) selectNone.checked = ideaLibrarySelected.size === 0;
   }
 
   function renderIdeaLibraryPicker() {
@@ -12235,6 +12237,18 @@
         button.disabled = false;
       }
     }
+  });
+
+  $("ideaLibrarySelectNone")?.addEventListener("change", (event) => {
+    if (!event.target.checked) {
+      // This control is an action/state indicator, not an inverse "select all".
+      // Unchecking it while already empty should not select anything.
+      if (ideaLibrarySelected.size === 0) event.target.checked = true;
+      return;
+    }
+    ideaLibraryPickerTouched = true;
+    ideaLibrarySelected.clear();
+    renderIdeaLibraryPicker();
   });
 
   $("ideaLibraryGrid")?.addEventListener("click", (event) => {
