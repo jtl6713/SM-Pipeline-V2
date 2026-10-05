@@ -127,3 +127,6 @@ jobs:
 
 # Trigger pipeline-runner deploy for TikTok duplicate-slide recovery (Output 997)
 # 2026-10-05T12:10:00Z
+
+# Trigger pipeline-runner deploy for Quality Agent signature QA-TT-DUPLICATE-SLIDES
+# 2026-10-05T12:20:00Z
