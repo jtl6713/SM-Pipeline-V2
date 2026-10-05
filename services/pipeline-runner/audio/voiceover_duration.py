@@ -9,7 +9,7 @@ from typing import Any
 from audio.leading_silence import _probe_duration
 from render.fields import field, field_str, parse_json_field
 
-DEFAULT_VOICEOVER_TAIL_SECONDS = 2.0
+DEFAULT_VOICEOVER_TAIL_SECONDS = 0.0
 DURATION_EPSILON_SECONDS = 0.05
 MIN_VOICEOVER_SECONDS = 4.0
 
@@ -145,12 +145,10 @@ def voiceover_exceeds_video(
     video_seconds: float,
     tail_seconds: float = 0.0,
 ) -> bool:
+    del tail_seconds  # Stored tail is not part of the clock.
     cap = max(0.0, float(video_seconds))
     spoken = max(0.0, float(voiceover_seconds))
-    tail = max(0.0, float(tail_seconds))
-    if spoken > cap + DURATION_EPSILON_SECONDS:
-        return True
-    return spoken + tail > cap + DURATION_EPSILON_SECONDS
+    return spoken > cap + DURATION_EPSILON_SECONDS
 
 
 def voiceover_exceeds_video_message(

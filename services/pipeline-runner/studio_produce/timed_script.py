@@ -29,6 +29,9 @@ MAX_SPEECH_RATE = 1.2
 MIN_SPEECH_RATE = 0.7
 MIN_SCENE_SECONDS = 1.0
 BOUNDARY_EPSILON_SECONDS = 0.05
+SLIDE_VOICEOVER_SOURCE = "slide_voiceover"
+DEFAULT_SILENT_HOLD_SECONDS = 2.5
+MAX_SILENT_HOLD_SECONDS = 8.0
 
 _TIMED_SCRIPT_RE = re.compile(r"(?:^|\n)\[timed-script\]\s*([^\n]*)", re.I)
 _RANGE_RE = re.compile(
@@ -221,17 +224,37 @@ def build_timeline(segments: list[dict[str, Any]]) -> dict[str, Any]:
             rate = 1.0
         rate = min(MAX_SPEECH_RATE, max(MIN_SPEECH_RATE, rate))
         asset_id = str(raw.get("asset_id") or "").strip()
+        voiceover_text = _strip_wrapping_quotes(str(raw.get("voiceover_text") or ""))
+        silent = bool(raw.get("silent")) or not voiceover_text
+        try:
+            hold = float(raw.get("hold_seconds") or 0)
+        except (TypeError, ValueError):
+            hold = 0.0
+        if silent:
+            voiceover_text = ""
+            if hold <= 0:
+                hold = end - start if end > start else DEFAULT_SILENT_HOLD_SECONDS
+            hold = min(MAX_SILENT_HOLD_SECONDS, max(MIN_SCENE_SECONDS, hold))
         segment = {
             "index": index,
             "start_seconds": _round_seconds(start),
             "end_seconds": _round_seconds(end),
             "duration_seconds": _round_seconds(end - start),
-            "voiceover_text": _strip_wrapping_quotes(str(raw.get("voiceover_text") or "")),
+            "voiceover_text": voiceover_text,
             "suggested_visual": str(raw.get("suggested_visual") or "").strip(),
             "asset_id": asset_id,
             "speech_rate": _round_seconds(rate),
             "force_exact_voiceover": True,
+            "silent": silent,
         }
+        if silent:
+            segment["hold_seconds"] = _round_seconds(hold)
+        measured = raw.get("measured_voiceover_seconds")
+        if measured not in (None, ""):
+            try:
+                segment["measured_voiceover_seconds"] = _round_seconds(float(measured))
+            except (TypeError, ValueError):
+                pass
         cleaned.append(segment)
     timeline["segments"] = cleaned
     timeline["duration_seconds"] = _round_seconds(max((segment["end_seconds"] for segment in cleaned), default=0))
@@ -325,6 +348,8 @@ def normalize_timeline(raw: Any) -> dict[str, Any] | None:
     timeline = build_timeline(segments)
     if not timeline["segments"]:
         return None
+    if str(raw.get("source") or "").strip() == SLIDE_VOICEOVER_SOURCE:
+        timeline["source"] = SLIDE_VOICEOVER_SOURCE
     return timeline
 
 
@@ -456,6 +481,140 @@ def suggested_visuals(timeline: dict[str, Any] | None) -> list[str]:
         for segment in timeline.get("segments") or []
         if isinstance(segment, dict)
     ]
+
+
+def _even_groups(items: list[str], count: int) -> list[list[str]]:
+    groups: list[list[str]] = [[] for _ in range(count)]
+    total = len(items)
+    if total <= 0 or count <= 0:
+        return groups
+    for index, item in enumerate(items):
+        bucket = min(count - 1, index * count // total)
+        groups[bucket].append(item)
+    return groups
+
+
+def chunk_script_across_slides(script: str, count: int) -> list[dict[str, Any]]:
+    """Split one narration blob into one line per still.
+
+    Explicit per-slide lines are preferred. This is the fallback when a photo
+    reel only has a single script.
+    """
+    slide_count = max(0, int(count))
+    text = " ".join(str(script or "").split())
+    if slide_count <= 0:
+        return []
+    if not text:
+        return [
+            {"line": "", "hold_seconds": DEFAULT_SILENT_HOLD_SECONDS, "silent": True}
+            for _ in range(slide_count)
+        ]
+    sentences = [part.strip() for part in re.split(r"(?<=[.!?])\s+", text) if part.strip()]
+    pieces = sentences if len(sentences) >= slide_count else text.split()
+    if not pieces:
+        pieces = [text]
+    lines: list[dict[str, Any]] = []
+    for group in _even_groups(pieces, slide_count):
+        line = " ".join(group).strip()
+        if line:
+            lines.append({"line": line, "hold_seconds": 0.0, "silent": False})
+        else:
+            lines.append({
+                "line": "",
+                "hold_seconds": DEFAULT_SILENT_HOLD_SECONDS,
+                "silent": True,
+            })
+    return lines
+
+
+def slide_lines_from_themes(themes: dict[str, Any] | None, count: int) -> list[dict[str, Any]]:
+    """Read one spoken line or an explicit silent hold for each finished slide."""
+    slide_count = max(0, int(count))
+    raw = (themes or {}).get("slide_voiceovers") if isinstance(themes, dict) else None
+    if isinstance(raw, list) and slide_count > 0 and len(raw) == slide_count:
+        lines: list[dict[str, Any]] = []
+        for item in raw:
+            if isinstance(item, str):
+                text = item.strip()
+                lines.append({
+                    "line": text,
+                    "hold_seconds": 0.0 if text else DEFAULT_SILENT_HOLD_SECONDS,
+                    "silent": not text,
+                })
+                continue
+            if not isinstance(item, dict):
+                lines.append({
+                    "line": "",
+                    "hold_seconds": DEFAULT_SILENT_HOLD_SECONDS,
+                    "silent": True,
+                })
+                continue
+            text = str(item.get("line") or item.get("voiceover_text") or "").strip()
+            try:
+                hold = float(item.get("hold_seconds") or 0)
+            except (TypeError, ValueError):
+                hold = 0.0
+            silent = not text or bool(item.get("silent"))
+            if silent and hold <= 0:
+                hold = DEFAULT_SILENT_HOLD_SECONDS
+            lines.append({
+                "line": "" if silent else text,
+                "hold_seconds": hold if silent else 0.0,
+                "silent": silent,
+            })
+        return lines
+    script = str((themes or {}).get("voiceover_script") or "").strip() if isinstance(themes, dict) else ""
+    if script and slide_count > 0:
+        return chunk_script_across_slides(script, slide_count)
+    return []
+
+
+def timeline_from_slide_lines(
+    lines: list[dict[str, Any]],
+    assets: list[dict[str, Any]] | None = None,
+) -> dict[str, Any] | None:
+    """Planning windows only. P2 replaces spoken windows with measured audio."""
+    rows = [line for line in lines or [] if isinstance(line, dict)]
+    if not rows:
+        return None
+    ordered = sorted(
+        [asset for asset in assets or [] if isinstance(asset, dict)],
+        key=lambda asset: int(asset.get("order") or 0),
+    )
+    raw_segments: list[dict[str, Any]] = []
+    cursor = 0.0
+    for index, line in enumerate(rows):
+        text = str(line.get("line") or line.get("voiceover_text") or "").strip()
+        silent = bool(line.get("silent")) or not text
+        if silent:
+            try:
+                seconds = float(line.get("hold_seconds") or 0)
+            except (TypeError, ValueError):
+                seconds = 0.0
+            if seconds <= 0:
+                seconds = DEFAULT_SILENT_HOLD_SECONDS
+            seconds = min(MAX_SILENT_HOLD_SECONDS, max(MIN_SCENE_SECONDS, seconds))
+            text = ""
+        else:
+            seconds = max(MIN_SCENE_SECONDS, estimate_narration_seconds(text))
+        asset = ordered[index] if index < len(ordered) else {}
+        asset_id = str(asset.get("id") or asset.get("media_asset_record_id") or "").strip()
+        raw_segments.append({
+            "start_seconds": cursor,
+            "end_seconds": cursor + seconds,
+            "voiceover_text": text,
+            "suggested_visual": str(asset.get("caption") or "").strip(),
+            "asset_id": asset_id,
+            "speech_rate": 1.0,
+            "silent": silent,
+            "hold_seconds": seconds if silent else 0.0,
+        })
+        cursor += seconds
+    timeline = build_timeline(raw_segments)
+    if not timeline.get("segments"):
+        return None
+    timeline["source"] = SLIDE_VOICEOVER_SOURCE
+    return timeline
 
 
 def assign_stills_in_order(timeline: dict[str, Any], assets: list[dict[str, Any]]) -> dict[str, Any]:

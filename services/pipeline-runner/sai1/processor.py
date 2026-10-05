@@ -22,9 +22,26 @@ def _normalize_themes(parsed: dict[str, Any], *, needed: int) -> dict[str, Any]:
         slides.append({"caption": caption, "image_prompt": image_prompt})
     if needed > 0:
         slides = slides[:needed]
+    voiceovers_in = parsed.get("slide_voiceovers") if isinstance(parsed.get("slide_voiceovers"), list) else []
+    slide_voiceovers: list[dict[str, Any]] = []
+    for item in voiceovers_in:
+        if isinstance(item, str):
+            slide_voiceovers.append({"line": item.strip(), "hold_seconds": 0})
+            continue
+        if not isinstance(item, dict):
+            continue
+        line = str(item.get("line") or item.get("voiceover_text") or "").strip()
+        try:
+            hold = float(item.get("hold_seconds") or 0)
+        except (TypeError, ValueError):
+            hold = 0.0
+        slide_voiceovers.append({"line": line, "hold_seconds": hold if not line else 0})
+    joined = " ".join(row["line"] for row in slide_voiceovers if row.get("line")).strip()
+    script = joined or str(parsed.get("voiceover_script") or "").strip()
     return {
         "slides": slides,
-        "voiceover_script": str(parsed.get("voiceover_script") or "").strip(),
+        "slide_voiceovers": slide_voiceovers,
+        "voiceover_script": script,
         "post_caption": str(parsed.get("post_caption") or "").strip(),
         "hashtags": str(parsed.get("hashtags") or "").strip(),
     }

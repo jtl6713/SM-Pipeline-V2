@@ -107,8 +107,6 @@ import {
 import { promotedContentOwner } from "./promotion-owner.mjs";
 import {
   AUTONOMOUS_DEFAULT_MUSIC_ASSET_ID,
-  AUTONOMOUS_DEFAULT_VIDEO_SECONDS,
-  AUTONOMOUS_DEFAULT_VOICEOVER_TAIL_SECONDS,
   AUTONOMOUS_IDEA_CREATED_FIELD,
   AUTONOMOUS_RELATED_STILL_MIN,
   AUTONOMOUS_NEWS_FEEDS,
@@ -117,7 +115,6 @@ import {
   autonomousYoutubeQueriesForTheme,
   filterAutonomousOccupiedForProfile,
   autonomousDefaultVoiceoverSeconds,
-  autonomousDefaultVoiceoverTailSeconds,
   autonomousIdeaConflictsOccupied,
   autonomousInWindow,
   autonomousIncomingMediaIds,
@@ -462,7 +459,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.439-voiceover-min-4s",
+          version: "0.10.440-voiceover-drives-timing",
           studio_desk_inventory_v1: true,
           studio_desk_activity_v1: true,
           studio_tiktok_complete_v1: true,
@@ -13419,8 +13416,7 @@ async function cleanProductionRequestPayload(payload, env) {
     voiceoverDurationSeconds = 4;
   }
   const musicStartSeconds = nullableNumber(payload?.music_start_seconds, 0, 3600, "Music start");
-  let voiceoverTailSeconds = nullableNumber(payload?.voiceover_tail_seconds, 0, 300, "Voiceover tail");
-  voiceoverTailSeconds = autonomousDefaultVoiceoverTailSeconds(voiceoverTailSeconds);
+  const voiceoverTailSeconds = 0;
 
   let videoClipCountExact = nullableInt(payload?.video_clip_count_exact, 1, 60, "Exact video clip count");
   let videoClipCountMin = nullableInt(payload?.video_clip_count_min, 1, 60, "Minimum video clip count");
@@ -13590,9 +13586,13 @@ function productionRequestDefaultsFromIdea(idea) {
     voiceover_mode: String(f(idea, "Production_Include_Voiceover") || "Yes").trim() || "Yes",
     background_music_mode: String(f(idea, "Production_Include_Background_Music") || "Yes").trim() || "Yes",
     thumbnail_mode: String(f(idea, "Production_Include_Thumbnail") || "Yes").trim() || "Yes",
-    video_duration_seconds: f(idea, "Production_Video_Duration") || 30,
-    voiceover_duration_seconds: f(idea, "Voiceover_Duration_Seconds")
-      ?? autonomousDefaultVoiceoverSeconds(f(idea, "Production_Video_Duration") || 30),
+    video_duration_seconds: ["Photo Set", "Carousel", "Feed Post"].includes(String(f(idea, "Production_Content_Type") || "").trim())
+      ? null
+      : (f(idea, "Production_Video_Duration") || 30),
+    voiceover_duration_seconds: ["Photo Set", "Carousel", "Feed Post"].includes(String(f(idea, "Production_Content_Type") || "").trim())
+      ? null
+      : (f(idea, "Voiceover_Duration_Seconds")
+      ?? autonomousDefaultVoiceoverSeconds(f(idea, "Production_Video_Duration") || 30)),
     music_start_seconds: f(idea, "Music_Start_Seconds") ?? 0,
     video_clip_count_mode: f(idea, "Production_Video_Clip_Count") ? "Exact" : "AI decides",
     video_clip_count_exact: f(idea, "Production_Video_Clip_Count") || null,
@@ -13604,7 +13604,7 @@ function productionRequestDefaultsFromIdea(idea) {
     carousel_slide_count_min: f(idea, "Production_Carousel_Slide_Count_Min") || null,
     carousel_slide_count_max: f(idea, "Production_Carousel_Slide_Count_Max") || null,
     carousel_image_mode: String(f(idea, "Production_Carousel_Image_Mode") || "Make AI Generated").trim() || "Make AI Generated",
-    voiceover_tail_seconds: autonomousDefaultVoiceoverTailSeconds(f(idea, "Voiceover_Tail_Seconds")),
+    voiceover_tail_seconds: 0,
     selected_music_asset_id: null,
     voice_id: null,
     voice_name: null,
@@ -14558,7 +14558,7 @@ function promotionInputFromProductionRequest(record) {
     include_thumbnail: promotionThumbnailTriState(f(record, "Thumbnail_Mode")),
     video_duration: f(record, "Video_Duration_Seconds") ?? 30,
     video_clip_count: videoMode === "Exact" ? f(record, "Video_Clip_Count_Exact") : "Auto",
-    voiceover_tail_seconds: autonomousDefaultVoiceoverTailSeconds(f(record, "Voiceover_Tail_Seconds")),
+    voiceover_tail_seconds: 0,
     carousel_slide_count: carouselMode === "Exact" ? f(record, "Carousel_Slide_Count_Exact") : 5,
     carousel_image_mode: String(f(record, "Carousel_Image_Mode") || "Make AI Generated"),
     production_notes: String(f(record, "Production_Notes") || "").trim(),
@@ -15281,15 +15281,7 @@ async function buildOutputWorkItemEffective(env, outputRow, requestRecord, paren
       "Voiceover_Duration_Seconds",
       requestRecord,
       "Voiceover_Duration_Seconds",
-      Number(f(parentContentItem, "Voiceover_Duration_Seconds") || 0) || autonomousDefaultVoiceoverSeconds(
-        outputEffectiveNumber(
-          outputRow,
-          "Video_Duration_Seconds_Override",
-          requestRecord,
-          "Video_Duration_Seconds",
-          profileDefaults.default_duration
-        )
-      )
+      Number(f(parentContentItem, "Voiceover_Duration_Seconds") || 0) || 0
     ),
     music_start_seconds: outputEffectiveNumber(
       outputRow,
@@ -15303,7 +15295,7 @@ async function buildOutputWorkItemEffective(env, outputRow, requestRecord, paren
       "Voiceover_Tail_Seconds_Override",
       requestRecord,
       "Voiceover_Tail_Seconds",
-      Number(f(parentContentItem, "Voiceover_Tail_Seconds") || 2)
+      Number(f(parentContentItem, "Voiceover_Tail_Seconds") || 0)
     ),
 
     video_clip_count_mode: videoMode,
@@ -26308,8 +26300,7 @@ async function phase6BuildPreviewRenderPackage(env, outputRecord) {
   const settings = mapped.creative_settings || {};
   const globalVoiceoverVolume = phase6Clamp(mapped?.voiceover?.volume, 0, 1.25, 1);
   const defaultDuration = phase6Clamp(settings.default_slide_duration_seconds, 0.5, 60, 4);
-  const tailSeconds = phase6Clamp(mapped.voiceover_tail_seconds, 0, 10, 2);
-  const anyVoiceover = slides.some(slide => slide?.voiceover?.enabled !== false && phase6Text(slide?.voiceover?.text, 5000));
+  const tailSeconds = 0;
   const missingVoiceovers = [];
   const clips = [];
 
@@ -26326,8 +26317,7 @@ async function phase6BuildPreviewRenderPackage(env, outputRecord) {
     const measuredFrames = voiceEnabled
       ? Math.max(1, Math.ceil(phase6Number(slide.voiceover.duration_seconds, 0) * 30))
       : 1;
-    let durationFrames = Math.max(requestedFrames, measuredFrames);
-    if (i === slides.length - 1 && anyVoiceover) durationFrames += Math.round(tailSeconds * 30);
+    let durationFrames = voiceEnabled ? measuredFrames : requestedFrames;
 
     const url = slide.preview_url;
     if (!url) throw new HttpError(409, `Slide ${slide.name || slide.id} has no usable image URL for preview rerender`);
@@ -37537,9 +37527,9 @@ async function executeStudioAutonomousProduce(env, ctx, options = {}) {
     voiceover_mode: "Yes",
     background_music_mode: "Yes",
     thumbnail_mode: "Yes",
-    video_duration_seconds: AUTONOMOUS_DEFAULT_VIDEO_SECONDS,
-    voiceover_duration_seconds: autonomousDefaultVoiceoverSeconds(AUTONOMOUS_DEFAULT_VIDEO_SECONDS),
-    voiceover_tail_seconds: AUTONOMOUS_DEFAULT_VOICEOVER_TAIL_SECONDS,
+    video_duration_seconds: null,
+    voiceover_duration_seconds: null,
+    voiceover_tail_seconds: 0,
     music_start_seconds: 0,
     selected_music_asset_id: musicAssetId,
     voice_id: narration.voice_id || PHASE6_DEFAULT_VOICE_ID,

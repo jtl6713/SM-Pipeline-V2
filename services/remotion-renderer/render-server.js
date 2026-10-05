@@ -13,7 +13,7 @@ const app = express();
 
 const PORT = Number(process.env.PORT || 3333);
 const DEFAULT_FPS = 30;
-const DEFAULT_VOICEOVER_TAIL_SECONDS = 2;
+const DEFAULT_VOICEOVER_TAIL_SECONDS = 0;
 const DEFAULT_MUSIC_BOOST_DELTA = 0.05;
 const DEFAULT_MUSIC_BOOST_FADE_SECONDS = 0.5;
 const DEFAULT_MUSIC_END_FADE_SECONDS = 0.5;
@@ -1029,14 +1029,10 @@ async function buildRewrittenProps({ body, jobId, job }) {
             job
         );
 
-        effectiveTailSeconds = clamp(
-            toFiniteNumber(
-                body.voiceoverTailSeconds,
-                DEFAULT_VOICEOVER_TAIL_SECONDS
-            ),
-            0,
-            30
-        );
+        // Picture after speech is not a separate budget. Slide and video
+        // length follow the measured voiceover (and any silent hold already
+        // baked into the clip list).
+        effectiveTailSeconds = 0;
 
         voiceoverEndFrame = Math.ceil(voiceoverDurationSeconds * fps);
         const voiceoverRequiredFrames = Math.ceil(

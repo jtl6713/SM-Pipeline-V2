@@ -176,7 +176,7 @@ def attach_voiceover(
     payload["voiceoverUrl"] = vo
     payload["durationIsExplicit"] = duration_is_explicit(output)
     if "voiceoverTailSeconds" not in payload:
-        payload["voiceoverTailSeconds"] = _num(field(output, "Voiceover_Tail_Seconds"), 2)
+        payload["voiceoverTailSeconds"] = _num(field(output, "Voiceover_Tail_Seconds"), 0)
     if content_item and not payload.get("voiceoverText"):
         payload["voiceoverText"] = field_str(content_item, "Voiceover_Script")
     return payload
@@ -223,7 +223,7 @@ def build_p020_request(
         "height": height,
         "durationInFrames": total_frames,
         "durationSeconds": total_frames / 30,
-        "voiceoverTailSeconds": _num(field(output, "Voiceover_Tail_Seconds"), 2),
+        "voiceoverTailSeconds": _num(field(output, "Voiceover_Tail_Seconds"), 0),
         "durationIsExplicit": duration_is_explicit(output),
         "clips": clips,
         "music": _with_music_start({
@@ -278,7 +278,7 @@ def build_voiceover_request(
         "height": height,
         "durationInFrames": total_frames,
         "durationSeconds": round(total_frames / 30),
-        "voiceoverTailSeconds": _num(field(output, "Voiceover_Tail_Seconds"), 2),
+        "voiceoverTailSeconds": _num(field(output, "Voiceover_Tail_Seconds"), 0),
         "durationIsExplicit": duration_is_explicit(output),
         "clips": clips,
         "music": _with_music_start({

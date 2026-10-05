@@ -71,19 +71,19 @@ def test_p1_effective_options_and_status():
     assert options["include_voiceover"] == "Yes"
     assert options["include_music"] == "No"
     assert options["include_thumbnail"] == "Yes"
-    assert options["voiceover_tail_seconds"] == 2
-    assert options["target_voiceover_duration"] == 22
+    assert options["voiceover_tail_seconds"] == 0
+    assert options["target_voiceover_duration"] == 0
     explicit = effective_options(
         {"fields": {"Content_Duration": 30, "Include_Voiceover": "Yes", "Voiceover_Duration_Seconds": 15}},
         production,
     )
-    assert explicit["target_voiceover_duration"] == 15
+    assert explicit["target_voiceover_duration"] == 0
     floored = effective_options(
         {"fields": {"Content_Duration": 30, "Include_Voiceover": "Yes", "Voiceover_Duration_Seconds": 1}},
         production,
     )
-    assert floored["target_voiceover_duration"] == 4
-    assert explicit["voiceover_tail_seconds"] == 15
+    assert floored["target_voiceover_duration"] == 0
+    assert explicit["voiceover_tail_seconds"] == 0
     assert content_status_for(options) == "Ready for Voiceover"
     assert content_status_for({"include_voiceover": "No", "include_thumbnail": "Yes"}) == "Ready for Thumbnail"
     assert content_status_for({"include_voiceover": "No", "include_thumbnail": "No"}) == "Script Generated"

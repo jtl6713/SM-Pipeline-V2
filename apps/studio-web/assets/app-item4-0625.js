@@ -257,7 +257,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.482-voiceover-min-4s";
+  const BUILD_ID = "item4-0.6.483-voiceover-drives-timing";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -2478,18 +2478,43 @@
     };
   }
 
+  function stillsContentType(contentType) {
+    return ["Photo Set", "Carousel", "Feed Post"].includes(String(contentType || "").trim());
+  }
+
+  function photoIntakeKind(kind = ezIntakeKind) {
+    return ["multiple-photos", "single-photo", "finished-stills"].includes(String(kind || ""));
+  }
+
+  function stillsTimingActive(contentType) {
+    if (photoIntakeKind()) return true;
+    const type = contentType || $("prContentType")?.value || activeProductionRequest?.content_type;
+    return stillsContentType(type);
+  }
+
+  function applyStillsTimingVisibility(contentType) {
+    const stills = stillsTimingActive(contentType);
+    ["ezVoiceoverDurationField", "ezVideoDurationField", "prVideoDurationField", "prVoiceoverDurationField"].forEach((id) => {
+      const el = $(id);
+      if (el) el.hidden = stills;
+    });
+    const hint = $("prTimingHint");
+    if (hint) {
+      hint.textContent = stills
+        ? "This reel’s length follows the recorded voiceover. Each slide stays up for the line written for it."
+        : "Clip videos use Video duration as the finished length. Photo reels follow the recorded voiceover instead. Skip into song jumps forward in the track while the video still starts at 0:00.";
+    }
+  }
+
   function syncPromoteTimingHint() {
     const hint = $("promoteTimingHint");
     if (!hint) return;
-    const duration = Number($("promoteVideoDuration")?.value || 30);
-    const tail = Number($("promoteVoiceoverTail")?.value || 2);
     const voiceover = String($("promoteVoiceover")?.value || "");
-    const spoken = Math.max(1, Math.round((duration - tail) * 10) / 10);
     if (voiceover === "No") {
-      hint.textContent = "Voiceover is off, so Video after voiceover is unused. Video duration is the finished length.";
+      hint.textContent = "Voiceover is off. Clip videos use Video duration as the finished length.";
       return;
     }
-    hint.textContent = `Spoken voiceover uses leftover time: ${spoken}s (${duration}s video − ${tail}s after voiceover). Video duration is the hard cap. If you later set Voiceover duration on Production, that spoken length wins and this tail is extra after it — unless they add up past the video cap, in which case the video is cut at the duration.`;
+    hint.textContent = "Clip videos use this duration as the finished length. A photo reel ignores it: the recorded voiceover sets each slide and the total length.";
   }
 
   function setSelectValue(id, value, fallback) {
@@ -2519,6 +2544,7 @@
       $("promoteCarouselSlideMode").value = "Target range";
     }
     syncPromoteTimingHint();
+    applyStillsTimingVisibility();
   }
 
   function selectedPromotionPlatforms() {
@@ -2655,7 +2681,6 @@
     setSelectValue("promoteThumbnail", idea?.include_thumbnail, "Use Profile Default");
     setSelectValue("promoteVideoDuration", idea?.video_duration ? String(idea.video_duration) : "30", "30");
     setSelectValue("promoteVideoClipCount", idea?.video_clip_count ? String(idea.video_clip_count) : "Auto", "Auto");
-    setSelectValue("promoteVoiceoverTail", idea?.voiceover_tail_seconds !== null && idea?.voiceover_tail_seconds !== undefined ? String(idea.voiceover_tail_seconds) : "2", "2");
     $("promoteCarouselSlideCount").value = idea?.carousel_slide_count == null || idea?.carousel_slide_count === ""
       ? 5
       : idea.carousel_slide_count;
@@ -2766,9 +2791,9 @@
       include_voiceover: $("promoteVoiceover")?.value || "",
       include_background_music: $("promoteMusic")?.value || "",
       include_thumbnail: $("promoteThumbnail")?.value || "",
-      video_duration: Number($("promoteVideoDuration")?.value || 30),
+      video_duration: stillsContentType($("promoteContentType")?.value) ? "" : Number($("promoteVideoDuration")?.value || 30),
       video_clip_count: $("promoteVideoClipCount")?.value || "Auto",
-      voiceover_tail_seconds: Number($("promoteVoiceoverTail")?.value || 2),
+      voiceover_tail_seconds: 0,
       carousel_slide_count: Number($("promoteCarouselSlideCount")?.value || 5),
       carousel_slide_count_mode: wait.slide_mode,
       carousel_slide_count_min: $("promoteCarouselSlideMin")?.value || "",
@@ -3022,7 +3047,7 @@
   $("promoteContentType").addEventListener("change", syncPromotionPanels);
   $("promoteCarouselSlideMode")?.addEventListener("change", syncPromotionPanels);
   $("promoteCarouselImageMode")?.addEventListener("change", syncPromotionPanels);
-  ["promoteVoiceover", "promoteVideoDuration", "promoteVoiceoverTail"].forEach((id) => {
+  ["promoteVoiceover", "promoteVideoDuration"].forEach((id) => {
     $(id)?.addEventListener("change", syncPromoteTimingHint);
   });
 
@@ -3153,9 +3178,9 @@
       include_voiceover: $("promoteVoiceover").value,
       include_background_music: $("promoteMusic").value,
       include_thumbnail: $("promoteThumbnail").value,
-      video_duration: Number($("promoteVideoDuration").value || 30),
+      video_duration: stillsContentType(contentType) ? "" : Number($("promoteVideoDuration").value || 30),
       video_clip_count: $("promoteVideoClipCount").value,
-      voiceover_tail_seconds: Number($("promoteVoiceoverTail").value || 2),
+      voiceover_tail_seconds: 0,
       carousel_slide_count: Number($("promoteCarouselSlideCount").value || 5),
       carousel_slide_count_mode: wait.slide_mode,
       carousel_slide_count_min: $("promoteCarouselSlideMin")?.value || "",
@@ -5369,9 +5394,6 @@
       if ($("prRequestedScript")) $("prRequestedScript").value = $("ezRequestedScript")?.value || "";
     }
     if (take("ezThumbnail")) copySelectValue("ezThumbnail", "prThumbnail");
-    if (take("ezVoiceoverTail") && $("prVoiceoverTail") && $("ezVoiceoverTail")) {
-      $("prVoiceoverTail").value = $("ezVoiceoverTail").value;
-    }
     if (take("ezVideoDuration") && $("prVideoDuration") && $("ezVideoDuration")) {
       $("prVideoDuration").value = $("ezVideoDuration").value;
     }
@@ -5465,7 +5487,6 @@
     if ($("ezScriptMode")) setSelectValue("ezScriptMode", record.script_mode, "AI decides");
     if ($("ezRequestedScript")) $("ezRequestedScript").value = record.requested_script || "";
     if ($("ezThumbnail")) setSelectValue("ezThumbnail", record.thumbnail_mode, "Yes");
-    if ($("ezVoiceoverTail")) $("ezVoiceoverTail").value = record.voiceover_tail_seconds ?? 15;
     if ($("ezVoiceoverDuration")) $("ezVoiceoverDuration").value = record.voiceover_duration_seconds ?? defaultVoiceoverDuration(record.video_duration_seconds ?? 30);
     if ($("ezMusicStart")) $("ezMusicStart").value = record.music_start_seconds ?? 0;
     if ($("ezVideoDuration")) $("ezVideoDuration").value = record.video_duration_seconds ?? 30;
@@ -5785,13 +5806,15 @@
     const record = activeProductionRequest || {};
     const requestedPlatforms = selectedRequestPlatforms();
     const recordPlatforms = Array.isArray(record.platforms) ? record.platforms : [];
+    const contentType = syncHiddenMasterContentType() || ezControlValue("prContentType", record.content_type || "Photo Set");
+    const stills = stillsTimingActive(contentType);
     const payload = {
-      content_type: syncHiddenMasterContentType() || ezControlValue("prContentType", record.content_type || "Photo Set"),
+      content_type: contentType,
       platforms: requestedPlatforms.length ? requestedPlatforms : (recordPlatforms.length ? recordPlatforms : item4SelectedPlatforms()),
       voiceover_mode: ezControlValue("prVoiceover", record.voiceover_mode || "Yes"),
       background_music_mode: ezControlValue("prMusicMode", record.background_music_mode || "Yes"),
       thumbnail_mode: ezControlValue("prThumbnail", record.thumbnail_mode || "Yes"),
-      video_duration_seconds: ezControlValue("prVideoDuration", record.video_duration_seconds ?? 30),
+      video_duration_seconds: stills ? "" : ezControlValue("prVideoDuration", record.video_duration_seconds ?? 30),
       video_clip_count_mode: ezControlValue("prVideoClipMode", record.video_clip_count_mode || "AI decides"),
       video_clip_count_exact: ezControlValue("prVideoClipExact", record.video_clip_count_exact ?? ""),
       video_clip_count_min: ezControlValue("prVideoClipMin", record.video_clip_count_min ?? ""),
@@ -5801,8 +5824,8 @@
       carousel_slide_count_min: ezControlValue("prCarouselSlideMin", record.carousel_slide_count_min ?? ""),
       carousel_slide_count_max: ezControlValue("prCarouselSlideMax", record.carousel_slide_count_max ?? ""),
       carousel_image_mode: ezControlValue("prCarouselImageMode", record.carousel_image_mode || "Manual Upload"),
-      voiceover_tail_seconds: ezControlValue("prVoiceoverTail", record.voiceover_tail_seconds ?? 15),
-      voiceover_duration_seconds: ezControlValue("prVoiceoverDuration", record.voiceover_duration_seconds ?? defaultVoiceoverDuration(record.video_duration_seconds ?? 30)),
+      voiceover_tail_seconds: 0,
+      voiceover_duration_seconds: stills ? "" : ezControlValue("prVoiceoverDuration", record.voiceover_duration_seconds ?? defaultVoiceoverDuration(record.video_duration_seconds ?? 30)),
       music_start_seconds: ezControlValue("prMusicStart", record.music_start_seconds ?? 0),
       selected_music_asset_id: ezControlValue(
         "prMusicAsset",
@@ -5874,7 +5897,7 @@
         requested_caption: $("prRequestedCaption")?.value ?? result.record.requested_caption,
         script_mode: $("prScriptMode")?.value || result.record.script_mode,
         requested_script: $("prRequestedScript")?.value ?? result.record.requested_script,
-        voiceover_tail_seconds: $("prVoiceoverTail")?.value || result.record.voiceover_tail_seconds,
+        voiceover_tail_seconds: 0,
       };
     }
   }
@@ -5983,6 +6006,7 @@
     if (resetPlatforms) syncItem4PlatformsFromEz();
     renderEzCaptionUi();
     if (resetPlatforms) setEzMessage();
+    applyStillsTimingVisibility();
   }
 
   function ezIdeaTitleValue() {
@@ -6254,17 +6278,19 @@
     if (captionFields.caption_mode === "Force exact" && !String(captionFields.requested_caption || "").trim()) {
       captionFields = { ...captionFields, caption_mode: "AI decides", requested_caption: "" };
     }
+    const contentType = (az || item4HasTimedScript())
+      ? "Vertical Short Video"
+      : (planned?.master_content_type || helpers?.ezMasterContentType?.(count) || "Photo Set");
+    const stills = stillsTimingActive(contentType);
     return coerceForceExactTextModes({
-      content_type: (az || item4HasTimedScript())
-        ? "Vertical Short Video"
-        : (planned?.master_content_type || helpers?.ezMasterContentType?.(count) || "Photo Set"),
+      content_type: contentType,
       platforms: (az || item4HasTimedScript())
         ? ["Instagram", "Facebook", "TikTok", "YouTube"]
         : (planned?.platforms || ezSelectedPlatforms()),
       voiceover_mode: (finished || az) ? "No" : ($("ezAudioVoiceover")?.value || "Yes"),
       background_music_mode: (finished || az) ? "No" : ($("ezAudioMusic")?.value || "Yes"),
       thumbnail_mode: (finished || az) ? "Yes" : ($("ezThumbnail")?.value || "Yes"),
-      video_duration_seconds: $("ezVideoDuration")?.value || 30,
+      video_duration_seconds: stills ? "" : ($("ezVideoDuration")?.value || 30),
       video_clip_count_mode: (helpers?.ezWizardClipCount?.(ezWizardPending || ezWizardAnswers) || Number((ezWizardPending || ezWizardAnswers)?.clipCount) || 0) > 0
         ? "Exact"
         : ($("ezVideoClipMode")?.value || "AI decides"),
@@ -6273,8 +6299,8 @@
         : ($("ezVideoClipExact")?.value || ""),
       video_clip_count_min: $("ezVideoClipMin")?.value || "",
       video_clip_count_max: $("ezVideoClipMax")?.value || "",
-      voiceover_tail_seconds: $("ezVoiceoverTail")?.value || 15,
-      voiceover_duration_seconds: $("ezVoiceoverDuration")?.value || defaultVoiceoverDuration($("ezVideoDuration")?.value || 30),
+      voiceover_tail_seconds: 0,
+      voiceover_duration_seconds: stills ? "" : ($("ezVoiceoverDuration")?.value || defaultVoiceoverDuration($("ezVideoDuration")?.value || 30)),
       music_start_seconds: $("ezMusicStart")?.value || 0,
       title_mode: ezTitleIsCustomized() ? ($("ezTitleMode")?.value || "AI decides") : (captionFields.title_mode || "AI decides"),
       requested_title: ezTitleIsCustomized() ? String($("ezRequestedTitle")?.value || "").trim() : (captionFields.requested_title || ""),
@@ -7300,7 +7326,7 @@
     });
     [
       "ezTitleMode", "ezRequestedTitle", "ezCaptionMode", "ezRequestedCaption", "ezScriptMode", "ezRequestedScript",
-      "ezThumbnail", "ezVoiceoverTail", "ezVideoDuration", "ezVideoClipMode",
+      "ezThumbnail", "ezVideoDuration", "ezVideoClipMode",
       "ezVideoClipExact", "ezVideoClipMin", "ezVideoClipMax", "ezCarouselSlideMode",
       "ezCarouselSlideExact", "ezCarouselSlideMin", "ezCarouselSlideMax",
       "ezCarouselImageMode", "ezProductionNotes", "ezPrimaryLocation",
@@ -10871,7 +10897,6 @@
     setOverrideSelect("prOverrideMusicMode", row.background_music_mode_override);
     setOverrideSelect("prOverrideThumbnail", row.thumbnail_mode_override);
     setOverrideValue("prOverrideDuration", row.video_duration_seconds_override);
-    setOverrideValue("prOverrideVoiceoverTail", row.voiceover_tail_seconds_override);
 
     setOverrideSelect("prOverrideClipMode", row.video_clip_count_mode_override);
     setOverrideValue("prOverrideClipExact", row.video_clip_count_exact_override);
@@ -10903,7 +10928,8 @@
     fillOverrideMusicChoices(row);
     $("prOverrideClipSection").hidden = !isVideoClipOutput(row.output_type);
     $("prOverrideSlideSection").hidden = !isSlideOutput(row.output_type);
-    $("prOverrideDurationField").hidden = !isVideoClipOutput(row.output_type) && !["Slideshow Reel","Slideshow Video","Story"].includes(row.output_type);
+    const durationOverrideApplies = isVideoClipOutput(row.output_type) || row.output_type === "Story";
+    $("prOverrideDurationField").hidden = !durationOverrideApplies;
     $("prOverrideEffectivePreview").innerHTML = effectivePreviewHtml(row);
     $("prOverrideMessage").textContent = "";
     $("prOverrideMessage").className = "form-message";
@@ -10930,13 +10956,15 @@
 
     try {
       const scheduledRaw = String($("prOverrideScheduledAt").value || "").trim();
+      const overrideRow = productionRequestOutputs.find((row) => row.id === recordId);
+      const durationOverrideApplies = isVideoClipOutput(overrideRow?.output_type) || overrideRow?.output_type === "Story";
       const payload = {
         voiceover_mode_override: $("prOverrideVoiceover").value,
         background_music_mode_override: $("prOverrideMusicMode").value,
         thumbnail_mode_override: $("prOverrideThumbnail").value,
         selected_music_asset_override_id: $("prOverrideMusicAsset").value || "",
-        video_duration_seconds_override: nullableNumberFromInput("prOverrideDuration"),
-        voiceover_tail_seconds_override: nullableNumberFromInput("prOverrideVoiceoverTail"),
+        video_duration_seconds_override: durationOverrideApplies ? nullableNumberFromInput("prOverrideDuration") : null,
+        voiceover_tail_seconds_override: 0,
 
         video_clip_count_mode_override: $("prOverrideClipMode").value,
         video_clip_count_exact_override: nullableNumberFromInput("prOverrideClipExact"),
@@ -11314,7 +11342,7 @@
     $("prCarouselSlideMin").value = record.carousel_slide_count_min ?? "";
     $("prCarouselSlideMax").value = record.carousel_slide_count_max ?? "";
     setSelectValue("prCarouselImageMode", record.carousel_image_mode, "Make AI Generated");
-    $("prVoiceoverTail").value = record.voiceover_tail_seconds ?? 15;
+    applyStillsTimingVisibility(record.content_type);
     setSelectValue("prTitleMode", record.title_mode, "AI decides");
     $("prRequestedTitle").value = record.requested_title || "";
     setSelectValue("prCaptionMode", record.caption_mode, "AI decides");
@@ -12362,13 +12390,15 @@
     }
     const requestedPlatforms = selectedRequestPlatforms();
     const planPlatforms = item4SelectedPlatforms();
+    const contentType = syncHiddenMasterContentType();
+    const stills = stillsTimingActive(contentType);
     const payload = {
-      content_type: syncHiddenMasterContentType(),
+      content_type: contentType,
       platforms: requestedPlatforms.length ? requestedPlatforms : planPlatforms,
       voiceover_mode: resolvedAudioMode("voiceover"),
       background_music_mode: resolvedAudioMode("music"),
       thumbnail_mode: $("prThumbnail").value,
-      video_duration_seconds: $("prVideoDuration").value,
+      video_duration_seconds: stills ? "" : $("prVideoDuration").value,
       video_clip_count_mode: $("prVideoClipMode").value,
       video_clip_count_exact: $("prVideoClipExact").value,
       video_clip_count_min: $("prVideoClipMin").value,
@@ -12378,8 +12408,8 @@
       carousel_slide_count_min: $("prCarouselSlideMin").value,
       carousel_slide_count_max: $("prCarouselSlideMax").value,
       carousel_image_mode: $("prCarouselImageMode").value,
-      voiceover_tail_seconds: $("prVoiceoverTail").value,
-      voiceover_duration_seconds: $("prVoiceoverDuration")?.value || defaultVoiceoverDuration($("prVideoDuration")?.value || 30),
+      voiceover_tail_seconds: 0,
+      voiceover_duration_seconds: stills ? "" : ($("prVoiceoverDuration")?.value || defaultVoiceoverDuration($("prVideoDuration")?.value || 30)),
       music_start_seconds: $("prMusicStart")?.value || 0,
       selected_music_asset_id: $("prMusicAsset").value,
       ...selectedRequestVoice(),
@@ -12559,6 +12589,7 @@
       if (!platformInputs.some((row) => row.checked)) applyDefaultOutputsForPlatform(input.value);
     });
     updateOutputMatrixSummary();
+    applyStillsTimingVisibility($("prContentType")?.value);
   });
 
   $("closePrOverride")?.addEventListener("click", () => {
@@ -14120,9 +14151,8 @@
     ezScriptMode: "AI decides writes the spoken script. Force exact uses your wording. AI improve keeps your draft and rewrites it.",
     ezRequestedScript: "Paste spoken words here only if you want to control the voiceover. Leave blank to let AI write it.",
     ezThumbnail: "Rendered videos always get the 3D ChicagoShining grid cover on Instagram Reels, Facebook Reels, and YouTube Shorts. You do not add Carousel for that. This control only applies to still-only posts.",
-    ezVoiceoverTail: "Picture and music after narration ends. Does not shorten an explicit Voiceover duration. If speech + tail is longer than Video duration, Video duration wins and the end is cut.",
-    ezVideoDuration: "Hard cap for the finished video. Wins if Voiceover duration + Video after voiceover would run longer. Long uploads are trimmed or sliced to fit; with music, cuts land on beats.",
-    ezVoiceoverDuration: "Spoken narration length. Minimum 4 seconds whenever voiceover is on. A one- or two-second read is not saved. This wins over Video after voiceover for how long speech lasts. If you set only this field, leftover time becomes the tail. If speech + tail is longer than Video duration, Video duration wins.",
+    ezVideoDuration: "Finished length for clip videos. Photo reels ignore this and follow the recorded voiceover.",
+    ezVoiceoverDuration: "Planning note for clip videos. Photo reels ignore this: each slide lasts as long as its recorded line. Spoken audio under 4 seconds is not saved.",
     ezVideoClipMode: "How many clips Studio should aim for in a video. AI decides unless you force a count or range.",
     ezVideoClipExact: "Exact number of clips to use in the video.",
     ezVideoClipMin: "Minimum clip count when using a target range.",
@@ -14133,8 +14163,8 @@
     ezCarouselSlideMax: "Maximum slide count when using a target range.",
     ezCarouselImageMode: "Use the photos you uploaded, or let Studio generate additional images.",
     ezProductionNotes: "Anything extra for pacing, style, or execution. Saved with the production request.",
-    prVideoDuration: "Hard cap for the finished video. Wins if Voiceover duration + Video after voiceover would run longer. Autonomous runs stay at 30 seconds. Long uploads are trimmed or sliced to fit; with music, cuts land on beats.",
-    prVoiceoverDuration: "Spoken narration length. Minimum 4 seconds whenever voiceover is on. A one- or two-second read is not saved. This wins over Video after voiceover for how long speech lasts. Autonomous defaults to half the video (15s of a 30s slideshow). If speech + tail is longer than Video duration, Video duration wins and the end is cut.",
+    prVideoDuration: "Finished length for clip videos. Photo reels ignore this and follow the recorded voiceover. Long uploads are trimmed or sliced to fit; with music, cuts land on beats.",
+    prVoiceoverDuration: "Planning note for clip videos. Photo reels ignore this. Spoken audio under 4 seconds is not saved.",
     prMusicStart: "Seconds into the song file to skip before playback. The video still starts at 0:00; this only fast-forwards the track so you can skip the intro.",
     prVideoClipMode: "How many clips Studio should aim for in a video.",
     prVideoClipExact: "Exact number of clips to use in the video.",
@@ -14150,14 +14180,13 @@
     prVoice: "ElevenLabs voice used when narration is generated. Kate is the default.",
     prMusicAsset: "Pick a specific music bed, or leave it so AI / the brand profile chooses.",
     prThumbnail: "Rendered videos always get the 3D ChicagoShining grid cover. Carousel is a separate still post, not the Reel cover.",
-    prVoiceoverTail: "Picture and music after narration ends. Does not shorten an explicit Voiceover duration. For a 30s video with a 15s voiceover this is often 15. If speech + tail is longer than Video duration, Video duration wins and the end is cut.",
-    promoteContentType: "Master format for this piece. Vertical Short Video and Longform Video show duration, clip count, and video after voiceover. Carousel, Photo Set, and Feed Post show slide options instead. Photo Set turns stills into Reels; Carousel keeps swipeable photos. Help → Ideas has a graphic of every type and what Pipeline builds.",
-    promoteVoiceover: "Spoken narration on video outputs. Native stills ignore this. On this screen there is no separate voiceover-length field — spoken time is Video duration minus Video after voiceover.",
+    promoteContentType: "Master format for this piece. Vertical Short Video and Longform Video show duration and clip count. Carousel, Photo Set, and Feed Post show slide options. Photo Set turns stills into Reels; Carousel keeps swipeable photos. Help → Ideas has a graphic of every type and what Pipeline builds.",
+    promoteVoiceover: "Spoken narration on video outputs. Native stills ignore this. On a photo reel the recorded voiceover sets the length.",
     promoteMusic: "Background music on video outputs. Native stills ignore this. The track is chosen later from the profile or Music library.",
     promoteThumbnail: "3D ChicagoShining grid cover for Reels, Shorts, and video drafts. No skips lettering on the video, not the native platform cover.",
-    promoteVideoDuration: "Hard cap for the finished video. Spoken voiceover plus Video after voiceover must fit inside this. If they add up to more, the video is cut here — duration wins.",
+    promoteVideoDuration: "Finished length for clip videos. A photo reel ignores this and follows the recorded voiceover.",
     promoteVideoClipCount: "How many stills or clips to use. Auto lets the pipeline pick from the attached photos and the profile default.",
-    promoteVoiceoverTail: "Seconds of picture and music after narration ends. Spoken length here is Video duration minus this tail. If you later set Voiceover duration on Production, that spoken length wins and this tail is extra after it. If speech + tail is longer than Video duration, Video duration still wins.",
+    promoteVoiceoverTail: "Unused. Photo reels follow the recorded voiceover. There is no extra time after speech.",
     promoteProductionNotes: "Optional direction for pacing, style, or what to emphasize. Saved with the idea and copied onto the production request.",
     promoteCarouselSlideMode: "Exact uses a fixed slide count. Target range listens in the Studio media library until enough high-confidence photos exist.",
     promoteCarouselSlideCount: "Exact number of slides or photos to attach.",
@@ -14179,7 +14208,7 @@
     prOverrideThumbnail: "Override this output’s cover. Inherit follows the piece. Yes is AI generated. Use photo frame copies a still from the photos.",
     prOverrideMusicAsset: "Override the music track for this one output, or inherit the master track.",
     prOverrideDuration: "Override duration for this one output. Long clips are still cut to fit. Stories default to 10 seconds for a single still and do not inherit the 30-second main video. Leave blank to inherit.",
-    prOverrideVoiceoverTail: "Override extra seconds after narration for this one output.",
+    prOverrideVoiceoverTail: "Unused. Slide length follows the recorded voiceover.",
     prOverrideClipMode: "Override video clip count for this one output, or inherit the master setting.",
     prOverridePublishMode: "Override whether this output auto-publishes, waits for review, or stays unpublished.",
     prOverrideScheduledAt: "Optional publish time for this one output.",
@@ -14420,7 +14449,7 @@
         "Audio / Voiceover": "Optional. Voiceover and music apply to video outputs, not native still carousels.",
         "Post title": "Optional on-post title. Separate from the idea name at the top.",
         Script: "Optional spoken-script control. Leave closed to let AI write narration when needed.",
-        Cover: "Optional thumbnail / cover still and extra seconds after voiceover.",
+        Cover: "Optional thumbnail / cover still.",
         Structure: "Optional clip and slide counts. Closed means AI decides.",
         Notes: "Optional production notes for pacing, style, or execution.",
         Outputs: "Optional extra formats. Defaults already follow your platforms and photos.",
@@ -15076,7 +15105,7 @@
     $("creativeStyleStrategy").value = settings.style_strategy || inferredStrategy;
     $("creativeDefaultDuration").value = settings.default_slide_duration_seconds ?? creativeSlides[0]?.duration_seconds ?? 4;
     $("creativeDefaultTransitionFrames").value = settings.default_transition_frames ?? manifest.transitionFrames ?? 12;
-    $("creativeVoiceoverTail").value = output.voiceover_tail_seconds ?? manifest.voiceoverTailSeconds ?? 2;
+    if ($("creativeVoiceoverTail")) $("creativeVoiceoverTail").value = 0;
     $("creativeVariantPolicy").value = settings.variant_policy || "Prefer exact prepared variant";
     $("creativeOpeningTreatment").value = settings.opening_treatment || "Auto";
     $("creativeClosingTreatment").value = settings.closing_treatment || "Auto";
@@ -15461,7 +15490,7 @@
         ducking_enabled: duckingEnabled,
         duck_fade_frames: Math.round(phase6NumberFromInput("creativeDuckFadeFrames", 6)),
       },
-      voiceover_tail_seconds: phase6NumberFromInput("creativeVoiceoverTail", 2),
+      voiceover_tail_seconds: 0,
       review_notes: $("creativeReviewNotes").value || "",
       creative_settings: {
         style_strategy: $("creativeStyleStrategy").value,

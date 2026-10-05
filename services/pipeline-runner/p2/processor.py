@@ -14,7 +14,6 @@ from audio.voiceover_duration import (
     VoiceoverTooShort,
     probe_audio_duration_bytes,
     validate_voiceover_for_owner_cap,
-    voiceover_tail_seconds,
 )
 from branding.watermark import apply_watermark_bytes, brand_watermark_bytes
 from config import load_settings
@@ -56,10 +55,7 @@ def _extend_video_duration_for_voiceover(
     measured_seconds: float,
 ) -> float:
     """Extend non-Story production targets instead of rejecting long synthesized narration."""
-    required = _required_video_seconds_for_voiceover(
-        measured_seconds,
-        voiceover_tail_seconds(item, request),
-    )
+    required = _required_video_seconds_for_voiceover(measured_seconds, 0)
 
     current_content = float((item.get("fields") or {}).get("Content_Duration") or 0)
     if required > current_content:

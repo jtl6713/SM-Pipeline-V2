@@ -78,28 +78,10 @@ def effective_options(item: dict[str, Any], production: dict[str, Any]) -> dict[
         bool(field(production, "Include_Background_Music")),
     )
     include_thumb = yes_no(field(item, "Include_Thumbnail"), bool(field(production, "Include_Thumbnail")))
+    # Spoken length is whatever the read actually is. Do not invent a tail
+    # or a target by subtracting one from the video duration.
     tail = 0
     target_vo = 0
-    if include_vo == "Yes":
-        tail_raw = field(item, "Voiceover_Tail_Seconds")
-        tail = int(tail_raw) if tail_raw not in (None, "") else 2
-        try:
-            duration_n = float(duration or 0)
-        except (TypeError, ValueError):
-            duration_n = 0
-        vo_raw = field(item, "Voiceover_Duration_Seconds")
-        try:
-            explicit_vo = float(vo_raw) if vo_raw not in (None, "") else 0
-        except (TypeError, ValueError):
-            explicit_vo = 0
-        if explicit_vo > 0:
-            target_vo = explicit_vo
-            if tail_raw in (None, "") and duration_n > 0:
-                tail = max(0, int(round(duration_n - explicit_vo)))
-        else:
-            target_vo = duration_n - tail
-        if target_vo < 4:
-            target_vo = 4
     return {
         "duration": duration,
         "clip_count": clip_count,

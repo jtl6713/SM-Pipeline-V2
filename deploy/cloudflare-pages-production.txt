@@ -7,3 +7,4 @@ Deploy UI 0.6.479 published calendar status styling.
 Deploy UI 0.6.480 show future YouTube published uploads on calendars.
 Deploy UI 0.6.481 timeline forces six standard video outputs.
 Deploy UI 0.6.482 voiceover minimum 4 seconds. Spoken audio under 4s is not saved.
+Deploy UI 0.6.483 voiceover drives slide timing. Photo reels follow the recorded voiceover.

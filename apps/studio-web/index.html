@@ -348,14 +348,11 @@
  <select id="ezThumbnail"><option>Use Profile Default</option><option value="Yes" selected>AI generated</option><option value="Use photo frame">Use a photo frame</option><option value="No">No</option></select>
  </label>
  <em class="ez-option-hint">Rendered Reels, Shorts, and video drafts always get the 3D grid cover. You do not add Carousel for that.</em>
- <label class="form-field"><span>Voiceover duration (seconds)</span>
+ <label class="form-field" id="ezVoiceoverDurationField"><span>Voiceover duration (seconds)</span>
  <input id="ezVoiceoverDuration" type="number" min="4" max="600" step=".5" value="15">
  </label>
  <label class="form-field"><span>Skip into song (seconds)</span>
  <input id="ezMusicStart" type="number" min="0" max="3600" step=".1" value="0">
- </label>
- <label class="form-field"><span>Video after voiceover</span>
- <input id="ezVoiceoverTail" type="number" min="0" max="300" step=".5" value="15">
  </label>
  </div>
  </div>
@@ -366,7 +363,7 @@
  <div class="ez-structure-grid">
  <div class="ez-structure-card" id="ezVideoStructure">
  <strong>Video</strong>
- <label class="form-field"><span>Duration (seconds)</span><input type="number" id="ezVideoDuration" min="5" max="600" value="30"></label>
+ <label class="form-field" id="ezVideoDurationField"><span>Duration (seconds)</span><input type="number" id="ezVideoDuration" min="5" max="600" value="30"></label>
  <label class="form-field"><span>Clip count</span><select id="ezVideoClipMode"><option>AI decides</option><option>Exact</option><option>Target range</option></select></label>
  <div class="count-inputs">
  <label class="form-field exact-count" hidden><span>Exact</span><input type="number" id="ezVideoClipExact" min="1" max="60"></label>
@@ -807,9 +804,6 @@
  <input id="prOverrideDuration" type="number" min="5" max="600" step="1" placeholder="Inherit">
  </label>
 
- <label>Voiceover tail (seconds)
- <input id="prOverrideVoiceoverTail" type="number" min="0" max="10" step="0.5" placeholder="Inherit">
- </label>
  </div>
 
  <div class="override-subsection" id="prOverrideClipSection">
@@ -965,7 +959,7 @@
  </div>
 
  <div class="request-section">
- <div class="request-section-heading"><h3>6. Audio &amp; cover</h3><p>Set video length, spoken voiceover length, music in-point, voice, track, and the 3D grid cover.</p></div>
+ <div class="request-section-heading"><h3>6. Audio &amp; cover</h3><p>Set the voice, music in-point, track, and the 3D grid cover. Photo reels take their length from the voiceover after it is recorded.</p></div>
  <div class="form-message warning-text" id="prAudioPlatformWarning" hidden>Music and voiceover play on video outputs. They are not used on native stills such as Instagram Carousel, Facebook Multi-Image Post, or TikTok Multi-Photo.</div>
  <div class="ez-audio-toggles">
  <label class="form-field"><span>Voiceover</span>
@@ -995,12 +989,11 @@
  </div>
  </div>
  <div class="ez-audio-toggles">
- <label class="form-field"><span>Video duration (seconds)</span><input type="number" id="prVideoDuration" min="5" max="600" step="0.1" value="30"></label>
- <label class="form-field"><span>Voiceover duration (seconds)</span><input type="number" id="prVoiceoverDuration" min="4" max="600" step=".5" value="15"></label>
+ <label class="form-field" id="prVideoDurationField"><span>Video duration (seconds)</span><input type="number" id="prVideoDuration" min="5" max="600" step="0.1" value="30"></label>
+ <label class="form-field" id="prVoiceoverDurationField"><span>Voiceover duration (seconds)</span><input type="number" id="prVoiceoverDuration" min="4" max="600" step=".5" value="15"></label>
  <label class="form-field"><span>Skip into song (seconds)</span><input type="number" id="prMusicStart" min="0" max="3600" step=".1" value="0"></label>
- <label class="form-field"><span>Video after voiceover</span><input type="number" id="prVoiceoverTail" min="0" max="300" step=".5" value="15"></label>
  </div>
- <em class="ez-option-hint">Autonomous photo slideshows are 30 seconds. Voiceover defaults to half of that (15 seconds). Voiceover duration wins for how long speech lasts; Video after voiceover is extra picture after speech. If those two add up past Video duration, Video duration wins and the end is cut. Skip into song jumps forward in the track while the video still starts at 0:00.</em>
+ <em class="ez-option-hint" id="prTimingHint">Photo reels take their length from the recorded voiceover. Each slide stays up for the line written for it. Clip videos still use Video duration as the finished length. Skip into song jumps forward in the track while the video still starts at 0:00.</em>
  <div class="ez-audio-toggles">
  <label class="form-field"><span>Thumbnail / cover</span><select id="prThumbnail"><option>Use Profile Default</option><option value="Yes" selected>AI generated</option><option value="Use photo frame">Use a photo frame</option><option value="No">No</option></select></label>
  <em class="ez-option-hint">Rendered Reels, Shorts, Slideshow videos, and video drafts get the 3D still as the platform grid cover where the API allows it. Stories and TikTok drafts do not accept a separate cover.</em>
@@ -1148,7 +1141,6 @@
  <label class="form-field"><span>Default transition</span><select id="creativeDefaultTransition"></select></label>
  <label class="form-field"><span>Transition frames</span><input type="number" id="creativeDefaultTransitionFrames" min="0" max="90" step="1" value="12"></label>
  <div class="voice-select-wrap"><label class="form-field"><span>Default voice</span><select id="creativeDefaultVoice"></select></label><button type="button" class="voice-preview-button" id="creativeDefaultVoicePreview" title="Preview selected ElevenLabs voice">▶ Preview</button></div>
- <label class="form-field"><span>Voiceover tail</span><input type="number" id="creativeVoiceoverTail" min="0" max="10" step="0.5" value="2"></label>
  <label class="form-field"><span>Variant policy</span><select id="creativeVariantPolicy"><option>Prefer exact prepared variant</option><option>Use existing prepared variants only</option><option>Allow fallback crop/fill</option></select></label>
  <label class="form-field"><span>Opening treatment</span><select id="creativeOpeningTreatment"><option>Auto</option><option>Title card</option><option>Plain image</option><option>No text</option></select></label>
  <label class="form-field"><span>Closing treatment</span><select id="creativeClosingTreatment"><option>Auto</option><option>End card</option><option>Plain image</option><option>No text</option></select></label>
@@ -1847,7 +1839,7 @@
  <h4>Vertical Short Video</h4>
  <p>9:16 video from clips or a photo sequence. Music and voiceover apply.</p>
  <p class="idea-type-builds"><span>Builds</span> Instagram Reel · Facebook Reel · TikTok draft · YouTube Short</p>
- <p class="idea-type-impact">Shows video duration, clip count, and video after voiceover. Remotion renders the MP4. Grid cover attaches on IG, Facebook, and YouTube.</p>
+ <p class="idea-type-impact">Shows video duration and clip count for footage. Photo reels take their length from the voiceover. Remotion renders the MP4. Grid cover attaches on IG, Facebook, and YouTube.</p>
  </article>
  <article class="idea-type-card" data-family="video">
  <div class="idea-type-card-icon" aria-hidden="true">
@@ -1856,7 +1848,7 @@
  <h4>Longform Video</h4>
  <p>Longer YouTube-first video, not a Short.</p>
  <p class="idea-type-builds"><span>Builds</span> YouTube Standard Video</p>
- <p class="idea-type-impact">Same duration / clip / tail controls. Other platforms stay off unless you add them on Production.</p>
+ <p class="idea-type-impact">Same duration and clip controls. Other platforms stay off unless you add them on Production.</p>
  </article>
  <article class="idea-type-card" data-family="video">
  <div class="idea-type-card-icon" aria-hidden="true">
@@ -1865,7 +1857,7 @@
  <h4>Photo Set</h4>
  <p>A set of stills that become <em>video</em>, not a swipe album.</p>
  <p class="idea-type-builds"><span>Builds</span> Instagram Reel · Facebook Slideshow Reel · TikTok draft · YouTube Short</p>
- <p class="idea-type-impact">Slide-count options appear. Photos are timed into a 9:16 render with music and voiceover. Use Carousel if you want people to swipe the stills themselves.</p>
+ <p class="idea-type-impact">Slide-count options appear. The voiceover is written for those stills, then each slide stays up for its measured line. Use Carousel if you want people to swipe the stills themselves.</p>
  </article>
  <article class="idea-type-card" data-family="still">
  <div class="idea-type-card-icon" aria-hidden="true">
@@ -1938,7 +1930,7 @@
  <li><strong>New idea</strong> — select an existing unpromoted candidate or enter a title/summary by hand.</li>
  <li><strong>Manage</strong> — edit copy, hold/restore, delete, or choose <em>Add new media</em> / <em>Use existing</em> to attach photos and clips before opening Production.</li>
  <li><strong>Promote to production</strong> — creates the content item from this idea. No review email is sent. Requires a summary, content type, and platforms. Hover the ? next to each field for what it does.</li>
- <li><strong>Video duration vs voiceover</strong> — Video duration is the hard cap. On the idea drawer, spoken length is duration minus Video after voiceover (30s − 2s = 28s of speech). If you later set an explicit Voiceover duration on Production, that spoken length wins and the tail is extra after it. If speech + tail is longer than Video duration, the video is cut at the duration.</li>
+ <li><strong>Photo reel length</strong> — Studio writes a line for each selected still, records the voiceover, then holds each slide for that line. The video lasts as long as those slides. There is no separate length target and no extra time after the voiceover.</li>
  </ul>
  <figure class="support-shot">
  <img src="/assets/support/ideas-new.jpg?v=0.6.102" alt="New idea form on the Ideas page" width="1440" height="920">
@@ -2145,7 +2137,7 @@
  <div class="studio-footer-meta">
  <span id="aiApiFooter" aria-live="polite"><strong>AI API:</strong> loading…</span>
  <span id="apiStatus" class="topbar-status">Connecting…</span>
- <span id="uiBuildLabel">UI build 0.6.482</span>
+ <span id="uiBuildLabel">UI build 0.6.483</span>
  <span id="workerBuildLabel">Worker …</span> </div>
  </footer>
 
@@ -2259,11 +2251,10 @@
 
  <div class="promotion-subpanel" id="videoPromotionOptions" hidden>
  <div class="promotion-grid">
- <label class="form-field"><span>Video duration</span><select id="promoteVideoDuration"><option value="15">15 seconds</option><option value="30" selected>30 seconds</option><option value="45">45 seconds</option><option value="60">60 seconds</option><option value="90">90 seconds</option></select></label>
+ <label class="form-field" id="promoteVideoDurationField"><span>Video duration</span><select id="promoteVideoDuration"><option value="15">15 seconds</option><option value="30" selected>30 seconds</option><option value="45">45 seconds</option><option value="60">60 seconds</option><option value="90">90 seconds</option></select></label>
  <label class="form-field"><span>Clip count</span><select id="promoteVideoClipCount"><option value="Auto" selected>Auto / pipeline default</option><option value="1">1</option><option value="2">2</option><option value="3">3</option><option value="4">4</option><option value="5">5</option><option value="6">6</option><option value="8">8</option><option value="10">10</option><option value="12">12</option><option value="16">16</option><option value="20">20</option><option value="24">24</option><option value="30">30</option><option value="40">40</option><option value="50">50</option><option value="60">60</option></select></label>
- <label class="form-field"><span>Video after voiceover</span><select id="promoteVoiceoverTail"><option value="0">0 seconds</option><option value="1">1 second</option><option value="2" selected>2 seconds</option><option value="2.5">2.5 seconds</option><option value="3">3 seconds</option><option value="4">4 seconds</option><option value="5">5 seconds</option></select></label>
  </div>
- <p class="subtle" id="promoteTimingHint">Spoken voiceover uses leftover time: video duration minus video after voiceover. Video duration is the hard cap if they conflict.</p>
+ <p class="subtle" id="promoteTimingHint">Clip videos use this duration as the finished length. A photo reel ignores it: the recorded voiceover sets each slide and the total length.</p>
  </div>
 
  <div class="promotion-subpanel" id="carouselPromotionOptions" hidden>
@@ -2302,12 +2293,12 @@
  </div>
  </aside>
 
- <script src="/assets/config-0621.js?v=0.6.344-idea-mixed-media"></script>
+ <script src="/assets/config-0621.js?v=0.6.483-voiceover-drives-timing"></script>
  <script src="/assets/ez-plan.js?v=0.6.376-recommend-carousel-slides"></script>
  <script src="/assets/pipeline-schedule-grid-0622.js?v=0.6.475-manual-media-authority"></script>
  <script src="/assets/platform-schedule-calendar-0924.js?v=0.6.475-manual-media-authority"></script>
  <script src="/assets/timed-script.js?v=0.6.475-manual-media-authority"></script>
- <script src="/assets/app-item4-0625.js?v=0.6.482-voiceover-min-4s"></script>
+ <script src="/assets/app-item4-0625.js?v=0.6.483-voiceover-drives-timing"></script>
  <script src="/assets/insights-0622.js?v=0.6.365-first-party-analytics-reconciled"></script>
  <script src="/assets/ai-api-footer.js?v=0.6.427-primary-ai-alert"></script>
  <script src="/assets/sticky-footer-scroll.js?v=0.6.378-sticky-footer-scroll"></script>

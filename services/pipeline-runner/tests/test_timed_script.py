@@ -225,6 +225,61 @@ def test_normal_timing_path_still_uses_owner_duration():
     assert frames == [150, 150]
 
 
+def test_photo_voiceover_timeline_ignores_stored_thirty_seconds():
+    from studio_produce.stamp import assign_clip_frames
+    from studio_produce.timed_script import apply_measured_durations, timeline_from_slide_lines
+
+    assets = [
+        {"id": "recA", "order": 1, "media_kind": "photo", "caption": "River"},
+        {"id": "recB", "order": 2, "media_kind": "photo", "caption": "Bean"},
+        {"id": "recC", "order": 3, "media_kind": "photo", "caption": "Skyline"},
+    ]
+    planned = timeline_from_slide_lines([
+        {"line": "Start at the river and keep walking downtown.", "silent": False},
+        {"line": "The Bean is the second stop on this walk.", "silent": False},
+        {"line": "", "silent": True, "hold_seconds": 2.5},
+    ], assets)
+    measured = apply_measured_durations(planned, [4.2, 6.4, 2.5])
+    clips = [
+        {"source": {"id": "recA", "media_kind": "photo"}},
+        {"source": {"id": "recB", "media_kind": "photo"}},
+        {"source": {"id": "recC", "media_kind": "photo"}},
+    ]
+    frames, total = assign_clip_frames(
+        clips,
+        story=False,
+        effective={
+            "video_duration_seconds": 30,
+            "voiceover_mode": "Yes",
+            "voiceover_duration_seconds": 10.6,
+            "voiceover_tail_seconds": 15,
+        },
+        request={"fields": {"Video_Duration_Seconds": 30, "Production_Notes": directive_line(measured), "Voiceover_Mode": "Yes"}},
+        output=None,
+    )
+    expected = [segment_duration_frames(segment) for segment in measured["segments"]]
+    assert frames == expected
+    assert total == sum(expected)
+    assert total != 30 * 30
+    assert measured["segments"][2]["silent"] is True
+    assert measured["segments"][2]["duration_seconds"] == 2.5
+
+
+def test_photo_voiceover_without_timeline_uses_measured_speech_not_owner_duration():
+    from studio_produce.stamp import assign_clip_frames
+
+    clips = [{"source": {"media_kind": "photo"}} for _ in range(2)]
+    frames, total = assign_clip_frames(
+        clips,
+        story=False,
+        effective={"video_duration_seconds": 30, "voiceover_mode": "Yes", "voiceover_duration_seconds": 12},
+        request={"fields": {"Video_Duration_Seconds": 30, "Voiceover_Mode": "Yes"}},
+        output=None,
+    )
+    assert total == 12 * 30
+    assert frames == [180, 180]
+
+
 def test_beat_sync_cannot_rewrite_authoritative_scene_lengths():
     clips = [
         {"url": "https://media.chicagoshining.com/a.jpg", "durationFrames": 210, "beatSync": True, "timingMode": "authoritative"},

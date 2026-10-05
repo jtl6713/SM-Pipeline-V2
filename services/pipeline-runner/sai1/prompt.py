@@ -17,7 +17,13 @@ Return exactly this structure:
       "image_prompt": "Full clean photorealistic image generation prompt for that thing to do."
     }}
   ],
-  "voiceover_script": "Spoken narration covering every slide in order.",
+  "slide_voiceovers": [
+    {{
+      "line": "Spoken line for this slide. Empty only when the still should play with no words.",
+      "hold_seconds": 0
+    }}
+  ],
+  "voiceover_script": "The spoken lines joined in slide order, skipping silent slides.",
   "post_caption": "The social post caption published with the finished video.",
   "hashtags": "#tag #tag #tag"
 }}
@@ -42,14 +48,14 @@ IMAGE PROMPT RULES
 - Never ask for rendered text, captions, labels, titles, borders, logos, app UI, watermarks, or graphic overlays of any kind. Watermarking happens downstream.
 - Keep each image_prompt under 900 characters.
 
-VOICEOVER SCRIPT RULES
-- This is read aloud by a text-to-speech voice over the finished video, so write only spoken words.
-- It must cover EVERY slide of the finished video in slide order: first the ALREADY COVERED entries in the order listed, then the slides you just chose in the order you returned them.
-- Open with one short hook line drawn from the VIDEO TITLE, then give one natural clause naming each thing in order.
-- Name each thing recognizably, but speak naturally rather than reading captions verbatim.
-- TOTAL SLIDE COUNT below is how many things must be named. Every one of them must appear.
-- Hard length limit: no more than 90 words total, because the video is short. Aim for roughly 10 to 14 words per slide.
-- No emoji, no hashtags, no stage directions, no speaker labels, no numbered lists, no markdown. Plain spoken prose only.
+VOICEOVER RULES
+- slide_voiceovers length must equal TOTAL SLIDE COUNT. One entry per finished slide, in order: first the ALREADY COVERED entries, then the slides you just chose.
+- Each line is read aloud over that still, so write only spoken words. Name the thing recognizably, but speak naturally rather than reading the on-photo caption verbatim.
+- Open the first spoken line with a short hook drawn from the VIDEO TITLE, then let later lines carry the rest of the slides.
+- Pace it as a short Reel or Short. Judge the length from the stills themselves. Do not aim for a second count, a word quota, or a fixed video length.
+- A slide with no speech is allowed only when that still is stronger with no words. Then leave line empty and set hold_seconds to how long the still should stay up, between 1 and 6. Do not add a global tail after the last spoken line.
+- voiceover_script is the spoken lines joined in order with spaces. Leave silent slides out of voiceover_script.
+- No emoji, no hashtags, no stage directions, no speaker labels, no numbered lists, no markdown.
 
 POST CAPTION RULES (the post_caption field)
 - This is the caption published alongside the video on TikTok, Instagram and Facebook. It is read by a person scrolling a feed, so it is NOT the short on-photo label and NOT the narration.
@@ -84,7 +90,8 @@ FINAL SELF-CHECK BEFORE RETURNING
 - No slide duplicates or paraphrases an ALREADY COVERED entry.
 - Every slides[].caption is 42 characters or fewer.
 - Every image_prompt asks for no text or logos of any kind.
-- voiceover_script names all TOTAL SLIDE COUNT things in slide order and is 90 words or fewer.
+- slide_voiceovers.length equals TOTAL SLIDE COUNT, in slide order.
+- voiceover_script is the spoken lines joined in that same order.
 - post_caption names all TOTAL SLIDE COUNT things, is 500 characters or fewer, and contains no hashtags.
 - hashtags contains 8 to 12 space separated tags.
 - Output is valid JSON only."""

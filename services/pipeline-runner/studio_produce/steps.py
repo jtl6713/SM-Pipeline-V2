@@ -394,28 +394,108 @@ def seed_ai_slides(
     return live + created
 
 
+def _ordered_photo_assets(request: dict[str, Any]) -> list[dict[str, Any]] | None:
+    """Photo masters in slide order. None when any master is footage."""
+    from studio_produce.media import asset_is_video
+
+    assets = master_assets(request)
+    if any(asset_is_video(asset) for asset in assets):
+        return None
+    return sorted(assets, key=lambda item: int(item.get("order") or 0))
+
+
+def _slide_captions(assets: list[dict[str, Any]]) -> list[str]:
+    captions = []
+    for index, asset in enumerate(assets):
+        text = str(asset.get("caption") or "").strip() or f"Photo {index + 1}"
+        captions.append(text)
+    return captions
+
+
+def ensure_slide_voiceover_timeline(
+    client: AirtableClient,
+    request: dict[str, Any],
+    parent: dict[str, Any],
+    themes: dict[str, Any] | None = None,
+    *,
+    total: int | None = None,
+) -> None:
+    """Store one timed-script scene per still before P2 measures the audio.
+
+    Operator timed scripts are left alone. Footage and finished video keep the
+    media file's length. Spoken scene clocks here are placeholders; P2 replaces
+    them with the measured read. A silent scene keeps the writer's hold.
+    """
+    from studio_produce.timed_script import (
+        SLIDE_VOICEOVER_SOURCE,
+        chunk_script_across_slides,
+        exact_voiceover_text,
+        notes_with_timed_script,
+        slide_lines_from_themes,
+        timed_script_from_request,
+        timeline_from_slide_lines,
+    )
+
+    if not parent or not voiceover_required(request, parent):
+        return
+    if finished_origin_kind((request or {}).get("fields") or {}):
+        return
+    if field_str(parent, "Voiceover_URL"):
+        return
+    existing = timed_script_from_request(request)
+    if existing and existing.get("source") != SLIDE_VOICEOVER_SOURCE:
+        return
+    photos = _ordered_photo_assets(request)
+    if photos is None:
+        return
+    intended = max(0, int(total or 0))
+    count = max(len(photos), expected_photo_count(request, photos), intended)
+    if count < 1:
+        return
+    lines = slide_lines_from_themes(themes, count)
+    if not lines:
+        script = field_str(parent, "Voiceover_Script") or exact_requested_script(request)
+        lines = chunk_script_across_slides(script, count) if script else []
+    if len(lines) != count:
+        return
+    timeline = timeline_from_slide_lines(lines, photos)
+    if not timeline:
+        return
+    notes = notes_with_timed_script(field_str(request, "Production_Notes"), timeline)
+    client.update_record(
+        PRODUCTION_REQUESTS_TABLE,
+        request["id"],
+        {"Production_Notes": notes, "Voiceover_Tail_Seconds": 0},
+        typecast=True,
+    )
+    request.setdefault("fields", {})["Production_Notes"] = notes
+    request["fields"]["Voiceover_Tail_Seconds"] = 0
+    joined = exact_voiceover_text(timeline)
+    if joined and not field_str(parent, "Voiceover_Script"):
+        apply_voiceover_script(client, parent, {"voiceover_script": joined}, locked=False)
+
+
 def ensure_voiceover_script(client: AirtableClient, request: dict[str, Any], parent: dict[str, Any], themes: dict[str, Any] | None = None) -> dict[str, Any]:
     """SAI1 for voiceover script when uploaded photos skipped themes (caption already set)."""
     parent = enforce_exact_voiceover_script(client, request, parent)
     exact = exact_requested_script(request)
     if exact:
+        ensure_slide_voiceover_timeline(client, request, parent, themes)
         return themes or {}
     if field_str(parent, "Voiceover_URL") or field_str(parent, "Voiceover_Script"):
+        ensure_slide_voiceover_timeline(client, request, parent, themes)
         return themes or {}
     if themes and str(themes.get("voiceover_script") or "").strip():
         apply_voiceover_script(client, parent, themes)
+        ensure_slide_voiceover_timeline(client, request, parent, themes)
         return themes
     from sai1.processor import process_request
 
     title = theme_title(request, parent)
     if not title:
         raise StepBlocked("No title available for voiceover script")
-    assets = master_assets(request)
-    covered = [
-        str(asset.get("caption") or "").strip()
-        for asset in sorted(assets, key=lambda item: int(item.get("order") or 0))
-        if str(asset.get("caption") or "").strip()
-    ]
+    photos = _ordered_photo_assets(request) or []
+    covered = _slide_captions(photos)
     result = process_request(
         title=title,
         covered_text="\n".join(f"{index + 1}. {text}" for index, text in enumerate(covered)) or "(none)",
@@ -426,6 +506,7 @@ def ensure_voiceover_script(client: AirtableClient, request: dict[str, Any], par
     if not str(next_themes.get("voiceover_script") or "").strip():
         raise StepBlocked(result.get("reason") or "SAI1 did not return a voiceover script")
     apply_voiceover_script(client, parent, next_themes)
+    ensure_slide_voiceover_timeline(client, request, parent, next_themes, total=max(1, len(covered)))
     return next_themes
 
 
@@ -466,23 +547,22 @@ def step_themes(client: AirtableClient, ctx: dict[str, Any]) -> str:
     ctx["parent"] = parent
     need_caption = not caption_locked(request) and not field_str(parent, "Caption")
     need_script = voiceover_required(request, parent) and not field_str(parent, "Voiceover_Script") and not field_str(parent, "Voiceover_URL")
+    photos = _ordered_photo_assets(request)
+    slide_total = (len(photos) if photos is not None else len(assets)) + needed
     if not needed and not need_caption and not need_script:
+        ensure_slide_voiceover_timeline(client, request, parent, total=slide_total)
         return "audio"
     from sai1.processor import process_request
 
     title = theme_title(request, parent)
     if not title:
         raise StepBlocked("No title available for slide themes")
-    covered = [
-        str(asset.get("caption") or "").strip()
-        for asset in sorted(assets, key=lambda item: int(item.get("order") or 0))
-        if str(asset.get("caption") or "").strip()
-    ]
+    covered = _slide_captions(photos if photos is not None else sorted(assets, key=lambda item: int(item.get("order") or 0)))
     result = process_request(
         title=title,
         covered_text="\n".join(f"{index + 1}. {text}" for index, text in enumerate(covered)) or "(none)",
         needed=needed,
-        total=len(covered) + needed,
+        total=max(slide_total, len(covered) + needed),
     )
     if needed and not result.get("processed"):
         raise StepBlocked(result.get("reason") or "SAI1 did not return slide themes")
@@ -497,6 +577,13 @@ def step_themes(client: AirtableClient, ctx: dict[str, Any]) -> str:
     if script_locked(request):
         parent = enforce_exact_voiceover_script(client, request, parent)
         ctx["parent"] = parent
+    ensure_slide_voiceover_timeline(
+        client,
+        request,
+        ctx.get("parent") or parent,
+        themes,
+        total=max(slide_total, len(covered) + needed),
+    )
     if need_script and not field_str(parent, "Voiceover_Script") and not field_str(ctx.get("parent") or parent, "Voiceover_Script"):
         parent = client.get_record(CONTENT_ITEMS_TABLE, parent["id"])
         ctx["parent"] = parent

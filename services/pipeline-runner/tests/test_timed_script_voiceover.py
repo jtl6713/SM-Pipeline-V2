@@ -112,7 +112,45 @@ def test_three_scenes_different_spoken_lengths_total_is_sum():
     assert rebuilt["duration_seconds"] == sum(spoken)
 
 
-def test_timed_script_under_four_seconds_is_rewritten_and_not_kept_short(monkeypatch):
+def test_silent_hold_stays_out_of_tts_and_total_is_the_sum(monkeypatch):
+    from studio_produce.timed_script import timeline_from_slide_lines
+
+    timeline = timeline_from_slide_lines([
+        {"line": "First stop is the riverwalk and it takes a breath.", "silent": False},
+        {"line": "Second stop is the bean and the crowd around it.", "silent": False},
+        {"line": "", "silent": True, "hold_seconds": 2.5},
+    ], [])
+
+    def fake_synthesize(text: str, *, voice_id: str, speed: float = 1.0) -> bytes:
+        return text.encode("utf-8")
+
+    def probe(data: bytes) -> float:
+        if data == b"SILENCE":
+            return 2.5
+        text = data.decode("utf-8")
+        return 4.2 if text.startswith("First") else 5.1
+
+    monkeypatch.setattr("p2.timed_script_voiceover.silence_mp3_bytes", lambda _seconds: b"SILENCE")
+    monkeypatch.setattr("p2.timed_script_voiceover.probe_audio_duration_bytes", probe)
+    monkeypatch.setattr("p2.timed_script_voiceover.concat_mp3_bytes", lambda parts: b"|".join(parts))
+
+    audio, measured, seconds = synthesize_timed_script_voiceover(
+        timeline,
+        voice_id="voice",
+        synthesize=fake_synthesize,
+    )
+    assert seconds == [4.2, 5.1, 2.5]
+    assert [segment["duration_seconds"] for segment in measured["segments"]] == [4.2, 5.1, 2.5]
+    assert measured["duration_seconds"] == 11.8
+    assert measured["segments"][2]["voiceover_text"] == ""
+    assert measured["segments"][2]["silent"] is True
+    assert b"SILENCE" in audio
+    assert audio.startswith(b"First")
+
+
+def test_timed_script_under_four_seconds_is_rejected(monkeypatch):
+    from audio.voiceover_duration import VoiceoverTooShort
+
     timeline = parse_timed_script_markdown(
         "| Time | Voiceover | Suggested still |\n"
         "| --- | --- | --- |\n"
@@ -122,21 +160,20 @@ def test_timed_script_under_four_seconds_is_rewritten_and_not_kept_short(monkeyp
     def fake_synthesize(text: str, *, voice_id: str, speed: float = 1.0) -> bytes:
         return text.encode("utf-8")
 
-    def lengthen(text: str, *, measured_seconds: float) -> str:
-        assert measured_seconds < 4
-        return text + " Look up at the ceiling, then move through with the crowd."
-
     monkeypatch.setattr(
         "p2.timed_script_voiceover.probe_audio_duration_bytes",
-        lambda data: 1.625 if b"Look up" not in data else 4.4,
+        lambda _data: 1.625,
     )
     monkeypatch.setattr("p2.timed_script_voiceover.concat_mp3_bytes", lambda parts: b"".join(parts))
 
-    _audio, measured, seconds = synthesize_timed_script_voiceover(
-        timeline,
-        voice_id="voice-eve",
-        synthesize=fake_synthesize,
-        lengthen=lengthen,
-    )
-    assert sum(seconds) >= 4
-    assert measured["segments"][-1]["voiceover_text"].endswith("crowd.")
+    try:
+        synthesize_timed_script_voiceover(
+            timeline,
+            voice_id="voice-eve",
+            synthesize=fake_synthesize,
+        )
+    except VoiceoverTooShort as exc:
+        assert "Not saved" in str(exc)
+        assert "1.625s" in str(exc)
+    else:
+        raise AssertionError("short voiceover was kept")

@@ -75,10 +75,10 @@ def test_p2_extends_non_story_outputs_instead_of_rejecting_long_voiceover():
     request = {"id": "recRequest", "fields": {"Video_Duration_Seconds": 30}}
     required = _extend_video_duration_for_voiceover(client, item, request, 32.28)
 
-    assert required == 34.3
-    assert any(record_id == "recContent" and fields.get("Content_Duration") == 34.3 for _, record_id, fields in client.updates)
-    assert any(record_id == "recRequest" and fields.get("Video_Duration_Seconds") == 34.3 for _, record_id, fields in client.updates)
-    assert any(record_id == "recReel" and fields.get("Studio_Effective_Video_Duration_Seconds") == 34.3 for _, record_id, fields in client.updates)
+    assert required == 32.3
+    assert any(record_id == "recContent" and fields.get("Content_Duration") == 32.3 for _, record_id, fields in client.updates)
+    assert any(record_id == "recRequest" and fields.get("Video_Duration_Seconds") == 32.3 for _, record_id, fields in client.updates)
+    assert any(record_id == "recReel" and fields.get("Studio_Effective_Video_Duration_Seconds") == 32.3 for _, record_id, fields in client.updates)
     assert not any(record_id == "recStory" for _, record_id, _ in client.updates)
 
 
@@ -108,7 +108,7 @@ def test_measured_voiceover_duration_overrides_requested_target_and_extends_rend
         effective=effective,
         request=request,
         output=output,
-    ) == 34.3
+    ) == 32.3
 
 
 def test_render_progress_detail_counts_ready_outputs():
@@ -1045,7 +1045,7 @@ def test_legacy_output_effective_keeps_parent_preferred_music_url():
     assert effective["voiceover_duration_seconds"] == 32.28
 
 
-def test_duration_extends_requested_video_to_voiceover_plus_tail():
+def test_duration_extends_requested_video_to_measured_speech_without_tail():
     effective = {
         "voiceover_mode": "Yes",
         "video_duration_seconds": 30,
@@ -1058,7 +1058,7 @@ def test_duration_extends_requested_video_to_voiceover_plus_tail():
         effective=effective,
         request={"fields": {"Video_Duration_Seconds": 30}},
         output={"fields": {}},
-    ) == 34.3
+    ) == 32.3
 
 
 def test_recovery_audio_uses_parent_music_and_keeps_voiceover_on_photo_story():

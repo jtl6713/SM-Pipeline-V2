@@ -397,7 +397,7 @@ def output_effective(output: dict[str, Any], request: dict[str, Any], parent: di
         "background_music_mode": field_str(output, "Studio_Effective_Background_Music_Mode") or field_str(request, "Background_Music_Mode") or "Yes",
         "video_duration_seconds": field(output, "Studio_Effective_Video_Duration_Seconds") or field(request, "Video_Duration_Seconds") or 0,
         "voiceover_duration_seconds": voiceover_duration,
-        "voiceover_tail_seconds": field(output, "Studio_Effective_Voiceover_Tail_Seconds") or field(request, "Voiceover_Tail_Seconds") or field(parent or {}, "Voiceover_Tail_Seconds") or 2,
+        "voiceover_tail_seconds": field(output, "Studio_Effective_Voiceover_Tail_Seconds") if field(output, "Studio_Effective_Voiceover_Tail_Seconds") not in (None, "") else field(request, "Voiceover_Tail_Seconds") if field(request, "Voiceover_Tail_Seconds") not in (None, "") else field(parent or {}, "Voiceover_Tail_Seconds") or 0,
         "music_start_seconds": field(output, "Studio_Effective_Music_Start_Seconds") or field(request, "Music_Start_Seconds") or field(parent or {}, "Music_Start_Seconds") or 0,
         "requested_title": field_str(output, "Studio_Effective_Requested_Title") or field_str(request, "Requested_Title") or field_str(parent or {}, "Content_Title"),
         "requested_caption": field_str(output, "Studio_Effective_Requested_Caption") or field_str(request, "Requested_Caption") or field_str(parent or {}, "Caption"),
@@ -435,17 +435,16 @@ def duration_seconds(
     except (TypeError, ValueError):
         stored_n = 0
     # A requested duration is a target, but narration must never be truncated.
-    # Extend to the next whole frame when measured/stored voiceover + tail is longer.
+    # Extend to the next whole frame when measured speech is longer. A stored tail is unused.
     if stored_n > 0:
         if directive_yes(effective.get("voiceover_mode")):
             try:
                 voice_n = float(effective.get("voiceover_duration_seconds") or 0)
-                tail_n = float(effective.get("voiceover_tail_seconds") or 0)
             except (TypeError, ValueError):
                 voice_n = 0
-                tail_n = 0
             if voice_n > 0:
-                required = math.ceil((voice_n + max(0.0, tail_n)) * FPS) / FPS
+                # Speech length can extend the reel. A stored tail does not.
+                required = math.ceil(voice_n * FPS) / FPS
                 return max(stored_n, required)
         return stored_n
     if clip_count <= 1:
@@ -644,6 +643,24 @@ def assign_clip_frames(
         # After P2, those windows are measured VO lengths (not raw import clocks).
         frames = [segment_duration_frames(segment) for segment in timeline["segments"]]
         if frames and all(frame >= 1 for frame in frames):
+            return frames, sum(frames)
+    photo_voice = (
+        not story
+        and not video_indexes
+        and directive_yes(effective.get("voiceover_mode"))
+    )
+    if photo_voice and photo_indexes:
+        try:
+            voice_n = float(effective.get("voiceover_duration_seconds") or 0)
+        except (TypeError, ValueError):
+            voice_n = 0
+        if voice_n > 0:
+            # No per-slide timeline yet. Split the measured speech. Do not pad
+            # out to a stored video duration or a tail.
+            target = max(len(photo_indexes), round(voice_n * FPS))
+            allocated = distribute_frames([1] * len(photo_indexes), target)
+            for position, index in enumerate(photo_indexes):
+                frames[index] = allocated[position]
             return frames, sum(frames)
     if render_settings.get("duration_mode") == "fixed" and photo_indexes:
         fixed_seconds = max(1.0, min(15.0, _render_float(render_settings, "duration_seconds", 3.0)))

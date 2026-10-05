@@ -12,7 +12,7 @@ from audio.voiceover_duration import (
 
 def test_voiceover_exceeds_video_when_spoken_runs_past_end():
     assert voiceover_exceeds_video(voiceover_seconds=26.8, video_seconds=25.0, tail_seconds=2.0) is True
-    assert voiceover_exceeds_video(voiceover_seconds=24.0, video_seconds=25.0, tail_seconds=2.0) is True
+    assert voiceover_exceeds_video(voiceover_seconds=24.0, video_seconds=25.0, tail_seconds=2.0) is False
     assert voiceover_exceeds_video(voiceover_seconds=23.0, video_seconds=25.0, tail_seconds=2.0) is False
 
 
@@ -20,12 +20,12 @@ def test_owner_cap_validation_uses_request_video_duration():
     item = {"fields": {"Content_Duration": 30, "Voiceover_Tail_Seconds": 2}}
     request = {"fields": {"Video_Duration_Seconds": 30}}
     assert validate_voiceover_for_owner_cap(
-        voiceover_seconds=26.8,
+        voiceover_seconds=29.0,
         content_item=item,
         request=request,
     ) is None
     assert validate_voiceover_for_owner_cap(
-        voiceover_seconds=29.0,
+        voiceover_seconds=32.0,
         content_item=item,
         request=request,
     ) is not None

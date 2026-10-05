@@ -438,7 +438,10 @@ export function ideaProductionConfigFields(payload, existingNotes = "") {
   tri(payload.include_background_music, "Production_Include_Background_Music", "Background music");
   tri(payload.include_thumbnail, "Production_Include_Thumbnail", "Thumbnail");
 
-  if (payload.video_duration !== undefined && payload.video_duration !== null && String(payload.video_duration).trim() !== "") {
+  const stillsType = ["Photo Set", "Carousel", "Feed Post"].includes(contentType);
+  if (stillsType) {
+    fields.Production_Video_Duration = null;
+  } else if (payload.video_duration !== undefined && payload.video_duration !== null && String(payload.video_duration).trim() !== "") {
     fields.Production_Video_Duration = ideaSaveInt(payload.video_duration, 5, 600, "Video duration");
   }
 
@@ -452,13 +455,7 @@ export function ideaProductionConfigFields(payload, existingNotes = "") {
     }
   }
 
-  if (payload.voiceover_tail_seconds !== undefined && payload.voiceover_tail_seconds !== null && String(payload.voiceover_tail_seconds).trim() !== "") {
-    const tail = Number(payload.voiceover_tail_seconds);
-    if (!Number.isFinite(tail) || tail < 0 || tail > 10) {
-      throw new Error("Voiceover tail must be between 0 and 10 seconds");
-    }
-    fields.Voiceover_Tail_Seconds = Math.round(tail * 2) / 2;
-  }
+  fields.Voiceover_Tail_Seconds = 0;
 
   if (payload.carousel_slide_count !== undefined && payload.carousel_slide_count !== null && String(payload.carousel_slide_count).trim() !== "") {
     fields.Production_Carousel_Slide_Count = ideaSaveInt(payload.carousel_slide_count, 1, 20, "Slide count");
