@@ -641,12 +641,15 @@
       if (existing && !Number.isNaN(Date.parse(existing))) {
         const iso = new Date(existing).toISOString();
         const existingMs = Date.parse(iso);
-        // Existing automatic suggestions are only reusable when they are valid in
-        // the ACTIVE PROFILE timezone. A saved 2 AM LA slot must not survive just
-        // because the browser happens to be running in Chicago (or any other zone).
-        if (!ezIsBlackoutLocalTime(existingMs, options.timeZone)) {
+        const lane = isStory ? [] : (reserved[platform] || []);
+        // Keep a stored time only when it is still an open MAE slot in the
+        // active profile timezone. A taken 5:30 is replaced by the next
+        // morning → afternoon → evening opening.
+        const reusable = ezIsPriorityLocalTime(existingMs, options.timeZone)
+          && !ezIsBlackoutLocalTime(existingMs, options.timeZone)
+          && (isStory || !ezScheduleConflicts(existingMs, lane));
+        if (reusable) {
           stamps.set(key, iso);
-          // Stories may share a wall-clock slot; keep them out of the platform lane.
           if (!isStory) (reserved[platform] ||= []).push(existingMs);
           continue;
         }

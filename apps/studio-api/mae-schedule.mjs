@@ -218,7 +218,14 @@ export function maeBuildSuggestedScheduleMap(items, occupiedByPlatform = {}, now
     if (existing && !Number.isNaN(Date.parse(existing))) {
       const iso = new Date(existing).toISOString();
       const existingMs = Date.parse(iso);
-      if (maeIsPriorityLocalTime(existingMs, timeZone) && !maeIsBlackoutLocalTime(existingMs, timeZone)) {
+      const lane = isStory ? [] : (reserved[platform] || []);
+      // Keep a stored time only when it is still an open MAE slot. A taken
+      // 5:30 is discarded and the next morning → afternoon → evening opening
+      // is chosen, the same walk Regenerate uses.
+      const reusable = maeIsPriorityLocalTime(existingMs, timeZone)
+        && !maeIsBlackoutLocalTime(existingMs, timeZone)
+        && (isStory || !maeScheduleConflicts(existingMs, lane));
+      if (reusable) {
         stamps.set(key, iso);
         if (!isStory) (reserved[platform] ||= []).push(existingMs);
         continue;

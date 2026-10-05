@@ -259,7 +259,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.494-master-calendar-blackout-collapse";
+  const BUILD_ID = "item4-0.6.495-plan-mae-on-create";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -6906,11 +6906,18 @@
     const saved = ezWizardAnswers.schedules && typeof ezWizardAnswers.schedules === "object"
       ? ezWizardAnswers.schedules
       : {};
+    const occupiedByPlatform = {};
+    for (const item of scheduleItems) {
+      const platform = String(item.platform || "").trim();
+      if (!platform || /story/i.test(item.output_type || "")) continue;
+      const taken = pipelineOccupiedScheduleMs(platform);
+      if (taken.length) occupiedByPlatform[platform] = taken;
+    }
     const stamps = helpers?.ezBuildSuggestedScheduleMap?.(
       scheduleItems.map((item) => ({
         ...item,
         scheduled_at: saved[`${item.platform}::${item.output_type}`] || "",
-      })), {}, new Date(), { timeZone: workingStudioTimeZone() }
+      })), occupiedByPlatform, new Date(), { timeZone: workingStudioTimeZone() }
     ) || new Map();
     const rows = scheduleItems.map((item) => {
       const key = `${item.platform}::${item.output_type}`;

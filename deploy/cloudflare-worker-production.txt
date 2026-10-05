@@ -9,3 +9,4 @@ Deploy Worker 0.10.445-ideas-vo-approve. Ideas Create VO timeline attaches still
 Deploy Worker 0.10.446-timed-script-apply-remeasure. Timed-script Apply always clears VO so P2 remeasures scene windows.
 Deploy Worker 0.10.447-drive-music-404. Quality Agent detects deleted library music.
 Deploy Worker 0.10.448-schedule-occupancy-window. Occupancy query windows lookback/horizon and sorts nearest-first so MAE does not pile onto 5:30 AM.
+Deploy Worker 0.10.449-plan-mae-rotation. New production plans pick the next open MAE slot instead of reusing a taken 5:30.

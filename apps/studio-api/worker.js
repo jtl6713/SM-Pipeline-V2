@@ -486,7 +486,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.448-schedule-occupancy-window",
+          version: "0.10.449-plan-mae-rotation",
           studio_mae_schedule_v1: true,
           studio_desk_inventory_v1: true,
           studio_desk_activity_v1: true,
@@ -4417,7 +4417,7 @@ async function syncProductionRequestOutputs(request, env, url, authorization) {
   const byKey = new Map(existing.map(row => [rowKey(row), row]));
 
   const now = new Date().toISOString();
-  const occupied = await studioOccupiedSchedulesOrEmpty(env);
+  const occupied = await studioLoadPlanScheduleOccupancy(env, { excludeRequestId: productionRequestId });
   const timeZone = await studioScheduleTimeZoneForRecord(env, parent, payload);
   const stamps = studioBuildSuggestedScheduleMap(planItems.map((item) => {
     const key = `${item.platform}::${item.output_type}`;
@@ -8197,7 +8197,7 @@ async function item4SyncPlanOutputs(env, requestRecord, items, { schedules = nul
   // doing any broad schedule-occupancy reads. The final AZ approval path performs
   // its own conflict-aware scheduling, so an empty local occupancy map is safe here
   // and avoids exhausting the Worker subrequest budget while the output lock is held.
-  const occupied = finishedVideo ? {} : await studioOccupiedSchedulesOrEmpty(env);
+  const occupied = finishedVideo ? {} : await studioLoadPlanScheduleOccupancy(env, { excludeRequestId: productionRequestId });
   const timeZone = await studioScheduleTimeZoneForRecord(env, requestRecord);
   const stamps = studioBuildSuggestedScheduleMap(uniqueItems.map((item) => {
     const key = `${item.platform}::${item.output_type}`;
@@ -17274,12 +17274,47 @@ async function studioOccupiedSchedulesOrEmpty(env) {
   }
 }
 
-function studioDestinationScheduleStamp(current, key, stamps, overrides) {
+function studioDestinationScheduleStamp(current, key, stamps, _overrides) {
   const iso = stamps.get(key);
   if (!iso) return null;
   const currentIso = current ? String(f(current, "Scheduled_At") || "").trim() : "";
-  if (currentIso && !(overrides instanceof Map && overrides.has(key))) return null;
+  if (!currentIso) return iso;
+  const currentMs = Date.parse(currentIso);
+  const nextMs = Date.parse(iso);
+  const same = Number.isFinite(currentMs) && Number.isFinite(nextMs)
+    && new Date(currentMs).toISOString() === new Date(nextMs).toISOString();
+  // A stored 5:30 that lost its slot must be written. Matching times stay put.
+  if (same) return null;
   return iso;
+}
+
+async function studioLoadPlanScheduleOccupancy(env, { excludeRequestId = "" } = {}) {
+  const occupied = await studioOccupiedSchedulesOrEmpty(env);
+  try {
+    const now = Date.now();
+    const lookback = airtableFormulaEscape(new Date(now - STUDIO_OCCUPIED_LOOKBACK_MS).toISOString());
+    const horizon = airtableFormulaEscape(new Date(now + STUDIO_OCCUPIED_HORIZON_MS).toISOString());
+    const rows = await listRecords(env, PRODUCTION_REQUEST_OUTPUT_TABLE, {
+      limit: 200,
+      sortField: "Scheduled_At",
+      sortDirection: "asc",
+      filterFormula: `AND({Enabled}=1,{Scheduled_At}!="",IS_AFTER({Scheduled_At},DATETIME_PARSE("${lookback}")),IS_BEFORE({Scheduled_At},DATETIME_PARSE("${horizon}")))`,
+      fields: ["Platform", "Output_Type", "Scheduled_At", "Production_Request"],
+    });
+    for (const row of rows || []) {
+      const requestIds = arrayOrEmpty(f(row, "Production_Request")).map((id) => String(id || "").trim());
+      if (excludeRequestId && requestIds.includes(excludeRequestId)) continue;
+      const outputType = String(f(row, "Output_Type") || "");
+      if (/story/i.test(outputType)) continue;
+      const platform = String(f(row, "Platform") || "").trim();
+      const ms = studioScheduleMs(f(row, "Scheduled_At"));
+      if (!platform || ms == null) continue;
+      (occupied[platform] ||= []).push(ms);
+    }
+  } catch (error) {
+    console.warn("pending plan schedule occupancy read failed", error);
+  }
+  return occupied;
 }
 
 const STUDIO_WATCHLIST_PLATFORMS = new Set(["instagram", "youtube", "tiktok", "facebook"]);

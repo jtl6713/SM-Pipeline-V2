@@ -152,6 +152,62 @@ test("existing blackout stamps are not reused", () => {
   assert.equal(maeIsBlackoutLocalTime(Date.parse(iso), zone), false);
 });
 
+test("a taken 5:30 is not reused; the next MAE opening is chosen", () => {
+  const zone = "America/New_York";
+  const now = new Date("2026-10-05T08:00:00Z");
+  const morning = maePickBalancedSuggestedIso([], now, {
+    occupiedMs: [],
+    platformOccupiedMs: [],
+    timeZone: zone,
+  });
+  const stamps = maeBuildSuggestedScheduleMap(
+    [
+      { platform: "Instagram", output_type: "Reel", scheduled_at: morning },
+      { platform: "Instagram", output_type: "Carousel", scheduled_at: morning },
+    ],
+    { Instagram: [Date.parse(morning)] },
+    now,
+    { timeZone: zone },
+  );
+  const reel = localParts(stamps.get("Instagram::Reel"), zone);
+  const carousel = localParts(stamps.get("Instagram::Carousel"), zone);
+  assert.notEqual(stamps.get("Instagram::Reel"), morning);
+  assert.equal(reel.hour, 11);
+  assert.equal(reel.minute, 30);
+  assert.equal(carousel.hour, 16);
+  assert.equal(carousel.minute, 30);
+  const dayOf = (iso) => new Intl.DateTimeFormat("en-CA", {
+    timeZone: zone, year: "numeric", month: "2-digit", day: "2-digit",
+  }).format(new Date(iso));
+  assert.equal(dayOf(stamps.get("Instagram::Reel")), dayOf(morning));
+});
+
+test("two Instagrams stored on the same free 5:30 become morning then afternoon", () => {
+  const zone = "America/New_York";
+  const now = new Date("2026-10-05T08:00:00Z");
+  const morning = maePickBalancedSuggestedIso([], now, {
+    occupiedMs: [],
+    platformOccupiedMs: [],
+    timeZone: zone,
+  });
+  const stamps = maeBuildSuggestedScheduleMap(
+    [
+      { platform: "Instagram", output_type: "Reel", scheduled_at: morning },
+      { platform: "Instagram", output_type: "Carousel", scheduled_at: morning },
+    ],
+    {},
+    now,
+    { timeZone: zone },
+  );
+  const reel = localParts(stamps.get("Instagram::Reel"), zone);
+  const carousel = localParts(stamps.get("Instagram::Carousel"), zone);
+  assert.equal(stamps.get("Instagram::Reel"), new Date(morning).toISOString());
+  assert.equal(reel.hour, 5);
+  assert.equal(reel.minute, 30);
+  assert.equal(carousel.hour, 11);
+  assert.equal(carousel.minute, 30);
+});
+
 test("occupancy load windows the Airtable query and sorts nearest-first", () => {
   const loadFn = worker.slice(
     worker.indexOf("async function studioLoadOccupiedScheduleRows"),
@@ -172,7 +228,9 @@ test("occupancy load windows the Airtable query and sorts nearest-first", () => 
 test("Worker stamp paths use MAE not industry evening windows", () => {
   assert.match(worker, /from "\.\/mae-schedule\.mjs"/);
   assert.match(worker, /studio_mae_schedule_v1: true/);
-  assert.match(worker, /0\.10\.448-schedule-occupancy-window/);
+  assert.match(worker, /0\.10\.449-plan-mae-rotation/);
+  assert.match(worker, /studioLoadPlanScheduleOccupancy/);
+  assert.match(worker, /A stored 5:30 that lost its slot must be written/);
   assert.match(worker, /MAE_PRIORITY_SCHEDULE_WINDOWS/);
   assert.doesNotMatch(
     worker.slice(worker.indexOf("function studioBuildSuggestedScheduleMap")),
