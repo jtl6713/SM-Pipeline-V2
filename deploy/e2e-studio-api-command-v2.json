@@ -1,10 +1,10 @@
 {
-  "correlation_id": "OUTPUT-1235-AP3C-RECOVERY-20260930",
+  "correlation_id": "CONTENT-323-VOICEOVER-CONTINUE-20261005",
   "requests": [
     {
-      "name": "kick-output-1235",
+      "name": "323-instagram-reel-continue",
       "method": "POST",
-      "path": "/api/operations/outputs/recVphOmGqaxIYHSD/publish-kick",
+      "path": "/api/outputs/recqjwPvNBY456O5R/creative/render/continue",
       "body": {}
     }
   ]
