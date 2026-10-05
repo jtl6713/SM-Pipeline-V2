@@ -182,14 +182,16 @@ export function buildAzCampaignSchedule(items, { occupiedMs = [], bestTimesByKey
     if (!platform || !outputType) continue;
     const key = scheduleKey(platform, outputType);
     const suggested = bestTimesByKey[key] || industryBestWindows(platform, outputType);
+    const isStory = isStoryType(outputType);
     const iso = pickBalancedSuggestedIso(suggested.windows || ["12:00-13:00"], now, {
       days: suggested.days || [],
-      occupiedMs: reservedAll,
-      platformOccupiedMs: reservedByPlatform[platform] || [],
+      // Stories ignore occupancy so they can share a slot with the platform main.
+      occupiedMs: isStory ? [] : reservedAll,
+      platformOccupiedMs: isStory ? [] : (reservedByPlatform[platform] || []),
     });
     stamps.set(key, iso);
     const ms = Date.parse(iso);
-    if (Number.isFinite(ms)) {
+    if (Number.isFinite(ms) && !isStory) {
       reservedAll.push(ms);
       (reservedByPlatform[platform] ||= []).push(ms);
     }

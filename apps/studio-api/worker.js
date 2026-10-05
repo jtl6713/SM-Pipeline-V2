@@ -459,7 +459,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.440-voiceover-drives-timing",
+          version: "0.10.441-schedule-platform-occupancy",
           studio_desk_inventory_v1: true,
           studio_desk_activity_v1: true,
           studio_tiktok_complete_v1: true,
@@ -7330,6 +7330,10 @@ async function studioLoadOccupiedSchedules(env, { excludeIds = [] } = {}) {
     if (skip.has(row.id)) continue;
     const platform = String(f(row, "Platform") || "").trim();
     if (!platform) continue;
+    // IG/FB Stories may share a wall-clock slot and must not occupy the
+    // platform lane used by Reels, Videos, Slideshows, and feed posts.
+    const outputType = String(f(row, "Studio_Output_Type") || f(row, "Format") || "").trim();
+    if (/story/i.test(outputType)) continue;
     const ms = studioOccupiedMsFromRow(row, now);
     if (ms == null) continue;
     (byPlatform[platform] ||= []).push(ms);
@@ -9685,14 +9689,17 @@ async function azAutoApproveIfReady(env, requestId, options = {}) {
   const scheduled = {};
   for (const row of toApprove) {
     const platform = String(f(row, "Platform") || "").trim();
-    const occupiedMs = studioOccupiedForPlatform(occupiedByPlatform, platform);
-    const key = studioAzScheduleKey(platform, f(row, "Studio_Output_Type") || f(row, "Format"));
+    const outputType = String(f(row, "Studio_Output_Type") || f(row, "Format") || "").trim();
+    const isStory = /story/i.test(outputType);
+    // Stories may share a wall-clock slot; only non-stories occupy the platform lane.
+    const occupiedMs = isStory ? [] : studioOccupiedForPlatform(occupiedByPlatform, platform);
+    const key = studioAzScheduleKey(platform, outputType);
     const existingIso = String(f(row, "Scheduled_Post_Date") || f(row, "Studio_Scheduled_At") || "").trim();
     let iso = existingIso && !Number.isNaN(Date.parse(existingIso))
       ? new Date(existingIso).toISOString()
       : "";
     if (!iso) {
-      const industry = studioIndustryBestWindows(platform, f(row, "Studio_Output_Type") || f(row, "Format"));
+      const industry = studioIndustryBestWindows(platform, outputType);
       iso = studioSuggestedLocalDatetime(industry.windows || ["12:00-13:00"], new Date(), {
         days: industry.days,
         occupiedMs: reservedAll,
@@ -9705,7 +9712,7 @@ async function azAutoApproveIfReady(env, requestId, options = {}) {
       scheduled_post_date: iso,
     }, { occupiedMs });
     const booked = studioScheduleMs(iso) ?? Date.parse(iso);
-    if (Number.isFinite(booked)) {
+    if (Number.isFinite(booked) && !isStory) {
       (occupiedByPlatform[platform] ||= []).push(booked);
       reservedAll.push(booked);
     }
@@ -17194,21 +17201,24 @@ function studioBuildSuggestedScheduleMap(items, occupiedByPlatform = {}, now = n
     const outputType = String(item.output_type || "").trim();
     if (!platform || !outputType) continue;
     const key = `${platform}::${outputType}`;
+    const isStory = studioScheduleStoryRank(outputType) === 1;
     const existing = String(item.scheduled_at || "").trim();
     if (existing && !Number.isNaN(Date.parse(existing))) {
       const iso = new Date(existing).toISOString();
       stamps.set(key, iso);
-      (reserved[platform] ||= []).push(Date.parse(iso));
+      // Stories may share a wall-clock slot; keep them out of the platform lane.
+      if (!isStory) (reserved[platform] ||= []).push(Date.parse(iso));
       continue;
     }
     const industry = studioIndustryBestWindows(platform, outputType);
     const iso = studioPickBalancedSuggestedIso(industry.windows, now, {
       days: industry.days,
-      occupiedMs: studioFlattenOccupiedByPlatform(reserved),
-      platformOccupiedMs: reserved[platform] || [],
+      // Stories ignore occupancy so IG/FB Stories can share a slot with mains.
+      occupiedMs: isStory ? [] : studioFlattenOccupiedByPlatform(reserved),
+      platformOccupiedMs: isStory ? [] : (reserved[platform] || []),
     });
     stamps.set(key, iso);
-    (reserved[platform] ||= []).push(Date.parse(iso));
+    if (!isStory) (reserved[platform] ||= []).push(Date.parse(iso));
   }
   return stamps;
 }
@@ -32246,13 +32256,15 @@ async function approveAllOutputsForPublishing(request, env, authorization, ctx =
   for (const record of eligible) {
     try {
       const platform = String(f(record, "Platform") || "").trim();
-      const occupiedMs = studioOccupiedForPlatform(occupiedByPlatform, platform);
+      const isStory = /story/i.test(String(f(record, "Studio_Output_Type") || f(record, "Format") || ""));
+      // Stories may share a wall-clock slot; only non-stories occupy the platform lane.
+      const occupiedMs = isStory ? [] : studioOccupiedForPlatform(occupiedByPlatform, platform);
       const rowSchedule = schedules[record.id] !== undefined ? schedules[record.id] : payload?.scheduled_post_date;
       const updated = await approveOutputRecordForPublishing(env, record, note, stamp, {
         scheduled_post_date: rowSchedule,
       }, { occupiedMs });
       const booked = studioScheduleMs(f(updated, "Scheduled_Post_Date")) ?? Date.now();
-      (occupiedByPlatform[platform] ||= []).push(booked);
+      if (!isStory) (occupiedByPlatform[platform] ||= []).push(booked);
       approved.push(mapApprovedOutputSummary(updated));
     } catch (error) {
       failed.push({

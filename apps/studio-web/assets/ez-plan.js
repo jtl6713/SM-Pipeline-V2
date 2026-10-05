@@ -643,6 +643,7 @@
       const outputType = String(item.output_type || "").trim();
       if (!platform || !outputType) continue;
       const key = `${platform}::${outputType}`;
+      const isStory = /story/i.test(outputType);
       const existing = String(item.scheduled_at || "").trim();
       if (existing && !Number.isNaN(Date.parse(existing))) {
         const iso = new Date(existing).toISOString();
@@ -652,17 +653,20 @@
         // because the browser happens to be running in Chicago (or any other zone).
         if (!ezIsBlackoutLocalTime(existingMs, options.timeZone)) {
           stamps.set(key, iso);
-          (reserved[platform] ||= []).push(existingMs);
+          // Stories may share a wall-clock slot; keep them out of the platform lane.
+          if (!isStory) (reserved[platform] ||= []).push(existingMs);
           continue;
         }
       }
       const iso = ezPickBalancedSuggestedIso(EZ_PRIORITY_SCHEDULE_WINDOWS, now, {
-        occupiedMs: ezFlattenOccupied(reserved),
-        platformOccupiedMs: reserved[platform] || [],
+        // Stories ignore occupancy entirely so IG/FB Stories can share a slot
+        // with each other and with the platform's main post.
+        occupiedMs: isStory ? [] : ezFlattenOccupied(reserved),
+        platformOccupiedMs: isStory ? [] : (reserved[platform] || []),
         timeZone: options.timeZone,
       });
       stamps.set(key, iso);
-      (reserved[platform] ||= []).push(Date.parse(iso));
+      if (!isStory) (reserved[platform] ||= []).push(Date.parse(iso));
     }
     return stamps;
   }
