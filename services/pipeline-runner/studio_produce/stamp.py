@@ -379,16 +379,31 @@ def directive_yes(value: Any) -> bool:
 
 def output_effective(output: dict[str, Any], request: dict[str, Any], parent: dict[str, Any] | None) -> dict[str, Any]:
     voiceover_mode = field_str(output, "Studio_Effective_Voiceover_Mode") or field_str(request, "Voiceover_Mode") or "Yes"
-    voiceover_duration = (
-        field(output, "Studio_Effective_Voiceover_Duration_Seconds")
-        # The parent value is measured from the actual synthesized file; the request
-        # value is only the requested script target and can be shorter.
-        or field(parent or {}, "Voiceover_Duration_Seconds")
-        or field(request, "Voiceover_Duration_Seconds")
-        or 0
-    )
-    if directive_yes(voiceover_mode) and not voiceover_duration and field_str(parent or {}, "Voiceover_URL"):
-        voiceover_duration = measured_voiceover_seconds(output, parent, probe=True) or 0
+    # Duration fields can be stale after P2 remasures or joins timed-script
+    # segments into the final continuous MP3. A shorter cached "effective" value
+    # must never truncate the actual narration. Preserve any intentional longer
+    # target by taking the maximum known duration.
+    duration_candidates = []
+    for raw in (
+        field(output, "Studio_Effective_Voiceover_Duration_Seconds"),
+        field(parent or {}, "Voiceover_Duration_Seconds"),
+        field(request, "Voiceover_Duration_Seconds"),
+    ):
+        try:
+            value = float(raw or 0)
+        except (TypeError, ValueError):
+            value = 0
+        if value > 0:
+            duration_candidates.append(value)
+    voiceover_duration = max(duration_candidates, default=0)
+    if directive_yes(voiceover_mode) and field_str(parent or {}, "Voiceover_URL"):
+        probed = measured_voiceover_seconds(output, parent, probe=True) or 0
+        try:
+            probed_n = float(probed or 0)
+        except (TypeError, ValueError):
+            probed_n = 0
+        if probed_n > voiceover_duration:
+            voiceover_duration = probed_n
     return {
         "platform": field_str(output, "Platform"),
         "output_type": field_str(output, "Studio_Output_Type") or field_str(output, "Output_Type"),
