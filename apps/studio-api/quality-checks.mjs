@@ -19,6 +19,7 @@ export const QUALITY_HEALS = Object.freeze([
   "clamp_children_then_requeue",
   "verify_children_then_advance",
   "backoff_then_retry_missing_child",
+  "retarget_music_drive",
   "ticket_only",
   "none",
 ]);
@@ -264,6 +265,14 @@ export const QUALITY_CHECKS = Object.freeze([
     kind: "produce_clip_mismatch",
     actor: "desk_agent",
     heal: "ticket_only",
+  }),
+  check({
+    id: "drive_music_404",
+    title: "Check for produce/render parked on a deleted Google Drive library music file (Remotion Download failed 404)",
+    lane: "service",
+    kind: "drive_music_404",
+    actor: "desk_agent",
+    heal: "retarget_music_drive",
   }),
   check({
     id: "render_ready_no_job",

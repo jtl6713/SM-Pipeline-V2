@@ -82,6 +82,8 @@ export function errorClassFromText(text) {
   if (/no studio master photos to crop/i.test(value)) return "missing_masters";
   if (/no platform outputs found/i.test(value)) return "missing_outputs";
   if (/no_eligible_p2_route/i.test(value)) return "no_eligible_p2_route";
+  if (/download failed\s+404\s+drive/i.test(value)) return "drive_music_404";
+  if (/alt=media/i.test(value) && /404|not found/i.test(value) && /drive/i.test(value)) return "drive_music_404";
   if (/heal budget|retries exhausted|escalated/i.test(value)) return "heal_exhausted";
   const compact = value.replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 48);
   return compact || "unknown";
@@ -125,6 +127,7 @@ export function failedAgeMs(row, nowMs = Date.now()) {
 export function deskFailedNeedsHeal(row, nowMs = Date.now()) {
   const err = String(row?.publish_error || row?.render_error || row?.error || "");
   if (deskPermanentFailedError(err)) return false;
+  if (isDriveMusic404Error(err)) return false;
   if (deskTransientPublishError(err) || deskTransientRenderError(err) || !err.trim()) return true;
   return failedAgeMs(row, nowMs) >= STALE_FAILED_MS;
 }
@@ -191,10 +194,49 @@ export function withDeskIdentity(incident, row) {
   return next;
 }
 
+export function extractDriveMusic404FileId(text) {
+  const value = String(text || "");
+  if (!/404|not found/i.test(value)) return "";
+  const remotion = value.match(/Download failed\s+404\s+Drive\s+([A-Za-z0-9_-]{10,})/i);
+  if (remotion?.[1]) return remotion[1];
+  const api = value.match(/\/drive\/v3\/files\/([A-Za-z0-9_-]{10,})/i);
+  if (api?.[1]) return api[1];
+  const queryId = value.match(/[?&]id=([A-Za-z0-9_-]{10,})/i);
+  if (queryId?.[1] && /drive\.google/i.test(value)) return queryId[1];
+  return "";
+}
+
+export function isDriveMusic404Error(text) {
+  const value = String(text || "");
+  if (!/404|not found/i.test(value)) return false;
+  if (/Download failed\s+404\s+Drive/i.test(value)) return true;
+  if (/alt=media/i.test(value) && /drive\.google|googleapis\.com\/drive/i.test(value)) return true;
+  if (/music/i.test(value) && /drive/i.test(value) && /not found|404/i.test(value)) return true;
+  return Boolean(extractDriveMusic404FileId(value));
+}
+
+function driveMusic404Incident(recordId, error, row) {
+  const fileId = extractDriveMusic404FileId(error) || "missing_file";
+  return withDeskIdentity({
+    kind: "drive_music_404",
+    class: "data_repair",
+    record_id: recordId || null,
+    fingerprint: fingerprint("drive_music_404", recordId, fileId),
+    actor: "desk_agent",
+    error: error || null,
+    diagnosis: "Library music Drive file is deleted (Remotion Download failed 404 Drive <id>, or T1 Drive alt=media 404). "
+      + "Worker resume cannot restore the file. Find a live Assets/Music copy of the same track, retarget the Media Asset "
+      + "Google Drive File ID + URL, Content Item Music File ID + Music URL, and sibling Platform Output Music_URLs, "
+      + "reset produce heal resume_count, then resume studio-produce. Do not Approve publish. "
+      + "Proven: Content 298 Huntington Beach / recrbAqjeyGcERgdf / 11XdsaVu9EB9p_H5y-Q1n1MEPa2ZMr11t → love_nwantiti.mp3 1hADVgqH1x5TyPUPea5jruEIVUe45__ew.",
+  }, row);
+}
+
 export function deskRecoverableEscalatedError(text) {
   const value = String(text || "");
   if (/clip count mismatch/i.test(value)) return false;
   if (/missing composition|no clips|invalid props/i.test(value)) return false;
+  if (isDriveMusic404Error(value)) return false;
   const errorClass = errorClassFromText(value);
   if (errorClass === "clip_count_mismatch") return false;
   return errorClass === "transient_http"
@@ -220,6 +262,11 @@ export function classifyProduceJob(job, nowMs = Date.now(), staleAfterMs = STALE
   const errorClass = errorClassFromText(error || step);
   const updated = Date.parse(String(job.updated_at || ""));
   const stale = !Number.isFinite(updated) || (nowMs - updated) >= staleAfterMs;
+
+  // Deleted library music. Worker resume cannot restore Drive pixels.
+  if (isDriveMusic404Error(error) && (step === "blocked" || step === "escalated" || stale)) {
+    return driveMusic404Incident(recordId, error, job);
+  }
 
   // Remotion expectedClipCount vs clips.length. Worker heal retries cannot fix this.
   if (errorClass === "clip_count_mismatch" && (step === "blocked" || step === "escalated")) {
@@ -276,7 +323,15 @@ export function classifyRenderRow(row, nowMs = Date.now()) {
   const ageMs = Number.isFinite(modified) ? nowMs - modified : Infinity;
   const renderClipList = String(row?.render_clip_list_json || "");
   const remotionProps = String(row?.remotion_props_json || "");
-  const renderErrorText = String(row?.render_error || row?.error || "");
+  const renderErrorText = String(
+    row?.render_error || row?.timing_error || row?.music_error || row?.error || ""
+  );
+  if (
+    isDriveMusic404Error(renderErrorText)
+    && ["Blocked", "Ready for Render", "Rendering", "Failed"].includes(renderStatus)
+  ) {
+    return driveMusic404Incident(recordId, renderErrorText, row);
+  }
   const privateDriveWatermark = /"watermarkUrl"\s*:\s*"https?:\/\/(?:drive|docs)\.google\.com/i.test(remotionProps)
     || /PRIVATE_DRIVE_WATERMARK/i.test(renderErrorText)
     || (/watermark/i.test(renderErrorText) && /drive\.google\.com|ERR_BLOCKED_BY_ORB|HTTP status code:\s*403/i.test(renderErrorText));
@@ -1147,6 +1202,7 @@ export function classifyTesterCatalogAssert() {
 
 export const CLASSIFIER_KINDS = Object.freeze([
   "produce_clip_mismatch",
+  "drive_music_404",
   "produce_escalated",
   "produce_stale",
   "render_ready_no_job",
