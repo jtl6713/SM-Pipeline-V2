@@ -81,14 +81,15 @@ test("8 PM through 3:30 AM is a blackout in profile local time", () => {
   for (const [iso, expected] of samples) assert.equal(plan.ezIsBlackoutLocalTime(Date.parse(iso), zone), expected);
 });
 
-test("conflict fallback advances out of overnight blackout", () => {
+test("conflict fallback re-picks MAE instead of walking into overnight blackout", () => {
   const zone = "America/Los_Angeles";
-  const candidate = "2026-10-04T02:00:00Z"; // 7:00 PM local
+  const now = new Date("2026-10-03T16:00:00Z"); // 9:00 AM PDT
+  const candidate = "2026-10-04T07:00:00Z"; // midnight PDT — blackout
   const occupied = [Date.parse(candidate)];
-  const iso = plan.ezNextOpenScheduleIso(candidate, occupied, 3 * 60 * 60 * 1000, { timeZone: zone });
+  const iso = plan.ezNextOpenScheduleIso(candidate, occupied, 3 * 60 * 60 * 1000, { timeZone: zone, now });
   const local = localParts(iso, zone);
-  assert.equal(local.hour, 4);
-  assert.equal(local.minute, 0);
+  assert.equal(local.hour, 5);
+  assert.equal(local.minute, 30);
   assert.equal(plan.ezIsBlackoutLocalTime(Date.parse(iso), zone), false);
 });
 

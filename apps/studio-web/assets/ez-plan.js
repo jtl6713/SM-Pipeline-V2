@@ -482,6 +482,20 @@
     return ezZonedWallToUtcMs(civil.year, civil.month, civil.day, 4, 0, timeZone);
   }
 
+  function ezIsPriorityLocalTime(ms, timeZone = EZ_DEFAULT_TIME_ZONE) {
+    if (!Number.isFinite(ms) || ezIsBlackoutLocalTime(ms, timeZone)) return false;
+    const parts = ezZonedDateTimeParts(new Date(ms), timeZone);
+    const minutes = parts.hour * 60 + parts.minute;
+    for (const window of EZ_PRIORITY_SCHEDULE_WINDOWS) {
+      const [start] = window.split("-");
+      const [hh, mm] = start.split(":").map((n) => Number(n) || 0);
+      for (const offset of EZ_PRIORITY_WINDOW_OFFSETS_MINUTES) {
+        if (minutes === hh * 60 + mm + offset) return true;
+      }
+    }
+    return false;
+  }
+
   function ezTimeCrowding(ms, occupiedMs, radiusMinutes = 90, timeZone = EZ_DEFAULT_TIME_ZONE) {
     const target = ezZonedDateTimeParts(new Date(ms), timeZone);
     const targetMinutes = target.hour * 60 + target.minute;
@@ -594,16 +608,22 @@
 
   function ezNextOpenScheduleIso(candidateIso, occupiedMs, gapMs = EZ_SCHEDULE_GAP_MS, options = {}) {
     const timeZone = ezNormalizeTimeZone(options.timeZone);
-    let ms = Date.parse(candidateIso);
-    if (Number.isNaN(ms)) ms = Date.now();
-    let guard = 0;
-    while (guard < 72) {
-      ms = ezAdvancePastBlackout(ms, timeZone);
-      if (!ezScheduleConflicts(ms, occupiedMs, gapMs) && !ezIsBlackoutLocalTime(ms, timeZone)) break;
-      ms += gapMs;
-      guard += 1;
+    const now = options.now instanceof Date ? options.now : new Date();
+    const ms = Date.parse(candidateIso);
+    if (
+      Number.isFinite(ms)
+      && ms > now.getTime()
+      && ezIsPriorityLocalTime(ms, timeZone)
+      && !ezIsBlackoutLocalTime(ms, timeZone)
+      && !ezScheduleConflicts(ms, occupiedMs, gapMs)
+    ) {
+      return new Date(ms).toISOString();
     }
-    return new Date(ms).toISOString();
+    return ezPickBalancedSuggestedIso(EZ_PRIORITY_SCHEDULE_WINDOWS, now, {
+      occupiedMs: occupiedMs || [],
+      platformOccupiedMs: occupiedMs || [],
+      timeZone,
+    });
   }
 
   function ezPlanScheduleItems(planned) {
@@ -760,6 +780,7 @@
     ezPickBalancedSuggestedIso,
     ezNextOpenScheduleIso,
     ezIsBlackoutLocalTime,
+    ezIsPriorityLocalTime,
     ezNormalizeTimeZone,
   };
 })();
