@@ -18,3 +18,4 @@ Deploy UI 0.6.489 ideas VO timeline. Ideas page writes a timed voiceover script 
 Deploy UI 0.6.490 ideas VO timeline advances to Production Approve with timeline stills attached.
 Deploy UI 0.6.491 schedule blackout shade. Calendar hours 8PM–3:30AM local render darker as off limits.
 Deploy UI 0.6.492 iPad production workspace layout.
+Deploy UI 0.6.493 ideas VO production handoff. Open Rendering with the attached voiceover timeline instead of Media photos only.

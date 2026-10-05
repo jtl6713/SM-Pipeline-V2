@@ -3307,6 +3307,24 @@ body.platform-calendar-open { overflow: hidden; }
 [data-production-workspace-panel][hidden]{
   display:none !important;
 }
+.production-vo-handoff{
+  margin:0 0 12px;
+  padding:10px 12px;
+  border:1px solid rgba(1,37,89,.16);
+  border-radius:10px;
+  background:#f4f7fb;
+  color:#012559;
+  font-size:.82rem;
+  font-weight:650;
+  line-height:1.4;
+}
+.production-vo-handoff .link-button{
+  display:inline;
+  margin:0 2px;
+  padding:2px 8px;
+  vertical-align:baseline;
+}
+.production-vo-handoff[hidden]{display:none!important}
 .production-render-settings{
   min-height:220px;
 }
