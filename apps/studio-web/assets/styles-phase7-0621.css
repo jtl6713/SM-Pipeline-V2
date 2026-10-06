@@ -4209,3 +4209,96 @@ body.platform-calendar-open { overflow: hidden; }
 @media(max-width:760px){
   #outputsList .pipeline-compact-table{min-width:1040px}
 }
+
+
+/* PIPELINE_DENSITY_0_6_510 */
+/* At-a-glance density pass: all manual completion actions live in Open/output details. */
+#outputsList .pipeline-compact-table{font-size:.71rem}
+#outputsList .pipeline-compact-table thead th{padding:5px 8px;font-size:.67rem}
+#outputsList .pipeline-content-package .pipeline-compact-row{height:30px}
+#outputsList .pipeline-content-package .pipeline-compact-row td{padding:2px 7px}
+#outputsList .pipeline-content-package + .pipeline-content-package .pipeline-content-cell,
+#outputsList .pipeline-content-package + .pipeline-content-package .pipeline-compact-row:first-child td{border-top-width:3px}
+
+#outputsList .pipeline-content-cell{padding:6px 8px!important}
+.pipeline-content-card{grid-template-columns:78px minmax(0,1fr);gap:9px}
+.pipeline-content-thumb{width:78px;height:98px;border-radius:6px}
+.pipeline-content-copy{gap:3px}
+.pipeline-content-title{font-size:.78rem;line-height:1.14}
+.pipeline-content-summary{font-size:.62rem;line-height:1.25;-webkit-line-clamp:2}
+.pipeline-profile-pill{min-height:18px;padding:1px 6px;font-size:.56rem}
+.pipeline-content-meta{gap:2px 7px;font-size:.55rem}
+.pipeline-content-meta span+span:before{margin-right:7px}
+.pipeline-content-actions{gap:4px;padding-top:1px}
+#outputsList .pipeline-content-action{min-height:21px;padding:2px 6px;font-size:.55rem}
+
+#outputsList .pipeline-platform-line{gap:6px}
+#outputsList .pipeline-platform-pill{gap:5px;font-size:.64rem;line-height:1}
+#outputsList .pipeline-platform-pill b{min-width:19px;width:19px;height:18px;font-size:.53rem;border-radius:4px}
+#outputsList .pipeline-platform-line>strong{font-size:.6rem}
+#outputsList .pipeline-output-detail{display:none!important}
+
+#outputsList .pipeline-status-stack{gap:0}
+#outputsList .pipeline-status-stack>.badge{font-size:.57rem;padding:2px 6px;border-radius:5px;line-height:1.15}
+#outputsList .pipeline-status-detail,
+#outputsList .pipeline-tiktok-complete,
+#outputsList .pipeline-tiktok-resend,
+#outputsList .pipeline-youtube-complete{display:none!important}
+
+#outputsList .pipeline-progress-cell{font-size:.59rem}
+#outputsList .pipeline-progress-cell .progress-track,
+#outputsList .pipeline-progress-cell progress{height:7px}
+
+#outputsList .pipeline-schedule-cell{margin-top:0;gap:0;max-width:none;line-height:1}
+#outputsList .pipeline-schedule-cell-compact .pipeline-schedule-controls{grid-template-columns:minmax(0,1fr) 24px;gap:3px}
+#outputsList .pipeline-schedule-cell-compact input[type="datetime-local"],
+#outputsList .pipeline-schedule-locked input[type="datetime-local"]{
+  min-height:24px;
+  height:24px;
+  padding:1px 5px;
+  font-size:.58rem;
+  border-radius:5px;
+}
+#outputsList .pipeline-calendar-button{
+  min-height:24px!important;
+  height:24px!important;
+  width:24px;
+  padding:1px!important;
+  border-radius:5px!important;
+  font-size:.6rem!important;
+}
+#outputsList .pipeline-schedule-save-state{font-size:.5rem;line-height:1}
+#outputsList .pipeline-schedule-readonly{font-size:.61rem}
+#outputsList .pipeline-schedule-locked{gap:3px}
+#outputsList .pipeline-schedule-locked b{font-size:.52rem}
+
+#outputsList .pipeline-actions-cell>.creative-button{
+  min-width:51px;
+  min-height:23px;
+  height:23px;
+  padding:2px 7px;
+  font-size:.58rem;
+  border-radius:5px;
+}
+#outputsList .pipeline-row-more{margin-left:3px}
+#outputsList .pipeline-row-more>summary{
+  width:24px;
+  height:23px;
+  border-radius:5px;
+  font-size:.63rem;
+}
+
+/* TikTok resend is now an output-detail action instead of a Pipeline-row action. */
+.creative-tiktok-resend{
+  display:flex;
+  align-items:center;
+  flex-wrap:wrap;
+  gap:8px;
+  padding:9px 10px;
+  border:1px solid var(--line);
+  border-radius:9px;
+  background:#f8fafb;
+}
+.creative-tiktok-resend[hidden]{display:none!important}
+.creative-tiktok-resend .secondary-button{min-height:32px}
+.creative-tiktok-resend .subtle{margin:0}
