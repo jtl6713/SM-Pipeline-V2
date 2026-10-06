@@ -9,7 +9,7 @@
  <link rel="preconnect" href="https://fonts.googleapis.com">
  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@1,600;1,700&family=Inter:wght@400;500;600;700;800&family=Oswald:wght@500&display=swap">
- <link rel="stylesheet" href="/assets/styles-phase7-0621.css?v=0.6.512-collapsible-nav">
+ <link rel="stylesheet" href="/assets/styles-phase7-0621.css?v=0.6.513-tiktok-photo-sound-guard">
  <link rel="stylesheet" href="/assets/production-tablet-0622.css?v=0.6.493-ideas-vo-production-handoff">
  <link rel="stylesheet" href="/assets/insights-0622.css?v=0.6.381-insights-padding">
  <link rel="stylesheet" href="/assets/clean-enterprise.css?v=0.6.375-clean-enterprise">
@@ -1187,7 +1187,8 @@
  </div>
  <form class="tiktok-complete-form" id="creativeTiktokCompleteForm">
  <label class="form-field"><span>TikTok post URL</span><input type="url" id="creativeTiktokUrl" required placeholder="https://www.tiktok.com/@chicago.shining/video/…" autocomplete="url"></label>
- <label class="form-field" id="creativeTiktokMusicWrap" hidden><span>Music handling</span><select id="creativeTiktokMusic"><option value="not_requested">No music requested / not applicable</option><option value="yes">Music selected or completed in TikTok</option><option value="no">Published without completing the requested music step</option></select></label>
+ <div class="creative-tiktok-music-requirement" id="creativeTiktokMusicRequirement" hidden><b>Sound required for photo posts.</b><span>Open the draft in TikTok, tap <b>Add sound</b>, choose music, then publish. Studio will not mark a photo carousel complete until you confirm sound was added.</span></div>
+ <label class="form-field" id="creativeTiktokMusicWrap" hidden><span>Music handling</span><select id="creativeTiktokMusic"><option value="">Select…</option><option value="yes">Yes — I added/selected sound in TikTok before posting</option><option value="not_requested">No music requested / not applicable</option><option value="no">Published without completing the requested music step</option></select></label>
  <button type="submit" class="primary-button" id="creativeTiktokCompleteSave">Save TikTok URL</button>
  </form>
  <p class="subtle" id="creativeTiktokCompleteLive" hidden></p>
@@ -2208,7 +2209,7 @@
  <div class="studio-footer-meta">
  <span id="aiApiFooter" aria-live="polite"><strong>AI API:</strong> loading…</span>
  <span id="apiStatus" class="topbar-status">Connecting…</span>
- <span id="uiBuildLabel">UI build 0.6.512</span>
+ <span id="uiBuildLabel">UI build 0.6.513</span>
  <span id="workerBuildLabel">Worker …</span> </div>
  </footer>
 
@@ -2382,7 +2383,7 @@
  <script src="/assets/pipeline-schedule-grid-0622.js?v=0.6.475-manual-media-authority"></script>
  <script src="/assets/platform-schedule-calendar-0924.js?v=0.6.475-manual-media-authority"></script>
  <script src="/assets/timed-script.js?v=0.6.512-collapsible-nav"></script>
- <script src="/assets/app-item4-0625.js?v=0.6.512-collapsible-nav"></script>
+ <script src="/assets/app-item4-0625.js?v=0.6.513-tiktok-photo-sound-guard"></script>
  <script src="/assets/insights-0622.js?v=0.6.365-first-party-analytics-reconciled"></script>
  <script src="/assets/ai-api-footer.js?v=0.6.427-primary-ai-alert"></script>
  <script src="/assets/sticky-footer-scroll.js?v=0.6.378-sticky-footer-scroll"></script>
