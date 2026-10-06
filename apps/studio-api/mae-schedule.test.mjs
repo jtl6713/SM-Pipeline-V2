@@ -113,6 +113,39 @@ test("blackout 12 AM NY is replaced with the next MAE slot, not +3h", () => {
   assert.equal(maeIsBlackoutLocalTime(Date.parse(iso), zone), false);
 });
 
+test("keepAnyNonClashing preserves a saved future non-MAE-adjacent stamp", () => {
+  const zone = "America/New_York";
+  const now = new Date("2026-10-06T18:00:00Z");
+  const saved = "2026-10-19T20:30:00.000Z"; // Oct 19 4:30 PM EDT
+  const kept = maeNextOpenScheduleIso(saved, [], undefined, {
+    timeZone: zone,
+    now,
+    keepAnyNonClashing: true,
+  });
+  assert.equal(kept, new Date(saved).toISOString());
+});
+
+test("taken evening forces the next morning instead of reusing 4:30 PM", () => {
+  const zone = "America/New_York";
+  const now = new Date("2026-10-06T18:00:00Z");
+  const occupied = [
+    Date.parse("2026-10-06T09:30:00.000Z"),
+    Date.parse("2026-10-06T15:30:00.000Z"),
+    Date.parse("2026-10-06T20:30:00.000Z"),
+    Date.parse("2026-10-06T21:00:00.000Z"),
+  ];
+  const iso = maePickBalancedSuggestedIso([], now, {
+    timeZone: zone,
+    occupiedMs: occupied,
+    platformOccupiedMs: occupied,
+  });
+  const local = localParts(iso, zone);
+  assert.equal(local.hour, 5);
+  assert.equal(local.minute, 30);
+  const day = new Intl.DateTimeFormat("en-CA", { timeZone: zone, year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(iso));
+  assert.equal(day, "2026-10-07");
+});
+
 test("Chicago 23:00 would display as NY 12:00 AM and is rejected as blackout in NY", () => {
   const chicagoLate = Date.parse("2026-10-09T04:00:00.000Z"); // 11 PM CDT / 12 AM EDT
   assert.equal(maeIsBlackoutLocalTime(chicagoLate, "America/New_York"), true);
@@ -324,7 +357,7 @@ test("Worker stamp paths use MAE not industry evening windows", () => {
   assert.match(worker, /studio_mae_schedule_v1: true/);
   assert.match(worker, /studio_mae_profile_occupancy_v1: true/);
   assert.match(worker, /studio_schedule_occupancy_fields_v1: true/);
-  assert.match(worker, /0\.10\.462-schedule-occupancy-fields/);
+  assert.match(worker, /0\.10\.463-approve-mae-keep/);
   assert.match(worker, /studioLoadPlanScheduleOccupancy/);
   assert.match(worker, /A stored 5:30 that lost its slot must be written/);
   assert.match(worker, /MAE_PRIORITY_SCHEDULE_WINDOWS/);

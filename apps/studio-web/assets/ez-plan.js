@@ -615,19 +615,24 @@
   function ezNextOpenScheduleIso(candidateIso, occupiedMs, gapMs = EZ_SCHEDULE_GAP_MS, options = {}) {
     const timeZone = ezNormalizeTimeZone(options.timeZone);
     const now = options.now instanceof Date ? options.now : new Date();
+    const platformOccupiedMs = options.platformOccupiedMs || occupiedMs || [];
+    const allOccupiedMs = options.occupiedMs || occupiedMs || [];
+    // Approve / row paths keep any future non-blackout time that does not clash.
+    // Plan regeneration still requires an MAE priority slot unless keepAnyNonClashing.
+    const keepAny = options.keepAnyNonClashing === true;
     const ms = Date.parse(candidateIso);
     if (
       Number.isFinite(ms)
       && ms > now.getTime()
-      && ezIsPriorityLocalTime(ms, timeZone)
       && !ezIsBlackoutLocalTime(ms, timeZone)
-      && !ezScheduleConflicts(ms, occupiedMs, gapMs)
+      && !ezScheduleConflicts(ms, platformOccupiedMs, gapMs)
+      && (keepAny || ezIsPriorityLocalTime(ms, timeZone))
     ) {
       return new Date(ms).toISOString();
     }
     return ezPickBalancedSuggestedIso(EZ_PRIORITY_SCHEDULE_WINDOWS, now, {
-      occupiedMs: occupiedMs || [],
-      platformOccupiedMs: occupiedMs || [],
+      occupiedMs: allOccupiedMs,
+      platformOccupiedMs,
       timeZone,
     });
   }

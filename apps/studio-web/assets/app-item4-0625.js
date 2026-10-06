@@ -260,7 +260,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.506-pipeline-color-system";
+  const BUILD_ID = "item4-0.6.507-approve-mae-keep";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -16925,15 +16925,35 @@
     return { days: read("suggestedDays"), windows: read("suggestedWindows") };
   }
 
-  function nextOpenScheduleIso(candidateIso, occupiedMs, hint = {}, gapMs = PIPELINE_SCHEDULE_GAP_MS, allOccupiedMs = occupiedMs) {
-    const picker = typeof window.ChicagoShiningEzPlan?.ezPickBalancedSuggestedIso === "function"
-      ? window.ChicagoShiningEzPlan.ezPickBalancedSuggestedIso
-      : null;
-    if (picker) {
-      return picker([], new Date(), {
+  function nextOpenScheduleIso(candidateIso, occupiedMs, hint = {}, gapMs = PIPELINE_SCHEDULE_GAP_MS, allOccupiedMs = occupiedMs, options = {}) {
+    const timeZone = workingStudioTimeZone();
+    const helper = window.ChicagoShiningEzPlan;
+    // Prefer the candidate-aware helper so saved/manual times survive Approve
+    // confirm. Bare ezPickBalancedSuggestedIso always re-picked MAE and made
+    // confirm show Oct 06 16:30 while the row still showed the saved date.
+    if (typeof helper?.ezNextOpenScheduleIso === "function") {
+      return helper.ezNextOpenScheduleIso(candidateIso, occupiedMs, gapMs, {
+        timeZone,
         occupiedMs: allOccupiedMs,
         platformOccupiedMs: occupiedMs,
-        timeZone: workingStudioTimeZone(),
+        keepAnyNonClashing: options.keepAnyNonClashing !== false,
+        now: options.now instanceof Date ? options.now : new Date(),
+      });
+    }
+    if (typeof helper?.ezPickBalancedSuggestedIso === "function") {
+      const ms = Date.parse(candidateIso);
+      if (
+        Number.isFinite(ms)
+        && ms > Date.now()
+        && !pipelineScheduleIsBlackout(new Date(ms).toISOString(), timeZone)
+        && !(occupiedMs || []).some((other) => Number.isFinite(other) && Math.abs(other - ms) < gapMs)
+      ) {
+        return new Date(ms).toISOString();
+      }
+      return helper.ezPickBalancedSuggestedIso([], new Date(), {
+        occupiedMs: allOccupiedMs,
+        platformOccupiedMs: occupiedMs,
+        timeZone,
       });
     }
     let ms = Date.parse(candidateIso);
@@ -16943,12 +16963,31 @@
       ms += 24 * 60 * 60 * 1000;
       guard += 1;
     }
-    const timeZone = workingStudioTimeZone();
-    const helper = window.ChicagoShiningEzPlan;
-    if (typeof helper?.ezNextOpenScheduleIso === "function") {
-      return helper.ezNextOpenScheduleIso(new Date(ms).toISOString(), occupiedMs, gapMs, { timeZone });
-    }
     return new Date(ms).toISOString();
+  }
+
+  function pipelineMergedOccupancy(excludeIds = new Set()) {
+    const reserved = {};
+    const byPlatform = {};
+    for (const [platform, times] of Object.entries(pipelineServerOccupiedMs || {})) {
+      const key = String(platform || "").trim().toLowerCase();
+      if (!key) continue;
+      byPlatform[key] = [...(times || [])].filter(Number.isFinite);
+    }
+    for (const record of pipelineOutputs || []) {
+      if (!record?.id || excludeIds.has(record.id)) continue;
+      if (record.do_not_publish || /published/i.test(String(record.studio_state || record.publish_status || ""))) continue;
+      const iso = pipelineRecordScheduleIso(record);
+      const ms = iso ? Date.parse(iso) : NaN;
+      if (!Number.isFinite(ms)) continue;
+      const bucket = pipelineScheduleBucketKey(record);
+      if (bucket) (reserved[bucket] ||= []).push(ms);
+      if (!pipelineScheduleIsStory(record)) {
+        const platform = String(record.platform || "").trim().toLowerCase();
+        if (platform) (byPlatform[platform] ||= []).push(ms);
+      }
+    }
+    return { reserved, byPlatform };
   }
 
   function resetPipelineScheduleOccupancyFromPersisted(records = pipelineOutputs) {
@@ -16980,14 +17019,7 @@
     const ready = pipelineApprovableOutputs(records)
       .slice()
       .sort((a, b) => pipelineOutputNumber(a) - pipelineOutputNumber(b));
-    const reserved = {};
-    for (const record of pipelineOutputs || []) {
-      const bucket = pipelineScheduleBucketKey(record);
-      const iso = pipelineRecordScheduleIso(record);
-      if (!bucket || !iso) continue;
-      if (record.do_not_publish || /published/i.test(String(record.studio_state || record.publish_status || ""))) continue;
-      (reserved[bucket] ||= []).push(Date.parse(iso));
-    }
+    const { reserved, byPlatform } = pipelineMergedOccupancy();
     for (const record of ready) {
       if (pipelineRowHasSchedule(record)) continue;
       try {
@@ -16998,45 +17030,48 @@
         const bucket = pipelineScheduleBucketKey(record);
         const hint = suggestedTimeHint(data);
         rememberSuggestedHint(platform, hint);
-        const story = pipelineScheduleIsStory(record);
-        const lane = story ? [] : (reserved[bucket] || []);
-        const iso = nextOpenScheduleIso(suggested, lane, hint, PIPELINE_SCHEDULE_GAP_MS, story ? [] : pipelineGlobalScheduleMs(reserved));
+        const lane = pipelineScheduleIsStory(record) ? [] : (byPlatform[platform] || reserved[bucket] || []);
+        const allOccupied = Object.values(byPlatform).flat().filter(Number.isFinite);
+        const iso = nextOpenScheduleIso(suggested, lane, hint, PIPELINE_SCHEDULE_GAP_MS, allOccupied);
         if (!iso || pipelineScheduleIsBlackout(iso, workingStudioTimeZone())) continue;
         const input = document.querySelector(`[data-pipeline-schedule="${record.id}"]`);
         if (input) applySuggestedIsoToScheduleInput(input, iso);
         else pipelineScheduleDrafts.set(record.id, formatDateTimeLocalInput(iso));
-        (reserved[bucket] ||= []).push(Date.parse(iso));
+        const ms = Date.parse(iso);
+        if (bucket) (reserved[bucket] ||= []).push(ms);
+        if (!pipelineScheduleIsStory(record) && platform) (byPlatform[platform] ||= []).push(ms);
         rememberBookedScheduleMs(platform, iso, record);
       } catch {}
     }
   }
 
   function staggerApproveAllSchedules(schedules, records) {
-    const reserved = {};
     const approving = new Set((records || []).map((record) => record.id));
-    for (const record of pipelineOutputs || []) {
-      if (approving.has(record.id)) continue;
-      const bucket = pipelineScheduleBucketKey(record);
-      const iso = pipelineRecordScheduleIso(record);
-      if (!bucket || !iso) continue;
-      if (record.do_not_publish || /published/i.test(String(record.studio_state || record.publish_status || ""))) continue;
-      (reserved[bucket] ||= []).push(Date.parse(iso));
-    }
+    const { reserved, byPlatform } = pipelineMergedOccupancy(approving);
     const next = { ...(schedules || {}) };
     const ordered = (records || []).slice().sort((a, b) => pipelineOutputNumber(a) - pipelineOutputNumber(b));
     for (const record of ordered) {
       const platform = String(record.platform || "").trim().toLowerCase();
       const bucket = pipelineScheduleBucketKey(record);
       const requested = next[record.id] || new Date().toISOString();
-      const story = pipelineScheduleIsStory(record);
-      const lane = story ? [] : (reserved[bucket] || []);
-      const iso = nextOpenScheduleIso(requested, lane, hintForPlatform(platform), PIPELINE_SCHEDULE_GAP_MS, story ? [] : pipelineGlobalScheduleMs(reserved));
+      const lane = pipelineScheduleIsStory(record) ? [] : (byPlatform[platform] || reserved[bucket] || []);
+      const allOccupied = Object.values(byPlatform).flat().filter(Number.isFinite);
+      const iso = nextOpenScheduleIso(
+        requested,
+        lane,
+        hintForPlatform(platform),
+        PIPELINE_SCHEDULE_GAP_MS,
+        allOccupied,
+        { keepAnyNonClashing: true },
+      );
       if (!iso) {
         delete next[record.id];
         continue;
       }
       next[record.id] = iso;
-      (reserved[bucket] ||= []).push(Date.parse(iso));
+      const ms = Date.parse(iso);
+      if (bucket) (reserved[bucket] ||= []).push(ms);
+      if (!pipelineScheduleIsStory(record) && platform) (byPlatform[platform] ||= []).push(ms);
       rememberBookedScheduleMs(platform, iso, record);
       const input = document.querySelector(`[data-pipeline-schedule="${record.id}"]`);
       if (input) applySuggestedIsoToScheduleInput(input, iso);
@@ -17168,7 +17203,11 @@
         }
         if (pipelineUseDefaultSchedules() && iso && creativeCanApproveForPublishing(record) && !pipelineRowHasSchedule(record)) {
           const input = document.querySelector(`[data-pipeline-schedule="${id}"]`);
-          const openIso = nextOpenScheduleIso(iso, pipelineOccupiedScheduleBucketMs(record), hint);
+          const { byPlatform } = pipelineMergedOccupancy();
+          const platform = String(record.platform || "").trim().toLowerCase();
+          const lane = pipelineScheduleIsStory(record) ? [] : (byPlatform[platform] || pipelineOccupiedScheduleBucketMs(record));
+          const allOccupied = Object.values(byPlatform).flat().filter(Number.isFinite);
+          const openIso = nextOpenScheduleIso(iso, lane, hint, PIPELINE_SCHEDULE_GAP_MS, allOccupied);
           if (openIso && !pipelineScheduleIsBlackout(openIso, workingStudioTimeZone()) && applySuggestedIsoToScheduleInput(input, openIso)) {
             rememberBookedScheduleMs(record.platform, openIso, record);
           }
@@ -17200,31 +17239,47 @@
     button.textContent = count ? `Approve All (${count})` : "Approve All";
   }
 
+  function pipelineApproveBlockedMessage(message) {
+    const text = String(message || "Approve could not continue.").trim();
+    setPipelineLiveHint(text);
+    try { window.alert(text); } catch { /* ignore */ }
+  }
+
   async function approveAllPipelineOutputs() {
     const button = $("pipelineApproveAll");
-    const ready = pipelineManualApprovableOutputs();
-    if (!ready.length) return;
-    if (pipelineHasUnsavedSchedules(ready)) {
-      setPipelineLiveHint("Save the edited schedule time before approving.");
+    let schedules = {};
+    let ready = [];
+    try {
+      ready = pipelineManualApprovableOutputs();
+      if (!ready.length) {
+        pipelineApproveBlockedMessage("No outputs are waiting for approval.");
+        return;
+      }
+      if (pipelineHasUnsavedSchedules(ready)) {
+        pipelineApproveBlockedMessage("Save the edited schedule time before approving.");
+        return;
+      }
+      if (pipelineUseDefaultSchedules()) {
+        setPipelineLiveHint("Applying default schedules…");
+        await applyDefaultSchedulesToReadyRows();
+      }
+      schedules = staggerApproveAllSchedules(collectPipelineSchedules(), ready);
+      const list = ready.map((record) => {
+        const iso = schedules[record.id];
+        const when = iso ? formatStudioDateTime(iso) : "now";
+        return `• ${pipelineOutputLabel(record)} — ${when}`;
+      }).join("\n");
+      const scheduleNote = pipelineUseDefaultSchedules()
+        ? "Default schedules fill empty times. Automatic schedules spread across the week and keep same-platform posts at least 3 hours apart. A time already on a row is kept unless it clashes.\n\n"
+        : "Empty times publish now. Automatic schedules still keep same-platform posts at least 3 hours apart.\n\n";
+      const confirmed = window.confirm(
+        `Approve ${ready.length} output${ready.length === 1 ? "" : "s"} for publishing?\n\n${scheduleNote}Instagram, Facebook, and YouTube will auto-publish publicly. TikTok will be saved as a draft.\n\n${list}`
+      );
+      if (!confirmed) return;
+    } catch (error) {
+      pipelineApproveBlockedMessage(error?.message || "Approve All failed before confirm.");
       return;
     }
-    if (pipelineUseDefaultSchedules()) {
-      setPipelineLiveHint("Applying default schedules…");
-      await applyDefaultSchedulesToReadyRows();
-    }
-    const schedules = staggerApproveAllSchedules(collectPipelineSchedules(), ready);
-    const list = ready.map((record) => {
-      const iso = schedules[record.id];
-      const when = iso ? formatStudioDateTime(iso) : "now";
-      return `• ${pipelineOutputLabel(record)} — ${when}`;
-    }).join("\n");
-    const scheduleNote = pipelineUseDefaultSchedules()
-      ? "Default schedules fill empty times. Automatic schedules spread across the week and keep same-platform posts at least 3 hours apart. A saved manual time is kept exactly.\n\n"
-      : "Empty times publish now. Automatic schedules still keep same-platform posts at least 3 hours apart.\n\n";
-    const confirmed = window.confirm(
-      `Approve ${ready.length} output${ready.length === 1 ? "" : "s"} for publishing?\n\n${scheduleNote}Instagram, Facebook, and YouTube will auto-publish publicly. TikTok will be saved as a draft.\n\n${list}`
-    );
-    if (!confirmed) return;
     try {
       if (button) {
         button.dataset.busy = "true";
@@ -17255,7 +17310,7 @@
         setPipelineLiveHint(result.message || `Approved ${approved} output${approved === 1 ? "" : "s"}`);
       }
     } catch (e) {
-      setPipelineLiveHint(e.message || "Approve All failed");
+      pipelineApproveBlockedMessage(e.message || "Approve All failed");
     } finally {
       if (button) {
         button.dataset.busy = "false";
@@ -17437,14 +17492,7 @@
     }
 
     const eligibleIds = new Set(eligible.map((record) => record.id));
-    const reserved = {};
-    for (const record of pipelineOutputs || []) {
-      if (eligibleIds.has(record.id) || record.do_not_publish || creativeIsPublished(record)) continue;
-      const bucket = pipelineScheduleBucketKey(record);
-      const iso = pipelineRecordScheduleIso(record);
-      const ms = iso ? Date.parse(iso) : NaN;
-      if (bucket && Number.isFinite(ms) && ms > nowMs) (reserved[bucket] ||= []).push(ms);
-    }
+    const { reserved, byPlatform } = pipelineMergedOccupancy(eligibleIds);
 
     if (button) {
       button.dataset.busy = "true";
@@ -17457,10 +17505,19 @@
     let failed = 0;
     for (const record of eligible) {
       const bucket = pipelineScheduleBucketKey(record);
+      const platform = String(record.platform || "").trim().toLowerCase();
       if (!bucket) { failed += 1; continue; }
-      const story = pipelineScheduleIsStory(record);
-      const lane = story ? [] : (reserved[bucket] || []);
-      const iso = nextOpenScheduleIso(new Date().toISOString(), lane, {}, PIPELINE_SCHEDULE_GAP_MS, story ? [] : pipelineGlobalScheduleMs(reserved));
+      const lane = pipelineScheduleIsStory(record) ? [] : (byPlatform[platform] || reserved[bucket] || []);
+      const allOccupied = Object.values(byPlatform).flat().filter(Number.isFinite);
+      // Regenerate always walks MAE; do not keep the prior stamp.
+      const iso = nextOpenScheduleIso(
+        new Date().toISOString(),
+        lane,
+        {},
+        PIPELINE_SCHEDULE_GAP_MS,
+        allOccupied,
+        { keepAnyNonClashing: false },
+      );
       // Hard invariant: regeneration must never persist an overnight blackout slot.
       if (!iso || pipelineScheduleIsBlackout(iso)) { failed += 1; continue; }
       try {
@@ -17472,7 +17529,9 @@
         });
         const savedRecord = result?.record || { ...record, scheduled_post_date: iso, manual_schedule_override: false };
         applySavedPipelineSchedule(savedRecord);
-        (reserved[bucket] ||= []).push(Date.parse(iso));
+        const ms = Date.parse(iso);
+        (reserved[bucket] ||= []).push(ms);
+        if (!pipelineScheduleIsStory(record) && platform) (byPlatform[platform] ||= []).push(ms);
         saved += 1;
       } catch {
         failed += 1;
@@ -17491,31 +17550,42 @@
   }
 
   async function approvePipelineContentGroup(groupKey, button = null) {
-    const groupRecords = (pipelineOutputs || []).filter((record) => pipelineContentGroupKey(record) === groupKey);
-    const ready = pipelineManualApprovableOutputs(groupRecords);
-    if (!ready.length) return;
-    if (pipelineHasUnsavedSchedules(ready)) {
-      setPipelineLiveHint("Save the edited schedule time before approving this content.");
+    let schedules = {};
+    let ready = [];
+    let title = "this content";
+    try {
+      const groupRecords = (pipelineOutputs || []).filter((record) => pipelineContentGroupKey(record) === groupKey);
+      ready = pipelineManualApprovableOutputs(groupRecords);
+      if (!ready.length) {
+        pipelineApproveBlockedMessage("No outputs in this content item are waiting for approval.");
+        return;
+      }
+      if (pipelineHasUnsavedSchedules(ready)) {
+        pipelineApproveBlockedMessage("Save the edited schedule time before approving this content.");
+        return;
+      }
+      if (pipelineUseDefaultSchedules()) {
+        setPipelineLiveHint("Applying default schedules for this content…");
+        await applyDefaultSchedulesToReadyRows(groupRecords);
+      }
+      schedules = staggerApproveAllSchedules(collectPipelineSchedules(), ready);
+      const list = ready.map((record) => {
+        const iso = schedules[record.id];
+        const when = iso ? formatStudioDateTime(iso) : "now";
+        return `• ${pipelineOutputLabel(record)} — ${when}`;
+      }).join("\n");
+      title = String(groupRecords[0]?.output_title || groupRecords[0]?.content_title || "this content").trim() || "this content";
+      const scheduleNote = pipelineUseDefaultSchedules()
+        ? "Default schedules fill empty times. Automatic schedules spread across the week and keep same-platform posts at least 3 hours apart. A time already on a row is kept unless it clashes.\n\n"
+        : "Empty times publish now. Automatic schedules still keep same-platform posts at least 3 hours apart.\n\n";
+      const confirmed = window.confirm(
+        `Approve ${ready.length} ready output${ready.length === 1 ? "" : "s"} for “${title}”?\n\n${scheduleNote}Only this content item is included. Instagram, Facebook, and YouTube will auto-publish publicly. TikTok will be saved as a draft.\n\n${list}`
+      );
+      if (!confirmed) return;
+    } catch (error) {
+      pipelineApproveBlockedMessage(error?.message || "Approve content failed before confirm.");
       return;
     }
-    if (pipelineUseDefaultSchedules()) {
-      setPipelineLiveHint("Applying default schedules for this content…");
-      await applyDefaultSchedulesToReadyRows(groupRecords);
-    }
-    const schedules = staggerApproveAllSchedules(collectPipelineSchedules(), ready);
-    const list = ready.map((record) => {
-      const iso = schedules[record.id];
-      const when = iso ? formatStudioDateTime(iso) : "now";
-      return `• ${pipelineOutputLabel(record)} — ${when}`;
-    }).join("\n");
-    const title = String(groupRecords[0]?.output_title || groupRecords[0]?.content_title || "this content").trim() || "this content";
-    const scheduleNote = pipelineUseDefaultSchedules()
-      ? "Default schedules fill empty times. Automatic schedules spread across the week and keep same-platform posts at least 3 hours apart. A time already on a row is kept unless it clashes.\n\n"
-      : "Empty times publish now. Automatic schedules still keep same-platform posts at least 3 hours apart.\n\n";
-    const confirmed = window.confirm(
-      `Approve ${ready.length} ready output${ready.length === 1 ? "" : "s"} for “${title}”?\n\n${scheduleNote}Only this content item is included. Instagram, Facebook, and YouTube will auto-publish publicly. TikTok will be saved as a draft.\n\n${list}`
-    );
-    if (!confirmed) return;
     try {
       if (button) {
         button.dataset.busy = "true";
@@ -17548,8 +17618,7 @@
         setPipelineLiveHint(result.message || `Approved ${approved} output${approved === 1 ? "" : "s"} for this content`);
       }
     } catch (error) {
-      setPipelineLiveHint(error.message || "Approve content failed");
-      throw error;
+      pipelineApproveBlockedMessage(error.message || "Approve content failed");
     } finally {
       if (button) {
         button.dataset.busy = "false";
@@ -18259,7 +18328,11 @@
           const record = (pipelineOutputs || []).find((row) => row.id === id);
           const input = target.querySelector(`[data-pipeline-schedule="${id}"]`);
           const hint = parseSuggestedHintDataset(button);
-          const openIso = nextOpenScheduleIso(iso, pipelineOccupiedScheduleBucketMs(record, id), hint);
+          const { byPlatform } = pipelineMergedOccupancy(new Set([id]));
+          const platform = String(record?.platform || "").trim().toLowerCase();
+          const lane = pipelineScheduleIsStory(record) ? [] : (byPlatform[platform] || pipelineOccupiedScheduleBucketMs(record, id));
+          const allOccupied = Object.values(byPlatform).flat().filter(Number.isFinite);
+          const openIso = nextOpenScheduleIso(iso, lane, hint, PIPELINE_SCHEDULE_GAP_MS, allOccupied);
           if (applySuggestedIsoToScheduleInput(input, openIso)) rememberBookedScheduleMs(record?.platform, openIso, record);
         });
       });

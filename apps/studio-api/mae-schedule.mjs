@@ -213,19 +213,24 @@ export function maePickBalancedSuggestedIso(_windows, now = new Date(), options 
 export function maeNextOpenScheduleIso(candidateIso, occupiedMs, gapMs = MAE_SCHEDULE_GAP_MS, options = {}) {
   const timeZone = maeNormalizeTimeZone(options.timeZone);
   const now = options.now instanceof Date ? options.now : new Date();
+  const platformOccupiedMs = options.platformOccupiedMs || occupiedMs || [];
+  const allOccupiedMs = options.occupiedMs || occupiedMs || [];
+  // Approve keeps any future non-blackout time that does not clash. Regeneration
+  // still requires an MAE priority slot unless keepAnyNonClashing is set.
+  const keepAny = options.keepAnyNonClashing === true;
   const ms = Date.parse(candidateIso);
   if (
     Number.isFinite(ms)
     && ms > now.getTime()
-    && maeIsPriorityLocalTime(ms, timeZone)
     && !maeIsBlackoutLocalTime(ms, timeZone)
-    && !maeScheduleConflicts(ms, occupiedMs, gapMs)
+    && !maeScheduleConflicts(ms, platformOccupiedMs, gapMs)
+    && (keepAny || maeIsPriorityLocalTime(ms, timeZone))
   ) {
     return new Date(ms).toISOString();
   }
   return maePickBalancedSuggestedIso(MAE_PRIORITY_SCHEDULE_WINDOWS, now, {
-    occupiedMs: occupiedMs || [],
-    platformOccupiedMs: occupiedMs || [],
+    occupiedMs: allOccupiedMs,
+    platformOccupiedMs,
     timeZone,
   });
 }

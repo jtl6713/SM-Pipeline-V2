@@ -503,7 +503,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.462-schedule-occupancy-fields",
+          version: "0.10.463-approve-mae-keep",
           studio_mae_schedule_v1: true,
           studio_mae_profile_occupancy_v1: true,
           studio_schedule_occupancy_fields_v1: true,
@@ -7399,7 +7399,13 @@ function studioNextOpenScheduleIso(candidateIso, occupiedMs, gapMs = STUDIO_SCHE
     gapMs = STUDIO_SCHEDULE_GAP_MS;
   }
   const timeZone = maeNormalizeTimeZone(options.timeZone);
-  return maeNextOpenScheduleIso(candidateIso, occupiedMs, gapMs, { timeZone, now: options.now });
+  return maeNextOpenScheduleIso(candidateIso, occupiedMs, gapMs, {
+    timeZone,
+    now: options.now,
+    occupiedMs: options.occupiedMs,
+    platformOccupiedMs: options.platformOccupiedMs || occupiedMs,
+    keepAnyNonClashing: options.keepAnyNonClashing === true,
+  });
 }
 
 const STUDIO_OCCUPIED_CACHE_MS = 45 * 1000;
