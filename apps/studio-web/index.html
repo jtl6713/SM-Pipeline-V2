@@ -9,7 +9,7 @@
  <link rel="preconnect" href="https://fonts.googleapis.com">
  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@1,600;1,700&family=Inter:wght@400;500;600;700;800&family=Oswald:wght@500&display=swap">
- <link rel="stylesheet" href="/assets/styles-phase7-0621.css?v=0.6.501-swap-still">
+ <link rel="stylesheet" href="/assets/styles-phase7-0621.css?v=0.6.503-low-platform-counts">
  <link rel="stylesheet" href="/assets/production-tablet-0622.css?v=0.6.493-ideas-vo-production-handoff">
  <link rel="stylesheet" href="/assets/insights-0622.css?v=0.6.381-insights-padding">
  <link rel="stylesheet" href="/assets/clean-enterprise.css?v=0.6.375-clean-enterprise">
@@ -2355,6 +2355,27 @@
  <script src="/assets/insights-0622.js?v=0.6.365-first-party-analytics-reconciled"></script>
  <script src="/assets/ai-api-footer.js?v=0.6.427-primary-ai-alert"></script>
  <script src="/assets/sticky-footer-scroll.js?v=0.6.378-sticky-footer-scroll"></script>
+<script>
+(function(){
+  const thresholds={facebook:40,instagram:40,tiktok:20,youtube:20};
+  function markLowScheduledCounts(){
+    const list=document.getElementById('studioHubScheduled');
+    if(!list) return;
+    list.querySelectorAll('li').forEach(function(row){
+      const label=(row.querySelector('.studio-hub-scheduled-platform')?.textContent||'').trim().toLowerCase();
+      const countText=(row.querySelector('.studio-hub-scheduled-count')?.textContent||'').trim();
+      const count=Number.parseInt(countText.replace(/[^0-9-]/g,''),10);
+      const threshold=thresholds[label];
+      row.classList.toggle('platform-count-low',Number.isFinite(count)&&Number.isFinite(threshold)&&count<threshold);
+    });
+  }
+  const list=document.getElementById('studioHubScheduled');
+  if(list){
+    new MutationObserver(markLowScheduledCounts).observe(list,{subtree:true,childList:true,characterData:true});
+    markLowScheduledCounts();
+  }
+})();
+</script>
 </body>
 </html>
 
