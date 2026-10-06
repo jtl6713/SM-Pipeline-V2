@@ -263,7 +263,10 @@ export function maeBuildSuggestedScheduleMap(items, occupiedByPlatform = {}, now
       );
       // Keep a stored MAE time when that day-part is still open. Keep a stored
       // extra only after morning, afternoon, and evening on that day are covered.
-      const reusable = existingMs > now.getTime()
+      // Regeneration must never preserve a slot that is already passed or inside
+      // the normal scheduling lead window. Using the same lead threshold as new
+      // suggestions prevents a just-expired 05:30 slot from surviving a regenerate.
+      const reusable = existingMs > now.getTime() + MAE_SUGGEST_LEAD_MS
         && !maeIsBlackoutLocalTime(existingMs, timeZone)
         && (isStory || !maeScheduleConflicts(existingMs, lane))
         && (maeIsPriorityLocalTime(existingMs, timeZone) || standardsCovered);
