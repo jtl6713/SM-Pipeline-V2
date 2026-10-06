@@ -228,7 +228,7 @@ test("occupancy load windows the Airtable query and sorts nearest-first", () => 
 test("Worker stamp paths use MAE not industry evening windows", () => {
   assert.match(worker, /from "\.\/mae-schedule\.mjs"/);
   assert.match(worker, /studio_mae_schedule_v1: true/);
-  assert.match(worker, /0\.10\.449-plan-mae-rotation/);
+  assert.match(worker, /0\.10\.452-scripted-short-allow/);
   assert.match(worker, /studioLoadPlanScheduleOccupancy/);
   assert.match(worker, /A stored 5:30 that lost its slot must be written/);
   assert.match(worker, /MAE_PRIORITY_SCHEDULE_WINDOWS/);

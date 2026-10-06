@@ -69,6 +69,7 @@ test('library search retains unchecked attachments', async () => {
   const c = vm.createContext({ item4LibraryLoadSequence: 0, activeProductionRequest: {id:'recA'}, activeIdea:null,
     $:()=>null, item4AttachedLibraryItems:()=>[{id:'a'}], fetchLibraryBrowse:async()=>[{id:'a'}],
     mergeLibraryPickerItems:(_s,_m,rows)=>rows, item4LibrarySelected:new Set(), renderItem4LibraryPicker(){},
+    libraryItemsForQuotedName:(items)=> ({ phrase: "", items }),
   });
   vm.runInContext(src,c); await c.loadItem4LibraryStills();
   assert.equal(c.item4LibrarySelected.size,0);
