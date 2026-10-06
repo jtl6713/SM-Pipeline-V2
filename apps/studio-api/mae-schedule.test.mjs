@@ -357,7 +357,7 @@ test("Worker stamp paths use MAE not industry evening windows", () => {
   assert.match(worker, /studio_mae_schedule_v1: true/);
   assert.match(worker, /studio_mae_profile_occupancy_v1: true/);
   assert.match(worker, /studio_schedule_occupancy_fields_v1: true/);
-  assert.match(worker, /0\.10\.464-schedule-save-ready-review/);
+  assert.match(worker, /0\.10\.465-render-stale-rendering/);
   assert.match(worker, /studioLoadPlanScheduleOccupancy/);
   assert.match(worker, /A stored 5:30 that lost its slot must be written/);
   assert.match(worker, /MAE_PRIORITY_SCHEDULE_WINDOWS/);
