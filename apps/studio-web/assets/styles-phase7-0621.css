@@ -3570,3 +3570,34 @@ body.platform-calendar-open { overflow: hidden; }
   color: #fecaca;
   font-weight: 800;
 }
+
+
+/* Pipeline output card separation — subtle alternating shades */
+#outputsList .data-table tbody tr{
+  --pipeline-card-shade: rgba(255,255,255,.72);
+  background: var(--pipeline-card-shade);
+}
+#outputsList .data-table tbody tr:nth-child(4n+1){--pipeline-card-shade:rgba(255,255,255,.78)}
+#outputsList .data-table tbody tr:nth-child(4n+2){--pipeline-card-shade:rgba(248,250,252,.84)}
+#outputsList .data-table tbody tr:nth-child(4n+3){--pipeline-card-shade:rgba(241,245,249,.78)}
+#outputsList .data-table tbody tr:nth-child(4n+4){--pipeline-card-shade:rgba(255,255,255,.66)}
+#outputsList .data-table tbody tr td{
+  background: var(--pipeline-card-shade);
+}
+#outputsList .data-table tbody tr:hover td{
+  filter:brightness(.985);
+}
+@media(max-width:760px){
+  #outputsList .data-table tbody tr{
+    border:1px solid rgba(100,116,139,.16);
+    border-radius:14px;
+    box-shadow:0 6px 16px rgba(15,35,70,.045);
+    overflow:hidden;
+  }
+  #outputsList .data-table tbody tr + tr{
+    margin-top:10px;
+  }
+  #outputsList .data-table tbody tr td{
+    background:var(--pipeline-card-shade);
+  }
+}
