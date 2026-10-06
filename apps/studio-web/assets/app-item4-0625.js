@@ -18220,7 +18220,12 @@
   }
 
   function pipelineCompactStatusMarkup(record) {
-    return `<div class="pipeline-status-stack">${badge(pipelineStudioStateLabel(record))}</div>`;
+    const render = String(pipelineRenderLabel(record) || "—");
+    const review = String(record?.review_status || "—");
+    const publish = String(pipelinePublishStatusLabel(record) || "—");
+    // Keep render/review/publish detail in the DOM for operators and hermetic
+    // assertions; CSS may hide .pipeline-status-detail in the dense Pipeline table.
+    return `<div class="pipeline-status-stack">${badge(pipelineStudioStateLabel(record))}<div class="pipeline-status-detail"><span title="Render status">${escapeHtml(render)}</span><span title="Review status">${escapeHtml(review)}</span><span title="Publish status">${escapeHtml(publish)}</span></div>${pipelineTiktokCompleteCell(record)}${pipelineYoutubeCompleteCell(record)}</div>`;
   }
 
   function renderOutputsTable(target, records) {
