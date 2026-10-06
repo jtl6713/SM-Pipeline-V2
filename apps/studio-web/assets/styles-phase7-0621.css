@@ -3914,3 +3914,298 @@ body.platform-calendar-open { overflow: hidden; }
 @media(max-width:900px){
   .pipeline-group-platforms{display:none}
 }
+
+
+/* PIPELINE_ROWSPAN_MOCKUP_0_6_509 */
+/* Structural Pipeline redesign: one content card spans its platform rows, matching the approved mockup. */
+#outputsList .pipeline-compact-table{
+  min-width:1180px;
+  border-collapse:separate;
+  border-spacing:0;
+  table-layout:fixed;
+  font-size:.76rem;
+  background:#fff;
+}
+#outputsList .pipeline-compact-table thead th{
+  padding:8px 10px;
+  background:#f7fafc;
+  border-top:1px solid #e4e9ef;
+  border-bottom:1px solid #dce3ea;
+  color:#1f365c;
+  font-size:.71rem;
+  font-weight:850;
+  letter-spacing:.01em;
+}
+#outputsList .pipeline-compact-table thead th:nth-child(1){width:27%}
+#outputsList .pipeline-compact-table thead th:nth-child(2){width:18%}
+#outputsList .pipeline-compact-table thead th:nth-child(3){width:14%}
+#outputsList .pipeline-compact-table thead th:nth-child(4){width:13%}
+#outputsList .pipeline-compact-table thead th:nth-child(5){width:20%}
+#outputsList .pipeline-compact-table thead th:nth-child(6){width:8%}
+
+#outputsList .pipeline-content-package .pipeline-compact-row{
+  height:38px;
+  background:#fff;
+}
+#outputsList .pipeline-content-package .pipeline-compact-row td{
+  padding:5px 9px;
+  border-bottom:1px solid #e6ebef;
+  vertical-align:middle;
+}
+#outputsList .pipeline-content-package .pipeline-compact-row:last-child td:not(.pipeline-content-cell){
+  border-bottom:1px solid #d8e0e6;
+}
+
+/* Workflow tint is package-level, like the reference design. */
+#outputsList .pipeline-content-package[data-pipeline-tone="approval"] .pipeline-compact-row,
+#outputsList .pipeline-content-package[data-pipeline-tone="approval"] .pipeline-content-cell{background:#fffdf7}
+#outputsList .pipeline-content-package[data-pipeline-tone="approved"] .pipeline-compact-row,
+#outputsList .pipeline-content-package[data-pipeline-tone="approved"] .pipeline-content-cell{background:#f4fcf8}
+#outputsList .pipeline-content-package[data-pipeline-tone="scheduled"] .pipeline-compact-row,
+#outputsList .pipeline-content-package[data-pipeline-tone="scheduled"] .pipeline-content-cell{background:#f8fbff}
+#outputsList .pipeline-content-package[data-pipeline-tone="rendering"] .pipeline-compact-row,
+#outputsList .pipeline-content-package[data-pipeline-tone="rendering"] .pipeline-content-cell{background:#faf8ff}
+#outputsList .pipeline-content-package[data-pipeline-tone="published"] .pipeline-compact-row,
+#outputsList .pipeline-content-package[data-pipeline-tone="published"] .pipeline-content-cell{background:#f6fcf7}
+#outputsList .pipeline-content-package[data-pipeline-tone="failed"] .pipeline-compact-row,
+#outputsList .pipeline-content-package[data-pipeline-tone="failed"] .pipeline-content-cell{background:#fff7f7}
+
+/* The left content card spans every destination row. */
+#outputsList .pipeline-content-cell{
+  padding:8px 10px!important;
+  vertical-align:top!important;
+  border-right:1px solid #e2e8ee;
+  border-bottom:1px solid #d8e0e6!important;
+}
+.pipeline-content-card{
+  display:grid;
+  grid-template-columns:92px minmax(0,1fr);
+  gap:11px;
+  min-height:100%;
+  align-items:start;
+}
+.pipeline-content-media{min-width:0}
+.pipeline-content-thumb{
+  display:block;
+  width:92px;
+  height:118px;
+  object-fit:cover;
+  border-radius:7px;
+  border:1px solid rgba(20,44,79,.12);
+  background:#eef3f7;
+  box-shadow:0 2px 5px rgba(15,23,42,.08);
+}
+.pipeline-content-thumb-placeholder{
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  color:#607287;
+  font-weight:850;
+  font-size:.86rem;
+}
+.pipeline-content-copy{
+  display:flex;
+  flex-direction:column;
+  align-items:flex-start;
+  gap:5px;
+  min-width:0;
+  padding-top:1px;
+}
+.pipeline-content-title{
+  color:#075fd8;
+  font-size:.86rem;
+  line-height:1.18;
+  font-weight:850;
+}
+.pipeline-content-summary{
+  margin:0;
+  color:#42556d;
+  font-size:.69rem;
+  line-height:1.35;
+  display:-webkit-box;
+  -webkit-line-clamp:3;
+  -webkit-box-orient:vertical;
+  overflow:hidden;
+}
+.pipeline-profile-pill{
+  display:inline-flex;
+  align-items:center;
+  min-height:22px;
+  padding:2px 8px;
+  border-radius:5px;
+  border:1px solid #cfd9ff;
+  background:#eef4ff;
+  color:#244eb0;
+  font-size:.62rem;
+  font-weight:800;
+}
+.pipeline-profile-pill[data-theme="miami"]{background:#fff0fa;border-color:#f6c6e5;color:#d52284}
+.pipeline-profile-pill[data-theme="nyc"]{background:#f2efff;border-color:#d9d0ff;color:#5543a7}
+.pipeline-profile-pill[data-theme="la"]{background:#fff5e9;border-color:#f1d3aa;color:#a45a08}
+.pipeline-content-meta{
+  display:flex;
+  flex-wrap:wrap;
+  gap:4px 9px;
+  color:#61728a;
+  font-size:.6rem;
+}
+.pipeline-content-meta span+span:before{content:"·";margin-right:9px;color:#a0acb9}
+.pipeline-content-actions{
+  display:flex;
+  flex-wrap:wrap;
+  gap:5px;
+  margin-top:auto;
+  padding-top:2px;
+}
+#outputsList .pipeline-content-action{
+  min-height:24px;
+  padding:3px 7px;
+  border-radius:6px;
+  font-size:.6rem;
+}
+#outputsList .pipeline-content-action:disabled{opacity:.48}
+
+/* Platform output column: icon/name/type and output number on one clean line. */
+#outputsList .pipeline-output-platform-cell{
+  border-right:1px solid #e7ebef;
+}
+#outputsList .pipeline-platform-line{
+  justify-content:space-between;
+  gap:8px;
+}
+#outputsList .pipeline-platform-pill{
+  min-width:0;
+  max-width:none;
+  flex:1 1 auto;
+  gap:6px;
+  color:#20344f;
+  font-size:.69rem;
+  font-weight:760;
+}
+#outputsList .pipeline-platform-pill b{
+  min-width:22px;
+  width:22px;
+  height:20px;
+  padding:0;
+  border-radius:5px;
+}
+#outputsList .pipeline-platform-line>strong{
+  flex:0 0 auto;
+  color:#53657b;
+  font-size:.66rem;
+  font-weight:750;
+}
+#outputsList .pipeline-output-detail{
+  margin-top:1px;
+  padding-left:28px;
+  font-size:.57rem;
+}
+#outputsList .pipeline-compact-row[data-platform] td:first-child{box-shadow:none!important}
+
+/* Status is intentionally simple in the table; detailed render/review/publish states remain in the record/review surfaces. */
+#outputsList .pipeline-status-stack{
+  display:flex;
+  align-items:center;
+  gap:5px;
+}
+#outputsList .pipeline-status-stack>.badge{
+  grid-row:auto;
+  font-size:.63rem;
+  padding:4px 7px;
+  border-radius:5px;
+}
+#outputsList .pipeline-status-detail{display:none}
+#outputsList .pipeline-status-stack .pipeline-tiktok-complete,
+#outputsList .pipeline-status-stack .pipeline-youtube-complete{
+  margin:0;
+  max-width:100%;
+}
+
+/* Progress and schedule stay single-line compact. */
+#outputsList .pipeline-progress-cell{
+  font-size:.64rem;
+  border-right:1px solid #e7ebef;
+}
+#outputsList .pipeline-progress-cell .progress-track,
+#outputsList .pipeline-progress-cell progress{height:9px}
+#outputsList .pipeline-schedule-column{
+  border-right:1px solid #e7ebef;
+}
+#outputsList .pipeline-schedule-cell-compact{
+  display:block;
+}
+#outputsList .pipeline-schedule-cell-compact .pipeline-schedule-controls{
+  display:grid;
+  grid-template-columns:minmax(0,1fr) 27px;
+  gap:4px;
+  align-items:center;
+}
+#outputsList .pipeline-schedule-cell-compact input[type="datetime-local"],
+#outputsList .pipeline-schedule-locked input[type="datetime-local"]{
+  min-height:28px;
+  height:28px;
+  padding:3px 6px;
+  border-radius:6px;
+  font-size:.64rem;
+}
+#outputsList .pipeline-calendar-button{
+  min-height:28px!important;
+  height:28px!important;
+  border-radius:6px!important;
+}
+.pipeline-schedule-hidden-meta{display:none!important}
+#outputsList .pipeline-schedule-save-state{
+  display:block;
+  min-height:0;
+  margin-top:1px;
+  font-size:.55rem;
+}
+#outputsList .pipeline-schedule-save-state:empty{display:none}
+#outputsList .pipeline-schedule-readonly{font-size:.66rem}
+#outputsList .pipeline-schedule-locked{
+  grid-template-columns:minmax(0,1fr) auto;
+}
+#outputsList .pipeline-schedule-locked span{display:none}
+#outputsList .pipeline-schedule-locked b{
+  font-size:.58rem;
+  color:#8a6110;
+}
+
+/* Keep action buttons like the mockup. */
+#outputsList .pipeline-actions-cell{
+  text-align:center;
+}
+#outputsList .pipeline-actions-cell>.creative-button{
+  min-width:60px;
+  min-height:27px;
+  padding:3px 8px;
+  border-radius:6px;
+  font-size:.64rem;
+  background:#fff;
+  color:#173a6b;
+  border:1px solid #b9cce6;
+}
+#outputsList .pipeline-row-more>summary{
+  width:28px;
+  height:27px;
+  border-radius:6px;
+}
+
+/* Old collapsible group presentation is retired for active rows. */
+#outputsList .pipeline-group-row{display:none}
+#outputsList .pipeline-output-group.is-collapsed tr:not(.pipeline-group-row){display:table-row}
+
+/* Package boundaries are clearer than giant empty row spacing. */
+#outputsList .pipeline-content-package + .pipeline-content-package .pipeline-content-cell,
+#outputsList .pipeline-content-package + .pipeline-content-package .pipeline-compact-row:first-child td{
+  border-top:5px solid #fff;
+}
+
+@media(max-width:1180px){
+  #outputsList .pipeline-compact-table{min-width:1080px}
+  .pipeline-content-card{grid-template-columns:78px minmax(0,1fr)}
+  .pipeline-content-thumb{width:78px;height:104px}
+}
+@media(max-width:760px){
+  #outputsList .pipeline-compact-table{min-width:1040px}
+}
