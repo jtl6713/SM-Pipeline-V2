@@ -34,3 +34,4 @@ Deploy UI 0.6.503 once morning, afternoon, and evening are taken, the next post 
 Deploy UI 0.6.503 low-platform-count-alert. Home Scheduled Content turns Facebook/Instagram totals below 40 and TikTok/YouTube totals below 20 red.
 Deploy UI 0.6.504 compact Pipeline workspace. Dense grouped table, status tabs, search/filters, condensed schedule/actions, thumbnails and overflow actions while preserving existing Pipeline functionality.
 Deploy UI 0.6.505 inline schedule autosave. Pipeline schedule fields save typed changes on change/blur/Enter; published outputs render locked and retain server-side reschedule protection.
+Deploy UI 0.6.506 Pipeline color system. Collapsed content groups now show workflow status color and platform chips; expanded IG/FB/TikTok/YouTube rows use brand tints; quick status tabs use stronger state colors.
