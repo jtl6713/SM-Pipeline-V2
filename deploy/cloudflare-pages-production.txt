@@ -25,3 +25,4 @@ Deploy UI 0.6.496 timed script import accepts bold markdown times so Use this ti
 Deploy UI 0.6.497 quoted library search returns only that named set.
 Deploy UI 0.6.498 timed script import accepts a spreadsheet paste of Time, Voiceover, and still.
 Deploy UI 0.6.499 scripted short proposal. One prompt writes a timed script that mixes owned files and shots still to create.
+Deploy UI 0.6.499 pipeline output card shading. Subtle alternating card backgrounds improve Platform Pipeline separation on mobile and tablet.
