@@ -36,9 +36,10 @@ test("Approve and Approve All fail soft when schedule occupancy cannot be read",
     source.indexOf("async function approveOutputRecordForPublishing"),
     source.indexOf("async function approveAllOutputsForPublishing"),
   );
+  const approveAllStart = source.indexOf("async function approveAllOutputsForPublishing");
   const approveAll = source.slice(
-    source.indexOf("async function approveAllOutputsForPublishing"),
-    source.indexOf("async function"),
+    approveAllStart,
+    source.indexOf("async function", approveAllStart + 20),
   );
   assert.match(singleApprove, /studioOccupiedSchedulesOrEmpty/);
   assert.match(approveAll, /studioOccupiedSchedulesOrEmpty/);
