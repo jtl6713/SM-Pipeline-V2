@@ -545,36 +545,38 @@ input, select, textarea, button {
     font-size: 1.4rem;
   }
 
-  /* Convert admin tables into phone-readable stacked cards. */
-  .data-table {
+  /* Convert admin tables into phone-readable stacked cards.
+     Pipeline compact overview keeps a wide table + horizontal pan
+     (#outputsList scrollport); do not collapse it to min-width:0. */
+  .data-table:not(.pipeline-compact-table) {
     min-width: 0 !important;
     width: 100%;
   }
 
-  .data-table thead {
+  .data-table:not(.pipeline-compact-table) thead {
     display: none;
   }
 
-  .data-table tbody,
-  .data-table tr,
-  .data-table td {
+  .data-table:not(.pipeline-compact-table) tbody,
+  .data-table:not(.pipeline-compact-table) tr,
+  .data-table:not(.pipeline-compact-table) td {
     display: block;
     width: 100%;
   }
 
-  .data-table tr {
+  .data-table:not(.pipeline-compact-table) tr {
     padding: 10px 12px;
     border-bottom: 1px solid var(--line);
   }
 
-  .data-table td {
+  .data-table:not(.pipeline-compact-table) td {
     border: 0 !important;
     padding: 5px 0 !important;
     text-align: left !important;
     overflow-wrap: anywhere;
   }
 
-  .data-table td:empty {
+  .data-table:not(.pipeline-compact-table) td:empty {
     display: none;
   }
 
@@ -3677,9 +3679,36 @@ body.platform-calendar-open { overflow: hidden; }
 #page-outputs .pipeline-schedule-collapsed .pipeline-schedule-unscheduled-list{min-height:20px;align-items:center}
 #page-outputs .pipeline-schedule-collapsed .pipeline-schedule-entry{min-height:24px;padding:3px 6px;font-size:9px}
 
-#page-outputs .panel:has(#outputsList){padding:0;overflow:visible}
+/* PIPELINE_MOBILE_SCROLL_0_6_514
+   Wide compact table (min-width 1040px) must pan inside #outputsList.
+   Ancestors stay bounded so body overflow-x:clip cannot hide the overflow.
+   Also exclude .pipeline-compact-table from the mobile .data-table card rule. */
+body:has(#page-outputs.active) .main{
+  min-width:0;
+  max-width:100%;
+  overflow-x:hidden;
+}
+#page-outputs{
+  max-width:100%;
+  min-width:0;
+}
+#page-outputs .panel:has(#outputsList){
+  padding:0;
+  overflow:hidden;
+  max-width:100%;
+  min-width:0;
+}
 #page-outputs #pipelineFilterBar{margin:0 0 7px;padding:6px 9px;border-radius:9px;font-size:.72rem}
-#outputsList{overflow:visible}
+#outputsList{
+  overflow-x:auto;
+  overflow-y:auto;
+  -webkit-overflow-scrolling:touch;
+  overscroll-behavior-x:contain;
+  max-width:100%;
+  min-width:0;
+  width:100%;
+  touch-action:pan-x pan-y;
+}
 #outputsList .pipeline-compact-table{width:100%;min-width:980px;table-layout:fixed;border-collapse:separate;border-spacing:0;font-size:.75rem}
 #outputsList .pipeline-compact-table thead th{position:sticky;top:0;z-index:4;padding:5px 8px;background:#f8faf9;border-bottom:1px solid var(--line);white-space:nowrap}
 #outputsList .pipeline-compact-table thead th:nth-child(1){width:24%}
@@ -3780,13 +3809,30 @@ body.platform-calendar-open { overflow: hidden; }
   #page-outputs .pipeline-schedule-collapsed .pipeline-schedule-overview-heading>div:first-child{display:block}
   #page-outputs .pipeline-schedule-collapsed #pipelineScheduleGridSummary{white-space:normal}
   #page-outputs .pipeline-schedule-collapsed .pipeline-schedule-unscheduled{grid-template-columns:1fr}
-  #outputsList{overflow-x:auto}
-  #outputsList .pipeline-compact-table{display:table;min-width:860px}
+  body:has(#page-outputs.active) .main,
+  #page-outputs,
+  #page-outputs .panel:has(#outputsList){
+    max-width:100%;
+    min-width:0;
+  }
+  #outputsList{
+    overflow-x:auto;
+    overflow-y:auto;
+    -webkit-overflow-scrolling:touch;
+    overscroll-behavior-x:contain;
+    max-width:100%;
+    width:100%;
+  }
+  #outputsList .pipeline-compact-table{
+    display:table;
+    min-width:1040px!important;
+    width:1040px;
+  }
   #outputsList .pipeline-compact-table thead{display:table-header-group}
   #outputsList .pipeline-compact-table tbody{display:table-row-group}
   #outputsList .pipeline-compact-table tr{display:table-row}
   #outputsList .pipeline-compact-table th,
-  #outputsList .pipeline-compact-table td{display:table-cell;width:auto}
+  #outputsList .pipeline-compact-table td{display:table-cell}
   #outputsList .pipeline-group-row{display:table-row;background:transparent;padding:0}
 }
 
@@ -4207,7 +4253,11 @@ body.platform-calendar-open { overflow: hidden; }
   .pipeline-content-thumb{width:78px;height:104px}
 }
 @media(max-width:760px){
-  #outputsList .pipeline-compact-table{min-width:1040px}
+  /* Beat the global .data-table{min-width:0!important} card rule. */
+  #outputsList .pipeline-compact-table{
+    min-width:1040px!important;
+    width:1040px;
+  }
 }
 
 

@@ -260,7 +260,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.513-tiktok-photo-sound-guard";
+  const BUILD_ID = "item4-0.6.514-pipeline-mobile-scroll";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   const NAV_MOBILE_MQ = "(max-width: 760px)";
   let item4AssetStripSignature = "";
