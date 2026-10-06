@@ -27,3 +27,4 @@ Deploy UI 0.6.498 timed script import accepts a spreadsheet paste of Time, Voice
 Deploy UI 0.6.499 scripted short proposal. One prompt writes a timed script that mixes owned files and shots still to create.
 Deploy UI 0.6.499 pipeline output card shading. Subtle alternating card backgrounds improve Platform Pipeline separation on mobile and tablet.
 Deploy UI 0.6.500 pipeline card shading fix. Force visible per-output alternating backgrounds on mobile/tablet.
+Deploy UI 0.6.500 footer BUILD_ID. Pipeline card shading fix labeled and cache-busted in app JS.
