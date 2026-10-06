@@ -43,3 +43,4 @@ Deploy UI 0.6.510 Pipeline density pass. Remove aspect-ratio detail from Pipelin
 Deploy UI 0.6.511-render-stale-approve-gate. creativeCanApproveForPublishing rejects In Production/Rendering/Ready for Render so Approve (N) does not false-light on stale Rendering rows (Output 1807).
 Deploy UI 0.6.512-collapsible-nav. Left navigation collapses on mobile as an off-canvas drawer (default closed) and can collapse on desktop to reclaim space.
 Deploy UI 0.6.513 TikTok photo sound guard. Photo carousels require confirmation that sound was added in TikTok before Studio marks them Published; output detail surfaces the required sound step.
+Deploy UI 0.6.514-pipeline-mobile-scroll. Pipeline content overview scrolls horizontally on phones; exclude compact table from mobile data-table card min-width:0 and bound #outputsList as the touch scrollport.
