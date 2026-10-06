@@ -50,12 +50,13 @@ test("opening a platform output jumps immediately to the top of the page", () =>
 });
 
 
-test("pipeline output puts Download Cover on a new line when Open post is present", () => {
+test("pipeline output keeps Open post and Download Cover in the compact more-actions menu", () => {
   assert.match(app, /const coverDownloadUrl = phase6ThumbnailDownloadUrl\(r\)/);
   assert.match(app, /pipeline-cover-download/);
-  assert.match(app, /pipeline-post-action-links/);
-  assert.match(app, /postLink && coverLink \? "<br>" : ""/);
-  assert.match(app, /\$\{actionLinks\}<\/td>/);
+  assert.match(app, /pipeline-row-more-menu/);
+  assert.match(app, /Open post ↗/);
+  assert.match(app, /Download cover/);
+  assert.match(app, /\$\{moreMenu\}<\/td>/);
 });
 
 
