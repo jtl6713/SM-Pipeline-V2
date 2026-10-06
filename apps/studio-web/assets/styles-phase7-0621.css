@@ -3789,3 +3789,128 @@ body.platform-calendar-open { overflow: hidden; }
   #outputsList .pipeline-compact-table td{display:table-cell;width:auto}
   #outputsList .pipeline-group-row{display:table-row;background:transparent;padding:0}
 }
+
+
+/* PIPELINE_COLOR_SYSTEM_0_6_506 */
+/* Stronger visual hierarchy for the compact Pipeline. Keep platform/status meaning visible even while groups are collapsed. */
+.pipeline-quick-tabs button{
+  border-color:#d7dfdf;
+  background:#fff;
+  transition:background .12s ease,border-color .12s ease,box-shadow .12s ease,transform .12s ease;
+}
+.pipeline-quick-tabs button:hover{transform:translateY(-1px)}
+.pipeline-quick-tabs [data-pipeline-quick-view="all"]{background:#f8fafc;border-color:#d9e0e7}
+.pipeline-quick-tabs [data-pipeline-quick-view="active"]{background:#f1f7f7;border-color:#cfe0de}
+.pipeline-quick-tabs [data-pipeline-quick-view="rendering"]{background:#eff6ff;border-color:#bfdbfe;color:#1d4ed8}
+.pipeline-quick-tabs [data-pipeline-quick-view="approval"]{background:#fff8e8;border-color:#f4d68a;color:#9a6700}
+.pipeline-quick-tabs [data-pipeline-quick-view="approved"]{background:#ecfdf5;border-color:#a7e8c8;color:#047857}
+.pipeline-quick-tabs [data-pipeline-quick-view="scheduled"]{background:#ecfeff;border-color:#a5e7ee;color:#0e7490}
+.pipeline-quick-tabs [data-pipeline-quick-view="published"]{background:#f0fdf4;border-color:#b7e4c3;color:#15803d}
+.pipeline-quick-tabs [data-pipeline-quick-view="failed"],
+.pipeline-quick-tabs [data-pipeline-quick-view="attention"]{background:#fff1f2;border-color:#fecaca;color:#b42318}
+.pipeline-quick-tabs [data-pipeline-quick-view="rendering"] b{background:#dbeafe;color:#1d4ed8}
+.pipeline-quick-tabs [data-pipeline-quick-view="approval"] b{background:#fef3c7;color:#92400e}
+.pipeline-quick-tabs [data-pipeline-quick-view="approved"] b{background:#d1fae5;color:#047857}
+.pipeline-quick-tabs [data-pipeline-quick-view="scheduled"] b{background:#cffafe;color:#0e7490}
+.pipeline-quick-tabs [data-pipeline-quick-view="published"] b{background:#dcfce7;color:#15803d}
+.pipeline-quick-tabs [data-pipeline-quick-view="failed"] b,
+.pipeline-quick-tabs [data-pipeline-quick-view="attention"] b{background:#fee2e2;color:#b42318}
+.pipeline-quick-tabs button.is-active{
+  border-width:2px;
+  box-shadow:0 2px 9px rgba(15,23,42,.10);
+  font-weight:850;
+}
+
+/* Collapsed content rows now carry workflow color, rather than every package looking mint green. */
+#outputsList .pipeline-group-row td{
+  position:relative;
+  background:#f8faf9;
+  transition:background .12s ease;
+}
+#outputsList .pipeline-group-row td:before{
+  content:"";
+  position:absolute;
+  left:0;top:0;bottom:0;
+  width:5px;
+  background:#94a3b8;
+}
+#outputsList .pipeline-group-row[data-pipeline-tone="rendering"] td{background:#f4f8ff;border-color:#d7e5fb}
+#outputsList .pipeline-group-row[data-pipeline-tone="rendering"] td:before{background:#3b82f6}
+#outputsList .pipeline-group-row[data-pipeline-tone="approval"] td{background:#fffaf0;border-color:#f0dfae}
+#outputsList .pipeline-group-row[data-pipeline-tone="approval"] td:before{background:#f59e0b}
+#outputsList .pipeline-group-row[data-pipeline-tone="approved"] td{background:#f2fbf7;border-color:#ccebdc}
+#outputsList .pipeline-group-row[data-pipeline-tone="approved"] td:before{background:#10b981}
+#outputsList .pipeline-group-row[data-pipeline-tone="scheduled"] td{background:#f1fbfd;border-color:#cae9ee}
+#outputsList .pipeline-group-row[data-pipeline-tone="scheduled"] td:before{background:#0ea5e9}
+#outputsList .pipeline-group-row[data-pipeline-tone="published"] td{background:#f3fbf4;border-color:#cee7d1}
+#outputsList .pipeline-group-row[data-pipeline-tone="published"] td:before{background:#16a34a}
+#outputsList .pipeline-group-row[data-pipeline-tone="failed"] td{background:#fff4f4;border-color:#f3cccc}
+#outputsList .pipeline-group-row[data-pipeline-tone="failed"] td:before{background:#dc2626}
+#outputsList .pipeline-group-row[data-pipeline-tone="active"] td:before{background:#64748b}
+
+#outputsList .pipeline-group-copy{
+  flex-wrap:wrap;
+  row-gap:3px;
+}
+.pipeline-group-platforms{
+  display:inline-flex;
+  align-items:center;
+  gap:4px;
+  margin-left:2px;
+  flex:0 0 auto;
+}
+.pipeline-group-platform-chip{
+  display:inline-flex;
+  align-items:center;
+  gap:3px;
+  min-height:20px;
+  padding:1px 5px;
+  border:1px solid #d9e0e0;
+  border-radius:999px;
+  background:#fff;
+  font-size:.59rem;
+  line-height:1;
+  font-weight:850;
+  letter-spacing:.01em;
+  box-shadow:0 1px 2px rgba(15,23,42,.04);
+}
+.pipeline-group-platform-chip b{font-size:.59rem}
+.pipeline-group-platform-chip span{font-size:.55rem;opacity:.72}
+.pipeline-group-platform-chip[data-platform="instagram"]{background:#fff0f8;border-color:#f5b8da;color:#9d174d}
+.pipeline-group-platform-chip[data-platform="facebook"]{background:#eff6ff;border-color:#b9d6ff;color:#1d4ed8}
+.pipeline-group-platform-chip[data-platform="tiktok"]{background:#f3f4f6;border-color:#d1d5db;color:#111827}
+.pipeline-group-platform-chip[data-platform="youtube"]{background:#fff1f1;border-color:#fecaca;color:#b91c1c}
+
+/* Expanded platform rows use a very light brand wash across the row, not just a 3px stripe. */
+#outputsList .pipeline-compact-row[data-platform="instagram"]{background:#fff9fc}
+#outputsList .pipeline-compact-row[data-platform="facebook"]{background:#f8fbff}
+#outputsList .pipeline-compact-row[data-platform="tiktok"]{background:#fbfcfd}
+#outputsList .pipeline-compact-row[data-platform="youtube"]{background:#fff9f9}
+#outputsList .pipeline-compact-row[data-platform="instagram"]:hover{background:#fff0f8}
+#outputsList .pipeline-compact-row[data-platform="facebook"]:hover{background:#eef6ff}
+#outputsList .pipeline-compact-row[data-platform="tiktok"]:hover{background:#f3f4f6}
+#outputsList .pipeline-compact-row[data-platform="youtube"]:hover{background:#fff0f0}
+#outputsList .pipeline-compact-row[data-platform="instagram"] td:first-child{box-shadow:inset 5px 0 0 #c13584}
+#outputsList .pipeline-compact-row[data-platform="facebook"] td:first-child{box-shadow:inset 5px 0 0 #1877f2}
+#outputsList .pipeline-compact-row[data-platform="tiktok"] td:first-child{box-shadow:inset 5px 0 0 #111827}
+#outputsList .pipeline-compact-row[data-platform="youtube"] td:first-child{box-shadow:inset 5px 0 0 #ff0000}
+
+/* Make content-level actions read as actions instead of identical white pills. */
+#outputsList .pipeline-group-approve:not(:disabled){
+  background:#e8f7f2;
+  border-color:#8fd1be;
+  color:#08715a;
+  font-weight:800;
+}
+#outputsList .pipeline-group-regenerate:not(:disabled){
+  background:#f4f2ff;
+  border-color:#cfc8f6;
+  color:#5543a7;
+  font-weight:800;
+}
+#outputsList .pipeline-group-approve:not(:disabled):hover{background:#d9f1e8}
+#outputsList .pipeline-group-regenerate:not(:disabled):hover{background:#ebe7ff}
+
+@media(max-width:900px){
+  .pipeline-group-platforms{display:none}
+}
