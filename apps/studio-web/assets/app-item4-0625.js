@@ -260,7 +260,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.505-inline-schedule-autosave";
+  const BUILD_ID = "item4-0.6.506-pipeline-color-system";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -17878,6 +17878,36 @@
     return Boolean(isNewest);
   }
 
+  function pipelineGroupVisualTone(records = []) {
+    const rows = Array.isArray(records) ? records : [];
+    if (!rows.length) return "active";
+    if (rows.some((record) => pipelineRecordMatchesFilter(record, "failed") || pipelineRecordMatchesFilter(record, "attention"))) return "failed";
+    if (rows.some((record) => pipelineRecordMatchesFilter(record, "approval"))) return "approval";
+    if (rows.some((record) => pipelineRecordMatchesFilter(record, "rendering"))) return "rendering";
+    if (rows.some((record) => pipelineRecordMatchesFilter(record, "approved"))) return "approved";
+    if (rows.some((record) => pipelineRecordMatchesFilter(record, "scheduled"))) return "scheduled";
+    if (rows.every((record) => pipelineRecordMatchesFilter(record, "published") || pipelineOutputFullyPublished(record))) return "published";
+    return "active";
+  }
+
+  function pipelineGroupPlatformSummary(records = []) {
+    const order = ["instagram", "facebook", "tiktok", "youtube"];
+    const counts = new Map();
+    for (const record of records || []) {
+      const key = String(record?.platform || "").trim().toLowerCase();
+      if (!key) continue;
+      counts.set(key, (counts.get(key) || 0) + 1);
+    }
+    return order
+      .filter((key) => counts.has(key))
+      .map((key) => {
+        const label = key === "instagram" ? "IG" : key === "facebook" ? "FB" : key === "tiktok" ? "TT" : "YT";
+        const count = counts.get(key) || 0;
+        return `<span class="pipeline-group-platform-chip" data-platform="${key}" title="${escapeHtml(key.charAt(0).toUpperCase() + key.slice(1))}: ${count} output${count === 1 ? "" : "s"}"><b>${label}</b>${count > 1 ? `<span>${count}</span>` : ""}</span>`;
+      })
+      .join("");
+  }
+
   function renderPipelineGroupTbody(group, pipelineRow, { isNewest = false, isArchived = false } = {}) {
     const open = isPipelineGroupExpanded(group.key, { isNewest, isArchived });
     const first = group.records[0] || {};
@@ -17905,7 +17935,9 @@
       destination ? `${destination.done}/${destination.total} rendered` : "",
     ].filter(Boolean).join(" · ");
     const contentLabel = contentNumber ? `#${contentNumber} · ${title}` : title;
-    const header = `<tr class="pipeline-group-row"><td colspan="5"><div class="pipeline-group-head"><button type="button" class="pipeline-group-toggle" data-pipeline-group-toggle="${escapeHtml(group.key)}" aria-expanded="${open ? "true" : "false"}"><span class="pipeline-group-chevron" aria-hidden="true">${open ? "▾" : "▸"}</span>${cover}<span class="pipeline-group-copy"><span class="pipeline-group-title">${escapeHtml(contentLabel)}</span><span class="pipeline-group-meta">${escapeHtml(groupMeta)}</span></span></button><div class="pipeline-group-actions">${approveButton}${regenerateButton}</div></div></td></tr>`;
+    const groupTone = pipelineGroupVisualTone(group.records);
+    const platformSummary = pipelineGroupPlatformSummary(group.records);
+    const header = `<tr class="pipeline-group-row" data-pipeline-tone="${escapeHtml(groupTone)}"><td colspan="5"><div class="pipeline-group-head"><button type="button" class="pipeline-group-toggle" data-pipeline-group-toggle="${escapeHtml(group.key)}" aria-expanded="${open ? "true" : "false"}"><span class="pipeline-group-chevron" aria-hidden="true">${open ? "▾" : "▸"}</span>${cover}<span class="pipeline-group-copy"><span class="pipeline-group-title">${escapeHtml(contentLabel)}</span><span class="pipeline-group-meta">${escapeHtml(groupMeta)}</span><span class="pipeline-group-platforms">${platformSummary}</span></span></button><div class="pipeline-group-actions">${approveButton}${regenerateButton}</div></div></td></tr>`;
     return `<tbody class="pipeline-output-group${open ? "" : " is-collapsed"}${isArchived ? " pipeline-archived-group" : ""}" data-pipeline-group="${escapeHtml(group.key)}">${header}${group.records.map((row) => pipelineRow(row, group.records)).join("")}</tbody>`;
   }
 
