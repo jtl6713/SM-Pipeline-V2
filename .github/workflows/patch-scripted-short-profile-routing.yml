@@ -1,0 +1,103 @@
+name: Patch Scripted Short Profile Routing
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/patch-scripted-short-profile-routing.yml'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: patch-scripted-short-profile-routing
+  cancel-in-progress: false
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Patch selected-profile transport for scripted shorts
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import re
+          from pathlib import Path
+
+          index = Path("apps/studio-web/index.html")
+          html = index.read_text()
+          match = re.search(r'src=["\'](/assets/app-item4-[^"\']+\.js)(?:\?[^"\']*)?["\']', html)
+          if not match:
+              raise SystemExit("Could not locate Studio app asset")
+          app_path = Path("apps/studio-web") / match.group(1).lstrip("/")
+          app = app_path.read_text()
+
+          old_scope = '''const scoped = pathname === "/api/ideas" || pathname.startsWith("/api/ideas/")
+      || pathname === "/api/production-requests"'''
+          new_scope = '''const scoped = pathname === "/api/ideas" || pathname.startsWith("/api/ideas/")
+      || pathname.startsWith("/api/scripted-short/")
+      || pathname === "/api/production-requests"'''
+          if app.count(old_scope) != 1:
+              raise SystemExit(f"Expected one withStudioProfile scope block, found {app.count(old_scope)}")
+          app = app.replace(old_scope, new_scope, 1)
+
+          old_body = '''if (pathname === "/api/ideas" || pathname === "/api/ideas/generate" || pathname === "/api/outputs/approve-all") {'''
+          new_body = '''if (pathname === "/api/ideas" || pathname === "/api/ideas/generate"
+          || pathname === "/api/scripted-short/propose" || pathname === "/api/scripted-short/accept"
+          || pathname === "/api/outputs/approve-all") {'''
+          if app.count(old_body) != 1:
+              raise SystemExit(f"Expected one selected-profile body injection block, found {app.count(old_body)}")
+          app = app.replace(old_body, new_body, 1)
+
+          old_build = 'const BUILD_ID = "item4-0.6.503-mae-gap-extras";'
+          new_build = 'const BUILD_ID = "item4-0.6.504-scripted-short-profile";'
+          if app.count(old_build) != 1:
+              raise SystemExit(f"Expected exact UI build marker once, found {app.count(old_build)}")
+          app = app.replace(old_build, new_build, 1)
+          app_path.write_text(app)
+
+          old_src = f'{match.group(1)}?v=0.6.503-mae-gap-extras'
+          new_src = f'{match.group(1)}?v=0.6.504-scripted-short-profile'
+          if old_src not in html:
+              raise SystemExit("Expected 0.6.503 app query marker is missing")
+          html = html.replace(old_src, new_src, 1)
+          if "UI build 0.6.503" not in html:
+              raise SystemExit("Expected UI build label 0.6.503 is missing")
+          html = html.replace("UI build 0.6.503", "UI build 0.6.504", 1)
+          index.write_text(html)
+
+          # Regression assertions: both query scoping and JSON payload transport
+          # must carry the currently selected Content Profile.
+          check = app_path.read_text()
+          assert 'pathname.startsWith("/api/scripted-short/")' in check
+          assert 'pathname === "/api/scripted-short/accept"' in check
+          assert 'parsed.content_profile_id = selectedProfileId' in check
+          assert 'item4-0.6.504-scripted-short-profile' in check
+          print(f"patched={app_path}")
+          PY
+
+          cp apps/studio-web/assets/app-item4-0625.js /tmp/studio-profile-patch.mjs
+          node --check /tmp/studio-profile-patch.mjs
+
+      - name: Trigger controlled Pages production deploy
+        shell: bash
+        run: |
+          set -euo pipefail
+          printf '\n2026-10-06 0.6.504 scripted-short selected-profile routing\n' >> deploy/cloudflare-pages-production.txt
+
+      - name: Commit patch and deploy trigger
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'SM Pipeline Profile Repair'
+          git config user.email 'actions@users.noreply.github.com'
+          git add apps/studio-web/index.html apps/studio-web/assets/app-item4-0625.js deploy/cloudflare-pages-production.txt
+          git commit -m 'Fix scripted short selected-profile routing'
+          git pull --rebase origin main
+          git push origin HEAD:main
