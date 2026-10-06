@@ -9,11 +9,11 @@ const app = fs.readFileSync(path.join(here, "assets/app-item4-0625.js"), "utf8")
 const html = fs.readFileSync(path.join(here, "index.html"), "utf8");
 const css = fs.readFileSync(path.join(here, "assets/styles-phase7-0621.css"), "utf8");
 
-test("UI 0.6.512 exposes a collapsible left navigation for mobile and desktop", () => {
-  assert.match(app, /BUILD_ID = "item4-0\.6\.512-collapsible-nav"/);
-  assert.match(html, /UI build 0\.6\.512/);
-  assert.match(html, /app-item4-0625\.js\?v=0\.6\.512-collapsible-nav/);
-  assert.match(html, /styles-phase7-0621\.css\?v=0\.6\.512-collapsible-nav/);
+test("UI 0.6.513 exposes a collapsible left navigation for mobile and desktop", () => {
+  assert.match(app, /BUILD_ID = "item4-0\.6\.513-tiktok-photo-sound-guard"/);
+  assert.match(html, /UI build 0\.6\.513/);
+  assert.match(html, /app-item4-0625\.js\?v=0\.6\.513-tiktok-photo-sound-guard/);
+  assert.match(html, /styles-phase7-0621\.css\?v=0\.6\.513-tiktok-photo-sound-guard/);
   assert.match(html, /id="studioNavToggle"/);
   assert.match(html, /id="studioSidebar"/);
   assert.match(html, /id="studioNavBackdrop"/);
