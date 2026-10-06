@@ -41,3 +41,4 @@ Deploy UI 0.6.509 row-spanned Pipeline. Replace collapsible group rows with one 
 Deploy UI 0.6.509-rowspan-pipeline hermetic-pin + pages retry. Align compact/mae/color/schedule-save pins after schedule-save 0.6.508 landed under rowspan 0.6.509.
 Deploy UI 0.6.510 Pipeline density pass. Remove aspect-ratio detail from Pipeline rows, move TikTok draft resend to Open/output details, normalize platform type labels, and reduce row/control heights for more at-a-glance outputs.
 Deploy UI 0.6.511-render-stale-approve-gate. creativeCanApproveForPublishing rejects In Production/Rendering/Ready for Render so Approve (N) does not false-light on stale Rendering rows (Output 1807).
+Deploy UI 0.6.512-collapsible-nav. Left navigation collapses on mobile as an off-canvas drawer (default closed) and can collapse on desktop to reclaim space.
