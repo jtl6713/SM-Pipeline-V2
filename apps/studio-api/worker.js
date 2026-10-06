@@ -503,7 +503,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.455-timeline-async-variants",
+          version: "0.10.456-timeline-background-variants",
           studio_mae_schedule_v1: true,
           studio_desk_inventory_v1: true,
           studio_desk_activity_v1: true,
@@ -21803,20 +21803,26 @@ async function createIdeaTimedScriptRoute(request, env, url, authorization, ctx 
 
   let variantStatus = String(f(requestRecord, "Studio_Variant_Status") || "").trim();
   if (variantStatus !== "Ready" && variantStatus !== "Not Needed") {
-    let reconciled = await item4ReconcileVariants(env, requestRecord.id, requestRecord).catch(() => null);
-    if (reconciled?.record) requestRecord = reconciled.record;
-    const queued = Array.isArray(reconciled?.queue_rows) && reconciled.queue_rows.length;
-    if (!autonomousPlanVariantsReady(requestRecord, reconciled) && !queued) {
-      const variantsCall = studioInternalJsonRequest(`/api/production-requests/${requestRecord.id}/variants`, {});
-      await prepareItem4Variants(variantsCall.request, env, variantsCall.url, authorization, ctx);
+    // Create Timeline is an interactive request. Variant preparation can be expensive
+    // (Drive reads + crop queue writes) and must not make this request fail after the
+    // timeline/stills have already been saved. Leave variants queued for the normal
+    // continuation/cron path and return the production draft immediately.
+    if (ctx?.waitUntil) {
+      ctx.waitUntil((async () => {
+        try {
+          let current = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, requestRecord.id);
+          let reconciled = await item4ReconcileVariants(env, current.id, current).catch(() => null);
+          if (reconciled?.record) current = reconciled.record;
+          const queued = Array.isArray(reconciled?.queue_rows) && reconciled.queue_rows.length;
+          if (!autonomousPlanVariantsReady(current, reconciled) && !queued) {
+            const variantsCall = studioInternalJsonRequest(`/api/production-requests/${current.id}/variants`, {});
+            await prepareItem4Variants(variantsCall.request, env, variantsCall.url, authorization, ctx);
+          }
+        } catch (error) {
+          console.warn("idea timeline async variant prepare failed", requestRecord.id, error);
+        }
+      })());
     }
-    // Do not hold the interactive Create Timeline request open while crop variants drain.
-    // The variant worker/cron continues asynchronously; a long synchronous wait can exhaust
-    // the Cloudflare Worker request/subrequest budget and surface as a misleading HTTP 500.
-    // Reconcile once, then return 202 while variants finish.
-    const afterPrepare = await item4ReconcileVariants(env, requestRecord.id, requestRecord).catch(() => null);
-    if (afterPrepare?.record) requestRecord = afterPrepare.record;
-    else requestRecord = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, requestRecord.id).catch(() => requestRecord);
   }
 
   const assetsCount = item4AssetManifest(requestRecord).length;
