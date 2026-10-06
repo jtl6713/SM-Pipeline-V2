@@ -1,0 +1,88 @@
+name: Diagnose LA TikTok Delivery
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'deploy/diagnose-la-tiktok-delivery.txt'
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      AIRTABLE_PAT: ${{ secrets.AIRTABLE_PAT }}
+    steps:
+      - name: Check output 1439 against live LA TikTok worker
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json, os, urllib.parse, urllib.request
+
+          pat = os.environ["AIRTABLE_PAT"].strip()
+          base = "appe33zkZn35yirTL"
+          outputs = "tblrlPeboBthkplH0"
+          settings = "tblpHPWeEkyJaF7ql"
+
+          def get_json(url, headers=None, data=None):
+              req = urllib.request.Request(url, headers=headers or {}, data=data)
+              with urllib.request.urlopen(req, timeout=30) as response:
+                  return json.loads(response.read().decode("utf-8"))
+
+          headers = {"Authorization": f"Bearer {pat}"}
+          formula = urllib.parse.quote("{Output_ID}=1439")
+          out = get_json(
+              f"https://api.airtable.com/v0/{base}/{outputs}?filterByFormula={formula}&pageSize=1",
+              headers,
+          )["records"][0]
+          fields = out["fields"]
+          publish_id = str(fields.get("TikTok_Draft_Publish_ID") or "").strip()
+          profile = fields.get("Content_Profile") or []
+          print("output_id=1439")
+          print("output_record_id=" + out["id"])
+          print("content_profile=" + json.dumps(profile, ensure_ascii=True))
+          print("draft_status=" + str(fields.get("TikTok_Draft_Status") or ""))
+          print("publish_id_present=" + str(bool(publish_id)).lower())
+
+          names = ["LA_TIKTOK_PIPELINE_SECRET", "LA_TIKTOK_HANDLE", "LA_TIKTOK_WORKER_BASE_URL"]
+          f = "OR(" + ",".join("{Setting_Name}='" + n + "'" for n in names) + ")"
+          qs = urllib.parse.urlencode([("filterByFormula", f), ("pageSize", "20")])
+          rows = get_json(f"https://api.airtable.com/v0/{base}/{settings}?{qs}", headers)["records"]
+          values = {
+              r["fields"].get("Setting_Name"): r["fields"].get("Setting_Value")
+              for r in rows
+              if r.get("fields", {}).get("Active")
+          }
+          secret = str(values["LA_TIKTOK_PIPELINE_SECRET"]).strip()
+          worker = str(values["LA_TIKTOK_WORKER_BASE_URL"]).rstrip("/")
+          expected_handle = str(values["LA_TIKTOK_HANDLE"]).lstrip("@").strip().lower()
+
+          api_headers = {"X-Pipeline-Secret": secret, "Content-Type": "application/json"}
+          creator = get_json(worker + "/tiktok/creator-info", api_headers, b"{}")
+          actual_handle = str(creator.get("creator_username") or "").lstrip("@").strip().lower()
+          print("worker=" + worker)
+          print("expected_handle=@" + expected_handle)
+          print("connected_handle=@" + actual_handle)
+          print("creator_match=" + str(actual_handle == expected_handle).lower())
+          print("creator_nickname=" + str(creator.get("creator_nickname") or ""))
+
+          if not publish_id:
+              raise SystemExit("missing publish id")
+          status = get_json(
+              worker + "/tiktok/draft/status",
+              api_headers,
+              json.dumps({"publish_id": publish_id}).encode(),
+          )
+          print("live_status=" + str(status.get("status") or ""))
+          print("draft_delivered=" + str(bool(status.get("draft_delivered"))).lower())
+          print("user_completed_post=" + str(bool(status.get("user_completed_post"))).lower())
+          print("fail_reason=" + str(status.get("fail_reason") or ""))
+          log_id = (((status.get("tiktok_response") or {}).get("error") or {}).get("log_id") or "")
+          print("tiktok_log_id=" + str(log_id))
+          if actual_handle != expected_handle:
+              raise SystemExit("connected TikTok account does not match LA profile")
+          PY
