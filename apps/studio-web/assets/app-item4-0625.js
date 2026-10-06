@@ -260,7 +260,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.508-schedule-save-ready-review";
+  const BUILD_ID = "item4-0.6.509-rowspan-pipeline";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -17985,19 +17985,48 @@
       .join("");
   }
 
+  function pipelineContentSummary(content, first) {
+    const raw = String(
+      content?.description
+      || content?.summary
+      || content?.content_summary
+      || content?.brief
+      || content?.caption
+      || first?.content_summary
+      || ""
+    ).replace(/\s+/g, " ").trim();
+    if (!raw) return "";
+    return raw.length > 150 ? `${raw.slice(0, 147).trimEnd()}…` : raw;
+  }
+
+  function pipelineWorkingProfileName() {
+    const profile = studioProfiles.find((item) => item.id === selectedProfileId);
+    return String(profile?.name || profile?.display_name || `${workingStudioCityLabel()} Shining`).trim();
+  }
+
   function renderPipelineGroupTbody(group, pipelineRow, { isNewest = false, isArchived = false } = {}) {
-    const open = isPipelineGroupExpanded(group.key, { isNewest, isArchived });
     const first = group.records[0] || {};
     const content = pipelineContentRecordForGroup(group.records);
     const contentNumber = String(content?.content_id ?? "").trim();
     const title = String(content?.title || first.output_title || first.content_title || "Untitled content").trim();
+    const summary = pipelineContentSummary(content, first);
     const groupReady = pipelineManualApprovableOutputs(group.records);
     const destination = pipelineDestinationProgress(group.records);
     const coverUrl = group.records.map((record) => phase6ThumbnailDownloadUrl(record)).find(Boolean) || "";
-    const cover = coverUrl
-      ? `<img class="pipeline-group-thumb" src="${escapeHtml(coverUrl)}" alt="" loading="lazy">`
-      : `<span class="pipeline-group-thumb pipeline-group-thumb-placeholder" aria-hidden="true">${escapeHtml(contentNumber || "•")}</span>`;
-    const approveButton = `<button type="button" class="secondary-button pipeline-group-approve" data-pipeline-group-approve="${escapeHtml(group.key)}" title="${groupReady.length ? "Approve only the ready outputs in this content item" : "No outputs in this content item are waiting for approval"}" ${groupReady.length ? "" : "disabled"}>Approve all${groupReady.length ? ` (${groupReady.length})` : ""}</button>`;
+    const groupTone = pipelineGroupVisualTone(group.records);
+    const rowSpan = Math.max(1, group.records.length);
+    const contentLabel = contentNumber ? `#${contentNumber} - ${title}` : title;
+    const profileName = pipelineWorkingProfileName();
+    const createdIso = String(content?.created_at || content?.created || first?.created_at || "").trim();
+    const createdLabel = createdIso ? formatStudioDateTime(createdIso) : "";
+    const groupMeta = [
+      createdLabel,
+      `${group.records.length} output${group.records.length === 1 ? "" : "s"}`,
+      destination ? `${destination.done}/${destination.total} rendered` : "",
+    ].filter(Boolean);
+
+    const approveButton = `<button type="button" class="secondary-button pipeline-group-approve pipeline-content-action" data-pipeline-group-approve="${escapeHtml(group.key)}" title="${groupReady.length ? "Approve only the ready outputs in this content item" : "No outputs in this content item are waiting for approval"}" ${groupReady.length ? "" : "disabled"}>Approve all${groupReady.length ? ` (${groupReady.length})` : ""}</button>`;
+
     const nowMs = Date.now();
     const regeneratable = group.records.filter((record) => {
       if (!record?.id || record.do_not_publish || creativeIsPublished(record)) return false;
@@ -18006,16 +18035,24 @@
       const ms = Date.parse(iso);
       return Number.isFinite(ms) && ms > nowMs;
     });
-    const regenerateButton = `<button type="button" class="secondary-button pipeline-group-regenerate" data-pipeline-group-regenerate="${escapeHtml(group.key)}" title="${regeneratable.length ? "Regenerate future or unscheduled outputs for this content using the rolling 14-day Platform + Output Type rules" : "No future or unscheduled unpublished outputs are eligible"}" ${regeneratable.length ? "" : "disabled"}>Regenerate${regeneratable.length ? ` (${regeneratable.length})` : ""}</button>`;
-    const groupMeta = [
-      `${group.records.length} output${group.records.length === 1 ? "" : "s"}`,
-      destination ? `${destination.done}/${destination.total} rendered` : "",
-    ].filter(Boolean).join(" · ");
-    const contentLabel = contentNumber ? `#${contentNumber} · ${title}` : title;
-    const groupTone = pipelineGroupVisualTone(group.records);
-    const platformSummary = pipelineGroupPlatformSummary(group.records);
-    const header = `<tr class="pipeline-group-row" data-pipeline-tone="${escapeHtml(groupTone)}"><td colspan="5"><div class="pipeline-group-head"><button type="button" class="pipeline-group-toggle" data-pipeline-group-toggle="${escapeHtml(group.key)}" aria-expanded="${open ? "true" : "false"}"><span class="pipeline-group-chevron" aria-hidden="true">${open ? "▾" : "▸"}</span>${cover}<span class="pipeline-group-copy"><span class="pipeline-group-title">${escapeHtml(contentLabel)}</span><span class="pipeline-group-meta">${escapeHtml(groupMeta)}</span><span class="pipeline-group-platforms">${platformSummary}</span></span></button><div class="pipeline-group-actions">${approveButton}${regenerateButton}</div></div></td></tr>`;
-    return `<tbody class="pipeline-output-group${open ? "" : " is-collapsed"}${isArchived ? " pipeline-archived-group" : ""}" data-pipeline-group="${escapeHtml(group.key)}">${header}${group.records.map((row) => pipelineRow(row, group.records)).join("")}</tbody>`;
+    const regenerateButton = `<button type="button" class="secondary-button pipeline-group-regenerate pipeline-content-action" data-pipeline-group-regenerate="${escapeHtml(group.key)}" title="${regeneratable.length ? "Regenerate future or unscheduled outputs for this content using the rolling 14-day Platform + Output Type rules" : "No future or unscheduled unpublished outputs are eligible"}" ${regeneratable.length ? "" : "disabled"}>Regenerate${regeneratable.length ? ` (${regeneratable.length})` : ""}</button>`;
+
+    const media = coverUrl
+      ? `<img class="pipeline-content-thumb" src="${escapeHtml(coverUrl)}" alt="" loading="lazy">`
+      : `<div class="pipeline-content-thumb pipeline-content-thumb-placeholder" aria-hidden="true">${escapeHtml(contentNumber || "•")}</div>`;
+
+    const summaryMarkup = summary
+      ? `<p class="pipeline-content-summary">${escapeHtml(summary)}</p>`
+      : "";
+
+    const metaMarkup = groupMeta.length
+      ? `<div class="pipeline-content-meta">${groupMeta.map((item) => `<span>${escapeHtml(item)}</span>`).join("")}</div>`
+      : "";
+
+    const contentCell = `<td class="pipeline-content-cell" rowspan="${rowSpan}"><div class="pipeline-content-card"><div class="pipeline-content-media">${media}</div><div class="pipeline-content-copy"><strong class="pipeline-content-title">${escapeHtml(contentLabel)}</strong>${summaryMarkup}<span class="pipeline-profile-pill" data-theme="${escapeHtml(workingStudioTheme())}">${escapeHtml(profileName)}</span>${metaMarkup}<div class="pipeline-content-actions">${approveButton}${regenerateButton}</div></div></div></td>`;
+
+    const rows = group.records.map((row, index) => pipelineRow(row, group.records, index === 0 ? contentCell : "")).join("");
+    return `<tbody class="pipeline-content-package${isArchived ? " pipeline-archived-group" : ""}" data-pipeline-group="${escapeHtml(group.key)}" data-pipeline-tone="${escapeHtml(groupTone)}">${rows}</tbody>`;
   }
 
   function renderPipelineArchivedSection(archivedGroups, pipelineRow) {
@@ -18023,7 +18060,7 @@
     const itemCount = archivedGroups.length;
     const outputCount = archivedGroups.reduce((total, group) => total + group.records.length, 0);
     const sectionOpen = pipelineArchivedSectionOpen;
-    const banner = `<tbody class="pipeline-archived-section${sectionOpen ? "" : " is-collapsed"}" data-pipeline-archived-section><tr class="pipeline-archived-section-row"><td colspan="5"><button type="button" class="pipeline-archived-section-toggle" data-pipeline-archived-toggle aria-expanded="${sectionOpen ? "true" : "false"}"><span class="pipeline-group-chevron" aria-hidden="true">${sectionOpen ? "▾" : "▸"}</span><span class="pipeline-archived-section-title">Archived</span><span class="pipeline-archived-section-meta">${itemCount} content item${itemCount === 1 ? "" : "s"} · ${outputCount} output${outputCount === 1 ? "" : "s"}</span></button></td></tr></tbody>`;
+    const banner = `<tbody class="pipeline-archived-section${sectionOpen ? "" : " is-collapsed"}" data-pipeline-archived-section><tr class="pipeline-archived-section-row"><td colspan="6"><button type="button" class="pipeline-archived-section-toggle" data-pipeline-archived-toggle aria-expanded="${sectionOpen ? "true" : "false"}"><span class="pipeline-group-chevron" aria-hidden="true">${sectionOpen ? "▾" : "▸"}</span><span class="pipeline-archived-section-title">Archived</span><span class="pipeline-archived-section-meta">${itemCount} content item${itemCount === 1 ? "" : "s"} · ${outputCount} output${outputCount === 1 ? "" : "s"}</span></button></td></tr></tbody>`;
     const groups = sectionOpen
       ? archivedGroups.map((group) => renderPipelineGroupTbody(group, pipelineRow, { isArchived: true })).join("")
       : "";
@@ -18197,7 +18234,7 @@
       return `<tr><td><div class="title-cell">${escapeHtml(pipelineOutputListTitle(r))}</div></td><td>${value(r.platform)}</td><td>${badge(pipelineStudioStateLabel(r))}</td><td>${value(pipelineRenderLabel(r))}</td><td>${value(r.review_status)}</td><td>${value(pipelinePublishStatusLabel(r))}</td><td>${pipelineProgressCell(r, groupRecords)}</td></tr>`;
     };
 
-    const pipelineRow = (r, groupRecords) => {
+    const pipelineRow = (r, groupRecords, contentCell = "") => {
       const canOpen = Boolean(r.creative_available);
       const blocked = ["blocked", "escalated"].includes(String(r.studio_production_job?.step || "")) || Boolean(r.studio_job_error);
       const notReadyLabel = String(r.studio_production_job?.step || "") === "escalated"
@@ -18213,7 +18250,7 @@
       const editableSchedule = !publishedSchedule && creativeCanSetSchedule(r);
       const scheduleIso = studioEffectiveScheduleIso(r);
       const scheduleCell = editableSchedule
-        ? `<div class="pipeline-schedule-cell pipeline-schedule-cell-compact"><div class="pipeline-schedule-controls"><input type="datetime-local" data-pipeline-schedule="${escapeHtml(r.id)}" value="${escapeHtml(scheduleValue)}" aria-label="Scheduled time for Platform Output ${escapeHtml(String(r.output_id || ""))}" title="Type the date and time. It saves automatically when you leave the field or press Enter."><button type="button" class="secondary-button pipeline-calendar-button" data-pipeline-schedule-calendar="${escapeHtml(r.id)}" title="Open calendar" aria-label="Open calendar">📅</button></div><span class="pipeline-schedule-save-state" data-pipeline-schedule-status aria-live="polite"></span><div class="pipeline-schedule-suggest" data-pipeline-schedule-suggest="${escapeHtml(r.id)}"></div><button type="button" class="text-button pipeline-use-suggested" data-pipeline-use-suggested="${escapeHtml(r.id)}" hidden>Use suggested</button></div>`
+        ? `<div class="pipeline-schedule-cell pipeline-schedule-cell-compact"><div class="pipeline-schedule-controls"><input type="datetime-local" data-pipeline-schedule="${escapeHtml(r.id)}" value="${escapeHtml(scheduleValue)}" aria-label="Scheduled time for Platform Output ${escapeHtml(String(r.output_id || ""))}" title="Type the date and time. It saves automatically when you leave the field or press Enter."><button type="button" class="secondary-button pipeline-calendar-button" data-pipeline-schedule-calendar="${escapeHtml(r.id)}" title="Open calendar" aria-label="Open calendar">📅</button></div><span class="pipeline-schedule-save-state" data-pipeline-schedule-status aria-live="polite"></span><span class="pipeline-schedule-hidden-meta" aria-hidden="true"><span data-pipeline-schedule-suggest="${escapeHtml(r.id)}"></span><button type="button" data-pipeline-use-suggested="${escapeHtml(r.id)}" hidden></button></span></div>`
         : publishedSchedule
           ? `<div class="pipeline-schedule-locked" title="Published outputs are locked and cannot be rescheduled."><input type="datetime-local" value="${escapeHtml(formatDateTimeLocalInput(scheduleIso))}" disabled aria-label="Published schedule locked"><span aria-hidden="true">🔒</span><b>Published</b></div>`
           : `<span class="pipeline-schedule-readonly">${scheduleIso ? escapeHtml(formatStudioDateTime(scheduleIso)) : "—"}</span>`;
@@ -18221,8 +18258,7 @@
       const platformSlug = platform.toLowerCase().replace(/[^a-z0-9]+/g, "-");
       const outputType = String(r.platform_output_type || r.format || "—");
       const ratio = String(r.aspect_ratio || "").trim();
-      const timing = studioOutputTimingLabel(r);
-      const detailBits = [outputType, ratio, timing].filter(Boolean);
+      const detailBits = [outputType, ratio].filter(Boolean);
       const postLink = r.platform_post_url
         ? `<a class="table-link" target="_blank" rel="noopener" href="${escapeHtml(r.platform_post_url)}">Open post ↗</a>`
         : "";
@@ -18236,7 +18272,7 @@
       const rowOpen = canOpen
         ? ` class="pipeline-open-row pipeline-compact-row" data-open-output-id="${escapeHtml(r.id)}" data-platform="${escapeHtml(platformSlug)}" tabindex="0"`
         : ` class="pipeline-compact-row" data-platform="${escapeHtml(platformSlug)}"`;
-      return `<tr${rowOpen}><td class="pipeline-output-platform-cell"><div class="pipeline-platform-line"><span class="pipeline-platform-pill" data-platform="${escapeHtml(platformSlug)}"><b>${escapeHtml(pipelinePlatformCode(platform))}</b><span>${escapeHtml(platform)}</span></span><strong>Output ${escapeHtml(String(r.output_id || ""))}</strong></div><div class="pipeline-output-detail">${detailBits.map((part) => `<span>${escapeHtml(String(part))}</span>`).join("")}</div></td><td class="pipeline-status-cell">${pipelineCompactStatusMarkup(r)}</td><td class="pipeline-progress-cell">${pipelineProgressCell(r, groupRecords)}</td><td class="pipeline-schedule-column">${scheduleCell}</td><td class="pipeline-actions-cell"><button type="button" class="creative-button pipeline-open-review" data-creative-output-id="${escapeHtml(r.id)}" ${canOpen ? "" : "disabled"} title="${canOpen ? "Open creative review" : notReadyTitle}">${canOpen ? "Open" : escapeHtml(notReadyLabel)}</button>${moreMenu}</td></tr>`;
+      return `<tr${rowOpen}>${contentCell}<td class="pipeline-output-platform-cell"><div class="pipeline-platform-line"><span class="pipeline-platform-pill" data-platform="${escapeHtml(platformSlug)}"><b>${escapeHtml(pipelinePlatformCode(platform))}</b><span>${escapeHtml(platform)}${outputType && outputType !== "—" ? ` · ${escapeHtml(outputType)}` : ""}</span></span><strong>${escapeHtml(String(r.output_id || ""))}</strong></div>${ratio ? `<div class="pipeline-output-detail"><span>${escapeHtml(ratio)}</span></div>` : ""}</td><td class="pipeline-status-cell">${pipelineCompactStatusMarkup(r)}</td><td class="pipeline-progress-cell">${pipelineProgressCell(r, groupRecords)}</td><td class="pipeline-schedule-column">${scheduleCell}</td><td class="pipeline-actions-cell"><button type="button" class="creative-button pipeline-open-review" data-creative-output-id="${escapeHtml(r.id)}" ${canOpen ? "" : "disabled"} title="${canOpen ? "Open creative review" : notReadyTitle}">${canOpen ? "Open" : escapeHtml(notReadyLabel)}</button>${moreMenu}</td></tr>`;
     };
 
     const body = isPipeline
@@ -18249,7 +18285,7 @@
       : `<tbody>${sortedSource.map((row) => dashboardRow(row, sortedSource.filter((peer) => pipelineContentGroupKey(peer) === pipelineContentGroupKey(row)))).join("")}</tbody>`;
 
     const head = isPipeline
-      ? `<tr><th>${pipelineSortHeader("platform", "Platform / output")}</th><th>${pipelineSortHeader("state", "Status")}</th><th>${pipelineSortHeader("progress", "Progress")}</th><th><span class="pipeline-col-label">Schedule</span></th><th><span class="pipeline-col-label">Actions</span></th></tr>`
+      ? `<tr><th>${pipelineSortHeader("output", "Content")}</th><th>${pipelineSortHeader("platform", "Platforms")}</th><th>${pipelineSortHeader("state", "Status")}</th><th>${pipelineSortHeader("progress", "Progress")}</th><th><span class="pipeline-col-label">Schedule (Your Time)</span></th><th><span class="pipeline-col-label">Actions</span></th></tr>`
       : isDashboard
       ? `<tr><th>${pipelineSortHeader("output", "Output")}</th><th>${pipelineSortHeader("platform", "Platform")}</th><th>${pipelineSortHeader("state", "Studio state")}</th><th>${pipelineSortHeader("render", "Render")}</th><th>${pipelineSortHeader("review", "Review")}</th><th>${pipelineSortHeader("publish", "Publish")}</th><th>${pipelineSortHeader("progress", "Progress")}</th></tr>`
       : `<tr><th>Output</th><th>Platform</th><th>Studio state</th><th>Render</th><th>Review</th><th>Publish</th><th>Progress</th></tr>`;
