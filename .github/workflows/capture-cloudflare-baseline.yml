@@ -1,6 +1,7 @@
 name: Capture Cloudflare Live Baseline
 
 # Read-only capture of currently deployed Cloudflare code into GitHub.
+# Source-sync trigger: 2026-10-06 promoted-profile-drift investigation.
 on:
   workflow_dispatch:
   push:
