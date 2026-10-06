@@ -260,7 +260,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.504-compact-pipeline";
+  const BUILD_ID = "item4-0.6.505-inline-schedule-autosave";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -16612,28 +16612,39 @@
     const scope = root || document;
     scope.querySelectorAll("[data-pipeline-schedule]").forEach((input) => {
       const keepOnRow = (event) => event.stopPropagation();
+      const markDirty = () => {
+        const id = input.dataset.pipelineSchedule;
+        if (id) {
+          pipelineScheduleDrafts.set(id, String(input.value || "").trim());
+          pipelineScheduleDirty.add(id);
+        }
+        const status = input.closest(".pipeline-schedule-cell")?.querySelector("[data-pipeline-schedule-status]");
+        if (status) status.textContent = "Unsaved";
+      };
+      const saveTypedValue = () => {
+        const id = input.dataset.pipelineSchedule;
+        if (!id || !pipelineScheduleDirty.has(id)) return;
+        savePipelineScheduleInput(input).catch((error) => {
+          setPipelineLiveHint(error.message || "Could not save schedule.");
+        });
+      };
       input.addEventListener("click", keepOnRow);
       input.addEventListener("mousedown", keepOnRow);
       input.addEventListener("pointerdown", keepOnRow);
-      input.addEventListener("keydown", keepOnRow);
-      input.addEventListener("input", () => {
-        const id = input.dataset.pipelineSchedule;
-        if (id) {
-          pipelineScheduleDrafts.set(id, String(input.value || "").trim());
-          pipelineScheduleDirty.add(id);
-        }
-        const status = input.closest(".pipeline-schedule-cell")?.querySelector("[data-pipeline-schedule-status]");
-        if (status) status.textContent = "Unsaved — click Save";
+      input.addEventListener("keydown", (event) => {
+        keepOnRow(event);
+        if (event.key !== "Enter") return;
+        event.preventDefault();
+        markDirty();
+        saveTypedValue();
+        input.blur();
       });
+      input.addEventListener("input", markDirty);
       input.addEventListener("change", () => {
-        const id = input.dataset.pipelineSchedule;
-        if (id) {
-          pipelineScheduleDrafts.set(id, String(input.value || "").trim());
-          pipelineScheduleDirty.add(id);
-        }
-        const status = input.closest(".pipeline-schedule-cell")?.querySelector("[data-pipeline-schedule-status]");
-        if (status) status.textContent = "Unsaved — click Save";
+        markDirty();
+        saveTypedValue();
       });
+      input.addEventListener("blur", saveTypedValue);
     });
     scope.querySelectorAll("[data-pipeline-schedule-save]").forEach((button) => {
       const keepOnRow = (event) => event.stopPropagation();
@@ -16664,9 +16675,17 @@
     if (!id || input.dataset.saving === "1") return;
     const record = (pipelineOutputs || []).find((row) => row.id === id);
     if (!record) return;
+    const status = input.closest(".pipeline-schedule-cell")?.querySelector("[data-pipeline-schedule-status]");
+    if (creativeIsPublished(record)) {
+      const previous = formatDateTimeLocalInput(studioEffectiveScheduleIso(record));
+      input.value = previous;
+      pipelineScheduleDrafts.set(id, previous);
+      pipelineScheduleDirty.delete(id);
+      if (status) status.textContent = "Locked — already published";
+      return;
+    }
     const raw = String(input.value || "").trim();
     pipelineScheduleDrafts.set(id, raw);
-    const status = input.closest(".pipeline-schedule-cell")?.querySelector("[data-pipeline-schedule-status]");
     if (!raw) {
       if (status) status.textContent = "";
       return;
@@ -18080,11 +18099,14 @@
       const notReadyTitle = escapeHtml(String(r.studio_job_error || r.studio_job_label || PHASE6_BUTTON_HELP["Not ready yet"]));
       const ready = /ready for review/i.test(String(r.studio_state || r.output_status || r.review_status || ""));
       const scheduleValue = pipelineScheduleInputValue(r);
-      const editableSchedule = ready || creativeCanReschedule(r);
+      const publishedSchedule = creativeIsPublished(r);
+      const editableSchedule = !publishedSchedule && (ready || creativeCanReschedule(r));
       const scheduleIso = studioEffectiveScheduleIso(r);
       const scheduleCell = editableSchedule
-        ? `<div class="pipeline-schedule-cell pipeline-schedule-cell-compact"><div class="pipeline-schedule-controls"><input type="datetime-local" data-pipeline-schedule="${escapeHtml(r.id)}" value="${escapeHtml(scheduleValue)}" aria-label="Scheduled time for Platform Output ${escapeHtml(String(r.output_id || ""))}" title="Choose the exact publish time, then Save."><button type="button" class="secondary-button pipeline-calendar-button" data-pipeline-schedule-calendar="${escapeHtml(r.id)}" title="Open calendar" aria-label="Open calendar">📅</button><button type="button" class="secondary-button pipeline-schedule-save" data-pipeline-schedule-save="${escapeHtml(r.id)}">Save</button></div><span class="pipeline-schedule-save-state" data-pipeline-schedule-status aria-live="polite"></span><div class="pipeline-schedule-suggest" data-pipeline-schedule-suggest="${escapeHtml(r.id)}"></div><button type="button" class="text-button pipeline-use-suggested" data-pipeline-use-suggested="${escapeHtml(r.id)}" hidden>Use suggested</button></div>`
-        : `<span class="pipeline-schedule-readonly">${scheduleIso ? escapeHtml(formatStudioDateTime(scheduleIso)) : "—"}</span>`;
+        ? `<div class="pipeline-schedule-cell pipeline-schedule-cell-compact"><div class="pipeline-schedule-controls"><input type="datetime-local" data-pipeline-schedule="${escapeHtml(r.id)}" value="${escapeHtml(scheduleValue)}" aria-label="Scheduled time for Platform Output ${escapeHtml(String(r.output_id || ""))}" title="Type the date and time. It saves automatically when you leave the field or press Enter."><button type="button" class="secondary-button pipeline-calendar-button" data-pipeline-schedule-calendar="${escapeHtml(r.id)}" title="Open calendar" aria-label="Open calendar">📅</button></div><span class="pipeline-schedule-save-state" data-pipeline-schedule-status aria-live="polite"></span><div class="pipeline-schedule-suggest" data-pipeline-schedule-suggest="${escapeHtml(r.id)}"></div><button type="button" class="text-button pipeline-use-suggested" data-pipeline-use-suggested="${escapeHtml(r.id)}" hidden>Use suggested</button></div>`
+        : publishedSchedule
+          ? `<div class="pipeline-schedule-locked" title="Published outputs are locked and cannot be rescheduled."><input type="datetime-local" value="${escapeHtml(formatDateTimeLocalInput(scheduleIso))}" disabled aria-label="Published schedule locked"><span aria-hidden="true">🔒</span><b>Published</b></div>`
+          : `<span class="pipeline-schedule-readonly">${scheduleIso ? escapeHtml(formatStudioDateTime(scheduleIso)) : "—"}</span>`;
       const platform = String(r.platform || "Platform");
       const platformSlug = platform.toLowerCase().replace(/[^a-z0-9]+/g, "-");
       const outputType = String(r.platform_output_type || r.format || "—");
