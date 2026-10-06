@@ -20,3 +20,4 @@ Deploy Worker 0.10.456 timeline-background-variants. Create Timeline returns aft
 Deploy Worker 0.10.457 timeline-fast-return. Create Timeline returns before any crop/variant preparation; variant work continues through waitUntil.
 Deploy Worker 0.10.458 timeline-writer-fallback. Create Timeline falls back to deterministic scenes when the preferred AI writer/provider fails instead of returning HTTP 500.
 Deploy Worker 0.10.458 timeline-writer-fallback retry. Retrigger controlled production publish after live footer remained on Worker 0.10.456.
+Deploy Worker 0.10.459-timeline-writer-fallback-retry. Clean controlled production retry with a new Worker version after 0.10.458 failed to become live.
