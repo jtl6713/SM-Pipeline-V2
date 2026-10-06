@@ -503,10 +503,11 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.464-schedule-save-ready-review",
+          version: "0.10.465-render-stale-rendering",
           studio_mae_schedule_v1: true,
           studio_mae_profile_occupancy_v1: true,
           studio_schedule_occupancy_fields_v1: true,
+          studio_render_stale_rendering_v1: true,
           studio_desk_inventory_v1: true,
           studio_desk_activity_v1: true,
           studio_tiktok_complete_v1: true,
@@ -2872,7 +2873,10 @@ function normalizedOutputState(record) {
     || has("Review_Status", "review sent");
   const inProductionEarly = has("Output_Status", "in production");
   const hasFinishedFileEarly = Boolean(String(f(record, "Final_File_URL") || "").trim());
-  const remotionFinishedEarly = has("Render_Status", "rendered") && (hasFinishedFileEarly || Boolean(String(f(record, "Studio_Preview_URL") || "").trim()));
+  // Final_File_URL means Remotion/Drive already finished even when Render_Status
+  // was left on Rendering (Output 1807 YouTube Short / Content 374).
+  const remotionFinishedEarly = hasFinishedFileEarly
+    || (has("Render_Status", "rendered") && Boolean(String(f(record, "Studio_Preview_URL") || "").trim()));
   // Review-ready native stills / finished files beat leftover retry flags and stale error text.
   // Stale Review Sent must not win while Remotion is still In Production, or while
   // lettering / the 3D cover is still missing.
@@ -11015,6 +11019,36 @@ async function healStuckStudioRenders(env) {
       pulses.push({ key: "R4_STUCK_READY", id: row.id, payload });
     } catch (error) {
       pulses.push({ key: "R4_STUCK_READY", id: row.id, error: error instanceof Error ? error.message : String(error) });
+    }
+  }
+  // Completed MP4 left on Render_Status=Rendering / Output_Status=In Production
+  // (Output 1807 YouTube Short). longRendering below requires a Remotion job and
+  // blank Final_File_URL, so it never heals this. Promote to Ready for Review.
+  const staleRenderingDone = await listRecords(env, outputTable, {
+    limit: 12,
+    sortField: "Output_ID",
+    sortDirection: "desc",
+    filterFormula: 'AND({Test_Run_ID}=BLANK(),{Published_At}=BLANK(),{Do_Not_Publish}=0,{Render_Status}="Rendering",{Final_File_URL}!="",OR({Output_Status}="In Production",{Output_Status}="Rendering",AND({Review_Status}="Review Sent",{Output_Status}!="Ready for Review",{Output_Status}!="Approved for Publishing",{Output_Status}!="Published")))',
+  }).catch(() => []);
+  for (const row of staleRenderingDone || []) {
+    try {
+      const review = String(f(row, "Review_Status") || "").trim();
+      const fields = {
+        Render_Status: "Rendered",
+        Output_Status: "Ready for Review",
+        Remotion_Error_Message: "",
+        Final_File_Error_Message: "",
+      };
+      if (!review || review === "Pending" || review === "Ready for Review") {
+        fields.Review_Status = "Review Sent";
+      }
+      await airtableFetch(env, outputTable, row.id, {
+        method: "PATCH",
+        body: JSON.stringify({ fields, typecast: true }),
+      });
+      pulses.push({ key: "R5_STALE_RENDERING_FINALIZED", id: row.id, repaired: true });
+    } catch (error) {
+      pulses.push({ key: "R5_STALE_RENDERING_FINALIZED", id: row.id, error: error instanceof Error ? error.message : String(error) });
     }
   }
   const longRendering = await listRecords(env, outputTable, {

@@ -20,6 +20,7 @@ export const QUALITY_HEALS = Object.freeze([
   "verify_children_then_advance",
   "backoff_then_retry_missing_child",
   "retarget_music_drive",
+  "promote_rendered_ready_for_review",
   "ticket_only",
   "none",
 ]);
@@ -289,6 +290,14 @@ export const QUALITY_CHECKS = Object.freeze([
     kind: "render_ready_waiting_voiceover",
     actor: "worker_heal",
     heal: "resume_produce",
+  }),
+  check({
+    id: "render_stale_rendering",
+    title: "Check for outputs stuck on Render_Status=Rendering after Final_File_URL is already present",
+    lane: "service",
+    kind: "render_stale_rendering",
+    actor: "worker_heal",
+    heal: "promote_rendered_ready_for_review",
   }),
   check({
     id: "render_long",

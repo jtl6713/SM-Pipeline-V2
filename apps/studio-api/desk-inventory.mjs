@@ -405,6 +405,28 @@ export function classifyRenderRow(row, nowMs = Date.now()) {
       actor: "worker_heal",
     }, row);
   }
+  // Output 1807 YouTube Short / Content 374: Final_File_URL present, siblings
+  // already Rendered, but this row stayed Render_Status=Rendering /
+  // Output_Status=In Production with Review_Status=Review Sent. UI Approve (1)
+  // lights from Review Sent + file; Worker approve rejects In Production/Rendering.
+  if (
+    renderStatus === "Rendering"
+    && finalUrl
+    && !row?.published_at
+    && (outputStatus === "In Production" || outputStatus === "Rendering"
+      || String(row?.review_status || "").trim() === "Review Sent")
+  ) {
+    return withDeskIdentity({
+      kind: "render_stale_rendering",
+      class: "transient",
+      record_id: recordId || null,
+      fingerprint: fingerprint("render_stale_rendering", recordId, "final_file_present"),
+      actor: "worker_heal",
+      diagnosis: "Render_Status=Rendering with Final_File_URL already set (often Remotion_Job_ID blank). "
+        + "Worker promotes Render_Status=Rendered and Output_Status=Ready for Review. Do not Approve until Ready for Review. "
+        + "Proven: Output 1807 / Content 374 South Beach Getting Around / rec0mwr0QiudNSQrn.",
+    }, row);
+  }
   if (renderStatus === "Rendering" && jobId && !finalUrl && ageMs >= STALE_RENDER_MINUTES * 60 * 1000) {
     return withDeskIdentity({
       kind: "render_long",
@@ -414,7 +436,7 @@ export function classifyRenderRow(row, nowMs = Date.now()) {
       actor: "local_companion",
     }, row);
   }
-  if (outputStatus === "In Production" && !jobId && !row?.published_at) {
+  if (outputStatus === "In Production" && !jobId && !row?.published_at && !finalUrl) {
     return withDeskIdentity({
       kind: "produce_orphan",
       class: "transient",
@@ -1228,6 +1250,7 @@ export const CLASSIFIER_KINDS = Object.freeze([
   "ig_carousel_child_poll_failure",
   "ig_carousel_rate_limited",
   "render_failed",
+  "render_stale_rendering",
   "render_unfetchable_source",
   "render_private_drive_watermark",
   "native_cover_missing",

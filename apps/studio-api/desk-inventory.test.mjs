@@ -215,6 +215,20 @@ test("render, orphan, crop, autonomous, and health classifiers", () => {
   }, now);
   assert.equal(parkedDriveWatermark.kind, "render_private_drive_watermark");
   assert.equal(parkedDriveWatermark.actor, "worker_heal");
+  // Output 1807: Final_File_URL present but Render_Status still Rendering.
+  const staleRendering = classifyRenderRow({
+    id: "rec0mwr0QiudNSQrn",
+    render_status: "Rendering",
+    output_status: "In Production",
+    review_status: "Review Sent",
+    remotion_job_id: "",
+    final_file_url: "https://drive.google.com/file/d/final1807/view",
+    last_modified: "2026-10-06T18:00:00Z",
+  }, now);
+  assert.equal(staleRendering.kind, "render_stale_rendering");
+  assert.equal(staleRendering.class, "transient");
+  assert.equal(staleRendering.actor, "worker_heal");
+  assert.equal(staleRendering.fingerprint, "render_stale_rendering:rec0mwr0QiudNSQrn:final_file_present");
   assert.equal(classifyRenderRow({
     id: "recR2",
     render_status: "Rendering",
