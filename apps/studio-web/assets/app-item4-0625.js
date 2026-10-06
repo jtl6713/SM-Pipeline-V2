@@ -260,7 +260,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.509-rowspan-pipeline";
+  const BUILD_ID = "item4-0.6.510-pipeline-density";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -15345,21 +15345,31 @@
     const musicWrap = $("creativeTiktokMusicWrap");
     const music = $("creativeTiktokMusic");
     const input = $("creativeTiktokUrl");
+    const resendWrap = $("creativeTiktokResendWrap");
+    const resendButton = $("creativeTiktokResend");
+    const resendMessage = $("creativeTiktokResendMessage");
     if (!card || !form || !live || !input) return;
     const tiktok = String(output?.platform || "").trim().toLowerCase() === "tiktok";
     const awaiting = tiktok && tiktokNeedsUrlEntry(output);
+    const canResend = tiktok && tiktokNeedsDraftResend(output);
     const posted = tiktok ? tiktokLiveUrl(output) : "";
-    if (!tiktok || (!awaiting && !posted)) {
+    if (!tiktok || (!awaiting && !canResend && !posted)) {
       card.hidden = true;
       form.hidden = true;
       live.hidden = true;
       live.innerHTML = "";
+      if (resendWrap) resendWrap.hidden = true;
+      if (resendButton) resendButton.disabled = false;
+      if (resendMessage) resendMessage.textContent = "";
       if (musicWrap) musicWrap.hidden = true;
       input.value = "";
       return;
     }
     card.hidden = false;
     form.hidden = !awaiting;
+    if (resendWrap) resendWrap.hidden = !canResend;
+    if (resendButton) resendButton.disabled = false;
+    if (resendMessage && !canResend) resendMessage.textContent = "";
     live.hidden = awaiting || !posted;
     if (musicWrap) musicWrap.hidden = !awaiting || !/manual action/i.test(String(output?.music_status || ""));
     if (music && awaiting) music.value = tiktokMusicChoice(output);
@@ -18205,10 +18215,7 @@
   }
 
   function pipelineCompactStatusMarkup(record) {
-    const render = String(pipelineRenderLabel(record) || "—");
-    const review = String(record?.review_status || "—");
-    const publish = String(pipelinePublishStatusLabel(record) || "—");
-    return `<div class="pipeline-status-stack">${badge(pipelineStudioStateLabel(record))}<div class="pipeline-status-detail"><span title="Render status">${escapeHtml(render)}</span><span title="Review status">${escapeHtml(review)}</span><span title="Publish status">${escapeHtml(publish)}</span></div>${pipelineTiktokCompleteCell(record)}${pipelineYoutubeCompleteCell(record)}</div>`;
+    return `<div class="pipeline-status-stack">${badge(pipelineStudioStateLabel(record))}</div>`;
   }
 
   function renderOutputsTable(target, records) {
@@ -18257,8 +18264,6 @@
       const platform = String(r.platform || "Platform");
       const platformSlug = platform.toLowerCase().replace(/[^a-z0-9]+/g, "-");
       const outputType = String(r.platform_output_type || r.format || "—");
-      const ratio = String(r.aspect_ratio || "").trim();
-      const detailBits = [outputType, ratio].filter(Boolean);
       const postLink = r.platform_post_url
         ? `<a class="table-link" target="_blank" rel="noopener" href="${escapeHtml(r.platform_post_url)}">Open post ↗</a>`
         : "";
@@ -18272,7 +18277,7 @@
       const rowOpen = canOpen
         ? ` class="pipeline-open-row pipeline-compact-row" data-open-output-id="${escapeHtml(r.id)}" data-platform="${escapeHtml(platformSlug)}" tabindex="0"`
         : ` class="pipeline-compact-row" data-platform="${escapeHtml(platformSlug)}"`;
-      return `<tr${rowOpen}>${contentCell}<td class="pipeline-output-platform-cell"><div class="pipeline-platform-line"><span class="pipeline-platform-pill" data-platform="${escapeHtml(platformSlug)}"><b>${escapeHtml(pipelinePlatformCode(platform))}</b><span>${escapeHtml(platform)}${outputType && outputType !== "—" ? ` · ${escapeHtml(outputType)}` : ""}</span></span><strong>${escapeHtml(String(r.output_id || ""))}</strong></div>${ratio ? `<div class="pipeline-output-detail"><span>${escapeHtml(ratio)}</span></div>` : ""}</td><td class="pipeline-status-cell">${pipelineCompactStatusMarkup(r)}</td><td class="pipeline-progress-cell">${pipelineProgressCell(r, groupRecords)}</td><td class="pipeline-schedule-column">${scheduleCell}</td><td class="pipeline-actions-cell"><button type="button" class="creative-button pipeline-open-review" data-creative-output-id="${escapeHtml(r.id)}" ${canOpen ? "" : "disabled"} title="${canOpen ? "Open creative review" : notReadyTitle}">${canOpen ? "Open" : escapeHtml(notReadyLabel)}</button>${moreMenu}</td></tr>`;
+      return `<tr${rowOpen}>${contentCell}<td class="pipeline-output-platform-cell"><div class="pipeline-platform-line"><span class="pipeline-platform-pill" data-platform="${escapeHtml(platformSlug)}"><b>${escapeHtml(pipelinePlatformCode(platform))}</b><span>${escapeHtml(platform)}${outputType && outputType !== "—" ? ` · ${escapeHtml(outputType)}` : ""}</span></span><strong>${escapeHtml(String(r.output_id || ""))}</strong></div></td><td class="pipeline-status-cell">${pipelineCompactStatusMarkup(r)}</td><td class="pipeline-progress-cell">${pipelineProgressCell(r, groupRecords)}</td><td class="pipeline-schedule-column">${scheduleCell}</td><td class="pipeline-actions-cell"><button type="button" class="creative-button pipeline-open-review" data-creative-output-id="${escapeHtml(r.id)}" ${canOpen ? "" : "disabled"} title="${canOpen ? "Open output details" : notReadyTitle}">${canOpen ? "Open" : escapeHtml(notReadyLabel)}</button>${moreMenu}</td></tr>`;
     };
 
     const body = isPipeline
@@ -22668,6 +22673,38 @@
       return;
     }
     if (window.confirm("Approve this preview? This records review approval and locks per-photo titles; it will not publish the output.")) reviewActiveCreative("approve");
+  });
+  $("creativeTiktokResend")?.addEventListener("click", async () => {
+    const record = activeCreativeOutput;
+    const id = activeCreativeOutputId || record?.id;
+    const button = $("creativeTiktokResend");
+    const message = $("creativeTiktokResendMessage");
+    if (!id || !record || !tiktokNeedsDraftResend(record) || !button) return;
+    if (!window.confirm("Resend this TikTok draft to the inbox?\n\nTikTok will receive a fresh draft. Approve/publish it in the TikTok app, then paste the live URL here if needed.")) return;
+    button.disabled = true;
+    if (message) {
+      message.classList.remove("error-text");
+      message.textContent = "Sending…";
+    }
+    try {
+      const result = await submitTiktokDraftResend(id);
+      if (result?.record) {
+        activeCreativeOutput = { ...record, ...result.record };
+        renderCreativeOutputMeta(activeCreativeOutput);
+        renderCreativeTiktokComplete(activeCreativeOutput);
+      }
+      if (message) message.textContent = "Sent — check TikTok inbox";
+      phase6Message("TikTok draft resent. Check the TikTok inbox.");
+      refreshPipelineOutputs({ silent: true }).catch(() => {});
+    } catch (error) {
+      if (message) {
+        message.textContent = error.message || "Could not resend draft.";
+        message.classList.add("error-text");
+      }
+      phase6Message(error.message || "Could not resend the TikTok draft.", "error-text");
+    } finally {
+      button.disabled = false;
+    }
   });
   $("creativeTiktokCompleteForm")?.addEventListener("submit", async (event) => {
     event.preventDefault();
