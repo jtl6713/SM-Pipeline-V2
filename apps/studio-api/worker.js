@@ -503,7 +503,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.453-mae-across-platforms",
+          version: "0.10.454-mae-gap-extras",
           studio_mae_schedule_v1: true,
           studio_desk_inventory_v1: true,
           studio_desk_activity_v1: true,

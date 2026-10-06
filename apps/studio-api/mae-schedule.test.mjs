@@ -46,6 +46,7 @@ test("MAE never stamps NYC midnight or 1 AM for YouTube/Instagram", () => {
     const local = localParts(iso, zone);
     assert.ok(
       (local.hour === 5 && local.minute === 30)
+      || (local.hour === 8 && local.minute === 30)
       || (local.hour === 11 && local.minute === 30)
       || (local.hour === 16 && local.minute === 30),
       `off MAE: ${iso} ${local.hour}:${String(local.minute).padStart(2, "0")}`,
@@ -74,7 +75,7 @@ test("Worker MAE fills morning then afternoon then evening on the same day", () 
     "11:30",
     "16:30",
   ]);
-  assert.equal(locals[3].hour, 5);
+  assert.equal(locals[3].hour, 8);
   assert.equal(locals[3].minute, 30);
 });
 
@@ -158,12 +159,71 @@ test("a new short spreads morning afternoon evening instead of four mornings", (
   const clocks = ["Instagram::Reel", "Facebook::Reel", "TikTok::Video Draft", "YouTube::Short"]
     .map((key) => localParts(stamps.get(key), zone))
     .map((part) => `${part.hour}:${String(part.minute).padStart(2, "0")}`);
-  assert.deepEqual(clocks, ["5:30", "11:30", "16:30", "5:30"]);
+  assert.deepEqual(clocks, ["5:30", "11:30", "16:30", "8:30"]);
   const dayOf = (iso) => new Intl.DateTimeFormat("en-CA", {
     timeZone: zone, year: "numeric", month: "2-digit", day: "2-digit",
   }).format(new Date(iso));
-  assert.equal(dayOf(stamps.get("Instagram::Reel")), dayOf(stamps.get("Facebook::Reel")));
-  assert.notEqual(dayOf(stamps.get("Instagram::Reel")), dayOf(stamps.get("YouTube::Short")));
+  assert.equal(dayOf(stamps.get("Instagram::Reel")), dayOf(stamps.get("YouTube::Short")));
+});
+
+test("after a day has morning afternoon and evening, the extra is that day's largest gap", () => {
+  const zone = "America/New_York";
+  const now = new Date("2026-10-05T08:00:00Z");
+  const stamps = maeBuildSuggestedScheduleMap(
+    [
+      { platform: "Instagram", output_type: "Reel", scheduled_at: "" },
+      { platform: "Facebook", output_type: "Reel", scheduled_at: "" },
+      { platform: "TikTok", output_type: "Video Draft", scheduled_at: "" },
+      { platform: "YouTube", output_type: "Short", scheduled_at: "" },
+      { platform: "Instagram", output_type: "Carousel", scheduled_at: "" },
+    ],
+    {},
+    now,
+    { timeZone: zone },
+  );
+  const dayOf = (iso) => new Intl.DateTimeFormat("en-CA", {
+    timeZone: zone, year: "numeric", month: "2-digit", day: "2-digit",
+  }).format(new Date(iso));
+  const clock = (key) => {
+    const part = localParts(stamps.get(key), zone);
+    return `${part.hour}:${String(part.minute).padStart(2, "0")}`;
+  };
+  assert.equal(clock("YouTube::Short"), "8:30");
+  assert.equal(dayOf(stamps.get("YouTube::Short")), dayOf(stamps.get("Instagram::Reel")));
+  assert.equal(clock("Instagram::Carousel"), "5:30");
+  assert.notEqual(dayOf(stamps.get("Instagram::Carousel")), dayOf(stamps.get("Instagram::Reel")));
+});
+
+test("extras fill day 1's gap before day 2's gap", () => {
+  const zone = "America/Chicago";
+  const now = new Date("2026-10-03T08:00:00Z");
+  const occupied = [];
+  for (let day = 3; day <= 4; day++) {
+    const dd = String(day).padStart(2, "0");
+    occupied.push(Date.parse(`2026-10-${dd}T10:30:00Z`));
+    occupied.push(Date.parse(`2026-10-${dd}T16:30:00Z`));
+    occupied.push(Date.parse(`2026-10-${dd}T21:30:00Z`));
+  }
+  const first = maePickBalancedSuggestedIso([], now, { timeZone: zone, occupiedMs: occupied });
+  const firstLocal = localParts(first, zone);
+  const firstDay = new Intl.DateTimeFormat("en-CA", {
+    timeZone: zone, year: "numeric", month: "2-digit", day: "2-digit",
+  }).format(new Date(first));
+  assert.equal(firstDay, "2026-10-03");
+  assert.equal(firstLocal.hour, 8);
+  assert.equal(firstLocal.minute, 30);
+
+  const second = maePickBalancedSuggestedIso([], now, {
+    timeZone: zone,
+    occupiedMs: [...occupied, Date.parse(first)],
+  });
+  const secondLocal = localParts(second, zone);
+  const secondDay = new Intl.DateTimeFormat("en-CA", {
+    timeZone: zone, year: "numeric", month: "2-digit", day: "2-digit",
+  }).format(new Date(second));
+  assert.equal(secondDay, "2026-10-04");
+  assert.equal(secondLocal.hour, 8);
+  assert.equal(secondLocal.minute, 30);
 });
 
 test("existing blackout stamps are not reused", () => {
@@ -256,7 +316,7 @@ test("occupancy load windows the Airtable query and sorts nearest-first", () => 
 test("Worker stamp paths use MAE not industry evening windows", () => {
   assert.match(worker, /from "\.\/mae-schedule\.mjs"/);
   assert.match(worker, /studio_mae_schedule_v1: true/);
-  assert.match(worker, /0\.10\.453-mae-across-platforms/);
+  assert.match(worker, /0\.10\.454-mae-gap-extras/);
   assert.match(worker, /studioLoadPlanScheduleOccupancy/);
   assert.match(worker, /A stored 5:30 that lost its slot must be written/);
   assert.match(worker, /MAE_PRIORITY_SCHEDULE_WINDOWS/);

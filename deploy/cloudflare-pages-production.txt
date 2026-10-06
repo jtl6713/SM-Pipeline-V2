@@ -30,3 +30,4 @@ Deploy UI 0.6.500 pipeline card shading fix. Force visible per-output alternatin
 Deploy UI 0.6.500 footer BUILD_ID. Pipeline card shading fix labeled and cache-busted in app JS.
 Deploy UI 0.6.501 swap still. Rendering tab opens a library picker to replace a scene still.
 Deploy UI 0.6.502 suggested times walk morning, then afternoon, then evening across platforms.
+Deploy UI 0.6.503 once morning, afternoon, and evening are taken, the next post fills that day's largest gap.

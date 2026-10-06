@@ -51,7 +51,7 @@ test("scheduler exhausts days 1-7 morning before using midday, then afternoon", 
   assert.equal(afternoonLocal.minute, 30);
 });
 
-test("scheduler moves to days 8-14 only after all three first-week passes are exhausted", () => {
+test("once the first week of MAE is covered, the extra is day 1's largest gap", () => {
   const zone = "America/Chicago";
   const now = new Date("2026-10-03T08:00:00Z");
   const occupied = [];
@@ -64,10 +64,19 @@ test("scheduler moves to days 8-14 only after all three first-week passes are ex
   const iso = plan.ezPickBalancedSuggestedIso([], now, { timeZone: zone, platformOccupiedMs: occupied });
   const localDate = new Intl.DateTimeFormat("en-CA", { timeZone: zone, year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(iso));
   const local = localParts(iso, zone);
-  // en-CA DateTimeFormat yields YYYY-MM-DD.
-  assert.equal(localDate, "2026-10-10");
-  assert.equal(local.hour, 5);
+  assert.equal(localDate, "2026-10-03");
+  assert.equal(local.hour, 8);
   assert.equal(local.minute, 30);
+
+  const next = plan.ezPickBalancedSuggestedIso([], now, {
+    timeZone: zone,
+    platformOccupiedMs: [...occupied, Date.parse(iso)],
+  });
+  const nextDate = new Intl.DateTimeFormat("en-CA", { timeZone: zone, year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(next));
+  const nextLocal = localParts(next, zone);
+  assert.equal(nextDate, "2026-10-04");
+  assert.equal(nextLocal.hour, 8);
+  assert.equal(nextLocal.minute, 30);
 });
 
 test("8 PM through 3:30 AM is a blackout in profile local time", () => {
@@ -274,6 +283,6 @@ test("picker fills morning then afternoon then evening before the next day", () 
     timeZone: zone, hour: "2-digit", minute: "2-digit", hourCycle: "h23",
   }).format(new Date(iso)));
   assert.deepEqual(local.slice(0, 3), ["05:30", "11:30", "16:30"]);
-  assert.equal(local[3], "05:30");
+  assert.equal(local[3], "08:30");
   assert.ok(picks.every((iso) => !plan.ezIsBlackoutLocalTime(Date.parse(iso), zone)));
 });

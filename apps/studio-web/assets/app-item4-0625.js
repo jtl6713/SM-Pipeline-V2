@@ -260,7 +260,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.502-mae-across-platforms";
+  const BUILD_ID = "item4-0.6.503-mae-gap-extras";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -7301,7 +7301,7 @@
     }).join("");
     ezWizardShowForm(
       `${rows ? `<div class="ez-wizard-schedules">${rows}</div>` : ""}
-       <p class="subtle">Automatic schedules fill morning, then afternoon, then evening before the next day. A second post does not take another 5:30. Stories can share a time. Finished-video (AZ) auto-schedules after cover + caption — no Approve publish step. Other Studio requests still wait for Ready for Review → Approve publish.</p>
+       <p class="subtle">Automatic schedules fill morning, then afternoon, then evening. Once those three are taken, the next post goes in the largest open gap on that day, then the next day. Stories can share a time. Finished-video (AZ) auto-schedules after cover + caption — no Approve publish step. Other Studio requests still wait for Ready for Review → Approve publish.</p>
        <div class="ez-wizard-form-actions"><button type="submit">Continue</button></div>`,
       () => {
         const schedules = {};

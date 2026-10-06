@@ -12,7 +12,7 @@ const app = fs.readFileSync(
 );
 
 test("health advertises current worker build with faster-frames helpers", () => {
-  assert.match(worker, /version: "0.10.453-mae-across-platforms"/);
+  assert.match(worker, /version: "0.10.454-mae-gap-extras"/);
   assert.match(worker, /airtableBatchCreate/);
   assert.match(worker, /mapProductionRequestLight/);
 });
@@ -145,7 +145,7 @@ test("fractional video duration is stored as a whole-number cap and save errors 
 });
 
 test("UI polls GET /variants during Prepare and skips Save reload waterfall", () => {
-  assert.match(app, /BUILD_ID = "item4-0.6.502-mae-across-platforms"/);
+  assert.match(app, /BUILD_ID = "item4-0.6.503-mae-gap-extras"/);
   assert.match(app, /pollItem4Variants/);
   const poll = app.slice(
     app.indexOf("async function pollItem4Variants"),

@@ -1,7 +1,8 @@
 /** Strict MAE rotation in profile-local time.
  * One post per day-part across platforms. Fill each day morning → afternoon →
- * evening before the next day: M, A, E, then next-day M. Instagram at 5:30
- * means Facebook takes 11:30, not another 5:30.
+ * evening. Once those three are covered, the next post goes in the largest
+ * open gap on that day, then day 2, then day 3. Instagram at 5:30 means
+ * Facebook takes 11:30, not another 5:30.
  * Never stamp 8:00 PM–3:30 AM local (inclusive). Stories may share a slot.
  */
 
@@ -122,32 +123,53 @@ export function maeIsPriorityLocalTime(ms, timeZone = MAE_DEFAULT_TIME_ZONE) {
   return maeAllowedMinutes().includes(parts.hour * 60 + parts.minute);
 }
 
-function maeWidestGapFallbackIso(local, nowMs, occupiedMs, platformOccupiedMs, timeZone) {
-  const candidates = [];
-  const sortedOccupied = (occupiedMs || []).filter(Number.isFinite).slice().sort((a, b) => a - b);
-  for (let dayOffset = 0; dayOffset < MAE_SUGGEST_HORIZON_DAYS; dayOffset++) {
-    const civil = maeAddCivilDays(local.year, local.month, local.day, dayOffset);
-    for (const window of MAE_PRIORITY_SCHEDULE_WINDOWS) {
-      const [start] = window.split("-");
-      const [hh, mm] = start.split(":").map((n) => Number(n) || 0);
-      const ms = maeZonedWallToUtcMs(civil.year, civil.month, civil.day, hh, mm || 0, timeZone);
-      if (ms <= nowMs || maeIsBlackoutLocalTime(ms, timeZone) || maeScheduleConflicts(ms, platformOccupiedMs)) continue;
-      let previous = nowMs;
-      let next = ms + 24 * 60 * 60 * 1000;
-      for (const occupied of sortedOccupied) {
-        if (occupied <= ms && occupied > previous) previous = occupied;
-        if (occupied > ms) {
-          next = occupied;
-          break;
-        }
-      }
-      candidates.push({ ms, clearance: Math.min(ms - previous, next - ms) });
-    }
+function maeStandardSlotMs(civil, window, timeZone) {
+  const [start] = String(window).split("-");
+  const [hh, mm] = start.split(":").map((n) => Number(n) || 0);
+  return maeZonedWallToUtcMs(civil.year, civil.month, civil.day, hh, mm || 0, timeZone);
+}
+
+function maeDayStandardsCovered(civil, nowMs, blockers, timeZone) {
+  for (const window of MAE_PRIORITY_SCHEDULE_WINDOWS) {
+    const ms = maeStandardSlotMs(civil, window, timeZone);
+    if (ms <= nowMs || maeIsBlackoutLocalTime(ms, timeZone)) continue;
+    if (!maeScheduleConflicts(ms, blockers)) return false;
   }
-  if (!candidates.length) return "";
-  const widest = Math.max(...candidates.map((item) => item.clearance));
-  const best = candidates.filter((item) => item.clearance === widest);
-  return new Date(best[0].ms).toISOString();
+  return true;
+}
+
+function maeExtraIsoOnDay(civil, nowMs, blockers, timeZone) {
+  const openStart = maeZonedWallToUtcMs(civil.year, civil.month, civil.day, 3, 31, timeZone);
+  const openEnd = maeZonedWallToUtcMs(civil.year, civil.month, civil.day, 19, 59, timeZone);
+  const windowStart = Math.max(openStart, nowMs + 60 * 1000);
+  const windowEnd = openEnd;
+  if (!(windowStart < windowEnd)) return "";
+
+  const posts = (blockers || []).filter((ms) => Number.isFinite(ms)).slice().sort((a, b) => a - b);
+  let before = null;
+  let after = null;
+  const interior = [];
+  for (const post of posts) {
+    if (post < windowStart) before = post;
+    else if (post > windowEnd) {
+      after = post;
+      break;
+    } else interior.push(post);
+  }
+  const markers = [before != null ? before : windowStart, ...interior, after != null ? after : windowEnd];
+  let best = null;
+  for (let i = 0; i < markers.length - 1; i++) {
+    const left = markers[i];
+    const right = markers[i + 1];
+    const span = right - left;
+    if (span <= 0) continue;
+    const ms = Math.round((left + Math.round(span / 2)) / 60000) * 60000;
+    if (ms < windowStart || ms > windowEnd || ms <= nowMs) continue;
+    if (maeIsBlackoutLocalTime(ms, timeZone) || maeScheduleConflicts(ms, posts)) continue;
+    if (maeIsPriorityLocalTime(ms, timeZone)) continue;
+    if (!best || span > best.span || (span === best.span && ms < best.ms)) best = { ms, span };
+  }
+  return best ? new Date(best.ms).toISOString() : "";
 }
 
 function maeBlockingTimes(occupiedMs, platformOccupiedMs) {
@@ -169,22 +191,23 @@ export function maePickBalancedSuggestedIso(_windows, now = new Date(), options 
   const nowMs = now.getTime() + (options.leadMs ?? MAE_SUGGEST_LEAD_MS);
   const local = maeZonedDateTimeParts(now, timeZone);
 
-  // Each civil day: morning, then afternoon, then evening. Then the next day.
-  // A taken morning on any platform blocks the next post from that same 5:30.
+  // Each civil day: morning, then afternoon, then evening. Once those three are
+  // covered, the extra goes in the largest gap on that day before the next morning.
   for (let i = 0; i < MAE_SUGGEST_HORIZON_DAYS; i++) {
     const civil = i === 0
       ? { year: local.year, month: local.month, day: local.day }
       : maeAddCivilDays(local.year, local.month, local.day, i);
     for (const window of MAE_PRIORITY_SCHEDULE_WINDOWS) {
-      const [start] = window.split("-");
-      const [hh, mm] = start.split(":").map((n) => Number(n) || 0);
-      const ms = maeZonedWallToUtcMs(civil.year, civil.month, civil.day, hh, mm || 0, timeZone);
+      const ms = maeStandardSlotMs(civil, window, timeZone);
       if (ms <= nowMs || maeIsBlackoutLocalTime(ms, timeZone) || maeScheduleConflicts(ms, blockers)) continue;
       return new Date(ms).toISOString();
     }
+    if (!maeDayStandardsCovered(civil, nowMs, blockers, timeZone)) continue;
+    const extra = maeExtraIsoOnDay(civil, nowMs, blockers, timeZone);
+    if (extra) return extra;
   }
 
-  return maeWidestGapFallbackIso(local, nowMs, occupiedMs, blockers, timeZone);
+  return "";
 }
 
 export function maeNextOpenScheduleIso(candidateIso, occupiedMs, gapMs = MAE_SCHEDULE_GAP_MS, options = {}) {
@@ -231,11 +254,19 @@ export function maeBuildSuggestedScheduleMap(items, occupiedByPlatform = {}, now
       const iso = new Date(existing).toISOString();
       const existingMs = Date.parse(iso);
       const lane = isStory ? [] : maeFlattenOccupied(reserved);
-      // Keep a stored time only when that day-part is still open across
-      // platforms. A second 5:30 becomes 11:30, then 4:30 PM, then the next morning.
-      const reusable = maeIsPriorityLocalTime(existingMs, timeZone)
+      const existingCivil = maeZonedDateTimeParts(new Date(existingMs), timeZone);
+      const standardsCovered = !isStory && maeDayStandardsCovered(
+        existingCivil,
+        now.getTime() + MAE_SUGGEST_LEAD_MS,
+        lane,
+        timeZone,
+      );
+      // Keep a stored MAE time when that day-part is still open. Keep a stored
+      // extra only after morning, afternoon, and evening on that day are covered.
+      const reusable = existingMs > now.getTime()
         && !maeIsBlackoutLocalTime(existingMs, timeZone)
-        && (isStory || !maeScheduleConflicts(existingMs, lane));
+        && (isStory || !maeScheduleConflicts(existingMs, lane))
+        && (maeIsPriorityLocalTime(existingMs, timeZone) || standardsCovered);
       if (reusable) {
         stamps.set(key, iso);
         if (!isStory) (reserved[platform] ||= []).push(existingMs);
