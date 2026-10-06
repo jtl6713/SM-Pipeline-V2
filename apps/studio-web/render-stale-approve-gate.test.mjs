@@ -9,11 +9,11 @@ const app = fs.readFileSync(path.join(here, "assets/app-item4-0625.js"), "utf8")
 const html = fs.readFileSync(path.join(here, "index.html"), "utf8");
 const worker = fs.readFileSync(path.join(here, "../studio-api/worker.js"), "utf8");
 
-test("UI 0.6.514 Approve gate rejects stale Rendering / In Production (Output 1807)", () => {
-  assert.match(app, /BUILD_ID = "item4-0\.6\.514-pipeline-mobile-scroll"/);
-  assert.match(html, /UI build 0\.6\.514/);
-  assert.match(html, /app-item4-0625\.js\?v=0\.6\.514-pipeline-mobile-scroll/);
-  assert.match(html, /styles-phase7-0621\.css\?v=0\.6\.514-pipeline-mobile-scroll/);
+test("UI 0.6.515 Approve gate rejects stale Rendering / In Production (Output 1807)", () => {
+  assert.match(app, /BUILD_ID = "item4-0\.6\.515-always-hamburger-nav"/);
+  assert.match(html, /UI build 0\.6\.515/);
+  assert.match(html, /app-item4-0625\.js\?v=0\.6\.515-always-hamburger-nav/);
+  assert.match(html, /styles-phase7-0621\.css\?v=0\.6\.515-always-hamburger-nav/);
   assert.match(app, /function creativeCanApproveForPublishing\(/);
   assert.match(
     app,

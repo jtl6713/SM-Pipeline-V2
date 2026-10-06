@@ -260,9 +260,8 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.514-pipeline-mobile-scroll";
+  const BUILD_ID = "item4-0.6.515-always-hamburger-nav";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
-  const NAV_MOBILE_MQ = "(max-width: 760px)";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -690,11 +689,7 @@
     return document.querySelector("[data-support-doc].active")?.dataset.supportDoc || "walkthrough";
   }
 
-  function isMobileNavViewport() {
-    try { return window.matchMedia(NAV_MOBILE_MQ).matches; } catch { return false; }
-  }
-
-  function setStudioNavCollapsed(collapsed, { persist = true } = {}) {
+  function setStudioNavCollapsed(collapsed) {
     const nextCollapsed = Boolean(collapsed);
     document.body.classList.toggle("nav-collapsed", nextCollapsed);
     document.body.classList.toggle("nav-open", !nextCollapsed);
@@ -705,42 +700,24 @@
       toggle.title = nextCollapsed ? "Show navigation" : "Hide navigation";
     }
     const backdrop = $("studioNavBackdrop");
-    if (backdrop) backdrop.hidden = nextCollapsed || !isMobileNavViewport();
-    if (persist && !isMobileNavViewport()) {
-      try { localStorage.setItem(NAV_COLLAPSE_STORAGE_KEY, nextCollapsed ? "1" : "0"); } catch { /* ignore */ }
-    }
+    if (backdrop) backdrop.hidden = nextCollapsed;
+    // Drawer is always the model (desktop + phone). Forget any old "sidebar open" preference.
+    try { localStorage.removeItem(NAV_COLLAPSE_STORAGE_KEY); } catch { /* ignore */ }
   }
 
   function initStudioNavCollapse() {
-    let collapsed = isMobileNavViewport();
-    if (!collapsed) {
-      try { collapsed = localStorage.getItem(NAV_COLLAPSE_STORAGE_KEY) === "1"; } catch { collapsed = false; }
-    }
-    setStudioNavCollapsed(collapsed, { persist: false });
+    // ALWAYS_HAMBURGER_NAV_0_6_515 — hamburger drawer on every viewport; content uses full width.
+    setStudioNavCollapsed(true);
     $("studioNavToggle")?.addEventListener("click", () => {
       const open = document.body.classList.contains("nav-open");
       setStudioNavCollapsed(open);
     });
-    $("studioNavBackdrop")?.addEventListener("click", () => setStudioNavCollapsed(true, { persist: false }));
+    $("studioNavBackdrop")?.addEventListener("click", () => setStudioNavCollapsed(true));
     document.addEventListener("keydown", (event) => {
       if (event.key !== "Escape") return;
       if (!document.body.classList.contains("nav-open")) return;
-      if (!isMobileNavViewport()) return;
-      setStudioNavCollapsed(true, { persist: false });
+      setStudioNavCollapsed(true);
     });
-    try {
-      const mq = window.matchMedia(NAV_MOBILE_MQ);
-      const onChange = () => {
-        if (mq.matches) setStudioNavCollapsed(true, { persist: false });
-        else {
-          let desktopCollapsed = false;
-          try { desktopCollapsed = localStorage.getItem(NAV_COLLAPSE_STORAGE_KEY) === "1"; } catch { desktopCollapsed = false; }
-          setStudioNavCollapsed(desktopCollapsed, { persist: false });
-        }
-      };
-      if (typeof mq.addEventListener === "function") mq.addEventListener("change", onChange);
-      else if (typeof mq.addListener === "function") mq.addListener(onChange);
-    } catch { /* ignore */ }
   }
 
   function showStudioPage(page, options = {}) {
@@ -784,8 +761,8 @@
       showOperationsView(parsed.view, parsed.tab);
     }
     loadPage(isHubPage(next) ? "home" : next);
-    // Free phone real estate after any navigation leaves the drawer.
-    if (isMobileNavViewport()) setStudioNavCollapsed(true, { persist: false });
+    // Free the full content canvas after choosing a nav destination.
+    setStudioNavCollapsed(true);
   }
 
   initStudioNavCollapse();
