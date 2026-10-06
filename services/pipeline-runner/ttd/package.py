@@ -275,6 +275,18 @@ def image_count_label(record: dict[str, Any]) -> str:
     return str(field(record, "Image_Count") or field(record, "Assets_Ready_Count") or "1")
 
 
+def tiktok_photo_sound_required(record: dict[str, Any]) -> bool:
+    """Photo-mode TikTok posts must have a sound added before manual completion."""
+    draft_type = _ci(field_str(record, "TikTok_Draft_Type"))
+    if draft_type == _ci(DRAFT_TYPE_VIDEO):
+        return False
+    combined = " ".join(
+        _ci(field_str(record, name))
+        for name in ("TikTok_Draft_Type", "Platform_Output_Type", "Studio_Output_Type", "Format")
+    )
+    return any(token in combined for token in ("photo", "carousel", "slideshow"))
+
+
 def cover_block(record: dict[str, Any]) -> str:
     raw = field_str(record, "Thumbnail_URL")
     public = graph_fetchable_cover_url(raw)
@@ -380,6 +392,7 @@ def handoff_email_text(
     output_id = str(field(record, "Output_ID") or "")
     title = field_str(record, "Output_Title") or "TikTok draft"
     draft_type = field_str(record, "TikTok_Draft_Type") or ""
+    music_required = tiktok_photo_sound_required(record)
     caption = caption_with_hashtags(
         field_str(record, "Output_Caption"),
         field_str(record, "Output_Hashtags"),
@@ -455,7 +468,11 @@ def handoff_email_text(
             "2. Review and edit the images/video and caption.",
             "3. Download the 3D cover above and set it as the draft cover in TikTok.",
             "4. Add the suggested location tag in TikTok when available.",
-            "5. Add music in TikTok before posting when music is requested.",
+            (
+                "5. REQUIRED FOR PHOTO POSTS: Tap Add sound in TikTok and choose music before posting. Do not publish this carousel silent."
+                if music_required
+                else "5. Add music in TikTok before posting when music is requested."
+            ),
             "6. Post manually.",
             "7. Record the final TikTok URL using the Mark as Published link below.",
         ]
@@ -552,6 +569,24 @@ def form_html(record: dict[str, Any], *, action_url: str) -> str:
     title = html.escape(field_str(record, "Output_Title") or "")
     record_id = html.escape(str(record.get("id") or ""))
     token = html.escape(field_str(record, "TikTok_Manual_Completion_Token"))
+    music_required = tiktok_photo_sound_required(record)
+    music_control = (
+        "<div style=\"margin:16px 0;padding:12px;border:1px solid #f59e0b;border-radius:8px;background:#fffbeb\">"
+        "<b>Sound required for this photo post.</b><p style=\"margin:6px 0 0\">"
+        "Before posting in TikTok, tap <b>Add sound</b> and choose music. "
+        "This completion form will not accept a silent photo carousel.</p></div>"
+        "<label><input type=\"checkbox\" name=\"music_completed\" value=\"yes\" required> "
+        "I added/selected sound in TikTok before publishing this photo post.</label>"
+        if music_required
+        else (
+            "<label for=\"music_completed\">Music handling</label>"
+            "<select id=\"music_completed\" name=\"music_completed\">"
+            "<option value=\"not_requested\">No music requested / not applicable</option>"
+            "<option value=\"yes\">Music selected or completed in TikTok</option>"
+            "<option value=\"no\">Published without completing the requested music step</option>"
+            "</select>"
+        )
+    )
     return (
         "<!doctype html><html><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
         "<title>Complete TikTok Publishing</title>"
@@ -567,12 +602,7 @@ def form_html(record: dict[str, Any], *, action_url: str) -> str:
         "<input type=\"hidden\" name=\"action\" value=\"submit\">"
         "<label for=\"platform_post_url\">Final TikTok post URL</label>"
         "<input id=\"platform_post_url\" name=\"platform_post_url\" type=\"url\" required placeholder=\"https://www.tiktok.com/@chicago.shining/video/...\">"
-        "<label for=\"music_completed\">Music handling</label>"
-        "<select id=\"music_completed\" name=\"music_completed\">"
-        "<option value=\"not_requested\">No music requested / not applicable</option>"
-        "<option value=\"yes\">Music selected or completed in TikTok</option>"
-        "<option value=\"no\">Published without completing the requested music step</option>"
-        "</select><button type=\"submit\">Confirm Published</button></form></div></body></html>"
+        f"{music_control}<button type=\"submit\">Confirm Published</button></form></div></body></html>"
     )
 
 
