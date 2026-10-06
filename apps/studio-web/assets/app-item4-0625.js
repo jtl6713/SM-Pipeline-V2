@@ -18264,6 +18264,7 @@
       const platform = String(r.platform || "Platform");
       const platformSlug = platform.toLowerCase().replace(/[^a-z0-9]+/g, "-");
       const outputType = String(r.platform_output_type || r.format || "—");
+      const outputTypeLabel = outputType.replace(/^(Facebook|Instagram|TikTok|YouTube)\s+/i, "").trim() || outputType;
       const postLink = r.platform_post_url
         ? `<a class="table-link" target="_blank" rel="noopener" href="${escapeHtml(r.platform_post_url)}">Open post ↗</a>`
         : "";
@@ -18277,7 +18278,7 @@
       const rowOpen = canOpen
         ? ` class="pipeline-open-row pipeline-compact-row" data-open-output-id="${escapeHtml(r.id)}" data-platform="${escapeHtml(platformSlug)}" tabindex="0"`
         : ` class="pipeline-compact-row" data-platform="${escapeHtml(platformSlug)}"`;
-      return `<tr${rowOpen}>${contentCell}<td class="pipeline-output-platform-cell"><div class="pipeline-platform-line"><span class="pipeline-platform-pill" data-platform="${escapeHtml(platformSlug)}"><b>${escapeHtml(pipelinePlatformCode(platform))}</b><span>${escapeHtml(platform)}${outputType && outputType !== "—" ? ` · ${escapeHtml(outputType)}` : ""}</span></span><strong>${escapeHtml(String(r.output_id || ""))}</strong></div></td><td class="pipeline-status-cell">${pipelineCompactStatusMarkup(r)}</td><td class="pipeline-progress-cell">${pipelineProgressCell(r, groupRecords)}</td><td class="pipeline-schedule-column">${scheduleCell}</td><td class="pipeline-actions-cell"><button type="button" class="creative-button pipeline-open-review" data-creative-output-id="${escapeHtml(r.id)}" ${canOpen ? "" : "disabled"} title="${canOpen ? "Open output details" : notReadyTitle}">${canOpen ? "Open" : escapeHtml(notReadyLabel)}</button>${moreMenu}</td></tr>`;
+      return `<tr${rowOpen}>${contentCell}<td class="pipeline-output-platform-cell"><div class="pipeline-platform-line"><span class="pipeline-platform-pill" data-platform="${escapeHtml(platformSlug)}"><b>${escapeHtml(pipelinePlatformCode(platform))}</b><span>${escapeHtml(platform)}${outputTypeLabel && outputTypeLabel !== "—" ? ` · ${escapeHtml(outputTypeLabel)}` : ""}</span></span><strong>${escapeHtml(String(r.output_id || ""))}</strong></div></td><td class="pipeline-status-cell">${pipelineCompactStatusMarkup(r)}</td><td class="pipeline-progress-cell">${pipelineProgressCell(r, groupRecords)}</td><td class="pipeline-schedule-column">${scheduleCell}</td><td class="pipeline-actions-cell"><button type="button" class="creative-button pipeline-open-review" data-creative-output-id="${escapeHtml(r.id)}" ${canOpen ? "" : "disabled"} title="${canOpen ? "Open output details" : notReadyTitle}">${canOpen ? "Open" : escapeHtml(notReadyLabel)}</button>${moreMenu}</td></tr>`;
     };
 
     const body = isPipeline
