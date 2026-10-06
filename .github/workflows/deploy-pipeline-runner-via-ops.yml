@@ -133,3 +133,6 @@ jobs:
 
 # Trigger pipeline-runner deploy for Quality Agent signature QA-PROMOTED-PROFILE-DRIFT
 # 2026-10-06 promoted Lower East Side NYC/Chicago profile drift repair
+
+# Trigger pipeline-runner deploy for SAI1 Featuring photo names (no Photo N placeholders)
+# 2026-10-06 caption photo-names merge
