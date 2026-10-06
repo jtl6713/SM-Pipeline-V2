@@ -30,6 +30,22 @@ test("calendar Save Schedule does not 500 when occupancy Brand is missing", () =
   assert.match(source, /studio_schedule_occupancy_fields_v1: true/);
 });
 
+
+test("Approve and Approve All fail soft when schedule occupancy cannot be read", () => {
+  const singleApprove = source.slice(
+    source.indexOf("async function approveOutputRecordForPublishing"),
+    source.indexOf("async function approveAllOutputsForPublishing"),
+  );
+  const approveAll = source.slice(
+    source.indexOf("async function approveAllOutputsForPublishing"),
+    source.indexOf("async function"),
+  );
+  assert.match(singleApprove, /studioOccupiedSchedulesOrEmpty/);
+  assert.match(approveAll, /studioOccupiedSchedulesOrEmpty/);
+  assert.doesNotMatch(singleApprove, /await studioLoadOccupiedSchedules/);
+  assert.doesNotMatch(approveAll, /await studioLoadOccupiedSchedules/);
+});
+
 test("approval preserves a previously saved manual schedule marker", () => {
   assert.match(source, /const markerIso = String\(f\(record, "Studio_Scheduled_At"\)/);
   assert.match(source, /const existingScheduleIso = String\(/);
