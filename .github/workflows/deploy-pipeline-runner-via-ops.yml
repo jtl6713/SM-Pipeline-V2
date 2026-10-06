@@ -130,3 +130,6 @@ jobs:
 
 # Trigger pipeline-runner deploy for Quality Agent signature QA-TT-DUPLICATE-SLIDES
 # 2026-10-05T12:20:00Z
+
+# Trigger pipeline-runner deploy for Quality Agent signature QA-PROMOTED-PROFILE-DRIFT
+# 2026-10-06 promoted Lower East Side NYC/Chicago profile drift repair
