@@ -21,7 +21,7 @@ from ttd.constants import (
     STATUS_PUBLISHED,
 )
 from ttd.eligibility import ttd4_form_eligibility_reason
-from ttd.package import form_html, page_html, submit_action_url
+from ttd.package import form_html, page_html, submit_action_url, tiktok_photo_sound_required
 
 
 def process_request(
@@ -98,11 +98,23 @@ def process_request(
         result["http_status"] = 400
         return {"processed": False, "reason": reason or "invalid_tiktok_url", **result}
 
+    music = str(music_completed or "").strip().casefold()
+    if tiktok_photo_sound_required(output) and music != "yes":
+        result["html"] = page_html(
+            title="Add sound before publishing",
+            body=(
+                "This TikTok photo post cannot be marked complete yet. "
+                "Open the draft in TikTok, tap Add sound, choose music, publish it, "
+                "then return here and confirm that sound was added."
+            ),
+        )
+        result["http_status"] = 400
+        return {"processed": False, "reason": "photo_sound_required", **result}
+
     if dry_run:
         result["html"] = page_html(title="TikTok publication recorded", body="Dry-run only; Airtable was not updated.")
         return {"processed": False, "dry_run": True, **result}
 
-    music = str(music_completed or "").strip().casefold()
     now = iso_utc()
     if music == "yes":
         music_status = MUSIC_COMPLETED
