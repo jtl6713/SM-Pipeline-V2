@@ -5154,7 +5154,7 @@ var worker_default = {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.455-timeline-async-variants",
+          version: "0.10.457-timeline-fast-return",
           studio_mae_schedule_v1: true,
           studio_desk_inventory_v1: true,
           studio_desk_activity_v1: true,
@@ -24184,17 +24184,22 @@ idea-vo-timeline=1`.trim();
     requestRecord = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, requestRecord.id);
   }
   let variantStatus = String(f(requestRecord, "Studio_Variant_Status") || "").trim();
-  if (variantStatus !== "Ready" && variantStatus !== "Not Needed") {
-    let reconciled = await item4ReconcileVariants(env, requestRecord.id, requestRecord).catch(() => null);
-    if (reconciled?.record) requestRecord = reconciled.record;
-    const queued = Array.isArray(reconciled?.queue_rows) && reconciled.queue_rows.length;
-    if (!autonomousPlanVariantsReady(requestRecord, reconciled) && !queued) {
-      const variantsCall = studioInternalJsonRequest(`/api/production-requests/${requestRecord.id}/variants`, {});
-      await prepareItem4Variants(variantsCall.request, env, variantsCall.url, authorization, ctx);
-    }
-    const afterPrepare = await item4ReconcileVariants(env, requestRecord.id, requestRecord).catch(() => null);
-    if (afterPrepare?.record) requestRecord = afterPrepare.record;
-    else requestRecord = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, requestRecord.id).catch(() => requestRecord);
+  if (variantStatus !== "Ready" && variantStatus !== "Not Needed" && ctx?.waitUntil) {
+    const asyncRequestId = requestRecord.id;
+    ctx.waitUntil((async () => {
+      try {
+        let current = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, asyncRequestId);
+        let reconciled = await item4ReconcileVariants(env, asyncRequestId, current).catch(() => null);
+        if (reconciled?.record) current = reconciled.record;
+        const queued = Array.isArray(reconciled?.queue_rows) && reconciled.queue_rows.length;
+        if (!autonomousPlanVariantsReady(current, reconciled) && !queued) {
+          const variantsCall = studioInternalJsonRequest(`/api/production-requests/${asyncRequestId}/variants`, {});
+          await prepareItem4Variants(variantsCall.request, env, variantsCall.url, authorization, ctx);
+        }
+      } catch (error) {
+        console.warn("idea timeline background variant prepare failed", asyncRequestId, error);
+      }
+    })());
   }
   const assetsCount = item4AssetManifest(requestRecord).length;
   const planReady = String(f(requestRecord, "Studio_Output_Plan_Status") || "").trim() === "Ready";
