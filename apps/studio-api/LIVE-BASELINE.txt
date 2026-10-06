@@ -1,3 +1,5 @@
-Captured from Cloudflare Worker: chicagoshining-studio-api
-Capture method: Workers Scripts Content API /content/v2
-Captured at: 2026-10-06T04:39:02Z
+Studio API source of truth is modular: worker.js plus sibling .mjs modules.
+Do not replace worker.js with a Wrangler /content/v2 bundle. That capture
+deleted desk-inventory.mjs, quality-checks.mjs, asset-library.mjs, and
+operations-oversized.mjs and broke Deploy Studio API Worker Production.
+Live production version to publish: 0.10.458-timeline-writer-fallback.

@@ -29,7 +29,9 @@ jobs:
           set -euo pipefail
           DEST="$GITHUB_WORKSPACE/apps/studio-api"
           mkdir -p "$DEST"
-          find "$DEST" -mindepth 1 -maxdepth 1 ! -name 'README.md' -exec rm -rf {} +
+          # Live Worker content is a Wrangler bundle. Never wipe modular source
+          # (*.mjs) or replace worker.js with that bundle — that made 0.10.457+
+          # production deploys fail at `test -s` for sibling modules.
 
           curl -fsS \
             "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/chicagoshining-studio-api/content/v2" \
@@ -48,7 +50,7 @@ jobs:
           text_headers = headers.decode('latin-1', errors='replace')
           matches = re.findall(r'(?im)^content-type:\s*(.+?)\r?$', text_headers)
           content_type = matches[-1].strip() if matches else ''
-          out = Path('apps/studio-api/worker.js')
+          out = Path('apps/studio-api/LIVE-CAPTURE-worker.js')
 
           if content_type.lower().startswith('multipart/'):
               msg = BytesParser(policy=default).parsebytes(
@@ -69,13 +71,9 @@ jobs:
               out.write_bytes(body)
           PY
 
-          test -s "$DEST/worker.js"
-          if ! grep -qE 'export default|addEventListener\(' "$DEST/worker.js"; then
-            echo 'Captured Worker content does not look like executable Worker source.' >&2
-            exit 1
-          fi
-          if ! grep -q 'chicagoshining-studio-api' "$DEST/worker.js"; then
-            echo 'Captured source does not contain the expected Studio API service marker.' >&2
+          test -s "$DEST/LIVE-CAPTURE-worker.js"
+          if ! grep -qE 'export default|addEventListener\(|chicagoshining-studio-api' "$DEST/LIVE-CAPTURE-worker.js"; then
+            echo 'Captured Worker content does not look like Studio API source.' >&2
             exit 1
           fi
           printf 'Captured from Cloudflare Worker: chicagoshining-studio-api\nCapture method: Workers Scripts Content API /content/v2\nCaptured at: %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$DEST/LIVE-BASELINE.txt"

@@ -97,5 +97,9 @@ p3-body.txt
 p3-payload.json
 apps/studio-web/scripts/
 
+# Captured live Worker bundles are not source of truth
+apps/studio-api/LIVE-CAPTURE-worker.js
+
 # Office lock files
 ~$*
+

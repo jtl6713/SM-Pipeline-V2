@@ -32,11 +32,13 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test -s apps/studio-api/worker.js
-          test -s apps/studio-api/desk-inventory.mjs
-          test -s apps/studio-api/quality-checks.mjs
-          test -s apps/studio-api/asset-library.mjs
-          test -s apps/studio-api/operations-oversized.mjs
+          for f in worker.js desk-inventory.mjs quality-checks.mjs asset-library.mjs operations-oversized.mjs; do
+            if [[ ! -s "apps/studio-api/$f" ]]; then
+              echo "missing or empty: apps/studio-api/$f" >&2
+              ls -la apps/studio-api >&2 || true
+              exit 1
+            fi
+          done
           mkdir -p /tmp/studio-check
           cp apps/studio-api/worker.js /tmp/studio-check/worker.mjs
           cp apps/studio-api/*.mjs /tmp/studio-check/
@@ -45,7 +47,7 @@ jobs:
           mkdir -p /tmp/wrangler-production
           cd /tmp/wrangler-production
           npm init -y >/dev/null 2>&1
-          npm install --no-save "wrangler@$WRANGLER_VERSION" >/dev/null
+          npm install --no-save "wrangler@$WRANGLER_VERSION"
           test "$(./node_modules/.bin/wrangler --version | tr -d '\r\n')" = "$WRANGLER_VERSION"
 
       - name: Capture production rollback point and exact binding contract
