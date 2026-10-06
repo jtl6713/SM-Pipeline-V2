@@ -30,3 +30,4 @@ Deploy Worker 0.10.462-schedule-occupancy-fields. Calendar Save Schedule no long
 Deploy Worker 0.10.462-schedule-occupancy-fields retry. Approve/Approve All now explicitly regression-guarded to fail soft on occupancy reads; repair content 368 and republish production.
 Deploy Worker 0.10.463-approve-mae-keep. studioNextOpenScheduleIso keeps non-clashing saved times and passes platform occupancy.
 Deploy Worker 0.10.464-schedule-save-ready-review. Ready for Review wins over Publish_Status Ready to Schedule until Approve (Output 1795).
+Deploy Worker 0.10.465-render-stale-rendering. Heal Final_File_URL + Render_Status=Rendering (Output 1807) to Rendered + Ready for Review; desk kind render_stale_rendering.

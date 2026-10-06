@@ -260,7 +260,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.510-pipeline-density";
+  const BUILD_ID = "item4-0.6.511-render-stale-approve-gate";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -16371,8 +16371,13 @@
     if (!output || output.do_not_publish) return false;
     const review = String(output.review_status || "").trim();
     const status = String(output.output_status || "").trim();
+    const render = String(output.render_status || "").trim();
     if (review === "Approved" || status === "Approved for Publishing" || status === "Published") return false;
     if (String(output.publish_status || "").trim() === "Published") return false;
+    // Stale Review Sent + Final_File_URL used to light Approve (1) while
+    // Output_Status was still In Production / Render_Status Rendering
+    // (Output 1807). Worker approve correctly rejects those rows.
+    if (status === "In Production" || render === "Rendering" || render === "Ready for Render") return false;
     const hasFile = Boolean(String(output.final_file_url || "").trim() || String(output.studio_preview_url || "").trim());
     if (!hasFile && !creativeIsNativePhotoPackage(output)) return false;
     if (!output.creative_available) return false;

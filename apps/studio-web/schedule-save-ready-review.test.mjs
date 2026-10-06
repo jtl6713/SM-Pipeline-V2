@@ -9,10 +9,10 @@ const app = fs.readFileSync(path.join(here, "assets/app-item4-0625.js"), "utf8")
 const html = fs.readFileSync(path.join(here, "index.html"), "utf8");
 const worker = fs.readFileSync(path.join(here, "../studio-api/worker.js"), "utf8");
 
-test("UI 0.6.509 enables Save schedule for Ready for Review (Output 1795)", () => {
-  assert.match(app, /BUILD_ID = "item4-0\.6\.509-rowspan-pipeline"/);
-  assert.match(html, /UI build 0\.6\.509/);
-  assert.match(html, /app-item4-0625\.js\?v=0\.6\.509-rowspan-pipeline/);
+test("UI enables Save schedule for Ready for Review (Output 1795)", () => {
+  assert.match(app, /BUILD_ID = "item4-0\.6\.510-render-stale-approve-gate"/);
+  assert.match(html, /UI build 0\.6\.511/);
+  assert.match(html, /app-item4-0625\.js\?v=0\.6\.510-render-stale-approve-gate/);
   // setCreativeBusy must gate Save on creativeCanSetSchedule, not only approved reschedule.
   assert.match(
     app,
@@ -29,8 +29,8 @@ test("UI 0.6.509 enables Save schedule for Ready for Review (Output 1795)", () =
   assert.match(app, /const editableSchedule = !publishedSchedule && creativeCanSetSchedule\(r\);/);
 });
 
-test("Worker 0.10.464 keeps Ready for Review over Ready to Schedule until Approve", () => {
-  assert.match(worker, /version: "0\.10\.464-schedule-save-ready-review"/);
+test("Worker keeps Ready for Review over Ready to Schedule until Approve", () => {
+  assert.match(worker, /version: "0\.10\.465-render-stale-rendering"/);
   // Ready to Schedule / Ready to Publish must not be in approvedOrScheduledEarly.
   const block = worker.match(
     /A pre-filled Publish_Status of "Ready to Schedule"[\s\S]{0,400}const approvedOrScheduledEarly =([\s\S]{0,500}?);/
