@@ -503,7 +503,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.454-mae-gap-extras",
+          version: "0.10.455-timeline-async-variants",
           studio_mae_schedule_v1: true,
           studio_desk_inventory_v1: true,
           studio_desk_activity_v1: true,
@@ -21810,7 +21810,13 @@ async function createIdeaTimedScriptRoute(request, env, url, authorization, ctx 
       const variantsCall = studioInternalJsonRequest(`/api/production-requests/${requestRecord.id}/variants`, {});
       await prepareItem4Variants(variantsCall.request, env, variantsCall.url, authorization, ctx);
     }
-    requestRecord = await waitAutonomousVariantsReady(env, requestRecord.id, ctx, 50000);
+    // Do not hold the interactive Create Timeline request open while crop variants drain.
+    // The variant worker/cron continues asynchronously; a long synchronous wait can exhaust
+    // the Cloudflare Worker request/subrequest budget and surface as a misleading HTTP 500.
+    // Reconcile once, then return 202 while variants finish.
+    const afterPrepare = await item4ReconcileVariants(env, requestRecord.id, requestRecord).catch(() => null);
+    if (afterPrepare?.record) requestRecord = afterPrepare.record;
+    else requestRecord = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, requestRecord.id).catch(() => requestRecord);
   }
 
   const assetsCount = item4AssetManifest(requestRecord).length;
