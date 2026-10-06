@@ -9,10 +9,10 @@ const app = fs.readFileSync(path.join(here, "assets/app-item4-0625.js"), "utf8")
 const html = fs.readFileSync(path.join(here, "index.html"), "utf8");
 const css = fs.readFileSync(path.join(here, "assets/styles-phase7-0621.css"), "utf8");
 
-test("UI 0.6.514 Pipeline overview is a bounded horizontal scrollport on phones", () => {
-  assert.match(app, /BUILD_ID = "item4-0\.6\.514-pipeline-mobile-scroll"/);
-  assert.match(html, /UI build 0\.6\.514/);
-  assert.match(html, /styles-phase7-0621\.css\?v=0\.6\.514-pipeline-mobile-scroll/);
+test("UI 0.6.515 Pipeline overview is a bounded horizontal scrollport on phones", () => {
+  assert.match(app, /BUILD_ID = "item4-0\.6\.515-always-hamburger-nav"/);
+  assert.match(html, /UI build 0\.6\.515/);
+  assert.match(html, /styles-phase7-0621\.css\?v=0\.6\.515-always-hamburger-nav/);
   assert.match(css, /PIPELINE_MOBILE_SCROLL_0_6_514/);
   assert.match(css, /body:has\(#page-outputs\.active\) \.main/);
   assert.match(css, /#page-outputs \.panel:has\(#outputsList\)/);

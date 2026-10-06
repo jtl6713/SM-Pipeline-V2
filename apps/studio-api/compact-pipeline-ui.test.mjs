@@ -11,10 +11,10 @@ const app = fs.readFileSync(path.join(web, "assets/app-item4-0625.js"), "utf8");
 const css = fs.readFileSync(path.join(web, "assets/styles-phase7-0621.css"), "utf8");
 
 test("compact Pipeline build and cache bust stay aligned", () => {
-  assert.match(app, /BUILD_ID = "item4-0\.6\.514-pipeline-mobile-scroll"/);
-  assert.match(html, /UI build 0\.6\.514/);
-  assert.match(html, /app-item4-0625\.js\?v=0\.6\.514-pipeline-mobile-scroll/);
-  assert.match(html, /styles-phase7-0621\.css\?v=0\.6\.514-pipeline-mobile-scroll/);
+  assert.match(app, /BUILD_ID = "item4-0\.6\.515-always-hamburger-nav"/);
+  assert.match(html, /UI build 0\.6\.515/);
+  assert.match(html, /app-item4-0625\.js\?v=0\.6\.515-always-hamburger-nav/);
+  assert.match(html, /styles-phase7-0621\.css\?v=0\.6\.515-always-hamburger-nav/);
   assert.match(css, /COMPACT_PIPELINE_V2_20261006/);
 });
 
