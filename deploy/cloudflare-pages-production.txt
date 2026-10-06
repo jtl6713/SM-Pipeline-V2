@@ -36,3 +36,4 @@ Deploy UI 0.6.504 compact Pipeline workspace. Dense grouped table, status tabs, 
 Deploy UI 0.6.505 inline schedule autosave. Pipeline schedule fields save typed changes on change/blur/Enter; published outputs render locked and retain server-side reschedule protection.
 Deploy UI 0.6.506 Pipeline color system. Collapsed content groups now show workflow status color and platform chips; expanded IG/FB/TikTok/YouTube rows use brand tints; quick status tabs use stronger state colors.
 Deploy UI 0.6.507-approve-mae-keep. Approve all never silent-fails; keep saved schedules unless clash; MAE occupancy uses full platform calendar.
+Deploy UI 0.6.508-schedule-save-ready-review. Ready-for-review Open review Save schedule stays enabled; Pipeline schedule fields editable before Approve (Output 1795).

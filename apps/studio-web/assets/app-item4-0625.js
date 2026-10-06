@@ -260,7 +260,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.507-approve-mae-keep";
+  const BUILD_ID = "item4-0.6.508-schedule-save-ready-review";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -14741,8 +14741,10 @@
         if ($("creativeApprovePreview")) $("creativeApprovePreview").disabled = !creativeCanApproveForPublishing() || creativeMixInProgress();
         if ($("reloadCreativeEditor")) $("reloadCreativeEditor").disabled = !creativeEditorDirty;
       }
+      // Ready-for-review outputs can set a schedule before Approve; Publish now stays approval-gated.
+      const canSaveSchedule = creativeCanSetSchedule();
       const canReschedule = creativeCanReschedule();
-      if ($("creativeSaveSchedule")) $("creativeSaveSchedule").disabled = !canReschedule;
+      if ($("creativeSaveSchedule")) $("creativeSaveSchedule").disabled = !canSaveSchedule;
       if ($("creativePublishNow")) $("creativePublishNow").disabled = !canReschedule;
     }
   }
@@ -16395,8 +16397,14 @@
     const canSave = creativeCanSetSchedule(output);
     const canPublishNow = creativeCanReschedule(output);
     if (box) box.hidden = !canSave;
-    if (save) save.hidden = !canSave;
-    if (publishNow) publishNow.hidden = !canPublishNow;
+    if (save) {
+      save.hidden = !canSave;
+      save.disabled = !canSave;
+    }
+    if (publishNow) {
+      publishNow.hidden = !canPublishNow;
+      publishNow.disabled = !canPublishNow;
+    }
     if (hint) {
       hint.textContent = canPublishNow
         ? "This output is already approved. Save schedule locks the exact time you enter. Publish now sends it immediately."
@@ -18198,10 +18206,11 @@
           ? "Blocked"
           : "Not ready";
       const notReadyTitle = escapeHtml(String(r.studio_job_error || r.studio_job_label || PHASE6_BUTTON_HELP["Not ready yet"]));
-      const ready = /ready for review/i.test(String(r.studio_state || r.output_status || r.review_status || ""));
       const scheduleValue = pipelineScheduleInputValue(r);
       const publishedSchedule = creativeIsPublished(r);
-      const editableSchedule = !publishedSchedule && (ready || creativeCanReschedule(r));
+      // Use creativeCanSetSchedule so Ready for Review (pre-approve) can edit times —
+      // studio_state may read "Scheduled" when Publish_Status is already Ready to Schedule.
+      const editableSchedule = !publishedSchedule && creativeCanSetSchedule(r);
       const scheduleIso = studioEffectiveScheduleIso(r);
       const scheduleCell = editableSchedule
         ? `<div class="pipeline-schedule-cell pipeline-schedule-cell-compact"><div class="pipeline-schedule-controls"><input type="datetime-local" data-pipeline-schedule="${escapeHtml(r.id)}" value="${escapeHtml(scheduleValue)}" aria-label="Scheduled time for Platform Output ${escapeHtml(String(r.output_id || ""))}" title="Type the date and time. It saves automatically when you leave the field or press Enter."><button type="button" class="secondary-button pipeline-calendar-button" data-pipeline-schedule-calendar="${escapeHtml(r.id)}" title="Open calendar" aria-label="Open calendar">📅</button></div><span class="pipeline-schedule-save-state" data-pipeline-schedule-status aria-live="polite"></span><div class="pipeline-schedule-suggest" data-pipeline-schedule-suggest="${escapeHtml(r.id)}"></div><button type="button" class="text-button pipeline-use-suggested" data-pipeline-use-suggested="${escapeHtml(r.id)}" hidden>Use suggested</button></div>`
@@ -22601,8 +22610,9 @@
       phase6Message(error.message || "Could not update the schedule.", "error-text");
     } finally {
       syncCreativeScheduleActions(activeCreativeOutput);
+      const canSaveSchedule = creativeCanSetSchedule(activeCreativeOutput);
       const canReschedule = creativeCanReschedule(activeCreativeOutput);
-      if (saveBtn) saveBtn.disabled = !canReschedule;
+      if (saveBtn) saveBtn.disabled = !canSaveSchedule;
       if (nowBtn) nowBtn.disabled = !canReschedule;
     }
   }

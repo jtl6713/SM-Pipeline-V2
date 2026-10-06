@@ -29,3 +29,4 @@ Deploy Worker 0.10.461-no-past-regenerated-schedules. Regenerate Schedule now re
 Deploy Worker 0.10.462-schedule-occupancy-fields. Calendar Save Schedule no longer 500s: occupancy no longer requests Platform Outputs.Brand (field does not exist), occupancy list failures are fail-soft, and manual calendar override skips occupancy.
 Deploy Worker 0.10.462-schedule-occupancy-fields retry. Approve/Approve All now explicitly regression-guarded to fail soft on occupancy reads; repair content 368 and republish production.
 Deploy Worker 0.10.463-approve-mae-keep. studioNextOpenScheduleIso keeps non-clashing saved times and passes platform occupancy.
+Deploy Worker 0.10.464-schedule-save-ready-review. Ready for Review wins over Publish_Status Ready to Schedule until Approve (Output 1795).

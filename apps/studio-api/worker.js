@@ -503,7 +503,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.463-approve-mae-keep",
+          version: "0.10.464-schedule-save-ready-review",
           studio_mae_schedule_v1: true,
           studio_mae_profile_occupancy_v1: true,
           studio_schedule_occupancy_fields_v1: true,
@@ -2876,11 +2876,13 @@ function normalizedOutputState(record) {
   // Review-ready native stills / finished files beat leftover retry flags and stale error text.
   // Stale Review Sent must not win while Remotion is still In Production, or while
   // lettering / the 3D cover is still missing.
+  // A pre-filled Publish_Status of "Ready to Schedule" must NOT beat Ready for Review
+  // before Approve (Output 1795). Only approved / in-flight / published publish states
+  // suppress the review badge. "Ready to Schedule" still maps to Scheduled later when
+  // the row is already approved.
   const approvedOrScheduledEarly =
     has("Review_Status", "approved")
     || has("Output_Status", "approved for publishing")
-    || has("Publish_Status", "ready to schedule")
-    || has("Publish_Status", "ready to publish")
     || has("Publish_Status", "scheduled")
     || has("Publish_Status", "publishing")
     || has("Publish_Status", "published")
