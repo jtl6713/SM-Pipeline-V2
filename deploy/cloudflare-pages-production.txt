@@ -31,3 +31,4 @@ Deploy UI 0.6.500 footer BUILD_ID. Pipeline card shading fix labeled and cache-b
 Deploy UI 0.6.501 swap still. Rendering tab opens a library picker to replace a scene still.
 Deploy UI 0.6.502 suggested times walk morning, then afternoon, then evening across platforms.
 Deploy UI 0.6.503 once morning, afternoon, and evening are taken, the next post fills that day's largest gap.
+Deploy UI 0.6.503 low-platform-count-alert. Home Scheduled Content turns Facebook/Instagram totals below 40 and TikTok/YouTube totals below 20 red.
