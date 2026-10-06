@@ -64,18 +64,18 @@ test("Pipeline schedule overview defaults collapsed", () => {
 });
 
 
-test("manual schedule overrides require an explicit save", () => {
+test("manual schedule overrides mark dirty then autosave on change/blur/Enter", () => {
   const here = path.dirname(fileURLToPath(import.meta.url));
   const app = fs.readFileSync(path.join(here, "assets", "app-item4-0625.js"), "utf8");
   const html = fs.readFileSync(path.join(here, "index.html"), "utf8");
-  assert.match(app, /data-pipeline-schedule-save/);
   assert.match(app, /manual_schedule_override:\s*true/);
   assert.match(app, /pipelineScheduleDirty\.add\(id\)/);
-  assert.match(app, /Unsaved — click Save/);
+  assert.match(app, /status\.textContent = "Unsaved"/);
+  assert.match(app, /const saveTypedValue = \(\) =>/);
+  assert.match(app, /input\.addEventListener\("change", \(\) => \{\s*markDirty\(\);\s*saveTypedValue\(\);/);
+  assert.match(app, /input\.addEventListener\("blur", saveTypedValue\)/);
   assert.match(app, /function creativeCanSetSchedule/);
   assert.match(app, /Manual schedule overrides are kept exactly as entered/);
-  assert.doesNotMatch(app, /input\.addEventListener\("change",[\s\S]{0,240}savePipelineScheduleInput/);
-  assert.doesNotMatch(app, /creativeScheduleAt"\)\?\.addEventListener\("keydown"/);
   assert.match(html, /id="creativeScheduleAt"[\s\S]{0,200}id="creativeSaveSchedule"/);
 });
 
