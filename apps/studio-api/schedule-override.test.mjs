@@ -14,6 +14,22 @@ test("manual output schedule route preserves the requested time exactly", () => 
   assert.match(source, /payload\?\.manual_schedule_override === true/);
 });
 
+test("calendar Save Schedule does not 500 when occupancy Brand is missing", () => {
+  const scheduleFn = source.slice(
+    source.indexOf("async function scheduleStudioPublishOutput"),
+    source.indexOf("function isTikTokPostUrl"),
+  );
+  assert.match(scheduleFn, /manualScheduleOverride \|\| publishNowImmediate/);
+  assert.match(scheduleFn, /studioOccupiedSchedulesOrEmpty/);
+  const loadFn = source.slice(
+    source.indexOf("async function studioLoadOccupiedScheduleRows"),
+    source.indexOf("async function studioLoadOccupiedSchedules"),
+  );
+  assert.doesNotMatch(loadFn, /"Brand"/);
+  assert.match(loadFn, /"Content_Profile"/);
+  assert.match(source, /studio_schedule_occupancy_fields_v1: true/);
+});
+
 test("approval preserves a previously saved manual schedule marker", () => {
   assert.match(source, /const markerIso = String\(f\(record, "Studio_Scheduled_At"\)/);
   assert.match(source, /const existingScheduleIso = String\(/);

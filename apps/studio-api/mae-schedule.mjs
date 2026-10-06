@@ -223,7 +223,7 @@ export function maeNextOpenScheduleIso(candidateIso, occupiedMs, gapMs = MAE_SCH
   ) {
     return new Date(ms).toISOString();
   }
-  return maePickBalancedSuggestedIso(MAE_PRIORITY_SCHEDULE_WINDOWS, scheduleNow, {
+  return maePickBalancedSuggestedIso(MAE_PRIORITY_SCHEDULE_WINDOWS, now, {
     occupiedMs: occupiedMs || [],
     platformOccupiedMs: occupiedMs || [],
     timeZone,

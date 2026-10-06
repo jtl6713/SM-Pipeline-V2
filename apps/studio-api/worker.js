@@ -503,9 +503,10 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.460-mae-profile-occupancy",
+          version: "0.10.462-schedule-occupancy-fields",
           studio_mae_schedule_v1: true,
           studio_mae_profile_occupancy_v1: true,
+          studio_schedule_occupancy_fields_v1: true,
           studio_desk_inventory_v1: true,
           studio_desk_activity_v1: true,
           studio_tiktok_complete_v1: true,
@@ -7482,7 +7483,9 @@ async function studioLoadOccupiedScheduleRows(env, { profile = null } = {}) {
     sortField: "Scheduled_Post_Date",
     sortDirection: "asc",
     filterFormula: studioOccupiedFilterFormula(now, profile),
-    fields: ["Platform", "Scheduled_Post_Date", "YouTube_Scheduled_Publish_At", "Studio_Scheduled_At", "Publish_Status", "Studio_Output_Type", "Format", "Content_Profile", "Brand"],
+    // Platform Outputs has Content_Profile (lookup) but no Brand field.
+    // Requesting Brand 422s Airtable and 500s calendar Save Schedule.
+    fields: ["Platform", "Scheduled_Post_Date", "YouTube_Scheduled_Publish_At", "Studio_Scheduled_At", "Publish_Status", "Studio_Output_Type", "Format", "Content_Profile"],
   }).then((rows) => {
     cache.at = Date.now();
     cache.rows = rows || [];
@@ -7490,7 +7493,9 @@ async function studioLoadOccupiedScheduleRows(env, { profile = null } = {}) {
     return cache.rows;
   }).catch((error) => {
     cache.inflight = null;
-    throw error;
+    console.warn("occupied schedule occupancy read failed", error);
+    if (Array.isArray(cache.rows)) return cache.rows;
+    return [];
   });
   return cache.inflight;
 }
@@ -32838,7 +32843,7 @@ async function approveOutputRecordForPublishing(env, existing, note, stamp, payl
   const platform = String(f(record, "Platform") || "").trim();
   let occupiedMs = Array.isArray(options.occupiedMs) ? options.occupiedMs.slice() : null;
   if (!occupiedMs) {
-    const occupied = await studioLoadOccupiedSchedules(env, {
+    const occupied = await studioOccupiedSchedulesOrEmpty(env, {
       excludeIds: [id],
       profile: await item4ProductionProfileRecord(env, record).catch(() => null),
     });
@@ -32940,7 +32945,7 @@ async function approveAllOutputsForPublishing(request, env, authorization, ctx =
   const approved = [];
   const failed = [];
   const schedules = payload?.schedules && typeof payload.schedules === "object" ? payload.schedules : {};
-  const occupiedByPlatform = await studioLoadOccupiedSchedules(env, {
+  const occupiedByPlatform = await studioOccupiedSchedulesOrEmpty(env, {
     excludeIds: eligible.map((record) => record.id),
     profile,
   });
@@ -38387,10 +38392,6 @@ async function scheduleStudioPublishOutput(request, env, url, authorization, ctx
     || Boolean(f(existing, "Published_At"));
   if (published) throw new HttpError(409, "Published outputs cannot be rescheduled");
   const platform = String(f(existing, "Platform") || "").trim();
-  const occupied = await studioLoadOccupiedSchedules(env, {
-    excludeIds: [match[1]],
-    profile: await item4ProductionProfileRecord(env, existing).catch(() => null),
-  });
   const manualScheduleOverride = Boolean(
     payload?.manual_schedule_override === true
     && value
@@ -38400,6 +38401,14 @@ async function scheduleStudioPublishOutput(request, env, url, authorization, ctx
     payload?.publish_now === true
     && (!value || value.toLowerCase() === "immediate")
   );
+  // Calendar Save sends manual_schedule_override and keeps the exact slot.
+  // Occupancy is only for MAE auto-stamp; do not let a list 422/500 block Save.
+  const occupied = (manualScheduleOverride || publishNowImmediate)
+    ? {}
+    : await studioOccupiedSchedulesOrEmpty(env, {
+      excludeIds: [match[1]],
+      profile: await item4ProductionProfileRecord(env, existing).catch(() => null),
+    });
   const timeZone = await studioScheduleTimeZoneForRecord(env, existing, payload);
   const fields = studioPublishScheduleFields(
     { scheduled_post_date: value || "immediate", timezone: timeZone },

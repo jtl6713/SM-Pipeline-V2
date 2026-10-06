@@ -307,6 +307,8 @@ test("occupancy load windows the Airtable query and sorts nearest-first", () => 
   assert.match(loadFn, /"Studio_Output_Type"/);
   assert.match(loadFn, /"Format"/);
   assert.match(loadFn, /"Content_Profile"/);
+  assert.doesNotMatch(loadFn, /"Brand"/);
+  assert.match(loadFn, /occupied schedule occupancy read failed/);
   assert.match(worker, /function studioOccupiedFilterFormula/);
   assert.match(worker, /contentProfileFilterFormula\(profile\)/);
   assert.match(worker, /studioOccupiedRowMatchesProfile/);
@@ -321,7 +323,8 @@ test("Worker stamp paths use MAE not industry evening windows", () => {
   assert.match(worker, /from "\.\/mae-schedule\.mjs"/);
   assert.match(worker, /studio_mae_schedule_v1: true/);
   assert.match(worker, /studio_mae_profile_occupancy_v1: true/);
-  assert.match(worker, /0\.10\.460-mae-profile-occupancy/);
+  assert.match(worker, /studio_schedule_occupancy_fields_v1: true/);
+  assert.match(worker, /0\.10\.462-schedule-occupancy-fields/);
   assert.match(worker, /studioLoadPlanScheduleOccupancy/);
   assert.match(worker, /A stored 5:30 that lost its slot must be written/);
   assert.match(worker, /MAE_PRIORITY_SCHEDULE_WINDOWS/);
