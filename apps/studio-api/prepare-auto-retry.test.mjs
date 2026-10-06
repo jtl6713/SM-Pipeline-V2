@@ -35,7 +35,7 @@ test("Worker heal requeues Failed/Error leftovers like Retry remaining", () => {
   assert.match(worker, /Requeued by Quality Agent prepare heal/);
   assert.match(worker, /Studio_Variant_Status\}="Error"/);
   assert.match(worker, /Math\.min\(40,/);
-  assert.match(worker, /0.10.454-mae-gap-extras/);
+  assert.match(worker, /0.10.455-timeline-async-variants/);
   assert.match(worker, /item4HealIncompletePreparingVariants/);
 });
 
