@@ -260,7 +260,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.503-mae-gap-extras";
+  const BUILD_ID = "item4-0.6.504-compact-pipeline";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -17582,25 +17582,55 @@
 
 
   function pipelineFilterLabel(filter = pipelineViewFilter) {
-    if (filter === "active") return "Active outputs";
+    if (filter === "active") return "Active";
     if (filter === "attention") return "Needs attention";
     if (filter === "manual") return "Manual Action Required";
     if (filter === "failed") return "Failed";
     if (filter === "approval") return "Awaiting Approval";
+    if (filter === "rendering") return "Rendering";
+    if (filter === "approved") return "Approved";
+    if (filter === "scheduled") return "Scheduled";
     if (filter === "published") return "Published";
-    return "All outputs";
+    return "All";
   }
 
   function pipelineRecordMatchesFilter(record, filter = pipelineViewFilter) {
     const state = String(record?.studio_state || "");
+    const studio = String(pipelineStudioStateLabel(record) || state);
+    const render = String(pipelineRenderLabel(record) || record?.render_status || "");
+    const review = String(record?.review_status || "");
+    const publish = String(pipelinePublishStatusLabel(record) || record?.publish_status || "");
     if (!filter || filter === "all") return true;
-    if (filter === "published") return state === "Published";
+    if (filter === "published") return studio === "Published" || state === "Published";
     if (filter === "attention") return ["Failed", "Retry Pending", "Manual Action Required"].includes(state);
     if (filter === "manual") return state === "Manual Action Required";
-    if (filter === "failed") return state === "Failed";
+    if (filter === "failed") return state === "Failed" || /failed|error/i.test(render) || /failed|error/i.test(publish);
     if (filter === "approval") return creativeCanApproveForPublishing(record) && !pipelineRecordIsAzAutoQueue(record);
+    if (filter === "rendering") return pipelineOutputRenderInFlight(record) || /rendering|processing|queued/i.test(render);
+    if (filter === "scheduled") return pipelineRecordIsScheduled(record) || /scheduled/i.test(publish);
+    if (filter === "approved") {
+      if (pipelineRecordIsScheduled(record) || /published/i.test(studio)) return false;
+      return /approved/i.test(studio) || /approved/i.test(review) || /approved/i.test(String(record?.output_status || ""));
+    }
     if (filter === "active") return !["Published", "Skipped", "Failed"].includes(state);
     return true;
+  }
+
+  function pipelineQuickFilterCount(filter, records = pipelineOutputs) {
+    return (records || []).filter((record) => pipelineRecordMatchesFilter(record, filter)).length;
+  }
+
+  function updatePipelineQuickTabs(records = pipelineOutputs) {
+    document.querySelectorAll("[data-pipeline-quick-view]").forEach((button) => {
+      const filter = String(button.dataset.pipelineQuickView || "all");
+      const count = pipelineQuickFilterCount(filter, records);
+      button.classList.toggle("is-active", pipelineViewFilter === filter);
+      button.setAttribute("aria-pressed", pipelineViewFilter === filter ? "true" : "false");
+      const countNode = button.querySelector("[data-pipeline-quick-count]");
+      if (countNode) countNode.textContent = String(count);
+    });
+    const search = $("pipelineQuickSearch");
+    if (search && document.activeElement !== search) search.value = String(pipelineColumnFilters.output || "");
   }
 
   function clearPipelineColumnFilters() {
@@ -17831,8 +17861,16 @@
 
   function renderPipelineGroupTbody(group, pipelineRow, { isNewest = false, isArchived = false } = {}) {
     const open = isPipelineGroupExpanded(group.key, { isNewest, isArchived });
-    const label = pipelineContentGroupLabel(group.records);
+    const first = group.records[0] || {};
+    const content = pipelineContentRecordForGroup(group.records);
+    const contentNumber = String(content?.content_id ?? "").trim();
+    const title = String(content?.title || first.output_title || first.content_title || "Untitled content").trim();
     const groupReady = pipelineManualApprovableOutputs(group.records);
+    const destination = pipelineDestinationProgress(group.records);
+    const coverUrl = group.records.map((record) => phase6ThumbnailDownloadUrl(record)).find(Boolean) || "";
+    const cover = coverUrl
+      ? `<img class="pipeline-group-thumb" src="${escapeHtml(coverUrl)}" alt="" loading="lazy">`
+      : `<span class="pipeline-group-thumb pipeline-group-thumb-placeholder" aria-hidden="true">${escapeHtml(contentNumber || "•")}</span>`;
     const approveButton = `<button type="button" class="secondary-button pipeline-group-approve" data-pipeline-group-approve="${escapeHtml(group.key)}" title="${groupReady.length ? "Approve only the ready outputs in this content item" : "No outputs in this content item are waiting for approval"}" ${groupReady.length ? "" : "disabled"}>Approve all${groupReady.length ? ` (${groupReady.length})` : ""}</button>`;
     const nowMs = Date.now();
     const regeneratable = group.records.filter((record) => {
@@ -17842,8 +17880,13 @@
       const ms = Date.parse(iso);
       return Number.isFinite(ms) && ms > nowMs;
     });
-    const regenerateButton = `<button type="button" class="secondary-button pipeline-group-regenerate" data-pipeline-group-regenerate="${escapeHtml(group.key)}" title="${regeneratable.length ? "Regenerate future or unscheduled outputs for this content using the rolling 14-day Platform + Output Type rules" : "No future or unscheduled unpublished outputs are eligible"}" ${regeneratable.length ? "" : "disabled"}>Regenerate Schedule${regeneratable.length ? ` (${regeneratable.length})` : ""}</button>`;
-    const header = `<tr class="pipeline-group-row"><td colspan="9"><div class="pipeline-group-head"><button type="button" class="pipeline-group-toggle" data-pipeline-group-toggle="${escapeHtml(group.key)}" aria-expanded="${open ? "true" : "false"}"><span class="pipeline-group-chevron" aria-hidden="true">${open ? "▾" : "▸"}</span><span class="pipeline-group-title">${escapeHtml(label)}</span></button>${approveButton}${regenerateButton}</div></td></tr>`;
+    const regenerateButton = `<button type="button" class="secondary-button pipeline-group-regenerate" data-pipeline-group-regenerate="${escapeHtml(group.key)}" title="${regeneratable.length ? "Regenerate future or unscheduled outputs for this content using the rolling 14-day Platform + Output Type rules" : "No future or unscheduled unpublished outputs are eligible"}" ${regeneratable.length ? "" : "disabled"}>Regenerate${regeneratable.length ? ` (${regeneratable.length})` : ""}</button>`;
+    const groupMeta = [
+      `${group.records.length} output${group.records.length === 1 ? "" : "s"}`,
+      destination ? `${destination.done}/${destination.total} rendered` : "",
+    ].filter(Boolean).join(" · ");
+    const contentLabel = contentNumber ? `#${contentNumber} · ${title}` : title;
+    const header = `<tr class="pipeline-group-row"><td colspan="5"><div class="pipeline-group-head"><button type="button" class="pipeline-group-toggle" data-pipeline-group-toggle="${escapeHtml(group.key)}" aria-expanded="${open ? "true" : "false"}"><span class="pipeline-group-chevron" aria-hidden="true">${open ? "▾" : "▸"}</span>${cover}<span class="pipeline-group-copy"><span class="pipeline-group-title">${escapeHtml(contentLabel)}</span><span class="pipeline-group-meta">${escapeHtml(groupMeta)}</span></span></button><div class="pipeline-group-actions">${approveButton}${regenerateButton}</div></div></td></tr>`;
     return `<tbody class="pipeline-output-group${open ? "" : " is-collapsed"}${isArchived ? " pipeline-archived-group" : ""}" data-pipeline-group="${escapeHtml(group.key)}">${header}${group.records.map((row) => pipelineRow(row, group.records)).join("")}</tbody>`;
   }
 
@@ -17852,7 +17895,7 @@
     const itemCount = archivedGroups.length;
     const outputCount = archivedGroups.reduce((total, group) => total + group.records.length, 0);
     const sectionOpen = pipelineArchivedSectionOpen;
-    const banner = `<tbody class="pipeline-archived-section${sectionOpen ? "" : " is-collapsed"}" data-pipeline-archived-section><tr class="pipeline-archived-section-row"><td colspan="9"><button type="button" class="pipeline-archived-section-toggle" data-pipeline-archived-toggle aria-expanded="${sectionOpen ? "true" : "false"}"><span class="pipeline-group-chevron" aria-hidden="true">${sectionOpen ? "▾" : "▸"}</span><span class="pipeline-archived-section-title">Archived</span><span class="pipeline-archived-section-meta">${itemCount} content item${itemCount === 1 ? "" : "s"} · ${outputCount} output${outputCount === 1 ? "" : "s"}</span></button></td></tr></tbody>`;
+    const banner = `<tbody class="pipeline-archived-section${sectionOpen ? "" : " is-collapsed"}" data-pipeline-archived-section><tr class="pipeline-archived-section-row"><td colspan="5"><button type="button" class="pipeline-archived-section-toggle" data-pipeline-archived-toggle aria-expanded="${sectionOpen ? "true" : "false"}"><span class="pipeline-group-chevron" aria-hidden="true">${sectionOpen ? "▾" : "▸"}</span><span class="pipeline-archived-section-title">Archived</span><span class="pipeline-archived-section-meta">${itemCount} content item${itemCount === 1 ? "" : "s"} · ${outputCount} output${outputCount === 1 ? "" : "s"}</span></button></td></tr></tbody>`;
     const groups = sectionOpen
       ? archivedGroups.map((group) => renderPipelineGroupTbody(group, pipelineRow, { isArchived: true })).join("")
       : "";
@@ -17932,49 +17975,138 @@
     return title ? `${idLabel} · ${title}` : idLabel;
   }
 
+  function pipelineAdvancedFilterMarkup() {
+    const fields = [
+      ["platform", "Platform"],
+      ["type", "Type / ratio"],
+      ["state", "Studio state"],
+      ["render", "Render"],
+      ["review", "Review"],
+      ["publish", "Publish"],
+      ["progress", "Progress"],
+      ["creative", "Creative"],
+    ];
+    const filters = fields.map(([key, label]) => `<div class="pipeline-advanced-filter-field"><span>${escapeHtml(label)}</span>${pipelineColumnFilterControl(key, label)}</div>`).join("");
+    const sortOptions = [
+      ["output", "Output"],
+      ["platform", "Platform"],
+      ["type", "Type / ratio"],
+      ["state", "Studio state"],
+      ["render", "Render"],
+      ["review", "Review"],
+      ["publish", "Publish"],
+      ["progress", "Progress"],
+    ].map(([key, label]) => `<option value="${key}"${pipelineSort.key === key ? " selected" : ""}>${escapeHtml(label)}</option>`).join("");
+    return `${filters}<div class="pipeline-advanced-filter-field"><span>Sort by</span><select id="pipelineCompactSortKey">${sortOptions}</select></div><div class="pipeline-advanced-filter-field"><span>Direction</span><select id="pipelineCompactSortDir"><option value="desc"${pipelineSort.dir === "desc" ? " selected" : ""}>Descending</option><option value="asc"${pipelineSort.dir === "asc" ? " selected" : ""}>Ascending</option></select></div><button type="button" class="secondary-button pipeline-filter-reset" id="pipelineAdvancedFilterClear">Clear filters</button>`;
+  }
+
+  function renderPipelineAdvancedFilters() {
+    const body = $("pipelineAdvancedFilterBody");
+    if (!body) return;
+    body.innerHTML = pipelineAdvancedFilterMarkup();
+    body.querySelectorAll("[data-pipeline-col-filter]").forEach((control) => {
+      const apply = () => {
+        const key = control.dataset.pipelineColFilter;
+        if (!key) return;
+        pipelineColumnFilters[key] = control.value || "";
+        renderOutputsTable($("outputsList"), pipelineOutputs);
+      };
+      if (control.tagName === "INPUT") control.addEventListener("input", apply);
+      else control.addEventListener("change", apply);
+    });
+    body.querySelector("#pipelineCompactSortKey")?.addEventListener("change", (event) => {
+      pipelineSort.key = event.currentTarget.value || "output";
+      renderOutputsTable($("outputsList"), pipelineOutputs);
+    });
+    body.querySelector("#pipelineCompactSortDir")?.addEventListener("change", (event) => {
+      pipelineSort.dir = event.currentTarget.value === "asc" ? "asc" : "desc";
+      renderOutputsTable($("outputsList"), pipelineOutputs);
+    });
+    body.querySelector("#pipelineAdvancedFilterClear")?.addEventListener("click", () => {
+      clearPipelineColumnFilters();
+      const search = $("pipelineQuickSearch");
+      if (search) search.value = "";
+      renderOutputsTable($("outputsList"), pipelineOutputs);
+    });
+  }
+
+  function pipelinePlatformCode(platform) {
+    const key = String(platform || "").trim().toLowerCase();
+    if (key === "instagram") return "IG";
+    if (key === "facebook") return "FB";
+    if (key === "tiktok") return "TT";
+    if (key === "youtube") return "YT";
+    return String(platform || "?").slice(0, 2).toUpperCase();
+  }
+
+  function pipelineCompactStatusMarkup(record) {
+    const render = String(pipelineRenderLabel(record) || "—");
+    const review = String(record?.review_status || "—");
+    const publish = String(pipelinePublishStatusLabel(record) || "—");
+    return `<div class="pipeline-status-stack">${badge(pipelineStudioStateLabel(record))}<div class="pipeline-status-detail"><span title="Render status">${escapeHtml(render)}</span><span title="Review status">${escapeHtml(review)}</span><span title="Publish status">${escapeHtml(publish)}</span></div>${pipelineTiktokCompleteCell(record)}${pipelineYoutubeCompleteCell(record)}</div>`;
+  }
+
   function renderOutputsTable(target, records) {
     phase6HideTooltip();
     const isPipeline = target?.id === "outputsList";
     const isDashboard = target?.id === "recentOutputs";
+    if (isPipeline) {
+      updatePipelineQuickTabs(records);
+      renderPipelineAdvancedFilters();
+    }
     const source = isPipeline ? filteredPipelineRecords(records) : records;
     if (isPipeline) updatePipelineFilterBar(source.length);
     if (!source.length) {
       const filteredEmpty = isPipeline && ((pipelineViewFilter && pipelineViewFilter !== "all") || pipelineColumnFiltersActive());
       target.innerHTML = filteredEmpty
-        ? `<div class="empty">No outputs match the current filters.</div>`
-        : '<div class="empty">No Platform Output records were returned.</div>';
+        ? `<div class="empty pipeline-compact-empty">No outputs match the current filters.</div>`
+        : '<div class="empty pipeline-compact-empty">No Platform Output records were returned.</div>';
       return;
     }
     const sortedSource = isDashboard ? sortedPipelineRecords(source) : source;
+
+    const dashboardRow = (r, groupRecords) => {
+      return `<tr><td><div class="title-cell">${escapeHtml(pipelineOutputListTitle(r))}</div></td><td>${value(r.platform)}</td><td>${badge(pipelineStudioStateLabel(r))}</td><td>${value(pipelineRenderLabel(r))}</td><td>${value(r.review_status)}</td><td>${value(pipelinePublishStatusLabel(r))}</td><td>${pipelineProgressCell(r, groupRecords)}</td></tr>`;
+    };
+
     const pipelineRow = (r, groupRecords) => {
-      const postLink = r.platform_post_url ? `<a class="table-link" target="_blank" rel="noopener" href="${escapeHtml(r.platform_post_url)}">Open post ↗</a>` : "";
-      const coverDownloadUrl = phase6ThumbnailDownloadUrl(r);
-      const coverLink = coverDownloadUrl
-        ? `<a class="table-link pipeline-cover-download" target="_blank" rel="noopener" download href="${escapeHtml(coverDownloadUrl)}">Download Cover</a>`
-        : "";
-      const actionLinks = postLink || coverLink
-        ? `<div class="pipeline-post-action-links">${postLink}${postLink && coverLink ? "<br>" : ""}${coverLink}</div>`
-        : "";
-      const timing = studioOutputTimingLabel(r);
-      const typeCell = isPipeline ? `<td><div>${value(r.platform_output_type || r.format)}</div><div class="subtle">${value(r.aspect_ratio)}</div></td>` : "";
       const canOpen = Boolean(r.creative_available);
       const blocked = ["blocked", "escalated"].includes(String(r.studio_production_job?.step || "")) || Boolean(r.studio_job_error);
       const notReadyLabel = String(r.studio_production_job?.step || "") === "escalated"
         ? "Escalated"
         : blocked
           ? "Blocked"
-          : "Not ready yet";
+          : "Not ready";
       const notReadyTitle = escapeHtml(String(r.studio_job_error || r.studio_job_label || PHASE6_BUTTON_HELP["Not ready yet"]));
       const ready = /ready for review/i.test(String(r.studio_state || r.output_status || r.review_status || ""));
       const scheduleValue = pipelineScheduleInputValue(r);
-      const scheduleCell = isPipeline && (ready || creativeCanReschedule(r))
-        ? `<div class="pipeline-schedule-cell"><span class="field-label">Scheduled time</span><div class="pipeline-schedule-controls"><input type="datetime-local" data-pipeline-schedule="${escapeHtml(r.id)}" value="${escapeHtml(scheduleValue)}" title="Choose the exact publish time, then Save."><button type="button" class="secondary-button pipeline-calendar-button" data-pipeline-schedule-calendar="${escapeHtml(r.id)}">📅 Calendar</button><button type="button" class="secondary-button pipeline-schedule-save" data-pipeline-schedule-save="${escapeHtml(r.id)}">Save</button></div><span data-pipeline-schedule-status aria-live="polite"></span><div class="pipeline-schedule-suggest" data-pipeline-schedule-suggest="${escapeHtml(r.id)}"></div><button type="button" class="secondary-button" data-pipeline-use-suggested="${escapeHtml(r.id)}" hidden>Use suggested</button></div>`
+      const editableSchedule = ready || creativeCanReschedule(r);
+      const scheduleIso = studioEffectiveScheduleIso(r);
+      const scheduleCell = editableSchedule
+        ? `<div class="pipeline-schedule-cell pipeline-schedule-cell-compact"><div class="pipeline-schedule-controls"><input type="datetime-local" data-pipeline-schedule="${escapeHtml(r.id)}" value="${escapeHtml(scheduleValue)}" aria-label="Scheduled time for Platform Output ${escapeHtml(String(r.output_id || ""))}" title="Choose the exact publish time, then Save."><button type="button" class="secondary-button pipeline-calendar-button" data-pipeline-schedule-calendar="${escapeHtml(r.id)}" title="Open calendar" aria-label="Open calendar">📅</button><button type="button" class="secondary-button pipeline-schedule-save" data-pipeline-schedule-save="${escapeHtml(r.id)}">Save</button></div><span class="pipeline-schedule-save-state" data-pipeline-schedule-status aria-live="polite"></span><div class="pipeline-schedule-suggest" data-pipeline-schedule-suggest="${escapeHtml(r.id)}"></div><button type="button" class="text-button pipeline-use-suggested" data-pipeline-use-suggested="${escapeHtml(r.id)}" hidden>Use suggested</button></div>`
+        : `<span class="pipeline-schedule-readonly">${scheduleIso ? escapeHtml(formatStudioDateTime(scheduleIso)) : "—"}</span>`;
+      const platform = String(r.platform || "Platform");
+      const platformSlug = platform.toLowerCase().replace(/[^a-z0-9]+/g, "-");
+      const outputType = String(r.platform_output_type || r.format || "—");
+      const ratio = String(r.aspect_ratio || "").trim();
+      const timing = studioOutputTimingLabel(r);
+      const detailBits = [outputType, ratio, timing].filter(Boolean);
+      const postLink = r.platform_post_url
+        ? `<a class="table-link" target="_blank" rel="noopener" href="${escapeHtml(r.platform_post_url)}">Open post ↗</a>`
         : "";
-      const creativeCell = isPipeline ? `<td class="creative-output-action-cell"><button type="button" class="creative-button" data-creative-output-id="${escapeHtml(r.id)}" ${canOpen ? "" : "disabled"} title="${canOpen ? "" : notReadyTitle}">${canOpen ? "Open review" : notReadyLabel}</button>${scheduleCell}</td>` : "";
-      const rowOpen = isPipeline && canOpen ? ` class="pipeline-open-row" data-open-output-id="${escapeHtml(r.id)}" tabindex="0"` : "";
-      const subtleParts = [r.publish_method, timing].filter(Boolean).map((part) => escapeHtml(String(part)));
-      return `<tr${rowOpen}><td><div class="title-cell">${escapeHtml(pipelineOutputListTitle(r))}</div><div class="subtle">${subtleParts.join(" · ") || "—"}</div>${actionLinks}</td><td>${value(r.platform)}</td>${typeCell}<td>${badge(pipelineStudioStateLabel(r))}${isPipeline ? `${pipelineTiktokCompleteCell(r)}${pipelineYoutubeCompleteCell(r)}` : ""}</td><td>${value(pipelineRenderLabel(r))}</td><td>${value(r.review_status)}</td><td>${value(pipelinePublishStatusLabel(r))}</td><td>${pipelineProgressCell(r, groupRecords)}</td>${creativeCell}</tr>`;
+      const coverDownloadUrl = phase6ThumbnailDownloadUrl(r);
+      const coverLink = coverDownloadUrl
+        ? `<a class="table-link pipeline-cover-download" target="_blank" rel="noopener" download href="${escapeHtml(coverDownloadUrl)}">Download cover</a>`
+        : "";
+      const moreMenu = postLink || coverLink
+        ? `<details class="pipeline-row-more"><summary title="More actions" aria-label="More actions">•••</summary><div class="pipeline-row-more-menu">${postLink}${coverLink}</div></details>`
+        : "";
+      const rowOpen = canOpen
+        ? ` class="pipeline-open-row pipeline-compact-row" data-open-output-id="${escapeHtml(r.id)}" data-platform="${escapeHtml(platformSlug)}" tabindex="0"`
+        : ` class="pipeline-compact-row" data-platform="${escapeHtml(platformSlug)}"`;
+      return `<tr${rowOpen}><td class="pipeline-output-platform-cell"><div class="pipeline-platform-line"><span class="pipeline-platform-pill" data-platform="${escapeHtml(platformSlug)}"><b>${escapeHtml(pipelinePlatformCode(platform))}</b><span>${escapeHtml(platform)}</span></span><strong>Output ${escapeHtml(String(r.output_id || ""))}</strong></div><div class="pipeline-output-detail">${detailBits.map((part) => `<span>${escapeHtml(String(part))}</span>`).join("")}</div></td><td class="pipeline-status-cell">${pipelineCompactStatusMarkup(r)}</td><td class="pipeline-progress-cell">${pipelineProgressCell(r, groupRecords)}</td><td class="pipeline-schedule-column">${scheduleCell}</td><td class="pipeline-actions-cell"><button type="button" class="creative-button pipeline-open-review" data-creative-output-id="${escapeHtml(r.id)}" ${canOpen ? "" : "disabled"} title="${canOpen ? "Open creative review" : notReadyTitle}">${canOpen ? "Open" : escapeHtml(notReadyLabel)}</button>${moreMenu}</td></tr>`;
     };
+
     const body = isPipeline
       ? (() => {
           const { active, archived } = partitionPipelineGroups(source);
@@ -17982,15 +18114,18 @@
           const archivedBody = renderPipelineArchivedSection(archived, pipelineRow);
           return `${activeBody}${archivedBody}`;
         })()
-      : `<tbody>${sortedSource.map((row) => pipelineRow(row, sortedSource.filter((peer) => pipelineContentGroupKey(peer) === pipelineContentGroupKey(row)))).join("")}</tbody>`;
+      : `<tbody>${sortedSource.map((row) => dashboardRow(row, sortedSource.filter((peer) => pipelineContentGroupKey(peer) === pipelineContentGroupKey(row)))).join("")}</tbody>`;
+
     const head = isPipeline
-      ? `<tr>${pipelineColumnHeader("output", "Output", { filterable: true })}${pipelineColumnHeader("platform", "Platform", { filterable: true })}${pipelineColumnHeader("type", "Type / ratio", { filterable: true })}${pipelineColumnHeader("state", "Studio state", { filterable: true })}${pipelineColumnHeader("render", "Render", { filterable: true })}${pipelineColumnHeader("review", "Review", { filterable: true })}${pipelineColumnHeader("publish", "Publish", { filterable: true })}${pipelineColumnHeader("progress", "Progress", { filterable: true })}${pipelineColumnHeader("creative", "Creative", { sortable: false, filterable: true })}</tr>`
+      ? `<tr><th>${pipelineSortHeader("platform", "Platform / output")}</th><th>${pipelineSortHeader("state", "Status")}</th><th>${pipelineSortHeader("progress", "Progress")}</th><th><span class="pipeline-col-label">Schedule</span></th><th><span class="pipeline-col-label">Actions</span></th></tr>`
       : isDashboard
       ? `<tr><th>${pipelineSortHeader("output", "Output")}</th><th>${pipelineSortHeader("platform", "Platform")}</th><th>${pipelineSortHeader("state", "Studio state")}</th><th>${pipelineSortHeader("render", "Render")}</th><th>${pipelineSortHeader("review", "Review")}</th><th>${pipelineSortHeader("publish", "Publish")}</th><th>${pipelineSortHeader("progress", "Progress")}</th></tr>`
       : `<tr><th>Output</th><th>Platform</th><th>Studio state</th><th>Render</th><th>Review</th><th>Publish</th><th>Progress</th></tr>`;
+
     rememberPipelineScheduleDrafts();
-    const tableClass = isDashboard ? "data-table dashboard-output-table" : "data-table";
+    const tableClass = isPipeline ? "data-table pipeline-compact-table" : isDashboard ? "data-table dashboard-output-table" : "data-table";
     target.innerHTML = `<table class="${tableClass}"><thead>${head}</thead>${body}</table>`;
+
     if (isPipeline || isDashboard) {
       target.querySelectorAll("[data-pipeline-sort]").forEach((button) => {
         button.addEventListener("click", (event) => {
@@ -18007,27 +18142,7 @@
         });
       });
     }
-    if (isPipeline) {
-      target.querySelectorAll("[data-pipeline-col-filter]").forEach((control) => {
-        control.addEventListener("click", (event) => event.stopPropagation());
-        control.addEventListener("mousedown", (event) => event.stopPropagation());
-        const apply = () => {
-          const key = control.dataset.pipelineColFilter;
-          if (!key) return;
-          pipelineColumnFilters[key] = control.value || "";
-          const caret = control.selectionStart;
-          renderOutputsTable(target, pipelineOutputs);
-          const next = target.querySelector(`[data-pipeline-col-filter="${key}"]`);
-          if (!next) return;
-          next.focus();
-          if (next.tagName === "INPUT" && typeof caret === "number" && typeof next.setSelectionRange === "function") {
-            try { next.setSelectionRange(caret, caret); } catch (_) { /* search inputs may reject a range */ }
-          }
-        };
-        if (control.tagName === "INPUT") control.addEventListener("input", apply);
-        else control.addEventListener("change", apply);
-      });
-    }
+
     if (isPipeline) {
       target.querySelectorAll("[data-pipeline-archived-toggle]").forEach((button) => {
         button.addEventListener("click", (event) => {
@@ -18058,7 +18173,7 @@
           regeneratePipelineContentSchedule(key, button).catch((error) => {
             button.dataset.busy = "false";
             button.disabled = false;
-            button.textContent = "Regenerate Schedule";
+            button.textContent = "Regenerate";
             setPipelineLiveHint(error.message || "Regenerate schedule failed");
           });
         });
@@ -18097,11 +18212,11 @@
       refreshPipelineScheduleSuggestions(source);
       target.querySelectorAll("[data-open-output-id]").forEach((row) => {
         row.addEventListener("click", (event) => {
-          if (event.target.closest("a, button, input, select, textarea, label, .pipeline-schedule-cell, .pipeline-tiktok-complete, .pipeline-tiktok-resend")) return;
+          if (event.target.closest("a, button, input, select, textarea, label, details, summary, .pipeline-row-more, .pipeline-schedule-cell, .pipeline-tiktok-complete, .pipeline-tiktok-resend")) return;
           openCreativeEditor(row.dataset.openOutputId);
         });
         row.addEventListener("keydown", (event) => {
-          if (event.target.closest("input, select, textarea")) return;
+          if (event.target.closest("input, select, textarea, details, summary")) return;
           if (event.key !== "Enter" && event.key !== " ") return;
           event.preventDefault();
           openCreativeEditor(row.dataset.openOutputId);
@@ -22234,9 +22349,23 @@
     approveAllPipelineOutputs().catch((e) => setPipelineLiveHint(e.message || "Approve All failed"));
   });
   restorePipelineUseDefaultSchedules();
+  document.querySelectorAll("[data-pipeline-quick-view]").forEach((button) => {
+    button.addEventListener("click", () => {
+      pipelineViewFilter = String(button.dataset.pipelineQuickView || "all");
+      pipelineOpenSingleOnLoad = false;
+      renderOutputsTable($("outputsList"), pipelineOutputs);
+    });
+  });
+  $("pipelineQuickSearch")?.addEventListener("input", (event) => {
+    pipelineColumnFilters.output = String(event.currentTarget.value || "");
+    pipelineOpenSingleOnLoad = false;
+    renderOutputsTable($("outputsList"), pipelineOutputs);
+  });
   $("pipelineFilterClear")?.addEventListener("click", () => {
     pipelineViewFilter = "all";
     clearPipelineColumnFilters();
+    const search = $("pipelineQuickSearch");
+    if (search) search.value = "";
     pipelineOpenSingleOnLoad = false;
     const target = $("outputsList");
     if (target) renderOutputsTable(target, pipelineOutputs);
