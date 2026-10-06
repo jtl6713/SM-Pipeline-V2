@@ -3600,3 +3600,15 @@ body.platform-calendar-open { overflow: hidden; }
     background:var(--pipeline-card-shade)!important;
   }
 }
+
+
+/* Home scheduled platform low-count warning */
+#studioHubScheduled li:has(.studio-hub-scheduled-platform:first-child){
+  transition:color .15s ease;
+}
+#studioHubScheduled li.platform-count-low,
+#studioHubScheduled li.platform-count-low .studio-hub-scheduled-platform,
+#studioHubScheduled li.platform-count-low .studio-hub-scheduled-count{
+  color:#b42318!important;
+  font-weight:800;
+}
