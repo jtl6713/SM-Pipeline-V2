@@ -5154,7 +5154,7 @@ var worker_default = {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.457-timeline-fast-return",
+          version: "0.10.458-timeline-writer-fallback",
           studio_mae_schedule_v1: true,
           studio_desk_inventory_v1: true,
           studio_desk_activity_v1: true,
@@ -24126,7 +24126,16 @@ async function createIdeaTimedScriptRoute(request, env, url, authorization, ctx 
   if (picked.selected.length < 2) {
     throw new HttpError(409, "No matching library stills yet. Add a place name to the idea or attach photos, then try again.");
   }
-  const writer = await pulseIdeaTimedScriptWriter(env, idea, picked.catalog.length >= 4 ? picked.catalog : picked.selected);
+  // Timeline creation must remain available even when the preferred AI provider is
+  // unavailable/misconfigured. The selected library stills are already authoritative,
+  // so fall back to deterministic scene writing instead of surfacing a provider 500.
+  let writer;
+  try {
+    writer = await pulseIdeaTimedScriptWriter(env, idea, picked.catalog.length >= 4 ? picked.catalog : picked.selected);
+  } catch (error) {
+    console.warn("idea timeline writer failed; using deterministic fallback", idea.id, error);
+    writer = { source: "deterministic-fallback", scenes: [] };
+  }
   const assigned = assignScenesToStills(writer.scenes, picked.catalog.length ? picked.catalog : picked.selected).filter((scene) => String(scene.voiceover_text || "").trim() && String(scene.media_asset_id || scene.asset_id || "").trim());
   const scenes = assigned.length >= 2 ? assigned : fallbackScenesFromStills({
     title,
