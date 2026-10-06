@@ -260,7 +260,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.500-pipeline-card-shading-fix";
+  const BUILD_ID = "item4-0.6.501-swap-still";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -4545,7 +4545,7 @@
         }).join("")}
       </div>
       ${issues.length ? `<div class="timed-script-issues">${issues.map((issue) => `<p>${escapeHtml(issue)}</p>`).join("")}</div>` : ""}
-      <p class="ez-option-hint">Import times are planning hints. After voiceover, each still lasts as long as that scene's narration. Beat sync and pacing will not override those spoken lengths. Drag a still onto a scene, or choose it from the list.</p>
+      <p class="ez-option-hint">Import times are planning hints. After voiceover, each still lasts as long as that scene's narration. Beat sync and pacing will not override those spoken lengths. Click a scene still to swap it from the library, drag a still onto a scene, or choose it from the list.</p>
       <div class="timed-script-pool" id="prTimedScriptPool">
         ${assets.map((asset, index) => {
           const assetId = String(asset.id || asset.media_asset_record_id || "").trim();
@@ -4567,7 +4567,7 @@
       })).join("");
       return `<details class="timed-script-scene ${assetId ? "" : "is-unresolved"} ${fit.status === "over" ? "is-over" : "is-ready"}">
         <summary>
-          <span class="timed-script-scene-thumb">${visual}</span>
+          <button type="button" class="timed-script-scene-thumb" data-timed-swap-scene="${index}" title="Swap still for scene ${index + 1}">${visual}</button>
           <span><strong>Scene ${index + 1} — ${escapeHtml(api.formatClock(segment.start_seconds))} → ${escapeHtml(api.formatClock(segment.end_seconds))} — ${Number(segment.duration_seconds).toFixed(1)} sec</strong><small>${escapeHtml(fit.message)}</small></span>
         </summary>
         <div class="timed-script-scene-body" data-timed-scene="${index}" data-timed-drop="${index}">
@@ -4577,6 +4577,7 @@
           <label class="form-field"><span>Still</span><select data-timed-field="asset">${options}</select></label>
           <p class="timed-script-visual"><span>Suggested visual</span> ${escapeHtml(segment.suggested_visual || "None")}</p>
           <div class="timed-script-scene-actions">
+            <button type="button" class="secondary-button" data-timed-action="swap">Swap still</button>
             <button type="button" class="secondary-button" data-timed-action="rate" title="Speeds the whole narration track up slightly so this scene can fit. The words stay the same.">Increase speech rate slightly</button>
             <button type="button" class="secondary-button" data-timed-action="extend">Extend this scene</button>
             <button type="button" class="secondary-button" data-timed-action="up">Move earlier</button>
@@ -4595,6 +4596,13 @@
       card.addEventListener("dragstart", (event) => {
         event.dataTransfer?.setData("text/plain", card.dataset.timedAsset || "");
         event.dataTransfer?.setData("application/x-studio-still", card.dataset.timedAsset || "");
+      });
+    });
+    host.querySelectorAll("[data-timed-swap-scene]").forEach((button) => {
+      button.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        openTimedScriptSwapStill(Number(button.dataset.timedSwapScene));
       });
     });
     host.querySelectorAll("[data-timed-drop]").forEach((zone) => {
@@ -4646,6 +4654,10 @@
         const segments = (productionTimedScript?.segments || []).map((segment) => ({ ...segment }));
         const action = button.dataset.timedAction;
         if (!segments[index]) return;
+        if (action === "swap") {
+          openTimedScriptSwapStill(index);
+          return;
+        }
         if (action === "rate") {
           segments[index].speech_rate = api.slightSpeechRate(segments[index]);
           commitTimedScript({ segments });
@@ -4716,6 +4728,247 @@
   function closeTimedScriptImporter() {
     const backdrop = $("prTimedScriptBackdrop");
     if (backdrop) backdrop.hidden = true;
+  }
+
+  let timedScriptSwapSceneIndex = null;
+  let swapStillItems = [];
+  let swapStillSelectedId = "";
+  let swapStillSuggestedIds = new Set();
+  let swapStillLoadSequence = 0;
+  let swapStillSearchTimer = 0;
+
+  function libraryItemIsPhotoStill(item) {
+    const kind = String(item?.media_kind || item?.kind || "").toLowerCase();
+    if (kind === "video") return false;
+    if (String(item?.mime_type || "").toLowerCase().startsWith("video/")) return false;
+    return Boolean(item?.id);
+  }
+
+  function setSwapStillMessage(text, className = "") {
+    const message = $("prSwapStillMessage");
+    if (!message) return;
+    message.textContent = text || "";
+    message.className = className ? `form-message ${className}` : "form-message";
+  }
+
+  function syncSwapStillApply() {
+    const button = $("prSwapStillApply");
+    if (button) button.disabled = !String(swapStillSelectedId || "").trim();
+  }
+
+  function renderSwapStillPicker() {
+    const grid = $("prSwapStillGrid");
+    const hint = $("prSwapStillHint");
+    if (!grid) return;
+    const phrase = libraryQuotedPhrase($("prSwapStillSearch")?.value || "");
+    const selected = swapStillSelectedId ? new Set([swapStillSelectedId]) : new Set();
+    grid.innerHTML = renderLibraryPickerSections(
+      swapStillItems,
+      selected,
+      swapStillSuggestedIds,
+      "data-swap-still-id",
+      { flat: Boolean(phrase) }
+    );
+    if (hint) {
+      const chosen = swapStillItems.find((item) => item.id === swapStillSelectedId);
+      hint.textContent = chosen
+        ? `Selected “${chosen.name || chosen.id}”. Use this still to replace scene ${(Number(timedScriptSwapSceneIndex) || 0) + 1}.`
+        : (phrase
+          ? `${swapStillItems.length} named “${phrase}”. Tap one still to select it.`
+          : `${swapStillItems.length} library stills. Tap one, then use it for this scene.`);
+    }
+    syncSwapStillApply();
+    item4BindClipPlayers(grid);
+    bindLibraryPickerPreviews(grid, swapStillItems);
+  }
+
+  async function loadSwapStillLibrary(query = "") {
+    const sequence = ++swapStillLoadSequence;
+    const requestId = activeProductionRequest?.id;
+    const grid = $("prSwapStillGrid");
+    const hint = $("prSwapStillHint");
+    if (grid) grid.innerHTML = `<p class="idea-library-picker-hint">Loading library stills…</p>`;
+    if (hint) hint.textContent = "Loading library stills…";
+    const ideaId = activeProductionRequest?.idea_record_id || activeIdea?.id || null;
+    const q = String(query || "").trim();
+    const attachedItems = item4AttachedLibraryItems().filter(libraryItemIsPhotoStill);
+    let suggestionError = null;
+    let browseError = null;
+    const [ideaPack, browse] = await Promise.all([
+      ideaId
+        ? fetchIdeaLibrarySuggested(ideaId, q).catch((error) => {
+          suggestionError = error;
+          return { suggested: [], matches: [] };
+        })
+        : Promise.resolve({ suggested: [], matches: [] }),
+      fetchLibraryBrowse(q, ideaId).catch((error) => {
+        browseError = error;
+        return [];
+      }),
+    ]);
+    if (sequence !== swapStillLoadSequence || activeProductionRequest?.id !== requestId) return;
+    const suggested = (ideaPack.suggested || []).filter(libraryItemIsPhotoStill);
+    const matches = (ideaPack.matches || []).filter(libraryItemIsPhotoStill);
+    const browsePhotos = (browse || []).filter(libraryItemIsPhotoStill);
+    const quoted = libraryItemsForQuotedName(
+      mergeLibraryPickerItems(suggested, matches, [...attachedItems, ...browsePhotos]),
+      q
+    );
+    swapStillSuggestedIds = quoted.phrase
+      ? new Set()
+      : new Set([
+        ...attachedItems.map((item) => item.id),
+        ...suggested.map((item) => item.id).filter(Boolean),
+      ]);
+    swapStillItems = quoted.items.filter(libraryItemIsPhotoStill);
+    if (swapStillSelectedId && !swapStillItems.some((item) => item.id === swapStillSelectedId)) {
+      swapStillSelectedId = "";
+    }
+    renderSwapStillPicker();
+    if (!swapStillItems.length) {
+      const detail = suggestionError?.message || browseError?.message || (q
+        ? `No classified Drive stills matched “${q}”.`
+        : "No classified Drive stills were returned for this profile.");
+      if (grid) grid.innerHTML = `<p class="idea-library-picker-hint">${escapeHtml(detail)}</p>`;
+      setSwapStillMessage(detail, suggestionError || browseError ? "error-text" : "");
+    } else if (suggestionError || browseError) {
+      setSwapStillMessage(
+        `Library search partially failed: ${suggestionError?.message || browseError?.message}`,
+        "error-text"
+      );
+    } else {
+      setSwapStillMessage("");
+    }
+  }
+
+  async function openTimedScriptSwapStill(sceneIndex) {
+    if (!timedScriptActive()) {
+      setRequestMessage("Import or create a timed script first.", "error-text");
+      return;
+    }
+    if (!activeProductionRequest?.id) {
+      setRequestMessage("Open or create a Production request first.", "error-text");
+      return;
+    }
+    const index = Number(sceneIndex);
+    if (!Number.isInteger(index) || index < 0 || !productionTimedScript?.segments?.[index]) {
+      setRequestMessage("That scene is not available to swap.", "error-text");
+      return;
+    }
+    timedScriptSwapSceneIndex = index;
+    const segment = productionTimedScript.segments[index];
+    const currentAssetId = String(segment.asset_id || "").trim();
+    const currentAsset = productionStillAssets().find((asset) => {
+      const id = String(asset.id || asset.media_asset_record_id || "").trim();
+      return id && id === currentAssetId;
+    });
+    swapStillSelectedId = String(currentAsset?.media_asset_record_id || "").trim();
+    swapStillItems = [];
+    const label = $("prSwapStillSceneLabel");
+    if (label) {
+      label.textContent = currentAsset
+        ? `Scene ${index + 1} currently uses “${currentAsset.name || currentAsset.file_name || "this still"}”. Choose a replacement from the library.`
+        : `Scene ${index + 1} has no still yet. Choose one from the library.`;
+    }
+    const search = $("prSwapStillSearch");
+    if (search) search.value = "";
+    setSwapStillMessage("");
+    syncSwapStillApply();
+    const backdrop = $("prSwapStillBackdrop");
+    if (backdrop && backdrop.parentElement !== document.body) document.body.appendChild(backdrop);
+    if (backdrop) backdrop.hidden = false;
+    search?.focus();
+    try {
+      await loadSwapStillLibrary("");
+    } catch (error) {
+      setSwapStillMessage(error.message || "Could not load Drive library stills.", "error-text");
+      const grid = $("prSwapStillGrid");
+      if (grid) grid.innerHTML = `<p class="idea-library-picker-hint">${escapeHtml(error.message || "Could not load Drive library stills.")}</p>`;
+    }
+  }
+
+  function closeTimedScriptSwapStill() {
+    const backdrop = $("prSwapStillBackdrop");
+    if (backdrop) backdrop.hidden = true;
+    timedScriptSwapSceneIndex = null;
+    swapStillSelectedId = "";
+    swapStillItems = [];
+    setSwapStillMessage("");
+  }
+
+  async function applyTimedScriptSwapStill() {
+    const index = Number(timedScriptSwapSceneIndex);
+    const mediaId = String(swapStillSelectedId || "").trim();
+    if (!Number.isInteger(index) || index < 0 || !productionTimedScript?.segments?.[index]) {
+      setSwapStillMessage("That scene is not available to swap.", "error-text");
+      return;
+    }
+    if (!mediaId) {
+      setSwapStillMessage("Choose a still first.", "error-text");
+      return;
+    }
+    if (!activeProductionRequest?.id) {
+      setSwapStillMessage("Open the production request first.", "error-text");
+      return;
+    }
+    const button = $("prSwapStillApply");
+    const chosen = swapStillItems.find((item) => item.id === mediaId);
+    try {
+      if (button) {
+        button.disabled = true;
+        button.textContent = "Using…";
+      }
+      setSwapStillMessage("Attaching the still to this production…");
+      const attached = item4AttachedMediaIds();
+      if (!attached.has(mediaId)) {
+        const result = await api(`/api/production-requests/${encodeURIComponent(activeProductionRequest.id)}/assets/library`, {
+          method: "POST",
+          body: JSON.stringify({
+            media_asset_ids: [mediaId],
+            allow_video: false,
+            origin_kind: ezIntakeKind || "photos-and-clips",
+          }),
+          timeoutMs: 45000,
+        });
+        if (result?.record) {
+          activeProductionRequest = result.record;
+          populateProductionRequestForm(result.record);
+        }
+      }
+      await loadItem4Workspace(activeProductionRequest, { allowAssetChanges: true });
+      const master = (item4Workspace?.assets || []).find((asset) => {
+        return String(asset.media_asset_record_id || "").trim() === mediaId && !item4AssetLooksLikeVideo(asset);
+      });
+      const masterId = String(master?.id || master?.media_asset_record_id || "").trim();
+      if (!masterId) throw new Error("The replacement still attached, but Studio could not find it on this request.");
+      const segments = productionTimedScript.segments.map((segment) => ({ ...segment }));
+      segments[index] = {
+        ...segments[index],
+        asset_id: masterId,
+        suggested_visual: String(master?.name || chosen?.name || segments[index].suggested_visual || "").trim(),
+      };
+      commitTimedScript({ segments });
+      closeTimedScriptSwapStill();
+      const sceneLabel = `Scene ${index + 1}`;
+      if (productionRequestIsPromoted()) {
+        setRequestMessage(
+          `${sceneLabel} still swapped. Tap Render this script to rewrite narration and start again. This does not publish.`,
+          "success"
+        );
+      } else {
+        setRequestMessage(
+          `${sceneLabel} still swapped. Save when ready. This does not publish.`,
+          "success"
+        );
+      }
+    } catch (error) {
+      setSwapStillMessage(error.message || "Could not swap that still.", "error-text");
+    } finally {
+      if (button) {
+        button.textContent = "Use this still";
+        syncSwapStillApply();
+      }
+    }
   }
 
   function renderProductionFrameOverrides(status = item4Workspace) {
@@ -12486,6 +12739,33 @@
     renderTimedScriptReview();
   });
   $("prTimedScriptClose")?.addEventListener("click", closeTimedScriptImporter);
+  $("prSwapStillClose")?.addEventListener("click", closeTimedScriptSwapStill);
+  $("prSwapStillCancel")?.addEventListener("click", closeTimedScriptSwapStill);
+  $("prSwapStillApply")?.addEventListener("click", () => {
+    applyTimedScriptSwapStill().catch((error) => {
+      setSwapStillMessage(error.message || "Could not swap that still.", "error-text");
+    });
+  });
+  $("prSwapStillBackdrop")?.addEventListener("click", (event) => {
+    if (event.target === event.currentTarget) closeTimedScriptSwapStill();
+  });
+  $("prSwapStillGrid")?.addEventListener("click", (event) => {
+    if (event.target.closest("[data-item4-play], video, .item4-clip-duration")) return;
+    const card = event.target.closest("[data-swap-still-id]");
+    if (!card) return;
+    const id = String(card.dataset.swapStillId || "").trim();
+    if (!id) return;
+    swapStillSelectedId = swapStillSelectedId === id ? "" : id;
+    renderSwapStillPicker();
+  });
+  $("prSwapStillSearch")?.addEventListener("input", () => {
+    window.clearTimeout(swapStillSearchTimer);
+    swapStillSearchTimer = window.setTimeout(() => {
+      loadSwapStillLibrary($("prSwapStillSearch")?.value || "").catch((error) => {
+        setSwapStillMessage(error.message || "Library search failed.", "error-text");
+      });
+    }, 280);
+  });
   $("prTimedScriptBackdrop")?.addEventListener("click", (event) => {
     if (event.target === $("prTimedScriptBackdrop")) closeTimedScriptImporter();
   });
