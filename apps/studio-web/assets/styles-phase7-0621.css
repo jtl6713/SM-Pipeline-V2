@@ -4302,3 +4302,154 @@ body.platform-calendar-open { overflow: hidden; }
 .creative-tiktok-resend[hidden]{display:none!important}
 .creative-tiktok-resend .secondary-button{min-height:32px}
 .creative-tiktok-resend .subtle{margin:0}
+
+/* =========================================================
+   COLLAPSIBLE_NAV_V1_20261006 — collapsible left navigation
+   Mobile: off-canvas drawer (collapsed by default).
+   Desktop: optional collapse to reclaim horizontal space.
+   ========================================================= */
+.topbar-leading{
+  display:flex;
+  align-items:center;
+  gap:10px;
+  min-width:0;
+  flex:1;
+}
+.studio-nav-toggle{
+  flex:0 0 auto;
+  width:40px;
+  height:40px;
+  border:0;
+  border-radius:12px;
+  background:var(--hub-chip,#f4f7fb);
+  color:var(--hub-nav-ink,#012559);
+  display:inline-grid;
+  place-items:center;
+  cursor:pointer;
+  padding:0;
+}
+.studio-nav-toggle:hover{
+  background:var(--hub-nav-hover,#eef3fa);
+}
+.studio-nav-toggle:focus-visible{
+  outline:2px solid var(--teal,#0f766e);
+  outline-offset:2px;
+}
+.studio-nav-toggle-bars,
+.studio-nav-toggle-bars:before,
+.studio-nav-toggle-bars:after{
+  display:block;
+  width:16px;
+  height:2px;
+  border-radius:2px;
+  background:currentColor;
+  content:"";
+  transition:transform .18s ease, opacity .18s ease;
+}
+.studio-nav-toggle-bars{
+  position:relative;
+}
+.studio-nav-toggle-bars:before{
+  position:absolute;
+  top:-5px;
+  left:0;
+}
+.studio-nav-toggle-bars:after{
+  position:absolute;
+  top:5px;
+  left:0;
+}
+body.nav-open .studio-nav-toggle-bars{
+  background:transparent;
+}
+body.nav-open .studio-nav-toggle-bars:before{
+  top:0;
+  transform:rotate(45deg);
+}
+body.nav-open .studio-nav-toggle-bars:after{
+  top:0;
+  transform:rotate(-45deg);
+}
+.studio-nav-backdrop{
+  display:none;
+  border:0;
+  padding:0;
+  margin:0;
+  background:rgba(15,35,70,.34);
+  cursor:pointer;
+}
+@media(min-width:761px){
+  body.nav-collapsed .shell{
+    grid-template-columns:minmax(0,1fr);
+  }
+  body.nav-collapsed .sidebar{
+    display:none;
+  }
+  body.nav-collapsed .main{
+    padding-left:20px;
+  }
+}
+@media(max-width:760px){
+  .topbar-leading{gap:8px}
+  .studio-nav-toggle{
+    width:36px;
+    height:36px;
+    border-radius:10px;
+  }
+  .shell{
+    display:block;
+    position:relative;
+  }
+  .studio-nav-backdrop{
+    position:fixed;
+    inset:56px 0 0 0;
+    z-index:18;
+  }
+  body.nav-open .studio-nav-backdrop{
+    display:block;
+  }
+  body.nav-open{
+    overflow:hidden;
+  }
+  .sidebar{
+    position:fixed !important;
+    top:56px !important;
+    left:0;
+    bottom:0;
+    z-index:20;
+    width:min(280px,86vw);
+    max-width:86vw;
+    min-height:0 !important;
+    height:auto !important;
+    margin:0 !important;
+    padding:14px 12px max(18px,env(safe-area-inset-bottom)) !important;
+    border-radius:0 18px 18px 0 !important;
+    flex-direction:column !important;
+    flex-wrap:nowrap !important;
+    gap:6px !important;
+    overflow-x:hidden !important;
+    overflow-y:auto !important;
+    -webkit-overflow-scrolling:touch;
+    background:rgba(255,255,255,.98) !important;
+    box-shadow:12px 0 28px rgba(15,35,70,.16);
+    transform:translateX(-105%);
+    transition:transform .2s ease;
+    backdrop-filter:blur(16px);
+    -webkit-backdrop-filter:blur(16px);
+  }
+  body.nav-open .sidebar{
+    transform:translateX(0);
+  }
+  body.nav-collapsed .sidebar{
+    transform:translateX(-105%);
+  }
+  .sidebar .nav-item[data-page="music"]{display:flex !important}
+  .nav-item{
+    flex:0 0 auto;
+    width:100%;
+    white-space:normal;
+    text-align:left;
+    padding:11px 14px;
+    font-size:.9rem;
+  }
+}
