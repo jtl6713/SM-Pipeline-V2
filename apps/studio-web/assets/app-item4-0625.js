@@ -260,7 +260,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.512-collapsible-nav";
+  const BUILD_ID = "item4-0.6.513-tiktok-photo-sound-guard";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   const NAV_MOBILE_MQ = "(max-width: 760px)";
   let item4AssetStripSignature = "";
@@ -15350,6 +15350,19 @@
     return /manual action/i.test(String(record?.music_status || "")) ? "no" : "not_requested";
   }
 
+  function tiktokPhotoSoundRequired(record) {
+    if (String(record?.platform || "").trim().toLowerCase() !== "tiktok") return false;
+    const combined = [
+      record?.tiktok_draft_type,
+      record?.platform_output_type,
+      record?.studio_output_type,
+      record?.format,
+      record?.output_type,
+    ].map((value) => String(value || "").trim().toLowerCase()).join(" ");
+    if (/\bvideo\b/.test(combined) && !/(photo|carousel|slideshow)/.test(combined)) return false;
+    return /(photo|carousel|slideshow)/.test(combined);
+  }
+
   function youtubeNeedsUrlEntry(record) {
     if (String(record?.platform || "").trim().toLowerCase() !== "youtube") return false;
     if (record?.do_not_publish) return false;
@@ -15403,6 +15416,7 @@
     const live = $("creativeTiktokCompleteLive");
     const musicWrap = $("creativeTiktokMusicWrap");
     const music = $("creativeTiktokMusic");
+    const musicRequirement = $("creativeTiktokMusicRequirement");
     const input = $("creativeTiktokUrl");
     const resendWrap = $("creativeTiktokResendWrap");
     const resendButton = $("creativeTiktokResend");
@@ -15411,6 +15425,7 @@
     const tiktok = String(output?.platform || "").trim().toLowerCase() === "tiktok";
     const awaiting = tiktok && tiktokNeedsUrlEntry(output);
     const canResend = tiktok && tiktokNeedsDraftResend(output);
+    const photoSoundRequired = tiktok && tiktokPhotoSoundRequired(output);
     const posted = tiktok ? tiktokLiveUrl(output) : "";
     if (!tiktok || (!awaiting && !canResend && !posted)) {
       card.hidden = true;
@@ -15421,6 +15436,7 @@
       if (resendButton) resendButton.disabled = false;
       if (resendMessage) resendMessage.textContent = "";
       if (musicWrap) musicWrap.hidden = true;
+      if (musicRequirement) musicRequirement.hidden = true;
       input.value = "";
       return;
     }
@@ -15430,8 +15446,12 @@
     if (resendButton) resendButton.disabled = false;
     if (resendMessage && !canResend) resendMessage.textContent = "";
     live.hidden = awaiting || !posted;
-    if (musicWrap) musicWrap.hidden = !awaiting || !/manual action/i.test(String(output?.music_status || ""));
-    if (music && awaiting) music.value = tiktokMusicChoice(output);
+    if (musicWrap) musicWrap.hidden = !awaiting || !(photoSoundRequired || /manual action/i.test(String(output?.music_status || "")));
+    if (musicRequirement) musicRequirement.hidden = !awaiting || !photoSoundRequired;
+    if (music && awaiting) {
+      const current = tiktokMusicChoice(output);
+      music.value = photoSoundRequired && current !== "yes" ? "" : current;
+    }
     if (awaiting) input.value = posted;
     if (!awaiting && posted) {
       live.innerHTML = `Live post: <a class="table-link" target="_blank" rel="noopener" href="${escapeHtml(posted)}">Open TikTok ↗</a>`;
@@ -22781,14 +22801,20 @@
     const record = activeCreativeOutput;
     const id = activeCreativeOutputId || record?.id;
     const input = $("creativeTiktokUrl");
+    const music = $("creativeTiktokMusic");
     const button = $("creativeTiktokCompleteSave");
     if (!id || !input) return;
+    if (tiktokPhotoSoundRequired(record) && String(music?.value || "").trim().toLowerCase() !== "yes") {
+      phase6Message("Add a sound in TikTok before publishing this photo carousel, then confirm it here.", "error-text");
+      music?.focus();
+      return;
+    }
     if (button) button.disabled = true;
     try {
       phase6Message("Saving TikTok URL…");
       const result = await submitTiktokComplete(id, {
         url: input.value,
-        musicCompleted: $("creativeTiktokMusic")?.value,
+        musicCompleted: music?.value,
         record,
       });
       if (result?.record) {
