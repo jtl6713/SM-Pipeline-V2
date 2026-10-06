@@ -114,12 +114,14 @@ test("unique option lists stay sorted and collapse blanks", () => {
   );
 });
 
-test("Pipeline UI binds a filter control for every column header", () => {
+test("Pipeline UI keeps every column filter in the compact advanced filter panel", () => {
+  assert.match(app, /function pipelineAdvancedFilterMarkup\(/);
   assert.match(app, /data-pipeline-col-filter="\$\{escapeHtml\(key\)\}"/);
-  for (const key of PIPELINE_COLUMN_FILTER_KEYS) {
-    assert.match(app, new RegExp(`pipelineColumnHeader\\("${key}"`));
+  for (const key of PIPELINE_COLUMN_FILTER_KEYS.filter((key) => key !== "output")) {
+    assert.match(app, new RegExp(`\\["${key}",`));
   }
   assert.match(app, /pipelineColumnFilters/);
-  assert.match(html, /pipelineFilterClear/);
-  assert.match(html, /Type in Output or use the dropdown under each heading to filter/);
+  assert.match(html, /id="pipelineQuickSearch"/);
+  assert.match(html, /id="pipelineAdvancedFilters"/);
+  assert.match(html, /id="pipelineAdvancedFilterBody"/);
 });
