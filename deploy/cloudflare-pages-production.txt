@@ -38,3 +38,4 @@ Deploy UI 0.6.506 Pipeline color system. Collapsed content groups now show workf
 Deploy UI 0.6.507-approve-mae-keep. Approve all never silent-fails; keep saved schedules unless clash; MAE occupancy uses full platform calendar.
 Deploy UI 0.6.508-schedule-save-ready-review. Ready-for-review Open review Save schedule stays enabled; Pipeline schedule fields editable before Approve (Output 1795).
 Deploy UI 0.6.509 row-spanned Pipeline. Replace collapsible group rows with one content/image cell spanning aligned platform outputs; hide repeated schedule guidance while preserving suggestion hooks; retain per-content approve/regenerate, inline schedule editing, published locks, filters, calendar, and review actions.
+Deploy UI 0.6.509-rowspan-pipeline hermetic-pin + pages retry. Align compact/mae/color/schedule-save pins after schedule-save 0.6.508 landed under rowspan 0.6.509.
