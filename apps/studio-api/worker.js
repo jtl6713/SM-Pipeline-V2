@@ -15751,7 +15751,7 @@ function item4StripAssetFilenameCaptionText(value) {
   if (!text) return "";
   const generic = String.raw`(?:photo|image|still|slide|clip|video)(?:[ _-]*(?:#|no\\.?|number)?)?[ _-]*\\d+`;
   const featuringLine = new RegExp(String.raw`(?:^|\\n)\\s*Featuring\\s*:\\s*(?:[^\\n]*\\b${generic}\\b[^\\n]*)\\s*(?=\\n|$)`, "gi");
-  text = text.replace(featureingLine, "\n");
+  text = text.replace(featuringLine, "\n");
   const genericToken = new RegExp(String.raw`(?:^|[,;:]\\s*)\\b${generic}\\b(?=\\s*[,;.]|$)`, "gi");
   text = text.replace(genericToken, "");
   return text
