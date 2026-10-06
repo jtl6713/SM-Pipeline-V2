@@ -303,10 +303,14 @@ test("occupancy load windows the Airtable query and sorts nearest-first", () => 
   );
   assert.match(loadFn, /sortDirection: "asc"/);
   assert.doesNotMatch(loadFn, /sortDirection: "desc"/);
-  assert.match(loadFn, /studioOccupiedFilterFormula\(now\)/);
+  assert.match(loadFn, /studioOccupiedFilterFormula\(now, profile\)/);
   assert.match(loadFn, /"Studio_Output_Type"/);
   assert.match(loadFn, /"Format"/);
+  assert.match(loadFn, /"Content_Profile"/);
   assert.match(worker, /function studioOccupiedFilterFormula/);
+  assert.match(worker, /contentProfileFilterFormula\(profile\)/);
+  assert.match(worker, /studioOccupiedRowMatchesProfile/);
+  assert.match(worker, /studioOccupiedCacheKey/);
   assert.match(worker, /IS_AFTER\(\{\$\{field\}\},DATETIME_PARSE/);
   assert.match(worker, /IS_BEFORE\(\{\$\{field\}\},DATETIME_PARSE/);
   assert.match(worker, /"Scheduled_Post_Date", "YouTube_Scheduled_Publish_At", "Studio_Scheduled_At"/);
@@ -316,7 +320,8 @@ test("occupancy load windows the Airtable query and sorts nearest-first", () => 
 test("Worker stamp paths use MAE not industry evening windows", () => {
   assert.match(worker, /from "\.\/mae-schedule\.mjs"/);
   assert.match(worker, /studio_mae_schedule_v1: true/);
-  assert.match(worker, /0\.10\.454-mae-gap-extras/);
+  assert.match(worker, /studio_mae_profile_occupancy_v1: true/);
+  assert.match(worker, /0\.10\.460-mae-profile-occupancy/);
   assert.match(worker, /studioLoadPlanScheduleOccupancy/);
   assert.match(worker, /A stored 5:30 that lost its slot must be written/);
   assert.match(worker, /MAE_PRIORITY_SCHEDULE_WINDOWS/);
@@ -325,4 +330,30 @@ test("Worker stamp paths use MAE not industry evening windows", () => {
     /studioIndustryBestWindows\(platform, outputType\);\s*const iso = studioPickBalancedSuggestedIso\(industry\.windows/,
   );
   assert.match(worker, /maeIsBlackoutLocalTime\(existingMs, timeZone\)/);
+});
+
+test("1 AM NYC still picks today's 5:30, not tomorrow morning", () => {
+  const zone = "America/New_York";
+  const now = new Date("2026-10-06T05:58:00Z");
+  const iso = maePickBalancedSuggestedIso([], now, { occupiedMs: [], timeZone: zone });
+  const day = new Intl.DateTimeFormat("en-CA", {
+    timeZone: zone, year: "numeric", month: "2-digit", day: "2-digit",
+  }).format(new Date(iso));
+  const local = localParts(iso, zone);
+  assert.equal(day, "2026-10-06");
+  assert.equal(local.hour, 5);
+  assert.equal(local.minute, 30);
+});
+
+test("Chicago occupancy for today does not move an empty NYC calendar to tomorrow morning", () => {
+  const zone = "America/New_York";
+  const now = new Date("2026-10-06T14:00:00Z"); // 10:00 AM EDT, so 5:30 is past
+  const iso = maePickBalancedSuggestedIso([], now, { occupiedMs: [], timeZone: zone });
+  const day = new Intl.DateTimeFormat("en-CA", {
+    timeZone: zone, year: "numeric", month: "2-digit", day: "2-digit",
+  }).format(new Date(iso));
+  const local = localParts(iso, zone);
+  assert.equal(day, "2026-10-06");
+  assert.equal(local.hour, 11);
+  assert.equal(local.minute, 30);
 });

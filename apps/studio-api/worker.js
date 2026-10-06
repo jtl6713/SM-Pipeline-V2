@@ -503,8 +503,9 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.458-timeline-writer-fallback",
+          version: "0.10.460-mae-profile-occupancy",
           studio_mae_schedule_v1: true,
+          studio_mae_profile_occupancy_v1: true,
           studio_desk_inventory_v1: true,
           studio_desk_activity_v1: true,
           studio_tiktok_complete_v1: true,
@@ -4449,7 +4450,8 @@ async function syncProductionRequestOutputs(request, env, url, authorization) {
   const byKey = new Map(existing.map(row => [rowKey(row), row]));
 
   const now = new Date().toISOString();
-  const occupied = await studioLoadPlanScheduleOccupancy(env, { excludeRequestId: productionRequestId });
+  const occupancyProfile = await item4ProductionProfileRecord(env, parent).catch(() => null);
+  const occupied = await studioLoadPlanScheduleOccupancy(env, { excludeRequestId: productionRequestId, profile: occupancyProfile });
   const timeZone = await studioScheduleTimeZoneForRecord(env, parent, payload);
   const stamps = studioBuildSuggestedScheduleMap(planItems.map((item) => {
     const key = `${item.platform}::${item.output_type}`;
@@ -7408,7 +7410,27 @@ function studioOccupiedDateInWindowFormula(field, lookback, horizon) {
   return `AND({${field}}!="",IS_AFTER({${field}},DATETIME_PARSE("${lookback}")),IS_BEFORE({${field}},DATETIME_PARSE("${horizon}")))`;
 }
 
-function studioOccupiedFilterFormula(now = Date.now()) {
+function studioOccupiedLinkedIds(value) {
+  return arrayOrEmpty(value).map((item) => {
+    if (typeof item === "string") return item.trim();
+    return String(item?.id || "").trim();
+  }).filter((id) => /^rec[A-Za-z0-9]+$/.test(id));
+}
+
+function studioOccupiedCacheKey(profile) {
+  return String(profile?.id || "").trim() || "_all";
+}
+
+function studioOccupiedRowMatchesProfile(row, profile) {
+  if (!profile?.id) return true;
+  const profileIds = studioOccupiedLinkedIds(f(row, "Content_Profile"));
+  if (profileIds.includes(profile.id)) return true;
+  const brandId = studioFirstLinkedId(f(profile, "Brand"));
+  if (brandId && studioOccupiedLinkedIds(f(row, "Brand")).includes(brandId)) return true;
+  return false;
+}
+
+function studioOccupiedFilterFormula(now = Date.now(), profile = null) {
   const lookback = airtableFormulaEscape(new Date(now - STUDIO_OCCUPIED_LOOKBACK_MS - 1000).toISOString());
   const horizon = airtableFormulaEscape(new Date(now + STUDIO_OCCUPIED_HORIZON_MS).toISOString());
   const dates = ["Scheduled_Post_Date", "YouTube_Scheduled_Publish_At", "Studio_Scheduled_At"]
@@ -7417,13 +7439,25 @@ function studioOccupiedFilterFormula(now = Date.now()) {
   // DESC+250 used to fetch the farthest-future 250 rows; the 10-day client
   // filter then dropped them, so today's MAE slots looked empty and every new
   // NYC stamp piled onto 5:30 AM. Window the Airtable query and sort nearest-first.
-  return `AND({Test_Run_ID}=BLANK(),{Do_Not_Publish}=0,{Published_At}=BLANK(),OR(${dates},{Publish_Status}="Publishing",{Publish_Status}="Ready to Publish"))`;
+  // MAE occupancy is per Content Profile: Chicago's morning must not push a new
+  // NYC idea to tomorrow 5:30.
+  const base = `AND({Test_Run_ID}=BLANK(),{Do_Not_Publish}=0,{Published_At}=BLANK(),OR(${dates},{Publish_Status}="Publishing",{Publish_Status}="Ready to Publish"))`;
+  const profileFormula = contentProfileFilterFormula(profile);
+  return profileFormula ? `AND(${profileFormula},${base})` : base;
 }
 
-let studioOccupiedScheduleCache = { at: 0, rows: null, inflight: null };
+const studioOccupiedScheduleCaches = new Map();
+
+function studioOccupiedCacheSlot(profile) {
+  const key = studioOccupiedCacheKey(profile);
+  if (!studioOccupiedScheduleCaches.has(key)) {
+    studioOccupiedScheduleCaches.set(key, { at: 0, rows: null, inflight: null });
+  }
+  return studioOccupiedScheduleCaches.get(key);
+}
 
 function studioInvalidateOccupiedScheduleCache() {
-  studioOccupiedScheduleCache = { at: 0, rows: null, inflight: null };
+  studioOccupiedScheduleCaches.clear();
 }
 
 function studioOccupiedMsFromRow(row, now = Date.now()) {
@@ -7436,35 +7470,39 @@ function studioOccupiedMsFromRow(row, now = Date.now()) {
   return imminent ? now : null;
 }
 
-async function studioLoadOccupiedScheduleRows(env) {
+async function studioLoadOccupiedScheduleRows(env, { profile = null } = {}) {
   const now = Date.now();
-  if (studioOccupiedScheduleCache.rows && now - studioOccupiedScheduleCache.at < STUDIO_OCCUPIED_CACHE_MS) {
-    return studioOccupiedScheduleCache.rows;
+  const cache = studioOccupiedCacheSlot(profile);
+  if (cache.rows && now - cache.at < STUDIO_OCCUPIED_CACHE_MS) {
+    return cache.rows;
   }
-  if (studioOccupiedScheduleCache.inflight) return studioOccupiedScheduleCache.inflight;
-  studioOccupiedScheduleCache.inflight = listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
+  if (cache.inflight) return cache.inflight;
+  cache.inflight = listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
     limit: STUDIO_OCCUPIED_LIST_LIMIT,
     sortField: "Scheduled_Post_Date",
     sortDirection: "asc",
-    filterFormula: studioOccupiedFilterFormula(now),
-    fields: ["Platform", "Scheduled_Post_Date", "YouTube_Scheduled_Publish_At", "Studio_Scheduled_At", "Publish_Status", "Studio_Output_Type", "Format"],
+    filterFormula: studioOccupiedFilterFormula(now, profile),
+    fields: ["Platform", "Scheduled_Post_Date", "YouTube_Scheduled_Publish_At", "Studio_Scheduled_At", "Publish_Status", "Studio_Output_Type", "Format", "Content_Profile", "Brand"],
   }).then((rows) => {
-    studioOccupiedScheduleCache = { at: Date.now(), rows: rows || [], inflight: null };
-    return studioOccupiedScheduleCache.rows;
+    cache.at = Date.now();
+    cache.rows = rows || [];
+    cache.inflight = null;
+    return cache.rows;
   }).catch((error) => {
-    studioOccupiedScheduleCache.inflight = null;
+    cache.inflight = null;
     throw error;
   });
-  return studioOccupiedScheduleCache.inflight;
+  return cache.inflight;
 }
 
-async function studioLoadOccupiedSchedules(env, { excludeIds = [] } = {}) {
+async function studioLoadOccupiedSchedules(env, { excludeIds = [], profile = null } = {}) {
   const skip = new Set((excludeIds || []).filter(Boolean));
-  const rows = await studioLoadOccupiedScheduleRows(env);
+  const rows = await studioLoadOccupiedScheduleRows(env, { profile });
   const now = Date.now();
   const byPlatform = {};
   for (const row of rows || []) {
     if (skip.has(row.id)) continue;
+    if (!studioOccupiedRowMatchesProfile(row, profile)) continue;
     const platform = String(f(row, "Platform") || "").trim();
     if (!platform) continue;
     // IG/FB Stories may share a wall-clock slot and must not occupy the
@@ -8265,7 +8303,10 @@ async function item4SyncPlanOutputs(env, requestRecord, items, { schedules = nul
   // doing any broad schedule-occupancy reads. The final AZ approval path performs
   // its own conflict-aware scheduling, so an empty local occupancy map is safe here
   // and avoids exhausting the Worker subrequest budget while the output lock is held.
-  const occupied = finishedVideo ? {} : await studioLoadPlanScheduleOccupancy(env, { excludeRequestId: productionRequestId });
+  const occupied = finishedVideo ? {} : await studioLoadPlanScheduleOccupancy(env, {
+    excludeRequestId: productionRequestId,
+    profile: await item4ProductionProfileRecord(env, requestRecord).catch(() => null),
+  });
   const timeZone = await studioScheduleTimeZoneForRecord(env, requestRecord);
   const stamps = studioBuildSuggestedScheduleMap(uniqueItems.map((item) => {
     const key = `${item.platform}::${item.output_type}`;
@@ -9836,7 +9877,8 @@ async function azAutoApproveIfReady(env, requestId, options = {}) {
   // One occupancy scan for the batch (cached). MAE rotation in the profile
   // timezone fills M1 then A1 then E1 then M2. Industry evening windows and
   // +3h occupancy bumps are what used to land NYC at 12:00 AM / 1:00 AM.
-  const occupiedByPlatform = await studioOccupiedSchedulesOrEmpty(env);
+  const occupancyProfile = await item4ProductionProfileRecord(env, requestRecord).catch(() => null);
+  const occupiedByPlatform = await studioOccupiedSchedulesOrEmpty(env, { profile: occupancyProfile });
   const reservedAll = studioFlattenOccupiedByPlatform(occupiedByPlatform);
   const timeZone = await studioScheduleTimeZoneForRecord(env, requestRecord);
   const stamp = new Date().toISOString();
@@ -17333,9 +17375,9 @@ function studioBuildSuggestedScheduleMap(items, occupiedByPlatform = {}, now = n
   return maeBuildSuggestedScheduleMap(items, occupiedByPlatform, now, options);
 }
 
-async function studioOccupiedSchedulesOrEmpty(env) {
+async function studioOccupiedSchedulesOrEmpty(env, options = {}) {
   try {
-    return await studioLoadOccupiedSchedules(env);
+    return await studioLoadOccupiedSchedules(env, options);
   } catch (error) {
     console.warn("suggested schedule occupancy read failed", error);
     return {};
@@ -17356,22 +17398,27 @@ function studioDestinationScheduleStamp(current, key, stamps, _overrides) {
   return iso;
 }
 
-async function studioLoadPlanScheduleOccupancy(env, { excludeRequestId = "" } = {}) {
-  const occupied = await studioOccupiedSchedulesOrEmpty(env);
+async function studioLoadPlanScheduleOccupancy(env, { excludeRequestId = "", profile = null } = {}) {
+  const occupied = await studioOccupiedSchedulesOrEmpty(env, { profile });
   try {
     const now = Date.now();
     const lookback = airtableFormulaEscape(new Date(now - STUDIO_OCCUPIED_LOOKBACK_MS).toISOString());
     const horizon = airtableFormulaEscape(new Date(now + STUDIO_OCCUPIED_HORIZON_MS).toISOString());
+    const brandId = studioFirstLinkedId(f(profile, "Brand"));
+    const brandClause = brandId
+      ? `,FIND("${airtableFormulaEscape(brandId)}",ARRAYJOIN({Brand})&"")`
+      : "";
     const rows = await listRecords(env, PRODUCTION_REQUEST_OUTPUT_TABLE, {
       limit: 200,
       sortField: "Scheduled_At",
       sortDirection: "asc",
-      filterFormula: `AND({Enabled}=1,{Scheduled_At}!="",IS_AFTER({Scheduled_At},DATETIME_PARSE("${lookback}")),IS_BEFORE({Scheduled_At},DATETIME_PARSE("${horizon}")))`,
-      fields: ["Platform", "Output_Type", "Scheduled_At", "Production_Request"],
+      filterFormula: `AND({Enabled}=1,{Scheduled_At}!="",IS_AFTER({Scheduled_At},DATETIME_PARSE("${lookback}")),IS_BEFORE({Scheduled_At},DATETIME_PARSE("${horizon}"))${brandClause})`,
+      fields: ["Platform", "Output_Type", "Scheduled_At", "Production_Request", "Brand"],
     });
     for (const row of rows || []) {
       const requestIds = arrayOrEmpty(f(row, "Production_Request")).map((id) => String(id || "").trim());
       if (excludeRequestId && requestIds.includes(excludeRequestId)) continue;
+      if (brandId && !studioOccupiedLinkedIds(f(row, "Brand")).includes(brandId)) continue;
       const outputType = String(f(row, "Output_Type") || "");
       if (/story/i.test(outputType)) continue;
       const platform = String(f(row, "Platform") || "").trim();
@@ -18558,7 +18605,13 @@ async function studioLoadSimilarTimesView(env, url, authorization) {
   const cache = await studioLoadSimilarAccountStatusCache(env);
   const [posts, occupiedByPlatform] = await Promise.all([
     studioInsightsPostsForView(env, { accounts, theme, platform, season, cache }),
-    studioLoadOccupiedSchedules(env).catch((error) => {
+    studioLoadOccupiedSchedules(env, {
+      profile: await (async () => {
+        let profileId = null;
+        try { profileId = requestedProfileId(url); } catch { profileId = null; }
+        return resolveWorkingContentProfile(env, authorization, profileId).catch(() => null);
+      })(),
+    }).catch((error) => {
       console.warn("similar-times own schedule overlay failed", error);
       return {};
     }),
@@ -19070,7 +19123,19 @@ async function getInsightsBestTimes(request, env, url, authorization) {
   const season = studioInsightsResolveSeason(url);
   const industry = studioIndustryBestWindows(platform, outputType);
   const seasonLabel = studioSeasonLabel(season);
-  const occupiedByPlatform = await studioOccupiedSchedulesOrEmpty(env);
+  let occupancyProfile = null;
+  try {
+    occupancyProfile = await resolveWorkingContentProfile(env, authorization, requestedProfileId(url));
+  } catch (error) {
+    const themeHint = String(url.searchParams.get("profile") || "").trim().toLowerCase();
+    const matches = await resolveAuthorizedContentProfiles(env, authorization).catch(() => []);
+    occupancyProfile = (themeHint && matches.find((row) => studioThemeForProfile(row) === themeHint))
+      || null;
+    if (!occupancyProfile && error?.status !== 400) {
+      occupancyProfile = await resolveWorkingContentProfile(env, authorization, null).catch(() => null);
+    }
+  }
+  const occupiedByPlatform = await studioOccupiedSchedulesOrEmpty(env, { profile: occupancyProfile });
   const theme = await studioResolveSimilarTimesTheme(env, url, authorization).catch(() => "chicago");
   const timeZone = maeNormalizeTimeZone(url.searchParams.get("timezone") || studioScheduleTimeZoneFromTheme(theme));
   const occupiedOpts = {
@@ -32754,7 +32819,10 @@ async function approveOutputRecordForPublishing(env, existing, note, stamp, payl
   const platform = String(f(record, "Platform") || "").trim();
   let occupiedMs = Array.isArray(options.occupiedMs) ? options.occupiedMs.slice() : null;
   if (!occupiedMs) {
-    const occupied = await studioLoadOccupiedSchedules(env, { excludeIds: [id] });
+    const occupied = await studioLoadOccupiedSchedules(env, {
+      excludeIds: [id],
+      profile: await item4ProductionProfileRecord(env, record).catch(() => null),
+    });
     occupiedMs = occupied[platform] || [];
   }
   const markerIso = String(f(record, "Studio_Scheduled_At") || "").trim();
@@ -32855,6 +32923,7 @@ async function approveAllOutputsForPublishing(request, env, authorization, ctx =
   const schedules = payload?.schedules && typeof payload.schedules === "object" ? payload.schedules : {};
   const occupiedByPlatform = await studioLoadOccupiedSchedules(env, {
     excludeIds: eligible.map((record) => record.id),
+    profile,
   });
   for (const record of eligible) {
     try {
@@ -38299,7 +38368,10 @@ async function scheduleStudioPublishOutput(request, env, url, authorization, ctx
     || Boolean(f(existing, "Published_At"));
   if (published) throw new HttpError(409, "Published outputs cannot be rescheduled");
   const platform = String(f(existing, "Platform") || "").trim();
-  const occupied = await studioLoadOccupiedSchedules(env, { excludeIds: [match[1]] });
+  const occupied = await studioLoadOccupiedSchedules(env, {
+    excludeIds: [match[1]],
+    profile: await item4ProductionProfileRecord(env, existing).catch(() => null),
+  });
   const manualScheduleOverride = Boolean(
     payload?.manual_schedule_override === true
     && value

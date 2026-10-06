@@ -220,7 +220,9 @@ test("finished-video destination sync skips the broad occupancy read while holdi
     worker.indexOf("async function item4SyncPlanOutputs"),
     worker.indexOf("async function buildItem4OutputPlan"),
   );
-  assert.match(sync, /const occupied = finishedVideo \? \{\} : await studioLoadPlanScheduleOccupancy\(env, \{ excludeRequestId: productionRequestId \}\)/);
+  assert.match(sync, /const occupied = finishedVideo \? \{\} : await studioLoadPlanScheduleOccupancy\(env, \{/);
+  assert.match(sync, /excludeRequestId: productionRequestId/);
+  assert.match(sync, /profile: await item4ProductionProfileRecord\(env, requestRecord\)/);
 });
 
 test("finished-video plan rebuild keeps variants Not Needed", () => {
