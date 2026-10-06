@@ -223,7 +223,7 @@ export function maeNextOpenScheduleIso(candidateIso, occupiedMs, gapMs = MAE_SCH
   ) {
     return new Date(ms).toISOString();
   }
-  return maePickBalancedSuggestedIso(MAE_PRIORITY_SCHEDULE_WINDOWS, now, {
+  return maePickBalancedSuggestedIso(MAE_PRIORITY_SCHEDULE_WINDOWS, scheduleNow, {
     occupiedMs: occupiedMs || [],
     platformOccupiedMs: occupiedMs || [],
     timeZone,
@@ -231,6 +231,11 @@ export function maeNextOpenScheduleIso(candidateIso, occupiedMs, gapMs = MAE_SCH
 }
 
 export function maeBuildSuggestedScheduleMap(items, occupiedByPlatform = {}, now = new Date(), options = {}) {
+  // Freeze one authoritative instant for the entire regeneration pass. Every
+  // reused or newly suggested slot must be strictly later than this instant
+  // plus the normal lead window; a regenerate can never return a past slot.
+  const scheduleNow = now instanceof Date && Number.isFinite(now.getTime()) ? now : new Date();
+  const notBeforeMs = scheduleNow.getTime() + (options.leadMs ?? MAE_SUGGEST_LEAD_MS);
   const timeZone = maeNormalizeTimeZone(options.timeZone);
   const reserved = {};
   for (const [platform, times] of Object.entries(occupiedByPlatform || {})) {
@@ -257,7 +262,7 @@ export function maeBuildSuggestedScheduleMap(items, occupiedByPlatform = {}, now
       const existingCivil = maeZonedDateTimeParts(new Date(existingMs), timeZone);
       const standardsCovered = !isStory && maeDayStandardsCovered(
         existingCivil,
-        now.getTime() + MAE_SUGGEST_LEAD_MS,
+        notBeforeMs,
         lane,
         timeZone,
       );
@@ -266,7 +271,7 @@ export function maeBuildSuggestedScheduleMap(items, occupiedByPlatform = {}, now
       // Regeneration must never preserve a slot that is already passed or inside
       // the normal scheduling lead window. Using the same lead threshold as new
       // suggestions prevents a just-expired 05:30 slot from surviving a regenerate.
-      const reusable = existingMs > now.getTime() + MAE_SUGGEST_LEAD_MS
+      const reusable = existingMs > notBeforeMs
         && !maeIsBlackoutLocalTime(existingMs, timeZone)
         && (isStory || !maeScheduleConflicts(existingMs, lane))
         && (maeIsPriorityLocalTime(existingMs, timeZone) || standardsCovered);
@@ -276,13 +281,23 @@ export function maeBuildSuggestedScheduleMap(items, occupiedByPlatform = {}, now
         continue;
       }
     }
-    const iso = maePickBalancedSuggestedIso(MAE_PRIORITY_SCHEDULE_WINDOWS, now, {
+    const iso = maePickBalancedSuggestedIso(MAE_PRIORITY_SCHEDULE_WINDOWS, scheduleNow, {
       occupiedMs: isStory ? [] : maeFlattenOccupied(reserved),
       platformOccupiedMs: isStory ? [] : (reserved[platform] || []),
       timeZone,
     });
-    stamps.set(key, iso);
-    if (!isStory) (reserved[platform] ||= []).push(Date.parse(iso));
+    // Defense in depth: even if a future scheduler change accidentally hands
+    // back an expired candidate, never persist it from a regenerate.
+    const safeIso = iso && Number.isFinite(Date.parse(iso)) && Date.parse(iso) > notBeforeMs
+      ? iso
+      : maePickBalancedSuggestedIso(MAE_PRIORITY_SCHEDULE_WINDOWS, scheduleNow, {
+          occupiedMs: isStory ? [] : maeFlattenOccupied(reserved),
+          platformOccupiedMs: isStory ? [] : (reserved[platform] || []),
+          timeZone,
+          leadMs: options.leadMs ?? MAE_SUGGEST_LEAD_MS,
+        });
+    stamps.set(key, safeIso);
+    if (!isStory && safeIso) (reserved[platform] ||= []).push(Date.parse(safeIso));
   }
   return stamps;
 }
