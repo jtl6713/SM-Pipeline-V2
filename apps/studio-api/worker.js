@@ -15700,7 +15700,7 @@ async function item4RequestAiSlideThemes(env, requestRecord, parent, needed) {
     .slice()
     .sort((a, b) => Number(a.order || 0) - Number(b.order || 0))
     .map((asset) => String(asset?.caption || "").trim())
-    .filter(Boolean);
+    .filter((caption) => caption && !/^(?:photo|image|still|slide|clip|video)(?:[ _-]*(?:#|no\\.?|number)?)?[ _-]*\\d+$/i.test(caption));
   const marketRaw = parent ? f(parent, "Market_Name") : "";
   const market = (Array.isArray(marketRaw) ? String(marketRaw[0] || "") : String(marketRaw || "")).trim() || "Chicago";
   const sai1Body = {
@@ -15743,8 +15743,27 @@ function item4StudioCaptionIsLocked(requestRecord) {
   return /force exact/i.test(String(f(requestRecord, "Caption_Mode") || "").trim());
 }
 
+// Asset filenames are production metadata, never publishable copy. SAI1 can see captions
+// attached to masters for visual context, but generic labels such as "Photo 2" must not
+// leak into a social caption (for example "Featuring: Photo 2, Photo 3...").
+function item4StripAssetFilenameCaptionText(value) {
+  let text = String(value || "").trim();
+  if (!text) return "";
+  const generic = String.raw`(?:photo|image|still|slide|clip|video)(?:[ _-]*(?:#|no\\.?|number)?)?[ _-]*\\d+`;
+  const featuringLine = new RegExp(String.raw`(?:^|\\n)\\s*Featuring\\s*:\\s*(?:[^\\n]*\\b${generic}\\b[^\\n]*)\\s*(?=\\n|$)`, "gi");
+  text = text.replace(featureingLine, "\n");
+  const genericToken = new RegExp(String.raw`(?:^|[,;:]\\s*)\\b${generic}\\b(?=\\s*[,;.]|$)`, "gi");
+  text = text.replace(genericToken, "");
+  return text
+    .replace(/(?:^|\\n)\\s*Featuring\\s*:\\s*[,; ]*(?=\\n|$)/gi, "\n")
+    .replace(/[ \\t]+([,;.])/g, "$1")
+    .replace(/,{2,}/g, ",")
+    .replace(/\\n{3,}/g, "\n\n")
+    .trim();
+}
+
 async function item4WriteStudioPostCaption(env, parentId, themes, parentRecord) {
-  const caption = String(themes?.postCaption || "").trim();
+  const caption = item4StripAssetFilenameCaptionText(themes?.postCaption);
   if (!parentId || !caption) return null;
   if (String(f(parentRecord || {}, "Caption") || "").trim()) return null;
   const fields = { Caption: caption };
