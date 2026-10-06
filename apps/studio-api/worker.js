@@ -5154,7 +5154,7 @@ var worker_default = {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.458-timeline-writer-fallback",
+          version: "0.10.459-timeline-writer-fallback-retry",
           studio_mae_schedule_v1: true,
           studio_desk_inventory_v1: true,
           studio_desk_activity_v1: true,
