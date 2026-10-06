@@ -13,3 +13,4 @@ Deploy Worker 0.10.449-plan-mae-rotation. New production plans pick the next ope
 Deploy Worker 0.10.450-quoted-library-name. A quoted library search matches the asset name only.
 Deploy Worker 0.10.451-scripted-short-proposal. Accept a scripted short as a Draft and block Approve while a scene still needs a photo.
 Deploy Worker 0.10.452-scripted-short-allow. Allow Propose and Accept on a scripted short.
+Deploy Worker 0.10.453-mae-across-platforms. A new plan walks morning, then afternoon, then evening across platforms instead of four 5:30s.

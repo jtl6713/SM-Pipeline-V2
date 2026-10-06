@@ -121,7 +121,7 @@ test("scheduler skips occupied 5:30 to 11:30 the same day", () => {
 });
 
 
-test("scheduler uses today's morning even when another platform already has that day", () => {
+test("another platform's morning pushes this post to the same-day afternoon", () => {
   const zone = "America/Chicago";
   const now = new Date("2026-10-03T08:00:00Z");
   const occupiedMs = [Date.parse("2026-10-03T10:30:00Z")];
@@ -134,7 +134,7 @@ test("scheduler uses today's morning even when another platform already has that
   const localDay = new Intl.DateTimeFormat("en-US", { timeZone: zone, day: "2-digit" }).format(date);
   const local = localParts(iso, zone);
   assert.equal(localDay, "03");
-  assert.equal(local.hour, 5);
+  assert.equal(local.hour, 11);
   assert.equal(local.minute, 30);
 });
 

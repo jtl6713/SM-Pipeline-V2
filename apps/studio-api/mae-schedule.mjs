@@ -1,8 +1,8 @@
 /** Strict MAE rotation in profile-local time.
- * One platform post per day-part. Fill each day morning → afternoon → evening
- * before the next day: M, A, E, then next-day M.
- * Never stamp 8:00 PM–3:30 AM local (inclusive). Never two TikToks in Monday
- * morning while Monday afternoon is empty.
+ * One post per day-part across platforms. Fill each day morning → afternoon →
+ * evening before the next day: M, A, E, then next-day M. Instagram at 5:30
+ * means Facebook takes 11:30, not another 5:30.
+ * Never stamp 8:00 PM–3:30 AM local (inclusive). Stories may share a slot.
  */
 
 export const MAE_SCHEDULE_GAP_MS = 3 * 60 * 60 * 1000;
@@ -150,15 +150,27 @@ function maeWidestGapFallbackIso(local, nowMs, occupiedMs, platformOccupiedMs, t
   return new Date(best[0].ms).toISOString();
 }
 
+function maeBlockingTimes(occupiedMs, platformOccupiedMs) {
+  const seen = new Set();
+  const out = [];
+  for (const ms of [...(occupiedMs || []), ...(platformOccupiedMs || [])]) {
+    if (!Number.isFinite(ms) || seen.has(ms)) continue;
+    seen.add(ms);
+    out.push(ms);
+  }
+  return out;
+}
+
 export function maePickBalancedSuggestedIso(_windows, now = new Date(), options = {}) {
   const timeZone = maeNormalizeTimeZone(options.timeZone);
   const occupiedMs = options.occupiedMs || [];
   const platformOccupiedMs = options.platformOccupiedMs || occupiedMs;
+  const blockers = maeBlockingTimes(occupiedMs, platformOccupiedMs);
   const nowMs = now.getTime() + (options.leadMs ?? MAE_SUGGEST_LEAD_MS);
   const local = maeZonedDateTimeParts(now, timeZone);
 
   // Each civil day: morning, then afternoon, then evening. Then the next day.
-  // Two TikToks on Monday become 5:30 and 11:30, never two mornings with an empty A.
+  // A taken morning on any platform blocks the next post from that same 5:30.
   for (let i = 0; i < MAE_SUGGEST_HORIZON_DAYS; i++) {
     const civil = i === 0
       ? { year: local.year, month: local.month, day: local.day }
@@ -167,12 +179,12 @@ export function maePickBalancedSuggestedIso(_windows, now = new Date(), options 
       const [start] = window.split("-");
       const [hh, mm] = start.split(":").map((n) => Number(n) || 0);
       const ms = maeZonedWallToUtcMs(civil.year, civil.month, civil.day, hh, mm || 0, timeZone);
-      if (ms <= nowMs || maeIsBlackoutLocalTime(ms, timeZone) || maeScheduleConflicts(ms, platformOccupiedMs)) continue;
+      if (ms <= nowMs || maeIsBlackoutLocalTime(ms, timeZone) || maeScheduleConflicts(ms, blockers)) continue;
       return new Date(ms).toISOString();
     }
   }
 
-  return maeWidestGapFallbackIso(local, nowMs, occupiedMs, platformOccupiedMs, timeZone);
+  return maeWidestGapFallbackIso(local, nowMs, occupiedMs, blockers, timeZone);
 }
 
 export function maeNextOpenScheduleIso(candidateIso, occupiedMs, gapMs = MAE_SCHEDULE_GAP_MS, options = {}) {
@@ -218,10 +230,9 @@ export function maeBuildSuggestedScheduleMap(items, occupiedByPlatform = {}, now
     if (existing && !Number.isNaN(Date.parse(existing))) {
       const iso = new Date(existing).toISOString();
       const existingMs = Date.parse(iso);
-      const lane = isStory ? [] : (reserved[platform] || []);
-      // Keep a stored time only when it is still an open MAE slot. A taken
-      // 5:30 is discarded and the next morning → afternoon → evening opening
-      // is chosen, the same walk Regenerate uses.
+      const lane = isStory ? [] : maeFlattenOccupied(reserved);
+      // Keep a stored time only when that day-part is still open across
+      // platforms. A second 5:30 becomes 11:30, then 4:30 PM, then the next morning.
       const reusable = maeIsPriorityLocalTime(existingMs, timeZone)
         && !maeIsBlackoutLocalTime(existingMs, timeZone)
         && (isStory || !maeScheduleConflicts(existingMs, lane));

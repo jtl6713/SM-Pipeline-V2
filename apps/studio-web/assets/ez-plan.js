@@ -549,16 +549,27 @@
     return new Date(best[0].ms).toISOString();
   }
 
+  function ezBlockingTimes(occupiedMs, platformOccupiedMs) {
+    const seen = new Set();
+    const out = [];
+    for (const ms of [...(occupiedMs || []), ...(platformOccupiedMs || [])]) {
+      if (!Number.isFinite(ms) || seen.has(ms)) continue;
+      seen.add(ms);
+      out.push(ms);
+    }
+    return out;
+  }
+
   function ezPickBalancedSuggestedIso(windows, now = new Date(), options = {}) {
     const timeZone = ezNormalizeTimeZone(options.timeZone);
     const occupiedMs = options.occupiedMs || [];
     const platformOccupiedMs = options.platformOccupiedMs || occupiedMs;
+    const blockers = ezBlockingTimes(occupiedMs, platformOccupiedMs);
     const nowMs = now.getTime() + EZ_SUGGEST_LEAD_MS;
     const local = ezZonedDateTimeParts(now, timeZone);
 
     // Each civil day: morning, then afternoon, then evening. Then the next day.
-    // Two TikToks become 5:30 then 11:30 the same day, never two Monday mornings
-    // with an empty afternoon.
+    // A taken morning on any platform blocks the next post from that same 5:30.
     for (let i = 0; i < EZ_SUGGEST_HORIZON_DAYS; i++) {
       const civil = i === 0
         ? { year: local.year, month: local.month, day: local.day }
@@ -567,12 +578,12 @@
         const [start] = window.split("-");
         const [hh, mm] = start.split(":").map((n) => Number(n) || 0);
         const ms = ezZonedWallToUtcMs(civil.year, civil.month, civil.day, hh, mm || 0, timeZone);
-        if (ms <= nowMs || ezIsBlackoutLocalTime(ms, timeZone) || ezScheduleConflicts(ms, platformOccupiedMs)) continue;
+        if (ms <= nowMs || ezIsBlackoutLocalTime(ms, timeZone) || ezScheduleConflicts(ms, blockers)) continue;
         return new Date(ms).toISOString();
       }
     }
 
-    return ezWidestGapFallbackIso(local, nowMs, occupiedMs, platformOccupiedMs, timeZone);
+    return ezWidestGapFallbackIso(local, nowMs, occupiedMs, blockers, timeZone);
   }
 
   function ezSuggestedChicagoIso(windows, now = new Date(), options = {}) {
@@ -641,10 +652,9 @@
       if (existing && !Number.isNaN(Date.parse(existing))) {
         const iso = new Date(existing).toISOString();
         const existingMs = Date.parse(iso);
-        const lane = isStory ? [] : (reserved[platform] || []);
-        // Keep a stored time only when it is still an open MAE slot in the
-        // active profile timezone. A taken 5:30 is replaced by the next
-        // morning → afternoon → evening opening.
+        const lane = isStory ? [] : ezFlattenOccupied(reserved);
+        // Keep a stored time only when that day-part is still open across
+        // platforms. A second 5:30 becomes 11:30, then 4:30 PM, then the next morning.
         const reusable = ezIsPriorityLocalTime(existingMs, options.timeZone)
           && !ezIsBlackoutLocalTime(existingMs, options.timeZone)
           && (isStory || !ezScheduleConflicts(existingMs, lane));

@@ -130,12 +130,40 @@ test("suggested map ignores industry 20:00 YouTube windows and uses MAE", () => 
     now,
     { timeZone: zone },
   );
+  const youtube = localParts(stamps.get("YouTube::Short"), zone);
+  const instagram = localParts(stamps.get("Instagram::Reel"), zone);
+  assert.equal(youtube.hour, 5);
+  assert.equal(youtube.minute, 30);
+  assert.equal(instagram.hour, 11);
+  assert.equal(instagram.minute, 30);
   for (const iso of stamps.values()) {
-    const local = localParts(iso, zone);
-    assert.equal(local.hour, 5);
-    assert.equal(local.minute, 30);
     assert.equal(maeIsBlackoutLocalTime(Date.parse(iso), zone), false);
   }
+});
+
+test("a new short spreads morning afternoon evening instead of four mornings", () => {
+  const zone = "America/New_York";
+  const now = new Date("2026-10-05T08:00:00Z");
+  const stamps = maeBuildSuggestedScheduleMap(
+    [
+      { platform: "Instagram", output_type: "Reel", scheduled_at: "" },
+      { platform: "Facebook", output_type: "Reel", scheduled_at: "" },
+      { platform: "TikTok", output_type: "Video Draft", scheduled_at: "" },
+      { platform: "YouTube", output_type: "Short", scheduled_at: "" },
+    ],
+    {},
+    now,
+    { timeZone: zone },
+  );
+  const clocks = ["Instagram::Reel", "Facebook::Reel", "TikTok::Video Draft", "YouTube::Short"]
+    .map((key) => localParts(stamps.get(key), zone))
+    .map((part) => `${part.hour}:${String(part.minute).padStart(2, "0")}`);
+  assert.deepEqual(clocks, ["5:30", "11:30", "16:30", "5:30"]);
+  const dayOf = (iso) => new Intl.DateTimeFormat("en-CA", {
+    timeZone: zone, year: "numeric", month: "2-digit", day: "2-digit",
+  }).format(new Date(iso));
+  assert.equal(dayOf(stamps.get("Instagram::Reel")), dayOf(stamps.get("Facebook::Reel")));
+  assert.notEqual(dayOf(stamps.get("Instagram::Reel")), dayOf(stamps.get("YouTube::Short")));
 });
 
 test("existing blackout stamps are not reused", () => {
@@ -228,7 +256,7 @@ test("occupancy load windows the Airtable query and sorts nearest-first", () => 
 test("Worker stamp paths use MAE not industry evening windows", () => {
   assert.match(worker, /from "\.\/mae-schedule\.mjs"/);
   assert.match(worker, /studio_mae_schedule_v1: true/);
-  assert.match(worker, /0\.10\.452-scripted-short-allow/);
+  assert.match(worker, /0\.10\.453-mae-across-platforms/);
   assert.match(worker, /studioLoadPlanScheduleOccupancy/);
   assert.match(worker, /A stored 5:30 that lost its slot must be written/);
   assert.match(worker, /MAE_PRIORITY_SCHEDULE_WINDOWS/);

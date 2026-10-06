@@ -260,7 +260,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.501-swap-still";
+  const BUILD_ID = "item4-0.6.502-mae-across-platforms";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -7301,7 +7301,7 @@
     }).join("");
     ezWizardShowForm(
       `${rows ? `<div class="ez-wizard-schedules">${rows}</div>` : ""}
-       <p class="subtle">Automatic schedules spread across the week and keep same-platform posts at least 3 hours apart. Finished-video (AZ) auto-schedules after cover + caption — no Approve publish step. Other Studio requests still wait for Ready for Review → Approve publish.</p>
+       <p class="subtle">Automatic schedules fill morning, then afternoon, then evening before the next day. A second post does not take another 5:30. Stories can share a time. Finished-video (AZ) auto-schedules after cover + caption — no Approve publish step. Other Studio requests still wait for Ready for Review → Approve publish.</p>
        <div class="ez-wizard-form-actions"><button type="submit">Continue</button></div>`,
       () => {
         const schedules = {};
@@ -16783,6 +16783,13 @@
     return /^story$/i.test(outputType) || /\bstory\b/i.test(outputType);
   }
 
+  function pipelineGlobalScheduleMs(reserved) {
+    return Object.entries(reserved || {})
+      .filter(([key]) => key && !String(key).includes("::story"))
+      .flatMap(([, times]) => times || [])
+      .filter(Number.isFinite);
+  }
+
   function pipelineScheduleBucketKey(record) {
     const platform = String(record?.platform || "").trim().toLowerCase();
     if (!platform) return "";
@@ -16972,8 +16979,9 @@
         const bucket = pipelineScheduleBucketKey(record);
         const hint = suggestedTimeHint(data);
         rememberSuggestedHint(platform, hint);
-        const allReserved = Object.values(reserved).flat().filter(Number.isFinite);
-        const iso = nextOpenScheduleIso(suggested, reserved[bucket] || [], hint, PIPELINE_SCHEDULE_GAP_MS, reserved[bucket] || []);
+        const story = pipelineScheduleIsStory(record);
+        const lane = story ? [] : (reserved[bucket] || []);
+        const iso = nextOpenScheduleIso(suggested, lane, hint, PIPELINE_SCHEDULE_GAP_MS, story ? [] : pipelineGlobalScheduleMs(reserved));
         if (!iso || pipelineScheduleIsBlackout(iso, workingStudioTimeZone())) continue;
         const input = document.querySelector(`[data-pipeline-schedule="${record.id}"]`);
         if (input) applySuggestedIsoToScheduleInput(input, iso);
@@ -17001,8 +17009,9 @@
       const platform = String(record.platform || "").trim().toLowerCase();
       const bucket = pipelineScheduleBucketKey(record);
       const requested = next[record.id] || new Date().toISOString();
-      const allReserved = Object.values(reserved).flat().filter(Number.isFinite);
-      const iso = nextOpenScheduleIso(requested, reserved[bucket] || [], hintForPlatform(platform), PIPELINE_SCHEDULE_GAP_MS, reserved[bucket] || []);
+      const story = pipelineScheduleIsStory(record);
+      const lane = story ? [] : (reserved[bucket] || []);
+      const iso = nextOpenScheduleIso(requested, lane, hintForPlatform(platform), PIPELINE_SCHEDULE_GAP_MS, story ? [] : pipelineGlobalScheduleMs(reserved));
       if (!iso) {
         delete next[record.id];
         continue;
@@ -17430,7 +17439,9 @@
     for (const record of eligible) {
       const bucket = pipelineScheduleBucketKey(record);
       if (!bucket) { failed += 1; continue; }
-      const iso = nextOpenScheduleIso(new Date().toISOString(), reserved[bucket] || [], {}, PIPELINE_SCHEDULE_GAP_MS, reserved[bucket] || []);
+      const story = pipelineScheduleIsStory(record);
+      const lane = story ? [] : (reserved[bucket] || []);
+      const iso = nextOpenScheduleIso(new Date().toISOString(), lane, {}, PIPELINE_SCHEDULE_GAP_MS, story ? [] : pipelineGlobalScheduleMs(reserved));
       // Hard invariant: regeneration must never persist an overnight blackout slot.
       if (!iso || pipelineScheduleIsBlackout(iso)) { failed += 1; continue; }
       try {
