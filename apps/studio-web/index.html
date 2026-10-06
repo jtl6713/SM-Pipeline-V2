@@ -9,7 +9,7 @@
  <link rel="preconnect" href="https://fonts.googleapis.com">
  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@1,600;1,700&family=Inter:wght@400;500;600;700;800&family=Oswald:wght@500&display=swap">
- <link rel="stylesheet" href="/assets/styles-phase7-0621.css?v=0.6.503-low-platform-counts">
+ <link rel="stylesheet" href="/assets/styles-phase7-0621.css?v=0.6.504-compact-pipeline">
  <link rel="stylesheet" href="/assets/production-tablet-0622.css?v=0.6.493-ideas-vo-production-handoff">
  <link rel="stylesheet" href="/assets/insights-0622.css?v=0.6.381-insights-padding">
  <link rel="stylesheet" href="/assets/clean-enterprise.css?v=0.6.375-clean-enterprise">
@@ -1083,7 +1083,28 @@
  </section>
 
  <section id="page-outputs" class="page">
- <div class="page-heading"><div><span class="eyebrow">Execution + creative review</span><h1>Platform pipeline</h1><p>Click an output row to watch the render, see the photo package, and read the caption. Studio state refreshes automatically while this page is open.</p></div><div class="heading-actions"><span class="subtle" id="pipelineLiveHint">Checking for updates…</span><button class="secondary-button" data-refresh="outputs">Refresh now</button><button type="button" class="primary-button" id="pipelineApproveAll" disabled>Approve All</button></div></div>
+ <div class="page-heading pipeline-page-heading"><div><span class="eyebrow">Execution + creative review</span><h1>Pipeline</h1><p>Manage, review, schedule, and publish every platform output from one compact workspace.</p></div><div class="heading-actions pipeline-heading-actions"><span class="subtle" id="pipelineLiveHint">Checking for updates…</span><button class="secondary-button" data-refresh="outputs">Refresh</button><button type="button" class="primary-button" id="pipelineApproveAll" disabled>Approve All</button></div></div>
+
+ <section class="pipeline-command-bar" aria-label="Pipeline views and filters">
+ <div class="pipeline-quick-tabs" role="group" aria-label="Pipeline status views">
+ <button type="button" data-pipeline-quick-view="all" class="is-active" aria-pressed="true"><span class="pipeline-tab-dot"></span>All <b data-pipeline-quick-count>0</b></button>
+ <button type="button" data-pipeline-quick-view="active" aria-pressed="false"><span class="pipeline-tab-dot"></span>Active <b data-pipeline-quick-count>0</b></button>
+ <button type="button" data-pipeline-quick-view="rendering" aria-pressed="false"><span class="pipeline-tab-dot"></span>Rendering <b data-pipeline-quick-count>0</b></button>
+ <button type="button" data-pipeline-quick-view="approval" aria-pressed="false"><span class="pipeline-tab-dot"></span>Review <b data-pipeline-quick-count>0</b></button>
+ <button type="button" data-pipeline-quick-view="approved" aria-pressed="false"><span class="pipeline-tab-dot"></span>Approved <b data-pipeline-quick-count>0</b></button>
+ <button type="button" data-pipeline-quick-view="scheduled" aria-pressed="false"><span class="pipeline-tab-dot"></span>Scheduled <b data-pipeline-quick-count>0</b></button>
+ <button type="button" data-pipeline-quick-view="published" aria-pressed="false"><span class="pipeline-tab-dot"></span>Published <b data-pipeline-quick-count>0</b></button>
+ <button type="button" data-pipeline-quick-view="failed" aria-pressed="false"><span class="pipeline-tab-dot"></span>Failed <b data-pipeline-quick-count>0</b></button>
+ <button type="button" data-pipeline-quick-view="attention" aria-pressed="false"><span class="pipeline-tab-dot"></span>Attention <b data-pipeline-quick-count>0</b></button>
+ </div>
+ <div class="pipeline-command-tools">
+ <label class="pipeline-quick-search"><span class="pipeline-col-filter-sr">Search pipeline</span><span aria-hidden="true">⌕</span><input type="search" id="pipelineQuickSearch" placeholder="Search output or title…" autocomplete="off"></label>
+ <details class="pipeline-advanced-filters" id="pipelineAdvancedFilters">
+ <summary>Filters</summary>
+ <div class="pipeline-advanced-filter-body" id="pipelineAdvancedFilterBody"></div>
+ </details>
+ </div>
+ </section>
 
  <section class="panel pipeline-schedule-overview pipeline-schedule-collapsed" id="pipelineScheduleOverview">
  <div class="panel-heading pipeline-schedule-overview-heading">
@@ -2177,7 +2198,7 @@
  <div class="studio-footer-meta">
  <span id="aiApiFooter" aria-live="polite"><strong>AI API:</strong> loading…</span>
  <span id="apiStatus" class="topbar-status">Connecting…</span>
- <span id="uiBuildLabel">UI build 0.6.503</span>
+ <span id="uiBuildLabel">UI build 0.6.504</span>
  <span id="workerBuildLabel">Worker …</span> </div>
  </footer>
 
@@ -2351,7 +2372,7 @@
  <script src="/assets/pipeline-schedule-grid-0622.js?v=0.6.475-manual-media-authority"></script>
  <script src="/assets/platform-schedule-calendar-0924.js?v=0.6.475-manual-media-authority"></script>
  <script src="/assets/timed-script.js?v=0.6.501-swap-still"></script>
- <script src="/assets/app-item4-0625.js?v=0.6.503-mae-gap-extras"></script>
+ <script src="/assets/app-item4-0625.js?v=0.6.504-compact-pipeline"></script>
  <script src="/assets/insights-0622.js?v=0.6.365-first-party-analytics-reconciled"></script>
  <script src="/assets/ai-api-footer.js?v=0.6.427-primary-ai-alert"></script>
  <script src="/assets/sticky-footer-scroll.js?v=0.6.378-sticky-footer-scroll"></script>
