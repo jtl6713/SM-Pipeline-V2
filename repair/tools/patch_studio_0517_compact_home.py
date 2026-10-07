@@ -76,12 +76,6 @@ for base in (ROOT / "apps/studio-web", ROOT / "apps/studio-api"):
         if t != original:
             path.write_text(t, encoding="utf-8")
 
-# Deployment verification must verify the newly named density asset.
-workflow = DEPLOY_WORKFLOW.read_text(encoding="utf-8")
-workflow = workflow.replace("home-density-0516", "home-density-0517")
-workflow = workflow.replace("HOME_DENSITY_0_6_516", "HOME_DENSITY_0_6_517")
-DEPLOY_WORKFLOW.write_text(workflow, encoding="utf-8")
-
 marker = DEPLOY_MARKER.read_text(encoding="utf-8")
 line = (
     "Deploy UI 0.6.517-compact-home-launcher. Full app BUILD_ID + cache-key bump, "
