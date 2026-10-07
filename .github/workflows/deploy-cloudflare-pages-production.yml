@@ -21,6 +21,8 @@ jobs:
     env:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
+      CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -229,25 +231,38 @@ jobs:
           # The operator uses the custom domain, so a green deploy is not enough unless
           # studio.chicagoshining.com is serving this exact build too.
           CUSTOM_URL="https://studio.chicagoshining.com"
-          CUSTOM_INDEX_CODE=$(curl -sS -D /tmp/custom-index.headers -o /tmp/custom-index.html -w '%{http_code}' "$CUSTOM_URL/?studio_build=$EXPECTED_LABEL&commit=$GITHUB_SHA" || true)
+          test -n "$CF_ACCESS_CLIENT_ID"
+          test -n "$CF_ACCESS_CLIENT_SECRET"
+          CUSTOM_INDEX_CODE=$(curl -sS \
+            -H "CF-Access-Client-Id: $CF_ACCESS_CLIENT_ID" \
+            -H "CF-Access-Client-Secret: $CF_ACCESS_CLIENT_SECRET" \
+            -D /tmp/custom-index.headers \
+            -o /tmp/custom-index.html \
+            -w '%{http_code}' \
+            "$CUSTOM_URL/?studio_build=$EXPECTED_LABEL&commit=$GITHUB_SHA" || true)
           CUSTOM_LOCATION=$(awk 'BEGIN{IGNORECASE=1} /^location:/{sub(/^[^:]*:[[:space:]]*/, ""); sub(/\r$/, ""); print; exit}' /tmp/custom-index.headers)
           echo "custom_domain_http=$CUSTOM_INDEX_CODE"
-          if [[ "$CUSTOM_INDEX_CODE" == "200" ]]; then
-            grep -Fq "UI build $EXPECTED_LABEL" /tmp/custom-index.html
-            grep -Fq "$EXPECTED_DENSITY_CSS_PATH" /tmp/custom-index.html
-            CUSTOM_CSS_CODE=$(curl -sS -o /tmp/custom-home-density.css -w '%{http_code}' "$CUSTOM_URL$EXPECTED_DENSITY_CSS_URL" || true)
-            test "$CUSTOM_CSS_CODE" = "200"
-            grep -Fq "HOME_DENSITY_0_6_517" /tmp/custom-home-density.css
-            echo "custom_domain_content_verify=PASS"
-          elif [[ "$CUSTOM_INDEX_CODE" =~ ^30[1278]$ ]] && [[ "$CUSTOM_LOCATION" == *"cloudflareaccess.com/cdn-cgi/access/login/"* ]]; then
-            echo "::notice::Studio custom domain is protected by Cloudflare Access; unauthenticated byte verification is intentionally skipped."
-            {
-              echo "### Studio custom-domain verification: ACCESS-PROTECTED"
-              echo "- Cloudflare Access intercepted the unauthenticated request as expected."
-              echo "- Pages production bytes were verified separately at chicagoshining-studio.pages.dev."
-              echo "- Expected UI: $EXPECTED_LABEL ($EXPECTED_BUILD_ID)"
-            } >> "$GITHUB_STEP_SUMMARY"
-          else
-            echo "Custom Studio domain returned HTTP $CUSTOM_INDEX_CODE (location: $CUSTOM_LOCATION); refusing to mark deployment healthy." >&2
+          if [[ "$CUSTOM_INDEX_CODE" != "200" ]]; then
+            echo "Authenticated Studio custom-domain verification failed with HTTP $CUSTOM_INDEX_CODE (location: $CUSTOM_LOCATION)." >&2
             exit 1
           fi
+          grep -Fq "UI build $EXPECTED_LABEL" /tmp/custom-index.html
+          grep -Fq "$EXPECTED_DENSITY_CSS_PATH" /tmp/custom-index.html
+          grep -Fq "$EXPECTED_JS_PATH" /tmp/custom-index.html
+          CUSTOM_CSS_CODE=$(curl -sS \
+            -H "CF-Access-Client-Id: $CF_ACCESS_CLIENT_ID" \
+            -H "CF-Access-Client-Secret: $CF_ACCESS_CLIENT_SECRET" \
+            -o /tmp/custom-home-density.css \
+            -w '%{http_code}' \
+            "$CUSTOM_URL$EXPECTED_DENSITY_CSS_URL" || true)
+          test "$CUSTOM_CSS_CODE" = "200"
+          grep -Fq "HOME_DENSITY_0_6_517" /tmp/custom-home-density.css
+          CUSTOM_APP_CODE=$(curl -sS \
+            -H "CF-Access-Client-Id: $CF_ACCESS_CLIENT_ID" \
+            -H "CF-Access-Client-Secret: $CF_ACCESS_CLIENT_SECRET" \
+            -o /tmp/custom-app.js \
+            -w '%{http_code}' \
+            "$CUSTOM_URL$EXPECTED_JS_URL" || true)
+          test "$CUSTOM_APP_CODE" = "200"
+          grep -Fq "$EXPECTED_BUILD_ID" /tmp/custom-app.js
+          echo "custom_domain_content_verify=PASS"
