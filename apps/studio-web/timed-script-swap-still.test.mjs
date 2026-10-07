@@ -24,7 +24,7 @@ test("Rendering timed-script scenes can open a swap-still library dialog", () =>
   assert.match(html, /id="prSwapStillGrid"/);
   assert.match(html, /id="prSwapStillApply"/);
   assert.match(html, /Swap still/);
-  assert.match(html, /UI build 0\.6\.515/);
+  assert.match(html, /UI build 0\.6\.516/);
   assert.match(html, /app-item4-0625\.js\?v=0\.6\.515-always-hamburger-nav/);
   assert.match(css, /\.swap-still-dialog/);
   assert.match(css, /\.timed-script-scene-thumb:hover/);
