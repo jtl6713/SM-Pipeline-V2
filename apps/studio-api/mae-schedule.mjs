@@ -327,34 +327,34 @@ export function maeBuildSuggestedScheduleMap(items, occupiedByPlatform = {}, now
     if (existing && !Number.isNaN(Date.parse(existing))) {
       const iso = new Date(existing).toISOString();
       const existingMs = Date.parse(iso);
-      const lane = isStory ? [] : maeFlattenOccupied(reserved);
+      const lane = maeFlattenOccupied(reserved);
       const existingCivil = maeCivilWithKey(maeZonedDateTimeParts(new Date(existingMs), timeZone));
-      const standardsCovered = !isStory && maeDayStandardsCovered(
+      const standardsCovered = maeDayStandardsCovered(
         existingCivil,
         notBeforeMs,
         lane,
         timeZone,
       );
-      const extrasOnDay = isStory ? 0 : maeExtraCountOnDay(existingCivil, lane, timeZone);
+      const extrasOnDay = maeExtraCountOnDay(existingCivil, lane, timeZone);
       // Keep a stored MAE time when that day-part is still open. Keep a stored
       // extra only after that day's MAE trio is covered and the day still has
       // room for a 4th/5th. Never preserve a past or blackout slot.
       const reusable = existingMs > notBeforeMs
         && !maeIsBlackoutLocalTime(existingMs, timeZone)
-        && (isStory || !maeScheduleConflicts(existingMs, lane))
+        && !maeScheduleConflicts(existingMs, lane)
         && (
           maeIsPriorityLocalTime(existingMs, timeZone)
           || (standardsCovered && extrasOnDay < MAE_MAX_EXTRA_POSTS_PER_DAY)
         );
       if (reusable) {
         stamps.set(key, iso);
-        if (!isStory) (reserved[platform] ||= []).push(existingMs);
+        (reserved[platform] ||= []).push(existingMs);
         continue;
       }
     }
     const iso = maePickBalancedSuggestedIso(MAE_PRIORITY_SCHEDULE_WINDOWS, scheduleNow, {
-      occupiedMs: isStory ? [] : maeFlattenOccupied(reserved),
-      platformOccupiedMs: isStory ? [] : (reserved[platform] || []),
+      occupiedMs: maeFlattenOccupied(reserved),
+      platformOccupiedMs: reserved[platform] || [],
       timeZone,
     });
     // Defense in depth: even if a future scheduler change accidentally hands
@@ -362,13 +362,13 @@ export function maeBuildSuggestedScheduleMap(items, occupiedByPlatform = {}, now
     const safeIso = iso && Number.isFinite(Date.parse(iso)) && Date.parse(iso) > notBeforeMs
       ? iso
       : maePickBalancedSuggestedIso(MAE_PRIORITY_SCHEDULE_WINDOWS, scheduleNow, {
-          occupiedMs: isStory ? [] : maeFlattenOccupied(reserved),
-          platformOccupiedMs: isStory ? [] : (reserved[platform] || []),
+          occupiedMs: maeFlattenOccupied(reserved),
+          platformOccupiedMs: reserved[platform] || [],
           timeZone,
           leadMs: options.leadMs ?? MAE_SUGGEST_LEAD_MS,
         });
     stamps.set(key, safeIso);
-    if (!isStory && safeIso) (reserved[platform] ||= []).push(Date.parse(safeIso));
+    if (safeIso) (reserved[platform] ||= []).push(Date.parse(safeIso));
   }
   return stamps;
 }
