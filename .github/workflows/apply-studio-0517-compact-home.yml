@@ -1,0 +1,49 @@
+name: Apply Studio 0.6.517 Compact Home
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'deploy/apply-studio-0517-compact-home.txt'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: apply-studio-0517-compact-home
+  cancel-in-progress: false
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Apply guarded Studio 0.6.517 patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          python repair/tools/patch_studio_0517_compact_home.py
+          cp apps/studio-web/assets/app-item4-0625.js /tmp/studio-app.mjs
+          node --check /tmp/studio-app.mjs
+          grep -q 'const BUILD_ID = "item4-0.6.517-compact-home-launcher";' apps/studio-web/assets/app-item4-0625.js
+          grep -q 'UI build 0.6.517' apps/studio-web/index.html
+          grep -q 'home-density-0517.css?v=0.6.517-compact-home-launcher' apps/studio-web/index.html
+          grep -q 'HOME_DENSITY_0_6_517' apps/studio-web/assets/home-density-0517.css
+          node --test apps/studio-web/home-start-density.test.mjs apps/studio-web/collapsible-nav.test.mjs apps/studio-api/compact-pipeline-ui.test.mjs
+
+      - name: Commit Studio 0.6.517 source
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add             apps/studio-web/index.html             apps/studio-web/assets/app-item4-0625.js             apps/studio-web/assets/home-density-0517.css             apps/studio-web/*.test.mjs             apps/studio-api/*.test.mjs             .github/workflows/deploy-cloudflare-pages-production.yml             deploy/cloudflare-pages-production.txt
+          if ! git diff --cached --quiet; then
+            git commit -m 'fix(studio): ship compact home as UI 0.6.517'
+            git pull --rebase origin main
+            git push origin HEAD:main
+          fi
