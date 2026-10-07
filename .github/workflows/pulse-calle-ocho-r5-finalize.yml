@@ -61,7 +61,25 @@ jobs:
                   "body": None,
               },
           ]
-          js = '''export default {async fetch(request,env){const u=new URL(request.url);if(u.pathname===ROUTE+"/ready")return Response.json({ok:true,ready:true},{headers:{"Cache-Control":"no-store"}});if(u.pathname!==ROUTE)return new Response("Not found",{status:404});const specs=SPECS,results=[];for(const s of specs){const m=String(s.method||"GET").toUpperCase(),h=new Headers({"Cf-Access-Authenticated-User-Email":"joseph.t.logan@gmail.com","Accept":"application/json","Origin":"https://studio.chicagoshining.com"});let b;if(m!=="GET"){h.set("Content-Type","application/json");b=JSON.stringify(s.body??{});}const r=await env.STUDIO_API.fetch(new Request("https://studio.chicagoshining.com"+s.path,{method:m,headers:h,body:b}));const t=await r.text();let p;try{p=t?JSON.parse(t):null}catch{p={raw:t.slice(0,10000)}}results.push({name:s.name||s.path,path:s.path,method:m,status:r.status,ok:r.ok,body:p});}return Response.json({ok:results.some(x=>x.name==="creative_continue"&&x.ok),results},{headers:{"Cache-Control":"no-store"}})}};'''
+          # Match the proven Calle Ocho classify bridge shape; accept /run suffix too.
+          js = (
+              "export default {async fetch(request,env){"
+              "const u=new URL(request.url);"
+              "const base=ROUTE;"
+              "if(u.pathname===base+\"/ready\")return Response.json({ok:true,ready:true},{headers:{\"Cache-Control\":\"no-store\"}});"
+              "if(u.pathname!==base && u.pathname!==base+\"/run\")return Response.json({ok:false,error:\"not_found\",pathname:u.pathname,base},{status:404,headers:{\"Cache-Control\":\"no-store\"}});"
+              "const specs=SPECS,results=[];"
+              "for(const s of specs){"
+              "const m=String(s.method||\"GET\").toUpperCase();"
+              "const h=new Headers({\"Cf-Access-Authenticated-User-Email\":\"joseph.t.logan@gmail.com\",\"Accept\":\"application/json\",\"Origin\":\"https://studio.chicagoshining.com\"});"
+              "let b;if(m!==\"GET\"){h.set(\"Content-Type\",\"application/json\");b=JSON.stringify(s.body??{});}"
+              "const r=await env.STUDIO_API.fetch(new Request(\"https://studio.chicagoshining.com\"+s.path,{method:m,headers:h,body:b}));"
+              "const t=await r.text();let p;try{p=t?JSON.parse(t):null}catch{p={raw:t.slice(0,10000)}};"
+              "results.push({name:s.name||s.path,path:s.path,method:m,status:r.status,ok:r.ok,body:p});"
+              "}"
+              "return Response.json({ok:results.some(x=>x.name===\"creative_continue\"&&x.ok),results},{headers:{\"Cache-Control\":\"no-store\"}})"
+              "}};"
+          )
           js = js.replace("ROUTE", json.dumps("/" + token)).replace("SPECS", json.dumps(specs, separators=(",", ":")))
           Path("/tmp/worker.js").write_text(js)
           PY
@@ -102,7 +120,12 @@ jobs:
             sleep 3
           done
           code=$(curl -sS --max-time 300 -o /tmp/result.json -w '%{http_code}' \
-            -H 'Content-Type: application/json' -d '{}' "$URL" || true)
+            -H 'Content-Type: application/json' -d '{}' "$URL/run" || true)
+          if [[ "$code" != "200" ]]; then
+            echo "run_failed body:"; head -c 2000 /tmp/result.json || true; echo
+            code=$(curl -sS --max-time 300 -o /tmp/result.json -w '%{http_code}' \
+              -H 'Content-Type: application/json' -d '{}' "$URL" || true)
+          fi
           echo "bridge_http=$code"
           test "$code" -eq 200
           jq '{ok,results:[.results[]|{name,path,status,ok,message:(.body.message//null),final:(.body.final_file_url//null),handoff:(.body.handoff_state//null)}]}' /tmp/result.json
