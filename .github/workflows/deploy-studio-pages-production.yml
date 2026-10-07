@@ -1,0 +1,66 @@
+name: Deploy Studio Pages Production
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "apps/studio-web/**"
+      - "deploy/cloudflare-pages-production.txt"
+      - ".github/workflows/deploy-studio-pages-production.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: studio-pages-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      PAGES_PROJECT: chicagoshining-studio
+      PUBLIC_URL: https://studio.chicagoshining.com
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Use Node 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+
+      - name: Verify Studio source
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -s apps/studio-web/index.html
+          grep -Fq "UI build 0.6.524" apps/studio-web/index.html
+          test -n "${CLOUDFLARE_API_TOKEN:-}"
+          test -n "${CLOUDFLARE_ACCOUNT_ID:-}"
+
+      - name: Deploy Studio to Cloudflare Pages production
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx --yes wrangler@latest pages deploy apps/studio-web             --project-name="$PAGES_PROJECT"             --branch=main             --commit-hash="$GITHUB_SHA"             --commit-message="Studio UI 0.6.524 production deployment"             --commit-dirty=false
+
+      - name: Verify production UI
+        shell: bash
+        run: |
+          set -euo pipefail
+          for ATTEMPT in $(seq 1 30); do
+            BODY=$(curl -fsS "$PUBLIC_URL/?deploy_verify=$GITHUB_SHA" || true)
+            if grep -Fq "UI build 0.6.524" <<<"$BODY"; then
+              echo "Studio production verification PASS: UI 0.6.524"
+              exit 0
+            fi
+            echo "Waiting for Studio production UI 0.6.524 (attempt $ATTEMPT/30)"
+            sleep 10
+          done
+          echo "Studio production did not report UI 0.6.524" >&2
+          exit 1
