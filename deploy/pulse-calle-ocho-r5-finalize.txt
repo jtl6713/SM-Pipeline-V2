@@ -4,3 +4,4 @@
 # 2026-10-07T07:23:00Z
 # 2026-10-07T07:45:00Z pin job-20261007074041-5e4f4ede; pulse r5-done via service binding (not creative continue)
 # 2026-10-07T07:58:00Z 1931 Remotion done job-20261007075538-f79518c5; pulse r5-done for FB reel
+# 2026-10-07T08:02:00Z retry 1931 r5-done; accept /run + pulse retries
