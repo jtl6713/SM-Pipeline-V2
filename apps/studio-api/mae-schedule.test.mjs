@@ -234,6 +234,31 @@ test("a new short spreads morning afternoon evening then next-day MAE, not a sam
   assert.notEqual(dayOf(stamps.get("Instagram::Reel"), zone), dayOf(stamps.get("YouTube::Short"), zone));
 });
 
+test("Stories share MAE occupancy instead of resetting to the next slot today", () => {
+  const zone = "America/New_York";
+  const now = new Date("2026-10-07T12:00:00Z");
+  const morning = maeZonedWallToUtcMs(2026, 10, 7, 5, 30, zone);
+  const afternoon = maeZonedWallToUtcMs(2026, 10, 7, 11, 30, zone);
+  const evening = maeZonedWallToUtcMs(2026, 10, 7, 16, 30, zone);
+  const stamps = maeBuildSuggestedScheduleMap(
+    [
+      { platform: "Instagram", output_type: "Story", scheduled_at: "" },
+      { platform: "Facebook", output_type: "Story", scheduled_at: "" },
+    ],
+    { Instagram: [morning, afternoon, evening], Facebook: [morning, afternoon, evening] },
+    now,
+    { timeZone: zone },
+  );
+  for (const key of ["Instagram::Story", "Facebook::Story"]) {
+    const iso = stamps.get(key);
+    assert.ok(iso, key);
+    assert.notEqual(dayOf(iso, zone), "2026-10-07");
+    assert.equal(localParts(iso, zone).hour, 5);
+    assert.equal(localParts(iso, zone).minute, 30);
+  }
+  assert.notEqual(stamps.get("Instagram::Story"), stamps.get("Facebook::Story"));
+});
+
 test("after 28 days of MAE are full, the 4th is day 1's largest gap", () => {
   const zone = "America/New_York";
   const now = new Date("2026-10-05T08:00:00Z");
