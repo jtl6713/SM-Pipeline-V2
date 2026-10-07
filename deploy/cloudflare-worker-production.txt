@@ -32,3 +32,4 @@ Deploy Worker 0.10.463-approve-mae-keep. studioNextOpenScheduleIso keeps non-cla
 Deploy Worker 0.10.464-schedule-save-ready-review. Ready for Review wins over Publish_Status Ready to Schedule until Approve (Output 1795).
 Deploy Worker 0.10.465-render-stale-rendering. Heal Final_File_URL + Render_Status=Rendering (Output 1807) to Rendered + Ready for Review; desk kind render_stale_rendering.
 Deploy Worker 0.10.466-mae-28-day-schedule. 28-day MAE then 4th/5th widest-gap; blackout 11PM–3AM profile TZ: 2026-10-07T05:40Z
+Deploy Worker 0.10.467-promotion-reconcile. If I3/I4 returns a transient 5xx after promotion side effects completed, reconcile the Idea Candidate from Airtable and return success instead of leaving Studio with a false Request failed (500). Triggered 2026-10-07.
