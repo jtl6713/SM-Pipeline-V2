@@ -20,7 +20,7 @@ test("compact launcher remains single-column on narrow screens", () => {
 });
 
 test("compact launcher uses a cache-busted Pages stylesheet and Pages build", () => {
-  assert.match(html, /styles-phase7-0621\.css\?v=0\.6\.515-always-hamburger-nav/);
-  assert.match(html, /home-density-0516\.css\?v=0\.6\.516-home-density/);
-  assert.match(html, /UI build 0\.6\.516/);
+  assert.match(html, /styles-phase7-0621\.css\?v=0\.6\.517-compact-home-launcher/);
+  assert.match(html, /home-density-0517\.css\?v=0\.6\.517-compact-home-launcher/);
+  assert.match(html, /UI build 0\.6\.517/);
 });

@@ -44,6 +44,6 @@ test("Studio build and app cache key stay aligned after clip preview playback ch
   const uiBuild = html.match(/UI build (0\.6\.\d+)/)?.[1];
   assert.ok(build);
   assert.ok(uiBuild);
-  assert.equal(uiBuild, "0.6.516");
+  assert.equal(uiBuild, "0.6.517");
   assert.ok(html.includes(`/assets/app-item4-0625.js?v=${build}`));
 });

@@ -9,7 +9,7 @@ const app = fs.readFileSync(path.join(here, "assets/app-item4-0625.js"), "utf8")
 const css = fs.readFileSync(path.join(here, "assets/styles-phase7-0621.css"), "utf8");
 
 test("collapsed Pipeline groups surface workflow tone and platform chips", () => {
-  assert.match(app, /item4-0\.6\.515-always-hamburger-nav/);
+  assert.match(app, /item4-0\.6\.517-compact-home-launcher/);
   assert.match(app, /function pipelineGroupVisualTone/);
   assert.match(app, /function pipelineGroupPlatformSummary/);
   assert.match(app, /data-pipeline-tone=/);
