@@ -151,11 +151,16 @@ jobs:
           const latest = rows[0] || {};
           const candidates = [
             latest.url,
-            Array.isArray(latest.aliases) ? latest.aliases[0] : null,
             latest.deployment_url,
+            Array.isArray(latest.aliases) ? latest.aliases[0] : null,
             'https://chicagoshining-studio.pages.dev',
           ].map((value) => String(value || '').trim().replace(/\/$/, ''));
-          const url = candidates.find((value) => /^https:\/\//i.test(value));
+          // Prefer the unique deployment subdomain (hash.project.pages.dev) over the
+          // production alias, which can briefly keep the previous index while alias cutover
+          // finishes — that made verify silently grep-fail and never reach the custom domain.
+          const httpsUrls = candidates.filter((value) => /^https:\/\//i.test(value));
+          const uniqueDeploy = httpsUrls.find((value) => /^https:\/\/[a-f0-9]{8}\./i.test(value));
+          const url = uniqueDeploy || httpsUrls[0];
           if (!url) {
             throw new Error(`Could not resolve a HTTPS Pages URL from deployment list: ${JSON.stringify(latest).slice(0, 500)}`);
           }
@@ -166,14 +171,32 @@ jobs:
             `### Studio Pages production deployment: PASS\n- Production branch: ${process.env.PROD_BRANCH}\n- Latest deployment: ${url}\n- Domains: ${domains.join(', ') || '(none listed)'}\n- Expected UI: ${expected.expectedLabel} (${expected.expectedJsUrl})\n`);
           console.log('pages_domains=' + JSON.stringify(domains));
           console.log('pages_verify_url=' + url);
+          console.log('pages_latest_raw_url=' + String(latest.url || ''));
           NODE
           LATEST_URL=$(cat /tmp/pages-latest-url.txt)
+          require_match() {
+            local needle="$1"
+            local file="$2"
+            local label="$3"
+            if ! grep -Fq "$needle" "$file"; then
+              echo "Pages content verify failed ($label): missing '$needle' in $file" >&2
+              head -c 400 "$file" >&2 || true
+              echo >&2
+              exit 1
+            fi
+          }
           # Always purge the custom domain first so studio.chicagoshining.com cannot keep an old index.html.
           # Prefer files purge (works with narrower tokens) then hosts purge. Path renames are the hard bust.
-          ZONE_ID=$(curl -fsS "https://api.cloudflare.com/client/v4/zones?name=chicagoshining.com" -H "$AUTH" | jq -r '.result[0].id // empty')
+          ZONE_HTTP=$(curl -sS "https://api.cloudflare.com/client/v4/zones?name=chicagoshining.com" -H "$AUTH" -o /tmp/zone-lookup.json -w '%{http_code}' || true)
+          ZONE_ID=""
+          if [[ "$ZONE_HTTP" == "200" ]]; then
+            ZONE_ID=$(jq -r '.result[0].id // empty' /tmp/zone-lookup.json)
+          else
+            echo "::warning::Zone lookup HTTP $ZONE_HTTP; skipping cache purge."
+          fi
           PURGE_OK=0
           if [[ -n "$ZONE_ID" ]]; then
-            curl -fsS "https://api.cloudflare.com/client/v4/zones/$ZONE_ID/workers/routes" -H "$AUTH" -o /tmp/worker-routes.json || true
+            curl -sS "https://api.cloudflare.com/client/v4/zones/$ZONE_ID/workers/routes" -H "$AUTH" -o /tmp/worker-routes.json || true
             jq -c '[.result[]? | {pattern,script}]' /tmp/worker-routes.json 2>/dev/null || true
             curl -sS -X POST "https://api.cloudflare.com/client/v4/zones/$ZONE_ID/purge_cache" \
               -H "$AUTH" -H "Content-Type: application/json" \
@@ -201,19 +224,32 @@ jobs:
           fi
           # A Pages project protected by Access can legitimately return 403 from the
           # pages.dev hostname even though Wrangler successfully deployed production.
-          # Verify bytes when the deployment URL is publicly readable; otherwise keep the
-          # successful Wrangler deployment as authority and report an explicit warning.
-          INDEX_CODE=$(curl -sS -L -o /tmp/live-index.html -w '%{http_code}' "$LATEST_URL/" || true)
+          # Prefer Access service-token fetch; fall back to public 200/403 handling.
+          test -n "$CF_ACCESS_CLIENT_ID"
+          test -n "$CF_ACCESS_CLIENT_SECRET"
+          ACCESS_HEADERS=(-H "CF-Access-Client-Id: $CF_ACCESS_CLIENT_ID" -H "CF-Access-Client-Secret: $CF_ACCESS_CLIENT_SECRET")
+          INDEX_CODE=$(curl -sS -L "${ACCESS_HEADERS[@]}" -o /tmp/live-index.html -w '%{http_code}' "$LATEST_URL/" || true)
+          echo "pages_dev_http=$INDEX_CODE url=$LATEST_URL"
+          if [[ "$INDEX_CODE" != "200" ]]; then
+            INDEX_CODE=$(curl -sS -L -o /tmp/live-index.html -w '%{http_code}' "$LATEST_URL/" || true)
+            echo "pages_dev_public_http=$INDEX_CODE"
+          fi
           if [[ "$INDEX_CODE" == "200" ]]; then
-            grep -Fq "$EXPECTED_JS_PATH" /tmp/live-index.html
-            grep -Fq "$EXPECTED_DENSITY_CSS_PATH" /tmp/live-index.html
-            grep -Fq "UI build $EXPECTED_LABEL" /tmp/live-index.html
-            APP_CODE=$(curl -sS -L -o /tmp/live-app.js -w '%{http_code}' "$LATEST_URL$EXPECTED_JS_URL" || true)
+            require_match "$EXPECTED_JS_PATH" /tmp/live-index.html "pages.dev index js path"
+            require_match "$EXPECTED_DENSITY_CSS_PATH" /tmp/live-index.html "pages.dev index density css path"
+            require_match "UI build $EXPECTED_LABEL" /tmp/live-index.html "pages.dev UI build label"
+            APP_CODE=$(curl -sS -L "${ACCESS_HEADERS[@]}" -o /tmp/live-app.js -w '%{http_code}' "$LATEST_URL$EXPECTED_JS_URL" || true)
+            if [[ "$APP_CODE" != "200" ]]; then
+              APP_CODE=$(curl -sS -L -o /tmp/live-app.js -w '%{http_code}' "$LATEST_URL$EXPECTED_JS_URL" || true)
+            fi
             test "$APP_CODE" = "200"
-            grep -Fq "$EXPECTED_BUILD_ID" /tmp/live-app.js
-            CSS_CODE=$(curl -sS -L -o /tmp/live-home-density.css -w '%{http_code}' "$LATEST_URL$EXPECTED_DENSITY_CSS_URL" || true)
+            require_match "$EXPECTED_BUILD_ID" /tmp/live-app.js "pages.dev BUILD_ID"
+            CSS_CODE=$(curl -sS -L "${ACCESS_HEADERS[@]}" -o /tmp/live-home-density.css -w '%{http_code}' "$LATEST_URL$EXPECTED_DENSITY_CSS_URL" || true)
+            if [[ "$CSS_CODE" != "200" ]]; then
+              CSS_CODE=$(curl -sS -L -o /tmp/live-home-density.css -w '%{http_code}' "$LATEST_URL$EXPECTED_DENSITY_CSS_URL" || true)
+            fi
             test "$CSS_CODE" = "200"
-            grep -Fq "HOME_DENSITY_0_6_517" /tmp/live-home-density.css
+            require_match "HOME_DENSITY_0_6_517" /tmp/live-home-density.css "pages.dev density marker"
             echo "pages_content_verify=PASS"
           elif [[ "$INDEX_CODE" == "403" ]]; then
             echo "::warning::Pages production is protected by Access (HTTP 403); Wrangler deployment completed successfully, so public byte verification is skipped."
@@ -231,11 +267,8 @@ jobs:
           # The operator uses the custom domain, so a green deploy is not enough unless
           # studio.chicagoshining.com is serving this exact build too.
           CUSTOM_URL="https://studio.chicagoshining.com"
-          test -n "$CF_ACCESS_CLIENT_ID"
-          test -n "$CF_ACCESS_CLIENT_SECRET"
           CUSTOM_INDEX_CODE=$(curl -sS \
-            -H "CF-Access-Client-Id: $CF_ACCESS_CLIENT_ID" \
-            -H "CF-Access-Client-Secret: $CF_ACCESS_CLIENT_SECRET" \
+            "${ACCESS_HEADERS[@]}" \
             -D /tmp/custom-index.headers \
             -o /tmp/custom-index.html \
             -w '%{http_code}' \
@@ -246,23 +279,21 @@ jobs:
             echo "Authenticated Studio custom-domain verification failed with HTTP $CUSTOM_INDEX_CODE (location: $CUSTOM_LOCATION)." >&2
             exit 1
           fi
-          grep -Fq "UI build $EXPECTED_LABEL" /tmp/custom-index.html
-          grep -Fq "$EXPECTED_DENSITY_CSS_PATH" /tmp/custom-index.html
-          grep -Fq "$EXPECTED_JS_PATH" /tmp/custom-index.html
+          require_match "UI build $EXPECTED_LABEL" /tmp/custom-index.html "custom-domain UI build label"
+          require_match "$EXPECTED_DENSITY_CSS_PATH" /tmp/custom-index.html "custom-domain density css path"
+          require_match "$EXPECTED_JS_PATH" /tmp/custom-index.html "custom-domain js path"
           CUSTOM_CSS_CODE=$(curl -sS \
-            -H "CF-Access-Client-Id: $CF_ACCESS_CLIENT_ID" \
-            -H "CF-Access-Client-Secret: $CF_ACCESS_CLIENT_SECRET" \
+            "${ACCESS_HEADERS[@]}" \
             -o /tmp/custom-home-density.css \
             -w '%{http_code}' \
             "$CUSTOM_URL$EXPECTED_DENSITY_CSS_URL" || true)
           test "$CUSTOM_CSS_CODE" = "200"
-          grep -Fq "HOME_DENSITY_0_6_517" /tmp/custom-home-density.css
+          require_match "HOME_DENSITY_0_6_517" /tmp/custom-home-density.css "custom-domain density marker"
           CUSTOM_APP_CODE=$(curl -sS \
-            -H "CF-Access-Client-Id: $CF_ACCESS_CLIENT_ID" \
-            -H "CF-Access-Client-Secret: $CF_ACCESS_CLIENT_SECRET" \
+            "${ACCESS_HEADERS[@]}" \
             -o /tmp/custom-app.js \
             -w '%{http_code}' \
             "$CUSTOM_URL$EXPECTED_JS_URL" || true)
           test "$CUSTOM_APP_CODE" = "200"
-          grep -Fq "$EXPECTED_BUILD_ID" /tmp/custom-app.js
+          require_match "$EXPECTED_BUILD_ID" /tmp/custom-app.js "custom-domain BUILD_ID"
           echo "custom_domain_content_verify=PASS"

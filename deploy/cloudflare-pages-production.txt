@@ -53,3 +53,4 @@ Retry UI 0.6.517 Pages deploy with Cloudflare Access-aware custom-domain verific
 Verify Studio UI 0.6.517 through Cloudflare Access service token: 2026-10-07T04:55Z
 Deploy Studio topbar skyline banner with contrast-protected hamburger, branding, Help, and profile selector. Asset: topbar-banner-0618.css. Triggered 2026-10-07.
 Deploy Studio UI 0.6.518 MAE 28-day schedule + 11PM–3AM blackout: 2026-10-07T05:40Z
+Retry Studio UI 0.6.519 Pages verify (prefer unique deployment URL + Access + loud content mismatches): 2026-10-07T06:14Z
