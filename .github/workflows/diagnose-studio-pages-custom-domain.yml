@@ -1,0 +1,50 @@
+name: Diagnose Studio Pages Custom Domain
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'deploy/diagnose-studio-pages-custom-domain.txt'
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Compare Pages alias and Studio custom domain
+        shell: bash
+        run: |
+          set -euo pipefail
+          AUTH="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
+          EXPECTED=$(grep -oE 'UI build [0-9]+\.[0-9]+\.[0-9]+' apps/studio-web/index.html | head -1 || true)
+          echo "expected=$EXPECTED"
+
+          echo "== Pages project =="
+          curl -fsS "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/pages/projects/chicagoshining-studio" -H "$AUTH"             | jq '{success,project:(.result.name // null),production_branch:(.result.production_branch // null),domains:(.result.domains // [])}'
+
+          echo "== Pages custom-domain records =="
+          curl -sS "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/pages/projects/chicagoshining-studio/domains" -H "$AUTH"             | jq '{success,errors,result:[.result[]? | {name,status,created_on,zone_tag,verification_data}]}'
+
+          for URL in "https://chicagoshining-studio.pages.dev/" "https://studio.chicagoshining.com/"; do
+            label=$(echo "$URL" | sed -E 's#https://##;s#/##g;s#[^A-Za-z0-9]#_#g')
+            echo "== GET $URL =="
+            curl -sS -L -D "/tmp/$label.headers" -o "/tmp/$label.html" -w 'http=%{http_code} final=%{url_effective}\n' "$URL?diag=$GITHUB_RUN_ID-$GITHUB_SHA"
+            grep -oiE 'UI build [0-9]+\.[0-9]+\.[0-9]+' "/tmp/$label.html" | head -1 || echo "ui_build=NOT_FOUND"
+            grep -oE 'home-density-[0-9]+\.css[^" ]*' "/tmp/$label.html" | head -1 || echo "density_css=NOT_FOUND"
+            grep -oE 'app-item4-0625\.js[^" ]*' "/tmp/$label.html" | head -1 || echo "app_js=NOT_FOUND"
+            grep -Ei '^(HTTP/|cf-cache-status:|age:|cache-control:|cdn-cache-control:|cloudflare-cdn-cache-control:|etag:|server:|cf-ray:|location:)' "/tmp/$label.headers" || true
+          done
+
+          echo "== DNS record (best effort) =="
+          ZONE_ID=$(curl -fsS "https://api.cloudflare.com/client/v4/zones?name=chicagoshining.com" -H "$AUTH" | jq -r '.result[0].id // empty' || true)
+          if [[ -n "$ZONE_ID" ]]; then
+            curl -sS "https://api.cloudflare.com/client/v4/zones/$ZONE_ID/dns_records?name=studio.chicagoshining.com" -H "$AUTH"               | jq '{success,errors,result:[.result[]? | {id,type,name,content,proxied,ttl}]}'
+          fi
