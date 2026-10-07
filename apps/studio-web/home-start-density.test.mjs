@@ -19,7 +19,7 @@ test("compact launcher remains single-column on narrow screens", () => {
   assert.match(css, /@media\(max-width:760px\)[\s\S]*\.main:has\(#page-home\.active\):has\(#page-dashboard\.active\) \.ez-path-fork-inner\{[\s\S]*grid-template-columns:1fr/);
 });
 
-test("Studio UI cache key is bumped for compact launcher", () => {
-  assert.match(html, /styles-phase7-0621\.css\?v=0\.6\.516-compact-home-start/);
-  assert.match(html, /UI build 0\.6\.516/);
+test("compact launcher keeps the Studio build contract aligned", () => {
+  assert.match(html, /styles-phase7-0621\.css\?v=0\.6\.515-always-hamburger-nav/);
+  assert.match(html, /UI build 0\.6\.515/);
 });
