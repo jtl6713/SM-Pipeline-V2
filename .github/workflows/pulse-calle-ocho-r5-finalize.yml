@@ -25,7 +25,7 @@ jobs:
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
       TARGET_WORKER: chicagoshining-studio-api
       BRIDGE_WORKER: chicagoshining-calle-ocho-r5
-      OUTPUT_ID: recqEHKBc7pkPrk5k
+      OUTPUT_ID: recowN22rCRbNXeLN
     steps:
       - uses: actions/checkout@v6
 
@@ -55,7 +55,7 @@ jobs:
                   "path": "/api/hooks/r5-done",
                   "headers": {"Authorization": "Bearer r5done_7kqp2nvm4w8x1c9h3z"},
                   "body": {
-                      "jobId": "job-20261007075538-f79518c5",
+                      "jobId": "job-20261007080539-1b738c67",
                       "status": "completed",
                       "renderUrl": "https://render.chicagoshining.com/out/studio-PR-20261007053900-P2KLPF-facebook-reel.mp4",
                   },
