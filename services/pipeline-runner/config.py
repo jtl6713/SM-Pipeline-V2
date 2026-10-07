@@ -146,7 +146,7 @@ def load_settings() -> dict[str, Any]:
         "rr1_review_email_to": os.environ.get("RR1_REVIEW_EMAIL_TO", ""),
         "rr1_decision_webhook_url": os.environ.get("RR1_DECISION_WEBHOOK_URL", ""),
         "rr2_webhook_token": os.environ.get("RR2_WEBHOOK_TOKEN", ""),
-        "service_version": os.environ.get("SERVICE_VERSION", "2026-10-07-timed-vo-leveling"),
+        "service_version": os.environ.get("SERVICE_VERSION", "2026-10-07-beat-sync-vo-guard"),
         "ops_alert_email_to": os.environ.get("OPS_ALERT_EMAIL_TO", "chicagoshining@gmail.com"),
         "produce_heal_webhook_url": os.environ.get("PRODUCE_HEAL_WEBHOOK_URL", ""),
     })
