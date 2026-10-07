@@ -503,9 +503,10 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.466-mae-28-day-schedule",
+          version: "0.10.467-promotion-reconcile",
           studio_mae_schedule_v1: true,
           studio_mae_28_day_schedule_v1: true,
+          studio_promotion_reconcile_after_handoff_error_v1: true,
           studio_mae_profile_occupancy_v1: true,
           studio_schedule_occupancy_fields_v1: true,
           studio_render_stale_rendering_v1: true,
@@ -21145,7 +21146,27 @@ async function promoteIdeaViaI3I4(request, env, url, authorization) {
   }
   if (!summary) throw new HttpError(409, "Idea summary is required by the existing I4 promotion gate; add a summary before promoting");
   const webhook = promotionWebhookUrl(env, recordId, input);
-  await fetchPromotionHandoff(env, webhook);
+  try {
+    await fetchPromotionHandoff(env, webhook);
+  } catch (error) {
+    // I3/I4 can complete the side effects even when the interactive bridge returns
+    // a transient 5xx. Reconcile against Airtable before surfacing a failure so
+    // Studio does not leave a successfully promoted idea looking stuck.
+    const reconciled = await waitForPromotionResult(env, recordId);
+    if (promotionCompleted(reconciled)) {
+      return respond(request, env, {
+        ok: true,
+        promoted: true,
+        already_promoted: false,
+        promotion_state: "promoted",
+        recovered_after_handoff_error: true,
+        handoff: "I3-to-I4-reconciled",
+        message: "Promotion completed after a transient I3/I4 handoff error",
+        record: mapIdea(reconciled),
+      });
+    }
+    throw error;
+  }
 
   const updated = await waitForPromotionResult(env, recordId);
   const promoted = promotionCompleted(updated);

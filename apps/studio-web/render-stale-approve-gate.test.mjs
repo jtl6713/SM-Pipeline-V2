@@ -22,8 +22,8 @@ test("UI 0.6.516 Approve gate rejects stale Rendering / In Production (Output 18
   assert.match(app, /Output 1807/);
 });
 
-test("Worker 0.10.466 heals Final_File_URL + Rendering to Ready for Review", () => {
-  assert.match(worker, /version: "0\.10\.466-mae-28-day-schedule"/);
+test("Worker 0.10.467 heals Final_File_URL + Rendering to Ready for Review", () => {
+  assert.match(worker, /version: "0\.10\.467-promotion-reconcile"/);
   assert.match(worker, /studio_render_stale_rendering_v1: true/);
   assert.match(worker, /R5_STALE_RENDERING_FINALIZED/);
   assert.match(worker, /\{Render_Status\}="Rendering",\{Final_File_URL\}!=""/);
