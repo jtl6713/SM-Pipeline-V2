@@ -49,3 +49,4 @@ Deploy compact home start-post density pass. Compress the home Start a post laun
 Deploy Pages UI 0.6.516 cache-busted home density. Load /assets/home-density-0516.css as a new asset path because production cache purge is not authorized; verify the CSS marker after deploy so a green Pages run proves the visible home compaction is actually live.
 Deploy UI 0.6.517-compact-home-launcher. Full app BUILD_ID + cache-key bump, new physical home-density-0517.css asset, and custom-domain verification for the compact Start a post launcher.
 Trigger Pages deploy for actual Studio UI 0.6.517 source commit 1ed2a838: 2026-10-07T04:28Z
+Retry UI 0.6.517 Pages deploy with Cloudflare Access-aware custom-domain verification: 2026-10-07T04:31Z
