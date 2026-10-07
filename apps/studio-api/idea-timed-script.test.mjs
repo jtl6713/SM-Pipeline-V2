@@ -13,6 +13,7 @@ import {
   formatTimedScriptMarkdown,
   ideaTimedScriptReady,
   mergeTimedScriptNotes,
+  singleImageFeedPostIds,
   pickTimelineCatalog,
   scenesFromModelPayload,
   scenesFromProposalPayload,
@@ -147,6 +148,23 @@ test("fallback proposal mixes library stills with shots still to create", () => 
   assert.match(scenes[0].voiceover_text, /Staten Island Ferry tricks/);
 });
 
+test("a single-image feed post keeps its one matched still and skips a video timeline", () => {
+  assert.equal(singleImageFeedPostIds({ contentType: "Vertical Short Video", matchedIds: ["recPhoto1"] }), null);
+  assert.deepEqual(singleImageFeedPostIds({
+    contentType: "Feed Post",
+    matchedIds: ["recPhoto1", "recPhoto1", "not-an-id"],
+  }), ["recPhoto1"]);
+  assert.deepEqual(singleImageFeedPostIds({ contentType: "Feed Post", matchedIds: [] }), []);
+  assert.deepEqual(singleImageFeedPostIds({
+    contentType: "Feed Post",
+    matchedIds: ["recPhoto1", "recPhoto2"],
+  }), ["recPhoto1", "recPhoto2"]);
+  assert.deepEqual(singleImageFeedPostIds({
+    contentType: "Feed Post",
+    matchedIds: [{ id: "recPhoto1" }],
+  }), ["recPhoto1"]);
+});
+
 test("Worker advertises the idea timed-script route", async () => {
   const worker = await readFile(path.join(here, "worker.js"), "utf8");
   const app = await readFile(path.join(here, "../studio-web/assets/app-item4-0625.js"), "utf8");
@@ -158,6 +176,11 @@ test("Worker advertises the idea timed-script route", async () => {
   assert.match(worker, /idea-vo-timeline=1/);
   assert.match(worker, /waitAutonomousVariantsReady/);
   assert.match(worker, /createIdeaTimedScriptRoute\(request, env, url, authorization, ctx\)/);
+  assert.match(worker, /acceptSingleImageFeedPost/);
+  assert.match(worker, /single_image_feed_post/);
+  assert.match(worker, /singleImageFeedPostIds/);
+  assert.match(app, /single_image_feed_post/);
+  assert.match(app, /Preparing this feed post from the one photo/);
   assert.match(worker, /deterministic-fallback/);
   assert.match(worker, /idea timeline writer failed; using deterministic fallback/);
   assert.match(app, /ideasCreateTimelineButton/);

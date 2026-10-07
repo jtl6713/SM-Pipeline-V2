@@ -389,6 +389,17 @@ export function scriptedShortProposalReady(timeline) {
   return segments.every((segment) => String(segment?.voiceover_text || "").trim() && String(segment?.suggested_visual || "").trim());
 }
 
+/** Feed Post + the already-matched stills. null means this is not a feed post. */
+export function singleImageFeedPostIds({ contentType, matchedIds = [] } = {}) {
+  if (String(contentType || "").trim() !== "Feed Post") return null;
+  const ids = [];
+  for (const raw of matchedIds || []) {
+    const id = String((raw && typeof raw === "object" ? raw.id : raw) || "").trim();
+    if (/^rec[A-Za-z0-9]+$/.test(id) && !ids.includes(id)) ids.push(id);
+  }
+  return ids;
+}
+
 export function ideaTimedScriptReady(timeline) {
   const segments = Array.isArray(timeline?.segments) ? timeline.segments : [];
   if (segments.length < 2) return false;
