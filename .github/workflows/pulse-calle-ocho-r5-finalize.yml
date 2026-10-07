@@ -25,7 +25,7 @@ jobs:
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
       TARGET_WORKER: chicagoshining-studio-api
       BRIDGE_WORKER: chicagoshining-calle-ocho-r5
-      OUTPUT_ID: recowN22rCRbNXeLN
+      OUTPUT_ID: recR5UuxolfIZFa1F
     steps:
       - uses: actions/checkout@v6
 
@@ -46,8 +46,10 @@ jobs:
           from pathlib import Path
           token = secrets.token_urlsafe(36)
           Path("/tmp/token").write_text(token)
-          # Service-binding path: returns 202 immediately; Studio waitUntil pulses Python R5.
-          # creative/render/continue awaits R5 and trips CF 1101 on the bridge.
+          # Service-binding path: returns 202 immediately; Studio waitUntil pulses Python R5
+          # and resumeStalePlatformOutputs (staleMinutes=1) which starts Python R4 for
+          # Ready-for-Render outputs with blank Remotion_Job_ID (1932 TikTok serialize).
+          # creative/render/continue uses retired Make R4 (410) — do not use it.
           specs = [
               {
                   "name": "r5_done",
@@ -55,9 +57,9 @@ jobs:
                   "path": "/api/hooks/r5-done",
                   "headers": {"Authorization": "Bearer r5done_7kqp2nvm4w8x1c9h3z"},
                   "body": {
-                      "jobId": "job-20261007080539-1b738c67",
+                      "jobId": "job-kick-r4-1932-serialize",
                       "status": "completed",
-                      "renderUrl": "https://render.chicagoshining.com/out/studio-PR-20261007053900-P2KLPF-facebook-reel.mp4",
+                      "renderUrl": "https://render.chicagoshining.com/out/studio-PR-20261007053900-P2KLPF-tiktok-video-draft.mp4",
                   },
               },
           ]
@@ -105,7 +107,7 @@ jobs:
             -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -o /tmp/account-sub.json
           jq -er '.result.subdomain' /tmp/account-sub.json >/tmp/subdomain
 
-      - name: Pulse r5-done for Output 1931
+      - name: Pulse r5-done side-effect to kick R4 for Output 1932
         shell: bash
         run: |
           set -euo pipefail
@@ -137,6 +139,9 @@ jobs:
           test "$code" -eq 200
           jq '{ok,results:[.results[]|{name,path,status,ok,triggered:(.body.triggered//null),eligible:(.body.eligible//null),message:(.body.message//null)}]}' /tmp/result.json
           jq -e '.ok==true' /tmp/result.json >/dev/null
+          # waitUntil R4 kick needs a few seconds after the 202
+          sleep 25
+
 
       - name: Delete temporary bridge
         if: always()
