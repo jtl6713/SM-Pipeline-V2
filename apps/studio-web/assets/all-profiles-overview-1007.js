@@ -13,9 +13,22 @@
     for (const row of outputs || []) {
       const platform = String(row?.platform || "").trim();
       if (!(platform in counts)) continue;
-      const published = Boolean(row?.published_at) || /published/i.test(String(row?.publish_status || ""));
+      const publishStatus = String(row?.publish_status || "");
+      const youtubePrivacy = String(
+        row?.youtube_privacy_status
+        || row?.youtube_privacy
+        || row?.privacy_status
+        || row?.privacyStatus
+        || row?.youtube_status?.privacyStatus
+        || ""
+      ).trim().toLowerCase();
+      // YouTube uploads are created private before their scheduled public release.
+      // Keep private/unlisted uploads in the non-public scheduled count until public.
+      const youtubeNotPublic = platform === "YouTube" && /^(private|unlisted)$/.test(youtubePrivacy);
+      const published = !youtubeNotPublic && (Boolean(row?.published_at) || /published/i.test(publishStatus));
       const scheduled = Boolean(row?.scheduled_post_date || row?.youtube_scheduled_publish_at || row?.studio_scheduled_at)
-        || /scheduled|ready to publish|publishing/i.test(String(row?.publish_status || ""));
+        || /scheduled|ready to publish|publishing/i.test(publishStatus)
+        || youtubeNotPublic;
       if (!published && scheduled) counts[platform] += 1;
     }
     return counts;
