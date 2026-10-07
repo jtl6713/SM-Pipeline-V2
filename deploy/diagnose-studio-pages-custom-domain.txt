@@ -1,0 +1,2 @@
+Diagnose why studio.chicagoshining.com is serving an older Studio build than chicagoshining-studio.pages.dev.
+Triggered: 2026-10-07T04:29Z
