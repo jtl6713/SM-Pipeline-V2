@@ -1,0 +1,2 @@
+# Trigger: finalize Calle Ocho Output 1930 R5 after Remotion completed (leveled VO)
+# 2026-10-07T07:15:00Z output=recqEHKBc7pkPrk5k job=job-20261007071039-d8c767b1
