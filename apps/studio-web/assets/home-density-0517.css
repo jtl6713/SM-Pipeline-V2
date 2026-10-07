@@ -1,4 +1,4 @@
-/* HOME_DENSITY_0_6_517
+/* HOME_DENSITY_0_6_521
    Cache-busted home launcher density overrides.
    This file is intentionally separate from styles-phase7-0621.css because
    Cloudflare cache purge is not currently authorized on the production token. */
@@ -91,5 +91,138 @@
   .main:has(#page-home.active):has(#page-dashboard.active) .ez-path-fork-inner{
     grid-template-columns:1fr;
     grid-template-areas:none;
+  }
+}
+
+/* 0.6.521: compact high-contrast Start a post launcher. */
+.main:has(#page-home.active):has(#page-dashboard.active) .ez-path-fork{
+  padding:9px 12px 8px;
+}
+.main:has(#page-home.active):has(#page-dashboard.active) .ez-path-fork::before{
+  filter:brightness(.72) saturate(.9);
+}
+.main:has(#page-home.active):has(#page-dashboard.active) .ez-path-fork-inner{
+  align-items:stretch;
+  gap:9px;
+}
+.main:has(#page-home.active):has(#page-dashboard.active) .ez-path-fork-copy{
+  padding:2px 4px;
+}
+.main:has(#page-home.active):has(#page-dashboard.active) .ez-path-brand{
+  margin-bottom:1px;
+}
+.main:has(#page-home.active):has(#page-dashboard.active) .ez-path-hook{
+  margin-bottom:3px;
+  color:#fff;
+  text-shadow:0 1px 4px #000;
+}
+.main:has(#page-home.active):has(#page-dashboard.active) .ez-path-fork-copy h1{
+  margin-bottom:2px;
+  color:#fff;
+}
+.main:has(#page-home.active):has(#page-dashboard.active) .ez-path-fork-copy h1 + p{
+  color:#fff;
+  font-size:.75rem;
+  line-height:1.25;
+  text-shadow:0 1px 4px #000;
+}
+.main:has(#page-home.active):has(#page-dashboard.active) .ez-wizard,
+.main:has(#page-home.active):has(#page-dashboard.active) .az-drop{
+  padding:9px 10px;
+  gap:5px;
+  border-radius:12px;
+  background:rgba(35,20,70,.88);
+  color:#fff;
+  box-shadow:0 1px 0 rgba(255,255,255,.28) inset,0 8px 18px rgba(0,0,0,.22);
+}
+.main:has(#page-home.active):has(#page-dashboard.active) .ez-wizard-toolbar{
+  min-height:12px;
+}
+.main:has(#page-home.active):has(#page-dashboard.active) .ez-wizard-text,
+.main:has(#page-home.active):has(#page-dashboard.active) .ez-wizard-summary,
+.main:has(#page-home.active):has(#page-dashboard.active) .ez-wizard-bubble--bot,
+.main:has(#page-home.active):has(#page-dashboard.active) .az-drop > p,
+.main:has(#page-home.active):has(#page-dashboard.active) .az-drop-title span,
+.main:has(#page-home.active):has(#page-dashboard.active) .az-drop-zone span{
+  color:#f7f4ff!important;
+}
+.main:has(#page-home.active):has(#page-dashboard.active) .ez-wizard-prompt,
+.main:has(#page-home.active):has(#page-dashboard.active) .az-drop h2,
+.main:has(#page-home.active):has(#page-dashboard.active) .az-drop-zone strong{
+  color:#fff;
+  text-shadow:0 1px 3px rgba(0,0,0,.65);
+}
+.main:has(#page-home.active):has(#page-dashboard.active) .ez-wizard-prompt{
+  font-size:.82rem;
+}
+.main:has(#page-home.active):has(#page-dashboard.active) .ez-wizard-turn,
+.main:has(#page-home.active):has(#page-dashboard.active) .ez-wizard-chips{
+  gap:5px;
+}
+.main:has(#page-home.active):has(#page-dashboard.active) .ez-wizard-chip,
+.main:has(#page-home.active):has(#page-dashboard.active) .ez-wizard-form button[type="submit"]{
+  padding:5px 9px;
+  font-size:.75rem;
+  border-color:rgba(255,255,255,.5);
+  background:rgba(4,10,30,.62);
+  color:#fff;
+}
+.main:has(#page-home.active):has(#page-dashboard.active) .az-drop h2{
+  font-size:.9rem;
+}
+.main:has(#page-home.active):has(#page-dashboard.active) .az-drop > p{
+  font-size:.69rem;
+  line-height:1.22;
+  display:-webkit-box;
+  -webkit-line-clamp:2;
+  -webkit-box-orient:vertical;
+  overflow:hidden;
+}
+.main:has(#page-home.active):has(#page-dashboard.active) .az-drop-title{
+  display:grid;
+  grid-template-columns:auto 1fr;
+  gap:7px;
+  align-items:center;
+}
+.main:has(#page-home.active):has(#page-dashboard.active) .az-drop-title span{
+  font-size:.7rem;
+  white-space:nowrap;
+}
+.main:has(#page-home.active):has(#page-dashboard.active) .az-drop-title input{
+  margin:0;
+  padding:5px 8px;
+  min-height:28px;
+  background:rgba(4,10,30,.65);
+  border-color:rgba(255,255,255,.42);
+}
+.main:has(#page-home.active):has(#page-dashboard.active) .az-optional-fields summary{
+  padding:5px 8px;
+  font-size:.72rem;
+  color:#fff;
+}
+.main:has(#page-home.active):has(#page-dashboard.active) .az-drop-zone{
+  min-height:0;
+  padding:6px 9px;
+  gap:7px;
+  border-color:rgba(255,255,255,.55)!important;
+  background:rgba(4,10,30,.58)!important;
+}
+.main:has(#page-home.active):has(#page-dashboard.active) .az-drop-zone .item4-upload-icon{
+  font-size:18px;
+}
+.main:has(#page-home.active):has(#page-dashboard.active) .az-drop-zone strong{
+  font-size:.78rem;
+}
+.main:has(#page-home.active):has(#page-dashboard.active) .az-drop-zone span{
+  font-size:.66rem;
+}
+.main:has(#page-home.active):has(#page-dashboard.active) .form-message:empty,
+.main:has(#page-home.active):has(#page-dashboard.active) .az-drop-progress[hidden]{
+  display:none!important;
+}
+@media(min-width:1020px){
+  .main:has(#page-home.active):has(#page-dashboard.active) .ez-path-fork-inner{
+    grid-template-columns:minmax(150px,.42fr) minmax(390px,1.05fr) minmax(470px,1.35fr);
+    gap:9px;
   }
 }
