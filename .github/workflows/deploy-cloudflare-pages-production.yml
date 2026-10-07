@@ -225,3 +225,19 @@ jobs:
             echo "Unexpected Pages verification HTTP $INDEX_CODE from $LATEST_URL" >&2
             exit 1
           fi
+
+          # The operator uses the custom domain, so a green deploy is not enough unless
+          # studio.chicagoshining.com is serving this exact build too.
+          CUSTOM_URL="https://studio.chicagoshining.com"
+          CUSTOM_INDEX_CODE=$(curl -sS -L -o /tmp/custom-index.html -w '%{http_code}' "$CUSTOM_URL/?studio_build=$EXPECTED_LABEL&commit=$GITHUB_SHA" || true)
+          echo "custom_domain_http=$CUSTOM_INDEX_CODE"
+          if [[ "$CUSTOM_INDEX_CODE" != "200" ]]; then
+            echo "Custom Studio domain returned HTTP $CUSTOM_INDEX_CODE; refusing to mark deployment healthy." >&2
+            exit 1
+          fi
+          grep -Fq "UI build $EXPECTED_LABEL" /tmp/custom-index.html
+          grep -Fq "$EXPECTED_DENSITY_CSS_PATH" /tmp/custom-index.html
+          CUSTOM_CSS_CODE=$(curl -sS -L -o /tmp/custom-home-density.css -w '%{http_code}' "$CUSTOM_URL$EXPECTED_DENSITY_CSS_URL" || true)
+          test "$CUSTOM_CSS_CODE" = "200"
+          grep -Fq "HOME_DENSITY_0_6_517" /tmp/custom-home-density.css
+          echo "custom_domain_content_verify=PASS"
