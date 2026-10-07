@@ -20,6 +20,7 @@ from studio_produce.timed_script import (
 
 
 SynthesizeFn = Callable[..., bytes]
+NormalizeSegmentFn = Callable[[bytes, int, str], bytes]
 
 
 def _silent_segment(segment: dict[str, Any]) -> bool:
@@ -45,6 +46,7 @@ def synthesize_timed_script_voiceover(
     voice_id: str,
     synthesize: SynthesizeFn,
     lengthen=None,
+    normalize_segment: NormalizeSegmentFn | None = None,
 ) -> tuple[bytes, dict[str, Any], list[float]]:
     """Generate one file per scene, measure each, rewrite windows, concat.
 
@@ -77,6 +79,19 @@ def synthesize_timed_script_voiceover(
         raw = synthesize(text, voice_id=voice_id, speed=1.0)
         if not raw:
             raise RuntimeError(f"timed-script scene {index} returned empty audio")
+
+        # ElevenLabs scene calls can differ dramatically in output level even
+        # when the voice and settings are identical. Normalizing only after
+        # concatenation preserves those relative differences, which produced
+        # the recurring "voiceover nearly disappears for one or two scenes"
+        # defect. Level every spoken scene before concat; the final whole-file
+        # normalization still runs afterward as the delivery loudness pass.
+        if normalize_segment is not None:
+            leveled = normalize_segment(raw, index, text)
+            if not leveled:
+                raise RuntimeError(f"timed-script scene {index} normalization returned empty audio")
+            raw = leveled
+
         seconds = probe_audio_duration_bytes(raw)
         if seconds <= 0:
             raise RuntimeError(f"timed-script scene {index} measured duration was {seconds}")
