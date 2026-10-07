@@ -177,3 +177,82 @@ def test_timed_script_under_four_seconds_is_rejected(monkeypatch):
         assert "1.625s" in str(exc)
     else:
         raise AssertionError("short voiceover was kept")
+
+
+def test_timed_script_normalizes_each_spoken_scene_before_concat(monkeypatch):
+    """Independent TTS scene calls must be leveled before they are joined."""
+    timeline = parse_timed_script_markdown(
+        "| Time | Voiceover | Suggested still |\n"
+        "| --- | --- | --- |\n"
+        "| 0:00–0:05 | First scene is normal. | A |\n"
+        "| 0:05–0:10 | Second scene arrived very quiet. | B |\n"
+        "| 0:10–0:15 | Third scene returns to normal. | C |\n"
+    )["timeline"]
+
+    normalized_calls: list[tuple[int, str, bytes]] = []
+
+    def fake_synthesize(text: str, *, voice_id: str, speed: float = 1.0) -> bytes:
+        return ("RAW:" + text).encode("utf-8")
+
+    def fake_normalize(raw: bytes, scene_index: int, text: str) -> bytes:
+        normalized_calls.append((scene_index, text, raw))
+        return ("NORM:" + text).encode("utf-8")
+
+    monkeypatch.setattr(
+        "p2.timed_script_voiceover.probe_audio_duration_bytes",
+        lambda data: 4.0 + (0.1 if data.startswith(b"NORM:Second") else 0.0),
+    )
+    monkeypatch.setattr(
+        "p2.timed_script_voiceover.concat_mp3_bytes",
+        lambda parts: b"|".join(parts),
+    )
+
+    audio, measured, seconds = synthesize_timed_script_voiceover(
+        timeline,
+        voice_id="voice",
+        synthesize=fake_synthesize,
+        normalize_segment=fake_normalize,
+    )
+
+    assert [row[0] for row in normalized_calls] == [1, 2, 3]
+    assert all(row[2].startswith(b"RAW:") for row in normalized_calls)
+    assert audio.count(b"NORM:") == 3
+    assert b"RAW:" not in audio
+    assert seconds == [4.0, 4.1, 4.0]
+    assert measured["segments"][1]["duration_seconds"] == 4.1
+
+
+def test_silent_scene_is_not_sent_to_loudness_normalizer(monkeypatch):
+    from studio_produce.timed_script import timeline_from_slide_lines
+
+    timeline = timeline_from_slide_lines(
+        [
+            {"line": "Spoken scene one.", "silent": False},
+            {"line": "", "silent": True, "hold_seconds": 2.0},
+            {"line": "Spoken scene three.", "silent": False},
+        ],
+        [],
+    )
+    calls: list[int] = []
+
+    def fake_synthesize(text: str, *, voice_id: str, speed: float = 1.0) -> bytes:
+        return text.encode("utf-8")
+
+    def fake_normalize(raw: bytes, scene_index: int, _text: str) -> bytes:
+        calls.append(scene_index)
+        return raw
+
+    monkeypatch.setattr("p2.timed_script_voiceover.silence_mp3_bytes", lambda _seconds: b"SILENCE")
+    monkeypatch.setattr(
+        "p2.timed_script_voiceover.probe_audio_duration_bytes",
+        lambda data: 2.0 if data == b"SILENCE" else 4.0,
+    )
+    monkeypatch.setattr("p2.timed_script_voiceover.concat_mp3_bytes", lambda parts: b"|".join(parts))
+
+    _audio, _measured, _seconds = synthesize_timed_script_voiceover(
+        timeline,
+        voice_id="voice",
+        synthesize=fake_synthesize,
+        normalize_segment=fake_normalize,
+    )
+    assert calls == [1, 3]
