@@ -260,7 +260,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.517-compact-home-launcher";
+  const BUILD_ID = "item4-0.6.518-mae-28-day-schedule";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -16854,7 +16854,7 @@
     if (!raw) return false;
     const iso = studioDateTimeLocalToIso(raw, workingStudioTimeZone());
     // The profile timezone is the scheduling authority. Treat a future schedule
-    // inside 8:00 PM–3:30 AM in that profile as invalid/missing so the automatic
+    // inside 11:00 PM–3:00 AM in that profile as invalid/missing so the automatic
     // scheduler replaces it instead of preserving a slot interpreted in the
     // browser/user timezone.
     return Boolean(iso) && !pipelineScheduleIsBlackout(iso, workingStudioTimeZone());
@@ -17412,7 +17412,7 @@
       const minute = Number(parts.find((part) => part.type === "minute")?.value);
       if (!Number.isFinite(hour) || !Number.isFinite(minute)) return true;
       const localMinutes = hour * 60 + minute;
-      return localMinutes >= 20 * 60 || localMinutes <= 3 * 60 + 30;
+      return localMinutes >= 23 * 60 || localMinutes <= 3 * 60;
     } catch {
       return true;
     }
@@ -17427,7 +17427,7 @@
     button.id = "pipelineScheduleBulkRegenerate";
     button.className = "secondary-button";
     button.textContent = "Regenerate schedules";
-    button.title = "Regenerate upcoming schedules for the selected platforms, within the next 14 days.";
+    button.title = "Regenerate upcoming schedules for the selected platforms, within the next 28 days.";
     actions.insertBefore(button, toggle);
     button.addEventListener("click", () => {
       const platforms = [...pipelineScheduleVisiblePlatforms];
@@ -17436,7 +17436,7 @@
         return;
       }
       const nowMs = Date.now();
-      const cutoffMs = nowMs + 14 * 24 * 60 * 60 * 1000;
+      const cutoffMs = nowMs + 28 * 24 * 60 * 60 * 1000;
       const eligible = (pipelineOutputs || []).filter((record) => {
         if (!record?.id || record.do_not_publish || creativeIsPublished(record)) return false;
         if (!platforms.includes(pipelineSchedulePlatformKey(record))) return false;
@@ -17446,11 +17446,11 @@
       });
       const platformNames = platforms.map((key) => key[0].toUpperCase() + key.slice(1)).join(", ");
       if (!eligible.length) {
-        setPipelineScheduleGridMessage("No unpublished posts for the selected platforms are scheduled in the next 14 days.");
+        setPipelineScheduleGridMessage("No unpublished posts for the selected platforms are scheduled in the next 28 days.");
         return;
       }
       const confirmed = window.confirm(
-        `You are about to change ${eligible.length} post schedule${eligible.length === 1 ? "" : "s"} for ${platformNames} in the next 14 days. Apply the current spacing and local-time blackout rules?\n\nOK to continue, or Cancel to leave every schedule unchanged.`
+        `You are about to change ${eligible.length} post schedule${eligible.length === 1 ? "" : "s"} for ${platformNames} in the next 28 days. Apply the current spacing and local-time blackout rules?\n\nOK to continue, or Cancel to leave every schedule unchanged.`
       );
       if (!confirmed) return;
       regeneratePipelineSchedulesForPlatforms(platforms, button).catch((error) => {
@@ -17463,7 +17463,7 @@
 
   async function regeneratePipelineSchedulesForPlatforms(platforms, button) {
     const nowMs = Date.now();
-    const cutoffMs = nowMs + 14 * 24 * 60 * 60 * 1000;
+    const cutoffMs = nowMs + 28 * 24 * 60 * 60 * 1000;
     const selected = new Set((platforms || []).map((key) => String(key || "").toLowerCase()));
     const eligible = (pipelineOutputs || [])
       .filter((record) => {
@@ -17550,7 +17550,7 @@
     button.textContent = "Regenerate schedules";
     setPipelineScheduleGridMessage(failed
       ? `Regenerated ${saved} schedule${saved === 1 ? "" : "s"}; ${failed} could not be regenerated.`
-      : `Regenerated ${saved} post schedule${saved === 1 ? "" : "s"} within the next 14 days.`);
+      : `Regenerated ${saved} post schedule${saved === 1 ? "" : "s"} within the next 28 days.`);
   }
 
   async function regeneratePipelineContentSchedule(groupKey, button = null) {
@@ -18915,7 +18915,7 @@
     if (summary) {
       summary.textContent = error
         ? `${total} scheduled in the loaded Pipeline rows · schedule service retrying · ${rangeLabel} · ${timezone}`
-        : `${total} scheduled output${total === 1 ? "" : "s"} · ${unscheduled.length} ready to schedule · ${rangeLabel} · ${timezone} · blackout hours ${pipelineScheduleBlackoutHoursOpen ? "shown" : "collapsed"} (8 PM–3:30 AM, off limits)`;
+        : `${total} scheduled output${total === 1 ? "" : "s"} · ${unscheduled.length} ready to schedule · ${rangeLabel} · ${timezone} · blackout hours ${pipelineScheduleBlackoutHoursOpen ? "shown" : "collapsed"} (11 PM–3 AM, off limits)`;
     }
 
     const now = new Date();
@@ -18968,17 +18968,17 @@
         ].filter(Boolean).join(" ");
         const interactive = !isPast && !isBlackout;
         const aria = isBlackout
-          ? `Off limits: ${date.toLocaleString(undefined, { timeZone: workingStudioTimeZone(), weekday: "long", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })} (8:00 PM–3:30 AM local)`
+          ? `Off limits: ${date.toLocaleString(undefined, { timeZone: workingStudioTimeZone(), weekday: "long", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })} (11:00 PM–3:00 AM local)`
           : `Schedule selected output for ${date.toLocaleString(undefined, { timeZone: workingStudioTimeZone(), weekday: "long", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}`;
         const emptyLabel = isBlackout
           ? '<span class="pipeline-schedule-slot-empty">Off limits</span>'
           : '<span class="pipeline-schedule-slot-empty">Drop here</span>';
         return `<td class="${classes}"${interactive ? ` data-pipeline-schedule-drop="${escapeHtml(date.toISOString())}" tabindex="0" role="button" aria-label="${escapeHtml(aria)}"` : ` aria-label="${escapeHtml(aria)}"`}><div class="pipeline-schedule-cell-inner">${bubbles || emptyLabel}</div></td>`;
       }).join("");
-      return `<tr${rowBlackout ? ' class="is-blackout-row"' : ""}><th scope="row" class="pipeline-schedule-hour${rowBlackout ? " is-blackout" : ""}"${rowBlackout ? ' title="Off limits: 8:00 PM–3:30 AM local"' : ""}>${escapeHtml(pipelineScheduleSlotLabel(slotIndex))}</th>${cellsHtml}</tr>`;
+      return `<tr${rowBlackout ? ' class="is-blackout-row"' : ""}><th scope="row" class="pipeline-schedule-hour${rowBlackout ? " is-blackout" : ""}"${rowBlackout ? ' title="Off limits: 11:00 PM–3:00 AM local"' : ""}>${escapeHtml(pipelineScheduleSlotLabel(slotIndex))}</th>${cellsHtml}</tr>`;
     }).join("");
 
-    const windowToolbar = `<div class="pipeline-schedule-window-toolbar" aria-label="Calendar date range controls"><div class="pipeline-schedule-window-controls"><button type="button" class="secondary-button" data-pipeline-schedule-window-shift="-7">← Previous 7 days</button><button type="button" class="text-button" data-pipeline-schedule-window-today${pipelineScheduleWindowStartsToday(windowValue) ? ' disabled aria-current="date"' : ""}>Today</button><button type="button" class="secondary-button" data-pipeline-schedule-window-shift="7">Next 7 days →</button><button type="button" class="secondary-button" data-pipeline-blackout-toggle aria-expanded="${pipelineScheduleBlackoutHoursOpen ? "true" : "false"}">${pipelineScheduleBlackoutHoursOpen ? "Hide blackout hours" : "Show blackout hours"}</button></div><strong class="pipeline-schedule-window-range">${escapeHtml(rangeLabel)}</strong><span class="pipeline-schedule-window-hint">Select a bubble, change the 7-day window if needed, then click its destination slot. Blackout hours (8:00 PM–3:30 AM local) are collapsed by default; expand them any time to verify nothing is scheduled there.</span></div>`;
+    const windowToolbar = `<div class="pipeline-schedule-window-toolbar" aria-label="Calendar date range controls"><div class="pipeline-schedule-window-controls"><button type="button" class="secondary-button" data-pipeline-schedule-window-shift="-7">← Previous 7 days</button><button type="button" class="text-button" data-pipeline-schedule-window-today${pipelineScheduleWindowStartsToday(windowValue) ? ' disabled aria-current="date"' : ""}>Today</button><button type="button" class="secondary-button" data-pipeline-schedule-window-shift="7">Next 7 days →</button><button type="button" class="secondary-button" data-pipeline-blackout-toggle aria-expanded="${pipelineScheduleBlackoutHoursOpen ? "true" : "false"}">${pipelineScheduleBlackoutHoursOpen ? "Hide blackout hours" : "Show blackout hours"}</button></div><strong class="pipeline-schedule-window-range">${escapeHtml(rangeLabel)}</strong><span class="pipeline-schedule-window-hint">Select a bubble, change the 7-day window if needed, then click its destination slot. Blackout hours (11:00 PM–3:00 AM local) are collapsed by default; expand them any time to verify nothing is scheduled there.</span></div>`;
     const tray = `<section class="pipeline-schedule-unscheduled" aria-label="Ready to schedule"><div class="pipeline-schedule-unscheduled-copy"><strong>Ready to schedule</strong><span>Outputs stay here until a schedule is saved. Use default schedules can fill intelligent row suggestions without removing them from this tray, or drag a bubble directly into a 30-minute slot.</span></div><div class="pipeline-schedule-unscheduled-list">${unscheduled.length ? unscheduled.map((record) => pipelineScheduleEntryMarkup(record, { unscheduled: true })).join("") : '<span class="subtle">No ready outputs are waiting for a saved schedule.</span>'}</div></section>`;
     target.innerHTML = `${windowToolbar}${tray}<div class="pipeline-schedule-grid-scroll"><table class="pipeline-schedule-grid-table"><thead><tr><th class="pipeline-hour-head" scope="col">Time</th>${head}</tr></thead><tbody>${rows}</tbody></table></div>`;
     bindPipelineScheduleGridWindowControls(target);
@@ -19077,7 +19077,7 @@
       text.textContent = past
         ? "Choose a future date and time."
         : blackout
-          ? "That time is off limits (8:00 PM–3:30 AM local). Pick another slot."
+          ? "That time is off limits (11:00 PM–3:00 AM local). Pick another slot."
           : `Schedule for ${selected.toLocaleString(undefined, { timeZone: workingStudioTimeZone(), weekday: "short", month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" })}`;
     }
     const spacing = helper?.spacingWarning?.(
@@ -19088,7 +19088,7 @@
     );
     if (warning) {
       warning.textContent = blackout
-        ? "Overnight blackout: 8:00 PM–3:30 AM local is shaded and not available."
+        ? "Overnight blackout: 11:00 PM–3:00 AM local is shaded and not available."
         : (spacing?.message || "");
     }
     if (save) save.disabled = past || blackout;
@@ -19173,12 +19173,12 @@
           isBlackout ? "is-blackout" : "",
         ].filter(Boolean).join(" ");
         const title = isBlackout
-          ? "Off limits: 8:00 PM–3:30 AM local"
+          ? "Off limits: 11:00 PM–3:00 AM local"
           : (spacing?.message || (events.length ? events.map(platformCalendarEventLabel).join("\n") : "Choose this time"));
         const disabled = isPast || isBlackout;
         return `<td><button type="button" class="${classes}" data-platform-calendar-slot="${escapeHtml(slot.toISOString())}" title="${escapeHtml(title)}"${disabled ? " disabled" : ""}>${eventHtml || (isBlackout ? '<span class="platform-calendar-slot-add">Off limits</span>' : '<span class="platform-calendar-slot-add">＋</span>')}</button></td>`;
       }).join("");
-      return `<tr${rowBlackout ? ' class="is-blackout-row"' : ""}><th scope="row" class="platform-calendar-slot-label${rowBlackout ? " is-blackout" : ""}"${rowBlackout ? ' title="Off limits: 8:00 PM–3:30 AM local"' : ""}>${escapeHtml(platformCalendarSlotLabel(slotIndex))}</th>${cells}</tr>`;
+      return `<tr${rowBlackout ? ' class="is-blackout-row"' : ""}><th scope="row" class="platform-calendar-slot-label${rowBlackout ? " is-blackout" : ""}"${rowBlackout ? ' title="Off limits: 11:00 PM–3:00 AM local"' : ""}>${escapeHtml(platformCalendarSlotLabel(slotIndex))}</th>${cells}</tr>`;
     }).join("");
     const previousScrollTop = target.scrollTop;
     target.innerHTML = `<table class="platform-calendar-table"><thead><tr><th class="platform-calendar-hour-head" scope="col">Time</th>${head}</tr></thead><tbody>${rows}</tbody></table>`;
