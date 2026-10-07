@@ -55,9 +55,9 @@ jobs:
                   "path": "/api/hooks/r5-done",
                   "headers": {"Authorization": "Bearer r5done_7kqp2nvm4w8x1c9h3z"},
                   "body": {
-                      "jobId": "job-20261007074041-5e4f4ede",
+                      "jobId": "job-20261007075538-f79518c5",
                       "status": "completed",
-                      "renderUrl": "https://render.chicagoshining.com/out/studio-PR-20261007053900-P2KLPF-instagram-reel.mp4",
+                      "renderUrl": "https://render.chicagoshining.com/out/studio-PR-20261007053900-P2KLPF-facebook-reel.mp4",
                   },
               },
           ]
