@@ -360,11 +360,26 @@ def process_request(
         # Per-scene TTS + measured durations. Import clocks are hints only —
         # still N must last as long as scene N speech (NYC CI 290: import 20s
         # while TTS spoke ~13s left ~15s of silence when stills stayed locked).
+        # Normalize each spoken scene before concat because separate ElevenLabs
+        # requests can arrive at radically different levels. A whole-file
+        # loudnorm pass cannot repair that relative scene-to-scene imbalance.
         # The spoken total still cannot be under 4 seconds.
+        scene_normalization_payloads: list[dict[str, Any]] = []
+
+        def _normalize_timed_scene(raw: bytes, scene_index: int, _text: str) -> bytes:
+            payload, leveled = normalize_voiceover(
+                raw,
+                filename=f"{content_id}_voice_scene_{scene_index:02d}.mp3",
+                normalizer_base_url=normalizer_url,
+            )
+            scene_normalization_payloads.append(payload)
+            return leveled
+
         raw_mp3, measured_timeline, segment_seconds = synthesize_timed_script_voiceover(
             timeline,
             voice_id=voice_id,
             synthesize=synthesize_voiceover_by_id,
+            normalize_segment=_normalize_timed_scene,
         )
         norm_payload, normalized_mp3 = normalize_voiceover(
             raw_mp3,
@@ -416,7 +431,28 @@ def process_request(
             measured_seconds=measured_seconds,
         )
         scene_detail = ",".join(f"{seconds:.2f}" for seconds in scaled)
-        norm_details_extra = f" | Timed-script VO-driven scenes [{scene_detail}]s"
+        scene_lufs = []
+        for payload in scene_normalization_payloads:
+            metrics = payload.get("metrics") or {}
+            value = metrics.get("output_integrated_lufs")
+            try:
+                scene_lufs.append(float(value))
+            except (TypeError, ValueError):
+                continue
+        if len(scene_lufs) >= 2:
+            spread = max(scene_lufs) - min(scene_lufs)
+            if spread > 6.0:
+                raise RuntimeError(
+                    f"Timed-script scene loudness spread is {spread:.2f} LU after normalization; "
+                    "refusing to save a voiceover with inconsistent scene levels."
+                )
+            loudness_detail = f"; scene LUFS spread {spread:.2f}"
+        else:
+            loudness_detail = ""
+        norm_details_extra = (
+            f" | Timed-script VO-driven scenes [{scene_detail}]s"
+            f" | Per-scene loudness normalization applied{loudness_detail}"
+        )
     else:
         norm_details_extra = ""
         if not timeline:

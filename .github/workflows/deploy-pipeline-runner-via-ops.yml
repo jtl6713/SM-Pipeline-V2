@@ -139,3 +139,5 @@ jobs:
 
 # Trigger pipeline-runner deploy for TikTok photo sound-required completion guard
 # 2026-10-06 UI 0.6.513 companion runner change
+# Trigger pipeline-runner deploy for per-scene timed-script voiceover loudness leveling
+# 2026-10-07 service_version=2026-10-07-timed-vo-leveling
