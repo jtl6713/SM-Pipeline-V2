@@ -2,3 +2,4 @@ Apply Studio UI 0.6.517 compact-home launcher fix.
 Reason: production still reports 0.6.515 after the earlier density deploy because the authoritative app BUILD_ID and app cache key were never advanced from 0.6.515. This patch bumps the actual app bundle, creates a new physical density CSS asset, updates version contracts, and triggers a verified Pages deploy.
 Triggered: 2026-10-07
 Retigger after workflow landed on main: 2026-10-07T04:26Z
+Retry after removing workflow-file mutation from bot commit: 2026-10-07T04:27Z
