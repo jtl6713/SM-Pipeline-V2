@@ -50,3 +50,4 @@ Deploy Pages UI 0.6.516 cache-busted home density. Load /assets/home-density-051
 Deploy UI 0.6.517-compact-home-launcher. Full app BUILD_ID + cache-key bump, new physical home-density-0517.css asset, and custom-domain verification for the compact Start a post launcher.
 Trigger Pages deploy for actual Studio UI 0.6.517 source commit 1ed2a838: 2026-10-07T04:28Z
 Retry UI 0.6.517 Pages deploy with Cloudflare Access-aware custom-domain verification: 2026-10-07T04:31Z
+Verify Studio UI 0.6.517 through Cloudflare Access service token: 2026-10-07T04:55Z
