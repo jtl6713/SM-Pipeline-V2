@@ -112,7 +112,7 @@ jobs:
           const fs = require('fs');
           const html = fs.readFileSync('apps/studio-web/index.html', 'utf8');
           const jsMatch = html.match(/src=["'](\/assets\/app-item4-[^"']+\.js(?:\?[^"']*)?)/);
-          const densityCssMatch = html.match(/href=["'](\/assets\/home-density-0516\.css(?:\?[^"']*)?)/);
+          const densityCssMatch = html.match(/href=["'](\/assets\/home-density-0517\.css(?:\?[^"']*)?)/);
           const labelMatch = html.match(/UI build (\d+\.\d+\.\d+)/);
           if (!jsMatch || !densityCssMatch || !labelMatch) throw new Error('index.html is missing app-item4 script, cache-busted home density CSS, or UI build label');
           const expectedJsUrl = jsMatch[1];
@@ -211,7 +211,7 @@ jobs:
             grep -Fq "$EXPECTED_BUILD_ID" /tmp/live-app.js
             CSS_CODE=$(curl -sS -L -o /tmp/live-home-density.css -w '%{http_code}' "$LATEST_URL$EXPECTED_DENSITY_CSS_URL" || true)
             test "$CSS_CODE" = "200"
-            grep -Fq "HOME_DENSITY_0_6_516" /tmp/live-home-density.css
+            grep -Fq "HOME_DENSITY_0_6_517" /tmp/live-home-density.css
             echo "pages_content_verify=PASS"
           elif [[ "$INDEX_CODE" == "403" ]]; then
             echo "::warning::Pages production is protected by Access (HTTP 403); Wrangler deployment completed successfully, so public byte verification is skipped."
