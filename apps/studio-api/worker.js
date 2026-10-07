@@ -503,8 +503,9 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.465-render-stale-rendering",
+          version: "0.10.466-mae-28-day-schedule",
           studio_mae_schedule_v1: true,
+          studio_mae_28_day_schedule_v1: true,
           studio_mae_profile_occupancy_v1: true,
           studio_schedule_occupancy_fields_v1: true,
           studio_render_stale_rendering_v1: true,
@@ -7417,7 +7418,7 @@ function studioNextOpenScheduleIso(candidateIso, occupiedMs, gapMs = STUDIO_SCHE
 const STUDIO_OCCUPIED_CACHE_MS = 45 * 1000;
 const STUDIO_OCCUPIED_LIST_LIMIT = 250;
 const STUDIO_OCCUPIED_LOOKBACK_MS = 12 * 60 * 60 * 1000;
-const STUDIO_OCCUPIED_HORIZON_MS = 10 * 24 * 60 * 60 * 1000;
+const STUDIO_OCCUPIED_HORIZON_MS = 28 * 24 * 60 * 60 * 1000;
 
 function studioOccupiedDateInWindowFormula(field, lookback, horizon) {
   return `AND({${field}}!="",IS_AFTER({${field}},DATETIME_PARSE("${lookback}")),IS_BEFORE({${field}},DATETIME_PARSE("${horizon}")))`;
@@ -17330,7 +17331,7 @@ function studioAddCivilDays(year, month, day, delta) {
   return { year: next.getUTCFullYear(), month: next.getUTCMonth() + 1, day: next.getUTCDate() };
 }
 
-const STUDIO_SUGGEST_HORIZON_DAYS = 7;
+const STUDIO_SUGGEST_HORIZON_DAYS = 28;
 const STUDIO_SUGGEST_LEAD_MS = 10 * 60 * 1000;
 
 function studioSuggestCivilKey(year, month, day) {
@@ -19228,7 +19229,7 @@ async function getInsightsBestTimes(request, env, url, authorization) {
     similar_sample_size: 0,
     similar_profile: themeName,
     caption: null,
-    note: note || `${seasonLabel} stamps use the MAE rotation in ${timeZone}: fill mornings, then afternoons, then evenings, then week-2 mornings. Overnight 8:00 PM–3:30 AM is never used.`,
+    note: note || `${seasonLabel} stamps use the MAE rotation in ${timeZone}: fill MAE morning/afternoon/evening across 28 days, then 4th/5th widest-gap slots. Overnight 11:00 PM–3:00 AM is never used.`,
   });
 
   try {
@@ -19321,7 +19322,7 @@ async function getInsightsBestTimes(request, env, url, authorization) {
       similar_sample_size: similar?.sample_size || 0,
       similar_profile: similar?.profile || theme,
       caption,
-      note: `${seasonLabel} stamps use the MAE rotation in ${timeZone}: fill week-1 mornings, then afternoons, then evenings, then week-2 mornings. Overnight 8:00 PM–3:30 AM is never used.`,
+      note: `${seasonLabel} stamps use the MAE rotation in ${timeZone}: fill MAE morning/afternoon/evening across 28 days, then 4th/5th widest-gap slots. Overnight 11:00 PM–3:00 AM is never used.`,
     });
   } catch (error) {
     console.warn("best-times failed; MAE fallback", error);

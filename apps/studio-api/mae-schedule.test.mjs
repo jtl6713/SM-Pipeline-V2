@@ -5,11 +5,13 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   MAE_PRIORITY_SCHEDULE_WINDOWS,
+  MAE_SUGGEST_HORIZON_DAYS,
   maeBuildSuggestedScheduleMap,
   maeIsBlackoutLocalTime,
   maeNextOpenScheduleIso,
   maePickBalancedSuggestedIso,
   maeTimeZoneFromTheme,
+  maeZonedWallToUtcMs,
 } from "./mae-schedule.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -23,13 +25,36 @@ function localParts(iso, timeZone) {
   return { hour: get("hour"), minute: get("minute") };
 }
 
+function dayOf(iso, timeZone) {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone, year: "numeric", month: "2-digit", day: "2-digit",
+  }).format(new Date(iso));
+}
+
+function fillMaeHorizon(zone, startCivil, days = MAE_SUGGEST_HORIZON_DAYS) {
+  const occupied = [];
+  for (let offset = 0; offset < days; offset++) {
+    const utc = Date.UTC(startCivil.year, startCivil.month - 1, startCivil.day) + offset * 86400000;
+    const d = new Date(utc);
+    const civil = { year: d.getUTCFullYear(), month: d.getUTCMonth() + 1, day: d.getUTCDate() };
+    for (const [hh, mm] of [[5, 30], [11, 30], [16, 30]]) {
+      occupied.push(maeZonedWallToUtcMs(civil.year, civil.month, civil.day, hh, mm, zone));
+    }
+  }
+  return occupied;
+}
+
 test("nyc and miami map to America/New_York", () => {
   assert.equal(maeTimeZoneFromTheme("nyc"), "America/New_York");
   assert.equal(maeTimeZoneFromTheme("miami"), "America/New_York");
   assert.equal(maeTimeZoneFromTheme("la"), "America/Los_Angeles");
 });
 
-test("MAE never stamps NYC midnight or 1 AM for YouTube/Instagram", () => {
+test("horizon is 28 days", () => {
+  assert.equal(MAE_SUGGEST_HORIZON_DAYS, 28);
+});
+
+test("MAE never stamps NYC midnight or 11 PM for YouTube/Instagram", () => {
   const zone = "America/New_York";
   const now = new Date("2026-10-04T12:00:00Z");
   const occupied = [];
@@ -46,21 +71,21 @@ test("MAE never stamps NYC midnight or 1 AM for YouTube/Instagram", () => {
     const local = localParts(iso, zone);
     assert.ok(
       (local.hour === 5 && local.minute === 30)
-      || (local.hour === 8 && local.minute === 30)
       || (local.hour === 11 && local.minute === 30)
       || (local.hour === 16 && local.minute === 30),
       `off MAE: ${iso} ${local.hour}:${String(local.minute).padStart(2, "0")}`,
     );
   }
   const hours = picks.map((iso) => localParts(iso, zone).hour);
-  assert.ok(!hours.includes(0) && !hours.includes(1) && !hours.includes(20) && !hours.includes(23), hours.join(","));
+  assert.ok(!hours.includes(0) && !hours.includes(1) && !hours.includes(23) && !hours.includes(22), hours.join(","));
 });
 
-test("Worker MAE fills morning then afternoon then evening on the same day", () => {
+test("Worker MAE fills morning then afternoon then evening before the next day's MAE", () => {
   const zone = "America/New_York";
   const now = new Date("2026-10-04T08:00:00Z");
   const occupied = [];
   const locals = [];
+  const days = [];
   for (let i = 0; i < 4; i++) {
     const iso = maePickBalancedSuggestedIso(MAE_PRIORITY_SCHEDULE_WINDOWS, now, {
       occupiedMs: occupied,
@@ -68,6 +93,7 @@ test("Worker MAE fills morning then afternoon then evening on the same day", () 
       timeZone: zone,
     });
     locals.push(localParts(iso, zone));
+    days.push(dayOf(iso, zone));
     occupied.push(Date.parse(iso));
   }
   assert.deepEqual(locals.slice(0, 3).map((part) => `${part.hour}:${String(part.minute).padStart(2, "0")}`), [
@@ -75,8 +101,10 @@ test("Worker MAE fills morning then afternoon then evening on the same day", () 
     "11:30",
     "16:30",
   ]);
-  assert.equal(locals[3].hour, 8);
+  assert.equal(locals[3].hour, 5);
   assert.equal(locals[3].minute, 30);
+  assert.equal(days[0], days[2]);
+  assert.notEqual(days[3], days[0]);
 });
 
 test("two TikToks take Monday morning then Monday afternoon, not two mornings", () => {
@@ -93,12 +121,11 @@ test("two TikToks take Monday morning then Monday afternoon, not two mornings", 
   );
   const first = localParts(stamps.get("TikTok::Video Draft"), zone);
   const second = localParts(stamps.get("TikTok::Multi-Photo"), zone);
-  const dayOf = (iso) => new Intl.DateTimeFormat("en-CA", { timeZone: zone, year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(iso));
   assert.equal(first.hour, 5);
   assert.equal(first.minute, 30);
   assert.equal(second.hour, 11);
   assert.equal(second.minute, 30);
-  assert.equal(dayOf(stamps.get("TikTok::Video Draft")), dayOf(stamps.get("TikTok::Multi-Photo")));
+  assert.equal(dayOf(stamps.get("TikTok::Video Draft"), zone), dayOf(stamps.get("TikTok::Multi-Photo"), zone));
 });
 
 test("blackout 12 AM NY is replaced with the next MAE slot, not +3h", () => {
@@ -142,8 +169,19 @@ test("taken evening forces the next morning instead of reusing 4:30 PM", () => {
   const local = localParts(iso, zone);
   assert.equal(local.hour, 5);
   assert.equal(local.minute, 30);
-  const day = new Intl.DateTimeFormat("en-CA", { timeZone: zone, year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(iso));
-  assert.equal(day, "2026-10-07");
+  assert.equal(dayOf(iso, zone), "2026-10-07");
+});
+
+test("11 PM profile local is blackout; 10:59 PM is not", () => {
+  const zone = "America/New_York";
+  const eleven = maeZonedWallToUtcMs(2026, 10, 8, 23, 0, zone);
+  const tenFiftyNine = maeZonedWallToUtcMs(2026, 10, 8, 22, 59, zone);
+  const threeAm = maeZonedWallToUtcMs(2026, 10, 9, 3, 0, zone);
+  const threeOhOne = maeZonedWallToUtcMs(2026, 10, 9, 3, 1, zone);
+  assert.equal(maeIsBlackoutLocalTime(eleven, zone), true);
+  assert.equal(maeIsBlackoutLocalTime(tenFiftyNine, zone), false);
+  assert.equal(maeIsBlackoutLocalTime(threeAm, zone), true);
+  assert.equal(maeIsBlackoutLocalTime(threeOhOne, zone), false);
 });
 
 test("Chicago 23:00 would display as NY 12:00 AM and is rejected as blackout in NY", () => {
@@ -175,7 +213,7 @@ test("suggested map ignores industry 20:00 YouTube windows and uses MAE", () => 
   }
 });
 
-test("a new short spreads morning afternoon evening instead of four mornings", () => {
+test("a new short spreads morning afternoon evening then next-day MAE, not a same-day 4th", () => {
   const zone = "America/New_York";
   const now = new Date("2026-10-05T08:00:00Z");
   const stamps = maeBuildSuggestedScheduleMap(
@@ -192,57 +230,67 @@ test("a new short spreads morning afternoon evening instead of four mornings", (
   const clocks = ["Instagram::Reel", "Facebook::Reel", "TikTok::Video Draft", "YouTube::Short"]
     .map((key) => localParts(stamps.get(key), zone))
     .map((part) => `${part.hour}:${String(part.minute).padStart(2, "0")}`);
-  assert.deepEqual(clocks, ["5:30", "11:30", "16:30", "8:30"]);
-  const dayOf = (iso) => new Intl.DateTimeFormat("en-CA", {
-    timeZone: zone, year: "numeric", month: "2-digit", day: "2-digit",
-  }).format(new Date(iso));
-  assert.equal(dayOf(stamps.get("Instagram::Reel")), dayOf(stamps.get("YouTube::Short")));
+  assert.deepEqual(clocks, ["5:30", "11:30", "16:30", "5:30"]);
+  assert.notEqual(dayOf(stamps.get("Instagram::Reel"), zone), dayOf(stamps.get("YouTube::Short"), zone));
 });
 
-test("after a day has morning afternoon and evening, the extra is that day's largest gap", () => {
+test("after 28 days of MAE are full, the 4th is day 1's largest gap", () => {
   const zone = "America/New_York";
   const now = new Date("2026-10-05T08:00:00Z");
+  const occupied = fillMaeHorizon(zone, { year: 2026, month: 10, day: 5 }, 28);
   const stamps = maeBuildSuggestedScheduleMap(
     [
       { platform: "Instagram", output_type: "Reel", scheduled_at: "" },
       { platform: "Facebook", output_type: "Reel", scheduled_at: "" },
-      { platform: "TikTok", output_type: "Video Draft", scheduled_at: "" },
-      { platform: "YouTube", output_type: "Short", scheduled_at: "" },
-      { platform: "Instagram", output_type: "Carousel", scheduled_at: "" },
     ],
-    {},
+    { Instagram: occupied.slice(), Facebook: occupied.slice() },
     now,
     { timeZone: zone },
   );
-  const dayOf = (iso) => new Intl.DateTimeFormat("en-CA", {
-    timeZone: zone, year: "numeric", month: "2-digit", day: "2-digit",
-  }).format(new Date(iso));
-  const clock = (key) => {
-    const part = localParts(stamps.get(key), zone);
-    return `${part.hour}:${String(part.minute).padStart(2, "0")}`;
-  };
-  assert.equal(clock("YouTube::Short"), "8:30");
-  assert.equal(dayOf(stamps.get("YouTube::Short")), dayOf(stamps.get("Instagram::Reel")));
-  assert.equal(clock("Instagram::Carousel"), "5:30");
-  assert.notEqual(dayOf(stamps.get("Instagram::Carousel")), dayOf(stamps.get("Instagram::Reel")));
+  const first = stamps.get("Instagram::Reel");
+  const second = stamps.get("Facebook::Reel");
+  assert.equal(dayOf(first, zone), "2026-10-05");
+  assert.equal(localParts(first, zone).hour, 8);
+  assert.equal(localParts(first, zone).minute, 30);
+  assert.equal(dayOf(second, zone), "2026-10-06");
+  assert.equal(localParts(second, zone).hour, 8);
+  assert.equal(localParts(second, zone).minute, 30);
 });
 
-test("extras fill day 1's gap before day 2's gap", () => {
+test("5th posts walk day 1 again after every day already has a 4th", () => {
   const zone = "America/Chicago";
   const now = new Date("2026-10-03T08:00:00Z");
-  const occupied = [];
-  for (let day = 3; day <= 4; day++) {
-    const dd = String(day).padStart(2, "0");
-    occupied.push(Date.parse(`2026-10-${dd}T10:30:00Z`));
-    occupied.push(Date.parse(`2026-10-${dd}T16:30:00Z`));
-    occupied.push(Date.parse(`2026-10-${dd}T21:30:00Z`));
+  const occupied = fillMaeHorizon(zone, { year: 2026, month: 10, day: 3 }, 28);
+  // Seed one 4th on every day (08:30 local).
+  for (let offset = 0; offset < 28; offset++) {
+    const utc = Date.UTC(2026, 9, 3 + offset);
+    const d = new Date(utc);
+    occupied.push(maeZonedWallToUtcMs(d.getUTCFullYear(), d.getUTCMonth() + 1, d.getUTCDate(), 8, 30, zone));
   }
+  const iso = maePickBalancedSuggestedIso([], now, {
+    timeZone: zone,
+    occupiedMs: occupied,
+    platformOccupiedMs: occupied,
+  });
+  assert.ok(iso);
+  assert.equal(maeIsBlackoutLocalTime(Date.parse(iso), zone), false);
+  const local = localParts(iso, zone);
+  // 5th is a widest-gap slot, not another MAE day-part.
+  assert.ok(!(local.hour === 5 && local.minute === 30));
+  assert.ok(!(local.hour === 11 && local.minute === 30));
+  assert.ok(!(local.hour === 16 && local.minute === 30));
+  // Walk starts at day 1; first day that still has room wins (may skip crowded early days).
+  assert.ok(dayOf(iso, zone) >= "2026-10-03");
+  assert.ok(dayOf(iso, zone) <= "2026-10-30");
+});
+
+test("extras fill day 1's gap before day 2's gap once MAE horizon is full", () => {
+  const zone = "America/Chicago";
+  const now = new Date("2026-10-03T08:00:00Z");
+  const occupied = fillMaeHorizon(zone, { year: 2026, month: 10, day: 3 }, 28);
   const first = maePickBalancedSuggestedIso([], now, { timeZone: zone, occupiedMs: occupied });
   const firstLocal = localParts(first, zone);
-  const firstDay = new Intl.DateTimeFormat("en-CA", {
-    timeZone: zone, year: "numeric", month: "2-digit", day: "2-digit",
-  }).format(new Date(first));
-  assert.equal(firstDay, "2026-10-03");
+  assert.equal(dayOf(first, zone), "2026-10-03");
   assert.equal(firstLocal.hour, 8);
   assert.equal(firstLocal.minute, 30);
 
@@ -251,10 +299,7 @@ test("extras fill day 1's gap before day 2's gap", () => {
     occupiedMs: [...occupied, Date.parse(first)],
   });
   const secondLocal = localParts(second, zone);
-  const secondDay = new Intl.DateTimeFormat("en-CA", {
-    timeZone: zone, year: "numeric", month: "2-digit", day: "2-digit",
-  }).format(new Date(second));
-  assert.equal(secondDay, "2026-10-04");
+  assert.equal(dayOf(second, zone), "2026-10-04");
   assert.equal(secondLocal.hour, 8);
   assert.equal(secondLocal.minute, 30);
 });
@@ -297,10 +342,7 @@ test("a taken 5:30 is not reused; the next MAE opening is chosen", () => {
   assert.equal(reel.minute, 30);
   assert.equal(carousel.hour, 16);
   assert.equal(carousel.minute, 30);
-  const dayOf = (iso) => new Intl.DateTimeFormat("en-CA", {
-    timeZone: zone, year: "numeric", month: "2-digit", day: "2-digit",
-  }).format(new Date(iso));
-  assert.equal(dayOf(stamps.get("Instagram::Reel")), dayOf(morning));
+  assert.equal(dayOf(stamps.get("Instagram::Reel"), zone), dayOf(morning, zone));
 });
 
 test("two Instagrams stored on the same free 5:30 become morning then afternoon", () => {
@@ -357,7 +399,8 @@ test("Worker stamp paths use MAE not industry evening windows", () => {
   assert.match(worker, /studio_mae_schedule_v1: true/);
   assert.match(worker, /studio_mae_profile_occupancy_v1: true/);
   assert.match(worker, /studio_schedule_occupancy_fields_v1: true/);
-  assert.match(worker, /0\.10\.465-render-stale-rendering/);
+  assert.match(worker, /0\.10\.466-mae-28-day-schedule/);
+  assert.match(worker, /STUDIO_OCCUPIED_HORIZON_MS = 28 \* 24/);
   assert.match(worker, /studioLoadPlanScheduleOccupancy/);
   assert.match(worker, /A stored 5:30 that lost its slot must be written/);
   assert.match(worker, /MAE_PRIORITY_SCHEDULE_WINDOWS/);
@@ -372,11 +415,8 @@ test("1 AM NYC still picks today's 5:30, not tomorrow morning", () => {
   const zone = "America/New_York";
   const now = new Date("2026-10-06T05:58:00Z");
   const iso = maePickBalancedSuggestedIso([], now, { occupiedMs: [], timeZone: zone });
-  const day = new Intl.DateTimeFormat("en-CA", {
-    timeZone: zone, year: "numeric", month: "2-digit", day: "2-digit",
-  }).format(new Date(iso));
+  assert.equal(dayOf(iso, zone), "2026-10-06");
   const local = localParts(iso, zone);
-  assert.equal(day, "2026-10-06");
   assert.equal(local.hour, 5);
   assert.equal(local.minute, 30);
 });
@@ -385,11 +425,8 @@ test("Chicago occupancy for today does not move an empty NYC calendar to tomorro
   const zone = "America/New_York";
   const now = new Date("2026-10-06T14:00:00Z"); // 10:00 AM EDT, so 5:30 is past
   const iso = maePickBalancedSuggestedIso([], now, { occupiedMs: [], timeZone: zone });
-  const day = new Intl.DateTimeFormat("en-CA", {
-    timeZone: zone, year: "numeric", month: "2-digit", day: "2-digit",
-  }).format(new Date(iso));
+  assert.equal(dayOf(iso, zone), "2026-10-06");
   const local = localParts(iso, zone);
-  assert.equal(day, "2026-10-06");
   assert.equal(local.hour, 11);
   assert.equal(local.minute, 30);
 });

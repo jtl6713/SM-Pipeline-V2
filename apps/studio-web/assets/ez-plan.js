@@ -370,9 +370,10 @@
   }
 
   const EZ_SCHEDULE_GAP_MS = 3 * 60 * 60 * 1000;
-  const EZ_SUGGEST_HORIZON_DAYS = 14;
+  const EZ_SUGGEST_HORIZON_DAYS = 28;
   const EZ_PRIORITY_SCHEDULE_WINDOWS = ["05:30-07:00", "11:30-13:00", "16:30-18:00"];
   const EZ_SUGGEST_LEAD_MS = 10 * 60 * 1000;
+  const EZ_MAX_EXTRA_POSTS_PER_DAY = 2;
 
   function ezIndustryBestWindows(platform, outputType) {
     const p = String(platform || "").toLowerCase();
@@ -389,8 +390,11 @@
   }
 
   const EZ_DEFAULT_TIME_ZONE = "America/Chicago";
-  const EZ_SCHEDULE_BLACKOUT_START_MINUTES = 20 * 60;
-  const EZ_SCHEDULE_BLACKOUT_END_MINUTES = 3 * 60 + 30;
+  /** Inclusive local blackout: 11:00 PM through 3:00 AM profile time. */
+  const EZ_SCHEDULE_BLACKOUT_START_MINUTES = 23 * 60;
+  const EZ_SCHEDULE_BLACKOUT_END_MINUTES = 3 * 60;
+  const EZ_SCHEDULE_OPEN_START_MINUTES = 3 * 60 + 1;
+  const EZ_SCHEDULE_OPEN_END_MINUTES = 22 * 60 + 59;
 
   function ezNormalizeTimeZone(value) {
     const zone = String(value || "").trim() || EZ_DEFAULT_TIME_ZONE;
@@ -477,8 +481,8 @@
     if (!Number.isFinite(ms) || !ezIsBlackoutLocalTime(ms, timeZone)) return ms;
     const parts = ezZonedDateTimeParts(new Date(ms), timeZone);
     let civil = { year: parts.year, month: parts.month, day: parts.day };
-    if (parts.hour >= 20) civil = ezAddCivilDays(civil.year, civil.month, civil.day, 1);
-    return ezZonedWallToUtcMs(civil.year, civil.month, civil.day, 4, 0, timeZone);
+    if (parts.hour >= 23) civil = ezAddCivilDays(civil.year, civil.month, civil.day, 1);
+    return ezZonedWallToUtcMs(civil.year, civil.month, civil.day, 3, 1, timeZone);
   }
 
   function ezIsPriorityLocalTime(ms, timeZone = EZ_DEFAULT_TIME_ZONE) {
@@ -536,9 +540,36 @@
     return true;
   }
 
+  function ezCivilWithKey(civil) {
+    return { ...civil, key: ezCivilKey(civil.year, civil.month, civil.day) };
+  }
+
+  function ezExtraCountOnDay(civil, blockers, timeZone) {
+    const day = ezCivilWithKey(civil);
+    let count = 0;
+    for (const ms of ezOccupiedOnDay(blockers, day, timeZone)) {
+      if (!ezIsPriorityLocalTime(ms, timeZone)) count += 1;
+    }
+    return count;
+  }
+
   function ezExtraIsoOnDay(civil, nowMs, blockers, timeZone) {
-    const openStart = ezZonedWallToUtcMs(civil.year, civil.month, civil.day, 3, 31, timeZone);
-    const openEnd = ezZonedWallToUtcMs(civil.year, civil.month, civil.day, 19, 59, timeZone);
+    const openStart = ezZonedWallToUtcMs(
+      civil.year,
+      civil.month,
+      civil.day,
+      Math.floor(EZ_SCHEDULE_OPEN_START_MINUTES / 60),
+      EZ_SCHEDULE_OPEN_START_MINUTES % 60,
+      timeZone,
+    );
+    const openEnd = ezZonedWallToUtcMs(
+      civil.year,
+      civil.month,
+      civil.day,
+      Math.floor(EZ_SCHEDULE_OPEN_END_MINUTES / 60),
+      EZ_SCHEDULE_OPEN_END_MINUTES % 60,
+      timeZone,
+    );
     const windowStart = Math.max(openStart, nowMs + 60 * 1000);
     const windowEnd = openEnd;
     if (!(windowStart < windowEnd)) return "";
@@ -581,29 +612,50 @@
     return out;
   }
 
+  function ezPickExtraIso(civils, nowMs, blockers, timeZone, extrasAlreadyOnDay) {
+    for (const civil of civils) {
+      if (!ezDayStandardsCovered(civil, nowMs, blockers, timeZone)) continue;
+      if (ezExtraCountOnDay(civil, blockers, timeZone) !== extrasAlreadyOnDay) continue;
+      const extra = ezExtraIsoOnDay(civil, nowMs, blockers, timeZone);
+      if (extra) return extra;
+    }
+    return "";
+  }
+
   function ezPickBalancedSuggestedIso(windows, now = new Date(), options = {}) {
     const timeZone = ezNormalizeTimeZone(options.timeZone);
     const occupiedMs = options.occupiedMs || [];
     const platformOccupiedMs = options.platformOccupiedMs || occupiedMs;
     const blockers = ezBlockingTimes(occupiedMs, platformOccupiedMs);
-    const nowMs = now.getTime() + EZ_SUGGEST_LEAD_MS;
+    const nowMs = now.getTime() + (options.leadMs ?? EZ_SUGGEST_LEAD_MS);
     const local = ezZonedDateTimeParts(now, timeZone);
-
-    // Each civil day: morning, then afternoon, then evening. Once those three are
-    // covered, the extra goes in the largest gap on that day before the next morning.
-    for (let i = 0; i < EZ_SUGGEST_HORIZON_DAYS; i++) {
+    const horizonDays = Number(options.horizonDays) > 0
+      ? Math.floor(Number(options.horizonDays))
+      : EZ_SUGGEST_HORIZON_DAYS;
+    const civils = [];
+    for (let i = 0; i < horizonDays; i++) {
       const civil = i === 0
         ? { year: local.year, month: local.month, day: local.day }
         : ezAddCivilDays(local.year, local.month, local.day, i);
+      civils.push(ezCivilWithKey(civil));
+    }
+
+    // Pass 1: MAE morning → afternoon → evening across the full 28-day horizon.
+    for (const civil of civils) {
       for (const window of EZ_PRIORITY_SCHEDULE_WINDOWS) {
         const ms = ezStandardSlotMs(civil, window, timeZone);
         if (ms <= nowMs || ezIsBlackoutLocalTime(ms, timeZone) || ezScheduleConflicts(ms, blockers)) continue;
         return new Date(ms).toISOString();
       }
-      if (!ezDayStandardsCovered(civil, nowMs, blockers, timeZone)) continue;
-      const extra = ezExtraIsoOnDay(civil, nowMs, blockers, timeZone);
-      if (extra) return extra;
     }
+
+    // Pass 2: 4th posts — day 1 → day 28, widest gap on each day.
+    const fourth = ezPickExtraIso(civils, nowMs, blockers, timeZone, 0);
+    if (fourth) return fourth;
+
+    // Pass 3: 5th posts — same walk for a second widest-gap slot.
+    const fifth = ezPickExtraIso(civils, nowMs, blockers, timeZone, 1);
+    if (fifth) return fifth;
 
     return "";
   }
@@ -681,19 +733,23 @@
         const existingMs = Date.parse(iso);
         const lane = isStory ? [] : ezFlattenOccupied(reserved);
         const zone = options.timeZone;
-        const existingCivil = ezZonedDateTimeParts(new Date(existingMs), zone);
+        const existingCivil = ezCivilWithKey(ezZonedDateTimeParts(new Date(existingMs), zone));
         const standardsCovered = !isStory && ezDayStandardsCovered(
           existingCivil,
           now.getTime() + EZ_SUGGEST_LEAD_MS,
           lane,
           zone,
         );
+        const extrasOnDay = isStory ? 0 : ezExtraCountOnDay(existingCivil, lane, zone);
         // Keep a stored MAE time when that day-part is still open. Keep a stored
-        // extra only after morning, afternoon, and evening on that day are covered.
+        // extra only after that day's MAE trio is covered and room remains for a 4th/5th.
         const reusable = existingMs > now.getTime()
           && !ezIsBlackoutLocalTime(existingMs, zone)
           && (isStory || !ezScheduleConflicts(existingMs, lane))
-          && (ezIsPriorityLocalTime(existingMs, zone) || standardsCovered);
+          && (
+            ezIsPriorityLocalTime(existingMs, zone)
+            || (standardsCovered && extrasOnDay < EZ_MAX_EXTRA_POSTS_PER_DAY)
+          );
         if (reusable) {
           stamps.set(key, iso);
           if (!isStory) (reserved[platform] ||= []).push(existingMs);
