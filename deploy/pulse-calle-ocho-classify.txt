@@ -1,3 +1,3 @@
-# Trigger: classify only Calle Ocho 6/10/11/14 via A3 (not Classify All).
-# 2026-10-07 — finish Calle Ocho quartet stuck Needs Classification after Classify All limbo.
-pulse-calle-ocho-classify 2026-10-07T04:10Z
+# Trigger: classify only Calle Ocho 6/10/11/14 via Studio profile→A3 (not Classify All).
+# 2026-10-07 — finish Calle Ocho quartet; bridge pulse (GH pipeline secret unavailable).
+pulse-calle-ocho-classify 2026-10-07T04:14Z bridge

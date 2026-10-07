@@ -1,6 +1,6 @@
 name: Pulse Calle Ocho A3 Classify
 
-# One-shot: classify only Calle Ocho 6/10/11/14 (not Classify All).
+# Classify only Calle Ocho 6/10/11/14 via Studio profile→A3 (not Classify All).
 on:
   push:
     branches: [main]
@@ -21,72 +21,110 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     env:
-      PIPELINE_RUNNER_SHARED_SECRET: ${{ secrets.PIPELINE_RUNNER_SHARED_SECRET }}
-      AIRTABLE_PAT: ${{ secrets.AIRTABLE_PAT }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      TARGET_WORKER: chicagoshining-studio-api
+      BRIDGE_WORKER: chicagoshining-calle-ocho-a3
+      MIAMI_PROFILE_ID: recpNlNn6U6eq0M9r
     steps:
-      - name: Pulse A3 for four Calle Ocho stills only
+      - uses: actions/checkout@v6
+
+      - name: Capture production Worker identity
         shell: bash
         run: |
           set -euo pipefail
-          test -n "${PIPELINE_RUNNER_SHARED_SECRET:-}"
-          test -n "${AIRTABLE_PAT:-}"
-          IDS='["recnUIg8Wp5U9SDEn","recMjeAXaO8hgYmko","recMShoqUg7ppO7AN","recRXsqQ4KtjPQxY2"]'
-          code=$(curl -sS --max-time 600 -o /tmp/a3.json -w '%{http_code}' \
-            -X POST 'https://pipeline.chicagoshining.com/stages/a3' \
-            -H "X-Pipeline-Secret: $PIPELINE_RUNNER_SHARED_SECRET" \
-            -H 'Content-Type: application/json' \
-            --data "{\"extra\":{\"record_ids\":$IDS,\"trigger_a4\":false,\"wait_for_next\":false,\"drain\":false,\"background\":false}}")
-          echo "a3_http=$code"
-          head -c 4000 /tmp/a3.json; echo
-          test "$code" -ge 200 -a "$code" -lt 300
-          jq -e '(.status // "") != "error"' /tmp/a3.json >/dev/null
+          curl -fsS "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/$TARGET_WORKER/deployments" \
+            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -o /tmp/before.json
+          jq -er '.result.deployments[0].versions|max_by(.percentage)|.version_id' /tmp/before.json >/tmp/active-before.txt
 
-      - name: Verify Calle Ocho quartet is Classified
+      - name: Build bridge that classifies four Calle Ocho assets
         shell: bash
         run: |
           set -euo pipefail
           python - <<'PY'
-          import json, os, time, urllib.request
-
-          pat = os.environ["AIRTABLE_PAT"].strip()
-          base = "appe33zkZn35yirTL"
-          table = "tblSITCujCsJTNcDe"
+          import json, secrets
+          from pathlib import Path
+          token = secrets.token_urlsafe(36)
+          Path("/tmp/token").write_text(token)
           ids = [
               "recnUIg8Wp5U9SDEn",  # Calle Ocho 6
               "recMjeAXaO8hgYmko",  # Calle Ocho 10
               "recMShoqUg7ppO7AN",  # Calle Ocho 11
               "recRXsqQ4KtjPQxY2",  # Calle Ocho 14
           ]
-          headers = {"Authorization": f"Bearer {pat}"}
-
-          def fetch():
-              out = []
-              for rid in ids:
-                  req = urllib.request.Request(
-                      f"https://api.airtable.com/v0/{base}/{table}/{rid}",
-                      headers=headers,
-                  )
-                  with urllib.request.urlopen(req, timeout=30) as response:
-                      row = json.loads(response.read().decode("utf-8"))
-                  fields = row.get("fields") or {}
-                  out.append(
-                      {
-                          "id": rid,
-                          "name": fields.get("Asset Name"),
-                          "status": fields.get("Classification_Status"),
-                          "keywords": bool(str(fields.get("Search_Keywords") or "").strip()),
-                      }
-                  )
-              return out
-
-          last = []
-          for attempt in range(1, 25):
-              last = fetch()
-              print(f"attempt={attempt} " + json.dumps(last, ensure_ascii=True))
-              if all(r["status"] == "Classified" and r["keywords"] for r in last):
-                  print("calle_ocho_quartet_classified=true")
-                  raise SystemExit(0)
-              time.sleep(15)
-          print("calle_ocho_quartet_classified=false")
-          raise SystemExit(1)
+          profile = "recpNlNn6U6eq0M9r"
+          specs = [
+              {
+                  "name": rid,
+                  "method": "POST",
+                  "path": f"/api/library/{rid}/profile",
+                  "body": {"content_profile_id": profile, "classify": True},
+              }
+              for rid in ids
+          ]
+          js = '''export default {async fetch(request,env){const u=new URL(request.url);if(u.pathname===ROUTE+"/ready")return Response.json({ok:true,ready:true},{headers:{"Cache-Control":"no-store"}});if(u.pathname!==ROUTE)return new Response("Not found",{status:404});const specs=SPECS,results=[];for(const s of specs){const m=String(s.method||"GET").toUpperCase(),h=new Headers({"Cf-Access-Authenticated-User-Email":"joseph.t.logan@gmail.com","Accept":"application/json","Origin":"https://studio.chicagoshining.com"});let b;if(m!=="GET"){h.set("Content-Type","application/json");b=JSON.stringify(s.body??{});}const r=await env.STUDIO_API.fetch(new Request("https://studio.chicagoshining.com"+s.path,{method:m,headers:h,body:b}));const t=await r.text();let p;try{p=t?JSON.parse(t):null}catch{p={raw:t.slice(0,10000)}}results.push({name:s.name||s.path,path:s.path,method:m,status:r.status,ok:r.ok,classifying:Boolean(p&&p.classifying),message:p&&p.message||null,body:p});}return Response.json({ok:results.every(x=>x.ok),results},{headers:{"Cache-Control":"no-store"}})}};'''
+          js = js.replace("ROUTE", json.dumps("/" + token)).replace("SPECS", json.dumps(specs, separators=(",", ":")))
+          Path("/tmp/worker.js").write_text(js)
           PY
+          node --check /tmp/worker.js
+          printf '%s' '{"main_module":"worker.js","compatibility_date":"2026-08-02","bindings":[{"type":"service","name":"STUDIO_API","service":"chicagoshining-studio-api"}]}' >/tmp/meta.json
+          curl -sS -X DELETE "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/$BRIDGE_WORKER" \
+            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" >/dev/null || true
+          code=$(curl -sS -o /tmp/upload.json -w '%{http_code}' -X PUT \
+            "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/$BRIDGE_WORKER/content" \
+            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            -F 'metadata=@/tmp/meta.json;type=application/json' \
+            -F 'worker.js=@/tmp/worker.js;type=application/javascript+module;filename=worker.js')
+          echo "bridge_upload_http=$code"
+          test "$code" -ge 200 -a "$code" -lt 300
+          jq -e '.success==true' /tmp/upload.json >/dev/null
+          curl -fsS -X POST "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/$BRIDGE_WORKER/subdomain" \
+            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -H 'Content-Type: application/json' \
+            --data '{"enabled":true,"previews_enabled":false}' -o /tmp/sub.json
+          jq -e '.success==true and .result.enabled==true' /tmp/sub.json >/dev/null
+          curl -fsS "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/subdomain" \
+            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -o /tmp/account-sub.json
+          jq -er '.result.subdomain' /tmp/account-sub.json >/tmp/subdomain
+
+      - name: Pulse four Calle Ocho profile classify calls
+        shell: bash
+        run: |
+          set -euo pipefail
+          URL="https://$BRIDGE_WORKER.$(cat /tmp/subdomain).workers.dev/$(cat /tmp/token)"
+          ready=000
+          for i in $(seq 1 12); do
+            ready=$(curl -sS --max-time 20 -o /tmp/ready.json -w '%{http_code}' "$URL/ready" || true)
+            echo "bridge_ready_attempt=$i/12 http=$ready"
+            [[ "$ready" == "200" ]] && break
+            if [[ "$i" -eq 12 ]]; then
+              echo "bridge gave up"
+              exit 1
+            fi
+            sleep 3
+          done
+          code=$(curl -sS --max-time 300 -o /tmp/result.json -w '%{http_code}' \
+            -H 'Content-Type: application/json' -d '{}' "$URL" || true)
+          echo "bridge_http=$code"
+          test "$code" -eq 200
+          jq '{ok,results:[.results[]|{name,path,status,ok,classifying,message}]}' /tmp/result.json
+          jq -e '.ok==true and ([.results[]|select(.ok!=true)]|length)==0' /tmp/result.json >/dev/null
+
+      - name: Delete temporary bridge
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -sS -X DELETE "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/$BRIDGE_WORKER" \
+            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -o /tmp/delete.json || true
+
+      - name: Verify production Worker unchanged
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          BEFORE=$(cat /tmp/active-before.txt)
+          curl -fsS "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/$TARGET_WORKER/deployments" \
+            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -o /tmp/after.json
+          AFTER=$(jq -er '.result.deployments[0].versions|max_by(.percentage)|.version_id' /tmp/after.json)
+          echo "production_unchanged=$([[ "$BEFORE" == "$AFTER" ]] && echo true || echo false)"
+          test "$BEFORE" = "$AFTER"
