@@ -226,3 +226,85 @@
     gap:9px;
   }
 }
+
+/* 0.6.523: All Profiles Overview replaces duplicated single-profile summary cards. */
+.main:has(#page-home.active):has(#page-dashboard.active) .studio-hub-top{
+  display:block;
+}
+.main:has(#page-home.active):has(#page-dashboard.active) .studio-hub-hello,
+.main:has(#page-home.active):has(#page-dashboard.active) .studio-hub-top > .metrics{
+  display:none!important;
+}
+.all-profiles-overview{
+  width:100%;
+  padding:14px 16px;
+  border:1px solid rgba(1,37,89,.12);
+  border-radius:20px;
+  background:rgba(255,255,255,.86);
+  box-shadow:0 10px 28px rgba(15,35,70,.07);
+}
+.all-profiles-heading{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:12px;
+  margin-bottom:9px;
+}
+.all-profiles-heading h1{
+  margin:1px 0 0;
+  font-size:1.35rem;
+  color:#012559;
+}
+.all-profiles-heading .studio-hub-kicker{
+  margin:0;
+}
+.all-profiles-table-wrap{overflow-x:auto}
+.all-profiles-table{
+  width:100%;
+  border-collapse:separate;
+  border-spacing:0;
+  font-size:.78rem;
+  color:#10233f;
+}
+.all-profiles-table th,
+.all-profiles-table td{
+  padding:8px 10px;
+  border-top:1px solid rgba(1,37,89,.09);
+  text-align:center;
+  white-space:nowrap;
+}
+.all-profiles-table thead th{
+  border-top:0;
+  color:#5f708a;
+  font-size:.68rem;
+  text-transform:uppercase;
+  letter-spacing:.04em;
+}
+.all-profiles-table th:first-child{
+  text-align:left;
+}
+.all-profiles-table tbody th{
+  color:#012559;
+  font-weight:800;
+}
+.all-profiles-total th,
+.all-profiles-total td{
+  font-weight:800;
+  background:rgba(1,37,89,.045);
+}
+.overview-tone-ok{color:#067647;font-weight:800}
+.overview-tone-warn{color:#9a6700;font-weight:800;background:#fff7db}
+.overview-tone-critical{color:#b42318;font-weight:800;background:#fff0ee}
+.all-profiles-loading{
+  min-height:92px;
+  display:grid;
+  place-items:center;
+  font-weight:700;
+  color:#5f708a;
+}
+@media(max-width:760px){
+  .all-profiles-overview{padding:11px 10px;border-radius:16px}
+  .all-profiles-heading h1{font-size:1.1rem}
+  .all-profiles-table{font-size:.72rem}
+  .all-profiles-table th,.all-profiles-table td{padding:7px 8px}
+}
