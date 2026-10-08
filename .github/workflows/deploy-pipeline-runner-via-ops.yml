@@ -148,3 +148,6 @@ jobs:
 
 # Trigger pipeline-runner deploy for mixed still/video Create Timeline
 # 2026-10-08 service_version=2026-10-08-mixed-media-timeline
+
+# Trigger pipeline-runner deploy for AI-only captions with no asset-name inventory
+# 2026-10-08 service_version=2026-10-08-ai-only-captions source=1149e9b9
