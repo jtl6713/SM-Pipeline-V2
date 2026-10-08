@@ -79,3 +79,5 @@ Deploy Studio UI 0.6.534-pages-path-bust. Rename app-item4-0625.js -> app-item4-
 2026-10-08: Deploy default AI-directed photo motion ON alongside beat sync ON in current app-item4-1008.js.
 
 2026-10-08: Deploy Production Rendering per-photo cards with descriptive photo labels instead of opaque asset GUIDs; cache-busted app-item4-1008.js.
+
+Deploy Studio UI 0.6.536-photo-labels. Production and library cards show a photo name or Photo N instead of an asset GUID. Triggered 2026-10-08.

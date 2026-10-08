@@ -260,7 +260,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.534-pages-path-bust";
+  const BUILD_ID = "item4-0.6.536-photo-labels";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -4594,8 +4594,37 @@
     return Math.round((Number(value) || 0) * 1000) / 1000;
   }
 
+  function studioAssetLabelIsOpaque(value) {
+    const text = String(value || "").trim().replace(/\.[A-Za-z0-9]{2,5}$/i, "");
+    if (!text) return true;
+    if (/^(photo|image|slide|still|asset|file|clip|video)(\s+\d+)?$/i.test(text)) return true;
+    if (/^rec[A-Za-z0-9]{10,}$/.test(text)) return true;
+    if (/^[a-f0-9]{16,}$/i.test(text)) return true;
+    if (/^[a-f0-9]{8}-[a-f0-9-]{13,}$/i.test(text)) return true;
+    if (!/\s/.test(text) && text.length >= 20 && /\d/.test(text) && !/[aeiou]{2}/i.test(text)) return true;
+    return false;
+  }
+
+  function studioPhotoLabel(asset, index, kind = "Photo") {
+    const description = String(asset?.description || "").trim();
+    const candidates = [
+      asset?.name,
+      asset?.file_name,
+      asset?.location,
+      asset?.topic,
+      description && !/studio item 4|authoritative master|watermarked:/i.test(description) ? description : "",
+    ];
+    const picked = candidates
+      .map((value) => String(value || "").trim().replace(/\.[A-Za-z0-9]{2,5}$/i, ""))
+      .find((value) => value && !studioAssetLabelIsOpaque(value) && value.length <= 80);
+    if (picked) return picked;
+    if (typeof index === "number" && Number.isFinite(index) && index >= 0) return `${kind} ${index + 1}`;
+    return kind;
+  }
+
   function timedScriptAssetLabel(asset, index) {
-    return `#${index + 1} · ${String(asset?.name || asset?.file_name || "Still")}`;
+    const label = studioPhotoLabel(asset, index, "Still");
+    return label === `Still ${index + 1}` ? label : `#${index + 1} · ${label}`;
   }
 
   function renderTimedScriptReview() {
@@ -5080,14 +5109,14 @@
     host.innerHTML = assets.map((asset, index) => {
       const assetId = String(asset.id || asset.media_asset_record_id || "").trim();
       const override = normalizeProductionRenderOverride(productionRenderFrameOverrides?.[assetId]);
-      const name = String(asset.name || asset.file_name || `Photo ${index + 1}`);
+      const name = studioPhotoLabel(asset, index, "Photo");
       const preview = item4AssetPreviewUrl(asset);
       const visual = preview
         ? `<img src="${escapeHtml(preview)}" alt="" loading="lazy">`
         : "<span>No preview</span>";
       return `<div class="production-render-frame-card" data-render-frame-asset="${escapeHtml(assetId)}">
         <div class="production-render-frame-preview">${visual}</div>
-        <div class="production-render-frame-meta"><strong>#${index + 1} · ${escapeHtml(name)}</strong><small>${escapeHtml(asset.width && asset.height ? `${asset.width} × ${asset.height} photo` : "Photo · motion override")}</small></div>
+        <div class="production-render-frame-meta"><strong>${escapeHtml(name === `Photo ${index + 1}` ? name : `#${index + 1} · ${name}`)}</strong><small>${escapeHtml(asset.width && asset.height ? `${asset.width} × ${asset.height} photo` : "Photo")}</small></div>
         <label class="form-field"><span>Motion</span><select data-render-frame-field="motion">
           ${productionRenderOption("", "Inherit / AI", override.motion || "")}
           ${productionRenderOption("static", "Static", override.motion || "")}
@@ -5665,7 +5694,7 @@
       const durationNote = isVideo && seconds > 0 ? ` · ${formatLibraryClipDuration(seconds)}` : "";
       cards.push(`<article class="ez-photo-card" data-item4-asset="${escapeHtml(id)}">
         ${visual}
-        <div class="item4-asset-meta"><strong>${escapeHtml(name)}</strong><span>${isVideo ? `Clip ${index + 1}` : (ezIsFinishedVideo() ? `Video ${index + 1}` : `Photo ${index + 1}`)}${durationNote}</span></div>
+        <div class="item4-asset-meta"><strong>${escapeHtml(studioPhotoLabel({ ...asset, name: asset.name || file?.name }, index, isVideo ? "Clip" : "Photo"))}</strong><span>${isVideo ? `Clip ${index + 1}` : (ezIsFinishedVideo() ? `Video ${index + 1}` : `Photo ${index + 1}`)}${durationNote}</span></div>
         ${item4CaptionField(id)}
         ${canRemove ? `<button type="button" class="item4-remove-asset" data-remove-item4-asset="${escapeHtml(asset.id)}" title="${ezIsFinishedVideo() ? "Remove this video" : "Remove this photo"}">×</button>` : ""}
       </article>`);
@@ -8740,7 +8769,7 @@
     const canReorder = canRemove && total > 1;
     return `<article class="item4-asset-card${showCaption ? " with-caption" : ""}${canReorder ? " is-reorderable" : ""}" data-item4-asset="${escapeHtml(asset.id)}" ${canReorder ? 'draggable="true"' : ""}>
       <div class="item4-thumb">${visual}${canReorder ? `<button type="button" class="item4-asset-drag-handle" data-item4-drag-handle="${escapeHtml(asset.id)}" aria-label="Drag to reorder" title="Drag to reorder">⋮⋮</button>` : ""}</div>
-      <div class="item4-asset-meta"><strong>${escapeHtml(asset.name || (isVideo ? "Clip" : "Photo"))}</strong><span>${escapeHtml(isVideo ? `Clip ${asset.order || ""}` : `Photo ${asset.order || ""}`)} · ${escapeHtml(dims)}${durationNote}${formatNote}</span></div>
+      <div class="item4-asset-meta"><strong>${escapeHtml(studioPhotoLabel(asset, Math.max(0, Number(asset.order || index + 1) - 1), isVideo ? "Clip" : "Photo"))}</strong><span>${escapeHtml(isVideo ? `Clip ${asset.order || ""}` : `Photo ${asset.order || ""}`)} · ${escapeHtml(dims)}${durationNote}${formatNote}</span></div>
       ${captionField}
       ${canRemove ? `<button type="button" class="item4-remove-asset" data-remove-item4-asset="${escapeHtml(asset.id)}" title="${ezIsFinishedVideo() ? "Remove this video" : "Remove this photo"}">×</button>` : ""}
     </article>`;
@@ -12397,7 +12426,7 @@
   function renderLibraryPickerSections(items, selected, suggestedIds, idAttr, { flat = false } = {}) {
     const suggested = items.filter((item) => suggestedIds.has(item.id));
     const more = items.filter((item) => !suggestedIds.has(item.id));
-    const card = (item) => {
+    const card = (item, index = 0) => {
       const checked = selected.has(item.id);
       const preview = ideaLibraryPreviewUrl(item);
       const video = String(item.media_kind || "").toLowerCase() === "video";
@@ -12420,20 +12449,20 @@
         <input type="checkbox" form="ideaLibraryPickerForm" tabindex="-1" ${checked ? "checked" : ""} aria-hidden="true">
         ${media}
         ${tag}
-        <span>${escapeHtml(item.name || item.id)}${duration ? ` · ${escapeHtml(duration)}` : ""}</span>
+        <span>${escapeHtml(studioPhotoLabel(item, index, video ? "Clip" : "Photo"))}${duration ? ` · ${escapeHtml(duration)}` : ""}</span>
       </div>`;
     };
     const parts = [];
     if (flat) {
       return items.length
-        ? `<div class="idea-library-cards">${items.map(card).join("")}</div>`
+        ? `<div class="idea-library-cards">${items.map((item, index) => card(item, index)).join("")}</div>`
         : `<p class="idea-library-picker-hint">No library file is named with that quoted phrase.</p>`;
     }
     if (suggested.length) {
-      parts.push(`<div class="idea-library-block"><p class="idea-library-section">Suggested</p><div class="idea-library-cards">${suggested.map(card).join("")}</div></div>`);
+      parts.push(`<div class="idea-library-block"><p class="idea-library-section">Suggested</p><div class="idea-library-cards">${suggested.map((item, index) => card(item, index)).join("")}</div></div>`);
     }
     if (more.length) {
-      parts.push(`<div class="idea-library-block"><p class="idea-library-section">More from library</p><div class="idea-library-cards">${more.map(card).join("")}</div></div>`);
+      parts.push(`<div class="idea-library-block"><p class="idea-library-section">More from library</p><div class="idea-library-cards">${more.map((item, index) => card(item, index)).join("")}</div></div>`);
     }
     return parts.join("") || `<p class="idea-library-picker-hint">No classified Drive photos or clips matched that search.</p>`;
   }
@@ -15749,7 +15778,7 @@
       const slideSummary = `v${overlayVersion} · ${Number(slide.duration_seconds ?? 4).toFixed(1)}s · ${overlay.style_preset || "No style"} · ${voiceover.enabled === false ? "No voiceover" : (voiceover.voice || "Voiceover")}${titleLocked ? " · titles locked" : ""}`;
       return `<article class="creative-slide-card ${slide.include === false ? "excluded" : ""} ${collapsed ? "collapsed" : ""} ${titleLocked ? "title-locked" : ""}" draggable="true" data-slide-id="${escapeHtml(slide.id)}">
         <div class="creative-slide-header">
-          <div class="creative-slide-title-wrap"><span class="slide-drag-handle" title="Drag to reorder">⋮⋮</span><div><div class="creative-slide-title">${escapeHtml(slide.name || `Slide ${index + 1}`)}</div><div class="creative-slide-subtitle">Order ${index + 1}${slide.is_cover ? " · Cover" : ""}${slide.review_status ? ` · ${escapeHtml(slide.review_status)}` : ""} · ${escapeHtml(slideSummary)}</div></div></div>
+          <div class="creative-slide-title-wrap"><span class="slide-drag-handle" title="Drag to reorder">⋮⋮</span><div><div class="creative-slide-title">${escapeHtml(studioPhotoLabel({ name: slide.name, location: media.location, description: media.description }, index, "Slide"))}</div><div class="creative-slide-subtitle">Order ${index + 1}${slide.is_cover ? " · Cover" : ""}${slide.review_status ? ` · ${escapeHtml(slide.review_status)}` : ""} · ${escapeHtml(slideSummary)}</div></div></div>
           <div class="creative-slide-header-actions"><button type="button" class="slide-collapse-button" aria-expanded="${collapsed ? "false" : "true"}">${collapsed ? "Expand" : "Collapse"}</button><label class="slide-include-control"><input type="checkbox" data-field="include" ${slide.include !== false ? "checked" : ""}> Include</label></div>
         </div>
         <div class="creative-slide-body">
@@ -20463,7 +20492,7 @@
       r.content_profile_name ? `<span>${escapeHtml(r.content_profile_name)}</span>` : "",
     ].filter(Boolean).join("");
     const classify = libraryNeedsManualClassify(r) ? libraryProfileSelectHtml(r) : "";
-    return `<article class="library-card" data-library-id="${escapeHtml(r.id)}" data-library-record-type="media_asset" data-library-needs-duration="${needsDuration}"><div class="library-card-media"${playAttrs}>${media}<em class="library-kind">${video ? "Clip" : "Photo"}</em></div><h3>${value(r.name)}</h3><div class="library-meta">${meta}</div><div class="subtle">${value(r.description, "No description yet")}</div>${classify}<div class="music-actions">${r.google_drive_url ? `<a class="link-button" target="_blank" rel="noopener" href="${escapeHtml(r.google_drive_url)}">Open in Drive</a>` : ""}${r.studio_uploaded ? `<span class="badge ready-for-review">Studio upload</span>` : ""}${libraryClassificationBadge(r)}<span class="badge ${r.do_not_use ? "failed" : "published"}">${r.do_not_use ? "Do not use" : "Available"}</span><button type="button" class="secondary-button" data-library-rename="${escapeHtml(r.id)}" data-library-name="${escapeHtml(r.name || "")}">Rename</button><button type="button" class="danger-button" data-library-delete="${escapeHtml(r.id)}" data-library-name="${escapeHtml(r.name || "this asset")}">Delete</button></div></article>`;
+    return `<article class="library-card" data-library-id="${escapeHtml(r.id)}" data-library-record-type="media_asset" data-library-needs-duration="${needsDuration}"><div class="library-card-media"${playAttrs}>${media}<em class="library-kind">${video ? "Clip" : "Photo"}</em></div><h3>${escapeHtml(studioPhotoLabel(r, null, video ? "Clip" : "Photo"))}</h3><div class="library-meta">${meta}</div><div class="subtle">${value(r.description, "No description yet")}</div>${classify}<div class="music-actions">${r.google_drive_url ? `<a class="link-button" target="_blank" rel="noopener" href="${escapeHtml(r.google_drive_url)}">Open in Drive</a>` : ""}${r.studio_uploaded ? `<span class="badge ready-for-review">Studio upload</span>` : ""}${libraryClassificationBadge(r)}<span class="badge ${r.do_not_use ? "failed" : "published"}">${r.do_not_use ? "Do not use" : "Available"}</span><button type="button" class="secondary-button" data-library-rename="${escapeHtml(r.id)}" data-library-name="${escapeHtml(r.name || "")}">Rename</button><button type="button" class="danger-button" data-library-delete="${escapeHtml(r.id)}" data-library-name="${escapeHtml(r.name || "this asset")}">Delete</button></div></article>`;
   }
 
   function renderLibraryCards(records) {
