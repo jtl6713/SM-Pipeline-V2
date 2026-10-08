@@ -11,9 +11,9 @@ const css = fs.readFileSync(path.join(here, "assets/styles-phase7-0621.css"), "u
 
 test("UI 0.6.516 preserves hamburger off-canvas nav on every viewport", () => {
   assert.match(app, /BUILD_ID = "item4-0\.6\.527-timed-vo-quiet-retry"/);
-  assert.match(html, /UI build 0\.6\.520/);
-  assert.match(html, /app-item4-0625\.js\?v=0\.6\.520-feed-post-timeline/);
-  assert.match(html, /styles-phase7-0621\.css\?v=0\.6\.520-feed-post-timeline/);
+  assert.match(html, /UI build 0\.6\.527/);
+  assert.match(html, /app-item4-0625\.js\?v=0\.6\.527-timed-vo-quiet-retry/);
+  assert.match(html, /styles-phase7-0621\.css\?v=0\.6\.527-timed-vo-quiet-retry/);
   assert.match(html, /id="studioNavToggle"/);
   assert.match(html, /id="studioSidebar"/);
   assert.match(html, /id="studioNavBackdrop"/);

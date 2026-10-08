@@ -2,7 +2,9 @@ name: Deploy Studio Pages Production
 
 on:
   push:
-    branches: [main]
+    branches:
+      - main
+      - cursor/vo-quiet-segment-retry-8481
     paths:
       - "apps/studio-web/**"
       - "deploy/cloudflare-pages-production.txt"

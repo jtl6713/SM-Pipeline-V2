@@ -234,7 +234,7 @@ test("a new short spreads morning afternoon evening then next-day MAE, not a sam
   assert.notEqual(dayOf(stamps.get("Instagram::Reel"), zone), dayOf(stamps.get("YouTube::Short"), zone));
 });
 
-test("Stories share MAE occupancy instead of resetting to the next slot today", () => {
+test("Stories roll to the next day when today's MAE slots are already occupied", () => {
   const zone = "America/New_York";
   const now = new Date("2026-10-07T12:00:00Z");
   const morning = maeZonedWallToUtcMs(2026, 10, 7, 5, 30, zone);
@@ -249,14 +249,18 @@ test("Stories share MAE occupancy instead of resetting to the next slot today", 
     now,
     { timeZone: zone },
   );
-  for (const key of ["Instagram::Story", "Facebook::Story"]) {
-    const iso = stamps.get(key);
-    assert.ok(iso, key);
-    assert.notEqual(dayOf(iso, zone), "2026-10-07");
-    assert.equal(localParts(iso, zone).hour, 5);
-    assert.equal(localParts(iso, zone).minute, 30);
-  }
-  assert.notEqual(stamps.get("Instagram::Story"), stamps.get("Facebook::Story"));
+  const ig = stamps.get("Instagram::Story");
+  const fb = stamps.get("Facebook::Story");
+  assert.ok(ig);
+  assert.ok(fb);
+  // Today's MAE trio is full across platforms, so both stories land on 2026-10-08.
+  assert.equal(dayOf(ig, zone), "2026-10-08");
+  assert.equal(localParts(ig, zone).hour, 5);
+  assert.equal(localParts(ig, zone).minute, 30);
+  assert.equal(dayOf(fb, zone), "2026-10-08");
+  assert.equal(localParts(fb, zone).hour, 11);
+  assert.equal(localParts(fb, zone).minute, 30);
+  assert.notEqual(ig, fb);
 });
 
 test("after 28 days of MAE are full, the 4th is day 1's largest gap", () => {

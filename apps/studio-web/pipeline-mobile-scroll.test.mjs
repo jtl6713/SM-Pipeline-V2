@@ -11,8 +11,8 @@ const css = fs.readFileSync(path.join(here, "assets/styles-phase7-0621.css"), "u
 
 test("UI 0.6.516 Pipeline overview is a bounded horizontal scrollport on phones", () => {
   assert.match(app, /BUILD_ID = "item4-0\.6\.527-timed-vo-quiet-retry"/);
-  assert.match(html, /UI build 0\.6\.520/);
-  assert.match(html, /styles-phase7-0621\.css\?v=0\.6\.520-feed-post-timeline/);
+  assert.match(html, /UI build 0\.6\.527/);
+  assert.match(html, /styles-phase7-0621\.css\?v=0\.6\.527-timed-vo-quiet-retry/);
   assert.match(css, /PIPELINE_MOBILE_SCROLL_0_6_514/);
   assert.match(css, /body:has\(#page-outputs\.active\) \.main/);
   assert.match(css, /#page-outputs \.panel:has\(#outputsList\)/);
