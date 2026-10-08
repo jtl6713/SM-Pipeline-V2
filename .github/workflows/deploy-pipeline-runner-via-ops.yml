@@ -144,7 +144,9 @@ jobs:
 
 # Trigger pipeline-runner deploy for six-hour YouTube scheduled handoff
 # 2026-10-07 keep approved YouTube outputs in Studio until T-minus 6 hours
-\n# Trigger pipeline-runner deploy for Output 1843 beat-sync voiceover+tail duration floor\n# 2026-10-07 service_version timing guard companion\n# Retrigger after runner service_version bump 2026-10-07-beat-sync-vo-guard\n
+# Trigger pipeline-runner deploy for Output 1843 beat-sync voiceover+tail duration floor
+# 2026-10-07 service_version timing guard companion
+# Retrigger after runner service_version bump 2026-10-07-beat-sync-vo-guard
 
 # Trigger pipeline-runner deploy for mixed still/video Create Timeline
 # 2026-10-08 service_version=2026-10-08-mixed-media-timeline
