@@ -506,7 +506,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.471-ai-only-captions",
+          version: "0.10.472-scripted-scene-approval-state",
           studio_mae_schedule_v1: true,
           studio_mae_28_day_schedule_v1: true,
           studio_promotion_reconcile_after_handoff_error_v1: true,
@@ -14465,6 +14465,20 @@ async function item4SourceToProductionBridgePreflight(env, requestRecord, ideaRe
     "The authoritative master-media manifest is missing or empty."
   );
 
+  const proposalNotes = String(f(requestRecord, "Production_Notes") || "");
+  if (/scripted-short=proposal/i.test(proposalNotes)) {
+    const proposalTimeline = timedScriptFromNotes(proposalNotes);
+    addCheck(
+      "scripted_short_timeline_present",
+      Boolean(proposalTimeline?.segments?.length),
+      "The scripted short timeline is missing. Save the scenes before Approve."
+    );
+    if (proposalTimeline?.segments?.length) {
+      const unassigned = scriptedShortUnassignedMessage(proposalTimeline);
+      addCheck("scripted_short_scenes_assigned", !unassigned, unassigned || null);
+    }
+  }
+
   if (Array.isArray(masterAssets) && masterAssets.length) {
     const incompleteMasters = masterAssets.filter(asset =>
       !String(asset?.google_drive_file_id || "").trim() ||
@@ -21707,13 +21721,11 @@ async function pulseIdeaTimedScriptWriter(env, idea, catalog) {
 function scriptedShortUnassignedMessage(timeline) {
   const count = unassignedSuggestionCount(timeline);
   if (!count) return "";
-  const shots = (timeline?.segments || [])
-    .filter((segment) => !String(segment?.asset_id || "").trim())
-    .map((segment) => String(segment?.suggested_visual || "").trim())
-    .filter(Boolean)
-    .slice(0, 3);
-  const list = shots.length ? ` Still needed: ${shots.join("; ")}.` : "";
-  return `Attach a photo to ${count} suggested scene${count === 1 ? "" : "s"} before Approve.${list} This does not publish.`;
+  const sceneNumbers = (timeline?.segments || [])
+    .map((segment, index) => !String(segment?.asset_id || segment?.media_asset_id || "").trim() ? index + 1 : null)
+    .filter(Boolean);
+  const sceneLabel = sceneNumbers.length === 1 ? `scene ${sceneNumbers[0]}` : `scenes ${sceneNumbers.join(", ")}`;
+  return `Assign ${count === 1 ? "a photo" : "photos"} to ${sceneLabel} in Rendering before Approve, or use “Match stills in order.” This does not publish.`;
 }
 
 async function proposeScriptedShortRoute(request, env, authorization) {

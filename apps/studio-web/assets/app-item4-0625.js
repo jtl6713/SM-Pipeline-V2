@@ -260,7 +260,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.520-feed-post-timeline";
+  const BUILD_ID = "item4-0.6.529-scripted-scene-approval-state";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -4367,6 +4367,21 @@
 
   function timedScriptActive() {
     return Boolean(productionTimedScript && Array.isArray(productionTimedScript.segments) && productionTimedScript.segments.length);
+  }
+
+  function scriptedShortMissingSceneNumbers(record = activeProductionRequest) {
+    const notes = String($('prProductionNotes')?.value || record?.production_notes || "");
+    if (!/scripted-short=proposal/i.test(notes) || !productionTimedScript?.segments?.length) return [];
+    return productionTimedScript.segments
+      .map((segment, index) => !String(segment?.asset_id || segment?.media_asset_id || "").trim() ? index + 1 : null)
+      .filter(Boolean);
+  }
+
+  function scriptedShortMissingSceneMessage(record = activeProductionRequest) {
+    const scenes = scriptedShortMissingSceneNumbers(record);
+    if (!scenes.length) return "";
+    const sceneLabel = scenes.length === 1 ? `scene ${scenes[0]}` : `scenes ${scenes.join(", ")}`;
+    return `Assign ${scenes.length === 1 ? "a photo" : "photos"} to ${sceneLabel} in Rendering before Approve, or use “Match stills in order.” This does not publish.`;
   }
 
   function productionStillAssets(status = item4Workspace) {
@@ -11808,6 +11823,7 @@
     }
 
     const promote = $("promoteProductionRequest");
+    const scriptedSceneBlocker = scriptedShortMissingSceneMessage(record);
     if (promote) {
       if (item4PromoteInFlight || promote.dataset.busy === "true") {
         promote.disabled = true;
@@ -11828,15 +11844,15 @@
         const variantsReady = finished
           || item4Workspace?.variant_status === "Ready"
           || item4Workspace?.variant_status === "Not Needed";
-        promote.disabled = Boolean(item4Uploading);
+        promote.disabled = Boolean(item4Uploading || scriptedSceneBlocker);
         promote.textContent = "Approve";
-        promote.title = !planReady
+        promote.title = scriptedSceneBlocker || (!planReady
           ? "Choose platforms first."
           : (!variantsReady
               ? "Wait until platform crops are ready, then approve."
               : (finished
                   ? "Approve this finished file and send it to review."
-                  : "Approve this piece and start production."));
+                  : "Approve this piece and start production.")));
       } else {
         promote.disabled = false;
         promote.textContent = "Approve";
@@ -11865,7 +11881,10 @@
       } else if (status === "Submitted") {
         text = "This request was sent. Use Check promotion status if you need an update.";
       } else if (item4Workspace?.assets?.length) {
-        if (item4Workspace?.plan_status !== "Ready") {
+        if (scriptedSceneBlocker) {
+          kind = "error-text";
+          text = scriptedSceneBlocker;
+        } else if (item4Workspace?.plan_status !== "Ready") {
           text = "Photos are saved. Next: save the platform plan.";
         } else if (!finished && item4Workspace?.variant_status !== "Ready" && item4Workspace?.variant_status !== "Not Needed") {
           text = "Plan is ready. Next: prepare the platform crops.";
@@ -13420,13 +13439,12 @@
       setRequestMessage("Save the platform plan first, then click Approve again.", "error-text");
       return;
     }
-    const proposalNotes = String($("prProductionNotes")?.value || activeProductionRequest?.production_notes || "");
-    if (/scripted-short=proposal/i.test(proposalNotes) && productionTimedScript?.segments?.length) {
-      const missing = productionTimedScript.segments.filter((segment) => !String(segment?.asset_id || "").trim()).length;
-      if (missing) {
-        setRequestMessage(`Attach a photo to ${missing} suggested scene${missing === 1 ? "" : "s"} before Approve. This does not publish.`, "error-text");
-        return;
-      }
+    const scriptedSceneBlocker = scriptedShortMissingSceneMessage(activeProductionRequest);
+    if (scriptedSceneBlocker) {
+      setRequestMessage(scriptedSceneBlocker, "error-text");
+      setProductionWorkspaceTab("rendering");
+      renderTimedScriptReview();
+      return;
     }
     if (item4Workspace?.assets?.length && !item4IsFinishedRequest() && item4Workspace?.variant_status !== "Ready" && item4Workspace?.variant_status !== "Not Needed") {
       setRequestMessage(`${item4VariantNotReadyCopy(item4Workspace?.variant_status)} Click Approve again when ready.`, "error-text");
