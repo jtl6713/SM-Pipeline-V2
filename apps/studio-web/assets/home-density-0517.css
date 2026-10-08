@@ -308,3 +308,25 @@
   .all-profiles-table{font-size:.72rem}
   .all-profiles-table th,.all-profiles-table td{padding:7px 8px}
 }
+
+
+/* 0.6.526: Visually group the four platform columns as scheduled posts. */
+.all-profiles-table thead .all-profiles-group-row th{vertical-align:middle}
+.all-profiles-table .all-profiles-scheduled-group{
+  padding:6px 10px 4px;
+  border:1px solid rgba(1,37,89,.14);
+  border-bottom:0;
+  border-radius:10px 10px 0 0;
+  background:rgba(1,37,89,.055);
+  color:#012559;
+  font-weight:900;
+  letter-spacing:.08em;
+}
+.all-profiles-table .all-profiles-platform-row .all-profiles-scheduled-col{
+  padding-top:5px;
+  background:rgba(1,37,89,.035);
+  border-top:0;
+  border-bottom:1px solid rgba(1,37,89,.14);
+}
+.all-profiles-table .all-profiles-platform-row .all-profiles-scheduled-col:first-child{border-left:1px solid rgba(1,37,89,.14)}
+.all-profiles-table .all-profiles-platform-row .all-profiles-scheduled-col:last-child{border-right:1px solid rgba(1,37,89,.14)}
