@@ -23,6 +23,8 @@ jobs:
     env:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
+      CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
       PAGES_PROJECT: chicagoshining-studio
       PUBLIC_URL: https://studio.chicagoshining.com
     steps:
@@ -39,7 +41,10 @@ jobs:
         run: |
           set -euo pipefail
           test -s apps/studio-web/index.html
-          grep -Fq "UI build 0.6.526" apps/studio-web/index.html
+          EXPECTED_UI=$(grep -oE 'UI build [0-9]+\.[0-9]+\.[0-9]+' apps/studio-web/index.html | head -1 | awk '{print $3}')
+          test -n "$EXPECTED_UI"
+          echo "EXPECTED_UI=$EXPECTED_UI" >> "$GITHUB_ENV"
+          grep -Fq "UI build $EXPECTED_UI" apps/studio-web/index.html
           test -n "${CLOUDFLARE_API_TOKEN:-}"
           test -n "${CLOUDFLARE_ACCOUNT_ID:-}"
 
@@ -47,20 +52,29 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          npx --yes wrangler@latest pages deploy apps/studio-web             --project-name="$PAGES_PROJECT"             --branch=main             --commit-hash="$GITHUB_SHA"             --commit-message="Studio UI 0.6.526 production deployment"             --commit-dirty=false
+          npx --yes wrangler@latest pages deploy apps/studio-web \
+            --project-name="$PAGES_PROJECT" \
+            --branch=main \
+            --commit-hash="$GITHUB_SHA" \
+            --commit-message="Studio UI ${EXPECTED_UI} production deployment" \
+            --commit-dirty=false
 
       - name: Verify production UI
         shell: bash
         run: |
           set -euo pipefail
+          AUTH_ARGS=()
+          if [[ -n "${CF_ACCESS_CLIENT_ID:-}" && -n "${CF_ACCESS_CLIENT_SECRET:-}" ]]; then
+            AUTH_ARGS=(-H "CF-Access-Client-Id: ${CF_ACCESS_CLIENT_ID}" -H "CF-Access-Client-Secret: ${CF_ACCESS_CLIENT_SECRET}")
+          fi
           for ATTEMPT in $(seq 1 30); do
-            BODY=$(curl -fsS "$PUBLIC_URL/?deploy_verify=$GITHUB_SHA" || true)
-            if grep -Fq "UI build 0.6.526" <<<"$BODY"; then
-              echo "Studio production verification PASS: UI 0.6.526"
+            BODY=$(curl -fsS "${AUTH_ARGS[@]}" "$PUBLIC_URL/?deploy_verify=$GITHUB_SHA" || true)
+            if grep -Fq "UI build ${EXPECTED_UI}" <<<"$BODY"; then
+              echo "Studio production verification PASS: UI ${EXPECTED_UI}"
               exit 0
             fi
-            echo "Waiting for Studio production UI 0.6.526 (attempt $ATTEMPT/30)"
+            echo "Waiting for Studio production UI ${EXPECTED_UI} (attempt $ATTEMPT/30)"
             sleep 10
           done
-          echo "Studio production did not report UI 0.6.526" >&2
+          echo "Studio production did not report UI ${EXPECTED_UI}" >&2
           exit 1

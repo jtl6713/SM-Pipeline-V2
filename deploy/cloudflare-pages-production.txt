@@ -65,3 +65,4 @@ Deploy Studio UI 0.6.525-timeline-padding. Add consistent left/right inset to Id
 Deploy Studio UI 0.6.526-scheduled-group. Group Facebook, Instagram, TikTok, and YouTube under a Scheduled Posts header in All Profiles Overview. Triggered 2026-10-08.
 
 Deploy Studio UI 0.6.527-timed-vo-quiet-retry after PR #542 conflict resolve + main merge. Triggered 2026-10-08.
+Redeploy Studio UI 0.6.527 with dynamic Pages verify + Access-aware check: 2026-10-08T03:50Z
