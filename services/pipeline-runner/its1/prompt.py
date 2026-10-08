@@ -48,7 +48,7 @@ PRIMARY LOCATION
 MARKET
 {market}
 
-LIBRARY STILL CATALOG (use only these)
+LIBRARY MEDIA CATALOG (use only these)
 {catalog}
 
 FINAL SELF-CHECK
