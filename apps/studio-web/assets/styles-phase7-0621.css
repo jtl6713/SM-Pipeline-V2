@@ -4572,3 +4572,18 @@ body.nav-collapsed .sidebar{
 }
 .creative-tiktok-music-requirement[hidden]{display:none!important}
 .creative-tiktok-music-requirement b{color:#6c4300}
+
+
+/* Create Timeline: keep scene content aligned with the panel inset. */
+#ideaTimedScriptStatus,
+#ideaTimedScriptMeta,
+#ideaTimedScriptScenes,
+.idea-timed-script-status,
+.idea-timed-script-meta,
+.idea-timed-script-scenes { box-sizing:border-box; padding-left:16px; padding-right:16px; }
+#ideaTimedScriptScenes .timed-script-scene,
+.idea-timed-script-scenes .timed-script-scene { margin-left:0; margin-right:0; }
+@media(max-width:760px){
+  #ideaTimedScriptStatus,#ideaTimedScriptMeta,#ideaTimedScriptScenes,
+  .idea-timed-script-status,.idea-timed-script-meta,.idea-timed-script-scenes { padding-left:12px; padding-right:12px; }
+}
