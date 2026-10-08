@@ -506,7 +506,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.470-scripted-short-video-discovery",
+          version: "0.10.471-ai-only-captions",
           studio_mae_schedule_v1: true,
           studio_mae_28_day_schedule_v1: true,
           studio_promotion_reconcile_after_handoff_error_v1: true,
@@ -15755,6 +15755,26 @@ function item4StudioThemeTitle(requestRecord, parent) {
 // same thing to do instead of drifting apart.
 // needed may be 0: SAI1 also authors the post caption, which is required even for an
 // all-manual photo set that has no AI slots to theme.
+function item4CaptionContextKey(value) {
+  return String(value || "")
+    .trim()
+    .replace(/\.(?:jpe?g|png|gif|webp|heic|heif|mp4|mov|m4v|webm)$/i, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "");
+}
+
+function item4AssetCaptionForAiContext(asset, title = "") {
+  const caption = String(asset?.caption || "").trim();
+  if (!caption) return "";
+  if (/^(?:photo|image|still|slide|clip|video)\s*(?:#|no\.?|number)?\s*\d+$/i.test(caption)) return "";
+  const captionKey = item4CaptionContextKey(caption);
+  if (!captionKey || captionKey === item4CaptionContextKey(title)) return "";
+  const names = [asset?.name, asset?.file_name, asset?.filename, asset?.asset_name, asset?.library_asset_name]
+    .map(item4CaptionContextKey)
+    .filter(Boolean);
+  return names.includes(captionKey) ? "" : caption;
+}
+
 async function item4RequestAiSlideThemes(env, requestRecord, parent, needed) {
   if (needed < 0) return null;
   const title = item4StudioThemeTitle(requestRecord, parent);
@@ -15762,8 +15782,8 @@ async function item4RequestAiSlideThemes(env, requestRecord, parent, needed) {
   const covered = item4AssetManifest(requestRecord)
     .slice()
     .sort((a, b) => Number(a.order || 0) - Number(b.order || 0))
-    .map((asset) => String(asset?.caption || "").trim())
-    .filter((caption) => caption && !/^(?:photo|image|still|slide|clip|video)(?:[ _-]*(?:#|no\\.?|number)?)?[ _-]*\\d+$/i.test(caption));
+    .map((asset) => item4AssetCaptionForAiContext(asset, title))
+    .filter(Boolean);
   const marketRaw = parent ? f(parent, "Market_Name") : "";
   const market = (Array.isArray(marketRaw) ? String(marketRaw[0] || "") : String(marketRaw || "")).trim() || "Chicago";
   const sai1Body = {
@@ -15810,25 +15830,21 @@ function item4StudioCaptionIsLocked(requestRecord) {
 // attached to masters for visual context, but generic labels such as "Photo 2" must not
 // leak into a social caption (for example "Featuring: Photo 2, Photo 3...").
 function item4StripAssetFilenameCaptionText(value) {
-  let text = String(value || "").trim();
-  if (!text) return "";
-  const generic = String.raw`(?:photo|image|still|slide|clip|video)(?:[ _-]*(?:#|no\\.?|number)?)?[ _-]*\\d+`;
-  const featuringLine = new RegExp(String.raw`(?:^|\\n)\\s*Featuring\\s*:\\s*(?:[^\\n]*\\b${generic}\\b[^\\n]*)\\s*(?=\\n|$)`, "gi");
-  text = text.replace(featuringLine, "\n");
-  const genericToken = new RegExp(String.raw`(?:^|[,;:]\\s*)\\b${generic}\\b(?=\\s*[,;.]|$)`, "gi");
-  text = text.replace(genericToken, "");
-  return text
-    .replace(/(?:^|\\n)\\s*Featuring\\s*:\\s*[,; ]*(?=\\n|$)/gi, "\n")
-    .replace(/[ \\t]+([,;.])/g, "$1")
-    .replace(/,{2,}/g, ",")
-    .replace(/\\n{3,}/g, "\n\n")
-    .trim();
+  const lines = String(value || "").split(/\r?\n/).map((line) => line.trim());
+  return lines.filter((line) => {
+    if (!line) return false;
+    if (/^featuring\s*:/i.test(line)) return false;
+    if (/\.(?:jpe?g|png|gif|webp|heic|heif|mp4|mov|m4v|webm)\b/i.test(line)) return false;
+    if (/\b(?:photo|image|still|slide|clip|video)\s*(?:#|no\.?|number)?\s*\d+\b/i.test(line)) return false;
+    return true;
+  }).join("\n").trim();
 }
 
 async function item4WriteStudioPostCaption(env, parentId, themes, parentRecord) {
   const caption = item4StripAssetFilenameCaptionText(themes?.postCaption);
   if (!parentId || !caption) return null;
-  if (String(f(parentRecord || {}, "Caption") || "").trim()) return null;
+  const existingParentCaption = String(f(parentRecord || {}, "Caption") || "").trim();
+  if (existingParentCaption && item4StripAssetFilenameCaptionText(existingParentCaption) === existingParentCaption) return null;
   const fields = { Caption: caption };
   if (themes.hashtags && !String(f(parentRecord || {}, "Hashtags") || "").trim()) {
     fields.Hashtags = themes.hashtags;
@@ -15842,16 +15858,20 @@ async function item4WriteStudioPostCaption(env, parentId, themes, parentRecord) 
     console.warn("Studio post caption write failed", parentId, error);
     return null;
   }
-  // Outputs are seeded before the caption exists, so backfill the ones still blank.
+  // Outputs are seeded before the caption exists. Backfill blanks and replace
+  // any previously leaked inventory with the newly generated AI copy.
   try {
     const outputs = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
       limit: 50,
-      filterFormula: `AND(FIND('${parentId}',ARRAYJOIN({Content_Item}))>0,{Output_Caption}="")`,
+      filterFormula: `FIND('${parentId}',ARRAYJOIN({Content_Item}))>0`,
     });
-    const updates = outputs.map((row) => ({
-      id: row.id,
-      fields: { Output_Caption: caption, ...(fields.Hashtags ? { Output_Hashtags: fields.Hashtags } : {}) },
-    }));
+    const updates = outputs.filter((row) => {
+      const current = String(f(row, "Output_Caption") || "").trim();
+      return !current || item4StripAssetFilenameCaptionText(current) !== current;
+    }).map((row) => ({
+        id: row.id,
+        fields: { Output_Caption: caption, ...(fields.Hashtags ? { Output_Hashtags: fields.Hashtags } : {}) },
+      }));
     for (let i = 0; i < updates.length; i += 10) {
       await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, "", {
         method: "PATCH",
@@ -15867,7 +15887,9 @@ async function item4WriteStudioPostCaption(env, parentId, themes, parentRecord) 
 async function item4EnsureStudioPostCaption(env, requestRecord, parentId) {
   if (!parentId || item4StudioCaptionIsLocked(requestRecord)) return null;
   const parent = await airtableFetch(env, env.AIRTABLE_CONTENT_TABLE_ID, parentId).catch(() => null);
-  if (!parent || String(f(parent, "Caption") || "").trim()) return null;
+  if (!parent) return null;
+  const existingCaption = String(f(parent, "Caption") || "").trim();
+  if (existingCaption && item4StripAssetFilenameCaptionText(existingCaption) === existingCaption) return null;
   let themes = null;
   try {
     themes = await item4RequestAiSlideThemes(env, requestRecord, parent, 0);
@@ -31968,12 +31990,14 @@ async function studioRunPublishOrchestrator(env, target) {
   }
 }
 
-// The platform handoff emails present the caption as a copy-and-paste block, so a blank
-// Output_Caption reaches you as an empty box with nothing to post. Guarantee one at dispatch.
+// Only SAI1 or an explicitly locked user caption may author publishable copy. This
+// gate can copy the parent's caption and remove leaked asset inventory, but it must
+// never invent a caption from an output title or another production field.
 async function studioEnsureOutputCaption(env, record) {
   const existingCaption = String(f(record, "Output_Caption") || "").trim();
+  const cleanExistingCaption = item4StripAssetFilenameCaptionText(existingCaption);
   const existingHashtags = String(f(record, "Output_Hashtags") || "").trim();
-  if (existingCaption && existingHashtags) return record;
+  if (cleanExistingCaption === existingCaption && existingCaption && existingHashtags) return record;
 
   const parentId = (f(record, "Content_Item") || [])[0] || null;
   const parent = parentId
@@ -31981,10 +32005,11 @@ async function studioEnsureOutputCaption(env, record) {
     : null;
 
   const fields = {};
-  if (!existingCaption) {
-    const caption = String(f(parent || {}, "Caption") || "").trim()
-      || String(f(record, "Output_Title") || "").trim();
-    if (caption) fields.Output_Caption = caption;
+  const parentCaption = item4StripAssetFilenameCaptionText(f(parent || {}, "Caption"));
+  if (cleanExistingCaption !== existingCaption) {
+    fields.Output_Caption = cleanExistingCaption || parentCaption || null;
+  } else if (!cleanExistingCaption && parentCaption) {
+    fields.Output_Caption = parentCaption;
   }
 
   if (!existingHashtags) {
@@ -32018,6 +32043,9 @@ async function studioDispatchApprovedPublishNow(env, record) {
   }
   record = await studioPromoteDuePublishStatus(env, record);
   record = await studioEnsureOutputCaption(env, record);
+  if (!String(f(record, "Output_Caption") || "").trim()) {
+    return { ok: false, skipped: "missing-ai-caption", record };
+  }
   const plan = studioPublishDispatchTarget(record);
   if (!plan) return { ok: true, skipped: "no-dispatch", record };
   if (plan.graphStory) return { ...await studioPublishFacebookPageStory(env, record), plan, record };

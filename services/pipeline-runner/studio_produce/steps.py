@@ -410,7 +410,25 @@ def _normalize_label_key(value: str) -> str:
 
 
 def _is_placeholder_slide_label(value: str) -> bool:
-    return bool(re.fullmatch(r"photo\s*\d+", str(value or "").strip(), flags=re.I))
+    return bool(re.fullmatch(
+        r"(?:photo|image|still|slide|clip|video)\s*(?:#|no\.?|number)?\s*\d+",
+        str(value or "").strip(),
+        flags=re.I,
+    ))
+
+
+def _asset_name_keys(asset: dict[str, Any]) -> set[str]:
+    keys: set[str] = set()
+    for field_name in ("name", "file_name", "filename", "asset_name", "library_asset_name"):
+        raw = str(asset.get(field_name) or "").strip()
+        if not raw:
+            continue
+        without_extension = re.sub(r"\.(?:jpe?g|png|gif|webp|heic|heif|mp4|mov|m4v|webm)$", "", raw, flags=re.I)
+        for value in (raw, without_extension):
+            key = _normalize_label_key(value)
+            if key:
+                keys.add(key)
+    return keys
 
 
 def _slide_captions(assets: list[dict[str, Any]], *, title: str = "") -> list[str]:
@@ -430,6 +448,7 @@ def _slide_captions(assets: list[dict[str, Any]], *, title: str = "") -> list[st
             and not _is_placeholder_slide_label(caption)
             and caption_key
             and caption_key != title_key
+            and caption_key not in _asset_name_keys(asset)
         ):
             captions.append(caption)
     return captions

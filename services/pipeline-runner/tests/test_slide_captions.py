@@ -34,3 +34,21 @@ def test_slide_captions_drop_title_leak_and_photo_placeholder():
         title="Miami Rain Plan: Museum Pairings",
     )
     assert labels == ["Indoor art and waterfront views"]
+
+
+def test_slide_captions_drop_caption_equal_to_asset_name():
+    labels = _slide_captions(
+        [
+            {
+                "name": "Chicago Italian Beef 6.jpg",
+                "library_asset_name": "Chicago Italian Beef 6",
+                "caption": "Chicago Italian Beef 6",
+            },
+            {
+                "name": "Chicago Italian Beef 8.jpg",
+                "caption": "Italian beef dipped in jus with hot giardiniera",
+            },
+        ],
+        title="Italian Beef Dip Closeup",
+    )
+    assert labels == ["Italian beef dipped in jus with hot giardiniera"]

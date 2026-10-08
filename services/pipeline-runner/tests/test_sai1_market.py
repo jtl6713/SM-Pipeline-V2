@@ -24,7 +24,7 @@ def test_sai1_prompt_defaults_to_chicago_for_legacy_calls():
     assert "TARGET MARKET\nChicago" in prompt
 
 
-def test_sai1_prompt_forbids_photo_n_placeholders_in_post_caption():
+def test_sai1_prompt_forbids_asset_names_and_featuring_inventory_in_post_caption():
     prompt = build_themer_prompt(
         title="Roosevelt Island Tram Plan",
         covered_text="1. Roosevelt Island Tram 1\n2. Roosevelt Island Tram 5",
@@ -32,8 +32,9 @@ def test_sai1_prompt_forbids_photo_n_placeholders_in_post_caption():
         total=2,
         market="New York",
     )
-    assert 'Never write placeholders such as "Photo 2"' in prompt
-    assert "use those names in the Featuring line" in prompt
+    assert 'Never write a "Featuring:" line' in prompt
+    assert "Never copy, quote, enumerate, paraphrase" in prompt
+    assert "use those names in the Featuring line" not in prompt
 
 
 def test_sai1_normalizer_strips_asset_inventory_featuring_line():
@@ -48,3 +49,26 @@ def test_sai1_normalizer_strips_asset_inventory_featuring_line():
     assert "Pérez Art Museum Miami 9" not in result["post_caption"]
     assert "Featuring:" not in result["post_caption"]
     assert result["post_caption"] == "Save this for your next stormy day in the 305."
+
+
+def test_sai1_normalizer_strips_chicago_italian_beef_asset_names():
+    from sai1.processor import _normalize_themes
+
+    result = _normalize_themes({
+        "post_caption": (
+            "Italian Beef Dip Closeup 🍖\n"
+            "Featuring: Chicago Italian Beef 6, Chicago Italian Beef 8, Chicago Italian Beef 1, "
+            "Chicago Italian Beef 4, Chicago Italian Beef 3, Chicago Italian Beef 5, Chicago Italian Beef 7.\n"
+            "Save this for your next beef run or tag a friend who’d demolish one."
+        ),
+        "slides": [],
+        "slide_voiceovers": [],
+        "hashtags": "#Chicago #ItalianBeef",
+    }, needed=0)
+
+    assert "Chicago Italian Beef 6" not in result["post_caption"]
+    assert "Featuring:" not in result["post_caption"]
+    assert result["post_caption"] == (
+        "Italian Beef Dip Closeup 🍖\n"
+        "Save this for your next beef run or tag a friend who’d demolish one."
+    )

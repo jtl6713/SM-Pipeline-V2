@@ -59,10 +59,10 @@ VOICEOVER RULES
 
 POST CAPTION RULES (the post_caption field)
 - This is the caption published alongside the video on TikTok, Instagram and Facebook. It is read by a person scrolling a feed, so it is NOT the short on-photo label and NOT the narration.
-- Open with a hook line that matches the VIDEO TITLE, then name the things featured in slide order, then close with one light call to action such as inviting a save or a comment.
-- Cover every one of the TOTAL SLIDE COUNT things: the ALREADY COVERED entries first in the order listed, then the slides you chose in the order you returned them.
-- When ALREADY COVERED labels are photo or place names (for example "Roosevelt Island Tram 1"), use those names in the Featuring line. Do not replace them with the VIDEO TITLE.
-- Never write placeholders such as "Photo 2", "Photo 3", or "Photo N" in post_caption. If a covered label looks like that, invent a real place or subject name that fits the VIDEO TITLE theme instead.
+- Generate fresh, natural audience-facing copy from the VIDEO TITLE and overall subject, then close with one light call to action such as inviting a save or a comment.
+- ALREADY COVERED is private planning context for avoiding duplicate slides and aligning narration. Never copy, quote, enumerate, paraphrase, or otherwise expose those labels in post_caption.
+- Never write a "Featuring:" line, an asset inventory, a filename, an asset name, an internal identifier, or placeholders such as "Photo 2" or "Slide 3" in post_caption.
+- Describe the overall experience naturally. Do not list every source image or clip.
 - 500 characters or fewer. Line breaks are allowed and encouraged for readability.
 - Emoji are allowed but keep them sparse and tasteful, at most one per line.
 - Put NO hashtags in post_caption. Hashtags belong only in the hashtags field.
@@ -94,7 +94,7 @@ FINAL SELF-CHECK BEFORE RETURNING
 - Every image_prompt asks for no text or logos of any kind.
 - slide_voiceovers.length equals TOTAL SLIDE COUNT, in slide order.
 - voiceover_script is the spoken lines joined in that same order.
-- post_caption is natural audience-facing prose, contains no filenames/asset names/internal media identifiers, is 500 characters or fewer, and contains no hashtags.
+- post_caption is newly written audience-facing prose, does not copy any ALREADY COVERED label, contains no Featuring line/asset inventory/filename/asset name/internal media identifier, is 500 characters or fewer, and contains no hashtags.
 - hashtags contains 8 to 12 space separated tags.
 - Output is valid JSON only."""
 

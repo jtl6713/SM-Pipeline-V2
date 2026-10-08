@@ -12,9 +12,15 @@ from sai1.prompt import build_themer_prompt
 
 def _sanitize_post_caption(value: str) -> str:
     lines = [line.strip() for line in str(value or "").splitlines()]
-    # Asset inventory lines are never audience-facing caption copy. This guard
-    # catches stale/model-generated Featuring lists before Platform Outputs.
-    lines = [line for line in lines if not re.match(r"^\\s*featuring\\s*:", line, flags=re.I)]
+    # Asset inventory is production metadata, never audience-facing copy. Drop
+    # the whole line instead of trying to edit filenames into usable prose.
+    lines = [
+        line
+        for line in lines
+        if not re.match(r"^\s*featuring\s*:", line, flags=re.I)
+        and not re.search(r"\.(?:jpe?g|png|gif|webp|heic|heif|mp4|mov|m4v|webm)\b", line, flags=re.I)
+        and not re.search(r"\b(?:photo|image|still|slide|clip|video)\s*(?:#|no\.?|number)?\s*\d+\b", line, flags=re.I)
+    ]
     return "\n".join(line for line in lines if line).strip()
 
 
