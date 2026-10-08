@@ -364,6 +364,14 @@ export const QUALITY_CHECKS = Object.freeze([
     heal: "resume_produce",
   }),
   check({
+    id: "render_ready_status_typo",
+    title: "Check for outputs parked on orphan Render_Status Ready to Render (R4 never selects it)",
+    lane: "service",
+    kind: "render_ready_status_typo",
+    actor: "worker_heal",
+    heal: "requeue_failed",
+  }),
+  check({
     id: "render_ready_waiting_voiceover",
     title: "Check for outputs Ready for Render with no Remotion job because the voiceover never generated",
     lane: "service",

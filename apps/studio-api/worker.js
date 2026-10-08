@@ -534,7 +534,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.474-engagement",
+          version: "0.10.475-ready-for-render-typo",
           studio_engagement_v1: true,
           studio_mae_schedule_v1: true,
           studio_mae_28_day_schedule_v1: true,
@@ -11056,6 +11056,38 @@ async function healStuckStudioRenders(env) {
       pulses.push({ key: "R4_UNFETCHABLE_SOURCE_REPAIR", id: row.id, error: error instanceof Error ? error.message : String(error) });
     }
   }
+  // Orphan Airtable choice "Ready to Render" (FB slideshow wording) is not
+  // matched by R4/T1 selectors which require "Ready for Render". Outputs
+  // 1702–1705 Upper West Side parked for days with a complete package.
+  const readyToTypo = await listRecords(env, outputTable, {
+    limit: 8,
+    sortField: "Output_ID",
+    sortDirection: "desc",
+    filterFormula: 'AND({Test_Run_ID}=BLANK(),{Render_Status}="Ready to Render",{Remotion_Job_ID}="",{Composition_ID}!="",{Output_Filename}!="",{Render_Clip_List_JSON}!="",{Render_Total_Frames}>0,{Format}!="Story",{Studio_Output_Type}!="Story")',
+  }).catch(() => []);
+  for (const row of readyToTypo || []) {
+    try {
+      await airtableFetch(env, outputTable, row.id, {
+        method: "PATCH",
+        body: JSON.stringify({
+          fields: {
+            Render_Status: "Ready for Render",
+            Remotion_Error_Message: "",
+            Final_File_Error_Message: "",
+          },
+          typecast: true,
+        }),
+      });
+      pulses.push({ key: "R4_READY_TO_RENDER_TYPO", id: row.id, repaired: true });
+    } catch (error) {
+      pulses.push({
+        key: "R4_READY_TO_RENDER_TYPO",
+        id: row.id,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
   const readyNoJob = await listRecords(env, outputTable, {
     limit: 8,
     sortField: "Output_ID",

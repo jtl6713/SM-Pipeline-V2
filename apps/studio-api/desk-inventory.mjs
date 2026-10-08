@@ -383,6 +383,18 @@ export function classifyRenderRow(row, nowMs = Date.now()) {
         : "Render_Status=Failed with a non-retryable error. Desk must fix the payload before requeue.",
     }, row);
   }
+  if (renderStatus === "Ready to Render" && !jobId) {
+    // Orphan choice next to "Ready for Render". R4/T1 formulas never match it.
+    return withDeskIdentity({
+      kind: "render_ready_status_typo",
+      class: "transient",
+      record_id: recordId || null,
+      fingerprint: fingerprint("render_ready_status_typo", recordId, "ready_to_render"),
+      actor: "worker_heal",
+      diagnosis: "Render_Status is the orphan choice \"Ready to Render\" (slideshow wording) instead of \"Ready for Render\". "
+        + "R4/T1 selectors never match, so Remotion never starts. Worker rewrites Ready for Render then pulses R4.",
+    }, row);
+  }
   if (renderStatus === "Ready for Render" && !jobId && row?.voiceover_required && !String(row?.voiceover_url || "").trim()) {
     // R4 returns waiting_for_voiceover on every pulse; re-pulsing R4 cannot heal it.
     // Worker copies the parent voiceover down or re-arms the P2 selector and resumes produce at audio.
@@ -1229,6 +1241,7 @@ export const CLASSIFIER_KINDS = Object.freeze([
   "produce_stale",
   "render_ready_no_job",
   "render_ready_waiting_voiceover",
+  "render_ready_status_typo",
   "render_long",
   "produce_orphan",
   "crop_parked",
