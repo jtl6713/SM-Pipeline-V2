@@ -260,7 +260,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.532-clip-scene-overview";
+  const BUILD_ID = "item4-0.6.533-ready-for-render";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -1407,7 +1407,10 @@
     const state = String(record?.studio_state || "").trim();
     const renderState = String(record?.render_status || "").trim();
     if (renderState && !/^(Rendered|Complete|Completed|Success|Succeeded)$/i.test(renderState) && !/Published/i.test(state)) {
-      if (/^(Ready to Render|Ready for Render)$/i.test(renderState)) return "Ready to Render";
+      // Keep the Airtable canonical label. Mapping both to "Ready to Render"
+      // hid the orphan choice that R4/T1 never select (Outputs 1702–1705).
+      if (/^Ready for Render$/i.test(renderState)) return "Ready for Render";
+      if (/^Ready to Render$/i.test(renderState)) return "Ready to Render";
       if (/^(Blocked|Failed|Error|Rendering|Queued)$/i.test(renderState)) return renderState;
     }
     // Per-output success/publish states win over the parent produce job. Sibling

@@ -157,6 +157,16 @@ test("render, orphan, crop, autonomous, and health classifiers", () => {
     render_status: "Ready for Render",
     remotion_job_id: "",
   }, now).kind, "render_ready_no_job");
+  // Outputs 1702–1705 Upper West Side: orphan "Ready to Render" choice parks R4 forever.
+  const readyToTypo = classifyRenderRow({
+    id: "recR1typo",
+    render_status: "Ready to Render",
+    remotion_job_id: "",
+    output_id: 1702,
+  }, now);
+  assert.equal(readyToTypo.kind, "render_ready_status_typo");
+  assert.equal(readyToTypo.actor, "worker_heal");
+  assert.equal(readyToTypo.fingerprint, "render_ready_status_typo:recR1typo:ready_to_render");
   // Output 432 / CI 137: narration required, Voiceover_URL blank, R4 loops on waiting_for_voiceover.
   const waitingVo = classifyRenderRow({
     id: "recR1b",
