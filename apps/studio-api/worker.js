@@ -504,7 +504,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.468-feed-post-timeline",
+          version: "0.10.469-story-mae",
           studio_mae_schedule_v1: true,
           studio_mae_28_day_schedule_v1: true,
           studio_promotion_reconcile_after_handoff_error_v1: true,

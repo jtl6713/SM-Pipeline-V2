@@ -3,7 +3,9 @@ name: Deploy Studio API Worker Production
 on:
   workflow_dispatch:
   push:
-    branches: [main]
+    branches:
+      - main
+      - cursor/worker-0-10-469-8481
     paths:
       - 'deploy/cloudflare-worker-production.txt'
 

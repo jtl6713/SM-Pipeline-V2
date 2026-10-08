@@ -249,14 +249,18 @@ test("Stories share MAE occupancy instead of resetting to the next slot today", 
     now,
     { timeZone: zone },
   );
-  for (const key of ["Instagram::Story", "Facebook::Story"]) {
-    const iso = stamps.get(key);
-    assert.ok(iso, key);
-    assert.notEqual(dayOf(iso, zone), "2026-10-07");
-    assert.equal(localParts(iso, zone).hour, 5);
-    assert.equal(localParts(iso, zone).minute, 30);
-  }
-  assert.notEqual(stamps.get("Instagram::Story"), stamps.get("Facebook::Story"));
+  const ig = stamps.get("Instagram::Story");
+  const fb = stamps.get("Facebook::Story");
+  assert.ok(ig);
+  assert.ok(fb);
+  // Today's MAE trio is full, so stories take the next shared openings: Oct 8 morning, then afternoon.
+  assert.equal(dayOf(ig, zone), "2026-10-08");
+  assert.equal(localParts(ig, zone).hour, 5);
+  assert.equal(localParts(ig, zone).minute, 30);
+  assert.equal(dayOf(fb, zone), "2026-10-08");
+  assert.equal(localParts(fb, zone).hour, 11);
+  assert.equal(localParts(fb, zone).minute, 30);
+  assert.notEqual(ig, fb);
 });
 
 test("after 28 days of MAE are full, the 4th is day 1's largest gap", () => {
@@ -424,7 +428,7 @@ test("Worker stamp paths use MAE not industry evening windows", () => {
   assert.match(worker, /studio_mae_schedule_v1: true/);
   assert.match(worker, /studio_mae_profile_occupancy_v1: true/);
   assert.match(worker, /studio_schedule_occupancy_fields_v1: true/);
-  assert.match(worker, /0\.10\.468-feed-post-timeline/);
+  assert.match(worker, /0\.10\.469-story-mae/);
   assert.match(worker, /STUDIO_OCCUPIED_HORIZON_MS = 28 \* 24/);
   assert.match(worker, /studioLoadPlanScheduleOccupancy/);
   assert.match(worker, /A stored 5:30 that lost its slot must be written/);

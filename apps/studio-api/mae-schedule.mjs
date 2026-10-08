@@ -5,7 +5,7 @@
  * in that day's largest open gap, walking day 1 → day 28. A 5th post repeats
  * the same day-by-day widest-gap walk.
  * One post per day-part across platforms: Instagram at 5:30 means Facebook
- * takes 11:30, not another 5:30. Stories may share a slot.
+ * takes 11:30, not another 5:30. Stories use that same shared occupancy.
  * Never stamp 11:00 PM–3:00 AM local (inclusive).
  */
 
@@ -322,7 +322,6 @@ export function maeBuildSuggestedScheduleMap(items, occupiedByPlatform = {}, now
     const outputType = String(item.output_type || "").trim();
     if (!platform || !outputType) continue;
     const key = `${platform}::${outputType}`;
-    const isStory = /story/i.test(outputType);
     const existing = String(item.scheduled_at || "").trim();
     if (existing && !Number.isNaN(Date.parse(existing))) {
       const iso = new Date(existing).toISOString();

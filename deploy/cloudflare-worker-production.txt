@@ -34,4 +34,5 @@ Deploy Worker 0.10.465-render-stale-rendering. Heal Final_File_URL + Render_Stat
 Deploy Worker 0.10.466-mae-28-day-schedule. 28-day MAE then 4th/5th widest-gap; blackout 11PM–3AM profile TZ: 2026-10-07T05:40Z
 Deploy Worker 0.10.467-promotion-reconcile. If I3/I4 returns a transient 5xx after promotion side effects completed, reconcile the Idea Candidate from Airtable and return success instead of leaving Studio with a false Request failed (500). Triggered 2026-10-07.
 Deploy Worker 0.10.468-feed-post-timeline. Single-image Feed Post Create timeline attaches the one photo and builds a slides plan without ITS1/SAI1, so it no longer request-timeouts 500.
-Deploy Worker 0.10.468 Story MAE hotfix. Stories now participate in shared profile MAE occupancy instead of resetting occupancy and stacking into today's next MAE slot. Regression: outputs 2012/2013 pattern.\n
+Deploy Worker 0.10.468 Story MAE hotfix. Stories now participate in shared profile MAE occupancy instead of resetting occupancy and stacking into today's next MAE slot. Regression: outputs 2012/2013 pattern.
+Deploy Worker 0.10.469-story-mae. Stamp the Story MAE occupancy hotfix so Studio footer leaves 0.10.468. Triggered 2026-10-08.
