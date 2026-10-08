@@ -251,7 +251,7 @@ jobs:
               CSS_CODE=$(curl -sS -L -o /tmp/live-home-density.css -w '%{http_code}' "$LATEST_URL$EXPECTED_DENSITY_CSS_URL" || true)
             fi
             test "$CSS_CODE" = "200"
-            require_match "HOME_DENSITY_0_6_517" /tmp/live-home-density.css "pages.dev density marker"
+            require_match "HOME_DENSITY_0_6_521" /tmp/live-home-density.css "pages.dev density marker"
             echo "pages_content_verify=PASS"
           elif [[ "$INDEX_CODE" == "403" ]]; then
             echo "::warning::Pages production is protected by Access (HTTP 403); Wrangler deployment completed successfully, so public byte verification is skipped."
@@ -290,7 +290,7 @@ jobs:
             -w '%{http_code}' \
             "$CUSTOM_URL$EXPECTED_DENSITY_CSS_URL" || true)
           test "$CUSTOM_CSS_CODE" = "200"
-          require_match "HOME_DENSITY_0_6_517" /tmp/custom-home-density.css "custom-domain density marker"
+          require_match "HOME_DENSITY_0_6_521" /tmp/custom-home-density.css "custom-domain density marker"
           CUSTOM_APP_CODE=$(curl -sS \
             "${ACCESS_HEADERS[@]}" \
             -o /tmp/custom-app.js \
