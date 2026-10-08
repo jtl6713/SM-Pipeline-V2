@@ -69,6 +69,10 @@
     }
     const nav = document.querySelector('[data-page="outputs"]');
     nav?.click();
+    // Normalize page state after profile switching so Dashboard can reliably
+    // restore the global overview instead of inheriting a stale active page.
+    document.querySelectorAll(".page").forEach((page) => page.classList.remove("active"));
+    document.getElementById("page-outputs")?.classList.add("active");
     const view = kind === "approval" ? "approval" : kind === "failed" ? "failed" : "attention";
     const openView = () => {
       const button = document.querySelector(`[data-pipeline-quick-view="${view}"]`);
