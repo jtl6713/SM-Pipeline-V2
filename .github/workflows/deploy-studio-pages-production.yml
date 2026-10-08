@@ -39,7 +39,7 @@ jobs:
         run: |
           set -euo pipefail
           test -s apps/studio-web/index.html
-          grep -Fq "UI build 0.6.528" apps/studio-web/index.html
+          grep -Fq "UI build 0.6.529" apps/studio-web/index.html
           test -n "${CLOUDFLARE_API_TOKEN:-}"
           test -n "${CLOUDFLARE_ACCOUNT_ID:-}"
 
@@ -47,7 +47,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          npx --yes wrangler@latest pages deploy apps/studio-web             --project-name="$PAGES_PROJECT"             --branch=main             --commit-hash="$GITHUB_SHA"             --commit-message="Studio UI 0.6.528 production deployment"             --commit-dirty=false
+          npx --yes wrangler@latest pages deploy apps/studio-web             --project-name="$PAGES_PROJECT"             --branch=main             --commit-hash="$GITHUB_SHA"             --commit-message="Studio UI 0.6.529 production deployment"             --commit-dirty=false
 
       - name: Verify production UI
         shell: bash
@@ -55,12 +55,12 @@ jobs:
           set -euo pipefail
           for ATTEMPT in $(seq 1 30); do
             BODY=$(curl -fsS "$PUBLIC_URL/?deploy_verify=$GITHUB_SHA" || true)
-            if grep -Fq "UI build 0.6.528" <<<"$BODY"; then
-              echo "Studio production verification PASS: UI 0.6.528"
+            if grep -Fq "UI build 0.6.529" <<<"$BODY"; then
+              echo "Studio production verification PASS: UI 0.6.529"
               exit 0
             fi
-            echo "Waiting for Studio production UI 0.6.528 (attempt $ATTEMPT/30)"
+            echo "Waiting for Studio production UI 0.6.529 (attempt $ATTEMPT/30)"
             sleep 10
           done
-          echo "Studio production did not report UI 0.6.528" >&2
+          echo "Studio production did not report UI 0.6.529" >&2
           exit 1
