@@ -56,6 +56,27 @@
     if (kind === "ideas") return n === 0 ? "ok" : n <= 4 ? "warn" : "critical";
     return n === 0 ? "ok" : n <= 2 ? "warn" : "critical";
   }
+  function actionCount(row, kind, label) {
+    const value = Number(row?.[kind]) || 0;
+    if (!value || !row?.id) return String(value);
+    return `<button type="button" class="overview-action-count" data-overview-profile="${esc(row.id)}" data-overview-action="${esc(kind)}" aria-label="Open ${esc(label)} for ${esc(row.name)}">${value}</button>`;
+  }
+  function openOverviewAction(profileId, kind) {
+    const profile = document.getElementById("studioProfileSelect");
+    if (profile && profile.value !== profileId) {
+      profile.value = profileId;
+      profile.dispatchEvent(new Event("change", { bubbles: true }));
+    }
+    const nav = document.querySelector('[data-page="outputs"]');
+    nav?.click();
+    const view = kind === "approval" ? "approval" : kind === "failed" ? "failed" : "attention";
+    const openView = () => {
+      const button = document.querySelector(`[data-pipeline-quick-view="${view}"]`);
+      if (button) button.click();
+    };
+    window.setTimeout(openView, 150);
+    window.setTimeout(openView, 700);
+  }
   function render() {
     if (!state.rows.length) {
       host.innerHTML = '<div class="all-profiles-loading">Loading all profiles…</div>';
@@ -77,7 +98,7 @@
     host.innerHTML = `<div class="all-profiles-heading"><div><p class="studio-hub-kicker">ALL PROFILES</p><h1>Studio overview</h1></div><button type="button" class="secondary-button" id="allProfilesRefresh">Refresh</button></div>
       <div class="all-profiles-table-wrap"><table class="all-profiles-table"><thead><tr class="all-profiles-group-row"><th rowspan="2">Profile</th><th colspan="4" class="all-profiles-scheduled-group">Scheduled posts</th><th rowspan="2">Manual action</th><th rowspan="2">Failed</th><th rowspan="2">Awaiting approval</th><th rowspan="2">Ideas</th></tr><tr class="all-profiles-platform-row">${platformOrder.map((p)=>`<th class="all-profiles-scheduled-col">${p}</th>`).join("")}</tr></thead>
       <tbody>${state.rows.map((r)=>rowHtml(r)).join("")}${rowHtml({name:"Total",...total},true)}</tbody></table></div>`;
-    document.getElementById("allProfilesRefresh")?.addEventListener("click", () => load(true));
+    document.getElementById("allProfilesRefresh")?.addEventListener("click", () => load(true));\n    host.querySelectorAll(".overview-action-count").forEach((button) => button.addEventListener("click", () => {\n      openOverviewAction(button.dataset.overviewProfile || "", button.dataset.overviewAction || "");\n    }));
   }
   async function load(force=false) {
     if (state.loading) return;
