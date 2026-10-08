@@ -63,3 +63,4 @@ Deploy Studio UI 0.6.524-youtube-private-count. Global all-profiles scheduled co
 Deploy Studio UI 0.6.525-timeline-padding. Add consistent left/right inset to Ideas Create VO Timeline meta and scene preview. Triggered 2026-10-08.
 
 Deploy Studio UI 0.6.526-scheduled-group. Group Facebook, Instagram, TikTok, and YouTube under a Scheduled Posts header in All Profiles Overview. Triggered 2026-10-08.
+Deploy Studio UI 0.6.529-scripted-scene-approval-state. Scripted-short approval now shows one authoritative state, blocks Approve when an exact scene is unassigned, and directs the operator to Rendering or Match stills in order. Triggered 2026-10-08.
