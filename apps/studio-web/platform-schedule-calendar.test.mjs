@@ -46,7 +46,7 @@ test("spacing warning reports the nearest same-platform post and ignores the edi
 
 test("Platform Outputs expose a save-only calendar workflow", () => {
   const html = fs.readFileSync(path.join(here, "index.html"), "utf8");
-  const app = fs.readFileSync(path.join(here, "assets", "app-item4-0625.js"), "utf8");
+  const app = fs.readFileSync(path.join(here, "assets", "app-item4-1008.js"), "utf8");
   const css = fs.readFileSync(path.join(here, "assets", "styles-phase7-0621.css"), "utf8");
   assert.match(html, /id="platformCalendarDialog"[^>]*role="dialog"/);
   assert.match(html, /id="platformCalendarSave"[^>]*>Save Schedule/);
@@ -66,7 +66,7 @@ test("Platform Outputs expose a save-only calendar workflow", () => {
 });
 
 test("schedule calendars shade overnight blackout hours as off limits", () => {
-  const app = fs.readFileSync(path.join(here, "assets", "app-item4-0625.js"), "utf8");
+  const app = fs.readFileSync(path.join(here, "assets", "app-item4-1008.js"), "utf8");
   const css = fs.readFileSync(path.join(here, "assets", "styles-phase7-0621.css"), "utf8");
   const html = fs.readFileSync(path.join(here, "index.html"), "utf8");
   assert.match(app, /isBlackout \? "is-blackout"/);
@@ -82,7 +82,7 @@ test("schedule calendars shade overnight blackout hours as off limits", () => {
 
 
 test("publish status labels follow schedule state", () => {
-  const app = fs.readFileSync(path.join(here, "assets", "app-item4-0625.js"), "utf8");
+  const app = fs.readFileSync(path.join(here, "assets", "app-item4-1008.js"), "utf8");
   assert.match(app, /function pipelinePublishStatusLabel/);
   assert.match(app, /Needs Schedule/);
   assert.match(app, /Scheduled/);

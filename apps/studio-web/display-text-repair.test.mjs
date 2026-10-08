@@ -5,7 +5,7 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-const app = fs.readFileSync(path.join(here, "assets", "app-item4-0625.js"), "utf8");
+const app = fs.readFileSync(path.join(here, "assets", "app-item4-1008.js"), "utf8");
 
 test("display text repair startup stays inside Studio app closure", () => {
   const functionPos = app.indexOf("function startDisplayTextRepair()");

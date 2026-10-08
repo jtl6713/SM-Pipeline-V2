@@ -7,20 +7,20 @@ import { fileURLToPath } from "node:url";
 const here = path.dirname(fileURLToPath(import.meta.url));
 const html = fs.readFileSync(path.join(here, "index.html"), "utf8");
 const config = fs.readFileSync(path.join(here, "assets", "config-0621.js"), "utf8");
-const app = fs.readFileSync(path.join(here, "assets", "app-item4-0625.js"), "utf8");
+const app = fs.readFileSync(path.join(here, "assets", "app-item4-1008.js"), "utf8");
 
 test("idea promote drawer documents duration vs voiceover precedence", () => {
   assert.match(html, /id="promoteTimingHint"/);
   assert.match(html, /id="promoteVideoDuration"/);
   assert.doesNotMatch(html, /id="promoteVoiceoverTail"/);
   const uiBuild = html.match(/UI build (0\.6\.\d+)/)?.[1];
-  const scriptBuild = html.match(/app-item4-0625\.js\?v=([^"]+)/)?.[1];
+  const scriptBuild = html.match(/app-item4-1008\.js\?v=([^"]+)/)?.[1];
   const appBuild = app.match(/BUILD_ID = "item4-([^"]+)"/)?.[1];
   assert.ok(uiBuild);
   assert.ok(scriptBuild);
   assert.ok(appBuild);
   assert.equal(appBuild, scriptBuild);
-  assert.equal(uiBuild, "0.6.533");
+  assert.equal(uiBuild, "0.6.534");
   assert.match(html, /id="ideaLibraryPickerForm"/);
   assert.match(html, /class="idea-type-guide"/);
   assert.match(html, /Photo Set turns stills into Reels|Photo Set/);

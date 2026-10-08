@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 import path from "node:path";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-const appPath = path.join(here, "assets", "app-item4-0625.js");
+const appPath = path.join(here, "assets", "app-item4-1008.js");
 const htmlPath = path.join(here, "index.html");
 
 test("Production uses tabs instead of stacking the full workspace", async () => {

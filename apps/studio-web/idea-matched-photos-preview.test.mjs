@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const html = fs.readFileSync(path.join(here, "index.html"), "utf8");
-const app = fs.readFileSync(path.join(here, "assets", "app-item4-0625.js"), "utf8");
+const app = fs.readFileSync(path.join(here, "assets", "app-item4-1008.js"), "utf8");
 
 test("Manage Idea shows matched photo thumbnails when photos are ready", () => {
   assert.match(html, /id="ideaMatchedPhotos"/);

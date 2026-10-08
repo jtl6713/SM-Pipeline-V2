@@ -5,7 +5,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-const app = fs.readFileSync(path.join(here, "assets", "app-item4-0625.js"), "utf8");
+const app = fs.readFileSync(path.join(here, "assets", "app-item4-1008.js"), "utf8");
 const html = fs.readFileSync(path.join(here, "index.html"), "utf8");
 
 test("clip player keeps stream authority even when preloaded", () => {
@@ -44,6 +44,6 @@ test("Studio build and app cache key stay aligned after clip preview playback ch
   const uiBuild = html.match(/UI build (0\.6\.\d+)/)?.[1];
   assert.ok(build);
   assert.ok(uiBuild);
-  assert.equal(uiBuild, "0.6.533");
-  assert.ok(html.includes(`/assets/app-item4-0625.js?v=${build}`));
+  assert.equal(uiBuild, "0.6.534");
+  assert.ok(html.includes(`/assets/app-item4-1008.js?v=${build}`));
 });
