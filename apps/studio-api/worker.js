@@ -20152,11 +20152,21 @@ async function postInsightsDiscover(request, env, url, authorization) {
   return respond(request, env, { ok: result.ok !== false, ...result, profile: theme });
 }
 
-function engagementDeps() {
+function engagementThemeContextRecord(theme) {
+  const label =
+    theme === "la" ? "Los Angeles Shining"
+      : theme === "nyc" ? "New York Shining"
+        : theme === "miami" ? "Miami Shining"
+          : "ChicagoShining";
+  return { id: `engagement-theme-${theme}`, fields: { Profile_Name: label, Market_Name: label, Brand_Name: label } };
+}
+
+function engagementDeps(theme = "chicago") {
+  const contextRecord = engagementThemeContextRecord(studioNormalizeSimilarProfile(theme));
   return {
     studioSettingsByName,
     studioUpsertSetting,
-    studioActivePipelineSettings,
+    studioActivePipelineSettings: (env, names) => studioActivePipelineSettings(env, names, contextRecord),
     airtableFetch,
     listRecords,
   };
@@ -20175,7 +20185,7 @@ async function resolveEngagementProfile(env, url, authorization, payload = {}) {
 
 async function getEngagementSettings(request, env, url, authorization) {
   const profile = await resolveEngagementProfile(env, url, authorization);
-  const settings = await studioLoadEngagementSettings(env, profile, engagementDeps());
+  const settings = await studioLoadEngagementSettings(env, profile, engagementDeps(profile));
   return respond(request, env, { ok: true, profile, settings, capabilities: capabilityMatrixResponse().matrix });
 }
 
@@ -20183,7 +20193,7 @@ async function putEngagementSettings(request, env, url, authorization) {
   let payload = {};
   try { payload = await request.json(); } catch { throw new HttpError(400, "Request body must be valid JSON"); }
   const profile = await resolveEngagementProfile(env, url, authorization, payload);
-  const settings = await studioSaveEngagementSettings(env, { ...payload, profile }, engagementDeps());
+  const settings = await studioSaveEngagementSettings(env, { ...payload, profile }, engagementDeps(profile));
   return respond(request, env, { ok: true, profile, settings });
 }
 
@@ -20195,7 +20205,7 @@ async function postEngagementDiscover(request, env, url, authorization) {
     profile,
     force: payload.force !== false,
     scheduled: false,
-  }, engagementDeps());
+  }, engagementDeps(profile));
   return respond(request, env, result);
 }
 
@@ -20205,7 +20215,7 @@ async function getEngagementRecommendations(request, env, url, authorization) {
     profile,
     platform: url.searchParams.get("platform") || "",
     status: url.searchParams.get("status") || "",
-  }, engagementDeps());
+  }, engagementDeps(profile));
   return respond(request, env, result);
 }
 
@@ -20214,7 +20224,7 @@ async function postEngagementAction(request, env, url, authorization) {
   try { payload = await request.json(); } catch { throw new HttpError(400, "Request body must be valid JSON"); }
   const profile = await resolveEngagementProfile(env, url, authorization, payload);
   try {
-    const result = await studioApplyEngagementAction(env, { ...payload, profile }, engagementDeps());
+    const result = await studioApplyEngagementAction(env, { ...payload, profile }, engagementDeps(profile));
     return respond(request, env, result, result.ok === false && !result.unsupported && !result.duplicate ? 409 : 200);
   } catch (error) {
     throw new HttpError(400, error?.message || String(error));
@@ -20225,7 +20235,7 @@ async function getEngagementInsights(request, env, url, authorization) {
   const profile = url.searchParams.get("profile")
     ? studioNormalizeSimilarProfile(url.searchParams.get("profile"))
     : await resolveEngagementProfile(env, url, authorization);
-  const result = await studioEngagementInsights(env, profile, engagementDeps());
+  const result = await studioEngagementInsights(env, profile, engagementDeps(profile));
   return respond(request, env, result);
 }
 

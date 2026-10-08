@@ -605,16 +605,16 @@ export async function studioEngagementInsights(env, profile, deps) {
   return { ok: true, ...computeEngagementInsights(store, profile || null) };
 }
 
-export async function studioEngagementCron(env, deps) {
+export async function studioEngagementCron(env, depsOrFactory) {
   const results = [];
   for (const profile of ENGAGEMENT_PROFILES) {
+    const deps = typeof depsOrFactory === "function" ? depsOrFactory(profile) : depsOrFactory;
     try {
       const settings = await studioLoadEngagementSettings(env, profile, deps);
       if (settings.enabled === false || settings.discovery_schedule === "off") {
         results.push({ profile, status: "skipped" });
         continue;
       }
-      // Only chicago runs on shared daily stamp unless force; still iterate profiles with force=false first day stamp.
       const result = await studioRunEngagementDiscovery(env, { profile, scheduled: true, force: false }, deps);
       results.push({ profile, status: result.status, added: result.added_count || 0, message: result.message });
     } catch (error) {
