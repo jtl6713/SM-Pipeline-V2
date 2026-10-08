@@ -14842,7 +14842,7 @@
       const canSaveSchedule = creativeCanSetSchedule();
       const canReschedule = creativeCanReschedule();
       if ($("creativeSaveSchedule")) $("creativeSaveSchedule").disabled = !canSaveSchedule;
-      if ($("creativePublishNow")) $("creativePublishNow").disabled = !canReschedule;
+      if ($("creativePublishNow")) $("creativePublishNow").disabled = !(canReschedule || creativeCanApproveForPublishing()) || creativeMixInProgress();
     }
   }
 
@@ -16527,7 +16527,7 @@
     const save = $("creativeSaveSchedule");
     const publishNow = $("creativePublishNow");
     const canSave = creativeCanSetSchedule(output);
-    const canPublishNow = creativeCanReschedule(output);
+    const canPublishNow = creativeCanReschedule(output) || (creativeCanApproveForPublishing(output) && !creativeMixInProgress());
     if (box) box.hidden = !canSave;
     if (save) {
       save.hidden = !canSave;
@@ -16539,7 +16539,7 @@
     }
     if (hint) {
       hint.textContent = canPublishNow
-        ? "This output is already approved. Save schedule locks the exact time you enter. Publish now sends it immediately."
+        ? (creativeCanReschedule(output) ? "Already approved. Publish Now overrides its schedule." : "Publish Now approves this ready output and requests immediate publishing.")
         : canSave
           ? "Set the date and time, then click Save schedule. Manual schedule overrides are kept exactly as entered."
           : "Immediate publishes as soon as you approve. Schedule uses your local time.";
@@ -17767,14 +17767,14 @@
     }
   }
 
-  async function reviewActiveCreative(action) {
+  async function reviewActiveCreative(action, scheduleOverride = null) {
     if (!activeCreativeOutputId) return;
     try {
       if (!creativeWatchOnly() || action === "changes_requested" || action === "apply_audio_mix") await saveActiveCreative({ quiet: true });
       const publishing = action === "approve_for_publishing" || (action === "approve" && creativeWatchOnly());
       phase6Message(publishing ? "Saving publish approval…" : (action === "approve" ? "Saving review approval…" : "Applying mix and starting render…"));
       setCreativeBusy(true);
-      const reviewBody = { action, notes: $("creativeReviewNotes").value || "", ...collectCreativeSchedulePayload() };
+      const reviewBody = { action, notes: $("creativeReviewNotes").value || "", ...(scheduleOverride || collectCreativeSchedulePayload()) };
       if (action === "apply_audio_mix" || action === "changes_requested") {
         const collected = collectCreativePayload();
         reviewBody.audio = collected.audio;
@@ -22790,9 +22790,19 @@
   $("creativeSaveSchedule")?.addEventListener("click", () => {
     submitCreativeScheduleChange(false);
   });
-  $("creativePublishNow")?.addEventListener("click", () => {
-    if (!window.confirm("Publish this output now?\n\nInstagram, Facebook, and YouTube will auto-publish publicly. TikTok will be saved as a draft.")) return;
-    submitCreativeScheduleChange(true);
+  $("creativePublishNow")?.addEventListener("click", async () => {
+    const button = $("creativePublishNow");
+    if (button?.disabled || button?.dataset.busy === "true") return;
+    const record = activeCreativeOutput;
+    if (!record || (!creativeCanReschedule(record) && !creativeCanApproveForPublishing(record))) return;
+    if (!window.confirm("Approve (if needed) and publish this output now? This overrides its scheduled time. Instagram/Facebook/YouTube may go public; TikTok uses its draft workflow.")) return;
+    if (creativeCanReschedule(record)) {
+      await submitCreativeScheduleChange(true);
+    } else if (creativeCanApproveForPublishing(record) && !creativeMixInProgress()) {
+      // One approval request with an immediate schedule: do not dispatch a second publish request.
+      // The review endpoint owns approval and downstream publishing, avoiding duplicate jobs.
+      await reviewActiveCreative("approve_for_publishing", { scheduled_post_date: "", manual_schedule_override: false });
+    }
   });
   $("creativeApprovePreview")?.addEventListener("click", () => {
     if (creativeWatchOnly()) {
