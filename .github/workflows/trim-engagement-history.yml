@@ -1,0 +1,22 @@
+name: Trim engagement history duplicates
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  trim:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      AIRTABLE_PAT: ${{ secrets.AIRTABLE_PAT }}
+    steps:
+      - uses: actions/checkout@v6
+      - name: Trim ENGAGEMENT_STORE_V1 pending duplicates
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "${AIRTABLE_PAT:-}"
+          python3 scripts/trim-engagement-history.py
