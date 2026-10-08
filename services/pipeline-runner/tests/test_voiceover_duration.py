@@ -1,6 +1,9 @@
+import json
+
 from audio.voiceover_duration import (
     MIN_VOICEOVER_SECONDS,
     VoiceoverTooShort,
+    extend_render_clips_to_cover_voiceover,
     owner_video_seconds,
     render_video_seconds,
     validate_voiceover_for_owner_cap,
@@ -82,6 +85,50 @@ def test_voiceover_exceeds_video_message_is_actionable():
         context="render duration",
     )
     assert "never run past" in message.lower()
+
+
+def test_extend_render_clips_covers_output_2156_shape():
+    # 7×134 + 133 = 1071 frames (35.70s). VO 35.75873 needs ceil → 1073.
+    clips = []
+    start = 0
+    for index, frames in enumerate([134] * 7 + [133], start=1):
+        clips.append({
+            "id": f"studio-source-{index}",
+            "order": index,
+            "startFrame": start,
+            "durationFrames": frames,
+        })
+        start += frames
+    output = {
+        "fields": {
+            "Render_Clip_List_JSON": json.dumps(clips),
+            "Render_Total_Frames": 1071,
+            "Timing_Timeline_JSON": json.dumps({"duration_seconds": 35.7, "duration_frames": 1071}),
+            "Voiceover_URL": "https://drive.example/vo.mp3",
+            "Voiceover_Duration_Seconds": 35.75873,
+            "Studio_Effective_Voiceover_Mode": "Yes",
+        }
+    }
+
+    from audio import voiceover_duration as module
+
+    original = module.probe_audio_duration_url
+    module.probe_audio_duration_url = lambda _url: 35.75873
+    try:
+        fields = extend_render_clips_to_cover_voiceover(output, probe=True)
+    finally:
+        module.probe_audio_duration_url = original
+
+    assert fields is not None
+    assert fields["Render_Total_Frames"] == 1073
+    assert fields["Render_Status"] == "Ready for Render"
+    extended = json.loads(fields["Render_Clip_List_JSON"])
+    assert sum(int(clip["durationFrames"]) for clip in extended) == 1073
+    assert extended[-1]["durationFrames"] == 135
+    assert validate_voiceover_for_render(
+        {"fields": {**output["fields"], **{k: v for k, v in fields.items() if k != "Remotion_Error_Message"}}},
+        probe=False,
+    ) is None
 
 
 def test_speak_until_minimum_rewrites_a_one_second_read_and_refuses_to_save_short_audio():

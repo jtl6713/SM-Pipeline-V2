@@ -686,12 +686,19 @@ def assign_clip_frames(
             voice_n = 0
         if voice_n > 0:
             # No per-slide timeline yet. Split the measured speech. Do not pad
-            # out to a stored video duration or a tail.
-            target = max(len(photo_indexes), round(voice_n * FPS))
+            # out to a stored video duration or a tail. Use ceil (not round) so
+            # fractional speech never lands under the R4 voiceover fit check
+            # (Output 2156: 35.76s VO vs round→35.70s / 1071 frames).
+            target = max(len(photo_indexes), math.ceil(voice_n * FPS))
             allocated = distribute_frames([1] * len(photo_indexes), target)
             for position, index in enumerate(photo_indexes):
                 frames[index] = allocated[position]
-            return frames, sum(frames)
+            total = sum(frames)
+            required = max(1, math.ceil(voice_n * FPS))
+            if required > total and photo_indexes:
+                frames[photo_indexes[-1]] += required - total
+                total = required
+            return frames, total
     if render_settings.get("duration_mode") == "fixed" and photo_indexes:
         fixed_seconds = max(1.0, min(15.0, _render_float(render_settings, "duration_seconds", 3.0)))
         fixed_frames = max(1, round(fixed_seconds * FPS))

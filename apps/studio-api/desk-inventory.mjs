@@ -332,6 +332,23 @@ export function classifyRenderRow(row, nowMs = Date.now()) {
   ) {
     return driveMusic404Incident(recordId, renderErrorText, row);
   }
+  // Output 2156: VO 35.76s vs render 35.70s (1071 frames). R4 parked Blocked;
+  // Worker / R4 extend the last clip to ceil(VO×fps) and requeue.
+  if (
+    renderStatus === "Blocked"
+    && /Spoken audio must never run past the video end/i.test(renderErrorText)
+  ) {
+    return withDeskIdentity({
+      kind: "voiceover_exceeds_render",
+      class: "transient",
+      record_id: recordId || null,
+      fingerprint: fingerprint("voiceover_exceeds_render", recordId, "spoken_past_end"),
+      actor: "worker_heal",
+      diagnosis: "Render_Status=Blocked because measured voiceover is longer than the stamped render duration "
+        + "(often by a few frames after round(VO×fps)). Worker extends the last clip to ceil(VO×fps), "
+        + "clears Remotion_Error_Message, sets Ready for Render, and pulses R4. Do not Approve.",
+    }, row);
+  }
   const privateDriveWatermark = /"watermarkUrl"\s*:\s*"https?:\/\/(?:drive|docs)\.google\.com/i.test(remotionProps)
     || /PRIVATE_DRIVE_WATERMARK/i.test(renderErrorText)
     || (/watermark/i.test(renderErrorText) && /drive\.google\.com|ERR_BLOCKED_BY_ORB|HTTP status code:\s*403/i.test(renderErrorText));
@@ -1266,6 +1283,7 @@ export const CLASSIFIER_KINDS = Object.freeze([
   "render_stale_rendering",
   "render_unfetchable_source",
   "render_private_drive_watermark",
+  "voiceover_exceeds_render",
   "native_cover_missing",
   "native_photo_review_strand",
   "native_photo_approve_incomplete",

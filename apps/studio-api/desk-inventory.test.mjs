@@ -225,6 +225,19 @@ test("render, orphan, crop, autonomous, and health classifiers", () => {
   }, now);
   assert.equal(parkedDriveWatermark.kind, "render_private_drive_watermark");
   assert.equal(parkedDriveWatermark.actor, "worker_heal");
+  // Output 2156: Blocked because spoken VO is a few frames past stamped duration.
+  const voExceeds = classifyRenderRow({
+    id: "recjFiFlhtGVpTwly",
+    render_status: "Blocked",
+    output_status: "In Production",
+    remotion_job_id: "",
+    render_error: "Voiceover is 35.76s but render duration is 35.70s (tail 0.00s). Spoken audio must never run past the video end.",
+    output_id: 2156,
+  }, now);
+  assert.equal(voExceeds.kind, "voiceover_exceeds_render");
+  assert.equal(voExceeds.class, "transient");
+  assert.equal(voExceeds.actor, "worker_heal");
+  assert.equal(voExceeds.fingerprint, "voiceover_exceeds_render:recjFiFlhtGVpTwly:spoken_past_end");
   // Output 1807: Final_File_URL present but Render_Status still Rendering.
   const staleRendering = classifyRenderRow({
     id: "rec0mwr0QiudNSQrn",

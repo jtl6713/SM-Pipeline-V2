@@ -21,6 +21,7 @@ export const QUALITY_HEALS = Object.freeze([
   "backoff_then_retry_missing_child",
   "retarget_music_drive",
   "promote_rendered_ready_for_review",
+  "extend_last_clip_requeue_r4",
   "ticket_only",
   "none",
 ]);
@@ -378,6 +379,14 @@ export const QUALITY_CHECKS = Object.freeze([
     kind: "render_ready_waiting_voiceover",
     actor: "worker_heal",
     heal: "resume_produce",
+  }),
+  check({
+    id: "voiceover_exceeds_render",
+    title: "Check for Blocked renders where spoken voiceover runs past the stamped duration (Output 2156)",
+    lane: "service",
+    kind: "voiceover_exceeds_render",
+    actor: "worker_heal",
+    heal: "extend_last_clip_requeue_r4",
   }),
   check({
     id: "render_stale_rendering",

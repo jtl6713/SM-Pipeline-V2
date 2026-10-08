@@ -43,3 +43,4 @@ Deploy Worker 0.10.473-scripted-scene-media-reuse. New scripted-short proposals 
 Deploy Worker 0.10.474-engagement. Social Engagement Automation: /api/engagement/* discovery+approval, capability matrix, Stage B YouTube like/comment via uploader, daily cron. Triggered 2026-10-08.
 
 Deploy Worker 0.10.475-ready-for-render-typo. Heal orphan Render_Status Ready to Render → Ready for Render (Outputs 1702-1705 Upper West Side). Triggered 2026-10-08.
+Deploy Worker 0.10.476-voiceover-exceeds-render. Heal Blocked Spoken-audio-past-end (Output 2156): extend last clip to ceil(VO×fps), Ready for Render, pulse R4.

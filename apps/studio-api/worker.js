@@ -534,7 +534,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.475-ready-for-render-typo",
+          version: "0.10.476-voiceover-exceeds-render",
           studio_engagement_v1: true,
           studio_mae_schedule_v1: true,
           studio_mae_28_day_schedule_v1: true,
@@ -10999,11 +10999,117 @@ async function studioResetPrivateDriveWatermarkRender(env, row) {
   });
 }
 
+function studioExtendClipsToCoverVoiceover(row) {
+  // Output 2156: spoken VO slightly longer than stamped render duration after
+  // round(VO×fps). Extend the last clip to ceil(VO×fps) and requeue R4.
+  const err = String(f(row, "Remotion_Error_Message") || "").trim();
+  if (!/Spoken audio must never run past the video end/i.test(err)) return null;
+  let clips;
+  try {
+    clips = JSON.parse(String(f(row, "Render_Clip_List_JSON") || ""));
+  } catch {
+    return null;
+  }
+  if (!Array.isArray(clips) || !clips.length) return null;
+  let total = 0;
+  for (const clip of clips) {
+    if (!clip || typeof clip !== "object") continue;
+    total += Math.max(0, Math.round(Number(clip.durationFrames) || 0));
+  }
+  if (total <= 0) return null;
+  let voiceSeconds = Number(f(row, "Voiceover_Duration_Seconds") || 0);
+  const match = err.match(/Voiceover is\s+([0-9.]+)s/i);
+  if ((!Number.isFinite(voiceSeconds) || voiceSeconds <= 0) && match) {
+    voiceSeconds = Number(match[1]);
+  }
+  if (!Number.isFinite(voiceSeconds) || voiceSeconds <= 0) return null;
+  const required = Math.max(1, Math.ceil(voiceSeconds * 30));
+  if (required <= total) return null;
+  const last = [...clips].reverse().find((clip) => clip && typeof clip === "object");
+  if (!last) return null;
+  const lastFrames = Math.max(1, Math.round(Number(last.durationFrames) || 0));
+  last.durationFrames = lastFrames + (required - total);
+  let cursor = 0;
+  for (const clip of clips) {
+    if (!clip || typeof clip !== "object") continue;
+    clip.startFrame = cursor;
+    cursor += Math.max(0, Math.round(Number(clip.durationFrames) || 0));
+  }
+  const fields = {
+    Render_Clip_List_JSON: JSON.stringify(clips),
+    Render_Total_Frames: required,
+    Remotion_Error_Message: "",
+    Remotion_Job_ID: "",
+    Render_Status: "Ready for Render",
+  };
+  const rawTimeline = String(f(row, "Timing_Timeline_JSON") || "").trim();
+  if (rawTimeline) {
+    try {
+      const timeline = JSON.parse(rawTimeline);
+      if (timeline && typeof timeline === "object") {
+        timeline.duration_frames = required;
+        timeline.duration_seconds = required / 30;
+        fields.Timing_Timeline_JSON = JSON.stringify(timeline);
+      }
+    } catch {
+      // keep clip+frame patch even when timeline JSON is stale
+    }
+  }
+  return fields;
+}
+
+async function studioHealVoiceoverExceedsRender(env, options = {}) {
+  const outputTable = env.AIRTABLE_OUTPUT_TABLE_ID;
+  const limit = Math.max(1, Math.min(8, Number(options.limit) || 4));
+  const rows = await listRecords(env, outputTable, {
+    limit: Math.max(limit, 12),
+    sortField: "Output_ID",
+    sortDirection: "desc",
+    filterFormula: 'AND({Test_Run_ID}=BLANK(),{Render_Status}="Blocked",FIND("Spoken audio must never run past the video end",{Remotion_Error_Message}&"")>0)',
+  }).catch(() => []);
+  const pulses = [];
+  let healed = 0;
+  for (const row of rows || []) {
+    if (healed >= limit) break;
+    const fields = studioExtendClipsToCoverVoiceover(row);
+    if (!fields) {
+      pulses.push({ key: "R4_VO_EXCEEDS_RENDER", id: row.id, skipped: "cannot_extend" });
+      continue;
+    }
+    try {
+      await airtableFetch(env, outputTable, row.id, {
+        method: "PATCH",
+        body: JSON.stringify({ fields, typecast: true }),
+      });
+      const payload = await item4PulseR4Python(env, { outputRecordId: row.id });
+      healed += 1;
+      pulses.push({ key: "R4_VO_EXCEEDS_RENDER", id: row.id, payload, repaired: true, frames: fields.Render_Total_Frames });
+    } catch (error) {
+      pulses.push({
+        key: "R4_VO_EXCEEDS_RENDER",
+        id: row.id,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+  return { healed, pulses };
+}
+
 async function healStuckStudioRenders(env) {
   const outputTable = env.AIRTABLE_OUTPUT_TABLE_ID;
   const pulses = [];
   const voCache = { parents: new Map(), requests: new Map() };
   const rendererSupportsPrivateDrive = await studioRemotionPrivateDriveLocalizationReady(env);
+
+  try {
+    const voExceeds = await studioHealVoiceoverExceedsRender(env, { limit: 4 });
+    for (const pulse of voExceeds?.pulses || []) pulses.push(pulse);
+  } catch (error) {
+    pulses.push({
+      key: "R4_VO_EXCEEDS_RENDER",
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
 
   // Exact regression signature: ChicagoShining watermark was embedded in
   // Remotion_Props_JSON as a private Drive URL. Chromium then fails it with

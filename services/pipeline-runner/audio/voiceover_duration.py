@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+import math
 import tempfile
 from pathlib import Path
 from typing import Any
@@ -12,6 +14,7 @@ from render.fields import field, field_str, parse_json_field
 DEFAULT_VOICEOVER_TAIL_SECONDS = 0.0
 DURATION_EPSILON_SECONDS = 0.05
 MIN_VOICEOVER_SECONDS = 4.0
+RENDER_FPS = 30
 
 
 class VoiceoverTooShort(RuntimeError):
@@ -220,3 +223,76 @@ def validate_voiceover_for_render(
             context="render duration",
         )
     return None
+
+
+def extend_render_clips_to_cover_voiceover(
+    output: dict[str, Any],
+    content_item: dict[str, Any] | None = None,
+    *,
+    probe: bool = True,
+    fps: int = RENDER_FPS,
+) -> dict[str, Any] | None:
+    """Extend the last clip so measured speech fits the render timeline.
+
+    Photo-sequence stamp used to round VO×fps, which can leave Remotion short by
+    a few frames (Output 2156: 35.76s spoken vs 35.70s / 1071 frames). Returns
+    Airtable fields to PATCH, or None when no extension is possible/needed.
+    """
+    if voiceover_is_disabled(output, content_item):
+        return None
+    url = voiceover_url(output, content_item)
+    if not url:
+        return None
+    measured = measured_voiceover_seconds(output, content_item, url=url, probe=probe)
+    if measured is None or measured <= 0:
+        return None
+    raw = field(output, "Render_Clip_List_JSON")
+    try:
+        clips = json.loads(str(raw or ""))
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(clips, list) or not clips:
+        return None
+    total = 0
+    for clip in clips:
+        if not isinstance(clip, dict):
+            continue
+        try:
+            total += max(0, int(clip.get("durationFrames") or 0))
+        except (TypeError, ValueError):
+            continue
+    if total <= 0:
+        return None
+    required = max(1, math.ceil(float(measured) * max(1, int(fps or RENDER_FPS))))
+    if required <= total:
+        return None
+    last = next((clip for clip in reversed(clips) if isinstance(clip, dict)), None)
+    if last is None:
+        return None
+    try:
+        last_frames = max(1, int(last.get("durationFrames") or 0))
+    except (TypeError, ValueError):
+        last_frames = 1
+    last["durationFrames"] = last_frames + (required - total)
+    # Keep startFrame chain consistent when present.
+    cursor = 0
+    for clip in clips:
+        if not isinstance(clip, dict):
+            continue
+        clip["startFrame"] = cursor
+        try:
+            cursor += max(0, int(clip.get("durationFrames") or 0))
+        except (TypeError, ValueError):
+            pass
+    fields: dict[str, Any] = {
+        "Render_Clip_List_JSON": json.dumps(clips, separators=(",", ":")),
+        "Render_Total_Frames": required,
+        "Remotion_Error_Message": None,
+        "Render_Status": "Ready for Render",
+    }
+    timeline = parse_json_field(field(output, "Timing_Timeline_JSON"))
+    if isinstance(timeline, dict):
+        timeline["duration_frames"] = required
+        timeline["duration_seconds"] = required / float(max(1, int(fps or RENDER_FPS)))
+        fields["Timing_Timeline_JSON"] = json.dumps(timeline, separators=(",", ":"))
+    return fields
