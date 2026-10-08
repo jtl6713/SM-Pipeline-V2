@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 const here = path.dirname(fileURLToPath(import.meta.url));
 const worker = fs.readFileSync(path.join(here, "worker.js"), "utf8");
 const app = fs.readFileSync(
-  path.join(here, "../studio-web/assets/app-item4-0625.js"),
+  path.join(here, "../studio-web/assets/app-item4-1008.js"),
   "utf8"
 );
 
@@ -145,7 +145,7 @@ test("fractional video duration is stored as a whole-number cap and save errors 
 });
 
 test("UI polls GET /variants during Prepare and skips Save reload waterfall", () => {
-  assert.match(app, /BUILD_ID = "item4-0.6.533-ready-for-render"/);
+  assert.match(app, /BUILD_ID = "item4-0.6.534-pages-path-bust"/);
   assert.match(app, /pollItem4Variants/);
   const poll = app.slice(
     app.indexOf("async function pollItem4Variants"),

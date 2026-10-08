@@ -217,7 +217,7 @@ test("a single-image feed post keeps its one matched still and skips a video tim
 
 test("Worker advertises the idea timed-script route", async () => {
   const worker = await readFile(path.join(here, "worker.js"), "utf8");
-  const app = await readFile(path.join(here, "../studio-web/assets/app-item4-0625.js"), "utf8");
+  const app = await readFile(path.join(here, "../studio-web/assets/app-item4-1008.js"), "utf8");
   const html = await readFile(path.join(here, "../studio-web/index.html"), "utf8");
   assert.match(worker, /isIdeaTimedScriptRoute/);
   assert.match(worker, /createIdeaTimedScriptRoute/);
