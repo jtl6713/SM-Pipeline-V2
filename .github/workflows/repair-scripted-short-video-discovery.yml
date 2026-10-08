@@ -1,0 +1,110 @@
+name: Repair Scripted Short Video Discovery
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/repair-scripted-short-video-discovery.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+
+      - name: Patch proposal discovery to query eligible videos separately
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          import re
+          p=Path("apps/studio-api/worker.js")
+          s=p.read_text()
+          marker='async function proposeScriptedShortRoute'
+          pos=s.find(marker)
+          if pos < 0: raise SystemExit("proposeScriptedShortRoute not found")
+          end=s.find("\nasync function ", pos+len(marker))
+          block=s[pos:end if end>0 else len(s)]
+          old='''catalog = (await rankStillsForIdeaPhotoWait(env, synthetic)).map(ideaTimedScriptCatalogRow);'''
+          if old not in block:
+              raise SystemExit("expected scripted-short rank call not found")
+          new='''const rankedMedia = await rankStillsForIdeaPhotoWait(env, synthetic);
+    catalog = rankedMedia.map(ideaTimedScriptCatalogRow);
+
+    // Scripted shorts are mixed-media. Photo ranking can still omit clips, so
+    // explicitly discover eligible library videos and merge them into the same
+    // catalog before scene selection.
+    try {
+      const videoRecords = await listIdeaLibraryVideoCandidates(env, synthetic);
+      const seen = new Set(catalog.map((row) => String(row?.id || row?.media_asset_record_id || "")));
+      for (const record of videoRecords) {
+        const row = ideaTimedScriptCatalogRow(record);
+        const id = String(row?.id || row?.media_asset_record_id || "");
+        if (id && !seen.has(id)) {
+          row.media_type = row.media_type || "video";
+          catalog.push(row);
+          seen.add(id);
+        }
+      }
+    } catch (videoError) {
+      console.warn("scripted short video discovery failed", videoError);
+    }'''
+          s=s[:pos]+block.replace(old,new,1)+s[(end if end>0 else len(s)):]
+          # Add helper immediately before proposal route. Reuse Airtable media table
+          # and eligibility helper already used by Studio rather than photo formula.
+          helper='''async function listIdeaLibraryVideoCandidates(env, idea) {
+  const table = env.AIRTABLE_MEDIA_ASSET_TABLE_ID;
+  if (!table) return [];
+  const records = await airtableListAll(env, table, {
+    maxRecords: 120,
+    filterByFormula: 'OR({Media_Type}="Video",LEFT({Mime_Type},6)="video/")',
+  });
+  return (records || []).filter((record) => ideaLibraryIsEligibleVideo(record));
+}
+
+'''
+          insert=s.find(marker)
+          s=s[:insert]+helper+s[insert:]
+          # bump first health marker
+          s,n=re.subn(r'version: "0\.10\.[^"]+"', 'version: "0.10.470-scripted-short-video-discovery"', s, count=1)
+          if n != 1: raise SystemExit("worker version marker not found")
+          p.write_text(s)
+          PY
+          node --check apps/studio-api/worker.js
+
+      - name: Add source regression
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat >> apps/studio-api/idea-timed-script.test.mjs <<'EOF'
+
+          test("scripted short route explicitly discovers eligible video candidates", async () => {
+            const worker = await readFile(path.join(here, "worker.js"), "utf8");
+            assert.match(worker, /listIdeaLibraryVideoCandidates/);
+            assert.match(worker, /ideaLibraryIsEligibleVideo/);
+            assert.match(worker, /scripted short video discovery failed/);
+            assert.match(worker, /0\.10\.470-scripted-short-video-discovery/);
+          });
+          EOF
+          node --test apps/studio-api/idea-timed-script.test.mjs
+
+      - name: Trigger Worker production deploy
+        shell: bash
+        run: |
+          printf '\n2026-10-08 deploy 0.10.470 scripted-short explicit video discovery\n' >> deploy/cloudflare-worker-production.txt
+
+      - name: Commit repair
+        shell: bash
+        run: |
+          git config user.name "SM Pipeline Video Discovery Repair"
+          git config user.email "actions@users.noreply.github.com"
+          git add apps/studio-api/worker.js apps/studio-api/idea-timed-script.test.mjs deploy/cloudflare-worker-production.txt
+          git commit -m "Explicitly discover video clips for scripted short proposals"
+          git pull --rebase origin main
+          git push origin HEAD:main
