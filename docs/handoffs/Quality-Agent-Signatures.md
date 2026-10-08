@@ -53,3 +53,37 @@ Escalate when any of these are true:
 - Signature ID: `QA-TT-DUPLICATE-SLIDES`
 
 TTD0 also has a conservative stamped-manifest fallback for other slide-table count mismatches when the authoritative manifest exactly matches the approved image count. The explicit Quality Agent signature above remains the exact 2× duplicate-link pattern.
+
+
+## QA-ENGAGEMENT-* — Social Engagement Automation failures
+
+**First observed:** Engagement module Stage A/B, October 8, 2026.
+
+### Signatures
+
+Recognize these `kind` values from Engagement Action `classification.kind` / Worker ledger:
+
+| Kind | Meaning | Recovery |
+|---|---|---|
+| `engagement_duplicate` | Idempotency key already published/queued | Do not retry; open Engagement history |
+| `engagement_repeated_comment` | Near-identical comment text | Edit or skip |
+| `engagement_unsupported` | Official API cannot perform the action | Open Post only; never mark automated success |
+| `engagement_permission` | OAuth/permission expired | Re-authorize profile; suspend platform until fixed |
+| `engagement_quota` | Provider quota / rate limit | Back off until reset; do not raise Studio limits to bypass spam rules |
+| `engagement_failed_comment` | Provider hard failure | Inspect error; never blind-retry |
+| `engagement_wrong_profile` | Profile isolation mismatch | Switch to the correct brand profile |
+| `engagement_irrelevant_ai` | Suggestion failed safety/relevance | Skip or regenerate |
+| `engagement_post_deleted` | Target post 404 / deleted | Mark target Expired |
+| `engagement_ambiguous` | Unclear whether comment exists | Verify via provider before any retry |
+
+### Rules
+
+- Never blind-retry failed external engagement actions.
+- Ambiguous comment publishes must check existing comments first (YouTube uploader idempotency path).
+- Unsupported platforms must remain Open Post / manual.
+
+### Runtime implementation
+
+- Classifier helpers: `apps/studio-api/engagement.mjs` → `classifyEngagementFailure`
+- Catalog: `apps/studio-api/quality-checks.mjs`
+- Signature family: `QA-ENGAGEMENT-*`

@@ -8,7 +8,8 @@ const { URL } = require("url");
 
 const { spawnSync } = require("child_process");
 
-const SERVICE_VERSION = "2026-09-26-supported-thumbnail-api";
+const SERVICE_VERSION = "2026-10-08-engagement-comment-like";
+const engageIdempotency = new Map();
 const MIN_REFRESH_TOKEN_LENGTH = 40;
 const ENV_PATH = path.join(process.cwd(), ".env");
 
@@ -724,6 +725,119 @@ async function videoAnalytics(videoId, publishedAt) {
   };
 }
 
+async function listOwnCommentsOnVideo(token, videoId) {
+  const url = new URL("https://www.googleapis.com/youtube/v3/commentThreads");
+  url.searchParams.set("part", "snippet");
+  url.searchParams.set("videoId", videoId);
+  url.searchParams.set("maxResults", "50");
+  url.searchParams.set("textFormat", "plainText");
+  const response = await fetch(url, { headers: { Authorization: "Bearer " + token, Accept: "application/json" } });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    return { ok: false, error: String(data?.error?.message || ("HTTP " + response.status)).slice(0, 300), items: [] };
+  }
+  return { ok: true, items: Array.isArray(data.items) ? data.items : [] };
+}
+
+async function engageComment(payload = {}) {
+  const videoId = String(payload.video_id || payload.videoId || "").trim();
+  const comment = String(payload.comment || payload.text || "").trim();
+  const idem = String(payload.idempotency_key || payload.idempotencyKey || "").trim();
+  if (!videoId) {
+    const error = new Error("video_id is required");
+    error.status = 400;
+    throw error;
+  }
+  if (!comment) {
+    const error = new Error("comment is required");
+    error.status = 400;
+    throw error;
+  }
+  if (idem && engageIdempotency.has(idem)) return engageIdempotency.get(idem);
+  const token = await accessToken();
+  const existing = await listOwnCommentsOnVideo(token, videoId);
+  if (existing.ok) {
+    const mine = existing.items.find((item) => {
+      const text = String(item?.snippet?.topLevelComment?.snippet?.textDisplay || item?.snippet?.topLevelComment?.snippet?.textOriginal || "").trim();
+      return text === comment;
+    });
+    if (mine) {
+      const result = {
+        ok: true,
+        already_exists: true,
+        comment_id: mine?.id || mine?.snippet?.topLevelComment?.id || null,
+        message: "Comment already exists; treating as idempotent success.",
+      };
+      if (idem) engageIdempotency.set(idem, result);
+      return result;
+    }
+  }
+  const response = await fetch("https://www.googleapis.com/youtube/v3/commentThreads?part=snippet", {
+    method: "POST",
+    headers: {
+      Authorization: "Bearer " + token,
+      Accept: "application/json",
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      snippet: {
+        videoId,
+        topLevelComment: { snippet: { textOriginal: comment } },
+      },
+    }),
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    // Ambiguous network-ish responses: caller must verify before retry.
+    if (response.status >= 500) {
+      const error = new Error(String(data?.error?.message || ("commentThreads.insert HTTP " + response.status)));
+      error.status = 502;
+      error.body = { ambiguous: true, upstream: data };
+      throw error;
+    }
+    const error = new Error(String(data?.error?.message || ("commentThreads.insert HTTP " + response.status)));
+    error.status = response.status === 403 || response.status === 401 ? response.status : 400;
+    error.body = data;
+    throw error;
+  }
+  const result = {
+    ok: true,
+    comment_id: data?.id || data?.snippet?.topLevelComment?.id || null,
+    message: "Comment published.",
+  };
+  if (idem) engageIdempotency.set(idem, result);
+  return result;
+}
+
+async function engageLike(payload = {}) {
+  const videoId = String(payload.video_id || payload.videoId || "").trim();
+  const idem = String(payload.idempotency_key || payload.idempotencyKey || "").trim();
+  if (!videoId) {
+    const error = new Error("video_id is required");
+    error.status = 400;
+    throw error;
+  }
+  if (idem && engageIdempotency.has(idem)) return engageIdempotency.get(idem);
+  const token = await accessToken();
+  const response = await fetch(
+    "https://www.googleapis.com/youtube/v3/videos/rate?id=" + encodeURIComponent(videoId) + "&rating=like",
+    {
+      method: "POST",
+      headers: { Authorization: "Bearer " + token, Accept: "application/json" },
+    }
+  );
+  if (!response.ok) {
+    const data = await response.json().catch(() => ({}));
+    const error = new Error(String(data?.error?.message || ("videos.rate HTTP " + response.status)));
+    error.status = response.status === 403 || response.status === 401 ? response.status : 400;
+    error.body = data;
+    throw error;
+  }
+  const result = { ok: true, id: "liked", message: "Video liked." };
+  if (idem) engageIdempotency.set(idem, result);
+  return result;
+}
+
 async function handler(req, res) {
   try {
     const url = new URL(req.url, `http://${req.headers.host || "localhost"}`);
@@ -813,6 +927,14 @@ async function handler(req, res) {
         return json(res, 400, { error: "at least one of title, description, categoryId, tags is required" });
       }
       return json(res, 200, await updateSnippet(payload.videoId, payload));
+    }
+    if (req.method === "POST" && url.pathname === "/youtube/engage/comment") {
+      const payload = await readJson(req);
+      return json(res, 200, await engageComment(payload));
+    }
+    if (req.method === "POST" && url.pathname === "/youtube/engage/like") {
+      const payload = await readJson(req);
+      return json(res, 200, await engageLike(payload));
     }
     return json(res, 404, { error: "Not found" });
   } catch (error) {
