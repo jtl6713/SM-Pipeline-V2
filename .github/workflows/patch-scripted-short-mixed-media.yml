@@ -1,0 +1,144 @@
+name: Patch Scripted Short Mixed Media
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/patch-scripted-short-mixed-media.yml"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: patch-scripted-short-mixed-media
+  cancel-in-progress: false
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Let scripted-short proposals consider video clips
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          import re
+
+          p = Path("apps/studio-api/worker.js")
+          s = p.read_text()
+
+          start = s.find("async function rankStillsForIdeaPhotoWait")
+          if start < 0:
+              raise SystemExit("rankStillsForIdeaPhotoWait not found")
+          end = s.find("\nasync function ", start + 20)
+          if end < 0:
+              raise SystemExit("could not bound rankStillsForIdeaPhotoWait")
+          block = s[start:end]
+          original = block
+
+          # The normal photo-wait path remains image-only. The synthetic
+          # scripted-short proposal may also see eligible video clips.
+          block = block.replace(
+              "ideaLibraryFilterFormula(filterKeys)",
+              'ideaLibraryFilterFormula(filterKeys, { includeVideo: idea?.id === "scripted-short-proposal" })'
+          )
+          block = block.replace(
+              "if (!ideaLibraryIsEligibleImage(record)) continue;",
+              'if (!ideaLibraryIsEligibleImage(record) && !(idea?.id === "scripted-short-proposal" && ideaLibraryIsEligibleVideo(record))) continue;'
+          )
+          if block == original:
+              raise SystemExit("rank block did not change; inspect source before retrying")
+          s = s[:start] + block + s[end:]
+          p.write_text(s)
+
+          # Ensure catalog rows expose media kind/duration to the proposal writer
+          # when those fields are available.
+          p = Path("apps/studio-api/idea-timed-script.mjs")
+          h = p.read_text()
+          old = """  const selected = [];
+  for (const pool of [high, medium, rest]) {
+    for (const row of pool) {
+      if (selected.length >= max) break;
+      if (selected.some((item) => stillId(item) === stillId(row))) continue;
+      selected.push(row);
+    }
+  }"""
+          new = """  const selected = [];
+  const mediaKind = (row) => String(row?.media_type || row?.mediaType || row?.mime_type || row?.mime || "").toLowerCase();
+  const isVideo = (row) => mediaKind(row).includes("video") || /\\.(mp4|mov|m4v|webm)$/i.test(stillLabel(row));
+  const videos = catalog.filter(isVideo);
+  const stills = catalog.filter((row) => !isVideo(row));
+
+  // For scripted shorts, do not let relevance sorting accidentally produce an
+  // all-still timeline when relevant clips are available. Seed the selection
+  // with the best clip, then the best still, and fill by normal confidence.
+  if (videos.length) selected.push(videos[0]);
+  if (stills.length && selected.length < max) selected.push(stills[0]);
+  for (const pool of [high, medium, rest]) {
+    for (const row of pool) {
+      if (selected.length >= max) break;
+      if (selected.some((item) => stillId(item) === stillId(row))) continue;
+      selected.push(row);
+    }
+  }"""
+          if old not in h:
+              raise SystemExit("pickTimelineCatalog selection block not found")
+          h = h.replace(old, new, 1)
+          p.write_text(h)
+          PY
+
+          node --check apps/studio-api/idea-timed-script.mjs
+          node --check apps/studio-api/worker.js
+
+      - name: Add mixed-media regression
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat >> apps/studio-api/idea-timed-script.test.mjs <<'EOF'
+
+          test("pickTimelineCatalog includes a video when relevant clips are available", () => {
+            const mixed = [
+              { id: "still-1", name: "Bridge Open 1.jpeg", media_type: "image/jpeg", confidence: "high", score: 20 },
+              { id: "still-2", name: "Open Bridge 3.jpeg", media_type: "image/jpeg", confidence: "high", score: 19 },
+              { id: "clip-1", name: "Chicago-River-Bridge-14.mp4", media_type: "video/mp4", confidence: "medium", score: 12, duration_seconds: 9.87 },
+            ];
+            const picked = pickTimelineCatalog(mixed, { min: 3, max: 3, catalogLimit: 24 });
+            assert.ok(picked.selected.some((row) => row.id === "clip-1"));
+            assert.ok(picked.selected.some((row) => row.id === "still-1"));
+          });
+          EOF
+          node --test apps/studio-api/idea-timed-script.test.mjs
+
+      - name: Bump worker and trigger deploy
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          import re
+          p=Path("apps/studio-api/worker.js")
+          s=p.read_text()
+          s,n=re.subn(r'version: "0\.10\.[^"]+"', 'version: "0.10.469-scripted-short-mixed-media"', s, count=1)
+          if n != 1:
+              raise SystemExit("worker version marker not found")
+          p.write_text(s)
+          with Path("deploy/cloudflare-worker-production.txt").open("a") as f:
+              f.write("\n2026-10-08 deploy 0.10.469 scripted-short mixed-media proposal selection\n")
+          PY
+
+      - name: Commit correction
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "SM Pipeline Mixed Media Repair"
+          git config user.email "actions@users.noreply.github.com"
+          git add apps/studio-api/worker.js apps/studio-api/idea-timed-script.mjs apps/studio-api/idea-timed-script.test.mjs deploy/cloudflare-worker-production.txt
+          git commit -m "Include relevant video clips in scripted short proposals"
+          git pull --rebase origin main
+          git push origin HEAD:main
