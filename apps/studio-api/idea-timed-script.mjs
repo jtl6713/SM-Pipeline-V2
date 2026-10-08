@@ -59,6 +59,36 @@ function stillLabel(still) {
   return String(still?.name || still?.asset_name || still?.filename || "").trim();
 }
 
+export function timelineCatalogMediaType(row) {
+  return String(
+    row?.media_type
+    || row?.mime_type
+    || row?.mediaType
+    || row?.mime
+    || (row?.media_kind === "video" ? "video" : ""),
+  ).trim().toLowerCase();
+}
+
+export function timelineCatalogIsVideo(row) {
+  const type = timelineCatalogMediaType(row);
+  return type === "video" || type.startsWith("video/") || /\.(mp4|mov|m4v|webm)$/i.test(stillLabel(row));
+}
+
+function timelineCatalogIsRelevant(row) {
+  const confidence = String(row?.confidence || "").trim().toLowerCase();
+  return confidence === "high" || confidence === "medium";
+}
+
+export function timelineCatalogIsRelevantVideo(row) {
+  return timelineCatalogIsVideo(row) && timelineCatalogIsRelevant(row);
+}
+
+export function relevantTimelineVideo(catalog) {
+  return (Array.isArray(catalog) ? catalog : []).find((row) => (
+    timelineCatalogIsRelevantVideo(row)
+  )) || null;
+}
+
 export function pickTimelineCatalog(ranked, {
   min = IDEA_TIMED_SCRIPT_MIN_SCENES,
   max = IDEA_TIMED_SCRIPT_MAX_SCENES,
@@ -73,15 +103,24 @@ export function pickTimelineCatalog(ranked, {
       if (confDiff) return confDiff;
       return (Number(b.score) || 0) - (Number(a.score) || 0);
     });
-  const catalog = rows.slice(0, Math.max(max, catalogLimit));
+  const limit = Math.max(max, catalogLimit);
+  const bestRelevantVideo = relevantTimelineVideo(rows);
+  const catalog = rows.slice(0, limit);
+  if (bestRelevantVideo && !catalog.some((row) => stillId(row) === stillId(bestRelevantVideo))) {
+    catalog.unshift(bestRelevantVideo);
+    catalog.splice(limit);
+  }
   const high = catalog.filter((row) => row.confidence === "high");
   const medium = catalog.filter((row) => row.confidence === "medium");
   const rest = catalog.filter((row) => row.confidence !== "high" && row.confidence !== "medium");
   const selected = [];
+  const relevantVideo = relevantTimelineVideo(catalog);
+  if (relevantVideo) selected.push(relevantVideo);
   for (const pool of [high, medium, rest]) {
     for (const row of pool) {
       if (selected.length >= max) break;
       if (selected.some((item) => stillId(item) === stillId(row))) continue;
+      if (timelineCatalogIsVideo(row) && !timelineCatalogIsRelevant(row)) continue;
       selected.push(row);
     }
   }
@@ -179,6 +218,8 @@ export function buildTimelineFromScenes(scenes) {
       suggested_visual: String(raw?.suggested_visual || "").trim(),
       asset_id: String(raw?.asset_id || raw?.media_asset_id || "").trim(),
       shot_status: String(raw?.shot_status || "").trim() || (String(raw?.asset_id || raw?.media_asset_id || "").trim() ? "owned" : "suggestion"),
+      media_type: timelineCatalogMediaType(raw) || null,
+      source_duration_seconds: Number(raw?.source_duration_seconds || raw?.duration_seconds || 0) || null,
       speech_rate: 1,
       force_exact_voiceover: true,
     });
@@ -312,8 +353,42 @@ export function assignOwnedScenes(scenes, stills) {
       asset_id: id,
       suggested_visual: stillLabel(matched) || next.suggested_visual,
       shot_status: "owned",
+      media_type: timelineCatalogMediaType(matched) || null,
+      source_duration_seconds: Number(matched?.duration_seconds || matched?.source_duration_seconds || 0) || null,
     };
   }).filter((scene) => scene.voiceover_text || scene.suggested_visual);
+}
+
+/**
+ * Keep the proposal mixed-media when the catalog contains a genuinely relevant
+ * clip. Low-confidence clips remain available to the writer but are never forced
+ * into a scene just to satisfy a media quota.
+ */
+export function ensureRelevantVideoScene(scenes, catalog) {
+  const rows = Array.isArray(catalog) ? catalog : [];
+  const video = relevantTimelineVideo(rows);
+  if (!video) return Array.isArray(scenes) ? scenes : [];
+  const videoId = stillId(video);
+  const incoming = Array.isArray(scenes) ? scenes : [];
+  const catalogById = new Map(rows.map((row) => [stillId(row), row]));
+  if (incoming.some((scene) => String(scene?.asset_id || scene?.media_asset_id || "").trim() === videoId)) return incoming;
+
+  const otherVideoIndex = incoming.findIndex((scene) => {
+    const row = catalogById.get(String(scene?.asset_id || scene?.media_asset_id || "").trim());
+    return row && timelineCatalogIsVideo(row);
+  });
+  const unassignedIndex = incoming.findIndex((scene) => !String(scene?.asset_id || scene?.media_asset_id || "").trim());
+  const index = otherVideoIndex >= 0 ? otherVideoIndex : (unassignedIndex >= 0 ? unassignedIndex : Math.max(0, incoming.length - 1));
+  if (!incoming.length || !videoId) return incoming;
+  return incoming.map((scene, sceneIndex) => sceneIndex === index ? {
+    ...scene,
+    suggested_visual: stillLabel(video) || scene?.suggested_visual || "",
+    media_asset_id: videoId,
+    asset_id: videoId,
+    shot_status: "owned",
+    media_type: timelineCatalogMediaType(video) || "video",
+    source_duration_seconds: Number(video?.duration_seconds || video?.source_duration_seconds || 0) || null,
+  } : scene);
 }
 
 export function scenesFromProposalPayload(payload, catalog) {

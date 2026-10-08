@@ -195,6 +195,7 @@ import {
   assignOwnedScenes,
   assignScenesToStills,
   buildTimelineFromScenes,
+  ensureRelevantVideoScene,
   exactVoiceoverText,
   fallbackProposalScenes,
   fallbackScenesFromStills,
@@ -206,6 +207,7 @@ import {
   scriptedShortProposalReady,
   singleImageFeedPostIds,
   timedScriptFromNotes,
+  timelineCatalogIsRelevantVideo,
   unassignedSuggestionCount,
 } from "./idea-timed-script.mjs";
 
@@ -504,7 +506,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.468-feed-post-timeline",
+          version: "0.10.470-scripted-short-video-discovery",
           studio_mae_schedule_v1: true,
           studio_mae_28_day_schedule_v1: true,
           studio_promotion_reconcile_after_handoff_error_v1: true,
@@ -6657,6 +6659,17 @@ function ideaLibraryFilterFormula(placeKeys, { includeVideo = false } = {}) {
   // share place names (e.g. Streeterville__9x16__fill-crop), sort newest-first,
   // and used to exhaust IDEA_LIBRARY_PLACE_FILTER_LIMIT so every candidate was
   // rejected in JS and photo-wait reported high_count=0.
+  const notDerived = ideaLibraryExcludeDerivedStillFormula();
+  const base = `AND(${media},{Classification_Status}='Classified',{Active},NOT({Do_Not_Use}),${notDerived})`;
+  const keys = (placeKeys || []).filter(Boolean).slice(0, 10);
+  if (!keys.length) return base;
+  const hay = "LOWER(CONCATENATE({Search_Keywords},' ',{AI_Tags},' ',{Location},' ',{Asset Name},' ',{Topic},' ',{Subtopic}))";
+  const clauses = keys.map((key) => `FIND("${ideaLibraryAirtableEscape(String(key).toLowerCase())}", ${hay})`);
+  return `AND(${base},OR(${clauses.join(",")}))`;
+}
+
+function ideaLibraryVideoFilterFormula(placeKeys) {
+  const media = "OR({Media_Class}='Video',LEFT(LOWER({MIME_Type}),6)='video/')";
   const notDerived = ideaLibraryExcludeDerivedStillFormula();
   const base = `AND(${media},{Classification_Status}='Classified',{Active},NOT({Do_Not_Use}),${notDerived})`;
   const keys = (placeKeys || []).filter(Boolean).slice(0, 10);
@@ -21596,6 +21609,8 @@ async function matchIdeaPhotosRoute(request, env, url, authorization) {
 
 function ideaTimedScriptCatalogRow(row) {
   const record = row?.record || row;
+  const mimeType = String(f(record, "MIME_Type") || row?.media_type || row?.mime_type || "").trim().toLowerCase();
+  const video = row?.media_kind === "video" || ideaLibraryIsEligibleVideo(record) || mimeType.startsWith("video/");
   return {
     id: row?.id || record?.id,
     name: String(f(record, "Asset Name") || row?.name || "").trim(),
@@ -21604,6 +21619,9 @@ function ideaTimedScriptCatalogRow(row) {
     description: String(f(record, "Asset_Description") || row?.description || "").trim().slice(0, 180),
     score: Number(row?.score || 0) || 0,
     confidence: String(row?.confidence || "none"),
+    media_kind: video ? "video" : "photo",
+    media_type: mimeType || (video ? "video" : "image"),
+    duration_seconds: Number(f(record, "Duration_Seconds") || row?.duration_seconds || 0) || null,
   };
 }
 
@@ -21619,6 +21637,9 @@ async function pulseIdeaTimedScriptWriter(env, idea, catalog) {
     location: row.location || "",
     topic: row.topic || "",
     description: row.description || "",
+    media_kind: row.media_kind || "photo",
+    media_type: row.media_type || null,
+    duration_seconds: Number(row.duration_seconds || 0) || null,
   }));
   try {
     const { response, payload } = await item4PulsePipelineStage(env, "its1", {
@@ -21685,14 +21706,31 @@ async function proposeScriptedShortRoute(request, env, authorization) {
       Idea_Summary: prompt.slice(0, 2000),
     },
   };
+  const profile = await resolveWorkingContentProfile(env, authorization, requestedProfileId(null, payload));
+  if (profile?.id) synthetic.fields.Content_Profile = [profile.id];
   let catalog = [];
   try {
-    catalog = (await rankStillsForIdeaPhotoWait(env, synthetic)).map(ideaTimedScriptCatalogRow);
+    catalog.push(...(await rankStillsForIdeaPhotoWait(env, synthetic)).map(ideaTimedScriptCatalogRow));
   } catch (error) {
     console.warn("scripted short library rank failed", error);
   }
+  try {
+    catalog.push(...(await rankVideosForScriptedShortProposal(env, synthetic)).map(ideaTimedScriptCatalogRow));
+  } catch (error) {
+    console.warn("scripted short video discovery failed", error);
+  }
+  const seen = new Set();
+  catalog = catalog.filter((row) => {
+    if (!row.id || seen.has(row.id)) return false;
+    seen.add(row.id);
+    return true;
+  });
   const picked = pickTimelineCatalog(catalog);
-  const pool = picked.catalog.length ? picked.catalog : picked.selected;
+  const selectedIds = new Set(picked.selected.map((row) => row.id));
+  const pool = [
+    ...picked.selected,
+    ...picked.catalog.filter((row) => !selectedIds.has(row.id) && (row.media_kind !== "video" || timelineCatalogIsRelevantVideo(row))),
+  ];
   let source = "fallback";
   let scenes = [];
   try {
@@ -21702,12 +21740,14 @@ async function proposeScriptedShortRoute(request, env, authorization) {
       voiceover_text: scene.voiceover_text,
       suggested_visual: scene.suggested_visual,
     })), pool);
+    scenes = ensureRelevantVideoScene(scenes, pool);
   } catch (error) {
     console.warn("scripted short writer failed", error);
   }
   if (!scriptedShortProposalReady(buildTimelineFromScenes(scenes))) {
     source = "fallback";
     scenes = assignOwnedScenes(fallbackProposalScenes(prompt, pool), pool);
+    scenes = ensureRelevantVideoScene(scenes, pool);
   }
   const timeline = buildTimelineFromScenes(scenes);
   if (!scriptedShortProposalReady(timeline)) {
@@ -21770,6 +21810,7 @@ async function acceptScriptedShortRoute(request, env, authorization, ctx = null)
       replaceWaitAssets: true,
       allowManagePaused: true,
       replaceAll: true,
+      allowVideo: true,
     });
     requestRecord = attached.record;
     const orderedAssets = item4AssetManifest(requestRecord)
@@ -22232,6 +22273,60 @@ async function rankStillsForIdeaPhotoWait(env, idea) {
       match_reasons: row.match_reasons,
       intake_date: ideaLibraryIntakeDate(record) || null,
       intake_batch_id: row.intake_batch_id || String(f(record, "Intake_Batch_ID") || "").trim() || null,
+      media_kind: "photo",
+      media_type: String(f(record, "MIME_Type") || "image").trim().toLowerCase(),
+      duration_seconds: Number(f(record, "Duration_Seconds") || 0) || null,
+    });
+  }
+  return ranked;
+}
+
+async function rankVideosForScriptedShortProposal(env, idea) {
+  const ideaTokens = ideaLibraryTokens([
+    f(idea, "Candidate_Title"),
+    f(idea, "Idea_Summary"),
+    f(idea, "Primary_Location"),
+  ].filter(Boolean).join(" "));
+  const strongIdeaTokens = ideaLibraryStrongTokens(ideaTokens);
+  const { placeKeys, subjectKeys, scanKeys } = ideaLibraryMatchKeys(idea, "");
+  const today = chicagoNowParts().date;
+  const filterKeys = placeKeys.length ? placeKeys : scanKeys;
+  const scanLimit = filterKeys.length ? IDEA_LIBRARY_PLACE_FILTER_LIMIT : IDEA_LIBRARY_SCAN_LIMIT;
+  const crossScope = await readLibraryCrossScopeSetting(env);
+  const scopeFormula = await mediaAssetProfileScopeForId(
+    env,
+    firstLinkedRecordId(f(idea, "Content_Profile")),
+    { crossScope, includeUnscoped: true },
+  );
+  const records = await listRecords(env, env.AIRTABLE_MEDIA_TABLE_ID || ITEM4_MEDIA_ASSET_TABLE, {
+    limit: scanLimit,
+    sortField: "Intake_Date",
+    sortDirection: "desc",
+    filterFormula: combineAirtableFormulas(ideaLibraryVideoFilterFormula(filterKeys), scopeFormula),
+  });
+  const ranked = [];
+  for (const record of records) {
+    if (!ideaLibraryIsEligibleVideo(record)) continue;
+    const row = ideaLibraryRankAsset(record, {
+      placeKeys,
+      subjectKeys,
+      strongIdeaTokens,
+      ideaTokens,
+      queryTokens: [],
+      today,
+    });
+    if (!row) continue;
+    ranked.push({
+      id: record.id,
+      record,
+      score: row.score,
+      confidence: row.confidence,
+      match_reasons: row.match_reasons,
+      intake_date: ideaLibraryIntakeDate(record) || null,
+      intake_batch_id: row.intake_batch_id || String(f(record, "Intake_Batch_ID") || "").trim() || null,
+      media_kind: "video",
+      media_type: String(f(record, "MIME_Type") || "video").trim().toLowerCase(),
+      duration_seconds: Number(f(record, "Duration_Seconds") || 0) || null,
     });
   }
   return ranked;
@@ -22250,7 +22345,7 @@ async function unfinishedIntakeBatchIds(env, batchIds) {
   return pending;
 }
 
-async function applyLibraryAssetsToProductionRequest(env, requestRecord, mediaIds, { replaceWaitAssets = false, allowManagePaused = false, replaceAll = false } = {}) {
+async function applyLibraryAssetsToProductionRequest(env, requestRecord, mediaIds, { replaceWaitAssets = false, allowManagePaused = false, replaceAll = false, allowVideo = false } = {}) {
   const existingAll = item4AssetManifest(requestRecord);
   const existing = replaceAll
     ? []
@@ -22263,18 +22358,24 @@ async function applyLibraryAssetsToProductionRequest(env, requestRecord, mediaId
     if (already.has(mediaId)) continue;
     let media = await airtableFetch(env, env.AIRTABLE_MEDIA_TABLE_ID || ITEM4_MEDIA_ASSET_TABLE, mediaId);
     media = await ensureChicagoWatermarkedLibraryAsset(env, media, requestRecord);
-    const reject = ideaLibraryRejectReason(media);
+    const reject = ideaLibraryRejectReason(media, { allowVideo });
     if (reject) continue;
     const driveId = googleDriveFileId(media);
     const driveUrl = String(f(media, "Google Drive URL") || "").trim()
       || (driveId ? `https://drive.google.com/file/d/${driveId}/view` : "");
     const mime = String(f(media, "MIME_Type") || "image/jpeg").trim() || "image/jpeg";
     const name = String(f(media, "Asset Name") || "photo");
+    const video = ideaLibraryIsEligibleVideo(media) || mime.toLowerCase().startsWith("video/");
+    const durationSeconds = Number(f(media, "Duration_Seconds") || 0);
     appended.push({
       id: crypto.randomUUID().replace(/-/g, "").slice(0, 18),
       order: existing.length + appended.length + 1,
       name,
       mime_type: mime,
+      media_kind: video ? "video" : "photo",
+      duration_seconds: Number.isFinite(durationSeconds) && durationSeconds > 0 ? durationSeconds : null,
+      in_seconds: 0,
+      out_seconds: Number.isFinite(durationSeconds) && durationSeconds > 0 ? durationSeconds : null,
       source_format: String(f(media, "File_Extension") || item4FileExtension(name) || "").toUpperCase() || null,
       browser_preview_compatible: true,
       size_bytes: ideaLibraryFileBytes(media) || null,

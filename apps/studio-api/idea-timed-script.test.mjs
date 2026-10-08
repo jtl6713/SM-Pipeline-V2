@@ -8,6 +8,7 @@ import {
   assignScenesToStills,
   buildTimelineFromScenes,
   exactVoiceoverText,
+  ensureRelevantVideoScene,
   fallbackProposalScenes,
   fallbackScenesFromStills,
   formatTimedScriptMarkdown,
@@ -19,6 +20,8 @@ import {
   scenesFromProposalPayload,
   scriptedShortProposalReady,
   stillNameKey,
+  timelineCatalogIsVideo,
+  timelineCatalogIsRelevantVideo,
   timedScriptFromNotes,
   unassignedSuggestionCount,
 } from "./idea-timed-script.mjs";
@@ -45,6 +48,41 @@ test("pickTimelineCatalog prefers high-confidence stills and keeps extras for th
   assert.ok(picked.selected.length >= 5);
   assert.equal(picked.selected[0].id, "recWide1");
   assert.ok(picked.selected.every((row) => row.confidence === "high" || row.confidence === "medium"));
+});
+
+test("Chicago River bridge proposals keep relevant MP4 clips with stills and their media metadata", () => {
+  const bridgeMedia = [
+    { id: "recBridgeStill1", name: "Chicago River Bridge Open 1.jpeg", media_type: "image/jpeg", confidence: "high", score: 40 },
+    { id: "recBridgeStill2", name: "Chicago River Bridge Open 3.jpeg", media_type: "image/jpeg", confidence: "high", score: 38 },
+    { id: "recBridgeClip14", name: "Chicago-River-Bridge-14.mp4", media_type: "video/mp4", media_kind: "video", confidence: "medium", score: 24, duration_seconds: 9.87 },
+  ];
+  const picked = pickTimelineCatalog(bridgeMedia, { min: 3, max: 3, catalogLimit: 3 });
+  assert.equal(picked.selected[0].id, "recBridgeClip14");
+  assert.ok(picked.selected.some((row) => row.id === "recBridgeStill1"));
+
+  const scenes = ensureRelevantVideoScene([
+    { voiceover_text: "Chicago's bridges still move the city.", suggested_visual: "Chicago River Bridge Open 1.jpeg", asset_id: "recBridgeStill1", shot_status: "owned" },
+    { voiceover_text: "Watch the span rise over the river.", suggested_visual: "Bridge opening shot", asset_id: "", shot_status: "suggestion" },
+  ], picked.selected);
+  assert.equal(scenes[1].asset_id, "recBridgeClip14");
+  assert.equal(scenes[1].media_type, "video/mp4");
+  assert.equal(scenes[1].source_duration_seconds, 9.87);
+  const timeline = buildTimelineFromScenes(scenes);
+  assert.equal(timeline.segments[1].media_type, "video/mp4");
+  assert.equal(timeline.segments[1].source_duration_seconds, 9.87);
+  assert.equal(timelineCatalogIsVideo(picked.selected[0]), true);
+});
+
+test("scripted short proposals do not force an irrelevant video clip", () => {
+  const catalog = [
+    { id: "recBridgeStill1", name: "Chicago River Bridge.jpeg", media_type: "image/jpeg", confidence: "high", score: 40 },
+    { id: "recMiamiClip", name: "Miami-Beach-Waves.mp4", media_type: "video/mp4", media_kind: "video", confidence: "low", score: 2, duration_seconds: 8 },
+  ];
+  const scenes = [{ voiceover_text: "The bridge opens downtown.", suggested_visual: "Chicago River Bridge.jpeg", asset_id: "recBridgeStill1", shot_status: "owned" }];
+  assert.deepEqual(ensureRelevantVideoScene(scenes, catalog), scenes);
+  const picked = pickTimelineCatalog(catalog, { min: 1, max: 2 });
+  assert.deepEqual(picked.selected.map((row) => row.id), ["recBridgeStill1"]);
+  assert.equal(timelineCatalogIsRelevantVideo(catalog[1]), false);
 });
 
 test("assignScenesToStills matches exact filenames then fills leftovers in order", () => {
@@ -208,6 +246,11 @@ test("Worker advertises the idea timed-script route", async () => {
   assert.match(worker, /isScriptedShortAcceptWrite/);
   assert.match(worker, /scriptedShortUnassignedMessage/);
   assert.match(worker, /scripted-short=proposal/);
+  assert.match(worker, /rankVideosForScriptedShortProposal/);
+  assert.match(worker, /ideaLibraryVideoFilterFormula/);
+  assert.match(worker, /scripted short video discovery failed/);
+  assert.match(worker, /allowVideo: true/);
+  assert.match(worker, /0\.10\.470-scripted-short-video-discovery/);
   const css = await readFile(path.join(here, "../studio-web/assets/styles-phase7-0621.css"), "utf8");
   assert.match(css, /#page-ideas \.page-heading\{\s*flex-wrap:wrap;/);
   assert.match(css, /#page-ideas \.heading-actions\{/);
