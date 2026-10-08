@@ -260,7 +260,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.519-mae-28-day-schedule";
+  const BUILD_ID = "item4-0.6.527-timed-vo-quiet-retry";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -3337,7 +3337,12 @@
       node.textContent = "Building Production…";
     });
     const setMessage = heading ? setIdeasAutonomousMessage : setManageMessage;
-    setMessage("Accepting this idea: writing the voiceover timeline, attaching named stills, and preparing Production Approve…");
+    const singleFeed = String(target.content_type || "").trim() === "Feed Post"
+      && Array.isArray(target.matched_media_asset_links)
+      && target.matched_media_asset_links.length === 1;
+    setMessage(singleFeed
+      ? "Preparing this feed post from the one photo. No voiceover timeline. This does not publish."
+      : "Accepting this idea: writing the voiceover timeline, attaching named stills, and preparing Production Approve…");
     try {
       const result = await api(`/api/ideas/${encodeURIComponent(target.id)}/timed-script`, {
         method: "POST",
@@ -3365,8 +3370,13 @@
       if (Array.isArray(result.stills) && result.stills.length) {
         ideaLibrarySelected = new Set(result.stills.map((row) => String(row.id || "")).filter(Boolean));
       }
-      if ($("promoteContentType")) $("promoteContentType").value = "Vertical Short Video";
-      if ($("promoteVoiceover")) $("promoteVoiceover").value = "Yes";
+      if (result.single_image_feed_post) {
+        if ($("promoteContentType")) $("promoteContentType").value = "Feed Post";
+        if ($("promoteVoiceover")) $("promoteVoiceover").value = "No";
+      } else {
+        if ($("promoteContentType")) $("promoteContentType").value = "Vertical Short Video";
+        if ($("promoteVoiceover")) $("promoteVoiceover").value = "Yes";
+      }
       syncPromotionPanels();
       const success = result.message
         || (result.ready_for_approval

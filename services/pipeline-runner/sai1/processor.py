@@ -3,10 +3,19 @@
 from __future__ import annotations
 
 from typing import Any
+import re
 
 from sai1.constants import MAKE_SCENARIO_ID, MAKE_SCENARIO_NAME
 from sai1.openai_themes import generate_themes
 from sai1.prompt import build_themer_prompt
+
+
+def _sanitize_post_caption(value: str) -> str:
+    lines = [line.strip() for line in str(value or "").splitlines()]
+    # Asset inventory lines are never audience-facing caption copy. This guard
+    # catches stale/model-generated Featuring lists before Platform Outputs.
+    lines = [line for line in lines if not re.match(r"^\\s*featuring\\s*:", line, flags=re.I)]
+    return "\n".join(line for line in lines if line).strip()
 
 
 def _normalize_themes(parsed: dict[str, Any], *, needed: int) -> dict[str, Any]:
@@ -42,7 +51,7 @@ def _normalize_themes(parsed: dict[str, Any], *, needed: int) -> dict[str, Any]:
         "slides": slides,
         "slide_voiceovers": slide_voiceovers,
         "voiceover_script": script,
-        "post_caption": str(parsed.get("post_caption") or "").strip(),
+        "post_caption": _sanitize_post_caption(str(parsed.get("post_caption") or "")),
         "hashtags": str(parsed.get("hashtags") or "").strip(),
     }
 

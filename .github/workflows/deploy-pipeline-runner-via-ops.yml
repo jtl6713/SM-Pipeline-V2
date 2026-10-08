@@ -142,5 +142,15 @@ jobs:
 # Trigger pipeline-runner deploy for per-scene timed-script voiceover loudness leveling
 # 2026-10-07 service_version=2026-10-07-timed-vo-leveling
 
+# Trigger pipeline-runner deploy for six-hour YouTube scheduled handoff
+# 2026-10-07 keep approved YouTube outputs in Studio until T-minus 6 hours
+
+# Trigger pipeline-runner deploy for Output 1843 beat-sync voiceover+tail duration floor
+# 2026-10-07 service_version timing guard companion
+# Retrigger after runner service_version bump 2026-10-07-beat-sync-vo-guard
+
+# Trigger pipeline-runner deploy for mixed still/video Create Timeline
+# 2026-10-08 service_version=2026-10-08-mixed-media-timeline
+
 # Trigger pipeline-runner deploy for quiet timed-script TTS scene retry (Calle Ocho CI 395)
-# 2026-10-07 service_version=2026-10-07-timed-vo-quiet-retry
+# 2026-10-08 service_version=2026-10-08-timed-vo-quiet-retry

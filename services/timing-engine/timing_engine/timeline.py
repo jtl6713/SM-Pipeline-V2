@@ -65,6 +65,26 @@ def build_timeline(
         frames_each = max(1, round(span * fps_i))
         clip_frames = [frames_each] * count
         total_frames = frames_each * count
+        required_frames = max(count, round(duration * fps_i))
+        if voiceover_end_seconds is not None:
+            required_frames = max(required_frames, round(float(voiceover_end_seconds) * fps_i))
+        if total_frames < required_frames:
+            # Equal-beat grouping can consume only the beats available in the
+            # selected analysis window. It must never shorten the requested
+            # video (Output 1843: 49.087s requested -> 37.87s generated).
+            # Preserve the clip count and distribute the required duration
+            # evenly; the renderer may lose a few exact beat boundaries, but
+            # spoken audio can never run past the end of the video.
+            base_frames, remainder = divmod(required_frames, count)
+            clip_frames = [
+                max(1, base_frames + (1 if index < remainder else 0))
+                for index in range(count)
+            ]
+            total_frames = sum(clip_frames)
+            rule_meta["duration_guard_applied"] = True
+            rule_meta["beat_derived_frames"] = frames_each * count
+            rule_meta["required_duration_frames"] = required_frames
+            rule_meta["strategy"] = "equal_beats_duration_guard"
     else:
         total_frames = max(count, round(duration * fps_i))
         boundaries = [0.0, *cuts, duration]

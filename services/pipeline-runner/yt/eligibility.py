@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from ap0.public_cover import native_grid_cover_required
@@ -7,6 +8,9 @@ from ap0.public_mp4 import is_public_publish_url
 from asset.helpers import as_bool
 from render.fields import field_str
 from yt.constants import STAGE_YT1, STAGE_YT2, STAGE_YT4
+from yt.package import youtube_publish_at
+
+YOUTUBE_HANDOFF_LEAD_HOURS = 6
 
 
 def _ci(value: Any) -> str:
@@ -64,6 +68,24 @@ def yt0_eligibility_reason(
     return None
 
 
+def youtube_handoff_due(record: dict[str, Any], *, now: datetime | None = None) -> bool:
+    """Keep scheduled videos in Studio until the YouTube handoff window opens."""
+    publish_at = youtube_publish_at(record)
+    if not publish_at:
+        return True
+    try:
+        scheduled = datetime.fromisoformat(publish_at.replace("Z", "+00:00"))
+    except ValueError:
+        # Preserve existing behavior for malformed dates so YouTube/API validation can surface it.
+        return True
+    if scheduled.tzinfo is None:
+        scheduled = scheduled.replace(tzinfo=timezone.utc)
+    current = now or datetime.now(timezone.utc)
+    if current.tzinfo is None:
+        current = current.replace(tzinfo=timezone.utc)
+    return current >= scheduled - timedelta(hours=YOUTUBE_HANDOFF_LEAD_HOURS)
+
+
 def ytp1_eligibility_reason(
     record: dict[str, Any],
     *,
@@ -80,6 +102,8 @@ def ytp1_eligibility_reason(
         return "already_has_upload_job"
     if field_str(record, "YouTube_Video_ID"):
         return "already_has_youtube_video"
+    if not youtube_handoff_due(record):
+        return "youtube_handoff_not_due"
     if not is_public_publish_url(upload_source_url(record)):
         return "missing_public_publish_url"
     if replace_mismatch(

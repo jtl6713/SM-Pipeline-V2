@@ -90,7 +90,10 @@ def analysis_window(output: dict[str, Any], *, vo_end_override: float | None = N
             break
         owner = None
     if owner:
-        duration_f = min(duration_f, max(0.25, owner))
+        # The owner duration is a cap only when it does not cut off narration.
+        # Voiceover + configured tail is a hard lower bound (Output 1843).
+        spoken_floor = (vo_end + voiceover_tail_seconds(output)) if vo_end else 0.0
+        duration_f = min(duration_f, max(0.25, owner, spoken_floor))
     return start_f, duration_f
 
 

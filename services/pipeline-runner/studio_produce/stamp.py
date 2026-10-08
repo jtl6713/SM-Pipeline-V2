@@ -652,7 +652,7 @@ def assign_clip_frames(
         native_video.append(max(1, round((end - start) * FPS)))
         frames[index] = native_video[-1]
     video_total = sum(native_video)
-    timeline = None if story or video_indexes else timed_script_from_request(request)
+    timeline = None if story else timed_script_from_request(request)
     if timeline and len(timeline.get("segments") or []) == len(clips):
         # Timed-script scene windows win over pacing/fixed/owner length.
         # After P2, those windows are measured VO lengths (not raw import clocks).
@@ -1258,7 +1258,7 @@ def source_package(
         field_str(output, "Platform_Output_Type"),
     )
     ai_motion = {} if native_route else _ai_directed_motion(clips, render_settings, render_overrides)
-    authoritative = bool(timed_script) and not story and not native_route and not has_video
+    authoritative = bool(timed_script) and not story and not native_route
     if authoritative:
         ordered = clips_for_timed_script(clips, timed_script)
         if not ordered:
@@ -1281,8 +1281,18 @@ def source_package(
         overlay = item["overlay"]
         video = item["media_kind"] == "video"
         in_seconds = float(item["in_seconds"] or 0)
-        out_seconds = in_seconds + (frames / fps) if video else item["out_seconds"]
-        source_duration = float(item.get("source_duration_seconds") or 0) or max(out_seconds or 0, in_seconds)
+        requested_out_seconds = in_seconds + (frames / fps) if video else item["out_seconds"]
+        source_duration = float(item.get("source_duration_seconds") or 0) or max(float(item.get("out_seconds") or 0), in_seconds)
+        # Timed-script VO owns the scene clock for both stills and video. A long
+        # source clip is trimmed to the measured narration window. Never invent
+        # frames beyond the source by stretching/looping a short clip.
+        if video and authoritative:
+            available_out = float(item.get("out_seconds") or 0) or source_duration
+            if available_out > in_seconds and requested_out_seconds > available_out + (1 / fps):
+                return None
+            out_seconds = min(requested_out_seconds, available_out) if available_out > in_seconds else requested_out_seconds
+        else:
+            out_seconds = requested_out_seconds
         frame_override = item.get("render_override") if isinstance(item.get("render_override"), dict) else {}
         motion_settings = dict(render_settings)
         motion_source = "global"

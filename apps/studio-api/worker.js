@@ -204,6 +204,7 @@ import {
   pickTimelineCatalog,
   scenesFromModelPayload,
   scriptedShortProposalReady,
+  singleImageFeedPostIds,
   timedScriptFromNotes,
   unassignedSuggestionCount,
 } from "./idea-timed-script.mjs";
@@ -503,7 +504,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.467-promotion-reconcile",
+          version: "0.10.468-feed-post-timeline",
           studio_mae_schedule_v1: true,
           studio_mae_28_day_schedule_v1: true,
           studio_promotion_reconcile_after_handoff_error_v1: true,
@@ -21852,6 +21853,129 @@ async function acceptScriptedShortRoute(request, env, authorization, ctx = null)
   }, 201);
 }
 
+function feedPostNotesWithoutTimeline(notes) {
+  return String(notes || "")
+    .replace(/(?:^|\n)\[timed-script\]\s*[^\n]*/g, "")
+    .replace(/\n?idea-vo-timeline=\S+/g, "")
+    .trim();
+}
+
+async function acceptSingleImageFeedPost(request, env, idea, mediaId, authorization, ctx) {
+  let requestRecord = await existingDraftForIdea(env, idea.id, authorization)
+    || await findDraftProductionRequestForIdea(env, idea.id)
+    || await createDraftForIdea(env, idea, authorization);
+  const attached = await applyLibraryAssetsToProductionRequest(env, requestRecord, [mediaId], {
+    replaceWaitAssets: true,
+    allowManagePaused: true,
+    replaceAll: true,
+  });
+  requestRecord = attached.record;
+  const notes = feedPostNotesWithoutTimeline(f(requestRecord, "Production_Notes"));
+  const stampedNotes = /ez-package=slides/i.test(notes) ? notes : `${notes}\nez-package=slides`.trim();
+  requestRecord = await item4UpdateRequestState(env, requestRecord.id, {
+    Master_Content_Type: "Feed Post",
+    Voiceover_Mode: "No",
+    Background_Music_Mode: "No",
+    Thumbnail_Mode: "No",
+    Script_Mode: "AI decides",
+    Requested_Script: null,
+    Voiceover_Tail_Seconds: 0,
+    Video_Clip_Count_Mode: "Exact",
+    Video_Clip_Count_Exact: 1,
+    Carousel_Image_Mode: "Manual Upload",
+    Carousel_Slide_Count_Mode: "Exact",
+    Carousel_Slide_Count_Exact: 1,
+    Production_Notes: stampedNotes.slice(0, 10000),
+  });
+
+  if (String(f(requestRecord, "Studio_Output_Plan_Status") || "").trim() !== "Ready") {
+    try {
+      const planCall = studioInternalJsonRequest(`/api/production-requests/${requestRecord.id}/plan`, {
+        platforms: ["Instagram", "Facebook", "TikTok"],
+        package: "slides",
+        skip_fbs1_guard: true,
+      });
+      await buildItem4OutputPlan(planCall.request, env, planCall.url, authorization);
+      requestRecord = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, requestRecord.id);
+    } catch (error) {
+      console.warn("single-image feed post plan failed", requestRecord.id, error);
+    }
+  }
+
+  let variantStatus = String(f(requestRecord, "Studio_Variant_Status") || "").trim();
+  if (variantStatus !== "Ready" && variantStatus !== "Not Needed" && ctx?.waitUntil) {
+    ctx.waitUntil((async () => {
+      try {
+        let current = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, requestRecord.id);
+        let reconciled = await item4ReconcileVariants(env, current.id, current).catch(() => null);
+        if (reconciled?.record) current = reconciled.record;
+        const queued = Array.isArray(reconciled?.queue_rows) && reconciled.queue_rows.length;
+        if (!autonomousPlanVariantsReady(current, reconciled) && !queued) {
+          const variantsCall = studioInternalJsonRequest(`/api/production-requests/${current.id}/variants`, {});
+          await prepareItem4Variants(variantsCall.request, env, variantsCall.url, authorization, ctx);
+        }
+      } catch (error) {
+        console.warn("single-image feed post variant prepare failed", requestRecord.id, error);
+      }
+    })());
+  }
+
+  const assetsCount = item4AssetManifest(requestRecord).length;
+  const planReady = String(f(requestRecord, "Studio_Output_Plan_Status") || "").trim() === "Ready";
+  variantStatus = String(f(requestRecord, "Studio_Variant_Status") || "").trim();
+  const variantsReady = variantStatus === "Ready"
+    || variantStatus === "Not Needed"
+    || autonomousPlanVariantsReady(requestRecord);
+  const readyForApproval = assetsCount >= 1 && planReady && variantsReady;
+  requestRecord = await item4UpdateRequestState(env, requestRecord.id, {
+    Request_Status: "Ready",
+    Studio_Master_Asset_Status: assetsCount >= 1 ? "Ready" : (f(requestRecord, "Studio_Master_Asset_Status") || "None"),
+    Studio_Item4_State: planReady ? "Plan Ready" : "Assets Ready",
+  });
+
+  const ideaNotes = mergeIdeaProductionNotes(f(idea, "Production_Config_Notes"), undefined, [mediaId]);
+  idea = await airtableFetch(env, env.AIRTABLE_IDEA_TABLE_ID, idea.id, {
+    method: "PATCH",
+    body: JSON.stringify({
+      fields: {
+        Production_Content_Type: "Feed Post",
+        Production_Include_Voiceover: "No",
+        Production_Include_Background_Music: "No",
+        Production_Include_Thumbnail: "No",
+        Production_Carousel_Image_Mode: "Manual Upload",
+        Production_Carousel_Slide_Count: 1,
+        Studio_Matched_Media_Assets: [mediaId],
+        Studio_Photo_Wait_Status: "Not Needed",
+        Production_Config_Notes: ideaNotes,
+        Candidate_Status: String(f(idea, "Candidate_Status") || "").trim() === "On Hold"
+          ? "On Hold"
+          : "Approved",
+      },
+      typecast: true,
+    }),
+  });
+
+  const message = readyForApproval
+    ? "The one photo is on a feed post and ready for Production Approve. No voiceover. This does not publish."
+    : "The one photo is on a feed post. Platform crops may still be finishing. Approve when Ready. No voiceover. This does not publish.";
+  return respond(request, env, {
+    ok: true,
+    single_image_feed_post: true,
+    source: "single-image-feed-post",
+    scene_count: 1,
+    ready_for_approval: readyForApproval,
+    waiting_variants: planReady && !variantsReady,
+    stills: [{
+      id: mediaId,
+      name: "",
+      preview_path: `/api/media-assets/${mediaId}/preview`,
+    }],
+    record: mapIdea(idea),
+    production_request: mapProductionRequest(requestRecord),
+    message,
+  }, readyForApproval ? 200 : 202);
+}
+
 async function createIdeaTimedScriptRoute(request, env, url, authorization, ctx = null) {
   const recordId = ideaRecordIdFromPath(url);
   let idea = await loadAuthorizedIdea(env, recordId, authorization);
@@ -21860,6 +21984,13 @@ async function createIdeaTimedScriptRoute(request, env, url, authorization, ctx 
   }
   if (String(f(idea, "Candidate_Status") || "").trim() === "On Hold") {
     throw new HttpError(409, "Restore this idea before creating a timeline.");
+  }
+  const feedPhotoIds = singleImageFeedPostIds({
+    contentType: f(idea, "Production_Content_Type"),
+    matchedIds: f(idea, "Studio_Matched_Media_Assets") || [],
+  });
+  if (Array.isArray(feedPhotoIds) && feedPhotoIds.length === 1) {
+    return acceptSingleImageFeedPost(request, env, idea, feedPhotoIds[0], authorization, ctx);
   }
   const title = String(f(idea, "Candidate_Title") || "").trim();
   if (!title) throw new HttpError(400, "Give this idea a title before creating a timeline.");

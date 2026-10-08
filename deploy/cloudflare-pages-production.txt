@@ -54,3 +54,14 @@ Verify Studio UI 0.6.517 through Cloudflare Access service token: 2026-10-07T04:
 Deploy Studio topbar skyline banner with contrast-protected hamburger, branding, Help, and profile selector. Asset: topbar-banner-0618.css. Triggered 2026-10-07.
 Deploy Studio UI 0.6.518 MAE 28-day schedule + 11PM–3AM blackout: 2026-10-07T05:40Z
 Retry Studio UI 0.6.519 Pages verify (prefer unique deployment URL + Access + loud content mismatches): 2026-10-07T06:14Z
+Deploy Studio UI 0.6.520-feed-post-timeline. Create timeline on a one-photo Feed Post keeps Feed Post and voiceover No.
+Deploy Studio UI 0.6.521-compact-start-launcher. Reduce Start a post launcher height, tighten wizard/upload controls, and raise purple-panel text contrast to white/off-white. Triggered 2026-10-07.\nDeploy Studio UI 0.6.522-pipeline-search-icon. Remove visible Search pipeline label; retain accessible aria-label and use the magnifying-glass symbol inside the search control. Triggered 2026-10-07.\nDeploy Studio UI 0.6.523-all-profiles-overview. Replace the selected-profile Scheduled Content/metric cards with a compact profile-independent Chicago/NYC/LA/Miami matrix showing Facebook, Instagram, TikTok, YouTube scheduled counts plus Manual Action, Failed, Awaiting Approval, Ideas, and totals. Triggered 2026-10-07.\n
+Deploy Studio UI 0.6.524-youtube-private-count. Global all-profiles scheduled counts now keep YouTube private/unlisted uploads in the non-public count until YouTube reports them public. Triggered 2026-10-08.
+2026-10-08 verified deploy trigger: Studio UI 0.6.524 via deploy-studio-pages-production workflow; Rockefeller NYC visibility correction.
+2026-10-08 PR merge deploy trigger: Studio UI 0.6.524 Cloudflare Pages production.
+
+Deploy Studio UI 0.6.525-timeline-padding. Add consistent left/right inset to Ideas Create VO Timeline meta and scene preview. Triggered 2026-10-08.
+
+Deploy Studio UI 0.6.526-scheduled-group. Group Facebook, Instagram, TikTok, and YouTube under a Scheduled Posts header in All Profiles Overview. Triggered 2026-10-08.
+
+Deploy Studio UI 0.6.527-timed-vo-quiet-retry after PR #542 conflict resolve + main merge. Triggered 2026-10-08.

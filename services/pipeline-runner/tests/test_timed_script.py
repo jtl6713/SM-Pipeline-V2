@@ -643,3 +643,67 @@ def test_measured_auto_slide_timeline_preserves_source_marker():
     measured = apply_measured_durations(planned, [2.1, 2.4])
     assert measured is not None
     assert measured["source"] == "slide_voiceover"
+
+
+def test_mixed_timed_script_trims_video_to_voiceover_scene_duration():
+    """Mixed media: VO scene length owns both still display and video trim."""
+    timeline = parse_timed_script_markdown(
+        "| Time | Voiceover | Suggested still |\n"
+        "| --- | --- | --- |\n"
+        "| 0:00–0:05 | Start with the tower. | tower.jpg |\n"
+        "| 0:05–0:11 | Now see it in motion. | tower-walk.mp4 |\n"
+    )["timeline"]
+    timeline["segments"][0]["asset_id"] = "asset-photo"
+    timeline["segments"][1]["asset_id"] = "asset-video"
+    notes = directive_line(timeline)
+    masters = [
+        {"id": "asset-photo", "order": 1, "name": "tower.jpg", "preview_url": "https://media.chicagoshining.com/tower.jpg", "media_asset_record_id": "recPHOTO00000001"},
+        {"id": "asset-video", "order": 2, "name": "tower-walk.mp4", "media_kind": "video", "mime_type": "video/mp4", "preview_url": "https://media.chicagoshining.com/tower-walk.mp4", "media_asset_record_id": "recVIDEO00000001", "duration_seconds": 14, "in_seconds": 0, "out_seconds": 14},
+    ]
+    manifest = [
+        {"id": "asset-photo", "order": 1, "name": "tower.jpg", "media_asset_record_id": "recPHOTO00000001", "variants": {"9:16": {"preview_url": "https://media.chicagoshining.com/tower.jpg", "media_asset_record_id": "recPHOTO00000001", "file_name": "tower.jpg"}}},
+        {"id": "asset-video", "order": 2, "name": "tower-walk.mp4", "media_kind": "video", "mime_type": "video/mp4", "preview_url": "https://media.chicagoshining.com/tower-walk.mp4", "media_asset_record_id": "recVIDEO00000001", "duration_seconds": 14, "in_seconds": 0, "out_seconds": 14, "variants": {"9:16": {"preview_url": "https://media.chicagoshining.com/tower-walk.mp4", "media_asset_record_id": "recVIDEO00000001", "file_name": "tower-walk.mp4"}}},
+    ]
+    request = {
+        "id": "recPRMIX",
+        "fields": {
+            "Production_Request_ID": "PR-MIX",
+            "Production_Notes": notes,
+            "Studio_Variant_Status": "Ready",
+            "Studio_Master_Assets_JSON": json.dumps(masters),
+            "Studio_Variant_Manifest_JSON": json.dumps({"assets": manifest}),
+            "Studio_Output_Plan_JSON": json.dumps({"items": [{"platform": "Instagram", "output_type": "Reel", "aspect_ratio": "9:16"}]}),
+        },
+    }
+    output = {"id": "recPO", "fields": {"Platform": "Instagram", "Studio_Output_Type": "Reel", "Aspect_Ratio": "9:16", "Platform_Output_Type": "Reel"}}
+    package = source_package(request, output, None)
+    assert package is not None
+    clips = json.loads(package["render_clip_list_json"])
+    assert [clip["mediaKind"] for clip in clips] == ["photo", "video"]
+    assert [clip["durationFrames"] for clip in clips] == [150, 180]
+    assert clips[1]["outSeconds"] == 6.0
+    assert clips[1]["motionStyle"] == "none"
+    assert all(clip["timingSource"] == "timed_script" for clip in clips)
+
+
+def test_mixed_timed_script_refuses_to_stretch_short_video():
+    """A 3s source cannot be looped/stretched to cover a 6s VO scene."""
+    timeline = parse_timed_script_markdown(
+        "| Time | Voiceover | Suggested still |\n"
+        "| --- | --- | --- |\n"
+        "| 0:00–0:05 | Start with the tower. | tower.jpg |\n"
+        "| 0:05–0:11 | Now see it in motion. | short.mp4 |\n"
+    )["timeline"]
+    timeline["segments"][0]["asset_id"] = "asset-photo"
+    timeline["segments"][1]["asset_id"] = "asset-video"
+    masters = [
+        {"id": "asset-photo", "order": 1, "name": "tower.jpg", "preview_url": "https://media.chicagoshining.com/tower.jpg", "media_asset_record_id": "recPHOTO00000001"},
+        {"id": "asset-video", "order": 2, "name": "short.mp4", "media_kind": "video", "mime_type": "video/mp4", "preview_url": "https://media.chicagoshining.com/short.mp4", "media_asset_record_id": "recVIDEO00000001", "duration_seconds": 3, "in_seconds": 0, "out_seconds": 3},
+    ]
+    manifest = [
+        {"id": "asset-photo", "order": 1, "name": "tower.jpg", "media_asset_record_id": "recPHOTO00000001", "variants": {"9:16": {"preview_url": "https://media.chicagoshining.com/tower.jpg", "media_asset_record_id": "recPHOTO00000001", "file_name": "tower.jpg"}}},
+        {"id": "asset-video", "order": 2, "name": "short.mp4", "media_kind": "video", "mime_type": "video/mp4", "preview_url": "https://media.chicagoshining.com/short.mp4", "media_asset_record_id": "recVIDEO00000001", "duration_seconds": 3, "in_seconds": 0, "out_seconds": 3, "variants": {"9:16": {"preview_url": "https://media.chicagoshining.com/short.mp4", "media_asset_record_id": "recVIDEO00000001", "file_name": "short.mp4"}}},
+    ]
+    request = {"id": "recPRSHORT", "fields": {"Production_Request_ID": "PR-SHORT", "Production_Notes": directive_line(timeline), "Studio_Variant_Status": "Ready", "Studio_Master_Assets_JSON": json.dumps(masters), "Studio_Variant_Manifest_JSON": json.dumps({"assets": manifest}), "Studio_Output_Plan_JSON": json.dumps({"items": [{"platform": "Instagram", "output_type": "Reel", "aspect_ratio": "9:16"}]})}}
+    output = {"id": "recPO", "fields": {"Platform": "Instagram", "Studio_Output_Type": "Reel", "Aspect_Ratio": "9:16", "Platform_Output_Type": "Reel"}}
+    assert source_package(request, output, None) is None

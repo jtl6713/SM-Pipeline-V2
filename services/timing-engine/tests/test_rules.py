@@ -226,7 +226,31 @@ def test_equal_beats_share_duration_and_land_on_beats():
         transition={"type": "fade", "duration_frames": 12},
     )
     frames = [clip["duration_frames"] for clip in plan["clips"]]
-    assert frames == [45, 45, 45, 45]
-    assert [item["at_seconds"] for item in plan["transitions"]] == [1.5, 3.0, 4.5]
-    assert plan["duration_frames"] == 180
+    assert frames == [60, 60, 60, 60]
+    assert [item["at_seconds"] for item in plan["transitions"]] == [2.0, 4.0, 6.0]
+    assert plan["duration_frames"] == 240
     assert plan["metadata"]["beat_count"] == 15
+    assert plan["metadata"]["duration_guard_applied"] is True
+    assert plan["metadata"]["beat_derived_frames"] == 180
+    assert plan["metadata"]["required_duration_frames"] == 240
+    assert plan["metadata"]["strategy"] == "equal_beats_duration_guard"
+
+
+def test_output_1843_equal_beats_cannot_shorten_voiceover_window():
+    # Regression: Output 1843 had 8 clips and a 49.087s VO/requested window,
+    # but equal-beats stopped at ~37.87s and entered an impossible retry loop.
+    beats = [0.5341 + index * 0.4644 for index in range(80)]
+    plan = build_timeline(
+        beats_in_window=beats,
+        clip_count=8,
+        duration_seconds=49.087,
+        fps=30,
+        rules={"strategy": "equal_beats"},
+        transition={"type": "fade", "duration_frames": 12},
+        voiceover_end_seconds=49.087,
+    )
+    assert plan["duration_seconds"] >= 49.087
+    assert plan["duration_frames"] >= 1473
+    assert sum(clip["duration_frames"] for clip in plan["clips"]) == plan["duration_frames"]
+    assert plan["metadata"]["duration_guard_applied"] is True
+    assert plan["metadata"]["strategy"] == "equal_beats_duration_guard"

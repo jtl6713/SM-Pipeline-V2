@@ -19,7 +19,7 @@ APP_PORT = int(os.environ.get("PORT", "3336"))
 HOST = os.environ.get("HOST", "127.0.0.1")
 WORK_DIR = Path(os.environ.get("WORK_DIR", "work")).resolve()
 WORK_DIR.mkdir(parents=True, exist_ok=True)
-VERSION = "2026-08-30-timing-engine"
+VERSION = "2026-10-07-voiceover-duration-guard"
 
 app = FastAPI(title="SM Pipeline V2 Timing Engine", version=VERSION)
 

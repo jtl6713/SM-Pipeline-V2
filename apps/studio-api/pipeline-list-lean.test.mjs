@@ -15,8 +15,8 @@ test("Pipeline /api/outputs list stays lean and non-blocking", async () => {
   assert.doesNotMatch(listFields, /"Selected_Assets_JSON"/);
   assert.doesNotMatch(listFields, /"Creative_Render_Manifest_JSON"/);
   assert.match(worker, /Return the Pipeline table immediately/);
-  assert.match(worker, /version: "0.10.467-promotion-reconcile"/);
-  assert.match(app, /BUILD_ID = "item4-0.6.519-mae-28-day-schedule"/);
+  assert.match(worker, /version: "0.10.468-feed-post-timeline"/);
+  assert.match(app, /BUILD_ID = "item4-0.6.520-feed-post-timeline"/);
   assert.match(app, /API_TRANSIENT_RETRY_MAX = 3/);
   assert.match(app, /api\("\/api\/health", \{ timeoutMs: 8000, retries: 1 \}/);
   assert.match(app, /api\("\/api\/outputs\?limit=250", \{ timeoutMs: 20000, retries: 2 \}/);

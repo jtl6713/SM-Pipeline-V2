@@ -151,7 +151,7 @@ def test_music_and_window_helpers():
     assert video_rules["max_clips"] == 60
 
 
-def test_analysis_window_clamps_voiceover_to_owner_duration():
+def test_analysis_window_never_clamps_below_voiceover_plus_tail():
     output = {
         "fields": {
             "Studio_Effective_Video_Duration_Seconds": 12,

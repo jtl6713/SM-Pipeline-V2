@@ -1,7 +1,10 @@
+from datetime import datetime, timezone
+
 from stages.registry import STAGE_NAMES, is_implemented
 from yt.eligibility import (
     package_source_url,
     upload_source_url,
+    youtube_handoff_due,
     yt0_eligibility_reason,
     ytp1_eligibility_reason,
     yts1_eligibility_reason,
@@ -90,6 +93,35 @@ def test_ytp1_and_poll_gates():
     assert yts3_eligibility_reason(short, require_native_cover=False) is None
     short["fields"]["YouTube_Thumbnail_Status"] = "Uploaded"
     assert yts3_eligibility_reason(short) is None
+
+
+def test_youtube_handoff_waits_until_six_hours_before_publish():
+    scheduled = _record(
+        Platform="YouTube",
+        YouTube_Stage="YT1",
+        Publish_Asset_URL="https://media.chicagoshining.com/publish/platform-output-375/file.mp4",
+        Studio_Scheduled_At="2026-10-08T18:00:00.000Z",
+    )
+    assert youtube_handoff_due(scheduled, now=datetime(2026, 10, 8, 11, 59, tzinfo=timezone.utc)) is False
+    assert youtube_handoff_due(scheduled, now=datetime(2026, 10, 8, 12, 0, tzinfo=timezone.utc)) is True
+
+    # Once YTP1 is invoked before the window, it must not create a YouTube upload job.
+    # Use the live clock only for a deliberately far-future fixture.
+    far_future = _record(
+        Platform="YouTube",
+        YouTube_Stage="YT1",
+        Publish_Asset_URL="https://media.chicagoshining.com/publish/platform-output-375/file.mp4",
+        Studio_Scheduled_At="2099-10-08T18:00:00.000Z",
+    )
+    assert ytp1_eligibility_reason(far_future) == "youtube_handoff_not_due"
+
+    # Unscheduled/immediate YouTube outputs preserve the existing immediate handoff behavior.
+    immediate = _record(
+        Platform="YouTube",
+        YouTube_Stage="YT1",
+        Publish_Asset_URL="https://media.chicagoshining.com/publish/platform-output-375/file.mp4",
+    )
+    assert youtube_handoff_due(immediate, now=datetime(2026, 10, 8, 1, 0, tzinfo=timezone.utc)) is True
 
 
 def test_youtube_thumbnail_publish_defaults_off_except_native_covers():

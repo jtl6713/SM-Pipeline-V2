@@ -94,7 +94,7 @@ FINAL SELF-CHECK BEFORE RETURNING
 - Every image_prompt asks for no text or logos of any kind.
 - slide_voiceovers.length equals TOTAL SLIDE COUNT, in slide order.
 - voiceover_script is the spoken lines joined in that same order.
-- post_caption names all TOTAL SLIDE COUNT things using real photo/place names (never Photo N placeholders), is 500 characters or fewer, and contains no hashtags.
+- post_caption is natural audience-facing prose, contains no filenames/asset names/internal media identifiers, is 500 characters or fewer, and contains no hashtags.
 - hashtags contains 8 to 12 space separated tags.
 - Output is valid JSON only."""
 
