@@ -4238,7 +4238,7 @@
     pacing: "normal",
     fit: "smart_crop",
     beat_sync: "on",
-    ai_motion: "off",
+    ai_motion: "on",
   });
 
   const PRODUCTION_RENDER_PRESETS = Object.freeze({
