@@ -330,3 +330,8 @@
 }
 .all-profiles-table .all-profiles-platform-row .all-profiles-scheduled-col:first-child{border-left:1px solid rgba(1,37,89,.14)}
 .all-profiles-table .all-profiles-platform-row .all-profiles-scheduled-col:last-child{border-right:1px solid rgba(1,37,89,.14)}
+
+
+/* 0.6.528: actionable All Profiles operational counts */
+.overview-action-count{appearance:none;border:0;background:transparent;color:inherit;font:inherit;font-weight:800;text-decoration:underline;text-decoration-thickness:1px;text-underline-offset:3px;cursor:pointer;padding:3px 10px;border-radius:999px;min-width:34px}
+.overview-action-count:hover,.overview-action-count:focus-visible{background:rgba(1,37,89,.09);outline:2px solid rgba(1,37,89,.24);outline-offset:1px}
