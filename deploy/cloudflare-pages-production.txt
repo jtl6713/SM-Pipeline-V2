@@ -59,3 +59,5 @@ Deploy Studio UI 0.6.521-compact-start-launcher. Reduce Start a post launcher he
 Deploy Studio UI 0.6.524-youtube-private-count. Global all-profiles scheduled counts now keep YouTube private/unlisted uploads in the non-public count until YouTube reports them public. Triggered 2026-10-08.
 2026-10-08 verified deploy trigger: Studio UI 0.6.524 via deploy-studio-pages-production workflow; Rockefeller NYC visibility correction.
 2026-10-08 PR merge deploy trigger: Studio UI 0.6.524 Cloudflare Pages production.
+
+Deploy Studio UI 0.6.525-timeline-padding. Add consistent left/right inset to Ideas Create VO Timeline meta and scene preview. Triggered 2026-10-08.
