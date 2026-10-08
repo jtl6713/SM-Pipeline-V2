@@ -11,13 +11,13 @@ const js = fs.readFileSync(path.join(here, "assets/engagement-1008.js"), "utf8")
 const css = fs.readFileSync(path.join(here, "assets/engagement-1008.css"), "utf8");
 const matrix = fs.readFileSync(path.join(here, "../../docs/engagement-capability-matrix.md"), "utf8");
 
-test("Engagement nav page and assets ship with UI 0.6.531", () => {
+test("Engagement nav page and assets ship with UI 0.6.532", () => {
   assert.match(html, /data-page="engagement"/);
   assert.match(html, /id="page-engagement"/);
-  assert.match(html, /engagement-1008\.js\?v=0\.6\.531-engagement/);
-  assert.match(html, /engagement-1008\.css\?v=0\.6\.531-engagement/);
-  assert.match(html, /UI build 0\.6\.531/);
-  assert.match(app, /BUILD_ID = "item4-0\.6\.531-engagement"/);
+  assert.match(html, /engagement-1008\.js\?v=0\.6\.532-clip-scene-overview/);
+  assert.match(html, /engagement-1008\.css\?v=0\.6\.532-clip-scene-overview/);
+  assert.match(html, /UI build 0\.6\.532/);
+  assert.match(app, /BUILD_ID = "item4-0\.6\.532-clip-scene-overview"/);
   assert.match(app, /page === "engagement"/);
   assert.match(app, /StudioEngagement/);
 });

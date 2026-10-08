@@ -1,4 +1,4 @@
-/* Engagement module — Studio 0.6.531 */
+/* Engagement module — Studio 0.6.532 */
 .engagement-heading { gap: 1rem; }
 .engagement-heading-actions { display: flex; flex-wrap: wrap; gap: 0.75rem; align-items: end; }
 .engagement-status { min-height: 1.25rem; margin: 0.5rem 0 1rem; color: var(--muted, #5b6570); }
