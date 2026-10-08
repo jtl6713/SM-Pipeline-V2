@@ -38,11 +38,20 @@ jobs:
           jq -c '[.result[]? | {id, url, created_on, aliases, is_skipped, deployment_trigger:(.deployment_trigger.metadata.commit_hash // null)}]' /tmp/deployments.json
           ZONE_ID=$(curl -fsS "https://api.cloudflare.com/client/v4/zones?name=chicagoshining.com" -H "$AUTH" | jq -r '.result[0].id')
           echo "ZONE_ID=$ZONE_ID"
-          curl -fsS "https://api.cloudflare.com/client/v4/zones/$ZONE_ID/workers/routes" -H "$AUTH" -o /tmp/routes.json
-          echo 'WORKER_ROUTES'
-          jq -c '[.result[]? | {id, pattern, script}]' /tmp/routes.json
-          curl -fsS "https://api.cloudflare.com/client/v4/zones/$ZONE_ID/dns_records?name=studio.chicagoshining.com" -H "$AUTH" -o /tmp/dns.json || true
-          echo 'DNS_STUDIO'
+          # Token may lack Workers Routes / Zone DNS / Cache Purge. Log and continue —
+          # this workflow is diagnostic; path-rename deploy verify is the ship gate.
+          ROUTES_HTTP=$(curl -sS -o /tmp/routes.json -w '%{http_code}' \
+            "https://api.cloudflare.com/client/v4/zones/$ZONE_ID/workers/routes" -H "$AUTH" || true)
+          echo "WORKER_ROUTES_HTTP=$ROUTES_HTTP"
+          if [[ "$ROUTES_HTTP" == "200" ]]; then
+            jq -c '[.result[]? | {id, pattern, script}]' /tmp/routes.json
+          else
+            echo "::warning::Workers routes lookup HTTP $ROUTES_HTTP (token likely missing Workers Routes read)."
+            jq -c '{success:(.success // false), errors:(.errors // [])}' /tmp/routes.json 2>/dev/null || true
+          fi
+          DNS_HTTP=$(curl -sS -o /tmp/dns.json -w '%{http_code}' \
+            "https://api.cloudflare.com/client/v4/zones/$ZONE_ID/dns_records?name=studio.chicagoshining.com" -H "$AUTH" || true)
+          echo "DNS_STUDIO_HTTP=$DNS_HTTP"
           jq -c '[.result[]? | {type, name, content, proxied}]' /tmp/dns.json 2>/dev/null || echo 'dns_unavailable'
           for url in \
             'https://chicagoshining-studio.pages.dev/' \
@@ -56,6 +65,9 @@ jobs:
           done
           curl -sS -X POST "https://api.cloudflare.com/client/v4/zones/$ZONE_ID/purge_cache" \
             -H "$AUTH" -H "Content-Type: application/json" \
-            --data '{"hosts":["studio.chicagoshining.com"]}' -o /tmp/purge.json
+            --data '{"hosts":["studio.chicagoshining.com"]}' -o /tmp/purge.json || true
           echo 'PURGE'
           jq -c '{success:(.success // false), errors:(.errors // []), result:(.result // null)}' /tmp/purge.json
+          if ! jq -e '.success == true' /tmp/purge.json >/dev/null 2>&1; then
+            echo "::warning::Cache purge did not succeed (token likely missing Zone.Cache Purge). Rely on asset path rename."
+          fi
