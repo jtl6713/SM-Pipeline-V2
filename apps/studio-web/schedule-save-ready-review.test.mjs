@@ -5,14 +5,14 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-const app = fs.readFileSync(path.join(here, "assets/app-item4-0625.js"), "utf8");
+const app = fs.readFileSync(path.join(here, "assets/app-item4-1008.js"), "utf8");
 const html = fs.readFileSync(path.join(here, "index.html"), "utf8");
 const worker = fs.readFileSync(path.join(here, "../studio-api/worker.js"), "utf8");
 
 test("UI enables Save schedule for Ready for Review (Output 1795)", () => {
-  assert.match(app, /BUILD_ID = "item4-0\.6\.533-ready-for-render"/);
-  assert.match(html, /UI build 0\.6\.533/);
-  assert.match(html, /app-item4-0625\.js\?v=0\.6\.533-ready-for-render/);
+  assert.match(app, /BUILD_ID = "item4-0\.6\.534-pages-path-bust"/);
+  assert.match(html, /UI build 0\.6\.534/);
+  assert.match(html, /app-item4-1008\.js\?v=0\.6\.534-pages-path-bust/);
   // setCreativeBusy must gate Save on creativeCanSetSchedule, not only approved reschedule.
   assert.match(
     app,

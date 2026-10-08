@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 const here = path.dirname(fileURLToPath(import.meta.url));
 const html = fs.readFileSync(path.join(here, "index.html"), "utf8");
 const config = fs.readFileSync(path.join(here, "assets", "config-0621.js"), "utf8");
-const app = fs.readFileSync(path.join(here, "assets", "app-item4-0625.js"), "utf8");
+const app = fs.readFileSync(path.join(here, "assets", "app-item4-1008.js"), "utf8");
 
 test("Operations copy uses Quality Agent as the operator-facing umbrella", () => {
   assert.match(html, />Quality Agent</);

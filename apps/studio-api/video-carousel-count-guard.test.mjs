@@ -18,7 +18,7 @@ test("video Production requests ignore irrelevant carousel count validation", as
 });
 
 test("Studio UI does not derive carousel slide count from source assets for video", async () => {
-  const source = await readFile(path.join(here, "..", "studio-web", "assets", "app-item4-0625.js"), "utf8");
+  const source = await readFile(path.join(here, "..", "studio-web", "assets", "app-item4-1008.js"), "utf8");
   const start = source.indexOf("function productionRequestPayload");
   const end = source.indexOf("function mergeProductionRequestRecord", start);
   assert.ok(start >= 0 && end > start);

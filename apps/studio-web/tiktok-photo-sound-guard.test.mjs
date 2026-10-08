@@ -5,12 +5,12 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-const app = fs.readFileSync(path.join(here, "assets/app-item4-0625.js"), "utf8");
+const app = fs.readFileSync(path.join(here, "assets/app-item4-1008.js"), "utf8");
 const html = fs.readFileSync(path.join(here, "index.html"), "utf8");
 const css = fs.readFileSync(path.join(here, "assets/styles-phase7-0621.css"), "utf8");
 
 test("TikTok photo posts require sound confirmation before Studio completion", () => {
-  assert.match(app, /item4-0\.6\.533-ready-for-render/);
+  assert.match(app, /item4-0\.6\.534-pages-path-bust/);
   assert.match(app, /function tiktokPhotoSoundRequired\(/);
   assert.match(app, /Add a sound in TikTok before publishing this photo carousel/);
   assert.match(app, /music\?\.focus\(\)/);

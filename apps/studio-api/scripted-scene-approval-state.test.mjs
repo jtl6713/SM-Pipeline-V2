@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const worker = fs.readFileSync(path.join(here, "worker.js"), "utf8");
-const app = fs.readFileSync(path.join(here, "../studio-web/assets/app-item4-0625.js"), "utf8");
+const app = fs.readFileSync(path.join(here, "../studio-web/assets/app-item4-1008.js"), "utf8");
 
 test("bridge preflight treats an unassigned scripted scene as not ready", () => {
   const start = worker.indexOf("async function item4SourceToProductionBridgePreflight");

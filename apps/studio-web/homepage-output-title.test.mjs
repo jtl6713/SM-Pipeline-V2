@@ -5,7 +5,7 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-const app = fs.readFileSync(path.join(here, "assets", "app-item4-0625.js"), "utf8");
+const app = fs.readFileSync(path.join(here, "assets", "app-item4-1008.js"), "utf8");
 const html = fs.readFileSync(path.join(here, "index.html"), "utf8");
 
 function pipelineOutputListTitle(record) {
@@ -32,7 +32,7 @@ test("live Studio JS renders output title in the recent-outputs list", () => {
   assert.match(app, /title-cell">\$\{escapeHtml\(pipelineOutputListTitle\(r\)\)\}/);
   const build = app.match(/BUILD_ID = "item4-([^"]+)"/)?.[1];
   assert.ok(build);
-  assert.match(html, new RegExp(`app-item4-0625\\.js\\?v=${build.replace(/[.*+?^${}()|[\\]\\]/g, "\\$&")}`));
+  assert.match(html, new RegExp(`app-item4-1008\\.js\\?v=${build.replace(/[.*+?^${}()|[\\]\\]/g, "\\$&")}`));
 });
 
 test("creative editor heading shows platform, output number, and title with bullets", () => {
@@ -171,7 +171,7 @@ test("Home metric cards use count tones and Airtable-safe polling", () => {
   const build = app.match(/BUILD_ID = "item4-([^"]+)"/)?.[1];
   assert.ok(build);
   const escaped = build.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  assert.match(html, new RegExp(`app-item4-0625\\.js\\?v=${escaped}`));
+  assert.match(html, new RegExp(`app-item4-1008\\.js\\?v=${escaped}`));
   assert.match(html, new RegExp(`styles-phase7-0621\\.css\\?v=${escaped}`));
   assert.match(html, new RegExp(`timed-script\\.js\\?v=${escaped}`));
 });

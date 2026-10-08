@@ -2,12 +2,12 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import test from "node:test";
 
-const app = fs.readFileSync(new URL("./assets/app-item4-0625.js", import.meta.url), "utf8");
+const app = fs.readFileSync(new URL("./assets/app-item4-1008.js", import.meta.url), "utf8");
 const html = fs.readFileSync(new URL("./index.html", import.meta.url), "utf8");
 const css = fs.readFileSync(new URL("./assets/styles-phase7-0621.css", import.meta.url), "utf8");
 
 test("Rendering timed-script scenes can open a swap-still library dialog", () => {
-  assert.match(app, /BUILD_ID = "item4-0\.6\.533-ready-for-render"/);
+  assert.match(app, /BUILD_ID = "item4-0\.6\.534-pages-path-bust"/);
   assert.match(app, /function openTimedScriptSwapStill\(/);
   assert.match(app, /function applyTimedScriptSwapStill\(/);
   assert.match(app, /function loadSwapStillLibrary\(/);
@@ -24,8 +24,8 @@ test("Rendering timed-script scenes can open a swap-still library dialog", () =>
   assert.match(html, /id="prSwapStillGrid"/);
   assert.match(html, /id="prSwapStillApply"/);
   assert.match(html, /Swap still/);
-  assert.match(html, /UI build 0\.6\.533/);
-  assert.match(html, /app-item4-0625\.js\?v=0\.6\.533-ready-for-render/);
+  assert.match(html, /UI build 0\.6\.534/);
+  assert.match(html, /app-item4-1008\.js\?v=0\.6\.534-pages-path-bust/);
   assert.match(css, /\.swap-still-dialog/);
   assert.match(css, /\.timed-script-scene-thumb:hover/);
 });

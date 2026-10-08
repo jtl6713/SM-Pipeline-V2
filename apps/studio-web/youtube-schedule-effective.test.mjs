@@ -5,7 +5,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-const app = fs.readFileSync(path.join(here, "assets/app-item4-0625.js"), "utf8");
+const app = fs.readFileSync(path.join(here, "assets/app-item4-1008.js"), "utf8");
 const html = fs.readFileSync(path.join(here, "index.html"), "utf8");
 
 test("UI prefers Studio_Scheduled_At over occupancy-bumped Scheduled_Post_Date", () => {
@@ -28,5 +28,5 @@ test("ops schedule form locks the exact operator time", () => {
 test("build id and cache bust for yt schedule thumb handoff", () => {
   const build = app.match(/BUILD_ID = "item4-([^"]+)"/)?.[1];
   assert.ok(build);
-  assert.ok(html.includes(`/assets/app-item4-0625.js?v=${build}`));
+  assert.ok(html.includes(`/assets/app-item4-1008.js?v=${build}`));
 });

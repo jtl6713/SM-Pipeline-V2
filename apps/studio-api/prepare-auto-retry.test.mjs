@@ -9,7 +9,7 @@ import { QUALITY_CHECKS } from "./quality-checks.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const worker = fs.readFileSync(path.join(here, "worker.js"), "utf8");
-const app = fs.readFileSync(path.join(here, "../studio-web/assets/app-item4-0625.js"), "utf8");
+const app = fs.readFileSync(path.join(here, "../studio-web/assets/app-item4-1008.js"), "utf8");
 
 test("Quality Agent classifies Preparing and Error variant gaps for worker heal", () => {
   const preparing = classifyPreparingGap({ id: "recPrep1", studio_variant_status: "Preparing" });
@@ -44,5 +44,5 @@ test("Production UI auto-retries prepare when the poll window expires", () => {
   assert.match(app, /item4NextVariantAutoRetry/);
   assert.match(app, /prepareItem4Variants\(\{ autoRetry: true \}\)/);
   assert.match(app, /Automatic retry \$\{item4VariantAutoRetries\}\/\$\{ITEM4_VARIANT_AUTO_RETRIES\}/);
-  assert.match(app, /BUILD_ID = "item4-0.6.533-ready-for-render"/);
+  assert.match(app, /BUILD_ID = "item4-0.6.534-pages-path-bust"/);
 });

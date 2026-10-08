@@ -57,7 +57,7 @@ test("platform abbreviations are stable", () => {
 test("Pipeline schedule overview defaults collapsed", () => {
   const here = path.dirname(fileURLToPath(import.meta.url));
   const html = fs.readFileSync(path.join(here, "index.html"), "utf8");
-  const app = fs.readFileSync(path.join(here, "assets", "app-item4-0625.js"), "utf8");
+  const app = fs.readFileSync(path.join(here, "assets", "app-item4-1008.js"), "utf8");
   assert.match(html, /pipeline-schedule-overview pipeline-schedule-collapsed/);
   assert.match(html, /id="pipelineScheduleGridToggle" aria-expanded="false"[^>]*>Show calendar<\/button>/);
   assert.match(app, /let pipelineScheduleGridOpen = false/);
@@ -66,7 +66,7 @@ test("Pipeline schedule overview defaults collapsed", () => {
 
 test("manual schedule overrides mark dirty then autosave on change/blur/Enter", () => {
   const here = path.dirname(fileURLToPath(import.meta.url));
-  const app = fs.readFileSync(path.join(here, "assets", "app-item4-0625.js"), "utf8");
+  const app = fs.readFileSync(path.join(here, "assets", "app-item4-1008.js"), "utf8");
   const html = fs.readFileSync(path.join(here, "index.html"), "utf8");
   assert.match(app, /manual_schedule_override:\s*true/);
   assert.match(app, /pipelineScheduleDirty\.add\(id\)/);
@@ -81,14 +81,14 @@ test("manual schedule overrides mark dirty then autosave on change/blur/Enter", 
 
 test("automatic scheduling uses wider weekly spacing", () => {
   const here = path.dirname(fileURLToPath(import.meta.url));
-  const app = fs.readFileSync(path.join(here, "assets", "app-item4-0625.js"), "utf8");
+  const app = fs.readFileSync(path.join(here, "assets", "app-item4-1008.js"), "utf8");
   assert.match(app, /PIPELINE_SCHEDULE_GAP_MS = 3 \* 60 \* 60 \* 1000/);
   assert.match(app, /spread across the week/);
 });
 
 test("Pipeline occupancy is platform-wide except Stories may stack", () => {
   const here = path.dirname(fileURLToPath(import.meta.url));
-  const app = fs.readFileSync(path.join(here, "assets", "app-item4-0625.js"), "utf8");
+  const app = fs.readFileSync(path.join(here, "assets", "app-item4-1008.js"), "utf8");
   assert.match(app, /function pipelineScheduleIsStory\(record\)/);
   assert.match(app, /\$\{platform\}::story:\$\{id\}/);
   assert.match(app, /TikTok Video and Slideshow cannot both take 5:30/);
@@ -101,7 +101,7 @@ test("Pipeline occupancy is platform-wide except Stories may stack", () => {
 
 test("Pipeline calendar supports drag/drop scheduling with full output identity tooltips", () => {
   const here = path.dirname(fileURLToPath(import.meta.url));
-  const app = fs.readFileSync(path.join(here, "assets", "app-item4-0625.js"), "utf8");
+  const app = fs.readFileSync(path.join(here, "assets", "app-item4-1008.js"), "utf8");
   const html = fs.readFileSync(path.join(here, "index.html"), "utf8");
   assert.match(html, /Drag-and-drop publishing calendar/);
   assert.match(html, /id="pipelineScheduleGridMessage"[^>]*aria-live="polite"/);
@@ -120,7 +120,7 @@ test("Pipeline calendar supports drag/drop scheduling with full output identity 
 test("platform legend checkboxes filter scheduled bubbles and ready tray without changing saved schedules", () => {
   const here = path.dirname(fileURLToPath(import.meta.url));
   const html = fs.readFileSync(path.join(here, "index.html"), "utf8");
-  const app = fs.readFileSync(path.join(here, "assets", "app-item4-0625.js"), "utf8");
+  const app = fs.readFileSync(path.join(here, "assets", "app-item4-1008.js"), "utf8");
   assert.match(html, /data-pipeline-schedule-platform-filter="instagram" checked/);
   assert.match(html, /data-pipeline-schedule-platform-filter="facebook" checked/);
   assert.match(html, /data-pipeline-schedule-platform-filter="tiktok" checked/);
@@ -143,7 +143,7 @@ test("30-minute schedule grid exposes slot helpers", () => {
 
 test("default schedule suggestions start off, clear on untick, and do not hide ready outputs from the tray", () => {
   const here = path.dirname(fileURLToPath(import.meta.url));
-  const app = fs.readFileSync(path.join(here, "assets", "app-item4-0625.js"), "utf8");
+  const app = fs.readFileSync(path.join(here, "assets", "app-item4-1008.js"), "utf8");
   // Header toggle retired: restore is a no-op; intelligent rolling-14-day scheduling stays on.
   assert.match(app, /function restorePipelineUseDefaultSchedules\(\) \{\s*\/\/ Header toggle retired/);
   assert.match(app, /function clearDefaultSchedulesFromUnapprovedRows/);
@@ -175,7 +175,7 @@ test("platform colors are visually distinct and the ready tray stays visible whi
 
 test("global Pipeline calendar navigates across rolling seven-day windows", () => {
   const here = path.dirname(fileURLToPath(import.meta.url));
-  const app = fs.readFileSync(path.join(here, "assets", "app-item4-0625.js"), "utf8");
+  const app = fs.readFileSync(path.join(here, "assets", "app-item4-1008.js"), "utf8");
   const html = fs.readFileSync(path.join(here, "index.html"), "utf8");
   const css = fs.readFileSync(path.join(here, "assets", "styles-phase7-0621.css"), "utf8");
   assert.match(app, /let pipelineScheduleGridAnchorDate = null/);

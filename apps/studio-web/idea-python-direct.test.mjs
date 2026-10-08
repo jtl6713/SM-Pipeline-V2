@@ -6,7 +6,7 @@ import path from "node:path";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const workerPath = path.join(here, "..", "studio-api", "worker.js");
-const appPath = path.join(here, "assets", "app-item4-0625.js");
+const appPath = path.join(here, "assets", "app-item4-1008.js");
 
 test("Studio idea generation routes directly to Python I1", async () => {
   const source = await readFile(workerPath, "utf8");

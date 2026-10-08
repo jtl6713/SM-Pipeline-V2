@@ -5,7 +5,7 @@ import fs from "node:fs";
 globalThis.window = globalThis;
 await import("./assets/ez-plan.js");
 const plan = globalThis.ChicagoShiningEzPlan;
-const app = fs.readFileSync(new URL("./assets/app-item4-0625.js", import.meta.url), "utf8");
+const app = fs.readFileSync(new URL("./assets/app-item4-1008.js", import.meta.url), "utf8");
 
 function localParts(iso, timeZone) {
   const parts = new Intl.DateTimeFormat("en-US", {

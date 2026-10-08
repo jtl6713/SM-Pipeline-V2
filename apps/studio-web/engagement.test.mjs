@@ -6,18 +6,18 @@ import { fileURLToPath } from "node:url";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const html = fs.readFileSync(path.join(here, "index.html"), "utf8");
-const app = fs.readFileSync(path.join(here, "assets/app-item4-0625.js"), "utf8");
+const app = fs.readFileSync(path.join(here, "assets/app-item4-1008.js"), "utf8");
 const js = fs.readFileSync(path.join(here, "assets/engagement-1008.js"), "utf8");
 const css = fs.readFileSync(path.join(here, "assets/engagement-1008.css"), "utf8");
 const matrix = fs.readFileSync(path.join(here, "../../docs/engagement-capability-matrix.md"), "utf8");
 
-test("Engagement nav page and assets ship with UI 0.6.533", () => {
+test("Engagement nav page and assets ship with UI 0.6.534", () => {
   assert.match(html, /data-page="engagement"/);
   assert.match(html, /id="page-engagement"/);
-  assert.match(html, /engagement-1008\.js\?v=0\.6\.533-ready-for-render/);
-  assert.match(html, /engagement-1008\.css\?v=0\.6\.533-ready-for-render/);
-  assert.match(html, /UI build 0\.6\.533/);
-  assert.match(app, /BUILD_ID = "item4-0\.6\.533-ready-for-render"/);
+  assert.match(html, /engagement-1008\.js\?v=0\.6\.534-pages-path-bust/);
+  assert.match(html, /engagement-1008\.css\?v=0\.6\.534-pages-path-bust/);
+  assert.match(html, /UI build 0\.6\.534/);
+  assert.match(app, /BUILD_ID = "item4-0\.6\.534-pages-path-bust"/);
   assert.match(app, /page === "engagement"/);
   assert.match(app, /StudioEngagement/);
 });

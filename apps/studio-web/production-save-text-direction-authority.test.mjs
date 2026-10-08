@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 import path from "node:path";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-const appPath = path.join(here, "assets", "app-item4-0625.js");
+const appPath = path.join(here, "assets", "app-item4-1008.js");
 
 test("Production Save keeps just-saved title caption and script authoritative through output sync", async () => {
   const source = await readFile(appPath, "utf8");

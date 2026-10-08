@@ -289,11 +289,23 @@ jobs:
             "$CUSTOM_URL$EXPECTED_DENSITY_CSS_URL" || true)
           test "$CUSTOM_CSS_CODE" = "200"
           require_match "HOME_DENSITY_0_6_521" /tmp/custom-home-density.css "custom-domain density marker"
-          CUSTOM_APP_CODE=$(curl -sS \
-            "${ACCESS_HEADERS[@]}" \
-            -o /tmp/custom-app.js \
-            -w '%{http_code}' \
-            "$CUSTOM_URL$EXPECTED_JS_URL" || true)
-          test "$CUSTOM_APP_CODE" = "200"
+          # Path renames are the hard cache bust; still retry briefly because the
+          # custom-domain alias can lag pages.dev by a few seconds after deploy.
+          CUSTOM_APP_OK=0
+          for attempt in 1 2 3 4 5 6; do
+            CUSTOM_APP_CODE=$(curl -sS \
+              "${ACCESS_HEADERS[@]}" \
+              -o /tmp/custom-app.js \
+              -w '%{http_code}' \
+              "$CUSTOM_URL$EXPECTED_JS_URL" || true)
+            if [[ "$CUSTOM_APP_CODE" == "200" ]] && grep -Fq "$EXPECTED_BUILD_ID" /tmp/custom-app.js; then
+              CUSTOM_APP_OK=1
+              echo "custom_domain_app_attempt=$attempt http=$CUSTOM_APP_CODE build=ok"
+              break
+            fi
+            echo "custom_domain_app_attempt=$attempt http=$CUSTOM_APP_CODE build=miss"
+            sleep 15
+          done
+          test "$CUSTOM_APP_OK" = "1"
           require_match "$EXPECTED_BUILD_ID" /tmp/custom-app.js "custom-domain BUILD_ID"
           echo "custom_domain_content_verify=PASS"

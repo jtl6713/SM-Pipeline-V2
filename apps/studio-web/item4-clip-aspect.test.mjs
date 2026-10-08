@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 import path from "node:path";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-const appPath = path.join(here, "assets", "app-item4-0625.js");
+const appPath = path.join(here, "assets", "app-item4-1008.js");
 const cssPath = path.join(here, "assets", "styles-phase7-0621.css");
 
 test("Production clip frames preserve native video aspect ratio", async () => {
