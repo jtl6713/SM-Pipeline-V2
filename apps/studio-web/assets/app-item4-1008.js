@@ -5087,7 +5087,7 @@
         : "<span>No preview</span>";
       return `<div class="production-render-frame-card" data-render-frame-asset="${escapeHtml(assetId)}">
         <div class="production-render-frame-preview">${visual}</div>
-        <div class="production-render-frame-meta"><strong>#${index + 1} · ${escapeHtml(name)}</strong><small>${escapeHtml(assetId || "Pending asset")}</small></div>
+        <div class="production-render-frame-meta"><strong>#${index + 1} · ${escapeHtml(name)}</strong><small>${escapeHtml(asset.width && asset.height ? `${asset.width} × ${asset.height} photo` : "Photo · motion override")}</small></div>
         <label class="form-field"><span>Motion</span><select data-render-frame-field="motion">
           ${productionRenderOption("", "Inherit / AI", override.motion || "")}
           ${productionRenderOption("static", "Static", override.motion || "")}
