@@ -26,7 +26,8 @@ SCENE RULES
 - suggested_visual MUST be copied exactly from the catalog's name field. Do not invent filenames. Do not describe a shot that is not in the catalog.
 - media_asset_id MUST be the matching catalog id for that name.
 - Pick assets that tell a visual story in order: hook, place, detail, movement or people if available, closer. Prefer a natural mix of photos and video clips when both are relevant; do not force video when a photo is the better match.
-- Skip assets whose names look like fill-crops, watermarks-only, or unrelated places.\n- A video clip may be longer than its scene; the renderer trims it to the measured voiceover duration. Prefer clips long enough for the spoken scene and never assume a short clip can be stretched or looped.
+- Skip assets whose names look like fill-crops, watermarks-only, or unrelated places.
+- A video clip may be longer than its scene; the renderer trims it to the measured voiceover duration. Prefer clips long enough for the spoken scene and never assume a short clip can be stretched or looped.
 
 VOICEOVER RULES
 - voiceover_text is spoken audio. No stage directions, no filename, no camera instructions, no hashtags, no emoji, no quotes around the whole line.
@@ -89,7 +90,9 @@ def _catalog_json(catalog: list[dict]) -> str:
                 "name": str(item.get("name") or "").strip(),
                 "location": str(item.get("location") or "").strip(),
                 "topic": str(item.get("topic") or "").strip(),
-                "description": str(item.get("description") or "").strip()[:180],\n                "media_type": str(item.get("media_type") or item.get("media_kind") or item.get("mime_type") or "").strip(),\n                "duration_seconds": item.get("duration_seconds") or item.get("duration") or 0,
+                "description": str(item.get("description") or "").strip()[:180],
+                "media_type": str(item.get("media_type") or item.get("media_kind") or item.get("mime_type") or "").strip(),
+                "duration_seconds": item.get("duration_seconds") or item.get("duration") or 0,
             }
         )
     return json.dumps(rows, ensure_ascii=False, indent=2)
