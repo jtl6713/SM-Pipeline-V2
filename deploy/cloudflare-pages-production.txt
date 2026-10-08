@@ -77,3 +77,5 @@ Deploy Studio UI 0.6.533-ready-for-render. Pipeline label keeps Ready for Render
 Deploy Studio UI 0.6.534-pages-path-bust. Rename app-item4-0625.js -> app-item4-1008.js so custom-domain edge cannot keep stale BUILD_ID after failed Cache Purge. Triggered 2026-10-08.
 
 2026-10-08: Deploy default AI-directed photo motion ON alongside beat sync ON in current app-item4-1008.js.
+
+2026-10-08: Deploy Production Rendering per-photo cards with descriptive photo labels instead of opaque asset GUIDs; cache-busted app-item4-1008.js.
