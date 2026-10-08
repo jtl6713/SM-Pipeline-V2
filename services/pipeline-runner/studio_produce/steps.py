@@ -5,7 +5,6 @@ import logging
 import re
 from typing import Any
 
-from a3.metadata_merge import parse_filename_metadata
 from airtable.client import AirtableClient
 from studio_produce.constants import CAROUSEL_SLIDES_TABLE, CONTENT_ITEMS_TABLE, PLATFORM_OUTPUTS_TABLE, PRODUCTION_REQUESTS_TABLE
 from item4.processor import process_drain as process_smv1_drain
@@ -414,51 +413,26 @@ def _is_placeholder_slide_label(value: str) -> bool:
     return bool(re.fullmatch(r"photo\s*\d+", str(value or "").strip(), flags=re.I))
 
 
-def _asset_display_name(asset: dict[str, Any]) -> str:
-    raw = str(
-        asset.get("name")
-        or asset.get("file_name")
-        or asset.get("filename")
-        or asset.get("asset_name")
-        or ""
-    ).strip()
-    if not raw:
-        return ""
-    phrase = str(parse_filename_metadata(raw).get("filename_phrase") or raw).strip()
-    return phrase or raw
-
-
 def _slide_captions(assets: list[dict[str, Any]], *, title: str = "") -> list[str]:
-    """Labels for SAI1 ALREADY COVERED / post-caption featuring lines.
+    """Semantic labels for SAI1 context; never expose internal asset filenames.
 
-    Prefer operator slide captions, then the real photo filename. Never invent
-    "Photo 2" when a library still already has a name — that leaked into
-    published captions (Content 329 Roosevelt Island Tram Plan).
+    Only a genuine descriptive slide caption may become public-caption context.
+    Blank captions, Photo N placeholders, and captions equal to the package
+    title are omitted instead of falling back to name/file_name/filename.
     """
     captions = []
     title_key = _normalize_label_key(title)
-    for index, asset in enumerate(assets):
+    for asset in assets:
         caption = str(asset.get("caption") or "").strip()
-        name = _asset_display_name(asset)
         caption_key = _normalize_label_key(caption)
-        # Title leaked onto the first still as caption_mode=ai text; use the
-        # photo name instead so Featuring lists stills, not the package title.
         if (
             caption
             and not _is_placeholder_slide_label(caption)
             and caption_key
             and caption_key != title_key
         ):
-            text = caption
-        elif name:
-            text = name
-        elif caption:
-            text = caption
-        else:
-            text = f"Photo {index + 1}"
-        captions.append(text)
+            captions.append(caption)
     return captions
-
 
 def ensure_slide_voiceover_timeline(
     client: AirtableClient,
