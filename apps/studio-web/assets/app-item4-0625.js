@@ -260,7 +260,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.531-engagement";
+  const BUILD_ID = "item4-0.6.532-clip-scene-overview";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -4389,12 +4389,36 @@
     return `Assign media to ${sceneLabel} in Rendering before Approve, or use “Match stills in order.” Relevant media may be reused when there are more scenes than assets. This does not publish.`;
   }
 
-  function productionStillAssets(status = item4Workspace) {
+  function productionMasterAssets(status = item4Workspace) {
     const fromStatus = Array.isArray(status?.assets) ? status.assets : [];
     const fromRequest = Array.isArray(activeProductionRequest?.studio_master_assets) ? activeProductionRequest.studio_master_assets : [];
-    const assets = (fromStatus.length ? fromStatus : fromRequest)
-      .filter((asset) => asset && !item4AssetLooksLikeVideo(asset));
-    return assets.slice().sort((a, b) => Number(a.order || 0) - Number(b.order || 0));
+    return (fromStatus.length ? fromStatus : fromRequest).filter((asset) => asset);
+  }
+
+  function productionStillAssets(status = item4Workspace) {
+    return productionMasterAssets(status)
+      .filter((asset) => !item4AssetLooksLikeVideo(asset))
+      .slice()
+      .sort((a, b) => Number(a.order || 0) - Number(b.order || 0));
+  }
+
+  function productionTimelineMedia(status = item4Workspace) {
+    return productionMasterAssets(status)
+      .slice()
+      .sort((a, b) => Number(a.order || 0) - Number(b.order || 0));
+  }
+
+  function assignOpenTimelineMedia() {
+    const api = window.StudioTimedScript;
+    const media = productionTimelineMedia();
+    if (!api || !media.length || !productionTimedScript?.segments?.length) return false;
+    const assigned = api.assignStillsInOrder(productionTimedScript, media);
+    const changed = assigned.segments.some((segment, index) =>
+      String(segment.asset_id || "") !== String(productionTimedScript.segments[index]?.asset_id || "")
+    );
+    if (!changed) return false;
+    commitTimedScript(assigned);
+    return true;
   }
 
   function syncProductionRenderUi() {
@@ -4592,7 +4616,7 @@
     }
     const segments = productionTimedScript.segments;
     const issues = api.validateTimeline(segments);
-    const assets = productionStillAssets();
+    const assets = productionTimelineMedia();
     const unresolved = segments.filter((segment) => !String(segment.asset_id || "").trim()).length;
     const fits = segments.filter((segment) => api.narrationFit(segment).status === "ready").length;
     summary.hidden = false;
@@ -4618,7 +4642,7 @@
           const preview = item4AssetPreviewUrl(asset);
           const visual = preview ? `<img src="${escapeHtml(preview)}" alt="">` : "<span>No preview</span>";
           return `<button type="button" class="timed-script-still" draggable="true" data-timed-asset="${escapeHtml(assetId)}">${visual}<small>${escapeHtml(timedScriptAssetLabel(asset, index))}</small></button>`;
-        }).join("") || '<div class="empty compact-empty">Add photos in Media, then assign them to scenes.</div>'}
+        }).join("") || '<div class="empty compact-empty">Add photos or clips in Media, then assign them to scenes.</div>'}
       </div>`;
     host.innerHTML = segments.map((segment, index) => {
       const fit = api.narrationFit(segment);
@@ -4640,7 +4664,7 @@
           <label class="form-field"><span>Start</span><input data-timed-field="start" value="${escapeHtml(api.formatClock(segment.start_seconds))}"></label>
           <label class="form-field"><span>End</span><input data-timed-field="end" value="${escapeHtml(api.formatClock(segment.end_seconds))}"></label>
           <label class="form-field timed-script-voice"><span>Voiceover</span><textarea data-timed-field="voiceover" rows="3">${escapeHtml(segment.voiceover_text || "")}</textarea></label>
-          <label class="form-field"><span>Still</span><select data-timed-field="asset">${options}</select></label>
+          <label class="form-field"><span>Media</span><select data-timed-field="asset">${options}</select></label>
           <p class="timed-script-visual"><span>Suggested visual</span> ${escapeHtml(segment.suggested_visual || "None")}</p>
           <div class="timed-script-scene-actions">
             <button type="button" class="secondary-button" data-timed-action="swap">Swap still</button>
@@ -4770,7 +4794,7 @@
         ...productionTimedScript,
         segments: (productionTimedScript?.segments || []).map((segment) => ({ ...segment, asset_id: "" })),
       };
-      commitTimedScript(api.assignStillsInOrder(cleared, productionStillAssets()));
+      commitTimedScript(api.assignStillsInOrder(cleared, productionTimelineMedia()));
     });
   }
 
@@ -5102,10 +5126,10 @@
 
   let timedScriptAssetSignature = "";
   function syncTimedScriptWithAssets() {
-    const signature = productionStillAssets().map((asset) => String(asset.id || asset.media_asset_record_id || "")).join("|");
+    const signature = productionTimelineMedia().map((asset) => String(asset.id || asset.media_asset_record_id || "")).join("|");
     if (signature === timedScriptAssetSignature) return;
     timedScriptAssetSignature = signature;
-    renderTimedScriptReview();
+    if (!assignOpenTimelineMedia()) renderTimedScriptReview();
   }
 
   function syncProductionVoBanner() {
@@ -12906,7 +12930,7 @@
 
   $("prTimedScriptApply")?.addEventListener("click", async () => {
     if (!productionTimedScriptDraft?.segments?.length || !window.StudioTimedScript) return;
-    const assigned = window.StudioTimedScript.assignStillsInOrder(productionTimedScriptDraft, productionStillAssets());
+    const assigned = window.StudioTimedScript.assignStillsInOrder(productionTimedScriptDraft, productionTimelineMedia());
     closeTimedScriptImporter();
     setProductionWorkspaceTab("rendering");
     commitTimedScript(assigned);
@@ -13444,6 +13468,7 @@
       setRequestMessage("Save the platform plan first, then click Approve again.", "error-text");
       return;
     }
+    assignOpenTimelineMedia();
     const scriptedSceneBlocker = scriptedShortMissingSceneMessage(activeProductionRequest);
     if (scriptedSceneBlocker) {
       setRequestMessage(scriptedSceneBlocker, "error-text");

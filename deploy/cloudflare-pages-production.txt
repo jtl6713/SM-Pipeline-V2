@@ -69,3 +69,5 @@ Deploy Studio UI 0.6.530-scripted-scene-media-reuse. Match stills in order now f
 
 Deploy Studio UI output detail accessibility fix 2026-10-08: incomplete render rows openable; show render state before schedule state. Preserve scheduled dates.
 Deploy Studio UI 0.6.531-engagement. Social Engagement module Stage A/B/C: discovery, AI comments, approval queue, YouTube engage endpoints, Quality Agent signatures. Triggered 2026-10-08.
+
+Deploy Studio UI 0.6.532-clip-scene-overview. Merge unshipped clip-scene assign + All Profiles clickable counts; retrigger Pages after 0.6.531 custom-domain verify lag. Triggered 2026-10-08.

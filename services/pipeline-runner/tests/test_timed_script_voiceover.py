@@ -222,6 +222,111 @@ def test_timed_script_normalizes_each_spoken_scene_before_concat(monkeypatch):
     assert measured["segments"][1]["duration_seconds"] == 4.1
 
 
+def test_quiet_spoken_scene_retries_tts_before_normalize(monkeypatch):
+    """Near-silent ElevenLabs scenes must be re-synthesized before loudnorm."""
+    timeline = parse_timed_script_markdown(
+        "| Time | Voiceover | Suggested still |\n"
+        "| --- | --- | --- |\n"
+        "| 0:00–0:05 | First scene is normal. | A |\n"
+        "| 0:05–0:10 | Second scene arrived very quiet. | B |\n"
+    )["timeline"]
+
+    synthesize_calls: list[str] = []
+    quiet_checks: list[bytes] = []
+
+    def fake_synthesize(text: str, *, voice_id: str, speed: float = 1.0) -> bytes:
+        synthesize_calls.append(text)
+        if text.startswith("Second") and synthesize_calls.count(text) < 2:
+            return b"QUIET:" + text.encode("utf-8")
+        return b"LOUD:" + text.encode("utf-8")
+
+    def fake_is_quiet(raw: bytes) -> bool:
+        quiet_checks.append(raw)
+        return raw.startswith(b"QUIET:")
+
+    def fake_probe_volume(raw: bytes) -> float | None:
+        return -22.0 if raw.startswith(b"QUIET:") else -2.0
+
+    def fake_normalize(raw: bytes, scene_index: int, text: str) -> bytes:
+        assert not raw.startswith(b"QUIET:"), "quiet take must not reach loudnorm"
+        return (b"NORM:" + raw)
+
+    monkeypatch.setattr(
+        "p2.timed_script_voiceover.probe_audio_duration_bytes",
+        lambda data: 4.0,
+    )
+    monkeypatch.setattr(
+        "p2.timed_script_voiceover.concat_mp3_bytes",
+        lambda parts: b"|".join(parts),
+    )
+
+    audio, _measured, _seconds = synthesize_timed_script_voiceover(
+        timeline,
+        voice_id="voice",
+        synthesize=fake_synthesize,
+        normalize_segment=fake_normalize,
+        is_quiet_segment=fake_is_quiet,
+        probe_segment_volume=fake_probe_volume,
+        quiet_tts_attempts=3,
+    )
+
+    assert synthesize_calls.count("Second scene arrived very quiet.") == 2
+    assert synthesize_calls.count("First scene is normal.") == 1
+    assert any(item.startswith(b"QUIET:") for item in quiet_checks)
+    assert b"NORM:LOUD:Second" in audio
+    assert b"QUIET:" not in audio
+
+
+def test_quiet_spoken_scene_keeps_loudest_attempt_when_all_quiet(monkeypatch):
+    timeline = parse_timed_script_markdown(
+        "| Time | Voiceover | Suggested still |\n"
+        "| --- | --- | --- |\n"
+        "| 0:00–0:05 | Always quiet scene. | A |\n"
+    )["timeline"]
+
+    synthesize_calls = 0
+
+    def fake_synthesize(text: str, *, voice_id: str, speed: float = 1.0) -> bytes:
+        nonlocal synthesize_calls
+        synthesize_calls += 1
+        # Later attempts are slightly louder but still under the floor.
+        return f"Q{synthesize_calls}:{text}".encode("utf-8")
+
+    def fake_is_quiet(_raw: bytes) -> bool:
+        return True
+
+    def fake_probe_volume(raw: bytes) -> float | None:
+        # Q1=-30, Q2=-25, Q3=-20 → keep attempt 3
+        label = raw.decode("utf-8").split(":", 1)[0]
+        return {
+            "Q1": -30.0,
+            "Q2": -25.0,
+            "Q3": -20.0,
+        }[label]
+
+    monkeypatch.setattr(
+        "p2.timed_script_voiceover.probe_audio_duration_bytes",
+        lambda _data: 4.5,
+    )
+    monkeypatch.setattr(
+        "p2.timed_script_voiceover.concat_mp3_bytes",
+        lambda parts: b"".join(parts),
+    )
+
+    audio, _measured, seconds = synthesize_timed_script_voiceover(
+        timeline,
+        voice_id="voice",
+        synthesize=fake_synthesize,
+        is_quiet_segment=fake_is_quiet,
+        probe_segment_volume=fake_probe_volume,
+        quiet_tts_attempts=3,
+    )
+
+    assert synthesize_calls == 3
+    assert audio.startswith(b"Q3:")
+    assert seconds == [4.5]
+
+
 def test_silent_scene_is_not_sent_to_loudness_normalizer(monkeypatch):
     from studio_produce.timed_script import timeline_from_slide_lines
 

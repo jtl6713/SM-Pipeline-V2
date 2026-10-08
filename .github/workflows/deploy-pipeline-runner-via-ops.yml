@@ -153,3 +153,6 @@ jobs:
 
 # Trigger pipeline-runner deploy for AI-only captions with no asset-name inventory
 # 2026-10-08 service_version=2026-10-08-ai-only-captions source=1149e9b9
+
+# Trigger pipeline-runner deploy for quiet timed-script TTS scene retry
+# 2026-10-08 service_version=2026-10-08-timed-vo-quiet-retry
