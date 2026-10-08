@@ -39,7 +39,7 @@
     const states = outputs.map(normalizedState);
     return {
       manual: Number(metrics.manual_action_required ?? states.filter((s) => s === "Manual Action Required").length) || 0,
-      failed: Number(metrics.failed ?? states.filter((s) => s === "Failed").length) || 0,
+      failed: Number(metrics.failed_outputs ?? metrics.failed ?? states.filter((s) => s === "Failed").length) || 0,
       approval: Number(metrics.awaiting_approval ?? states.filter((s) => s === "Awaiting Approval").length) || 0,
       ideas: Number(metrics.ideas_not_in_production ?? metrics.ideas ?? 0) || 0,
       scheduled: scheduledCounts(outputs),
@@ -94,15 +94,18 @@
     const rowHtml = (row, isTotal=false) => `<tr class="${isTotal ? "all-profiles-total" : ""}">
       <th scope="row">${esc(row.name)}</th>
       ${platformOrder.map((p)=>`<td data-label="${p}">${row.scheduled[p] || 0}</td>`).join("")}
-      <td data-label="Manual" class="overview-tone-${tone(row.manual,"manual")}">${row.manual}</td>
-      <td data-label="Failed" class="overview-tone-${tone(row.failed,"failed")}">${row.failed}</td>
-      <td data-label="Approval" class="overview-tone-${tone(row.approval,"approval")}">${row.approval}</td>
-      <td data-label="Ideas" class="overview-tone-${tone(row.ideas,"ideas")}">${row.ideas}</td>
+      <td data-label="Manual" class="overview-tone-${tone(row.manual,"manual")}">${actionCount(row, "manual", "manual action")}</td>
+      <td data-label="Failed" class="overview-tone-${tone(row.failed,"failed")}">${actionCount(row, "failed", "failed")}</td>
+      <td data-label="Approval" class="overview-tone-${tone(row.approval,"approval")}">${actionCount(row, "approval", "awaiting approval")}</td>
+      <td data-label="Ideas" class="overview-tone-${tone(row.ideas,"ideas")}">${actionCount(row, "ideas", "ideas")}</td>
     </tr>`;
     host.innerHTML = `<div class="all-profiles-heading"><div><p class="studio-hub-kicker">ALL PROFILES</p><h1>Studio overview</h1></div><button type="button" class="secondary-button" id="allProfilesRefresh">Refresh</button></div>
       <div class="all-profiles-table-wrap"><table class="all-profiles-table"><thead><tr class="all-profiles-group-row"><th rowspan="2">Profile</th><th colspan="4" class="all-profiles-scheduled-group">Scheduled posts</th><th rowspan="2">Manual action</th><th rowspan="2">Failed</th><th rowspan="2">Awaiting approval</th><th rowspan="2">Ideas</th></tr><tr class="all-profiles-platform-row">${platformOrder.map((p)=>`<th class="all-profiles-scheduled-col">${p}</th>`).join("")}</tr></thead>
       <tbody>${state.rows.map((r)=>rowHtml(r)).join("")}${rowHtml({name:"Total",...total},true)}</tbody></table></div>`;
-    document.getElementById("allProfilesRefresh")?.addEventListener("click", () => load(true));\n    host.querySelectorAll(".overview-action-count").forEach((button) => button.addEventListener("click", () => {\n      openOverviewAction(button.dataset.overviewProfile || "", button.dataset.overviewAction || "");\n    }));
+    document.getElementById("allProfilesRefresh")?.addEventListener("click", () => load(true));
+    host.querySelectorAll(".overview-action-count").forEach((button) => button.addEventListener("click", () => {
+      openOverviewAction(button.dataset.overviewProfile || "", button.dataset.overviewAction || "");
+    }));
   }
   async function load(force=false) {
     if (state.loading) return;
