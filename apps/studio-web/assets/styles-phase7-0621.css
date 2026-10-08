@@ -4575,15 +4575,12 @@ body.nav-collapsed .sidebar{
 
 
 /* Create Timeline: keep scene content aligned with the panel inset. */
-#ideaTimedScriptStatus,
 #ideaTimedScriptMeta,
-#ideaTimedScriptScenes,
-.idea-timed-script-status,
+#ideaTimedScriptTable,
 .idea-timed-script-meta,
-.idea-timed-script-scenes { box-sizing:border-box; padding-left:16px; padding-right:16px; }
-#ideaTimedScriptScenes .timed-script-scene,
-.idea-timed-script-scenes .timed-script-scene { margin-left:0; margin-right:0; }
+.idea-timed-script-table { box-sizing:border-box; padding-left:16px; padding-right:16px; }
+#ideaTimedScriptTable,.idea-timed-script-table { width:100%; margin-left:0; margin-right:0; }
 @media(max-width:760px){
-  #ideaTimedScriptStatus,#ideaTimedScriptMeta,#ideaTimedScriptScenes,
-  .idea-timed-script-status,.idea-timed-script-meta,.idea-timed-script-scenes { padding-left:12px; padding-right:12px; }
+  #ideaTimedScriptMeta,#ideaTimedScriptTable,
+  .idea-timed-script-meta,.idea-timed-script-table { padding-left:12px; padding-right:12px; }
 }
