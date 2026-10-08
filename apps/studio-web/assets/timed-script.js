@@ -344,15 +344,16 @@
     const used = new Set(normalized.segments.map((segment) => String(segment.asset_id || "").trim()).filter(Boolean));
     const remaining = ordered.filter((asset) => assetId(asset) && !used.has(assetId(asset)));
     const unresolved = normalized.segments.filter((segment) => !String(segment.asset_id || "").trim());
-    if (remaining.length && remaining.length === unresolved.length) {
-      unresolved.forEach((segment, index) => {
-        segment.asset_id = assetId(remaining[index]);
-      });
-    } else if (ordered.length && ordered.length === normalized.segments.length && !used.size) {
-      normalized.segments.forEach((segment, index) => {
-        segment.asset_id = assetId(ordered[index]);
-      });
-    }
+    let reuse = 0;
+    unresolved.forEach((segment) => {
+      let fill = remaining.shift();
+      if (!fill && ordered.length) {
+        fill = ordered[reuse % ordered.length];
+        reuse += 1;
+      }
+      if (!fill) return;
+      segment.asset_id = assetId(fill);
+    });
     return normalized;
   }
 

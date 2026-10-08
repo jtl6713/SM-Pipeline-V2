@@ -182,12 +182,19 @@ export function assignScenesToStills(scenes, stills) {
     }
     assigned.push(next);
   }
-  const remaining = (Array.isArray(stills) ? stills : []).filter((still) => !used.has(stillId(still)));
+  const remaining = (Array.isArray(stills) ? stills : []).filter((still) => stillId(still) && !used.has(stillId(still)));
   let leftover = 0;
+  let reuse = 0;
+  const reusable = (Array.isArray(stills) ? stills : []).filter((still) => stillId(still));
   return assigned.map((scene) => {
     if (scene.media_asset_id || scene.asset_id) return scene;
-    const fill = remaining[leftover];
-    leftover += 1;
+    let fill = remaining[leftover];
+    if (fill) leftover += 1;
+    if (!fill && reusable.length) {
+      fill = matchStillBySuggestedVisual(scene?.suggested_visual, reusable, { usedIds: new Set() })
+        || reusable[reuse % reusable.length];
+      reuse += 1;
+    }
     if (!fill) return scene;
     const id = stillId(fill);
     used.add(id);

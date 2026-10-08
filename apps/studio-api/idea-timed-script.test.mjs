@@ -98,6 +98,18 @@ test("assignScenesToStills matches exact filenames then fills leftovers in order
   assert.equal(assigned[2].suggested_visual, "Uptown_Bronx_entrance_sign.jpg");
 });
 
+test("assignScenesToStills reuses relevant media when scenes outnumber assets", () => {
+  const scenes = Array.from({ length: 7 }, (_, index) => ({
+    voiceover_text: `Bridge scene ${index + 1}`,
+    suggested_visual: "Chicago River bridge",
+  }));
+  const assigned = assignScenesToStills(scenes, STILLS);
+  assert.equal(assigned.length, 7);
+  assert.ok(assigned.every((scene) => scene.asset_id && scene.media_asset_id));
+  assert.equal(new Set(assigned.slice(0, 6).map((scene) => scene.asset_id)).size, 6);
+  assert.ok(STILLS.some((asset) => asset.id === assigned[6].asset_id));
+});
+
 test("buildTimelineFromScenes times scenes from spoken length with a 4 second floor", () => {
   const timeline = buildTimelineFromScenes([
     { voiceover_text: "First time on the Upper West Side subway?", suggested_visual: "UpperWestSide_72nd_platform.jpg", media_asset_id: "recWide1" },
@@ -250,7 +262,7 @@ test("Worker advertises the idea timed-script route", async () => {
   assert.match(worker, /ideaLibraryVideoFilterFormula/);
   assert.match(worker, /scripted short video discovery failed/);
   assert.match(worker, /allowVideo: true/);
-  assert.match(worker, /0\.10\.472-scripted-scene-approval-state/);
+  assert.match(worker, /0\.10\.473-scripted-scene-media-reuse/);
   const css = await readFile(path.join(here, "../studio-web/assets/styles-phase7-0621.css"), "utf8");
   assert.match(css, /#page-ideas \.page-heading\{\s*flex-wrap:wrap;/);
   assert.match(css, /#page-ideas \.heading-actions\{/);

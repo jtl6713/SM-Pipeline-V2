@@ -506,7 +506,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.472-scripted-scene-approval-state",
+          version: "0.10.473-scripted-scene-media-reuse",
           studio_mae_schedule_v1: true,
           studio_mae_28_day_schedule_v1: true,
           studio_promotion_reconcile_after_handoff_error_v1: true,
@@ -21725,7 +21725,7 @@ function scriptedShortUnassignedMessage(timeline) {
     .map((segment, index) => !String(segment?.asset_id || segment?.media_asset_id || "").trim() ? index + 1 : null)
     .filter(Boolean);
   const sceneLabel = sceneNumbers.length === 1 ? `scene ${sceneNumbers[0]}` : `scenes ${sceneNumbers.join(", ")}`;
-  return `Assign ${count === 1 ? "a photo" : "photos"} to ${sceneLabel} in Rendering before Approve, or use “Match stills in order.” This does not publish.`;
+  return `Assign media to ${sceneLabel} in Rendering before Approve, or use “Match stills in order.” Relevant media may be reused when there are more scenes than assets. This does not publish.`;
 }
 
 async function proposeScriptedShortRoute(request, env, authorization) {

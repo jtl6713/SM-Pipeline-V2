@@ -260,7 +260,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.529-scripted-scene-approval-state";
+  const BUILD_ID = "item4-0.6.530-scripted-scene-media-reuse";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -4381,7 +4381,7 @@
     const scenes = scriptedShortMissingSceneNumbers(record);
     if (!scenes.length) return "";
     const sceneLabel = scenes.length === 1 ? `scene ${scenes[0]}` : `scenes ${scenes.join(", ")}`;
-    return `Assign ${scenes.length === 1 ? "a photo" : "photos"} to ${sceneLabel} in Rendering before Approve, or use “Match stills in order.” This does not publish.`;
+    return `Assign media to ${sceneLabel} in Rendering before Approve, or use “Match stills in order.” Relevant media may be reused when there are more scenes than assets. This does not publish.`;
   }
 
   function productionStillAssets(status = item4Workspace) {
