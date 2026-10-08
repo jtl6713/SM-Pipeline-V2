@@ -68,3 +68,4 @@ Retry Studio UI 0.6.529 verification after aligning the controlled deploy check 
 Deploy Studio UI 0.6.530-scripted-scene-media-reuse. Match stills in order now fills every scene, uses each relevant asset once first, and reuses relevant media when scenes outnumber available assets. Triggered 2026-10-08.
 
 Deploy Studio UI output detail accessibility fix 2026-10-08: incomplete render rows openable; show render state before schedule state. Preserve scheduled dates.
+Deploy Studio UI 0.6.531-engagement. Social Engagement module Stage A/B/C: discovery, AI comments, approval queue, YouTube engage endpoints, Quality Agent signatures. Triggered 2026-10-08.

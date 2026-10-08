@@ -160,7 +160,8 @@ def test_analysis_window_never_clamps_below_voiceover_plus_tail():
         }
     }
     assert voiceover_end_seconds(output) == 20.0
-    assert analysis_window(output) == (0.0, 12.0)
+    # Owner duration is not allowed to cut off narration + configured tail.
+    assert analysis_window(output) == (0.0, 22.0)
 
 
 def test_analysis_window_extends_for_voiceover_without_owner_cap():

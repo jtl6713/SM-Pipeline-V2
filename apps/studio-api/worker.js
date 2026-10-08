@@ -210,6 +210,16 @@ import {
   timelineCatalogIsRelevantVideo,
   unassignedSuggestionCount,
 } from "./idea-timed-script.mjs";
+import {
+  capabilityMatrixResponse,
+  studioApplyEngagementAction,
+  studioEngagementCron,
+  studioEngagementInsights,
+  studioListEngagementRecommendations,
+  studioLoadEngagementSettings,
+  studioRunEngagementDiscovery,
+  studioSaveEngagementSettings,
+} from "./engagement-service.mjs";
 
 const JSON_HEADERS = {
   "Content-Type": "application/json; charset=UTF-8",
@@ -318,6 +328,13 @@ export default {
       const isInsightsChatRoute = url.pathname === "/api/insights/chat";
       const isInsightsPostsRoute = url.pathname === "/api/insights/posts";
       const isInsightsConnectionsRoute = url.pathname === "/api/insights/connections";
+      const isEngagementCapabilitiesRoute = url.pathname === "/api/engagement/capabilities";
+      const isEngagementSettingsRoute = url.pathname === "/api/engagement/settings";
+      const isEngagementDiscoverRoute = url.pathname === "/api/engagement/discover";
+      const isEngagementRecommendationsRoute = url.pathname === "/api/engagement/recommendations";
+      const isEngagementActionsRoute = url.pathname === "/api/engagement/actions";
+      const isEngagementInsightsRoute = url.pathname === "/api/engagement/insights";
+      const isEngagementHistoryRoute = url.pathname === "/api/engagement/history";
       const isR5DoneHookRoute = url.pathname === "/api/hooks/r5-done";
       const isRr2HookRoute = url.pathname === "/api/hooks/rr2";
       const isVoiceCatalogRoute = url.pathname === "/api/voices";
@@ -399,6 +416,9 @@ export default {
       const isInsightsSimilarTimesWrite = isInsightsSimilarTimesRoute && request.method === "POST";
       const isInsightsDiscoverWrite = isInsightsDiscoverRoute && request.method === "POST";
       const isInsightsChatWrite = isInsightsChatRoute && request.method === "POST";
+      const isEngagementSettingsWrite = isEngagementSettingsRoute && (request.method === "POST" || request.method === "PATCH");
+      const isEngagementDiscoverWrite = isEngagementDiscoverRoute && request.method === "POST";
+      const isEngagementActionsWrite = isEngagementActionsRoute && request.method === "POST";
       const allowedMethod =
         request.method === "GET" ||
         (request.method === "HEAD" && (isMusicPreviewRoute || isMediaAssetPreviewRoute || isMediaAssetStreamRoute || isPublicBrandWatermarkRoute || isOutputPreviewRoute || isVoicePreviewRoute)) ||
@@ -481,6 +501,14 @@ export default {
         (isInsightsSimilarTimesRoute && request.method === "GET") ||
         (isInsightsCaptionsRoute && request.method === "GET") ||
         (isInsightsWatchlistRoute && request.method === "GET") ||
+        isEngagementSettingsWrite ||
+        isEngagementDiscoverWrite ||
+        isEngagementActionsWrite ||
+        (isEngagementCapabilitiesRoute && request.method === "GET") ||
+        (isEngagementSettingsRoute && request.method === "GET") ||
+        (isEngagementRecommendationsRoute && request.method === "GET") ||
+        (isEngagementInsightsRoute && request.method === "GET") ||
+        (isEngagementHistoryRoute && request.method === "GET") ||
         (isR5DoneHookRoute && request.method === "POST") ||
         (isRr2HookRoute && (request.method === "GET" || request.method === "POST"));
       if (!allowedMethod) {
@@ -506,7 +534,8 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.473-scripted-scene-media-reuse",
+          version: "0.10.474-engagement",
+          studio_engagement_v1: true,
           studio_mae_schedule_v1: true,
           studio_mae_28_day_schedule_v1: true,
           studio_promotion_reconcile_after_handoff_error_v1: true,
@@ -1033,6 +1062,41 @@ export default {
         assertWriteRequest(request, env);
         requirePermission(authorization, "tenant_admin");
         return putInsightsWatchlist(request, env);
+      }
+
+      if (isEngagementCapabilitiesRoute) {
+        requireAnyPermission(authorization, ["outputs_review", "publishing_control", "tenant_admin"]);
+        return respond(request, env, capabilityMatrixResponse());
+      }
+
+      if (isEngagementSettingsRoute) {
+        requireAnyPermission(authorization, ["outputs_review", "publishing_control", "tenant_admin"]);
+        if (request.method === "GET") return getEngagementSettings(request, env, url, authorization);
+        assertWriteRequest(request, env);
+        requirePermission(authorization, "tenant_admin");
+        return putEngagementSettings(request, env, url, authorization);
+      }
+
+      if (isEngagementDiscoverRoute) {
+        requirePermission(authorization, "tenant_admin");
+        assertWriteRequest(request, env);
+        return postEngagementDiscover(request, env, url, authorization);
+      }
+
+      if (isEngagementRecommendationsRoute || isEngagementHistoryRoute) {
+        requireAnyPermission(authorization, ["outputs_review", "publishing_control", "tenant_admin"]);
+        return getEngagementRecommendations(request, env, url, authorization);
+      }
+
+      if (isEngagementActionsRoute) {
+        requireAnyPermission(authorization, ["publishing_control", "tenant_admin"]);
+        assertWriteRequest(request, env);
+        return postEngagementAction(request, env, url, authorization);
+      }
+
+      if (isEngagementInsightsRoute) {
+        requireAnyPermission(authorization, ["outputs_review", "publishing_control", "tenant_admin"]);
+        return getEngagementInsights(request, env, url, authorization);
       }
 
       if (isVoicePreviewRoute) {
@@ -1699,6 +1763,11 @@ export default {
           await studioDiscoverYoutubeChicagoCreators(env, { theme: "chicago", limit: 5, scheduled: true });
         } catch (error) {
           console.warn("insights youtube discovery cron failed", error);
+        }
+        try {
+          await studioEngagementCron(env, engagementDeps());
+        } catch (error) {
+          console.warn("engagement discovery cron failed", error);
         }
       }
       if (cadence.ingest) {
@@ -20081,6 +20150,93 @@ async function postInsightsDiscover(request, env, url, authorization) {
     force: payload.force !== false,
   });
   return respond(request, env, { ok: result.ok !== false, ...result, profile: theme });
+}
+
+function engagementThemeContextRecord(theme) {
+  const label =
+    theme === "la" ? "Los Angeles Shining"
+      : theme === "nyc" ? "New York Shining"
+        : theme === "miami" ? "Miami Shining"
+          : "ChicagoShining";
+  return { id: `engagement-theme-${theme}`, fields: { Profile_Name: label, Market_Name: label, Brand_Name: label } };
+}
+
+function engagementDeps(theme = "chicago") {
+  const contextRecord = engagementThemeContextRecord(studioNormalizeSimilarProfile(theme));
+  return {
+    studioSettingsByName,
+    studioUpsertSetting,
+    studioActivePipelineSettings: (env, names) => studioActivePipelineSettings(env, names, contextRecord),
+    airtableFetch,
+    listRecords,
+  };
+}
+
+async function resolveEngagementProfile(env, url, authorization, payload = {}) {
+  const hint = payload.profile || payload.theme || url.searchParams.get("profile") || url.searchParams.get("theme");
+  if (hint) return studioNormalizeSimilarProfile(hint);
+  try {
+    const working = await resolveWorkingContentProfile(env, authorization, requestedProfileId(url));
+    return studioThemeForProfile(working) || "chicago";
+  } catch {
+    return "chicago";
+  }
+}
+
+async function getEngagementSettings(request, env, url, authorization) {
+  const profile = await resolveEngagementProfile(env, url, authorization);
+  const settings = await studioLoadEngagementSettings(env, profile, engagementDeps(profile));
+  return respond(request, env, { ok: true, profile, settings, capabilities: capabilityMatrixResponse().matrix });
+}
+
+async function putEngagementSettings(request, env, url, authorization) {
+  let payload = {};
+  try { payload = await request.json(); } catch { throw new HttpError(400, "Request body must be valid JSON"); }
+  const profile = await resolveEngagementProfile(env, url, authorization, payload);
+  const settings = await studioSaveEngagementSettings(env, { ...payload, profile }, engagementDeps(profile));
+  return respond(request, env, { ok: true, profile, settings });
+}
+
+async function postEngagementDiscover(request, env, url, authorization) {
+  let payload = {};
+  try { payload = await request.json(); } catch { payload = {}; }
+  const profile = await resolveEngagementProfile(env, url, authorization, payload);
+  const result = await studioRunEngagementDiscovery(env, {
+    profile,
+    force: payload.force !== false,
+    scheduled: false,
+  }, engagementDeps(profile));
+  return respond(request, env, result);
+}
+
+async function getEngagementRecommendations(request, env, url, authorization) {
+  const profile = await resolveEngagementProfile(env, url, authorization);
+  const result = await studioListEngagementRecommendations(env, {
+    profile,
+    platform: url.searchParams.get("platform") || "",
+    status: url.searchParams.get("status") || "",
+  }, engagementDeps(profile));
+  return respond(request, env, result);
+}
+
+async function postEngagementAction(request, env, url, authorization) {
+  let payload = {};
+  try { payload = await request.json(); } catch { throw new HttpError(400, "Request body must be valid JSON"); }
+  const profile = await resolveEngagementProfile(env, url, authorization, payload);
+  try {
+    const result = await studioApplyEngagementAction(env, { ...payload, profile }, engagementDeps(profile));
+    return respond(request, env, result, result.ok === false && !result.unsupported && !result.duplicate ? 409 : 200);
+  } catch (error) {
+    throw new HttpError(400, error?.message || String(error));
+  }
+}
+
+async function getEngagementInsights(request, env, url, authorization) {
+  const profile = url.searchParams.get("profile")
+    ? studioNormalizeSimilarProfile(url.searchParams.get("profile"))
+    : await resolveEngagementProfile(env, url, authorization);
+  const result = await studioEngagementInsights(env, profile, engagementDeps(profile));
+  return respond(request, env, result);
 }
 
 async function studioSweepSimilarAccountTimes(env, options = {}) {

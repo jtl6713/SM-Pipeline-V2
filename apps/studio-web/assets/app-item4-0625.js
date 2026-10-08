@@ -260,7 +260,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.530-scripted-scene-media-reuse";
+  const BUILD_ID = "item4-0.6.531-engagement";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -22567,6 +22567,7 @@
     if (page === "ideas") return loadIdeas();
     if (page === "content") return loadContent();
     if (page === "outputs") return loadOutputs();
+    if (page === "engagement") return window.StudioEngagement?.load?.(false);
     if (page === "music") return loadMusic();
     if (page === "library") return loadLibrary();
     if (page === "operations") return loadOperations();
