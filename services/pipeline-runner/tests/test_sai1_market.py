@@ -34,3 +34,17 @@ def test_sai1_prompt_forbids_photo_n_placeholders_in_post_caption():
     )
     assert 'Never write placeholders such as "Photo 2"' in prompt
     assert "use those names in the Featuring line" in prompt
+
+
+def test_sai1_normalizer_strips_asset_inventory_featuring_line():
+    from sai1.processor import _normalize_themes
+
+    result = _normalize_themes({
+        "post_caption": "Featuring: Pérez Art Museum Miami 9, Pérez Art Museum Miami 10, Pérez Art Museum Miami 7\nSave this for your next stormy day in the 305.",
+        "slides": [],
+        "slide_voiceovers": [],
+        "hashtags": "#Miami",
+    }, needed=0)
+    assert "Pérez Art Museum Miami 9" not in result["post_caption"]
+    assert "Featuring:" not in result["post_caption"]
+    assert result["post_caption"] == "Save this for your next stormy day in the 305."
