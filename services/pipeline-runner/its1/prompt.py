@@ -1,19 +1,19 @@
-"""ITS1 prompt: idea + library still catalog → timed VO scenes with exact filenames."""
+"""ITS1 prompt: idea + mixed library media catalog → timed VO scenes."""
 
 from __future__ import annotations
 
-PROMPT_TEMPLATE = """You are ChicagoShining's timed-script writer for a still-image Reel / Short with spoken voiceover.
+PROMPT_TEMPLATE = """You are ChicagoShining's timed-script writer for a mixed-media Reel / Short with spoken voiceover.
 
 Return strict JSON only. No markdown. No explanations.
 
 WHAT THIS DOES
-The operator tapped Create VO timeline on an Idea. You must write a compelling spoken narration AND pick specific library stills by their exact Asset Name. The renderer shows one still per scene while that scene's voiceover plays.
+The operator tapped Create VO timeline on an Idea. You must write a compelling spoken narration AND pick specific library photos or short video clips by their exact Asset Name. The renderer shows one selected asset per scene while that scene's voiceover plays.
 
 Return exactly this structure:
 {{
   "scenes": [
     {{
-      "voiceover_text": "Spoken line for this still. Only words that will be read aloud.",
+      "voiceover_text": "Spoken line for this asset. Only words that will be read aloud.",
       "suggested_visual": "Exact Asset Name from the catalog, including the file extension if present.",
       "media_asset_id": "recXXXXXXXXXXXXXX"
     }}
@@ -21,19 +21,19 @@ Return exactly this structure:
 }}
 
 SCENE RULES
-- Write 6 to 8 scenes when the catalog has at least 6 stills. If the catalog is smaller, use every usable still, at least 4 when 4 or more exist.
-- Each scene uses ONE still. Never reuse a media_asset_id or Asset Name.
+- Write 6 to 8 scenes when the catalog has at least 6 assets. If the catalog is smaller, use every usable asset, at least 4 when 4 or more exist.
+- Each scene uses ONE asset. Never reuse a media_asset_id or Asset Name.
 - suggested_visual MUST be copied exactly from the catalog's name field. Do not invent filenames. Do not describe a shot that is not in the catalog.
 - media_asset_id MUST be the matching catalog id for that name.
-- Pick stills that tell a visual story in order: hook, place, detail, movement or people if available, closer. Prefer variety over near-duplicates.
-- Skip stills whose names look like fill-crops, watermarks-only, or unrelated places.
+- Pick assets that tell a visual story in order: hook, place, detail, movement or people if available, closer. Prefer a natural mix of photos and video clips when both are relevant; do not force video when a photo is the better match.
+- Skip assets whose names look like fill-crops, watermarks-only, or unrelated places.\n- A video clip may be longer than its scene; the renderer trims it to the measured voiceover duration. Prefer clips long enough for the spoken scene and never assume a short clip can be stretched or looped.
 
 VOICEOVER RULES
 - voiceover_text is spoken audio. No stage directions, no filename, no camera instructions, no hashtags, no emoji, no quotes around the whole line.
 - Open scene 1 with a hook from the IDEA TITLE, then let later lines carry the idea.
-- Speak like a local guide. Name real places from the idea or still location when they are actually in the catalog.
+- Speak like a local guide. Name real places from the idea or asset location when they are actually in the catalog.
 - Each line should be 8 to 24 words so it fits about 4 to 12 seconds at a natural pace. Do not pad with filler.
-- Do not invent events, prices, hours, rankings, or claims the idea and stills do not support.
+- Do not invent events, prices, hours, rankings, or claims the idea and assets do not support.
 - Do not copy Asset Names into the spoken line unless the name is a real place a viewer would recognize.
 
 IDEA TITLE
@@ -54,7 +54,7 @@ LIBRARY STILL CATALOG (use only these)
 FINAL SELF-CHECK
 - scenes length is between 4 and 8, or equal to the catalog size when the catalog is smaller than 4.
 - Every suggested_visual and media_asset_id pair exists in the catalog.
-- No duplicate stills.
+- No duplicate assets.
 - Every voiceover_text is spoken words only.
 - Output is valid JSON only."""
 
@@ -89,7 +89,7 @@ def _catalog_json(catalog: list[dict]) -> str:
                 "name": str(item.get("name") or "").strip(),
                 "location": str(item.get("location") or "").strip(),
                 "topic": str(item.get("topic") or "").strip(),
-                "description": str(item.get("description") or "").strip()[:180],
+                "description": str(item.get("description") or "").strip()[:180],\n                "media_type": str(item.get("media_type") or item.get("media_kind") or item.get("mime_type") or "").strip(),\n                "duration_seconds": item.get("duration_seconds") or item.get("duration") or 0,
             }
         )
     return json.dumps(rows, ensure_ascii=False, indent=2)
