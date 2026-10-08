@@ -1405,6 +1405,11 @@
     if (pipelineMixRerenderInProgress(record)) return "Rerendering";
     if (pipelineIsRetryingRender(record)) return "Trying Again";
     const state = String(record?.studio_state || "").trim();
+    const renderState = String(record?.render_status || "").trim();
+    if (renderState && !/^(Rendered|Complete|Completed|Success|Succeeded)$/i.test(renderState) && !/Published/i.test(state)) {
+      if (/^(Ready to Render|Ready for Render)$/i.test(renderState)) return "Ready to Render";
+      if (/^(Blocked|Failed|Error|Rendering|Queued)$/i.test(renderState)) return renderState;
+    }
     // Per-output success/publish states win over the parent produce job. Sibling
     // rows still rendering used to paint every approved row as "Rendering"
     // because studio_job_label collapses job.step=render / "Rendering N/M".
@@ -18336,7 +18341,7 @@
     };
 
     const pipelineRow = (r, groupRecords, contentCell = "") => {
-      const canOpen = Boolean(r.creative_available);
+      const canOpen = Boolean(r.id); // Always allow output inspection, including pending renders.
       const blocked = ["blocked", "escalated"].includes(String(r.studio_production_job?.step || "")) || Boolean(r.studio_job_error);
       const notReadyLabel = String(r.studio_production_job?.step || "") === "escalated"
         ? "Escalated"
