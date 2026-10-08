@@ -14,7 +14,7 @@ def _sanitize_post_caption(value: str) -> str:
     lines = [line.strip() for line in str(value or "").splitlines()]
     # Asset inventory lines are never audience-facing caption copy. This guard
     # catches stale/model-generated Featuring lists before Platform Outputs.
-    lines = [line for line in lines if not re.match(r"^\\s*featuring\\s*:", line, flags=re.I)]
+    lines = [line for line in lines if not re.match(r"^\s*featuring\s*:", line, flags=re.I)]
     return "\n".join(line for line in lines if line).strip()
 
 

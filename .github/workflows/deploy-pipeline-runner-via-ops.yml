@@ -154,3 +154,6 @@ jobs:
 
 # Trigger pipeline-runner deploy for quiet timed-script TTS scene retry (Calle Ocho CI 395)
 # 2026-10-08 service_version=2026-10-08-timed-vo-quiet-retry
+
+# Trigger pipeline-runner deploy for SAI1 Featuring-line strip regex fix
+# 2026-10-08 service_version=2026-10-08-timed-vo-quiet-retry
