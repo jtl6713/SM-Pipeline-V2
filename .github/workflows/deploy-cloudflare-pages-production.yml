@@ -3,7 +3,9 @@ name: Deploy Studio Pages Production
 on:
   workflow_dispatch:
   push:
-    branches: [main]
+    branches:
+      - main
+      - cursor/clip-scene-assign-8481
     paths:
       - 'deploy/cloudflare-pages-production.txt'
 
