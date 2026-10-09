@@ -4216,7 +4216,7 @@ async function studioProfileSetupConnectionSnapshot(env, profile) {
   ], profile).catch(() => ({}));
   const version = String(settings.FACEBOOK_GRAPH_API_VERSION || "v26.0").replace(/^\/+|\/+$/g, "");
   const token = String(settings.FACEBOOK_PAGE_ACCESS_TOKEN || env.FACEBOOK_PAGE_ACCESS_TOKEN || "").trim();
-  const result = {
+  const connectionState = {
     instagram: { platform: "Instagram", status: "not_configured", account_name: null, account_id: settings.INSTAGRAM_BUSINESS_ACCOUNT_ID || null, error: null },
     tiktok: {
       platform: "TikTok",
@@ -4245,22 +4245,22 @@ async function studioProfileSetupConnectionSnapshot(env, profile) {
       if (!token || !settings.FACEBOOK_PAGE_ID) return;
       try {
         const page = await studioInsightsMetaIdentity(settings.FACEBOOK_PAGE_ID, token, version, "id,name");
-        result.facebook.status = "connected";
-        result.facebook.account_name = page?.name || null;
-        result.facebook.account_id = page?.id || settings.FACEBOOK_PAGE_ID;
+        connectionState.facebook.status = "connected";
+        connectionState.facebook.account_name = page?.name || null;
+        connectionState.facebook.account_id = page?.id || settings.FACEBOOK_PAGE_ID;
       } catch (error) {
-        Object.assign(result.facebook, studioInsightsConnectionStateFromError(error));
+        Object.assign(connectionState.facebook, studioInsightsConnectionStateFromError(error));
       }
     })(),
     (async () => {
       if (!token || !settings.INSTAGRAM_BUSINESS_ACCOUNT_ID) return;
       try {
         const ig = await studioInsightsMetaIdentity(settings.INSTAGRAM_BUSINESS_ACCOUNT_ID, token, version, "id,username,name");
-        result.instagram.status = "connected";
-        result.instagram.account_name = ig?.username ? "@" + ig.username : (ig?.name || null);
-        result.instagram.account_id = ig?.id || settings.INSTAGRAM_BUSINESS_ACCOUNT_ID;
+        connectionState.instagram.status = "connected";
+        connectionState.instagram.account_name = ig?.username ? "@" + ig.username : (ig?.name || null);
+        connectionState.instagram.account_id = ig?.id || settings.INSTAGRAM_BUSINESS_ACCOUNT_ID;
       } catch (error) {
-        Object.assign(result.instagram, studioInsightsConnectionStateFromError(error));
+        Object.assign(connectionState.instagram, studioInsightsConnectionStateFromError(error));
       }
     })(),
     (async () => {
@@ -4272,14 +4272,14 @@ async function studioProfileSetupConnectionSnapshot(env, profile) {
           headers: { Accept: "application/json", ...(secret ? { "X-SM-Pipeline-Key": secret } : {}) },
         });
         const body = await studioInsightsSafeJson(response);
-        result.youtube.account_name = body?.channel_title || null;
-        result.youtube.account_id = body?.channel_id || settings.YOUTUBE_CHANNEL_ID || null;
-        result.youtube.status = body?.refresh_ok && body?.analytics_read_ok ? "connected" : "needs_authorization";
-        result.youtube.error = result.youtube.status === "connected"
+        connectionState.youtube.account_name = body?.channel_title || null;
+        connectionState.youtube.account_id = body?.channel_id || settings.YOUTUBE_CHANNEL_ID || null;
+        connectionState.youtube.status = body?.refresh_ok && body?.analytics_read_ok ? "connected" : "needs_authorization";
+        connectionState.youtube.error = connectionState.youtube.status === "connected"
           ? null
           : (body?.analytics_error || body?.error || "YouTube authorization is required.");
       } catch (error) {
-        Object.assign(result.youtube, studioInsightsConnectionStateFromError(error));
+        Object.assign(connectionState.youtube, studioInsightsConnectionStateFromError(error));
       }
     })(),
     (async () => {
@@ -4287,16 +4287,16 @@ async function studioProfileSetupConnectionSnapshot(env, profile) {
       if (!base) return;
       try {
         const body = await studioInsightsSafeJson(await fetch(base + "/tiktok/status", { headers: { Accept: "application/json" } }));
-        result.tiktok.account_name = body?.creator_username ? "@" + body.creator_username : (body?.creator_nickname || result.tiktok.account_name);
-        result.tiktok.status = body?.authorized && body?.required_scopes_granted ? "connected" : "needs_authorization";
-        result.tiktok.error = result.tiktok.status === "connected" ? null : "TikTok authorization is required.";
+        connectionState.tiktok.account_name = body?.creator_username ? "@" + body.creator_username : (body?.creator_nickname || connectionState.tiktok.account_name);
+        connectionState.tiktok.status = body?.authorized && body?.required_scopes_granted ? "connected" : "needs_authorization";
+        connectionState.tiktok.error = connectionState.tiktok.status === "connected" ? null : "TikTok authorization is required.";
       } catch (error) {
-        Object.assign(result.tiktok, studioInsightsConnectionStateFromError(error));
+        Object.assign(connectionState.tiktok, studioInsightsConnectionStateFromError(error));
       }
     })(),
   ]);
 
-  return result;
+  return connectionState;
 }
 
 async function studioProfileSetupSummary(env, profile) {
