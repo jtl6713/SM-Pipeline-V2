@@ -327,7 +327,9 @@ export function createProfileOnboarding(deps) {
       const profileFields = {
         Profile_Name: profileName,
         Brand_Name: brandName,
-        Active: true,
+        // Keep incomplete city profiles out of the normal Studio selector until
+        // the platform readiness gate is explicitly activated.
+        Active: false,
         Organization: [orgId],
         Brand: [brandRecord.id],
         Market: [marketRecord.id],
