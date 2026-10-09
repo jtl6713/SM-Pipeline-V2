@@ -225,8 +225,9 @@
     }
     let message = "";
     let failed = false;
+    let result = null;
     try {
-      const result = await fetchJson("/api/engagement/actions", {
+      result = await fetchJson("/api/engagement/actions", {
         method: "POST",
         body: JSON.stringify(payload),
       });
@@ -246,9 +247,13 @@
     }
     await loadEngagement(true);
     setStatus(message, failed);
-    if (failed) {
-      const subtitle = $("engagementSubtitle");
-      if (subtitle) subtitle.textContent = message;
+    const subtitle = $("engagementSubtitle");
+    if (subtitle && message) subtitle.textContent = message;
+    const savedId = result?.action?.action_id;
+    const visible = savedId && state.history.some((row) => row.action_id === savedId);
+    if (!visible && message && !state.history.length) {
+      const history = $("engagementHistory");
+      if (history) history.innerHTML = `<p class="${failed ? "engagement-status is-error" : "subtle"}">${esc(message)}</p>`;
     }
   }
 

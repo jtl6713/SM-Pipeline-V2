@@ -23,6 +23,7 @@ import {
   buildTargetRecord,
   buildActionRecord,
   enrichEngagementHistory,
+  pruneEngagementStore,
   dailyActionCount,
   nearIdenticalComment,
   backoffMs,
@@ -211,11 +212,53 @@ test("insights only count confirmed publishes and never invent growth", () => {
   assert.notEqual(insights.top_creators[0]?.creator, "UCabc123");
 });
 
+test("prune keeps the engagement ledger under Airtable's long-text limit", () => {
+  const store = {
+    targets: Array.from({ length: 40 }, (_, index) => ({
+      target_id: `et_${index}`,
+      profile: "chicago",
+      caption: "c".repeat(2000),
+      content_summary: "s".repeat(500),
+      suggested_comments: ["a".repeat(300), "b".repeat(300), "c".repeat(300)],
+      discovered_at: new Date(Date.now() - index * 1000).toISOString(),
+    })),
+    actions: Array.from({ length: 60 }, (_, index) => ({
+      action_id: `ea_${index}`,
+      profile: index % 2 ? "chicago" : "la",
+      action_type: "comment",
+      execution_status: "published",
+      created_at: new Date(Date.now() - index * 1000).toISOString(),
+    })),
+    suspended: {},
+  };
+  const pruned = pruneEngagementStore(store);
+  const size = JSON.stringify(pruned).length;
+  assert.ok(size <= 80000, `ledger is ${size} chars`);
+  assert.ok(pruned.actions.some((row) => row.profile === "chicago"));
+  assert.ok(pruned.targets.some((row) => row.profile === "chicago"));
+  const mixed = pruneEngagementStore({
+    targets: ["chicago", "miami", "la", "nyc"].flatMap((profile) => (
+      Array.from({ length: 12 }, (_, index) => ({
+        target_id: `${profile}_${index}`,
+        profile,
+        caption: "c".repeat(2000),
+        discovered_at: new Date(Date.now() - index * 1000).toISOString(),
+      }))
+    )),
+    actions: [],
+    suspended: {},
+  });
+  for (const profile of ["chicago", "miami", "la", "nyc"]) {
+    assert.ok(mixed.targets.some((row) => row.profile === profile), profile);
+  }
+  assert.ok(JSON.stringify(mixed).length <= 80000);
+});
+
 test("worker wires engagement routes, cron, and version bump", () => {
   assert.match(worker, /from "\.\/engagement-service\.mjs"/);
   assert.match(worker, /\/api\/engagement\//);
   assert.match(worker, /studio_engagement_v1:\s*true/);
-  assert.match(worker, /0.10.488-engagement-click/);
+  assert.match(worker, /0.10.489-engagement-ledger/);
   assert.match(worker, /studioRunEngagementDiscovery/);
   assert.match(worker, /studioEngagementCron/);
   assert.match(worker, /engagementThemeContextRecord/);
