@@ -195,7 +195,7 @@ test("worker wires engagement routes, cron, and version bump", () => {
   assert.match(worker, /from "\.\/engagement-service\.mjs"/);
   assert.match(worker, /\/api\/engagement\//);
   assert.match(worker, /studio_engagement_v1:\s*true/);
-  assert.match(worker, /0\.10\.482\-engagement\-frequent\-creators/);
+  assert.match(worker, /0.10.483-youtube-engage-stale-detect/);
   assert.match(worker, /studioRunEngagementDiscovery/);
   assert.match(worker, /studioEngagementCron/);
   assert.match(worker, /engagementThemeContextRecord/);
@@ -247,4 +247,12 @@ test("Stage B checkbox on approve/comment persists per profile", () => {
   assert.match(service, /stage_b_disabled:\s*true/);
   assert.match(ui, /stage_b_enabled:\s*stageBChecked\(\)/);
   assert.match(ui, /engagementStageB[\s\S]*addEventListener\("change"/);
+});
+
+test("YouTube engage probes uploader health for engagement build before comment", () => {
+  const service = fs.readFileSync(path.join(here, "engagement-service.mjs"), "utf8");
+  assert.match(service, /\/health/);
+  assert.match(service, /\/engagement\/i\.test\(version\)/);
+  assert.match(service, /YouTube uploader is stale/);
+  assert.match(service, /\/youtube\/engage\/comment/);
 });
