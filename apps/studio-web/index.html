@@ -18,6 +18,7 @@
  <link rel="stylesheet" href="/assets/ai-api-footer.css?v=0.6.427-primary-ai-alert">
  <link rel="stylesheet" href="/assets/sticky-footer-scroll.css?v=0.6.378-sticky-footer-scroll">
  <link rel="stylesheet" href="/assets/topbar-banner-0618.css?v=20261007-city-banner">
+ <link rel="stylesheet" href="/assets/new-profile-1009.css?v=20261009-new-profile">
 </head>
 <body>
  <header class="topbar">
@@ -56,6 +57,7 @@
  <button class="nav-item" data-page="engagement">Engagement</button>
  <button class="nav-item" data-page="music">Music Manager</button>
  <button class="nav-item" data-page="library">Asset Manager</button>
+ <button class="nav-item" data-page="profiles" id="navNewProfile" hidden>New Profile</button>
  <button class="nav-item" data-page="operations" id="navOperations" hidden>Operations <span class="ops-nav-badge" id="navOperationsBadge" hidden></span></button>
  <button class="nav-item nav-item-footer-only" data-page="support">Help</button>
  </nav>
@@ -1599,6 +1601,167 @@
  </div>
  </section>
 
+
+ <section id="page-profiles" class="page">
+ <div class="page-heading">
+ <div><span class="eyebrow">Shining Cities</span><h1>New Profile</h1><p>Create a new city as a complete Studio market: Brand, Market, Content Profile, platform destinations, and launch readiness. Platform accounts can be connected if they already exist, created through the official platform flow, or skipped for now.</p></div>
+ <button type="button" class="secondary-button" id="newProfileReset">Start over</button>
+ </div>
+ <section class="panel profile-onboarding-shell">
+ <div class="profile-onboarding-hero">
+ <div>
+ <h2>City onboarding</h2>
+ <p>Studio saves a draft as you work. A city can exist before every social account is ready; activation stays blocked until every selected publishing destination has the required account IDs and publishing connection.</p>
+ </div>
+ <div class="profile-security-note"><strong>No passwords or access tokens here.</strong> Account signup happens on the platform. OAuth/access credentials stay in the existing publishing infrastructure, not in the Content Profile.</div>
+ </div>
+ <div class="profile-onboarding-progress" role="tablist" aria-label="New profile steps">
+ <button type="button" class="profile-step-button active" data-profile-step-button="1"><strong>1 · City</strong><span>Identity & timezone</span></button>
+ <button type="button" class="profile-step-button" data-profile-step-button="2"><strong>2 · Content</strong><span>City DNA & defaults</span></button>
+ <button type="button" class="profile-step-button" data-profile-step-button="3"><strong>3 · Platforms</strong><span>Create or connect</span></button>
+ <button type="button" class="profile-step-button" data-profile-step-button="4"><strong>4 · Review</strong><span>Create & activate</span></button>
+ </div>
+ <p class="profile-onboarding-message form-message" id="newProfileMessage" aria-live="polite"></p>
+ <div class="profile-created-banner" id="newProfileCreatedBanner" hidden>
+ <h3><span id="newProfileCreatedName">New profile</span> was created</h3>
+ <p>The Studio records exist. Finish the platform cards below, validate the destinations, then activate the profile. The profile remains safe to configure because autonomous idea generation starts off.</p>
+ </div>
+ <form id="newProfileForm" onsubmit="return false;">
+ <section class="profile-onboarding-step" data-profile-step="1">
+ <div>
+ <h2>Choose the city</h2>
+ <p class="subtle">Use a preset for the five planned additions, or enter any city. Timezone belongs to the profile and controls scheduling.</p>
+ </div>
+ <div class="profile-city-presets" aria-label="Planned city presets">
+ <button type="button" class="profile-city-preset" data-city-preset="las-vegas">Las Vegas</button>
+ <button type="button" class="profile-city-preset" data-city-preset="san-francisco">San Francisco</button>
+ <button type="button" class="profile-city-preset" data-city-preset="new-orleans">New Orleans</button>
+ <button type="button" class="profile-city-preset" data-city-preset="washington-dc">Washington DC</button>
+ <button type="button" class="profile-city-preset" data-city-preset="boston">Boston</button>
+ </div>
+ <div class="profile-form-grid three">
+ <label class="profile-form-field"><span>City</span><input id="newProfileCity" required placeholder="Las Vegas"></label>
+ <label class="profile-form-field"><span>State / region</span><input id="newProfileState" required placeholder="Nevada"></label>
+ <label class="profile-form-field"><span>State / region code</span><input id="newProfileStateCode" required maxlength="8" placeholder="NV"></label>
+ <label class="profile-form-field"><span>Country</span><input id="newProfileCountry" value="United States"></label>
+ <label class="profile-form-field"><span>Country code</span><input id="newProfileCountryCode" value="US" maxlength="8"></label>
+ <label class="profile-form-field"><span>Timezone</span><input id="newProfileTimezone" required placeholder="America/Los_Angeles"><small class="profile-field-help">IANA timezone; all MAE scheduling uses this profile-local zone.</small></label>
+ <label class="profile-form-field"><span>Brand name</span><input id="newProfileBrandName" required placeholder="Las Vegas Shining"></label>
+ <label class="profile-form-field"><span>Studio display name</span><input id="newProfileDisplayName" placeholder="Las Vegas Shining - Las Vegas"></label>
+ <label class="profile-form-field"><span>Short code</span><input id="newProfileShortCode" required maxlength="10" placeholder="LV"></label>
+ <label class="profile-form-field"><span>Profile key</span><input id="newProfileKey" required placeholder="las-vegas"><small class="profile-field-help">Stable key used for city-specific publishing settings.</small></label>
+ <label class="profile-form-field"><span>Website <em>optional</em></span><input id="newProfileWebsite" type="url" placeholder="https://lasvegasshining.com"></label>
+ <label class="profile-form-field"><span>Target launch date <em>optional</em></span><input id="newProfileLaunchDate" type="date"></label>
+ <label class="profile-form-field span-3"><span>Copy configuration from</span><select id="newProfileTemplate"></select><small class="profile-field-help">Copies the established city-discovery persona, production profile, and output-format foundation. Chicago is the default template.</small></label>
+ </div>
+ </section>
+
+ <section class="profile-onboarding-step" data-profile-step="2" hidden>
+ <div><h2>Define the city content DNA</h2><p class="subtle">These values become the persistent context used by ideas, captions, media matching, and production.</p></div>
+ <div class="profile-form-grid">
+ <label class="profile-form-field"><span>Primary audience</span><textarea id="newProfileAudience">Locals, visitors, photographers, city explorers, architecture fans, food lovers, and travelers looking for visually interesting experiences.</textarea></label>
+ <label class="profile-form-field"><span>Brand voice</span><textarea id="newProfileBrandVoice">Bright, polished, curious, visually driven, practical, and locally informed. Keep the tone positive, accessible, energetic, and specific to the city.</textarea></label>
+ <label class="profile-form-field"><span>Local context</span><textarea id="newProfileLocalContext" placeholder="What should the AI understand about this city?"></textarea></label>
+ <label class="profile-form-field"><span>Priority locations</span><textarea id="newProfilePriorityLocations" placeholder="One per line or comma-separated: major landmarks, neighborhoods, waterfronts, viewpoints…"></textarea></label>
+ <label class="profile-form-field"><span>Default hashtags</span><textarea id="newProfileHashtags" rows="4" placeholder="#LasVegas #LasVegasShining #VegasTravel #ExploreVegas #Travel"></textarea></label>
+ <label class="profile-form-field"><span>Avoid / special cautions</span><textarea id="newProfileAvoidTopics" rows="4" placeholder="Optional city-specific topics or framing to avoid."></textarea></label>
+ </div>
+ <div class="profile-form-field">
+ <span>Default content themes</span>
+ <div class="profile-inline-checks">
+ <label><input type="checkbox" data-profile-theme value="History" checked>History</label>
+ <label><input type="checkbox" data-profile-theme value="Architecture" checked>Architecture</label>
+ <label><input type="checkbox" data-profile-theme value="Sites and Sounds" checked>Sites &amp; Sounds</label>
+ <label><input type="checkbox" data-profile-theme value="Events" checked>Events</label>
+ <label><input type="checkbox" data-profile-theme value="Parks" checked>Parks</label>
+ <label><input type="checkbox" data-profile-theme value="Museums" checked>Museums</label>
+ <label><input type="checkbox" data-profile-theme value="Hidden Gems" checked>Hidden Gems</label>
+ <label><input type="checkbox" data-profile-theme value="Neighborhoods" checked>Neighborhoods</label>
+ <label><input type="checkbox" data-profile-theme value="Transportation" checked>Transportation</label>
+ <label><input type="checkbox" data-profile-theme value="Food" checked>Food</label>
+ <label><input type="checkbox" data-profile-theme value="Restaurants" checked>Restaurants</label>
+ <label><input type="checkbox" data-profile-theme value="Seasonal" checked>Seasonal</label>
+ <label><input type="checkbox" data-profile-theme value="Education" checked>Education</label>
+ <label><input type="checkbox" data-profile-theme value="Tourist Tips" checked>Tourist Tips</label>
+ <label><input type="checkbox" data-profile-theme value="Nature" checked>Nature</label>
+ </div>
+ </div>
+ <div class="profile-security-note"><strong>Inherited Studio defaults:</strong> 9:16 first, five hashtags, Instagram/TikTok covers, profile-local scheduling, initial schedules empty, 5:30–7:00 AM / 11:30 AM–1:00 PM / 4:30–6:00 PM priority windows, and no scheduling from 8:00 PM–3:30 AM.</div>
+ </section>
+
+ <section class="profile-onboarding-step" data-profile-step="3" hidden>
+ <div><h2>Create or connect the social accounts</h2><p class="subtle">For each platform choose whether the account already exists, needs to be created, or should be skipped. “Create account” opens the platform’s official signup flow; return here afterward and enter the resulting account identifiers.</p></div>
+ <div class="profile-platform-grid">
+ <article class="profile-platform-card" data-profile-platform="instagram">
+ <div class="profile-platform-head"><div><h3>Instagram</h3><p class="profile-platform-note">Use a professional/business account linked to the intended Meta business/Page for automated publishing.</p></div><span class="profile-platform-status warn" data-platform-status>Needs connection</span></div>
+ <label class="profile-form-field"><span>Account</span><select data-platform-intent><option value="existing">I already have it</option><option value="create">Create a new account</option><option value="skip">Skip for now</option></select></label>
+ <p class="profile-platform-note" data-platform-create-copy hidden>Open Instagram signup, create the city account, convert/configure it for professional publishing as required, then come back here.</p>
+ <div data-platform-field><label class="profile-form-field"><span>Handle</span><input data-platform-handle placeholder="lasvegasshining"></label></div>
+ <div data-platform-field><label class="profile-form-field"><span>Instagram Business Account ID</span><input data-platform-account-id inputmode="numeric" placeholder="1784…"></label></div>
+ <div class="profile-platform-actions" data-platform-field><a class="secondary-button" href="https://www.instagram.com/accounts/emailsignup/" target="_blank" rel="noopener noreferrer">Open official signup</a><button type="button" class="secondary-button" data-platform-validate>Validate</button></div>
+ <p class="profile-platform-note" data-platform-advanced-label>Publishing credential is configured outside this form; Studio never asks you to paste a Meta access token here.</p>
+ <ul class="profile-platform-missing" data-platform-missing hidden></ul>
+ </article>
+
+ <article class="profile-platform-card" data-profile-platform="facebook">
+ <div class="profile-platform-head"><div><h3>Facebook</h3><p class="profile-platform-note">Create or connect the city’s Facebook Page. Publishing requires the city-specific Page credential already used by Studio’s Meta pipeline.</p></div><span class="profile-platform-status warn" data-platform-status>Needs connection</span></div>
+ <label class="profile-form-field"><span>Page</span><select data-platform-intent><option value="existing">I already have it</option><option value="create">Create a new Page</option><option value="skip">Skip for now</option></select></label>
+ <p class="profile-platform-note" data-platform-create-copy hidden>Open Facebook Page creation in a new tab, create the city Page, then return and enter its Page ID.</p>
+ <div data-platform-field><label class="profile-form-field"><span>Page name / handle</span><input data-platform-handle placeholder="LasVegasShining"></label></div>
+ <div data-platform-field><label class="profile-form-field"><span>Facebook Page ID</span><input data-platform-account-id inputmode="numeric" placeholder="Page ID"></label></div>
+ <div class="profile-platform-actions" data-platform-field><a class="secondary-button" href="https://www.facebook.com/pages/create/" target="_blank" rel="noopener noreferrer">Open Page creation</a><button type="button" class="secondary-button" data-platform-validate>Validate</button></div>
+ <p class="profile-platform-note" data-platform-advanced-label>Publishing credential is configured outside this form; Studio never asks you to paste a Meta access token here.</p>
+ <ul class="profile-platform-missing" data-platform-missing hidden></ul>
+ </article>
+
+ <article class="profile-platform-card" data-profile-platform="tiktok">
+ <div class="profile-platform-head"><div><h3>TikTok</h3><p class="profile-platform-note">The current architecture uses one city-specific TikTok OAuth worker per account so drafts and analytics cannot cross cities.</p></div><span class="profile-platform-status warn" data-platform-status>Needs connection</span></div>
+ <label class="profile-form-field"><span>Account</span><select data-platform-intent><option value="existing">I already have it</option><option value="create">Create a new account</option><option value="skip">Skip for now</option></select></label>
+ <p class="profile-platform-note" data-platform-create-copy hidden>Open TikTok signup, create the city account, then return here. Studio still needs a city-specific OAuth worker before automated draft delivery is ready.</p>
+ <div data-platform-field><label class="profile-form-field"><span>Handle</span><input data-platform-handle placeholder="lasvegasshining"></label></div>
+ <div class="profile-platform-actions" data-platform-field><a class="secondary-button" href="https://www.tiktok.com/signup" target="_blank" rel="noopener noreferrer">Open official signup</a><a class="secondary-button" data-platform-connect hidden target="_blank" rel="noopener noreferrer">Connect TikTok OAuth</a><button type="button" class="secondary-button" data-platform-validate>Validate</button></div>
+ <details class="profile-advanced" data-platform-field><summary>Infrastructure</summary><label class="profile-form-field"><span>City TikTok worker URL</span><input data-platform-service-url type="url" placeholder="https://auth-las-vegas.chicagoshining.com"><small class="profile-field-help">Separate worker/KV/OAuth state keeps credentials isolated by city.</small></label></details>
+ <ul class="profile-platform-missing" data-platform-missing hidden></ul>
+ </article>
+
+ <article class="profile-platform-card" data-profile-platform="youtube">
+ <div class="profile-platform-head"><div><h3>YouTube</h3><p class="profile-platform-note">YouTube channel creation is completed on YouTube. Studio then needs the Channel ID and the city-specific uploader/OAuth service.</p></div><span class="profile-platform-status warn" data-platform-status>Needs connection</span></div>
+ <label class="profile-form-field"><span>Channel</span><select data-platform-intent><option value="existing">I already have it</option><option value="create">Create a new channel</option><option value="skip">Skip for now</option></select></label>
+ <p class="profile-platform-note" data-platform-create-copy hidden>Open YouTube channel creation, create the city channel, then return and enter the Channel ID. Approval still follows the existing delayed/private upload workflow.</p>
+ <div data-platform-field><label class="profile-form-field"><span>Handle <em>optional</em></span><input data-platform-handle placeholder="@LasVegasShining"></label></div>
+ <div data-platform-field><label class="profile-form-field"><span>YouTube Channel ID</span><input data-platform-account-id placeholder="UC…"></label></div>
+ <div class="profile-platform-actions" data-platform-field><a class="secondary-button" href="https://www.youtube.com/create_channel" target="_blank" rel="noopener noreferrer">Open channel creation</a><button type="button" class="secondary-button" data-platform-validate>Validate</button></div>
+ <details class="profile-advanced" data-platform-field><summary>Infrastructure</summary><label class="profile-form-field"><span>City YouTube uploader URL</span><input data-platform-service-url type="url" placeholder="https://youtube-upload-las-vegas.chicagoshining.com"><small class="profile-field-help">The uploader holds that channel’s OAuth refresh credential. Do not reuse another city’s uploader.</small></label></details>
+ <ul class="profile-platform-missing" data-platform-missing hidden></ul>
+ </article>
+ </div>
+ <div class="profile-onboarding-actions">
+ <p class="subtle">You can create the Studio profile now even if one or more accounts are unfinished; save/resume keeps the work together.</p>
+ <div class="profile-onboarding-actions-right"><button type="button" class="secondary-button" id="newProfileSavePlatforms">Save platform setup</button></div>
+ </div>
+ </section>
+
+ <section class="profile-onboarding-step" data-profile-step="4" hidden>
+ <div><h2>Review and create</h2><p class="subtle">Creating the profile creates the linked Brand and Market too. Autonomous idea generation remains off until you deliberately enable it later.</p></div>
+ <div class="profile-review-grid">
+ <article class="profile-review-card"><h3>Profile</h3><div id="newProfileReview"></div></article>
+ <article class="profile-review-card"><h3>Platform readiness</h3><p class="subtle" id="newProfileReadinessSummary">Create the profile to begin live readiness checks.</p><div class="profile-readiness-list" id="newProfileReadiness"><p class="subtle">Not created yet.</p></div></article>
+ </div>
+ <div class="profile-security-note"><strong>Activation gate:</strong> every platform not marked “Skip” must have its destination ID plus the existing publishing credential/service. This prevents a new city from generating output that accidentally routes through Chicago or another city.</div>
+ </section>
+ </form>
+ <div class="profile-onboarding-actions">
+ <button type="button" class="secondary-button" id="newProfileBack">Back</button>
+ <div class="profile-onboarding-actions-right">
+ <button type="button" class="primary-button" id="newProfileNext">Continue</button>
+ <button type="button" class="primary-button" id="newProfileCreate" hidden>Create Studio profile</button>
+ <button type="button" class="primary-button" id="newProfileActivate" hidden>Activate profile</button>
+ <button type="button" class="primary-button" id="newProfileReload" hidden>Reload Studio</button>
+ </div>
+ </div>
+ </section>
+ </section>
+
  <section id="page-operations" class="page">
  <div class="page-heading">
  <div><span class="eyebrow">Control</span><h1>Operations</h1><p>Open one Control tool at a time from the text links. Quality Agent has a Recap of pipeline blocks in everyday language, plus the check catalog and activity log.</p></div>
@@ -2450,6 +2613,7 @@
  <script src="/assets/platform-schedule-calendar-0924.js?v=0.6.475-manual-media-authority"></script>
  <script src="/assets/timed-script.js?v=0.6.545-timeline-back-list"></script>
  <script src="/assets/app-item4-1008.js?v=0.6.545-timeline-back-list"></script>
+ <script src="/assets/new-profile-1009.js?v=20261009-new-profile"></script>
  <script src="/assets/all-profiles-overview-1007.js?v=0.6.545-timeline-back-list"></script>
  <script src="/assets/insights-0622.js?v=0.6.365-first-party-analytics-reconciled"></script>
  <script src="/assets/engagement-1008.js?v=0.6.545-timeline-back-list"></script>
