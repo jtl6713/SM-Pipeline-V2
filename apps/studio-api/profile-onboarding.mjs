@@ -276,6 +276,7 @@ export function createProfileOnboarding(deps) {
 
     let brandRecord = null;
     let marketRecord = null;
+    let profileRecord = null;
     try {
       brandRecord = await airtableFetch(env, "Brands", "", {
         method: "POST",
@@ -364,21 +365,24 @@ export function createProfileOnboarding(deps) {
         YouTube_Channel_ID: setup.platforms.youtube.account_id || null,
         TikTok_Handle: setup.platforms.tiktok.handle || null,
       };
-      const created = await airtableFetch(env, STUDIO_IDEA_PROFILE_TABLE_ID, "", {
+      profileRecord = await airtableFetch(env, STUDIO_IDEA_PROFILE_TABLE_ID, "", {
         method: "POST",
         body: JSON.stringify({ fields: profileFields, typecast: true }),
       });
-      await saveNonSecretSettings(env, created, setup);
+      await saveNonSecretSettings(env, profileRecord, setup);
       env.__contentProfilesPromise = null;
       return respond(request, env, {
         ok: true,
         created: true,
-        profile: mapStudioContentProfile(created),
+        profile: mapStudioContentProfile(profileRecord),
         brand: { id: brandRecord.id, name: brandName },
         market: { id: marketRecord.id, name: city },
-        readiness: await readiness(env, created),
+        readiness: await readiness(env, profileRecord),
       }, 201);
     } catch (error) {
+      if (profileRecord && profileRecord.id) {
+        await airtableFetch(env, STUDIO_IDEA_PROFILE_TABLE_ID, profileRecord.id, { method: "DELETE" }).catch(() => {});
+      }
       if (marketRecord && marketRecord.id) {
         await airtableFetch(env, "Markets", marketRecord.id, { method: "DELETE" }).catch(() => {});
       }
