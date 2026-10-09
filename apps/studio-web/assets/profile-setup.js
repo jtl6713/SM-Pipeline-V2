@@ -205,9 +205,12 @@
     const saved = state.platforms?.[key] || {};
     const connection = current?.connections?.[key] || {};
     const createMode = saved.setup_mode === "create";
-    const connectUrl = key === "tiktok" && connection?.worker_base_url
-      ? String(connection.worker_base_url).replace(/\/$/, "") + "/tiktok/connect"
-      : "";
+    const connectUrl = key === "tiktok" ? String(connection?.connect_url || "") : "";
+    const integrationNote = key === "tiktok" && saved.enabled && !connection?.worker_configured
+      ? "TikTok signup can be completed now; publishing authorization will remain pending until this profile has a TikTok auth worker URL."
+      : key === "youtube" && saved.enabled && !connection?.service_configured
+        ? "YouTube channel creation can be completed now; publishing authorization will remain pending until this profile has a YouTube uploader service URL."
+        : "";
     return `
       <article class="profile-platform-card" data-platform-card="${key}">
         <div class="profile-platform-head">
@@ -246,7 +249,7 @@
             <button type="button" class="secondary" data-platform-verify="${key}">Save & verify</button>
           </div>
           ${connection?.account_name ? `<p class="profile-connected-as">Connected as <strong>${escapeHtml(connection.account_name)}</strong></p>` : ""}
-          ${connection?.error ? `<p class="error-text">${escapeHtml(connection.error)}</p>` : ""}
+          ${integrationNote ? `<p class="profile-integration-note">${escapeHtml(integrationNote)}</p>` : ""}\n          ${connection?.error ? `<p class="error-text">${escapeHtml(connection.error)}</p>` : ""}
           ${connectUrl ? `<p><a class="button secondary" href="${escapeHtml(connectUrl)}" target="_blank" rel="noopener">Authorize TikTok</a></p>` : ""}
         </div>
       </article>`;
