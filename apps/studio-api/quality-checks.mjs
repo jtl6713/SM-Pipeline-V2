@@ -13,6 +13,7 @@ export const QUALITY_HEALS = Object.freeze([
   "repair_render_sources",
   "promote_native_photo_review_strand",
   "complete_native_photo_approve",
+  "heal_stale_rfr_after_approve",
   "diagnose_then_one_send",
   "wait_pacific_midnight",
   "align_signature_then_rearm",
@@ -227,6 +228,14 @@ export const QUALITY_CHECKS = Object.freeze([
     kind: "native_photo_approve_incomplete",
     actor: "worker_heal",
     heal: "complete_native_photo_approve",
+  }),
+  check({
+    id: "awaiting_approval_stale_rfr",
+    title: "Check for outputs still Output_Status=Ready for Review after Approve (phantom All-Profiles Awaiting Approval)",
+    lane: "service",
+    kind: "awaiting_approval_stale_rfr",
+    actor: "worker_heal",
+    heal: "heal_stale_rfr_after_approve",
   }),
   check({
     id: "native_cover_missing",

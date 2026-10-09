@@ -40,7 +40,7 @@
     return {
       manual: Number(metrics.manual_action_required ?? states.filter((s) => s === "Manual Action Required").length) || 0,
       failed: Number(metrics.failed_outputs ?? metrics.failed ?? states.filter((s) => s === "Failed").length) || 0,
-      approval: Number(metrics.awaiting_approval ?? states.filter((s) => s === "Awaiting Approval").length) || 0,
+      approval: Number(metrics.awaiting_approval ?? states.filter((s) => s === "Ready for Review" || s === "Awaiting Approval").length) || 0,
       ideas: Number(metrics.ideas_not_in_production ?? metrics.ideas ?? 0) || 0,
       scheduled: scheduledCounts(outputs),
     };

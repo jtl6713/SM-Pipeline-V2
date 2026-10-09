@@ -14,6 +14,7 @@ import {
   classifyNativeCover,
   classifyNativePhotoReviewStrand,
   classifyNativePhotoApproveIncomplete,
+  classifyAwaitingApprovalStaleRfr,
   classifyPreparingGap,
   classifyProduceJob,
   classifyPromotedNotRfr,
@@ -534,7 +535,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.478-engagement-approve-blocks-comment",
+          version: "0.10.480-awaiting-approval-stale-desk",
           studio_engagement_v1: true,
           studio_mae_schedule_v1: true,
           studio_mae_28_day_schedule_v1: true,
@@ -1602,6 +1603,11 @@ export default {
         await studioHealNativePhotoReviewStrands(env, { limit: 8 });
       } catch (error) {
         console.warn("studio native-photo review-strand heal failed", error);
+      }
+      try {
+        await studioHealAwaitingApprovalStaleRfr(env, { limit: 12 });
+      } catch (error) {
+        console.warn("studio awaiting-approval stale RFR heal failed", error);
       }
       try {
         await studioHealPromotedMissingFanout(env, { limit: 8 });
@@ -11439,6 +11445,49 @@ async function studioHealNativePhotoReviewStrands(env, options = {}) {
     }
   }
   if (healed.length) console.log("Studio native-photo review/approve heal", JSON.stringify({ count: healed.length, healed }));
+  return healed;
+}
+
+/** Output_Status stuck Ready for Review after Approve → phantom All-Profiles Awaiting Approval. */
+async function studioHealAwaitingApprovalStaleRfr(env, options = {}) {
+  const limit = Math.max(1, Math.min(20, Number(options.limit || 12)));
+  const outputTable = env.AIRTABLE_OUTPUT_TABLE_ID;
+  const rows = await listRecords(env, outputTable, {
+    limit: Math.max(limit * 3, 30),
+    sortField: "Output_ID",
+    sortDirection: "desc",
+    filterFormula: 'AND({Test_Run_ID}=BLANK(),{Published_At}=BLANK(),{Do_Not_Publish}=0,{Output_Status}="Ready for Review",{Review_Status}="Approved",OR({Publish_Status}="Ready to Schedule",{Publish_Status}="Ready to Publish",{Publish_Status}="Scheduled",{Publish_Status}="Publishing"))',
+  }).catch(() => []);
+  const healed = [];
+  for (const record of rows || []) {
+    if (healed.length >= limit) break;
+    const row = mapDeskInventoryOutput(record);
+    const finding = classifyAwaitingApprovalStaleRfr(row);
+    if (!finding) continue;
+    try {
+      await airtableFetch(env, outputTable, record.id, {
+        method: "PATCH",
+        body: JSON.stringify({
+          fields: { Output_Status: "Approved for Publishing" },
+          typecast: true,
+        }),
+      });
+      healed.push({
+        key: "AWAITING_APPROVAL_STALE_RFR",
+        id: record.id,
+        output_id: row.output_id || null,
+        fingerprint: finding.fingerprint,
+      });
+    } catch (error) {
+      healed.push({
+        key: "AWAITING_APPROVAL_STALE_RFR",
+        id: record.id,
+        output_id: row.output_id || null,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+  if (healed.length) console.log("Studio awaiting-approval stale RFR heal", JSON.stringify({ count: healed.length, healed }));
   return healed;
 }
 
@@ -33948,14 +33997,17 @@ async function dashboard(request, env, url, authorization) {
   const active = mappedOutputs.filter((o) => !["Published", "Skipped", "Failed"].includes(o.studio_state)).length;
   const manualAction = mappedOutputs.filter((o) => o.studio_state === "Manual Action Required").length;
   const failed = mappedOutputs.filter((o) => o.studio_state === "Failed").length;
+  // Match Pipeline "Awaiting Approval": normalized studio_state only.
+  // Do not count raw Output_Status=Ready for Review after Approve (Review=Approved /
+  // Publish=Ready to Schedule) — those click through empty (Miami Outputs 2154/2155/1841).
   const awaitingApproval = mappedOutputs.filter((o) => {
     const state = String(o.studio_state || "").trim();
-    const review = String(o.review_status || "").trim();
-    const output = String(o.output_status || "").trim();
-    return state === "Ready for Review"
-      || state === "Awaiting Approval"
-      || review === "Pending"
-      || output === "Ready for Review";
+    if (state !== "Ready for Review" && state !== "Awaiting Approval") return false;
+    if (o.do_not_publish) return false;
+    const notes = `${o.output_notes || ""}\n${o.production_notes || ""}`;
+    if (/origin=az-finished-video/i.test(notes)) return false;
+    if (/az-auto-queue=1/i.test(notes) && /ez-input=finished-video/i.test(notes)) return false;
+    return true;
   }).length;
   // Keep the Home count identical to the Ideas tab's "Current ideas"
   // population. The tab considers an idea promoted when either the canonical
@@ -37505,6 +37557,20 @@ async function gatherStudioDeskInventory(env) {
     }
   } catch (error) {
     console.warn("desk native-photo approve-incomplete scan failed", error);
+  }
+  try {
+    const staleRfrRows = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
+      limit: 30,
+      sortField: "Output_ID",
+      sortDirection: "desc",
+      filterFormula: 'AND({Test_Run_ID}=BLANK(),{Published_At}=BLANK(),{Do_Not_Publish}=0,{Output_Status}="Ready for Review",{Review_Status}="Approved",OR({Publish_Status}="Ready to Schedule",{Publish_Status}="Ready to Publish",{Publish_Status}="Scheduled",{Publish_Status}="Publishing"))',
+    }).catch(() => []);
+    scanned("awaiting_approval_stale_rfr");
+    for (const record of staleRfrRows || []) {
+      push(classifyAwaitingApprovalStaleRfr(mapOut(record)));
+    }
+  } catch (error) {
+    console.warn("desk awaiting-approval stale RFR scan failed", error);
   }
 
   try {

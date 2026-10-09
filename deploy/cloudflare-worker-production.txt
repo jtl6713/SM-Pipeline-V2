@@ -48,3 +48,7 @@ Deploy Worker 0.10.476-voiceover-exceeds-render. Heal Blocked Spoken-audio-past-
 Deploy Worker 0.10.477-engagement-stageb-persist. Miami Stage B checkbox now persists on Approve/Comment; Stage B-off no longer silent-opens YouTube. Triggered 2026-10-09.
 
 Deploy Worker 0.10.478-engagement-approve-blocks-comment. Approve/queue rows no longer trip creator cooldown, daily limit, or idempotency before Stage B Comment publishes. Triggered 2026-10-09.
+
+Deploy Worker 0.10.479-awaiting-approval-count. metrics.awaiting_approval matches Pipeline filter; ignore approved/scheduled rows with stale Ready for Review. Triggered 2026-10-09.
+
+Deploy Worker 0.10.480-awaiting-approval-stale-desk. Desk kind awaiting_approval_stale_rfr + Worker heal for Approved+armed rows stuck at Ready for Review. Triggered 2026-10-09.
