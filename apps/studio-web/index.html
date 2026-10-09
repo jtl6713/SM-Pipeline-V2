@@ -18,6 +18,7 @@
  <link rel="stylesheet" href="/assets/ai-api-footer.css?v=0.6.427-primary-ai-alert">
  <link rel="stylesheet" href="/assets/sticky-footer-scroll.css?v=0.6.378-sticky-footer-scroll">
  <link rel="stylesheet" href="/assets/topbar-banner-0618.css?v=20261007-city-banner">
+ <link rel="stylesheet" href="/assets/profile-setup.css?v=20261009-new-profile">
 </head>
 <body>
  <header class="topbar">
@@ -56,6 +57,7 @@
  <button class="nav-item" data-page="engagement">Engagement</button>
  <button class="nav-item" data-page="music">Music Manager</button>
  <button class="nav-item" data-page="library">Asset Manager</button>
+ <button class="nav-item" data-page="profile-setup" id="navProfileSetup" hidden>New Profile</button>
  <button class="nav-item" data-page="operations" id="navOperations" hidden>Operations <span class="ops-nav-badge" id="navOperationsBadge" hidden></span></button>
  <button class="nav-item nav-item-footer-only" data-page="support">Help</button>
  </nav>
@@ -1598,6 +1600,18 @@
  </div>
  </section>
 
+ <section id="page-profile-setup" class="page">
+ <div class="page-heading">
+ <div>
+ <p class="eyebrow">Administration</p>
+ <h1>New Profile</h1>
+ <p>Create and launch a Shining Cities profile without mixing its destinations with another city.</p>
+ </div>
+ </div>
+ <p id="profileSetupMessage" class="profile-setup-message" aria-live="polite"></p>
+ <div id="profileSetupRoot"></div>
+ </section>
+
  <section id="page-operations" class="page">
  <div class="page-heading">
  <div><span class="eyebrow">Control</span><h1>Operations</h1><p>Open one Control tool at a time from the text links. Quality Agent has a Recap of pipeline blocks in everyday language, plus the check catalog and activity log.</p></div>
@@ -2448,6 +2462,7 @@
  <script src="/assets/pipeline-schedule-grid-0622.js?v=0.6.475-manual-media-authority"></script>
  <script src="/assets/platform-schedule-calendar-0924.js?v=0.6.475-manual-media-authority"></script>
  <script src="/assets/timed-script.js?v=0.6.544-idea-page-links"></script>
+ <script src="/assets/profile-setup.js?v=20261009-new-profile"></script>
  <script src="/assets/app-item4-1008.js?v=0.6.544-idea-page-links"></script>
  <script src="/assets/all-profiles-overview-1007.js?v=0.6.544-idea-page-links"></script>
  <script src="/assets/insights-0622.js?v=0.6.365-first-party-analytics-reconciled"></script>
