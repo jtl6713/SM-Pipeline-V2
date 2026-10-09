@@ -588,13 +588,29 @@ export async function studioApplyEngagementAction(env, payload, deps) {
   }
 
   const comment = sanitizeCommentSuggestion(payload.comment || target.selected_comment || "");
-  if (execType === "comment" && !comment) throw new Error("Comment text required");
+  const recordBlocked = async (message) => {
+    const action = buildActionRecord({
+      target,
+      actionType: execType,
+      comment: comment || payload.comment || target.selected_comment,
+      approvalStatus: "approved",
+      executionStatus: "failed",
+      error: message,
+    });
+    store.actions.unshift(action);
+    await mirrorActionRow(env, action, deps);
+    await studioSaveEngagementStore(env, store, deps);
+    return { ok: false, target, action, message };
+  };
+  if (execType === "comment" && !comment) {
+    return recordBlocked("Comment text is empty or failed the safety check. Edit it, then try Comment again.");
+  }
   if (execType === "comment") {
     const priorComments = store.actions
       .filter((row) => row.action_type === "comment" && row.execution_status === "published")
       .map((row) => row.edited_comment || row.suggested_comment);
     if (priorComments.some((row) => nearIdenticalComment(row, comment))) {
-      throw new Error("Near-identical comment rejected");
+      return recordBlocked("Near-identical comment rejected. Edit the text or skip this post.");
     }
   }
 
@@ -611,11 +627,11 @@ export async function studioApplyEngagementAction(env, payload, deps) {
   }
 
   if (creatorRecentlyEngaged(store.actions, target.creator_id, target.platform, settings.min_hours_between_creator_comments)) {
-    throw new Error("Creator recently engaged; cooldown active");
+    return recordBlocked(`This creator was already engaged in the last ${settings.min_hours_between_creator_comments} hours.`);
   }
   const limit = execType === "like" ? settings.daily_like_limit : settings.daily_comment_limit;
   if (dailyActionCount(store.actions, profile, target.platform, execType) >= limit) {
-    throw new Error(`Daily ${execType} limit reached for ${profile}/${target.platform}`);
+    return recordBlocked(`Daily ${execType} limit reached (${limit}) for ${profile}. Nothing was sent.`);
   }
 
   let result;

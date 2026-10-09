@@ -216,20 +216,33 @@
       stage_b_enabled: stageBChecked(),
     };
     setStatus(`Running ${action}…`);
-    const result = await fetchJson("/api/engagement/actions", {
-      method: "POST",
-      body: JSON.stringify(payload),
-    });
-    if (action === "open_post" && (result.post_url || result.target?.post_url)) {
-      window.open(result.post_url || result.target.post_url, "_blank", "noopener,noreferrer");
+    let message = "";
+    let failed = false;
+    try {
+      const result = await fetchJson("/api/engagement/actions", {
+        method: "POST",
+        body: JSON.stringify(payload),
+      });
+      if (action === "open_post" && (result.post_url || result.target?.post_url)) {
+        window.open(result.post_url || result.target.post_url, "_blank", "noopener,noreferrer");
+      }
+      // Platform-unsupported opens the post for manual work. Stage B off must not —
+      // that looked like success while no YouTube API call ran.
+      if (result.unsupported && !result.stage_b_disabled && (result.post_url || result.target?.post_url)) {
+        window.open(result.post_url || result.target.post_url, "_blank", "noopener,noreferrer");
+      }
+      message = result.message || (result.ok === false ? "Engagement action did not complete." : "Done.");
+      failed = result.ok === false;
+    } catch (error) {
+      message = error.message || String(error);
+      failed = true;
     }
-    // Platform-unsupported opens the post for manual work. Stage B off must not —
-    // that looked like success while no YouTube API call ran.
-    if (result.unsupported && !result.stage_b_disabled && (result.post_url || result.target?.post_url)) {
-      window.open(result.post_url || result.target.post_url, "_blank", "noopener,noreferrer");
-    }
-    setStatus(result.message || "Done.", result.ok === false);
     await loadEngagement(true);
+    setStatus(message, failed);
+    if (failed) {
+      const subtitle = $("engagementSubtitle");
+      if (subtitle) subtitle.textContent = message;
+    }
   }
 
   async function saveSettings() {
