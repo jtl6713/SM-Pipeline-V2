@@ -535,7 +535,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.480-awaiting-approval-stale-desk",
+          version: "0.10.481-engagement-history-channel",
           studio_engagement_v1: true,
           studio_mae_schedule_v1: true,
           studio_mae_28_day_schedule_v1: true,

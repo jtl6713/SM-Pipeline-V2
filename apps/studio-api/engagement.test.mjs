@@ -21,6 +21,8 @@ import {
   computeEngagementInsights,
   mapYoutubeSearchItem,
   buildTargetRecord,
+  buildActionRecord,
+  enrichEngagementHistory,
   dailyActionCount,
   nearIdenticalComment,
   backoffMs,
@@ -185,11 +187,49 @@ test("worker wires engagement routes, cron, and version bump", () => {
   assert.match(worker, /from "\.\/engagement-service\.mjs"/);
   assert.match(worker, /\/api\/engagement\//);
   assert.match(worker, /studio_engagement_v1:\s*true/);
-  assert.match(worker, /0\.10\.478-engagement-approve-blocks-comment/);
+  assert.match(worker, /0\.10\.479-engagement-history-channel/);
   assert.match(worker, /studioRunEngagementDiscovery/);
   assert.match(worker, /studioEngagementCron/);
   assert.match(worker, /engagementThemeContextRecord/);
   assert.match(worker, /engagementDeps\(profile\)/);
+});
+
+test("history rows expose channel name and clickable post URL", () => {
+  const target = {
+    target_id: "et_1",
+    profile: "miami",
+    platform: "youtube",
+    creator_id: "UCabc",
+    creator_name: "TripVerse",
+    post_id: "qH7IQboSKuc",
+    post_url: "https://www.youtube.com/watch?v=qH7IQboSKuc",
+    selected_comment: "Nice walls",
+    suggested_comments: ["Nice walls"],
+  };
+  const action = buildActionRecord({
+    target,
+    actionType: "comment",
+    comment: "Nice walls",
+    approvalStatus: "approved",
+    executionStatus: "published",
+    publishedId: "Ugxyz",
+  });
+  assert.equal(action.creator_name, "TripVerse");
+  assert.equal(action.post_url, "https://www.youtube.com/watch?v=qH7IQboSKuc");
+
+  const legacy = enrichEngagementHistory(
+    [{ action_id: "ea_old", target_id: "et_1", platform: "youtube", post_id: "qH7IQboSKuc", creator_id: "UCabc" }],
+    [target]
+  );
+  assert.equal(legacy[0].creator_name, "TripVerse");
+  assert.equal(legacy[0].post_url, "https://www.youtube.com/watch?v=qH7IQboSKuc");
+
+  const ui = fs.readFileSync(path.join(here, "../studio-web/assets/engagement-1008.js"), "utf8");
+  assert.match(ui, /<th>Channel<\/th>/);
+  assert.match(ui, /Open post/);
+  assert.match(ui, /row\.post_url/);
+  const service = fs.readFileSync(path.join(here, "engagement-service.mjs"), "utf8");
+  assert.match(service, /enrichEngagementHistory/);
 });
 
 test("Stage B checkbox on approve/comment persists per profile", () => {

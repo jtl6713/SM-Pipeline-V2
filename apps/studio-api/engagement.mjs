@@ -621,13 +621,17 @@ export function buildTargetRecord(post, settings, comments) {
 
 export function buildActionRecord({ target, actionType, comment, approvalStatus = "pending", executionStatus = "pending", error = null, publishedId = null }) {
   const now = new Date().toISOString();
+  const postUrl = String(target.post_url || "").trim()
+    || (String(target.platform || "").toLowerCase() === "youtube" ? youtubePostUrl(target.post_id) : "");
   return {
     action_id: `ea_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`,
     target_id: target.target_id,
     profile: target.profile,
     platform: target.platform,
     creator_id: target.creator_id,
+    creator_name: String(target.creator_name || "").trim(),
     post_id: target.post_id,
+    post_url: postUrl,
     action_type: actionType,
     suggested_comment: target.selected_comment || (target.suggested_comments || [])[0] || "",
     edited_comment: comment || "",
@@ -641,6 +645,24 @@ export function buildActionRecord({ target, actionType, comment, approvalStatus 
     executed_at: executionStatus === "published" ? now : null,
     classification: error ? classifyEngagementFailure(error) : null,
   };
+}
+
+/** Fill channel + post link on history rows (legacy actions may omit them). */
+export function enrichEngagementHistory(actions, targets = []) {
+  const byId = new Map((targets || []).map((row) => [row.target_id, row]));
+  return (actions || []).map((action) => {
+    const target = byId.get(action.target_id) || {};
+    const creator_name = String(action.creator_name || target.creator_name || "").trim();
+    let post_url = String(action.post_url || target.post_url || "").trim();
+    if (!post_url && String(action.platform || target.platform || "").toLowerCase() === "youtube") {
+      post_url = youtubePostUrl(action.post_id || target.post_id);
+    }
+    return {
+      ...action,
+      creator_name: creator_name || String(action.creator_id || target.creator_id || "").trim(),
+      post_url,
+    };
+  });
 }
 
 export function computeEngagementInsights(store, profile = null) {
