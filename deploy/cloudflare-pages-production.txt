@@ -92,4 +92,7 @@ Deploy Studio UI 0.6.534-pages-path-bust. Rename app-item4-0625.js -> app-item4-
 2026-10-09: Deploy UI 0.6.540-engagement-frequent-creators. Frequent creators shows channel titles, not UC… IDs.
 
 2026-10-09: Deploy UI 0.6.541-ship-verify. Ship-verify footer after engagement/awaiting-approval merges; hard-refresh Studio.
+
 2026-10-09: Deploy UI 0.6.542-profile-scheduled-total. Show each profile's total scheduled posts in parentheses beside the profile name while retaining the existing per-profile dashboard filter and schedule-timezone paths.
+
+2026-10-09: Deploy UI 0.6.543-approve-all-batch. Approve All runs as durable background batch with live progress + safe retry.
