@@ -635,10 +635,14 @@ export async function studioApplyEngagementAction(env, payload, deps) {
   }
 
   let result;
-  if (target.platform === "youtube") {
-    result = await executeYoutubeAction(env, target, execType, comment, deps);
-  } else {
-    result = { ok: false, status: "unsupported", error: "Unsupported platform execution path" };
+  try {
+    if (target.platform === "youtube") {
+      result = await executeYoutubeAction(env, target, execType, comment, deps);
+    } else {
+      result = { ok: false, status: "unsupported", error: "Unsupported platform execution path" };
+    }
+  } catch (error) {
+    return recordBlocked(String(error?.message || error).slice(0, 400));
   }
 
   const action = buildActionRecord({

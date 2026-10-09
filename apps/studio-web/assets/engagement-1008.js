@@ -174,7 +174,7 @@
     const root = $("engagementHistory");
     if (!root) return;
     if (!state.history.length) {
-      root.innerHTML = `<p class="subtle">No engagement actions yet.</p>`;
+      root.innerHTML = `<p class="subtle">No engagement actions for this profile yet. Use Comment or Like on a recommended post. Approve only queues a comment and does not post it.</p>`;
       return;
     }
     root.innerHTML = `<table class="engagement-table"><thead><tr><th>When</th><th>Channel</th><th>Type</th><th>Platform</th><th>Status</th><th>Post</th><th>Detail</th></tr></thead><tbody>${
@@ -216,6 +216,13 @@
       stage_b_enabled: stageBChecked(),
     };
     setStatus(`Running ${action}…`);
+    const history = $("engagementHistory");
+    if (history) {
+      const note = document.createElement("p");
+      note.className = "engagement-status";
+      note.textContent = `Sending ${action}…`;
+      history.prepend(note);
+    }
     let message = "";
     let failed = false;
     try {
@@ -337,6 +344,7 @@
   });
 
   document.addEventListener("click", (event) => {
+    if (!event.target?.closest?.("#page-engagement")) return;
     const select = event.target?.closest?.("[data-select-target]");
     if (select) {
       const id = select.getAttribute("data-select-target");
@@ -355,7 +363,8 @@
       return;
     }
     const button = event.target?.closest?.("[data-action][data-target-id]");
-    if (!button || !pageActive()) return;
+    if (!button) return;
+    event.preventDefault();
     const action = button.getAttribute("data-action");
     const targetId = button.getAttribute("data-target-id");
     runAction(action, targetId).catch((error) => setStatus(error.message || String(error), true));

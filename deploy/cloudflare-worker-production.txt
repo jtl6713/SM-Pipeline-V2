@@ -68,3 +68,5 @@ Deploy Worker 0.10.485-approve-all-batch. Durable Approve All job store, limited
 Deploy Worker 0.10.486-la-discover. LA Discover now queues YouTube posts that name Los Angeles, and searches the LA topic list instead of one random query. Triggered 2026-10-09.
 
 Deploy Worker 0.10.487-engagement-action-visible. Engagement blocks write a history row and return 200 so the page shows why Comment or Like did not send. Triggered 2026-10-09.
+
+Deploy Worker 0.10.488-engagement-click. A YouTube comment or like error is written into Engagement history instead of disappearing. Triggered 2026-10-09.
