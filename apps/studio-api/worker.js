@@ -3819,11 +3819,30 @@ async function studioThemeForPublishRecord(env, record) {
   if (!record) return "chicago";
   const direct = studioThemeForProfile(record);
   if (direct !== "chicago") return direct;
+
+  // Publish/output records often do not copy city fields. Resolve their linked
+  // Content Profile before falling back so a new city can never inherit the
+  // unprefixed Chicago destination credentials by accident.
+  const profileId = await studioContentProfileRecordIdForOutput(env, record).catch(() => null);
+  if (profileId) {
+    try {
+      const profile = await airtableFetch(env, STUDIO_IDEA_PROFILE_TABLE_ID, profileId);
+      return studioThemeForProfile(profile);
+    } catch {}
+  }
+
   const contentId = studioFirstLinkedId(f(record, "Content_Item"));
   if (!contentId || !env.AIRTABLE_CONTENT_TABLE_ID) return direct;
   try {
     const item = await airtableFetch(env, env.AIRTABLE_CONTENT_TABLE_ID, contentId);
-    return studioThemeForProfile(item);
+    const itemTheme = studioThemeForProfile(item);
+    if (itemTheme !== "chicago") return itemTheme;
+    const linkedProfileId = studioFirstLinkedId(f(item, "Content_Profile"));
+    if (linkedProfileId) {
+      const profile = await airtableFetch(env, STUDIO_IDEA_PROFILE_TABLE_ID, linkedProfileId);
+      return studioThemeForProfile(profile);
+    }
+    return itemTheme;
   } catch {
     return direct;
   }
