@@ -54,10 +54,25 @@ function Test-PublicHealth([string]$Url) {
     try {
         $resp = Invoke-WebRequest -UseBasicParsing -Uri $Url -TimeoutSec 8
         $ok = [int]$resp.StatusCode -ge 200 -and [int]$resp.StatusCode -lt 300
-        return @{ Ok = $ok; Status = [int]$resp.StatusCode; Error = $null }
+        $version = $null
+        if ($ok -and $resp.Content) {
+            try {
+                $parsed = $resp.Content | ConvertFrom-Json
+                if ($parsed.version) { $version = [string]$parsed.version }
+            } catch {}
+        }
+        return @{ Ok = $ok; Status = [int]$resp.StatusCode; Error = $null; Version = $version }
     } catch {
-        return @{ Ok = $false; Status = 0; Error = $_.Exception.Message }
+        return @{ Ok = $false; Status = 0; Error = $_.Exception.Message; Version = $null }
     }
+}
+
+function Test-YoutubeUploaderNeedsEngageDeploy([string]$ServiceName, $Probe) {
+    if ($ServiceName -notmatch '^youtube-uploader') { return $false }
+    if (-not $Probe -or -not $Probe.ok) { return $false }
+    $version = [string]$Probe.version
+    if (-not $version) { return $true }
+    return ($version -notmatch 'engagement')
 }
 
 function Get-GitState {
@@ -181,15 +196,18 @@ foreach ($target in $HealthTargets) {
         ok = [bool]$probe.Ok
         status = $probe.Status
         error = $probe.Error
+        version = $probe.Version
         warnOnly = [bool]$target.WarnOnly
     }
 }
 
 $down = @($probes | Where-Object { -not $_.ok -and -not $_.warnOnly })
-Write-Host "Desk companion mode=$DeskMode dirty=$($git.Dirty) behind=$($git.Behind) down=$($down.Count)"
+$staleYoutube = @($probes | Where-Object { Test-YoutubeUploaderNeedsEngageDeploy $_.service $_ })
+Write-Host "Desk companion mode=$DeskMode dirty=$($git.Dirty) behind=$($git.Behind) down=$($down.Count) staleYoutube=$($staleYoutube.Count)"
 $probes | ForEach-Object {
     $state = if ($_.ok) { 'ok' } elseif ($_.warnOnly) { 'WARN' } else { 'DOWN' }
-    Write-Host ("  {0,-22} {1}" -f $_.id, $state)
+    $ver = if ($_.version) { " v=$($_.version)" } else { '' }
+    Write-Host ("  {0,-22} {1}{2}" -f $_.id, $state, $ver)
 }
 
 if ($rank -lt 1) {
@@ -274,6 +292,14 @@ foreach ($svc in @('frame-extractor','remotion-renderer','watermark','voiceover-
         $behind.Add($svc)
     }
 }
+foreach ($row in $staleYoutube) {
+    $svc = [string]$row.service
+    if (-not $svc) { continue }
+    if (-not $behind.Contains($svc)) {
+        Write-Host ("  {0} health.version={1} lacks engagement build (force DEPLOY)" -f $svc, $row.version)
+        $behind.Add($svc)
+    }
+}
 
 if ($behind.Count -eq 0) {
     Write-Host 'No live service stamp is behind origin/main. No enhancement DEPLOY.'
@@ -299,6 +325,19 @@ foreach ($svc in $behind) {
     Write-Host $planOut
     if ($planCode -ne 0) { throw "PLAN failed for $svc" }
     if ($planOut -match 'Files:\s+0 added,\s+0 changed,\s+0 removed') {
+        $staleRow = @($staleYoutube | Where-Object { $_.service -eq $svc }) | Select-Object -First 1
+        if ($staleRow -and (Test-Path -LiteralPath $HiddenStart)) {
+            Write-Host "STALE ${svc}: files match origin/main but health.version lacks engagement. Hidden restart only."
+            & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $HiddenStart -Service $svc -StopFirst
+            if ($LASTEXITCODE -ne 0) {
+                Write-Host "WARN hidden restart failed for $svc (exit $LASTEXITCODE)"
+            } else {
+                $caps.restarts[$svc] = $used + 1
+                $deployed++
+            }
+            Save-DeskCaps $caps
+            continue
+        }
         Write-Host "SKIP ${svc}: origin/main has no file changes vs live. Not restarting."
         $caps.noop_commits[$svc] = $git.OriginMain
         Save-DeskCaps $caps
