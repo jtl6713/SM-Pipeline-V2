@@ -45,6 +45,9 @@
       scheduled: scheduledCounts(outputs),
     };
   }
+  function scheduledTotal(row) {
+    return platformOrder.reduce((sum, platform) => sum + (Number(row?.scheduled?.[platform]) || 0), 0);
+  }
   async function json(url) {
     const response = await fetch(url, { credentials: "same-origin", headers: { Accept: "application/json" }, cache: "no-store" });
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
@@ -92,7 +95,7 @@
       total.manual += row.manual; total.failed += row.failed; total.approval += row.approval; total.ideas += row.ideas;
     }
     const rowHtml = (row, isTotal=false) => `<tr class="${isTotal ? "all-profiles-total" : ""}">
-      <th scope="row">${esc(row.name)}</th>
+      <th scope="row">${esc(row.name)}${isTotal ? "" : ` (${scheduledTotal(row)})`}</th>
       ${platformOrder.map((p)=>`<td data-label="${p}">${row.scheduled[p] || 0}</td>`).join("")}
       <td data-label="Manual" class="overview-tone-${tone(row.manual,"manual")}">${actionCount(row, "manual", "manual action")}</td>
       <td data-label="Failed" class="overview-tone-${tone(row.failed,"failed")}">${actionCount(row, "failed", "failed")}</td>

@@ -66,7 +66,6 @@ Deploy Studio UI 0.6.526-scheduled-group. Group Facebook, Instagram, TikTok, and
 Deploy Studio UI 0.6.529-scripted-scene-approval-state. Scripted-short approval now shows one authoritative state, blocks Approve when an exact scene is unassigned, and directs the operator to Rendering or Match stills in order. Triggered 2026-10-08.
 Retry Studio UI 0.6.529 verification after aligning the controlled deploy check with the existing HOME_DENSITY_0_6_521 marker. Triggered 2026-10-08.
 Deploy Studio UI 0.6.530-scripted-scene-media-reuse. Match stills in order now fills every scene, uses each relevant asset once first, and reuses relevant media when scenes outnumber available assets. Triggered 2026-10-08.
-
 Deploy Studio UI output detail accessibility fix 2026-10-08: incomplete render rows openable; show render state before schedule state. Preserve scheduled dates.
 Deploy Studio UI 0.6.531-engagement. Social Engagement module Stage A/B/C: discovery, AI comments, approval queue, YouTube engage endpoints, Quality Agent signatures. Triggered 2026-10-08.
 
@@ -94,4 +93,6 @@ Deploy Studio UI 0.6.534-pages-path-bust. Rename app-item4-0625.js -> app-item4-
 
 2026-10-09: Deploy UI 0.6.541-ship-verify. Ship-verify footer after engagement/awaiting-approval merges; hard-refresh Studio.
 
-2026-10-09: Deploy UI 0.6.542-approve-all-batch. Approve All runs as durable background batch with live progress + safe retry.
+2026-10-09: Deploy UI 0.6.542-profile-scheduled-total. Show each profile's total scheduled posts in parentheses beside the profile name while retaining the existing per-profile dashboard filter and schedule-timezone paths.
+
+2026-10-09: Deploy UI 0.6.543-approve-all-batch. Approve All runs as durable background batch with live progress + safe retry.

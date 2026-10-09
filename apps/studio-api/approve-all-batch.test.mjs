@@ -90,7 +90,7 @@ test("worker exposes durable approve-all batch routes and cron resume", () => {
 });
 
 test("Studio UI starts Approve All as a background job and polls progress", () => {
-  assert.match(app, /item4-0\.6\.542-approve-all-batch/);
+  assert.match(app, /item4-0\.6\.543-approve-all-batch/);
   assert.match(app, /startPipelineApproveAllJobWatch/);
   assert.match(app, /pollPipelineApproveAllJob/);
   assert.match(app, /Retry failed/);
