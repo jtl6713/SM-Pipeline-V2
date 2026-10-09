@@ -298,6 +298,8 @@
     const target = $("newProfileReadiness");
     const banner = $("newProfileCreatedBanner");
     if (banner && state.createdProfileId) banner.hidden = false;
+    const reset = $("newProfileReset");
+    if (reset && state.createdProfileId) reset.hidden = true;
     if (!target) return;
     if (!readiness || !readiness.platforms) {
       target.innerHTML = "<p class=\"subtle\">Create the Studio profile to begin live platform validation.</p>";
