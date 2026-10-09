@@ -22,7 +22,7 @@ function loadCadenceHelper() {
 }
 
 test("Worker health advertises airtable low-burn cron build", () => {
-  assert.match(worker, /version: "0.10.476-voiceover-exceeds-render"/);
+  assert.match(worker, /version: "0.10.478-engagement-approve-blocks-comment"/);
   assert.match(worker, /studio_airtable_low_burn_cron_v1: true/);
   assert.match(worker, /studioCronAirtableCadence/);
 });
