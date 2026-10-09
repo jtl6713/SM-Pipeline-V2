@@ -72,3 +72,5 @@ Deploy Worker 0.10.487-engagement-action-visible. Engagement blocks write a hist
 Deploy Worker 0.10.488-engagement-click. A YouTube comment or like error is written into Engagement history instead of disappearing. Triggered 2026-10-09.
 
 Deploy Worker 0.10.489-engagement-ledger. Shrink the engagement ledger so Chicago Comment and Like can be saved under Airtable's 100k limit. Triggered 2026-10-09.
+
+2026-10-09: Deploy Worker new-city onboarding and generic profile routing. Create Brand/Market/Profile, use profile-local timezone, isolate generic city destination settings, and gate activation on platform readiness. PR #562.

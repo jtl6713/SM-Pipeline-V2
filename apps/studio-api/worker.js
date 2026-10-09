@@ -1,3 +1,4 @@
+import { createProfileOnboarding } from "./profile-onboarding.mjs";
 import {
   DESK_SETTING_NAME,
   DESK_CAPS_SETTING_NAME,
@@ -317,6 +318,8 @@ export default {
       const isAdminRepairControlRoute = url.pathname === "/api/admin/repair/control";
       const isOperationsRoute = url.pathname === "/api/operations";
       const isOperationsProfileRoute = /^\/api\/operations\/profiles\/rec[A-Za-z0-9]+$/.test(url.pathname);
+      const isProfileSetupRoute = /^\/api\/profiles\/rec[A-Za-z0-9]+\/setup$/.test(url.pathname);
+      const isProfilePlatformValidateRoute = /^\/api\/profiles\/rec[A-Za-z0-9]+\/platforms\/(instagram|tiktok|youtube|facebook)\/validate$/.test(url.pathname);
       const isOperationsDailyIdeasRoute = url.pathname === "/api/operations/ideas/run-daily";
       const isOperationsAutonomousRoute = url.pathname === "/api/operations/ideas/run-autonomous";
       const isOperationsOutputScheduleRoute = /^\/api\/operations\/outputs\/rec[A-Za-z0-9]+\/schedule$/.test(url.pathname);
@@ -1128,7 +1131,31 @@ export default {
         return brandLogo(request, env, authorization);
       }
 
+      if (isProfileSetupRoute) {
+        requirePermission(authorization, "tenant_admin");
+        const onboarding = studioProfileOnboardingHandlers();
+        if (request.method === "GET") return onboarding.getSetup(request, env, url, authorization);
+        if (request.method === "PATCH") {
+          assertWriteRequest(request, env);
+          return onboarding.patchSetup(request, env, url, authorization);
+        }
+        throw new HttpError(405, "Method not allowed");
+      }
+
+      if (isProfilePlatformValidateRoute) {
+        requirePermission(authorization, "tenant_admin");
+        if (request.method !== "POST") throw new HttpError(405, "Method not allowed");
+        assertWriteRequest(request, env);
+        return studioProfileOnboardingHandlers().validatePlatform(request, env, url, authorization);
+      }
+
       if (url.pathname === "/api/profiles") {
+        if (request.method === "POST") {
+          requirePermission(authorization, "tenant_admin");
+          assertWriteRequest(request, env);
+          return studioProfileOnboardingHandlers().createProfile(request, env, authorization);
+        }
+        if (request.method !== "GET") throw new HttpError(405, "Method not allowed");
         return listStudioContentProfiles(request, env, authorization);
       }
 
@@ -3729,7 +3756,18 @@ function requestedProfileId(url, payload) {
   return raw;
 }
 
+function studioNormalizeProfileKey(value) {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 80);
+}
+
 function studioThemeForProfile(record) {
+  const explicit = studioNormalizeProfileKey(f(record, "Profile_Key"));
+  if (explicit) return explicit;
   const hay = [
     f(record, "Profile_Name"),
     f(record, "Market_Name"),
@@ -3739,7 +3777,17 @@ function studioThemeForProfile(record) {
   if (hay.includes("los angeles") || hay.includes("la shining") || hay.includes("la -") || /\bla\b/.test(hay) || hay.includes("hollywood")) return "la";
   if (hay.includes("new york") || hay.includes("nyc") || hay.includes("manhattan")) return "nyc";
   if (hay.includes("miami") || hay.includes("miami shining")) return "miami";
-  return "chicago";
+  if (hay.includes("chicago")) return "chicago";
+  return studioNormalizeProfileKey(f(record, "Market_Name") || f(record, "Brand_Name") || f(record, "Profile_Name")) || "chicago";
+}
+
+function studioSettingsPrefixForTheme(theme) {
+  const normalized = studioNormalizeProfileKey(theme);
+  if (!normalized || normalized === "chicago") return "";
+  if (normalized === "la") return "LA_";
+  if (normalized === "nyc") return "NYC_";
+  if (normalized === "miami") return "MIAMI_";
+  return normalized.toUpperCase().replace(/[^A-Z0-9]+/g, "_") + "_";
 }
 
 const STUDIO_CITY_DESTINATION_KEYS = new Set([
@@ -3771,11 +3819,30 @@ async function studioThemeForPublishRecord(env, record) {
   if (!record) return "chicago";
   const direct = studioThemeForProfile(record);
   if (direct !== "chicago") return direct;
+
+  // Publish/output records often do not copy city fields. Resolve their linked
+  // Content Profile before falling back so a new city can never inherit the
+  // unprefixed Chicago destination credentials by accident.
+  const profileId = await studioContentProfileRecordIdForOutput(env, record).catch(() => null);
+  if (profileId) {
+    try {
+      const profile = await airtableFetch(env, STUDIO_IDEA_PROFILE_TABLE_ID, profileId);
+      return studioThemeForProfile(profile);
+    } catch {}
+  }
+
   const contentId = studioFirstLinkedId(f(record, "Content_Item"));
   if (!contentId || !env.AIRTABLE_CONTENT_TABLE_ID) return direct;
   try {
     const item = await airtableFetch(env, env.AIRTABLE_CONTENT_TABLE_ID, contentId);
-    return studioThemeForProfile(item);
+    const itemTheme = studioThemeForProfile(item);
+    if (itemTheme !== "chicago") return itemTheme;
+    const linkedProfileId = studioFirstLinkedId(f(item, "Content_Profile"));
+    if (linkedProfileId) {
+      const profile = await airtableFetch(env, STUDIO_IDEA_PROFILE_TABLE_ID, linkedProfileId);
+      return studioThemeForProfile(profile);
+    }
+    return itemTheme;
   } catch {
     return direct;
   }
@@ -3785,12 +3852,23 @@ function studioCityLabel(theme, record) {
   if (theme === "la") return "Los Angeles";
   if (theme === "nyc") return "New York";
   if (theme === "miami") return "Miami";
+  if (theme === "las-vegas") return "Las Vegas";
+  if (theme === "san-francisco") return "San Francisco";
+  if (theme === "new-orleans") return "New Orleans";
+  if (theme === "washington-dc") return "Washington DC";
+  if (theme === "boston") return "Boston";
   const market = String(f(record, "Market_Name") || "").trim();
   if (market) return market;
-  return "Chicago";
+  return theme && theme !== "chicago"
+    ? String(theme).split("-").filter(Boolean).map((part) => part.charAt(0).toUpperCase() + part.slice(1)).join(" ")
+    : "Chicago";
 }
 
 function studioScheduleTimeZoneFromTheme(theme) {
+  const normalized = studioNormalizeProfileKey(theme);
+  if (normalized === "las-vegas" || normalized === "san-francisco") return "America/Los_Angeles";
+  if (normalized === "new-orleans") return "America/Chicago";
+  if (normalized === "washington-dc" || normalized === "boston") return "America/New_York";
   return maeTimeZoneFromTheme(theme);
 }
 
@@ -3803,8 +3881,14 @@ async function studioScheduleTimeZoneForRecord(env, record, payload = null) {
   if (payload?.timezone || payload?.time_zone) return studioScheduleTimeZoneFromPayload(payload);
   try {
     const profile = await item4ProductionProfileRecord(env, record);
-    if (profile) return studioScheduleTimeZoneFromTheme(studioThemeForProfile(profile));
+    if (profile) {
+      const explicit = String(f(profile, "Timezone") || "").trim();
+      if (explicit) return maeNormalizeTimeZone(explicit);
+      return studioScheduleTimeZoneFromTheme(studioThemeForProfile(profile));
+    }
   } catch {}
+  const direct = String(f(record, "Timezone") || "").trim();
+  if (direct) return maeNormalizeTimeZone(direct);
   const theme = await studioThemeForPublishRecord(env, record).catch(() => studioThemeForProfile(record));
   return studioScheduleTimeZoneFromTheme(theme);
 }
@@ -3838,6 +3922,17 @@ function mapStudioContentProfile(record) {
     background_color: studioBackgroundColorForRecord(record),
     default_narration_voice_id: String(f(record, "Default_Narration_Voice_ID") || "").trim(),
     default_narration_voice_name: String(f(record, "Default_Narration_Voice_Name") || "").trim(),
+    profile_key: String(f(record, "Profile_Key") || "").trim(),
+    short_code: String(f(record, "Profile_Short_Code") || "").trim(),
+    state_region: String(f(record, "State_Region") || "").trim(),
+    country: String(f(record, "Country") || "").trim(),
+    website_url: String(f(record, "Website_URL") || "").trim(),
+    launch_date: String(f(record, "Launch_Date") || "").trim(),
+    setup_status: String(f(record, "Profile_Setup_Status") || "").trim(),
+    facebook_page_id: String(f(record, "Facebook_Page_ID") || "").trim(),
+    instagram_business_account_id: String(f(record, "Instagram_Business_Account_ID") || "").trim(),
+    youtube_channel_id: String(f(record, "YouTube_Channel_ID") || "").trim(),
+    tiktok_handle: String(f(record, "TikTok_Handle") || "").trim(),
   };
 }
 
@@ -3999,6 +4094,26 @@ async function listStudioContentProfiles(request, env, authorization) {
     ok: true,
     records: profiles.map(mapStudioContentProfile),
     default_profile_id: selected.id,
+    can_create_profile: Boolean(authorization?.permissions?.tenant_admin),
+  });
+}
+
+function studioProfileOnboardingHandlers() {
+  return createProfileOnboarding({
+    HttpError,
+    f,
+    arrayOrEmpty,
+    listRecords,
+    airtableFetch,
+    studioUpsertSetting,
+    studioActivePipelineSettings,
+    mapStudioContentProfile,
+    studioThemeForProfile,
+    studioCityLabel,
+    studioSettingsPrefixForTheme,
+    STUDIO_IDEA_PROFILE_TABLE_ID,
+    respond,
+    readJsonBody,
   });
 }
 
@@ -18659,14 +18774,12 @@ function studioNormalizeSimilarProfile(value) {
   if (raw === "la" || raw === "los angeles" || raw === "losangeles") return "la";
   if (raw === "nyc" || raw === "new york" || raw === "newyork") return "nyc";
   if (raw === "miami" || raw === "miami shining" || raw === "miamishining") return "miami";
-  return "chicago";
+  if (raw === "chicago" || raw === "chicagoshining") return "chicago";
+  return studioNormalizeProfileKey(raw) || "chicago";
 }
 
 function studioSimilarProfileLabel(theme) {
-  if (theme === "la") return "Los Angeles";
-  if (theme === "nyc") return "New York";
-  if (theme === "miami") return "Miami";
-  return "Chicago";
+  return studioCityLabel(studioNormalizeSimilarProfile(theme), {});
 }
 
 function parseSimilarWatchlist(raw) {
@@ -18805,12 +18918,12 @@ async function studioEnsureSimilarWatchlist(env) {
 
 async function studioResolveSimilarTimesTheme(env, url, authorization) {
   const raw = String(url?.searchParams?.get("profile") || url?.searchParams?.get("theme") || "").trim();
-  if (["chicago", "la", "nyc", "miami"].includes(raw.toLowerCase())) return raw.toLowerCase();
   if (/^rec[A-Za-z0-9]+$/.test(raw) && authorization) {
     const profiles = await resolveAuthorizedContentProfiles(env, authorization).catch(() => []);
     const found = profiles.find((record) => record.id === raw);
     if (found) return studioThemeForProfile(found);
   }
+  if (raw) return studioNormalizeSimilarProfile(raw);
   return "chicago";
 }
 
@@ -30475,7 +30588,7 @@ async function studioActivePipelineSettings(env, names, contextRecord) {
   const wanted = [...new Set((names || []).map((name) => String(name || "").trim()).filter(Boolean))];
   if (!wanted.length) return {};
   const theme = contextRecord ? await studioThemeForPublishRecord(env, contextRecord) : "chicago";
-  const prefix = theme === "la" ? "LA_" : theme === "nyc" ? "NYC_" : theme === "miami" ? "MIAMI_" : "";
+  const prefix = studioSettingsPrefixForTheme(theme);
   const fetchNames = [...wanted];
   if (prefix) {
     for (const name of wanted) fetchNames.push(`${prefix}${name}`);

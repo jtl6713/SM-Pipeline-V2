@@ -106,3 +106,5 @@ Deploy Studio UI 0.6.534-pages-path-bust. Rename app-item4-0625.js -> app-item4-
 2026-10-09: Deploy UI 0.6.547-engagement-click. Chicago Comment and Like show Sending in the history panel as soon as they are clicked.
 
 2026-10-09: Deploy UI 0.6.548-engagement-ledger. Engagement history keeps the server message when a click cannot be saved.
+
+2026-10-09: Deploy Studio New Profile onboarding. Add guided city setup with Las Vegas, San Francisco, New Orleans, Washington DC, Boston presets plus IG/TT/YT/FB create-or-connect workflow. PR #562.
