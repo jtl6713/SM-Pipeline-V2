@@ -42,6 +42,8 @@ test("new profile onboarding module is valid ESM and never requires a token in p
   assert.match(source, /Instagram Business Account ID/);
   assert.match(source, /city-specific TikTok OAuth worker/);
   assert.match(source, /city-specific YouTube uploader\/OAuth service/);
+  assert.match(source, /Active: false/);
+  assert.match(source, /fields\.Active = true/);
 });
 
 test("Studio worker supports generic city keys, profile-local timezone, and onboarding routes", async () => {
