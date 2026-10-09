@@ -48,7 +48,7 @@ test("new profile onboarding module is valid ESM and never requires a token in p
 
 test("Studio worker supports generic city keys, profile-local timezone, and onboarding routes", async () => {
   const source = await readFile(workerPath, "utf8");
-  assert.match(source, /import \{ createProfileOnboarding \} from "\.\/profile-onboarding\.js";/);
+  assert.match(source, /import \{ createProfileOnboarding \} from "\.\/profile-onboarding\.mjs";/);
   assert.match(source, /isProfileSetupRoute/);
   assert.match(source, /isProfilePlatformValidateRoute/);
   assert.match(source, /studioSettingsPrefixForTheme/);
