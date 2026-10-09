@@ -19244,17 +19244,24 @@ const STUDIO_SIMILAR_SEEDS = Object.freeze([
 
 function studioNormalizeSimilarProfile(value) {
   const raw = String(value || "").trim().toLowerCase();
-  if (raw === "la" || raw === "los angeles" || raw === "losangeles") return "la";
-  if (raw === "nyc" || raw === "new york" || raw === "newyork") return "nyc";
+  if (!raw) return "chicago";
+  if (raw === "la" || raw === "los angeles" || raw === "losangeles" || raw === "los-angeles") return "la";
+  if (raw === "nyc" || raw === "new york" || raw === "newyork" || raw === "new-york") return "nyc";
   if (raw === "miami" || raw === "miami shining" || raw === "miamishining") return "miami";
-  return "chicago";
+  if (raw === "chicago" || raw === "chicago shining" || raw === "chicagoshining") return "chicago";
+  return profileSetupSlug(raw) || "chicago";
 }
 
 function studioSimilarProfileLabel(theme) {
   if (theme === "la") return "Los Angeles";
   if (theme === "nyc") return "New York";
   if (theme === "miami") return "Miami";
-  return "Chicago";
+  if (theme === "chicago") return "Chicago";
+  return String(theme || "")
+    .split("-")
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ") || "Chicago";
 }
 
 function parseSimilarWatchlist(raw) {
@@ -19393,13 +19400,17 @@ async function studioEnsureSimilarWatchlist(env) {
 
 async function studioResolveSimilarTimesTheme(env, url, authorization) {
   const raw = String(url?.searchParams?.get("profile") || url?.searchParams?.get("theme") || "").trim();
-  if (["chicago", "la", "nyc", "miami"].includes(raw.toLowerCase())) return raw.toLowerCase();
-  if (/^rec[A-Za-z0-9]+$/.test(raw) && authorization) {
-    const profiles = await resolveAuthorizedContentProfiles(env, authorization).catch(() => []);
-    const found = profiles.find((record) => record.id === raw);
-    if (found) return studioThemeForProfile(found);
-  }
-  return "chicago";
+  if (!raw) return "chicago";
+  const normalized = studioNormalizeSimilarProfile(raw);
+  if (!authorization) return normalized;
+  const profiles = await resolveAuthorizedContentProfiles(env, authorization).catch(() => []);
+  const found = profiles.find((record) =>
+    record.id === raw
+      || studioThemeForProfile(record) === normalized
+      || String(f(record, "Profile_Name") || "").trim().toLowerCase() === raw.toLowerCase()
+      || String(f(record, "Market_Name") || "").trim().toLowerCase() === raw.toLowerCase()
+  );
+  return found ? studioThemeForProfile(found) : normalized;
 }
 
 function studioTimedWatchlistAccounts(accounts, theme, platform) {
@@ -19565,7 +19576,7 @@ async function getInsightsWatchlist(request, env) {
     ok: true,
     accounts,
     message: accounts.length
-      ? "Chicago watchlist loaded. YouTube can be timed from public posts. Instagram timing is paused pending Meta permission; TikTok and Facebook are reference only."
+      ? "Similar-account watchlist loaded. YouTube can be timed from public posts. Instagram timing is paused pending Meta permission; TikTok and Facebook are reference only."
       : "Add a YouTube handle to start similar-account timing.",
   });
 }
@@ -20955,12 +20966,14 @@ async function postInsightsDiscover(request, env, url, authorization) {
 }
 
 function engagementThemeContextRecord(theme) {
+  const city = studioSimilarProfileLabel(theme);
   const label =
-    theme === "la" ? "Los Angeles Shining"
-      : theme === "nyc" ? "New York Shining"
-        : theme === "miami" ? "Miami Shining"
-          : "ChicagoShining";
-  return { id: `engagement-theme-${theme}`, fields: { Profile_Name: label, Market_Name: label, Brand_Name: label } };
+    theme === "chicago" ? "ChicagoShining"
+      : theme === "la" ? "Los Angeles Shining"
+        : theme === "nyc" ? "New York Shining"
+          : theme === "miami" ? "Miami Shining"
+            : `${city} Shining`;
+  return { id: `engagement-theme-${theme}`, fields: { Profile_Name: label, Market_Name: city, Brand_Name: label } };
 }
 
 function engagementDeps(theme = "chicago") {
@@ -31064,10 +31077,23 @@ function studioOutputReadyForPublishApproval(record) {
 
 async function studioPipelineSettingsProfileRecord(env, contextRecord) {
   if (!contextRecord) return null;
-  if (String(f(contextRecord, "Profile_Name") || "").trim() && contextRecord.id) return contextRecord;
+  if (
+    String(f(contextRecord, "Profile_Name") || "").trim()
+      && /^rec[A-Za-z0-9]+$/.test(String(contextRecord.id || ""))
+  ) {
+    return contextRecord;
+  }
   const profileId = await studioContentProfileRecordIdForOutput(env, contextRecord).catch(() => null);
-  if (!profileId) return null;
-  return airtableFetch(env, STUDIO_IDEA_PROFILE_TABLE_ID, profileId).catch(() => null);
+  if (profileId) {
+    return airtableFetch(env, STUDIO_IDEA_PROFILE_TABLE_ID, profileId).catch(() => null);
+  }
+  // Synthetic contexts (for example Engagement) carry a city/theme rather than
+  // a Content Profile record id. Resolve them back to the actual active profile
+  // so they use the same profile-scoped destinations as publishing.
+  const theme = studioThemeForProfile(contextRecord);
+  if (!theme) return null;
+  const profiles = await listContentProfileRecords(env).catch(() => []);
+  return profiles.find((record) => Boolean(f(record, "Active")) && studioThemeForProfile(record) === theme) || null;
 }
 
 function studioLegacyDestinationPrefix(theme) {
