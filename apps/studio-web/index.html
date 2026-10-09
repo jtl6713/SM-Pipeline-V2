@@ -56,6 +56,7 @@
  <button class="nav-item" data-page="engagement">Engagement</button>
  <button class="nav-item" data-page="music">Music Manager</button>
  <button class="nav-item" data-page="library">Asset Manager</button>
+ <button class="nav-item" data-page="new-profile">New Profile</button>
  <button class="nav-item" data-page="operations" id="navOperations" hidden>Operations <span class="ops-nav-badge" id="navOperationsBadge" hidden></span></button>
  <button class="nav-item nav-item-footer-only" data-page="support">Help</button>
  </nav>
@@ -1599,6 +1600,47 @@
  </div>
  </section>
 
+
+ <section id="page-new-profile" class="page">
+ <style>
+ .np-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:1rem}.np-platform-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:1rem}.np-platform{border:1px solid var(--border,#d8dee6);border-radius:12px;padding:1rem}.np-platform h3{margin:.1rem 0 .75rem}.np-platform-fields{display:grid;gap:.65rem}.np-actions{display:flex;gap:.65rem;flex-wrap:wrap;margin-top:1rem}.np-readiness{display:grid;gap:.65rem;margin-top:1rem}.np-readiness-head,.np-ready-row{display:flex;justify-content:space-between;gap:1rem;align-items:center}.np-ready-row{border-top:1px solid var(--border,#d8dee6);padding-top:.65rem}.np-ready-row>div:first-child{display:grid;gap:.15rem}.np-ready-actions{display:flex;gap:.4rem;flex-wrap:wrap;justify-content:flex-end}.np-status{font-size:.78rem;font-weight:700}.np-status.ready{color:#19703c}.np-create-help{margin:.45rem 0 0;font-size:.85rem}.np-create-help[hidden]{display:none}.np-platform-fields[hidden]{display:none}@media(max-width:900px){.np-grid,.np-platform-grid{grid-template-columns:1fr}.np-ready-row{align-items:flex-start;flex-direction:column}.np-ready-actions{justify-content:flex-start}}
+ </style>
+ <div class="page-heading"><div><span class="eyebrow">Setup</span><h1>New Profile</h1><p>Create a new Shining City, configure its local timezone and content defaults, then create or connect Instagram, TikTok, YouTube, and Facebook.</p></div></div>
+ <div class="form-message" id="newProfileMessage" aria-live="polite"></div>
+ <section class="panel">
+ <div class="panel-heading"><div><h2>City profile</h2><p>Studio creates the Brand, Market, and Content Profile together. Scheduling remains unscheduled until the normal scheduling flow runs.</p></div></div>
+ <label class="form-field" id="npResumeWrap" hidden><span>Resume an unfinished setup</span><select id="npResume"><option value="">Start a new profile</option></select></label>
+ <div class="np-grid">
+ <label class="form-field"><span>City</span><input id="npCity" placeholder="Las Vegas"></label>
+ <label class="form-field"><span>State / region</span><input id="npState" placeholder="Nevada"></label>
+ <label class="form-field"><span>State code</span><input id="npStateCode" maxlength="8" placeholder="NV"></label>
+ <label class="form-field"><span>Timezone</span><select id="npTimezone"><option value="America/Los_Angeles">Pacific — America/Los_Angeles</option><option value="America/Chicago">Central — America/Chicago</option><option value="America/New_York">Eastern — America/New_York</option><option value="America/Denver">Mountain — America/Denver</option></select></label>
+ <label class="form-field"><span>Brand name</span><input id="npBrand" placeholder="Las Vegas Shining"></label>
+ <label class="form-field"><span>Profile key</span><input id="npKey" placeholder="las-vegas"></label>
+ <label class="form-field"><span>Short code</span><input id="npShort" maxlength="10" placeholder="LAS"></label>
+ <label class="form-field"><span>Website <em>optional</em></span><input id="npWebsite" type="url" placeholder="https://..."></label>
+ <label class="form-field"><span>Country</span><input id="npCountry" value="United States"></label>
+ <label class="form-field"><span>Country code</span><input id="npCountryCode" value="US" maxlength="8"></label>
+ <label class="form-field"><span>Launch date <em>optional</em></span><input id="npLaunchDate" type="date"></label>
+ <label class="form-field"><span>Five default hashtags</span><input id="npHashtags" placeholder="#LasVegas #LasVegasShining #CityTravel #ExploreLasVegas #Travel"></label>
+ </div>
+ <label class="form-field"><span>Priority locations <em>optional</em></span><textarea id="npLocations" rows="3" placeholder="Strip, Fremont Street, Arts District, Red Rock Canyon..."></textarea></label>
+ <label class="form-field"><span>Local context <em>optional</em></span><textarea id="npContext" rows="3" placeholder="City-specific guidance for the Idea Agent and content generation."></textarea></label>
+ </section>
+
+ <section class="panel">
+ <div class="panel-heading"><div><h2>Platforms</h2><p>Choose whether the account already exists, needs to be created, or should be skipped. Account creation opens the platform's official flow; Studio then stores only non-secret identifiers and validates the publishing connection.</p></div></div>
+ <div class="np-platform-grid">
+ <div class="np-platform"><h3>Instagram</h3><label class="form-field"><span>Account</span><select id="np-instagram-intent"><option value="existing">I already have it</option><option value="create">Create a new account</option><option value="skip">Skip for now</option></select></label><p class="np-create-help" id="np-instagram-create" hidden>After the Instagram account is created, convert/connect it for professional publishing through Meta, then return here with the Business Account ID.</p><div class="np-platform-fields" id="np-instagram-details"><label class="form-field"><span>Handle</span><input id="np-instagram-handle" placeholder="LasVegasShining"></label><label class="form-field"><span>Instagram Business Account ID</span><input id="np-instagram-id"></label><input id="np-instagram-service" type="hidden"></div></div>
+ <div class="np-platform"><h3>TikTok</h3><label class="form-field"><span>Account</span><select id="np-tiktok-intent"><option value="existing">I already have it</option><option value="create">Create a new account</option><option value="skip">Skip for now</option></select></label><p class="np-create-help" id="np-tiktok-create" hidden>Create the TikTok account in TikTok's official flow, then return to connect the city-specific OAuth worker.</p><div class="np-platform-fields" id="np-tiktok-details"><label class="form-field"><span>Handle</span><input id="np-tiktok-handle" placeholder="LasVegasShining"></label><label class="form-field"><span>TikTok OAuth worker URL</span><input id="np-tiktok-service" type="url" placeholder="https://...workers.dev"></label><input id="np-tiktok-id" type="hidden"></div></div>
+ <div class="np-platform"><h3>YouTube</h3><label class="form-field"><span>Channel</span><select id="np-youtube-intent"><option value="existing">I already have it</option><option value="create">Create a new channel</option><option value="skip">Skip for now</option></select></label><p class="np-create-help" id="np-youtube-create" hidden>YouTube channel creation is completed in Google's official flow. Return here with the Channel ID and uploader/OAuth service.</p><div class="np-platform-fields" id="np-youtube-details"><label class="form-field"><span>Channel handle <em>optional</em></span><input id="np-youtube-handle"></label><label class="form-field"><span>YouTube Channel ID</span><input id="np-youtube-id"></label><label class="form-field"><span>YouTube uploader/OAuth service URL</span><input id="np-youtube-service" type="url" placeholder="https://..."></label></div></div>
+ <div class="np-platform"><h3>Facebook</h3><label class="form-field"><span>Page</span><select id="np-facebook-intent"><option value="existing">I already have it</option><option value="create">Create a new Page</option><option value="skip">Skip for now</option></select></label><p class="np-create-help" id="np-facebook-create" hidden>Create the Page in Facebook's official flow, then return here with the Page ID. Publishing credentials stay in Pipeline Settings, not the profile record.</p><div class="np-platform-fields" id="np-facebook-details"><label class="form-field"><span>Page name / handle <em>optional</em></span><input id="np-facebook-handle"></label><label class="form-field"><span>Facebook Page ID</span><input id="np-facebook-id"></label><input id="np-facebook-service" type="hidden"></div></div>
+ </div>
+ <div class="np-actions"><button type="button" class="primary-button" id="npCreate">Create profile</button><button type="button" class="secondary-button" id="npSaveSetup" hidden>Save setup</button><button type="button" class="primary-button" id="npActivate" hidden disabled>Activate profile</button></div>
+ </section>
+ <section class="panel"><div class="panel-heading"><div><h2>Readiness</h2><p>A platform is ready only when its destination and publishing connection are configured. You can save and resume without activating everything at once.</p></div></div><div class="np-readiness" id="npReadiness"></div></section>
+ </section>
+
  <section id="page-operations" class="page">
  <div class="page-heading">
  <div><span class="eyebrow">Control</span><h1>Operations</h1><p>Open one Control tool at a time from the text links. Quality Agent has a Recap of pipeline blocks in everyday language, plus the check catalog and activity log.</p></div>
@@ -2451,6 +2493,7 @@
  <script src="/assets/timed-script.js?v=0.6.545-timeline-back-list"></script>
  <script src="/assets/app-item4-1008.js?v=0.6.545-timeline-back-list"></script>
  <script src="/assets/all-profiles-overview-1007.js?v=0.6.545-timeline-back-list"></script>
+ <script src="/assets/new-profile.js?v=0.6.546-new-profile-onboarding"></script>
  <script src="/assets/insights-0622.js?v=0.6.365-first-party-analytics-reconciled"></script>
  <script src="/assets/engagement-1008.js?v=0.6.545-timeline-back-list"></script>
  <script src="/assets/ai-api-footer.js?v=0.6.427-primary-ai-alert"></script>
