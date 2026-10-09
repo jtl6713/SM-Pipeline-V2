@@ -120,22 +120,35 @@ test("provider authorization / rate-limit classification and retry safety", () =
 
 test("idempotent comment publishing and creator cooldowns", () => {
   const key = makeIdempotencyKey("chicago", "youtube", "comment", "vid1");
-  const actions = [
-    {
-      idempotency_key: key,
-      execution_status: "published",
-      action_type: "comment",
-      platform: "youtube",
-      creator_id: "ch1",
-      profile: "chicago",
-      approved_at: new Date().toISOString(),
-      executed_at: new Date().toISOString(),
-      created_at: new Date().toISOString(),
-    },
-  ];
-  assert.ok(findDuplicateAction(actions, key));
-  assert.equal(creatorRecentlyEngaged(actions, "ch1", "youtube", 72), true);
-  assert.equal(dailyActionCount(actions, "chicago", "youtube", "comment"), 1);
+  const published = {
+    idempotency_key: key,
+    execution_status: "published",
+    approval_status: "approved",
+    action_type: "comment",
+    platform: "youtube",
+    creator_id: "ch1",
+    profile: "chicago",
+    approved_at: new Date().toISOString(),
+    executed_at: new Date().toISOString(),
+    created_at: new Date().toISOString(),
+  };
+  const approvedOnly = {
+    ...published,
+    execution_status: "pending",
+    executed_at: null,
+  };
+  const queued = {
+    ...published,
+    execution_status: "queued",
+    executed_at: null,
+  };
+  assert.ok(findDuplicateAction([published], key));
+  assert.equal(findDuplicateAction([approvedOnly], key), null);
+  assert.equal(findDuplicateAction([queued], key), null);
+  assert.equal(creatorRecentlyEngaged([published], "ch1", "youtube", 72), true);
+  assert.equal(creatorRecentlyEngaged([approvedOnly], "ch1", "youtube", 72), false);
+  assert.equal(dailyActionCount([published], "chicago", "youtube", "comment"), 1);
+  assert.equal(dailyActionCount([approvedOnly, queued], "chicago", "youtube", "comment"), 0);
 });
 
 test("quality agent error classification signatures are distinct", () => {
@@ -172,7 +185,7 @@ test("worker wires engagement routes, cron, and version bump", () => {
   assert.match(worker, /from "\.\/engagement-service\.mjs"/);
   assert.match(worker, /\/api\/engagement\//);
   assert.match(worker, /studio_engagement_v1:\s*true/);
-  assert.match(worker, /0\.10\.477-engagement-stageb-persist/);
+  assert.match(worker, /0\.10\.478-engagement-approve-blocks-comment/);
   assert.match(worker, /studioRunEngagementDiscovery/);
   assert.match(worker, /studioEngagementCron/);
   assert.match(worker, /engagementThemeContextRecord/);

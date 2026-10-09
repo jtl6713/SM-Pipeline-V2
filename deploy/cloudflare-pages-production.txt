@@ -81,3 +81,5 @@ Deploy Studio UI 0.6.534-pages-path-bust. Rename app-item4-0625.js -> app-item4-
 2026-10-08: Deploy Production Rendering per-photo cards with descriptive photo labels instead of opaque asset GUIDs; cache-busted app-item4-1008.js.
 
 2026-10-09: Deploy UI 0.6.536-engagement-stageb. Engagement sends Stage B checkbox on actions and auto-saves on toggle.
+
+2026-10-09: Deploy UI 0.6.537-engagement-approve-comment. Cache-bust Engagement after Approve-blocks-Comment fix.

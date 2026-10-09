@@ -491,9 +491,8 @@ export function creatorRecentlyEngaged(actions, creatorId, platform, minHours = 
     if (String(action.creator_id || "").toLowerCase() !== key) return false;
     if (normalizeEngagementPlatform(action.platform) !== normalizeEngagementPlatform(platform)) return false;
     if (!["comment", "like"].includes(action.action_type)) return false;
-    if (!["approved", "published", "manual_completed"].includes(action.approval_status) && action.execution_status !== "published") {
-      return false;
-    }
+    // Only real publishes count. Stage A Approve must not block Stage B Comment.
+    if (action.execution_status !== "published") return false;
     const ts = Date.parse(action.executed_at || action.approved_at || action.created_at || "");
     return Number.isFinite(ts) && ts >= cutoff;
   });
@@ -504,7 +503,8 @@ export function dailyActionCount(actions, profile, platform, actionType, dayIso 
     if (normalizeEngagementProfile(action.profile) !== normalizeEngagementProfile(profile)) return false;
     if (platform && normalizeEngagementPlatform(action.platform) !== normalizeEngagementPlatform(platform)) return false;
     if (action.action_type !== actionType) return false;
-    if (!["published", "queued", "approved"].includes(action.execution_status) && action.approval_status !== "approved") return false;
+    // Count only API publishes toward daily limits — not Approve/queue rows.
+    if (action.execution_status !== "published") return false;
     const stamp = String(action.executed_at || action.approved_at || action.created_at || "").slice(0, 10);
     return stamp === dayIso;
   }).length;
@@ -522,7 +522,9 @@ export function makeIdempotencyKey(profile, platform, actionType, postId) {
 export function findDuplicateAction(actions, idempotencyKey) {
   return (actions || []).find((action) => {
     if (action.idempotency_key !== idempotencyKey) return false;
-    return ["published", "queued", "approved", "ambiguous"].includes(action.execution_status);
+    // Approve writes the same idempotency key with pending/queued. Only block
+    // when an API attempt already published or returned ambiguous.
+    return ["published", "ambiguous"].includes(action.execution_status);
   }) || null;
 }
 
