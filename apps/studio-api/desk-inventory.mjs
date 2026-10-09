@@ -1161,6 +1161,33 @@ export function classifyNativePhotoApproveIncomplete(row) {
   }, row);
 }
 
+/** Output_Status stuck Ready for Review after Approve (phantom All-Profiles Awaiting Approval). */
+export function isAwaitingApprovalStaleRfr(row) {
+  if (String(row?.test_run_id || "").trim()) return false;
+  if (Boolean(row?.do_not_publish)) return false;
+  if (row?.published_at || String(row?.publish_status || "").trim() === "Published") return false;
+  if (String(row?.output_status || "").trim() !== "Ready for Review") return false;
+  const review = String(row?.review_status || "").trim();
+  const publish = String(row?.publish_status || "").trim();
+  // Approved + publish armed means Approve already ran; Output_Status never advanced.
+  if (review !== "Approved") return false;
+  return ["Ready to Schedule", "Ready to Publish", "Scheduled", "Publishing"].includes(publish);
+}
+
+export function classifyAwaitingApprovalStaleRfr(row) {
+  if (!isAwaitingApprovalStaleRfr(row)) return null;
+  const recordId = String(row?.id || row?.record_id || "").trim();
+  const outputId = String(row?.output_id || recordId || "").trim();
+  return withDeskIdentity({
+    kind: "awaiting_approval_stale_rfr",
+    class: "transient",
+    record_id: recordId || null,
+    fingerprint: fingerprint("awaiting_approval_stale_rfr", recordId || outputId, "approved_publish_armed"),
+    actor: "worker_heal",
+    diagnosis: "Output_Status is still Ready for Review after Approve (Review_Status=Approved and Publish_Status Ready to Schedule/Publish/Scheduled). All-Profiles Awaiting Approval counted the stale Output_Status while Pipeline Awaiting Approval correctly showed empty. Repair: set Output_Status=Approved for Publishing (do not re-Approve). Overview metrics must use studio_state Ready for Review, not raw Output_Status. Proven: Miami Outputs 2154/2155 (Inside PAMM Design, CI 434) and 1841 (Brickell or Coconut Grove?, CI 380).",
+  }, row);
+}
+
 export function classifyNativeCover(row) {
   const recordId = String(row?.id || row?.record_id || "").trim();
   const outputStatus = String(row?.output_status || "").trim();
@@ -1287,6 +1314,7 @@ export const CLASSIFIER_KINDS = Object.freeze([
   "native_cover_missing",
   "native_photo_review_strand",
   "native_photo_approve_incomplete",
+  "awaiting_approval_stale_rfr",
   "rfr_locked_missing_deliverable",
   "health_down",
   "variant_preparing",
