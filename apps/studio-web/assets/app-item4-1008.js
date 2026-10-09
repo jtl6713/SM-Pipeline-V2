@@ -260,7 +260,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.541-ship-verify";
+  const BUILD_ID = "item4-0.6.542-approve-all-batch";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -337,6 +337,10 @@
   let pipelineCountdownTimer = null;
   let pipelineNextRefreshAt = 0;
   let pipelinePollInFlight = false;
+  let pipelineApproveAllJobId = "";
+  let pipelineApproveAllPollTimer = null;
+  let pipelineApproveAllCanRetry = false;
+  let pipelineApproveAllFailedCount = 0;
   let operationsTimezone = null;
   let operationsAnalyticsAccounts = [];
   let operationsWatchlistAll = [];
@@ -14902,7 +14906,7 @@
     creativeRequestChanges: "Save the current music and voiceover levels and render a new preview. Approve stays locked until that preview is ready.",
     "Save draft": "Save these edits as a draft without creating a new rendered preview. Unavailable in watch-only review.",
     creativeApprovePreview: "Approve this output for publishing. Immediate is the default. Set a local date and time to override. Instagram, Facebook, and YouTube auto-publish; TikTok is a draft.",
-    pipelineApproveAll: "Approve every Ready for Review output. Immediate is the default unless Use default schedules is on. Automatic schedules spread across the week; same-platform times stay at least 3 hours apart. Instagram, Facebook, and YouTube auto-publish; TikTok is a draft.",
+    pipelineApproveAll: "Approve every Ready for Review output as a background batch with live progress. Immediate is the default unless Use default schedules is on. Automatic schedules spread across the week; same-platform times stay at least 3 hours apart. Instagram, Facebook, and YouTube auto-publish; TikTok is a draft.",
     creativeUnlockTitles: "Unlock per-photo titles after approval so you can start a new title version. Publishing stays locked.",
     closeCreativeEditor: "Close the creative editor. Unsaved changes are not preserved.",
   };
@@ -15042,7 +15046,7 @@
     saveProductionRequest: "Save the current draft without promoting it into the pipeline.",
     syncProductionRequestDirectives: "Copy advanced options from this form onto the requested platform outputs.",
     promoteProductionRequest: "Approve this request and send it into the production pipeline. Publishing stays a later step.",
-    pipelineApproveAll: "Approve every Ready for Review output on this page. Leave Use default schedules off to publish now; turn it on to fill empty times from each platform’s suggested slot. A time you already typed still wins.",
+    pipelineApproveAll: "Approve every Ready for Review output on this page as a durable background batch. Leave Use default schedules off to publish now; turn it on to fill empty times from each platform’s suggested slot. A time you already typed still wins. Failed rows can be retried without re-approving successes.",
     pipelineUseDefaultSchedules: "When on, Approve All uses each platform’s suggested publish window for any row that does not already have a time. Studio then spreads automatic times across days and keeps same-platform posts at least 3 hours apart. Off means empty times publish now, still staggered if two rows on the same platform would go at once. New requests already come with suggested times filled in.",
     prVoicePreview: "Play a short sample of the selected voice. This does not generate your script.",
     prMusicPreview: "Play a preview of the selected music track.",
@@ -17358,24 +17362,130 @@
     }));
   }
 
+  function stopPipelineApproveAllPoll() {
+    if (pipelineApproveAllPollTimer) {
+      clearTimeout(pipelineApproveAllPollTimer);
+      pipelineApproveAllPollTimer = null;
+    }
+  }
+
+  function pipelineApproveAllProgressText(result) {
+    const approved = Number(result?.approved_count || 0);
+    const failed = Number(result?.failed_count || 0);
+    const total = Number(result?.total || 0);
+    if (result?.message) return String(result.message);
+    return `${approved} of ${total} approved · ${failed} failed`;
+  }
+
+  function applyPipelineApproveAllProgress(result, { terminal = false } = {}) {
+    const button = $("pipelineApproveAll");
+    const status = String(result?.status || "");
+    const running = status === "queued" || status === "running";
+    pipelineApproveAllJobId = String(result?.job_id || pipelineApproveAllJobId || "").trim();
+    pipelineApproveAllFailedCount = Number(result?.failed_count || 0);
+    pipelineApproveAllCanRetry = Boolean(result?.can_retry);
+    setPipelineLiveHint(pipelineApproveAllProgressText(result));
+    if (button) {
+      button.dataset.busy = running ? "true" : "false";
+      if (running) {
+        button.disabled = true;
+        button.textContent = "Approving…";
+      } else if (pipelineApproveAllCanRetry && pipelineApproveAllFailedCount > 0) {
+        button.disabled = false;
+        button.textContent = `Retry failed (${pipelineApproveAllFailedCount})`;
+        button.dataset.retryJob = pipelineApproveAllJobId;
+      } else {
+        button.dataset.retryJob = "";
+        updatePipelineApproveAllButton();
+      }
+    }
+    if (terminal || !running) {
+      stopPipelineApproveAllPoll();
+      if (button && !pipelineApproveAllCanRetry) {
+        button.dataset.busy = "false";
+        updatePipelineApproveAllButton();
+      }
+    }
+  }
+
+  async function pollPipelineApproveAllJob(jobId) {
+    const id = String(jobId || pipelineApproveAllJobId || "").trim();
+    if (!id) return;
+    try {
+      const result = await api(`/api/outputs/approve-all?job_id=${encodeURIComponent(id)}`, {
+        method: "GET",
+        timeoutMs: 15000,
+      });
+      const status = String(result?.status || "");
+      const running = status === "queued" || status === "running";
+      applyPipelineApproveAllProgress(result, { terminal: !running });
+      if (!running) {
+        pipelineScheduleDrafts.clear();
+        pipelineTiktokUrlDrafts.clear();
+        pipelineYoutubeUrlDrafts.clear();
+        await refreshPipelineOutputs({ silent: true, force: true }).catch(() => null);
+        if (pipelineApproveAllCanRetry) {
+          setPipelineLiveHint(pipelineApproveAllProgressText(result));
+        } else if (Number(result?.approved_count || 0) > 0) {
+          setPipelineLiveHint(result.message || `Approved ${result.approved_count}. Publishers start from the approved queue.`);
+        }
+        return;
+      }
+    } catch (error) {
+      setPipelineLiveHint(error?.message || "Approve All progress check failed — retrying…");
+    }
+    stopPipelineApproveAllPoll();
+    pipelineApproveAllPollTimer = setTimeout(() => {
+      pollPipelineApproveAllJob(id).catch(() => null);
+    }, 1500);
+  }
+
+  function startPipelineApproveAllJobWatch(result) {
+    const jobId = String(result?.job_id || "").trim();
+    if (!jobId) {
+      applyPipelineApproveAllProgress(result || {}, { terminal: true });
+      return;
+    }
+    applyPipelineApproveAllProgress(result, { terminal: false });
+    stopPipelineApproveAllPoll();
+    pipelineApproveAllPollTimer = setTimeout(() => {
+      pollPipelineApproveAllJob(jobId).catch(() => null);
+    }, 900);
+  }
+
   function updatePipelineApproveAllButton() {
     const button = $("pipelineApproveAll");
     if (!button) return;
+    if (button.dataset.busy === "true") {
+      button.disabled = true;
+      button.textContent = "Approving…";
+      return;
+    }
+    if (pipelineApproveAllCanRetry && pipelineApproveAllFailedCount > 0 && pipelineApproveAllJobId) {
+      button.disabled = false;
+      button.dataset.azAuto = "";
+      button.dataset.retryJob = pipelineApproveAllJobId;
+      button.textContent = `Retry failed (${pipelineApproveAllFailedCount})`;
+      button.title = "Retry only outputs that failed in the last Approve All batch. Already approved or published rows are left alone.";
+      return;
+    }
     const readyManual = pipelineManualApprovableOutputs();
     const readyAz = pipelineApprovableOutputs().filter((record) => pipelineRecordIsAzAutoQueue(record));
     if (!readyManual.length && readyAz.length) {
       button.disabled = true;
       button.dataset.azAuto = "true";
+      button.dataset.retryJob = "";
       button.textContent = `Auto-scheduling (${readyAz.length})…`;
       button.title = "AZ finished-video queues itself after the public cover and caption are ready. You can still open a row to edit times.";
       return;
     }
     button.dataset.azAuto = "";
+    button.dataset.retryJob = "";
     button.title = readyAz.length
       ? `${readyAz.length} AZ finished-video output(s) auto-schedule separately. Approve All covers the other Ready rows.`
-      : "";
+      : "Approve every Ready for Review output. Runs as a background batch so Studio stays responsive.";
     const count = readyManual.length;
-    button.disabled = !count || button.dataset.busy === "true";
+    button.disabled = !count;
     button.textContent = count ? `Approve All (${count})` : "Approve All";
   }
 
@@ -17385,8 +17495,44 @@
     try { window.alert(text); } catch { /* ignore */ }
   }
 
+  async function retryPipelineApproveAllFailures() {
+    const button = $("pipelineApproveAll");
+    const jobId = String(pipelineApproveAllJobId || button?.dataset?.retryJob || "").trim();
+    if (!jobId) {
+      pipelineApproveBlockedMessage("No failed Approve All batch to retry.");
+      return;
+    }
+    try {
+      if (button) {
+        button.dataset.busy = "true";
+        button.disabled = true;
+        button.textContent = "Retrying…";
+      }
+      setPipelineLiveHint("Retrying failed approvals…");
+      const result = await api("/api/outputs/approve-all", {
+        method: "POST",
+        body: JSON.stringify({
+          action: "retry",
+          job_id: jobId,
+          notes: "Studio Pipeline Approve All retry",
+        }),
+        timeoutMs: 30000,
+      });
+      pipelineApproveAllCanRetry = false;
+      startPipelineApproveAllJobWatch(result);
+    } catch (error) {
+      if (button) button.dataset.busy = "false";
+      pipelineApproveBlockedMessage(error?.message || "Approve All retry failed");
+      updatePipelineApproveAllButton();
+    }
+  }
+
   async function approveAllPipelineOutputs() {
     const button = $("pipelineApproveAll");
+    if (pipelineApproveAllCanRetry && pipelineApproveAllJobId) {
+      await retryPipelineApproveAllFailures();
+      return;
+    }
     let schedules = {};
     let ready = [];
     try {
@@ -17413,7 +17559,7 @@
         ? "Default schedules fill empty times. Automatic schedules spread across the week and keep same-platform posts at least 3 hours apart. A time already on a row is kept unless it clashes.\n\n"
         : "Empty times publish now. Automatic schedules still keep same-platform posts at least 3 hours apart.\n\n";
       const confirmed = window.confirm(
-        `Approve ${ready.length} output${ready.length === 1 ? "" : "s"} for publishing?\n\n${scheduleNote}Instagram, Facebook, and YouTube will auto-publish publicly. TikTok will be saved as a draft.\n\n${list}`
+        `Approve ${ready.length} output${ready.length === 1 ? "" : "s"} for publishing?\n\n${scheduleNote}Instagram, Facebook, and YouTube will auto-publish publicly. TikTok will be saved as a draft.\n\nApprovals run in the background so you can keep using Studio.\n\n${list}`
       );
       if (!confirmed) return;
     } catch (error) {
@@ -17426,7 +17572,7 @@
         button.disabled = true;
         button.textContent = "Approving…";
       }
-      setPipelineLiveHint("Approving all ready outputs…");
+      setPipelineLiveHint(`Approve All started · 0 of ${ready.length} approved · 0 failed`);
       const result = await api("/api/outputs/approve-all", {
         method: "POST",
         body: JSON.stringify({
@@ -17434,28 +17580,14 @@
           schedules,
           record_ids: ready.map((record) => record.id),
         }),
-        timeoutMs: 120000,
+        timeoutMs: 30000,
       });
-      pipelineScheduleDrafts.clear();
-      pipelineTiktokUrlDrafts.clear();
-      pipelineYoutubeUrlDrafts.clear();
-      await refreshPipelineOutputs({ silent: true });
-      const approved = Number(result.approved_count || 0);
-      const failed = Number(result.failed_count || 0);
-      if (failed) {
-        setPipelineLiveHint(result.message || `Approved ${approved}, ${failed} failed`);
-      } else if (result.dispatch_deferred) {
-        setPipelineLiveHint(result.message || `Approved ${approved}. Publishers start from the approved queue.`);
-      } else {
-        setPipelineLiveHint(result.message || `Approved ${approved} output${approved === 1 ? "" : "s"}`);
-      }
+      pipelineApproveAllCanRetry = false;
+      startPipelineApproveAllJobWatch(result);
     } catch (e) {
+      if (button) button.dataset.busy = "false";
       pipelineApproveBlockedMessage(e.message || "Approve All failed");
-    } finally {
-      if (button) {
-        button.dataset.busy = "false";
-        updatePipelineApproveAllButton();
-      }
+      updatePipelineApproveAllButton();
     }
   }
 
@@ -17719,7 +17851,7 @@
         ? "Default schedules fill empty times. Automatic schedules spread across the week and keep same-platform posts at least 3 hours apart. A time already on a row is kept unless it clashes.\n\n"
         : "Empty times publish now. Automatic schedules still keep same-platform posts at least 3 hours apart.\n\n";
       const confirmed = window.confirm(
-        `Approve ${ready.length} ready output${ready.length === 1 ? "" : "s"} for “${title}”?\n\n${scheduleNote}Only this content item is included. Instagram, Facebook, and YouTube will auto-publish publicly. TikTok will be saved as a draft.\n\n${list}`
+        `Approve ${ready.length} ready output${ready.length === 1 ? "" : "s"} for “${title}”?\n\n${scheduleNote}Only this content item is included. Instagram, Facebook, and YouTube will auto-publish publicly. TikTok will be saved as a draft.\n\nApprovals run in the background so you can keep using Studio.\n\n${list}`
       );
       if (!confirmed) return;
     } catch (error) {
@@ -17732,7 +17864,7 @@
         button.disabled = true;
         button.textContent = "Approving…";
       }
-      setPipelineLiveHint(`Approving ${ready.length} output${ready.length === 1 ? "" : "s"} for this content…`);
+      setPipelineLiveHint(`Approve All started · 0 of ${ready.length} approved · 0 failed`);
       const result = await api("/api/outputs/approve-all", {
         method: "POST",
         body: JSON.stringify({
@@ -17740,30 +17872,21 @@
           schedules,
           record_ids: ready.map((record) => record.id),
         }),
-        timeoutMs: 120000,
+        timeoutMs: 30000,
       });
       ready.forEach((record) => {
         pipelineScheduleDrafts.delete(record.id);
         pipelineTiktokUrlDrafts.delete(record.id);
         pipelineYoutubeUrlDrafts.delete(record.id);
       });
-      await refreshPipelineOutputs({ silent: true, force: true });
-      const approved = Number(result.approved_count || 0);
-      const failed = Number(result.failed_count || 0);
-      if (failed) {
-        setPipelineLiveHint(result.message || `Approved ${approved}, ${failed} failed`);
-      } else if (result.dispatch_deferred) {
-        setPipelineLiveHint(result.message || `Approved ${approved} for this content. Publishers start from the approved queue.`);
-      } else {
-        setPipelineLiveHint(result.message || `Approved ${approved} output${approved === 1 ? "" : "s"} for this content`);
-      }
+      pipelineApproveAllCanRetry = false;
+      startPipelineApproveAllJobWatch(result);
     } catch (error) {
-      pipelineApproveBlockedMessage(error.message || "Approve content failed");
-    } finally {
       if (button) {
         button.dataset.busy = "false";
         button.disabled = false;
       }
+      pipelineApproveBlockedMessage(error.message || "Approve content failed");
     }
   }
 
