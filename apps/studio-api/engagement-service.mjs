@@ -183,25 +183,35 @@ export async function studioDiscoverYoutubeEngagementPosts(env, settings, deps) 
     return { ok: false, status: "needs_key", posts: [], message: "Add YOUTUBE_API_KEY to discover YouTube engagement candidates." };
   }
   const topics = DEFAULT_PROFILE_TOPICS[settings.profile] || DEFAULT_PROFILE_TOPICS.chicago;
-  const queries = topics.youtube_queries || settings.keywords || [];
-  const query = queries[Math.floor(Math.random() * Math.max(1, queries.length))] || `${settings.profile} photography`;
-  const maxResults = Math.min(15, Math.max(5, Number(settings.max_candidates_per_run) || 20));
-  const searchUrl =
-    `https://www.googleapis.com/youtube/v3/search?part=snippet&type=video&order=relevance&maxResults=${encodeURIComponent(String(maxResults))}` +
-    `&q=${encodeURIComponent(query)}&key=${encodeURIComponent(youtubeKey)}`;
-  const response = await fetch(searchUrl);
-  const body = await response.json().catch(() => ({}));
-  if (!response.ok || body?.error) {
-    return {
-      ok: false,
-      status: "error",
-      posts: [],
-      query,
-      message: String(body?.error?.message || `YouTube search HTTP ${response.status}`).slice(0, 300),
-    };
+  const queries = (topics.youtube_queries || settings.keywords || [])
+    .map((query) => String(query || "").trim())
+    .filter(Boolean);
+  const picked = (queries.length ? queries : [`${settings.profile} photography`]).slice(0, 4);
+  const maxResults = Math.min(10, Math.max(5, Number(settings.max_candidates_per_run) || 20));
+  const seen = new Set();
+  const posts = [];
+  const errors = [];
+  for (const query of picked) {
+    const searchUrl =
+      `https://www.googleapis.com/youtube/v3/search?part=snippet&type=video&order=relevance&maxResults=${encodeURIComponent(String(maxResults))}` +
+      `&q=${encodeURIComponent(query)}&key=${encodeURIComponent(youtubeKey)}`;
+    const response = await fetch(searchUrl);
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok || body?.error) {
+      errors.push(String(body?.error?.message || `YouTube search HTTP ${response.status}`).slice(0, 200));
+      continue;
+    }
+    for (const post of (body.items || []).map(mapYoutubeSearchItem).filter(Boolean)) {
+      if (seen.has(post.post_id)) continue;
+      seen.add(post.post_id);
+      posts.push(post);
+    }
   }
-  const posts = (body.items || []).map(mapYoutubeSearchItem).filter(Boolean);
-  return { ok: true, status: "ok", posts, query, message: `Found ${posts.length} YouTube video(s) for “${query}”.` };
+  const query = picked.join(" | ");
+  if (!posts.length && errors.length) {
+    return { ok: false, status: "error", posts: [], query, message: errors[0] };
+  }
+  return { ok: true, status: "ok", posts, query, message: `Found ${posts.length} YouTube video(s) for ${settings.profile}.` };
 }
 
 export async function studioGenerateEngagementComments(env, post, settings, deps) {
@@ -230,6 +240,14 @@ export async function studioGenerateEngagementComments(env, post, settings, deps
   } catch {
     return fallbackCommentSuggestions(post, maxSuggestions);
   }
+}
+
+function engagementDiscoveryMessage(profile, addedCount, scanned, platformNotes) {
+  if (addedCount) return `Queued ${addedCount} engagement recommendation(s) for ${profile}.`;
+  const youtube = (platformNotes || []).find((row) => row.platform === "youtube");
+  if (youtube && youtube.ok === false && youtube.message) return youtube.message;
+  if (!scanned) return `No YouTube posts found for ${profile}. Instagram, Facebook, and TikTok discovery are not available yet.`;
+  return `Scanned ${scanned} YouTube post(s) for ${profile}; none matched this profile closely enough to queue.`;
 }
 
 function discoveryLastSettingName(profile) {
@@ -318,9 +336,7 @@ export async function studioRunEngagementDiscovery(env, options, deps) {
     added_count: added.length,
     scanned: collected.length,
     platforms: platformNotes,
-    message: added.length
-      ? `Queued ${added.length} engagement recommendation(s) for ${profile}.`
-      : `No new eligible recommendations for ${profile}.`,
+    message: engagementDiscoveryMessage(profile, added.length, collected.length, platformNotes),
   };
 }
 

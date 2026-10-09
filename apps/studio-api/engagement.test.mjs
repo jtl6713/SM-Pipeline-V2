@@ -105,6 +105,26 @@ test("approval and unsupported API behavior helpers", () => {
   });
   const ranked = filterAndRankCandidates([post], settings, []);
   assert.equal(ranked.length, 1);
+  const cityTitle = scorePostRelevance(
+    { caption: "Los Angeles in 4K | City of Angels", creator_name: "Travel Cuts" },
+    settings
+  );
+  assert.ok(cityTitle.score >= settings.relevance_threshold);
+  const shortTitle = scorePostRelevance(
+    { caption: "Best of LA", description: "A walk through Hollywood and the coast." },
+    settings
+  );
+  assert.ok(shortTitle.score >= settings.relevance_threshold);
+  const unrelated = scorePostRelevance(
+    { caption: "Yosemite valley hike at sunrise", creator_name: "Park Notes" },
+    settings
+  );
+  assert.ok(unrelated.score < settings.relevance_threshold);
+  const embedded = scorePostRelevance(
+    { caption: "Glass architecture in a plaza", creator_name: "Design Daily" },
+    settings
+  );
+  assert.ok(embedded.score < settings.relevance_threshold);
   const target = buildTargetRecord(ranked[0], settings, ["Strong DTLA framing — great sense of place."]);
   assert.equal(target.approval_status, "pending");
   assert.equal(actionSupported(target.platform, "comment"), true);
@@ -195,7 +215,7 @@ test("worker wires engagement routes, cron, and version bump", () => {
   assert.match(worker, /from "\.\/engagement-service\.mjs"/);
   assert.match(worker, /\/api\/engagement\//);
   assert.match(worker, /studio_engagement_v1:\s*true/);
-  assert.match(worker, /0.10.485-approve-all-batch/);
+  assert.match(worker, /0.10.486-la-discover/);
   assert.match(worker, /studioRunEngagementDiscovery/);
   assert.match(worker, /studioEngagementCron/);
   assert.match(worker, /engagementThemeContextRecord/);

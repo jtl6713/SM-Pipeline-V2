@@ -121,7 +121,7 @@ export const DEFAULT_PROFILE_TOPICS = Object.freeze({
       "la photography",
     ],
     hashtags: ["#losangeles", "#dtla", "#california", "#beach", "#architecture"],
-    locations: ["Los Angeles", "Downtown LA", "Santa Monica", "Venice Beach"],
+    locations: ["Los Angeles", "LA", "DTLA", "Downtown LA", "Hollywood", "Santa Monica", "Venice Beach"],
     exclusions: ["politics", "nsfw", "onlyfans", "giveaway", "follow4follow"],
     youtube_queries: [
       "Los Angeles architecture photography",
@@ -304,16 +304,39 @@ export function engagementDedupeKey(platform, postId, creatorId = "") {
   ].join(":");
 }
 
+const PROFILE_PLACE_TERMS = Object.freeze({
+  chicago: ["Chicago"],
+  nyc: ["New York", "NYC", "Manhattan", "Brooklyn"],
+  la: ["Los Angeles", "LA", "DTLA", "Hollywood", "Santa Monica", "Venice Beach"],
+  miami: ["Miami", "South Beach", "Wynwood"],
+});
+
+export function engagementTermMatches(haystack, term) {
+  const needle = String(term || "").trim().toLowerCase().replace(/^#/, "");
+  if (!needle) return false;
+  if (needle.length <= 3) {
+    const dotted = needle.replace(/[.*+?^${}()|[\]\\]/g, "\\$&").split("").join("\\.?");
+    return new RegExp(`(?:^|[^a-z0-9])${dotted}(?:[^a-z0-9]|$)`, "i").test(haystack);
+  }
+  return haystack.includes(needle);
+}
+
 export function scorePostRelevance(post, settings) {
-  const caption = String(post?.caption || post?.title || post?.description || "").toLowerCase();
-  const creator = String(post?.creator_name || post?.channel_title || post?.handle || "").toLowerCase();
-  const location = String(post?.location || "").toLowerCase();
-  const haystack = `${caption} ${creator} ${location} ${(post?.hashtags || []).join(" ")}`.toLowerCase();
+  const haystack = [
+    post?.caption,
+    post?.title,
+    post?.description,
+    post?.creator_name,
+    post?.channel_title,
+    post?.handle,
+    post?.location,
+    ...(Array.isArray(post?.hashtags) ? post.hashtags : []),
+  ].filter(Boolean).join(" ").toLowerCase();
 
   if (!haystack.trim()) return { score: 0, reason: "Empty content", matched: [] };
 
   for (const exclusion of settings.exclusions || []) {
-    if (exclusion && haystack.includes(String(exclusion).toLowerCase())) {
+    if (engagementTermMatches(haystack, exclusion)) {
       return { score: 0, reason: `Excluded term: ${exclusion}`, matched: [] };
     }
   }
@@ -322,32 +345,37 @@ export function scorePostRelevance(post, settings) {
   }
 
   const creatorKey = String(post?.creator_id || post?.channel_id || post?.handle || "").toLowerCase();
-  if ((settings.creator_blocklist || []).some((row) => String(row).toLowerCase() === creatorKey || haystack.includes(String(row).toLowerCase()))) {
+  if ((settings.creator_blocklist || []).some((row) => String(row).toLowerCase() === creatorKey || engagementTermMatches(haystack, row))) {
     return { score: 0, reason: "Creator blocked", matched: [] };
   }
 
   let score = 0;
   const matched = [];
   for (const keyword of settings.keywords || []) {
-    const needle = String(keyword).toLowerCase();
-    if (needle && haystack.includes(needle)) {
+    if (engagementTermMatches(haystack, keyword)) {
       score += 0.18;
       matched.push(keyword);
     }
   }
   for (const tag of settings.hashtags || []) {
-    const needle = String(tag).toLowerCase().replace(/^#/, "");
-    if (needle && haystack.includes(needle)) {
+    if (engagementTermMatches(haystack, tag)) {
       score += 0.1;
       matched.push(tag);
     }
   }
-  for (const loc of settings.locations || []) {
-    const needle = String(loc).toLowerCase();
-    if (needle && haystack.includes(needle)) {
-      score += 0.12;
-      matched.push(loc);
-    }
+  const placeTerms = [
+    ...(settings.locations || []),
+    ...(PROFILE_PLACE_TERMS[normalizeEngagementProfile(settings.profile)] || []),
+  ];
+  const seenPlaces = new Set();
+  let primaryPlace = false;
+  for (const loc of placeTerms) {
+    const key = String(loc || "").trim().toLowerCase();
+    if (!key || seenPlaces.has(key) || !engagementTermMatches(haystack, loc)) continue;
+    seenPlaces.add(key);
+    score += primaryPlace ? 0.08 : 0.5;
+    primaryPlace = true;
+    matched.push(loc);
   }
   if ((settings.creator_allowlist || []).some((row) => String(row).toLowerCase() === creatorKey)) {
     score += 0.25;
@@ -355,7 +383,7 @@ export function scorePostRelevance(post, settings) {
   }
 
   // Prefer original creators: slightly boost when title/caption looks first-person photography/travel.
-  if (/\b(i (shot|captured|photographed)|my (photo|shot|walk)|original)\b/i.test(caption)) {
+  if (/\b(i (shot|captured|photographed)|my (photo|shot|walk)|original)\b/i.test(haystack)) {
     score += 0.08;
     matched.push("original-creator cues");
   }

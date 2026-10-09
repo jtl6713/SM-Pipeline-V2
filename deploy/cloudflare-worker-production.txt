@@ -64,3 +64,5 @@ Deploy Worker 0.10.483-youtube-engage-stale-detect. Detect stale YouTube uploade
 Deploy Worker 0.10.484-ship-verify. Ship-verify production footer after #556/#557/#558. Triggered 2026-10-09.
 
 Deploy Worker 0.10.485-approve-all-batch. Durable Approve All job store, limited slices, cron resume, GET progress, failed-only retry. Triggered 2026-10-09.
+
+Deploy Worker 0.10.486-la-discover. LA Discover now queues YouTube posts that name Los Angeles, and searches the LA topic list instead of one random query. Triggered 2026-10-09.
