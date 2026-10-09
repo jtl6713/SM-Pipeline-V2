@@ -674,20 +674,37 @@ export function computeEngagementInsights(store, profile = null) {
   const failed = actions.filter((row) => row.execution_status === "failed" || row.approval_status === "rejected");
   const byPlatform = {};
   const byProfile = {};
+  const creatorNameByKey = new Map();
+  for (const target of targets) {
+    const id = String(target.creator_id || "").trim();
+    const name = String(target.creator_name || "").trim();
+    if (!id || !name) continue;
+    creatorNameByKey.set(`${target.platform}:${id}`, name);
+  }
   const creatorCounts = {};
   for (const action of published) {
     byPlatform[action.platform] = (byPlatform[action.platform] || 0) + 1;
     byProfile[action.profile] = (byProfile[action.profile] || 0) + 1;
-    const key = `${action.platform}:${action.creator_id || action.creator_name || "unknown"}`;
-    creatorCounts[key] = (creatorCounts[key] || 0) + 1;
+    const platform = String(action.platform || "unknown");
+    const creatorId = String(action.creator_id || "").trim();
+    const groupKey = creatorId
+      ? `${platform}:${creatorId}`
+      : `${platform}:name:${String(action.creator_name || "unknown").trim()}`;
+    const displayName = String(action.creator_name || "").trim()
+      || creatorNameByKey.get(`${platform}:${creatorId}`)
+      || creatorId
+      || "unknown";
+    if (!creatorCounts[groupKey]) {
+      creatorCounts[groupKey] = { platform, creator: displayName, creator_id: creatorId || null, count: 0 };
+    }
+    creatorCounts[groupKey].count += 1;
+    if (String(action.creator_name || "").trim()) {
+      creatorCounts[groupKey].creator = String(action.creator_name).trim();
+    }
   }
-  const topCreators = Object.entries(creatorCounts)
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, 10)
-    .map(([key, count]) => {
-      const [platform, creator] = key.split(":");
-      return { platform, creator, count };
-    });
+  const topCreators = Object.values(creatorCounts)
+    .sort((a, b) => b.count - a.count)
+    .slice(0, 10);
   return {
     schema_version: ENGAGEMENT_SCHEMA,
     profile: theme,

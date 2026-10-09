@@ -171,23 +171,31 @@ test("quality agent error classification signatures are distinct", () => {
 
 test("insights only count confirmed publishes and never invent growth", () => {
   const insights = computeEngagementInsights({
-    targets: [{ profile: "chicago", suggested_comments: ["a", "b"] }],
+    targets: [{
+      profile: "chicago",
+      suggested_comments: ["a", "b"],
+      platform: "youtube",
+      creator_id: "UCabc123",
+      creator_name: "TripVerse",
+    }],
     actions: [
-      { profile: "chicago", platform: "youtube", action_type: "comment", approval_status: "approved", execution_status: "published", creator_id: "c1" },
-      { profile: "chicago", platform: "youtube", action_type: "like", approval_status: "approved", execution_status: "published", creator_id: "c1" },
+      { profile: "chicago", platform: "youtube", action_type: "comment", approval_status: "approved", execution_status: "published", creator_id: "UCabc123" },
+      { profile: "chicago", platform: "youtube", action_type: "like", approval_status: "approved", execution_status: "published", creator_id: "UCabc123" },
       { profile: "chicago", platform: "tiktok", action_type: "comment", approval_status: "rejected", execution_status: "failed", creator_id: "c2" },
     ],
   }, "chicago");
   assert.equal(insights.comments_published, 1);
   assert.equal(insights.likes_completed, 1);
   assert.match(insights.note, /not attributed/i);
+  assert.equal(insights.top_creators[0]?.creator, "TripVerse");
+  assert.notEqual(insights.top_creators[0]?.creator, "UCabc123");
 });
 
 test("worker wires engagement routes, cron, and version bump", () => {
   assert.match(worker, /from "\.\/engagement-service\.mjs"/);
   assert.match(worker, /\/api\/engagement\//);
   assert.match(worker, /studio_engagement_v1:\s*true/);
-  assert.match(worker, /0\.10\.479-engagement-history-channel/);
+  assert.match(worker, /0\.10\.480-engagement-frequent-creators/);
   assert.match(worker, /studioRunEngagementDiscovery/);
   assert.match(worker, /studioEngagementCron/);
   assert.match(worker, /engagementThemeContextRecord/);

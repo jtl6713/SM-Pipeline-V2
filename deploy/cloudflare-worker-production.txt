@@ -54,3 +54,7 @@ Deploy Worker 0.10.479-awaiting-approval-count. metrics.awaiting_approval matche
 Deploy Worker 0.10.480-awaiting-approval-stale-desk. Desk kind awaiting_approval_stale_rfr + Worker heal for Approved+armed rows stuck at Ready for Review. Triggered 2026-10-09.
 
 Deploy Worker 0.10.481-engagement-history-channel. History API enriches creator_name + post_url for Engagement History channel/link columns. Triggered 2026-10-09.
+
+Deploy Worker 0.10.479-engagement-history-channel. History API enriches creator_name + post_url for Engagement History channel/link columns. Triggered 2026-10-09.
+
+Deploy Worker 0.10.482-engagement-frequent-creators. Insights top_creators prefer creator_name (target lookup for legacy). Triggered 2026-10-09.

@@ -87,3 +87,7 @@ Deploy Studio UI 0.6.534-pages-path-bust. Rename app-item4-0625.js -> app-item4-
 2026-10-09: Deploy UI 0.6.538-awaiting-approval-count. All-Profiles Awaiting Approval uses Ready for Review studio_state (not stale Output_Status).
 
 2026-10-09: Deploy UI 0.6.539-engagement-history-channel. Engagement History shows YouTube channel + clickable post link.
+
+2026-10-09: Deploy UI 0.6.538-engagement-history-channel. Engagement History shows YouTube channel + clickable post link.
+
+2026-10-09: Deploy UI 0.6.540-engagement-frequent-creators. Frequent creators shows channel titles, not UC… IDs.
