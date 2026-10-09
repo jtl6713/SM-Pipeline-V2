@@ -534,7 +534,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.478-engagement-approve-blocks-comment",
+          version: "0.10.479-awaiting-approval-count",
           studio_engagement_v1: true,
           studio_mae_schedule_v1: true,
           studio_mae_28_day_schedule_v1: true,
@@ -33948,14 +33948,17 @@ async function dashboard(request, env, url, authorization) {
   const active = mappedOutputs.filter((o) => !["Published", "Skipped", "Failed"].includes(o.studio_state)).length;
   const manualAction = mappedOutputs.filter((o) => o.studio_state === "Manual Action Required").length;
   const failed = mappedOutputs.filter((o) => o.studio_state === "Failed").length;
+  // Match Pipeline "Awaiting Approval": normalized studio_state only.
+  // Do not count raw Output_Status=Ready for Review after Approve (Review=Approved /
+  // Publish=Ready to Schedule) — those click through empty (Miami Outputs 2154/2155/1841).
   const awaitingApproval = mappedOutputs.filter((o) => {
     const state = String(o.studio_state || "").trim();
-    const review = String(o.review_status || "").trim();
-    const output = String(o.output_status || "").trim();
-    return state === "Ready for Review"
-      || state === "Awaiting Approval"
-      || review === "Pending"
-      || output === "Ready for Review";
+    if (state !== "Ready for Review" && state !== "Awaiting Approval") return false;
+    if (o.do_not_publish) return false;
+    const notes = `${o.output_notes || ""}\n${o.production_notes || ""}`;
+    if (/origin=az-finished-video/i.test(notes)) return false;
+    if (/az-auto-queue=1/i.test(notes) && /ez-input=finished-video/i.test(notes)) return false;
+    return true;
   }).length;
   // Keep the Home count identical to the Ideas tab's "Current ideas"
   // population. The tab considers an idea promoted when either the canonical
