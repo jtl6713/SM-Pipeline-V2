@@ -61,18 +61,30 @@
     if (!value || !row?.id) return String(value);
     return `<button type="button" class="overview-action-count" data-overview-profile="${esc(row.id)}" data-overview-action="${esc(kind)}" aria-label="Open ${esc(label)} for ${esc(row.name)}">${value}</button>`;
   }
+  function activateStudioPage(pageName) {
+    document.querySelectorAll(".nav-item").forEach((button) => {
+      button.classList.toggle("active", button.dataset.page === pageName);
+    });
+    document.querySelectorAll(".page").forEach((page) => page.classList.remove("active"));
+    document.getElementById(`page-${pageName}`)?.classList.add("active");
+  }
   function openOverviewAction(profileId, kind) {
     const profile = document.getElementById("studioProfileSelect");
     if (profile && profile.value !== profileId) {
       profile.value = profileId;
       profile.dispatchEvent(new Event("change", { bubbles: true }));
     }
+    if (kind === "ideas") {
+      document.querySelector('[data-page="ideas"]')?.click();
+      activateStudioPage("ideas");
+      document.getElementById("page-ideas")?.scrollIntoView({ block: "start" });
+      return;
+    }
     const nav = document.querySelector('[data-page="outputs"]');
     nav?.click();
     // Normalize page state after profile switching so Dashboard can reliably
     // restore the global overview instead of inheriting a stale active page.
-    document.querySelectorAll(".page").forEach((page) => page.classList.remove("active"));
-    document.getElementById("page-outputs")?.classList.add("active");
+    activateStudioPage("outputs");
     const view = kind === "approval" ? "approval" : kind === "failed" ? "failed" : "attention";
     const openView = () => {
       const button = document.querySelector(`[data-pipeline-quick-view="${view}"]`);

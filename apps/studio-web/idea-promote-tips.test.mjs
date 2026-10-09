@@ -20,7 +20,7 @@ test("idea promote drawer documents duration vs voiceover precedence", () => {
   assert.ok(scriptBuild);
   assert.ok(appBuild);
   assert.equal(appBuild, scriptBuild);
-  assert.equal(uiBuild, "0.6.537");
+  assert.equal(uiBuild, "0.6.538");
   assert.match(html, /id="ideaLibraryPickerForm"/);
   assert.match(html, /class="idea-type-guide"/);
   assert.match(html, /Photo Set turns stills into Reels|Photo Set/);
@@ -57,6 +57,15 @@ test("Music Manager uses native file labels for Windows file picker", () => {
   assert.match(html, /id="musicAddInput"[^>]*native-file-input/);
   assert.match(app, /function musicFileInputs/);
   assert.doesNotMatch(app, /choose\?\.addEventListener\("click", openPicker\)/);
+});
+
+test("All Profiles Ideas count opens the Ideas page", () => {
+  const overview = fs.readFileSync(path.join(here, "assets", "all-profiles-overview-1007.js"), "utf8");
+  const ideasBranch = overview.slice(overview.indexOf('if (kind === "ideas")'), overview.indexOf('const nav = document.querySelector'));
+  assert.match(ideasBranch, /\[data-page="ideas"\]/);
+  assert.match(ideasBranch, /activateStudioPage\("ideas"\)/);
+  assert.match(ideasBranch, /return;/);
+  assert.doesNotMatch(ideasBranch, /outputs/);
 });
 
 test("Ideas shows Current expanded and Archived collapsed by default", () => {
