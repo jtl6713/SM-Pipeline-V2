@@ -550,9 +550,10 @@
         method: "POST",
         body: JSON.stringify({}),
       });
-      current = result;
-      await reload(current.profile?.id);
-      window.dispatchEvent(new CustomEvent("studio-profile-created", { detail: { profile_id: current.profile?.id } }));
+      const activatedId = String(result?.profile?.id || current.profile.id || "").trim();
+      current = null;
+      await reload();
+      window.dispatchEvent(new CustomEvent("studio-profile-created", { detail: { profile_id: activatedId } }));
       setMessage("Profile activated and added to the Studio profile switcher.", "success");
     } catch (error) {
       if (error.body?.checklist) {
