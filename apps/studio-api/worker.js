@@ -1,4 +1,4 @@
-import { createProfileOnboarding } from "./profile-onboarding.js";
+import { createProfileOnboarding } from "./profile-onboarding.mjs";
 import {
   DESK_SETTING_NAME,
   DESK_CAPS_SETTING_NAME,
