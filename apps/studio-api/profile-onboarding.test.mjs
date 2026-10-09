@@ -72,5 +72,5 @@ test("Studio web exposes the four-step New Profile flow with five city presets a
   assert.match(html, /No passwords or access tokens here/);
   assert.match(js, /localStorage\.setItem\(DRAFT_KEY/);
   assert.match(js, /\/api\/profiles\/" \+ encodeURIComponent\(state\.createdProfileId\) \+ "\/setup/);
-  assert.match(js, /Activate profile/);
+  assert.match(html, /Activate profile/);
 });
