@@ -74,3 +74,4 @@ Deploy Worker 0.10.488-engagement-click. A YouTube comment or like error is writ
 Deploy Worker 0.10.489-engagement-ledger. Shrink the engagement ledger so Chicago Comment and Like can be saved under Airtable's 100k limit. Triggered 2026-10-09.
 
 2026-10-09: Deploy Worker new-city onboarding and generic profile routing. Create Brand/Market/Profile, use profile-local timezone, isolate generic city destination settings, and gate activation on platform readiness. PR #562.
+2026-10-09 New Profile onboarding rollout — main 17cace69c7e7674b7de2c70abc4a05d5bdf9e331
