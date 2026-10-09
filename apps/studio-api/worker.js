@@ -4244,10 +4244,11 @@ async function studioProfileSetupConnectionSnapshot(env, profile) {
     (async () => {
       if (!token || !settings.FACEBOOK_PAGE_ID) return;
       try {
-        const page = await studioInsightsMetaIdentity(settings.FACEBOOK_PAGE_ID, token, version, "id,name");
+        const setupFacebookPageId = String(settings.FACEBOOK_PAGE_ID || "").trim();
+        const page = await studioInsightsMetaIdentity(setupFacebookPageId, token, version, "id,name");
         connectionState.facebook.status = "connected";
         connectionState.facebook.account_name = page?.name || null;
-        connectionState.facebook.account_id = page?.id || settings.FACEBOOK_PAGE_ID;
+        connectionState.facebook.account_id = page?.id || setupFacebookPageId;
       } catch (error) {
         Object.assign(connectionState.facebook, studioInsightsConnectionStateFromError(error));
       }
