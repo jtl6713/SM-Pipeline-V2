@@ -5,7 +5,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import path from "node:path";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-const modulePath = path.join(here, "profile-onboarding.js");
+const modulePath = path.join(here, "profile-onboarding.mjs");
 const workerPath = path.join(here, "worker.js");
 const webRoot = path.resolve(here, "../studio-web");
 
