@@ -628,6 +628,18 @@
     ensureProfileNarrationDefaults().catch(() => {});
   }
 
+  window.addEventListener("studio-profile-created", async (event) => {
+    const createdId = String(event?.detail?.profile_id || "").trim();
+    if (createdId) {
+      try { localStorage.setItem(PROFILE_STORAGE_KEY, createdId); } catch {}
+    }
+    await loadStudioProfiles().catch(() => {});
+    if (createdId) {
+      const profile = studioProfiles.find((item) => item.id === createdId);
+      if (profile) applyStudioProfile(profile, { reload: false });
+    }
+  });
+
   function pipelineDisplayPercent(record) {
     const raw = record?.studio_progress_percent ?? record?.youtube_processing_progress_percent ?? record?.youtube_upload_progress_percent;
     const n = Number(raw);
@@ -22721,6 +22733,7 @@
     if (page === "engagement") return window.StudioEngagement?.load?.(false);
     if (page === "music") return loadMusic();
     if (page === "library") return loadLibrary();
+    if (page === "profile-setup") return window.StudioProfileSetup?.load?.();
     if (page === "operations") return loadOperations();
     if (page === "support") return;
   }
