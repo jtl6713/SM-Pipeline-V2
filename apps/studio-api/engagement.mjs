@@ -621,13 +621,17 @@ export function buildTargetRecord(post, settings, comments) {
 
 export function buildActionRecord({ target, actionType, comment, approvalStatus = "pending", executionStatus = "pending", error = null, publishedId = null }) {
   const now = new Date().toISOString();
+  const postUrl = String(target.post_url || "").trim()
+    || (String(target.platform || "").toLowerCase() === "youtube" ? youtubePostUrl(target.post_id) : "");
   return {
     action_id: `ea_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`,
     target_id: target.target_id,
     profile: target.profile,
     platform: target.platform,
     creator_id: target.creator_id,
+    creator_name: String(target.creator_name || "").trim(),
     post_id: target.post_id,
+    post_url: postUrl,
     action_type: actionType,
     suggested_comment: target.selected_comment || (target.suggested_comments || [])[0] || "",
     edited_comment: comment || "",
@@ -643,6 +647,24 @@ export function buildActionRecord({ target, actionType, comment, approvalStatus 
   };
 }
 
+/** Fill channel + post link on history rows (legacy actions may omit them). */
+export function enrichEngagementHistory(actions, targets = []) {
+  const byId = new Map((targets || []).map((row) => [row.target_id, row]));
+  return (actions || []).map((action) => {
+    const target = byId.get(action.target_id) || {};
+    const creator_name = String(action.creator_name || target.creator_name || "").trim();
+    let post_url = String(action.post_url || target.post_url || "").trim();
+    if (!post_url && String(action.platform || target.platform || "").toLowerCase() === "youtube") {
+      post_url = youtubePostUrl(action.post_id || target.post_id);
+    }
+    return {
+      ...action,
+      creator_name: creator_name || String(action.creator_id || target.creator_id || "").trim(),
+      post_url,
+    };
+  });
+}
+
 export function computeEngagementInsights(store, profile = null) {
   const theme = profile ? normalizeEngagementProfile(profile) : null;
   const targets = (store.targets || []).filter((row) => !theme || row.profile === theme);
@@ -652,20 +674,37 @@ export function computeEngagementInsights(store, profile = null) {
   const failed = actions.filter((row) => row.execution_status === "failed" || row.approval_status === "rejected");
   const byPlatform = {};
   const byProfile = {};
+  const creatorNameByKey = new Map();
+  for (const target of targets) {
+    const id = String(target.creator_id || "").trim();
+    const name = String(target.creator_name || "").trim();
+    if (!id || !name) continue;
+    creatorNameByKey.set(`${target.platform}:${id}`, name);
+  }
   const creatorCounts = {};
   for (const action of published) {
     byPlatform[action.platform] = (byPlatform[action.platform] || 0) + 1;
     byProfile[action.profile] = (byProfile[action.profile] || 0) + 1;
-    const key = `${action.platform}:${action.creator_id || action.creator_name || "unknown"}`;
-    creatorCounts[key] = (creatorCounts[key] || 0) + 1;
+    const platform = String(action.platform || "unknown");
+    const creatorId = String(action.creator_id || "").trim();
+    const groupKey = creatorId
+      ? `${platform}:${creatorId}`
+      : `${platform}:name:${String(action.creator_name || "unknown").trim()}`;
+    const displayName = String(action.creator_name || "").trim()
+      || creatorNameByKey.get(`${platform}:${creatorId}`)
+      || creatorId
+      || "unknown";
+    if (!creatorCounts[groupKey]) {
+      creatorCounts[groupKey] = { platform, creator: displayName, creator_id: creatorId || null, count: 0 };
+    }
+    creatorCounts[groupKey].count += 1;
+    if (String(action.creator_name || "").trim()) {
+      creatorCounts[groupKey].creator = String(action.creator_name).trim();
+    }
   }
-  const topCreators = Object.entries(creatorCounts)
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, 10)
-    .map(([key, count]) => {
-      const [platform, creator] = key.split(":");
-      return { platform, creator, count };
-    });
+  const topCreators = Object.values(creatorCounts)
+    .sort((a, b) => b.count - a.count)
+    .slice(0, 10);
   return {
     schema_version: ENGAGEMENT_SCHEMA,
     profile: theme,

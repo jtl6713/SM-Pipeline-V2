@@ -177,16 +177,24 @@
       root.innerHTML = `<p class="subtle">No engagement actions yet.</p>`;
       return;
     }
-    root.innerHTML = `<table class="engagement-table"><thead><tr><th>When</th><th>Type</th><th>Platform</th><th>Status</th><th>Detail</th></tr></thead><tbody>${
-      state.history.map((row) => `
+    root.innerHTML = `<table class="engagement-table"><thead><tr><th>When</th><th>Channel</th><th>Type</th><th>Platform</th><th>Status</th><th>Post</th><th>Detail</th></tr></thead><tbody>${
+      state.history.map((row) => {
+        const channel = row.creator_name || row.creator_id || "—";
+        const postUrl = String(row.post_url || "").trim();
+        const postCell = postUrl
+          ? `<a href="${esc(postUrl)}" target="_blank" rel="noopener noreferrer">Open post</a>`
+          : "—";
+        return `
         <tr>
           <td>${esc(String(row.executed_at || row.approved_at || row.created_at || "").replace("T", " ").slice(0, 16))}</td>
+          <td>${esc(channel)}</td>
           <td>${esc(row.action_type)}</td>
           <td>${esc(row.platform)}</td>
           <td>${esc(row.execution_status || row.approval_status)}</td>
+          <td>${postCell}</td>
           <td>${esc(row.error_details || row.edited_comment || row.suggested_comment || row.published_comment_id || "")}</td>
-        </tr>
-      `).join("")
+        </tr>`;
+      }).join("")
     }</tbody></table>`;
   }
 

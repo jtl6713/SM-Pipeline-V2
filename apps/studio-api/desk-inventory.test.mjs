@@ -30,6 +30,7 @@ import {
   classifyRfrLockedMissingDeliverable,
   classifyNativePhotoReviewStrand,
   classifyNativePhotoApproveIncomplete,
+  classifyAwaitingApprovalStaleRfr,
   classifyTesterNightly,
   classifyTesterCatalogAssert,
   originFromNotes,
@@ -972,4 +973,34 @@ test("native photo approve incomplete catches Output 1245 half-armed AFP", () =>
   }), null);
   assert.ok(CLASSIFIER_KINDS.includes("native_photo_approve_incomplete"));
   assert.ok(CLASSIFIER_KINDS.includes("native_photo_review_strand"));
+});
+
+test("awaiting_approval_stale_rfr catches Approved + Ready to Schedule stuck at Ready for Review", () => {
+  const miami2155 = classifyAwaitingApprovalStaleRfr({
+    id: "recFSu2sKmHlTkKTY",
+    output_id: 2155,
+    output_status: "Ready for Review",
+    review_status: "Approved",
+    publish_status: "Ready to Schedule",
+    platform: "TikTok",
+    output_title: "Inside PAMM Design",
+  });
+  assert.equal(miami2155.kind, "awaiting_approval_stale_rfr");
+  assert.equal(miami2155.class, "transient");
+  assert.equal(miami2155.actor, "worker_heal");
+  assert.equal(miami2155.fingerprint, fingerprint("awaiting_approval_stale_rfr", "recFSu2sKmHlTkKTY", "approved_publish_armed"));
+  assert.match(miami2155.diagnosis, /Approved for Publishing/i);
+  assert.equal(classifyAwaitingApprovalStaleRfr({
+    id: "recTrueRfr",
+    output_status: "Ready for Review",
+    review_status: "Review Sent",
+    publish_status: "Ready to Schedule",
+  }), null);
+  assert.equal(classifyAwaitingApprovalStaleRfr({
+    id: "recAlreadyAfp",
+    output_status: "Approved for Publishing",
+    review_status: "Approved",
+    publish_status: "Ready to Schedule",
+  }), null);
+  assert.ok(CLASSIFIER_KINDS.includes("awaiting_approval_stale_rfr"));
 });

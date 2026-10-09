@@ -25,6 +25,7 @@ import {
   fallbackCommentSuggestions,
   buildTargetRecord,
   buildActionRecord,
+  enrichEngagementHistory,
   actionSupported,
   findDuplicateAction,
   makeIdempotencyKey,
@@ -344,7 +345,10 @@ export async function studioListEngagementRecommendations(env, options, deps) {
     settings,
     capabilities: PLATFORM_CAPABILITIES,
     recommendations: rows.slice(0, 100),
-    history: store.actions.filter((row) => row.profile === profile).slice(0, 100),
+    history: enrichEngagementHistory(
+      store.actions.filter((row) => row.profile === profile).slice(0, 100),
+      store.targets
+    ),
   };
 }
 
@@ -357,6 +361,22 @@ async function executeYoutubeAction(env, target, actionType, comment, deps) {
   const secret = settings.YOUTUBE_UPLOAD_SERVICE_SHARED_SECRET || env.YOUTUBE_UPLOAD_SERVICE_SHARED_SECRET || "";
   if (!base) {
     return { ok: false, status: "needs_authorization", error: "YouTube uploader service is not configured for this profile." };
+  }
+  // Health is public. Engage routes sit behind the shared secret, so a missing
+  // route looks like 404 only after auth. Detect stale builds up front.
+  try {
+    const health = await fetch(`${base}/health`, { method: "GET", headers: { Accept: "application/json" } });
+    const healthBody = await health.json().catch(() => ({}));
+    const version = String(healthBody?.version || "");
+    if (health.ok && version && !/engagement/i.test(version)) {
+      return {
+        ok: false,
+        status: "unsupported",
+        error: `YouTube uploader is stale (${version}); needs engagement build. Companion/Deploy-SMService this profile's youtube-uploader, then retry.`,
+      };
+    }
+  } catch {
+    // Fall through to the engage call; network errors surface there.
   }
   const path = actionType === "like" ? "/youtube/engage/like" : "/youtube/engage/comment";
   const response = await fetch(base + path, {

@@ -113,6 +113,20 @@ Kind `native_photo_approve_incomplete`, class `transient`, actor `worker_heal`, 
 
 Auto-correct: Worker `studioCompleteNativePhotoPublishArming` / full `approveOutputRecordForPublishing`. Proven: Output **1245** Getty Center Sunset Poll IG Carousel / `reccuk3Nj4jOQX5c1` (siblings 1246–1248 armed). Same fingerprint after arming → `code_bug`.
 
+## Watch: All-Profiles Awaiting Approval click shows empty
+
+All-Profiles Overview shows N Awaiting Approval, but Pipeline Awaiting Approval is empty ("no outputs match the current filters"). Cause: `Output_Status` stayed **Ready for Review** after Approve while `Review_Status=Approved` and `Publish_Status` is Ready to Schedule / Ready to Publish / Scheduled. Overview used to count raw `Output_Status`; Pipeline requires `creativeCanApproveForPublishing` (rejects Approved review).
+
+Kind `awaiting_approval_stale_rfr`, class `transient`, actor `worker_heal`, fingerprint `awaiting_approval_stale_rfr:<output_rec>:approved_publish_armed`.
+
+Repair (per output):
+
+1. Confirm `Review_Status=Approved` and publish is armed (`Ready to Schedule` / `Ready to Publish` / `Scheduled` / `Publishing`).
+2. Set `Output_Status=Approved for Publishing`. Do **not** re-Approve and do not change schedule.
+3. Overview `metrics.awaiting_approval` must use normalized `studio_state === Ready for Review` (not raw Output_Status / Review Pending).
+
+Auto-correct: Worker `studioHealAwaitingApprovalStaleRfr`. Proven: Miami Outputs **2155** TikTok / **2154** Facebook Inside PAMM Design (CI 434), **1841** Facebook Brickell or Coconut Grove? (CI 380). Same fingerprint after heal → `code_bug`.
+
 ## Watch: Escalated — needs investigation
 
 Parent `Studio_Production_Job_JSON.step=escalated` after five Worker resumes. Pipeline paints **Escalated — needs investigation** on every sibling output. Worker `resumeStaleStudioProductionJobs` used to skip this terminal step, so the row parked forever even when the block was recoverable (empty `Studio_Master_Assets_JSON` while library stills exist; outputs created after a "No Platform Outputs" block; transient HTTP that exhausted the budget). Kind `produce_escalated`, class `transient` when `deskRecoverableEscalatedError` matches, actor `worker_heal`. Clip-count mismatch stays `produce_clip_mismatch` / `code_bug`. Skip `Request_Status=Cancelled`.

@@ -14,6 +14,7 @@ import {
   classifyNativeCover,
   classifyNativePhotoReviewStrand,
   classifyNativePhotoApproveIncomplete,
+  classifyAwaitingApprovalStaleRfr,
   classifyPreparingGap,
   classifyProduceJob,
   classifyPromotedNotRfr,
@@ -162,6 +163,21 @@ import {
   tiktokResendRearmFields,
   TIKTOK_RESEND_ERRORS,
 } from "./tiktok-resend.mjs";
+import {
+  APPROVE_ALL_BATCH_SIZE,
+  APPROVE_ALL_JOBS_SETTING,
+  APPROVE_ALL_MAX_SLICES_PER_INVOKE,
+  approveAllJobCounts,
+  approveAllProgressMessage,
+  buildApproveAllJob,
+  finalizeApproveAllJobStatus,
+  newApproveAllJobId,
+  nextPendingApproveAllItems,
+  parseApproveAllJobStore,
+  pruneApproveAllJobStore,
+  resetFailedApproveAllItems,
+  summarizeApproveAllJob,
+} from "./approve-all-batch.mjs";
 
 import {
   analyticsObservationKey,
@@ -534,7 +550,8 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.478-engagement-approve-blocks-comment",
+          version: "0.10.485-approve-all-batch",
+          studio_approve_all_batch_v1: true,
           studio_engagement_v1: true,
           studio_mae_schedule_v1: true,
           studio_mae_28_day_schedule_v1: true,
@@ -1432,8 +1449,11 @@ export default {
       }
 
       if (isOutputApproveAllRoute) {
-        assertWriteRequest(request, env);
         requirePermission(authorization, "outputs_review");
+        if (request.method === "GET") {
+          return getApproveAllJobStatus(request, env, authorization);
+        }
+        assertWriteRequest(request, env);
         return approveAllOutputsForPublishing(request, env, authorization, ctx);
       }
 
@@ -1602,6 +1622,16 @@ export default {
         await studioHealNativePhotoReviewStrands(env, { limit: 8 });
       } catch (error) {
         console.warn("studio native-photo review-strand heal failed", error);
+      }
+      try {
+        await studioHealAwaitingApprovalStaleRfr(env, { limit: 12 });
+      } catch (error) {
+        console.warn("studio awaiting-approval stale RFR heal failed", error);
+      }
+      try {
+        await studioResumeApproveAllJobs(env, ctx);
+      } catch (error) {
+        console.warn("studio approve-all batch resume failed", error);
       }
       try {
         await studioHealPromotedMissingFanout(env, { limit: 8 });
@@ -11439,6 +11469,49 @@ async function studioHealNativePhotoReviewStrands(env, options = {}) {
     }
   }
   if (healed.length) console.log("Studio native-photo review/approve heal", JSON.stringify({ count: healed.length, healed }));
+  return healed;
+}
+
+/** Output_Status stuck Ready for Review after Approve → phantom All-Profiles Awaiting Approval. */
+async function studioHealAwaitingApprovalStaleRfr(env, options = {}) {
+  const limit = Math.max(1, Math.min(20, Number(options.limit || 12)));
+  const outputTable = env.AIRTABLE_OUTPUT_TABLE_ID;
+  const rows = await listRecords(env, outputTable, {
+    limit: Math.max(limit * 3, 30),
+    sortField: "Output_ID",
+    sortDirection: "desc",
+    filterFormula: 'AND({Test_Run_ID}=BLANK(),{Published_At}=BLANK(),{Do_Not_Publish}=0,{Output_Status}="Ready for Review",{Review_Status}="Approved",OR({Publish_Status}="Ready to Schedule",{Publish_Status}="Ready to Publish",{Publish_Status}="Scheduled",{Publish_Status}="Publishing"))',
+  }).catch(() => []);
+  const healed = [];
+  for (const record of rows || []) {
+    if (healed.length >= limit) break;
+    const row = mapDeskInventoryOutput(record);
+    const finding = classifyAwaitingApprovalStaleRfr(row);
+    if (!finding) continue;
+    try {
+      await airtableFetch(env, outputTable, record.id, {
+        method: "PATCH",
+        body: JSON.stringify({
+          fields: { Output_Status: "Approved for Publishing" },
+          typecast: true,
+        }),
+      });
+      healed.push({
+        key: "AWAITING_APPROVAL_STALE_RFR",
+        id: record.id,
+        output_id: row.output_id || null,
+        fingerprint: finding.fingerprint,
+      });
+    } catch (error) {
+      healed.push({
+        key: "AWAITING_APPROVAL_STALE_RFR",
+        id: record.id,
+        output_id: row.output_id || null,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+  if (healed.length) console.log("Studio awaiting-approval stale RFR heal", JSON.stringify({ count: healed.length, healed }));
   return healed;
 }
 
@@ -33550,14 +33623,273 @@ function mapApprovedOutputSummary(record) {
   };
 }
 
+async function studioLoadApproveAllJobStore(env) {
+  const row = await studioSettingsByName(env, APPROVE_ALL_JOBS_SETTING).catch(() => null);
+  return pruneApproveAllJobStore(
+    parseApproveAllJobStore(row?.fields?.Setting_Value || row?.fields?.Value || "{}"),
+  );
+}
+
+async function studioSaveApproveAllJobStore(env, store) {
+  const pruned = pruneApproveAllJobStore(store);
+  await studioUpsertSetting(
+    env,
+    APPROVE_ALL_JOBS_SETTING,
+    JSON.stringify(pruned),
+    "Durable Pipeline Approve All batch jobs (progress + retry).",
+  );
+  return pruned;
+}
+
+async function studioGetApproveAllJob(env, jobId) {
+  const store = await studioLoadApproveAllJobStore(env);
+  return store.jobs[String(jobId || "").trim()] || null;
+}
+
+async function studioPutApproveAllJob(env, job) {
+  const store = await studioLoadApproveAllJobStore(env);
+  store.jobs[job.id] = job;
+  if (job.profile_id && (job.status === "queued" || job.status === "running")) {
+    store.active_by_profile[job.profile_id] = job.id;
+  } else if (job.profile_id && store.active_by_profile[job.profile_id] === job.id) {
+    delete store.active_by_profile[job.profile_id];
+  }
+  await studioSaveApproveAllJobStore(env, store);
+  return job;
+}
+
+function mapApproveAllEligibleSummary(record) {
+  return {
+    id: record.id,
+    output_id: f(record, "Output_ID"),
+    platform: f(record, "Platform"),
+    format: f(record, "Format") || f(record, "Platform_Output_Type") || f(record, "Studio_Output_Type"),
+  };
+}
+
+async function getApproveAllJobStatus(request, env, authorization) {
+  const url = new URL(request.url);
+  const jobId = String(url.searchParams.get("job_id") || "").trim();
+  const profile = await resolveWorkingContentProfile(env, authorization, requestedProfileId(url, null));
+  const store = await studioLoadApproveAllJobStore(env);
+  let job = jobId ? store.jobs[jobId] : null;
+  if (!job && profile?.id) {
+    const activeId = store.active_by_profile[profile.id];
+    job = activeId ? store.jobs[activeId] : null;
+  }
+  if (!job) {
+    return respond(request, env, {
+      ok: true,
+      action: "approve_all_for_publishing",
+      batch: true,
+      status: "idle",
+      job_id: null,
+      message: "No Approve All batch is running.",
+    });
+  }
+  if (job.profile_id && profile?.id && job.profile_id !== profile.id) {
+    throw new HttpError(404, "Approve All job not found for this profile");
+  }
+  return respond(request, env, summarizeApproveAllJob(job));
+}
+
+async function studioProcessApproveAllJobSlice(env, jobId, options = {}) {
+  const maxSlices = Math.max(1, Math.min(20, Number(options.maxSlices || APPROVE_ALL_MAX_SLICES_PER_INVOKE)));
+  let job = await studioGetApproveAllJob(env, jobId);
+  if (!job) return null;
+  if (job.status === "completed" || job.status === "failed") return job;
+
+  const stamp = new Date().toISOString();
+  job = { ...job, status: "running", updated_at: stamp, items: (job.items || []).map((item) => ({ ...item })) };
+  await studioPutApproveAllJob(env, job);
+
+  const profile = job.profile_id
+    ? await airtableFetch(env, "Content Profiles", job.profile_id).catch(() => null)
+    : null;
+  const occupiedByPlatform = await studioOccupiedSchedulesOrEmpty(env, {
+    excludeIds: (job.items || []).map((item) => item.id),
+    profile,
+  });
+  // Seed occupancy with schedules already booked by earlier approved items in this job.
+  for (const item of job.items || []) {
+    if (item.status !== "approved" || !item.scheduled_ms) continue;
+    const platform = String(item.platform || "").trim();
+    if (!platform || /story/i.test(String(item.format || ""))) continue;
+    (occupiedByPlatform[platform] ||= []).push(Number(item.scheduled_ms));
+  }
+
+  let slices = 0;
+  let approvedThisInvoke = 0;
+  while (slices < maxSlices) {
+    const pending = nextPendingApproveAllItems(job, APPROVE_ALL_BATCH_SIZE);
+    if (!pending.length) break;
+    slices += 1;
+    for (const pendingItem of pending) {
+      const item = (job.items || []).find((row) => row.id === pendingItem.id);
+      if (!item || item.status !== "pending") continue;
+      try {
+        const record = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, item.id);
+        const publishStatus = String(f(record, "Publish_Status") || "").trim();
+        const outputStatus = String(f(record, "Output_Status") || "").trim();
+        const reviewStatus = String(f(record, "Review_Status") || "").trim();
+        if (publishStatus === "Published" || outputStatus === "Published") {
+          item.status = "skipped";
+          item.error = null;
+          Object.assign(item, mapApproveAllEligibleSummary(record));
+          continue;
+        }
+        if (reviewStatus === "Approved" || outputStatus === "Approved for Publishing") {
+          item.status = "skipped";
+          item.error = null;
+          Object.assign(item, mapApproveAllEligibleSummary(record));
+          continue;
+        }
+        if (!studioOutputReadyForPublishApproval(record)) {
+          throw new HttpError(409, "This output is not ready for publishing approval");
+        }
+        const platform = String(f(record, "Platform") || "").trim();
+        const isStory = /story/i.test(String(f(record, "Studio_Output_Type") || f(record, "Format") || ""));
+        const occupiedMs = isStory ? [] : studioOccupiedForPlatform(occupiedByPlatform, platform);
+        const rowSchedule = job.schedules?.[record.id];
+        const updated = await approveOutputRecordForPublishing(env, record, job.notes || "", new Date().toISOString(), {
+          scheduled_post_date: rowSchedule,
+        }, { occupiedMs });
+        const booked = studioScheduleMs(f(updated, "Scheduled_Post_Date")) ?? Date.now();
+        if (!isStory) (occupiedByPlatform[platform] ||= []).push(booked);
+        Object.assign(item, mapApproveAllEligibleSummary(updated), {
+          status: "approved",
+          error: null,
+          scheduled_ms: booked,
+        });
+        approvedThisInvoke += 1;
+      } catch (error) {
+        item.status = "failed";
+        item.error = error?.message || "Approval failed";
+      }
+      job.updated_at = new Date().toISOString();
+    }
+    job = finalizeApproveAllJobStatus(job, new Date().toISOString());
+    await studioPutApproveAllJob(env, job);
+    if (job.status === "completed" || job.status === "failed") break;
+  }
+
+  job = finalizeApproveAllJobStatus(job, new Date().toISOString());
+  await studioPutApproveAllJob(env, job);
+  return { job, approvedThisInvoke };
+}
+
+async function studioRunApproveAllJob(env, jobId, ctx = null) {
+  const result = await studioProcessApproveAllJobSlice(env, jobId);
+  const job = result?.job;
+  if (!job) return null;
+  if (result.approvedThisInvoke > 0 && ctx && typeof ctx.waitUntil === "function") {
+    ctx.waitUntil(studioReconcileApprovedPublishes(env, { limit: 2 }).catch((error) => {
+      console.warn("approve-all publish kickoff failed", error);
+    }));
+  }
+  const counts = approveAllJobCounts(job);
+  if (counts.pending_count > 0) {
+    // Chain slices after the HTTP response returns. Cron also resumes queued/running
+    // jobs if an isolate budget cut lands mid-batch.
+    const continuation = studioRunApproveAllJob(env, jobId, null).catch((error) => {
+      console.warn("approve-all batch continuation failed", jobId, error);
+    });
+    if (ctx && typeof ctx.waitUntil === "function") {
+      ctx.waitUntil(continuation);
+    } else {
+      await continuation;
+    }
+  }
+  return job;
+}
+
+async function studioResumeApproveAllJobs(env, ctx = null) {
+  const store = await studioLoadApproveAllJobStore(env);
+  const activeIds = Object.values(store.active_by_profile || {});
+  const running = Object.values(store.jobs || {}).filter((job) => {
+    if (!job) return false;
+    if (activeIds.includes(job.id)) return true;
+    return job.status === "queued" || job.status === "running";
+  });
+  const seen = new Set();
+  for (const job of running) {
+    if (!job?.id || seen.has(job.id)) continue;
+    seen.add(job.id);
+    const counts = approveAllJobCounts(job);
+    if (counts.pending_count <= 0) {
+      const finalized = finalizeApproveAllJobStatus(job, new Date().toISOString());
+      await studioPutApproveAllJob(env, finalized);
+      continue;
+    }
+    if (ctx && typeof ctx.waitUntil === "function") {
+      ctx.waitUntil(studioRunApproveAllJob(env, job.id, ctx).catch((error) => {
+        console.warn("approve-all cron resume failed", job.id, error);
+      }));
+    } else {
+      await studioRunApproveAllJob(env, job.id, null).catch((error) => {
+        console.warn("approve-all cron resume failed", job.id, error);
+      });
+    }
+  }
+  return seen.size;
+}
+
 async function approveAllOutputsForPublishing(request, env, authorization, ctx = null) {
   let payload = {};
   try { payload = await request.json(); } catch { payload = {}; }
   const note = phase6Text(payload?.notes, 10000);
   const stamp = new Date().toISOString();
   const profile = await resolveWorkingContentProfile(env, authorization, requestedProfileId(null, payload));
-  // Approval is the click that must survive this isolate. Inline dispatch of every
-  // ready row (webhook + 10s orchestrator tail) is what left 262/267 unapproved.
+  const action = String(payload?.action || "start").trim().toLowerCase();
+
+  if (action === "retry") {
+    const jobId = String(payload?.job_id || "").trim();
+    if (!jobId) throw new HttpError(400, "job_id is required to retry Approve All failures");
+    const existing = await studioGetApproveAllJob(env, jobId);
+    if (!existing) throw new HttpError(404, "Approve All job not found");
+    if (existing.profile_id && profile?.id && existing.profile_id !== profile.id) {
+      throw new HttpError(404, "Approve All job not found for this profile");
+    }
+    const counts = approveAllJobCounts(existing);
+    if (counts.failed_count <= 0) {
+      return respond(request, env, {
+        ...summarizeApproveAllJob(existing),
+        message: "No failed approvals to retry.",
+      });
+    }
+    const retried = resetFailedApproveAllItems(existing, stamp);
+    await studioPutApproveAllJob(env, retried);
+    if (ctx && typeof ctx.waitUntil === "function") {
+      ctx.waitUntil(studioRunApproveAllJob(env, retried.id, ctx).catch((error) => {
+        console.warn("approve-all retry failed", retried.id, error);
+      }));
+    } else {
+      await studioRunApproveAllJob(env, retried.id, null);
+    }
+    return respond(request, env, {
+      ...summarizeApproveAllJob(retried),
+      accepted: true,
+      message: `Retrying ${counts.failed_count} failed approval${counts.failed_count === 1 ? "" : "s"} in the background.`,
+    });
+  }
+
+  const store = await studioLoadApproveAllJobStore(env);
+  const activeId = profile?.id ? store.active_by_profile[profile.id] : null;
+  const activeJob = activeId ? store.jobs[activeId] : null;
+  if (activeJob && (activeJob.status === "queued" || activeJob.status === "running")) {
+    if (ctx && typeof ctx.waitUntil === "function") {
+      ctx.waitUntil(studioRunApproveAllJob(env, activeJob.id, ctx).catch(() => null));
+    }
+    return respond(request, env, {
+      ...summarizeApproveAllJob(activeJob),
+      accepted: true,
+      already_running: true,
+      message: approveAllProgressMessage(activeJob),
+    });
+  }
+
+  // Enqueue only. Approval work + publish reconcile run in waitUntil / cron slices so
+  // Studio stays responsive and a closed tab cannot strand half-approved batches.
   const records = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
     limit: 100,
     sortField: "Output_ID",
@@ -33572,51 +33904,48 @@ async function approveAllOutputsForPublishing(request, env, authorization, ctx =
     if (requestedIdSet && !requestedIdSet.has(record.id)) return false;
     return studioOutputReadyForPublishApproval(record);
   });
-  const approved = [];
-  const failed = [];
-  const schedules = payload?.schedules && typeof payload.schedules === "object" ? payload.schedules : {};
-  const occupiedByPlatform = await studioOccupiedSchedulesOrEmpty(env, {
+  if (!eligible.length) {
+    return respond(request, env, {
+      ok: true,
+      action: "approve_all_for_publishing",
+      batch: true,
+      status: "idle",
+      approved_count: 0,
+      failed_count: 0,
+      skipped_count: records.length,
+      message: "No outputs were ready to approve.",
+    });
+  }
+
+  // Warm occupancy once so the background worker starts with a soft fail path if
+  // schedule occupancy cannot be read (same contract as single Approve).
+  await studioOccupiedSchedulesOrEmpty(env, {
     excludeIds: eligible.map((record) => record.id),
     profile,
   });
-  for (const record of eligible) {
-    try {
-      const platform = String(f(record, "Platform") || "").trim();
-      const isStory = /story/i.test(String(f(record, "Studio_Output_Type") || f(record, "Format") || ""));
-      // Stories may share a wall-clock slot; only non-stories occupy the platform lane.
-      const occupiedMs = isStory ? [] : studioOccupiedForPlatform(occupiedByPlatform, platform);
-      const rowSchedule = schedules[record.id] !== undefined ? schedules[record.id] : payload?.scheduled_post_date;
-      const updated = await approveOutputRecordForPublishing(env, record, note, stamp, {
-        scheduled_post_date: rowSchedule,
-      }, { occupiedMs });
-      const booked = studioScheduleMs(f(updated, "Scheduled_Post_Date")) ?? Date.now();
-      if (!isStory) (occupiedByPlatform[platform] ||= []).push(booked);
-      approved.push(mapApprovedOutputSummary(updated));
-    } catch (error) {
-      failed.push({
-        ...mapApprovedOutputSummary(record),
-        error: error?.message || "Approval failed",
-      });
-    }
-  }
-  if (approved.length && ctx && typeof ctx.waitUntil === "function") {
-    ctx.waitUntil(studioReconcileApprovedPublishes(env, { limit: 2 }).catch((error) => {
-      console.warn("approve-all publish kickoff failed", error);
+
+  const schedules = payload?.schedules && typeof payload.schedules === "object" ? payload.schedules : {};
+  const job = buildApproveAllJob({
+    jobId: newApproveAllJobId(),
+    profileId: profile?.id || null,
+    note,
+    schedules,
+    records: eligible.map(mapApproveAllEligibleSummary),
+    stamp,
+  });
+  await studioPutApproveAllJob(env, job);
+  if (ctx && typeof ctx.waitUntil === "function") {
+    ctx.waitUntil(studioRunApproveAllJob(env, job.id, ctx).catch((error) => {
+      console.warn("approve-all batch start failed", job.id, error);
     }));
+  } else {
+    await studioRunApproveAllJob(env, job.id, null);
   }
-  const skipped = records.length - eligible.length;
   return respond(request, env, {
-    ok: true,
-    action: "approve_all_for_publishing",
-    approved_count: approved.length,
-    failed_count: failed.length,
-    skipped_count: skipped,
-    dispatch_deferred: true,
-    approved,
-    failed,
-    message: approved.length
-      ? `Approved ${approved.length} output${approved.length === 1 ? "" : "s"} for publishing. Publishers start from the approved queue so a Worker budget miss cannot leave rows unapproved.`
-      : "No outputs were ready to approve.",
+    ...summarizeApproveAllJob(job),
+    accepted: true,
+    skipped_count: records.length - eligible.length,
+    message: `Approve All started · 0 of ${eligible.length} approved · 0 failed`,
   });
 }
 
@@ -33948,14 +34277,17 @@ async function dashboard(request, env, url, authorization) {
   const active = mappedOutputs.filter((o) => !["Published", "Skipped", "Failed"].includes(o.studio_state)).length;
   const manualAction = mappedOutputs.filter((o) => o.studio_state === "Manual Action Required").length;
   const failed = mappedOutputs.filter((o) => o.studio_state === "Failed").length;
+  // Match Pipeline "Awaiting Approval": normalized studio_state only.
+  // Do not count raw Output_Status=Ready for Review after Approve (Review=Approved /
+  // Publish=Ready to Schedule) — those click through empty (Miami Outputs 2154/2155/1841).
   const awaitingApproval = mappedOutputs.filter((o) => {
     const state = String(o.studio_state || "").trim();
-    const review = String(o.review_status || "").trim();
-    const output = String(o.output_status || "").trim();
-    return state === "Ready for Review"
-      || state === "Awaiting Approval"
-      || review === "Pending"
-      || output === "Ready for Review";
+    if (state !== "Ready for Review" && state !== "Awaiting Approval") return false;
+    if (o.do_not_publish) return false;
+    const notes = `${o.output_notes || ""}\n${o.production_notes || ""}`;
+    if (/origin=az-finished-video/i.test(notes)) return false;
+    if (/az-auto-queue=1/i.test(notes) && /ez-input=finished-video/i.test(notes)) return false;
+    return true;
   }).length;
   // Keep the Home count identical to the Ideas tab's "Current ideas"
   // population. The tab considers an idea promoted when either the canonical
@@ -37505,6 +37837,20 @@ async function gatherStudioDeskInventory(env) {
     }
   } catch (error) {
     console.warn("desk native-photo approve-incomplete scan failed", error);
+  }
+  try {
+    const staleRfrRows = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
+      limit: 30,
+      sortField: "Output_ID",
+      sortDirection: "desc",
+      filterFormula: 'AND({Test_Run_ID}=BLANK(),{Published_At}=BLANK(),{Do_Not_Publish}=0,{Output_Status}="Ready for Review",{Review_Status}="Approved",OR({Publish_Status}="Ready to Schedule",{Publish_Status}="Ready to Publish",{Publish_Status}="Scheduled",{Publish_Status}="Publishing"))',
+    }).catch(() => []);
+    scanned("awaiting_approval_stale_rfr");
+    for (const record of staleRfrRows || []) {
+      push(classifyAwaitingApprovalStaleRfr(mapOut(record)));
+    }
+  } catch (error) {
+    console.warn("desk awaiting-approval stale RFR scan failed", error);
   }
 
   try {

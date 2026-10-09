@@ -8,7 +8,7 @@ const { URL } = require("url");
 
 const { spawnSync } = require("child_process");
 
-const SERVICE_VERSION = "2026-10-08-engagement-comment-like";
+const SERVICE_VERSION = "2026-10-09-engagement-comment-like";
 const engageIdempotency = new Map();
 const MIN_REFRESH_TOKEN_LENGTH = 40;
 const ENV_PATH = path.join(process.cwd(), ".env");
