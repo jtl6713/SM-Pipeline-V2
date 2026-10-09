@@ -195,8 +195,18 @@
     return String(area?.value || "").trim();
   }
 
+  function stageBChecked() {
+    return Boolean($("engagementStageB")?.checked);
+  }
+
   async function runAction(action, targetId) {
-    const payload = { action, target_id: targetId, comment: commentFor(targetId) };
+    const payload = {
+      action,
+      target_id: targetId,
+      comment: commentFor(targetId),
+      // Send checkbox state so Miami/etc Stage B is persisted even if Save was skipped.
+      stage_b_enabled: stageBChecked(),
+    };
     setStatus(`Running ${action}…`);
     const result = await fetchJson("/api/engagement/actions", {
       method: "POST",
@@ -205,10 +215,12 @@
     if (action === "open_post" && (result.post_url || result.target?.post_url)) {
       window.open(result.post_url || result.target.post_url, "_blank", "noopener,noreferrer");
     }
-    if (result.unsupported && (result.post_url || result.target?.post_url)) {
+    // Platform-unsupported opens the post for manual work. Stage B off must not —
+    // that looked like success while no YouTube API call ran.
+    if (result.unsupported && !result.stage_b_disabled && (result.post_url || result.target?.post_url)) {
       window.open(result.post_url || result.target.post_url, "_blank", "noopener,noreferrer");
     }
-    setStatus(result.message || "Done.", result.ok === false && !result.unsupported);
+    setStatus(result.message || "Done.", result.ok === false);
     await loadEngagement(true);
   }
 
@@ -283,6 +295,9 @@
   $("engagementRefresh")?.addEventListener("click", () => loadEngagement(true));
   $("engagementDiscover")?.addEventListener("click", () => discover().catch((error) => setStatus(error.message, true)));
   $("engagementSaveSettings")?.addEventListener("click", () => saveSettings().catch((error) => setStatus(error.message, true)));
+  $("engagementStageB")?.addEventListener("change", () => {
+    saveSettings().catch((error) => setStatus(error.message || String(error), true));
+  });
   $("engagementPlatform")?.addEventListener("change", () => loadEngagement(true));
   $("studioProfileSelect")?.addEventListener("change", () => {
     if (pageActive()) loadEngagement(true);

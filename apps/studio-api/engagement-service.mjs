@@ -408,9 +408,20 @@ export async function studioApplyEngagementAction(env, payload, deps) {
   }
 
   const store = await studioLoadEngagementStore(env, deps);
-  const settings = await studioLoadEngagementSettings(env, profile, deps);
+  let settings = await studioLoadEngagementSettings(env, profile, deps);
   const target = store.targets.find((row) => row.target_id === targetId && row.profile === profile);
   if (!target) throw new Error("Engagement target not found for this profile");
+
+  // Persist Stage B from the current UI checkbox for this profile. Checking the
+  // box without Save left miami/nyc/la on Stage A defaults, so Comment only
+  // opened YouTube and never called the API.
+  if (payload.stage_b_enabled === true && settings.stage_b_enabled !== true) {
+    settings = await studioSaveEngagementSettings(
+      env,
+      { ...settings, stage_b_enabled: true, stage: "B" },
+      deps
+    );
+  }
 
   if (actionType === "edit") {
     const edited = sanitizeCommentSuggestion(payload.comment || payload.edited_comment || "");
@@ -490,11 +501,25 @@ export async function studioApplyEngagementAction(env, payload, deps) {
   // like / comment execution (Stage B)
   const execType = actionType === "like" ? "like" : "comment";
   if (!settings.stage_b_enabled) {
+    const action = buildActionRecord({
+      target,
+      actionType: execType,
+      comment: payload.comment || target.selected_comment,
+      approvalStatus: "approved",
+      executionStatus: "unsupported",
+      error: `Stage B publish is disabled for ${profile}. Enable Stage B, then click Comment again.`,
+    });
+    action.classification = classifyEngagementFailure(action.error_details);
+    store.actions.unshift(action);
+    await mirrorActionRow(env, action, deps);
+    await studioSaveEngagementStore(env, store, deps);
     return {
       ok: false,
       unsupported: true,
+      stage_b_disabled: true,
       target,
-      message: "Stage B publish is disabled. Approve suggestions in Stage A, or enable Stage B in settings after review.",
+      action,
+      message: action.error_details,
       post_url: target.post_url,
     };
   }
