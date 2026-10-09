@@ -66,7 +66,7 @@ test("Worker and Pipeline UI advertise TikTok draft resend", async () => {
   assert.match(worker, /version: "0.10.490-vibe-cut"/);
   assert.match(worker, /function resendStudioTiktokDraft/);
   assert.match(worker, /\/tiktok-resend\$/);
-  assert.match(app, /BUILD_ID = "item4-0.6.549-vibe-cut"/);
+  assert.match(app, /BUILD_ID = "item4-0.6.550-vibe-cut-home"/);
   assert.match(app, /Resend draft to TikTok/);
   assert.match(app, /\/tiktok-resend/);
   assert.match(app, /function tiktokNeedsDraftResend/);

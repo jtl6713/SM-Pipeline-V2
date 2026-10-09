@@ -181,7 +181,9 @@ test("Studio web exposes Vibe Cut creation path", () => {
   const html = fs.readFileSync(path.join(webRoot, "index.html"), "utf8");
   assert.match(ez, /VIBE_CUT:\s*"vibe-cut"/);
   assert.match(app, /Vibe Cut/);
+  assert.match(app, /startEzVibeCutWizard/);
   assert.match(app, /vibeTarget|vibeStyle|vibeEnergy/);
   assert.match(app, /ez-input=vibe-cut|inputKind:\s*"vibe-cut"/);
   assert.match(html, /vibe-cut\.js/);
+  assert.match(html, /id="ezVibeCutLaunch"/);
 });

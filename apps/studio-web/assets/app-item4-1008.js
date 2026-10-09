@@ -260,7 +260,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.549-vibe-cut";
+  const BUILD_ID = "item4-0.6.550-vibe-cut-home";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -3706,6 +3706,28 @@
       voiceover: "off",
       aspect_ratio: "9:16",
     };
+  }
+
+  function syncEzVibeCutLaunch() {
+    const launch = $("ezVibeCutLaunch");
+    if (!launch) return;
+    const onHome = Boolean($("page-home")?.classList.contains("active"));
+    const atStart = ezWizardStep === "start" || !ezWizardStep;
+    launch.hidden = !(onHome && atStart && !ezWizardBusy && !azFinishedPath);
+  }
+
+  function startEzVibeCutWizard() {
+    if (ezWizardBusy) return;
+    switchToPage("home");
+    resetEzWizard({ silent: true });
+    ezWizardPick("Vibe Cut", {
+      start: "vibe-cut",
+      inputKind: "vibe-cut",
+      photoCount: 1,
+      packageId: "video",
+      vibeBeatSync: "on",
+    }, "vibeTarget");
+    syncEzVibeCutLaunch();
   }
 
   function setEzMessage(text = "", type = "") {
@@ -7176,6 +7198,7 @@
     const summary = $("ezWizardSummary");
     const chipsHost = $("ezWizardChips");
     if (!prompt || !chipsHost) return;
+    syncEzVibeCutLaunch();
     if (back) back.hidden = ezWizardHistory.length === 0;
     const summaryText = ezWizardSummaryText();
     if (summary) {
@@ -7192,21 +7215,16 @@
       if (!$("ezWizardLog")?.children.length) {
         ezWizardLogAdd("bot", "Where do you want to start?");
       }
+      syncEzVibeCutLaunch();
       renderEzWizardChips([
+        {
+          label: "Vibe Cut — long video → music montage",
+          onClick: () => startEzVibeCutWizard(),
+        },
         { label: "An idea I already have, or a new idea", onClick: () => ezWizardPick("An idea", { start: "idea" }, "ideaMode") },
         { label: "Photos I already have", onClick: () => ezWizardPick("Photos I already have", { start: "photos" }, "photoKind") },
         { label: "AI-generated images", onClick: () => ezWizardPick("AI-generated images", { start: "ai" }, "aiKind") },
         { label: "Mix of my photos and AI images", onClick: () => ezWizardPick("Mix of my photos and AI", { start: "mixed" }, "mixManual") },
-        {
-          label: "Vibe Cut — long video → music montage",
-          onClick: () => ezWizardPick("Vibe Cut", {
-            start: "vibe-cut",
-            inputKind: "vibe-cut",
-            photoCount: 1,
-            packageId: "video",
-            vibeBeatSync: "on",
-          }, "vibeTarget"),
-        },
       ]);
       return;
     }
@@ -8021,6 +8039,7 @@
   }
 
   function bindEzWizard() {
+    $("ezVibeCutLaunch")?.addEventListener("click", () => startEzVibeCutWizard());
     $("ezWizardBack")?.addEventListener("click", () => {
       const previous = ezWizardHistory.pop();
       if (!previous) return;
