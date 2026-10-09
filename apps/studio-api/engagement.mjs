@@ -607,16 +607,64 @@ export function shouldSuspendProfilePlatform(errorText) {
   return /permission|oauth|unauthorized|abuse|spam|suspended|app.?review/i.test(String(errorText || ""));
 }
 
+function slimEngagementTarget(target) {
+  if (!target || typeof target !== "object") return target;
+  const comments = Array.isArray(target.suggested_comments) ? target.suggested_comments : [];
+  return {
+    ...target,
+    caption: String(target.caption || "").slice(0, 320),
+    content_summary: String(target.content_summary || "").slice(0, 180),
+    recommend_reason: String(target.recommend_reason || "").slice(0, 180),
+    suggested_comments: comments.slice(0, 1).map((row) => String(row || "").slice(0, 240)),
+    selected_comment: String(target.selected_comment || comments[0] || "").slice(0, 240),
+    matched_terms: Array.isArray(target.matched_terms) ? target.matched_terms.slice(0, 6) : [],
+    hashtags: Array.isArray(target.hashtags) ? target.hashtags.slice(0, 6) : [],
+    preview_url: String(target.preview_url || "").slice(0, 300),
+  };
+}
+
+/** Airtable long text rejects Setting_Value above 100,000 characters. */
+export const ENGAGEMENT_STORE_CHAR_BUDGET = 80000;
+
 export function pruneEngagementStore(store, limits = {}) {
-  const maxTargets = limits.maxTargets || 250;
-  const maxActions = limits.maxActions || 500;
-  const targets = [...(store.targets || [])]
-    .sort((a, b) => String(b.discovered_at || "").localeCompare(String(a.discovered_at || "")))
-    .slice(0, maxTargets);
-  const actions = [...(store.actions || [])]
+  const maxChars = limits.maxChars || ENGAGEMENT_STORE_CHAR_BUDGET;
+  const keepPerProfile = limits.keepPerProfile || 8;
+  const sortedTargets = [...(store.targets || [])]
+    .map(slimEngagementTarget)
+    .sort((a, b) => String(b.discovered_at || "").localeCompare(String(a.discovered_at || "")));
+  const seen = new Map();
+  const protectedTargets = [];
+  const extraTargets = [];
+  for (const target of sortedTargets) {
+    const key = String(target.profile || "");
+    const count = seen.get(key) || 0;
+    if (count < keepPerProfile) {
+      seen.set(key, count + 1);
+      protectedTargets.push(target);
+    } else {
+      extraTargets.push(target);
+    }
+  }
+  let targets = [...protectedTargets, ...extraTargets].slice(0, limits.maxTargets || 80);
+  let actions = [...(store.actions || [])]
     .sort((a, b) => String(b.created_at || "").localeCompare(String(a.created_at || "")))
-    .slice(0, maxActions);
-  return { ...store, targets, actions, updated_at: new Date().toISOString() };
+    .slice(0, limits.maxActions || 200);
+  const pack = () => ({
+    ...store,
+    targets,
+    actions,
+    updated_at: new Date().toISOString(),
+  });
+  let next = pack();
+  while (JSON.stringify(next).length > maxChars && targets.length > protectedTargets.length) {
+    targets = targets.slice(0, targets.length - 1);
+    next = pack();
+  }
+  while (JSON.stringify(next).length > maxChars && actions.length > 15) {
+    actions = actions.slice(0, actions.length - 10);
+    next = pack();
+  }
+  return next;
 }
 
 export function buildTargetRecord(post, settings, comments) {
@@ -631,8 +679,8 @@ export function buildTargetRecord(post, settings, comments) {
     post_id: String(post.post_id || post.external_post_id || "").trim(),
     post_url: String(post.post_url || post.url || "").trim(),
     discovered_at: now,
-    content_summary: String(post.content_summary || post.caption || post.title || "").slice(0, 500),
-    caption: String(post.caption || post.title || "").slice(0, 2000),
+    content_summary: String(post.content_summary || post.caption || post.title || "").slice(0, 180),
+    caption: String(post.caption || post.title || "").slice(0, 320),
     relevance_score: Number(post.relevance_score) || 0,
     recommend_reason: String(post.recommend_reason || "").slice(0, 500),
     eligibility_status: comments.length ? "Suggested" : "Ineligible",

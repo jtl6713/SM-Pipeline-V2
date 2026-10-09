@@ -104,3 +104,5 @@ Deploy Studio UI 0.6.534-pages-path-bust. Rename app-item4-0625.js -> app-item4-
 2026-10-09: Deploy UI 0.6.546-engagement-action-status. Engagement Comment and Like show the block reason and refresh history.
 
 2026-10-09: Deploy UI 0.6.547-engagement-click. Chicago Comment and Like show Sending in the history panel as soon as they are clicked.
+
+2026-10-09: Deploy UI 0.6.548-engagement-ledger. Engagement history keeps the server message when a click cannot be saved.
