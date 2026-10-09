@@ -335,7 +335,10 @@
       }
     });
     const activate = $("newProfileActivate");
-    if (activate) activate.disabled = !readiness.ready;
+    if (activate) {
+      activate.hidden = !state.createdProfileId;
+      activate.disabled = !readiness.ready;
+    }
     const summary = $("newProfileReadinessSummary");
     if (summary) {
       summary.textContent = readiness.ready
