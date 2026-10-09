@@ -4218,8 +4218,25 @@ async function studioProfileSetupConnectionSnapshot(env, profile) {
   const token = String(settings.FACEBOOK_PAGE_ACCESS_TOKEN || env.FACEBOOK_PAGE_ACCESS_TOKEN || "").trim();
   const result = {
     instagram: { platform: "Instagram", status: "not_configured", account_name: null, account_id: settings.INSTAGRAM_BUSINESS_ACCOUNT_ID || null, error: null },
-    tiktok: { platform: "TikTok", status: "not_configured", account_name: f(profile, "TikTok_Handle") || null, account_id: null, error: null },
-    youtube: { platform: "YouTube", status: "not_configured", account_name: null, account_id: settings.YOUTUBE_CHANNEL_ID || null, error: null },
+    tiktok: {
+      platform: "TikTok",
+      status: "not_configured",
+      account_name: f(profile, "TikTok_Handle") || null,
+      account_id: null,
+      worker_configured: Boolean(String(settings.TIKTOK_WORKER_BASE_URL || "").trim()),
+      connect_url: String(settings.TIKTOK_WORKER_BASE_URL || "").trim()
+        ? String(settings.TIKTOK_WORKER_BASE_URL).trim().replace(/\/+$/, "") + "/tiktok/connect"
+        : null,
+      error: null,
+    },
+    youtube: {
+      platform: "YouTube",
+      status: "not_configured",
+      account_name: null,
+      account_id: settings.YOUTUBE_CHANNEL_ID || null,
+      service_configured: Boolean(String(settings.YOUTUBE_UPLOAD_SERVICE_URL || "").trim()),
+      error: null,
+    },
     facebook: { platform: "Facebook", status: "not_configured", account_name: null, account_id: settings.FACEBOOK_PAGE_ID || null, error: null },
   };
 
@@ -4300,16 +4317,21 @@ async function listStudioProfileSetups(request, env, authorization) {
   const profiles = (await listContentProfileRecords(env)).filter((profile) =>
     studioProfileSetupBelongsToAuthorization(profile, authorization)
   );
-  const records = [];
-  for (const profile of profiles) {
-    records.push(await studioProfileSetupSummary(env, profile));
-  }
+  // This page is an onboarding surface. Do not probe every already-active city's
+  // external APIs each time it opens; only setup drafts need live connection checks.
+  const setupProfiles = profiles.filter((profile) => !Boolean(f(profile, "Active")));
+  const records = await Promise.all(setupProfiles.map((profile) =>
+    studioProfileSetupSummary(env, profile)
+  ));
   return respond(request, env, {
     ok: true,
     can_create: Boolean(authorization?.permissions?.tenant_admin),
     organization: authorization.organization,
     platforms: profileSetupPublicPlatformDescriptors(),
     records,
+    active_profiles: profiles
+      .filter((profile) => Boolean(f(profile, "Active")))
+      .map(mapStudioContentProfile),
   });
 }
 
@@ -20100,7 +20122,10 @@ async function getInsightsBestTimes(request, env, url, authorization) {
   }
   const occupiedByPlatform = await studioOccupiedSchedulesOrEmpty(env, { profile: occupancyProfile });
   const theme = await studioResolveSimilarTimesTheme(env, url, authorization).catch(() => "chicago");
-  const timeZone = maeNormalizeTimeZone(url.searchParams.get("timezone") || studioScheduleTimeZoneFromTheme(theme));
+  const timeZone = maeNormalizeTimeZone(
+    url.searchParams.get("timezone")
+      || (occupancyProfile ? studioScheduleTimeZoneForProfile(occupancyProfile) : studioScheduleTimeZoneFromTheme(theme))
+  );
   const occupiedOpts = {
     occupiedMs: studioFlattenOccupiedByPlatform(occupiedByPlatform),
     platformOccupiedMs: studioOccupiedForPlatform(occupiedByPlatform, platform),
