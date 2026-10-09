@@ -3852,12 +3852,23 @@ function studioCityLabel(theme, record) {
   if (theme === "la") return "Los Angeles";
   if (theme === "nyc") return "New York";
   if (theme === "miami") return "Miami";
+  if (theme === "las-vegas") return "Las Vegas";
+  if (theme === "san-francisco") return "San Francisco";
+  if (theme === "new-orleans") return "New Orleans";
+  if (theme === "washington-dc") return "Washington DC";
+  if (theme === "boston") return "Boston";
   const market = String(f(record, "Market_Name") || "").trim();
   if (market) return market;
-  return "Chicago";
+  return theme && theme !== "chicago"
+    ? String(theme).split("-").filter(Boolean).map((part) => part.charAt(0).toUpperCase() + part.slice(1)).join(" ")
+    : "Chicago";
 }
 
 function studioScheduleTimeZoneFromTheme(theme) {
+  const normalized = studioNormalizeProfileKey(theme);
+  if (normalized === "las-vegas" || normalized === "san-francisco") return "America/Los_Angeles";
+  if (normalized === "new-orleans") return "America/Chicago";
+  if (normalized === "washington-dc" || normalized === "boston") return "America/New_York";
   return maeTimeZoneFromTheme(theme);
 }
 
@@ -18763,14 +18774,12 @@ function studioNormalizeSimilarProfile(value) {
   if (raw === "la" || raw === "los angeles" || raw === "losangeles") return "la";
   if (raw === "nyc" || raw === "new york" || raw === "newyork") return "nyc";
   if (raw === "miami" || raw === "miami shining" || raw === "miamishining") return "miami";
-  return "chicago";
+  if (raw === "chicago" || raw === "chicagoshining") return "chicago";
+  return studioNormalizeProfileKey(raw) || "chicago";
 }
 
 function studioSimilarProfileLabel(theme) {
-  if (theme === "la") return "Los Angeles";
-  if (theme === "nyc") return "New York";
-  if (theme === "miami") return "Miami";
-  return "Chicago";
+  return studioCityLabel(studioNormalizeSimilarProfile(theme), {});
 }
 
 function parseSimilarWatchlist(raw) {
@@ -18909,12 +18918,12 @@ async function studioEnsureSimilarWatchlist(env) {
 
 async function studioResolveSimilarTimesTheme(env, url, authorization) {
   const raw = String(url?.searchParams?.get("profile") || url?.searchParams?.get("theme") || "").trim();
-  if (["chicago", "la", "nyc", "miami"].includes(raw.toLowerCase())) return raw.toLowerCase();
   if (/^rec[A-Za-z0-9]+$/.test(raw) && authorization) {
     const profiles = await resolveAuthorizedContentProfiles(env, authorization).catch(() => []);
     const found = profiles.find((record) => record.id === raw);
     if (found) return studioThemeForProfile(found);
   }
+  if (raw) return studioNormalizeSimilarProfile(raw);
   return "chicago";
 }
 
