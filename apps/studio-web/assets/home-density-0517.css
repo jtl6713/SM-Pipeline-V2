@@ -66,6 +66,36 @@
   font-size:.82rem;
 }
 .main:has(#page-home.active):has(#page-dashboard.active) .ez-wizard-log{max-height:10vh}
+.main:has(#page-home.active):has(#page-dashboard.active) .ez-vibe-cut-launch{
+  display:flex;
+  flex-direction:column;
+  align-items:flex-start;
+  gap:2px;
+  width:100%;
+  margin:0;
+  padding:9px 11px;
+  border:1px solid rgba(255,214,120,.55);
+  border-radius:12px;
+  background:linear-gradient(135deg,rgba(28,48,86,.92),rgba(12,24,48,.96));
+  color:#fff;
+  text-align:left;
+  cursor:pointer;
+}
+.main:has(#page-home.active):has(#page-dashboard.active) .ez-vibe-cut-launch[hidden]{display:none!important}
+.main:has(#page-home.active):has(#page-dashboard.active) .ez-vibe-cut-launch strong{
+  font-size:.92rem;
+  letter-spacing:.04em;
+  color:#ffe7a8;
+}
+.main:has(#page-home.active):has(#page-dashboard.active) .ez-vibe-cut-launch span{
+  font-size:.74rem;
+  line-height:1.3;
+  color:rgba(226,236,255,.88);
+}
+.main:has(#page-home.active):has(#page-dashboard.active) .ez-vibe-cut-launch:hover{
+  border-color:rgba(255,214,120,.85);
+  box-shadow:0 0 0 1px rgba(255,214,120,.25);
+}
 
 @media(min-width:1020px){
   .main:has(#page-home.active):has(#page-dashboard.active) .ez-path-fork-inner{

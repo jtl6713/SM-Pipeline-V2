@@ -228,6 +228,18 @@ import {
   unassignedSuggestionCount,
 } from "./idea-timed-script.mjs";
 import {
+  anotherCutFromUnused,
+  defaultVibeCutConfig,
+  isVibeCutNotes,
+  mergeVibeCutIntoNotes,
+  parseVibeCutDirective,
+  proposeVibeCuts,
+  provisionalSelectsFromDuration,
+  selectsFromSceneTimestamps,
+  vibeCutProductionDefaults,
+  vibeCutRenderSettings,
+} from "./vibe-cut.mjs";
+import {
   capabilityMatrixResponse,
   studioApplyEngagementAction,
   studioEngagementCron,
@@ -269,6 +281,8 @@ export default {
       const isIdeaPhotoListeningSessionRoute = /^\/api\/ideas\/rec[A-Za-z0-9]+\/photo-listening-session$/.test(url.pathname);
       const isIdeaMatchPhotosRoute = /^\/api\/ideas\/rec[A-Za-z0-9]+\/match-photos$/.test(url.pathname);
       const isIdeaTimedScriptRoute = /^\/api\/ideas\/rec[A-Za-z0-9]+\/timed-script$/.test(url.pathname);
+      const isVibeCutPlanRoute = url.pathname === "/api/vibe-cut/plan";
+      const isVibeCutAnotherRoute = url.pathname === "/api/vibe-cut/another";
       const isIdeaLibrarySuggestionsRoute = /^\/api\/ideas\/rec[A-Za-z0-9]+\/library-suggestions$/.test(url.pathname);
       const isIdeaProductionRequestRoute = /^\/api\/ideas\/rec[A-Za-z0-9]+\/production-request$/.test(url.pathname);
       const isIdeaGenerateRoute = url.pathname === "/api/ideas/generate";
@@ -553,7 +567,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.489-engagement-ledger",
+          version: "0.10.490-vibe-cut",
           studio_approve_all_batch_v1: true,
           studio_engagement_v1: true,
           studio_mae_schedule_v1: true,
@@ -1235,6 +1249,20 @@ export default {
         assertWriteRequest(request, env);
         requirePermission(authorization, "production_configure");
         return createIdeaTimedScriptRoute(request, env, url, authorization, ctx);
+      }
+
+      if (isVibeCutPlanRoute) {
+        if (request.method !== "POST") throw new HttpError(405, "Method not allowed");
+        assertWriteRequest(request, env);
+        requirePermission(authorization, "production_configure");
+        return planVibeCutRoute(request, env, authorization);
+      }
+
+      if (isVibeCutAnotherRoute) {
+        if (request.method !== "POST") throw new HttpError(405, "Method not allowed");
+        assertWriteRequest(request, env);
+        requirePermission(authorization, "production_configure");
+        return anotherVibeCutRoute(request, env, authorization);
       }
 
       if (isIdeaLibrarySuggestionsRoute) {
@@ -9577,6 +9605,13 @@ function studioIsAzFinishedVideo(record) {
     || (/az-auto-queue=1/i.test(text) && /ez-input=finished-video/i.test(text));
 }
 
+function studioIsVibeCut(recordOrNotes) {
+  if (recordOrNotes && typeof recordOrNotes === "object" && !Array.isArray(recordOrNotes)) {
+    return isVibeCutNotes(studioRequestNotesText(recordOrNotes));
+  }
+  return isVibeCutNotes(recordOrNotes);
+}
+
 function skipsProductionApprove(text) {
   return String(text || "").includes("origin=autonomous") || /origin=az-finished-video/i.test(String(text || ""));
 }
@@ -14214,13 +14249,14 @@ async function cleanProductionRequestPayload(payload, env) {
 function productionRequestFields(input, nowIso, { status = "Draft" } = {}) {
   const notes = String(input.production_notes || "");
   const az = /origin=az-finished-video/i.test(notes);
+  const vibeCut = studioIsVibeCut(notes);
   return {
     Request_Status: status,
-    Master_Content_Type: input.content_type || null,
+    Master_Content_Type: vibeCut ? "Vertical Short Video" : (input.content_type || null),
     Target_Platforms: input.platforms || [],
-    Voiceover_Mode: az ? "No" : input.voiceover_mode,
-    Background_Music_Mode: az ? "No" : input.background_music_mode,
-    Thumbnail_Mode: /ez-input=finished-(video|stills|carousel)/i.test(notes)
+    Voiceover_Mode: (az || vibeCut) ? "No" : input.voiceover_mode,
+    Background_Music_Mode: az ? "No" : (vibeCut ? "Yes" : input.background_music_mode),
+    Thumbnail_Mode: (/ez-input=finished-(video|stills|carousel)/i.test(notes) || vibeCut)
       ? "Yes"
       : input.thumbnail_mode,
     Video_Duration_Seconds: input.video_duration_seconds,
@@ -22529,6 +22565,108 @@ async function acceptSingleImageFeedPost(request, env, idea, mediaId, authorizat
     production_request: mapProductionRequest(requestRecord),
     message,
   }, readyForApproval ? 200 : 202);
+}
+
+function vibeCutPlanFromBody(body = {}) {
+  const config = defaultVibeCutConfig(body.config || body);
+  let selects = Array.isArray(body.selects) ? body.selects : [];
+  if (!selects.length) {
+    const sceneSeconds = Array.isArray(body.scene_seconds)
+      ? body.scene_seconds
+      : (Array.isArray(body.sceneSeconds) ? body.sceneSeconds : []);
+    const duration = Number(body.source_duration_seconds ?? body.sourceDurationSeconds ?? 0);
+    if (sceneSeconds.length && duration > 0) {
+      selects = selectsFromSceneTimestamps(sceneSeconds, duration);
+    } else if (duration > 0) {
+      selects = provisionalSelectsFromDuration(duration);
+    }
+  }
+  if (!selects.length) {
+    throw new HttpError(400, "Provide selects, scene_seconds + source_duration_seconds, or source_duration_seconds.");
+  }
+  const beats = Array.isArray(body.beats) ? body.beats : (Array.isArray(body.beat_map) ? body.beat_map : []);
+  const beatStrengths = Array.isArray(body.beat_strengths)
+    ? body.beat_strengths
+    : (Array.isArray(body.beatStrengths) ? body.beatStrengths : []);
+  const sections = Array.isArray(body.sections) ? body.sections : [];
+  const proposal = proposeVibeCuts({
+    selects,
+    beats,
+    beatStrengths,
+    sections,
+    config,
+  });
+  const productionDefaults = vibeCutProductionDefaults(config);
+  const renderSettings = vibeCutRenderSettings(config);
+  let notes = String(body.production_notes || body.notes || "").trim();
+  notes = mergeVibeCutIntoNotes(notes, {
+    ...config,
+    cuts: proposal.cuts.map((cut) => ({
+      version_index: cut.version_index,
+      label: cut.label,
+      theme: cut.theme,
+      duration_seconds: cut.duration_seconds,
+      clip_count: cut.clip_count,
+      used_ranges: cut.used_ranges,
+    })),
+    used_ranges: proposal.used_ranges,
+  });
+  return {
+    ok: true,
+    mode: "vibe_cut",
+    ...proposal,
+    production_defaults: productionDefaults,
+    render_settings: renderSettings,
+    production_notes: notes,
+    message: proposal.cut_count > 1
+      ? `Proposed ${proposal.cut_count} Vibe Cuts. Preview each, then Keep, Regenerate, or Create Another from unused footage.`
+      : `Proposed a ${proposal.cuts[0]?.duration_seconds || config.target_seconds}s Vibe Cut. Music drives the timeline; there is no voiceover.`,
+  };
+}
+
+async function planVibeCutRoute(request, env, authorization) {
+  void env;
+  void authorization;
+  let body;
+  try { body = await request.json(); } catch { throw new HttpError(400, "Request body must be valid JSON"); }
+  return respond(request, env, vibeCutPlanFromBody(body || {}));
+}
+
+async function anotherVibeCutRoute(request, env, authorization) {
+  void env;
+  void authorization;
+  let body;
+  try { body = await request.json(); } catch { throw new HttpError(400, "Request body must be valid JSON"); }
+  const config = defaultVibeCutConfig(body?.config || body || {});
+  let selects = Array.isArray(body?.selects) ? body.selects : [];
+  if (!selects.length) {
+    const duration = Number(body?.source_duration_seconds ?? body?.sourceDurationSeconds ?? 0);
+    const sceneSeconds = Array.isArray(body?.scene_seconds) ? body.scene_seconds : [];
+    if (sceneSeconds.length && duration > 0) selects = selectsFromSceneTimestamps(sceneSeconds, duration);
+    else if (duration > 0) selects = provisionalSelectsFromDuration(duration);
+  }
+  if (!selects.length) {
+    throw new HttpError(400, "Provide selects or source_duration_seconds to create another cut.");
+  }
+  const usedRanges = Array.isArray(body?.used_ranges)
+    ? body.used_ranges
+    : (parseVibeCutDirective(body?.production_notes)?.used_ranges || []);
+  const cut = anotherCutFromUnused({
+    selects,
+    beats: Array.isArray(body?.beats) ? body.beats : [],
+    beatStrengths: Array.isArray(body?.beat_strengths) ? body.beat_strengths : [],
+    sections: Array.isArray(body?.sections) ? body.sections : [],
+    config,
+    usedRanges,
+  });
+  return respond(request, env, {
+    ok: true,
+    mode: "vibe_cut",
+    action: "create_another_from_unused",
+    cut,
+    used_ranges: [...usedRanges, ...(cut.used_ranges || [])],
+    message: `Another cut from unused footage · ${cut.duration_seconds}s · ${cut.theme}`,
+  });
 }
 
 async function createIdeaTimedScriptRoute(request, env, url, authorization, ctx = null) {
