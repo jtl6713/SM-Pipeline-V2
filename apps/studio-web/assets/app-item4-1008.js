@@ -260,7 +260,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.544-idea-page-links";
+  const BUILD_ID = "item4-0.6.545-timeline-back-list";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -2298,7 +2298,7 @@
   });
   $("ideasCreateTimelineButton")?.addEventListener("click", async () => {
     if (activeIdea?.id && $("ideaManageDrawer")?.classList.contains("open")) {
-      await createIdeaTimedScript(activeIdea, { heading: true });
+      await createIdeaTimedScript(activeIdea, { heading: true, background: true });
       return;
     }
     setIdeasAutonomousMessage("Open an idea with Manage, then tap Create VO timeline. Studio writes the spoken script and picks named library stills.");
@@ -3335,20 +3335,23 @@
     if (table) table.textContent = preview.markdown;
   }
 
-  async function createIdeaTimedScript(idea, { button = null, heading = false } = {}) {
+  async function createIdeaTimedScript(idea, { button = null, heading = false, background = false } = {}) {
     const target = idea || activeIdea;
     if (!target?.id) return;
-    const buttons = [
-      button,
-      $("createIdeaTimelineButton"),
-      heading ? $("ideasCreateTimelineButton") : null,
-    ].filter(Boolean);
+    const buttons = (background
+      ? [button]
+      : [
+        button,
+        $("createIdeaTimelineButton"),
+        heading ? $("ideasCreateTimelineButton") : null,
+      ]
+    ).filter(Boolean);
     const restore = buttons.map((node) => ({ node, text: node.textContent, disabled: node.disabled }));
     buttons.forEach((node) => {
       node.disabled = true;
-      node.textContent = "Building Production…";
+      node.textContent = background ? "Creating timeline…" : "Building Production…";
     });
-    const setMessage = heading ? setIdeasAutonomousMessage : setManageMessage;
+    const setMessage = background || heading ? setIdeasAutonomousMessage : setManageMessage;
     const singleFeed = String(target.content_type || "").trim() === "Feed Post"
       && Array.isArray(target.matched_media_asset_links)
       && target.matched_media_asset_links.length === 1;
@@ -3373,23 +3376,26 @@
       if (result.timeline && result.production_request?.id) {
         rememberTimedScript(result.timeline, result.production_request.id);
       }
-      if (result.record) {
+      const drawerOpenForTarget = $("ideaManageDrawer")?.classList.contains("open") && activeIdea?.id === target.id;
+      if (result.record && (!background || drawerOpenForTarget)) {
         activeIdea = result.record;
         updateIdeaDrawer(result.record);
-      } else {
+      } else if (!background) {
         renderIdeaTimedScriptPreview(activeIdea);
       }
-      if (Array.isArray(result.stills) && result.stills.length) {
-        ideaLibrarySelected = new Set(result.stills.map((row) => String(row.id || "")).filter(Boolean));
+      if (!background || drawerOpenForTarget) {
+        if (Array.isArray(result.stills) && result.stills.length) {
+          ideaLibrarySelected = new Set(result.stills.map((row) => String(row.id || "")).filter(Boolean));
+        }
+        if (result.single_image_feed_post) {
+          if ($("promoteContentType")) $("promoteContentType").value = "Feed Post";
+          if ($("promoteVoiceover")) $("promoteVoiceover").value = "No";
+        } else {
+          if ($("promoteContentType")) $("promoteContentType").value = "Vertical Short Video";
+          if ($("promoteVoiceover")) $("promoteVoiceover").value = "Yes";
+        }
+        syncPromotionPanels();
       }
-      if (result.single_image_feed_post) {
-        if ($("promoteContentType")) $("promoteContentType").value = "Feed Post";
-        if ($("promoteVoiceover")) $("promoteVoiceover").value = "No";
-      } else {
-        if ($("promoteContentType")) $("promoteContentType").value = "Vertical Short Video";
-        if ($("promoteVoiceover")) $("promoteVoiceover").value = "Yes";
-      }
-      syncPromotionPanels();
       const success = result.message
         || (result.ready_for_approval
           ? "Ready for Production Approve. Stills are attached. Tap Approve on Production. This does not publish."
@@ -3397,7 +3403,10 @@
       setMessage(success, "success");
       if (heading) setManageMessage(success, "success");
       await Promise.all([loadIdeas(), loadDashboard(), loadProductionRequests()]).catch(() => {});
-      if (result.production_request?.id || activeIdea?.id) {
+      if (background) {
+        const name = result.record?.title || target.title || "This idea";
+        setIdeasAutonomousMessage(`${name} is in the Production list and ready to open. This does not publish.`, "success");
+      } else if (result.production_request?.id || activeIdea?.id) {
         await openProductionRequestForIdea(result.record || activeIdea, {
           productionRequest: result.production_request,
           successMessage: success,
@@ -13058,7 +13067,7 @@
     }
   });
 
-  $("closeProductionRequest")?.addEventListener("click", () => {
+  function leaveProductionWorkspace() {
     stopItem4MasterPolling();
     stopItem4VariantPolling();
     const workspace = $("productionRequestWorkspace");
@@ -13079,7 +13088,12 @@
       setPageContentSimple(false);
       hideEzFrontDoor();
     }
-  });
+    const list = $("productionRequestListPanel") || $("promotedContentPanel");
+    requestAnimationFrame(() => list?.scrollIntoView({ behavior: "smooth", block: "start" }));
+  }
+
+  $("closeProductionRequest")?.addEventListener("click", () => leaveProductionWorkspace());
+  $("backToProductionList")?.addEventListener("click", () => leaveProductionWorkspace());
 
   function item4YouTubeLongformSelected() {
     const selected = usingEzPlatforms() ? ezSelectedPlatforms() : item4SelectedPlatforms();
@@ -13879,8 +13893,7 @@
         event.stopPropagation();
         const idea = byId.get(button.dataset.ideaTimeline);
         if (!idea?.id) return;
-        await openIdeaDrawer(idea);
-        await createIdeaTimedScript(idea, { button });
+        await createIdeaTimedScript(idea, { button, background: true });
       });
     });
     target.querySelectorAll("[data-idea-id]").forEach((button) => {
@@ -15036,7 +15049,8 @@
     item4LibraryCancelButton: "Close the Drive library picker without attaching more stills.",
     item4BuildPlan: "Recommend the strongest format for each selected platform from the photos you uploaded.",
     item4PrepareVariants: "Create the cropped 4:5, 9:16, 1:1, or 16:9 versions required by the plan. If a run stalls, Studio and the Quality Agent automatically requeue leftover crops (Retry remaining still works if you want to nudge sooner). Files must finish saving to Google Drive first. Drag each photo to keep the important part in frame.",
-    closeProductionRequest: "Close this request and return to the draft list. Saved photos stay in Studio.",
+    closeProductionRequest: "Leave this item and return to the Production list so you can open another draft or in-production piece. Saved photos stay in Studio.",
+    backToProductionList: "Leave this item and return to the Production list so you can open another draft or in-production piece. Saved photos stay in Studio.",
     saveIdeaButton: "Save the title, summary, checked library stills, platforms, and these options. Save does not drop photo selections.",
     holdIdeaButton: "Put this idea on hold so it stays out of the active queue without deleting it.",
     promoteIdeaButton: "Create the content item from this idea. No review email is sent. Nothing publishes until Ready for Review → Approve publish.",
