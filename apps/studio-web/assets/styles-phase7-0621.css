@@ -1817,6 +1817,7 @@ body:has(#page-content.active) .studio-footer-links button:hover{
   display:flex;
   align-items:baseline;
   justify-content:space-between;
+  flex-wrap:wrap;
   gap:16px;
   padding:0 0 28px;
   border:0;
@@ -1824,6 +1825,11 @@ body:has(#page-content.active) .studio-footer-links button:hover{
   color:#111;
   background:transparent;
   box-shadow:none;
+}
+#page-content .production-back-list{
+  flex:1 0 100%;
+  width:fit-content;
+  margin:0 0 4px;
 }
 #page-content .production-studio-hero h2{
   font-family:Inter,ui-sans-serif,system-ui,sans-serif;

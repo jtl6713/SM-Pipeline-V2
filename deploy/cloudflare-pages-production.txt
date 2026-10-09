@@ -98,3 +98,5 @@ Deploy Studio UI 0.6.534-pages-path-bust. Rename app-item4-0625.js -> app-item4-
 2026-10-09: Deploy UI 0.6.543-approve-all-batch. Approve All runs as durable background batch with live progress + safe retry.
 
 2026-10-09: Deploy UI 0.6.544-idea-page-links. All Profiles Ideas counts open the Ideas page for that profile.
+
+2026-10-09: Deploy UI 0.6.545-timeline-back-list. Idea Create timeline stays on the list; Production has Back to list.
