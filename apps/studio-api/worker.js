@@ -236,6 +236,19 @@ import {
   studioRunEngagementDiscovery,
   studioSaveEngagementSettings,
 } from "./engagement-service.mjs";
+import {
+  PROFILE_SETUP_DEFAULT_FORMATS,
+  PROFILE_SETUP_DEFAULT_THEMES,
+  PROFILE_SETUP_PLATFORMS,
+  normalizeProfileSetupState,
+  profileDestinationSettingName,
+  profileSetupChecklist,
+  profileSetupPlatformKey,
+  profileSetupPublicPlatformDescriptors,
+  profileSetupSelectedPlatformLabels,
+  profileSetupSettingName,
+  profileSetupSlug,
+} from "./profile-setup.mjs";
 
 const JSON_HEADERS = {
   "Content-Type": "application/json; charset=UTF-8",
@@ -336,6 +349,10 @@ export default {
       const isOperationsMakeAdminBridgeRoute = url.pathname === "/api/operations/make-admin-bridge";
       const isOperationsIntakeRoute = url.pathname === "/api/operations/intake";
       const isOperationsAudioLeadingSilenceRoute = url.pathname === "/api/operations/audio-leading-silence";
+      const isProfileSetupCollectionRoute = url.pathname === "/api/profile-setup";
+      const isProfileSetupRecordRoute = /^\/api\/profile-setup\/rec[A-Za-z0-9]+$/.test(url.pathname);
+      const isProfileSetupPlatformRoute = /^\/api\/profile-setup\/rec[A-Za-z0-9]+\/platform\/(instagram|facebook|youtube|tiktok)$/.test(url.pathname);
+      const isProfileSetupActivateRoute = /^\/api\/profile-setup\/rec[A-Za-z0-9]+\/activate$/.test(url.pathname);
       const isInsightsBestTimesRoute = url.pathname === "/api/insights/best-times";
       const isInsightsSimilarTimesRoute = url.pathname === "/api/insights/similar-times";
       const isInsightsCaptionsRoute = url.pathname === "/api/insights/captions";
@@ -1126,6 +1143,40 @@ export default {
 
       if (url.pathname === "/api/branding/logo") {
         return brandLogo(request, env, authorization);
+      }
+
+      if (isProfileSetupCollectionRoute) {
+        requirePermission(authorization, "tenant_admin");
+        if (request.method === "GET") return listStudioProfileSetups(request, env, authorization);
+        if (request.method === "POST") {
+          assertWriteRequest(request, env);
+          return createStudioProfileSetup(request, env, authorization);
+        }
+        throw new HttpError(405, "Method not allowed");
+      }
+
+      if (isProfileSetupPlatformRoute) {
+        requirePermission(authorization, "tenant_admin");
+        if (request.method !== "POST") throw new HttpError(405, "Method not allowed");
+        assertWriteRequest(request, env);
+        return updateStudioProfileSetupPlatform(request, env, url, authorization);
+      }
+
+      if (isProfileSetupActivateRoute) {
+        requirePermission(authorization, "tenant_admin");
+        if (request.method !== "POST") throw new HttpError(405, "Method not allowed");
+        assertWriteRequest(request, env);
+        return activateStudioProfileSetup(request, env, url, authorization);
+      }
+
+      if (isProfileSetupRecordRoute) {
+        requirePermission(authorization, "tenant_admin");
+        if (request.method === "GET") return getStudioProfileSetup(request, env, url, authorization);
+        if (request.method === "PATCH") {
+          assertWriteRequest(request, env);
+          return patchStudioProfileSetup(request, env, url, authorization);
+        }
+        throw new HttpError(405, "Method not allowed");
       }
 
       if (url.pathname === "/api/profiles") {
@@ -3739,7 +3790,10 @@ function studioThemeForProfile(record) {
   if (hay.includes("los angeles") || hay.includes("la shining") || hay.includes("la -") || /\bla\b/.test(hay) || hay.includes("hollywood")) return "la";
   if (hay.includes("new york") || hay.includes("nyc") || hay.includes("manhattan")) return "nyc";
   if (hay.includes("miami") || hay.includes("miami shining")) return "miami";
-  return "chicago";
+  if (hay.includes("chicago") || hay.includes("chicagoshining")) return "chicago";
+  const market = String(f(record, "Market_Name") || "").trim();
+  const marketSlug = profileSetupSlug(market);
+  return marketSlug || "chicago";
 }
 
 const STUDIO_CITY_DESTINATION_KEYS = new Set([
@@ -3749,6 +3803,7 @@ const STUDIO_CITY_DESTINATION_KEYS = new Set([
   "META_GRAPH_API_ACCESS_TOKEN",
   "YOUTUBE_CHANNEL_ID",
   "YOUTUBE_UPLOAD_SERVICE_URL",
+  "YOUTUBE_UPLOAD_SERVICE_SHARED_SECRET",
   "TIKTOK_WORKER_BASE_URL",
 ]);
 
@@ -3794,6 +3849,13 @@ function studioScheduleTimeZoneFromTheme(theme) {
   return maeTimeZoneFromTheme(theme);
 }
 
+function studioScheduleTimeZoneForProfile(profile, fallback = MAE_DEFAULT_TIME_ZONE) {
+  const explicit = String(f(profile, "Timezone") || "").trim();
+  if (explicit) return maeNormalizeTimeZone(explicit);
+  const themed = studioScheduleTimeZoneFromTheme(studioThemeForProfile(profile));
+  return maeNormalizeTimeZone(themed || fallback);
+}
+
 function studioScheduleTimeZoneFromPayload(payload, fallback = MAE_DEFAULT_TIME_ZONE) {
   const raw = String(payload?.timezone || payload?.time_zone || "").trim();
   return maeNormalizeTimeZone(raw || fallback);
@@ -3803,7 +3865,7 @@ async function studioScheduleTimeZoneForRecord(env, record, payload = null) {
   if (payload?.timezone || payload?.time_zone) return studioScheduleTimeZoneFromPayload(payload);
   try {
     const profile = await item4ProductionProfileRecord(env, record);
-    if (profile) return studioScheduleTimeZoneFromTheme(studioThemeForProfile(profile));
+    if (profile) return studioScheduleTimeZoneForProfile(profile);
   } catch {}
   const theme = await studioThemeForPublishRecord(env, record).catch(() => studioThemeForProfile(record));
   return studioScheduleTimeZoneFromTheme(theme);
@@ -3999,6 +4061,509 @@ async function listStudioContentProfiles(request, env, authorization) {
     ok: true,
     records: profiles.map(mapStudioContentProfile),
     default_profile_id: selected.id,
+  });
+}
+
+
+function studioProfileSetupRecordIdFromPath(url) {
+  const match = /^\/api\/profile-setup\/(rec[A-Za-z0-9]+)/.exec(url.pathname);
+  return match?.[1] || null;
+}
+
+function studioProfileSetupPlatformFromPath(url) {
+  const match = /^\/api\/profile-setup\/rec[A-Za-z0-9]+\/platform\/(instagram|facebook|youtube|tiktok)$/.exec(url.pathname);
+  return profileSetupPlatformKey(match?.[1] || "");
+}
+
+function studioProfileSetupBelongsToAuthorization(profile, authorization) {
+  if (!profile?.id || !authorization?.organization?.record_id) return false;
+  const organizations = arrayOrEmpty(f(profile, "Organization"));
+  const orgMatch = !organizations.length || organizations.includes(authorization.organization.record_id);
+  return orgMatch && membershipAllowsBrand(authorization, arrayOrEmpty(f(profile, "Brand")));
+}
+
+async function loadAuthorizedStudioProfileSetupRecord(env, authorization, profileId) {
+  if (!/^rec[A-Za-z0-9]+$/.test(String(profileId || ""))) {
+    throw new HttpError(400, "Invalid Content Profile id");
+  }
+  const profile = await airtableFetch(env, STUDIO_IDEA_PROFILE_TABLE_ID, profileId);
+  if (!studioProfileSetupBelongsToAuthorization(profile, authorization)) {
+    throw new HttpError(403, "Content Profile is not available for this Studio organization");
+  }
+  return profile;
+}
+
+function studioProfileSetupStateFromRecord(profile, saved = null) {
+  const defaults = arrayOrEmpty(f(profile, "Default_Platforms")).map((value) => String(value || ""));
+  const byLabel = new Set(defaults.map((value) => value.toLowerCase()));
+  const recordState = {
+    profile_id: profile.id,
+    brand_record_id: arrayOrEmpty(f(profile, "Brand"))[0] || null,
+    lifecycle: Boolean(f(profile, "Active")) ? "active" : "setup",
+    city: String(f(profile, "Market_Name") || ""),
+    state_region: String(f(profile, "State_Region") || ""),
+    country: String(f(profile, "Country") || "United States"),
+    timezone: String(f(profile, "Timezone") || ""),
+    profile_name: String(f(profile, "Profile_Name") || ""),
+    brand_name: String(f(profile, "Brand_Name") || ""),
+    default_formats: arrayOrEmpty(f(profile, "Default_Formats")),
+    content_themes: arrayOrEmpty(f(profile, "Allowed_Content_Themes")),
+    primary_audience: String(f(profile, "Primary_Audience") || ""),
+    brand_voice: String(f(profile, "Brand_Voice") || ""),
+    local_context: String(f(profile, "Local_Context") || ""),
+    priority_locations: String(f(profile, "Priority_Locations") || ""),
+    avoid_topics: String(f(profile, "Avoid_Topics") || ""),
+    default_hashtags: String(f(profile, "Default_Hashtags") || ""),
+    asset_filter_tag: String(f(profile, "Asset_Filter_Tag") || ""),
+    background_color: studioBackgroundColorForRecord(profile),
+    platforms: {
+      instagram: {
+        enabled: byLabel.has("instagram"),
+        desired_handle: "",
+        last_status: f(profile, "Instagram_Business_Account_ID") ? "configured" : "not_configured",
+      },
+      tiktok: {
+        enabled: byLabel.has("tiktok"),
+        desired_handle: String(f(profile, "TikTok_Handle") || "").replace(/^@/, ""),
+        last_status: f(profile, "TikTok_Handle") ? "configured" : "not_configured",
+      },
+      youtube: {
+        enabled: byLabel.has("youtube"),
+        desired_handle: "",
+        last_status: f(profile, "YouTube_Channel_ID") ? "configured" : "not_configured",
+      },
+      facebook: {
+        enabled: byLabel.has("facebook"),
+        desired_handle: "",
+        last_status: f(profile, "Facebook_Page_ID") ? "configured" : "not_configured",
+      },
+    },
+  };
+  return normalizeProfileSetupState({ ...recordState, ...(saved || {}), profile_id: profile.id }, saved || recordState);
+}
+
+async function loadStudioProfileSetupState(env, profile) {
+  const setting = await studioSettingsByName(env, profileSetupSettingName(profile.id)).catch(() => null);
+  let saved = null;
+  try {
+    saved = setting ? JSON.parse(String(f(setting, "Setting_Value") || "{}")) : null;
+  } catch {
+    saved = null;
+  }
+  return studioProfileSetupStateFromRecord(profile, saved);
+}
+
+async function saveStudioProfileSetupState(env, state) {
+  const normalized = normalizeProfileSetupState(state, state);
+  await studioUpsertSetting(
+    env,
+    profileSetupSettingName(normalized.profile_id),
+    JSON.stringify(normalized),
+    "Resumable New Profile / City Setup wizard state. Secrets are stored separately in profile-scoped destination settings.",
+  );
+  return normalized;
+}
+
+function studioProfileSetupBrandId(state) {
+  const seed = String(state.short_code || state.slug || state.city || "CITY")
+    .toUpperCase()
+    .replace(/[^A-Z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 24);
+  return `BRD-${seed || "CITY"}`;
+}
+
+function studioProfileSetupProfileFields(state, brandRecordId, organizationRecordId) {
+  const fields = {
+    Profile_Name: state.profile_name,
+    Brand_Name: state.brand_name,
+    Active: false,
+    Organization: [organizationRecordId],
+    Brand: [brandRecordId],
+    Default_Formats: state.default_formats?.length ? state.default_formats : PROFILE_SETUP_DEFAULT_FORMATS,
+    Market_Name: state.city,
+    State_Region: state.state_region,
+    Country: state.country || "United States",
+    Timezone: state.timezone,
+    Primary_Audience: state.primary_audience || "Travelers, locals, photographers, and people discovering the city.",
+    Brand_Voice: state.brand_voice || "Bright, polished, curious, practical, visually driven, and locally informed.",
+    Default_Platforms: profileSetupSelectedPlatformLabels(state),
+    Allowed_Content_Themes: state.content_themes?.length ? state.content_themes : PROFILE_SETUP_DEFAULT_THEMES,
+    Priority_Locations: state.priority_locations || null,
+    Avoid_Topics: state.avoid_topics || null,
+    Local_Context: state.local_context || null,
+    Default_Hashtags: state.default_hashtags || null,
+    Asset_Filter_Tag: state.asset_filter_tag || state.slug || null,
+    Idea_Generation_Enabled: false,
+    Daily_Idea_Limit: 5,
+    Autonomous_Produce_Enabled: false,
+  };
+  const bg = normalizeStudioBackgroundColor(state.background_color);
+  if (bg) fields.Studio_Background_Color = bg;
+  return fields;
+}
+
+async function studioProfileSetupConnectionSnapshot(env, profile) {
+  const settings = await studioActivePipelineSettings(env, [
+    "FACEBOOK_PAGE_ID",
+    "FACEBOOK_PAGE_ACCESS_TOKEN",
+    "FACEBOOK_GRAPH_API_VERSION",
+    "INSTAGRAM_BUSINESS_ACCOUNT_ID",
+    "YOUTUBE_CHANNEL_ID",
+    "YOUTUBE_UPLOAD_SERVICE_URL",
+    "YOUTUBE_UPLOAD_SERVICE_SHARED_SECRET",
+    "TIKTOK_WORKER_BASE_URL",
+  ], profile).catch(() => ({}));
+  const version = String(settings.FACEBOOK_GRAPH_API_VERSION || "v26.0").replace(/^\/+|\/+$/g, "");
+  const token = String(settings.FACEBOOK_PAGE_ACCESS_TOKEN || env.FACEBOOK_PAGE_ACCESS_TOKEN || "").trim();
+  const result = {
+    instagram: { platform: "Instagram", status: "not_configured", account_name: null, account_id: settings.INSTAGRAM_BUSINESS_ACCOUNT_ID || null, error: null },
+    tiktok: { platform: "TikTok", status: "not_configured", account_name: f(profile, "TikTok_Handle") || null, account_id: null, error: null },
+    youtube: { platform: "YouTube", status: "not_configured", account_name: null, account_id: settings.YOUTUBE_CHANNEL_ID || null, error: null },
+    facebook: { platform: "Facebook", status: "not_configured", account_name: null, account_id: settings.FACEBOOK_PAGE_ID || null, error: null },
+  };
+
+  await Promise.all([
+    (async () => {
+      if (!token || !settings.FACEBOOK_PAGE_ID) return;
+      try {
+        const page = await studioInsightsMetaIdentity(settings.FACEBOOK_PAGE_ID, token, version, "id,name");
+        result.facebook.status = "connected";
+        result.facebook.account_name = page?.name || null;
+        result.facebook.account_id = page?.id || settings.FACEBOOK_PAGE_ID;
+      } catch (error) {
+        Object.assign(result.facebook, studioInsightsConnectionStateFromError(error));
+      }
+    })(),
+    (async () => {
+      if (!token || !settings.INSTAGRAM_BUSINESS_ACCOUNT_ID) return;
+      try {
+        const ig = await studioInsightsMetaIdentity(settings.INSTAGRAM_BUSINESS_ACCOUNT_ID, token, version, "id,username,name");
+        result.instagram.status = "connected";
+        result.instagram.account_name = ig?.username ? "@" + ig.username : (ig?.name || null);
+        result.instagram.account_id = ig?.id || settings.INSTAGRAM_BUSINESS_ACCOUNT_ID;
+      } catch (error) {
+        Object.assign(result.instagram, studioInsightsConnectionStateFromError(error));
+      }
+    })(),
+    (async () => {
+      const base = String(settings.YOUTUBE_UPLOAD_SERVICE_URL || "").trim().replace(/\/+$/, "");
+      if (!base) return;
+      try {
+        const secret = settings.YOUTUBE_UPLOAD_SERVICE_SHARED_SECRET || env.YOUTUBE_UPLOAD_SERVICE_SHARED_SECRET || "";
+        const response = await fetch(base + "/youtube/oauth/status", {
+          headers: { Accept: "application/json", ...(secret ? { "X-SM-Pipeline-Key": secret } : {}) },
+        });
+        const body = await studioInsightsSafeJson(response);
+        result.youtube.account_name = body?.channel_title || null;
+        result.youtube.account_id = body?.channel_id || settings.YOUTUBE_CHANNEL_ID || null;
+        result.youtube.status = body?.refresh_ok && body?.analytics_read_ok ? "connected" : "needs_authorization";
+        result.youtube.error = result.youtube.status === "connected"
+          ? null
+          : (body?.analytics_error || body?.error || "YouTube authorization is required.");
+      } catch (error) {
+        Object.assign(result.youtube, studioInsightsConnectionStateFromError(error));
+      }
+    })(),
+    (async () => {
+      const base = String(settings.TIKTOK_WORKER_BASE_URL || "").trim().replace(/\/+$/, "");
+      if (!base) return;
+      try {
+        const body = await studioInsightsSafeJson(await fetch(base + "/tiktok/status", { headers: { Accept: "application/json" } }));
+        result.tiktok.account_name = body?.creator_username ? "@" + body.creator_username : (body?.creator_nickname || result.tiktok.account_name);
+        result.tiktok.status = body?.authorized && body?.required_scopes_granted ? "connected" : "needs_authorization";
+        result.tiktok.error = result.tiktok.status === "connected" ? null : "TikTok authorization is required.";
+      } catch (error) {
+        Object.assign(result.tiktok, studioInsightsConnectionStateFromError(error));
+      }
+    })(),
+  ]);
+
+  return result;
+}
+
+async function studioProfileSetupSummary(env, profile) {
+  const [state, connections] = await Promise.all([
+    loadStudioProfileSetupState(env, profile),
+    studioProfileSetupConnectionSnapshot(env, profile),
+  ]);
+  const checklist = profileSetupChecklist(state, connections);
+  return {
+    profile: mapStudioContentProfile(profile),
+    state,
+    connections,
+    checklist,
+  };
+}
+
+async function listStudioProfileSetups(request, env, authorization) {
+  const profiles = (await listContentProfileRecords(env)).filter((profile) =>
+    studioProfileSetupBelongsToAuthorization(profile, authorization)
+  );
+  const records = [];
+  for (const profile of profiles) {
+    records.push(await studioProfileSetupSummary(env, profile));
+  }
+  return respond(request, env, {
+    ok: true,
+    can_create: Boolean(authorization?.permissions?.tenant_admin),
+    organization: authorization.organization,
+    platforms: profileSetupPublicPlatformDescriptors(),
+    records,
+  });
+}
+
+async function createStudioProfileSetup(request, env, authorization) {
+  const payload = await readJsonBody(request);
+  const platformSeed = payload.platforms && typeof payload.platforms === "object"
+    ? payload.platforms
+    : Object.fromEntries(Object.keys(PROFILE_SETUP_PLATFORMS).map((key) => [key, { enabled: true }]));
+  let state = normalizeProfileSetupState({ ...payload, platforms: platformSeed });
+  if (!state.city || !state.state_region || !state.timezone) {
+    throw new HttpError(400, "City, state/region, and timezone are required");
+  }
+  try {
+    new Intl.DateTimeFormat("en-US", { timeZone: state.timezone }).format(new Date());
+  } catch {
+    throw new HttpError(400, "Timezone must be a valid IANA timezone");
+  }
+
+  const allProfiles = await listContentProfileRecords(env);
+  const duplicate = allProfiles.find((profile) =>
+    String(f(profile, "Market_Name") || "").trim().toLowerCase() === state.city.toLowerCase()
+    && studioProfileSetupBelongsToAuthorization(profile, authorization)
+  );
+  if (duplicate) throw new HttpError(409, `${state.city} already has a Content Profile`);
+
+  const organizationId = authorization.organization.record_id;
+  const allBrands = await listRecords(env, STUDIO_TABLES.brands, { limit: 100 });
+  let brand = allBrands.find((record) =>
+    String(f(record, "Brand_Name") || "").trim().toLowerCase() === state.brand_name.toLowerCase()
+    && arrayOrEmpty(f(record, "Organization")).includes(organizationId)
+  );
+  if (!brand) {
+    const brandFields = {
+      Brand_ID: studioProfileSetupBrandId(state),
+      Brand_Name: state.brand_name,
+      Organization: [organizationId],
+      Active: true,
+      Brand_Description: state.local_context
+        || `${state.brand_name} is a visual city-discovery brand focused on ${state.city}.`,
+      Brand_Voice: state.brand_voice
+        || "Bright, polished, curious, practical, visually driven, and locally informed.",
+      Default_Language: "English",
+    };
+    if (state.website_url) brandFields.Website_URL = state.website_url;
+    brand = await airtableFetch(env, STUDIO_TABLES.brands, "", {
+      method: "POST",
+      body: JSON.stringify({ fields: brandFields, typecast: true }),
+    });
+  }
+
+  const profile = await airtableFetch(env, STUDIO_IDEA_PROFILE_TABLE_ID, "", {
+    method: "POST",
+    body: JSON.stringify({
+      fields: studioProfileSetupProfileFields(state, brand.id, organizationId),
+      typecast: true,
+    }),
+  });
+  env.__contentProfilesPromise = null;
+  state = normalizeProfileSetupState({
+    ...state,
+    profile_id: profile.id,
+    brand_record_id: brand.id,
+    lifecycle: "setup",
+  }, state);
+  await saveStudioProfileSetupState(env, state);
+  return respond(request, env, {
+    ok: true,
+    created: true,
+    ...(await studioProfileSetupSummary(env, profile)),
+  }, 201);
+}
+
+async function getStudioProfileSetup(request, env, url, authorization) {
+  const profile = await loadAuthorizedStudioProfileSetupRecord(
+    env,
+    authorization,
+    studioProfileSetupRecordIdFromPath(url),
+  );
+  return respond(request, env, { ok: true, ...(await studioProfileSetupSummary(env, profile)) });
+}
+
+async function patchStudioProfileSetup(request, env, url, authorization) {
+  const profileId = studioProfileSetupRecordIdFromPath(url);
+  const profile = await loadAuthorizedStudioProfileSetupRecord(env, authorization, profileId);
+  const prior = await loadStudioProfileSetupState(env, profile);
+  const payload = await readJsonBody(request);
+  let state = normalizeProfileSetupState({ ...prior, ...payload, profile_id: profileId }, prior);
+  if (!state.city || !state.state_region || !state.timezone) {
+    throw new HttpError(400, "City, state/region, and timezone are required");
+  }
+  try {
+    new Intl.DateTimeFormat("en-US", { timeZone: state.timezone }).format(new Date());
+  } catch {
+    throw new HttpError(400, "Timezone must be a valid IANA timezone");
+  }
+
+  const fields = studioProfileSetupProfileFields(
+    state,
+    state.brand_record_id || arrayOrEmpty(f(profile, "Brand"))[0],
+    authorization.organization.record_id,
+  );
+  fields.Active = Boolean(f(profile, "Active"));
+  await airtableFetch(env, STUDIO_IDEA_PROFILE_TABLE_ID, profileId, {
+    method: "PATCH",
+    body: JSON.stringify({ fields, typecast: true }),
+  });
+
+  const brandId = state.brand_record_id || arrayOrEmpty(f(profile, "Brand"))[0];
+  if (brandId) {
+    const brandFields = {
+      Brand_Name: state.brand_name,
+      Brand_Description: state.local_context || `${state.brand_name} is a visual city-discovery brand focused on ${state.city}.`,
+      Brand_Voice: state.brand_voice || "Bright, polished, curious, practical, visually driven, and locally informed.",
+    };
+    if (state.website_url) brandFields.Website_URL = state.website_url;
+    await airtableFetch(env, STUDIO_TABLES.brands, brandId, {
+      method: "PATCH",
+      body: JSON.stringify({ fields: brandFields, typecast: true }),
+    }).catch(() => null);
+  }
+
+  state = await saveStudioProfileSetupState(env, state);
+  env.__contentProfilesPromise = null;
+  const refreshed = await airtableFetch(env, STUDIO_IDEA_PROFILE_TABLE_ID, profileId);
+  return respond(request, env, { ok: true, ...(await studioProfileSetupSummary(env, refreshed)) });
+}
+
+async function updateStudioProfileSetupPlatform(request, env, url, authorization) {
+  const profileId = studioProfileSetupRecordIdFromPath(url);
+  const platformKey = studioProfileSetupPlatformFromPath(url);
+  if (!platformKey) throw new HttpError(400, "Unsupported platform");
+  const profile = await loadAuthorizedStudioProfileSetupRecord(env, authorization, profileId);
+  const prior = await loadStudioProfileSetupState(env, profile);
+  const payload = await readJsonBody(request);
+  const nextPlatform = {
+    ...(prior.platforms?.[platformKey] || {}),
+    ...(payload.enabled === undefined ? {} : { enabled: Boolean(payload.enabled) }),
+    ...(payload.setup_mode === undefined ? {} : { setup_mode: payload.setup_mode }),
+    ...(payload.deferred === undefined ? {} : { deferred: Boolean(payload.deferred) }),
+    ...(payload.desired_handle === undefined ? {} : { desired_handle: payload.desired_handle }),
+  };
+  if (payload.action === "mark_creation_opened") {
+    nextPlatform.account_creation_opened_at = new Date().toISOString();
+  }
+
+  const profileFields = {};
+  const settingsToWrite = [];
+  const saveSetting = (name, value, note) => {
+    const clean = String(value || "").trim();
+    if (clean) settingsToWrite.push([profileDestinationSettingName(profileId, name), clean, note]);
+  };
+
+  if (platformKey === "facebook") {
+    const pageId = String(payload.page_id || "").trim();
+    if (pageId) profileFields.Facebook_Page_ID = pageId;
+    saveSetting("FACEBOOK_PAGE_ID", pageId, "Profile-scoped Facebook Page ID from New Profile setup.");
+    saveSetting("FACEBOOK_PAGE_ACCESS_TOKEN", payload.page_access_token, "Profile-scoped Facebook Page access token from New Profile setup.");
+    saveSetting("FACEBOOK_GRAPH_API_VERSION", payload.graph_api_version, "Profile-scoped Meta Graph API version.");
+  }
+  if (platformKey === "instagram") {
+    const accountId = String(payload.instagram_business_account_id || payload.account_id || "").trim();
+    if (accountId) profileFields.Instagram_Business_Account_ID = accountId;
+    saveSetting("INSTAGRAM_BUSINESS_ACCOUNT_ID", accountId, "Profile-scoped Instagram professional account ID from New Profile setup.");
+    saveSetting("FACEBOOK_PAGE_ACCESS_TOKEN", payload.page_access_token, "Profile-scoped Meta access token shared by Instagram/Facebook.");
+    saveSetting("META_GRAPH_API_ACCESS_TOKEN", payload.meta_graph_api_access_token, "Profile-scoped Meta Graph API access token.");
+  }
+  if (platformKey === "youtube") {
+    const channelId = String(payload.youtube_channel_id || payload.channel_id || "").trim();
+    if (channelId) profileFields.YouTube_Channel_ID = channelId;
+    saveSetting("YOUTUBE_CHANNEL_ID", channelId, "Profile-scoped YouTube channel ID from New Profile setup.");
+    saveSetting("YOUTUBE_UPLOAD_SERVICE_URL", payload.upload_service_url, "Profile-scoped YouTube uploader service URL.");
+    saveSetting("YOUTUBE_UPLOAD_SERVICE_SHARED_SECRET", payload.upload_service_shared_secret, "Profile-scoped YouTube uploader service shared secret.");
+  }
+  if (platformKey === "tiktok") {
+    const handle = String(payload.tiktok_handle || payload.desired_handle || "").trim().replace(/^@/, "");
+    if (handle) profileFields.TikTok_Handle = handle;
+    saveSetting("TIKTOK_WORKER_BASE_URL", payload.worker_base_url, "Profile-scoped TikTok auth/publish worker URL.");
+  }
+
+  if (Object.keys(profileFields).length) {
+    await airtableFetch(env, STUDIO_IDEA_PROFILE_TABLE_ID, profileId, {
+      method: "PATCH",
+      body: JSON.stringify({ fields: profileFields, typecast: true }),
+    });
+  }
+  for (const [name, value, note] of settingsToWrite) {
+    await studioUpsertSetting(env, name, value, note);
+  }
+  if (settingsToWrite.length) nextPlatform.credentials_saved = true;
+
+  let state = normalizeProfileSetupState({
+    ...prior,
+    platforms: { ...prior.platforms, [platformKey]: nextPlatform },
+  }, prior);
+  await saveStudioProfileSetupState(env, state);
+
+  const refreshed = await airtableFetch(env, STUDIO_IDEA_PROFILE_TABLE_ID, profileId);
+  const connections = await studioProfileSetupConnectionSnapshot(env, refreshed);
+  const platformConnection = connections[platformKey] || { status: "not_configured" };
+  const verifiedPlatform = {
+    ...state.platforms[platformKey],
+    last_verified_at: new Date().toISOString(),
+    last_status: platformConnection.status || "not_configured",
+    last_error: platformConnection.error || null,
+  };
+  state = normalizeProfileSetupState({
+    ...state,
+    platforms: { ...state.platforms, [platformKey]: verifiedPlatform },
+  }, state);
+  await saveStudioProfileSetupState(env, state);
+
+  const checklist = profileSetupChecklist(state, connections);
+  return respond(request, env, {
+    ok: true,
+    platform: platformKey,
+    descriptor: PROFILE_SETUP_PLATFORMS[platformKey],
+    connection: platformConnection,
+    state,
+    connections,
+    checklist,
+  });
+}
+
+async function activateStudioProfileSetup(request, env, url, authorization) {
+  const profileId = studioProfileSetupRecordIdFromPath(url);
+  const profile = await loadAuthorizedStudioProfileSetupRecord(env, authorization, profileId);
+  let state = await loadStudioProfileSetupState(env, profile);
+  const connections = await studioProfileSetupConnectionSnapshot(env, profile);
+  const checklist = profileSetupChecklist(state, connections);
+  if (!checklist.can_activate) {
+    return respond(request, env, {
+      ok: false,
+      error: "Complete or defer every selected platform and finish the city strategy before activation.",
+      state,
+      connections,
+      checklist,
+    }, 409);
+  }
+  await airtableFetch(env, STUDIO_IDEA_PROFILE_TABLE_ID, profileId, {
+    method: "PATCH",
+    body: JSON.stringify({ fields: { Active: true }, typecast: true }),
+  });
+  state = normalizeProfileSetupState({
+    ...state,
+    lifecycle: "active",
+    activated_at: new Date().toISOString(),
+  }, state);
+  await saveStudioProfileSetupState(env, state);
+  env.__contentProfilesPromise = null;
+  const refreshed = await airtableFetch(env, STUDIO_IDEA_PROFILE_TABLE_ID, profileId);
+  return respond(request, env, {
+    ok: true,
+    activated: true,
+    ...(await studioProfileSetupSummary(env, refreshed)),
   });
 }
 
@@ -30471,18 +31036,50 @@ function studioOutputReadyForPublishApproval(record) {
   return outputStatus === "Ready for Review" || reviewStatus === "Review Sent";
 }
 
+async function studioPipelineSettingsProfileRecord(env, contextRecord) {
+  if (!contextRecord) return null;
+  if (String(f(contextRecord, "Profile_Name") || "").trim() && contextRecord.id) return contextRecord;
+  const profileId = await studioContentProfileRecordIdForOutput(env, contextRecord).catch(() => null);
+  if (!profileId) return null;
+  return airtableFetch(env, STUDIO_IDEA_PROFILE_TABLE_ID, profileId).catch(() => null);
+}
+
+function studioLegacyDestinationPrefix(theme) {
+  if (theme === "la") return "LA_";
+  if (theme === "nyc") return "NYC_";
+  if (theme === "miami") return "MIAMI_";
+  return "";
+}
+
+function studioProfileDestinationFieldValue(profile, settingName) {
+  if (!profile) return "";
+  const fields = {
+    FACEBOOK_PAGE_ID: "Facebook_Page_ID",
+    INSTAGRAM_BUSINESS_ACCOUNT_ID: "Instagram_Business_Account_ID",
+    YOUTUBE_CHANNEL_ID: "YouTube_Channel_ID",
+  };
+  const field = fields[settingName];
+  return field ? String(f(profile, field) || "").trim() : "";
+}
+
 async function studioActivePipelineSettings(env, names, contextRecord) {
   const wanted = [...new Set((names || []).map((name) => String(name || "").trim()).filter(Boolean))];
   if (!wanted.length) return {};
-  const theme = contextRecord ? await studioThemeForPublishRecord(env, contextRecord) : "chicago";
-  const prefix = theme === "la" ? "LA_" : theme === "nyc" ? "NYC_" : theme === "miami" ? "MIAMI_" : "";
+  const profile = await studioPipelineSettingsProfileRecord(env, contextRecord);
+  const theme = profile
+    ? studioThemeForProfile(profile)
+    : (contextRecord ? await studioThemeForPublishRecord(env, contextRecord) : "chicago");
+  const prefix = studioLegacyDestinationPrefix(theme);
   const fetchNames = [...wanted];
   if (prefix) {
     for (const name of wanted) fetchNames.push(`${prefix}${name}`);
   }
+  if (profile?.id) {
+    for (const name of wanted) fetchNames.push(profileDestinationSettingName(profile.id, name));
+  }
   const uniqueFetch = [...new Set(fetchNames)];
   const formula = `AND({Active}=1,OR(${uniqueFetch.map((name) => `{Setting_Name}='${name.replace(/'/g, "\\'")}'`).join(",")}))`;
-  const rows = await listRecords(env, "Pipeline Settings", { limit: 40, filterFormula: formula });
+  const rows = await listRecords(env, "Pipeline Settings", { limit: Math.max(40, uniqueFetch.length + 10), filterFormula: formula });
   const map = {};
   for (const row of rows) {
     const name = String(f(row, "Setting_Name") || "").trim();
@@ -30490,10 +31087,23 @@ async function studioActivePipelineSettings(env, names, contextRecord) {
   }
   const resolved = {};
   for (const name of wanted) {
-    if (prefix && STUDIO_CITY_DESTINATION_KEYS.has(name)) {
-      resolved[name] = map[`${prefix}${name}`] || "";
+    const scoped = profile?.id ? map[profileDestinationSettingName(profile.id, name)] || "" : "";
+    const profileField = studioProfileDestinationFieldValue(profile, name);
+    if (STUDIO_CITY_DESTINATION_KEYS.has(name)) {
+      if (scoped) {
+        resolved[name] = scoped;
+      } else if (profileField) {
+        resolved[name] = profileField;
+      } else if (prefix) {
+        resolved[name] = map[`${prefix}${name}`] || "";
+      } else if (profile && theme !== "chicago") {
+        // Never let a newly added city silently inherit Chicago destinations.
+        resolved[name] = "";
+      } else {
+        resolved[name] = map[name] || "";
+      }
     } else {
-      resolved[name] = (prefix && map[`${prefix}${name}`]) || map[name] || "";
+      resolved[name] = scoped || (prefix && map[`${prefix}${name}`]) || map[name] || "";
     }
   }
   return resolved;
