@@ -25,6 +25,7 @@ import {
   fallbackCommentSuggestions,
   buildTargetRecord,
   buildActionRecord,
+  enrichEngagementHistory,
   actionSupported,
   findDuplicateAction,
   makeIdempotencyKey,
@@ -344,7 +345,10 @@ export async function studioListEngagementRecommendations(env, options, deps) {
     settings,
     capabilities: PLATFORM_CAPABILITIES,
     recommendations: rows.slice(0, 100),
-    history: store.actions.filter((row) => row.profile === profile).slice(0, 100),
+    history: enrichEngagementHistory(
+      store.actions.filter((row) => row.profile === profile).slice(0, 100),
+      store.targets
+    ),
   };
 }
 

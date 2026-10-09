@@ -67,6 +67,11 @@
   border-bottom: 1px solid rgba(15, 23, 42, 0.08);
   vertical-align: top;
 }
+.engagement-table a {
+  color: var(--accent, #0f4c81);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
 .engagement-insights-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
