@@ -553,7 +553,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.486-la-discover",
+          version: "0.10.488-engagement-click",
           studio_approve_all_batch_v1: true,
           studio_engagement_v1: true,
           studio_mae_schedule_v1: true,
@@ -20549,7 +20549,7 @@ async function postEngagementAction(request, env, url, authorization) {
   const profile = await resolveEngagementProfile(env, url, authorization, payload);
   try {
     const result = await studioApplyEngagementAction(env, { ...payload, profile }, engagementDeps(profile));
-    return respond(request, env, result, result.ok === false && !result.unsupported && !result.duplicate ? 409 : 200);
+    return respond(request, env, result, 200);
   } catch (error) {
     throw new HttpError(400, error?.message || String(error));
   }

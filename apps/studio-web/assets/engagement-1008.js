@@ -174,7 +174,7 @@
     const root = $("engagementHistory");
     if (!root) return;
     if (!state.history.length) {
-      root.innerHTML = `<p class="subtle">No engagement actions yet.</p>`;
+      root.innerHTML = `<p class="subtle">No engagement actions for this profile yet. Use Comment or Like on a recommended post. Approve only queues a comment and does not post it.</p>`;
       return;
     }
     root.innerHTML = `<table class="engagement-table"><thead><tr><th>When</th><th>Channel</th><th>Type</th><th>Platform</th><th>Status</th><th>Post</th><th>Detail</th></tr></thead><tbody>${
@@ -216,20 +216,40 @@
       stage_b_enabled: stageBChecked(),
     };
     setStatus(`Running ${action}…`);
-    const result = await fetchJson("/api/engagement/actions", {
-      method: "POST",
-      body: JSON.stringify(payload),
-    });
-    if (action === "open_post" && (result.post_url || result.target?.post_url)) {
-      window.open(result.post_url || result.target.post_url, "_blank", "noopener,noreferrer");
+    const history = $("engagementHistory");
+    if (history) {
+      const note = document.createElement("p");
+      note.className = "engagement-status";
+      note.textContent = `Sending ${action}…`;
+      history.prepend(note);
     }
-    // Platform-unsupported opens the post for manual work. Stage B off must not —
-    // that looked like success while no YouTube API call ran.
-    if (result.unsupported && !result.stage_b_disabled && (result.post_url || result.target?.post_url)) {
-      window.open(result.post_url || result.target.post_url, "_blank", "noopener,noreferrer");
+    let message = "";
+    let failed = false;
+    try {
+      const result = await fetchJson("/api/engagement/actions", {
+        method: "POST",
+        body: JSON.stringify(payload),
+      });
+      if (action === "open_post" && (result.post_url || result.target?.post_url)) {
+        window.open(result.post_url || result.target.post_url, "_blank", "noopener,noreferrer");
+      }
+      // Platform-unsupported opens the post for manual work. Stage B off must not —
+      // that looked like success while no YouTube API call ran.
+      if (result.unsupported && !result.stage_b_disabled && (result.post_url || result.target?.post_url)) {
+        window.open(result.post_url || result.target.post_url, "_blank", "noopener,noreferrer");
+      }
+      message = result.message || (result.ok === false ? "Engagement action did not complete." : "Done.");
+      failed = result.ok === false;
+    } catch (error) {
+      message = error.message || String(error);
+      failed = true;
     }
-    setStatus(result.message || "Done.", result.ok === false);
     await loadEngagement(true);
+    setStatus(message, failed);
+    if (failed) {
+      const subtitle = $("engagementSubtitle");
+      if (subtitle) subtitle.textContent = message;
+    }
   }
 
   async function saveSettings() {
@@ -324,6 +344,7 @@
   });
 
   document.addEventListener("click", (event) => {
+    if (!event.target?.closest?.("#page-engagement")) return;
     const select = event.target?.closest?.("[data-select-target]");
     if (select) {
       const id = select.getAttribute("data-select-target");
@@ -342,7 +363,8 @@
       return;
     }
     const button = event.target?.closest?.("[data-action][data-target-id]");
-    if (!button || !pageActive()) return;
+    if (!button) return;
+    event.preventDefault();
     const action = button.getAttribute("data-action");
     const targetId = button.getAttribute("data-target-id");
     runAction(action, targetId).catch((error) => setStatus(error.message || String(error), true));
