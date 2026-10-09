@@ -172,9 +172,18 @@ test("worker wires engagement routes, cron, and version bump", () => {
   assert.match(worker, /from "\.\/engagement-service\.mjs"/);
   assert.match(worker, /\/api\/engagement\//);
   assert.match(worker, /studio_engagement_v1:\s*true/);
-  assert.match(worker, /0\.10\.475-ready-for-render-typo/);
+  assert.match(worker, /0\.10\.477-engagement-stageb-persist/);
   assert.match(worker, /studioRunEngagementDiscovery/);
   assert.match(worker, /studioEngagementCron/);
   assert.match(worker, /engagementThemeContextRecord/);
   assert.match(worker, /engagementDeps\(profile\)/);
+});
+
+test("Stage B checkbox on approve/comment persists per profile", () => {
+  const service = fs.readFileSync(path.join(here, "engagement-service.mjs"), "utf8");
+  const ui = fs.readFileSync(path.join(here, "../studio-web/assets/engagement-1008.js"), "utf8");
+  assert.match(service, /payload\.stage_b_enabled === true/);
+  assert.match(service, /stage_b_disabled:\s*true/);
+  assert.match(ui, /stage_b_enabled:\s*stageBChecked\(\)/);
+  assert.match(ui, /engagementStageB[\s\S]*addEventListener\("change"/);
 });

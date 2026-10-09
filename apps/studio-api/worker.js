@@ -534,7 +534,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.476-voiceover-exceeds-render",
+          version: "0.10.477-engagement-stageb-persist",
           studio_engagement_v1: true,
           studio_mae_schedule_v1: true,
           studio_mae_28_day_schedule_v1: true,
