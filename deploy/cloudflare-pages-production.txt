@@ -109,3 +109,5 @@ Deploy Studio UI 0.6.534-pages-path-bust. Rename app-item4-0625.js -> app-item4-
 
 2026-10-09: Deploy Studio New Profile onboarding. Add guided city setup with Las Vegas, San Francisco, New Orleans, Washington DC, Boston presets plus IG/TT/YT/FB create-or-connect workflow. PR #562.
 2026-10-09 New Profile onboarding rollout — main 17cace69c7e7674b7de2c70abc4a05d5bdf9e331
+
+2026-10-09: Deploy UI 0.6.549-vibe-cut. Vibe Cut creation mode — long video to music-driven 9:16 montage (no voiceover).

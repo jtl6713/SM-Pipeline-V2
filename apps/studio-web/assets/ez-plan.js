@@ -9,6 +9,7 @@
     PHOTOS_AND_CLIPS: "photos-and-clips",
     FINISHED_VIDEO: "finished-video",
     FINISHED_STILLS: "finished-stills",
+    VIBE_CUT: "vibe-cut",
     SINGLE_AI: "single-ai",
     MULTIPLE_AI: "multiple-ai",
     MIXED: "mixed",
@@ -259,8 +260,13 @@
     };
   }
 
+  function ezIsVibeCutInput(kind) {
+    return String(kind || "").trim() === EZ_INPUTS.VIBE_CUT;
+  }
+
   function ezIntakeKindFromWizard(inputKind) {
     const kind = String(inputKind || "").trim();
+    if (kind === EZ_INPUTS.VIBE_CUT) return EZ_INPUTS.VIBE_CUT;
     if (kind === EZ_INPUTS.FINISHED_VIDEO) return EZ_INPUTS.FINISHED_VIDEO;
     if (kind === EZ_INPUTS.FINISHED_STILLS) return EZ_INPUTS.FINISHED_STILLS;
     if (ezIsClipInput(kind)) return kind;
@@ -278,13 +284,14 @@
       || ezIsClipInput(kind)
       || kind === EZ_INPUTS.FINISHED_VIDEO
       || kind === EZ_INPUTS.FINISHED_STILLS
+      || kind === EZ_INPUTS.VIBE_CUT
     ) return "Manual Upload";
     return "Make AI Generated";
   }
 
   function ezWizardPhotoCount(answers = {}) {
     const kind = String(answers.inputKind || "").trim();
-    if (kind === EZ_INPUTS.SINGLE_PHOTO || kind === EZ_INPUTS.SINGLE_AI) return 1;
+    if (kind === EZ_INPUTS.SINGLE_PHOTO || kind === EZ_INPUTS.SINGLE_AI || kind === EZ_INPUTS.VIBE_CUT) return 1;
     if (kind === EZ_INPUTS.VIDEO_CLIPS) return 0;
     if (kind === EZ_INPUTS.MIXED) {
       return Math.max(0, Number(answers.manualCount) || 0) + Math.max(0, Number(answers.aiCount) || 0);
@@ -310,7 +317,7 @@
     const kind = String(answers.inputKind || "").trim();
     if (answers.photoWait) return 0;
     if (kind === EZ_INPUTS.SINGLE_AI || kind === EZ_INPUTS.MULTIPLE_AI) return 0;
-    if (kind === EZ_INPUTS.SINGLE_PHOTO || kind === EZ_INPUTS.FINISHED_VIDEO) return 1;
+    if (kind === EZ_INPUTS.SINGLE_PHOTO || kind === EZ_INPUTS.FINISHED_VIDEO || kind === EZ_INPUTS.VIBE_CUT) return 1;
     if (kind === EZ_INPUTS.PHOTOS_AND_CLIPS) {
       return Math.max(1, ezWizardPhotoCount(answers)) + Math.max(1, ezWizardClipCount(answers));
     }
@@ -348,12 +355,17 @@
 
   function ezWizardPackages(photoCount, answers = {}) {
     const count = Math.max(1, Number(photoCount) || 1);
-    const clipInput = ezIsClipInput(answers.inputKind) || String(answers.inputKind || "") === EZ_INPUTS.FINISHED_VIDEO;
+    const vibeCut = ezIsVibeCutInput(answers.inputKind);
+    const clipInput = ezIsClipInput(answers.inputKind)
+      || String(answers.inputKind || "") === EZ_INPUTS.FINISHED_VIDEO
+      || vibeCut;
     const packages = [
       {
         id: EZ_PACKAGES.VIDEO,
-        label: "Vertical video",
-        hint: "IG Reel · FB Reel · TikTok · YouTube Short · IG & FB Stories · grid thumbnail",
+        label: vibeCut ? "Vertical video (Vibe Cut)" : "Vertical video",
+        hint: vibeCut
+          ? "9:16 Reel / Short / TikTok — music-driven, no voiceover"
+          : "IG Reel · FB Reel · TikTok · YouTube Short · IG & FB Stories · grid thumbnail",
       },
     ];
     if (!clipInput) {
@@ -791,13 +803,16 @@
       ? answers.platforms
       : null;
     const finishedVideo = String(answers.inputKind || "") === EZ_INPUTS.FINISHED_VIDEO;
-    const clipInput = ezIsClipInput(answers.inputKind);
-    if (clipInput || finishedVideo || packageId === EZ_PACKAGES.VIDEO) {
-      const overrides = ezVideoOverrides({ finishedVideo, clipInput });
+    const vibeCut = ezIsVibeCutInput(answers.inputKind);
+    const clipInput = ezIsClipInput(answers.inputKind) || vibeCut;
+    if (clipInput || finishedVideo || vibeCut || packageId === EZ_PACKAGES.VIDEO) {
+      const overrides = ezVideoOverrides({ finishedVideo, clipInput: clipInput || vibeCut });
       const filtered = selected
         ? Object.fromEntries(Object.entries(overrides).filter(([platform]) => selected.includes(platform)))
         : overrides;
-      return ezPlanFromOverrides(count, filtered, ezVideoStoryExtras(selected || Object.keys(filtered)));
+      const plan = ezPlanFromOverrides(count, filtered, ezVideoStoryExtras(selected || Object.keys(filtered)));
+      if (vibeCut) plan.master_content_type = "Vertical Short Video";
+      return plan;
     }
     if (!clipInput && (String(answers.inputKind || "") === EZ_INPUTS.FINISHED_STILLS || packageId === EZ_PACKAGES.SLIDES || packageId === "stills")) {
       const overrides = ezSlidesOverrides(count);
@@ -832,6 +847,7 @@
     EZ_PHOTO_PASSES,
     EZ_OUTPUT_OPTIONS,
     ezIsClipInput,
+    ezIsVibeCutInput,
     ezIsNativeStillOutput,
     ezPhotoCountKind,
     ezVideoOverrides,

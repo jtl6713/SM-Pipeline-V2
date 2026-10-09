@@ -260,7 +260,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.548-engagement-ledger";
+  const BUILD_ID = "item4-0.6.549-vibe-cut";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -274,7 +274,7 @@
 
   function item4AcceptForKind(kind = ezIntakeKind) {
     const next = String(kind || "").trim();
-    if (next === "finished-video") return `${ITEM4_ACCEPT_VIDEOS},image/*`;
+    if (next === "finished-video" || next === "vibe-cut") return `${ITEM4_ACCEPT_VIDEOS},image/*`;
     if (next === "video-clips") return ITEM4_ACCEPT_VIDEOS;
     if (next === "photos-and-clips") return ITEM4_ACCEPT_MIXED;
     return ITEM4_ACCEPT_PHOTOS;
@@ -3672,6 +3672,42 @@
     return window.ChicagoShiningEzPlan || null;
   }
 
+  function vibeCutApi() {
+    return window.ChicagoShiningVibeCut || null;
+  }
+
+  function ezIsVibeCut() {
+    const kind = String(ezIntakeKind || (ezWizardPending || ezWizardAnswers)?.inputKind || "").trim();
+    if (kind === "vibe-cut") return true;
+    const notes = String($("prProductionNotes")?.value || $("ezProductionNotes")?.value || "").trim();
+    return Boolean(vibeCutApi()?.isVibeCutNotes?.(notes) || /ez-input=vibe-cut/i.test(notes));
+  }
+
+  function vibeCutConfigFromWizard(answers = ezWizardAnswers || {}) {
+    const helper = vibeCutApi();
+    return helper?.defaultConfig?.({
+      style: answers.vibeStyle || "beat-cut",
+      energy: answers.vibeEnergy,
+      target_seconds: answers.vibeTargetSeconds || 30,
+      chronology: answers.vibeChronology || "best-moments",
+      versions: answers.vibeVersions || 1,
+      beat_sync: answers.vibeBeatSync === "off" ? "off" : "on",
+      find_best: Boolean(answers.vibeFindBest),
+      prefer_unused: Boolean(answers.vibePreferUnused),
+    }) || {
+      style: "beat-cut",
+      energy: 3,
+      target_seconds: 30,
+      chronology: "best-moments",
+      versions: 1,
+      beat_sync: "on",
+      find_best: false,
+      prefer_unused: false,
+      voiceover: "off",
+      aspect_ratio: "9:16",
+    };
+  }
+
   function setEzMessage(text = "", type = "") {
     const target = $("ezMessage");
     if (!target) return;
@@ -4325,6 +4361,7 @@
       .replace(/(?:^|\n)\[render-settings\]\s*[^\n]*(?=\n|$)/ig, "")
       .replace(/(?:^|\n)\[render-overrides\]\s*[^\n]*(?=\n|$)/ig, "")
       .replace(/(?:^|\n)\[timed-script\]\s*[^\n]*(?=\n|$)/ig, "")
+      .replace(/(?:^|\n)\[vibe-cut\]\s*[^\n]*(?=\n|$)/ig, "")
       .replace(/^\s*\n/, "")
       .replace(/\n{3,}/g, "\n\n")
       .trim();
@@ -4367,8 +4404,14 @@
   }
 
   function mergeProductionRenderSettings(notes) {
+    const vibeHelper = vibeCutApi();
+    const existingVibe = vibeHelper?.parseDirective?.(notes);
+    let settings = collectProductionRenderSettings();
+    if (existingVibe || /ez-input=vibe-cut/i.test(String(notes || ""))) {
+      settings = { ...settings, beat_sync: "on" };
+      if ($("prRenderBeatSync")) $("prRenderBeatSync").checked = true;
+    }
     const clean = stripProductionRenderSettings(notes);
-    const settings = collectProductionRenderSettings();
     const overrides = collectProductionFrameOverridesFromUi();
     const directive = "[render-settings] " + Object.entries(settings)
       .map(([key, value]) => key + "=" + (String(value || "auto").trim() || "auto"))
@@ -4377,7 +4420,8 @@
       ? "[render-overrides] " + encodeURIComponent(JSON.stringify(overrides))
       : "";
     const timedDirective = window.StudioTimedScript?.directiveLine?.(productionTimedScript) || "";
-    return [clean, directive, frameDirective, timedDirective].filter(Boolean).join("\n");
+    const vibeDirective = existingVibe ? vibeHelper.formatDirective(existingVibe) : "";
+    return [clean, vibeDirective, directive, frameDirective, timedDirective].filter(Boolean).join("\n");
   }
 
   function productionRequestIsPromoted(record = activeProductionRequest) {
@@ -4442,14 +4486,34 @@
     if ($("prRenderImageDurationSecondsWrap")) $("prRenderImageDurationSecondsWrap").hidden = !fixed;
     const summary = $("prRenderStyleSummary");
     const timed = timedScriptActive();
+    const vibe = ezIsVibeCut();
+    const vibeCfg = vibeCutApi()?.parseDirective?.(
+      activeProductionRequest?.production_notes || $("prProductionNotes")?.value || "",
+    );
+    const vibeBanner = $("prVibeCutBanner");
+    if (vibeBanner) {
+      vibeBanner.hidden = !vibe;
+      if (vibe) {
+        vibeBanner.textContent = vibeCutApi()?.summaryText?.(vibeCfg)
+          || "Vibe Cut — music-driven montage, no voiceover. Beat sync stays on.";
+      }
+    }
     if (summary) {
       const preset = $("prRenderPreset")?.selectedOptions?.[0]?.textContent || "Auto";
-      summary.textContent = timed ? "Timed script" : preset.replace(" / current behavior", "");
-      summary.dataset.state = timed || $("prRenderPreset")?.value !== "auto" ? "ready" : "idle";
+      summary.textContent = vibe
+        ? (vibeCutApi()?.summaryText?.(vibeCfg) || "Vibe Cut")
+        : (timed ? "Timed script" : preset.replace(" / current behavior", ""));
+      summary.dataset.state = vibe || timed || $("prRenderPreset")?.value !== "auto" ? "ready" : "idle";
     }
     ["prRenderImageDurationMode", "prRenderImageDurationSeconds", "prRenderPacing", "prRenderBeatSync"].forEach((id) => {
       const input = $(id);
-      if (input) input.disabled = timed;
+      if (!input) return;
+      if (vibe && id === "prRenderBeatSync") {
+        input.checked = true;
+        input.disabled = true;
+        return;
+      }
+      input.disabled = timed;
     });
   }
 
@@ -5166,7 +5230,7 @@
   }
 
   function selectPrMediaKind(kind, { quiet = false } = {}) {
-    const nextKind = ["multiple-photos", "single-photo", "photos-and-clips", "video-clips", "finished-video", "finished-stills"].includes(kind) ? kind : null;
+    const nextKind = ["multiple-photos", "single-photo", "photos-and-clips", "video-clips", "finished-video", "finished-stills", "vibe-cut"].includes(kind) ? kind : null;
     ezIntakeKind = nextKind;
     document.querySelectorAll("[data-pr-input]").forEach((button) => {
       button.classList.toggle("selected", Boolean(nextKind) && button.dataset.prInput === nextKind);
@@ -5176,8 +5240,14 @@
     const hint = $("item4UploadHint");
     const choose = $("item4ChooseMedia");
     const library = $("item4ChooseLibrary");
-    if (library) library.hidden = nextKind === "finished-video";
-    if (nextKind === "finished-video") {
+    if (library) library.hidden = nextKind === "finished-video" || nextKind === "vibe-cut";
+    if (nextKind === "vibe-cut") {
+      if (title) title.textContent = "Drop long source video";
+      if (hint) hint.textContent = "One long MP4/MOV. Studio finds the best moments and cuts them to music — no voiceover.";
+      if (choose) choose.textContent = "Choose video";
+      const picker = $("item4LibraryPicker");
+      if (picker) picker.hidden = true;
+    } else if (nextKind === "finished-video") {
       if (title) title.textContent = "Drop video";
       if (hint) hint.textContent = "";
       if (choose) choose.textContent = "Choose video";
@@ -5393,9 +5463,10 @@
     const parsed = ezPlanApi()?.parseEzOriginNotes(activeProductionRequest?.production_notes);
     const notesText = String(activeProductionRequest?.production_notes || item4Workspace?.production_notes || "");
     const noteKind = String(parsed?.inputKind || "").trim()
+      || (/ez-input=vibe-cut/i.test(notesText) ? "vibe-cut" : "")
       || (/ez-input=video-clips/i.test(notesText) ? "video-clips" : "")
       || (/ez-input=photos-and-clips|ez-clips=\d+/i.test(notesText) ? "photos-and-clips" : "");
-    if (noteKind === "photos-and-clips" || noteKind === "video-clips" || noteKind === "finished-video" || noteKind === "finished-stills") {
+    if (noteKind === "photos-and-clips" || noteKind === "video-clips" || noteKind === "finished-video" || noteKind === "finished-stills" || noteKind === "vibe-cut") {
       if (ezIntakeKind !== noteKind) {
         selectPrMediaKind(noteKind, { quiet: true });
         return;
@@ -5938,21 +6009,33 @@
 
   function mergeEzProductionNotes() {
     const pending = ezWizardPending || ezWizardAnswers;
+    const inputKind = (
+      ezIntakeKind === "photos-and-clips"
+      || ezIntakeKind === "video-clips"
+      || ezIntakeKind === "finished-video"
+      || ezIntakeKind === "finished-stills"
+      || ezIntakeKind === "vibe-cut"
+    )
+      ? ezIntakeKind
+      : (pending?.inputKind || ezIntakeKind || "single-photo");
     const origin = ezPlanApi()?.ezOriginNotes({
       origin: ezIsAzFinishedPath()
         ? ezPlanApi()?.EZ_ORIGIN_AZ
         : (pending?.start ? ezPlanApi()?.EZ_ORIGIN_WIZARD : undefined),
-      inputKind: (ezIntakeKind === "photos-and-clips" || ezIntakeKind === "video-clips" || ezIntakeKind === "finished-video" || ezIntakeKind === "finished-stills")
-        ? ezIntakeKind
-        : (pending?.inputKind || ezIntakeKind || "single-photo"),
+      inputKind,
       captionMode: ezCaptionMode(),
       manualCount: pending?.manualCount,
       aiCount: pending?.aiCount,
       clipCount: pending?.clipCount || ((ezIntakeKind === "photos-and-clips" || ezIntakeKind === "video-clips") ? 1 : undefined),
-      packageId: pending?.packageId || currentEzPackageId(),
+      packageId: inputKind === "vibe-cut" ? "video" : (pending?.packageId || currentEzPackageId()),
     }) || "";
     const user = String($("ezProductionNotes")?.value || "").trim();
-    const combined = user ? `${origin}\n\n${user}` : origin;
+    let combined = user ? `${origin}\n\n${user}` : origin;
+    if (inputKind === "vibe-cut" || pending?.inputKind === "vibe-cut") {
+      const helper = vibeCutApi();
+      const config = vibeCutConfigFromWizard(pending || {});
+      combined = helper?.mergeIntoNotes?.(combined, config) || combined;
+    }
     if ($("prProductionNotes")) $("prProductionNotes").value = combined;
     return combined;
   }
@@ -6606,7 +6689,7 @@
   }
 
   function selectEzInput(kind, { resetPlatforms = true } = {}) {
-    const nextKind = ["multiple-photos", "single-photo", "photos-and-clips", "video-clips", "finished-video", "finished-stills"].includes(kind)
+    const nextKind = ["multiple-photos", "single-photo", "photos-and-clips", "video-clips", "finished-video", "finished-stills", "vibe-cut"].includes(kind)
       ? kind
       : "single-photo";
     if (resetPlatforms && ezIntakeKind && ezIntakeKind !== nextKind) {
@@ -6625,13 +6708,16 @@
     const hint = $("ezUploadHint");
     const choose = $("ezChooseMedia");
     if (choose) {
-      if (ezIntakeKind === "finished-video") choose.textContent = "Choose video";
+      if (ezIntakeKind === "finished-video" || ezIntakeKind === "vibe-cut") choose.textContent = "Choose video";
       else if (ezIntakeKind === "video-clips") choose.textContent = "Choose clips";
       else if (ezIntakeKind === "photos-and-clips") choose.textContent = "Choose files";
       else if (ezIntakeKind === "single-photo") choose.textContent = "Choose photo";
       else choose.textContent = "Choose photos";
     }
-    if (ezIntakeKind === "finished-video") {
+    if (ezIntakeKind === "vibe-cut") {
+      if (title) title.textContent = "Drop the long source video here";
+      if (hint) hint.textContent = "One long MP4/MOV (60s–several minutes). Studio finds strong moments and edits them to music. No voiceover.";
+    } else if (ezIntakeKind === "finished-video") {
       if (title) title.textContent = "Drop the finished video here";
       if (hint) hint.textContent = "One MP4. Studio skips crops and Remotion.";
     } else if (ezIntakeKind === "finished-stills") {
@@ -6653,10 +6739,17 @@
     selectPrMediaKind(nextKind, { quiet: true });
     syncFinishedMediaHeadings();
     const slidesCard = document.querySelector('[data-ez-package="slides"]');
-    const videoOnlyInput = nextKind === "photos-and-clips" || nextKind === "video-clips" || nextKind === "finished-video";
+    const videoOnlyInput = nextKind === "photos-and-clips" || nextKind === "video-clips" || nextKind === "finished-video" || nextKind === "vibe-cut";
     if (slidesCard) slidesCard.hidden = videoOnlyInput;
     if (videoOnlyInput && currentEzPackageId() !== "video") {
       selectEzPackage("video", { resetPlatforms: false });
+    }
+    if (nextKind === "vibe-cut") {
+      if ($("ezAudioVoiceover")) $("ezAudioVoiceover").value = "No";
+      if ($("ezAudioMusic")) $("ezAudioMusic").value = "Yes";
+      if ($("ezThumbnail")) $("ezThumbnail").value = "Yes";
+      audioUserTouched.add("ezAudioVoiceover");
+      audioUserTouched.add("ezAudioMusic");
     }
     syncEzYouTubeAvailability(resetPlatforms);
     if (resetPlatforms) syncItem4PlatformsFromEz();
@@ -6815,6 +6908,9 @@
     }
     if (answers.inputKind === "video-clips") bits.push(answers.clipCount ? `${answers.clipCount} clips` : "clips only");
     if (answers.inputKind === "mixed") bits.push(`${answers.manualCount || 0} yours · ${answers.aiCount || 0} AI`);
+    if (answers.inputKind === "vibe-cut" || answers.start === "vibe-cut") {
+      bits.push(vibeCutApi()?.summaryText?.(vibeCutConfigFromWizard(answers)) || "Vibe Cut");
+    }
     if (answers.packageId) {
       const pkg = ezPlanApi()?.ezWizardPackages?.(ezPlanApi()?.ezWizardPhotoCount?.(answers) || 1, answers)
         ?.find((row) => row.id === answers.packageId);
@@ -6909,6 +7005,12 @@
       const clips = helpers.ezWizardClipCount?.(answers) || Number(answers.clipCount) || 1;
       if (title) title.textContent = `Add ${photos} photo${photos === 1 ? "" : "s"} and ${clips} clip${clips === 1 ? "" : "s"}`;
       if (hint) hint.textContent = "Pick stills and clips together. Studio saves them one file at a time.";
+    } else if (answers.inputKind === "vibe-cut") {
+      if (title) title.textContent = "Drop the long source video here";
+      if (hint) hint.textContent = vibeCutApi()?.summaryText?.(vibeCutConfigFromWizard(answers))
+        || "Studio finds strong moments and edits them to music. No voiceover.";
+      if ($("ezAudioVoiceover")) $("ezAudioVoiceover").value = "No";
+      if ($("ezAudioMusic")) $("ezAudioMusic").value = "Yes";
     } else if (answers.inputKind === "finished-video") {
       if (title) title.textContent = "Drop the finished video here";
       if (hint) hint.textContent = "One MP4. Studio skips crops and Remotion.";
@@ -6926,44 +7028,51 @@
 
   function ezWizardRequestPayload(planned, { fileCount = 0 } = {}) {
     const helpers = ezPlanApi();
-    const count = helpers?.ezWizardPhotoCount?.(ezWizardPending || ezWizardAnswers) || fileCount || 1;
+    const pendingAnswers = ezWizardPending || ezWizardAnswers;
+    const count = helpers?.ezWizardPhotoCount?.(pendingAnswers) || fileCount || 1;
     const slideMode = $("ezCarouselSlideMode")?.value || "Exact";
-    const finished = ["finished-video", "finished-stills"].includes((ezWizardPending || ezWizardAnswers)?.inputKind || ezIntakeKind);
+    const finished = ["finished-video", "finished-stills"].includes(pendingAnswers?.inputKind || ezIntakeKind);
+    const vibeCut = (pendingAnswers?.inputKind || ezIntakeKind) === "vibe-cut";
+    const vibeConfig = vibeCut ? vibeCutConfigFromWizard(pendingAnswers || {}) : null;
     const az = ezIsAzFinishedPath();
     let captionFields = helpers?.ezCaptionFields(ezCaptionMode(), { captions: joinedManualSlideCaptions(), finished }) || {};
     if (captionFields.caption_mode === "Force exact" && !String(captionFields.requested_caption || "").trim()) {
       captionFields = { ...captionFields, caption_mode: "AI decides", requested_caption: "" };
     }
-    const contentType = (az || item4HasTimedScript())
+    const contentType = (az || vibeCut || item4HasTimedScript())
       ? "Vertical Short Video"
       : (planned?.master_content_type || helpers?.ezMasterContentType?.(count) || "Photo Set");
     const stills = stillsTimingActive(contentType);
     return coerceForceExactTextModes({
       content_type: contentType,
-      platforms: (az || item4HasTimedScript())
+      platforms: (az || vibeCut || item4HasTimedScript())
         ? ["Instagram", "Facebook", "TikTok", "YouTube"]
         : (planned?.platforms || ezSelectedPlatforms()),
-      voiceover_mode: (finished || az) ? "No" : ($("ezAudioVoiceover")?.value || "Yes"),
-      background_music_mode: (finished || az) ? "No" : ($("ezAudioMusic")?.value || "Yes"),
-      thumbnail_mode: (finished || az) ? "Yes" : ($("ezThumbnail")?.value || "Yes"),
-      video_duration_seconds: stills ? "" : ($("ezVideoDuration")?.value || 30),
-      video_clip_count_mode: (helpers?.ezWizardClipCount?.(ezWizardPending || ezWizardAnswers) || Number((ezWizardPending || ezWizardAnswers)?.clipCount) || 0) > 0
+      voiceover_mode: (finished || az || vibeCut) ? "No" : ($("ezAudioVoiceover")?.value || "Yes"),
+      background_music_mode: (finished || az) ? "No" : (vibeCut ? "Yes" : ($("ezAudioMusic")?.value || "Yes")),
+      thumbnail_mode: (finished || az || vibeCut) ? "Yes" : ($("ezThumbnail")?.value || "Yes"),
+      video_duration_seconds: stills ? "" : (vibeCut ? String(vibeConfig?.target_seconds || 30) : ($("ezVideoDuration")?.value || 30)),
+      video_clip_count_mode: (helpers?.ezWizardClipCount?.(pendingAnswers) || Number(pendingAnswers?.clipCount) || 0) > 0
         ? "Exact"
         : ($("ezVideoClipMode")?.value || "AI decides"),
-      video_clip_count_exact: (helpers?.ezWizardClipCount?.(ezWizardPending || ezWizardAnswers) || Number((ezWizardPending || ezWizardAnswers)?.clipCount) || 0) > 0
-        ? String(helpers.ezWizardClipCount(ezWizardPending || ezWizardAnswers) || (ezWizardPending || ezWizardAnswers)?.clipCount)
+      video_clip_count_exact: (helpers?.ezWizardClipCount?.(pendingAnswers) || Number(pendingAnswers?.clipCount) || 0) > 0
+        ? String(helpers.ezWizardClipCount(pendingAnswers) || pendingAnswers?.clipCount)
         : ($("ezVideoClipExact")?.value || ""),
       video_clip_count_min: $("ezVideoClipMin")?.value || "",
       video_clip_count_max: $("ezVideoClipMax")?.value || "",
       voiceover_tail_seconds: 0,
-      voiceover_duration_seconds: stills ? "" : ($("ezVoiceoverDuration")?.value || defaultVoiceoverDuration($("ezVideoDuration")?.value || 30)),
+      voiceover_duration_seconds: (stills || vibeCut) ? "" : ($("ezVoiceoverDuration")?.value || defaultVoiceoverDuration($("ezVideoDuration")?.value || 30)),
       music_start_seconds: $("ezMusicStart")?.value || 0,
       title_mode: ezTitleIsCustomized() ? ($("ezTitleMode")?.value || "AI decides") : (captionFields.title_mode || "AI decides"),
       requested_title: ezTitleIsCustomized() ? String($("ezRequestedTitle")?.value || "").trim() : (captionFields.requested_title || ""),
       caption_mode: ezCaptionIsCustomized() ? ($("ezCaptionMode")?.value || "AI decides") : (captionFields.caption_mode || "AI decides"),
       requested_caption: ezCaptionIsCustomized() ? String($("ezRequestedCaption")?.value || "").trim() : (captionFields.requested_caption || ""),
-      script_mode: ezScriptIsCustomized() ? ($("ezScriptMode")?.value || "AI decides") : (captionFields.script_mode || "AI decides"),
-      requested_script: ezScriptIsCustomized() ? String($("ezRequestedScript")?.value || "") : (captionFields.requested_script || ""),
+      script_mode: vibeCut
+        ? "Leave blank"
+        : (ezScriptIsCustomized() ? ($("ezScriptMode")?.value || "AI decides") : (captionFields.script_mode || "AI decides")),
+      requested_script: vibeCut
+        ? ""
+        : (ezScriptIsCustomized() ? String($("ezRequestedScript")?.value || "") : (captionFields.requested_script || "")),
       primary_location: currentPrimaryLocationValue()
         || suggestPrimaryLocationFromCopy({
           title: ezIdeaTitleValue(),
@@ -6972,18 +7081,18 @@
           area: activeIdea?.neighborhood_or_area || "",
           market: activeIdea?.market_name || "",
         }).name,
-      carousel_image_mode: helpers?.ezImageModeFromWizard?.((ezWizardPending || ezWizardAnswers)?.inputKind)
+      carousel_image_mode: helpers?.ezImageModeFromWizard?.(pendingAnswers?.inputKind)
         || $("ezCarouselImageMode")?.value
         || "Manual Upload",
-      carousel_slide_count_mode: (ezWizardPending || ezWizardAnswers)?.photoWait ? "Target range" : slideMode,
+      carousel_slide_count_mode: pendingAnswers?.photoWait ? "Target range" : slideMode,
       carousel_slide_count_exact: (() => {
         const raw = $("ezCarouselSlideExact")?.value;
         const n = Number(raw);
         if (slideMode === "Exact" && (!Number.isFinite(n) || n < 1)) return String(count);
         return raw || (slideMode === "Exact" ? String(count) : "");
       })(),
-      carousel_slide_count_min: (ezWizardPending || ezWizardAnswers)?.photoCountMin || $("ezCarouselSlideMin")?.value || "",
-      carousel_slide_count_max: (ezWizardPending || ezWizardAnswers)?.photoCountMax || $("ezCarouselSlideMax")?.value || "",
+      carousel_slide_count_min: pendingAnswers?.photoCountMin || $("ezCarouselSlideMin")?.value || "",
+      carousel_slide_count_max: pendingAnswers?.photoCountMax || $("ezCarouselSlideMax")?.value || "",
       selected_music_asset_id: $("ezAudioTrack")?.value || "",
       production_notes: mergeEzProductionNotes(),
       ...selectedRequestVoice(),
@@ -7088,6 +7197,98 @@
         { label: "Photos I already have", onClick: () => ezWizardPick("Photos I already have", { start: "photos" }, "photoKind") },
         { label: "AI-generated images", onClick: () => ezWizardPick("AI-generated images", { start: "ai" }, "aiKind") },
         { label: "Mix of my photos and AI images", onClick: () => ezWizardPick("Mix of my photos and AI", { start: "mixed" }, "mixManual") },
+        {
+          label: "Vibe Cut — long video → music montage",
+          onClick: () => ezWizardPick("Vibe Cut", {
+            start: "vibe-cut",
+            inputKind: "vibe-cut",
+            photoCount: 1,
+            packageId: "video",
+            vibeBeatSync: "on",
+          }, "vibeTarget"),
+        },
+      ]);
+      return;
+    }
+
+    if (ezWizardStep === "vibeTarget") {
+      prompt.textContent = "How long should the finished cut be?";
+      const pickTarget = (seconds, label, extra = {}) => ezWizardPick(
+        label,
+        { vibeTargetSeconds: seconds, vibeFindBest: Boolean(extra.findBest), packageId: "video" },
+        "vibeStyle",
+      );
+      renderEzWizardChips([
+        { label: "15 seconds", onClick: () => pickTarget(15, "15 seconds") },
+        { label: "30 seconds", onClick: () => pickTarget(30, "30 seconds") },
+        { label: "45 seconds", onClick: () => pickTarget(45, "45 seconds") },
+        { label: "Find me the best 30 seconds", onClick: () => pickTarget(30, "Best 30 seconds", { findBest: true }) },
+      ]);
+      ezWizardShowForm(
+        `<label>Custom length (seconds)<input name="seconds" type="number" min="8" max="90" step="1" value="30" required></label>
+         <div class="ez-wizard-form-actions"><button type="submit">Use this length</button></div>`,
+        (data) => {
+          const n = Math.round(Number(data.get("seconds")));
+          if (!Number.isFinite(n) || n < 8 || n > 90) {
+            ezWizardSetMessage("Enter a target between 8 and 90 seconds.", "error-text");
+            return;
+          }
+          pickTarget(n, `${n} seconds`);
+        },
+      );
+      return;
+    }
+
+    if (ezWizardStep === "vibeStyle") {
+      prompt.textContent = "Which editing style?";
+      const helper = vibeCutApi();
+      const styles = [
+        { id: "smooth-vibes", label: "Smooth Vibes" },
+        { id: "beat-cut", label: "Beat Cut (default)" },
+        { id: "fast-cuts", label: "Fast Cuts" },
+      ];
+      renderEzWizardChips(styles.map((style) => ({
+        label: style.label,
+        onClick: () => {
+          const energy = helper?.DEFAULT_ENERGY?.[style.id] || (style.id === "smooth-vibes" ? 2 : (style.id === "fast-cuts" ? 5 : 3));
+          ezWizardPick(style.label, { vibeStyle: style.id, vibeEnergy: energy }, "vibeEnergy");
+        },
+      })));
+      return;
+    }
+
+    if (ezWizardStep === "vibeEnergy") {
+      prompt.textContent = "Energy level (1 calm → 5 aggressive)?";
+      const current = Number(answers.vibeEnergy) || 3;
+      renderEzWizardChips([1, 2, 3, 4, 5].map((n) => ({
+        label: String(n),
+        pressed: n === current,
+        onClick: () => ezWizardPick(`Energy ${n}`, { vibeEnergy: n }, "vibeChronology"),
+      })));
+      return;
+    }
+
+    if (ezWizardStep === "vibeChronology") {
+      prompt.textContent = "Keep footage in shooting order, or use the best moments regardless of order?";
+      renderEzWizardChips([
+        {
+          label: "Best moments (recommended)",
+          onClick: () => ezWizardPick("Best moments", { vibeChronology: "best-moments" }, "vibeVersions"),
+        },
+        {
+          label: "Chronological",
+          onClick: () => ezWizardPick("Chronological", { vibeChronology: "chronological" }, "vibeVersions"),
+        },
+      ]);
+      return;
+    }
+
+    if (ezWizardStep === "vibeVersions") {
+      prompt.textContent = "How many cut versions should Studio propose?";
+      renderEzWizardChips([
+        { label: "1 cut", onClick: () => ezWizardPick("1 cut", { vibeVersions: 1, packageId: "video" }, "confirm") },
+        { label: "2 cuts", onClick: () => ezWizardPick("2 cuts", { vibeVersions: 2, packageId: "video" }, "confirm") },
+        { label: "3 cuts", onClick: () => ezWizardPick("3 cuts", { vibeVersions: 3, packageId: "video" }, "confirm") },
       ]);
       return;
     }
@@ -7169,6 +7370,16 @@
         { label: "Clips only I’ll upload", onClick: () => ezWizardPick("Clips only", { inputKind: "video-clips", photoCount: 0 }, "clipCount") },
         { label: "Finished video I’ll upload", onClick: () => ezWizardPick("Finished video", { inputKind: "finished-video", photoCount: 1 }, "package") },
         { label: "Finished photos I’ll upload", onClick: () => ezWizardPick("Finished photos", { inputKind: "finished-stills" }, "photoCount") },
+        {
+          label: "Vibe Cut from a long video",
+          onClick: () => ezWizardPick("Vibe Cut", {
+            start: "vibe-cut",
+            inputKind: "vibe-cut",
+            photoCount: 1,
+            packageId: "video",
+            vibeBeatSync: "on",
+          }, "vibeTarget"),
+        },
       ]);
       return;
     }
@@ -7179,6 +7390,16 @@
         { label: "Single manually created image", onClick: () => ezWizardPick("Single photo", { inputKind: "single-photo", photoCount: 1 }, "package") },
         { label: "Multiple manually created images", onClick: () => ezWizardPick("Multiple photos", { inputKind: "multiple-photos" }, "photoCount") },
         { label: "Video clips I’ll upload", onClick: () => ezWizardPick("Video clips", { inputKind: "video-clips", photoCount: 0 }, "clipCount") },
+        {
+          label: "Vibe Cut — one long video",
+          onClick: () => ezWizardPick("Vibe Cut", {
+            start: "vibe-cut",
+            inputKind: "vibe-cut",
+            photoCount: 1,
+            packageId: "video",
+            vibeBeatSync: "on",
+          }, "vibeTarget"),
+        },
       ]);
       return;
     }
@@ -7518,6 +7739,8 @@
           ? `Add ${answers.clipCount || 1} clip${Number(answers.clipCount) === 1 ? "" : "s"}.`
           : answers.inputKind === "photos-and-clips"
           ? `Add ${answers.photoCount || 0} photo${Number(answers.photoCount) === 1 ? "" : "s"} and ${answers.clipCount || 0} clip${Number(answers.clipCount) === 1 ? "" : "s"}.`
+          : answers.inputKind === "vibe-cut"
+          ? `Drop the long source video. Studio will propose ${answers.vibeVersions || 1} music-driven cut${Number(answers.vibeVersions) === 1 ? "" : "s"} — no voiceover.`
           : answers.inputKind === "finished-video"
           ? "Drop the finished video to continue."
           : expected === 1
@@ -7554,7 +7777,7 @@
       setRequestMessage(unsupportedNote, "error-text");
       if (!files.length) return;
     } else if (!files.length) {
-      const choose = ezIsFinishedVideo() ? "Choose a video file." : "Choose one or more photo files.";
+      const choose = (ezIsFinishedVideo() || ezIsVibeCut()) ? "Choose a video file." : "Choose one or more photo files.";
       setEzMessage(choose, "error-text");
       setRequestMessage(choose, "error-text");
       return;
@@ -7605,7 +7828,9 @@
         return false;
       }
     } else if (!allowEmpty && !supported.length) {
-      const message = ezIsFinishedVideo() ? "Choose a video file." : "Choose one or more photo files.";
+      const message = (ezIsFinishedVideo() || ezIsVibeCut() || pending?.inputKind === "vibe-cut")
+        ? "Choose a video file."
+        : "Choose one or more photo files.";
       setEzMessage(message, "error-text");
       failAzFinishedIngest(message);
       return false;
@@ -7624,7 +7849,7 @@
       return false;
     }
     let nextFiles = ezIntakeKind === "single-photo" ? supported.slice(0, 1) : supported;
-    if (ezIntakeKind === "finished-video") {
+    if (ezIntakeKind === "finished-video" || ezIntakeKind === "vibe-cut") {
       nextFiles = supported.filter(item4FileLooksLikeVideo).slice(0, 1);
       if (!nextFiles.length) nextFiles = supported.slice(0, 1);
     }
@@ -7677,6 +7902,16 @@
         item4PlanOverrides = { ...(wizardPlanned.overrides || {}) };
       } else if (ezIntakeKind === "finished-video") {
         planned = apiHelpers.ezWizardResolvePackage({ inputKind: "finished-video", photoCount: 1, packageId: "video" });
+        item4PlanOverrides = { ...(planned.overrides || {}) };
+      } else if (ezIntakeKind === "vibe-cut" || pending?.inputKind === "vibe-cut") {
+        planned = apiHelpers.ezWizardResolvePackage({
+          inputKind: "vibe-cut",
+          photoCount: 1,
+          packageId: "video",
+          vibeTargetSeconds: pending?.vibeTargetSeconds,
+          vibeStyle: pending?.vibeStyle,
+          vibeEnergy: pending?.vibeEnergy,
+        });
         item4PlanOverrides = { ...(planned.overrides || {}) };
       } else {
         item4PlanOverrides = {};
