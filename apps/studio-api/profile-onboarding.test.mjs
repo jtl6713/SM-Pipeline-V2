@@ -56,6 +56,9 @@ test("Studio worker supports generic city keys, profile-local timezone, and onbo
   assert.match(source, /const explicit = String\(f\(profile, "Timezone"\)/);
   assert.match(source, /can_create_profile/);
   assert.match(source, /Resolve their linked[\s\S]*Content Profile before falling back/);
+  assert.match(source, /normalized === "las-vegas" \|\| normalized === "san-francisco"/);
+  assert.match(source, /normalized === "washington-dc" \|\| normalized === "boston"/);
+  assert.match(source, /if \(raw\) return studioNormalizeSimilarProfile\(raw\)/);
 });
 
 test("Studio web exposes the four-step New Profile flow with five city presets and official account handoffs", async () => {
