@@ -60,3 +60,5 @@ Deploy Worker 0.10.479-engagement-history-channel. History API enriches creator_
 Deploy Worker 0.10.482-engagement-frequent-creators. Insights top_creators prefer creator_name (target lookup for legacy). Triggered 2026-10-09.
 
 Deploy Worker 0.10.483-youtube-engage-stale-detect. Detect stale YouTube uploader (no engagement build) before Comment 404; companion force-deploys youtube-uploader* when health.version lacks engagement. Triggered 2026-10-09.
+
+Deploy Worker 0.10.484-ship-verify. Ship-verify production footer after #556/#557/#558. Triggered 2026-10-09.
