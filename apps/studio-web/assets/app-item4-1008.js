@@ -260,7 +260,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.553-engagement-comment-one-click";
+  const BUILD_ID = "item4-0.6.554-pipeline-thumb-no-stories";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -17214,6 +17214,42 @@
     return /^story$/i.test(outputType) || /\bstory\b/i.test(outputType);
   }
 
+  /** Main destinations for package thumb clicks — never Stories when a Reel/Video/Short exists. */
+  function pipelineMainOutputScore(record) {
+    if (!record || pipelineScheduleIsStory(record)) return -1;
+    const type = String(record.platform_output_type || record.studio_output_type || record.format || "").toLowerCase();
+    const platform = String(record.platform || "").toLowerCase();
+    if (platform === "tiktok" && /video|draft/.test(type)) return 100;
+    if (platform === "youtube" && /short/.test(type)) return 95;
+    if (platform === "instagram" && /reel/.test(type)) return 90;
+    if (platform === "facebook" && /reel/.test(type)) return 85;
+    if (/short|reel|video draft|slideshow reel|slideshow video|standard video/.test(type)) return 70;
+    if (/carousel|album|multi-image|single image|photo/.test(type)) return 35;
+    return 10;
+  }
+
+  function pipelinePreferredMainOutput(records = []) {
+    const list = (Array.isArray(records) ? records : []).filter(Boolean);
+    let best = null;
+    let bestScore = -1;
+    for (const record of list) {
+      const score = pipelineMainOutputScore(record);
+      if (score > bestScore) {
+        best = record;
+        bestScore = score;
+      }
+    }
+    return best;
+  }
+
+  function pipelinePreferredLiveUrl(record) {
+    if (!record || pipelineScheduleIsStory(record)) return "";
+    const platform = String(record.platform || "").toLowerCase();
+    if (platform === "youtube") return youtubeLiveUrl(record);
+    if (platform === "tiktok") return tiktokLiveUrl(record);
+    return String(record.platform_post_url || record.manual_published_url || "").trim();
+  }
+
   function pipelineGlobalScheduleMs(reserved) {
     return Object.entries(reserved || {})
       .filter(([key]) => key && !String(key).includes("::story"))
@@ -18535,7 +18571,13 @@
     const summary = pipelineContentSummary(content, first);
     const groupReady = pipelineManualApprovableOutputs(group.records);
     const destination = pipelineDestinationProgress(group.records);
-    const coverUrl = group.records.map((record) => phase6ThumbnailDownloadUrl(record)).find(Boolean) || "";
+    const preferredMain = pipelinePreferredMainOutput(group.records);
+    const coverUrl = [
+      preferredMain,
+      ...group.records.filter((record) => record !== preferredMain && !pipelineScheduleIsStory(record)),
+      ...group.records.filter((record) => pipelineScheduleIsStory(record)),
+    ].map((record) => phase6ThumbnailDownloadUrl(record)).find(Boolean) || "";
+    const liveUrl = pipelinePreferredLiveUrl(preferredMain);
     const groupTone = pipelineGroupVisualTone(group.records);
     const rowSpan = Math.max(1, group.records.length);
     const contentLabel = contentNumber ? `#${contentNumber} - ${title}` : title;
@@ -18560,9 +18602,19 @@
     });
     const regenerateButton = `<button type="button" class="secondary-button pipeline-group-regenerate pipeline-content-action" data-pipeline-group-regenerate="${escapeHtml(group.key)}" title="${regeneratable.length ? "Regenerate future or unscheduled outputs for this content using the rolling 14-day Platform + Output Type rules" : "No future or unscheduled unpublished outputs are eligible"}" ${regeneratable.length ? "" : "disabled"}>Regenerate${regeneratable.length ? ` (${regeneratable.length})` : ""}</button>`;
 
-    const media = coverUrl
+    const thumbImg = coverUrl
       ? `<img class="pipeline-content-thumb" src="${escapeHtml(coverUrl)}" alt="" loading="lazy">`
       : `<div class="pipeline-content-thumb pipeline-content-thumb-placeholder" aria-hidden="true">${escapeHtml(contentNumber || "•")}</div>`;
+    const preferredLabel = preferredMain
+      ? `${String(preferredMain.platform || "").trim()} ${String(preferredMain.platform_output_type || preferredMain.format || "").replace(/^(Facebook|Instagram|TikTok|YouTube)\s+/i, "").trim()}`.trim()
+      : "";
+    // Thumb click must open Reel / Video / Short — never a Story companion, even when
+    // the rowspan content cell sits on the first (Story) row.
+    const media = liveUrl
+      ? `<a class="pipeline-content-thumb-link" href="${escapeHtml(liveUrl)}" target="_blank" rel="noopener noreferrer" title="Open ${escapeHtml(preferredLabel || "published video")}">${thumbImg}</a>`
+      : (preferredMain?.id
+        ? `<button type="button" class="pipeline-content-thumb-button" data-pipeline-thumb-open="${escapeHtml(preferredMain.id)}" title="Open ${escapeHtml(preferredLabel || "main video output")}">${thumbImg}</button>`
+        : thumbImg);
 
     const summaryMarkup = summary
       ? `<p class="pipeline-content-summary">${escapeHtml(summary)}</p>`
@@ -18906,13 +18958,34 @@
         });
       });
       refreshPipelineScheduleSuggestions(source);
+      target.querySelectorAll("[data-pipeline-thumb-open]").forEach((button) => {
+        button.addEventListener("click", (event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          const id = button.getAttribute("data-pipeline-thumb-open");
+          if (id) openCreativeEditor(id);
+        });
+      });
       target.querySelectorAll("[data-open-output-id]").forEach((row) => {
         row.addEventListener("click", (event) => {
-          if (event.target.closest("a, button, input, select, textarea, label, details, summary, .pipeline-row-more, .pipeline-schedule-cell, .pipeline-tiktok-complete, .pipeline-tiktok-resend")) return;
+          if (event.target.closest("a, button, input, select, textarea, label, details, summary, .pipeline-row-more, .pipeline-schedule-cell, .pipeline-tiktok-complete, .pipeline-tiktok-resend, .pipeline-content-media, .pipeline-content-thumb-link, .pipeline-content-thumb-button")) return;
+          // Content-cell clicks on a Story-first rowspan package must not open Story.
+          if (event.target.closest(".pipeline-content-cell")) {
+            const groupKey = row.closest("[data-pipeline-group]")?.getAttribute("data-pipeline-group");
+            const peers = groupKey
+              ? pipelineContentGroupRecords(groupKey, pipelineOutputs)
+              : [];
+            const preferred = pipelinePreferredMainOutput(peers);
+            if (preferred?.id) {
+              openCreativeEditor(preferred.id);
+              return;
+            }
+            return;
+          }
           openCreativeEditor(row.dataset.openOutputId);
         });
         row.addEventListener("keydown", (event) => {
-          if (event.target.closest("input, select, textarea, details, summary")) return;
+          if (event.target.closest("input, select, textarea, details, summary, .pipeline-content-thumb-button")) return;
           if (event.key !== "Enter" && event.key !== " ") return;
           event.preventDefault();
           openCreativeEditor(row.dataset.openOutputId);

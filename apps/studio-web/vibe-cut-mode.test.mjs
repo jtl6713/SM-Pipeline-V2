@@ -29,7 +29,7 @@ test("Vibe Cut is a distinct Home creation path with style/energy controls", () 
   assert.match(app, /Find me the best 30 seconds/);
   assert.match(app, /Best moments \(recommended\)/);
   assert.match(app, /inputKind:\s*"vibe-cut"/);
-  assert.match(app, /BUILD_ID = "item4-0\.6\.550-vibe-cut-home"/);
+  assert.match(app, /BUILD_ID = "item4-0\.6\.554-pipeline-thumb-no-stories"/);
 });
 
 test("Vibe Cut client helper stamps music-driven defaults", () => {
