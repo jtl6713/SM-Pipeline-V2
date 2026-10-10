@@ -25,4 +25,22 @@ class TimingEngineClient:
             except Exception:
                 pass
             raise RuntimeError(f"Timing Engine {response.status_code}: {detail}")
-        return response.json()
+        # Empty 200 bodies used to surface as bare JSONDecodeError
+        # ("Expecting value: line 1 column 1") and park studio-produce as Blocked
+        # (Chicago Walk with me / Content 454).
+        if not (response.content or b"").strip():
+            raise RuntimeError(
+                f"Timing Engine returned empty body (HTTP {response.status_code})"
+            )
+        try:
+            data = response.json()
+        except ValueError as exc:
+            raise RuntimeError(
+                f"Timing Engine returned non-JSON body (HTTP {response.status_code}): "
+                f"{(response.text or '')[:200]}"
+            ) from exc
+        if not isinstance(data, dict):
+            raise RuntimeError(
+                f"Timing Engine returned unexpected JSON type {type(data).__name__}"
+            )
+        return data
