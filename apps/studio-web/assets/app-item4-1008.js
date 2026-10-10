@@ -260,7 +260,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.567-render-queue-wait";
+  const BUILD_ID = "item4-0.6.568-pr-superseded-cancel";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -12284,7 +12284,8 @@ function timedScriptAssetLabel(asset, index) {
     const status = item4PromotedRequestIds.has(recordId)
       ? "Promoted"
       : String(record?.status || "Draft");
-    const editable = status === "Draft" || status === "Ready";
+    const cancelled = status === "Cancelled";
+    const editable = !cancelled && (status === "Draft" || status === "Ready");
     const form = $("productionRequestForm");
 
     if (form) {
@@ -12299,8 +12300,8 @@ function timedScriptAssetLabel(asset, index) {
     }
     const timedScriptInput = $("prTimedScriptInput");
     if (timedScriptInput) {
-      timedScriptInput.disabled = false;
-      timedScriptInput.readOnly = false;
+      timedScriptInput.disabled = cancelled;
+      timedScriptInput.readOnly = cancelled;
     }
     syncNativeVideoCoverRule();
     syncEzIdeaIdentityFields();
@@ -12309,13 +12310,19 @@ function timedScriptAssetLabel(asset, index) {
     const save = $("saveProductionRequest");
     if (save) {
       save.disabled = !editable;
-      save.textContent = editable ? "Save" : (status === "Promoted" ? "Locked" : "Submitted");
+      save.textContent = cancelled
+        ? "Cancelled"
+        : (editable ? "Save" : (status === "Promoted" ? "Locked" : "Submitted"));
     }
 
     const promote = $("promoteProductionRequest");
     const scriptedSceneBlocker = scriptedShortMissingSceneMessage(record);
     if (promote) {
-      if (item4PromoteInFlight || promote.dataset.busy === "true") {
+      if (cancelled) {
+        promote.disabled = true;
+        promote.textContent = "Cancelled";
+        promote.title = "This Production Request was cancelled. Open the active request or Pipeline / Open Review.";
+      } else if (item4PromoteInFlight || promote.dataset.busy === "true") {
         promote.disabled = true;
         promote.textContent = status === "Submitted" ? "Checking…" : "Submitting…";
       } else if (status === "Promoted") {
@@ -12365,7 +12372,10 @@ function timedScriptAssetLabel(asset, index) {
       let text = finished
         ? "Finished file, caption, and platform plan need to be ready before you approve."
         : "Photos, plan, and platform crops need to be ready before you approve.";
-      if (status === "Promoted") {
+      if (status === "Cancelled") {
+        kind = "error-text";
+        text = "This Production Request was cancelled. Open Pipeline / Open Review for the piece that is already in production.";
+      } else if (status === "Promoted") {
         kind = "success";
         text = finished ? "Approved. This finished file is going to review." : "Approved. This request is in production.";
       } else if (status === "Submitted") {
@@ -13986,12 +13996,28 @@ function timedScriptAssetLabel(asset, index) {
         item4PromotedRequestIds.add(String(activeProductionRequest.id));
         activeProductionRequest = { ...activeProductionRequest, status: "Promoted" };
       }
-      if (result.production_request || result.promoted) {
+      if (result.superseded || result.promotion_state === "cancelled") {
+        activeProductionRequest = {
+          ...(activeProductionRequest || {}),
+          ...(result.production_request || {}),
+          status: "Cancelled",
+        };
+      }
+      if (result.production_request || result.promoted || result.superseded) {
         populateProductionRequestForm(activeProductionRequest);
       }
       setProductionRequestControlState(activeProductionRequest);
 
-      if (result.promoted) {
+      if (result.superseded || result.promotion_state === "cancelled") {
+        const winner = result.superseded_by_request_id
+          ? ` The active request is ${result.superseded_by_request_id}.`
+          : "";
+        setRequestMessage(
+          `${result.message || "This Production Request was cancelled because another request already owns the Content Item."}${winner} Open Pipeline / Open Review.`,
+          "error-text"
+        );
+        openPipelineAfterPromote();
+      } else if (result.promoted) {
         const content = result.content_item_record_id ? ` Content Item: ${result.content_item_record_id}.` : "";
         setRequestMessage(`${result.message || "Approved. This request is in production."}${content}`, "success");
         openPipelineAfterPromote();

@@ -144,3 +144,5 @@ Deploy Studio UI 0.6.534-pages-path-bust. Rename app-item4-0625.js -> app-item4-
 2026-10-10: Redeploy Studio UI 0.6.566-pages-alias. Custom-domain verify lagged after 0.6.565; force path rename.
 
 2026-10-10: Deploy Studio UI 0.6.567-render-queue-wait. Waiting in render queue (#N of M); Rendering only for Remotion slot holder; Trying Again only on real Remotion failures.
+
+2026-10-10: Deploy Studio UI 0.6.568-pr-superseded-cancel. Cancelled/superseded Production Request no longer shows Approve; open Pipeline for the winner.

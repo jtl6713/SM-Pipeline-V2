@@ -107,7 +107,11 @@ import {
   shouldCreateFinishedOutput,
   uniquePlanItems,
 } from "./az-finished-video.mjs";
-import { promotedContentOwner } from "./promotion-owner.mjs";
+import {
+  preferAuthoritativeProductionRequest,
+  promotedContentOwner,
+  siblingProductionRequestsToCancel,
+} from "./promotion-owner.mjs";
 import {
   AUTONOMOUS_DEFAULT_MUSIC_ASSET_ID,
   AUTONOMOUS_IDEA_CREATED_FIELD,
@@ -596,7 +600,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.508-render-queue-wait",
+          version: "0.10.509-pr-superseded-cancel",
           studio_render_queue_wait_v1: true,
           studio_approve_all_batch_v1: true,
           studio_engagement_v1: true,
@@ -15307,7 +15311,7 @@ function suggestPrimaryLocationFromIdea(idea) {
 
 async function existingDraftForIdea(env, ideaRecordId, authorization) {
   const records = await listRecords(env, PRODUCTION_REQUEST_TABLE, { limit: 100 });
-  return records.find(record => {
+  const matches = records.filter((record) => {
     const ideaLinks = Array.isArray(f(record, "Idea_Candidate")) ? f(record, "Idea_Candidate") : [];
     const orgLinks = Array.isArray(f(record, "Organization")) ? f(record, "Organization") : [];
     const brandLinks = Array.isArray(f(record, "Brand")) ? f(record, "Brand") : [];
@@ -15315,9 +15319,16 @@ async function existingDraftForIdea(env, ideaRecordId, authorization) {
     return ideaLinks.includes(ideaRecordId) &&
       orgLinks.includes(authorization?.organization?.record_id) &&
       membershipAllowsBrand(authorization, brandLinks) &&
-      ["Draft","Ready"].includes(status) &&
+      ["Draft", "Ready", "Submitted"].includes(status) &&
       Boolean(f(record, "Active"));
-  }) || null;
+  }).map((record) => ({
+    id: record.id,
+    status: String(f(record, "Request_Status") || "").trim(),
+    createdAt: f(record, "Created_At") || record.createdTime || "",
+    record,
+  }));
+  const preferred = preferAuthoritativeProductionRequest(matches);
+  return preferred ? (matches.find((row) => row.id === preferred.id)?.record || null) : null;
 }
 
 async function loadContentProfileRecord(env, authorization, profileId) {
@@ -21945,6 +21956,33 @@ function assertProductionRequestFanoutComplete(outputFanout) {
   }
 }
 
+async function cancelSiblingProductionRequestsForIdea(env, ideaRecord, winnerRequestId) {
+  const ideaLinks = Array.isArray(f(ideaRecord, "Production Requests"))
+    ? f(ideaRecord, "Production Requests")
+    : [];
+  const siblingIds = [...new Set(
+    ideaLinks.map((value) => String(value || "").trim()).filter((id) => /^rec[A-Za-z0-9]+$/.test(id) && id !== winnerRequestId)
+  )];
+  if (!siblingIds.length) return [];
+  const loaded = await Promise.allSettled(siblingIds.map((id) => airtableFetch(env, PRODUCTION_REQUEST_TABLE, id)));
+  const rows = loaded
+    .filter((entry) => entry.status === "fulfilled")
+    .map((entry) => ({
+      id: entry.value.id,
+      status: String(f(entry.value, "Request_Status") || "").trim(),
+    }));
+  const toCancel = siblingProductionRequestsToCancel(winnerRequestId, rows);
+  for (const siblingId of toCancel) {
+    await updateProductionRequestPromotionState(env, siblingId, {
+      Request_Status: "Cancelled",
+      Active: false,
+    }).catch((error) => {
+      console.warn("Studio promote sibling cancel failed", winnerRequestId, siblingId, error);
+    });
+  }
+  return toCancel;
+}
+
 async function finalizeProductionRequestPromotion(env, requestRecordId, ideaRecord, ctx = null) {
   const contentItemId = linkedContentItemRecordId(ideaRecord);
 
@@ -22054,7 +22092,24 @@ async function finalizeProductionRequestPromotion(env, requestRecordId, ideaReco
     else await continuation;
   }
 
-  return { requestRecord, contentItemId, directiveBridge, outputFanout };
+  // Duplicate Draft/Ready/Submitted PRs for the same Idea must not stay Approvals-ready
+  // after one wins (Buckingham Fountain Mist: cancelled duplicate still showed Approve).
+  const cancelledSiblings = await cancelSiblingProductionRequestsForIdea(
+    env,
+    ideaRecord,
+    requestRecordId
+  ).catch((error) => {
+    console.warn("Studio promote sibling sweep failed", requestRecordId, error);
+    return [];
+  });
+
+  return {
+    requestRecord,
+    contentItemId,
+    directiveBridge,
+    outputFanout,
+    cancelled_sibling_request_ids: cancelledSiblings,
+  };
 }
 
 // P2 will happily regenerate audio, normalize it and upload it to Drive, but its write-back
@@ -22282,7 +22337,7 @@ async function promoteProductionRequestViaI3I4(request, env, url, authorization,
         content_item_record_id: finalized.contentItemId,
         output_fanout: finalized.outputFanout,
         superseded_by_request_id: finalized.supersededByRequestId,
-        message: "This Production Request was cancelled because the promoted Content Item already belongs to another active Production Request",
+        message: "This Production Request was cancelled because the promoted Content Item already belongs to another active Production Request. Open Pipeline / Open Review for that piece — do not Approve this cancelled duplicate.",
       });
     }
     return respond(request, env, {
@@ -22322,7 +22377,7 @@ async function promoteProductionRequestViaI3I4(request, env, url, authorization,
         content_item_record_id: finalized.contentItemId,
         output_fanout: finalized.outputFanout,
         superseded_by_request_id: finalized.supersededByRequestId,
-        message: "This Production Request was cancelled because the promoted Content Item already belongs to another active Production Request",
+        message: "This Production Request was cancelled because the promoted Content Item already belongs to another active Production Request. Open Pipeline / Open Review for that piece — do not Approve this cancelled duplicate.",
       });
     }
       return respond(request, env, {
@@ -22408,7 +22463,7 @@ async function promoteProductionRequestViaI3I4(request, env, url, authorization,
         content_item_record_id: finalized.contentItemId,
         output_fanout: finalized.outputFanout,
         superseded_by_request_id: finalized.supersededByRequestId,
-        message: "This Production Request was cancelled because the promoted Content Item already belongs to another active Production Request",
+        message: "This Production Request was cancelled because the promoted Content Item already belongs to another active Production Request. Open Pipeline / Open Review for that piece — do not Approve this cancelled duplicate.",
       });
     }
     return respond(request, env, {
@@ -23651,13 +23706,32 @@ async function createIdeaTimedScriptRoute(request, env, url, authorization, ctx 
     if (linked.some((entry) => entry.status === "rejected")) {
       throw new HttpError(503, "An existing Production Request could not be checked. Retry safely; no new timeline was created.");
     }
-    const saved = linked
-      .map((entry) => entry.value)
+    const linkedRows = linked.map((entry) => entry.value);
+    const preferred = preferAuthoritativeProductionRequest(linkedRows.map((record) => ({
+      id: record.id,
+      status: String(f(record, "Request_Status") || "").trim(),
+      createdAt: f(record, "Created_At") || record.createdTime || "",
+    })));
+    if (preferred?.status === "Promoted") {
+      const promoted = linkedRows.find((record) => record.id === preferred.id);
+      throw new HttpError(
+        409,
+        `This idea already has Production Request ${f(promoted, "Production_Request_ID") || preferred.id} in production. Open Pipeline / Open Review instead of creating another timeline.`
+      );
+    }
+    const saved = linkedRows
       .map((record) => ({ record, timeline: timedScriptFromNotes(f(record, "Production_Notes")) }))
       .filter(({ record, timeline }) => timeline?.segments?.length >= 2
         && ["Draft", "Ready", "Submitted"].includes(String(f(record, "Request_Status") || "").trim()))
-      .sort((a, b) => (Date.parse(f(a.record, "Created_At") || "") || 0)
-        - (Date.parse(f(b.record, "Created_At") || "") || 0))[0];
+      .sort((a, b) => {
+        const rank = { Submitted: 0, Ready: 1, Draft: 2 };
+        const aStatus = String(f(a.record, "Request_Status") || "").trim();
+        const bStatus = String(f(b.record, "Request_Status") || "").trim();
+        const byStatus = (rank[aStatus] ?? 9) - (rank[bStatus] ?? 9);
+        if (byStatus !== 0) return byStatus;
+        return (Date.parse(f(a.record, "Created_At") || "") || 0)
+          - (Date.parse(f(b.record, "Created_At") || "") || 0);
+      })[0];
     if (saved) {
       const { record: savedRequest, timeline } = saved;
       return respond(request, env, {
@@ -23870,13 +23944,20 @@ async function createIdeaTimedScriptRoute(request, env, url, authorization, ctx 
 
 async function findDraftProductionRequestForIdea(env, ideaRecordId) {
   const records = await listRecords(env, PRODUCTION_REQUEST_TABLE, { limit: 100 });
-  return records.find((record) => {
+  const matches = records.filter((record) => {
     const ideaLinks = Array.isArray(f(record, "Idea_Candidate")) ? f(record, "Idea_Candidate") : [];
     const status = String(f(record, "Request_Status") || "").trim();
     return ideaLinks.includes(ideaRecordId)
-      && ["Draft", "Ready"].includes(status)
+      && ["Draft", "Ready", "Submitted"].includes(status)
       && Boolean(f(record, "Active"));
-  }) || null;
+  }).map((record) => ({
+    id: record.id,
+    status: String(f(record, "Request_Status") || "").trim(),
+    createdAt: f(record, "Created_At") || record.createdTime || "",
+    record,
+  }));
+  const preferred = preferAuthoritativeProductionRequest(matches);
+  return preferred ? (matches.find((row) => row.id === preferred.id)?.record || null) : null;
 }
 
 async function rankStillsForIdeaPhotoWait(env, idea) {
