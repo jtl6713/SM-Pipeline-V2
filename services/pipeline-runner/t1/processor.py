@@ -359,19 +359,42 @@ def process_one(
             )
         return {"processed": False, "reason": "voiceover_exceeds_video", "error": message, **preview}
     footage_capped = False
+    usable = footage_usable_seconds(clips) if has_video else 0.0
     if has_video:
-        usable = footage_usable_seconds(clips)
         if usable > 0 and usable + 1e-6 < duration:
             # Prefer a shorter beat-aligned edit over recycling short clips to fill
             # the requested owner duration (freezes + repeats).
             duration = max(0.25, usable)
             rules = {**rules, "recycle": False}
             footage_capped = True
+    # Vibe Cut / single long master: never ask Timing Engine for one clip spanning
+    # the whole owner window — that keeps Selected_Clip_Count=1 and Remotion plays
+    # only the head of the source. Stamp should already expand; this is a harden.
+    clip_count = max(1, len(clips))
+    if has_video and clip_count == 1 and usable > duration * 1.15:
+        from vibe_cut import desired_clip_count, is_vibe_cut_notes, parse_vibe_cut_directive
+
+        note_text = " ".join(
+            [
+                field_str(output, "Output_Notes"),
+                field_str(content_item or {}, "Production_Notes"),
+                field_str(content_item or {}, "Production_Request_Notes"),
+                field_str(content_item or {}, "Content_Notes"),
+            ]
+        )
+        vibe = is_vibe_cut_notes(note_text) or bool((clips[0] or {}).get("vibe_cut"))
+        if vibe or bool((clips[0] or {}).get("beatSync", True)):
+            cfg = parse_vibe_cut_directive(note_text) if is_vibe_cut_notes(note_text) else {
+                "target_seconds": duration,
+                "style": "beat-cut",
+                "energy": 3,
+            }
+            clip_count = max(clip_count, desired_clip_count(cfg, source_duration=usable))
     request_body = {
         "schema_version": "timing.request.1",
         "music_start_seconds": start,
         "music_duration_seconds": duration,
-        "clip_count": max(1, len(clips)),
+        "clip_count": clip_count,
         "fps": 30,
         "transition_rules": rules,
         "sources": ["beats", "voiceover"],
@@ -450,7 +473,7 @@ def process_one(
 
         response = snap_timeline_to_beats(
             response,
-            clip_count=max(1, len(clips)),
+            clip_count=clip_count,
             fps=30,
             requested_duration=duration,
         )

@@ -22,7 +22,7 @@ function loadCadenceHelper() {
 }
 
 test("Worker health advertises airtable low-burn cron build", () => {
-  assert.match(worker, /version: "0.10.495-vibe-cut-no-passthrough"/);
+  assert.match(worker, /version: "0.10.496-vibe-cut-multi-clip"/);
   assert.match(worker, /studio_airtable_low_burn_cron_v1: true/);
   assert.match(worker, /studioCronAirtableCadence/);
 });

@@ -567,7 +567,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.495-vibe-cut-no-passthrough",
+          version: "0.10.496-vibe-cut-multi-clip",
           studio_approve_all_batch_v1: true,
           studio_engagement_v1: true,
           studio_mae_schedule_v1: true,
@@ -10629,12 +10629,16 @@ async function studioClearVibeCutPassthroughOutputs(env, requestId) {
   for (const row of outputs || []) {
     const notes = String(f(row, "Output_Notes") || "");
     const finalUrl = String(f(row, "Final_File_URL") || "").trim();
+    const clipCount = Number(f(row, "Selected_Clip_Count") || 0) || 0;
+    const singleHeadTrim = clipCount <= 1
+      && Boolean(String(f(row, "Render_Clip_List_JSON") || "").trim())
+      && /studio-source-1/.test(String(f(row, "Render_Clip_List_JSON") || ""));
     const passthroughStamp = /Finished passthrough/i.test(notes)
       || /finished-video:passthrough|ez-input=finished-video/i.test(notes)
       || Boolean(finalUrl && !String(f(row, "Composition_ID") || "").trim()
         && String(f(row, "Render_Status") || "") === "Rendered");
-    if (!passthroughStamp && String(f(row, "Output_Status") || "") !== "Ready for Review") continue;
-    if (!passthroughStamp && !finalUrl) continue;
+    if (!passthroughStamp && !singleHeadTrim && String(f(row, "Output_Status") || "") !== "Ready for Review") continue;
+    if (!passthroughStamp && !singleHeadTrim && !finalUrl) continue;
     try {
       await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, row.id, {
         method: "PATCH",
@@ -10651,6 +10655,8 @@ async function studioClearVibeCutPassthroughOutputs(env, requestId) {
             Render_Clip_List_JSON: null,
             Render_Total_Frames: null,
             Selected_Clip_Count: null,
+            Studio_Effective_Video_Duration_Seconds: null,
+            Video_Duration_Seconds_Override: null,
             Timing_Status: "Pending",
             Timing_Timeline_JSON: null,
             Timing_Error_Message: null,
@@ -10675,28 +10681,43 @@ async function enqueueStudioProductionJob(env, requestId, options = {}) {
   const step = String(existing?.step || "").trim();
   // Heal: single-master Vibe Cuts used to inherit finished-video:passthrough from the
   // one-video heuristic. Clear that route so produce stamps + T1 cut the source.
-  const vibeCutPassthrough = studioIsVibeCut(record)
-    && /passthrough/i.test(String(existing?.route || ""));
-  if (!existing?.job_id || vibeCutPassthrough) {
+  // Also remount when a prior stamp left Selected_Clip_Count=1 (head-of-file trim).
+  const vibeCut = studioIsVibeCut(record);
+  const vibeCutPassthrough = vibeCut && /passthrough/i.test(String(existing?.route || ""));
+  const vibeDirective = vibeCut ? parseVibeCutDirective(studioRequestNotesText(record)) : null;
+  const vibeTarget = Number(vibeDirective?.target_seconds || 0) || 0;
+  let vibeCutNeedsRemount = vibeCutPassthrough;
+  if (vibeCut && !vibeCutNeedsRemount && (Boolean(options.resume) || Boolean(options.remount))) {
+    const outputs = await azPlatformOutputsForRequest(env, requestId).catch(() => []);
+    vibeCutNeedsRemount = (outputs || []).some((row) => {
+      const count = Number(f(row, "Selected_Clip_Count") || 0) || 0;
+      const frames = Number(f(row, "Render_Total_Frames") || 0) || 0;
+      const story = studioAzIsStory(studioOutputTypeLabel(row));
+      if (story) return false;
+      return count <= 1 || (vibeTarget > 0 && frames > 0 && frames < Math.round(vibeTarget * 30) - 15);
+    });
+  }
+  if (!existing?.job_id || vibeCutPassthrough || vibeCutNeedsRemount) {
     const finishedKind = studioFinishedOriginKind(record);
     const job = {
       schema_version: "studio.production-job.1",
       job_id: existing?.job_id || `spj-${crypto.randomUUID().replace(/-/g, "").slice(0, 12)}`,
-      route: finishedKind ? `${finishedKind}:passthrough` : null,
+      route: finishedKind ? `${finishedKind}:passthrough` : (vibeCut ? "uploaded:photo_sequence" : null),
       step: "themes",
       attempt: Number(existing?.attempt || 1) || 1,
       updated_at: new Date().toISOString(),
       error: null,
-      detail: vibeCutPassthrough
-        ? "Rebuilding Vibe Cut montage (not finished passthrough)"
+      detail: (vibeCutPassthrough || vibeCutNeedsRemount)
+        ? "Rebuilding Vibe Cut multi-clip montage"
         : (finishedKind ? "Writing post caption" : STUDIO_PRODUCTION_JOB_LABELS.themes),
       percent: finishedKind ? 20 : 12,
     };
-    if (vibeCutPassthrough) {
+    if (vibeCutPassthrough || vibeCutNeedsRemount) {
       job.heal = {
         ...(typeof existing?.heal === "object" && existing.heal ? existing.heal : {}),
         schema: "studio.produce-heal.1",
         vibe_cut_passthrough_cleared_at: new Date().toISOString(),
+        vibe_cut_multiclip_remount_at: new Date().toISOString(),
         resume_count: 0,
         max_resumes: Number(existing?.heal?.max_resumes || 5) || 5,
       };
@@ -10704,15 +10725,22 @@ async function enqueueStudioProductionJob(env, requestId, options = {}) {
     } else if (existing?.heal) {
       job.heal = existing.heal;
     }
+    const patchFields = {
+      Studio_Production_Job_JSON: JSON.stringify(job),
+      Updated_At: new Date().toISOString(),
+    };
+    if (vibeCut && vibeTarget > 0) {
+      patchFields.Video_Duration_Seconds = vibeTarget;
+    }
     await airtableFetch(env, PRODUCTION_REQUEST_TABLE, requestId, {
       method: "PATCH",
       body: JSON.stringify({
-        fields: { Studio_Production_Job_JSON: JSON.stringify(job), Updated_At: new Date().toISOString() },
+        fields: patchFields,
         typecast: false,
       }),
     });
   }
-  if (Boolean(options.resume) || vibeCutPassthrough || step === "blocked" || step === "escalated") {
+  if (Boolean(options.resume) || vibeCutPassthrough || vibeCutNeedsRemount || step === "blocked" || step === "escalated") {
     return item4PulseStudioProduceJob(env, requestId, { resume: true });
   }
   return item4PulseStudioProduceJob(env, requestId);

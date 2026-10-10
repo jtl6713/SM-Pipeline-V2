@@ -180,7 +180,9 @@ test("Worker never treats Vibe Cut as finished-video passthrough", () => {
   assert.match(worker, /if \(studioIsVibeCut\(record\)\) return ""/);
   assert.match(worker, /vibeCutPassthrough/);
   assert.match(worker, /studioClearVibeCutPassthroughOutputs/);
-  assert.match(worker, /version: "0\.10\.495-vibe-cut-no-passthrough"/);
+  assert.match(worker, /vibeCutNeedsRemount/);
+  assert.match(worker, /Rebuilding Vibe Cut multi-clip montage/);
+  assert.match(worker, /version: "0\.10\.496-vibe-cut-multi-clip"/);
 });
 
 test("Studio web exposes Vibe Cut creation path", () => {

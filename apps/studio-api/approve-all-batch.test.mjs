@@ -79,7 +79,7 @@ test("approve-all job store prunes terminal jobs and active map", () => {
 test("worker exposes durable approve-all batch routes and cron resume", () => {
   assert.match(worker, /from "\.\/approve-all-batch\.mjs"/);
   assert.match(worker, /studio_approve_all_batch_v1:\s*true/);
-  assert.match(worker, /0\.10\.495-vibe-cut-no-passthrough/);
+  assert.match(worker, /0\.10\.496-vibe-cut-multi-clip/);
   assert.match(worker, /async function studioProcessApproveAllJobSlice/);
   assert.match(worker, /async function studioResumeApproveAllJobs/);
   assert.match(worker, /studioResumeApproveAllJobs\(env, ctx\)/);
@@ -90,7 +90,7 @@ test("worker exposes durable approve-all batch routes and cron resume", () => {
 });
 
 test("Studio UI starts Approve All as a background job and polls progress", () => {
-  assert.match(app, /item4-0\.6\.556-vibe-cut-large-upload/);
+  assert.match(app, /item4-0\.6\.557-vibe-cut-multi-clip/);
   assert.match(app, /startPipelineApproveAllJobWatch/);
   assert.match(app, /pollPipelineApproveAllJob/);
   assert.match(app, /Retry failed/);
