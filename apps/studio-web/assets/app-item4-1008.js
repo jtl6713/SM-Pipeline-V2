@@ -17626,12 +17626,13 @@
   function staggerApproveAllSchedules(schedules, records) {
     const approving = new Set((records || []).map((record) => record.id));
     const { reserved, byPlatform } = pipelineMergedOccupancy(approving);
-    const next = { ...(schedules || {}) };
+    const source = schedules || {};
+    const next = {};
     const ordered = (records || []).slice().sort((a, b) => pipelineOutputNumber(a) - pipelineOutputNumber(b));
     for (const record of ordered) {
       const platform = String(record.platform || "").trim().toLowerCase();
       const bucket = pipelineScheduleBucketKey(record);
-      const requested = next[record.id] || new Date().toISOString();
+      const requested = source[record.id] || new Date().toISOString();
       const lane = pipelineScheduleIsStory(record) ? [] : (byPlatform[platform] || reserved[bucket] || []);
       const allOccupied = Object.values(byPlatform).flat().filter(Number.isFinite);
       const iso = nextOpenScheduleIso(
@@ -17642,10 +17643,7 @@
         allOccupied,
         { keepAnyNonClashing: true },
       );
-      if (!iso) {
-        delete next[record.id];
-        continue;
-      }
+      if (!iso) continue;
       next[record.id] = iso;
       const ms = Date.parse(iso);
       if (bucket) (reserved[bucket] ||= []).push(ms);

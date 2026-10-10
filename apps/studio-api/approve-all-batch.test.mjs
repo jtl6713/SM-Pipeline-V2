@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import {
   APPROVE_ALL_BATCH_SIZE,
   APPROVE_ALL_JOBS_SETTING,
+  APPROVE_ALL_STORE_CHAR_BUDGET,
   approveAllJobCounts,
   approveAllProgressMessage,
   buildApproveAllJob,
@@ -14,6 +15,7 @@ import {
   parseApproveAllJobStore,
   pruneApproveAllJobStore,
   resetFailedApproveAllItems,
+  slimApproveAllJobSchedules,
   summarizeApproveAllJob,
 } from "./approve-all-batch.mjs";
 
@@ -76,6 +78,60 @@ test("approve-all job store prunes terminal jobs and active map", () => {
   assert.equal(APPROVE_ALL_JOBS_SETTING, "APPROVE_ALL_JOBS_V1");
 });
 
+test("approve-all jobs keep only schedules for their own output ids", () => {
+  const job = buildApproveAllJob({
+    jobId: "aj_slim",
+    profileId: "recProfile1",
+    note: "test",
+    schedules: {
+      recA: "2026-10-10T12:00:00.000Z",
+      recOther: "2026-10-11T12:00:00.000Z",
+      recB: "2026-10-12T12:00:00.000Z",
+    },
+    records: [
+      { id: "recA", output_id: 1, platform: "Instagram", format: "Reel" },
+      { id: "recB", output_id: 2, platform: "TikTok", format: "Video Draft" },
+    ],
+    stamp: "2026-10-09T00:00:00.000Z",
+  });
+  assert.deepEqual(Object.keys(job.schedules).sort(), ["recA", "recB"]);
+  const fat = {
+    ...job,
+    schedules: { ...job.schedules, recNoise: "2026-10-13T12:00:00.000Z" },
+  };
+  assert.equal(Boolean(slimApproveAllJobSchedules(fat).schedules.recNoise), false);
+});
+
+test("approve-all store stays under Airtable Setting_Value budget", () => {
+  const now = Date.now();
+  const fatSchedules = Object.fromEntries(
+    Array.from({ length: 300 }, (_, i) => [`recPad${i}`, new Date(now + i * 3600000).toISOString()]),
+  );
+  const jobs = {};
+  for (let i = 0; i < 8; i += 1) {
+    const id = `aj_fat_${i}`;
+    jobs[id] = {
+      id,
+      status: "completed",
+      updated_at: new Date(now - i * 60_000).toISOString(),
+      items: [{ id: `recPad${i}`, status: "approved" }],
+      schedules: fatSchedules,
+    };
+  }
+  jobs.aj_live = {
+    id: "aj_live",
+    status: "running",
+    updated_at: new Date(now).toISOString(),
+    items: [{ id: "recLive", status: "pending" }],
+    schedules: fatSchedules,
+  };
+  const pruned = pruneApproveAllJobStore({ jobs, active_by_profile: { recP: "aj_live" } }, now);
+  assert.equal(Boolean(pruned.jobs.aj_live), true);
+  assert.ok(Object.keys(pruned.jobs.aj_live.schedules).length <= 1);
+  assert.ok(Object.keys(pruned.jobs).filter((id) => id !== "aj_live").length <= 3);
+  assert.ok(JSON.stringify(pruned).length <= APPROVE_ALL_STORE_CHAR_BUDGET);
+});
+
 test("worker exposes durable approve-all batch routes and cron resume", () => {
   assert.match(worker, /from "\.\/approve-all-batch\.mjs"/);
   assert.match(worker, /studio_approve_all_batch_v1:\s*true/);
@@ -87,6 +143,7 @@ test("worker exposes durable approve-all batch routes and cron resume", () => {
   assert.match(worker, /getApproveAllJobStatus/);
   assert.match(worker, /accepted: true/);
   assert.match(worker, /studioOccupiedSchedulesOrEmpty/);
+  assert.match(worker, /approve-all job store pruned after Setting_Value reject/);
 });
 
 test("Studio UI starts Approve All as a background job and polls progress", () => {
@@ -97,4 +154,5 @@ test("Studio UI starts Approve All as a background job and polls progress", () =
   assert.match(app, /action: "retry"/);
   assert.match(app, /timeoutMs: 30000/);
   assert.match(app, /Approve All started/);
+  assert.match(app, /const next = \{\};/);
 });
