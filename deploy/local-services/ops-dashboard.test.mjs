@@ -64,7 +64,11 @@ test("Ops dashboard reports the version/build each listener is actually running"
     assert.equal(typeof service.runtimePath, "string");
     assert.ok(service.runtimePath.length > 0);
   }
-  assert.match(server, /OPS_DASHBOARD_VERSION = '2026-10-02-service-versions'/);
+  assert.match(server, /OPS_DASHBOARD_VERSION = '2026-10-10-powershell-console'/);
+  assert.match(server, /POST.*\/api\/shell|pathname === '\/api\/shell'/);
+  assert.match(server, /function startShellJob/);
+  assert.match(html, /id="shellInput"/);
+  assert.match(html, /Run PowerShell/);
   assert.match(server, /\.smv2-deployment\.json/);
   assert.match(server, /function readGitHead/);
   assert.match(server, /function buildServiceVersionInfo/);
