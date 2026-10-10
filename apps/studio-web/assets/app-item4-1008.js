@@ -261,7 +261,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.572-idea-timeline-photo-wait";
+  const BUILD_ID = "item4-0.6.573-production-preview-load";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -4987,7 +4987,9 @@ function timedScriptAssetLabel(asset, index) {
         ${assets.map((asset, index) => {
           const assetId = String(asset.id || asset.media_asset_record_id || "").trim();
           const preview = item4AssetPreviewUrl(asset);
-          const visual = preview ? `<img src="${escapeHtml(preview)}" alt="">` : "<span>No preview</span>";
+          const visual = preview
+            ? `<img src="${escapeHtml(preview)}" alt="${escapeHtml(timedScriptAssetLabel(asset, index))}" loading="eager" decoding="async" data-item4-production-preview="${escapeHtml(assetId)}" data-preview-src="${escapeHtml(preview)}">`
+            : "<span>No preview</span>";
           return `<button type="button" class="timed-script-still" draggable="true" data-timed-asset="${escapeHtml(assetId)}">${visual}<small>${escapeHtml(timedScriptAssetLabel(asset, index))}</small></button>`;
         }).join("") || '<div class="empty compact-empty">Add photos or clips in Media, then assign them to scenes.</div>'}
       </div>`;
@@ -4997,7 +4999,9 @@ function timedScriptAssetLabel(asset, index) {
       const assetIndex = assets.findIndex((asset) => String(asset.id || asset.media_asset_record_id || "") === assetId);
       const asset = assetIndex >= 0 ? assets[assetIndex] : null;
       const preview = asset ? item4AssetPreviewUrl(asset) : "";
-      const visual = preview ? `<img src="${escapeHtml(preview)}" alt="">` : `<span>${assetId ? "No preview" : "Unassigned"}</span>`;
+      const visual = preview
+        ? `<img src="${escapeHtml(preview)}" alt="${escapeHtml(asset?.name || `Scene ${index + 1} still`)}" loading="eager" decoding="async" data-item4-production-preview="${escapeHtml(assetId)}" data-preview-src="${escapeHtml(preview)}">`
+        : `<span>${assetId ? "No preview" : "Unassigned"}</span>`;
       const options = [`<option value="">Unassigned</option>`].concat(assets.map((item, itemIndex) => {
         const id = String(item.id || item.media_asset_record_id || "").trim();
         return `<option value="${escapeHtml(id)}"${id === assetId ? " selected" : ""}>${escapeHtml(timedScriptAssetLabel(item, itemIndex))}</option>`;
@@ -5024,6 +5028,8 @@ function timedScriptAssetLabel(asset, index) {
         </div>
       </details>`;
     }).join("") + `<div class="timed-script-scene-actions"><button type="button" class="secondary-button" id="prTimedScriptAdd">Add scene</button><button type="button" class="secondary-button" id="prTimedScriptMatch">Match stills in order</button></div>`;
+    item4BindProductionPreviewImages(summary, assets);
+    item4BindProductionPreviewImages(host, assets);
     bindTimedScriptReview(host, summary);
   }
 
@@ -5427,7 +5433,7 @@ function timedScriptAssetLabel(asset, index) {
       const name = studioPhotoLabel(asset, index, "Photo");
       const preview = item4AssetPreviewUrl(asset);
       const visual = preview
-        ? `<img src="${escapeHtml(preview)}" alt="" loading="lazy">`
+        ? `<img src="${escapeHtml(preview)}" alt="${escapeHtml(name)}" loading="eager" decoding="async" data-item4-production-preview="${escapeHtml(assetId)}" data-preview-src="${escapeHtml(preview)}">`
         : "<span>No preview</span>";
       return `<div class="production-render-frame-card" data-render-frame-asset="${escapeHtml(assetId)}">
         <div class="production-render-frame-preview">${visual}</div>
@@ -5462,6 +5468,7 @@ function timedScriptAssetLabel(asset, index) {
         </select></label>
       </div>`;
     }).join("");
+    item4BindProductionPreviewImages(host, assets);
     host.querySelectorAll("[data-render-frame-field]").forEach((input) => {
       input.addEventListener("change", () => {
         collectProductionFrameOverridesFromUi();
@@ -8894,16 +8901,36 @@ function timedScriptAssetLabel(asset, index) {
     if (candidateIndex >= chain.length) candidateIndex = 0;
     img.dataset.previewFailureKey = key;
     img.dataset.previewCandidate = String(candidateIndex);
+    let previewWatchdog = 0;
+    let sourceGeneration = 0;
+    const previewImageLooksReady = (node) => Boolean(node && Number(node.naturalWidth) > 0);
+    const clearPreviewWatchdog = () => {
+      if (previewWatchdog) window.clearTimeout(previewWatchdog);
+      previewWatchdog = 0;
+    };
+    const armPreviewWatchdog = () => {
+      clearPreviewWatchdog();
+      const generation = sourceGeneration;
+      previewWatchdog = window.setTimeout(() => {
+        previewWatchdog = 0;
+        if (!img.isConnected || generation !== sourceGeneration || previewImageLooksReady(img)) return;
+        // Hidden Production panels can leave WebKit preview requests suspended
+        // until a scroll repaint. Advance the normal fallback/retry chain here.
+        failPreview();
+      }, ITEM4_PREVIEW_RETRY_MS);
+    };
     const applySrc = (url) => {
+      sourceGeneration += 1;
       if (/drive\.google\.com/i.test(url)) img.referrerPolicy = "no-referrer";
       img.src = url;
+      armPreviewWatchdog();
     };
     if (String(img.getAttribute("src") || "") !== chain[candidateIndex]) {
       applySrc(chain[candidateIndex]);
     }
 
-    const previewImageLooksReady = (node) => Boolean(node && Number(node.naturalWidth) > 0);
     const failPreview = () => {
+      clearPreviewWatchdog();
       if (!img.isConnected) return;
       const nextIndex = candidateIndex + 1;
       if (nextIndex < chain.length) {
@@ -8942,6 +8969,7 @@ function timedScriptAssetLabel(asset, index) {
         failPreview();
         return;
       }
+      clearPreviewWatchdog();
       item4PreviewFailures.delete(key);
     });
 
@@ -8949,9 +8977,36 @@ function timedScriptAssetLabel(asset, index) {
     // WebKit often reports complete=true + naturalWidth=0 for a freshly inserted
     // <img> before the request starts. Wait for load/error when a src is present.
     if (img.complete) {
-      if (previewImageLooksReady(img)) item4PreviewFailures.delete(key);
+      if (previewImageLooksReady(img)) {
+        clearPreviewWatchdog();
+        item4PreviewFailures.delete(key);
+      }
       else if (!String(img.currentSrc || img.getAttribute("src") || "").trim()) failPreview();
+      else armPreviewWatchdog();
+    } else {
+      armPreviewWatchdog();
     }
+  }
+
+  function item4BindProductionPreviewImages(root, assets = []) {
+    if (!root) return;
+    const byId = new Map();
+    (Array.isArray(assets) ? assets : []).forEach((asset) => {
+      [asset?.id, asset?.media_asset_record_id].forEach((value) => {
+        const id = String(value || "").trim();
+        if (id) byId.set(id, asset);
+      });
+    });
+    root.querySelectorAll("[data-item4-production-preview]").forEach((img) => {
+      const assetId = String(img.dataset.item4ProductionPreview || "").trim();
+      const asset = byId.get(assetId) || item4MasterAsset(assetId) || {};
+      img.loading = "eager";
+      img.decoding = "async";
+      item4BindPreviewImage(img, {
+        candidates: item4AssetPreviewCandidates(asset),
+        failureKey: `production:${root.id || "preview"}:${assetId || img.dataset.previewSrc || "unknown"}`,
+      });
+    });
   }
 
   function item4AssetPreviewUrl(asset) {
@@ -9284,7 +9339,7 @@ function timedScriptAssetLabel(asset, index) {
     const visual = isVideo
       ? (item4ClipPlayerHtml({ previewUrl, streamUrl, name: asset.name || "Clip", durationSeconds: asset.duration_seconds, asset, preload: Boolean(streamUrl) }) || item4AssetPlaceholder(asset, "Clip saved"))
       : previewUrl
-        ? `<img src="${escapeHtml(previewUrl)}" alt="${escapeHtml(asset.name || "Master photo")}" loading="lazy" draggable="false" data-item4-preview-image data-preview-src="${escapeHtml(previewUrl)}" data-preview-failure-key="${escapeHtml(String(asset.id || asset.media_asset_record_id || previewUrl))}">`
+        ? `<img src="${escapeHtml(previewUrl)}" alt="${escapeHtml(asset.name || "Master photo")}" loading="eager" decoding="async" draggable="false" data-item4-preview-image data-preview-src="${escapeHtml(previewUrl)}" data-preview-failure-key="${escapeHtml(String(asset.id || asset.media_asset_record_id || previewUrl))}">`
         : item4AssetPlaceholder(asset, isHeic ? "Original preserved" : "Preview unavailable");
     const ext = item4AssetExtension(asset?.name).toUpperCase();
     const seconds = item4KnownClipDuration(asset);
