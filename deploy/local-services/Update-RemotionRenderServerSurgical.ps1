@@ -36,7 +36,7 @@ Write-Host "  $src"
 Write-Host "  -> $dst"
 Copy-Item -Force $src $dst
 
-$expected = "2026-09-28-clip-media-kind"
+$expected = "2026-10-10-accept-before-download"
 if (-not (Select-String -Path $dst -SimpleMatch $expected -Quiet)) {
     throw "Copied render-server.js does not contain SERVICE_VERSION $expected"
 }
