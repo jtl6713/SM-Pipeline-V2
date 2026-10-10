@@ -568,7 +568,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.503-vibe-cut-produce-heal",
+          version: "0.10.504-item4-snapshot-reopen",
           studio_approve_all_batch_v1: true,
           studio_engagement_v1: true,
           studio_mae_schedule_v1: true,
@@ -13820,6 +13820,34 @@ async function getItem4WorkspaceStatus(request, env, url, authorization, ctx = n
   let makeHardening = { skipped: "workspace-read" };
   let record = await loadAuthorizedProductionRequest(env, recordId, authorization);
   let assets = item4AssetManifest(record).sort((a, b) => Number(a.order || 0) - Number(b.order || 0));
+
+  // Saved-state reopen: completed drafts do not need queue reconciliation,
+  // Airtable mutation, preview polling, or crop relinking just to display
+  // their already-authoritative frames. This also isolates the editor from
+  // transient Make/Drive/queue dependency errors on mobile.
+  if (url.searchParams.get("snapshot") === "1") {
+    const manifest = item4VariantManifest(record);
+    return respond(request, env, {
+      ok: true,
+      snapshot: true,
+      state: f(record, "Studio_Item4_State") || "Draft",
+      assets_status: f(record, "Studio_Master_Asset_Status") || "None",
+      assets,
+      plan_status: f(record, "Studio_Output_Plan_Status") || "Needs Plan",
+      plan: item4ParseJson(f(record, "Studio_Output_Plan_JSON"), null),
+      variant_status: f(record, "Studio_Variant_Status") || "None",
+      variant_updated_at: f(record, "Studio_Variant_Updated_At") || null,
+      variant_error: f(record, "Studio_Variant_Error") || null,
+      variants: manifest,
+      variant_progress: manifest ? {
+        ready: Number(manifest.ready_count || 0),
+        target: Number(manifest.target_count || 0),
+      } : null,
+      request_status: f(record, "Request_Status"),
+      outputs: [],
+      publish_status: item4ParseJson(f(record, "Studio_Publish_Status_JSON"), null),
+    });
+  }
   let masterAuthorityResume = { attempted: false, reason: "not-needed", execution_ids: [] };
 
   try {

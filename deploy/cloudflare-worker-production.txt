@@ -102,3 +102,5 @@ Deploy Worker 0.10.489-engagement-ledger. Shrink the engagement ledger so Chicag
 2026-10-10: Deploy Worker 0.10.502-vibe-cut-remount-heal. Do not remount multi-clip Vibe Cuts on transient short Render_Total_Frames.
 
 2026-10-10: Deploy Worker 0.10.503-vibe-cut-produce-heal. Sort produce heal by Updated_At; widen readyNoJob R4 pulse so active Vibe Cuts are not starved.
+
+2026-10-10: Deploy Worker 0.10.504-item4-snapshot-reopen. Serve read-only Item4 saved-state snapshots without expensive variant/preview reconciliation when reopening Ready requests.

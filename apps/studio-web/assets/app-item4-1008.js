@@ -260,7 +260,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.562-vibe-cut-remount";
+  const BUILD_ID = "item4-0.6.563-item4-snapshot-reopen";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -10547,10 +10547,19 @@
     const revision = item4WorkspaceRevision;
     const sequence = ++item4WorkspaceLoadSequence;
     try {
-      if (item4WorkspaceRequestId !== record.id) {
-        await stopIdeaPhotoListeningAfterProductionOpen(ideaIdFromRequest(record));
+      // The photo-listening stop is housekeeping, not a prerequisite to opening
+      // a saved production request. A failed/slow POST must never strand the editor.
+      if (item4WorkspaceRequestId !== record.id && !/ez-photo-wait=off/i.test(String(record.production_notes || ""))) {
+        Promise.resolve().then(() => stopIdeaPhotoListeningAfterProductionOpen(ideaIdFromRequest(record))).catch((error) => {
+          console.warn("Production photo-listening stop deferred without blocking editor", error);
+        });
       }
-      const incoming = await api(`/api/production-requests/${encodeURIComponent(record.id)}/item4`);
+      const snapshotReady = String(record.status || "") === "Ready"
+        && Array.isArray(record.studio_master_assets) && record.studio_master_assets.length > 0;
+      const item4Path = `/api/production-requests/${encodeURIComponent(record.id)}/item4`;
+      // Snapshot is a read-only, authoritative Airtable view. A Ready draft
+      // should not need expensive variant reconciliation simply to reopen.
+      const incoming = await api(snapshotReady ? `${item4Path}?snapshot=1` : item4Path);
       if (activeProductionRequest?.id !== record.id || revision !== item4WorkspaceRevision
         || sequence !== item4WorkspaceLoadSequence || item4PendingRemoves.size || item4ReorderBusy) return;
       const preserveAssets = item4WorkspaceRequestId === record.id && item4Workspace && !allowAssetChanges;
@@ -10610,7 +10619,7 @@
         setRequestMessage(
           isTransientStudioError(error)
             ? "Still loading this request. Studio will try again."
-            : "Could not open this request. Try again in a moment.",
+            : `Could not load saved media: ${String(error?.message || "request unavailable").slice(0, 160)}. Your saved photos and plan were not deleted.`,
           isTransientStudioError(error) ? "" : "error-text"
         );
       }
