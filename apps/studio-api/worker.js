@@ -568,7 +568,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.504-item4-snapshot-reopen",
+          version: "0.10.505-merge-open-studio",
           studio_approve_all_batch_v1: true,
           studio_engagement_v1: true,
           studio_mae_schedule_v1: true,

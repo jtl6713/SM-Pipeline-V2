@@ -104,3 +104,7 @@ Deploy Worker 0.10.489-engagement-ledger. Shrink the engagement ledger so Chicag
 2026-10-10: Deploy Worker 0.10.503-vibe-cut-produce-heal. Sort produce heal by Updated_At; widen readyNoJob R4 pulse so active Vibe Cuts are not starved.
 
 2026-10-10: Deploy Worker 0.10.504-item4-snapshot-reopen. Serve read-only Item4 saved-state snapshots without expensive variant/preview reconciliation when reopening Ready requests.
+
+2026-10-10: Redeploy Worker with main after merge of open Studio PRs (diagnose + photo labels; Approve All budget already on main).
+
+2026-10-10: Deploy Worker 0.10.505-merge-open-studio. Land open Studio PR merge (Pages diagnose soft-fail + photo-label cover).

@@ -137,3 +137,5 @@ Deploy Studio UI 0.6.534-pages-path-bust. Rename app-item4-0625.js -> app-item4-
 2026-10-10: Deploy Studio UI 0.6.562-vibe-cut-remount. Land Worker heal remount + blank-schedule regenerate filter sync.
 
 2026-10-10: Deploy Studio UI 0.6.563-item4-snapshot-reopen. Reopen Ready Chinatown drafts from saved Item4 snapshot; photo-listener housekeeping must not block requests; expose actionable load error.
+
+2026-10-10: Deploy Studio UI 0.6.564-photo-labels-diagnose. Soft-fail Pages diagnose Routes 403; broaden production-asset-labels DOM cover.
