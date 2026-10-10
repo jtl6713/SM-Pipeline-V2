@@ -132,4 +132,6 @@ Deploy Studio UI 0.6.534-pages-path-bust. Rename app-item4-0625.js -> app-item4-
 2026-10-10: Deploy Studio UI 0.6.559-idea-production-reopen. Approved Ideas open linked Production Requests, never silently repeat timeline generation; preserve earliest saved timed scenes and display errors.
 2026-10-10: Deploy Pages 0.6.557-vibe-cut-multi-clip. Sync Vibe Cut target length onto video duration fields.
 
-2026-10-10: Deploy Studio UI 0.6.561-vibe-cut-ship. Ship Vibe Cut multi-clip UI duration sync with main.
+2026-10-10: Deploy Studio UI 0.6.562-vibe-cut-remount. Ship Vibe Cut multi-clip UI duration sync with main.
+
+2026-10-10: Deploy Studio UI 0.6.562-vibe-cut-remount. Land Worker heal remount + blank-schedule regenerate filter sync.

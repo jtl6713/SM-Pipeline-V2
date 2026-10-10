@@ -260,7 +260,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.561-vibe-cut-ship";
+  const BUILD_ID = "item4-0.6.562-vibe-cut-remount";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -18098,10 +18098,14 @@
         if (!selected.has(pipelineSchedulePlatformKey(record))) return false;
         const iso = pipelineRecordScheduleIso(record);
         const ms = iso ? Date.parse(iso) : NaN;
-        return Number.isFinite(ms) && ms > nowMs && ms <= cutoffMs;
+        // Unscheduled unpublished outputs are the primary recovery target.
+        return !iso || !Number.isFinite(ms) || (ms > nowMs && ms <= cutoffMs);
       })
-      .sort((a, b) => Date.parse(pipelineRecordScheduleIso(a)) - Date.parse(pipelineRecordScheduleIso(b))
-        || pipelineOutputNumber(a) - pipelineOutputNumber(b));
+      .sort((a, b) => {
+        const aMs = Date.parse(pipelineRecordScheduleIso(a) || "") || Number.POSITIVE_INFINITY;
+        const bMs = Date.parse(pipelineRecordScheduleIso(b) || "") || Number.POSITIVE_INFINITY;
+        return aMs - bMs || pipelineOutputNumber(a) - pipelineOutputNumber(b);
+      });
     if (!eligible.length) {
       setPipelineScheduleGridMessage("No eligible unpublished posts remain in the selected 14-day window.");
       return;

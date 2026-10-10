@@ -568,7 +568,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.498-vibe-cut-ship",
+          version: "0.10.500-vibe-cut-remount-heal",
           studio_approve_all_batch_v1: true,
           studio_engagement_v1: true,
           studio_mae_schedule_v1: true,
@@ -10687,15 +10687,17 @@ async function enqueueStudioProductionJob(env, requestId, options = {}) {
   const vibeCutPassthrough = vibeCut && /passthrough/i.test(String(existing?.route || ""));
   const vibeDirective = vibeCut ? parseVibeCutDirective(studioRequestNotesText(record)) : null;
   const vibeTarget = Number(vibeDirective?.target_seconds || 0) || 0;
-  let vibeCutNeedsRemount = vibeCutPassthrough;
-  if (vibeCut && !vibeCutNeedsRemount && (Boolean(options.resume) || Boolean(options.remount))) {
+  let vibeCutNeedsRemount = vibeCutPassthrough || Boolean(existing?.heal?.force_multiclip_remount);
+  if (vibeCut && !vibeCutNeedsRemount && (Boolean(options.resume) || Boolean(options.remount) || step === "blocked")) {
     const outputs = await azPlatformOutputsForRequest(env, requestId).catch(() => []);
     vibeCutNeedsRemount = (outputs || []).some((row) => {
       const count = Number(f(row, "Selected_Clip_Count") || 0) || 0;
       const frames = Number(f(row, "Render_Total_Frames") || 0) || 0;
+      const clipJson = String(f(row, "Render_Clip_List_JSON") || "");
       const story = studioAzIsStory(studioOutputTypeLabel(row));
       if (story) return false;
-      return count <= 1 || (vibeTarget > 0 && frames > 0 && frames < Math.round(vibeTarget * 30) - 15);
+      const singleHead = count <= 1 || /"id"\s*:\s*"studio-source-1"/.test(clipJson);
+      return singleHead || (vibeTarget > 0 && frames > 0 && frames < Math.round(vibeTarget * 30) - 15);
     });
   }
   if (!existing?.job_id || vibeCutPassthrough || vibeCutNeedsRemount) {
@@ -11021,14 +11023,17 @@ async function resumeStaleStudioProductionJobs(env, options = {}) {
         });
       }
 
-      const { payload } = await item4PulseStudioProduceJob(env, requestId, { resume: true });
+      // Must go through enqueueStudioProductionJob so Vibe Cut single-clip /
+      // passthrough remounts run before the runner resume pulse. Direct
+      // item4PulseStudioProduceJob skipped that gate (Walk with me Chicago).
+      const payload = await enqueueStudioProductionJob(env, requestId, { resume: true });
       pulses.push({
         key: "STUDIO_PRODUCE",
         request: requestId,
         resumed: true,
         self_heal: isBlocked,
         resume_count: nextHeal.resume_count,
-        step: payload?.job?.step || resumedJob.step || step || "themes",
+        step: payload?.payload?.job?.step || payload?.job?.step || resumedJob.step || step || "themes",
       });
     } catch (error) {
       pulses.push({
