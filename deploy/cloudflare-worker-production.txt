@@ -108,4 +108,6 @@ Deploy Worker 0.10.489-engagement-ledger. Shrink the engagement ledger so Chicag
 2026-10-10: Redeploy Worker with main after merge of open Studio PRs (diagnose + photo labels; Approve All budget already on main).
 
 2026-10-10: Deploy Worker 0.10.505-merge-open-studio. Land open Studio PR merge (Pages diagnose soft-fail + photo-label cover).
-2026-10-10: Deploy Worker 0.10.506-new-profile-setup. Merge New Profile /api/profile-setup with existing onboarding; profile-scoped destinations.
+2026-10-10: Deploy Worker 0.10.507-metra-photo-scan. Merge New Profile /api/profile-setup with existing onboarding; profile-scoped destinations.
+
+2026-10-10: Deploy Worker 0.10.507-metra-photo-scan. Find images scans Metra/CTA brand subjects with place keys so Ogilvie-located Metra ideas match classified Metra stills.
