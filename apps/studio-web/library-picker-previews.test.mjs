@@ -38,3 +38,13 @@ test("Idea and Production pickers bind preview fallbacks", () => {
   assert.match(app, /previewImageLooksReady/);
   assert.match(app, /libraryPickerPreviewCandidates/);
 });
+
+test("swap-still library cards resolve preview bind ids and eager-load thumbs", () => {
+  assert.match(app, /data-swap-still-id/);
+  assert.match(
+    app,
+    /getAttribute\("data-library-id"\)[\s\S]{0,120}?getAttribute\("data-item4-library-id"\)[\s\S]{0,120}?getAttribute\("data-swap-still-id"\)/
+  );
+  assert.match(app, /loading="eager"/);
+  assert.match(app, /starts loading="lazy" images/);
+});

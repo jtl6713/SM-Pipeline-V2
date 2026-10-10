@@ -260,7 +260,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.568-pr-superseded-cancel";
+  const BUILD_ID = "item4-0.6.569-swap-still-previews";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -12780,7 +12780,11 @@ function timedScriptAssetLabel(asset, index) {
     root.querySelectorAll(".idea-library-card img, .library-card[data-library-record-type='media_asset'] .library-card-media > img").forEach((img) => {
       if (img.closest(".item4-clip-poster-wrap")) return;
       const card = img.closest(".idea-library-card, .library-card");
-      const id = card?.getAttribute("data-library-id") || card?.getAttribute("data-item4-library-id") || "";
+      // Swap-still cards use data-swap-still-id; Idea/Production pickers use the library ids.
+      const id = card?.getAttribute("data-library-id")
+        || card?.getAttribute("data-item4-library-id")
+        || card?.getAttribute("data-swap-still-id")
+        || "";
       const item = byId.get(id) || { id, preview_path: img.getAttribute("src"), google_drive_file_id: img.dataset.driveId };
       item4BindPreviewImage(img, {
         candidates: libraryPickerPreviewCandidates(item),
@@ -12874,6 +12878,8 @@ function timedScriptAssetLabel(asset, index) {
       if (suggestedIds.has(item.id)) tags.push(`<em class="idea-library-card-tag">Suggested</em>`);
       if (video) tags.push(`<em class="idea-library-card-tag">Clip</em>`);
       const tag = tags.join("");
+      // Eager load: these grids sit in overflow:auto dialogs where WebKit often never
+      // starts loading="lazy" images (blank white tiles on iPhone swap-still / library pickers).
       const media = video
         ? (item4ClipPlayerHtml({
           previewUrl: preview,
@@ -12882,8 +12888,8 @@ function timedScriptAssetLabel(asset, index) {
           durationSeconds: item.duration_seconds,
           asset: item,
           preload: false,
-        }) || (preview ? `<img src="${escapeHtml(preview)}" alt="" loading="lazy">` : `<img alt="">`))
-        : (preview ? `<img src="${escapeHtml(preview)}" alt="" loading="lazy"${item.google_drive_file_id ? ` data-drive-id="${escapeHtml(item.google_drive_file_id)}"` : ""}>` : `<img alt="">`);
+        }) || (preview ? `<img src="${escapeHtml(preview)}" alt="" loading="eager" decoding="async">` : `<img alt="">`))
+        : (preview ? `<img src="${escapeHtml(preview)}" alt="" loading="eager" decoding="async"${item.google_drive_file_id ? ` data-drive-id="${escapeHtml(item.google_drive_file_id)}"` : ""}>` : `<img alt="">`);
       return `<div class="idea-library-card" role="button" tabindex="0" ${idAttr}="${escapeHtml(item.id)}" data-selected="${checked ? "true" : "false"}">
         <input type="checkbox" form="ideaLibraryPickerForm" tabindex="-1" ${checked ? "checked" : ""} aria-hidden="true">
         ${media}

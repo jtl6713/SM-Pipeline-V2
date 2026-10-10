@@ -11,12 +11,12 @@ const app = fs.readFileSync(path.join(web, "assets/app-item4-1008.js"), "utf8");
 const css = fs.readFileSync(path.join(web, "assets/styles-phase7-0621.css"), "utf8");
 
 test("compact Pipeline build and cache bust stay aligned", () => {
-  assert.match(app, /BUILD_ID = "item4-0.6.568-pr-superseded-cancel"/);
-  assert.match(html, /UI build 0\.6\.568/);
-  assert.match(html, /app-item4-1008\.js\?v=0.6.568-pr-superseded-cancel/);
-  assert.match(html, /styles-phase7-0621\.css\?v=0.6.568-pr-superseded-cancel/);
+  assert.match(app, /BUILD_ID = "item4-0.6.569-swap-still-previews"/);
+  assert.match(html, /UI build 0\.6\.569/);
+  assert.match(html, /app-item4-1008\.js\?v=0.6.569-swap-still-previews/);
+  assert.match(html, /styles-phase7-0621\.css\?v=0.6.569-swap-still-previews/);
   assert.match(css, /COMPACT_PIPELINE_V2_20261006/);
-  assert.match(html, /home-density-0517\.css\?v=0.6.568-pr-superseded-cancel/);
+  assert.match(html, /home-density-0517\.css\?v=0.6.569-swap-still-previews/);
 });
 
 test("compact Pipeline exposes quick views, search, and advanced filters", () => {
