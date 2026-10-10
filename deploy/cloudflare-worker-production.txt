@@ -109,3 +109,5 @@ Deploy Worker 0.10.489-engagement-ledger. Shrink the engagement ledger so Chicag
 
 2026-10-10: Deploy Worker 0.10.505-merge-open-studio. Land open Studio PR merge (Pages diagnose soft-fail + photo-label cover).
 2026-10-10: Deploy Worker 0.10.506-new-profile-setup. Merge New Profile /api/profile-setup with existing onboarding; profile-scoped destinations.
+
+2026-10-10: Deploy Worker 0.10.507-render-queue-wait. Single-slot Remotion admit; stamp Waiting in Render Queue; heal does not pulse every Ready row as Rendering.

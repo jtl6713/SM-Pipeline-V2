@@ -180,6 +180,17 @@ import {
   resetFailedApproveAllItems,
   summarizeApproveAllJob,
 } from "./approve-all-batch.mjs";
+import {
+  RENDER_STATUS_READY,
+  RENDER_STATUS_WAITING_QUEUE,
+  assignRenderQueuePositions,
+  isActiveRemotionHold,
+  isRealRemotionRetryFailure,
+  isRenderQueueCandidateStatus,
+  isRenderQueueWaitingStatus,
+  remotionHealthLooksBusy,
+  sortRenderQueueCandidates,
+} from "./render-queue.mjs";
 
 import {
   analyticsObservationKey,
@@ -585,7 +596,8 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.506-new-profile-setup",
+          version: "0.10.507-render-queue-wait",
+          studio_render_queue_wait_v1: true,
           studio_approve_all_batch_v1: true,
           studio_engagement_v1: true,
           studio_mae_schedule_v1: true,
@@ -3032,12 +3044,16 @@ function studioMixRerenderInProgress(record) {
   const review = text("Review_Status");
   const output = text("Output_Status").toLowerCase();
   const render = text("Render_Status").toLowerCase();
-  if (output.includes("in production") && (render.includes("ready for render") || render.includes("rendering"))) {
+  // Only intentional creative re-renders. First-time Ready/Waiting/Rendering is
+  // normal produce — do not paint those as "Rerendering".
+  if (review !== "Changes Requested") return false;
+  if (output.includes("in production")) return true;
+  if (
+    render.includes("ready for render")
+    || render.includes("waiting in render queue")
+    || render.includes("rendering")
+  ) {
     return true;
-  }
-  if (review === "Changes Requested") {
-    if (output.includes("in production")) return true;
-    if (render.includes("ready for render") || render.includes("rendering")) return true;
   }
   return false;
 }
@@ -3141,15 +3157,18 @@ function normalizedOutputState(record) {
     const publish = text("Publish_Status").toLowerCase();
     const outputDead = output.includes("failed") || output.includes("terminal error") || output.includes("skipped");
     const publishDead = publish.includes("failed") || publish.includes("error");
-    const stillRendering = output.includes("in production")
-      || output.includes("rendering")
-      || render.includes("rendering")
-      || render.includes("ready for render")
-      || render.includes("failed")
-      || render.includes("error")
-      || Boolean(text("Remotion_Error_Message") || text("Final_File_Error_Message"));
-    if (!outputDead && !publishDead && stillRendering) return "Trying Again";
-    return "Failed";
+    // Queue wait / ready package must never show as Trying Again — only real
+    // Remotion failures (delayRender, exit code, Chrome) while still in produce.
+    const stillInProduce = output.includes("in production") || output.includes("rendering");
+    const queuedOrReady = render.includes("ready for render") || render.includes("waiting in render queue");
+    if (!outputDead && !publishDead && stillInProduce && isRealRemotionRetryFailure(record, f)) {
+      return "Trying Again";
+    }
+    if (!outputDead && !publishDead && queuedOrReady) {
+      // Fall through to Waiting in Render Queue / ready labels below.
+    } else {
+      return "Failed";
+    }
   }
 
   if (
@@ -3182,14 +3201,18 @@ function normalizedOutputState(record) {
     if ((has("Review_Status", "pending") || has("Review_Status", "review sent") || has("Output_Status", "ready for review")) && studioOutputHasReviewableDeliverable(record)) return "Ready for Review";
     if (has("Render_Status", "rendered") && studioOutputHasReviewableDeliverable(record)) return "Ready for Review";
   }
-  if (has("Render_Status", "rendering") || has("FB_Slideshow_Status", "rendering") || has("FB_Slideshow_Status", "starting render")) return "Rendering";
+  if (has("Render_Status", "waiting in render queue")) return "Waiting in Render Queue";
+  if (isActiveRemotionHold(record, f) || has("FB_Slideshow_Status", "rendering") || has("FB_Slideshow_Status", "starting render")) {
+    return "Rendering";
+  }
   if (studioNativeStillsNeedLettering(record)) return "Rendering";
   if ((readyForReviewIntent || has("Render_Status", "rendered") || has("Render_Status", "native photo route")) && !studioOutputHasReviewableDeliverable(record)) {
     return "Preparing Assets";
   }
   if (inProduction && !remotionFinished && !studioOutputIsNativePhoto(record)) {
     const remotionStarted = Boolean(String(f(record, "Remotion_Job_ID") || "").trim());
-    if (has("Render_Status", "ready for render") || remotionStarted) return "Rendering";
+    if (has("Render_Status", "ready for render") && !remotionStarted) return "Waiting in Render Queue";
+    if (remotionStarted && has("Render_Status", "rendering")) return "Rendering";
     if (hasFinishedFile || Boolean(String(f(record, "Studio_Preview_URL") || "").trim())) return "Rendering";
   }
   const studioAssetPrep = has("Asset_Selection_Status", "needs selection") || has("Asset_Selection_Status", "selecting");
@@ -3225,7 +3248,7 @@ function contentLifecycleFromOutputs(outputRecords = []) {
     studioStage = "Needs Attention";
   } else if (states.some((state) => state === "Ready for Review")) {
     studioStage = "Review";
-  } else if (states.some((state) => state === "Rendering" || state === "Rerendering")) {
+  } else if (states.some((state) => state === "Rendering" || state === "Rerendering" || String(state || "").startsWith("Waiting in render queue") || state === "Waiting in Render Queue")) {
     studioStage = "Rendering";
   } else if (states.some((state) => ["Uploading", "Platform Processing", "Approved"].includes(state))) {
     studioStage = states.some((state) => state === "Uploading" || state === "Platform Processing")
@@ -3235,14 +3258,20 @@ function contentLifecycleFromOutputs(outputRecords = []) {
     studioStage = "Preparing Assets";
   }
 
-  const earlyRender = new Set(["Queued", "Preparing Assets", "Rendering"]);
-  const incompleteRender = new Set(["Queued", "Preparing Assets", "Rendering", "Rerendering", "Trying Again"]);
+  const earlyRender = new Set(["Queued", "Preparing Assets", "Rendering", "Waiting in Render Queue"]);
+  const incompleteRender = new Set(["Queued", "Preparing Assets", "Rendering", "Rerendering", "Trying Again", "Waiting in Render Queue"]);
   const total = states.length;
-  const renderedCount = states.filter((state) => !incompleteRender.has(state)).length;
+  const renderedCount = states.filter((state) => {
+    const label = String(state || "");
+    return !incompleteRender.has(label) && !label.startsWith("Waiting in render queue");
+  }).length;
   let renderStatus = null;
-  if (states.some((state) => state === "Rendering" || state === "Trying Again")) {
+  if (states.some((state) => {
+    const label = String(state || "");
+    return state === "Rendering" || state === "Trying Again" || state === "Waiting in Render Queue" || label.startsWith("Waiting in render queue");
+  })) {
     renderStatus = `Rendering ${renderedCount}/${total}`;
-  } else if (states.every((state) => !earlyRender.has(state))) {
+  } else if (states.every((state) => !earlyRender.has(state) && !String(state || "").startsWith("Waiting in render queue"))) {
     renderStatus = "Ready";
   }
 
@@ -3448,6 +3477,7 @@ function outputProgressMilestoneFloor(record) {
     || ((output.includes("ready for review") || review.includes("review sent") || review === "pending")
       && studioOutputHasReviewableDeliverable(record))
   ) return 65;
+  if (render.includes("waiting in render queue")) return 45;
   if (render.includes("rendering") || render.includes("ready for render")) return 50;
   return 0;
 }
@@ -3463,6 +3493,7 @@ function outputProgressPercent(record, state, job = null) {
   const defaults = {
     Queued: 5,
     "Preparing Assets": 30,
+    "Waiting in Render Queue": 45,
     Rendering: 50,
     Rerendering: 50,
     "Ready for Review": 65,
@@ -3477,6 +3508,9 @@ function outputProgressPercent(record, state, job = null) {
     Skipped: 100,
   };
   let computed = defaults[state] ?? null;
+  if (computed == null && String(state || "").startsWith("Waiting in render queue")) {
+    computed = 45;
+  }
   const jobPercent = Number(job?.percent);
   if (
     Number.isFinite(jobPercent)
@@ -3544,8 +3578,15 @@ function outputCreativeAvailable(record) {
   return studioOutputHasReviewableDeliverable(record);
 }
 
-function mapOutput(record, job = null) {
-  const studioState = normalizedOutputState(record);
+function mapOutput(record, job = null, queueMeta = null) {
+  let studioState = normalizedOutputState(record);
+  const renderStatus = String(f(record, "Render_Status") || "").trim();
+  const hasJob = Boolean(String(f(record, "Remotion_Job_ID") || "").trim());
+  if (queueMeta?.label && isRenderQueueCandidateStatus(renderStatus) && !hasJob) {
+    studioState = queueMeta.label;
+  } else if (studioState === "Waiting in Render Queue") {
+    studioState = queueMeta?.label || "Waiting in render queue";
+  }
   const studioJob = job && typeof job === "object" ? job : null;
   return {
     id: record.id,
@@ -3558,6 +3599,12 @@ function mapOutput(record, job = null) {
     output_status: f(record, "Output_Status"),
     studio_state: studioState,
     render_status: f(record, "Render_Status"),
+    remotion_job_id: f(record, "Remotion_Job_ID"),
+    remotion_error_message: f(record, "Remotion_Error_Message"),
+    final_file_error_message: f(record, "Final_File_Error_Message"),
+    render_queue_position: queueMeta?.position || null,
+    render_queue_total: queueMeta?.total || null,
+    render_queue_label: queueMeta?.label || null,
     review_status: f(record, "Review_Status"),
     publish_status: f(record, "Publish_Status"),
     platform_publish_status: platformPublishStatus(record),
@@ -12082,11 +12129,14 @@ async function healStuckStudioRenders(env) {
     }
   }
 
+  // Prep VO/timing for queue candidates, then admit at most one Remotion start.
+  // Do not pulse R4 for every Ready row — that stamped many "Rendering" / Trying Again
+  // labels while Remotion can only run one job.
   const readyNoJob = await listRecords(env, outputTable, {
-    limit: 16,
+    limit: 24,
     sortField: "Output_ID",
-    sortDirection: "desc",
-    filterFormula: `AND(${STUDIO_R4_WORK_FORMULA},{Remotion_Job_ID}="")`,
+    sortDirection: "asc",
+    filterFormula: STUDIO_RENDER_QUEUE_CANDIDATE_FORMULA,
   }).catch(() => []);
   for (const row of readyNoJob || []) {
     if (!rendererSupportsPrivateDrive && studioChicagoWatermarkOutput(row)) {
@@ -12125,12 +12175,12 @@ async function healStuckStudioRenders(env) {
       }
       continue;
     }
-    try {
-      const payload = await item4PulseR4Python(env, { outputRecordId: row.id });
-      pulses.push({ key: "R4_STUCK_READY", id: row.id, payload });
-    } catch (error) {
-      pulses.push({ key: "R4_STUCK_READY", id: row.id, error: error instanceof Error ? error.message : String(error) });
-    }
+  }
+  try {
+    const admitted = await studioAdmitRenderQueue(env, { limit: 80 });
+    pulses.push({ key: "R4_QUEUE_ADMIT", ...admitted });
+  } catch (error) {
+    pulses.push({ key: "R4_QUEUE_ADMIT", error: error instanceof Error ? error.message : String(error) });
   }
   // Completed MP4 left on Render_Status=Rendering / Output_Status=In Production
   // (Output 1807 YouTube Short). longRendering below requires a Remotion job and
@@ -13373,6 +13423,117 @@ async function studioGateR4ForPrivateDriveWatermark(env, options = {}) {
   return { renderer_ready: false, parked };
 }
 
+async function studioRemotionRenderBusy(env) {
+  const active = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
+    limit: 8,
+    filterFormula: STUDIO_RENDER_QUEUE_ACTIVE_FORMULA,
+  }).catch(() => []);
+  if (active.length) {
+    return { busy: true, activeCount: active.length, source: "airtable", activeIds: active.map((row) => row.id) };
+  }
+  try {
+    const response = await fetch("https://render.chicagoshining.com/health", {
+      method: "GET",
+      headers: { Accept: "application/json", "Cache-Control": "no-cache" },
+      signal: AbortSignal.timeout(4000),
+    });
+    if (response.ok) {
+      const payload = await response.json().catch(() => ({}));
+      if (remotionHealthLooksBusy(payload)) {
+        return {
+          busy: true,
+          activeCount: Number(payload.remotionActiveRenders || 0),
+          source: "health",
+          queued: Number(payload.remotionQueuedRenders || 0),
+        };
+      }
+    }
+  } catch {}
+  return { busy: false, activeCount: 0, source: "none" };
+}
+
+async function studioStampRenderQueueWaiting(env, rowOrId) {
+  const id = typeof rowOrId === "string" ? rowOrId : rowOrId?.id;
+  if (!id) return null;
+  return airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, id, {
+    method: "PATCH",
+    body: JSON.stringify({
+      fields: {
+        Render_Status: RENDER_STATUS_WAITING_QUEUE,
+      },
+      typecast: true,
+    }),
+  });
+}
+
+async function studioLoadRenderQueueCandidates(env, { limit = 80 } = {}) {
+  const rows = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
+    limit,
+    sortField: "Output_ID",
+    sortDirection: "asc",
+    filterFormula: STUDIO_RENDER_QUEUE_CANDIDATE_FORMULA,
+  }).catch(() => []);
+  return sortRenderQueueCandidates(rows, f);
+}
+
+async function studioAdmitRenderQueue(env, options = {}) {
+  const candidates = await studioLoadRenderQueueCandidates(env, { limit: Number(options.limit || 80) });
+  if (!candidates.length) {
+    return { admitted: false, reason: "no_candidates", waiting: 0, started: null };
+  }
+  const busy = await studioRemotionRenderBusy(env);
+  const { byId, total } = assignRenderQueuePositions(candidates, f);
+  let stampedWaiting = 0;
+  for (const row of candidates) {
+    if (!isRenderQueueWaitingStatus(f(row, "Render_Status"))) {
+      await studioStampRenderQueueWaiting(env, row).catch(() => null);
+      stampedWaiting += 1;
+    }
+  }
+  if (busy.busy) {
+    return {
+      admitted: false,
+      reason: "remotion_slot_busy",
+      waiting: total,
+      stamped_waiting: stampedWaiting,
+      busy,
+      queue: [...byId.values()],
+    };
+  }
+  const head = candidates[0];
+  await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, head.id, {
+    method: "PATCH",
+    body: JSON.stringify({
+      fields: { Render_Status: RENDER_STATUS_READY },
+      typecast: true,
+    }),
+  }).catch(() => null);
+  let started = null;
+  try {
+    started = await item4PulseR4Python(env, {
+      outputRecordId: head.id,
+      forceSlot: true,
+      testRunId: options.testRunId,
+    });
+  } catch (error) {
+    return {
+      admitted: false,
+      reason: "r4_start_failed",
+      waiting: Math.max(0, total - 1),
+      head: head.id,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+  return {
+    admitted: Boolean(started?.processed || started?.details?.processed || started?.ok !== false),
+    reason: "started_head",
+    waiting: Math.max(0, total - 1),
+    stamped_waiting: stampedWaiting,
+    head: head.id,
+    started,
+  };
+}
+
 async function item4PulseR4Python(env, options = {}) {
   const gate = await studioGateR4ForPrivateDriveWatermark(env, options);
   if (options.outputRecordId && gate.parked.length) {
@@ -13384,6 +13545,36 @@ async function item4PulseR4Python(env, options = {}) {
         parked: gate.parked,
       },
     };
+  }
+
+  if (!options.outputRecordId && !options.forceSlot && !options.dryRun) {
+    // Global cadence pulses must use the single-slot admitter so Ready rows
+    // wait in line instead of all being stamped Rendering.
+    const admitted = await studioAdmitRenderQueue(env, { testRunId: options.testRunId });
+    return {
+      status: admitted.admitted ? "ok" : "queued",
+      processed: Boolean(admitted.admitted),
+      message: admitted.admitted
+        ? "Started the next render from the queue"
+        : "Remotion slot busy or no queue candidates",
+      details: admitted,
+    };
+  }
+
+  if (options.outputRecordId && !options.forceSlot) {
+    const busy = await studioRemotionRenderBusy(env);
+    if (busy.busy) {
+      await studioStampRenderQueueWaiting(env, options.outputRecordId).catch(() => null);
+      return {
+        status: "queued",
+        processed: false,
+        message: "Waiting in render queue — Remotion slot is busy",
+        details: {
+          reason: "remotion_slot_busy",
+          busy,
+        },
+      };
+    }
   }
 
   const body = { extra: {} };
@@ -24288,10 +24479,14 @@ async function listOutputs(request, env, url, authorization, ctx = null) {
           console.warn("pipeline list heal skipped", record?.id, error);
         }
       }
-      const stalled = records.filter((record) =>
-        /^in production$/i.test(String(f(record, "Output_Status") || ""))
-        && !String(f(record, "Remotion_Job_ID") || "").trim()
-      );
+      const stalled = records.filter((record) => {
+        const output = String(f(record, "Output_Status") || "");
+        const render = String(f(record, "Render_Status") || "");
+        // Waiting / Ready package rows are intentionally queued — do not re-enqueue produce.
+        if (isRenderQueueCandidateStatus(render)) return false;
+        return /^in production$/i.test(output)
+          && !String(f(record, "Remotion_Job_ID") || "").trim();
+      });
       if (!stalled.length) return;
       const requestIds = [];
       for (const record of stalled) {
@@ -24316,10 +24511,13 @@ async function listOutputs(request, env, url, authorization, ctx = null) {
       }
     })());
   }
+  const queueCandidates = await studioLoadRenderQueueCandidates(env, { limit: 100 }).catch(() => []);
+  const { byId: renderQueueById } = assignRenderQueuePositions(queueCandidates, f);
   return respond(request, env, {
     ok: true,
-    records: records.map((record) => mapOutput(record, jobs.get(record))),
+    records: records.map((record) => mapOutput(record, jobs.get(record), renderQueueById.get(record.id) || null)),
     profile: mapStudioContentProfile(profile),
+    render_queue_total: queueCandidates.length,
   });
 }
 
@@ -29698,8 +29896,10 @@ async function phase6EnsureScenarioActive(env, scenarioId) {
 
 const STUDIO_R2_WORK_FORMULA = 'AND({Test_Run_ID}=BLANK(),NOT({Do_Not_Publish}),{Content_Item}!=BLANK(),{Output_Status}="Ready for Review",OR({Asset_Need_Status}="Not Needed",{Asset_Need_Status}="Fulfilled"),{Asset_Selection_Status}=BLANK(),{Render_Status}=BLANK(),{Remotion_Job_ID}=BLANK(),{Final_File_URL}="")';
 const STUDIO_R3_WORK_FORMULA = 'AND({Test_Run_ID}=BLANK(),AND({Asset_Selection_Status}="Selected",{Selected_Assets_JSON}!="",{Render_Status}=BLANK(),{Format}!="Story",{Studio_Output_Type}!="Story",OR({Format}="Vertical Short Video",{Format}="Longform Video",{Format}="Feed Post",{Format}="Reel",{Format}="Slideshow Reel",{Format}="Video Draft",{Format}="Short",{Format}="Standard Video",{Format}="Slideshow Video")))';
-const STUDIO_T1_WORK_FORMULA = 'AND({Test_Run_ID}=BLANK(),{Render_Status}="Ready for Render",{Composition_ID}!="",{Output_Filename}!="",{Render_Clip_List_JSON}!="",{Render_Total_Frames}>0,{Format}!="Story",{Studio_Output_Type}!="Story",OR({Timing_Status}=BLANK(),{Timing_Status}="Pending"),OR({Music_URL}!="",{Selected_Music_URL}!=""))';
+const STUDIO_T1_WORK_FORMULA = 'AND({Test_Run_ID}=BLANK(),OR({Render_Status}="Ready for Render",{Render_Status}="Waiting in Render Queue"),{Composition_ID}!="",{Output_Filename}!="",{Render_Clip_List_JSON}!="",{Render_Total_Frames}>0,{Format}!="Story",{Studio_Output_Type}!="Story",OR({Timing_Status}=BLANK(),{Timing_Status}="Pending"),OR({Music_URL}!="",{Selected_Music_URL}!=""))';
 const STUDIO_R4_WORK_FORMULA = 'AND({Test_Run_ID}=BLANK(),AND({Render_Status}="Ready for Render",{Composition_ID}!="",{Output_Filename}!="",{Render_Clip_List_JSON}!="",{Render_Total_Frames}>0,{Format}!="Story",{Studio_Output_Type}!="Story"))';
+const STUDIO_RENDER_QUEUE_CANDIDATE_FORMULA = 'AND({Test_Run_ID}=BLANK(),OR({Render_Status}="Ready for Render",{Render_Status}="Waiting in Render Queue"),{Remotion_Job_ID}="",{Composition_ID}!="",{Output_Filename}!="",{Render_Clip_List_JSON}!="",{Render_Total_Frames}>0,{Format}!="Story",{Studio_Output_Type}!="Story")';
+const STUDIO_RENDER_QUEUE_ACTIVE_FORMULA = 'AND({Test_Run_ID}=BLANK(),{Render_Status}="Rendering",{Remotion_Job_ID}!="",{Final_File_URL}="")';
 const STUDIO_RR1_WORK_FORMULA = 'AND({Test_Run_ID}=BLANK(),{Output_Status}="Ready for Review",{Review_Email_Sent_At}=BLANK(),OR({Review_Status}=BLANK(),{Review_Status}=""),OR(AND({Render_Status}="Rendered",{Final_File_URL}!=""),AND({Render_Status}="Native Photo Route",OR({Studio_Preview_URL}!="",{Thumbnail_URL}!="",{Selected_Assets_JSON}!="")),AND({Platform}="TikTok",{Studio_Output_Type}="Multi-Photo",{Composition_ID}="",{Render_Clip_List_JSON}!=""),AND({Platform}="Instagram",{Studio_Output_Type}="Carousel",{Composition_ID}="",{Selected_Assets_JSON}!=""),AND({Platform}="Facebook",{Studio_Output_Type}="Multi-Image Post",{Composition_ID}="",{Selected_Assets_JSON}!="")))';
 const STUDIO_CONTINUATION_CANDIDATE_FORMULA = 'AND({Test_Run_ID}=BLANK(),{Production_Request_Output}!=BLANK(),{Published_At}=BLANK(),NOT({Output_Status}="Published"),NOT({Output_Status}="Approved for Publishing"))';
 const STUDIO_RFR_MISSING_COVER_FORMULA = `AND(${STUDIO_CONTINUATION_CANDIDATE_FORMULA},{Output_Status}="Ready for Review",{Output_ID}>=227,OR({Thumbnail_URL}="",FIND("ITEM4-VARIANT-fill-crop",{Thumbnail_URL}&""),{Output_Caption}=""))`;

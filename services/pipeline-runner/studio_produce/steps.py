@@ -1007,11 +1007,14 @@ def _is_delay_render_failure(output: dict[str, Any]) -> bool:
 
 
 def _requeue_failed_render(client: AirtableClient, output_id: str) -> None:
+    # Park in the waiting queue so Pipeline shows "Waiting in render queue"
+    # instead of another immediate "Trying Again" / Rendering stamp. Worker
+    # admit promotes the head of the line when the Remotion slot is free.
     client.update_record(
         PLATFORM_OUTPUTS_TABLE,
         output_id,
         {
-            "Render_Status": "Ready for Render",
+            "Render_Status": "Waiting in Render Queue",
             "Remotion_Job_ID": "",
             "Remotion_Status_URL": "",
             "Remotion_Error_Message": "",
@@ -1109,8 +1112,15 @@ def step_render(client: AirtableClient, ctx: dict[str, Any]) -> str:
                     continue
                 remaining.append(fresh["id"])
                 continue
-            if render_status == "Ready for Render":
+            if render_status in {"Ready for Render", "Waiting in Render Queue"}:
                 if busy_rendering or started_r4:
+                    if render_status != "Waiting in Render Queue":
+                        client.update_record(
+                            PLATFORM_OUTPUTS_TABLE,
+                            fresh["id"],
+                            {"Render_Status": "Waiting in Render Queue"},
+                            typecast=True,
+                        )
                     remaining.append(fresh["id"])
                     continue
                 timing = field_str(fresh, "Timing_Status")
@@ -1142,12 +1152,21 @@ def step_render(client: AirtableClient, ctx: dict[str, Any]) -> str:
                             fresh = client.get_record(PLATFORM_OUTPUTS_TABLE, fresh["id"])
                 except Exception:
                     pass
+                if render_status == "Waiting in Render Queue":
+                    client.update_record(
+                        PLATFORM_OUTPUTS_TABLE,
+                        fresh["id"],
+                        {"Render_Status": "Ready for Render"},
+                        typecast=True,
+                    )
                 r4 = process_r4(output_record_id=fresh["id"], test_run_id=test_run_id) or {}
                 if r4.get("processed"):
                     started_r4 = True
                     busy_rendering = True
                 elif r4.get("reason") == "waiting_for_voiceover":
                     raise StepWait("Waiting for voiceover")
+                elif r4.get("reason") == "waiting_for_remotion_slot":
+                    busy_rendering = True
                 elif not r4.get("processed") and r4.get("reason"):
                     remaining.append(fresh["id"])
                     raise StepWait(f"Rendering ({r4.get('reason')})")

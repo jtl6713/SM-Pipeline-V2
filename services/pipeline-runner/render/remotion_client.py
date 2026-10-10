@@ -9,6 +9,22 @@ class RemotionClient:
     def __init__(self, base_url: str) -> None:
         self._base_url = base_url.rstrip("/")
 
+    def get_health(self) -> dict[str, Any]:
+        response = requests.get(f"{self._base_url}/health", timeout=10)
+        data = response.json() if response.content else {}
+        if not response.ok:
+            raise RuntimeError(f"Remotion /health failed ({response.status_code}): {data}")
+        return data
+
+    def slot_busy(self) -> bool:
+        try:
+            health = self.get_health()
+        except Exception:
+            return False
+        active = int(health.get("remotionActiveRenders") or 0)
+        max_concurrent = max(1, int(health.get("remotionMaxConcurrent") or 1))
+        return active >= max_concurrent
+
     def post_render(self, payload: dict[str, Any]) -> dict[str, Any]:
         response = requests.post(
             f"{self._base_url}/render",
