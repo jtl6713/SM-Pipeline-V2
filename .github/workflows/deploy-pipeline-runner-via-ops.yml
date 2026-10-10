@@ -177,3 +177,6 @@ jobs:
 
 # Trigger: vibe-cut clip/timeline sync; expected version 2026-10-10-vibe-cut-clip-sync
 # 2026-10-10T08:28Z
+
+# Trigger pipeline-runner deploy for Remotion render-queue wait (Waiting in Render Queue)
+# 2026-10-10 service_version=2026-10-10-render-queue-wait

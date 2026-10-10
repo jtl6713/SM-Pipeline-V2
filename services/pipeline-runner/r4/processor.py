@@ -302,9 +302,33 @@ def process_one(
         preview["render_request"] = payload
         return {"processed": False, "dry_run": True, **preview}
 
+    remotion = RemotionClient(render_base)
+    # Single Remotion slot: if Chrome is already busy, park this row in the
+    # waiting queue instead of accepting another job that only looks like Rendering.
+    if remotion.slot_busy():
+        client.update_record(
+            PLATFORM_OUTPUTS_TABLE,
+            output["id"],
+            {
+                "Render_Status": "Waiting in Render Queue",
+                "Remotion_Job_ID": "",
+                "Remotion_Status_URL": "",
+                "Remotion_Error_Message": "",
+                "Final_File_Error_Message": "",
+            },
+            typecast=True,
+        )
+        return {
+            "processed": False,
+            "reason": "waiting_for_remotion_slot",
+            "output_record_id": output["id"],
+            "output_id": field_str(output, "Output_ID"),
+            "make_scenario_id": MAKE_SCENARIO_ID,
+            "make_scenario_name": MAKE_SCENARIO_NAME,
+        }
+
     client.update_record(PLATFORM_OUTPUTS_TABLE, output["id"], dict(R4_CLEAR_FIELDS))
 
-    remotion = RemotionClient(render_base)
     response = remotion.post_render(payload)
 
     save_fields: dict[str, Any] = {

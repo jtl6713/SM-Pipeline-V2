@@ -260,7 +260,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.566-pages-alias";
+  const BUILD_ID = "item4-0.6.567-render-queue-wait";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -1394,13 +1394,30 @@
     const output = String(record?.output_status || "").trim();
     const render = String(record?.render_status || "").trim();
     if (/published|ready for review|approved|skipped/i.test(output)) return false;
+    if (/waiting in render queue/i.test(state) || /waiting in render queue/i.test(render)) return false;
+    if (/^ready for render$/i.test(render)) return false;
     if (state === "Trying Again") return true;
     if (state !== "Failed" && state !== "Error") return false;
-    return /in production|rendering|ready for render|not ready|failed|error/i.test(`${output} ${render}`);
+    // Only real Remotion failures — not normal queue wait.
+    return /failed|error/i.test(render) || Boolean(String(record?.remotion_error_message || record?.final_file_error_message || "").trim());
   }
 
   function pipelineIsTerminalFailure(record) {
     return (record?.studio_state === "Failed" || record?.studio_state === "Error") && !pipelineIsRetryingRender(record);
+  }
+
+  function pipelineRenderQueueLabel(record) {
+    const fromApi = String(record?.render_queue_label || record?.studio_state || "").trim();
+    if (/^Waiting in render queue/i.test(fromApi)) return fromApi;
+    const render = String(record?.render_status || "").trim();
+    const hasJob = Boolean(String(record?.remotion_job_id || "").trim());
+    if (/^Waiting in Render Queue$/i.test(render) || (/^Ready for Render$/i.test(render) && !hasJob)) {
+      const pos = Number(record?.render_queue_position || 0);
+      const total = Number(record?.render_queue_total || 0);
+      if (pos > 0 && total > 0) return `Waiting in render queue (#${pos} of ${total})`;
+      return "Waiting in render queue";
+    }
+    return "";
   }
 
   function pipelineMixRerenderInProgress(record) {
@@ -1409,16 +1426,17 @@
     const render = String(record?.render_status || "").trim();
     const state = String(record?.studio_state || "").trim();
     if (state === "Rerendering") return true;
-    if (/in production/i.test(output) && /^(Ready for Render|Rendering)$/i.test(render)) return true;
-    if (review === "Changes Requested") {
-      if (/in production/i.test(output)) return true;
-      if (/^(Ready for Render|Rendering)$/i.test(render)) return true;
-    }
+    // Only intentional Changes Requested re-renders — not first-time queue wait.
+    if (review !== "Changes Requested") return false;
+    if (/in production/i.test(output)) return true;
+    if (/^(Ready for Render|Waiting in Render Queue|Rendering)$/i.test(render)) return true;
     return false;
   }
 
   function pipelineStudioStateLabel(record) {
     if (pipelineMixRerenderInProgress(record)) return "Rerendering";
+    const queueLabel = pipelineRenderQueueLabel(record);
+    if (queueLabel) return queueLabel;
     if (pipelineIsRetryingRender(record)) return "Trying Again";
     const state = String(record?.studio_state || "").trim();
     const renderState = String(record?.render_status || "").trim();
@@ -1427,6 +1445,7 @@
       // hid the orphan choice that R4/T1 never select (Outputs 1702–1705).
       if (/^Ready for Render$/i.test(renderState)) return "Ready for Render";
       if (/^Ready to Render$/i.test(renderState)) return "Ready to Render";
+      if (/^Waiting in Render Queue$/i.test(renderState)) return "Waiting in render queue";
       if (/^(Blocked|Failed|Error|Rendering|Queued)$/i.test(renderState)) return renderState;
     }
     // Per-output success/publish states win over the parent produce job. Sibling
@@ -1463,6 +1482,8 @@
 
   function pipelineRenderLabel(record) {
     if (pipelineMixRerenderInProgress(record)) return "Rerendering";
+    const queueLabel = pipelineRenderQueueLabel(record);
+    if (queueLabel) return queueLabel;
     const render = String(record?.render_status || "").trim();
     if (pipelineIsRetryingRender(record) && /failed|error/i.test(render)) return "Trying Again";
     return render;
@@ -1488,9 +1509,10 @@
     if (pipelineMixRerenderInProgress(record)) return true;
     if (pipelineIsRetryingRender(record)) return true;
     const state = String(record?.studio_state || "").trim();
-    if (["Rendering", "Queued", "Preparing Assets"].includes(state)) return true;
+    if (/^Waiting in render queue/i.test(state)) return true;
+    if (["Rendering", "Queued", "Preparing Assets", "Waiting in Render Queue"].includes(state)) return true;
     const render = String(record?.render_status || "").trim();
-    return /^(Rendering|Ready for Render)(\s+\d+\/\d+)?$/i.test(render);
+    return /^(Rendering|Ready for Render|Waiting in Render Queue)(\s+\d+\/\d+)?$/i.test(render);
   }
 
   function pipelineDestinationProgress(records) {
