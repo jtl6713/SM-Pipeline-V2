@@ -15,7 +15,7 @@ test("Engagement nav page and assets ship with UI 0.6.549", () => {
   assert.match(html, /data-page="engagement"/);
   assert.match(html, /id="page-engagement"/);
   assert.match(html, /engagement-1008\.js\?v=0\.6\.550-vibe-cut-home/);
-  assert.match(html, /engagement-1008\.css\?v=0\.6\.550-vibe-cut-home/);
+  assert.match(html, /engagement-1008\.css\?v=0\.6\.551-engagement-filter-layout/);
   assert.match(html, /UI build 0\.6\.550/);
   assert.match(app, /BUILD_ID = "item4-0\.6\.550-vibe-cut-home"/);
   assert.match(app, /page === "engagement"/);
@@ -35,6 +35,10 @@ test("Engagement UI exposes review actions without mass unreviewed commenting", 
   assert.match(js, /\/api\/engagement\/actions/);
   assert.doesNotMatch(js, /mass.?comment|auto.?publish.?all|unreviewed.?bulk.?comment/i);
   assert.match(css, /\.engagement-card/);
+  assert.match(css, /\.engagement-filters-panel > \.engagement-filters-grid\s*\{[^}]*padding:/s);
+  assert.match(css, /\.engagement-filters-grid \.form-field > span\s*\{[^}]*font-weight:\s*750/s);
+  assert.match(css, /\.engagement-filters-grid \.checkbox-field > span\s*\{[^}]*display:\s*flex/s);
+  assert.match(css, /\.engagement-filters-grid \.checkbox-field input\[type="checkbox"\]\s*\{[^}]*width:\s*1rem/s);
 });
 
 test("capability matrix documents unsupported automation honestly", () => {
