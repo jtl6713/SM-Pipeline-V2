@@ -24,6 +24,7 @@ import {
   buildActionRecord,
   enrichEngagementHistory,
   pruneEngagementStore,
+  ensureThreeCommentSuggestions,
   dailyActionCount,
   nearIdenticalComment,
   backoffMs,
@@ -236,6 +237,10 @@ test("prune keeps the engagement ledger under Airtable's long-text limit", () =>
   assert.ok(size <= 80000, `ledger is ${size} chars`);
   assert.ok(pruned.actions.some((row) => row.profile === "chicago"));
   assert.ok(pruned.targets.some((row) => row.profile === "chicago"));
+  assert.ok(
+    pruned.targets.every((row) => (row.suggested_comments || []).length === 3),
+    "ledger slim must keep all three comment options",
+  );
   const mixed = pruneEngagementStore({
     targets: ["chicago", "miami", "la", "nyc"].flatMap((profile) => (
       Array.from({ length: 12 }, (_, index) => ({
@@ -254,11 +259,27 @@ test("prune keeps the engagement ledger under Airtable's long-text limit", () =>
   assert.ok(JSON.stringify(mixed).length <= 80000);
 });
 
+test("ensureThreeCommentSuggestions restores Use #2/#3 after over-slim", () => {
+  const repaired = ensureThreeCommentSuggestions({
+    target_id: "et_slim",
+    caption: "Chicago riverwalk skyline at dusk",
+    matched_terms: ["chicago skyline"],
+    suggested_comments: ["Love how you framed this riverwalk skyline."],
+    selected_comment: "Love how you framed this riverwalk skyline.",
+    approval_status: "pending",
+    eligibility_status: "Suggested",
+  });
+  assert.equal(repaired.suggested_comments.length, 3);
+  assert.equal(repaired.suggested_comments[0], "Love how you framed this riverwalk skyline.");
+  assert.ok(repaired.suggested_comments[1]);
+  assert.ok(repaired.suggested_comments[2]);
+});
+
 test("worker wires engagement routes, cron, and version bump", () => {
   assert.match(worker, /from "\.\/engagement-service\.mjs"/);
   assert.match(worker, /\/api\/engagement\//);
   assert.match(worker, /studio_engagement_v1:\s*true/);
-  assert.match(worker, /0.10.490-vibe-cut/);
+  assert.match(worker, /0.10.491-engagement-three-comments/);
   assert.match(worker, /studioRunEngagementDiscovery/);
   assert.match(worker, /studioEngagementCron/);
   assert.match(worker, /engagementThemeContextRecord/);

@@ -607,6 +607,9 @@ export function shouldSuspendProfilePlatform(errorText) {
   return /permission|oauth|unauthorized|abuse|spam|suspended|app.?review/i.test(String(errorText || ""));
 }
 
+/** Keep all three comment options while trimming ledger size for Airtable. */
+export const ENGAGEMENT_COMMENT_OPTIONS = 3;
+
 function slimEngagementTarget(target) {
   if (!target || typeof target !== "object") return target;
   const comments = Array.isArray(target.suggested_comments) ? target.suggested_comments : [];
@@ -615,11 +618,49 @@ function slimEngagementTarget(target) {
     caption: String(target.caption || "").slice(0, 320),
     content_summary: String(target.content_summary || "").slice(0, 180),
     recommend_reason: String(target.recommend_reason || "").slice(0, 180),
-    suggested_comments: comments.slice(0, 1).map((row) => String(row || "").slice(0, 240)),
-    selected_comment: String(target.selected_comment || comments[0] || "").slice(0, 240),
+    // Ledger shrink must not drop Use #1/#2/#3 — keep up to three short options.
+    suggested_comments: comments
+      .slice(0, ENGAGEMENT_COMMENT_OPTIONS)
+      .map((row) => String(row || "").slice(0, 200))
+      .filter(Boolean),
+    selected_comment: String(target.selected_comment || comments[0] || "").slice(0, 200),
     matched_terms: Array.isArray(target.matched_terms) ? target.matched_terms.slice(0, 6) : [],
     hashtags: Array.isArray(target.hashtags) ? target.hashtags.slice(0, 6) : [],
     preview_url: String(target.preview_url || "").slice(0, 300),
+  };
+}
+
+/**
+ * Restore missing Use #2 / Use #3 options on cards that were over-slimmed to one comment.
+ * Preserves existing suggestions and pads with fallback phrasing.
+ */
+export function ensureThreeCommentSuggestions(target, maxSuggestions = ENGAGEMENT_COMMENT_OPTIONS) {
+  const max = Math.max(1, Math.min(ENGAGEMENT_COMMENT_OPTIONS, Number(maxSuggestions) || ENGAGEMENT_COMMENT_OPTIONS));
+  const existing = Array.isArray(target?.suggested_comments)
+    ? target.suggested_comments.map((row) => String(row || "").trim()).filter(Boolean)
+    : [];
+  if (existing.length >= max) {
+    return {
+      ...target,
+      suggested_comments: existing.slice(0, max),
+      selected_comment: String(target?.selected_comment || existing[0] || "").trim() || existing[0] || "",
+    };
+  }
+  const fallback = fallbackCommentSuggestions({
+    caption: target?.caption || target?.content_summary || "",
+    title: target?.content_summary || "",
+    matched_terms: target?.matched_terms || [],
+  }, max);
+  const merged = [...existing];
+  for (const candidate of fallback.comments || []) {
+    if (merged.length >= max) break;
+    if (merged.some((row) => nearIdenticalComment(row, candidate))) continue;
+    merged.push(candidate);
+  }
+  return {
+    ...target,
+    suggested_comments: merged.slice(0, max),
+    selected_comment: String(target?.selected_comment || merged[0] || "").trim() || merged[0] || "",
   };
 }
 

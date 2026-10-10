@@ -35,6 +35,7 @@ import {
   classifyEngagementFailure,
   shouldSuspendProfilePlatform,
   pruneEngagementStore,
+  ensureThreeCommentSuggestions,
   computeEngagementInsights,
   mapYoutubeSearchItem,
   nearIdenticalComment,
@@ -345,6 +346,21 @@ export async function studioListEngagementRecommendations(env, options, deps) {
   const platform = normalizeEngagementPlatform(options.platform || "");
   const store = await studioLoadEngagementStore(env, deps);
   const settings = await studioLoadEngagementSettings(env, profile, deps);
+  let dirty = false;
+  // Repair cards that the ledger shrink over-slimmed to a single comment option.
+  store.targets = (store.targets || []).map((row) => {
+    const open = !["Skipped", "Blocked Creator", "Engaged"].includes(String(row?.eligibility_status || ""));
+    const pending = String(row?.approval_status || "pending").toLowerCase() === "pending";
+    const count = Array.isArray(row?.suggested_comments) ? row.suggested_comments.length : 0;
+    if (!open || !pending || count >= 3) return row;
+    dirty = true;
+    return ensureThreeCommentSuggestions(row, settings.max_comment_suggestions || 3);
+  });
+  if (dirty) {
+    await studioSaveEngagementStore(env, store, deps).catch((error) => {
+      console.warn("engagement comment-option repair save failed", error);
+    });
+  }
   let rows = store.targets.filter((row) => row.profile === profile);
   if (platform) rows = rows.filter((row) => row.platform === platform);
   if (options.status) {
