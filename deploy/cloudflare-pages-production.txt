@@ -113,3 +113,4 @@ Deploy Studio UI 0.6.534-pages-path-bust. Rename app-item4-0625.js -> app-item4-
 2026-10-09: Deploy UI 0.6.550-vibe-cut-home. Vibe Cut creation mode — long video to music-driven 9:16 montage (no voiceover).
 
 2026-10-09: Deploy UI 0.6.550-vibe-cut-home. Prominent Vibe Cut launcher on Home wizard.
+2026-10-09: Deploy UI 0.6.551-engagement-filter-layout. Add Discovery filters padding, stronger field labels, and keep Engagement checkboxes beside their text.
