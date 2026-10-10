@@ -11,7 +11,7 @@ const worker = fs.readFileSync(path.join(here, "../studio-api/worker.js"), "utf8
 
 test("UI 0.6.516 Approve gate rejects stale Rendering / In Production (Output 1807)", () => {
   assert.match(app, /BUILD_ID = "item4-0.6.571-ez-portal-home"/);
-  assert.match(html, /UI build 0\.6\.570/);
+  assert.match(html, /UI build 0.6.571/);
   assert.match(html, /app-item4-1008\.js\?v=0.6.571-ez-portal-home/);
   assert.match(html, /styles-phase7-0621\.css\?v=0.6.571-ez-portal-home/);
   assert.match(app, /function creativeCanApproveForPublishing\(/);
