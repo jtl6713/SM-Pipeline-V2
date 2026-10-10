@@ -46,3 +46,23 @@ Run `test-watchdog.ps1` to exercise DOWN, retry, recovery, queue cleanup and sub
 Use `watchdog.example.json` to create new configurations. Configure either Gmail or an authorized webhook, or both; with no delivery channel, events are recorded but cannot be delivered. Never commit `watchdog.local.json`, `gmail-credential.local.xml`, the private local email script, or runtime state.
 
 The watchdog cannot detect a powered-off PC because it runs on that PC; external monitoring is required for that failure mode.
+
+## Invisible background operation (Windows Task Scheduler)
+
+The tracked `watchdog-hidden.vbs` launches `watchdog.ps1` using hidden PowerShell and waits for completion, so it doesn't steal focus and Task Scheduler can see its exit status. It forwards the configured JSON file location and doesn't print credentials. The task runs on the same five-minute schedule and keeps the same DPAPI Gmail user context.
+
+After pulling changes from GitHub, run:
+
+```powershell
+$folder = 'D:\Content Creation\ChicagoShining Pipeline\Source Control\SM-Pipeline-V2\scripts\production-services'
+& "$folder\install-watchdog.ps1"
+Start-ScheduledTask -TaskName 'SM-Pipeline Local Service Watchdog'
+Start-Sleep -Seconds 10
+Get-ScheduledTaskInfo -TaskName 'SM-Pipeline Local Service Watchdog' |
+    Select-Object LastRunTime, LastTaskResult, NextRunTime
+(Get-ScheduledTask -TaskName 'SM-Pipeline Local Service Watchdog').Actions
+```
+
+If the task already exists, the installer **only replaces its launch action**, preserving the operator's existing schedule, task principal, and `Run only when user is logged on` setting. For a new installation, it creates an interactive-current-user task with checks every five minutes. The task does not run if the user signs out or the PC goes to sleep.
+
+The earlier local-only `watchdog-hidden.local.vbs` is no longer needed after reinstalling the tracked launcher; keep it as a backup if desired. Running routine checks should not open a console window. The Remotion restart path uses `Start-Process -WindowStyle Hidden`, but the child Node process's window behavior should be checked during a maintenance-window restart test.
