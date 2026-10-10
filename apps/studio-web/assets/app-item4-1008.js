@@ -261,7 +261,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.574-profile-picker-resilience";
+  const BUILD_ID = "item4-0.6.575-compression-progress-finish";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -4406,12 +4406,24 @@
     return { oversized: tooLarge, allowed, compressable };
   }
 
+  function item4AssetCompressionUiPending(asset, assetsStatus = "") {
+    const state = String(asset?.compression_status || "").toLowerCase();
+    if (state === "failed") return true;
+    if (state === "ready" || state === "skipped") return false;
+    const driveReady = Boolean(String(asset?.google_drive_file_id || "").trim()
+      && String(asset?.media_asset_record_id || "").trim());
+    if (String(assetsStatus || "").trim() === "Ready" && driveReady) {
+      return ["pending", "queued", "downloading"].includes(state);
+    }
+    if (["pending", "queued", "compressing", "downloading"].includes(state)) return true;
+    return asset?.compression_needed === true && state !== "ready" && state !== "failed";
+  }
+
   function item4WorkspaceNeedsCompression(status = item4Workspace) {
-    return (Array.isArray(status?.assets) ? status.assets : []).some((asset) => {
-      const state = String(asset?.compression_status || "").toLowerCase();
-      if (["pending", "queued", "compressing", "downloading"].includes(state)) return true;
-      return asset?.compression_needed === true && state !== "ready" && state !== "failed";
-    });
+    const assetsStatus = String(status?.assets_status || "").trim();
+    return (Array.isArray(status?.assets) ? status.assets : []).some((asset) => (
+      item4AssetLooksLikeVideo(asset) && item4AssetCompressionUiPending(asset, assetsStatus)
+    ));
   }
 
   function item4WorkspaceCompressionFailed(status = item4Workspace) {
@@ -4428,9 +4440,17 @@
     const name = asset?.name || "video";
     const pct = Number(asset?.compression_progress);
     if (Number.isFinite(pct) && pct > 0) {
-      return ezIsAzFinishedPath()
-        ? `Compressing ${name} · ${Math.round(pct)}%. You can close this tab.`
-        : `Compressing ${name} · ${Math.round(pct)}%. Keep this tab open.`;
+      const finishing = pct >= 95;
+      const suffix = finishing
+        ? "Finishing Drive copy and preview…"
+        : (ezIsAzFinishedPath()
+          ? "You can close this tab."
+          : "Keep this tab open.");
+      return finishing
+        ? `Compressing ${name} · ${Math.round(pct)}%. ${suffix}`
+        : (ezIsAzFinishedPath()
+          ? `Compressing ${name} · ${Math.round(pct)}%. You can close this tab.`
+          : `Compressing ${name} · ${Math.round(pct)}%. Keep this tab open.`);
     }
     return ezIsAzFinishedPath()
       ? `Studio is compressing ${name}. You can close this tab.`
@@ -10498,6 +10518,16 @@ function timedScriptAssetLabel(asset, index) {
     return next;
   }
 
+  function item4MasterPollDelayMs(status = item4Workspace) {
+    if (!item4WorkspaceNeedsCompression(status)) return ITEM4_MASTER_POLL_MS;
+    const asset = (Array.isArray(status?.assets) ? status.assets : []).find((row) => (
+      item4AssetCompressionUiPending(row, String(status?.assets_status || ""))
+    ));
+    const pct = Number(asset?.compression_progress || 0);
+    if (Number.isFinite(pct) && pct >= 85) return 1000;
+    return ITEM4_MASTER_POLL_MS;
+  }
+
   async function pollItem4MasterAssets() {
     if (!activeProductionRequest?.id) { stopItem4MasterPolling(); return; }
     if (!item4MasterPollStartedAt) item4MasterPollStartedAt = Date.now();
@@ -10523,17 +10553,17 @@ function timedScriptAssetLabel(asset, index) {
         }
         const elapsed = Date.now() - item4MasterPollStartedAt;
         if (elapsed >= ITEM4_COMPRESS_POLL_TIMEOUT_MS) {
-          stopItem4MasterPolling();
           setRequestMessage(ezIsAzFinishedPath()
             ? "Compression is still running in the background. You can close this tab."
-            : "Compression is still running. Keep this tab open, or wait a minute and refresh.", "success");
+            : "Compression is still running. Studio will keep checking automatically.", "success");
           if (ezIsAzFinishedPath()) {
             setAzFinishedMessage("Compression is still running in the background. You can close this tab.", "success");
             startAzFinishedProgressPolling();
           }
+          item4MasterPollTimer = setTimeout(pollItem4MasterAssets, 12000);
           return;
         }
-        item4MasterPollTimer = setTimeout(pollItem4MasterAssets, ITEM4_MASTER_POLL_MS);
+        item4MasterPollTimer = setTimeout(pollItem4MasterAssets, item4MasterPollDelayMs(item4Workspace));
         return;
       }
       if (state === "Ready") {
@@ -10568,7 +10598,7 @@ function timedScriptAssetLabel(asset, index) {
     } catch (error) {
       console.warn("Item 4 master-media status poll deferred", error);
     }
-    item4MasterPollTimer = setTimeout(pollItem4MasterAssets, ITEM4_MASTER_POLL_MS);
+    item4MasterPollTimer = setTimeout(pollItem4MasterAssets, item4MasterPollDelayMs(item4Workspace));
   }
 
   function startItem4MasterPolling() {

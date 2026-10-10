@@ -51,9 +51,9 @@ def asset_size_bytes(asset: dict[str, Any] | None) -> int:
         return 0
 
 
-def is_finished_video_request(record: dict[str, Any] | None) -> bool:
+def _production_notes_blob(record: dict[str, Any] | None) -> str:
     fields = (record or {}).get("fields") or {}
-    notes = "\n".join(
+    return "\n".join(
         str(fields.get(name) or "")
         for name in (
             "Production_Notes",
@@ -62,7 +62,19 @@ def is_finished_video_request(record: dict[str, Any] | None) -> bool:
             "Production_Request_Notes",
         )
     ).lower()
-    return "ez-input=finished-video" in notes
+
+
+def is_finished_video_request(record: dict[str, Any] | None) -> bool:
+    return "ez-input=finished-video" in _production_notes_blob(record)
+
+
+def is_vibe_cut_request(record: dict[str, Any] | None) -> bool:
+    notes = _production_notes_blob(record)
+    return "ez-input=vibe-cut" in notes or "[vibe-cut]" in notes
+
+
+def promotes_master_ready_after_compress(record: dict[str, Any] | None) -> bool:
+    return is_finished_video_request(record) or is_vibe_cut_request(record)
 
 
 def compression_status(asset: dict[str, Any] | None) -> str:
@@ -228,7 +240,7 @@ def compress_pending_assets(
     record, assets = load_assets(client, record_id)
     still_pending = [asset for asset in assets if needs_compress(asset)]
     extra: dict[str, Any] = {}
-    if is_finished_video_request(record) and not still_pending and not failed:
+    if promotes_master_ready_after_compress(record) and not still_pending and not failed:
         extra = {
             "Studio_Master_Asset_Status": "Ready",
             "Studio_Item4_State": "Assets Ready",
@@ -319,6 +331,22 @@ def compress_one(
         )
         sleep(POLL_SLEEP_SECONDS)
         job = poll_job(job_id)
+
+    record, assets = load_assets(client, record_id)
+    save_assets(
+        client,
+        record_id,
+        patch_asset(
+            assets,
+            asset_id,
+            {
+                "compression_status": "compressing",
+                "compression_needed": True,
+                "compression_job_id": job_id,
+                "compression_progress": 98,
+            },
+        ),
+    )
 
     content, _mime = download_output(job)
     if not content:

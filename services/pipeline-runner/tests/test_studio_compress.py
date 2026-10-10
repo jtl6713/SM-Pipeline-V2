@@ -154,6 +154,52 @@ def test_compress_pending_assets_stages_preview_and_marks_ready():
     assert "drive_file_id" not in submitted[0]
 
 
+def test_compress_pending_assets_promotes_vibe_cut_master_ready():
+    client = FakeAirtable(
+        _request(
+            [
+                {
+                    "id": "vid1",
+                    "name": "long.mp4",
+                    "media_kind": "video",
+                    "size_bytes": 150 * 1024 * 1024,
+                    "r2_key": "studio/master-assets/recPR/vid1-long.mp4",
+                    "compression_status": "pending",
+                }
+            ],
+            finished=False,
+        )
+    )
+    client.record["fields"]["Production_Notes"] = "origin=ez-wizard; ez-input=vibe-cut"
+
+    def submit_job(*_args, **_kwargs):
+        return {"job_id": "job-vibe", "status": "queued"}
+
+    def poll_job(_job_id: str) -> dict[str, Any]:
+        return {
+            "job_id": "job-vibe",
+            "status": "complete",
+            "progress": 100,
+            "ok": True,
+            "output_url": "http://127.0.0.1:3335/files/job-vibe/long_compressed.mp4",
+            "output_size_bytes": 40_000_000,
+        }
+
+    result = compress_pending_assets(
+        client,
+        "recPRCompress",
+        submit_job=submit_job,
+        poll_job=poll_job,
+        download_output=lambda _job: (b"vibe-mp4", "video/mp4"),
+        stage_preview=lambda request_id, asset_id, _content: (
+            f"https://media.chicagoshining.com/studio/previews/finished-video/{request_id}/{asset_id}.mp4"
+        ),
+        sleep=lambda _seconds: None,
+    )
+    assert result["finished_video_ready"] is True
+    assert client.record["fields"]["Studio_Master_Asset_Status"] == "Ready"
+
+
 def test_submit_download_job_uses_url_not_drive(monkeypatch):
     import a1s.compressor as compressor
 

@@ -603,7 +603,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.514-compress-staging-hold",
+          version: "0.10.515-compression-stale-heal",
           studio_render_queue_wait_v1: true,
           studio_approve_all_batch_v1: true,
           studio_engagement_v1: true,
@@ -5728,6 +5728,31 @@ function item4AssetCompressionPending(asset) {
 
 function item4AssetsNeedStudioCompress(assets) {
   return (Array.isArray(assets) ? assets : []).some(item4AssetCompressionPending);
+}
+
+function item4HealStaleCompressionAssets(assets) {
+  let changed = false;
+  const next = (Array.isArray(assets) ? assets : []).map((asset) => {
+    if (!item4LooksLikeVideoAsset(asset)) return asset;
+    const state = String(asset?.compression_status || "").trim().toLowerCase();
+    if (!["pending", "queued", "compressing", "downloading"].includes(state)) return asset;
+    const driveId = String(asset?.google_drive_file_id || "").trim();
+    const mediaId = String(asset?.media_asset_record_id || "").trim();
+    const progress = Number(asset?.compression_progress || 0);
+    const preview = String(asset?.preview_public_url || asset?.url || "").trim();
+    const previewReady = preview && item4UrlIsPublicPublishCdn(preview);
+    if (!driveId || !mediaId) return asset;
+    if (!(progress >= 95 || previewReady)) return asset;
+    changed = true;
+    return {
+      ...asset,
+      compression_status: "ready",
+      compression_needed: false,
+      compression_progress: 100,
+      compression_error: null,
+    };
+  });
+  return { assets: next, changed };
 }
 
 function item4HasVideoMasters(assets) {
@@ -14710,6 +14735,28 @@ async function getItem4WorkspaceStatus(request, env, url, authorization, ctx = n
           console.warn("Item 4 clip poster drain deferred", error);
         }
       })());
+    }
+    const staleCompression = item4HealStaleCompressionAssets(assets);
+    if (staleCompression.changed) {
+      assets = staleCompression.assets.slice().sort((a, b) => Number(a.order || 0) - Number(b.order || 0));
+      const masterReady = String(f(record, "Studio_Master_Asset_Status") || "").trim() === "Ready";
+      const patchFields = {
+        Studio_Master_Assets_JSON: JSON.stringify(assets),
+      };
+      if (masterReady && !item4AssetsNeedStudioCompress(assets)) {
+        patchFields.Studio_Item4_State = "Assets Ready";
+      }
+      if (ctx && typeof ctx.waitUntil === "function") {
+        ctx.waitUntil(item4UpdateRequestState(env, recordId, patchFields).catch((error) => {
+          console.warn("Item 4 stale compression heal deferred", error);
+        }));
+      } else {
+        try {
+          record = await item4UpdateRequestState(env, recordId, patchFields);
+        } catch (error) {
+          console.warn("Item 4 stale compression heal failed", error);
+        }
+      }
     }
     if (item4AssetsNeedStudioCompress(assets) && ctx && typeof ctx.waitUntil === "function") {
       ctx.waitUntil(item4PulseStudioCompressJob(env, recordId).catch((error) => {

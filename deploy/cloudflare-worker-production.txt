@@ -119,3 +119,5 @@ Deploy Worker 0.10.489-engagement-ledger. Shrink the engagement ledger so Chicag
 2026-10-10: Deploy Worker 0.10.510-ez-portal-horizontal-finished. AZ horizontal finished-video routes to YouTube Standard Video only (source-aspect=horizontal).
 
 2026-10-10: Deploy Worker 0.10.514-compress-staging-hold. Keep studio/master-assets R2 until studio_compress finishes (Drive handoff race).
+
+2026-10-10: Deploy Worker 0.10.515-compression-stale-heal. Heal compressing@95 manifests when Drive authority already landed.
