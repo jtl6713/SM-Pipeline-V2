@@ -260,7 +260,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.554-pipeline-thumb-no-stories";
+  const BUILD_ID = "item4-0.6.555-unscheduled-regenerate";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -17939,7 +17939,9 @@
         if (!platforms.includes(pipelineSchedulePlatformKey(record))) return false;
         const iso = pipelineRecordScheduleIso(record);
         const ms = iso ? Date.parse(iso) : NaN;
-        return Number.isFinite(ms) && ms > nowMs && ms <= cutoffMs;
+        // Unscheduled unpublished outputs are the primary recovery target.
+        // Do not require an existing future stamp to enter regeneration.
+        return !iso || !Number.isFinite(ms) || (ms > nowMs && ms <= cutoffMs);
       });
       const platformNames = platforms.map((key) => key[0].toUpperCase() + key.slice(1)).join(", ");
       if (!eligible.length) {
@@ -17960,7 +17962,7 @@
 
   async function regeneratePipelineSchedulesForPlatforms(platforms, button) {
     const nowMs = Date.now();
-    const cutoffMs = nowMs + 28 * 24 * 60 * 60 * 1000;
+    const cutoffMs = nowMs + 14 * 24 * 60 * 60 * 1000;
     const selected = new Set((platforms || []).map((key) => String(key || "").toLowerCase()));
     const eligible = (pipelineOutputs || [])
       .filter((record) => {
@@ -18047,7 +18049,7 @@
     button.textContent = "Regenerate schedules";
     setPipelineScheduleGridMessage(failed
       ? `Regenerated ${saved} schedule${saved === 1 ? "" : "s"}; ${failed} could not be regenerated.`
-      : `Regenerated ${saved} post schedule${saved === 1 ? "" : "s"} within the next 28 days.`);
+      : `Regenerated ${saved} post schedule${saved === 1 ? "" : "s"} within the next 14 days.`);
   }
 
   async function regeneratePipelineContentSchedule(groupKey, button = null) {
