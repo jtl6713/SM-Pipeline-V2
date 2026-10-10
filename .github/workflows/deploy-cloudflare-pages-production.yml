@@ -95,12 +95,24 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          # Capture the unique *.pages.dev URL Wrangler prints so verify does not race
+          # the production alias (which briefly served the previous index after #568).
           npx --yes wrangler@latest pages deploy /tmp/pages-deploy \
             --project-name=chicagoshining-studio \
             --branch="$PROD_BRANCH" \
             --commit-hash="$GITHUB_SHA" \
             --commit-message="SM Pipeline V2 controlled GitHub deployment" \
-            --commit-dirty=false
+            --commit-dirty=false 2>&1 | tee /tmp/pages-deploy.log
+          DEPLOY_URL=$(awk '
+            match($0, /https:\/\/[a-f0-9]+\.chicagoshining-studio\.pages\.dev/) {
+              print substr($0, RSTART, RLENGTH); exit
+            }' /tmp/pages-deploy.log || true)
+          if [[ -n "${DEPLOY_URL:-}" ]]; then
+            printf '%s\n' "$DEPLOY_URL" > /tmp/pages-wrangler-url.txt
+            echo "pages_wrangler_deploy_url=$DEPLOY_URL"
+          else
+            echo "::warning::Could not parse unique Pages deploy URL from Wrangler output."
+          fi
 
       - name: Verify latest production deployment
         shell: bash
@@ -149,7 +161,12 @@ jobs:
           const rows = Array.isArray(data) ? data : (data.result || []);
           if (!rows.length) throw new Error('No production Pages deployment was returned after deploy');
           const latest = rows[0] || {};
+          let wranglerUrl = '';
+          try {
+            wranglerUrl = fs.readFileSync('/tmp/pages-wrangler-url.txt', 'utf8').trim();
+          } catch {}
           const candidates = [
+            wranglerUrl,
             latest.url,
             latest.deployment_url,
             Array.isArray(latest.aliases) ? latest.aliases[0] : null,
@@ -159,7 +176,7 @@ jobs:
           // production alias, which can briefly keep the previous index while alias cutover
           // finishes — that made verify silently grep-fail and never reach the custom domain.
           const httpsUrls = candidates.filter((value) => /^https:\/\//i.test(value));
-          const uniqueDeploy = httpsUrls.find((value) => /^https:\/\/[a-f0-9]{8}\./i.test(value));
+          const uniqueDeploy = httpsUrls.find((value) => /^https:\/\/[a-f0-9]+\./i.test(value));
           const url = uniqueDeploy || httpsUrls[0];
           if (!url) {
             throw new Error(`Could not resolve a HTTPS Pages URL from deployment list: ${JSON.stringify(latest).slice(0, 500)}`);
@@ -228,12 +245,22 @@ jobs:
           test -n "$CF_ACCESS_CLIENT_ID"
           test -n "$CF_ACCESS_CLIENT_SECRET"
           ACCESS_HEADERS=(-H "CF-Access-Client-Id: $CF_ACCESS_CLIENT_ID" -H "CF-Access-Client-Secret: $CF_ACCESS_CLIENT_SECRET")
-          INDEX_CODE=$(curl -sS -L "${ACCESS_HEADERS[@]}" -o /tmp/live-index.html -w '%{http_code}' "$LATEST_URL/" || true)
-          echo "pages_dev_http=$INDEX_CODE url=$LATEST_URL"
-          if [[ "$INDEX_CODE" != "200" ]]; then
-            INDEX_CODE=$(curl -sS -L -o /tmp/live-index.html -w '%{http_code}' "$LATEST_URL/" || true)
-            echo "pages_dev_public_http=$INDEX_CODE"
-          fi
+          INDEX_CODE=""
+          for attempt in 1 2 3 4 5 6; do
+            INDEX_CODE=$(curl -sS -L "${ACCESS_HEADERS[@]}" -o /tmp/live-index.html -w '%{http_code}' "$LATEST_URL/?studio_build=$EXPECTED_LABEL&attempt=$attempt" || true)
+            echo "pages_dev_http=$INDEX_CODE url=$LATEST_URL attempt=$attempt"
+            if [[ "$INDEX_CODE" != "200" ]]; then
+              INDEX_CODE=$(curl -sS -L -o /tmp/live-index.html -w '%{http_code}' "$LATEST_URL/?studio_build=$EXPECTED_LABEL&attempt=$attempt" || true)
+              echo "pages_dev_public_http=$INDEX_CODE attempt=$attempt"
+            fi
+            if [[ "$INDEX_CODE" == "200" ]] \
+              && grep -Fq "UI build $EXPECTED_LABEL" /tmp/live-index.html \
+              && grep -Fq "$EXPECTED_JS_PATH" /tmp/live-index.html \
+              && grep -Fq "$EXPECTED_DENSITY_CSS_PATH" /tmp/live-index.html; then
+              break
+            fi
+            sleep 10
+          done
           if [[ "$INDEX_CODE" == "200" ]]; then
             require_match "$EXPECTED_JS_PATH" /tmp/live-index.html "pages.dev index js path"
             require_match "$EXPECTED_DENSITY_CSS_PATH" /tmp/live-index.html "pages.dev index density css path"
