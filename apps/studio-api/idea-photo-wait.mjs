@@ -21,6 +21,16 @@ export const IDEA_LIBRARY_WEAK_TOKENS = new Set([
 
 export const IDEA_LIBRARY_SHORT_SUBJECTS = new Set(["cta"]);
 
+/**
+ * Transit / brand subjects that must stay in the Airtable scan even when a
+ * Primary_Location place key exists. Without this, "Metra Or The L?" with
+ * Primary_Location "Ogilvie Station" only scanned for "ogilvie" and missed
+ * classified Metra stills whose Location/Asset Name never say Ogilvie.
+ */
+export const IDEA_LIBRARY_BRAND_SUBJECTS = new Set([
+  "cta", "metra", "amtrak", "pace", "divvy", "uber", "lyft",
+]);
+
 export const IDEA_LIBRARY_NAMED_PLACES = [
   "andersonville", "bridgeport", "bronzeville", "bucktown", "chinatown",
   "edgewater", "fulton market", "garfield park", "gold coast", "grant park",
@@ -97,6 +107,15 @@ export function buildIdeaLibraryKeys({ primaryLocation = "", title = "", summary
     subjectKeys,
     scanKeys: [...new Set([...placeKeys, ...subjectKeys])],
   };
+}
+
+/** Airtable FIND keys: place anchors plus brand/transit subjects from the title. */
+export function ideaLibraryFilterKeys(placeKeys = [], subjectKeys = []) {
+  const brands = (subjectKeys || []).filter((token) => IDEA_LIBRARY_BRAND_SUBJECTS.has(token));
+  if ((placeKeys || []).length || brands.length) {
+    return [...new Set([...(placeKeys || []), ...brands])];
+  }
+  return [...new Set(subjectKeys || [])];
 }
 
 export function rankIdeaLibraryFields({

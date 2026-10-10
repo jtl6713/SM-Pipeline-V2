@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   buildIdeaLibraryKeys,
   ideaAutoListenContentType,
+  ideaLibraryFilterKeys,
   ideaPhotoWaitApplies,
   ideaManagePhotoPauseActive,
   ideaManagePhotoPauseUntil,
@@ -192,6 +193,35 @@ test("CTA idea keys ignore cars/ride and keep train subject words", () => {
   assert.ok(keys.subjectKeys.includes("trains") || keys.subjectKeys.includes("train"));
   assert.ok(keys.subjectKeys.includes("platform"));
   assert.ok(keys.subjectKeys.includes("cta"));
+});
+
+test("Metra idea with Ogilvie location still scans metra brand photos", () => {
+  const keys = buildIdeaLibraryKeys({
+    primaryLocation: "Ogilvie Station",
+    title: "Metra Or The L?",
+    summary: "Quick thread clarifying when to choose Metra versus the L.",
+  });
+  assert.ok(keys.placeKeys.includes("ogilvie"));
+  assert.ok(keys.subjectKeys.includes("metra"));
+  const filter = ideaLibraryFilterKeys(keys.placeKeys, keys.subjectKeys);
+  assert.ok(filter.includes("ogilvie"));
+  assert.ok(filter.includes("metra"), "brand subject must stay in Airtable FIND with place keys");
+  assert.ok(!filter.includes("versus"));
+  assert.ok(!filter.includes("thread"));
+
+  const metraStill = rankIdeaLibraryFields({
+    location: "West Chicago Metra Station, West Chicago, Illinois",
+    name: "Metra 6",
+    haystack: "Metra 6, metra, train station, West Chicago, commuter rail",
+    ...keys,
+    strongIdeaTokens: keys.subjectKeys,
+    ideaTokens: ["metra", "ogilvie", "choose"],
+    queryTokens: [],
+    today: "2026-10-10",
+    intakeDate: "2026-10-10",
+  });
+  assert.equal(metraStill.confidence, "high");
+  assert.ok(metraStill.match_reasons.some((reason) => reason.includes("metra")));
 });
 
 test("parked-car Andersonville still is not high for a CTA idea", () => {
