@@ -353,6 +353,29 @@ def test_footage_usable_seconds_sums_unique_videos_once():
     assert footage_usable_seconds(clips) == 9.0
 
 
+def test_footage_usable_seconds_sums_distinct_trims_of_same_master():
+    """Vibe Cut: many in/out windows on one Drive file must not collapse to max trim."""
+    from t1.slice import footage_usable_seconds
+
+    clips = []
+    for index in range(28):
+        start = (index * 1.6) % 45
+        clips.append(
+            {
+                "id": f"studio-source-{index + 1}",
+                "media_kind": "video",
+                "googleDriveFileId": "drive-chicago",
+                "sourceInSeconds": start,
+                "sourceOutSeconds": start + 1.085,
+                "sourceDurationSeconds": 48.69,
+                "vibe_cut": True,
+            }
+        )
+    usable = footage_usable_seconds(clips)
+    assert usable > 20
+    assert usable <= 48.69 + 1e-6
+
+
 def test_expand_to_timeline_does_not_wrap_short_video_library():
     from t1.slice import expand_to_timeline
 

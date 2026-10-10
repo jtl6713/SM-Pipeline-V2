@@ -57,4 +57,6 @@ def test_expand_master_is_not_head_trim():
     total = sum(float(row["out_seconds"]) - float(row["in_seconds"]) for row in sources)
     assert 20 <= total <= 35
     assert sources[0]["media_asset_record_id"] == "recVIDEO00000001"
+    assert float(sources[0]["duration_seconds"]) < 3
+    assert float(sources[0]["source_duration_seconds"]) == 48.69
     assert desired_clip_count(parse_vibe_cut_directive(NOTES), source_duration=48.69) >= 8

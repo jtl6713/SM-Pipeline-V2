@@ -360,6 +360,35 @@ def process_one(
         return {"processed": False, "reason": "voiceover_exceeds_video", "error": message, **preview}
     footage_capped = False
     usable = footage_usable_seconds(clips) if has_video else 0.0
+    note_text = " ".join(
+        [
+            field_str(output, "Output_Notes"),
+            field_str(content_item or {}, "Production_Notes"),
+            field_str(content_item or {}, "Production_Request_Notes"),
+            field_str(content_item or {}, "Content_Notes"),
+        ]
+    )
+    from vibe_cut import desired_clip_count, is_vibe_cut_notes, parse_vibe_cut_directive
+
+    vibe = has_video and (
+        is_vibe_cut_notes(note_text)
+        or any(bool((clip or {}).get("vibe_cut")) for clip in clips)
+    )
+    if has_video and vibe:
+        # Vibe Cut stamps many trims of one master. Usable footage is the master
+        # length (or merged trim coverage), never a single-trim max that would
+        # collapse a 30s target to ~1s (Chicago Walk with me / Content 454).
+        from studio_produce.media import source_duration_seconds as _source_duration_seconds
+
+        master_seconds = max(
+            (
+                float(_source_duration_seconds(clip) or 0)
+                for clip in clips
+                if isinstance(clip, dict)
+            ),
+            default=0.0,
+        )
+        usable = max(float(usable or 0), float(master_seconds or 0))
     if has_video:
         if usable > 0 and usable + 1e-6 < duration:
             # Prefer a shorter beat-aligned edit over recycling short clips to fill
@@ -372,18 +401,8 @@ def process_one(
     # only the head of the source. Stamp should already expand; this is a harden.
     clip_count = max(1, len(clips))
     if has_video and clip_count == 1 and usable > duration * 1.15:
-        from vibe_cut import desired_clip_count, is_vibe_cut_notes, parse_vibe_cut_directive
-
-        note_text = " ".join(
-            [
-                field_str(output, "Output_Notes"),
-                field_str(content_item or {}, "Production_Notes"),
-                field_str(content_item or {}, "Production_Request_Notes"),
-                field_str(content_item or {}, "Content_Notes"),
-            ]
-        )
-        vibe = is_vibe_cut_notes(note_text) or bool((clips[0] or {}).get("vibe_cut"))
-        if vibe or bool((clips[0] or {}).get("beatSync", True)):
+        vibe_single = vibe or bool((clips[0] or {}).get("beatSync", True))
+        if vibe_single:
             cfg = parse_vibe_cut_directive(note_text) if is_vibe_cut_notes(note_text) else {
                 "target_seconds": duration,
                 "style": "beat-cut",

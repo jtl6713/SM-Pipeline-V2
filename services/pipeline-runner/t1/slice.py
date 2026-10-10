@@ -24,16 +24,44 @@ def clips_have_video(clips: list[dict[str, Any]]) -> bool:
     return any(is_video_clip(clip) for clip in clips)
 
 
+def _merge_span_seconds(ranges: list[tuple[float, float]]) -> float:
+    """Sum seconds covered by ranges after merging overlaps."""
+    cleaned = sorted(
+        (float(start), float(end))
+        for start, end in ranges
+        if end > start + 1e-9
+    )
+    if not cleaned:
+        return 0.0
+    total = 0.0
+    cur_start, cur_end = cleaned[0]
+    for start, end in cleaned[1:]:
+        if start <= cur_end + 1e-9:
+            cur_end = max(cur_end, end)
+            continue
+        total += max(0.0, cur_end - cur_start)
+        cur_start, cur_end = start, end
+    total += max(0.0, cur_end - cur_start)
+    return float(total)
+
+
 def unique_video_usable_seconds(clips: list[dict[str, Any]], *, fps: int = FPS_DEFAULT) -> float:
-    """Sum unique video source spans. Duplicate rows of the same file count once."""
-    spans: dict[str, float] = {}
+    """Sum unique video source spans.
+
+    Duplicate rows of the same file count overlapping windows once, but distinct
+    trims of one long master (Vibe Cut) must add together — otherwise T1 caps the
+    whole montage to the longest single trim (~1s) and Remotion gets a 28×0.1s cut.
+    """
+    spans: dict[str, list[tuple[float, float]]] = {}
     for index, clip in enumerate(clips):
         if not is_video_clip(clip):
             continue
         key = source_key(clip) or f"video:{index}"
         start, end = _source_span(clip, fps)
-        spans[key] = max(spans.get(key, 0.0), max(0.0, end - start))
-    return float(sum(spans.values()))
+        if end <= start:
+            continue
+        spans.setdefault(key, []).append((start, end))
+    return float(sum(_merge_span_seconds(ranges) for ranges in spans.values()))
 
 
 def photo_floor_seconds(clips: list[dict[str, Any]], *, fps: int = FPS_DEFAULT) -> float:
