@@ -1,15 +1,48 @@
-# Local Windows service watchdog
+# SM Pipeline local Windows watchdog
 
-This is a **local PC** watchdog, not Cloudflare monitoring. It checks every five minutes, alerts on a down transition, attempts at most three consecutive restarts (five-minute cooldown), alerts on exhaustion, and resets the counter only after a healthy check. It sends recovery alerts and avoids repeating DOWN notifications.
+Checks Remotion's HTTP health endpoint every five minutes from Windows Task Scheduler. Restarts at most three times per consecutive outage, with a five-minute cooldown; attempts stop at the configured limit until health recovers.
 
-## Installation (on the Windows rendering PC)
+## Gmail notifications (durable retry)
 
-1. Copy `watchdog.example.json` to `watchdog.local.json` in this folder. **Do not commit local configuration or webhook secrets.**
-2. Replace the example Remotion health URL with the **actual local listener URL**. Replace the restart script path with a verified local startup script that exits after launching the service. The sample URL and script are placeholders, **not verified production endpoints**.
-3. Set `notificationWebhookUrl` to an authorized JSON webhook accepting `{"text":"..."}` (e.g. a compatible Teams/Slack relay). Leaving it empty only logs messages; it does **not** notify anyone.
-4. Run PowerShell as the account authorized to start the services and register tasks: `powershell -ExecutionPolicy Bypass -File .\install-watchdog.ps1`.
-5. Test a service stop and confirm DOWN, restart, exhaustion and RECOVERED notifications. Ensure the watchdog task runs even after logout under the correct account.
+Set `notificationEmailTo` in your local `watchdog.local.json`. The tracked `send-watchdog-email.ps1` uses the existing DPAPI-encrypted `gmail-credential.local.xml` and the installed `Send-MailKitMessage` PowerShell module, with TLS required on `smtp.gmail.com:465` and Gmail app-password LOGIN authentication. It does not embed passwords or email addresses in committed code.
 
-Windows services can use `{"name":"Runner","type":"windows-service","serviceName":"ActualServiceName"}`. Process checks use `type: process`, `processName`, `restartCommand` and `restartWorkingDirectory`. HTTP checks are preferred for Remotion because a running process can be unresponsive.
+Events are stored under `_pendingNotifications` inside `watchdog.state.json` *before* sending. A successful email removes its pending Gmail channel; errors keep it pending and it retries on subsequent checks, even if Remotion is healthy. The state and queue are serialized together. Successful multi-channel deliveries are checkpointed separately. Alerts have explicit subjects:
 
-The watchdog intentionally **does not kill processes** or endlessly restart them. After reaching the limit, it keeps checking health but stops restarting until a healthy check resets the count or the state file is deliberately cleared by an operator. It requires the PC and Task Scheduler to be running; external monitoring is needed to detect a powered-off PC.
+- `[ChicagoShining Watchdog] Remotion renderer DOWN`
+- `[ChicagoShining Watchdog] Remotion renderer RESTART ATTEMPT`
+- `[ChicagoShining Watchdog] Remotion renderer RESTART FAILED`
+- `[ChicagoShining Watchdog] Remotion renderer RESTART LIMIT`
+- `[ChicagoShining Watchdog] Remotion renderer RECOVERED`
+
+The retry queue is **at-least-once**, so a PC crash between SMTP acceptance and recording success can cause a duplicate. A permanently failing email remains pending until successfully delivered; do not delete the state file to troubleshoot.
+
+## Updating an already configured Windows PC
+
+Important: Older installs have **local edits** to `watchdog.ps1` and an untracked working `send-watchdog-email.local.ps1`. Back up `watchdog.ps1` and the local JSON/credential file; do not discard those secrets or your start script. Restore only `scripts/production-services/watchdog.ps1` in Git before pulling the new tracked implementation (see operator instructions in the rollout message). Other uncommitted repository changes should be reviewed, not overwritten.
+
+From `scripts/production-services` after pulling:
+
+```powershell
+.\configure-watchdog-email.ps1 -To 'your-inbox@example.com'
+.\test-watchdog.ps1
+.\send-watchdog-email.ps1 -Subject '[ChicagoShining Watchdog] TEST' -Message 'Test alert' -To 'your-inbox@example.com'
+.\watchdog.ps1
+```
+
+The Gmail credential is scoped to the Windows user that created it. The scheduled task must run as that same user. The `Run only when user is logged on` option continues checking while the session is locked, but not after sign-out or sleep.
+
+Remotion health is `http://127.0.0.1:3333/health` on the known Windows PC. The restart script is intentionally local at `start-remotion.local.ps1`; it must have been tested and must exit. The watchdog's restart invocation quotes that path and checks the script's exit code. HTTP health is re-evaluated on the next check.
+
+## Local diagnostics
+
+```powershell
+Get-Content .\watchdog.state.json
+Get-ScheduledTaskInfo -TaskName 'SM-Pipeline Local Service Watchdog'
+Invoke-RestMethod http://127.0.0.1:3333/health
+```
+
+Run `test-watchdog.ps1` to exercise DOWN, retry, recovery, queue cleanup and subject names *in an isolated temp directory*; it does not stop the production renderer, alter Task Scheduler, or send real email.
+
+Use `watchdog.example.json` to create new configurations. Configure either Gmail or an authorized webhook, or both; with no delivery channel, events are recorded but cannot be delivered. Never commit `watchdog.local.json`, `gmail-credential.local.xml`, the private local email script, or runtime state.
+
+The watchdog cannot detect a powered-off PC because it runs on that PC; external monitoring is required for that failure mode.
