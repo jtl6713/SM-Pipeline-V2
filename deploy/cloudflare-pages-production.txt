@@ -123,3 +123,5 @@ Deploy Studio UI 0.6.534-pages-path-bust. Rename app-item4-0625.js -> app-item4-
 
 2026-10-10: Deploy UI 0.6.554-pipeline-thumb-no-stories. Pipeline package thumb opens Reel/Video/Short (never Story).
 2026-10-09 Deploy Studio UI 0.6.555-unscheduled-regenerate. Bulk regenerate includes unscheduled unpublished outputs; 14-day window; regression test.
+
+2026-10-09: Deploy Studio UI 0.6.556-vibe-cut-large-upload. Accept Vibe Cut video drops up to 1.5 GB, preserve Vibe Cut mode, and show multipart upload progress.

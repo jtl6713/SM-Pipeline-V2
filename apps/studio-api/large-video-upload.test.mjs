@@ -1,5 +1,11 @@
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import path from "node:path";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
+
+const here = path.dirname(fileURLToPath(import.meta.url));
+const worker = fs.readFileSync(path.join(here, "worker.js"), "utf8");
 
 function sessionIdFromPath(pathname) {
   const match = String(pathname || "").match(/\/assets\/upload-session\/([A-Za-z0-9_-]+)/);
@@ -47,4 +53,15 @@ test("finished-video hard max is 1.5 GB and direct upload stays under Worker bod
   assert.ok(directMax < clipHardMax);
   assert.ok(clipHardMax < finishedHardMax);
   assert.equal(finishedHardMax, 1610612736);
+});
+
+test("multipart Vibe Cut upload preserves Vibe Cut request notes", () => {
+  const session = worker.slice(
+    worker.indexOf("async function createItem4LargeVideoUploadSession"),
+    worker.indexOf("async function uploadItem4LargeVideoPart"),
+  );
+  assert.match(session, /const vibeCut = originKind === "vibe-cut"/);
+  assert.match(session, /role: vibeCut \? "vibe-cut-source" : "large-finished-video"/);
+  assert.match(session, /const stamped = vibeCut \? notes : studioRewriteFinishedOriginNotes/);
+  assert.match(worker, /origin_kind: draft\.origin_kind \|\| "finished-video"/);
 });

@@ -260,7 +260,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.555-unscheduled-regenerate";
+  const BUILD_ID = "item4-0.6.556-vibe-cut-large-upload";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -3986,7 +3986,7 @@
     const hasVideo = files.some(item4FileLooksLikeVideo);
     const hasPhoto = files.some(item4FileLooksLikePhoto);
     if (!hasVideo) return;
-    if (ezIsClipRequest() || ezIsFinishedVideo()) return;
+    if (ezIsClipRequest() || ezIsFinishedVideo() || ezIsVibeCut()) return;
     if (hasPhoto || files.filter(item4FileLooksLikeVideo).length > 1) {
       selectEzInput(hasPhoto ? "photos-and-clips" : "video-clips", { resetPlatforms: false });
       return;
@@ -4007,7 +4007,7 @@
   }
 
   function item4VideoHardMaxBytes() {
-    return (ezIsFinishedVideo() || ezIsAzFinishedPath())
+    return (ezIsFinishedVideo() || ezIsAzFinishedPath() || ezIsVibeCut())
       ? ITEM4_FINISHED_VIDEO_HARD_MAX_BYTES
       : ITEM4_CLIP_HARD_MAX_BYTES;
   }
@@ -4022,6 +4022,11 @@
       ? labels[0]
       : `${labels.slice(0, -1).join(", ")} and ${labels[labels.length - 1]}`;
     if (autoCompress) {
+      if (ezIsVibeCut()) {
+        return oversized.length === 1
+          ? `${list} was accepted for Vibe Cut. Studio will upload it in parts and compress it automatically — keep this tab open.`
+          : `${oversized.length} videos were accepted for Vibe Cut. Studio will upload them in parts and compress them automatically — keep this tab open.`;
+      }
       if (ezIsAzFinishedPath()) {
         return oversized.length === 1
           ? `${list} is over 100 MB. Studio will compress it automatically. You can close this tab.`
@@ -9906,8 +9911,12 @@
     return counts.clips < wantClips;
   }
 
+  function item4IsVideoUploadMode() {
+    return ezIsFinishedVideo() || ezIsVibeCut();
+  }
+
   function item4MasterReadyMessage(status) {
-    if (ezIsFinishedVideo()) {
+    if (item4IsVideoUploadMode()) {
       return "Video is loaded into the system. You can keep working or leave this screen anytime.";
     }
     if (item4WaitingForClips(status)) {
@@ -9957,11 +9966,13 @@
       };
     }
     if (!item4Uploading && state === "Ready") {
-      if (ezIsFinishedVideo()) {
+      if (item4IsVideoUploadMode()) {
         return {
           heal: "ready",
           title: "Video is loaded into the system.",
-          body: "The finished video is stored and ready. Crops and Drive copies are skipped.",
+          body: ezIsVibeCut()
+            ? "The Vibe Cut source is stored and ready for its music-driven edit."
+            : "The finished video is stored and ready. Crops and Drive copies are skipped.",
         };
       }
       const counts = item4ClipCountsFromStatus(status);
@@ -9981,7 +9992,7 @@
     if (state === "Error") {
       return {
         heal: "error",
-        title: ezIsFinishedVideo() || ezIsClipRequest() ? "Media upload needs attention." : "Master photos need attention.",
+        title: item4IsVideoUploadMode() || ezIsClipRequest() ? "Media upload needs attention." : "Master photos need attention.",
         body: `${ready} of ${target} saved. Your originals remain in Studio. You can keep working or leave this screen.`,
       };
     }
@@ -9989,11 +10000,11 @@
     const clipUpload = item4Uploading && ezIsClipRequest();
     return {
       heal: "uploading",
-      title: ezIsFinishedVideo()
+      title: item4IsVideoUploadMode()
         ? "Video is loading into the system."
         : (clipUpload ? "Photos and clips are loading into the system." : "Photos are loading into the system."),
-      body: ezIsFinishedVideo()
-        ? "You can keep working on this screen, or leave and come back."
+      body: item4IsVideoUploadMode()
+        ? (ezIsVibeCut() ? "Keep this tab open until the source video finishes uploading." : "You can keep working on this screen, or leave and come back.")
         : (clipUpload
           ? "Keep this tab open until the clip appears in the strip. Drive copies finish in the background."
           : "You can keep working on this screen, or leave and come back. Your photos stay in Studio while Google Drive copies finish in the background."),
@@ -10546,8 +10557,9 @@
     const ext = item4UploadFileExtension(file?.name);
     const kind = ezIntakeKind || (ezWizardPending || ezWizardAnswers)?.inputKind || "";
     if (item4FileLooksLikeVideo(file)) {
-      return ezIsClipRequest() || kind === "finished-video" || kind === "photos-and-clips" || kind === "video-clips";
+      return ezIsClipRequest() || ezIsVibeCut() || kind === "finished-video" || kind === "vibe-cut" || kind === "photos-and-clips" || kind === "video-clips";
     }
+    if (ezIsVibeCut() || kind === "vibe-cut") return false;
     if (kind === "finished-video") {
       return mime.startsWith("image/") || ["heic", "heif"].includes(ext);
     }
@@ -10558,7 +10570,7 @@
     const rejected = Array.from(files || []).filter((file) => !item4IsSupportedPhotoFile(file));
     if (!rejected.length) return "";
     const names = rejected.map((file) => String(file?.name || "").trim()).filter(Boolean);
-    const noun = ezIsFinishedVideo() ? "video" : (ezIsClipRequest() ? "photo or clip" : "photo");
+    const noun = (ezIsFinishedVideo() || ezIsVibeCut()) ? "video" : (ezIsClipRequest() ? "photo or clip" : "photo");
     if (names.length === 1) return `${names[0]} is not a supported ${noun}.`;
     if (names.length === 2 || names.length === 3) return `${names.join(", ")} are not supported ${noun}s.`;
     return `${rejected.length} files are not supported ${noun}s.`;
@@ -10569,6 +10581,9 @@
     const raw = String(error?.message || error || "").trim();
     const status = Number(error?.status || 0);
     const aborted = error?.name === "AbortError" || /aborted|timeout|timed out|failed to fetch/i.test(raw);
+    if (aborted && hasVideo && ezIsVibeCut()) {
+      return "The Vibe Cut video did not finish uploading. Keep this tab open and choose the same file to try again.";
+    }
     if (aborted && hasVideo) {
       return "The clip did not finish saving. Use an MP4 or MOV under 100 MB and keep this tab open until the clip appears next to the photos.";
     }
@@ -10912,16 +10927,17 @@
     const sizeBytes = Number(file?.size || 0);
     if (!sizeBytes) throw new Error("That video file is empty");
     if (sizeBytes > ITEM4_FINISHED_VIDEO_HARD_MAX_BYTES) {
-      throw new Error(`Finished videos must be ${Math.round(ITEM4_FINISHED_VIDEO_HARD_MAX_BYTES / (1024 * 1024))} MB or smaller`);
+      throw new Error(`Videos must be ${Math.round(ITEM4_FINISHED_VIDEO_HARD_MAX_BYTES / (1024 * 1024))} MB or smaller`);
     }
+    const originKind = ezIsVibeCut() ? "vibe-cut" : "finished-video";
     const metadata = (await imageMetadataForFiles([file]))[0] || {};
     const session = await api(`/api/production-requests/${encodeURIComponent(requestId)}/assets/upload-session`, {
       method: "POST",
       body: JSON.stringify({
-        filename: file.name || "finished-video.mp4",
+        filename: file.name || (originKind === "vibe-cut" ? "vibe-cut-source.mp4" : "finished-video.mp4"),
         size_bytes: sizeBytes,
         mime_type: file.type || "video/mp4",
-        origin_kind: "finished-video",
+        origin_kind: originKind,
       }),
       timeoutMs: 60000,
       retries: 0,
@@ -10991,13 +11007,13 @@
   }
 
   function item4ShouldUseLargeFinishedUpload(file) {
-    return (ezIsFinishedVideo() || ezIsAzFinishedPath())
+    return (ezIsFinishedVideo() || ezIsAzFinishedPath() || ezIsVibeCut())
       && item4FileLooksLikeVideo(file);
   }
 
-  async function postItem4MasterFile(file, poster) {
+  async function postItem4MasterFile(file, poster, { onProgress } = {}) {
     if (item4ShouldUseLargeFinishedUpload(file)) {
-      return postItem4LargeFinishedVideo(file);
+      return postItem4LargeFinishedVideo(file, { onProgress });
     }
     const send = async (payload) => {
       const metadata = await imageMetadataForFiles([payload]);
@@ -11059,7 +11075,7 @@
       setRequestMessage(unsupportedNote, "error-text");
       if (!files.length) return;
     } else if (!files.length) {
-      setRequestMessage(ezIsFinishedVideo() ? "Choose a video file." : "Choose one or more photo files.", "error-text");
+      setRequestMessage((ezIsFinishedVideo() || ezIsVibeCut()) ? "Choose a video file." : "Choose one or more photo files.", "error-text");
       return;
     }
     const oversizedSplit = item4DropOversizedClips(files, { resetNotice: !preserveOversizedNotice });
@@ -11069,7 +11085,7 @@
     }
     files = files.slice().sort((a, b) => Number(item4FileLooksLikeVideo(a)) - Number(item4FileLooksLikeVideo(b)));
     const existingCount = ezPersistedAssetCount();
-    if (ezIntakeKind === "finished-video") {
+    if (ezIntakeKind === "finished-video" || ezIntakeKind === "vibe-cut") {
       if (existingCount >= 1) {
         setRequestMessage("This piece already has a video. Remove it first to replace it.", "error-text");
         return;
@@ -11116,7 +11132,9 @@
       mergeEzProductionNotes();
       for (let index = 0; index < files.length; index += 1) {
         const file = files[index];
-        setRequestMessage(`Saving ${index + 1} of ${files.length}: ${file.name}`, "success");
+        const accepted = `Accepted ${file.name} (${item4ClipFileMb(file)} MB). Starting upload ${index + 1} of ${files.length}.`;
+        setRequestMessage(accepted, "success");
+        setEzMessage(accepted, "success");
         updateItem4MasterProgress(item4Workspace || {});
         let poster = null;
         if (item4FileLooksLikeVideo(file)) {
@@ -11130,7 +11148,24 @@
         }
         posterBlobs[index] = poster;
         try {
-          const result = await postItem4MasterFile(file, poster);
+          const result = await postItem4MasterFile(file, poster, {
+            onProgress: ({ doneParts, totalParts, pct }) => {
+              const safePct = Math.max(0, Math.min(99, Number(pct) || 0));
+              const title = `Uploading ${file.name} · ${safePct}%`;
+              const detail = totalParts > 1
+                ? `Part ${Math.min(doneParts + 1, totalParts)} of ${totalParts}. Keep this tab open.`
+                : "Keep this tab open until the upload finishes.";
+              ["item4UploadProgress", "ezUploadProgress"].forEach((id) => {
+                const node = $(id);
+                if (!node) return;
+                node.hidden = false;
+                node.dataset.heal = "uploading";
+                node.innerHTML = `<strong>${escapeHtml(title)}</strong><span>${escapeHtml(detail)}</span>`;
+              });
+              setRequestMessage(`${title}. ${detail}`, "success");
+              setEzMessage(`${title}. ${detail}`, "success");
+            },
+          });
           if (result?.record) activeProductionRequest = result.record;
           item4UploadBatchDone += 1;
           if (Array.isArray(result?.assets)) {
@@ -11155,7 +11190,7 @@
         if (progress) {
           progress.hidden = false;
           progress.dataset.heal = "error";
-          progress.innerHTML = `<strong>Photo upload needs attention.</strong><span>${escapeHtml(friendly)}</span>`;
+          progress.innerHTML = `<strong>${uploadingClips ? "Video" : "Photo"} upload needs attention.</strong><span>${escapeHtml(friendly)}</span>`;
         }
         setRequestMessage(friendly, "error-text");
         setEzMessage(friendly, "error-text");
@@ -11176,10 +11211,12 @@
         setRequestMessage(item4MasterReadyMessage(item4Workspace), "success");
       } else {
         updateItem4MasterProgress(item4Workspace || {});
-        setRequestMessage(ezIsFinishedVideo()
+        setRequestMessage(item4IsVideoUploadMode()
           ? (ezIsAzFinishedPath()
             ? "Finished video is stored. Studio will thumbnail, schedule, and queue all four platforms. You can close this tab."
-            : "Video is loading into the system. You can keep working or leave this screen.")
+            : (ezIsVibeCut()
+              ? "Vibe Cut source is stored. Studio is preparing the music-driven edit."
+              : "Video is loading into the system. You can keep working or leave this screen."))
           : (uploadingClips
             ? "Clip is loading into the system. Keep this tab open until it appears in the strip."
             : "Photos are loading into the system. You can keep working or leave this screen — Drive copies finish in the background."), "success");

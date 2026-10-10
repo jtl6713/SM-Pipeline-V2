@@ -83,3 +83,5 @@ Deploy Worker 0.10.489-engagement-ledger. Shrink the engagement ledger so Chicag
 2026-10-10: Deploy Worker 0.10.492-engagement-alts-deploy-fix. Raise Wrangler bundle size gate (30%/512KB) so engagement three-comment + vibe-cut modules stay live; restore Use #1/#2/#3.
 
 2026-10-10: Deploy Worker 0.10.493-engagement-comment-one-click. Comment is one-click approve+publish; drop Approve Comment from Engagement UI.
+
+2026-10-09: Deploy Worker 0.10.494-vibe-cut-large-upload. Preserve Vibe Cut origin metadata during large multipart video uploads.

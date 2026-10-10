@@ -567,7 +567,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.493-engagement-comment-one-click",
+          version: "0.10.494-vibe-cut-large-upload",
           studio_approve_all_batch_v1: true,
           studio_engagement_v1: true,
           studio_mae_schedule_v1: true,
@@ -6078,6 +6078,7 @@ async function createItem4LargeVideoUploadSession(request, env, url, authorizati
   const sizeBytes = Number(body?.size_bytes || body?.size || 0);
   const mimeType = String(body?.mime_type || body?.content_type || "video/mp4").trim() || "video/mp4";
   const originKind = String(body?.origin_kind || "finished-video").trim().toLowerCase();
+  const vibeCut = originKind === "vibe-cut";
   if (!sizeBytes || sizeBytes < 1) throw new HttpError(400, "size_bytes is required");
   if (sizeBytes > ITEM4_FINISHED_VIDEO_HARD_MAX_BYTES) {
     throw new HttpError(413, "Finished videos must be 1.5 GB or smaller. Compress longer masters before uploading.");
@@ -6097,7 +6098,7 @@ async function createItem4LargeVideoUploadSession(request, env, url, authorizati
       productionRequestId: recordId,
       originalName: filename,
       assetId: id,
-      role: "large-finished-video",
+      role: vibeCut ? "vibe-cut-source" : "large-finished-video",
     },
   });
   const draft = {
@@ -6116,7 +6117,7 @@ async function createItem4LargeVideoUploadSession(request, env, url, authorizati
   };
   if (!draft.multipart_upload_id) throw new HttpError(502, "Could not start staged upload");
   const notes = String(f(record, "Production_Notes") || "").trim();
-  const stamped = studioRewriteFinishedOriginNotes(notes, "finished-video");
+  const stamped = vibeCut ? notes : studioRewriteFinishedOriginNotes(notes, "finished-video");
   const fields = {
     Studio_Master_Assets_JSON: JSON.stringify([...existing, draft]),
     Studio_Master_Asset_Count: existing.length + 1,
@@ -6205,6 +6206,7 @@ async function completeItem4LargeVideoUploadSession(request, env, url, authoriza
     source_ratio: width && height ? `${width}:${height}` : null,
     focal_point: "center",
     r2_key: draft.r2_key,
+    origin_kind: draft.origin_kind || "finished-video",
     url: needsCompress ? "" : `${ITEM4_MEDIA_PUBLIC_BASE}/${draft.r2_key}`,
     uploaded_at: new Date().toISOString(),
     upload_status: "complete",
