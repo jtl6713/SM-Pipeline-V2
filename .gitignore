@@ -103,3 +103,9 @@ apps/studio-api/LIVE-CAPTURE-worker.js
 # Office lock files
 ~$*
 
+
+# Local watchdog runtime and notification secrets
+scripts/production-services/watchdog.local.json
+scripts/production-services/watchdog.state.json
+scripts/production-services/watchdog.state.json.tmp
+scripts/production-services/watchdog.lock
