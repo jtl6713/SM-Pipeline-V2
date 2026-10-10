@@ -448,7 +448,9 @@ function Wait-ServiceHealth {
         [int]$Seconds = 90
     )
 
-    $localUrl = "http://localhost:$($Config.Port)/health"
+    # Prefer 127.0.0.1 over localhost — Windows can prefer ::1 and hang when the
+    # service only listens on IPv4 (0.0.0.0).
+    $localUrl = "http://127.0.0.1:$($Config.Port)/health"
     $publicUrl = $Config.PublicUrl.TrimEnd('/') + '/health'
 
     $deadline = (Get-Date).AddSeconds($Seconds)
@@ -883,7 +885,7 @@ try {
         $Removed | ForEach-Object { Write-Host "  - $_" -ForegroundColor DarkGray }
     }
 
-    $localBefore = Test-HttpHealth -Url ("http://localhost:$($Config.Port)/health") -ReturnBoolean
+    $localBefore = Test-HttpHealth -Url ("http://127.0.0.1:$($Config.Port)/health") -ReturnBoolean
     $publicBefore = Test-HttpHealth -Url ($Config.PublicUrl.TrimEnd('/') + '/health') -ReturnBoolean
     $requirePublicBaseline = $true
     if ($Config.ContainsKey('PublicHealthRequired') -and -not [bool]$Config.PublicHealthRequired) {
@@ -1009,7 +1011,7 @@ try {
             runtime_path = $RuntimeRoot
             backup_path = $BackupRoot
             managed_files = $NewManaged
-            local_health = "http://localhost:$($Config.Port)/health"
+            local_health = "http://127.0.0.1:$($Config.Port)/health"
             public_health = $Config.PublicUrl.TrimEnd('/') + '/health'
         }
         $deploymentRecord | ConvertTo-Json -Depth 10 |

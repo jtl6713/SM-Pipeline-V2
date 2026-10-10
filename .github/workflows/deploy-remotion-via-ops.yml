@@ -19,7 +19,7 @@ jobs:
       OPS_TOKEN_A: ${{ secrets.OPS_DASHBOARD_TOKEN }}
       OPS_TOKEN_B: ${{ secrets.DASHBOARD_TOKEN }}
       OPS_TOKEN_C: ${{ secrets.OPS_TOKEN }}
-      EXPECTED_VERSION: '2026-10-10-accept-before-download'
+      EXPECTED_VERSION: '2026-10-10-health-first-boot'
     steps:
       - name: Authenticate to Ops Dashboard
         id: auth
@@ -51,74 +51,7 @@ jobs:
             echo "EOF"
           } >> "$GITHUB_OUTPUT"
 
-      - name: Restart Remotion (recovery start)
-        shell: bash
-        env:
-          OPS_TOKEN: ${{ steps.auth.outputs.token }}
-        run: |
-          set -euo pipefail
-          BASE='https://ops.chicagoshining.com'
-          code=$(curl -sS --max-time 30 -o /tmp/run.json -w '%{http_code}' \
-            -X POST "$BASE/api/run" \
-            -H "Authorization: Bearer $OPS_TOKEN" \
-            -H 'Content-Type: application/json' \
-            --data '{"action":"restart-one","service":"remotion-renderer","confirm":true}' || true)
-          if [[ "$code" == "409" ]]; then
-            JOB=$(jq -r '.jobId // .job.id // empty' /tmp/run.json)
-            echo "ops_dashboard_existing_job=$JOB"
-          else
-            test "$code" = "202"
-            jq -e '.ok==true' /tmp/run.json >/dev/null
-            JOB=$(jq -r '.job.id // empty' /tmp/run.json)
-          fi
-          test -n "$JOB"
-          for i in $(seq 1 40); do
-            code=$(curl -sS --max-time 20 -o /tmp/job.json -w '%{http_code}' \
-              -H "Authorization: Bearer $OPS_TOKEN" "$BASE/api/jobs/$JOB" || true)
-            if [[ "$code" == "200" ]]; then
-              status=$(jq -r '.job.status // empty' /tmp/job.json)
-              echo "ops_restart_status=$status"
-              case "$status" in
-                ok)
-                  jq -c '{ok,job:{id:.job.id,status:.job.status,exitCode:.job.exitCode}}' /tmp/job.json
-                  exit 0
-                  ;;
-                failed)
-                  jq -c '{ok,job:{id:.job.id,status:.job.status,exitCode:.job.exitCode,log:.job.log}}' /tmp/job.json
-                  echo "restart_failed_continuing=1"
-                  exit 0
-                  ;;
-              esac
-            fi
-            sleep 5
-          done
-          echo "ops_restart_timeout_continuing=$JOB"
-          exit 0
-
-      - name: Wait for Remotion public health after restart
-        id: health_after_restart
-        shell: bash
-        run: |
-          set -euo pipefail
-          for i in $(seq 1 60); do
-            code=$(curl -sS --max-time 20 -o /tmp/remotion-health.json -w '%{http_code}' \
-              'https://render.chicagoshining.com/health' || true)
-            if [[ "$code" == "200" ]] && jq -e '.ok==true' /tmp/remotion-health.json >/dev/null 2>&1; then
-              jq -c '{ok,service,version}' /tmp/remotion-health.json
-              version=$(jq -r '.version // empty' /tmp/remotion-health.json)
-              echo "up=true" >> "$GITHUB_OUTPUT"
-              echo "version=$version" >> "$GITHUB_OUTPUT"
-              exit 0
-            fi
-            echo "waiting_public_health attempt=$i http=$code"
-            sleep 5
-          done
-          echo "up=false" >> "$GITHUB_OUTPUT"
-          echo "version=" >> "$GITHUB_OUTPUT"
-          echo "remotion_still_down_after_restart=1"
-
       - name: Sync git checkout on render PC
-        if: steps.health_after_restart.outputs.version != env.EXPECTED_VERSION
         continue-on-error: true
         shell: bash
         env:
@@ -158,7 +91,6 @@ jobs:
           exit 5
 
       - name: Deploy Remotion renderer through allowlisted Ops action
-        if: steps.health_after_restart.outputs.version != env.EXPECTED_VERSION
         shell: bash
         env:
           OPS_TOKEN: ${{ steps.auth.outputs.token }}
@@ -194,14 +126,6 @@ jobs:
                   ;;
                 failed)
                   jq -c '{ok,job:{id:.job.id,status:.job.status,exitCode:.job.exitCode,log:.job.log}}' /tmp/job.json
-                  # If restart already restored public health, do not fail the whole job on deploy.
-                  code2=$(curl -sS --max-time 20 -o /tmp/remotion-health.json -w '%{http_code}' \
-                    'https://render.chicagoshining.com/health' || true)
-                  if [[ "$code2" == "200" ]] && jq -e '.ok==true' /tmp/remotion-health.json >/dev/null 2>&1; then
-                    echo "deploy_failed_but_remotion_healthy=1"
-                    jq -c '{ok,service,version}' /tmp/remotion-health.json
-                    exit 0
-                  fi
                   exit 4
                   ;;
               esac
@@ -211,44 +135,24 @@ jobs:
           echo "ops_job_timeout=$JOB"
           exit 5
 
-      - name: Verify Remotion public health
+      - name: Verify health-first-boot is live
+        if: success()
         shell: bash
         run: |
           set -euo pipefail
-          for i in $(seq 1 36); do
+          for i in $(seq 1 60); do
             code=$(curl -sS --max-time 20 -o /tmp/remotion-health.json -w '%{http_code}' \
               'https://render.chicagoshining.com/health' || true)
-            if [[ "$code" == "200" ]] && jq -e '.ok==true' /tmp/remotion-health.json >/dev/null 2>&1; then
+            if [[ "$code" == "200" ]] && jq -e --arg v "$EXPECTED_VERSION" \
+              '.ok==true and .privateDriveImageLocalization==true and .watermarkLocalization==true and .version==$v' \
+              /tmp/remotion-health.json >/dev/null 2>&1; then
               jq -c '{ok,service,version,privateDriveImageLocalization,watermarkLocalization}' /tmp/remotion-health.json
-              version=$(jq -r '.version // empty' /tmp/remotion-health.json)
-              if [[ "$version" == "$EXPECTED_VERSION" ]]; then
-                echo "remotion_version_match=1"
-              else
-                echo "remotion_version_mismatch expected=$EXPECTED_VERSION actual=$version"
-              fi
               exit 0
             fi
+            echo "waiting_version attempt=$i http=$code body=$(head -c 120 /tmp/remotion-health.json 2>/dev/null | tr '\n' ' ')"
             sleep 5
           done
           cat /tmp/remotion-health.json || true
           exit 6
 
-# Trigger: deploy job-assets-serialize for CI 239-242 (2026-09-28T01:13Z)
-
-# Trigger remotion-renderer deploy for Timed Script Render Mode
-# Source merge 5abf33dba79d9d983f1ccbc611f70c1fb285be18
-# Expected health version 2026-10-01-timed-script-authoritative
-# 2026-10-01T17:16:00Z
-
-# Trigger remotion-renderer deploy for Chicago Shining logo watermark top-left
-# Expected health version 2026-10-02-render-logo-watermark
-# 2026-10-02T16:45:00Z
-
-# Trigger: accept-before-download; expected health version 2026-10-10-accept-before-download
-# 2026-10-10T08:28Z
-
-# Redeploy trigger 2026-10-10T08:48Z: Ops 409 raced pipeline-runner job; remotion never restarted
-# Redeploy trigger 2026-10-10T12:52Z: public /health still 502; restart remotion after Studio merge ship
-
-# 2026-10-10T12:55Z: recovery — restart-one first (works while deploy refuses unhealthy baseline),
-# allow unhealthy baseline + 240s Remotion health wait in Deploy-SMService
+# 2026-10-10T13:12Z: health-first-boot — register /health before static; defer startup sweep

@@ -20,7 +20,7 @@ const DEFAULT_MUSIC_END_FADE_SECONDS = 0.5;
 const PIPELINE_RUNNER_INTERNAL_URL = String(
     process.env.PIPELINE_RUNNER_INTERNAL_URL || 'http://127.0.0.1:3350'
 ).replace(/\/$/, '');
-const SERVICE_VERSION = '2026-10-10-accept-before-download';
+const SERVICE_VERSION = '2026-10-10-health-first-boot';
 const PROJECT_DIR = __dirname;
 const PUBLIC_DIR = path.join(PROJECT_DIR, 'public');
 const OUT_DIR = path.join(PROJECT_DIR, 'out');
@@ -46,17 +46,6 @@ app.set('trust proxy', true);
 
 app.use(express.json({ limit: '100mb' }));
 
-// Serve rendered output files.
-app.use('/out', express.static(OUT_DIR));
-
-// Serve public files.
-// This makes URLs like http://localhost:3333/Assets/video1_proxy.mp4 work.
-// It is also useful for the controlled V4 remote URL test.
-app.use(express.static(PUBLIC_DIR));
-
-// Job-local clips/music/VO/watermarks — outside public/, fetched by Remotion via HTTP.
-app.use(RENDER_ASSETS_URL_PREFIX, express.static(RENDER_ASSETS_DIR));
-
 const jobs = new Map();
 const remotionCleanup = registerRemotionCleanup({
     app,
@@ -69,6 +58,46 @@ const remotionCleanup = registerRemotionCleanup({
 
 let activeRemotionRenders = 0;
 const remotionRenderWaiters = [];
+
+// Liveness before static middleware. Deploy-SMService polls /health; a multi-GB
+// job-assets stale sweep must never run inside the listen callback or public
+// health stays Cloudflare 502 past the deploy timeout.
+app.get('/health', (req, res) => {
+    res.json({
+        ok: true,
+        service: 'SM Pipeline V2 Remotion Render Server',
+        version: SERVICE_VERSION,
+        voiceoverSupport: true,
+        voiceoverAwareDuration: true,
+        defaultVoiceoverTailSeconds: DEFAULT_VOICEOVER_TAIL_SECONDS,
+        postVoiceoverMusicBoost: true,
+        privateDriveImageLocalization: true,
+        watermarkLocalization: true,
+        jobAssetsOutsidePublic: true,
+        remotionMaxConcurrent: MAX_CONCURRENT_REMOTION_RENDERS,
+        remotionActiveRenders: activeRemotionRenders,
+        remotionQueuedRenders: remotionRenderWaiters.length,
+        cleanup: {
+            enabled: true,
+            staleHours: remotionCleanup.staleHours,
+            sweepIntervalMs: remotionCleanup.sweepIntervalMs,
+            lastSweep: remotionCleanup.getLastSweep(),
+        },
+        port: PORT,
+        time: nowIso(),
+    });
+});
+
+// Serve rendered output files.
+app.use('/out', express.static(OUT_DIR));
+
+// Serve public files.
+// This makes URLs like http://localhost:3333/Assets/video1_proxy.mp4 work.
+// It is also useful for the controlled V4 remote URL test.
+app.use(express.static(PUBLIC_DIR));
+
+// Job-local clips/music/VO/watermarks — outside public/, fetched by Remotion via HTTP.
+app.use(RENDER_ASSETS_URL_PREFIX, express.static(RENDER_ASSETS_DIR));
 
 function acquireRemotionSlot(job) {
     return new Promise((resolve) => {
@@ -1290,32 +1319,6 @@ function runRemotionRender({ jobId, compositionId, filename, propsFilePath }) {
     })();
 }
 
-app.get('/health', async (req, res) => {
-    res.json({
-        ok: true,
-        service: 'SM Pipeline V2 Remotion Render Server',
-        version: SERVICE_VERSION,
-        voiceoverSupport: true,
-        voiceoverAwareDuration: true,
-        defaultVoiceoverTailSeconds: DEFAULT_VOICEOVER_TAIL_SECONDS,
-        postVoiceoverMusicBoost: true,
-        privateDriveImageLocalization: true,
-        watermarkLocalization: true,
-        jobAssetsOutsidePublic: true,
-        remotionMaxConcurrent: MAX_CONCURRENT_REMOTION_RENDERS,
-        remotionActiveRenders: activeRemotionRenders,
-        remotionQueuedRenders: remotionRenderWaiters.length,
-        cleanup: {
-            enabled: true,
-            staleHours: remotionCleanup.staleHours,
-            sweepIntervalMs: remotionCleanup.sweepIntervalMs,
-            lastSweep: remotionCleanup.getLastSweep(),
-        },
-        port: PORT,
-        time: nowIso(),
-    });
-});
-
 app.get('/status/:jobId', (req, res) => {
     const job = jobs.get(req.params.jobId);
 
@@ -1438,13 +1441,23 @@ app.post('/render', async (req, res) => {
     });
 });
 
-app.listen(PORT, '0.0.0.0', async () => {
-    await ensureDirectories();
-    await remotionCleanup.runStartupSweep();
-    remotionCleanup.startStaleSweepTimer();
-
+app.listen(PORT, '0.0.0.0', () => {
     console.log(`SM Pipeline V2 Remotion render server running on port ${PORT}`);
-    console.log(`Health: http://localhost:${PORT}/health`);
-    console.log(`Render: http://localhost:${PORT}/render`);
-    console.log(`Cleanup: http://localhost:${PORT}/cleanup/<jobId>`);
+    console.log(`Health: http://127.0.0.1:${PORT}/health`);
+    console.log(`Render: http://127.0.0.1:${PORT}/render`);
+    console.log(`Cleanup: http://127.0.0.1:${PORT}/cleanup/<jobId>`);
+
+    // Housekeeping after listen so Deploy-SMService / Cloudflare Tunnel see /health
+    // immediately. A recursive job-assets sweep can run for minutes on this box.
+    setImmediate(() => {
+        ensureDirectories()
+            .then(() => remotionCleanup.runStartupSweep())
+            .then(() => {
+                remotionCleanup.startStaleSweepTimer();
+            })
+            .catch((error) => {
+                console.error(`Startup sweep failed: ${error.message}`);
+                remotionCleanup.startStaleSweepTimer();
+            });
+    });
 });
