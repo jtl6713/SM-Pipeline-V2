@@ -55,3 +55,16 @@ test("all three Ideas timeline actions route through one safe open-or-create pat
   assert.match(helper, /await createIdeaTimedScript\(idea/);
   assert.doesNotMatch(action, /background:\s*true/);
 });
+
+test("photo-wait shell production requests still run Create timeline instead of opening an empty draft", () => {
+  const opener = app.slice(
+    app.indexOf("async function openOrCreateIdeaTimeline("),
+    app.indexOf('$("createIdeaTimelineButton")?.addEventListener'),
+  );
+  assert.match(opener, /productionRequestNotesHaveTimedScript\(existing\.production_notes\)/);
+  assert.match(opener, /if \(!hasTimeline\)/);
+  assert.match(opener, /await createIdeaTimedScript\(idea, \{ button, heading \}\)/);
+  const row = app.slice(app.indexOf("function ideaTimelineRowButtonLabel("), app.indexOf("function ideaCanPromote("));
+  assert.match(row, /wait === "Waiting" \|\| wait === "Ready"/);
+  assert.match(row, /return "Create timeline"/);
+});
