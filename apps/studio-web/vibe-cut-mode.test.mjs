@@ -11,7 +11,7 @@ const ez = fs.readFileSync(path.join(here, "assets/ez-plan.js"), "utf8");
 const vibe = fs.readFileSync(path.join(here, "assets/vibe-cut.js"), "utf8");
 
 test("Vibe Cut is a distinct Home creation path with style/energy controls", () => {
-  assert.match(html, /vibe-cut\.js\?v=0.6.561-vibe-cut-ship/);
+  assert.match(html, /vibe-cut\.js\?v=0.6.562-vibe-cut-remount/);
   assert.match(html, /id="prVibeCutBanner"/);
   assert.match(html, /id="ezVibeCutLaunch"/);
   assert.match(html, /ez-vibe-cut-launch/);
@@ -29,7 +29,7 @@ test("Vibe Cut is a distinct Home creation path with style/energy controls", () 
   assert.match(app, /Find me the best 30 seconds/);
   assert.match(app, /Best moments \(recommended\)/);
   assert.match(app, /inputKind:\s*"vibe-cut"/);
-  assert.match(app, /BUILD_ID = "item4-0.6.561-vibe-cut-ship"/);
+  assert.match(app, /BUILD_ID = "item4-0.6.562-vibe-cut-remount"/);
 });
 
 test("Vibe Cut client helper stamps music-driven defaults", () => {

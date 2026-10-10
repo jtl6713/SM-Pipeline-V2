@@ -10,9 +10,9 @@ const html = fs.readFileSync(path.join(here, "index.html"), "utf8");
 const worker = fs.readFileSync(path.join(here, "../studio-api/worker.js"), "utf8");
 
 test("UI enables Save schedule for Ready for Review (Output 1795)", () => {
-  assert.match(app, /BUILD_ID = "item4-0.6.561-vibe-cut-ship"/);
-  assert.match(html, /UI build 0\.6\.561/);
-  assert.match(html, /app-item4-1008\.js\?v=0.6.561-vibe-cut-ship/);
+  assert.match(app, /BUILD_ID = "item4-0.6.562-vibe-cut-remount"/);
+  assert.match(html, /UI build 0\.6\.562/);
+  assert.match(html, /app-item4-1008\.js\?v=0.6.562-vibe-cut-remount/);
   // setCreativeBusy must gate Save on creativeCanSetSchedule, not only approved reschedule.
   assert.match(
     app,
