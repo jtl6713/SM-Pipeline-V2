@@ -117,16 +117,14 @@ try {
             $s.down = $false
             $s.exhausted = $false
             $s.lastAttempt = ''
-            Save-State
             if ($wasDown) {
                 Queue-Notification 'RECOVERED' $name "RECOVERED: $name on $env:COMPUTERNAME is healthy."
-            }
+            } else { Save-State }
             continue
         }
 
         if (-not [bool]$s.down) {
             $s.down = $true
-            Save-State
             Queue-Notification 'DOWN' $name "DOWN: $name on $env:COMPUTERNAME failed health check."
         }
 
