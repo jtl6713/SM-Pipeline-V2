@@ -87,7 +87,7 @@ jobs:
           set -euo pipefail
           for i in $(seq 1 18); do
             code=$(curl -sS --max-time 20 -o /tmp/remotion-health.json -w '%{http_code}' 'https://render.chicagoshining.com/health' || true)
-            if [[ "$code" == "200" ]] && jq -e '.ok==true and .privateDriveImageLocalization==true and .watermarkLocalization==true' /tmp/remotion-health.json >/dev/null 2>&1; then
+            if [[ "$code" == "200" ]] && jq -e '.ok==true and .privateDriveImageLocalization==true and .watermarkLocalization==true and .version=="2026-10-10-accept-before-download"' /tmp/remotion-health.json >/dev/null 2>&1; then
               jq -c '{ok,service,version,privateDriveImageLocalization,watermarkLocalization}' /tmp/remotion-health.json
               exit 0
             fi
@@ -106,3 +106,6 @@ jobs:
 # Trigger remotion-renderer deploy for Chicago Shining logo watermark top-left
 # Expected health version 2026-10-02-render-logo-watermark
 # 2026-10-02T16:45:00Z
+
+# Trigger: accept-before-download; expected health version 2026-10-10-accept-before-download
+# 2026-10-10T08:28Z

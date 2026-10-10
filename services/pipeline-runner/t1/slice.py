@@ -24,6 +24,54 @@ def clips_have_video(clips: list[dict[str, Any]]) -> bool:
     return any(is_video_clip(clip) for clip in clips)
 
 
+def sync_clip_durations_to_timeline(
+    clips: list[dict[str, Any]],
+    timeline: dict[str, Any] | None,
+    *,
+    fps: int = FPS_DEFAULT,
+) -> list[dict[str, Any]]:
+    """Force Render_Clip_List_JSON scene lengths onto Timing_Timeline plan frames.
+
+    expand_to_timeline can under-shoot when a prior trim left a short sourceOutSeconds.
+    Remotion then gets durationInFrames=900 with clip sum 795 and stalls or fails.
+    """
+    if not clips or not isinstance(timeline, dict):
+        return list(clips or [])
+    plan = timeline.get("timeline") if isinstance(timeline.get("timeline"), dict) else timeline
+    plan_clips = [item for item in (plan.get("clips") or []) if isinstance(item, dict)]
+    if not plan_clips or len(plan_clips) != len(clips):
+        return list(clips)
+    fps_i = max(1, int(plan.get("fps") or timeline.get("fps") or fps or FPS_DEFAULT))
+    clip_sum = sum(max(1, int((clip or {}).get("durationFrames") or (clip or {}).get("duration_frames") or 0)) for clip in clips)
+    plan_sum = sum(max(1, int(item.get("duration_frames") or item.get("durationFrames") or 0)) for item in plan_clips)
+    if clip_sum == plan_sum and clip_sum > 0:
+        return list(clips)
+    start = 0
+    updated: list[dict[str, Any]] = []
+    for clip, plan_clip in zip(clips, plan_clips):
+        item = dict(clip or {})
+        frames = max(1, int(plan_clip.get("duration_frames") or plan_clip.get("durationFrames") or 1))
+        in_seconds = _as_float(item.get("inSeconds") if item.get("inSeconds") is not None else item.get("in_seconds"), 0.0)
+        out_seconds = in_seconds + (frames / fps_i)
+        item["durationFrames"] = frames
+        item["duration_frames"] = frames
+        item["startFrame"] = int(plan_clip.get("start_frame") or plan_clip.get("startFrame") or start)
+        item["start_frame"] = item["startFrame"]
+        if is_video_clip(item):
+            item["inSeconds"] = in_seconds
+            item["in_seconds"] = in_seconds
+            item["outSeconds"] = round(out_seconds, 4)
+            item["out_seconds"] = item["outSeconds"]
+            # Drop stale sourceOut that would re-clamp on the next T1 pass.
+            master = source_duration_seconds(item)
+            if master > 0:
+                item["sourceOutSeconds"] = round(min(master, out_seconds), 4)
+                item["source_out_seconds"] = item["sourceOutSeconds"]
+        start = int(item["startFrame"]) + frames
+        updated.append(item)
+    return updated
+
+
 def _merge_span_seconds(ranges: list[tuple[float, float]]) -> float:
     """Sum seconds covered by ranges after merging overlaps."""
     cleaned = sorted(
@@ -226,8 +274,15 @@ def expand_to_timeline(
     updated: list[dict[str, Any]] = []
 
     def _clamp_video_frames(source: dict[str, Any], in_seconds: float, frames: int) -> int:
-        _source_start, source_end = _source_span(source, fps_i)
-        remaining = max(0.0, source_end - max(0.0, in_seconds))
+        # Prefer full master duration over a stale sourceOutSeconds left by a prior
+        # trim (Chicago Walk with me: plan wanted 52 frames, clamp saw out=29.0s and
+        # shrank the last clip to 21 → clip sum 795 vs timeline 900).
+        master = source_duration_seconds(source)
+        if master > 0:
+            remaining = max(0.0, master - max(0.0, in_seconds))
+        else:
+            _source_start, source_end = _source_span(source, fps_i)
+            remaining = max(0.0, source_end - max(0.0, in_seconds))
         max_frames = max(1, int(remaining * fps_i + 1e-6))
         return max(1, min(frames, max_frames))
 

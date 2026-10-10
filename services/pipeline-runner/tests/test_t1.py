@@ -433,3 +433,64 @@ def test_t1_caps_requested_duration_to_usable_footage():
     capped = min(requested, usable)
     assert capped == 24.0
 
+
+def test_sync_clip_durations_to_timeline_repairs_stale_source_out_clamp():
+    """Chicago Walk with me: expand under-shot 795 vs plan 900 from stale sourceOut."""
+    from t1.slice import expand_to_timeline, sync_clip_durations_to_timeline
+
+    sources = [
+        {
+            "id": "v1",
+            "url": "https://cdn/long.mp4",
+            "mediaKind": "video",
+            "sourceDurationSeconds": 60,
+            "sourceOutSeconds": 29.0,
+            "googleDriveFileId": "g1",
+        },
+        {
+            "id": "v2",
+            "url": "https://cdn/long.mp4",
+            "mediaKind": "video",
+            "sourceDurationSeconds": 60,
+            "sourceOutSeconds": 29.0,
+            "inSeconds": 28.3,
+            "googleDriveFileId": "g1",
+        },
+    ]
+    plan = {
+        "timeline": {
+            "fps": 30,
+            "clips": [
+                {"duration_frames": 30, "start_frame": 0},
+                {"duration_frames": 52, "start_frame": 30},
+            ],
+        }
+    }
+    # Simulate the under-shot list Remotion saw (795 vs 900).
+    drifted = [
+        {
+            **sources[0],
+            "durationFrames": 30,
+            "startFrame": 0,
+            "inSeconds": 0.0,
+            "outSeconds": 1.0,
+        },
+        {
+            **sources[1],
+            "durationFrames": 21,
+            "startFrame": 30,
+            "inSeconds": 28.3,
+            "outSeconds": 29.0,
+            "sourceOutSeconds": 29.0,
+        },
+    ]
+    assert sum(c["durationFrames"] for c in drifted) == 51
+    synced = sync_clip_durations_to_timeline(drifted, plan)
+    assert [c["durationFrames"] for c in synced] == [30, 52]
+    assert synced[1]["outSeconds"] == round(28.3 + 52 / 30, 4)
+    assert synced[1]["sourceOutSeconds"] >= synced[1]["outSeconds"] - 1e-6
+
+    # Prefer master duration so expand keeps the plan frames.
+    expanded = expand_to_timeline(sources, plan)
+    assert [c["durationFrames"] for c in expanded] == [30, 52]
+

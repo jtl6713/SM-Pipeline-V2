@@ -523,6 +523,9 @@ def process_one(
             if has_video
             else apply_timeline(clips, response)
         )
+        from t1.slice import sync_clip_durations_to_timeline
+
+        timed = sync_clip_durations_to_timeline(timed, response.get("timeline") or response)
         total_frames = sum(int(clip.get("durationFrames") or 0) for clip in timed)
         if vibe and vibe_target > 0:
             required_frames = max(1, int(round(vibe_target * 30)))

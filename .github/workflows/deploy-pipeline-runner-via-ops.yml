@@ -174,3 +174,6 @@ jobs:
 
 # Trigger pipeline-runner deploy for Timing Engine empty-JSON harden (Content 454)
 # 2026-10-10 service_version=2026-10-10-vibe-cut-timing-empty-json
+
+# Trigger: vibe-cut clip/timeline sync; expected version 2026-10-10-vibe-cut-clip-sync
+# 2026-10-10T08:28Z
