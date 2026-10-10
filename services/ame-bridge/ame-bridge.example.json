@@ -5,6 +5,6 @@
   "min_output_bytes": 32768,
   "delete_watch_source": true,
   "use_ffprobe": true,
-  "port": 3342,
+  "port": 3344,
   "host": "127.0.0.1"
 }

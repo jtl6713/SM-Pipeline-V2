@@ -98,6 +98,14 @@
       "gitCheckout": true
     },
     {
+      "id": "ame-bridge",
+      "name": "AME Bridge",
+      "port": 3344,
+      "publicUrl": null,
+      "deployable": false,
+      "runtimePath": "Source Control\\SM-Pipeline-V2\\services\\ame-bridge"
+    },
+    {
       "id": "ops-dashboard",
       "name": "Ops Dashboard",
       "port": 3361,
@@ -226,7 +234,7 @@
       "confirm": false,
       "shortcut": "PLAN Local Service Deployment",
       "summary": "Read-only plan: which files would change from origin/main. No production mutation.",
-      "detail": "Deploy-SMService.ps1 -Service <id> -PlanOnly -Yes. Video Compressor and Task Organizer are not in this selector."
+      "detail": "Deploy-SMService.ps1 -Service <id> -PlanOnly -Yes. Video Compressor, AME Bridge, and Task Organizer are not in this selector."
     },
     {
       "id": "deploy",

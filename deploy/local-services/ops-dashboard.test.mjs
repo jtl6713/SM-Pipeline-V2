@@ -31,6 +31,20 @@ test("Invoke-Ps1 leaves -Switch names unquoted so Deploy -Service binds", () => 
   assert.match(runner, /'-Service', 'pipeline-runner', '-Yes'/);
 });
 
+test("AME bridge starts and stops with the local service suite", () => {
+  const ame = catalog.services.find((service) => service.id === "ame-bridge");
+  assert.ok(ame);
+  assert.equal(ame.port, 3344);
+  assert.equal(ame.deployable, false);
+  assert.equal(ame.publicUrl, null);
+  assert.match(hidden, /'ame-bridge'/);
+  assert.match(hidden, /Port = 3344/);
+  assert.match(hiddenAll, /'ame-bridge'/);
+  assert.match(hiddenAll, /'ame-bridge' = 3344/);
+  assert.match(runner, /'ame-bridge' = 3344/);
+  assert.match(runner, /'ame-bridge'/);
+});
+
 test("hidden start and deploy know ops-dashboard", () => {
   assert.match(hidden, /ops-dashboard/);
   assert.match(hidden, /3361/);

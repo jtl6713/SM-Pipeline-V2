@@ -35,7 +35,7 @@ class BridgeConfig:
     min_output_bytes: int = 32 * 1024
     delete_watch_source: bool = True
     use_ffprobe: bool = True
-    port: int = 3342
+    port: int = 3344
     host: str = "127.0.0.1"
 
     @classmethod
@@ -50,13 +50,13 @@ class BridgeConfig:
             min_output_bytes=_positive_int(payload.get("min_output_bytes"), 32 * 1024),
             delete_watch_source=bool(payload.get("delete_watch_source", True)),
             use_ffprobe=bool(payload.get("use_ffprobe", True)),
-            port=_positive_int(payload.get("port"), 3342),
+            port=_positive_int(payload.get("port"), 3344),
             host=str(payload.get("host") or "127.0.0.1"),
         )
 
 
 def load_config(path: Path) -> BridgeConfig:
-    payload = json.loads(path.read_text(encoding="utf-8"))
+    payload = json.loads(path.read_text(encoding="utf-8-sig"))
     if not isinstance(payload, dict):
         raise ValueError("config must be a JSON object")
     return BridgeConfig.from_dict(payload)
@@ -108,7 +108,7 @@ def root_is_dedicated(root: Path) -> bool:
 def marker_ok(root: Path) -> bool:
     path = root / MARKER_NAME
     try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
+        payload = json.loads(path.read_text(encoding="utf-8-sig"))
     except (OSError, json.JSONDecodeError):
         return False
     return isinstance(payload, dict) and payload.get("role") == MARKER_ROLE

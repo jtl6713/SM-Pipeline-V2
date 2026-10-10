@@ -53,7 +53,7 @@ $Deployable = @(
     'ops-dashboard'
 )
 
-$Startable = $Deployable + @('video-compressor', 'task-organizer')
+$Startable = $Deployable + @('video-compressor', 'task-organizer', 'ame-bridge')
 
 $Ports = @{
     'frame-extractor' = 3334
@@ -68,6 +68,7 @@ $Ports = @{
     'video-compressor' = 3335
     'timing-engine' = 3336
     'task-organizer' = 3360
+    'ame-bridge' = 3344
     'ops-dashboard' = 3361
 }
 

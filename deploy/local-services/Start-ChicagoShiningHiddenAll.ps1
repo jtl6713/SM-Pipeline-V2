@@ -27,6 +27,7 @@ $order = @(
     'video-compressor',
     'timing-engine',
     'task-organizer',
+    'ame-bridge',
     'ops-dashboard'
 )
 
@@ -47,6 +48,7 @@ $ports = @{
     'video-compressor' = 3335
     'timing-engine' = 3336
     'task-organizer' = 3360
+    'ame-bridge' = 3344
     'ops-dashboard' = 3361
 }
 

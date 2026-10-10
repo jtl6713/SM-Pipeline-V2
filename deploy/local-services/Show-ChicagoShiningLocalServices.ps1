@@ -14,6 +14,7 @@ $rows = @(
     @{ Name = 'Video Compressor'; Port = 3335 }
     @{ Name = 'Timing Engine'; Port = 3336 }
     @{ Name = 'Task Organizer'; Port = 3360 }
+    @{ Name = 'AME Bridge'; Port = 3344 }
     @{ Name = 'Ops Dashboard'; Port = 3361 }
 )
 

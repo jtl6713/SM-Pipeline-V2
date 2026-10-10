@@ -20,19 +20,9 @@ try {
 if ($LASTEXITCODE -ne 0) { throw "Could not create the AME bridge folders" }
 
 $taskName = 'SM-Pipeline AME Bridge'
-$action = New-ScheduledTaskAction -Execute (Join-Path $env:WINDIR 'System32\wscript.exe') -Argument ('//B //Nologo "{0}"' -f $launcher)
-$settings = New-ScheduledTaskSettingsSet -MultipleInstances IgnoreNew -ExecutionTimeLimit ([TimeSpan]::Zero) -StartWhenAvailable
-$currentUser = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
-$trigger = New-ScheduledTaskTrigger -AtLogOn -User $currentUser
 $existing = Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
 if ($null -ne $existing) {
-    Set-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -Settings $settings | Out-Null
-    Write-Output "Updated scheduled task: $taskName"
-} else {
-    $principal = New-ScheduledTaskPrincipal -UserId $currentUser -LogonType Interactive -RunLevel Limited
-    Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -Settings $settings -Principal $principal -Description 'Watches Adobe Media Encoder output folders and removes the inbox source copy after a validated encode.' | Out-Null
-    Write-Output "Installed scheduled task: $taskName"
+    Unregister-ScheduledTask -TaskName $taskName -Confirm:$false
+    Write-Output "Removed separate logon task: $taskName"
 }
-
-Start-ScheduledTask -TaskName $taskName
-Write-Output "Started $taskName"
+Write-Output "AME Bridge starts with START ChicagoShining Services and from the Ops Dashboard. It is not a separate logon task."

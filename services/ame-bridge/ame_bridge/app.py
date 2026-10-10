@@ -132,7 +132,11 @@ def start_poller(bridge: Bridge, stop: threading.Event | None = None) -> threadi
 
 def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
-    config = BridgeConfig.from_dict(json.loads(resolve_config_path().read_text(encoding="utf-8")))
+    payload = json.loads(resolve_config_path().read_text(encoding="utf-8-sig"))
+    port = os.environ.get("PORT", "").strip()
+    if port:
+        payload["port"] = int(port)
+    config = BridgeConfig.from_dict(payload)
     ensure_layout(config.root)
     lock = InstanceLock(config.root / "state" / "bridge.lock")
     if not lock.acquire():

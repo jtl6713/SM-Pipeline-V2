@@ -22,6 +22,7 @@ param(
         'video-compressor',
         'timing-engine',
         'task-organizer',
+        'ame-bridge',
         'ops-dashboard'
     )]
     [string]$Service,
@@ -147,6 +148,15 @@ $Map = @{
         Dir = 'Source Control\chicago-shining-task-organizer'
         Title = '9 LOC Task Organizer :3360'
         Kind = 'uvicorn'
+    }
+    'ame-bridge' = @{
+        Name = 'AME Bridge'
+        Port = 3344
+        Dir = 'Source Control\SM-Pipeline-V2\services\ame-bridge'
+        Title = '11 LOC AME Bridge :3344'
+        Kind = 'python'
+        File = 'app.py'
+        ExtraEnv = @{ PORT = '3344' }
     }
     'ops-dashboard' = @{
         Name = 'Ops Dashboard'

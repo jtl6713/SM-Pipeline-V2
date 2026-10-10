@@ -46,12 +46,14 @@ Drop only a copy. To keep a particular inbox file, place an empty `filename.ext.
 
 ## Run
 
+The bridge is local service `ame-bridge` on port **3344**. Windows sign-in runs `START ChicagoShining Services`, and that hidden start includes this listener with the others. STOP clears port 3344. The Ops Dashboard (`http://127.0.0.1:3361`) lists it as **AME Bridge** for status, start, restart, and stop. There is no public hostname.
+
 ```powershell
 cd services\ame-bridge
 .\install-ame-bridge.ps1
 ```
 
-The installer creates the folders, registers the logon task `SM-Pipeline AME Bridge`, and starts it. Health check: `http://127.0.0.1:3342/health`.
+The installer only creates the watch folders. Health check: `http://127.0.0.1:3344/health`.
 
 `POST /reconcile` with `{"dry_run": true}` reports what would be removed and leaves the inbox file in place.
 
