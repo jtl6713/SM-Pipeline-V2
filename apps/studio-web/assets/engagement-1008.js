@@ -125,6 +125,43 @@
     return row.discover || "unknown";
   }
 
+  /** Pad slimmed ledger rows so Use #1/#2/#3 always appear (mirrors Worker ensureThreeCommentSuggestions). */
+  function ensureThreeComments(row) {
+    const existing = (Array.isArray(row?.suggested_comments) ? row.suggested_comments : [])
+      .map((text) => String(text || "").trim())
+      .filter(Boolean);
+    if (existing.length >= 3) {
+      return { ...row, suggested_comments: existing.slice(0, 3) };
+    }
+    const caption = String(row?.content_summary || row?.caption || "").trim();
+    const tokens = caption
+      .replace(/#[\w]+/g, "")
+      .split(/[\s,.;:!?\-/]+/)
+      .map((part) => part.trim())
+      .filter((part) => part.length > 3);
+    const subject = tokens.slice(0, 4).join(" ").slice(0, 48) || "this shot";
+    const fallbacks = [
+      `Love how you framed ${subject}. Really strong composition.`,
+      `Great eye for detail on ${subject}. Beautifully captured.`,
+      `The mood in this one stands out. Thanks for sharing such a thoughtful frame.`,
+    ];
+    const merged = [...existing];
+    for (const candidate of fallbacks) {
+      if (merged.length >= 3) break;
+      const norm = candidate.toLowerCase().replace(/[^a-z0-9\s]/g, "").trim();
+      if (merged.some((rowText) => {
+        const left = String(rowText).toLowerCase().replace(/[^a-z0-9\s]/g, "").trim();
+        return left && norm && (left === norm || left.includes(norm.slice(0, Math.floor(norm.length * 0.8))));
+      })) continue;
+      merged.push(candidate);
+    }
+    return {
+      ...row,
+      suggested_comments: merged.slice(0, 3),
+      selected_comment: String(row?.selected_comment || merged[0] || "").trim() || merged[0] || "",
+    };
+  }
+
   function renderRecommendations() {
     const root = $("engagementRecommendations");
     if (!root) return;
@@ -132,7 +169,8 @@
       root.innerHTML = `<p class="subtle">No open recommendations. Run Discover now for the current profile.</p>`;
       return;
     }
-    root.innerHTML = state.recommendations.map((row) => {
+    root.innerHTML = state.recommendations.map((raw) => {
+      const row = ensureThreeComments(raw);
       const comments = Array.isArray(row.suggested_comments) ? row.suggested_comments : [];
       const selected = row.selected_comment || comments[0] || "";
       const checked = state.selected.has(row.target_id) ? "checked" : "";
@@ -361,7 +399,8 @@
     if (useComment) {
       const targetId = useComment.getAttribute("data-use-comment");
       const index = Number(useComment.getAttribute("data-comment-index") || 0);
-      const row = state.recommendations.find((item) => item.target_id === targetId);
+      const raw = state.recommendations.find((item) => item.target_id === targetId);
+      const row = raw ? ensureThreeComments(raw) : null;
       const text = row?.suggested_comments?.[index] || "";
       const area = document.querySelector(`textarea[data-comment-for="${targetId}"]`);
       if (area) area.value = text;
