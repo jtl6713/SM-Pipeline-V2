@@ -20,7 +20,7 @@ test("idea promote drawer documents duration vs voiceover precedence", () => {
   assert.ok(scriptBuild);
   assert.ok(appBuild);
   assert.equal(appBuild, scriptBuild);
-  assert.equal(uiBuild, "0.6.557");
+  assert.equal(uiBuild, "0.6.558");
   assert.match(html, /id="ideaLibraryPickerForm"/);
   assert.match(html, /class="idea-type-guide"/);
   assert.match(html, /Photo Set turns stills into Reels|Photo Set/);
@@ -76,6 +76,9 @@ test("Ideas list Create timeline opens saved Production instead of only refreshi
   assert.match(handler, /event\.preventDefault\(\)/);
   assert.match(handler, /findExistingProductionRequestForIdea\(idea\)/);
   assert.match(handler, /existing\.production_notes/);
+  assert.match(handler, /savedTimelines\[0\]/);
+  assert.match(handler, /Date\.parse\(first\.created_at/);
+  assert.match(handler, /Promise\.all\(requestIds\.map/);
   assert.match(handler, /openProductionRequestForIdea\(idea/);
   assert.match(handler, /productionRequest: saved/);
   assert.match(handler, /createIdeaTimedScript\(idea, \{ button, heading: true \}\)/);

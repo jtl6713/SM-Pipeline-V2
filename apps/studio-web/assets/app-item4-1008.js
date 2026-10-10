@@ -260,7 +260,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.557-idea-timeline-open";
+  const BUILD_ID = "item4-0.6.558-idea-timeline-preserve";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -14192,9 +14192,33 @@
         try {
           // A timed script already attached to Production must be reopened, not
           // regenerated. Regenerating discards the operator's scene/media order.
-          const existing = ideaHasProductionRequest(idea)
-            ? await findExistingProductionRequestForIdea(idea).catch(() => null)
-            : null;
+          const requestIds = (Array.isArray(idea.production_request_links)
+            ? idea.production_request_links : [])
+            .map((entry) => String(typeof entry === "string" ? entry : entry?.id || "").trim())
+            .filter(Boolean)
+            .slice(0, 12);
+          const linkedRequests = await Promise.all(requestIds.map(async (id) => {
+            try {
+              const result = await api(`/api/production-requests/${encodeURIComponent(id)}`, {
+                timeoutMs: 12000,
+                retries: 0,
+              });
+              return result?.record || null;
+            } catch {
+              return null;
+            }
+          }));
+          const savedTimelines = linkedRequests
+            .filter((record) => record?.id && /\[timed-script\]\s*\{/i.test(String(record.production_notes || "")))
+            .filter((record) => ["Draft", "Ready", "Submitted"].includes(String(record.status || "").trim()))
+            .sort((first, second) => (Date.parse(first.created_at || "") || 0)
+              - (Date.parse(second.created_at || "") || 0));
+          // Keep the earliest saved timeline, not the newest one created by a
+          // repeat click. This retains the original approved scene assignments.
+          const existing = savedTimelines[0]
+            || (ideaHasProductionRequest(idea)
+              ? await findExistingProductionRequestForIdea(idea).catch(() => null)
+              : null);
           const saved = existing?.id && /\[timed-script\]\s*\{/i.test(String(existing.production_notes || ""))
             ? existing
             : null;
