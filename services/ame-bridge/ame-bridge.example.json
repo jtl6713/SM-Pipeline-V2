@@ -1,0 +1,10 @@
+{
+  "root": "D:/Content Creation/ChicagoShining Pipeline/Services/AME_Bridge",
+  "stability_seconds": 15,
+  "poll_seconds": 5,
+  "min_output_bytes": 32768,
+  "delete_watch_source": true,
+  "use_ffprobe": true,
+  "port": 3342,
+  "host": "127.0.0.1"
+}

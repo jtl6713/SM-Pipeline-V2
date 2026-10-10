@@ -16,6 +16,8 @@ __pycache__/
 *.pfx
 *.p12
 services/video-compressor/credentials/
+services/ame-bridge/ame-bridge.local.json
+services/ame-bridge/*.log
 **/google-drive-service-account.json
 
 # Logs / runtime
