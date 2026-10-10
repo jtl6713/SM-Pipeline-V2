@@ -279,7 +279,7 @@ test("worker wires engagement routes, cron, and version bump", () => {
   assert.match(worker, /from "\.\/engagement-service\.mjs"/);
   assert.match(worker, /\/api\/engagement\//);
   assert.match(worker, /studio_engagement_v1:\s*true/);
-  assert.match(worker, /0.10.492-engagement-alts-deploy-fix/);
+  assert.match(worker, /0.10.493-engagement-comment-one-click/);
   assert.match(worker, /studioRunEngagementDiscovery/);
   assert.match(worker, /studioEngagementCron/);
   assert.match(worker, /engagementThemeContextRecord/);
@@ -331,6 +331,16 @@ test("Stage B checkbox on approve/comment persists per profile", () => {
   assert.match(service, /stage_b_disabled:\s*true/);
   assert.match(ui, /stage_b_enabled:\s*stageBChecked\(\)/);
   assert.match(ui, /engagementStageB[\s\S]*addEventListener\("change"/);
+});
+
+test("Comment is one-click approve+publish; Approve Comment button is gone", () => {
+  const service = fs.readFileSync(path.join(here, "engagement-service.mjs"), "utf8");
+  const ui = fs.readFileSync(path.join(here, "../studio-web/assets/engagement-1008.js"), "utf8");
+  assert.match(ui, /primary-button" data-action="comment"/);
+  assert.doesNotMatch(ui, /Approve Comment/);
+  assert.match(service, /Approve used to only queue/);
+  assert.match(service, /One-click Comment \(and Stage B Approve\) locks the chosen text/);
+  assert.match(service, /Click Comment to publish where supported/);
 });
 
 test("YouTube engage probes uploader health for engagement build before comment", () => {

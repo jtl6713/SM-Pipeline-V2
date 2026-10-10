@@ -43,9 +43,9 @@ Last reviewed: 2026-10-08.
 
 | Stage | Behavior |
 |---|---|
-| **A** | Discover + AI suggestions + approval queue. **No external write actions.** |
-| **B** | Approved Like/Comment only where matrix = Supported (YouTube). Others → Open Post. |
-| **C** | Scheduled daily discovery (≤20 candidates/profile); still requires human approval before publish. |
+| **A** | Discover + AI suggestions. **No external write actions.** |
+| **B** | **Comment** / **Like** publish where matrix = Supported (YouTube). Comment is one-click approve+publish. Others → Open Post. |
+| **C** | Scheduled daily discovery (≤20 candidates/profile); operator clicks Comment/Like to publish. |
 
 ## Unsupported → manual workflow
 

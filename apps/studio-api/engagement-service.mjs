@@ -482,7 +482,7 @@ export async function studioApplyEngagementAction(env, payload, deps) {
     target.approval_status = "edited";
     if (!target.suggested_comments.includes(edited)) target.suggested_comments = [edited, ...target.suggested_comments].slice(0, 3);
     await studioSaveEngagementStore(env, store, deps);
-    return { ok: true, target, message: "Comment updated. Approve before publishing." };
+    return { ok: true, target, message: "Comment updated. Click Comment to publish where supported." };
   }
 
   if (actionType === "skip") {
@@ -525,7 +525,9 @@ export async function studioApplyEngagementAction(env, payload, deps) {
     };
   }
 
-  if (actionType === "approve") {
+  // Approve used to only queue. With Stage B on it is the same as Comment (approve + publish).
+  // Stage A still records approval without an external write.
+  if (actionType === "approve" && settings.stage_b_enabled !== true) {
     const comment = sanitizeCommentSuggestion(payload.comment || target.selected_comment || (target.suggested_comments || [])[0] || "");
     if (!comment) throw new Error("No safe comment available to approve");
     target.selected_comment = comment;
@@ -535,7 +537,7 @@ export async function studioApplyEngagementAction(env, payload, deps) {
       actionType: "comment",
       comment,
       approvalStatus: "approved",
-      executionStatus: settings.stage_b_enabled ? "queued" : "pending",
+      executionStatus: "pending",
     });
     store.actions.unshift(action);
     await mirrorActionRow(env, action, deps);
@@ -544,13 +546,10 @@ export async function studioApplyEngagementAction(env, payload, deps) {
       ok: true,
       target,
       action,
-      message: settings.stage_b_enabled
-        ? "Comment approved and queued. Use Comment to publish where supported."
-        : "Comment approved (Stage A). External publish remains disabled until Stage B is enabled.",
+      message: "Comment approved (Stage A). Enable Stage B, then click Comment to publish where supported.",
     };
   }
-
-  // like / comment execution (Stage B)
+  // like / comment execution (Stage B). Approve with Stage B uses the Comment publish path.
   const execType = actionType === "like" ? "like" : "comment";
   if (!settings.stage_b_enabled) {
     const action = buildActionRecord({
@@ -603,7 +602,14 @@ export async function studioApplyEngagementAction(env, payload, deps) {
     throw new Error(`Engagement suspended for ${suspendKey}: ${store.suspended[suspendKey].reason || "permission/abuse warning"}`);
   }
 
-  const comment = sanitizeCommentSuggestion(payload.comment || target.selected_comment || "");
+  const comment = sanitizeCommentSuggestion(
+    payload.comment || target.selected_comment || (target.suggested_comments || [])[0] || ""
+  );
+  // One-click Comment (and Stage B Approve) locks the chosen text as approved before publish.
+  if (execType === "comment" && comment) {
+    target.selected_comment = comment;
+    target.approval_status = "approved";
+  }
   const recordBlocked = async (message) => {
     const action = buildActionRecord({
       target,
