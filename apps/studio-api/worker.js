@@ -567,7 +567,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.494-vibe-cut-large-upload",
+          version: "0.10.495-vibe-cut-no-passthrough",
           studio_approve_all_batch_v1: true,
           studio_engagement_v1: true,
           studio_mae_schedule_v1: true,
@@ -7562,7 +7562,10 @@ function studioRewriteClipOriginNotes(existing, kind) {
 }
 
 function studioFinishedOriginKind(record) {
+  // Vibe Cut is a music montage of one long source — never finished-file passthrough.
+  if (studioIsVibeCut(record)) return "";
   const kind = item4ParseEzOrigin(record).inputKind;
+  if (kind === "vibe-cut") return "";
   if (item4IsClipInputKind(kind)) return "";
   if (kind === "finished-stills" || kind === "finished-carousel") return kind;
   const assets = item4AssetManifest(record);
@@ -10621,24 +10624,86 @@ async function resumeAzFinishedVideoRequests(env, ctx = null) {
   return { resumed: results.length, results };
 }
 
+async function studioClearVibeCutPassthroughOutputs(env, requestId) {
+  const outputs = await azPlatformOutputsForRequest(env, requestId).catch(() => []);
+  for (const row of outputs || []) {
+    const notes = String(f(row, "Output_Notes") || "");
+    const finalUrl = String(f(row, "Final_File_URL") || "").trim();
+    const passthroughStamp = /Finished passthrough/i.test(notes)
+      || /finished-video:passthrough|ez-input=finished-video/i.test(notes)
+      || Boolean(finalUrl && !String(f(row, "Composition_ID") || "").trim()
+        && String(f(row, "Render_Status") || "") === "Rendered");
+    if (!passthroughStamp && String(f(row, "Output_Status") || "") !== "Ready for Review") continue;
+    if (!passthroughStamp && !finalUrl) continue;
+    try {
+      await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, row.id, {
+        method: "PATCH",
+        body: JSON.stringify({
+          fields: {
+            Output_Status: "In Production",
+            Render_Status: "Ready for Render",
+            Final_File_URL: null,
+            Studio_Preview_URL: null,
+            Publish_Asset_URL: null,
+            Remotion_Job_ID: null,
+            Composition_ID: null,
+            Output_Filename: null,
+            Render_Clip_List_JSON: null,
+            Render_Total_Frames: null,
+            Selected_Clip_Count: null,
+            Timing_Status: "Pending",
+            Timing_Timeline_JSON: null,
+            Timing_Error_Message: null,
+            Review_Status: null,
+            Output_Notes: notes
+              .replace(/Finished passthrough[^\n]*/gi, "Vibe Cut — remounting music montage.")
+              .trim() || "Vibe Cut — remounting music montage.",
+          },
+          typecast: true,
+        }),
+      });
+    } catch (error) {
+      console.warn("vibe-cut passthrough output clear failed", row.id, error);
+    }
+  }
+}
+
 async function enqueueStudioProductionJob(env, requestId, options = {}) {
   if (!requestId) return null;
   const record = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, requestId);
   const existing = parseStudioProductionJob(record);
   const step = String(existing?.step || "").trim();
-  if (!existing?.job_id) {
+  // Heal: single-master Vibe Cuts used to inherit finished-video:passthrough from the
+  // one-video heuristic. Clear that route so produce stamps + T1 cut the source.
+  const vibeCutPassthrough = studioIsVibeCut(record)
+    && /passthrough/i.test(String(existing?.route || ""));
+  if (!existing?.job_id || vibeCutPassthrough) {
     const finishedKind = studioFinishedOriginKind(record);
     const job = {
       schema_version: "studio.production-job.1",
-      job_id: `spj-${crypto.randomUUID().replace(/-/g, "").slice(0, 12)}`,
+      job_id: existing?.job_id || `spj-${crypto.randomUUID().replace(/-/g, "").slice(0, 12)}`,
       route: finishedKind ? `${finishedKind}:passthrough` : null,
       step: "themes",
-      attempt: 1,
+      attempt: Number(existing?.attempt || 1) || 1,
       updated_at: new Date().toISOString(),
       error: null,
-      detail: finishedKind ? "Writing post caption" : STUDIO_PRODUCTION_JOB_LABELS.themes,
+      detail: vibeCutPassthrough
+        ? "Rebuilding Vibe Cut montage (not finished passthrough)"
+        : (finishedKind ? "Writing post caption" : STUDIO_PRODUCTION_JOB_LABELS.themes),
       percent: finishedKind ? 20 : 12,
     };
+    if (vibeCutPassthrough) {
+      job.heal = {
+        ...(typeof existing?.heal === "object" && existing.heal ? existing.heal : {}),
+        schema: "studio.produce-heal.1",
+        vibe_cut_passthrough_cleared_at: new Date().toISOString(),
+        resume_count: 0,
+        max_resumes: Number(existing?.heal?.max_resumes || 5) || 5,
+      };
+      await studioClearVibeCutPassthroughOutputs(env, requestId);
+    } else if (existing?.heal) {
+      job.heal = existing.heal;
+    }
     await airtableFetch(env, PRODUCTION_REQUEST_TABLE, requestId, {
       method: "PATCH",
       body: JSON.stringify({
@@ -10647,7 +10712,7 @@ async function enqueueStudioProductionJob(env, requestId, options = {}) {
       }),
     });
   }
-  if (Boolean(options.resume) || step === "blocked" || step === "escalated") {
+  if (Boolean(options.resume) || vibeCutPassthrough || step === "blocked" || step === "escalated") {
     return item4PulseStudioProduceJob(env, requestId, { resume: true });
   }
   return item4PulseStudioProduceJob(env, requestId);
@@ -14252,6 +14317,8 @@ function productionRequestFields(input, nowIso, { status = "Draft" } = {}) {
   const notes = String(input.production_notes || "");
   const az = /origin=az-finished-video/i.test(notes);
   const vibeCut = studioIsVibeCut(notes);
+  const vibeDirective = vibeCut ? parseVibeCutDirective(notes) : null;
+  const vibeTargetSeconds = Number(vibeDirective?.target_seconds || 0);
   return {
     Request_Status: status,
     Master_Content_Type: vibeCut ? "Vertical Short Video" : (input.content_type || null),
@@ -14261,7 +14328,9 @@ function productionRequestFields(input, nowIso, { status = "Draft" } = {}) {
     Thumbnail_Mode: (/ez-input=finished-(video|stills|carousel)/i.test(notes) || vibeCut)
       ? "Yes"
       : input.thumbnail_mode,
-    Video_Duration_Seconds: input.video_duration_seconds,
+    Video_Duration_Seconds: (vibeCut && vibeTargetSeconds > 0)
+      ? vibeTargetSeconds
+      : input.video_duration_seconds,
     Voiceover_Duration_Seconds: input.voiceover_duration_seconds,
     Music_Start_Seconds: input.music_start_seconds,
     Video_Clip_Count_Mode: input.video_clip_count_mode,

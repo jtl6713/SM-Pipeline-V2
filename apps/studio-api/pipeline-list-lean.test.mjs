@@ -15,7 +15,7 @@ test("Pipeline /api/outputs list stays lean and non-blocking", async () => {
   assert.doesNotMatch(listFields, /"Selected_Assets_JSON"/);
   assert.doesNotMatch(listFields, /"Creative_Render_Manifest_JSON"/);
   assert.match(worker, /Return the Pipeline table immediately/);
-  assert.match(worker, /version: "0.10.494-vibe-cut-large-upload"/);
+  assert.match(worker, /version: "0.10.495-vibe-cut-no-passthrough"/);
   assert.match(app, /BUILD_ID = "item4-0.6.556-vibe-cut-large-upload"/);
   assert.match(app, /API_TRANSIENT_RETRY_MAX = 3/);
   assert.match(app, /api\("\/api\/health", \{ timeoutMs: 8000, retries: 1 \}/);
