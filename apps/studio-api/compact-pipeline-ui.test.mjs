@@ -12,7 +12,7 @@ const css = fs.readFileSync(path.join(web, "assets/styles-phase7-0621.css"), "ut
 
 test("compact Pipeline build and cache bust stay aligned", () => {
   assert.match(app, /BUILD_ID = "item4-0.6.565-new-profile-setup"/);
-  assert.match(html, /UI build 0\.6\.562/);
+  assert.match(html, /UI build 0\.6\.565/);
   assert.match(html, /app-item4-1008\.js\?v=0.6.565-new-profile-setup/);
   assert.match(html, /styles-phase7-0621\.css\?v=0.6.565-new-profile-setup/);
   assert.match(css, /COMPACT_PIPELINE_V2_20261006/);
