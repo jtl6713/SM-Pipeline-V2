@@ -603,7 +603,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.510-ez-portal-horizontal-finished",
+          version: "0.10.514-compress-staging-hold",
           studio_render_queue_wait_v1: true,
           studio_approve_all_batch_v1: true,
           studio_engagement_v1: true,
@@ -6519,7 +6519,8 @@ async function item4ReconcileMasterAuthority(env, recordId, record = null) {
 
       if (driveId && mediaAssetId) {
         const stagingKey = String(asset?.r2_key || f(q, "Source_R2_Key") || "").trim();
-        if (stagingKey && env.STUDIO_MEDIA) {
+        const keepStagingForCompress = item4AssetCompressionPending(asset);
+        if (stagingKey && env.STUDIO_MEDIA && !keepStagingForCompress) {
           try { await env.STUDIO_MEDIA.delete(stagingKey); } catch {}
         }
         if (q && item4QueueStatus(q) !== "Ready") {
@@ -6581,8 +6582,8 @@ async function item4ReconcileMasterAuthority(env, recordId, record = null) {
       poster_url: posterUrl || null,
       poster_r2_key: posterKey || null,
       authoritative_storage: authoritative ? "google_drive" : (asset.authoritative_storage || null),
-      staging_deleted: authoritative ? true : Boolean(asset.staging_deleted),
-      r2_key: authoritative ? null : (asset.r2_key || null),
+      staging_deleted: authoritative && !item4AssetCompressionPending(asset) ? true : Boolean(asset.staging_deleted),
+      r2_key: authoritative && !item4AssetCompressionPending(asset) ? null : (asset.r2_key || f(q, "Source_R2_Key") || null),
       url: authoritative ? (driveUrl || null) : (asset.url || null),
     });
   }
