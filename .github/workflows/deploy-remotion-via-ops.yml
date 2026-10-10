@@ -111,3 +111,4 @@ jobs:
 # 2026-10-10T08:28Z
 
 # Redeploy trigger 2026-10-10T08:48Z: Ops 409 raced pipeline-runner job; remotion never restarted
+# Redeploy trigger 2026-10-10T12:52Z: public /health still 502; restart remotion after Studio merge ship
