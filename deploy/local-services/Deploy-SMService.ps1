@@ -264,6 +264,42 @@ function Select-Service {
     }
 }
 
+function Assert-PipelineRunnerHealthVersion {
+    param(
+        [Parameter(Mandatory = $true)][string]$RuntimeRoot,
+        [Parameter(Mandatory = $true)][string]$PublicUrl
+    )
+    $configPath = Join-Path $RuntimeRoot 'config.py'
+    if (-not (Test-Path -LiteralPath $configPath -PathType Leaf)) {
+        throw 'pipeline-runner runtime config.py missing after deploy'
+    }
+    $configText = Get-Content -LiteralPath $configPath -Raw
+    $match = [regex]::Match($configText, 'PIPELINE_RUNNER_CODE_VERSION\s*=\s*"([^"]+)"')
+    if (-not $match.Success) {
+        throw 'pipeline-runner runtime missing PIPELINE_RUNNER_CODE_VERSION'
+    }
+    $expected = $match.Groups[1].Value.Trim()
+    $healthUrl = $PublicUrl.TrimEnd('/') + '/health'
+    $deadline = (Get-Date).AddSeconds(60)
+    $body = $null
+    do {
+        try {
+            $resp = Invoke-WebRequest -Uri $healthUrl -UseBasicParsing -TimeoutSec 8
+            if ($resp.StatusCode -ge 200 -and $resp.StatusCode -lt 300) {
+                $body = $resp.Content
+                $json = $body | ConvertFrom-Json
+                if ([string]$json.version -eq $expected) {
+                    Write-Host "PASS public health version=$expected" -ForegroundColor Green
+                    return
+                }
+            }
+        }
+        catch {}
+        Start-Sleep -Seconds 3
+    } while ((Get-Date) -lt $deadline)
+    throw "pipeline-runner public health version mismatch. expected=$expected body=$body"
+}
+
 function Sync-PipelineRunnerServiceVersionPin {
     param(
         [Parameter(Mandatory = $true)][string]$SourceRoot,

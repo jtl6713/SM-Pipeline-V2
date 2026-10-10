@@ -92,3 +92,5 @@ Deploy Worker 0.10.489-engagement-ledger. Shrink the engagement ledger so Chicag
 2026-10-10: Deploy Worker 0.10.496-vibe-cut-multi-clip. Stamp expands Vibe Cut into many source trims; clear single head-trim remounts.
 
 2026-10-10: Deploy Worker 0.10.498-vibe-cut-ship. Ship Vibe Cut no-passthrough + multi-clip remount with main idea-timeline fixes.
+
+2026-10-10: Deploy Worker 0.10.499-vibe-cut-remount-heal. Produce watchdog must enqueue (not direct pulse) so Vibe Cut multi-clip remount runs.

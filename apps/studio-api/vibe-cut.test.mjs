@@ -182,7 +182,7 @@ test("Worker never treats Vibe Cut as finished-video passthrough", () => {
   assert.match(worker, /studioClearVibeCutPassthroughOutputs/);
   assert.match(worker, /vibeCutNeedsRemount/);
   assert.match(worker, /Rebuilding Vibe Cut multi-clip montage/);
-  assert.match(worker, /version: "0.10.498-vibe-cut-ship"/);
+  assert.match(worker, /version: "0.10.499-vibe-cut-remount-heal"/);
 });
 
 test("Studio web exposes Vibe Cut creation path", () => {
