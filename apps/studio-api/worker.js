@@ -596,7 +596,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.507-render-queue-wait",
+          version: "0.10.508-render-queue-wait",
           studio_render_queue_wait_v1: true,
           studio_approve_all_batch_v1: true,
           studio_engagement_v1: true,
@@ -7428,6 +7428,11 @@ const IDEA_LIBRARY_WEAK_TOKENS = new Set([
 
 const IDEA_LIBRARY_SHORT_SUBJECTS = new Set(["cta"]);
 
+/** Mirrored from idea-photo-wait.mjs — transit brands stay in the scan with place keys. */
+const IDEA_LIBRARY_BRAND_SUBJECTS = new Set([
+  "cta", "metra", "amtrak", "pace", "divvy", "uber", "lyft",
+]);
+
 const IDEA_LIBRARY_NAMED_PLACES = [
   "andersonville", "bridgeport", "bronzeville", "bucktown", "chinatown",
   "edgewater", "fulton market", "garfield park", "gold coast", "grant park",
@@ -7507,6 +7512,15 @@ function ideaLibraryMatchKeys(idea, query = "") {
     subjectKeys,
     scanKeys: [...new Set([...placeKeys, ...subjectKeys])],
   };
+}
+
+/** Place anchors plus brand/transit subjects (Metra/CTA) so station locations do not hide title brands. */
+function ideaLibraryFilterKeys(placeKeys = [], subjectKeys = []) {
+  const brands = (subjectKeys || []).filter((token) => IDEA_LIBRARY_BRAND_SUBJECTS.has(token));
+  if ((placeKeys || []).length || brands.length) {
+    return [...new Set([...(placeKeys || []), ...brands])];
+  }
+  return [...new Set(subjectKeys || [])];
 }
 
 /** Named places plus operator search. Title nouns like cars/ride are subjects, not places. */
@@ -7772,10 +7786,13 @@ async function getIdeaLibrarySuggestions(request, env, url, authorization) {
   const today = chicagoNowParts().date;
   // When the operator typed a search, filter Airtable on those tokens only.
   // A quoted name is the whole Asset Name phrase, not an OR of "island" and "ferry".
-  // Otherwise prefer named place keys so title nouns like "luxury" do not flood the scan.
+  // Otherwise place keys plus brand subjects (Metra/CTA) — place-only hid Metra
+  // stills when Primary_Location was a station name photos never mention.
   const filterKeys = queryTokens.length
     ? ideaLibraryStrongTokens(queryTokens)
-    : (placeKeys.length ? placeKeys : scanKeys);
+    : (placeKeys.length || subjectKeys.some((token) => IDEA_LIBRARY_BRAND_SUBJECTS.has(token))
+      ? ideaLibraryFilterKeys(placeKeys, subjectKeys)
+      : scanKeys);
   const scanLimit = phrase || filterKeys.length ? IDEA_LIBRARY_PLACE_FILTER_LIMIT : IDEA_LIBRARY_SCAN_LIMIT;
   const scopeFormula = await libraryProfileScopeFormula(env, authorization, url, { idea });
   const records = await listRecords(env, env.AIRTABLE_MEDIA_TABLE_ID, {
@@ -23871,7 +23888,9 @@ async function rankStillsForIdeaPhotoWait(env, idea) {
   const strongIdeaTokens = ideaLibraryStrongTokens(ideaTokens);
   const { placeKeys, subjectKeys, scanKeys } = ideaLibraryMatchKeys(idea, "");
   const today = chicagoNowParts().date;
-  const filterKeys = placeKeys.length ? placeKeys : scanKeys;
+  const filterKeys = placeKeys.length || subjectKeys.some((token) => IDEA_LIBRARY_BRAND_SUBJECTS.has(token))
+    ? ideaLibraryFilterKeys(placeKeys, subjectKeys)
+    : scanKeys;
   const scanLimit = filterKeys.length ? IDEA_LIBRARY_PLACE_FILTER_LIMIT : IDEA_LIBRARY_SCAN_LIMIT;
   const crossScope = await readLibraryCrossScopeSetting(env);
   const scopeFormula = await mediaAssetProfileScopeForId(
@@ -23922,7 +23941,9 @@ async function rankVideosForScriptedShortProposal(env, idea) {
   const strongIdeaTokens = ideaLibraryStrongTokens(ideaTokens);
   const { placeKeys, subjectKeys, scanKeys } = ideaLibraryMatchKeys(idea, "");
   const today = chicagoNowParts().date;
-  const filterKeys = placeKeys.length ? placeKeys : scanKeys;
+  const filterKeys = placeKeys.length || subjectKeys.some((token) => IDEA_LIBRARY_BRAND_SUBJECTS.has(token))
+    ? ideaLibraryFilterKeys(placeKeys, subjectKeys)
+    : scanKeys;
   const scanLimit = filterKeys.length ? IDEA_LIBRARY_PLACE_FILTER_LIMIT : IDEA_LIBRARY_SCAN_LIMIT;
   const crossScope = await readLibraryCrossScopeSetting(env);
   const scopeFormula = await mediaAssetProfileScopeForId(
