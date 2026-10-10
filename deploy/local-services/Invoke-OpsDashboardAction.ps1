@@ -34,6 +34,11 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
+# Ops Dashboard Node sets PORT=3361 on its process. START/DEPLOY children must
+# not inherit it — Remotion/voiceover/etc. read process.env.PORT and will bind
+# the wrong listener (or crash with EADDRINUSE on :3361 while Ops is up).
+Remove-Item Env:PORT -ErrorAction SilentlyContinue
+
 $Deployable = @(
     'frame-extractor',
     'remotion-renderer',

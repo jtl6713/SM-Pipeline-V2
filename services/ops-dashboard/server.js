@@ -36,7 +36,18 @@ const TOKEN = String(process.env.DASHBOARD_TOKEN || '').trim();
 const PIPELINE_ROOT = process.env.PIPELINE_ROOT || 'D:\\Content Creation\\ChicagoShining Pipeline';
 const REPO_ROOT = process.env.REPO_ROOT || path.resolve(ROOT, '..', '..');
 const ACTION_PS1 = path.join(REPO_ROOT, 'deploy', 'local-services', 'Invoke-OpsDashboardAction.ps1');
-const OPS_DASHBOARD_VERSION = '2026-10-02-service-versions';
+const OPS_DASHBOARD_VERSION = '2026-10-10-ops-start-port-clear';
+const SHELL_MAX_CHARS = 8000;
+const SHELL_TIMEOUT_MS = 5 * 60 * 1000;
+const SHELL_BLOCKED = [
+  /format-volume\b/i,
+  /clear-disk\b/i,
+  /remove-item\s+.*-recurse\s+.*[cC]:\\?\s*$/i,
+  /rm\s+-rf\s+\/\s*$/i,
+  /shutdown\b/i,
+  /restart-computer\b/i,
+  /stop-computer\b/i,
+];
 
 const catalog = JSON.parse(fs.readFileSync(CATALOG_PATH, 'utf8'));
 const actionsById = new Map(catalog.actions.map((a) => [a.id, a]));
@@ -320,6 +331,9 @@ function startJob(action, service) {
   const child = spawn('powershell.exe', args, {
     windowsHide: true,
     cwd: REPO_ROOT,
+    // Ops itself listens with PORT=3361. Children that start Node services
+    // (Remotion) must not inherit that or they bind the wrong port / EADDRINUSE.
+    env: { ...process.env, PORT: '' },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   job.child = child;
@@ -364,12 +378,120 @@ function publicSafeJob(job) {
     id: job.id,
     action: job.action,
     service: job.service,
+    command: job.command || null,
     status: job.status,
     startedAt: job.startedAt,
     endedAt: job.endedAt,
     exitCode: job.exitCode,
     log: job.log,
   };
+}
+
+function shellAuditPath() {
+  const dir = path.join(PIPELINE_ROOT, 'Deployment Logs', 'Local Services');
+  try { fs.mkdirSync(dir, { recursive: true }); } catch { /* ignore */ }
+  return path.join(dir, 'ops-shell-audit.log');
+}
+
+function appendShellAudit(entry) {
+  const line = `[${new Date().toISOString()}] ${JSON.stringify(entry)}\n`;
+  try { fs.appendFileSync(shellAuditPath(), line, 'utf8'); } catch { /* ignore */ }
+}
+
+function validateShellCommand(raw) {
+  const command = String(raw || '').trim();
+  if (!command) return { ok: false, error: 'Command is empty.' };
+  if (command.length > SHELL_MAX_CHARS) {
+    return { ok: false, error: `Command exceeds ${SHELL_MAX_CHARS} characters.` };
+  }
+  for (const pattern of SHELL_BLOCKED) {
+    if (pattern.test(command)) {
+      return { ok: false, error: `Command blocked by Ops safety filter (${pattern}).` };
+    }
+  }
+  return { ok: true, command };
+}
+
+function startShellJob(command, meta = {}) {
+  const job = {
+    id: randomUUID(),
+    action: 'shell',
+    service: null,
+    command,
+    status: 'running',
+    startedAt: new Date().toISOString(),
+    endedAt: null,
+    exitCode: null,
+    log: `PowerShell console on ${os.hostname()}\ncwd=${PIPELINE_ROOT}\n$ ${command}\n\n`,
+  };
+  jobs.set(job.id, job);
+  activeJobId = job.id;
+  appendShellAudit({
+    event: 'start',
+    jobId: job.id,
+    host: os.hostname(),
+    ip: meta.ip || null,
+    command,
+  });
+
+  // Encoded command avoids quoting hell for multiline operator paste.
+  const encoded = Buffer.from(command, 'utf16le').toString('base64');
+  const args = [
+    '-NoProfile',
+    '-ExecutionPolicy',
+    'Bypass',
+    '-EncodedCommand',
+    encoded,
+  ];
+  const child = spawn('powershell.exe', args, {
+    windowsHide: true,
+    cwd: PIPELINE_ROOT,
+    env: {
+      ...process.env,
+      // Never leak Ops' own PORT=3361 into operator shell sessions that start
+      // Node services (Remotion reads process.env.PORT).
+      PORT: '',
+    },
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  job.child = child;
+
+  let pump = null;
+  let timeoutTimer = null;
+  const finish = (code, errText) => {
+    if (job.endedAt) return;
+    if (pump) clearInterval(pump);
+    if (timeoutTimer) clearTimeout(timeoutTimer);
+    if (errText) appendLog(job, `\n${errText}\n`);
+    job.exitCode = code == null ? 1 : code;
+    job.status = job.exitCode === 0 ? 'ok' : 'failed';
+    job.endedAt = new Date().toISOString();
+    job.child = null;
+    if (activeJobId === job.id) activeJobId = null;
+    appendShellAudit({
+      event: 'finish',
+      jobId: job.id,
+      exitCode: job.exitCode,
+      status: job.status,
+    });
+  };
+  pump = setInterval(() => {
+    if (child.exitCode !== null) finish(child.exitCode);
+  }, 800);
+  timeoutTimer = setTimeout(() => {
+    if (job.endedAt) return;
+    try {
+      if (child && !child.killed) child.kill();
+    } catch { /* ignore */ }
+    finish(1, `ERROR shell timed out after ${Math.round(SHELL_TIMEOUT_MS / 1000)} seconds`);
+  }, SHELL_TIMEOUT_MS);
+
+  child.stdout.on('data', (buf) => appendLog(job, buf.toString('utf8')));
+  child.stderr.on('data', (buf) => appendLog(job, buf.toString('utf8')));
+  child.on('error', (err) => finish(1, `ERROR ${err.message}`));
+  child.on('exit', (code) => finish(code));
+  child.on('close', (code) => finish(code));
+  return job;
 }
 
 const server = http.createServer(async (req, res) => {
@@ -518,6 +640,35 @@ const server = http.createServer(async (req, res) => {
         return;
       }
       const job = startJob(actionId, service);
+      json(res, 202, { ok: true, job: publicSafeJob(job) });
+      return;
+    }
+
+    if (req.method === 'POST' && url.pathname === '/api/shell') {
+      if (activeJobId) {
+        const current = jobs.get(activeJobId);
+        json(res, 409, {
+          ok: false,
+          error: 'Another Ops job is still running. Wait or Unlock actions first.',
+          jobId: activeJobId,
+          job: current ? publicSafeJob(current) : null,
+        });
+        return;
+      }
+      const body = JSON.parse((await readBody(req)) || '{}');
+      if (body.confirm !== true) {
+        json(res, 400, {
+          ok: false,
+          error: 'PowerShell console requires confirm: true. Commands run as the Ops host user on this PC.',
+        });
+        return;
+      }
+      const checked = validateShellCommand(body.command);
+      if (!checked.ok) {
+        json(res, 400, { ok: false, error: checked.error });
+        return;
+      }
+      const job = startShellJob(checked.command, { ip: clientIp(req) });
       json(res, 202, { ok: true, job: publicSafeJob(job) });
       return;
     }

@@ -90,6 +90,18 @@ Poll until `job.status` is `ok` or `failed`. Success log contains `PASS - contro
 
 Confirm required: `stop-all`, `desk-restart`, `restart-one`, `stop-one`, `sync`, `deploy`, `deploy-pipeline-runner`, `rollback`
 
+### POST /api/shell (PowerShell console)
+
+Authenticated host PowerShell for diagnostics. Runs as the Ops Dashboard Windows user on JOE-GAMING.
+
+```json
+{ "command": "curl.exe -sS http://127.0.0.1:3333/health", "confirm": true }
+```
+
+Requires `confirm: true`. Audited to `Deployment Logs\Local Services\ops-shell-audit.log`. Blocks a short list of wipe/shutdown patterns. Prefer allowlisted `/api/run` actions when one exists.
+
+Ops clears inherited `PORT=3361` on `/api/run` and `/api/shell` children so Remotion (and other Node listeners) bind their catalog ports. `Start-ChicagoShiningHidden.ps1` also pins each service `PORT` and waits for local `/health` before exit 0.
+
 ## CLI wrapper (recommended on Joseph's PC)
 
 Script: `deploy/local-services/Invoke-OpsApi.ps1`

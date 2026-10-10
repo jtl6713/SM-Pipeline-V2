@@ -30,6 +30,18 @@
     .wrap { padding: 20px 24px 48px; max-width: 1180px; margin: 0 auto; }
     .grid { display: grid; grid-template-columns: 1.15fr 0.85fr; gap: 18px; }
     @media (max-width: 920px) { .grid { grid-template-columns: 1fr; } }
+    textarea.shell {
+      width: 100%; min-height: 120px; resize: vertical;
+      font: 12px/1.4 Consolas, "SFMono-Regular", monospace;
+      background: #09090a; color: #e8d7a5;
+    }
+    .chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0 10px; }
+    .chips button {
+      background: transparent; color: var(--ink); border: 1px solid var(--line);
+      font-size: 11px; font-weight: 500; padding: 5px 8px;
+    }
+    .confirm-row { display: flex; gap: 8px; align-items: flex-start; margin: 8px 0 12px; color: var(--muted); font-size: 12px; }
+    .confirm-row input { margin-top: 2px; }
     section {
       background: var(--panel);
       border: 1px solid var(--line);
@@ -90,7 +102,7 @@
 <body>
   <header>
     <h1>Chicago Shining Ops</h1>
-    <div class="sub">START / STOP / VERIFY / SYNC / PLAN / DEPLOY. Allowlisted scripts only. Catalog 2026-09-19-job-finish. <a href="#" id="forgetDevice" hidden>Forget token on this device</a></div>
+    <div class="sub">START / STOP / VERIFY / SYNC / PLAN / DEPLOY + authenticated PowerShell console on this PC. Catalog 2026-10-10-ops-start-port-clear. <a href="#" id="forgetDevice" hidden>Forget token on this device</a></div>
   </header>
   <div class="wrap">
     <div id="login" class="login" hidden>
@@ -110,6 +122,20 @@
           <section>
             <h2>Listeners</h2>
             <div id="status"></div>
+          </section>
+          <section style="margin-top:18px">
+            <h2>PowerShell console</h2>
+            <p class="sub">Runs on this Windows PC as the Ops host user. Requires confirm. Audited under <code>Deployment Logs\Local Services\ops-shell-audit.log</code>. Prefer allowlisted Actions when one exists.</p>
+            <div class="chips" id="shellChips"></div>
+            <textarea id="shellInput" class="shell" spellcheck="false" placeholder="Get-NetTCPConnection -LocalPort 3333 -State Listen&#10;curl.exe -sS http://127.0.0.1:3333/health"></textarea>
+            <label class="confirm-row">
+              <input type="checkbox" id="shellConfirm" />
+              <span>I understand this executes PowerShell on JOE-GAMING (not a browser sandbox).</span>
+            </label>
+            <div class="row">
+              <button type="button" class="danger" id="shellRun">Run PowerShell</button>
+              <button type="button" class="ghost" id="shellClear">Clear</button>
+            </div>
           </section>
           <section style="margin-top:18px">
             <h2>Actions</h2>
@@ -257,10 +283,69 @@
       };
     }
 
+    const shellPresets = [
+      {
+        label: "Remotion local health",
+        command: "curl.exe -sS http://127.0.0.1:3333/health",
+      },
+      {
+        label: "Who owns :3333 / :3361",
+        command: "Get-NetTCPConnection -LocalPort 3333,3361 -State Listen -ErrorAction SilentlyContinue | Select-Object LocalPort,OwningProcess,State | Format-Table -AutoSize; Get-Process -Id (Get-NetTCPConnection -LocalPort 3333,3361 -State Listen -ErrorAction SilentlyContinue).OwningProcess -ErrorAction SilentlyContinue | Select-Object Id,ProcessName,Path | Format-List",
+      },
+      {
+        label: "Start Remotion on :3333",
+        // Nested `powershell -File` opens a visible window; Start-Process -WindowStyle Hidden does not.
+        command: "$env:PORT='3333'; $p = Start-Process -FilePath powershell.exe -WindowStyle Hidden -PassThru -ArgumentList @('-NoProfile','-ExecutionPolicy','Bypass','-File','D:\\Content Creation\\ChicagoShining Pipeline\\Source Control\\SM-Pipeline-V2\\deploy\\local-services\\Start-ChicagoShiningHidden.ps1','-Service','remotion-renderer','-StopFirst'); Wait-Process -Id $p.Id; Start-Sleep 1; curl.exe -sS http://127.0.0.1:3333/health",
+      },
+      {
+        label: "Remotion start log tail",
+        command: "Get-Content \"D:\\Content Creation\\ChicagoShining Pipeline\\Deployment Logs\\Local Services\\hidden-remotion-renderer.out.log\" -Tail 40 -ErrorAction SilentlyContinue; Write-Host '--- ERR ---'; Get-Content \"D:\\Content Creation\\ChicagoShining Pipeline\\Deployment Logs\\Local Services\\hidden-remotion-renderer.err.log\" -Tail 40 -ErrorAction SilentlyContinue",
+      },
+    ];
+
+    function renderShellChips() {
+      $("shellChips").innerHTML = shellPresets.map((preset, index) =>
+        `<button type="button" data-shell-preset="${index}">${escapeHtml(preset.label)}</button>`
+      ).join("");
+      $("shellChips").onclick = (ev) => {
+        const btn = ev.target.closest("button[data-shell-preset]");
+        if (!btn) return;
+        const preset = shellPresets[Number(btn.getAttribute("data-shell-preset"))];
+        if (preset) $("shellInput").value = preset.command;
+      };
+    }
+
     function setActionsLocked(locked) {
       document.querySelectorAll("button[data-action]").forEach((b) => { b.disabled = locked; });
+      $("shellRun").disabled = locked;
       $("unlockActions").hidden = !locked;
       $("lockNote").hidden = !locked;
+    }
+
+    async function runShell() {
+      $("runErr").textContent = "";
+      const command = String($("shellInput").value || "").trim();
+      if (!command) {
+        $("runErr").textContent = "Type a PowerShell command first.";
+        return;
+      }
+      if (!$("shellConfirm").checked) {
+        $("runErr").textContent = "Check the confirm box before running PowerShell on this PC.";
+        return;
+      }
+      if (!confirm("Run this PowerShell on JOE-GAMING?\n\n" + command.slice(0, 500))) return;
+      try {
+        const data = await api("/api/shell", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ command, confirm: true }),
+        });
+        if (pollTimer) clearTimeout(pollTimer);
+        if (data.error) $("runErr").textContent = data.error;
+        pollJob(data.job.id);
+      } catch (err) {
+        $("runErr").textContent = err.message;
+      }
     }
 
     async function pollJob(id) {
@@ -269,7 +354,7 @@
         const job = data.job;
         pollFailures = 0;
         $("runErr").textContent = "";
-        $("jobMeta").textContent = `${job.action}${job.service ? " · " + job.service : ""} · ${job.status}` +
+        $("jobMeta").textContent = `${job.action}${job.service ? " · " + job.service : ""}${job.command ? " · shell" : ""} · ${job.status}` +
           (job.exitCode == null ? "" : " · exit " + job.exitCode);
         $("log").textContent = job.log || "(no output yet)";
         $("log").scrollTop = $("log").scrollHeight;
@@ -340,6 +425,7 @@
         $("app").hidden = false;
         $("forgetDevice").hidden = false;
         if (token()) rememberToken(token());
+        renderShellChips();
         renderActions();
         const status = await loadStatus();
         if (status && status.activeJobId) pollJob(status.activeJobId);
@@ -351,6 +437,8 @@
       }
     }
 
+    $("shellRun").onclick = () => runShell();
+    $("shellClear").onclick = () => { $("shellInput").value = ""; $("shellConfirm").checked = false; };
     $("saveToken").onclick = () => {
       rememberToken($("tokenInput").value);
       $("loginErr").textContent = "";

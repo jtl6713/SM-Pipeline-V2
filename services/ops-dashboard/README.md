@@ -1,13 +1,13 @@
 # Ops Dashboard
 
-Local operator site for the Chicago Shining START / STOP / VERIFY / SYNC / PLAN / DEPLOY shortcuts. It shows listener status, explains each action, and runs only the allowlisted scripts in `deploy/local-services/Invoke-OpsDashboardAction.ps1`.
+Local operator site for the Chicago Shining START / STOP / VERIFY / SYNC / PLAN / DEPLOY shortcuts. It shows listener status, explains each action, and runs the allowlisted scripts in `deploy/local-services/Invoke-OpsDashboardAction.ps1`. It also exposes an authenticated **PowerShell console** (`POST /api/shell`) for one-off host diagnostics.
 
 - Local: `http://127.0.0.1:3361`
 - Optional public hostname: `https://ops.chicagoshining.com` (Cloudflare Tunnel + Access + token)
 
 ## What it is not
 
-It does not run arbitrary commands. It does not replace Studio, Task Organizer, or Quality Agent. STOP ALL from the stock shortcut still leaves this dashboard up so you can start services again.
+Prefer allowlisted Actions when one exists. The PowerShell console is for diagnostics (confirm required, audited, safety-filtered). It does not replace Studio, Task Organizer, or Quality Agent. STOP ALL from the stock shortcut still leaves this dashboard up so you can start services again.
 
 ## Start on this PC
 

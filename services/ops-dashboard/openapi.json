@@ -2,8 +2,8 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Chicago Shining Ops Dashboard API",
-    "version": "1.0.0",
-    "description": "Allowlisted operator actions for local Windows services (DEPLOY, VERIFY, restart). Does not deploy Cloudflare Worker or Pages — those use GitHub Actions trigger files on main."
+    "version": "1.1.0",
+    "description": "Allowlisted operator actions for local Windows services (DEPLOY, VERIFY, restart) plus an authenticated PowerShell console (POST /api/shell, confirm required, audited). Does not deploy Cloudflare Worker or Pages — those use GitHub Actions trigger files on main."
   },
   "servers": [
     { "url": "https://ops.chicagoshining.com", "description": "Public (Cloudflare Access + bearer token)" },
@@ -124,6 +124,41 @@
         "responses": {
           "202": { "description": "Job started; body includes job.id" },
           "400": { "description": "Unknown action, missing service, or confirm required" },
+          "401": { "description": "Missing or invalid token" },
+          "409": { "description": "Another job is still running" }
+        }
+      }
+    },
+    "/api/shell": {
+      "post": {
+        "operationId": "shell",
+        "summary": "Run PowerShell on the Ops host (async job)",
+        "description": "Requires confirm=true. Runs as the Ops Dashboard Windows user on JOE-GAMING. Audited to Deployment Logs\\\\Local Services\\\\ops-shell-audit.log. Prefer allowlisted /api/run actions when one exists. Only one job at a time.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["command", "confirm"],
+                "properties": {
+                  "command": {
+                    "type": "string",
+                    "maxLength": 8000,
+                    "description": "PowerShell script text"
+                  },
+                  "confirm": {
+                    "type": "boolean",
+                    "description": "Must be true"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": { "description": "Job started; body includes job.id" },
+          "400": { "description": "Empty command, missing confirm, or blocked pattern" },
           "401": { "description": "Missing or invalid token" },
           "409": { "description": "Another job is still running" }
         }
