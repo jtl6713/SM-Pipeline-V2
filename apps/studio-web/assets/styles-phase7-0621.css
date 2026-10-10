@@ -2706,9 +2706,12 @@ body{
 .library-preview-dialog{width:min(920px,100%);background:#fff;border-radius:16px;padding:16px;box-shadow:0 20px 50px rgba(1,37,89,.28)}
 .library-preview-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:12px}
 .library-preview-head p{margin:0;font-weight:800}
-.library-preview-dialog video,.library-preview-dialog img{width:100%;max-height:min(72vh,820px);border-radius:10px;background:#012559;object-fit:contain;display:none}
-.library-preview-dialog.is-video video,.library-preview-dialog.is-image img{display:block}
-.library-preview-dialog.is-video video{background:#000}
+/* Only the Asset Manager lightbox stage (direct children). Nested picker thumbs
+   in swap-still / timed-script dialogs reuse .library-preview-dialog and must stay visible. */
+.library-preview-dialog>video,.library-preview-dialog>img{width:100%;max-height:min(72vh,820px);border-radius:10px;background:#012559;object-fit:contain;display:none}
+.library-preview-dialog.is-video>video,.library-preview-dialog.is-image>img{display:block}
+.library-preview-dialog.is-video>video{background:#000}
+.swap-still-dialog .idea-library-card img{display:block;max-height:none;width:100%;aspect-ratio:1;object-fit:cover;background:#eef3f2}
 .library-kind{position:absolute;top:8px;left:8px;z-index:3;pointer-events:none;background:#012559;color:#fff;font-size:.68rem;font-weight:800;letter-spacing:.04em;text-transform:uppercase;padding:3px 7px;border-radius:999px}
 .library-toolbar{display:grid;grid-template-columns:minmax(0,1.2fr) 10rem 10rem 10rem 10rem;gap:12px;align-items:end}.library-toolbar-dates{grid-template-columns:minmax(10rem,14rem) minmax(10rem,14rem) auto;margin-top:2px}.library-date-actions{display:flex;align-items:end;gap:8px;flex-wrap:wrap;padding-bottom:2px}.library-date-actions .secondary-button{min-height:42px}
 .library-results-toolbar{padding:18px 20px 14px;display:grid;gap:14px;border-bottom:1px solid var(--line)}
