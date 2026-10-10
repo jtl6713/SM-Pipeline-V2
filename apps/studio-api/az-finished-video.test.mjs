@@ -28,6 +28,9 @@ import {
   pickPlatformOutputSeedKeeper,
   shouldCreateFinishedOutput,
   uniquePlanItems,
+  azExpectedOutputCount,
+  isHorizontalFinishedAspect,
+  FINISHED_HORIZONTAL_KEYS,
 } from "./az-finished-video.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -137,6 +140,18 @@ test("canonical keys collapse reel-family types onto the six destinations", () =
     "Instagram::Story",
     "Facebook::Story",
   ]);
+});
+
+test("horizontal finished aspect caps to YouTube Standard Video only", () => {
+  const notes = "origin=az-finished-video; ez-input=finished-video; source-aspect=horizontal; az-auto-queue=1";
+  assert.equal(isHorizontalFinishedAspect(notes), true);
+  assert.equal(azExpectedOutputCount(notes), 1);
+  const capped = capFinishedPlanItems([
+    { platform: "Instagram", output_type: "Reel" },
+    { platform: "YouTube", output_type: "Standard Video" },
+    { platform: "YouTube", output_type: "Short" },
+  ], { notes });
+  assert.deepEqual(capped.map((item) => `${item.platform}::${item.output_type}`), [...FINISHED_HORIZONTAL_KEYS]);
 });
 
 test("capFinishedPlanItems refuses a seventh destination and same-key aliases", () => {

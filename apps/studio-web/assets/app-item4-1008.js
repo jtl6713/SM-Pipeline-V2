@@ -154,6 +154,7 @@
   let ezWizardHistory = [];
   let ezWizardBusy = false;
   let azFinishedPath = false;
+  let ezPortalPath = null;
   let azProgressTimer = 0;
   let ezAutoPlanAfterUpload = false;
   let ezPlanInFlight = false;
@@ -260,7 +261,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.570-swap-still-img-display";
+  const BUILD_ID = "item4-0.6.571-ez-portal-home";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -3822,9 +3823,93 @@
   function syncEzVibeCutLaunch() {
     const launch = $("ezVibeCutLaunch");
     if (!launch) return;
-    const onHome = Boolean($("page-home")?.classList.contains("active"));
-    const atStart = ezWizardStep === "start" || !ezWizardStep;
-    launch.hidden = !(onHome && atStart && !ezWizardBusy && !azFinishedPath);
+    const portalOpen = !$("ezPortal")?.hidden;
+    launch.hidden = true;
+    void portalOpen;
+  }
+
+  function showEzPortal({ silent = false } = {}) {
+    if (azFinishedPath && $("azFinishedDrop")?.classList.contains("is-busy")) return;
+    ezPortalPath = null;
+    const portal = $("ezPortal");
+    if (portal) portal.hidden = false;
+    if ($("azFinishedDrop")) $("azFinishedDrop").hidden = true;
+    if ($("ezWizard")) $("ezWizard").hidden = true;
+    if ($("ezPortalBackWizard")) $("ezPortalBackWizard").hidden = true;
+    if (!silent && !azFinishedPath) resetEzWizard({ silent: true });
+    syncEzVibeCutLaunch();
+  }
+
+  function showEzPathPanel(path) {
+    const next = path === "vibe" || path === "completed" || path === "wizard" ? path : null;
+    if (!next) return;
+    ezPortalPath = next;
+    switchToPage("home");
+    if ($("ezPortal")) $("ezPortal").hidden = true;
+    if ($("azFinishedDrop")) $("azFinishedDrop").hidden = next !== "completed";
+    if ($("ezWizard")) $("ezWizard").hidden = next === "completed";
+    if ($("ezPortalBackWizard")) $("ezPortalBackWizard").hidden = next === "completed";
+    syncEzVibeCutLaunch();
+    if (next === "vibe") {
+      startEzVibeCutWizard();
+    } else if (next === "wizard") {
+      resetEzWizard({ silent: true });
+      renderEzWizard();
+    }
+  }
+
+  function bindEzPortal() {
+    $("ezPortal")?.querySelectorAll("[data-ez-portal-path]").forEach((button) => {
+      button.addEventListener("click", () => showEzPathPanel(button.dataset.ezPortalPath));
+    });
+    $("ezPortalBackCompleted")?.addEventListener("click", () => {
+      if ($("azFinishedDrop")?.classList.contains("is-busy")) return;
+      azFinishedPath = false;
+      showEzPortal();
+    });
+    $("ezPortalBackWizard")?.addEventListener("click", () => {
+      if (ezWizardBusy) return;
+      showEzPortal();
+    });
+    showEzPortal({ silent: true });
+  }
+
+  async function aspectPlanFromVideoFiles(files) {
+    const video = Array.from(files || []).find(item4FileLooksLikeVideo);
+    if (!video) return null;
+    const meta = await imageMetadataForFiles([video]);
+    const row = meta?.[0];
+    const plan = ezPlanApi()?.ezPlanFromSourceAspect?.({
+      width: row?.width,
+      height: row?.height,
+    }) || null;
+    if (!plan) return null;
+    return { plan, width: row?.width, height: row?.height };
+  }
+
+  function applyAspectPlanToWizardState(aspectBundle) {
+    const aspectPlan = aspectBundle?.plan || aspectBundle;
+    if (!aspectPlan?.source_aspect) return;
+    const width = aspectBundle?.width;
+    const height = aspectBundle?.height;
+    ezWizardAnswers = {
+      ...ezWizardAnswers,
+      sourceAspect: aspectPlan.source_aspect,
+      sourceVideoWidth: width,
+      sourceVideoHeight: height,
+      packageId: "video",
+      platforms: [...(aspectPlan.platforms || [])],
+    };
+    if (ezWizardPending) {
+      ezWizardPending = {
+        ...ezWizardPending,
+        sourceAspect: aspectPlan.source_aspect,
+        sourceVideoWidth: width,
+        sourceVideoHeight: height,
+        platforms: [...(aspectPlan.platforms || [])],
+        planned: ezPlanApi()?.ezMergeAspectPlan?.(ezWizardPending.planned, aspectPlan) || ezWizardPending.planned,
+      };
+    }
   }
 
   function startEzVibeCutWizard() {
@@ -5679,6 +5764,7 @@ function timedScriptAssetLabel(asset, index) {
     const workspace = $("productionRequestWorkspace");
     if (workspace) workspace.hidden = true;
     switchToPage("home");
+    if (!$("azFinishedDrop")?.classList.contains("is-busy")) showEzPortal({ silent: true });
   }
 
   function showEzFork() {
@@ -6195,6 +6281,7 @@ function timedScriptAssetLabel(asset, index) {
       aiCount: pending?.aiCount,
       clipCount: pending?.clipCount || ((ezIntakeKind === "photos-and-clips" || ezIntakeKind === "video-clips") ? 1 : undefined),
       packageId: inputKind === "vibe-cut" ? "video" : (pending?.packageId || currentEzPackageId()),
+      sourceAspect: pending?.sourceAspect || ezWizardAnswers?.sourceAspect,
     }) || "";
     const user = String($("ezProductionNotes")?.value || "").trim();
     let combined = user ? `${origin}\n\n${user}` : origin;
@@ -7123,7 +7210,14 @@ function timedScriptAssetLabel(asset, index) {
     const helpers = ezPlanApi();
     if (!helpers) return null;
     const answers = { ...ezWizardAnswers };
-    const planned = helpers.ezWizardResolvePackage(answers);
+    let planned = helpers.ezWizardResolvePackage(answers);
+    if (answers.sourceAspect && (answers.sourceVideoWidth || answers.sourceVideoHeight || answers.sourceAspect)) {
+      const aspectPlan = helpers.ezPlanFromSourceAspect?.({
+        width: answers.sourceVideoWidth,
+        height: answers.sourceVideoHeight,
+      }) || null;
+      if (aspectPlan) planned = helpers.ezMergeAspectPlan?.(planned, aspectPlan) || planned;
+    }
     const intake = helpers.ezIntakeKindFromWizard(answers.inputKind);
     const count = helpers.ezWizardPhotoCount(answers);
     ezWizardPending = { ...answers, planned };
@@ -7361,16 +7455,17 @@ function timedScriptAssetLabel(asset, index) {
         ezWizardLogAdd("bot", "Where do you want to start?");
       }
       syncEzVibeCutLaunch();
-      renderEzWizardChips([
-        {
+      const startChips = [
+        ...(ezPortalPath === "wizard" ? [] : [{
           label: "Vibe Cut — long video → music montage",
           onClick: () => startEzVibeCutWizard(),
-        },
+        }]),
         { label: "An idea I already have, or a new idea", onClick: () => ezWizardPick("An idea", { start: "idea" }, "ideaMode") },
         { label: "Photos I already have", onClick: () => ezWizardPick("Photos I already have", { start: "photos" }, "photoKind") },
         { label: "AI-generated images", onClick: () => ezWizardPick("AI-generated images", { start: "ai" }, "aiKind") },
         { label: "Mix of my photos and AI images", onClick: () => ezWizardPick("Mix of my photos and AI", { start: "mixed" }, "mixManual") },
-      ]);
+      ];
+      renderEzWizardChips(startChips);
       return;
     }
 
@@ -8059,6 +8154,11 @@ function timedScriptAssetLabel(asset, index) {
       if (ezIsAzFinishedPath()) setAzFinishedMessage("Uploading your video. You can close this tab after it finishes.");
     }
     try {
+      let aspectBundle = null;
+      if (nextFiles.length && (ezIntakeKind === "finished-video" || ezIntakeKind === "vibe-cut" || ezIsAzFinishedPath())) {
+        aspectBundle = await aspectPlanFromVideoFiles(nextFiles);
+        if (aspectBundle) applyAspectPlanToWizardState(aspectBundle);
+      }
       const wizardPlanned = pending?.planned;
       const totalAfter = existingCount + nextFiles.length;
       const photoCount = allowEmpty
@@ -8085,12 +8185,18 @@ function timedScriptAssetLabel(asset, index) {
         item4PlanOverrides = {};
         planned = applyEzPlanOverrides(photoCount, ezSelectedPlatforms());
       }
+      if (aspectBundle?.plan) {
+        planned = apiHelpers.ezMergeAspectPlan?.(planned, aspectBundle.plan) || planned;
+        item4PlanOverrides = { ...(planned.overrides || {}) };
+      }
       syncItem4PlatformsFromEz();
       syncRequestAudioUi({ fromEz: true, userChanged: true });
       applyEzToAdvanced({ force: true });
-      const extras = (wizardPlanned?.extras && wizardPlanned.extras.length)
-        ? wizardPlanned.extras
-        : ezExtraOutputSnapshot();
+      const extras = planned?.extras?.length
+        ? [...planned.extras]
+        : ((wizardPlanned?.extras && wizardPlanned.extras.length)
+          ? wizardPlanned.extras
+          : ezExtraOutputSnapshot());
       let captionFields = apiHelpers.ezCaptionFields(captionMode, { captions });
       if (captionFields.caption_mode === "Force exact" && !String(captionFields.requested_caption || "").trim()) {
         captionFields = { ...captionFields, caption_mode: "AI decides", requested_caption: "" };
@@ -8165,6 +8271,13 @@ function timedScriptAssetLabel(asset, index) {
         await uploadItem4Files(nextFiles, { preserveOversizedNotice: true });
         renderEzPhotoStrip();
         if (ezIsAzFinishedPath()) startAzFinishedProgressPolling();
+        if (ezIsVibeCut() && activeProductionRequest?.id) {
+          applyEzExtraOutputs(extras);
+          applyEzToAdvanced({ force: true });
+          switchToPage("content");
+          showProductionRequestWorkspace();
+          setRequestMessage("Production is ready — outputs match your source video.", "success");
+        }
       }
       return Boolean(activeProductionRequest?.id || allowEmpty);
     } catch (error) {
@@ -8268,12 +8381,20 @@ function timedScriptAssetLabel(asset, index) {
       ? "Uploading in parts. Studio will compress afterward if needed…"
       : "Uploading your finished video…");
     const helpers = ezPlanApi();
+    const aspectBundle = await aspectPlanFromVideoFiles(videos);
+    if (aspectBundle) applyAspectPlanToWizardState(aspectBundle);
+    const aspectPlatforms = aspectBundle?.plan?.platforms?.length
+      ? [...aspectBundle.plan.platforms]
+      : ["Instagram", "Facebook", "TikTok", "YouTube"];
     ezWizardAnswers = {
       origin: helpers?.EZ_ORIGIN_AZ || "az-finished-video",
       start: "content",
       inputKind: "finished-video",
       packageId: "video",
-      platforms: ["Instagram", "Facebook", "TikTok", "YouTube"],
+      platforms: aspectPlatforms,
+      sourceAspect: aspectBundle?.plan?.source_aspect,
+      sourceVideoWidth: aspectBundle?.width,
+      sourceVideoHeight: aspectBundle?.height,
     };
     applyEzWizardAnswersToIntake();
     lockAzFinishedDefaults();
@@ -8331,6 +8452,7 @@ function timedScriptAssetLabel(asset, index) {
   }
 
   function bindEzIntake() {
+    bindEzPortal();
     bindEzWizard();
     $("ezStartOver")?.addEventListener("click", () => {
       azFinishedPath = false;

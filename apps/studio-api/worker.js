@@ -93,7 +93,9 @@ import {
 import {
   AZ_EXPECTED_OUTPUT_COUNT,
   FINISHED_DESTINATION_KEYS,
+  FINISHED_HORIZONTAL_KEYS,
   FINISHED_STORY_TEASER_SECONDS,
+  azExpectedOutputCount,
   azOutputLockHeld,
   azOutputLockIsFresh,
   azOutputLockToken,
@@ -101,6 +103,7 @@ import {
   capFinishedPlanItems,
   finishedCompanionStoryFields,
   finishedStoryTeaserClipFlags,
+  isHorizontalFinishedAspect,
   mergeAzOutputLock,
   pickDuplicateOutputKeepers,
   pickPlatformOutputSeedKeeper,
@@ -600,7 +603,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.509-pr-superseded-cancel",
+          version: "0.10.510-ez-portal-horizontal-finished",
           studio_render_queue_wait_v1: true,
           studio_approve_all_batch_v1: true,
           studio_engagement_v1: true,
@@ -5310,7 +5313,9 @@ async function syncProductionRequestOutputs(request, env, url, authorization) {
   if (!normalized.length) throw new HttpError(400, "Choose at least one platform output");
 
   const finishedVideo = studioFinishedOriginKind(parent) === "finished-video";
-  const planItems = finishedVideo ? capFinishedPlanItems(normalized) : uniquePlanItems(normalized);
+  const planItems = finishedVideo
+    ? capFinishedPlanItems(normalized, { notes: studioRequestNotesText(parent) })
+    : uniquePlanItems(normalized);
   let azLock = null;
   if (finishedVideo) {
     azLock = await acquireAzOutputLock(env, parent);
@@ -9195,11 +9200,12 @@ async function acquireAzOutputLock(env, requestRecord) {
   return { acquired: held, record, token };
 }
 
-function finishedEnabledKeysFromRows(rows) {
+function finishedEnabledKeysFromRows(rows, record = null) {
+  const horizontal = record ? isHorizontalFinishedAspect(studioRequestNotesText(record)) : false;
   const keys = new Set();
   for (const row of rows || []) {
     if (!f(row, "Enabled") && !f(row, "Active")) continue;
-    const key = canonicalFinishedDestinationKey(f(row, "Platform"), f(row, "Output_Type"));
+    const key = canonicalFinishedDestinationKey(f(row, "Platform"), f(row, "Output_Type"), { horizontal });
     if (key) keys.add(key);
   }
   return keys;
@@ -9208,7 +9214,9 @@ function finishedEnabledKeysFromRows(rows) {
 async function item4SyncPlanOutputs(env, requestRecord, items, { schedules = null } = {}) {
   const productionRequestId = requestRecord.id;
   const finishedVideo = studioFinishedOriginKind(requestRecord) === "finished-video";
-  const uniqueItems = finishedVideo ? capFinishedPlanItems(items) : uniquePlanItems(items);
+  const uniqueItems = finishedVideo
+    ? capFinishedPlanItems(items, { notes: studioRequestNotesText(requestRecord) })
+    : uniquePlanItems(items);
   let azLock = null;
   if (finishedVideo) {
     azLock = await acquireAzOutputLock(env, requestRecord);
@@ -9378,7 +9386,9 @@ async function buildItem4OutputPlan(request, env, url, authorization) {
     }
   }
   const finishedVideo = studioFinishedOriginKind(record) === "finished-video";
-  const plannedItems = finishedVideo ? capFinishedPlanItems(items) : items;
+  const plannedItems = finishedVideo
+    ? capFinishedPlanItems(items, { notes: studioRequestNotesText(record) })
+    : items;
   const plan={schema_version:"item4.output-plan.1",generated_at:new Date().toISOString(),production_request_record_id:recordId,source_asset_count:photoCount,photo_count_kind:item4PhotoCountKind(photoCount),items:plannedItems};
   needsReview = plannedItems.some((item) => !item.aspect_ratio);
 
@@ -10886,6 +10896,8 @@ async function azAutoApproveIfReady(env, requestId, options = {}) {
 }
 
 async function azBuildPlanItems(env, record) {
+  const notes = studioRequestNotesText(record);
+  const horizontal = isHorizontalFinishedAspect(notes);
   const assets = item4AssetManifest(record);
   const photoCount = Math.max(1, item4EffectivePhotoCount(record, assets) || assets.length || 1);
   const hasVideo = true;
@@ -10900,9 +10912,18 @@ async function azBuildPlanItems(env, record) {
         aspect_ratio: String(item?.aspect_ratio || "").trim() || null,
         companion: Boolean(item?.companion) || item4IsCompanionOutputType(item?.output_type),
       }))
-      .filter((item) => item.platform && item.output_type));
+      .filter((item) => item.platform && item.output_type), { notes, horizontal });
   }
   const items = [];
+  if (horizontal) {
+    try {
+      const chosen = item4PlanChoice("YouTube", "Standard Video", photoCount, { hasVideo, packageId: "video" });
+      items.push(item4PlanItemFromChoice("YouTube", chosen, photoCount, mappingIndex));
+    } catch (error) {
+      console.warn("AZ horizontal default plan item failed", error);
+    }
+    return capFinishedPlanItems(items, { notes, horizontal });
+  }
   for (const platform of AZ_DEFAULT_PLATFORMS) {
     const requested = AZ_DEFAULT_OVERRIDES[platform] || "";
     try {
@@ -10921,7 +10942,7 @@ async function azBuildPlanItems(env, record) {
       continue;
     }
   }
-  return capFinishedPlanItems(items);
+  return capFinishedPlanItems(items, { notes, horizontal: false });
 }
 
 async function azEnsurePlatformOutputs(env, requestRecord, options = {}) {
@@ -10930,21 +10951,23 @@ async function azEnsurePlatformOutputs(env, requestRecord, options = {}) {
   if (!contentId) return { waiting: "content", production_request_id: requestRecord.id };
   // Video packages need up to 6 destinations (4 mains + IG/FB Stories). A
   // limit of 2 left mains stranded when the PRO lookup window was incomplete.
-  const batchLimit = Math.max(1, Math.min(10, Number(options.limit) || 6));
-
   const finishedVideo = studioFinishedOriginKind(requestRecord) === "finished-video";
+  const expectedOutputs = finishedVideo ? azExpectedOutputCount(studioRequestNotesText(requestRecord)) : 6;
+  const batchLimit = Math.max(1, Math.min(10, Number(options.limit) || expectedOutputs));
   let proRows = await outputRowsForProductionRequest(env, requestRecord.id, { includeInactive: true });
   const collapsed = await item4CollapseDuplicatePlanOutputs(env, proRows, { finishedVideo });
   if (collapsed.collapsed) {
     proRows = await outputRowsForProductionRequest(env, requestRecord.id, { includeInactive: true });
   }
   let enabled = proRows.filter((row) => Boolean(f(row, "Enabled")));
-  if (finishedVideo) enabled = keepFinishedOutputRows(enabled);
+  if (finishedVideo) enabled = keepFinishedOutputRows(enabled, requestRecord);
   let synced = false;
   if (!enabled.length) {
     const items = await azBuildPlanItems(env, requestRecord);
     if (!items.length) return { error: "no_plan_items", production_request_id: requestRecord.id };
-    const planItems = finishedVideo ? capFinishedPlanItems(items) : items;
+    const planItems = finishedVideo
+      ? capFinishedPlanItems(items, { notes: studioRequestNotesText(requestRecord) })
+      : items;
     await item4SyncPlanOutputs(env, requestRecord, planItems);
     const needsReview = planItems.some((item) => !item.aspect_ratio);
     const plan = {
@@ -10963,7 +10986,7 @@ async function azEnsurePlatformOutputs(env, requestRecord, options = {}) {
     });
     proRows = await outputRowsForProductionRequest(env, requestRecord.id);
     enabled = proRows.filter((row) => Boolean(f(row, "Enabled")));
-    if (finishedVideo) enabled = keepFinishedOutputRows(enabled);
+    if (finishedVideo) enabled = keepFinishedOutputRows(enabled, requestRecord);
     synced = true;
   }
 
@@ -11031,14 +11054,16 @@ async function advanceAzFinishedVideo(env, requestId, authorization, ctx = null,
   }
   const planStatus = String(f(record, "Studio_Output_Plan_Status") || "").trim();
   const existingPros = await outputRowsForProductionRequest(env, requestId, { includeInactive: true }).catch(() => []);
-  const existingKeys = finishedEnabledKeysFromRows(existingPros);
-  if (existingKeys.size < AZ_EXPECTED_OUTPUT_COUNT && planStatus !== "Ready" && (phase === "auto" || phase === "plan" || phase === "outputs")) {
+  const existingKeys = finishedEnabledKeysFromRows(existingPros, record);
+  const expectedOutputCount = azExpectedOutputCount(studioRequestNotesText(record));
+  if (existingKeys.size < expectedOutputCount && planStatus !== "Ready" && (phase === "auto" || phase === "plan" || phase === "outputs")) {
     const editable = ["Draft", "Ready"].includes(String(f(record, "Request_Status") || "").trim());
     if (editable) {
+      const horizontal = isHorizontalFinishedAspect(studioRequestNotesText(record));
       const planCall = studioInternalJsonRequest(`/api/production-requests/${requestId}/plan`, {
-        platforms: [...AZ_DEFAULT_PLATFORMS],
-        overrides: { ...AZ_DEFAULT_OVERRIDES },
-        extras: [...AZ_DEFAULT_EXTRAS],
+        platforms: horizontal ? ["YouTube"] : [...AZ_DEFAULT_PLATFORMS],
+        overrides: horizontal ? { YouTube: "Standard Video" } : { ...AZ_DEFAULT_OVERRIDES },
+        extras: horizontal ? [] : [...AZ_DEFAULT_EXTRAS],
         package: "video",
       });
       await buildItem4OutputPlan(planCall.request, env, planCall.url, auth);
@@ -11077,7 +11102,7 @@ async function advanceAzFinishedVideo(env, requestId, authorization, ctx = null,
     const linked = enabled.filter((row) => arrayOrEmpty(f(row, "Platform_Output")).some((id) => /^rec[A-Za-z0-9]+$/.test(String(id || ""))));
     if (!enabled.length || linked.length < enabled.length) {
       try {
-        ensureOutputs = await azEnsurePlatformOutputs(env, record, { limit: 6 });
+        ensureOutputs = await azEnsurePlatformOutputs(env, record, { limit: expectedOutputCount });
         record = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, requestId);
       } catch (error) {
         ensureOutputs = { error: error instanceof Error ? error.message : String(error) };
@@ -21736,15 +21761,18 @@ async function listExistingFinishedPlatformOutputs(env, requestRecord, parent) {
   }).catch(() => []);
 }
 
-function keepFinishedOutputRows(rows) {
+function keepFinishedOutputRows(rows, record = null) {
+  const horizontal = record ? isHorizontalFinishedAspect(studioRequestNotesText(record)) : false;
+  const allowedKeys = horizontal ? FINISHED_HORIZONTAL_KEYS : FINISHED_DESTINATION_KEYS;
+  const expected = record ? azExpectedOutputCount(studioRequestNotesText(record)) : AZ_EXPECTED_OUTPUT_COUNT;
   const seen = new Set();
   const keepers = [];
   for (const row of rows || []) {
-    const key = canonicalFinishedDestinationKey(f(row, "Platform"), f(row, "Output_Type"));
-    if (!FINISHED_DESTINATION_KEYS.includes(key) || seen.has(key)) continue;
+    const key = canonicalFinishedDestinationKey(f(row, "Platform"), f(row, "Output_Type"), { horizontal });
+    if (!allowedKeys.includes(key) || seen.has(key)) continue;
     seen.add(key);
     keepers.push(row);
-    if (keepers.length >= AZ_EXPECTED_OUTPUT_COUNT) break;
+    if (keepers.length >= expected) break;
   }
   return keepers;
 }
@@ -21762,9 +21790,9 @@ async function fanoutProductionRequestOutputsToContentItems(env, requestRecord, 
   }
   const batchLimit = Number.isFinite(limit) && limit > 0
     ? Math.floor(limit)
-    : (finishedVideo ? AZ_EXPECTED_OUTPUT_COUNT : null);
+    : (finishedVideo ? azExpectedOutputCount(studioRequestNotesText(requestRecord)) : null);
   let outputRows=(await outputRowsForProductionRequest(env,requestRecord.id)).filter(row=>Boolean(f(row,"Enabled")));
-  if (finishedVideo) outputRows = keepFinishedOutputRows(outputRows);
+  if (finishedVideo) outputRows = keepFinishedOutputRows(outputRows, requestRecord);
   if(!outputRows.length) return {enabled_output_count:0,routed_count:0,blocked_count:0,remaining:0,work_items:[],single_parent_mode:true};
   const candidates = onlyMissing
     ? outputRows.filter((row) => !arrayOrEmpty(f(row, "Platform_Output")).some((id) => /^rec[A-Za-z0-9]+$/.test(String(id || ""))))
@@ -21883,7 +21911,7 @@ async function completeProductionRequestPromotionSideEffects(env, requestRecordI
       current,
       contentItemId,
       studioFinishedOriginKind(current) === "finished-video"
-        ? { onlyMissing: true, limit: AZ_EXPECTED_OUTPUT_COUNT }
+        ? { onlyMissing: true, limit: azExpectedOutputCount(studioRequestNotesText(current)) }
         : {}
     );
   }

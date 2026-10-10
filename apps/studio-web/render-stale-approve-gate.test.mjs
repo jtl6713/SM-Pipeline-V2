@@ -10,10 +10,10 @@ const html = fs.readFileSync(path.join(here, "index.html"), "utf8");
 const worker = fs.readFileSync(path.join(here, "../studio-api/worker.js"), "utf8");
 
 test("UI 0.6.516 Approve gate rejects stale Rendering / In Production (Output 1807)", () => {
-  assert.match(app, /BUILD_ID = "item4-0.6.570-swap-still-img-display"/);
-  assert.match(html, /UI build 0\.6\.570/);
-  assert.match(html, /app-item4-1008\.js\?v=0.6.570-swap-still-img-display/);
-  assert.match(html, /styles-phase7-0621\.css\?v=0.6.570-swap-still-img-display/);
+  assert.match(app, /BUILD_ID = "item4-0.6.571-ez-portal-home"/);
+  assert.match(html, /UI build 0.6.571/);
+  assert.match(html, /app-item4-1008\.js\?v=0.6.571-ez-portal-home/);
+  assert.match(html, /styles-phase7-0621\.css\?v=0.6.571-ez-portal-home/);
   assert.match(app, /function creativeCanApproveForPublishing\(/);
   assert.match(
     app,
@@ -23,7 +23,7 @@ test("UI 0.6.516 Approve gate rejects stale Rendering / In Production (Output 18
 });
 
 test("Worker 0.10.478 heals Final_File_URL + Rendering to Ready for Review", () => {
-  assert.match(worker, /version: "0.10.509-pr-superseded-cancel"/);
+  assert.match(worker, /version: "0.10.510-ez-portal-horizontal-finished"/);
   assert.match(worker, /studio_render_stale_rendering_v1: true/);
   assert.match(worker, /R5_STALE_RENDERING_FINALIZED/);
   assert.match(worker, /\{Render_Status\}="Rendering",\{Final_File_URL\}!=""/);

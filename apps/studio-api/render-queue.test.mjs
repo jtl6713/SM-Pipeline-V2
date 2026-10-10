@@ -91,7 +91,7 @@ test("Trying Again only for real Remotion failures, never queue wait", () => {
 });
 
 test("Worker admit + mapOutput expose queue meta and Remotion job id", () => {
-  assert.match(worker, /version: "0\.10\.509-pr-superseded-cancel"/);
+  assert.match(worker, /version: "0\.10\.510-ez-portal-horizontal-finished"/);
   assert.match(worker, /studio_render_queue_wait_v1: true/);
   assert.match(worker, /async function studioAdmitRenderQueue/);
   assert.match(worker, /STUDIO_RENDER_QUEUE_CANDIDATE_FORMULA/);
@@ -105,9 +105,9 @@ test("Worker admit + mapOutput expose queue meta and Remotion job id", () => {
 });
 
 test("UI shows Waiting in render queue and narrows Trying Again", () => {
-  assert.match(app, /BUILD_ID = "item4-0\.6\.570-swap-still-img-display"/);
-  assert.match(html, /app-item4-1008\.js\?v=0\.6\.570-swap-still-img-display/);
-  assert.match(html, /UI build 0\.6\.570/);
+  assert.match(app, /BUILD_ID = "item4-0\.6\.571-ez-portal-home"/);
+  assert.match(html, /app-item4-1008\.js\?v=0\.6\.571-ez-portal-home/);
+  assert.match(html, /UI build 0.6.571/);
   assert.match(app, /function pipelineRenderQueueLabel/);
   assert.match(app, /Waiting in render queue \(#\$\{pos\} of \$\{total\}\)/);
   assert.match(app, /if \(\/waiting in render queue\/i\.test\(state\)/);

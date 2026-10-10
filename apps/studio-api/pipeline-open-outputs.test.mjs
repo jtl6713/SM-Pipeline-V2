@@ -19,12 +19,12 @@ test("Pipeline keeps unfinished packages via open-output merge", async () => {
   assert.match(worker, /Manual Fallback/);
   assert.match(worker, /Pull every sibling on unfinished packages/);
   assert.match(worker, /clampLimit\(url, 200, 250\)/);
-  assert.match(worker, /version: "0.10.509-pr-superseded-cancel"/);
+  assert.match(worker, /version: "0.10.510-ez-portal-horizontal-finished"/);
   assert.match(worker, /FIND\("Manual Action",\{TikTok_Draft_Status\}/);
   assert.match(worker, /FIND\("Manual Fallback",\{TikTok_Draft_Status\}/);
   assert.match(worker, /manual fallback/);
   assert.match(app, /\/api\/outputs\?limit=250/);
-  assert.match(app, /BUILD_ID = "item4-0.6.570-swap-still-img-display"/);
+  assert.match(app, /BUILD_ID = "item4-0.6.571-ez-portal-home"/);
   assert.match(app, /function partitionPipelineGroups/);
   assert.match(app, /pipelineContentGroupFullyPublished/);
   assert.match(app, /matchingKeys/);
