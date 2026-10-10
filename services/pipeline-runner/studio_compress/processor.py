@@ -2,7 +2,9 @@
 
 A1S/A1P remain intake-folder only. Studio keeps the original on private
 STUDIO_MEDIA and replaces the playable URL with a compressed studio/previews/
-copy after the local Video Compressor finishes.
+copy. A large upload is handed to Adobe Media Encoder when the local bridge is
+up. If Media Encoder does not pick the file up, the existing FFmpeg compressor
+finishes the job.
 """
 
 from __future__ import annotations
@@ -17,6 +19,7 @@ from urllib.parse import quote
 
 from a1s import compressor as compressor_api
 from airtable.constants import PRODUCTION_REQUESTS_TABLE
+from studio_compress.ame_encoder import AmeNotReady, live_encoder
 from ap0.public_mp4 import (
     existing_finished_preview_url,
     finished_video_preview_key,
@@ -187,6 +190,7 @@ def compress_pending_assets(
     download_output: Callable[[dict[str, Any]], tuple[bytes, str]] | None = None,
     stage_preview: Callable[[str, str, bytes], str] | None = None,
     sleep: SleepFn = time.sleep,
+    ame_encode: Callable[..., bytes] | None = None,
 ) -> dict[str, Any]:
     record, assets = load_assets(client, record_id)
     targets = [asset for asset in assets if needs_compress(asset)]
@@ -196,6 +200,10 @@ def compress_pending_assets(
     if not targets:
         return {"ok": True, "compressed": 0, "pending": 0, "already_ready": True}
 
+    injected = submit_job is not None or poll_job is not None or download_output is not None
+    encoder = ame_encode
+    if encoder is None and not injected:
+        encoder = live_encoder()
     submit = submit_job or compressor_api.submit_download_job
     poll = poll_job or compressor_api.poll_job
     download = download_output or compressor_api.download_output
@@ -213,6 +221,7 @@ def compress_pending_assets(
                 download_output=download,
                 stage_preview=stage,
                 sleep=sleep,
+                ame_encode=encoder,
             )
             compressed += 1
         except Exception as exc:
@@ -265,6 +274,7 @@ def compress_one(
     download_output: Callable[[dict[str, Any]], tuple[bytes, str]],
     stage_preview: Callable[[str, str, bytes], str],
     sleep: SleepFn = time.sleep,
+    ame_encode: Callable[..., bytes] | None = None,
 ) -> dict[str, Any]:
     asset_id = str(asset.get("id") or "").strip()
     r2_key = str(asset.get("r2_key") or "").strip()
@@ -273,8 +283,24 @@ def compress_one(
     if not is_studio_master_key(r2_key):
         raise RuntimeError("Studio compression needs a private studio/master-assets key")
 
+    existing_job = str(asset.get("compression_job_id") or "").strip()
+    ffmpeg_job = "" if existing_job.startswith("ame-") else existing_job
+    if ame_encode is not None and not ffmpeg_job:
+        encoded = _encode_with_ame(client, record_id, asset, ame_encode)
+        if encoded is not None:
+            return _store_compressed(
+                client,
+                record_id,
+                asset,
+                content=encoded,
+                output_size=len(encoded),
+                job_id=f"ame-{asset_id}",
+                provider="adobe-media-encoder",
+                stage_preview=stage_preview,
+            )
+
     record, assets = load_assets(client, record_id)
-    job_id = str(asset.get("compression_job_id") or "").strip()
+    job_id = ffmpeg_job
     job: dict[str, Any] | None = None
     if job_id:
         job = poll_job(job_id)
@@ -351,11 +377,78 @@ def compress_one(
     content, _mime = download_output(job)
     if not content:
         raise RuntimeError("Video Compressor returned an empty file")
+    output_size = int(job.get("output_size_bytes") or len(content) or 0)
+    return _store_compressed(
+        client,
+        record_id,
+        asset,
+        content=content,
+        output_size=output_size,
+        job_id=job_id,
+        provider="ffmpeg",
+        stage_preview=stage_preview,
+    )
+
+
+def _encode_with_ame(
+    client: Any,
+    record_id: str,
+    asset: dict[str, Any],
+    ame_encode: Callable[..., bytes],
+) -> bytes | None:
+    asset_id = str(asset.get("id") or "")
+
+    def on_progress(progress: int) -> None:
+        _record, assets = load_assets(client, record_id)
+        save_assets(
+            client,
+            record_id,
+            patch_asset(
+                assets,
+                asset_id,
+                {
+                    "compression_status": "compressing",
+                    "compression_needed": True,
+                    "compression_job_id": f"ame-{asset_id}",
+                    "compression_provider": "adobe-media-encoder",
+                    "compression_error": None,
+                    "compression_progress": progress,
+                },
+            ),
+        )
+
+    try:
+        encoded = ame_encode(asset, on_progress)
+    except AmeNotReady as exc:
+        logger.warning(
+            "studio-compress Media Encoder unavailable request=%s asset=%s: %s",
+            record_id,
+            asset_id,
+            exc,
+        )
+        return None
+    if not encoded:
+        raise RuntimeError("Media Encoder returned an empty file")
+    return encoded
+
+
+def _store_compressed(
+    client: Any,
+    record_id: str,
+    asset: dict[str, Any],
+    *,
+    content: bytes,
+    output_size: int,
+    job_id: str,
+    provider: str,
+    stage_preview: Callable[[str, str, bytes], str],
+) -> dict[str, Any]:
+    asset_id = str(asset.get("id") or "").strip()
+    r2_key = str(asset.get("r2_key") or "").strip()
     preview_url = stage_preview(record_id, asset_id, content)
     preview_key = finished_video_preview_key(record_id, asset_id)
-    output_size = int(job.get("output_size_bytes") or len(content) or 0)
     original_size = asset_size_bytes(asset) or int(asset.get("original_size_bytes") or 0)
-    record, assets = load_assets(client, record_id)
+    _record, assets = load_assets(client, record_id)
     save_assets(
         client,
         record_id,
@@ -366,6 +459,7 @@ def compress_one(
                 "compression_status": "ready",
                 "compression_needed": False,
                 "compression_job_id": job_id,
+                "compression_provider": provider,
                 "compression_progress": 100,
                 "compression_error": None,
                 "original_size_bytes": original_size,
@@ -384,4 +478,5 @@ def compress_one(
         "preview_url": preview_url,
         "existing_preview": existing_finished_preview_url(asset) or None,
         "size_bytes": output_size,
+        "compression_provider": provider,
     }

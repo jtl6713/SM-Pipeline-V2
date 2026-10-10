@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from studio_compress.ame_encoder import AmeNotReady
 from studio_compress.processor import (
     compress_pending_assets,
     needs_compress,
@@ -233,3 +234,92 @@ def test_submit_download_job_uses_url_not_drive(monkeypatch):
     assert body["download_url"].startswith("http://127.0.0.1:3350/internal/studio-master")
     assert "drive_file_id" not in body
     assert body["record_id"] == "studio-recPR-vid1"
+
+
+def _pending_client() -> FakeAirtable:
+    return FakeAirtable(
+        _request(
+            [
+                {
+                    "id": "vid1",
+                    "name": "long.mp4",
+                    "media_kind": "video",
+                    "size_bytes": 150 * 1024 * 1024,
+                    "r2_key": "studio/master-assets/recPR/vid1-long.mp4",
+                    "compression_status": "pending",
+                }
+            ],
+            finished=False,
+        )
+    )
+
+
+def test_ame_output_is_staged_without_calling_ffmpeg():
+    client = _pending_client()
+    client.record["fields"]["Production_Notes"] = "origin=ez-wizard; ez-input=vibe-cut"
+    submitted: list[str] = []
+
+    def ame_encode(asset, on_progress):
+        assert asset["id"] == "vid1"
+        on_progress(40)
+        return b"ame-encoded-mp4"
+
+    result = compress_pending_assets(
+        client,
+        "recPRCompress",
+        ame_encode=ame_encode,
+        submit_job=lambda *_args, **_kwargs: submitted.append("ffmpeg"),
+        poll_job=lambda _job_id: {"status": "complete", "ok": True},
+        download_output=lambda _job: (b"ffmpeg-should-not-run", "video/mp4"),
+        stage_preview=lambda request_id, asset_id, _content: (
+            f"https://media.chicagoshining.com/studio/previews/finished-video/{request_id}/{asset_id}.mp4"
+        ),
+        sleep=lambda _seconds: None,
+    )
+    import json
+
+    asset = json.loads(client.record["fields"]["Studio_Master_Assets_JSON"])[0]
+    assert result["compressed"] == 1
+    assert result["finished_video_ready"] is True
+    assert submitted == []
+    assert asset["compression_provider"] == "adobe-media-encoder"
+    assert asset["compression_status"] == "ready"
+    assert asset["url"].endswith("/vid1.mp4")
+    assert asset["size_bytes"] == len(b"ame-encoded-mp4")
+
+
+def test_ame_not_ready_falls_back_to_ffmpeg():
+    client = _pending_client()
+    submitted: list[str] = []
+
+    def ame_encode(_asset, _on_progress):
+        raise AmeNotReady("Media Encoder did not pick up the inbox file")
+
+    def submit_job(*_args, **_kwargs):
+        submitted.append("ffmpeg")
+        return {"job_id": "job-fallback", "status": "complete", "ok": True, "output_size_bytes": 12}
+
+    result = compress_pending_assets(
+        client,
+        "recPRCompress",
+        ame_encode=ame_encode,
+        submit_job=submit_job,
+        poll_job=lambda job_id: {
+            "job_id": job_id,
+            "status": "complete",
+            "ok": True,
+            "output_size_bytes": 12,
+        },
+        download_output=lambda _job: (b"ffmpeg-mp4", "video/mp4"),
+        stage_preview=lambda request_id, asset_id, _content: (
+            f"https://media.chicagoshining.com/studio/previews/finished-video/{request_id}/{asset_id}.mp4"
+        ),
+        sleep=lambda _seconds: None,
+    )
+    import json
+
+    asset = json.loads(client.record["fields"]["Studio_Master_Assets_JSON"])[0]
+    assert result["ok"] is True
+    assert submitted == ["ffmpeg"]
+    assert asset["compression_provider"] == "ffmpeg"
+    assert asset["compression_job_id"] == "job-fallback"

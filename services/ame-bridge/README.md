@@ -1,10 +1,10 @@
 # Adobe Media Encoder watch-folder bridge
 
-Local file watcher for Adobe Media Encoder 2026. Drop a working copy into a preset inbox. Media Encoder writes the encode to the matching output folder. After that output stops changing and `ffprobe` accepts it, the bridge deletes the inbox copy.
+Local file watcher for Adobe Media Encoder 2026. A large Studio upload (Vibe Cut or finished video) copies the private master into the matching inbox by itself. Media Encoder writes the encode to the matching output folder. After that output stops changing and `ffprobe` accepts it, the bridge deletes the inbox copy and Studio uses the encoded file.
 
-The inbox file is the working copy. The original stays in Drive, on the camera card, or in whatever folder you already keep it. This bridge never scans those locations.
+The inbox file is the working copy. The original stays in Drive or on the private master. This bridge never scans those locations.
 
-Studio publish, approval, and the existing FFmpeg compressor are unchanged. Cloud fallback and a Studio compression-job queue are later stages.
+If Media Encoder is closed or is not watching the inbox, Studio removes the unclaimed copy and finishes the same upload with the existing FFmpeg compressor. Encoding still does not approve or publish.
 
 ## Layout
 
