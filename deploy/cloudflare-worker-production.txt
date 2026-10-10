@@ -98,3 +98,5 @@ Deploy Worker 0.10.489-engagement-ledger. Shrink the engagement ledger so Chicag
 2026-10-10: Deploy Worker 0.10.500-vibe-cut-remount-heal. Actually land enqueue-on-heal + single-head remount gate (prior 0.10.499 trigger shipped without worker.js).
 
 2026-10-10: Deploy Worker 0.10.501-vibe-cut-remount-heal. Clear force_multiclip after remount; detect single-head by clip count not studio-source-1 id.
+
+2026-10-10: Deploy Worker 0.10.502-vibe-cut-remount-heal. Do not remount multi-clip Vibe Cuts on transient short Render_Total_Frames.
