@@ -109,3 +109,11 @@ scripts/production-services/watchdog.local.json
 scripts/production-services/watchdog.state.json
 scripts/production-services/watchdog.state.json.tmp
 scripts/production-services/watchdog.lock
+
+# Windows watchdog: Gmail app-password material, local scripts and secrets
+scripts/production-services/gmail-credential.local.xml
+scripts/production-services/send-watchdog-email.local.ps1
+scripts/production-services/start-remotion.local.ps1
+scripts/production-services/watchdog.local.json.bak
+scripts/production-services/watchdog.state.json.*
+scripts/production-services/watchdog.ps1.backup
