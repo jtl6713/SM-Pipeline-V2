@@ -264,6 +264,48 @@ function Select-Service {
     }
 }
 
+function Sync-PipelineRunnerServiceVersionPin {
+    param(
+        [Parameter(Mandatory = $true)][string]$SourceRoot,
+        [Parameter(Mandatory = $true)][string]$RuntimeRoot
+    )
+    $configPath = Join-Path $SourceRoot 'config.py'
+    if (-not (Test-Path -LiteralPath $configPath -PathType Leaf)) {
+        Write-Host 'WARN pipeline-runner config.py missing; cannot sync SERVICE_VERSION pin.' -ForegroundColor Yellow
+        return
+    }
+    $configText = Get-Content -LiteralPath $configPath -Raw
+    $match = [regex]::Match($configText, 'PIPELINE_RUNNER_CODE_VERSION\s*=\s*"([^"]+)"')
+    if (-not $match.Success) {
+        $match = [regex]::Match($configText, 'SERVICE_VERSION",\s*"([^"]+)"')
+    }
+    if (-not $match.Success) {
+        Write-Host 'WARN could not parse pipeline-runner code version from config.py' -ForegroundColor Yellow
+        return
+    }
+    $version = $match.Groups[1].Value.Trim()
+    if (-not $version) { return }
+    $envPath = Join-Path $RuntimeRoot '.env'
+    $lines = @()
+    if (Test-Path -LiteralPath $envPath -PathType Leaf) {
+        $lines = @(Get-Content -LiteralPath $envPath)
+    }
+    $written = $false
+    $next = New-Object System.Collections.Generic.List[string]
+    foreach ($line in $lines) {
+        if ($line -match '^\s*SERVICE_VERSION\s*=') {
+            $next.Add("SERVICE_VERSION=$version")
+            $written = $true
+        }
+        else {
+            $next.Add($line)
+        }
+    }
+    if (-not $written) { $next.Add("SERVICE_VERSION=$version") }
+    Set-Content -LiteralPath $envPath -Value $next -Encoding UTF8
+    Write-Host "Synced runtime SERVICE_VERSION=$version" -ForegroundColor Green
+}
+
 function Test-IsSecretFile([System.IO.FileInfo]$File) {
     $name = $File.Name.ToLowerInvariant()
     $ext = $File.Extension.ToLowerInvariant()
@@ -883,6 +925,10 @@ try {
         }
         $Modified = $true
 
+        if ($Service -eq 'pipeline-runner') {
+            Sync-PipelineRunnerServiceVersionPin -SourceRoot $SourceRoot -RuntimeRoot $RuntimeRoot
+        }
+
         $postDependencyHashes = @{
             'package.json' = Get-FileHashOrEmpty (Join-Path $RuntimeRoot 'package.json')
             'package-lock.json' = Get-FileHashOrEmpty (Join-Path $RuntimeRoot 'package-lock.json')
@@ -901,6 +947,9 @@ try {
         Start-LocalService -ServiceName $Service -Config $Config -RuntimeRoot $RuntimeRoot
         $Stopped = $false
         Wait-ServiceHealth -Config $Config -Seconds 90
+        if ($Service -eq 'pipeline-runner') {
+            Assert-PipelineRunnerHealthVersion -RuntimeRoot $RuntimeRoot -PublicUrl $Config.PublicUrl
+        }
 
         Write-Step '8/8  Record exact deployed Git commit'
         $deploymentRecord = @{

@@ -13,6 +13,22 @@ load_dotenv(Path(__file__).resolve().parent / ".env")
 
 StageStatus = Literal["ok", "skipped", "deferred", "not_implemented", "error"]
 
+# Bump on every ship that must show through public /health. Deploy also syncs
+# this into runtime .env, but a stale pin must never win.
+PIPELINE_RUNNER_CODE_VERSION = "2026-10-10-vibe-cut-multi-clip"
+
+
+def _resolve_service_version() -> str:
+    env = (os.environ.get("SERVICE_VERSION") or "").strip()
+    code = PIPELINE_RUNNER_CODE_VERSION
+    if not env:
+        return code
+    env_day = env[:10]
+    code_day = code[:10]
+    if len(env_day) == 10 and len(code_day) == 10 and env_day < code_day:
+        return code
+    return env
+
 
 def _without_retired_make_urls(settings: dict[str, Any]) -> dict[str, Any]:
     cleaned = dict(settings)
@@ -146,7 +162,9 @@ def load_settings() -> dict[str, Any]:
         "rr1_review_email_to": os.environ.get("RR1_REVIEW_EMAIL_TO", ""),
         "rr1_decision_webhook_url": os.environ.get("RR1_DECISION_WEBHOOK_URL", ""),
         "rr2_webhook_token": os.environ.get("RR2_WEBHOOK_TOKEN", ""),
-        "service_version": os.environ.get("SERVICE_VERSION", "2026-10-10-vibe-cut-multi-clip"),
+        # Stale SERVICE_VERSION pins in runtime .env used to mask fresh deploys
+        # (health stayed on 2026-09-05-contain-stills after Ops copied new code).
+        "service_version": _resolve_service_version(),
         "ops_alert_email_to": os.environ.get("OPS_ALERT_EMAIL_TO", "chicagoshining@gmail.com"),
         "produce_heal_webhook_url": os.environ.get("PRODUCE_HEAL_WEBHOOK_URL", ""),
     })

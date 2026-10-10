@@ -162,3 +162,6 @@ jobs:
 
 # Trigger pipeline-runner deploy for Vibe Cut multi-clip stamp/T1
 # 2026-10-10 service_version=2026-10-10-vibe-cut-multi-clip
+
+# Retrigger pipeline-runner deploy: override stale SERVICE_VERSION pin + require health version match
+# 2026-10-10 service_version=2026-10-10-vibe-cut-multi-clip pin-sync
