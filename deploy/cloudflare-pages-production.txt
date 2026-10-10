@@ -122,3 +122,4 @@ Deploy Studio UI 0.6.534-pages-path-bust. Rename app-item4-0625.js -> app-item4-
 2026-10-10: Deploy UI 0.6.553-engagement-comment-one-click. Engagement Comment is primary (approve+publish); remove Approve Comment button.
 
 2026-10-10: Deploy UI 0.6.554-pipeline-thumb-no-stories. Pipeline package thumb opens Reel/Video/Short (never Story).
+2026-10-09 Deploy Studio UI 0.6.555-unscheduled-regenerate. Bulk regenerate includes unscheduled unpublished outputs; 14-day window; regression test.
