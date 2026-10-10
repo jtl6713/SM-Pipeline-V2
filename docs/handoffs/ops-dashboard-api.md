@@ -100,6 +100,8 @@ Authenticated host PowerShell for diagnostics. Runs as the Ops Dashboard Windows
 
 Requires `confirm: true`. Audited to `Deployment Logs\Local Services\ops-shell-audit.log`. Blocks a short list of wipe/shutdown patterns. Prefer allowlisted `/api/run` actions when one exists.
 
+Ops clears inherited `PORT=3361` on `/api/run` and `/api/shell` children so Remotion (and other Node listeners) bind their catalog ports. `Start-ChicagoShiningHidden.ps1` also pins each service `PORT` and waits for local `/health` before exit 0.
+
 ## CLI wrapper (recommended on Joseph's PC)
 
 Script: `deploy/local-services/Invoke-OpsApi.ps1`
