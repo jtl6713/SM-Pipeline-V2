@@ -2,8 +2,8 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Chicago Shining Ops Dashboard API",
-    "version": "1.0.0",
-    "description": "Allowlisted operator actions for local Windows services (DEPLOY, VERIFY, restart). Does not deploy Cloudflare Worker or Pages — those use GitHub Actions trigger files on main."
+    "version": "1.1.0",
+    "description": "Allowlisted operator actions for local Windows services (DEPLOY, VERIFY, restart) plus an authenticated PowerShell console (POST /api/shell, confirm required, audited). Does not deploy Cloudflare Worker or Pages — those use GitHub Actions trigger files on main."
   },
   "servers": [
     { "url": "https://ops.chicagoshining.com", "description": "Public (Cloudflare Access + bearer token)" },
