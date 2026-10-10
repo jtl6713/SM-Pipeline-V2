@@ -567,7 +567,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.492-engagement-alts-deploy-fix",
+          version: "0.10.493-engagement-comment-one-click",
           studio_approve_all_batch_v1: true,
           studio_engagement_v1: true,
           studio_mae_schedule_v1: true,

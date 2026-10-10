@@ -11,13 +11,13 @@ const js = fs.readFileSync(path.join(here, "assets/engagement-1008.js"), "utf8")
 const css = fs.readFileSync(path.join(here, "assets/engagement-1008.css"), "utf8");
 const matrix = fs.readFileSync(path.join(here, "../../docs/engagement-capability-matrix.md"), "utf8");
 
-test("Engagement nav page and assets ship with UI 0.6.549", () => {
+test("Engagement nav page and assets ship with UI 0.6.553", () => {
   assert.match(html, /data-page="engagement"/);
   assert.match(html, /id="page-engagement"/);
-  assert.match(html, /engagement-1008\.js\?v=0\.6\.550-vibe-cut-home/);
-  assert.match(html, /engagement-1008\.css\?v=0\.6\.551-engagement-filter-layout/);
-  assert.match(html, /UI build 0\.6\.550/);
-  assert.match(app, /BUILD_ID = "item4-0\.6\.550-vibe-cut-home"/);
+  assert.match(html, /engagement-1008\.js\?v=0\.6\.553-engagement-comment-one-click/);
+  assert.match(html, /engagement-1008\.css\?v=0\.6\.553-engagement-comment-one-click/);
+  assert.match(html, /UI build 0\.6\.553/);
+  assert.match(app, /BUILD_ID = "item4-0\.6\.553-engagement-comment-one-click"/);
   assert.match(app, /page === "engagement"/);
   assert.match(app, /StudioEngagement/);
 });
@@ -27,7 +27,8 @@ test("Engagement UI exposes review actions without mass unreviewed commenting", 
   assert.match(html, /id="engagementHistory"/);
   assert.match(html, /id="engagementInsights"/);
   assert.match(html, /id="engagementDiscover"/);
-  assert.match(js, /Approve Comment/);
+  assert.match(js, /primary-button" data-action="comment"/);
+  assert.doesNotMatch(js, /Approve Comment/);
   assert.match(js, /Edit Comment/);
   assert.match(js, /Open Post/);
   assert.match(js, /Block Creator/);

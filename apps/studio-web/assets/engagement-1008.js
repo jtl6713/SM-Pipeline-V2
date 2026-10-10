@@ -195,10 +195,9 @@
             `<button type="button" class="chip-button" data-use-comment="${esc(row.target_id)}" data-comment-index="${index}">Use #${index + 1}</button>`
           )).join("")}</div>` : ""}
           <div class="engagement-actions">
-            <button type="button" class="primary-button" data-action="approve" data-target-id="${esc(row.target_id)}">Approve Comment</button>
+            <button type="button" class="primary-button" data-action="comment" data-target-id="${esc(row.target_id)}">Comment</button>
             <button type="button" class="secondary-button" data-action="edit" data-target-id="${esc(row.target_id)}">Edit Comment</button>
             <button type="button" class="secondary-button" data-action="like" data-target-id="${esc(row.target_id)}">Like</button>
-            <button type="button" class="secondary-button" data-action="comment" data-target-id="${esc(row.target_id)}">Comment</button>
             <button type="button" class="secondary-button" data-action="open_post" data-target-id="${esc(row.target_id)}">Open Post</button>
             <button type="button" class="secondary-button" data-action="skip" data-target-id="${esc(row.target_id)}">Skip</button>
             <button type="button" class="danger-button" data-action="block_creator" data-target-id="${esc(row.target_id)}">Block Creator</button>
@@ -212,7 +211,7 @@
     const root = $("engagementHistory");
     if (!root) return;
     if (!state.history.length) {
-      root.innerHTML = `<p class="subtle">No engagement actions for this profile yet. Use Comment or Like on a recommended post. Approve only queues a comment and does not post it.</p>`;
+      root.innerHTML = `<p class="subtle">No engagement actions for this profile yet. Comment publishes where the API supports it (YouTube with Stage B). Otherwise use Open Post.</p>`;
       return;
     }
     root.innerHTML = `<table class="engagement-table"><thead><tr><th>When</th><th>Channel</th><th>Type</th><th>Platform</th><th>Status</th><th>Post</th><th>Detail</th></tr></thead><tbody>${
