@@ -568,7 +568,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.502-vibe-cut-remount-heal",
+          version: "0.10.503-vibe-cut-produce-heal",
           studio_approve_all_batch_v1: true,
           studio_engagement_v1: true,
           studio_mae_schedule_v1: true,
@@ -10922,9 +10922,11 @@ function isTransientRenderBlockError(blockError) {
 }
 
 async function resumeStaleStudioProductionJobs(env, options = {}) {
+  // Prefer Updated_At so an older active Vibe Cut (Chicago Walk with me) is not
+  // starved by newer Draft/Ready rows that sort higher on Created_At.
   const rows = await listRecords(env, PRODUCTION_REQUEST_TABLE, {
-    limit: 25,
-    sortField: "Created_At",
+    limit: 40,
+    sortField: "Updated_At",
     sortDirection: "desc",
     filterFormula: 'AND({Test_Run_ID}=BLANK(),{Studio_Production_Job_JSON}!="")',
   }).catch(() => []);
@@ -10932,7 +10934,7 @@ async function resumeStaleStudioProductionJobs(env, options = {}) {
   const pulses = [];
   const now = Date.now();
   const staleAfter = Number(options.staleAfterMs || 180000);
-  for (const requestId of ids.slice(0, 8)) {
+  for (const requestId of ids.slice(0, 16)) {
     try {
       const record = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, requestId);
       const job = parseStudioProductionJob(record);
@@ -11497,7 +11499,7 @@ async function healStuckStudioRenders(env) {
   }
 
   const readyNoJob = await listRecords(env, outputTable, {
-    limit: 8,
+    limit: 16,
     sortField: "Output_ID",
     sortDirection: "desc",
     filterFormula: `AND(${STUDIO_R4_WORK_FORMULA},{Remotion_Job_ID}="")`,

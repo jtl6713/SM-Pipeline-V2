@@ -980,6 +980,11 @@ def _is_transient_render_error(exc: BaseException) -> bool:
         "503",
         "502",
         "504",
+        # Timing Engine empty/non-JSON 200 used to park the whole produce job
+        # (Chicago Content 454 / Expecting value: line 1 column 1).
+        "expecting value",
+        "timing engine returned empty",
+        "timing engine returned non-json",
     )
     return any(n in text for n in needles)
 
