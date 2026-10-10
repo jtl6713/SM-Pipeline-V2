@@ -2,12 +2,13 @@
   "maxConsecutiveRestarts": 3,
   "cooldownMinutes": 5,
   "httpTimeoutSeconds": 8,
+  "notificationEmailTo": "",
   "notificationWebhookUrl": "",
   "services": [
     {
       "name": "Remotion renderer",
       "type": "http",
-      "healthUrl": "http://127.0.0.1:3000/health",
+      "healthUrl": "http://127.0.0.1:3333/health",
       "restartCommand": "D:\\Content Creation\\ChicagoShining Pipeline\\Source Control\\SM-Pipeline-V2\\scripts\\production-services\\start-remotion.local.ps1",
       "restartWorkingDirectory": "D:\\Content Creation\\ChicagoShining Pipeline\\Source Control\\SM-Pipeline-V2"
     }
