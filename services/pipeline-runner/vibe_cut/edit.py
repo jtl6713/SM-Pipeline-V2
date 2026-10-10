@@ -414,7 +414,9 @@ def expand_master_to_vibe_sources(
             "source_out_seconds": round(end, 3),
             "sourceInSeconds": round(start, 3),
             "sourceOutSeconds": round(end, 3),
-            "duration_seconds": round(duration, 3),
+            # Clip window length (not the full master). Stamp/T1 use
+            # source_duration_seconds for the master length separately.
+            "duration_seconds": round(max(0.2, end - start), 3),
             "source_duration_seconds": round(duration, 3),
             "sourceDurationSeconds": round(duration, 3),
             "vibe_cut": True,

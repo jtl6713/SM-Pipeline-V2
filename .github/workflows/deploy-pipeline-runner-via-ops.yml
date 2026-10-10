@@ -165,3 +165,6 @@ jobs:
 
 # Retrigger pipeline-runner deploy: override stale SERVICE_VERSION pin + require health version match
 # 2026-10-10 service_version=2026-10-10-vibe-cut-multi-clip pin-sync
+
+# Trigger pipeline-runner deploy for Vibe Cut T1 usable-footage merge (Content 454)
+# 2026-10-10 service_version=2026-10-10-vibe-cut-usable-footage

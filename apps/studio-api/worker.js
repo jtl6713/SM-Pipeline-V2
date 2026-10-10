@@ -568,7 +568,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.501-vibe-cut-remount-heal",
+          version: "0.10.502-vibe-cut-remount-heal",
           studio_approve_all_batch_v1: true,
           studio_engagement_v1: true,
           studio_mae_schedule_v1: true,
@@ -10707,8 +10707,15 @@ async function enqueueStudioProductionJob(env, requestId, options = {}) {
       }
       // Multi-clip montages still include id studio-source-1 as the first trim —
       // only treat as single-head when the list/count is actually one clip.
-      const singleHead = count <= 1 || (parsedClipCount > 0 && parsedClipCount <= 1);
-      return singleHead || (vibeTarget > 0 && frames > 0 && frames < Math.round(vibeTarget * 30) - 15);
+      const effectiveCount = Math.max(count, parsedClipCount);
+      const singleHead = effectiveCount <= 1;
+      // Short-frame remount only for true single-head trims. Multi-clip stamps can
+      // briefly show low Render_Total_Frames while T1 expands duration.
+      const shortSingle = singleHead
+        && vibeTarget > 0
+        && frames > 0
+        && frames < Math.round(vibeTarget * 30) - 15;
+      return singleHead || shortSingle;
     });
   }
   if (!existing?.job_id || vibeCutPassthrough || vibeCutNeedsRemount) {
