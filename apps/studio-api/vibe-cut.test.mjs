@@ -182,9 +182,11 @@ test("Worker never treats Vibe Cut as finished-video passthrough", () => {
   assert.match(worker, /studioClearVibeCutPassthroughOutputs/);
   assert.match(worker, /vibeCutNeedsRemount/);
   assert.match(worker, /force_multiclip_remount/);
+  assert.match(worker, /parsedClipCount/);
+  assert.match(worker, /force_multiclip_remount: false/);
   assert.match(worker, /Rebuilding Vibe Cut multi-clip montage/);
   assert.match(worker, /Must go through enqueueStudioProductionJob so Vibe Cut/);
-  assert.match(worker, /version: "0.10.500-vibe-cut-remount-heal"/);
+  assert.match(worker, /version: "0.10.501-vibe-cut-remount-heal"/);
 });
 
 test("Studio web exposes Vibe Cut creation path", () => {

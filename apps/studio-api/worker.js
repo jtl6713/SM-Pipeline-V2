@@ -568,7 +568,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.500-vibe-cut-remount-heal",
+          version: "0.10.501-vibe-cut-remount-heal",
           studio_approve_all_batch_v1: true,
           studio_engagement_v1: true,
           studio_mae_schedule_v1: true,
@@ -10693,10 +10693,21 @@ async function enqueueStudioProductionJob(env, requestId, options = {}) {
     vibeCutNeedsRemount = (outputs || []).some((row) => {
       const count = Number(f(row, "Selected_Clip_Count") || 0) || 0;
       const frames = Number(f(row, "Render_Total_Frames") || 0) || 0;
-      const clipJson = String(f(row, "Render_Clip_List_JSON") || "");
+      const clipJson = String(f(row, "Render_Clip_List_JSON") || "").trim();
       const story = studioAzIsStory(studioOutputTypeLabel(row));
       if (story) return false;
-      const singleHead = count <= 1 || /"id"\s*:\s*"studio-source-1"/.test(clipJson);
+      let parsedClipCount = 0;
+      if (clipJson) {
+        try {
+          const parsed = JSON.parse(clipJson);
+          parsedClipCount = Array.isArray(parsed) ? parsed.length : 0;
+        } catch {
+          parsedClipCount = 0;
+        }
+      }
+      // Multi-clip montages still include id studio-source-1 as the first trim —
+      // only treat as single-head when the list/count is actually one clip.
+      const singleHead = count <= 1 || (parsedClipCount > 0 && parsedClipCount <= 1);
       return singleHead || (vibeTarget > 0 && frames > 0 && frames < Math.round(vibeTarget * 30) - 15);
     });
   }
@@ -10716,11 +10727,14 @@ async function enqueueStudioProductionJob(env, requestId, options = {}) {
       percent: finishedKind ? 20 : 12,
     };
     if (vibeCutPassthrough || vibeCutNeedsRemount) {
+      const priorHeal = (typeof existing?.heal === "object" && existing.heal) ? { ...existing.heal } : {};
+      delete priorHeal.force_multiclip_remount;
       job.heal = {
-        ...(typeof existing?.heal === "object" && existing.heal ? existing.heal : {}),
+        ...priorHeal,
         schema: "studio.produce-heal.1",
         vibe_cut_passthrough_cleared_at: new Date().toISOString(),
         vibe_cut_multiclip_remount_at: new Date().toISOString(),
+        force_multiclip_remount: false,
         resume_count: 0,
         max_resumes: Number(existing?.heal?.max_resumes || 5) || 5,
       };
