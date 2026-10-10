@@ -121,6 +121,57 @@
     return n <= 1 ? "Feed Post" : "Photo Set";
   }
 
+  function ezIsHorizontalSource(width, height) {
+    const w = Number(width) || 0;
+    const h = Number(height) || 0;
+    if (!w || !h) return false;
+    return w > h;
+  }
+
+  function ezPlanFromSourceAspect({ width, height } = {}) {
+    const horizontal = ezIsHorizontalSource(width, height);
+    if (horizontal) {
+      return {
+        source_aspect: "horizontal",
+        packageId: EZ_PACKAGES.VIDEO,
+        master_content_type: "Longform Video",
+        platforms: ["YouTube"],
+        overrides: { YouTube: "Standard Video" },
+        extras: [],
+        items: [{ platform: "YouTube", output_type: "Standard Video" }],
+        youtube_enabled: true,
+      };
+    }
+    const overrides = { ...EZ_VIDEO_PASSES };
+    const items = Object.entries(overrides).map(([platform, output_type]) => ({ platform, output_type }));
+    const extras = [...EZ_VIDEO_STORY_EXTRAS];
+    return {
+      source_aspect: "vertical",
+      packageId: EZ_PACKAGES.VIDEO,
+      master_content_type: "Vertical Short Video",
+      platforms: items.map((item) => item.platform),
+      overrides,
+      extras,
+      items,
+      youtube_enabled: true,
+    };
+  }
+
+  function ezMergeAspectPlan(basePlan, aspectPlan) {
+    if (!aspectPlan) return basePlan;
+    const merged = {
+      ...(basePlan || {}),
+      master_content_type: aspectPlan.master_content_type,
+      platforms: [...aspectPlan.platforms],
+      overrides: { ...aspectPlan.overrides },
+      extras: [...(aspectPlan.extras || [])],
+      items: [...(aspectPlan.items || [])],
+      youtube_enabled: aspectPlan.youtube_enabled,
+      source_aspect: aspectPlan.source_aspect,
+    };
+    return merged;
+  }
+
   function ezPlanFromPhotoCount({
     photoCount,
     platforms,
@@ -216,13 +267,15 @@
     };
   }
 
-  function ezOriginNotes({ inputKind, captionMode, origin, manualCount, aiCount, packageId, clipCount } = {}) {
+  function ezOriginNotes({ inputKind, captionMode, origin, manualCount, aiCount, packageId, clipCount, sourceAspect } = {}) {
     const tag = String(origin || EZ_ORIGIN).trim() || EZ_ORIGIN;
     const input = String(inputKind || EZ_INPUTS.SINGLE_PHOTO).trim() || EZ_INPUTS.SINGLE_PHOTO;
     const caption = String(captionMode || "ai").trim().toLowerCase() || "ai";
     const pkg = String(packageId || "").trim().toLowerCase();
     const parts = [`origin=${tag}`, `ez-input=${input}`, `ez-caption=${caption}`];
     if (tag === EZ_ORIGIN_AZ) parts.push("az-auto-queue=1");
+    const aspect = String(sourceAspect || "").trim().toLowerCase();
+    if (aspect === "horizontal" || aspect === "vertical") parts.push(`source-aspect=${aspect}`);
     if (pkg === EZ_PACKAGES.VIDEO || pkg === EZ_PACKAGES.SLIDES || pkg === EZ_PACKAGES.CUSTOM) {
       parts.push(`ez-package=${pkg}`);
     }
@@ -249,11 +302,13 @@
     const ai = Number(/ez-ai=(\d+)/i.exec(text)?.[1] || "");
     const packageId = /ez-package=(video|slides|custom)/i.exec(text)?.[1] || "";
     const clips = Number(/ez-clips=(\d+)/i.exec(text)?.[1] || "");
+    const sourceAspect = /source-aspect=(horizontal|vertical)/i.exec(text)?.[1] || "";
     return {
       origin: originMatch[1].toLowerCase(),
       inputKind: input,
       captionMode: caption,
       packageId: packageId ? packageId.toLowerCase() : null,
+      sourceAspect: sourceAspect ? sourceAspect.toLowerCase() : null,
       manualCount: Number.isFinite(manual) && manual > 0 ? manual : null,
       aiCount: Number.isFinite(ai) && ai > 0 ? ai : null,
       clipCount: Number.isFinite(clips) && clips > 0 ? clips : null,
@@ -856,6 +911,9 @@
     ezPackageFromContentType,
     ezMasterContentType,
     ezPlanFromPhotoCount,
+    ezIsHorizontalSource,
+    ezPlanFromSourceAspect,
+    ezMergeAspectPlan,
     ezCanonicalOutputType,
     ezCaptionFields,
     ezOriginNotes,

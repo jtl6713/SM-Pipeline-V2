@@ -115,3 +115,5 @@ Deploy Worker 0.10.489-engagement-ledger. Shrink the engagement ledger so Chicag
 2026-10-10: Deploy Worker 0.10.508-render-queue-wait. Single-slot Remotion admit; stamp Waiting in Render Queue; heal does not pulse every Ready row as Rendering.
 
 2026-10-10: Deploy Worker 0.10.509-pr-superseded-cancel. Cancel sibling Draft/Ready/Submitted PRs when one Idea promotes; reuse Submitted drafts.
+
+2026-10-10: Deploy Worker 0.10.510-ez-portal-horizontal-finished. AZ horizontal finished-video routes to YouTube Standard Video only (source-aspect=horizontal).

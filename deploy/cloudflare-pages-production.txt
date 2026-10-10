@@ -152,3 +152,5 @@ Deploy Studio UI 0.6.534-pages-path-bust. Rename app-item4-0625.js -> app-item4-
 2026-10-10: Deploy Studio UI 0.6.570-swap-still-img-display. Swap-still dialog no longer inherits Asset Manager lightbox img{display:none}; library thumbs visible again.
 
 2026-10-10: Redeploy Studio UI 0.6.570-swap-still-img-display after custom-domain alias lag (pages.dev had 570; studio.chicagoshining.com still served 569).
+
+2026-10-10: Deploy Studio UI 0.6.571-ez-portal-home. Home EZ portal (Vibe Cut, Completed video, Step by step) with aspect-based output pre-fill.

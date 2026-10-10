@@ -16,6 +16,6 @@ assert.match(app, /pipelineScheduleIsBlackout/);
 assert.match(css, /pipeline-schedule-blackout-band/);
 assert.match(css, /pipeline-schedule-blackout-toggle/);
 assert.match(html, /UI build 0\.6\.570/);
-assert.match(html, /app-item4-1008\.js\?v=0.6.570-swap-still-img-display/);
+assert.match(html, /app-item4-1008\.js\?v=0.6.571-ez-portal-home/);
 
 console.log("master calendar blackout collapse contract: PASS");

@@ -7,12 +7,23 @@ import { fileURLToPath } from "node:url";
 const here = path.dirname(fileURLToPath(import.meta.url));
 const html = fs.readFileSync(path.join(here, "index.html"), "utf8");
 const css = fs.readFileSync(path.join(here, "assets/styles-phase7-0621.css"), "utf8");
+const density = fs.readFileSync(path.join(here, "assets/home-density-0517.css"), "utf8");
+const app = fs.readFileSync(path.join(here, "assets/app-item4-1008.js"), "utf8");
 
 test("home start-post launcher uses a compact wide-screen layout", () => {
   assert.match(css, /Home launcher density: keep all three start paths above the fold on wide screens/);
-  assert.match(css, /grid-template-areas:"copy wizard video"/);
-  assert.match(css, /grid-template-columns:minmax\(165px,.48fr\) minmax\(285px,.82fr\) minmax\(390px,1.25fr\)/);
+  assert.match(density, /grid-template-areas:"copy portal"/);
+  assert.match(density, /grid-template-columns:minmax\(165px,.48fr\) minmax\(320px,1.52fr\)/);
   assert.match(css, /\.az-drop-zone\{[\s\S]*padding:10px 12px/);
+});
+
+test("home portal exposes three EZ path cards", () => {
+  assert.match(html, /id="ezPortal"/);
+  assert.match(html, /data-ez-portal-path="vibe"/);
+  assert.match(html, /data-ez-portal-path="completed"/);
+  assert.match(html, /data-ez-portal-path="wizard"/);
+  assert.match(app, /function bindEzPortal/);
+  assert.match(app, /0\.6\.571-ez-portal-home/);
 });
 
 test("compact launcher remains single-column on narrow screens", () => {
@@ -20,7 +31,7 @@ test("compact launcher remains single-column on narrow screens", () => {
 });
 
 test("compact launcher uses a cache-busted Pages stylesheet and Pages build", () => {
-  assert.match(html, /styles-phase7-0621\.css\?v=0.6.570-swap-still-img-display/);
-  assert.match(html, /home-density-0517\.css\?v=0.6.570-swap-still-img-display/);
-  assert.match(html, /UI build 0\.6\.570/);
+  assert.match(html, /styles-phase7-0621\.css\?v=0.6.571-ez-portal-home/);
+  assert.match(html, /home-density-0517\.css\?v=0.6.571-ez-portal-home/);
+  assert.match(html, /UI build 0\.6\.571/);
 });

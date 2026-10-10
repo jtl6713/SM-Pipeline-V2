@@ -20,15 +20,38 @@ export const FINISHED_DESTINATION_KEYS = Object.freeze([
   "Instagram::Story",
   "Facebook::Story",
 ]);
+export const FINISHED_HORIZONTAL_KEYS = Object.freeze(["YouTube::Standard Video"]);
+export const AZ_HORIZONTAL_EXPECTED_OUTPUT_COUNT = FINISHED_HORIZONTAL_KEYS.length;
 
 export function outputPairKey(platform, outputType) {
   return `${String(platform || "").trim()}::${String(outputType || "").trim()}`;
 }
 
-export function canonicalFinishedDestinationKey(platform, outputType) {
+export function parseSourceAspect(notes) {
+  const match = /source-aspect=(horizontal|vertical)/i.exec(String(notes || ""));
+  return match ? match[1].toLowerCase() : "vertical";
+}
+
+export function isHorizontalFinishedAspect(notes) {
+  return parseSourceAspect(notes) === "horizontal";
+}
+
+export function azExpectedOutputCount(notes) {
+  return isHorizontalFinishedAspect(notes) ? AZ_HORIZONTAL_EXPECTED_OUTPUT_COUNT : AZ_EXPECTED_OUTPUT_COUNT;
+}
+
+export function finishedDestinationKeysForNotes(notes) {
+  return isHorizontalFinishedAspect(notes) ? FINISHED_HORIZONTAL_KEYS : FINISHED_DESTINATION_KEYS;
+}
+
+export function canonicalFinishedDestinationKey(platform, outputType, { horizontal = false } = {}) {
   const p = String(platform || "").trim();
   const o = String(outputType || "").trim();
   if (!p) return "";
+  if (horizontal) {
+    if (p === "YouTube" && o === "Standard Video") return "YouTube::Standard Video";
+    return "";
+  }
   if (o === "Story") return `${p}::Story`;
   if (p === "Instagram") return "Instagram::Reel";
   if (p === "Facebook") return "Facebook::Reel";
@@ -52,12 +75,13 @@ export function uniquePlanItems(items) {
   return out;
 }
 
-export function capFinishedPlanItems(items) {
-  const allowed = new Set(FINISHED_DESTINATION_KEYS);
+export function capFinishedPlanItems(items, { horizontal = false, notes = "" } = {}) {
+  const horizontalMode = horizontal || isHorizontalFinishedAspect(notes);
+  const allowed = new Set(horizontalMode ? FINISHED_HORIZONTAL_KEYS : FINISHED_DESTINATION_KEYS);
   const seen = new Set();
   const out = [];
   for (const item of uniquePlanItems(items)) {
-    const key = canonicalFinishedDestinationKey(item.platform, item.output_type);
+    const key = canonicalFinishedDestinationKey(item.platform, item.output_type, { horizontal: horizontalMode });
     if (!allowed.has(key) || seen.has(key)) continue;
     seen.add(key);
     const [platform, output_type] = key.split("::");
@@ -66,9 +90,12 @@ export function capFinishedPlanItems(items) {
   return out;
 }
 
-export function shouldCreateFinishedOutput(existingKeys, wantedKey) {
+export function shouldCreateFinishedOutput(existingKeys, wantedKey, { horizontal = false, notes = "" } = {}) {
+  const horizontalMode = horizontal || isHorizontalFinishedAspect(notes);
+  const allowedKeys = horizontalMode ? FINISHED_HORIZONTAL_KEYS : FINISHED_DESTINATION_KEYS;
+  const maxCount = horizontalMode ? AZ_HORIZONTAL_EXPECTED_OUTPUT_COUNT : AZ_EXPECTED_OUTPUT_COUNT;
   const key = String(wantedKey || "").trim();
-  if (!key || !FINISHED_DESTINATION_KEYS.includes(key)) return false;
+  if (!key || !allowedKeys.includes(key)) return false;
   // Airtable/worker callers can return a single key, Set, object, or null here.
   // Normalize before iterating so finished-video promotion can never fail on .map().
   const rows = Array.isArray(existingKeys)
@@ -82,7 +109,7 @@ export function shouldCreateFinishedOutput(existingKeys, wantedKey) {
           : [existingKeys];
   const live = new Set(rows.map((item) => String(item || "").trim()).filter(Boolean));
   if (live.has(key)) return false;
-  return live.size < AZ_EXPECTED_OUTPUT_COUNT;
+  return live.size < maxCount;
 }
 
 export function azOutputLockToken(now = Date.now()) {
@@ -210,9 +237,10 @@ export function azDefaultPlanPayload() {
 
 export function azRequestDefaults({ title = "", productionNotes = "" } = {}) {
   const notes = mergeAzProductionNotes(productionNotes, { title });
+  const horizontal = isHorizontalFinishedAspect(notes);
   return {
-    content_type: "Vertical Short Video",
-    platforms: [...AZ_PLATFORMS],
+    content_type: horizontal ? "Longform Video" : "Vertical Short Video",
+    platforms: horizontal ? ["YouTube"] : [...AZ_PLATFORMS],
     voiceover_mode: "No",
     background_music_mode: "No",
     thumbnail_mode: "Yes",

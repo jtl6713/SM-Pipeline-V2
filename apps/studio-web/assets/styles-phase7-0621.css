@@ -761,6 +761,69 @@ input, select, textarea, button {
 .ez-path-fork-copy h1{margin:0 0 10px;font-size:clamp(1.45rem,2.6vw,2rem);color:#fff;text-shadow:0 8px 28px rgba(0,0,0,.35)}
 .ez-path-fork-copy h1 + p{margin:0;color:rgba(226,236,255,.9);font-size:1.05rem;line-height:1.5;text-shadow:0 2px 12px rgba(0,0,0,.35)}
 .ez-path-fork-grid{display:grid;grid-template-columns:1fr 1fr;gap:22px;perspective:1100px}
+.ez-portal{
+  display:grid;
+  grid-template-columns:repeat(3,minmax(0,1fr));
+  gap:14px;
+  width:100%;
+}
+.ez-portal-card{
+  display:grid;
+  gap:8px;
+  align-content:start;
+  margin:0;
+  padding:16px 16px 14px;
+  border:1px solid rgba(255,214,120,.35);
+  border-radius:18px;
+  background:linear-gradient(145deg,rgba(22,38,68,.88),rgba(10,20,42,.94));
+  backdrop-filter:blur(12px);
+  -webkit-backdrop-filter:blur(12px);
+  box-shadow:0 1px 0 rgba(255,255,255,.18) inset,0 14px 32px rgba(0,0,0,.28);
+  color:#eef4ff;
+  text-align:left;
+  cursor:pointer;
+  transition:border-color .18s ease,transform .18s ease,box-shadow .18s ease;
+}
+.ez-portal-card:hover{
+  border-color:rgba(255,214,120,.75);
+  transform:translateY(-2px);
+  box-shadow:0 1px 0 rgba(255,255,255,.22) inset,0 20px 40px rgba(0,0,0,.34),0 0 0 1px rgba(255,214,120,.2);
+}
+.ez-portal-card:focus-visible{outline:3px solid var(--gold);outline-offset:3px}
+.ez-portal-card-icon{
+  font-size:1.35rem;
+  line-height:1;
+  color:#ffe7a8;
+  text-shadow:0 0 12px rgba(255,214,120,.45);
+}
+.ez-portal-card-title{font-size:1rem;font-weight:800;letter-spacing:.02em;color:#fff}
+.ez-portal-card-desc{font-size:.82rem;line-height:1.4;color:rgba(226,236,255,.88)}
+.ez-portal-card-chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:2px}
+.ez-portal-card-chips span{
+  font-size:.68rem;
+  font-weight:700;
+  letter-spacing:.04em;
+  text-transform:uppercase;
+  padding:3px 8px;
+  border-radius:999px;
+  background:rgba(255,255,255,.08);
+  color:rgba(226,236,255,.92);
+}
+.ez-portal-back{
+  justify-self:start;
+  margin:0 0 4px;
+  padding:0;
+  border:0;
+  background:transparent;
+  color:rgba(226,236,255,.88);
+  font:inherit;
+  font-size:.82rem;
+  font-weight:750;
+  cursor:pointer;
+}
+.ez-portal-back:hover{text-decoration:underline;color:#fff}
+.ez-portal-back[hidden]{display:none!important}
+.ez-path-panel[hidden]{display:none!important}
 .ez-wizard{
   display:grid;
   gap:14px;
@@ -1067,6 +1130,7 @@ input, select, textarea, button {
 @media(max-width:760px){
   .ez-path-fork{padding:36px 16px 28px;min-height:calc(100vh - 128px)}
   .ez-path-fork-grid{grid-template-columns:1fr}
+  .ez-portal{grid-template-columns:1fr}
   .ez-path-choice{min-height:240px}
   .ez-path-choice:hover,.ez-path-choice:active{transform:translateY(-6px)}
   .ez-wizard-log{max-height:22vh}
