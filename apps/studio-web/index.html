@@ -9,16 +9,17 @@
  <link rel="preconnect" href="https://fonts.googleapis.com">
  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@1,600;1,700&family=Inter:wght@400;500;600;700;800&family=Oswald:wght@500&display=swap">
- <link rel="stylesheet" href="/assets/styles-phase7-0621.css?v=0.6.564-photo-labels-diagnose">
- <link rel="stylesheet" href="/assets/home-density-0517.css?v=0.6.564-photo-labels-diagnose">
- <link rel="stylesheet" href="/assets/engagement-1008.css?v=0.6.564-photo-labels-diagnose">
- <link rel="stylesheet" href="/assets/production-tablet-0622.css?v=0.6.564-photo-labels-diagnose">
- <link rel="stylesheet" href="/assets/insights-0622.css?v=0.6.564-photo-labels-diagnose">
- <link rel="stylesheet" href="/assets/clean-enterprise.css?v=0.6.564-photo-labels-diagnose">
- <link rel="stylesheet" href="/assets/ai-api-footer.css?v=0.6.564-photo-labels-diagnose">
- <link rel="stylesheet" href="/assets/sticky-footer-scroll.css?v=0.6.564-photo-labels-diagnose">
- <link rel="stylesheet" href="/assets/topbar-banner-0618.css?v=0.6.564-photo-labels-diagnose">
- <link rel="stylesheet" href="/assets/new-profile-1009.css?v=0.6.564-photo-labels-diagnose">
+ <link rel="stylesheet" href="/assets/styles-phase7-0621.css?v=0.6.565-new-profile-setup">
+ <link rel="stylesheet" href="/assets/home-density-0517.css?v=0.6.565-new-profile-setup">
+ <link rel="stylesheet" href="/assets/engagement-1008.css?v=0.6.565-new-profile-setup">
+ <link rel="stylesheet" href="/assets/production-tablet-0622.css?v=0.6.565-new-profile-setup">
+ <link rel="stylesheet" href="/assets/insights-0622.css?v=0.6.565-new-profile-setup">
+ <link rel="stylesheet" href="/assets/clean-enterprise.css?v=0.6.565-new-profile-setup">
+ <link rel="stylesheet" href="/assets/ai-api-footer.css?v=0.6.565-new-profile-setup">
+ <link rel="stylesheet" href="/assets/sticky-footer-scroll.css?v=0.6.565-new-profile-setup">
+ <link rel="stylesheet" href="/assets/topbar-banner-0618.css?v=0.6.565-new-profile-setup">
+ <link rel="stylesheet" href="/assets/new-profile-1009.css?v=0.6.565-new-profile-setup">
+ <link rel="stylesheet" href="/assets/profile-setup.css?v=0.6.565-new-profile-setup">
 </head>
 <body>
  <header class="topbar">
@@ -58,6 +59,7 @@
  <button class="nav-item" data-page="music">Music Manager</button>
  <button class="nav-item" data-page="library">Asset Manager</button>
  <button class="nav-item" data-page="profiles" id="navNewProfile" hidden>New Profile</button>
+ <button class="nav-item" data-page="profile-setup" id="navProfileSetup" hidden>City Setup</button>
  <button class="nav-item" data-page="operations" id="navOperations" hidden>Operations <span class="ops-nav-badge" id="navOperationsBadge" hidden></span></button>
  <button class="nav-item nav-item-footer-only" data-page="support">Help</button>
  </nav>
@@ -1765,7 +1767,18 @@
  </div>
  </div>
  </section>
- </section>
+
+<section id="page-profile-setup" class="page">
+ <div class="page-heading">
+ <div>
+ <p class="eyebrow">Administration</p>
+ <h1>New Profile</h1>
+ <p>Create and launch a Shining Cities profile without mixing its destinations with another city.</p>
+ </div>
+ </div>
+ <p id="profileSetupMessage" class="profile-setup-message" aria-live="polite"></p>
+ <div id="profileSetupRoot"></div>
+</section>
 
  <section id="page-operations" class="page">
  <div class="page-heading">
@@ -2612,19 +2625,20 @@
  </div>
  </aside>
 
- <script src="/assets/config-0621.js?v=0.6.564-photo-labels-diagnose"></script>
- <script src="/assets/ez-plan.js?v=0.6.564-photo-labels-diagnose"></script>
- <script src="/assets/pipeline-schedule-grid-0622.js?v=0.6.564-photo-labels-diagnose"></script>
- <script src="/assets/platform-schedule-calendar-0924.js?v=0.6.564-photo-labels-diagnose"></script>
- <script src="/assets/timed-script.js?v=0.6.564-photo-labels-diagnose"></script>
- <script src="/assets/vibe-cut.js?v=0.6.564-photo-labels-diagnose"></script>
- <script src="/assets/app-item4-1008.js?v=0.6.564-photo-labels-diagnose"></script>
- <script src="/assets/new-profile-1009.js?v=0.6.564-photo-labels-diagnose"></script>
- <script src="/assets/all-profiles-overview-1007.js?v=0.6.564-photo-labels-diagnose"></script>
- <script src="/assets/insights-0622.js?v=0.6.564-photo-labels-diagnose"></script>
- <script src="/assets/engagement-1008.js?v=0.6.564-photo-labels-diagnose"></script>
- <script src="/assets/ai-api-footer.js?v=0.6.564-photo-labels-diagnose"></script>
- <script src="/assets/sticky-footer-scroll.js?v=0.6.564-photo-labels-diagnose"></script>
+ <script src="/assets/config-0621.js?v=0.6.565-new-profile-setup"></script>
+ <script src="/assets/ez-plan.js?v=0.6.565-new-profile-setup"></script>
+ <script src="/assets/pipeline-schedule-grid-0622.js?v=0.6.565-new-profile-setup"></script>
+ <script src="/assets/platform-schedule-calendar-0924.js?v=0.6.565-new-profile-setup"></script>
+ <script src="/assets/timed-script.js?v=0.6.565-new-profile-setup"></script>
+ <script src="/assets/vibe-cut.js?v=0.6.565-new-profile-setup"></script>
+ <script src="/assets/app-item4-1008.js?v=0.6.565-new-profile-setup"></script>
+ <script src="/assets/new-profile-1009.js?v=0.6.565-new-profile-setup"></script>
+ <script src="/assets/all-profiles-overview-1007.js?v=0.6.565-new-profile-setup"></script>
+ <script src="/assets/insights-0622.js?v=0.6.565-new-profile-setup"></script>
+ <script src="/assets/engagement-1008.js?v=0.6.565-new-profile-setup"></script>
+ <script src="/assets/ai-api-footer.js?v=0.6.565-new-profile-setup"></script>
+ <script src="/assets/sticky-footer-scroll.js?v=0.6.565-new-profile-setup"></script>
+<script src="/assets/profile-setup.js?v=0.6.565-new-profile-setup"></script>
 <script src="/assets/production-asset-labels.js?v=3"></script>
 <script>
 (function(){

@@ -260,7 +260,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.564-photo-labels-diagnose";
+  const BUILD_ID = "item4-0.6.565-new-profile-setup";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -627,6 +627,18 @@
     if (next) applyStudioProfile(next);
     ensureProfileNarrationDefaults().catch(() => {});
   }
+
+  window.addEventListener("studio-profile-created", async (event) => {
+    const createdId = String(event?.detail?.profile_id || "").trim();
+    if (createdId) {
+      try { localStorage.setItem(PROFILE_STORAGE_KEY, createdId); } catch {}
+    }
+    await loadStudioProfiles().catch(() => {});
+    if (createdId) {
+      const profile = studioProfiles.find((item) => item.id === createdId);
+      if (profile) applyStudioProfile(profile, { reload: false });
+    }
+  });
 
   function pipelineDisplayPercent(record) {
     const raw = record?.studio_progress_percent ?? record?.youtube_processing_progress_percent ?? record?.youtube_upload_progress_percent;
@@ -23234,6 +23246,7 @@ function timedScriptAssetLabel(asset, index) {
     if (page === "engagement") return window.StudioEngagement?.load?.(false);
     if (page === "music") return loadMusic();
     if (page === "library") return loadLibrary();
+    if (page === "profile-setup") return window.StudioProfileSetup?.load?.();
     if (page === "operations") return loadOperations();
     if (page === "support") return;
   }
