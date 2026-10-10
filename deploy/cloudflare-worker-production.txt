@@ -79,3 +79,5 @@ Deploy Worker 0.10.489-engagement-ledger. Shrink the engagement ledger so Chicag
 2026-10-09: Deploy Worker 0.10.490-vibe-cut. Vibe Cut plan/another APIs + production defaults (VO off, music on, beat sync).
 
 2026-10-10: Deploy Worker 0.10.491-engagement-three-comments. Restore Use #1/#2/#3 engagement comment options after ledger slim over-truncated to one.
+
+2026-10-10: Deploy Worker 0.10.492-engagement-alts-deploy-fix. Raise Wrangler bundle size gate (30%/512KB) so engagement three-comment + vibe-cut modules stay live; restore Use #1/#2/#3.

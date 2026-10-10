@@ -196,7 +196,10 @@ jobs:
               ]
               missing = [marker.decode() for marker in markers if marker not in live]
               bundled = live.startswith(b'var __defProp') or b'// worker.js' in live[:500]
-              size_ok = abs(len(live) - len(repo)) <= max(int(len(repo) * 0.15), 64000)
+              # Wrangler inlines ESM imports (engagement, vibe-cut, …) so the live
+              # module is larger than apps/studio-api/worker.js alone. Allow 30% /
+              # 512KB headroom; marker checks still catch a wrong deploy.
+              size_ok = abs(len(live) - len(repo)) <= max(int(len(repo) * 0.30), 512000)
               print(f'repo_bytes={len(repo)} live_bytes={len(live)} bundled={bundled} size_ok={size_ok} missing={missing}')
               if bundled and size_ok and not missing:
                   print('active_source_byte_match=WRANGLER_BUNDLE_EQUIVALENT')
