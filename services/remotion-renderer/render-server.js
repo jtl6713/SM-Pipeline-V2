@@ -20,7 +20,7 @@ const DEFAULT_MUSIC_END_FADE_SECONDS = 0.5;
 const PIPELINE_RUNNER_INTERNAL_URL = String(
     process.env.PIPELINE_RUNNER_INTERNAL_URL || 'http://127.0.0.1:3350'
 ).replace(/\/$/, '');
-const SERVICE_VERSION = '2026-10-02-render-logo-watermark';
+const SERVICE_VERSION = '2026-10-10-accept-before-download';
 const PROJECT_DIR = __dirname;
 const PUBLIC_DIR = path.join(PROJECT_DIR, 'public');
 const OUT_DIR = path.join(PROJECT_DIR, 'out');
@@ -1341,48 +1341,93 @@ app.post('/render', async (req, res) => {
     const compositionId = body.compositionId || 'TEST-REMOTION-V4';
     const baseUrl = getBaseUrl(req);
 
+    // Fail fast on clip-count mismatch before accepting — no Drive download needed.
+    const expectedClipCount = Math.max(
+        0,
+        Math.round(toFiniteNumber(body.expectedClipCount, 0))
+    );
+    const receivedClipCount = Array.isArray(body.clips) ? body.clips.length : 0;
+    if (expectedClipCount > 0 && receivedClipCount !== expectedClipCount) {
+        return res.status(400).json({
+            accepted: false,
+            jobId,
+            status: 'failed',
+            error:
+                `Render clip count mismatch before asset download: expected ` +
+                `${expectedClipCount}, received ${receivedClipCount}.`,
+        });
+    }
+
+    const filename = sanitizeOutputFilename(body.filename || `${jobId}.mp4`);
+    const renderUrl = `${baseUrl}/out/${filename}`;
+    const statusUrl = `${baseUrl}/status/${jobId}`;
+
     const job = {
         jobId,
         compositionId,
         status: 'preparing',
-        accepted: false,
+        accepted: true,
+        filename,
+        renderUrl,
+        statusUrl,
         createdAt: nowIso(),
         updatedAt: nowIso(),
         logs: [],
     };
 
     jobs.set(jobId, job);
+    appendLog(
+        job,
+        `Accepted job before Drive localize (clips=${receivedClipCount}, ` +
+        `queue=${remotionRenderWaiters.length}, active=${activeRemotionRenders})`
+    );
 
-    try {
-        const { filename, props } = await buildRewrittenProps({
-            body,
-            jobId,
-            job,
-        });
+    // Return immediately so R4 / produce are not blocked on multi-GB Drive downloads.
+    // Prepare + Remotion run continue in the background; clients poll statusUrl.
+    res.json({
+        accepted: true,
+        jobId,
+        status: job.status,
+        statusUrl,
+        renderUrl,
+    });
 
-        const propsFilePath = await savePropsFile({
-            jobId,
-            props,
-        });
+    setImmediate(() => {
+        (async () => {
+            try {
+                const { filename: preparedName, props } = await buildRewrittenProps({
+                    body,
+                    jobId,
+                    job,
+                });
+                const propsFilePath = await savePropsFile({
+                    jobId,
+                    props,
+                });
+                const outName = preparedName || filename;
+                job.filename = outName;
+                job.propsFile = toProjectRelative(propsFilePath);
+                job.renderUrl = `${baseUrl}/out/${outName}`;
+                job.props = props;
+                job.updatedAt = nowIso();
+                appendLog(job, 'Prepare complete; starting Remotion');
 
-        const renderUrl = `${baseUrl}/out/${filename}`;
-        const statusUrl = `${baseUrl}/status/${jobId}`;
-
-        job.accepted = true;
-        job.filename = filename;
-        job.propsFile = toProjectRelative(propsFilePath);
-        job.renderUrl = renderUrl;
-        job.statusUrl = statusUrl;
-        job.props = props;
-        job.updatedAt = nowIso();
-
-        // Start the render in the background.
-        runRemotionRender({
-            jobId,
-            compositionId,
-            filename,
-            propsFilePath,
-        }).catch((error) => {
+                await runRemotionRender({
+                    jobId,
+                    compositionId,
+                    filename: outName,
+                    propsFilePath,
+                });
+            } catch (error) {
+                const failedJob = jobs.get(jobId);
+                if (failedJob) {
+                    failedJob.status = 'failed';
+                    failedJob.error = error.message;
+                    failedJob.updatedAt = nowIso();
+                    appendLog(failedJob, `Prepare/render failed: ${error.message}`);
+                }
+            }
+        })().catch((error) => {
             const failedJob = jobs.get(jobId);
             if (failedJob) {
                 failedJob.status = 'failed';
@@ -1390,27 +1435,7 @@ app.post('/render', async (req, res) => {
                 failedJob.updatedAt = nowIso();
             }
         });
-
-        res.json({
-            accepted: true,
-            jobId,
-            status: job.status,
-            statusUrl,
-            renderUrl,
-            props,
-        });
-    } catch (error) {
-        job.status = 'failed';
-        job.error = error.message;
-        job.updatedAt = nowIso();
-
-        res.status(500).json({
-            accepted: false,
-            jobId,
-            status: 'failed',
-            error: error.message,
-        });
-    }
+    });
 });
 
 app.listen(PORT, '0.0.0.0', async () => {

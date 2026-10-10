@@ -1116,12 +1116,41 @@ def step_render(client: AirtableClient, ctx: dict[str, Any]) -> str:
                 timing = field_str(fresh, "Timing_Status")
                 if timing not in {"Ready", "Skipped"}:
                     process_t1(output_record_id=fresh["id"], test_run_id=test_run_id)
+                    fresh = client.get_record(PLATFORM_OUTPUTS_TABLE, fresh["id"])
+                # Heal clip/timeline frame drift before Remotion sees the payload.
+                try:
+                    from t1.slice import sync_clip_durations_to_timeline
+                    from render.fields import parse_json_field
+
+                    clips = parse_json_field(field(fresh, "Render_Clip_List_JSON"))
+                    timeline = parse_json_field(field(fresh, "Timing_Timeline_JSON"))
+                    if isinstance(clips, list) and isinstance(timeline, dict):
+                        synced = sync_clip_durations_to_timeline(clips, timeline)
+                        before = sum(int((c or {}).get("durationFrames") or 0) for c in clips)
+                        after = sum(int((c or {}).get("durationFrames") or 0) for c in synced)
+                        if after and after != before:
+                            import json as _json
+
+                            client.update_record(
+                                PLATFORM_OUTPUTS_TABLE,
+                                fresh["id"],
+                                {
+                                    "Render_Clip_List_JSON": _json.dumps(synced, separators=(",", ":")),
+                                    "Render_Total_Frames": after,
+                                },
+                            )
+                            fresh = client.get_record(PLATFORM_OUTPUTS_TABLE, fresh["id"])
+                except Exception:
+                    pass
                 r4 = process_r4(output_record_id=fresh["id"], test_run_id=test_run_id) or {}
                 if r4.get("processed"):
                     started_r4 = True
                     busy_rendering = True
                 elif r4.get("reason") == "waiting_for_voiceover":
                     raise StepWait("Waiting for voiceover")
+                elif not r4.get("processed") and r4.get("reason"):
+                    remaining.append(fresh["id"])
+                    raise StepWait(f"Rendering ({r4.get('reason')})")
                 remaining.append(fresh["id"])
                 continue
             if field_str(fresh, "Asset_Selection_Status") == "Selected" and not render_status:
