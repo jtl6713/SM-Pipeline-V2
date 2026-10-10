@@ -130,3 +130,5 @@ Deploy Studio UI 0.6.534-pages-path-bust. Rename app-item4-0625.js -> app-item4-
 2026-10-10: Deploy Studio UI 0.6.558-idea-timeline-preserve. Prefer the first saved timed-script request among linked drafts; preserve original 7-scene Pilsen timeline instead of reopening a later regenerated duplicate.
 
 2026-10-10: Deploy Studio UI 0.6.559-idea-production-reopen. Approved Ideas open linked Production Requests, never silently repeat timeline generation; preserve earliest saved timed scenes and display errors.
+
+2026-10-10: Deploy Studio UI 0.6.560-approve-all-budget. Approve All POSTs only schedules for the approving rows (not the full Pipeline map).

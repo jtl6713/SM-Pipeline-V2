@@ -87,3 +87,5 @@ Deploy Worker 0.10.489-engagement-ledger. Shrink the engagement ledger so Chicag
 2026-10-09: Deploy Worker 0.10.494-vibe-cut-large-upload. Preserve Vibe Cut origin metadata during large multipart video uploads.
 
 2026-10-10: Deploy Worker 0.10.495-idea-timeline-idempotent. Return existing saved timed-script Production Request before AI writing or Airtable mutation, preventing duplicate regeneration.
+
+2026-10-10: Deploy Worker 0.10.497-approve-all-budget. Slim Approve All job schedules + Setting_Value char budget so Approve (1) cannot 500 on Airtable INVALID_VALUE_FOR_COLUMN.

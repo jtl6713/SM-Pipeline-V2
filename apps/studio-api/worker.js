@@ -171,6 +171,7 @@ import {
   approveAllJobCounts,
   approveAllProgressMessage,
   buildApproveAllJob,
+  emptyApproveAllJobStore,
   finalizeApproveAllJobStatus,
   newApproveAllJobId,
   nextPendingApproveAllItems,
@@ -567,7 +568,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.495-idea-timeline-idempotent",
+          version: "0.10.497-approve-all-budget",
           studio_approve_all_batch_v1: true,
           studio_engagement_v1: true,
           studio_mae_schedule_v1: true,
@@ -33923,14 +33924,34 @@ async function studioLoadApproveAllJobStore(env) {
 }
 
 async function studioSaveApproveAllJobStore(env, store) {
-  const pruned = pruneApproveAllJobStore(store);
-  await studioUpsertSetting(
-    env,
-    APPROVE_ALL_JOBS_SETTING,
-    JSON.stringify(pruned),
-    "Durable Pipeline Approve All batch jobs (progress + retry).",
-  );
-  return pruned;
+  let pruned = pruneApproveAllJobStore(store);
+  const notes = "Durable Pipeline Approve All batch jobs (progress + retry).";
+  try {
+    await studioUpsertSetting(env, APPROVE_ALL_JOBS_SETTING, JSON.stringify(pruned), notes);
+    return pruned;
+  } catch (error) {
+    const message = String(error?.message || error || "");
+    if (!/INVALID_VALUE_FOR_COLUMN|Setting_Value|cannot accept the provided value/i.test(message)) {
+      throw error;
+    }
+    // Airtable long-text 100k: drop all terminal jobs, then keep only active.
+    pruned = pruneApproveAllJobStore(pruned, Date.now(), { maxChars: 20000, maxTerminalJobs: 0 });
+    try {
+      await studioUpsertSetting(env, APPROVE_ALL_JOBS_SETTING, JSON.stringify(pruned), notes);
+      console.warn("approve-all job store pruned after Setting_Value reject", JSON.stringify(pruned).length);
+      return pruned;
+    } catch (retryError) {
+      const activeOnly = emptyApproveAllJobStore();
+      for (const jobId of Object.values(pruned.active_by_profile || {})) {
+        if (pruned.jobs?.[jobId]) activeOnly.jobs[jobId] = pruned.jobs[jobId];
+      }
+      activeOnly.active_by_profile = { ...(pruned.active_by_profile || {}) };
+      const emergency = pruneApproveAllJobStore(activeOnly, Date.now(), { maxChars: 20000, maxTerminalJobs: 0 });
+      await studioUpsertSetting(env, APPROVE_ALL_JOBS_SETTING, JSON.stringify(emergency), notes);
+      console.warn("approve-all job store reset to active-only after Setting_Value reject", retryError);
+      return emergency;
+    }
+  }
 }
 
 async function studioGetApproveAllJob(env, jobId) {
