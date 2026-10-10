@@ -116,3 +116,5 @@ Deploy Studio UI 0.6.534-pages-path-bust. Rename app-item4-0625.js -> app-item4-
 2026-10-09: Deploy UI 0.6.551-engagement-filter-layout. Add Discovery filters padding, stronger field labels, and keep Engagement checkboxes beside their text.
 
 2026-10-10: Deploy UI 0.6.552-engagement-alts. Client pad for Use #1/#2/#3 when API ledger still has one comment.
+
+2026-10-10: Re-deploy UI 0.6.552-engagement-alts after alias lag caused Pages verify to miss the just-uploaded build.
