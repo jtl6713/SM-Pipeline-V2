@@ -892,8 +892,16 @@ try {
     if ($FirstInstall -or -not $PriorCommit) {
         Write-Host 'First managed deploy: skipping baseline health (service is not live yet).' -ForegroundColor Yellow
     }
-    elseif (-not $localBefore -or ($requirePublicBaseline -and -not $publicBefore)) {
-        throw 'Baseline local/public health is not green. Refusing to modify a service that is already unhealthy.'
+    elseif (-not $localBefore) {
+        # Already down (e.g. prior deploy timed out mid-restart and left public 502).
+        # Refusing forever parks the service; continue as an explicit recovery deploy.
+        Write-Host 'WARN baseline local health is down; continuing as recovery deploy.' -ForegroundColor Yellow
+        if ($requirePublicBaseline -and -not $publicBefore) {
+            Write-Host 'WARN baseline public health is also down.' -ForegroundColor Yellow
+        }
+    }
+    elseif ($requirePublicBaseline -and -not $publicBefore) {
+        Write-Host 'WARN baseline public health is down while local is up; continuing deploy.' -ForegroundColor Yellow
     }
     else {
         Write-Host 'PASS baseline local/public health.' -ForegroundColor Green
@@ -982,7 +990,9 @@ try {
         Write-Step '7/8  Restart only selected service and verify local/public health'
         Start-LocalService -ServiceName $Service -Config $Config -RuntimeRoot $RuntimeRoot
         $Stopped = $false
-        Wait-ServiceHealth -Config $Config -Seconds 90
+        # Remotion cold-starts (bundle + Chromium) regularly exceed 90s on this box.
+        $healthSeconds = if ($Service -eq 'remotion-renderer') { 240 } else { 90 }
+        Wait-ServiceHealth -Config $Config -Seconds $healthSeconds
         if ($Service -eq 'pipeline-runner') {
             Assert-PipelineRunnerHealthVersion -RuntimeRoot $RuntimeRoot -PublicUrl $Config.PublicUrl
         }
@@ -1037,7 +1047,8 @@ try {
                 Restore-SourceBackup -RuntimeRoot $RuntimeRoot -Config $Config -BackupRoot $BackupRoot
                 Install-Dependencies -Config $Config -RuntimeRoot $RuntimeRoot -ForceInstall
                 Start-LocalService -ServiceName $Service -Config $Config -RuntimeRoot $RuntimeRoot
-                Wait-ServiceHealth -Config $Config -Seconds 90
+                $rollbackHealthSeconds = if ($Service -eq 'remotion-renderer') { 240 } else { 90 }
+                Wait-ServiceHealth -Config $Config -Seconds $rollbackHealthSeconds
 
                 Write-DeploymentHistory -Record @{
                     action = 'automatic_rollback'
