@@ -567,7 +567,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.494-vibe-cut-large-upload",
+          version: "0.10.495-idea-timeline-idempotent",
           studio_approve_all_batch_v1: true,
           studio_engagement_v1: true,
           studio_mae_schedule_v1: true,
@@ -22679,6 +22679,45 @@ async function createIdeaTimedScriptRoute(request, env, url, authorization, ctx 
   }
   if (String(f(idea, "Candidate_Status") || "").trim() === "On Hold") {
     throw new HttpError(409, "Restore this idea before creating a timeline.");
+  }
+  // QA-IDEA-TIMELINE-ORPHAN: this POST must be idempotent once a timed
+  // script has been saved. Repeated Ideas clicks must never rewrite approved
+  // narration, scene timing, asset assignments, or create another draft.
+  const linkedProductionRequestIds = [...new Set(
+    (Array.isArray(f(idea, "Production Requests")) ? f(idea, "Production Requests") : [])
+      .map((value) => String(value || "").trim())
+      .filter((value) => /^rec[A-Za-z0-9]+$/.test(value))
+  )];
+  if (linkedProductionRequestIds.length) {
+    const linked = await Promise.allSettled(linkedProductionRequestIds.map((id) =>
+      airtableFetch(env, PRODUCTION_REQUEST_TABLE, id)
+    ));
+    if (linked.some((entry) => entry.status === "rejected")) {
+      throw new HttpError(503, "An existing Production Request could not be checked. Retry safely; no new timeline was created.");
+    }
+    const saved = linked
+      .map((entry) => entry.value)
+      .map((record) => ({ record, timeline: timedScriptFromNotes(f(record, "Production_Notes")) }))
+      .filter(({ record, timeline }) => timeline?.segments?.length >= 2
+        && ["Draft", "Ready", "Submitted"].includes(String(f(record, "Request_Status") || "").trim()))
+      .sort((a, b) => (Date.parse(f(a.record, "Created_At") || "") || 0)
+        - (Date.parse(f(b.record, "Created_At") || "") || 0))[0];
+    if (saved) {
+      const { record: savedRequest, timeline } = saved;
+      return respond(request, env, {
+        ok: true,
+        reused_existing: true,
+        timeline,
+        markdown: formatTimedScriptMarkdown(timeline),
+        requested_script: exactVoiceoverText(timeline),
+        duration_seconds: timeline.duration_seconds,
+        scene_count: timeline.segments.length,
+        ready_for_approval: false,
+        record: mapIdea(idea),
+        production_request: mapProductionRequest(savedRequest),
+        message: "The existing voiceover timeline was reopened without changing its scenes or stills. Review it in Production / Rendering.",
+      });
+    }
   }
   const feedPhotoIds = singleImageFeedPostIds({
     contentType: f(idea, "Production_Content_Type"),

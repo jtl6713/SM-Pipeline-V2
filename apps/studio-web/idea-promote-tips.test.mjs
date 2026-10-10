@@ -20,7 +20,7 @@ test("idea promote drawer documents duration vs voiceover precedence", () => {
   assert.ok(scriptBuild);
   assert.ok(appBuild);
   assert.equal(appBuild, scriptBuild);
-  assert.equal(uiBuild, "0.6.558");
+  assert.equal(uiBuild, "0.6.559");
   assert.match(html, /id="ideaLibraryPickerForm"/);
   assert.match(html, /class="idea-type-guide"/);
   assert.match(html, /Photo Set turns stills into Reels|Photo Set/);
@@ -68,22 +68,23 @@ test("All Profiles Ideas count opens the Ideas page", () => {
   assert.doesNotMatch(ideasBranch, /outputs/);
 });
 
-test("Ideas list Create timeline opens saved Production instead of only refreshing Ideas", () => {
+test("Approved Ideas reopen linked Production Requests, not regenerate voiceovers", () => {
+  const row = app.slice(app.indexOf("function ideaRowHtml("), app.indexOf("function partitionIdeaRecords"));
+  assert.match(row, /ideaHasProductionRequest\(r\) \? "Open production" : "Create timeline"/);
   const handler = app.slice(
     app.indexOf('target.querySelectorAll("[data-idea-timeline]")'),
     app.indexOf('target.querySelectorAll("[data-idea-id]")'),
   );
   assert.match(handler, /event\.preventDefault\(\)/);
-  assert.match(handler, /findExistingProductionRequestForIdea\(idea\)/);
-  assert.match(handler, /existing\.production_notes/);
-  assert.match(handler, /savedTimelines\[0\]/);
-  assert.match(handler, /Date\.parse\(first\.created_at/);
-  assert.match(handler, /Promise\.all\(requestIds\.map/);
-  assert.match(handler, /openProductionRequestForIdea\(idea/);
-  assert.match(handler, /productionRequest: saved/);
-  assert.match(handler, /createIdeaTimedScript\(idea, \{ button, heading: true \}\)/);
+  assert.match(handler, /openOrCreateIdeaTimeline\(idea/);
   assert.doesNotMatch(handler, /background:\s*true/);
-  assert.match(handler, /setIdeasAutonomousMessage\(error\.message/);
+  const opener = app.slice(app.indexOf("async function openOrCreateIdeaTimeline("), app.indexOf('$("createIdeaTimelineButton")?.addEventListener'));
+  assert.match(opener, /knownIds/);
+  assert.match(opener, /Promise\.allSettled\(knownIds\.map/);
+  assert.match(opener, /selectIdeaProductionRequest/);
+  assert.match(opener, /openProductionRequestForIdea\(idea/);
+  assert.match(opener, /strict: true/);
+  assert.match(opener, /await createIdeaTimedScript\(idea/);
   assert.match(html, /id="backToProductionList"/);
   assert.match(app, /function leaveProductionWorkspace/);
 });

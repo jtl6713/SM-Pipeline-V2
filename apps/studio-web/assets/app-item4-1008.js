@@ -260,7 +260,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.558-idea-timeline-preserve";
+  const BUILD_ID = "item4-0.6.559-idea-production-reopen";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -2298,7 +2298,11 @@
   });
   $("ideasCreateTimelineButton")?.addEventListener("click", async () => {
     if (activeIdea?.id && $("ideaManageDrawer")?.classList.contains("open")) {
-      await createIdeaTimedScript(activeIdea, { heading: true, background: true });
+      try {
+        await openOrCreateIdeaTimeline(activeIdea, { heading: true });
+      } catch (error) {
+        setIdeasAutonomousMessage(error.message || "Could not open Production.", "error-text");
+      }
       return;
     }
     setIdeasAutonomousMessage("Open an idea with Manage, then tap Create VO timeline. Studio writes the spoken script and picks named library stills.");
@@ -2584,7 +2588,8 @@
   }
 
   function ideaHasProductionRequest(idea) {
-    return Array.isArray(idea?.production_request_links) && idea.production_request_links.length > 0;
+    return Boolean(String(idea?.production_request_id || "").trim())
+      || (Array.isArray(idea?.production_request_links) && idea.production_request_links.length > 0);
   }
 
   function ideaCanPromote(idea) {
@@ -3403,21 +3408,23 @@
       setMessage(success, "success");
       if (heading) setManageMessage(success, "success");
       await Promise.all([loadIdeas(), loadDashboard(), loadProductionRequests()]).catch(() => {});
-      if (background) {
-        const name = result.record?.title || target.title || "This idea";
-        setIdeasAutonomousMessage(`${name} is in the Production list and ready to open. This does not publish.`, "success");
-      } else if (result.production_request?.id || activeIdea?.id) {
-        await openProductionRequestForIdea(result.record || activeIdea, {
-          productionRequest: result.production_request,
-          successMessage: success,
-        }).catch((error) => {
-          console.warn("Open Production after VO timeline failed", error);
-        });
-        setRequestMessage(success, "success");
+      const resolvedRequest = result.production_request?.id
+        ? result.production_request
+        : await findExistingProductionRequestForIdea(result.record || target);
+      if (!resolvedRequest?.id) {
+        throw new Error("Timeline was saved, but its Production Request could not be resolved. Reopen the existing draft; do not create another.");
       }
+      await openProductionRequestForIdea(result.record || target, {
+        productionRequest: resolvedRequest,
+        successMessage: success,
+        strict: true,
+      });
+      setIdeasAutonomousMessage("", "");
+      setRequestMessage(success, "success");
     } catch (error) {
       setMessage(error.message || "Could not create the voiceover timeline.", "error-text");
       if (heading) setManageMessage(error.message || "Could not create the voiceover timeline.", "error-text");
+      throw error;
     } finally {
       restore.forEach(({ node, text, disabled }) => {
         node.textContent = text;
@@ -3430,9 +3437,79 @@
     }
   }
 
+  // QA-IDEA-TIMELINE-ORPHAN: Approved is an Idea status, not permission to
+  // generate a second timeline. Prefer an authoritative linked draft.
+  function selectIdeaProductionRequest(records = []) {
+    const active = new Set(["Draft", "Ready", "Submitted"]);
+    const isTimed = (record) => /(?:^|\n)\[timed-script\]\s*\{/i.test(String(record?.production_notes || ""));
+    const candidates = (records || [])
+      .filter((record) => record?.id && active.has(String(record.status || "").trim()));
+    candidates.sort((first, second) => {
+      const timed = Number(isTimed(second)) - Number(isTimed(first));
+      if (timed) return timed;
+      const ready = Number(second.status === "Ready") - Number(first.status === "Ready");
+      if (ready) return ready;
+      return (Date.parse(first.created_at || "") || 0) - (Date.parse(second.created_at || "") || 0);
+    });
+    return candidates[0] || null;
+  }
+
+  async function openOrCreateIdeaTimeline(idea, { button = null, heading = false } = {}) {
+    if (!idea?.id) throw new Error("Open an idea before creating its timeline.");
+    const entries = Array.isArray(idea.production_request_links) ? idea.production_request_links : [];
+    const knownIds = [...new Set([
+      ...entries.map((row) => typeof row === "string" ? row : row?.id),
+      idea.production_request_id,
+    ].map((id) => String(id || "").trim()).filter((id) => /^rec[A-Za-z0-9]+$/.test(id)))];
+
+    setIdeasAutonomousMessage(knownIds.length
+      ? "Opening the existing Production Request without regenerating its timeline…"
+      : "Checking Production for an existing timeline…");
+    let existing = null;
+    if (knownIds.length) {
+      const results = await Promise.allSettled(knownIds.map((id) => api(
+        `/api/production-requests/${encodeURIComponent(id)}`,
+        { timeoutMs: 15000, retries: 0 },
+      )));
+      if (results.some((outcome) => outcome.status === "rejected" || !outcome.value?.record?.id)) {
+        throw new Error("An existing Production Request could not be checked. Refresh and try again; nothing new was created.");
+      }
+      existing = selectIdeaProductionRequest(results.map((outcome) => outcome.value.record));
+      if (!existing) {
+        throw new Error("This idea has Production Requests, but none is an editable draft. Open its Pipeline outputs; no duplicate was created.");
+      }
+    } else {
+      // Protect against older API/cache records whose linked IDs are omitted.
+      // If this read fails, fail closed rather than creating a duplicate.
+      existing = await findExistingProductionRequestForIdea(idea);
+    }
+
+    if (existing?.id) {
+      const hasTimeline = /\[timed-script\]\s*\{/i.test(String(existing.production_notes || ""));
+      await openProductionRequestForIdea(idea, {
+        productionRequest: existing,
+        successMessage: hasTimeline
+          ? "Saved timeline opened in Rendering. Review the existing scenes; nothing was regenerated."
+          : "Existing Production Request opened. Configure the timeline in Rendering; nothing was regenerated.",
+        strict: true,
+      });
+      setIdeasAutonomousMessage("", "");
+      return existing;
+    }
+
+    // Only POST when the authoritative Idea has no linked Production draft.
+    await createIdeaTimedScript(idea, { button, heading });
+    return null;
+  }
+
+
   $("createIdeaTimelineButton")?.addEventListener("click", async () => {
     if (!activeIdea?.id) return;
-    await createIdeaTimedScript(activeIdea);
+    try {
+      await openOrCreateIdeaTimeline(activeIdea, { button: $("createIdeaTimelineButton") });
+    } catch (error) {
+      setManageMessage(error.message || "Could not open Production.", "error-text");
+    }
   });
 
   $("matchIdeaPhotosButton")?.addEventListener("click", async () => {
@@ -12410,7 +12487,7 @@
     });
   }
 
-  async function openProductionRequestForIdea(idea, { fromWizard = false, productionRequest = null, successMessage = "" } = {}) {
+  async function openProductionRequestForIdea(idea, { fromWizard = false, productionRequest = null, successMessage = "", strict = false } = {}) {
     if (!idea?.id) return;
     const button = $("configureProductionButton");
     if (button) {
@@ -12533,12 +12610,12 @@
       } else {
         setRequestMessage("Existing Production Request draft opened. Add photos from the library or upload.", "success");
       }
+      return true;
     } catch (e) {
       setManageMessage(e.message, "error-text");
-      if (fromWizard) {
-        ezWizardSetMessage(e.message || "Could not open production.", "error-text");
-        throw e;
-      }
+      if (fromWizard) ezWizardSetMessage(e.message || "Could not open production.", "error-text");
+      if (strict || fromWizard) throw e;
+      return false;
     } finally {
       if (button && activeIdea && !ideaIsPromoted(activeIdea) && !activeIdea.is_on_hold) {
         button.disabled = false;
@@ -14076,7 +14153,7 @@
       ? `<button type="button" class="manage-button find-images-row-button" data-idea-find-images="${escapeHtml(r.id)}">Find images now</button>`
       : "";
     const timeline = !ideaIsPromoted(r) && !r.is_on_hold
-      ? `<button type="button" class="manage-button find-images-row-button" data-idea-timeline="${escapeHtml(r.id)}">Create timeline</button>`
+      ? `<button type="button" class="manage-button find-images-row-button" data-idea-timeline="${escapeHtml(r.id)}">${ideaHasProductionRequest(r) ? "Open production" : "Create timeline"}</button>`
       : "";
     const title = `${value(r.title)}${listeningForPhotos ? ' <span class="subtle">(Listening for photos)</span>' : ""}`;
     return `<tr class="${r.is_on_hold ? "idea-row-held" : ""}"><td><div class="title-cell">${title}</div><div class="subtle">${value(r.summary, "")}${r.created_at ? `${r.summary ? " · " : ""}Created ${dateValue(r.created_at)}` : ""}</div></td><td>${badge(ideaStatusLabel(r))}</td><td>${value(r.content_type)}</td><td>${join(r.platforms)}</td><td>${ideaStructureLabel(r)}</td><td><div class="subtle">${escapeHtml(ideaProductionLabel(r))}</div></td><td><div class="idea-row-actions">${promote}<div class="idea-row-action-stack"><button type="button" class="manage-button" data-idea-id="${escapeHtml(r.id)}">Manage</button>${findImages}${timeline}</div></div></td></tr>`;
@@ -14185,58 +14262,16 @@
         event.stopPropagation();
         const idea = byId.get(button.dataset.ideaTimeline);
         if (!idea?.id || button.disabled) return;
-        const idleText = button.textContent;
+        const idle = button.textContent;
         button.disabled = true;
-        button.textContent = "Opening timeline…";
-        setIdeasAutonomousMessage("Checking for a saved timeline…");
+        button.textContent = "Opening Production…";
         try {
-          // A timed script already attached to Production must be reopened, not
-          // regenerated. Regenerating discards the operator's scene/media order.
-          const requestIds = (Array.isArray(idea.production_request_links)
-            ? idea.production_request_links : [])
-            .map((entry) => String(typeof entry === "string" ? entry : entry?.id || "").trim())
-            .filter(Boolean)
-            .slice(0, 12);
-          const linkedRequests = await Promise.all(requestIds.map(async (id) => {
-            try {
-              const result = await api(`/api/production-requests/${encodeURIComponent(id)}`, {
-                timeoutMs: 12000,
-                retries: 0,
-              });
-              return result?.record || null;
-            } catch {
-              return null;
-            }
-          }));
-          const savedTimelines = linkedRequests
-            .filter((record) => record?.id && /\[timed-script\]\s*\{/i.test(String(record.production_notes || "")))
-            .filter((record) => ["Draft", "Ready", "Submitted"].includes(String(record.status || "").trim()))
-            .sort((first, second) => (Date.parse(first.created_at || "") || 0)
-              - (Date.parse(second.created_at || "") || 0));
-          // Keep the earliest saved timeline, not the newest one created by a
-          // repeat click. This retains the original approved scene assignments.
-          const existing = savedTimelines[0]
-            || (ideaHasProductionRequest(idea)
-              ? await findExistingProductionRequestForIdea(idea).catch(() => null)
-              : null);
-          const saved = existing?.id && /\[timed-script\]\s*\{/i.test(String(existing.production_notes || ""))
-            ? existing
-            : null;
-          if (saved) {
-            await openProductionRequestForIdea(idea, {
-              productionRequest: saved,
-              successMessage: "Saved timeline opened. Review the scenes in Rendering.",
-            });
-          } else {
-            // A new timeline must navigate to Production. Background mode only
-            // refreshes the Ideas list and leaves users stranded on this screen.
-            await createIdeaTimedScript(idea, { button, heading: true });
-          }
+          await openOrCreateIdeaTimeline(idea, { button, heading: true });
         } catch (error) {
-          setIdeasAutonomousMessage(error.message || "Could not open the timeline. Try again.", "error-text");
+          setIdeasAutonomousMessage(error.message || "Could not open the Production Request.", "error-text");
         } finally {
           button.disabled = false;
-          button.textContent = idleText;
+          button.textContent = idle;
         }
       });
     });
