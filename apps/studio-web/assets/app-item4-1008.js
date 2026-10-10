@@ -260,7 +260,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.569-swap-still-previews";
+  const BUILD_ID = "item4-0.6.570-swap-still-img-display";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -8809,9 +8809,11 @@ function timedScriptAssetLabel(asset, index) {
     });
 
     img.addEventListener("error", failPreview);
+    // WebKit often reports complete=true + naturalWidth=0 for a freshly inserted
+    // <img> before the request starts. Wait for load/error when a src is present.
     if (img.complete) {
       if (previewImageLooksReady(img)) item4PreviewFailures.delete(key);
-      else failPreview();
+      else if (!String(img.currentSrc || img.getAttribute("src") || "").trim()) failPreview();
     }
   }
 
