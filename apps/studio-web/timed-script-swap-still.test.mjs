@@ -7,7 +7,7 @@ const html = fs.readFileSync(new URL("./index.html", import.meta.url), "utf8");
 const css = fs.readFileSync(new URL("./assets/styles-phase7-0621.css", import.meta.url), "utf8");
 
 test("Rendering timed-script scenes can open a swap-still library dialog", () => {
-  assert.match(app, /BUILD_ID = "item4-0.6.567-render-queue-wait"/);
+  assert.match(app, /BUILD_ID = "item4-0.6.568-pr-superseded-cancel"/);
   assert.match(app, /function openTimedScriptSwapStill\(/);
   assert.match(app, /function applyTimedScriptSwapStill\(/);
   assert.match(app, /function loadSwapStillLibrary\(/);
@@ -24,8 +24,8 @@ test("Rendering timed-script scenes can open a swap-still library dialog", () =>
   assert.match(html, /id="prSwapStillGrid"/);
   assert.match(html, /id="prSwapStillApply"/);
   assert.match(html, /Swap still/);
-  assert.match(html, /UI build 0\.6\.567/);
-  assert.match(html, /app-item4-1008\.js\?v=0.6.567-render-queue-wait/);
+  assert.match(html, /UI build 0\.6\.568/);
+  assert.match(html, /app-item4-1008\.js\?v=0.6.568-pr-superseded-cancel/);
   assert.match(css, /\.swap-still-dialog/);
   assert.match(css, /\.timed-script-scene-thumb:hover/);
 });
