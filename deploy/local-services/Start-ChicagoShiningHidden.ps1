@@ -52,6 +52,9 @@ $Map = @{
         Title = '2 LOC Remotion Render :3333'
         Kind = 'node'
         File = 'render-server.js'
+        # Must pin PORT: Ops Dashboard children inherit PORT=3361 and Remotion
+        # then binds there while Cloudflare Tunnel still targets :3333 (502).
+        ExtraEnv = @{ PORT = '3333' }
     }
     'watermark' = @{
         Name = 'Watermark'
@@ -60,6 +63,7 @@ $Map = @{
         Title = '3 LOC Watermark :3011'
         Kind = 'node'
         File = 'server.js'
+        ExtraEnv = @{ PORT = '3011' }
     }
     'voiceover-normalizer' = @{
         Name = 'Voiceover Normalizer'
@@ -207,8 +211,17 @@ else {
 }
 
 $saved = @{}
-$extraEnv = if ($cfg.ContainsKey('ExtraEnv')) { $cfg.ExtraEnv } else { $null }
-if ($extraEnv) {
+# Always force the service port into the child env. Ops / companion parents often
+# carry PORT=3361 (ops-dashboard); Node services that read process.env.PORT would
+# otherwise steal the wrong listener (Remotion → 3361, public /health 502).
+$extraEnv = @{}
+if ($cfg.ContainsKey('ExtraEnv') -and $cfg.ExtraEnv) {
+    foreach ($key in $cfg.ExtraEnv.Keys) { $extraEnv[$key] = [string]$cfg.ExtraEnv[$key] }
+}
+if ($cfg.ContainsKey('Port') -and $cfg.Port) {
+    $extraEnv['PORT'] = [string]$cfg.Port
+}
+if ($extraEnv.Count -gt 0) {
     foreach ($key in $extraEnv.Keys) {
         $saved[$key] = [Environment]::GetEnvironmentVariable($key, 'Process')
         [Environment]::SetEnvironmentVariable($key, [string]$extraEnv[$key], 'Process')
