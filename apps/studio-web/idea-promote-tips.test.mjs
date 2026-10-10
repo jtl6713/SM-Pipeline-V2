@@ -20,7 +20,7 @@ test("idea promote drawer documents duration vs voiceover precedence", () => {
   assert.ok(scriptBuild);
   assert.ok(appBuild);
   assert.equal(appBuild, scriptBuild);
-  assert.equal(uiBuild, "0.6.556");
+  assert.equal(uiBuild, "0.6.557");
   assert.match(html, /id="ideaLibraryPickerForm"/);
   assert.match(html, /class="idea-type-guide"/);
   assert.match(html, /Photo Set turns stills into Reels|Photo Set/);
@@ -68,19 +68,19 @@ test("All Profiles Ideas count opens the Ideas page", () => {
   assert.doesNotMatch(ideasBranch, /outputs/);
 });
 
-test("Ideas list Create timeline stays in the background", () => {
+test("Ideas list Create timeline opens saved Production instead of only refreshing Ideas", () => {
   const handler = app.slice(
     app.indexOf('target.querySelectorAll("[data-idea-timeline]")'),
     app.indexOf('target.querySelectorAll("[data-idea-id]")'),
   );
-  assert.match(handler, /background:\s*true/);
-  assert.doesNotMatch(handler, /openIdeaDrawer/);
-  const fnStart = app.indexOf("async function createIdeaTimedScript");
-  const fn = app.slice(fnStart, app.indexOf('$("matchIdeaPhotosButton")', fnStart));
-  assert.ok(fn.includes("background"));
-  assert.match(fn, /if \(background\)/);
-  assert.match(fn, /ready to open/);
-  assert.match(fn, /openProductionRequestForIdea/);
+  assert.match(handler, /event\.preventDefault\(\)/);
+  assert.match(handler, /findExistingProductionRequestForIdea\(idea\)/);
+  assert.match(handler, /existing\.production_notes/);
+  assert.match(handler, /openProductionRequestForIdea\(idea/);
+  assert.match(handler, /productionRequest: saved/);
+  assert.match(handler, /createIdeaTimedScript\(idea, \{ button, heading: true \}\)/);
+  assert.doesNotMatch(handler, /background:\s*true/);
+  assert.match(handler, /setIdeasAutonomousMessage\(error\.message/);
   assert.match(html, /id="backToProductionList"/);
   assert.match(app, /function leaveProductionWorkspace/);
 });

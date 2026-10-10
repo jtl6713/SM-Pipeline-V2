@@ -260,7 +260,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.556-vibe-cut-large-upload";
+  const BUILD_ID = "item4-0.6.557-idea-timeline-open";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -14181,10 +14181,39 @@
     });
     target.querySelectorAll("[data-idea-timeline]").forEach((button) => {
       button.addEventListener("click", async (event) => {
+        event.preventDefault();
         event.stopPropagation();
         const idea = byId.get(button.dataset.ideaTimeline);
-        if (!idea?.id) return;
-        await createIdeaTimedScript(idea, { button, background: true });
+        if (!idea?.id || button.disabled) return;
+        const idleText = button.textContent;
+        button.disabled = true;
+        button.textContent = "Opening timeline…";
+        setIdeasAutonomousMessage("Checking for a saved timeline…");
+        try {
+          // A timed script already attached to Production must be reopened, not
+          // regenerated. Regenerating discards the operator's scene/media order.
+          const existing = ideaHasProductionRequest(idea)
+            ? await findExistingProductionRequestForIdea(idea).catch(() => null)
+            : null;
+          const saved = existing?.id && /\[timed-script\]\s*\{/i.test(String(existing.production_notes || ""))
+            ? existing
+            : null;
+          if (saved) {
+            await openProductionRequestForIdea(idea, {
+              productionRequest: saved,
+              successMessage: "Saved timeline opened. Review the scenes in Rendering.",
+            });
+          } else {
+            // A new timeline must navigate to Production. Background mode only
+            // refreshes the Ideas list and leaves users stranded on this screen.
+            await createIdeaTimedScript(idea, { button, heading: true });
+          }
+        } catch (error) {
+          setIdeasAutonomousMessage(error.message || "Could not open the timeline. Try again.", "error-text");
+        } finally {
+          button.disabled = false;
+          button.textContent = idleText;
+        }
       });
     });
     target.querySelectorAll("[data-idea-id]").forEach((button) => {
