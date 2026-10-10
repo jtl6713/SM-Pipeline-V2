@@ -159,3 +159,6 @@ jobs:
 
 # Trigger pipeline-runner deploy for voiceover_exceeds_render last-clip extend (Output 2156)
 # 2026-10-08 service_version=2026-10-08-vo-exceeds-render
+
+# Trigger pipeline-runner deploy for Vibe Cut multi-clip stamp/T1
+# 2026-10-10 service_version=2026-10-10-vibe-cut-multi-clip

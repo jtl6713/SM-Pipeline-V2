@@ -8,8 +8,9 @@ from typing import Any
 from airtable.client import AirtableClient
 from studio_produce.constants import STEP_LABELS, TERMINAL_STEPS
 from studio_produce.context import load_outputs, load_parent, load_request, load_slides, read_job, write_job
-from studio_produce.job import derive_route, job_is_terminal, new_job, next_step, utc_now, with_step
+from studio_produce.job import derive_route, is_finished_route, job_is_terminal, new_job, next_step, utc_now, with_step
 from studio_produce.steps import STEP_HANDLERS, StepBlocked, StepWait, pick_resume_step, render_progress_detail
+from vibe_cut import is_vibe_cut_notes
 
 logger = logging.getLogger("pipeline-runner.studio-produce")
 
@@ -31,14 +32,36 @@ def start_job(production_request_record_id: str, *, resume: bool = False) -> dic
     parent = load_parent(client, request)
     outputs = load_outputs(client, request_id, parent)
     job = read_job(request)
-    if job_is_terminal(job) and not resume:
+    fields = request.get("fields") or {}
+    notes = " ".join(
+        str(fields.get(name) or "")
+        for name in ("Production_Notes", "Production_Request_Notes", "Production_Config_Notes", "Output_Notes")
+    )
+    vibe_cut = is_vibe_cut_notes(notes)
+    if job_is_terminal(job) and not resume and not (
+        vibe_cut and is_finished_route(str((job or {}).get("route") or ""))
+    ):
         return {"accepted": False, "reason": "terminal", "job": job, "production_request_record_id": request_id}
     if not job or not job.get("job_id"):
-        route = derive_route(request.get("fields") or {}, outputs)
+        route = derive_route(fields, outputs)
         job = new_job(route=route, step="themes")
         write_job(client, request_id, job)
+    elif vibe_cut and is_finished_route(str(job.get("route") or "")):
+        # Older Workers mis-classified single-master Vibe Cuts as finished passthrough.
+        route = derive_route(fields, outputs)
+        heal = dict(job.get("heal") or {}) if isinstance(job.get("heal"), dict) else {}
+        heal["vibe_cut_passthrough_cleared_at"] = utc_now()
+        heal["resume_count"] = 0
+        job = with_step(
+            {**job, "route": route, "error": None, "heal": heal},
+            "themes",
+            error=None,
+        )
+        write_job(client, request_id, job)
     elif resume and job_is_terminal(job):
-        route = job.get("route") or derive_route(request.get("fields") or {}, outputs)
+        route = job.get("route") or derive_route(fields, outputs)
+        if vibe_cut and is_finished_route(str(route or "")):
+            route = derive_route(fields, outputs)
         step = pick_resume_step(request, outputs, parent=parent, route=route)
         heal = dict(job.get("heal") or {}) if isinstance(job.get("heal"), dict) else {}
         # Manual/agent resume after escalate clears the escalation latch but keeps history.
@@ -49,7 +72,7 @@ def start_job(production_request_record_id: str, *, resume: bool = False) -> dic
         job["error"] = None
         write_job(client, request_id, job)
     elif not job.get("route"):
-        job = {**job, "route": derive_route(request.get("fields") or {}, outputs)}
+        job = {**job, "route": derive_route(fields, outputs)}
         write_job(client, request_id, job)
     launched = _launch(request_id)
     return {

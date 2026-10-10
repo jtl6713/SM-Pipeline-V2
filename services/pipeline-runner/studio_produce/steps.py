@@ -28,6 +28,7 @@ from studio_produce.queue import (
 )
 from studio_produce.stamp import directive_yes, is_native_photo, stamp_outputs
 from studio_produce.thumbnail import is_designed_cover_url, needs_grid_cover
+from vibe_cut import is_vibe_cut_notes
 
 logger = logging.getLogger("pipeline-runner.studio-produce")
 
@@ -46,7 +47,21 @@ def source_kind(route: str) -> str:
     return str(route or "").split(":", 1)[0] or "uploaded"
 
 
+def _request_notes_text(request: dict[str, Any] | None) -> str:
+    fields = (request or {}).get("fields") or request or {}
+    if not isinstance(fields, dict):
+        return ""
+    return " ".join(
+        str(fields.get(name) or "")
+        for name in ("Production_Notes", "Production_Request_Notes", "Production_Config_Notes", "Output_Notes")
+    )
+
+
 def is_finished(ctx: dict[str, Any]) -> bool:
+    # Vibe Cut must never take the finished-file passthrough shortcut, even when
+    # an older Worker stamped route=finished-video:passthrough on a single master.
+    if is_vibe_cut_notes(_request_notes_text(ctx.get("request"))):
+        return False
     route = str((ctx.get("job") or {}).get("route") or "")
     if is_finished_route(route):
         return True

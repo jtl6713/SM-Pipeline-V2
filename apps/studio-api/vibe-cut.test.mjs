@@ -174,6 +174,17 @@ test("Worker wires vibe-cut module and plan route", () => {
   assert.match(worker, /isVibeCutNotes|studioIsVibeCut/);
 });
 
+test("Worker never treats Vibe Cut as finished-video passthrough", () => {
+  const worker = fs.readFileSync(path.join(here, "worker.js"), "utf8");
+  assert.match(worker, /function studioFinishedOriginKind\(record\)/);
+  assert.match(worker, /if \(studioIsVibeCut\(record\)\) return ""/);
+  assert.match(worker, /vibeCutPassthrough/);
+  assert.match(worker, /studioClearVibeCutPassthroughOutputs/);
+  assert.match(worker, /vibeCutNeedsRemount/);
+  assert.match(worker, /Rebuilding Vibe Cut multi-clip montage/);
+  assert.match(worker, /version: "0.10.498-vibe-cut-ship"/);
+});
+
 test("Studio web exposes Vibe Cut creation path", () => {
   const webRoot = path.join(here, "../studio-web");
   const app = fs.readFileSync(path.join(webRoot, "assets/app-item4-1008.js"), "utf8");

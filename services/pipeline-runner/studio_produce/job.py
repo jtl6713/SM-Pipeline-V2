@@ -124,10 +124,20 @@ def request_notes(request_fields: dict[str, Any]) -> str:
 
 
 def finished_origin_kind(request_fields: dict[str, Any]) -> str:
-    text = request_notes(request_fields).lower()
-    if "ez-input=finished-video" in text:
+    text = request_notes(request_fields)
+    # Vibe Cut is a music montage of one long source — never finished-file passthrough.
+    try:
+        from vibe_cut import is_vibe_cut_notes
+
+        if is_vibe_cut_notes(text):
+            return ""
+    except Exception:
+        if "ez-input=vibe-cut" in text.lower():
+            return ""
+    lowered = text.lower()
+    if "ez-input=finished-video" in lowered:
         return "finished-video"
-    if "ez-input=finished-stills" in text or "ez-input=finished-carousel" in text:
+    if "ez-input=finished-stills" in lowered or "ez-input=finished-carousel" in lowered:
         return "finished-stills"
     return ""
 

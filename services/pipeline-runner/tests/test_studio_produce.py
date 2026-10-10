@@ -190,6 +190,31 @@ def test_derive_route_finished_video():
     assert finished_origin_kind({"Production_Notes": "ez-input=finished-video"}) == "finished-video"
 
 
+def test_vibe_cut_is_not_finished_passthrough():
+    notes = (
+        'origin=ez-wizard; ez-input=vibe-cut; ez-caption=ai; ez-package=video\n'
+        '[vibe-cut] {"schema_version":"vibe-cut.1","mode":"vibe_cut","style":"beat-cut",'
+        '"energy":3,"target_seconds":30,"chronology":"best-moments","beat_sync":"on"}'
+    )
+    fields = {
+        "Production_Notes": notes,
+        "Studio_Master_Assets_JSON": (
+            '[{"id":"v1","source":"upload","media_kind":"video",'
+            '"url":"https://media.chicagoshining.com/studio/master-assets/chicago.mp4"}]'
+        ),
+    }
+    assert finished_origin_kind(fields) == ""
+    route = derive_route(
+        fields,
+        [{"fields": {"Studio_Output_Type": "Reel", "Platform": "Instagram"}}],
+    )
+    assert route == "uploaded:photo_sequence"
+    assert not is_finished_route(route)
+    from studio_produce.steps import is_finished
+
+    assert is_finished({"job": {"route": "finished-video:passthrough"}, "request": {"fields": fields}}) is False
+
+
 def test_derive_route_finished_stills():
     route = derive_route(
         {

@@ -11,7 +11,7 @@ from audio.voiceover_duration import measured_voiceover_seconds
 from render.fields import field, field_str, first_linked_id
 from studio_produce.constants import NATIVE_OUTPUT_TYPES, STORY_OUTPUT_TYPES
 from studio_produce.context import expected_photo_count, master_assets, variant_manifest
-from studio_produce.job import finished_origin_kind, parse_json
+from studio_produce.job import finished_origin_kind, parse_json, request_notes
 from studio_produce.thumbnail import is_designed_cover_url
 from studio_produce.timed_script import (
     segment_duration_frames,
@@ -26,6 +26,12 @@ from studio_produce.media import (
     playable_url,
     remotion_clip_url,
     source_duration_seconds,
+)
+from vibe_cut import (
+    expand_master_to_vibe_sources,
+    is_vibe_cut_notes,
+    parse_vibe_cut_directive,
+    vibe_cut_target_seconds,
 )
 
 if TYPE_CHECKING:
@@ -404,13 +410,20 @@ def output_effective(output: dict[str, Any], request: dict[str, Any], parent: di
             probed_n = 0
         if probed_n > voiceover_duration:
             voiceover_duration = probed_n
+    notes = request_notes(request.get("fields") or request or {})
+    vibe_target = vibe_cut_target_seconds(notes, fallback=0) if is_vibe_cut_notes(notes) else 0
+    stored_duration = field(output, "Studio_Effective_Video_Duration_Seconds") or field(request, "Video_Duration_Seconds") or 0
+    # Vibe Cut directive owns length. Stale Studio_Effective_* from an earlier
+    # mis-stamp (e.g. 15s head trim) must not win over [vibe-cut] target_seconds.
+    if vibe_target > 0:
+        stored_duration = vibe_target
     return {
         "platform": field_str(output, "Platform"),
         "output_type": field_str(output, "Studio_Output_Type") or field_str(output, "Output_Type"),
         "voiceover_mode": voiceover_mode,
         "thumbnail_mode": field_str(output, "Studio_Effective_Thumbnail_Mode") or field_str(request, "Thumbnail_Mode") or "Yes",
         "background_music_mode": field_str(output, "Studio_Effective_Background_Music_Mode") or field_str(request, "Background_Music_Mode") or "Yes",
-        "video_duration_seconds": field(output, "Studio_Effective_Video_Duration_Seconds") or field(request, "Video_Duration_Seconds") or 0,
+        "video_duration_seconds": stored_duration,
         "voiceover_duration_seconds": voiceover_duration,
         "voiceover_tail_seconds": field(output, "Studio_Effective_Voiceover_Tail_Seconds") if field(output, "Studio_Effective_Voiceover_Tail_Seconds") not in (None, "") else field(request, "Voiceover_Tail_Seconds") if field(request, "Voiceover_Tail_Seconds") not in (None, "") else field(parent or {}, "Voiceover_Tail_Seconds") or 0,
         "music_start_seconds": field(output, "Studio_Effective_Music_Start_Seconds") or field(request, "Music_Start_Seconds") or field(parent or {}, "Music_Start_Seconds") or 0,
@@ -1196,12 +1209,51 @@ def source_package(
         sources = sources[:1]
     elif expected and len(sources) < expected:
         return None
+
+    notes = request_notes(request.get("fields") or request or {})
+    vibe_cut = (not story) and is_vibe_cut_notes(notes)
+    vibe_config = parse_vibe_cut_directive(notes) if vibe_cut else None
+    if vibe_cut and vibe_config:
+        effective["video_duration_seconds"] = vibe_cut_target_seconds(
+            notes,
+            fallback=float(effective.get("video_duration_seconds") or 30),
+        )
+        video_masters = [item for item in masters if asset_is_video(item)]
+        video_sources = []
+        for item in sources:
+            merged_probe = {**_master_for_source(masters, item), **item}
+            if asset_is_video(merged_probe):
+                video_sources.append(item)
+        # One long Vibe Cut master must become many trims. Without this, stamp + T1
+        # keep Selected_Clip_Count=1 and Remotion plays the first N seconds only.
+        if len(video_masters) == 1 and (len(sources) <= 1 or len(video_sources) <= 1):
+            master = video_masters[0]
+            template = sources[0] if sources else master
+            sources = expand_master_to_vibe_sources(
+                master,
+                config=vibe_config,
+                source_template=template,
+            )
+            expected = max(expected, len(sources))
+
     captions = {
         str(asset.get("id") or ""): str(asset.get("caption") or "").strip()
         for asset in masters
         if str(asset.get("caption") or "").strip()
     }
     render_settings = render_settings_from_request(request)
+    if vibe_cut and vibe_config:
+        params = vibe_config.get("params") or {}
+        render_settings = {
+            **render_settings,
+            "preset": params.get("preset") or render_settings.get("preset") or "energetic",
+            "transition": "cut",
+            "transition_seconds": "0",
+            "pacing": params.get("pacing") or render_settings.get("pacing") or "fast",
+            "beat_sync": "off" if vibe_config.get("beat_sync") == "off" else "on",
+            "ai_motion": "on",
+            "fit": render_settings.get("fit") or "smart_crop",
+        }
     render_overrides = render_overrides_from_request(request)
     timed_script = None if story else timed_script_from_request(request)
     clips = []
@@ -1506,6 +1558,7 @@ def stamp_fields(
             else ("Skipped" if not native else None)
         ),
         "Voiceover_Duration_Seconds": package.get("effective", {}).get("voiceover_duration_seconds") or None,
+        "Studio_Effective_Video_Duration_Seconds": package.get("effective", {}).get("video_duration_seconds") or None,
     }
     authoritative = bool(package.get("timed_script"))
     if authoritative:
@@ -1522,12 +1575,18 @@ def stamp_fields(
     new_overlays = _clip_overlay_texts(package.get("render_clip_list_json"))
     old_render = _clip_render_signature(field(existing_record, "Render_Clip_List_JSON"))
     new_render = _clip_render_signature(package.get("render_clip_list_json"))
+    try:
+        old_clip_count = int(field(existing_record, "Selected_Clip_Count") or 0)
+    except (TypeError, ValueError):
+        old_clip_count = 0
+    new_clip_count = int(package.get("clip_count") or 0)
+    clip_count_expanded = bool(new_clip_count and old_clip_count and new_clip_count > old_clip_count)
     recropped = bool(new_stills) and bool(old_stills) and new_stills != old_stills
     overlay_changed = bool(new_overlays) and new_overlays != old_overlays
     render_changed = bool(new_render) and new_render != old_render
     if authoritative:
         pass
-    elif recropped or render_changed:
+    elif recropped or render_changed or clip_count_expanded:
         fields["Timing_Status"] = "Pending" if _music_requested(package.get("effective") or {}) else "Skipped"
         fields["Timing_Timeline_JSON"] = None
         fields["Timing_Error_Message"] = None

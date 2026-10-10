@@ -260,7 +260,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.559-idea-production-reopen";
+  const BUILD_ID = "item4-0.6.561-vibe-cut-ship";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -7313,11 +7313,16 @@
 
     if (ezWizardStep === "vibeTarget") {
       prompt.textContent = "How long should the finished cut be?";
-      const pickTarget = (seconds, label, extra = {}) => ezWizardPick(
-        label,
-        { vibeTargetSeconds: seconds, vibeFindBest: Boolean(extra.findBest), packageId: "video" },
-        "vibeStyle",
-      );
+      const pickTarget = (seconds, label, extra = {}) => {
+        const n = Math.max(8, Math.min(90, Math.round(Number(seconds) || 30)));
+        if ($("ezVideoDuration")) $("ezVideoDuration").value = String(n);
+        if ($("prVideoDuration")) $("prVideoDuration").value = String(n);
+        return ezWizardPick(
+          label,
+          { vibeTargetSeconds: n, vibeFindBest: Boolean(extra.findBest), packageId: "video" },
+          "vibeStyle",
+        );
+      };
       renderEzWizardChips([
         { label: "15 seconds", onClick: () => pickTarget(15, "15 seconds") },
         { label: "30 seconds", onClick: () => pickTarget(30, "30 seconds") },
