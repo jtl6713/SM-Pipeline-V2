@@ -20,7 +20,7 @@ const DEFAULT_MUSIC_END_FADE_SECONDS = 0.5;
 const PIPELINE_RUNNER_INTERNAL_URL = String(
     process.env.PIPELINE_RUNNER_INTERNAL_URL || 'http://127.0.0.1:3350'
 ).replace(/\/$/, '');
-const SERVICE_VERSION = '2026-10-10-health-first-boot';
+const SERVICE_VERSION = '2026-10-10-remotion-slot-reconcile';
 const PROJECT_DIR = __dirname;
 const PUBLIC_DIR = path.join(PROJECT_DIR, 'public');
 const OUT_DIR = path.join(PROJECT_DIR, 'out');
@@ -59,10 +59,38 @@ const remotionCleanup = registerRemotionCleanup({
 let activeRemotionRenders = 0;
 const remotionRenderWaiters = [];
 
+function countInFlightRemotionJobs() {
+    let count = 0;
+    for (const job of jobs.values()) {
+        const status = String(job?.status || '').trim().toLowerCase();
+        if (status === 'preparing' || status === 'rendering') {
+            count += 1;
+        }
+    }
+    return count;
+}
+
+function reconcileRemotionSlots(reason = 'health') {
+    const inFlight = countInFlightRemotionJobs();
+    if (activeRemotionRenders === inFlight) {
+        return { corrected: false, inFlight, activeRemotionRenders };
+    }
+    console.warn(
+        `[remotion] slot counter drift (${reason}): active=${activeRemotionRenders} inFlight=${inFlight}`,
+    );
+    activeRemotionRenders = inFlight;
+    while (activeRemotionRenders < MAX_CONCURRENT_REMOTION_RENDERS && remotionRenderWaiters.length) {
+        const next = remotionRenderWaiters.shift();
+        if (next) next();
+    }
+    return { corrected: true, inFlight, activeRemotionRenders };
+}
+
 // Liveness before static middleware. Deploy-SMService polls /health; a multi-GB
 // job-assets stale sweep must never run inside the listen callback or public
 // health stays Cloudflare 502 past the deploy timeout.
 app.get('/health', (req, res) => {
+    const slotSync = reconcileRemotionSlots('health');
     res.json({
         ok: true,
         service: 'SM Pipeline V2 Remotion Render Server',
@@ -76,6 +104,8 @@ app.get('/health', (req, res) => {
         jobAssetsOutsidePublic: true,
         remotionMaxConcurrent: MAX_CONCURRENT_REMOTION_RENDERS,
         remotionActiveRenders: activeRemotionRenders,
+        remotionInFlightJobs: slotSync.inFlight,
+        remotionSlotReconciled: slotSync.corrected,
         remotionQueuedRenders: remotionRenderWaiters.length,
         cleanup: {
             enabled: true,
@@ -1315,6 +1345,7 @@ function runRemotionRender({ jobId, compositionId, filename, propsFilePath }) {
             });
         } finally {
             releaseRemotionSlot();
+            reconcileRemotionSlots('render-finally');
         }
     })();
 }

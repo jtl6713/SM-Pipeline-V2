@@ -88,10 +88,14 @@ test("Trying Again only for real Remotion failures, never queue wait", () => {
   assert.equal(isRenderQueueCandidateStatus(RENDER_STATUS_WAITING_QUEUE), true);
   assert.equal(remotionHealthLooksBusy({ remotionActiveRenders: 1, remotionMaxConcurrent: 1 }), true);
   assert.equal(remotionHealthLooksBusy({ remotionActiveRenders: 0, remotionMaxConcurrent: 1 }), false);
+  assert.equal(
+    remotionHealthLooksBusy({ remotionActiveRenders: 1, remotionInFlightJobs: 0, remotionMaxConcurrent: 1 }),
+    false,
+  );
 });
 
 test("Worker admit + mapOutput expose queue meta and Remotion job id", () => {
-  assert.match(worker, /version: "0.10.514-compress-staging-hold"/);
+  assert.match(worker, /version: "0.10.516-remotion-slot-reconcile"/);
   assert.match(worker, /studio_render_queue_wait_v1: true/);
   assert.match(worker, /async function studioAdmitRenderQueue/);
   assert.match(worker, /STUDIO_RENDER_QUEUE_CANDIDATE_FORMULA/);
@@ -115,6 +119,12 @@ test("UI shows Waiting in render queue and narrows Trying Again", () => {
 });
 
 test("R4 and studio-produce park on busy Remotion slot", () => {
+  const renderServer = fs.readFileSync(
+    path.join(here, "../../services/remotion-renderer/render-server.js"),
+    "utf8",
+  );
+  assert.match(renderServer, /function reconcileRemotionSlots/);
+  assert.match(renderServer, /remotionInFlightJobs/);
   assert.match(config, /2026-10-10-render-queue-wait/);
   assert.match(remotion, /def slot_busy\(self\)/);
   assert.match(r4, /waiting_for_remotion_slot/);

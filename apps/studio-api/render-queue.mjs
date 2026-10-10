@@ -77,7 +77,11 @@ export function assignRenderQueuePositions(records, field = (row, name) => row?.
 
 export function remotionHealthLooksBusy(health, maxConcurrent = 1) {
   if (!health || typeof health !== "object") return false;
-  const active = Number(health.remotionActiveRenders || 0);
   const max = Math.max(1, Number(health.remotionMaxConcurrent || maxConcurrent) || 1);
+  const inFlight = Number(health.remotionInFlightJobs);
+  if (Number.isFinite(inFlight)) {
+    return inFlight >= max;
+  }
+  const active = Number(health.remotionActiveRenders || 0);
   return Number.isFinite(active) && active >= max;
 }
