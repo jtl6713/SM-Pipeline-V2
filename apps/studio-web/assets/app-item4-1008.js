@@ -261,7 +261,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.573-production-preview-load";
+  const BUILD_ID = "item4-0.6.574-profile-picker-resilience";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -308,8 +308,12 @@
     return Number.isFinite(n) && n > 0 ? Math.max(4, Math.round(n * 0.5)) : 15;
   }
   const PROFILE_STORAGE_KEY = "studio.content_profile_id";
+  const PROFILE_LIST_CACHE_KEY = "studio.content_profiles_cache_v1";
+  const PROFILE_LIST_RETRY_MS = 45000;
   let selectedProfileId = "";
   let studioProfiles = [];
+  let studioProfilesLoadInFlight = null;
+  let studioProfileListRetryTimer = null;
   let profileVoicesLoaded = false;
   let profileVoicesPromise = null;
   const uiBuildMatch = /item4-(\d+\.\d+\.\d+)/.exec(BUILD_ID);
@@ -601,32 +605,116 @@
     }
   }
 
-  function renderStudioProfileSelects() {
+  function persistStudioProfilesCache(records, defaultProfileId = "") {
+    try {
+      sessionStorage.setItem(PROFILE_LIST_CACHE_KEY, JSON.stringify({
+        saved_at: Date.now(),
+        default_profile_id: String(defaultProfileId || ""),
+        records: Array.isArray(records) ? records : [],
+      }));
+    } catch {}
+  }
+
+  function hydrateStudioProfilesFromCache() {
+    try {
+      const raw = sessionStorage.getItem(PROFILE_LIST_CACHE_KEY);
+      if (!raw) return false;
+      const parsed = JSON.parse(raw);
+      const records = Array.isArray(parsed?.records) ? parsed.records : [];
+      if (!records.length) return false;
+      studioProfiles = records;
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  function scheduleStudioProfileListRetry() {
+    if (studioProfileListRetryTimer) return;
+    studioProfileListRetryTimer = setTimeout(() => {
+      studioProfileListRetryTimer = null;
+      loadStudioProfiles({ quiet: true }).catch(() => {});
+    }, PROFILE_LIST_RETRY_MS);
+  }
+
+  function renderStudioProfileSelects({ loading = false, stale = false } = {}) {
     const options = studioProfiles.map((profile) =>
       `<option value="${escapeHtml(profile.id)}">${escapeHtml(profile.name || profile.city_label || profile.id)}</option>`
     ).join("");
+    const placeholder = loading && !studioProfiles.length
+      ? '<option value="">Loading profiles…</option>'
+      : (options || '<option value="">No profiles</option>');
     ["studioProfileSelect"].forEach((id) => {
       const select = $(id);
       if (!select) return;
-      select.innerHTML = options || '<option value="">No profiles</option>';
+      select.innerHTML = placeholder;
       if (selectedProfileId) select.value = selectedProfileId;
+      select.disabled = Boolean(loading && !studioProfiles.length);
     });
     const wrap = $("studioProfileWrap");
-    if (wrap) wrap.hidden = !studioProfiles.length;
+    if (wrap) {
+      wrap.hidden = !loading && !studioProfiles.length;
+      wrap.title = stale
+        ? "Profile list may be stale — Studio will retry when Airtable is less busy."
+        : "";
+    }
   }
 
-  async function loadStudioProfiles() {
-    const data = await api("/api/profiles");
-    studioProfiles = Array.isArray(data.records) ? data.records : [];
-    let stored = "";
-    try { stored = String(localStorage.getItem(PROFILE_STORAGE_KEY) || ""); } catch {}
-    const next = studioProfiles.find((profile) => profile.id === stored)
-      || studioProfiles.find((profile) => profile.id === data.default_profile_id)
-      || studioProfiles[0]
-      || null;
-    renderStudioProfileSelects();
-    if (next) applyStudioProfile(next);
-    ensureProfileNarrationDefaults().catch(() => {});
+  async function loadStudioProfiles({ quiet = false } = {}) {
+    if (studioProfilesLoadInFlight) return studioProfilesLoadInFlight;
+    studioProfilesLoadInFlight = (async () => {
+      if (!studioProfiles.length) hydrateStudioProfilesFromCache();
+      if (!quiet) renderStudioProfileSelects({ loading: true });
+      try {
+        const data = await api("/api/profiles", { retries: 6, timeoutMs: 30000 });
+        studioProfiles = Array.isArray(data.records) ? data.records : [];
+        persistStudioProfilesCache(studioProfiles, data.default_profile_id);
+        let stored = "";
+        try { stored = String(localStorage.getItem(PROFILE_STORAGE_KEY) || ""); } catch {}
+        const next = studioProfiles.find((profile) => profile.id === stored)
+          || studioProfiles.find((profile) => profile.id === data.default_profile_id)
+          || studioProfiles[0]
+          || null;
+        renderStudioProfileSelects();
+        if (next) applyStudioProfile(next);
+        ensureProfileNarrationDefaults().catch(() => {});
+      } catch (error) {
+        const hadCache = hydrateStudioProfilesFromCache();
+        if (hadCache) {
+          renderStudioProfileSelects({ stale: true });
+          if (!selectedProfileId) {
+            let stored = "";
+            try { stored = String(localStorage.getItem(PROFILE_STORAGE_KEY) || ""); } catch {}
+            const next = studioProfiles.find((profile) => profile.id === stored) || studioProfiles[0] || null;
+            if (next) applyStudioProfile(next);
+          }
+          scheduleStudioProfileListRetry();
+          return;
+        }
+        const sessionReady = Boolean(studioSession?.authorized || studioSession?.authenticated);
+        if (sessionReady) {
+          const wrap = $("studioProfileWrap");
+          const select = $("studioProfileSelect");
+          if (wrap) {
+            wrap.hidden = false;
+            wrap.title = "Could not load profiles — Studio will retry when Airtable is less busy.";
+          }
+          if (select) {
+            select.innerHTML = '<option value="">Profiles unavailable — retrying…</option>';
+            select.disabled = true;
+          }
+          scheduleStudioProfileListRetry();
+          return;
+        }
+        renderStudioProfileSelects();
+        throw error;
+      }
+    })();
+    try {
+      await studioProfilesLoadInFlight;
+    } finally {
+      studioProfilesLoadInFlight = null;
+    }
   }
 
   window.addEventListener("studio-profile-created", async (event) => {
@@ -1836,7 +1924,7 @@
       const session = sessionResult.status === "fulfilled" ? sessionResult.value : null;
       if (!health && !session) throw (healthResult.reason || sessionResult.reason || new Error("API unavailable"));
       studioSession = session || studioSession;
-      try { await loadStudioProfiles(); } catch {}
+      try { await loadStudioProfiles({ quiet: true }); } catch {}
       const navOps = $("navOperations");
       const footerOps = $("footerOperations");
       const showOps = Boolean(session?.permissions?.tenant_admin || session?.permissions?.publishing_control || session?.permissions?.production_configure);
@@ -23867,6 +23955,14 @@ function timedScriptAssetLabel(asset, index) {
     phase6HideTooltip();
     if (!$("platformCalendarBackdrop")?.hidden) closePlatformScheduleCalendar();
   });
+
+  if (hydrateStudioProfilesFromCache()) {
+    renderStudioProfileSelects({ stale: true });
+    let bootStored = "";
+    try { bootStored = String(localStorage.getItem(PROFILE_STORAGE_KEY) || ""); } catch {}
+    const bootProfile = studioProfiles.find((item) => item.id === bootStored) || studioProfiles[0] || null;
+    if (bootProfile) applyStudioProfile(bootProfile);
+  }
 
   checkHealth().finally(() => loadDashboard());
   $("studioProfileSelect")?.addEventListener("change", (event) => {
