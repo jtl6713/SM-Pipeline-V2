@@ -7,7 +7,7 @@ const html = fs.readFileSync(new URL("./index.html", import.meta.url), "utf8");
 const css = fs.readFileSync(new URL("./assets/styles-phase7-0621.css", import.meta.url), "utf8");
 
 test("Rendering timed-script scenes can open a swap-still library dialog", () => {
-  assert.match(app, /BUILD_ID = "item4-0\.6\.550-vibe-cut-home"/);
+  assert.match(app, /BUILD_ID = "item4-0\.6\.554-pipeline-thumb-no-stories"/);
   assert.match(app, /function openTimedScriptSwapStill\(/);
   assert.match(app, /function applyTimedScriptSwapStill\(/);
   assert.match(app, /function loadSwapStillLibrary\(/);

@@ -4115,6 +4115,22 @@ body:has(#page-outputs.active) .main{
   background:#eef3f7;
   box-shadow:0 2px 5px rgba(15,23,42,.08);
 }
+.pipeline-content-thumb-link,
+.pipeline-content-thumb-button{
+  display:block;
+  padding:0;
+  margin:0;
+  border:0;
+  background:transparent;
+  cursor:pointer;
+  line-height:0;
+  border-radius:7px;
+}
+.pipeline-content-thumb-link:focus-visible,
+.pipeline-content-thumb-button:focus-visible{
+  outline:2px solid #075fd8;
+  outline-offset:2px;
+}
 .pipeline-content-thumb-placeholder{
   display:flex;
   align-items:center;
