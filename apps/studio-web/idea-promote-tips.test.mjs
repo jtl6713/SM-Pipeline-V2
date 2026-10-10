@@ -20,7 +20,7 @@ test("idea promote drawer documents duration vs voiceover precedence", () => {
   assert.ok(scriptBuild);
   assert.ok(appBuild);
   assert.equal(appBuild, scriptBuild);
-  assert.equal(uiBuild, "0.6.571");
+  assert.equal(uiBuild, "0.6.572");
   assert.match(html, /id="ideaLibraryPickerForm"/);
   assert.match(html, /class="idea-type-guide"/);
   assert.match(html, /Photo Set turns stills into Reels|Photo Set/);
@@ -70,7 +70,7 @@ test("All Profiles Ideas count opens the Ideas page", () => {
 
 test("Approved Ideas reopen linked Production Requests, not regenerate voiceovers", () => {
   const row = app.slice(app.indexOf("function ideaRowHtml("), app.indexOf("function partitionIdeaRecords"));
-  assert.match(row, /ideaHasProductionRequest\(r\) \? "Open production" : "Create timeline"/);
+  assert.match(row, /ideaTimelineRowButtonLabel\(r\)/);
   const handler = app.slice(
     app.indexOf('target.querySelectorAll("[data-idea-timeline]")'),
     app.indexOf('target.querySelectorAll("[data-idea-id]")'),

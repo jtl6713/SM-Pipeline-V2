@@ -55,6 +55,21 @@ test("finished-video hard max is 1.5 GB and direct upload stays under Worker bod
   assert.equal(finishedHardMax, 1610612736);
 });
 
+test("Drive authority keeps studio/master-assets staging until compression finishes", () => {
+  const reconcile = worker.slice(
+    worker.indexOf("if (driveId && mediaAssetId) {"),
+    worker.indexOf("if (q && item4QueueStatus(q) !== \"Ready\")"),
+  );
+  assert.match(reconcile, /keepStagingForCompress = item4AssetCompressionPending\(asset\)/);
+  assert.match(reconcile, /!keepStagingForCompress\)/);
+  const manifest = worker.slice(
+    worker.indexOf("staging_deleted: authoritative"),
+    worker.indexOf("url: authoritative ? (driveUrl || null)"),
+  );
+  assert.match(manifest, /item4AssetCompressionPending\(asset\)/);
+  assert.match(manifest, /f\(q, "Source_R2_Key"\)/);
+});
+
 test("multipart Vibe Cut upload preserves Vibe Cut request notes", () => {
   const session = worker.slice(
     worker.indexOf("async function createItem4LargeVideoUploadSession"),

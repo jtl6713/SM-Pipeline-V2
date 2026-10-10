@@ -261,7 +261,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.571-ez-portal-home";
+  const BUILD_ID = "item4-0.6.572-idea-timeline-photo-wait";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -2627,6 +2627,18 @@
       || (Array.isArray(idea?.production_request_links) && idea.production_request_links.length > 0);
   }
 
+  function productionRequestNotesHaveTimedScript(notes) {
+    return /\[timed-script\]\s*\{/i.test(String(notes || ""));
+  }
+
+  /** Photo-wait creates a shell Production Request before the VO timeline exists. */
+  function ideaTimelineRowButtonLabel(idea) {
+    if (!ideaHasProductionRequest(idea)) return "Create timeline";
+    const wait = String(idea?.photo_wait_status || "").trim();
+    if (wait === "Waiting" || wait === "Ready") return "Create timeline";
+    return "Open production";
+  }
+
   function ideaCanPromote(idea) {
     const wait = String(idea?.photo_wait_status || "").trim();
     return !ideaIsPromoted(idea) && !idea?.is_on_hold && wait !== "Waiting" && wait !== "Ready";
@@ -3520,12 +3532,15 @@
     }
 
     if (existing?.id) {
-      const hasTimeline = /\[timed-script\]\s*\{/i.test(String(existing.production_notes || ""));
+      const hasTimeline = productionRequestNotesHaveTimedScript(existing.production_notes);
+      if (!hasTimeline) {
+        // Photo-wait / configure handoff may link a draft before [timed-script] is saved.
+        await createIdeaTimedScript(idea, { button, heading });
+        return null;
+      }
       await openProductionRequestForIdea(idea, {
         productionRequest: existing,
-        successMessage: hasTimeline
-          ? "Saved timeline opened in Rendering. Review the existing scenes; nothing was regenerated."
-          : "Existing Production Request opened. Configure the timeline in Rendering; nothing was regenerated.",
+        successMessage: "Saved timeline opened in Rendering. Review the existing scenes; nothing was regenerated.",
         strict: true,
       });
       setIdeasAutonomousMessage("", "");
@@ -14386,7 +14401,7 @@ function timedScriptAssetLabel(asset, index) {
       ? `<button type="button" class="manage-button find-images-row-button" data-idea-find-images="${escapeHtml(r.id)}">Find images now</button>`
       : "";
     const timeline = !ideaIsPromoted(r) && !r.is_on_hold
-      ? `<button type="button" class="manage-button find-images-row-button" data-idea-timeline="${escapeHtml(r.id)}">${ideaHasProductionRequest(r) ? "Open production" : "Create timeline"}</button>`
+      ? `<button type="button" class="manage-button find-images-row-button" data-idea-timeline="${escapeHtml(r.id)}">${ideaTimelineRowButtonLabel(r)}</button>`
       : "";
     const title = `${value(r.title)}${listeningForPhotos ? ' <span class="subtle">(Listening for photos)</span>' : ""}`;
     return `<tr class="${r.is_on_hold ? "idea-row-held" : ""}"><td><div class="title-cell">${title}</div><div class="subtle">${value(r.summary, "")}${r.created_at ? `${r.summary ? " · " : ""}Created ${dateValue(r.created_at)}` : ""}</div></td><td>${badge(ideaStatusLabel(r))}</td><td>${value(r.content_type)}</td><td>${join(r.platforms)}</td><td>${ideaStructureLabel(r)}</td><td><div class="subtle">${escapeHtml(ideaProductionLabel(r))}</div></td><td><div class="idea-row-actions">${promote}<div class="idea-row-action-stack"><button type="button" class="manage-button" data-idea-id="${escapeHtml(r.id)}">Manage</button>${findImages}${timeline}</div></div></td></tr>`;

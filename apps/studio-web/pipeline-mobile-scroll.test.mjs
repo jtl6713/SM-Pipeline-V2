@@ -10,9 +10,9 @@ const html = fs.readFileSync(path.join(here, "index.html"), "utf8");
 const css = fs.readFileSync(path.join(here, "assets/styles-phase7-0621.css"), "utf8");
 
 test("UI 0.6.516 Pipeline overview is a bounded horizontal scrollport on phones", () => {
-  assert.match(app, /BUILD_ID = "item4-0.6.571-ez-portal-home"/);
-  assert.match(html, /UI build 0.6.571/);
-  assert.match(html, /styles-phase7-0621\.css\?v=0.6.571-ez-portal-home/);
+  assert.match(app, /BUILD_ID = "item4-0.6.572-idea-timeline-photo-wait"/);
+  assert.match(html, /UI build 0.6.572/);
+  assert.match(html, /styles-phase7-0621\.css\?v=0.6.572-idea-timeline-photo-wait/);
   assert.match(css, /PIPELINE_MOBILE_SCROLL_0_6_514/);
   assert.match(css, /body:has\(#page-outputs\.active\) \.main/);
   assert.match(css, /#page-outputs \.panel:has\(#outputsList\)/);
