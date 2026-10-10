@@ -10,7 +10,7 @@ const html = fs.readFileSync(path.join(here, "index.html"), "utf8");
 const css = fs.readFileSync(path.join(here, "assets/styles-phase7-0621.css"), "utf8");
 
 test("TikTok photo posts require sound confirmation before Studio completion", () => {
-  assert.match(app, /item4-0.6.562-vibe-cut-remount/);
+  assert.match(app, /item4-0.6.565-new-profile-setup/);
   assert.match(app, /function tiktokPhotoSoundRequired\(/);
   assert.match(app, /Add a sound in TikTok before publishing this photo carousel/);
   assert.match(app, /music\?\.focus\(\)/);
