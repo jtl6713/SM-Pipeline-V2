@@ -230,9 +230,11 @@ if ($extraEnv.Count -gt 0) {
 
 Write-Host ("Starting {0} hidden on port {1}" -f $cfg.Name, $cfg.Port)
 try {
+    # File redirects keep pipes open for the life of the child (do not use
+    # in-process stdout readers that get disposed when this script exits).
     $p = Start-Process -FilePath $filePath -WorkingDirectory $runtime -ArgumentList $argumentList -WindowStyle Hidden -RedirectStandardOutput $outLog -RedirectStandardError $errLog -PassThru
 } finally {
-    if ($extraEnv) {
+    if ($extraEnv.Count -gt 0) {
         foreach ($key in $saved.Keys) {
             [Environment]::SetEnvironmentVariable($key, $saved[$key], 'Process')
         }
@@ -242,4 +244,35 @@ if (-not $p) {
     throw "Hidden start failed for $Service"
 }
 Write-Host ("  pid={0} log={1}" -f $p.Id, $outLog)
+
+# Do not claim success until the configured port answers /health (or the process dies).
+# Ops previously showed exit 0 while Remotion crashed on inherited PORT=3361.
+$healthUrl = "http://127.0.0.1:$($cfg.Port)/health"
+$healthy = $false
+$deadline = (Get-Date).AddSeconds(20)
+while ((Get-Date) -lt $deadline) {
+    if ($p.HasExited) {
+        $tail = ''
+        if (Test-Path -LiteralPath $errLog) {
+            $tail = (Get-Content -LiteralPath $errLog -Tail 30 -ErrorAction SilentlyContinue) -join "`n"
+        }
+        throw ("{0} exited early (code {1}) before {2}. err log:`n{3}" -f $cfg.Name, $p.ExitCode, $healthUrl, $tail)
+    }
+    try {
+        $resp = Invoke-WebRequest -Uri $healthUrl -UseBasicParsing -TimeoutSec 2
+        if ($resp.StatusCode -ge 200 -and $resp.StatusCode -lt 300) {
+            $healthy = $true
+            break
+        }
+    } catch {
+        # still booting
+    }
+    Start-Sleep -Milliseconds 400
+}
+
+if (-not $healthy) {
+    throw ("{0} started (pid {1}) but {2} did not respond within 20s. Check {3}" -f $cfg.Name, $p.Id, $healthUrl, $errLog)
+}
+
+Write-Host ("  health ok {0}" -f $healthUrl)
 exit 0

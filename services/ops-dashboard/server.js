@@ -36,7 +36,7 @@ const TOKEN = String(process.env.DASHBOARD_TOKEN || '').trim();
 const PIPELINE_ROOT = process.env.PIPELINE_ROOT || 'D:\\Content Creation\\ChicagoShining Pipeline';
 const REPO_ROOT = process.env.REPO_ROOT || path.resolve(ROOT, '..', '..');
 const ACTION_PS1 = path.join(REPO_ROOT, 'deploy', 'local-services', 'Invoke-OpsDashboardAction.ps1');
-const OPS_DASHBOARD_VERSION = '2026-10-10-powershell-console';
+const OPS_DASHBOARD_VERSION = '2026-10-10-ops-start-port-clear';
 const SHELL_MAX_CHARS = 8000;
 const SHELL_TIMEOUT_MS = 5 * 60 * 1000;
 const SHELL_BLOCKED = [
@@ -331,6 +331,9 @@ function startJob(action, service) {
   const child = spawn('powershell.exe', args, {
     windowsHide: true,
     cwd: REPO_ROOT,
+    // Ops itself listens with PORT=3361. Children that start Node services
+    // (Remotion) must not inherit that or they bind the wrong port / EADDRINUSE.
+    env: { ...process.env, PORT: '' },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   job.child = child;

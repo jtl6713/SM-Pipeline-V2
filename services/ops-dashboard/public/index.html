@@ -102,7 +102,7 @@
 <body>
   <header>
     <h1>Chicago Shining Ops</h1>
-    <div class="sub">START / STOP / VERIFY / SYNC / PLAN / DEPLOY + authenticated PowerShell console on this PC. Catalog 2026-10-10-powershell-console. <a href="#" id="forgetDevice" hidden>Forget token on this device</a></div>
+    <div class="sub">START / STOP / VERIFY / SYNC / PLAN / DEPLOY + authenticated PowerShell console on this PC. Catalog 2026-10-10-ops-start-port-clear. <a href="#" id="forgetDevice" hidden>Forget token on this device</a></div>
   </header>
   <div class="wrap">
     <div id="login" class="login" hidden>
@@ -294,7 +294,8 @@
       },
       {
         label: "Start Remotion on :3333",
-        command: "$env:PORT='3333'; & powershell -NoProfile -ExecutionPolicy Bypass -File 'D:\\Content Creation\\ChicagoShining Pipeline\\Source Control\\SM-Pipeline-V2\\deploy\\local-services\\Start-ChicagoShiningHidden.ps1' -Service remotion-renderer -StopFirst; Start-Sleep 2; curl.exe -sS http://127.0.0.1:3333/health",
+        // Nested `powershell -File` opens a visible window; Start-Process -WindowStyle Hidden does not.
+        command: "$env:PORT='3333'; $p = Start-Process -FilePath powershell.exe -WindowStyle Hidden -PassThru -ArgumentList @('-NoProfile','-ExecutionPolicy','Bypass','-File','D:\\Content Creation\\ChicagoShining Pipeline\\Source Control\\SM-Pipeline-V2\\deploy\\local-services\\Start-ChicagoShiningHidden.ps1','-Service','remotion-renderer','-StopFirst'); Wait-Process -Id $p.Id; Start-Sleep 1; curl.exe -sS http://127.0.0.1:3333/health",
       },
       {
         label: "Remotion start log tail",

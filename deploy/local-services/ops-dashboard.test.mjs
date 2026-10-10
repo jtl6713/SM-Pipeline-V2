@@ -39,6 +39,15 @@ test("hidden start and deploy know ops-dashboard", () => {
   assert.match(deploy, /PublicHealthRequired = \$false/);
 });
 
+test("hidden start pins PORT and waits for local /health", () => {
+  assert.match(hidden, /ExtraEnv = @\{ PORT = '3333' \}/);
+  assert.match(hidden, /\$extraEnv\['PORT'\] = \[string\]\$cfg\.Port/);
+  assert.match(hidden, /health ok/);
+  assert.match(hidden, /exited early/);
+  assert.match(hidden, /Invoke-WebRequest -Uri \$healthUrl/);
+  assert.match(runner, /Remove-Item Env:PORT/);
+});
+
 test("dashboard server binds loopback and allowlists actions", () => {
   const server = fs.readFileSync(
     path.join(repo, "services", "ops-dashboard", "server.js"),
@@ -48,8 +57,8 @@ test("dashboard server binds loopback and allowlists actions", () => {
   assert.match(server, /DASHBOARD_TOKEN/);
   assert.match(server, /Unknown action/);
   assert.doesNotMatch(server, /eval\(/);
+  assert.match(server, /PORT: ''/);
 });
-
 
 test("Ops dashboard reports the version/build each listener is actually running", () => {
   const server = fs.readFileSync(
@@ -64,11 +73,12 @@ test("Ops dashboard reports the version/build each listener is actually running"
     assert.equal(typeof service.runtimePath, "string");
     assert.ok(service.runtimePath.length > 0);
   }
-  assert.match(server, /OPS_DASHBOARD_VERSION = '2026-10-10-powershell-console'/);
+  assert.match(server, /OPS_DASHBOARD_VERSION = '2026-10-10-ops-start-port-clear'/);
   assert.match(server, /POST.*\/api\/shell|pathname === '\/api\/shell'/);
   assert.match(server, /function startShellJob/);
   assert.match(html, /id="shellInput"/);
   assert.match(html, /Run PowerShell/);
+  assert.match(html, /Start-Process -FilePath powershell\.exe -WindowStyle Hidden/);
   assert.match(server, /\.smv2-deployment\.json/);
   assert.match(server, /function readGitHead/);
   assert.match(server, /function buildServiceVersionInfo/);
