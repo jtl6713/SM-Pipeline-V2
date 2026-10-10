@@ -368,12 +368,29 @@ def process_one(
             field_str(content_item or {}, "Content_Notes"),
         ]
     )
-    from vibe_cut import desired_clip_count, is_vibe_cut_notes, parse_vibe_cut_directive
+    from vibe_cut import (
+        desired_clip_count,
+        is_vibe_cut_notes,
+        parse_vibe_cut_directive,
+        vibe_cut_target_seconds,
+    )
 
     vibe = has_video and (
         is_vibe_cut_notes(note_text)
         or any(bool((clip or {}).get("vibe_cut")) for clip in clips)
     )
+    vibe_target = 0.0
+    if vibe:
+        vibe_target = float(
+            vibe_cut_target_seconds(note_text, fallback=0)
+            or field(output, "Studio_Effective_Video_Duration_Seconds")
+            or field(output, "Video_Duration_Seconds")
+            or 0
+        )
+        # Owner vibe target wins over a short Music_Duration left by a prior
+        # Timing Engine pass (analysis_window uses min(music, owner)).
+        if vibe_target > 0:
+            duration = max(float(duration or 0), vibe_target)
     if has_video and vibe:
         # Vibe Cut stamps many trims of one master. Usable footage is the master
         # length (or merged trim coverage), never a single-trim max that would
@@ -393,9 +410,13 @@ def process_one(
         if usable > 0 and usable + 1e-6 < duration:
             # Prefer a shorter beat-aligned edit over recycling short clips to fill
             # the requested owner duration (freezes + repeats).
-            duration = max(0.25, usable)
-            rules = {**rules, "recycle": False}
-            footage_capped = True
+            # Vibe Cut: never shrink below the owner target when the master is long enough.
+            if vibe and vibe_target > 0 and usable + 1e-6 >= vibe_target:
+                duration = max(float(duration or 0), vibe_target)
+            else:
+                duration = max(0.25, usable)
+                rules = {**rules, "recycle": False}
+                footage_capped = True
     # Vibe Cut / single long master: never ask Timing Engine for one clip spanning
     # the whole owner window — that keeps Selected_Clip_Count=1 and Remotion plays
     # only the head of the source. Stamp should already expand; this is a harden.
@@ -503,6 +524,31 @@ def process_one(
             else apply_timeline(clips, response)
         )
         total_frames = sum(int(clip.get("durationFrames") or 0) for clip in timed)
+        if vibe and vibe_target > 0:
+            required_frames = max(1, int(round(vibe_target * 30)))
+            if total_frames < required_frames - 15 and timed:
+                # Timing Engine / beat snap shrank the montage. Stretch slots back
+                # to the owner vibe target while keeping per-clip in-points.
+                from studio_produce.media import distribute_frames as _distribute_frames
+
+                weights = [max(1, int(clip.get("durationFrames") or 1)) for clip in timed]
+                allocated = _distribute_frames(weights, required_frames)
+                start_frame = 0
+                rebuilt = []
+                for clip, frames in zip(timed, allocated):
+                    item = dict(clip)
+                    in_seconds = float(item.get("inSeconds") or item.get("in_seconds") or 0)
+                    out_seconds = in_seconds + (frames / 30.0)
+                    item["durationFrames"] = frames
+                    item["startFrame"] = start_frame
+                    item["inSeconds"] = in_seconds
+                    item["in_seconds"] = in_seconds
+                    item["outSeconds"] = out_seconds
+                    item["out_seconds"] = out_seconds
+                    start_frame += frames
+                    rebuilt.append(item)
+                timed = rebuilt
+                total_frames = sum(int(clip.get("durationFrames") or 0) for clip in timed)
         fields = {
             "Timing_Status": STATUS_READY,
             "Timing_Error_Message": "",
@@ -520,7 +566,12 @@ def process_one(
         }
         audio_duration = _audio_duration_seconds(response)
         if audio_duration > 0:
-            fields["Music_Duration_Seconds"] = round(audio_duration, 3)
+            # Keep the owner vibe window on Music_Duration so the next T1 pass
+            # does not re-enter analysis_window with a short prior music stamp.
+            if vibe and vibe_target > 0 and audio_duration + 0.05 >= duration:
+                fields["Music_Duration_Seconds"] = round(duration, 3)
+            else:
+                fields["Music_Duration_Seconds"] = round(audio_duration, 3)
         if audio_duration > 0 and audio_duration + 0.05 < duration:
             message = (
                 f"Selected music is {audio_duration:.2f}s but the video requires {duration:.2f}s. "

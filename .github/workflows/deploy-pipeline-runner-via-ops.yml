@@ -168,3 +168,6 @@ jobs:
 
 # Trigger pipeline-runner deploy for Vibe Cut T1 usable-footage merge (Content 454)
 # 2026-10-10 service_version=2026-10-10-vibe-cut-usable-footage
+
+# Trigger pipeline-runner deploy for Vibe Cut owner-duration lock (Content 454)
+# 2026-10-10 service_version=2026-10-10-vibe-cut-owner-duration
