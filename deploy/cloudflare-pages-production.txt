@@ -212,3 +212,5 @@ Deploy Studio UI 0.6.534-pages-path-bust. Rename app-item4-0625.js -> app-item4-
 2026-10-11 remove literal backslash-n characters from Studio HTML
 2026-10-11: fix escaped newline and synchronize Studio footer and asset pins (UI 0.6.602).
 2026-10-11: deploy complete 0.6.602 cache-busting asset pin synchronization.
+
+2026-10-11: Align Review Open rendered file with authenticated preview stream (UI 0.6.603-render-server-preview).

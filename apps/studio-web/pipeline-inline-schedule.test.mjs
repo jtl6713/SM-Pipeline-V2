@@ -9,7 +9,7 @@ const app = fs.readFileSync(path.join(here, "assets/app-item4-1008.js"), "utf8")
 const css = fs.readFileSync(path.join(here, "assets/styles-phase7-0621.css"), "utf8");
 
 test("Pipeline typed schedule autosaves without requiring Save", () => {
-  assert.match(app, /item4-0.6.600-home-overview-budget/);
+  assert.match(app, /item4-0.6.603-render-server-preview/);
   assert.match(app, /input\.addEventListener\("change", \(\) => \{\s*markDirty\(\);\s*saveTypedValue\(\);/);
   assert.match(app, /input\.addEventListener\("blur", saveTypedValue\)/);
   assert.match(app, /if \(event\.key !== "Enter"\) return;[\s\S]*saveTypedValue\(\)/);

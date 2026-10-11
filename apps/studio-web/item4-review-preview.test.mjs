@@ -33,6 +33,18 @@ test("Open rendered file uses the Studio preview endpoint, not Drive", () => {
   assert.equal(item4ReviewWatchUrl(DRIVE_MP4), `/api/outputs/${DRIVE_MP4.id}/preview`);
 });
 
+test("render-server Final_File_URL still routes Open rendered file through preview", () => {
+  const renderOnly = {
+    id: "recRenderOut2487",
+    final_file_id: "",
+    final_file_url: "https://render.chicagoshining.com/out/platform-output-2487.mp4",
+    studio_preview_url: "",
+  };
+  assert.equal(item4OutputHasVideoFinal(renderOnly), true);
+  assert.equal(item4ReviewWatchUrl(renderOnly), `/api/outputs/${renderOnly.id}/preview`);
+  assert.equal(item4PreviewKind(renderOnly), "video");
+});
+
 test("preview player uses native video, not a Drive embed", () => {
   assert.equal(item4PreviewPlayerFallback(DRIVE_MP4), "native");
   assert.equal(item4PreviewPlayerFallback({ thumbnail_url: COVER }), "cover");

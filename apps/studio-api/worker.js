@@ -93,6 +93,7 @@ import {
   shouldUseMultipart,
   youtubePublishAssetKey,
 } from "./youtube-public-mp4.mjs";
+import { item4UrlIsRenderServerVideo } from "./output-preview-source.mjs";
 import {
   YOUTUBE_MANUAL_LIVE_VIDEO_HEAL_FORMULA,
   YOUTUBE_STALE_QUOTA_POLL_HEAL_FORMULA,
@@ -622,8 +623,9 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.531-home-overview-budget",
+          version: "0.10.532-render-server-preview",
           studio_post_publish_release_v1: true,
+          studio_render_server_preview_v1: true,
           studio_render_queue_wait_v1: true,
           studio_shared_render_queue_v1: true,
           studio_approve_all_batch_v1: true,
@@ -28237,7 +28239,7 @@ async function fetchStudioPreviewVideo(previewUrl, request) {
   return response;
 }
 
-function copyStudioPreviewHeaders(upstream) {
+function copyStudioPreviewHeaders(upstream, source = "cloudflare-r2-studio-preview") {
   const headers = new Headers();
   for (const name of ["Content-Type", "Content-Length", "Content-Range", "ETag", "Last-Modified"]) {
     const value = upstream.headers.get(name);
@@ -28247,7 +28249,7 @@ function copyStudioPreviewHeaders(upstream) {
   headers.set("Accept-Ranges", upstream.headers.get("Accept-Ranges") || "bytes");
   headers.set("Cache-Control", "private, max-age=60");
   headers.set("X-Content-Type-Options", "nosniff");
-  headers.set("X-Studio-Preview-Source", "cloudflare-r2-studio-preview");
+  headers.set("X-Studio-Preview-Source", source);
   headers.delete("Content-Disposition");
   return headers;
 }
@@ -28262,18 +28264,26 @@ async function outputPreview(request, env, url, authorization) {
     f(record, "Final_File_URL"),
     f(record, "Studio_Preview_URL"),
     f(record, "Render_Server_URL"),
-  ].map((value) => String(value || "").trim()).find((href) => item4UrlIsPublicPlayableVideo(href) || item4UrlIsPublicPublishCdn(href) && !/\.(jpe?g|png|webp|gif)(\?|#|$)/i.test(href))
-    || "";
+  ].map((value) => String(value || "").trim()).find((href) => (
+    item4UrlIsPublicPlayableVideo(href)
+    || (item4UrlIsPublicPublishCdn(href) && !/\.(jpe?g|png|webp|gif)(\?|#|$)/i.test(href))
+    || item4UrlIsRenderServerVideo(href)
+  )) || "";
 
   // Preferred Phase 6 path: R5 writes a browser-playable MP4 copy to the existing
-  // ChicagoShining R2 media host. The Studio API remains the authenticated URL the
-  // browser sees; Range requests are preserved so the native <video> player can seek.
+  // ChicagoShining R2 media host. When that copy is absent, stream the Remotion
+  // render-server /out/*.mp4 (same host R4 stamped on Render_Server_URL). The Studio
+  // API remains the authenticated URL the browser sees; Range requests are preserved
+  // so the native <video> player can seek.
   if (studioPreviewUrl) {
+    const previewSource = item4UrlIsRenderServerVideo(studioPreviewUrl)
+      ? "render-server-out"
+      : "cloudflare-r2-studio-preview";
     try {
       if (request.method === "HEAD") {
         const probeRequest = new Request(request.url, { method: "GET", headers: { Range: "bytes=0-0" } });
         const upstream = await fetchStudioPreviewVideo(studioPreviewUrl, probeRequest);
-        const headers = copyStudioPreviewHeaders(upstream);
+        const headers = copyStudioPreviewHeaders(upstream, previewSource);
         const contentRange = upstream.headers.get("Content-Range") || "";
         const totalMatch = contentRange.match(/\/(\d+)$/);
         if (totalMatch?.[1]) headers.set("Content-Length", totalMatch[1]);
@@ -28283,11 +28293,11 @@ async function outputPreview(request, env, url, authorization) {
       }
 
       const upstream = await fetchStudioPreviewVideo(studioPreviewUrl, request);
-      const headers = copyStudioPreviewHeaders(upstream);
+      const headers = copyStudioPreviewHeaders(upstream, previewSource);
       const status = upstream.status === 206 ? 206 : 200;
       return new Response(upstream.body, { status, headers });
     } catch (error) {
-      console.warn("Studio R2 preview unavailable; trying legacy MP4 source", error);
+      console.warn("Studio public preview unavailable; trying legacy MP4 source", error);
     }
   }
 
