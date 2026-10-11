@@ -25,16 +25,16 @@ const DRIVE_MP4 = {
 test("a Drive final is a video even when Studio_Preview_URL is blank", () => {
   assert.equal(item4OutputHasVideoFinal(DRIVE_MP4), true);
   assert.equal(item4PreviewKind(DRIVE_MP4, { stillUrl: COVER }), "video");
-  assert.equal(item4MappedStudioPreviewUrl(DRIVE_MP4, COVER), null);
+  assert.equal(item4MappedStudioPreviewUrl(DRIVE_MP4, COVER), `/api/outputs/${DRIVE_MP4.id}/preview`);
 });
 
 test("Open rendered file uses the Drive MP4, not the cover PNG", () => {
-  assert.equal(item4ReviewWatchUrl({ ...DRIVE_MP4, studio_preview_url: COVER }), DRIVE_MP4.final_file_url);
+  assert.equal(item4ReviewWatchUrl({ ...DRIVE_MP4, studio_preview_url: COVER }), `/api/outputs/${DRIVE_MP4.id}/preview`);
   assert.equal(item4ReviewWatchUrl(DRIVE_MP4), DRIVE_MP4.final_file_url);
 });
 
 test("preview player falls back to Drive embed, not the cover still", () => {
-  assert.equal(item4PreviewPlayerFallback(DRIVE_MP4), "drive");
+  assert.equal(item4PreviewPlayerFallback(DRIVE_MP4), "native");
   assert.equal(item4PreviewPlayerFallback({ thumbnail_url: COVER }), "cover");
 });
 
@@ -44,8 +44,8 @@ test("R2 story MP4 stays the preview and watch URL", () => {
     studio_preview_url: "https://media.chicagoshining.com/studio/previews/recLwLnWlkL3SNoP9/current.mp4",
     final_file_id: "1wgJUK15WQrhlm6vX06fQS2n9WJNyZtaP",
   };
-  assert.equal(item4MappedStudioPreviewUrl(story, COVER), story.studio_preview_url);
-  assert.equal(item4ReviewWatchUrl(story), story.studio_preview_url);
+  assert.equal(item4MappedStudioPreviewUrl(story, COVER), `/api/outputs/${story.id}/preview`);
+  assert.equal(item4ReviewWatchUrl(story), `/api/outputs/${story.id}/preview`);
   assert.equal(item4PreviewKind(story, { stillUrl: COVER }), "video");
 });
 
