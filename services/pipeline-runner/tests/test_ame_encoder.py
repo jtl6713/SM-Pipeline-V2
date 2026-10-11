@@ -240,3 +240,54 @@ def test_ame_default_output_folder_is_accepted(tmp_path: Path):
     )
     assert len(content) == 40000
     assert list(output.iterdir()) == []
+
+
+def test_download_is_staged_outside_the_watch_folder(tmp_path: Path):
+    root = _root(tmp_path)
+    inbox = root / "inbox" / "social-standard-9x16"
+    seen: dict[str, Path] = {}
+
+    def fetch(_key, dest: Path):
+        seen["dest"] = dest
+        dest.write_bytes(b"source-master")
+
+    def sleep(_seconds: float):
+        source = next(inbox.glob("*.mov"))
+        (root / "out" / "social-standard-9x16" / f"{source.stem}.mp4").write_bytes(b"x" * 40000)
+        source.unlink()
+
+    encode_downloaded_master(
+        root=root,
+        asset=_asset(),
+        fetch=fetch,
+        sleep=sleep,
+        monotonic=lambda: 0,
+        now=lambda: 100,
+    )
+    assert "inbox" not in seen["dest"].parts
+    assert seen["dest"].parent.name == "staging"
+    assert not seen["dest"].exists()
+
+
+def test_reuses_an_encode_media_encoder_already_finished(tmp_path: Path):
+    root = _root(tmp_path)
+    out = root / "out" / "social-standard-9x16"
+    parked = root / "inbox" / "social-standard-9x16" / "Source" / "2026-10-11_00-42-47"
+    parked.mkdir(parents=True)
+    (out / "vid1-55.mp4").write_bytes(b"x" * 40000)
+    (parked / "vid1-55.mp4").write_bytes(b"source-master")
+
+    def fetch(_key, _dest):
+        raise AssertionError("the finished encode should be reused")
+
+    content = encode_downloaded_master(
+        root=root,
+        asset=_asset(name="clip.mp4"),
+        fetch=fetch,
+        sleep=lambda _seconds: None,
+        monotonic=lambda: 0,
+        now=lambda: 100,
+    )
+    assert content == b"x" * 40000
+    assert not (out / "vid1-55.mp4").exists()
+    assert not parked.exists()

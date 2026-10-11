@@ -144,15 +144,15 @@ def encode_downloaded_master(
     preset = preset_for_asset(asset)
     inbox = root / "inbox" / preset
     inbox.mkdir(parents=True, exist_ok=True)
+    asset_id = _asset_id(asset)
+    _unlink_inbox_partials(inbox, asset_id)
+    ready = _take_stable_output(root, preset, asset_id, min_output_bytes, sleep, poll_seconds)
+    if ready is not None:
+        _progress(on_progress, 100)
+        return ready
     source = inbox / _source_filename(asset, now())
-    partial = source.with_name(source.name + ".partial")
     _progress(on_progress, 8)
-    try:
-        fetch(r2_key, partial)
-        os_replace(partial, source)
-    finally:
-        if partial.exists():
-            partial.unlink(missing_ok=True)
+    _stage_outside_watch_folder(root, source, fetch, r2_key)
     if not source.is_file() or source.stat().st_size <= 0:
         raise RuntimeError("Studio master was not written to the Media Encoder inbox")
     logger.info(
@@ -203,6 +203,117 @@ def os_replace(src: Path, dest: Path) -> None:
     os.replace(src, dest)
 
 
+def _asset_id(asset: dict[str, Any]) -> str:
+    return re.sub(r"[^A-Za-z0-9_-]", "", str(asset.get("id") or "video"))[:48] or "video"
+
+
+def _stage_outside_watch_folder(root: Path, source: Path, fetch: FetchFn, r2_key: str) -> None:
+    """Write the download outside the watch folder.
+
+    Media Encoder locks a file as soon as it appears in the inbox, including a
+    ``.partial`` that is still being written. The rename then fails with
+    WinError 32 and the compression job stops.
+    """
+    staging = root / "staging"
+    staging.mkdir(parents=True, exist_ok=True)
+    partial = staging / f"{source.name}.partial"
+    try:
+        fetch(r2_key, partial)
+        last_error: PermissionError | None = None
+        for _attempt in range(8):
+            try:
+                os_replace(partial, source)
+                return
+            except PermissionError as exc:
+                last_error = exc
+                time.sleep(0.25)
+        if last_error is not None:
+            raise last_error
+    finally:
+        try:
+            if partial.exists():
+                partial.unlink()
+        except OSError:
+            logger.warning("could not remove staging file %s", partial)
+
+
+def _unlink_inbox_partials(inbox: Path, asset_id: str) -> None:
+    if not inbox.is_dir():
+        return
+    for path in inbox.glob(f"{asset_id}-*.partial"):
+        if not path.is_file():
+            continue
+        try:
+            path.unlink()
+        except OSError:
+            logger.warning("could not remove locked inbox partial %s", path)
+
+
+def _output_belongs_to_asset(stem: str, asset_id: str) -> bool:
+    prefix = f"{asset_id}-"
+    if not stem.startswith(prefix):
+        return False
+    rest = stem[len(prefix):]
+    base = rest.split("_", 1)[0]
+    return base.isdigit()
+
+
+def _newest_asset_output(root: Path, preset: str, asset_id: str, min_output_bytes: int) -> Path | None:
+    folders = (root / "out" / preset, root / "inbox" / preset / "Output")
+    matches: list[Path] = []
+    for folder in folders:
+        if not folder.is_dir():
+            continue
+        for path in folder.iterdir():
+            if not path.is_file() or path.is_symlink() or path.name.startswith("."):
+                continue
+            if path.suffix.lower() not in OUTPUT_EXTENSIONS:
+                continue
+            if path.stat().st_size < min_output_bytes:
+                continue
+            if _output_belongs_to_asset(path.stem, asset_id):
+                matches.append(path)
+    if not matches:
+        return None
+    return max(matches, key=lambda path: path.stat().st_mtime)
+
+
+def _inbox_has_stem(inbox: Path, stem: str) -> bool:
+    if not inbox.is_dir():
+        return False
+    for path in inbox.iterdir():
+        if path.is_file() and not path.name.endswith(".partial") and _stem_matches(path.stem, stem):
+            return True
+    return False
+
+
+def _take_stable_output(
+    root: Path,
+    preset: str,
+    asset_id: str,
+    min_output_bytes: int,
+    sleep: SleepFn,
+    poll_seconds: float,
+) -> bytes | None:
+    """Reuse an encode Media Encoder already finished after a locked partial."""
+    output = _newest_asset_output(root, preset, asset_id, min_output_bytes)
+    if output is None or _inbox_has_stem(root / "inbox" / preset, output.stem):
+        return None
+    snapshot = output.stat()
+    sleep(min(poll_seconds, 2))
+    if not output.is_file():
+        return None
+    current = output.stat()
+    if current.st_size != snapshot.st_size or current.st_mtime != snapshot.st_mtime:
+        return None
+    if current.st_size < min_output_bytes:
+        return None
+    content = output.read_bytes()
+    _remove_parked_copies(root, preset, output.name)
+    output.unlink(missing_ok=True)
+    return content
+
+
 def _progress(on_progress: ProgressFn | None, value: int) -> None:
     if on_progress is None:
         return
@@ -224,8 +335,7 @@ def _source_filename(asset: dict[str, Any], stamp: float) -> str:
     suffix = Path(str(asset.get("name") or "video.mp4")).suffix.lower()
     if suffix not in SOURCE_EXTENSIONS:
         suffix = ".mp4"
-    safe_id = re.sub(r"[^A-Za-z0-9_-]", "", str(asset.get("id") or "video"))[:48] or "video"
-    return f"{safe_id}-{int(stamp)}{suffix}"
+    return f"{_asset_id(asset)}-{int(stamp)}{suffix}"
 
 
 def _stem_matches(candidate: str, stem: str) -> bool:
