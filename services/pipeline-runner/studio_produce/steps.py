@@ -1186,6 +1186,17 @@ def step_render(client: AirtableClient, ctx: dict[str, Any]) -> str:
                 continue
             raise
     ctx["outputs"] = [client.get_record(PLATFORM_OUTPUTS_TABLE, row["id"]) for row in ctx["outputs"]]
+    # Rebuild after T1/R5 mutations so a Pending YouTube Short that was solo at
+    # plan time can still inherit the Instagram Final_File_URL.
+    shared_plan = build_shared_render_plan(ctx["outputs"])
+    for output in ctx["outputs"]:
+        meta = shared_plan.get(output["id"]) or {}
+        if meta.get("role") != "sibling" or _output_ready(output):
+            continue
+        canonical = next((row for row in ctx["outputs"] if row.get("id") == meta.get("canonical_id")), None)
+        if canonical and _output_ready(canonical):
+            propagate_render_result(client, canonical, [output["id"]])
+    ctx["outputs"] = [client.get_record(PLATFORM_OUTPUTS_TABLE, row["id"]) for row in ctx["outputs"]]
     if all(_output_file_ready(row) for row in ctx["outputs"]):
         if any(_output_missing_review_cover(row) for row in ctx["outputs"]) and ctx.get("parent"):
             from studio_produce.thumbnail import ensure_platform_thumbnails

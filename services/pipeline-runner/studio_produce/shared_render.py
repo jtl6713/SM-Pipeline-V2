@@ -80,19 +80,13 @@ def render_equivalence_key(output: dict[str, Any]) -> str | None:
     clip_key = _normalized_clip_key(field_str(output, "Render_Clip_List_JSON"))
     if not clip_key:
         return None
-    timeline = field(output, "Timing_Timeline_JSON")
-    timeline_frames = ""
-    if timeline:
-        try:
-            parsed = json.loads(str(timeline))
-            if isinstance(parsed, dict) and parsed.get("duration_frames"):
-                timeline_frames = str(parsed.get("duration_frames"))
-        except json.JSONDecodeError:
-            timeline_frames = ""
+    # Do not key on Timing_Status, Timing_Timeline_JSON, or Render_Total_Frames.
+    # T1 often marks Instagram Ready + writes the timeline while YouTube/TikTok
+    # still sit at Pending with the pre-T1 frame total (Content 484 / Output 2448).
+    # Those rows are the same 9:16 short and must share one Remotion render.
     parts = [
         clip_key,
         field_str(output, "Composition_ID"),
-        timeline_frames or str(field(output, "Render_Total_Frames") or ""),
         field_str(output, "Music_URL"),
         field_str(output, "Voiceover_URL"),
         str(field(output, "Music_Volume") or ""),
@@ -101,8 +95,6 @@ def render_equivalence_key(output: dict[str, Any]) -> str | None:
         str(field(output, "Voiceover_Volume") or ""),
         str(field(output, "Music_Ducking_Enabled") or ""),
         str(field(output, "Music_Duck_Fade_Frames") or ""),
-        field_str(output, "Timing_Status"),
-        _normalized_clip_key(field_str(output, "Timing_Timeline_JSON")),
         field_str(output, "Creative_Render_Manifest_JSON"),
         str(field(output, "Video_Duration_Seconds_Override") or ""),
     ]

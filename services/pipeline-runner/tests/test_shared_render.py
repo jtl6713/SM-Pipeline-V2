@@ -98,6 +98,43 @@ def test_stale_duration_frames_still_share_one_render():
     assert plan["recYT"]["role"] == "sibling"
 
 
+def test_pending_timing_sibling_still_shares_one_render():
+    """Content 484: IG Ready+timeline while YouTube still Pending/900 must share."""
+    clip = '[{"url":"https://media.chicagoshining.com/a.jpg","durationFrames":17,"overlay":{"text":"Hi"}}]'
+    common = {
+        "Aspect_Ratio": "9:16",
+        "Composition_ID": "ChicagoShiningPhotoSequence",
+        "Music_URL": "https://drive.google.com/uc?export=download&id=music",
+        "Music_Volume": 0.6,
+        "Creative_Render_Manifest_JSON": '{"v":1}',
+    }
+    ig = _output(
+        id="recIG",
+        Platform="Instagram",
+        Studio_Output_Type="Reel",
+        Output_ID="2443",
+        Timing_Status="Ready",
+        Timing_Timeline_JSON='{"duration_frames":810,"duration_seconds":27}',
+        Render_Total_Frames=810,
+        Render_Clip_List_JSON=clip,
+        **common,
+    )
+    yt = _output(
+        id="recYT",
+        Platform="YouTube",
+        Studio_Output_Type="Short",
+        Output_ID="2448",
+        Timing_Status="Pending",
+        Render_Total_Frames=900,
+        Render_Clip_List_JSON=clip,
+        **common,
+    )
+    assert render_equivalence_key(ig) == render_equivalence_key(yt)
+    plan = build_shared_render_plan([ig, yt])
+    assert plan["recIG"]["role"] == "canonical"
+    assert plan["recYT"]["role"] == "sibling"
+
+
 def test_different_music_volume_splits_groups():
     clip = '[{"url":"https://media.chicagoshining.com/a.jpg","durationFrames":90}]'
     base = {

@@ -180,3 +180,6 @@ jobs:
 
 # Trigger pipeline-runner deploy for Remotion render-queue wait (Waiting in Render Queue)
 # 2026-10-10 service_version=2026-10-10-render-queue-wait
+
+# Trigger pipeline-runner deploy for shared-render Pending timing orphan (Content 484 / Output 2448)
+# 2026-10-11 service_version=2026-10-11-shared-render-pending
