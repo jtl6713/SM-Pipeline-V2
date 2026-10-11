@@ -28,7 +28,7 @@ function output(fields, id = "recOUT1") {
 }
 
 test("health and cron advertise post-publish release", () => {
-  assert.match(worker, /version: "0\.10\.523-ai-api-soft"/);
+  assert.match(worker, /version: "0\.10\.524-airtable-burn-kill"/);
   assert.match(worker, /studio_post_publish_release_v1: true/);
   assert.match(worker, /studioSweepPostPublishMediaRelease/);
   assert.match(worker, /releasePublishedOutputMedia/);
@@ -40,9 +40,16 @@ test("low-urgency IG and native-photo heals are heavy-gated", () => {
     worker.indexOf("async scheduled(event, env, ctx)"),
     worker.indexOf("class HttpError")
   );
-  assert.match(scheduled, /if \(cadence\.heavy\) \{[\s\S]*studioHealIgCarouselTooManyChildren/);
-  assert.match(scheduled, /if \(cadence\.heavy\) \{[\s\S]*studioHealNativePhotoReviewStrands/);
-  assert.match(scheduled, /if \(cadence\.heavy\) \{[\s\S]*studioSweepPostPublishMediaRelease/);
+  const heavyGate = scheduled.indexOf("if (!cadence.heavy) return;");
+  assert.ok(heavyGate > 0, "burn-kill light early-return missing");
+  const afterHeavy = scheduled.slice(heavyGate);
+  assert.match(afterHeavy, /studioHealIgCarouselTooManyChildren/);
+  assert.match(afterHeavy, /studioHealNativePhotoReviewStrands/);
+  assert.match(afterHeavy, /studioSweepPostPublishMediaRelease/);
+  const beforeHeavy = scheduled.slice(0, heavyGate);
+  assert.doesNotMatch(beforeHeavy, /studioHealIgCarouselTooManyChildren/);
+  assert.doesNotMatch(beforeHeavy, /studioHealNativePhotoReviewStrands/);
+  assert.doesNotMatch(beforeHeavy, /studioSweepPostPublishMediaRelease/);
 });
 
 test("cleanup keys include staged covers and skip branding", () => {

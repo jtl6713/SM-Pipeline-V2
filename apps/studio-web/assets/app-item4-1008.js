@@ -192,6 +192,9 @@
   const ITEM4_PREVIEW_RETRY_MS = 1200;
   const API_TRANSIENT_RETRY_MAX = 3;
   const API_TRANSIENT_RETRY_MS = 1500;
+  // Airtable 429 cooldown is ~30s. 1.5s retries only pile more Worker cancels
+  // onto the same isolate while cron is still burning quota.
+  const API_AIRTABLE_COOLDOWN_RETRY_MS = 12000;
   const ITEM4_POLL_EXTRA_WINDOWS = 2;
   const ITEM4_POLL_EXTRA_MS = 15000;
   // When the browser poll window expires mid-prepare, automatically re-POST
@@ -261,7 +264,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.588-ai-api-soft";
+  const BUILD_ID = "item4-0.6.589-airtable-burn-kill";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -1374,6 +1377,19 @@
     return controller.signal;
   }
 
+  function isAirtableCooldownFailure({ status = 0, text = "", error = null } = {}) {
+    const code = Number(status || error?.status || 0);
+    const message = String(error?.message || text || "");
+    return code === 429 || /cooling down|rate.?limit|too many requests/i.test(message);
+  }
+
+  function apiRetryDelayMs({ status = 0, text = "", error = null, attempt = 1 } = {}) {
+    if (isAirtableCooldownFailure({ status, text, error })) {
+      return Math.min(45000, API_AIRTABLE_COOLDOWN_RETRY_MS * Math.max(1, Number(attempt) || 1));
+    }
+    return API_TRANSIENT_RETRY_MS;
+  }
+
   function isTransientApiFailure({ status = 0, text = "", error = null, method = "GET" } = {}) {
     const write = !["GET", "HEAD"].includes(String(method || "GET").toUpperCase());
     if (error) {
@@ -1439,7 +1455,7 @@
           failure.transient = isTransientApiFailure({ status: response.status, text, method });
           if (failure.transient && attempt < maxAttempts) {
             lastError = failure;
-            await sleepMs(API_TRANSIENT_RETRY_MS);
+            await sleepMs(apiRetryDelayMs({ status: response.status, text, error: failure, attempt }));
             continue;
           }
           throw failure;
@@ -1452,7 +1468,7 @@
         }
         lastError = error;
         if (!error?.transient || attempt >= maxAttempts) throw error;
-        await sleepMs(API_TRANSIENT_RETRY_MS);
+        await sleepMs(apiRetryDelayMs({ status: error?.status, error, attempt }));
       }
     }
     throw lastError || new Error("Request failed");
