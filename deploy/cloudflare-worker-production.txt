@@ -131,3 +131,5 @@ Deploy Worker 0.10.489-engagement-ledger. Shrink the engagement ledger so Chicag
 2026-10-11: Deploy Studio native MP4 preview with retry for all profiles; commit ebaa0069.
 
 2026-10-11: Fix legacy rendered MP4 streaming to use existing Google access token for authenticated Drive media fetch.
+
+2026-10-11: Enable output 2487 and other legacy outputs to preview via Render_Server_URL when R2 preview is missing.
