@@ -68,7 +68,7 @@ test("Pipeline thumb helpers prefer TikTok Video / YouTube Short over Stories", 
 });
 
 test("Pipeline UI wires thumb links away from Stories", () => {
-  assert.match(app, /BUILD_ID = "item4-0.6.590-airtable-queue-hang"/);
+  assert.match(app, /BUILD_ID = "item4-0.6.591-pipeline-review-filter"/);
   assert.match(app, /pipelinePreferredMainOutput/);
   assert.match(app, /pipeline-content-thumb-link/);
   assert.match(app, /data-pipeline-thumb-open/);

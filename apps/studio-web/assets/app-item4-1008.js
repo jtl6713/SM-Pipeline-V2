@@ -264,7 +264,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.590-airtable-queue-hang";
+  const BUILD_ID = "item4-0.6.591-pipeline-review-filter";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -18891,7 +18891,14 @@ function timedScriptAssetLabel(asset, index) {
     if (filter === "attention") return ["Failed", "Retry Pending", "Manual Action Required"].includes(state);
     if (filter === "manual") return state === "Manual Action Required";
     if (filter === "failed") return state === "Failed" || /failed|error/i.test(render) || /failed|error/i.test(publish);
-    if (filter === "approval") return creativeCanApproveForPublishing(record) && !pipelineRecordIsAzAutoQueue(record);
+    // Match All-Profiles / dashboard awaiting_approval (studio_state), not the
+    // stricter Approve-button gate. mode=review used to fetch Pending Review and
+    // leave Review empty while home still showed needs-approval counts.
+    if (filter === "approval") {
+      const approvalState = studio === "Ready for Review" || studio === "Awaiting Approval"
+        || state === "Ready for Review" || state === "Awaiting Approval";
+      return approvalState && !pipelineRecordIsAzAutoQueue(record);
+    }
     if (filter === "rendering") return pipelineOutputRenderInFlight(record) || /rendering|processing|queued/i.test(render);
     if (filter === "scheduled") return pipelineRecordIsScheduled(record) || /scheduled/i.test(publish);
     if (filter === "approved") {
@@ -20557,7 +20564,10 @@ function timedScriptAssetLabel(asset, index) {
       const scheduleGeneration = pipelineScheduleGridLoadGeneration;
       const schedulePath = pipelineScheduleGridApiPath();
       const [outputsSettled, contentSettled, scheduleSettled] = await Promise.all([
-        api(pipelineViewFilter === "approval" ? "/api/outputs?mode=review&limit=80" : "/api/outputs?limit=250", { timeoutMs: 20000, retries: 2 }).then(
+        // Always load the full Pipeline page. A lean mode=review fetch left
+        // All/Active/Rendering counts at 0 (counts are from loaded rows only)
+        // and missed Ready-for-Review rows the home "needs approval" link uses.
+        api("/api/outputs?limit=250", { timeoutMs: 20000, retries: 2 }).then(
           (value) => ({ ok: true, value }),
           (error) => ({ ok: false, error }),
         ),
@@ -23765,9 +23775,29 @@ function timedScriptAssetLabel(asset, index) {
     button.addEventListener("click", () => {
       pipelineViewFilter = String(button.dataset.pipelineQuickView || "all");
       pipelineOpenSingleOnLoad = false;
+      // Full list is already in memory — re-filter locally so tab counts stay
+      // honest and switching Review→All does not blank the other counts.
+      if (pipelineOutputs.length) {
+        updatePipelineQuickTabs(pipelineOutputs);
+        const target = $("outputsList");
+        if (target) renderOutputsTable(target, pipelineOutputs);
+        return;
+      }
       refreshPipelineOutputs({ force: true });
     });
   });
+  window.studioOpenPipelineFilter = (filter, options = {}) => {
+    const profileId = String(options.profileId || "").trim();
+    if (profileId && selectedProfileId !== profileId) {
+      const select = $("studioProfileSelect");
+      if (select) {
+        select.value = profileId;
+        select.dispatchEvent(new Event("change", { bubbles: true }));
+      }
+    }
+    clearPipelineColumnFilters();
+    showStudioPage("outputs", { pipelineFilter: String(filter || "approval").trim() || "approval" });
+  };
   $("pipelineQuickSearch")?.addEventListener("input", (event) => {
     pipelineColumnFilters.output = String(event.currentTarget.value || "");
     pipelineOpenSingleOnLoad = false;

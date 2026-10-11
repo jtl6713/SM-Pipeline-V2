@@ -149,3 +149,5 @@ Deploy Worker 0.10.489-engagement-ledger. Shrink the engagement ledger so Chicag
 2026-10-11: Airtable burn-kill — light cron publish/produce only + skip while cooling + UI 429 backoff (UI 0.6.589 / Worker 0.10.524).
 
 2026-10-11: Fix Airtable shared Promise queue hang (UI 0.6.590 / Worker 0.10.525).
+
+2026-10-11: Fix Pipeline Review default empty feed + needs-approval deep link (UI 0.6.591 / Worker 0.10.526).
