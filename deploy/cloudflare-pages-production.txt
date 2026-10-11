@@ -168,3 +168,5 @@ Deploy Studio UI 0.6.534-pages-path-bust. Rename app-item4-0625.js -> app-item4-
 2026-10-11: Deploy Studio UI 0.6.578-pipeline-publish-immediate. Pipeline shows Publish Now on approved rows that are not published yet, including future schedules, and the Actions column is wide enough to show it.
 
 2026-10-11: Deploy Pages UI 0.6.579-shared-render-queue. Show Waiting for shared render on non-canonical 9:16 shorts.
+
+2026-10-11: Deploy Studio native MP4 preview with retry for all profiles; commit ebaa0069.
