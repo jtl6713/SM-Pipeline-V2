@@ -141,3 +141,7 @@ Deploy Worker 0.10.489-engagement-ledger. Shrink the engagement ledger so Chicag
 2026-10-11: Deploy post-publish media release (Drive+R2), desk inventory fields[], R2 exact-source OpenAI skip (0.10.520).
 
 2026-10-11: Deploy footer health paint-before-profiles + Airtable 429 fail-fast (UI 0.6.586 / Worker 0.10.521).
+
+2026-10-11: Deploy approve enqueue fast-path + Airtable 429 fail-fast (UI 0.6.587 / Worker 0.10.522).
+
+2026-10-11: Soft AI API footer under Airtable cooldown (UI 0.6.588 / Worker 0.10.523).

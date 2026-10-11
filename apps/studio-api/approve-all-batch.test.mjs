@@ -135,7 +135,7 @@ test("approve-all store stays under Airtable Setting_Value budget", () => {
 test("worker exposes durable approve-all batch routes and cron resume", () => {
   assert.match(worker, /from "\.\/approve-all-batch\.mjs"/);
   assert.match(worker, /studio_approve_all_batch_v1:\s*true/);
-  assert.match(worker, /0.10.521-footer-health-fast/);
+  assert.match(worker, /0.10.523-ai-api-soft/);
   assert.match(worker, /async function studioProcessApproveAllJobSlice/);
   assert.match(worker, /async function studioResumeApproveAllJobs/);
   assert.match(worker, /studioResumeApproveAllJobs\(env, ctx\)/);
@@ -143,16 +143,18 @@ test("worker exposes durable approve-all batch routes and cron resume", () => {
   assert.match(worker, /getApproveAllJobStatus/);
   assert.match(worker, /accepted: true/);
   assert.match(worker, /studioOccupiedSchedulesOrEmpty/);
+  assert.match(worker, /approve-all record fetch failed/);
   assert.match(worker, /approve-all job store pruned after Setting_Value reject/);
 });
 
 test("Studio UI starts Approve All as a background job and polls progress", () => {
-  assert.match(app, /item4-0.6.586-footer-health-fast/);
+  assert.match(app, /item4-0.6.588-ai-api-soft/);
   assert.match(app, /startPipelineApproveAllJobWatch/);
   assert.match(app, /pollPipelineApproveAllJob/);
   assert.match(app, /Retry failed/);
   assert.match(app, /action: "retry"/);
-  assert.match(app, /timeoutMs: 30000/);
+  assert.match(app, /timeoutMs: 90000/);
+  assert.match(app, /Approve timed out while Airtable was slow/);
   assert.match(app, /Approve All started/);
   assert.match(app, /const next = \{\};/);
 });

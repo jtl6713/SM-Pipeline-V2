@@ -1,10 +1,32 @@
 (() => {
   const endpoint = "/api/ai-api";
+  const CACHE_KEY = "studio.ai_api_status_v1";
   let current = "OpenAI";
+  let lastPayload = null;
 
-  function render(payload = {}) {
+  function readCache() {
+    try {
+      const raw = sessionStorage.getItem(CACHE_KEY);
+      if (!raw) return null;
+      const parsed = JSON.parse(raw);
+      return parsed && typeof parsed === "object" ? parsed : null;
+    } catch {
+      return null;
+    }
+  }
+
+  function writeCache(payload) {
+    try {
+      sessionStorage.setItem(CACHE_KEY, JSON.stringify(payload || {}));
+    } catch {
+      /* ignore */
+    }
+  }
+
+  function render(payload = {}, { stale = false } = {}) {
     const host = document.getElementById("aiApiFooter");
     if (!host) return;
+    lastPayload = payload;
     current = payload.preferred_provider === "Azure" ? "Azure" : "OpenAI";
     const next = current === "OpenAI" ? "Azure" : "OpenAI";
     const currentProvider = payload.current_provider === "Azure" || payload.current_provider === "OpenAI"
@@ -23,9 +45,12 @@
     const primaryLabel = primaryBits.length
       ? ('<span class="ai-api-primary-hit" title="Last PRIMARY OpenAI hit' + (primaryAt ? (" at " + primaryAt) : "") + '">PRIMARY hit: ' + primaryBits.join(" · ") + "</span>")
       : "";
+    const staleNote = stale
+      ? '<span class="ai-api-stale" title="Airtable was busy — showing the last known preference">· cached</span>'
+      : "";
     host.innerHTML = [
       '<span class="ai-api-footer-label"><strong>AI API:</strong> <span class="ai-api-dot" aria-hidden="true">🟢</span> ',
-      '<strong class="ai-api-provider">' + current + '</strong> <strong>Preferred</strong></span>',
+      '<strong class="ai-api-provider">' + current + '</strong> <strong>Preferred</strong>' + staleNote + '</span>',
       '<span class="ai-api-failover">' + (failoverEnabled ? (next + ' Failover') : (next + ' Standby · disabled')) + '</span>',
       '<button type="button" class="ai-api-toggle" id="aiApiToggle">Make ' + next + ' Preferred</button>',
       currentProvider ? '<span class="ai-api-current" title="Provider that handled the most recent successful AI request">Current: ' + currentProvider + (failover ? ' (failover)' : '') + '</span>' : '',
@@ -41,12 +66,20 @@
       const response = await fetch(endpoint, {
         credentials: "same-origin",
         headers: { Accept: "application/json" },
-        signal: AbortSignal.timeout(8000),
+        signal: AbortSignal.timeout(6000),
       });
       if (!response.ok) throw new Error("AI API status unavailable");
-      render(await response.json());
+      const payload = await response.json();
+      writeCache(payload);
+      render(payload);
     } catch {
-      host.innerHTML = '<span class="ai-api-footer-label"><strong>AI API:</strong> status unavailable</span>';
+      const cached = lastPayload || readCache();
+      if (cached) {
+        render(cached, { stale: true });
+        return;
+      }
+      // Default preferred so the strip never looks dead when Airtable is cooling down.
+      render({ preferred_provider: current || "OpenAI", failover_enabled: true }, { stale: true });
     }
   }
 
@@ -63,9 +96,11 @@
         credentials: "same-origin",
         headers: { "Content-Type": "application/json", Accept: "application/json" },
         body: JSON.stringify({ preferred_provider: next }),
+        signal: AbortSignal.timeout(15000),
       });
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(payload?.error || payload?.message || "Could not switch AI API");
+      writeCache(payload);
       render(payload);
       window.setTimeout(load, 1200);
     } catch (error) {
@@ -77,6 +112,8 @@
     }
   }
 
+  const boot = readCache();
+  if (boot) render(boot, { stale: true });
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", load, { once: true });
   else load();
   window.setInterval(load, 60000);

@@ -7,8 +7,8 @@ import { fileURLToPath } from "node:url";
 const here = path.dirname(fileURLToPath(import.meta.url));
 const app = fs.readFileSync(path.join(here, "assets/app-item4-1008.js"), "utf8");
 
-test("UI build advertises footer-health-fast", () => {
-  assert.match(app, /BUILD_ID = "item4-0\.6\.586-footer-health-fast"/);
+test("UI build advertises ai-api-soft", () => {
+  assert.match(app, /BUILD_ID = "item4-0\.6\.588-ai-api-soft"/);
 });
 
 test("checkHealth paints Worker/API before loading profiles", () => {

@@ -261,7 +261,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.586-footer-health-fast";
+  const BUILD_ID = "item4-0.6.588-ai-api-soft";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -18486,7 +18486,8 @@ function timedScriptAssetLabel(asset, index) {
           schedules,
           record_ids: ready.map((record) => record.id),
         }),
-        timeoutMs: 30000,
+        timeoutMs: 90000,
+        retries: 1,
       });
       pipelineApproveAllCanRetry = false;
       startPipelineApproveAllJobWatch(result);
@@ -18784,7 +18785,8 @@ function timedScriptAssetLabel(asset, index) {
           schedules,
           record_ids: ready.map((record) => record.id),
         }),
-        timeoutMs: 30000,
+        timeoutMs: 90000,
+        retries: 1,
       });
       ready.forEach((record) => {
         pipelineScheduleDrafts.delete(record.id);
@@ -18798,7 +18800,12 @@ function timedScriptAssetLabel(asset, index) {
         button.dataset.busy = "false";
         button.disabled = false;
       }
-      pipelineApproveBlockedMessage(error.message || "Approve content failed");
+      const aborted = error?.name === "AbortError" || /aborted|timeout|timed out/i.test(String(error?.message || ""));
+      pipelineApproveBlockedMessage(
+        aborted
+          ? "Approve timed out while Airtable was slow. Wait a few seconds and try Approve again — the job may already be running."
+          : (error.message || "Approve content failed")
+      );
     }
   }
 

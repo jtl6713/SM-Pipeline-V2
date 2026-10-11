@@ -8,7 +8,7 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const worker = fs.readFileSync(path.join(here, "worker.js"), "utf8");
 
 test("Worker health advertises footer-health-fast build", () => {
-  assert.match(worker, /version: "0\.10\.521-footer-health-fast"/);
+  assert.match(worker, /version: "0\.10\.523-ai-api-soft"/);
 });
 
 test("Airtable 429 records cooldown but does not sleep in-request", () => {
