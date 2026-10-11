@@ -11,7 +11,7 @@ const css = fs.readFileSync(path.join(here, "assets/styles-phase7-0621.css"), "u
 
 test("UI 0.6.516 preserves hamburger off-canvas nav on every viewport", () => {
   assert.match(app, /BUILD_ID = "item4-0.6.589-airtable-burn-kill"/);
-  assert.match(html, /UI build 0\.6\.588/);
+  assert.match(html, /UI build 0\.6\.589/);
   assert.match(html, /app-item4-1008\.js\?v=0.6.589-airtable-burn-kill/);
   assert.match(html, /styles-phase7-0621\.css\?v=0.6.589-airtable-burn-kill/);
   assert.match(html, /id="studioNavToggle"/);

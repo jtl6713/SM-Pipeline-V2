@@ -35,13 +35,17 @@ test("Photo listening stays in Ideas until enough matches and then surfaces in P
 });
 
 
-test("already-listening ideas are matched on every five-minute Worker tick", () => {
+test("already-listening ideas are matched on heavy Worker ticks only", () => {
   const scheduledStart = worker.indexOf("async scheduled(event, env, ctx)");
   const scheduledBody = worker.slice(scheduledStart, worker.indexOf("class HttpError", scheduledStart));
-  assert.match(
-    scheduledBody,
-    /if \(cadence\.heavy\) \{[\s\S]{0,700}?autoListenOpenPhotoIdeas[\s\S]{0,500}?\n\s*\}[\s\S]{0,250}?Existing listeners react[\s\S]{0,350}?runWaitingIdeaPhotoMatches\(env, \{ limit: 12 \}\)/
-  );
+  const heavyGate = scheduledBody.indexOf("if (!cadence.heavy) return;");
+  assert.ok(heavyGate > 0, "burn-kill light early-return missing");
+  const beforeHeavy = scheduledBody.slice(0, heavyGate);
+  const afterHeavy = scheduledBody.slice(heavyGate);
+  assert.doesNotMatch(beforeHeavy, /autoListenOpenPhotoIdeas/);
+  assert.doesNotMatch(beforeHeavy, /runWaitingIdeaPhotoMatches/);
+  assert.match(afterHeavy, /autoListenOpenPhotoIdeas/);
+  assert.match(afterHeavy, /runWaitingIdeaPhotoMatches\(env, \{ limit: 12 \}\)/);
 });
 
 test("generated media ideas start listening automatically and the cron can create their draft", () => {
