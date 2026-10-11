@@ -622,11 +622,12 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.529-home-overview-soft-429",
+          version: "0.10.530-approve-publish-fast",
           studio_post_publish_release_v1: true,
           studio_render_queue_wait_v1: true,
           studio_shared_render_queue_v1: true,
           studio_approve_all_batch_v1: true,
+          studio_approve_all_enqueue_ids_v1: true,
           studio_engagement_v1: true,
           studio_mae_schedule_v1: true,
           studio_mae_28_day_schedule_v1: true,
@@ -35882,30 +35883,40 @@ async function approveAllOutputsForPublishing(request, env, authorization, ctx =
   const requestedIds = Array.isArray(payload?.record_ids)
     ? [...new Set(payload.record_ids.map((id) => String(id || "").trim()).filter((id) => /^rec[A-Za-z0-9]+$/.test(id)))]
     : [];
-  let records = [];
+  let eligibleSummaries = [];
+  let skippedCount = 0;
   if (requestedIds.length) {
-    // Content-group Approve already knows the Ready-for-Review ids. Fetch only those
-    // rows instead of scanning up to 100 profile candidates (that scan hangs under
-    // Airtable pressure and aborts the browser fetch).
-    const fetched = await Promise.all(requestedIds.map(async (id) => {
-      try {
-        return await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, id);
-      } catch (error) {
-        console.warn("approve-all record fetch failed", id, error);
-        return null;
-      }
-    }));
-    records = fetched.filter(Boolean);
+    // Pipeline already filtered Ready-for-Review ids. Do not N× GET those rows on the
+    // HTTP request — under Airtable cooldown Promise.all either 429s every slot or
+    // holds the browser on Approving… for >60s. Background slices re-fetch + gate.
+    const clientItems = Array.isArray(payload?.items) ? payload.items : [];
+    const byId = new Map();
+    for (const item of clientItems) {
+      const id = String(item?.id || "").trim();
+      if (!/^rec[A-Za-z0-9]+$/.test(id)) continue;
+      byId.set(id, item);
+    }
+    eligibleSummaries = requestedIds.map((id) => {
+      const client = byId.get(id) || {};
+      return {
+        id,
+        output_id: client.output_id ?? client.Output_ID ?? null,
+        platform: client.platform ?? client.Platform ?? null,
+        format: client.format ?? client.Format ?? client.platform_output_type ?? null,
+      };
+    });
   } else {
-    records = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
+    const records = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
       limit: 100,
       sortField: "Output_ID",
       sortDirection: "desc",
       filterFormula: studioApproveAllCandidateFormula(profile),
     });
+    const eligible = records.filter((record) => studioOutputReadyForPublishApproval(record));
+    skippedCount = records.length - eligible.length;
+    eligibleSummaries = eligible.map(mapApproveAllEligibleSummary);
   }
-  const eligible = records.filter((record) => studioOutputReadyForPublishApproval(record));
-  if (!eligible.length) {
+  if (!eligibleSummaries.length) {
     return respond(request, env, {
       ok: true,
       action: "approve_all_for_publishing",
@@ -35913,7 +35924,7 @@ async function approveAllOutputsForPublishing(request, env, authorization, ctx =
       status: "idle",
       approved_count: 0,
       failed_count: 0,
-      skipped_count: records.length,
+      skipped_count: skippedCount,
       message: "No outputs were ready to approve.",
     });
   }
@@ -35922,7 +35933,7 @@ async function approveAllOutputsForPublishing(request, env, authorization, ctx =
   // Background slices call studioOccupiedSchedulesOrEmpty again before stamping times.
   if (ctx && typeof ctx.waitUntil === "function") {
     ctx.waitUntil(studioOccupiedSchedulesOrEmpty(env, {
-      excludeIds: eligible.map((record) => record.id),
+      excludeIds: eligibleSummaries.map((record) => record.id),
       profile,
     }).catch(() => ({})));
   }
@@ -35933,7 +35944,7 @@ async function approveAllOutputsForPublishing(request, env, authorization, ctx =
     profileId: profile?.id || null,
     note,
     schedules,
-    records: eligible.map(mapApproveAllEligibleSummary),
+    records: eligibleSummaries,
     stamp,
   });
   await studioPutApproveAllJob(env, job);
@@ -35947,8 +35958,8 @@ async function approveAllOutputsForPublishing(request, env, authorization, ctx =
   return respond(request, env, {
     ...summarizeApproveAllJob(job),
     accepted: true,
-    skipped_count: records.length - eligible.length,
-    message: `Approve All started · 0 of ${eligible.length} approved · 0 failed`,
+    skipped_count: skippedCount,
+    message: `Approve All started · 0 of ${eligibleSummaries.length} approved · 0 failed`,
   });
 }
 

@@ -264,7 +264,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.597-home-overview-soft";
+  const BUILD_ID = "item4-0.6.598-approve-publish-fast";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -18356,6 +18356,30 @@ function timedScriptAssetLabel(asset, index) {
     return `${approved} of ${total} approved · ${failed} failed`;
   }
 
+  function pipelineApproveAllItemSummaries(records) {
+    return (records || []).map((record) => ({
+      id: record.id,
+      output_id: record.output_id || null,
+      platform: record.platform || null,
+      format: record.platform_output_type || record.format || null,
+    }));
+  }
+
+  function clearPipelineGroupApproveBusy() {
+    document.querySelectorAll("[data-pipeline-group-approve]").forEach((button) => {
+      if (button.dataset.busy !== "true") return;
+      const key = String(button.dataset.pipelineGroupApprove || "").trim();
+      const groupRecords = (pipelineOutputs || []).filter((record) => pipelineContentGroupKey(record) === key);
+      const groupReady = pipelineManualApprovableOutputs(groupRecords);
+      button.dataset.busy = "false";
+      button.disabled = !groupReady.length;
+      button.textContent = groupReady.length ? `Approve all (${groupReady.length})` : "Approve all";
+      button.title = groupReady.length
+        ? "Approve only the ready outputs in this content item"
+        : "No outputs in this content item are waiting for approval";
+    });
+  }
+
   function applyPipelineApproveAllProgress(result, { terminal = false } = {}) {
     const button = $("pipelineApproveAll");
     const status = String(result?.status || "");
@@ -18380,6 +18404,7 @@ function timedScriptAssetLabel(asset, index) {
     }
     if (terminal || !running) {
       stopPipelineApproveAllPoll();
+      clearPipelineGroupApproveBusy();
       if (button && !pipelineApproveAllCanRetry) {
         button.dataset.busy = "false";
         updatePipelineApproveAllButton();
@@ -18558,14 +18583,17 @@ function timedScriptAssetLabel(asset, index) {
           notes: "Studio Pipeline Approve All",
           schedules,
           record_ids: ready.map((record) => record.id),
+          items: pipelineApproveAllItemSummaries(ready),
         }),
-        timeoutMs: 90000,
+        timeoutMs: 25000,
         retries: 1,
       });
       pipelineApproveAllCanRetry = false;
       startPipelineApproveAllJobWatch(result);
+      clearPipelineGroupApproveBusy();
     } catch (e) {
       if (button) button.dataset.busy = "false";
+      clearPipelineGroupApproveBusy();
       pipelineApproveBlockedMessage(e.message || "Approve All failed");
       updatePipelineApproveAllButton();
     }
@@ -18857,8 +18885,9 @@ function timedScriptAssetLabel(asset, index) {
           notes: "Studio Pipeline Approve Content",
           schedules,
           record_ids: ready.map((record) => record.id),
+          items: pipelineApproveAllItemSummaries(ready),
         }),
-        timeoutMs: 90000,
+        timeoutMs: 25000,
         retries: 1,
       });
       ready.forEach((record) => {
@@ -18868,11 +18897,10 @@ function timedScriptAssetLabel(asset, index) {
       });
       pipelineApproveAllCanRetry = false;
       startPipelineApproveAllJobWatch(result);
+      // Group Approve must not stay stuck on Approving… — progress lives on Approve All.
+      clearPipelineGroupApproveBusy();
     } catch (error) {
-      if (button) {
-        button.dataset.busy = "false";
-        button.disabled = false;
-      }
+      clearPipelineGroupApproveBusy();
       const aborted = error?.name === "AbortError" || /aborted|timeout|timed out/i.test(String(error?.message || ""));
       pipelineApproveBlockedMessage(
         aborted

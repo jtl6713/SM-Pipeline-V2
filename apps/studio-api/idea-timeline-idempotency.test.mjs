@@ -28,5 +28,5 @@ test("a failed linked-request lookup cannot silently regenerate a duplicate", ()
 });
 
 test("Worker version is incremented for deployed idempotency fix", () => {
-  assert.match(worker, /version: "0.10.529-home-overview-soft-429"/);
+  assert.match(worker, /version: "0.10.530-approve-publish-fast"/);
 });
