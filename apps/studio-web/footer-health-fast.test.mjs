@@ -7,8 +7,8 @@ import { fileURLToPath } from "node:url";
 const here = path.dirname(fileURLToPath(import.meta.url));
 const app = fs.readFileSync(path.join(here, "assets/app-item4-1008.js"), "utf8");
 
-test("UI build advertises airtable-burn-kill", () => {
-  assert.match(app, /BUILD_ID = "item4-0\.6\.589-airtable-burn-kill"/);
+test("UI build advertises airtable-queue-hang", () => {
+  assert.match(app, /BUILD_ID = "item4-0\.6\.590-airtable-queue-hang"/);
 });
 
 test("api() backs off longer on Airtable 429 / cooling-down", () => {
