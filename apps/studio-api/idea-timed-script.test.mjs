@@ -13,7 +13,10 @@ import {
   fallbackScenesFromStills,
   formatTimedScriptMarkdown,
   ideaTimedScriptReady,
+  isStillsIdeaContentType,
   mergeTimedScriptNotes,
+  normalizeIdeaLibraryAssetIds,
+  preferredIdeaLibraryAssetIds,
   singleImageFeedPostIds,
   pickTimelineCatalog,
   scenesFromModelPayload,
@@ -215,6 +218,24 @@ test("a single-image feed post keeps its one matched still and skips a video tim
   }), ["recPhoto1"]);
 });
 
+test("Create VO prefers operator-selected stills over place ranking", () => {
+  assert.deepEqual(
+    normalizeIdeaLibraryAssetIds(["recA", { id: "recB" }, "recA", "nope"]),
+    ["recA", "recB"],
+  );
+  assert.deepEqual(
+    preferredIdeaLibraryAssetIds({
+      bodyIds: ["recSelected1", "recSelected2"],
+      matchedIds: ["recMatched1", "recSelected1"],
+    }),
+    ["recSelected1", "recSelected2", "recMatched1"],
+  );
+  assert.equal(isStillsIdeaContentType("Feed Post"), true);
+  assert.equal(isStillsIdeaContentType("Photo Set"), true);
+  assert.equal(isStillsIdeaContentType("Carousel"), true);
+  assert.equal(isStillsIdeaContentType("Vertical Short Video"), false);
+});
+
 test("Worker advertises the idea timed-script route", async () => {
   const worker = await readFile(path.join(here, "worker.js"), "utf8");
   const app = await readFile(path.join(here, "../studio-web/assets/app-item4-1008.js"), "utf8");
@@ -227,12 +248,20 @@ test("Worker advertises the idea timed-script route", async () => {
   assert.match(worker, /waitAutonomousVariantsReady/);
   assert.match(worker, /createIdeaTimedScriptRoute\(request, env, url, authorization, ctx\)/);
   assert.match(worker, /acceptSingleImageFeedPost/);
+  assert.match(worker, /acceptStillsIdeaPackage/);
   assert.match(worker, /single_image_feed_post/);
+  assert.match(worker, /stills_package/);
   assert.match(worker, /singleImageFeedPostIds/);
+  assert.match(worker, /preferredIdeaLibraryAssetIds/);
+  assert.match(worker, /isStillsIdeaContentType/);
+  assert.match(worker, /library_asset_ids/);
   assert.match(app, /single_image_feed_post/);
+  assert.match(app, /library_asset_ids/);
+  assert.match(app, /saveManagedIdeaIdentity/);
   assert.match(app, /Preparing this feed post from the one photo/);
   assert.match(worker, /deterministic-fallback/);
   assert.match(worker, /idea timeline writer failed; using deterministic fallback/);
+  assert.match(worker, /idea timeline plan failed after stills saved/);
   assert.match(app, /ideasCreateTimelineButton/);
   assert.match(app, /\/timed-script`/);
   assert.match(app, /openProductionRequestForIdea/);
@@ -262,7 +291,7 @@ test("Worker advertises the idea timed-script route", async () => {
   assert.match(worker, /ideaLibraryVideoFilterFormula/);
   assert.match(worker, /scripted short video discovery failed/);
   assert.match(worker, /allowVideo: true/);
-  assert.match(worker, /0.10.532-render-server-preview/);
+  assert.match(worker, /0.10.533-create-vo-matched-stills/);
   const css = await readFile(path.join(here, "../studio-web/assets/styles-phase7-0621.css"), "utf8");
   assert.match(css, /#page-ideas \.page-heading\{\s*flex-wrap:wrap;/);
   assert.match(css, /#page-ideas \.heading-actions\{/);

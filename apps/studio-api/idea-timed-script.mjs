@@ -471,15 +471,31 @@ export function scriptedShortProposalReady(timeline) {
   return segments.every((segment) => String(segment?.voiceover_text || "").trim() && String(segment?.suggested_visual || "").trim());
 }
 
-/** Feed Post + the already-matched stills. null means this is not a feed post. */
-export function singleImageFeedPostIds({ contentType, matchedIds = [] } = {}) {
-  if (String(contentType || "").trim() !== "Feed Post") return null;
+/** Deduplicate Airtable media record ids from strings or linked-record objects. */
+export function normalizeIdeaLibraryAssetIds(values = []) {
   const ids = [];
-  for (const raw of matchedIds || []) {
+  for (const raw of values || []) {
     const id = String((raw && typeof raw === "object" ? raw.id : raw) || "").trim();
     if (/^rec[A-Za-z0-9]+$/.test(id) && !ids.includes(id)) ids.push(id);
   }
   return ids;
+}
+
+/** Still packages that must not invent a voiceover timeline. */
+export function isStillsIdeaContentType(contentType) {
+  const type = String(contentType || "").trim();
+  return type === "Feed Post" || type === "Carousel" || type === "Photo Set";
+}
+
+/** Feed Post + the already-matched stills. null means this is not a feed post. */
+export function singleImageFeedPostIds({ contentType, matchedIds = [] } = {}) {
+  if (String(contentType || "").trim() !== "Feed Post") return null;
+  return normalizeIdeaLibraryAssetIds(matchedIds);
+}
+
+/** Operator-selected + already-matched stills for Create VO / accept. */
+export function preferredIdeaLibraryAssetIds({ bodyIds = [], matchedIds = [] } = {}) {
+  return normalizeIdeaLibraryAssetIds([...(bodyIds || []), ...(matchedIds || [])]);
 }
 
 export function ideaTimedScriptReady(timeline) {

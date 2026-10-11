@@ -263,7 +263,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.604-no-home-recent-outputs";
+  const BUILD_ID = "item4-0.6.605-create-vo-matched-stills";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -3470,9 +3470,13 @@
       ? "Preparing this feed post from the one photo. No voiceover timeline. This does not publish."
       : "Accepting this idea: writing the voiceover timeline, attaching named stills, and preparing Production Approve…");
     try {
+      // Persist Manage Idea picker selections before Create VO so the Worker
+      // prefers those stills over place-name library ranking.
+      await saveManagedIdeaIdentity({ quiet: true, reloadList: false, forceProduction: true }).catch(() => null);
+      const libraryIds = [...ideaLibrarySelected].filter((id) => /^rec[A-Za-z0-9]+$/.test(String(id || "")));
       const result = await api(`/api/ideas/${encodeURIComponent(target.id)}/timed-script`, {
         method: "POST",
-        body: JSON.stringify({}),
+        body: JSON.stringify(libraryIds.length ? { library_asset_ids: libraryIds } : {}),
         timeoutMs: 150000,
       });
       ideaTimedScriptPreview = {
@@ -3498,8 +3502,10 @@
         if (Array.isArray(result.stills) && result.stills.length) {
           ideaLibrarySelected = new Set(result.stills.map((row) => String(row.id || "")).filter(Boolean));
         }
-        if (result.single_image_feed_post) {
-          if ($("promoteContentType")) $("promoteContentType").value = "Feed Post";
+        if (result.single_image_feed_post || result.stills_package) {
+          if ($("promoteContentType")) {
+            $("promoteContentType").value = result.stills_package ? "Photo Set" : "Feed Post";
+          }
           if ($("promoteVoiceover")) $("promoteVoiceover").value = "No";
         } else {
           if ($("promoteContentType")) $("promoteContentType").value = "Vertical Short Video";
