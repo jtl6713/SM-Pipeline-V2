@@ -622,7 +622,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.522-approve-enqueue-fast",
+          version: "0.10.523-ai-api-soft",
           studio_post_publish_release_v1: true,
           studio_render_queue_wait_v1: true,
           studio_shared_render_queue_v1: true,
@@ -40084,14 +40084,30 @@ async function studioAiApiRunnerStatus(env) {
   }
 }
 
+let studioAiApiPreferenceCache = { preferred: "OpenAI", failoverEnabled: true, at: 0 };
+
 async function getStudioAiApiStatus(request, env) {
-  const row = await studioSettingsByName(env, "AI_API_PREFERRED_PROVIDER").catch(() => null);
+  // Parallel + soft-soft: Airtable settings must never blank the footer under 429 cooldown.
+  const [row, failoverRow, runner] = await Promise.all([
+    studioSettingsByName(env, "AI_API_PREFERRED_PROVIDER").catch(() => null),
+    studioSettingsByName(env, "AI_API_CROSS_PROVIDER_FAILOVER").catch(() => null),
+    studioAiApiRunnerStatus(env),
+  ]);
   const raw = String(row ? f(row, "Setting_Value") || "" : "").trim().toLowerCase();
-  const preferredProvider = raw === "azure" ? "Azure" : "OpenAI";
-  const failoverRow = await studioSettingsByName(env, "AI_API_CROSS_PROVIDER_FAILOVER").catch(() => null);
   const failoverRaw = String(failoverRow ? f(failoverRow, "Setting_Value") || "" : "").trim().toLowerCase();
-  const failoverEnabled = ["1", "true", "yes", "on", "enabled"].includes(failoverRaw);
-  const runner = await studioAiApiRunnerStatus(env);
+  let preferredProvider = raw === "azure" ? "Azure" : (raw === "openai" ? "OpenAI" : "");
+  let failoverEnabled = ["1", "true", "yes", "on", "enabled"].includes(failoverRaw);
+  if (!preferredProvider) {
+    preferredProvider = studioAiApiPreferenceCache.preferred || "OpenAI";
+  } else {
+    studioAiApiPreferenceCache.preferred = preferredProvider;
+    studioAiApiPreferenceCache.at = Date.now();
+  }
+  if (!failoverRow) {
+    failoverEnabled = studioAiApiPreferenceCache.failoverEnabled !== false;
+  } else {
+    studioAiApiPreferenceCache.failoverEnabled = failoverEnabled;
+  }
   return respond(request, env, {
     ok: true,
     preferred_provider: preferredProvider,
@@ -40105,6 +40121,7 @@ async function getStudioAiApiStatus(request, env) {
     last_primary_at: runner?.last_primary_at || null,
     last_primary_failover: Boolean(runner?.last_primary_failover),
     runner_connected: Boolean(runner?.ok),
+    settings_cached: !row,
   });
 }
 
@@ -40120,6 +40137,8 @@ async function patchStudioAiApiPreference(request, env) {
     provider,
     "Preferred AI API for normal Pipeline Runner workloads. The other provider is automatic failover."
   );
+  studioAiApiPreferenceCache.preferred = provider;
+  studioAiApiPreferenceCache.at = Date.now();
   return respond(request, env, {
     ok: true,
     preferred_provider: provider,

@@ -184,3 +184,5 @@ Deploy Studio UI 0.6.534-pages-path-bust. Rename app-item4-0625.js -> app-item4-
 2026-10-11: Deploy footer health paint-before-profiles + Airtable 429 fail-fast (UI 0.6.586 / Worker 0.10.521).
 
 2026-10-11: Deploy approve enqueue fast-path + Airtable 429 fail-fast (UI 0.6.587 / Worker 0.10.522).
+
+2026-10-11: Soft AI API footer under Airtable cooldown (UI 0.6.588 / Worker 0.10.523).
