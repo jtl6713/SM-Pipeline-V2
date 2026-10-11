@@ -24,10 +24,8 @@ export function item4OutputHasVideoFinal(output = {}) {
 
 export function item4MappedStudioPreviewUrl(output = {}, stillUrl = "") {
   const stored = String(output.studio_preview_url || "").trim();
+  if (item4OutputHasVideoFinal(output) && output.id) return `/api/outputs/${encodeURIComponent(output.id)}/preview`;
   if (stored && item4LooksLikeVideo(stored)) return stored;
-  if (item4OutputHasVideoFinal(output)) {
-    return stored && !item4LooksLikeImage(stored) ? stored : null;
-  }
   return stored || String(stillUrl || "").trim() || null;
 }
 
@@ -44,21 +42,14 @@ export function item4PreviewKind(output = {}, { nativePhoto = false, stillUrl = 
 }
 
 export function item4ReviewWatchUrl(output = {}) {
-  const stored = String(output.studio_preview_url || "").trim();
-  if (stored && !item4LooksLikeImage(stored)) return stored;
-  const finalUrl = String(output.final_file_url || "").trim();
-  if (finalUrl && !item4LooksLikeImage(finalUrl)) return finalUrl;
-  const outputUrl = String(output.output_url || "").trim();
-  if (outputUrl && !item4LooksLikeImage(outputUrl)) return outputUrl;
   if (output.id && item4OutputHasVideoFinal(output)) {
     return `/api/outputs/${encodeURIComponent(output.id)}/preview`;
   }
-  return stored;
+  return String(output.studio_preview_url || output.final_file_url || "").trim();
 }
 
 export function item4PreviewPlayerFallback(output = {}) {
-  if (item4OutputHasVideoFinal(output)) return "drive";
-  return "cover";
+  return item4OutputHasVideoFinal(output) ? "native" : "cover";
 }
 
 export function item4IsTikTokOutput(output = {}) {
