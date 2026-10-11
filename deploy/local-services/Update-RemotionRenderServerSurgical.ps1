@@ -36,7 +36,7 @@ Write-Host "  $src"
 Write-Host "  -> $dst"
 Copy-Item -Force $src $dst
 
-$expected = "2026-10-11-slot-hold-only"
+$expected = "2026-10-11-drive-clip-dedupe"
 if (-not (Select-String -Path $dst -SimpleMatch $expected -Quiet)) {
     throw "Copied render-server.js does not contain SERVICE_VERSION $expected"
 }
@@ -63,4 +63,4 @@ for ($i = 0; $i -lt 30; $i++) {
 if (-not $ok) {
     throw "Remotion did not advertise $expected on http://127.0.0.1:3333/health"
 }
-Write-Host "Done. Produce heal should requeue CI 239-243 on the next Worker tick."
+Write-Host "Done. Cancel stuck preparing vibe-cut jobs, then requeue Ready for Render."
