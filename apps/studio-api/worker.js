@@ -27886,6 +27886,7 @@ async function outputPreview(request, env, url, authorization) {
     f(record, "Publish_Asset_URL"),
     f(record, "Final_File_URL"),
     f(record, "Studio_Preview_URL"),
+    f(record, "Render_Server_URL"),
   ].map((value) => String(value || "").trim()).find((href) => item4UrlIsPublicPlayableVideo(href) || item4UrlIsPublicPublishCdn(href) && !/\.(jpe?g|png|webp|gif)(\?|#|$)/i.test(href))
     || "";
 
