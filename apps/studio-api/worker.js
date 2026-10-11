@@ -604,8 +604,9 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.518-stamp-422-signature",
+          version: "0.10.519-shared-render-queue",
           studio_render_queue_wait_v1: true,
+          studio_shared_render_queue_v1: true,
           studio_approve_all_batch_v1: true,
           studio_engagement_v1: true,
           studio_mae_schedule_v1: true,
@@ -13563,8 +13564,16 @@ async function studioAdmitRenderQueue(env, options = {}) {
   if (!candidates.length) {
     return { admitted: false, reason: "no_candidates", waiting: 0, started: null };
   }
+  const activeHolds = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
+    limit: 16,
+    filterFormula: STUDIO_RENDER_QUEUE_ACTIVE_FORMULA,
+  }).catch(() => []);
   const busy = await studioRemotionRenderBusy(env);
-  const { byId, total } = assignRenderQueuePositions(candidates, f);
+  // One Remotion admission per shared 9:16 short group — siblings wait for produce
+  // to copy Final_File_URL, they do not each claim a render slot.
+  const { byId, total, admitCandidates } = assignRenderQueuePositions(candidates, f, {
+    activeHolds,
+  });
   let stampedWaiting = 0;
   for (const row of candidates) {
     if (!isRenderQueueWaitingStatus(f(row, "Render_Status"))) {
@@ -13580,9 +13589,21 @@ async function studioAdmitRenderQueue(env, options = {}) {
       stamped_waiting: stampedWaiting,
       busy,
       queue: [...byId.values()],
+      shared_siblings_waiting: Math.max(0, candidates.length - total),
     };
   }
-  const head = candidates[0];
+  const head = admitCandidates[0];
+  if (!head) {
+    return {
+      admitted: false,
+      reason: "shared_render_hold",
+      waiting: total,
+      stamped_waiting: stampedWaiting,
+      busy,
+      queue: [...byId.values()],
+      shared_siblings_waiting: Math.max(0, candidates.length - total),
+    };
+  }
   await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, head.id, {
     method: "PATCH",
     body: JSON.stringify({
@@ -13613,6 +13634,7 @@ async function studioAdmitRenderQueue(env, options = {}) {
     stamped_waiting: stampedWaiting,
     head: head.id,
     started,
+    shared_siblings_waiting: Math.max(0, candidates.length - total),
   };
 }
 
@@ -24780,12 +24802,20 @@ async function listOutputs(request, env, url, authorization, ctx = null) {
     })());
   }
   const queueCandidates = await studioLoadRenderQueueCandidates(env, { limit: 100 }).catch(() => []);
-  const { byId: renderQueueById } = assignRenderQueuePositions(queueCandidates, f);
+  const activeHolds = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
+    limit: 16,
+    filterFormula: STUDIO_RENDER_QUEUE_ACTIVE_FORMULA,
+  }).catch(() => []);
+  const { byId: renderQueueById, total: renderQueueTotal } = assignRenderQueuePositions(
+    queueCandidates,
+    f,
+    { activeHolds },
+  );
   return respond(request, env, {
     ok: true,
     records: records.map((record) => mapOutput(record, jobs.get(record), renderQueueById.get(record.id) || null)),
     profile: mapStudioContentProfile(profile),
-    render_queue_total: queueCandidates.length,
+    render_queue_total: renderQueueTotal,
   });
 }
 

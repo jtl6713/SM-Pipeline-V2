@@ -261,7 +261,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.578-pipeline-publish-immediate";
+  const BUILD_ID = "item4-0.6.579-shared-render-queue";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -1498,6 +1498,7 @@
 
   function pipelineRenderQueueLabel(record) {
     const fromApi = String(record?.render_queue_label || record?.studio_state || "").trim();
+    if (/^Waiting for shared render/i.test(fromApi)) return fromApi;
     if (/^Waiting in render queue/i.test(fromApi)) return fromApi;
     const render = String(record?.render_status || "").trim();
     const hasJob = Boolean(String(record?.remotion_job_id || "").trim());
@@ -1599,6 +1600,7 @@
     if (pipelineMixRerenderInProgress(record)) return true;
     if (pipelineIsRetryingRender(record)) return true;
     const state = String(record?.studio_state || "").trim();
+    if (/^Waiting for shared render/i.test(state)) return true;
     if (/^Waiting in render queue/i.test(state)) return true;
     if (["Rendering", "Queued", "Preparing Assets", "Waiting in Render Queue"].includes(state)) return true;
     const render = String(record?.render_status || "").trim();
