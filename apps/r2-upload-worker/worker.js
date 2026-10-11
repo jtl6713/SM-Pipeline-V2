@@ -1,13 +1,21 @@
 const SERVICE = "chicagoshining-r2-upload";
-const VERSION = "1.2.0-multipart";
+const VERSION = "1.3.0-post-publish-cleanup";
 const LEGACY_SECRET_SHA256 = "206163e803094104e8de49871a138636b2978653a9935feea94f85e2454d666e";
 const ALLOWED_PREFIXES = ["publish/", "studio/previews/"];
-const CLEANUP_PREFIXES = ["publish/platform-output-157/", "publish/item12-lifecycle-proof/"];
+// Authenticated Studio post-publish release may delete pointed-at production keys.
+// Still no silent bucket TTL — deletes require x-pipeline-secret + x-lifecycle-confirm.
+const CLEANUP_PREFIXES = [
+  "publish/",
+  "studio/previews/",
+  "publish/platform-output-157/",
+  "publish/item12-lifecycle-proof/",
+];
+const CLEANUP_DENY_PREFIXES = ["studio/previews/branding/"];
 const MAX_UPLOAD_BYTES = 250 * 1024 * 1024;
 const MAX_LIST = 100;
 const MAX_DELETE = 20;
 const PUBLISH_TTL_POLICY =
-  "Publish objects are retained until explicit allowlisted cleanup. Incomplete multipart uploads abort after 7 days by R2 default. studio/previews are TTL candidates and are not auto-deleted by this worker.";
+  "Publish and studio/previews objects are retained until authenticated post-publish cleanup deletes keys pointed at by a released Platform Output. Incomplete multipart uploads abort after 7 days by R2 default. Branding keys are never deleted.";
 
 export default {
   async fetch(request, env) {
@@ -106,6 +114,12 @@ function prefixAllowed(key, prefixes) {
   return prefixes.some((prefix) => key === prefix.slice(0, -1) || key.startsWith(prefix));
 }
 
+function cleanupKeyAllowed(key) {
+  if (!prefixAllowed(key, CLEANUP_PREFIXES)) return false;
+  if (prefixAllowed(key, CLEANUP_DENY_PREFIXES)) return false;
+  return true;
+}
+
 function inferContentType(key) {
   const lower = key.toLowerCase();
   if (lower.endsWith(".mp4")) return "video/mp4";
@@ -141,7 +155,7 @@ function objectRecord(object) {
     output_id: (object.customMetadata || {}).outputId || outputIdFromKey(object.key),
     final_file_id: (object.customMetadata || {}).finalFileId || finalFileIdFromKey(object.key),
     retain_class: (object.customMetadata || {}).retainClass || (object.key.startsWith("studio/previews/") ? "preview" : "publish"),
-    cleanup_allowed: prefixAllowed(object.key, CLEANUP_PREFIXES),
+    cleanup_allowed: cleanupKeyAllowed(object.key),
   };
 }
 
@@ -185,7 +199,7 @@ async function deleteObjects(bucket, request, rawKeys, searchParams) {
   const keys = [...new Set(rawKeys.map(normalizeKey).filter(Boolean))];
   if (!keys.length) return { ok: false, error: "Missing keys" };
   if (keys.length > MAX_DELETE) return { ok: false, error: `Refusing more than ${MAX_DELETE} keys` };
-  const denied = keys.filter((key) => !prefixAllowed(key, CLEANUP_PREFIXES));
+  const denied = keys.filter((key) => !cleanupKeyAllowed(key));
   if (denied.length) {
     return { ok: false, error: "Key not in cleanup allowlist", denied, deleted: [] };
   }
