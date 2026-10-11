@@ -185,15 +185,28 @@ def encode_downloaded_master(
             elif not seen_output and clock - source_gone_at >= SOURCE_GONE_GRACE_SECONDS:
                 raise AmeNotReady("inbox copy is gone and Media Encoder left no output")
         if not seen_output and source_exists and clock - started >= pickup_seconds:
-            _unlink_inside(root, source)
-            raise AmeNotReady("Media Encoder did not pick up the inbox file")
+            try:
+                _unlink_inside(root, source)
+            except PermissionError:
+                logger.info(
+                    "Media Encoder has %s locked; waiting for the encode to finish",
+                    source.name,
+                )
+                seen_output = True
+            else:
+                raise AmeNotReady("Media Encoder did not pick up the inbox file")
         if clock - started >= timeout_seconds:
             if seen_output or source_exists and _growing_output(root, preset, source.stem) is not None:
                 raise RuntimeError(
                     "Adobe Media Encoder did not finish before the Studio compression limit"
                 )
             if source_exists:
-                _unlink_inside(root, source)
+                try:
+                    _unlink_inside(root, source)
+                except PermissionError:
+                    raise RuntimeError(
+                        "Adobe Media Encoder did not finish before the Studio compression limit"
+                    )
             raise AmeNotReady("Media Encoder did not pick up the inbox file")
         _progress(on_progress, 70 if seen_output else 25)
         sleep(poll_seconds)

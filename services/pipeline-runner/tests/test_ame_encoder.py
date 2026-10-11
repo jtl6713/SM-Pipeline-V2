@@ -242,6 +242,41 @@ def test_ame_default_output_folder_is_accepted(tmp_path: Path):
     assert list(output.iterdir()) == []
 
 
+def test_locked_inbox_file_waits_for_media_encoder(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    root = _root(tmp_path)
+    inbox = root / "inbox" / "social-standard-9x16"
+    out = root / "out" / "social-standard-9x16"
+    clock = {"t": 0.0}
+
+    def fetch(_key, dest: Path):
+        dest.write_bytes(b"source-master")
+
+    def locked_unlink(_root: Path, path: Path):
+        raise PermissionError(32, "The process cannot access the file", str(path))
+
+    monkeypatch.setattr("studio_compress.ame_encoder._unlink_inside", locked_unlink)
+
+    def sleep(_seconds: float):
+        if clock["t"] < 90:
+            clock["t"] = 90
+            return
+        source = next(inbox.glob("*.mov"))
+        (out / f"{source.stem}.mp4").write_bytes(b"x" * 40000)
+        source.unlink()
+
+    content = encode_downloaded_master(
+        root=root,
+        asset=_asset(),
+        fetch=fetch,
+        sleep=sleep,
+        monotonic=lambda: clock["t"],
+        now=lambda: 100,
+        pickup_seconds=90,
+        timeout_seconds=1200,
+    )
+    assert content == b"x" * 40000
+
+
 def test_download_is_staged_outside_the_watch_folder(tmp_path: Path):
     root = _root(tmp_path)
     inbox = root / "inbox" / "social-standard-9x16"
