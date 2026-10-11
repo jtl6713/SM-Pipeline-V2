@@ -26,7 +26,14 @@
       /* ignore quota */
     }
   }
-  async function json(url, { timeoutMs = 45000 } = {}) {
+  function isOverviewSoftFailure(error) {
+    const name = String(error?.name || "");
+    const message = String(error?.message || error || "");
+    return name === "AbortError"
+      || name === "TimeoutError"
+      || /timed?\s*out|timeout after|aborted|HTTP 429|cooling down|rate.?limit|too many requests/i.test(message);
+  }
+  async function json(url, { timeoutMs = 8000 } = {}) {
     const controller = typeof AbortController === "function" ? new AbortController() : null;
     const timer = controller ? window.setTimeout(() => controller.abort(), timeoutMs) : 0;
     try {
@@ -39,7 +46,12 @@
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       return response.json();
     } catch (error) {
-      if (error?.name === "AbortError") throw new Error(`Timed out after ${timeoutMs}ms`);
+      if (error?.name === "AbortError" || error?.name === "TimeoutError") {
+        const soft = new Error(`Timeout after ${timeoutMs}ms`);
+        soft.name = "TimeoutError";
+        soft.soft = true;
+        throw soft;
+      }
       throw error;
     } finally {
       if (timer) window.clearTimeout(timer);
@@ -144,8 +156,9 @@
     }
     try {
       // One Worker request replaces N× /api/dashboard (+ /api/profiles) fan-out
-      // that was 429ing the home page on every paint. Worker soft-200s on cooldown.
-      const data = await json(`/api/profiles/overview?_=${Date.now()}`, { timeoutMs: 60000 });
+      // that was 429ing the home page on every paint. Worker soft-200s on cooldown
+      // and budgets the build so this never waits 60s.
+      const data = await json(`/api/profiles/overview?_=${Date.now()}`, { timeoutMs: 8000 });
       const rows = Array.isArray(data?.records) ? data.records : [];
       if (!rows.length) {
         if (data?.cooling) {
@@ -167,14 +180,14 @@
       writeCache(state.rows);
       render({ stale: Boolean(data?.stale || data?.cooling), error: data?.cooling ? "Airtable busy" : "" });
     } catch (error) {
-      const message = String(error?.message || error || "");
-      const cooling = /HTTP 429|cooling down|rate.?limit|too many requests/i.test(message);
+      // Timeouts and 429s are soft — never paint a red "unavailable" banner on home.
+      const cooling = isOverviewSoftFailure(error);
       const cached = state.rows.length ? state.rows : readCache();
       if (cached?.length) {
         state.rows = cached;
-        render({ stale: true, cooling, error: cooling ? "Airtable busy" : message });
+        render({ stale: true, cooling, error: cooling ? "Airtable busy" : String(error?.message || error || "") });
       } else {
-        render({ cooling, error: cooling ? "" : message });
+        render({ cooling: true, error: "" });
       }
     } finally {
       state.loading = false;

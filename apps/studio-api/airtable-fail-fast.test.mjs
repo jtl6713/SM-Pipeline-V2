@@ -8,7 +8,7 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const worker = fs.readFileSync(path.join(here, "worker.js"), "utf8");
 
 test("Worker health advertises airtable queue-hang fix build", () => {
-  assert.match(worker, /version: "0\.10\.530-approve-publish-fast"/);
+  assert.match(worker, /version: "0\.10\.531-home-overview-budget"/);
   assert.match(worker, /studio_airtable_queue_hang_fix_v1: true/);
 });
 

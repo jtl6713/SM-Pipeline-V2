@@ -622,12 +622,13 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.530-approve-publish-fast",
+          version: "0.10.531-home-overview-budget",
           studio_post_publish_release_v1: true,
           studio_render_queue_wait_v1: true,
           studio_shared_render_queue_v1: true,
           studio_approve_all_batch_v1: true,
           studio_approve_all_enqueue_ids_v1: true,
+          studio_home_overview_budget_v1: true,
           studio_engagement_v1: true,
           studio_mae_schedule_v1: true,
           studio_mae_28_day_schedule_v1: true,
@@ -36314,9 +36315,30 @@ function studioOverviewOperationalMetrics(mappedOutputs, ideas) {
 
 // Isolate memory cache: home used to fire N×(ideas+outputs) and 429 before paint.
 const STUDIO_PROFILES_OVERVIEW_CACHE_MS = 75 * 1000;
+/** Hard wall for overview Airtable work so home never waits on a 60s browser abort. */
+const STUDIO_PROFILES_OVERVIEW_BUILD_BUDGET_MS = 4000;
+const STUDIO_PROFILES_OVERVIEW_RESOLVE_BUDGET_MS = 2500;
 const STUDIO_PROFILES_OVERVIEW_OUTPUT_LIMIT = 800;
 const STUDIO_PROFILES_OVERVIEW_IDEA_LIMIT = 300;
 const studioProfilesOverviewCache = { at: 0, authKey: "", rows: null, inflight: null };
+
+function studioOverviewBudgetError(label = "overview") {
+  return new HttpError(429, `Airtable cooling down (${label} budget); try again shortly`);
+}
+
+async function raceStudioOverviewBudget(promise, budgetMs, label = "overview") {
+  let timer = 0;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise((_, reject) => {
+        timer = setTimeout(() => reject(studioOverviewBudgetError(label)), Math.max(250, Number(budgetMs) || 0));
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
 
 function studioProfilesOverviewAuthKey(profiles = []) {
   return (profiles || []).map((profile) => String(profile?.id || "").trim()).filter(Boolean).sort().join(",");
@@ -36410,7 +36432,11 @@ async function profilesOverview(request, env, authorization) {
 
   let profiles;
   try {
-    profiles = await resolveAuthorizedContentProfiles(env, authorization);
+    profiles = await raceStudioOverviewBudget(
+      resolveAuthorizedContentProfiles(env, authorization),
+      STUDIO_PROFILES_OVERVIEW_RESOLVE_BUDGET_MS,
+      "overview-resolve",
+    );
   } catch (error) {
     if (cache.rows?.length) {
       return respondProfilesOverviewSoft(request, env, { records: cache.rows, stale: true, cooling: isAirtableCoolingError(error) });
@@ -36428,7 +36454,12 @@ async function profilesOverview(request, env, authorization) {
   }
   if (cache.inflight && cache.authKey === authKey) {
     try {
-      const rows = await cache.inflight;
+      // Keep inflight running after budget — next paint gets a warm cache.
+      const rows = await raceStudioOverviewBudget(
+        cache.inflight,
+        STUDIO_PROFILES_OVERVIEW_BUILD_BUDGET_MS,
+        "overview-build",
+      );
       return respondProfilesOverviewSoft(request, env, { records: rows, cached: true });
     } catch (error) {
       if (cache.rows && cache.authKey === authKey) {
@@ -36451,7 +36482,11 @@ async function profilesOverview(request, env, authorization) {
       if (cache.inflight) cache.inflight = null;
     });
   try {
-    const rows = await cache.inflight;
+    const rows = await raceStudioOverviewBudget(
+      cache.inflight,
+      STUDIO_PROFILES_OVERVIEW_BUILD_BUDGET_MS,
+      "overview-build",
+    );
     return respondProfilesOverviewSoft(request, env, { records: rows });
   } catch (error) {
     if (cache.rows && cache.authKey === authKey) {

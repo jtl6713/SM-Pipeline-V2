@@ -35,5 +35,16 @@ test("Worker exposes profilesOverview lean batch route", () => {
 test("All Profiles client soft-handles Airtable cooling without a red HTTP 429 banner", () => {
   assert.match(overview, /data\?\.cooling/);
   assert.match(overview, /waiting on Airtable/);
-  assert.doesNotMatch(overview, /could not load: \$\{esc\(error\)\}/i);
+  assert.match(overview, /timeoutMs: 8000/);
+  assert.match(overview, /isOverviewSoftFailure/);
+  assert.match(overview, /never paint a red/i);
+  assert.doesNotMatch(overview, /timeoutMs: 60000/);
+  assert.doesNotMatch(overview, /could not load:/i);
+});
+
+test("Worker budgets overview Airtable work so home never waits 60s", () => {
+  assert.match(worker, /studio_home_overview_budget_v1:\s*true/);
+  assert.match(worker, /STUDIO_PROFILES_OVERVIEW_BUILD_BUDGET_MS/);
+  assert.match(worker, /raceStudioOverviewBudget/);
+  assert.match(worker, /0\.10\.531-home-overview-budget/);
 });
