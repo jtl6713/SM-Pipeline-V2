@@ -622,7 +622,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.521-footer-health-fast",
+          version: "0.10.522-approve-enqueue-fast",
           studio_post_publish_release_v1: true,
           studio_render_queue_wait_v1: true,
           studio_shared_render_queue_v1: true,
@@ -35873,20 +35873,32 @@ async function approveAllOutputsForPublishing(request, env, authorization, ctx =
 
   // Enqueue only. Approval work + publish reconcile run in waitUntil / cron slices so
   // Studio stays responsive and a closed tab cannot strand half-approved batches.
-  const records = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
-    limit: 100,
-    sortField: "Output_ID",
-    sortDirection: "desc",
-    filterFormula: studioApproveAllCandidateFormula(profile),
-  });
   const requestedIds = Array.isArray(payload?.record_ids)
-    ? payload.record_ids.map((id) => String(id || "").trim()).filter(Boolean)
+    ? [...new Set(payload.record_ids.map((id) => String(id || "").trim()).filter((id) => /^rec[A-Za-z0-9]+$/.test(id)))]
     : [];
-  const requestedIdSet = requestedIds.length ? new Set(requestedIds) : null;
-  const eligible = records.filter((record) => {
-    if (requestedIdSet && !requestedIdSet.has(record.id)) return false;
-    return studioOutputReadyForPublishApproval(record);
-  });
+  let records = [];
+  if (requestedIds.length) {
+    // Content-group Approve already knows the Ready-for-Review ids. Fetch only those
+    // rows instead of scanning up to 100 profile candidates (that scan hangs under
+    // Airtable pressure and aborts the browser fetch).
+    const fetched = await Promise.all(requestedIds.map(async (id) => {
+      try {
+        return await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, id);
+      } catch (error) {
+        console.warn("approve-all record fetch failed", id, error);
+        return null;
+      }
+    }));
+    records = fetched.filter(Boolean);
+  } else {
+    records = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
+      limit: 100,
+      sortField: "Output_ID",
+      sortDirection: "desc",
+      filterFormula: studioApproveAllCandidateFormula(profile),
+    });
+  }
+  const eligible = records.filter((record) => studioOutputReadyForPublishApproval(record));
   if (!eligible.length) {
     return respond(request, env, {
       ok: true,
@@ -35900,12 +35912,14 @@ async function approveAllOutputsForPublishing(request, env, authorization, ctx =
     });
   }
 
-  // Warm occupancy once so the background worker starts with a soft fail path if
-  // schedule occupancy cannot be read (same contract as single Approve).
-  await studioOccupiedSchedulesOrEmpty(env, {
-    excludeIds: eligible.map((record) => record.id),
-    profile,
-  });
+  // Occupancy warm is best-effort and must not block enqueue under Airtable pressure.
+  // Background slices call studioOccupiedSchedulesOrEmpty again before stamping times.
+  if (ctx && typeof ctx.waitUntil === "function") {
+    ctx.waitUntil(studioOccupiedSchedulesOrEmpty(env, {
+      excludeIds: eligible.map((record) => record.id),
+      profile,
+    }).catch(() => ({})));
+  }
 
   const schedules = payload?.schedules && typeof payload.schedules === "object" ? payload.schedules : {};
   const job = buildApproveAllJob({
