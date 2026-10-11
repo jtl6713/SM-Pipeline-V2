@@ -264,7 +264,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.593-home-overview-cache";
+  const BUILD_ID = "item4-0.6.594-ai-generate-density";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -5743,10 +5743,10 @@ function timedScriptAssetLabel(asset, index) {
     if (title) title.textContent = aiAssets.length ? "Add more AI images" : "Generate AI images";
     if (hint) {
       hint.textContent = item4AiGenerationInFlight
-        ? "Generating AI images one at a time…"
+        ? "Generating one at a time…"
         : automatic && aiAssets.length < suggested
-          ? `${aiAssets.length} AI image${aiAssets.length === 1 ? "" : "s"} ready. The initial structure suggests ${suggested}, but that does not limit the Production asset pool.`
-          : `${aiAssets.length} AI image${aiAssets.length === 1 ? "" : "s"} in the asset pool. Add any quantity; the structure is only a recommendation.`;
+          ? `${aiAssets.length} ready · structure suggests ${suggested} (not a limit).`
+          : `${aiAssets.length} in pool · add any quantity.`;
     }
     if (quantity) quantity.disabled = item4AiGenerationInFlight;
     if (promptInput) promptInput.disabled = item4AiGenerationInFlight;
@@ -5761,7 +5761,7 @@ function timedScriptAssetLabel(asset, index) {
     if (generate) {
       generate.hidden = false;
       generate.disabled = item4AiGenerationInFlight;
-      generate.textContent = item4AiGenerationInFlight ? "Generating…" : "Generate AI images";
+      generate.textContent = item4AiGenerationInFlight ? "Generating…" : "Generate";
     }
     if (regenerate) {
       regenerate.hidden = aiAssets.length === 0;

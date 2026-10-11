@@ -9,17 +9,17 @@
  <link rel="preconnect" href="https://fonts.googleapis.com">
  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@1,600;1,700&family=Inter:wght@400;500;600;700;800&family=Oswald:wght@500&display=swap">
- <link rel="stylesheet" href="/assets/styles-phase7-0621.css?v=0.6.593-home-overview-cache">
- <link rel="stylesheet" href="/assets/home-density-0517.css?v=0.6.593-home-overview-cache">
- <link rel="stylesheet" href="/assets/engagement-1008.css?v=0.6.593-home-overview-cache">
- <link rel="stylesheet" href="/assets/production-tablet-0622.css?v=0.6.593-home-overview-cache">
- <link rel="stylesheet" href="/assets/insights-0622.css?v=0.6.593-home-overview-cache">
- <link rel="stylesheet" href="/assets/clean-enterprise.css?v=0.6.593-home-overview-cache">
- <link rel="stylesheet" href="/assets/ai-api-footer.css?v=0.6.593-home-overview-cache">
- <link rel="stylesheet" href="/assets/sticky-footer-scroll.css?v=0.6.593-home-overview-cache">
- <link rel="stylesheet" href="/assets/topbar-banner-0618.css?v=0.6.593-home-overview-cache">
- <link rel="stylesheet" href="/assets/new-profile-1009.css?v=0.6.593-home-overview-cache">
- <link rel="stylesheet" href="/assets/profile-setup.css?v=0.6.593-home-overview-cache">
+ <link rel="stylesheet" href="/assets/styles-phase7-0621.css?v=0.6.594-ai-generate-density">
+ <link rel="stylesheet" href="/assets/home-density-0517.css?v=0.6.594-ai-generate-density">
+ <link rel="stylesheet" href="/assets/engagement-1008.css?v=0.6.594-ai-generate-density">
+ <link rel="stylesheet" href="/assets/production-tablet-0622.css?v=0.6.594-ai-generate-density">
+ <link rel="stylesheet" href="/assets/insights-0622.css?v=0.6.594-ai-generate-density">
+ <link rel="stylesheet" href="/assets/clean-enterprise.css?v=0.6.594-ai-generate-density">
+ <link rel="stylesheet" href="/assets/ai-api-footer.css?v=0.6.594-ai-generate-density">
+ <link rel="stylesheet" href="/assets/sticky-footer-scroll.css?v=0.6.594-ai-generate-density">
+ <link rel="stylesheet" href="/assets/topbar-banner-0618.css?v=0.6.594-ai-generate-density">
+ <link rel="stylesheet" href="/assets/new-profile-1009.css?v=0.6.594-ai-generate-density">
+ <link rel="stylesheet" href="/assets/profile-setup.css?v=0.6.594-ai-generate-density">
 </head>
 <body>
  <header class="topbar">
@@ -533,23 +533,32 @@
  </div>
  <em class="ez-option-hint" id="item4MediaKindHint"></em>
  <div class="item4-upload-zone item4-ai-generation-panel" id="item4AiGenerationPanel" hidden>
+ <div class="item4-ai-generation-head">
  <div class="item4-upload-icon" aria-hidden="true">AI</div>
- <div><strong id="item4AiGenerationTitle">Generate AI images</strong><span id="item4AiGenerationHint">Studio will create the requested images before approval.</span></div>
- <label class="form-field" style="min-width:280px;flex:1 1 360px;margin:0;">
- <span>Describe what you want the AI image to be</span>
- <textarea id="item4AiPrompt" rows="3" maxlength="2000" placeholder="Example: Sunset view of the Chicago River from the bridge, cinematic, realistic, no text" aria-label="Describe the AI image"></textarea>
+ <div class="item4-ai-generation-copy">
+ <strong id="item4AiGenerationTitle">Generate AI images</strong>
+ <span id="item4AiGenerationHint">Studio will create the requested images before approval.</span>
+ </div>
+ </div>
+ <div class="item4-ai-generation-fields">
+ <label class="form-field item4-ai-prompt-field">
+ <span>Prompt</span>
+ <textarea id="item4AiPrompt" rows="2" maxlength="2000" placeholder="Sunset on the Chicago River from the bridge, cinematic, realistic, no text" aria-label="Describe the AI image"></textarea>
  </label>
- <label class="form-field" style="min-width:240px;flex:1 1 280px;margin:0;">
+ <div class="item4-ai-generation-meta">
+ <label class="form-field item4-ai-name-field">
  <span>Asset name</span>
  <input id="item4AiAssetBaseName" type="text" maxlength="120" placeholder="Leave blank to use the Production title" aria-label="AI asset name base">
- <small>Uses Asset Manager numbering automatically — for example, Field Museum 9, Field Museum 10, …</small>
  </label>
- <label class="form-field" style="min-width:110px;max-width:150px;margin:0;">
- <span>Quantity to add</span>
+ <label class="form-field item4-ai-qty-field">
+ <span>Qty</span>
  <input id="item4AiAddCount" type="number" min="1" step="1" value="1" inputmode="numeric" aria-label="AI images to add">
  </label>
+ </div>
+ <small class="item4-ai-name-hint">Asset Manager numbering applies (Field Museum 9, 10, …).</small>
+ </div>
  <div class="item4-upload-actions">
- <button type="button" class="primary-button" id="item4GenerateAiImages">Generate AI images</button>
+ <button type="button" class="primary-button" id="item4GenerateAiImages">Generate</button>
  <button type="button" class="secondary-button" id="item4RegenerateAiImages" hidden>Regenerate all</button>
  </div>
  </div>
@@ -2478,7 +2487,7 @@
  <div class="studio-footer-meta">
  <span id="aiApiFooter" aria-live="polite"><strong>AI API:</strong> loading…</span>
  <span id="apiStatus" class="topbar-status">Connecting…</span>
- <span id="uiBuildLabel">UI build 0.6.593</span>
+ <span id="uiBuildLabel">UI build 0.6.594</span>
  <span id="workerBuildLabel">Worker …</span> </div>
  </footer>
 
@@ -2647,20 +2656,20 @@
  </div>
  </aside>
 
- <script src="/assets/config-0621.js?v=0.6.593-home-overview-cache"></script>
- <script src="/assets/ez-plan.js?v=0.6.593-home-overview-cache"></script>
- <script src="/assets/pipeline-schedule-grid-0622.js?v=0.6.593-home-overview-cache"></script>
- <script src="/assets/platform-schedule-calendar-0924.js?v=0.6.593-home-overview-cache"></script>
- <script src="/assets/timed-script.js?v=0.6.593-home-overview-cache"></script>
- <script src="/assets/vibe-cut.js?v=0.6.593-home-overview-cache"></script>
- <script src="/assets/app-item4-1008.js?v=0.6.593-home-overview-cache"></script>
- <script src="/assets/new-profile-1009.js?v=0.6.593-home-overview-cache"></script>
- <script src="/assets/all-profiles-overview-1007.js?v=0.6.593-home-overview-cache"></script>
- <script src="/assets/insights-0622.js?v=0.6.593-home-overview-cache"></script>
- <script src="/assets/engagement-1008.js?v=0.6.593-home-overview-cache"></script>
- <script src="/assets/ai-api-footer.js?v=0.6.593-home-overview-cache"></script>
- <script src="/assets/sticky-footer-scroll.js?v=0.6.593-home-overview-cache"></script>
-<script src="/assets/profile-setup.js?v=0.6.593-home-overview-cache"></script>
+ <script src="/assets/config-0621.js?v=0.6.594-ai-generate-density"></script>
+ <script src="/assets/ez-plan.js?v=0.6.594-ai-generate-density"></script>
+ <script src="/assets/pipeline-schedule-grid-0622.js?v=0.6.594-ai-generate-density"></script>
+ <script src="/assets/platform-schedule-calendar-0924.js?v=0.6.594-ai-generate-density"></script>
+ <script src="/assets/timed-script.js?v=0.6.594-ai-generate-density"></script>
+ <script src="/assets/vibe-cut.js?v=0.6.594-ai-generate-density"></script>
+ <script src="/assets/app-item4-1008.js?v=0.6.594-ai-generate-density"></script>
+ <script src="/assets/new-profile-1009.js?v=0.6.594-ai-generate-density"></script>
+ <script src="/assets/all-profiles-overview-1007.js?v=0.6.594-ai-generate-density"></script>
+ <script src="/assets/insights-0622.js?v=0.6.594-ai-generate-density"></script>
+ <script src="/assets/engagement-1008.js?v=0.6.594-ai-generate-density"></script>
+ <script src="/assets/ai-api-footer.js?v=0.6.594-ai-generate-density"></script>
+ <script src="/assets/sticky-footer-scroll.js?v=0.6.594-ai-generate-density"></script>
+<script src="/assets/profile-setup.js?v=0.6.594-ai-generate-density"></script>
 <script src="/assets/production-asset-labels.js?v=3"></script>
 <script>
 (function(){
