@@ -161,3 +161,5 @@ Deploy Worker 0.10.489-engagement-ledger. Shrink the engagement ledger so Chicag
 2026-10-11: Fast Approve All enqueue from record_ids (no N× Airtable GET); clear stuck group Approving… (UI 0.6.598 / Worker 0.10.530).
 
 2026-10-11: Soft home overview timeout (8s client + Worker build budget); no red Timeout banner; soft pipeline loading (UI 0.6.600 / Worker 0.10.531).
+
+2026-10-11: Flat All Profiles overview snapshot (Settings JSON); home reads 1 row instead of scanning Outputs/Ideas (Worker 0.10.532).

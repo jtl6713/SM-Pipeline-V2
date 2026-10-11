@@ -207,6 +207,15 @@ import {
   summarizeApproveAllJob,
 } from "./approve-all-batch.mjs";
 import {
+  STUDIO_PROFILES_OVERVIEW_SNAPSHOT_SETTING,
+  STUDIO_PROFILES_OVERVIEW_SNAPSHOT_FRESH_MS,
+  STUDIO_PROFILES_OVERVIEW_SNAPSHOT_MAX_AGE_MS,
+  filterOverviewSnapshotRows,
+  isOverviewSnapshotFresh,
+  parseOverviewSnapshot,
+  serializeOverviewSnapshot,
+} from "./profiles-overview-snapshot.mjs";
+import {
   RENDER_STATUS_READY,
   RENDER_STATUS_WAITING_QUEUE,
   assignRenderQueuePositions,
@@ -622,13 +631,14 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.531-home-overview-budget",
+          version: "0.10.532-home-overview-snapshot",
           studio_post_publish_release_v1: true,
           studio_render_queue_wait_v1: true,
           studio_shared_render_queue_v1: true,
           studio_approve_all_batch_v1: true,
           studio_approve_all_enqueue_ids_v1: true,
           studio_home_overview_budget_v1: true,
+          studio_home_overview_snapshot_v1: true,
           studio_engagement_v1: true,
           studio_mae_schedule_v1: true,
           studio_mae_28_day_schedule_v1: true,
@@ -1275,7 +1285,7 @@ export default {
 
       if (url.pathname === "/api/profiles/overview") {
         if (request.method !== "GET") throw new HttpError(405, "Method not allowed");
-        return profilesOverview(request, env, authorization);
+        return profilesOverview(request, env, authorization, ctx);
       }
 
       if (url.pathname === "/api/dashboard") {
@@ -1971,6 +1981,15 @@ export default {
         await studioSweepPostPublishMediaRelease(env, { limit: POST_PUBLISH_RELEASE_BATCH_LIMIT });
       } catch (error) {
         console.warn("post-publish media release cron failed", error);
+      }
+      // Keep All Profiles home flat counts warm (Settings snapshot) off the request path.
+      try {
+        const existing = await studioLoadOverviewSnapshot(env).catch(() => null);
+        if (!isOverviewSnapshotFresh(existing, Date.now(), STUDIO_PROFILES_OVERVIEW_SNAPSHOT_MAX_AGE_MS)) {
+          await studioRefreshOverviewSnapshot(env);
+        }
+      } catch (error) {
+        console.warn("overview snapshot cron refresh failed", error);
       }
     })());
     if (cadence.heavy) {
@@ -36362,9 +36381,19 @@ function studioOverviewRowMatchesProfile(row, profile) {
   return joined.includes(name);
 }
 
+/** Idea columns needed only for overview “ideas not in production” + profile match. */
+const OVERVIEW_IDEA_FIELDS = [
+  "Create_Date",
+  "Content Items",
+  "Promoted_Content_Record_ID",
+  "Content_Profile",
+  "Content Profiles",
+];
+
 async function buildStudioProfilesOverviewRows(env, profiles) {
   const formula = studioProfilesOverviewCombinedFormula(profiles);
   // Two Airtable reads total (was 2×N). Slot serialization still applies inside listRecords.
+  // Prefer this off the home request path — persist via studioRefreshOverviewSnapshot.
   const outputRows = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
     limit: STUDIO_PROFILES_OVERVIEW_OUTPUT_LIMIT,
     filterFormula: formula,
@@ -36376,6 +36405,7 @@ async function buildStudioProfilesOverviewRows(env, profiles) {
     limit: STUDIO_PROFILES_OVERVIEW_IDEA_LIMIT,
     sortField: "Create_Date",
     filterFormula: formula,
+    fields: OVERVIEW_IDEA_FIELDS,
   });
   return (profiles || []).map((profile) => {
     const profileOutputs = (outputRows || []).filter((row) => studioOverviewRowMatchesProfile(row, profile));
@@ -36399,6 +36429,61 @@ async function buildStudioProfilesOverviewRows(env, profiles) {
   });
 }
 
+const studioOverviewSnapshotMem = { at: 0, payload: null, inflight: null };
+
+async function studioLoadOverviewSnapshot(env) {
+  if (studioOverviewSnapshotMem.payload && Date.now() - studioOverviewSnapshotMem.at < STUDIO_PROFILES_OVERVIEW_SNAPSHOT_FRESH_MS) {
+    return studioOverviewSnapshotMem.payload;
+  }
+  const row = await studioSettingsByName(env, STUDIO_PROFILES_OVERVIEW_SNAPSHOT_SETTING).catch(() => null);
+  const parsed = parseOverviewSnapshot(row?.fields?.Setting_Value || row?.fields?.Value || "");
+  if (parsed) {
+    studioOverviewSnapshotMem.payload = parsed;
+    studioOverviewSnapshotMem.at = Date.now();
+  }
+  return parsed;
+}
+
+async function studioSaveOverviewSnapshot(env, rows) {
+  const stamp = new Date().toISOString();
+  const payload = {
+    schema_version: 1,
+    updated_at: stamp,
+    rows: (rows || []).map((row) => ({
+      id: row.id,
+      name: row.name || row.city_label || row.id,
+      city_label: row.city_label || "",
+      scheduled: row.scheduled || {},
+      manual: Number(row.manual) || 0,
+      failed: Number(row.failed) || 0,
+      approval: Number(row.approval) || 0,
+      ideas: Number(row.ideas) || 0,
+    })),
+  };
+  await studioUpsertSetting(
+    env,
+    STUDIO_PROFILES_OVERVIEW_SNAPSHOT_SETTING,
+    serializeOverviewSnapshot(payload),
+    "Materialized All Profiles home counts (flat). Cron + home warm; request path reads this instead of scanning Outputs/Ideas.",
+  );
+  studioOverviewSnapshotMem.payload = payload;
+  studioOverviewSnapshotMem.at = Date.now();
+  return payload;
+}
+
+async function studioRefreshOverviewSnapshot(env) {
+  if (studioOverviewSnapshotMem.inflight) return studioOverviewSnapshotMem.inflight;
+  studioOverviewSnapshotMem.inflight = (async () => {
+    const profiles = await listContentProfileRecords(env);
+    const active = (profiles || []).filter((record) => Boolean(f(record, "Active")));
+    const rows = await buildStudioProfilesOverviewRows(env, active);
+    return studioSaveOverviewSnapshot(env, rows);
+  })().finally(() => {
+    studioOverviewSnapshotMem.inflight = null;
+  });
+  return studioOverviewSnapshotMem.inflight;
+}
+
 function isAirtableCoolingError(error) {
   const status = Number(error?.status || 0);
   const message = String(error?.message || error || "");
@@ -36419,7 +36504,7 @@ function respondProfilesOverviewSoft(request, env, { records = [], cached = fals
 }
 
 /** One Worker request for All Profiles home table — no N× /api/dashboard fan-out. */
-async function profilesOverview(request, env, authorization) {
+async function profilesOverview(request, env, authorization, ctx = null) {
   const cache = studioProfilesOverviewCache;
   const coolMs = airtableCooldownWaitMs();
   // Serve last-good without resolving profiles (that resolve is itself an Airtable hit).
@@ -36427,16 +36512,27 @@ async function profilesOverview(request, env, authorization) {
     if (cache.rows?.length) {
       return respondProfilesOverviewSoft(request, env, { records: cache.rows, stale: true, cooling: true });
     }
+    const snap = studioOverviewSnapshotMem.payload;
+    if (snap?.rows?.length) {
+      return respondProfilesOverviewSoft(request, env, { records: snap.rows, stale: true, cooling: true });
+    }
     return respondProfilesOverviewSoft(request, env, { records: [], cooling: true });
   }
 
   let profiles;
+  let snapshot = null;
   try {
-    profiles = await raceStudioOverviewBudget(
-      resolveAuthorizedContentProfiles(env, authorization),
-      STUDIO_PROFILES_OVERVIEW_RESOLVE_BUDGET_MS,
-      "overview-resolve",
-    );
+    // Prefer flat snapshot (1 Settings read) over scanning 800 outputs on every home paint.
+    const settled = await Promise.all([
+      raceStudioOverviewBudget(
+        resolveAuthorizedContentProfiles(env, authorization),
+        STUDIO_PROFILES_OVERVIEW_RESOLVE_BUDGET_MS,
+        "overview-resolve",
+      ),
+      studioLoadOverviewSnapshot(env).catch(() => null),
+    ]);
+    profiles = settled[0];
+    snapshot = settled[1];
   } catch (error) {
     if (cache.rows?.length) {
       return respondProfilesOverviewSoft(request, env, { records: cache.rows, stale: true, cooling: isAirtableCoolingError(error) });
@@ -36448,13 +36544,35 @@ async function profilesOverview(request, env, authorization) {
   }
 
   const authKey = studioProfilesOverviewAuthKey(profiles);
+  const authorizedIds = new Set((profiles || []).map((profile) => String(profile?.id || "").trim()).filter(Boolean));
+  const snapshotRows = filterOverviewSnapshotRows(snapshot?.rows, authorizedIds);
+  const snapshotFresh = Boolean(snapshotRows.length) && isOverviewSnapshotFresh(snapshot);
+
   const now = Date.now();
   if (cache.rows && cache.authKey === authKey && now - cache.at < STUDIO_PROFILES_OVERVIEW_CACHE_MS) {
     return respondProfilesOverviewSoft(request, env, { records: cache.rows, cached: true });
   }
+
+  if (snapshotRows.length) {
+    cache.authKey = authKey;
+    cache.rows = snapshotRows;
+    cache.at = Date.now();
+    if (!snapshotFresh) {
+      const refresh = studioRefreshOverviewSnapshot(env).catch((error) => {
+        console.warn("overview snapshot background refresh failed", error);
+      });
+      if (ctx && typeof ctx.waitUntil === "function") ctx.waitUntil(refresh);
+    }
+    return respondProfilesOverviewSoft(request, env, {
+      records: snapshotRows,
+      cached: snapshotFresh,
+      stale: !snapshotFresh,
+    });
+  }
+
+  // Cold start (no snapshot yet): budgeted live build, then persist for the next open.
   if (cache.inflight && cache.authKey === authKey) {
     try {
-      // Keep inflight running after budget — next paint gets a warm cache.
       const rows = await raceStudioOverviewBudget(
         cache.inflight,
         STUDIO_PROFILES_OVERVIEW_BUILD_BUDGET_MS,
@@ -36473,9 +36591,12 @@ async function profilesOverview(request, env, authorization) {
   }
   cache.authKey = authKey;
   cache.inflight = buildStudioProfilesOverviewRows(env, profiles)
-    .then((rows) => {
+    .then(async (rows) => {
       cache.at = Date.now();
       cache.rows = rows;
+      await studioSaveOverviewSnapshot(env, rows).catch((error) => {
+        console.warn("overview snapshot save after cold build failed", error);
+      });
       return rows;
     })
     .finally(() => {
@@ -36493,6 +36614,10 @@ async function profilesOverview(request, env, authorization) {
       return respondProfilesOverviewSoft(request, env, { records: cache.rows, stale: true, cooling: isAirtableCoolingError(error) });
     }
     if (isAirtableCoolingError(error)) {
+      // Keep building in the background so the next home open hits the snapshot.
+      if (ctx && typeof ctx.waitUntil === "function") {
+        ctx.waitUntil(cache.inflight.catch(() => null));
+      }
       return respondProfilesOverviewSoft(request, env, { records: [], cooling: true });
     }
     throw error;

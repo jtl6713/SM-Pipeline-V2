@@ -29,7 +29,7 @@ function scheduledBody() {
 }
 
 test("Worker health advertises airtable burn-kill cron build", () => {
-  assert.match(worker, /version: "0.10.531-home-overview-budget"/);
+  assert.match(worker, /version: "0.10.532-home-overview-snapshot"/);
   assert.match(worker, /studio_airtable_low_burn_cron_v1: true/);
   assert.match(worker, /studio_airtable_burn_kill_v1: true/);
   assert.match(worker, /studioCronAirtableCadence/);
@@ -70,6 +70,7 @@ test("light ticks only run publish/produce rescue; heavy owns platform heals", (
   assert.match(afterHeavy, /studioHealAwaitingApprovalStaleRfr/);
   assert.match(afterHeavy, /advanceStudioProductionOutputs/);
   assert.match(afterHeavy, /studioSweepPostPublishMediaRelease/);
+  assert.match(afterHeavy, /studioRefreshOverviewSnapshot/);
 
   // Light body (before heavy gate) must not still call platform reconcile storms.
   const beforeHeavy = scheduled.slice(0, heavyGate);
@@ -78,6 +79,7 @@ test("light ticks only run publish/produce rescue; heavy owns platform heals", (
   assert.doesNotMatch(beforeHeavy, /studioReconcileYoutubePublishes/);
   assert.doesNotMatch(beforeHeavy, /studioHealFailedStatuses/);
   assert.doesNotMatch(beforeHeavy, /studioSweepPublishedInsights/);
+  assert.doesNotMatch(beforeHeavy, /studioRefreshOverviewSnapshot/);
   assert.doesNotMatch(beforeHeavy, /item4PulsePipelineStage/);
 });
 

@@ -46,5 +46,21 @@ test("Worker budgets overview Airtable work so home never waits 60s", () => {
   assert.match(worker, /studio_home_overview_budget_v1:\s*true/);
   assert.match(worker, /STUDIO_PROFILES_OVERVIEW_BUILD_BUDGET_MS/);
   assert.match(worker, /raceStudioOverviewBudget/);
-  assert.match(worker, /0\.10\.531-home-overview-budget/);
+  assert.match(worker, /0\.10\.532-home-overview-snapshot/);
+});
+
+test("Worker serves All Profiles from a flat Settings snapshot", () => {
+  assert.match(worker, /studio_home_overview_snapshot_v1:\s*true/);
+  assert.match(worker, /STUDIO_PROFILES_OVERVIEW_SNAPSHOT_SETTING/);
+  assert.match(worker, /studioLoadOverviewSnapshot/);
+  assert.match(worker, /studioRefreshOverviewSnapshot/);
+  assert.match(worker, /Prefer flat snapshot/);
+  const scheduled = worker.slice(
+    worker.indexOf("async scheduled(event, env, ctx)"),
+    worker.indexOf("class HttpError"),
+  );
+  const heavyGate = scheduled.indexOf("if (!cadence.heavy) return;");
+  assert.ok(heavyGate > 0);
+  assert.match(scheduled.slice(heavyGate), /studioRefreshOverviewSnapshot/);
+  assert.doesNotMatch(scheduled.slice(0, heavyGate), /studioRefreshOverviewSnapshot/);
 });
