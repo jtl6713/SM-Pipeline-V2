@@ -1864,6 +1864,14 @@ body:has(#page-content.active) .studio-footer-links button:hover{
 #page-content .item4-plan-source,
 #page-content .production-request-id,
 #page-content .production-library-panel .panel-heading p,
+#page-content #productionRequestMessage.form-message{
+  display:block;
+  max-width:100%;
+  white-space:normal;
+  overflow-wrap:anywhere;
+  word-break:break-word;
+  line-height:1.4;
+}
 #page-content #productionPromotionCompatibility:not(.success):not(.error-text){
   display:none!important;
 }

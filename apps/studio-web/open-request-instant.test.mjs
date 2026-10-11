@@ -20,3 +20,11 @@ test("In-production Open request paints workspace before waiting on Airtable", a
     /data-content-request[\s\S]{0,400}await api\(`\/api\/production-requests\/\$\{encodeURIComponent\(requestId\)\}`\)/,
   );
 });
+
+test("Item4 Airtable cooldown is transient and does not imply photos were deleted", async () => {
+  const app = await readFile(appPath, "utf8");
+  assert.match(app, /function isTransientStudioError/);
+  assert.match(app, /isAirtableCooldownFailure/);
+  assert.match(app, /Airtable is busy — retrying\. Photos are safe\./);
+  assert.doesNotMatch(app, /Your saved photos and plan were not deleted/);
+});

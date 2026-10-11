@@ -8,7 +8,7 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const app = fs.readFileSync(path.join(here, "assets/app-item4-1008.js"), "utf8");
 
 test("UI build advertises open-request", () => {
-  assert.match(app, /BUILD_ID = "item4-0\.6\.595-open-request"/);
+  assert.match(app, /BUILD_ID = "item4-0\.6\.596-open-request-cool"/);
 });
 
 test("api() backs off longer on Airtable 429 / cooling-down", () => {

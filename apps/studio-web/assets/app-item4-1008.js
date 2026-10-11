@@ -264,7 +264,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.595-open-request";
+  const BUILD_ID = "item4-0.6.596-open-request-cool";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -10866,7 +10866,8 @@ function timedScriptAssetLabel(asset, index) {
 
   function isTransientStudioError(error) {
     const text = String(error?.message || error || "");
-    return /too many subrequests|subrequest|request failed \(5\d\d\)|timed out|networkerror|failed to fetch|502|503|504/i.test(text);
+    if (isAirtableCooldownFailure({ status: error?.status, text, error })) return true;
+    return /too many subrequests|subrequest|request failed \(5\d\d\)|timed out|networkerror|failed to fetch|502|503|504|429/i.test(text);
   }
 
   function item4VariantNotReadyCopy(variantStatus) {
@@ -11017,24 +11018,34 @@ function timedScriptAssetLabel(asset, index) {
         }
       });
     } catch (error) {
+      const cooling = isAirtableCooldownFailure({ status: error?.status, text: String(error?.message || ""), error });
+      const transient = cooling || isTransientStudioError(error);
       if (item4Workspace) {
         console.warn("Item 4 workspace refresh deferred", error);
-        if (!isTransientStudioError(error)) {
-          setRequestMessage("Could not refresh this request. Your photos and plan are still saved.", "error-text");
+        if (!transient) {
+          setRequestMessage("Could not refresh this request. Photos and plan are still saved.", "error-text");
+        } else if (cooling) {
+          setRequestMessage("Airtable is busy — retrying media load. Photos are safe.", "");
         }
+      } else if (cooling) {
+        // Short copy: the old "not deleted" line truncated on mobile and read like a wipe.
+        setRequestMessage("Airtable is busy — retrying. Photos are safe.", "");
+      } else if (transient) {
+        setRequestMessage("Still loading this request. Studio will try again.", "");
       } else {
         setRequestMessage(
-          isTransientStudioError(error)
-            ? "Still loading this request. Studio will try again."
-            : `Could not load saved media: ${String(error?.message || "request unavailable").slice(0, 160)}. Your saved photos and plan were not deleted.`,
-          isTransientStudioError(error) ? "" : "error-text"
+          `Could not load saved media (${String(error?.message || "unavailable").slice(0, 80)}). Photos are safe — tap Refresh.`,
+          "error-text",
         );
       }
       if (!item4WorkspaceRetryTimer) {
+        const retryMs = cooling
+          ? Math.max(12000, Number(API_AIRTABLE_COOLDOWN_RETRY_MS) || 12000)
+          : transient ? 4000 : 2000;
         item4WorkspaceRetryTimer = window.setTimeout(() => {
           item4WorkspaceRetryTimer = 0;
           if (activeProductionRequest?.id === record.id) loadItem4Workspace(record, { allowAssetChanges }).catch(() => {});
-        }, 2000);
+        }, retryMs);
       }
     }
   }
