@@ -123,9 +123,10 @@ test("Home dashboard exposes only actionable counts and filtered destinations", 
   assert.doesNotMatch(app, /label: "Published"/);
   assert.match(app, /if \(filter === "manual"\) return state === "Manual Action Required"/);
   assert.match(app, /if \(filter === "failed"\) return state === "Failed"/);
-  assert.match(app, /if \(filter === "approval"\) return creativeCanApproveForPublishing\(record\) && !pipelineRecordIsAzAutoQueue\(record\)/);
+  assert.match(app, /if \(filter === "approval"\) \{\s*const approvalState = studio === "Ready for Review"/);
   assert.match(app, /const awaitingApprovalCount = outputs\.filter\(\(record\) => pipelineRecordMatchesFilter\(record, "approval"\)\)\.length/);
   assert.doesNotMatch(app, /filter === "approval"[^\n]*review_status[^\n]*Pending/);
+  assert.doesNotMatch(app, /if \(filter === "approval"\) return creativeCanApproveForPublishing\(record\) && !pipelineRecordIsAzAutoQueue\(record\)/);
 });
 
 test("Home metric cards use count tones and Airtable-safe polling", () => {
