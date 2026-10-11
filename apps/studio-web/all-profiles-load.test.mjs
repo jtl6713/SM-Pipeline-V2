@@ -14,5 +14,5 @@ test("All Profiles overview caps dashboard concurrency and times out hung fetche
   assert.match(overview, /Timed out after/);
   assert.match(overview, /timeoutMs:\s*25000/);
   assert.match(overview, /load_error/);
-  assert.match(html, /all-profiles-overview-1007\.js\?v=0\.6\.588-ai-api-soft/);
+  assert.match(html, /all-profiles-overview-1007\.js\?v=0\.6\.589-airtable-burn-kill/);
 });

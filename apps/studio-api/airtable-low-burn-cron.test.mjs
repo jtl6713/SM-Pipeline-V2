@@ -21,10 +21,19 @@ function loadCadenceHelper() {
   return vm.runInNewContext(snippet, Object.create(null));
 }
 
-test("Worker health advertises airtable low-burn cron build", () => {
-  assert.match(worker, /version: "0.10.523-ai-api-soft"/);
+function scheduledBody() {
+  return worker.slice(
+    worker.indexOf("async scheduled(event, env, ctx)"),
+    worker.indexOf("class HttpError")
+  );
+}
+
+test("Worker health advertises airtable burn-kill cron build", () => {
+  assert.match(worker, /version: "0.10.524-airtable-burn-kill"/);
   assert.match(worker, /studio_airtable_low_burn_cron_v1: true/);
+  assert.match(worker, /studio_airtable_burn_kill_v1: true/);
   assert.match(worker, /studioCronAirtableCadence/);
+  assert.match(worker, /airtableCooldownWaitMs/);
 });
 
 test("production Worker deploy cron is every five minutes", () => {
@@ -32,18 +41,53 @@ test("production Worker deploy cron is every five minutes", () => {
   assert.doesNotMatch(deployWorkflow, /'crons':\['\*\/2 \* \* \* \*'\]/);
 });
 
-test("scheduled gates insights and ingest to heavy cadence", () => {
-  const scheduled = worker.slice(
-    worker.indexOf("async scheduled(event, env, ctx)"),
-    worker.indexOf("class HttpError")
-  );
+test("scheduled skips cron while Airtable is cooling down", () => {
+  const scheduled = scheduledBody();
+  assert.match(scheduled, /airtableCooldownWaitMs\(\)/);
+  assert.match(scheduled, /coolMs > AIRTABLE_SLOT_FAIL_FAST_MS/);
+  assert.match(scheduled, /cron skipped: Airtable cooling down/);
+});
+
+test("light ticks only run publish/produce rescue; heavy owns platform heals", () => {
+  const scheduled = scheduledBody();
   assert.match(scheduled, /const cadence = studioCronAirtableCadence/);
+  assert.match(scheduled, /if \(!cadence\.heavy\) return;/);
+  assert.match(scheduled, /studioReconcileOverdueScheduledPublishes/);
+  assert.match(scheduled, /studioReconcileApprovedPublishes/);
+  assert.match(scheduled, /healStuckStudioRenders/);
+  assert.match(scheduled, /resumeStaleStudioProductionJobs/);
+  assert.match(scheduled, /startOrphanedStudioProductionJobs/);
+
+  // Platform reconciles / heal storms must sit behind the heavy gate.
+  const heavyGate = scheduled.indexOf("if (!cadence.heavy) return;");
+  assert.ok(heavyGate > 0, "missing light early-return");
+  const afterHeavy = scheduled.slice(heavyGate);
+  assert.match(afterHeavy, /studioReconcileTiktokDrafts/);
+  assert.match(afterHeavy, /studioReconcilePublishingInstagramReels/);
+  assert.match(afterHeavy, /studioReconcileFacebookReels/);
+  assert.match(afterHeavy, /studioReconcileYoutubePublishes/);
+  assert.match(afterHeavy, /studioHealFailedStatuses/);
+  assert.match(afterHeavy, /studioHealAwaitingApprovalStaleRfr/);
+  assert.match(afterHeavy, /advanceStudioProductionOutputs/);
+  assert.match(afterHeavy, /studioSweepPostPublishMediaRelease/);
+
+  // Light body (before heavy gate) must not still call platform reconcile storms.
+  const beforeHeavy = scheduled.slice(0, heavyGate);
+  assert.doesNotMatch(beforeHeavy, /studioReconcileTiktokDrafts/);
+  assert.doesNotMatch(beforeHeavy, /studioReconcilePublishingInstagramReels/);
+  assert.doesNotMatch(beforeHeavy, /studioReconcileYoutubePublishes/);
+  assert.doesNotMatch(beforeHeavy, /studioHealFailedStatuses/);
+  assert.doesNotMatch(beforeHeavy, /studioSweepPublishedInsights/);
+  assert.doesNotMatch(beforeHeavy, /item4PulsePipelineStage/);
+});
+
+test("scheduled gates insights and ingest to heavy cadence", () => {
+  const scheduled = scheduledBody();
   assert.match(scheduled, /if \(cadence\.insights\)/);
   assert.match(scheduled, /if \(cadence\.ingest\)/);
   assert.match(scheduled, /if \(cadence\.heavy\)/);
   assert.match(scheduled, /studioSweepPublishedInsights/);
   assert.match(scheduled, /item4PulsePipelineStage\(env, "a2"/);
-  assert.match(scheduled, /cadence\.heavy \|\| \(item4Drain\?\.request_ids/);
 });
 
 test("insights backlog list is capped near the per-profile select size", () => {

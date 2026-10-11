@@ -622,7 +622,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.523-ai-api-soft",
+          version: "0.10.524-airtable-burn-kill",
           studio_post_publish_release_v1: true,
           studio_render_queue_wait_v1: true,
           studio_shared_render_queue_v1: true,
@@ -658,6 +658,7 @@ export default {
           studio_intake_parked_heal_v1: true,
           studio_quality_agent_v1: true,
           studio_airtable_low_burn_cron_v1: true,
+          studio_airtable_burn_kill_v1: true,
           studio_oversized_list_refresh_v1: true,
           studio_library_published_files_v1: true,
           studio_native_grid_cover_v1: true,
@@ -1711,29 +1712,29 @@ export default {
     }
   },
   async scheduled(event, env, ctx) {
-    // Airtable free/Team monthly call caps require a thinner cron than the old
-    // */2 megapass. Light ticks keep publish rescue + stuck produce/render/crop
-    // alive; heavy ticks (UTC :00 / :30) own insights, idea photo matchers,
-    // A1S/A2 ingestion, and one-off ops patches. Daily ideas stay on a separate
-    // waitUntil so they cannot block P2/Remotion.
+    // 2026-10-11 burn-kill: light ticks were still running ~25 platform reconciles
+    // + heals every 5 minutes, colliding with Studio UI polls and Airtable 429
+    // cooldowns (603 Worker hung-cancels in 3h). Light = publish/produce rescue
+    // only. Heavy (UTC :00/:30) owns platform polls, heals, insights, ingest,
+    // post-publish release. Skip the whole pass while Airtable is cooling down.
     const cadence = studioCronAirtableCadence(new Date(), event?.cron || "");
     ctx.waitUntil((async () => {
+      const coolMs = airtableCooldownWaitMs();
+      if (coolMs > AIRTABLE_SLOT_FAIL_FAST_MS) {
+        console.warn("cron skipped: Airtable cooling down", { waitMs: coolMs, heavy: cadence.heavy });
+        return;
+      }
+
+      // --- LIGHT (every 5 min): due-publish + stuck produce/render only ---
       try {
         await studioReconcileOverdueScheduledPublishes(env, { limit: 12 });
       } catch (error) {
         console.warn("overdue scheduled publish rescue cron failed", error);
       }
       try {
-        await studioReconcileFacebookReels(env, { limit: 4 });
+        await studioReconcileApprovedPublishes(env);
       } catch (error) {
-        console.warn("facebook reel priority reconcile cron failed", error);
-      }
-      if (cadence.heavy) {
-        try {
-          await opsForceAzNavyPierTitle(env);
-        } catch (error) {
-          console.warn("ops az navy pier title patch failed", error);
-        }
+        console.warn("publish reconcile cron failed", error);
       }
       try {
         await healStuckStudioRenders(env);
@@ -1741,46 +1742,68 @@ export default {
         console.warn("studio stuck-render heal failed", error);
       }
       try {
+        await studioResumeApproveAllJobs(env, ctx);
+      } catch (error) {
+        console.warn("studio approve-all batch resume failed", error);
+      }
+      try {
+        await resumeStaleStudioProductionJobs(env);
+      } catch (error) {
+        console.warn("studio produce watchdog failed", error);
+      }
+      try {
+        await startOrphanedStudioProductionJobs(env);
+      } catch (error) {
+        console.warn("studio produce orphan kick failed", error);
+      }
+      try {
+        await resumeAzFinishedVideoRequests(env, ctx);
+      } catch (error) {
+        console.warn("AZ finished-video resume failed", error);
+      }
+
+      if (!cadence.heavy) return;
+
+      // --- HEAVY (UTC :00 / :30): platform polls, heals, ideas, ingest, release ---
+      try {
+        await opsForceAzNavyPierTitle(env);
+      } catch (error) {
+        console.warn("ops az navy pier title patch failed", error);
+      }
+      try {
         await studioHealFailedStatuses(env, { limit: 6 });
       } catch (error) {
         console.warn("studio failed-status heal failed", error);
       }
-      if (cadence.heavy) {
-        try {
-          await studioHealIgCarouselTooManyChildren(env, { limit: 4 });
-        } catch (error) {
-          console.warn("studio IG carousel child-count heal failed", error);
-        }
-        try {
-          await studioHealIgCarouselChildVerificationRace(env, { limit: 4 });
-        } catch (error) {
-          console.warn("studio IG AP1C verification-race heal failed", error);
-        }
-        try {
-          await studioHealIgCarouselChildPollFailure(env, { limit: 4 });
-        } catch (error) {
-          console.warn("studio IG AP2C child-poll heal failed", error);
-        }
-        try {
-          await studioHealIgCarouselRateLimit(env, { limit: 4 });
-        } catch (error) {
-          console.warn("studio IG AP1C rate-limit heal failed", error);
-        }
-        try {
-          await studioHealNativePhotoReviewStrands(env, { limit: 8 });
-        } catch (error) {
-          console.warn("studio native-photo review-strand heal failed", error);
-        }
+      try {
+        await studioHealIgCarouselTooManyChildren(env, { limit: 4 });
+      } catch (error) {
+        console.warn("studio IG carousel child-count heal failed", error);
+      }
+      try {
+        await studioHealIgCarouselChildVerificationRace(env, { limit: 4 });
+      } catch (error) {
+        console.warn("studio IG AP1C verification-race heal failed", error);
+      }
+      try {
+        await studioHealIgCarouselChildPollFailure(env, { limit: 4 });
+      } catch (error) {
+        console.warn("studio IG AP2C child-poll heal failed", error);
+      }
+      try {
+        await studioHealIgCarouselRateLimit(env, { limit: 4 });
+      } catch (error) {
+        console.warn("studio IG AP1C rate-limit heal failed", error);
+      }
+      try {
+        await studioHealNativePhotoReviewStrands(env, { limit: 8 });
+      } catch (error) {
+        console.warn("studio native-photo review-strand heal failed", error);
       }
       try {
         await studioHealAwaitingApprovalStaleRfr(env, { limit: 12 });
       } catch (error) {
         console.warn("studio awaiting-approval stale RFR heal failed", error);
-      }
-      try {
-        await studioResumeApproveAllJobs(env, ctx);
-      } catch (error) {
-        console.warn("studio approve-all batch resume failed", error);
       }
       try {
         await studioHealPromotedMissingFanout(env, { limit: 8 });
@@ -1798,37 +1821,10 @@ export default {
         console.warn("studio rfr missing-deliverable heal failed", error);
       }
       try {
-        await startOrphanedStudioProductionJobs(env);
-      } catch (error) {
-        console.warn("studio produce orphan kick failed", error);
-      }
-      try {
-        await resumeAzFinishedVideoRequests(env, ctx);
-      } catch (error) {
-        console.warn("AZ finished-video resume failed", error);
-      }
-      if (cadence.ingest) {
-        try {
-          await item4PulsePipelineStage(env, "a1s", { extra: { live_status: true } }, "A1S");
-        } catch (error) {
-          console.warn("a1s compression watchdog failed", error);
-        }
-      }
-      // Due publishes first. Item4 drain + autonomous produce were running before
-      // this block and routinely exhausted the isolate budget, so scheduled TikTok /
-      // FB finalize work sat for hours with no dispatch receipt (326, 311/316 late).
-      try {
-        await studioReconcileApprovedPublishes(env);
-      } catch (error) {
-        console.warn("publish reconcile cron failed", error);
-      }
-      try {
         await studioReconcileTiktokDrafts(env);
       } catch (error) {
         console.warn("tiktok draft reconcile cron failed", error);
       }
-      // Due IG carousels (Parent Ready) must publish before heavier platform polls
-      // burn the isolate subrequest budget — 304 sat ~3h past schedule otherwise.
       try {
         await studioReconcileInstagramCarousels(env);
       } catch (error) {
@@ -1850,6 +1846,11 @@ export default {
         console.warn("facebook slideshow reconcile cron failed", error);
       }
       try {
+        await studioReconcileFacebookReels(env, { limit: 4 });
+      } catch (error) {
+        console.warn("facebook reel priority reconcile cron failed", error);
+      }
+      try {
         await studioReconcileFacebookReels(env);
       } catch (error) {
         console.warn("facebook reel reconcile cron failed", error);
@@ -1869,24 +1870,15 @@ export default {
       } catch (error) {
         console.warn("facebook native cover reconcile cron failed", error);
       }
-      if (cadence.heavy) {
-        try {
-          await autoListenOpenPhotoIdeas(env, { limit: 12 });
-        } catch (error) {
-          console.warn("idea automatic photo listening failed", error);
-        }
+      try {
+        await autoListenOpenPhotoIdeas(env, { limit: 12 });
+      } catch (error) {
+        console.warn("idea automatic photo listening failed", error);
       }
-      // Existing listeners react to newly ingested media on every five-minute
-      // Worker tick. Starting brand-new listeners stays on the lower-cost heavy cadence.
       try {
         await runWaitingIdeaPhotoMatches(env, { limit: 12 });
       } catch (error) {
         console.warn("idea photo-wait matcher failed", error);
-      }
-      try {
-        await resumeStaleStudioProductionJobs(env);
-      } catch (error) {
-        console.warn("studio produce watchdog failed", error);
       }
       try {
         await studioHealEscalatedProduce(env, { limit: 4 });
@@ -1899,9 +1891,7 @@ export default {
       } catch (error) {
         console.warn("item4 pending crop drain cron failed", error);
       }
-      // Preparing-gap heal lists Production Requests every call; skip on light
-      // ticks when the drain scan already found nothing outstanding.
-      if (cadence.heavy || (item4Drain?.request_ids || []).length) {
+      if (item4Drain?.request_ids?.length) {
         try {
           await item4HealIncompletePreparingVariants(env);
         } catch (error) {
@@ -1928,8 +1918,6 @@ export default {
         } catch (error) {
           console.warn("insights sweep cron failed", error);
         }
-        // Similar-account collection remains manual. First-party lifecycle snapshots are
-        // persisted by the sweep; refresh learned patterns only for profiles that changed.
         for (const profile of firstPartyAnalyticsSweep?.profiles || []) {
           try {
             await studioRecomputeInsightsLearned(env, { profile });
@@ -1938,7 +1926,6 @@ export default {
           }
         }
         try {
-          // search.list is ~100 quota units. At most once per day from cron; Ops can still force discover.
           await studioDiscoverYoutubeChicagoCreators(env, { theme: "chicago", limit: 5, scheduled: true });
         } catch (error) {
           console.warn("insights youtube discovery cron failed", error);
@@ -1951,15 +1938,16 @@ export default {
       }
       if (cadence.ingest) {
         try {
-          // After publish work: start the next oversized Ingestion clip so a Drive dump
-          // does not wait for Process intake folder. live_status above only resumes jobs.
+          await item4PulsePipelineStage(env, "a1s", { extra: { live_status: true } }, "A1S");
+        } catch (error) {
+          console.warn("a1s compression watchdog failed", error);
+        }
+        try {
           await item4PulsePipelineStage(env, "a1s", { extra: {} }, "A1S");
         } catch (error) {
           console.warn("a1s ingestion scan failed", error);
         }
         try {
-          // Eligible leftover files (already-small clips, HEICs, compressed replacements)
-          // must leave Ingestion without a human clicking Process intake folder.
           await item4PulsePipelineStage(env, "a2", {
             extra: { drain: true, trigger_a2b: true, wait_for_next: false },
           }, "A2");
@@ -1967,20 +1955,20 @@ export default {
           console.warn("a2 ingestion drain failed", error);
         }
       }
-      if (cadence.heavy) {
-        try {
-          await studioSweepPostPublishMediaRelease(env, { limit: POST_PUBLISH_RELEASE_BATCH_LIMIT });
-        } catch (error) {
-          console.warn("post-publish media release cron failed", error);
-        }
+      try {
+        await studioSweepPostPublishMediaRelease(env, { limit: POST_PUBLISH_RELEASE_BATCH_LIMIT });
+      } catch (error) {
+        console.warn("post-publish media release cron failed", error);
       }
     })());
-    ctx.waitUntil(runStudioDailyIdeas(null, env, { permissions: { tenant_admin: true } }, ctx, {
-      scheduled: true,
-      cron: event?.cron || "",
-    }).catch((error) => {
-      console.warn("daily idea cadence failed", error);
-    }));
+    if (cadence.heavy) {
+      ctx.waitUntil(runStudioDailyIdeas(null, env, { permissions: { tenant_admin: true } }, ctx, {
+        scheduled: true,
+        cron: event?.cron || "",
+      }).catch((error) => {
+        console.warn("daily idea cadence failed", error);
+      }));
+    }
   },
 };
 
@@ -2370,6 +2358,9 @@ const AIRTABLE_MIN_GAP_MS = 250;
 const AIRTABLE_SLOT_FAIL_FAST_MS = 1500;
 let airtableNextRequestAt = 0;
 let airtableQueue = Promise.resolve();
+function airtableCooldownWaitMs() {
+  return Math.max(0, airtableNextRequestAt - Date.now());
+}
 function airtableRequestSlot() {
   const slot = airtableQueue.then(async () => {
     const now = Date.now();

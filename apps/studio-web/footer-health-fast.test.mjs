@@ -7,8 +7,20 @@ import { fileURLToPath } from "node:url";
 const here = path.dirname(fileURLToPath(import.meta.url));
 const app = fs.readFileSync(path.join(here, "assets/app-item4-1008.js"), "utf8");
 
-test("UI build advertises ai-api-soft", () => {
-  assert.match(app, /BUILD_ID = "item4-0\.6\.588-ai-api-soft"/);
+test("UI build advertises airtable-burn-kill", () => {
+  assert.match(app, /BUILD_ID = "item4-0\.6\.589-airtable-burn-kill"/);
+});
+
+test("api() backs off longer on Airtable 429 / cooling-down", () => {
+  assert.match(app, /API_AIRTABLE_COOLDOWN_RETRY_MS = 12000/);
+  assert.match(app, /function apiRetryDelayMs/);
+  assert.match(app, /function isAirtableCooldownFailure/);
+  assert.match(app, /cooling down\|rate\.\?limit\|too many requests/);
+  const apiStart = app.indexOf("async function api(path, options = {})");
+  assert.ok(apiStart >= 0);
+  const apiFn = app.slice(apiStart, apiStart + 3500);
+  assert.match(apiFn, /apiRetryDelayMs\(/);
+  assert.doesNotMatch(apiFn, /await sleepMs\(API_TRANSIENT_RETRY_MS\);/);
 });
 
 test("checkHealth paints Worker/API before loading profiles", () => {
