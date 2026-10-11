@@ -48,10 +48,39 @@
   function scheduledTotal(row) {
     return platformOrder.reduce((sum, platform) => sum + (Number(row?.scheduled?.[platform]) || 0), 0);
   }
-  async function json(url) {
-    const response = await fetch(url, { credentials: "same-origin", headers: { Accept: "application/json" }, cache: "no-store" });
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    return response.json();
+  async function json(url, { timeoutMs = 20000 } = {}) {
+    const controller = typeof AbortController === "function" ? new AbortController() : null;
+    const timer = controller ? window.setTimeout(() => controller.abort(), timeoutMs) : 0;
+    try {
+      const response = await fetch(url, {
+        credentials: "same-origin",
+        headers: { Accept: "application/json" },
+        cache: "no-store",
+        signal: controller?.signal,
+      });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      return response.json();
+    } catch (error) {
+      if (error?.name === "AbortError") throw new Error(`Timed out after ${timeoutMs}ms`);
+      throw error;
+    } finally {
+      if (timer) window.clearTimeout(timer);
+    }
+  }
+  async function mapPool(items, limit, worker) {
+    const list = Array.isArray(items) ? items : [];
+    const concurrency = Math.max(1, Math.min(Number(limit) || 1, list.length || 1));
+    const results = new Array(list.length);
+    let next = 0;
+    async function run() {
+      while (next < list.length) {
+        const index = next;
+        next += 1;
+        results[index] = await worker(list[index], index);
+      }
+    }
+    await Promise.all(Array.from({ length: concurrency }, () => run()));
+    return results;
   }
   function tone(value, kind) {
     const n = Number(value) || 0;
@@ -127,13 +156,35 @@
     state.loading = true;
     if (!state.rows.length) render();
     try {
-      const profilesData = await json("/api/profiles");
+      const profilesData = await json("/api/profiles", { timeoutMs: 15000 });
       const profiles = Array.isArray(profilesData?.records) ? profilesData.records : [];
-      const rows = await Promise.all(profiles.map(async (profile) => {
-        const data = await json(`/api/dashboard?profile=${encodeURIComponent(profile.id)}&all_profiles_overview=1&_${Date.now()}`);
-        const counts = operationalCounts(data);
-        return { id: profile.id, name: profile.city_label || profile.name || profile.id, ...counts };
-      }));
+      if (!profiles.length) {
+        host.innerHTML = '<div class="all-profiles-loading error">No Content Profiles returned.</div>';
+        return;
+      }
+      // Cap concurrency so N parallel /api/dashboard calls do not sit forever
+      // behind Worker Airtable 429 pacing (home used to stick on Loading…).
+      const rows = await mapPool(profiles, 2, async (profile) => {
+        try {
+          const data = await json(
+            `/api/dashboard?profile=${encodeURIComponent(profile.id)}&all_profiles_overview=1&_${Date.now()}`,
+            { timeoutMs: 25000 },
+          );
+          const counts = operationalCounts(data);
+          return { id: profile.id, name: profile.city_label || profile.name || profile.id, ...counts };
+        } catch (error) {
+          return {
+            id: profile.id,
+            name: profile.city_label || profile.name || profile.id,
+            scheduled: Object.fromEntries(platformOrder.map((p) => [p, 0])),
+            manual: 0,
+            failed: 0,
+            approval: 0,
+            ideas: 0,
+            load_error: error?.message || String(error),
+          };
+        }
+      });
       state.rows = rows;
       render();
     } catch (error) {

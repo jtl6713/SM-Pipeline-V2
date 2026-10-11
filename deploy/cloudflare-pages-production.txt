@@ -178,3 +178,5 @@ Deploy Studio UI 0.6.534-pages-path-bust. Rename app-item4-0625.js -> app-item4-
 2026-10-11 UI 0.6.583 rollback approval fallback and restore loading
 
 2026-10-11: Deploy Published library blurb for automatic post-publish release (UI 0.6.584).
+
+2026-10-11: Deploy All Profiles overview load timeout + concurrency cap (UI 0.6.585).
