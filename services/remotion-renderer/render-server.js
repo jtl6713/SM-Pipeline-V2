@@ -20,7 +20,7 @@ const DEFAULT_MUSIC_END_FADE_SECONDS = 0.5;
 const PIPELINE_RUNNER_INTERNAL_URL = String(
     process.env.PIPELINE_RUNNER_INTERNAL_URL || 'http://127.0.0.1:3350'
 ).replace(/\/$/, '');
-const SERVICE_VERSION = '2026-10-10-remotion-slot-reconcile';
+const SERVICE_VERSION = '2026-10-11-slot-hold-only';
 const PROJECT_DIR = __dirname;
 const PUBLIC_DIR = path.join(PROJECT_DIR, 'public');
 const OUT_DIR = path.join(PROJECT_DIR, 'out');
@@ -59,11 +59,29 @@ const remotionCleanup = registerRemotionCleanup({
 let activeRemotionRenders = 0;
 const remotionRenderWaiters = [];
 
-function countInFlightRemotionJobs() {
+// Slot holders only — preparing (Drive localize) must NOT inflate activeRenders.
+// Accept-before-download leaves jobs in preparing before acquireRemotionSlot;
+// counting them made reconcile set active=2 > max=1 and park the waiter queue.
+function countSlotHoldingRemotionJobs() {
+    let count = 0;
+    for (const job of jobs.values()) {
+        if (job?.holdsRemotionSlot) {
+            count += 1;
+            continue;
+        }
+        const status = String(job?.status || '').trim().toLowerCase();
+        if (status === 'rendering') {
+            count += 1;
+        }
+    }
+    return count;
+}
+
+function countPreparingRemotionJobs() {
     let count = 0;
     for (const job of jobs.values()) {
         const status = String(job?.status || '').trim().toLowerCase();
-        if (status === 'preparing' || status === 'rendering') {
+        if (status === 'preparing' && !job?.holdsRemotionSlot) {
             count += 1;
         }
     }
@@ -71,19 +89,33 @@ function countInFlightRemotionJobs() {
 }
 
 function reconcileRemotionSlots(reason = 'health') {
-    const inFlight = countInFlightRemotionJobs();
-    if (activeRemotionRenders === inFlight) {
-        return { corrected: false, inFlight, activeRemotionRenders };
+    const holders = countSlotHoldingRemotionJobs();
+    const preparing = countPreparingRemotionJobs();
+    // Never let reconcile push active above maxConcurrent (old preparing bug).
+    const target = Math.min(holders, MAX_CONCURRENT_REMOTION_RENDERS);
+    if (activeRemotionRenders === target) {
+        return {
+            corrected: false,
+            inFlight: holders,
+            preparing,
+            activeRemotionRenders,
+        };
     }
     console.warn(
-        `[remotion] slot counter drift (${reason}): active=${activeRemotionRenders} inFlight=${inFlight}`,
+        `[remotion] slot counter drift (${reason}): active=${activeRemotionRenders} ` +
+            `holders=${holders} preparing=${preparing} → active=${target}`,
     );
-    activeRemotionRenders = inFlight;
+    activeRemotionRenders = target;
     while (activeRemotionRenders < MAX_CONCURRENT_REMOTION_RENDERS && remotionRenderWaiters.length) {
         const next = remotionRenderWaiters.shift();
         if (next) next();
     }
-    return { corrected: true, inFlight, activeRemotionRenders };
+    return {
+        corrected: true,
+        inFlight: holders,
+        preparing,
+        activeRemotionRenders,
+    };
 }
 
 // Liveness before static middleware. Deploy-SMService polls /health; a multi-GB
@@ -104,7 +136,9 @@ app.get('/health', (req, res) => {
         jobAssetsOutsidePublic: true,
         remotionMaxConcurrent: MAX_CONCURRENT_REMOTION_RENDERS,
         remotionActiveRenders: activeRemotionRenders,
+        // Slot holders only (rendering / holdsRemotionSlot) — not preparing.
         remotionInFlightJobs: slotSync.inFlight,
+        remotionPreparingJobs: slotSync.preparing ?? countPreparingRemotionJobs(),
         remotionSlotReconciled: slotSync.corrected,
         remotionQueuedRenders: remotionRenderWaiters.length,
         cleanup: {
@@ -134,6 +168,7 @@ function acquireRemotionSlot(job) {
         const tryAcquire = () => {
             if (activeRemotionRenders < MAX_CONCURRENT_REMOTION_RENDERS) {
                 activeRemotionRenders += 1;
+                if (job) job.holdsRemotionSlot = true;
                 appendLog(
                     job,
                     `Acquired Remotion slot (${activeRemotionRenders}/${MAX_CONCURRENT_REMOTION_RENDERS})`,
@@ -151,7 +186,8 @@ function acquireRemotionSlot(job) {
     });
 }
 
-function releaseRemotionSlot() {
+function releaseRemotionSlot(job) {
+    if (job) job.holdsRemotionSlot = false;
     activeRemotionRenders = Math.max(0, activeRemotionRenders - 1);
     const next = remotionRenderWaiters.shift();
     if (next) next();
@@ -1344,7 +1380,7 @@ function runRemotionRender({ jobId, compositionId, filename, propsFilePath }) {
                 });
             });
         } finally {
-            releaseRemotionSlot();
+            releaseRemotionSlot(job);
             reconcileRemotionSlots('render-finally');
         }
     })();
