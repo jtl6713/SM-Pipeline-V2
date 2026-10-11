@@ -216,3 +216,5 @@ Deploy Studio UI 0.6.534-pages-path-bust. Rename app-item4-0625.js -> app-item4-
 2026-10-11: Align Review Open rendered file with authenticated preview stream (UI 0.6.603-render-server-preview).
 
 2026-10-11: Drop unused Home Recent platform outputs table (UI 0.6.604).
+
+2026-10-11: Create VO uses Manage Idea selected/matched stills; multi Feed Post skips VO timeline (UI 0.6.605 / Worker 0.10.533).

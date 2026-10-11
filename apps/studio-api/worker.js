@@ -258,7 +258,10 @@ import {
   formatTimedScriptMarkdown,
   ideaTimedScriptReady,
   mergeTimedScriptNotes,
+  isStillsIdeaContentType,
+  normalizeIdeaLibraryAssetIds,
   pickTimelineCatalog,
+  preferredIdeaLibraryAssetIds,
   scenesFromModelPayload,
   scriptedShortProposalReady,
   singleImageFeedPostIds,
@@ -623,7 +626,8 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.532-render-server-preview",
+          version: "0.10.533-create-vo-matched-stills",
+          studio_create_vo_matched_stills_v1: true,
           studio_post_publish_release_v1: true,
           studio_render_server_preview_v1: true,
           studio_render_queue_wait_v1: true,
@@ -23704,10 +23708,21 @@ function feedPostNotesWithoutTimeline(notes) {
 }
 
 async function acceptSingleImageFeedPost(request, env, idea, mediaId, authorization, ctx) {
+  return acceptStillsIdeaPackage(request, env, idea, [mediaId], authorization, ctx);
+}
+
+/** Feed Post / Carousel / Photo Set: attach chosen stills with no voiceover timeline. */
+async function acceptStillsIdeaPackage(request, env, idea, mediaIds, authorization, ctx) {
+  const ids = normalizeIdeaLibraryAssetIds(mediaIds);
+  if (!ids.length) {
+    throw new HttpError(409, "Attach at least one library photo before accepting this stills idea.");
+  }
+  const single = ids.length === 1;
+  const masterType = single ? "Feed Post" : "Photo Set";
   let requestRecord = await existingDraftForIdea(env, idea.id, authorization)
     || await findDraftProductionRequestForIdea(env, idea.id)
     || await createDraftForIdea(env, idea, authorization);
-  const attached = await applyLibraryAssetsToProductionRequest(env, requestRecord, [mediaId], {
+  const attached = await applyLibraryAssetsToProductionRequest(env, requestRecord, ids, {
     replaceWaitAssets: true,
     allowManagePaused: true,
     replaceAll: true,
@@ -23716,7 +23731,7 @@ async function acceptSingleImageFeedPost(request, env, idea, mediaId, authorizat
   const notes = feedPostNotesWithoutTimeline(f(requestRecord, "Production_Notes"));
   const stampedNotes = /ez-package=slides/i.test(notes) ? notes : `${notes}\nez-package=slides`.trim();
   requestRecord = await item4UpdateRequestState(env, requestRecord.id, {
-    Master_Content_Type: "Feed Post",
+    Master_Content_Type: masterType,
     Voiceover_Mode: "No",
     Background_Music_Mode: "No",
     Thumbnail_Mode: "No",
@@ -23724,10 +23739,10 @@ async function acceptSingleImageFeedPost(request, env, idea, mediaId, authorizat
     Requested_Script: null,
     Voiceover_Tail_Seconds: 0,
     Video_Clip_Count_Mode: "Exact",
-    Video_Clip_Count_Exact: 1,
+    Video_Clip_Count_Exact: single ? 1 : null,
     Carousel_Image_Mode: "Manual Upload",
     Carousel_Slide_Count_Mode: "Exact",
-    Carousel_Slide_Count_Exact: 1,
+    Carousel_Slide_Count_Exact: ids.length,
     Production_Notes: stampedNotes.slice(0, 10000),
   });
 
@@ -23741,7 +23756,7 @@ async function acceptSingleImageFeedPost(request, env, idea, mediaId, authorizat
       await buildItem4OutputPlan(planCall.request, env, planCall.url, authorization);
       requestRecord = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, requestRecord.id);
     } catch (error) {
-      console.warn("single-image feed post plan failed", requestRecord.id, error);
+      console.warn("stills idea package plan failed", requestRecord.id, error);
     }
   }
 
@@ -23758,7 +23773,7 @@ async function acceptSingleImageFeedPost(request, env, idea, mediaId, authorizat
           await prepareItem4Variants(variantsCall.request, env, variantsCall.url, authorization, ctx);
         }
       } catch (error) {
-        console.warn("single-image feed post variant prepare failed", requestRecord.id, error);
+        console.warn("stills idea package variant prepare failed", requestRecord.id, error);
       }
     })());
   }
@@ -23776,18 +23791,18 @@ async function acceptSingleImageFeedPost(request, env, idea, mediaId, authorizat
     Studio_Item4_State: planReady ? "Plan Ready" : "Assets Ready",
   });
 
-  const ideaNotes = mergeIdeaProductionNotes(f(idea, "Production_Config_Notes"), undefined, [mediaId]);
+  const ideaNotes = mergeIdeaProductionNotes(f(idea, "Production_Config_Notes"), undefined, ids);
   idea = await airtableFetch(env, env.AIRTABLE_IDEA_TABLE_ID, idea.id, {
     method: "PATCH",
     body: JSON.stringify({
       fields: {
-        Production_Content_Type: "Feed Post",
+        Production_Content_Type: masterType,
         Production_Include_Voiceover: "No",
         Production_Include_Background_Music: "No",
         Production_Include_Thumbnail: "No",
         Production_Carousel_Image_Mode: "Manual Upload",
-        Production_Carousel_Slide_Count: 1,
-        Studio_Matched_Media_Assets: [mediaId],
+        Production_Carousel_Slide_Count: ids.length,
+        Studio_Matched_Media_Assets: ids,
         Studio_Photo_Wait_Status: "Not Needed",
         Production_Config_Notes: ideaNotes,
         Candidate_Status: String(f(idea, "Candidate_Status") || "").trim() === "On Hold"
@@ -23799,20 +23814,25 @@ async function acceptSingleImageFeedPost(request, env, idea, mediaId, authorizat
   });
 
   const message = readyForApproval
-    ? "The one photo is on a feed post and ready for Production Approve. No voiceover. This does not publish."
-    : "The one photo is on a feed post. Platform crops may still be finishing. Approve when Ready. No voiceover. This does not publish.";
+    ? (single
+      ? "The one photo is on a feed post and ready for Production Approve. No voiceover. This does not publish."
+      : `${ids.length} photos are on a stills package and ready for Production Approve. No voiceover. This does not publish.`)
+    : (single
+      ? "The one photo is on a feed post. Platform crops may still be finishing. Approve when Ready. No voiceover. This does not publish."
+      : `${ids.length} photos are attached. Platform crops may still be finishing. Approve when Ready. No voiceover. This does not publish.`);
   return respond(request, env, {
     ok: true,
-    single_image_feed_post: true,
-    source: "single-image-feed-post",
-    scene_count: 1,
+    single_image_feed_post: single,
+    stills_package: !single,
+    source: single ? "single-image-feed-post" : "multi-image-stills-package",
+    scene_count: ids.length,
     ready_for_approval: readyForApproval,
     waiting_variants: planReady && !variantsReady,
-    stills: [{
-      id: mediaId,
+    stills: ids.map((id) => ({
+      id,
       name: "",
-      preview_path: `/api/media-assets/${mediaId}/preview`,
-    }],
+      preview_path: `/api/media-assets/${id}/preview`,
+    })),
     record: mapIdea(idea),
     production_request: mapProductionRequest(requestRecord),
     message,
@@ -23924,6 +23944,9 @@ async function anotherVibeCutRoute(request, env, authorization) {
 async function createIdeaTimedScriptRoute(request, env, url, authorization, ctx = null) {
   const recordId = ideaRecordIdFromPath(url);
   let idea = await loadAuthorizedIdea(env, recordId, authorization);
+  let body = {};
+  try { body = await request.json(); } catch { body = {}; }
+  if (!body || typeof body !== "object" || Array.isArray(body)) body = {};
   if (promotionCompleted(idea)) {
     throw new HttpError(409, "This idea is already in production, so a new timeline was not written.");
   }
@@ -23988,9 +24011,21 @@ async function createIdeaTimedScriptRoute(request, env, url, authorization, ctx 
       });
     }
   }
-  const feedPhotoIds = singleImageFeedPostIds({
-    contentType: f(idea, "Production_Content_Type"),
+  // Operator-chosen stills (Manage Idea picker) win over place-name library ranking.
+  const preferredMediaIds = preferredIdeaLibraryAssetIds({
+    bodyIds: body.library_asset_ids,
     matchedIds: f(idea, "Studio_Matched_Media_Assets") || [],
+  });
+  const contentType = String(f(idea, "Production_Content_Type") || "").trim();
+  if (isStillsIdeaContentType(contentType)) {
+    if (!preferredMediaIds.length) {
+      throw new HttpError(409, "Attach at least one library photo in Manage Idea, then try again.");
+    }
+    return acceptStillsIdeaPackage(request, env, idea, preferredMediaIds, authorization, ctx);
+  }
+  const feedPhotoIds = singleImageFeedPostIds({
+    contentType,
+    matchedIds: preferredMediaIds,
   });
   if (Array.isArray(feedPhotoIds) && feedPhotoIds.length === 1) {
     return acceptSingleImageFeedPost(request, env, idea, feedPhotoIds[0], authorization, ctx);
@@ -23999,7 +24034,7 @@ async function createIdeaTimedScriptRoute(request, env, url, authorization, ctx 
   if (!title) throw new HttpError(400, "Give this idea a title before creating a timeline.");
   let summary = String(f(idea, "Idea_Summary") || "").trim();
   const location = String(f(idea, "Primary_Location") || f(idea, "Neighborhood_or_Area") || "").trim();
-  if (!summary && !location) {
+  if (!summary && !location && preferredMediaIds.length < 2) {
     throw new HttpError(400, "Add a short summary or place name so Studio can describe the idea, pick stills, and write the voiceover.");
   }
   if (!summary) {
@@ -24012,10 +24047,38 @@ async function createIdeaTimedScriptRoute(request, env, url, authorization, ctx 
     });
   }
 
-  const ranked = (await rankStillsForIdeaPhotoWait(env, idea)).map(ideaTimedScriptCatalogRow);
+  const ranked = [];
+  const seenRanked = new Set();
+  if (preferredMediaIds.length) {
+    const preferredRows = await Promise.all(preferredMediaIds.map((id) =>
+      airtableFetch(env, env.AIRTABLE_MEDIA_TABLE_ID || ITEM4_MEDIA_ASSET_TABLE, id).catch(() => null)
+    ));
+    for (const record of preferredRows) {
+      if (!record?.id || seenRanked.has(record.id)) continue;
+      seenRanked.add(record.id);
+      ranked.push(ideaTimedScriptCatalogRow({
+        id: record.id,
+        record,
+        score: 100,
+        confidence: "high",
+      }));
+    }
+  }
+  if (ranked.length < 2) {
+    for (const row of (await rankStillsForIdeaPhotoWait(env, idea)).map(ideaTimedScriptCatalogRow)) {
+      if (!row?.id || seenRanked.has(row.id)) continue;
+      seenRanked.add(row.id);
+      ranked.push(row);
+    }
+  }
   const picked = pickTimelineCatalog(ranked);
   if (picked.selected.length < 2) {
-    throw new HttpError(409, "No matching library stills yet. Add a place name to the idea or attach photos, then try again.");
+    throw new HttpError(
+      409,
+      preferredMediaIds.length
+        ? "Those selected photos could not be used for a voiceover timeline. Keep at least two stills selected, or switch this idea to Feed Post / Photo Set."
+        : "No matching library stills yet. Add a place name to the idea or attach photos, then try again.",
+    );
   }
 
   // Timeline creation must remain available even when the preferred AI provider is
@@ -24085,16 +24148,22 @@ async function createIdeaTimedScriptRoute(request, env, url, authorization, ctx 
 
   // Accept the idea all the way to Production Approve: plan + crops, stills already attached.
   // Do not I3/I4 promote — Joseph still taps Approve on Production.
+  // Plan failures must not 500 after the timeline/stills are already saved.
   if (String(f(requestRecord, "Studio_Output_Plan_Status") || "").trim() !== "Ready") {
-    const planCall = studioInternalJsonRequest(`/api/production-requests/${requestRecord.id}/plan`, {
-      platforms: [...AUTONOMOUS_STANDARD_PLATFORMS],
-      overrides: autonomousPlanOverrides("Vertical Short Video"),
-      extras: autonomousPlanExtras(),
-      package: "video",
-      skip_fbs1_guard: true,
-    });
-    await buildItem4OutputPlan(planCall.request, env, planCall.url, authorization);
-    requestRecord = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, requestRecord.id);
+    try {
+      const planCall = studioInternalJsonRequest(`/api/production-requests/${requestRecord.id}/plan`, {
+        platforms: [...AUTONOMOUS_STANDARD_PLATFORMS],
+        overrides: autonomousPlanOverrides("Vertical Short Video"),
+        extras: autonomousPlanExtras(),
+        package: "video",
+        skip_fbs1_guard: true,
+      });
+      await buildItem4OutputPlan(planCall.request, env, planCall.url, authorization);
+      requestRecord = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, requestRecord.id);
+    } catch (error) {
+      console.warn("idea timeline plan failed after stills saved", requestRecord.id, error);
+      requestRecord = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, requestRecord.id).catch(() => requestRecord);
+    }
   }
 
   let variantStatus = String(f(requestRecord, "Studio_Variant_Status") || "").trim();
