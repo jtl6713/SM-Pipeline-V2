@@ -1,0 +1,44 @@
+/* Studio clarity theme — contrast-first, profile identity independent of Operations. */
+:root{--studio-accent:#607d9a;--studio-accent-soft:#edf3f8;--studio-ink:#102b50;--studio-muted:#425775;--studio-paper:#fff;--studio-line:#d7e2ed}
+body[data-studio-city="chicago"]{--studio-accent:#4485b1;--studio-accent-soft:#e9f4fb}
+body[data-studio-city="new-york"]{--studio-accent:#8b6b9f;--studio-accent-soft:#f3edf7}
+body[data-studio-city="los-angeles"]{--studio-accent:#bc794e;--studio-accent-soft:#fff2e5}
+body[data-studio-city="miami"]{--studio-accent:#328e8c;--studio-accent-soft:#e9f7f5}
+body[data-studio-city="san-francisco"]{--studio-accent:#b46d64;--studio-accent-soft:#fff0ee}
+body[data-studio-city="las-vegas"]{--studio-accent:#9973ad;--studio-accent-soft:#f6effa}
+body[data-studio-city="boston"]{--studio-accent:#977b5b;--studio-accent-soft:#f7f2e9}
+body[data-studio-city="washington"]{--studio-accent:#567a9a;--studio-accent-soft:#edf4fa}
+body{background:#f1f5fa!important;color:var(--studio-ink)}
+.main,.page,.shell main{color:var(--studio-ink)}
+.page-heading,.panel,.card,.studio-hub-card{color:var(--studio-ink)}
+.page-heading{background:var(--studio-paper)!important;border:1px solid var(--studio-line)!important;border-top:4px solid var(--studio-accent)!important;border-radius:18px!important;padding:22px!important;box-shadow:0 6px 25px rgba(12,37,70,.045)}
+.page-heading h1,.page-heading h2,.panel h2,.panel h3{color:var(--studio-ink)!important}
+.page-heading p,.page-heading .eyebrow,.panel-heading p,.subtle,.form-field span{color:var(--studio-muted)!important}
+.page-heading .eyebrow{font-weight:800;letter-spacing:.12em;text-transform:uppercase}
+.page-heading p{line-height:1.65}
+.page .panel{background:#fff!important;border:1px solid var(--studio-line)!important;border-radius:16px}
+.page .panel p,.page .panel label{color:var(--studio-muted)}
+.page input,.page textarea,.page select{color:var(--studio-ink);background:#fff}
+.page input::placeholder,.page textarea::placeholder{color:#667890;opacity:1}
+.topbar{border-bottom:3px solid var(--studio-accent)!important}
+.topbar .topbar-profile{border:1px solid rgba(255,255,255,.48)!important;background:rgba(5,20,46,.9)!important}
+.topbar .topbar-profile,.topbar .topbar-profile span,.topbar .topbar-profile select{color:#fff!important}
+.topbar .topbar-profile select option{color:#102b50;background:#fff}
+#page-ideas .page-heading{display:block!important}
+#page-ideas .page-heading .heading-actions{display:grid!important;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px!important;margin-top:24px}
+#page-ideas .heading-actions button{min-height:65px!important;white-space:normal!important;text-align:left!important;justify-content:flex-start!important;border-radius:14px!important;padding:15px 18px!important;font-weight:750!important;font-size:1rem!important;color:#102b50!important;background:#eaf3ff!important;border:1px solid #c5dbf4!important}
+#page-ideas .heading-actions button:nth-child(2){background:#e8f7ef!important;border-color:#c4e9d5!important}
+#page-ideas .heading-actions button:nth-child(3){background:#f0ebfc!important;border-color:#dcd0f5!important}
+#page-ideas .heading-actions button:nth-child(4){background:#fff2e4!important;border-color:#f6dcc0!important}
+#page-ideas .heading-actions button:nth-child(5){grid-column:1/-1;justify-content:center!important;background:#082d60!important;border-color:#082d60!important;color:#fff!important}
+#page-ideas .heading-actions button:hover{filter:brightness(.97)}
+#page-ideas .heading-actions button:focus-visible{outline:3px solid var(--studio-accent);outline-offset:3px}
+#page-ideas .page-heading{box-shadow:0 12px 36px rgba(14,39,71,.08)}
+#page-ideas .page-heading h1{font-size:clamp(1.7rem,4vw,2.4rem)}
+#page-ideas .page-heading .eyebrow{color:var(--studio-accent)!important}
+@media(max-width:760px){
+ .page-heading{padding:20px!important}
+ #page-ideas .page-heading .heading-actions{grid-template-columns:1fr}
+ #page-ideas .heading-actions button:nth-child(5){grid-column:auto}
+ #page-ideas .heading-actions button{width:100%!important;min-height:60px!important}
+}
