@@ -4487,6 +4487,16 @@ body:has(#page-outputs.active) .main{
   font-size:.58rem;
   border-radius:5px;
 }
+#outputsList .pipeline-actions-cell>.pipeline-publish-now{
+  min-height:23px;
+  height:23px;
+  margin-right:4px;
+  padding:2px 7px;
+  border-radius:5px;
+  font-size:.58rem;
+  font-weight:800;
+  line-height:1;
+}
 #outputsList .pipeline-row-more{margin-left:3px}
 #outputsList .pipeline-row-more>summary{
   width:24px;

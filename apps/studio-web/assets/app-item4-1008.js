@@ -261,7 +261,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.575-compression-progress-finish";
+  const BUILD_ID = "item4-0.6.576-pipeline-publish-now";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -342,6 +342,7 @@
   let pipelineCountdownTimer = null;
   let pipelineNextRefreshAt = 0;
   let pipelinePollInFlight = false;
+  const pipelinePublishNowPending = new Set();
   let pipelineApproveAllJobId = "";
   let pipelineApproveAllPollTimer = null;
   let pipelineApproveAllCanRetry = false;
@@ -17334,6 +17335,13 @@ function timedScriptAssetLabel(asset, index) {
     return status === "Approved for Publishing" || review === "Approved";
   }
 
+  function pipelineCanPublishNow(record) {
+    if (!creativeCanReschedule(record)) return false;
+    const publish = String(record?.publish_status || "").trim();
+    if (/^(publishing|published)$/i.test(publish)) return false;
+    return /^ready to publish$/i.test(pipelinePublishStatusLabel(record));
+  }
+
   function creativeCanSetSchedule(output = activeCreativeOutput) {
     if (!output || output.do_not_publish || creativeIsPublished(output)) return false;
     return creativeCanReschedule(output) || creativeCanApproveForPublishing(output);
@@ -17679,6 +17687,51 @@ function timedScriptAssetLabel(asset, index) {
       setPipelineLiveHint(error.message || "Could not save schedule.");
     } finally {
       delete input.dataset.saving;
+    }
+  }
+
+  async function publishPipelineOutputNow(recordId, button) {
+    const record = (pipelineOutputs || []).find((row) => row.id === recordId);
+    if (!record || !pipelineCanPublishNow(record) || pipelinePublishNowPending.has(recordId)) return;
+    const outputLabel = [record.output_id, record.platform].filter(Boolean).join(" · ") || "this output";
+    if (!window.confirm(`Publish ${outputLabel} now? This overrides its scheduled time. Instagram, Facebook, and YouTube may go public. TikTok stays a draft.`)) return;
+    pipelinePublishNowPending.add(recordId);
+    if (button) {
+      button.disabled = true;
+      button.textContent = "Publishing…";
+    }
+    try {
+      const result = await api(`/api/operations/outputs/${encodeURIComponent(recordId)}/schedule`, {
+        method: "POST",
+        body: JSON.stringify({
+          scheduled_post_date: "immediate",
+          publish_now: true,
+          timezone: workingStudioTimeZone(),
+        }),
+      });
+      if (result?.record) {
+        pipelineOutputs = (pipelineOutputs || []).map((row) => (row.id === recordId ? { ...row, ...result.record } : row));
+        if (activeCreativeOutput?.id === recordId) activeCreativeOutput = { ...activeCreativeOutput, ...result.record };
+        applySavedPipelineSchedule(result.record);
+      }
+      const skipped = result?.dispatch?.skipped;
+      if (skipped === "scheduled-hold") {
+        setPipelineLiveHint("Saved as Immediate, but the next open slot is later. Use that time or wait for cadence.");
+      } else if (result?.dispatch && result.dispatch.ok === false) {
+        setPipelineLiveHint(result.dispatch.message || "Publish now was saved, but the publisher did not start.");
+      } else {
+        setPipelineLiveHint(`Publish now sent for ${outputLabel}.`);
+      }
+      pipelinePublishNowPending.delete(recordId);
+      renderOutputsTable($("outputsList"), pipelineOutputs);
+      refreshPipelineOutputs({ silent: true, force: true }).catch(() => {});
+    } catch (error) {
+      pipelinePublishNowPending.delete(recordId);
+      setPipelineLiveHint(error.message || "Could not publish now.");
+      if (button && button.isConnected) {
+        button.disabled = false;
+        button.textContent = "Publish Now";
+      }
     }
   }
 
@@ -19395,10 +19448,13 @@ function timedScriptAssetLabel(asset, index) {
       const moreMenu = postLink || coverLink
         ? `<details class="pipeline-row-more"><summary title="More actions" aria-label="More actions">•••</summary><div class="pipeline-row-more-menu">${postLink}${coverLink}</div></details>`
         : "";
+      const publishNowButton = pipelineCanPublishNow(r)
+        ? `<button type="button" class="primary-button pipeline-publish-now" data-pipeline-publish-now="${escapeHtml(r.id)}" title="Publish this output now. This overrides its scheduled time. Instagram, Facebook, and YouTube may go public. TikTok stays a draft."${pipelinePublishNowPending.has(r.id) ? " disabled" : ""}>Publish Now</button>`
+        : "";
       const rowOpen = canOpen
         ? ` class="pipeline-open-row pipeline-compact-row" data-open-output-id="${escapeHtml(r.id)}" data-platform="${escapeHtml(platformSlug)}" tabindex="0"`
         : ` class="pipeline-compact-row" data-platform="${escapeHtml(platformSlug)}"`;
-      return `<tr${rowOpen}>${contentCell}<td class="pipeline-output-platform-cell"><div class="pipeline-platform-line"><span class="pipeline-platform-pill" data-platform="${escapeHtml(platformSlug)}"><b>${escapeHtml(pipelinePlatformCode(platform))}</b><span>${escapeHtml(platform)}${outputTypeLabel && outputTypeLabel !== "—" ? ` · ${escapeHtml(outputTypeLabel)}` : ""}</span></span><strong>${escapeHtml(String(r.output_id || ""))}</strong></div></td><td class="pipeline-status-cell">${pipelineCompactStatusMarkup(r)}</td><td class="pipeline-progress-cell">${pipelineProgressCell(r, groupRecords)}</td><td class="pipeline-schedule-column">${scheduleCell}</td><td class="pipeline-actions-cell"><button type="button" class="creative-button pipeline-open-review" data-creative-output-id="${escapeHtml(r.id)}" ${canOpen ? "" : "disabled"} title="${canOpen ? "Open output details" : notReadyTitle}">${canOpen ? "Open" : escapeHtml(notReadyLabel)}</button>${moreMenu}</td></tr>`;
+      return `<tr${rowOpen}>${contentCell}<td class="pipeline-output-platform-cell"><div class="pipeline-platform-line"><span class="pipeline-platform-pill" data-platform="${escapeHtml(platformSlug)}"><b>${escapeHtml(pipelinePlatformCode(platform))}</b><span>${escapeHtml(platform)}${outputTypeLabel && outputTypeLabel !== "—" ? ` · ${escapeHtml(outputTypeLabel)}` : ""}</span></span><strong>${escapeHtml(String(r.output_id || ""))}</strong></div></td><td class="pipeline-status-cell">${pipelineCompactStatusMarkup(r)}</td><td class="pipeline-progress-cell">${pipelineProgressCell(r, groupRecords)}</td><td class="pipeline-schedule-column">${scheduleCell}</td><td class="pipeline-actions-cell">${publishNowButton}<button type="button" class="creative-button pipeline-open-review" data-creative-output-id="${escapeHtml(r.id)}" ${canOpen ? "" : "disabled"} title="${canOpen ? "Open output details" : notReadyTitle}">${canOpen ? "Open" : escapeHtml(notReadyLabel)}</button>${moreMenu}</td></tr>`;
     };
 
     const body = isPipeline
@@ -19489,6 +19545,13 @@ function timedScriptAssetLabel(asset, index) {
         });
       });
       bindPipelineScheduleInputs(target);
+      target.querySelectorAll("[data-pipeline-publish-now]").forEach((button) => {
+        button.addEventListener("click", (event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          publishPipelineOutputNow(button.dataset.pipelinePublishNow, button);
+        });
+      });
       bindPipelineTiktokComplete(target);
       bindPipelineYoutubeComplete(target);
       target.querySelectorAll("[data-pipeline-use-suggested]").forEach((button) => {

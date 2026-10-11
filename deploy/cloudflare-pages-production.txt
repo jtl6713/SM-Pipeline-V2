@@ -162,3 +162,5 @@ Deploy Studio UI 0.6.534-pages-path-bust. Rename app-item4-0625.js -> app-item4-
 2026-10-10: Deploy Studio UI 0.6.574-profile-picker-resilience. Keep topbar profile picker visible with session cache, loading state, and retries when /api/profiles is rate-limited.
 
 2026-10-10: Deploy Studio UI 0.6.575-compression-progress-finish. Trust Ready+Drive for compression UI, faster final-percent polling, and no stuck 95% banner.
+
+2026-10-11: Deploy Studio UI 0.6.576-pipeline-publish-now. Pipeline rows that are Ready to Publish show Publish Now and send the existing immediate publish request.
