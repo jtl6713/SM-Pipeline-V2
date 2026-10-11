@@ -3,52 +3,30 @@
   if (!host) return;
   const esc = (value) => String(value ?? "").replace(/[&<>"']/g, (ch) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[ch]));
   const platformOrder = ["Facebook","Instagram","TikTok","YouTube"];
-  const state = { rows: [], timer: 0, loading: false };
+  const CACHE_KEY = "studio.allProfilesOverview.v1";
+  const state = { rows: [], timer: 0, loading: false, deferred: false };
 
-  function normalizedState(row) {
-    return String(row?.studio_state || row?.normalized_state || row?.state || row?.output_status || "").trim();
-  }
-  function scheduledCounts(outputs) {
-    const counts = Object.fromEntries(platformOrder.map((p) => [p, 0]));
-    for (const row of outputs || []) {
-      const platform = String(row?.platform || "").trim();
-      if (!(platform in counts)) continue;
-      const publishStatus = String(row?.publish_status || "");
-      const youtubePrivacy = String(
-        row?.youtube_privacy_status
-        || row?.youtube_privacy
-        || row?.privacy_status
-        || row?.privacyStatus
-        || row?.youtube_status?.privacyStatus
-        || ""
-      ).trim().toLowerCase();
-      // YouTube uploads are created private before their scheduled public release.
-      // Keep private/unlisted uploads in the non-public scheduled count until public.
-      const youtubeNotPublic = platform === "YouTube" && /^(private|unlisted)$/.test(youtubePrivacy);
-      const published = !youtubeNotPublic && (Boolean(row?.published_at) || /published/i.test(publishStatus));
-      const scheduled = Boolean(row?.scheduled_post_date || row?.youtube_scheduled_publish_at || row?.studio_scheduled_at)
-        || /scheduled|ready to publish|publishing/i.test(publishStatus)
-        || youtubeNotPublic;
-      if (!published && scheduled) counts[platform] += 1;
-    }
-    return counts;
-  }
-  function operationalCounts(data) {
-    const outputs = Array.isArray(data?.outputs) && data.outputs.length ? data.outputs : (data?.recent_outputs || []);
-    const metrics = data?.metrics || {};
-    const states = outputs.map(normalizedState);
-    return {
-      manual: Number(metrics.manual_action_required ?? states.filter((s) => s === "Manual Action Required").length) || 0,
-      failed: Number(metrics.failed_outputs ?? metrics.failed ?? states.filter((s) => s === "Failed").length) || 0,
-      approval: Number(metrics.awaiting_approval ?? states.filter((s) => s === "Ready for Review" || s === "Awaiting Approval").length) || 0,
-      ideas: Number(metrics.ideas_not_in_production ?? metrics.ideas ?? 0) || 0,
-      scheduled: scheduledCounts(outputs),
-    };
-  }
   function scheduledTotal(row) {
     return platformOrder.reduce((sum, platform) => sum + (Number(row?.scheduled?.[platform]) || 0), 0);
   }
-  async function json(url, { timeoutMs = 20000 } = {}) {
+  function readCache() {
+    try {
+      const raw = sessionStorage.getItem(CACHE_KEY);
+      if (!raw) return null;
+      const parsed = JSON.parse(raw);
+      return Array.isArray(parsed?.rows) ? parsed.rows : null;
+    } catch {
+      return null;
+    }
+  }
+  function writeCache(rows) {
+    try {
+      sessionStorage.setItem(CACHE_KEY, JSON.stringify({ rows, at: Date.now() }));
+    } catch {
+      /* ignore quota */
+    }
+  }
+  async function json(url, { timeoutMs = 45000 } = {}) {
     const controller = typeof AbortController === "function" ? new AbortController() : null;
     const timer = controller ? window.setTimeout(() => controller.abort(), timeoutMs) : 0;
     try {
@@ -66,21 +44,6 @@
     } finally {
       if (timer) window.clearTimeout(timer);
     }
-  }
-  async function mapPool(items, limit, worker) {
-    const list = Array.isArray(items) ? items : [];
-    const concurrency = Math.max(1, Math.min(Number(limit) || 1, list.length || 1));
-    const results = new Array(list.length);
-    let next = 0;
-    async function run() {
-      while (next < list.length) {
-        const index = next;
-        next += 1;
-        results[index] = await worker(list[index], index);
-      }
-    }
-    await Promise.all(Array.from({ length: concurrency }, () => run()));
-    return results;
   }
   function tone(value, kind) {
     const n = Number(value) || 0;
@@ -113,9 +76,6 @@
       return;
     }
     const view = kind === "approval" ? "approval" : kind === "failed" ? "failed" : "attention";
-    // Prefer the Studio opener so profile + Review filter apply in one path.
-    // The old nav-click + delayed tab click raced profile change and used a
-    // lean Pending-Review feed that came back empty while this cell showed 1.
     if (typeof window.studioOpenPipelineFilter === "function") {
       window.studioOpenPipelineFilter(view, { profileId: profileId || "" });
       return;
@@ -135,25 +95,30 @@
     window.setTimeout(openView, 150);
     window.setTimeout(openView, 700);
   }
-  function render() {
+  function render({ stale = false, error = "" } = {}) {
     if (!state.rows.length) {
-      host.innerHTML = '<div class="all-profiles-loading">Loading all profiles…</div>';
+      host.innerHTML = error
+        ? `<div class="all-profiles-loading error">All Profiles Overview could not load: ${esc(error)}</div>`
+        : '<div class="all-profiles-loading">Loading all profiles…</div>';
       return;
     }
     const total = { scheduled:Object.fromEntries(platformOrder.map((p)=>[p,0])), manual:0, failed:0, approval:0, ideas:0 };
     for (const row of state.rows) {
-      platformOrder.forEach((p)=> total.scheduled[p] += row.scheduled[p] || 0);
+      platformOrder.forEach((p)=> total.scheduled[p] += row.scheduled?.[p] || 0);
       total.manual += row.manual; total.failed += row.failed; total.approval += row.approval; total.ideas += row.ideas;
     }
     const rowHtml = (row, isTotal=false) => `<tr class="${isTotal ? "all-profiles-total" : ""}">
       <th scope="row">${esc(row.name)}${isTotal ? "" : ` (${scheduledTotal(row)})`}</th>
-      ${platformOrder.map((p)=>`<td data-label="${p}">${row.scheduled[p] || 0}</td>`).join("")}
+      ${platformOrder.map((p)=>`<td data-label="${p}">${row.scheduled?.[p] || 0}</td>`).join("")}
       <td data-label="Manual" class="overview-tone-${tone(row.manual,"manual")}">${actionCount(row, "manual", "manual action")}</td>
       <td data-label="Failed" class="overview-tone-${tone(row.failed,"failed")}">${actionCount(row, "failed", "failed")}</td>
       <td data-label="Approval" class="overview-tone-${tone(row.approval,"approval")}">${actionCount(row, "approval", "awaiting approval")}</td>
       <td data-label="Ideas" class="overview-tone-${tone(row.ideas,"ideas")}">${actionCount(row, "ideas", "ideas")}</td>
     </tr>`;
-    host.innerHTML = `<div class="all-profiles-heading"><div><p class="studio-hub-kicker">ALL PROFILES</p><h1>Studio overview</h1></div><button type="button" class="secondary-button" id="allProfilesRefresh">Refresh</button></div>
+    const staleNote = stale || error
+      ? `<p class="subtle all-profiles-stale">${esc(error ? `Showing last good overview (${error}).` : "Showing cached overview.")}</p>`
+      : "";
+    host.innerHTML = `<div class="all-profiles-heading"><div><p class="studio-hub-kicker">ALL PROFILES</p><h1>Studio overview</h1>${staleNote}</div><button type="button" class="secondary-button" id="allProfilesRefresh">Refresh</button></div>
       <div class="all-profiles-table-wrap"><table class="all-profiles-table"><thead><tr class="all-profiles-group-row"><th rowspan="2">Profile</th><th colspan="4" class="all-profiles-scheduled-group">Scheduled posts</th><th rowspan="2">Manual action</th><th rowspan="2">Failed</th><th rowspan="2">Awaiting approval</th><th rowspan="2">Ideas</th></tr><tr class="all-profiles-platform-row">${platformOrder.map((p)=>`<th class="all-profiles-scheduled-col">${p}</th>`).join("")}</tr></thead>
       <tbody>${state.rows.map((r)=>rowHtml(r)).join("")}${rowHtml({name:"Total",...total},true)}</tbody></table></div>`;
     document.getElementById("allProfilesRefresh")?.addEventListener("click", () => load(true));
@@ -164,47 +129,60 @@
   async function load(force=false) {
     if (state.loading) return;
     state.loading = true;
-    if (!state.rows.length) render();
+    if (!state.rows.length) {
+      const cached = readCache();
+      if (cached?.length) {
+        state.rows = cached;
+        render({ stale: true });
+      } else {
+        render();
+      }
+    }
     try {
-      const profilesData = await json("/api/profiles", { timeoutMs: 15000 });
-      const profiles = Array.isArray(profilesData?.records) ? profilesData.records : [];
-      if (!profiles.length) {
-        host.innerHTML = '<div class="all-profiles-loading error">No Content Profiles returned.</div>';
+      // One Worker request replaces N× /api/dashboard (+ /api/profiles) fan-out
+      // that was 429ing the home page on every paint.
+      const data = await json(`/api/profiles/overview?_=${Date.now()}`, { timeoutMs: 60000 });
+      const rows = Array.isArray(data?.records) ? data.records : [];
+      if (!rows.length) {
+        if (!state.rows.length) host.innerHTML = '<div class="all-profiles-loading error">No Content Profiles returned.</div>';
         return;
       }
-      // Cap concurrency so N parallel /api/dashboard calls do not sit forever
-      // behind Worker Airtable 429 pacing (home used to stick on Loading…).
-      const rows = await mapPool(profiles, 2, async (profile) => {
-        try {
-          const data = await json(
-            `/api/dashboard?profile=${encodeURIComponent(profile.id)}&all_profiles_overview=1&_${Date.now()}`,
-            { timeoutMs: 25000 },
-          );
-          const counts = operationalCounts(data);
-          return { id: profile.id, name: profile.city_label || profile.name || profile.id, ...counts };
-        } catch (error) {
-          return {
-            id: profile.id,
-            name: profile.city_label || profile.name || profile.id,
-            scheduled: Object.fromEntries(platformOrder.map((p) => [p, 0])),
-            manual: 0,
-            failed: 0,
-            approval: 0,
-            ideas: 0,
-            load_error: error?.message || String(error),
-          };
-        }
-      });
-      state.rows = rows;
+      state.rows = rows.map((row) => ({
+        id: row.id,
+        name: row.city_label || row.name || row.id,
+        scheduled: row.scheduled || Object.fromEntries(platformOrder.map((p) => [p, 0])),
+        manual: Number(row.manual) || 0,
+        failed: Number(row.failed) || 0,
+        approval: Number(row.approval) || 0,
+        ideas: Number(row.ideas) || 0,
+      }));
+      writeCache(state.rows);
       render();
     } catch (error) {
-      if (!state.rows.length) host.innerHTML = `<div class="all-profiles-loading error">All Profiles Overview could not load: ${esc(error.message)}</div>`;
+      const cached = state.rows.length ? state.rows : readCache();
+      if (cached?.length) {
+        state.rows = cached;
+        render({ stale: true, error: error?.message || String(error) });
+      } else {
+        render({ error: error?.message || String(error) });
+      }
     } finally {
       state.loading = false;
     }
   }
-  load();
+  // Let selected-profile health + home dashboard claim Airtable slots first.
+  const start = () => {
+    if (state.deferred) return;
+    state.deferred = true;
+    load();
+  };
+  if (typeof window.requestIdleCallback === "function") {
+    window.requestIdleCallback(start, { timeout: 2500 });
+  } else {
+    window.setTimeout(start, 1800);
+  }
+  // Poll less often — overview is expensive even when lean.
   state.timer = window.setInterval(() => {
     if (!document.hidden && document.getElementById("page-dashboard")?.classList.contains("active")) load();
-  }, 30000);
+  }, 90000);
 })();

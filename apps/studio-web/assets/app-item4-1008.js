@@ -264,7 +264,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.591-pipeline-review-filter";
+  const BUILD_ID = "item4-0.6.592-home-overview-lean";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -2134,11 +2134,11 @@
         // Use the same lean Pipeline outputs feed so Home cards match Pipeline filters.
         const stamp = Date.now();
         const [outputsSettled, ideasSettled] = await Promise.all([
-          api(`/api/outputs?limit=250&_=${stamp}`, { timeoutMs: 20000, retries: 2 }).then(
+          api(`/api/outputs?limit=250&_=${stamp}`, { timeoutMs: 20000, retries: 1 }).then(
             (value) => ({ ok: true, value }),
             (error) => ({ ok: false, error }),
           ),
-          api(`/api/ideas?limit=100&_=${stamp}`, { timeoutMs: 15000, retries: 1 }).then(
+          api(`/api/ideas?limit=100&_=${stamp}`, { timeoutMs: 15000, retries: 0 }).then(
             (value) => ({ ok: true, value }),
             (error) => ({ ok: false, error }),
           ),
