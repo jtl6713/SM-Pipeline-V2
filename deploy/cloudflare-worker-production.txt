@@ -129,3 +129,5 @@ Deploy Worker 0.10.489-engagement-ledger. Shrink the engagement ledger so Chicag
 2026-10-11: Deploy Worker 0.10.519-shared-render-queue. Remotion queue counts one slot per shared 9:16 short group; siblings wait for shared render.
 
 2026-10-11: Deploy Studio native MP4 preview with retry for all profiles; commit ebaa0069.
+
+2026-10-11: Fix legacy rendered MP4 streaming to use existing Google access token for authenticated Drive media fetch.
