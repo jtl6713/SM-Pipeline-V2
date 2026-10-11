@@ -250,7 +250,6 @@
   };
   let pipelineOpenSingleOnLoad = false;
   let dashboardCache = { metrics: {}, ideas: [], content: [], outputs: [] };
-  let dashboardView = "recent";
   const audioUserTouched = new Set();
   let activeCreativeOutputId = null;
   let activeCreativeOutput = null;
@@ -264,7 +263,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.603-render-server-preview";
+  const BUILD_ID = "item4-0.6.604-no-home-recent-outputs";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -2124,17 +2123,14 @@
       return dashboardInflight;
     }
     const generation = ++dashboardLoadGeneration;
-    const list = $("recentOutputs");
     const run = (async () => {
       updateDashboardLiveHint();
-      if (list && !force && !(dashboardCache.outputs || []).length) {
-        list.innerHTML = '<div class="empty">Loading pipeline data…</div>';
-      }
       try {
-        // Use the same lean Pipeline outputs feed so Home cards match Pipeline filters.
+        // Lean Pipeline outputs feed powers Scheduled counts + metric cards only.
+        // The old Home "Recent platform outputs" table was removed — Joseph never used it.
         const stamp = Date.now();
         const [outputsSettled, ideasSettled] = await Promise.all([
-          // Fail soft fast on home — long retries left "Loading pipeline data…" stuck.
+          // Fail soft fast on home — long retries left cards stuck on stale zeros.
           api(`/api/outputs?limit=250&_=${stamp}`, { timeoutMs: 12000, retries: 0 }).then(
             (value) => ({ ok: true, value }),
             (error) => ({ ok: false, error }),
@@ -2164,7 +2160,6 @@
         dashboardPollDelayMs = DASHBOARD_POLL_MS;
         renderScheduledContentOverview(outputs);
         renderDashboardMetrics();
-        renderDashboardPanel();
         updateDashboardLiveHint();
       } catch (e) {
         if (generation !== dashboardLoadGeneration) return;
@@ -2175,12 +2170,6 @@
         renderScheduledContentOverview(dashboardCache.outputs || []);
         renderDashboardMetrics();
         updateDashboardLiveHint();
-        if (list && !(dashboardCache.outputs || []).length) {
-          const soft = isTimeoutError(e) || isAirtableCooldownFailure({ error: e, text: e?.message || "" });
-          list.innerHTML = soft
-            ? '<div class="empty">Pipeline data is waiting on Airtable — retrying shortly…</div>'
-            : `<div class="error">${escapeHtml(e.message)}</div>`;
-        }
       }
     })();
     // Assign the fetch promise itself. Wrapping with .finally() and comparing
@@ -2199,12 +2188,6 @@
       }
     });
     return dashboardInflight;
-  }
-
-  function dashboardViewForCard(page, filter) {
-    if (page === "ideas") return "ideas";
-    if (page === "content") return "content";
-    return filter || "all";
   }
 
   function dashboardCardTone(view, number) {
@@ -2245,55 +2228,12 @@
     const metrics = $("metrics");
     if (!metrics) return;
     metrics.innerHTML = dashboardCards().map((card) => {
-      const selected = dashboardView === card.view;
       const tone = card.tone || "ok";
-      return `<button type="button" class="metric metric-button metric-tone-${escapeHtml(tone)}${selected ? " is-selected" : ""}" data-dash-page="${escapeHtml(card.page)}" data-dash-filter="${escapeHtml(card.filter || "")}" data-tone="${escapeHtml(tone)}" aria-pressed="${selected ? "true" : "false"}" title="Show ${escapeHtml(card.label)}"><div class="metric-label">${escapeHtml(card.label)}</div><div class="metric-value">${card.number ?? 0}</div></button>`;
+      return `<button type="button" class="metric metric-button metric-tone-${escapeHtml(tone)}" data-dash-page="${escapeHtml(card.page)}" data-dash-filter="${escapeHtml(card.filter || "")}" data-tone="${escapeHtml(tone)}" title="Show ${escapeHtml(card.label)}"><div class="metric-label">${escapeHtml(card.label)}</div><div class="metric-value">${card.number ?? 0}</div></button>`;
     }).join("");
     metrics.querySelectorAll("[data-dash-page]").forEach((button) => {
       button.addEventListener("click", () => openDashboardCard(button.dataset.dashPage, button.dataset.dashFilter));
     });
-  }
-
-  function dashboardPanelCopy(view) {
-    if (view === "ideas") return { title: "Ideas", copy: "Idea candidates currently in the intake queue." };
-    if (view === "content") return { title: "Content items", copy: "Promoted production items." };
-    if (view === "all") return { title: "Platform outputs", copy: "Every current platform output." };
-    if (view === "active") return { title: "Active outputs", copy: "Outputs still moving through production or publishing." };
-    if (view === "attention") return { title: "Needs attention", copy: "Failed, retry pending, or manual-action outputs." };
-    if (view === "published") return { title: "Published", copy: "Outputs that have reached a published state." };
-    return { title: "Recent platform outputs", copy: "Normalized states hide scenario implementation details while preserving actionable status." };
-  }
-
-  function renderDashboardPanel() {
-    const heading = dashboardPanelCopy(dashboardView);
-    const title = $("dashboardListTitle");
-    const copy = $("dashboardListCopy");
-    const list = $("recentOutputs");
-    if (title) title.textContent = heading.title;
-    if (copy) copy.textContent = heading.copy;
-    if (!list) return;
-    if (dashboardView === "ideas") {
-      renderIdeasTable(list, dashboardCache.ideas || []);
-      return;
-    }
-    if (dashboardView === "content") {
-      renderContentItemsTable(list, dashboardCache.content || []);
-      return;
-    }
-    const filter = dashboardView === "recent" ? "all" : dashboardView;
-    let records = dashboardCache.outputs || [];
-    if (dashboardView !== "recent") {
-      records = records.filter((record) => pipelineRecordMatchesFilter(record, filter));
-    }
-    records = sortedPipelineRecords(records);
-    if (dashboardView === "recent") {
-      records = records.slice(0, 12);
-    }
-    if (!records.length) {
-      list.innerHTML = `<div class="empty">No ${escapeHtml(heading.title.toLowerCase())} right now.</div>`;
-      return;
-    }
-    renderOutputsTable(list, records);
   }
 
   function openDashboardCard(page, filter) {
@@ -19513,26 +19453,21 @@ function timedScriptAssetLabel(asset, index) {
 
   function renderOutputsTable(target, records) {
     phase6HideTooltip();
-    const isPipeline = target?.id === "outputsList";
-    const isDashboard = target?.id === "recentOutputs";
-    if (isPipeline) {
-      updatePipelineQuickTabs(records);
-      renderPipelineAdvancedFilters();
+    if (target?.id !== "outputsList") {
+      target.innerHTML = '<div class="empty pipeline-compact-empty">No Platform Output records were returned.</div>';
+      return;
     }
-    const source = isPipeline ? filteredPipelineRecords(records) : records;
-    if (isPipeline) updatePipelineFilterBar(source.length);
+    updatePipelineQuickTabs(records);
+    renderPipelineAdvancedFilters();
+    const source = filteredPipelineRecords(records);
+    updatePipelineFilterBar(source.length);
     if (!source.length) {
-      const filteredEmpty = isPipeline && ((pipelineViewFilter && pipelineViewFilter !== "all") || pipelineColumnFiltersActive());
+      const filteredEmpty = (pipelineViewFilter && pipelineViewFilter !== "all") || pipelineColumnFiltersActive();
       target.innerHTML = filteredEmpty
         ? `<div class="empty pipeline-compact-empty">No outputs match the current filters.</div>`
         : '<div class="empty pipeline-compact-empty">No Platform Output records were returned.</div>';
       return;
     }
-    const sortedSource = isDashboard ? sortedPipelineRecords(source) : source;
-
-    const dashboardRow = (r, groupRecords) => {
-      return `<tr><td><div class="title-cell">${escapeHtml(pipelineOutputListTitle(r))}</div></td><td>${value(r.platform)}</td><td>${badge(pipelineStudioStateLabel(r))}</td><td>${value(pipelineRenderLabel(r))}</td><td>${value(r.review_status)}</td><td>${value(pipelinePublishStatusLabel(r))}</td><td>${pipelineProgressCell(r, groupRecords)}</td></tr>`;
-    };
 
     const pipelineRow = (r, groupRecords, contentCell = "") => {
       const canOpen = Boolean(r.id); // Always allow output inspection, including pending renders.
@@ -19577,44 +19512,33 @@ function timedScriptAssetLabel(asset, index) {
       return `<tr${rowOpen}>${contentCell}<td class="pipeline-output-platform-cell"><div class="pipeline-platform-line"><span class="pipeline-platform-pill" data-platform="${escapeHtml(platformSlug)}"><b>${escapeHtml(pipelinePlatformCode(platform))}</b><span>${escapeHtml(platform)}${outputTypeLabel && outputTypeLabel !== "—" ? ` · ${escapeHtml(outputTypeLabel)}` : ""}</span></span><strong>${escapeHtml(String(r.output_id || ""))}</strong></div></td><td class="pipeline-status-cell">${pipelineCompactStatusMarkup(r)}</td><td class="pipeline-progress-cell">${pipelineProgressCell(r, groupRecords)}</td><td class="pipeline-schedule-column">${scheduleCell}</td><td class="pipeline-actions-cell">${publishNowButton}<button type="button" class="creative-button pipeline-open-review" data-creative-output-id="${escapeHtml(r.id)}" ${canOpen ? "" : "disabled"} title="${canOpen ? "Open output details" : notReadyTitle}">${canOpen ? "Open" : escapeHtml(notReadyLabel)}</button>${moreMenu}</td></tr>`;
     };
 
-    const body = isPipeline
-      ? (() => {
-          const { active, archived } = partitionPipelineGroups(source);
-          const activeBody = active.map((group, index) => renderPipelineGroupTbody(group, pipelineRow, { isNewest: index === 0 })).join("");
-          const archivedBody = renderPipelineArchivedSection(archived, pipelineRow);
-          return `${activeBody}${archivedBody}`;
-        })()
-      : `<tbody>${sortedSource.map((row) => dashboardRow(row, sortedSource.filter((peer) => pipelineContentGroupKey(peer) === pipelineContentGroupKey(row)))).join("")}</tbody>`;
+    const body = (() => {
+      const { active, archived } = partitionPipelineGroups(source);
+      const activeBody = active.map((group, index) => renderPipelineGroupTbody(group, pipelineRow, { isNewest: index === 0 })).join("");
+      const archivedBody = renderPipelineArchivedSection(archived, pipelineRow);
+      return `${activeBody}${archivedBody}`;
+    })();
 
-    const head = isPipeline
-      ? `<tr><th>${pipelineSortHeader("output", "Content")}</th><th>${pipelineSortHeader("platform", "Platforms")}</th><th>${pipelineSortHeader("state", "Status")}</th><th>${pipelineSortHeader("progress", "Progress")}</th><th><span class="pipeline-col-label">Schedule (Your Time)</span></th><th><span class="pipeline-col-label">Actions</span></th></tr>`
-      : isDashboard
-      ? `<tr><th>${pipelineSortHeader("output", "Output")}</th><th>${pipelineSortHeader("platform", "Platform")}</th><th>${pipelineSortHeader("state", "Studio state")}</th><th>${pipelineSortHeader("render", "Render")}</th><th>${pipelineSortHeader("review", "Review")}</th><th>${pipelineSortHeader("publish", "Publish")}</th><th>${pipelineSortHeader("progress", "Progress")}</th></tr>`
-      : `<tr><th>Output</th><th>Platform</th><th>Studio state</th><th>Render</th><th>Review</th><th>Publish</th><th>Progress</th></tr>`;
+    const head = `<tr><th>${pipelineSortHeader("output", "Content")}</th><th>${pipelineSortHeader("platform", "Platforms")}</th><th>${pipelineSortHeader("state", "Status")}</th><th>${pipelineSortHeader("progress", "Progress")}</th><th><span class="pipeline-col-label">Schedule (Your Time)</span></th><th><span class="pipeline-col-label">Actions</span></th></tr>`;
 
     rememberPipelineScheduleDrafts();
-    const tableClass = isPipeline ? "data-table pipeline-compact-table" : isDashboard ? "data-table dashboard-output-table" : "data-table";
-    target.innerHTML = `<table class="${tableClass}"><thead>${head}</thead>${body}</table>`;
+    target.innerHTML = `<table class="data-table pipeline-compact-table"><thead>${head}</thead>${body}</table>`;
 
-    if (isPipeline || isDashboard) {
-      target.querySelectorAll("[data-pipeline-sort]").forEach((button) => {
-        button.addEventListener("click", (event) => {
-          event.stopPropagation();
-          const key = button.dataset.pipelineSort;
-          if (pipelineSort.key === key) {
-            pipelineSort.dir = pipelineSort.dir === "asc" ? "desc" : "asc";
-          } else {
-            pipelineSort.key = key;
-            pipelineSort.dir = key === "output" || key === "progress" ? "desc" : "asc";
-          }
-          if (isPipeline) renderOutputsTable(target, pipelineOutputs);
-          else renderDashboardPanel();
-        });
+    target.querySelectorAll("[data-pipeline-sort]").forEach((button) => {
+      button.addEventListener("click", (event) => {
+        event.stopPropagation();
+        const key = button.dataset.pipelineSort;
+        if (pipelineSort.key === key) {
+          pipelineSort.dir = pipelineSort.dir === "asc" ? "desc" : "asc";
+        } else {
+          pipelineSort.key = key;
+          pipelineSort.dir = key === "output" || key === "progress" ? "desc" : "asc";
+        }
+        renderOutputsTable(target, pipelineOutputs);
       });
-    }
+    });
 
-    if (isPipeline) {
-      target.querySelectorAll("[data-pipeline-archived-toggle]").forEach((button) => {
+    target.querySelectorAll("[data-pipeline-archived-toggle]").forEach((button) => {
         button.addEventListener("click", (event) => {
           event.stopPropagation();
           pipelineArchivedSectionOpen = !pipelineArchivedSectionOpen;
@@ -19724,8 +19648,7 @@ function timedScriptAssetLabel(asset, index) {
           openCreativeEditor(row.dataset.openOutputId);
         });
       });
-      phase6DecorateTooltips(target);
-    }
+    phase6DecorateTooltips(target);
   }
 
   function pipelineScheduleWindow() {

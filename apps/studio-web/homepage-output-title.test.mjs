@@ -27,9 +27,12 @@ test("homepage output list helper keeps the ID and adds the title", () => {
   assert.equal(pipelineOutputListTitle({ output_id: "441" }), "Output 441");
 });
 
-test("live Studio JS renders output title in the recent-outputs list", () => {
+test("live Studio JS keeps pipeline output titles without a Home recent-outputs table", () => {
   assert.match(app, /function pipelineOutputListTitle\(/);
-  assert.match(app, /title-cell">\$\{escapeHtml\(pipelineOutputListTitle\(r\)\)\}/);
+  assert.match(app, /pipelineOutputListTitle\(record\)/);
+  assert.doesNotMatch(html, /id="recentOutputs"/);
+  assert.doesNotMatch(html, /Recent platform outputs/);
+  assert.doesNotMatch(app, /function renderDashboardPanel\(/);
   const build = app.match(/BUILD_ID = "item4-([^"]+)"/)?.[1];
   assert.ok(build);
   assert.match(html, new RegExp(`app-item4-1008\\.js\\?v=${build.replace(/[.*+?^${}()|[\\]\\]/g, "\\$&")}`));
@@ -149,7 +152,8 @@ test("Home metric cards use count tones and Airtable-safe polling", () => {
   assert.match(app, /dashboardInflight = run;/);
   assert.doesNotMatch(app, /dashboardInflight = run\.finally/);
   assert.match(app, /api\(`\/api\/outputs\?limit=250&_=\$\{stamp\}`, \{ timeoutMs: 12000, retries: 0 \}/);
-  assert.match(app, /Pipeline data is waiting on Airtable/);
+  assert.doesNotMatch(app, /Pipeline data is waiting on Airtable/);
+  assert.doesNotMatch(html, /id="recentOutputs"/);
   assert.match(app, /showStudioPage\("outputs", \{ pipelineFilter: nextFilter \}\)/);
   assert.match(app, /pipelineOutputs = dashboardCache\.outputs\.slice\(\)/);
   assert.doesNotMatch(app, /await api\("\/api\/dashboard"/);
