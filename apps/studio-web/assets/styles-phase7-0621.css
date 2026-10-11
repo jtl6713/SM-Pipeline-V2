@@ -4106,7 +4106,7 @@ body:has(#page-outputs.active) .main{
 /* PIPELINE_ROWSPAN_MOCKUP_0_6_509 */
 /* Structural Pipeline redesign: one content card spans its platform rows, matching the approved mockup. */
 #outputsList .pipeline-compact-table{
-  min-width:1180px;
+  min-width:1280px;
   border-collapse:separate;
   border-spacing:0;
   table-layout:fixed;
@@ -4123,12 +4123,12 @@ body:has(#page-outputs.active) .main{
   font-weight:850;
   letter-spacing:.01em;
 }
-#outputsList .pipeline-compact-table thead th:nth-child(1){width:27%}
-#outputsList .pipeline-compact-table thead th:nth-child(2){width:18%}
-#outputsList .pipeline-compact-table thead th:nth-child(3){width:14%}
-#outputsList .pipeline-compact-table thead th:nth-child(4){width:13%}
-#outputsList .pipeline-compact-table thead th:nth-child(5){width:20%}
-#outputsList .pipeline-compact-table thead th:nth-child(6){width:8%}
+#outputsList .pipeline-compact-table thead th:nth-child(1){width:22%}
+#outputsList .pipeline-compact-table thead th:nth-child(2){width:16%}
+#outputsList .pipeline-compact-table thead th:nth-child(3){width:13%}
+#outputsList .pipeline-compact-table thead th:nth-child(4){width:12%}
+#outputsList .pipeline-compact-table thead th:nth-child(5){width:19%}
+#outputsList .pipeline-compact-table thead th:nth-child(6){width:18%}
 
 #outputsList .pipeline-content-package .pipeline-compact-row{
   height:38px;

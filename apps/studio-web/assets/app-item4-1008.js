@@ -261,7 +261,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.577-reopen-production-draft";
+  const BUILD_ID = "item4-0.6.578-pipeline-publish-immediate";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -17347,10 +17347,18 @@ function timedScriptAssetLabel(asset, index) {
   }
 
   function pipelineCanPublishNow(record) {
+    // Approved rows that are not published yet, including a future Scheduled time.
+    // Publish Now overrides that time. A due-only check hid the button on every
+    // row the operator actually sees in Pipeline.
     if (!creativeCanReschedule(record)) return false;
-    const publish = String(record?.publish_status || "").trim();
+    const publish = String(record?.publish_status || record?.platform_publish_status || "").trim();
     if (/^(publishing|published)$/i.test(publish)) return false;
-    return /^ready to publish$/i.test(pipelinePublishStatusLabel(record));
+    const label = String(pipelinePublishStatusLabel(record) || "").trim();
+    if (/^(publishing|published)$/i.test(label)) return false;
+    const status = String(record?.output_status || "").trim();
+    const render = String(record?.render_status || "").trim();
+    if (status === "In Production" || /^(rendering|ready for render|ready to render|waiting in render queue)$/i.test(render)) return false;
+    return true;
   }
 
   function creativeCanSetSchedule(output = activeCreativeOutput) {

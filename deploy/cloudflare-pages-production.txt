@@ -165,3 +165,4 @@ Deploy Studio UI 0.6.534-pages-path-bust. Rename app-item4-0625.js -> app-item4-
 
 2026-10-11: Deploy Studio UI 0.6.576-pipeline-publish-now. Pipeline rows that are Ready to Publish show Publish Now and send the existing immediate publish request.
 2026-10-11: Deploy Studio UI 0.6.577-reopen-production-draft. Open Production reopens an existing Vibe Cut or upload draft instead of rebuilding a voiceover timeline.
+2026-10-11: Deploy Studio UI 0.6.578-pipeline-publish-immediate. Pipeline shows Publish Now on approved rows that are not published yet, including future schedules, and the Actions column is wide enough to show it.
