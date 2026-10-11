@@ -28,5 +28,5 @@ test("a failed linked-request lookup cannot silently regenerate a duplicate", ()
 });
 
 test("Worker version is incremented for deployed idempotency fix", () => {
-  assert.match(worker, /version: "0.10.518-stamp-422-signature"/);
+  assert.match(worker, /version: "0.10.519-shared-render-queue"/);
 });
