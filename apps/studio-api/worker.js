@@ -622,7 +622,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.527-home-overview-lean",
+          version: "0.10.528-home-overview-cache",
           studio_post_publish_release_v1: true,
           studio_render_queue_wait_v1: true,
           studio_shared_render_queue_v1: true,
@@ -662,6 +662,7 @@ export default {
           studio_airtable_queue_hang_fix_v1: true,
           studio_pipeline_review_filter_v1: true,
           studio_home_overview_lean_v1: true,
+          studio_home_overview_cache_v1: true,
           studio_oversized_list_refresh_v1: true,
           studio_library_published_files_v1: true,
           studio_native_grid_cover_v1: true,
@@ -36299,31 +36300,58 @@ function studioOverviewOperationalMetrics(mappedOutputs, ideas) {
   };
 }
 
-/** One Worker request for All Profiles home table — no N× /api/dashboard fan-out. */
-async function profilesOverview(request, env, authorization) {
-  const profiles = await resolveAuthorizedContentProfiles(env, authorization);
-  const rows = [];
-  for (const profile of profiles) {
-    const formula = contentProfileFilterFormula(profile);
-    // Sequential per profile so the shared Airtable slot does not 429 itself.
-    const ideaRows = await listRecords(env, env.AIRTABLE_IDEA_TABLE_ID, {
-      limit: 100,
-      sortField: "Create_Date",
-      filterFormula: formula,
-    });
-    const outputRows = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
-      limit: 200,
-      filterFormula: formula,
-      sortField: "Output_ID",
-      sortDirection: "desc",
-      fields: OUTPUT_LIST_FIELDS,
-    });
-    const ideas = ideaRows.map(mapIdea);
+// Isolate memory cache: home used to fire N×(ideas+outputs) and 429 before paint.
+const STUDIO_PROFILES_OVERVIEW_CACHE_MS = 75 * 1000;
+const STUDIO_PROFILES_OVERVIEW_OUTPUT_LIMIT = 800;
+const STUDIO_PROFILES_OVERVIEW_IDEA_LIMIT = 300;
+const studioProfilesOverviewCache = { at: 0, authKey: "", rows: null, inflight: null };
+
+function studioProfilesOverviewAuthKey(profiles = []) {
+  return (profiles || []).map((profile) => String(profile?.id || "").trim()).filter(Boolean).sort().join(",");
+}
+
+function studioProfilesOverviewCombinedFormula(profiles = []) {
+  const formulas = (profiles || []).map((profile) => contentProfileFilterFormula(profile)).filter(Boolean);
+  if (!formulas.length) return null;
+  if (formulas.length === 1) return formulas[0];
+  return `OR(${formulas.join(",")})`;
+}
+
+function studioOverviewRowMatchesProfile(row, profile) {
+  if (!profile?.id) return true;
+  if (studioOccupiedRowMatchesProfile(row, profile)) return true;
+  const name = String(f(profile, "Profile_Name") || "").trim();
+  if (!name) return false;
+  const joined = arrayOrEmpty(f(row, "Content_Profile"))
+    .map((item) => (typeof item === "string" ? item : String(item?.name || item?.id || "")))
+    .join(" ");
+  return joined.includes(name);
+}
+
+async function buildStudioProfilesOverviewRows(env, profiles) {
+  const formula = studioProfilesOverviewCombinedFormula(profiles);
+  // Two Airtable reads total (was 2×N). Slot serialization still applies inside listRecords.
+  const outputRows = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
+    limit: STUDIO_PROFILES_OVERVIEW_OUTPUT_LIMIT,
+    filterFormula: formula,
+    sortField: "Output_ID",
+    sortDirection: "desc",
+    fields: OUTPUT_LIST_FIELDS,
+  });
+  const ideaRows = await listRecords(env, env.AIRTABLE_IDEA_TABLE_ID, {
+    limit: STUDIO_PROFILES_OVERVIEW_IDEA_LIMIT,
+    sortField: "Create_Date",
+    filterFormula: formula,
+  });
+  return (profiles || []).map((profile) => {
+    const profileOutputs = (outputRows || []).filter((row) => studioOverviewRowMatchesProfile(row, profile));
+    const profileIdeas = (ideaRows || []).filter((row) => studioOverviewRowMatchesProfile(row, profile));
     // Skip produce-job hydration — overview only needs studio_state + schedule fields.
-    const mappedOutputs = outputRows.map((row) => mapOutput(row, null));
+    const mappedOutputs = profileOutputs.map((row) => mapOutput(row, null));
+    const ideas = profileIdeas.map(mapIdea);
     const metrics = studioOverviewOperationalMetrics(mappedOutputs, ideas);
     const mapped = mapStudioContentProfile(profile);
-    rows.push({
+    return {
       id: profile.id,
       name: mapped.city_label || mapped.name || profile.id,
       city_label: mapped.city_label || "",
@@ -36333,9 +36361,50 @@ async function profilesOverview(request, env, authorization) {
       approval: metrics.awaiting_approval,
       ideas: metrics.ideas_not_in_production,
       metrics,
-    });
+    };
+  });
+}
+
+/** One Worker request for All Profiles home table — no N× /api/dashboard fan-out. */
+async function profilesOverview(request, env, authorization) {
+  const profiles = await resolveAuthorizedContentProfiles(env, authorization);
+  const authKey = studioProfilesOverviewAuthKey(profiles);
+  const now = Date.now();
+  const cache = studioProfilesOverviewCache;
+  if (cache.rows && cache.authKey === authKey && now - cache.at < STUDIO_PROFILES_OVERVIEW_CACHE_MS) {
+    return respond(request, env, { ok: true, cached: true, records: cache.rows });
   }
-  return respond(request, env, { ok: true, records: rows });
+  if (cache.inflight && cache.authKey === authKey) {
+    try {
+      const rows = await cache.inflight;
+      return respond(request, env, { ok: true, cached: true, records: rows });
+    } catch (error) {
+      if (cache.rows && cache.authKey === authKey) {
+        return respond(request, env, { ok: true, stale: true, records: cache.rows });
+      }
+      throw error;
+    }
+  }
+  cache.authKey = authKey;
+  cache.inflight = buildStudioProfilesOverviewRows(env, profiles)
+    .then((rows) => {
+      cache.at = Date.now();
+      cache.rows = rows;
+      return rows;
+    })
+    .finally(() => {
+      if (cache.inflight) cache.inflight = null;
+    });
+  try {
+    const rows = await cache.inflight;
+    return respond(request, env, { ok: true, records: rows });
+  } catch (error) {
+    // Prefer last-good overview over a red HTTP 429 banner on every home paint.
+    if (cache.rows && cache.authKey === authKey) {
+      return respond(request, env, { ok: true, stale: true, records: cache.rows });
+    }
+    throw error;
+  }
 }
 
 async function dashboard(request, env, url, authorization) {
