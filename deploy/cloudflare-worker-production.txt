@@ -123,3 +123,4 @@ Deploy Worker 0.10.489-engagement-ledger. Shrink the engagement ledger so Chicag
 2026-10-10: Deploy Worker 0.10.515-compression-stale-heal. Heal compressing@95 manifests when Drive authority already landed.
 
 2026-10-10: Deploy Worker 0.10.516-remotion-slot-reconcile. Treat Remotion busy from in-flight jobs, not stale slot counter.
+2026-10-11: Deploy Worker 0.10.517-reopen-production-draft. Production drafts list the newest open requests without downloading asset JSON or one Idea fetch per row.

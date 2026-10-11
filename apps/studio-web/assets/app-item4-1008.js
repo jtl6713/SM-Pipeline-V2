@@ -261,7 +261,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.576-pipeline-publish-now";
+  const BUILD_ID = "item4-0.6.577-reopen-production-draft";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -2723,9 +2723,15 @@
   /** Photo-wait creates a shell Production Request before the VO timeline exists. */
   function ideaTimelineRowButtonLabel(idea) {
     if (!ideaHasProductionRequest(idea)) return "Create timeline";
-    const wait = String(idea?.photo_wait_status || "").trim();
-    if (wait === "Waiting" || wait === "Ready") return "Create timeline";
+    if (ideaDraftNeedsTimeline(idea)) return "Create timeline";
     return "Open production";
+  }
+
+  // Photo-wait shells are empty until Create timeline attaches stills.
+  // Vibe Cut, finished video, and any other saved draft must reopen as-is.
+  function ideaDraftNeedsTimeline(idea) {
+    const wait = String(idea?.photo_wait_status || "").trim();
+    return wait === "Waiting" || wait === "Ready";
   }
 
   function ideaCanPromote(idea) {
@@ -3604,13 +3610,16 @@
     let existing = null;
     if (knownIds.length) {
       const results = await Promise.allSettled(knownIds.map((id) => api(
-        `/api/production-requests/${encodeURIComponent(id)}`,
+        `/api/production-requests/${encodeURIComponent(id)}?fields=light`,
         { timeoutMs: 15000, retries: 0 },
       )));
-      if (results.some((outcome) => outcome.status === "rejected" || !outcome.value?.record?.id)) {
+      const opened = results
+        .filter((outcome) => outcome.status === "fulfilled" && outcome.value?.record?.id)
+        .map((outcome) => outcome.value.record);
+      if (!opened.length) {
         throw new Error("An existing Production Request could not be checked. Refresh and try again; nothing new was created.");
       }
-      existing = selectIdeaProductionRequest(results.map((outcome) => outcome.value.record));
+      existing = selectIdeaProductionRequest(opened);
       if (!existing) {
         throw new Error("This idea has Production Requests, but none is an editable draft. Open its Pipeline outputs; no duplicate was created.");
       }
@@ -3622,14 +3631,16 @@
 
     if (existing?.id) {
       const hasTimeline = productionRequestNotesHaveTimedScript(existing.production_notes);
-      if (!hasTimeline) {
+      if (!hasTimeline && ideaDraftNeedsTimeline(idea)) {
         // Photo-wait / configure handoff may link a draft before [timed-script] is saved.
         await createIdeaTimedScript(idea, { button, heading });
         return null;
       }
       await openProductionRequestForIdea(idea, {
         productionRequest: existing,
-        successMessage: "Saved timeline opened in Rendering. Review the existing scenes; nothing was regenerated.",
+        successMessage: hasTimeline
+          ? "Saved timeline opened in Rendering. Review the existing scenes; nothing was regenerated."
+          : "Production draft opened. Your uploaded media is still attached.",
         strict: true,
       });
       setIdeasAutonomousMessage("", "");

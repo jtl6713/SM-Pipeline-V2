@@ -80,5 +80,5 @@ test("profile totals keep the existing profile-filtered dashboard and timezone c
   assert.match(overview, /\/api\/dashboard\?profile=\$\{encodeURIComponent\(profile\.id\)\}/);
   assert.match(app, /function workingStudioTimeZone\(\)/);
   assert.match(app, /function studioEffectiveScheduleIso\(record\)/);
-  assert.match(html, /all-profiles-overview-1007\.js\?v=0.6.576-pipeline-publish-now/);
+  assert.match(html, /all-profiles-overview-1007\.js\?v=0.6.577-reopen-production-draft/);
 });

@@ -17,4 +17,12 @@ test("Production Request list excludes detached blank Drafts", async () => {
   assert.match(fn, /promotedLinks\.length === 0/);
   assert.match(fn, /contentLinks\.length === 0/);
   assert.match(fn, /return !detachedBlankDraft/);
+  assert.match(fn, /listOpenProductionRequests/);
+  assert.match(fn, /loadIdeaListMetaByRecordId/);
+  const fields = source.slice(source.indexOf("const PRODUCTION_REQUEST_LIST_FIELDS"), source.indexOf("const OPEN_PRODUCTION_REQUEST_FORMULA"));
+  assert.doesNotMatch(fields, /Studio_Master_Assets_JSON/);
+  assert.doesNotMatch(fields, /Studio_Output_Plan_JSON/);
+  assert.doesNotMatch(fields, /Studio_Variant_Manifest_JSON/);
+  assert.doesNotMatch(fields, /Studio_Production_Job_JSON/);
+  assert.match(source, /sortField: "Updated_At"/);
 });

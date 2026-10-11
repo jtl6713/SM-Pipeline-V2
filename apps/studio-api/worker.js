@@ -603,7 +603,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.516-remotion-slot-reconcile",
+          version: "0.10.517-reopen-production-draft",
           studio_render_queue_wait_v1: true,
           studio_approve_all_batch_v1: true,
           studio_engagement_v1: true,
@@ -14931,37 +14931,48 @@ function ideaRecordIdFromProductionRequest(record) {
   return String(links[0] || "").trim() || null;
 }
 
-async function loadIdeaTitlesByRecordId(env, ideaIds) {
-  const unique = [...new Set((Array.isArray(ideaIds) ? ideaIds : [])
+function uniqueIdeaRecordIds(ideaIds) {
+  return [...new Set((Array.isArray(ideaIds) ? ideaIds : [])
     .map((id) => String(id || "").trim())
     .filter((id) => /^rec[A-Za-z0-9]+$/.test(id)))];
+}
+
+// One formula page per chunk. Per-idea GETs blow the Worker subrequest cap
+// once Production has more than a handful of open drafts, and the list 500s.
+async function loadIdeaListMetaByRecordId(env, ideaIds) {
+  const unique = uniqueIdeaRecordIds(ideaIds);
   const titles = new Map();
-  await Promise.all(unique.map(async (id) => {
+  const photoWait = new Map();
+  const chunks = [];
+  for (let index = 0; index < unique.length; index += 40) chunks.push(unique.slice(index, index + 40));
+  await Promise.all(chunks.map(async (chunk) => {
+    const formula = `OR(${chunk.map((id) => `RECORD_ID()="${id}"`).join(",")})`;
     try {
-      const idea = await airtableFetch(env, env.AIRTABLE_IDEA_TABLE_ID, id);
-      const title = String(f(idea, "Candidate_Title") || "").trim();
-      if (title) titles.set(id, title);
+      const rows = await listRecords(env, env.AIRTABLE_IDEA_TABLE_ID, {
+        limit: chunk.length,
+        filterFormula: formula,
+        fields: ["Candidate_Title", "Studio_Photo_Wait_Status"],
+      });
+      for (const row of rows) {
+        const title = String(f(row, "Candidate_Title") || "").trim();
+        if (title) titles.set(row.id, title);
+        photoWait.set(row.id, String(f(row, "Studio_Photo_Wait_Status") || "").trim());
+      }
     } catch (error) {
-      console.warn("Idea title lookup skipped", id, error);
+      console.warn("Idea list meta lookup skipped", error);
     }
   }));
+  return { titles, photoWait };
+}
+
+async function loadIdeaTitlesByRecordId(env, ideaIds) {
+  const { titles } = await loadIdeaListMetaByRecordId(env, ideaIds);
   return titles;
 }
 
 async function loadIdeaPhotoWaitStatesByRecordId(env, ideaIds) {
-  const unique = [...new Set((Array.isArray(ideaIds) ? ideaIds : [])
-    .map((id) => String(id || "").trim())
-    .filter((id) => /^rec[A-Za-z0-9]+$/.test(id)))];
-  const states = new Map();
-  await Promise.all(unique.map(async (id) => {
-    try {
-      const idea = await airtableFetch(env, env.AIRTABLE_IDEA_TABLE_ID, id);
-      states.set(id, String(f(idea, "Studio_Photo_Wait_Status") || "").trim());
-    } catch (error) {
-      console.warn("Idea photo-wait lookup skipped", id, error);
-    }
-  }));
-  return states;
+  const { photoWait } = await loadIdeaListMetaByRecordId(env, ideaIds);
+  return photoWait;
 }
 
 function mapProductionRequest(record, ideaTitle = null) {
@@ -15382,8 +15393,74 @@ function suggestPrimaryLocationFromIdea(idea) {
   return { name: "", source: "" };
 }
 
+const PRODUCTION_REQUEST_LIST_FIELDS = [
+  "Production_Request_ID",
+  "Test_Run_ID",
+  "Idea_Candidate",
+  "Organization",
+  "Brand",
+  "Created_By",
+  "Request_Status",
+  "Master_Content_Type",
+  "Target_Platforms",
+  "Voiceover_Mode",
+  "Voice_ID",
+  "Voice_Name",
+  "Background_Music_Mode",
+  "Thumbnail_Mode",
+  "Video_Duration_Seconds",
+  "Voiceover_Duration_Seconds",
+  "Music_Start_Seconds",
+  "Video_Clip_Count_Mode",
+  "Video_Clip_Count_Exact",
+  "Video_Clip_Count_Min",
+  "Video_Clip_Count_Max",
+  "Carousel_Slide_Count_Mode",
+  "Carousel_Slide_Count_Exact",
+  "Carousel_Slide_Count_Min",
+  "Carousel_Slide_Count_Max",
+  "Carousel_Image_Mode",
+  "Voiceover_Tail_Seconds",
+  "Selected_Music_Asset",
+  "Title_Mode",
+  "Requested_Title",
+  "Caption_Mode",
+  "Requested_Caption",
+  "Script_Mode",
+  "Requested_Script",
+  "Primary_Location",
+  "Production_Notes",
+  "Created_At",
+  "Updated_At",
+  "Submitted_At",
+  "Promoted_Content_Item",
+  "Content Items",
+  "Active",
+  "Studio_Master_Asset_Count",
+  "Studio_Master_Asset_Status",
+  "Studio_Output_Plan_Status",
+  "Studio_Variant_Status",
+  "Studio_Variant_Updated_At",
+  "Studio_Variant_Error",
+  "Studio_Item4_State",
+  "Studio_Publish_Batch_ID",
+  "Studio_Publish_Requested_At",
+];
+
+const OPEN_PRODUCTION_REQUEST_FORMULA = 'OR({Request_Status}="Draft",{Request_Status}="Ready",{Request_Status}="Submitted")';
+
+async function listOpenProductionRequests(env, { limit = 100, fields = PRODUCTION_REQUEST_LIST_FIELDS } = {}) {
+  return listRecords(env, PRODUCTION_REQUEST_TABLE, {
+    limit,
+    sortField: "Updated_At",
+    sortDirection: "desc",
+    filterFormula: OPEN_PRODUCTION_REQUEST_FORMULA,
+    fields,
+  });
+}
+
 async function existingDraftForIdea(env, ideaRecordId, authorization) {
-  const records = await listRecords(env, PRODUCTION_REQUEST_TABLE, { limit: 100 });
+  const records = await listOpenProductionRequests(env);
   const matches = records.filter((record) => {
     const ideaLinks = Array.isArray(f(record, "Idea_Candidate")) ? f(record, "Idea_Candidate") : [];
     const orgLinks = Array.isArray(f(record, "Organization")) ? f(record, "Organization") : [];
@@ -15401,7 +15478,11 @@ async function existingDraftForIdea(env, ideaRecordId, authorization) {
     record,
   }));
   const preferred = preferAuthoritativeProductionRequest(matches);
-  return preferred ? (matches.find((row) => row.id === preferred.id)?.record || null) : null;
+  const chosen = preferred ? (matches.find((row) => row.id === preferred.id)?.record || null) : null;
+  if (!chosen?.id) return null;
+  // The list omits asset/plan/variant JSON. Callers that continue the draft
+  // need the full record, and only this one row is fetched.
+  return airtableFetch(env, PRODUCTION_REQUEST_TABLE, chosen.id);
 }
 
 async function loadContentProfileRecord(env, authorization, profileId) {
@@ -15717,7 +15798,7 @@ async function listProductionRequests(request, env, url, authorization) {
   try { await item4EnsureMakeHardeningFromWorkspaceOpen(env); } catch (error) {
     console.warn("Item 4 Make hardening deferred from Production Request list", error);
   }
-  const records = await listRecords(env, PRODUCTION_REQUEST_TABLE, { limit: clampLimit(url, 100, 100) });
+  const records = await listOpenProductionRequests(env, { limit: clampLimit(url, 100, 100) });
   const profile = await resolveWorkingContentProfile(env, authorization, requestedProfileId(url));
   const profileBrandIds = new Set(arrayOrEmpty(f(profile, "Brand")));
   const filtered = records.filter(record => {
@@ -15740,10 +15821,7 @@ async function listProductionRequests(request, env, url, authorization) {
       (!profileBrandIds.size || brandLinks.some((id) => profileBrandIds.has(id)));
   });
   const ideaIds = filtered.map(ideaRecordIdFromProductionRequest);
-  const [ideaTitles, photoWaitStates] = await Promise.all([
-    loadIdeaTitlesByRecordId(env, ideaIds),
-    loadIdeaPhotoWaitStatesByRecordId(env, ideaIds),
-  ]);
+  const { titles: ideaTitles, photoWait: photoWaitStates } = await loadIdeaListMetaByRecordId(env, ideaIds);
   const visible = filtered.filter((record) => {
     const ideaId = ideaRecordIdFromProductionRequest(record);
     return !ideaId || photoWaitStates.get(ideaId) !== "Waiting";
@@ -24019,7 +24097,7 @@ async function createIdeaTimedScriptRoute(request, env, url, authorization, ctx 
 }
 
 async function findDraftProductionRequestForIdea(env, ideaRecordId) {
-  const records = await listRecords(env, PRODUCTION_REQUEST_TABLE, { limit: 100 });
+  const records = await listOpenProductionRequests(env);
   const matches = records.filter((record) => {
     const ideaLinks = Array.isArray(f(record, "Idea_Candidate")) ? f(record, "Idea_Candidate") : [];
     const status = String(f(record, "Request_Status") || "").trim();
@@ -24033,7 +24111,9 @@ async function findDraftProductionRequestForIdea(env, ideaRecordId) {
     record,
   }));
   const preferred = preferAuthoritativeProductionRequest(matches);
-  return preferred ? (matches.find((row) => row.id === preferred.id)?.record || null) : null;
+  const chosen = preferred ? (matches.find((row) => row.id === preferred.id)?.record || null) : null;
+  if (!chosen?.id) return null;
+  return airtableFetch(env, PRODUCTION_REQUEST_TABLE, chosen.id);
 }
 
 async function rankStillsForIdeaPhotoWait(env, idea) {
