@@ -155,3 +155,5 @@ Deploy Worker 0.10.489-engagement-ledger. Shrink the engagement ledger so Chicag
 2026-10-11: Lean All Profiles overview — one /api/profiles/overview (UI 0.6.592 / Worker 0.10.527).
 
 2026-10-11: Cache All Profiles overview (2 Airtable reads + stale cache) UI 0.6.593 / Worker 0.10.528.
+
+2026-10-11: Soft-200 All Profiles overview on Airtable cooldown (UI 0.6.597 / Worker 0.10.529).

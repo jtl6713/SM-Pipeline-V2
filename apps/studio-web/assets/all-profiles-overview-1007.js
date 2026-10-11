@@ -95,10 +95,14 @@
     window.setTimeout(openView, 150);
     window.setTimeout(openView, 700);
   }
-  function render({ stale = false, error = "" } = {}) {
+  function render({ stale = false, error = "", cooling = false } = {}) {
     if (!state.rows.length) {
+      if (cooling) {
+        host.innerHTML = '<div class="all-profiles-loading">All Profiles overview is waiting on Airtable — retrying shortly…</div>';
+        return;
+      }
       host.innerHTML = error
-        ? `<div class="all-profiles-loading error">All Profiles Overview could not load: ${esc(error)}</div>`
+        ? `<div class="all-profiles-loading error">All Profiles Overview unavailable: ${esc(error)}</div>`
         : '<div class="all-profiles-loading">Loading all profiles…</div>';
       return;
     }
@@ -140,11 +144,15 @@
     }
     try {
       // One Worker request replaces N× /api/dashboard (+ /api/profiles) fan-out
-      // that was 429ing the home page on every paint.
+      // that was 429ing the home page on every paint. Worker soft-200s on cooldown.
       const data = await json(`/api/profiles/overview?_=${Date.now()}`, { timeoutMs: 60000 });
       const rows = Array.isArray(data?.records) ? data.records : [];
       if (!rows.length) {
-        if (!state.rows.length) host.innerHTML = '<div class="all-profiles-loading error">No Content Profiles returned.</div>';
+        if (data?.cooling) {
+          render({ cooling: true, stale: Boolean(state.rows.length) });
+          return;
+        }
+        if (!state.rows.length) host.innerHTML = '<div class="all-profiles-loading">No Content Profiles returned yet.</div>';
         return;
       }
       state.rows = rows.map((row) => ({
@@ -157,14 +165,16 @@
         ideas: Number(row.ideas) || 0,
       }));
       writeCache(state.rows);
-      render();
+      render({ stale: Boolean(data?.stale || data?.cooling), error: data?.cooling ? "Airtable busy" : "" });
     } catch (error) {
+      const message = String(error?.message || error || "");
+      const cooling = /HTTP 429|cooling down|rate.?limit|too many requests/i.test(message);
       const cached = state.rows.length ? state.rows : readCache();
       if (cached?.length) {
         state.rows = cached;
-        render({ stale: true, error: error?.message || String(error) });
+        render({ stale: true, cooling, error: cooling ? "Airtable busy" : message });
       } else {
-        render({ error: error?.message || String(error) });
+        render({ cooling, error: cooling ? "" : message });
       }
     } finally {
       state.loading = false;
