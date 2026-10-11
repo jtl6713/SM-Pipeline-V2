@@ -622,7 +622,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.524-airtable-burn-kill",
+          version: "0.10.525-airtable-queue-hang",
           studio_post_publish_release_v1: true,
           studio_render_queue_wait_v1: true,
           studio_shared_render_queue_v1: true,
@@ -659,6 +659,7 @@ export default {
           studio_quality_agent_v1: true,
           studio_airtable_low_burn_cron_v1: true,
           studio_airtable_burn_kill_v1: true,
+          studio_airtable_queue_hang_fix_v1: true,
           studio_oversized_list_refresh_v1: true,
           studio_library_published_files_v1: true,
           studio_native_grid_cover_v1: true,
@@ -2351,28 +2352,25 @@ function sleepMs(ms) {
   return new Promise((resolve) => setTimeout(resolve, Math.max(0, Number(ms) || 0)));
 }
 
-// Pace requests per Worker isolate. Other workers/clients share the base quota.
-// On 429: record Airtable's cooldown so later slots wait, but fail the current
-// request immediately — never sleep 30–120s inside a user-facing fetch.
+// Pace Airtable calls per isolate without a shared Promise chain.
+// A module-level `airtableQueue.then(...)` wedged the isolate when a request
+// was canceled mid-slot (CF hung / "will never generate a response" / UI 500):
+// 203 exceptions + 213 hung cancels after 0.10.524. Each call sleeps locally
+// for short gaps only; long cooldowns fail fast as HTTP 429.
 const AIRTABLE_MIN_GAP_MS = 250;
 const AIRTABLE_SLOT_FAIL_FAST_MS = 1500;
 let airtableNextRequestAt = 0;
-let airtableQueue = Promise.resolve();
 function airtableCooldownWaitMs() {
   return Math.max(0, airtableNextRequestAt - Date.now());
 }
-function airtableRequestSlot() {
-  const slot = airtableQueue.then(async () => {
-    const now = Date.now();
-    const wait = Math.max(0, airtableNextRequestAt - now);
-    if (wait > AIRTABLE_SLOT_FAIL_FAST_MS) {
-      throw new HttpError(429, `Airtable cooling down (${Math.ceil(wait / 1000)}s); try again shortly`);
-    }
-    airtableNextRequestAt = Math.max(now, airtableNextRequestAt) + AIRTABLE_MIN_GAP_MS;
-    if (wait) await sleepMs(wait);
-  });
-  airtableQueue = slot.catch(() => {});
-  return slot;
+async function airtableRequestSlot() {
+  const now = Date.now();
+  const wait = Math.max(0, airtableNextRequestAt - now);
+  if (wait > AIRTABLE_SLOT_FAIL_FAST_MS) {
+    throw new HttpError(429, `Airtable cooling down (${Math.ceil(wait / 1000)}s); try again shortly`);
+  }
+  airtableNextRequestAt = Math.max(now, airtableNextRequestAt) + AIRTABLE_MIN_GAP_MS;
+  if (wait) await sleepMs(wait);
 }
 function airtableRetryDelayMs(response, attempt) {
   const raw = String(response?.headers?.get("Retry-After") || "").trim();
@@ -4224,10 +4222,14 @@ function studioApproveAllCandidateFormula(profile) {
 }
 
 async function listContentProfileRecords(env) {
-  if (!env.__contentProfilesPromise) {
-    env.__contentProfilesPromise = listRecords(env, "Content Profiles", { limit: 100 });
+  if (Array.isArray(env.__contentProfilesCache) && env.__contentProfilesCache.length) {
+    return env.__contentProfilesCache;
   }
-  return env.__contentProfilesPromise;
+  // Do not cache an unsettled/rejected Promise on env — a canceled in-flight
+  // listRecords would hang every profile-scoped route until isolate recycle.
+  const rows = await listRecords(env, "Content Profiles", { limit: 100 });
+  env.__contentProfilesCache = rows;
+  return rows;
 }
 
 async function resolveAuthorizedContentProfiles(env, authorization) {

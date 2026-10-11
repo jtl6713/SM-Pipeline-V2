@@ -10,9 +10,9 @@ const html = fs.readFileSync(path.join(here, "index.html"), "utf8");
 const worker = fs.readFileSync(path.join(here, "../studio-api/worker.js"), "utf8");
 
 test("UI enables Save schedule for Ready for Review (Output 1795)", () => {
-  assert.match(app, /BUILD_ID = "item4-0.6.589-airtable-burn-kill"/);
-  assert.match(html, /UI build 0.6.589/);
-  assert.match(html, /app-item4-1008\.js\?v=0.6.589-airtable-burn-kill/);
+  assert.match(app, /BUILD_ID = "item4-0.6.590-airtable-queue-hang"/);
+  assert.match(html, /UI build 0.6.590/);
+  assert.match(html, /app-item4-1008\.js\?v=0.6.590-airtable-queue-hang/);
   // setCreativeBusy must gate Save on creativeCanSetSchedule, not only approved reschedule.
   assert.match(
     app,
@@ -30,7 +30,7 @@ test("UI enables Save schedule for Ready for Review (Output 1795)", () => {
 });
 
 test("Worker keeps Ready for Review over Ready to Schedule until Approve", () => {
-  assert.match(worker, /version: "0.10.524-airtable-burn-kill"/);
+  assert.match(worker, /version: "0.10.525-airtable-queue-hang"/);
   // Ready to Schedule / Ready to Publish must not be in approvedOrScheduledEarly.
   const block = worker.match(
     /A pre-filled Publish_Status of "Ready to Schedule"[\s\S]{0,400}const approvedOrScheduledEarly =([\s\S]{0,500}?);/

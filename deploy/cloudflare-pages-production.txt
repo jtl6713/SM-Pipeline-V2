@@ -188,3 +188,5 @@ Deploy Studio UI 0.6.534-pages-path-bust. Rename app-item4-0625.js -> app-item4-
 2026-10-11: Soft AI API footer under Airtable cooldown (UI 0.6.588 / Worker 0.10.523).
 
 2026-10-11: Airtable burn-kill — light cron publish/produce only + skip while cooling + UI 429 backoff (UI 0.6.589 / Worker 0.10.524).
+
+2026-10-11: Fix Airtable shared Promise queue hang (UI 0.6.590 / Worker 0.10.525).
