@@ -622,7 +622,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.526-pipeline-review-filter",
+          version: "0.10.527-home-overview-lean",
           studio_post_publish_release_v1: true,
           studio_render_queue_wait_v1: true,
           studio_shared_render_queue_v1: true,
@@ -661,6 +661,7 @@ export default {
           studio_airtable_burn_kill_v1: true,
           studio_airtable_queue_hang_fix_v1: true,
           studio_pipeline_review_filter_v1: true,
+          studio_home_overview_lean_v1: true,
           studio_oversized_list_refresh_v1: true,
           studio_library_published_files_v1: true,
           studio_native_grid_cover_v1: true,
@@ -1266,6 +1267,11 @@ export default {
         }
         if (request.method !== "GET") throw new HttpError(405, "Method not allowed");
         return listStudioContentProfiles(request, env, authorization);
+      }
+
+      if (url.pathname === "/api/profiles/overview") {
+        if (request.method !== "GET") throw new HttpError(405, "Method not allowed");
+        return profilesOverview(request, env, authorization);
       }
 
       if (url.pathname === "/api/dashboard") {
@@ -24672,6 +24678,7 @@ const OUTPUT_LIST_FIELDS = [
   "YouTube_Rejection_Reason",
   "Remotion_Job_ID",
   "Review_Decision_At",
+  "YouTube_Privacy_Status",
 ];
 
 async function scheduleGridContentById(env, outputRecords) {
@@ -36244,17 +36251,123 @@ async function getOutputRoute(request, env, url) {
   });
 }
 
+function studioOverviewScheduledCounts(mappedOutputs) {
+  const platformOrder = ["Facebook", "Instagram", "TikTok", "YouTube"];
+  const counts = Object.fromEntries(platformOrder.map((p) => [p, 0]));
+  for (const row of mappedOutputs || []) {
+    const platform = String(row?.platform || "").trim();
+    if (!(platform in counts)) continue;
+    const publishStatus = String(row?.publish_status || "");
+    const youtubePrivacy = String(row?.youtube_privacy_status || "").trim().toLowerCase();
+    const youtubeNotPublic = platform === "YouTube" && /^(private|unlisted)$/.test(youtubePrivacy);
+    const published = !youtubeNotPublic && (Boolean(row?.published_at) || /published/i.test(publishStatus));
+    const scheduled = Boolean(row?.scheduled_post_date || row?.youtube_scheduled_publish_at || row?.studio_scheduled_at)
+      || /scheduled|ready to publish|publishing/i.test(publishStatus)
+      || youtubeNotPublic;
+    if (!published && scheduled) counts[platform] += 1;
+  }
+  return counts;
+}
+
+function studioOverviewOperationalMetrics(mappedOutputs, ideas) {
+  const attentionStates = new Set(["Failed", "Retry Pending", "Manual Action Required"]);
+  const manualAction = mappedOutputs.filter((o) => o.studio_state === "Manual Action Required").length;
+  const failed = mappedOutputs.filter((o) => o.studio_state === "Failed").length;
+  const awaitingApproval = mappedOutputs.filter((o) => {
+    const state = String(o.studio_state || "").trim();
+    if (state !== "Ready for Review" && state !== "Awaiting Approval") return false;
+    if (o.do_not_publish) return false;
+    const notes = `${o.output_notes || ""}\n${o.production_notes || ""}`;
+    if (/origin=az-finished-video/i.test(notes)) return false;
+    if (/az-auto-queue=1/i.test(notes) && /ez-input=finished-video/i.test(notes)) return false;
+    return true;
+  }).length;
+  const ideasNotInProduction = (ideas || []).filter((idea) => !(
+    Boolean(idea?.promoted_content_record_id)
+    || (Array.isArray(idea?.content_item_links) && idea.content_item_links.length > 0)
+  )).length;
+  return {
+    manual_action_required: manualAction,
+    failed_outputs: failed,
+    awaiting_approval: awaitingApproval,
+    ideas_not_in_production: ideasNotInProduction,
+    attention_outputs: mappedOutputs.filter((o) => attentionStates.has(o.studio_state)).length,
+    published_outputs: mappedOutputs.filter((o) => o.studio_state === "Published").length,
+    active_outputs: mappedOutputs.filter((o) => !["Published", "Skipped", "Failed"].includes(o.studio_state)).length,
+    ideas: (ideas || []).length,
+    platform_outputs: mappedOutputs.length,
+  };
+}
+
+/** One Worker request for All Profiles home table — no N× /api/dashboard fan-out. */
+async function profilesOverview(request, env, authorization) {
+  const profiles = await resolveAuthorizedContentProfiles(env, authorization);
+  const rows = [];
+  for (const profile of profiles) {
+    const formula = contentProfileFilterFormula(profile);
+    // Sequential per profile so the shared Airtable slot does not 429 itself.
+    const ideaRows = await listRecords(env, env.AIRTABLE_IDEA_TABLE_ID, {
+      limit: 100,
+      sortField: "Create_Date",
+      filterFormula: formula,
+    });
+    const outputRows = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
+      limit: 200,
+      filterFormula: formula,
+      sortField: "Output_ID",
+      sortDirection: "desc",
+      fields: OUTPUT_LIST_FIELDS,
+    });
+    const ideas = ideaRows.map(mapIdea);
+    // Skip produce-job hydration — overview only needs studio_state + schedule fields.
+    const mappedOutputs = outputRows.map((row) => mapOutput(row, null));
+    const metrics = studioOverviewOperationalMetrics(mappedOutputs, ideas);
+    const mapped = mapStudioContentProfile(profile);
+    rows.push({
+      id: profile.id,
+      name: mapped.city_label || mapped.name || profile.id,
+      city_label: mapped.city_label || "",
+      scheduled: studioOverviewScheduledCounts(mappedOutputs),
+      manual: metrics.manual_action_required,
+      failed: metrics.failed_outputs,
+      approval: metrics.awaiting_approval,
+      ideas: metrics.ideas_not_in_production,
+      metrics,
+    });
+  }
+  return respond(request, env, { ok: true, records: rows });
+}
+
 async function dashboard(request, env, url, authorization) {
   const profile = await resolveWorkingContentProfile(env, authorization, requestedProfileId(url));
   const formula = contentProfileFilterFormula(profile);
+  const leanOverview = url.searchParams.get("all_profiles_overview") === "1";
   const ideas = (await listRecords(env, env.AIRTABLE_IDEA_TABLE_ID, { limit: 100, sortField: "Create_Date", filterFormula: formula })).map(mapIdea);
-  const contentRows = await listRecords(env, env.AIRTABLE_CONTENT_TABLE_ID, { limit: 100, sortField: "Created_At", filterFormula: formula });
   const outputRows = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
     limit: 200,
     filterFormula: formula,
     sortField: "Output_ID",
     sortDirection: "desc",
+    fields: leanOverview ? OUTPUT_LIST_FIELDS : [],
   });
+  if (leanOverview) {
+    const mappedOutputs = outputRows.map((row) => mapOutput(row, null));
+    const metrics = studioOverviewOperationalMetrics(mappedOutputs, ideas);
+    return respond(request, env, {
+      ok: true,
+      lean: true,
+      metrics: {
+        ...metrics,
+        content_items: 0,
+      },
+      ideas: [],
+      content: [],
+      outputs: mappedOutputs,
+      recent_outputs: mappedOutputs.slice(0, 12),
+      profile: mapStudioContentProfile(profile),
+    });
+  }
+  const contentRows = await listRecords(env, env.AIRTABLE_CONTENT_TABLE_ID, { limit: 100, sortField: "Created_At", filterFormula: formula });
   const outputsByContent = new Map();
   for (const output of outputRows) {
     const contentId = studioFirstLinkedId(f(output, "Content_Item"));
@@ -36265,46 +36378,13 @@ async function dashboard(request, env, url, authorization) {
   const content = contentRows.map((row) => mapContent(row, outputsByContent.get(row.id) || []));
   const outputJobs = await loadStudioProductionJobsForOutputs(env, outputRows);
   const mappedOutputs = outputRows.map((row) => mapOutput(row, outputJobs.get(row)));
-  const attentionStates = new Set(["Failed", "Retry Pending", "Manual Action Required"]);
-  const published = mappedOutputs.filter((o) => o.studio_state === "Published").length;
-  const attention = mappedOutputs.filter((o) => attentionStates.has(o.studio_state)).length;
-  const active = mappedOutputs.filter((o) => !["Published", "Skipped", "Failed"].includes(o.studio_state)).length;
-  const manualAction = mappedOutputs.filter((o) => o.studio_state === "Manual Action Required").length;
-  const failed = mappedOutputs.filter((o) => o.studio_state === "Failed").length;
-  // Match Pipeline "Awaiting Approval": normalized studio_state only.
-  // Do not count raw Output_Status=Ready for Review after Approve (Review=Approved /
-  // Publish=Ready to Schedule) — those click through empty (Miami Outputs 2154/2155/1841).
-  const awaitingApproval = mappedOutputs.filter((o) => {
-    const state = String(o.studio_state || "").trim();
-    if (state !== "Ready for Review" && state !== "Awaiting Approval") return false;
-    if (o.do_not_publish) return false;
-    const notes = `${o.output_notes || ""}\n${o.production_notes || ""}`;
-    if (/origin=az-finished-video/i.test(notes)) return false;
-    if (/az-auto-queue=1/i.test(notes) && /ez-input=finished-video/i.test(notes)) return false;
-    return true;
-  }).length;
-  // Keep the Home count identical to the Ideas tab's "Current ideas"
-  // population. The tab considers an idea promoted when either the canonical
-  // promoted record ID or Content Items linkage exists; Candidate_Status is
-  // presentation state and must not independently determine this count.
-  const ideasNotInProduction = ideas.filter((idea) => !(
-    Boolean(idea?.promoted_content_record_id)
-    || (Array.isArray(idea?.content_item_links) && idea.content_item_links.length > 0)
-  )).length;
+  const metrics = studioOverviewOperationalMetrics(mappedOutputs, ideas);
 
   return respond(request, env, {
     ok: true,
     metrics: {
-      ideas: ideas.length,
+      ...metrics,
       content_items: content.length,
-      platform_outputs: mappedOutputs.length,
-      active_outputs: active,
-      attention_outputs: attention,
-      published_outputs: published,
-      manual_action_required: manualAction,
-      failed_outputs: failed,
-      awaiting_approval: awaitingApproval,
-      ideas_not_in_production: ideasNotInProduction,
     },
     ideas,
     content,

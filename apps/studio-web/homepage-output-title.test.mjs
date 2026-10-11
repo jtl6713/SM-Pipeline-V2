@@ -148,7 +148,7 @@ test("Home metric cards use count tones and Airtable-safe polling", () => {
   assert.match(app, /if \(!force && dashboardInflight && dashboardInflightKey === key\)/);
   assert.match(app, /dashboardInflight = run;/);
   assert.doesNotMatch(app, /dashboardInflight = run\.finally/);
-  assert.match(app, /api\(`\/api\/outputs\?limit=250&_=\$\{stamp\}`, \{ timeoutMs: 20000, retries: 2 \}/);
+  assert.match(app, /api\(`\/api\/outputs\?limit=250&_=\$\{stamp\}`, \{ timeoutMs: 20000, retries: 1 \}/);
   assert.match(app, /showStudioPage\("outputs", \{ pipelineFilter: nextFilter \}\)/);
   assert.match(app, /pipelineOutputs = dashboardCache\.outputs\.slice\(\)/);
   assert.doesNotMatch(app, /await api\("\/api\/dashboard"/);

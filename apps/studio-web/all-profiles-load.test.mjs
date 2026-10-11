@@ -7,12 +7,21 @@ import { fileURLToPath } from "node:url";
 const here = path.dirname(fileURLToPath(import.meta.url));
 const overview = fs.readFileSync(path.join(here, "assets/all-profiles-overview-1007.js"), "utf8");
 const html = fs.readFileSync(path.join(here, "index.html"), "utf8");
+const worker = fs.readFileSync(path.join(here, "../studio-api/worker.js"), "utf8");
 
-test("All Profiles overview caps dashboard concurrency and times out hung fetches", () => {
-  assert.match(overview, /function mapPool/);
-  assert.match(overview, /mapPool\(profiles,\s*2,/);
-  assert.match(overview, /Timed out after/);
-  assert.match(overview, /timeoutMs:\s*25000/);
-  assert.match(overview, /load_error/);
-  assert.match(html, /all-profiles-overview-1007\.js\?v=0\.6\.591-pipeline-review-filter/);
+test("All Profiles overview uses one lean /api/profiles/overview call", () => {
+  assert.match(overview, /\/api\/profiles\/overview/);
+  assert.doesNotMatch(overview, /\/api\/dashboard\?profile=/);
+  assert.doesNotMatch(overview, /mapPool\(profiles/);
+  assert.match(overview, /requestIdleCallback|setTimeout\(start/);
+  assert.match(overview, /sessionStorage/);
+  assert.match(overview, /Showing last good overview/);
+  assert.match(html, /all-profiles-overview-1007\.js\?v=/);
+});
+
+test("Worker exposes profilesOverview lean batch route", () => {
+  assert.match(worker, /pathname === "\/api\/profiles\/overview"/);
+  assert.match(worker, /async function profilesOverview/);
+  assert.match(worker, /Skip produce-job hydration/);
+  assert.match(worker, /studio_home_overview_lean_v1: true/);
 });
