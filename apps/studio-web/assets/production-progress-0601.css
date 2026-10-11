@@ -1,0 +1,7 @@
+#productionRequestMessage:has(.production-progress-list){background:#e9f7f0!important;border:1px solid #b8dfc8!important;color:#134d35!important;padding:16px!important;border-radius:12px!important}
+.production-progress-list{display:grid;gap:10px}
+.production-progress-step{display:flex;align-items:center;gap:11px;color:#4a5c69;font-weight:650;line-height:1.4}
+.production-progress-step.is-complete{color:#11603c}
+.production-progress-mark{width:22px;height:22px;flex:0 0 22px;border:2px solid #a4b5bf;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-size:14px;line-height:1;font-weight:900}
+.production-progress-step.is-complete .production-progress-mark{background:#147a4a;color:#fff;border-color:#147a4a}
+.production-progress-note{margin-top:14px;padding-top:12px;border-top:1px solid #c4e2d0;color:#305c47;font-size:.9rem;line-height:1.5}
