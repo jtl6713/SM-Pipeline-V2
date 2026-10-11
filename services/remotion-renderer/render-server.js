@@ -20,7 +20,7 @@ const DEFAULT_MUSIC_END_FADE_SECONDS = 0.5;
 const PIPELINE_RUNNER_INTERNAL_URL = String(
     process.env.PIPELINE_RUNNER_INTERNAL_URL || 'http://127.0.0.1:3350'
 ).replace(/\/$/, '');
-const SERVICE_VERSION = '2026-10-11-slot-hold-only';
+const SERVICE_VERSION = '2026-10-11-drive-clip-dedupe';
 const PROJECT_DIR = __dirname;
 const PUBLIC_DIR = path.join(PROJECT_DIR, 'public');
 const OUT_DIR = path.join(PROJECT_DIR, 'out');
@@ -756,6 +756,9 @@ async function rewriteClipAssets({ clips, jobId, jobAssetDir, job }) {
 
     const usedFilenames = new Set();
     const rewrittenClips = [];
+    // Vibe-cut / beat-cut often stamps 20–28 clips from one Drive master. Re-download
+    // of the same file stalls prepare for many minutes and piles preparingJobs.
+    const driveLocalCache = new Map();
 
     for (let index = 0; index < clips.length; index += 1) {
         const clip = clips[index];
@@ -771,6 +774,23 @@ async function rewriteClipAssets({ clips, jobId, jobAssetDir, job }) {
         const sourceUrl = driveFileId
             ? `${PIPELINE_RUNNER_INTERNAL_URL}/internal/drive-media/${encodeURIComponent(driveFileId)}`
             : clip.url;
+
+        if (driveFileId && driveLocalCache.has(driveFileId)) {
+            const cached = driveLocalCache.get(driveFileId);
+            appendLog(
+                job,
+                `Reusing downloaded Drive file ${driveFileId} for clip ${clipId}`
+            );
+            const rewrittenClip = {
+                ...clip,
+                mediaKind: cached.mediaKind,
+                media_kind: cached.mediaKind,
+                src: toPublicSrc(cached.destination),
+            };
+            delete rewrittenClip.url;
+            rewrittenClips.push(rewrittenClip);
+            continue;
+        }
 
         if (isHttpUrl(sourceUrl)) {
             const fallbackExt = mediaKind === 'video' ? '.mp4' : '.jpg';
@@ -803,6 +823,9 @@ async function rewriteClipAssets({ clips, jobId, jobAssetDir, job }) {
                     job,
                     `Clip ${clipId} bytes are MP4 (ftyp); renamed to ${toProjectRelative(videoPath)} and mediaKind=video`
                 );
+                if (driveFileId) {
+                    driveLocalCache.set(driveFileId, { destination: videoPath, mediaKind: 'video' });
+                }
                 const rewrittenClip = {
                     ...clip,
                     mediaKind: 'video',
@@ -815,6 +838,9 @@ async function rewriteClipAssets({ clips, jobId, jobAssetDir, job }) {
             }
 
             appendLog(job, `Downloaded clip ${clipId} to ${toProjectRelative(destination)}`);
+            if (driveFileId) {
+                driveLocalCache.set(driveFileId, { destination, mediaKind });
+            }
 
             const rewrittenClip = {
                 ...clip,
@@ -1400,6 +1426,40 @@ app.get('/status/:jobId', (req, res) => {
     res.json({
         found: true,
         ...job,
+    });
+});
+
+// Desk / heal: abandon a stuck preparing job (e.g. vibe-cut re-downloading one Drive
+// master 28×) so R4 can requeue after a remotion deploy. Does not kill an active
+// Remotion child — use only while status is preparing/queued.
+app.post('/cancel/:jobId', (req, res) => {
+    const job = jobs.get(req.params.jobId);
+    if (!job) {
+        res.status(404).json({ ok: false, found: false, error: 'Job not found.' });
+        return;
+    }
+    const status = String(job.status || '').toLowerCase();
+    if (status !== 'preparing' && status !== 'queued' && status !== 'accepted') {
+        res.status(409).json({
+            ok: false,
+            found: true,
+            jobId: job.jobId,
+            status: job.status,
+            error: `Refusing cancel while job status is ${job.status}.`,
+        });
+        return;
+    }
+    job.status = 'failed';
+    job.error = 'Cancelled while preparing (desk remotion cancel).';
+    job.updatedAt = nowIso();
+    appendLog(job, job.error);
+    notifyStudioR5Done(job);
+    res.json({
+        ok: true,
+        found: true,
+        jobId: job.jobId,
+        status: job.status,
+        cancelled: true,
     });
 });
 

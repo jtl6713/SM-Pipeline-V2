@@ -23,7 +23,18 @@ test("Remotion renders are serialized to one concurrent child", () => {
   assert.match(serverSrc, /acquireRemotionSlot/);
   assert.match(serverSrc, /releaseRemotionSlot/);
   assert.match(serverSrc, /jobAssetsOutsidePublic: true/);
-  assert.match(serverSrc, /2026-09-28-watermark-expect-image/);
+  assert.match(serverSrc, /2026-10-11-drive-clip-dedupe/);
+});
+
+test("rewriteClipAssets reuses one Drive download across vibe-cut clip stamps", () => {
+  const start = serverSrc.indexOf("async function rewriteClipAssets");
+  const end = serverSrc.indexOf("async function rewriteMusicAsset", start);
+  assert.ok(start >= 0 && end > start);
+  const fn = serverSrc.slice(start, end);
+  assert.match(fn, /driveLocalCache/);
+  assert.match(fn, /Reusing downloaded Drive file/);
+  assert.match(fn, /driveLocalCache\.set\(driveFileId/);
+  assert.match(fn, /driveLocalCache\.has\(driveFileId\)/);
 });
 
 test("resolvePublicAssetPath maps http job-assets URLs to the filesystem for ffprobe", () => {
