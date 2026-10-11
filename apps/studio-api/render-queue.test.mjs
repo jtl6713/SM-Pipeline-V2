@@ -109,9 +109,9 @@ test("Worker admit + mapOutput expose queue meta and Remotion job id", () => {
 });
 
 test("UI shows Waiting in render queue and narrows Trying Again", () => {
-  assert.match(app, /BUILD_ID = "item4-0.6.577-reopen-production-draft"/);
-  assert.match(html, /app-item4-1008\.js\?v=0.6.577-reopen-production-draft/);
-  assert.match(html, /UI build 0.6.577/);
+  assert.match(app, /BUILD_ID = "item4-0.6.578-pipeline-publish-immediate"/);
+  assert.match(html, /app-item4-1008\.js\?v=0.6.578-pipeline-publish-immediate/);
+  assert.match(html, /UI build 0.6.578/);
   assert.match(app, /function pipelineRenderQueueLabel/);
   assert.match(app, /Waiting in render queue \(#\$\{pos\} of \$\{total\}\)/);
   assert.match(app, /if \(\/waiting in render queue\/i\.test\(state\)/);
