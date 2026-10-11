@@ -174,3 +174,5 @@ Deploy Studio UI 0.6.534-pages-path-bust. Rename app-item4-0625.js -> app-item4-
 2026-10-11: Correct actual app BUILD_ID 0.6.581 and force Pages deploy; previous HTML-only version bump left app reporting 0.6.579.
 
 2026-10-11: Deploy Pipeline review-only initial loading and on-demand filters (5a34de0).
+
+2026-10-11: Deploy Pipeline content-item pagination (first 10 packages for All / non-review filters).

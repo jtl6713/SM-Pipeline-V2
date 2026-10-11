@@ -199,6 +199,12 @@ import {
   remotionHealthLooksBusy,
   sortRenderQueueCandidates,
 } from "./render-queue.mjs";
+import {
+  orderedContentIdsFromOutputRecords,
+  pageContentIds,
+  parsePipelineContentPage,
+  pipelineContentDiscoveryLimit,
+} from "./pipeline-content-page.mjs";
 
 import {
   analyticsObservationKey,
@@ -604,9 +610,10 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.519-shared-render-queue",
+          version: "0.10.520-pipeline-content-page",
           studio_render_queue_wait_v1: true,
           studio_shared_render_queue_v1: true,
+          studio_pipeline_content_page_v1: true,
           studio_approve_all_batch_v1: true,
           studio_engagement_v1: true,
           studio_mae_schedule_v1: true,
@@ -24742,7 +24749,11 @@ async function listOutputs(request, env, url, authorization, ctx = null) {
     sortDirection: "desc",
   };
   const reviewOnly = url.searchParams.get("mode") === "review";
+  // Browse/All filters page by Content Item (default 10) so Airtable is not
+  // scanned for every open package when the operator leaves Review.
+  const { contentLimit, contentOffset } = parsePipelineContentPage(url.searchParams);
   let records;
+  let contentPageMeta = null;
   if (reviewOnly) {
     const profileFormula = contentProfileFilterFormula(profile);
     const reviewFormula = 'AND({Test_Run_ID}=BLANK(),{Review_Status}="Pending Review",{Render_Status}="Rendered")';
@@ -24751,29 +24762,32 @@ async function listOutputs(request, env, url, authorization, ctx = null) {
       filterFormula: profileFormula ? `AND(${profileFormula},${reviewFormula})` : reviewFormula,
     });
   } else {
-  const [newest, open] = await Promise.all([
-    listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
+    const discoveryLimit = pipelineContentDiscoveryLimit(contentOffset, contentLimit, {
+      max: Math.min(250, limit),
+    });
+    const newest = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
       ...listOpts,
-      limit,
+      limit: discoveryLimit,
       filterFormula: contentProfileFilterFormula(profile),
-    }),
-    listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
-      ...listOpts,
-      // Cap used to be max(limit, 250) newest-open only; older unfinished packages
-      // (CI 143 / Output 847 Manual Fallback) aged out once >250 Ready-to-Schedule rows existed.
-      limit: STUDIO_PIPELINE_OPEN_OUTPUT_LIMIT,
-      filterFormula: studioPipelineOpenOutputFormula(profile),
-    }).catch((error) => {
-      console.warn("pipeline open-output scan failed", error);
-      return [];
-    }),
-  ]);
-  // Pull every sibling on unfinished packages (Published FB/YT next to TikTok draft).
-  const openContentIds = studioPipelineContentIdsFromOutputs(open);
-  const siblings = openContentIds.length
-    ? await listPipelineOutputsForContentIds(env, profile, openContentIds, listOpts)
-    : [];
-  records = mergePipelineOutputRecords(newest, mergePipelineOutputRecords(open, siblings));
+    });
+    const orderedContentIds = orderedContentIdsFromOutputRecords(
+      newest,
+      (row) => studioFirstLinkedId(f(row, "Content_Item")),
+    );
+    const page = pageContentIds(orderedContentIds, contentOffset, contentLimit);
+    // Full packages for this page only — skip the open-output 1000 scan.
+    const siblings = page.ids.length
+      ? await listPipelineOutputsForContentIds(env, profile, page.ids, listOpts)
+      : [];
+    const pageNewest = newest.filter((row) => page.ids.includes(studioFirstLinkedId(f(row, "Content_Item"))));
+    records = mergePipelineOutputRecords(pageNewest, siblings);
+    contentPageMeta = {
+      content_limit: page.limit,
+      content_offset: page.offset,
+      content_returned: page.returned,
+      has_more_content: page.has_more || (newest.length >= discoveryLimit && page.returned >= page.limit),
+      content_ids: page.ids,
+    };
   }
   // Return the Pipeline table immediately. Per-row heals / produce enqueue run in
   // waitUntil so a heal storm cannot leave Studio stuck on Loading outputs…
@@ -24845,6 +24859,7 @@ async function listOutputs(request, env, url, authorization, ctx = null) {
     records: records.map((record) => mapOutput(record, jobs.get(record), renderQueueById.get(record.id) || null)),
     profile: mapStudioContentProfile(profile),
     render_queue_total: renderQueueTotal,
+    ...(contentPageMeta || {}),
   });
 }
 

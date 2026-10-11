@@ -234,6 +234,10 @@
   const pipelineTiktokUrlDrafts = new Map();
   const pipelineYoutubeUrlDrafts = new Map();
   let pipelineViewFilter = "approval";
+  let pipelineContentOffset = 0;
+  let pipelineHasMoreContent = false;
+  let pipelineContentPageLoading = false;
+  const PIPELINE_CONTENT_PAGE_SIZE = 10;
   let pipelineColumnFilters = {
     output: "",
     platform: "",
@@ -261,7 +265,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.581-native-mp4-preview";
+  const BUILD_ID = "item4-0.6.582-pipeline-content-page";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -19477,7 +19481,13 @@ function timedScriptAssetLabel(asset, index) {
 
     rememberPipelineScheduleDrafts();
     const tableClass = isPipeline ? "data-table pipeline-compact-table" : isDashboard ? "data-table dashboard-output-table" : "data-table";
-    target.innerHTML = `<table class="${tableClass}"><thead>${head}</thead>${body}</table>`;
+    const loadMore = isPipeline
+      && pipelineViewFilter !== "approval"
+      && pipelineHasMoreContent
+      ? `<div class="pipeline-content-pager"><button type="button" class="secondary-button" data-pipeline-load-more-content${pipelineContentPageLoading ? " disabled" : ""}>${pipelineContentPageLoading ? "Loading…" : "Load more packages"}</button><span class="subtle">Showing ${PIPELINE_CONTENT_PAGE_SIZE} content items per page</span></div>`
+      : "";
+    target.innerHTML = `<table class="${tableClass}"><thead>${head}</thead>${body}</table>${loadMore}`;
+    if (isPipeline) bindPipelineContentPager(target);
 
     if (isPipeline || isDashboard) {
       target.querySelectorAll("[data-pipeline-sort]").forEach((button) => {
@@ -20519,20 +20529,55 @@ function timedScriptAssetLabel(asset, index) {
     }, PIPELINE_POLL_MS);
   }
 
-  async function refreshPipelineOutputs({ silent = false, force = false } = {}) {
+  function pipelineOutputsApiPath({ append = false } = {}) {
+    if (pipelineViewFilter === "approval") {
+      return "/api/outputs?mode=review&limit=80";
+    }
+    const offset = append ? Math.max(0, Number(pipelineContentOffset) || 0) : 0;
+    return `/api/outputs?content_limit=${PIPELINE_CONTENT_PAGE_SIZE}&content_offset=${offset}&limit=120`;
+  }
+
+  function mergePipelineOutputPages(existing, incoming) {
+    const byId = new Map();
+    for (const row of [...(existing || []), ...(incoming || [])]) {
+      if (row?.id) byId.set(row.id, row);
+    }
+    return [...byId.values()];
+  }
+
+  function bindPipelineContentPager(target) {
+    target?.querySelectorAll("[data-pipeline-load-more-content]").forEach((button) => {
+      button.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        if (pipelineContentPageLoading || !pipelineHasMoreContent) return;
+        refreshPipelineOutputs({ force: true, append: true }).catch((error) => {
+          setPipelineLiveHint(error.message || "Could not load more packages");
+        });
+      });
+    });
+  }
+
+  async function refreshPipelineOutputs({ silent = false, force = false, append = false } = {}) {
     const target = $("outputsList");
     if (!target) return;
     if (silent && pipelinePollInFlight && !force) return;
+    if (append && (pipelineContentPageLoading || !pipelineHasMoreContent || pipelineViewFilter === "approval")) return;
     pipelinePollInFlight = true;
-    if (!silent) {
+    if (append) pipelineContentPageLoading = true;
+    if (!silent && !append) {
       target.innerHTML = '<div class="empty">Loading outputs…</div>';
       setPipelineLiveHint("Refreshing…");
+    } else if (append) {
+      setPipelineLiveHint("Loading more packages…");
     }
     try {
+      if (!append) pipelineContentOffset = 0;
       const scheduleGeneration = pipelineScheduleGridLoadGeneration;
       const schedulePath = pipelineScheduleGridApiPath();
+      const outputsPath = pipelineOutputsApiPath({ append });
       const [outputsSettled, contentSettled, scheduleSettled] = await Promise.all([
-        api(pipelineViewFilter === "approval" ? "/api/outputs?mode=review&limit=80" : "/api/outputs?limit=250", { timeoutMs: 20000, retries: 2 }).then(
+        api(outputsPath, { timeoutMs: 20000, retries: 2 }).then(
           (value) => ({ ok: true, value }),
           (error) => ({ ok: false, error }),
         ),
@@ -20551,8 +20596,18 @@ function timedScriptAssetLabel(asset, index) {
       const scheduleResult = scheduleSettled.ok
         ? scheduleSettled.value
         : { records: [], schedule_error: scheduleSettled.error?.message || "Schedule view unavailable" };
-      const records = outputsResult?.records || [];
+      const pageRecords = outputsResult?.records || [];
+      const records = append ? mergePipelineOutputPages(pipelineOutputs, pageRecords) : pageRecords;
       const contentRecords = contentResult?.records || [];
+      if (pipelineViewFilter === "approval") {
+        pipelineHasMoreContent = false;
+        pipelineContentOffset = 0;
+      } else {
+        const returned = Number(outputsResult?.content_returned || 0);
+        const offset = Number(outputsResult?.content_offset || 0);
+        pipelineHasMoreContent = Boolean(outputsResult?.has_more_content);
+        pipelineContentOffset = offset + (returned || (outputsResult?.content_ids || []).length || 0);
+      }
       const scheduleError = String(scheduleResult?.schedule_error || (!scheduleSettled.ok ? (scheduleSettled.error?.message || "Schedule view unavailable") : ""));
       if (scheduleGeneration === pipelineScheduleGridLoadGeneration) {
         pipelineScheduleGridRecords = scheduleError
@@ -20561,6 +20616,7 @@ function timedScriptAssetLabel(asset, index) {
         renderPipelineScheduleGrid(pipelineScheduleGridRecords, scheduleError);
       }
       const unchanged = !force
+        && !append
         && silent
         && target.querySelector("table")
         && pipelineFingerprint(records) === pipelineFingerprint(pipelineOutputs)
@@ -20576,10 +20632,11 @@ function timedScriptAssetLabel(asset, index) {
       maybeOpenFilteredPipelineOutput();
       if (pipelinePageActive() && !document.hidden && !pipelineCountdownTimer) setPipelineLiveHint("Live · refreshed just now");
     } catch (e) {
-      if (!silent) target.innerHTML = `<div class="error">${escapeHtml(e.message)}</div>`;
-      else setPipelineLiveHint("Live update failed · retrying");
+      if (!silent && !append) target.innerHTML = `<div class="error">${escapeHtml(e.message)}</div>`;
+      else setPipelineLiveHint(append ? (e.message || "Could not load more packages") : "Live update failed · retrying");
     } finally {
       pipelinePollInFlight = false;
+      pipelineContentPageLoading = false;
     }
   }
 
@@ -23740,6 +23797,8 @@ function timedScriptAssetLabel(asset, index) {
     button.addEventListener("click", () => {
       pipelineViewFilter = String(button.dataset.pipelineQuickView || "all");
       pipelineOpenSingleOnLoad = false;
+      pipelineContentOffset = 0;
+      pipelineHasMoreContent = false;
       refreshPipelineOutputs({ force: true });
     });
   });
@@ -23754,8 +23813,9 @@ function timedScriptAssetLabel(asset, index) {
     const search = $("pipelineQuickSearch");
     if (search) search.value = "";
     pipelineOpenSingleOnLoad = false;
-    const target = $("outputsList");
-    if (target) renderOutputsTable(target, pipelineOutputs);
+    pipelineContentOffset = 0;
+    pipelineHasMoreContent = false;
+    refreshPipelineOutputs({ force: true });
   });
   $("creativeScheduleAt")?.addEventListener("input", () => {
     document.querySelectorAll("input[name='creativeScheduleMode']").forEach((radio) => {

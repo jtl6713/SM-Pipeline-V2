@@ -3933,6 +3933,8 @@ body:has(#page-outputs.active) .main{
 #outputsList .pipeline-archived-section-title{font-size:.72rem}
 #outputsList .pipeline-archived-section-meta{font-size:.66rem}
 .pipeline-compact-empty{padding:28px 16px!important}
+.pipeline-content-pager{display:flex;align-items:center;justify-content:center;gap:12px;padding:16px;border-top:1px solid var(--line);background:#f9fbfb}
+.pipeline-content-pager .subtle{font-size:.78rem}
 
 @media(max-width:1180px){
   .pipeline-command-bar{align-items:stretch;flex-direction:column}
