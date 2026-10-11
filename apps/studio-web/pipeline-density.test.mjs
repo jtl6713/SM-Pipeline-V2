@@ -11,7 +11,9 @@ const css = fs.readFileSync(path.join(here, "assets/styles-phase7-0621.css"), "u
 
 test("Pipeline rows omit aspect ratio and manual TikTok resend controls", () => {
   const rowStart = app.indexOf("const pipelineRow =");
-  const rowEnd = app.indexOf("const body = isPipeline", rowStart);
+  // Home recent-outputs path is gone; Pipeline body is built unconditionally.
+  const rowEnd = app.indexOf("const body = (() => {", rowStart);
+  assert.ok(rowStart >= 0 && rowEnd > rowStart, "pipelineRow marker present");
   const row = app.slice(rowStart, rowEnd);
   assert.doesNotMatch(row, /aspect_ratio/);
   assert.doesNotMatch(row, /pipelineTiktokCompleteCell/);

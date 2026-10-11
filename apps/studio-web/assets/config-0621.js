@@ -15,7 +15,7 @@ window.CHICAGOSHINING_STUDIO_CONFIG = {
     studioProfileSelect: "Choose the content profile/city used for new work, branding, defaults, library filtering, and Admin context. Operations switches to this profile when you change it.",
     operationsProfileContext: "Shows which Content Profile Admin is currently scoped to. Change it with the header Profile control.",
     studioHelpLink: "Open Studio help. Tabs cover the walkthrough plus a guide for the page you came from.",
-    refreshDashboard: "Reload dashboard counts and recent output states from the Studio API without changing any records.",
+    refreshDashboard: "Reload Home scheduled counts and metric cards from the Studio API without changing any records.",
     generateIdeasButton: "Open AI idea generation. You can choose how many ideas to create and the generation quality before anything is added.",
     ideasCreateTimelineButton: "Accept this idea: write a timed voiceover script, attach named library stills, and open Production ready for Approve. This does not publish.",
     createIdeaTimelineButton: "Accept this idea: write the spoken script, attach the named stills from the timeline, and leave Production ready for Approve. This does not publish.",
