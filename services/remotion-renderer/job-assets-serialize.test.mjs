@@ -23,7 +23,9 @@ test("Remotion renders are serialized to one concurrent child", () => {
   assert.match(serverSrc, /acquireRemotionSlot/);
   assert.match(serverSrc, /releaseRemotionSlot/);
   assert.match(serverSrc, /jobAssetsOutsidePublic: true/);
-  assert.match(serverSrc, /2026-10-11-drive-clip-dedupe/);
+  assert.match(serverSrc, /2026-10-11-force-release-slots/);
+  assert.match(serverSrc, /remotionJobs/);
+  assert.match(serverSrc, /\/admin\/force-release-slots/);
 });
 
 test("rewriteClipAssets reuses one Drive download across vibe-cut clip stamps", () => {
