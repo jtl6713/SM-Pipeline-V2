@@ -25,6 +25,15 @@ test("Worker exposes profilesOverview lean batch route", () => {
   assert.match(worker, /Skip produce-job hydration/);
   assert.match(worker, /studio_home_overview_lean_v1: true/);
   assert.match(worker, /studio_home_overview_cache_v1: true/);
+  assert.match(worker, /studio_home_overview_soft_429_v1: true/);
   assert.match(worker, /buildStudioProfilesOverviewRows/);
   assert.match(worker, /STUDIO_PROFILES_OVERVIEW_CACHE_MS/);
+  assert.match(worker, /respondProfilesOverviewSoft/);
+  assert.match(worker, /Never HTTP 429 the home overview/);
+});
+
+test("All Profiles client soft-handles Airtable cooling without a red HTTP 429 banner", () => {
+  assert.match(overview, /data\?\.cooling/);
+  assert.match(overview, /waiting on Airtable/);
+  assert.doesNotMatch(overview, /could not load: \$\{esc\(error\)\}/i);
 });

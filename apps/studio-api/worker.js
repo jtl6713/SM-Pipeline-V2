@@ -622,7 +622,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.528-home-overview-cache",
+          version: "0.10.529-home-overview-soft-429",
           studio_post_publish_release_v1: true,
           studio_render_queue_wait_v1: true,
           studio_shared_render_queue_v1: true,
@@ -663,6 +663,7 @@ export default {
           studio_pipeline_review_filter_v1: true,
           studio_home_overview_lean_v1: true,
           studio_home_overview_cache_v1: true,
+          studio_home_overview_soft_429_v1: true,
           studio_oversized_list_refresh_v1: true,
           studio_library_published_files_v1: true,
           studio_native_grid_cover_v1: true,
@@ -36365,22 +36366,65 @@ async function buildStudioProfilesOverviewRows(env, profiles) {
   });
 }
 
+function isAirtableCoolingError(error) {
+  const status = Number(error?.status || 0);
+  const message = String(error?.message || error || "");
+  return status === 429 || /cooling down|rate.?limit|too many requests/i.test(message);
+}
+
+function respondProfilesOverviewSoft(request, env, { records = [], cached = false, stale = false, cooling = false } = {}) {
+  // Never HTTP 429 the home overview — cold isolates + Airtable cooldown used to
+  // paint a red banner on every Studio open even when the selected-profile feed
+  // could still recover. Soft 200 keeps the shell usable.
+  return respond(request, env, {
+    ok: true,
+    cached: Boolean(cached),
+    stale: Boolean(stale),
+    cooling: Boolean(cooling),
+    records: Array.isArray(records) ? records : [],
+  });
+}
+
 /** One Worker request for All Profiles home table — no N× /api/dashboard fan-out. */
 async function profilesOverview(request, env, authorization) {
-  const profiles = await resolveAuthorizedContentProfiles(env, authorization);
+  const cache = studioProfilesOverviewCache;
+  const coolMs = airtableCooldownWaitMs();
+  // Serve last-good without resolving profiles (that resolve is itself an Airtable hit).
+  if (coolMs > AIRTABLE_SLOT_FAIL_FAST_MS) {
+    if (cache.rows?.length) {
+      return respondProfilesOverviewSoft(request, env, { records: cache.rows, stale: true, cooling: true });
+    }
+    return respondProfilesOverviewSoft(request, env, { records: [], cooling: true });
+  }
+
+  let profiles;
+  try {
+    profiles = await resolveAuthorizedContentProfiles(env, authorization);
+  } catch (error) {
+    if (cache.rows?.length) {
+      return respondProfilesOverviewSoft(request, env, { records: cache.rows, stale: true, cooling: isAirtableCoolingError(error) });
+    }
+    if (isAirtableCoolingError(error)) {
+      return respondProfilesOverviewSoft(request, env, { records: [], cooling: true });
+    }
+    throw error;
+  }
+
   const authKey = studioProfilesOverviewAuthKey(profiles);
   const now = Date.now();
-  const cache = studioProfilesOverviewCache;
   if (cache.rows && cache.authKey === authKey && now - cache.at < STUDIO_PROFILES_OVERVIEW_CACHE_MS) {
-    return respond(request, env, { ok: true, cached: true, records: cache.rows });
+    return respondProfilesOverviewSoft(request, env, { records: cache.rows, cached: true });
   }
   if (cache.inflight && cache.authKey === authKey) {
     try {
       const rows = await cache.inflight;
-      return respond(request, env, { ok: true, cached: true, records: rows });
+      return respondProfilesOverviewSoft(request, env, { records: rows, cached: true });
     } catch (error) {
       if (cache.rows && cache.authKey === authKey) {
-        return respond(request, env, { ok: true, stale: true, records: cache.rows });
+        return respondProfilesOverviewSoft(request, env, { records: cache.rows, stale: true, cooling: isAirtableCoolingError(error) });
+      }
+      if (isAirtableCoolingError(error)) {
+        return respondProfilesOverviewSoft(request, env, { records: [], cooling: true });
       }
       throw error;
     }
@@ -36397,11 +36441,13 @@ async function profilesOverview(request, env, authorization) {
     });
   try {
     const rows = await cache.inflight;
-    return respond(request, env, { ok: true, records: rows });
+    return respondProfilesOverviewSoft(request, env, { records: rows });
   } catch (error) {
-    // Prefer last-good overview over a red HTTP 429 banner on every home paint.
     if (cache.rows && cache.authKey === authKey) {
-      return respond(request, env, { ok: true, stale: true, records: cache.rows });
+      return respondProfilesOverviewSoft(request, env, { records: cache.rows, stale: true, cooling: isAirtableCoolingError(error) });
+    }
+    if (isAirtableCoolingError(error)) {
+      return respondProfilesOverviewSoft(request, env, { records: [], cooling: true });
     }
     throw error;
   }
