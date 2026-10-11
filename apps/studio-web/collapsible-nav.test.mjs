@@ -10,10 +10,10 @@ const html = fs.readFileSync(path.join(here, "index.html"), "utf8");
 const css = fs.readFileSync(path.join(here, "assets/styles-phase7-0621.css"), "utf8");
 
 test("UI 0.6.516 preserves hamburger off-canvas nav on every viewport", () => {
-  assert.match(app, /BUILD_ID = "item4-0.6.600-home-overview-budget"/);
-  assert.match(html, /UI build 0\.6\.600/);
-  assert.match(html, /app-item4-1008\.js\?v=0.6.600-home-overview-budget/);
-  assert.match(html, /styles-phase7-0621\.css\?v=0.6.600-home-overview-budget/);
+  assert.match(app, /BUILD_ID = "item4-0.6.602-escaped-newline-fix"/);
+  assert.match(html, /UI build 0\.6\.602/);
+  assert.match(html, /app-item4-1008\.js\?v=0.6.602-escaped-newline-fix/);
+  assert.match(html, /styles-phase7-0621\.css\?v=0.6.602-escaped-newline-fix/);
   assert.match(html, /id="studioNavToggle"/);
   assert.match(html, /id="studioSidebar"/);
   assert.match(html, /id="studioNavBackdrop"/);
