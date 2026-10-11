@@ -12,36 +12,45 @@ test("all-profiles overview shows each profile's own scheduled total beside its 
     innerHTML: "",
     querySelectorAll() { return []; },
   };
-  const profiles = [
-    { id: "recChicago", city_label: "Chicago" },
-    { id: "recMiami", city_label: "Miami" },
+  const overviewRows = [
+    {
+      id: "recChicago",
+      city_label: "Chicago",
+      name: "Chicago",
+      scheduled: { Facebook: 1, Instagram: 1, TikTok: 0, YouTube: 1 },
+      manual: 0,
+      failed: 0,
+      approval: 0,
+      ideas: 0,
+    },
+    {
+      id: "recMiami",
+      city_label: "Miami",
+      name: "Miami",
+      scheduled: { Facebook: 0, Instagram: 0, TikTok: 1, YouTube: 0 },
+      manual: 0,
+      failed: 0,
+      approval: 0,
+      ideas: 0,
+    },
   ];
-  const dashboards = {
-    recChicago: {
-      outputs: [
-        { platform: "Facebook", scheduled_post_date: "2026-10-10T12:00:00Z" },
-        { platform: "Instagram", publish_status: "Scheduled" },
-        { platform: "YouTube", youtube_privacy_status: "private" },
-        { platform: "TikTok", publish_status: "Published", published_at: "2026-10-01T12:00:00Z" },
-      ],
-      metrics: {},
-    },
-    recMiami: {
-      outputs: [
-        { platform: "TikTok", studio_scheduled_at: "2026-10-11T15:00:00Z" },
-        { platform: "YouTube", youtube_privacy_status: "public", publish_status: "Published" },
-      ],
-      metrics: {},
-    },
-  };
 
   const prior = {
     document: globalThis.document,
     fetch: globalThis.fetch,
     window: globalThis.window,
+    sessionStorage: globalThis.sessionStorage,
   };
+  const idleCallbacks = [];
   globalThis.window = globalThis;
   globalThis.window.setInterval = () => 0;
+  globalThis.window.setTimeout = (fn) => { idleCallbacks.push(fn); return 1; };
+  globalThis.window.requestIdleCallback = (fn) => { idleCallbacks.push(fn); return 1; };
+  globalThis.window.clearTimeout = () => {};
+  globalThis.sessionStorage = {
+    getItem() { return null; },
+    setItem() {},
+  };
   globalThis.document = {
     hidden: false,
     getElementById(id) {
@@ -53,14 +62,15 @@ test("all-profiles overview shows each profile's own scheduled total beside its 
   };
   globalThis.fetch = async (url) => {
     const value = String(url);
-    const body = value === "/api/profiles"
-      ? { records: profiles }
-      : dashboards[new URL(value, "https://studio.test").searchParams.get("profile")];
-    return { ok: true, json: async () => body };
+    assert.match(value, /\/api\/profiles\/overview/);
+    assert.doesNotMatch(value, /\/api\/dashboard/);
+    return { ok: true, json: async () => ({ records: overviewRows }) };
   };
 
   try {
     await import(`${pathToFileURL(overviewPath).href}?test=${Date.now()}`);
+    while (idleCallbacks.length) idleCallbacks.shift()();
+    await new Promise((resolve) => setImmediate(resolve));
     await new Promise((resolve) => setImmediate(resolve));
     assert.match(host.innerHTML, /<th scope="row">Chicago \(3\)<\/th>/);
     assert.match(host.innerHTML, /<th scope="row">Miami \(1\)<\/th>/);
@@ -70,15 +80,17 @@ test("all-profiles overview shows each profile's own scheduled total beside its 
     globalThis.document = prior.document;
     globalThis.fetch = prior.fetch;
     globalThis.window = prior.window;
+    globalThis.sessionStorage = prior.sessionStorage;
   }
 });
 
-test("profile totals keep the existing profile-filtered dashboard and timezone code paths", async () => {
+test("profile totals use lean overview endpoint and keep timezone helpers", async () => {
   const overview = await readFile(overviewPath, "utf8");
   const app = await readFile(path.join(here, "assets/app-item4-1008.js"), "utf8");
   const html = await readFile(path.join(here, "index.html"), "utf8");
-  assert.match(overview, /\/api\/dashboard\?profile=\$\{encodeURIComponent\(profile\.id\)\}/);
+  assert.match(overview, /\/api\/profiles\/overview/);
+  assert.doesNotMatch(overview, /\/api\/dashboard\?profile=/);
   assert.match(app, /function workingStudioTimeZone\(\)/);
   assert.match(app, /function studioEffectiveScheduleIso\(record\)/);
-  assert.match(html, /all-profiles-overview-1007\.js\?v=0.6.592-home-overview-lean/);
+  assert.match(html, /all-profiles-overview-1007\.js\?v=0.6.593-home-overview-cache/);
 });

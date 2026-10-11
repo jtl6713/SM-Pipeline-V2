@@ -24,4 +24,7 @@ test("Worker exposes profilesOverview lean batch route", () => {
   assert.match(worker, /async function profilesOverview/);
   assert.match(worker, /Skip produce-job hydration/);
   assert.match(worker, /studio_home_overview_lean_v1: true/);
+  assert.match(worker, /studio_home_overview_cache_v1: true/);
+  assert.match(worker, /buildStudioProfilesOverviewRows/);
+  assert.match(worker, /STUDIO_PROFILES_OVERVIEW_CACHE_MS/);
 });

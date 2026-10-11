@@ -177,12 +177,12 @@
     load();
   };
   if (typeof window.requestIdleCallback === "function") {
-    window.requestIdleCallback(start, { timeout: 2500 });
+    window.requestIdleCallback(start, { timeout: 4500 });
   } else {
-    window.setTimeout(start, 1800);
+    window.setTimeout(start, 3200);
   }
-  // Poll less often — overview is expensive even when lean.
+  // Poll less often — overview is cached on the Worker but still shares the Airtable slot.
   state.timer = window.setInterval(() => {
     if (!document.hidden && document.getElementById("page-dashboard")?.classList.contains("active")) load();
-  }, 90000);
+  }, 120000);
 })();
