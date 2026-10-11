@@ -16930,56 +16930,38 @@ function timedScriptAssetLabel(asset, index) {
     }
 
     empty.hidden = true;
-    const fallbackToDrive = () => {
-      const embed = phase6DriveEmbedUrl(fileId);
-      if (embed) {
-        video.pause();
-        video.removeAttribute("src");
-        video.hidden = true;
-        drive.src = embed;
-        drive.hidden = false;
-        if (still) still.hidden = true;
-        return;
-      }
-      if (!creativeIsFinishedVideo(output) && showCoverStill()) return;
-      empty.textContent = "Rendered file exists, but no playable preview source is available.";
-      empty.hidden = false;
+    const previewUrl = output.id ? `/api/outputs/${encodeURIComponent(output.id)}/preview` : "";
+    const showPreviewError = () => {
+      video.pause();
+      video.removeAttribute("src");
       video.hidden = true;
+      drive.removeAttribute("src");
+      drive.hidden = true;
+      if (still) still.hidden = true;
+      empty.hidden = false;
+      empty.textContent = "The finished MP4 is missing or inaccessible. ";
+      const retry = document.createElement("button");
+      retry.type = "button";
+      retry.textContent = "Retry preview";
+      retry.onclick = () => showCreativeRenderedPreview(output);
+      empty.appendChild(retry);
     };
-
-    const playableSrc = (() => {
-      const stamp = output.studio_preview_updated_at || output.remotion_job_id || "";
-      if (directPreview) {
-        const sep = directPreview.includes("?") ? "&" : "?";
-        return stamp ? `${directPreview}${sep}v=${encodeURIComponent(String(stamp))}` : directPreview;
-      }
-      // Drive-only mains: the Worker preview proxy often dies on 100MB+ files.
-      // Play the Drive MP4 in Studio instead of flashing the cover still.
-      if (fileId) return "";
-      return output.id ? `/api/outputs/${encodeURIComponent(output.id)}/preview` : "";
-    })();
-    if (playableSrc) {
-      if (coverUrl && !creativeIsFinishedVideo(output)) video.setAttribute("poster", coverUrl);
-      else video.removeAttribute("poster");
-      video.src = playableSrc;
-      video.hidden = false;
-      video.onerror = fallbackToDrive;
-      video.onloadedmetadata = () => {
-        drive.removeAttribute("src");
-        drive.hidden = true;
-        video.hidden = false;
-        if (creativeIsFinishedVideo(output)) syncCreativeStoryTeaserChrome(output);
-      };
-      video.load();
+    if (!previewUrl) {
+      showPreviewError();
       return;
     }
-
-    if (fileId) {
-      fallbackToDrive();
-      return;
-    }
-    if (!creativeIsFinishedVideo(output) && showCoverStill()) return;
-    fallbackToDrive();
+    if (coverUrl && !creativeIsFinishedVideo(output)) video.setAttribute("poster", coverUrl);
+    else video.removeAttribute("poster");
+    video.src = previewUrl;
+    video.hidden = false;
+    video.onerror = showPreviewError;
+    video.onloadedmetadata = () => {
+      empty.hidden = true;
+      drive.removeAttribute("src");
+      drive.hidden = true;
+      if (creativeIsFinishedVideo(output)) syncCreativeStoryTeaserChrome(output);
+    };
+    video.load();
   }
 
   function creativeEditorOutputHeading(output = {}) {

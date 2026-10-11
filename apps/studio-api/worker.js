@@ -27911,13 +27911,13 @@ async function outputPreview(request, env, url, authorization) {
       const status = upstream.status === 206 ? 206 : 200;
       return new Response(upstream.body, { status, headers });
     } catch (error) {
-      console.warn("Studio R2 preview unavailable; falling back to Drive", error);
+      console.warn("Studio R2 preview unavailable; trying legacy MP4 source", error);
     }
   }
 
   // Compatibility fallback for older rendered outputs that predate R5 v2.3.
   // Private Drive files generally cannot be fetched server-side without Google OAuth,
-  // so the UI may still fall back to its Drive iframe until that output is rerendered.
+  // Return an explicit HTTP error if the MP4 cannot be streamed; never embed Drive.
   const fileId = String(f(record, "Final_File_ID") || extractGoogleDriveFileId(f(record, "Final_File_URL")) || extractGoogleDriveFileId(f(record, "Output_URL")) || "").trim();
   if (!fileId) throw new HttpError(404, "No rendered preview file is available for this output");
   const finalFileUrl = f(record, "Final_File_URL") || f(record, "Output_URL") || null;
