@@ -28,5 +28,5 @@ test("a failed linked-request lookup cannot silently regenerate a duplicate", ()
 });
 
 test("Worker version is incremented for deployed idempotency fix", () => {
-  assert.match(worker, /version: "0.10.525-airtable-queue-hang"/);
+  assert.match(worker, /version: "0.10.526-pipeline-review-filter"/);
 });

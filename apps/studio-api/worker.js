@@ -622,7 +622,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.525-airtable-queue-hang",
+          version: "0.10.526-pipeline-review-filter",
           studio_post_publish_release_v1: true,
           studio_render_queue_wait_v1: true,
           studio_shared_render_queue_v1: true,
@@ -660,6 +660,7 @@ export default {
           studio_airtable_low_burn_cron_v1: true,
           studio_airtable_burn_kill_v1: true,
           studio_airtable_queue_hang_fix_v1: true,
+          studio_pipeline_review_filter_v1: true,
           studio_oversized_list_refresh_v1: true,
           studio_library_published_files_v1: true,
           studio_native_grid_cover_v1: true,
@@ -24766,8 +24767,11 @@ async function listOutputs(request, env, url, authorization, ctx = null) {
   const reviewOnly = url.searchParams.get("mode") === "review";
   let records;
   if (reviewOnly) {
+    // Match Pipeline / All-Profiles "Awaiting Approval": Ready for Review or
+    // Review Sent — not legacy Pending Review (that feed was empty while home
+    // still showed needs-approval counts).
     const profileFormula = contentProfileFilterFormula(profile);
-    const reviewFormula = 'AND({Test_Run_ID}=BLANK(),{Review_Status}="Pending Review",{Render_Status}="Rendered")';
+    const reviewFormula = 'AND({Test_Run_ID}=BLANK(),NOT({Do_Not_Publish}),OR({Output_Status}="Ready for Review",{Review_Status}="Review Sent"),{Review_Status}!="Approved",{Output_Status}!="Approved for Publishing",{Output_Status}!="Published")';
     records = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
       ...listOpts, limit: Math.min(limit, 80),
       filterFormula: profileFormula ? `AND(${profileFormula},${reviewFormula})` : reviewFormula,

@@ -101,23 +101,33 @@
     document.getElementById(`page-${pageName}`)?.classList.add("active");
   }
   function openOverviewAction(profileId, kind) {
-    const profile = document.getElementById("studioProfileSelect");
-    if (profile && profile.value !== profileId) {
-      profile.value = profileId;
-      profile.dispatchEvent(new Event("change", { bubbles: true }));
-    }
     if (kind === "ideas") {
+      const profile = document.getElementById("studioProfileSelect");
+      if (profile && profileId && profile.value !== profileId) {
+        profile.value = profileId;
+        profile.dispatchEvent(new Event("change", { bubbles: true }));
+      }
       document.querySelector('[data-page="ideas"]')?.click();
       activateStudioPage("ideas");
       document.getElementById("page-ideas")?.scrollIntoView({ block: "start" });
       return;
     }
+    const view = kind === "approval" ? "approval" : kind === "failed" ? "failed" : "attention";
+    // Prefer the Studio opener so profile + Review filter apply in one path.
+    // The old nav-click + delayed tab click raced profile change and used a
+    // lean Pending-Review feed that came back empty while this cell showed 1.
+    if (typeof window.studioOpenPipelineFilter === "function") {
+      window.studioOpenPipelineFilter(view, { profileId: profileId || "" });
+      return;
+    }
+    const profile = document.getElementById("studioProfileSelect");
+    if (profile && profileId && profile.value !== profileId) {
+      profile.value = profileId;
+      profile.dispatchEvent(new Event("change", { bubbles: true }));
+    }
     const nav = document.querySelector('[data-page="outputs"]');
     nav?.click();
-    // Normalize page state after profile switching so Dashboard can reliably
-    // restore the global overview instead of inheriting a stale active page.
     activateStudioPage("outputs");
-    const view = kind === "approval" ? "approval" : kind === "failed" ? "failed" : "attention";
     const openView = () => {
       const button = document.querySelector(`[data-pipeline-quick-view="${view}"]`);
       if (button) button.click();
