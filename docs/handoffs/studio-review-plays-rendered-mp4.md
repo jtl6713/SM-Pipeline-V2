@@ -2,6 +2,8 @@
 
 **For the quality / regression agent.** This is a playback bug, not a new feature.
 
+Worker `/api/outputs/:id/preview` must accept, in order: public R2 (`Publish_Asset_URL` / `Final_File_URL` / `Studio_Preview_URL` on `media.chicagoshining.com`), then Remotion `Render_Server_URL` (`https://render.chicagoshining.com/out/*.mp4`), then Drive `Final_File_ID`. Half-applied fixes that list `Render_Server_URL` but only pass CDN predicates leave Review blank when R2 is absent. See `apps/studio-api/output-preview-source.mjs` + `output-preview-source.test.mjs`. Footer pins: UI `0.6.603-render-server-preview` / Worker `0.10.532-render-server-preview`.
+
 Lincoln Park Zoo (2026-09-07) already had Drive MP4s. Joseph opened the Drive link and the clip looked right. Studio Review showed the **cover PNG** instead — “Open rendered file” opened the still, and the player fell back to the same thumbnail.
 
 ## What went wrong

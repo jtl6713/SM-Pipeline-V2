@@ -264,7 +264,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.602-escaped-newline-fix";
+  const BUILD_ID = "item4-0.6.603-render-server-preview";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -15230,16 +15230,12 @@ function timedScriptAssetLabel(asset, index) {
   }
 
   function phase6ReviewWatchUrl(output = {}) {
-    const stored = String(output.studio_preview_url || "").trim();
-    if (stored && !phase6PreviewLooksLikeImage(stored)) return stored;
-    const finalUrl = String(output.final_file_url || "").trim();
-    if (finalUrl && !phase6PreviewLooksLikeImage(finalUrl)) return finalUrl;
-    const outputUrl = String(output.output_url || "").trim();
-    if (outputUrl && !phase6PreviewLooksLikeImage(outputUrl)) return outputUrl;
+    // Same contract as item4ReviewWatchUrl: finished video rows always open the
+    // authenticated /api/outputs/:id/preview stream (R2 → render-server → Drive).
     if (output.id && phase6OutputHasVideoFinal(output)) {
       return `/api/outputs/${encodeURIComponent(output.id)}/preview`;
     }
-    return stored;
+    return String(output.studio_preview_url || output.final_file_url || "").trim();
   }
 
   function phase6UrlLooksPublicPublish(url) {
