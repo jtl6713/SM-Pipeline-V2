@@ -68,6 +68,24 @@ import {
   sanitizeLibraryAssetName,
   stripLibraryAssetExtension,
 } from "./asset-library.mjs";
+import {
+  POST_PUBLISH_RELEASE_BATCH_LIMIT,
+  POST_PUBLISH_RELEASE_COOLDOWN_MS,
+  POST_PUBLISH_RELEASE_DRY_RUN_SETTING,
+  POST_PUBLISH_RELEASE_LIST_FIELDS,
+  DESK_INVENTORY_OUTPUT_FIELDS,
+  DESK_INVENTORY_REQUEST_FIELDS,
+  collectPublishedR2CleanupKeys,
+  contentGroupReadyForMediaRelease,
+  contentItemDerivedDriveIds,
+  contentItemIdFromOutput,
+  dryRunFlagEnabled,
+  evaluatePublishedOutputRelease,
+  isFillCropAssetName,
+  isFillCropPreviewKey,
+  postPublishReleaseCandidateFormula,
+  publishedReleaseStampFields,
+} from "./post-publish-release.mjs";
 import { attachCompressionJobs } from "./operations-oversized.mjs";
 import {
   YOUTUBE_PRIVATE_SOURCE_HEAL_INNER,
@@ -604,7 +622,8 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.519-shared-render-queue",
+          version: "0.10.520-post-publish-release",
+          studio_post_publish_release_v1: true,
           studio_render_queue_wait_v1: true,
           studio_shared_render_queue_v1: true,
           studio_approve_all_batch_v1: true,
@@ -1726,30 +1745,32 @@ export default {
       } catch (error) {
         console.warn("studio failed-status heal failed", error);
       }
-      try {
-        await studioHealIgCarouselTooManyChildren(env, { limit: 4 });
-      } catch (error) {
-        console.warn("studio IG carousel child-count heal failed", error);
-      }
-      try {
-        await studioHealIgCarouselChildVerificationRace(env, { limit: 4 });
-      } catch (error) {
-        console.warn("studio IG AP1C verification-race heal failed", error);
-      }
-      try {
-        await studioHealIgCarouselChildPollFailure(env, { limit: 4 });
-      } catch (error) {
-        console.warn("studio IG AP2C child-poll heal failed", error);
-      }
-      try {
-        await studioHealIgCarouselRateLimit(env, { limit: 4 });
-      } catch (error) {
-        console.warn("studio IG AP1C rate-limit heal failed", error);
-      }
-      try {
-        await studioHealNativePhotoReviewStrands(env, { limit: 8 });
-      } catch (error) {
-        console.warn("studio native-photo review-strand heal failed", error);
+      if (cadence.heavy) {
+        try {
+          await studioHealIgCarouselTooManyChildren(env, { limit: 4 });
+        } catch (error) {
+          console.warn("studio IG carousel child-count heal failed", error);
+        }
+        try {
+          await studioHealIgCarouselChildVerificationRace(env, { limit: 4 });
+        } catch (error) {
+          console.warn("studio IG AP1C verification-race heal failed", error);
+        }
+        try {
+          await studioHealIgCarouselChildPollFailure(env, { limit: 4 });
+        } catch (error) {
+          console.warn("studio IG AP2C child-poll heal failed", error);
+        }
+        try {
+          await studioHealIgCarouselRateLimit(env, { limit: 4 });
+        } catch (error) {
+          console.warn("studio IG AP1C rate-limit heal failed", error);
+        }
+        try {
+          await studioHealNativePhotoReviewStrands(env, { limit: 8 });
+        } catch (error) {
+          console.warn("studio native-photo review-strand heal failed", error);
+        }
       }
       try {
         await studioHealAwaitingApprovalStaleRfr(env, { limit: 12 });
@@ -1938,12 +1959,19 @@ export default {
         }
         try {
           // Eligible leftover files (already-small clips, HEICs, compressed replacements)
-          // must leave Ingestion without a human clicking Process intake.
+          // must leave Ingestion without a human clicking Process intake folder.
           await item4PulsePipelineStage(env, "a2", {
             extra: { drain: true, trigger_a2b: true, wait_for_next: false },
           }, "A2");
         } catch (error) {
           console.warn("a2 ingestion drain failed", error);
+        }
+      }
+      if (cadence.heavy) {
+        try {
+          await studioSweepPostPublishMediaRelease(env, { limit: POST_PUBLISH_RELEASE_BATCH_LIMIT });
+        } catch (error) {
+          console.warn("post-publish media release cron failed", error);
         }
       }
     })());
@@ -26125,19 +26153,170 @@ function driveTrashLooksGone(result) {
   return /404|410|not found|trashed|already/.test(error);
 }
 
-async function stampPublishedFileReleased(env, recordId) {
+async function stampPublishedFileReleased(env, recordId, { clearBlobs = false } = {}) {
   return airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, recordId, {
     method: "PATCH",
     body: JSON.stringify({
-      fields: {
-        Final_File_ID: null,
-        Final_File_URL: null,
-        Output_URL: null,
-        Final_File_Storage_Status: "Released",
-      },
+      fields: publishedReleaseStampFields({ clearBlobs }),
       typecast: true,
     }),
   });
+}
+
+async function deletePublishedR2Keys(env, keys, { dryRun = false } = {}) {
+  const list = [...new Set((keys || []).map((key) => String(key || "").trim()).filter(Boolean))];
+  const deleted = [];
+  const missing = [];
+  const errors = [];
+  for (const key of list) {
+    if (key.startsWith("studio/previews/branding/")) continue;
+    if (dryRun) {
+      deleted.push(key);
+      continue;
+    }
+    if (!env?.STUDIO_MEDIA?.delete) {
+      errors.push({ key, error: "STUDIO_MEDIA binding missing" });
+      continue;
+    }
+    try {
+      const head = await env.STUDIO_MEDIA.head(key).catch(() => null);
+      if (!head) {
+        missing.push(key);
+        continue;
+      }
+      await env.STUDIO_MEDIA.delete(key);
+      deleted.push(key);
+    } catch (error) {
+      errors.push({ key, error: error?.message || String(error) });
+    }
+  }
+  return { ok: errors.length === 0, deleted, missing, errors, dry_run: dryRun };
+}
+
+async function loadContentItemSiblingOutputs(env, contentItemId) {
+  const id = String(contentItemId || "").trim();
+  if (!/^rec[A-Za-z0-9]+$/.test(id)) return [];
+  return listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
+    limit: 50,
+    filterFormula: `AND({Test_Run_ID}=BLANK(),FIND("${id}", ARRAYJOIN({Content_Item})&""))`,
+    fields: POST_PUBLISH_RELEASE_LIST_FIELDS,
+  }).catch(() => []);
+}
+
+async function clearParentProductionJobJsonIfFullyReleased(env, siblings) {
+  const list = Array.isArray(siblings) ? siblings : [];
+  if (!list.length) return { cleared: false };
+  const allReleased = list.every((row) => {
+    const storage = String(f(row, "Final_File_Storage_Status") || "").trim().toLowerCase();
+    return storage === "released" || !outputNeedsMediaReleaseLocal(row);
+  });
+  if (!allReleased) return { cleared: false };
+  const requestIds = new Set();
+  for (const row of list) {
+    const outputRowId = studioFirstLinkedId(f(row, "Production_Request_Output"));
+    if (!outputRowId) continue;
+    const outputRow = await airtableFetch(env, PRODUCTION_REQUEST_OUTPUT_TABLE, outputRowId).catch(() => null);
+    const requestId = studioFirstLinkedId(f(outputRow, "Production_Request"));
+    if (requestId) requestIds.add(requestId);
+  }
+  let cleared = 0;
+  for (const requestId of requestIds) {
+    await airtableFetch(env, PRODUCTION_REQUEST_TABLE, requestId, {
+      method: "PATCH",
+      body: JSON.stringify({
+        fields: { Studio_Production_Job_JSON: null },
+        typecast: true,
+      }),
+    }).catch(() => null);
+    cleared += 1;
+  }
+  return { cleared: cleared > 0, request_count: cleared };
+}
+
+function outputNeedsMediaReleaseLocal(record) {
+  const storage = String(f(record, "Final_File_Storage_Status") || "").trim().toLowerCase();
+  if (storage === "released") {
+    return collectPublishedR2CleanupKeys(record).length > 0
+      || Boolean(String(f(record, "Studio_Preview_URL") || "").trim() || String(f(record, "Publish_Asset_URL") || "").trim());
+  }
+  return Boolean(
+    publishedFinalFileId(record)
+    || String(f(record, "Final_File_URL") || "").trim()
+    || String(f(record, "Output_URL") || "").trim()
+    || collectPublishedR2CleanupKeys(record).length
+    || String(f(record, "Studio_Preview_URL") || "").trim()
+    || String(f(record, "Publish_Asset_URL") || "").trim()
+  );
+}
+
+async function releasePublishedOutputMedia(env, record, {
+  dryRun = false,
+  requireGroupComplete = false,
+  siblingRecords = null,
+  clearBlobs = true,
+  now = Date.now(),
+} = {}) {
+  const masterDriveIds = await collectPublishedMasterDriveIds(env, record);
+  const siblings = siblingRecords || (
+    requireGroupComplete
+      ? await loadContentItemSiblingOutputs(env, contentItemIdFromOutput(record))
+      : [record]
+  );
+  const decision = evaluatePublishedOutputRelease(record, {
+    masterDriveIds,
+    siblingRecords: siblings,
+    now,
+    coolDownMs: POST_PUBLISH_RELEASE_COOLDOWN_MS,
+    requireGroupComplete,
+  });
+  if (!decision.ok) {
+    return { ok: false, status: decision.status || 409, error: decision.error, reason: decision.reason };
+  }
+  if (decision.already_released && !(decision.r2_keys || []).length) {
+    return {
+      ok: true,
+      already_released: true,
+      released: true,
+      dry_run: dryRun,
+      record: mapPublishedLibraryFile(record),
+      drive: { ok: true, skipped: true, reason: "already_released" },
+      r2: { ok: true, deleted: [], missing: [], errors: [] },
+    };
+  }
+
+  let drive = { ok: true, skipped: true, reason: "already_released" };
+  if (!decision.already_released && decision.final_file_id) {
+    if (dryRun) {
+      drive = { ok: true, dry_run: true, would_trash: decision.final_file_id };
+    } else {
+      drive = await trashStudioAssetOnDrive(env, decision.final_file_id).catch((error) => ({
+        ok: false,
+        error: error?.message || String(error),
+      }));
+      if (!drive.ok && !driveTrashLooksGone(drive)) {
+        return { ok: false, status: 502, error: drive.error || "Could not trash the Google Drive copy", drive };
+      }
+    }
+  }
+
+  const r2 = await deletePublishedR2Keys(env, decision.r2_keys || collectPublishedR2CleanupKeys(record), { dryRun });
+  let updated = record;
+  if (!dryRun) {
+    updated = await stampPublishedFileReleased(env, record.id, { clearBlobs });
+    if (requireGroupComplete || contentGroupReadyForMediaRelease(siblings)) {
+      const refreshed = siblings.map((row) => (row.id === record.id ? updated : row));
+      await clearParentProductionJobJsonIfFullyReleased(env, refreshed);
+    }
+  }
+  return {
+    ok: true,
+    released: true,
+    already_released: Boolean(decision.already_released || driveTrashLooksGone(drive)),
+    dry_run: dryRun,
+    record: mapPublishedLibraryFile(updated || record),
+    drive,
+    r2,
+  };
 }
 
 async function releasePublishedLibraryFile(request, env, url) {
@@ -26145,27 +26324,185 @@ async function releasePublishedLibraryFile(request, env, url) {
   const outputId = String(url.pathname.split("/")[4] || "");
   if (!/^rec[A-Za-z0-9]+$/.test(outputId)) throw new HttpError(400, "Invalid published file record");
   const record = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, outputId);
-  const masterDriveIds = await collectPublishedMasterDriveIds(env, record);
-  const guard = publishedFileReleaseGuard(record, { masterDriveIds });
-  if (!guard.ok) throw new HttpError(guard.status || 409, guard.error);
-  let drive = { ok: true, skipped: true, reason: "already_released" };
-  if (!guard.already_released && guard.final_file_id) {
-    drive = await trashStudioAssetOnDrive(env, guard.final_file_id).catch((error) => ({
-      ok: false,
-      error: error?.message || String(error),
-    }));
-    if (!drive.ok && !driveTrashLooksGone(drive)) {
-      throw new HttpError(502, drive.error || "Could not trash the Google Drive copy");
-    }
-  }
-  const updated = await stampPublishedFileReleased(env, outputId);
+  const result = await releasePublishedOutputMedia(env, record, {
+    dryRun: false,
+    requireGroupComplete: false,
+    clearBlobs: true,
+  });
+  if (!result.ok) throw new HttpError(result.status || 409, result.error || "Release failed");
   return respond(request, env, {
     ok: true,
     released: true,
-    already_released: Boolean(guard.already_released || driveTrashLooksGone(drive)),
-    record: mapPublishedLibraryFile(updated || record),
-    drive,
+    already_released: Boolean(result.already_released),
+    record: result.record,
+    drive: result.drive,
+    r2: result.r2,
   });
+}
+
+async function studioPostPublishReleaseDryRunEnabled(env) {
+  const row = await studioSettingsByName(env, POST_PUBLISH_RELEASE_DRY_RUN_SETTING).catch(() => null);
+  // Default dry-run ON for the first production week unless Setting_Value is explicitly off.
+  if (!row) return true;
+  const raw = String(f(row, "Setting_Value") || "").trim();
+  if (!raw) return true;
+  return dryRunFlagEnabled(raw);
+}
+
+async function studioSweepPostPublishMediaRelease(env, { limit = POST_PUBLISH_RELEASE_BATCH_LIMIT } = {}) {
+  if (!env.AIRTABLE_OUTPUT_TABLE_ID) return { ok: false, skipped: "no_output_table" };
+  const dryRun = await studioPostPublishReleaseDryRunEnabled(env);
+  const candidates = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
+    limit: Math.max(limit * 3, 24),
+    sortField: "Published_At",
+    sortDirection: "asc",
+    filterFormula: postPublishReleaseCandidateFormula(),
+    fields: POST_PUBLISH_RELEASE_LIST_FIELDS,
+  }).catch(() => []);
+
+  const byContent = new Map();
+  for (const row of candidates || []) {
+    const contentId = contentItemIdFromOutput(row) || `solo:${row.id}`;
+    if (!byContent.has(contentId)) byContent.set(contentId, []);
+    byContent.get(contentId).push(row);
+  }
+
+  const released = [];
+  const skipped = [];
+  let examined = 0;
+  for (const [contentId, seedRows] of byContent) {
+    if (released.length >= limit) break;
+    examined += 1;
+    const siblings = contentId.startsWith("solo:")
+      ? seedRows
+      : await loadContentItemSiblingOutputs(env, contentId);
+    if (!contentGroupReadyForMediaRelease(siblings)) {
+      skipped.push({ content_item_id: contentId, reason: "group_incomplete" });
+      continue;
+    }
+    for (const row of siblings) {
+      if (released.length >= limit) break;
+      if (!outputNeedsMediaReleaseLocal(row)) continue;
+      const result = await releasePublishedOutputMedia(env, row, {
+        dryRun,
+        requireGroupComplete: true,
+        siblingRecords: siblings,
+        clearBlobs: true,
+      });
+      if (!result.ok) {
+        skipped.push({ id: row.id, reason: result.reason || result.error });
+        continue;
+      }
+      released.push({
+        id: row.id,
+        dry_run: dryRun,
+        already_released: result.already_released,
+        r2_deleted: result.r2?.deleted || [],
+        drive: result.drive,
+      });
+      if (!dryRun) {
+        // Phase 2 / 2b follow-ons once finals are gone.
+        await studioReleaseDerivedFillCropsForOutput(env, row, { dryRun }).catch((error) => {
+          console.warn("fill-crop release failed", row.id, error);
+        });
+        await studioReleaseContentItemVoiceoverThumbnail(env, row, siblings, { dryRun }).catch((error) => {
+          console.warn("vo/thumb release failed", row.id, error);
+        });
+      }
+    }
+  }
+  console.log(JSON.stringify({
+    event: "studio_post_publish_media_release",
+    dry_run: dryRun,
+    examined_groups: examined,
+    released: released.length,
+    skipped: skipped.length,
+  }));
+  return { ok: true, dry_run: dryRun, released, skipped, examined_groups: examined };
+}
+
+async function studioReleaseDerivedFillCropsForOutput(env, outputRecord, { dryRun = false } = {}) {
+  if (!env.AIRTABLE_MEDIA_TABLE_ID) return { ok: false, skipped: "no_media_table" };
+  const outputRowId = studioFirstLinkedId(f(outputRecord, "Production_Request_Output"));
+  if (!outputRowId) return { ok: true, skipped: "no_production_request_output" };
+  const outputRow = await airtableFetch(env, PRODUCTION_REQUEST_OUTPUT_TABLE, outputRowId).catch(() => null);
+  const requestId = studioFirstLinkedId(f(outputRow, "Production_Request"));
+  if (!requestId) return { ok: true, skipped: "no_production_request" };
+  const request = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, requestId).catch(() => null);
+  const linkedMedia = []
+    .concat(f(request, "Studio_Master_Media_Assets") || [])
+    .concat(f(request, "Media_Assets") || [])
+    .map((value) => (typeof value === "string" ? value : value?.id))
+    .filter((id) => /^rec[A-Za-z0-9]+$/.test(String(id || "")));
+  const trashed = [];
+  for (const mediaId of [...new Set(linkedMedia)].slice(0, 20)) {
+    const media = await airtableFetch(env, env.AIRTABLE_MEDIA_TABLE_ID, mediaId).catch(() => null);
+    if (!media) continue;
+    const name = String(f(media, "Asset Name") || f(media, "Name") || "");
+    if (!isFillCropAssetName(name)) continue;
+    const driveId = String(f(media, "Google Drive File ID") || googleDriveFileId(media) || "").trim();
+    const previewKeys = collectPublishedR2CleanupKeys(media).filter(isFillCropPreviewKey);
+    if (dryRun) {
+      trashed.push({ id: mediaId, dry_run: true, drive_id: driveId || null, r2_keys: previewKeys });
+      continue;
+    }
+    if (driveId) {
+      const drive = await trashStudioAssetOnDrive(env, driveId).catch((error) => ({
+        ok: false,
+        error: error?.message || String(error),
+      }));
+      if (!drive.ok && !driveTrashLooksGone(drive)) continue;
+    }
+    await deletePublishedR2Keys(env, previewKeys, { dryRun: false });
+    await airtableFetch(env, env.AIRTABLE_MEDIA_TABLE_ID, mediaId, {
+      method: "PATCH",
+      body: JSON.stringify({
+        fields: {
+          Notes: `${String(f(media, "Notes") || "").trim()}\nPost-publish fill-crop released ${new Date().toISOString()}.`.trim().slice(0, 10000),
+        },
+        typecast: true,
+      }),
+    }).catch(() => null);
+    trashed.push({ id: mediaId, drive_id: driveId || null, r2_keys: previewKeys });
+  }
+  return { ok: true, trashed };
+}
+
+async function studioReleaseContentItemVoiceoverThumbnail(env, outputRecord, siblings, { dryRun = false } = {}) {
+  const contentId = contentItemIdFromOutput(outputRecord);
+  if (!contentId || !env.AIRTABLE_CONTENT_TABLE_ID) return { ok: true, skipped: "no_content" };
+  if (!contentGroupReadyForMediaRelease(siblings)) return { ok: true, skipped: "group_incomplete" };
+  const allReleased = (siblings || []).every((row) => {
+    const storage = String(f(row, "Final_File_Storage_Status") || "").trim().toLowerCase();
+    return storage === "released" || row.id === outputRecord.id;
+  });
+  if (!allReleased) return { ok: true, skipped: "siblings_not_released" };
+  const content = await airtableFetch(env, env.AIRTABLE_CONTENT_TABLE_ID, contentId).catch(() => null);
+  if (!content) return { ok: false, skipped: "content_missing" };
+  const driveIds = contentItemDerivedDriveIds(content);
+  if (!driveIds.length) return { ok: true, skipped: "no_vo_thumb" };
+  const trashed = [];
+  for (const driveId of driveIds) {
+    if (dryRun) {
+      trashed.push({ drive_id: driveId, dry_run: true });
+      continue;
+    }
+    const drive = await trashStudioAssetOnDrive(env, driveId).catch((error) => ({
+      ok: false,
+      error: error?.message || String(error),
+    }));
+    if (drive.ok || driveTrashLooksGone(drive)) trashed.push({ drive_id: driveId, drive });
+  }
+  if (!dryRun && trashed.length) {
+    await airtableFetch(env, env.AIRTABLE_CONTENT_TABLE_ID, contentId, {
+      method: "PATCH",
+      body: JSON.stringify({
+        fields: { Voiceover_URL: null, Thumbnail_URL: null },
+        typecast: true,
+      }),
+    }).catch(() => null);
+  }
+  return { ok: true, trashed };
 }
 
 async function fetchGoogleDriveAudio(record, request) {
@@ -39193,28 +39530,34 @@ async function gatherStudioDeskInventory(env) {
       sortField: "Created_At",
       sortDirection: "desc",
       filterFormula: 'AND({Test_Run_ID}=BLANK(),{Studio_Production_Job_JSON}!="")',
+      fields: DESK_INVENTORY_REQUEST_FIELDS,
     }).catch(() => []),
     listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
       limit: 8,
       filterFormula: 'AND({Test_Run_ID}=BLANK(),{Render_Status}="Ready for Render",{Remotion_Job_ID}="")',
+      fields: DESK_INVENTORY_OUTPUT_FIELDS,
     }).catch(() => []),
     listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
       limit: 12,
       sortField: "Output_ID",
       sortDirection: "desc",
       filterFormula: 'AND({Test_Run_ID}=BLANK(),FIND("/api/media-assets/",{Render_Clip_List_JSON}&"")>0,OR({Render_Status}="Ready for Render",{Render_Status}="Rendering",{Render_Status}="Failed"))',
+      fields: DESK_INVENTORY_OUTPUT_FIELDS,
     }).catch(() => []),
     listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
       limit: 8,
       filterFormula: `AND({Test_Run_ID}=BLANK(),{Render_Status}="Rendering",{Remotion_Job_ID}!="",{Final_File_URL}="",${studioLastModifiedStaleFormula(15)})`,
+      fields: DESK_INVENTORY_OUTPUT_FIELDS,
     }).catch(() => []),
     listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
       limit: 8,
       filterFormula: 'AND({Test_Run_ID}=BLANK(),{Output_Status}="In Production",{Remotion_Job_ID}="",{Published_At}=BLANK())',
+      fields: DESK_INVENTORY_OUTPUT_FIELDS,
     }).catch(() => []),
     listRecords(env, PRODUCTION_REQUEST_TABLE, {
       limit: 12,
       filterFormula: 'AND({Test_Run_ID}=BLANK(),OR({Studio_Variant_Status}="Preparing",{Studio_Variant_Status}="Error"))',
+      fields: DESK_INVENTORY_REQUEST_FIELDS,
     }).catch(() => []),
     listRecords(env, ITEM4_VARIANT_QUEUE_TABLE, {
       limit: 8,
@@ -39227,34 +39570,42 @@ async function gatherStudioDeskInventory(env) {
     listRecords(env, PRODUCTION_REQUEST_TABLE, {
       limit: 8,
       filterFormula: "AND(OR({Request_Status}='Draft',{Request_Status}='Ready',{Request_Status}='Submitted'),FIND('origin=autonomous',{Production_Notes}&'')>0,{Test_Run_ID}=BLANK())",
+      fields: DESK_INVENTORY_REQUEST_FIELDS,
     }).catch(() => []),
     listRecords(env, PRODUCTION_REQUEST_TABLE, {
       limit: 8,
       filterFormula: 'AND({Test_Run_ID}=BLANK(),FIND("origin=az-finished-video",{Production_Notes}&""),{Request_Status}!="Cancelled")',
+      fields: DESK_INVENTORY_REQUEST_FIELDS,
     }).catch(() => []),
     listRecords(env, PRODUCTION_REQUEST_TABLE, {
       limit: 8,
       filterFormula: 'AND({Test_Run_ID}=BLANK(),{Request_Status}="Promoted")',
+      fields: DESK_INVENTORY_REQUEST_FIELDS,
     }).catch(() => []),
     listRecords(env, PRODUCTION_REQUEST_TABLE, {
       limit: 8,
       filterFormula: "AND({Test_Run_ID}=BLANK(),FIND('origin=autonomous',{Production_Notes}&'')>0,{Request_Status}='Promoted')",
+      fields: DESK_INVENTORY_REQUEST_FIELDS,
     }).catch(() => []),
     listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
       limit: 8,
       filterFormula: `AND(${STUDIO_CONTINUATION_CANDIDATE_FORMULA},{Output_Status}!="Ready for Review",${studioLastModifiedStaleFormula(15)})`,
+      fields: DESK_INVENTORY_OUTPUT_FIELDS,
     }).catch(() => []),
     listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
       limit: 8,
       filterFormula: 'AND({Test_Run_ID}=BLANK(),{Output_Status}="Ready for Review",{Final_File_URL}!="",{Output_Caption}!="",{Thumbnail_URL}!="",OR({Review_Status}="",{Review_Status}="Review Sent"))',
+      fields: DESK_INVENTORY_OUTPUT_FIELDS,
     }).catch(() => []),
     listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
       limit: 8,
       filterFormula: `AND({Test_Run_ID}=BLANK(),{Output_Status}="Approved for Publishing",{Published_At}=BLANK(),{Platform}!="TikTok",${studioLastModifiedStaleFormula(15)})`,
+      fields: DESK_INVENTORY_OUTPUT_FIELDS,
     }).catch(() => []),
     listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
       limit: 8,
       filterFormula: 'AND({Test_Run_ID}=BLANK(),OR({Output_Status}="Published",{Publish_Status}="Published"),OR({Studio_Output_Type}="Reel",{Studio_Output_Type}="Short",{Platform_Output_Type}="Instagram Reel",{Platform_Output_Type}="Facebook Reel",{Platform_Output_Type}="YouTube Short"))',
+      fields: DESK_INVENTORY_OUTPUT_FIELDS,
     }).catch(() => []),
   ]);
 
@@ -39278,6 +39629,7 @@ async function gatherStudioDeskInventory(env) {
     sortField: "Updated_At",
     sortDirection: "desc",
     filterFormula: `AND({Test_Run_ID}=BLANK(),{Request_Status}!="Cancelled",{Studio_Production_Job_JSON}!="",OR(FIND('"step":"escalated"',{Studio_Production_Job_JSON}),FIND('"step": "escalated"',{Studio_Production_Job_JSON})))`,
+    fields: DESK_INVENTORY_REQUEST_FIELDS,
   }).catch(() => []);
   const contentToRequest = new Map();
   for (const record of [...(promotedRows || []), ...(autonomousPromoted || []), ...(azRows || []), ...(autonomousRows || []), ...(produceRows || []), ...(escalatedRows || [])]) {

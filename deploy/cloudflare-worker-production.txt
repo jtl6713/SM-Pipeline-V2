@@ -137,3 +137,5 @@ Deploy Worker 0.10.489-engagement-ledger. Shrink the engagement ledger so Chicag
 2026-10-11: Deploy Airtable 429 pacing and 30-second-plus backoff in Studio API worker.
 
 2026-10-11: Deploy Pipeline review-only initial loading and on-demand filters (5a34de0).
+
+2026-10-11: Deploy post-publish media release (Drive+R2), desk inventory fields[], R2 exact-source OpenAI skip (0.10.520).

@@ -261,7 +261,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.583-restore-pipeline-loading";
+  const BUILD_ID = "item4-0.6.584-post-publish-release";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -21238,7 +21238,7 @@ function timedScriptAssetLabel(asset, index) {
     if (eyebrow) eyebrow.textContent = published ? "Published Platform Outputs" : "Photos and clips";
     if (blurb) {
       blurb.textContent = published
-        ? "These are published Platform Outputs, not source stills or clips. Confirm the live post, then Remove Drive copy to trash the rendered Drive file. The Airtable row, publish date, and post link stay for reporting."
+        ? "These are published Platform Outputs, not source stills or clips. After every sibling output is live (plus a 24-hour cool-down), Studio automatically trashes the rendered Drive final and clears R2 preview/publish copies. You can still Remove Drive copy sooner. The Airtable row, publish date, and post link stay for reporting. Original library stills and clips are kept."
         : "Opens on the 5 most recent Drive stills and Raw Footage. Files dropped in the Drive ingestion folder wait here until you assign a Content Profile; that starts AI tagging. Each card shows when it was added, file size when known, and clips show duration when known. Add photos or clips, or delete an unused Studio upload. Production and the wizard attach from this same library. Published files is a separate list of live Platform Outputs.";
     }
     if (search) search.placeholder = published ? "Title, platform, or filename" : "Name or location";

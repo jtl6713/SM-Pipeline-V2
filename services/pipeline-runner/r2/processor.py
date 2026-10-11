@@ -11,6 +11,7 @@ from r2.constants import MAKE_SCENARIO_ID, MAKE_SCENARIO_NAME
 from r2.formulas import r2_exact_output_formula, r2_production_formula
 from r2.openai_selection import select_canonical_package
 from r2.p4_webhook import trigger_p4
+from r2.studio_exact_source import build_exact_source_selection, requires_openai_for_output
 from r2.updates import apply_selection, fail_fast_zero_candidates, mark_selecting
 
 
@@ -153,12 +154,30 @@ def process_one(
         }
 
     mark_selecting(client, output)
-    selection = select_canonical_package(
-        output=output,
-        content_item=content_item,
-        video_candidates=video_candidates,
-        music_candidates=music_candidates,
-    )
+    route = "openai_selection"
+    if not requires_openai_for_output(output, content_item):
+        selection = build_exact_source_selection(
+            output=output,
+            content_item=content_item,
+            music_candidates=music_candidates,
+            required_music_seconds=required_music_seconds,
+        )
+        route = "exact_source_skip_openai"
+    else:
+        selection = select_canonical_package(
+            output=output,
+            content_item=content_item,
+            video_candidates=video_candidates,
+            music_candidates=music_candidates,
+        )
+    if not selection:
+        selection = select_canonical_package(
+            output=output,
+            content_item=content_item,
+            video_candidates=video_candidates,
+            music_candidates=music_candidates,
+        )
+        route = "openai_selection"
     apply_selection(
         client,
         output,
@@ -187,7 +206,7 @@ def process_one(
 
     return {
         "processed": True,
-        "route": "openai_selection",
+        "route": route,
         "selection_status": parsed.get("selection_status"),
         "p4": p4_result,
         **preview,

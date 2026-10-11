@@ -51,7 +51,7 @@ def _call_openai(prompt: str) -> tuple[str, dict[str, Any]]:
             "model": model,
             "input": prompt,
             "store": False,
-            "max_output_tokens": 14000,
+            "max_output_tokens": 4000,
             "text": {"format": {"type": "json_object"}},
         },
         timeout=300,
