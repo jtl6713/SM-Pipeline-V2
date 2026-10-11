@@ -135,3 +135,5 @@ Deploy Worker 0.10.489-engagement-ledger. Shrink the engagement ledger so Chicag
 2026-10-11: Enable output 2487 and other legacy outputs to preview via Render_Server_URL when R2 preview is missing.
 
 2026-10-11: Deploy Airtable 429 pacing and 30-second-plus backoff in Studio API worker.
+
+2026-10-11: Deploy Pipeline review-only initial loading and on-demand filters (5a34de0).
