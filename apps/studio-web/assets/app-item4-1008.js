@@ -264,7 +264,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.594-ai-generate-density";
+  const BUILD_ID = "item4-0.6.596-open-request-cool";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -10866,7 +10866,8 @@ function timedScriptAssetLabel(asset, index) {
 
   function isTransientStudioError(error) {
     const text = String(error?.message || error || "");
-    return /too many subrequests|subrequest|request failed \(5\d\d\)|timed out|networkerror|failed to fetch|502|503|504/i.test(text);
+    if (isAirtableCooldownFailure({ status: error?.status, text, error })) return true;
+    return /too many subrequests|subrequest|request failed \(5\d\d\)|timed out|networkerror|failed to fetch|502|503|504|429/i.test(text);
   }
 
   function item4VariantNotReadyCopy(variantStatus) {
@@ -11017,24 +11018,34 @@ function timedScriptAssetLabel(asset, index) {
         }
       });
     } catch (error) {
+      const cooling = isAirtableCooldownFailure({ status: error?.status, text: String(error?.message || ""), error });
+      const transient = cooling || isTransientStudioError(error);
       if (item4Workspace) {
         console.warn("Item 4 workspace refresh deferred", error);
-        if (!isTransientStudioError(error)) {
-          setRequestMessage("Could not refresh this request. Your photos and plan are still saved.", "error-text");
+        if (!transient) {
+          setRequestMessage("Could not refresh this request. Photos and plan are still saved.", "error-text");
+        } else if (cooling) {
+          setRequestMessage("Airtable is busy — retrying media load. Photos are safe.", "");
         }
+      } else if (cooling) {
+        // Short copy: the old "not deleted" line truncated on mobile and read like a wipe.
+        setRequestMessage("Airtable is busy — retrying. Photos are safe.", "");
+      } else if (transient) {
+        setRequestMessage("Still loading this request. Studio will try again.", "");
       } else {
         setRequestMessage(
-          isTransientStudioError(error)
-            ? "Still loading this request. Studio will try again."
-            : `Could not load saved media: ${String(error?.message || "request unavailable").slice(0, 160)}. Your saved photos and plan were not deleted.`,
-          isTransientStudioError(error) ? "" : "error-text"
+          `Could not load saved media (${String(error?.message || "unavailable").slice(0, 80)}). Photos are safe — tap Refresh.`,
+          "error-text",
         );
       }
       if (!item4WorkspaceRetryTimer) {
+        const retryMs = cooling
+          ? Math.max(12000, Number(API_AIRTABLE_COOLDOWN_RETRY_MS) || 12000)
+          : transient ? 4000 : 2000;
         item4WorkspaceRetryTimer = window.setTimeout(() => {
           item4WorkspaceRetryTimer = 0;
           if (activeProductionRequest?.id === record.id) loadItem4Workspace(record, { allowAssetChanges }).catch(() => {});
-        }, 2000);
+        }, retryMs);
       }
     }
   }
@@ -14826,28 +14837,74 @@ function timedScriptAssetLabel(asset, index) {
       });
     });
     target.querySelectorAll("[data-content-request]").forEach((button) => {
-      button.addEventListener("click", async () => {
+      button.addEventListener("click", () => {
         const requestId = String(button.dataset.contentRequest || "");
+        const contentId = String(button.dataset.contentId || "");
         if (!requestId) return;
+        const content = (productionContentRecords || []).find((row) => String(row?.id || "") === contentId) || null;
+        const idleText = button.textContent || "Open request";
         button.disabled = true;
         button.textContent = "Opening…";
-        try {
-          const result = await api(`/api/production-requests/${encodeURIComponent(requestId)}`);
-          const record = result?.record;
-          if (!record?.id) throw new Error("Production Request was not found.");
-          ezEntryPath = "configure";
-          populateProductionRequestForm(record);
-          showProductionRequestWorkspace();
-          await Promise.all([
-            loadProductionRequestOutputs(record),
-            loadItem4Workspace(record),
+        // Instant paint like Draft → Continue. Never block the first frame on a
+        // fat Production Request GET (multi-MB asset/plan JSON can hang / 429).
+        const stub = {
+          id: requestId,
+          requested_title: content?.title || "Untitled piece",
+          status: "Promoted",
+          content_type: content?.content_type || "",
+          platforms: [],
+          production_notes: "",
+          promoted_content_item_links: contentId ? [contentId] : [],
+        };
+        ezEntryPath = "configure";
+        populateProductionRequestForm(stub);
+        showProductionRequestWorkspace();
+        $("productionRequestWorkspace")?.scrollIntoView({ behavior: "smooth", block: "start" });
+        setRequestMessage("Opening request… loading the latest details.", "success");
+        setProductionLiveHint("Opening request…");
+
+        (async () => {
+          let fullRecord = stub;
+          try {
+            const result = await api(
+              `/api/production-requests/${encodeURIComponent(requestId)}?fields=light`,
+              { timeoutMs: 12000, retries: 0 },
+            );
+            if (result?.record?.id) {
+              fullRecord = result.record;
+              populateProductionRequestForm(fullRecord);
+              showProductionRequestWorkspace();
+            }
+          } catch (error) {
+            console.warn("production request light open timed out; keeping stub workspace open", error);
+          }
+
+          const hydration = await Promise.allSettled([
+            loadProductionRequestOutputs(fullRecord),
+            loadItem4Workspace(fullRecord),
           ]);
-          $("productionRequestWorkspace")?.scrollIntoView({ behavior: "smooth", block: "start" });
-        } catch (error) {
-          setProductionLiveHint(error.message || "Could not open this Production Request.");
-          button.disabled = false;
-          button.textContent = "Open request";
-        }
+          const failed = hydration.filter((entry) => entry.status === "rejected");
+          if (failed.length) {
+            setRequestMessage(
+              `Request opened. ${failed.length} background section${failed.length === 1 ? "" : "s"} could not refresh yet; use Refresh if something looks incomplete.`,
+              "error-text",
+            );
+          } else {
+            setRequestMessage("Request opened.", "success");
+          }
+          setProductionLiveHint(productionPageActive() ? "Live · request open" : "Open Production to watch live updates");
+          if (button.isConnected) {
+            button.disabled = false;
+            button.textContent = idleText;
+          }
+        })().catch((error) => {
+          setRequestMessage(error?.message || "Could not open this Production Request.", "error-text");
+          setProductionLiveHint(error?.message || "Could not open this Production Request.");
+          if (button.isConnected) {
+            button.disabled = false;
+            button.textContent = idleText;
+          }
+        });
       });
     });
     target.querySelectorAll("[data-content-pipeline]").forEach((button) => {

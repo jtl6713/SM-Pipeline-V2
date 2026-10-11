@@ -21,5 +21,7 @@ test("photo listening stop cannot block loading existing media", () => {
   assert.match(handler, /stopIdeaPhotoListeningAfterProductionOpen/);
   assert.match(handler, /Promise\.resolve\(\)\.then/);
   assert.doesNotMatch(handler, /await stopIdeaPhotoListeningAfterProductionOpen/);
-  assert.match(handler, /Could not load saved media:/);
+  assert.match(handler, /isAirtableCooldownFailure/);
+  assert.match(handler, /Airtable is busy — retrying\. Photos are safe\./);
+  assert.match(handler, /Could not load saved media \(/);
 });
