@@ -38,7 +38,11 @@
     const host = document.getElementById("aiApiFooter");
     if (!host) return;
     try {
-      const response = await fetch(endpoint, { credentials: "same-origin", headers: { Accept: "application/json" } });
+      const response = await fetch(endpoint, {
+        credentials: "same-origin",
+        headers: { Accept: "application/json" },
+        signal: AbortSignal.timeout(8000),
+      });
       if (!response.ok) throw new Error("AI API status unavailable");
       render(await response.json());
     } catch {

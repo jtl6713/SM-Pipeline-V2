@@ -180,3 +180,5 @@ Deploy Studio UI 0.6.534-pages-path-bust. Rename app-item4-0625.js -> app-item4-
 2026-10-11: Deploy Published library blurb for automatic post-publish release (UI 0.6.584).
 
 2026-10-11: Deploy All Profiles overview load timeout + concurrency cap (UI 0.6.585).
+
+2026-10-11: Deploy footer health paint-before-profiles + Airtable 429 fail-fast (UI 0.6.586 / Worker 0.10.521).

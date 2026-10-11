@@ -622,7 +622,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.520-post-publish-release",
+          version: "0.10.521-footer-health-fast",
           studio_post_publish_release_v1: true,
           studio_render_queue_wait_v1: true,
           studio_shared_render_queue_v1: true,
@@ -2363,15 +2363,21 @@ function sleepMs(ms) {
   return new Promise((resolve) => setTimeout(resolve, Math.max(0, Number(ms) || 0)));
 }
 
-// Pace requests per Worker isolate. Other workers/clients share the base quota,
-// so a 429 still requires Airtable's full cooldown and a bounded retry.
+// Pace requests per Worker isolate. Other workers/clients share the base quota.
+// On 429: record Airtable's cooldown so later slots wait, but fail the current
+// request immediately — never sleep 30–120s inside a user-facing fetch.
+const AIRTABLE_MIN_GAP_MS = 250;
+const AIRTABLE_SLOT_FAIL_FAST_MS = 1500;
 let airtableNextRequestAt = 0;
 let airtableQueue = Promise.resolve();
 function airtableRequestSlot() {
   const slot = airtableQueue.then(async () => {
     const now = Date.now();
     const wait = Math.max(0, airtableNextRequestAt - now);
-    airtableNextRequestAt = Math.max(now, airtableNextRequestAt) + 250;
+    if (wait > AIRTABLE_SLOT_FAIL_FAST_MS) {
+      throw new HttpError(429, `Airtable cooling down (${Math.ceil(wait / 1000)}s); try again shortly`);
+    }
+    airtableNextRequestAt = Math.max(now, airtableNextRequestAt) + AIRTABLE_MIN_GAP_MS;
     if (wait) await sleepMs(wait);
   });
   airtableQueue = slot.catch(() => {});
@@ -2393,27 +2399,22 @@ async function airtableFetch(env, tableId, pathOrParams = "", options = {}) {
   const suffix = pathOrParams ? (pathOrParams.startsWith("?") || pathOrParams.startsWith("/") ? pathOrParams : `/${pathOrParams}`) : "";
   const tableRef = encodeURIComponent(String(tableId));
   const endpoint = `https://api.airtable.com/v0/${env.AIRTABLE_BASE_ID}/${tableRef}${suffix}`;
-  const maxAttempts = 3;
-  let response;
-  let responseText = "";
+  await airtableRequestSlot();
+  const response = await fetch(endpoint, {
+    ...options,
+    headers: {
+      Authorization: `Bearer ${env.AIRTABLE_PAT}`,
+      "Content-Type": "application/json",
+      ...(options.headers || {}),
+    },
+  });
+  const responseText = await response.text();
   let body = {};
-  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-    await airtableRequestSlot();
-    response = await fetch(endpoint, {
-      ...options,
-      headers: {
-        Authorization: `Bearer ${env.AIRTABLE_PAT}`,
-        "Content-Type": "application/json",
-        ...(options.headers || {}),
-      },
-    });
-    responseText = await response.text();
-    try { body = responseText ? JSON.parse(responseText) : {}; } catch { body = { raw: responseText }; }
-    if (response.status !== 429 || attempt === maxAttempts) break;
-    const cooldown = airtableRetryDelayMs(response, attempt);
+  try { body = responseText ? JSON.parse(responseText) : {}; } catch { body = { raw: responseText }; }
+  if (response.status === 429) {
+    const cooldown = airtableRetryDelayMs(response, 1);
     airtableNextRequestAt = Math.max(airtableNextRequestAt, Date.now() + cooldown);
-    console.warn("Airtable rate limited; backing off", { attempt, cooldownMs: cooldown });
-    await sleepMs(cooldown);
+    console.warn("Airtable rate limited; failing fast", { attempt: 1, cooldownMs: cooldown });
   }
   if (!response.ok) {
     const airtableType = body?.error?.type ? String(body.error.type) : "";

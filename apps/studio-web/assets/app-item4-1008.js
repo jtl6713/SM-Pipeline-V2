@@ -261,7 +261,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.585-all-profiles-load";
+  const BUILD_ID = "item4-0.6.586-footer-health-fast";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -667,7 +667,7 @@
       if (!studioProfiles.length) hydrateStudioProfilesFromCache();
       if (!quiet) renderStudioProfileSelects({ loading: true });
       try {
-        const data = await api("/api/profiles", { retries: 6, timeoutMs: 30000 });
+        const data = await api("/api/profiles", { retries: 2, timeoutMs: 12000 });
         studioProfiles = Array.isArray(data.records) ? data.records : [];
         persistStudioProfilesCache(studioProfiles, data.default_profile_id);
         let stored = "";
@@ -1927,7 +1927,8 @@
       const session = sessionResult.status === "fulfilled" ? sessionResult.value : null;
       if (!health && !session) throw (healthResult.reason || sessionResult.reason || new Error("API unavailable"));
       studioSession = session || studioSession;
-      try { await loadStudioProfiles({ quiet: true }); } catch {}
+      // Paint Worker / API footer immediately. Profile list hits Airtable and must
+      // never gate the bottom status strip when the base is rate-limited.
       const navOps = $("navOperations");
       const footerOps = $("footerOperations");
       const showOps = Boolean(session?.permissions?.tenant_admin || session?.permissions?.publishing_control || session?.permissions?.production_configure);
@@ -1950,6 +1951,7 @@
       } else {
         $("apiStatus").textContent = "API connected";
       }
+      loadStudioProfiles({ quiet: true }).catch(() => {});
     } catch (e) {
       $("apiStatus").textContent = "API unavailable";
       if (workerBuildLabel) {

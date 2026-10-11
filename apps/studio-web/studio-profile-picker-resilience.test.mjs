@@ -11,7 +11,7 @@ test("profile picker survives /api/profiles outages with session cache and retri
   const app = await readFile(appPath, "utf8");
   assert.match(app, /PROFILE_LIST_CACHE_KEY = "studio\.content_profiles_cache_v1"/);
   assert.match(app, /hydrateStudioProfilesFromCache\(\)/);
-  assert.match(app, /api\("\/api\/profiles", \{ retries: 6, timeoutMs: 30000 \}\)/);
+  assert.match(app, /api\("\/api\/profiles", \{ retries: 2, timeoutMs: 12000 \}\)/);
   assert.match(app, /Loading profiles…/);
   assert.match(app, /scheduleStudioProfileListRetry\(\)/);
   assert.match(app, /wrap\.hidden = !loading && !studioProfiles\.length/);
