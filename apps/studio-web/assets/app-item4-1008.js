@@ -261,7 +261,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.582-approval-feed-fallback";
+  const BUILD_ID = "item4-0.6.583-restore-pipeline-loading";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -20551,14 +20551,7 @@ function timedScriptAssetLabel(asset, index) {
       const scheduleResult = scheduleSettled.ok
         ? scheduleSettled.value
         : { records: [], schedule_error: scheduleSettled.error?.message || "Schedule view unavailable" };
-      // The review-only API can return an empty subset even when the Home
-      // dashboard's standard feed contains approvable outputs. Fall back to
-      // that same feed rather than incorrectly showing Awaiting Approval · 0.
-      let records = outputsResult?.records || [];
-      if (pipelineViewFilter === "approval" && records.length === 0) {
-        const fallback = await api("/api/outputs?limit=250", { timeoutMs: 20000, retries: 2 });
-        records = Array.isArray(fallback?.records) ? fallback.records : [];
-      }
+      const records = outputsResult?.records || [];
       const contentRecords = contentResult?.records || [];
       const scheduleError = String(scheduleResult?.schedule_error || (!scheduleSettled.ok ? (scheduleSettled.error?.message || "Schedule view unavailable") : ""));
       if (scheduleGeneration === pipelineScheduleGridLoadGeneration) {
