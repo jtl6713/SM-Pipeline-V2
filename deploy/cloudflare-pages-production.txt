@@ -209,3 +209,4 @@ Deploy Studio UI 0.6.534-pages-path-bust. Rename app-item4-0625.js -> app-item4-
 
 2026-10-11: Soft home overview timeout (8s client + Worker build budget); no red Timeout banner; soft pipeline loading (UI 0.6.600 / Worker 0.10.531).
 2026-10-11 Studio 0.6.601 production progress indicators
+2026-10-11 remove literal backslash-n characters from Studio HTML
