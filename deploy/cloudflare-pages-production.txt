@@ -202,3 +202,5 @@ Deploy Studio UI 0.6.534-pages-path-bust. Rename app-item4-0625.js -> app-item4-
 2026-10-11: Open request paints Production workspace before fat GET; soften Airtable cooldown media copy (UI 0.6.596).
 
 2026-10-11: Soft-200 All Profiles overview on Airtable cooldown (UI 0.6.597 / Worker 0.10.529).
+
+2026-10-11: Fast Approve All enqueue from record_ids (no N× Airtable GET); clear stuck group Approving… (UI 0.6.598 / Worker 0.10.530).

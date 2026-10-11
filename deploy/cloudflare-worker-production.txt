@@ -157,3 +157,5 @@ Deploy Worker 0.10.489-engagement-ledger. Shrink the engagement ledger so Chicag
 2026-10-11: Cache All Profiles overview (2 Airtable reads + stale cache) UI 0.6.593 / Worker 0.10.528.
 
 2026-10-11: Soft-200 All Profiles overview on Airtable cooldown (UI 0.6.597 / Worker 0.10.529).
+
+2026-10-11: Fast Approve All enqueue from record_ids (no N× Airtable GET); clear stuck group Approving… (UI 0.6.598 / Worker 0.10.530).
