@@ -9,7 +9,7 @@ from studio_produce.job import derive_route, finished_origin_kind, is_finished_r
 from studio_produce.queue import master_transfer_id, rebuild_variant_manifest, required_ratios, ratios_for_asset, variant_transfer_id
 from studio_produce.media import asset_is_video, playable_url, remotion_clip_url
 from studio_produce.queue import rebuild_variant_manifest
-from studio_produce.stamp import assign_clip_frames, collapse_repeated_scene_caption_overlays, duration_seconds, finished_source_package, is_native_photo, output_effective, photo_sequence_url, source_package, stamp_fields
+from studio_produce.stamp import AIRTABLE_LONG_TEXT_LIMIT, assign_clip_frames, collapse_repeated_scene_caption_overlays, duration_seconds, finished_source_package, fit_selected_assets_json, is_native_photo, output_effective, photo_sequence_url, source_package, stamp_fields
 from studio_produce.steps import (
     _is_delay_render_failure,
     pick_resume_step,
@@ -1188,6 +1188,39 @@ def test_repeated_identical_scene_caption_is_intro_only():
     assert fixed[1]["overlay"] is None
     assert fixed[1]["caption"] == ""
     assert fixed[2]["overlay"] is None
+
+
+def test_fast_vibe_cut_selected_assets_fit_airtable_long_text():
+    clip = {
+        "id": "studio-source-1",
+        "url": "https://drive.google.com/file/d/1fRI-1_-_XGzREhWCeFEdt5E2OzLOgn3v/view?usp=drivesdk",
+        "src": "https://drive.google.com/file/d/1fRI-1_-_XGzREhWCeFEdt5E2OzLOgn3v/view?usp=drivesdk",
+        "durationFrames": 17,
+        "media_asset_record_id": "recQ6UYa3QcBd3ryG",
+        "renderDirective": {"preset": "energetic", "motion": "auto", "beatSync": True, "note": "x" * 1800},
+    }
+    clips = [{**clip, "id": f"studio-source-{index + 1}", "order": index + 1} for index in range(53)]
+    clip_list = json.dumps(clips)
+    selected = {
+        "schema_version": "studio.source-selection.2",
+        "selection_status": "Selected",
+        "selected_clips": clips,
+        "render_prep": {
+            "render_status": "Ready for Render",
+            "composition_id": "ChicagoShiningPhotoSequence",
+            "render_clip_list_json": clip_list,
+        },
+    }
+    raw = json.dumps(selected)
+    assert len(raw) > AIRTABLE_LONG_TEXT_LIMIT
+    fitted = fit_selected_assets_json(selected)
+    assert len(fitted) <= AIRTABLE_LONG_TEXT_LIMIT
+    parsed = json.loads(fitted)
+    assert parsed["selection_status"] == "Selected"
+    assert len(parsed["selected_clips"]) == 53
+    assert "render_clip_list_json" not in parsed["render_prep"]
+    small = {"selection_status": "Selected", "selected_clips": [clip]}
+    assert fit_selected_assets_json(small) == json.dumps(small)
 
 
 def test_distinct_scene_captions_are_preserved():

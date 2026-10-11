@@ -34,7 +34,12 @@ class AirtableClient:
         if typecast:
             body["typecast"] = True
         response = requests.patch(url, headers=self._headers, json=body, timeout=60)
-        response.raise_for_status()
+        if not response.ok:
+            detail = (response.text or "").strip().replace("\n", " ")[:500]
+            message = f"{response.status_code} {response.reason} for url: {url}"
+            if detail:
+                message = f"{message} {detail}"
+            raise requests.HTTPError(message, response=response)
         return response.json()
 
     def list_records(

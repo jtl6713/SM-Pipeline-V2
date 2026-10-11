@@ -42,6 +42,47 @@ STORY_TEASER_SECONDS = 10
 SINGLE_STILL_SECONDS = 5
 PHOTO_FLOOR_SECONDS = 3
 FPS = 30
+# Airtable long text rejects anything longer than this. Fast Vibe Cuts can
+# stamp 50+ trims; the nested clip-list copy is what overflows the field.
+AIRTABLE_LONG_TEXT_LIMIT = 100_000
+
+
+def fit_selected_assets_json(selected: dict[str, Any]) -> str:
+    """Serialize a source package so Selected_Assets_JSON can be stored.
+
+    The clip list already lives on the package's render_clip_list_json field.
+    Dropping the duplicate nested inside render_prep keeps lettering and R3
+    able to read selected_clips, and keeps the Airtable write under 100k.
+    """
+    text = json.dumps(selected)
+    if len(text) <= AIRTABLE_LONG_TEXT_LIMIT:
+        return text
+    current = selected
+    prep = current.get("render_prep")
+    if isinstance(prep, dict) and prep.get("render_clip_list_json"):
+        current = {
+            **current,
+            "render_prep": {
+                key: value for key, value in prep.items() if key != "render_clip_list_json"
+            },
+        }
+        text = json.dumps(current)
+        if len(text) <= AIRTABLE_LONG_TEXT_LIMIT:
+            return text
+    clips = current.get("selected_clips")
+    if isinstance(clips, list):
+        trimmed = []
+        for clip in clips:
+            if isinstance(clip, dict):
+                trimmed.append({
+                    key: value
+                    for key, value in clip.items()
+                    if key not in {"renderDirective", "motion", "transition"}
+                })
+            else:
+                trimmed.append(clip)
+        text = json.dumps({**current, "selected_clips": trimmed})
+    return text
 
 _RENDER_SETTINGS_RE = re.compile(r"(?:^|\n)\[render-settings\]\s*([^\n]*)", re.I)
 _RENDER_OVERRIDES_RE = re.compile(r"(?:^|\n)\[render-overrides\]\s*([^\n]*)", re.I)
@@ -1096,7 +1137,7 @@ def finished_source_package(
             "total_frames": frames,
             "composition_id": "ChicagoShiningPhotoSequence",
             "output_filename": filename,
-            "selected_assets_json": json.dumps(selected),
+            "selected_assets_json": fit_selected_assets_json(selected),
             "render_clip_list_json": json.dumps(clip_list),
             "native": False,
             "finished": False,
@@ -1157,7 +1198,7 @@ def finished_source_package(
         "total_frames": 1,
         "composition_id": None,
         "output_filename": None,
-        "selected_assets_json": json.dumps(selected),
+        "selected_assets_json": fit_selected_assets_json(selected),
         "render_clip_list_json": json.dumps([
             {
                 "id": clip["id"],
@@ -1508,7 +1549,7 @@ def source_package(
         "total_frames": total_frames,
         "composition_id": composition_id,
         "output_filename": filename if composition_id else None,
-        "selected_assets_json": json.dumps(selected),
+        "selected_assets_json": fit_selected_assets_json(selected),
         "render_clip_list_json": json.dumps(clip_list),
         "native": native,
         "story": story,
