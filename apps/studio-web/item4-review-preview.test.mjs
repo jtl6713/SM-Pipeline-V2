@@ -28,12 +28,12 @@ test("a Drive final is a video even when Studio_Preview_URL is blank", () => {
   assert.equal(item4MappedStudioPreviewUrl(DRIVE_MP4, COVER), `/api/outputs/${DRIVE_MP4.id}/preview`);
 });
 
-test("Open rendered file uses the Drive MP4, not the cover PNG", () => {
+test("Open rendered file uses the Studio preview endpoint, not Drive", () => {
   assert.equal(item4ReviewWatchUrl({ ...DRIVE_MP4, studio_preview_url: COVER }), `/api/outputs/${DRIVE_MP4.id}/preview`);
-  assert.equal(item4ReviewWatchUrl(DRIVE_MP4), DRIVE_MP4.final_file_url);
+  assert.equal(item4ReviewWatchUrl(DRIVE_MP4), `/api/outputs/${DRIVE_MP4.id}/preview`);
 });
 
-test("preview player falls back to Drive embed, not the cover still", () => {
+test("preview player uses native video, not a Drive embed", () => {
   assert.equal(item4PreviewPlayerFallback(DRIVE_MP4), "native");
   assert.equal(item4PreviewPlayerFallback({ thumbnail_url: COVER }), "cover");
 });
