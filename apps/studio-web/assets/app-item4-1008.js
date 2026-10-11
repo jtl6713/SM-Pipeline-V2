@@ -233,7 +233,7 @@
   let platformCalendarLoadToken = 0;
   const pipelineTiktokUrlDrafts = new Map();
   const pipelineYoutubeUrlDrafts = new Map();
-  let pipelineViewFilter = "all";
+  let pipelineViewFilter = "approval";
   let pipelineColumnFilters = {
     output: "",
     platform: "",
@@ -846,7 +846,7 @@
     else $("studioHelpLink")?.removeAttribute("aria-current");
     if (next === "outputs") {
       const requestedFilter = String(options.pipelineFilter || "").trim();
-      pipelineViewFilter = requestedFilter || "all";
+      pipelineViewFilter = requestedFilter || "approval";
       if (previous !== "outputs") {
         restorePipelineUseDefaultSchedules();
         clearDefaultSchedulesFromUnapprovedRows();
@@ -20532,7 +20532,7 @@ function timedScriptAssetLabel(asset, index) {
       const scheduleGeneration = pipelineScheduleGridLoadGeneration;
       const schedulePath = pipelineScheduleGridApiPath();
       const [outputsSettled, contentSettled, scheduleSettled] = await Promise.all([
-        api("/api/outputs?limit=250", { timeoutMs: 20000, retries: 2 }).then(
+        api(pipelineViewFilter === "approval" ? "/api/outputs?mode=review&limit=80" : "/api/outputs?limit=250", { timeoutMs: 20000, retries: 2 }).then(
           (value) => ({ ok: true, value }),
           (error) => ({ ok: false, error }),
         ),
@@ -23740,7 +23740,7 @@ function timedScriptAssetLabel(asset, index) {
     button.addEventListener("click", () => {
       pipelineViewFilter = String(button.dataset.pipelineQuickView || "all");
       pipelineOpenSingleOnLoad = false;
-      renderOutputsTable($("outputsList"), pipelineOutputs);
+      refreshPipelineOutputs({ force: true });
     });
   });
   $("pipelineQuickSearch")?.addEventListener("input", (event) => {

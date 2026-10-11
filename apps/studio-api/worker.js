@@ -24741,6 +24741,16 @@ async function listOutputs(request, env, url, authorization, ctx = null) {
     sortField: "Output_ID",
     sortDirection: "desc",
   };
+  const reviewOnly = url.searchParams.get("mode") === "review";
+  let records;
+  if (reviewOnly) {
+    const profileFormula = contentProfileFilterFormula(profile);
+    const reviewFormula = 'AND({Test_Run_ID}=BLANK(),{Review_Status}="Pending Review",{Render_Status}="Rendered")';
+    records = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
+      ...listOpts, limit: Math.min(limit, 80),
+      filterFormula: profileFormula ? `AND(${profileFormula},${reviewFormula})` : reviewFormula,
+    });
+  } else {
   const [newest, open] = await Promise.all([
     listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
       ...listOpts,
@@ -24763,7 +24773,8 @@ async function listOutputs(request, env, url, authorization, ctx = null) {
   const siblings = openContentIds.length
     ? await listPipelineOutputsForContentIds(env, profile, openContentIds, listOpts)
     : [];
-  const records = mergePipelineOutputRecords(newest, mergePipelineOutputRecords(open, siblings));
+  records = mergePipelineOutputRecords(newest, mergePipelineOutputRecords(open, siblings));
+  }
   // Return the Pipeline table immediately. Per-row heals / produce enqueue run in
   // waitUntil so a heal storm cannot leave Studio stuck on Loading outputs…
   const jobs = await loadStudioProductionJobsForOutputs(env, records);
