@@ -2065,6 +2065,107 @@ body:has(#page-content.active) .studio-footer-links button:hover{
   box-shadow:var(--prod-glass-shadow);
   gap:12px;
 }
+/* AI generate is a form, not a drop zone — do not inherit the tall empty pad. */
+#page-content .item4-ai-generation-panel{
+  min-height:0;
+  padding:14px 14px 12px;
+  align-items:stretch;
+  justify-content:flex-start;
+  text-align:left;
+  gap:10px;
+  cursor:default;
+}
+#page-content .item4-ai-generation-head{
+  display:flex;
+  align-items:flex-start;
+  gap:10px;
+}
+#page-content .item4-ai-generation-panel .item4-upload-icon{
+  flex:0 0 auto;
+  margin-top:1px;
+  font-size:1.05rem;
+  font-weight:600;
+  letter-spacing:.04em;
+  line-height:1.2;
+}
+#page-content .item4-ai-generation-copy{
+  display:flex;
+  flex-direction:column;
+  gap:2px;
+  flex:1;
+  min-width:0;
+}
+#page-content .item4-ai-generation-copy strong{
+  display:block;
+  font-size:.95rem;
+  font-weight:650;
+  line-height:1.25;
+  color:var(--prod-navy);
+}
+#page-content .item4-ai-generation-copy span{
+  display:block;
+  font-size:.78rem;
+  line-height:1.35;
+  color:#607976;
+}
+#page-content .item4-ai-generation-fields{
+  display:grid;
+  gap:8px;
+  width:100%;
+}
+#page-content .item4-ai-generation-panel .form-field{
+  margin:0;
+  gap:4px;
+  min-width:0;
+}
+#page-content .item4-ai-generation-panel .form-field > span{
+  font-size:.72rem;
+  font-weight:700;
+  letter-spacing:.04em;
+  text-transform:uppercase;
+  color:#5c7470;
+}
+#page-content .item4-ai-generation-panel textarea,
+#page-content .item4-ai-generation-panel input[type="text"],
+#page-content .item4-ai-generation-panel input[type="number"]{
+  width:100%;
+  box-sizing:border-box;
+  min-width:0;
+  padding:8px 10px;
+  border-radius:10px;
+  font-size:.9rem;
+}
+#page-content .item4-ai-prompt-field textarea{
+  min-height:56px;
+  max-height:110px;
+  resize:vertical;
+  line-height:1.35;
+}
+#page-content .item4-ai-generation-meta{
+  display:grid;
+  grid-template-columns:minmax(0,1fr) 72px;
+  gap:8px;
+  align-items:end;
+}
+#page-content .item4-ai-qty-field input{
+  text-align:center;
+}
+#page-content .item4-ai-name-hint{
+  display:block;
+  margin:0;
+  font-size:.72rem;
+  line-height:1.3;
+  color:#6a807c;
+}
+#page-content .item4-ai-generation-panel .item4-upload-actions{
+  justify-content:flex-start;
+  gap:8px;
+  margin-top:2px;
+}
+#page-content .item4-ai-generation-panel .item4-upload-actions .primary-button,
+#page-content .item4-ai-generation-panel .item4-upload-actions .secondary-button{
+  padding:9px 16px;
+}
 #page-content .item4-upload-zone>div:nth-child(3){align-items:center}
 #page-content .item4-upload-icon{
   width:auto;
@@ -2331,6 +2432,7 @@ body:has(#page-content.active) .studio-footer-links button:hover{
   .studio-footer{flex-direction:column;align-items:flex-start;padding:20px 18px 28px}
   .production-step-rail{gap:16px}
   #page-content .item4-upload-zone{min-height:240px;padding:40px 16px}
+  #page-content .item4-ai-generation-panel{min-height:0;padding:12px}
   #page-content .production-step-card,
   #page-content .item4-master-media-section,
   #page-content .item4-output-plan-section,
