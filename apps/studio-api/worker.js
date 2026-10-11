@@ -27924,7 +27924,7 @@ async function outputPreview(request, env, url, authorization) {
 
   if (request.method === "HEAD") {
     const probeRequest = new Request(request.url, { method: "GET", headers: { Range: "bytes=0-0" } });
-    const upstream = await fetchGoogleDriveVideo(fileId, finalFileUrl, probeRequest);
+    const upstream = await fetchGoogleDriveVideo(fileId, finalFileUrl, probeRequest, env);
     const headers = copyDriveVideoHeaders(upstream);
     const contentRange = upstream.headers.get("Content-Range") || "";
     const totalMatch = contentRange.match(/\/(\d+)$/);
@@ -27934,7 +27934,7 @@ async function outputPreview(request, env, url, authorization) {
     return new Response(null, { status: 200, headers });
   }
 
-  const upstream = await fetchGoogleDriveVideo(fileId, finalFileUrl, request);
+  const upstream = await fetchGoogleDriveVideo(fileId, finalFileUrl, request, env);
   const headers = copyDriveVideoHeaders(upstream);
   const status = upstream.status === 206 ? 206 : 200;
   return new Response(upstream.body, { status, headers });
