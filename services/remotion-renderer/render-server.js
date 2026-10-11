@@ -20,7 +20,7 @@ const DEFAULT_MUSIC_END_FADE_SECONDS = 0.5;
 const PIPELINE_RUNNER_INTERNAL_URL = String(
     process.env.PIPELINE_RUNNER_INTERNAL_URL || 'http://127.0.0.1:3350'
 ).replace(/\/$/, '');
-const SERVICE_VERSION = '2026-10-11-drive-clip-dedupe';
+const SERVICE_VERSION = '2026-10-11-force-release-slots';
 const PROJECT_DIR = __dirname;
 const PUBLIC_DIR = path.join(PROJECT_DIR, 'public');
 const OUT_DIR = path.join(PROJECT_DIR, 'out');
@@ -141,6 +141,14 @@ app.get('/health', (req, res) => {
         remotionPreparingJobs: slotSync.preparing ?? countPreparingRemotionJobs(),
         remotionSlotReconciled: slotSync.corrected,
         remotionQueuedRenders: remotionRenderWaiters.length,
+        remotionJobs: [...jobs.values()].map((job) => ({
+            jobId: job.jobId,
+            status: job.status,
+            holdsRemotionSlot: Boolean(job.holdsRemotionSlot),
+            createdAt: job.createdAt || null,
+            updatedAt: job.updatedAt || null,
+            filename: job.filename || null,
+        })),
         cleanup: {
             enabled: true,
             staleHours: remotionCleanup.staleHours,
@@ -1426,6 +1434,44 @@ app.get('/status/:jobId', (req, res) => {
     res.json({
         found: true,
         ...job,
+    });
+});
+
+// Desk: clear a ghost slot after process crash / orphan holdsRemotionSlot so Worker
+// admitRenderQueue is not parked on remotionInFlightJobs>=1 with zero Airtable Rendering.
+app.post('/admin/force-release-slots', (req, res) => {
+    const before = {
+        active: activeRemotionRenders,
+        waiters: remotionRenderWaiters.length,
+        jobs: [...jobs.values()].map((job) => ({
+            jobId: job.jobId,
+            status: job.status,
+            holdsRemotionSlot: Boolean(job.holdsRemotionSlot),
+        })),
+    };
+    for (const job of jobs.values()) {
+        const status = String(job.status || '').toLowerCase();
+        if (job.holdsRemotionSlot || status === 'rendering' || status === 'preparing') {
+            job.holdsRemotionSlot = false;
+            if (status === 'rendering' || status === 'preparing') {
+                job.status = 'failed';
+                job.error = 'Force-released Remotion slot (desk admin).';
+                job.updatedAt = nowIso();
+                appendLog(job, job.error);
+                notifyStudioR5Done(job);
+            }
+        }
+    }
+    remotionRenderWaiters.length = 0;
+    activeRemotionRenders = 0;
+    const after = reconcileRemotionSlots('force-release');
+    res.json({
+        ok: true,
+        before,
+        after,
+        remotionActiveRenders: activeRemotionRenders,
+        remotionInFlightJobs: after.inFlight,
+        remotionQueuedRenders: remotionRenderWaiters.length,
     });
 });
 

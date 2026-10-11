@@ -19,7 +19,7 @@ jobs:
       OPS_TOKEN_A: ${{ secrets.OPS_DASHBOARD_TOKEN }}
       OPS_TOKEN_B: ${{ secrets.DASHBOARD_TOKEN }}
       OPS_TOKEN_C: ${{ secrets.OPS_TOKEN }}
-      EXPECTED_VERSION: '2026-10-11-drive-clip-dedupe'
+      EXPECTED_VERSION: '2026-10-11-force-release-slots'
     steps:
       - name: Authenticate to Ops Dashboard
         id: auth
