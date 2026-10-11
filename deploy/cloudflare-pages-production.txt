@@ -198,3 +198,5 @@ Deploy Studio UI 0.6.534-pages-path-bust. Rename app-item4-0625.js -> app-item4-
 2026-10-11: Cache All Profiles overview (2 Airtable reads + stale cache) UI 0.6.593 / Worker 0.10.528.
 
 2026-10-11: Compact Production AI generate panel (UI 0.6.594).
+
+2026-10-11: Open request paints Production workspace before fat GET (UI 0.6.595).

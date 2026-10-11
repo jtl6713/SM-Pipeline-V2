@@ -264,7 +264,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.594-ai-generate-density";
+  const BUILD_ID = "item4-0.6.595-open-request";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -14826,28 +14826,74 @@ function timedScriptAssetLabel(asset, index) {
       });
     });
     target.querySelectorAll("[data-content-request]").forEach((button) => {
-      button.addEventListener("click", async () => {
+      button.addEventListener("click", () => {
         const requestId = String(button.dataset.contentRequest || "");
+        const contentId = String(button.dataset.contentId || "");
         if (!requestId) return;
+        const content = (productionContentRecords || []).find((row) => String(row?.id || "") === contentId) || null;
+        const idleText = button.textContent || "Open request";
         button.disabled = true;
         button.textContent = "Opening…";
-        try {
-          const result = await api(`/api/production-requests/${encodeURIComponent(requestId)}`);
-          const record = result?.record;
-          if (!record?.id) throw new Error("Production Request was not found.");
-          ezEntryPath = "configure";
-          populateProductionRequestForm(record);
-          showProductionRequestWorkspace();
-          await Promise.all([
-            loadProductionRequestOutputs(record),
-            loadItem4Workspace(record),
+        // Instant paint like Draft → Continue. Never block the first frame on a
+        // fat Production Request GET (multi-MB asset/plan JSON can hang / 429).
+        const stub = {
+          id: requestId,
+          requested_title: content?.title || "Untitled piece",
+          status: "Promoted",
+          content_type: content?.content_type || "",
+          platforms: [],
+          production_notes: "",
+          promoted_content_item_links: contentId ? [contentId] : [],
+        };
+        ezEntryPath = "configure";
+        populateProductionRequestForm(stub);
+        showProductionRequestWorkspace();
+        $("productionRequestWorkspace")?.scrollIntoView({ behavior: "smooth", block: "start" });
+        setRequestMessage("Opening request… loading the latest details.", "success");
+        setProductionLiveHint("Opening request…");
+
+        (async () => {
+          let fullRecord = stub;
+          try {
+            const result = await api(
+              `/api/production-requests/${encodeURIComponent(requestId)}?fields=light`,
+              { timeoutMs: 12000, retries: 0 },
+            );
+            if (result?.record?.id) {
+              fullRecord = result.record;
+              populateProductionRequestForm(fullRecord);
+              showProductionRequestWorkspace();
+            }
+          } catch (error) {
+            console.warn("production request light open timed out; keeping stub workspace open", error);
+          }
+
+          const hydration = await Promise.allSettled([
+            loadProductionRequestOutputs(fullRecord),
+            loadItem4Workspace(fullRecord),
           ]);
-          $("productionRequestWorkspace")?.scrollIntoView({ behavior: "smooth", block: "start" });
-        } catch (error) {
-          setProductionLiveHint(error.message || "Could not open this Production Request.");
-          button.disabled = false;
-          button.textContent = "Open request";
-        }
+          const failed = hydration.filter((entry) => entry.status === "rejected");
+          if (failed.length) {
+            setRequestMessage(
+              `Request opened. ${failed.length} background section${failed.length === 1 ? "" : "s"} could not refresh yet; use Refresh if something looks incomplete.`,
+              "error-text",
+            );
+          } else {
+            setRequestMessage("Request opened.", "success");
+          }
+          setProductionLiveHint(productionPageActive() ? "Live · request open" : "Open Production to watch live updates");
+          if (button.isConnected) {
+            button.disabled = false;
+            button.textContent = idleText;
+          }
+        })().catch((error) => {
+          setRequestMessage(error?.message || "Could not open this Production Request.", "error-text");
+          setProductionLiveHint(error?.message || "Could not open this Production Request.");
+          if (button.isConnected) {
+            button.disabled = false;
+            button.textContent = idleText;
+          }
+        });
       });
     });
     target.querySelectorAll("[data-content-pipeline]").forEach((button) => {

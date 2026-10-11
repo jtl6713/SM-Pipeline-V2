@@ -35,6 +35,6 @@ test("Studio build and app cache key stay aligned after output scope authority c
   const uiBuild = html.match(/UI build (0\.6\.\d+)/)?.[1];
   assert.ok(build);
   assert.ok(uiBuild);
-  assert.equal(uiBuild, "0.6.594");
+  assert.equal(uiBuild, "0.6.595");
   assert.ok(html.includes(`/assets/app-item4-1008.js?v=${build}`));
 });

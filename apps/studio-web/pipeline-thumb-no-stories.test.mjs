@@ -68,7 +68,7 @@ test("Pipeline thumb helpers prefer TikTok Video / YouTube Short over Stories", 
 });
 
 test("Pipeline UI wires thumb links away from Stories", () => {
-  assert.match(app, /BUILD_ID = "item4-0.6.594-ai-generate-density"/);
+  assert.match(app, /BUILD_ID = "item4-0.6.595-open-request"/);
   assert.match(app, /pipelinePreferredMainOutput/);
   assert.match(app, /pipeline-content-thumb-link/);
   assert.match(app, /data-pipeline-thumb-open/);
