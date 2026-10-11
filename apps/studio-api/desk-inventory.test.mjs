@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import fs from "node:fs";
 import test from "node:test";
 
 import {
@@ -6,8 +7,10 @@ import {
   deskModeAllows,
   classifyProduceJob,
   errorClassFromText,
+  deskRecoverableEscalatedError,
   extractDriveMusic404FileId,
   isDriveMusic404Error,
+  isProduceStamp422Error,
   classifyRenderRow,
   classifyCropRow,
   classifyAutonomousRequest,
@@ -111,6 +114,37 @@ test("produce jobs escalate after heal budget then stay transient while retries 
   assert.equal(mismatch.actor, "desk_agent");
   assert.equal(mismatch.fingerprint, fingerprint("produce_clip_mismatch", "reccEj6eVXPPKalJd", "clip_count_mismatch"));
   assert.equal(errorClassFromText("clip count mismatch before asset download"), "clip_count_mismatch");
+});
+
+test("Airtable Selected_Assets_JSON 422 is produce_stamp_422, not a Worker resume", () => {
+  const now = Date.parse("2026-10-11T06:30:00Z");
+  const bare = "422 Client Error: Unprocessable Entity for url: https://api.airtable.com/v0/appe33zkZn35yirTL/tblrlPeboBthkplH0/recuqRqQQmMZUfNGp";
+  const named = '422 Unprocessable Entity for url: https://api.airtable.com/v0/appe33zkZn35yirTL/tblrlPeboBthkplH0/recuqRqQQmMZUfNGp {"error":{"type":"INVALID_VALUE_FOR_COLUMN","message":"Field \\"Selected_Assets_JSON\\" cannot accept the provided value"}}';
+  assert.equal(isProduceStamp422Error(bare), true);
+  assert.equal(isProduceStamp422Error(named), true);
+  assert.equal(errorClassFromText(bare), "airtable_422");
+  assert.equal(errorClassFromText(named), "selected_assets_json");
+  assert.equal(deskRecoverableEscalatedError(named), false);
+  const blocked = classifyProduceJob({
+    request_id: "recV8a1Yo7KeqPdcb",
+    step: "blocked",
+    job_id: "spj-aa1f7845d3ca",
+    updated_at: "2026-10-11T06:22:17Z",
+    error: named,
+    heal: { resume_count: 0, max_resumes: 5, last_block_error: bare },
+  }, now);
+  assert.equal(blocked.kind, "produce_stamp_422");
+  assert.equal(blocked.class, "code_bug");
+  assert.equal(blocked.actor, "desk_agent");
+  assert.equal(blocked.fingerprint, fingerprint("produce_stamp_422", "recV8a1Yo7KeqPdcb", "selected_assets_json"));
+  assert.match(blocked.diagnosis, /Content 484/);
+  assert.match(blocked.diagnosis, /100,000/);
+  assert.equal(deskRecoverableEscalatedError(bare), false);
+  assert.ok(CLASSIFIER_KINDS.includes("produce_stamp_422"));
+  const worker = fs.readFileSync(new URL("./worker.js", import.meta.url), "utf8");
+  assert.match(worker, /skipped: "produce_stamp_422"/);
+  assert.match(worker, /isProduceStamp422Error\(blockError\)/);
+  assert.match(worker, /isProduceStamp422Error\(err\)/);
 });
 
 test("deleted Drive library music is drive_music_404 data_repair, not Worker retry", () => {

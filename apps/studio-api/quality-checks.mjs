@@ -278,6 +278,14 @@ export const QUALITY_CHECKS = Object.freeze([
     heal: "ticket_only",
   }),
   check({
+    id: "produce_stamp_422",
+    title: "Check for studio-produce blocked on an Airtable 422 while stamping Selected_Assets_JSON",
+    lane: "service",
+    kind: "produce_stamp_422",
+    actor: "desk_agent",
+    heal: "ticket_only",
+  }),
+  check({
     id: "engagement_duplicate",
     title: "Check for duplicate engagement attempts blocked by idempotency keys",
     lane: "both",

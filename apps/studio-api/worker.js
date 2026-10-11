@@ -30,6 +30,7 @@ import {
   deskFailedNeedsHeal,
   deskRecoverableEscalatedError,
   isDriveMusic404Error,
+  isProduceStamp422Error,
   deskTransientPublishError,
   deskTransientRenderError,
   deskWorkIdentity,
@@ -603,7 +604,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.517-reopen-production-draft",
+          version: "0.10.518-stamp-422-signature",
           studio_render_queue_wait_v1: true,
           studio_approve_all_batch_v1: true,
           studio_engagement_v1: true,
@@ -11659,6 +11660,15 @@ async function resumeStaleStudioProductionJobs(env, options = {}) {
         });
         continue;
       }
+      // Airtable 422 on Selected_Assets_JSON. Resume restamps the same oversized payload.
+      if (isBlocked && isProduceStamp422Error(blockError)) {
+        pulses.push({
+          key: "STUDIO_PRODUCE",
+          request: requestId,
+          skipped: "produce_stamp_422",
+        });
+        continue;
+      }
       // Always retry blocked jobs (any other failure class) until the heal budget is exhausted.
       const updated = Date.parse(String(job?.updated_at || ""));
       const stale =
@@ -13231,7 +13241,7 @@ async function studioHealEscalatedProduce(env, options = {}) {
     const job = parseStudioProductionJob(row);
     if (String(job?.step || "").trim() !== "escalated") continue;
     const err = String(job?.error || job?.heal?.last_block_error || "");
-    if (/clip count mismatch/i.test(err) || isDriveMusic404Error(err) || !deskRecoverableEscalatedError(err || "escalated")) {
+    if (/clip count mismatch/i.test(err) || isDriveMusic404Error(err) || isProduceStamp422Error(err) || !deskRecoverableEscalatedError(err || "escalated")) {
       pulses.push({ key: "STUDIO_ESCALATED", id: row.id, skipped: "not_recoverable" });
       continue;
     }
@@ -39202,7 +39212,7 @@ async function gatherStudioDeskInventory(env) {
     for (const kind of kinds) scannedKinds.add(kind);
   };
 
-  scanned("produce_stale", "produce_escalated", "produce_clip_mismatch", "drive_music_404");
+  scanned("produce_stale", "produce_escalated", "produce_clip_mismatch", "produce_stamp_422", "drive_music_404");
   const escalatedRows = await listRecords(env, PRODUCTION_REQUEST_TABLE, {
     limit: 8,
     sortField: "Updated_At",

@@ -79,6 +79,7 @@ export function errorClassFromText(text) {
   }
   if (/exit code 1|delayrender|request closed/i.test(value)) return "render_crash";
   if (/clip count mismatch/i.test(value)) return "clip_count_mismatch";
+  if (isProduceStamp422Error(value)) return produceStamp422ErrorClass(value);
   if (/no studio master photos to crop/i.test(value)) return "missing_masters";
   if (/no platform outputs found/i.test(value)) return "missing_outputs";
   if (/no_eligible_p2_route/i.test(value)) return "no_eligible_p2_route";
@@ -232,13 +233,29 @@ function driveMusic404Incident(recordId, error, row) {
   }, row);
 }
 
+export function isProduceStamp422Error(text) {
+  const value = String(text || "");
+  if (!value.trim()) return false;
+  const rejectedAssets = /selected_assets_json/i.test(value)
+    && /cannot accept|invalid_value_for_column|unprocessable entity|\b422\b/i.test(value);
+  const outputStamp = /tblrlPeboBthkplH0/i.test(value)
+    && /unprocessable entity|\b422\b/i.test(value);
+  return rejectedAssets || outputStamp;
+}
+
+export function produceStamp422ErrorClass(text) {
+  return /selected_assets_json/i.test(String(text || "")) ? "selected_assets_json" : "airtable_422";
+}
+
 export function deskRecoverableEscalatedError(text) {
   const value = String(text || "");
   if (/clip count mismatch/i.test(value)) return false;
+  if (isProduceStamp422Error(value)) return false;
   if (/missing composition|no clips|invalid props/i.test(value)) return false;
   if (isDriveMusic404Error(value)) return false;
   const errorClass = errorClassFromText(value);
   if (errorClass === "clip_count_mismatch") return false;
+  if (errorClass === "selected_assets_json" || errorClass === "airtable_422") return false;
   return errorClass === "transient_http"
     || errorClass === "render_crash"
     || errorClass === "in_progress"
@@ -266,6 +283,26 @@ export function classifyProduceJob(job, nowMs = Date.now(), staleAfterMs = STALE
   // Deleted library music. Worker resume cannot restore Drive pixels.
   if (isDriveMusic404Error(error) && (step === "blocked" || step === "escalated" || stale)) {
     return driveMusic404Incident(recordId, error, job);
+  }
+
+  // Airtable rejected the stamp write. Retrying the same Selected_Assets_JSON cannot succeed.
+  if (isProduceStamp422Error(error) && (step === "blocked" || step === "escalated")) {
+    const stampClass = produceStamp422ErrorClass(error);
+    return withDeskIdentity({
+      kind: "produce_stamp_422",
+      class: "code_bug",
+      record_id: recordId || null,
+      fingerprint: fingerprint("produce_stamp_422", recordId, stampClass),
+      step,
+      resume_count: resumeCount,
+      error: error || null,
+      actor: "desk_agent",
+      diagnosis: "Platform Output stamp returned Airtable 422. Fast Vibe Cuts (energy 4, ~0.56s cuts) "
+        + "embed the clip list twice in Selected_Assets_JSON and pass the 100,000 character long-text limit. "
+        + "Worker resume writes that same payload. fit_selected_assets_json drops the nested render_clip_list_json "
+        + "copy, then one studio-produce resume can continue. Do not Approve. "
+        + "Proven: Content 484 / recV8a1Yo7KeqPdcb / YouTube Short recuqRqQQmMZUfNGp Output 2448 / 156605 chars.",
+    }, job);
   }
 
   // Remotion expectedClipCount vs clips.length. Worker heal retries cannot fix this.
@@ -1280,6 +1317,7 @@ export function classifyTesterCatalogAssert() {
 
 export const CLASSIFIER_KINDS = Object.freeze([
   "produce_clip_mismatch",
+  "produce_stamp_422",
   "drive_music_404",
   "produce_escalated",
   "produce_stale",

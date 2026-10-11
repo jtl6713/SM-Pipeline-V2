@@ -51,6 +51,14 @@ If every Platform Output on a request shows Studio state Blocked (0/N rendered),
 
 After that mismatch is fixed, do **not** start four 28-clip Remotion jobs at once. Concurrent compositor load causes `delayRender` / `Request closed` / exit code 1 around frame ~848. Serialize R4 (one new render while any output is Rendering). Requeue Failed `exit code 1` to Ready for Render. Do not Approve publish.
 
+## Watch: Stamp 422, Selected_Assets_JSON too long
+
+Parent `Studio_Production_Job_JSON.step=blocked` (or escalated) and the error is an Airtable **422** on Platform Outputs `tblrlPeboBthkplH0`. With the response body: `INVALID_VALUE_FOR_COLUMN` / `Field "Selected_Assets_JSON" cannot accept the provided value`. Without the body (older runner): `422 Client Error: Unprocessable Entity for url: .../tblrlPeboBthkplH0/<output_rec>`. Kind `produce_stamp_422`, class `code_bug`, actor `desk_agent`. Fingerprint `produce_stamp_422:<production_request_rec>:selected_assets_json` (or `:airtable_422` when the body does not name the field).
+
+Fast Vibe Cut energy 4 uses ~0.56s cuts. A 30s target becomes ~53 trims. Stamp stores those clips on `selected_clips` and again as `render_prep.render_clip_list_json` inside the same long text. Airtable long text stops at 100,000 characters (proven 156,605). Worker resume restamps that payload and 422s again. Do not burn the heal budget.
+
+`fit_selected_assets_json` in `services/pipeline-runner/studio_produce/stamp.py` drops the nested clip-list copy (and, if still over, per-clip render notes) so the field fits, while `Render_Clip_List_JSON` keeps the full list. After that runner is live, one studio-produce resume can continue. Do not Approve. Proven: Content 484 / `recV8a1Yo7KeqPdcb` / YouTube Short `recuqRqQQmMZUfNGp` Output 2448 / job `spj-aa1f7845d3ca`. Same fingerprint after that resume → the slim was not enough.
+
 ## Watch: Deleted library music (Drive 404)
 
 Remotion `/render failed (500): Download failed 404 Drive <id>` or T1 `404 Client Error: Not Found` on `drive/v3/files/<id>?alt=media` means the **library MP3 is gone from Drive**, not a share/ACL glitch. Kind `drive_music_404`, class `data_repair`, actor `desk_agent`, fingerprint `drive_music_404:<pr_or_output_rec>:<drive_file_id>`. Worker resume / Failed-render requeue cannot restore the file; they only burn the heal budget.

@@ -78,6 +78,10 @@ const COPY = {
     found: "A video was built with the wrong number of clips.",
     action: "Flagged it so the clip list can be fixed before another build.",
   },
+  produce_stamp_422: {
+    found: "A video could not be packaged because Airtable rejected the clip list as too large.",
+    action: "Flagged it so the clip list can be shortened before production is restarted. Another restart would send the same list.",
+  },
   drive_music_404: {
     found: "A video could not build because its background music file was deleted from Google Drive.",
     action: "Pointed the catalog at a live copy of the same track, then restarted production.",

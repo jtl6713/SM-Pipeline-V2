@@ -37,6 +37,7 @@ test("recap uses everyday words and names the post", () => {
   }), "Vizcaya Rainy Day Plan · TikTok Slideshow");
   assert.equal(qualityRecapCopy("produce_escalated").found.includes("investigation"), true);
   assert.match(qualityRecapCopy("drive_music_404").found, /background music file was deleted/i);
+  assert.match(qualityRecapCopy("produce_stamp_422").found, /clip list as too large/i);
 });
 
 test("recap names the content item and platform output on a never-sent post", () => {
