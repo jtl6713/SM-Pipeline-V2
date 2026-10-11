@@ -59,6 +59,28 @@ def test_deletes_inbox_source_after_output_is_stable(tmp_path):
     assert library.read_bytes() == b"original-master"
 
 
+def test_deletes_source_copy_media_encoder_parked_under_source(tmp_path):
+    root = tmp_path / "bridge"
+    config = _config(root)
+    parked = root / "inbox" / PRESET / "Source" / "2026-10-10_23-07-28" / "beach.mov"
+    output = root / "out" / PRESET / "beach.mp4"
+    library = tmp_path / "Pictures" / "beach.mov"
+    _write(parked, b"source-bytes", 10_000)
+    _write(output, b"encoded-mp4", 10_010)
+    _write(library, b"original-master", 9_000)
+
+    report, observations = _run(config, {}, 10_000)
+    assert parked.exists()
+    assert report["completed"] == []
+
+    report, _observations = _run(config, observations, 10_020)
+    assert report["completed"][0]["source_deleted"] is True
+    assert not parked.exists()
+    assert not parked.parent.exists()
+    assert output.read_bytes() == b"encoded-mp4"
+    assert library.read_bytes() == b"original-master"
+
+
 def test_waits_while_the_encode_is_still_growing(tmp_path):
     root = tmp_path / "bridge"
     config = _config(root)

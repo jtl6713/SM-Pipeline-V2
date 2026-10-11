@@ -2,7 +2,7 @@
 
 Local file watcher for Adobe Media Encoder 2026. A large Studio upload (Vibe Cut or finished video) copies the private master into the matching inbox by itself. Media Encoder writes the encode to the matching output folder. After that output stops changing and `ffprobe` accepts it, the bridge deletes the inbox copy and Studio uses the encoded file.
 
-The inbox file is the working copy. The original stays in Drive or on the private master. This bridge never scans those locations.
+The inbox file is the working copy. The original stays in Drive, in Photos, or on the private master. This bridge never scans those locations. After a finished encode it also deletes the copy Media Encoder parks under `inbox/<preset>/Source`.
 
 If Media Encoder is closed or is not watching the inbox, Studio removes the unclaimed copy and finishes the same upload with the existing FFmpeg compressor. Encoding still does not approve or publish.
 

@@ -129,7 +129,7 @@ test("R4 and studio-produce park on busy Remotion slot", () => {
   assert.match(renderServer, /2026-10-11-slot-hold-only/);
   assert.match(renderServer, /remotionInFlightJobs/);
   assert.match(renderServer, /remotionPreparingJobs/);
-  assert.match(config, /2026-10-10-ame-studio-compress/);
+  assert.match(config, /2026-10-10-ame-source-cleanup/);
   assert.match(remotion, /def slot_busy\(self\)/);
   assert.match(r4, /waiting_for_remotion_slot/);
   assert.match(r4, /Waiting in Render Queue/);

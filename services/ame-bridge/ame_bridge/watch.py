@@ -160,7 +160,7 @@ def reconcile_once(
 
 def _reconcile_preset(config, preset: Preset, observations, seen, report, now, probe) -> None:
     inbox = config.root / "inbox" / preset.id
-    sources = _list_media(inbox, SOURCE_EXTENSIONS)
+    sources = _list_media(inbox, SOURCE_EXTENSIONS) + _list_parked_sources(inbox, SOURCE_EXTENSIONS)
     outputs: list[Path] = []
     for directory in output_directories(config.root, preset.id):
         outputs.extend(_list_media(directory, OUTPUT_EXTENSIONS))
@@ -412,13 +412,63 @@ def _list_media(directory: Path, extensions: set[str]) -> list[Path]:
     return sorted(found, key=lambda path: path.name.lower())
 
 
+def _list_parked_sources(inbox: Path, extensions: set[str]) -> list[Path]:
+    """Files Media Encoder moved under inbox/Source after it finished the watch item."""
+    source_root = inbox / "Source"
+    if not source_root.is_dir():
+        return []
+    root = source_root.resolve()
+    found = []
+    try:
+        entries = list(source_root.rglob("*"))
+    except OSError:
+        return []
+    for entry in entries:
+        try:
+            if entry.is_symlink() or not entry.is_file():
+                continue
+            name = entry.name
+            if name.startswith(".") or name.startswith("~$"):
+                continue
+            if name.lower().endswith(SKIP_SUFFIXES):
+                continue
+            if entry.suffix.lower() not in extensions:
+                continue
+            resolved = entry.resolve()
+            if root != resolved and root not in resolved.parents:
+                continue
+        except OSError:
+            continue
+        found.append(entry)
+    return sorted(found, key=lambda path: path.name.lower())
+
+
 def _unlink_watch_source(source: Path, inbox: Path) -> None:
     resolved = source.resolve()
-    if resolved.parent != inbox.resolve():
+    inbox_resolved = inbox.resolve()
+    parked_root = (inbox / "Source").resolve()
+    in_inbox = resolved.parent == inbox_resolved
+    in_parked = parked_root == resolved or parked_root in resolved.parents
+    if resolved == parked_root or not (in_inbox or in_parked):
         raise OSError("refusing_delete_outside_inbox")
     if resolved.is_symlink() or not resolved.is_file():
         raise OSError("refusing_delete_non_file")
     resolved.unlink()
+    if in_parked:
+        _remove_empty_parents(resolved.parent, parked_root)
+
+
+def _remove_empty_parents(start: Path, stop: Path) -> None:
+    current = start
+    stop_resolved = stop.resolve()
+    while current.resolve() != stop_resolved:
+        try:
+            if any(current.iterdir()):
+                return
+            current.rmdir()
+        except OSError:
+            return
+        current = current.parent
 
 
 def _identity(path: Path) -> dict:

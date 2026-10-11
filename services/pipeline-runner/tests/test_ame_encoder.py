@@ -82,6 +82,34 @@ def test_encode_returns_output_after_the_inbox_copy_is_removed(tmp_path: Path):
     assert list(out.iterdir()) == []
 
 
+def test_encode_removes_the_copy_media_encoder_parks_under_source(tmp_path: Path):
+    root = _root(tmp_path)
+    inbox = root / "inbox" / "social-standard-9x16"
+    out = root / "out" / "social-standard-9x16"
+    parked = inbox / "Source" / "2026-10-10_23-07-28"
+
+    def fetch(_key, dest: Path):
+        dest.write_bytes(b"source-master")
+
+    def sleep(_seconds: float):
+        source = next(inbox.glob("*.mov"))
+        parked.mkdir(parents=True)
+        source.replace(parked / source.name)
+        (out / f"{source.stem}.mp4").write_bytes(b"x" * 40000)
+
+    content = encode_downloaded_master(
+        root=root,
+        asset=_asset(),
+        fetch=fetch,
+        sleep=sleep,
+        monotonic=lambda: 0,
+        now=lambda: 100,
+    )
+    assert content == b"x" * 40000
+    assert not parked.exists()
+    assert list(out.iterdir()) == []
+
+
 def test_pickup_timeout_removes_the_inbox_copy(tmp_path: Path):
     root = _root(tmp_path)
     inbox = root / "inbox" / "social-standard-9x16"

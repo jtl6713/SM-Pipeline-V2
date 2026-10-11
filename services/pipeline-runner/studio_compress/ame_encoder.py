@@ -173,6 +173,7 @@ def encode_downloaded_master(
             content = output.read_bytes()
             if len(content) < min_output_bytes:
                 raise RuntimeError("Media Encoder output was empty")
+            _remove_parked_copies(root, preset, source.name)
             output.unlink(missing_ok=True)
             _progress(on_progress, 100)
             return content
@@ -267,6 +268,41 @@ def _find_output(root: Path, preset: str, stem: str, min_output_bytes: int) -> P
     if not matches:
         return None
     return max(matches, key=lambda path: path.stat().st_mtime)
+
+
+def _remove_parked_copies(root: Path, preset: str, filename: str) -> None:
+    """Delete the copy Media Encoder moved under inbox/<preset>/Source."""
+    parked_root = (root / "inbox" / preset / "Source").resolve()
+    if not parked_root.is_dir() or not filename or filename in {".", ".."}:
+        return
+    matches = [path for path in parked_root.rglob(filename) if path.is_file() and not path.is_symlink()]
+    for path in matches:
+        resolved = path.resolve()
+        if parked_root != resolved and parked_root not in resolved.parents:
+            continue
+        if resolved.name != filename:
+            continue
+        resolved.unlink()
+        _prune_empty_parents(resolved.parent, parked_root)
+
+
+def _prune_empty_parents(start: Path, stop: Path) -> None:
+    current = start
+    stop_resolved = stop.resolve()
+    while True:
+        try:
+            resolved = current.resolve()
+        except OSError:
+            return
+        if resolved == stop_resolved:
+            return
+        try:
+            if any(current.iterdir()):
+                return
+            current.rmdir()
+        except OSError:
+            return
+        current = current.parent
 
 
 def _unlink_inside(root: Path, path: Path) -> None:
