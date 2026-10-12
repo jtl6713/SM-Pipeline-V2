@@ -264,7 +264,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.620-production-unapproved-only";
+  const BUILD_ID = "item4-0.6.621-pipeline-snapshot";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -20719,16 +20719,29 @@ function timedScriptAssetLabel(asset, index) {
     }, PIPELINE_POLL_MS);
   }
 
+  function pipelineOutputCacheKey() {
+    return `studio.pipelineOutputs.v1:${selectedProfileId || "default"}`;
+  }
   function readPipelineOutputCache() {
     try {
-      const parsed = JSON.parse(sessionStorage.getItem("studio.pipelineOutputs.v1") || "");
+      const raw = localStorage.getItem(pipelineOutputCacheKey())
+        || sessionStorage.getItem(pipelineOutputCacheKey())
+        || localStorage.getItem("studio.pipelineOutputs.v1")
+        || sessionStorage.getItem("studio.pipelineOutputs.v1");
+      const parsed = JSON.parse(raw || "");
       const records = Array.isArray(parsed?.records) ? parsed.records : [];
       if (!records.length) return [];
-      if (Date.now() - Number(parsed.at || 0) > 30 * 60 * 1000) return [];
+      if (Date.now() - Number(parsed.at || 0) > 6 * 60 * 60 * 1000) return [];
       return records;
     } catch {
       return [];
     }
+  }
+  function writePipelineOutputCache(records) {
+    if (!Array.isArray(records) || !records.length) return;
+    const payload = JSON.stringify({ records, at: Date.now() });
+    try { localStorage.setItem(pipelineOutputCacheKey(), payload); } catch { /* ignore quota */ }
+    try { sessionStorage.setItem(pipelineOutputCacheKey(), payload); } catch { /* ignore quota */ }
   }
 
   async function refreshPipelineOutputs({ silent = false, force = false } = {}) {
@@ -20736,7 +20749,12 @@ function timedScriptAssetLabel(asset, index) {
     if (!target) return;
     if (silent && pipelinePollInFlight && !force) return;
     pipelinePollInFlight = true;
-    if (!silent) {
+    const cachedRows = pipelineOutputs.length ? pipelineOutputs : readPipelineOutputCache();
+    if (cachedRows.length && !target.querySelector("table")) {
+      pipelineOutputs = cachedRows;
+      renderOutputsTable(target, cachedRows);
+      pipelineListUnverified = true;
+    } else if (!silent && !target.querySelector("table")) {
       target.innerHTML = '<div class="empty">Loading outputs…</div>';
       setPipelineLiveHint("Refreshing…");
     }
@@ -20765,6 +20783,7 @@ function timedScriptAssetLabel(asset, index) {
         : { records: [], schedule_error: scheduleSettled.error?.message || "Schedule view unavailable" };
       if (!Array.isArray(outputsResult?.records)) throw new Error("Pipeline API returned no verified output list");
       const records = outputsResult.records;
+      if (outputsResult.refreshing && !records.length) throw new Error("Pipeline is still loading");
       const contentRecords = contentResult?.records || [];
       const scheduleError = String(scheduleResult?.schedule_error || (!scheduleSettled.ok ? (scheduleSettled.error?.message || "Schedule view unavailable") : ""));
       if (scheduleGeneration === pipelineScheduleGridLoadGeneration) {
@@ -20782,9 +20801,7 @@ function timedScriptAssetLabel(asset, index) {
       pipelineOutputs = records;
       pipelineContentRecords = contentRecords;
       target.querySelector(":scope > .pipeline-stale-note")?.remove();
-      try {
-        sessionStorage.setItem("studio.pipelineOutputs.v1", JSON.stringify({ records, at: Date.now() }));
-      } catch { /* ignore quota */ }
+      try { writePipelineOutputCache(records); } catch { /* ignore quota */ }
       updatePipelineApproveAllButton();
       if (!unchanged) {
         const scrollTop = target.scrollTop;
@@ -20824,8 +20841,16 @@ function timedScriptAssetLabel(asset, index) {
       pipelineScheduleGridRecords = [];
       updatePipelineQuickTabs([]);
       updatePipelineApproveAllButton();
-      target.innerHTML = `<div class="error" role="alert">Pipeline data is unavailable or out of date. Previously loaded posts are hidden to prevent opening or approving deleted content. Retrying automatically. ${escapeHtml(message)}</div>`;
+      const stillLoading = /timed out|still loading|signal timed|abort/i.test(message);
+      target.innerHTML = stillLoading
+        ? `<div class="empty">Pipeline is still loading. Retrying automatically.</div>`
+        : `<div class="error" role="alert">Pipeline data is unavailable or out of date. Previously loaded posts are hidden to prevent opening or approving deleted content. Retrying automatically. ${escapeHtml(message)}</div>`;
       setPipelineLiveHint("Pipeline data unverified · retrying");
+      if (stillLoading) {
+        window.setTimeout(() => {
+          if (pipelinePageActive() && !pipelinePollInFlight) refreshPipelineOutputs({ silent: true });
+        }, 8000);
+      }
     } finally {
       pipelinePollInFlight = false;
     }

@@ -626,7 +626,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.543-explicit-vo-timeline",
+          version: "0.10.544-pipeline-snapshot",
           studio_create_vo_matched_stills_v1: true,
           studio_idea_library_typeahead_v1: true,
           studio_post_publish_release_v1: true,
@@ -674,6 +674,7 @@ export default {
           studio_home_overview_cache_v1: true,
           studio_home_overview_snapshot_v1: true,
           studio_keep_last_list_v1: true,
+          studio_pipeline_list_snapshot_v1: true,
           studio_home_overview_soft_429_v1: true,
           studio_oversized_list_refresh_v1: true,
           studio_library_published_files_v1: true,
@@ -25098,6 +25099,35 @@ function schedulePipelineListHeal(ctx, env, records) {
   })());
 }
 
+async function readPipelineOutputsSnapshot(env, memoryKey, snapshotKey) {
+  const hit = studioHotReadCache.get(memoryKey);
+  if (hit?.value?.records?.length) return { payload: hit.value, at: Number(hit.at) || 0 };
+  if (!env?.STUDIO_MEDIA?.get) return null;
+  try {
+    const object = await env.STUDIO_MEDIA.get(snapshotKey);
+    if (!object) return null;
+    const body = await object.json();
+    if (!body?.payload?.records?.length) return null;
+    const at = Number(body.at) || 0;
+    studioHotReadCache.set(memoryKey, { at, value: body.payload });
+    return { payload: body.payload, at };
+  } catch (error) {
+    console.warn("pipeline list snapshot read failed", error);
+    return null;
+  }
+}
+
+async function writePipelineOutputsSnapshot(env, snapshotKey, payload) {
+  if (!payload?.records?.length || !env?.STUDIO_MEDIA?.put) return;
+  try {
+    await env.STUDIO_MEDIA.put(snapshotKey, JSON.stringify({ at: Date.now(), payload }), {
+      httpMetadata: { contentType: "application/json" },
+    });
+  } catch (error) {
+    console.warn("pipeline list snapshot write failed", error);
+  }
+}
+
 async function listOutputs(request, env, url, authorization, ctx = null) {
   const profile = await resolveWorkingContentProfile(env, authorization, requestedProfileId(url));
   // Newest first, plus unfinished rows that would otherwise age out of the page.
@@ -25107,7 +25137,11 @@ async function listOutputs(request, env, url, authorization, ctx = null) {
   // are not re-fetched.
   const limit = clampLimit(url, 200, 250);
   const reviewOnly = url.searchParams.get("mode") === "review";
-  const payload = await studioReadCoalesce(`outputs:${profile.id}:${limit}:${reviewOnly ? "review" : "full"}`, PIPELINE_OUTPUT_LIST_CACHE_MS, async () => {
+  const memoryKey = `outputs:${profile.id}:${limit}:${reviewOnly ? "review" : "full"}`;
+  const snapshotKey = `studio/state/pipeline-list-${profile.id}-${limit}-${reviewOnly ? "review" : "full"}.json`;
+  const remembered = await readPipelineOutputsSnapshot(env, memoryKey, snapshotKey);
+  const rememberedAge = remembered ? Date.now() - remembered.at : Infinity;
+  const buildPayload = () => studioReadCoalesce(memoryKey, PIPELINE_OUTPUT_LIST_CACHE_MS, async () => {
   const listOpts = {
     fields: OUTPUT_LIST_FIELDS,
     sortField: "Output_ID",
@@ -25163,8 +25197,36 @@ async function listOutputs(request, env, url, authorization, ctx = null) {
     profile: mapStudioContentProfile(profile),
     render_queue_total: renderQueueTotal,
   };
+  }).then(async (payload) => {
+    await writePipelineOutputsSnapshot(env, snapshotKey, payload);
+    return payload;
   });
-  return respond(request, env, { ok: true, ...payload });
+  if (remembered?.payload?.records?.length && rememberedAge < PIPELINE_OUTPUT_LIST_CACHE_MS) {
+    return respond(request, env, { ok: true, cached: true, snapshot: true, ...remembered.payload });
+  }
+  const pending = buildPayload();
+  ctx?.waitUntil?.(pending.catch((error) => console.warn("pipeline list refresh failed", error)));
+  if (remembered?.payload?.records?.length) {
+    return respond(request, env, { ok: true, stale: true, snapshot: true, ...remembered.payload });
+  }
+  try {
+    const payload = await raceStudioOverviewBudget(pending, 12000, "pipeline-list");
+    return respond(request, env, { ok: true, ...payload });
+  } catch (error) {
+    const late = await readPipelineOutputsSnapshot(env, memoryKey, snapshotKey);
+    if (late?.payload?.records?.length) {
+      return respond(request, env, { ok: true, stale: true, snapshot: true, ...late.payload });
+    }
+    if (isAirtableCoolingError(error)) {
+      return respond(request, env, {
+        ok: true,
+        records: [],
+        refreshing: true,
+        profile: mapStudioContentProfile(profile),
+      });
+    }
+    throw error;
+  }
 }
 
 async function listMusic(request, env, url) {
