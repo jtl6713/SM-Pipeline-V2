@@ -264,7 +264,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.619-timed-script-handoff";
+  const BUILD_ID = "item4-0.6.620-production-unapproved-only";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -14985,12 +14985,44 @@ function timedScriptAssetLabel(asset, index) {
     }, PRODUCTION_POLL_MS);
   }
 
+  function productionContentNeedsWork(record) {
+    if (!record || record.lifecycle_complete) return false;
+    const stage = String(record.studio_stage || "").trim().toLowerCase();
+    if (stage === "archived") return false;
+
+    // Output states are authoritative. Keep a mixed-status content item here
+    // while ANY output still needs rendering or approval, even when the other
+    // platform outputs have already been approved or scheduled.
+    const counts = record.output_state_counts;
+    if (counts && typeof counts === "object" && Object.keys(counts).length) {
+      const beforeApproval = new Set([
+        "queued", "preparing assets", "rendering", "rerendering",
+        "trying again", "waiting in render queue", "ready for review",
+      ]);
+      return Object.entries(counts).some(([state, count]) =>
+        Number(count || 0) > 0 && (
+          beforeApproval.has(String(state).trim().toLowerCase())
+          || /^waiting in render queue\b/i.test(String(state))
+        )
+      );
+    }
+
+    // Older items may not have output rollups. Use the available parent state
+    // without treating scheduled/publishing/approved records as production work.
+    const review = String(record.review_status || record.carousel_review_status || "").trim().toLowerCase();
+    if (review === "approved" || review === "complete") return false;
+    return !new Set([
+      "approved", "publishing", "scheduled", "published",
+      "draft delivered", "complete", "needs attention",
+    ]).has(stage);
+  }
+
   async function refreshProductionContent({ silent = false } = {}) {
     const target = $("contentList");
     if (!target) return;
     if (!silent) target.innerHTML = '<div class="empty production-empty"><strong>Loading in-production items…</strong></div>';
     const { records = [] } = await api("/api/content?limit=100");
-    const active = records.filter((record) => !record?.lifecycle_complete && String(record?.studio_stage || "") !== "Archived");
+    const active = records.filter(productionContentNeedsWork);
     const unchanged = silent && target.querySelector("table") && productionContentFingerprint(active) === productionContentFingerprint(productionContentRecords);
     productionContentRecords = active;
     if (activeProductionRequest && $("productionRequestTitle")) {
