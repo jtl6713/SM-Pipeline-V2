@@ -626,7 +626,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.537-hot-read-hold",
+          version: "0.10.538-lean-native-review",
           studio_create_vo_matched_stills_v1: true,
           studio_idea_library_typeahead_v1: true,
           studio_post_publish_release_v1: true,
@@ -2675,8 +2675,23 @@ function studioOutputHasReviewableDeliverable(record) {
   if (studioOutputIsNativePhoto(record)) {
     const slides = (f(record, "Carousel Slides") || []).length;
     const clips = selectedVisualClips(record);
-    if (!slides && !clips.length) return false;
-    if (studioNativeStillsNeedLettering(record)) return false;
+    // The Pipeline list intentionally omits Selected_Assets_JSON for performance.
+    // Do not turn a completed native photo package into Preparing Assets / 0-of-3
+    // merely because the list projection has no selected_clips array.
+    // The detail/approve routes still read the complete record.
+    const compactNativeReady = !clips.length
+      && Number(f(record, "Selected_Clip_Count") || 0) > 0
+      && String(f(record, "Output_Status") || "").trim() === "Ready for Review"
+      && String(f(record, "Render_Status") || "").trim() === "Native Photo Route"
+      && Boolean(studioClipPublicCdnUrl(f(record, "Studio_Preview_URL")));
+    if (!slides && !clips.length && !compactNativeReady) return false;
+    // Facebook/TikTok native photos do not require Instagram-style lettering
+    // when all selected CDN images are present and production marked review-ready.
+    const nativePhotoSetReady = clips.length > 0
+      && ["Facebook", "TikTok"].includes(String(f(record, "Platform") || "").trim())
+      && String(f(record, "Output_Status") || "").trim() === "Ready for Review"
+      && studioNativeClipsArePublicCdn(record);
+    if (studioNativeStillsNeedLettering(record) && !nativePhotoSetReady) return false;
     if (!studioOutputHasReviewCover(record)) return false;
     const preview = String(f(record, "Studio_Preview_URL") || "").trim();
     const firstClip = studioClipPublicCdnUrl(clips[0]);
@@ -24835,6 +24850,8 @@ const OUTPUT_LIST_FIELDS = [
   "Content_Profile",
   "Carousel Slides",
   "Composition_ID",
+  // Scalar proof of selected media for the lean Pipeline list (not multi-KB JSON).
+  "Selected_Clip_Count",
   // Keep Pipeline list lean: Selected_Assets_JSON / Creative_Render_Manifest_JSON
   // are multi‑KB per row and stall mobile /api/outputs (Connecting… / Loading outputs…).
   // Creative detail routes still fetch the full record when opened.
