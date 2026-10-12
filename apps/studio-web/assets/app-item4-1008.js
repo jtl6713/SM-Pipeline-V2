@@ -264,7 +264,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.621-pipeline-snapshot";
+  const BUILD_ID = "item4-0.6.622-create-vo";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -3054,8 +3054,11 @@
     }
     const timelineButton = $("createIdeaTimelineButton");
     if (timelineButton) {
-      timelineButton.hidden = promoted;
-      timelineButton.disabled = promoted || Boolean(idea?.is_on_hold);
+      // A promoted silent Photo Set can still be turned into a narrated short
+      // until its outputs are approved. Hide the button only after that.
+      const canVoicePromoted = promoted && ideaDraftNeedsTimeline(idea);
+      timelineButton.hidden = promoted && !canVoicePromoted;
+      timelineButton.disabled = Boolean(idea?.is_on_hold);
     }
     renderIdeaTimedScriptPreview(idea);
     const watchPhotosButton = $("watchIdeaPhotosButton");
@@ -3493,18 +3496,9 @@
       node.textContent = background ? "Creating timeline…" : "Building Production…";
     });
     const setMessage = background || heading ? setIdeasAutonomousMessage : setManageMessage;
-    const singleFeed = String(target.content_type || "").trim() === "Feed Post"
-      && Array.isArray(target.matched_media_asset_links)
-      && target.matched_media_asset_links.length === 1;
-    // "Create VO timeline" is an explicit video request, even if an earlier
-    // photo-wait shell saved this idea as a silent photo package.
-    const createVoiceover = !singleFeed && ["Photo Set", "Carousel", "Vertical Short Video"]
-      .includes(String(target.content_type || "").trim());
-    setMessage(singleFeed
-      ? "Preparing this feed post from the one photo. No voiceover timeline. This does not publish."
-      : createVoiceover
-        ? "Writing the spoken timeline and matching named stills. This will replace the unapproved silent photo plan; nothing will publish."
-        : "Preparing this idea and its matched stills for Production review…");
+    // This button is an explicit voiceover request for every content type,
+    // including a Feed Post or a Photo Set that was saved without narration.
+    setMessage("Writing the spoken timeline and matching named stills. This replaces an unapproved silent photo plan. Nothing publishes.");
     try {
       // Persist Manage Idea picker selections before Create VO so the Worker
       // prefers those stills over place-name library ranking.
@@ -3514,7 +3508,7 @@
         method: "POST",
         body: JSON.stringify({
           ...(libraryIds.length ? { library_asset_ids: libraryIds } : {}),
-          create_voiceover_timeline: createVoiceover,
+          create_voiceover_timeline: true,
         }),
         timeoutMs: 150000,
       });
@@ -3629,8 +3623,15 @@
         throw new Error("An existing Production Request could not be checked. Refresh and try again; nothing new was created.");
       }
       existing = selectIdeaProductionRequest(opened);
-      if (!existing) {
+      const silentPromoted = !existing
+        && opened.length > 0
+        && opened.every((row) => !productionRequestNotesHaveTimedScript(row.production_notes));
+      if (!existing && !silentPromoted) {
         throw new Error("This idea has Production Requests, but none is an editable draft. Open its Pipeline outputs; no duplicate was created.");
+      }
+      if (silentPromoted) {
+        await createIdeaTimedScript(idea, { button, heading });
+        return null;
       }
     } else {
       // Protect against older API/cache records whose linked IDs are omitted.
@@ -3640,8 +3641,9 @@
 
     if (existing?.id) {
       const hasTimeline = productionRequestNotesHaveTimedScript(existing.production_notes);
-      if (!hasTimeline && ideaDraftNeedsTimeline(idea)) {
-        // Photo-wait / configure handoff may link a draft before [timed-script] is saved.
+      if (!hasTimeline) {
+        // Create VO timeline always writes narration. A photo-wait shell or
+        // silent Photo Set must not reopen as a stills package.
         await createIdeaTimedScript(idea, { button, heading });
         return null;
       }
@@ -14632,7 +14634,7 @@ function timedScriptAssetLabel(asset, index) {
     const findImages = listeningForPhotos
       ? `<button type="button" class="manage-button find-images-row-button" data-idea-find-images="${escapeHtml(r.id)}">Find images now</button>`
       : "";
-    const timeline = !ideaIsPromoted(r) && !r.is_on_hold
+    const timeline = !r.is_on_hold && (!ideaIsPromoted(r) || ideaDraftNeedsTimeline(r))
       ? `<button type="button" class="manage-button find-images-row-button" data-idea-timeline="${escapeHtml(r.id)}">${ideaTimelineRowButtonLabel(r)}</button>`
       : "";
     const title = `${value(r.title)}${listeningForPhotos ? ' <span class="subtle">(Listening for photos)</span>' : ""}`;

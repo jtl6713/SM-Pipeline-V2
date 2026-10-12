@@ -62,11 +62,12 @@ test("photo-wait shell production requests still run Create timeline instead of 
     app.indexOf('$("createIdeaTimelineButton")?.addEventListener'),
   );
   assert.match(opener, /productionRequestNotesHaveTimedScript\(existing\.production_notes\)/);
-  assert.match(opener, /if \(!hasTimeline && ideaDraftNeedsTimeline\(idea\)\)/);
+  assert.match(opener, /if \(!hasTimeline\)/);
+  assert.match(opener, /silentPromoted/);
   assert.match(opener, /await createIdeaTimedScript\(idea, \{ button, heading \}\)/);
   assert.match(opener, /\?fields=light/);
   assert.match(app, /function ideaDraftNeedsTimeline\(idea\)/);
   const row = app.slice(app.indexOf("function ideaTimelineRowButtonLabel("), app.indexOf("function ideaCanPromote("));
   assert.match(row, /wait === "Waiting" \|\| wait === "Ready"/);
-  assert.match(row, /return "Create timeline"/);
+  assert.match(row, /return "Create VO timeline"/);
 });

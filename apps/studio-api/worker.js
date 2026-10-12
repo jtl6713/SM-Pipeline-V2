@@ -626,7 +626,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.544-pipeline-snapshot",
+          version: "0.10.545-create-vo",
           studio_create_vo_matched_stills_v1: true,
           studio_idea_library_typeahead_v1: true,
           studio_post_publish_release_v1: true,
@@ -24098,9 +24098,7 @@ async function createIdeaTimedScriptRoute(request, env, url, authorization, ctx 
   if (!body || typeof body !== "object" || Array.isArray(body)) body = {};
   // Create VO timeline is distinct from silently accepting a Photo Set.
   const requireVoiceoverTimeline = body.create_voiceover_timeline === true;
-  if (promotionCompleted(idea)) {
-    throw new HttpError(409, "This idea is already in production, so a new timeline was not written.");
-  }
+  let convertPromotedSilent = null;
   if (String(f(idea, "Candidate_Status") || "").trim() === "On Hold") {
     throw new HttpError(409, "Restore this idea before creating a timeline.");
   }
@@ -24127,10 +24125,22 @@ async function createIdeaTimedScriptRoute(request, env, url, authorization, ctx 
     })));
     if (preferred?.status === "Promoted") {
       const promoted = linkedRows.find((record) => record.id === preferred.id);
-      throw new HttpError(
-        409,
-        `This idea already has Production Request ${f(promoted, "Production_Request_ID") || preferred.id} in production. Open Pipeline / Open Review instead of creating another timeline.`
+      const promotedNotes = String(f(promoted, "Production_Notes") || "");
+      const promotedTimeline = timedScriptFromNotes(promotedNotes);
+      const silentPhotoPackage = !promotedTimeline?.segments?.length && !studioIsVibeCut(promoted) && (
+        isStillsIdeaContentType(String(f(promoted, "Master_Content_Type") || ""))
+        || /ez-package=slides/i.test(promotedNotes)
+        || String(f(promoted, "Voiceover_Mode") || "").trim() === "No"
       );
+      // Create VO timeline on an unapproved silent photo package rewrites that
+      // request. A package that already has narration stays put.
+      if (!(requireVoiceoverTimeline && silentPhotoPackage)) {
+        throw new HttpError(
+          409,
+          `This idea already has Production Request ${f(promoted, "Production_Request_ID") || preferred.id} in production. Open Pipeline / Open Review instead of creating another timeline.`
+        );
+      }
+      convertPromotedSilent = promoted;
     }
     const saved = linkedRows
       .map((record) => ({ record, timeline: timedScriptFromNotes(f(record, "Production_Notes")) }))
@@ -24161,6 +24171,9 @@ async function createIdeaTimedScriptRoute(request, env, url, authorization, ctx 
         message: "The existing voiceover timeline was reopened without changing its scenes or stills. Review it in Production / Rendering.",
       });
     }
+  }
+  if (promotionCompleted(idea) && !convertPromotedSilent) {
+    throw new HttpError(409, "This idea is already in production, so a new timeline was not written.");
   }
   // Operator-chosen stills (Manage Idea picker) win over place-name library ranking.
   const preferredMediaIds = preferredIdeaLibraryAssetIds({
@@ -24259,7 +24272,8 @@ async function createIdeaTimedScriptRoute(request, env, url, authorization, ctx 
     throw new HttpError(409, "The timeline did not resolve to library stills. Try again after more photos are classified.");
   }
 
-  let requestRecord = await existingDraftForIdea(env, idea.id, authorization)
+  let requestRecord = convertPromotedSilent
+    || await existingDraftForIdea(env, idea.id, authorization)
     || await findDraftProductionRequestForIdea(env, idea.id)
     || await createDraftForIdea(env, idea, authorization);
   const priorContentType = String(f(requestRecord, "Master_Content_Type") || "").trim();
@@ -24268,7 +24282,12 @@ async function createIdeaTimedScriptRoute(request, env, url, authorization, ctx 
   // An explicit VO conversion must never reset a live/approved destination.
   if (requireVoiceoverTimeline && previouslyPhotoOnly) {
     const existingOutputs = await outputRowsForProductionRequest(env, requestRecord.id, { includeInactive: false });
-    const unsafe = existingOutputs.filter((row) => !["Draft", "Ready"].includes(String(f(row, "Output_Status") || "").trim()));
+    const lockedOutput = new Set(["Approved for Publishing", "Published", "Scheduled", "Publishing"]);
+    const unsafe = existingOutputs.filter((row) => {
+      const status = String(f(row, "Output_Status") || "").trim();
+      const review = String(f(row, "Review_Status") || "").trim();
+      return lockedOutput.has(status) || review === "Approved" || Boolean(f(row, "Published_At"));
+    });
     if (unsafe.length) {
       throw new HttpError(409, "This photo package has already advanced beyond Draft. Open Production and review its outputs before converting to a voiceover timeline.");
     }
@@ -24302,6 +24321,8 @@ async function createIdeaTimedScriptRoute(request, env, url, authorization, ctx 
   requestRecord = await item4UpdateRequestState(env, requestRecord.id, {
     Master_Content_Type: "Vertical Short Video",
     Voiceover_Mode: "Yes",
+    Background_Music_Mode: "Yes",
+    Thumbnail_Mode: "Yes",
     Script_Mode: "Force exact",
     Requested_Script: script,
     Video_Duration_Seconds: duration,
@@ -24372,10 +24393,56 @@ async function createIdeaTimedScriptRoute(request, env, url, authorization, ctx 
     || autonomousPlanVariantsReady(requestRecord);
   const readyForApproval = assetsCount >= 2 && planReady && variantsReady;
   requestRecord = await item4UpdateRequestState(env, requestRecord.id, {
-    Request_Status: "Ready",
+    Request_Status: convertPromotedSilent ? "Promoted" : "Ready",
     Studio_Master_Asset_Status: assetsCount >= 2 ? "Ready" : (f(requestRecord, "Studio_Master_Asset_Status") || "None"),
     Studio_Item4_State: readyForApproval ? "Plan Ready" : (planReady ? "Plan Ready" : "Assets Ready"),
   });
+  if (convertPromotedSilent) {
+    try {
+      const contentId = studioFirstLinkedId(f(requestRecord, "Promoted_Content_Item"))
+        || studioFirstLinkedId(f(idea, "Content Items"))
+        || String(f(idea, "Promoted_Content_Record_ID") || "").trim();
+      if (contentId) {
+        await airtableFetch(env, env.AIRTABLE_CONTENT_TABLE_ID, contentId, {
+          method: "PATCH",
+          body: JSON.stringify({
+            fields: { Content_Type: "Vertical Short Video" },
+            typecast: true,
+          }),
+        });
+        await syncProductionRequestDirectivesToContentItem(env, requestRecord, contentId, { invalidateVoiceover: true });
+        const content = await airtableFetch(env, env.AIRTABLE_CONTENT_TABLE_ID, contentId);
+        const outputIds = (Array.isArray(f(content, "Platform Outputs")) ? f(content, "Platform Outputs") : [])
+          .map((id) => String(id || "").trim())
+          .filter((id) => /^rec[A-Za-z0-9]+$/.test(id));
+        for (const outputId of outputIds) {
+          const output = await airtableFetch(env, STUDIO_PLATFORM_OUTPUT_TABLE, outputId).catch(() => null);
+          const renderStatus = String(f(output, "Render_Status") || "");
+          const outputStatus = String(f(output, "Output_Status") || "");
+          const review = String(f(output, "Review_Status") || "");
+          const locked = ["Approved for Publishing", "Published", "Scheduled", "Publishing"].includes(outputStatus)
+            || review === "Approved"
+            || Boolean(f(output, "Published_At"));
+          if (!output || locked || !/native photo/i.test(renderStatus)) continue;
+          await airtableFetch(env, STUDIO_PLATFORM_OUTPUT_TABLE, outputId, {
+            method: "PATCH",
+            body: JSON.stringify({ fields: { Do_Not_Publish: true }, typecast: false }),
+          }).catch((error) => console.warn("silent photo output retire failed", outputId, error));
+        }
+      }
+      await airtableFetch(env, PRODUCTION_REQUEST_TABLE, requestRecord.id, {
+        method: "PATCH",
+        body: JSON.stringify({ fields: { Studio_Production_Job_JSON: null }, typecast: false }),
+      });
+      const resume = enqueueStudioProductionJob(env, requestRecord.id).catch((error) => {
+        console.warn("voiceover conversion produce enqueue failed", requestRecord.id, error);
+      });
+      if (ctx?.waitUntil) ctx.waitUntil(resume);
+      else await resume;
+    } catch (error) {
+      console.warn("promoted silent package voiceover handoff failed", requestRecord.id, error);
+    }
+  }
 
   const ideaNotes = mergeIdeaProductionNotes(f(idea, "Production_Config_Notes"), undefined, mediaIds);
   idea = await airtableFetch(env, env.AIRTABLE_IDEA_TABLE_ID, idea.id, {
@@ -24389,9 +24456,9 @@ async function createIdeaTimedScriptRoute(request, env, url, authorization, ctx 
         Studio_Matched_Media_Assets: mediaIds,
         Studio_Photo_Wait_Status: "Not Needed",
         Production_Config_Notes: ideaNotes,
-        Candidate_Status: String(f(idea, "Candidate_Status") || "").trim() === "On Hold"
-          ? "On Hold"
-          : "Approved",
+        Candidate_Status: convertPromotedSilent
+          ? "Promoted"
+          : (String(f(idea, "Candidate_Status") || "").trim() === "On Hold" ? "On Hold" : "Approved"),
       },
       typecast: true,
     }),

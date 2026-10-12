@@ -238,3 +238,4 @@ UI 0.6.607 hashtag mismatch warning only; approval no longer blocked.
 2026-10-11: Create VO timeline converts existing unapproved silent Photo Set drafts into timed narration and opens Production with scenes; UI 0.6.619-timed-script-handoff.
 2026-10-11: Studio UI 0.6.620-production-unapproved-only. Keep only render/review work in Production; approved and publishing items remain in Pipeline.
 2026-10-11: Pipeline keeps the last list when the outputs request times out, and serves a stored snapshot instead of waiting on a live scan (UI 0.6.621 / Worker 0.10.544-pipeline-snapshot).
+2026-10-11: Create VO timeline writes narration onto an unapproved silent photo package, including one already promoted (UI 0.6.622 / Worker 0.10.545-create-vo).
