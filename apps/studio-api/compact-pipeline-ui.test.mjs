@@ -11,12 +11,12 @@ const app = fs.readFileSync(path.join(web, "assets/app-item4-1008.js"), "utf8");
 const css = fs.readFileSync(path.join(web, "assets/styles-phase7-0621.css"), "utf8");
 
 test("compact Pipeline build and cache bust stay aligned", () => {
-  assert.match(app, /BUILD_ID = "item4-0.6.614-overview-snapshot"/);
-  assert.match(html, /UI build 0.6.614/);
-  assert.match(html, /app-item4-1008\.js\?v=0.6.614-overview-snapshot/);
-  assert.match(html, /styles-phase7-0621\.css\?v=0.6.614-overview-snapshot/);
+  assert.match(app, /BUILD_ID = "item4-0.6.615-pipeline-default-all"/);
+  assert.match(html, /UI build 0.6.615/);
+  assert.match(html, /app-item4-1008\.js\?v=0.6.615-pipeline-default-all/);
+  assert.match(html, /styles-phase7-0621\.css\?v=0.6.615-pipeline-default-all/);
   assert.match(css, /COMPACT_PIPELINE_V2_20261006/);
-  assert.match(html, /home-density-0517\.css\?v=0.6.614-overview-snapshot/);
+  assert.match(html, /home-density-0517\.css\?v=0.6.615-pipeline-default-all/);
 });
 
 test("compact Pipeline exposes quick views, search, and advanced filters", () => {
@@ -72,4 +72,13 @@ test("collapsed calendar and compact table are intentionally dense but responsiv
   assert.match(css, /@media\(max-width:760px\)/);
   assert.match(css, /PIPELINE_MOBILE_SCROLL_0_6_514/);
   assert.match(css, /#outputsList\{\s*overflow-x:auto;/);
+});
+
+// The unfiltered Pipeline opens on All. Explicit Home/Review links can still pass their own filter.
+test("Pipeline defaults to All unless a filter is explicitly requested", () => {
+  assert.match(app, /let pipelineViewFilter = "all";/);
+  assert.ok(app.includes('pipelineViewFilter = requestedFilter || "all";'));
+  assert.ok(app.includes('const nextFilter = String(filter || "all").trim() || "all";'));
+  assert.match(html, /data-pipeline-quick-view="all" class="is-active" aria-pressed="true"/);
+  assert.match(html, /data-pipeline-quick-view="approval" aria-pressed="false"/);
 });

@@ -236,7 +236,7 @@
   let platformCalendarLoadToken = 0;
   const pipelineTiktokUrlDrafts = new Map();
   const pipelineYoutubeUrlDrafts = new Map();
-  let pipelineViewFilter = "approval";
+  let pipelineViewFilter = "all";
   let pipelineColumnFilters = {
     output: "",
     platform: "",
@@ -263,7 +263,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.614-overview-snapshot";
+  const BUILD_ID = "item4-0.6.615-pipeline-default-all";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -854,7 +854,7 @@
     else $("studioHelpLink")?.removeAttribute("aria-current");
     if (next === "outputs") {
       const requestedFilter = String(options.pipelineFilter || "").trim();
-      pipelineViewFilter = requestedFilter || "approval";
+      pipelineViewFilter = requestedFilter || "all";
       if (previous !== "outputs") {
         restorePipelineUseDefaultSchedules();
         clearDefaultSchedulesFromUnapprovedRows();
