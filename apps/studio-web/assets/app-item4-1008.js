@@ -267,7 +267,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.633-ops-page-nesting";
+  const BUILD_ID = "item4-0.6.634-ops-queue-titles";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -23868,10 +23868,10 @@ function timedScriptAssetLabel(asset, index) {
         ? `<img class="ops-queue-thumb" src="${escapeHtml(row.thumbnail_url)}" alt="" loading="lazy">`
         : `<span class="ops-queue-thumb" aria-hidden="true"></span>`;
       const identity = [
-        row.content_id ? `Content ${row.content_id}` : "",
+        row.content_id != null && String(row.content_id).trim() !== "" ? `Content ${String(row.content_id).trim()}` : "",
         row.output_id ? `Output ${row.output_id}` : "",
         row.production_request_number ? `PR ${row.production_request_number}` : "",
-        row.kind === "request" ? "Production request" : "",
+        row.kind === "request" && !(row.content_id != null && String(row.content_id).trim() !== "") ? "Production request" : "",
       ].filter(Boolean).join(" · ");
       const stuck = row.stuck_kind ? `<div class="subtle error-text">${escapeHtml(row.stuck_kind)}${row.produce_error ? ` — ${escapeHtml(String(row.produce_error).slice(0, 120))}` : ""}</div>` : "";
       const queueLabel = row.render_queue_label

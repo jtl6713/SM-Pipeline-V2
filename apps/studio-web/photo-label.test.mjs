@@ -14,7 +14,7 @@ test("Production cards hide opaque asset ids behind a photo label", () => {
   assert.match(app, /studioPhotoLabel\(r, null, video \? "Clip" : "Photo"\)/);
   assert.match(labels, /production-render-frame-meta strong/);
   assert.match(labels, /library-card\[data-library-record-type='media_asset'\] h3/);
-  assert.match(html, /production-asset-labels\.js\?v=0\.6\.633-ops-page-nesting/);
-  assert.match(html, /app-item4-1008\.js\?v=0\.6\.633-ops-page-nesting/);
-  assert.match(app, /BUILD_ID = "item4-0.6.633-ops-page-nesting"/);
+  assert.match(html, /production-asset-labels\.js\?v=0\.6\.634-ops-queue-titles/);
+  assert.match(html, /app-item4-1008\.js\?v=0\.6\.634-ops-queue-titles/);
+  assert.match(app, /BUILD_ID = "item4-0.6.634-ops-queue-titles"/);
 });

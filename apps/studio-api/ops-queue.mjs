@@ -52,12 +52,54 @@ export const OPS_QUEUE_REQUEST_FIELDS = [
   "Studio_Output_Plan_Status",
   "Master_Content_Type",
   "Target_Platforms",
+  "Requested_Title",
+  "Idea_Title",
   "Idea_Candidate",
   "Promoted_Content_Item",
   "Created_At",
   "Updated_At",
   "Test_Run_ID",
 ];
+
+/** Prefer human titles over Master_Content_Type ("Vertical Short Video"). */
+export function opsQueueItemTitle({
+  contentWorkingTitle = "",
+  contentTitle = "",
+  ideaTitle = "",
+  requestedTitle = "",
+  requestIdeaTitle = "",
+  outputTitle = "",
+  masterContentType = "",
+  outputId = "",
+  fallback = "Untitled",
+} = {}) {
+  const genericTypes = new Set([
+    "vertical short video",
+    "feed post",
+    "carousel",
+    "photo set",
+    "story",
+    "longform video",
+    "production request",
+    "untitled",
+    "untitled output",
+  ]);
+  const candidates = [
+    contentWorkingTitle,
+    contentTitle,
+    ideaTitle,
+    requestedTitle,
+    requestIdeaTitle,
+    outputTitle,
+    masterContentType,
+  ].map((value) => String(value || "").trim()).filter(Boolean);
+  for (const candidate of candidates) {
+    if (!genericTypes.has(candidate.toLowerCase())) return candidate;
+  }
+  if (candidates.length) return candidates[0];
+  if (outputId) return `Output ${outputId}`;
+  return fallback;
+}
 
 export const OPS_QUEUE_CONTENT_FIELDS = [
   "Content_ID",

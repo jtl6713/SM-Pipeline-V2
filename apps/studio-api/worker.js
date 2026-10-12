@@ -231,6 +231,7 @@ import {
   isRenderPaused,
   jobIsOpsPaused,
   normalizeOpsQueueControls,
+  opsQueueItemTitle,
   queueLaneForStudioState,
   summarizeOpsQueueRows,
 } from "./ops-queue.mjs";
@@ -652,7 +653,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.552-ops-queue",
+          version: "0.10.553-ops-queue-titles",
           studio_create_vo_matched_stills_v1: true,
           studio_idea_library_typeahead_v1: true,
           studio_idea_library_search_all_hits_v1: true,
@@ -41457,7 +41458,7 @@ async function getStudioOperationsQueue(request, env, authorization) {
   const ideaIds = [...new Set((requests || [])
     .map((row) => firstOpsLinkedId(f(row, "Idea_Candidate")))
     .filter((id) => /^rec[A-Za-z0-9]+$/.test(id)))];
-  const ideaProfileById = new Map();
+  const ideaMetaById = new Map();
   if (ideaIds.length && env.AIRTABLE_IDEA_TABLE_ID) {
     const ideaFormula = ideaIds.length === 1
       ? `RECORD_ID()="${ideaIds[0]}"`
@@ -41468,7 +41469,10 @@ async function getStudioOperationsQueue(request, env, authorization) {
       filterFormula: ideaFormula,
     }).catch(() => []);
     for (const idea of ideas || []) {
-      ideaProfileById.set(idea.id, firstOpsLinkedId(f(idea, "Content_Profile")));
+      ideaMetaById.set(idea.id, {
+        profile_id: firstOpsLinkedId(f(idea, "Content_Profile")),
+        title: String(f(idea, "Candidate_Title") || "").trim(),
+      });
     }
   }
   for (const record of requests || []) {
@@ -41482,25 +41486,33 @@ async function getStudioOperationsQueue(request, env, authorization) {
     const contentId = firstOpsLinkedId(f(record, "Promoted_Content_Item"));
     const content = contentId ? contentMap.get(contentId) : null;
     const ideaId = firstOpsLinkedId(f(record, "Idea_Candidate"));
+    const ideaMeta = ideaId ? ideaMetaById.get(ideaId) : null;
     const profile = mapOpsQueueProfileName(
       profileMap,
-      (content ? f(content, "Content_Profile") : null) || ideaProfileById.get(ideaId) || null,
+      (content ? f(content, "Content_Profile") : null) || ideaMeta?.profile_id || null,
     );
     const step = String(job?.step || "").trim();
     const status = String(f(record, "Request_Status") || "").trim();
     const studioState = producePaused
       ? "Paused"
       : (stuck ? (stuck.kind || "Stuck") : (step && step !== "done" ? `Producing · ${step}` : status || "Draft"));
+    const contentNumber = content ? f(content, "Content_ID") : null;
     const row = {
       kind: "request",
       id: record.id,
       production_request_id: record.id,
       production_request_number: f(record, "Production_Request_ID") || null,
       content_item_id: contentId || null,
-      content_id: content ? f(content, "Content_ID") : null,
-      title: content
-        ? (f(content, "Working_Title") || f(content, "Content_Title") || "")
-        : (String(f(record, "Master_Content_Type") || "").trim() || "Production request"),
+      content_id: contentNumber,
+      title: opsQueueItemTitle({
+        contentWorkingTitle: content ? f(content, "Working_Title") : "",
+        contentTitle: content ? f(content, "Content_Title") : "",
+        ideaTitle: ideaMeta?.title || "",
+        requestedTitle: f(record, "Requested_Title"),
+        requestIdeaTitle: f(record, "Idea_Title"),
+        masterContentType: f(record, "Master_Content_Type"),
+        fallback: "Production request",
+      }),
       ...profile,
       studio_state: studioState,
       request_status: status,
@@ -41547,16 +41559,22 @@ async function getStudioOperationsQueue(request, env, authorization) {
       profileMap,
       f(record, "Content_Profile") || (content ? f(content, "Content_Profile") : null),
     );
+    const contentNumber = content ? f(content, "Content_ID") : null;
     return {
       kind: "output",
       id: record.id,
       output_id: mapped.output_id,
       production_request_id: parentRequest?.production_request_id || null,
       content_item_id: contentId || null,
-      content_id: content ? f(content, "Content_ID") : null,
-      title: mapped.output_title
-        || (content ? (f(content, "Working_Title") || f(content, "Content_Title")) : "")
-        || `Output ${mapped.output_id || ""}`.trim(),
+      content_id: contentNumber,
+      title: opsQueueItemTitle({
+        contentWorkingTitle: content ? f(content, "Working_Title") : "",
+        contentTitle: content ? f(content, "Content_Title") : "",
+        requestedTitle: parentRequest?.title || "",
+        outputTitle: mapped.output_title,
+        outputId: mapped.output_id,
+        fallback: "Untitled output",
+      }),
       ...profile,
       platform: mapped.platform,
       studio_output_type: mapped.studio_output_type || mapped.format,

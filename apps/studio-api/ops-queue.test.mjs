@@ -10,6 +10,7 @@ import {
   isRenderPaused,
   jobIsOpsPaused,
   normalizeOpsQueueControls,
+  opsQueueItemTitle,
   queueLaneForStudioState,
   summarizeOpsQueueRows,
 } from "./ops-queue.mjs";
@@ -68,6 +69,21 @@ test("produce pause flag on job JSON", () => {
   assert.equal(jobIsOpsPaused(resumed), false);
 });
 
+test("ops queue item title prefers content/idea over content type", () => {
+  assert.equal(opsQueueItemTitle({
+    masterContentType: "Vertical Short Video",
+    ideaTitle: "Brooklyn Bridge at dusk",
+  }), "Brooklyn Bridge at dusk");
+  assert.equal(opsQueueItemTitle({
+    contentTitle: "Inside PAMM Design",
+    outputTitle: "IG Reel",
+    masterContentType: "Feed Post",
+  }), "Inside PAMM Design");
+  assert.equal(opsQueueItemTitle({
+    masterContentType: "Vertical Short Video",
+  }), "Vertical Short Video");
+});
+
 test("queue lanes + summary", () => {
   assert.equal(queueLaneForStudioState("Ready for Review"), "review");
   assert.equal(queueLaneForStudioState("Rendering", { stuck: { kind: "x" } }), "stuck");
@@ -91,13 +107,13 @@ test("worker and UI wire Operations Queue + prepare-to-review", () => {
   assert.match(worker, /prepare-to-review/);
   assert.match(worker, /async function getStudioOperationsQueue/);
   assert.match(worker, /async function prepareIdeaToReview/);
-  assert.match(worker, /version: "0\.10\.552-ops-queue"/);
+  assert.match(worker, /version: "0\.10\.553-ops-queue-titles"/);
   assert.match(worker, /origin=prepare-to-review/);
   assert.match(worker, /readOpsQueueControls/);
   assert.match(html, /data-ops-tab="queue"/);
   assert.match(html, /operationsQueuePanel/);
   assert.match(html, /prepareIdeaToReviewButton/);
-  assert.match(app, /BUILD_ID = "item4-0\.6\.633-ops-page-nesting"/);
+  assert.match(app, /BUILD_ID = "item4-0\.6\.634-ops-queue-titles"/);
   assert.match(app, /loadOperationsQueue/);
   assert.match(app, /prepareIdeaToReviewButton/);
   assert.match(app, /OPS_CONTROL_TABS = \[[^\]]*\"queue\"/);
