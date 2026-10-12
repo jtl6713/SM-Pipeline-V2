@@ -37,6 +37,6 @@ test("Studio build label and cache key stay aligned with the active bundle", () 
   const uiBuild = html.match(/UI build (0\.6\.\d+)/)?.[1];
   assert.ok(build);
   assert.ok(uiBuild);
-  assert.equal(uiBuild, "0.6.658");
+  assert.equal(uiBuild, "0.6.659");
   assert.ok(html.includes(`/assets/app-item4-1008.js?v=${build}`));
 });

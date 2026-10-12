@@ -284,3 +284,5 @@ UI 0.6.607 hashtag mismatch warning only; approval no longer blocked.
 2026-10-12: Studio UI 0.6.657-lazy-js � Home paints the shell first; Pipeline/Ideas/Insights/Engagement/New Profile scripts load on demand.
 
 2026-10-12: Studio UI 0.6.658-factory-desk — Factory Desk parallel page (4 lanes + needs-assets max 3).
+
+2026-10-12: Studio UI 0.6.659-factory-actions — Factory 2×2 grid + Approve/Send back/Delete; restore UI after baseline wipe.

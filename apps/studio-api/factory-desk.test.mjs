@@ -105,6 +105,10 @@ test("Worker exposes factory desk routes and version flag", async () => {
   assert.match(worker, /FACTORY_DESK_KEY/);
   assert.match(worker, /getFactoryDesk/);
   assert.match(worker, /mutateFactoryDesk/);
-  assert.match(worker, /0\.10\.562-factory-desk/);
+  assert.match(worker, /factoryApproveOutput/);
+  assert.match(worker, /factorySendBackOutput/);
+  assert.match(worker, /action === "approve"/);
+  assert.match(worker, /action === "send_back"/);
+  assert.match(worker, /0\.10\.563-factory-actions/);
   assert.match(worker, /studio_factory_desk_v1:\s*true/);
 });
