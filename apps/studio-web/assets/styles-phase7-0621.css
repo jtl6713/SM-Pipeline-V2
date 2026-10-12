@@ -2932,6 +2932,7 @@ body{
 #page-music .page-heading,
 #page-library .page-heading,
 #page-operations .page-heading,
+#page-factory .page-heading,
 #page-support .page-heading{
   margin-bottom:20px;
 }
@@ -4941,3 +4942,48 @@ body.nav-collapsed .sidebar{
 .timed-script-format-help-body{padding:0 12px 12px}
 .timed-script-format-help pre{display:block;max-width:100%;overflow-x:auto;white-space:pre;padding:11px 12px;border:1px solid #dae4ef;border-radius:7px;background:#fff;color:#10233f;font-size:.78rem;line-height:1.65}
 .timed-script-format-help-body p{font-size:.78rem;line-height:1.55;color:#345;margin:8px 0 0}
+
+/* Factory Desk — 2×2 lanes (UI 0.6.659) */
+#page-factory .factory-lanes{
+  display:grid;
+  grid-template-columns:repeat(2,minmax(0,1fr));
+  grid-template-rows:minmax(280px,1fr) minmax(280px,1fr);
+  gap:14px;
+  padding:0 4px 24px;
+  align-items:stretch;
+}
+#page-factory .factory-lane{
+  margin:0;min-width:0;min-height:0;
+  display:flex;flex-direction:column;
+}
+#page-factory .factory-lane .panel-heading{flex:0 0 auto}
+#page-factory .factory-lane-list{
+  display:flex;flex-direction:column;gap:8px;
+  padding:0 16px 16px;flex:1 1 auto;min-height:0;
+  max-height:none;overflow:auto;
+}
+#page-factory .factory-lane-assets .ops-log-heading{padding:0 16px;margin:0 0 6px;flex:0 0 auto}
+#page-factory .factory-candidates{max-height:40%;flex:0 1 auto}
+#page-factory .factory-lane-empty{margin:0}
+#page-factory .factory-card{
+  display:flex;gap:10px;justify-content:space-between;align-items:flex-start;
+  border:1px solid var(--line,#d7e0ea);border-radius:10px;padding:10px 12px;background:#fff;
+}
+#page-factory .factory-card-main{min-width:0;display:flex;flex-direction:column;gap:3px}
+#page-factory .factory-card-title{font-size:.86rem;line-height:1.25}
+#page-factory .factory-card-meta{font-size:.74rem;color:#4d5f73}
+#page-factory .factory-card-alert{font-size:.72rem;color:#7a2e2e}
+#page-factory .factory-card-actions{display:flex;flex-wrap:wrap;gap:4px;justify-content:flex-end;flex:0 0 auto;max-width:58%}
+#page-factory .factory-card-actions .primary-button,
+#page-factory .factory-card-actions .secondary-button,
+#page-factory .factory-card-actions .text-button{
+  min-height:22px;height:auto;padding:2px 8px;font-size:.7rem;line-height:1.2;border-radius:999px;
+}
+#page-factory .factory-delete{color:#7a2e2e;border-color:#e3b6b6}
+@media(max-width:900px){
+  #page-factory .factory-lanes{
+    grid-template-columns:1fr;
+    grid-template-rows:none;
+  }
+  #page-factory .factory-lane-list{max-height:min(42vh,420px)}
+}

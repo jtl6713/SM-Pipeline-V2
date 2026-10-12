@@ -668,8 +668,9 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.562-factory-desk",
+          version: "0.10.563-factory-actions",
           studio_factory_desk_v1: true,
+          studio_factory_desk_actions_v1: true,
           studio_create_vo_matched_stills_v1: true,
           studio_idea_library_typeahead_v1: true,
           studio_idea_library_search_all_hits_v1: true,
@@ -1109,7 +1110,7 @@ export default {
         if (request.method === "GET") return getFactoryDesk(request, env, authorization);
         if (request.method === "POST") {
           assertWriteRequest(request, env);
-          return mutateFactoryDesk(request, env, authorization);
+          return mutateFactoryDesk(request, env, authorization, ctx);
         }
         throw new HttpError(405, "Method not allowed");
       }
@@ -41955,28 +41956,12 @@ async function getFactoryDesk(request, env, authorization) {
   });
 }
 
-async function mutateFactoryDesk(request, env, authorization) {
-  let payload;
-  try { payload = await request.json(); } catch { throw new HttpError(400, "Request body must be valid JSON"); }
-  const action = String(payload?.action || "").trim().toLowerCase();
-  const actor = authorization?.user?.email || authorization?.email || null;
-  const controls = await readFactoryDeskControls(env);
-  let next = controls;
-  if (action === "pin_needs_assets") {
-    const result = pinFactoryNeedsAssets(controls, payload?.item || payload, { actor });
-    if (!result.ok) throw new HttpError(409, result.message || result.error || "Could not pin needs-assets item");
-    next = result.controls;
-  } else if (action === "unpin_needs_assets") {
-    next = unpinFactoryNeedsAssets(controls, payload?.id || payload?.item?.id).controls;
-  } else {
-    throw new HttpError(400, "action must be pin_needs_assets or unpin_needs_assets");
-  }
-  const saved = await writeFactoryDeskControls(env, next, actor);
+async function factoryDeskRefreshPayload(request, env, authorization, controls, action, extra = {}) {
   const queueResponse = await getStudioOperationsQueue(request, env, authorization);
   let queue = {};
   try { queue = await queueResponse.clone().json(); } catch { queue = {}; }
   const ideaCandidates = await loadFactoryIdeaCandidates(env);
-  const part = partitionFactoryLanes(queue.rows || [], saved, { ideaCandidates });
+  const part = partitionFactoryLanes(queue.rows || [], controls, { ideaCandidates });
   return respond(request, env, {
     ok: true,
     page: "factory-desk",
@@ -41986,6 +41971,150 @@ async function mutateFactoryDesk(request, env, authorization) {
     controls: part.controls,
     can_edit: true,
     action,
+    ...extra,
+  });
+}
+
+async function factoryApproveOutput(env, id, actor, note, ctx = null) {
+  const existing = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, id);
+  const stamp = new Date().toISOString();
+  const updated = await approveOutputRecordForPublishing(
+    env,
+    existing,
+    note || `Factory Desk approve by ${actor || "operator"}`,
+    stamp,
+    {},
+  );
+  const held = !studioPublishCanDispatchNow(updated);
+  if (ctx && typeof ctx.waitUntil === "function") {
+    ctx.waitUntil(studioDispatchApprovedPublishAndSchedule(null, env, updated).catch((error) => {
+      console.warn("factory approve publish kickoff failed", updated?.id, error);
+    }));
+  }
+  return {
+    id,
+    message: held
+      ? "Approved. Studio will publish at the scheduled time."
+      : "Approved for publishing. Studio is starting the publisher.",
+  };
+}
+
+async function factorySendBackOutput(env, id, actor, note) {
+  const existing = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, id);
+  const outputStatus = String(f(existing, "Output_Status") || "").trim();
+  const reviewStatus = String(f(existing, "Review_Status") || "").trim();
+  const publishStatus = String(f(existing, "Publish_Status") || "").trim();
+  if (publishStatus === "Published" || outputStatus === "Published") {
+    throw new HttpError(409, "Published outputs cannot be sent back");
+  }
+  if (outputStatus === "Skipped") throw new HttpError(409, "Skipped outputs cannot be sent back");
+  const stamp = new Date().toISOString();
+  const existingNotes = String(f(existing, "Review_Notes") || "").trim();
+  const line = `Factory Desk send-back by ${actor || "operator"} at ${stamp}.${note ? ` ${note}` : ""}`;
+  await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, id, {
+    method: "PATCH",
+    body: JSON.stringify({
+      fields: {
+        Review_Status: "Changes Requested",
+        Output_Status: "In Production",
+        Publish_Status: "Not Ready",
+        Review_Decision_At: stamp,
+        Review_Notes: [existingNotes, line].filter(Boolean).join("\n\n"),
+      },
+      typecast: true,
+    }),
+  });
+  return {
+    id,
+    prior_review_status: reviewStatus,
+    message: "Sent back to production (Changes Requested).",
+  };
+}
+
+async function factoryDeleteDeskItem(env, id, kind, actor, note) {
+  const stamp = new Date().toISOString();
+  if (kind === "idea") {
+    const idea = await airtableFetch(env, env.AIRTABLE_IDEA_TABLE_ID, id);
+    const promoted = firstOpsLinkedId(f(idea, "Promoted_Content_Record_ID") || f(idea, "Content Item") || f(idea, "Content_Item"));
+    if (promoted) throw new HttpError(409, "Promoted ideas cannot be deleted from Factory; open Ideas instead");
+    await airtableFetch(env, env.AIRTABLE_IDEA_TABLE_ID, id, { method: "DELETE" });
+    return { id, kind, message: "Idea deleted." };
+  }
+  if (kind === "request") {
+    throw new HttpError(409, "Production requests cannot be deleted from Factory yet; open Production or Operations");
+  }
+  const existing = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, id);
+  const outputStatus = String(f(existing, "Output_Status") || "").trim();
+  const publishStatus = String(f(existing, "Publish_Status") || "").trim();
+  if (publishStatus === "Published" || outputStatus === "Published") {
+    throw new HttpError(409, "Published outputs cannot be deleted");
+  }
+  const existingNotes = String(f(existing, "Review_Notes") || "").trim();
+  const line = `Factory Desk delete/skip by ${actor || "operator"} at ${stamp}.${note ? ` ${note}` : ""}`;
+  await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, id, {
+    method: "PATCH",
+    body: JSON.stringify({
+      fields: {
+        Output_Status: "Skipped",
+        Publish_Status: "Not Ready",
+        Do_Not_Publish: true,
+        Review_Decision_At: stamp,
+        Review_Notes: [existingNotes, line].filter(Boolean).join("\n\n"),
+      },
+      typecast: true,
+    }),
+  });
+  return { id, kind: "output", message: "Output marked Skipped (removed from Factory queues)." };
+}
+
+async function mutateFactoryDesk(request, env, authorization, ctx = null) {
+  let payload;
+  try { payload = await request.json(); } catch { throw new HttpError(400, "Request body must be valid JSON"); }
+  const action = String(payload?.action || "").trim().toLowerCase();
+  const actor = authorization?.user?.email || authorization?.email || null;
+  const controls = await readFactoryDeskControls(env);
+  let next = controls;
+  let resultExtra = {};
+
+  if (action === "pin_needs_assets") {
+    const result = pinFactoryNeedsAssets(controls, payload?.item || payload, { actor });
+    if (!result.ok) throw new HttpError(409, result.message || result.error || "Could not pin needs-assets item");
+    next = result.controls;
+  } else if (action === "unpin_needs_assets") {
+    next = unpinFactoryNeedsAssets(controls, payload?.id || payload?.item?.id).controls;
+  } else if (action === "approve" || action === "send_back" || action === "delete") {
+    const id = String(payload?.id || payload?.item?.id || "").trim();
+    const kind = String(payload?.kind || payload?.item?.kind || "output").trim().toLowerCase();
+    const note = String(payload?.note || payload?.notes || "").trim().slice(0, 500);
+    if (!/^rec[A-Za-z0-9]+$/.test(id)) throw new HttpError(400, "id must be an Airtable record id");
+    if (action === "approve") {
+      if (kind !== "output") throw new HttpError(400, "Approve is only for Ready for Review outputs");
+      requirePermission(authorization, "outputs_review");
+      resultExtra = await factoryApproveOutput(env, id, actor, note, ctx);
+    } else if (action === "send_back") {
+      if (kind !== "output") throw new HttpError(400, "Send back is only for outputs");
+      requirePermission(authorization, "outputs_review");
+      resultExtra = await factorySendBackOutput(env, id, actor, note);
+    } else {
+      if (kind === "idea") requirePermission(authorization, "ideas_delete");
+      else requireAnyPermission(authorization, ["outputs_review", "publishing_control", "tenant_admin"]);
+      resultExtra = await factoryDeleteDeskItem(env, id, kind, actor, note);
+      next = unpinFactoryNeedsAssets(next, id).controls;
+    }
+  } else {
+    throw new HttpError(400, "action must be pin_needs_assets, unpin_needs_assets, approve, send_back, or delete");
+  }
+
+  const saved = (
+    action === "pin_needs_assets"
+    || action === "unpin_needs_assets"
+    || action === "delete"
+  )
+    ? await writeFactoryDeskControls(env, next, actor)
+    : next;
+  return factoryDeskRefreshPayload(request, env, authorization, saved, action, {
+    result: resultExtra,
+    message: resultExtra.message || null,
   });
 }
 
