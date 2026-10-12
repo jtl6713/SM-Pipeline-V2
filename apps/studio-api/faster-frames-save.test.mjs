@@ -12,7 +12,7 @@ const app = fs.readFileSync(
 );
 
 test("health advertises current worker build with faster-frames helpers", () => {
-  assert.match(worker, /version: "0.10.560-ops-phase-open"/);
+  assert.match(worker, /version: "0.10.561-production-photo-wait-visibility"/);
   assert.match(worker, /airtableBatchCreate/);
   assert.match(worker, /mapProductionRequestLight/);
 });
@@ -145,7 +145,7 @@ test("fractional video duration is stored as a whole-number cap and save errors 
 });
 
 test("UI polls GET /variants during Prepare and skips Save reload waterfall", () => {
-  assert.match(app, /BUILD_ID = "item4-0.6.654-ops-phase-open"/);
+  assert.match(app, /BUILD_ID = "item4-0.6.655-ops-render-type"/);
   assert.match(app, /pollItem4Variants/);
   const poll = app.slice(
     app.indexOf("async function pollItem4Variants"),
@@ -165,5 +165,5 @@ test("UI polls GET /variants during Prepare and skips Save reload waterfall", ()
 test("Worker heals orphan Ready to Render into Ready for Render", () => {
   assert.match(worker, /R4_READY_TO_RENDER_TYPO/);
   assert.match(worker, /Render_Status\}="Ready to Render"/);
-  assert.match(worker, /0.10.560-ops-phase-open/);
+  assert.match(worker, /0.10.561-production-photo-wait-visibility/);
 });

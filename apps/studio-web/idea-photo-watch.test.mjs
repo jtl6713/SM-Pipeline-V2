@@ -28,7 +28,7 @@ test("Photo listening stays in Ideas until enough matches and then surfaces in P
   assert.match(worker, /isIdeaWatchPhotosRoute/);
   assert.match(worker, /Studio_Photo_Wait_Status:\s*"Waiting"/);
   assert.match(worker, /photo_watch_waiting_count/);
-  assert.match(worker, /photoWaitStates\.get\(ideaId\) !== "Waiting"/);
+  assert.match(worker, /!productionRequestPhotoWaitHidden\(record, photoWaitStates\.get\(ideaId\)\)/);
   assert.match(worker, /autoListenOpenPhotoIdeas/);
   assert.match(worker, /runWaitingIdeaPhotoMatches/);
   assert.match(worker, /Studio media library/);

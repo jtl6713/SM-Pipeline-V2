@@ -267,7 +267,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.654-ops-phase-open";
+  const BUILD_ID = "item4-0.6.655-ops-render-type";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -24113,6 +24113,11 @@ function timedScriptAssetLabel(asset, index) {
     return prefix ? `${prefix}-${title}` : title;
   }
 
+  /** Reel / Story / Short / etc. Prefer Studio_Output_Type over Format. */
+  function opsQueueOutputTypeLabel(row) {
+    return String(row?.studio_output_type || row?.format || row?.platform_output_type || "").trim() || "—";
+  }
+
   function opsQueueRowPhase(row) {
     const direct = String(row?.phase || row?.e2e?.phase || "").trim();
     if (direct && OPS_E2E_PHASE_LABELS[direct]) return direct;
@@ -24385,8 +24390,8 @@ function timedScriptAssetLabel(asset, index) {
         <div class="ops-queue-line-main">${thumb}<div class="ops-queue-cell"><span class="ops-queue-line-title">${escapeHtml(opsQueueItemLabel(row))}</span></div></div>
         <div class="ops-queue-cell">${escapeHtml(row.profile_name || "—")}</div>
         <div class="ops-queue-cell">${escapeHtml(row.platform || "—")}</div>
-        <div class="ops-queue-cell">${escapeHtml(row.studio_state || row.render_status || "—")}</div>
-        <div class="ops-queue-cell">${escapeHtml(queueLabel)}</div>
+        <div class="ops-queue-cell" title="${escapeHtml(opsQueueOutputTypeLabel(row))}">${escapeHtml(opsQueueOutputTypeLabel(row))}</div>
+        <div class="ops-queue-cell" title="${escapeHtml(row.studio_state || row.render_status || queueLabel)}">${escapeHtml(queueLabel)}</div>
         ${opsE2eTrailHtml(row.e2e)}
         <div class="ops-queue-line-actions">
           ${operationsQueueCanEdit ? `<button type="button" class="secondary-button" data-ops-queue-pause="${escapeHtml(row.id)}" data-ops-queue-kind="output" data-ops-queue-paused="${paused ? "0" : "1"}">${paused ? "Resume" : "Pause"}</button>
@@ -24432,11 +24437,13 @@ function timedScriptAssetLabel(asset, index) {
       return;
     }
     host.innerHTML = rows.map((row) => {
+      const typeLabel = opsQueueOutputTypeLabel(row);
       return `<div class="ops-queue-line" data-lane="${escapeHtml(row.lane || "publish")}" data-phase="${escapeHtml(opsQueueRowPhase(row))}">
         ${opsQueuePhaseCell(row)}
         <div class="ops-queue-line-main"><div class="ops-queue-cell"><span class="ops-queue-line-title">${escapeHtml(opsQueueItemLabel(row))}</span></div></div>
         <div class="ops-queue-cell">${escapeHtml(row.profile_name || "—")}</div>
         <div class="ops-queue-cell">${escapeHtml(row.platform || "—")}</div>
+        <div class="ops-queue-cell" title="${escapeHtml(typeLabel)}">${escapeHtml(typeLabel)}</div>
         <div class="ops-queue-cell">${escapeHtml(row.studio_state || "—")}</div>
         ${opsE2eTrailHtml(row.e2e)}
         <div class="ops-queue-line-actions">
@@ -24472,11 +24479,13 @@ function timedScriptAssetLabel(asset, index) {
       const openId = row.content_item_id || row.production_request_id || row.id;
       const band = phase !== lastPhase ? opsQueuePhaseBandHtml(phase) : "";
       lastPhase = phase;
+      const typeLabel = opsQueueOutputTypeLabel(row);
       return `${band}<div class="ops-queue-line" data-lane="${row.stuck_kind ? "stuck" : "active"}" data-phase="${escapeHtml(phase)}">
         ${opsQueuePhaseCell(row)}
         <div class="ops-queue-line-main"><div class="ops-queue-cell"><span class="ops-queue-line-title">${escapeHtml(opsQueueItemLabel(row))}</span></div></div>
         <div class="ops-queue-cell">${escapeHtml(row.profile_name || "—")}</div>
         <div class="ops-queue-cell">${escapeHtml(platforms)}</div>
+        <div class="ops-queue-cell" title="${escapeHtml(typeLabel)}">${escapeHtml(typeLabel)}</div>
         ${opsE2eTrailHtml(row.e2e)}
         <div class="ops-queue-line-actions">
           <button type="button" class="text-button" ${opsQueueOpenButtonAttrs(row, { openId })}>Open</button>
