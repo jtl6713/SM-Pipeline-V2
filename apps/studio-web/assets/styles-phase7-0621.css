@@ -4813,3 +4813,13 @@ body.nav-collapsed .sidebar{
   #ideaTimedScriptMeta,#ideaTimedScriptTable,
   .idea-timed-script-meta,.idea-timed-script-table { padding-left:12px; padding-right:12px; }
 }
+
+/* Timed script: compact, accessible format help, including narrow screens. */
+.timed-script-format-hint{font-size:.82rem;line-height:1.45;color:#345;margin:12px 0 6px}
+.timed-script-format-hint code{font-size:.85em;background:#eef3f7;border-radius:4px;padding:2px 4px}
+.timed-script-format-help{border:1px solid #cddce8;border-radius:9px;background:#f7fafc;margin:6px 0 10px;max-width:100%}
+.timed-script-format-help summary{cursor:pointer;list-style-position:inside;padding:10px 12px;font-size:.85rem;font-weight:700;color:#012559}
+.timed-script-format-help summary:focus-visible{outline:2px solid #1269aa;outline-offset:3px}
+.timed-script-format-help-body{padding:0 12px 12px}
+.timed-script-format-help pre{display:block;max-width:100%;overflow-x:auto;white-space:pre;padding:11px 12px;border:1px solid #dae4ef;border-radius:7px;background:#fff;color:#10233f;font-size:.78rem;line-height:1.65}
+.timed-script-format-help-body p{font-size:.78rem;line-height:1.55;color:#345;margin:8px 0 0}
