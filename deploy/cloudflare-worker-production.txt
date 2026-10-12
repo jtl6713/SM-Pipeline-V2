@@ -172,3 +172,4 @@ Deploy Worker 0.10.489-engagement-ledger. Shrink the engagement ledger so Chicag
 2026-10-11: Hold Pipeline, Production, ideas, and music reads longer and load produce jobs by id (UI 0.6.611 / Worker 0.10.537-hot-read-hold).
 2026-10-11: Worker 0.10.538-lean-native-review — Pipeline native photo rows retain review-ready status with lean selected-count projection; full FB/TT package can open for approval.
 2026-10-11: NYC Comment publishes on the New York profile and keeps the failure on the card (UI 0.6.612 / Worker 0.10.539-nyc-comment).
+2026-10-11: Worker 0.10.540-pipeline-field-schema — remove nonexistent Production_Request from Platform Outputs lean list (422 UNKNOWN_FIELD_NAME); guard with live schema snapshot regression test.

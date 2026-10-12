@@ -626,7 +626,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.539-nyc-comment",
+          version: "0.10.540-pipeline-field-schema",
           studio_create_vo_matched_stills_v1: true,
           studio_idea_library_typeahead_v1: true,
           studio_post_publish_release_v1: true,
@@ -24846,7 +24846,7 @@ const OUTPUT_LIST_FIELDS = [
   "YouTube_Upload_Progress_Percent",
   "YouTube_Processing_Progress_Percent",
   "Content_Item",
-  "Production_Request",
+  // Production request is resolved from Content_Item; no Production_Request column exists here.
   "Content_Profile",
   "Carousel Slides",
   "Composition_ID",
