@@ -264,7 +264,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.618-header-pinned";
+  const BUILD_ID = "item4-0.6.619-timed-script-handoff";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -2712,16 +2712,20 @@
 
   /** Photo-wait creates a shell Production Request before the VO timeline exists. */
   function ideaTimelineRowButtonLabel(idea) {
-    if (!ideaHasProductionRequest(idea)) return "Create timeline";
-    if (ideaDraftNeedsTimeline(idea)) return "Create timeline";
+    if (!ideaHasProductionRequest(idea)) return "Create VO timeline";
+    if (ideaDraftNeedsTimeline(idea)) return "Create VO timeline";
     return "Open production";
   }
 
-  // Photo-wait shells are empty until Create timeline attaches stills.
-  // Vibe Cut, finished video, and any other saved draft must reopen as-is.
+  // The explicit Create VO timeline action must still work after a photo-wait
+  // shell has been filled as a silent Carousel/Photo Set. Such requests can
+  // say Ready and Not Needed despite having no [timed-script] directive.
+  // Vibe Cut, finished video, and existing voiced shorts still reopen as-is.
   function ideaDraftNeedsTimeline(idea) {
     const wait = String(idea?.photo_wait_status || "").trim();
-    return wait === "Waiting" || wait === "Ready";
+    const type = String(idea?.content_type || "").trim();
+    return wait === "Waiting" || wait === "Ready"
+      || (ideaHasProductionRequest(idea) && ["Photo Set", "Carousel"].includes(type));
   }
 
   function ideaCanPromote(idea) {
@@ -3492,9 +3496,15 @@
     const singleFeed = String(target.content_type || "").trim() === "Feed Post"
       && Array.isArray(target.matched_media_asset_links)
       && target.matched_media_asset_links.length === 1;
+    // "Create VO timeline" is an explicit video request, even if an earlier
+    // photo-wait shell saved this idea as a silent photo package.
+    const createVoiceover = !singleFeed && ["Photo Set", "Carousel", "Vertical Short Video"]
+      .includes(String(target.content_type || "").trim());
     setMessage(singleFeed
       ? "Preparing this feed post from the one photo. No voiceover timeline. This does not publish."
-      : "Accepting this idea: writing the voiceover timeline, attaching named stills, and preparing Production Approve…");
+      : createVoiceover
+        ? "Writing the spoken timeline and matching named stills. This will replace the unapproved silent photo plan; nothing will publish."
+        : "Preparing this idea and its matched stills for Production review…");
     try {
       // Persist Manage Idea picker selections before Create VO so the Worker
       // prefers those stills over place-name library ranking.
@@ -3502,7 +3512,10 @@
       const libraryIds = [...ideaLibrarySelected].filter((id) => /^rec[A-Za-z0-9]+$/.test(String(id || "")));
       const result = await api(`/api/ideas/${encodeURIComponent(target.id)}/timed-script`, {
         method: "POST",
-        body: JSON.stringify(libraryIds.length ? { library_asset_ids: libraryIds } : {}),
+        body: JSON.stringify({
+          ...(libraryIds.length ? { library_asset_ids: libraryIds } : {}),
+          create_voiceover_timeline: createVoiceover,
+        }),
         timeoutMs: 150000,
       });
       ideaTimedScriptPreview = {

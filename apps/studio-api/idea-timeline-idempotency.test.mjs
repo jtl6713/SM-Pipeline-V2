@@ -28,5 +28,25 @@ test("a failed linked-request lookup cannot silently regenerate a duplicate", ()
 });
 
 test("Worker version is incremented for deployed idempotency fix", () => {
-  assert.match(worker, /version: "0.10.542-keep-last-list"/);
+  assert.match(worker, /version: "0.10.543-explicit-vo-timeline"/);
+});
+
+test("explicit Create VO Timeline does not silently make a Photo Set", () => {
+  assert.match(route, /const requireVoiceoverTimeline = body\.create_voiceover_timeline === true/);
+  assert.match(route, /!requireVoiceoverTimeline && isStillsIdeaContentType\(contentType\)/);
+  assert.match(route, /!requireVoiceoverTimeline && Array\.isArray\(feedPhotoIds\)/);
+  assert.match(route, /previouslyPhotoOnly/);
+  assert.match(route, /outputRowsForProductionRequest\(env, requestRecord\.id, \{ includeInactive: false \}\)/);
+  assert.ok(route.includes('!["Draft", "Ready"].includes'));
+  assert.match(route, /if \(previouslyPhotoOnly \|\| String\(f\(requestRecord, "Studio_Output_Plan_Status"\)/);
+  assert.match(route, /Studio_Output_Plan_Status: "Needs Review"/);
+});
+
+test("Idea Create Timeline generates VO on existing silent Photo Set drafts", () => {
+  const app = fs.readFileSync(path.join(here, "../studio-web/assets/app-item4-1008.js"), "utf8");
+  const ideaNeeds = app.slice(app.indexOf("function ideaDraftNeedsTimeline("), app.indexOf("function ideaCanPromote("));
+  assert.ok(ideaNeeds.includes('["Photo Set", "Carousel"].includes(type)'));
+  assert.match(app, /create_voiceover_timeline: createVoiceover/);
+  assert.match(app, /"Photo Set", "Carousel", "Vertical Short Video"/);
+  assert.match(app, /return "Create VO timeline"/);
 });

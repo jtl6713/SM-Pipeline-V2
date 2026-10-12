@@ -175,3 +175,4 @@ Deploy Worker 0.10.489-engagement-ledger. Shrink the engagement ledger so Chicag
 2026-10-11: Worker 0.10.540-pipeline-field-schema — remove nonexistent Production_Request from Platform Outputs lean list (422 UNKNOWN_FIELD_NAME); guard with live schema snapshot regression test.
 2026-10-11: All Profiles overview serves a stored counts snapshot instead of waiting on a live Airtable scan (UI 0.6.614 / Worker 0.10.541-overview-snapshot).
 2026-10-11: Keep the last Pipeline list on a short Airtable pause, and let a 2s slot wait finish instead of blanking the page (UI 0.6.616 / Worker 0.10.542-keep-last-list).
+2026-10-11: Worker 0.10.543-explicit-vo-timeline — honor explicit narration timeline request from Photo Set ideas, replan unapproved still packages as narrated shorts, prevent changing approved/published outputs.

@@ -235,3 +235,4 @@ UI 0.6.607 hashtag mismatch warning only; approval no longer blocked.
 2026-10-11: Keep the last Pipeline list on a short Airtable pause, and let a 2s slot wait finish instead of blanking the page (UI 0.6.616 / Worker 0.10.542-keep-last-list).
 2026-10-11: Remove the empty City Setup tab. New Profile remains the city setup path (UI 0.6.617).
 2026-10-11: Pin the Studio header and open every page at the top so the nav stays on screen (UI 0.6.618).
+2026-10-11: Create VO timeline converts existing unapproved silent Photo Set drafts into timed narration and opens Production with scenes; UI 0.6.619-timed-script-handoff.

@@ -626,7 +626,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.542-keep-last-list",
+          version: "0.10.543-explicit-vo-timeline",
           studio_create_vo_matched_stills_v1: true,
           studio_idea_library_typeahead_v1: true,
           studio_post_publish_release_v1: true,
@@ -24095,6 +24095,8 @@ async function createIdeaTimedScriptRoute(request, env, url, authorization, ctx 
   let body = {};
   try { body = await request.json(); } catch { body = {}; }
   if (!body || typeof body !== "object" || Array.isArray(body)) body = {};
+  // Create VO timeline is distinct from silently accepting a Photo Set.
+  const requireVoiceoverTimeline = body.create_voiceover_timeline === true;
   if (promotionCompleted(idea)) {
     throw new HttpError(409, "This idea is already in production, so a new timeline was not written.");
   }
@@ -24165,7 +24167,7 @@ async function createIdeaTimedScriptRoute(request, env, url, authorization, ctx 
     matchedIds: f(idea, "Studio_Matched_Media_Assets") || [],
   });
   const contentType = String(f(idea, "Production_Content_Type") || "").trim();
-  if (isStillsIdeaContentType(contentType)) {
+  if (!requireVoiceoverTimeline && isStillsIdeaContentType(contentType)) {
     if (!preferredMediaIds.length) {
       throw new HttpError(409, "Attach at least one library photo in Manage Idea, then try again.");
     }
@@ -24175,7 +24177,7 @@ async function createIdeaTimedScriptRoute(request, env, url, authorization, ctx 
     contentType,
     matchedIds: preferredMediaIds,
   });
-  if (Array.isArray(feedPhotoIds) && feedPhotoIds.length === 1) {
+  if (!requireVoiceoverTimeline && Array.isArray(feedPhotoIds) && feedPhotoIds.length === 1) {
     return acceptSingleImageFeedPost(request, env, idea, feedPhotoIds[0], authorization, ctx);
   }
   const title = String(f(idea, "Candidate_Title") || "").trim();
@@ -24259,6 +24261,17 @@ async function createIdeaTimedScriptRoute(request, env, url, authorization, ctx 
   let requestRecord = await existingDraftForIdea(env, idea.id, authorization)
     || await findDraftProductionRequestForIdea(env, idea.id)
     || await createDraftForIdea(env, idea, authorization);
+  const priorContentType = String(f(requestRecord, "Master_Content_Type") || "").trim();
+  const previouslyPhotoOnly = isStillsIdeaContentType(priorContentType)
+    || /(?:^|\n)ez-package=slides(?:\n|$)/i.test(String(f(requestRecord, "Production_Notes") || ""));
+  // An explicit VO conversion must never reset a live/approved destination.
+  if (requireVoiceoverTimeline && previouslyPhotoOnly) {
+    const existingOutputs = await outputRowsForProductionRequest(env, requestRecord.id, { includeInactive: false });
+    const unsafe = existingOutputs.filter((row) => !["Draft", "Ready"].includes(String(f(row, "Output_Status") || "").trim()));
+    if (unsafe.length) {
+      throw new HttpError(409, "This photo package has already advanced beyond Draft. Open Production and review its outputs before converting to a voiceover timeline.");
+    }
+  }
   const attached = await applyLibraryAssetsToProductionRequest(env, requestRecord, mediaIds, {
     replaceWaitAssets: true,
     allowManagePaused: true,
@@ -24276,7 +24289,11 @@ async function createIdeaTimedScriptRoute(request, env, url, authorization, ctx 
 
   const script = exactVoiceoverText(timeline);
   const markdown = formatTimedScriptMarkdown(timeline);
-  const notes = withProductionPhotoWaitManual(mergeTimedScriptNotes(f(requestRecord, "Production_Notes"), timeline));
+  // A former silent Photo Set must not retain the slides route marker once
+  // the operator explicitly requests a narrated short.
+  const priorNotes = String(f(requestRecord, "Production_Notes") || "")
+    .split(/\r?\n/).filter((line) => !/^\s*ez-package=slides\s*$/i.test(line)).join("\n");
+  const notes = withProductionPhotoWaitManual(mergeTimedScriptNotes(priorNotes, timeline));
   const stampedNotes = /idea-vo-timeline=/i.test(notes)
     ? notes
     : `${notes}\nidea-vo-timeline=1`.trim();
@@ -24297,7 +24314,10 @@ async function createIdeaTimedScriptRoute(request, env, url, authorization, ctx 
   // Accept the idea all the way to Production Approve: plan + crops, stills already attached.
   // Do not I3/I4 promote — Joseph still taps Approve on Production.
   // Plan failures must not 500 after the timeline/stills are already saved.
-  if (String(f(requestRecord, "Studio_Output_Plan_Status") || "").trim() !== "Ready") {
+  // A prior Photo Set plan can say Ready while containing only native still
+  // destinations. Rebuild that plan for VO shorts and deactivate old draft
+  // photo outputs rather than opening a timed script with a silent plan.
+  if (previouslyPhotoOnly || String(f(requestRecord, "Studio_Output_Plan_Status") || "").trim() !== "Ready") {
     try {
       const planCall = studioInternalJsonRequest(`/api/production-requests/${requestRecord.id}/plan`, {
         platforms: [...AUTONOMOUS_STANDARD_PLATFORMS],
@@ -24311,6 +24331,11 @@ async function createIdeaTimedScriptRoute(request, env, url, authorization, ctx 
     } catch (error) {
       console.warn("idea timeline plan failed after stills saved", requestRecord.id, error);
       requestRecord = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, requestRecord.id).catch(() => requestRecord);
+      // Do not leave an old photo-only plan labelled Ready after VO conversion.
+      if (previouslyPhotoOnly) requestRecord = await item4UpdateRequestState(env, requestRecord.id, {
+        Studio_Output_Plan_Status: "Needs Review",
+        Studio_Item4_State: "Assets Ready",
+      });
     }
   }
 
