@@ -202,3 +202,5 @@ Deploy Worker 0.10.489-engagement-ledger. Shrink the engagement ledger so Chicag
 2026-10-12: Studio list reads (Home / Pipeline / Ideas) serve R2 snapshots and never wait on a live Airtable scan (UI 0.6.646 / Worker 0.10.558-list-read-snapshot).
 2026-10-12: Worker 0.10.559-open-index — filter open Pipeline rows with {Studio_Pipeline_Open}=1 and skip snapshot rebuild when refresh=0.
 2026-10-12: Worker 0.10.560-ops-phase-open — ops e2e lifecycle phase + idea_id on End-to-End groups for Open routing.
+
+2026-10-12 Worker 0.10.561-production-photo-wait-visibility: keep prepared Production drafts visible when Idea photo-wait flag is stale.

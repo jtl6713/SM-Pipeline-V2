@@ -658,7 +658,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.560-ops-phase-open",
+          version: "0.10.561-production-photo-wait-visibility",
           studio_create_vo_matched_stills_v1: true,
           studio_idea_library_typeahead_v1: true,
           studio_idea_library_search_all_hits_v1: true,
@@ -16252,6 +16252,20 @@ function mapProductionRequestSummary(record, ideaTitle = null) {
   };
 }
 
+// QA-PRODUCTION-PHOTO-WAIT: a stale Idea 'Waiting' flag must not hide an
+// operator-owned draft with exact narration and attached photos. Untouched
+// photo-listening shells remain hidden until they actually enter Production.
+function productionRequestPhotoWaitHidden(record, ideaWait) {
+  if (String(ideaWait || "").trim() !== "Waiting") return false;
+  const notes = String(f(record, "Production_Notes") || "");
+  if (productionPhotoWaitAutoOff(notes)) return false;
+  const assetCount = Number(f(record, "Studio_Master_Asset_Count") || 0);
+  if (assetCount > 0 && timedScriptFromNotes(notes)?.segments?.some(
+    segment => String(segment?.voiceover_text || "").trim()
+  )) return false;
+  return true;
+}
+
 async function listProductionRequests(request, env, url, authorization) {
   const limit = clampLimit(url, 100, 100);
   const profile = await resolveWorkingContentProfile(env, authorization, requestedProfileId(url));
@@ -16282,7 +16296,7 @@ async function listProductionRequests(request, env, url, authorization) {
   const { titles: ideaTitles, photoWait: photoWaitStates } = await loadIdeaListMetaByRecordId(env, ideaIds);
   const visible = filtered.filter((record) => {
     const ideaId = ideaRecordIdFromProductionRequest(record);
-    return !ideaId || photoWaitStates.get(ideaId) !== "Waiting";
+    return !ideaId || !productionRequestPhotoWaitHidden(record, photoWaitStates.get(ideaId));
   });
   return {
     records: visible.map((record) => mapProductionRequestSummary(
