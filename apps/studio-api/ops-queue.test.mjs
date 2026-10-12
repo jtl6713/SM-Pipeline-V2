@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import {
   OPS_QUEUE_CONTENT_FIELDS,
   OPS_QUEUE_OUTPUT_FIELDS,
+  OPS_QUEUE_RENDER_FORMULA,
   OPS_QUEUE_REQUEST_FIELDS,
   applyProducePauseToJob,
   buildOpsE2eStages,
@@ -13,6 +14,7 @@ import {
   isProducePaused,
   isRenderPaused,
   jobIsOpsPaused,
+  mergeOpsQueueOutputRecords,
   normalizeOpsQueueControls,
   opsOutputSkipsRender,
   opsQueueItemTitle,
@@ -197,6 +199,24 @@ test("ops queue Airtable field lists avoid unknown column names", () => {
   assert.ok(OPS_QUEUE_OUTPUT_FIELDS.includes("Studio_Preview_Updated_At"));
 });
 
+test("ops queue merges dedicated Remotion-lane rows so publishing cannot crowd them out", () => {
+  assert.match(OPS_QUEUE_RENDER_FORMULA, /Ready for Render/);
+  assert.match(OPS_QUEUE_RENDER_FORMULA, /Waiting in Render Queue/);
+  assert.match(OPS_QUEUE_RENDER_FORMULA, /Rendering/);
+  const publishHeavy = Array.from({ length: 160 }, (_, i) => ({
+    id: `recPublish${String(i).padStart(8, "0")}`,
+    fields: { Output_ID: 9000 + i, Render_Status: "Rendered", Output_Status: "Ready for Review" },
+  }));
+  const renderLane = [
+    { id: "recRenderReady0001", fields: { Output_ID: 12, Render_Status: "Ready for Render" } },
+    { id: "recRenderLive00001", fields: { Output_ID: 13, Render_Status: "Rendering" } },
+  ];
+  const merged = mergeOpsQueueOutputRecords(publishHeavy, renderLane);
+  assert.equal(merged.length, 162);
+  assert.ok(merged.some((row) => row.id === "recRenderReady0001"));
+  assert.ok(merged.some((row) => row.id === "recRenderLive00001"));
+});
+
 test("worker and UI wire Operations multi-queue + prepare-to-review", () => {
   assert.match(worker, /\/api\/operations\/queue/);
   assert.match(worker, /\/api\/operations\/queue\/pause/);
@@ -204,8 +224,10 @@ test("worker and UI wire Operations multi-queue + prepare-to-review", () => {
   assert.match(worker, /prepare-to-review/);
   assert.match(worker, /async function getStudioOperationsQueue/);
   assert.match(worker, /partitionOpsQueues/);
+  assert.match(worker, /mergeOpsQueueOutputRecords/);
+  assert.match(worker, /OPS_QUEUE_RENDER_FORMULA/);
   assert.match(worker, /async function prepareIdeaToReview/);
-  assert.match(worker, /version: "0\.10\.555-ops-queue-fields"/);
+  assert.match(worker, /version: "0\.10\.556-ops-render-queue-fetch"/);
   assert.match(worker, /origin=prepare-to-review/);
   assert.match(worker, /readOpsQueueControls/);
   assert.match(html, /data-ops-tab="queue"/);

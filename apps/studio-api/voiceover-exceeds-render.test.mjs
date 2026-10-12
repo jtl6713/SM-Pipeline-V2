@@ -10,7 +10,7 @@ const quality = fs.readFileSync(path.join(here, "quality-checks.mjs"), "utf8");
 const desk = fs.readFileSync(path.join(here, "desk-inventory.mjs"), "utf8");
 
 test("Worker 0.10.479 heals Blocked spoken-past-end by extending last clip (Output 2156)", () => {
-  assert.match(worker, /version: "0.10.555-ops-queue-fields"/);
+  assert.match(worker, /version: "0.10.556-ops-render-queue-fetch"/);
   assert.match(worker, /function studioExtendClipsToCoverVoiceover/);
   assert.match(worker, /async function studioHealVoiceoverExceedsRender/);
   assert.match(worker, /R4_VO_EXCEEDS_RENDER/);
