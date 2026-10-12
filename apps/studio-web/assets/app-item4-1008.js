@@ -263,7 +263,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.605-create-vo-matched-stills";
+  const BUILD_ID = "item4-0.6.606-approval-profile-guard";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -347,6 +347,8 @@
   const pipelinePublishNowPending = new Set();
   let pipelineApproveAllJobId = "";
   let pipelineApproveAllPollTimer = null;
+  let pipelineApproveAllStartedAt = 0;
+  let pipelineApproveAllPollFailures = 0;
   let pipelineApproveAllCanRetry = false;
   let pipelineApproveAllFailedCount = 0;
   let operationsTimezone = null;
@@ -15233,6 +15235,26 @@ function timedScriptAssetLabel(asset, index) {
     return ready.every((record) => pipelineRecordIsAzAutoQueue(record));
   }
 
+  function pipelineForeignCityHashtags(record) {
+    const theme = workingStudioTheme();
+    const caption = [record?.output_caption, record?.output_hashtags].filter(Boolean).join(" ");
+    const tags = caption.match(/#[a-z0-9_]+/gi) || [];
+    const foreign = {
+      la: /^(?:#chicago|#chicagoeats|#travelchicago|#westloop|#logansquare|#lincolnpark|#newyork|#nyc|#miami|#southbeach)$/i,
+      nyc: /^(?:#chicago|#chicagoeats|#travelchicago|#westloop|#logansquare|#lincolnpark|#losangeles|#downtownla|#miami|#southbeach)$/i,
+      miami: /^(?:#chicago|#chicagoeats|#travelchicago|#westloop|#logansquare|#lincolnpark|#losangeles|#downtownla|#newyork|#nyc)$/i,
+      chicago: /^(?:#losangeles|#downtownla|#newyork|#nyc|#miami|#southbeach)$/i,
+    }[theme];
+    return foreign ? tags.filter((tag) => foreign.test(tag)) : [];
+  }
+
+  function pipelineRejectForeignCityHashtags(records) {
+    const bad = (records || []).map((record) => ({ record, tags: pipelineForeignCityHashtags(record) })).filter((item) => item.tags.length);
+    if (!bad.length) return false;
+    pipelineApproveBlockedMessage("Approval blocked: wrong-city hashtags on " + bad.map(({ record, tags }) => pipelineOutputLabel(record) + " (" + tags.join(", ") + ")").join("; ") + ". Correct the caption and hashtags before publishing.");
+    return true;
+  }
+
   function pipelineManualApprovableOutputs(records = pipelineOutputs) {
     return pipelineApprovableOutputs(records).filter((record) => !pipelineRecordIsAzAutoQueue(record));
   }
@@ -18329,7 +18351,7 @@ function timedScriptAssetLabel(asset, index) {
   function applyPipelineApproveAllProgress(result, { terminal = false } = {}) {
     const button = $("pipelineApproveAll");
     const status = String(result?.status || "");
-    const running = status === "queued" || status === "running";
+    const running = !terminal && (status === "queued" || status === "running");
     pipelineApproveAllJobId = String(result?.job_id || pipelineApproveAllJobId || "").trim();
     pipelineApproveAllFailedCount = Number(result?.failed_count || 0);
     pipelineApproveAllCanRetry = Boolean(result?.can_retry);
@@ -18384,6 +18406,12 @@ function timedScriptAssetLabel(asset, index) {
     } catch (error) {
       setPipelineLiveHint(error?.message || "Approve All progress check failed — retrying…");
     }
+    pipelineApproveAllPollFailures += 1;
+    if (Date.now() - pipelineApproveAllStartedAt > 120000 || pipelineApproveAllPollFailures > 70) {
+      applyPipelineApproveAllProgress({ job_id: id, status: "stalled", message: "Approval is taking too long. Refresh the list to check which outputs were approved before retrying." }, { terminal: true });
+      await refreshPipelineOutputs({ silent: true, force: true }).catch(() => null);
+      return;
+    }
     stopPipelineApproveAllPoll();
     pipelineApproveAllPollTimer = setTimeout(() => {
       pollPipelineApproveAllJob(id).catch(() => null);
@@ -18396,6 +18424,8 @@ function timedScriptAssetLabel(asset, index) {
       applyPipelineApproveAllProgress(result || {}, { terminal: true });
       return;
     }
+    pipelineApproveAllStartedAt = Date.now();
+    pipelineApproveAllPollFailures = 0;
     applyPipelineApproveAllProgress(result, { terminal: false });
     stopPipelineApproveAllPoll();
     pipelineApproveAllPollTimer = setTimeout(() => {
@@ -18491,6 +18521,7 @@ function timedScriptAssetLabel(asset, index) {
         pipelineApproveBlockedMessage("No outputs are waiting for approval.");
         return;
       }
+      if (pipelineRejectForeignCityHashtags(ready)) return;
       if (pipelineHasUnsavedSchedules(ready)) {
         pipelineApproveBlockedMessage("Save the edited schedule time before approving.");
         return;
@@ -18792,6 +18823,7 @@ function timedScriptAssetLabel(asset, index) {
         pipelineApproveBlockedMessage("No outputs in this content item are waiting for approval.");
         return;
       }
+      if (pipelineRejectForeignCityHashtags(ready)) return;
       if (pipelineHasUnsavedSchedules(ready)) {
         pipelineApproveBlockedMessage("Save the edited schedule time before approving this content.");
         return;

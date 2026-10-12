@@ -220,3 +220,4 @@ Deploy Studio UI 0.6.534-pages-path-bust. Rename app-item4-0625.js -> app-item4-
 2026-10-11: Create VO uses Manage Idea selected/matched stills; multi Feed Post skips VO timeline (UI 0.6.605 / Worker 0.10.533).
 
 2026-10-11: Redeploy Studio UI 0.6.605-create-vo-matched-stills after custom-domain alias lag (pages.dev had 605; studio.chicagoshining.com still served 604).
+Deploy UI 0.6.606 approval recovery and cross-profile hashtag approval guard.
