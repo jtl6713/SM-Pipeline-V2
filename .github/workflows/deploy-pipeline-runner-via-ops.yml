@@ -18,6 +18,19 @@ jobs:
       OPS_TOKEN_B: ${{ secrets.DASHBOARD_TOKEN }}
       OPS_TOKEN_C: ${{ secrets.OPS_TOKEN }}
     steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Test A2B Drive-ID duplicate prevention (no external writes)
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --quiet -r services/pipeline-runner/requirements.txt pytest
+          PYTHONPATH=services/pipeline-runner python -m pytest -q \
+            services/pipeline-runner/tests/test_a2b_existing_lookup.py \
+            services/pipeline-runner/tests/test_airtable_atomic_upsert.py
+
       - name: Deploy Pipeline Runner through allowlisted Ops action
         shell: bash
         run: |
@@ -63,10 +76,13 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          EXPECTED=$(sed -n 's/^PIPELINE_RUNNER_CODE_VERSION = "\\([^"]*\\)"/\\1/p' services/pipeline-runner/config.py)
+          test -n "$EXPECTED"
           for i in $(seq 1 18); do
             code=$(curl -sS --max-time 20 -o /tmp/health.json -w '%{http_code}' 'https://pipeline.chicagoshining.com/health' || true)
-            if [[ "$code" == "200" ]] && jq -e '.ok==true' /tmp/health.json >/dev/null 2>&1; then
+            if [[ "$code" == "200" ]] && jq -e --arg expected "$EXPECTED" '.ok==true and .version==$expected' /tmp/health.json >/dev/null 2>&1; then
               cat /tmp/health.json
+              echo "Verified deployed runner version: $EXPECTED"
               exit 0
             fi
             sleep 5
@@ -191,3 +207,6 @@ jobs:
 
 # Trigger FB2 retry selector bypassing stale Airtable view for Output 2292
 # 2026-10-12 service_version=2026-10-12-fb2-retry-view
+
+# A2B Google Drive file-ID atomic upsert, duplicate check, and concurrency regression deployment.
+# 2026-10-12 service_version=2026-10-12-a2b-drive-id-dedupe
