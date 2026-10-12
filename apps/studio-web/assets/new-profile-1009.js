@@ -465,31 +465,43 @@
     }
   }
 
-  async function loadProfiles() {
-    const result = await api("/api/profiles");
-    state.profiles = Array.isArray(result.records) ? result.records : [];
-    state.canCreate = Boolean(result.can_create_profile);
+  function applyNewProfileNavFailOpen() {
     const nav = $("navNewProfile");
-    if (nav) nav.hidden = !state.canCreate;
-    // Owner/Admin who can create profiles must also see Operations. Do not leave
-    // Ops hidden when /api/session timed out earlier in checkHealth.
-    if (state.canCreate) {
-      const ops = $("navOperations");
-      const footerOps = $("footerOperations");
-      if (ops) ops.hidden = false;
-      if (footerOps) footerOps.hidden = false;
-    }
-    const select = $("newProfileTemplate");
-    if (select) {
-      select.innerHTML = state.profiles.map(function (profile) {
-        return "<option value=\"" + escapeHtml(profile.id) + "\">" + escapeHtml(profile.name || profile.city_label || profile.id) + "</option>";
-      }).join("");
-      const chicago = state.profiles.find(function (profile) { return profile.theme === "chicago"; });
-      if (chicago) select.value = chicago.id;
-    }
-    if (!state.canCreate) {
-      setMessage("New Profile requires Studio Owner/Admin permission.", true);
-      qa("#page-profiles input, #page-profiles select, #page-profiles textarea, #page-profiles button").forEach(function (el) { el.disabled = true; });
+    if (nav) nav.hidden = false;
+  }
+
+  async function loadProfiles() {
+    try {
+      const result = await api("/api/profiles");
+      state.profiles = Array.isArray(result.records) ? result.records : [];
+      state.canCreate = Boolean(result.can_create_profile);
+      const nav = $("navNewProfile");
+      if (nav) nav.hidden = !state.canCreate;
+      // Owner/Admin who can create profiles must also see Operations. Do not leave
+      // Ops hidden when /api/session timed out earlier in checkHealth.
+      if (state.canCreate) {
+        const ops = $("navOperations");
+        const footerOps = $("footerOperations");
+        if (ops) ops.hidden = false;
+        if (footerOps) footerOps.hidden = false;
+      }
+      const select = $("newProfileTemplate");
+      if (select) {
+        select.innerHTML = state.profiles.map(function (profile) {
+          return "<option value=\"" + escapeHtml(profile.id) + "\">" + escapeHtml(profile.name || profile.city_label || profile.id) + "</option>";
+        }).join("");
+        const chicago = state.profiles.find(function (profile) { return profile.theme === "chicago"; });
+        if (chicago) select.value = chicago.id;
+      }
+      if (!state.canCreate) {
+        setMessage("New Profile requires Studio Owner/Admin permission.", true);
+        qa("#page-profiles input, #page-profiles select, #page-profiles textarea, #page-profiles button").forEach(function (el) { el.disabled = true; });
+      }
+    } catch (error) {
+      // Keep the nav link visible while profiles/session are slow or failing.
+      // Create actions still hit the API and enforce Owner/Admin there.
+      applyNewProfileNavFailOpen();
+      throw error;
     }
   }
 
@@ -556,6 +568,8 @@
 
   async function init() {
     if (!$("page-profiles")) return;
+    // Show with the rest of the drawer immediately; /api/profiles is Airtable-backed.
+    applyNewProfileNavFailOpen();
     bind();
     try {
       await loadProfiles();
@@ -564,6 +578,7 @@
       await resumeCreatedProfile();
       renderReview();
     } catch (error) {
+      applyNewProfileNavFailOpen();
       setMessage(error.message || "Could not initialize New Profile.", true);
     }
   }

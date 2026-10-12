@@ -10,10 +10,10 @@ const html = fs.readFileSync(path.join(here, "index.html"), "utf8");
 const css = fs.readFileSync(path.join(here, "assets/styles-phase7-0621.css"), "utf8");
 
 test("UI 0.6.516 preserves hamburger off-canvas nav on every viewport", () => {
-  assert.match(app, /BUILD_ID = "item4-0.6.643-ops-timeline-align"/);
-  assert.match(html, /UI build 0\.6\.643/);
-  assert.match(html, /app-item4-1008\.js\?v=0.6.643-ops-timeline-align/);
-  assert.match(html, /styles-phase7-0621\.css\?v=0.6.643-ops-timeline-align/);
+  assert.match(app, /BUILD_ID = "item4-0.6.644-nav-eager"/);
+  assert.match(html, /UI build 0\.6\.644/);
+  assert.match(html, /app-item4-1008\.js\?v=0.6.644-nav-eager/);
+  assert.match(html, /styles-phase7-0621\.css\?v=0.6.644-nav-eager/);
   assert.match(html, /id="studioNavToggle"/);
   assert.match(html, /id="studioSidebar"/);
   assert.match(html, /id="studioNavBackdrop"/);
@@ -36,4 +36,18 @@ test("UI 0.6.516 preserves hamburger off-canvas nav on every viewport", () => {
   assert.doesNotMatch(app, /page === "profile-setup"/);
   // Drawer is not limited to the phone breakpoint.
   assert.match(css, /\.sidebar\{\s*position:fixed/);
+});
+
+test("New Profile and Operations paint with the drawer before session/profiles resolve", () => {
+  // First HTML paint must not hide privileged links behind Airtable-backed APIs.
+  assert.match(html, /id="navNewProfile"(?! [^>]*\bhidden\b)[^>]*>New Profile</);
+  assert.match(html, /id="navOperations"(?! [^>]*\bhidden\b)[^>]*>Operations/);
+  assert.match(html, /id="footerOperations"(?! [^>]*\bhidden\b)[^>]*>Operations</);
+  assert.match(app, /function applyPrivilegedNavFailOpen\(/);
+  assert.match(app, /function applyNewProfileNavVisibility\(/);
+  assert.match(app, /applyPrivilegedNavFailOpen\(\);\s*\n\s*checkHealth\(/);
+  assert.match(app, /applyPrivilegedNavFailOpen\(\);\s*\n\s*try \{/);
+  const newProfile = fs.readFileSync(path.join(here, "assets/new-profile-1009.js"), "utf8");
+  assert.match(newProfile, /function applyNewProfileNavFailOpen\(/);
+  assert.match(newProfile, /applyNewProfileNavFailOpen\(\);\s*\n\s*bind\(\);/);
 });

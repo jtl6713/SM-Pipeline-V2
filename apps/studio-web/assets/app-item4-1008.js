@@ -267,7 +267,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.643-ops-timeline-align";
+  const BUILD_ID = "item4-0.6.644-nav-eager";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -1975,6 +1975,27 @@
     );
   }
 
+  function applyNewProfileNavVisibility(canCreate, { failOpen = false } = {}) {
+    const navNew = $("navNewProfile");
+    if (!navNew) return;
+    if (canCreate === true) {
+      navNew.hidden = false;
+      return;
+    }
+    if (canCreate === false) {
+      navNew.hidden = true;
+      return;
+    }
+    if (failOpen) navNew.hidden = false;
+  }
+
+  function applyPrivilegedNavFailOpen() {
+    // Paint New Profile + Operations with the rest of the drawer. Do not wait on
+    // /api/session or /api/profiles (Airtable) before the links exist in the nav.
+    applyOperationsNavVisibility(null, { failOpen: true });
+    applyNewProfileNavVisibility(null, { failOpen: true });
+  }
+
   function applyOperationsNavVisibility(session, { failOpen = false } = {}) {
     const navOps = $("navOperations");
     const footerOps = $("footerOperations");
@@ -2008,6 +2029,8 @@
   }
 
   async function checkHealth() {
+    // Eager paint before awaiting health/session — those hits can take seconds.
+    applyPrivilegedNavFailOpen();
     try {
       const [healthResult, sessionResult] = await Promise.allSettled([
         api("/api/health", { timeoutMs: 8000, retries: 1 }),
@@ -2019,7 +2042,7 @@
       studioSession = session || studioSession;
       // Paint Worker / API footer immediately. Profile list hits Airtable and must
       // never gate the bottom status strip when the base is rate-limited.
-      applyOperationsNavVisibility(session);
+      applyOperationsNavVisibility(session, { failOpen: !session });
       if (!session) {
         // /api/session reads Studio Users in Airtable — a rate-limit/timeout used to
         // leave Operations stuck hidden for the whole page life. Retry, then fail open.
@@ -25054,6 +25077,7 @@ function timedScriptAssetLabel(asset, index) {
     if (bootProfile) applyStudioProfile(bootProfile);
   }
 
+  applyPrivilegedNavFailOpen();
   checkHealth().finally(() => loadDashboard());
   $("studioProfileSelect")?.addEventListener("change", (event) => {
     const profile = studioProfiles.find((item) => item.id === event.target.value);
