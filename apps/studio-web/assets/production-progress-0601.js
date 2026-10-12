@@ -1,36 +1,60 @@
-/* Noninteractive progress indicators for Production timeline handoff. */
+/* Persistent Production checklist: state derived from request/workspace, not transient toast text. */
 (function(){
- const target=document.getElementById('productionRequestMessage');
- if(!target)return;
+ const labels=['Timeline created','Stills attached','Platform crops ready','Production approved'];
+ const $=id=>document.getElementById(id);
  let updating=false;
+ function state(){
+  const request=typeof activeProductionRequest!=='undefined'?activeProductionRequest:null;
+  const workspace=typeof item4Workspace!=='undefined'?item4Workspace:null;
+  const status=String(request?.status||$('productionRequestStatus')?.textContent||'').trim();
+  const message=String($('productionRequestMessage')?.dataset.progressSource||$('productionRequestMessage')?.textContent||'');
+  const timeline=/timeline and stills are on production/i.test(message)||Boolean(workspace?.plan?.items?.length)||workspace?.plan_status==='Ready';
+  const stills=/timeline and stills are on production/i.test(message)||Boolean(workspace?.assets?.length);
+  const crops=workspace?.variant_status==='Ready'||workspace?.variant_status==='Not Needed'||/crops (?:are )?ready/i.test(message)&&!/still finishing|still preparing|not ready/i.test(message);
+  const approved=/^(Promoted|Approved)$/i.test(status);
+  return [timeline||approved,stills||approved,crops||approved,approved];
+ }
  function render(){
   if(updating)return;
-  const raw=(target.dataset.progressSource||target.textContent||'').trim();
-  if(!/timeline and stills are on production|platform crops are still finishing/i.test(raw)){
-   if(target.dataset.progressSource){updating=true;target.replaceChildren(document.createTextNode(raw));delete target.dataset.progressSource;updating=false}
-   return;
-  }
-  const ready=/crops (?:are )?ready|ready for production approve|ready for approval/i.test(raw)&&!/still finishing|still preparing|not ready/i.test(raw);
-  const steps=[['Timeline created',true],['Stills attached',true],['Platform crops ready',ready],['Production approved',false]];
-  updating=true;
-  target.dataset.progressSource=raw;
-  const list=document.createElement('div');list.className='production-progress-list';list.setAttribute('role','status');list.setAttribute('aria-label','Production preparation progress');
-  steps.forEach(([label,complete])=>{
-   const row=document.createElement('div');row.className='production-progress-step'+(complete?' is-complete':'');
-   const mark=document.createElement('span');mark.className='production-progress-mark';mark.setAttribute('aria-hidden','true');mark.textContent=complete?'✓':'';
+  const target=$('productionPromotionCompatibility')||$('productionRequestMessage');
+  if(!target)return;
+  const request=typeof activeProductionRequest!=='undefined'?activeProductionRequest:null;
+  const workspace=typeof item4Workspace!=='undefined'?item4Workspace:null;
+  const source=$('productionRequestMessage');
+  const sourceText=String(source?.dataset.progressSource||source?.textContent||'');
+  const relevant=Boolean(request&&(workspace||/timeline and stills are on production/i.test(sourceText)));
+  if(!relevant)return;
+  const flags=state();
+  const prior=target.querySelector('.production-progress-list');
+  const current=target.textContent.trim();
+  if(prior&&target.dataset.progressSignature===flags.join(','))return;
+  const noteText=prior?(target.dataset.progressNote||''):current;
+  const list=document.createElement('div');
+  list.className='production-progress-list';
+  list.setAttribute('role','status');
+  list.setAttribute('aria-label','Production preparation progress');
+  labels.forEach((label,i)=>{
+   const row=document.createElement('div');
+   row.className='production-progress-step'+(flags[i]?' is-complete':'');
+   const mark=document.createElement('span');
+   mark.className='production-progress-mark';
+   mark.setAttribute('aria-hidden','true');
+   mark.textContent=flags[i]?'✓':'';
    const text=document.createElement('span');text.textContent=label;
    row.append(mark,text);list.append(row);
   });
-  const note=document.createElement('div');note.className='production-progress-note';note.textContent='Open Production and approve once platform crops are Ready. Approval does not publish.';
+  const note=document.createElement('div');
+  note.className='production-progress-note';
+  note.textContent=flags[3]?'Production approved. Approval does not publish.':(noteText||'Open Production and approve once platform crops are ready. Approval does not publish.');
+  updating=true;
+  target.dataset.progressSignature=flags.join(',');
+  target.dataset.progressNote=note.textContent;
   target.replaceChildren(list,note);
   updating=false;
  }
- const observer=new MutationObserver(()=>{
-  if(updating)return;
-  if(target.querySelector('.production-progress-list'))return;
-  delete target.dataset.progressSource;
-  render();
+ const observer=new MutationObserver(()=>{if(!updating)queueMicrotask(render)});
+ ['productionRequestMessage','productionPromotionCompatibility','productionRequestStatus'].forEach(id=>{
+  const node=$(id);if(node)observer.observe(node,{childList:true,characterData:true,subtree:true});
  });
- observer.observe(target,{childList:true,characterData:true,subtree:true});
  render();
 })();

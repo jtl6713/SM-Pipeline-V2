@@ -245,3 +245,4 @@ UI 0.6.607 hashtag mismatch warning only; approval no longer blocked.
 2026-10-12: Redeploy Studio Pages so custom-domain serves UI 0.6.625-library-search-all-hits (edge lag after #635).
 2026-10-12: Studio UI 0.6.626-timeline-auto-prepare kicks Prepare for VO timeline drafts when plan is Ready and variants are None.
 2026-10-12: Studio UI 0.6.627-ideas-generate-async — Generate Ideas returns a batch immediately so mobile Safari no longer aborts mid-I1.
+2026-10-12: persistent four-state Production checkbox tracker (UI 0.6.628).
