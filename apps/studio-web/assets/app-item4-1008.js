@@ -263,7 +263,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.606-approval-profile-guard";
+  const BUILD_ID = "item4-0.6.607-hashtag-warning-only";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -15236,7 +15236,7 @@ function timedScriptAssetLabel(asset, index) {
   }
 
   function pipelineForeignCityHashtags(record) {
-    const theme = workingStudioTheme();
+    const theme = /new york|nyc/i.test(String(record?.profile_name || record?.content_profile || "")) ? "nyc" : /los angeles|\bla\b/i.test(String(record?.profile_name || record?.content_profile || "")) ? "la" : /miami/i.test(String(record?.profile_name || record?.content_profile || "")) ? "miami" : /chicago/i.test(String(record?.profile_name || record?.content_profile || "")) ? "chicago" : workingStudioTheme();
     const caption = [record?.output_caption, record?.output_hashtags].filter(Boolean).join(" ");
     const tags = caption.match(/#[a-z0-9_]+/gi) || [];
     const foreign = {
@@ -15251,8 +15251,9 @@ function timedScriptAssetLabel(asset, index) {
   function pipelineRejectForeignCityHashtags(records) {
     const bad = (records || []).map((record) => ({ record, tags: pipelineForeignCityHashtags(record) })).filter((item) => item.tags.length);
     if (!bad.length) return false;
-    pipelineApproveBlockedMessage("Approval blocked: wrong-city hashtags on " + bad.map(({ record, tags }) => pipelineOutputLabel(record) + " (" + tags.join(", ") + ")").join("; ") + ". Correct the caption and hashtags before publishing.");
-    return true;
+    const message = "Warning: possible wrong-city hashtags on " + bad.map(({ record, tags }) => pipelineOutputLabel(record) + " (" + [...new Set(tags)].join(", ") + ")").join("; ") + ". Approval will continue. Review and correct captions when editing is available.";
+    console.warn(message);
+    return false;
   }
 
   function pipelineManualApprovableOutputs(records = pipelineOutputs) {
@@ -18521,7 +18522,7 @@ function timedScriptAssetLabel(asset, index) {
         pipelineApproveBlockedMessage("No outputs are waiting for approval.");
         return;
       }
-      if (pipelineRejectForeignCityHashtags(ready)) return;
+      pipelineRejectForeignCityHashtags(ready);
       if (pipelineHasUnsavedSchedules(ready)) {
         pipelineApproveBlockedMessage("Save the edited schedule time before approving.");
         return;
@@ -18823,7 +18824,7 @@ function timedScriptAssetLabel(asset, index) {
         pipelineApproveBlockedMessage("No outputs in this content item are waiting for approval.");
         return;
       }
-      if (pipelineRejectForeignCityHashtags(ready)) return;
+      pipelineRejectForeignCityHashtags(ready);
       if (pipelineHasUnsavedSchedules(ready)) {
         pipelineApproveBlockedMessage("Save the edited schedule time before approving this content.");
         return;
