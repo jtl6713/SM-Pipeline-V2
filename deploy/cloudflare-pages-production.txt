@@ -252,3 +252,4 @@ UI 0.6.607 hashtag mismatch warning only; approval no longer blocked.
 2026-10-12: move persistent Production checklist directly below workspace tabs (UI 0.6.631).
 2026-10-12: Redeploy Studio Pages UI 0.6.631-progress-under-tabs (includes library-search-tokens) after #646 Function publish flake.
 2026-10-12: Studio UI 0.6.632-ops-queue — Operations Queue tab (all-profile inventory, pause/reorder Remotion, Prepare to Review).
+2026-10-12: Studio UI 0.6.633-ops-page-nesting — close New Profile section so Operations/Help are not nested inside display:none.

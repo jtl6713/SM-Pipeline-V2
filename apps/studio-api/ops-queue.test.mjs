@@ -97,7 +97,7 @@ test("worker and UI wire Operations Queue + prepare-to-review", () => {
   assert.match(html, /data-ops-tab="queue"/);
   assert.match(html, /operationsQueuePanel/);
   assert.match(html, /prepareIdeaToReviewButton/);
-  assert.match(app, /BUILD_ID = "item4-0\.6\.632-ops-queue"/);
+  assert.match(app, /BUILD_ID = "item4-0\.6\.633-ops-page-nesting"/);
   assert.match(app, /loadOperationsQueue/);
   assert.match(app, /prepareIdeaToReviewButton/);
   assert.match(app, /OPS_CONTROL_TABS = \[[^\]]*\"queue\"/);
