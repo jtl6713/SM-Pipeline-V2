@@ -626,7 +626,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.545-create-vo",
+          version: "0.10.546-pipeline-latest-rescue",
           studio_create_vo_matched_stills_v1: true,
           studio_idea_library_typeahead_v1: true,
           studio_post_publish_release_v1: true,
@@ -25197,6 +25197,24 @@ async function writePipelineOutputsSnapshot(env, snapshotKey, payload) {
 
 async function listOutputs(request, env, url, authorization, ctx = null) {
   const profile = await resolveWorkingContentProfile(env, authorization, requestedProfileId(url));
+  // QA-PIPELINE-NEWEST-MISSING: bypass potentially stale heavy snapshots with
+  // a one-page live read of recent outputs scoped to this content profile.
+  if (url.searchParams.get("mode") === "latest") {
+    const key = `pipeline-latest:${profile.id}`;
+    const recent = await studioReadCoalesce(key, 7000, () => listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
+      fields: OUTPUT_LIST_FIELDS,
+      sortField: "Output_ID",
+      sortDirection: "desc",
+      filterFormula: contentProfileFilterFormula(profile),
+      limit: 60,
+    }));
+    return respond(request, env, {
+      ok: true,
+      fresh: true,
+      records: recent.map((record) => mapOutput(record)),
+      profile: mapStudioContentProfile(profile),
+    });
+  }
   // Newest first, plus unfinished rows that would otherwise age out of the page.
   // CI 206 (Muscle Beach / outputs 887–892) disappeared once Output_ID hit 1133
   // while Pipeline only loaded the newest 100 rows. Fully complete packages stay

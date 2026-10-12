@@ -264,7 +264,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.623-timeline-format-help";
+  const BUILD_ID = "item4-0.6.624-pipeline-latest-rescue";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -20726,10 +20726,9 @@ function timedScriptAssetLabel(asset, index) {
   }
   function readPipelineOutputCache() {
     try {
+      // A legacy unscoped cache can contain a different city's outputs.
       const raw = localStorage.getItem(pipelineOutputCacheKey())
-        || sessionStorage.getItem(pipelineOutputCacheKey())
-        || localStorage.getItem("studio.pipelineOutputs.v1")
-        || sessionStorage.getItem("studio.pipelineOutputs.v1");
+        || sessionStorage.getItem(pipelineOutputCacheKey());
       const parsed = JSON.parse(raw || "");
       const records = Array.isArray(parsed?.records) ? parsed.records : [];
       if (!records.length) return [];
@@ -20744,6 +20743,18 @@ function timedScriptAssetLabel(asset, index) {
     const payload = JSON.stringify({ records, at: Date.now() });
     try { localStorage.setItem(pipelineOutputCacheKey(), payload); } catch { /* ignore quota */ }
     try { sessionStorage.setItem(pipelineOutputCacheKey(), payload); } catch { /* ignore quota */ }
+  }
+
+  function mergePipelineFreshOutputs(baseRows, freshRows) {
+    // Latest live records win over old snapshots; keep all history and siblings.
+    const byId = new Map();
+    for (const row of Array.isArray(baseRows) ? baseRows : []) {
+      if (row && row.id) byId.set(String(row.id), row);
+    }
+    for (const row of Array.isArray(freshRows) ? freshRows : []) {
+      if (row && row.id) byId.set(String(row.id), { ...(byId.get(String(row.id)) || {}), ...row });
+    }
+    return [...byId.values()].sort((a,b) => Number(b.output_id || 0)-Number(a.output_id || 0));
   }
 
   async function refreshPipelineOutputs({ silent = false, force = false } = {}) {
@@ -20763,28 +20774,35 @@ function timedScriptAssetLabel(asset, index) {
     try {
       const scheduleGeneration = pipelineScheduleGridLoadGeneration;
       const schedulePath = pipelineScheduleGridApiPath();
-      const [outputsSettled, scheduleSettled] = await Promise.all([
-        // Always load the full Pipeline page. A lean mode=review fetch left
-        // All/Active/Rendering counts at 0 (counts are from loaded rows only)
-        // and missed Ready-for-Review rows the home "needs approval" link uses.
-        // Content id/title ride on each output, so this poll does not also call /api/content.
-        api("/api/outputs?limit=250", { timeoutMs: 20000, retries: 1 }).then(
-          (value) => ({ ok: true, value }),
-          (error) => ({ ok: false, error }),
-        ),
-        api(schedulePath, { timeoutMs: 15000, retries: 1 }).then(
-          (value) => ({ ok: true, value }),
-          (error) => ({ ok: false, error }),
-        ),
-      ]);
-      if (!outputsSettled.ok) throw outputsSettled.error || new Error("Outputs unavailable");
-      const outputsResult = outputsSettled.value;
+      const settled = (promise) => promise.then(
+        (value) => ({ ok: true, value }),
+        (error) => ({ ok: false, error }),
+      );
+      // Start the heavy history read and small live check concurrently; paint
+      // the newest outputs without waiting on Airtable's open-pack scan.
+      const latestPromise = settled(api("/api/outputs?mode=latest", { timeoutMs: 14000, retries: 1 }));
+      const fullPromise = settled(api("/api/outputs?limit=250", { timeoutMs: 20000, retries: 1 }));
+      const schedulePromise = settled(api(schedulePath, { timeoutMs: 15000, retries: 1 }));
+      const latestSettled = await latestPromise;
+      const latestRows = latestSettled.ok && Array.isArray(latestSettled.value?.records)
+        ? latestSettled.value.records : [];
+      if (latestRows.length) {
+        const liveRows = mergePipelineFreshOutputs(pipelineOutputs, latestRows);
+        const changed = pipelineFingerprint(liveRows) !== pipelineFingerprint(pipelineOutputs);
+        pipelineOutputs = liveRows;
+        if (changed || !target.querySelector("table")) renderOutputsTable(target, liveRows);
+        pipelineListUnverified = true;
+        setPipelineLiveHint("Newest outputs checked live · loading full Pipeline…");
+      }
+      const [outputsSettled, scheduleSettled] = await Promise.all([fullPromise, schedulePromise]);
+      if (!outputsSettled.ok && !latestRows.length) throw outputsSettled.error || new Error("Outputs unavailable");
+      const outputsResult = outputsSettled.ok ? outputsSettled.value : { records: [], stale: true };
       const contentResult = { records: [] };
       const scheduleResult = scheduleSettled.ok
         ? scheduleSettled.value
         : { records: [], schedule_error: scheduleSettled.error?.message || "Schedule view unavailable" };
       if (!Array.isArray(outputsResult?.records)) throw new Error("Pipeline API returned no verified output list");
-      const records = outputsResult.records;
+      const records = mergePipelineFreshOutputs(outputsSettled.ok ? outputsResult.records : pipelineOutputs, latestRows);
       if (outputsResult.refreshing && !records.length) throw new Error("Pipeline is still loading");
       const contentRecords = contentResult?.records || [];
       const scheduleError = String(scheduleResult?.schedule_error || (!scheduleSettled.ok ? (scheduleSettled.error?.message || "Schedule view unavailable") : ""));
@@ -20799,11 +20817,23 @@ function timedScriptAssetLabel(asset, index) {
         && target.querySelector("table")
         && pipelineFingerprint(records) === pipelineFingerprint(pipelineOutputs)
         && pipelineContentFingerprint(contentRecords) === pipelineContentFingerprint(pipelineContentRecords);
-      pipelineListUnverified = false;
+      const historyStale = !outputsSettled.ok || Boolean(outputsResult.stale);
+      pipelineListUnverified = historyStale;
       pipelineOutputs = records;
       pipelineContentRecords = contentRecords;
       target.querySelector(":scope > .pipeline-stale-note")?.remove();
-      try { writePipelineOutputCache(records); } catch { /* ignore quota */ }
+      if (historyStale) {
+        const note = document.createElement("div");
+        note.className = "pipeline-stale-note";
+        note.setAttribute("role", "status");
+        note.textContent = latestRows.length
+          ? "Newest outputs checked live. Older Pipeline history is still refreshing."
+          : "Pipeline is showing an older snapshot. Live check failed; retrying.";
+        target.prepend(note);
+      }
+      if (!historyStale) {
+        try { writePipelineOutputCache(records); } catch { /* ignore quota */ }
+      }
       updatePipelineApproveAllButton();
       if (!unchanged) {
         const scrollTop = target.scrollTop;
@@ -20811,7 +20841,7 @@ function timedScriptAssetLabel(asset, index) {
         target.scrollTop = scrollTop;
       }
       maybeOpenFilteredPipelineOutput();
-      if (pipelinePageActive() && !document.hidden && !pipelineCountdownTimer) setPipelineLiveHint("Live · refreshed just now");
+      if (pipelinePageActive() && !document.hidden && !pipelineCountdownTimer) setPipelineLiveHint(historyStale ? (latestRows.length ? "Newest outputs live · older history refreshing" : "Older snapshot · retrying live") : "Live · refreshed just now");
     } catch (e) {
       // A short Airtable pause must not blank the list. Keep the last verified
       // Pipeline on screen and hold Approve All until the next successful fetch.
