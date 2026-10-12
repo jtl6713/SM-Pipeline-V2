@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - '.github/workflows/repair-production-photo-wait-visibility.yml'
+      - 'repair/scripts/patch_production_photo_wait_visibility.py'
   workflow_dispatch:
 
 permissions:
