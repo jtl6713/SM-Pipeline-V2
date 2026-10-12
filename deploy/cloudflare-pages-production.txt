@@ -248,3 +248,4 @@ UI 0.6.607 hashtag mismatch warning only; approval no longer blocked.
 2026-10-12: persistent four-state Production checkbox tracker (UI 0.6.628).
 2026-10-12: stable always-visible Production checklist, driven by workspace state (UI 0.6.629).
 2026-10-12: Studio UI 0.6.630-library-search-tokens — Production library flat operator search + Save draft no longer stuck on quiet autosave.
+2026-10-12: move persistent Production checklist directly below workspace tabs (UI 0.6.631).
