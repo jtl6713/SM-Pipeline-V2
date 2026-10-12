@@ -21,18 +21,15 @@ def test_existing_drive_ids_queries_candidates_not_oldest_view():
     ]
     found = _existing_drive_ids(client, ["drive-known", "drive-new", "drive-known"])
     assert found == {"drive-known"}
-    assert client.list_records.call_count == 2
-    formulas = [call.kwargs["formula"] for call in client.list_records.call_args_list]
-    assert formulas == [
-        '{Google Drive File ID}="drive-known"',
-        '{Google Drive File ID}="drive-new"',
-    ]
-    # Each independent one-ID query cannot be saturated by another ID's
-    # duplicates, even when the catalog contains 10,000+ legacy rows.
-    for call in client.list_records.call_args_list:
-        assert call.kwargs["max_records"] == 1
-        assert call.kwargs["fields"] == ["Google Drive File ID"]
-        assert "view" not in call.kwargs
+    # Healthy catalogs are checked in one request, not one per Drive file.
+    assert client.list_records.call_count == 1
+    kwargs = client.list_records.call_args.kwargs
+    assert kwargs["formula"] == (
+        'OR({Google Drive File ID}="drive-known",{Google Drive File ID}="drive-new")'
+    )
+    assert kwargs["max_records"] == 100
+    assert kwargs["fields"] == ["Google Drive File ID"]
+    assert "view" not in kwargs
 
 
 def test_process_request_skips_drive_ids_already_in_media_assets(monkeypatch):
@@ -91,17 +88,22 @@ def test_existing_ids_do_not_disappear_under_duplicate_row_saturation():
 
     def find_one(_table, *, formula, **_kwargs):
         requested.append(formula)
+        if formula.startswith("OR("):
+            # 100 duplicate rows of hit-1 saturate the shared response.
+            return [
+                {"id": f"recDup{i}", "fields": {"Google Drive File ID": "hit-1"}}
+                for i in range(100)
+            ]
         if formula == '{Google Drive File ID}="hit-16"':
             return [{"id": "rec16", "fields": {"Google Drive File ID": "hit-16"}}]
-        if formula == '{Google Drive File ID}="hit-1"':
-            return [{"id": "rec1", "fields": {"Google Drive File ID": "hit-1"}}]
         return []
 
     client.list_records.side_effect = find_one
     found = _existing_drive_ids(client, ["hit-1", *[f"missing-{i}" for i in range(14)], "hit-16"])
     assert found == {"hit-1", "hit-16"}
-    assert len(requested) == 16
+    assert len(requested) == 16  # one capped OR + 15 exact lookups.
     assert client.list_records.call_count == 16
+    assert client.list_records.call_args.kwargs["max_records"] == 1
 
 
 def test_process_request_wont_duplicate_repeated_drive_id_in_same_page(monkeypatch):
