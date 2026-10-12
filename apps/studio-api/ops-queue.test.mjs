@@ -230,7 +230,7 @@ test("worker and UI wire Operations multi-queue + prepare-to-review", () => {
   assert.match(worker, /mergeOpsQueueOutputRecords/);
   assert.match(worker, /OPS_QUEUE_RENDER_FORMULA/);
   assert.match(worker, /async function prepareIdeaToReview/);
-  assert.match(worker, /version: "0\.10\.557-ops-profiles-load"/);
+  assert.match(worker, /version: "0\.10\.558-list-read-snapshot"/);
   assert.match(worker, /origin=prepare-to-review/);
   assert.match(worker, /readOpsQueueControls/);
   assert.match(html, /data-ops-tab="queue"/);
@@ -245,7 +245,7 @@ test("worker and UI wire Operations multi-queue + prepare-to-review", () => {
   assert.match(html, /ops-queue-timeline-head/);
   assert.match(html, />Timeline</);
   assert.match(html, /prepareIdeaToReviewButton/);
-  assert.match(app, /BUILD_ID = "item4-0.6.646-ops-render-section"/);
+  assert.match(app, /BUILD_ID = "item4-0.6.647-list-read-snapshot"/);
   assert.match(app, /platforms: "Plat"/);
   assert.match(app, /Media Added/);
   assert.match(app, /Waiting for Approval/);

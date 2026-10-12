@@ -658,7 +658,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.557-ops-profiles-load",
+          version: "0.10.558-list-read-snapshot",
           studio_create_vo_matched_stills_v1: true,
           studio_idea_library_typeahead_v1: true,
           studio_idea_library_search_all_hits_v1: true,
@@ -708,6 +708,7 @@ export default {
           studio_home_overview_snapshot_v1: true,
           studio_keep_last_list_v1: true,
           studio_pipeline_list_snapshot_v1: true,
+          studio_list_read_snapshot_v2: true,
           studio_home_overview_soft_429_v1: true,
           studio_oversized_list_refresh_v1: true,
           studio_library_published_files_v1: true,
@@ -1380,7 +1381,7 @@ export default {
           requirePermission(authorization, "ideas_create");
           return createIdea(request, env, authorization);
         }
-        return listIdeas(request, env, url, authorization);
+        return listIdeas(request, env, url, authorization, ctx);
       }
 
       if (isIdeaHoldRoute) {
@@ -1854,6 +1855,11 @@ export default {
       if (!cadence.heavy) return;
 
       // --- HEAVY (UTC :00 / :30): platform polls, heals, ideas, ingest, release ---
+      try {
+        await warmOldestStudioReadSnapshot(env);
+      } catch (error) {
+        console.warn("studio list snapshot warm failed", error);
+      }
       try {
         await opsForceAzNavyPierTitle(env);
       } catch (error) {
@@ -2499,16 +2505,23 @@ function studioReadCacheDropPrefix(prefix) {
   }
 }
 
+let studioListWriteGeneration = 0;
+function studioMarkMappedListDirty() {
+  studioListWriteGeneration += 1;
+}
+
 function studioInvalidateHotReads(env, tableId, method) {
   const verb = String(method || "GET").toUpperCase();
   if (verb === "GET" || verb === "HEAD") return;
   const id = String(tableId || "");
   if (env?.AIRTABLE_OUTPUT_TABLE_ID && id === env.AIRTABLE_OUTPUT_TABLE_ID) {
+    studioMarkMappedListDirty();
     studioReadCacheDropPrefix("outputs:");
     studioReadCacheDropPrefix("schedule-grid:");
     studioReadCacheDropPrefix("content-recent-outputs:");
     studioReadCacheDropPrefix("content-list:");
   } else if (env?.AIRTABLE_IDEA_TABLE_ID && id === env.AIRTABLE_IDEA_TABLE_ID) {
+    studioMarkMappedListDirty();
     studioReadCacheDropPrefix("ideas:");
   } else if (env?.AIRTABLE_CONTENT_TABLE_ID && id === env.AIRTABLE_CONTENT_TABLE_ID) {
     studioReadCacheDropPrefix("content-labels:");
@@ -4090,18 +4103,27 @@ async function brandLogo(request, env, authorization) {
 }
 
 
-async function listIdeas(request, env, url, authorization) {
+async function buildIdeasListPayload(env, profile, limit) {
+  const records = await listRecords(env, env.AIRTABLE_IDEA_TABLE_ID, {
+    limit,
+    sortField: "Create_Date",
+    filterFormula: contentProfileFilterFormula(profile),
+  });
+  return { records: records.map(mapIdea), profile: mapStudioContentProfile(profile) };
+}
+
+async function listIdeas(request, env, url, authorization, ctx = null) {
   const profile = await resolveWorkingContentProfile(env, authorization, requestedProfileId(url));
   const limit = clampLimit(url);
-  const payload = await studioReadCoalesce(`ideas:${profile.id}:${limit}`, 25000, async () => {
-    const records = await listRecords(env, env.AIRTABLE_IDEA_TABLE_ID, {
-      limit,
-      sortField: "Create_Date",
-      filterFormula: contentProfileFilterFormula(profile),
-    });
-    return { records: records.map(mapIdea), profile: mapStudioContentProfile(profile) };
+  const memoryKey = `ideas:${profile.id}:${limit}`;
+  const snapshotKey = `studio/state/ideas-list-${profile.id}-${limit}.json`;
+  return respondStudioMappedList(request, env, ctx, {
+    memoryKey,
+    snapshotKey,
+    profile,
+    ttlMs: STUDIO_READ_SNAPSHOT_FRESH_MS,
+    builder: () => buildIdeasListPayload(env, profile, limit),
   });
-  return respond(request, env, { ok: true, ...payload });
 }
 
 function airtableFormulaEscape(value) {
@@ -25267,9 +25289,81 @@ async function listOutputScheduleGrid(request, env, url, authorization) {
   return respond(request, env, body);
 }
 
-const PIPELINE_OUTPUT_LIST_CACHE_MS = 25000;
+const STUDIO_READ_SNAPSHOT_FRESH_MS = 25000;
+const PIPELINE_OUTPUT_LIST_CACHE_MS = STUDIO_READ_SNAPSHOT_FRESH_MS;
 const PIPELINE_OPEN_PACK_CACHE_MS = 30000;
+const STUDIO_READ_SNAPSHOT_WARM_MS = 2 * 60 * 1000;
 let pipelineListHealAt = 0;
+
+function studioMappedListSnapshotFresh(remembered, ttlMs) {
+  if (!remembered?.payload || !Array.isArray(remembered.payload.records)) return false;
+  if (Number(remembered.writeGen || 0) !== studioListWriteGeneration) return false;
+  return Date.now() - Number(remembered.at || 0) < Math.max(1000, Number(ttlMs) || STUDIO_READ_SNAPSHOT_FRESH_MS);
+}
+
+async function readMappedListSnapshot(env, memoryKey, snapshotKey) {
+  const hit = studioHotReadCache.get(memoryKey);
+  if (hit?.value && Array.isArray(hit.value.records)) {
+    return { payload: hit.value, at: Number(hit.at) || 0, writeGen: Number(hit.writeGen || 0) };
+  }
+  if (!env?.STUDIO_MEDIA?.get) return null;
+  try {
+    const object = await env.STUDIO_MEDIA.get(snapshotKey);
+    if (!object) return null;
+    const body = await object.json();
+    if (!body?.payload || !Array.isArray(body.payload.records)) return null;
+    const at = Number(body.at) || 0;
+    const writeGen = Number(body.writeGen || 0);
+    studioHotReadCache.set(memoryKey, { at, value: body.payload, writeGen });
+    return { payload: body.payload, at, writeGen };
+  } catch (error) {
+    console.warn("mapped list snapshot read failed", snapshotKey, error);
+    return null;
+  }
+}
+
+async function writeMappedListSnapshot(env, memoryKey, snapshotKey, payload) {
+  if (!payload || !Array.isArray(payload.records)) return;
+  const at = Date.now();
+  const writeGen = studioListWriteGeneration;
+  studioHotReadCache.set(memoryKey, { at, value: payload, writeGen });
+  if (!env?.STUDIO_MEDIA?.put) return;
+  try {
+    await env.STUDIO_MEDIA.put(snapshotKey, JSON.stringify({ at, writeGen, payload }), {
+      httpMetadata: { contentType: "application/json" },
+    });
+  } catch (error) {
+    console.warn("mapped list snapshot write failed", snapshotKey, error);
+  }
+}
+
+function scheduleMappedListRefresh(ctx, env, memoryKey, snapshotKey, ttlMs, builder) {
+  if (airtableCooldownWaitMs() > AIRTABLE_SLOT_FAIL_FAST_MS) return null;
+  const pending = studioReadCoalesce(memoryKey, ttlMs, builder).then(async (payload) => {
+    await writeMappedListSnapshot(env, memoryKey, snapshotKey, payload);
+    return payload;
+  });
+  ctx?.waitUntil?.(pending.catch((error) => console.warn("mapped list refresh failed", snapshotKey, error)));
+  return pending;
+}
+
+function respondStudioMappedList(request, env, ctx, { memoryKey, snapshotKey, profile, ttlMs, builder }) {
+  const freshMs = Math.max(1000, Number(ttlMs) || STUDIO_READ_SNAPSHOT_FRESH_MS);
+  return readMappedListSnapshot(env, memoryKey, snapshotKey).then((remembered) => {
+    const fresh = studioMappedListSnapshotFresh(remembered, freshMs);
+    if (!fresh) scheduleMappedListRefresh(ctx, env, memoryKey, snapshotKey, freshMs, builder);
+    return respond(request, env, {
+      ok: true,
+      snapshot: Boolean(remembered),
+      cached: Boolean(fresh),
+      stale: Boolean(remembered) && !fresh,
+      refreshing: !remembered,
+      records: Array.isArray(remembered?.payload?.records) ? remembered.payload.records : [],
+      ...(remembered?.payload || {}),
+      profile: remembered?.payload?.profile || mapStudioContentProfile(profile),
+    });
+  });
+}
 
 async function loadOpenPipelineOutputPack(env, profile) {
   const listOpts = {
@@ -25369,66 +25463,15 @@ function schedulePipelineListHeal(ctx, env, records) {
 }
 
 async function readPipelineOutputsSnapshot(env, memoryKey, snapshotKey) {
-  const hit = studioHotReadCache.get(memoryKey);
-  if (hit?.value?.records?.length) return { payload: hit.value, at: Number(hit.at) || 0 };
-  if (!env?.STUDIO_MEDIA?.get) return null;
-  try {
-    const object = await env.STUDIO_MEDIA.get(snapshotKey);
-    if (!object) return null;
-    const body = await object.json();
-    if (!body?.payload?.records?.length) return null;
-    const at = Number(body.at) || 0;
-    studioHotReadCache.set(memoryKey, { at, value: body.payload });
-    return { payload: body.payload, at };
-  } catch (error) {
-    console.warn("pipeline list snapshot read failed", error);
-    return null;
-  }
+  return readMappedListSnapshot(env, memoryKey, snapshotKey);
 }
 
 async function writePipelineOutputsSnapshot(env, snapshotKey, payload) {
-  if (!payload?.records?.length || !env?.STUDIO_MEDIA?.put) return;
-  try {
-    await env.STUDIO_MEDIA.put(snapshotKey, JSON.stringify({ at: Date.now(), payload }), {
-      httpMetadata: { contentType: "application/json" },
-    });
-  } catch (error) {
-    console.warn("pipeline list snapshot write failed", error);
-  }
+  const memoryKey = String(snapshotKey || "").replace(/^studio\/state\//, "outputs:");
+  return writeMappedListSnapshot(env, memoryKey, snapshotKey, payload);
 }
 
-async function listOutputs(request, env, url, authorization, ctx = null) {
-  const profile = await resolveWorkingContentProfile(env, authorization, requestedProfileId(url));
-  // QA-PIPELINE-NEWEST-MISSING: bypass potentially stale heavy snapshots with
-  // a one-page live read of recent outputs scoped to this content profile.
-  if (url.searchParams.get("mode") === "latest") {
-    const key = `pipeline-latest:${profile.id}`;
-    const recent = await studioReadCoalesce(key, 7000, () => listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
-      fields: OUTPUT_LIST_FIELDS,
-      sortField: "Output_ID",
-      sortDirection: "desc",
-      filterFormula: contentProfileFilterFormula(profile),
-      limit: 60,
-    }));
-    return respond(request, env, {
-      ok: true,
-      fresh: true,
-      records: recent.map((record) => mapOutput(record)),
-      profile: mapStudioContentProfile(profile),
-    });
-  }
-  // Newest first, plus unfinished rows that would otherwise age out of the page.
-  // CI 206 (Muscle Beach / outputs 887–892) disappeared once Output_ID hit 1133
-  // while Pipeline only loaded the newest 100 rows. Fully complete packages stay
-  // in Archive (UI partition) when still inside newest-N; aged complete packages
-  // are not re-fetched.
-  const limit = clampLimit(url, 200, 250);
-  const reviewOnly = url.searchParams.get("mode") === "review";
-  const memoryKey = `outputs:${profile.id}:${limit}:${reviewOnly ? "review" : "full"}`;
-  const snapshotKey = `studio/state/pipeline-list-${profile.id}-${limit}-${reviewOnly ? "review" : "full"}.json`;
-  const remembered = await readPipelineOutputsSnapshot(env, memoryKey, snapshotKey);
-  const rememberedAge = remembered ? Date.now() - remembered.at : Infinity;
-  const buildPayload = () => studioReadCoalesce(memoryKey, PIPELINE_OUTPUT_LIST_CACHE_MS, async () => {
+async function buildPipelineOutputsPayload(env, profile, { limit, reviewOnly, ctx = null } = {}) {
   const listOpts = {
     fields: OUTPUT_LIST_FIELDS,
     sortField: "Output_ID",
@@ -25436,9 +25479,6 @@ async function listOutputs(request, env, url, authorization, ctx = null) {
   };
   let records;
   if (reviewOnly) {
-    // Match Pipeline / All-Profiles "Awaiting Approval": Ready for Review or
-    // Review Sent — not legacy Pending Review (that feed was empty while home
-    // still showed needs-approval counts).
     const profileFormula = contentProfileFilterFormula(profile);
     const reviewFormula = 'AND({Test_Run_ID}=BLANK(),NOT({Do_Not_Publish}),OR({Output_Status}="Ready for Review",{Review_Status}="Review Sent"),{Review_Status}!="Approved",{Output_Status}!="Approved for Publishing",{Output_Status}!="Published")';
     records = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
@@ -25456,8 +25496,6 @@ async function listOutputs(request, env, url, authorization, ctx = null) {
     ]);
     records = mergePipelineOutputRecords(newest, mergePipelineOutputRecords(openPack.open, openPack.siblings));
   }
-  // Return the Pipeline table immediately. Per-row heals / produce enqueue run in
-  // waitUntil so a heal storm cannot leave Studio stuck on Loading outputs…
   if (!reviewOnly) schedulePipelineListHeal(ctx, env, records);
   const [jobs, queueControls, activeHolds, labels] = await Promise.all([
     loadStudioProductionJobsForOutputs(env, records),
@@ -25489,37 +25527,81 @@ async function listOutputs(request, env, url, authorization, ctx = null) {
     profile: mapStudioContentProfile(profile),
     render_queue_total: renderQueueTotal,
   };
-  }).then(async (payload) => {
-    await writePipelineOutputsSnapshot(env, snapshotKey, payload);
-    return payload;
-  });
-  if (remembered?.payload?.records?.length && rememberedAge < PIPELINE_OUTPUT_LIST_CACHE_MS) {
-    return respond(request, env, { ok: true, cached: true, snapshot: true, ...remembered.payload });
-  }
-  const pending = buildPayload();
-  ctx?.waitUntil?.(pending.catch((error) => console.warn("pipeline list refresh failed", error)));
-  if (remembered?.payload?.records?.length) {
-    return respond(request, env, { ok: true, stale: true, snapshot: true, ...remembered.payload });
-  }
-  try {
-    const payload = await raceStudioOverviewBudget(pending, 12000, "pipeline-list");
-    return respond(request, env, { ok: true, ...payload });
-  } catch (error) {
-    const late = await readPipelineOutputsSnapshot(env, memoryKey, snapshotKey);
-    if (late?.payload?.records?.length) {
-      return respond(request, env, { ok: true, stale: true, snapshot: true, ...late.payload });
-    }
-    if (isAirtableCoolingError(error)) {
-      return respond(request, env, {
-        ok: true,
-        records: [],
-        refreshing: true,
-        profile: mapStudioContentProfile(profile),
-      });
-    }
-    throw error;
-  }
 }
+
+async function warmOldestStudioReadSnapshot(env) {
+  if (airtableCooldownWaitMs() > AIRTABLE_SLOT_FAIL_FAST_MS) return { skipped: "cooling" };
+  const profiles = (await listContentProfileRecords(env)).filter((row) => Boolean(f(row, "Active")));
+  let pick = null;
+  for (const profile of profiles) {
+    const memoryKey = `outputs:${profile.id}:250:full`;
+    const snapshotKey = `studio/state/pipeline-list-${profile.id}-250-full.json`;
+    const remembered = await readMappedListSnapshot(env, memoryKey, snapshotKey);
+    const at = Number(remembered?.at) || 0;
+    if (!pick || at < pick.at) pick = { profile, at };
+  }
+  if (!pick?.profile) return { skipped: "no-profile" };
+  if (pick.at && Date.now() - pick.at < STUDIO_READ_SNAPSHOT_WARM_MS) {
+    return { skipped: "fresh", age_ms: Date.now() - pick.at, profile_id: pick.profile.id };
+  }
+  const profile = pick.profile;
+  const outputs = await buildPipelineOutputsPayload(env, profile, { limit: 250, reviewOnly: false });
+  await writeMappedListSnapshot(
+    env,
+    `outputs:${profile.id}:250:full`,
+    `studio/state/pipeline-list-${profile.id}-250-full.json`,
+    outputs,
+  );
+  const ideas = await buildIdeasListPayload(env, profile, 100);
+  await writeMappedListSnapshot(
+    env,
+    `ideas:${profile.id}:100`,
+    `studio/state/ideas-list-${profile.id}-100.json`,
+    ideas,
+  );
+  return { warmed: true, profile_id: profile.id };
+}
+
+async function listOutputs(request, env, url, authorization, ctx = null) {
+  const profile = await resolveWorkingContentProfile(env, authorization, requestedProfileId(url));
+  // QA-PIPELINE-NEWEST-MISSING: bypass potentially stale heavy snapshots with
+  // a one-page live read of recent outputs scoped to this content profile.
+  if (url.searchParams.get("mode") === "latest") {
+    const key = `pipeline-latest:${profile.id}`;
+    const recent = await studioReadCoalesce(key, 7000, () => listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
+      fields: OUTPUT_LIST_FIELDS,
+      sortField: "Output_ID",
+      sortDirection: "desc",
+      filterFormula: contentProfileFilterFormula(profile),
+      limit: 60,
+    }));
+    return respond(request, env, {
+      ok: true,
+      fresh: true,
+      records: recent.map((record) => mapOutput(record)),
+      profile: mapStudioContentProfile(profile),
+    });
+  }
+  // Newest first, plus unfinished rows that would otherwise age out of the page.
+  // CI 206 (Muscle Beach / outputs 887–892) disappeared once Output_ID hit 1133
+  // while Pipeline only loaded the newest 100 rows. Fully complete packages stay
+  // in Archive (UI partition) when still inside newest-N; aged complete packages
+  // are not re-fetched.
+  const limit = clampLimit(url, 200, 250);
+  const reviewOnly = url.searchParams.get("mode") === "review";
+  const memoryKey = `outputs:${profile.id}:${limit}:${reviewOnly ? "review" : "full"}`;
+  const snapshotKey = `studio/state/pipeline-list-${profile.id}-${limit}-${reviewOnly ? "review" : "full"}.json`;
+  // Return the Pipeline table immediately from R2/memory. Never wait on a live
+  // Airtable scan — a miss returns empty + refreshing while waitUntil warms.
+  return respondStudioMappedList(request, env, ctx, {
+    memoryKey,
+    snapshotKey,
+    profile,
+    ttlMs: PIPELINE_OUTPUT_LIST_CACHE_MS,
+    builder: () => buildPipelineOutputsPayload(env, profile, { limit, reviewOnly, ctx }),
+  });
+}
+
 
 async function listMusic(request, env, url) {
   const limit = clampLimit(url, 100, 100);

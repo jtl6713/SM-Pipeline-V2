@@ -267,7 +267,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.646-ops-render-section";
+  const BUILD_ID = "item4-0.6.647-list-read-snapshot";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -2243,6 +2243,12 @@
         if (generation !== dashboardLoadGeneration) return;
         if (!outputsSettled.ok) throw outputsSettled.error || new Error("Outputs unavailable");
         const outputs = Array.isArray(outputsSettled.value?.records) ? outputsSettled.value.records : [];
+        if (outputsSettled.value?.refreshing && !outputs.length) {
+          renderScheduledContentOverview(dashboardCache.outputs || []);
+          renderDashboardMetrics();
+          updateDashboardLiveHint();
+          return;
+        }
         const ideas = ideasSettled.ok
           ? (Array.isArray(ideasSettled.value?.records) ? ideasSettled.value.records : [])
           : (dashboardCache.ideas || []);
@@ -15170,7 +15176,13 @@ function timedScriptAssetLabel(asset, index) {
     const target = $("ideasList");
     target.innerHTML = '<div class="empty">Loading ideas…</div>';
     try {
-      const { records = [] } = await api("/api/ideas?limit=100");
+      let result = await api("/api/ideas?limit=100", { timeoutMs: 8000, retries: 1 });
+      if (result?.refreshing && !Array.isArray(result.records)) result = { ...result, records: [] };
+      if (result?.refreshing && !result.records.length) {
+        await new Promise((resolve) => window.setTimeout(resolve, 1200));
+        result = await api("/api/ideas?limit=100", { timeoutMs: 8000, retries: 0 });
+      }
+      const records = Array.isArray(result?.records) ? result.records : [];
       ideasCache = records;
       populateIdeaExistingSelect(records);
       renderIdeasTable(target, records);
@@ -21017,7 +21029,7 @@ function timedScriptAssetLabel(asset, index) {
       // Start the heavy history read and small live check concurrently; paint
       // the newest outputs without waiting on Airtable's open-pack scan.
       const latestPromise = settled(api("/api/outputs?mode=latest", { timeoutMs: 14000, retries: 1 }));
-      const fullPromise = settled(api("/api/outputs?limit=250", { timeoutMs: 20000, retries: 1 }));
+      const fullPromise = settled(api("/api/outputs?limit=250", { timeoutMs: 8000, retries: 1 }));
       const schedulePromise = settled(api(schedulePath, { timeoutMs: 15000, retries: 1 }));
       const latestSettled = await latestPromise;
       const latestRows = latestSettled.ok && Array.isArray(latestSettled.value?.records)
