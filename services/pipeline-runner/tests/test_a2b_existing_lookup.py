@@ -166,3 +166,38 @@ def test_process_request_skips_if_record_arrived_between_lookup_and_create(monke
     airtable.upsert_record.assert_not_called()
     drive.share_anyone_reader.assert_not_called()
 
+def test_repeating_a2b_does_not_create_second_asset(monkeypatch):
+    """Running an hourly backfill twice against the same Drive ID is idempotent."""
+    drive = MagicMock()
+    item = {"id": "drive-repeat", "name": "LA-Quick-Hits-10.mp4",
+            "mimeType": "video/mp4", "size": "1200", "fileExtension": "mp4"}
+    drive.list_files.return_value = [item]
+    drive.get_file.return_value = item
+    airtable = MagicMock()
+    existing = set()
+
+    def lookup(_table, *, formula, **_kwargs):
+        if formula == '{Google Drive File ID}="drive-repeat"' and "drive-repeat" in existing:
+            return [{"id": "recRepeat", "fields": {"Google Drive File ID": "drive-repeat"}}]
+        return []
+
+    def upsert(_table, fields, **_kwargs):
+        assert fields["Google Drive File ID"] == "drive-repeat"
+        if "drive-repeat" in existing:
+            return {"id": "recRepeat"}, False
+        existing.add("drive-repeat")
+        return {"id": "recRepeat"}, True
+
+    airtable.list_records.side_effect = lookup
+    airtable.upsert_record.side_effect = upsert
+    monkeypatch.setattr("a2b.processor.GoogleDriveClient", lambda: drive)
+    monkeypatch.setattr("a2b.processor.AirtableClient", lambda: airtable)
+
+    first = process_request()
+    second = process_request()
+    assert first["backfill_count"] == 1
+    assert second["backfill_count"] == 0
+    assert second["skipped_existing_ids"] == ["drive-repeat"]
+    assert airtable.upsert_record.call_count == 1
+    assert drive.share_anyone_reader.call_count == 1
+
