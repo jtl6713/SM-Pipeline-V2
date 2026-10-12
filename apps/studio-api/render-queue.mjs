@@ -121,9 +121,9 @@ export function pickSharedRenderCanonical(records, field = (row, name) => row?.f
 export function collapseSharedRenderQueueCandidates(
   records,
   field = (row, name) => row?.fields?.[name],
-  { activeHolds = [] } = {},
+  { activeHolds = [], controls = null } = {},
 ) {
-  const ordered = sortRenderQueueCandidates(records, field);
+  const ordered = sortRenderQueueCandidates(records, field, controls);
   const busyKeys = new Set();
   for (const hold of activeHolds || []) {
     const key = sharedRenderGroupKey(hold, field);
@@ -165,17 +165,30 @@ export function collapseSharedRenderQueueCandidates(
   }
 
   admitCandidates.push(...solos);
-  const sortedAdmit = sortRenderQueueCandidates(admitCandidates, field);
+  const sortedAdmit = sortRenderQueueCandidates(admitCandidates, field, controls);
   return { admitCandidates: sortedAdmit, siblingIds, siblingMeta };
 }
 
-export function sortRenderQueueCandidates(records, field = (row, name) => row?.fields?.[name]) {
-  return [...(records || [])].sort((a, b) => {
-    const aId = Number(field(a, "Output_ID") || 0);
-    const bId = Number(field(b, "Output_ID") || 0);
-    if (aId && bId && aId !== bId) return aId - bId;
-    return String(a?.id || "").localeCompare(String(b?.id || ""));
-  });
+/**
+ * Default order is Output_ID asc. When `controls` is provided:
+ * - `render_paused` ids are omitted from admit order
+ * - `render_priority` ids (array order) come before everyone else
+ */
+export function sortRenderQueueCandidates(records, field = (row, name) => row?.fields?.[name], controls = null) {
+  const paused = new Set(Object.keys(controls?.render_paused || {}));
+  const priority = Array.isArray(controls?.render_priority) ? controls.render_priority : [];
+  const rank = new Map(priority.map((id, index) => [id, index]));
+  return [...(records || [])]
+    .filter((row) => !paused.has(String(row?.id || "")))
+    .sort((a, b) => {
+      const aRank = rank.has(a.id) ? rank.get(a.id) : Number.POSITIVE_INFINITY;
+      const bRank = rank.has(b.id) ? rank.get(b.id) : Number.POSITIVE_INFINITY;
+      if (aRank !== bRank) return aRank - bRank;
+      const aId = Number(field(a, "Output_ID") || 0);
+      const bId = Number(field(b, "Output_ID") || 0);
+      if (aId && bId && aId !== bId) return aId - bId;
+      return String(a?.id || "").localeCompare(String(b?.id || ""));
+    });
 }
 
 export function assignRenderQueuePositions(
