@@ -626,7 +626,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.549-ideas-generate-async",
+          version: "0.10.550-library-search-tokens",
           studio_create_vo_matched_stills_v1: true,
           studio_idea_library_typeahead_v1: true,
           studio_idea_library_search_all_hits_v1: true,
@@ -25998,14 +25998,16 @@ function assetLibraryFilterFormula(query, kind, needsProfile = false) {
     parts.push("OR({Classification_Status}='Needs Classification',{Classification_Status}='Classification Error')");
   }
   const phrase = libraryQuotedPhrase(query);
-  const needle = String(phrase || query || "").trim().toLowerCase();
-  if (needle) {
-    if (phrase) parts.push(libraryAssetNameFindFormula(phrase));
-    else {
-      const escaped = ideaLibraryAirtableEscape(needle);
-      // Operator search must see tags/topics too — not only name/location/description.
+  if (phrase) {
+    parts.push(libraryAssetNameFindFormula(phrase));
+  } else {
+    // Token OR — full-string FIND("prospect parked") misses "Prospect Park".
+    // Prefer strong tokens so weak words like "parked" do not empty the scan.
+    const keys = ideaLibrarySearchFilterKeys(ideaLibraryTokens(query)).slice(0, 10);
+    if (keys.length) {
       const hay = "LOWER(CONCATENATE({Search_Keywords},' ',{AI_Tags},' ',{Location},' ',{Asset Name},' ',{Topic},' ',{Subtopic},' ',{Asset_Description}))";
-      parts.push(`FIND("${escaped}", ${hay})`);
+      const clauses = keys.map((key) => `FIND("${ideaLibraryAirtableEscape(String(key).toLowerCase())}", ${hay})`);
+      parts.push(clauses.length === 1 ? clauses[0] : `OR(${clauses.join(",")})`);
     }
   }
   return `AND(${parts.join(",")})`;

@@ -267,7 +267,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.629-persistent-progress";
+  const BUILD_ID = "item4-0.6.630-library-search-tokens";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -5349,14 +5349,16 @@ function timedScriptAssetLabel(asset, index) {
     const grid = $("prSwapStillGrid");
     const hint = $("prSwapStillHint");
     if (!grid) return;
-    const phrase = libraryQuotedPhrase($("prSwapStillSearch")?.value || "");
+    const searchValue = String($("prSwapStillSearch")?.value || "").trim();
+    const phrase = libraryQuotedPhrase(searchValue);
+    const operatorSearch = Boolean(searchValue);
     const selected = swapStillSelectedId ? new Set([swapStillSelectedId]) : new Set();
     grid.innerHTML = renderLibraryPickerSections(
       swapStillItems,
       selected,
       swapStillSuggestedIds,
       "data-swap-still-id",
-      { flat: Boolean(phrase) }
+      { flat: operatorSearch }
     );
     if (hint) {
       const chosen = swapStillItems.find((item) => item.id === swapStillSelectedId);
@@ -5364,7 +5366,9 @@ function timedScriptAssetLabel(asset, index) {
         ? `Selected “${chosen.name || chosen.id}”. Use this still to replace scene ${(Number(timedScriptSwapSceneIndex) || 0) + 1}.`
         : (phrase
           ? `${swapStillItems.length} named “${phrase}”. Tap one still to select it.`
-          : `${swapStillItems.length} library stills. Tap one, then use it for this scene.`);
+          : (operatorSearch
+            ? `${swapStillItems.length} match${swapStillItems.length === 1 ? "" : "es"} for “${searchValue}”. Tap one still to select it.`
+            : `${swapStillItems.length} library stills. Tap one, then use it for this scene.`));
     }
     syncSwapStillApply();
     item4BindClipPlayers(grid);
@@ -5403,7 +5407,8 @@ function timedScriptAssetLabel(asset, index) {
       mergeLibraryPickerItems(suggested, matches, [...attachedItems, ...browsePhotos]),
       q
     );
-    swapStillSuggestedIds = quoted.phrase
+    const operatorSearch = Boolean(q);
+    swapStillSuggestedIds = (operatorSearch || quoted.phrase)
       ? new Set()
       : new Set([
         ...attachedItems.map((item) => item.id),
@@ -12700,10 +12705,17 @@ function timedScriptAssetLabel(asset, index) {
 
     const save = $("saveProductionRequest");
     if (save) {
-      save.disabled = !editable;
-      save.textContent = cancelled
-        ? "Cancelled"
-        : (editable ? "Save" : (status === "Promoted" ? "Locked" : "Submitted"));
+      // Keep "Saving draft…" while a manual save is in flight — quiet autosaves
+      // and form re-renders must not clear the busy label mid-request.
+      if (save.dataset.busy === "true") {
+        save.disabled = true;
+        save.textContent = "Saving draft…";
+      } else {
+        save.disabled = !editable;
+        save.textContent = cancelled
+          ? "Cancelled"
+          : (editable ? "Save" : (status === "Promoted" ? "Locked" : "Submitted"));
+      }
     }
 
     const promote = $("promoteProductionRequest");
@@ -13537,20 +13549,25 @@ function timedScriptAssetLabel(asset, index) {
     const grid = $("item4LibraryGrid");
     const hint = $("item4LibraryPickerHint");
     if (!grid) return;
-    const phrase = libraryQuotedPhrase($("item4LibrarySearch")?.value || "");
+    const searchValue = String($("item4LibrarySearch")?.value || "").trim();
+    const phrase = libraryQuotedPhrase(searchValue);
+    const operatorSearch = Boolean(searchValue);
+    // Typed search is a flat checklist of every query hit — same as Idea picker.
     grid.innerHTML = renderLibraryPickerSections(
       item4LibraryItems,
       item4LibrarySelected,
       item4LibrarySuggestedIds,
       "data-item4-library-id",
-      { flat: Boolean(phrase) }
+      { flat: operatorSearch }
     );
     if (hint) {
       const { toAdd, toRemove } = item4LibraryDiff();
       const applyNote = toAdd.length || toRemove.length ? ` Apply will add ${toAdd.length} and remove ${toRemove.length}.` : "";
       hint.textContent = phrase
         ? `${item4LibraryItems.length} named “${phrase}”. ${item4LibrarySelected.size} checked.${applyNote}`
-        : `${item4LibrarySuggestedIds.size} suggested. ${item4LibrarySelected.size} checked. Uncheck to remove, search to add.${applyNote}`;
+        : (operatorSearch
+          ? `${item4LibraryItems.length} match${item4LibraryItems.length === 1 ? "" : "es"} for “${searchValue}”. ${item4LibrarySelected.size} checked. Check any to add — search is not limited to this idea.${applyNote}`
+          : `${item4LibrarySuggestedIds.size} suggested. ${item4LibrarySelected.size} checked. Uncheck to remove, search to add.${applyNote}`);
     }
     syncItem4LibraryAdd();
     item4BindClipPlayers(grid);
@@ -13590,7 +13607,10 @@ function timedScriptAssetLabel(asset, index) {
       mergeLibraryPickerItems(suggested, matches, [...attachedItems, ...browse]),
       q
     );
-    item4LibrarySuggestedIds = quoted.phrase
+    const operatorSearch = Boolean(q);
+    // Operator search never auto-surfaces idea "Suggested" as a separate bucket —
+    // show a flat hit list. Attached assets still stay in the selection set.
+    item4LibrarySuggestedIds = (operatorSearch || quoted.phrase)
       ? new Set()
       : new Set([
         ...attachedItems.map((item) => item.id),
@@ -14195,7 +14215,9 @@ function timedScriptAssetLabel(asset, index) {
     }
 
     const button = $("saveProductionRequest");
-    if (button) {
+    // Quiet autosaves must not steal the Save button into "Saving draft…".
+    // A hung PATCH used to leave Production looking stuck forever.
+    if (!quiet && button) {
       button.disabled = true;
       button.dataset.busy = "true";
       button.textContent = "Saving draft…";
@@ -14215,6 +14237,8 @@ function timedScriptAssetLabel(asset, index) {
       const result = await api(`/api/production-requests/${encodeURIComponent(activeProductionRequest.id)}`, {
         method: "PATCH",
         body: JSON.stringify(payload),
+        timeoutMs: quiet ? 20000 : 45000,
+        retries: quiet ? 0 : 1,
       });
       activeProductionRequest = mergeProductionRequestRecord(activeProductionRequest, result.record);
       ezDirty.clear();
@@ -14243,7 +14267,7 @@ function timedScriptAssetLabel(asset, index) {
       setRequestMessage("Production Request draft and requested platform outputs saved.", "success");
       return activeProductionRequest;
     } finally {
-      if (button) {
+      if (!quiet && button) {
         delete button.dataset.busy;
         setProductionRequestControlState(activeProductionRequest);
       }
