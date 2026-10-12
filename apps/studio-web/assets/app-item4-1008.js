@@ -264,7 +264,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.617-remove-city-setup";
+  const BUILD_ID = "item4-0.6.618-header-pinned";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -835,6 +835,12 @@
     });
   }
 
+  function scrollStudioToTop() {
+    window.scrollTo(0, 0);
+    document.documentElement.scrollTop = 0;
+    document.body.scrollTop = 0;
+  }
+
   function showStudioPage(page, options = {}) {
     // Every Studio page retains the same small ChicagoShining watermark.
     ensureGlobalStudioWatermark();
@@ -876,11 +882,14 @@
       showOperationsView(parsed.view, parsed.tab);
     }
     loadPage(isHubPage(next) ? "home" : next);
+    scrollStudioToTop();
     // Free the full content canvas after choosing a nav destination.
     setStudioNavCollapsed(true);
   }
 
   initStudioNavCollapse();
+  if ("scrollRestoration" in history) history.scrollRestoration = "manual";
+  scrollStudioToTop();
 
   document.querySelectorAll(".nav-item").forEach((button) => {
     button.addEventListener("click", () => {
