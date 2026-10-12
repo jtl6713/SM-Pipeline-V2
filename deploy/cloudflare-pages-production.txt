@@ -223,3 +223,4 @@ Deploy Studio UI 0.6.534-pages-path-bust. Rename app-item4-0625.js -> app-item4-
 Deploy UI 0.6.606 approval recovery and cross-profile hashtag approval guard.
 
 UI 0.6.607 hashtag mismatch warning only; approval no longer blocked.
+2026-10-11: Fix Approve All selected-profile GET polling (NYC batch 509), keep approval button progress until server confirms completion; UI 0.6.608-approve-profile-poll.

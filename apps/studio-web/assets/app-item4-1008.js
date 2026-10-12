@@ -263,7 +263,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.607-hashtag-warning-only";
+  const BUILD_ID = "item4-0.6.608-approve-profile-poll";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -351,6 +351,9 @@
   let pipelineApproveAllPollFailures = 0;
   let pipelineApproveAllCanRetry = false;
   let pipelineApproveAllFailedCount = 0;
+  let pipelineApproveAllRunning = false;
+  let pipelineApproveAllActiveGroupKey = "";
+  let pipelineApproveAllNoticeUntil = 0;
   let operationsTimezone = null;
   let operationsAnalyticsAccounts = [];
   let operationsWatchlistAll = [];
@@ -399,6 +402,7 @@
       || pathname === "/api/production-requests" || pathname.startsWith("/api/production-requests/")
       || pathname === "/api/content"
       || pathname === "/api/outputs"
+      || pathname === "/api/outputs/approve-all"
       || pathname === "/api/outputs/schedule-grid"
       || pathname === "/api/dashboard"
       || pathname === "/api/insights/best-times"
@@ -18353,10 +18357,22 @@ function timedScriptAssetLabel(asset, index) {
     const button = $("pipelineApproveAll");
     const status = String(result?.status || "");
     const running = !terminal && (status === "queued" || status === "running");
+    pipelineApproveAllRunning = running;
+    if (!running) pipelineApproveAllNoticeUntil = Date.now() + 16000;
     pipelineApproveAllJobId = String(result?.job_id || pipelineApproveAllJobId || "").trim();
     pipelineApproveAllFailedCount = Number(result?.failed_count || 0);
     pipelineApproveAllCanRetry = Boolean(result?.can_retry);
     setPipelineLiveHint(pipelineApproveAllProgressText(result));
+    if (running) {
+      document.querySelectorAll("[data-pipeline-group-approve]").forEach((groupButton) => {
+        const active = groupButton.dataset.pipelineGroupApprove === pipelineApproveAllActiveGroupKey;
+        groupButton.dataset.busy = "true";
+        groupButton.disabled = true;
+        groupButton.textContent = active
+          ? "Approving (" + Number(result?.approved_count || 0) + "/" + Number(result?.total || 0) + ")…"
+          : "Approval in progress";
+      });
+    }
     if (button) {
       button.dataset.busy = running ? "true" : "false";
       if (running) {
@@ -18374,6 +18390,7 @@ function timedScriptAssetLabel(asset, index) {
     if (terminal || !running) {
       stopPipelineApproveAllPoll();
       clearPipelineGroupApproveBusy();
+      pipelineApproveAllActiveGroupKey = "";
       if (button && !pipelineApproveAllCanRetry) {
         button.dataset.busy = "false";
         updatePipelineApproveAllButton();
@@ -18852,6 +18869,7 @@ function timedScriptAssetLabel(asset, index) {
       return;
     }
     try {
+      pipelineApproveAllActiveGroupKey = groupKey;
       if (button) {
         button.dataset.busy = "true";
         button.disabled = true;
@@ -18876,9 +18894,9 @@ function timedScriptAssetLabel(asset, index) {
       });
       pipelineApproveAllCanRetry = false;
       startPipelineApproveAllJobWatch(result);
-      // Group Approve must not stay stuck on Approving… — progress lives on Approve All.
-      clearPipelineGroupApproveBusy();
+      // Keep progress visible until the selected profile\u0027s job-status poll reaches a terminal state.
     } catch (error) {
+      pipelineApproveAllActiveGroupKey = "";
       clearPipelineGroupApproveBusy();
       const aborted = error?.name === "AbortError" || /aborted|timeout|timed out/i.test(String(error?.message || ""));
       pipelineApproveBlockedMessage(
@@ -19292,7 +19310,11 @@ function timedScriptAssetLabel(asset, index) {
       destination ? `${destination.done}/${destination.total} rendered` : "",
     ].filter(Boolean);
 
-    const approveButton = `<button type="button" class="secondary-button pipeline-group-approve pipeline-content-action" data-pipeline-group-approve="${escapeHtml(group.key)}" title="${groupReady.length ? "Approve only the ready outputs in this content item" : "No outputs in this content item are waiting for approval"}" ${groupReady.length ? "" : "disabled"}>Approve all${groupReady.length ? ` (${groupReady.length})` : ""}</button>`;
+    const groupBusy = pipelineApproveAllRunning;
+    const groupActive = groupBusy && pipelineApproveAllActiveGroupKey === group.key;
+    const groupLabel = groupActive ? "Approving…" : groupBusy ? "Approval in progress" : `Approve all${groupReady.length ? ` (${groupReady.length})` : ""}`;
+    const groupTitle = groupBusy ? "A background approval batch is in progress" : groupReady.length ? "Approve only the ready outputs in this content item" : "No outputs in this content item are waiting for approval";
+    const approveButton = `<button type="button" class="secondary-button pipeline-group-approve pipeline-content-action" data-pipeline-group-approve="${escapeHtml(group.key)}" title="${escapeHtml(groupTitle)}" ${groupBusy || !groupReady.length ? "disabled" : ""} ${groupBusy ? 'data-busy="true"' : ""}>${groupLabel}</button>`;
 
     const nowMs = Date.now();
     const regeneratable = group.records.filter((record) => {
@@ -20567,6 +20589,7 @@ function timedScriptAssetLabel(asset, index) {
   }
 
   function updatePipelineCountdownHint() {
+    if (pipelineApproveAllRunning || Date.now() < pipelineApproveAllNoticeUntil) return;
     if (!pipelinePageActive() || document.hidden || !pipelineNextRefreshAt) return;
     const remainingMs = pipelineNextRefreshAt - Date.now();
     if (remainingMs <= 0) {
