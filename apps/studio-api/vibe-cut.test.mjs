@@ -187,7 +187,7 @@ test("Worker never treats Vibe Cut as finished-video passthrough", () => {
   assert.match(worker, /force_multiclip_remount: false/);
   assert.match(worker, /Rebuilding Vibe Cut multi-clip montage/);
   assert.match(worker, /Must go through enqueueStudioProductionJob so Vibe Cut/);
-  assert.match(worker, /version: "0.10.547-library-search-all-hits"/);
+  assert.match(worker, /version: "0.10.548-timeline-auto-prepare"/);
 });
 
 test("Studio web exposes Vibe Cut creation path", () => {
