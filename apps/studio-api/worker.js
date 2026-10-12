@@ -655,7 +655,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.554-ops-multi-queue",
+          version: "0.10.555-ops-queue-fields",
           studio_create_vo_matched_stills_v1: true,
           studio_idea_library_typeahead_v1: true,
           studio_idea_library_search_all_hits_v1: true,
@@ -41404,27 +41404,37 @@ function mapOpsQueueProfileName(profileMap, linked) {
 
 async function getStudioOperationsQueue(request, env, authorization) {
   const controls = await readOpsQueueControls(env);
+  const fetchErrors = [];
+  const settleList = async (label, promise) => {
+    try {
+      return await promise;
+    } catch (error) {
+      fetchErrors.push(`${label}: ${error?.message || error}`);
+      console.warn("operations-queue fetch failed", label, error?.message || error);
+      return [];
+    }
+  };
   const [profiles, outputs, requests, activeHolds] = await Promise.all([
-    listRecords(env, STUDIO_IDEA_PROFILE_TABLE_ID, { limit: 50 }).catch(() => []),
-    listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
+    settleList("profiles", listRecords(env, STUDIO_IDEA_PROFILE_TABLE_ID, { limit: 50 })),
+    settleList("outputs", listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
       limit: 160,
       sortField: "Output_ID",
       sortDirection: "desc",
       fields: OPS_QUEUE_OUTPUT_FIELDS,
       filterFormula: OPS_QUEUE_OUTPUT_FORMULA,
-    }).catch(() => []),
-    listRecords(env, PRODUCTION_REQUEST_TABLE, {
+    })),
+    settleList("requests", listRecords(env, PRODUCTION_REQUEST_TABLE, {
       limit: 60,
       sortField: "Updated_At",
       sortDirection: "desc",
       fields: OPS_QUEUE_REQUEST_FIELDS,
       filterFormula: OPS_QUEUE_REQUEST_FORMULA,
-    }).catch(() => []),
-    listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
+    })),
+    settleList("activeHolds", listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
       limit: 16,
-      fields: OPS_QUEUE_OUTPUT_FIELDS,
+      fields: OPS_QUEUE_OUTPUT_FIELDS.filter((name) => name !== "Studio_Preview_Updated_At" && name !== "Last_Publish_Attempt_At"),
       filterFormula: STUDIO_RENDER_QUEUE_ACTIVE_FORMULA,
-    }).catch(() => []),
+    })),
   ]);
   const profileMap = new Map((profiles || []).map((row) => [row.id, row]));
   const queueCandidates = sortRenderQueueCandidates(
@@ -41508,11 +41518,9 @@ async function getStudioOperationsQueue(request, env, authorization) {
       content_item_id: contentId || null,
       content_id: contentNumber,
       title: opsQueueItemTitle({
-        contentWorkingTitle: content ? f(content, "Working_Title") : "",
         contentTitle: content ? f(content, "Content_Title") : "",
         ideaTitle: ideaMeta?.title || "",
         requestedTitle: f(record, "Requested_Title"),
-        requestIdeaTitle: f(record, "Idea_Title"),
         masterContentType: f(record, "Master_Content_Type"),
         fallback: "Production request",
       }),
@@ -41550,13 +41558,17 @@ async function getStudioOperationsQueue(request, env, authorization) {
     const parentRequest = contentId ? requestByContent.get(contentId) : null;
     const renderPaused = isRenderPaused(controls, record.id);
     const producePaused = Boolean(parentRequest?.produce_paused);
+    const outputUpdatedAt = f(record, "Studio_Preview_Updated_At")
+      || f(record, "Last_Publish_Attempt_At")
+      || record?.createdTime
+      || null;
     const stuck = classifyRenderRow({
       id: record.id,
       render_status: f(record, "Render_Status"),
       remotion_job_id: f(record, "Remotion_Job_ID"),
       final_file_url: f(record, "Final_File_URL"),
       output_status: f(record, "Output_Status"),
-      last_modified: f(record, "Last Modified"),
+      last_modified: outputUpdatedAt,
       render_error: f(record, "Remotion_Error_Message") || f(record, "Final_File_Error_Message"),
       error: f(record, "Publish_Error_Message"),
     });
@@ -41577,7 +41589,6 @@ async function getStudioOperationsQueue(request, env, authorization) {
       content_item_id: contentId || null,
       content_id: contentNumber,
       title: opsQueueItemTitle({
-        contentWorkingTitle: content ? f(content, "Working_Title") : "",
         contentTitle: content ? f(content, "Content_Title") : "",
         requestedTitle: parentRequest?.title || "",
         outputTitle: mapped.output_title,
@@ -41618,7 +41629,7 @@ async function getStudioOperationsQueue(request, env, authorization) {
       platforms: parentRequest?.platforms || (mapped.platform ? [mapped.platform] : []),
       scheduled_at: mapped.scheduled_at || mapped.scheduled_post_date || null,
       creative_available: outputCreativeAvailable(record),
-      updated_at: f(record, "Last Modified") || null,
+      updated_at: outputUpdatedAt,
     };
     outputRow.e2e = buildOpsE2eStages({
       ...outputRow,
@@ -41665,6 +41676,10 @@ async function getStudioOperationsQueue(request, env, authorization) {
       || authorization?.permissions?.production_configure
     ),
     rows,
+    fetch_errors: fetchErrors,
+    warning: fetchErrors.length
+      ? `Queue data incomplete: ${fetchErrors.slice(0, 2).join(" · ")}`
+      : null,
   });
 }
 

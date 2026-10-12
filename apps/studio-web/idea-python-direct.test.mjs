@@ -27,7 +27,7 @@ test("Studio idea generation accepts a batch then finishes Python I1 in waitUnti
   assert.match(run, /item4PulsePipelineStage\(env, "i1"/);
   assert.match(run, /batch_record_id: batch\.id/);
   assert.doesNotMatch(handler, /phase6ScenarioState/);
-  assert.match(source, /version: "0\.10\.554-ops-multi-queue"/);
+  assert.match(source, /version: "0\.10\.555-ops-queue-fields"/);
 });
 
 test("Studio UI polls idea batches and explains aborted Generate starts", async () => {
@@ -37,5 +37,5 @@ test("Studio UI polls idea batches and explains aborted Generate starts", async 
   assert.match(source, /timeoutMs: 45000/);
   assert.match(source, /activeIdeaGenerationBatchId = result\.batch_record_id/);
   assert.match(source, /connection dropped/);
-  assert.match(source, /BUILD_ID = "item4-0.6.637-ops-nav"/);
+  assert.match(source, /BUILD_ID = "item4-0.6.638-ops-queue-fields"/);
 });

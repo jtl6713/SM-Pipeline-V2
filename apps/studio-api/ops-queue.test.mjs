@@ -4,6 +4,9 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
+  OPS_QUEUE_CONTENT_FIELDS,
+  OPS_QUEUE_OUTPUT_FIELDS,
+  OPS_QUEUE_REQUEST_FIELDS,
   applyProducePauseToJob,
   buildOpsE2eStages,
   emptyOpsQueueControls,
@@ -187,6 +190,13 @@ test("queue lanes + summary", () => {
   assert.equal(summary.producing, 1);
 });
 
+test("ops queue Airtable field lists avoid unknown column names", () => {
+  assert.equal(OPS_QUEUE_OUTPUT_FIELDS.includes("Last Modified"), false);
+  assert.equal(OPS_QUEUE_REQUEST_FIELDS.includes("Idea_Title"), false);
+  assert.equal(OPS_QUEUE_CONTENT_FIELDS.includes("Working_Title"), false);
+  assert.ok(OPS_QUEUE_OUTPUT_FIELDS.includes("Studio_Preview_Updated_At"));
+});
+
 test("worker and UI wire Operations multi-queue + prepare-to-review", () => {
   assert.match(worker, /\/api\/operations\/queue/);
   assert.match(worker, /\/api\/operations\/queue\/pause/);
@@ -195,7 +205,7 @@ test("worker and UI wire Operations multi-queue + prepare-to-review", () => {
   assert.match(worker, /async function getStudioOperationsQueue/);
   assert.match(worker, /partitionOpsQueues/);
   assert.match(worker, /async function prepareIdeaToReview/);
-  assert.match(worker, /version: "0\.10\.554-ops-multi-queue"/);
+  assert.match(worker, /version: "0\.10\.555-ops-queue-fields"/);
   assert.match(worker, /origin=prepare-to-review/);
   assert.match(worker, /readOpsQueueControls/);
   assert.match(html, /data-ops-tab="queue"/);
@@ -204,7 +214,7 @@ test("worker and UI wire Operations multi-queue + prepare-to-review", () => {
   assert.match(html, /opsPublishQueueLines/);
   assert.match(html, /opsE2eQueueLines/);
   assert.match(html, /prepareIdeaToReviewButton/);
-  assert.match(app, /BUILD_ID = "item4-0\.6\.637-ops-nav"/);
+  assert.match(app, /BUILD_ID = "item4-0\.6\.638-ops-queue-fields"/);
   assert.match(app, /loadOperationsQueue/);
   assert.match(app, /opsE2eTrailHtml/);
   assert.match(app, /renderOpsRenderQueueDetail/);

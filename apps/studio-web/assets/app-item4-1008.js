@@ -267,7 +267,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.637-ops-nav";
+  const BUILD_ID = "item4-0.6.638-ops-queue-fields";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -24114,6 +24114,10 @@ function timedScriptAssetLabel(asset, index) {
       operationsQueueCanEdit = Boolean(data.can_edit_queue);
       renderOperationsQueueSummary(data.summary || {});
       renderOperationsStudioQueue();
+      if (data.warning && !options.quiet) setOperationsMessage(data.warning, "error-text");
+      else if (!operationsQueueRows.length && !options.quiet) {
+        setOperationsMessage("Queue is empty right now — nothing matched in-flight Production Requests or Platform Outputs.", "");
+      }
       startOperationsQueuePoll();
       return data;
     } catch (error) {

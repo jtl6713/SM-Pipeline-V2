@@ -8,7 +8,7 @@ export const OPS_QUEUE_CONTROLS_SCHEMA = "studio.ops-queue-controls.1";
 
 /** Open Platform Outputs worth showing on the Ops Queue (not terminal published/skipped). */
 export const OPS_QUEUE_OUTPUT_FORMULA =
-  'AND({Test_Run_ID}=BLANK(),NOT({Do_Not_Publish}),OR({Output_Status}="In Production",{Output_Status}="Ready for Render",{Output_Status}="Ready for Review",{Output_Status}="Approved for Publishing",{Output_Status}="Ready to Schedule",{Output_Status}="Ready to Publish",{Output_Status}="Scheduled",{Output_Status}="Failed",{Output_Status}="Blocked",{Review_Status}="Review Sent",{Render_Status}="Waiting in Render Queue",{Render_Status}="Ready for Render",{Render_Status}="Rendering",{Render_Status}="Failed",{Render_Status}="Blocked"))';
+  'AND({Test_Run_ID}=BLANK(),NOT({Do_Not_Publish}),OR({Output_Status}="In Production",{Output_Status}="Ready for Render",{Output_Status}="Rendering",{Output_Status}="Rendered",{Output_Status}="Ready for Review",{Output_Status}="Approved",{Output_Status}="Approved for Publishing",{Output_Status}="Ready to Schedule",{Output_Status}="Ready to Publish",{Output_Status}="Scheduled",{Output_Status}="Failed",{Output_Status}="Blocked",{Review_Status}="Review Sent",{Render_Status}="Waiting in Render Queue",{Render_Status}="Ready for Render",{Render_Status}="Ready to Render",{Render_Status}="Rendering",{Render_Status}="Failed",{Render_Status}="Blocked"))';
 
 /** Production Requests still moving toward Ready for Review. */
 export const OPS_QUEUE_REQUEST_FORMULA =
@@ -38,7 +38,10 @@ export const OPS_QUEUE_OUTPUT_FIELDS = [
   "Publish_Error_Message",
   "Remotion_Error_Message",
   "Final_File_Error_Message",
-  "Last Modified",
+  // Platform Outputs has no "Last Modified" field — unknown fields[] make Airtable 422
+  // and the Worker used to swallow that into an empty queue.
+  "Studio_Preview_Updated_At",
+  "Last_Publish_Attempt_At",
   "Test_Run_ID",
   "Do_Not_Publish",
 ];
@@ -53,7 +56,7 @@ export const OPS_QUEUE_REQUEST_FIELDS = [
   "Master_Content_Type",
   "Target_Platforms",
   "Requested_Title",
-  "Idea_Title",
+  // Idea titles come from Idea_Candidate → Candidate_Title; there is no Idea_Title field.
   "Idea_Candidate",
   "Promoted_Content_Item",
   "Created_At",
@@ -104,7 +107,6 @@ export function opsQueueItemTitle({
 export const OPS_QUEUE_CONTENT_FIELDS = [
   "Content_ID",
   "Content_Title",
-  "Working_Title",
   "Content_Status",
   "Voiceover_Status",
   "Content_Profile",
@@ -490,8 +492,8 @@ export function isOpsRenderingQueueRow(row = {}) {
   if (row.render_paused) return true;
   if (Number(row.render_queue_position) > 0) return true;
   if (opsOutputSkipsRender(row)) return false;
-  const blob = `${normStatus(row.render_status)} ${normStatus(row.studio_state)}`;
-  return /ready for render|waiting in render|\brendering\b/.test(blob);
+  const blob = `${normStatus(row.render_status)} ${normStatus(row.studio_state)} ${normStatus(row.output_status)}`;
+  return /ready for render|ready to render|waiting in render|\brendering\b/.test(blob);
 }
 
 export function isOpsPublishingQueueRow(row = {}) {
@@ -500,7 +502,7 @@ export function isOpsPublishingQueueRow(row = {}) {
     return false;
   }
   const blob = `${normStatus(row.studio_state)} ${normStatus(row.output_status)} ${normStatus(row.review_status)} ${normStatus(row.publish_status)}`;
-  return /ready for review|review sent|awaiting approval|approved for publishing|ready to schedule|ready to publish|scheduled|uploading|platform processing|manual action/.test(blob)
+  return /ready for review|review sent|awaiting approval|\bapproved\b|approved for publishing|ready to schedule|ready to publish|scheduled|uploading|platform processing|manual action/.test(blob)
     || row.lane === "review"
     || row.lane === "publish";
 }
