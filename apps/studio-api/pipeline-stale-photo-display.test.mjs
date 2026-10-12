@@ -9,9 +9,9 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const app = readFileSync(path.join(here, "../studio-web/assets/app-item4-1008.js"), "utf8");
 
 test("native photo packages never display video 0/3 destination render counts", () => {
- const from = app.indexOf("function pipelineProgressCell(record, groupRecords)");
+ const from = app.indexOf("function pipelineProgressInlineMarkup(");
  const end = app.indexOf("function normalizeDisplayText(", from);
- assert.ok(from > 0 && end > from);
+ assert.ok(from > 0 && end > from, "progress helpers must be present");
  const fn = vm.runInNewContext(app.slice(from, end) + "\npipelineProgressCell", {
    pipelineDestinationProgress: () => ({done:0,total:3,percent:0}),
    pipelineOutputRenderInFlight: () => true,
@@ -23,9 +23,11 @@ test("native photo packages never display video 0/3 destination render counts", 
    const html = fn({render_status:"Native Photo Route",studio_state:state}, [{id:"1"},{id:"2"},{id:"3"}]);
    assert.doesNotMatch(html, /0\/3|destinations rendered/);
    assert.match(html, state === "Preparing Assets" ? /Preparing photos/ : /Photos ready/);
+   assert.match(html, /pipeline-progress-inline/);
  }
  const video = fn({render_status:"Rendering",studio_state:"Rendering"}, [{id:"1"}]);
  assert.match(video, /0\/3/);
+ assert.match(video, /pipeline-progress-inline/);
 });
 
 test("Pipeline navigation and failed live polls cannot present stale Home snapshot as active output", () => {
