@@ -626,7 +626,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.540-pipeline-field-schema",
+          version: "0.10.541-overview-snapshot",
           studio_create_vo_matched_stills_v1: true,
           studio_idea_library_typeahead_v1: true,
           studio_post_publish_release_v1: true,
@@ -672,6 +672,7 @@ export default {
           studio_pipeline_review_filter_v1: true,
           studio_home_overview_lean_v1: true,
           studio_home_overview_cache_v1: true,
+          studio_home_overview_snapshot_v1: true,
           studio_home_overview_soft_429_v1: true,
           studio_oversized_list_refresh_v1: true,
           studio_library_published_files_v1: true,
@@ -1282,7 +1283,7 @@ export default {
 
       if (url.pathname === "/api/profiles/overview") {
         if (request.method !== "GET") throw new HttpError(405, "Method not allowed");
-        return profilesOverview(request, env, authorization);
+        return profilesOverview(request, env, authorization, ctx);
       }
 
       if (url.pathname === "/api/dashboard") {
@@ -1777,6 +1778,13 @@ export default {
         await resumeAzFinishedVideoRequests(env, ctx);
       } catch (error) {
         console.warn("AZ finished-video resume failed", error);
+      }
+      try {
+        const existing = await readStudioProfilesOverviewSnapshot(env);
+        const age = existing?.at ? Date.now() - existing.at : Infinity;
+        if (age > 10 * 60 * 1000) await refreshStudioProfilesOverviewSnapshot(env, null);
+      } catch (error) {
+        console.warn("profiles overview snapshot refresh failed", error);
       }
 
       if (!cadence.heavy) return;
@@ -36572,8 +36580,10 @@ function studioOverviewOperationalMetrics(mappedOutputs, ideas) {
   };
 }
 
-// Isolate memory cache: home used to fire N×(ideas+outputs) and 429 before paint.
-const STUDIO_PROFILES_OVERVIEW_CACHE_MS = 75 * 1000;
+// Last-good counts. Home reads the snapshot and does not scan Airtable on open.
+// Isolate memory is only a hot copy; R2 keeps it across cold Workers.
+const STUDIO_PROFILES_OVERVIEW_CACHE_MS = 3 * 60 * 1000;
+const STUDIO_PROFILES_OVERVIEW_SNAPSHOT_KEY = "studio/state/profiles-overview.json";
 /** Hard wall for overview Airtable work so home never waits on a 60s browser abort. */
 const STUDIO_PROFILES_OVERVIEW_BUILD_BUDGET_MS = 4000;
 const STUDIO_PROFILES_OVERVIEW_RESOLVE_BUDGET_MS = 2500;
@@ -36664,7 +36674,7 @@ function isAirtableCoolingError(error) {
   return status === 429 || /cooling down|rate.?limit|too many requests/i.test(message);
 }
 
-function respondProfilesOverviewSoft(request, env, { records = [], cached = false, stale = false, cooling = false } = {}) {
+function respondProfilesOverviewSoft(request, env, { records = [], cached = false, stale = false, cooling = false, refreshing = false, snapshot = false } = {}) {
   // Never HTTP 429 the home overview — cold isolates + Airtable cooldown used to
   // paint a red banner on every Studio open even when the selected-profile feed
   // could still recover. Soft 200 keeps the shell usable.
@@ -36673,56 +36683,123 @@ function respondProfilesOverviewSoft(request, env, { records = [], cached = fals
     cached: Boolean(cached),
     stale: Boolean(stale),
     cooling: Boolean(cooling),
+    refreshing: Boolean(refreshing),
+    snapshot: Boolean(snapshot),
     records: Array.isArray(records) ? records : [],
   });
 }
 
-/** One Worker request for All Profiles home table — no N× /api/dashboard fan-out. */
-async function profilesOverview(request, env, authorization) {
-  const cache = studioProfilesOverviewCache;
-  const coolMs = airtableCooldownWaitMs();
-  // Serve last-good without resolving profiles (that resolve is itself an Airtable hit).
-  if (coolMs > AIRTABLE_SLOT_FAIL_FAST_MS) {
-    if (cache.rows?.length) {
-      return respondProfilesOverviewSoft(request, env, { records: cache.rows, stale: true, cooling: true });
-    }
-    return respondProfilesOverviewSoft(request, env, { records: [], cooling: true });
-  }
+function rememberProfilesOverviewSnapshot(snapshot) {
+  const rows = Array.isArray(snapshot?.rows) ? snapshot.rows : [];
+  if (!rows.length) return null;
+  studioProfilesOverviewCache.rows = rows;
+  studioProfilesOverviewCache.at = Number(snapshot.at) || 0;
+  studioProfilesOverviewCache.authKey = String(snapshot.authKey || "");
+  return {
+    rows,
+    at: studioProfilesOverviewCache.at,
+    authKey: studioProfilesOverviewCache.authKey,
+  };
+}
 
-  let profiles;
+async function readStudioProfilesOverviewSnapshot(env) {
+  const cache = studioProfilesOverviewCache;
+  if (cache.rows?.length) {
+    return { rows: cache.rows, at: cache.at, authKey: cache.authKey };
+  }
+  if (!env?.STUDIO_MEDIA?.get) return null;
   try {
-    profiles = await raceStudioOverviewBudget(
-      resolveAuthorizedContentProfiles(env, authorization),
-      STUDIO_PROFILES_OVERVIEW_RESOLVE_BUDGET_MS,
-      "overview-resolve",
+    const object = await env.STUDIO_MEDIA.get(STUDIO_PROFILES_OVERVIEW_SNAPSHOT_KEY);
+    if (!object) return null;
+    return rememberProfilesOverviewSnapshot(await object.json());
+  } catch (error) {
+    console.warn("profiles overview snapshot read failed", error);
+    return null;
+  }
+}
+
+async function writeStudioProfilesOverviewSnapshot(env, rows, authKey) {
+  const snapshot = rememberProfilesOverviewSnapshot({ rows, authKey, at: Date.now() });
+  if (!snapshot || !env?.STUDIO_MEDIA?.put) return snapshot;
+  try {
+    await env.STUDIO_MEDIA.put(
+      STUDIO_PROFILES_OVERVIEW_SNAPSHOT_KEY,
+      JSON.stringify(snapshot),
+      { httpMetadata: { contentType: "application/json" } },
     );
   } catch (error) {
-    if (cache.rows?.length) {
-      return respondProfilesOverviewSoft(request, env, { records: cache.rows, stale: true, cooling: isAirtableCoolingError(error) });
-    }
-    if (isAirtableCoolingError(error)) {
-      return respondProfilesOverviewSoft(request, env, { records: [], cooling: true });
-    }
-    throw error;
+    console.warn("profiles overview snapshot write failed", error);
+  }
+  return snapshot;
+}
+
+async function refreshStudioProfilesOverviewSnapshot(env, authorization) {
+  const cache = studioProfilesOverviewCache;
+  if (cache.inflight) return cache.inflight;
+  if (airtableCooldownWaitMs() > AIRTABLE_SLOT_FAIL_FAST_MS) return cache.rows || [];
+  const run = (async () => {
+    const profiles = authorization
+      ? await resolveAuthorizedContentProfiles(env, authorization)
+      : (await listContentProfileRecords(env)).filter((record) => Boolean(f(record, "Active")));
+    if (!profiles?.length) return cache.rows || [];
+    const rows = await buildStudioProfilesOverviewRows(env, profiles);
+    await writeStudioProfilesOverviewSnapshot(env, rows, studioProfilesOverviewAuthKey(profiles));
+    return rows;
+  })().finally(() => {
+    if (cache.inflight === run) cache.inflight = null;
+  });
+  cache.inflight = run;
+  return run;
+}
+
+function scheduleStudioProfilesOverviewRefresh(ctx, env, authorization) {
+  const pending = refreshStudioProfilesOverviewSnapshot(env, authorization);
+  ctx?.waitUntil?.(pending.catch((error) => {
+    console.warn("profiles overview background refresh failed", error);
+  }));
+  return pending;
+}
+
+/** One Worker request for All Profiles home table — no N× /api/dashboard fan-out. */
+async function profilesOverview(request, env, authorization, ctx) {
+  const snapshot = await readStudioProfilesOverviewSnapshot(env);
+  const age = snapshot?.at ? Date.now() - snapshot.at : Infinity;
+  if (snapshot?.rows?.length && age < STUDIO_PROFILES_OVERVIEW_CACHE_MS) {
+    return respondProfilesOverviewSoft(request, env, {
+      records: snapshot.rows,
+      cached: true,
+      snapshot: true,
+    });
+  }
+  if (snapshot?.rows?.length) {
+    const cooling = airtableCooldownWaitMs() > AIRTABLE_SLOT_FAIL_FAST_MS;
+    if (!cooling) scheduleStudioProfilesOverviewRefresh(ctx, env, authorization);
+    return respondProfilesOverviewSoft(request, env, {
+      records: snapshot.rows,
+      cached: true,
+      stale: true,
+      cooling,
+      refreshing: !cooling,
+      snapshot: true,
+    });
   }
 
-  const authKey = studioProfilesOverviewAuthKey(profiles);
-  const now = Date.now();
-  if (cache.rows && cache.authKey === authKey && now - cache.at < STUDIO_PROFILES_OVERVIEW_CACHE_MS) {
-    return respondProfilesOverviewSoft(request, env, { records: cache.rows, cached: true });
+  const cache = studioProfilesOverviewCache;
+  const coolMs = airtableCooldownWaitMs();
+  if (coolMs > AIRTABLE_SLOT_FAIL_FAST_MS) {
+    return respondProfilesOverviewSoft(request, env, { records: [], cooling: true });
   }
-  if (cache.inflight && cache.authKey === authKey) {
+  if (cache.inflight) {
     try {
-      // Keep inflight running after budget — next paint gets a warm cache.
       const rows = await raceStudioOverviewBudget(
         cache.inflight,
         STUDIO_PROFILES_OVERVIEW_BUILD_BUDGET_MS,
         "overview-build",
       );
-      return respondProfilesOverviewSoft(request, env, { records: rows, cached: true });
+      return respondProfilesOverviewSoft(request, env, { records: rows, cached: true, snapshot: true });
     } catch (error) {
-      if (cache.rows && cache.authKey === authKey) {
-        return respondProfilesOverviewSoft(request, env, { records: cache.rows, stale: true, cooling: isAirtableCoolingError(error) });
+      if (cache.rows?.length) {
+        return respondProfilesOverviewSoft(request, env, { records: cache.rows, stale: true, cooling: isAirtableCoolingError(error), snapshot: true });
       }
       if (isAirtableCoolingError(error)) {
         return respondProfilesOverviewSoft(request, env, { records: [], cooling: true });
@@ -36730,26 +36807,27 @@ async function profilesOverview(request, env, authorization) {
       throw error;
     }
   }
-  cache.authKey = authKey;
-  cache.inflight = buildStudioProfilesOverviewRows(env, profiles)
-    .then((rows) => {
-      cache.at = Date.now();
-      cache.rows = rows;
-      return rows;
-    })
-    .finally(() => {
-      if (cache.inflight) cache.inflight = null;
-    });
   try {
+    const profiles = await raceStudioOverviewBudget(
+      resolveAuthorizedContentProfiles(env, authorization),
+      STUDIO_PROFILES_OVERVIEW_RESOLVE_BUDGET_MS,
+      "overview-resolve",
+    );
+    cache.authKey = studioProfilesOverviewAuthKey(profiles);
+    cache.inflight = buildStudioProfilesOverviewRows(env, profiles)
+      .then((rows) => writeStudioProfilesOverviewSnapshot(env, rows, cache.authKey).then(() => rows))
+      .finally(() => {
+        if (cache.inflight) cache.inflight = null;
+      });
     const rows = await raceStudioOverviewBudget(
       cache.inflight,
       STUDIO_PROFILES_OVERVIEW_BUILD_BUDGET_MS,
       "overview-build",
     );
-    return respondProfilesOverviewSoft(request, env, { records: rows });
+    return respondProfilesOverviewSoft(request, env, { records: rows, snapshot: true });
   } catch (error) {
-    if (cache.rows && cache.authKey === authKey) {
-      return respondProfilesOverviewSoft(request, env, { records: cache.rows, stale: true, cooling: isAirtableCoolingError(error) });
+    if (cache.rows?.length) {
+      return respondProfilesOverviewSoft(request, env, { records: cache.rows, stale: true, cooling: isAirtableCoolingError(error), snapshot: true });
     }
     if (isAirtableCoolingError(error)) {
       return respondProfilesOverviewSoft(request, env, { records: [], cooling: true });

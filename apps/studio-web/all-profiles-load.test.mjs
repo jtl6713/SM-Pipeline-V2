@@ -15,6 +15,7 @@ test("All Profiles overview uses one lean /api/profiles/overview call", () => {
   assert.doesNotMatch(overview, /mapPool\(profiles/);
   assert.match(overview, /requestIdleCallback|setTimeout\(start/);
   assert.match(overview, /sessionStorage/);
+  assert.match(overview, /localStorage/);
   assert.match(overview, /Showing last good overview/);
   assert.match(html, /all-profiles-overview-1007\.js\?v=/);
 });
@@ -28,6 +29,10 @@ test("Worker exposes profilesOverview lean batch route", () => {
   assert.match(worker, /studio_home_overview_soft_429_v1: true/);
   assert.match(worker, /buildStudioProfilesOverviewRows/);
   assert.match(worker, /STUDIO_PROFILES_OVERVIEW_CACHE_MS/);
+  assert.match(worker, /studio\/state\/profiles-overview\.json/);
+  assert.match(worker, /readStudioProfilesOverviewSnapshot/);
+  assert.match(worker, /refreshStudioProfilesOverviewSnapshot/);
+  assert.match(worker, /studio_home_overview_snapshot_v1: true/);
   assert.match(worker, /respondProfilesOverviewSoft/);
   assert.match(worker, /Never HTTP 429 the home overview/);
 });
@@ -46,5 +51,5 @@ test("Worker budgets overview Airtable work so home never waits 60s", () => {
   assert.match(worker, /studio_home_overview_budget_v1:\s*true/);
   assert.match(worker, /STUDIO_PROFILES_OVERVIEW_BUILD_BUDGET_MS/);
   assert.match(worker, /raceStudioOverviewBudget/);
-  assert.match(worker, /0\.10\.539-nyc-comment/);
+  assert.match(worker, /0\.10\.541-overview-snapshot/);
 });

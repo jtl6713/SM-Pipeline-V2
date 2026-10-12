@@ -4,14 +4,14 @@
   const esc = (value) => String(value ?? "").replace(/[&<>"']/g, (ch) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[ch]));
   const platformOrder = ["Facebook","Instagram","TikTok","YouTube"];
   const CACHE_KEY = "studio.allProfilesOverview.v1";
-  const state = { rows: [], timer: 0, loading: false, deferred: false };
+  const state = { rows: [], timer: 0, loading: false, deferred: false, followUp: false };
 
   function scheduledTotal(row) {
     return platformOrder.reduce((sum, platform) => sum + (Number(row?.scheduled?.[platform]) || 0), 0);
   }
   function readCache() {
     try {
-      const raw = sessionStorage.getItem(CACHE_KEY);
+      const raw = localStorage.getItem(CACHE_KEY) || sessionStorage.getItem(CACHE_KEY);
       if (!raw) return null;
       const parsed = JSON.parse(raw);
       return Array.isArray(parsed?.rows) ? parsed.rows : null;
@@ -20,11 +20,9 @@
     }
   }
   function writeCache(rows) {
-    try {
-      sessionStorage.setItem(CACHE_KEY, JSON.stringify({ rows, at: Date.now() }));
-    } catch {
-      /* ignore quota */
-    }
+    const payload = JSON.stringify({ rows, at: Date.now() });
+    try { localStorage.setItem(CACHE_KEY, payload); } catch { /* ignore quota */ }
+    try { sessionStorage.setItem(CACHE_KEY, payload); } catch { /* ignore quota */ }
   }
   function isOverviewSoftFailure(error) {
     const name = String(error?.name || "");
@@ -142,6 +140,14 @@
       openOverviewAction(button.dataset.overviewProfile || "", button.dataset.overviewAction || "");
     }));
   }
+  function retrySoon() {
+    if (state.followUp) return;
+    state.followUp = true;
+    window.setTimeout(() => {
+      state.followUp = false;
+      load();
+    }, 15000);
+  }
   async function load(force=false) {
     if (state.loading) return;
     state.loading = true;
@@ -161,8 +167,9 @@
       const data = await json(`/api/profiles/overview?_=${Date.now()}`, { timeoutMs: 8000 });
       const rows = Array.isArray(data?.records) ? data.records : [];
       if (!rows.length) {
-        if (data?.cooling) {
+        if (data?.cooling || data?.refreshing) {
           render({ cooling: true, stale: Boolean(state.rows.length) });
+          retrySoon();
           return;
         }
         if (!state.rows.length) host.innerHTML = '<div class="all-profiles-loading">No Content Profiles returned yet.</div>';
@@ -179,6 +186,13 @@
       }));
       writeCache(state.rows);
       render({ stale: Boolean(data?.stale || data?.cooling), error: data?.cooling ? "Airtable busy" : "" });
+      if (data?.refreshing && !state.followUp) {
+        state.followUp = true;
+        window.setTimeout(() => {
+          state.followUp = false;
+          load(true);
+        }, 8000);
+      }
     } catch (error) {
       // Timeouts and 429s are soft — never paint a red "unavailable" banner on home.
       const cooling = isOverviewSoftFailure(error);
@@ -188,10 +202,16 @@
         render({ stale: true, cooling, error: cooling ? "Airtable busy" : String(error?.message || error || "") });
       } else {
         render({ cooling: true, error: "" });
+        if (cooling) retrySoon();
       }
     } finally {
       state.loading = false;
     }
+  }
+  const cachedNow = readCache();
+  if (cachedNow?.length) {
+    state.rows = cachedNow;
+    render({ stale: true });
   }
   // Let selected-profile health + home dashboard claim Airtable slots first.
   const start = () => {

@@ -230,3 +230,4 @@ UI 0.6.607 hashtag mismatch warning only; approval no longer blocked.
 2026-10-11: Hold Pipeline, Production, ideas, and music reads longer and load produce jobs by id (UI 0.6.611 / Worker 0.10.537-hot-read-hold).
 2026-10-11: NYC Comment publishes on the New York profile and keeps the failure on the card (UI 0.6.612 / Worker 0.10.539-nyc-comment).
 2026-10-11: Native photo sets show photo workflow, Pipeline will not resurrect deleted rows from stale Home data or failed silent refresh (UI 0.6.613-photo-pipeline-fresh).
+2026-10-11: All Profiles overview serves a stored counts snapshot instead of waiting on a live Airtable scan (UI 0.6.614 / Worker 0.10.541-overview-snapshot).
