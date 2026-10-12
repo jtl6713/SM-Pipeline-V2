@@ -267,3 +267,4 @@ UI 0.6.607 hashtag mismatch warning only; approval no longer blocked.
 2026-10-12: Studio UI 0.6.644-nav-eager — show New Profile + Operations in left nav immediately (fail-open; do not wait on session/profiles).
 2026-10-12: Studio UI 0.6.645-ops-queue-dense — denser Ops Studio queue rows (single-line C{n}O{n}-title ITEM, slim Open).
 2026-10-12: Studio UI 0.6.646-ops-render-section — keep Rendering Queue flex-shrink:0 so it is not crushed by Publishing backlog.
+2026-10-12: Redeploy Studio Pages UI 0.6.646-ops-render-section — custom-domain verify retry after cache-purge lag.
