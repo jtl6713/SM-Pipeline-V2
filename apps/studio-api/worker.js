@@ -626,7 +626,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.535-idea-topic-place-fallback",
+          version: "0.10.536-pipeline-read-cache",
           studio_create_vo_matched_stills_v1: true,
           studio_idea_library_typeahead_v1: true,
           studio_post_publish_release_v1: true,
@@ -1398,9 +1398,7 @@ export default {
         // specific request/status route is necessarily selected. Trigger the Make
         // safety hardening here as well so a simple /item4 page open is sufficient.
         // Never block the list UI if Make is temporarily unavailable.
-        try { await item4EnsureMakeHardeningFromWorkspaceOpen(env); } catch (error) {
-          console.warn("Item 4 Make hardening deferred from Production Request collection open", error);
-        }
+        deferItem4MakeHardening(ctx, env);
         return listProductionRequests(request, env, url, authorization);
       }
 
@@ -1503,7 +1501,7 @@ export default {
           requirePermission(authorization, "production_configure");
           return await syncProductionRequestOutputs(request, env, url, authorization);
         }
-        return listProductionRequestOutputs(request, env, url, authorization);
+        return listProductionRequestOutputs(request, env, url, authorization, ctx);
       }
 
       if (isProductionRequestOutputRecordRoute) {
@@ -2390,6 +2388,7 @@ async function airtableRequestSlot() {
   airtableNextRequestAt = Math.max(now, airtableNextRequestAt) + AIRTABLE_MIN_GAP_MS;
   if (wait) await sleepMs(wait);
 }
+
 function airtableRetryDelayMs(response, attempt) {
   const raw = String(response?.headers?.get("Retry-After") || "").trim();
   const seconds = Number(raw);
@@ -2402,7 +2401,60 @@ function airtableRetryDelayMs(response, attempt) {
     + Math.floor(Math.random() * 750);
 }
 
+const studioHotReadCache = new Map();
+
+function studioReadCachePrune() {
+  if (studioHotReadCache.size < 48) return;
+  const now = Date.now();
+  for (const [key, hit] of studioHotReadCache) {
+    if (!hit?.promise && now - Number(hit?.at || 0) > 120000) studioHotReadCache.delete(key);
+  }
+}
+
+function studioReadCacheDropPrefix(prefix) {
+  for (const key of studioHotReadCache.keys()) {
+    if (String(key).startsWith(prefix)) studioHotReadCache.delete(key);
+  }
+}
+
+function studioInvalidateHotReads(env, tableId, method) {
+  const verb = String(method || "GET").toUpperCase();
+  if (verb === "GET" || verb === "HEAD") return;
+  const id = String(tableId || "");
+  if (env?.AIRTABLE_OUTPUT_TABLE_ID && id === env.AIRTABLE_OUTPUT_TABLE_ID) {
+    studioReadCacheDropPrefix("outputs:");
+    studioReadCacheDropPrefix("schedule-grid:");
+    studioReadCacheDropPrefix("content-recent-outputs:");
+  } else if (env?.AIRTABLE_IDEA_TABLE_ID && id === env.AIRTABLE_IDEA_TABLE_ID) {
+    studioReadCacheDropPrefix("ideas:");
+  } else if (env?.AIRTABLE_CONTENT_TABLE_ID && id === env.AIRTABLE_CONTENT_TABLE_ID) {
+    studioReadCacheDropPrefix("content-labels:");
+  }
+}
+
+function studioReadCoalesce(key, ttlMs, loader) {
+  studioReadCachePrune();
+  const now = Date.now();
+  const hit = studioHotReadCache.get(key);
+  if (hit && hit.value !== undefined && now - hit.at < ttlMs) return Promise.resolve(hit.value);
+  if (hit?.promise) return hit.promise;
+  const promise = Promise.resolve().then(loader).then((value) => {
+    studioHotReadCache.set(key, { at: Date.now(), value });
+    return value;
+  }).catch((error) => {
+    const current = studioHotReadCache.get(key);
+    if (current?.promise === promise) {
+      if (current.value !== undefined) studioHotReadCache.set(key, { at: current.at, value: current.value });
+      else studioHotReadCache.delete(key);
+    }
+    throw error;
+  });
+  studioHotReadCache.set(key, { at: hit?.at || 0, value: hit?.value, promise });
+  return promise;
+}
+
 async function airtableFetch(env, tableId, pathOrParams = "", options = {}) {
+  studioInvalidateHotReads(env, tableId, options?.method);
   const suffix = pathOrParams ? (pathOrParams.startsWith("?") || pathOrParams.startsWith("/") ? pathOrParams : `/${pathOrParams}`) : "";
   const tableRef = encodeURIComponent(String(tableId));
   const endpoint = `https://api.airtable.com/v0/${env.AIRTABLE_BASE_ID}/${tableRef}${suffix}`;
@@ -3641,7 +3693,7 @@ function outputCreativeAvailable(record) {
   return studioOutputHasReviewableDeliverable(record);
 }
 
-function mapOutput(record, job = null, queueMeta = null) {
+function mapOutput(record, job = null, queueMeta = null, contentRecord = null) {
   let studioState = normalizedOutputState(record);
   const renderStatus = String(f(record, "Render_Status") || "").trim();
   const hasJob = Boolean(String(f(record, "Remotion_Job_ID") || "").trim());
@@ -3735,7 +3787,8 @@ function mapOutput(record, job = null, queueMeta = null) {
     youtube_processing_progress_percent: f(record, "YouTube_Processing_Progress_Percent"),
     content_item_links: f(record, "Content_Item") || [],
     content_item_id: Array.isArray(f(record, "Content_Item")) ? (f(record, "Content_Item")[0] || null) : null,
-    content_title: f(record, "Output_Title") || null,
+    content_title: (contentRecord && f(contentRecord, "Content_Title")) || f(record, "Output_Title") || null,
+    content_number: contentRecord ? (f(contentRecord, "Content_ID") || null) : null,
     content_profile_links: f(record, "Content_Profile") || [],
     carousel_slide_links: f(record, "Carousel Slides") || [],
     creative_manifest_present: Boolean(f(record, "Creative_Render_Manifest_JSON")),
@@ -3927,12 +3980,16 @@ async function brandLogo(request, env, authorization) {
 
 async function listIdeas(request, env, url, authorization) {
   const profile = await resolveWorkingContentProfile(env, authorization, requestedProfileId(url));
-  const records = await listRecords(env, env.AIRTABLE_IDEA_TABLE_ID, {
-    limit: clampLimit(url),
-    sortField: "Create_Date",
-    filterFormula: contentProfileFilterFormula(profile),
+  const limit = clampLimit(url);
+  const payload = await studioReadCoalesce(`ideas:${profile.id}:${limit}`, 8000, async () => {
+    const records = await listRecords(env, env.AIRTABLE_IDEA_TABLE_ID, {
+      limit,
+      sortField: "Create_Date",
+      filterFormula: contentProfileFilterFormula(profile),
+    });
+    return { records: records.map(mapIdea), profile: mapStudioContentProfile(profile) };
   });
-  return respond(request, env, { ok: true, records: records.map(mapIdea), profile: mapStudioContentProfile(profile) });
+  return respond(request, env, { ok: true, ...payload });
 }
 
 function airtableFormulaEscape(value) {
@@ -4190,9 +4247,9 @@ async function listPipelineOutputsForContentIds(env, profile, contentIds, listOp
   const ids = [...new Set((contentIds || []).filter((id) => /^rec[A-Za-z0-9]+$/.test(String(id || ""))))];
   if (!ids.length) return [];
   const profileFormula = contentProfileFilterFormula(profile);
-  const rows = [];
-  for (let index = 0; index < ids.length; index += 20) {
-    const batch = ids.slice(index, index + 20);
+  const batches = [];
+  for (let index = 0; index < ids.length; index += 40) batches.push(ids.slice(index, index + 40));
+  const pages = await mapPool(batches, 2, async (batch) => {
     const contentOr = batch
       .map((id) => `FIND("${airtableFormulaEscape(id)}", ARRAYJOIN({Content_Item})&"")`)
       .join(",");
@@ -4208,14 +4265,15 @@ async function listPipelineOutputsForContentIds(env, profile, contentIds, listOp
       console.warn("pipeline sibling-output scan failed", error);
       return [];
     });
-    rows.push(...batchRows);
-  }
-  return rows;
+    return batchRows;
+  });
+  return pages.flat();
 }
 
-async function listPipelineContentByIds(env, contentIds = []) {
+async function listPipelineContentByIds(env, contentIds = [], fields = null) {
   const ids = [...new Set((contentIds || []).filter((id) => /^rec[A-Za-z0-9]+$/.test(String(id || ""))))];
   if (!ids.length) return [];
+  const fieldList = Array.isArray(fields) ? fields.filter(Boolean) : [];
   const rows = [];
   for (let index = 0; index < ids.length; index += 40) {
     const batch = ids.slice(index, index + 40);
@@ -4224,6 +4282,7 @@ async function listPipelineContentByIds(env, contentIds = []) {
     const batchRows = await listRecords(env, env.AIRTABLE_CONTENT_TABLE_ID, {
       limit: batch.length,
       filterFormula,
+      ...(fieldList.length ? { fields: fieldList } : {}),
     }).catch((error) => {
       console.warn("pipeline open-content scan failed", error);
       return [];
@@ -5326,12 +5385,10 @@ function assertEditableProductionRequest(parent) {
   }
 }
 
-async function listProductionRequestOutputs(request, env, url, authorization) {
+async function listProductionRequestOutputs(request, env, url, authorization, ctx) {
   // v0.10.6: this endpoint is part of every Production workspace data refresh.
-  // Force the P3 single-parent hardener here so UI refresh semantics cannot bypass it.
-  try { await item4EnsureMakeHardeningFromWorkspaceOpen(env); } catch (error) {
-    console.warn("Item 4 Make hardening deferred from Production Request Outputs list", error);
-  }
+  // Run the P3 hardener after the response so the outputs list is not waiting on Make.
+  deferItem4MakeHardening(ctx, env);
   const productionRequestId = productionRequestIdFromOutputsPath(url);
   const parent = await loadAuthorizedProductionRequest(env, productionRequestId, authorization);
   const rows = await outputRowsForProductionRequest(env, productionRequestId);
@@ -11600,12 +11657,18 @@ async function loadStudioProductionJobsForOutputs(env, records) {
       contentToRequest.set(parentId, row.id);
     }
   }
-  for (const id of directIds.slice(0, 25)) {
-    if (jobs.has(id)) continue;
-    try {
-      const requestRecord = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, id);
-      jobs.set(id, parseStudioProductionJob(requestRecord));
-    } catch {}
+  const missingJobIds = directIds.filter((id) => !jobs.has(id)).slice(0, 25);
+  if (missingJobIds.length) {
+    const formula = missingJobIds.length === 1
+      ? `RECORD_ID()="${airtableFormulaEscape(missingJobIds[0])}"`
+      : `OR(${missingJobIds.map((id) => `RECORD_ID()="${airtableFormulaEscape(id)}"`).join(",")})`;
+    const fetched = await listRecords(env, PRODUCTION_REQUEST_TABLE, {
+      limit: missingJobIds.length,
+      filterFormula: formula,
+    }).catch(() => []);
+    for (const requestRecord of fetched || []) {
+      if (requestRecord?.id) jobs.set(requestRecord.id, parseStudioProductionJob(requestRecord));
+    }
   }
   return {
     get(record) {
@@ -13641,12 +13704,14 @@ async function studioStampRenderQueueWaiting(env, rowOrId) {
   });
 }
 
-async function studioLoadRenderQueueCandidates(env, { limit = 80 } = {}) {
+async function studioLoadRenderQueueCandidates(env, { limit = 80, fields = null } = {}) {
+  const fieldList = Array.isArray(fields) ? fields.filter(Boolean) : [];
   const rows = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
     limit,
     sortField: "Output_ID",
     sortDirection: "asc",
     filterFormula: STUDIO_RENDER_QUEUE_CANDIDATE_FORMULA,
+    ...(fieldList.length ? { fields: fieldList } : {}),
   }).catch(() => []);
   return sortRenderQueueCandidates(rows, f);
 }
@@ -15918,10 +15983,6 @@ function mapProductionRequestSummary(record, ideaTitle = null) {
 }
 
 async function listProductionRequests(request, env, url, authorization) {
-  // v0.10.6: collection refresh is a guaranteed hardening entry point.
-  try { await item4EnsureMakeHardeningFromWorkspaceOpen(env); } catch (error) {
-    console.warn("Item 4 Make hardening deferred from Production Request list", error);
-  }
   const records = await listOpenProductionRequests(env, { limit: clampLimit(url, 100, 100) });
   const profile = await resolveWorkingContentProfile(env, authorization, requestedProfileId(url));
   const profileBrandIds = new Set(arrayOrEmpty(f(profile, "Brand")));
@@ -24659,24 +24720,22 @@ async function runWaitingIdeaPhotoMatches(env, { limit = 8 } = {}) {
 async function listContent(request, env, url, authorization) {
   const profile = await resolveWorkingContentProfile(env, authorization, requestedProfileId(url));
   const profileFormula = contentProfileFilterFormula(profile);
-  const [newest, openOutputs] = await Promise.all([
+  const [newest, openPack, recentOutputs] = await Promise.all([
     listRecords(env, env.AIRTABLE_CONTENT_TABLE_ID, {
       limit: clampLimit(url),
       sortField: "Created_At",
       filterFormula: profileFormula,
     }),
-    listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
-      limit: STUDIO_PIPELINE_OPEN_OUTPUT_LIMIT,
+    loadOpenPipelineOutputPack(env, profile),
+    studioReadCoalesce(`content-recent-outputs:${profile.id}`, 20000, () => listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
+      limit: 200,
+      filterFormula: profileFormula,
       sortField: "Output_ID",
       sortDirection: "desc",
-      fields: ["Content_Item", "Output_ID", "Output_Status", "Publish_Status", "Published_At", "TikTok_Draft_Status", "Manual_Fallback_Required"],
-      filterFormula: studioPipelineOpenOutputFormula(profile),
-    }).catch((error) => {
-      console.warn("content open-output scan failed", error);
-      return [];
-    }),
+      fields: OUTPUT_LIST_FIELDS,
+    }).catch(() => [])),
   ]);
-  const openContentIds = studioPipelineContentIdsFromOutputs(openOutputs);
+  const openContentIds = openPack.openContentIds;
   const missingIds = openContentIds.filter((id) => !newest.some((row) => row.id === id));
   const openContent = missingIds.length ? await listPipelineContentByIds(env, missingIds) : [];
   const byId = new Map();
@@ -24684,32 +24743,16 @@ async function listContent(request, env, url, authorization) {
     if (row?.id) byId.set(row.id, row);
   }
   const records = [...byId.values()];
+  const outputs = mergePipelineOutputRecords(
+    recentOutputs,
+    mergePipelineOutputRecords(openPack.open, openPack.siblings),
+  );
   const outputsByContent = new Map();
-  try {
-    const siblingOutputs = openContentIds.length
-      ? await listPipelineOutputsForContentIds(env, profile, openContentIds, {
-          fields: ["Output_ID", "Content_Item", "Platform", "Output_Status", "Publish_Status", "Published_At"],
-          sortField: "Output_ID",
-          sortDirection: "desc",
-        })
-      : [];
-    const outputs = mergePipelineOutputRecords(
-      await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
-        limit: Math.max(200, clampLimit(url, 300, 300)),
-        filterFormula: profileFormula,
-        sortField: "Output_ID",
-        sortDirection: "desc",
-      }).catch(() => []),
-      siblingOutputs,
-    );
-    for (const output of outputs) {
-      const contentId = studioFirstLinkedId(f(output, "Content_Item"));
-      if (!contentId) continue;
-      if (!outputsByContent.has(contentId)) outputsByContent.set(contentId, []);
-      outputsByContent.get(contentId).push(output);
-    }
-  } catch (error) {
-    console.warn("content lifecycle output rollup skipped", error);
+  for (const output of outputs) {
+    const contentId = studioFirstLinkedId(f(output, "Content_Item"));
+    if (!contentId) continue;
+    if (!outputsByContent.has(contentId)) outputsByContent.set(contentId, []);
+    outputsByContent.get(contentId).push(output);
   }
   return respond(request, env, {
     ok: true,
@@ -24823,6 +24866,7 @@ async function listOutputScheduleGrid(request, env, url, authorization) {
     throw new HttpError(400, "Schedule grid range cannot exceed 8 days");
   }
 
+  const body = await studioReadCoalesce(`schedule-grid:${profile.id}:${startMs}:${endMs}`, 25000, async () => {
   const startFloor = new Date(startMs - 1000).toISOString();
   const endIso = new Date(endMs).toISOString();
   const profileFormula = contentProfileFilterFormula(profile);
@@ -24844,7 +24888,7 @@ async function listOutputScheduleGrid(request, env, url, authorization) {
   });
   const contentById = await scheduleGridContentById(env, records);
 
-  return respond(request, env, {
+  return {
     ok: true,
     start: new Date(startMs).toISOString(),
     end: endIso,
@@ -24865,7 +24909,110 @@ async function listOutputScheduleGrid(request, env, url, authorization) {
       };
     }),
     profile: mapStudioContentProfile(profile),
+  };
   });
+  return respond(request, env, body);
+}
+
+const PIPELINE_OUTPUT_LIST_CACHE_MS = 1500;
+const PIPELINE_OPEN_PACK_CACHE_MS = 30000;
+let pipelineListHealAt = 0;
+
+async function loadOpenPipelineOutputPack(env, profile) {
+  const listOpts = {
+    fields: OUTPUT_LIST_FIELDS,
+    sortField: "Output_ID",
+    sortDirection: "desc",
+  };
+  return studioReadCoalesce(`pipeline-open:${profile?.id || "default"}`, PIPELINE_OPEN_PACK_CACHE_MS, async () => {
+    const open = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
+      ...listOpts,
+      // Cap used to be max(limit, 250) newest-open only; older unfinished packages
+      // (CI 143 / Output 847 Manual Fallback) aged out once >250 Ready-to-Schedule rows existed.
+      limit: STUDIO_PIPELINE_OPEN_OUTPUT_LIMIT,
+      filterFormula: studioPipelineOpenOutputFormula(profile),
+    }).catch((error) => {
+      console.warn("pipeline open-output scan failed", error);
+      return [];
+    });
+    const openContentIds = studioPipelineContentIdsFromOutputs(open);
+    // Pull every sibling on unfinished packages (Published FB/YT next to TikTok draft).
+    const siblings = openContentIds.length
+      ? await listPipelineOutputsForContentIds(env, profile, openContentIds, listOpts)
+      : [];
+    return { open, siblings, openContentIds };
+  });
+}
+
+async function pipelineContentLabelsById(env, profile, contentIds) {
+  const ids = [...new Set((contentIds || []).filter((id) => /^rec[A-Za-z0-9]+$/.test(String(id || ""))))].sort();
+  if (!ids.length) return new Map();
+  const rows = await studioReadCoalesce(
+    `content-labels:${profile?.id || "default"}:${ids.join(",")}`,
+    30000,
+    () => listPipelineContentByIds(env, ids, ["Content_ID", "Content_Title"]),
+  );
+  const labels = new Map();
+  for (const row of rows || []) {
+    if (row?.id) labels.set(row.id, row);
+  }
+  return labels;
+}
+
+function schedulePipelineListHeal(ctx, env, records) {
+  if (!ctx || typeof ctx.waitUntil !== "function") return;
+  const now = Date.now();
+  if (now - pipelineListHealAt < 60000) return;
+  pipelineListHealAt = now;
+  ctx.waitUntil((async () => {
+    let manualLiveHealBudget = 5;
+    let staleManualHealBudget = 8;
+    for (const record of (records || []).slice(0, 40)) {
+      let current = record;
+      try {
+        current = await phase6RestoreProductionReviewReady(env, current);
+        if (staleManualHealBudget > 0 && staleManualFlagsOnPublishedFields(current?.fields || current)) {
+          staleManualHealBudget -= 1;
+          current = await healStaleManualFlagsOnPublishedRecord(env, current);
+        }
+        if (manualLiveHealBudget > 0 && youtubeManualLiveVideoHealCandidate(current?.fields || current)) {
+          manualLiveHealBudget -= 1;
+          current = await healYoutubeManualWithLiveVideoRecord(env, current, { autoHealed: true });
+        }
+      } catch (error) {
+        console.warn("pipeline list heal skipped", record?.id, error);
+      }
+    }
+    const stalled = (records || []).filter((record) => {
+      const output = String(f(record, "Output_Status") || "");
+      const render = String(f(record, "Render_Status") || "");
+      if (isRenderQueueCandidateStatus(render)) return false;
+      return /^in production$/i.test(output)
+        && !String(f(record, "Remotion_Job_ID") || "").trim();
+    });
+    if (!stalled.length) return;
+    const requestIds = [];
+    for (const record of stalled) {
+      let requestId = studioOutputProductionRequestId(record);
+      if (!requestId) {
+        const contentId = studioFirstLinkedId(f(record, "Content_Item"));
+        if (!contentId) continue;
+        try {
+          const parent = await airtableFetch(env, env.AIRTABLE_CONTENT_TABLE_ID, contentId);
+          requestId = studioFirstLinkedId(f(parent, "Production_Request"))
+            || studioFirstLinkedId(f(parent, "Production Requests"));
+        } catch {
+          continue;
+        }
+      }
+      if (requestId && !requestIds.includes(requestId)) requestIds.push(requestId);
+    }
+    for (const requestId of requestIds.slice(0, 4)) {
+      try { await enqueueStudioProductionJob(env, requestId); } catch (error) {
+        console.warn("Pipeline produce enqueue failed", requestId, error);
+      }
+    }
+  })());
 }
 
 async function listOutputs(request, env, url, authorization, ctx = null) {
@@ -24876,12 +25023,13 @@ async function listOutputs(request, env, url, authorization, ctx = null) {
   // in Archive (UI partition) when still inside newest-N; aged complete packages
   // are not re-fetched.
   const limit = clampLimit(url, 200, 250);
+  const reviewOnly = url.searchParams.get("mode") === "review";
+  const payload = await studioReadCoalesce(`outputs:${profile.id}:${limit}:${reviewOnly ? "review" : "full"}`, PIPELINE_OUTPUT_LIST_CACHE_MS, async () => {
   const listOpts = {
     fields: OUTPUT_LIST_FIELDS,
     sortField: "Output_ID",
     sortDirection: "desc",
   };
-  const reviewOnly = url.searchParams.get("mode") === "review";
   let records;
   if (reviewOnly) {
     // Match Pipeline / All-Profiles "Awaiting Approval": Ready for Review or
@@ -24894,101 +25042,46 @@ async function listOutputs(request, env, url, authorization, ctx = null) {
       filterFormula: profileFormula ? `AND(${profileFormula},${reviewFormula})` : reviewFormula,
     });
   } else {
-  const [newest, open] = await Promise.all([
-    listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
-      ...listOpts,
-      limit,
-      filterFormula: contentProfileFilterFormula(profile),
-    }),
-    listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
-      ...listOpts,
-      // Cap used to be max(limit, 250) newest-open only; older unfinished packages
-      // (CI 143 / Output 847 Manual Fallback) aged out once >250 Ready-to-Schedule rows existed.
-      limit: STUDIO_PIPELINE_OPEN_OUTPUT_LIMIT,
-      filterFormula: studioPipelineOpenOutputFormula(profile),
-    }).catch((error) => {
-      console.warn("pipeline open-output scan failed", error);
-      return [];
-    }),
-  ]);
-  // Pull every sibling on unfinished packages (Published FB/YT next to TikTok draft).
-  const openContentIds = studioPipelineContentIdsFromOutputs(open);
-  const siblings = openContentIds.length
-    ? await listPipelineOutputsForContentIds(env, profile, openContentIds, listOpts)
-    : [];
-  records = mergePipelineOutputRecords(newest, mergePipelineOutputRecords(open, siblings));
+    const [newest, openPack] = await Promise.all([
+      listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
+        ...listOpts,
+        limit,
+        filterFormula: contentProfileFilterFormula(profile),
+      }),
+      loadOpenPipelineOutputPack(env, profile),
+    ]);
+    records = mergePipelineOutputRecords(newest, mergePipelineOutputRecords(openPack.open, openPack.siblings));
   }
   // Return the Pipeline table immediately. Per-row heals / produce enqueue run in
   // waitUntil so a heal storm cannot leave Studio stuck on Loading outputs…
-  const jobs = await loadStudioProductionJobsForOutputs(env, records);
-  if (ctx && typeof ctx.waitUntil === "function") {
-    ctx.waitUntil((async () => {
-      let manualLiveHealBudget = 5;
-      let staleManualHealBudget = 8;
-      for (const record of records.slice(0, 40)) {
-        let current = record;
-        try {
-          current = await phase6RestoreProductionReviewReady(env, current);
-          if (staleManualHealBudget > 0 && staleManualFlagsOnPublishedFields(current?.fields || current)) {
-            staleManualHealBudget -= 1;
-            current = await healStaleManualFlagsOnPublishedRecord(env, current);
-          }
-          if (manualLiveHealBudget > 0 && youtubeManualLiveVideoHealCandidate(current?.fields || current)) {
-            manualLiveHealBudget -= 1;
-            current = await healYoutubeManualWithLiveVideoRecord(env, current, { autoHealed: true });
-          }
-        } catch (error) {
-          console.warn("pipeline list heal skipped", record?.id, error);
-        }
-      }
-      const stalled = records.filter((record) => {
-        const output = String(f(record, "Output_Status") || "");
-        const render = String(f(record, "Render_Status") || "");
-        // Waiting / Ready package rows are intentionally queued — do not re-enqueue produce.
-        if (isRenderQueueCandidateStatus(render)) return false;
-        return /^in production$/i.test(output)
-          && !String(f(record, "Remotion_Job_ID") || "").trim();
-      });
-      if (!stalled.length) return;
-      const requestIds = [];
-      for (const record of stalled) {
-        let requestId = studioOutputProductionRequestId(record);
-        if (!requestId) {
-          const contentId = studioFirstLinkedId(f(record, "Content_Item"));
-          if (!contentId) continue;
-          try {
-            const parent = await airtableFetch(env, env.AIRTABLE_CONTENT_TABLE_ID, contentId);
-            requestId = studioFirstLinkedId(f(parent, "Production_Request"))
-              || studioFirstLinkedId(f(parent, "Production Requests"));
-          } catch {
-            continue;
-          }
-        }
-        if (requestId && !requestIds.includes(requestId)) requestIds.push(requestId);
-      }
-      for (const requestId of requestIds.slice(0, 4)) {
-        try { await enqueueStudioProductionJob(env, requestId); } catch (error) {
-          console.warn("Pipeline produce enqueue failed", requestId, error);
-        }
-      }
-    })());
-  }
-  const queueCandidates = await studioLoadRenderQueueCandidates(env, { limit: 100 }).catch(() => []);
-  const activeHolds = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
-    limit: 16,
-    filterFormula: STUDIO_RENDER_QUEUE_ACTIVE_FORMULA,
-  }).catch(() => []);
+  if (!reviewOnly) schedulePipelineListHeal(ctx, env, records);
+  const [jobs, queueCandidates, activeHolds, labels] = await Promise.all([
+    loadStudioProductionJobsForOutputs(env, records),
+    studioLoadRenderQueueCandidates(env, { limit: 100, fields: OUTPUT_LIST_FIELDS }).catch(() => []),
+    listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
+      limit: 16,
+      fields: OUTPUT_LIST_FIELDS,
+      filterFormula: STUDIO_RENDER_QUEUE_ACTIVE_FORMULA,
+    }).catch(() => []),
+    reviewOnly ? Promise.resolve(new Map()) : pipelineContentLabelsById(env, profile, studioPipelineContentIdsFromOutputs(records)),
+  ]);
   const { byId: renderQueueById, total: renderQueueTotal } = assignRenderQueuePositions(
     queueCandidates,
     f,
     { activeHolds },
   );
-  return respond(request, env, {
-    ok: true,
-    records: records.map((record) => mapOutput(record, jobs.get(record), renderQueueById.get(record.id) || null)),
+  return {
+    records: records.map((record) => mapOutput(
+      record,
+      jobs.get(record),
+      renderQueueById.get(record.id) || null,
+      labels.get(studioFirstLinkedId(f(record, "Content_Item"))) || null,
+    )),
     profile: mapStudioContentProfile(profile),
     render_queue_total: renderQueueTotal,
+  };
   });
+  return respond(request, env, { ok: true, ...payload });
 }
 
 async function listMusic(request, env, url) {
@@ -27193,6 +27286,13 @@ async function item4RecoverStaleR2BaselineReads(env, staleMs = 180000) {
     }
   }
   return { ok: true, recovered, inspected: rows.length };
+}
+
+function deferItem4MakeHardening(ctx, env) {
+  const work = item4EnsureMakeHardeningFromWorkspaceOpen(env).catch((error) => {
+    console.warn("Item 4 Make hardening deferred", error);
+  });
+  if (ctx && typeof ctx.waitUntil === "function") ctx.waitUntil(work);
 }
 
 async function item4EnsureMakeHardeningFromWorkspaceOpen(env, options = {}) {

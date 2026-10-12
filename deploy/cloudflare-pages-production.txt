@@ -226,3 +226,4 @@ UI 0.6.607 hashtag mismatch warning only; approval no longer blocked.
 2026-10-11: Fix Approve All selected-profile GET polling (NYC batch 509), keep approval button progress until server confirms completion; UI 0.6.608-approve-profile-poll.
 
 2026-10-12: Manage Idea library search keeps museu/Museum hits; stale loads cannot clear picker (UI 0.6.609 / Worker 0.10.534).
+2026-10-11: Cache Pipeline Airtable reads, stop the 8s outputs+content poll, defer Make hardening off Production lists (UI 0.6.610 / Worker 0.10.536-pipeline-read-cache).

@@ -263,7 +263,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.609-idea-library-typeahead";
+  const BUILD_ID = "item4-0.6.610-pipeline-read-cache";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -387,7 +387,7 @@
   const operationsAnalyticsQueue = { running: false, stop: false };
   const operationsActivityOpenKeys = new Set();
   let operationsActivityLogsBound = false;
-  const PIPELINE_POLL_MS = 8000;
+  const PIPELINE_POLL_MS = 20000;
   const PRODUCTION_POLL_MS = 8000;
   let productionPollTimer = null;
   let productionPollInFlight = false;
@@ -19198,8 +19198,8 @@ function timedScriptAssetLabel(asset, index) {
   function pipelineContentGroupLabel(records) {
     const first = records[0] || {};
     const content = pipelineContentRecordForGroup(records);
-    const contentNumber = String(content?.content_id ?? "").trim();
-    const title = String(content?.title || first.output_title || first.content_title || "").trim();
+    const contentNumber = String(content?.content_id ?? first.content_number ?? "").trim();
+    const title = String(content?.title || first.content_title || first.output_title || "").trim();
     const count = records.length;
     const suffix = `${count} output${count === 1 ? "" : "s"}`;
     const dest = pipelineDestinationProgress(records);
@@ -20660,15 +20660,12 @@ function timedScriptAssetLabel(asset, index) {
     try {
       const scheduleGeneration = pipelineScheduleGridLoadGeneration;
       const schedulePath = pipelineScheduleGridApiPath();
-      const [outputsSettled, contentSettled, scheduleSettled] = await Promise.all([
+      const [outputsSettled, scheduleSettled] = await Promise.all([
         // Always load the full Pipeline page. A lean mode=review fetch left
         // All/Active/Rendering counts at 0 (counts are from loaded rows only)
         // and missed Ready-for-Review rows the home "needs approval" link uses.
-        api("/api/outputs?limit=250", { timeoutMs: 20000, retries: 2 }).then(
-          (value) => ({ ok: true, value }),
-          (error) => ({ ok: false, error }),
-        ),
-        api("/api/content?limit=100", { timeoutMs: 20000, retries: 2 }).then(
+        // Content id/title ride on each output, so this poll does not also call /api/content.
+        api("/api/outputs?limit=250", { timeoutMs: 20000, retries: 1 }).then(
           (value) => ({ ok: true, value }),
           (error) => ({ ok: false, error }),
         ),
@@ -20679,7 +20676,7 @@ function timedScriptAssetLabel(asset, index) {
       ]);
       if (!outputsSettled.ok) throw outputsSettled.error || new Error("Outputs unavailable");
       const outputsResult = outputsSettled.value;
-      const contentResult = contentSettled.ok ? contentSettled.value : { records: [] };
+      const contentResult = { records: [] };
       const scheduleResult = scheduleSettled.ok
         ? scheduleSettled.value
         : { records: [], schedule_error: scheduleSettled.error?.message || "Schedule view unavailable" };
