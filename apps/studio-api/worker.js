@@ -41432,7 +41432,7 @@ async function getStudioOperationsQueue(request, env, authorization) {
     })),
     settleList("activeHolds", listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
       limit: 16,
-      fields: OPS_QUEUE_OUTPUT_FIELDS.filter((name) => name !== "Studio_Preview_Updated_At" && name !== "Last_Publish_Attempt_At"),
+      fields: OPS_QUEUE_OUTPUT_FIELDS,
       filterFormula: STUDIO_RENDER_QUEUE_ACTIVE_FORMULA,
     })),
   ]);
