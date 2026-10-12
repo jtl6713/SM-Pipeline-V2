@@ -117,7 +117,8 @@ FB_BRANCHES = (
     OrchBranch(
         "FB2 Retry",
         "fb2",
-        "FB — Retry Eligible",
+        None,  # Airtable retry view may omit manually recovered eligible records.
+
         FB_PRE_RETRY + 'OR({Publish_Error_Stage}="FB2_PUBLISH",{Publish_Error_Stage}="FB2_COMMIT")))',
     ),
     OrchBranch("FB2R Retry", "fb2r", "FB — Retry Eligible", FB_PRE_RETRY + 'LEFT({Publish_Error_Stage},4)="FB2R"))'),
