@@ -149,11 +149,31 @@ jobs:
           node - <<'NODE'
           const fs = require('fs');
           const html = fs.readFileSync('apps/studio-web/index.html', 'utf8');
-          const jsMatch = html.match(/src=["'](\/assets\/app-item4-[^"']+\.js(?:\?[^"']*)?)/);
+          // Prefer classic <script src>, else studioLazyManifest JSON (Home-first lazy load).
+          let expectedJsUrl = null;
+          const scriptSrc = html.match(/src=["'](\/assets\/app-item4-[^"']+\.js(?:\?[^"']*)?)/);
+          if (scriptSrc) {
+            expectedJsUrl = scriptSrc[1];
+          } else {
+            const manifestMatch = html.match(/id="studioLazyManifest"[^>]*>\s*([\s\S]*?)\s*<\/script>/i);
+            if (manifestMatch) {
+              const urls = [];
+              const walk = (value) => {
+                if (typeof value === 'string') urls.push(value);
+                else if (Array.isArray(value)) value.forEach(walk);
+                else if (value && typeof value === 'object') Object.values(value).forEach(walk);
+              };
+              walk(JSON.parse(manifestMatch[1]));
+              expectedJsUrl = urls.find((u) => /\/assets\/app-item4-[^"'?\s]+\.js(?:\?[^"'\s]*)?$/i.test(u) || /\/assets\/app-item4-[^"'\s]+\.js/i.test(u)) || null;
+            }
+          }
+          if (!expectedJsUrl) {
+            const loose = html.match(/(\/assets\/app-item4-[^"'\s]+\.js(?:\?[^"'\s]*)?)/);
+            if (loose) expectedJsUrl = loose[1];
+          }
           const densityCssMatch = html.match(/href=["'](\/assets\/home-density-0517\.css(?:\?[^"']*)?)/);
           const labelMatch = html.match(/UI build (\d+\.\d+\.\d+)/);
-          if (!jsMatch || !densityCssMatch || !labelMatch) throw new Error('index.html is missing app-item4 script, cache-busted home density CSS, or UI build label');
-          const expectedJsUrl = jsMatch[1];
+          if (!expectedJsUrl || !densityCssMatch || !labelMatch) throw new Error('index.html is missing app-item4 script, cache-busted home density CSS, or UI build label');
           const expectedJsPath = expectedJsUrl.split('?')[0];
           const expectedDensityCssUrl = densityCssMatch[1];
           const expectedDensityCssPath = expectedDensityCssUrl.split('?')[0];
