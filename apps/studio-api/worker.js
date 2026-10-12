@@ -626,7 +626,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.547-library-search-all-hits",
+          version: "0.10.548-timeline-auto-prepare",
           studio_create_vo_matched_stills_v1: true,
           studio_idea_library_typeahead_v1: true,
           studio_idea_library_search_all_hits_v1: true,
@@ -1918,6 +1918,14 @@ export default {
         item4Drain = await item4DrainAllPendingWork(env, { maxMs: ITEM4_DRAIN_CRON_BUDGET_MS });
       } catch (error) {
         console.warn("item4 pending crop drain cron failed", error);
+      }
+      // Timeline drafts can sit at Variant Status=None with a Ready plan when the
+      // Create Timeline waitUntil prepare never started queue rows. Drain will not
+      // see them, so this heal must run even when the media drain was idle.
+      try {
+        await item4HealTimelineAutoPrepare(env, ctx);
+      } catch (error) {
+        console.warn("item4 timeline auto-prepare heal failed", error);
       }
       if (item4Drain?.request_ids?.length) {
         try {
@@ -14870,6 +14878,70 @@ async function item4ResumePendingVariants(env, recordId, record = null) {
     ready_count: Number(reconciled.manifest?.ready_count || 0),
     target_count: Number(reconciled.manifest?.target_count || 0),
   };
+}
+
+function item4TimelineAutoPrepareEligible(record) {
+  if (!record?.id) return false;
+  const notes = String(f(record, "Production_Notes") || "");
+  if (!/idea-vo-timeline=/i.test(notes) && !/\[timed-script\]\s*\{/i.test(notes)) return false;
+  const requestStatus = String(f(record, "Request_Status") || "").trim();
+  if (!["Draft", "Ready"].includes(requestStatus)) return false;
+  if (String(f(record, "Studio_Output_Plan_Status") || "").trim() !== "Ready") return false;
+  const variantStatus = String(f(record, "Studio_Variant_Status") || "").trim() || "None";
+  if (variantStatus !== "None") return false;
+  const plan = item4ParseJson(f(record, "Studio_Output_Plan_JSON"), null);
+  if (!plan?.items?.length) return false;
+  const assets = item4AssetManifest(record);
+  return assets.length > 0;
+}
+
+async function item4HealTimelineAutoPrepare(env, ctx = null) {
+  const authorization = await resolveStudioCronAuthorization(env).catch((error) => {
+    console.warn("timeline auto-prepare auth failed", error);
+    return null;
+  });
+  if (!authorization?.authorized) return [];
+
+  const rows = await listRecords(env, PRODUCTION_REQUEST_TABLE, {
+    limit: 8,
+    sortField: "Updated_At",
+    sortDirection: "desc",
+    filterFormula: 'AND({Test_Run_ID}=BLANK(),OR({Request_Status}="Draft",{Request_Status}="Ready"),{Studio_Output_Plan_Status}="Ready",OR({Studio_Variant_Status}="None",{Studio_Variant_Status}=BLANK()),OR(FIND("idea-vo-timeline=",{Production_Notes}),FIND("[timed-script]",{Production_Notes})))',
+  }).catch(() => []);
+
+  const pulses = [];
+  for (const row of rows || []) {
+    if (!item4TimelineAutoPrepareEligible(row)) continue;
+    try {
+      // Resume refuses to create the first queue rows (prepare-not-started).
+      // Explicitly start Prepare the same way Create Timeline's waitUntil does.
+      const variantsCall = studioInternalJsonRequest(`/api/production-requests/${row.id}/variants`, {});
+      const result = await prepareItem4Variants(
+        variantsCall.request,
+        env,
+        variantsCall.url,
+        authorization,
+        ctx
+      );
+      pulses.push({
+        id: row.id,
+        reason: "timeline-auto-prepare",
+        status: result?.status || null,
+        ready: result?.progress?.ready ?? null,
+        target: result?.progress?.target ?? null,
+      });
+    } catch (error) {
+      pulses.push({
+        id: row.id,
+        reason: "timeline-auto-prepare",
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+  if (pulses.length) {
+    console.log("Studio timeline auto-prepare heal", JSON.stringify({ count: pulses.length, pulses }));
+  }
+  return pulses;
 }
 
 async function item4HealIncompletePreparingVariants(env) {

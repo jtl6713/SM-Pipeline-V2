@@ -245,6 +245,9 @@ test("Worker advertises the idea timed-script route", async () => {
   assert.match(worker, /from "\.\/idea-timed-script\.mjs"/);
   assert.match(worker, /ready_for_approval/);
   assert.match(worker, /idea-vo-timeline=1/);
+  assert.match(worker, /item4HealTimelineAutoPrepare/);
+  assert.match(worker, /item4TimelineAutoPrepareEligible/);
+  assert.match(app, /maybeAutoPrepareTimelineVariants/);
   assert.match(worker, /waitAutonomousVariantsReady/);
   assert.match(worker, /createIdeaTimedScriptRoute\(request, env, url, authorization, ctx\)/);
   assert.match(worker, /acceptSingleImageFeedPost/);
