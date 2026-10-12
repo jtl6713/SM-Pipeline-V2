@@ -626,7 +626,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.538-lean-native-review",
+          version: "0.10.539-nyc-comment",
           studio_create_vo_matched_stills_v1: true,
           studio_idea_library_typeahead_v1: true,
           studio_post_publish_release_v1: true,

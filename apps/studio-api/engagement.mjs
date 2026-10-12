@@ -163,8 +163,8 @@ export const GENERIC_PRAISE_PATTERN =
 
 export function normalizeEngagementProfile(value) {
   const raw = String(value || "").trim().toLowerCase();
-  if (raw === "la" || raw === "los angeles" || raw === "losangeles" || raw === "los angeles shining") return "la";
-  if (raw === "nyc" || raw === "new york" || raw === "newyork" || raw === "new york shining") return "nyc";
+  if (raw === "la" || raw === "los angeles" || raw === "losangeles" || raw === "los-angeles" || raw === "los angeles shining") return "la";
+  if (raw === "nyc" || raw === "new york" || raw === "newyork" || raw === "new-york" || raw === "new york shining") return "nyc";
   if (raw === "miami" || raw === "miami shining" || raw === "miamishining") return "miami";
   return "chicago";
 }

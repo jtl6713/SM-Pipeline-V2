@@ -244,6 +244,23 @@
     return Boolean($("engagementStageB")?.checked);
   }
 
+  function pinEngagementResult(targetId, message, failed) {
+    const text = String(message || "").trim();
+    if (!text) return;
+    const card = targetId
+      ? document.querySelector(`#engagementRecommendations .engagement-card[data-target-id="${CSS.escape(targetId)}"]`)
+      : null;
+    const note = document.createElement("p");
+    note.className = failed ? "engagement-status is-error" : "engagement-status";
+    note.textContent = text;
+    if (card) {
+      card.insertBefore(note, card.firstChild);
+      return;
+    }
+    const history = $("engagementHistory");
+    if (history) history.prepend(note);
+  }
+
   async function runAction(action, targetId) {
     const payload = {
       action,
@@ -252,14 +269,14 @@
       // Send checkbox state so Miami/etc Stage B is persisted even if Save was skipped.
       stage_b_enabled: stageBChecked(),
     };
-    setStatus(`Running ${action}…`);
-    const history = $("engagementHistory");
-    if (history) {
-      const note = document.createElement("p");
-      note.className = "engagement-status";
-      note.textContent = `Sending ${action}…`;
-      history.prepend(note);
+    const button = document.querySelector(
+      `#page-engagement [data-action="${action}"][data-target-id="${CSS.escape(targetId)}"]`
+    );
+    if (button) {
+      button.disabled = true;
+      button.textContent = `Sending ${action}…`;
     }
+    setStatus(`Sending ${action}…`);
     let message = "";
     let failed = false;
     let result = null;
@@ -286,12 +303,7 @@
     setStatus(message, failed);
     const subtitle = $("engagementSubtitle");
     if (subtitle && message) subtitle.textContent = message;
-    const savedId = result?.action?.action_id;
-    const visible = savedId && state.history.some((row) => row.action_id === savedId);
-    if (!visible && message && !state.history.length) {
-      const history = $("engagementHistory");
-      if (history) history.innerHTML = `<p class="${failed ? "engagement-status is-error" : "subtle"}">${esc(message)}</p>`;
-    }
+    if (failed || action === "comment" || action === "like") pinEngagementResult(targetId, message, failed);
   }
 
   async function saveSettings() {

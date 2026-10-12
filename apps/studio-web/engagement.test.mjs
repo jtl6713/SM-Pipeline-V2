@@ -14,10 +14,10 @@ const matrix = fs.readFileSync(path.join(here, "../../docs/engagement-capability
 test("Engagement nav page and assets ship with UI 0.6.553", () => {
   assert.match(html, /data-page="engagement"/);
   assert.match(html, /id="page-engagement"/);
-  assert.match(html, /engagement-1008\.js\?v=0.6.611-hot-read-hold/);
-  assert.match(html, /engagement-1008\.css\?v=0.6.611-hot-read-hold/);
-  assert.match(html, /UI build 0.6.611/);
-  assert.match(app, /BUILD_ID = "item4-0.6.611-hot-read-hold"/);
+  assert.match(html, /engagement-1008\.js\?v=0.6.612-nyc-comment/);
+  assert.match(html, /engagement-1008\.css\?v=0.6.612-nyc-comment/);
+  assert.match(html, /UI build 0.6.612/);
+  assert.match(app, /BUILD_ID = "item4-0.6.612-nyc-comment"/);
   assert.match(app, /page === "engagement"/);
   assert.match(app, /StudioEngagement/);
 });
@@ -34,6 +34,8 @@ test("Engagement UI exposes review actions without mass unreviewed commenting", 
   assert.match(js, /Block Creator/);
   assert.match(js, /\/api\/engagement\/discover/);
   assert.match(js, /\/api\/engagement\/actions/);
+  assert.match(js, /function pinEngagementResult/);
+  assert.match(js, /button\.textContent = `Sending \$\{action\}…`/);
   assert.doesNotMatch(js, /mass.?comment|auto.?publish.?all|unreviewed.?bulk.?comment/i);
   assert.match(css, /\.engagement-card/);
   assert.match(css, /\.engagement-filters-panel > \.engagement-filters-grid\s*\{[^}]*padding:/s);

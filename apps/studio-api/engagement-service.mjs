@@ -432,20 +432,27 @@ async function executeYoutubeAction(env, target, actionType, comment, deps) {
       error: "YouTube uploader build lacks /youtube/engage endpoints. Deploy uploader, then retry once.",
     };
   }
-  if (!response.ok) {
+  const publishedId = body?.comment_id || body?.id || null;
+  if (!response.ok || body?.ok === false || (actionType === "comment" && !publishedId)) {
     const ambiguous = Boolean(body?.ambiguous || body?.upstream?.ambiguous);
     return {
       ok: false,
       status: ambiguous ? "ambiguous" : "failed",
-      error: String(body?.error || body?.message || `YouTube engage HTTP ${response.status}`).slice(0, 400),
-      published_id: body?.comment_id || body?.id || null,
+      error: String(
+        body?.error
+        || body?.message
+        || (actionType === "comment" && response.ok
+          ? "YouTube did not return a comment id. Nothing was published."
+          : `YouTube engage HTTP ${response.status}`)
+      ).slice(0, 400),
+      published_id: publishedId,
       ambiguous,
     };
   }
   return {
     ok: true,
     status: "published",
-    published_id: body?.comment_id || body?.id || (actionType === "like" ? "liked" : null),
+    published_id: publishedId || (actionType === "like" ? "liked" : null),
     message: body?.message || null,
   };
 }
@@ -464,10 +471,10 @@ export async function studioApplyEngagementAction(env, payload, deps) {
   const target = store.targets.find((row) => row.target_id === targetId && row.profile === profile);
   if (!target) throw new Error("Engagement target not found for this profile");
 
-  // Persist Stage B from the current UI checkbox for this profile. Checking the
-  // box without Save left miami/nyc/la on Stage A defaults, so Comment only
-  // opened YouTube and never called the API.
-  if (payload.stage_b_enabled === true && settings.stage_b_enabled !== true) {
+  // A Comment or Like click is the publish. NYC/LA profile keys used to miss
+  // the saved Stage B flag, so the click recorded nothing and the queue reload
+  // cleared "Sending comment…". Persist Stage B for this profile, then post.
+  if ((payload.stage_b_enabled === true || actionType === "comment" || actionType === "like") && settings.stage_b_enabled !== true) {
     settings = await studioSaveEngagementSettings(
       env,
       { ...settings, stage_b_enabled: true, stage: "B" },

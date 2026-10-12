@@ -10,6 +10,7 @@ import {
   filterAndRankCandidates,
   normalizeGeneratedComments,
   sanitizeCommentSuggestion,
+  normalizeEngagementProfile,
   fallbackCommentSuggestions,
   engagementDedupeKey,
   creatorRecentlyEngaged,
@@ -32,6 +33,13 @@ import {
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const worker = fs.readFileSync(path.join(here, "worker.js"), "utf8");
+
+test("city profile keys map onto engagement profiles", () => {
+  assert.equal(normalizeEngagementProfile("new-york"), "nyc");
+  assert.equal(normalizeEngagementProfile("New York"), "nyc");
+  assert.equal(normalizeEngagementProfile("los-angeles"), "la");
+  assert.equal(normalizeEngagementProfile("nyc"), "nyc");
+});
 
 test("capability matrix marks YouTube comment/like supported and TikTok unsupported", () => {
   assert.equal(PLATFORM_CAPABILITIES.youtube.stage_b_comment, true);
@@ -279,7 +287,7 @@ test("worker wires engagement routes, cron, and version bump", () => {
   assert.match(worker, /from "\.\/engagement-service\.mjs"/);
   assert.match(worker, /\/api\/engagement\//);
   assert.match(worker, /studio_engagement_v1:\s*true/);
-  assert.match(worker, /0.10.537-hot-read-hold/);
+  assert.match(worker, /0.10.539-nyc-comment/);
   assert.match(worker, /studioRunEngagementDiscovery/);
   assert.match(worker, /studioEngagementCron/);
   assert.match(worker, /engagementThemeContextRecord/);
@@ -349,4 +357,6 @@ test("YouTube engage probes uploader health for engagement build before comment"
   assert.match(service, /\/engagement\/i\.test\(version\)/);
   assert.match(service, /YouTube uploader is stale/);
   assert.match(service, /\/youtube\/engage\/comment/);
+  assert.match(service, /YouTube did not return a comment id/);
+  assert.match(service, /actionType === "comment" \|\| actionType === "like"/);
 });
