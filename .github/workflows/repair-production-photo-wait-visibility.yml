@@ -1,0 +1,48 @@
+name: Repair Production Photo Wait Visibility
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/repair-production-photo-wait-visibility.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: write
+
+concurrency:
+  group: repair-production-photo-wait-visibility
+  cancel-in-progress: false
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - name: Patch Worker with bounded, idempotent source replacement
+        run: python3 repair/scripts/patch_production_photo_wait_visibility.py
+      - name: Validate Worker syntax and regression tests
+        run: |
+          set -euo pipefail
+          node --check apps/studio-api/worker.js
+          node --test apps/studio-api/production-photo-wait-visibility.test.mjs
+      - name: Commit Worker repair to main
+        run: |
+          set -euo pipefail
+          git config user.name 'SM Pipeline Production Repair'
+          git config user.email 'actions@users.noreply.github.com'
+          git add apps/studio-api/worker.js deploy/cloudflare-worker-production.txt
+          if ! git diff --cached --quiet; then
+            git commit -m 'fix: retain narrated Production drafts despite stale Idea photo wait'
+            git pull --rebase origin main
+            git push origin HEAD:main
+          fi
+      - name: Dispatch controlled Worker production deployment
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh workflow run deploy-cloudflare-worker-production.yml --ref main

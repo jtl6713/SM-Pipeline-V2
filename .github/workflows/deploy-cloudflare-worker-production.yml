@@ -34,6 +34,7 @@ jobs:
           set -euo pipefail
           node --check apps/studio-api/engagement-service.mjs
           node --test apps/studio-api/engagement-auth-recovery.test.mjs
+          node --test apps/studio-api/production-photo-wait-visibility.test.mjs
 
       - name: Validate source and install pinned Wrangler
         shell: bash
