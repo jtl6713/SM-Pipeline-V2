@@ -198,3 +198,4 @@ Deploy Worker 0.10.489-engagement-ledger. Shrink the engagement ledger so Chicag
 2026-10-12: Deploy engagement permission-suspension recovery and read-only reconnect probe; gated by engagement-auth-recovery tests.
 2026-10-12: Worker 0.10.555-ops-queue-fields — drop unknown Last Modified / Idea_Title / Working_Title from ops queue fetches.
 2026-10-12: Worker 0.10.556-ops-render-queue-fetch — dedicated Remotion-lane fetch so Publishing backlog cannot empty Rendering Queue.
+2026-10-12: Worker 0.10.557-ops-profiles-load — GET /api/operations/profiles + non-blocking watchlist read.

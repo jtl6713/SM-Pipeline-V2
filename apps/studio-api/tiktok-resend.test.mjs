@@ -63,10 +63,10 @@ test("Worker and Pipeline UI advertise TikTok draft resend", async () => {
   const worker = await readFile(path.join(here, "worker.js"), "utf8");
   const app = await readFile(path.join(here, "../studio-web/assets/app-item4-1008.js"), "utf8");
   assert.match(worker, /studio_tiktok_draft_resend_v1: true/);
-  assert.match(worker, /version: "0.10.556-ops-render-queue-fetch"/);
+  assert.match(worker, /version: "0.10.557-ops-profiles-load"/);
   assert.match(worker, /function resendStudioTiktokDraft/);
   assert.match(worker, /\/tiktok-resend\$/);
-  assert.match(app, /BUILD_ID = "item4-0.6.641-ops-timeline-headers"/);
+  assert.match(app, /BUILD_ID = "item4-0.6.642-ops-profiles-load"/);
   assert.match(app, /Resend draft to TikTok/);
   assert.match(app, /\/tiktok-resend/);
   assert.match(app, /function tiktokNeedsDraftResend/);

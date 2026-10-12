@@ -261,3 +261,4 @@ UI 0.6.607 hashtag mismatch warning only; approval no longer blocked.
 2026-10-12: Studio UI 0.6.639-ops-timeline-dots — Ops End-to-End visual timeline dots + stage labels in header.
 2026-10-12: Studio UI 0.6.640-ops-timeline-dots — shorten E2E stage header labels so the path column fits.
 2026-10-12: Studio UI 0.6.641-ops-timeline-headers — stage labels on Publishing/Rendering timeline headers.
+2026-10-12: Studio UI 0.6.642-ops-profiles-load — lean Profiles tab load for narration voice.
