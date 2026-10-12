@@ -236,11 +236,13 @@ test("worker and UI wire Operations multi-queue + prepare-to-review", () => {
   assert.match(html, /opsPublishQueueLines/);
   assert.match(html, /opsE2eQueueLines/);
   assert.match(html, /opsE2eStageLabels/);
+  assert.match(html, /opsPublishStageLabels/);
+  assert.match(html, /opsRenderStageLabels/);
   assert.match(html, /ops-queue-cols-head/);
   assert.match(html, /ops-queue-timeline-head/);
   assert.match(html, />Timeline</);
   assert.match(html, /prepareIdeaToReviewButton/);
-  assert.match(app, /BUILD_ID = "item4-0.6.640-ops-timeline-dots"/);
+  assert.match(app, /BUILD_ID = "item4-0.6.641-ops-timeline-headers"/);
   assert.match(app, /platforms: "Plat"/);
   assert.match(app, /Media Added/);
   assert.match(app, /Waiting for Approval/);
