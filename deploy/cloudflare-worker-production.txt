@@ -167,3 +167,4 @@ Deploy Worker 0.10.489-engagement-ledger. Shrink the engagement ledger so Chicag
 2026-10-11: Create VO uses Manage Idea selected/matched stills; multi Feed Post skips VO timeline (UI 0.6.605 / Worker 0.10.533).
 
 2026-10-12: Manage Idea library search keeps museu/Museum hits; stale loads cannot clear picker (UI 0.6.609 / Worker 0.10.534).
+2026-10-11: Worker 0.10.535-idea-topic-place-fallback — preserve distinctive topical (jazz) subject alongside Greenwich Village location in photo-wait scans; regression tests.

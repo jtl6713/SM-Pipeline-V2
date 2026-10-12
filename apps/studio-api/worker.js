@@ -626,7 +626,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.534-idea-library-typeahead",
+          version: "0.10.535-idea-topic-place-fallback",
           studio_create_vo_matched_stills_v1: true,
           studio_idea_library_typeahead_v1: true,
           studio_post_publish_release_v1: true,
@@ -7527,6 +7527,14 @@ const IDEA_LIBRARY_SHORT_SUBJECTS = new Set(["cta"]);
 const IDEA_LIBRARY_BRAND_SUBJECTS = new Set([
   "cta", "metra", "amtrak", "pace", "divvy", "uber", "lyft",
 ]);
+// A neighborhood label must not hide images about a distinctive named subject.
+// Keep this conservative: generic words such as "walk", "night", "street"
+// still cannot broaden a Greenwich Village scan to unrelated NYC pictures.
+const IDEA_LIBRARY_DISTINCTIVE_SUBJECTS = new Set([
+  "jazz", "blues", "comedy", "opera", "theater", "theatre",
+  "sushi", "ramen", "pizza", "speakeasy",
+]);
+
 
 const IDEA_LIBRARY_NAMED_PLACES = [
   "andersonville", "bridgeport", "bronzeville", "bucktown", "chinatown",
@@ -7635,8 +7643,9 @@ function ideaLibraryMatchKeys(idea, query = "") {
 /** Place anchors plus brand/transit subjects (Metra/CTA) so station locations do not hide title brands. */
 function ideaLibraryFilterKeys(placeKeys = [], subjectKeys = []) {
   const brands = (subjectKeys || []).filter((token) => IDEA_LIBRARY_BRAND_SUBJECTS.has(token));
+  const distinctive = (subjectKeys || []).filter((token) => IDEA_LIBRARY_DISTINCTIVE_SUBJECTS.has(token));
   if ((placeKeys || []).length || brands.length) {
-    return [...new Set([...(placeKeys || []), ...brands])];
+    return [...new Set([...(placeKeys || []), ...brands, ...distinctive])];
   }
   return [...new Set(subjectKeys || [])];
 }

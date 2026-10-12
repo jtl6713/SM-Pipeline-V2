@@ -444,3 +444,41 @@ test("Manage Idea pause token is temporary, preserved by save, and removable", (
   assert.match(resumed, /origin=autonomous/);
   assert.match(resumed, /Keep the bridge shot/);
 });
+
+test("NYC Jazz Clubs photo uploads remain discoverable for a Greenwich Village jazz idea", () => {
+  const keys = buildIdeaLibraryKeys({
+    primaryLocation: "Greenwich Village",
+    title: "Two-Stop Village Jazz",
+    summary: "Quick route: pre-show slice, intimate set, late-night stroll.",
+  });
+  assert.ok(keys.placeKeys.includes("greenwich"));
+  assert.ok(keys.placeKeys.includes("village"));
+  assert.ok(keys.subjectKeys.includes("jazz"));
+  const filter = ideaLibraryFilterKeys(keys.placeKeys, keys.subjectKeys);
+  assert.ok(filter.includes("jazz"), "Distinctive title topic must survive neighborhood prefilter");
+  assert.ok(!filter.includes("stroll"), "Generic narrative topics must not flood the scan");
+  const match = rankIdeaLibraryFields({
+    location: "New York City",
+    name: "NYC Jazz Clubs 2",
+    haystack: "NYC Jazz Clubs 2, New York City, jazz club, jazz singer, nightlife, stage",
+    ...keys,
+    strongIdeaTokens: keys.subjectKeys,
+    ideaTokens: ["two", "stop", "village", "jazz", "night"],
+    queryTokens: [],
+    today: "2026-10-12",
+    intakeDate: "2026-10-12",
+  });
+  assert.equal(match?.confidence, "high");
+  assert.ok(match.match_reasons.some((reason) => reason === "asset_name:jazz"));
+
+  const unrelated = rankIdeaLibraryFields({
+    location: "New York City",
+    name: "NYC Street Scene",
+    haystack: "New York City buildings urban street nightlife",
+    ...keys,
+    strongIdeaTokens: keys.subjectKeys,
+    ideaTokens: ["village", "jazz", "night"],
+    queryTokens: [],
+  });
+  assert.equal(unrelated, null, "General city photos must not be high-confidence jazz matches");
+});

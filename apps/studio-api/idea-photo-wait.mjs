@@ -30,6 +30,14 @@ export const IDEA_LIBRARY_SHORT_SUBJECTS = new Set(["cta"]);
 export const IDEA_LIBRARY_BRAND_SUBJECTS = new Set([
   "cta", "metra", "amtrak", "pace", "divvy", "uber", "lyft",
 ]);
+// A neighborhood label must not hide images about a distinctive named subject.
+// Keep this conservative: generic words such as "walk", "night", "street"
+// still cannot broaden a Greenwich Village scan to unrelated NYC pictures.
+export const IDEA_LIBRARY_DISTINCTIVE_SUBJECTS = new Set([
+  "jazz", "blues", "comedy", "opera", "theater", "theatre",
+  "sushi", "ramen", "pizza", "speakeasy",
+]);
+
 
 export const IDEA_LIBRARY_NAMED_PLACES = [
   "andersonville", "bridgeport", "bronzeville", "bucktown", "chinatown",
@@ -135,8 +143,9 @@ export function buildIdeaLibraryKeys({ primaryLocation = "", title = "", summary
 /** Airtable FIND keys: place anchors plus brand/transit subjects from the title. */
 export function ideaLibraryFilterKeys(placeKeys = [], subjectKeys = []) {
   const brands = (subjectKeys || []).filter((token) => IDEA_LIBRARY_BRAND_SUBJECTS.has(token));
+  const distinctive = (subjectKeys || []).filter((token) => IDEA_LIBRARY_DISTINCTIVE_SUBJECTS.has(token));
   if ((placeKeys || []).length || brands.length) {
-    return [...new Set([...(placeKeys || []), ...brands])];
+    return [...new Set([...(placeKeys || []), ...brands, ...distinctive])];
   }
   return [...new Set(subjectKeys || [])];
 }
