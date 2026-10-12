@@ -240,6 +240,14 @@ import {
   queueLaneForStudioState,
   summarizeOpsQueueRows,
 } from "./ops-queue.mjs";
+import {
+  FACTORY_DESK_KEY,
+  emptyFactoryDeskControls,
+  normalizeFactoryDeskControls,
+  partitionFactoryLanes,
+  pinFactoryNeedsAssets,
+  unpinFactoryNeedsAssets,
+} from "./factory-desk.mjs";
 
 import {
   analyticsObservationKey,
@@ -412,6 +420,7 @@ export default {
       const isOperationsQueueRoute = url.pathname === "/api/operations/queue";
       const isOperationsQueuePauseRoute = url.pathname === "/api/operations/queue/pause";
       const isOperationsQueueReorderRoute = url.pathname === "/api/operations/queue/reorder";
+      const isFactoryDeskRoute = url.pathname === "/api/factory/desk";
       const isOperationsProfileRoute = /^\/api\/operations\/profiles\/rec[A-Za-z0-9]+$/.test(url.pathname);
       const isIdeaPrepareToReviewRoute = /^\/api\/ideas\/rec[A-Za-z0-9]+\/prepare-to-review$/.test(url.pathname);
       const isProfileSetupRoute = /^\/api\/profiles\/rec[A-Za-z0-9]+\/setup$/.test(url.pathname);
@@ -659,7 +668,8 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.561-production-photo-wait-visibility",
+          version: "0.10.562-factory-desk",
+          studio_factory_desk_v1: true,
           studio_create_vo_matched_stills_v1: true,
           studio_idea_library_typeahead_v1: true,
           studio_idea_library_search_all_hits_v1: true,
@@ -1092,6 +1102,16 @@ export default {
         requireAnyPermission(authorization, ["tenant_admin", "publishing_control", "production_configure"]);
         assertWriteRequest(request, env);
         return reorderStudioOperationsRenderQueue(request, env, authorization);
+      }
+
+      if (isFactoryDeskRoute) {
+        requireAnyPermission(authorization, ["tenant_admin", "publishing_control", "production_configure"]);
+        if (request.method === "GET") return getFactoryDesk(request, env, authorization);
+        if (request.method === "POST") {
+          assertWriteRequest(request, env);
+          return mutateFactoryDesk(request, env, authorization);
+        }
+        throw new HttpError(405, "Method not allowed");
       }
 
       if (isOperationsProfileRoute) {
@@ -13890,6 +13910,70 @@ async function readOpsQueueControls(env) {
   } catch {
     return emptyOpsQueueControls();
   }
+}
+
+async function readFactoryDeskControls(env) {
+  try {
+    const object = await env.STUDIO_MEDIA?.get?.(FACTORY_DESK_KEY);
+    if (!object) return emptyFactoryDeskControls();
+    const text = await object.text();
+    return normalizeFactoryDeskControls(JSON.parse(text));
+  } catch {
+    return emptyFactoryDeskControls();
+  }
+}
+
+async function writeFactoryDeskControls(env, controls, actor = null) {
+  const next = normalizeFactoryDeskControls({
+    ...controls,
+    updated_at: new Date().toISOString(),
+    updated_by: actor || null,
+  });
+  await env.STUDIO_MEDIA.put(FACTORY_DESK_KEY, JSON.stringify(next), {
+    httpMetadata: { contentType: "application/json" },
+  });
+  return next;
+}
+
+async function loadFactoryIdeaCandidates(env) {
+  if (!env.AIRTABLE_IDEA_TABLE_ID) return [];
+  const ideas = await listRecords(env, env.AIRTABLE_IDEA_TABLE_ID, {
+    limit: 40,
+    sortField: "Candidate_ID",
+    sortDirection: "desc",
+    fields: [
+      "Candidate_ID",
+      "Candidate_Title",
+      "Candidate_Status",
+      "Content_Profile",
+      "Studio_Photo_Wait_Status",
+      "Production_Notes",
+    ],
+    filterFormula: "AND({Studio_Photo_Wait_Status}='Waiting',{Promoted_Content_Record_ID}=BLANK(),{Candidate_Status}!='On Hold')",
+  }).catch(() => []);
+  const profileIds = [...new Set((ideas || [])
+    .map((row) => firstOpsLinkedId(f(row, "Content_Profile")))
+    .filter((id) => /^rec[A-Za-z0-9]+$/.test(id)))];
+  const profileMap = new Map();
+  if (profileIds.length) {
+    const profiles = await listRecords(env, STUDIO_IDEA_PROFILE_TABLE_ID, { limit: 50 }).catch(() => []);
+    for (const profile of profiles || []) profileMap.set(profile.id, profile);
+  }
+  return (ideas || []).map((record) => {
+    const profile = mapOpsQueueProfileName(profileMap, f(record, "Content_Profile"));
+    return {
+      kind: "idea",
+      id: record.id,
+      idea_id: record.id,
+      title: String(f(record, "Candidate_Title") || `Idea ${f(record, "Candidate_ID") || ""}`).trim(),
+      ...profile,
+      studio_state: "Waiting for photos",
+      photo_wait_status: f(record, "Studio_Photo_Wait_Status") || "Waiting",
+      production_notes: f(record, "Production_Notes") || "",
+      request_status: null,
+      updated_at: record?.createdTime || null,
+    };
+  });
 }
 
 async function writeOpsQueueControls(env, controls, actor = null) {
@@ -41837,6 +41921,71 @@ async function getStudioOperationsQueue(request, env, authorization) {
     warning: fetchErrors.length
       ? `Queue data incomplete: ${fetchErrors.slice(0, 2).join(" · ")}`
       : null,
+  });
+}
+
+async function getFactoryDesk(request, env, authorization) {
+  const [queueResponse, deskControls, ideaCandidates] = await Promise.all([
+    getStudioOperationsQueue(request, env, authorization),
+    readFactoryDeskControls(env),
+    loadFactoryIdeaCandidates(env),
+  ]);
+  let queue = {};
+  try {
+    queue = await queueResponse.clone().json();
+  } catch {
+    queue = {};
+  }
+  const part = partitionFactoryLanes(queue.rows || [], deskControls, { ideaCandidates });
+  const warningBits = [];
+  if (queue.warning) warningBits.push(queue.warning);
+  return respond(request, env, {
+    ok: true,
+    page: "factory-desk",
+    lanes: part.lanes,
+    needs_assets_candidates: part.needs_assets_candidates,
+    summary: part.summary,
+    controls: part.controls,
+    can_edit: Boolean(
+      authorization?.permissions?.tenant_admin
+      || authorization?.permissions?.publishing_control
+      || authorization?.permissions?.production_configure
+    ),
+    warning: warningBits.length ? warningBits.join(" · ") : null,
+  });
+}
+
+async function mutateFactoryDesk(request, env, authorization) {
+  let payload;
+  try { payload = await request.json(); } catch { throw new HttpError(400, "Request body must be valid JSON"); }
+  const action = String(payload?.action || "").trim().toLowerCase();
+  const actor = authorization?.user?.email || authorization?.email || null;
+  const controls = await readFactoryDeskControls(env);
+  let next = controls;
+  if (action === "pin_needs_assets") {
+    const result = pinFactoryNeedsAssets(controls, payload?.item || payload, { actor });
+    if (!result.ok) throw new HttpError(409, result.message || result.error || "Could not pin needs-assets item");
+    next = result.controls;
+  } else if (action === "unpin_needs_assets") {
+    next = unpinFactoryNeedsAssets(controls, payload?.id || payload?.item?.id).controls;
+  } else {
+    throw new HttpError(400, "action must be pin_needs_assets or unpin_needs_assets");
+  }
+  const saved = await writeFactoryDeskControls(env, next, actor);
+  const queueResponse = await getStudioOperationsQueue(request, env, authorization);
+  let queue = {};
+  try { queue = await queueResponse.clone().json(); } catch { queue = {}; }
+  const ideaCandidates = await loadFactoryIdeaCandidates(env);
+  const part = partitionFactoryLanes(queue.rows || [], saved, { ideaCandidates });
+  return respond(request, env, {
+    ok: true,
+    page: "factory-desk",
+    lanes: part.lanes,
+    needs_assets_candidates: part.needs_assets_candidates,
+    summary: part.summary,
+    controls: part.controls,
+    can_edit: true,
+    action,
   });
 }
 
