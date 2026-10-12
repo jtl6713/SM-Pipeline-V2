@@ -264,7 +264,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.624-pipeline-latest-rescue";
+  const BUILD_ID = "item4-0.6.625-library-search-all-hits";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -13248,7 +13248,7 @@ function timedScriptAssetLabel(asset, index) {
     if (flat) {
       return items.length
         ? `<div class="idea-library-cards">${items.map(card).join("")}</div>`
-        : `<p class="idea-library-picker-hint">No library file is named with that quoted phrase.</p>`;
+        : `<p class="idea-library-picker-hint">No classified Drive photos or clips matched that search.</p>`;
     }
     if (suggested.length) {
       parts.push(`<div class="idea-library-block"><p class="idea-library-section">Suggested</p><div class="idea-library-cards">${suggested.map(card).join("")}</div></div>`);
@@ -13270,22 +13270,27 @@ function timedScriptAssetLabel(asset, index) {
     const grid = $("ideaLibraryGrid");
     const hint = $("ideaLibraryPickerHint");
     if (!grid) return;
-    const phrase = libraryQuotedPhrase($("ideaLibrarySearch")?.value || "");
+    const searchValue = String($("ideaLibrarySearch")?.value || "").trim();
+    const phrase = libraryQuotedPhrase(searchValue);
+    const operatorSearch = Boolean(searchValue);
+    // Typed search is a flat checklist of every query hit — not idea-ranked Suggested/More.
     grid.innerHTML = renderLibraryPickerSections(
       ideaLibraryPickerItems,
       ideaLibrarySelected,
       ideaLibrarySuggestedIds,
       "data-library-id",
-      { flat: Boolean(phrase) }
+      { flat: operatorSearch }
     );
     if (hint) {
       const checked = ideaLibrarySelected.size;
       const suggested = ideaLibrarySuggestedIds.size;
       hint.textContent = phrase
         ? `${ideaLibraryPickerItems.length} named “${phrase}”. ${checked} checked.`
-        : (suggested
-          ? `${suggested} suggested. ${checked} checked. Uncheck to drop, search to add.`
-          : `No place match yet. ${checked} checked. Search the Drive library and check photos or clips to add.`);
+        : (operatorSearch
+          ? `${ideaLibraryPickerItems.length} match${ideaLibraryPickerItems.length === 1 ? "" : "es"} for “${searchValue}”. ${checked} checked. Check any to add — search is not limited to this idea.`
+          : (suggested
+            ? `${suggested} suggested. ${checked} checked. Uncheck to drop, search to add.`
+            : `No place match yet. ${checked} checked. Search the Drive library and check photos or clips to add.`));
     }
     syncIdeaLibraryContinue();
     item4BindClipPlayers(grid);
@@ -13301,6 +13306,7 @@ function timedScriptAssetLabel(asset, index) {
     if (grid) grid.innerHTML = `<p class="idea-library-picker-hint">Loading library photos and clips…</p>`;
     if (hint) hint.textContent = "Loading suggested photos, clips, and the Drive library.";
     const q = String(query || "").trim();
+    const operatorSearch = Boolean(q);
     let suggestionError = null;
     let browseError = null;
     const [ideaPack, browse] = await Promise.all([
@@ -13318,16 +13324,17 @@ function timedScriptAssetLabel(asset, index) {
     const suggested = ideaPack.suggested || [];
     const matches = ideaPack.matches || [];
     const quoted = libraryItemsForQuotedName(mergeLibraryPickerItems(suggested, matches, browse), q);
-    ideaLibrarySuggestedIds = quoted.phrase
+    // Operator search never auto-checks idea "Suggested" stills — only the typed matches.
+    ideaLibrarySuggestedIds = (operatorSearch || quoted.phrase)
       ? new Set()
       : new Set(suggested.map((item) => item.id).filter(Boolean));
     ideaLibraryPickerItems = quoted.items;
     ideaLibrarySelected = seedLibrarySelection(
       ideaLibrarySelected,
-      quoted.phrase ? [] : suggested,
+      (operatorSearch || quoted.phrase) ? [] : suggested,
       ideaLibrarySeeded ? [] : ideaLibraryIdsFromIdea(activeIdea),
       libraryPickerMaxCount(),
-      !ideaLibrarySeeded
+      !ideaLibrarySeeded && !operatorSearch
     );
     ideaLibrarySeeded = true;
     renderIdeaLibraryPicker();

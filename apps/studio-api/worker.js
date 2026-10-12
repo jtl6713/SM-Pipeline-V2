@@ -626,9 +626,10 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.546-pipeline-latest-rescue",
+          version: "0.10.547-library-search-all-hits",
           studio_create_vo_matched_stills_v1: true,
           studio_idea_library_typeahead_v1: true,
+          studio_idea_library_search_all_hits_v1: true,
           studio_post_publish_release_v1: true,
           studio_render_server_preview_v1: true,
           studio_render_queue_wait_v1: true,
@@ -7982,7 +7983,8 @@ async function getMediaLibraryStills(request, env, url, authorization) {
     }));
   }
   items.sort((a, b) => libraryNameSort(a.name, b.name));
-  const capped = items.slice(0, phrase ? 120 : 60);
+  // Empty browse stays small; typed/quoted search returns every match we scanned.
+  const capped = items.slice(0, (phrase || queryTokens.length) ? 200 : 60);
   return respond(request, env, {
     ok: true,
     query: query || null,
@@ -8010,27 +8012,28 @@ async function getIdeaLibrarySuggestions(request, env, url, authorization) {
   const strongIdeaTokens = ideaLibraryStrongTokens(ideaTokens);
   const { placeKeys, subjectKeys, scanKeys } = ideaLibraryMatchKeys(idea, phrase ? "" : query);
   const today = chicagoNowParts().date;
-  // When the operator typed a search, filter Airtable on those tokens only.
-  // A quoted name is the whole Asset Name phrase, not an OR of "island" and "ferry".
-  // Otherwise place keys plus brand subjects (Metra/CTA) — place-only hid Metra
-  // stills when Primary_Location was a station name photos never mention.
-  // Operator search: prefer strong tokens, but keep weak-only queries (e.g. "museum")
-  // as Airtable FIND keys so substring scan still returns rows for JS prefix match.
-  const filterKeys = queryTokens.length
+  const operatorSearch = Boolean(phrase || queryTokens.length);
+  // Typed search is operator choice only: every library hit for the query, no idea
+  // place/subject ranking. Empty-q suggestions still rank against the idea brief.
+  const filterKeys = operatorSearch
     ? ideaLibrarySearchFilterKeys(queryTokens)
     : (placeKeys.length || subjectKeys.some((token) => IDEA_LIBRARY_BRAND_SUBJECTS.has(token))
       ? ideaLibraryFilterKeys(placeKeys, subjectKeys)
       : scanKeys);
-  const scanLimit = phrase || filterKeys.length ? IDEA_LIBRARY_PLACE_FILTER_LIMIT : IDEA_LIBRARY_SCAN_LIMIT;
+  const scanLimit = operatorSearch
+    ? IDEA_LIBRARY_SCAN_LIMIT
+    : (filterKeys.length ? IDEA_LIBRARY_PLACE_FILTER_LIMIT : IDEA_LIBRARY_SCAN_LIMIT);
   const scopeFormula = await libraryProfileScopeFormula(env, authorization, url, { idea });
   const records = await listRecords(env, env.AIRTABLE_MEDIA_TABLE_ID, {
-    limit: phrase ? IDEA_LIBRARY_SCAN_LIMIT : scanLimit,
+    limit: scanLimit,
     sortField: "Intake_Date",
     sortDirection: "desc",
     filterFormula: combineAirtableFormulas(
       phrase
         ? ideaLibraryNamePhraseFormula(phrase, { includeVideo })
-        : ideaLibraryFilterFormula(filterKeys, { includeVideo }),
+        : (operatorSearch
+          ? assetLibraryFilterFormula(query, includeVideo ? "" : "photo")
+          : ideaLibraryFilterFormula(filterKeys, { includeVideo })),
       scopeFormula
     ),
   });
@@ -8052,6 +8055,19 @@ async function getIdeaLibrarySuggestions(request, env, url, authorization) {
       });
       continue;
     }
+    if (operatorSearch) {
+      const haystack = ideaLibraryHaystack(record);
+      if (!queryTokens.some((token) => ideaLibrarySearchHit(haystack, token))) continue;
+      ranked.push({
+        record,
+        score: 1,
+        confidence: "low",
+        match_reasons: ["search_hit"],
+        intake_batch_id: String(f(record, "Intake_Batch_ID") || "").trim() || null,
+        preselected: false,
+      });
+      continue;
+    }
     const row = ideaLibraryRankAsset(record, {
       placeKeys,
       subjectKeys,
@@ -8063,7 +8079,9 @@ async function getIdeaLibrarySuggestions(request, env, url, authorization) {
     if (row) ranked.push(row);
   }
   ranked.sort((a, b) => {
-    if (phrase) return libraryNameSort(f(a.record, "Asset Name"), f(b.record, "Asset Name"));
+    if (operatorSearch || phrase) {
+      return libraryNameSort(f(a.record, "Asset Name"), f(b.record, "Asset Name"));
+    }
     const confidenceRank = { high: 3, medium: 2, low: 1, none: 0 };
     const confDiff = (confidenceRank[b.confidence] || 0) - (confidenceRank[a.confidence] || 0);
     if (confDiff) return confDiff;
@@ -8071,24 +8089,26 @@ async function getIdeaLibrarySuggestions(request, env, url, authorization) {
     if (a.preselected !== b.preselected) return a.preselected ? -1 : 1;
     return String(f(a.record, "Asset Name") || "").localeCompare(String(f(b.record, "Asset Name") || ""));
   });
-  const capped = ranked.slice(0, phrase ? 120 : 40).map((row) => mapIdeaLibraryAsset(row.record, row));
+  const capped = ranked.slice(0, operatorSearch || phrase ? 200 : 40).map((row) => mapIdeaLibraryAsset(row.record, row));
   return respond(request, env, {
     ok: true,
     idea_id: ideaId,
     query: query || null,
     phrase: phrase || null,
-    place_keys: placeKeys,
-    subject_keys: subjectKeys,
+    place_keys: operatorSearch ? [] : placeKeys,
+    subject_keys: operatorSearch ? [] : subjectKeys,
     match_policy: {
       auto_attach_confidence: "high",
+      operator_search: operatorSearch,
       high: "Location or Asset Name shares a named place, or a subject word on name/location, or two subject words in metadata",
       medium: "one subject/topic overlap only — show, do not auto-attach",
       low: "weak/search hit — operator choice only",
       scan_limit: scanLimit,
-      place_filter_active: filterKeys.length > 0,
+      place_filter_active: !operatorSearch && filterKeys.length > 0,
     },
-    suggested: capped.filter((row) => row.preselected),
-    matches: capped.filter((row) => !row.preselected),
+    // Typed search never auto-suggests — every hit is an unchecked match for the operator.
+    suggested: operatorSearch ? [] : capped.filter((row) => row.preselected),
+    matches: operatorSearch ? capped : capped.filter((row) => !row.preselected),
   });
 }
 
@@ -25911,7 +25931,8 @@ function assetLibraryFilterFormula(query, kind, needsProfile = false) {
     if (phrase) parts.push(libraryAssetNameFindFormula(phrase));
     else {
       const escaped = ideaLibraryAirtableEscape(needle);
-      const hay = "LOWER(CONCATENATE({Asset Name},' ',{Location},' ',{Asset_Description}))";
+      // Operator search must see tags/topics too — not only name/location/description.
+      const hay = "LOWER(CONCATENATE({Search_Keywords},' ',{AI_Tags},' ',{Location},' ',{Asset Name},' ',{Topic},' ',{Subtopic},' ',{Asset_Description}))";
       parts.push(`FIND("${escaped}", ${hay})`);
     }
   }
