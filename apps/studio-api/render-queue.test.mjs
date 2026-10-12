@@ -172,7 +172,7 @@ test("Trying Again only for real Remotion failures, never queue wait", () => {
 });
 
 test("Worker admit + mapOutput expose queue meta and Remotion job id", () => {
-  assert.match(worker, /version: "0.10.550-library-search-tokens"/);
+  assert.match(worker, /version: "0.10.551-story-schedule-seed"/);
   assert.match(worker, /studio_shared_render_queue_v1: true/);
   assert.match(worker, /studio_render_queue_wait_v1: true/);
   assert.match(worker, /async function studioAdmitRenderQueue/);
@@ -189,9 +189,9 @@ test("Worker admit + mapOutput expose queue meta and Remotion job id", () => {
 });
 
 test("UI shows Waiting in render queue and shared-render sibling wait", () => {
-  assert.match(app, /BUILD_ID = "item4-0.6.630-library-search-tokens"/);
-  assert.match(html, /app-item4-1008\.js\?v=0.6.630-library-search-tokens/);
-  assert.match(html, /UI build 0.6.630/);
+  assert.match(app, /BUILD_ID = "item4-0.6.631-progress-under-tabs"/);
+  assert.match(html, /app-item4-1008\.js\?v=0.6.631-progress-under-tabs/);
+  assert.match(html, /UI build 0.6.631/);
   assert.match(app, /function pipelineRenderQueueLabel/);
   assert.match(app, /Waiting in render queue \(#\$\{pos\} of \$\{total\}\)/);
   assert.match(app, /Waiting for shared render/);

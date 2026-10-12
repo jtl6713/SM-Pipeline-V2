@@ -185,3 +185,6 @@ Deploy Worker 0.10.489-engagement-ledger. Shrink the engagement ledger so Chicag
 2026-10-12: Redeploy Worker 0.10.549-ideas-generate-async after transient Cloudflare deployments JSON parse during postdeploy verify (#641).
 2026-10-12: Worker 0.10.550-library-search-tokens — token-OR FIND for library/browse search so Prospect Park matches prospect/parked typos.
 2026-10-12: Redeploy Worker 0.10.550-library-search-tokens after Cloudflare API 504 on #646 deploy.
+
+2026-10-12: Worker 0.10.551-story-schedule-seed — always stamp IG/FB Story suggested times at plan seed (empty MAE lane + main+10m fallback).
+2026-10-12: Redeploy Worker 0.10.551-story-schedule-seed (includes library-search-tokens) after #646 Cloudflare 504; tip redeploy via merge conflict resolution.

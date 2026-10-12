@@ -13,6 +13,8 @@ export const MAE_SCHEDULE_GAP_MS = 3 * 60 * 60 * 1000;
 export const MAE_SUGGEST_HORIZON_DAYS = 28;
 export const MAE_PRIORITY_SCHEDULE_WINDOWS = Object.freeze(["05:30-07:00", "11:30-13:00", "16:30-18:00"]);
 export const MAE_SUGGEST_LEAD_MS = 10 * 60 * 1000;
+/** Companion Stories sit this far after the same-platform main when MAE has no open slot. */
+export const MAE_STORY_COMPANION_OFFSET_MS = 10 * 60 * 1000;
 export const MAE_DEFAULT_TIME_ZONE = "America/Chicago";
 /** Inclusive local blackout: 11:00 PM through 3:00 AM profile time. */
 export const MAE_SCHEDULE_BLACKOUT_START_MINUTES = 23 * 60;
@@ -299,6 +301,32 @@ export function maeNextOpenScheduleIso(candidateIso, occupiedMs, gapMs = MAE_SCH
   });
 }
 
+function maeStoryCompanionIso(stamps, platform, notBeforeMs) {
+  const mainKeys = [
+    `${platform}::Reel`,
+    `${platform}::Carousel`,
+    `${platform}::Single Image`,
+    `${platform}::Multi-Image Post`,
+    `${platform}::Slideshow Reel`,
+    `${platform}::Video Draft`,
+    `${platform}::Short`,
+  ];
+  for (const key of mainKeys) {
+    const base = Date.parse(String(stamps.get(key) || ""));
+    if (!Number.isFinite(base)) continue;
+    const companion = base + MAE_STORY_COMPANION_OFFSET_MS;
+    if (companion > notBeforeMs) return new Date(companion).toISOString();
+  }
+  for (const [key, iso] of stamps.entries()) {
+    if (/::Story$/i.test(key)) continue;
+    const base = Date.parse(String(iso || ""));
+    if (!Number.isFinite(base)) continue;
+    const companion = base + MAE_STORY_COMPANION_OFFSET_MS;
+    if (companion > notBeforeMs) return new Date(companion).toISOString();
+  }
+  return "";
+}
+
 export function maeBuildSuggestedScheduleMap(items, occupiedByPlatform = {}, now = new Date(), options = {}) {
   // Freeze one authoritative instant for the entire regeneration pass. Every
   // reused or newly suggested slot must be strictly later than this instant
@@ -327,48 +355,74 @@ export function maeBuildSuggestedScheduleMap(items, occupiedByPlatform = {}, now
     if (existing && !Number.isNaN(Date.parse(existing))) {
       const iso = new Date(existing).toISOString();
       const existingMs = Date.parse(iso);
-      const lane = maeFlattenOccupied(reserved);
+      // Stories may share a wall-clock slot with mains (UI / #507). They do not
+      // read or write the platform MAE lane, so a busy calendar cannot blank them.
+      const lane = isStory ? [] : maeFlattenOccupied(reserved);
       const existingCivil = maeCivilWithKey(maeZonedDateTimeParts(new Date(existingMs), timeZone));
-      const standardsCovered = maeDayStandardsCovered(
+      const standardsCovered = !isStory && maeDayStandardsCovered(
         existingCivil,
         notBeforeMs,
         lane,
         timeZone,
       );
-      const extrasOnDay = maeExtraCountOnDay(existingCivil, lane, timeZone);
+      const extrasOnDay = isStory ? 0 : maeExtraCountOnDay(existingCivil, lane, timeZone);
       // Keep a stored MAE time when that day-part is still open. Keep a stored
       // extra only after that day's MAE trio is covered and the day still has
       // room for a 4th/5th. Never preserve a past or blackout slot.
       const reusable = existingMs > notBeforeMs
         && !maeIsBlackoutLocalTime(existingMs, timeZone)
-        && !maeScheduleConflicts(existingMs, lane)
+        && (isStory || !maeScheduleConflicts(existingMs, lane))
         && (
-          maeIsPriorityLocalTime(existingMs, timeZone)
+          isStory
+          || maeIsPriorityLocalTime(existingMs, timeZone)
           || (standardsCovered && extrasOnDay < MAE_MAX_EXTRA_POSTS_PER_DAY)
         );
       if (reusable) {
         stamps.set(key, iso);
-        (reserved[platform] ||= []).push(existingMs);
+        if (!isStory) (reserved[platform] ||= []).push(existingMs);
+        continue;
+      }
+    }
+    // Companion Stories follow the same-platform main by 10 minutes (AZ offset).
+    // They must never compete for MAE slots or come back blank on a full calendar.
+    if (isStory) {
+      const companion = maeStoryCompanionIso(stamps, platform, notBeforeMs);
+      if (companion) {
+        stamps.set(key, companion);
         continue;
       }
     }
     const iso = maePickBalancedSuggestedIso(MAE_PRIORITY_SCHEDULE_WINDOWS, scheduleNow, {
-      occupiedMs: maeFlattenOccupied(reserved),
-      platformOccupiedMs: reserved[platform] || [],
+      occupiedMs: isStory ? [] : maeFlattenOccupied(reserved),
+      platformOccupiedMs: isStory ? [] : (reserved[platform] || []),
       timeZone,
     });
     // Defense in depth: even if a future scheduler change accidentally hands
     // back an expired candidate, never persist it from a regenerate.
-    const safeIso = iso && Number.isFinite(Date.parse(iso)) && Date.parse(iso) > notBeforeMs
+    let safeIso = iso && Number.isFinite(Date.parse(iso)) && Date.parse(iso) > notBeforeMs
       ? iso
       : maePickBalancedSuggestedIso(MAE_PRIORITY_SCHEDULE_WINDOWS, scheduleNow, {
-          occupiedMs: maeFlattenOccupied(reserved),
-          platformOccupiedMs: reserved[platform] || [],
+          occupiedMs: isStory ? [] : maeFlattenOccupied(reserved),
+          platformOccupiedMs: isStory ? [] : (reserved[platform] || []),
           timeZone,
           leadMs: options.leadMs ?? MAE_SUGGEST_LEAD_MS,
         });
+    if (isStory && !(safeIso && Number.isFinite(Date.parse(safeIso)) && Date.parse(safeIso) > notBeforeMs)) {
+      safeIso = maeStoryCompanionIso(stamps, platform, notBeforeMs);
+    }
     stamps.set(key, safeIso);
-    if (safeIso) (reserved[platform] ||= []).push(Date.parse(safeIso));
+    if (!isStory && safeIso) (reserved[platform] ||= []).push(Date.parse(safeIso));
+  }
+  // Last resort: any Story still blank gets same-platform main + 10 minutes.
+  for (const { item } of indexed) {
+    const platform = String(item.platform || "").trim();
+    const outputType = String(item.output_type || "").trim();
+    if (!platform || !/story/i.test(outputType)) continue;
+    const key = `${platform}::${outputType}`;
+    const current = String(stamps.get(key) || "").trim();
+    if (current && Number.isFinite(Date.parse(current)) && Date.parse(current) > notBeforeMs) continue;
+    const companion = maeStoryCompanionIso(stamps, platform, notBeforeMs);
+    if (companion) stamps.set(key, companion);
   }
   return stamps;
 }
