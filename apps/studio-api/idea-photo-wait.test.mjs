@@ -5,6 +5,9 @@ import {
   buildIdeaLibraryKeys,
   ideaAutoListenContentType,
   ideaLibraryFilterKeys,
+  ideaLibrarySearchFilterKeys,
+  ideaLibrarySearchHit,
+  ideaLibraryTokens,
   ideaPhotoWaitApplies,
   ideaManagePhotoPauseActive,
   ideaManagePhotoPauseUntil,
@@ -273,6 +276,46 @@ test("neighborhood place on Location or Asset Name stays high", () => {
   });
   assert.equal(mural.confidence, "high");
   assert.ok(mural.match_reasons.includes("location:pilsen"));
+});
+
+test("operator library search keeps museu and Museum hits", () => {
+  const hay = "american museum of natural history nyc ceiling";
+  assert.equal(ideaLibrarySearchHit(hay, "museu"), true);
+  assert.equal(ideaLibrarySearchHit(hay, "museum"), true);
+  assert.equal(ideaLibrarySearchHit(hay, "Museum"), true);
+  assert.equal(ideaLibrarySearchHit(hay, "ceiling"), true);
+  assert.equal(ideaLibrarySearchHit(hay, "zzz"), false);
+
+  // "museum" is weak for place ranking but must stay an Airtable FIND key when typed.
+  assert.deepEqual(ideaLibrarySearchFilterKeys(ideaLibraryTokens("Museum")), ["museum"]);
+  assert.deepEqual(ideaLibrarySearchFilterKeys(ideaLibraryTokens("museu")), ["museu"]);
+
+  const hit = rankIdeaLibraryFields({
+    location: "New York",
+    name: "Museum ceiling 2.jpg",
+    haystack: hay,
+    placeKeys: [],
+    subjectKeys: [],
+    strongIdeaTokens: [],
+    ideaTokens: [],
+    queryTokens: ["museu"],
+  });
+  assert.ok(hit);
+  assert.equal(hit.confidence, "low");
+  assert.ok(hit.match_reasons.includes("search_hit"));
+
+  const full = rankIdeaLibraryFields({
+    location: "New York",
+    name: "Museum ceiling 2.jpg",
+    haystack: hay,
+    placeKeys: [],
+    subjectKeys: [],
+    strongIdeaTokens: [],
+    ideaTokens: [],
+    queryTokens: ["museum"],
+  });
+  assert.ok(full);
+  assert.ok(full.match_reasons.includes("search_hit"));
 });
 
 test("idea save persists platforms and exact slide count", () => {

@@ -263,7 +263,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.608-approve-profile-poll";
+  const BUILD_ID = "item4-0.6.609-idea-library-typeahead";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -13028,6 +13028,7 @@ function timedScriptAssetLabel(asset, index) {
   let ideaLibrarySeeded = false;
   let ideaLibraryPickerTouched = false;
   let ideaLibrarySearchTimer = 0;
+  let ideaLibraryLoadSequence = 0;
 
   function resetIdeaLibraryPicker() {
     ideaLibraryPickerItems = [];
@@ -13258,15 +13259,27 @@ function timedScriptAssetLabel(asset, index) {
 
   async function loadIdeaLibrarySuggestions(query = "") {
     if (!activeIdea?.id) return;
+    const sequence = ++ideaLibraryLoadSequence;
+    const ideaId = activeIdea.id;
     const grid = $("ideaLibraryGrid");
     const hint = $("ideaLibraryPickerHint");
     if (grid) grid.innerHTML = `<p class="idea-library-picker-hint">Loading library photos and clips…</p>`;
     if (hint) hint.textContent = "Loading suggested photos, clips, and the Drive library.";
     const q = String(query || "").trim();
+    let suggestionError = null;
+    let browseError = null;
     const [ideaPack, browse] = await Promise.all([
-      fetchIdeaLibrarySuggested(activeIdea.id, q).catch(() => ({ suggested: [], matches: [] })),
-      fetchLibraryBrowse(q, activeIdea.id).catch(() => []),
+      fetchIdeaLibrarySuggested(ideaId, q).catch((error) => {
+        suggestionError = error;
+        return { suggested: [], matches: [] };
+      }),
+      fetchLibraryBrowse(q, ideaId).catch((error) => {
+        browseError = error;
+        return [];
+      }),
     ]);
+    // Ignore stale responses so a slow empty-query open cannot wipe a later "Museum" search.
+    if (sequence !== ideaLibraryLoadSequence || activeIdea?.id !== ideaId) return;
     const suggested = ideaPack.suggested || [];
     const matches = ideaPack.matches || [];
     const quoted = libraryItemsForQuotedName(mergeLibraryPickerItems(suggested, matches, browse), q);
@@ -13283,6 +13296,20 @@ function timedScriptAssetLabel(asset, index) {
     );
     ideaLibrarySeeded = true;
     renderIdeaLibraryPicker();
+    if (!ideaLibraryPickerItems.length) {
+      const detail = suggestionError?.message || browseError?.message || (q
+        ? `No classified Drive photos or clips matched “${q}”.`
+        : "No classified Drive photos or clips were returned for this profile.");
+      if (grid) grid.innerHTML = `<p class="idea-library-picker-hint">${escapeHtml(detail)}</p>`;
+      if (suggestionError || browseError) {
+        setManageMessage(detail, "error-text");
+      }
+    } else if (suggestionError || browseError) {
+      setManageMessage(
+        `Library search partially failed: ${suggestionError?.message || browseError?.message}`,
+        "error-text"
+      );
+    }
   }
 
   async function openIdeaLibraryPicker() {
