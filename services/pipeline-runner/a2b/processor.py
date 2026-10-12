@@ -22,8 +22,10 @@ from carousel.timeutil import chicago_now, iso_ms
 from integrations.google_drive import GoogleDriveClient
 from render.fields import field_str
 
-# A2B Drive pages are small (20 files); one exact lookup per ID cannot be
-# truncated by hundreds of unrelated duplicate rows in a shared OR() query.
+# First fetch candidate IDs together; if the cap is reached, individually
+# verify any unseen IDs so hundreds of copies of one file cannot mask another.
+_A2B_EXISTING_LOOKUP_CHUNK = 20
+_A2B_EXISTING_LOOKUP_LIMIT = 100
 _A2B_CREATE_LOCK = Lock()  # Serialize the final check/write within this runner process.
 
 
@@ -51,22 +53,50 @@ def existing_drive_id_formula(candidate_ids: Iterable[str]) -> str | None:
 
 
 def _existing_drive_ids(client: AirtableClient, candidate_ids: Iterable[str]) -> set[str]:
-    """Look up each Drive ID independently so duplicates cannot hide candidates.
+    """Query candidate Drive IDs; verify unseen IDs if a shared query is capped.
 
-    A combined OR() query with a capped max_records can be filled entirely by
-    copies of one file; another known ID then appears 'missing' and is reimported.
-    Exact one-ID queries never have that false-negative failure mode.
+    Ordinarily one OR query is enough for a 20-file Drive page. If legacy
+    duplicate rows saturate its limit, exact one-ID lookups recover any IDs
+    hidden past the cap. This avoids 20 Airtable calls in the healthy case.
     """
+    cleaned = _unique_drive_ids(candidate_ids)
     found: set[str] = set()
-    for file_id in _unique_drive_ids(candidate_ids):
+    for index in range(0, len(cleaned), _A2B_EXISTING_LOOKUP_CHUNK):
+        chunk = cleaned[index : index + _A2B_EXISTING_LOOKUP_CHUNK]
+        if len(chunk) == 1:
+            rows = client.list_records(
+                MEDIA_ASSETS_TABLE,
+                formula=existing_drive_id_formula(chunk),
+                max_records=1,
+                fields=["Google Drive File ID"],
+            )
+            if any(field_str(row, "Google Drive File ID") == chunk[0] for row in rows):
+                found.add(chunk[0])
+            continue
         rows = client.list_records(
             MEDIA_ASSETS_TABLE,
-            formula=existing_drive_id_formula([file_id]),
-            max_records=1,
+            formula=existing_drive_id_formula(chunk),
+            max_records=_A2B_EXISTING_LOOKUP_LIMIT,
             fields=["Google Drive File ID"],
         )
-        if any(field_str(row, "Google Drive File ID") == file_id for row in rows):
-            found.add(file_id)
+        for row in rows:
+            drive_id = field_str(row, "Google Drive File ID")
+            if drive_id in chunk:
+                found.add(drive_id)
+        # Only capped results are potentially incomplete. Never treat an ID as
+        # absent just because the older matching records fill the response.
+        if len(rows) >= _A2B_EXISTING_LOOKUP_LIMIT:
+            for file_id in chunk:
+                if file_id in found:
+                    continue
+                exact_rows = client.list_records(
+                    MEDIA_ASSETS_TABLE,
+                    formula=existing_drive_id_formula([file_id]),
+                    max_records=1,
+                    fields=["Google Drive File ID"],
+                )
+                if any(field_str(row, "Google Drive File ID") == file_id for row in exact_rows):
+                    found.add(file_id)
     return found
 
 
