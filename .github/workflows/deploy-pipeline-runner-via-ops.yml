@@ -76,7 +76,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          EXPECTED=$(sed -n 's/^PIPELINE_RUNNER_CODE_VERSION = "\\([^"]*\\)"/\\1/p' services/pipeline-runner/config.py)
+          EXPECTED=$(grep '^PIPELINE_RUNNER_CODE_VERSION = ' services/pipeline-runner/config.py | cut -d '"' -f 2)
           test -n "$EXPECTED"
           for i in $(seq 1 18); do
             code=$(curl -sS --max-time 20 -o /tmp/health.json -w '%{http_code}' 'https://pipeline.chicagoshining.com/health' || true)
