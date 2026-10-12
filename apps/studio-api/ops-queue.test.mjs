@@ -28,6 +28,7 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const worker = fs.readFileSync(path.join(here, "worker.js"), "utf8");
 const app = fs.readFileSync(path.join(here, "../studio-web/assets/app-item4-1008.js"), "utf8");
 const html = fs.readFileSync(path.join(here, "../studio-web/index.html"), "utf8");
+const css = fs.readFileSync(path.join(here, "../studio-web/assets/styles-phase7-0621.css"), "utf8");
 
 function row(fields, id) {
   return { id, fields };
@@ -244,7 +245,7 @@ test("worker and UI wire Operations multi-queue + prepare-to-review", () => {
   assert.match(html, /ops-queue-timeline-head/);
   assert.match(html, />Timeline</);
   assert.match(html, /prepareIdeaToReviewButton/);
-  assert.match(app, /BUILD_ID = "item4-0.6.642-ops-profiles-load"/);
+  assert.match(app, /BUILD_ID = "item4-0.6.643-ops-timeline-align"/);
   assert.match(app, /platforms: "Plat"/);
   assert.match(app, /Media Added/);
   assert.match(app, /Waiting for Approval/);
@@ -255,6 +256,10 @@ test("worker and UI wire Operations multi-queue + prepare-to-review", () => {
   assert.match(app, /ensureOpsE2eStageLabels/);
   assert.match(app, /ops-e2e-dot/);
   assert.match(app, /ops-e2e-track/);
+  assert.match(app, /setProperty\("--ops-e2e-count"/);
+  assert.match(css, /minmax\(0,2\.6fr\) 4\.5rem/);
+  assert.match(css, /\.ops-e2e-labels,\s*\.ops-e2e-track/);
+  assert.match(css, /left:calc\(50% \/ var\(--ops-e2e-count\)\)/);
   assert.match(app, /data-filled=/);
   assert.match(app, /renderOpsRenderQueueDetail/);
   assert.match(app, /function applyOperationsNavVisibility/);

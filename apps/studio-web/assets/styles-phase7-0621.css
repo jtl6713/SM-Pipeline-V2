@@ -1348,14 +1348,15 @@ input, select, textarea, button {
 .ops-queue-count{font-size:.75rem;font-weight:700;color:var(--muted);background:#e8eef3;border-radius:999px;padding:2px 8px}
 .ops-queue-cols{display:grid;gap:10px;align-items:center;padding:0 12px;font-size:.8rem}
 .ops-queue-cols-head{min-height:34px;padding-top:8px;padding-bottom:6px;border-bottom:1px solid var(--line);background:#fafbfc;font-size:.66rem;font-weight:800;letter-spacing:.04em;text-transform:uppercase;color:var(--muted)}
+/* Pin Actions to 4.5rem so header/row Timeline columns share the same fr leftover. */
 .ops-queue-cols-render,
 .ops-queue-block:has(#opsRenderQueueLines) .ops-queue-cols-head,
-.ops-queue-block:has(#opsRenderQueueLines) .ops-queue-line{grid-template-columns:minmax(120px,1.3fr) minmax(70px,.7fr) minmax(60px,.6fr) minmax(80px,.8fr) minmax(50px,.5fr) minmax(240px,2.4fr) auto}
+.ops-queue-block:has(#opsRenderQueueLines) .ops-queue-line{grid-template-columns:minmax(120px,1.3fr) minmax(70px,.7fr) minmax(60px,.6fr) minmax(80px,.8fr) minmax(50px,.5fr) minmax(0,2.4fr) 4.5rem}
 .ops-queue-cols-publish,
 .ops-queue-block:has(#opsPublishQueueLines) .ops-queue-cols-head,
-.ops-queue-block:has(#opsPublishQueueLines) .ops-queue-line{grid-template-columns:minmax(120px,1.3fr) minmax(70px,.7fr) minmax(60px,.6fr) minmax(90px,.9fr) minmax(240px,2.4fr) auto}
+.ops-queue-block:has(#opsPublishQueueLines) .ops-queue-line{grid-template-columns:minmax(120px,1.3fr) minmax(70px,.7fr) minmax(60px,.6fr) minmax(90px,.9fr) minmax(0,2.4fr) 4.5rem}
 .ops-queue-cols-e2e,
-.ops-queue-block:has(#opsE2eQueueLines) .ops-queue-line{grid-template-columns:minmax(120px,1.3fr) minmax(70px,.7fr) minmax(70px,.7fr) minmax(260px,2.6fr) auto}
+.ops-queue-block:has(#opsE2eQueueLines) .ops-queue-line{grid-template-columns:minmax(120px,1.3fr) minmax(70px,.7fr) minmax(70px,.7fr) minmax(0,2.6fr) 4.5rem}
 .ops-queue-lines{display:flex;flex-direction:column}
 .ops-queue-line{display:grid;gap:10px;align-items:center;min-height:42px;padding:6px 12px;border-bottom:1px solid #edf1f4;font-size:.8rem}
 .ops-queue-line:last-child{border-bottom:0}
@@ -1367,16 +1368,19 @@ input, select, textarea, button {
 .ops-queue-line-title{font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .ops-queue-line-meta{display:block;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:.74rem}
 .ops-queue-cell{min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.ops-queue-line-actions{display:flex;flex-wrap:nowrap;gap:4px;justify-content:flex-end}
+.ops-queue-line-actions{display:flex;flex-wrap:nowrap;gap:4px;justify-content:flex-end;min-width:0}
 .ops-queue-line-actions .secondary-button,.ops-queue-line-actions .text-button{min-height:28px;padding:2px 8px;font-size:.72rem}
 .ops-queue-empty{padding:12px 14px;color:var(--muted);font-size:.8rem}
-.ops-queue-timeline-head{display:flex;flex-direction:column;gap:4px;min-width:0}
+.ops-queue-timeline-head{display:flex;flex-direction:column;gap:4px;min-width:0;width:100%}
 .ops-queue-timeline-title{font-size:.66rem;font-weight:800;letter-spacing:.04em;text-transform:uppercase;color:var(--muted)}
-.ops-e2e-labels{display:grid;grid-template-columns:repeat(10,minmax(0,1fr));gap:0 2px;align-items:end;min-width:0;padding:0 2px}
-.ops-e2e-labels span{font-size:.55rem;font-weight:800;letter-spacing:.01em;text-transform:uppercase;text-align:center;line-height:1.1;color:var(--dot,var(--muted));white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.ops-e2e-track{--progress:0;--current:-1;--ops-e2e-count:10;position:relative;display:grid;grid-template-columns:repeat(10,minmax(0,1fr));align-items:center;min-height:20px;min-width:0;padding:0 2px}
-.ops-e2e-track::before{content:"";position:absolute;left:4%;right:4%;top:50%;height:2px;transform:translateY(-50%);background:#dfe5ea;border-radius:999px;z-index:0}
-.ops-e2e-track::after{content:"";position:absolute;left:4%;top:50%;height:3px;width:calc((100% - 8%) * var(--progress));max-width:calc(100% - 8%);transform:translateY(-50%);background:linear-gradient(90deg,#d4a017,#e67e22,#c0392b,#d63384,#8e44ad,#5b2c6f,#012559,#2471a3,#148f9c,#1e8449);border-radius:999px;z-index:1}
+/* Labels + dots share one N-col grid (no gap/padding drift) so centers match. */
+.ops-e2e-labels,
+.ops-e2e-track{--ops-e2e-count:10;display:grid;grid-template-columns:repeat(var(--ops-e2e-count),minmax(0,1fr));gap:0;align-items:center;min-width:0;width:100%;padding:0;box-sizing:border-box}
+.ops-e2e-labels{align-items:end}
+.ops-e2e-labels span{font-size:.55rem;font-weight:800;letter-spacing:.01em;text-transform:uppercase;text-align:center;line-height:1.1;color:var(--dot,var(--muted));white-space:nowrap;overflow:hidden;text-overflow:ellipsis;justify-self:stretch}
+.ops-e2e-track{--progress:0;--current:-1;position:relative;min-height:20px}
+.ops-e2e-track::before{content:"";position:absolute;left:calc(50% / var(--ops-e2e-count));right:calc(50% / var(--ops-e2e-count));top:50%;height:2px;transform:translateY(-50%);background:#dfe5ea;border-radius:999px;z-index:0}
+.ops-e2e-track::after{content:"";position:absolute;left:calc(50% / var(--ops-e2e-count));top:50%;height:3px;width:calc((100% - 100% / var(--ops-e2e-count)) * var(--progress));max-width:calc(100% - 100% / var(--ops-e2e-count));transform:translateY(-50%);background:linear-gradient(90deg,#d4a017,#e67e22,#c0392b,#d63384,#8e44ad,#5b2c6f,#012559,#2471a3,#148f9c,#1e8449);border-radius:999px;z-index:1}
 .ops-e2e-dot{position:relative;z-index:2;justify-self:center;width:11px;height:11px;border-radius:50%;border:2px solid var(--dot,#9aa6b2);background:#fff;box-sizing:border-box}
 .ops-e2e-dot[data-state="done"],
 .ops-e2e-dot[data-state="skipped"],

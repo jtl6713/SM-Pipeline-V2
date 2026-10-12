@@ -267,7 +267,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.642-ops-profiles-load";
+  const BUILD_ID = "item4-0.6.643-ops-timeline-align";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -23931,6 +23931,7 @@ function timedScriptAssetLabel(asset, index) {
     hosts.forEach((host) => {
       if (host.dataset.signature === signature) return;
       host.dataset.signature = signature;
+      host.style.setProperty("--ops-e2e-count", String(defs.length));
       host.style.gridTemplateColumns = `repeat(${defs.length},minmax(0,1fr))`;
       host.innerHTML = html;
     });
