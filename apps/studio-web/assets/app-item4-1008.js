@@ -267,7 +267,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.648-ops-render-rows";
+  const BUILD_ID = "item4-0.6.649-render-filter-terminal";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -1617,7 +1617,18 @@
     return render;
   }
 
+  // A successfully published destination is no longer an active render even if
+  // Airtable retains an older "Ready for Render" / "Rendering" status.
+  // This must be checked before rerender, queue and PR-level job heuristics.
+  function pipelineOutputIsPublished(record) {
+    if (!record) return false;
+    return creativeIsPublished(record)
+      || /^Published$/i.test(String(record.studio_state || "").trim())
+      || /^Published$/i.test(String(record.platform_publish_status || "").trim());
+  }
+
   function pipelineOutputRenderComplete(record) {
+    if (pipelineOutputIsPublished(record)) return true;
     if (pipelineMixRerenderInProgress(record)) return false;
     if (pipelineIsRetryingRender(record)) return false;
     const state = String(record?.studio_state || "").trim();
@@ -1634,6 +1645,9 @@
   }
 
   function pipelineOutputRenderInFlight(record) {
+    // Publication and terminal delivery always override obsolete render labels.
+    if (pipelineOutputIsPublished(record)) return false;
+    if (/^(Skipped|Draft Delivered)$/i.test(String(record?.studio_state || "").trim())) return false;
     if (pipelineMixRerenderInProgress(record)) return true;
     if (pipelineIsRetryingRender(record)) return true;
     const state = String(record?.studio_state || "").trim();
@@ -19329,7 +19343,12 @@ function timedScriptAssetLabel(asset, index) {
         || state === "Ready for Review" || state === "Awaiting Approval";
       return approvalState && !pipelineRecordIsAzAutoQueue(record);
     }
-    if (filter === "rendering") return pipelineOutputRenderInFlight(record) || /rendering|processing|queued/i.test(render);
+    if (filter === "rendering") {
+      // Never pull fully published content (or all its group siblings) into the
+      // Rendering view because one historic Render_Status was left queued.
+      if (pipelineOutputIsPublished(record)) return false;
+      return pipelineOutputRenderInFlight(record) || /rendering|processing|queued/i.test(render);
+    }
     if (filter === "scheduled") return pipelineRecordIsScheduled(record) || /scheduled/i.test(publish);
     if (filter === "approved") {
       if (pipelineRecordIsScheduled(record) || /published/i.test(studio)) return false;
