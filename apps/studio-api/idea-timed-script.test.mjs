@@ -245,6 +245,9 @@ test("Worker advertises the idea timed-script route", async () => {
   assert.match(worker, /from "\.\/idea-timed-script\.mjs"/);
   assert.match(worker, /ready_for_approval/);
   assert.match(worker, /idea-vo-timeline=1/);
+  assert.match(worker, /item4HealTimelineAutoPrepare/);
+  assert.match(worker, /item4TimelineAutoPrepareEligible/);
+  assert.match(app, /maybeAutoPrepareTimelineVariants/);
   assert.match(worker, /waitAutonomousVariantsReady/);
   assert.match(worker, /createIdeaTimedScriptRoute\(request, env, url, authorization, ctx\)/);
   assert.match(worker, /acceptSingleImageFeedPost/);
@@ -291,7 +294,7 @@ test("Worker advertises the idea timed-script route", async () => {
   assert.match(worker, /ideaLibraryVideoFilterFormula/);
   assert.match(worker, /scripted short video discovery failed/);
   assert.match(worker, /allowVideo: true/);
-  assert.match(worker, /0.10.547-library-search-all-hits/);
+  assert.match(worker, /0.10.548-timeline-auto-prepare/);
   const css = await readFile(path.join(here, "../studio-web/assets/styles-phase7-0621.css"), "utf8");
   assert.match(css, /#page-ideas \.page-heading\{\s*flex-wrap:wrap;/);
   assert.match(css, /#page-ideas \.heading-actions\{/);

@@ -15,7 +15,10 @@ function harness(api, extra = {}) {
     mergeItem4WorkspaceStatus: x => x, api,
     renderItem4Workspace(status) { context.item4Workspace = status; },
     syncPrMediaKindUi() {}, syncItem4AiGenerationUi() {}, maybeGenerateItem4AiImages() {},
+    maybeAutoPrepareTimelineVariants() {},
     ezIsOriginRecord: () => false, ezAutoPlanAfterUpload: false, ezStarting: false,
+    isAirtableCooldownFailure: () => false, isTransientStudioError: () => false,
+    setRequestMessage() {},
     renderItem4Variants() {}, console, ...extra,
   });
   vm.runInContext(loader, context);

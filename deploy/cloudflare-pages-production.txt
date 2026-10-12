@@ -241,7 +241,6 @@ UI 0.6.607 hashtag mismatch warning only; approval no longer blocked.
 2026-10-11: Create VO timeline writes narration onto an unapproved silent photo package, including one already promoted (UI 0.6.622 / Worker 0.10.545-create-vo).
 2026-10-11: Timed Script importer explains timeline format with verified example (UI 0.6.623).
 2026-10-11: Studio UI 0.6.624-pipeline-latest-rescue includes newest live outputs even during Pipeline snapshots lag.
-
 2026-10-12: Manage Idea typed library search returns every query hit (no idea relevance ranking); UI 0.6.625 / Worker 0.10.547.
-
 2026-10-12: Redeploy Studio Pages so custom-domain serves UI 0.6.625-library-search-all-hits (edge lag after #635).
+2026-10-12: Studio UI 0.6.626-timeline-auto-prepare kicks Prepare for VO timeline drafts when plan is Ready and variants are None.

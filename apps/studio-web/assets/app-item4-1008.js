@@ -203,6 +203,9 @@
   let item4MasterExtraWindows = 0;
   let item4VariantExtraWindows = 0;
   let item4VariantAutoRetries = 0;
+  // One automatic Prepare kick per Production Request while this tab stays open.
+  // Create Timeline's waitUntil can miss; Worker heal covers abandoned drafts.
+  const item4TimelineAutoPrepareKicked = new Set();
   const item4PreviewFailures = new Map();
   const item4CropDrafts = new Map();
   let item4CropRequestId = null;
@@ -264,7 +267,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.625-library-search-all-hits";
+  const BUILD_ID = "item4-0.6.626-timeline-auto-prepare";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -10778,6 +10781,35 @@ function timedScriptAssetLabel(asset, index) {
       || /attaching .* clip frames/i.test(message);
   }
 
+  function item4TimelineAutoPrepareEligibleUi(status = item4Workspace, record = activeProductionRequest) {
+    if (!record?.id) return false;
+    const notes = [
+      status?.production_notes,
+      record?.production_notes,
+      $("prProductionNotes")?.value,
+      $("ezProductionNotes")?.value,
+    ].map((value) => String(value || "")).filter(Boolean).join("\n");
+    if (!/idea-vo-timeline=/i.test(notes) && !item4HasTimedScript(record)) return false;
+    if (String(status?.plan_status || "") !== "Ready") return false;
+    const variantStatus = String(status?.variant_status || "None").trim() || "None";
+    if (variantStatus !== "None") return false;
+    if (!Array.isArray(status?.assets) || !status.assets.length) return false;
+    if (item4MastersNeedSave(status || {})) return false;
+    return true;
+  }
+
+  function maybeAutoPrepareTimelineVariants(status = item4Workspace) {
+    const requestId = activeProductionRequest?.id;
+    if (!requestId || item4PreparingVariants || item4VariantPolling) return false;
+    if (item4TimelineAutoPrepareKicked.has(requestId)) return false;
+    if (!item4TimelineAutoPrepareEligibleUi(status, activeProductionRequest)) return false;
+    item4TimelineAutoPrepareKicked.add(requestId);
+    Promise.resolve().then(() => prepareItem4Variants({ autoRetry: false }).catch((error) => {
+      console.warn("Timeline auto-prepare kick deferred", error);
+    }));
+    return true;
+  }
+
   async function prepareItem4Variants({ autoRetry = false } = {}) {
     if (!activeProductionRequest?.id || item4PreparingVariants) return;
     if (item4MastersNeedSave(item4Workspace || {})) {
@@ -10976,6 +11008,7 @@ function timedScriptAssetLabel(asset, index) {
       syncPrMediaKindUi();
       syncItem4AiGenerationUi(status);
       maybeGenerateItem4AiImages(status);
+      maybeAutoPrepareTimelineVariants(status);
       if ((ezIsOriginRecord() || ezAutoPlanAfterUpload || ezStarting)
         && !ezIsAzFinishedPath()
         && ezMasterSetReadyForPlan()
