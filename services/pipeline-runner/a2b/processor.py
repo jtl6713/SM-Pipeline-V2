@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import timedelta
+from threading import Lock
 from typing import Any, Iterable
 
 from a2.dedupe import airtable_quote
@@ -23,6 +24,7 @@ from render.fields import field_str
 
 # A2B Drive pages are small (20 files); one exact lookup per ID cannot be
 # truncated by hundreds of unrelated duplicate rows in a shared OR() query.
+_A2B_CREATE_LOCK = Lock()  # Serialize the final check/write within this runner process.
 
 
 def _unique_drive_ids(candidate_ids: Iterable[str]) -> list[str]:
@@ -154,37 +156,39 @@ def process_request(
             continue
         if route != "backfill":
             continue
-        # Recheck before any Drive write. A prior page item or concurrent run
-        # may have created this record since the initial route decision.
-        if file_id in existing or file_id in _existing_drive_ids(client, [file_id]):
-            existing.add(file_id)
-            skipped.append(file_id)
-            continue
-        meta = drive.get_file(file_id)
-        drive.share_anyone_reader(file_id)
-        try:
-            # performUpsert is atomic at Airtable. Even concurrent A2B workers
-            # cannot both insert the same Google Drive File ID.
-            record, was_created = client.upsert_record(
-                MEDIA_ASSETS_TABLE,
-                _backfill_fields(meta, batch_id=batch_id),
-                merge_field="Google Drive File ID",
-                typecast=True,
-            )
-        except Exception:
-            # If the write returned an ambiguous error after succeeding, or an
-            # old duplicate already exists, fail closed rather than POSTing.
-            if file_id in _existing_drive_ids(client, [file_id]):
+        # Avoid same-process create races; atomic upsert also protects across hosts.
+        with _A2B_CREATE_LOCK:
+            # Recheck before any Drive write. A prior page item or concurrent run
+            # may have created this record since the initial route decision.
+            if file_id in existing or file_id in _existing_drive_ids(client, [file_id]):
                 existing.add(file_id)
                 skipped.append(file_id)
                 continue
-            raise
-        existing.add(file_id)
-        if was_created:
-            created_ids.append(record["id"])
-        else:
-            skipped.append(file_id)
-
+            meta = drive.get_file(file_id)
+            drive.share_anyone_reader(file_id)
+            try:
+                # performUpsert is atomic at Airtable. Even concurrent A2B workers
+                # cannot both insert the same Google Drive File ID.
+                record, was_created = client.upsert_record(
+                    MEDIA_ASSETS_TABLE,
+                    _backfill_fields(meta, batch_id=batch_id),
+                    merge_field="Google Drive File ID",
+                    typecast=True,
+                )
+            except Exception:
+                # If the write returned an ambiguous error after succeeding, or an
+                # old duplicate already exists, fail closed rather than POSTing.
+                if file_id in _existing_drive_ids(client, [file_id]):
+                    existing.add(file_id)
+                    skipped.append(file_id)
+                    continue
+                raise
+            existing.add(file_id)
+            if was_created:
+                created_ids.append(record["id"])
+            else:
+                skipped.append(file_id)
+    
     preview["moved_oversize_ids"] = moved_oversize
     preview["created_ids"] = created_ids
     preview["skipped_existing_ids"] = skipped
