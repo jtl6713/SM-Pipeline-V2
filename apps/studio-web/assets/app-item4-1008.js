@@ -267,7 +267,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.651-home-snapshot";
+  const BUILD_ID = "item4-0.6.652-production-media-isolation";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -10745,9 +10745,12 @@ function timedScriptAssetLabel(asset, index) {
 
   async function pollItem4MasterAssets() {
     if (!activeProductionRequest?.id) { stopItem4MasterPolling(); return; }
+    const requestId = activeProductionRequest.id;
+    const revision = item4WorkspaceRevision;
     if (!item4MasterPollStartedAt) item4MasterPollStartedAt = Date.now();
     try {
       await loadItem4Workspace(activeProductionRequest);
+      if (activeProductionRequest?.id !== requestId || revision !== item4WorkspaceRevision) return;
       const state = String(item4Workspace?.assets_status || "None");
       updateItem4MasterProgress(item4Workspace || {});
       if (item4WorkspaceCompressionFailed(item4Workspace)) {
@@ -10833,6 +10836,8 @@ function timedScriptAssetLabel(asset, index) {
 
   async function pollItem4Variants() {
     if (!activeProductionRequest?.id) { stopItem4VariantPolling(); return; }
+    const requestId = activeProductionRequest.id;
+    const revision = item4WorkspaceRevision;
     item4VariantPolling = true;
     if (item4VariantPollTimer) {
       clearTimeout(item4VariantPollTimer);
@@ -10840,7 +10845,8 @@ function timedScriptAssetLabel(asset, index) {
     }
     if (!item4VariantPollStartedAt) item4VariantPollStartedAt = Date.now();
     try {
-      const variantStatus = await api(`/api/production-requests/${encodeURIComponent(activeProductionRequest.id)}/variants`);
+      const variantStatus = await api(`/api/production-requests/${encodeURIComponent(requestId)}/variants`);
+      if (activeProductionRequest?.id !== requestId || revision !== item4WorkspaceRevision || !item4VariantPolling) return;
       const state = String(variantStatus?.status || item4Workspace?.variant_status || "None");
       const manifest = variantStatus?.manifest || null;
       const progressReady = Number(variantStatus?.progress?.ready || manifest?.ready_count || 0);
@@ -10929,6 +10935,7 @@ function timedScriptAssetLabel(asset, index) {
       // Transient polling errors should not convert a valid background job into a user-facing failure.
       console.warn("Item 4 variant status poll deferred", error);
     }
+    if (activeProductionRequest?.id !== requestId || revision !== item4WorkspaceRevision || !item4VariantPolling) return;
     item4VariantPollTimer = setTimeout(pollItem4Variants, ITEM4_VARIANT_POLL_MS);
   }
 
@@ -11231,6 +11238,8 @@ function timedScriptAssetLabel(asset, index) {
         }
       });
     } catch (error) {
+      if (activeProductionRequest?.id !== record.id || revision !== item4WorkspaceRevision
+        || sequence !== item4WorkspaceLoadSequence) return;
       const cooling = isAirtableCooldownFailure({ status: error?.status, text: String(error?.message || ""), error });
       const transient = cooling || isTransientStudioError(error);
       if (item4Workspace) {
@@ -13001,7 +13010,49 @@ function timedScriptAssetLabel(asset, index) {
     }
   }
 
+  // Switching Production Requests must never show photo frames from the prior one.
+  function clearProductionMediaOnRequestChange(record) {
+    const nextId = String(record?.id || "").trim();
+    const currentId = String(activeProductionRequest?.id || "").trim();
+    const loadedId = String(item4WorkspaceRequestId || "").trim();
+    if (!nextId || (nextId === currentId && (!loadedId || loadedId === nextId))) return false;
+    item4WorkspaceRevision += 1;
+    item4WorkspaceLoadSequence += 1;
+    stopItem4MasterPolling();
+    stopItem4VariantPolling();
+    if (item4WorkspaceRetryTimer) {
+      clearTimeout(item4WorkspaceRetryTimer);
+      item4WorkspaceRetryTimer = 0;
+    }
+    item4Workspace = null;
+    item4WorkspaceRequestId = null;
+    item4BridgePreflight = null;
+    item4AssetStripSignature = "";
+    item4PlanOverrides = {};
+    item4PrepareError = "";
+    item4PreparingVariants = false;
+    const loading = "Loading photos for this Production Request…";
+    for (const id of ["prRenderFrameOverrides", "item4AssetStrip", "item4VariantGallery", "item4OutputPlan"]) {
+      const host = $(id);
+      if (host) host.innerHTML = `<div class="empty compact-empty" role="status">${escapeHtml(loading)}</div>`;
+    }
+    const staged = $("ezPhotoStrip");
+    if (staged) { staged.hidden = true; staged.innerHTML = ""; }
+    for (const id of ["item4AssetStatus", "item4PlanStatus", "item4VariantStatus"]) {
+      const badge = $(id);
+      if (badge) badge.textContent = "Loading…";
+    }
+    const error = $("item4VariantError");
+    if (error) { error.hidden = true; error.textContent = ""; }
+    const clearFrames = $("prRenderClearFrameOverrides");
+    if (clearFrames) clearFrames.disabled = true;
+    const progress = $("item4VariantProgress");
+    if (progress) { progress.hidden = true; progress.innerHTML = ""; }
+    return true;
+  }
+
   function populateProductionRequestForm(record, { reveal = true } = {}) {
+    const changingRequest = clearProductionMediaOnRequestChange(record);
     voiceUserPicked = false;
     activeProductionRequest = record;
     productionOutputMatrixLoaded = false;
@@ -13070,7 +13121,8 @@ function timedScriptAssetLabel(asset, index) {
     if (productionTimedScript) rememberTimedScript(productionTimedScript, record.id);
     timedScriptAssetSignature = "";
     hydrateProductionRenderSettings(renderSettings);
-    renderProductionFrameOverrides({ assets: record.studio_master_assets || item4Workspace?.assets || [] });
+    // Do not draw stale frame cards while the new item4 workspace is loading.
+    if (!changingRequest) renderProductionFrameOverrides({ assets: record.studio_master_assets || item4Workspace?.assets || [] });
     renderTimedScriptReview();
     if (reveal && ezEntryPath !== "content" && timedScriptActive()) {
       setProductionWorkspaceTab("rendering");
