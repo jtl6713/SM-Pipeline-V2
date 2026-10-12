@@ -267,7 +267,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.639-ops-timeline-dots";
+  const BUILD_ID = "item4-0.6.640-ops-timeline-dots";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -23874,6 +23874,18 @@ function timedScriptAssetLabel(asset, index) {
 
   const OPS_E2E_STAGE_LABELS = {
     idea: "Idea",
+    media: "Media",
+    platforms: "Plat",
+    frames: "Frame",
+    prod_approved: "Prod",
+    render_queue: "Queue",
+    rendering: "Rend",
+    review: "Review",
+    pub_approved: "Appr",
+    published: "Pub",
+  };
+  const OPS_E2E_STAGE_TITLES = {
+    idea: "Idea",
     media: "Media Added",
     platforms: "Platform Suggested",
     frames: "Frames Prepared",
@@ -23915,7 +23927,8 @@ function timedScriptAssetLabel(asset, index) {
     host.innerHTML = defs.map((stage, index) => {
       const color = opsE2eStageColor(index);
       const label = OPS_E2E_STAGE_LABELS[stage.id] || stage.label || stage.id;
-      return `<span style="--dot:${color}" title="${escapeHtml(label)}">${escapeHtml(label)}</span>`;
+      const title = OPS_E2E_STAGE_TITLES[stage.id] || stage.label || label;
+      return `<span style="--dot:${color}" title="${escapeHtml(title)}">${escapeHtml(label)}</span>`;
     }).join("");
   }
 
