@@ -195,3 +195,4 @@ Deploy Worker 0.10.489-engagement-ledger. Shrink the engagement ledger so Chicag
 2026-10-12: Redeploy Worker tip after #650 merge onto main (keeps 0.10.552-ops-queue; clears DIRTY append conflict).
 2026-10-12: Worker 0.10.553-ops-queue-titles — ops queue item titles prefer Content/Idea over Master_Content_Type.
 2026-10-12: Worker 0.10.554-ops-multi-queue — ops queue partition + e2e stage trails.
+2026-10-12: Deploy engagement permission-suspension recovery and read-only reconnect probe; gated by engagement-auth-recovery tests.
