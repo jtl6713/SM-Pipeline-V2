@@ -83,6 +83,21 @@ export const OPS_QUEUE_REQUEST_FIELDS = [
   "Test_Run_ID",
 ];
 
+/**
+ * Prioritize unfinished render work in Studio continuation. Completed outputs
+ * awaiting human review must not consume the bounded render-inspection slots.
+ */
+export function opsQueueContinuationCandidatePriority(row, readField = (record, name) => record?.fields?.[name]) {
+  const status = String(readField(row, "Output_Status") || "").trim().toLowerCase();
+  const render = String(readField(row, "Render_Status") || "").trim().toLowerCase();
+  const outputType = String(readField(row, "Studio_Output_Type") || "").trim().toLowerCase();
+  const hasJob = Boolean(String(readField(row, "Remotion_Job_ID") || "").trim());
+  if (outputType === "story" && !hasJob && (render === "ready for render" || render === "waiting in render queue")) return 0;
+  if (status === "in production") return 1;
+  if (status === "ready for review") return 2;
+  return 3;
+}
+
 /** Prefer human titles over Master_Content_Type ("Vertical Short Video"). */
 export function opsQueueItemTitle({
   contentWorkingTitle = "",

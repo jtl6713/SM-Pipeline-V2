@@ -226,6 +226,7 @@ import {
   OPS_QUEUE_RENDER_FORMULA,
   OPS_QUEUE_REQUEST_FIELDS,
   OPS_QUEUE_REQUEST_FORMULA,
+  opsQueueContinuationCandidatePriority,
   applyProducePauseToJob,
   buildOpsE2eStages,
   emptyOpsQueueControls,
@@ -32207,9 +32208,24 @@ async function listStudioContinuationCandidates(env, options = {}) {
     sortDirection: "desc",
     filterFormula: STUDIO_RFR_MISSING_COVER_FORMULA,
   }).catch(() => []);
+  // Stories are excluded from the generic R4 queue. Recover older unclaimed
+  // Stories explicitly, even when they fall outside the newest 20.
+  const stalledStories = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
+    limit: 24,
+    sortField: "Output_ID",
+    sortDirection: "asc",
+    filterFormula: `AND(${STUDIO_CONTINUATION_CANDIDATE_FORMULA},{Output_Status}="In Production",{Studio_Output_Type}="Story",{Remotion_Job_ID}=BLANK(),OR({Render_Status}="Ready for Render",{Render_Status}="Waiting in Render Queue"))`,
+  }).catch(() => []);
   const byId = new Map();
-  for (const row of [...coverGaps, ...newest]) byId.set(row.id, row);
-  return [...byId.values()].sort((a, b) => Number(f(b, "Output_ID") || 0) - Number(f(a, "Output_ID") || 0));
+  for (const row of [...coverGaps, ...newest, ...stalledStories]) byId.set(row.id, row);
+  return [...byId.values()].sort((a, b) => {
+    const left = opsQueueContinuationCandidatePriority(a, f);
+    const right = opsQueueContinuationCandidatePriority(b, f);
+    if (left !== right) return left - right;
+    const aId = Number(f(a, "Output_ID") || 0);
+    const bId = Number(f(b, "Output_ID") || 0);
+    return left === 0 ? aId - bId : bId - aId;
+  });
 }
 
 async function pulseStudioContinuationJobs(env, options = {}) {
@@ -32434,7 +32450,10 @@ async function advanceStudioProductionOutputs(env, options = {}) {
     return !studioAiThumbnailUrl(thumb) || !caption;
   });
   const remainder = (candidates || []).filter((po) => !missingCover.some((row) => row.id === po.id));
-  for (const po of [...missingCover, ...remainder].slice(0, 12)) {
+  const prioritizedMedia = [...missingCover, ...remainder].sort((a, b) =>
+    opsQueueContinuationCandidatePriority(a, f) - opsQueueContinuationCandidatePriority(b, f)
+  );
+  for (const po of prioritizedMedia.slice(0, 12)) {
     try {
       coverMedia.push({ id: po.id, ...await studioContinuationMediaGate(env, po, cache) });
     } catch (error) {
@@ -32496,7 +32515,8 @@ async function advanceStudioProductionOutputs(env, options = {}) {
       const idx = inspected.findIndex((row) => row.id === po.id);
       if (idx >= 0) inspected[idx] = { id: po.id, ...result };
       else inspected.push({ id: po.id, ...result });
-      inspectedRemotion += 1;
+      // Already-reviewable outputs must not consume the four-item render budget.
+      if (result.action !== "reviewable" && result.action !== "stop") inspectedRemotion += 1;
       try {
         const applied = await studioContinuationApplyInspectAction(env, po, result);
         if (applied) pulses.push({ key: "INSPECT_ACTION", id: po.id, action: result.action, reason: result.reason || null });
