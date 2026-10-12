@@ -27,6 +27,17 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
 
+      - name: Regression tests for published outputs excluded from Rendering
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check apps/studio-web/assets/app-item4-1008.js
+          node --test \
+            apps/studio-web/pipeline-rendering-terminal.test.mjs \
+            apps/studio-web/pipeline-review-filter.test.mjs \
+            apps/studio-web/pipeline-publish-now.test.mjs \
+            apps/studio-web/pipeline-column-filters.test.mjs
+
       - name: Validate Pages source and stage deployment directory
         shell: bash
         run: |
