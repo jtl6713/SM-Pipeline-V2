@@ -267,7 +267,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.640-ops-timeline-dots";
+  const BUILD_ID = "item4-0.6.641-ops-timeline-headers";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -23915,21 +23915,24 @@ function timedScriptAssetLabel(asset, index) {
   }
 
   function ensureOpsE2eStageLabels(stages) {
-    const host = $("opsE2eStageLabels");
-    if (!host) return;
+    const hosts = document.querySelectorAll(".ops-e2e-labels");
+    if (!hosts.length) return;
     const defs = Array.isArray(stages) && stages.length
       ? stages
       : OPS_E2E_STAGE_ORDER.map((id) => ({ id, label: OPS_E2E_STAGE_LABELS[id] }));
     const signature = defs.map((stage) => stage.id).join("|");
-    if (host.dataset.signature === signature) return;
-    host.dataset.signature = signature;
-    host.style.gridTemplateColumns = `repeat(${defs.length},minmax(0,1fr))`;
-    host.innerHTML = defs.map((stage, index) => {
+    const html = defs.map((stage, index) => {
       const color = opsE2eStageColor(index);
       const label = OPS_E2E_STAGE_LABELS[stage.id] || stage.label || stage.id;
       const title = OPS_E2E_STAGE_TITLES[stage.id] || stage.label || label;
       return `<span style="--dot:${color}" title="${escapeHtml(title)}">${escapeHtml(label)}</span>`;
     }).join("");
+    hosts.forEach((host) => {
+      if (host.dataset.signature === signature) return;
+      host.dataset.signature = signature;
+      host.style.gridTemplateColumns = `repeat(${defs.length},minmax(0,1fr))`;
+      host.innerHTML = html;
+    });
   }
 
   function opsE2eTrailHtml(e2e) {

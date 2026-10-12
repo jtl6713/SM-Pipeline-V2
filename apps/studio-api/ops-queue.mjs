@@ -10,6 +10,25 @@ export const OPS_QUEUE_CONTROLS_SCHEMA = "studio.ops-queue-controls.1";
 export const OPS_QUEUE_OUTPUT_FORMULA =
   'AND({Test_Run_ID}=BLANK(),NOT({Do_Not_Publish}),OR({Output_Status}="In Production",{Output_Status}="Ready for Render",{Output_Status}="Rendering",{Output_Status}="Rendered",{Output_Status}="Ready for Review",{Output_Status}="Approved",{Output_Status}="Approved for Publishing",{Output_Status}="Ready to Schedule",{Output_Status}="Ready to Publish",{Output_Status}="Scheduled",{Output_Status}="Failed",{Output_Status}="Blocked",{Review_Status}="Review Sent",{Render_Status}="Waiting in Render Queue",{Render_Status}="Ready for Render",{Render_Status}="Ready to Render",{Render_Status}="Rendering",{Render_Status}="Failed",{Render_Status}="Blocked"))';
 
+/**
+ * Dedicated Remotion-lane fetch. The general ops output query is capped (~160) and
+ * sorted by newest Output_ID, so a large Publishing backlog can crowd Ready for Render /
+ * Rendering rows out of the list. This formula is fetched separately and merged in.
+ */
+export const OPS_QUEUE_RENDER_FORMULA =
+  'AND({Test_Run_ID}=BLANK(),NOT({Do_Not_Publish}),OR({Render_Status}="Ready for Render",{Render_Status}="Ready to Render",{Render_Status}="Waiting in Render Queue",{Render_Status}="Rendering",{Render_Status}="Failed",{Render_Status}="Blocked",{Output_Status}="Ready for Render",{Output_Status}="Rendering"))';
+
+/** Deduplicate Airtable output records by id (later lists win). */
+export function mergeOpsQueueOutputRecords(...lists) {
+  const byId = new Map();
+  for (const list of lists) {
+    for (const row of list || []) {
+      if (row?.id) byId.set(row.id, row);
+    }
+  }
+  return [...byId.values()];
+}
+
 /** Production Requests still moving toward Ready for Review. */
 export const OPS_QUEUE_REQUEST_FORMULA =
   'AND({Test_Run_ID}=BLANK(),OR({Request_Status}="Draft",{Request_Status}="Ready",{Request_Status}="Submitted",{Request_Status}="Promoted",AND({Studio_Production_Job_JSON}!="",FIND(\'"step":"done"\',{Studio_Production_Job_JSON}&\'\')=0)))';

@@ -223,6 +223,7 @@ import {
   OPS_QUEUE_CONTENT_FIELDS,
   OPS_QUEUE_OUTPUT_FIELDS,
   OPS_QUEUE_OUTPUT_FORMULA,
+  OPS_QUEUE_RENDER_FORMULA,
   OPS_QUEUE_REQUEST_FIELDS,
   OPS_QUEUE_REQUEST_FORMULA,
   applyProducePauseToJob,
@@ -231,6 +232,7 @@ import {
   isProducePaused,
   isRenderPaused,
   jobIsOpsPaused,
+  mergeOpsQueueOutputRecords,
   normalizeOpsQueueControls,
   opsQueueItemTitle,
   partitionOpsQueues,
@@ -655,7 +657,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.555-ops-queue-fields",
+          version: "0.10.556-ops-render-queue-fetch",
           studio_create_vo_matched_stills_v1: true,
           studio_idea_library_typeahead_v1: true,
           studio_idea_library_search_all_hits_v1: true,
@@ -41414,7 +41416,7 @@ async function getStudioOperationsQueue(request, env, authorization) {
       return [];
     }
   };
-  const [profiles, outputs, requests, activeHolds] = await Promise.all([
+  const [profiles, outputs, requests, activeHolds, renderLaneOutputs] = await Promise.all([
     settleList("profiles", listRecords(env, STUDIO_IDEA_PROFILE_TABLE_ID, { limit: 50 })),
     settleList("outputs", listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
       limit: 160,
@@ -41435,10 +41437,19 @@ async function getStudioOperationsQueue(request, env, authorization) {
       fields: OPS_QUEUE_OUTPUT_FIELDS,
       filterFormula: STUDIO_RENDER_QUEUE_ACTIVE_FORMULA,
     })),
+    // Separate Remotion-lane fetch so a full Publishing backlog cannot empty Rendering Queue.
+    settleList("renderLane", listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
+      limit: 100,
+      sortField: "Output_ID",
+      sortDirection: "desc",
+      fields: OPS_QUEUE_OUTPUT_FIELDS,
+      filterFormula: OPS_QUEUE_RENDER_FORMULA,
+    })),
   ]);
+  const mergedOutputs = mergeOpsQueueOutputRecords(outputs, renderLaneOutputs, activeHolds);
   const profileMap = new Map((profiles || []).map((row) => [row.id, row]));
   const queueCandidates = sortRenderQueueCandidates(
-    (outputs || []).filter((row) => isRenderQueueCandidateStatus(f(row, "Render_Status"))),
+    mergedOutputs.filter((row) => isRenderQueueCandidateStatus(f(row, "Render_Status"))),
     f,
     controls,
   );
@@ -41449,7 +41460,7 @@ async function getStudioOperationsQueue(request, env, authorization) {
   );
 
   const contentIds = [...new Set([
-    ...(outputs || []).map((row) => firstOpsLinkedId(f(row, "Content_Item"))),
+    ...mergedOutputs.map((row) => firstOpsLinkedId(f(row, "Content_Item"))),
     ...(requests || []).map((row) => firstOpsLinkedId(f(row, "Promoted_Content_Item"))),
   ].filter((id) => /^rec[A-Za-z0-9]+$/.test(id)))];
   const contentMap = new Map();
@@ -41550,7 +41561,7 @@ async function getStudioOperationsQueue(request, env, authorization) {
     if (contentId) requestByContent.set(contentId, row);
   }
 
-  const outputRows = (outputs || []).map((record) => {
+  const outputRows = mergedOutputs.map((record) => {
     const queueMeta = renderQueueById.get(record.id) || null;
     const mapped = mapOutput(record, null, queueMeta);
     const contentId = firstOpsLinkedId(f(record, "Content_Item"));
