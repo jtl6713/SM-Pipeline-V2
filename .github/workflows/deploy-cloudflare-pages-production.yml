@@ -50,14 +50,25 @@ jobs:
           const path = require('path');
           const html = fs.readFileSync('apps/studio-web/index.html','utf8');
           let app = false, css = false;
-          for (const m of html.matchAll(/(?:src|href)=["']([^"']+)["']/gi)) {
-            let p = m[1].trim();
-            if (!p.startsWith('/assets/')) continue;
+          const addRef = (raw) => {
+            let p = String(raw || '').trim();
+            if (!p.startsWith('/assets/')) return;
             p = p.split('#')[0].split('?')[0];
             const local = path.join('apps/studio-web', p.replace(/^\//,''));
             if (!fs.existsSync(local)) throw new Error(`Missing referenced asset: ${p}`);
             if (/app-.*\.js$/i.test(p)) app = true;
             if (/\.css$/i.test(p)) css = true;
+          };
+          for (const m of html.matchAll(/(?:src|href)=["']([^"']+)["']/gi)) addRef(m[1]);
+          const manifestMatch = html.match(/id="studioLazyManifest"[^>]*>\s*([\s\S]*?)\s*<\/script>/i);
+          if (manifestMatch) {
+            const manifest = JSON.parse(manifestMatch[1]);
+            const walk = (value) => {
+              if (typeof value === 'string') addRef(value);
+              else if (Array.isArray(value)) value.forEach(walk);
+              else if (value && typeof value === 'object') Object.values(value).forEach(walk);
+            };
+            walk(manifest);
           }
           if (!app || !css) throw new Error('Pages baseline must include referenced application JS and CSS');
           NODE

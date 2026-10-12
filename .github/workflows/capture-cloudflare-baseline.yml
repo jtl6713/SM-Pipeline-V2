@@ -92,13 +92,24 @@ jobs:
           const fs = require('fs');
           const html = fs.readFileSync(process.argv[2], 'utf8');
           const found = new Set();
-          for (const m of html.matchAll(/(?:src|href)=["']([^"']+)["']/gi)) {
-            let p = m[1].trim();
-            if (/^(?:https?:|data:|mailto:|javascript:)/i.test(p)) continue;
+          const addRef = (raw) => {
+            let p = String(raw || '').trim();
+            if (!p || /^(?:https?:|data:|mailto:|javascript:)/i.test(p)) return;
             p = p.split('#')[0].split('?')[0];
             if (!p.startsWith('/')) p = '/' + p.replace(/^\.\//, '');
-            if (!p.startsWith('/assets/')) continue;
+            if (!p.startsWith('/assets/')) return;
             found.add(p);
+          };
+          for (const m of html.matchAll(/(?:src|href)=["']([^"']+)["']/gi)) addRef(m[1]);
+          const manifestMatch = html.match(/id="studioLazyManifest"[^>]*>\s*([\s\S]*?)\s*<\/script>/i);
+          if (manifestMatch) {
+            const manifest = JSON.parse(manifestMatch[1]);
+            const walk = (value) => {
+              if (typeof value === 'string') addRef(value);
+              else if (Array.isArray(value)) value.forEach(walk);
+              else if (value && typeof value === 'object') Object.values(value).forEach(walk);
+            };
+            walk(manifest);
           }
           for (const p of [...found].sort()) console.log(p);
           NODE

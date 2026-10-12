@@ -46,9 +46,9 @@ jobs:
           const path = require('path');
           const html = fs.readFileSync('apps/studio-web/index.html','utf8');
           const refs = [];
-          for (const m of html.matchAll(/(?:src|href)=["']([^"']+)["']/gi)) {
-            let p = m[1].trim();
-            if (!p.startsWith('/assets/')) continue;
+          const addRef = (raw) => {
+            let p = String(raw || '').trim();
+            if (!p.startsWith('/assets/')) return;
             p = p.split('#')[0].split('?')[0];
             refs.push(p);
             const local = path.join('apps/studio-web', p.replace(/^\//,''));
@@ -56,6 +56,18 @@ jobs:
               console.error(`Missing referenced asset: ${p}`);
               process.exitCode = 1;
             }
+          };
+          for (const m of html.matchAll(/(?:src|href)=["']([^"']+)["']/gi)) addRef(m[1]);
+          // Lazy page scripts live in #studioLazyManifest JSON, not <script src>.
+          const manifestMatch = html.match(/id="studioLazyManifest"[^>]*>\s*([\s\S]*?)\s*<\/script>/i);
+          if (manifestMatch) {
+            const manifest = JSON.parse(manifestMatch[1]);
+            const walk = (value) => {
+              if (typeof value === 'string') addRef(value);
+              else if (Array.isArray(value)) value.forEach(walk);
+              else if (value && typeof value === 'object') Object.values(value).forEach(walk);
+            };
+            walk(manifest);
           }
           if (!refs.some(x => /app-.*\.js$/i.test(x))) throw new Error('index.html does not reference an application JavaScript asset');
           if (!refs.some(x => /\.css$/i.test(x))) throw new Error('index.html does not reference a CSS asset');
