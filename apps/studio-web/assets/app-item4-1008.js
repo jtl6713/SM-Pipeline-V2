@@ -267,7 +267,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.634-ops-queue-titles";
+  const BUILD_ID = "item4-0.6.635-swap-search-fast";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -5463,64 +5463,72 @@ function timedScriptAssetLabel(asset, index) {
     bindLibraryPickerPreviews(grid, swapStillItems);
   }
 
+  // Short-lived query cache and in-flight deduplication prevent repeated Airtable reads.
+  const swapLibraryCache = new Map();
+  const SWAP_LIBRARY_CACHE_MS = 120000;
+  function swapLibraryCached(key, loader) {
+    const existing = swapLibraryCache.get(key);
+    if (existing && Date.now() - existing.time < SWAP_LIBRARY_CACHE_MS) return existing.promise;
+    const promise = Promise.resolve().then(loader);
+    swapLibraryCache.set(key, { time: Date.now(), promise });
+    promise.catch(() => { if (swapLibraryCache.get(key)?.promise === promise) swapLibraryCache.delete(key); });
+    if (swapLibraryCache.size > 40) swapLibraryCache.delete(swapLibraryCache.keys().next().value);
+    return promise;
+  }
+
   async function loadSwapStillLibrary(query = "") {
     const sequence = ++swapStillLoadSequence;
     const requestId = activeProductionRequest?.id;
     const grid = $("prSwapStillGrid");
     const hint = $("prSwapStillHint");
-    if (grid) grid.innerHTML = `<p class="idea-library-picker-hint">Loading library stills…</p>`;
-    if (hint) hint.textContent = "Loading library stills…";
     const ideaId = activeProductionRequest?.idea_record_id || activeIdea?.id || null;
     const q = String(query || "").trim();
     const attachedItems = item4AttachedLibraryItems().filter(libraryItemIsPhotoStill);
-    let suggestionError = null;
-    let browseError = null;
-    const [ideaPack, browse] = await Promise.all([
-      ideaId
-        ? fetchIdeaLibrarySuggested(ideaId, q).catch((error) => {
-          suggestionError = error;
-          return { suggested: [], matches: [] };
-        })
-        : Promise.resolve({ suggested: [], matches: [] }),
-      fetchLibraryBrowse(q, ideaId).catch((error) => {
-        browseError = error;
-        return [];
-      }),
-    ]);
-    if (sequence !== swapStillLoadSequence || activeProductionRequest?.id !== requestId) return;
-    const suggested = (ideaPack.suggested || []).filter(libraryItemIsPhotoStill);
-    const matches = (ideaPack.matches || []).filter(libraryItemIsPhotoStill);
-    const browsePhotos = (browse || []).filter(libraryItemIsPhotoStill);
-    const quoted = libraryItemsForQuotedName(
-      mergeLibraryPickerItems(suggested, matches, [...attachedItems, ...browsePhotos]),
-      q
-    );
-    const operatorSearch = Boolean(q);
-    swapStillSuggestedIds = (operatorSearch || quoted.phrase)
-      ? new Set()
-      : new Set([
-        ...attachedItems.map((item) => item.id),
-        ...suggested.map((item) => item.id).filter(Boolean),
+    const valid = () => sequence === swapStillLoadSequence && activeProductionRequest?.id === requestId;
+    const key = [String(ideaId || ""), q.toLowerCase()].join("|");
+    if (grid) grid.innerHTML = '<p class="idea-library-picker-hint">Searching library stills…</p>';
+    if (hint) hint.textContent = "Searching library stills…";
+    let suggestionError = null, browseError = null;
+    let suggested = [], matches = [], browsePhotos = [];
+    const paint = () => {
+      if (!valid()) return;
+      const quoted = libraryItemsForQuotedName(
+        mergeLibraryPickerItems(suggested, matches, [...attachedItems, ...browsePhotos]), q
+      );
+      swapStillSuggestedIds = q || quoted.phrase ? new Set() : new Set([
+        ...attachedItems.map(item => item.id),
+        ...suggested.map(item => item.id).filter(Boolean),
       ]);
-    swapStillItems = quoted.items.filter(libraryItemIsPhotoStill);
-    if (swapStillSelectedId && !swapStillItems.some((item) => item.id === swapStillSelectedId)) {
-      swapStillSelectedId = "";
-    }
-    renderSwapStillPicker();
+      swapStillItems = quoted.items.filter(libraryItemIsPhotoStill);
+      if (swapStillSelectedId && !swapStillItems.some(item => item.id === swapStillSelectedId)) swapStillSelectedId = "";
+      renderSwapStillPicker();
+    };
+    // Browse is the authoritative search result. Render it immediately instead of waiting
+    // for idea recommendations, which can take another 20 seconds.
+    const browseTask = swapLibraryCached("browse|" + key, () => fetchLibraryBrowse(q, ideaId))
+      .then(items => { browsePhotos = (items || []).filter(libraryItemIsPhotoStill); paint(); })
+      .catch(error => { browseError = error; });
+    // Suggestions are useful for an empty query, but duplicate the search for typed terms.
+    const suggestionTask = !q && ideaId
+      ? swapLibraryCached("suggest|" + key, () => fetchIdeaLibrarySuggested(ideaId, ""))
+          .then(pack => {
+            suggested = (pack.suggested || []).filter(libraryItemIsPhotoStill);
+            matches = (pack.matches || []).filter(libraryItemIsPhotoStill);
+            paint();
+          }).catch(error => { suggestionError = error; })
+      : Promise.resolve();
+    await Promise.all([browseTask, suggestionTask]);
+    if (!valid()) return;
+    paint();
     if (!swapStillItems.length) {
-      const detail = suggestionError?.message || browseError?.message || (q
+      const detail = browseError?.message || suggestionError?.message || (q
         ? `No classified Drive stills matched “${q}”.`
         : "No classified Drive stills were returned for this profile.");
       if (grid) grid.innerHTML = `<p class="idea-library-picker-hint">${escapeHtml(detail)}</p>`;
-      setSwapStillMessage(detail, suggestionError || browseError ? "error-text" : "");
-    } else if (suggestionError || browseError) {
-      setSwapStillMessage(
-        `Library search partially failed: ${suggestionError?.message || browseError?.message}`,
-        "error-text"
-      );
-    } else {
-      setSwapStillMessage("");
-    }
+      setSwapStillMessage(detail, browseError || suggestionError ? "error-text" : "");
+    } else if (browseError || suggestionError) {
+      setSwapStillMessage(`Library search partially failed: ${browseError?.message || suggestionError?.message}`, "error-text");
+    } else setSwapStillMessage("");
   }
 
   async function openTimedScriptSwapStill(sceneIndex) {
