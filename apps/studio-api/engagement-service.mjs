@@ -384,6 +384,34 @@ export async function studioListEngagementRecommendations(env, options, deps) {
   };
 }
 
+// Read-only check before lifting a permission suspension. Never retry a write
+// automatically: only a fresh, explicit Comment/Like click can execute one.
+async function probeYoutubeEngagementConnection(env, deps) {
+  const settings = await deps.studioActivePipelineSettings(env, [
+    "YOUTUBE_UPLOAD_SERVICE_URL",
+    "YOUTUBE_UPLOAD_SERVICE_SHARED_SECRET",
+  ]).catch(() => ({}));
+  const base = String(settings.YOUTUBE_UPLOAD_SERVICE_URL || "").trim().replace(/\/+$/, "");
+  const secret = settings.YOUTUBE_UPLOAD_SERVICE_SHARED_SECRET || env.YOUTUBE_UPLOAD_SERVICE_SHARED_SECRET || "";
+  if (!base) return { ok: false, error: "This profile has no YouTube uploader URL configured" };
+  if (!secret) return { ok: false, error: "This profile has no uploader service key configured" };
+  try {
+    const response = await fetch(base + "/youtube/oauth/status", {
+      method: "GET",
+      headers: { Accept: "application/json", "X-SM-Pipeline-Key": secret },
+    });
+    const body = await response.json().catch(() => ({}));
+    if (response.status === 401) {
+      return { ok: false, error: "Uploader Unauthorized (401): Studio and uploader shared keys do not match" };
+    }
+    if (!response.ok) return { ok: false, error: `Uploader connection check returned HTTP ${response.status}` };
+    if (!body.refresh_ok) return { ok: false, error: "YouTube OAuth refresh is not healthy for this profile" };
+    return { ok: true };
+  } catch (error) {
+    return { ok: false, error: `Uploader connection check failed: ${String(error?.message || error).slice(0, 140)}` };
+  }
+}
+
 async function executeYoutubeAction(env, target, actionType, comment, deps) {
   const settings = await deps.studioActivePipelineSettings(env, [
     "YOUTUBE_UPLOAD_SERVICE_URL",
@@ -425,6 +453,13 @@ async function executeYoutubeAction(env, target, actionType, comment, deps) {
     }),
   });
   const body = await response.json().catch(() => ({}));
+  if (response.status === 401) {
+    return {
+      ok: false,
+      status: "needs_authorization",
+      error: "Unauthorized (401): This profile's YouTube uploader rejected Studio's shared key. No comment was sent. Repair the uploader key before retrying.",
+    };
+  }
   if (response.status === 404) {
     return {
       ok: false,
@@ -605,8 +640,34 @@ export async function studioApplyEngagementAction(env, payload, deps) {
   }
 
   const suspendKey = `${profile}:${target.platform}`;
-  if (store.suspended?.[suspendKey]) {
-    throw new Error(`Engagement suspended for ${suspendKey}: ${store.suspended[suspendKey].reason || "permission/abuse warning"}`);
+  const suspension = store.suspended?.[suspendKey];
+  if (suspension) {
+    const reason = String(suspension.reason || "permission/abuse warning");
+    // Permission blocks can heal after an operator fixes the service connection.
+    // Abuse/spam suspensions remain blocked until explicitly reviewed.
+    if (target.platform === "youtube" && /unauthorized|oauth|permission|401/i.test(reason)) {
+      const probe = await probeYoutubeEngagementConnection(env, deps);
+      if (!probe.ok) {
+        return {
+          ok: false,
+          suspended: true,
+          needs_authorization: true,
+          message: `${profile.toUpperCase()} YouTube commenting is paused: ${probe.error}. No comment was sent.`,
+          classification: classifyEngagementFailure(probe.error),
+          post_url: target.post_url,
+        };
+      }
+      delete store.suspended[suspendKey];
+      await studioSaveEngagementStore(env, store, deps);
+    } else {
+      return {
+        ok: false,
+        suspended: true,
+        message: `Engagement remains paused for ${suspendKey}: ${reason}. No comment was sent.`,
+        classification: classifyEngagementFailure(reason),
+        post_url: target.post_url,
+      };
+    }
   }
 
   const comment = sanitizeCommentSuggestion(
