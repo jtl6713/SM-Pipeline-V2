@@ -407,6 +407,7 @@ export default {
       const isAdminFbPublicDiagnosticRoute = url.pathname === "/api/admin/fb-public-diagnostic";
       const isAdminRepairControlRoute = url.pathname === "/api/admin/repair/control";
       const isOperationsRoute = url.pathname === "/api/operations";
+      const isOperationsProfilesListRoute = url.pathname === "/api/operations/profiles";
       const isOperationsQueueRoute = url.pathname === "/api/operations/queue";
       const isOperationsQueuePauseRoute = url.pathname === "/api/operations/queue/pause";
       const isOperationsQueueReorderRoute = url.pathname === "/api/operations/queue/reorder";
@@ -657,7 +658,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.556-ops-render-queue-fetch",
+          version: "0.10.557-ops-profiles-load",
           studio_create_vo_matched_stills_v1: true,
           studio_idea_library_typeahead_v1: true,
           studio_idea_library_search_all_hits_v1: true,
@@ -1065,6 +1066,12 @@ export default {
       if (isOperationsRoute) {
         requireAnyPermission(authorization, ["tenant_admin", "publishing_control", "production_configure"]);
         return getStudioOperations(request, env, authorization);
+      }
+
+      if (isOperationsProfilesListRoute) {
+        requireAnyPermission(authorization, ["tenant_admin", "publishing_control", "production_configure"]);
+        if (request.method !== "GET") throw new HttpError(405, "Method not allowed");
+        return getStudioOperationsProfiles(request, env, authorization);
       }
 
       if (isOperationsQueueRoute) {
@@ -20470,6 +20477,13 @@ function studioMergeSeedWatchlist(accounts) {
   const have = new Set((accounts || []).map((row) => studioSimilarAccountKey(row.platform, row.handle)));
   const extra = STUDIO_SIMILAR_SEEDS.filter((row) => !have.has(studioSimilarAccountKey(row.platform, row.handle)));
   return extra.length ? [...accounts, ...extra.map((item) => ({ ...item }))] : accounts;
+}
+
+async function studioReadSimilarWatchlist(env) {
+  const row = await studioSettingsByName(env, STUDIO_SIMILAR_WATCHLIST_SETTING).catch(() => null);
+  const existing = parseSimilarWatchlist(f(row, "Setting_Value"));
+  if (existing.length) return studioMergeSeedWatchlist(existing);
+  return STUDIO_SIMILAR_SEEDS.map((item) => ({ ...item }));
 }
 
 async function studioEnsureSimilarWatchlist(env) {
@@ -41937,7 +41951,8 @@ async function getStudioOperations(request, env, authorization) {
     listActiveA1CompressionJobs(env).catch(() => []),
   ]);
   const libraryIntake = mapLibraryIntakeSnapshot(needingClassification, oversized);
-  const similarAccounts = await studioEnsureSimilarWatchlist(env).catch(() => []);
+  // Read-only watchlist for Ops; do not block Profiles on ensure/upsert side effects.
+  const similarAccounts = await studioReadSimilarWatchlist(env).catch(() => []);
   return respond(request, env, {
     ok: true,
     page: "operations",
@@ -41959,6 +41974,17 @@ async function getStudioOperations(request, env, authorization) {
     library_intake: libraryIntake,
     similar_accounts: similarAccounts,
     library_include_cross_scope: libraryCrossScopeEnabled(f(libraryCrossScopeRow, "Setting_Value")),
+  });
+}
+
+/** Lean Profiles tab payload — Content Profiles only (voice/music settings). */
+async function getStudioOperationsProfiles(request, env, authorization) {
+  const profiles = await listRecords(env, STUDIO_IDEA_PROFILE_TABLE_ID, { limit: 50 });
+  return respond(request, env, {
+    ok: true,
+    page: "operations-profiles",
+    can_edit_profiles: Boolean(authorization?.permissions?.tenant_admin),
+    profiles: (profiles || []).map(mapOperationsProfile),
   });
 }
 

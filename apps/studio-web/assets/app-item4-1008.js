@@ -267,7 +267,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.641-ops-timeline-headers";
+  const BUILD_ID = "item4-0.6.642-ops-profiles-load";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -22918,6 +22918,7 @@ function timedScriptAssetLabel(asset, index) {
       applyOperationsTabs("operationsControlView", operationsControlTab);
       if (operationsControlTab === "queue") loadOperationsQueue().catch(() => {});
       else stopOperationsQueuePoll();
+      if (operationsControlTab === "profiles") loadOperationsProfilesPanel().catch(() => {});
     }
     if (!options.skipHash) {
       const nextHash = operationsHashFor(agent ? "agent" : "control", agent ? operationsAgentTab : operationsControlTab);
@@ -24367,30 +24368,80 @@ function timedScriptAssetLabel(asset, index) {
     });
   }
 
-  async function loadOperations() {
+  function mergeOperationsProfilesIntoStudio(profiles) {
+    (profiles || []).forEach((opsProfile) => {
+      const idx = studioProfiles.findIndex((item) => item.id === opsProfile.id);
+      if (idx >= 0) {
+        studioProfiles[idx] = {
+          ...studioProfiles[idx],
+          background_color: opsProfile.background_color || studioProfiles[idx].background_color || "",
+          theme: opsProfile.theme || studioProfiles[idx].theme,
+          city_label: opsProfile.city_label || studioProfiles[idx].city_label,
+          default_narration_voice_id: opsProfile.default_narration_voice_id || studioProfiles[idx].default_narration_voice_id || "",
+          default_narration_voice_name: opsProfile.default_narration_voice_name || studioProfiles[idx].default_narration_voice_name || "",
+        };
+      }
+    });
+  }
+
+  /** Profiles tab: lean fetch so voice changes are not blocked by full Ops inventory. */
+  async function loadOperationsProfilesPanel() {
     const meta = $("operationsIdeaMeta");
-    initOperationsInsightsSeason();
-    if (meta) meta.textContent = "Loading operations…";
+    if (meta && !String(meta.textContent || "").trim()) meta.textContent = "Loading profiles…";
     try {
-      const [data, desk, activity, voicesResult, musicResult] = await Promise.all([
-        api("/api/operations"),
-        api("/api/ops/desk/inventory").catch(() => null),
-        api("/api/ops/desk/activity").catch(() => null),
-        api("/api/voices", { timeoutMs: 45000 }).catch(() => ({ voices: [] })),
-        api("/api/music?limit=100").catch(() => ({ records: [] })),
+      const [profilesResult, voicesResult, musicResult] = await Promise.all([
+        api("/api/operations/profiles", { timeoutMs: 15000 }),
+        api("/api/voices", { timeoutMs: 20000 }).catch(() => ({ voices: [] })),
+        api("/api/music?limit=100", { timeoutMs: 15000 }).catch(() => ({ records: [] })),
       ]);
       operationsVoiceOptions = phase6NormalizeVoices(voicesResult?.voices || voicesResult?.records || voicesResult?.items || []);
       operationsMusicOptions = sortClientMusic(
         (Array.isArray(musicResult?.records) ? musicResult.records : []).filter((record) => !record.do_not_use)
       );
+      operationsCanEditProfiles = Boolean(profilesResult?.can_edit_profiles);
+      const profiles = Array.isArray(profilesResult?.profiles) ? profilesResult.profiles : [];
+      mergeOperationsProfilesIntoStudio(profiles);
+      profileVoicesLoaded = true;
+      if (!$("productionRequestWorkspace")?.hidden) applyResolvedDefaultVoice();
+      const working = studioProfiles.find((item) => item.id === selectedProfileId);
+      if (working) applyStudioBackgroundColor(working);
+      renderOperationsProfiles(profiles, operationsCanEditProfiles);
+      const run = $("operationsRunDailyIdeas");
+      if (run) run.hidden = !operationsCanEditProfiles;
+      if (meta && /Loading (operations|profiles)/i.test(String(meta.textContent || ""))) {
+        meta.textContent = `${profiles.length} profile${profiles.length === 1 ? "" : "s"} loaded. Change default narration voice below.`;
+      }
+    } catch (error) {
+      setOperationsMessage(error.message || "Could not load profiles.", "error-text");
+      if (meta) meta.textContent = "Unable to load profiles.";
+    }
+  }
+
+  async function loadOperations() {
+    const meta = $("operationsIdeaMeta");
+    initOperationsInsightsSeason();
+    if (meta) meta.textContent = "Loading operations…";
+    // Profiles tab must not wait on the full Ops inventory / desk / music waterfall.
+    if (operationsControlTab === "profiles") {
+      await loadOperationsProfilesPanel();
+    }
+    const voicesPromise = api("/api/voices", { timeoutMs: 20000 }).catch(() => ({ voices: [] }));
+    const musicPromise = api("/api/music?limit=100", { timeoutMs: 15000 }).catch(() => ({ records: [] }));
+    const opsPromise = api("/api/operations", { timeoutMs: 20000 });
+    const deskPromise = api("/api/ops/desk/inventory").catch(() => null);
+    const activityPromise = api("/api/ops/desk/activity").catch(() => null);
+    try {
+      const [data, voicesResult] = await Promise.all([opsPromise, voicesPromise]);
+      operationsVoiceOptions = phase6NormalizeVoices(voicesResult?.voices || voicesResult?.records || voicesResult?.items || []);
       operationsTimezone = data.timezone || null;
       operationsCanEditProfiles = Boolean(data.can_edit_profiles);
-      operationsQualityDeskSnapshot = desk;
-      operationsQualityActivitySnapshot = activity;
-      renderOperationsDesk(desk, operationsCanEditProfiles);
-      renderLibraryCrossScopeToggle(Boolean(data.library_include_cross_scope), operationsCanEditProfiles);
-      renderOperationsAgentActivity(activity);
-      startOperationsQualityPoll();
+      mergeOperationsProfilesIntoStudio(data.profiles || []);
+      profileVoicesLoaded = true;
+      if (!$("productionRequestWorkspace")?.hidden) applyResolvedDefaultVoice();
+      const working = studioProfiles.find((item) => item.id === selectedProfileId);
+      if (working) applyStudioBackgroundColor(working);
+      // Paint voice controls before music/desk finish.
+      renderOperationsProfiles(data.profiles || [], Boolean(data.can_edit_profiles));
       if (meta) {
         const tz = data.timezone || studioTimezone();
         const today = data.chicago_date ? formatStudioDate(data.chicago_date, { timeZone: tz, weekday: true }) : "—";
@@ -24399,6 +24450,19 @@ function timedScriptAssetLabel(asset, index) {
           : "not yet";
         meta.textContent = `Today: ${today}. Last daily ideas run: ${lastRun}. Times shown in ${studioTimezoneLabel(tz)}.`;
       }
+
+      const [musicResult, desk, activity] = await Promise.all([musicPromise, deskPromise, activityPromise]);
+      operationsMusicOptions = sortClientMusic(
+        (Array.isArray(musicResult?.records) ? musicResult.records : []).filter((record) => !record.do_not_use)
+      );
+      // Refresh cards once music pool options are available.
+      renderOperationsProfiles(data.profiles || [], Boolean(data.can_edit_profiles));
+      operationsQualityDeskSnapshot = desk;
+      operationsQualityActivitySnapshot = activity;
+      renderOperationsDesk(desk, operationsCanEditProfiles);
+      renderLibraryCrossScopeToggle(Boolean(data.library_include_cross_scope), operationsCanEditProfiles);
+      renderOperationsAgentActivity(activity);
+      startOperationsQualityPoll();
       const autonomousMeta = $("operationsAutonomousMeta");
       if (autonomousMeta) {
         const lastAuto = data.last_autonomous_run || {};
@@ -24410,24 +24474,6 @@ function timedScriptAssetLabel(asset, index) {
           ? `Last autonomous run: ${parts.join(" · ")}.`
           : "Autonomous produce has not run yet. Enable a profile toggle, then wait for 8:00 a.m. / 4:00 p.m. Chicago or run now.";
       }
-      (data.profiles || []).forEach((opsProfile) => {
-        const idx = studioProfiles.findIndex((item) => item.id === opsProfile.id);
-        if (idx >= 0) {
-          studioProfiles[idx] = {
-            ...studioProfiles[idx],
-            background_color: opsProfile.background_color || studioProfiles[idx].background_color || "",
-            theme: opsProfile.theme || studioProfiles[idx].theme,
-            city_label: opsProfile.city_label || studioProfiles[idx].city_label,
-            default_narration_voice_id: opsProfile.default_narration_voice_id || studioProfiles[idx].default_narration_voice_id || "",
-            default_narration_voice_name: opsProfile.default_narration_voice_name || studioProfiles[idx].default_narration_voice_name || "",
-          };
-        }
-      });
-      profileVoicesLoaded = true;
-      if (!$("productionRequestWorkspace")?.hidden) applyResolvedDefaultVoice();
-      const working = studioProfiles.find((item) => item.id === selectedProfileId);
-      if (working) applyStudioBackgroundColor(working);
-      renderOperationsProfiles(data.profiles || [], Boolean(data.can_edit_profiles));
       operationsWatchlistAll = data.similar_accounts || [];
       const watchlist = watchlistForWorkingProfile(operationsWatchlistAll);
       renderOperationsWatchlist(watchlist, Boolean(data.can_edit_profiles));
@@ -24482,8 +24528,14 @@ function timedScriptAssetLabel(asset, index) {
       if (stopAnalytics && !data.can_edit_profiles) stopAnalytics.hidden = true;
       startIntakeFormRefresh();
     } catch (error) {
+      // Profiles tab already tried the lean path; still attempt a last-chance paint.
+      if (operationsControlTab === "profiles") {
+        await loadOperationsProfilesPanel().catch(() => {});
+      }
       setOperationsMessage(error.message || "Could not load operations.", "error-text");
-      if (meta) meta.textContent = "Unable to load operations.";
+      if (meta && /Loading operations/i.test(String(meta.textContent || ""))) {
+        meta.textContent = "Unable to load operations.";
+      }
     }
   }
 
