@@ -626,7 +626,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.536-pipeline-read-cache",
+          version: "0.10.537-hot-read-hold",
           studio_create_vo_matched_stills_v1: true,
           studio_idea_library_typeahead_v1: true,
           studio_post_publish_release_v1: true,
@@ -2425,10 +2425,17 @@ function studioInvalidateHotReads(env, tableId, method) {
     studioReadCacheDropPrefix("outputs:");
     studioReadCacheDropPrefix("schedule-grid:");
     studioReadCacheDropPrefix("content-recent-outputs:");
+    studioReadCacheDropPrefix("content-list:");
   } else if (env?.AIRTABLE_IDEA_TABLE_ID && id === env.AIRTABLE_IDEA_TABLE_ID) {
     studioReadCacheDropPrefix("ideas:");
   } else if (env?.AIRTABLE_CONTENT_TABLE_ID && id === env.AIRTABLE_CONTENT_TABLE_ID) {
     studioReadCacheDropPrefix("content-labels:");
+    studioReadCacheDropPrefix("content-list:");
+  } else if (id === "Production Requests") {
+    studioReadCacheDropPrefix("production-requests:");
+    studioReadCacheDropPrefix("produce-jobs:");
+  } else if (env?.AIRTABLE_MEDIA_TABLE_ID && id === env.AIRTABLE_MEDIA_TABLE_ID) {
+    studioReadCacheDropPrefix("music:");
   }
 }
 
@@ -2439,7 +2446,10 @@ function studioReadCoalesce(key, ttlMs, loader) {
   if (hit && hit.value !== undefined && now - hit.at < ttlMs) return Promise.resolve(hit.value);
   if (hit?.promise) return hit.promise;
   const promise = Promise.resolve().then(loader).then((value) => {
-    studioHotReadCache.set(key, { at: Date.now(), value });
+    const current = studioHotReadCache.get(key);
+    // A write that dropped this key while the read was in flight must not
+    // put the pre-write snapshot back into the cache.
+    if (current?.promise === promise) studioHotReadCache.set(key, { at: Date.now(), value });
     return value;
   }).catch((error) => {
     const current = studioHotReadCache.get(key);
@@ -3981,7 +3991,7 @@ async function brandLogo(request, env, authorization) {
 async function listIdeas(request, env, url, authorization) {
   const profile = await resolveWorkingContentProfile(env, authorization, requestedProfileId(url));
   const limit = clampLimit(url);
-  const payload = await studioReadCoalesce(`ideas:${profile.id}:${limit}`, 8000, async () => {
+  const payload = await studioReadCoalesce(`ideas:${profile.id}:${limit}`, 25000, async () => {
     const records = await listRecords(env, env.AIRTABLE_IDEA_TABLE_ID, {
       limit,
       sortField: "Create_Date",
@@ -11639,13 +11649,19 @@ async function loadStudioProductionJobsForOutputs(env, records) {
     const contentId = studioFirstLinkedId(f(record, "Content_Item"));
     if (contentId) contentIds.add(contentId);
   }
-  const recent = contentIds.size
-    ? await listRecords(env, PRODUCTION_REQUEST_TABLE, {
+  const unresolvedContent = (records || []).some((record) => (
+    !studioFirstLinkedId(f(record, "Production_Request"))
+    && studioFirstLinkedId(f(record, "Content_Item"))
+  ));
+  const jobFields = ["Studio_Production_Job_JSON", "Promoted_Content_Item"];
+  const recent = unresolvedContent
+    ? await studioReadCoalesce("produce-jobs:recent", 20000, () => listRecords(env, PRODUCTION_REQUEST_TABLE, {
         limit: 50,
         sortField: "Created_At",
         sortDirection: "desc",
         filterFormula: 'AND({Test_Run_ID}=BLANK(),{Studio_Production_Job_JSON}!="")',
-      }).catch(() => [])
+        fields: jobFields,
+      }).catch(() => []))
     : [];
   const jobs = new Map();
   const contentToRequest = new Map();
@@ -11665,6 +11681,7 @@ async function loadStudioProductionJobsForOutputs(env, records) {
     const fetched = await listRecords(env, PRODUCTION_REQUEST_TABLE, {
       limit: missingJobIds.length,
       filterFormula: formula,
+      fields: jobFields,
     }).catch(() => []);
     for (const requestRecord of fetched || []) {
       if (requestRecord?.id) jobs.set(requestRecord.id, parseStudioProductionJob(requestRecord));
@@ -15983,8 +16000,11 @@ function mapProductionRequestSummary(record, ideaTitle = null) {
 }
 
 async function listProductionRequests(request, env, url, authorization) {
-  const records = await listOpenProductionRequests(env, { limit: clampLimit(url, 100, 100) });
+  const limit = clampLimit(url, 100, 100);
   const profile = await resolveWorkingContentProfile(env, authorization, requestedProfileId(url));
+  const orgId = String(authorization?.organization?.record_id || "none");
+  const payload = await studioReadCoalesce(`production-requests:${orgId}:${profile.id}:${limit}`, 25000, async () => {
+  const records = await listOpenProductionRequests(env, { limit });
   const profileBrandIds = new Set(arrayOrEmpty(f(profile, "Brand")));
   const filtered = records.filter(record => {
     const orgLinks = Array.isArray(f(record, "Organization")) ? f(record, "Organization") : [];
@@ -16011,14 +16031,15 @@ async function listProductionRequests(request, env, url, authorization) {
     const ideaId = ideaRecordIdFromProductionRequest(record);
     return !ideaId || photoWaitStates.get(ideaId) !== "Waiting";
   });
-  return respond(request, env, {
-    ok: true,
+  return {
     records: visible.map((record) => mapProductionRequestSummary(
       record,
       ideaTitles.get(ideaRecordIdFromProductionRequest(record)) || null
     )),
     photo_watch_waiting_count: filtered.length - visible.length,
+  };
   });
+  return respond(request, env, { ok: true, ...payload });
 }
 
 async function getProductionRequest(request, env, url, authorization, ctx = null) {
@@ -24719,10 +24740,12 @@ async function runWaitingIdeaPhotoMatches(env, { limit = 8 } = {}) {
 
 async function listContent(request, env, url, authorization) {
   const profile = await resolveWorkingContentProfile(env, authorization, requestedProfileId(url));
+  const limit = clampLimit(url);
+  const payload = await studioReadCoalesce(`content-list:${profile.id}:${limit}`, 25000, async () => {
   const profileFormula = contentProfileFilterFormula(profile);
   const [newest, openPack, recentOutputs] = await Promise.all([
     listRecords(env, env.AIRTABLE_CONTENT_TABLE_ID, {
-      limit: clampLimit(url),
+      limit,
       sortField: "Created_At",
       filterFormula: profileFormula,
     }),
@@ -24754,11 +24777,12 @@ async function listContent(request, env, url, authorization) {
     if (!outputsByContent.has(contentId)) outputsByContent.set(contentId, []);
     outputsByContent.get(contentId).push(output);
   }
-  return respond(request, env, {
-    ok: true,
+  return {
     records: records.map((record) => mapContent(record, outputsByContent.get(record.id) || [])),
     profile: mapStudioContentProfile(profile),
+  };
   });
+  return respond(request, env, { ok: true, ...payload });
 }
 
 const OUTPUT_LIST_FIELDS = [
@@ -24807,6 +24831,7 @@ const OUTPUT_LIST_FIELDS = [
   "YouTube_Upload_Progress_Percent",
   "YouTube_Processing_Progress_Percent",
   "Content_Item",
+  "Production_Request",
   "Content_Profile",
   "Carousel Slides",
   "Composition_ID",
@@ -24914,7 +24939,7 @@ async function listOutputScheduleGrid(request, env, url, authorization) {
   return respond(request, env, body);
 }
 
-const PIPELINE_OUTPUT_LIST_CACHE_MS = 1500;
+const PIPELINE_OUTPUT_LIST_CACHE_MS = 25000;
 const PIPELINE_OPEN_PACK_CACHE_MS = 30000;
 let pipelineListHealAt = 0;
 
@@ -25086,6 +25111,7 @@ async function listOutputs(request, env, url, authorization, ctx = null) {
 
 async function listMusic(request, env, url) {
   const limit = clampLimit(url, 100, 100);
+  const payload = await studioReadCoalesce(`music:${limit}`, 60000, async () => {
   const [catalog, uploaded] = await Promise.all([
     listRecords(env, env.AIRTABLE_MEDIA_TABLE_ID, {
       limit,
@@ -25105,7 +25131,9 @@ async function listMusic(request, env, url) {
     records.push(record);
   }
 
-  return respond(request, env, { ok: true, records: sortMusicRecords(records).map(mapMusic) });
+  return { records: sortMusicRecords(records).map(mapMusic) };
+  });
+  return respond(request, env, { ok: true, ...payload });
 }
 
 function musicSortName(record) {

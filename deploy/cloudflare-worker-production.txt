@@ -169,3 +169,4 @@ Deploy Worker 0.10.489-engagement-ledger. Shrink the engagement ledger so Chicag
 2026-10-12: Manage Idea library search keeps museu/Museum hits; stale loads cannot clear picker (UI 0.6.609 / Worker 0.10.534).
 2026-10-11: Worker 0.10.535-idea-topic-place-fallback — preserve distinctive topical (jazz) subject alongside Greenwich Village location in photo-wait scans; regression tests.
 2026-10-11: Cache Pipeline Airtable reads, stop the 8s outputs+content poll, defer Make hardening off Production lists (UI 0.6.610 / Worker 0.10.536-pipeline-read-cache).
+2026-10-11: Hold Pipeline, Production, ideas, and music reads longer and load produce jobs by id (UI 0.6.611 / Worker 0.10.537-hot-read-hold).
