@@ -263,7 +263,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.612-nyc-comment";
+  const BUILD_ID = "item4-0.6.613-photo-pipeline-fresh";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -1638,6 +1638,19 @@
   }
 
   function pipelineProgressCell(record, groupRecords) {
+    // A native IG carousel / FB photo set / TikTok slideshow is never a video render.
+    // Keep the workflow bar but suppress misleading destination render counts (0/3).
+    if (/^Native Photo Route$/i.test(String(record?.render_status || "").trim())) {
+      const state = String(record?.studio_state || "").trim();
+      const label = ["Ready for Review", "Approved", "Scheduled", "Published", "Uploading", "Platform Processing", "Draft Delivered"].includes(state)
+        ? "Photos ready"
+        : state === "Failed" ? "Photo error" : state === "Skipped" ? "Skipped" : "Preparing photos";
+      const pct = pipelineDisplayPercent(record);
+      const n = Number(pct);
+      return pct === null || pct === undefined || !Number.isFinite(n)
+        ? `<div>${escapeHtml(label)}</div>`
+        : `<div>${escapeHtml(label)}</div><div class="progress" title="Overall publishing workflow ${Math.max(0, Math.min(100, n))}% — not video rendering"><span style="width:${Math.max(0, Math.min(100, n))}%"></span></div>`;
+    }
     const dest = pipelineDestinationProgress(groupRecords);
     if (dest && pipelineOutputRenderInFlight(record)) {
       return `<div>${dest.done}/${dest.total}</div><div class="progress" title="${dest.done} of ${dest.total} destinations rendered"><span style="width:${Math.max(0, Math.min(100, dest.percent))}%"></span></div>`;
@@ -2249,16 +2262,13 @@
     }
     if (page === "outputs") {
       const nextFilter = String(filter || "all").trim() || "all";
-      // Seed Pipeline from the same Home snapshot so tile counts match the filter instantly.
-      if (Array.isArray(dashboardCache.outputs) && dashboardCache.outputs.length) {
-        pipelineOutputs = dashboardCache.outputs.slice();
-      }
+      // Do not seed Pipeline with stale Home snapshots. Deleted Airtable records
+      // must never reappear as apparently current Approve/Open actions while
+      // /api/outputs is cooling down or returning a transient error.
+      pipelineOutputs = [];
+      pipelineContentRecords = [];
       clearPipelineColumnFilters();
       showStudioPage("outputs", { pipelineFilter: nextFilter });
-      const target = $("outputsList");
-      if (target && pipelineOutputs.length) {
-        renderOutputsTable(target, pipelineOutputs);
-      }
       return;
     }
   }
@@ -20680,7 +20690,8 @@ function timedScriptAssetLabel(asset, index) {
       const scheduleResult = scheduleSettled.ok
         ? scheduleSettled.value
         : { records: [], schedule_error: scheduleSettled.error?.message || "Schedule view unavailable" };
-      const records = outputsResult?.records || [];
+      if (!Array.isArray(outputsResult?.records)) throw new Error("Pipeline API returned no verified output list");
+      const records = outputsResult.records;
       const contentRecords = contentResult?.records || [];
       const scheduleError = String(scheduleResult?.schedule_error || (!scheduleSettled.ok ? (scheduleSettled.error?.message || "Schedule view unavailable") : ""));
       if (scheduleGeneration === pipelineScheduleGridLoadGeneration) {
@@ -20705,8 +20716,15 @@ function timedScriptAssetLabel(asset, index) {
       maybeOpenFilteredPipelineOutput();
       if (pipelinePageActive() && !document.hidden && !pipelineCountdownTimer) setPipelineLiveHint("Live · refreshed just now");
     } catch (e) {
-      if (!silent) target.innerHTML = `<div class="error">${escapeHtml(e.message)}</div>`;
-      else setPipelineLiveHint("Live update failed · retrying");
+      // A failed refresh cannot certify previously loaded output rows.
+      // Hide them and disable stale approval actions until a verified fetch succeeds.
+      pipelineOutputs = [];
+      pipelineContentRecords = [];
+      pipelineScheduleGridRecords = [];
+      updatePipelineQuickTabs([]);
+      updatePipelineApproveAllButton();
+      target.innerHTML = `<div class="error" role="alert">Pipeline data is unavailable or out of date. Previously loaded posts are hidden to prevent opening or approving deleted content. Retrying automatically. ${escapeHtml(e?.message || "Refresh failed")}</div>`;
+      setPipelineLiveHint("Pipeline data unverified · retrying");
     } finally {
       pipelinePollInFlight = false;
     }
