@@ -267,7 +267,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.657-lazy-js";
+  const BUILD_ID = "item4-0.6.658-factory-desk";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -2035,16 +2035,22 @@
   function applyOperationsNavVisibility(session, { failOpen = false } = {}) {
     const navOps = $("navOperations");
     const footerOps = $("footerOperations");
-    if (!navOps && !footerOps) return;
+    const navFactory = $("navFactory");
+    const footerFactory = $("footerFactory");
+    if (!navOps && !footerOps && !navFactory && !footerFactory) return;
     if (session) {
       const showOps = sessionCanOpenOperations(session);
       if (navOps) navOps.hidden = !showOps;
       if (footerOps) footerOps.hidden = !showOps;
+      if (navFactory) navFactory.hidden = !showOps;
+      if (footerFactory) footerFactory.hidden = !showOps;
       return;
     }
     if (failOpen) {
       if (navOps) navOps.hidden = false;
       if (footerOps) footerOps.hidden = false;
+      if (navFactory) navFactory.hidden = false;
+      if (footerFactory) footerFactory.hidden = false;
     }
   }
 
@@ -25018,6 +25024,7 @@ function timedScriptAssetLabel(asset, index) {
     if (page === "music") return loadMusic();
     if (page === "library") return loadLibrary();
     if (page === "operations") return loadOperations();
+    if (page === "factory") return window.StudioFactoryDesk?.load?.(false);
     if (page === "support") return;
   }
 
