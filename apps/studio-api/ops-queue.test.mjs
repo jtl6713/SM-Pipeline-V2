@@ -20,6 +20,7 @@ import {
   opsE2eLifecyclePhase,
   opsOutputSkipsRender,
   opsQueueItemTitle,
+  opsQueueContinuationCandidatePriority,
   partitionOpsQueues,
   queueLaneForStudioState,
   summarizeOpsQueueRows,
@@ -349,4 +350,16 @@ test("worker and UI wire Operations multi-queue + prepare-to-review", () => {
   const newProfile = fs.readFileSync(path.join(here, "../studio-web/assets/new-profile-1009.js"), "utf8");
   assert.match(newProfile, /navOperations/);
   assert.match(newProfile, /ops\.hidden = false/);
+});
+
+
+test("continuation prioritizes waiting Story renders over review-ready siblings", () => {
+  const waiting = row({ Output_Status: "In Production", Studio_Output_Type: "Story", Render_Status: "Waiting in Render Queue", Remotion_Job_ID: "" }, "recWaitingStory123");
+  const reviewed = row({ Output_Status: "Ready for Review", Studio_Output_Type: "Story", Render_Status: "Rendered" }, "recRenderedStory12");
+  assert.equal(opsQueueContinuationCandidatePriority(waiting, field), 0);
+  assert.equal(opsQueueContinuationCandidatePriority(reviewed, field), 2);
+  assert.ok(opsQueueContinuationCandidatePriority(waiting, field) < opsQueueContinuationCandidatePriority(reviewed, field));
+  assert.match(worker, /const stalledStories = await listRecords/);
+  assert.match(worker, /\.\.\.newest, \.\.\.stalledStories/);
+  assert.match(worker, /result\.action !== "reviewable" && result\.action !== "stop"/);
 });
