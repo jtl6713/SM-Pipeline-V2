@@ -19,18 +19,12 @@ function harness({ currentId = "previous-request", loadedId = "previous-request"
     "ezPhotoStrip", "item4AssetStatus", "item4PlanStatus", "item4VariantStatus",
     "item4VariantError", "prRenderClearFrameOverrides", "item4VariantProgress",
   ].map(id => [id, { innerHTML: '<img src="previous-run-photo.jpg">', textContent: "Old photo", hidden: false, disabled: false }]));
-  let cancelled = 0;
-  let stopped = 0;
   const context = {
     dom,
-    clearTimeout() { cancelled++; },
+    cancelled: 0,
+    stopped: 0,
+    clearTimeout() { context.cancelled += 1; },
     escapeHtml(value) { return String(value).replace(/&/g, "&amp;").replace(/</g, "&lt;"); },
-    getResult() {
-      return { currentId: activeProductionRequest?.id, loadedId: item4WorkspaceRequestId,
-        workspace: item4Workspace, revision: item4WorkspaceRevision,
-        sequence: item4WorkspaceLoadSequence, signature: item4AssetStripSignature,
-        cancelled, stopped, dom };
-    },
   };
   const script = `
     let activeProductionRequest = { id: ${JSON.stringify(currentId)} };
