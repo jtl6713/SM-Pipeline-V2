@@ -188,3 +188,6 @@ jobs:
 # 2026-10-12 route=fb2-attached-single-photo
 
 # 2026-10-12: redeploy merged FB2 attached_media single-photo route, verify Output 2292
+
+# Trigger FB2 retry selector bypassing stale Airtable view for Output 2292
+# 2026-10-12 service_version=2026-10-12-fb2-retry-view
