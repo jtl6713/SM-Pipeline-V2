@@ -245,7 +245,7 @@ test("worker and UI wire Operations multi-queue + prepare-to-review", () => {
   assert.match(html, /ops-queue-timeline-head/);
   assert.match(html, />Timeline</);
   assert.match(html, /prepareIdeaToReviewButton/);
-  assert.match(app, /BUILD_ID = "item4-0.6.648-ops-render-rows"/);
+  assert.match(app, /BUILD_ID = "item4-0.6.650-ops-actions-pub"/);
   assert.match(app, /platforms: "Plat"/);
   assert.match(app, /Media Added/);
   assert.match(app, /Waiting for Approval/);
@@ -258,6 +258,7 @@ test("worker and UI wire Operations multi-queue + prepare-to-review", () => {
   assert.match(app, /ops-e2e-track/);
   assert.match(app, /setProperty\("--ops-e2e-count"/);
   assert.match(css, /minmax\(0,2\.6fr\) 4\.5rem/);
+  assert.match(css, /minmax\(10rem,\s*max-content\)/);
   assert.match(css, /\.ops-queue-block\{[^}]*flex-shrink:0/);
   assert.match(css, /\.ops-queue-block\{[^}]*overflow:visible/);
   assert.match(css, /ops-queue-block:has\(#opsRenderQueueLines\) \.ops-queue-lines\{[^}]*overflow:visible/);
