@@ -267,7 +267,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.635-swap-search-fast";
+  const BUILD_ID = "item4-0.6.636-ops-multi-queue";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -1061,15 +1061,6 @@
 
   $("operationsQueueRefresh")?.addEventListener("click", () => {
     loadOperationsQueue().catch(() => {});
-  });
-  document.querySelectorAll("[data-ops-queue-filter]").forEach((button) => {
-    button.addEventListener("click", () => {
-      operationsQueueFilter = String(button.dataset.opsQueueFilter || "all");
-      document.querySelectorAll("[data-ops-queue-filter]").forEach((node) => {
-        node.classList.toggle("active", node.dataset.opsQueueFilter === operationsQueueFilter);
-      });
-      renderOperationsStudioQueue();
-    });
   });
   $("operationsRunDailyIdeas")?.addEventListener("click", async () => {
     try {
@@ -22821,9 +22812,10 @@ function timedScriptAssetLabel(asset, index) {
 
   const OPS_CONTROL_TABS = ["desk", "queue", "profiles", "produce", "intake", "analytics", "schedule", "publish", "oversized", "repair"];
   let operationsQueueRows = [];
-  let operationsQueueFilter = "all";
+  let operationsQueueBundles = { rendering: [], publishing: [], end_to_end: [] };
   let operationsQueueCanEdit = false;
   let operationsQueueTimer = 0;
+  let operationsRenderDetailId = "";
   const OPS_AGENT_TABS = ["recap", "guide", "catalog", "activity"];
   let operationsControlTab = "desk";
   let operationsAgentTab = "recap";
@@ -23824,134 +23816,246 @@ function timedScriptAssetLabel(asset, index) {
     }, 20000);
   }
 
-  function opsQueueLaneLabel(lane) {
-    if (lane === "stuck") return "Stuck";
-    if (lane === "paused") return "Paused";
-    if (lane === "review") return "Review";
-    if (lane === "publish") return "Publish";
-    if (lane === "done") return "Done";
-    return "Active";
-  }
-
   function renderOperationsQueueSummary(summary = {}) {
     const host = $("operationsQueueSummary");
     if (!host) return;
     const chips = [
-      ["total", "In queue", summary.total || 0, ""],
-      ["stuck", "Stuck", summary.stuck || 0, "alert"],
-      ["active", "Producing", summary.active || 0, ""],
-      ["paused", "Paused", summary.paused || 0, ""],
-      ["review", "Ready for review", summary.review || 0, "ok"],
-      ["publish", "Publish lane", summary.publish || 0, ""],
-      ["render", `Render wait ${summary.render_waiting || 0}`, summary.render_waiting || 0, ""],
+      ["rendering", "Rendering", summary.rendering || 0, summary.rendering ? "alert" : ""],
+      ["publishing", "Publishing", summary.publishing || 0, ""],
+      ["end_to_end", "End to end", summary.end_to_end || 0, ""],
+      ["stuck", "Stuck", summary.stuck || 0, summary.stuck ? "alert" : ""],
     ];
     host.innerHTML = chips.map(([key, label, count, tone]) => (
       `<span class="ops-desk-chip" data-tone="${escapeHtml(tone)}" data-ops-summary="${escapeHtml(key)}">${escapeHtml(label)}: <strong>${escapeHtml(count)}</strong></span>`
     )).join("");
   }
 
-  function filteredOperationsQueueRows() {
-    if (operationsQueueFilter === "all") return operationsQueueRows;
-    return operationsQueueRows.filter((row) => String(row.lane || "active") === operationsQueueFilter);
+  function opsE2eTrailHtml(e2e) {
+    const stages = Array.isArray(e2e?.stages) ? e2e.stages : [];
+    if (!stages.length) return `<div class="ops-e2e-trail"><span class="ops-e2e-step" data-state="todo">No stages</span></div>`;
+    return `<div class="ops-e2e-trail" title="${escapeHtml(stages.map((stage) => `${stage.label}: ${stage.state}`).join(" · "))}">${stages.map((stage) => (
+      `<span class="ops-e2e-step" data-state="${escapeHtml(stage.state || "todo")}">${escapeHtml(stage.label)}</span>`
+    )).join("")}</div>`;
   }
 
-  function renderOperationsStudioQueue() {
-    const host = $("operationsQueueList");
-    const meta = $("operationsQueueMeta");
-    if (!host) return;
-    const rows = filteredOperationsQueueRows();
-    if (meta) {
-      meta.textContent = rows.length
-        ? `Showing ${rows.length} of ${operationsQueueRows.length} in-flight items across all profiles.`
-        : (operationsQueueRows.length ? "No items match this filter." : "Queue is clear — nothing in production.");
-    }
-    if (!rows.length) {
-      host.innerHTML = `<div class="empty">${operationsQueueRows.length ? "No items match this filter." : "Nothing is in the Studio queue right now."}</div>`;
-      return;
-    }
-    host.innerHTML = `<table class="ops-queue-table"><thead><tr>
-      <th></th><th>Item</th><th>Profile</th><th>Platform</th><th>Status</th><th>Queue</th><th>Actions</th>
-    </tr></thead><tbody>${rows.map((row) => {
-      const thumb = row.thumbnail_url
-        ? `<img class="ops-queue-thumb" src="${escapeHtml(row.thumbnail_url)}" alt="" loading="lazy">`
-        : `<span class="ops-queue-thumb" aria-hidden="true"></span>`;
-      const identity = [
-        row.content_id != null && String(row.content_id).trim() !== "" ? `Content ${String(row.content_id).trim()}` : "",
-        row.output_id ? `Output ${row.output_id}` : "",
-        row.production_request_number ? `PR ${row.production_request_number}` : "",
-        row.kind === "request" && !(row.content_id != null && String(row.content_id).trim() !== "") ? "Production request" : "",
-      ].filter(Boolean).join(" · ");
-      const stuck = row.stuck_kind ? `<div class="subtle error-text">${escapeHtml(row.stuck_kind)}${row.produce_error ? ` — ${escapeHtml(String(row.produce_error).slice(0, 120))}` : ""}</div>` : "";
-      const queueLabel = row.render_queue_label
-        || (row.render_queue_position ? `#${row.render_queue_position} of ${row.render_queue_total || "?"}` : "—");
-      const paused = row.kind === "output" ? row.render_paused : row.produce_paused;
-      const pauseLabel = paused ? "Resume" : "Pause";
-      const canReorder = row.kind === "output" && Number(row.render_queue_position) > 0 && operationsQueueCanEdit;
-      const actions = operationsQueueCanEdit
-        ? `<div class="ops-queue-actions">
-            <button type="button" class="secondary-button" data-ops-queue-pause="${escapeHtml(row.id)}" data-ops-queue-kind="${escapeHtml(row.kind)}" data-ops-queue-paused="${paused ? "0" : "1"}">${pauseLabel}</button>
-            ${canReorder ? `<button type="button" class="text-button" data-ops-queue-move="${escapeHtml(row.id)}" data-ops-queue-dir="top">To front</button>
-            <button type="button" class="text-button" data-ops-queue-move="${escapeHtml(row.id)}" data-ops-queue-dir="up">Up</button>
-            <button type="button" class="text-button" data-ops-queue-move="${escapeHtml(row.id)}" data-ops-queue-dir="down">Down</button>` : ""}
-            ${row.kind === "output" ? `<button type="button" class="text-button" data-ops-queue-open="${escapeHtml(row.id)}" data-ops-queue-profile="${escapeHtml(row.profile_id || "")}">Open</button>` : ""}
-          </div>`
-        : (row.kind === "output"
-          ? `<button type="button" class="text-button" data-ops-queue-open="${escapeHtml(row.id)}" data-ops-queue-profile="${escapeHtml(row.profile_id || "")}">Open</button>`
-          : "—");
-      return `<tr data-lane="${escapeHtml(row.lane || "active")}" data-ops-queue-id="${escapeHtml(row.id)}">
-        <td>${thumb}</td>
-        <td><p class="ops-queue-title">${value(row.title)}</p><div class="subtle">${escapeHtml(identity || row.id)}</div>${stuck}</td>
-        <td>${value(row.profile_name || "—")}</td>
-        <td>${value(row.platform || (Array.isArray(row.platforms) ? row.platforms.join(", ") : "—"))}<div class="subtle">${value(row.studio_output_type || "")}</div></td>
-        <td>${badge(row.studio_state)}<div class="subtle">${escapeHtml(opsQueueLaneLabel(row.lane))}</div></td>
-        <td>${escapeHtml(queueLabel)}</td>
-        <td>${actions}</td>
-      </tr>`;
-    }).join("")}</tbody></table>`;
+  function opsQueueIdentity(row) {
+    return [
+      row.content_id != null && String(row.content_id).trim() !== "" ? `Content ${String(row.content_id).trim()}` : "",
+      row.output_id ? `Out ${row.output_id}` : "",
+      row.production_request_number ? `PR ${row.production_request_number}` : "",
+      row.profile_name || "",
+    ].filter(Boolean).join(" · ");
+  }
 
-    host.querySelectorAll("[data-ops-queue-pause]").forEach((button) => {
-      button.addEventListener("click", async () => {
+  async function opsQueuePauseRow(row, paused) {
+    await api("/api/operations/queue/pause", {
+      method: "POST",
+      body: JSON.stringify({ kind: row.kind, id: row.id, paused }),
+    });
+    setOperationsMessage(paused ? "Paused in Operations Queue." : "Resumed.");
+    await loadOperationsQueue();
+  }
+
+  async function opsQueueMoveRow(id, direction) {
+    await api("/api/operations/queue/reorder", {
+      method: "POST",
+      body: JSON.stringify({ id, direction }),
+    });
+    setOperationsMessage("Render queue order updated.");
+    await loadOperationsQueue();
+  }
+
+  function bindOpsQueueLineActions(root) {
+    if (!root) return;
+    root.querySelectorAll("[data-ops-queue-pause]").forEach((button) => {
+      button.addEventListener("click", async (event) => {
+        event.stopPropagation();
         button.disabled = true;
         try {
-          await api("/api/operations/queue/pause", {
-            method: "POST",
-            body: JSON.stringify({
-              kind: button.dataset.opsQueueKind,
-              id: button.dataset.opsQueuePause,
-              paused: button.dataset.opsQueuePaused === "1",
-            }),
-          });
-          setOperationsMessage(button.dataset.opsQueuePaused === "1" ? "Paused in Operations Queue." : "Resumed.");
-          await loadOperationsQueue();
+          await opsQueuePauseRow({
+            kind: button.dataset.opsQueueKind,
+            id: button.dataset.opsQueuePause,
+          }, button.dataset.opsQueuePaused === "1");
         } catch (error) {
           setOperationsMessage(error.message || "Could not update pause.", "error-text");
           button.disabled = false;
         }
       });
     });
-    host.querySelectorAll("[data-ops-queue-move]").forEach((button) => {
-      button.addEventListener("click", async () => {
+    root.querySelectorAll("[data-ops-queue-move]").forEach((button) => {
+      button.addEventListener("click", async (event) => {
+        event.stopPropagation();
         button.disabled = true;
         try {
-          await api("/api/operations/queue/reorder", {
-            method: "POST",
-            body: JSON.stringify({ id: button.dataset.opsQueueMove, direction: button.dataset.opsQueueDir }),
-          });
-          setOperationsMessage("Render queue order updated.");
-          await loadOperationsQueue();
+          await opsQueueMoveRow(button.dataset.opsQueueMove, button.dataset.opsQueueDir);
         } catch (error) {
           setOperationsMessage(error.message || "Could not reorder queue.", "error-text");
           button.disabled = false;
         }
       });
     });
-    host.querySelectorAll("[data-ops-queue-open]").forEach((button) => {
-      button.addEventListener("click", () => {
+    root.querySelectorAll("[data-ops-queue-open]").forEach((button) => {
+      button.addEventListener("click", (event) => {
+        event.stopPropagation();
         studioOpenPipelineFilter("all", {
           profileId: button.dataset.opsQueueProfile || selectedProfileId,
         });
       });
     });
+  }
+
+  function renderOpsRenderQueueDetail(row) {
+    const host = $("opsRenderQueueDetail");
+    if (!host) return;
+    if (!row) {
+      host.hidden = true;
+      host.innerHTML = "";
+      return;
+    }
+    const queueLabel = row.render_queue_label
+      || (row.render_queue_position ? `#${row.render_queue_position} of ${row.render_queue_total || "?"}` : "Not in Remotion queue");
+    const paused = Boolean(row.render_paused);
+    host.hidden = false;
+    host.innerHTML = `
+      <div class="ops-queue-detail-grid">
+        <div><span>Status</span><strong>${escapeHtml(row.studio_state || row.render_status || "—")}</strong></div>
+        <div><span>Queue</span><strong>${escapeHtml(queueLabel)}</strong></div>
+        <div><span>Platform</span><strong>${escapeHtml(row.platform || "—")}</strong></div>
+        <div><span>Remotion job</span><strong>${escapeHtml(row.remotion_job_id || "—")}</strong></div>
+        <div><span>Output</span><strong>${escapeHtml(row.output_id != null ? String(row.output_id) : "—")}</strong></div>
+        <div><span>Type</span><strong>${escapeHtml(row.studio_output_type || row.format || "—")}</strong></div>
+      </div>
+      ${row.stuck_kind || row.produce_error ? `<p class="error-text" style="margin:0 0 10px">${escapeHtml(row.stuck_kind || "Issue")}${row.produce_error ? ` — ${escapeHtml(String(row.produce_error).slice(0, 220))}` : ""}</p>` : ""}
+      <div class="ops-queue-detail-actions">
+        ${operationsQueueCanEdit ? `<button type="button" class="secondary-button" data-ops-queue-pause="${escapeHtml(row.id)}" data-ops-queue-kind="output" data-ops-queue-paused="${paused ? "0" : "1"}">${paused ? "Resume" : "Pause"}</button>
+        <button type="button" class="text-button" data-ops-queue-move="${escapeHtml(row.id)}" data-ops-queue-dir="top">To front</button>
+        <button type="button" class="text-button" data-ops-queue-move="${escapeHtml(row.id)}" data-ops-queue-dir="up">Up</button>
+        <button type="button" class="text-button" data-ops-queue-move="${escapeHtml(row.id)}" data-ops-queue-dir="down">Down</button>` : ""}
+        <button type="button" class="text-button" data-ops-queue-open="${escapeHtml(row.id)}" data-ops-queue-profile="${escapeHtml(row.profile_id || "")}">Open in Pipeline</button>
+        ${row.final_file_url ? `<a class="text-button" target="_blank" rel="noopener" href="${escapeHtml(row.final_file_url)}">Final file</a>` : ""}
+        <button type="button" class="text-button" data-ops-queue-detail-close="1">Close</button>
+      </div>`;
+    bindOpsQueueLineActions(host);
+    host.querySelector("[data-ops-queue-detail-close]")?.addEventListener("click", () => {
+      operationsRenderDetailId = "";
+      renderOpsRenderQueueDetail(null);
+      $("opsRenderQueueLines")?.querySelectorAll(".ops-queue-line.is-selected").forEach((node) => node.classList.remove("is-selected"));
+    });
+  }
+
+  function renderOpsRenderQueueLines(rows) {
+    const host = $("opsRenderQueueLines");
+    const count = $("opsRenderQueueCount");
+    if (count) count.textContent = String(rows.length);
+    if (!host) return;
+    if (!rows.length) {
+      host.innerHTML = `<div class="ops-queue-empty">Remotion queue is clear.</div>`;
+      renderOpsRenderQueueDetail(null);
+      return;
+    }
+    host.innerHTML = rows.map((row) => {
+      const pos = row.render_queue_position ? `#${row.render_queue_position}` : (String(row.studio_state || "").toLowerCase().includes("rendering") ? "LIVE" : "—");
+      const paused = Boolean(row.render_paused);
+      const selected = operationsRenderDetailId === row.id ? " is-selected" : "";
+      const thumb = row.thumbnail_url
+        ? `<img class="ops-queue-thumb" src="${escapeHtml(row.thumbnail_url)}" alt="" loading="lazy">`
+        : "";
+      return `<div class="ops-queue-line${selected}" data-lane="${escapeHtml(row.lane || "active")}" data-ops-render-id="${escapeHtml(row.id)}" role="button" tabindex="0">
+        <div class="ops-queue-line-main">${thumb}<span class="ops-queue-line-title">${escapeHtml(pos)} · ${value(row.title)}</span><span class="ops-queue-line-meta">${escapeHtml(opsQueueIdentity(row))} · ${escapeHtml(row.platform || "—")} · ${escapeHtml(row.studio_state || row.render_status || "—")}</span></div>
+        ${opsE2eTrailHtml(row.e2e)}
+        <div class="ops-queue-line-actions">
+          ${operationsQueueCanEdit ? `<button type="button" class="secondary-button" data-ops-queue-pause="${escapeHtml(row.id)}" data-ops-queue-kind="output" data-ops-queue-paused="${paused ? "0" : "1"}">${paused ? "Resume" : "Pause"}</button>
+          <button type="button" class="text-button" data-ops-queue-move="${escapeHtml(row.id)}" data-ops-queue-dir="top">Front</button>` : ""}
+          <button type="button" class="text-button" data-ops-queue-open="${escapeHtml(row.id)}" data-ops-queue-profile="${escapeHtml(row.profile_id || "")}">Open</button>
+        </div>
+      </div>`;
+    }).join("");
+    bindOpsQueueLineActions(host);
+    host.querySelectorAll("[data-ops-render-id]").forEach((line) => {
+      const openDetail = () => {
+        const id = line.dataset.opsRenderId;
+        operationsRenderDetailId = operationsRenderDetailId === id ? "" : id;
+        const selected = operationsQueueBundles.rendering.find((row) => row.id === operationsRenderDetailId) || null;
+        host.querySelectorAll(".ops-queue-line").forEach((node) => {
+          node.classList.toggle("is-selected", node.dataset.opsRenderId === operationsRenderDetailId);
+        });
+        renderOpsRenderQueueDetail(selected);
+      };
+      line.addEventListener("click", (event) => {
+        if (event.target.closest("button,a")) return;
+        openDetail();
+      });
+      line.addEventListener("keydown", (event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          openDetail();
+        }
+      });
+    });
+    const selected = rows.find((row) => row.id === operationsRenderDetailId) || null;
+    if (!selected) operationsRenderDetailId = "";
+    renderOpsRenderQueueDetail(selected);
+  }
+
+  function renderOpsPublishQueueLines(rows) {
+    const host = $("opsPublishQueueLines");
+    const count = $("opsPublishQueueCount");
+    if (count) count.textContent = String(rows.length);
+    if (!host) return;
+    if (!rows.length) {
+      host.innerHTML = `<div class="ops-queue-empty">Nothing waiting on review or publish.</div>`;
+      return;
+    }
+    host.innerHTML = rows.map((row) => `<div class="ops-queue-line" data-lane="${escapeHtml(row.lane || "publish")}">
+      <div class="ops-queue-line-main"><span class="ops-queue-line-title">${value(row.title)}</span><span class="ops-queue-line-meta">${escapeHtml(opsQueueIdentity(row))} · ${escapeHtml(row.platform || "—")} · ${escapeHtml(row.studio_state || "—")}</span></div>
+      ${opsE2eTrailHtml(row.e2e)}
+      <div class="ops-queue-line-actions">
+        <button type="button" class="text-button" data-ops-queue-open="${escapeHtml(row.id)}" data-ops-queue-profile="${escapeHtml(row.profile_id || "")}">Open</button>
+      </div>
+    </div>`).join("");
+    bindOpsQueueLineActions(host);
+  }
+
+  function renderOpsE2eQueueLines(rows) {
+    const host = $("opsE2eQueueLines");
+    const count = $("opsE2eQueueCount");
+    if (count) count.textContent = String(rows.length);
+    if (!host) return;
+    if (!rows.length) {
+      host.innerHTML = `<div class="ops-queue-empty">No in-flight idea → publish paths.</div>`;
+      return;
+    }
+    host.innerHTML = rows.map((row) => {
+      const meta = [
+        row.content_id != null ? `Content ${row.content_id}` : "",
+        row.profile_name || "",
+        row.platforms?.length ? row.platforms.join(", ") : "",
+        row.output_count ? `${row.output_count} output${row.output_count === 1 ? "" : "s"}` : "Pre-output",
+        row.stuck_kind || "",
+      ].filter(Boolean).join(" · ");
+      const openId = row.content_item_id || row.production_request_id || row.id;
+      return `<div class="ops-queue-line" data-lane="${row.stuck_kind ? "stuck" : "active"}">
+        <div class="ops-queue-line-main"><span class="ops-queue-line-title">${value(row.title)}</span><span class="ops-queue-line-meta">${escapeHtml(meta)}</span></div>
+        ${opsE2eTrailHtml(row.e2e)}
+        <div class="ops-queue-line-actions">
+          <button type="button" class="text-button" data-ops-queue-open="${escapeHtml(openId)}" data-ops-queue-profile="${escapeHtml(row.profile_id || "")}">Open</button>
+        </div>
+      </div>`;
+    }).join("");
+    bindOpsQueueLineActions(host);
+  }
+
+  function renderOperationsStudioQueue() {
+    const meta = $("operationsQueueMeta");
+    const rendering = operationsQueueBundles.rendering || [];
+    const publishing = operationsQueueBundles.publishing || [];
+    const endToEnd = operationsQueueBundles.end_to_end || [];
+    if (meta) {
+      meta.textContent = `Rendering ${rendering.length} · Publishing ${publishing.length} · End to end ${endToEnd.length}`;
+    }
+    renderOpsRenderQueueLines(rendering);
+    renderOpsPublishQueueLines(publishing);
+    renderOpsE2eQueueLines(endToEnd);
   }
 
   async function loadOperationsQueue(options = {}) {
@@ -23960,6 +24064,11 @@ function timedScriptAssetLabel(asset, index) {
     try {
       const data = await api("/api/operations/queue");
       operationsQueueRows = Array.isArray(data.rows) ? data.rows : [];
+      operationsQueueBundles = {
+        rendering: Array.isArray(data.queues?.rendering) ? data.queues.rendering : [],
+        publishing: Array.isArray(data.queues?.publishing) ? data.queues.publishing : [],
+        end_to_end: Array.isArray(data.queues?.end_to_end) ? data.queues.end_to_end : [],
+      };
       operationsQueueCanEdit = Boolean(data.can_edit_queue);
       renderOperationsQueueSummary(data.summary || {});
       renderOperationsStudioQueue();

@@ -226,12 +226,14 @@ import {
   OPS_QUEUE_REQUEST_FIELDS,
   OPS_QUEUE_REQUEST_FORMULA,
   applyProducePauseToJob,
+  buildOpsE2eStages,
   emptyOpsQueueControls,
   isProducePaused,
   isRenderPaused,
   jobIsOpsPaused,
   normalizeOpsQueueControls,
   opsQueueItemTitle,
+  partitionOpsQueues,
   queueLaneForStudioState,
   summarizeOpsQueueRows,
 } from "./ops-queue.mjs";
@@ -653,7 +655,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.553-ops-queue-titles",
+          version: "0.10.554-ops-multi-queue",
           studio_create_vo_matched_stills_v1: true,
           studio_idea_library_typeahead_v1: true,
           studio_idea_library_search_all_hits_v1: true,
@@ -41497,6 +41499,7 @@ async function getStudioOperationsQueue(request, env, authorization) {
       ? "Paused"
       : (stuck ? (stuck.kind || "Stuck") : (step && step !== "done" ? `Producing · ${step}` : status || "Draft"));
     const contentNumber = content ? f(content, "Content_ID") : null;
+    const ideaLinkedId = firstOpsLinkedId(f(record, "Idea_Candidate")) || null;
     const row = {
       kind: "request",
       id: record.id,
@@ -41526,10 +41529,15 @@ async function getStudioOperationsQueue(request, env, authorization) {
       produce_paused: producePaused,
       render_paused: false,
       lane: queueLaneForStudioState(studioState, { producePaused, stuck }),
-      idea_id: firstOpsLinkedId(f(record, "Idea_Candidate")) || null,
+      idea_id: ideaLinkedId,
       platforms: Array.isArray(f(record, "Target_Platforms")) ? f(record, "Target_Platforms") : [],
       updated_at: f(record, "Updated_At") || job?.updated_at || null,
     };
+    row.e2e = buildOpsE2eStages({
+      ...row,
+      has_idea: Boolean(ideaLinkedId),
+      has_outputs: false,
+    });
     requestRows.push(row);
     if (contentId) requestByContent.set(contentId, row);
   }
@@ -41560,11 +41568,12 @@ async function getStudioOperationsQueue(request, env, authorization) {
       f(record, "Content_Profile") || (content ? f(content, "Content_Profile") : null),
     );
     const contentNumber = content ? f(content, "Content_ID") : null;
-    return {
+    const outputRow = {
       kind: "output",
       id: record.id,
       output_id: mapped.output_id,
       production_request_id: parentRequest?.production_request_id || null,
+      production_request_number: parentRequest?.production_request_number || null,
       content_item_id: contentId || null,
       content_id: contentNumber,
       title: opsQueueItemTitle({
@@ -41577,10 +41586,12 @@ async function getStudioOperationsQueue(request, env, authorization) {
       }),
       ...profile,
       platform: mapped.platform,
+      format: mapped.format || null,
       studio_output_type: mapped.studio_output_type || mapped.format,
       studio_state: studioState,
       output_status: mapped.output_status,
       render_status: mapped.render_status,
+      remotion_job_id: mapped.remotion_job_id || null,
       review_status: mapped.review_status,
       publish_status: mapped.publish_status,
       thumbnail_url: mapped.thumbnail_url || null,
@@ -41588,7 +41599,11 @@ async function getStudioOperationsQueue(request, env, authorization) {
       render_queue_position: mapped.render_queue_position,
       render_queue_total: mapped.render_queue_total || renderQueueTotal,
       render_queue_label: mapped.render_queue_label,
+      request_status: parentRequest?.request_status || null,
+      variant_status: parentRequest?.variant_status || null,
+      plan_status: parentRequest?.plan_status || null,
       produce_step: parentRequest?.produce_step || null,
+      produce_percent: parentRequest?.produce_percent || null,
       produce_paused: producePaused,
       render_paused: renderPaused,
       stuck_kind: stuck?.kind || parentRequest?.stuck_kind || null,
@@ -41599,10 +41614,18 @@ async function getStudioOperationsQueue(request, env, authorization) {
         renderPaused,
         stuck: stuck || (parentRequest?.stuck_kind ? { kind: parentRequest.stuck_kind } : null),
       }),
+      idea_id: parentRequest?.idea_id || null,
+      platforms: parentRequest?.platforms || (mapped.platform ? [mapped.platform] : []),
       scheduled_at: mapped.scheduled_at || mapped.scheduled_post_date || null,
       creative_available: outputCreativeAvailable(record),
       updated_at: f(record, "Last Modified") || null,
     };
+    outputRow.e2e = buildOpsE2eStages({
+      ...outputRow,
+      has_idea: Boolean(outputRow.idea_id),
+      has_outputs: true,
+    });
+    return outputRow;
   });
 
   // Prefer output rows; keep request-only rows (Draft/Ready before fanout) so Ideas→produce is visible.
@@ -41623,11 +41646,17 @@ async function getStudioOperationsQueue(request, env, authorization) {
     if (aOut && bOut && aOut !== bOut) return bOut - aOut;
     return String(b.updated_at || "").localeCompare(String(a.updated_at || ""));
   });
+  const queues = partitionOpsQueues(rows);
 
   return respond(request, env, {
     ok: true,
     page: "operations-queue",
-    summary: summarizeOpsQueueRows(rows),
+    summary: queues.summary,
+    queues: {
+      rendering: queues.rendering,
+      publishing: queues.publishing,
+      end_to_end: queues.end_to_end,
+    },
     render_queue_total: renderQueueTotal,
     controls,
     can_edit_queue: Boolean(

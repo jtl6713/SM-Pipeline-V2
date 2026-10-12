@@ -255,3 +255,303 @@ export function summarizeOpsQueueRows(rows) {
 export function opsQueueGroupKey(row) {
   return String(row?.content_item_id || row?.production_request_id || row?.id || "").trim();
 }
+
+/** Idea → publish breadcrumb for the End to End queue. */
+export const OPS_E2E_STAGE_DEFS = [
+  { id: "idea", label: "Idea" },
+  { id: "media", label: "Media Added" },
+  { id: "platforms", label: "Platform Suggested" },
+  { id: "frames", label: "Frames Prepared" },
+  { id: "prod_approved", label: "Approved" },
+  { id: "render_queue", label: "Rendering Queue" },
+  { id: "rendering", label: "Rendering" },
+  { id: "review", label: "Waiting for Approval" },
+  { id: "pub_approved", label: "Approved" },
+  { id: "published", label: "Published" },
+];
+
+function normStatus(value) {
+  return String(value || "").trim().toLowerCase();
+}
+
+function statusReady(value) {
+  const text = normStatus(value);
+  return text === "ready" || text === "complete" || text === "done" || text === "prepared";
+}
+
+/** True when Remotion is not part of this output's path (stills, skipped render, etc.). */
+export function opsOutputSkipsRender(row = {}) {
+  const render = normStatus(row.render_status);
+  const type = normStatus(row.studio_output_type || row.format);
+  const state = normStatus(row.studio_state);
+  const outputStatus = normStatus(row.output_status);
+  if (/skip|not required|n\/a|not needed|not applicable/.test(render)) return true;
+  if (row.remotion_job_id || Number(row.render_queue_position) > 0) return false;
+  if (/ready for render|waiting in render|rendering/.test(render)) return false;
+  if (/waiting in render|rendering \d/.test(state)) return false;
+  const stillLike = /single image|carousel|photo|feed post|story|image/.test(type);
+  const pastProduce = /ready for review|approved|ready to schedule|ready to publish|scheduled|published|uploading|platform processing|draft delivered/.test(
+    `${state} ${outputStatus} ${normStatus(row.review_status)} ${normStatus(row.publish_status)}`,
+  );
+  if (stillLike && (row.final_file_url || pastProduce) && !/vertical short|reel|tiktok|youtube short|longform/.test(type)) {
+    return true;
+  }
+  if (row.final_file_url && !render && pastProduce && !/vertical short|reel|short video|longform/.test(type)) {
+    return true;
+  }
+  return false;
+}
+
+function isPublishedLike(row = {}) {
+  const blob = `${normStatus(row.studio_state)} ${normStatus(row.output_status)} ${normStatus(row.publish_status)}`;
+  return /\bpublished\b|draft delivered/.test(blob);
+}
+
+function isPublishApprovedLike(row = {}) {
+  if (isPublishedLike(row)) return true;
+  if (isReviewWaitingLike(row)) return false;
+  const blob = `${normStatus(row.studio_state)} ${normStatus(row.output_status)} ${normStatus(row.publish_status)}`;
+  if (/approved for publishing|ready to schedule|ready to publish|scheduled|uploading|platform processing/.test(blob)) {
+    return true;
+  }
+  return /^approved$/.test(normStatus(row.studio_state)) || /^approved$/.test(normStatus(row.review_status));
+}
+
+function isReviewWaitingLike(row = {}) {
+  const blob = `${normStatus(row.studio_state)} ${normStatus(row.output_status)} ${normStatus(row.review_status)}`;
+  return /ready for review|review sent|awaiting approval/.test(blob);
+}
+
+function isRenderingLike(row = {}) {
+  const blob = `${normStatus(row.render_status)} ${normStatus(row.studio_state)}`;
+  return /\brendering\b/.test(blob) && !/ready for render|waiting in render/.test(blob);
+}
+
+function isRenderQueuedLike(row = {}) {
+  if (Number(row.render_queue_position) > 0) return true;
+  const blob = `${normStatus(row.render_status)} ${normStatus(row.studio_state)}`;
+  return /ready for render|waiting in render/.test(blob);
+}
+
+function isRenderDoneLike(row = {}) {
+  if (opsOutputSkipsRender(row)) return true;
+  const render = normStatus(row.render_status);
+  if (/rendered|complete|done/.test(render)) return true;
+  if (row.final_file_url && !isRenderQueuedLike(row) && !isRenderingLike(row)) {
+    return isReviewWaitingLike(row) || isPublishApprovedLike(row) || isPublishedLike(row);
+  }
+  return false;
+}
+
+/**
+ * Build a left=done / current / right=todo breadcrumb.
+ * stage.state: done | current | todo | skipped
+ */
+export function buildOpsE2eStages(input = {}) {
+  const hasIdea = Boolean(input.has_idea || input.idea_id);
+  const requestStatus = normStatus(input.request_status);
+  const variantStatus = normStatus(input.variant_status);
+  const planStatus = normStatus(input.plan_status);
+  const produceStep = normStatus(input.produce_step);
+  const platforms = Array.isArray(input.platforms) ? input.platforms : [];
+  const hasOutputs = Boolean(input.has_outputs || input.kind === "output" || input.output_id);
+  const skipsRender = input.skips_render != null ? Boolean(input.skips_render) : opsOutputSkipsRender(input);
+  const promoted = /promoted/.test(requestStatus) || Boolean(produceStep && produceStep !== "done") || hasOutputs;
+  const mediaDone = statusReady(variantStatus)
+    || /media|crops|audio|thumb|render|stamp|done/.test(produceStep)
+    || Boolean(input.content_item_id)
+    || /ready|submitted|promoted/.test(requestStatus);
+  const platformsDone = statusReady(planStatus) || platforms.length > 0 || hasOutputs;
+  const framesDone = statusReady(variantStatus)
+    || /crops|audio|thumb|render|stamp|done/.test(produceStep)
+    || (skipsRender && promoted);
+  const prodApproved = promoted || produceStep === "done";
+  const renderDone = isRenderDoneLike(input) || skipsRender;
+  const waitingReview = isReviewWaitingLike(input);
+  const publishApproved = isPublishApprovedLike(input);
+  const published = isPublishedLike(input);
+  const activelyRendering = isRenderingLike(input);
+  const inRenderQueue = isRenderQueuedLike(input);
+
+  const skipped = {
+    idea: !hasIdea && (Boolean(input.production_request_id) || hasOutputs),
+    media: false,
+    platforms: false,
+    frames: skipsRender && !statusReady(variantStatus) && prodApproved,
+    prod_approved: false,
+    render_queue: skipsRender,
+    rendering: skipsRender,
+    review: false,
+    pub_approved: false,
+    published: false,
+  };
+
+  const completion = {
+    idea: hasIdea || skipped.idea || Boolean(input.production_request_id) || Boolean(input.request_status),
+    media: mediaDone,
+    platforms: platformsDone,
+    frames: framesDone || skipped.frames,
+    prod_approved: prodApproved,
+    // Sitting in Remotion / review / publish-approved is current for that step, not done.
+    render_queue: skipped.render_queue || renderDone || activelyRendering,
+    rendering: renderDone,
+    review: publishApproved || published,
+    pub_approved: published,
+    published,
+  };
+
+  let currentId = null;
+  for (const def of OPS_E2E_STAGE_DEFS) {
+    if (skipped[def.id]) continue;
+    if (!completion[def.id]) {
+      currentId = def.id;
+      break;
+    }
+  }
+  if (published) currentId = null;
+  else if (publishApproved) currentId = "pub_approved";
+  else if (waitingReview) currentId = "review";
+  else if (activelyRendering && !renderDone && !skipped.rendering) currentId = "rendering";
+  else if (inRenderQueue && !activelyRendering && !renderDone && !skipped.render_queue) currentId = "render_queue";
+
+  const stages = OPS_E2E_STAGE_DEFS.map((def) => {
+    if (skipped[def.id]) return { ...def, state: "skipped" };
+    if (def.id === currentId) return { ...def, state: "current" };
+    if (completion[def.id]) return { ...def, state: "done" };
+    return { ...def, state: "todo" };
+  });
+
+  return {
+    stages,
+    current_id: currentId,
+    skips_render: skipsRender,
+  };
+}
+
+function mergeE2eStageStates(states) {
+  // Group progress: a stage is done only if every member is done/skipped;
+  // skipped if every member skipped; current if any current and none blocking earlier.
+  if (!states.length) return "todo";
+  if (states.every((state) => state === "skipped")) return "skipped";
+  if (states.every((state) => state === "done" || state === "skipped")) return "done";
+  if (states.some((state) => state === "current")) return "current";
+  if (states.some((state) => state === "todo" || state === "current")) return "todo";
+  return "todo";
+}
+
+export function buildOpsE2eGroup(rows = []) {
+  const list = (rows || []).filter(Boolean);
+  if (!list.length) return null;
+  const primary = list.find((row) => row.kind === "request") || list[0];
+  const outputs = list.filter((row) => row.kind === "output");
+  const sample = outputs[0] || primary;
+  const trails = (outputs.length ? outputs : [primary]).map((row) => buildOpsE2eStages({
+    ...row,
+    has_idea: Boolean(row.idea_id || primary.idea_id),
+    idea_id: row.idea_id || primary.idea_id,
+    request_status: row.request_status || primary.request_status,
+    variant_status: row.variant_status || primary.variant_status,
+    plan_status: row.plan_status || primary.plan_status,
+    produce_step: row.produce_step || primary.produce_step,
+    platforms: row.platforms || primary.platforms,
+    production_request_id: row.production_request_id || primary.production_request_id,
+    content_item_id: row.content_item_id || primary.content_item_id,
+    has_outputs: outputs.length > 0,
+  }));
+  const stages = OPS_E2E_STAGE_DEFS.map((def, index) => {
+    const state = mergeE2eStageStates(trails.map((trail) => trail.stages[index]?.state || "todo"));
+    return { ...def, state };
+  });
+  let currentId = stages.find((stage) => stage.state === "current")?.id || null;
+  if (!currentId) currentId = stages.find((stage) => stage.state === "todo")?.id || null;
+  const platforms = [...new Set(outputs.map((row) => row.platform).filter(Boolean))];
+  return {
+    kind: "e2e",
+    id: opsQueueGroupKey(primary),
+    group_key: opsQueueGroupKey(primary),
+    title: primary.title || sample.title || "Untitled",
+    content_id: primary.content_id || sample.content_id || null,
+    content_item_id: primary.content_item_id || sample.content_item_id || null,
+    production_request_id: primary.production_request_id || sample.production_request_id || null,
+    production_request_number: primary.production_request_number || null,
+    profile_id: primary.profile_id || sample.profile_id || null,
+    profile_name: primary.profile_name || sample.profile_name || null,
+    platforms,
+    output_count: outputs.length,
+    stuck_kind: list.find((row) => row.stuck_kind)?.stuck_kind || null,
+    produce_error: list.find((row) => row.produce_error)?.produce_error || null,
+    e2e: { stages, current_id: currentId, skips_render: trails.some((trail) => trail.skips_render) },
+    updated_at: list.map((row) => row.updated_at).filter(Boolean).sort().at(-1) || null,
+  };
+}
+
+export function isOpsRenderingQueueRow(row = {}) {
+  if (row.kind !== "output") return false;
+  if (row.render_paused) return true;
+  if (Number(row.render_queue_position) > 0) return true;
+  if (opsOutputSkipsRender(row)) return false;
+  const blob = `${normStatus(row.render_status)} ${normStatus(row.studio_state)}`;
+  return /ready for render|waiting in render|\brendering\b/.test(blob);
+}
+
+export function isOpsPublishingQueueRow(row = {}) {
+  if (row.kind !== "output") return false;
+  if (isOpsRenderingQueueRow(row) && !isReviewWaitingLike(row) && !isPublishApprovedLike(row) && !isPublishedLike(row)) {
+    return false;
+  }
+  const blob = `${normStatus(row.studio_state)} ${normStatus(row.output_status)} ${normStatus(row.review_status)} ${normStatus(row.publish_status)}`;
+  return /ready for review|review sent|awaiting approval|approved for publishing|ready to schedule|ready to publish|scheduled|uploading|platform processing|manual action/.test(blob)
+    || row.lane === "review"
+    || row.lane === "publish";
+}
+
+export function partitionOpsQueues(rows = []) {
+  const list = Array.isArray(rows) ? rows : [];
+  const rendering = list
+    .filter((row) => isOpsRenderingQueueRow(row))
+    .map((row) => ({
+      ...row,
+      e2e: buildOpsE2eStages(row),
+    }))
+    .sort((a, b) => {
+      const aPos = Number(a.render_queue_position) || Number.POSITIVE_INFINITY;
+      const bPos = Number(b.render_queue_position) || Number.POSITIVE_INFINITY;
+      if (aPos !== bPos) return aPos - bPos;
+      return String(b.updated_at || "").localeCompare(String(a.updated_at || ""));
+    });
+  const publishing = list
+    .filter((row) => isOpsPublishingQueueRow(row))
+    .map((row) => ({
+      ...row,
+      e2e: buildOpsE2eStages(row),
+    }))
+    .sort((a, b) => String(b.updated_at || "").localeCompare(String(a.updated_at || "")));
+
+  const groups = new Map();
+  for (const row of list) {
+    const key = opsQueueGroupKey(row);
+    if (!key) continue;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(row);
+  }
+  const endToEnd = [...groups.values()]
+    .map((group) => buildOpsE2eGroup(group))
+    .filter(Boolean)
+    .filter((row) => {
+      const stages = row.e2e?.stages || [];
+      return stages.some((stage) => stage.state === "current" || stage.state === "todo");
+    })
+    .sort((a, b) => String(b.updated_at || "").localeCompare(String(a.updated_at || "")));
+
+  return {
+    rendering,
+    publishing,
+    end_to_end: endToEnd,
+    summary: {
+      ...summarizeOpsQueueRows(list),
+      rendering: rendering.length,
+      publishing: publishing.length,
+      end_to_end: endToEnd.length,
+    },
+  };
+}

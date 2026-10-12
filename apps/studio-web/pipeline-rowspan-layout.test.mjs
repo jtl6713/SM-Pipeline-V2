@@ -9,7 +9,7 @@ const app = fs.readFileSync(path.join(here, "assets/app-item4-1008.js"), "utf8")
 const css = fs.readFileSync(path.join(here, "assets/styles-phase7-0621.css"), "utf8");
 
 test("Pipeline content cell spans all platform outputs", () => {
-  assert.match(app, /item4-0.6.634-ops-queue-titles/);
+  assert.match(app, /item4-0.6.636-ops-multi-queue/);
   assert.match(app, /class="pipeline-content-cell" rowspan="\$\{rowSpan\}"/);
   assert.match(app, /pipelineRow\(row, group\.records, index === 0 \? contentCell : ""\)/);
   assert.match(app, /pipeline-content-card/);

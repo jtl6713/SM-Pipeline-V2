@@ -5,12 +5,15 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   applyProducePauseToJob,
+  buildOpsE2eStages,
   emptyOpsQueueControls,
   isProducePaused,
   isRenderPaused,
   jobIsOpsPaused,
   normalizeOpsQueueControls,
+  opsOutputSkipsRender,
   opsQueueItemTitle,
+  partitionOpsQueues,
   queueLaneForStudioState,
   summarizeOpsQueueRows,
 } from "./ops-queue.mjs";
@@ -84,6 +87,90 @@ test("ops queue item title prefers content/idea over content type", () => {
   }), "Vertical Short Video");
 });
 
+test("e2e trail marks render queue current and skips stills render", () => {
+  const queued = buildOpsE2eStages({
+    has_idea: true,
+    request_status: "Promoted",
+    variant_status: "Ready",
+    plan_status: "Ready",
+    platforms: ["Instagram"],
+    kind: "output",
+    output_id: 12,
+    render_status: "Ready for Render",
+    render_queue_position: 2,
+    studio_output_type: "Vertical Short Video",
+  });
+  assert.equal(queued.current_id, "render_queue");
+  assert.equal(queued.stages.find((stage) => stage.id === "render_queue")?.state, "current");
+  assert.equal(queued.stages.find((stage) => stage.id === "media")?.state, "done");
+
+  const stillInput = {
+    has_idea: true,
+    request_status: "Promoted",
+    variant_status: "Ready",
+    plan_status: "Ready",
+    platforms: ["Instagram"],
+    kind: "output",
+    studio_output_type: "Single Image",
+    output_status: "Ready for Review",
+    studio_state: "Ready for Review",
+    final_file_url: "https://example.com/photo.jpg",
+  };
+  assert.equal(opsOutputSkipsRender(stillInput), true);
+  const still = buildOpsE2eStages(stillInput);
+  assert.equal(still.stages.find((stage) => stage.id === "render_queue")?.state, "skipped");
+  assert.equal(still.stages.find((stage) => stage.id === "rendering")?.state, "skipped");
+  assert.equal(still.current_id, "review");
+});
+
+test("partition ops queues into render / publish / e2e", () => {
+  const rows = [
+    {
+      kind: "output",
+      id: "recRender00000001",
+      title: "Bridge reel",
+      content_item_id: "recContent0000001",
+      content_id: 101,
+      platform: "Instagram",
+      studio_output_type: "Vertical Short Video",
+      render_status: "Ready for Render",
+      render_queue_position: 1,
+      studio_state: "Waiting in render queue #1",
+      request_status: "Promoted",
+      variant_status: "Ready",
+      plan_status: "Ready",
+      idea_id: "recIdea0000000001",
+      lane: "active",
+    },
+    {
+      kind: "output",
+      id: "recPublish0000001",
+      title: "PAMM still",
+      content_item_id: "recContent0000002",
+      content_id: 102,
+      platform: "Instagram",
+      studio_output_type: "Single Image",
+      output_status: "Ready for Review",
+      studio_state: "Ready for Review",
+      review_status: "Review Sent",
+      final_file_url: "https://example.com/a.jpg",
+      request_status: "Promoted",
+      variant_status: "Ready",
+      plan_status: "Ready",
+      idea_id: "recIdea0000000002",
+      lane: "review",
+    },
+  ];
+  const queues = partitionOpsQueues(rows);
+  assert.equal(queues.rendering.length, 1);
+  assert.equal(queues.rendering[0].id, "recRender00000001");
+  assert.equal(queues.publishing.length, 1);
+  assert.equal(queues.publishing[0].id, "recPublish0000001");
+  assert.ok(queues.end_to_end.length >= 2);
+  assert.equal(queues.summary.rendering, 1);
+  assert.equal(queues.summary.publishing, 1);
+});
+
 test("queue lanes + summary", () => {
   assert.equal(queueLaneForStudioState("Ready for Review"), "review");
   assert.equal(queueLaneForStudioState("Rendering", { stuck: { kind: "x" } }), "stuck");
@@ -100,21 +187,27 @@ test("queue lanes + summary", () => {
   assert.equal(summary.producing, 1);
 });
 
-test("worker and UI wire Operations Queue + prepare-to-review", () => {
+test("worker and UI wire Operations multi-queue + prepare-to-review", () => {
   assert.match(worker, /\/api\/operations\/queue/);
   assert.match(worker, /\/api\/operations\/queue\/pause/);
   assert.match(worker, /\/api\/operations\/queue\/reorder/);
   assert.match(worker, /prepare-to-review/);
   assert.match(worker, /async function getStudioOperationsQueue/);
+  assert.match(worker, /partitionOpsQueues/);
   assert.match(worker, /async function prepareIdeaToReview/);
-  assert.match(worker, /version: "0\.10\.553-ops-queue-titles"/);
+  assert.match(worker, /version: "0\.10\.554-ops-multi-queue"/);
   assert.match(worker, /origin=prepare-to-review/);
   assert.match(worker, /readOpsQueueControls/);
   assert.match(html, /data-ops-tab="queue"/);
   assert.match(html, /operationsQueuePanel/);
+  assert.match(html, /opsRenderQueueLines/);
+  assert.match(html, /opsPublishQueueLines/);
+  assert.match(html, /opsE2eQueueLines/);
   assert.match(html, /prepareIdeaToReviewButton/);
-  assert.match(app, /BUILD_ID = "item4-0\.6\.634-ops-queue-titles"/);
+  assert.match(app, /BUILD_ID = "item4-0\.6\.636-ops-multi-queue"/);
   assert.match(app, /loadOperationsQueue/);
+  assert.match(app, /opsE2eTrailHtml/);
+  assert.match(app, /renderOpsRenderQueueDetail/);
   assert.match(app, /prepareIdeaToReviewButton/);
   assert.match(app, /OPS_CONTROL_TABS = \[[^\]]*\"queue\"/);
 });
