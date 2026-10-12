@@ -1358,19 +1358,19 @@ input, select, textarea, button {
 .ops-queue-cols-e2e,
 .ops-queue-block:has(#opsE2eQueueLines) .ops-queue-line{grid-template-columns:minmax(120px,1.3fr) minmax(70px,.7fr) minmax(70px,.7fr) minmax(0,2.6fr) 4.5rem}
 .ops-queue-lines{display:flex;flex-direction:column}
-.ops-queue-line{display:grid;gap:10px;align-items:center;min-height:42px;padding:6px 12px;border-bottom:1px solid #edf1f4;font-size:.8rem}
+.ops-queue-line{display:grid;gap:8px;align-items:center;min-height:26px;padding:2px 12px;border-bottom:1px solid #edf1f4;font-size:.78rem;line-height:1.25}
 .ops-queue-line:last-child{border-bottom:0}
 .ops-queue-line[data-lane="stuck"]{background:#fdf6f6}
 .ops-queue-line[data-lane="paused"]{background:#f7f7f4}
 .ops-queue-line.is-selected{background:#eef5fb;box-shadow:inset 3px 0 0 var(--navy,#012559)}
-.ops-queue-line-main{display:flex;align-items:center;gap:8px;min-width:0}
-.ops-queue-line-main .ops-queue-cell{display:flex;flex-direction:column;gap:1px;min-width:0}
+.ops-queue-line-main{display:flex;align-items:center;gap:6px;min-width:0}
+.ops-queue-line-main .ops-queue-cell{display:block;min-width:0}
 .ops-queue-line-title{font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.ops-queue-line-meta{display:block;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:.74rem}
+.ops-queue-line-meta{display:none}
 .ops-queue-cell{min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.ops-queue-line-actions{display:flex;flex-wrap:nowrap;gap:4px;justify-content:flex-end;min-width:0}
-.ops-queue-line-actions .secondary-button,.ops-queue-line-actions .text-button{min-height:28px;padding:2px 8px;font-size:.72rem}
-.ops-queue-empty{padding:12px 14px;color:var(--muted);font-size:.8rem}
+.ops-queue-line-actions{display:flex;flex-wrap:nowrap;gap:3px;justify-content:flex-end;min-width:0;align-items:center}
+.ops-queue-line-actions .secondary-button,.ops-queue-line-actions .text-button{min-height:20px;height:20px;padding:0 6px;font-size:.68rem;line-height:1.1;border-radius:999px}
+.ops-queue-empty{padding:10px 14px;color:var(--muted);font-size:.8rem}
 .ops-queue-timeline-head{display:flex;flex-direction:column;gap:4px;min-width:0;width:100%}
 .ops-queue-timeline-title{font-size:.66rem;font-weight:800;letter-spacing:.04em;text-transform:uppercase;color:var(--muted)}
 /* Labels + dots share one N-col grid (no gap/padding drift) so centers match. */
@@ -1393,12 +1393,12 @@ input, select, textarea, button {
 .ops-queue-detail-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:8px 14px;margin:0 0 10px}
 .ops-queue-detail-grid div span{display:block;color:var(--muted);font-size:.68rem;text-transform:uppercase;letter-spacing:.04em}
 .ops-queue-detail-actions{display:flex;flex-wrap:wrap;gap:6px}
-.ops-queue-thumb{width:28px;height:36px;object-fit:cover;border-radius:4px;background:#e8eef3;display:block;flex:0 0 auto}
+.ops-queue-thumb{width:18px;height:22px;object-fit:cover;border-radius:3px;background:#e8eef3;display:block;flex:0 0 auto}
 @media (max-width:900px){
  .ops-queue-cols-head{display:none}
  .ops-queue-block:has(#opsRenderQueueLines) .ops-queue-line,
  .ops-queue-block:has(#opsPublishQueueLines) .ops-queue-line,
- .ops-queue-block:has(#opsE2eQueueLines) .ops-queue-line{grid-template-columns:minmax(0,1fr);gap:4px;padding:8px 10px}
+ .ops-queue-block:has(#opsE2eQueueLines) .ops-queue-line{grid-template-columns:minmax(0,1fr);gap:3px;padding:4px 10px}
  .ops-queue-line-actions{justify-content:flex-start}
  .ops-e2e-labels{display:none}
 }

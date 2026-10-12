@@ -267,7 +267,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.644-nav-eager";
+  const BUILD_ID = "item4-0.6.645-ops-queue-dense";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -23992,13 +23992,17 @@ function timedScriptAssetLabel(asset, index) {
     return state === "done" || state === "skipped";
   }
 
-  function opsQueueIdentity(row) {
-    return [
-      row.content_id != null && String(row.content_id).trim() !== "" ? `Content ${String(row.content_id).trim()}` : "",
-      row.output_id ? `Out ${row.output_id}` : "",
-      row.production_request_number ? `PR ${row.production_request_number}` : "",
-      row.profile_name || "",
-    ].filter(Boolean).join(" · ");
+  /** Single-line ITEM: C{content}O{output}-{title}, omitting missing IDs. */
+  function opsQueueItemLabel(row) {
+    const content = row?.content_id != null && String(row.content_id).trim() !== ""
+      ? `C${String(row.content_id).trim()}`
+      : "";
+    const output = row?.output_id != null && String(row.output_id).trim() !== ""
+      ? `O${String(row.output_id).trim()}`
+      : "";
+    const prefix = `${content}${output}`;
+    const title = String(row?.title || "").trim() || "Untitled";
+    return prefix ? `${prefix}-${title}` : title;
   }
 
   async function opsQueuePauseRow(row, paused) {
@@ -24116,12 +24120,8 @@ function timedScriptAssetLabel(asset, index) {
       const thumb = row.thumbnail_url
         ? `<img class="ops-queue-thumb" src="${escapeHtml(row.thumbnail_url)}" alt="" loading="lazy">`
         : "";
-      const idBits = [
-        row.content_id != null && String(row.content_id).trim() !== "" ? `Content ${String(row.content_id).trim()}` : "",
-        row.output_id ? `Out ${row.output_id}` : "",
-      ].filter(Boolean).join(" · ");
       return `<div class="ops-queue-line${selected}" data-lane="${escapeHtml(row.lane || "active")}" data-ops-render-id="${escapeHtml(row.id)}" role="button" tabindex="0">
-        <div class="ops-queue-line-main">${thumb}<div class="ops-queue-cell"><span class="ops-queue-line-title">${value(row.title)}</span>${idBits ? `<span class="ops-queue-line-meta">${escapeHtml(idBits)}</span>` : ""}</div></div>
+        <div class="ops-queue-line-main">${thumb}<div class="ops-queue-cell"><span class="ops-queue-line-title">${escapeHtml(opsQueueItemLabel(row))}</span></div></div>
         <div class="ops-queue-cell">${escapeHtml(row.profile_name || "—")}</div>
         <div class="ops-queue-cell">${escapeHtml(row.platform || "—")}</div>
         <div class="ops-queue-cell">${escapeHtml(row.studio_state || row.render_status || "—")}</div>
@@ -24171,12 +24171,8 @@ function timedScriptAssetLabel(asset, index) {
       return;
     }
     host.innerHTML = rows.map((row) => {
-      const idBits = [
-        row.content_id != null && String(row.content_id).trim() !== "" ? `Content ${String(row.content_id).trim()}` : "",
-        row.output_id ? `Out ${row.output_id}` : "",
-      ].filter(Boolean).join(" · ");
       return `<div class="ops-queue-line" data-lane="${escapeHtml(row.lane || "publish")}">
-        <div class="ops-queue-line-main"><div class="ops-queue-cell"><span class="ops-queue-line-title">${value(row.title)}</span>${idBits ? `<span class="ops-queue-line-meta">${escapeHtml(idBits)}</span>` : ""}</div></div>
+        <div class="ops-queue-line-main"><div class="ops-queue-cell"><span class="ops-queue-line-title">${escapeHtml(opsQueueItemLabel(row))}</span></div></div>
         <div class="ops-queue-cell">${escapeHtml(row.profile_name || "—")}</div>
         <div class="ops-queue-cell">${escapeHtml(row.platform || "—")}</div>
         <div class="ops-queue-cell">${escapeHtml(row.studio_state || "—")}</div>
@@ -24200,17 +24196,12 @@ function timedScriptAssetLabel(asset, index) {
       return;
     }
     host.innerHTML = rows.map((row) => {
-      const idBits = [
-        row.content_id != null ? `Content ${row.content_id}` : "",
-        row.output_count ? `${row.output_count} output${row.output_count === 1 ? "" : "s"}` : "Pre-output",
-        row.stuck_kind || "",
-      ].filter(Boolean).join(" · ");
       const platforms = Array.isArray(row.platforms) && row.platforms.length
         ? row.platforms.join(", ")
         : (row.platform || "—");
       const openId = row.content_item_id || row.production_request_id || row.id;
       return `<div class="ops-queue-line" data-lane="${row.stuck_kind ? "stuck" : "active"}">
-        <div class="ops-queue-line-main"><div class="ops-queue-cell"><span class="ops-queue-line-title">${value(row.title)}</span>${idBits ? `<span class="ops-queue-line-meta">${escapeHtml(idBits)}</span>` : ""}</div></div>
+        <div class="ops-queue-line-main"><div class="ops-queue-cell"><span class="ops-queue-line-title">${escapeHtml(opsQueueItemLabel(row))}</span></div></div>
         <div class="ops-queue-cell">${escapeHtml(row.profile_name || "—")}</div>
         <div class="ops-queue-cell">${escapeHtml(platforms)}</div>
         ${opsE2eTrailHtml(row.e2e)}
