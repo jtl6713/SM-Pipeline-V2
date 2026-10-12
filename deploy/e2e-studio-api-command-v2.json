@@ -1,11 +1,10 @@
 {
-  "correlation_id": "CONTENT-323-VOICEOVER-CONTINUE-20261005",
+  "correlation_id": "NYC-LIVE-PIPELINE-OUTPUTS-20261012",
   "requests": [
     {
-      "name": "323-instagram-reel-continue",
-      "method": "POST",
-      "path": "/api/outputs/recqjwPvNBY456O5R/creative/render/continue",
-      "body": {}
+      "name": "nyc_recent_outputs",
+      "method": "GET",
+      "path": "/api/outputs?mode=latest&profile=recgtK8Z7eNADNtVy"
     }
   ]
 }
