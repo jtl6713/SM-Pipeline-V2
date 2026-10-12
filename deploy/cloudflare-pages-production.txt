@@ -264,3 +264,4 @@ UI 0.6.607 hashtag mismatch warning only; approval no longer blocked.
 2026-10-12: Studio UI 0.6.642-ops-profiles-load — lean Profiles tab load for narration voice.
 2026-10-12: Studio UI 0.6.643-ops-timeline-align — align E2E/Publishing/Rendering stage labels over row timeline dots.
 2026-10-12: Redeploy Studio Pages UI 0.6.643-ops-timeline-align — custom-domain verify retry after cache-purge lag.
+2026-10-12: Studio UI 0.6.644-nav-eager — show New Profile + Operations in left nav immediately (fail-open; do not wait on session/profiles).
