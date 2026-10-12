@@ -12,9 +12,9 @@ test("idea library search sequence + pins", async () => {
   const worker = await readFile(path.join(here, "../studio-api/worker.js"), "utf8");
   assert.match(app, /ideaLibraryLoadSequence/);
   assert.match(app, /Ignore stale responses so a slow empty-query open cannot wipe a later "Museum" search/);
-  assert.match(app, /item4-0\.6\.627-ideas-generate-async/);
-  assert.match(html, /UI build 0\.6\.627/);
-  assert.match(worker, /0\.10\.549-ideas-generate-async/);
+  assert.match(app, /item4-0\.6\.630-library-search-tokens/);
+  assert.match(html, /UI build 0\.6\.630/);
+  assert.match(worker, /0\.10\.550-library-search-tokens/);
   assert.match(worker, /studio_idea_library_typeahead_v1: true/);
   assert.match(worker, /ideaLibrarySearchHit/);
   assert.match(worker, /ideaLibrarySearchFilterKeys\(queryTokens\)/);
