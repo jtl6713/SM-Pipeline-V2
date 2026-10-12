@@ -1360,15 +1360,16 @@ input, select, textarea, button {
  * those buttons overflow left onto the Timeline PUB label/dot. Keep header/row
  * tracks identical; Publishing/E2E stay tight (Open only).
  */
+/* Type is short (Reel/Story); Queue keeps the wait/position copy that used to duplicate Status. */
 .ops-queue-cols-render,
 .ops-queue-block:has(#opsRenderQueueLines) .ops-queue-cols-head,
-.ops-queue-block:has(#opsRenderQueueLines) .ops-queue-line{grid-template-columns:3.4rem minmax(110px,1.3fr) minmax(70px,.7fr) minmax(60px,.6fr) minmax(80px,.8fr) minmax(50px,.5fr) minmax(0,2.4fr) minmax(10rem,max-content)}
+.ops-queue-block:has(#opsRenderQueueLines) .ops-queue-line{grid-template-columns:3.4rem minmax(110px,1.3fr) minmax(70px,.7fr) minmax(60px,.6fr) minmax(56px,.55fr) minmax(90px,.95fr) minmax(0,2.4fr) minmax(10rem,max-content)}
 .ops-queue-cols-publish,
 .ops-queue-block:has(#opsPublishQueueLines) .ops-queue-cols-head,
-.ops-queue-block:has(#opsPublishQueueLines) .ops-queue-line{grid-template-columns:3.4rem minmax(110px,1.3fr) minmax(70px,.7fr) minmax(60px,.6fr) minmax(90px,.9fr) minmax(0,2.4fr) 4.5rem}
+.ops-queue-block:has(#opsPublishQueueLines) .ops-queue-line{grid-template-columns:3.4rem minmax(100px,1.2fr) minmax(64px,.65fr) minmax(56px,.55fr) minmax(56px,.55fr) minmax(80px,.85fr) minmax(0,2.2fr) 4.5rem}
 .ops-queue-cols-e2e,
 .ops-queue-block:has(#opsE2eQueueLines) .ops-queue-cols-head,
-.ops-queue-block:has(#opsE2eQueueLines) .ops-queue-line{grid-template-columns:3.4rem minmax(110px,1.3fr) minmax(70px,.7fr) minmax(70px,.7fr) minmax(0,2.6fr) 4.5rem}
+.ops-queue-block:has(#opsE2eQueueLines) .ops-queue-line{grid-template-columns:3.4rem minmax(110px,1.3fr) minmax(64px,.65fr) minmax(60px,.6fr) minmax(56px,.55fr) minmax(0,2.4fr) 4.5rem}
 .ops-queue-phase{display:flex;align-items:center;min-width:0}
 .ops-queue-phase-chip{display:inline-flex;align-items:center;justify-content:center;min-height:16px;padding:0 5px;border-radius:4px;font-size:.62rem;font-weight:800;letter-spacing:.03em;text-transform:uppercase;line-height:1;white-space:nowrap;background:#e8eef3;color:#345;border:1px solid #d5dee6}
 .ops-queue-phase[data-phase="idea"] .ops-queue-phase-chip{background:#fff7e8;color:#8a5a00;border-color:#efd7a2}

@@ -279,3 +279,4 @@ UI 0.6.607 hashtag mismatch warning only; approval no longer blocked.
 2026-10-12: Deploy Studio UI 0.6.653-production-timeline-truth. Correct Production checklist to derive narrated timeline from persisted scene data, not Ready output plan; preserve four independent checklist flags.
 2026-10-12: Repair UI 0.6.653 Pages deployment regression version expectations, include timeline truth test in Pages gates.
 2026-10-12: Studio UI 0.6.654-ops-phase-open — Ops queue Idea/Production/Publishing phase labels + Idea-phase Open → Ideas.
+2026-10-12: Studio UI 0.6.655-ops-render-type — Rendering Status→Type (output type); Type on Publishing/E2E; Queue keeps wait/position.

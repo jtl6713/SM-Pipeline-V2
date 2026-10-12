@@ -273,7 +273,7 @@ test("worker and UI wire Operations multi-queue + prepare-to-review", () => {
   assert.match(worker, /mergeOpsQueueOutputRecords/);
   assert.match(worker, /OPS_QUEUE_RENDER_FORMULA/);
   assert.match(worker, /async function prepareIdeaToReview/);
-  assert.match(worker, /version: "0\.10\.560-ops-phase-open"/);
+  assert.match(worker, /version: "0\.10\.561-production-photo-wait-visibility"/);
   assert.match(worker, /origin=prepare-to-review/);
   assert.match(worker, /readOpsQueueControls/);
   assert.match(html, /data-ops-tab="queue"/);
@@ -288,8 +288,14 @@ test("worker and UI wire Operations multi-queue + prepare-to-review", () => {
   assert.match(html, /ops-queue-timeline-head/);
   assert.match(html, />Timeline</);
   assert.match(html, />Phase</);
+  // Rendering: Type replaces the Status column that duplicated Queue wait text.
+  assert.match(html, /ops-queue-cols-render[\s\S]*?>Type<\/div><div>Queue</);
+  assert.match(html, /ops-queue-cols-publish[\s\S]*?>Type<\/div><div>Status</);
+  assert.match(html, /ops-queue-cols-e2e[\s\S]*?>Platform<\/div><div>Type</);
   assert.match(html, /prepareIdeaToReviewButton/);
-  assert.match(app, /BUILD_ID = "item4-0.6.654-ops-phase-open"/);
+  assert.match(app, /BUILD_ID = "item4-0.6.655-ops-render-type"/);
+  assert.match(app, /function opsQueueOutputTypeLabel/);
+  assert.match(app, /studio_output_type \|\| row\?\.format/);
   assert.match(app, /platforms: "Plat"/);
   assert.match(app, /Media Added/);
   assert.match(app, /Waiting for Approval/);
@@ -309,6 +315,11 @@ test("worker and UI wire Operations multi-queue + prepare-to-review", () => {
   assert.match(ideaOpen, /openIdeaDrawer/);
   const prodOpen = app.slice(app.indexOf("async function opsQueueOpenProductionPhase"), app.indexOf("async function opsQueueOpenRow"));
   assert.match(prodOpen, /showStudioPage\("content"\)/);
+  const renderLines = app.slice(app.indexOf("function renderOpsRenderQueueLines"), app.indexOf("function renderOpsPublishQueueLines"));
+  assert.match(renderLines, /opsQueueOutputTypeLabel\(row\)/);
+  assert.match(renderLines, /escapeHtml\(queueLabel\)/);
+  // Status cell removed; wait/position stays in Queue (title keeps studio_state for hover).
+  assert.equal((renderLines.match(/opsQueueOutputTypeLabel\(row\)/g) || []).length >= 1, true);
   assert.match(app, /loadOperationsQueue/);
   assert.match(app, /loadOperationsProfilesPanel/);
   assert.match(app, /\/api\/operations\/profiles/);
@@ -317,9 +328,10 @@ test("worker and UI wire Operations multi-queue + prepare-to-review", () => {
   assert.match(app, /ops-e2e-dot/);
   assert.match(app, /ops-e2e-track/);
   assert.match(app, /setProperty\("--ops-e2e-count"/);
-  assert.match(css, /minmax\(0,2\.6fr\) 4\.5rem/);
+  assert.match(css, /minmax\(0,2\.4fr\) 4\.5rem/);
   assert.match(css, /minmax\(10rem,\s*max-content\)/);
   assert.match(css, /3\.4rem minmax\(110px,1\.3fr\)/);
+  assert.match(css, /minmax\(56px,\.55fr\) minmax\(90px,\.95fr\)/);
   assert.match(css, /\.ops-queue-phase-chip/);
   assert.match(css, /\.ops-queue-phase-band/);
   assert.match(css, /\.ops-queue-block\{[^}]*flex-shrink:0/);
