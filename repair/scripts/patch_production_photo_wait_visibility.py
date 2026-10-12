@@ -35,10 +35,10 @@ assert source.count(anchor) == 1, "Production route anchor changed"
 assert source.count(old) == 1, "Exact old filter changed"
 assert "function productionRequestPhotoWaitHidden(" not in source, "Unexpected existing helper"
 source = source.replace(anchor, helper + anchor, 1).replace(old, new, 1)
-source, n = re.subn(r'version: "0\\.10\\.560-ops-phase-open"', 'version: "0.10.561-production-photo-wait-visibility"', source, count=1)
+source, n = re.subn(r'version: "0[.]10[.]560-ops-phase-open"', 'version: "0.10.561-production-photo-wait-visibility"', source, count=1)
 assert n == 1, "Expected Worker source version changed; inspect before re-running"
 assert source.count("function productionRequestPhotoWaitHidden(") == 1
 worker.write_text(source)
 with Path("deploy/cloudflare-worker-production.txt").open("a") as out:
-    out.write("\\n2026-10-12 Worker 0.10.561-production-photo-wait-visibility: keep prepared Production drafts visible when Idea photo-wait flag is stale.\\n")
+    out.write(chr(10) + "2026-10-12 Worker 0.10.561-production-photo-wait-visibility: keep prepared Production drafts visible when Idea photo-wait flag is stale." + chr(10))
 print("Patched Worker Production photo-wait visibility and deployment marker")
