@@ -40,7 +40,7 @@ test("outputPreview wires Render_Server_URL through the render-server accept hel
 });
 
 test("Review Open rendered file prefers /api/outputs/:id/preview for finished video", () => {
-  assert.match(app, /BUILD_ID = "item4-0.6.647-list-read-snapshot"/);
+  assert.match(app, /BUILD_ID = "item4-0.6.648-ops-render-rows"/);
   const fn = app.match(/function phase6ReviewWatchUrl\(output = \{\}\) \{[\s\S]*?\n  \}/)?.[0] || "";
   assert.match(fn, /phase6OutputHasVideoFinal\(output\)/);
   assert.match(fn, /\/api\/outputs\/\$\{encodeURIComponent\(output\.id\)\}\/preview/);

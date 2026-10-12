@@ -30,9 +30,11 @@ test("Awaiting Approval filter matches Ready for Review studio_state", () => {
 });
 
 test("Worker mode=review targets Ready for Review / Review Sent", () => {
-  const start = worker.indexOf("async function listOutputs");
+  // Review filter lives in the snapshot builder (listOutputs only toggles reviewOnly).
+  const start = worker.indexOf("async function buildPipelineOutputsPayload");
   const end = worker.indexOf("\nasync function ", start + 10);
   const list = worker.slice(start, end > start ? end : start + 8000);
+  assert.match(list, /reviewOnly/);
   assert.match(list, /Output_Status\}="Ready for Review"/);
   assert.match(list, /Review_Status\}="Review Sent"/);
   assert.doesNotMatch(list, /Review_Status\}="Pending Review"/);

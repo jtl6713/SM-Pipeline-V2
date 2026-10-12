@@ -267,7 +267,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.647-list-read-snapshot";
+  const BUILD_ID = "item4-0.6.648-ops-render-rows";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -24234,16 +24234,26 @@ function timedScriptAssetLabel(asset, index) {
       meta.textContent = `Rendering ${rendering.length} · Publishing ${publishing.length} · End to end ${endToEnd.length}`;
     }
     ensureOpsE2eStageLabels(endToEnd[0]?.e2e?.stages || rendering[0]?.e2e?.stages || publishing[0]?.e2e?.stages);
-    renderOpsRenderQueueLines(rendering);
-    renderOpsPublishQueueLines(publishing);
-    renderOpsE2eQueueLines(endToEnd);
+    // Paint each lane independently so one map/throw cannot blank the others.
+    try { renderOpsRenderQueueLines(rendering); } catch (error) {
+      console.warn("ops render queue paint failed", error);
+      const host = $("opsRenderQueueLines");
+      if (host) host.innerHTML = `<div class="ops-queue-empty error-text">Could not paint Rendering rows.</div>`;
+    }
+    try { renderOpsPublishQueueLines(publishing); } catch (error) {
+      console.warn("ops publish queue paint failed", error);
+    }
+    try { renderOpsE2eQueueLines(endToEnd); } catch (error) {
+      console.warn("ops e2e queue paint failed", error);
+    }
   }
 
   async function loadOperationsQueue(options = {}) {
     const meta = $("operationsQueueMeta");
     if (!options.quiet && meta) meta.textContent = "Loading queue…";
     try {
-      const data = await api("/api/operations/queue");
+      // Multi-Airtable fanout; default 25s AbortSignal often surfaces as "signal timed out".
+      const data = await api("/api/operations/queue", { timeoutMs: 60000, retries: 1 });
       operationsQueueRows = Array.isArray(data.rows) ? data.rows : [];
       operationsQueueBundles = {
         rendering: Array.isArray(data.queues?.rendering) ? data.queues.rendering : [],
@@ -24251,7 +24261,13 @@ function timedScriptAssetLabel(asset, index) {
         end_to_end: Array.isArray(data.queues?.end_to_end) ? data.queues.end_to_end : [],
       };
       operationsQueueCanEdit = Boolean(data.can_edit_queue);
-      renderOperationsQueueSummary(data.summary || {});
+      // Chips must match painted row arrays — never show a count without row objects.
+      renderOperationsQueueSummary({
+        ...(data.summary || {}),
+        rendering: operationsQueueBundles.rendering.length,
+        publishing: operationsQueueBundles.publishing.length,
+        end_to_end: operationsQueueBundles.end_to_end.length,
+      });
       renderOperationsStudioQueue();
       if (data.warning && !options.quiet) setOperationsMessage(data.warning, "error-text");
       else if (!operationsQueueRows.length && !options.quiet) {
@@ -24260,6 +24276,22 @@ function timedScriptAssetLabel(asset, index) {
       startOperationsQueuePoll();
       return data;
     } catch (error) {
+      // Fail-open: keep last good rows painted; do not clear counts to empty on timeout.
+      const hasLastGood = Boolean(
+        (operationsQueueBundles.rendering || []).length
+        || (operationsQueueBundles.publishing || []).length
+        || (operationsQueueBundles.end_to_end || []).length
+      );
+      if (hasLastGood) {
+        renderOperationsStudioQueue();
+        if (meta) {
+          meta.textContent = `Showing last queue · ${error.message || "refresh failed"}`;
+        }
+        if (!options.quiet) {
+          setOperationsMessage(error.message || "Could not refresh Operations Queue.", "error-text");
+        }
+        return null;
+      }
       if (meta) meta.textContent = error.message || "Could not load Operations Queue.";
       if (!options.quiet) setOperationsMessage(error.message || "Could not load Operations Queue.", "error-text");
       throw error;

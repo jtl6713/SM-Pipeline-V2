@@ -13,7 +13,9 @@ test("Worker latest mode fetches one live Airtable page before history snapshot"
   assert.match(route,/limit: 60/);
   assert.match(route,/filterFormula: contentProfileFilterFormula\(profile\)/);
   assert.match(route,/fresh: true/);
-  assert.ok(route.indexOf('mode") === "latest"')<route.indexOf("readPipelineOutputsSnapshot"));
+  // Latest returns a live page immediately; full list uses respondStudioMappedList (R2 snapshot).
+  assert.ok(route.indexOf('mode") === "latest"') < route.indexOf("respondStudioMappedList"));
+  assert.match(route, /fresh: true/);
 });
 test("Newest live rows override stale snapshot rows without losing older items",()=>{
   const match=app.match(/  function mergePipelineFreshOutputs\(baseRows, freshRows\) \{[\s\S]*?\n  \}/);
