@@ -138,3 +138,49 @@ class AirtableClient:
             response.raise_for_status()
             updated.extend(response.json().get("records", []))
         return updated
+
+    def upsert_record(
+        self,
+        table_id: str,
+        fields: dict[str, Any],
+        *,
+        merge_field: str,
+        typecast: bool = True,
+    ) -> tuple[dict[str, Any], bool]:
+        """Atomically create or match one record on an Airtable merge field.
+
+        Airtable's performUpsert resolves simultaneous writers server-side.
+        Never fall back to POST after an ambiguous response or 422: that could
+        create a duplicate. The bool is True only for a confirmed new record.
+        """
+        import requests
+
+        key = str(fields.get(merge_field) or "").strip()
+        if not key:
+            raise ValueError(f"{merge_field} must be set for atomic upsert")
+        url = f"{self._api_root}/{self._base_id}/{table_id}"
+        body = {
+            "records": [{"fields": fields}],
+            "performUpsert": {"fieldsToMergeOn": [merge_field]},
+            "typecast": typecast,
+        }
+        response = requests.patch(url, headers=self._headers, json=body, timeout=60)
+        if not response.ok:
+            detail = (response.text or "").strip().replace("\n", " ")[:500]
+            message = f"{response.status_code} {response.reason} for url: {url}"
+            if detail:
+                message = f"{message} {detail}"
+            raise requests.HTTPError(message, response=response)
+        payload = response.json()
+        records = payload.get("records") or []
+        if len(records) != 1 or not records[0].get("id"):
+            raise RuntimeError("Airtable upsert returned no unambiguous record; do not retry as create")
+        record = records[0]
+        record_id = record["id"]
+        created_ids = payload.get("createdRecords") or []
+        updated_ids = payload.get("updatedRecords") or []
+        if record_id in created_ids and record_id not in updated_ids:
+            return record, True
+        if record_id in updated_ids and record_id not in created_ids:
+            return record, False
+        raise RuntimeError("Airtable did not confirm whether upsert created or updated; do not retry as create")
