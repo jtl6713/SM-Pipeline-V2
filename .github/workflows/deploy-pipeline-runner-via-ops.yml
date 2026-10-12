@@ -186,3 +186,5 @@ jobs:
 
 # Trigger single-photo FB2 published feed attached_media route (Output 2292)
 # 2026-10-12 route=fb2-attached-single-photo
+
+# 2026-10-12: redeploy merged FB2 attached_media single-photo route, verify Output 2292
