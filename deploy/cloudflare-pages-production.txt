@@ -270,3 +270,4 @@ UI 0.6.607 hashtag mismatch warning only; approval no longer blocked.
 2026-10-12: Redeploy Studio Pages UI 0.6.646-ops-render-section — custom-domain verify retry after cache-purge lag.
 2026-10-12: Studio list reads (Home / Pipeline / Ideas) serve R2 snapshots and never wait on a live Airtable scan (UI 0.6.647 / Worker 0.10.558-list-read-snapshot).
 2026-10-12: Studio UI 0.6.648-ops-render-rows — stop clipping Rendering queue body (overflow:visible + content-sized flex; Publishing scrolls in-lane).
+2026-10-12: Redeploy Studio Pages UI 0.6.648-ops-render-rows — custom-domain verify retry after cache-purge lag.
