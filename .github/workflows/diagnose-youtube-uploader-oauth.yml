@@ -34,12 +34,7 @@ jobs:
           d=json.load(open('/tmp/settings')); vals={r['fields']['Setting_Name']:str(r['fields'].get('Setting_Value','')).strip() for r in d.get('records',[])}
           base=vals.get('YOUTUBE_UPLOAD_SERVICE_URL','').rstrip('/'); secret=vals.get('YOUTUBE_UPLOAD_SERVICE_SHARED_SECRET','')
           if not base: raise SystemExit('missing uploader URL')
-          paths=[
-            '/','/health','/status','/api/health','/docs','/openapi.json','/swagger','/swagger.json',
-            '/youtube','/youtube/health','/youtube/status','/youtube/auth/status','/youtube/oauth/status',
-            '/youtube/credentials/status','/youtube/auth','/youtube/oauth','/youtube/authorize',
-            '/youtube/auth/start','/youtube/oauth/start','/youtube/reauthorize','/youtube/videos'
-          ]
+          paths=['/health','/youtube/oauth/status']
           headersets=[('plain',{}),('service-key',{'X-SM-Pipeline-Key':secret})]
           out={'base':base,'probes':[]}
           for path in paths:
@@ -58,6 +53,64 @@ jobs:
           if secret: raw=raw.replace(secret,'[REDACTED]')
           open('/tmp/youtube-oauth-diagnostic.json','w').write(raw)
           print(json.dumps({'ok':True,'base':base,'probe_count':len(out['probes'])}))
+          PY
+      - name: Verify per-city engagement uploader keys without posting
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json,urllib.request,urllib.error,urllib.parse
+          api='https://api.airtable.com/v0/appe33zkZn35yirTL/tblpHPWeEkyJaF7ql'
+          pat=open('/tmp/pat.txt').read().strip()
+          names=['YOUTUBE_UPLOAD_SERVICE_URL','YOUTUBE_UPLOAD_SERVICE_SHARED_SECRET']
+          for prefix in ('NYC_','LA_','MIAMI_'):
+            names.extend((prefix+'YOUTUBE_UPLOAD_SERVICE_URL',prefix+'YOUTUBE_UPLOAD_SERVICE_SHARED_SECRET'))
+          names.append('YOUTUBE_ENGAGEMENT_AUTH_DIAGNOSTIC_V1')
+          formula="OR("+",".join("{Setting_Name}='"+n+"'" for n in names)+")"
+          query=urllib.parse.urlencode({'filterByFormula':formula})
+          def airtable(url,method='GET',body=None):
+            payload=None if body is None else json.dumps(body).encode()
+            request=urllib.request.Request(url,method=method,data=payload,headers={
+              'Authorization':'Bearer '+pat,'Content-Type':'application/json'})
+            with urllib.request.urlopen(request,timeout=25) as response:
+              return json.load(response)
+          found=airtable(api+'?'+query)['records']
+          values={r['fields']['Setting_Name']:str(r['fields'].get('Setting_Value','')).strip() for r in found if r['fields'].get('Active',True)}
+          record=next((r for r in found if r['fields']['Setting_Name']=='YOUTUBE_ENGAGEMENT_AUTH_DIAGNOSTIC_V1'),None)
+          report={}
+          for city,prefix in [('chicago',''),('nyc','NYC_'),('la','LA_'),('miami','MIAMI_')]:
+            base=values.get(prefix+'YOUTUBE_UPLOAD_SERVICE_URL','').rstrip('/')
+            # The existing Worker can use its env fallback; the global key is
+            # only a diagnostic fallback, not a change to profile settings.
+            secret=values.get(prefix+'YOUTUBE_UPLOAD_SERVICE_SHARED_SECRET') or values.get('YOUTUBE_UPLOAD_SERVICE_SHARED_SECRET','')
+            result={'url_configured':bool(base),'key_configured':bool(secret)}
+            if base:
+              for probe in ('health','oauth'):
+                path='/health' if probe=='health' else '/youtube/oauth/status'
+                headers={'Accept':'application/json','User-Agent':'SM-Pipeline-Engagement-ReadOnly-Diagnostic/1.0'}
+                if probe=='oauth' and secret: headers['X-SM-Pipeline-Key']=secret
+                try:
+                  req=urllib.request.Request(base+path,method='GET',headers=headers)
+                  with urllib.request.urlopen(req,timeout=12) as response:
+                    result[probe+'_status']=response.status
+                    payload=json.load(response)
+                    if probe=='health':
+                      result['version']=str(payload.get('version',''))[:80]
+                    else:
+                      result['refresh_ok']=bool(payload.get('refresh_ok'))
+                      result['channel_identity_ok']=bool(payload.get('channel_identity_ok'))
+                except urllib.error.HTTPError as error:
+                  result[probe+'_status']=error.code
+                except Exception as error:
+                  result[probe+'_error_type']=type(error).__name__
+            report[city]=result
+          safe=json.dumps(report,separators=(',',':'))
+          fields={'Setting_Name':'YOUTUBE_ENGAGEMENT_AUTH_DIAGNOSTIC_V1','Setting_Value':safe,'Active':True,'Notes':'Read-only uploader auth diagnostic, no tokens or posts; updated by GitHub Actions.'}
+          if record:
+            airtable(api+'/'+record['id'],method='PATCH',body={'fields':fields})
+          else:
+            airtable(api,method='POST',body={'fields':fields})
+          print('Read-only engagement authentication diagnostics:',safe)
           PY
       - uses: actions/upload-artifact@v4
         with:
