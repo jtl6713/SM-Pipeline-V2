@@ -21,8 +21,8 @@ from carousel.timeutil import chicago_now, iso_ms
 from integrations.google_drive import GoogleDriveClient
 from render.fields import field_str
 
-# Keep OR() formulas short; A2B Drive page size is 20 so one chunk covers a pulse.
-_A2B_EXISTING_LOOKUP_CHUNK = 25
+# A2B Drive pages are small (20 files); one exact lookup per ID cannot be
+# truncated by hundreds of unrelated duplicate rows in a shared OR() query.
 
 
 def _unique_drive_ids(candidate_ids: Iterable[str]) -> list[str]:
@@ -49,32 +49,22 @@ def existing_drive_id_formula(candidate_ids: Iterable[str]) -> str | None:
 
 
 def _existing_drive_ids(client: AirtableClient, candidate_ids: Iterable[str]) -> set[str]:
-    """Return Drive file IDs that already have a Media Asset row.
+    """Look up each Drive ID independently so duplicates cannot hide candidates.
 
-    Lookup is scoped to the current Drive listing. The previous view scan capped
-    at the oldest 1000 Intake_Date rows, so once the catalog grew past that the
-    hourly A2B pulse re-created the same recent videos every run (Needs Profile spike).
+    A combined OR() query with a capped max_records can be filled entirely by
+    copies of one file; another known ID then appears 'missing' and is reimported.
+    Exact one-ID queries never have that false-negative failure mode.
     """
-    cleaned = _unique_drive_ids(candidate_ids)
-    if not cleaned:
-        return set()
     found: set[str] = set()
-    for index in range(0, len(cleaned), _A2B_EXISTING_LOOKUP_CHUNK):
-        chunk = cleaned[index : index + _A2B_EXISTING_LOOKUP_CHUNK]
-        formula = existing_drive_id_formula(chunk)
-        if not formula:
-            continue
+    for file_id in _unique_drive_ids(candidate_ids):
         rows = client.list_records(
             MEDIA_ASSETS_TABLE,
-            formula=formula,
-            # Allow many duplicate rows per Drive ID while the backlog is cleaned up.
-            max_records=max(100, len(chunk) * 50),
+            formula=existing_drive_id_formula([file_id]),
+            max_records=1,
             fields=["Google Drive File ID"],
         )
-        for row in rows:
-            drive_id = field_str(row, "Google Drive File ID")
-            if drive_id:
-                found.add(drive_id)
+        if any(field_str(row, "Google Drive File ID") == file_id for row in rows):
+            found.add(file_id)
     return found
 
 
@@ -164,12 +154,36 @@ def process_request(
             continue
         if route != "backfill":
             continue
+        # Recheck before any Drive write. A prior page item or concurrent run
+        # may have created this record since the initial route decision.
+        if file_id in existing or file_id in _existing_drive_ids(client, [file_id]):
+            existing.add(file_id)
+            skipped.append(file_id)
+            continue
         meta = drive.get_file(file_id)
         drive.share_anyone_reader(file_id)
-        created = client.create_records(MEDIA_ASSETS_TABLE, [_backfill_fields(meta, batch_id=batch_id)], typecast=True)
-        if created:
-            created_ids.append(created[0]["id"])
-            existing.add(file_id)
+        try:
+            # performUpsert is atomic at Airtable. Even concurrent A2B workers
+            # cannot both insert the same Google Drive File ID.
+            record, was_created = client.upsert_record(
+                MEDIA_ASSETS_TABLE,
+                _backfill_fields(meta, batch_id=batch_id),
+                merge_field="Google Drive File ID",
+                typecast=True,
+            )
+        except Exception:
+            # If the write returned an ambiguous error after succeeding, or an
+            # old duplicate already exists, fail closed rather than POSTing.
+            if file_id in _existing_drive_ids(client, [file_id]):
+                existing.add(file_id)
+                skipped.append(file_id)
+                continue
+            raise
+        existing.add(file_id)
+        if was_created:
+            created_ids.append(record["id"])
+        else:
+            skipped.append(file_id)
 
     preview["moved_oversize_ids"] = moved_oversize
     preview["created_ids"] = created_ids
