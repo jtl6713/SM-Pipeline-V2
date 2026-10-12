@@ -218,6 +218,22 @@ import {
   remotionHealthLooksBusy,
   sortRenderQueueCandidates,
 } from "./render-queue.mjs";
+import {
+  OPS_QUEUE_CONTROLS_KEY,
+  OPS_QUEUE_CONTENT_FIELDS,
+  OPS_QUEUE_OUTPUT_FIELDS,
+  OPS_QUEUE_OUTPUT_FORMULA,
+  OPS_QUEUE_REQUEST_FIELDS,
+  OPS_QUEUE_REQUEST_FORMULA,
+  applyProducePauseToJob,
+  emptyOpsQueueControls,
+  isProducePaused,
+  isRenderPaused,
+  jobIsOpsPaused,
+  normalizeOpsQueueControls,
+  queueLaneForStudioState,
+  summarizeOpsQueueRows,
+} from "./ops-queue.mjs";
 
 import {
   analyticsObservationKey,
@@ -386,7 +402,11 @@ export default {
       const isAdminFbPublicDiagnosticRoute = url.pathname === "/api/admin/fb-public-diagnostic";
       const isAdminRepairControlRoute = url.pathname === "/api/admin/repair/control";
       const isOperationsRoute = url.pathname === "/api/operations";
+      const isOperationsQueueRoute = url.pathname === "/api/operations/queue";
+      const isOperationsQueuePauseRoute = url.pathname === "/api/operations/queue/pause";
+      const isOperationsQueueReorderRoute = url.pathname === "/api/operations/queue/reorder";
       const isOperationsProfileRoute = /^\/api\/operations\/profiles\/rec[A-Za-z0-9]+$/.test(url.pathname);
+      const isIdeaPrepareToReviewRoute = /^\/api\/ideas\/rec[A-Za-z0-9]+\/prepare-to-review$/.test(url.pathname);
       const isProfileSetupRoute = /^\/api\/profiles\/rec[A-Za-z0-9]+\/setup$/.test(url.pathname);
       const isProfilePlatformValidateRoute = /^\/api\/profiles\/rec[A-Za-z0-9]+\/platforms\/(instagram|tiktok|youtube|facebook)\/validate$/.test(url.pathname);
       const isOperationsDailyIdeasRoute = url.pathname === "/api/operations/ideas/run-daily";
@@ -456,6 +476,9 @@ export default {
       const isIdeaDeleteRoute = isIdeaRecordRoute && request.method === "DELETE";
       const isIdeaHoldWrite = (isIdeaHoldRoute || isIdeaRestoreRoute) && request.method === "POST";
       const isIdeaPromoteWrite = isIdeaPromoteRoute && request.method === "POST";
+      const isIdeaPrepareToReviewWrite = isIdeaPrepareToReviewRoute && request.method === "POST";
+      const isOperationsQueuePauseWrite = isOperationsQueuePauseRoute && request.method === "POST";
+      const isOperationsQueueReorderWrite = isOperationsQueueReorderRoute && request.method === "POST";
       const isIdeaWatchPhotosWrite = isIdeaWatchPhotosRoute && request.method === "POST";
       const isIdeaPhotoListeningSessionWrite = isIdeaPhotoListeningSessionRoute && request.method === "POST";
       const isIdeaMatchPhotosWrite = isIdeaMatchPhotosRoute && request.method === "POST";
@@ -522,6 +545,7 @@ export default {
         isIdeaDeleteRoute ||
         isIdeaHoldWrite ||
         isIdeaPromoteWrite ||
+        isIdeaPrepareToReviewWrite ||
         isIdeaWatchPhotosWrite ||
         isIdeaPhotoListeningSessionWrite ||
         isIdeaMatchPhotosWrite ||
@@ -570,6 +594,8 @@ export default {
         isOperationsProfileWrite ||
         isOperationsDailyIdeasWrite ||
         isOperationsAutonomousWrite ||
+        isOperationsQueuePauseWrite ||
+        isOperationsQueueReorderWrite ||
         isOperationsOutputScheduleWrite ||
         isOperationsOutputPublishedWrite ||
         isOperationsOutputPublishKickWrite ||
@@ -626,7 +652,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.551-story-schedule-seed",
+          version: "0.10.552-ops-queue",
           studio_create_vo_matched_stills_v1: true,
           studio_idea_library_typeahead_v1: true,
           studio_idea_library_search_all_hits_v1: true,
@@ -1034,6 +1060,23 @@ export default {
       if (isOperationsRoute) {
         requireAnyPermission(authorization, ["tenant_admin", "publishing_control", "production_configure"]);
         return getStudioOperations(request, env, authorization);
+      }
+
+      if (isOperationsQueueRoute) {
+        requireAnyPermission(authorization, ["tenant_admin", "publishing_control", "production_configure"]);
+        return getStudioOperationsQueue(request, env, authorization);
+      }
+
+      if (isOperationsQueuePauseRoute) {
+        requireAnyPermission(authorization, ["tenant_admin", "publishing_control", "production_configure"]);
+        assertWriteRequest(request, env);
+        return pauseStudioOperationsQueueItem(request, env, authorization);
+      }
+
+      if (isOperationsQueueReorderRoute) {
+        requireAnyPermission(authorization, ["tenant_admin", "publishing_control", "production_configure"]);
+        assertWriteRequest(request, env);
+        return reorderStudioOperationsRenderQueue(request, env, authorization);
       }
 
       if (isOperationsProfileRoute) {
@@ -1567,6 +1610,12 @@ export default {
         } catch {}
         continueParkedProductionAfterPromote(ctx, env, requestId);
         return response;
+      }
+
+      if (isIdeaPrepareToReviewRoute) {
+        assertWriteRequest(request, env);
+        requirePermission(authorization, "ideas_promote");
+        return prepareIdeaToReview(request, env, url, authorization, ctx);
       }
 
       if (isIdeaRecordRoute) {
@@ -11603,6 +11652,9 @@ async function enqueueStudioProductionJob(env, requestId, options = {}) {
   if (!requestId) return null;
   const record = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, requestId);
   const existing = parseStudioProductionJob(record);
+  if (!options.force && (jobIsOpsPaused(existing) || isProducePaused(await readOpsQueueControls(env), requestId))) {
+    return { skipped: "ops_paused", request_id: requestId, job: existing };
+  }
   const step = String(existing?.step || "").trim();
   // Heal: single-master Vibe Cuts used to inherit finished-video:passthrough from the
   // one-video heuristic. Clear that route so produce stamps + T1 cut the source.
@@ -11871,12 +11923,21 @@ async function resumeStaleStudioProductionJobs(env, options = {}) {
   const pulses = [];
   const now = Date.now();
   const staleAfter = Number(options.staleAfterMs || 180000);
+  const queueControls = await readOpsQueueControls(env);
   for (const requestId of ids.slice(0, 16)) {
     try {
       const record = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, requestId);
       const job = parseStudioProductionJob(record);
       const step = String(job?.step || "").trim();
       if (step === "done" || step === "escalated") continue;
+      if (jobIsOpsPaused(job) || isProducePaused(queueControls, requestId)) {
+        pulses.push({
+          key: "STUDIO_PRODUCE",
+          request: requestId,
+          skipped: "ops_paused",
+        });
+        continue;
+      }
 
       const blockError = String(job?.error || "");
       const heal = studioProduceHealState(job);
@@ -13781,7 +13842,30 @@ async function studioStampRenderQueueWaiting(env, rowOrId) {
   });
 }
 
-async function studioLoadRenderQueueCandidates(env, { limit = 80, fields = null } = {}) {
+async function readOpsQueueControls(env) {
+  try {
+    const object = await env.STUDIO_MEDIA?.get?.(OPS_QUEUE_CONTROLS_KEY);
+    if (!object) return emptyOpsQueueControls();
+    const text = await object.text();
+    return normalizeOpsQueueControls(JSON.parse(text));
+  } catch {
+    return emptyOpsQueueControls();
+  }
+}
+
+async function writeOpsQueueControls(env, controls, actor = null) {
+  const next = normalizeOpsQueueControls({
+    ...controls,
+    updated_at: new Date().toISOString(),
+    updated_by: actor || null,
+  });
+  await env.STUDIO_MEDIA.put(OPS_QUEUE_CONTROLS_KEY, JSON.stringify(next), {
+    httpMetadata: { contentType: "application/json" },
+  });
+  return next;
+}
+
+async function studioLoadRenderQueueCandidates(env, { limit = 80, fields = null, controls = null } = {}) {
   const fieldList = Array.isArray(fields) ? fields.filter(Boolean) : [];
   const rows = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
     limit,
@@ -13790,13 +13874,17 @@ async function studioLoadRenderQueueCandidates(env, { limit = 80, fields = null 
     filterFormula: STUDIO_RENDER_QUEUE_CANDIDATE_FORMULA,
     ...(fieldList.length ? { fields: fieldList } : {}),
   }).catch(() => []);
-  return sortRenderQueueCandidates(rows, f);
+  return sortRenderQueueCandidates(rows, f, controls);
 }
 
 async function studioAdmitRenderQueue(env, options = {}) {
-  const candidates = await studioLoadRenderQueueCandidates(env, { limit: Number(options.limit || 80) });
+  const controls = options.controls || await readOpsQueueControls(env);
+  const candidates = await studioLoadRenderQueueCandidates(env, {
+    limit: Number(options.limit || 80),
+    controls,
+  });
   if (!candidates.length) {
-    return { admitted: false, reason: "no_candidates", waiting: 0, started: null };
+    return { admitted: false, reason: "no_candidates", waiting: 0, started: null, controls };
   }
   const activeHolds = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
     limit: 16,
@@ -13807,6 +13895,7 @@ async function studioAdmitRenderQueue(env, options = {}) {
   // to copy Final_File_URL, they do not each claim a render slot.
   const { byId, total, admitCandidates } = assignRenderQueuePositions(candidates, f, {
     activeHolds,
+    controls,
   });
   let stampedWaiting = 0;
   for (const row of candidates) {
@@ -13824,6 +13913,7 @@ async function studioAdmitRenderQueue(env, options = {}) {
       busy,
       queue: [...byId.values()],
       shared_siblings_waiting: Math.max(0, candidates.length - total),
+      controls,
     };
   }
   const head = admitCandidates[0];
@@ -13836,6 +13926,7 @@ async function studioAdmitRenderQueue(env, options = {}) {
       busy,
       queue: [...byId.values()],
       shared_siblings_waiting: Math.max(0, candidates.length - total),
+      controls,
     };
   }
   await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, head.id, {
@@ -25349,9 +25440,9 @@ async function listOutputs(request, env, url, authorization, ctx = null) {
   // Return the Pipeline table immediately. Per-row heals / produce enqueue run in
   // waitUntil so a heal storm cannot leave Studio stuck on Loading outputs…
   if (!reviewOnly) schedulePipelineListHeal(ctx, env, records);
-  const [jobs, queueCandidates, activeHolds, labels] = await Promise.all([
+  const [jobs, queueControls, activeHolds, labels] = await Promise.all([
     loadStudioProductionJobsForOutputs(env, records),
-    studioLoadRenderQueueCandidates(env, { limit: 100, fields: OUTPUT_LIST_FIELDS }).catch(() => []),
+    readOpsQueueControls(env),
     listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
       limit: 16,
       fields: OUTPUT_LIST_FIELDS,
@@ -25359,10 +25450,15 @@ async function listOutputs(request, env, url, authorization, ctx = null) {
     }).catch(() => []),
     reviewOnly ? Promise.resolve(new Map()) : pipelineContentLabelsById(env, profile, studioPipelineContentIdsFromOutputs(records)),
   ]);
+  const queueCandidates = await studioLoadRenderQueueCandidates(env, {
+    limit: 100,
+    fields: OUTPUT_LIST_FIELDS,
+    controls: queueControls,
+  }).catch(() => []);
   const { byId: renderQueueById, total: renderQueueTotal } = assignRenderQueuePositions(
     queueCandidates,
     f,
-    { activeHolds },
+    { activeHolds, controls: queueControls },
   );
   return {
     records: records.map((record) => mapOutput(
@@ -41289,6 +41385,470 @@ async function listOversizedMedia(env) {
   return [...byDriveId.values()].sort((a, b) => (Number(b.file_size_mb) || 0) - (Number(a.file_size_mb) || 0));
 }
 
+function firstOpsLinkedId(value) {
+  return firstLinkedRecordId(value) || studioFirstLinkedId(value) || "";
+}
+
+function mapOpsQueueProfileName(profileMap, linked) {
+  const id = firstOpsLinkedId(linked);
+  if (!id) return { profile_id: null, profile_name: "" };
+  const profile = profileMap.get(id);
+  return {
+    profile_id: id,
+    profile_name: profile ? String(f(profile, "Profile_Name") || "") : "",
+  };
+}
+
+async function getStudioOperationsQueue(request, env, authorization) {
+  const controls = await readOpsQueueControls(env);
+  const [profiles, outputs, requests, activeHolds] = await Promise.all([
+    listRecords(env, STUDIO_IDEA_PROFILE_TABLE_ID, { limit: 50 }).catch(() => []),
+    listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
+      limit: 160,
+      sortField: "Output_ID",
+      sortDirection: "desc",
+      fields: OPS_QUEUE_OUTPUT_FIELDS,
+      filterFormula: OPS_QUEUE_OUTPUT_FORMULA,
+    }).catch(() => []),
+    listRecords(env, PRODUCTION_REQUEST_TABLE, {
+      limit: 60,
+      sortField: "Updated_At",
+      sortDirection: "desc",
+      fields: OPS_QUEUE_REQUEST_FIELDS,
+      filterFormula: OPS_QUEUE_REQUEST_FORMULA,
+    }).catch(() => []),
+    listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
+      limit: 16,
+      fields: OPS_QUEUE_OUTPUT_FIELDS,
+      filterFormula: STUDIO_RENDER_QUEUE_ACTIVE_FORMULA,
+    }).catch(() => []),
+  ]);
+  const profileMap = new Map((profiles || []).map((row) => [row.id, row]));
+  const queueCandidates = sortRenderQueueCandidates(
+    (outputs || []).filter((row) => isRenderQueueCandidateStatus(f(row, "Render_Status"))),
+    f,
+    controls,
+  );
+  const { byId: renderQueueById, total: renderQueueTotal } = assignRenderQueuePositions(
+    queueCandidates,
+    f,
+    { activeHolds, controls },
+  );
+
+  const contentIds = [...new Set([
+    ...(outputs || []).map((row) => firstOpsLinkedId(f(row, "Content_Item"))),
+    ...(requests || []).map((row) => firstOpsLinkedId(f(row, "Promoted_Content_Item"))),
+  ].filter((id) => /^rec[A-Za-z0-9]+$/.test(id)))];
+  const contentMap = new Map();
+  if (contentIds.length && env.AIRTABLE_CONTENT_TABLE_ID) {
+    const formula = contentIds.length === 1
+      ? `RECORD_ID()="${contentIds[0]}"`
+      : `OR(${contentIds.map((id) => `RECORD_ID()="${id}"`).join(",")})`;
+    const contentRows = await listRecords(env, env.AIRTABLE_CONTENT_TABLE_ID, {
+      limit: Math.min(160, contentIds.length),
+      fields: OPS_QUEUE_CONTENT_FIELDS,
+      filterFormula: formula,
+    }).catch(() => []);
+    for (const row of contentRows || []) contentMap.set(row.id, row);
+  }
+
+  const requestByContent = new Map();
+  const requestRows = [];
+  const ideaIds = [...new Set((requests || [])
+    .map((row) => firstOpsLinkedId(f(row, "Idea_Candidate")))
+    .filter((id) => /^rec[A-Za-z0-9]+$/.test(id)))];
+  const ideaProfileById = new Map();
+  if (ideaIds.length && env.AIRTABLE_IDEA_TABLE_ID) {
+    const ideaFormula = ideaIds.length === 1
+      ? `RECORD_ID()="${ideaIds[0]}"`
+      : `OR(${ideaIds.map((id) => `RECORD_ID()="${id}"`).join(",")})`;
+    const ideas = await listRecords(env, env.AIRTABLE_IDEA_TABLE_ID, {
+      limit: Math.min(60, ideaIds.length),
+      fields: ["Content_Profile", "Candidate_Title"],
+      filterFormula: ideaFormula,
+    }).catch(() => []);
+    for (const idea of ideas || []) {
+      ideaProfileById.set(idea.id, firstOpsLinkedId(f(idea, "Content_Profile")));
+    }
+  }
+  for (const record of requests || []) {
+    const job = parseStudioProductionJob(record);
+    const producePaused = jobIsOpsPaused(job) || isProducePaused(controls, record.id);
+    const stuck = classifyProduceJob({
+      ...(job || {}),
+      request_id: record.id,
+      record_id: record.id,
+    });
+    const contentId = firstOpsLinkedId(f(record, "Promoted_Content_Item"));
+    const content = contentId ? contentMap.get(contentId) : null;
+    const ideaId = firstOpsLinkedId(f(record, "Idea_Candidate"));
+    const profile = mapOpsQueueProfileName(
+      profileMap,
+      (content ? f(content, "Content_Profile") : null) || ideaProfileById.get(ideaId) || null,
+    );
+    const step = String(job?.step || "").trim();
+    const status = String(f(record, "Request_Status") || "").trim();
+    const studioState = producePaused
+      ? "Paused"
+      : (stuck ? (stuck.kind || "Stuck") : (step && step !== "done" ? `Producing · ${step}` : status || "Draft"));
+    const row = {
+      kind: "request",
+      id: record.id,
+      production_request_id: record.id,
+      production_request_number: f(record, "Production_Request_ID") || null,
+      content_item_id: contentId || null,
+      content_id: content ? f(content, "Content_ID") : null,
+      title: content
+        ? (f(content, "Working_Title") || f(content, "Content_Title") || "")
+        : (String(f(record, "Master_Content_Type") || "").trim() || "Production request"),
+      ...profile,
+      studio_state: studioState,
+      request_status: status,
+      variant_status: f(record, "Studio_Variant_Status") || null,
+      plan_status: f(record, "Studio_Output_Plan_Status") || null,
+      produce_step: step || null,
+      produce_percent: Number(job?.percent) || null,
+      produce_error: job?.error || stuck?.error || null,
+      stuck_kind: stuck?.kind || null,
+      stuck_class: stuck?.class || null,
+      produce_paused: producePaused,
+      render_paused: false,
+      lane: queueLaneForStudioState(studioState, { producePaused, stuck }),
+      idea_id: firstOpsLinkedId(f(record, "Idea_Candidate")) || null,
+      platforms: Array.isArray(f(record, "Target_Platforms")) ? f(record, "Target_Platforms") : [],
+      updated_at: f(record, "Updated_At") || job?.updated_at || null,
+    };
+    requestRows.push(row);
+    if (contentId) requestByContent.set(contentId, row);
+  }
+
+  const outputRows = (outputs || []).map((record) => {
+    const queueMeta = renderQueueById.get(record.id) || null;
+    const mapped = mapOutput(record, null, queueMeta);
+    const contentId = firstOpsLinkedId(f(record, "Content_Item"));
+    const content = contentId ? contentMap.get(contentId) : null;
+    const parentRequest = contentId ? requestByContent.get(contentId) : null;
+    const renderPaused = isRenderPaused(controls, record.id);
+    const producePaused = Boolean(parentRequest?.produce_paused);
+    const stuck = classifyRenderRow({
+      id: record.id,
+      render_status: f(record, "Render_Status"),
+      remotion_job_id: f(record, "Remotion_Job_ID"),
+      final_file_url: f(record, "Final_File_URL"),
+      output_status: f(record, "Output_Status"),
+      last_modified: f(record, "Last Modified"),
+      render_error: f(record, "Remotion_Error_Message") || f(record, "Final_File_Error_Message"),
+      error: f(record, "Publish_Error_Message"),
+    });
+    const studioState = renderPaused
+      ? "Paused in render queue"
+      : mapped.studio_state;
+    const profile = mapOpsQueueProfileName(
+      profileMap,
+      f(record, "Content_Profile") || (content ? f(content, "Content_Profile") : null),
+    );
+    return {
+      kind: "output",
+      id: record.id,
+      output_id: mapped.output_id,
+      production_request_id: parentRequest?.production_request_id || null,
+      content_item_id: contentId || null,
+      content_id: content ? f(content, "Content_ID") : null,
+      title: mapped.output_title
+        || (content ? (f(content, "Working_Title") || f(content, "Content_Title")) : "")
+        || `Output ${mapped.output_id || ""}`.trim(),
+      ...profile,
+      platform: mapped.platform,
+      studio_output_type: mapped.studio_output_type || mapped.format,
+      studio_state: studioState,
+      output_status: mapped.output_status,
+      render_status: mapped.render_status,
+      review_status: mapped.review_status,
+      publish_status: mapped.publish_status,
+      thumbnail_url: mapped.thumbnail_url || null,
+      final_file_url: mapped.final_file_url || null,
+      render_queue_position: mapped.render_queue_position,
+      render_queue_total: mapped.render_queue_total || renderQueueTotal,
+      render_queue_label: mapped.render_queue_label,
+      produce_step: parentRequest?.produce_step || null,
+      produce_paused: producePaused,
+      render_paused: renderPaused,
+      stuck_kind: stuck?.kind || parentRequest?.stuck_kind || null,
+      stuck_class: stuck?.class || parentRequest?.stuck_class || null,
+      produce_error: stuck?.error || parentRequest?.produce_error || mapped.remotion_error_message || null,
+      lane: queueLaneForStudioState(studioState, {
+        producePaused,
+        renderPaused,
+        stuck: stuck || (parentRequest?.stuck_kind ? { kind: parentRequest.stuck_kind } : null),
+      }),
+      scheduled_at: mapped.scheduled_at || mapped.scheduled_post_date || null,
+      creative_available: outputCreativeAvailable(record),
+      updated_at: f(record, "Last Modified") || null,
+    };
+  });
+
+  // Prefer output rows; keep request-only rows (Draft/Ready before fanout) so Ideas→produce is visible.
+  const contentIdsWithOutputs = new Set(outputRows.map((row) => row.content_item_id).filter(Boolean));
+  const requestOnly = requestRows.filter((row) => {
+    if (!row.content_item_id) return true;
+    return !contentIdsWithOutputs.has(row.content_item_id);
+  });
+  const rows = [...outputRows, ...requestOnly].sort((a, b) => {
+    const laneRank = { stuck: 0, paused: 1, active: 2, review: 3, publish: 4, done: 5 };
+    const laneDelta = (laneRank[a.lane] ?? 9) - (laneRank[b.lane] ?? 9);
+    if (laneDelta) return laneDelta;
+    const aPos = Number(a.render_queue_position) || Number.POSITIVE_INFINITY;
+    const bPos = Number(b.render_queue_position) || Number.POSITIVE_INFINITY;
+    if (aPos !== bPos) return aPos - bPos;
+    const aOut = Number(a.output_id) || 0;
+    const bOut = Number(b.output_id) || 0;
+    if (aOut && bOut && aOut !== bOut) return bOut - aOut;
+    return String(b.updated_at || "").localeCompare(String(a.updated_at || ""));
+  });
+
+  return respond(request, env, {
+    ok: true,
+    page: "operations-queue",
+    summary: summarizeOpsQueueRows(rows),
+    render_queue_total: renderQueueTotal,
+    controls,
+    can_edit_queue: Boolean(
+      authorization?.permissions?.tenant_admin
+      || authorization?.permissions?.publishing_control
+      || authorization?.permissions?.production_configure
+    ),
+    rows,
+  });
+}
+
+async function pauseStudioOperationsQueueItem(request, env, authorization) {
+  let payload;
+  try { payload = await request.json(); } catch { throw new HttpError(400, "Request body must be valid JSON"); }
+  const kind = String(payload?.kind || "").trim();
+  const id = String(payload?.id || "").trim();
+  const paused = Boolean(payload?.paused);
+  const reason = String(payload?.reason || "").trim().slice(0, 240) || null;
+  if (!/^rec[A-Za-z0-9]+$/.test(id)) throw new HttpError(400, "id must be an Airtable record id");
+  if (kind !== "output" && kind !== "request") throw new HttpError(400, "kind must be output or request");
+  const actor = authorization?.user?.email || authorization?.email || null;
+  const controls = await readOpsQueueControls(env);
+  const next = normalizeOpsQueueControls(controls);
+
+  if (kind === "output") {
+    if (paused) {
+      next.render_paused[id] = { paused_at: new Date().toISOString(), paused_by: actor, reason };
+    } else {
+      delete next.render_paused[id];
+    }
+  } else {
+    if (paused) {
+      next.produce_paused[id] = { paused_at: new Date().toISOString(), paused_by: actor, reason };
+    } else {
+      delete next.produce_paused[id];
+    }
+    const record = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, id).catch(() => null);
+    if (record?.id) {
+      const job = parseStudioProductionJob(record) || {
+        schema_version: "studio.production-job.1",
+        job_id: `spj-pause-${id.slice(-6)}`,
+        step: "themes",
+      };
+      const patched = applyProducePauseToJob(job, { paused, pausedBy: actor, reason });
+      await airtableFetch(env, PRODUCTION_REQUEST_TABLE, id, {
+        method: "PATCH",
+        body: JSON.stringify({
+          fields: {
+            Studio_Production_Job_JSON: JSON.stringify(patched),
+            Updated_At: new Date().toISOString(),
+          },
+          typecast: false,
+        }),
+      });
+      if (!paused) {
+        try { await enqueueStudioProductionJob(env, id, { resume: true, force: true }); } catch (error) {
+          console.warn("ops queue unpause resume failed", id, error);
+        }
+      }
+    }
+  }
+
+  const saved = await writeOpsQueueControls(env, next, actor);
+  return respond(request, env, { ok: true, controls: saved, kind, id, paused });
+}
+
+async function reorderStudioOperationsRenderQueue(request, env, authorization) {
+  let payload;
+  try { payload = await request.json(); } catch { throw new HttpError(400, "Request body must be valid JSON"); }
+  const orderedIds = Array.isArray(payload?.ordered_ids) ? payload.ordered_ids : null;
+  const moveId = String(payload?.id || "").trim();
+  const direction = String(payload?.direction || "").trim().toLowerCase();
+  const actor = authorization?.user?.email || authorization?.email || null;
+  const controls = await readOpsQueueControls(env);
+  const next = normalizeOpsQueueControls(controls);
+
+  if (orderedIds) {
+    next.render_priority = [...new Set(orderedIds.map((id) => String(id || "").trim()).filter((id) => /^rec[A-Za-z0-9]+$/.test(id)))];
+  } else if (/^rec[A-Za-z0-9]+$/.test(moveId) && (direction === "up" || direction === "down" || direction === "top")) {
+    const candidates = await studioLoadRenderQueueCandidates(env, { limit: 100, controls: next });
+    const currentOrder = candidates.map((row) => row.id);
+    const priority = next.render_priority.length
+      ? [...next.render_priority.filter((id) => currentOrder.includes(id)), ...currentOrder.filter((id) => !next.render_priority.includes(id))]
+      : currentOrder;
+    const index = priority.indexOf(moveId);
+    if (index < 0) {
+      priority.unshift(moveId);
+    } else if (direction === "top") {
+      priority.splice(index, 1);
+      priority.unshift(moveId);
+    } else if (direction === "up" && index > 0) {
+      [priority[index - 1], priority[index]] = [priority[index], priority[index - 1]];
+    } else if (direction === "down" && index < priority.length - 1) {
+      [priority[index + 1], priority[index]] = [priority[index], priority[index + 1]];
+    }
+    next.render_priority = priority;
+  } else {
+    throw new HttpError(400, "Provide ordered_ids or id + direction (up|down|top)");
+  }
+
+  const saved = await writeOpsQueueControls(env, next, actor);
+  // Recompute positions so the UI can refresh immediately.
+  const candidates = await studioLoadRenderQueueCandidates(env, { limit: 100, controls: saved });
+  const activeHolds = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
+    limit: 16,
+    filterFormula: STUDIO_RENDER_QUEUE_ACTIVE_FORMULA,
+  }).catch(() => []);
+  const { byId, total } = assignRenderQueuePositions(candidates, f, { activeHolds, controls: saved });
+  return respond(request, env, {
+    ok: true,
+    controls: saved,
+    render_queue_total: total,
+    queue: [...byId.entries()].map(([id, meta]) => ({ id, ...meta })),
+  });
+}
+
+function stampPrepareToReviewNotes(existing) {
+  const text = String(existing || "").trim();
+  if (/origin=(prepare-to-review|autonomous|az-finished-video)/i.test(text)) return text || "origin=prepare-to-review";
+  return [text, "origin=prepare-to-review"].filter(Boolean).join("\n").slice(0, 3000);
+}
+
+async function prepareIdeaToReview(request, env, url, authorization, ctx = null) {
+  const match = /^\/api\/ideas\/(rec[A-Za-z0-9]+)\/prepare-to-review$/.exec(url.pathname);
+  if (!match) throw new HttpError(400, "Invalid idea path");
+  const ideaId = match[1];
+  let payload = {};
+  try { payload = await request.json(); } catch { payload = {}; }
+
+  const idea = await airtableFetch(env, env.AIRTABLE_IDEA_TABLE_ID, ideaId);
+  if (!idea?.id) throw new HttpError(404, "Idea was not found");
+  if (String(f(idea, "Candidate_Status") || "").trim() === "On Hold") {
+    throw new HttpError(409, "Restore this idea before preparing it for review");
+  }
+
+  const platforms = canonicalProductionPlatforms(
+    Array.isArray(payload.platforms) && payload.platforms.length
+      ? payload.platforms
+      : (Array.isArray(f(idea, "Production_Target_Platforms")) && f(idea, "Production_Target_Platforms").length
+        ? f(idea, "Production_Target_Platforms")
+        : (Array.isArray(f(idea, "Suggested_Platforms")) ? f(idea, "Suggested_Platforms") : AUTONOMOUS_STANDARD_PLATFORMS))
+  );
+  if (!platforms.length) throw new HttpError(400, "Choose at least one target platform");
+
+  const contentType = String(
+    payload.content_type
+    || f(idea, "Production_Content_Type")
+    || "Vertical Short Video"
+  ).trim();
+  const libraryIds = [
+    ...new Set([
+      ...(Array.isArray(payload.library_asset_ids) ? payload.library_asset_ids : []),
+      ...linkedRecordIds(f(idea, "Studio_Matched_Media_Assets")),
+      ...parseIdeaNotedMediaIds(f(idea, "Production_Config_Notes")),
+    ].map((id) => String(id || "").trim()).filter((id) => /^rec[A-Za-z0-9]+$/.test(id)))
+  ];
+  if (!libraryIds.length) {
+    throw new HttpError(409, "Attach library photos before preparing this idea for review");
+  }
+
+  const existingNotes = String(f(idea, "Production_Config_Notes") || "");
+  const nextIdeaNotes = mergeIdeaProductionNotes(
+    stampPrepareToReviewNotes(existingNotes),
+    parseIdeaMachineNotes(existingNotes).user || undefined,
+    libraryIds,
+  );
+  await airtableFetch(env, env.AIRTABLE_IDEA_TABLE_ID, ideaId, {
+    method: "PATCH",
+    body: JSON.stringify({
+      fields: {
+        Production_Config_Notes: nextIdeaNotes,
+        Production_Target_Platforms: platforms,
+        Production_Content_Type: contentType,
+      },
+      typecast: true,
+    }),
+  }).catch(() => null);
+
+  const input = {
+    content_type: contentType,
+    platforms,
+    include_voiceover: payload.include_voiceover || f(idea, "Production_Include_Voiceover") || "Yes",
+    include_background_music: payload.include_background_music || f(idea, "Production_Include_Background_Music") || "Yes",
+    include_thumbnail: payload.include_thumbnail || f(idea, "Production_Include_Thumbnail") || "Yes",
+    video_duration: payload.video_duration || f(idea, "Production_Video_Duration") || 30,
+    production_notes: stampPrepareToReviewNotes(payload.production_notes || f(idea, "Production_Notes") || ""),
+  };
+  let requestRecord = await createDraftForIdea(env, idea, authorization, input);
+  await attachItem4LibraryAssetIds(env, requestRecord.id, libraryIds, authorization);
+  requestRecord = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, requestRecord.id);
+
+  const requestNotes = String(f(requestRecord, "Production_Notes") || "");
+  if (!/origin=(prepare-to-review|autonomous|az-finished-video)/i.test(requestNotes)) {
+    requestRecord = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, requestRecord.id, {
+      method: "PATCH",
+      body: JSON.stringify({
+        fields: { Production_Notes: stampPrepareToReviewNotes(requestNotes) },
+        typecast: true,
+      }),
+    });
+  }
+
+  // Plan with the operator's platforms before finishAutonomous (which defaults to standard Reel set).
+  if (String(f(requestRecord, "Studio_Output_Plan_Status") || "").trim() !== "Ready") {
+    const planCall = studioInternalJsonRequest(`/api/production-requests/${requestRecord.id}/plan`, {
+      platforms,
+      overrides: autonomousPlanOverrides(contentType),
+      extras: autonomousPlanExtras(),
+      skip_fbs1_guard: true,
+    });
+    await buildItem4OutputPlan(planCall.request, env, planCall.url, authorization);
+    requestRecord = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, requestRecord.id);
+  }
+
+  const finished = await finishAutonomousProductionRequest(
+    env,
+    authorization,
+    ctx,
+    idea,
+    requestRecord,
+    { media_asset_ids: libraryIds, content_type: contentType },
+    { awaitFinish: Boolean(payload.await_finish), scheduled: false }
+  );
+
+  return respond(request, env, {
+    ok: true,
+    message: finished?.waiting
+      ? (finished.waiting_reason === "awaiting_i4"
+        ? "Preparing production — waiting on I4 promotion."
+        : "Preparing frames and production. Watch the Operations Queue.")
+      : "Production started. Outputs will land at Ready for Review.",
+    idea_id: ideaId,
+    production_request_id: finished?.production_request_id || requestRecord.id,
+    waiting: Boolean(finished?.waiting),
+    waiting_reason: finished?.waiting_reason || null,
+    gate: "ready_for_review",
+  });
+}
+
 async function getStudioOperations(request, env, authorization) {
   const chicago = chicagoNowParts();
   const lastDaily = await studioSettingsByName(env, STUDIO_I1_LAST_DAILY_SETTING);
@@ -41754,7 +42314,8 @@ async function finishAutonomousProductionRequest(env, authorization, ctx, idea, 
 async function listAutonomousDraftRequests(env) {
   return listRecords(env, PRODUCTION_REQUEST_TABLE, {
     limit: 1,
-    filterFormula: "AND(OR({Request_Status}='Draft',{Request_Status}='Ready',{Request_Status}='Submitted'),FIND('origin=autonomous',{Production_Notes}&'')>0)",
+    // Autonomous harvest + operator Prepare-to-Review both need Draft/Ready/Submitted resume.
+    filterFormula: "AND(OR({Request_Status}='Draft',{Request_Status}='Ready',{Request_Status}='Submitted'),OR(FIND('origin=autonomous',{Production_Notes}&'')>0,FIND('origin=prepare-to-review',{Production_Notes}&'')>0))",
     sortField: "Created_At",
     sortDirection: "asc",
   });

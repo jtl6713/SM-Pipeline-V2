@@ -191,3 +191,5 @@ Deploy Worker 0.10.489-engagement-ledger. Shrink the engagement ledger so Chicag
 2026-10-12: Redeploy Worker 0.10.551-story-schedule-seed after Cloudflare deployments 504 Gateway Timeout (#649).
 2026-10-12: Redeploy Worker 0.10.551-story-schedule-seed again after #650 merge — prior tip redeploy also hit Cloudflare 504.
 
+2026-10-12: Worker 0.10.552-ops-queue — /api/operations/queue + pause/reorder + ideas prepare-to-review.
+2026-10-12: Redeploy Worker tip after #650 merge onto main (keeps 0.10.552-ops-queue; clears DIRTY append conflict).
