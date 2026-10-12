@@ -267,7 +267,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.658-factory-desk";
+  const BUILD_ID = "item4-0.6.656-pipeline-progress-compact";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -2035,22 +2035,16 @@
   function applyOperationsNavVisibility(session, { failOpen = false } = {}) {
     const navOps = $("navOperations");
     const footerOps = $("footerOperations");
-    const navFactory = $("navFactory");
-    const footerFactory = $("footerFactory");
-    if (!navOps && !footerOps && !navFactory && !footerFactory) return;
+    if (!navOps && !footerOps) return;
     if (session) {
       const showOps = sessionCanOpenOperations(session);
       if (navOps) navOps.hidden = !showOps;
       if (footerOps) footerOps.hidden = !showOps;
-      if (navFactory) navFactory.hidden = !showOps;
-      if (footerFactory) footerFactory.hidden = !showOps;
       return;
     }
     if (failOpen) {
       if (navOps) navOps.hidden = false;
       if (footerOps) footerOps.hidden = false;
-      if (navFactory) navFactory.hidden = false;
-      if (footerFactory) footerFactory.hidden = false;
     }
   }
 
@@ -4183,17 +4177,12 @@
     if ($("ezWizard")) $("ezWizard").hidden = next === "completed";
     if ($("ezPortalBackWizard")) $("ezPortalBackWizard").hidden = next === "completed";
     syncEzVibeCutLaunch();
-    const start = () => {
-      if (next === "vibe") {
-        startEzVibeCutWizard();
-      } else if (next === "wizard") {
-        resetEzWizard({ silent: true });
-        renderEzWizard();
-      }
-    };
-    const pending = window.StudioLazyLoad?.ensure("content");
-    if (pending && typeof pending.then === "function") pending.then(start).catch(start);
-    else start();
+    if (next === "vibe") {
+      startEzVibeCutWizard();
+    } else if (next === "wizard") {
+      resetEzWizard({ silent: true });
+      renderEzWizard();
+    }
   }
 
   function bindEzPortal() {
@@ -24998,14 +24987,6 @@ function timedScriptAssetLabel(asset, index) {
   }
 
   function loadPage(page) {
-    const pending = window.StudioLazyLoad?.ensure(page);
-    if (pending && typeof pending.then === "function") {
-      return pending.then(() => runLoadPage(page)).catch(() => runLoadPage(page));
-    }
-    return runLoadPage(page);
-  }
-
-  function runLoadPage(page) {
     if (page !== "operations") {
       stopIntakePoll();
       stopCompressionPoll();
@@ -25019,12 +25000,10 @@ function timedScriptAssetLabel(asset, index) {
     if (page === "ideas") return loadIdeas();
     if (page === "content") return loadContent();
     if (page === "outputs") return loadOutputs();
-    if (page === "insights") return window.ChicagoShiningInsights?.load?.(false);
     if (page === "engagement") return window.StudioEngagement?.load?.(false);
     if (page === "music") return loadMusic();
     if (page === "library") return loadLibrary();
     if (page === "operations") return loadOperations();
-    if (page === "factory") return window.StudioFactoryDesk?.load?.(false);
     if (page === "support") return;
   }
 

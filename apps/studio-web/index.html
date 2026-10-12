@@ -9,18 +9,18 @@
  <link rel="preconnect" href="https://fonts.googleapis.com">
  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@1,600;1,700&family=Inter:wght@400;500;600;700;800&family=Oswald:wght@500&display=swap">
- <link rel="stylesheet" href="/assets/styles-phase7-0621.css?v=0.6.658-factory-desk">
- <link rel="stylesheet" href="/assets/home-density-0517.css?v=0.6.658-factory-desk">
- <link rel="stylesheet" href="/assets/engagement-1008.css?v=0.6.658-factory-desk">
- <link rel="stylesheet" href="/assets/production-tablet-0622.css?v=0.6.658-factory-desk">
- <link rel="stylesheet" href="/assets/insights-0622.css?v=0.6.658-factory-desk">
- <link rel="stylesheet" href="/assets/clean-enterprise.css?v=0.6.658-factory-desk">
- <link rel="stylesheet" href="/assets/ai-api-footer.css?v=0.6.658-factory-desk">
- <link rel="stylesheet" href="/assets/sticky-footer-scroll.css?v=0.6.658-factory-desk">
- <link rel="stylesheet" href="/assets/topbar-banner-0618.css?v=0.6.658-factory-desk">
- <link rel="stylesheet" href="/assets/new-profile-1009.css?v=0.6.658-factory-desk">
- <link rel="stylesheet" href="/assets/studio-clarity-0599.css?v=0.6.658-factory-desk">
-<link rel="stylesheet" href="/assets/production-progress-0601.css?v=0.6.658-factory-desk">
+ <link rel="stylesheet" href="/assets/styles-phase7-0621.css?v=0.6.656-pipeline-progress-compact">
+ <link rel="stylesheet" href="/assets/home-density-0517.css?v=0.6.656-pipeline-progress-compact">
+ <link rel="stylesheet" href="/assets/engagement-1008.css?v=0.6.656-pipeline-progress-compact">
+ <link rel="stylesheet" href="/assets/production-tablet-0622.css?v=0.6.656-pipeline-progress-compact">
+ <link rel="stylesheet" href="/assets/insights-0622.css?v=0.6.656-pipeline-progress-compact">
+ <link rel="stylesheet" href="/assets/clean-enterprise.css?v=0.6.656-pipeline-progress-compact">
+ <link rel="stylesheet" href="/assets/ai-api-footer.css?v=0.6.656-pipeline-progress-compact">
+ <link rel="stylesheet" href="/assets/sticky-footer-scroll.css?v=0.6.656-pipeline-progress-compact">
+ <link rel="stylesheet" href="/assets/topbar-banner-0618.css?v=0.6.656-pipeline-progress-compact">
+ <link rel="stylesheet" href="/assets/new-profile-1009.css?v=0.6.656-pipeline-progress-compact">
+ <link rel="stylesheet" href="/assets/studio-clarity-0599.css?v=0.6.656-pipeline-progress-compact">
+<link rel="stylesheet" href="/assets/production-progress-0601.css?v=0.6.656-pipeline-progress-compact">
 </head>
 <body>
  <header class="topbar">
@@ -61,7 +61,6 @@
  <button class="nav-item" data-page="library">Asset Manager</button>
  <button class="nav-item" data-page="profiles" id="navNewProfile">New Profile</button>
  <button class="nav-item" data-page="operations" id="navOperations">Operations <span class="ops-nav-badge" id="navOperationsBadge" hidden></span></button>
- <button class="nav-item" data-page="factory" id="navFactory">Factory</button>
  <button class="nav-item nav-item-footer-only" data-page="support">Help</button>
  </nav>
 
@@ -2078,36 +2077,6 @@
  </div>
  </section>
 
-
- <section id="page-factory" class="page">
- <div class="page-heading">
- <div><span class="eyebrow">Parallel desk</span><h1>Factory</h1><p>Four-lane work surface beside Operations. Auto-high and Needs eyes flow from live Studio queues; Needs assets is a max-3 working pile. Approve / Send back / Delete come next.</p></div>
- <button class="secondary-button" id="factoryDeskRefresh" data-refresh="factory">Refresh</button>
- </div>
- <div class="form-message" id="factoryDeskStatus" aria-live="polite">Open Factory to load lanes.</div>
- <div class="ops-queue-summary" id="factoryDeskSummary" aria-live="polite"></div>
- <div class="factory-lanes" id="factoryLanes">
- <section class="panel factory-lane" aria-labelledby="factoryLaneAutoHighHeading">
- <div class="panel-heading"><div><h2 id="factoryLaneAutoHighHeading">Auto-high</h2><p>Active produce and render — keep eyes off unless it stalls.</p></div></div>
- <div class="factory-lane-list" id="factoryLaneAutoHigh"></div>
- </section>
- <section class="panel factory-lane" aria-labelledby="factoryLaneNeedsEyesHeading">
- <div class="panel-heading"><div><h2 id="factoryLaneNeedsEyesHeading">Needs eyes</h2><p>Ready for Review. Human gate before publish for library-stills.</p></div></div>
- <div class="factory-lane-list" id="factoryLaneNeedsEyes"></div>
- </section>
- <section class="panel factory-lane factory-lane-assets" aria-labelledby="factoryLaneNeedsAssetsHeading">
- <div class="panel-heading"><div><h2 id="factoryLaneNeedsAssetsHeading">Needs assets</h2><p id="factoryNeedsAssetsMeta">Working pile max 3. Pin from candidates below.</p></div></div>
- <div class="factory-lane-list" id="factoryLaneNeedsAssets"></div>
- <h3 class="ops-log-heading">Candidates</h3>
- <div class="factory-lane-list factory-candidates" id="factoryNeedsAssetsCandidates"></div>
- </section>
- <section class="panel factory-lane" aria-labelledby="factoryLaneManualHeading">
- <div class="panel-heading"><div><h2 id="factoryLaneManualHeading">Manual</h2><p>Stuck, blocked, or failed — investigate here.</p></div></div>
- <div class="factory-lane-list" id="factoryLaneManual"></div>
- </section>
- </div>
- </section>
-
  <section id="page-support" class="page">
  <div class="page-heading">
  <div><span class="eyebrow">Guides</span><h1>Help</h1><p>Every Studio area has a guide. Open Help from a page to land on that area’s tab.</p></div>
@@ -2133,7 +2102,7 @@
  <h2>Idea through publish on every platform</h2>
  <p>This is the photo-based path ChicagoShining Studio uses today: write or pick an idea, attach stills, let Studio plan the packages, review the renders, then approve. Instagram, Facebook, and YouTube publish publicly. TikTok is saved as a draft.</p>
  <figure class="support-shot">
- <img src="/assets/support/home.jpg?v=0.6.658-factory-desk" alt="Home page with the publishing wizard" width="1440" height="920">
+ <img src="/assets/support/home.jpg?v=0.6.656-pipeline-progress-compact" alt="Home page with the publishing wizard" width="1440" height="920">
  <figcaption>Home is the publishing wizard. Same pipeline underneath.</figcaption>
  </figure>
  <ol class="support-steps">
@@ -2146,7 +2115,7 @@
  <strong>Start in the publishing wizard.</strong>
  <span>On Home, answer where you want to start: an idea, photos you already have, AI images, or a mix. Then pick a platform package. Ideas and Production stay in the sidebar if you already know the path.</span>
  <figure class="support-shot">
- <img src="/assets/support/ideas.jpg?v=0.6.658-factory-desk" alt="Ideas page with start form and candidate table" width="1440" height="920">
+ <img src="/assets/support/ideas.jpg?v=0.6.656-pipeline-progress-compact" alt="Ideas page with start form and candidate table" width="1440" height="920">
  <figcaption>Ideas — select an existing candidate or enter one, then continue. Manage opens the drawer to add photos.</figcaption>
  </figure>
  <button type="button" class="text-button" data-open-page="ideas">Open Ideas</button>
@@ -2159,7 +2128,7 @@
  <strong>Confirm platforms and crops in Production.</strong>
  <span>Two default packages. Vertical video: Instagram Reel, Facebook Reel, TikTok draft, YouTube Short, plus Instagram and Facebook 9:16 Stories and a grid thumbnail. Voiceover and music stay on. Scrollable slides: Instagram carousel, Facebook album, TikTok photos; YouTube is a rendered Slideshow Video (no image post). First slide can introduce a multi-day event; later slides hold the details. Reframe crops, write or AI-fill captions, then Save.</span>
  <figure class="support-shot">
- <img src="/assets/support/production.jpg?v=0.6.658-factory-desk" alt="Production start-with-content screen with photo drop zone" width="1440" height="920">
+ <img src="/assets/support/production.jpg?v=0.6.656-pipeline-progress-compact" alt="Production start-with-content screen with photo drop zone" width="1440" height="920">
  <figcaption>Production — name the piece, choose single or multiple photos, drop stills, then set platforms and audio.</figcaption>
  </figure>
  <button type="button" class="text-button" data-open-page="content">Open Production</button>
@@ -2172,7 +2141,7 @@
  <strong>Watch Pipeline until Ready for Review.</strong>
  <span>Open Platform Pipeline. Rows move through package, asset selection, Remotion render, and review mail. Click a row to open the creative editor: preview, audio mix, per-photo titles, then <em>Save &amp; rerender preview</em> if you change the mix.</span>
  <figure class="support-shot">
- <img src="/assets/support/pipeline.jpg?v=0.6.658-factory-desk" alt="Platform pipeline table with Instagram Facebook TikTok and YouTube outputs" width="1440" height="920">
+ <img src="/assets/support/pipeline.jpg?v=0.6.656-pipeline-progress-compact" alt="Platform pipeline table with Instagram Facebook TikTok and YouTube outputs" width="1440" height="920">
  <figcaption>Pipeline — one row per platform output. Open review when Ready for Review, then Approve for publishing or Approve All.</figcaption>
  </figure>
  <button type="button" class="text-button" data-open-page="outputs">Open Pipeline</button>
@@ -2194,7 +2163,7 @@
  <strong>Confirm in Operations if you need a clock or a manual mark.</strong>
  <span>Ready to schedule lists approved rows that still need a post time. Ready to publish lists due packages. Use <em>mark published</em> only when you posted by hand. Profiles, Drive intake, and render repair live on the same page (admin roles).</span>
  <figure class="support-shot">
- <img src="/assets/support/operations.jpg?v=0.6.658-factory-desk" alt="Operations page with daily ideas, intake, and publish queues" width="1440" height="920">
+ <img src="/assets/support/operations.jpg?v=0.6.656-pipeline-progress-compact" alt="Operations page with daily ideas, intake, and publish queues" width="1440" height="920">
  <figcaption>Operations — schedule a post time, mark a hand-posted URL, or pulse intake and render repair.</figcaption>
  </figure>
  <button type="button" class="text-button" data-open-page="operations">Open Operations</button>
@@ -2205,7 +2174,7 @@
  <article class="support-article" id="helpArticleHome" data-support-article="home" role="tabpanel" aria-labelledby="helpTabHome" hidden>
  <h2>Home</h2>
  <figure class="support-shot">
- <img src="/assets/support/home.jpg?v=0.6.658-factory-desk" alt="Home page with the publishing wizard" width="1440" height="920">
+ <img src="/assets/support/home.jpg?v=0.6.656-pipeline-progress-compact" alt="Home page with the publishing wizard" width="1440" height="920">
  <figcaption>Home does not run the pipeline. It asks a few questions, then opens the right screen.</figcaption>
  </figure>
  <p>Home is the start screen. It does not run the pipeline by itself.</p>
@@ -2219,7 +2188,7 @@
  <article class="support-article" id="helpArticleDashboard" data-support-article="dashboard" role="tabpanel" aria-labelledby="helpTabDashboard" hidden>
  <h2>Dashboard</h2>
  <figure class="support-shot">
- <img src="/assets/support/dashboard.jpg?v=0.6.658-factory-desk" alt="Dashboard metric cards and scheduled content overview" width="1440" height="920">
+ <img src="/assets/support/dashboard.jpg?v=0.6.656-pipeline-progress-compact" alt="Dashboard metric cards and scheduled content overview" width="1440" height="920">
  <figcaption>Dashboard cards stay on the page. Click a card to filter the table underneath.</figcaption>
  </figure>
  <p>Dashboard is the queue overview. Metric cards stay on the page and filter the table under them.</p>
@@ -2234,7 +2203,7 @@
  <article class="support-article" id="helpArticleIdeas" data-support-article="ideas" role="tabpanel" aria-labelledby="helpTabIdeas" hidden>
  <h2>Ideas</h2>
  <figure class="support-shot">
- <img src="/assets/support/ideas.jpg?v=0.6.658-factory-desk" alt="Ideas intake table and start form" width="1440" height="920">
+ <img src="/assets/support/ideas.jpg?v=0.6.656-pipeline-progress-compact" alt="Ideas intake table and start form" width="1440" height="920">
  <figcaption>The table is the candidate queue. Nothing here publishes.</figcaption>
  </figure>
  <p>Ideas holds Idea Candidates before they become Content Items. Nothing here publishes.</p>
@@ -2349,7 +2318,7 @@
  <li><strong>Photo reel length</strong> — Studio writes a line for each selected still, records the voiceover, then holds each slide for that line. The video lasts as long as those slides. There is no separate length target and no extra time after the voiceover.</li>
  </ul>
  <figure class="support-shot">
- <img src="/assets/support/ideas-new.jpg?v=0.6.658-factory-desk" alt="New idea form on the Ideas page" width="1440" height="920">
+ <img src="/assets/support/ideas-new.jpg?v=0.6.656-pipeline-progress-compact" alt="New idea form on the Ideas page" width="1440" height="920">
  <figcaption>+ New idea opens the same form in manual mode so you can type a title without picking from the queue.</figcaption>
  </figure>
  <p>Ready to produce means the idea is in the queue. Promote it here; nothing publishes until Ready for Review → Approve publish.</p>
@@ -2358,7 +2327,7 @@
  <article class="support-article" id="helpArticleProduction" data-support-article="production" role="tabpanel" aria-labelledby="helpTabProduction" hidden>
  <h2>Production</h2>
  <figure class="support-shot">
- <img src="/assets/support/production.jpg?v=0.6.658-factory-desk" alt="Production photo intake and platform checks" width="1440" height="920">
+ <img src="/assets/support/production.jpg?v=0.6.656-pipeline-progress-compact" alt="Production photo intake and platform checks" width="1440" height="920">
  <figcaption>Start with Content lands here. Home → Ideas → Add photos uses the same workspace after photos are attached.</figcaption>
  </figure>
  <p>Production is where photos become a platform plan and a Content Item. The master content type from the idea (Vertical Short Video, Photo Set, Carousel, and the rest) is what chose those default packages — see the graphic on the <button type="button" class="text-button" data-support-doc="ideas">Ideas</button> Help tab.</p>
@@ -2374,7 +2343,7 @@
  <article class="support-article" id="helpArticlePipeline" data-support-article="pipeline" role="tabpanel" aria-labelledby="helpTabPipeline" hidden>
  <h2>Pipeline</h2>
  <figure class="support-shot">
- <img src="/assets/support/pipeline.jpg?v=0.6.658-factory-desk" alt="Platform pipeline with Open review on each output" width="1440" height="920">
+ <img src="/assets/support/pipeline.jpg?v=0.6.656-pipeline-progress-compact" alt="Platform pipeline with Open review on each output" width="1440" height="920">
  <figcaption>Each row is one destination. Approve All uses the same live publish path as a single Approve for publishing.</figcaption>
  </figure>
  <p>Platform Pipeline is execution plus creative review. It refreshes while the page is open.</p>
@@ -2390,7 +2359,7 @@
  <article class="support-article" id="helpArticleMusic" data-support-article="music" role="tabpanel" aria-labelledby="helpTabMusic" hidden>
  <h2>Music Manager</h2>
  <figure class="support-shot">
- <img src="/assets/support/music.jpg?v=0.6.658-factory-desk" alt="Music Manager track cards" width="1440" height="920">
+ <img src="/assets/support/music.jpg?v=0.6.656-pipeline-progress-compact" alt="Music Manager track cards" width="1440" height="920">
  <figcaption>Cleared tracks from the Airtable catalogue. Production still decides Yes/No and the mix in Pipeline review.</figcaption>
  </figure>
  <p>Music Manager is the Airtable background-music catalogue plus tracks you add as MP3 or WAV files.</p>
@@ -2419,7 +2388,7 @@
  <article class="support-article" id="helpArticleOperations" data-support-article="operations" role="tabpanel" aria-labelledby="helpTabOperations" hidden>
  <h2>Operations</h2>
  <figure class="support-shot">
- <img src="/assets/support/operations.jpg?v=0.6.658-factory-desk" alt="Operations control page" width="1440" height="920">
+ <img src="/assets/support/operations.jpg?v=0.6.656-pipeline-progress-compact" alt="Operations control page" width="1440" height="920">
  <figcaption>Admin-only control room. Control and Quality Agent are separate pages. Control tools are text tabs so only one section is open at a time.</figcaption>
  </figure>
  <p>Operations is the control room. The sidebar item is limited to tenant admin, publishing, and production-configure roles. Use <strong>Control</strong> for daily jobs and queues. Use <strong>Quality Agent</strong> for the check catalog, stuck inventory, and activity log. Refresh reloads the current page from the API.</p>
@@ -2549,12 +2518,11 @@
  <button type="button" data-open-page="music">Music</button>
  <button type="button" data-open-page="library">Assets</button>
  <button type="button" data-open-page="operations" id="footerOperations">Operations</button>
- <button type="button" data-open-page="factory" id="footerFactory">Factory</button>
  </nav>
  <div class="studio-footer-meta">
  <span id="aiApiFooter" aria-live="polite"><strong>AI API:</strong> loading…</span>
  <span id="apiStatus" class="topbar-status">Connecting…</span>
- <span id="uiBuildLabel">UI build 0.6.658</span>
+ <span id="uiBuildLabel">UI build 0.6.656</span>
  <span id="workerBuildLabel">Worker …</span> </div>
  </footer>
 
@@ -2725,67 +2693,20 @@
  </div>
  </aside>
 
- <script src="/assets/config-0621.js?v=0.6.658-factory-desk"></script>
- <script src="/assets/ez-plan.js?v=0.6.658-factory-desk"></script>
- <script type="application/json" id="studioLazyManifest">
-{
-  "v": "0.6.658-factory-desk",
-  "core": [
-    "/assets/app-item4-1008.js?v=0.6.658-factory-desk",
-    "/assets/ai-api-footer.js?v=0.6.658-factory-desk",
-    "/assets/sticky-footer-scroll.js?v=0.6.658-factory-desk",
-    "/assets/studio-profile-identity-0599.js?v=0.6.658-factory-desk"
-  ],
-  "afterHome": [
-    "/assets/all-profiles-overview-1007.js?v=0.6.658-factory-desk"
-  ],
-  "groups": {
-    "home": [],
-    "ideas": [
-      "/assets/timed-script.js?v=0.6.658-factory-desk",
-      "/assets/vibe-cut.js?v=0.6.658-factory-desk"
-    ],
-    "content": [
-      "/assets/timed-script.js?v=0.6.658-factory-desk",
-      "/assets/vibe-cut.js?v=0.6.658-factory-desk",
-      "/assets/production-asset-labels.js?v=0.6.658-factory-desk",
-      "/assets/production-progress-0601.js?v=0.6.658-factory-desk"
-    ],
-    "outputs": [
-      "/assets/pipeline-schedule-grid-0622.js?v=0.6.658-factory-desk",
-      "/assets/platform-schedule-calendar-0924.js?v=0.6.658-factory-desk"
-    ],
-    "insights": [
-      "/assets/insights-0622.js?v=0.6.658-factory-desk"
-    ],
-    "engagement": [
-      "/assets/engagement-1008.js?v=0.6.658-factory-desk"
-    ],
-    "profiles": [
-      "/assets/new-profile-1009.js?v=0.6.658-factory-desk"
-    ],
-    "library": [
-      "/assets/production-asset-labels.js?v=0.6.658-factory-desk"
-    ],
-    "factory": [
-      "/assets/factory-desk.js?v=0.6.658-factory-desk"
-    ]
-  },
-  "prefetch": [
-    "/assets/pipeline-schedule-grid-0622.js?v=0.6.658-factory-desk",
-    "/assets/platform-schedule-calendar-0924.js?v=0.6.658-factory-desk",
-    "/assets/timed-script.js?v=0.6.658-factory-desk",
-    "/assets/vibe-cut.js?v=0.6.658-factory-desk",
-    "/assets/new-profile-1009.js?v=0.6.658-factory-desk",
-    "/assets/insights-0622.js?v=0.6.658-factory-desk",
-    "/assets/engagement-1008.js?v=0.6.658-factory-desk",
-    "/assets/production-asset-labels.js?v=0.6.658-factory-desk",
-    "/assets/production-progress-0601.js?v=0.6.658-factory-desk"
-  ]
-}
- </script>
- <script src="/assets/studio-lazy-pages.js?v=0.6.658-factory-desk"></script>
- <script>window.StudioLazyLoad.boot();</script>
+ <script src="/assets/config-0621.js?v=0.6.656-pipeline-progress-compact"></script>
+ <script src="/assets/ez-plan.js?v=0.6.656-pipeline-progress-compact"></script>
+ <script src="/assets/pipeline-schedule-grid-0622.js?v=0.6.656-pipeline-progress-compact"></script>
+ <script src="/assets/platform-schedule-calendar-0924.js?v=0.6.656-pipeline-progress-compact"></script>
+ <script src="/assets/timed-script.js?v=0.6.656-pipeline-progress-compact"></script>
+ <script src="/assets/vibe-cut.js?v=0.6.656-pipeline-progress-compact"></script>
+ <script src="/assets/app-item4-1008.js?v=0.6.656-pipeline-progress-compact"></script>
+ <script src="/assets/new-profile-1009.js?v=0.6.656-pipeline-progress-compact"></script>
+ <script src="/assets/all-profiles-overview-1007.js?v=0.6.656-pipeline-progress-compact"></script>
+ <script src="/assets/insights-0622.js?v=0.6.656-pipeline-progress-compact"></script>
+ <script src="/assets/engagement-1008.js?v=0.6.656-pipeline-progress-compact"></script>
+ <script src="/assets/ai-api-footer.js?v=0.6.656-pipeline-progress-compact"></script>
+ <script src="/assets/sticky-footer-scroll.js?v=0.6.656-pipeline-progress-compact"></script>
+<script src="/assets/production-asset-labels.js?v=0.6.656-pipeline-progress-compact"></script>
 <script>
 (function(){
   const thresholds={facebook:40,instagram:40,tiktok:20,youtube:20};
@@ -2807,6 +2728,8 @@
   }
 })();
 </script>
+ <script src="/assets/studio-profile-identity-0599.js?v=0.6.656-pipeline-progress-compact"></script>
+<script src="/assets/production-progress-0601.js?v=0.6.656-pipeline-progress-compact"></script>
 </body>
 </html>
 
