@@ -267,7 +267,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.638-ops-queue-fields";
+  const BUILD_ID = "item4-0.6.639-ops-timeline-dots";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -23872,12 +23872,83 @@ function timedScriptAssetLabel(asset, index) {
     )).join("");
   }
 
+  const OPS_E2E_STAGE_LABELS = {
+    idea: "Idea",
+    media: "Media Added",
+    platforms: "Platform Suggested",
+    frames: "Frames Prepared",
+    prod_approved: "Approved",
+    render_queue: "Rendering Queue",
+    rendering: "Rendering",
+    review: "Waiting for Approval",
+    pub_approved: "Approved",
+    published: "Published",
+  };
+  const OPS_E2E_DOT_COLORS = [
+    "#d4a017",
+    "#e67e22",
+    "#c0392b",
+    "#d63384",
+    "#8e44ad",
+    "#5b2c6f",
+    "#012559",
+    "#2471a3",
+    "#148f9c",
+    "#1e8449",
+  ];
+  const OPS_E2E_STAGE_ORDER = Object.keys(OPS_E2E_STAGE_LABELS);
+
+  function opsE2eStageColor(index) {
+    return OPS_E2E_DOT_COLORS[index % OPS_E2E_DOT_COLORS.length] || "#9aa6b2";
+  }
+
+  function ensureOpsE2eStageLabels(stages) {
+    const host = $("opsE2eStageLabels");
+    if (!host) return;
+    const defs = Array.isArray(stages) && stages.length
+      ? stages
+      : OPS_E2E_STAGE_ORDER.map((id) => ({ id, label: OPS_E2E_STAGE_LABELS[id] }));
+    const signature = defs.map((stage) => stage.id).join("|");
+    if (host.dataset.signature === signature) return;
+    host.dataset.signature = signature;
+    host.style.gridTemplateColumns = `repeat(${defs.length},minmax(0,1fr))`;
+    host.innerHTML = defs.map((stage, index) => {
+      const color = opsE2eStageColor(index);
+      const label = OPS_E2E_STAGE_LABELS[stage.id] || stage.label || stage.id;
+      return `<span style="--dot:${color}" title="${escapeHtml(label)}">${escapeHtml(label)}</span>`;
+    }).join("");
+  }
+
   function opsE2eTrailHtml(e2e) {
     const stages = Array.isArray(e2e?.stages) ? e2e.stages : [];
-    if (!stages.length) return `<div class="ops-e2e-trail"><span class="ops-e2e-step" data-state="todo">No stages</span></div>`;
-    return `<div class="ops-e2e-trail" title="${escapeHtml(stages.map((stage) => `${stage.label}: ${stage.state}`).join(" · "))}">${stages.map((stage) => (
-      `<span class="ops-e2e-step" data-state="${escapeHtml(stage.state || "todo")}">${escapeHtml(stage.label)}</span>`
-    )).join("")}</div>`;
+    ensureOpsE2eStageLabels(stages);
+    if (!stages.length) {
+      return `<div class="ops-e2e-track" style="--progress:0;--current:-1" aria-label="No stages"></div>`;
+    }
+    const currentIndex = stages.findIndex((stage) => stage.state === "current");
+    let progressIndex = currentIndex;
+    if (progressIndex < 0) {
+      for (let i = stages.length - 1; i >= 0; i -= 1) {
+        if (stageDoneLike(stages[i]?.state)) {
+          progressIndex = i;
+          break;
+        }
+      }
+    }
+    if (progressIndex < 0) progressIndex = 0;
+    const progress = stages.length <= 1 ? 1 : progressIndex / (stages.length - 1);
+    const title = stages.map((stage) => `${stage.label}: ${stage.state}`).join(" · ");
+    const dots = stages.map((stage, index) => {
+      const color = opsE2eStageColor(index);
+      const state = stage.state || "todo";
+      const filled = stageDoneLike(state) || state === "current";
+      return `<span class="ops-e2e-dot" data-state="${escapeHtml(state)}" data-filled="${filled ? "1" : "0"}" style="--dot:${color}" title="${escapeHtml(`${stage.label}: ${state}`)}"></span>`;
+    }).join("");
+    return `<div class="ops-e2e-track" style="--progress:${progress.toFixed(4)};--current:${currentIndex};--ops-e2e-count:${stages.length};grid-template-columns:repeat(${stages.length},minmax(0,1fr))" title="${escapeHtml(title)}" role="img" aria-label="${escapeHtml(title)}">${dots}</div>`;
+  }
+
+  function stageDoneLike(state) {
+    return state === "done" || state === "skipped";
   }
 
   function opsQueueIdentity(row) {
@@ -23997,13 +24068,23 @@ function timedScriptAssetLabel(asset, index) {
     }
     host.innerHTML = rows.map((row) => {
       const pos = row.render_queue_position ? `#${row.render_queue_position}` : (String(row.studio_state || "").toLowerCase().includes("rendering") ? "LIVE" : "—");
+      const queueLabel = row.render_queue_label
+        || (row.render_queue_position ? `${pos} of ${row.render_queue_total || "?"}` : pos);
       const paused = Boolean(row.render_paused);
       const selected = operationsRenderDetailId === row.id ? " is-selected" : "";
       const thumb = row.thumbnail_url
         ? `<img class="ops-queue-thumb" src="${escapeHtml(row.thumbnail_url)}" alt="" loading="lazy">`
         : "";
+      const idBits = [
+        row.content_id != null && String(row.content_id).trim() !== "" ? `Content ${String(row.content_id).trim()}` : "",
+        row.output_id ? `Out ${row.output_id}` : "",
+      ].filter(Boolean).join(" · ");
       return `<div class="ops-queue-line${selected}" data-lane="${escapeHtml(row.lane || "active")}" data-ops-render-id="${escapeHtml(row.id)}" role="button" tabindex="0">
-        <div class="ops-queue-line-main">${thumb}<span class="ops-queue-line-title">${escapeHtml(pos)} · ${value(row.title)}</span><span class="ops-queue-line-meta">${escapeHtml(opsQueueIdentity(row))} · ${escapeHtml(row.platform || "—")} · ${escapeHtml(row.studio_state || row.render_status || "—")}</span></div>
+        <div class="ops-queue-line-main">${thumb}<div class="ops-queue-cell"><span class="ops-queue-line-title">${value(row.title)}</span>${idBits ? `<span class="ops-queue-line-meta">${escapeHtml(idBits)}</span>` : ""}</div></div>
+        <div class="ops-queue-cell">${escapeHtml(row.profile_name || "—")}</div>
+        <div class="ops-queue-cell">${escapeHtml(row.platform || "—")}</div>
+        <div class="ops-queue-cell">${escapeHtml(row.studio_state || row.render_status || "—")}</div>
+        <div class="ops-queue-cell">${escapeHtml(queueLabel)}</div>
         ${opsE2eTrailHtml(row.e2e)}
         <div class="ops-queue-line-actions">
           ${operationsQueueCanEdit ? `<button type="button" class="secondary-button" data-ops-queue-pause="${escapeHtml(row.id)}" data-ops-queue-kind="output" data-ops-queue-paused="${paused ? "0" : "1"}">${paused ? "Resume" : "Pause"}</button>
@@ -24048,13 +24129,22 @@ function timedScriptAssetLabel(asset, index) {
       host.innerHTML = `<div class="ops-queue-empty">Nothing waiting on review or publish.</div>`;
       return;
     }
-    host.innerHTML = rows.map((row) => `<div class="ops-queue-line" data-lane="${escapeHtml(row.lane || "publish")}">
-      <div class="ops-queue-line-main"><span class="ops-queue-line-title">${value(row.title)}</span><span class="ops-queue-line-meta">${escapeHtml(opsQueueIdentity(row))} · ${escapeHtml(row.platform || "—")} · ${escapeHtml(row.studio_state || "—")}</span></div>
-      ${opsE2eTrailHtml(row.e2e)}
-      <div class="ops-queue-line-actions">
-        <button type="button" class="text-button" data-ops-queue-open="${escapeHtml(row.id)}" data-ops-queue-profile="${escapeHtml(row.profile_id || "")}">Open</button>
-      </div>
-    </div>`).join("");
+    host.innerHTML = rows.map((row) => {
+      const idBits = [
+        row.content_id != null && String(row.content_id).trim() !== "" ? `Content ${String(row.content_id).trim()}` : "",
+        row.output_id ? `Out ${row.output_id}` : "",
+      ].filter(Boolean).join(" · ");
+      return `<div class="ops-queue-line" data-lane="${escapeHtml(row.lane || "publish")}">
+        <div class="ops-queue-line-main"><div class="ops-queue-cell"><span class="ops-queue-line-title">${value(row.title)}</span>${idBits ? `<span class="ops-queue-line-meta">${escapeHtml(idBits)}</span>` : ""}</div></div>
+        <div class="ops-queue-cell">${escapeHtml(row.profile_name || "—")}</div>
+        <div class="ops-queue-cell">${escapeHtml(row.platform || "—")}</div>
+        <div class="ops-queue-cell">${escapeHtml(row.studio_state || "—")}</div>
+        ${opsE2eTrailHtml(row.e2e)}
+        <div class="ops-queue-line-actions">
+          <button type="button" class="text-button" data-ops-queue-open="${escapeHtml(row.id)}" data-ops-queue-profile="${escapeHtml(row.profile_id || "")}">Open</button>
+        </div>
+      </div>`;
+    }).join("");
     bindOpsQueueLineActions(host);
   }
 
@@ -24063,21 +24153,25 @@ function timedScriptAssetLabel(asset, index) {
     const count = $("opsE2eQueueCount");
     if (count) count.textContent = String(rows.length);
     if (!host) return;
+    ensureOpsE2eStageLabels(rows[0]?.e2e?.stages);
     if (!rows.length) {
       host.innerHTML = `<div class="ops-queue-empty">No in-flight idea → publish paths.</div>`;
       return;
     }
     host.innerHTML = rows.map((row) => {
-      const meta = [
+      const idBits = [
         row.content_id != null ? `Content ${row.content_id}` : "",
-        row.profile_name || "",
-        row.platforms?.length ? row.platforms.join(", ") : "",
         row.output_count ? `${row.output_count} output${row.output_count === 1 ? "" : "s"}` : "Pre-output",
         row.stuck_kind || "",
       ].filter(Boolean).join(" · ");
+      const platforms = Array.isArray(row.platforms) && row.platforms.length
+        ? row.platforms.join(", ")
+        : (row.platform || "—");
       const openId = row.content_item_id || row.production_request_id || row.id;
       return `<div class="ops-queue-line" data-lane="${row.stuck_kind ? "stuck" : "active"}">
-        <div class="ops-queue-line-main"><span class="ops-queue-line-title">${value(row.title)}</span><span class="ops-queue-line-meta">${escapeHtml(meta)}</span></div>
+        <div class="ops-queue-line-main"><div class="ops-queue-cell"><span class="ops-queue-line-title">${value(row.title)}</span>${idBits ? `<span class="ops-queue-line-meta">${escapeHtml(idBits)}</span>` : ""}</div></div>
+        <div class="ops-queue-cell">${escapeHtml(row.profile_name || "—")}</div>
+        <div class="ops-queue-cell">${escapeHtml(platforms)}</div>
         ${opsE2eTrailHtml(row.e2e)}
         <div class="ops-queue-line-actions">
           <button type="button" class="text-button" data-ops-queue-open="${escapeHtml(openId)}" data-ops-queue-profile="${escapeHtml(row.profile_id || "")}">Open</button>
@@ -24095,6 +24189,7 @@ function timedScriptAssetLabel(asset, index) {
     if (meta) {
       meta.textContent = `Rendering ${rendering.length} · Publishing ${publishing.length} · End to end ${endToEnd.length}`;
     }
+    ensureOpsE2eStageLabels(endToEnd[0]?.e2e?.stages || rendering[0]?.e2e?.stages || publishing[0]?.e2e?.stages);
     renderOpsRenderQueueLines(rendering);
     renderOpsPublishQueueLines(publishing);
     renderOpsE2eQueueLines(endToEnd);
