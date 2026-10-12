@@ -183,3 +183,6 @@ jobs:
 
 # Trigger pipeline-runner deploy for shared-render Pending timing orphan (Content 484 / Output 2448)
 # 2026-10-11 service_version=2026-10-11-shared-render-pending
+
+# Trigger single-photo FB2 published feed attached_media route (Output 2292)
+# 2026-10-12 route=fb2-attached-single-photo

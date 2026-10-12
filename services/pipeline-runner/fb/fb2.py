@@ -144,20 +144,15 @@ def process_request(
         creds = page_settings or load_facebook_page_settings(settings, output, client=client)
         graph = FacebookPhotoClient(**creds)
         place_id = location.page_id if location else None
-        if single:
-            source_url = field_str(photos[0], "Asset_4x5_Public_URL")
-            image, filename = graph.download_image(source_url)
-            status_code, data = graph.publish_single_photo(
-                image=image, filename=filename, caption=message, place=place_id
-            )
-            post_id = str(data.get("post_id") or "").strip()
-            media_id = str(data.get("id") or "").strip()
-        else:
-            status_code, data = graph.publish_attached_media(
-                message=message, photo_ids=ids, place=place_id
-            )
-            post_id = str(data.get("id") or "").strip()
-            media_id = post_id
+        # FB1 already created the unpublished Page photo object. Publish it
+        # through /feed attached_media, including for a single-photo package.
+        # Direct binary /photos publishing caused ambiguous Graph code 1 for
+        # Output 2292; reusing the prepared ID keeps retries deterministic.
+        status_code, data = graph.publish_attached_media(
+            message=message, photo_ids=ids, place=place_id
+        )
+        post_id = str(data.get("id") or "").strip()
+        media_id = post_id
     except FacebookPhotoError as exc:
         if exc.ambiguous or exc.stage == "FB2_AMBIGUOUS":
             return _ambiguous(client, record_id, result, message=str(exc), payload=exc.payload)
