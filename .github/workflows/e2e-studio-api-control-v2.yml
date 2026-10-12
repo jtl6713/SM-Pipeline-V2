@@ -20,7 +20,7 @@ jobs:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
       TARGET_WORKER: chicagoshining-studio-api
-      BRIDGE_WORKER: chicagoshining-e2e-service-bridge-v2
+      BRIDGE_WORKER: chicagoshining-e2e-service-bridge-v2-${{ github.run_id }}
       BRIDGE_RETRY_MAX: "12"
       BRIDGE_RETRY_SLEEP_S: "3"
     steps:
@@ -34,7 +34,7 @@ jobs:
           jq -e '.correlation_id|type=="string" and length>0' "$F" >/dev/null
           jq -e '.requests|type=="array" and length>0 and length<=12' "$F" >/dev/null
           jq -e 'all(.requests[]; (.method=="GET" or .method=="POST" or .method=="PATCH" or .method=="PUT") and (.path|type=="string"))' "$F" >/dev/null
-          jq -e 'all(.requests[]; (.path|test("^/api/ideas(?:\\?.*)?$|^/api/production-requests/(recc9H8SXdUnKEMhQ|recVAxLIuTsHHuDZK)(/|$)|^/api/production-request-outputs/rec(D15PEl3x8LnZ7G|GvE1SHoxXPs5Aa|GZm1Si8GhHPP13|wvxu6GketzHWiF)(/|$)|^/api/outputs/rec[A-Za-z0-9]+/(preview|creative)(/|$)|^/api/operations/outputs/rec[A-Za-z0-9]+/publish-kick$")))' "$F" >/dev/null
+          jq -e 'all(.requests[]; (.path|test("^/api/ideas(?:\\?.*)?$|^/api/production-requests/(recc9H8SXdUnKEMhQ|recVAxLIuTsHHuDZK)(/|$)|^/api/production-request-outputs/rec(D15PEl3x8LnZ7G|GvE1SHoxXPs5Aa|GZm1Si8GhHPP13|wvxu6GketzHWiF)(/|$)|^/api/outputs\\?mode=latest&profile=recgtK8Z7eNADNtVy$|^/api/outputs/rec[A-Za-z0-9]+/(preview|creative)(/|$)|^/api/operations/outputs/rec[A-Za-z0-9]+/publish-kick$")))' "$F" >/dev/null
           curl -fsS "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/$TARGET_WORKER/deployments" -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -o /tmp/before.json
           jq -er '.result.deployments[0].versions|max_by(.percentage)|.version_id' /tmp/before.json >/tmp/active-before.txt
 
@@ -87,7 +87,10 @@ jobs:
           test "$code" -eq 200
           jq -e '.results|type=="array"' /tmp/result.json >/dev/null
           echo E2E_RESULT_SANITIZED
-          jq 'def redact: walk(if type=="object" then with_entries(if (.key|test("token|secret|password|api[_-]?key|authorization|webhook|pat$|completion";"i")) then .value="[REDACTED]" else . end) else . end); {ok,correlation_id,results:[.results[]|{name,path,method,status,ok,body:(.body|redact)}]}' /tmp/result.json | head -c 30000
+          jq '{ok,correlation_id,results:[.results[]|{name,path,method,status,ok,body:{record_count:(.body.records|length),first_outputs:[.body.records[:25][]?|{output_id,output_title,studio_state}],expected_output_ids:([.body.records[]?|select(.output_id >= 2623 and .output_id <= 2640)|.output_id]|sort),fresh:.body.fresh,profile:.body.profile.name}}]}' /tmp/result.json | head -c 10000
+          echo
+          jq -e '.ok==true and ([.results[0].body.records[]?|select(.output_id == 2635)]|length)>0' /tmp/result.json >/dev/null
+          echo "pipeline_live_latest_contains_2635=PASS"
           echo
           jq -e '.ok==true' /tmp/result.json >/dev/null
 
