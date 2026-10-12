@@ -98,7 +98,7 @@ test("Production waits for its current workspace before drawing frame cards", ()
 });
 
 test("UI and cache-busting strings agree for Production media isolation build", () => {
-  assert.ok(app.includes('const BUILD_ID = "item4-0.6.655-ops-render-type"'));
-  assert.ok(index.includes("UI build 0.6.655"));
-  assert.ok(index.includes("app-item4-1008.js?v=0.6.655-ops-render-type"));
+  assert.ok(app.includes('const BUILD_ID = "item4-0.6.656-pipeline-progress-compact"'));
+  assert.ok(index.includes("UI build 0.6.656"));
+  assert.ok(index.includes("app-item4-1008.js?v=0.6.656-pipeline-progress-compact"));
 });

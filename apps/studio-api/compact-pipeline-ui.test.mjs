@@ -11,12 +11,12 @@ const app = fs.readFileSync(path.join(web, "assets/app-item4-1008.js"), "utf8");
 const css = fs.readFileSync(path.join(web, "assets/styles-phase7-0621.css"), "utf8");
 
 test("compact Pipeline build and cache bust stay aligned", () => {
-  assert.match(app, /BUILD_ID = "item4-0.6.655-ops-render-type"/);
-  assert.match(html, /UI build 0.6.655/);
-  assert.match(html, /app-item4-1008\.js\?v=0.6.655-ops-render-type/);
-  assert.match(html, /styles-phase7-0621\.css\?v=0.6.655-ops-render-type/);
+  assert.match(app, /BUILD_ID = "item4-0.6.656-pipeline-progress-compact"/);
+  assert.match(html, /UI build 0.6.656/);
+  assert.match(html, /app-item4-1008\.js\?v=0.6.656-pipeline-progress-compact/);
+  assert.match(html, /styles-phase7-0621\.css\?v=0.6.656-pipeline-progress-compact/);
   assert.match(css, /COMPACT_PIPELINE_V2_20261006/);
-  assert.match(html, /home-density-0517\.css\?v=0.6.655-ops-render-type/);
+  assert.match(html, /home-density-0517\.css\?v=0.6.656-pipeline-progress-compact/);
 });
 
 test("compact Pipeline exposes quick views, search, and advanced filters", () => {
@@ -60,6 +60,19 @@ test("compact Pipeline preserves status detail instead of hiding workflow state"
   assert.match(app, /pipeline-status-detail/);
   assert.match(app, /pipelineProgressCell\(r, groupRecords\)/);
   assert.match(app, /pipeline-compact-table/);
+});
+
+test("Pipeline progress keeps percent beside the bar on one line", () => {
+  assert.match(app, /function pipelineProgressInlineMarkup/);
+  assert.match(app, /pipeline-progress-inline/);
+  assert.match(app, /pipeline-progress-pct/);
+  const progressCell = app.slice(app.indexOf("function pipelineProgressCell"), app.indexOf("function normalizeDisplayText"));
+  assert.match(progressCell, /pipelineProgressInlineMarkup\(/);
+  // Old stacked markup: label div then separate progress div as siblings.
+  assert.doesNotMatch(progressCell, /`<div>\$\{value\(pct\)\}%<\/div><div class="progress">/);
+  assert.match(css, /#outputsList \.pipeline-progress-inline\{/);
+  assert.match(css, /display:\s*flex/);
+  assert.match(css, /\.pipeline-progress-pct/);
 });
 
 test("collapsed calendar and compact table are intentionally dense but responsive", () => {

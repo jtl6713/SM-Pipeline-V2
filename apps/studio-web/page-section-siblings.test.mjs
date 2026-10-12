@@ -8,7 +8,7 @@ const html = fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.ur
 const app = fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), "assets/app-item4-1008.js"), "utf8");
 
 test("Studio page sections are siblings under main (profiles closes before operations)", () => {
-  assert.match(app, /BUILD_ID = "item4-0\.6\.655-ops-render-type"/);
+  assert.match(app, /BUILD_ID = "item4-0\.6\.656-pipeline-progress-compact"/);
   const profiles = html.indexOf('id="page-profiles"');
   const operations = html.indexOf('id="page-operations"');
   const support = html.indexOf('id="page-support"');

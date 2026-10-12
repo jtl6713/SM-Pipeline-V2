@@ -4100,8 +4100,29 @@ body:has(#page-outputs.active) .main{
 .pipeline-status-stack .pipeline-youtube-complete{grid-column:1/-1;margin-top:2px}
 
 #outputsList .pipeline-progress-cell .progress-track,
-#outputsList .pipeline-progress-cell progress{height:7px}
+#outputsList .pipeline-progress-cell progress,
+#outputsList .pipeline-progress-cell .progress{height:7px;margin:0}
 #outputsList .pipeline-progress-cell{font-size:.66rem}
+#outputsList .pipeline-progress-inline{
+  display:flex;
+  align-items:center;
+  gap:6px;
+  min-width:0;
+  line-height:1;
+}
+#outputsList .pipeline-progress-pct{
+  flex:0 0 auto;
+  min-width:2.1rem;
+  font-weight:800;
+  font-variant-numeric:tabular-nums;
+  color:var(--ink);
+  white-space:nowrap;
+}
+#outputsList .pipeline-progress-inline .progress{
+  flex:1 1 auto;
+  min-width:36px;
+  margin:0;
+}
 
 .pipeline-schedule-column{overflow:visible}
 .pipeline-schedule-cell-compact{display:grid;gap:2px;min-width:0}
@@ -4530,9 +4551,13 @@ body:has(#page-outputs.active) .main{
 #outputsList .pipeline-progress-cell{
   font-size:.64rem;
   border-right:1px solid #e7ebef;
+  vertical-align:middle;
 }
 #outputsList .pipeline-progress-cell .progress-track,
-#outputsList .pipeline-progress-cell progress{height:9px}
+#outputsList .pipeline-progress-cell progress,
+#outputsList .pipeline-progress-cell .progress{height:8px;margin:0}
+#outputsList .pipeline-progress-inline{gap:5px}
+#outputsList .pipeline-progress-pct{min-width:1.9rem;font-size:.64rem}
 #outputsList .pipeline-schedule-column{
   border-right:1px solid #e7ebef;
 }
@@ -4656,7 +4681,9 @@ body:has(#page-outputs.active) .main{
 
 #outputsList .pipeline-progress-cell{font-size:.59rem}
 #outputsList .pipeline-progress-cell .progress-track,
-#outputsList .pipeline-progress-cell progress{height:7px}
+#outputsList .pipeline-progress-cell progress,
+#outputsList .pipeline-progress-cell .progress{height:7px;margin:0}
+#outputsList .pipeline-progress-pct{min-width:1.75rem;font-size:.59rem}
 
 #outputsList .pipeline-schedule-cell{margin-top:0;gap:0;max-width:none;line-height:1}
 #outputsList .pipeline-schedule-cell-compact .pipeline-schedule-controls{grid-template-columns:minmax(0,1fr) 24px;gap:3px}

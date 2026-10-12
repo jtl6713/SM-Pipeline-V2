@@ -267,7 +267,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.655-ops-render-type";
+  const BUILD_ID = "item4-0.6.656-pipeline-progress-compact";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -1667,6 +1667,18 @@
     return { done, total, percent: Math.round((done / total) * 100) };
   }
 
+  /** Single-line progress: label/percent left of the bar so Pipeline rows stay short. */
+  function pipelineProgressInlineMarkup(label, percent, title = "") {
+    const n = Number(percent);
+    const clamped = Number.isFinite(n) ? Math.max(0, Math.min(100, n)) : null;
+    const text = String(label || "").trim() || (clamped === null ? "—" : `${clamped}%`);
+    const tip = String(title || text).trim();
+    if (clamped === null) {
+      return `<div class="pipeline-progress-inline" title="${escapeHtml(tip)}"><span class="pipeline-progress-pct">${escapeHtml(text)}</span></div>`;
+    }
+    return `<div class="pipeline-progress-inline" title="${escapeHtml(tip)}"><span class="pipeline-progress-pct">${escapeHtml(text)}</span><div class="progress" aria-hidden="true"><span style="width:${clamped}%"></span></div></div>`;
+  }
+
   function pipelineProgressCell(record, groupRecords) {
     // A native IG carousel / FB photo set / TikTok slideshow is never a video render.
     // Keep the workflow bar but suppress misleading destination render counts (0/3).
@@ -1677,18 +1689,28 @@
         : state === "Failed" ? "Photo error" : state === "Skipped" ? "Skipped" : "Preparing photos";
       const pct = pipelineDisplayPercent(record);
       const n = Number(pct);
-      return pct === null || pct === undefined || !Number.isFinite(n)
-        ? `<div>${escapeHtml(label)}</div>`
-        : `<div>${escapeHtml(label)}</div><div class="progress" title="Overall publishing workflow ${Math.max(0, Math.min(100, n))}% — not video rendering"><span style="width:${Math.max(0, Math.min(100, n))}%"></span></div>`;
+      if (pct === null || pct === undefined || !Number.isFinite(n)) {
+        return pipelineProgressInlineMarkup(label, null, label);
+      }
+      const clamped = Math.max(0, Math.min(100, n));
+      return pipelineProgressInlineMarkup(
+        label,
+        clamped,
+        `${label} · Overall publishing workflow ${clamped}% — not video rendering`,
+      );
     }
     const dest = pipelineDestinationProgress(groupRecords);
     if (dest && pipelineOutputRenderInFlight(record)) {
-      return `<div>${dest.done}/${dest.total}</div><div class="progress" title="${dest.done} of ${dest.total} destinations rendered"><span style="width:${Math.max(0, Math.min(100, dest.percent))}%"></span></div>`;
+      return pipelineProgressInlineMarkup(
+        `${dest.done}/${dest.total}`,
+        dest.percent,
+        `${dest.done} of ${dest.total} destinations rendered`,
+      );
     }
     const pct = pipelineDisplayPercent(record);
-    return pct === null || pct === undefined
-      ? "—"
-      : `<div>${value(pct)}%</div><div class="progress"><span style="width:${Math.max(0, Math.min(100, Number(pct) || 0))}%"></span></div>`;
+    if (pct === null || pct === undefined) return "—";
+    const n = Math.max(0, Math.min(100, Number(pct) || 0));
+    return pipelineProgressInlineMarkup(`${n}%`, n);
   }
 
   function normalizeDisplayText(value) {
