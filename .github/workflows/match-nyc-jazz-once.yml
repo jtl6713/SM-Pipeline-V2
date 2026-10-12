@@ -1,0 +1,79 @@
+name: Match NYC Jazz Idea Photos Once
+on:
+  push:
+    branches: [main]
+    paths:
+      - deploy/one-time-nyc-jazz-photo-match.txt
+permissions:
+  contents: read
+jobs:
+  match:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      BRIDGE: chicagoshining-jazz-match-${{ github.run_id }}
+    steps:
+      - name: Build temporary authenticated Studio service bridge
+        shell: bash
+        run: |
+          set -euo pipefail
+          TOKEN=$(python -c 'import secrets;print(secrets.token_urlsafe(32))')
+          printf '%s' "$TOKEN" >/tmp/match-token.txt
+          cat >/tmp/bridge.js <<EOF
+          export default {
+            async fetch(request, env) {
+              const url = new URL(request.url);
+              if (url.pathname !== "/$TOKEN" || request.method !== "POST") return new Response("Not found", {status:404});
+              const response = await env.STUDIO_API.fetch(new Request("https://studio.chicagoshining.com/api/ideas/rec0Gx0LuBJAtRBIo/match-photos", {
+                method: "POST",
+                headers: {
+                  "Cf-Access-Authenticated-User-Email": "joseph.t.logan@gmail.com",
+                  "Origin": "https://studio.chicagoshining.com",
+                  "Content-Type": "application/json",
+                  "Accept": "application/json"
+                },
+                body: '{"force":true}'
+              }));
+              return new Response(await response.text(), {status: response.status, headers: {"Content-Type":"application/json","Cache-Control":"no-store"}});
+            }
+          };
+          EOF
+          cat >/tmp/bridge-meta.json <<EOF
+          {"main_module":"worker.js","compatibility_date":"2026-08-02","bindings":[{"type":"service","name":"STUDIO_API","service":"chicagoshining-studio-api"}]}
+          EOF
+          node --check /tmp/bridge.js
+          ROOT="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID"
+          AUTH="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
+          curl -fsS -X PUT "$ROOT/workers/scripts/$BRIDGE/content" -H "$AUTH" -F 'metadata=@/tmp/bridge-meta.json;type=application/json' -F 'worker.js=@/tmp/bridge.js;type=application/javascript+module;filename=worker.js' -o /tmp/bridge-upload.json
+          jq -e '.success == true' /tmp/bridge-upload.json >/dev/null
+          curl -fsS -X POST "$ROOT/workers/scripts/$BRIDGE/subdomain" -H "$AUTH" -H 'Content-Type: application/json' --data '{"enabled":true,"previews_enabled":false}' -o /tmp/bridge-enable.json
+          jq -e '.success == true' /tmp/bridge-enable.json >/dev/null
+      - name: Run Find Images Now and verify attached assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID"
+          curl -fsS "$ROOT/workers/subdomain" -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -o /tmp/subdomain.json
+          SUB=$(jq -er '.result.subdomain' /tmp/subdomain.json)
+          TOKEN=$(cat /tmp/match-token.txt)
+          URL="https://$BRIDGE.$SUB.workers.dev/$TOKEN"
+          for i in 1 2 3; do
+            code=$(curl -sS --max-time 120 -X POST -o /tmp/match-result.json -w '%{http_code}' "$URL" || true)
+            echo "match_http=$code attempt=$i"
+            jq -c '{ok,action:.photo_wait.action,reason:.photo_wait.reason,high_count:.photo_wait.high_count,matched_count:(.record.matched_media_asset_links // [] | length),status:.record.photo_wait_status,error}' /tmp/match-result.json || true
+            if [[ "$code" == "200" ]] && jq -e '.ok == true and .record.photo_wait_status == "Ready" and (.record.matched_media_asset_links | length) >= 1' /tmp/match-result.json >/dev/null; then
+              echo "nyc_jazz_photo_match=PASS"
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "nyc_jazz_photo_match=FAIL"
+          exit 1
+      - name: Remove temporary service bridge
+        if: always()
+        shell: bash
+        run: |
+          ROOT="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID"
+          curl -sS -X DELETE "$ROOT/workers/scripts/$BRIDGE" -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" >/dev/null || true
