@@ -1341,10 +1341,16 @@ input, select, textarea, button {
 .ops-desk-chip[data-tone="ok"]{border-color:#b7d8d3;color:var(--teal-dark)}
 .ops-queue-summary{display:flex;flex-wrap:wrap;gap:8px;padding:0 20px 12px}
 .ops-queue-summary .ops-desk-chip{cursor:default}
-.ops-multi-queues{padding:0 12px 20px;display:flex;flex-direction:column;gap:16px;max-height:min(78vh,900px);overflow:auto}
-/* flex-shrink:0 — overflow:hidden + default shrink crushed Rendering Queue to a 1px bar when Publishing had 160+ rows. */
-.ops-queue-block{border:1px solid var(--line);border-radius:10px;background:#fff;overflow:hidden;flex-shrink:0}
-.ops-queue-block-head{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 14px;background:#f4f7f9;border-bottom:1px solid var(--line)}
+.ops-multi-queues{padding:0 12px 20px;display:flex;flex-direction:column;gap:16px;max-height:min(78vh,900px);overflow:auto;align-items:stretch}
+/*
+ * Rendering rows were clipped under the section header while the badge still
+ * showed count>0. Cause: flex column + max-height parent + overflow:hidden on
+ * .ops-queue-block — used height collapsed to the head even after flex-shrink:0
+ * when Publishing had 160+ rows. Keep blocks content-sized; scroll long lanes
+ * inside .ops-queue-lines instead of clipping the whole section.
+ */
+.ops-queue-block{border:1px solid var(--line);border-radius:10px;background:#fff;overflow:visible;flex:0 0 auto;flex-shrink:0;min-height:min-content}
+.ops-queue-block-head{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 14px;background:#f4f7f9;border-bottom:1px solid var(--line);border-radius:9px 9px 0 0}
 .ops-queue-block-head h3{margin:0;font-size:.92rem}
 .ops-queue-count{font-size:.75rem;font-weight:700;color:var(--muted);background:#e8eef3;border-radius:999px;padding:2px 8px}
 .ops-queue-cols{display:grid;gap:10px;align-items:center;padding:0 12px;font-size:.8rem}
@@ -1358,7 +1364,11 @@ input, select, textarea, button {
 .ops-queue-block:has(#opsPublishQueueLines) .ops-queue-line{grid-template-columns:minmax(120px,1.3fr) minmax(70px,.7fr) minmax(60px,.6fr) minmax(90px,.9fr) minmax(0,2.4fr) 4.5rem}
 .ops-queue-cols-e2e,
 .ops-queue-block:has(#opsE2eQueueLines) .ops-queue-line{grid-template-columns:minmax(120px,1.3fr) minmax(70px,.7fr) minmax(70px,.7fr) minmax(0,2.6fr) 4.5rem}
-.ops-queue-lines{display:flex;flex-direction:column}
+.ops-queue-lines{display:flex;flex-direction:column;min-height:min-content}
+/* Rendering stays fully open (few Remotion rows). Cap Publishing/E2E scroll. */
+.ops-queue-block:has(#opsRenderQueueLines) .ops-queue-lines{overflow:visible;max-height:none}
+.ops-queue-block:has(#opsPublishQueueLines) .ops-queue-lines,
+.ops-queue-block:has(#opsE2eQueueLines) .ops-queue-lines{max-height:min(48vh,520px);overflow:auto}
 .ops-queue-line{display:grid;gap:8px;align-items:center;min-height:26px;padding:2px 12px;border-bottom:1px solid #edf1f4;font-size:.78rem;line-height:1.25}
 .ops-queue-line:last-child{border-bottom:0}
 .ops-queue-line[data-lane="stuck"]{background:#fdf6f6}
