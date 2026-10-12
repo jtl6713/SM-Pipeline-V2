@@ -1355,10 +1355,14 @@ input, select, textarea, button {
 .ops-queue-count{font-size:.75rem;font-weight:700;color:var(--muted);background:#e8eef3;border-radius:999px;padding:2px 8px}
 .ops-queue-cols{display:grid;gap:10px;align-items:center;padding:0 12px;font-size:.8rem}
 .ops-queue-cols-head{min-height:34px;padding-top:8px;padding-bottom:6px;border-bottom:1px solid var(--line);background:#fafbfc;font-size:.66rem;font-weight:800;letter-spacing:.04em;text-transform:uppercase;color:var(--muted)}
-/* Pin Actions to 4.5rem so header/row Timeline columns share the same fr leftover. */
+/*
+ * Rendering Actions need Pause+Front+Open (~10rem). A pinned 4.5rem track let
+ * those buttons overflow left onto the Timeline PUB label/dot. Keep header/row
+ * tracks identical; Publishing/E2E stay tight (Open only).
+ */
 .ops-queue-cols-render,
 .ops-queue-block:has(#opsRenderQueueLines) .ops-queue-cols-head,
-.ops-queue-block:has(#opsRenderQueueLines) .ops-queue-line{grid-template-columns:minmax(120px,1.3fr) minmax(70px,.7fr) minmax(60px,.6fr) minmax(80px,.8fr) minmax(50px,.5fr) minmax(0,2.4fr) 4.5rem}
+.ops-queue-block:has(#opsRenderQueueLines) .ops-queue-line{grid-template-columns:minmax(120px,1.3fr) minmax(70px,.7fr) minmax(60px,.6fr) minmax(80px,.8fr) minmax(50px,.5fr) minmax(0,2.4fr) minmax(10rem,max-content)}
 .ops-queue-cols-publish,
 .ops-queue-block:has(#opsPublishQueueLines) .ops-queue-cols-head,
 .ops-queue-block:has(#opsPublishQueueLines) .ops-queue-line{grid-template-columns:minmax(120px,1.3fr) minmax(70px,.7fr) minmax(60px,.6fr) minmax(90px,.9fr) minmax(0,2.4fr) 4.5rem}

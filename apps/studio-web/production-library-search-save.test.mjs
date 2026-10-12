@@ -9,8 +9,8 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 test("Production library picker uses flat operator search like Ideas", async () => {
   const app = await readFile(path.join(here, "assets/app-item4-1008.js"), "utf8");
   const html = await readFile(path.join(here, "index.html"), "utf8");
-  assert.match(app, /BUILD_ID = "item4-0.6.648-ops-render-rows"/);
-  assert.match(html, /UI build 0\.6\.648/);
+  assert.match(app, /BUILD_ID = "item4-0.6.650-ops-actions-pub"/);
+  assert.match(html, /UI build 0\.6\.650/);
   const start = app.indexOf("function renderItem4LibraryPicker");
   const fn = app.slice(start, start + 1600);
   assert.match(fn, /const operatorSearch = Boolean\(searchValue\)/);
