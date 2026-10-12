@@ -236,3 +236,4 @@ UI 0.6.607 hashtag mismatch warning only; approval no longer blocked.
 2026-10-11: Remove the empty City Setup tab. New Profile remains the city setup path (UI 0.6.617).
 2026-10-11: Pin the Studio header and open every page at the top so the nav stays on screen (UI 0.6.618).
 2026-10-11: Create VO timeline converts existing unapproved silent Photo Set drafts into timed narration and opens Production with scenes; UI 0.6.619-timed-script-handoff.
+2026-10-11: Studio UI 0.6.620-production-unapproved-only. Keep only render/review work in Production; approved and publishing items remain in Pipeline.\n
