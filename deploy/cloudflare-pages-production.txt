@@ -275,3 +275,5 @@ UI 0.6.607 hashtag mismatch warning only; approval no longer blocked.
 2026-10-12: Studio UI 0.6.650-ops-actions-pub — widen Rendering Actions so Pause/Front/Open do not overlap Timeline PUB.
 2026-10-12: Studio Home polls snapshots only (refresh=0, 60s) and Pipeline open-pack uses Studio_Pipeline_Open index (UI 0.6.651-home-snapshot / Worker 0.10.559-open-index).
 2026-10-12: Studio UI 0.6.652-production-media-isolation — immediately clear prior Production Rendering photos on request change; block stale workspace/poll callbacks; verify tests and live custom domain.
+
+2026-10-12: Deploy Studio UI 0.6.653-production-timeline-truth. Correct Production checklist to derive narrated timeline from persisted scene data, not Ready output plan; preserve four independent checklist flags.

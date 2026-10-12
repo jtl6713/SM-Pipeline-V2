@@ -6,7 +6,7 @@
  let last=null;
  function render(state={}){
   const flags=[Boolean(state.timeline),Boolean(state.stills),Boolean(state.crops),Boolean(state.approved)];
-  if(flags[3])flags.fill(true);
+  // Approval cannot imply that a voiceover timeline, stills, or crops exist.
   root.replaceChildren();
   const list=document.createElement('div');list.className='production-progress-list';
   list.setAttribute('role','status');list.setAttribute('aria-label','Production preparation progress');
