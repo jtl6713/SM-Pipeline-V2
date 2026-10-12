@@ -273,3 +273,4 @@ UI 0.6.607 hashtag mismatch warning only; approval no longer blocked.
 2026-10-12: Redeploy Studio Pages UI 0.6.648-ops-render-rows — custom-domain verify retry after cache-purge lag.
 2026-10-12: Studio UI 0.6.649-render-filter-terminal — exclude published outputs with stale render status from Rendering; Venice Beach 825/826 regression; Pages gated by tests.
 2026-10-12: Studio UI 0.6.650-ops-actions-pub — widen Rendering Actions so Pause/Front/Open do not overlap Timeline PUB.
+2026-10-12: Studio Home polls snapshots only (refresh=0, 60s) and Pipeline open-pack uses Studio_Pipeline_Open index (UI 0.6.651-home-snapshot / Worker 0.10.559-open-index).

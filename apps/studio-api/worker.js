@@ -658,7 +658,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.558-list-read-snapshot",
+          version: "0.10.559-open-index",
           studio_create_vo_matched_stills_v1: true,
           studio_idea_library_typeahead_v1: true,
           studio_idea_library_search_all_hits_v1: true,
@@ -709,6 +709,7 @@ export default {
           studio_keep_last_list_v1: true,
           studio_pipeline_list_snapshot_v1: true,
           studio_list_read_snapshot_v2: true,
+          studio_pipeline_open_index_v1: true,
           studio_home_overview_soft_429_v1: true,
           studio_oversized_list_refresh_v1: true,
           studio_library_published_files_v1: true,
@@ -4122,6 +4123,7 @@ async function listIdeas(request, env, url, authorization, ctx = null) {
     snapshotKey,
     profile,
     ttlMs: STUDIO_READ_SNAPSHOT_FRESH_MS,
+    allowRefresh: url.searchParams.get("refresh") !== "0",
     builder: () => buildIdeasListPayload(env, profile, limit),
   });
 }
@@ -4341,20 +4343,22 @@ function contentProfileFilterFormula(profile) {
 // TikTok Manual Fallback (auth-signature 401 park) must stay open — FIND("Manual Action")
 // does not match "Manual Fallback", which is why CI 143 / Output 847 vanished.
 const STUDIO_PIPELINE_OPEN_OUTPUT_LIMIT = 1000;
+const STUDIO_PIPELINE_OPEN_FIELD_FORMULA = "{Studio_Pipeline_Open}=1";
+const STUDIO_PIPELINE_OPEN_LEGACY_FORMULA = 'AND({Test_Run_ID}=BLANK(),{Output_Status}!="Skipped",OR('
+  + '{Published_At}=BLANK(),'
+  + '{Output_Status}!="Published",'
+  + '{Publish_Status}!="Published",'
+  + '{Publish_Status}="Failed",'
+  + '{Manual_Fallback_Required}=1,'
+  + 'FIND("Manual Action",{TikTok_Draft_Status}&""),'
+  + 'FIND("Manual Fallback",{TikTok_Draft_Status}&""),'
+  + 'FIND("Draft Delivered",{TikTok_Draft_Status}&""),'
+  + '{TikTok_Draft_Status}="Ready for Delivery",'
+  + '{TikTok_Draft_Status}="Retry Pending"'
+  + '))';
 
-function studioPipelineOpenOutputFormula(profile) {
-  const open = 'AND({Test_Run_ID}=BLANK(),{Output_Status}!="Skipped",OR('
-    + '{Published_At}=BLANK(),'
-    + '{Output_Status}!="Published",'
-    + '{Publish_Status}!="Published",'
-    + '{Publish_Status}="Failed",'
-    + '{Manual_Fallback_Required}=1,'
-    + 'FIND("Manual Action",{TikTok_Draft_Status}&""),'
-    + 'FIND("Manual Fallback",{TikTok_Draft_Status}&""),'
-    + 'FIND("Draft Delivered",{TikTok_Draft_Status}&""),'
-    + '{TikTok_Draft_Status}="Ready for Delivery",'
-    + '{TikTok_Draft_Status}="Retry Pending"'
-    + '))';
+function studioPipelineOpenOutputFormula(profile, { legacy = false } = {}) {
+  const open = legacy ? STUDIO_PIPELINE_OPEN_LEGACY_FORMULA : STUDIO_PIPELINE_OPEN_FIELD_FORMULA;
   const profileFormula = contentProfileFilterFormula(profile);
   return profileFormula ? `AND(${profileFormula},${open})` : open;
 }
@@ -25347,11 +25351,11 @@ function scheduleMappedListRefresh(ctx, env, memoryKey, snapshotKey, ttlMs, buil
   return pending;
 }
 
-function respondStudioMappedList(request, env, ctx, { memoryKey, snapshotKey, profile, ttlMs, builder }) {
+function respondStudioMappedList(request, env, ctx, { memoryKey, snapshotKey, profile, ttlMs, builder, allowRefresh = true }) {
   const freshMs = Math.max(1000, Number(ttlMs) || STUDIO_READ_SNAPSHOT_FRESH_MS);
   return readMappedListSnapshot(env, memoryKey, snapshotKey).then((remembered) => {
     const fresh = studioMappedListSnapshotFresh(remembered, freshMs);
-    if (!fresh) scheduleMappedListRefresh(ctx, env, memoryKey, snapshotKey, freshMs, builder);
+    if (allowRefresh && !fresh) scheduleMappedListRefresh(ctx, env, memoryKey, snapshotKey, freshMs, builder);
     return respond(request, env, {
       ok: true,
       snapshot: Boolean(remembered),
@@ -25379,8 +25383,19 @@ async function loadOpenPipelineOutputPack(env, profile) {
       limit: STUDIO_PIPELINE_OPEN_OUTPUT_LIMIT,
       filterFormula: studioPipelineOpenOutputFormula(profile),
     }).catch((error) => {
-      console.warn("pipeline open-output scan failed", error);
-      return [];
+      const missingIndex = /UNKNOWN_FIELD_NAME|Studio_Pipeline_Open/i.test(String(error?.message || error || ""));
+      if (!missingIndex) {
+        console.warn("pipeline open-output scan failed", error);
+        return [];
+      }
+      return listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
+        ...listOpts,
+        limit: STUDIO_PIPELINE_OPEN_OUTPUT_LIMIT,
+        filterFormula: studioPipelineOpenOutputFormula(profile, { legacy: true }),
+      }).catch((legacyError) => {
+        console.warn("pipeline open-output scan failed", legacyError);
+        return [];
+      });
     });
     const openContentIds = studioPipelineContentIdsFromOutputs(open);
     // Pull every sibling on unfinished packages (Published FB/YT next to TikTok draft).
@@ -25598,6 +25613,7 @@ async function listOutputs(request, env, url, authorization, ctx = null) {
     snapshotKey,
     profile,
     ttlMs: PIPELINE_OUTPUT_LIST_CACHE_MS,
+    allowRefresh: url.searchParams.get("refresh") !== "0",
     builder: () => buildPipelineOutputsPayload(env, profile, { limit, reviewOnly, ctx }),
   });
 }

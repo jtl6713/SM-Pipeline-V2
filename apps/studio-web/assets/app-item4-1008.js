@@ -267,13 +267,13 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.650-ops-actions-pub";
+  const BUILD_ID = "item4-0.6.651-home-snapshot";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
   const ITEM4_ACCEPT_MIXED = `${ITEM4_ACCEPT_PHOTOS},${ITEM4_ACCEPT_VIDEOS}`;
-  const DASHBOARD_POLL_MS = 15000;
+  const DASHBOARD_POLL_MS = 60000;
   const DASHBOARD_POLL_MAX_MS = 60000;
   let dashboardPollTimer = null;
   let dashboardPollDelayMs = DASHBOARD_POLL_MS;
@@ -2121,12 +2121,12 @@
       stopDashboardPoll();
       return;
     }
-    // Wall-clock cadence: tick every few seconds even when Airtable is slow.
+    // Wall-clock cadence: tick even when Airtable is slow. Snapshot polls skip rebuilds.
     // Skip overlapping fetches so polls cannot stack and starve the loop.
     dashboardPollTimer = setTimeout(() => {
       dashboardPollTimer = null;
       if (!homePageActive() || document.hidden) return;
-      const tick = dashboardInflight ? Promise.resolve() : loadDashboard(true);
+      const tick = dashboardInflight ? Promise.resolve() : loadDashboard(true, { snapshotOnly: true });
       Promise.resolve(tick).finally(scheduleDashboardPoll);
     }, dashboardPollDelayMs);
     updateDashboardLiveHint();
@@ -2228,7 +2228,7 @@
     )).join("");
   }
 
-  async function loadDashboard(force = false) {
+  async function loadDashboard(force = false, { snapshotOnly = false } = {}) {
     const key = selectedProfileId || "default";
     // Background polls coalesce. Refresh / force always starts a new read.
     if (!force && dashboardInflight && dashboardInflightKey === key) {
@@ -2245,11 +2245,11 @@
         const stamp = Date.now();
         const [outputsSettled, ideasSettled] = await Promise.all([
           // Fail soft fast on home — long retries left cards stuck on stale zeros.
-          api(`/api/outputs?limit=250&_=${stamp}`, { timeoutMs: 12000, retries: 0 }).then(
+          api(`/api/outputs?limit=250${snapshotOnly ? "&refresh=0" : ""}&_=${stamp}`, { timeoutMs: 8000, retries: 0 }).then(
             (value) => ({ ok: true, value }),
             (error) => ({ ok: false, error }),
           ),
-          api(`/api/ideas?limit=100&_=${stamp}`, { timeoutMs: 8000, retries: 0 }).then(
+          api(`/api/ideas?limit=100${snapshotOnly ? "&refresh=0" : ""}&_=${stamp}`, { timeoutMs: 8000, retries: 0 }).then(
             (value) => ({ ok: true, value }),
             (error) => ({ ok: false, error }),
           ),
