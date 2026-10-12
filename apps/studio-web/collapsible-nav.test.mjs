@@ -10,10 +10,10 @@ const html = fs.readFileSync(path.join(here, "index.html"), "utf8");
 const css = fs.readFileSync(path.join(here, "assets/styles-phase7-0621.css"), "utf8");
 
 test("UI 0.6.516 preserves hamburger off-canvas nav on every viewport", () => {
-  assert.match(app, /BUILD_ID = "item4-0.6.616-keep-last-list"/);
-  assert.match(html, /UI build 0\.6\.616/);
-  assert.match(html, /app-item4-1008\.js\?v=0.6.616-keep-last-list/);
-  assert.match(html, /styles-phase7-0621\.css\?v=0.6.616-keep-last-list/);
+  assert.match(app, /BUILD_ID = "item4-0.6.617-remove-city-setup"/);
+  assert.match(html, /UI build 0\.6\.617/);
+  assert.match(html, /app-item4-1008\.js\?v=0.6.617-remove-city-setup/);
+  assert.match(html, /styles-phase7-0621\.css\?v=0.6.617-remove-city-setup/);
   assert.match(html, /id="studioNavToggle"/);
   assert.match(html, /id="studioSidebar"/);
   assert.match(html, /id="studioNavBackdrop"/);
@@ -30,6 +30,9 @@ test("UI 0.6.516 preserves hamburger off-canvas nav on every viewport", () => {
   assert.match(css, /body\.nav-open \.sidebar/);
   assert.match(css, /\.studio-nav-toggle/);
   assert.match(css, /transform:translateX\(-105%\)/);
+  assert.doesNotMatch(html, /City Setup/);
+  assert.doesNotMatch(html, /profile-setup\.js/);
+  assert.doesNotMatch(app, /page === "profile-setup"/);
   // Drawer is not limited to the phone breakpoint.
   assert.match(css, /\.sidebar\{\s*position:fixed/);
 });

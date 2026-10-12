@@ -264,7 +264,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.616-keep-last-list";
+  const BUILD_ID = "item4-0.6.617-remove-city-setup";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -23872,7 +23872,6 @@ function timedScriptAssetLabel(asset, index) {
     if (page === "engagement") return window.StudioEngagement?.load?.(false);
     if (page === "music") return loadMusic();
     if (page === "library") return loadLibrary();
-    if (page === "profile-setup") return window.StudioProfileSetup?.load?.();
     if (page === "operations") return loadOperations();
     if (page === "support") return;
   }
