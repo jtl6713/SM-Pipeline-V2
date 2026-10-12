@@ -5,18 +5,19 @@ alwaysApply: true
 
 # Agent ships; Joseph does not carry git burden
 
-When the agent finishes a task that changes the repo, **commit, push, and land on `main`** in the same piece of work. Do not leave uncommitted fixes or ask Joseph to commit unless a push is blocked by credentials or policy.
+When the agent finishes a task that changes the repo, **commit, push, and land on `main`** in the same piece of work. Do not leave uncommitted fixes or ask Joseph to commit or merge unless credentials or policy block the ship.
 
 ## Always
 
 - Resolve merge conflicts locally (stash/move local-only files if needed, `git pull --rebase` or `--ff-only`, reconcile, test).
 - Keep **one active line of truth: `main`** synced with `origin/main` after ship.
 - For Studio Web / Worker changes, append deploy trigger files and bump BUILD_ID / Worker version per `ship-studio-pages-worker.mdc`.
-- Push to `origin/main` after commit; use a PR only when branch workflow is required, then merge and sync local `main`.
+- Prefer a PR when cloud/branch workflow requires it: open the PR, wait for CI green, **mark ready and merge it yourself** (squash), then sync local `main`. Do not stop at “ready for you to merge.”
+- Push to `origin/main` after commit when direct-to-main is allowed; otherwise merge the PR as above.
 
 ## Never
 
-- Stop with “ready to commit when you want.”
+- Stop with “ready to commit when you want” or “merge when ready.”
 - Leave WIP on `main` unpushed after claiming a fix is done.
 - Force-push `main` without explicit Joseph request.
 
