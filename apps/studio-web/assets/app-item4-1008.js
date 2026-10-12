@@ -10816,6 +10816,7 @@ function timedScriptAssetLabel(asset, index) {
     } catch (error) {
       console.warn("Item 4 master-media status poll deferred", error);
     }
+    if (activeProductionRequest?.id !== requestId || revision !== item4WorkspaceRevision) return;
     item4MasterPollTimer = setTimeout(pollItem4MasterAssets, item4MasterPollDelayMs(item4Workspace));
   }
 
