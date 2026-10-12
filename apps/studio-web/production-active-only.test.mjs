@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs";
 import vm from "node:vm";
 
 const source = readFileSync(new URL("./assets/app-item4-1008.js", import.meta.url), "utf8");
-const match = source.match(/  function productionContentNeedsWork\\(record\\) \\{[\\s\\S]*?\\n  \\}/);
+const match = source.match(/  function productionContentNeedsWork\(record\) \{[\s\S]*?\n  \}/);
 assert.ok(match, "Production filtering helper exists");
 const needsWork = vm.runInNewContext("(" + match[0].trim() + ")");
 

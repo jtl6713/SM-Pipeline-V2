@@ -15002,7 +15002,7 @@ function timedScriptAssetLabel(asset, index) {
       return Object.entries(counts).some(([state, count]) =>
         Number(count || 0) > 0 && (
           beforeApproval.has(String(state).trim().toLowerCase())
-          || /^waiting in render queue\\b/i.test(String(state))
+          || /^waiting in render queue\b/i.test(String(state))
         )
       );
     }
