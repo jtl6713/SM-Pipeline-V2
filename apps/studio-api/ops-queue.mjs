@@ -291,6 +291,55 @@ export const OPS_E2E_STAGE_DEFS = [
   { id: "published", label: "Published" },
 ];
 
+/**
+ * Lifecycle phases grouped from e2e stage keys (UI labels IDEA/MEDIA/PLAT/FRAME…).
+ * idea: idea|media|platforms|frames
+ * production: prod_approved|render_queue|rendering
+ * publishing: review|pub_approved|published
+ */
+export const OPS_E2E_PHASE_BY_STAGE = Object.freeze({
+  idea: "idea",
+  media: "idea",
+  platforms: "idea",
+  frames: "idea",
+  prod_approved: "production",
+  render_queue: "production",
+  rendering: "production",
+  review: "publishing",
+  pub_approved: "publishing",
+  published: "publishing",
+});
+
+export const OPS_E2E_PHASE_ORDER = Object.freeze(["idea", "production", "publishing"]);
+
+export const OPS_E2E_PHASE_LABELS = Object.freeze({
+  idea: "Idea",
+  production: "Production",
+  publishing: "Publishing",
+});
+
+/** Resolve Idea / Production / Publishing from e2e.current_id or stage states. */
+export function opsE2eLifecyclePhase(e2e = {}) {
+  const currentId = String(e2e?.current_id || "").trim();
+  if (currentId && OPS_E2E_PHASE_BY_STAGE[currentId]) {
+    return OPS_E2E_PHASE_BY_STAGE[currentId];
+  }
+  const stages = Array.isArray(e2e?.stages) ? e2e.stages : [];
+  const current = stages.find((stage) => stage?.state === "current");
+  if (current?.id && OPS_E2E_PHASE_BY_STAGE[current.id]) {
+    return OPS_E2E_PHASE_BY_STAGE[current.id];
+  }
+  const todo = stages.find((stage) => stage?.state === "todo");
+  if (todo?.id && OPS_E2E_PHASE_BY_STAGE[todo.id]) {
+    return OPS_E2E_PHASE_BY_STAGE[todo.id];
+  }
+  // All done/skipped → publishing (terminal side of the trail).
+  if (stages.length && stages.every((stage) => stage?.state === "done" || stage?.state === "skipped")) {
+    return "publishing";
+  }
+  return "idea";
+}
+
 function normStatus(value) {
   return String(value || "").trim().toLowerCase();
 }
@@ -442,11 +491,13 @@ export function buildOpsE2eStages(input = {}) {
     return { ...def, state: "todo" };
   });
 
-  return {
+  const e2e = {
     stages,
     current_id: currentId,
     skips_render: skipsRender,
   };
+  e2e.phase = opsE2eLifecyclePhase(e2e);
+  return e2e;
 }
 
 function mergeE2eStageStates(states) {
@@ -486,6 +537,12 @@ export function buildOpsE2eGroup(rows = []) {
   let currentId = stages.find((stage) => stage.state === "current")?.id || null;
   if (!currentId) currentId = stages.find((stage) => stage.state === "todo")?.id || null;
   const platforms = [...new Set(outputs.map((row) => row.platform).filter(Boolean))];
+  const e2e = {
+    stages,
+    current_id: currentId,
+    skips_render: trails.some((trail) => trail.skips_render),
+  };
+  e2e.phase = opsE2eLifecyclePhase(e2e);
   return {
     kind: "e2e",
     id: opsQueueGroupKey(primary),
@@ -495,13 +552,15 @@ export function buildOpsE2eGroup(rows = []) {
     content_item_id: primary.content_item_id || sample.content_item_id || null,
     production_request_id: primary.production_request_id || sample.production_request_id || null,
     production_request_number: primary.production_request_number || null,
+    idea_id: primary.idea_id || sample.idea_id || null,
     profile_id: primary.profile_id || sample.profile_id || null,
     profile_name: primary.profile_name || sample.profile_name || null,
     platforms,
     output_count: outputs.length,
     stuck_kind: list.find((row) => row.stuck_kind)?.stuck_kind || null,
     produce_error: list.find((row) => row.produce_error)?.produce_error || null,
-    e2e: { stages, current_id: currentId, skips_render: trails.some((trail) => trail.skips_render) },
+    e2e,
+    phase: e2e.phase,
     updated_at: list.map((row) => row.updated_at).filter(Boolean).sort().at(-1) || null,
   };
 }
@@ -530,10 +589,10 @@ export function partitionOpsQueues(rows = []) {
   const list = Array.isArray(rows) ? rows : [];
   const rendering = list
     .filter((row) => isOpsRenderingQueueRow(row))
-    .map((row) => ({
-      ...row,
-      e2e: buildOpsE2eStages(row),
-    }))
+    .map((row) => {
+      const e2e = buildOpsE2eStages(row);
+      return { ...row, e2e, phase: e2e.phase };
+    })
     .sort((a, b) => {
       const aPos = Number(a.render_queue_position) || Number.POSITIVE_INFINITY;
       const bPos = Number(b.render_queue_position) || Number.POSITIVE_INFINITY;
@@ -542,10 +601,10 @@ export function partitionOpsQueues(rows = []) {
     });
   const publishing = list
     .filter((row) => isOpsPublishingQueueRow(row))
-    .map((row) => ({
-      ...row,
-      e2e: buildOpsE2eStages(row),
-    }))
+    .map((row) => {
+      const e2e = buildOpsE2eStages(row);
+      return { ...row, e2e, phase: e2e.phase };
+    })
     .sort((a, b) => String(b.updated_at || "").localeCompare(String(a.updated_at || "")));
 
   const groups = new Map();

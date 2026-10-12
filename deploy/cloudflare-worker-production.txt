@@ -2,7 +2,7 @@ Deploy manual media authority fix 2026-10-04. UI 0.6.475 / API 0.10.438. Preserv
 Deploy Worker 0.10.439-voiceover-min-4s. Requested voiceover duration cannot be under 4 seconds.
 Deploy Worker 0.10.440-voiceover-drives-timing. Photo reels no longer stamp a 30s video, 15s voiceover, or tail.
 Deploy Worker 0.10.441-schedule-platform-occupancy. Occupancy ignores Stories; non-stories conflict by platform.
-Deploy Worker 0.10.442-schedule-mae-blackout. MAE rotation in profile time; never stamp 8PM–3:30AM.
+Deploy Worker 0.10.442-schedule-mae-blackout. MAE rotation in profile time; never stamp 8PMâ3:30AM.
 Deploy Worker 0.10.443-schedule-mae-day. Each day fills M then A then E before the next morning.
 Deploy Worker 0.10.444-ideas-vo-timeline. Ideas Create VO timeline writes a timed script with named library stills.
 Deploy Worker 0.10.445-ideas-vo-approve. Ideas Create VO timeline attaches stills, builds plan/crops, stops at Production Approve.
@@ -31,7 +31,7 @@ Deploy Worker 0.10.462-schedule-occupancy-fields retry. Approve/Approve All now 
 Deploy Worker 0.10.463-approve-mae-keep. studioNextOpenScheduleIso keeps non-clashing saved times and passes platform occupancy.
 Deploy Worker 0.10.464-schedule-save-ready-review. Ready for Review wins over Publish_Status Ready to Schedule until Approve (Output 1795).
 Deploy Worker 0.10.465-render-stale-rendering. Heal Final_File_URL + Render_Status=Rendering (Output 1807) to Rendered + Ready for Review; desk kind render_stale_rendering.
-Deploy Worker 0.10.466-mae-28-day-schedule. 28-day MAE then 4th/5th widest-gap; blackout 11PM–3AM profile TZ: 2026-10-07T05:40Z
+Deploy Worker 0.10.466-mae-28-day-schedule. 28-day MAE then 4th/5th widest-gap; blackout 11PMâ3AM profile TZ: 2026-10-07T05:40Z
 Deploy Worker 0.10.467-promotion-reconcile. If I3/I4 returns a transient 5xx after promotion side effects completed, reconcile the Idea Candidate from Airtable and return success instead of leaving Studio with a false Request failed (500). Triggered 2026-10-07.
 Deploy Worker 0.10.468-feed-post-timeline. Single-image Feed Post Create timeline attaches the one photo and builds a slides plan without ITS1/SAI1, so it no longer request-timeouts 500.
 
@@ -42,8 +42,8 @@ Deploy Worker 0.10.472-scripted-scene-approval-state. Scripted-short approval no
 Deploy Worker 0.10.473-scripted-scene-media-reuse. New scripted-short proposals use every unique relevant asset first and reuse the best relevant media only when scenes outnumber available assets. Triggered 2026-10-08.
 Deploy Worker 0.10.474-engagement. Social Engagement Automation: /api/engagement/* discovery+approval, capability matrix, Stage B YouTube like/comment via uploader, daily cron. Triggered 2026-10-08.
 
-Deploy Worker 0.10.475-ready-for-render-typo. Heal orphan Render_Status Ready to Render → Ready for Render (Outputs 1702-1705 Upper West Side). Triggered 2026-10-08.
-Deploy Worker 0.10.476-voiceover-exceeds-render. Heal Blocked Spoken-audio-past-end (Output 2156): extend last clip to ceil(VO×fps), Ready for Render, pulse R4.
+Deploy Worker 0.10.475-ready-for-render-typo. Heal orphan Render_Status Ready to Render â Ready for Render (Outputs 1702-1705 Upper West Side). Triggered 2026-10-08.
+Deploy Worker 0.10.476-voiceover-exceeds-render. Heal Blocked Spoken-audio-past-end (Output 2156): extend last clip to ceil(VOÃ—fps), Ready for Render, pulse R4.
 
 Deploy Worker 0.10.477-engagement-stageb-persist. Miami Stage B checkbox now persists on Approve/Comment; Stage B-off no longer silent-opens YouTube. Triggered 2026-10-09.
 
@@ -74,7 +74,7 @@ Deploy Worker 0.10.488-engagement-click. A YouTube comment or like error is writ
 Deploy Worker 0.10.489-engagement-ledger. Shrink the engagement ledger so Chicago Comment and Like can be saved under Airtable's 100k limit. Triggered 2026-10-09.
 
 2026-10-09: Deploy Worker new-city onboarding and generic profile routing. Create Brand/Market/Profile, use profile-local timezone, isolate generic city destination settings, and gate activation on platform readiness. PR #562.
-2026-10-09 New Profile onboarding rollout — main 17cace69c7e7674b7de2c70abc4a05d5bdf9e331
+2026-10-09 New Profile onboarding rollout â main 17cace69c7e7674b7de2c70abc4a05d5bdf9e331
 
 2026-10-09: Deploy Worker 0.10.490-vibe-cut. Vibe Cut plan/another APIs + production defaults (VO off, music on, beat sync).
 
@@ -146,19 +146,19 @@ Deploy Worker 0.10.489-engagement-ledger. Shrink the engagement ledger so Chicag
 
 2026-10-11: Soft AI API footer under Airtable cooldown (UI 0.6.588 / Worker 0.10.523).
 
-2026-10-11: Airtable burn-kill — light cron publish/produce only + skip while cooling + UI 429 backoff (UI 0.6.589 / Worker 0.10.524).
+2026-10-11: Airtable burn-kill â light cron publish/produce only + skip while cooling + UI 429 backoff (UI 0.6.589 / Worker 0.10.524).
 
 2026-10-11: Fix Airtable shared Promise queue hang (UI 0.6.590 / Worker 0.10.525).
 
 2026-10-11: Fix Pipeline Review default empty feed + needs-approval deep link (UI 0.6.591 / Worker 0.10.526).
 
-2026-10-11: Lean All Profiles overview — one /api/profiles/overview (UI 0.6.592 / Worker 0.10.527).
+2026-10-11: Lean All Profiles overview â one /api/profiles/overview (UI 0.6.592 / Worker 0.10.527).
 
 2026-10-11: Cache All Profiles overview (2 Airtable reads + stale cache) UI 0.6.593 / Worker 0.10.528.
 
 2026-10-11: Soft-200 All Profiles overview on Airtable cooldown (UI 0.6.597 / Worker 0.10.529).
 
-2026-10-11: Fast Approve All enqueue from record_ids (no N× Airtable GET); clear stuck group Approving… (UI 0.6.598 / Worker 0.10.530).
+2026-10-11: Fast Approve All enqueue from record_ids (no NÃ— Airtable GET); clear stuck group Approvingâ¦ (UI 0.6.598 / Worker 0.10.530).
 
 2026-10-11: Soft home overview timeout (8s client + Worker build budget); no red Timeout banner; soft pipeline loading (UI 0.6.600 / Worker 0.10.531).
 
@@ -167,15 +167,15 @@ Deploy Worker 0.10.489-engagement-ledger. Shrink the engagement ledger so Chicag
 2026-10-11: Create VO uses Manage Idea selected/matched stills; multi Feed Post skips VO timeline (UI 0.6.605 / Worker 0.10.533).
 
 2026-10-12: Manage Idea library search keeps museu/Museum hits; stale loads cannot clear picker (UI 0.6.609 / Worker 0.10.534).
-2026-10-11: Worker 0.10.535-idea-topic-place-fallback — preserve distinctive topical (jazz) subject alongside Greenwich Village location in photo-wait scans; regression tests.
+2026-10-11: Worker 0.10.535-idea-topic-place-fallback â preserve distinctive topical (jazz) subject alongside Greenwich Village location in photo-wait scans; regression tests.
 2026-10-11: Cache Pipeline Airtable reads, stop the 8s outputs+content poll, defer Make hardening off Production lists (UI 0.6.610 / Worker 0.10.536-pipeline-read-cache).
 2026-10-11: Hold Pipeline, Production, ideas, and music reads longer and load produce jobs by id (UI 0.6.611 / Worker 0.10.537-hot-read-hold).
-2026-10-11: Worker 0.10.538-lean-native-review — Pipeline native photo rows retain review-ready status with lean selected-count projection; full FB/TT package can open for approval.
+2026-10-11: Worker 0.10.538-lean-native-review â Pipeline native photo rows retain review-ready status with lean selected-count projection; full FB/TT package can open for approval.
 2026-10-11: NYC Comment publishes on the New York profile and keeps the failure on the card (UI 0.6.612 / Worker 0.10.539-nyc-comment).
-2026-10-11: Worker 0.10.540-pipeline-field-schema — remove nonexistent Production_Request from Platform Outputs lean list (422 UNKNOWN_FIELD_NAME); guard with live schema snapshot regression test.
+2026-10-11: Worker 0.10.540-pipeline-field-schema â remove nonexistent Production_Request from Platform Outputs lean list (422 UNKNOWN_FIELD_NAME); guard with live schema snapshot regression test.
 2026-10-11: All Profiles overview serves a stored counts snapshot instead of waiting on a live Airtable scan (UI 0.6.614 / Worker 0.10.541-overview-snapshot).
 2026-10-11: Keep the last Pipeline list on a short Airtable pause, and let a 2s slot wait finish instead of blanking the page (UI 0.6.616 / Worker 0.10.542-keep-last-list).
-2026-10-11: Worker 0.10.543-explicit-vo-timeline — honor explicit narration timeline request from Photo Set ideas, replan unapproved still packages as narrated shorts, prevent changing approved/published outputs.
+2026-10-11: Worker 0.10.543-explicit-vo-timeline â honor explicit narration timeline request from Photo Set ideas, replan unapproved still packages as narrated shorts, prevent changing approved/published outputs.
 2026-10-11: Pipeline keeps the last list when the outputs request times out, and serves a stored snapshot instead of waiting on a live scan (UI 0.6.621 / Worker 0.10.544-pipeline-snapshot).
 2026-10-11: Create VO timeline writes narration onto an unapproved silent photo package, including one already promoted (UI 0.6.622 / Worker 0.10.545-create-vo).
 2026-10-11: Worker 0.10.546-pipeline-latest-rescue serves live recent outputs without stale heavy Pipeline snapshot.
@@ -183,21 +183,22 @@ Deploy Worker 0.10.489-engagement-ledger. Shrink the engagement ledger so Chicag
 2026-10-12: Worker 0.10.548-timeline-auto-prepare auto-starts Prepare for idea-vo-timeline drafts stuck at Variant Status=None.
 2026-10-12: Worker 0.10.549-ideas-generate-async accepts idea Generate as a Pending batch and finishes Python I1 + photo listening in waitUntil.
 2026-10-12: Redeploy Worker 0.10.549-ideas-generate-async after transient Cloudflare deployments JSON parse during postdeploy verify (#641).
-2026-10-12: Worker 0.10.550-library-search-tokens — token-OR FIND for library/browse search so Prospect Park matches prospect/parked typos.
+2026-10-12: Worker 0.10.550-library-search-tokens â token-OR FIND for library/browse search so Prospect Park matches prospect/parked typos.
 2026-10-12: Redeploy Worker 0.10.550-library-search-tokens after Cloudflare API 504 on #646 deploy.
 
-2026-10-12: Worker 0.10.551-story-schedule-seed — always stamp IG/FB Story suggested times at plan seed (empty MAE lane + main+10m fallback).
+2026-10-12: Worker 0.10.551-story-schedule-seed â always stamp IG/FB Story suggested times at plan seed (empty MAE lane + main+10m fallback).
 2026-10-12: Redeploy Worker 0.10.551-story-schedule-seed (includes library-search-tokens) after #646 Cloudflare 504; tip redeploy via merge conflict resolution.
 2026-10-12: Redeploy Worker 0.10.551-story-schedule-seed after Cloudflare deployments 504 Gateway Timeout (#649).
-2026-10-12: Redeploy Worker 0.10.551-story-schedule-seed again after #650 merge — prior tip redeploy also hit Cloudflare 504.
+2026-10-12: Redeploy Worker 0.10.551-story-schedule-seed again after #650 merge â prior tip redeploy also hit Cloudflare 504.
 
-2026-10-12: Worker 0.10.552-ops-queue — /api/operations/queue + pause/reorder + ideas prepare-to-review.
+2026-10-12: Worker 0.10.552-ops-queue â /api/operations/queue + pause/reorder + ideas prepare-to-review.
 2026-10-12: Redeploy Worker tip after #650 merge onto main (keeps 0.10.552-ops-queue; clears DIRTY append conflict).
-2026-10-12: Worker 0.10.553-ops-queue-titles — ops queue item titles prefer Content/Idea over Master_Content_Type.
-2026-10-12: Worker 0.10.554-ops-multi-queue — ops queue partition + e2e stage trails.
+2026-10-12: Worker 0.10.553-ops-queue-titles â ops queue item titles prefer Content/Idea over Master_Content_Type.
+2026-10-12: Worker 0.10.554-ops-multi-queue â ops queue partition + e2e stage trails.
 2026-10-12: Deploy engagement permission-suspension recovery and read-only reconnect probe; gated by engagement-auth-recovery tests.
-2026-10-12: Worker 0.10.555-ops-queue-fields — drop unknown Last Modified / Idea_Title / Working_Title from ops queue fetches.
-2026-10-12: Worker 0.10.556-ops-render-queue-fetch — dedicated Remotion-lane fetch so Publishing backlog cannot empty Rendering Queue.
-2026-10-12: Worker 0.10.557-ops-profiles-load — GET /api/operations/profiles + non-blocking watchlist read.
+2026-10-12: Worker 0.10.555-ops-queue-fields â drop unknown Last Modified / Idea_Title / Working_Title from ops queue fetches.
+2026-10-12: Worker 0.10.556-ops-render-queue-fetch â dedicated Remotion-lane fetch so Publishing backlog cannot empty Rendering Queue.
+2026-10-12: Worker 0.10.557-ops-profiles-load â GET /api/operations/profiles + non-blocking watchlist read.
 2026-10-12: Studio list reads (Home / Pipeline / Ideas) serve R2 snapshots and never wait on a live Airtable scan (UI 0.6.646 / Worker 0.10.558-list-read-snapshot).
-2026-10-12: Worker 0.10.559-open-index � filter open Pipeline rows with {Studio_Pipeline_Open}=1 and skip snapshot rebuild when refresh=0.
+2026-10-12: Worker 0.10.559-open-index — filter open Pipeline rows with {Studio_Pipeline_Open}=1 and skip snapshot rebuild when refresh=0.
+2026-10-12: Worker 0.10.560-ops-phase-open — ops e2e lifecycle phase + idea_id on End-to-End groups for Open routing.

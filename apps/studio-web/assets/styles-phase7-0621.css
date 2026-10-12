@@ -1362,12 +1362,22 @@ input, select, textarea, button {
  */
 .ops-queue-cols-render,
 .ops-queue-block:has(#opsRenderQueueLines) .ops-queue-cols-head,
-.ops-queue-block:has(#opsRenderQueueLines) .ops-queue-line{grid-template-columns:minmax(120px,1.3fr) minmax(70px,.7fr) minmax(60px,.6fr) minmax(80px,.8fr) minmax(50px,.5fr) minmax(0,2.4fr) minmax(10rem,max-content)}
+.ops-queue-block:has(#opsRenderQueueLines) .ops-queue-line{grid-template-columns:3.4rem minmax(110px,1.3fr) minmax(70px,.7fr) minmax(60px,.6fr) minmax(80px,.8fr) minmax(50px,.5fr) minmax(0,2.4fr) minmax(10rem,max-content)}
 .ops-queue-cols-publish,
 .ops-queue-block:has(#opsPublishQueueLines) .ops-queue-cols-head,
-.ops-queue-block:has(#opsPublishQueueLines) .ops-queue-line{grid-template-columns:minmax(120px,1.3fr) minmax(70px,.7fr) minmax(60px,.6fr) minmax(90px,.9fr) minmax(0,2.4fr) 4.5rem}
+.ops-queue-block:has(#opsPublishQueueLines) .ops-queue-line{grid-template-columns:3.4rem minmax(110px,1.3fr) minmax(70px,.7fr) minmax(60px,.6fr) minmax(90px,.9fr) minmax(0,2.4fr) 4.5rem}
 .ops-queue-cols-e2e,
-.ops-queue-block:has(#opsE2eQueueLines) .ops-queue-line{grid-template-columns:minmax(120px,1.3fr) minmax(70px,.7fr) minmax(70px,.7fr) minmax(0,2.6fr) 4.5rem}
+.ops-queue-block:has(#opsE2eQueueLines) .ops-queue-cols-head,
+.ops-queue-block:has(#opsE2eQueueLines) .ops-queue-line{grid-template-columns:3.4rem minmax(110px,1.3fr) minmax(70px,.7fr) minmax(70px,.7fr) minmax(0,2.6fr) 4.5rem}
+.ops-queue-phase{display:flex;align-items:center;min-width:0}
+.ops-queue-phase-chip{display:inline-flex;align-items:center;justify-content:center;min-height:16px;padding:0 5px;border-radius:4px;font-size:.62rem;font-weight:800;letter-spacing:.03em;text-transform:uppercase;line-height:1;white-space:nowrap;background:#e8eef3;color:#345;border:1px solid #d5dee6}
+.ops-queue-phase[data-phase="idea"] .ops-queue-phase-chip{background:#fff7e8;color:#8a5a00;border-color:#efd7a2}
+.ops-queue-phase[data-phase="production"] .ops-queue-phase-chip{background:#eef2fb;color:#243a6b;border-color:#c9d4ea}
+.ops-queue-phase[data-phase="publishing"] .ops-queue-phase-chip{background:#e9f6ef;color:#1f6b45;border-color:#b7dec8}
+.ops-queue-phase-band{position:sticky;top:0;z-index:3;display:flex;align-items:center;gap:8px;padding:5px 12px;background:#f0f3f6;border-bottom:1px solid var(--line);font-size:.68rem;font-weight:800;letter-spacing:.05em;text-transform:uppercase;color:var(--muted)}
+.ops-queue-phase-band[data-phase="idea"]{background:#fff8ec;color:#8a5a00}
+.ops-queue-phase-band[data-phase="production"]{background:#eef2fb;color:#243a6b}
+.ops-queue-phase-band[data-phase="publishing"]{background:#e9f6ef;color:#1f6b45}
 .ops-queue-lines{display:flex;flex-direction:column;min-height:min-content}
 /* Rendering stays fully open (few Remotion rows). Cap Publishing/E2E scroll. */
 .ops-queue-block:has(#opsRenderQueueLines) .ops-queue-lines{overflow:visible;max-height:none}
