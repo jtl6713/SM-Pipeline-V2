@@ -267,7 +267,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.631-progress-under-tabs";
+  const BUILD_ID = "item4-0.6.632-ops-queue";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -1059,6 +1059,18 @@
     showOperationsView(parsed.view, parsed.tab, { skipHash: true });
   });
 
+  $("operationsQueueRefresh")?.addEventListener("click", () => {
+    loadOperationsQueue().catch(() => {});
+  });
+  document.querySelectorAll("[data-ops-queue-filter]").forEach((button) => {
+    button.addEventListener("click", () => {
+      operationsQueueFilter = String(button.dataset.opsQueueFilter || "all");
+      document.querySelectorAll("[data-ops-queue-filter]").forEach((node) => {
+        node.classList.toggle("active", node.dataset.opsQueueFilter === operationsQueueFilter);
+      });
+      renderOperationsStudioQueue();
+    });
+  });
   $("operationsRunDailyIdeas")?.addEventListener("click", async () => {
     try {
       setOperationsMessage("Starting daily idea run…");
@@ -3114,6 +3126,20 @@
     if (openProd) {
       openProd.hidden = String(idea?.photo_wait_status || "") !== "Ready" || promoted;
     }
+    const prepareBtn = $("prepareIdeaToReviewButton");
+    const prepareHint = $("prepareIdeaToReviewHint");
+    const hasPhotos = Boolean(
+      (Array.isArray(idea?.matched_media_asset_links) && idea.matched_media_asset_links.length)
+      || (Array.isArray(idea?.photo_match?.selected) && idea.photo_match.selected.length)
+      || (ideaLibrarySelected && ideaLibrarySelected.size)
+      || String(idea?.photo_wait_status || "") === "Ready"
+    );
+    const canPrepare = !promoted && !idea?.is_on_hold && promotable && hasPhotos;
+    if (prepareBtn) {
+      prepareBtn.hidden = !canPrepare;
+      prepareBtn.disabled = !canPrepare;
+    }
+    if (prepareHint) prepareHint.hidden = !canPrepare;
 
     if (ideaIsPromoted(idea)) {
       $("promoteIdeaButton").textContent = "Already promoted";
@@ -3126,10 +3152,10 @@
       const max = Number(idea?.carousel_slide_count_max || 0);
       $("promoteIdeaButton").textContent = "Listening for photos";
       setManageMessage(`Listening in the Studio media library. ${high} / ${min || "?"} high-confidence matches so far. Automatic matching runs every 5 minutes; use Find images now for an immediate scan. Studio will use up to ${max || "?"} photos, then you can edit the selected assets and set production rules.`, "");
-    } else if (String(idea?.photo_wait_status || "") === "Ready") {
+    } else if (String(idea?.photo_wait_status || "") === "Ready" || hasPhotos) {
       $("promoteIdeaButton").textContent = "Photos ready";
-      const count = Array.isArray(idea?.matched_media_asset_links) ? idea.matched_media_asset_links.length : (idea?.photo_match?.selected?.length || 0);
-      setManageMessage(`${count || "Matched"} photo${count === 1 ? "" : "s"} attached. Open Production to set content rules, then approve rendering there.`, "success");
+      const count = Array.isArray(idea?.matched_media_asset_links) ? idea.matched_media_asset_links.length : (idea?.photo_match?.selected?.length || ideaLibrarySelected?.size || 0);
+      setManageMessage(`${count || "Matched"} photo${count === 1 ? "" : "s"} attached. Use Prepare to Ready for Review for one-click plan + frames + produce, or Open Production to edit rules first.`, "success");
     } else if (idea?.status === "Approved") {
       setManageMessage("This idea is approved but not yet linked to a content item. Use Promote to production to retry.", "");
     } else {
@@ -3745,6 +3771,68 @@
       await openProductionRequestForIdea(activeIdea);
     } catch (error) {
       setManageMessage(error.message || "Could not open Production.", "error-text");
+    }
+  });
+
+  $("prepareIdeaToReviewButton")?.addEventListener("click", async () => {
+    if (!activeIdea?.id || !ideaCanPromote(activeIdea)) return;
+    flushIdeaManageInputs();
+    const contentType = $("promoteContentType")?.value || activeIdea.content_type || "";
+    const platforms = selectedPromotionPlatforms();
+    if (!contentType) {
+      setManageMessage("Choose a master content type before preparing.", "error-text");
+      return;
+    }
+    if (!platforms.length) {
+      setManageMessage("Choose at least one target platform before preparing.", "error-text");
+      return;
+    }
+    const libraryIds = ideaLibrarySelected?.size
+      ? [...ideaLibrarySelected]
+      : (Array.isArray(activeIdea.matched_media_asset_links)
+        ? activeIdea.matched_media_asset_links.map((row) => row?.id || row).filter(Boolean)
+        : []);
+    if (!libraryIds.length && String(activeIdea.photo_wait_status || "") !== "Ready") {
+      setManageMessage("Attach library photos before Prepare to Ready for Review.", "error-text");
+      return;
+    }
+    const label = activeIdea.title || `Candidate ${activeIdea.candidate_id || activeIdea.id}`;
+    const confirmed = window.confirm(
+      `Prepare "${label}" through to Ready for Review?\n\nStudio will plan platforms, prepare frames, Production-approve, and run produce. Nothing publishes — you approve in Pipeline when it's ready.`
+    );
+    if (!confirmed) return;
+    const button = $("prepareIdeaToReviewButton");
+    if (button) {
+      button.disabled = true;
+      button.textContent = "Preparing…";
+    }
+    setManageMessage("Preparing timeline, frames, and production…", "");
+    try {
+      await saveManagedIdeaIdentity({ quiet: true, reloadList: false, forceProduction: true });
+      const result = await api(`/api/ideas/${encodeURIComponent(activeIdea.id)}/prepare-to-review`, {
+        method: "POST",
+        body: JSON.stringify({
+          content_type: contentType,
+          platforms,
+          include_voiceover: $("promoteVoiceover")?.value || "Yes",
+          include_background_music: $("promoteMusic")?.value || "Yes",
+          include_thumbnail: $("promoteThumbnail")?.value || "Yes",
+          video_duration: stillsContentType(contentType) ? "" : Number($("promoteVideoDuration")?.value || 30),
+          production_notes: $("promoteProductionNotes")?.value?.trim() || "",
+          library_asset_ids: libraryIds,
+        }),
+      });
+      setManageMessage(result.message || "Preparation started. Watch the Operations Queue.", "success");
+      await Promise.all([loadIdeas(), loadDashboard(), loadProductionRequests()]);
+      showStudioPage("operations");
+      showOperationsView("control", "queue");
+    } catch (error) {
+      setManageMessage(error.message || "Could not prepare this idea for review.", "error-text");
+    } finally {
+      if (button) {
+        button.disabled = false;
+        button.textContent = "Prepare to Ready for Review";
+      }
     }
   });
 
@@ -22723,7 +22811,11 @@ function timedScriptAssetLabel(asset, index) {
     });
   }
 
-  const OPS_CONTROL_TABS = ["desk", "profiles", "produce", "intake", "analytics", "schedule", "publish", "oversized", "repair"];
+  const OPS_CONTROL_TABS = ["desk", "queue", "profiles", "produce", "intake", "analytics", "schedule", "publish", "oversized", "repair"];
+  let operationsQueueRows = [];
+  let operationsQueueFilter = "all";
+  let operationsQueueCanEdit = false;
+  let operationsQueueTimer = 0;
   const OPS_AGENT_TABS = ["recap", "guide", "catalog", "activity"];
   let operationsControlTab = "desk";
   let operationsAgentTab = "recap";
@@ -22778,9 +22870,12 @@ function timedScriptAssetLabel(asset, index) {
     if (agent) {
       if (OPS_AGENT_TABS.includes(tab)) operationsAgentTab = tab;
       applyOperationsTabs("operationsAgentView", operationsAgentTab);
+      stopOperationsQueuePoll();
     } else {
       if (OPS_CONTROL_TABS.includes(tab)) operationsControlTab = tab;
       applyOperationsTabs("operationsControlView", operationsControlTab);
+      if (operationsControlTab === "queue") loadOperationsQueue().catch(() => {});
+      else stopOperationsQueuePoll();
     }
     if (!options.skipHash) {
       const nextHash = operationsHashFor(agent ? "agent" : "control", agent ? operationsAgentTab : operationsControlTab);
@@ -23703,6 +23798,170 @@ function timedScriptAssetLabel(asset, index) {
       });
     });
     syncOperationsProfileContext();
+  }
+
+  function stopOperationsQueuePoll() {
+    if (operationsQueueTimer) clearInterval(operationsQueueTimer);
+    operationsQueueTimer = 0;
+  }
+
+  function startOperationsQueuePoll() {
+    stopOperationsQueuePoll();
+    if (activeNavPage() !== "operations") return;
+    const parsed = typeof parseOperationsLocation === "function" ? parseOperationsLocation() : { tab: "" };
+    if (parsed.tab !== "queue") return;
+    operationsQueueTimer = setInterval(() => {
+      if (document.hidden) return;
+      loadOperationsQueue({ quiet: true }).catch(() => {});
+    }, 20000);
+  }
+
+  function opsQueueLaneLabel(lane) {
+    if (lane === "stuck") return "Stuck";
+    if (lane === "paused") return "Paused";
+    if (lane === "review") return "Review";
+    if (lane === "publish") return "Publish";
+    if (lane === "done") return "Done";
+    return "Active";
+  }
+
+  function renderOperationsQueueSummary(summary = {}) {
+    const host = $("operationsQueueSummary");
+    if (!host) return;
+    const chips = [
+      ["total", "In queue", summary.total || 0, ""],
+      ["stuck", "Stuck", summary.stuck || 0, "alert"],
+      ["active", "Producing", summary.active || 0, ""],
+      ["paused", "Paused", summary.paused || 0, ""],
+      ["review", "Ready for review", summary.review || 0, "ok"],
+      ["publish", "Publish lane", summary.publish || 0, ""],
+      ["render", `Render wait ${summary.render_waiting || 0}`, summary.render_waiting || 0, ""],
+    ];
+    host.innerHTML = chips.map(([key, label, count, tone]) => (
+      `<span class="ops-desk-chip" data-tone="${escapeHtml(tone)}" data-ops-summary="${escapeHtml(key)}">${escapeHtml(label)}: <strong>${escapeHtml(count)}</strong></span>`
+    )).join("");
+  }
+
+  function filteredOperationsQueueRows() {
+    if (operationsQueueFilter === "all") return operationsQueueRows;
+    return operationsQueueRows.filter((row) => String(row.lane || "active") === operationsQueueFilter);
+  }
+
+  function renderOperationsStudioQueue() {
+    const host = $("operationsQueueList");
+    const meta = $("operationsQueueMeta");
+    if (!host) return;
+    const rows = filteredOperationsQueueRows();
+    if (meta) {
+      meta.textContent = rows.length
+        ? `Showing ${rows.length} of ${operationsQueueRows.length} in-flight items across all profiles.`
+        : (operationsQueueRows.length ? "No items match this filter." : "Queue is clear — nothing in production.");
+    }
+    if (!rows.length) {
+      host.innerHTML = `<div class="empty">${operationsQueueRows.length ? "No items match this filter." : "Nothing is in the Studio queue right now."}</div>`;
+      return;
+    }
+    host.innerHTML = `<table class="ops-queue-table"><thead><tr>
+      <th></th><th>Item</th><th>Profile</th><th>Platform</th><th>Status</th><th>Queue</th><th>Actions</th>
+    </tr></thead><tbody>${rows.map((row) => {
+      const thumb = row.thumbnail_url
+        ? `<img class="ops-queue-thumb" src="${escapeHtml(row.thumbnail_url)}" alt="" loading="lazy">`
+        : `<span class="ops-queue-thumb" aria-hidden="true"></span>`;
+      const identity = [
+        row.content_id ? `Content ${row.content_id}` : "",
+        row.output_id ? `Output ${row.output_id}` : "",
+        row.production_request_number ? `PR ${row.production_request_number}` : "",
+        row.kind === "request" ? "Production request" : "",
+      ].filter(Boolean).join(" · ");
+      const stuck = row.stuck_kind ? `<div class="subtle error-text">${escapeHtml(row.stuck_kind)}${row.produce_error ? ` — ${escapeHtml(String(row.produce_error).slice(0, 120))}` : ""}</div>` : "";
+      const queueLabel = row.render_queue_label
+        || (row.render_queue_position ? `#${row.render_queue_position} of ${row.render_queue_total || "?"}` : "—");
+      const paused = row.kind === "output" ? row.render_paused : row.produce_paused;
+      const pauseLabel = paused ? "Resume" : "Pause";
+      const canReorder = row.kind === "output" && Number(row.render_queue_position) > 0 && operationsQueueCanEdit;
+      const actions = operationsQueueCanEdit
+        ? `<div class="ops-queue-actions">
+            <button type="button" class="secondary-button" data-ops-queue-pause="${escapeHtml(row.id)}" data-ops-queue-kind="${escapeHtml(row.kind)}" data-ops-queue-paused="${paused ? "0" : "1"}">${pauseLabel}</button>
+            ${canReorder ? `<button type="button" class="text-button" data-ops-queue-move="${escapeHtml(row.id)}" data-ops-queue-dir="top">To front</button>
+            <button type="button" class="text-button" data-ops-queue-move="${escapeHtml(row.id)}" data-ops-queue-dir="up">Up</button>
+            <button type="button" class="text-button" data-ops-queue-move="${escapeHtml(row.id)}" data-ops-queue-dir="down">Down</button>` : ""}
+            ${row.kind === "output" ? `<button type="button" class="text-button" data-ops-queue-open="${escapeHtml(row.id)}" data-ops-queue-profile="${escapeHtml(row.profile_id || "")}">Open</button>` : ""}
+          </div>`
+        : (row.kind === "output"
+          ? `<button type="button" class="text-button" data-ops-queue-open="${escapeHtml(row.id)}" data-ops-queue-profile="${escapeHtml(row.profile_id || "")}">Open</button>`
+          : "—");
+      return `<tr data-lane="${escapeHtml(row.lane || "active")}" data-ops-queue-id="${escapeHtml(row.id)}">
+        <td>${thumb}</td>
+        <td><p class="ops-queue-title">${value(row.title)}</p><div class="subtle">${escapeHtml(identity || row.id)}</div>${stuck}</td>
+        <td>${value(row.profile_name || "—")}</td>
+        <td>${value(row.platform || (Array.isArray(row.platforms) ? row.platforms.join(", ") : "—"))}<div class="subtle">${value(row.studio_output_type || "")}</div></td>
+        <td>${badge(row.studio_state)}<div class="subtle">${escapeHtml(opsQueueLaneLabel(row.lane))}</div></td>
+        <td>${escapeHtml(queueLabel)}</td>
+        <td>${actions}</td>
+      </tr>`;
+    }).join("")}</tbody></table>`;
+
+    host.querySelectorAll("[data-ops-queue-pause]").forEach((button) => {
+      button.addEventListener("click", async () => {
+        button.disabled = true;
+        try {
+          await api("/api/operations/queue/pause", {
+            method: "POST",
+            body: JSON.stringify({
+              kind: button.dataset.opsQueueKind,
+              id: button.dataset.opsQueuePause,
+              paused: button.dataset.opsQueuePaused === "1",
+            }),
+          });
+          setOperationsMessage(button.dataset.opsQueuePaused === "1" ? "Paused in Operations Queue." : "Resumed.");
+          await loadOperationsQueue();
+        } catch (error) {
+          setOperationsMessage(error.message || "Could not update pause.", "error-text");
+          button.disabled = false;
+        }
+      });
+    });
+    host.querySelectorAll("[data-ops-queue-move]").forEach((button) => {
+      button.addEventListener("click", async () => {
+        button.disabled = true;
+        try {
+          await api("/api/operations/queue/reorder", {
+            method: "POST",
+            body: JSON.stringify({ id: button.dataset.opsQueueMove, direction: button.dataset.opsQueueDir }),
+          });
+          setOperationsMessage("Render queue order updated.");
+          await loadOperationsQueue();
+        } catch (error) {
+          setOperationsMessage(error.message || "Could not reorder queue.", "error-text");
+          button.disabled = false;
+        }
+      });
+    });
+    host.querySelectorAll("[data-ops-queue-open]").forEach((button) => {
+      button.addEventListener("click", () => {
+        studioOpenPipelineFilter("all", {
+          profileId: button.dataset.opsQueueProfile || selectedProfileId,
+        });
+      });
+    });
+  }
+
+  async function loadOperationsQueue(options = {}) {
+    const meta = $("operationsQueueMeta");
+    if (!options.quiet && meta) meta.textContent = "Loading queue…";
+    try {
+      const data = await api("/api/operations/queue");
+      operationsQueueRows = Array.isArray(data.rows) ? data.rows : [];
+      operationsQueueCanEdit = Boolean(data.can_edit_queue);
+      renderOperationsQueueSummary(data.summary || {});
+      renderOperationsStudioQueue();
+      startOperationsQueuePoll();
+      return data;
+    } catch (error) {
+      if (meta) meta.textContent = error.message || "Could not load Operations Queue.";
+      if (!options.quiet) setOperationsMessage(error.message || "Could not load Operations Queue.", "error-text");
+      throw error;
+    }
   }
 
   function renderOperationsQueue(target, records, kind) {

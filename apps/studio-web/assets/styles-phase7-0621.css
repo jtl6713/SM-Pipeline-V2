@@ -1339,6 +1339,24 @@ input, select, textarea, button {
 .ops-desk-chip{border:1px solid var(--line);border-radius:999px;padding:6px 10px;font-size:.78rem;font-weight:700;background:#fbfdfd}
 .ops-desk-chip[data-tone="alert"]{border-color:#e3b6b6;background:#fdf6f6;color:#7a2e2e}
 .ops-desk-chip[data-tone="ok"]{border-color:#b7d8d3;color:var(--teal-dark)}
+.ops-queue-summary{display:flex;flex-wrap:wrap;gap:8px;padding:0 20px 12px}
+.ops-queue-summary .ops-desk-chip{cursor:default}
+.ops-queue-filters{display:flex;flex-wrap:wrap;gap:8px;padding:0 20px 12px}
+.ops-queue-filter{border:1px solid var(--line);background:#fff;color:var(--ink);border-radius:999px;padding:6px 12px;font-size:.78rem;font-weight:700;cursor:pointer}
+.ops-queue-filter.active{background:var(--navy,#012559);color:#fff;border-color:transparent}
+.ops-queue-table-wrap{padding:0 12px 20px;overflow:auto;max-height:min(70vh,820px)}
+.ops-queue-table{width:100%;border-collapse:separate;border-spacing:0;font-size:.84rem}
+.ops-queue-table th{position:sticky;top:0;z-index:1;background:#f4f7f9;text-align:left;padding:10px 12px;border-bottom:1px solid var(--line);font-size:.72rem;letter-spacing:.04em;text-transform:uppercase;color:var(--muted)}
+.ops-queue-table td{padding:10px 12px;border-bottom:1px solid #edf1f4;vertical-align:top}
+.ops-queue-table tr[data-lane="stuck"]{background:#fdf6f6}
+.ops-queue-table tr[data-lane="paused"]{background:#f7f7f4}
+.ops-queue-table tr[data-lane="review"]{background:#f3faf7}
+.ops-queue-table .ops-queue-title{font-weight:700;margin:0 0 2px}
+.ops-queue-table .ops-queue-actions{display:flex;flex-wrap:wrap;gap:6px}
+.ops-queue-table .ops-queue-actions .secondary-button,.ops-queue-table .ops-queue-actions .text-button{min-height:32px;padding:4px 10px;font-size:.75rem}
+.ops-queue-thumb{width:44px;height:56px;object-fit:cover;border-radius:6px;background:#e8eef3;display:block}
+#prepareIdeaToReviewButton{margin-bottom:8px;background:linear-gradient(135deg,#0a6b5c,#012559);border:none}
+#prepareIdeaToReviewHint{margin:0 0 10px}
 .ops-recap{padding:0 20px 8px}
 .ops-recap-toolbar{display:flex;flex-wrap:wrap;gap:10px;align-items:flex-end;padding:0 20px 14px}
 .ops-recap-toolbar .form-field{margin:0;min-width:170px}
