@@ -19,7 +19,7 @@ test("Pipeline keeps unfinished packages via open-output merge", async () => {
   assert.match(worker, /Manual Fallback/);
   assert.match(worker, /Pull every sibling on unfinished packages/);
   assert.match(worker, /clampLimit\(url, 200, 250\)/);
-  assert.match(worker, /version: "0.10.550-library-search-tokens"/);
+  assert.match(worker, /version: "0.10.551-story-schedule-seed"/);
   assert.match(worker, /FIND\("Manual Action",\{TikTok_Draft_Status\}/);
   assert.match(worker, /FIND\("Manual Fallback",\{TikTok_Draft_Status\}/);
   assert.match(worker, /manual fallback/);
