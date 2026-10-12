@@ -1342,7 +1342,8 @@ input, select, textarea, button {
 .ops-queue-summary{display:flex;flex-wrap:wrap;gap:8px;padding:0 20px 12px}
 .ops-queue-summary .ops-desk-chip{cursor:default}
 .ops-multi-queues{padding:0 12px 20px;display:flex;flex-direction:column;gap:16px;max-height:min(78vh,900px);overflow:auto}
-.ops-queue-block{border:1px solid var(--line);border-radius:10px;background:#fff;overflow:hidden}
+/* flex-shrink:0 — overflow:hidden + default shrink crushed Rendering Queue to a 1px bar when Publishing had 160+ rows. */
+.ops-queue-block{border:1px solid var(--line);border-radius:10px;background:#fff;overflow:hidden;flex-shrink:0}
 .ops-queue-block-head{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 14px;background:#f4f7f9;border-bottom:1px solid var(--line)}
 .ops-queue-block-head h3{margin:0;font-size:.92rem}
 .ops-queue-count{font-size:.75rem;font-weight:700;color:var(--muted);background:#e8eef3;border-radius:999px;padding:2px 8px}
