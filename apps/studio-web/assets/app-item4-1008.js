@@ -267,7 +267,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.628-production-checklist";
+  const BUILD_ID = "item4-0.6.629-persistent-progress";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -12806,6 +12806,14 @@ function timedScriptAssetLabel(asset, index) {
       }
       compatibility.className = `form-message${kind ? ` ${kind}` : ""}`;
       compatibility.textContent = text;
+      // Render a stable checklist from actual Production Request state, not transient messages.
+      window.studioProductionProgress?.update({
+        timeline: Boolean(item4Workspace?.plan?.items?.length || item4Workspace?.plan_status === "Ready"),
+        stills: Boolean(item4Workspace?.assets?.length),
+        crops: Boolean(item4Workspace?.variant_status === "Ready" || item4Workspace?.variant_status === "Not Needed"),
+        approved: status === "Promoted",
+        note: text
+      });
     }
   }
 
