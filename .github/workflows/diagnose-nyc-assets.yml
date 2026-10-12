@@ -1,0 +1,34 @@
+name: Diagnose NYC Asset Preparation
+on:
+  push:
+    branches: [main]
+    paths: ['deploy/diagnose-nyc-assets.txt']
+permissions: {contents: read}
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      AIRTABLE_PAT: ${{ secrets.AIRTABLE_PAT }}
+    steps:
+      - name: Inspect affected output states
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json,os,urllib.parse,urllib.request
+          ids=[2575,2576,2577,2578,2579,2580,2581,2582,2583,2584,2585,2586,2587]
+          formula='OR('+','.join('{Output_ID}='+str(i) for i in ids)+')'
+          url='https://api.airtable.com/v0/appe33zkZn35yirTL/tblrlPeboBthkplH0?'+urllib.parse.urlencode({'filterByFormula':formula,'pageSize':100})
+          req=urllib.request.Request(url,headers={'Authorization':'Bearer '+os.environ['AIRTABLE_PAT']})
+          with urllib.request.urlopen(req,timeout=30) as resp: rows=json.load(resp)['records']
+          keys=['Output_ID','Output_Status','Render_Status','Asset_Selection_Status','Review_Status','Studio_Output_Type','Platform','Platform_Output_Type','Remotion_Job_ID','Remotion_Error_Message','Final_File_Error_Message','Carousel Slides','Selected_Clip_1_URL','Final_File_URL','Final_File_ID','Thumbnail_URL','Studio_Preview_URL','Content_Profile','Production_Request_Output','Output_Notes','Last_Modified_Time']
+          for r in sorted(rows,key=lambda x:x['fields'].get('Output_ID',0)):
+            f=r['fields']; o={'record_id':r['id']}
+            for k in keys:
+              v=f.get(k)
+              if k in ('Final_File_URL','Thumbnail_URL','Studio_Preview_URL','Selected_Clip_1_URL'): v=bool(v)
+              if k=='Output_Notes':v=str(v or '')[:160]
+              if k=='Carousel Slides':v=len(v or [])
+              if v is not None:o[k]=v
+            print(json.dumps(o,default=str))
+          PY
