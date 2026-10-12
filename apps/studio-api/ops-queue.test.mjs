@@ -245,7 +245,7 @@ test("worker and UI wire Operations multi-queue + prepare-to-review", () => {
   assert.match(html, /ops-queue-timeline-head/);
   assert.match(html, />Timeline</);
   assert.match(html, /prepareIdeaToReviewButton/);
-  assert.match(app, /BUILD_ID = "item4-0.6.644-nav-eager"/);
+  assert.match(app, /BUILD_ID = "item4-0.6.645-ops-queue-dense"/);
   assert.match(app, /platforms: "Plat"/);
   assert.match(app, /Media Added/);
   assert.match(app, /Waiting for Approval/);
