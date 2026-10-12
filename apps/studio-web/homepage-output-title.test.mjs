@@ -155,7 +155,9 @@ test("Home metric cards use count tones and Airtable-safe polling", () => {
   assert.doesNotMatch(app, /Pipeline data is waiting on Airtable/);
   assert.doesNotMatch(html, /id="recentOutputs"/);
   assert.match(app, /showStudioPage\("outputs", \{ pipelineFilter: nextFilter \}\)/);
-  assert.match(app, /pipelineOutputs = dashboardCache\.outputs\.slice\(\)/);
+  // Home metric clicks must not seed Pipeline from a stale dashboard snapshot.
+  assert.doesNotMatch(app, /pipelineOutputs = dashboardCache\.outputs\.slice\(\)/);
+  assert.match(app, /Do not seed Pipeline with stale Home snapshots/);
   assert.doesNotMatch(app, /await api\("\/api\/dashboard"/);
   assert.match(app, /function scheduledContentByPlatform\(/);
   assert.match(app, /function renderScheduledContentOverview\(/);

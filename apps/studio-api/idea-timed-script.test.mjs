@@ -258,7 +258,7 @@ test("Worker advertises the idea timed-script route", async () => {
   assert.match(app, /single_image_feed_post/);
   assert.match(app, /library_asset_ids/);
   assert.match(app, /saveManagedIdeaIdentity/);
-  assert.match(app, /Preparing this feed post from the one photo/);
+  assert.match(app, /Writing the spoken timeline and matching named stills\. This replaces an unapproved silent photo plan\. Nothing publishes\./);
   assert.match(worker, /deterministic-fallback/);
   assert.match(worker, /idea timeline writer failed; using deterministic fallback/);
   assert.match(worker, /idea timeline plan failed after stills saved/);
