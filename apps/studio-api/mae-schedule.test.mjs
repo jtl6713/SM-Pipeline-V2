@@ -234,7 +234,7 @@ test("a new short spreads morning afternoon evening then next-day MAE, not a sam
   assert.notEqual(dayOf(stamps.get("Instagram::Reel"), zone), dayOf(stamps.get("YouTube::Short"), zone));
 });
 
-test("Stories share MAE occupancy instead of resetting to the next slot today", () => {
+test("Stories follow the same-platform main by 10 minutes even when MAE lanes are full", () => {
   const zone = "America/New_York";
   const now = new Date("2026-10-07T12:00:00Z");
   const morning = maeZonedWallToUtcMs(2026, 10, 7, 5, 30, zone);
@@ -242,6 +242,8 @@ test("Stories share MAE occupancy instead of resetting to the next slot today", 
   const evening = maeZonedWallToUtcMs(2026, 10, 7, 16, 30, zone);
   const stamps = maeBuildSuggestedScheduleMap(
     [
+      { platform: "Instagram", output_type: "Reel", scheduled_at: "" },
+      { platform: "Facebook", output_type: "Reel", scheduled_at: "" },
       { platform: "Instagram", output_type: "Story", scheduled_at: "" },
       { platform: "Facebook", output_type: "Story", scheduled_at: "" },
     ],
@@ -249,20 +251,36 @@ test("Stories share MAE occupancy instead of resetting to the next slot today", 
     now,
     { timeZone: zone },
   );
-  const ig = stamps.get("Instagram::Story");
-  const fb = stamps.get("Facebook::Story");
-  assert.ok(ig, "Instagram::Story");
-  assert.ok(fb, "Facebook::Story");
-  // Shared profile occupancy: once today's MAE is full, both Stories move to the next day
-  // and take morning then afternoon (not two independent morning resets).
-  assert.notEqual(dayOf(ig, zone), "2026-10-07");
-  assert.notEqual(dayOf(fb, zone), "2026-10-07");
-  assert.equal(dayOf(ig, zone), dayOf(fb, zone));
-  assert.equal(localParts(ig, zone).hour, 5);
-  assert.equal(localParts(ig, zone).minute, 30);
-  assert.equal(localParts(fb, zone).hour, 11);
-  assert.equal(localParts(fb, zone).minute, 30);
-  assert.notEqual(ig, fb);
+  const igReel = Date.parse(stamps.get("Instagram::Reel"));
+  const fbReel = Date.parse(stamps.get("Facebook::Reel"));
+  const ig = Date.parse(stamps.get("Instagram::Story"));
+  const fb = Date.parse(stamps.get("Facebook::Story"));
+  assert.ok(Number.isFinite(igReel), "Instagram::Reel");
+  assert.ok(Number.isFinite(fbReel), "Facebook::Reel");
+  assert.ok(Number.isFinite(ig), "Instagram::Story");
+  assert.ok(Number.isFinite(fb), "Facebook::Story");
+  // Content 527 Waiting Stories showed — because Stories competed for MAE and
+  // lost. Companion Stories always stamp main + 10 minutes instead.
+  assert.equal(ig, igReel + 10 * 60 * 1000);
+  assert.equal(fb, fbReel + 10 * 60 * 1000);
+});
+
+test("Stories keep a stored companion time without occupying the MAE lane", () => {
+  const zone = "America/New_York";
+  const now = new Date("2026-10-07T12:00:00Z");
+  const reelIso = new Date(maeZonedWallToUtcMs(2026, 10, 8, 5, 30, zone)).toISOString();
+  const storyIso = new Date(Date.parse(reelIso) + 10 * 60 * 1000).toISOString();
+  const stamps = maeBuildSuggestedScheduleMap(
+    [
+      { platform: "Instagram", output_type: "Reel", scheduled_at: reelIso },
+      { platform: "Instagram", output_type: "Story", scheduled_at: storyIso },
+    ],
+    {},
+    now,
+    { timeZone: zone },
+  );
+  assert.equal(stamps.get("Instagram::Reel"), new Date(reelIso).toISOString());
+  assert.equal(stamps.get("Instagram::Story"), new Date(storyIso).toISOString());
 });
 
 test("after 28 days of MAE are full, the 4th is day 1's largest gap", () => {
@@ -430,7 +448,7 @@ test("Worker stamp paths use MAE not industry evening windows", () => {
   assert.match(worker, /studio_mae_schedule_v1: true/);
   assert.match(worker, /studio_mae_profile_occupancy_v1: true/);
   assert.match(worker, /studio_schedule_occupancy_fields_v1: true/);
-  assert.match(worker, /0.10.550-library-search-tokens/);
+  assert.match(worker, /0.10.551-story-schedule-seed/);
   assert.match(worker, /STUDIO_OCCUPIED_HORIZON_MS = 28 \* 24/);
   assert.match(worker, /studioLoadPlanScheduleOccupancy/);
   assert.match(worker, /A stored 5:30 that lost its slot must be written/);

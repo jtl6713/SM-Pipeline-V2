@@ -184,3 +184,5 @@ Deploy Worker 0.10.489-engagement-ledger. Shrink the engagement ledger so Chicag
 2026-10-12: Worker 0.10.549-ideas-generate-async accepts idea Generate as a Pending batch and finishes Python I1 + photo listening in waitUntil.
 2026-10-12: Redeploy Worker 0.10.549-ideas-generate-async after transient Cloudflare deployments JSON parse during postdeploy verify (#641).
 2026-10-12: Worker 0.10.550-library-search-tokens — token-OR FIND for library/browse search so Prospect Park matches prospect/parked typos.
+
+2026-10-12: Worker 0.10.551-story-schedule-seed — always stamp IG/FB Story suggested times at plan seed (empty MAE lane + main+10m fallback).
