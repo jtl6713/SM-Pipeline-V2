@@ -267,7 +267,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.636-ops-multi-queue";
+  const BUILD_ID = "item4-0.6.637-ops-nav";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -1967,6 +1967,46 @@
     displayTextObserver.observe(document.body, {subtree:true, childList:true, characterData:true});
   }
 
+  function sessionCanOpenOperations(session) {
+    return Boolean(
+      session?.permissions?.tenant_admin
+      || session?.permissions?.publishing_control
+      || session?.permissions?.production_configure
+    );
+  }
+
+  function applyOperationsNavVisibility(session, { failOpen = false } = {}) {
+    const navOps = $("navOperations");
+    const footerOps = $("footerOperations");
+    if (!navOps && !footerOps) return;
+    if (session) {
+      const showOps = sessionCanOpenOperations(session);
+      if (navOps) navOps.hidden = !showOps;
+      if (footerOps) footerOps.hidden = !showOps;
+      return;
+    }
+    if (failOpen) {
+      if (navOps) navOps.hidden = false;
+      if (footerOps) footerOps.hidden = false;
+    }
+  }
+
+  async function refreshOperationsNavFromSession({ failOpen = true } = {}) {
+    try {
+      const session = await api("/api/session", { timeoutMs: 12000, retries: 2 });
+      studioSession = session || studioSession;
+      applyOperationsNavVisibility(session, { failOpen });
+      if (session?.authorized && session.user?.display_name && $("apiStatus")) {
+        $("apiStatus").textContent = normalizeDisplayText(`${session.user.display_name} · ${session.role || "Member"} · ${session.brand?.name || "Studio"}`);
+        $("apiStatus").title = "Authenticated by Cloudflare Access and authorized by Studio membership";
+      }
+      return session;
+    } catch (_error) {
+      applyOperationsNavVisibility(null, { failOpen });
+      return null;
+    }
+  }
+
   async function checkHealth() {
     try {
       const [healthResult, sessionResult] = await Promise.allSettled([
@@ -1979,11 +2019,12 @@
       studioSession = session || studioSession;
       // Paint Worker / API footer immediately. Profile list hits Airtable and must
       // never gate the bottom status strip when the base is rate-limited.
-      const navOps = $("navOperations");
-      const footerOps = $("footerOperations");
-      const showOps = Boolean(session?.permissions?.tenant_admin || session?.permissions?.publishing_control || session?.permissions?.production_configure);
-      if (navOps) navOps.hidden = !showOps;
-      if (footerOps) footerOps.hidden = !showOps;
+      applyOperationsNavVisibility(session);
+      if (!session) {
+        // /api/session reads Studio Users in Airtable — a rate-limit/timeout used to
+        // leave Operations stuck hidden for the whole page life. Retry, then fail open.
+        refreshOperationsNavFromSession().catch(() => {});
+      }
       if (workerBuildLabel) {
         workerBuildLabel.textContent = formatWorkerBuild(health?.version);
         workerBuildLabel.title = String(health?.version || "").trim() || (health ? "Studio API Worker" : "Could not reach /api/health");
@@ -1999,11 +2040,12 @@
         $("apiStatus").textContent = `Signed in · ${session.email}`;
         $("apiStatus").title = "Authenticated by Cloudflare Access; same-origin Studio API connected";
       } else {
-        $("apiStatus").textContent = "API connected";
+        $("apiStatus").textContent = sessionResult.status === "rejected" ? "API connected · session retrying" : "API connected";
       }
       loadStudioProfiles({ quiet: true }).catch(() => {});
     } catch (e) {
       $("apiStatus").textContent = "API unavailable";
+      refreshOperationsNavFromSession({ failOpen: true }).catch(() => {});
       if (workerBuildLabel) {
         workerBuildLabel.textContent = "Worker offline";
         workerBuildLabel.title = "Could not reach /api/health";

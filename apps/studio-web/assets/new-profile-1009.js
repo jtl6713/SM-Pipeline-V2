@@ -471,6 +471,14 @@
     state.canCreate = Boolean(result.can_create_profile);
     const nav = $("navNewProfile");
     if (nav) nav.hidden = !state.canCreate;
+    // Owner/Admin who can create profiles must also see Operations. Do not leave
+    // Ops hidden when /api/session timed out earlier in checkHealth.
+    if (state.canCreate) {
+      const ops = $("navOperations");
+      const footerOps = $("footerOperations");
+      if (ops) ops.hidden = false;
+      if (footerOps) footerOps.hidden = false;
+    }
     const select = $("newProfileTemplate");
     if (select) {
       select.innerHTML = state.profiles.map(function (profile) {

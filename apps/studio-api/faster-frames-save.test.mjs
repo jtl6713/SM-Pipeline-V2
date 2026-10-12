@@ -145,7 +145,7 @@ test("fractional video duration is stored as a whole-number cap and save errors 
 });
 
 test("UI polls GET /variants during Prepare and skips Save reload waterfall", () => {
-  assert.match(app, /BUILD_ID = "item4-0.6.636-ops-multi-queue"/);
+  assert.match(app, /BUILD_ID = "item4-0.6.637-ops-nav"/);
   assert.match(app, /pollItem4Variants/);
   const poll = app.slice(
     app.indexOf("async function pollItem4Variants"),

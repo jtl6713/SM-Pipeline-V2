@@ -256,3 +256,4 @@ UI 0.6.607 hashtag mismatch warning only; approval no longer blocked.
 2026-10-12: Studio UI 0.6.634-ops-queue-titles — Operations Queue shows content/idea titles + Content ID.
 2026-10-12: cache and deduplicate Swap Still searches; skip redundant suggestions for typed queries (UI 0.6.635).
 2026-10-12: Studio UI 0.6.636-ops-multi-queue — Operations multi-queue (Rendering / Publishing / End-to-End timeline).
+2026-10-12: Studio UI 0.6.637-ops-nav — restore Operations nav when /api/session blips; sync from New Profile admin.

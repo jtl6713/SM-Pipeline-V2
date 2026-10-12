@@ -204,10 +204,15 @@ test("worker and UI wire Operations multi-queue + prepare-to-review", () => {
   assert.match(html, /opsPublishQueueLines/);
   assert.match(html, /opsE2eQueueLines/);
   assert.match(html, /prepareIdeaToReviewButton/);
-  assert.match(app, /BUILD_ID = "item4-0\.6\.636-ops-multi-queue"/);
+  assert.match(app, /BUILD_ID = "item4-0\.6\.637-ops-nav"/);
   assert.match(app, /loadOperationsQueue/);
   assert.match(app, /opsE2eTrailHtml/);
   assert.match(app, /renderOpsRenderQueueDetail/);
+  assert.match(app, /function applyOperationsNavVisibility/);
+  assert.match(app, /function refreshOperationsNavFromSession/);
   assert.match(app, /prepareIdeaToReviewButton/);
   assert.match(app, /OPS_CONTROL_TABS = \[[^\]]*\"queue\"/);
+  const newProfile = fs.readFileSync(path.join(here, "../studio-web/assets/new-profile-1009.js"), "utf8");
+  assert.match(newProfile, /navOperations/);
+  assert.match(newProfile, /ops\.hidden = false/);
 });
