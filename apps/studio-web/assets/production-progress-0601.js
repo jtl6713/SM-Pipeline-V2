@@ -4,13 +4,14 @@
  const $=id=>document.getElementById(id);
  let updating=false;
  function state(){
-  const request=typeof activeProductionRequest!=='undefined'?activeProductionRequest:null;
-  const workspace=typeof item4Workspace!=='undefined'?item4Workspace:null;
-  const status=String(request?.status||$('productionRequestStatus')?.textContent||'').trim();
+  const request=$('productionRequestStatus');
+  const workspace=null;
+  const status=String(request?.textContent||$('productionRequestStatus')?.textContent||'').trim();
   const message=String($('productionRequestMessage')?.dataset.progressSource||$('productionRequestMessage')?.textContent||'');
-  const timeline=/timeline and stills are on production/i.test(message)||Boolean(workspace?.plan?.items?.length)||workspace?.plan_status==='Ready';
-  const stills=/timeline and stills are on production/i.test(message)||Boolean(workspace?.assets?.length);
-  const crops=workspace?.variant_status==='Ready'||workspace?.variant_status==='Not Needed'||/crops (?:are )?ready/i.test(message)&&!/still finishing|still preparing|not ready/i.test(message);
+  const timeline=/timeline and stills are on production/i.test(message)||/plan is ready|ready to approve|approved\./i.test(String($('productionPromotionCompatibility')?.textContent||''));
+  const stills=/timeline and stills are on production/i.test(message)||/photos are saved|plan is ready|ready to approve|approved\./i.test(String($('productionPromotionCompatibility')?.textContent||''));
+  const compatibility=String($('productionPromotionCompatibility')?.dataset.progressNote||$('productionPromotionCompatibility')?.textContent||'');
+  const crops=/5 platform-ready|variants are ready|ready to approve|approved\.|crops (?:are )?ready/i.test(compatibility+' '+message)&&!/still finishing|still preparing|not ready/i.test(compatibility+' '+message);
   const approved=/^(Promoted|Approved)$/i.test(status);
   return [timeline||approved,stills||approved,crops||approved,approved];
  }
@@ -18,11 +19,11 @@
   if(updating)return;
   const target=$('productionPromotionCompatibility')||$('productionRequestMessage');
   if(!target)return;
-  const request=typeof activeProductionRequest!=='undefined'?activeProductionRequest:null;
-  const workspace=typeof item4Workspace!=='undefined'?item4Workspace:null;
+  const request=$('productionRequestStatus');
+  const workspace=null;
   const source=$('productionRequestMessage');
   const sourceText=String(source?.dataset.progressSource||source?.textContent||'');
-  const relevant=Boolean(request&&(workspace||/timeline and stills are on production/i.test(sourceText)));
+  const relevant=Boolean(request&&(/timeline and stills are on production/i.test(sourceText)||$('productionPromotionCompatibility')?.textContent?.trim()));
   if(!relevant)return;
   const flags=state();
   const prior=target.querySelector('.production-progress-list');
