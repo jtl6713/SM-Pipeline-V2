@@ -626,7 +626,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.548-timeline-auto-prepare",
+          version: "0.10.549-ideas-generate-async",
           studio_create_vo_matched_stills_v1: true,
           studio_idea_library_typeahead_v1: true,
           studio_idea_library_search_all_hits_v1: true,
@@ -39964,66 +39964,9 @@ async function studioIdeaExecuteBatch(env, profile, batchRecord) {
   }
 }
 
-async function startStudioIdeaGeneration(request, env, authorization, ctx = null) {
-  let payload;
-  try { payload = await request.json(); } catch { throw new HttpError(400, "Request body must be valid JSON"); }
-  const count = Number(payload?.count);
-  const quality = String(payload?.quality || "Highest Quality").trim();
-  if (!Number.isInteger(count) || count < STUDIO_IDEA_MIN_COUNT || count > STUDIO_IDEA_MAX_COUNT) {
-    throw new HttpError(400, "Idea count must be a whole number from 1 to 10");
-  }
-  if (!STUDIO_IDEA_ALLOWED_QUALITIES.has(quality)) {
-    throw new HttpError(400, "Quality must be Highest Quality, Balanced, or Quantity");
-  }
-
-  const profileId = requestedProfileId(null, payload);
-  const profile = await resolveWorkingContentProfile(env, authorization, profileId);
-  if (!Boolean(f(profile, "Active"))) throw new HttpError(409, "The selected content profile is not active");
-
-  // I1 is Python-owned in production. Manual Studio generation should call the
-  // current pipeline stage directly instead of touching retired Make scenario
-  // state, temporary Make blueprints, or the legacy manual batch overrides.
-  let pulse;
-  try {
-    pulse = await item4PulsePipelineStage(env, "i1", {
-      extra: {
-        profile_record_id: profile.id,
-        requested_count: count,
-        quality,
-        trigger_i2: false,
-      },
-    }, "I1");
-  } catch (error) {
-    console.error("Studio idea generation could not reach Python I1", error);
-    throw error instanceof HttpError
-      ? error
-      : new HttpError(502, `Python I1 request failed: ${String(error?.message || error)}`);
-  }
-
-  const { response, payload: result } = pulse;
-  if (!response.ok || result?.status === "error") {
-    throw new HttpError(
-      response.status >= 400 ? response.status : 502,
-      result?.message || result?.error || `Python I1 returned HTTP ${response.status}`
-    );
-  }
-
-  const run = result?.details?.run || {};
-  const created = Math.max(0, Number(run.created_count || 0));
-  if (created < count) {
-    throw new HttpError(
-      502,
-      run.reason
-        ? `Python I1 created ${created} of ${count} requested ideas (${run.reason}).`
-        : `Python I1 created ${created} of ${count} requested ideas.`
-    );
-  }
-
-  const createdIds = Array.isArray(run.created_record_ids)
-    ? run.created_record_ids.map((id) => String(id || "").trim()).filter((id) => /^rec[A-Za-z0-9]+$/.test(id))
-    : [];
+async function studioIdeaStartPhotoListening(env, authorization, createdIds) {
   const photoListening = [];
-  for (const ideaId of createdIds) {
+  for (const ideaId of createdIds || []) {
     try {
       let idea = await airtableFetch(env, env.AIRTABLE_IDEA_TABLE_ID, ideaId);
       const contentType = ideaPhotoAutoListenContentType(idea);
@@ -40060,7 +40003,126 @@ async function startStudioIdeaGeneration(request, env, authorization, ctx = null
       photoListening.push({ action: "error", idea_id: ideaId, error: error?.message || String(error) });
     }
   }
+  return photoListening;
+}
 
+async function studioIdeaRunPythonBatch(env, authorization, profile, batch, count, quality) {
+  await studioIdeaUpdateBatch(env, batch.id, {
+    Status: "Running",
+    Started_At: new Date().toISOString(),
+    Error: null,
+  });
+
+  let pulse;
+  try {
+    pulse = await item4PulsePipelineStage(env, "i1", {
+      extra: {
+        profile_record_id: profile.id,
+        batch_record_id: batch.id,
+        requested_count: count,
+        quality,
+        trigger_i2: false,
+      },
+    }, "I1");
+  } catch (error) {
+    console.error("Studio idea generation could not reach Python I1", error);
+    throw error instanceof HttpError
+      ? error
+      : new HttpError(502, `Python I1 request failed: ${String(error?.message || error)}`);
+  }
+
+  const { response, payload: result } = pulse;
+  if (!response.ok || result?.status === "error") {
+    throw new HttpError(
+      response.status >= 400 ? response.status : 502,
+      result?.message || result?.error || `Python I1 returned HTTP ${response.status}`
+    );
+  }
+
+  const run = result?.details?.run || {};
+  const created = Math.max(0, Number(run.created_count || 0));
+  if (created < count) {
+    throw new HttpError(
+      502,
+      run.reason
+        ? `Python I1 created ${created} of ${count} requested ideas (${run.reason}).`
+        : `Python I1 created ${created} of ${count} requested ideas.`
+    );
+  }
+
+  const createdIds = Array.isArray(run.created_record_ids)
+    ? run.created_record_ids.map((id) => String(id || "").trim()).filter((id) => /^rec[A-Za-z0-9]+$/.test(id))
+    : [];
+  const photoListening = await studioIdeaStartPhotoListening(env, authorization, createdIds);
+  await studioIdeaUpdateBatch(env, batch.id, {
+    Status: "Complete",
+    Generated_Count: created,
+    Completed_At: new Date().toISOString(),
+    Error: null,
+  });
+  return { created, createdIds, photoListening };
+}
+
+async function startStudioIdeaGeneration(request, env, authorization, ctx = null) {
+  let payload;
+  try { payload = await request.json(); } catch { throw new HttpError(400, "Request body must be valid JSON"); }
+  const count = Number(payload?.count);
+  const quality = String(payload?.quality || "Highest Quality").trim();
+  if (!Number.isInteger(count) || count < STUDIO_IDEA_MIN_COUNT || count > STUDIO_IDEA_MAX_COUNT) {
+    throw new HttpError(400, "Idea count must be a whole number from 1 to 10");
+  }
+  if (!STUDIO_IDEA_ALLOWED_QUALITIES.has(quality)) {
+    throw new HttpError(400, "Quality must be Highest Quality, Balanced, or Quantity");
+  }
+
+  const profileId = requestedProfileId(null, payload);
+  // Blocks a second Generate while Manual_Idea_Batch is still linked.
+  const profile = await studioIdeaEnabledProfile(env, authorization, profileId);
+  const batch = await studioIdeaCreateBatch(env, profile, count, quality, authorization);
+  await studioIdeaSetProfileOverrides(env, profile.id, batch.id, count, quality);
+
+  // Mobile Safari aborts long sync Generate posts ("Fetch is aborted") while I1
+  // + photo listening still run. Accept the batch immediately and finish in
+  // waitUntil; the UI already polls /api/ideas/generate/:batchId.
+  const finish = async () => {
+    try {
+      return await studioIdeaRunPythonBatch(env, authorization, profile, batch, count, quality);
+    } catch (error) {
+      try {
+        await studioIdeaUpdateBatch(env, batch.id, {
+          Status: "Failed",
+          Completed_At: new Date().toISOString(),
+          Error: String(error?.message || error || "Idea generation failed").slice(0, 10000),
+        });
+      } catch {}
+      throw error;
+    } finally {
+      try { await studioIdeaClearProfileOverrides(env, profile.id); } catch (error) {
+        console.error("Could not clear manual idea overrides", error);
+      }
+    }
+  };
+
+  if (ctx && typeof ctx.waitUntil === "function") {
+    ctx.waitUntil(finish().catch((error) => {
+      console.error("Studio idea generation background finish failed", batch.id, error);
+    }));
+    return respond(request, env, {
+      ok: true,
+      accepted: true,
+      completed: false,
+      status: "Pending",
+      batch_record_id: batch.id,
+      batch_id: String(f(batch, "Batch_ID") || ""),
+      requested_count: count,
+      quality,
+      profile_record_id: profile.id,
+      backend: "python",
+      message: `Generating ${count} idea${count === 1 ? "" : "s"}…`,
+    }, 202);
+  }
+
+  const { created, photoListening } = await finish();
   return respond(request, env, {
     ok: true,
     accepted: true,
@@ -40070,6 +40132,7 @@ async function startStudioIdeaGeneration(request, env, authorization, ctx = null
     requested_count: count,
     quality,
     profile_record_id: profile.id,
+    batch_record_id: batch.id,
     backend: "python",
     photo_listening_started: photoListening.filter((row) => row.action !== "error").length,
     photo_matches_ready: photoListening.filter((row) => row.action === "ready").length,

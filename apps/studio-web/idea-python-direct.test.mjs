@@ -8,24 +8,34 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const workerPath = path.join(here, "..", "studio-api", "worker.js");
 const appPath = path.join(here, "assets", "app-item4-1008.js");
 
-test("Studio idea generation routes directly to Python I1", async () => {
+test("Studio idea generation accepts a batch then finishes Python I1 in waitUntil", async () => {
   const source = await readFile(workerPath, "utf8");
   const start = source.indexOf("async function startStudioIdeaGeneration");
   const end = source.indexOf("async function studioIdeaGenerationStatus", start);
   assert.ok(start >= 0 && end > start, "idea generation handler should exist");
   const handler = source.slice(start, end);
+  const run = source.slice(
+    source.indexOf("async function studioIdeaRunPythonBatch"),
+    source.indexOf("async function startStudioIdeaGeneration")
+  );
 
-  assert.match(handler, /item4PulsePipelineStage\(env, "i1"/);
+  assert.match(handler, /studioIdeaCreateBatch/);
+  assert.match(handler, /studioIdeaRunPythonBatch/);
+  assert.match(handler, /ctx\.waitUntil/);
+  assert.match(handler, /status: "Pending"/);
   assert.match(handler, /backend: "python"/);
+  assert.match(run, /item4PulsePipelineStage\(env, "i1"/);
+  assert.match(run, /batch_record_id: batch\.id/);
   assert.doesNotMatch(handler, /phase6ScenarioState/);
-  assert.doesNotMatch(handler, /studioIdeaCreateBatch/);
-  assert.doesNotMatch(handler, /studioIdeaSetProfileOverrides/);
-  assert.match(source, /version: "0\.10\./);
+  assert.match(source, /version: "0\.10\.549-ideas-generate-async"/);
 });
 
-test("Studio UI accepts synchronous Python I1 completion", async () => {
+test("Studio UI polls idea batches and explains aborted Generate starts", async () => {
   const source = await readFile(appPath, "utf8");
   assert.match(source, /result\.completed \|\| result\.status === "Complete"/);
   assert.match(source, /created_count/);
-  assert.match(source, /timeoutMs: 120000/);
+  assert.match(source, /timeoutMs: 45000/);
+  assert.match(source, /activeIdeaGenerationBatchId = result\.batch_record_id/);
+  assert.match(source, /connection dropped/);
+  assert.match(source, /BUILD_ID = "item4-0\.6\.627-ideas-generate-async"/);
 });

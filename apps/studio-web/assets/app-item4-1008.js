@@ -267,7 +267,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.626-timeline-auto-prepare";
+  const BUILD_ID = "item4-0.6.627-ideas-generate-async";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -2568,10 +2568,13 @@
     if ($("ideaGenerateComplete")) $("ideaGenerateComplete").hidden = true;
     setIdeaGenerateMessage("Starting idea generation…");
     try {
+      // POST only accepts the batch now; I1 finishes in the Worker background.
+      // Keep this short so mobile Safari does not surface "Fetch is aborted".
       const result = await api("/api/ideas/generate", {
         method: "POST",
         body: JSON.stringify({ count, quality }),
-        timeoutMs: 120000,
+        timeoutMs: 45000,
+        retries: 1,
       });
       if (result.completed || result.status === "Complete") {
         ideaGenerationInFlight = false;
@@ -2592,7 +2595,16 @@
     } catch (error) {
       ideaGenerationInFlight = false;
       if (button) { button.disabled = false; button.textContent = "Retry"; }
-      setIdeaGenerateMessage(error.message || "Unable to start idea generation. Try again.", "error-text");
+      const aborted = error?.name === "AbortError"
+        || /aborted|timeout|timed out|signal timed out/i.test(String(error?.message || ""));
+      setIdeaGenerateMessage(
+        aborted
+          ? "Studio could not start idea generation before the connection dropped. Tap Retry — check Current ideas first in case some already appeared."
+          : (error.message || "Unable to start idea generation. Try again."),
+        "error-text"
+      );
+      // A timed-out accept may still have created the batch / ideas.
+      Promise.all([loadIdeas(), loadDashboard()]).catch(() => {});
     }
   });
 
