@@ -267,7 +267,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.653-production-timeline-truth";
+  const BUILD_ID = "item4-0.6.654-ops-phase-open";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -24004,6 +24004,30 @@ function timedScriptAssetLabel(asset, index) {
     pub_approved: "Approved",
     published: "Published",
   };
+  /** IDEA/MEDIA/PLAT/FRAME → Idea; PROD/QUEUE/REND → Production; REVIEW/APPR/PUB → Publishing */
+  const OPS_E2E_PHASE_BY_STAGE = {
+    idea: "idea",
+    media: "idea",
+    platforms: "idea",
+    frames: "idea",
+    prod_approved: "production",
+    render_queue: "production",
+    rendering: "production",
+    review: "publishing",
+    pub_approved: "publishing",
+    published: "publishing",
+  };
+  const OPS_E2E_PHASE_ORDER = ["idea", "production", "publishing"];
+  const OPS_E2E_PHASE_LABELS = {
+    idea: "Idea",
+    production: "Production",
+    publishing: "Publishing",
+  };
+  const OPS_E2E_PHASE_SHORT = {
+    idea: "Idea",
+    production: "Prod",
+    publishing: "Pub",
+  };
   const OPS_E2E_DOT_COLORS = [
     "#d4a017",
     "#e67e22",
@@ -24089,6 +24113,153 @@ function timedScriptAssetLabel(asset, index) {
     return prefix ? `${prefix}-${title}` : title;
   }
 
+  function opsQueueRowPhase(row) {
+    const direct = String(row?.phase || row?.e2e?.phase || "").trim();
+    if (direct && OPS_E2E_PHASE_LABELS[direct]) return direct;
+    const currentId = String(row?.e2e?.current_id || "").trim();
+    if (currentId && OPS_E2E_PHASE_BY_STAGE[currentId]) return OPS_E2E_PHASE_BY_STAGE[currentId];
+    const stages = Array.isArray(row?.e2e?.stages) ? row.e2e.stages : [];
+    const current = stages.find((stage) => stage?.state === "current");
+    if (current?.id && OPS_E2E_PHASE_BY_STAGE[current.id]) return OPS_E2E_PHASE_BY_STAGE[current.id];
+    const todo = stages.find((stage) => stage?.state === "todo");
+    if (todo?.id && OPS_E2E_PHASE_BY_STAGE[todo.id]) return OPS_E2E_PHASE_BY_STAGE[todo.id];
+    return "idea";
+  }
+
+  function opsQueuePhaseCell(row) {
+    const phase = opsQueueRowPhase(row);
+    const label = OPS_E2E_PHASE_LABELS[phase] || "Idea";
+    const short = OPS_E2E_PHASE_SHORT[phase] || label;
+    return `<div class="ops-queue-cell ops-queue-phase" data-phase="${escapeHtml(phase)}" title="${escapeHtml(label)}"><span class="ops-queue-phase-chip">${escapeHtml(short)}</span></div>`;
+  }
+
+  function opsQueuePhaseBandHtml(phase) {
+    const label = OPS_E2E_PHASE_LABELS[phase] || phase;
+    return `<div class="ops-queue-phase-band" data-phase="${escapeHtml(phase)}" role="rowheader"><span>${escapeHtml(label)}</span></div>`;
+  }
+
+  function opsQueueOpenButtonAttrs(row, { openId = "" } = {}) {
+    const phase = opsQueueRowPhase(row);
+    const id = openId || row?.id || "";
+    const currentId = String(row?.e2e?.current_id || "").trim();
+    const reviewLike = phase === "publishing" && (
+      currentId === "review"
+      || /ready for review|review sent|awaiting approval/i.test(String(row?.studio_state || ""))
+    );
+    const filter = reviewLike ? "approval" : "all";
+    return [
+      `data-ops-queue-open="${escapeHtml(id)}"`,
+      `data-ops-queue-phase="${escapeHtml(phase)}"`,
+      `data-ops-queue-profile="${escapeHtml(row?.profile_id || "")}"`,
+      `data-ops-queue-idea="${escapeHtml(row?.idea_id || "")}"`,
+      `data-ops-queue-pr="${escapeHtml(row?.production_request_id || "")}"`,
+      `data-ops-queue-filter="${escapeHtml(filter)}"`,
+    ].join(" ");
+  }
+
+  function opsQueueEnsureProfile(profileId) {
+    const next = String(profileId || "").trim();
+    if (!next || selectedProfileId === next) return;
+    const select = $("studioProfileSelect");
+    if (!select) return;
+    select.value = next;
+    select.dispatchEvent(new Event("change", { bubbles: true }));
+  }
+
+  async function opsQueueOpenIdeaPhase(button) {
+    const ideaId = String(button.dataset.opsQueueIdea || "").trim();
+    const prId = String(button.dataset.opsQueuePr || "").trim();
+    opsQueueEnsureProfile(button.dataset.opsQueueProfile || selectedProfileId);
+    showStudioPage("ideas");
+    await ensureIdeasCache();
+    let idea = ideaId ? ideasCache.find((row) => row.id === ideaId) : null;
+    if (!idea && ideaId) {
+      try {
+        const result = await api(`/api/ideas/${encodeURIComponent(ideaId)}`, { timeoutMs: 12000, retries: 0 });
+        idea = result?.record || (result?.id ? result : null);
+      } catch {
+        idea = null;
+      }
+    }
+    if (!idea && prId) {
+      try {
+        const fresh = await api(`/api/production-requests/${encodeURIComponent(prId)}`, { timeoutMs: 12000, retries: 0 });
+        const resolvedIdeaId = ideaIdFromRequest(fresh?.record || {});
+        if (resolvedIdeaId) {
+          idea = ideasCache.find((row) => row.id === resolvedIdeaId) || null;
+          if (!idea) {
+            const result = await api(`/api/ideas/${encodeURIComponent(resolvedIdeaId)}`, { timeoutMs: 12000, retries: 0 });
+            idea = result?.record || (result?.id ? result : null);
+          }
+        }
+      } catch {
+        idea = null;
+      }
+    }
+    if (idea?.id) {
+      await openIdeaDrawer(idea);
+      setOperationsMessage("Opened Ideas for this item.", "");
+      return;
+    }
+    setOperationsMessage("Opened Ideas. Find the matching idea to continue.", "");
+  }
+
+  async function opsQueueOpenProductionPhase(button) {
+    const prId = String(button.dataset.opsQueuePr || "").trim();
+    const ideaId = String(button.dataset.opsQueueIdea || "").trim();
+    opsQueueEnsureProfile(button.dataset.opsQueueProfile || selectedProfileId);
+    showStudioPage("content");
+    await ensureIdeasCache();
+    if (prId) {
+      try {
+        const fresh = await api(`/api/production-requests/${encodeURIComponent(prId)}`, { timeoutMs: 12000, retries: 0 });
+        const record = fresh?.record;
+        if (record?.id) {
+          const resolvedIdeaId = ideaIdFromRequest(record) || ideaId;
+          activeIdea = resolvedIdeaId ? ideasCache.find((idea) => idea.id === resolvedIdeaId) || null : null;
+          ezEntryPath = "configure";
+          populateProductionRequestForm(record);
+          showProductionRequestWorkspace();
+          Promise.allSettled([
+            loadProductionRequestOutputs(record),
+            loadItem4Workspace(record),
+            ensureProductionRequestMusic(),
+            loadEzAudioOptions(),
+          ]).catch(() => {});
+          setRequestMessage("Opened from Operations Queue.", "success");
+          setOperationsMessage("Opened Production.", "");
+          return;
+        }
+      } catch (error) {
+        setOperationsMessage(error.message || "Could not open Production.", "error-text");
+      }
+    }
+    if (ideaId) {
+      const idea = ideasCache.find((row) => row.id === ideaId);
+      if (idea) {
+        await openProductionRequestForIdea(idea);
+        setOperationsMessage("Opened Production.", "");
+        return;
+      }
+    }
+    setOperationsMessage("Opened Production. Pick the draft to continue.", "");
+  }
+
+  async function opsQueueOpenRow(button) {
+    const phase = String(button.dataset.opsQueuePhase || "").trim() || "publishing";
+    if (phase === "idea") {
+      await opsQueueOpenIdeaPhase(button);
+      return;
+    }
+    if (phase === "production") {
+      await opsQueueOpenProductionPhase(button);
+      return;
+    }
+    studioOpenPipelineFilter(button.dataset.opsQueueFilter || "all", {
+      profileId: button.dataset.opsQueueProfile || selectedProfileId,
+    });
+  }
+
   async function opsQueuePauseRow(row, paused) {
     await api("/api/operations/queue/pause", {
       method: "POST",
@@ -24137,11 +24308,16 @@ function timedScriptAssetLabel(asset, index) {
       });
     });
     root.querySelectorAll("[data-ops-queue-open]").forEach((button) => {
-      button.addEventListener("click", (event) => {
+      button.addEventListener("click", async (event) => {
         event.stopPropagation();
-        studioOpenPipelineFilter("all", {
-          profileId: button.dataset.opsQueueProfile || selectedProfileId,
-        });
+        button.disabled = true;
+        try {
+          await opsQueueOpenRow(button);
+        } catch (error) {
+          setOperationsMessage(error.message || "Could not open item.", "error-text");
+        } finally {
+          button.disabled = false;
+        }
       });
     });
   }
@@ -24173,7 +24349,7 @@ function timedScriptAssetLabel(asset, index) {
         <button type="button" class="text-button" data-ops-queue-move="${escapeHtml(row.id)}" data-ops-queue-dir="top">To front</button>
         <button type="button" class="text-button" data-ops-queue-move="${escapeHtml(row.id)}" data-ops-queue-dir="up">Up</button>
         <button type="button" class="text-button" data-ops-queue-move="${escapeHtml(row.id)}" data-ops-queue-dir="down">Down</button>` : ""}
-        <button type="button" class="text-button" data-ops-queue-open="${escapeHtml(row.id)}" data-ops-queue-profile="${escapeHtml(row.profile_id || "")}">Open in Pipeline</button>
+        <button type="button" class="text-button" ${opsQueueOpenButtonAttrs(row)}>Open</button>
         ${row.final_file_url ? `<a class="text-button" target="_blank" rel="noopener" href="${escapeHtml(row.final_file_url)}">Final file</a>` : ""}
         <button type="button" class="text-button" data-ops-queue-detail-close="1">Close</button>
       </div>`;
@@ -24204,7 +24380,8 @@ function timedScriptAssetLabel(asset, index) {
       const thumb = row.thumbnail_url
         ? `<img class="ops-queue-thumb" src="${escapeHtml(row.thumbnail_url)}" alt="" loading="lazy">`
         : "";
-      return `<div class="ops-queue-line${selected}" data-lane="${escapeHtml(row.lane || "active")}" data-ops-render-id="${escapeHtml(row.id)}" role="button" tabindex="0">
+      return `<div class="ops-queue-line${selected}" data-lane="${escapeHtml(row.lane || "active")}" data-phase="${escapeHtml(opsQueueRowPhase(row))}" data-ops-render-id="${escapeHtml(row.id)}" role="button" tabindex="0">
+        ${opsQueuePhaseCell(row)}
         <div class="ops-queue-line-main">${thumb}<div class="ops-queue-cell"><span class="ops-queue-line-title">${escapeHtml(opsQueueItemLabel(row))}</span></div></div>
         <div class="ops-queue-cell">${escapeHtml(row.profile_name || "—")}</div>
         <div class="ops-queue-cell">${escapeHtml(row.platform || "—")}</div>
@@ -24214,7 +24391,7 @@ function timedScriptAssetLabel(asset, index) {
         <div class="ops-queue-line-actions">
           ${operationsQueueCanEdit ? `<button type="button" class="secondary-button" data-ops-queue-pause="${escapeHtml(row.id)}" data-ops-queue-kind="output" data-ops-queue-paused="${paused ? "0" : "1"}">${paused ? "Resume" : "Pause"}</button>
           <button type="button" class="text-button" data-ops-queue-move="${escapeHtml(row.id)}" data-ops-queue-dir="top">Front</button>` : ""}
-          <button type="button" class="text-button" data-ops-queue-open="${escapeHtml(row.id)}" data-ops-queue-profile="${escapeHtml(row.profile_id || "")}">Open</button>
+          <button type="button" class="text-button" ${opsQueueOpenButtonAttrs(row)}>Open</button>
         </div>
       </div>`;
     }).join("");
@@ -24255,14 +24432,15 @@ function timedScriptAssetLabel(asset, index) {
       return;
     }
     host.innerHTML = rows.map((row) => {
-      return `<div class="ops-queue-line" data-lane="${escapeHtml(row.lane || "publish")}">
+      return `<div class="ops-queue-line" data-lane="${escapeHtml(row.lane || "publish")}" data-phase="${escapeHtml(opsQueueRowPhase(row))}">
+        ${opsQueuePhaseCell(row)}
         <div class="ops-queue-line-main"><div class="ops-queue-cell"><span class="ops-queue-line-title">${escapeHtml(opsQueueItemLabel(row))}</span></div></div>
         <div class="ops-queue-cell">${escapeHtml(row.profile_name || "—")}</div>
         <div class="ops-queue-cell">${escapeHtml(row.platform || "—")}</div>
         <div class="ops-queue-cell">${escapeHtml(row.studio_state || "—")}</div>
         ${opsE2eTrailHtml(row.e2e)}
         <div class="ops-queue-line-actions">
-          <button type="button" class="text-button" data-ops-queue-open="${escapeHtml(row.id)}" data-ops-queue-profile="${escapeHtml(row.profile_id || "")}">Open</button>
+          <button type="button" class="text-button" ${opsQueueOpenButtonAttrs(row)}>Open</button>
         </div>
       </div>`;
     }).join("");
@@ -24279,18 +24457,29 @@ function timedScriptAssetLabel(asset, index) {
       host.innerHTML = `<div class="ops-queue-empty">No in-flight idea → publish paths.</div>`;
       return;
     }
-    host.innerHTML = rows.map((row) => {
+    const phaseRank = Object.fromEntries(OPS_E2E_PHASE_ORDER.map((phase, index) => [phase, index]));
+    const sorted = [...rows].sort((a, b) => {
+      const phaseDelta = (phaseRank[opsQueueRowPhase(a)] ?? 9) - (phaseRank[opsQueueRowPhase(b)] ?? 9);
+      if (phaseDelta) return phaseDelta;
+      return String(b.updated_at || "").localeCompare(String(a.updated_at || ""));
+    });
+    let lastPhase = "";
+    host.innerHTML = sorted.map((row) => {
+      const phase = opsQueueRowPhase(row);
       const platforms = Array.isArray(row.platforms) && row.platforms.length
         ? row.platforms.join(", ")
         : (row.platform || "—");
       const openId = row.content_item_id || row.production_request_id || row.id;
-      return `<div class="ops-queue-line" data-lane="${row.stuck_kind ? "stuck" : "active"}">
+      const band = phase !== lastPhase ? opsQueuePhaseBandHtml(phase) : "";
+      lastPhase = phase;
+      return `${band}<div class="ops-queue-line" data-lane="${row.stuck_kind ? "stuck" : "active"}" data-phase="${escapeHtml(phase)}">
+        ${opsQueuePhaseCell(row)}
         <div class="ops-queue-line-main"><div class="ops-queue-cell"><span class="ops-queue-line-title">${escapeHtml(opsQueueItemLabel(row))}</span></div></div>
         <div class="ops-queue-cell">${escapeHtml(row.profile_name || "—")}</div>
         <div class="ops-queue-cell">${escapeHtml(platforms)}</div>
         ${opsE2eTrailHtml(row.e2e)}
         <div class="ops-queue-line-actions">
-          <button type="button" class="text-button" data-ops-queue-open="${escapeHtml(openId)}" data-ops-queue-profile="${escapeHtml(row.profile_id || "")}">Open</button>
+          <button type="button" class="text-button" ${opsQueueOpenButtonAttrs(row, { openId })}>Open</button>
         </div>
       </div>`;
     }).join("");
