@@ -258,7 +258,7 @@ test("Worker advertises the idea timed-script route", async () => {
   assert.match(app, /single_image_feed_post/);
   assert.match(app, /library_asset_ids/);
   assert.match(app, /saveManagedIdeaIdentity/);
-  assert.match(app, /Preparing this feed post from the one photo/);
+  assert.match(app, /Writing the spoken timeline and matching named stills\. This replaces an unapproved silent photo plan\. Nothing publishes\./);
   assert.match(worker, /deterministic-fallback/);
   assert.match(worker, /idea timeline writer failed; using deterministic fallback/);
   assert.match(worker, /idea timeline plan failed after stills saved/);
@@ -291,7 +291,7 @@ test("Worker advertises the idea timed-script route", async () => {
   assert.match(worker, /ideaLibraryVideoFilterFormula/);
   assert.match(worker, /scripted short video discovery failed/);
   assert.match(worker, /allowVideo: true/);
-  assert.match(worker, /0.10.542-keep-last-list/);
+  assert.match(worker, /0.10.547-library-search-all-hits/);
   const css = await readFile(path.join(here, "../studio-web/assets/styles-phase7-0621.css"), "utf8");
   assert.match(css, /#page-ideas \.page-heading\{\s*flex-wrap:wrap;/);
   assert.match(css, /#page-ideas \.heading-actions\{/);

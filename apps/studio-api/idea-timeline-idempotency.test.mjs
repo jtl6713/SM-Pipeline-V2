@@ -28,7 +28,7 @@ test("a failed linked-request lookup cannot silently regenerate a duplicate", ()
 });
 
 test("Worker version is incremented for deployed idempotency fix", () => {
-  assert.match(worker, /version: "0.10.545-create-vo"/);
+  assert.match(worker, /version: "0.10.547-library-search-all-hits"/);
 });
 
 test("explicit Create VO Timeline does not silently make a Photo Set", () => {

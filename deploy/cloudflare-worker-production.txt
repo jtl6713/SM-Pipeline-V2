@@ -179,3 +179,5 @@ Deploy Worker 0.10.489-engagement-ledger. Shrink the engagement ledger so Chicag
 2026-10-11: Pipeline keeps the last list when the outputs request times out, and serves a stored snapshot instead of waiting on a live scan (UI 0.6.621 / Worker 0.10.544-pipeline-snapshot).
 2026-10-11: Create VO timeline writes narration onto an unapproved silent photo package, including one already promoted (UI 0.6.622 / Worker 0.10.545-create-vo).
 2026-10-11: Worker 0.10.546-pipeline-latest-rescue serves live recent outputs without stale heavy Pipeline snapshot.
+
+2026-10-12: Manage Idea typed library search returns every query hit (no idea relevance ranking); UI 0.6.625 / Worker 0.10.547.
