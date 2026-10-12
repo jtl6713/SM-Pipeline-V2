@@ -258,4 +258,4 @@ UI 0.6.607 hashtag mismatch warning only; approval no longer blocked.
 2026-10-12: Studio UI 0.6.636-ops-multi-queue — Operations multi-queue (Rendering / Publishing / End-to-End timeline).
 2026-10-12: Studio UI 0.6.637-ops-nav — restore Operations nav when /api/session blips; sync from New Profile admin.
 2026-10-12: Studio UI 0.6.638-ops-queue-fields — Ops queues empty fix (bad Airtable fields[]).
-2026-10-12: Studio UI 0.6.639-ops-timeline-dots — Ops End-to-End colored-dot path + column headers.
+2026-10-12: Studio UI 0.6.639-ops-timeline-dots — Ops End-to-End visual timeline dots + stage labels in header.

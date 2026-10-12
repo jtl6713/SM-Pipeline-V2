@@ -23872,15 +23872,15 @@ function timedScriptAssetLabel(asset, index) {
     )).join("");
   }
 
-  const OPS_E2E_STAGE_SHORT = {
+  const OPS_E2E_STAGE_LABELS = {
     idea: "Idea",
-    media: "Media",
-    platforms: "Platforms",
-    frames: "Frames",
+    media: "Media Added",
+    platforms: "Platform Suggested",
+    frames: "Frames Prepared",
     prod_approved: "Approved",
-    render_queue: "Queue",
+    render_queue: "Rendering Queue",
     rendering: "Rendering",
-    review: "Review",
+    review: "Waiting for Approval",
     pub_approved: "Approved",
     published: "Published",
   };
@@ -23896,7 +23896,7 @@ function timedScriptAssetLabel(asset, index) {
     "#148f9c",
     "#1e8449",
   ];
-  const OPS_E2E_STAGE_ORDER = Object.keys(OPS_E2E_STAGE_SHORT);
+  const OPS_E2E_STAGE_ORDER = Object.keys(OPS_E2E_STAGE_LABELS);
 
   function opsE2eStageColor(index) {
     return OPS_E2E_DOT_COLORS[index % OPS_E2E_DOT_COLORS.length] || "#9aa6b2";
@@ -23907,15 +23907,15 @@ function timedScriptAssetLabel(asset, index) {
     if (!host) return;
     const defs = Array.isArray(stages) && stages.length
       ? stages
-      : OPS_E2E_STAGE_ORDER.map((id) => ({ id, label: OPS_E2E_STAGE_SHORT[id] }));
+      : OPS_E2E_STAGE_ORDER.map((id) => ({ id, label: OPS_E2E_STAGE_LABELS[id] }));
     const signature = defs.map((stage) => stage.id).join("|");
     if (host.dataset.signature === signature) return;
     host.dataset.signature = signature;
     host.style.gridTemplateColumns = `repeat(${defs.length},minmax(0,1fr))`;
     host.innerHTML = defs.map((stage, index) => {
       const color = opsE2eStageColor(index);
-      const short = OPS_E2E_STAGE_SHORT[stage.id] || stage.label || stage.id;
-      return `<span style="--dot:${color}" title="${escapeHtml(stage.label || short)}">${escapeHtml(short)}</span>`;
+      const label = OPS_E2E_STAGE_LABELS[stage.id] || stage.label || stage.id;
+      return `<span style="--dot:${color}" title="${escapeHtml(label)}">${escapeHtml(label)}</span>`;
     }).join("");
   }
 
@@ -23923,9 +23923,10 @@ function timedScriptAssetLabel(asset, index) {
     const stages = Array.isArray(e2e?.stages) ? e2e.stages : [];
     ensureOpsE2eStageLabels(stages);
     if (!stages.length) {
-      return `<div class="ops-e2e-track" style="--progress:0" aria-label="No stages"></div>`;
+      return `<div class="ops-e2e-track" style="--progress:0;--current:-1" aria-label="No stages"></div>`;
     }
-    let progressIndex = stages.findIndex((stage) => stage.state === "current");
+    const currentIndex = stages.findIndex((stage) => stage.state === "current");
+    let progressIndex = currentIndex;
     if (progressIndex < 0) {
       for (let i = stages.length - 1; i >= 0; i -= 1) {
         if (stageDoneLike(stages[i]?.state)) {
@@ -23940,9 +23941,10 @@ function timedScriptAssetLabel(asset, index) {
     const dots = stages.map((stage, index) => {
       const color = opsE2eStageColor(index);
       const state = stage.state || "todo";
-      return `<span class="ops-e2e-dot" data-state="${escapeHtml(state)}" style="--dot:${color}" title="${escapeHtml(`${stage.label}: ${state}`)}"></span>`;
+      const filled = stageDoneLike(state) || state === "current";
+      return `<span class="ops-e2e-dot" data-state="${escapeHtml(state)}" data-filled="${filled ? "1" : "0"}" style="--dot:${color}" title="${escapeHtml(`${stage.label}: ${state}`)}"></span>`;
     }).join("");
-    return `<div class="ops-e2e-track" style="--progress:${progress.toFixed(4)};grid-template-columns:repeat(${stages.length},minmax(0,1fr))" title="${escapeHtml(title)}" role="img" aria-label="${escapeHtml(title)}">${dots}</div>`;
+    return `<div class="ops-e2e-track" style="--progress:${progress.toFixed(4)};--current:${currentIndex};--ops-e2e-count:${stages.length};grid-template-columns:repeat(${stages.length},minmax(0,1fr))" title="${escapeHtml(title)}" role="img" aria-label="${escapeHtml(title)}">${dots}</div>`;
   }
 
   function stageDoneLike(state) {

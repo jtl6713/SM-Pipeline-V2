@@ -189,9 +189,9 @@ test("Worker admit + mapOutput expose queue meta and Remotion job id", () => {
 });
 
 test("UI shows Waiting in render queue and shared-render sibling wait", () => {
-  assert.match(app, /BUILD_ID = "item4-0.6.638-ops-queue-fields"/);
-  assert.match(html, /app-item4-1008\.js\?v=0.6.638-ops-queue-fields/);
-  assert.match(html, /UI build 0.6.638/);
+  assert.match(app, /BUILD_ID = "item4-0.6.639-ops-timeline-dots"/);
+  assert.match(html, /app-item4-1008\.js\?v=0.6.639-ops-timeline-dots/);
+  assert.match(html, /UI build 0.6.639/);
   assert.match(app, /function pipelineRenderQueueLabel/);
   assert.match(app, /Waiting in render queue \(#\$\{pos\} of \$\{total\}\)/);
   assert.match(app, /Waiting for shared render/);
