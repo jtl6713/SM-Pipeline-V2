@@ -7577,7 +7577,7 @@ function ideaLibrarySearchHit(text, token) {
   if (!key) return false;
   if (ideaLibraryHasToken(hay, key)) return true;
   if (key.length < 3) return false;
-  const escaped = key.replace(/[.*+?^${}()|[\]\]/g, "\$&");
+  const escaped = key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   return new RegExp(`(?:^|[^a-z0-9])${escaped}[a-z0-9]`).test(hay);
 }
 
