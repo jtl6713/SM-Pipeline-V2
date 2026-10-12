@@ -12,8 +12,8 @@ test("idea library search sequence + pins", async () => {
   const worker = await readFile(path.join(here, "../studio-api/worker.js"), "utf8");
   assert.match(app, /ideaLibraryLoadSequence/);
   assert.match(app, /Ignore stale responses so a slow empty-query open cannot wipe a later "Museum" search/);
-  assert.match(app, /item4-0.6.656-pipeline-progress-compact/);
-  assert.match(html, /UI build 0\.6\.656/);
+  assert.match(app, /item4-0.6.657-lazy-js/);
+  assert.match(html, /UI build 0\.6\.657/);
   assert.match(worker, /0\.10\.561-production-photo-wait-visibility/);
   assert.match(worker, /studio_idea_library_typeahead_v1: true/);
   assert.match(worker, /ideaLibrarySearchHit/);
