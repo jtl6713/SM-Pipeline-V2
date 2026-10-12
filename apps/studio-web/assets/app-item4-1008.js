@@ -207,6 +207,7 @@
   const item4CropDrafts = new Map();
   let item4CropRequestId = null;
   let pipelineOutputs = [];
+  let pipelineListUnverified = false;
   let pipelineContentRecords = [];
   let pipelineScheduleGridRecords = [];
   let pipelineScheduleGridOpen = false;
@@ -263,7 +264,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.615-pipeline-default-all";
+  const BUILD_ID = "item4-0.6.616-keep-last-list";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -18496,6 +18497,12 @@ function timedScriptAssetLabel(asset, index) {
       button.textContent = "Approving…";
       return;
     }
+    if (pipelineListUnverified) {
+      button.disabled = true;
+      button.textContent = "Approve All";
+      button.title = "Approve stays off until Pipeline finishes refreshing.";
+      return;
+    }
     if (pipelineApproveAllCanRetry && pipelineApproveAllFailedCount > 0 && pipelineApproveAllJobId) {
       button.disabled = false;
       button.dataset.azAuto = "";
@@ -20658,6 +20665,18 @@ function timedScriptAssetLabel(asset, index) {
     }, PIPELINE_POLL_MS);
   }
 
+  function readPipelineOutputCache() {
+    try {
+      const parsed = JSON.parse(sessionStorage.getItem("studio.pipelineOutputs.v1") || "");
+      const records = Array.isArray(parsed?.records) ? parsed.records : [];
+      if (!records.length) return [];
+      if (Date.now() - Number(parsed.at || 0) > 30 * 60 * 1000) return [];
+      return records;
+    } catch {
+      return [];
+    }
+  }
+
   async function refreshPipelineOutputs({ silent = false, force = false } = {}) {
     const target = $("outputsList");
     if (!target) return;
@@ -20705,8 +20724,13 @@ function timedScriptAssetLabel(asset, index) {
         && target.querySelector("table")
         && pipelineFingerprint(records) === pipelineFingerprint(pipelineOutputs)
         && pipelineContentFingerprint(contentRecords) === pipelineContentFingerprint(pipelineContentRecords);
+      pipelineListUnverified = false;
       pipelineOutputs = records;
       pipelineContentRecords = contentRecords;
+      target.querySelector(":scope > .pipeline-stale-note")?.remove();
+      try {
+        sessionStorage.setItem("studio.pipelineOutputs.v1", JSON.stringify({ records, at: Date.now() }));
+      } catch { /* ignore quota */ }
       updatePipelineApproveAllButton();
       if (!unchanged) {
         const scrollTop = target.scrollTop;
@@ -20716,14 +20740,37 @@ function timedScriptAssetLabel(asset, index) {
       maybeOpenFilteredPipelineOutput();
       if (pipelinePageActive() && !document.hidden && !pipelineCountdownTimer) setPipelineLiveHint("Live · refreshed just now");
     } catch (e) {
-      // A failed refresh cannot certify previously loaded output rows.
-      // Hide them and disable stale approval actions until a verified fetch succeeds.
+      // A short Airtable pause must not blank the list. Keep the last verified
+      // Pipeline on screen and hold Approve All until the next successful fetch.
+      const message = String(e?.message || "Refresh failed");
+      const keep = (pipelineOutputs.length > 0 && target.querySelector("table"))
+        ? pipelineOutputs
+        : readPipelineOutputCache();
+      if (keep?.length) {
+        pipelineListUnverified = true;
+        if (!target.querySelector("table")) {
+          pipelineOutputs = keep;
+          renderOutputsTable(target, keep);
+        }
+        let note = target.querySelector(":scope > .pipeline-stale-note");
+        if (!note) {
+          note = document.createElement("div");
+          note.className = "pipeline-stale-note";
+          note.setAttribute("role", "status");
+          target.prepend(note);
+        }
+        note.textContent = `Showing the last verified Pipeline. Retrying automatically. ${message}`;
+        updatePipelineApproveAllButton();
+        setPipelineLiveHint("Showing last Pipeline list · retrying");
+        return;
+      }
+      // Nothing verified yet. Do not invent rows from the Home snapshot.
       pipelineOutputs = [];
       pipelineContentRecords = [];
       pipelineScheduleGridRecords = [];
       updatePipelineQuickTabs([]);
       updatePipelineApproveAllButton();
-      target.innerHTML = `<div class="error" role="alert">Pipeline data is unavailable or out of date. Previously loaded posts are hidden to prevent opening or approving deleted content. Retrying automatically. ${escapeHtml(e?.message || "Refresh failed")}</div>`;
+      target.innerHTML = `<div class="error" role="alert">Pipeline data is unavailable or out of date. Previously loaded posts are hidden to prevent opening or approving deleted content. Retrying automatically. ${escapeHtml(message)}</div>`;
       setPipelineLiveHint("Pipeline data unverified · retrying");
     } finally {
       pipelinePollInFlight = false;

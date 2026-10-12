@@ -626,7 +626,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.541-overview-snapshot",
+          version: "0.10.542-keep-last-list",
           studio_create_vo_matched_stills_v1: true,
           studio_idea_library_typeahead_v1: true,
           studio_post_publish_release_v1: true,
@@ -673,6 +673,7 @@ export default {
           studio_home_overview_lean_v1: true,
           studio_home_overview_cache_v1: true,
           studio_home_overview_snapshot_v1: true,
+          studio_keep_last_list_v1: true,
           studio_home_overview_soft_429_v1: true,
           studio_oversized_list_refresh_v1: true,
           studio_library_published_files_v1: true,
@@ -2382,7 +2383,9 @@ function sleepMs(ms) {
 // 203 exceptions + 213 hung cancels after 0.10.524. Each call sleeps locally
 // for short gaps only; long cooldowns fail fast as HTTP 429.
 const AIRTABLE_MIN_GAP_MS = 250;
-const AIRTABLE_SLOT_FAIL_FAST_MS = 1500;
+// A 2s gap is normal when Pipeline and Home share the slot. Waiting it out
+// returns the list. Only a real Airtable penalty (30s) fails fast.
+const AIRTABLE_SLOT_FAIL_FAST_MS = 8000;
 let airtableNextRequestAt = 0;
 function airtableCooldownWaitMs() {
   return Math.max(0, airtableNextRequestAt - Date.now());
@@ -2462,6 +2465,11 @@ function studioReadCoalesce(key, ttlMs, loader) {
   }).catch((error) => {
     const current = studioHotReadCache.get(key);
     if (current?.promise === promise) {
+      const cooling = Number(error?.status) === 429 || /cooling down|rate.?limit|too many requests/i.test(String(error?.message || error || ""));
+      if (cooling && current.value !== undefined) {
+        studioHotReadCache.set(key, { at: current.at, value: current.value });
+        return current.value;
+      }
       if (current.value !== undefined) studioHotReadCache.set(key, { at: current.at, value: current.value });
       else studioHotReadCache.delete(key);
     }
@@ -36802,7 +36810,7 @@ async function profilesOverview(request, env, authorization, ctx) {
         return respondProfilesOverviewSoft(request, env, { records: cache.rows, stale: true, cooling: isAirtableCoolingError(error), snapshot: true });
       }
       if (isAirtableCoolingError(error)) {
-        return respondProfilesOverviewSoft(request, env, { records: [], cooling: true });
+        return respondProfilesOverviewSoft(request, env, { records: [], cooling: true, refreshing: true });
       }
       throw error;
     }
@@ -36819,6 +36827,9 @@ async function profilesOverview(request, env, authorization, ctx) {
       .finally(() => {
         if (cache.inflight) cache.inflight = null;
       });
+    ctx?.waitUntil?.(cache.inflight.catch((error) => {
+      console.warn("profiles overview snapshot build failed", error);
+    }));
     const rows = await raceStudioOverviewBudget(
       cache.inflight,
       STUDIO_PROFILES_OVERVIEW_BUILD_BUDGET_MS,

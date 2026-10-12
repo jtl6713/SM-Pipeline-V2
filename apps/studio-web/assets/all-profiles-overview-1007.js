@@ -146,7 +146,7 @@
     window.setTimeout(() => {
       state.followUp = false;
       load();
-    }, 15000);
+    }, 5000);
   }
   async function load(force=false) {
     if (state.loading) return;

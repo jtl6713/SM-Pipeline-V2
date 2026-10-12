@@ -36,5 +36,7 @@ test("Pipeline navigation and failed live polls cannot present stale Home snapsh
  assert.match(refresh,/if \(!Array\.isArray\(outputsResult\?\.records\)\) throw/);
  assert.match(refresh,/Pipeline data is unavailable or out of date/);
  assert.match(refresh,/Pipeline data unverified/);
- assert.match(refresh,/pipelineOutputs = \[\]/);
+  assert.match(refresh,/Showing the last verified Pipeline/);
+  assert.match(refresh,/pipelineListUnverified = true/);
+  assert.match(refresh,/readPipelineOutputCache/);
 });
