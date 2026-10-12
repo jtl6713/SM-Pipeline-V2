@@ -4943,11 +4943,14 @@ body.nav-collapsed .sidebar{
 .timed-script-format-help pre{display:block;max-width:100%;overflow-x:auto;white-space:pre;padding:11px 12px;border:1px solid #dae4ef;border-radius:7px;background:#fff;color:#10233f;font-size:.78rem;line-height:1.65}
 .timed-script-format-help-body p{font-size:.78rem;line-height:1.55;color:#345;margin:8px 0 0}
 
-/* Factory Desk — 2×2 lanes (UI 0.6.659) */
+/* Factory Desk — true 2×2 lanes (UI 0.6.660); Needs assets must NOT span full width */
 #page-factory .factory-lanes{
   display:grid;
-  grid-template-columns:repeat(2,minmax(0,1fr));
+  grid-template-columns:minmax(0,1fr) minmax(0,1fr);
   grid-template-rows:minmax(280px,1fr) minmax(280px,1fr);
+  grid-template-areas:
+    "auto eyes"
+    "assets manual";
   gap:14px;
   padding:0 4px 24px;
   align-items:stretch;
@@ -4955,7 +4958,12 @@ body.nav-collapsed .sidebar{
 #page-factory .factory-lane{
   margin:0;min-width:0;min-height:0;
   display:flex;flex-direction:column;
+  grid-column:auto; /* never full-span — avoids 2×1×2 when cached 0.6.658 CSS wins */
 }
+#page-factory .factory-lane-auto{grid-area:auto}
+#page-factory .factory-lane-eyes{grid-area:eyes}
+#page-factory .factory-lane-assets{grid-area:assets}
+#page-factory .factory-lane-manual{grid-area:manual}
 #page-factory .factory-lane .panel-heading{flex:0 0 auto}
 #page-factory .factory-lane-list{
   display:flex;flex-direction:column;gap:8px;
@@ -4984,6 +4992,11 @@ body.nav-collapsed .sidebar{
   #page-factory .factory-lanes{
     grid-template-columns:1fr;
     grid-template-rows:none;
+    grid-template-areas:
+      "auto"
+      "eyes"
+      "assets"
+      "manual";
   }
   #page-factory .factory-lane-list{max-height:min(42vh,420px)}
 }
