@@ -20,5 +20,5 @@ test("Item4 snapshot is authorized, read-only, and bypasses reconciliation", () 
   assert.ok(handler.indexOf('snapshot: true') < handler.indexOf('item4ReconcileVariants'));
 });
 test("Worker version advances for Chinatown request reopen", () => {
-  assert.match(source, /version: "0.10.533-create-vo-matched-stills"/);
+  assert.match(source, /version: "0.10.534-idea-library-typeahead"/);
 });

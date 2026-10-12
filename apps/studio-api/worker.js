@@ -626,8 +626,9 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.533-create-vo-matched-stills",
+          version: "0.10.534-idea-library-typeahead",
           studio_create_vo_matched_stills_v1: true,
+          studio_idea_library_typeahead_v1: true,
           studio_post_publish_release_v1: true,
           studio_render_server_preview_v1: true,
           studio_render_queue_wait_v1: true,
@@ -7565,6 +7566,29 @@ function ideaLibraryHasToken(text, token) {
   return new RegExp(`(?:^|[^a-z0-9])${escaped}(?:[^a-z0-9]|$)`).test(hay);
 }
 
+/**
+ * Operator typeahead / library search: whole-word or word-start prefix so
+ * "museu" and "Museum" both find "museum". Place/auto-match still uses
+ * whole-word `ideaLibraryHasToken`.
+ */
+function ideaLibrarySearchHit(text, token) {
+  const hay = String(text || "").toLowerCase();
+  const key = String(token || "").toLowerCase();
+  if (!key) return false;
+  if (ideaLibraryHasToken(hay, key)) return true;
+  if (key.length < 3) return false;
+  const escaped = key.replace(/[.*+?^${}()|[\]\]/g, "\$&");
+  return new RegExp(`(?:^|[^a-z0-9])${escaped}[a-z0-9]`).test(hay);
+}
+
+/** Airtable FIND keys for operator-typed search (keep weak tokens like museum). */
+function ideaLibrarySearchFilterKeys(queryTokens = []) {
+  const tokens = (queryTokens || []).map((token) => String(token || "").toLowerCase()).filter(Boolean);
+  if (!tokens.length) return [];
+  const strong = ideaLibraryStrongTokens(tokens);
+  return strong.length ? strong : [...new Set(tokens.filter((token) => token.length >= 3))];
+}
+
 function ideaLibraryTokenForms(token) {
   const value = String(token || "").toLowerCase();
   if (!value) return [];
@@ -7736,7 +7760,7 @@ function ideaLibraryRankAsset(record, { placeKeys, subjectKeys, strongIdeaTokens
   const name = String(f(record, "Asset Name") || "").toLowerCase();
   const batchId = String(f(record, "Intake_Batch_ID") || "").trim();
   const haystack = ideaLibraryHaystack(record);
-  if (queryTokens.length && !queryTokens.some((token) => ideaLibraryHasToken(haystack, token))) {
+  if (queryTokens.length && !queryTokens.some((token) => ideaLibrarySearchHit(haystack, token))) {
     return null;
   }
   const locationPlaceHits = ideaLibraryFieldHits(location, placeKeys);
@@ -7840,7 +7864,7 @@ async function getMediaLibraryStills(request, env, url, authorization) {
       if (!libraryNameHasPhrase(name, phrase)) continue;
     } else if (queryTokens.length) {
       const haystack = ideaLibraryHaystack(record);
-      if (!queryTokens.some((token) => ideaLibraryHasToken(haystack, token))) continue;
+      if (!queryTokens.some((token) => ideaLibrarySearchHit(haystack, token))) continue;
     }
     items.push(mapIdeaLibraryAsset(record, {
       score: 0,
@@ -7882,8 +7906,10 @@ async function getIdeaLibrarySuggestions(request, env, url, authorization) {
   // A quoted name is the whole Asset Name phrase, not an OR of "island" and "ferry".
   // Otherwise place keys plus brand subjects (Metra/CTA) — place-only hid Metra
   // stills when Primary_Location was a station name photos never mention.
+  // Operator search: prefer strong tokens, but keep weak-only queries (e.g. "museum")
+  // as Airtable FIND keys so substring scan still returns rows for JS prefix match.
   const filterKeys = queryTokens.length
-    ? ideaLibraryStrongTokens(queryTokens)
+    ? ideaLibrarySearchFilterKeys(queryTokens)
     : (placeKeys.length || subjectKeys.some((token) => IDEA_LIBRARY_BRAND_SUBJECTS.has(token))
       ? ideaLibraryFilterKeys(placeKeys, subjectKeys)
       : scanKeys);

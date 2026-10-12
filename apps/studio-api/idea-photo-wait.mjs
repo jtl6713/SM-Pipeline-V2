@@ -69,6 +69,29 @@ export function ideaLibraryHasToken(text, token) {
   return new RegExp(`(?:^|[^a-z0-9])${escaped}(?:[^a-z0-9]|$)`).test(hay);
 }
 
+/**
+ * Operator typeahead / library search: whole-word or word-start prefix so
+ * "museu" and "Museum" both find "museum". Place/auto-match still uses
+ * whole-word `ideaLibraryHasToken`.
+ */
+export function ideaLibrarySearchHit(text, token) {
+  const hay = String(text || "").toLowerCase();
+  const key = String(token || "").toLowerCase();
+  if (!key) return false;
+  if (ideaLibraryHasToken(hay, key)) return true;
+  if (key.length < 3) return false;
+  const escaped = key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(`(?:^|[^a-z0-9])${escaped}[a-z0-9]`).test(hay);
+}
+
+/** Airtable FIND keys for operator-typed search (keep weak tokens like museum). */
+export function ideaLibrarySearchFilterKeys(queryTokens = []) {
+  const tokens = (queryTokens || []).map((token) => String(token || "").toLowerCase()).filter(Boolean);
+  if (!tokens.length) return [];
+  const strong = ideaLibraryStrongTokens(tokens);
+  return strong.length ? strong : [...new Set(tokens.filter((token) => token.length >= 3))];
+}
+
 export function ideaLibraryTokenForms(token) {
   const value = String(token || "").toLowerCase();
   if (!value) return [];
@@ -130,7 +153,7 @@ export function rankIdeaLibraryFields({
   today = "",
   intakeDate = "",
 } = {}) {
-  if (queryTokens.length && !queryTokens.some((token) => ideaLibraryHasToken(haystack, token))) {
+  if (queryTokens.length && !queryTokens.some((token) => ideaLibrarySearchHit(haystack, token))) {
     return null;
   }
   const locationPlaceHits = ideaLibraryFieldHits(location, placeKeys);
