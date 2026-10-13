@@ -210,3 +210,5 @@ Deploy Worker 0.10.489-engagement-ledger. Shrink the engagement ledger so Chicag
 2026-10-12 Worker 0.10.562-factory-desk: GET/POST /api/factory/desk + R2 needs-assets pile (max 3).
 
 2026-10-12 Worker 0.10.563-factory-actions: Factory desk approve / send_back / delete actions.
+
+2026-10-13: Worker 0.10.564-factory-approve — allow Factory Desk POST through Phase 2A (Approve was 405).

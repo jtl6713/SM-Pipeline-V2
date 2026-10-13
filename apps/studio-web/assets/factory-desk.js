@@ -163,32 +163,60 @@
     });
     root.querySelectorAll("[data-factory-approve]").forEach((button) => {
       button.addEventListener("click", () => {
-        const card = byId.get(button.getAttribute("data-factory-approve"));
-        if (!card) return;
+        const id = button.getAttribute("data-factory-approve");
+        const card = byId.get(id);
+        if (!card) {
+          setStatus(`Approve failed: card ${id || "(missing)"} not found in desk payload.`, true);
+          return;
+        }
         if (!window.confirm(`Approve “${cardLabel(card)}” for publishing?\n\nInstagram, Facebook, and YouTube will auto-publish. TikTok stays a draft.`)) return;
+        button.disabled = true;
         mutateDesk({ action: "approve", id: card.id, kind: card.kind || "output" })
-          .catch((error) => setStatus(error.message || String(error), true));
+          .catch((error) => {
+            button.disabled = false;
+            const message = error.message || String(error);
+            setStatus(message, true);
+            window.alert(`Factory Approve failed:\n${message}`);
+          });
       });
     });
     root.querySelectorAll("[data-factory-send-back]").forEach((button) => {
       button.addEventListener("click", () => {
         const card = byId.get(button.getAttribute("data-factory-send-back"));
-        if (!card) return;
+        if (!card) {
+          setStatus("Send back failed: card not found in desk payload.", true);
+          return;
+        }
         if (!window.confirm(`Send “${cardLabel(card)}” back to production?\n\nReview becomes Changes Requested.`)) return;
+        button.disabled = true;
         mutateDesk({ action: "send_back", id: card.id, kind: card.kind || "output" })
-          .catch((error) => setStatus(error.message || String(error), true));
+          .catch((error) => {
+            button.disabled = false;
+            const message = error.message || String(error);
+            setStatus(message, true);
+            window.alert(`Factory Send back failed:\n${message}`);
+          });
       });
     });
     root.querySelectorAll("[data-factory-delete]").forEach((button) => {
       button.addEventListener("click", () => {
         const card = byId.get(button.getAttribute("data-factory-delete"));
-        if (!card) return;
+        if (!card) {
+          setStatus("Delete failed: card not found in desk payload.", true);
+          return;
+        }
         const copy = card.kind === "idea"
           ? `Delete idea “${cardLabel(card)}” permanently from Airtable?`
           : `Mark “${cardLabel(card)}” as Skipped and remove it from Factory queues?`;
         if (!window.confirm(copy)) return;
+        button.disabled = true;
         mutateDesk({ action: "delete", id: card.id, kind: card.kind || "output" })
-          .catch((error) => setStatus(error.message || String(error), true));
+          .catch((error) => {
+            button.disabled = false;
+            const message = error.message || String(error);
+            setStatus(message, true);
+            window.alert(`Factory Delete failed:\n${message}`);
+          });
       });
     });
   }

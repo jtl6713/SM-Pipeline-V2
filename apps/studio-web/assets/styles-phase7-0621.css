@@ -4943,7 +4943,7 @@ body.nav-collapsed .sidebar{
 .timed-script-format-help pre{display:block;max-width:100%;overflow-x:auto;white-space:pre;padding:11px 12px;border:1px solid #dae4ef;border-radius:7px;background:#fff;color:#10233f;font-size:.78rem;line-height:1.65}
 .timed-script-format-help-body p{font-size:.78rem;line-height:1.55;color:#345;margin:8px 0 0}
 
-/* Factory Desk — true 2×2 lanes (UI 0.6.660); Needs assets must NOT span full width */
+/* Factory Desk — true 2×2 lanes (UI 0.6.661); Needs assets must NOT span full width */
 #page-factory .factory-lanes{
   display:grid;
   grid-template-columns:minmax(0,1fr) minmax(0,1fr);
