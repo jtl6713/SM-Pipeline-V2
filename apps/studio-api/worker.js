@@ -680,7 +680,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.580-factory-promoted-done-exclude",
+          version: "0.10.581-pipeline-content-id-live",
           studio_factory_desk_v1: true,
           studio_factory_desk_actions_v1: true,
           studio_factory_desk_write_v1: true,
@@ -25809,10 +25809,23 @@ async function listOutputs(request, env, url, authorization, ctx = null) {
       filterFormula: contentProfileFilterFormula(profile),
       limit: 60,
     }));
+    // The lightweight latest path used to skip the Content Item label lookup,
+    // so its mapped rows had content_number=null and the Pipeline could not
+    // display Content ID even though the full snapshot already knew it.
+    const labels = await pipelineContentLabelsById(
+      env,
+      profile,
+      studioPipelineContentIdsFromOutputs(recent),
+    );
     return respond(request, env, {
       ok: true,
       fresh: true,
-      records: recent.map((record) => mapOutput(record)),
+      records: recent.map((record) => mapOutput(
+        record,
+        null,
+        null,
+        labels.get(studioFirstLinkedId(f(record, "Content_Item"))) || null,
+      )),
       profile: mapStudioContentProfile(profile),
     });
   }
