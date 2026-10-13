@@ -128,9 +128,27 @@
     return w > h;
   }
 
-  function ezPlanFromSourceAspect({ width, height } = {}) {
+  function ezPlanFromSourceAspect({ width, height, inputKind = "" } = {}) {
     const horizontal = ezIsHorizontalSource(width, height);
+    const vibeCut = ezIsVibeCutInput(inputKind);
     if (horizontal) {
+      // Finished-video 16:9 → YouTube Standard only.
+      // Vibe Cut 16:9 → YouTube Standard (16:9) + Short (9:16 remount), no Reels/TikTok/Stories.
+      if (vibeCut) {
+        return {
+          source_aspect: "horizontal",
+          packageId: EZ_PACKAGES.VIDEO,
+          master_content_type: "Longform Video",
+          platforms: ["YouTube"],
+          overrides: { YouTube: "Standard Video" },
+          extras: ["YouTube::Short"],
+          items: [
+            { platform: "YouTube", output_type: "Standard Video" },
+            { platform: "YouTube", output_type: "Short" },
+          ],
+          youtube_enabled: true,
+        };
+      }
       return {
         source_aspect: "horizontal",
         packageId: EZ_PACKAGES.VIDEO,
@@ -417,9 +435,9 @@
     const packages = [
       {
         id: EZ_PACKAGES.VIDEO,
-        label: vibeCut ? "Vertical video (Vibe Cut)" : "Vertical video",
+        label: vibeCut ? "Video (Vibe Cut)" : "Vertical video",
         hint: vibeCut
-          ? "9:16 Reel / Short / TikTok — music-driven, no voiceover"
+          ? "Vertical → Reels/Short/TikTok · Horizontal 16:9 → YouTube Standard + Short"
           : "IG Reel · FB Reel · TikTok · YouTube Short · IG & FB Stories · grid thumbnail",
       },
     ];
@@ -860,14 +878,31 @@
     const finishedVideo = String(answers.inputKind || "") === EZ_INPUTS.FINISHED_VIDEO;
     const vibeCut = ezIsVibeCutInput(answers.inputKind);
     const clipInput = ezIsClipInput(answers.inputKind) || vibeCut;
-    if (clipInput || finishedVideo || vibeCut || packageId === EZ_PACKAGES.VIDEO) {
-      const overrides = ezVideoOverrides({ finishedVideo, clipInput: clipInput || vibeCut });
+    if (vibeCut) {
+      const aspect = String(answers.sourceAspect || "").trim().toLowerCase();
+      if (aspect === "horizontal"
+        || ezIsHorizontalSource(answers.sourceVideoWidth, answers.sourceVideoHeight)) {
+        return ezPlanFromSourceAspect({
+          width: Number(answers.sourceVideoWidth) || 1920,
+          height: Number(answers.sourceVideoHeight) || 1080,
+          inputKind: EZ_INPUTS.VIBE_CUT,
+        });
+      }
+      const overrides = ezVideoOverrides({ finishedVideo: false, clipInput: true });
       const filtered = selected
         ? Object.fromEntries(Object.entries(overrides).filter(([platform]) => selected.includes(platform)))
         : overrides;
       const plan = ezPlanFromOverrides(count, filtered, ezVideoStoryExtras(selected || Object.keys(filtered)));
-      if (vibeCut) plan.master_content_type = "Vertical Short Video";
+      plan.master_content_type = "Vertical Short Video";
+      plan.source_aspect = "vertical";
       return plan;
+    }
+    if (clipInput || finishedVideo || packageId === EZ_PACKAGES.VIDEO) {
+      const overrides = ezVideoOverrides({ finishedVideo, clipInput });
+      const filtered = selected
+        ? Object.fromEntries(Object.entries(overrides).filter(([platform]) => selected.includes(platform)))
+        : overrides;
+      return ezPlanFromOverrides(count, filtered, ezVideoStoryExtras(selected || Object.keys(filtered)));
     }
     if (!clipInput && (String(answers.inputKind || "") === EZ_INPUTS.FINISHED_STILLS || packageId === EZ_PACKAGES.SLIDES || packageId === "stills")) {
       const overrides = ezSlidesOverrides(count);

@@ -12,6 +12,22 @@
 export const VIBE_CUT_INPUT = "vibe-cut";
 export const VIBE_CUT_SCHEMA_VERSION = "vibe-cut.1";
 
+/** Vertical (9:16) Vibe Cut — full short-package fanout. */
+export const VIBE_CUT_VERTICAL_KEYS = Object.freeze([
+  "Instagram::Reel",
+  "Facebook::Reel",
+  "TikTok::Video Draft",
+  "YouTube::Short",
+  "Instagram::Story",
+  "Facebook::Story",
+]);
+
+/** Horizontal (16:9) Vibe Cut — YouTube Standard + 9:16 Short only. */
+export const VIBE_CUT_HORIZONTAL_KEYS = Object.freeze([
+  "YouTube::Standard Video",
+  "YouTube::Short",
+]);
+
 export const VIBE_CUT_STYLES = Object.freeze({
   SMOOTH_VIBES: "smooth-vibes",
   BEAT_CUT: "beat-cut",
@@ -757,10 +773,62 @@ export function anotherCutFromUnused({
   });
 }
 
-export function vibeCutProductionDefaults(config) {
+export function parseVibeCutSourceAspect(notesOrAspect) {
+  const text = String(notesOrAspect || "").trim().toLowerCase();
+  if (text === "horizontal" || text === "vertical") return text;
+  const match = /source-aspect=(horizontal|vertical)/i.exec(String(notesOrAspect || ""));
+  return match ? match[1].toLowerCase() : "vertical";
+}
+
+export function isHorizontalVibeCutAspect(notesOrAspect) {
+  return parseVibeCutSourceAspect(notesOrAspect) === "horizontal";
+}
+
+export function vibeCutDestinationKeys(notesOrAspect) {
+  return isHorizontalVibeCutAspect(notesOrAspect)
+    ? VIBE_CUT_HORIZONTAL_KEYS
+    : VIBE_CUT_VERTICAL_KEYS;
+}
+
+export function capVibeCutPlanItems(items, { notes = "", sourceAspect = "" } = {}) {
+  if (!isVibeCutNotes(notes) && !sourceAspect) return Array.isArray(items) ? items : [];
+  const aspectHint = sourceAspect || notes;
+  const allowedKeys = vibeCutDestinationKeys(aspectHint);
+  const allowed = new Set(allowedKeys);
+  const seen = new Set();
+  const out = [];
+  for (const item of Array.isArray(items) ? items : []) {
+    const platform = String(item?.platform || "").trim();
+    const outputType = String(item?.output_type || item?.outputType || "").trim();
+    if (!platform || !outputType) continue;
+    const key = `${platform}::${outputType}`;
+    if (!allowed.has(key) || seen.has(key)) continue;
+    seen.add(key);
+    out.push({ ...item, platform, output_type: outputType });
+  }
+  // Horizontal Vibe Cut must always include Standard + Short even if the client
+  // still sent the old 4-platform short package without a Standard override.
+  if (isHorizontalVibeCutAspect(aspectHint)) {
+    for (const key of allowedKeys) {
+      if (seen.has(key)) continue;
+      const [platform, output_type] = key.split("::");
+      out.push({ platform, output_type });
+      seen.add(key);
+    }
+    out.sort((a, b) => {
+      const ai = allowedKeys.indexOf(`${a.platform}::${a.output_type}`);
+      const bi = allowedKeys.indexOf(`${b.platform}::${b.output_type}`);
+      return ai - bi;
+    });
+  }
+  return out;
+}
+
+export function vibeCutProductionDefaults(config, { sourceAspect = "", notes = "" } = {}) {
   const normalized = defaultVibeCutConfig(config || {});
+  const horizontal = isHorizontalVibeCutAspect(sourceAspect || notes);
   return {
-    content_type: "Vertical Short Video",
+    content_type: horizontal ? "Longform Video" : "Vertical Short Video",
     voiceover_mode: "No",
     background_music_mode: "Yes",
     thumbnail_mode: "Yes",
@@ -768,5 +836,19 @@ export function vibeCutProductionDefaults(config) {
     voiceover_duration_seconds: "",
     script_mode: "Leave blank",
     requested_script: "",
+    platforms: horizontal
+      ? ["YouTube"]
+      : ["Instagram", "Facebook", "TikTok", "YouTube"],
+    overrides: horizontal
+      ? { YouTube: "Standard Video" }
+      : {
+        Instagram: "Reel",
+        Facebook: "Reel",
+        TikTok: "Video Draft",
+        YouTube: "Short",
+      },
+    extras: horizontal
+      ? ["YouTube::Short"]
+      : ["Instagram::Story", "Facebook::Story"],
   };
 }
