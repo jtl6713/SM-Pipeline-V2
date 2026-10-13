@@ -7350,7 +7350,7 @@ function timedScriptAssetLabel(asset, index) {
     }
     if (ezIntakeKind === "vibe-cut") {
       if (title) title.textContent = "Drop the long source video here";
-      if (hint) hint.textContent = "One long MP4/MOV (60s–several minutes). Studio finds strong moments and edits them to music. No voiceover.";
+      if (hint) hint.textContent = "One long MP4/MOV (60s–several minutes). Studio finds strong moments and edits them to music. No voiceover. Vertical → Reels/Short/TikTok; horizontal 16:9 → YouTube Standard + Short.";
     } else if (ezIntakeKind === "finished-video") {
       if (title) title.textContent = "Drop the finished video here";
       if (hint) hint.textContent = "One MP4. Studio skips crops and Remotion.";
