@@ -28,6 +28,7 @@ import {
   stampAutonomousOrigin,
   isAutonomousResumeDeferred,
   stampAutonomousResumeDeferred,
+  clearAutonomousResumeDeferred,
   autonomousWaitingIsStale,
   autonomousPreparingIsStale,
   extractJsonObject,
@@ -281,6 +282,14 @@ test("YouTube mapper keeps titles and picker requires assets", () => {
   assert.equal(isAutonomousResumeDeferred("origin=autonomous\nqueue=deferred\nWas waiting"), true);
   assert.equal(isAutonomousResumeDeferred("origin=autonomous"), false);
   assert.match(stampAutonomousResumeDeferred("origin=autonomous", "preparing_stale"), /autonomous_resume=deferred reason=preparing_stale/);
+  assert.equal(
+    clearAutonomousResumeDeferred("origin=autonomous\nautonomous_resume=deferred reason=preparing_stale\nParked note"),
+    "origin=autonomous\nParked note",
+  );
+  assert.equal(
+    clearAutonomousResumeDeferred("origin=autonomous\nqueue=deferred\nDeferred behind Miami"),
+    "origin=autonomous\nDeferred behind Miami",
+  );
   assert.equal(autonomousWaitingIsStale({
     status: "waiting_variants",
     at: "2026-10-13T12:00:00.000Z",
@@ -596,7 +605,7 @@ test("Worker stamps photo-ready ideas and always adopts after 8am CT", async () 
   const path = await import("node:path");
   const here = path.dirname(fileURLToPath(import.meta.url));
   const worker = await readFile(path.join(here, "worker.js"), "utf8");
-  assert.match(worker, /version: "0\.10\.582-preparing-created-stale"/);
+  assert.match(worker, /version: "0\.10\.583-variant-reconcile-gap"/);
   assert.match(worker, /async function stampPhotoReadyIdeaForAutonomousProduce/);
   assert.match(worker, /stampPhotoReadyIdeaForAutonomousProduce\(env, ideaReady, requestRecord\)/);
   assert.match(worker, /Always stamp photo-ready daily ideas after 8am CT/);

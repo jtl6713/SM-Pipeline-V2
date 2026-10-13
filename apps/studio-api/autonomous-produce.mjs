@@ -279,6 +279,21 @@ export function stampAutonomousResumeDeferred(notes, reason = "variants_still_pr
   return text ? `${text}\n${reasonLine}` : reasonLine;
 }
 
+/** Clear parked-FIFO stamps once variants/reconcile finish so the draft can resume. */
+export function clearAutonomousResumeDeferred(notes) {
+  return String(notes || "")
+    .split("\n")
+    .filter((line) => {
+      const text = String(line || "").trim();
+      if (!text) return false;
+      if (/^autonomous_resume\s*=\s*deferred\b/i.test(text)) return false;
+      if (/^queue\s*=\s*deferred\b/i.test(text)) return false;
+      return true;
+    })
+    .join("\n")
+    .trim();
+}
+
 /**
  * waiting_variants / awaiting_i4 / hung resuming|picking older than maxAge
  * must not block the next city (Color Rush sat on status=resuming for hours).

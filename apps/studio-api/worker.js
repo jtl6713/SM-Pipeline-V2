@@ -162,6 +162,7 @@ import {
   stampAutonomousOrigin,
   isAutonomousResumeDeferred,
   stampAutonomousResumeDeferred,
+  clearAutonomousResumeDeferred,
   autonomousWaitingIsStale,
   autonomousPreparingIsStale,
   autonomousRunIsBusy,
@@ -680,7 +681,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.582-preparing-created-stale",
+          version: "0.10.583-variant-reconcile-gap",
           studio_factory_desk_v1: true,
           studio_factory_desk_actions_v1: true,
           studio_factory_desk_write_v1: true,
@@ -2041,12 +2042,12 @@ export default {
       } catch (error) {
         console.warn("item4 timeline auto-prepare heal failed", error);
       }
-      if (item4Drain?.request_ids?.length) {
-        try {
-          await item4HealIncompletePreparingVariants(env);
-        } catch (error) {
-          console.warn("item4 preparing variant-gap heal failed", error);
-        }
+      // Always reconcile Preparing/Error parents — once crops finish, the drain
+      // scan is empty and gating on request_ids leaves ready_count=0 forever.
+      try {
+        await item4HealIncompletePreparingVariants(env);
+      } catch (error) {
+        console.warn("item4 preparing variant-gap heal failed", error);
       }
       try {
         await runStudioAutonomousProduce(null, env, { permissions: { tenant_admin: true } }, ctx, {
@@ -15183,7 +15184,16 @@ async function item4ResumePendingVariants(env, recordId, record = null) {
   const outstanding = scoped.filter(item4QueueRowIsOutstanding);
   if (!outstanding.length) {
     const reconciled = await item4ReconcileVariants(env, recordId, currentRecord);
-    return { attempted: false, reason: "no-pending-variants", record: reconciled.record, execution_ids: [] };
+    const ready = reconciled.status === "Ready";
+    return {
+      attempted: ready,
+      reason: ready ? "reconciled-ready" : "no-pending-variants",
+      record: reconciled.record,
+      execution_ids: [],
+      variant_status: reconciled.status,
+      ready_count: Number(reconciled.manifest?.ready_count || 0),
+      target_count: Number(reconciled.manifest?.target_count || 0),
+    };
   }
 
   // Large prepare batches (many photos × ratios) need more drain slots than the
@@ -43119,8 +43129,8 @@ async function selectAutonomousResumeDraft(env, drafts) {
   const enabled = new Set(profiles.map((row) => row.id));
   const annotated = [];
   const nowMs = Date.now();
-  for (const requestRecord of drafts || []) {
-    const notes = String(f(requestRecord, "Production_Notes") || "");
+  for (let requestRecord of drafts || []) {
+    let notes = String(f(requestRecord, "Production_Notes") || "");
     let profileId = "";
     if (isAutonomousOrigin(notes)) {
       const ideaId = firstLinkedRecordId(f(requestRecord, "Idea_Candidate"));
@@ -43129,9 +43139,32 @@ async function selectAutonomousResumeDraft(env, drafts) {
         : null;
       profileId = firstLinkedRecordId(idea ? f(idea, "Content_Profile") : "");
     }
-    const variantStatus = String(f(requestRecord, "Studio_Variant_Status") || "").trim();
-    const variantUpdatedAt = f(requestRecord, "Studio_Variant_Updated_At") || requestRecord.createdTime || "";
+    let variantStatus = String(f(requestRecord, "Studio_Variant_Status") || "").trim();
+    let variantUpdatedAt = f(requestRecord, "Studio_Variant_Updated_At") || requestRecord.createdTime || "";
     const draftCreatedAt = f(requestRecord, "Created_At") || requestRecord.createdTime || "";
+    // Crops can finish while the parent stays Preparing (reconcile gap). Reconcile
+    // before parking so Ready drafts are not deferred forever.
+    if (isAutonomousOrigin(notes) && (variantStatus === "Preparing" || variantStatus === "Error")) {
+      try {
+        const resumed = await item4ResumePendingVariants(env, requestRecord.id, requestRecord);
+        if (resumed?.record) {
+          requestRecord = resumed.record;
+          variantStatus = String(f(requestRecord, "Studio_Variant_Status") || "").trim();
+          variantUpdatedAt = f(requestRecord, "Studio_Variant_Updated_At") || requestRecord.createdTime || "";
+          notes = String(f(requestRecord, "Production_Notes") || notes);
+        }
+        if (variantStatus === "Ready" && isAutonomousResumeDeferred(notes)) {
+          const cleared = clearAutonomousResumeDeferred(notes);
+          requestRecord = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, requestRecord.id, {
+            method: "PATCH",
+            body: JSON.stringify({ fields: { Production_Notes: cleared }, typecast: true }),
+          });
+          notes = cleared;
+        }
+      } catch (error) {
+        console.warn("autonomous prepare reconcile before resume failed", requestRecord.id, error);
+      }
+    }
     // Auto-park long-Preparing drafts so FIFO can reach the next city.
     if (isAutonomousOrigin(notes) && !isAutonomousResumeDeferred(notes)
       && autonomousPreparingIsStale(variantStatus, variantUpdatedAt, nowMs, 12 * 60 * 1000, draftCreatedAt)) {
