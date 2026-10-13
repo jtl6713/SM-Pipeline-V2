@@ -185,12 +185,16 @@ test("factoryCardFromRow exposes authenticated preview path for Ready for Review
     studio_state: "Ready for Review",
     final_file_url: "https://drive.google.com/file/d/abc/view",
     thumbnail_url: "https://media.chicagoshining.com/publish/cover.jpg",
+    production_request_id: "recProductionRoundTrip1",
+    content_item_id: "recContentRoundTrip0001",
     title: "Preview me",
   }, { lane: "needs_eyes" });
   assert.equal(card.preview_url, "/api/outputs/recEyesPreview0001/preview");
   assert.equal(card.can_preview, true);
   assert.equal(card.thumbnail_url, "https://media.chicagoshining.com/publish/cover.jpg");
   assert.equal(card.final_file_url, "https://drive.google.com/file/d/abc/view");
+  assert.equal(card.production_request_id, "recProductionRoundTrip1");
+  assert.equal(card.content_item_id, "recContentRoundTrip0001");
 
   const idea = factoryCardFromRow({
     id: "recIdeaNoPreview001",
@@ -223,9 +227,13 @@ test("Worker exposes factory desk routes and version flag", async () => {
   assert.match(worker, /action === "send_back"/);
   assert.match(worker, /action === "send_back_content"/);
   assert.match(worker, /factorySendBackContent/);
+  assert.match(worker, /loadContentPlatformOutputs\(env, contentId\)/);
+  assert.match(worker, /outputRowsForProductionRequest\(env, requestId, \{ includeInactive: true \}\)/);
   assert.match(worker, /Request_Status: "Draft"/);
+  assert.match(worker, /Submitted_At: null/);
   assert.match(worker, /Studio_Production_Job_JSON: null/);
-  assert.match(worker, /0\.10\.589-factory-approve-mae/);
+  assert.match(worker, /Render_Status: null/);
+  assert.match(worker, /0\.10\.590-factory-content-roundtrip/);
   assert.match(worker, /studio_factory_desk_v1:\s*true/);
   assert.match(worker, /studio_factory_desk_preview_v1:\s*true/);
 });
@@ -234,6 +242,6 @@ test("Worker allows Factory Desk POST through Phase 2A gate", async () => {
   const worker = await readFile(path.join(here, "worker.js"), "utf8");
   assert.match(worker, /const isFactoryDeskWrite = isFactoryDeskRoute && request\.method === "POST"/);
   assert.match(worker, /isFactoryDeskWrite \|/);
-  assert.match(worker, /version: "0\.10\.589-factory-approve-mae"/);
+  assert.match(worker, /version: "0\.10\.590-factory-content-roundtrip"/);
   assert.match(worker, /studio_factory_desk_write_v1: true/);
 });

@@ -684,7 +684,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.589-factory-approve-mae",
+          version: "0.10.590-factory-content-roundtrip",
           studio_factory_desk_v1: true,
           studio_factory_desk_actions_v1: true,
           studio_factory_desk_write_v1: true,
@@ -42345,58 +42345,92 @@ async function factorySendBackContent(env, productionRequestId, outputIds, actor
   const requestId = String(productionRequestId || "").trim();
   if (!/^rec[A-Za-z0-9]+$/.test(requestId)) throw new HttpError(400, "Production Request is required");
   const requestRecord = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, requestId);
-  const contentId = studioFirstLinkedId(f(requestRecord, "Promoted_Content_Item"));
-  const ids = [...new Set((Array.isArray(outputIds) ? outputIds : [])
+
+  const suppliedIds = [...new Set((Array.isArray(outputIds) ? outputIds : [])
     .map((id) => String(id || "").trim())
     .filter((id) => /^rec[A-Za-z0-9]+$/.test(id)))];
-  if (!ids.length) throw new HttpError(400, "No content outputs were supplied");
+
+  let contentId = studioFirstLinkedId(f(requestRecord, "Promoted_Content_Item"));
+  if (!contentId && suppliedIds.length) {
+    const firstOutput = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, suppliedIds[0]).catch(() => null);
+    contentId = firstOutput ? studioFirstLinkedId(f(firstOutput, "Content_Item")) : null;
+  }
+  if (!contentId) throw new HttpError(409, "The linked Content Item could not be resolved");
+
+  const [contentOutputs, requestOutputRows] = await Promise.all([
+    loadContentPlatformOutputs(env, contentId),
+    outputRowsForProductionRequest(env, requestId, { includeInactive: true }).catch(() => []),
+  ]);
+  if (!contentOutputs.length) throw new HttpError(409, "This content has no Platform Outputs to send back");
+
+  const routedOutputIds = new Set();
+  for (const row of requestOutputRows || []) {
+    if (Boolean(f(row, "Enabled")) === false) continue;
+    for (const id of arrayOrEmpty(f(row, "Platform_Output"))) {
+      const value = String(id || "").trim();
+      if (/^rec[A-Za-z0-9]+$/.test(value)) routedOutputIds.add(value);
+    }
+  }
+
+  const suppliedSet = new Set(suppliedIds);
+  const targets = contentOutputs.filter((row) => {
+    const id = String(row?.id || "").trim();
+    if (!id) return false;
+    if (String(f(row, "Output_Status") || "").trim() === "Skipped") return false;
+    const directRequest = studioFirstLinkedId(f(row, "Production_Request"));
+    if (routedOutputIds.size) {
+      return routedOutputIds.has(id) || directRequest === requestId || suppliedSet.has(id);
+    }
+    return !directRequest || directRequest === requestId || suppliedSet.has(id);
+  });
+  if (!targets.length) throw new HttpError(409, "No active outputs for this Production Request could be resolved");
+
+  const blocked = targets.filter((row) => outputAlreadyApprovedForPublishing(row) || Boolean(f(row, "Published_At")));
+  if (blocked.length) {
+    throw new HttpError(
+      409,
+      "This content already has an approved, publishing, or published output. Send-back is only available before publishing approval."
+    );
+  }
 
   const stamp = new Date().toISOString();
-  let changed = 0;
-  for (const id of ids) {
-    const existing = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, id);
-    const linkedContent = studioFirstLinkedId(f(existing, "Content_Item"));
-    const linkedRequest = studioFirstLinkedId(f(existing, "Production_Request"));
-    if (contentId && linkedContent && linkedContent !== contentId) {
-      throw new HttpError(409, "All outputs must belong to the same Content Item");
-    }
-    if (linkedRequest && linkedRequest !== requestId) {
-      throw new HttpError(409, "All outputs must belong to the same Production Request");
-    }
-    const outputStatus = String(f(existing, "Output_Status") || "").trim();
-    const publishStatus = String(f(existing, "Publish_Status") || "").trim();
-    if (publishStatus === "Published" || outputStatus === "Published" || f(existing, "Published_At")) {
-      throw new HttpError(409, "Published outputs cannot be sent back to Production");
-    }
-    if (outputStatus === "Skipped") continue;
+  const line = `Factory content send-back by ${actor || "operator"} at ${stamp}.${note ? ` ${note}` : ""}`;
+  const patches = targets.map((existing) => {
     const existingNotes = String(f(existing, "Review_Notes") || "").trim();
-    const line = `Factory content send-back by ${actor || "operator"} at ${stamp}.${note ? ` ${note}` : ""}`;
-    await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, id, {
-      method: "PATCH",
-      body: JSON.stringify({
-        fields: {
-          Review_Status: "Changes Requested",
-          Output_Status: "In Production",
-          Publish_Status: "Not Ready",
-          Render_Status: "Pending",
-          Final_File_URL: null,
-          Studio_Preview_URL: null,
-          Publish_Asset_URL: null,
-          Remotion_Job_ID: null,
-          Review_Decision_At: stamp,
-          Review_Notes: [existingNotes, line].filter(Boolean).join("\n\n"),
-        },
-        typecast: true,
-      }),
-    });
-    changed += 1;
-  }
+    return {
+      id: existing.id,
+      fields: {
+        Review_Status: "Changes Requested",
+        Output_Status: "In Production",
+        Publish_Status: "Not Ready",
+        Render_Status: null,
+        Final_File_URL: null,
+        Final_File_ID: null,
+        Output_URL: null,
+        Studio_Preview_URL: null,
+        Studio_Preview_R2_Key: null,
+        Studio_Preview_Updated_At: null,
+        Publish_Asset_URL: null,
+        Remotion_Job_ID: null,
+        Remotion_Status_URL: null,
+        Remotion_Props_JSON: null,
+        Remotion_Error_Message: null,
+        Final_File_Error_Message: null,
+        Final_File_Storage_Status: null,
+        Review_Decision_At: stamp,
+        Review_Notes: [existingNotes, line].filter(Boolean).join("\n\n"),
+      },
+    };
+  });
+  await airtableBatchUpdate(env, env.AIRTABLE_OUTPUT_TABLE_ID, patches, { typecast: true });
 
   await airtableFetch(env, PRODUCTION_REQUEST_TABLE, requestId, {
     method: "PATCH",
     body: JSON.stringify({
       fields: {
         Request_Status: "Draft",
+        Active: true,
+        Submitted_At: null,
         Studio_Production_Job_JSON: null,
         Updated_At: stamp,
       },
@@ -42406,9 +42440,10 @@ async function factorySendBackContent(env, productionRequestId, outputIds, actor
 
   return {
     production_request_id: requestId,
-    content_item_id: contentId || null,
-    output_count: changed,
-    message: `Sent ${changed} content output${changed === 1 ? "" : "s"} back to Production. Edit the package and approve it to rerender.`,
+    content_item_id: contentId,
+    output_count: patches.length,
+    output_ids: patches.map((row) => row.id),
+    message: `Sent the full content package (${patches.length} output${patches.length === 1 ? "" : "s"}) back to Production. Make changes and Approve to rerender.`,
   };
 }
 
