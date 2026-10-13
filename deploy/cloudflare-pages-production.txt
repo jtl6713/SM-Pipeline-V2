@@ -297,4 +297,6 @@ UI 0.6.607 hashtag mismatch warning only; approval no longer blocked.
 2026-10-13: Studio UI 0.6.664-content-cover - Pipeline shared Download Cover moved below content thumbnail; output-level duplicate removed.
 2026-10-13: Studio UI 0.6.665-factory-fit - Factory rows stay inside the lane so Approve and Delete are not clipped.
 2026-10-13: Studio UI 0.6.666-factory-approve-content - Factory Needs eyes Approve all covers every ready output in one content package.
-2026-10-13: Studio UI 0.6.667-vibe-cut-16x9 - Horizontal Vibe Cut uploads plan YouTube Standard + 9:16 Short only.
+2026-10-13: Studio UI 0.6.667-vibe-intent - distinguish one-source Vibe Cut from finished-video passthrough; require clip-frame readiness and preserve YouTube longform plus Short.
+2026-10-13: Deploy regression checks now explicitly include Vibe Cut source-vs-finished classification tests.
+2026-10-13: Studio UI 0.6.668-vibe-cut-16x9 - Horizontal Vibe Cut → YouTube Standard + Short; includes main vibe-intent classification.

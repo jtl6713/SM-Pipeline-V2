@@ -47,7 +47,6 @@ test("Production AI description is sent as prompt guidance", async () => {
   ]);
 
   assert.match(html, /id="item4AiPrompt"/);
-  assert.match(html, /id="item4AiPrompt"/);
   assert.match(html, /item4-ai-generation-panel/);
   assert.match(html, />Prompt</);
   assert.match(app, /const promptGuidance = String\(\$\("item4AiPrompt"\)\?\.value \|\| ""\)\.trim\(\)/);
