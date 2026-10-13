@@ -267,7 +267,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.668-vibe-cut-16x9";
+  const BUILD_ID = "item4-0.6.669-idea-find-images-local";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -3831,26 +3831,20 @@
         // watermarked assets. The generic 25s write timeout is too short.
         timeoutMs: 120000,
       });
-      updateIdeaDrawer(result.record);
-      await Promise.all([loadIdeas(), loadDashboard(), loadProductionRequests()]);
-      setManageMessage(result.photo_wait?.action === "ready"
-        ? `Matched ${result.photo_wait.selected?.length || 0} photos. Open Production to set rules.`
-        : `Still listening. ${result.photo_wait?.high_count || 0} high-confidence matches so far.`,
-        result.photo_wait?.action === "ready" ? "success" : "");
+      const next = await refreshIdeaAfterPhotoMatch(activeIdea.id, { result });
+      setManageMessage(result.photo_wait?.action === "ready" || String(next?.photo_wait_status || "") === "Ready"
+        ? `Matched ${result.photo_wait?.selected?.length || next?.matched_media_asset_links?.length || 0} photos. Open Production to set rules.`
+        : `Still listening. ${result.photo_wait?.high_count || next?.photo_match?.high_count || 0} high-confidence matches so far.`,
+        (result.photo_wait?.action === "ready" || String(next?.photo_wait_status || "") === "Ready") ? "success" : "");
     } catch (error) {
       if (isTimeoutError(error)) {
         // A timed-out POST may still finish server-side. Do not tell the user
         // that photo listening failed or encourage a duplicate write. Refresh
-        // the authoritative idea state and leave listening armed.
+        // only this idea row and leave listening armed.
         try {
           await sleepMs(1500);
-          const refreshed = await api(`/api/ideas/${encodeURIComponent(activeIdea.id)}`, {
-            timeoutMs: 30000,
-            retries: 2,
-          });
-          if (refreshed?.record) updateIdeaDrawer(refreshed.record);
-          await Promise.all([loadIdeas(), loadDashboard(), loadProductionRequests()]);
-          const status = String(refreshed?.record?.photo_wait_status || activeIdea?.photo_wait_status || "").trim();
+          const next = await refreshIdeaAfterPhotoMatch(activeIdea.id);
+          const status = String(next?.photo_wait_status || activeIdea?.photo_wait_status || "").trim();
           setManageMessage(
             status === "Ready"
               ? "Photos finished matching after the request took longer than expected. Open Production to continue."
@@ -15001,7 +14995,117 @@ function timedScriptAssetLabel(asset, index) {
       ? `<button type="button" class="manage-button find-images-row-button" data-idea-timeline="${escapeHtml(r.id)}">${ideaTimelineRowButtonLabel(r)}</button>`
       : "";
     const title = `${value(r.title)}${listeningForPhotos ? ' <span class="subtle">(Listening for photos)</span>' : ""}`;
-    return `<tr class="${r.is_on_hold ? "idea-row-held" : ""}"><td><div class="title-cell">${title}</div><div class="subtle">${value(r.summary, "")}${r.created_at ? `${r.summary ? " · " : ""}Created ${dateValue(r.created_at)}` : ""}</div></td><td>${badge(ideaStatusLabel(r))}</td><td>${value(r.content_type)}</td><td>${join(r.platforms)}</td><td>${ideaStructureLabel(r)}</td><td><div class="subtle">${escapeHtml(ideaProductionLabel(r))}</div></td><td><div class="idea-row-actions">${promote}<div class="idea-row-action-stack"><button type="button" class="manage-button" data-idea-id="${escapeHtml(r.id)}">Manage</button>${findImages}${timeline}</div></div></td></tr>`;
+    return `<tr class="${r.is_on_hold ? "idea-row-held" : ""}" data-idea-row="${escapeHtml(r.id)}"><td><div class="title-cell">${title}</div><div class="subtle">${value(r.summary, "")}${r.created_at ? `${r.summary ? " · " : ""}Created ${dateValue(r.created_at)}` : ""}</div></td><td>${badge(ideaStatusLabel(r))}</td><td>${value(r.content_type)}</td><td>${join(r.platforms)}</td><td>${ideaStructureLabel(r)}</td><td><div class="subtle">${escapeHtml(ideaProductionLabel(r))}</div></td><td><div class="idea-row-actions">${promote}<div class="idea-row-action-stack"><button type="button" class="manage-button" data-idea-id="${escapeHtml(r.id)}">Manage</button>${findImages}${timeline}</div></div></td></tr>`;
+  }
+
+  function upsertIdeaInCache(record) {
+    if (!record?.id) return null;
+    const idx = ideasCache.findIndex((row) => row.id === record.id);
+    if (idx >= 0) ideasCache[idx] = { ...ideasCache[idx], ...record };
+    else ideasCache = [record, ...ideasCache];
+    return ideasCache.find((row) => row.id === record.id) || record;
+  }
+
+  function ideaFromCache(ideaId) {
+    const id = String(ideaId || "").trim();
+    if (!id) return null;
+    return ideasCache.find((row) => row.id === id) || null;
+  }
+
+  async function refreshIdeaAfterPhotoMatch(ideaId, { result = null, button = null } = {}) {
+    let next = result?.record || null;
+    if (!next?.id) {
+      const refreshed = await api(`/api/ideas/${encodeURIComponent(ideaId)}`, {
+        timeoutMs: 30000,
+        retries: 2,
+      });
+      next = refreshed?.record || null;
+    }
+    if (!next?.id) {
+      if (button) {
+        button.disabled = false;
+        button.textContent = "Find images now";
+      }
+      return null;
+    }
+    if (activeIdea?.id === next.id) updateIdeaDrawer(next);
+    refreshIdeaListRow(next);
+    return next;
+  }
+
+  function refreshIdeaListRow(record) {
+    const next = upsertIdeaInCache(record);
+    if (!next?.id) return;
+    const list = $("ideasList");
+    const row = list?.querySelector(`[data-idea-row="${next.id}"]`);
+    if (!row) return;
+    const holder = document.createElement("tbody");
+    holder.innerHTML = ideaRowHtml(next);
+    const fresh = holder.querySelector("tr");
+    if (!fresh) return;
+    row.replaceWith(fresh);
+    bindIdeaRowButtons(fresh);
+  }
+
+  function bindIdeaRowButtons(scope) {
+    if (!scope) return;
+    scope.querySelectorAll("[data-idea-find-images]").forEach((button) => {
+      button.addEventListener("click", async (event) => {
+        event.stopPropagation();
+        const idea = ideaFromCache(button.dataset.ideaFindImages);
+        if (!idea?.id) return;
+        button.disabled = true;
+        button.textContent = "Finding…";
+        try {
+          const result = await api(`/api/ideas/${encodeURIComponent(idea.id)}/match-photos`, {
+            method: "POST",
+            body: JSON.stringify({ force: true }),
+            timeoutMs: 120000,
+          });
+          // Update only this idea row — do not wipe the whole Ideas page.
+          await refreshIdeaAfterPhotoMatch(idea.id, { result, button });
+        } catch (error) {
+          console.warn("Find images now failed", error);
+          if (isTimeoutError(error)) {
+            await sleepMs(1500);
+            try {
+              await refreshIdeaAfterPhotoMatch(idea.id, { button });
+            } catch {
+              button.disabled = false;
+              button.textContent = "Find images now";
+            }
+          } else {
+            button.disabled = false;
+            button.textContent = "Try again";
+          }
+        }
+      });
+    });
+    scope.querySelectorAll("[data-idea-timeline]").forEach((button) => {
+      button.addEventListener("click", async (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        const idea = ideaFromCache(button.dataset.ideaTimeline);
+        if (!idea?.id || button.disabled) return;
+        const idle = button.textContent;
+        button.disabled = true;
+        button.textContent = "Opening Production…";
+        try {
+          await openOrCreateIdeaTimeline(idea, { button, heading: true });
+        } catch (error) {
+          setIdeasAutonomousMessage(error.message || "Could not open the Production Request.", "error-text");
+        } finally {
+          button.disabled = false;
+          button.textContent = idle;
+        }
+      });
+    });
+    scope.querySelectorAll("[data-idea-id]").forEach((button) => {
+      button.addEventListener("click", () => {
+        const idea = ideaFromCache(button.dataset.ideaId);
+        if (idea) openIdeaDrawer(idea, { focusPromote: button.dataset.ideaAction === "promote" });
+      });
+    });
   }
 
   function partitionIdeaRecords(records) {
@@ -15073,59 +15177,7 @@ function timedScriptAssetLabel(asset, index) {
       });
     });
 
-    const byId = new Map([...sortedActive, ...sortedArchived].map((record) => [record.id, record]));
-    target.querySelectorAll("[data-idea-find-images]").forEach((button) => {
-      button.addEventListener("click", async (event) => {
-        event.stopPropagation();
-        const idea = byId.get(button.dataset.ideaFindImages);
-        if (!idea?.id) return;
-        button.disabled = true;
-        button.textContent = "Finding…";
-        try {
-          const result = await api(`/api/ideas/${encodeURIComponent(idea.id)}/match-photos`, {
-            method: "POST",
-            body: JSON.stringify({ force: true }),
-            timeoutMs: 120000,
-          });
-          if (result?.record && activeIdea?.id === idea.id) updateIdeaDrawer(result.record);
-          await Promise.all([loadIdeas(), loadDashboard(), loadProductionRequests()]);
-        } catch (error) {
-          console.warn("Find images now failed", error);
-          if (isTimeoutError(error)) {
-            await sleepMs(1500);
-            await Promise.all([loadIdeas(), loadDashboard(), loadProductionRequests()]).catch(() => {});
-          } else {
-            button.disabled = false;
-            button.textContent = "Try again";
-          }
-        }
-      });
-    });
-    target.querySelectorAll("[data-idea-timeline]").forEach((button) => {
-      button.addEventListener("click", async (event) => {
-        event.preventDefault();
-        event.stopPropagation();
-        const idea = byId.get(button.dataset.ideaTimeline);
-        if (!idea?.id || button.disabled) return;
-        const idle = button.textContent;
-        button.disabled = true;
-        button.textContent = "Opening Production…";
-        try {
-          await openOrCreateIdeaTimeline(idea, { button, heading: true });
-        } catch (error) {
-          setIdeasAutonomousMessage(error.message || "Could not open the Production Request.", "error-text");
-        } finally {
-          button.disabled = false;
-          button.textContent = idle;
-        }
-      });
-    });
-    target.querySelectorAll("[data-idea-id]").forEach((button) => {
-      button.addEventListener("click", () => {
-        const idea = byId.get(button.dataset.ideaId);
-        if (idea) openIdeaDrawer(idea, { focusPromote: button.dataset.ideaAction === "promote" });
-      });
-    });
+    bindIdeaRowButtons(target);
   }
 
   function contentRenderLabel(record) {
