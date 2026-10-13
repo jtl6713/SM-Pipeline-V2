@@ -66,6 +66,111 @@
     return false;
   }
 
+  function canPreview(card) {
+    if (card?.kind !== "output") return false;
+    if (card.can_preview) return true;
+    return Boolean(card.preview_url || card.final_file_url || card.thumbnail_url);
+  }
+
+  function looksLikeImageOnly(card) {
+    const type = `${card.studio_output_type || ""} ${card.platform || ""}`.toLowerCase();
+    if (/carousel|single image|single photo|feed post/.test(type) && !/reel|story|short|tiktok|video/.test(type)) {
+      return Boolean(card.thumbnail_url) && !card.final_file_url;
+    }
+    return false;
+  }
+
+  function closeFactoryPreview() {
+    const backdrop = $("factoryPreviewBackdrop");
+    const video = $("factoryPreviewVideo");
+    const image = $("factoryPreviewImage");
+    const empty = $("factoryPreviewEmpty");
+    const dialog = backdrop?.querySelector(".library-preview-dialog");
+    if (video) {
+      video.pause();
+      video.removeAttribute("src");
+      video.removeAttribute("poster");
+      video.load();
+    }
+    if (image) {
+      image.removeAttribute("src");
+      image.hidden = true;
+    }
+    if (empty) empty.hidden = true;
+    dialog?.classList.remove("is-image");
+    dialog?.classList.add("is-video");
+    if (backdrop) backdrop.hidden = true;
+  }
+
+  function openFactoryPreview(card) {
+    const backdrop = $("factoryPreviewBackdrop");
+    const video = $("factoryPreviewVideo");
+    const image = $("factoryPreviewImage");
+    const empty = $("factoryPreviewEmpty");
+    const title = $("factoryPreviewTitle");
+    const dialog = backdrop?.querySelector(".library-preview-dialog");
+    if (!backdrop || !video || !image || !dialog) {
+      setStatus("Preview UI is missing from this page build.", true);
+      return;
+    }
+    if (title) title.textContent = cardLabel(card);
+    empty.hidden = true;
+    image.hidden = true;
+    image.removeAttribute("src");
+    video.pause();
+    video.removeAttribute("src");
+    video.removeAttribute("poster");
+
+    const thumb = String(card.thumbnail_url || "").trim();
+    const previewUrl = String(card.preview_url || "").trim()
+      || (/^rec[A-Za-z0-9]+$/.test(String(card.id || "")) ? `/api/outputs/${card.id}/preview` : "");
+    const imageOnly = looksLikeImageOnly(card);
+
+    if (imageOnly && thumb) {
+      dialog.classList.remove("is-video");
+      dialog.classList.add("is-image");
+      image.src = thumb;
+      image.hidden = false;
+      backdrop.hidden = false;
+      setStatus(`Previewing still · ${cardLabel(card)}`);
+      return;
+    }
+
+    if (!previewUrl && !thumb) {
+      dialog.classList.add("is-video");
+      dialog.classList.remove("is-image");
+      empty.hidden = false;
+      empty.textContent = "No preview file yet for this output.";
+      backdrop.hidden = false;
+      setStatus("No preview file yet.", true);
+      return;
+    }
+
+    dialog.classList.add("is-video");
+    dialog.classList.remove("is-image");
+    if (thumb) video.setAttribute("poster", thumb);
+    video.onerror = () => {
+      if (thumb) {
+        dialog.classList.remove("is-video");
+        dialog.classList.add("is-image");
+        image.src = thumb;
+        image.hidden = false;
+        video.removeAttribute("src");
+        setStatus(`Video stream failed — showing cover for ${cardLabel(card)}.`, true);
+        return;
+      }
+      empty.hidden = false;
+      empty.textContent = "Preview stream failed. Open Pipeline review for this output.";
+      setStatus("Preview stream failed.", true);
+    };
+    video.src = previewUrl;
+    video.hidden = false;
+    video.load();
+    backdrop.hidden = false;
+    setStatus(`Previewing · ${cardLabel(card)}`);
+    video.play?.().catch(() => {});
+  }
+
   function renderCard(card, { pile = false, candidate = false, lane = "" } = {}) {
     const meta = [
       card.profile_name,
@@ -80,6 +185,9 @@
     } else if (candidate) {
       actions.push(`<button type="button" class="primary-button" data-factory-pin="${esc(card.id)}">Add to pile</button>`);
     }
+    if (canPreview(card) && (lane === "needs_eyes" || canReviewActions(card, { pile, candidate }) || lane === "auto_high" || lane === "manual")) {
+      actions.push(`<button type="button" class="secondary-button" data-factory-preview="${esc(card.id)}">Preview</button>`);
+    }
     if (card.kind === "output" && (canReviewActions(card, { pile, candidate }) || lane === "needs_eyes")) {
       actions.push(`<button type="button" class="primary-button" data-factory-approve="${esc(card.id)}">Approve</button>`);
       actions.push(`<button type="button" class="secondary-button" data-factory-send-back="${esc(card.id)}">Send back</button>`);
@@ -87,7 +195,14 @@
     if (canDelete(card, { candidate })) {
       actions.push(`<button type="button" class="secondary-button factory-delete" data-factory-delete="${esc(card.id)}">Delete</button>`);
     }
+    const thumb = String(card.thumbnail_url || "").trim();
+    const media = canPreview(card)
+      ? `<button type="button" class="factory-card-thumb" data-factory-preview="${esc(card.id)}" aria-label="Preview ${esc(cardLabel(card))}">
+          ${thumb ? `<img src="${esc(thumb)}" alt="" loading="lazy">` : `<span class="factory-card-thumb-fallback">▶</span>`}
+        </button>`
+      : "";
     return `<article class="factory-card" data-factory-id="${esc(card.id)}" data-factory-kind="${esc(card.kind || "")}">
+      ${media}
       <div class="factory-card-main">
         <strong class="factory-card-title">${esc(cardLabel(card))}</strong>
         <span class="factory-card-meta">${meta || "—"}</span>
@@ -137,6 +252,16 @@
         if (card) openStudioTarget(card);
       });
     });
+    root.querySelectorAll("[data-factory-preview]").forEach((button) => {
+      button.addEventListener("click", () => {
+        const card = byId.get(button.getAttribute("data-factory-preview"));
+        if (!card) {
+          setStatus("Preview failed: card not found in desk payload.", true);
+          return;
+        }
+        openFactoryPreview(card);
+      });
+    });
     root.querySelectorAll("[data-factory-pin]").forEach((button) => {
       button.addEventListener("click", () => {
         const card = byId.get(button.getAttribute("data-factory-pin"));
@@ -171,6 +296,7 @@
         }
         if (!window.confirm(`Approve “${cardLabel(card)}” for publishing?\n\nInstagram, Facebook, and YouTube will auto-publish. TikTok stays a draft.`)) return;
         button.disabled = true;
+        closeFactoryPreview();
         mutateDesk({ action: "approve", id: card.id, kind: card.kind || "output" })
           .catch((error) => {
             button.disabled = false;
@@ -189,6 +315,7 @@
         }
         if (!window.confirm(`Send “${cardLabel(card)}” back to production?\n\nReview becomes Changes Requested.`)) return;
         button.disabled = true;
+        closeFactoryPreview();
         mutateDesk({ action: "send_back", id: card.id, kind: card.kind || "output" })
           .catch((error) => {
             button.disabled = false;
@@ -210,6 +337,7 @@
           : `Mark “${cardLabel(card)}” as Skipped and remove it from Factory queues?`;
         if (!window.confirm(copy)) return;
         button.disabled = true;
+        closeFactoryPreview();
         mutateDesk({ action: "delete", id: card.id, kind: card.kind || "output" })
           .catch((error) => {
             button.disabled = false;
@@ -281,6 +409,13 @@
 
   $("factoryDeskRefresh")?.addEventListener("click", () => {
     loadFactoryDesk(true).catch(() => {});
+  });
+  $("factoryPreviewClose")?.addEventListener("click", () => closeFactoryPreview());
+  $("factoryPreviewBackdrop")?.addEventListener("click", (event) => {
+    if (event.target === $("factoryPreviewBackdrop")) closeFactoryPreview();
+  });
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && !$("factoryPreviewBackdrop")?.hidden) closeFactoryPreview();
   });
 
   window.StudioFactoryDesk = {

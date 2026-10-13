@@ -289,4 +289,6 @@ UI 0.6.607 hashtag mismatch warning only; approval no longer blocked.
 
 2026-10-12: Studio UI 0.6.660-factory-grid2 — explicit 2×2 Factory grid areas + Pages verify reads lazy app-item4 manifest (fixes 2×1×2 from stale 0.6.658 Needs-assets full-span).
 
-2026-10-13: Studio UI 0.6.661-factory-approve — surface Factory action failures; pair with Worker write allowlist.
+2026-10-13: Studio UI 0.6.662-factory-preview — surface Factory action failures; pair with Worker write allowlist.
+
+2026-10-13: Studio UI 0.6.662-factory-preview — Factory Needs eyes inline Preview (thumb + modal video via /api/outputs/:id/preview).
