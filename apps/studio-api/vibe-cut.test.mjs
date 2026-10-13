@@ -221,10 +221,53 @@ test("Worker never treats Vibe Cut as finished-video passthrough", () => {
   assert.match(worker, /force_multiclip_remount/);
   assert.match(worker, /parsedClipCount/);
   assert.match(worker, /shortSingle/);
+  assert.match(worker, /durationMismatch/);
   assert.match(worker, /force_multiclip_remount: false/);
   assert.match(worker, /Rebuilding Vibe Cut multi-clip montage/);
   assert.match(worker, /Must go through enqueueStudioProductionJob so Vibe Cut/);
-  assert.match(worker, /version: "0.10.568-vibe-cut-16x9"/);
+  assert.match(worker, /version: "0.10.569-vibe-cut-adler-563"/);
+  assert.match(worker, /Video_Clip_Count_Mode: vibeCut \? "AI decides"/);
+  assert.match(worker, /Requested_Video_Clip_Count_Mode: "AI decides"/);
+  assert.match(worker, /Horizontal Vibe Cut must keep YouTube Standard \+ Short/);
+  assert.match(worker, /Re-enable horizontal Vibe Cut destinations/);
+});
+
+test("Smooth Vibes energy 1 at 45s builds multi-clip montage (not one trim)", () => {
+  const selects = provisionalSelectsFromDuration(305, { count: 36 });
+  const beats = Array.from({ length: 120 }, (_, i) => i * 0.5);
+  const edit = buildVibeCutEdit({
+    selects,
+    beats,
+    config: {
+      style: "smooth-vibes",
+      energy: 1,
+      target_seconds: 45,
+      chronology: "best-moments",
+      aspect_ratio: "16:9",
+    },
+  });
+  assert.ok(edit.clip_count >= 8, `expected many clips, got ${edit.clip_count}`);
+  assert.ok(edit.duration_seconds >= 40, `expected ~45s, got ${edit.duration_seconds}`);
+  assert.ok(edit.duration_seconds <= 45.5);
+  assert.ok(edit.clips.every((clip) => clip.duration_seconds >= 1.5));
+});
+
+test("horizontal plan always includes Standard + Short after cap", () => {
+  const notes = "ez-input=vibe-cut; source-aspect=horizontal";
+  const onlyStandard = capVibeCutPlanItems([
+    { platform: "YouTube", output_type: "Standard Video" },
+  ], { notes });
+  assert.deepEqual(
+    onlyStandard.map((item) => `${item.platform}::${item.output_type}`),
+    [...VIBE_CUT_HORIZONTAL_KEYS],
+  );
+  const onlyShort = capVibeCutPlanItems([
+    { platform: "YouTube", output_type: "Short" },
+  ], { notes });
+  assert.deepEqual(
+    onlyShort.map((item) => `${item.platform}::${item.output_type}`),
+    [...VIBE_CUT_HORIZONTAL_KEYS],
+  );
 });
 
 test("Studio web exposes Vibe Cut creation path", () => {

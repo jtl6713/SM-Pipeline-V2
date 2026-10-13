@@ -60,3 +60,38 @@ def test_expand_master_is_not_head_trim():
     assert float(sources[0]["duration_seconds"]) < 3
     assert float(sources[0]["source_duration_seconds"]) == 48.69
     assert desired_clip_count(parse_vibe_cut_directive(NOTES), source_duration=48.69) >= 8
+
+
+SMOOTH_45 = (
+    "origin=ez-wizard; ez-input=vibe-cut; ez-caption=ai; source-aspect=horizontal; ez-package=video\n"
+    '[vibe-cut] {"schema_version":"vibe-cut.1","mode":"vibe_cut","style":"smooth-vibes",'
+    '"energy":1,"target_seconds":45,"chronology":"best-moments","beat_sync":"on",'
+    '"aspect_ratio":"16:9","voiceover":"off"}'
+)
+
+
+def test_smooth_vibes_energy_1_45s_is_multi_clip_not_head_trim():
+    """Adler / Content 563 regression: 45s Smooth Vibes Energy 1 must cut many segments."""
+    cfg = parse_vibe_cut_directive(SMOOTH_45)
+    assert cfg is not None
+    assert cfg["style"] == "smooth-vibes"
+    assert cfg["energy"] == 1
+    assert vibe_cut_target_seconds(SMOOTH_45) == 45
+    master = {
+        "id": "adler",
+        "media_kind": "video",
+        "duration_seconds": 305.0,
+        "media_asset_record_id": "recADLERMASTER001",
+        "google_drive_file_id": "15tiMP0vOGgyZlVnbSttaQvo1Vr2EsO_3",
+        "name": "Adler Drone View.mp4",
+        "mime_type": "video/mp4",
+        "caption": "Adler Drone View",
+    }
+    sources = expand_master_to_vibe_sources(master, config=cfg)
+    assert len(sources) >= 8
+    assert len(sources) != 1
+    starts = [float(row["in_seconds"]) for row in sources]
+    assert max(starts) > 30
+    total = sum(float(row["out_seconds"]) - float(row["in_seconds"]) for row in sources)
+    assert 40 <= total <= 48
+    assert desired_clip_count(cfg, source_duration=305.0) >= 8
