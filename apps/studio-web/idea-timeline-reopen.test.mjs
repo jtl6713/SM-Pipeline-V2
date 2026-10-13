@@ -42,8 +42,8 @@ test("published or unusable Production requests are never selected for another t
 });
 
 test("all three Ideas timeline actions route through one safe open-or-create path", () => {
-  const action = app.slice(app.indexOf('target.querySelectorAll("[data-idea-timeline]")'),
-    app.indexOf('target.querySelectorAll("[data-idea-id]")'));
+  const action = app.slice(app.indexOf('scope.querySelectorAll("[data-idea-timeline]")'),
+    app.indexOf('scope.querySelectorAll("[data-idea-id]")'));
   assert.match(action, /openOrCreateIdeaTimeline\(idea/);
   assert.match(app, /openOrCreateIdeaTimeline\(activeIdea, \{ heading: true \}\)/);
   assert.match(app, /openOrCreateIdeaTimeline\(activeIdea, \{ button: \$\("createIdeaTimelineButton"\) \}\)/);
