@@ -4438,6 +4438,28 @@ body:has(#page-outputs.active) .main{
   min-width:0;
   padding-top:1px;
 }
+/* PIPELINE_CONTENT_ID_0_6_671 */
+.pipeline-content-heading{
+  display:flex;
+  flex-wrap:wrap;
+  align-items:baseline;
+  gap:4px 8px;
+  min-width:0;
+}
+.pipeline-content-id{
+  display:inline-flex;
+  align-items:center;
+  min-height:20px;
+  padding:2px 7px;
+  border-radius:999px;
+  border:1px solid #c9d7e8;
+  background:#f5f8fc;
+  color:#53657b;
+  font-size:.59rem;
+  line-height:1;
+  font-weight:800;
+  white-space:nowrap;
+}
 .pipeline-content-title{
   color:#075fd8;
   font-size:.86rem;

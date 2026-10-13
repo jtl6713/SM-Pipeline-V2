@@ -267,7 +267,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.670-schedule-4wk";
+  const BUILD_ID = "item4-0.6.671-content-id";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -19878,7 +19878,8 @@ function timedScriptAssetLabel(asset, index) {
       ? `<div class="pipeline-content-meta">${groupMeta.map((item) => `<span>${escapeHtml(item)}</span>`).join("")}</div>`
       : "";
 
-    const contentCell = `<td class="pipeline-content-cell" rowspan="${rowSpan}"><div class="pipeline-content-card"><div class="pipeline-content-media">${media}${coverDownload}</div><div class="pipeline-content-copy"><strong class="pipeline-content-title">${escapeHtml(contentLabel)}</strong>${summaryMarkup}<span class="pipeline-profile-pill" data-theme="${escapeHtml(workingStudioTheme())}">${escapeHtml(profileName)}</span>${metaMarkup}<div class="pipeline-content-actions">${approveButton}${regenerateButton}</div></div></div></td>`;
+    const contentIdMarkup = contentNumber ? `<span class="pipeline-content-id">Content ID ${escapeHtml(contentNumber)}</span>` : "";
+    const contentCell = `<td class="pipeline-content-cell" rowspan="${rowSpan}"><div class="pipeline-content-card"><div class="pipeline-content-media">${media}${coverDownload}</div><div class="pipeline-content-copy"><div class="pipeline-content-heading"><strong class="pipeline-content-title">${escapeHtml(title)}</strong>${contentIdMarkup}</div>${summaryMarkup}<span class="pipeline-profile-pill" data-theme="${escapeHtml(workingStudioTheme())}">${escapeHtml(profileName)}</span>${metaMarkup}<div class="pipeline-content-actions">${approveButton}${regenerateButton}</div></div></div></td>`;
 
     const rows = group.records.map((row, index) => pipelineRow(row, group.records, index === 0 ? contentCell : "")).join("");
     return `<tbody class="pipeline-content-package${isArchived ? " pipeline-archived-group" : ""}" data-pipeline-group="${escapeHtml(group.key)}" data-pipeline-tone="${escapeHtml(groupTone)}">${rows}</tbody>`;
