@@ -676,7 +676,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.574-open-branches-landed",
+          version: "0.10.575-photo-ready-auto-produce",
           studio_factory_desk_v1: true,
           studio_factory_desk_actions_v1: true,
           studio_factory_desk_write_v1: true,
@@ -25260,6 +25260,9 @@ async function evaluateAndMaybeAttachWaitingIdeaPhotos(env, idea, { authorizatio
         typecast: true,
       }),
     });
+    // Stamp origin=autonomous so morning resume / Factory Auto High can pick this
+    // up — photo Ready alone used to park forever as a blank-notes Draft.
+    requestRecord = await stampPhotoReadyIdeaForAutonomousProduce(env, ideaReady, requestRecord);
     return { ...decision, idea: ideaReady, production_request: requestRecord, match: matchJson };
   }
 
@@ -41938,6 +41941,7 @@ async function getStudioOperationsQueue(request, env, authorization) {
       stuck_class: stuck?.class || null,
       produce_paused: producePaused,
       render_paused: false,
+      production_notes: f(record, "Production_Notes") || "",
       lane: queueLaneForStudioState(studioState, { producePaused, stuck }),
       idea_id: ideaLinkedId,
       platforms: Array.isArray(f(record, "Target_Platforms")) ? f(record, "Target_Platforms") : [],
@@ -42988,14 +42992,29 @@ function ideaMatchedMediaIds(idea) {
     .filter((id) => /^rec[A-Za-z0-9]+$/.test(id));
 }
 
-/** Stamp the next photo-ready 1 a.m. idea so the existing one-at-a-time resume can produce it. */
-async function adoptNextReadyDailyIdea(env, authorization) {
+/** Stamp photo-ready daily ideas so one-at-a-time resume can produce them into Factory Needs eyes. */
+async function stampPhotoReadyIdeaForAutonomousProduce(env, idea, requestRecord) {
+  if (!idea?.id || !requestRecord?.id) return requestRecord;
+  if (isAutonomousOrigin(f(requestRecord, "Production_Notes"))) return requestRecord;
+  const profileId = firstLinkedRecordId(f(idea, "Content_Profile"));
+  if (!profileId) return requestRecord;
+  const profile = await airtableFetch(env, STUDIO_IDEA_PROFILE_TABLE_ID, profileId).catch(() => null);
+  if (!f(profile, "Active") || !f(profile, "Autonomous_Produce_Enabled")) return requestRecord;
+  const notes = stampAutonomousOrigin(f(requestRecord, "Production_Notes"));
+  return airtableFetch(env, PRODUCTION_REQUEST_TABLE, requestRecord.id, {
+    method: "PATCH",
+    body: JSON.stringify({ fields: { Production_Notes: notes }, typecast: true }),
+  });
+}
+
+/** Stamp photo-ready 1 a.m. ideas (up to a small batch) so resume can produce them. */
+async function adoptNextReadyDailyIdea(env, authorization, { limit = 8 } = {}) {
   const profiles = (await listRecords(env, STUDIO_IDEA_PROFILE_TABLE_ID, {
     limit: 50,
     filterFormula: "AND({Active}=1,{Autonomous_Produce_Enabled}=1)",
   })).map(mapOperationsProfile);
   const enabledIds = profiles.map((row) => row.id).filter(Boolean);
-  if (!enabledIds.length) return null;
+  if (!enabledIds.length) return [];
 
   const ideas = await listRecords(env, env.AIRTABLE_IDEA_TABLE_ID, {
     limit: 40,
@@ -43011,7 +43030,7 @@ async function adoptNextReadyDailyIdea(env, authorization) {
       "Studio_Matched_Media_Assets",
     ],
   });
-  if (!ideas.length) return null;
+  if (!ideas.length) return [];
 
   const open = await listOpenProductionRequests(env, { limit: 100 });
   const draftByIdea = new Map();
@@ -43038,7 +43057,10 @@ async function adoptNextReadyDailyIdea(env, authorization) {
     };
   });
 
+  const adopted = [];
+  const max = Math.max(1, Number(limit) || 8);
   for (const idea of dailyIdeasReadyToProduce(plain, enabledIds)) {
+    if (adopted.length >= max) break;
     const draft = idea.draft;
     if (!draft?.id) continue;
     const assetCount = Number(f(draft, "Studio_Master_Asset_Count") || 0);
@@ -43056,9 +43078,9 @@ async function adoptNextReadyDailyIdea(env, authorization) {
       method: "PATCH",
       body: JSON.stringify({ fields: { Production_Notes: notes }, typecast: true }),
     });
-    return { idea_id: idea.id, production_request_id: draft.id };
+    adopted.push({ idea_id: idea.id, production_request_id: draft.id });
   }
-  return null;
+  return adopted;
 }
 
 async function listAutonomousDraftRequests(env) {
@@ -43293,14 +43315,12 @@ async function executeStudioAutonomousProduce(env, ctx, options = {}) {
     return { skipped: "in_flight", chicago_date: chicago.date, slot, last };
   }
 
+  // Always stamp photo-ready daily ideas after 8am CT — do not wait for an empty
+  // autonomous/prepare-to-review queue (that gate left Miami/NYC Ready drafts parked).
   if (dailyIdeaProduceHasStarted(chicago, { force: Boolean(options.force) })) {
-    const pendingNow = await listAutonomousDraftRequests(env);
-    const queued = pendingNow.length ? await selectAutonomousResumeDraft(env, pendingNow) : null;
-    if (!queued) {
-      await adoptNextReadyDailyIdea(env, authorization).catch((error) => {
-        console.warn("daily idea produce adopt failed", error);
-      });
-    }
+    await adoptNextReadyDailyIdea(env, authorization).catch((error) => {
+      console.warn("daily idea produce adopt failed", error);
+    });
   }
 
   const pendingDrafts = await listAutonomousDraftRequests(env);

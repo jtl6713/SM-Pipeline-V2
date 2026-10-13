@@ -530,3 +530,23 @@ test("JSON fences unwrap and last-run notes stay readable", () => {
   assert.equal(parseAutonomousLastRun("not-json").notes, "not-json");
   assert.equal(parseAutonomousLastRun('{"slot":"2026-08-30:am"}').slot, "2026-08-30:am");
 });
+
+test("Worker stamps photo-ready ideas and always adopts after 8am CT", async () => {
+  const { readFile } = await import("node:fs/promises");
+  const { fileURLToPath } = await import("node:url");
+  const path = await import("node:path");
+  const here = path.dirname(fileURLToPath(import.meta.url));
+  const worker = await readFile(path.join(here, "worker.js"), "utf8");
+  assert.match(worker, /version: "0\.10\.574-photo-ready-auto-produce"/);
+  assert.match(worker, /async function stampPhotoReadyIdeaForAutonomousProduce/);
+  assert.match(worker, /stampPhotoReadyIdeaForAutonomousProduce\(env, ideaReady, requestRecord\)/);
+  assert.match(worker, /Always stamp photo-ready daily ideas after 8am CT/);
+  assert.doesNotMatch(
+    worker.slice(
+      worker.indexOf("if (dailyIdeaProduceHasStarted(chicago"),
+      worker.indexOf("const pendingDrafts = await listAutonomousDraftRequests(env);"),
+    ),
+    /if \(!queued\)/,
+  );
+});
+
