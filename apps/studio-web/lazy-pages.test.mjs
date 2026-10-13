@@ -23,7 +23,7 @@ test("Home boots a thin script set and lazy-loads the other pages", async () => 
   assert.match(html, /\/assets\/app-item4-1008\.js\?v=0\.6\.668-vibe-cut-16x9/);
   assert.match(loader, /function ensure\(/);
   assert.match(loader, /prefetchRemaining/);
-  assert.match(app, /BUILD_ID = "item4-0.6.668-vibe-cut-16x9"/);
+  assert.match(app, /BUILD_ID = "item4-0.6.669-idea-find-images-local"/);
   assert.match(app, /window\.StudioLazyLoad\?\.ensure\(page\)/);
   assert.match(app, /window\.StudioLazyLoad\?\.ensure\("content"\)/);
   assert.match(app, /page === "insights"/);
