@@ -220,12 +220,16 @@ test("Worker never treats Vibe Cut as finished-video passthrough", () => {
   assert.match(worker, /vibeCutNeedsRemount/);
   assert.match(worker, /force_multiclip_remount/);
   assert.match(worker, /parsedClipCount/);
+  assert.match(worker, /studioVibeCutOutputNeedsRemount/);
   assert.match(worker, /shortSingle/);
   assert.match(worker, /durationMismatch/);
+  assert.match(worker, /finishedWrong/);
+  assert.match(worker, /Music_Duration_Seconds/);
   assert.match(worker, /force_multiclip_remount: false/);
   assert.match(worker, /Rebuilding Vibe Cut multi-clip montage/);
   assert.match(worker, /Must go through enqueueStudioProductionJob so Vibe Cut/);
-  assert.match(worker, /version: "0.10.570-vibe-cut-short-fanout"/);
+  assert.match(worker, /version: "0.10.571-vibe-cut-finished-short-remount"/);
+  assert.match(worker, /Only clear outputs that actually need remount/);
   assert.match(worker, /Video_Clip_Count_Mode: vibeCut \? "AI decides"/);
   assert.match(worker, /Requested_Video_Clip_Count_Mode: "AI decides"/);
   assert.match(worker, /Horizontal Vibe Cut must keep YouTube Standard \+ Short/);

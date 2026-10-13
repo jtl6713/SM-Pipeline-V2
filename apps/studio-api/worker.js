@@ -676,7 +676,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.570-vibe-cut-short-fanout",
+          version: "0.10.571-vibe-cut-finished-short-remount",
           studio_factory_desk_v1: true,
           studio_factory_desk_actions_v1: true,
           studio_factory_desk_write_v1: true,
@@ -11687,7 +11687,50 @@ async function resumeAzFinishedVideoRequests(env, ctx = null) {
   return { resumed: results.length, results };
 }
 
-async function studioClearVibeCutPassthroughOutputs(env, requestId) {
+function studioVibeCutOutputNeedsRemount(row, vibeTarget = 0) {
+  const count = Number(f(row, "Selected_Clip_Count") || 0) || 0;
+  const frames = Number(f(row, "Render_Total_Frames") || 0) || 0;
+  const clipJson = String(f(row, "Render_Clip_List_JSON") || "").trim();
+  const story = studioAzIsStory(studioOutputTypeLabel(row));
+  if (story) return false;
+  let parsedClipCount = 0;
+  if (clipJson) {
+    try {
+      const parsed = JSON.parse(clipJson);
+      parsedClipCount = Array.isArray(parsed) ? parsed.length : 0;
+    } catch {
+      parsedClipCount = 0;
+    }
+  }
+  // Multi-clip montages still include id studio-source-1 as the first trim —
+  // only treat as single-head when the list/count is actually one clip.
+  const effectiveCount = Math.max(count, parsedClipCount);
+  // Count/list of 1 = head-of-file trim. Ignore empty (0) rows still waiting on stamp.
+  const singleHead = effectiveCount === 1;
+  // Short-frame remount only for true single-head trims while produce is mid
+  // flight. Multi-clip stamps can briefly show low Render_Total_Frames while
+  // T1 expands duration — those must not remount until they finish wrong.
+  const shortSingle = singleHead
+    && vibeTarget > 0
+    && frames > 0
+    && frames < Math.round(vibeTarget * 30) - 15;
+  const stampedDur = Number(f(row, "Studio_Effective_Video_Duration_Seconds") || 0) || 0;
+  const durationMismatch = vibeTarget > 0
+    && stampedDur > 0
+    && Math.abs(stampedDur - vibeTarget) >= 2;
+  const musicDur = Number(f(row, "Music_Duration_Seconds") || 0) || 0;
+  const outputStatus = String(f(row, "Output_Status") || "").trim();
+  const renderStatus = String(f(row, "Render_Status") || "").trim();
+  const finishedWrong = (outputStatus === "Ready for Review" || renderStatus === "Rendered")
+    && vibeTarget > 0
+    && (
+      (frames > 0 && frames < Math.round(vibeTarget * 30) - 15)
+      || (musicDur > 0 && musicDur < vibeTarget - 2)
+    );
+  return singleHead || shortSingle || durationMismatch || finishedWrong;
+}
+
+async function studioClearVibeCutPassthroughOutputs(env, requestId, { vibeTarget = 0 } = {}) {
   const outputs = await azPlatformOutputsForRequest(env, requestId).catch(() => []);
   for (const row of outputs || []) {
     const notes = String(f(row, "Output_Notes") || "");
@@ -11700,8 +11743,9 @@ async function studioClearVibeCutPassthroughOutputs(env, requestId) {
       || /finished-video:passthrough|ez-input=finished-video/i.test(notes)
       || Boolean(finalUrl && !String(f(row, "Composition_ID") || "").trim()
         && String(f(row, "Render_Status") || "") === "Rendered");
-    if (!passthroughStamp && !singleHeadTrim && String(f(row, "Output_Status") || "") !== "Ready for Review") continue;
-    if (!passthroughStamp && !singleHeadTrim && !finalUrl) continue;
+    // Only clear outputs that actually need remount. Do not wipe a correct
+    // Ready for Review sibling (Adler Short 45s) when Standard finished short.
+    if (!passthroughStamp && !singleHeadTrim && !studioVibeCutOutputNeedsRemount(row, vibeTarget)) continue;
     try {
       await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, row.id, {
         method: "PATCH",
@@ -11720,6 +11764,7 @@ async function studioClearVibeCutPassthroughOutputs(env, requestId) {
             Selected_Clip_Count: null,
             Studio_Effective_Video_Duration_Seconds: null,
             Video_Duration_Seconds_Override: null,
+            Music_Duration_Seconds: null,
             // Drop Exact=1 (I4 defaults) so stamp/T1 can expand many beat trims.
             Requested_Video_Clip_Count_Mode: "AI decides",
             Requested_Video_Clip_Count_Exact: null,
@@ -11759,41 +11804,12 @@ async function enqueueStudioProductionJob(env, requestId, options = {}) {
   const vibeTarget = Number(vibeDirective?.target_seconds || 0) || 0;
   let vibeCutNeedsRemount = vibeCutPassthrough || Boolean(existing?.heal?.force_multiclip_remount);
   // Always inspect outputs for Vibe Cut remount needs (single-head trim, wrong
-  // stamped duration after a notes rewrite). Do not wait for resume/blocked —
-  // cron fanout heal and fresh enqueue must rebuild Adler-style 30→45s jobs.
+  // stamped duration, or finished multi-clip that rendered short of target —
+  // Adler Standard kept Music_Duration_Seconds=30 / 900 frames after a 45s notes
+  // rewrite). Do not wait for resume/blocked.
   if (vibeCut && !vibeCutNeedsRemount) {
     const outputs = await azPlatformOutputsForRequest(env, requestId).catch(() => []);
-    vibeCutNeedsRemount = (outputs || []).some((row) => {
-      const count = Number(f(row, "Selected_Clip_Count") || 0) || 0;
-      const frames = Number(f(row, "Render_Total_Frames") || 0) || 0;
-      const clipJson = String(f(row, "Render_Clip_List_JSON") || "").trim();
-      const story = studioAzIsStory(studioOutputTypeLabel(row));
-      if (story) return false;
-      let parsedClipCount = 0;
-      if (clipJson) {
-        try {
-          const parsed = JSON.parse(clipJson);
-          parsedClipCount = Array.isArray(parsed) ? parsed.length : 0;
-        } catch {
-          parsedClipCount = 0;
-        }
-      }
-      // Multi-clip montages still include id studio-source-1 as the first trim —
-      // only treat as single-head when the list/count is actually one clip.
-      const effectiveCount = Math.max(count, parsedClipCount);
-      const singleHead = effectiveCount <= 1;
-      // Short-frame remount only for true single-head trims. Multi-clip stamps can
-      // briefly show low Render_Total_Frames while T1 expands duration.
-      const shortSingle = singleHead
-        && vibeTarget > 0
-        && frames > 0
-        && frames < Math.round(vibeTarget * 30) - 15;
-      const stampedDur = Number(f(row, "Studio_Effective_Video_Duration_Seconds") || 0) || 0;
-      const durationMismatch = vibeTarget > 0
-        && stampedDur > 0
-        && Math.abs(stampedDur - vibeTarget) >= 2;
-      return singleHead || shortSingle || durationMismatch;
-    });
+    vibeCutNeedsRemount = (outputs || []).some((row) => studioVibeCutOutputNeedsRemount(row, vibeTarget));
   }
   if (!existing?.job_id || vibeCutPassthrough || vibeCutNeedsRemount) {
     const finishedKind = studioFinishedOriginKind(record);
@@ -11822,7 +11838,7 @@ async function enqueueStudioProductionJob(env, requestId, options = {}) {
         resume_count: 0,
         max_resumes: Number(existing?.heal?.max_resumes || 5) || 5,
       };
-      await studioClearVibeCutPassthroughOutputs(env, requestId);
+      await studioClearVibeCutPassthroughOutputs(env, requestId, { vibeTarget });
     } else if (existing?.heal) {
       job.heal = existing.heal;
     }
