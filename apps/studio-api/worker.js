@@ -157,6 +157,9 @@ import {
   autonomousProfileHarvestOrder,
   autonomousRequestNeedsContinue,
   firstAutonomousResumeDraft,
+  dailyIdeaProduceHasStarted,
+  dailyIdeasReadyToProduce,
+  stampAutonomousOrigin,
   autonomousRunIsBusy,
   autonomousSlot,
   autonomousSlotAlreadyClaimed,
@@ -671,7 +674,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.566-factory-profile-gate",
+          version: "0.10.567-daily-idea-produce",
           studio_factory_desk_v1: true,
           studio_factory_desk_actions_v1: true,
           studio_factory_desk_write_v1: true,
@@ -42825,6 +42828,87 @@ async function finishAutonomousProductionRequest(env, authorization, ctx, idea, 
   return continueAfterPlan();
 }
 
+function ideaMatchedMediaIds(idea) {
+  const raw = f(idea, "Studio_Matched_Media_Assets");
+  const rows = Array.isArray(raw) ? raw : [];
+  return rows
+    .map((row) => String(row || "").trim())
+    .filter((id) => /^rec[A-Za-z0-9]+$/.test(id));
+}
+
+/** Stamp the next photo-ready 1 a.m. idea so the existing one-at-a-time resume can produce it. */
+async function adoptNextReadyDailyIdea(env, authorization) {
+  const profiles = (await listRecords(env, STUDIO_IDEA_PROFILE_TABLE_ID, {
+    limit: 50,
+    filterFormula: "AND({Active}=1,{Autonomous_Produce_Enabled}=1)",
+  })).map(mapOperationsProfile);
+  const enabledIds = profiles.map((row) => row.id).filter(Boolean);
+  if (!enabledIds.length) return null;
+
+  const ideas = await listRecords(env, env.AIRTABLE_IDEA_TABLE_ID, {
+    limit: 40,
+    sortField: "Create_Date",
+    sortDirection: "asc",
+    filterFormula: "AND({Studio_Photo_Wait_Status}='Ready',{Promoted_Content_Record_ID}=BLANK(),{Candidate_Status}!='On Hold',{Candidate_Status}!='Rejected')",
+    fields: [
+      "Candidate_Title",
+      "Content_Profile",
+      "Studio_Photo_Wait_Status",
+      "Promoted_Content_Record_ID",
+      "Candidate_Status",
+      "Studio_Matched_Media_Assets",
+    ],
+  });
+  if (!ideas.length) return null;
+
+  const open = await listOpenProductionRequests(env, { limit: 100 });
+  const draftByIdea = new Map();
+  for (const record of open) {
+    const ideaId = firstLinkedRecordId(f(record, "Idea_Candidate"));
+    const status = String(f(record, "Request_Status") || "").trim();
+    if (!ideaId || draftByIdea.has(ideaId)) continue;
+    if (!["Draft", "Ready", "Submitted"].includes(status)) continue;
+    if (!f(record, "Active")) continue;
+    draftByIdea.set(ideaId, record);
+  }
+
+  const plain = ideas.map((idea) => {
+    const draft = draftByIdea.get(idea.id) || null;
+    return {
+      id: idea.id,
+      profile_id: firstLinkedRecordId(f(idea, "Content_Profile")),
+      photo_wait_status: String(f(idea, "Studio_Photo_Wait_Status") || "").trim(),
+      promoted: Boolean(String(f(idea, "Promoted_Content_Record_ID") || "").trim()),
+      candidate_status: String(f(idea, "Candidate_Status") || "").trim(),
+      already_autonomous: isAutonomousOrigin(draft ? f(draft, "Production_Notes") : ""),
+      draft,
+      matched_ids: ideaMatchedMediaIds(idea),
+    };
+  });
+
+  for (const idea of dailyIdeasReadyToProduce(plain, enabledIds)) {
+    const draft = idea.draft;
+    if (!draft?.id) continue;
+    const assetCount = Number(f(draft, "Studio_Master_Asset_Count") || 0);
+    if (assetCount < 1) {
+      if (!idea.matched_ids.length || !authorization) continue;
+      try {
+        await attachItem4LibraryAssetIds(env, draft.id, idea.matched_ids, authorization);
+      } catch (error) {
+        console.warn("daily idea asset attach failed", idea.id, error);
+        continue;
+      }
+    }
+    const notes = stampAutonomousOrigin(f(draft, "Production_Notes"));
+    await airtableFetch(env, PRODUCTION_REQUEST_TABLE, draft.id, {
+      method: "PATCH",
+      body: JSON.stringify({ fields: { Production_Notes: notes }, typecast: true }),
+    });
+    return { idea_id: idea.id, production_request_id: draft.id };
+  }
+  return null;
+}
+
 async function listAutonomousDraftRequests(env) {
   return listRecords(env, PRODUCTION_REQUEST_TABLE, {
     limit: 25,
@@ -43055,6 +43139,16 @@ async function executeStudioAutonomousProduce(env, ctx, options = {}) {
 
   if (autonomousRunIsBusy(last)) {
     return { skipped: "in_flight", chicago_date: chicago.date, slot, last };
+  }
+
+  if (dailyIdeaProduceHasStarted(chicago, { force: Boolean(options.force) })) {
+    const pendingNow = await listAutonomousDraftRequests(env);
+    const queued = pendingNow.length ? await selectAutonomousResumeDraft(env, pendingNow) : null;
+    if (!queued) {
+      await adoptNextReadyDailyIdea(env, authorization).catch((error) => {
+        console.warn("daily idea produce adopt failed", error);
+      });
+    }
   }
 
   const pendingDrafts = await listAutonomousDraftRequests(env);

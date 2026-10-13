@@ -228,6 +228,40 @@ export function isAutonomousOrigin(text) {
   return String(text || "").includes("origin=autonomous");
 }
 
+/** 1 a.m. creates ideas. Production of photo-ready ideas starts at 8 a.m. Chicago and continues after that. */
+export function dailyIdeaProduceHasStarted(chicago, { force = false } = {}) {
+  if (force) return true;
+  const hour = Number(chicago?.hour);
+  return Number.isFinite(hour) && hour >= 8;
+}
+
+/**
+ * Photo-wait Ready ideas on profiles with Autonomous produce on.
+ * Waiting ideas, promoted ideas, and Chicago/LA (switch off) stay out.
+ */
+export function dailyIdeasReadyToProduce(ideas, enabledProfileIds) {
+  const enabled = new Set(
+    (Array.isArray(enabledProfileIds) ? enabledProfileIds : [])
+      .map((id) => String(id || "").trim())
+      .filter(Boolean),
+  );
+  const blocked = /^(on hold|rejected|promoted)$/i;
+  return (Array.isArray(ideas) ? ideas : []).filter((idea) => {
+    if (String(idea?.photo_wait_status || "").trim() !== "Ready") return false;
+    if (idea?.promoted) return false;
+    if (idea?.already_autonomous) return false;
+    const candidate = String(idea?.candidate_status || "").trim();
+    if (blocked.test(candidate)) return false;
+    return enabled.has(String(idea?.profile_id || "").trim());
+  });
+}
+
+export function stampAutonomousOrigin(notes) {
+  const text = String(notes || "").trim();
+  if (isAutonomousOrigin(text)) return text;
+  return text ? `origin=autonomous\n${text}` : "origin=autonomous";
+}
+
 /**
  * Oldest draft the morning resume may start.
  * origin=autonomous runs only for profiles with Autonomous produce on.

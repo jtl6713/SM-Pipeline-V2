@@ -23,6 +23,9 @@ import {
   isAutonomousOrigin,
   autonomousRequestNeedsContinue,
   firstAutonomousResumeDraft,
+  dailyIdeaProduceHasStarted,
+  dailyIdeasReadyToProduce,
+  stampAutonomousOrigin,
   extractJsonObject,
   mapYoutubeSearchItems,
   observationIsRecent,
@@ -252,6 +255,20 @@ test("YouTube mapper keeps titles and picker requires assets", () => {
     { id: "la", notes: "origin=autonomous", profile_id: la },
     { id: "chicago", notes: "origin=autonomous", profile_id: "recChicago" },
   ], enabled), null);
+  assert.equal(dailyIdeaProduceHasStarted({ hour: 1 }), false);
+  assert.equal(dailyIdeaProduceHasStarted({ hour: 8 }), true);
+  assert.equal(dailyIdeaProduceHasStarted({ hour: 1 }, { force: true }), true);
+  const morning = dailyIdeasReadyToProduce([
+    { id: "wait", profile_id: miami, photo_wait_status: "Waiting" },
+    { id: "la-ready", profile_id: la, photo_wait_status: "Ready" },
+    { id: "hold", profile_id: nyc, photo_wait_status: "Ready", candidate_status: "On Hold" },
+    { id: "queued", profile_id: miami, photo_wait_status: "Ready", already_autonomous: true },
+    { id: "miami-ready", profile_id: miami, photo_wait_status: "Ready", candidate_status: "Generated" },
+    { id: "nyc-ready", profile_id: nyc, photo_wait_status: "Ready", candidate_status: "Sent for Review" },
+  ], enabled);
+  assert.deepEqual(morning.map((row) => row.id), ["miami-ready", "nyc-ready"]);
+  assert.equal(stampAutonomousOrigin("Keep the river shots"), "origin=autonomous\nKeep the river shots");
+  assert.equal(stampAutonomousOrigin("origin=autonomous\nKeep"), "origin=autonomous\nKeep");
   assert.equal(isDerivedLibraryStillName("Pilsen-Murals-9__9x16__fill-crop-v2.jpg"), true);
   assert.equal(isDerivedLibraryStillName("Pilsen Murals 1.jpg"), false);
   assert.deepEqual(autonomousMasterMediaIds([
