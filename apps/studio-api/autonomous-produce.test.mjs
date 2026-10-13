@@ -537,7 +537,7 @@ test("Worker stamps photo-ready ideas and always adopts after 8am CT", async () 
   const path = await import("node:path");
   const here = path.dirname(fileURLToPath(import.meta.url));
   const worker = await readFile(path.join(here, "worker.js"), "utf8");
-  assert.match(worker, /version: "0\.10\.574-photo-ready-auto-produce"/);
+  assert.match(worker, /version: "0\.10\.575-photo-ready-auto-produce"/);
   assert.match(worker, /async function stampPhotoReadyIdeaForAutonomousProduce/);
   assert.match(worker, /stampPhotoReadyIdeaForAutonomousProduce\(env, ideaReady, requestRecord\)/);
   assert.match(worker, /Always stamp photo-ready daily ideas after 8am CT/);
