@@ -244,6 +244,7 @@
     return `<div class="factory-content-bar" data-factory-content="${esc(group.key)}">
       <span class="factory-content-title">${esc(title)}</span>
       <span class="factory-content-meta">${esc(meta)}</span>
+      <button type="button" class="secondary-button factory-content-send-back" data-factory-send-back-content="${esc(group.key)}">Send back to Production</button>
       <button type="button" class="primary-button factory-content-approve" data-factory-approve-content="${esc(group.key)}">Approve all (${ready.length})</button>
     </div>`;
   }
@@ -327,6 +328,46 @@
           action: "unpin_needs_assets",
           id: button.getAttribute("data-factory-unpin"),
         }).catch((error) => setStatus(error.message || String(error), true));
+      });
+    });
+    root.querySelectorAll("[data-factory-send-back-content]").forEach((button) => {
+      button.addEventListener("click", async () => {
+        const key = button.getAttribute("data-factory-send-back-content");
+        const cards = (state.desk?.lanes?.needs_eyes || []).filter((card) => contentGroupKey(card) === key);
+        const ready = readyContentCards({ cards });
+        if (!ready.length) {
+          setStatus("No reviewable outputs were found for this content.", true);
+          return;
+        }
+        const productionRequestId = String(ready.find((card) => /^rec[A-Za-z0-9]+$/.test(String(card.production_request_id || "")))?.production_request_id || "").trim();
+        if (!productionRequestId) {
+          setStatus("The linked Production Request could not be resolved.", true);
+          return;
+        }
+        const title = ready[0].title || "this content";
+        if (!window.confirm(`Send all ${ready.length} outputs for “${title}” back to Production?\n\nThe Production Request will reopen as a draft. You can change the package and approve it again to rerender.`)) return;
+        button.disabled = true;
+        closeFactoryPreview();
+        try {
+          const desk = await mutateDesk({
+            action: "send_back_content",
+            kind: "output",
+            id: ready[0].id,
+            production_request_id: productionRequestId,
+            output_ids: ready.map((card) => card.id),
+          });
+          const requestId = String(desk?.result?.production_request_id || productionRequestId).trim();
+          if (requestId && typeof window.StudioOpenProductionRequestById === "function") {
+            await window.StudioOpenProductionRequestById(requestId);
+          } else {
+            setStatus("Sent back to Production. Open Production to edit the package.");
+          }
+        } catch (error) {
+          button.disabled = false;
+          const message = error.message || String(error);
+          setStatus(message, true);
+          window.alert(`Factory Send back to Production failed:\n${message}`);
+        }
       });
     });
     root.querySelectorAll("[data-factory-approve-content]").forEach((button) => {
@@ -430,6 +471,7 @@
     unpin_needs_assets: "Removed from needs-assets pile.",
     approve: "Approved for publishing.",
     send_back: "Sent back to production.",
+    send_back_content: "Content sent back to Production.",
     delete: "Deleted / skipped.",
   };
 

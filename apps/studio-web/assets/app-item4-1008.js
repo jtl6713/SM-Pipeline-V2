@@ -267,7 +267,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.673-mae-slot-occupancy";
+  const BUILD_ID = "item4-0.6.674-factory-content-send-back";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -13394,6 +13394,26 @@ function timedScriptAssetLabel(asset, index) {
       }
     }
   }
+
+  window.StudioOpenProductionRequestById = async function StudioOpenProductionRequestById(requestId) {
+    const id = String(requestId || "").trim();
+    if (!/^rec[A-Za-z0-9]+$/.test(id)) throw new Error("Production Request ID is missing.");
+    const result = await api(`/api/production-requests/${encodeURIComponent(id)}`);
+    const record = result?.record;
+    if (!record?.id) throw new Error("Production Request could not be loaded.");
+    const ideaId = String(record.idea_record_id || (Array.isArray(record.idea_candidate_links) ? record.idea_candidate_links[0] : "") || "").trim();
+    if (!ideaId) throw new Error("The Production Request has no linked Idea Candidate.");
+    await ensureIdeasCache().catch(() => []);
+    const idea = ideasCache.find((row) => row?.id === ideaId) || {
+      id: ideaId,
+      title: record.idea_title || record.requested_title || "Production item",
+    };
+    return openProductionRequestForIdea(idea, {
+      productionRequest: record,
+      successMessage: "Returned from Factory. Make your changes, then Approve to rerender the content package.",
+      strict: true,
+    });
+  };
 
   let ideaLibraryPickerItems = [];
   let ideaLibrarySelected = new Set();

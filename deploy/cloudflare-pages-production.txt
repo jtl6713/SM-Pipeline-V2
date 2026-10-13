@@ -308,3 +308,4 @@ UI 0.6.607 hashtag mismatch warning only; approval no longer blocked.
 2026-10-13: Retry Studio UI 0.6.672-content-id-data after aligning footer-version regression assertions.
 
 2026-10-13: Studio UI 0.6.673-mae-slot-occupancy - Suggest the next post one row at a time, and keep published posts in the occupied-slot list so mornings are not reused.
+2026-10-13: Studio UI 0.6.674-factory-content-send-back - Needs Eyes content groups can return the entire package to editable Production and open it directly.
