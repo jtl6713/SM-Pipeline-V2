@@ -228,6 +228,36 @@ export function isAutonomousOrigin(text) {
   return String(text || "").includes("origin=autonomous");
 }
 
+/** Matched photo-ready ideas must not sit idle past this SLA (light cron drains them). */
+export const PHOTO_READY_SLA_MS = 30 * 60 * 1000;
+
+/** True when a stamp (Created_At / last.at) is at or past the photo-ready SLA. */
+export function photoReadySlaOverdue(stamp, nowMs = Date.now(), slaMs = PHOTO_READY_SLA_MS) {
+  const at = Date.parse(stamp || "");
+  if (!Number.isFinite(at)) return false;
+  return nowMs - at >= slaMs;
+}
+
+/**
+ * Promoted produce still running (Remotion / studio-produce steps).
+ * Must not block adopt + prepare of the next matched draft — only defer the
+ * next Remotion enqueue so two heavy renders do not collide.
+ */
+export function autonomousProduceJobInFlight(requestStatus, jobStep) {
+  const status = String(requestStatus || "").trim();
+  const step = String(jobStep || "").trim();
+  return status === "Promoted" && Boolean(step) && step !== "done" && step !== "blocked";
+}
+
+/** Clear parked-FIFO stamps when variants are Ready or the draft breached the 30m SLA. */
+export function shouldClearAutonomousResumeDeferred(notes, variantStatus, createdAt, nowMs = Date.now()) {
+  if (!isAutonomousResumeDeferred(notes)) return false;
+  if (String(variantStatus || "").trim() === "Ready") return true;
+  // Overdue Preparing stays parked (firstAutonomousResumeDraft skips stale Preparing).
+  if (String(variantStatus || "").trim() === "Preparing") return false;
+  return photoReadySlaOverdue(createdAt, nowMs);
+}
+
 /** 1 a.m. creates ideas. Production of photo-ready ideas starts at 8 a.m. Chicago and continues after that. */
 export function dailyIdeaProduceHasStarted(chicago, { force = false } = {}) {
   if (force) return true;
