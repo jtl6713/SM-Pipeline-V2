@@ -22,6 +22,7 @@ import {
   autonomousSlotAlreadyClaimed,
   isAutonomousOrigin,
   autonomousRequestNeedsContinue,
+  firstAutonomousResumeDraft,
   extractJsonObject,
   mapYoutubeSearchItems,
   observationIsRecent,
@@ -235,6 +236,22 @@ test("YouTube mapper keeps titles and picker requires assets", () => {
   assert.equal(autonomousRequestNeedsContinue("Draft", "origin=autonomous"), true);
   assert.equal(autonomousRequestNeedsContinue("Submitted", "manual studio request"), false);
   assert.equal(autonomousRequestNeedsContinue("Promoted", "origin=autonomous"), false);
+  const miami = "recpNlNn6U6eq0M9r";
+  const nyc = "recgtK8Z7eNADNtVy";
+  const la = "recF7UAn0LkMZZrWZ";
+  const enabled = [miami, nyc];
+  assert.equal(firstAutonomousResumeDraft([
+    { id: "la", notes: "origin=autonomous", profile_id: la },
+    { id: "miami", notes: "origin=autonomous", profile_id: miami },
+  ], enabled)?.id, "miami");
+  assert.equal(firstAutonomousResumeDraft([
+    { id: "prepare", notes: "origin=prepare-to-review", profile_id: la },
+    { id: "miami", notes: "origin=autonomous", profile_id: miami },
+  ], enabled)?.id, "prepare");
+  assert.equal(firstAutonomousResumeDraft([
+    { id: "la", notes: "origin=autonomous", profile_id: la },
+    { id: "chicago", notes: "origin=autonomous", profile_id: "recChicago" },
+  ], enabled), null);
   assert.equal(isDerivedLibraryStillName("Pilsen-Murals-9__9x16__fill-crop-v2.jpg"), true);
   assert.equal(isDerivedLibraryStillName("Pilsen Murals 1.jpg"), false);
   assert.deepEqual(autonomousMasterMediaIds([

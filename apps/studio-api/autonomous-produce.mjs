@@ -228,6 +228,26 @@ export function isAutonomousOrigin(text) {
   return String(text || "").includes("origin=autonomous");
 }
 
+/**
+ * Oldest draft the morning resume may start.
+ * origin=autonomous runs only for profiles with Autonomous produce on.
+ * Other resume stamps, such as prepare-to-review, are unchanged.
+ */
+export function firstAutonomousResumeDraft(drafts, enabledProfileIds) {
+  const enabled = new Set(
+    (Array.isArray(enabledProfileIds) ? enabledProfileIds : [])
+      .map((id) => String(id || "").trim())
+      .filter(Boolean),
+  );
+  for (const draft of Array.isArray(drafts) ? drafts : []) {
+    const notes = String(draft?.notes || draft?.production_notes || "");
+    if (!isAutonomousOrigin(notes)) return draft || null;
+    const profileId = String(draft?.profile_id || "").trim();
+    if (enabled.has(profileId)) return draft;
+  }
+  return null;
+}
+
 /** Draft / Ready / Submitted autonomous PRs must keep moving. Submitted is not a stop. */
 export function autonomousRequestNeedsContinue(requestStatus, notes) {
   if (!isAutonomousOrigin(notes)) return false;

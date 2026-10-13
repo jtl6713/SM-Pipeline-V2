@@ -108,7 +108,14 @@ function isAutonomousOrigin(row) {
   return false;
 }
 
+function isPastEyes(row) {
+  if (row?.lane === "publish" || row?.lane === "done") return true;
+  const blob = `${row?.studio_state || ""} ${row?.output_status || ""} ${row?.publish_status || ""}`.toLowerCase();
+  return /scheduled|ready to schedule|ready to publish|\bpublished\b|draft delivered|approved for publishing|uploading|platform processing/.test(blob);
+}
+
 function isReadyForReview(row) {
+  if (isPastEyes(row)) return false;
   const state = String(row?.studio_state || "").trim().toLowerCase();
   const output = String(row?.output_status || "").trim().toLowerCase();
   const review = String(row?.review_status || "").trim().toLowerCase();

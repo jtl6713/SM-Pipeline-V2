@@ -214,3 +214,4 @@ Deploy Worker 0.10.489-engagement-ledger. Shrink the engagement ledger so Chicag
 2026-10-13: Worker 0.10.565-factory-preview — allow Factory Desk POST through Phase 2A (Approve was 405).
 
 2026-10-13: Worker 0.10.565-factory-preview — Factory desk preview_url / can_preview on cards + studio_factory_desk_preview_v1.
+2026-10-13: Worker 0.10.566-factory-profile-gate - Factory drops Scheduled rows from Needs eyes, and autonomous resume runs only for profiles with Autonomous produce on.

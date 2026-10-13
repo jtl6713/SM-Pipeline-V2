@@ -156,6 +156,7 @@ import {
   pickAutonomousEnabledProfile,
   autonomousProfileHarvestOrder,
   autonomousRequestNeedsContinue,
+  firstAutonomousResumeDraft,
   autonomousRunIsBusy,
   autonomousSlot,
   autonomousSlotAlreadyClaimed,
@@ -670,7 +671,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.565-factory-preview",
+          version: "0.10.566-factory-profile-gate",
           studio_factory_desk_v1: true,
           studio_factory_desk_actions_v1: true,
           studio_factory_desk_write_v1: true,
@@ -42826,12 +42827,40 @@ async function finishAutonomousProductionRequest(env, authorization, ctx, idea, 
 
 async function listAutonomousDraftRequests(env) {
   return listRecords(env, PRODUCTION_REQUEST_TABLE, {
-    limit: 1,
+    limit: 25,
     // Autonomous harvest + operator Prepare-to-Review both need Draft/Ready/Submitted resume.
+    // More than one row so a Chicago/LA draft cannot block the next Miami or NYC draft.
     filterFormula: "AND(OR({Request_Status}='Draft',{Request_Status}='Ready',{Request_Status}='Submitted'),OR(FIND('origin=autonomous',{Production_Notes}&'')>0,FIND('origin=prepare-to-review',{Production_Notes}&'')>0))",
     sortField: "Created_At",
     sortDirection: "asc",
   });
+}
+
+async function selectAutonomousResumeDraft(env, drafts) {
+  const profiles = (await listRecords(env, STUDIO_IDEA_PROFILE_TABLE_ID, {
+    limit: 50,
+    filterFormula: "AND({Active}=1,{Autonomous_Produce_Enabled}=1)",
+  })).map(mapOperationsProfile);
+  const enabled = new Set(profiles.map((row) => row.id));
+  const annotated = [];
+  for (const requestRecord of drafts || []) {
+    const notes = String(f(requestRecord, "Production_Notes") || "");
+    let profileId = "";
+    if (isAutonomousOrigin(notes)) {
+      const ideaId = firstLinkedRecordId(f(requestRecord, "Idea_Candidate"));
+      const idea = ideaId
+        ? await airtableFetch(env, env.AIRTABLE_IDEA_TABLE_ID, ideaId).catch(() => null)
+        : null;
+      profileId = firstLinkedRecordId(idea ? f(idea, "Content_Profile") : "");
+    }
+    annotated.push({
+      requestRecord,
+      notes,
+      profile_id: profileId,
+    });
+  }
+  const chosen = firstAutonomousResumeDraft(annotated, [...enabled]);
+  return chosen?.requestRecord || null;
 }
 
 async function alignAutonomousDraftContentType(env, requestRecord, contentType) {
@@ -42844,6 +42873,11 @@ async function alignAutonomousDraftContentType(env, requestRecord, contentType) 
 }
 
 async function resumeAutonomousDrafts(env, authorization, ctx, drafts, chicago, slot, options = {}) {
+  const selected = await selectAutonomousResumeDraft(env, drafts);
+  if (!selected) {
+    return { status: "no_enabled_profile", chicago_date: chicago.date, slot, resumed: [] };
+  }
+  drafts = [selected];
   const ids = drafts.map((row) => row.id);
   const ideaIds = drafts.map((row) => firstLinkedRecordId(f(row, "Idea_Candidate"))).filter(Boolean);
 
@@ -43025,9 +43059,10 @@ async function executeStudioAutonomousProduce(env, ctx, options = {}) {
 
   const pendingDrafts = await listAutonomousDraftRequests(env);
   if (pendingDrafts.length) {
-    return resumeAutonomousDrafts(env, authorization, ctx, pendingDrafts, chicago, slot, {
+    const resumed = await resumeAutonomousDrafts(env, authorization, ctx, pendingDrafts, chicago, slot, {
       scheduled: Boolean(options.scheduled),
     });
+    if (resumed?.status !== "no_enabled_profile") return resumed;
   }
 
   if (options.scheduled) {
