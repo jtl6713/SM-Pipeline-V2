@@ -25,7 +25,7 @@ Return exactly this structure:
   ],
   "voiceover_script": "The spoken lines joined in slide order, skipping silent slides.",
   "post_caption": "The social post caption published with the finished video.",
-  "hashtags": "#tag #tag #tag"
+  "hashtags": "#tag #tag #tag #tag #tag"
 }}
 
 SLIDE REQUIREMENTS
@@ -68,7 +68,7 @@ POST CAPTION RULES (the post_caption field)
 - Put NO hashtags in post_caption. Hashtags belong only in the hashtags field.
 
 HASHTAG RULES (the hashtags field)
-- Return 8 to 12 hashtags as a single space separated string, each starting with #.
+- Return exactly 5 hashtags as a single space separated string, each starting with #.
 - No commas, no line breaks, no duplicates, no spaces inside a tag.
 - Mix broad TARGET MARKET and travel tags with tags specific to the things actually featured.
 
@@ -95,7 +95,7 @@ FINAL SELF-CHECK BEFORE RETURNING
 - slide_voiceovers.length equals TOTAL SLIDE COUNT, in slide order.
 - voiceover_script is the spoken lines joined in that same order.
 - post_caption is newly written audience-facing prose, does not copy any ALREADY COVERED label, contains no Featuring line/asset inventory/filename/asset name/internal media identifier, is 500 characters or fewer, and contains no hashtags.
-- hashtags contains 8 to 12 space separated tags.
+- hashtags contains exactly 5 space separated tags.
 - Output is valid JSON only."""
 
 
