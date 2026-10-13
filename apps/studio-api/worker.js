@@ -684,7 +684,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.588-factory-content-send-back",
+          version: "0.10.589-factory-approve-mae",
           studio_factory_desk_v1: true,
           studio_factory_desk_actions_v1: true,
           studio_factory_desk_write_v1: true,
@@ -1853,6 +1853,13 @@ export default {
       }
 
       // --- LIGHT (every 5 min): due-publish + stuck produce/render only ---
+      // Stamp MAE onto approved rows that Factory left blank BEFORE reconcile.
+      // A blank Scheduled_Post_Date matches the due-publish formula and goes out now.
+      try {
+        await studioHealApprovedMissingSchedule(env, { limit: 16 });
+      } catch (error) {
+        console.warn("approved missing-schedule heal failed", error);
+      }
       try {
         await studioReconcileOverdueScheduledPublishes(env, { limit: 12 });
       } catch (error) {
@@ -36280,7 +36287,70 @@ async function studioReconcileOverdueScheduledPublishes(env, options = {}) {
 // Approval is one click, and it has to survive a publisher scenario that drifted off, a Make API
 // hiccup, and a Worker invocation that ran out of budget before reaching the webhook. Nothing else
 // guarantees an approved output reaches a publisher, so this sweep runs first on every cron tick.
+async function studioHealApprovedMissingSchedule(env, options = {}) {
+  const limit = Math.max(1, Math.min(20, Number(options.limit || 16)));
+  let rows = [];
+  try {
+    rows = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
+      limit,
+      sortField: "Output_ID",
+      sortDirection: "asc",
+      // Publishing is already in flight. Ready to Publish / Ready to Schedule with
+      // no date are the Factory approvals Make will post on the next pulse.
+      filterFormula: 'AND({Test_Run_ID}=BLANK(),{Do_Not_Publish}=0,{Published_At}=BLANK(),{Scheduled_Post_Date}=BLANK(),{YouTube_Scheduled_Publish_At}=BLANK(),{Studio_Scheduled_At}=BLANK(),{Output_Status}="Approved for Publishing",OR({Publish_Status}="Ready to Publish",{Publish_Status}="Ready to Schedule"))',
+    });
+  } catch (error) {
+    console.warn("approved missing-schedule scan failed", error);
+    return [];
+  }
+  const occupiedByProfile = new Map();
+  const healed = [];
+  for (const row of rows || []) {
+    const profile = await item4ProductionProfileRecord(env, row).catch(() => null);
+    const profileKey = profile?.id || "_all";
+    if (!occupiedByProfile.has(profileKey)) {
+      occupiedByProfile.set(profileKey, await studioOccupiedSchedulesOrEmpty(env, { profile }).catch(() => ({})));
+    }
+    const occupiedByPlatform = occupiedByProfile.get(profileKey) || {};
+    const platform = String(f(row, "Platform") || "").trim();
+    const outputType = String(f(row, "Studio_Output_Type") || f(row, "Format") || "").trim();
+    const isStory = /story/i.test(outputType);
+    const laneKey = Object.keys(occupiedByPlatform).find((key) => String(key || "").trim().toLowerCase() === platform.toLowerCase()) || platform;
+    const lane = isStory ? [] : (occupiedByPlatform[laneKey] || []);
+    const timeZone = await studioScheduleTimeZoneForRecord(env, row, null);
+    const iso = studioSuggestedLocalDatetime(MAE_PRIORITY_SCHEDULE_WINDOWS, new Date(), {
+      occupiedMs: lane,
+      platformOccupiedMs: lane,
+      timeZone,
+    });
+    if (!iso) continue;
+    const fields = studioPublishScheduleFields(
+      { scheduled_post_date: iso, timezone: timeZone },
+      row,
+      { occupiedMs: lane, timeZone, forceWrite: true },
+    );
+    if (!fields.Scheduled_Post_Date) continue;
+    try {
+      await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, row.id, {
+        method: "PATCH",
+        body: JSON.stringify({ fields, typecast: true }),
+      });
+    } catch (error) {
+      console.warn("approved missing-schedule stamp failed", row.id, error);
+      continue;
+    }
+    const booked = Date.parse(fields.Scheduled_Post_Date);
+    if (!isStory && Number.isFinite(booked)) (occupiedByPlatform[laneKey] ||= []).push(booked);
+    healed.push({ id: row.id, output_id: f(row, "Output_ID") || null, scheduled_post_date: fields.Scheduled_Post_Date });
+  }
+  if (healed.length) studioInvalidateOccupiedScheduleCache();
+  return healed;
+}
+
 async function studioReconcileApprovedPublishes(env, options = {}) {
+  await studioHealApprovedMissingSchedule(env, { limit: 16 }).catch((error) => {
+    console.warn("approved missing-schedule heal before reconcile failed", error);
+  });
   const limit = Math.max(1, Math.min(12, Number(options.limit || 8)));
   let rows = [];
   try {
@@ -36591,6 +36661,9 @@ async function approveOutputRecordForPublishing(env, existing, note, stamp, payl
     });
     occupiedMs = occupied[platform] || [];
   }
+  const timeZone = options.timeZone || await studioScheduleTimeZoneForRecord(env, record, payload);
+  const outputType = String(f(record, "Studio_Output_Type") || f(record, "Format") || "").trim();
+  const isStory = /story/i.test(outputType);
   const markerIso = String(f(record, "Studio_Scheduled_At") || "").trim();
   const existingScheduleIso = String(
     f(record, "Scheduled_Post_Date") || f(record, "YouTube_Scheduled_Publish_At") || ""
@@ -36599,10 +36672,11 @@ async function approveOutputRecordForPublishing(env, existing, note, stamp, payl
   const publishNowImmediate = Boolean(
     payload?.publish_now === true || rawIn.toLowerCase() === "immediate"
   );
-  // Empty approve payloads used to mean "now", then occupancy bumped Scheduled_Post_Date
-  // / YouTube_Scheduled_Publish_At away from Studio_Scheduled_At (Output 909: marker Sep-25,
-  // YouTube still got Sep-28). Keep a locked operator time exactly; otherwise preserve the
-  // existing slot instead of inventing a new immediate time.
+  // A locked operator time stays exact (Output 909). An existing slot is kept.
+  // Publish Now is the only path that means "right now". Factory Approve and every
+  // other approve with no stored time take the next MAE opening. A blank
+  // Scheduled_Post_Date is what Make and the worker treat as due, so writing
+  // nothing publishes the post immediately.
   let requestedRaw = rawIn;
   let exactOverride = false;
   if (publishNowImmediate) {
@@ -36615,16 +36689,25 @@ async function approveOutputRecordForPublishing(env, existing, note, stamp, payl
   } else if (!requestedRaw && existingScheduleIso) {
     requestedRaw = existingScheduleIso;
   } else if (!requestedRaw) {
-    requestedRaw = "immediate";
+    const lane = isStory ? [] : (occupiedMs || []);
+    requestedRaw = studioSuggestedLocalDatetime(MAE_PRIORITY_SCHEDULE_WINDOWS, new Date(), {
+      occupiedMs: lane,
+      platformOccupiedMs: lane,
+      timeZone,
+    }) || "";
+    if (!requestedRaw) {
+      throw new HttpError(409, "No open morning, afternoon, or evening slot in the next 4 weeks");
+    }
   }
-  const timeZone = options.timeZone || await studioScheduleTimeZoneForRecord(env, record, payload);
   const scheduleFields = studioPublishScheduleFields(
     { ...(payload || {}), scheduled_post_date: requestedRaw, timezone: timeZone },
     record,
     {
-      occupiedMs,
+      occupiedMs: isStory ? [] : occupiedMs,
       exactOverride,
       timeZone,
+      // Publish Now must store "now". Leaving the date blank is the same as due.
+      forceWrite: publishNowImmediate,
     },
   );
   const scheduledIso = scheduleFields.Scheduled_Post_Date || f(record, "Scheduled_Post_Date");

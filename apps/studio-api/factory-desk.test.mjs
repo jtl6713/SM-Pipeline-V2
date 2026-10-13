@@ -210,13 +210,22 @@ test("Worker exposes factory desk routes and version flag", async () => {
   assert.match(worker, /mutateFactoryDesk/);
   assert.match(worker, /factoryApproveOutput/);
   assert.match(worker, /factorySendBackOutput/);
+  const approveFn = worker.slice(
+    worker.indexOf("async function approveOutputRecordForPublishing"),
+    worker.indexOf("function mapApprovedOutputSummary"),
+  );
+  assert.match(approveFn, /studioSuggestedLocalDatetime\(MAE_PRIORITY_SCHEDULE_WINDOWS/);
+  assert.match(approveFn, /No open morning, afternoon, or evening slot in the next 4 weeks/);
+  assert.match(approveFn, /forceWrite: publishNowImmediate/);
+  assert.match(worker, /async function studioHealApprovedMissingSchedule/);
+  assert.match(worker, /await studioHealApprovedMissingSchedule\(env, \{ limit: 16 \}\)/);
   assert.match(worker, /action === "approve"/);
   assert.match(worker, /action === "send_back"/);
   assert.match(worker, /action === "send_back_content"/);
   assert.match(worker, /factorySendBackContent/);
   assert.match(worker, /Request_Status: "Draft"/);
   assert.match(worker, /Studio_Production_Job_JSON: null/);
-  assert.match(worker, /0\.10\.588-factory-content-send-back/);
+  assert.match(worker, /0\.10\.589-factory-approve-mae/);
   assert.match(worker, /studio_factory_desk_v1:\s*true/);
   assert.match(worker, /studio_factory_desk_preview_v1:\s*true/);
 });
@@ -225,6 +234,6 @@ test("Worker allows Factory Desk POST through Phase 2A gate", async () => {
   const worker = await readFile(path.join(here, "worker.js"), "utf8");
   assert.match(worker, /const isFactoryDeskWrite = isFactoryDeskRoute && request\.method === "POST"/);
   assert.match(worker, /isFactoryDeskWrite \|/);
-  assert.match(worker, /version: "0\.10\.588-factory-content-send-back"/);
+  assert.match(worker, /version: "0\.10\.589-factory-approve-mae"/);
   assert.match(worker, /studio_factory_desk_write_v1: true/);
 });

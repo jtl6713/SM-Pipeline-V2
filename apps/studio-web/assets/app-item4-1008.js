@@ -267,7 +267,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.674-factory-content-send-back";
+  const BUILD_ID = "item4-0.6.675-factory-approve-mae";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -17972,7 +17972,12 @@ function timedScriptAssetLabel(asset, index) {
   function collectCreativeSchedulePayload() {
     const mode = document.querySelector("input[name='creativeScheduleMode']:checked")?.value || "immediate";
     const raw = String($("creativeScheduleAt")?.value || "").trim();
-    if (mode !== "schedule" || !raw) return { scheduled_post_date: "" };
+    // Immediate is an explicit Publish Now. An empty Schedule time is not:
+    // the server fills the next morning, afternoon, or evening slot.
+    if (mode === "immediate") {
+      return { scheduled_post_date: "immediate", publish_now: true, timezone: workingStudioTimeZone() };
+    }
+    if (!raw) return { scheduled_post_date: "", timezone: workingStudioTimeZone() };
     return { scheduled_post_date: studioDateTimeLocalToIso(raw), manual_schedule_override: true, timezone: workingStudioTimeZone() };
   }
 
@@ -25356,7 +25361,11 @@ function timedScriptAssetLabel(asset, index) {
     } else if (creativeCanApproveForPublishing(record) && !creativeMixInProgress()) {
       // One approval request with an immediate schedule: do not dispatch a second publish request.
       // The review endpoint owns approval and downstream publishing, avoiding duplicate jobs.
-      await reviewActiveCreative("approve_for_publishing", { scheduled_post_date: "", manual_schedule_override: false });
+      await reviewActiveCreative("approve_for_publishing", {
+        scheduled_post_date: "immediate",
+        publish_now: true,
+        timezone: workingStudioTimeZone(),
+      });
     }
   });
   $("creativeApprovePreview")?.addEventListener("click", () => {
