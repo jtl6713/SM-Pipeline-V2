@@ -30,7 +30,7 @@ test("UI enables Save schedule for Ready for Review (Output 1795)", () => {
 });
 
 test("Worker keeps Ready for Review over Ready to Schedule until Approve", () => {
-  assert.match(worker, /version: "0.10.577-miami-force-after-deploy"/);
+  assert.match(worker, /version: "0.10.578-autonomous-resuming-stale"/);
   // Ready to Schedule / Ready to Publish must not be in approvedOrScheduledEarly.
   const block = worker.match(
     /A pre-filled Publish_Status of "Ready to Schedule"[\s\S]{0,400}const approvedOrScheduledEarly =([\s\S]{0,500}?);/

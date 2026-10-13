@@ -287,7 +287,7 @@ test("worker wires engagement routes, cron, and version bump", () => {
   assert.match(worker, /from "\.\/engagement-service\.mjs"/);
   assert.match(worker, /\/api\/engagement\//);
   assert.match(worker, /studio_engagement_v1:\s*true/);
-  assert.match(worker, /0.10.577-miami-force-after-deploy/);
+  assert.match(worker, /0.10.578-autonomous-resuming-stale/);
   assert.match(worker, /studioRunEngagementDiscovery/);
   assert.match(worker, /studioEngagementCron/);
   assert.match(worker, /engagementThemeContextRecord/);

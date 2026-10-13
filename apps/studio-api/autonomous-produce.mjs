@@ -279,10 +279,13 @@ export function stampAutonomousResumeDeferred(notes, reason = "variants_still_pr
   return text ? `${text}\n${reasonLine}` : reasonLine;
 }
 
-/** waiting_variants / awaiting_i4 older than maxAge must not block the next city. */
+/**
+ * waiting_variants / awaiting_i4 / hung resuming|picking older than maxAge
+ * must not block the next city (Color Rush sat on status=resuming for hours).
+ */
 export function autonomousWaitingIsStale(last, nowMs = Date.now(), maxAgeMs = 12 * 60 * 1000) {
   const status = String(last?.status || "").trim();
-  if (!["waiting_variants", "awaiting_i4"].includes(status)) return false;
+  if (!["waiting_variants", "awaiting_i4", "resuming", "picking"].includes(status)) return false;
   const at = Date.parse(last?.at || "");
   if (!Number.isFinite(at)) return true;
   return nowMs - at >= maxAgeMs;

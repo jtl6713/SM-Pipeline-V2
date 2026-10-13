@@ -230,3 +230,5 @@ Deploy Worker 0.10.489-engagement-ledger. Shrink the engagement ledger so Chicag
 2026-10-13: Worker 0.10.576-miami-queue-unstick - Skip stuck Preparing/waiting autonomous drafts so Miami photo-ready FIFO can reach Needs eyes.
 
 2026-10-13: Worker 0.10.577-miami-force-after-deploy - Honor queue=deferred stamps; re-force after 576 deploy race so Miami Color Rush can resume.
+
+2026-10-13: Worker 0.10.578-autonomous-resuming-stale - Treat hung status=resuming like stale wait; park Preparing Color Rush and advance FIFO to Needs eyes.
