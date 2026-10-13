@@ -267,7 +267,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.671-content-id";
+  const BUILD_ID = "item4-0.6.672-content-id-data";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -19812,7 +19812,7 @@ function timedScriptAssetLabel(asset, index) {
   function renderPipelineGroupTbody(group, pipelineRow, { isNewest = false, isArchived = false } = {}) {
     const first = group.records[0] || {};
     const content = pipelineContentRecordForGroup(group.records);
-    const contentNumber = String(content?.content_id ?? "").trim();
+    const contentNumber = String(content?.content_id ?? first.content_number ?? "").trim();
     const title = String(content?.title || first.output_title || first.content_title || "Untitled content").trim();
     const summary = pipelineContentSummary(content, first);
     const groupReady = pipelineManualApprovableOutputs(group.records);
@@ -21179,7 +21179,17 @@ function timedScriptAssetLabel(asset, index) {
       if (row && row.id) byId.set(String(row.id), row);
     }
     for (const row of Array.isArray(freshRows) ? freshRows : []) {
-      if (row && row.id) byId.set(String(row.id), { ...(byId.get(String(row.id)) || {}), ...row });
+      if (!row || !row.id) continue;
+      const id = String(row.id);
+      const existing = byId.get(id) || {};
+      const merged = { ...existing, ...row };
+      // mode=latest intentionally skips the Content Item label lookup. Do not let
+      // its null content_number erase the enriched value from the full Pipeline snapshot.
+      if (!String(row.content_number ?? "").trim() && String(existing.content_number ?? "").trim()) {
+        merged.content_number = existing.content_number;
+        if (String(existing.content_title ?? "").trim()) merged.content_title = existing.content_title;
+      }
+      byId.set(id, merged);
     }
     return [...byId.values()].sort((a,b) => Number(b.output_id || 0)-Number(a.output_id || 0));
   }

@@ -304,3 +304,4 @@ UI 0.6.607 hashtag mismatch warning only; approval no longer blocked.
 2026-10-13: UI 0.6.670-schedule-4wk - Schedule copy says platforms in one package spread across 4 weeks.
 2026-10-13: Studio UI 0.6.671-content-id - Pipeline content card shows an explicit Content ID badge beside the title near the thumbnail.
 2026-10-13: Retry Studio UI 0.6.671-content-id after aligning stale regression version pins.
+2026-10-13: Studio UI 0.6.672-content-id-data - Pipeline Content ID now comes from output content_number; latest refresh no longer erases enriched content labels.

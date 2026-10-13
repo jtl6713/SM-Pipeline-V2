@@ -9,13 +9,15 @@ const app = fs.readFileSync(path.join(here, "assets/app-item4-1008.js"), "utf8")
 const css = fs.readFileSync(path.join(here, "assets/styles-phase7-0621.css"), "utf8");
 
 test("Pipeline content cell spans all platform outputs", () => {
-  assert.match(app, /item4-0.6.671-content-id/);
+  assert.match(app, /item4-0.6.672-content-id-data/);
   assert.match(app, /class="pipeline-content-cell" rowspan="\$\{rowSpan\}"/);
   assert.match(app, /pipelineRow\(row, group\.records, index === 0 \? contentCell : ""\)/);
   assert.match(app, /pipeline-content-card/);
   assert.match(app, /pipeline-content-heading/);
   assert.match(app, /pipeline-content-id/);
   assert.match(app, /Content ID/);
+  assert.match(app, /content\?\.content_id \?\? first\.content_number \?\? ""/);
+  assert.match(app, /merged\.content_number = existing\.content_number/);
   assert.match(app, /pipeline-content-thumb/);
   assert.match(app, /Schedule \(Your Time\)/);
 });
