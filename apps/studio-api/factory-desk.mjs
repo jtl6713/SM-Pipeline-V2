@@ -146,6 +146,8 @@ function isNeedsAssetsCandidate(row) {
   if (textIncludes(row?.studio_state, "assets needed") || textIncludes(row?.studio_state, "photo wait")) return true;
   if (row?.kind === "request") {
     const status = String(row?.request_status || "").toLowerCase();
+    // Photo-ready autonomous drafts already have stills — they belong in Auto High, not Needs Images.
+    if (isAutonomousOrigin(row)) return false;
     if ((status === "draft" || status === "ready") && !row?.produce_step) return true;
   }
   return false;
@@ -154,12 +156,15 @@ function isNeedsAssetsCandidate(row) {
 function isAutoHigh(row) {
   if (isManualLane(row) || isReadyForReview(row) || isNeedsAssetsCandidate(row)) return false;
   if (row?.lane === "publish" || row?.lane === "done") return false;
+  const status = String(row?.request_status || "").toLowerCase();
   const state = String(row?.studio_state || "").toLowerCase();
   const active = state.includes("producing")
     || state.includes("rendering")
     || state.includes("in production")
     || row?.lane === "active"
-    || String(row?.request_status || "").toLowerCase() === "promoted";
+    || status === "promoted"
+    // Queued photo-ready autonomous work should surface while plan/variants/produce catch up.
+    || (isAutonomousOrigin(row) && ["draft", "ready", "submitted"].includes(status));
   if (!active) return false;
   // Prefer autonomous; still show busy non-stuck work so the lane is useful on day one.
   return true;
