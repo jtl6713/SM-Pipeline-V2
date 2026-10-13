@@ -294,3 +294,4 @@ UI 0.6.607 hashtag mismatch warning only; approval no longer blocked.
 2026-10-13: Studio UI 0.6.662-factory-preview â Factory Needs eyes inline Preview (thumb + modal video via /api/outputs/:id/preview).
 
 2026-10-13: Studio UI 0.6.663-factory-lines - Factory desk is one column of four labeled bands with short Operations queue lines.
+2026-10-13: Studio UI 0.6.664-content-cover - Pipeline shared Download Cover moved below content thumbnail; output-level duplicate removed.

@@ -5030,3 +5030,9 @@ body.nav-collapsed .sidebar{
   #page-factory .factory-line-state{display:block;grid-column:2}
   #page-factory .factory-line-actions{grid-column:1 / -1;justify-content:flex-start;flex-wrap:wrap;padding-bottom:4px}
 }
+
+/* PIPELINE_CONTENT_COVER_0_6_664: one download action under each shared content thumbnail. */
+#outputsList .pipeline-content-media{display:flex;flex-direction:column;align-items:stretch;gap:5px}
+#outputsList .pipeline-content-download-cover{display:flex;align-items:center;justify-content:center;box-sizing:border-box;width:100%;min-height:26px;padding:4px 3px;border:1px solid #b7cce7;border-radius:6px;background:#fff;color:#0753b4;font-size:.56rem;font-weight:750;line-height:1.12;text-decoration:none;text-align:center;white-space:normal;cursor:pointer}
+#outputsList .pipeline-content-download-cover:hover{background:#edf4ff;border-color:#7ca8db}
+#outputsList .pipeline-content-download-cover:focus-visible{outline:2px solid #075fd8;outline-offset:2px}

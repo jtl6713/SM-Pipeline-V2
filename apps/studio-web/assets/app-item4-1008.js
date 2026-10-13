@@ -267,7 +267,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.663-factory-lines";
+  const BUILD_ID = "item4-0.6.664-content-cover";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -19793,6 +19793,10 @@ function timedScriptAssetLabel(asset, index) {
         ? `<button type="button" class="pipeline-content-thumb-button" data-pipeline-thumb-open="${escapeHtml(preferredMain.id)}" title="Open ${escapeHtml(preferredLabel || "main video output")}">${thumbImg}</button>`
         : thumbImg);
 
+    const coverDownload = coverUrl
+      ? `<a class="pipeline-content-download-cover" href="${escapeHtml(coverUrl)}" download target="_blank" rel="noopener noreferrer" title="Download cover for ${escapeHtml(contentLabel)}">Download Cover</a>`
+      : "";
+
     const summaryMarkup = summary
       ? `<p class="pipeline-content-summary">${escapeHtml(summary)}</p>`
       : "";
@@ -19801,7 +19805,7 @@ function timedScriptAssetLabel(asset, index) {
       ? `<div class="pipeline-content-meta">${groupMeta.map((item) => `<span>${escapeHtml(item)}</span>`).join("")}</div>`
       : "";
 
-    const contentCell = `<td class="pipeline-content-cell" rowspan="${rowSpan}"><div class="pipeline-content-card"><div class="pipeline-content-media">${media}</div><div class="pipeline-content-copy"><strong class="pipeline-content-title">${escapeHtml(contentLabel)}</strong>${summaryMarkup}<span class="pipeline-profile-pill" data-theme="${escapeHtml(workingStudioTheme())}">${escapeHtml(profileName)}</span>${metaMarkup}<div class="pipeline-content-actions">${approveButton}${regenerateButton}</div></div></div></td>`;
+    const contentCell = `<td class="pipeline-content-cell" rowspan="${rowSpan}"><div class="pipeline-content-card"><div class="pipeline-content-media">${media}${coverDownload}</div><div class="pipeline-content-copy"><strong class="pipeline-content-title">${escapeHtml(contentLabel)}</strong>${summaryMarkup}<span class="pipeline-profile-pill" data-theme="${escapeHtml(workingStudioTheme())}">${escapeHtml(profileName)}</span>${metaMarkup}<div class="pipeline-content-actions">${approveButton}${regenerateButton}</div></div></div></td>`;
 
     const rows = group.records.map((row, index) => pipelineRow(row, group.records, index === 0 ? contentCell : "")).join("");
     return `<tbody class="pipeline-content-package${isArchived ? " pipeline-archived-group" : ""}" data-pipeline-group="${escapeHtml(group.key)}" data-pipeline-tone="${escapeHtml(groupTone)}">${rows}</tbody>`;
@@ -20010,12 +20014,8 @@ function timedScriptAssetLabel(asset, index) {
       const postLink = r.platform_post_url
         ? `<a class="table-link" target="_blank" rel="noopener" href="${escapeHtml(r.platform_post_url)}">Open post ↗</a>`
         : "";
-      const coverDownloadUrl = phase6ThumbnailDownloadUrl(r);
-      const coverLink = coverDownloadUrl
-        ? `<a class="table-link pipeline-cover-download" target="_blank" rel="noopener" download href="${escapeHtml(coverDownloadUrl)}">Download cover</a>`
-        : "";
-      const moreMenu = postLink || coverLink
-        ? `<details class="pipeline-row-more"><summary title="More actions" aria-label="More actions">•••</summary><div class="pipeline-row-more-menu">${postLink}${coverLink}</div></details>`
+      const moreMenu = postLink
+        ? `<details class="pipeline-row-more"><summary title="More actions" aria-label="More actions">•••</summary><div class="pipeline-row-more-menu">${postLink}</div></details>`
         : "";
       const publishNowButton = pipelineCanPublishNow(r)
         ? `<button type="button" class="primary-button pipeline-publish-now" data-pipeline-publish-now="${escapeHtml(r.id)}" title="Publish this output now. This overrides its scheduled time. Instagram, Facebook, and YouTube may go public. TikTok stays a draft."${pipelinePublishNowPending.has(r.id) ? " disabled" : ""}>Publish Now</button>`
