@@ -167,7 +167,7 @@ test("Worker exposes factory desk routes and version flag", async () => {
   assert.match(worker, /factorySendBackOutput/);
   assert.match(worker, /action === "approve"/);
   assert.match(worker, /action === "send_back"/);
-  assert.match(worker, /0\.10\.582-preparing-created-stale/);
+  assert.match(worker, /0\.10\.583-variant-reconcile-gap/);
   assert.match(worker, /studio_factory_desk_v1:\s*true/);
   assert.match(worker, /studio_factory_desk_preview_v1:\s*true/);
 });
@@ -176,6 +176,6 @@ test("Worker allows Factory Desk POST through Phase 2A gate", async () => {
   const worker = await readFile(path.join(here, "worker.js"), "utf8");
   assert.match(worker, /const isFactoryDeskWrite = isFactoryDeskRoute && request\.method === "POST"/);
   assert.match(worker, /isFactoryDeskWrite \|/);
-  assert.match(worker, /version: "0\.10\.582-preparing-created-stale"/);
+  assert.match(worker, /version: "0\.10\.583-variant-reconcile-gap"/);
   assert.match(worker, /studio_factory_desk_write_v1: true/);
 });

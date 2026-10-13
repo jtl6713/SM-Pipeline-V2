@@ -35,9 +35,16 @@ test("Worker heal requeues Failed/Error leftovers like Retry remaining", () => {
   assert.match(worker, /Requeued by Quality Agent prepare heal/);
   assert.match(worker, /Studio_Variant_Status\}="Error"/);
   assert.match(worker, /Math\.min\(40,/);
-  assert.match(worker, /0\.10\.582-preparing-created-stale/);
+  assert.match(worker, /0\.10\.583-variant-reconcile-gap/);
   assert.match(worker, /item4HealIncompletePreparingVariants/);
   assert.match(worker, /item4HealTimelineAutoPrepare/);
+  // Preparing parents with finished crops must reconcile even when drain is idle.
+  assert.doesNotMatch(
+    worker,
+    /if \(item4Drain\?\.request_ids\?\.length\) \{\s*try \{\s*await item4HealIncompletePreparingVariants/,
+  );
+  assert.match(worker, /reconciled-ready/);
+  assert.match(worker, /clearAutonomousResumeDeferred/);
 });
 
 test("Production UI auto-retries prepare when the poll window expires", () => {
