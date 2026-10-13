@@ -158,11 +158,14 @@ function isAutoHigh(row) {
   if (row?.lane === "publish" || row?.lane === "done") return false;
   const status = String(row?.request_status || "").toLowerCase();
   const state = String(row?.studio_state || "").toLowerCase();
+  const produceStep = String(row?.produce_step || "").trim().toLowerCase();
+  // Produce finished — not In Flight even if Request_Status is still Promoted.
+  if (produceStep === "done") return false;
   const active = state.includes("producing")
     || state.includes("rendering")
     || state.includes("in production")
     || row?.lane === "active"
-    || status === "promoted"
+    || (status === "promoted" && produceStep && produceStep !== "done")
     // Queued photo-ready autonomous work should surface while plan/variants/produce catch up.
     || (isAutonomousOrigin(row) && ["draft", "ready", "submitted"].includes(status));
   if (!active) return false;

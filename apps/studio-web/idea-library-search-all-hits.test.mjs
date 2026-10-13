@@ -10,12 +10,12 @@ test("typed library search is not idea-ranked", async () => {
   const app = await readFile(path.join(here, "assets/app-item4-1008.js"), "utf8");
   const worker = await readFile(path.join(here, "../studio-api/worker.js"), "utf8");
   const html = await readFile(path.join(here, "index.html"), "utf8");
-  assert.match(app, /item4-0.6.671-content-id/);
-  assert.match(html, /UI build 0\.6\.671/);
+  assert.match(app, /item4-0.6.672-content-id-data/);
+  assert.match(html, /UI build 0\.6\.672/);
   assert.match(app, /search is not limited to this idea/);
   assert.match(app, /\{ flat: operatorSearch \}/);
   assert.match(app, /\(operatorSearch \|\| quoted\.phrase\) \? \[\] : suggested/);
-  assert.match(worker, /0\.10\.579-factory-cancelled-exclude/);
+  assert.match(worker, /0\.10\.580-factory-promoted-done-exclude/);
   assert.match(worker, /studio_idea_library_search_all_hits_v1: true/);
   assert.match(worker, /operator_search: operatorSearch/);
   assert.match(worker, /Typed search is operator choice only/);
