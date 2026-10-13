@@ -126,15 +126,36 @@ function isReadyForReview(row) {
   return false;
 }
 
+/** Worker-heal backlog while Remotion serializes — belongs in In Flight, not Repair. */
+function isTransientFactoryStuck(row) {
+  const stuckClass = String(row?.stuck_class || "").toLowerCase();
+  const stuckKind = String(row?.stuck_kind || "").toLowerCase();
+  if (stuckClass === "code_bug") return false;
+  if (stuckClass === "transient") return true;
+  return stuckKind === "produce_stale"
+    || stuckKind === "crop_stale"
+    || stuckKind === "render_stale_rendering"
+    || stuckKind === "render_ready_waiting_voiceover"
+    || stuckKind === "awaiting_approval_stale_rfr";
+}
+
 function isManualLane(row) {
+  const state = String(row?.studio_state || "").toLowerCase();
+  const status = String(row?.output_status || row?.request_status || "").toLowerCase();
+  const step = String(row?.produce_step || "").toLowerCase();
+  const explicitlyBroken = state.includes("blocked")
+    || state.includes("failed")
+    || state.includes("escalat")
+    || status === "blocked"
+    || status === "failed"
+    || step === "blocked"
+    || step === "escalated";
+  // produce_stale after 3m of quiet job JSON used to dump the whole render queue
+  // into Repair while only one Remotion job could run — operators saw In Flight=1.
+  if (isTransientFactoryStuck(row) && !explicitlyBroken) return false;
   if (row?.lane === "stuck") return true;
   if (row?.stuck_kind) return true;
-  const state = String(row?.studio_state || "").toLowerCase();
-  if (state.includes("blocked") || state.includes("failed") || state.includes("escalat")) return true;
-  const status = String(row?.output_status || row?.request_status || "").toLowerCase();
-  if (status === "blocked" || status === "failed") return true;
-  const step = String(row?.produce_step || "").toLowerCase();
-  if (step === "blocked" || step === "escalated") return true;
+  if (explicitlyBroken) return true;
   return false;
 }
 
@@ -153,19 +174,31 @@ function isNeedsAssetsCandidate(row) {
   return false;
 }
 
+function isRenderQueueActive(row) {
+  const state = String(row?.studio_state || "").toLowerCase();
+  const render = String(row?.render_status || "").toLowerCase();
+  return /ready for render|waiting in render queue/.test(state)
+    || state.includes("rendering")
+    || /ready for render|waiting in render queue|^rendering$/.test(render);
+}
+
 function isAutoHigh(row) {
   if (isManualLane(row) || isReadyForReview(row) || isNeedsAssetsCandidate(row)) return false;
   if (row?.lane === "publish" || row?.lane === "done") return false;
   const status = String(row?.request_status || "").toLowerCase();
   const state = String(row?.studio_state || "").toLowerCase();
   const produceStep = String(row?.produce_step || "").trim().toLowerCase();
-  // Produce finished — not In Flight even if Request_Status is still Promoted.
-  if (produceStep === "done") return false;
-  const active = state.includes("producing")
-    || state.includes("rendering")
+  const stuckKind = String(row?.stuck_kind || "").toLowerCase();
+  const renderActive = isRenderQueueActive(row);
+  // Parent produce may be done while sibling outputs still wait on serial Remotion.
+  if (produceStep === "done" && !renderActive) return false;
+  const active = renderActive
+    || state.includes("producing")
     || state.includes("in production")
+    || state === "produce_stale"
+    || stuckKind === "produce_stale"
     || row?.lane === "active"
-    || (status === "promoted" && produceStep && produceStep !== "done")
+    || (status === "promoted" && produceStep && produceStep !== "done" && produceStep !== "escalated")
     // Queued photo-ready autonomous work should surface while plan/variants/produce catch up.
     || (isAutonomousOrigin(row) && ["draft", "ready", "submitted"].includes(status));
   if (!active) return false;

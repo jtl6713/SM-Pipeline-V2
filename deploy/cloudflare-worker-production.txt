@@ -245,3 +245,5 @@ Deploy Worker 0.10.489-engagement-ledger. Shrink the engagement ledger so Chicag
 2026-10-13: Worker 0.10.584-autonomous-fifo-chain - Advance FIFO when prior job done; resume drafts on light cron so Needs eyes fills beyond one item.
 
 2026-10-13: Worker 0.10.585-photo-ready-30m-sla - Light ticks adopt matched ideas; Remotion in-flight no longer blocks prepare; undefer Ready/SLA; never leave photo-ready idle >30m.
+
+2026-10-13: Worker 0.10.586-factory-inflight-queue - Keep produce_stale / Ready for Render in Factory In Flight (Remotion stays serial; Repair is for real blocks).
