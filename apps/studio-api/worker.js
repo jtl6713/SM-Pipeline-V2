@@ -680,7 +680,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.578-autonomous-resuming-stale",
+          version: "0.10.579-factory-cancelled-exclude",
           studio_factory_desk_v1: true,
           studio_factory_desk_actions_v1: true,
           studio_factory_desk_write_v1: true,

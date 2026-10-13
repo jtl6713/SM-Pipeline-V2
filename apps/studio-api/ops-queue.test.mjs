@@ -7,6 +7,7 @@ import {
   OPS_QUEUE_CONTENT_FIELDS,
   OPS_QUEUE_OUTPUT_FIELDS,
   OPS_QUEUE_RENDER_FORMULA,
+  OPS_QUEUE_REQUEST_FORMULA,
   OPS_QUEUE_REQUEST_FIELDS,
   applyProducePauseToJob,
   buildOpsE2eGroup,
@@ -244,6 +245,12 @@ test("ops queue Airtable field lists avoid unknown column names", () => {
   assert.ok(OPS_QUEUE_OUTPUT_FIELDS.includes("Studio_Preview_Updated_At"));
 });
 
+test("ops queue request formula excludes Cancelled even when job step is not done", () => {
+  assert.match(OPS_QUEUE_REQUEST_FORMULA, /Request_Status\}!="Cancelled"/);
+  assert.match(OPS_QUEUE_REQUEST_FORMULA, /Request_Status\}="Promoted"/);
+  assert.match(OPS_QUEUE_REQUEST_FORMULA, /step":"done"/);
+});
+
 test("ops queue merges dedicated Remotion-lane rows so publishing cannot crowd them out", () => {
   assert.match(OPS_QUEUE_RENDER_FORMULA, /Ready for Render/);
   assert.match(OPS_QUEUE_RENDER_FORMULA, /Waiting in Render Queue/);
@@ -294,7 +301,7 @@ test("worker and UI wire Operations multi-queue + prepare-to-review", () => {
   assert.match(html, /ops-queue-cols-publish[\s\S]*?>Type<\/div><div>Status</);
   assert.match(html, /ops-queue-cols-e2e[\s\S]*?>Platform<\/div><div>Type</);
   assert.match(html, /prepareIdeaToReviewButton/);
-  assert.match(app, /BUILD_ID = "item4-0.6.670-schedule-4wk"/);
+  assert.match(app, /BUILD_ID = "item4-0.6.671-content-id"/);
   assert.match(app, /function opsQueueOutputTypeLabel/);
   assert.match(app, /studio_output_type \|\| row\?\.format/);
   assert.match(app, /platforms: "Plat"/);
