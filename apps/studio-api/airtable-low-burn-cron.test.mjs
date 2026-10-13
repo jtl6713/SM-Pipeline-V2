@@ -29,16 +29,33 @@ function scheduledBody() {
 }
 
 test("Worker health advertises airtable burn-kill cron build", () => {
-  assert.match(worker, /version: "0.10.570-vibe-cut-short-fanout"/);
+  assert.match(worker, /version: "0.10.572-daily-ideas-1am"/);
   assert.match(worker, /studio_airtable_low_burn_cron_v1: true/);
   assert.match(worker, /studio_airtable_burn_kill_v1: true/);
   assert.match(worker, /studioCronAirtableCadence/);
   assert.match(worker, /airtableCooldownWaitMs/);
 });
 
-test("production Worker deploy cron is every five minutes", () => {
-  assert.match(deployWorkflow, /'triggers':\{'crons':\['\*\/5 \* \* \* \*'\]\}/);
+test("production Worker deploy cron is every five minutes plus dedicated 06:00 UTC daily I1", () => {
+  assert.match(
+    deployWorkflow,
+    /'triggers':\{'crons':\['\*\/5 \* \* \* \*', '0 6 \* \* \*'\]\}/
+  );
   assert.doesNotMatch(deployWorkflow, /'crons':\['\*\/2 \* \* \* \*'\]/);
+});
+
+test("scheduled retries daily ideas throughout Chicago hour 1, not only heavy ticks", () => {
+  const scheduled = scheduledBody();
+  assert.match(scheduled, /chicagoNowParts\(\)/);
+  assert.match(scheduled, /dailyIdeasCron/);
+  assert.match(scheduled, /0 6 \* \* \*/);
+  assert.match(scheduled, /chicagoIdeas\.hour === 1/);
+  assert.match(scheduled, /runStudioDailyIdeas/);
+  // Must not gate daily I1 solely on cadence.heavy (two chances per night).
+  assert.doesNotMatch(
+    scheduled,
+    /if \(cadence\.heavy\) \{\s*ctx\.waitUntil\(runStudioDailyIdeas/
+  );
 });
 
 test("scheduled skips cron while Airtable is cooling down", () => {
@@ -85,7 +102,7 @@ test("scheduled gates insights and ingest to heavy cadence", () => {
   const scheduled = scheduledBody();
   assert.match(scheduled, /if \(cadence\.insights\)/);
   assert.match(scheduled, /if \(cadence\.ingest\)/);
-  assert.match(scheduled, /if \(cadence\.heavy\)/);
+  assert.match(scheduled, /if \(!cadence\.heavy\) return;/);
   assert.match(scheduled, /studioSweepPublishedInsights/);
   assert.match(scheduled, /item4PulsePipelineStage\(env, "a2"/);
 });

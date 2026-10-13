@@ -676,7 +676,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.570-vibe-cut-short-fanout",
+          version: "0.10.572-daily-ideas-1am",
           studio_factory_desk_v1: true,
           studio_factory_desk_actions_v1: true,
           studio_factory_desk_write_v1: true,
@@ -722,6 +722,7 @@ export default {
           studio_intake_parked_heal_v1: true,
           studio_quality_agent_v1: true,
           studio_airtable_low_burn_cron_v1: true,
+          studio_daily_ideas_1am_retry_v1: true,
           studio_airtable_burn_kill_v1: true,
           studio_airtable_queue_hang_fix_v1: true,
           studio_pipeline_review_filter_v1: true,
@@ -2104,7 +2105,14 @@ export default {
         console.warn("post-publish media release cron failed", error);
       }
     })());
-    if (cadence.heavy) {
+    // Daily I1 must not depend on heavy (:00/:30) alone. Chicago hour 1 is only
+    // ~two heavy ticks; if either is skipped under Airtable cool-down load, the
+    // whole day is lost. Retry on every */5 tick while hour===1, plus dedicated
+    // 06:00 UTC cron. already_ran_today / per-profile recent-batch guards
+    // prevent duplicate slates.
+    const chicagoIdeas = chicagoNowParts();
+    const dailyIdeasCron = String(event?.cron || "").trim() === "0 6 * * *";
+    if (cadence.heavy || dailyIdeasCron || chicagoIdeas.hour === 1) {
       ctx.waitUntil(runStudioDailyIdeas(null, env, { permissions: { tenant_admin: true } }, ctx, {
         scheduled: true,
         cron: event?.cron || "",
@@ -43521,6 +43529,22 @@ async function runStudioAutonomousProduce(request, env, authorization, ctx, opti
   return respond(request, env, { ok: true, ...result }, result.skipped || result.dry_run ? 200 : 202);
 }
 
+async function studioDailyCadenceRecentBatchForProfile(env, profileId) {
+  const sinceMs = Date.now() - 3 * 60 * 60 * 1000;
+  const rows = await listRecords(env, STUDIO_IDEA_BATCH_TABLE_ID, {
+    limit: 25,
+    sortField: "Requested_At",
+    sortDirection: "desc",
+    filterFormula: "AND({Requested_By}='studio-daily-cadence',OR({Status}='Complete',{Status}='Running',{Status}='Pending'))",
+  });
+  for (const row of rows) {
+    if (!linkedRecordIds(f(row, "Content_Profile")).includes(profileId)) continue;
+    const stamp = Date.parse(String(f(row, "Requested_At") || row.createdTime || ""));
+    if (Number.isFinite(stamp) && stamp >= sinceMs) return row;
+  }
+  return null;
+}
+
 async function executeStudioDailyIdeas(env, ctx, options = {}) {
   const chicago = chicagoNowParts();
   const lastDaily = await studioSettingsByName(env, STUDIO_I1_LAST_DAILY_SETTING);
@@ -43539,22 +43563,82 @@ async function executeStudioDailyIdeas(env, ctx, options = {}) {
     if (options.scheduled) await studioUpsertSetting(env, STUDIO_I1_LAST_DAILY_SETTING, chicago.date, "No enabled idea-generation profiles");
     return { skipped: "no_enabled_profiles", chicago_date: chicago.date, profiles: [] };
   }
-  if (pipelineStageBackend(env, "I1").mode !== "python") {
-    const scenario = await phase6ScenarioState(env, STUDIO_IDEA_I1_SCENARIO_ID);
-    if (scenario?.isActive) throw new HttpError(409, "I1 is already running");
+
+  let authorization = options.authorization;
+  if (!authorization?.user?.record_id) {
+    authorization = await resolveStudioCronAuthorization(env).catch(() => authorization || null);
   }
 
   const started = [];
+  const skipped = [];
+  const errors = [];
   for (const profile of profiles) {
     const count = Math.max(1, Math.min(10, Number(profile.daily_idea_limit) || 5));
-    const full = await airtableFetch(env, STUDIO_IDEA_PROFILE_TABLE_ID, profile.id);
-    const batch = await studioIdeaCreateBatch(env, full, count, "Balanced", { email: "studio-daily-cadence" });
-    await studioIdeaSetProfileOverrides(env, profile.id, batch.id, count, "Balanced");
-    await studioIdeaExecuteBatch(env, full, batch);
-    started.push({ profile_id: profile.id, name: profile.name, batch_record_id: batch.id, requested_count: count });
+    let batch = null;
+    try {
+      if (!options.force) {
+        const recent = await studioDailyCadenceRecentBatchForProfile(env, profile.id);
+        if (recent) {
+          skipped.push({
+            profile_id: profile.id,
+            name: profile.name,
+            batch_record_id: recent.id,
+            reason: "recent_daily_batch",
+          });
+          continue;
+        }
+      }
+      const full = await airtableFetch(env, STUDIO_IDEA_PROFILE_TABLE_ID, profile.id);
+      batch = await studioIdeaCreateBatch(env, full, count, "Balanced", { email: "studio-daily-cadence" });
+      await studioIdeaSetProfileOverrides(env, profile.id, batch.id, count, "Balanced");
+      // Use the same Python completion path as Studio Generate Ideas (marks
+      // Complete, stamps Generated_Count, starts photo listening). The older
+      // studioIdeaExecuteBatch Python branch returned without finishing the batch.
+      await studioIdeaRunPythonBatch(env, authorization, full, batch, count, "Balanced");
+      started.push({ profile_id: profile.id, name: profile.name, batch_record_id: batch.id, requested_count: count });
+    } catch (error) {
+      const message = String(error?.message || error || "Daily I1 failed").slice(0, 500);
+      errors.push({ profile_id: profile.id, name: profile.name, batch_record_id: batch?.id || null, error: message });
+      console.warn("daily idea cadence profile failed", profile.id, message);
+      if (batch?.id) {
+        try {
+          await studioIdeaUpdateBatch(env, batch.id, {
+            Status: "Failed",
+            Completed_At: new Date().toISOString(),
+            Error: message.slice(0, 10000),
+          });
+        } catch {}
+      }
+    } finally {
+      try { await studioIdeaClearProfileOverrides(env, profile.id); } catch {}
+    }
   }
-  await studioUpsertSetting(env, STUDIO_I1_LAST_DAILY_SETTING, chicago.date, `Daily I1 started for ${started.length} profile(s)`);
-  return { started: true, chicago_date: chicago.date, runs: started };
+
+  const pending = profiles.length - started.length - skipped.length;
+  // Stamp the day only when every enabled profile either finished or already
+  // had a recent daily batch. Partial failure leaves the stamp unset so later
+  // hour-1 ticks can retry the remaining profiles without re-running successes.
+  if (options.scheduled && pending <= 0 && errors.length === 0) {
+    await studioUpsertSetting(
+      env,
+      STUDIO_I1_LAST_DAILY_SETTING,
+      chicago.date,
+      `Daily I1 started for ${started.length} profile(s); skipped ${skipped.length}`
+    );
+  } else if (!options.scheduled && started.length) {
+    await studioUpsertSetting(env, STUDIO_I1_LAST_DAILY_SETTING, chicago.date, `Daily I1 started for ${started.length} profile(s)`);
+  }
+
+  if (!started.length && !skipped.length && errors.length) {
+    return { started: false, chicago_date: chicago.date, runs: [], skipped, errors };
+  }
+  return {
+    started: started.length > 0,
+    chicago_date: chicago.date,
+    runs: started,
+    skipped,
+    errors,
+  };
 }
 
 async function runStudioDailyIdeas(request, env, authorization, ctx, options = {}) {
