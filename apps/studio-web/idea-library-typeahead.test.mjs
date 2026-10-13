@@ -12,9 +12,9 @@ test("idea library search sequence + pins", async () => {
   const worker = await readFile(path.join(here, "../studio-api/worker.js"), "utf8");
   assert.match(app, /ideaLibraryLoadSequence/);
   assert.match(app, /Ignore stale responses so a slow empty-query open cannot wipe a later "Museum" search/);
-  assert.match(app, /item4-0.6.669-idea-find-images-local/);
+  assert.match(app, /item4-0.6.670-schedule-4wk/);
   assert.match(html, /UI build 0\.6\.669/);
-  assert.match(worker, /0\.10\.573-idea-generate-stale-lock/);
+  assert.match(worker, /0\.10\.574-open-branches-landed/);
   assert.match(worker, /studio_idea_library_typeahead_v1: true/);
   assert.match(worker, /ideaLibrarySearchHit/);
   assert.match(worker, /ideaLibrarySearchFilterKeys\(queryTokens\)/);

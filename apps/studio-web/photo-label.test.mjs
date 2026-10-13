@@ -16,5 +16,5 @@ test("Production cards hide opaque asset ids behind a photo label", () => {
   assert.match(labels, /library-card\[data-library-record-type='media_asset'\] h3/);
   assert.match(html, /production-asset-labels\.js\?v=0\.6\.669-idea-find-images-local/);
   assert.match(html, /app-item4-1008\.js\?v=0\.6\.669-idea-find-images-local/);
-  assert.match(app, /BUILD_ID = "item4-0.6.669-idea-find-images-local"/);
+  assert.match(app, /BUILD_ID = "item4-0.6.670-schedule-4wk"/);
 });

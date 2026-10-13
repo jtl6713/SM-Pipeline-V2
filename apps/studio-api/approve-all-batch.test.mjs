@@ -135,7 +135,7 @@ test("approve-all store stays under Airtable Setting_Value budget", () => {
 test("worker exposes durable approve-all batch routes and cron resume", () => {
   assert.match(worker, /from "\.\/approve-all-batch\.mjs"/);
   assert.match(worker, /studio_approve_all_batch_v1:\s*true/);
-  assert.match(worker, /0.10.573-idea-generate-stale-lock/);
+  assert.match(worker, /0.10.574-open-branches-landed/);
   assert.match(worker, /async function studioProcessApproveAllJobSlice/);
   assert.match(worker, /async function studioResumeApproveAllJobs/);
   assert.match(worker, /studioResumeApproveAllJobs\(env, ctx\)/);
@@ -150,7 +150,7 @@ test("worker exposes durable approve-all batch routes and cron resume", () => {
 });
 
 test("Studio UI starts Approve All as a background job and polls progress", () => {
-  assert.match(app, /item4-0.6.669-idea-find-images-local/);
+  assert.match(app, /item4-0.6.670-schedule-4wk/);
   assert.match(app, /startPipelineApproveAllJobWatch/);
   assert.match(app, /pollPipelineApproveAllJob/);
   assert.match(app, /Retry failed/);

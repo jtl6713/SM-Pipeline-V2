@@ -224,3 +224,4 @@ Deploy Worker 0.10.489-engagement-ledger. Shrink the engagement ledger so Chicag
 2026-10-13: Worker 0.10.572-daily-ideas-1am - Retry Chicago 1am Python I1 on every */5 tick + dedicated 06:00 UTC cron; finish daily batches via studioIdeaRunPythonBatch.
 
 2026-10-13: Worker 0.10.573-idea-generate-stale-lock - Auto-clear stale Manual_Idea_Batch locks so Generate Ideas is not blocked by Complete/Failed leftover links.
+2026-10-13: Worker 0.10.574-open-branches-landed - Land 4-week platform spread and finished Vibe Cut short remount on main.
