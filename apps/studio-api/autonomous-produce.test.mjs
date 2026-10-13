@@ -278,6 +278,8 @@ test("YouTube mapper keeps titles and picker requires assets", () => {
     { id: "miami", notes: "origin=autonomous", profile_id: miami },
   ], enabled, Date.parse("2026-10-13T12:20:00.000Z"))?.id, "miami");
   assert.equal(isAutonomousResumeDeferred("origin=autonomous\nautonomous_resume=deferred reason=x"), true);
+  assert.equal(isAutonomousResumeDeferred("origin=autonomous\nqueue=deferred\nWas waiting"), true);
+  assert.equal(isAutonomousResumeDeferred("origin=autonomous"), false);
   assert.match(stampAutonomousResumeDeferred("origin=autonomous", "preparing_stale"), /autonomous_resume=deferred reason=preparing_stale/);
   assert.equal(autonomousWaitingIsStale({
     status: "waiting_variants",
@@ -571,7 +573,7 @@ test("Worker stamps photo-ready ideas and always adopts after 8am CT", async () 
   const path = await import("node:path");
   const here = path.dirname(fileURLToPath(import.meta.url));
   const worker = await readFile(path.join(here, "worker.js"), "utf8");
-  assert.match(worker, /version: "0\.10\.576-miami-queue-unstick"/);
+  assert.match(worker, /version: "0\.10\.577-miami-force-after-deploy"/);
   assert.match(worker, /async function stampPhotoReadyIdeaForAutonomousProduce/);
   assert.match(worker, /stampPhotoReadyIdeaForAutonomousProduce\(env, ideaReady, requestRecord\)/);
   assert.match(worker, /Always stamp photo-ready daily ideas after 8am CT/);

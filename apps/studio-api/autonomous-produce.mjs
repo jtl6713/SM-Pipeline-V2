@@ -264,7 +264,10 @@ export function stampAutonomousOrigin(notes) {
 
 /** Park a Draft that is monopolizing FIFO (stuck Preparing / deferred by resume). */
 export function isAutonomousResumeDeferred(notes) {
-  return /(?:^|\n)\s*autonomous_resume\s*=\s*deferred\b/i.test(String(notes || ""));
+  const text = String(notes || "");
+  // Prefer autonomous_resume=deferred; also honor earlier queue=deferred stamps.
+  return /(?:^|\n)\s*autonomous_resume\s*=\s*deferred\b/i.test(text)
+    || /(?:^|\n)\s*queue\s*=\s*deferred\b/i.test(text);
 }
 
 export function stampAutonomousResumeDeferred(notes, reason = "variants_still_preparing") {
