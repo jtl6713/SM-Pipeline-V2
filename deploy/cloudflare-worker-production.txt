@@ -243,3 +243,5 @@ Deploy Worker 0.10.489-engagement-ledger. Shrink the engagement ledger so Chicag
 2026-10-13: Worker 0.10.583-variant-reconcile-gap - Always reconcile Preparing parents after crops finish; clear deferred so Cafecito/Color Rush reach Needs eyes.
 
 2026-10-13: Worker 0.10.584-autonomous-fifo-chain - Advance FIFO when prior job done; resume drafts on light cron so Needs eyes fills beyond one item.
+
+2026-10-13: Worker 0.10.585-photo-ready-30m-sla - Light ticks adopt matched ideas; Remotion in-flight no longer blocks prepare; undefer Ready/SLA; never leave photo-ready idle >30m.

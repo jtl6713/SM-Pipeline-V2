@@ -163,6 +163,9 @@ import {
   isAutonomousResumeDeferred,
   stampAutonomousResumeDeferred,
   clearAutonomousResumeDeferred,
+  shouldClearAutonomousResumeDeferred,
+  photoReadySlaOverdue,
+  autonomousProduceJobInFlight,
   autonomousWaitingIsStale,
   autonomousPreparingIsStale,
   autonomousRunIsBusy,
@@ -681,7 +684,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.584-autonomous-fifo-chain",
+          version: "0.10.585-photo-ready-30m-sla",
           studio_factory_desk_v1: true,
           studio_factory_desk_actions_v1: true,
           studio_factory_desk_write_v1: true,
@@ -1887,9 +1890,8 @@ export default {
       } catch (error) {
         console.warn("studio produce orphan kick failed", error);
       }
-      // Light tick: keep photo-ready autonomous FIFO moving. Heavy cron still owns
-      // harvest/picking; this only resumes Draft/Ready/Submitted once the prior
-      // job is done (Color Rush sat on status=resuming for ~50m with Needs eyes=1).
+      // Light tick: 30m photo-ready SLA drain. Adopt matched ideas + resume prepare
+      // even while a prior Remotion job is in flight. Heavy cron still owns harvest.
       try {
         await runStudioAutonomousProduce(null, env, { permissions: { tenant_admin: true } }, ctx, {
           scheduled: true,
@@ -42977,6 +42979,16 @@ async function finishAutonomousProductionRequest(env, authorization, ctx, idea, 
         idea_id: idea.id,
       };
     }
+    // Prior Remotion/produce still running — promote now, enqueue on a later tick
+    // (orphan kick / FIFO advance) so two heavy renders do not collide.
+    if (options.deferProduce) {
+      return {
+        waiting: false,
+        deferred_produce: true,
+        production_request_id: requestId,
+        idea_id: idea.id,
+      };
+    }
     try { await enqueueStudioProductionJob(env, requestId); } catch (error) {
       console.warn("autonomous studio-produce enqueue failed", requestId, error);
     }
@@ -43165,16 +43177,22 @@ async function selectAutonomousResumeDraft(env, drafts) {
           variantUpdatedAt = f(requestRecord, "Studio_Variant_Updated_At") || requestRecord.createdTime || "";
           notes = String(f(requestRecord, "Production_Notes") || notes);
         }
-        if (variantStatus === "Ready" && isAutonomousResumeDeferred(notes)) {
-          const cleared = clearAutonomousResumeDeferred(notes);
-          requestRecord = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, requestRecord.id, {
-            method: "PATCH",
-            body: JSON.stringify({ fields: { Production_Notes: cleared }, typecast: true }),
-          });
-          notes = cleared;
-        }
       } catch (error) {
         console.warn("autonomous prepare reconcile before resume failed", requestRecord.id, error);
+      }
+    }
+    // 30m SLA: re-enter FIFO when Ready (or non-Preparing overdue), not only after reconcile.
+    if (isAutonomousOrigin(notes)
+      && shouldClearAutonomousResumeDeferred(notes, variantStatus, draftCreatedAt, nowMs)) {
+      try {
+        const cleared = clearAutonomousResumeDeferred(notes);
+        requestRecord = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, requestRecord.id, {
+          method: "PATCH",
+          body: JSON.stringify({ fields: { Production_Notes: cleared }, typecast: true }),
+        });
+        notes = cleared;
+      } catch (error) {
+        console.warn("autonomous undefer for SLA drain failed", requestRecord.id, error);
       }
     }
     // Auto-park long-Preparing drafts so FIFO can reach the next city.
@@ -43223,6 +43241,7 @@ async function resumeAutonomousDrafts(env, authorization, ctx, drafts, chicago, 
   drafts = [selected];
   const ids = drafts.map((row) => row.id);
   const ideaIds = drafts.map((row) => firstLinkedRecordId(f(row, "Idea_Candidate"))).filter(Boolean);
+  const deferProduce = Boolean(options.deferProduce);
 
   const runAll = async () => {
     const results = [];
@@ -43238,6 +43257,8 @@ async function resumeAutonomousDrafts(env, authorization, ctx, drafts, chicago, 
       );
       const mediaAssetIds = autonomousMasterMediaIds(item4ParseJson(f(requestRecord, "Studio_Master_Assets_JSON"), []));
       if (!mediaAssetIds.length) {
+        // Empty-asset drafts monopolize FIFO if left unparked — park and advance.
+        await parkAutonomousResumeDraft(env, requestRecord, "resume_missing_assets");
         results.push({
           production_request_id: requestRecord.id,
           idea_id: ideaId,
@@ -43251,13 +43272,17 @@ async function resumeAutonomousDrafts(env, authorization, ctx, drafts, chicago, 
         const finished = await finishAutonomousProductionRequest(env, authorization, ctx, idea, requestRecord, {
           content_type: contentType,
           media_asset_ids: mediaAssetIds,
-        }, { awaitFinish: true, scheduled: Boolean(options.scheduled) });
+        }, {
+          awaitFinish: true,
+          scheduled: Boolean(options.scheduled),
+          deferProduce,
+        });
         results.push({
           production_request_id: finished.production_request_id,
           idea_id: finished.idea_id,
           status: finished.waiting
             ? (finished.waiting_reason === "awaiting_i4" ? "awaiting_i4" : "waiting_variants")
-            : "producing",
+            : (finished.deferred_produce ? "promoted_deferred_produce" : "producing"),
         });
       } catch (error) {
         console.warn("autonomous draft resume failed", requestRecord.id, error);
@@ -43271,16 +43296,20 @@ async function resumeAutonomousDrafts(env, authorization, ctx, drafts, chicago, 
     }
     const waitingI4 = results.some((row) => row.status === "awaiting_i4");
     const waiting = results.some((row) => row.status === "waiting_variants");
-    const producing = results.some((row) => row.status === "producing");
+    const producing = results.some((row) => row.status === "producing" || row.status === "promoted_deferred_produce");
     await studioSaveAutonomousLastRun(env, {
       status: waitingI4 ? "awaiting_i4" : (waiting ? "waiting_variants" : (producing ? "producing" : "skipped")),
-      skip_reason: waitingI4 ? "awaiting_i4" : (waiting ? "variants_still_preparing" : null),
+      skip_reason: waitingI4
+        ? "awaiting_i4"
+        : (waiting ? "variants_still_preparing" : (deferProduce ? "deferred_produce_prior_in_flight" : null)),
       chicago_date: chicago.date,
       slot,
       idea_id: ideaIds[ideaIds.length - 1] || null,
       production_request_id: ids[ids.length - 1] || null,
       production_request_ids: ids,
       resumed: results,
+      deferred_produce: deferProduce || undefined,
+      prior_produce_request_id: options.priorProduceRequestId || null,
     });
     return results;
   };
@@ -43293,6 +43322,7 @@ async function resumeAutonomousDrafts(env, authorization, ctx, drafts, chicago, 
     idea_id: ideaIds[0] || null,
     production_request_id: ids[0] || null,
     production_request_ids: ids,
+    prior_produce_request_id: options.priorProduceRequestId || null,
   });
 
   if (ctx?.waitUntil) {
@@ -43451,12 +43481,13 @@ async function executeStudioAutonomousProduce(env, ctx, options = {}) {
       });
     }
     if (finished.waiting) {
-      // Second consecutive wait on the same PR while force-running → park and advance.
-      if (options.force && ["waiting_variants", "awaiting_i4"].includes(String(last.status || "").trim())) {
+      // Force or 30m SLA breach on the same waiting PR → park and advance FIFO.
+      const slaOverdue = photoReadySlaOverdue(draftCreatedAt) || photoReadySlaOverdue(last.at);
+      if ((options.force || slaOverdue) && ["waiting_variants", "awaiting_i4"].includes(String(last.status || "").trim())) {
         await parkAutonomousResumeDraft(env, requestRecord, finished.waiting_reason || "variants_still_preparing");
         last = await studioSaveAutonomousLastRun(env, {
           status: "reset",
-          skip_reason: "force_skip_stuck_waiting",
+          skip_reason: options.force ? "force_skip_stuck_waiting" : "sla_skip_stuck_waiting",
           chicago_date: chicago.date,
           idea_id: null,
           production_request_id: null,
@@ -43484,16 +43515,29 @@ async function executeStudioAutonomousProduce(env, ctx, options = {}) {
     }
   }
 
-  if (["producing", "promoted", "resuming"].includes(String(last.status || "").trim()) && last.production_request_id) {
-    const requestRecord = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, last.production_request_id).catch(() => null);
+  // Remotion/produce in flight must NOT block adopt + prepare of the next matched
+  // draft (that was the day-long Needs eyes stall). Only defer the next enqueue.
+  let priorProduceInFlight = false;
+  let priorProduceRequestId = String(last.prior_produce_request_id || "").trim() || null;
+  const produceProbeIds = [...new Set([
+    last.production_request_id,
+    priorProduceRequestId,
+  ].filter(Boolean))];
+  for (const probeId of produceProbeIds) {
+    const requestRecord = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, probeId).catch(() => null);
     const requestStatus = String(f(requestRecord, "Request_Status") || "").trim();
     const job = requestRecord ? parseStudioProductionJob(requestRecord) : null;
     const step = String(job?.step || "").trim();
-    if (requestStatus === "Promoted" && job && step && step !== "done" && step !== "blocked") {
-      return { skipped: "in_flight", chicago_date: chicago.date, last };
+    if (autonomousProduceJobInFlight(requestStatus, step)) {
+      priorProduceInFlight = true;
+      priorProduceRequestId = probeId;
+      break;
     }
-    // Promoted produce finished — free the lock so the next Draft can resume.
-    if (requestStatus === "Promoted" && (!job || step === "done" || step === "blocked")) {
+    if (probeId === last.production_request_id
+      && ["producing", "promoted", "resuming"].includes(String(last.status || "").trim())
+      && requestStatus === "Promoted"
+      && (!job || step === "done" || step === "blocked")) {
+      // Promoted produce finished — free the lock so the next Draft can resume.
       last = await studioSaveAutonomousLastRun(env, {
         status: "reset",
         skip_reason: step === "done" ? "prior_job_done_advance_fifo" : "prior_promoted_advance_fifo",
@@ -43501,18 +43545,21 @@ async function executeStudioAutonomousProduce(env, ctx, options = {}) {
         slot: null,
         idea_id: null,
         production_request_id: null,
+        prior_produce_request_id: null,
         completed_production_request_id: last.production_request_id,
       });
+      priorProduceRequestId = null;
     }
   }
+  if (!priorProduceInFlight) priorProduceRequestId = null;
 
-  if (autonomousRunIsBusy(last)) {
+  if (autonomousRunIsBusy(last) && !priorProduceInFlight) {
     return { skipped: "in_flight", chicago_date: chicago.date, slot, last };
   }
 
-  // Always stamp photo-ready daily ideas after 8am CT — do not wait for an empty
-  // autonomous/prepare-to-review queue (that gate left Miami/NYC Ready drafts parked).
-  if (!options.resume_only && dailyIdeaProduceHasStarted(chicago, { force: Boolean(options.force) })) {
+  // Light + heavy: stamp photo-ready daily ideas after 8am CT so matched drafts
+  // never sit past the 30m SLA waiting for the next heavy harvest tick.
+  if (dailyIdeaProduceHasStarted(chicago, { force: Boolean(options.force) })) {
     await adoptNextReadyDailyIdea(env, authorization).catch((error) => {
       console.warn("daily idea produce adopt failed", error);
     });
@@ -43523,6 +43570,8 @@ async function executeStudioAutonomousProduce(env, ctx, options = {}) {
     const resumed = await resumeAutonomousDrafts(env, authorization, ctx, pendingDrafts, chicago, slot, {
       scheduled: Boolean(options.scheduled),
       force: Boolean(options.force),
+      deferProduce: priorProduceInFlight,
+      priorProduceRequestId,
     });
     if (resumed?.status !== "no_enabled_profile") return resumed;
   }

@@ -172,7 +172,7 @@ test("Trying Again only for real Remotion failures, never queue wait", () => {
 });
 
 test("Worker admit + mapOutput expose queue meta and Remotion job id", () => {
-  assert.match(worker, /version: "0.10.584-autonomous-fifo-chain"/);
+  assert.match(worker, /version: "0.10.585-photo-ready-30m-sla"/);
   assert.match(worker, /studio_shared_render_queue_v1: true/);
   assert.match(worker, /studio_render_queue_wait_v1: true/);
   assert.match(worker, /async function studioAdmitRenderQueue/);

@@ -29,6 +29,10 @@ import {
   isAutonomousResumeDeferred,
   stampAutonomousResumeDeferred,
   clearAutonomousResumeDeferred,
+  shouldClearAutonomousResumeDeferred,
+  photoReadySlaOverdue,
+  PHOTO_READY_SLA_MS,
+  autonomousProduceJobInFlight,
   autonomousWaitingIsStale,
   autonomousPreparingIsStale,
   extractJsonObject,
@@ -326,6 +330,33 @@ test("YouTube mapper keeps titles and picker requires assets", () => {
   assert.equal(dailyIdeaProduceHasStarted({ hour: 1 }), false);
   assert.equal(dailyIdeaProduceHasStarted({ hour: 8 }), true);
   assert.equal(dailyIdeaProduceHasStarted({ hour: 1 }, { force: true }), true);
+  assert.equal(PHOTO_READY_SLA_MS, 30 * 60 * 1000);
+  assert.equal(photoReadySlaOverdue("2026-10-13T12:00:00.000Z", Date.parse("2026-10-13T12:29:00.000Z")), false);
+  assert.equal(photoReadySlaOverdue("2026-10-13T12:00:00.000Z", Date.parse("2026-10-13T12:30:00.000Z")), true);
+  assert.equal(photoReadySlaOverdue("", Date.now()), false);
+  assert.equal(autonomousProduceJobInFlight("Promoted", "render"), true);
+  assert.equal(autonomousProduceJobInFlight("Promoted", "done"), false);
+  assert.equal(autonomousProduceJobInFlight("Promoted", "blocked"), false);
+  assert.equal(autonomousProduceJobInFlight("Draft", "themes"), false);
+  assert.equal(shouldClearAutonomousResumeDeferred(
+    "origin=autonomous\nautonomous_resume=deferred reason=x",
+    "Ready",
+    "2026-10-13T12:00:00.000Z",
+    Date.parse("2026-10-13T12:05:00.000Z"),
+  ), true);
+  assert.equal(shouldClearAutonomousResumeDeferred(
+    "origin=autonomous\nautonomous_resume=deferred reason=x",
+    "Preparing",
+    "2026-10-13T12:00:00.000Z",
+    Date.parse("2026-10-13T13:00:00.000Z"),
+  ), false);
+  assert.equal(shouldClearAutonomousResumeDeferred(
+    "origin=autonomous\nautonomous_resume=deferred reason=x",
+    "Error",
+    "2026-10-13T12:00:00.000Z",
+    Date.parse("2026-10-13T12:35:00.000Z"),
+  ), true);
+  assert.equal(shouldClearAutonomousResumeDeferred("origin=autonomous", "Ready", "2026-10-13T12:00:00.000Z"), false);
   const morning = dailyIdeasReadyToProduce([
     { id: "wait", profile_id: miami, photo_wait_status: "Waiting" },
     { id: "la-ready", profile_id: la, photo_wait_status: "Ready" },
@@ -599,22 +630,34 @@ test("JSON fences unwrap and last-run notes stay readable", () => {
   assert.equal(parseAutonomousLastRun('{"slot":"2026-08-30:am"}').slot, "2026-08-30:am");
 });
 
-test("Worker stamps photo-ready ideas and always adopts after 8am CT", async () => {
+test("Worker stamps photo-ready ideas and drains the 30m SLA on light ticks", async () => {
   const { readFile } = await import("node:fs/promises");
   const { fileURLToPath } = await import("node:url");
   const path = await import("node:path");
   const here = path.dirname(fileURLToPath(import.meta.url));
   const worker = await readFile(path.join(here, "worker.js"), "utf8");
-  assert.match(worker, /version: "0\.10\.584-autonomous-fifo-chain"/);
+  assert.match(worker, /version: "0\.10\.585-photo-ready-30m-sla"/);
   assert.match(worker, /async function stampPhotoReadyIdeaForAutonomousProduce/);
   assert.match(worker, /stampPhotoReadyIdeaForAutonomousProduce\(env, ideaReady, requestRecord\)/);
-  assert.match(worker, /Always stamp photo-ready daily ideas after 8am CT/);
+  assert.match(worker, /30m photo-ready SLA drain/);
   assert.match(worker, /skip_stuck_waiting_for_next_draft/);
   assert.match(worker, /parkAutonomousResumeDraft/);
   assert.match(worker, /autonomousWaitingIsStale/);
   assert.match(worker, /prior_job_done_advance_fifo/);
+  assert.match(worker, /priorProduceInFlight/);
+  assert.match(worker, /deferProduce/);
+  assert.match(worker, /sla_skip_stuck_waiting/);
+  assert.match(worker, /shouldClearAutonomousResumeDeferred/);
   assert.match(worker, /resume_only: true/);
   assert.match(worker, /resume_only_idle/);
+  // Light ticks must adopt photo-ready ideas (not heavy-only).
+  assert.doesNotMatch(
+    worker.slice(
+      worker.indexOf("if (dailyIdeaProduceHasStarted(chicago"),
+      worker.indexOf("const pendingDrafts = await listAutonomousDraftRequests(env);"),
+    ),
+    /resume_only/,
+  );
   assert.doesNotMatch(
     worker.slice(
       worker.indexOf("if (dailyIdeaProduceHasStarted(chicago"),

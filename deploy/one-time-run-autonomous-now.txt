@@ -11,3 +11,5 @@
 2026-10-13: Force autonomous after variant reconcile gap (Cafecito crops Ready, parent stuck Preparing).
 
 2026-10-13: Force autonomous after Color Rush done — chain Cafecito/Golden Hour and remaining photo-ready drafts to Needs eyes.
+
+2026-10-13: Force autonomous after 0.10.585 photo-ready 30m SLA — drain all matched Drafts (adopt on light + prepare while Remotion runs) so Needs eyes fills continuously.
