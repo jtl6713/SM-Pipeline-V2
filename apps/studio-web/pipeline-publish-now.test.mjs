@@ -10,7 +10,7 @@ const css = fs.readFileSync(path.join(here, "assets/styles-phase7-0621.css"), "u
 const html = fs.readFileSync(path.join(here, "index.html"), "utf8");
 
 test("Pipeline rows offer Publish Now for Ready to Publish outputs", () => {
-  assert.match(app, /BUILD_ID = "item4-0.6.662-factory-preview"/);
+  assert.match(app, /BUILD_ID = "item4-0.6.663-factory-lines"/);
   assert.match(html, /UI build 0.6.662/);
   const gateStart = app.indexOf("function pipelineCanPublishNow(record)");
   const gateEnd = app.indexOf("function creativeCanSetSchedule", gateStart);

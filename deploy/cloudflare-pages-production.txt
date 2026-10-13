@@ -16,7 +16,7 @@ Deploy UI 0.6.487 schedule MAE day fill. Two TikToks become 5:30 then 11:30 the 
 Deploy UI 0.6.488 global ChicagoShining watermark on every Studio page/profile.
 Deploy UI 0.6.489 ideas VO timeline. Ideas page writes a timed voiceover script and picks named library stills.
 Deploy UI 0.6.490 ideas VO timeline advances to Production Approve with timeline stills attached.
-Deploy UI 0.6.491 schedule blackout shade. Calendar hours 8PM–3:30AM local render darker as off limits.
+Deploy UI 0.6.491 schedule blackout shade. Calendar hours 8PMâ3:30AM local render darker as off limits.
 Deploy UI 0.6.492 iPad production workspace layout.
 Deploy UI 0.6.493 ideas VO production handoff. Open Rendering with the attached voiceover timeline instead of Media photos only.
 Deploy UI 0.6.494 master calendar blackout collapse. Hide off-limits overnight rows by default with expandable audit bands.
@@ -52,7 +52,7 @@ Trigger Pages deploy for actual Studio UI 0.6.517 source commit 1ed2a838: 2026-1
 Retry UI 0.6.517 Pages deploy with Cloudflare Access-aware custom-domain verification: 2026-10-07T04:31Z
 Verify Studio UI 0.6.517 through Cloudflare Access service token: 2026-10-07T04:55Z
 Deploy Studio topbar skyline banner with contrast-protected hamburger, branding, Help, and profile selector. Asset: topbar-banner-0618.css. Triggered 2026-10-07.
-Deploy Studio UI 0.6.518 MAE 28-day schedule + 11PM–3AM blackout: 2026-10-07T05:40Z
+Deploy Studio UI 0.6.518 MAE 28-day schedule + 11PMâ3AM blackout: 2026-10-07T05:40Z
 Retry Studio UI 0.6.519 Pages verify (prefer unique deployment URL + Access + loud content mismatches): 2026-10-07T06:14Z
 Deploy Studio UI 0.6.520-feed-post-timeline. Create timeline on a one-photo Feed Post keeps Feed Post and voiceover No.
 Deploy Studio UI 0.6.521-compact-start-launcher. Reduce Start a post launcher height, tighten wizard/upload controls, and raise purple-panel text contrast to white/off-white. Triggered 2026-10-07.\nDeploy Studio UI 0.6.522-pipeline-search-icon. Remove visible Search pipeline label; retain accessible aria-label and use the magnifying-glass symbol inside the search control. Triggered 2026-10-07.\nDeploy Studio UI 0.6.523-all-profiles-overview. Replace the selected-profile Scheduled Content/metric cards with a compact profile-independent Chicago/NYC/LA/Miami matrix showing Facebook, Instagram, TikTok, YouTube scheduled counts plus Manual Action, Failed, Awaiting Approval, Ideas, and totals. Triggered 2026-10-07.\n
@@ -89,7 +89,7 @@ Deploy Studio UI 0.6.534-pages-path-bust. Rename app-item4-0625.js -> app-item4-
 
 2026-10-09: Deploy UI 0.6.538-engagement-history-channel. Engagement History shows YouTube channel + clickable post link.
 
-2026-10-09: Deploy UI 0.6.540-engagement-frequent-creators. Frequent creators shows channel titles, not UC… IDs.
+2026-10-09: Deploy UI 0.6.540-engagement-frequent-creators. Frequent creators shows channel titles, not UCâ¦ IDs.
 
 2026-10-09: Deploy UI 0.6.541-ship-verify. Ship-verify footer after engagement/awaiting-approval merges; hard-refresh Studio.
 
@@ -108,9 +108,9 @@ Deploy Studio UI 0.6.534-pages-path-bust. Rename app-item4-0625.js -> app-item4-
 2026-10-09: Deploy UI 0.6.548-engagement-ledger. Engagement history keeps the server message when a click cannot be saved.
 
 2026-10-09: Deploy Studio New Profile onboarding. Add guided city setup with Las Vegas, San Francisco, New Orleans, Washington DC, Boston presets plus IG/TT/YT/FB create-or-connect workflow. PR #562.
-2026-10-09 New Profile onboarding rollout — main 17cace69c7e7674b7de2c70abc4a05d5bdf9e331
+2026-10-09 New Profile onboarding rollout â main 17cace69c7e7674b7de2c70abc4a05d5bdf9e331
 
-2026-10-09: Deploy UI 0.6.550-vibe-cut-home. Vibe Cut creation mode — long video to music-driven 9:16 montage (no voiceover).
+2026-10-09: Deploy UI 0.6.550-vibe-cut-home. Vibe Cut creation mode â long video to music-driven 9:16 montage (no voiceover).
 
 2026-10-09: Deploy UI 0.6.550-vibe-cut-home. Prominent Vibe Cut launcher on Home wizard.
 2026-10-09: Deploy UI 0.6.551-engagement-filter-layout. Add Discovery filters padding, stronger field labels, and keep Engagement checkboxes beside their text.
@@ -187,13 +187,13 @@ Deploy Studio UI 0.6.534-pages-path-bust. Rename app-item4-0625.js -> app-item4-
 
 2026-10-11: Soft AI API footer under Airtable cooldown (UI 0.6.588 / Worker 0.10.523).
 
-2026-10-11: Airtable burn-kill — light cron publish/produce only + skip while cooling + UI 429 backoff (UI 0.6.589 / Worker 0.10.524).
+2026-10-11: Airtable burn-kill â light cron publish/produce only + skip while cooling + UI 429 backoff (UI 0.6.589 / Worker 0.10.524).
 
 2026-10-11: Fix Airtable shared Promise queue hang (UI 0.6.590 / Worker 0.10.525).
 
 2026-10-11: Fix Pipeline Review default empty feed + needs-approval deep link (UI 0.6.591 / Worker 0.10.526).
 
-2026-10-11: Lean All Profiles overview — one /api/profiles/overview (UI 0.6.592 / Worker 0.10.527).
+2026-10-11: Lean All Profiles overview â one /api/profiles/overview (UI 0.6.592 / Worker 0.10.527).
 
 2026-10-11: Cache All Profiles overview (2 Airtable reads + stale cache) UI 0.6.593 / Worker 0.10.528.
 
@@ -203,7 +203,7 @@ Deploy Studio UI 0.6.534-pages-path-bust. Rename app-item4-0625.js -> app-item4-
 
 2026-10-11: Soft-200 All Profiles overview on Airtable cooldown (UI 0.6.597 / Worker 0.10.529).
 
-2026-10-11: Fast Approve All enqueue from record_ids (no N× Airtable GET); clear stuck group Approving… (UI 0.6.598 / Worker 0.10.530).
+2026-10-11: Fast Approve All enqueue from record_ids (no NÃ Airtable GET); clear stuck group Approvingâ¦ (UI 0.6.598 / Worker 0.10.530).
 2026-10-11 Studio UI 0.6.599 clarity theme and profile identity
 2026-10-11 Studio 0.6.599 corrected footer and JS build ID; verify authenticated production
 
@@ -244,51 +244,53 @@ UI 0.6.607 hashtag mismatch warning only; approval no longer blocked.
 2026-10-12: Manage Idea typed library search returns every query hit (no idea relevance ranking); UI 0.6.625 / Worker 0.10.547.
 2026-10-12: Redeploy Studio Pages so custom-domain serves UI 0.6.625-library-search-all-hits (edge lag after #635).
 2026-10-12: Studio UI 0.6.626-timeline-auto-prepare kicks Prepare for VO timeline drafts when plan is Ready and variants are None.
-2026-10-12: Studio UI 0.6.627-ideas-generate-async — Generate Ideas returns a batch immediately so mobile Safari no longer aborts mid-I1.
+2026-10-12: Studio UI 0.6.627-ideas-generate-async â Generate Ideas returns a batch immediately so mobile Safari no longer aborts mid-I1.
 2026-10-12: persistent four-state Production checkbox tracker (UI 0.6.628).
 2026-10-12: stable always-visible Production checklist, driven by workspace state (UI 0.6.629).
-2026-10-12: Studio UI 0.6.630-library-search-tokens — Production library flat operator search + Save draft no longer stuck on quiet autosave.
+2026-10-12: Studio UI 0.6.630-library-search-tokens â Production library flat operator search + Save draft no longer stuck on quiet autosave.
 2026-10-12: Redeploy Studio Pages UI 0.6.630-library-search-tokens after Wrangler Function publish internal error on #646.
 2026-10-12: move persistent Production checklist directly below workspace tabs (UI 0.6.631).
 2026-10-12: Redeploy Studio Pages UI 0.6.631-progress-under-tabs (includes library-search-tokens) after #646 Function publish flake.
-2026-10-12: Studio UI 0.6.632-ops-queue — Operations Queue tab (all-profile inventory, pause/reorder Remotion, Prepare to Review).
-2026-10-12: Studio UI 0.6.633-ops-page-nesting — close New Profile section so Operations/Help are not nested inside display:none.
-2026-10-12: Studio UI 0.6.634-ops-queue-titles — Operations Queue shows content/idea titles + Content ID.
+2026-10-12: Studio UI 0.6.632-ops-queue â Operations Queue tab (all-profile inventory, pause/reorder Remotion, Prepare to Review).
+2026-10-12: Studio UI 0.6.633-ops-page-nesting â close New Profile section so Operations/Help are not nested inside display:none.
+2026-10-12: Studio UI 0.6.634-ops-queue-titles â Operations Queue shows content/idea titles + Content ID.
 2026-10-12: cache and deduplicate Swap Still searches; skip redundant suggestions for typed queries (UI 0.6.635).
-2026-10-12: Studio UI 0.6.636-ops-multi-queue — Operations multi-queue (Rendering / Publishing / End-to-End timeline).
-2026-10-12: Studio UI 0.6.637-ops-nav — restore Operations nav when /api/session blips; sync from New Profile admin.
-2026-10-12: Studio UI 0.6.638-ops-queue-fields — Ops queues empty fix (bad Airtable fields[]).
-2026-10-12: Studio UI 0.6.639-ops-timeline-dots — Ops End-to-End visual timeline dots + stage labels in header.
-2026-10-12: Studio UI 0.6.640-ops-timeline-dots — shorten E2E stage header labels so the path column fits.
-2026-10-12: Studio UI 0.6.641-ops-timeline-headers — stage labels on Publishing/Rendering timeline headers.
-2026-10-12: Studio UI 0.6.642-ops-profiles-load — lean Profiles tab load for narration voice.
-2026-10-12: Studio UI 0.6.643-ops-timeline-align — align E2E/Publishing/Rendering stage labels over row timeline dots.
-2026-10-12: Redeploy Studio Pages UI 0.6.643-ops-timeline-align — custom-domain verify retry after cache-purge lag.
-2026-10-12: Studio UI 0.6.644-nav-eager — show New Profile + Operations in left nav immediately (fail-open; do not wait on session/profiles).
-2026-10-12: Studio UI 0.6.645-ops-queue-dense — denser Ops Studio queue rows (single-line C{n}O{n}-title ITEM, slim Open).
-2026-10-12: Studio UI 0.6.646-ops-render-section — keep Rendering Queue flex-shrink:0 so it is not crushed by Publishing backlog.
-2026-10-12: Redeploy Studio Pages UI 0.6.646-ops-render-section — custom-domain verify retry after cache-purge lag.
+2026-10-12: Studio UI 0.6.636-ops-multi-queue â Operations multi-queue (Rendering / Publishing / End-to-End timeline).
+2026-10-12: Studio UI 0.6.637-ops-nav â restore Operations nav when /api/session blips; sync from New Profile admin.
+2026-10-12: Studio UI 0.6.638-ops-queue-fields â Ops queues empty fix (bad Airtable fields[]).
+2026-10-12: Studio UI 0.6.639-ops-timeline-dots â Ops End-to-End visual timeline dots + stage labels in header.
+2026-10-12: Studio UI 0.6.640-ops-timeline-dots â shorten E2E stage header labels so the path column fits.
+2026-10-12: Studio UI 0.6.641-ops-timeline-headers â stage labels on Publishing/Rendering timeline headers.
+2026-10-12: Studio UI 0.6.642-ops-profiles-load â lean Profiles tab load for narration voice.
+2026-10-12: Studio UI 0.6.643-ops-timeline-align â align E2E/Publishing/Rendering stage labels over row timeline dots.
+2026-10-12: Redeploy Studio Pages UI 0.6.643-ops-timeline-align â custom-domain verify retry after cache-purge lag.
+2026-10-12: Studio UI 0.6.644-nav-eager â show New Profile + Operations in left nav immediately (fail-open; do not wait on session/profiles).
+2026-10-12: Studio UI 0.6.645-ops-queue-dense â denser Ops Studio queue rows (single-line C{n}O{n}-title ITEM, slim Open).
+2026-10-12: Studio UI 0.6.646-ops-render-section â keep Rendering Queue flex-shrink:0 so it is not crushed by Publishing backlog.
+2026-10-12: Redeploy Studio Pages UI 0.6.646-ops-render-section â custom-domain verify retry after cache-purge lag.
 2026-10-12: Studio list reads (Home / Pipeline / Ideas) serve R2 snapshots and never wait on a live Airtable scan (UI 0.6.647 / Worker 0.10.558-list-read-snapshot).
-2026-10-12: Studio UI 0.6.648-ops-render-rows — stop clipping Rendering queue body (overflow:visible + content-sized flex; Publishing scrolls in-lane).
-2026-10-12: Redeploy Studio Pages UI 0.6.648-ops-render-rows — custom-domain verify retry after cache-purge lag.
-2026-10-12: Studio UI 0.6.649-render-filter-terminal — exclude published outputs with stale render status from Rendering; Venice Beach 825/826 regression; Pages gated by tests.
-2026-10-12: Studio UI 0.6.650-ops-actions-pub — widen Rendering Actions so Pause/Front/Open do not overlap Timeline PUB.
+2026-10-12: Studio UI 0.6.648-ops-render-rows â stop clipping Rendering queue body (overflow:visible + content-sized flex; Publishing scrolls in-lane).
+2026-10-12: Redeploy Studio Pages UI 0.6.648-ops-render-rows â custom-domain verify retry after cache-purge lag.
+2026-10-12: Studio UI 0.6.649-render-filter-terminal â exclude published outputs with stale render status from Rendering; Venice Beach 825/826 regression; Pages gated by tests.
+2026-10-12: Studio UI 0.6.650-ops-actions-pub â widen Rendering Actions so Pause/Front/Open do not overlap Timeline PUB.
 2026-10-12: Studio Home polls snapshots only (refresh=0, 60s) and Pipeline open-pack uses Studio_Pipeline_Open index (UI 0.6.651-home-snapshot / Worker 0.10.559-open-index).
-2026-10-12: Studio UI 0.6.652-production-media-isolation — immediately clear prior Production Rendering photos on request change; block stale workspace/poll callbacks; verify tests and live custom domain.
+2026-10-12: Studio UI 0.6.652-production-media-isolation â immediately clear prior Production Rendering photos on request change; block stale workspace/poll callbacks; verify tests and live custom domain.
 
 2026-10-12: Deploy Studio UI 0.6.653-production-timeline-truth. Correct Production checklist to derive narrated timeline from persisted scene data, not Ready output plan; preserve four independent checklist flags.
 2026-10-12: Repair UI 0.6.653 Pages deployment regression version expectations, include timeline truth test in Pages gates.
-2026-10-12: Studio UI 0.6.654-ops-phase-open — Ops queue Idea/Production/Publishing phase labels + Idea-phase Open → Ideas.
-2026-10-12: Studio UI 0.6.655-ops-render-type — Rendering Status→Type (output type); Type on Publishing/E2E; Queue keeps wait/position.
-2026-10-12: Studio UI 0.6.656-pipeline-progress-compact — Pipeline progress % left of bar (single-line) for denser rows.
-2026-10-12: Studio UI 0.6.657-lazy-js � Home paints the shell first; Pipeline/Ideas/Insights/Engagement/New Profile scripts load on demand.
+2026-10-12: Studio UI 0.6.654-ops-phase-open â Ops queue Idea/Production/Publishing phase labels + Idea-phase Open â Ideas.
+2026-10-12: Studio UI 0.6.655-ops-render-type â Rendering StatusâType (output type); Type on Publishing/E2E; Queue keeps wait/position.
+2026-10-12: Studio UI 0.6.656-pipeline-progress-compact â Pipeline progress % left of bar (single-line) for denser rows.
+2026-10-12: Studio UI 0.6.657-lazy-js  Home paints the shell first; Pipeline/Ideas/Insights/Engagement/New Profile scripts load on demand.
 
-2026-10-12: Studio UI 0.6.658-factory-desk — Factory Desk parallel page (4 lanes + needs-assets max 3).
+2026-10-12: Studio UI 0.6.658-factory-desk â Factory Desk parallel page (4 lanes + needs-assets max 3).
 
-2026-10-12: Studio UI 0.6.659-factory-actions — Factory 2×2 grid + Approve/Send back/Delete; restore UI after baseline wipe.
+2026-10-12: Studio UI 0.6.659-factory-actions â Factory 2Ã2 grid + Approve/Send back/Delete; restore UI after baseline wipe.
 
-2026-10-12: Studio UI 0.6.660-factory-grid2 — explicit 2×2 Factory grid areas + Pages verify reads lazy app-item4 manifest (fixes 2×1×2 from stale 0.6.658 Needs-assets full-span).
+2026-10-12: Studio UI 0.6.660-factory-grid2 â explicit 2Ã2 Factory grid areas + Pages verify reads lazy app-item4 manifest (fixes 2Ã1Ã2 from stale 0.6.658 Needs-assets full-span).
 
-2026-10-13: Studio UI 0.6.662-factory-preview — surface Factory action failures; pair with Worker write allowlist.
+2026-10-13: Studio UI 0.6.662-factory-preview â surface Factory action failures; pair with Worker write allowlist.
 
-2026-10-13: Studio UI 0.6.662-factory-preview — Factory Needs eyes inline Preview (thumb + modal video via /api/outputs/:id/preview).
+2026-10-13: Studio UI 0.6.662-factory-preview â Factory Needs eyes inline Preview (thumb + modal video via /api/outputs/:id/preview).
+
+2026-10-13: Studio UI 0.6.663-factory-lines - Factory desk is one column of four labeled bands with short Operations queue lines.

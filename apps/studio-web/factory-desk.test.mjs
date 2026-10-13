@@ -14,13 +14,17 @@ test("Factory Desk is a separate page beside Operations", async () => {
 
   assert.match(html, /id="navFactory"[^>]*>Factory</);
   assert.match(html, /id="page-factory"/);
-  assert.match(html, /factory-desk\.js\?v=0\.6\.662-factory-preview/);
+  assert.match(html, /factory-desk\.js\?v=0\.6\.663-factory-lines/);
   assert.match(html, /"factory":\s*\[\s*"\/assets\/factory-desk\.js/);
   assert.doesNotMatch(html, /<script src="\/assets\/factory-desk\.js/);
-  assert.match(html, /factory-lane-auto/);
-  assert.match(html, /factory-lane-eyes/);
-  assert.match(html, /factory-lane-assets/);
-  assert.match(html, /factory-lane-manual/);
+  assert.match(html, /factory-band-auto/);
+  assert.match(html, /factory-band-eyes/);
+  assert.match(html, /factory-band-assets/);
+  assert.match(html, /factory-band-manual/);
+  assert.match(html, /id="factoryCountAutoHigh"/);
+  assert.match(html, /id="factoryCountNeedsEyes"/);
+  assert.match(html, /id="factoryCountNeedsAssets"/);
+  assert.match(html, /id="factoryCountManual"/);
   assert.match(html, /id="factoryPreviewBackdrop"/);
   assert.match(html, /id="factoryPreviewVideo"/);
 
@@ -29,7 +33,7 @@ test("Factory Desk is a separate page beside Operations", async () => {
   const support = html.indexOf('id="page-support"');
   assert.ok(operations > 0 && factoryPage > operations && support > factoryPage);
 
-  assert.match(app, /BUILD_ID = "item4-0\.6\.662-factory-preview"/);
+  assert.match(app, /BUILD_ID = "item4-0\.6\.663-factory-lines"/);
   assert.match(app, /page === "factory"/);
   assert.match(app, /StudioFactoryDesk\?\.load/);
   assert.match(factory, /StudioFactoryDesk/);
@@ -40,12 +44,15 @@ test("Factory Desk is a separate page beside Operations", async () => {
   assert.match(factory, /data-factory-preview/);
   assert.match(factory, /openFactoryPreview/);
   assert.match(factory, /\/api\/outputs\/\$\{card\.id\}\/preview/);
-  assert.match(css, /grid-template-areas:\s*"auto eyes"\s*"assets manual"/);
-  assert.match(css, /\.factory-lane-auto\{grid-area:auto\}/);
-  assert.match(css, /\.factory-lane-assets\{grid-area:assets\}/);
-  assert.doesNotMatch(css, /factory-lane-assets\{grid-column:1 \/ -1\}/);
+  assert.match(css, /#page-factory \.factory-lanes\{\s*display:flex;\s*flex-direction:column/);
+  assert.match(css, /\.factory-band-auto\{--factory-accent:#0c7a72\}/);
+  assert.match(css, /\.factory-band-assets\{--factory-accent:#1f4e89\}/);
+  assert.match(css, /\.factory-line\{/);
+  assert.doesNotMatch(css, /grid-template-areas:\s*"auto eyes"/);
+  assert.match(factory, /factory-line/);
+  assert.match(factory, /factoryCountNeedsEyes/);
   assert.match(factory, /\/api\/factory\/desk/);
   assert.match(css, /\.factory-lanes/);
   assert.match(css, /#page-factory/);
-  assert.match(css, /\.factory-card-thumb/);
+  assert.match(css, /\.factory-line-thumb/);
 });

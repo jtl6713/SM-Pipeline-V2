@@ -172,18 +172,12 @@
   }
 
   function renderCard(card, { pile = false, candidate = false, lane = "" } = {}) {
-    const meta = [
-      card.profile_name,
-      card.platform,
-      card.studio_output_type,
-      card.studio_state,
-    ].filter(Boolean).map(esc).join(" · ");
     const actions = [];
     actions.push(`<button type="button" class="text-button" data-factory-open="${esc(card.id)}">Open</button>`);
     if (pile) {
       actions.push(`<button type="button" class="secondary-button" data-factory-unpin="${esc(card.id)}">Remove</button>`);
     } else if (candidate) {
-      actions.push(`<button type="button" class="primary-button" data-factory-pin="${esc(card.id)}">Add to pile</button>`);
+      actions.push(`<button type="button" class="primary-button" data-factory-pin="${esc(card.id)}">Add</button>`);
     }
     if (canPreview(card) && (lane === "needs_eyes" || canReviewActions(card, { pile, candidate }) || lane === "auto_high" || lane === "manual")) {
       actions.push(`<button type="button" class="secondary-button" data-factory-preview="${esc(card.id)}">Preview</button>`);
@@ -197,19 +191,22 @@
     }
     const thumb = String(card.thumbnail_url || "").trim();
     const media = canPreview(card)
-      ? `<button type="button" class="factory-card-thumb" data-factory-preview="${esc(card.id)}" aria-label="Preview ${esc(cardLabel(card))}">
-          ${thumb ? `<img src="${esc(thumb)}" alt="" loading="lazy">` : `<span class="factory-card-thumb-fallback">▶</span>`}
+      ? `<button type="button" class="factory-line-thumb" data-factory-preview="${esc(card.id)}" aria-label="Preview ${esc(cardLabel(card))}">
+          ${thumb ? `<img src="${esc(thumb)}" alt="" loading="lazy">` : `<span class="factory-line-play">▶</span>`}
         </button>`
-      : "";
-    return `<article class="factory-card" data-factory-id="${esc(card.id)}" data-factory-kind="${esc(card.kind || "")}">
+      : `<span class="factory-line-thumb factory-line-thumb-empty" aria-hidden="true"></span>`;
+    const alert = card.stuck_kind || card.produce_error || "";
+    const state = card.studio_state || (alert ? "Needs repair" : "—");
+    const cell = (value) => `<span class="factory-line-cell">${esc(value || "—")}</span>`;
+    return `<div class="factory-line" data-factory-id="${esc(card.id)}" data-factory-kind="${esc(card.kind || "")}" data-lane="${esc(lane)}" title="${esc(cardLabel(card))}">
       ${media}
-      <div class="factory-card-main">
-        <strong class="factory-card-title">${esc(cardLabel(card))}</strong>
-        <span class="factory-card-meta">${meta || "—"}</span>
-        ${card.stuck_kind || card.produce_error ? `<span class="factory-card-alert">${esc(card.stuck_kind || card.produce_error)}</span>` : ""}
-      </div>
-      <div class="factory-card-actions">${actions.join("")}</div>
-    </article>`;
+      <span class="factory-line-title">${esc(card.title || cardLabel(card))}</span>
+      ${cell(card.profile_name)}
+      ${cell(card.platform)}
+      ${cell(card.studio_output_type)}
+      <span class="factory-line-cell factory-line-state"${alert ? ` title="${esc(alert)}"` : ""}>${esc(state)}</span>
+      <div class="factory-line-actions">${actions.join("")}</div>
+    </div>`;
   }
 
   function renderLane(listId, cards, emptyCopy, options = {}) {
@@ -222,18 +219,19 @@
     node.innerHTML = cards.map((card) => renderCard(card, options)).join("");
   }
 
+  function setCount(id, text) {
+    const node = $(id);
+    if (node) node.textContent = text;
+  }
+
   function renderSummary(summary) {
-    const node = $("factoryDeskSummary");
-    if (!node || !summary) return;
-    const chips = [
-      ["Auto-high", summary.auto_high, "ok"],
-      ["Needs eyes", summary.needs_eyes, summary.needs_eyes ? "alert" : "ok"],
-      [`Needs assets ${summary.needs_assets_pile || 0}/${summary.needs_assets_max || 3}`, summary.needs_assets_candidates, ""],
-      ["Manual", summary.manual, summary.manual ? "alert" : "ok"],
-    ];
-    node.innerHTML = chips.map(([label, count, tone]) => (
-      `<span class="ops-desk-chip"${tone ? ` data-tone="${tone}"` : ""}>${esc(label)}: ${Number(count) || 0}</span>`
-    )).join("");
+    if (!summary) return;
+    setCount("factoryCountAutoHigh", String(Number(summary.auto_high) || 0));
+    setCount("factoryCountNeedsEyes", String(Number(summary.needs_eyes) || 0));
+    const used = Number(summary.needs_assets_pile) || 0;
+    const max = Number(summary.needs_assets_max) || 3;
+    setCount("factoryCountNeedsAssets", `${used}/${max}`);
+    setCount("factoryCountManual", String(Number(summary.manual) || 0));
   }
 
   function bindCardActions(desk) {
