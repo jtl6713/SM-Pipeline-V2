@@ -684,7 +684,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.586-factory-inflight-queue",
+          version: "0.10.587-mae-slot-occupancy",
           studio_factory_desk_v1: true,
           studio_factory_desk_actions_v1: true,
           studio_factory_desk_write_v1: true,
@@ -8738,7 +8738,10 @@ function studioNextOpenScheduleIso(candidateIso, occupiedMs, gapMs = STUDIO_SCHE
 }
 
 const STUDIO_OCCUPIED_CACHE_MS = 45 * 1000;
-const STUDIO_OCCUPIED_LIST_LIMIT = 250;
+// 4 platforms × (3 MAE + 2 widest-gap extras) × 28 days = 560 blockers.
+// Headroom stays under a full 28-day calendar so the nearest sort cannot
+// drop day-1 mornings while ancient rows still fit in the page.
+const STUDIO_OCCUPIED_LIST_LIMIT = 800;
 const STUDIO_OCCUPIED_LOOKBACK_MS = 12 * 60 * 60 * 1000;
 const STUDIO_OCCUPIED_HORIZON_MS = 28 * 24 * 60 * 60 * 1000;
 
@@ -8772,12 +8775,16 @@ function studioOccupiedFilterFormula(now = Date.now(), profile = null) {
   const dates = ["Scheduled_Post_Date", "YouTube_Scheduled_Publish_At", "Studio_Scheduled_At"]
     .map((field) => studioOccupiedDateInWindowFormula(field, lookback, horizon))
     .join(",");
-  // DESC+250 used to fetch the farthest-future 250 rows; the 10-day client
-  // filter then dropped them, so today's MAE slots looked empty and every new
-  // NYC stamp piled onto 5:30 AM. Window the Airtable query and sort nearest-first.
+  // Every clause must be inside the 12h lookback → 28-day horizon. Undated
+  // ready-to-publish and publishing rows used to sort oldest-first and fill the
+  // row cap. Those fell outside the window, today's MAE slots looked empty, and
+  // every new stamp piled onto the next 5:30 AM.
+  // Published rows stay in the window: a 5:30 that already went out is still a post.
+  // Stories do not occupy a MAE lane, so they must not consume the row cap.
   // MAE occupancy is per Content Profile: Chicago's morning must not push a new
   // NYC idea to tomorrow 5:30.
-  const base = `AND({Test_Run_ID}=BLANK(),{Do_Not_Publish}=0,{Published_At}=BLANK(),OR(${dates},{Publish_Status}="Publishing",{Publish_Status}="Ready to Publish"))`;
+  const notStory = 'NOT(OR(FIND("Story",{Studio_Output_Type}&""),FIND("Story",{Format}&"")))';
+  const base = `AND({Test_Run_ID}=BLANK(),{Do_Not_Publish}=0,${notStory},OR(${dates}))`;
   const profileFormula = contentProfileFilterFormula(profile);
   return profileFormula ? `AND(${profileFormula},${base})` : base;
 }
@@ -8798,12 +8805,12 @@ function studioInvalidateOccupiedScheduleCache() {
 
 function studioOccupiedMsFromRow(row, now = Date.now()) {
   const raw = f(row, "Scheduled_Post_Date") || f(row, "YouTube_Scheduled_Publish_At") || f(row, "Studio_Scheduled_At");
-  const status = String(f(row, "Publish_Status") || "").trim();
-  const imminent = status === "Publishing" || status === "Ready to Publish";
   const ms = raw ? studioScheduleMs(raw) : null;
-  if (ms == null) return imminent ? now : null;
+  // An old Ready to Publish row is not "right now". Mapping it to Date.now()
+  // blocked whatever MAE slot was within 3 hours and left 5:30 AM looking free.
+  if (ms == null) return null;
   if (ms >= now - STUDIO_OCCUPIED_LOOKBACK_MS && ms <= now + STUDIO_OCCUPIED_HORIZON_MS) return ms;
-  return imminent ? now : null;
+  return null;
 }
 
 async function studioLoadOccupiedScheduleRows(env, { profile = null } = {}) {
@@ -10845,10 +10852,10 @@ function studioBuildAzCampaignSchedule(items, { occupiedMs = [], bestTimesByKey 
 async function studioLoadAzOccupiedTimes(env, { excludeIds = [] } = {}) {
   const skip = new Set((excludeIds || []).filter(Boolean));
   const unpublished = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
-    limit: 200,
+    limit: STUDIO_OCCUPIED_LIST_LIMIT,
     sortField: "Scheduled_Post_Date",
     sortDirection: "asc",
-    filterFormula: 'AND({Test_Run_ID}=BLANK(),{Do_Not_Publish}=0,{Published_At}=BLANK(),OR({Scheduled_Post_Date}!="",{YouTube_Scheduled_Publish_At}!="",{Publish_Status}="Publishing",{Publish_Status}="Ready to Publish"))',
+    filterFormula: studioOccupiedFilterFormula(Date.now(), null),
   }).catch(() => []);
   const since = new Date(Date.now() - 7 * 86400000).toISOString();
   const published = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
@@ -19763,11 +19770,20 @@ async function studioLoadPlanScheduleOccupancy(env, { excludeRequestId = "", pro
     const lookback = airtableFormulaEscape(new Date(now - STUDIO_OCCUPIED_LOOKBACK_MS).toISOString());
     const horizon = airtableFormulaEscape(new Date(now + STUDIO_OCCUPIED_HORIZON_MS).toISOString());
     const brandId = studioFirstLinkedId(f(profile, "Brand"));
-    const brandClause = brandId
-      ? `,FIND("${airtableFormulaEscape(brandId)}",ARRAYJOIN({Brand})&"")`
-      : "";
+    const brandName = String(f(profile, "Brand_Name") || "").trim();
+    // ARRAYJOIN of a linked Brand field is the brand name, not the record id.
+    // Matching only the id returned zero plan rows, so the next package never
+    // saw the previous package and every first post landed on 5:30.
+    const brandParts = [];
+    if (brandId) {
+      const id = airtableFormulaEscape(brandId);
+      brandParts.push(`FIND("${id}",ARRAYJOIN({Brand})&"")`);
+      brandParts.push(`FIND("${id}",{Brand}&"")`);
+    }
+    if (brandName) brandParts.push(`FIND("${airtableFormulaEscape(brandName)}",ARRAYJOIN({Brand})&"")`);
+    const brandClause = brandParts.length ? `,OR(${brandParts.join(",")})` : "";
     const rows = await listRecords(env, PRODUCTION_REQUEST_OUTPUT_TABLE, {
-      limit: 200,
+      limit: STUDIO_OCCUPIED_LIST_LIMIT,
       sortField: "Scheduled_At",
       sortDirection: "asc",
       filterFormula: `AND({Enabled}=1,{Scheduled_At}!="",IS_AFTER({Scheduled_At},DATETIME_PARSE("${lookback}")),IS_BEFORE({Scheduled_At},DATETIME_PARSE("${horizon}"))${brandClause})`,

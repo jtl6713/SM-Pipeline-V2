@@ -453,6 +453,22 @@ test("occupancy load windows the Airtable query and sorts nearest-first", () => 
   assert.match(worker, /IS_BEFORE\(\{\$\{field\}\},DATETIME_PARSE/);
   assert.match(worker, /"Scheduled_Post_Date", "YouTube_Scheduled_Publish_At", "Studio_Scheduled_At"/);
   assert.doesNotMatch(worker, /const STUDIO_OCCUPIED_FORMULA =/);
+  const formulaFn = worker.slice(
+    worker.indexOf("const notStory =", worker.indexOf("function studioOccupiedFilterFormula")),
+    worker.indexOf("const studioOccupiedScheduleCaches"),
+  );
+  // Unbounded Ready to Publish / Publishing rows sorted oldest-first and filled
+  // the cap, so the real 28-day MAE calendar looked empty and every stamp was 5:30.
+  assert.doesNotMatch(formulaFn, /Publish_Status\}="Ready to Publish"/);
+  assert.doesNotMatch(formulaFn, /Publish_Status\}="Publishing"/);
+  assert.doesNotMatch(formulaFn, /Published_At\}=BLANK\(\)/);
+  assert.match(formulaFn, /FIND\("Story"/);
+  assert.match(worker, /STUDIO_OCCUPIED_LIST_LIMIT = 800/);
+  const msFn = worker.slice(
+    worker.indexOf("function studioOccupiedMsFromRow"),
+    worker.indexOf("async function studioLoadOccupiedScheduleRows"),
+  );
+  assert.doesNotMatch(msFn, /return imminent \? now : null/);
 });
 
 test("Worker stamp paths use MAE not industry evening windows", () => {
@@ -461,7 +477,7 @@ test("Worker stamp paths use MAE not industry evening windows", () => {
   assert.match(worker, /studio_mae_platform_spread_v1: true/);
   assert.match(worker, /studio_mae_profile_occupancy_v1: true/);
   assert.match(worker, /studio_schedule_occupancy_fields_v1: true/);
-  assert.match(worker, /0.10.586-factory-inflight-queue/);
+  assert.match(worker, /0.10.587-mae-slot-occupancy/);
   assert.match(worker, /STUDIO_OCCUPIED_HORIZON_MS = 28 \* 24/);
   assert.match(worker, /studioLoadPlanScheduleOccupancy/);
   assert.match(worker, /A stored 5:30 that lost its slot must be written/);
