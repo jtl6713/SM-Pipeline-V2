@@ -5,3 +5,5 @@
 2026-10-13: Force-run autonomous AFTER Worker 0.10.576/577 live — prior once raced deploy and left last=resuming on Rainy Midtown; Color Rush is next FIFO Draft.
 
 2026-10-13: Force-run autonomous after 0.10.578 — Color Rush parked preparing_stale; next FIFO Golden Hour Crandon / Miami+NYC Drafts toward Needs eyes.
+
+2026-10-13: Force autonomous after parking Golden Hour Crandon Preparing — unblock photo-ready Miami drafts (Rain Burst etc) to Needs eyes.

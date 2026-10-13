@@ -299,6 +299,21 @@ test("YouTube mapper keeps titles and picker requires assets", () => {
   }, Date.parse("2026-10-13T18:35:00.000Z")), false);
   assert.equal(autonomousPreparingIsStale("Preparing", "2026-10-13T12:00:00.000Z", Date.parse("2026-10-13T12:13:00.000Z")), true);
   assert.equal(autonomousPreparingIsStale("Ready", "2026-10-13T12:00:00.000Z", Date.parse("2026-10-13T12:20:00.000Z")), false);
+  // Fresh variant stamp must not hide a draft that has been Preparing for hours.
+  assert.equal(autonomousPreparingIsStale(
+    "Preparing",
+    "2026-10-13T19:00:00.000Z",
+    Date.parse("2026-10-13T19:05:00.000Z"),
+    12 * 60 * 1000,
+    "2026-10-13T05:31:55.000Z",
+  ), true);
+  assert.equal(autonomousPreparingIsStale(
+    "Preparing",
+    "2026-10-13T19:00:00.000Z",
+    Date.parse("2026-10-13T19:05:00.000Z"),
+    12 * 60 * 1000,
+    "2026-10-13T18:50:00.000Z",
+  ), false);
   assert.equal(dailyIdeaProduceHasStarted({ hour: 1 }), false);
   assert.equal(dailyIdeaProduceHasStarted({ hour: 8 }), true);
   assert.equal(dailyIdeaProduceHasStarted({ hour: 1 }, { force: true }), true);
@@ -581,7 +596,7 @@ test("Worker stamps photo-ready ideas and always adopts after 8am CT", async () 
   const path = await import("node:path");
   const here = path.dirname(fileURLToPath(import.meta.url));
   const worker = await readFile(path.join(here, "worker.js"), "utf8");
-  assert.match(worker, /version: "0\.10\.580-factory-promoted-done-exclude"/);
+  assert.match(worker, /version: "0\.10\.582-preparing-created-stale"/);
   assert.match(worker, /async function stampPhotoReadyIdeaForAutonomousProduce/);
   assert.match(worker, /stampPhotoReadyIdeaForAutonomousProduce\(env, ideaReady, requestRecord\)/);
   assert.match(worker, /Always stamp photo-ready daily ideas after 8am CT/);
