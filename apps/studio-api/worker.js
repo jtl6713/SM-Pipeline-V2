@@ -676,7 +676,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.568-vibe-cut-16x9",
+          version: "0.10.569-vibe-cut-adler-563",
           studio_factory_desk_v1: true,
           studio_factory_desk_actions_v1: true,
           studio_factory_desk_write_v1: true,
@@ -9580,9 +9580,16 @@ function finishedEnabledKeysFromRows(rows, record = null) {
 async function item4SyncPlanOutputs(env, requestRecord, items, { schedules = null } = {}) {
   const productionRequestId = requestRecord.id;
   const finishedVideo = studioFinishedOriginKind(requestRecord) === "finished-video";
-  const uniqueItems = finishedVideo
-    ? capFinishedPlanItems(items, { notes: studioRequestNotesText(requestRecord) })
+  const notesText = studioRequestNotesText(requestRecord);
+  const vibeCut = studioIsVibeCut(requestRecord);
+  let uniqueItems = finishedVideo
+    ? capFinishedPlanItems(items, { notes: notesText })
     : uniquePlanItems(items);
+  // Horizontal Vibe Cut must keep YouTube Standard + Short enabled even when a
+  // prior 6-destination draft left Short unchecked / Reels still Enabled.
+  if (vibeCut) {
+    uniqueItems = capVibeCutPlanItems(uniqueItems, { notes: notesText });
+  }
   let azLock = null;
   if (finishedVideo) {
     azLock = await acquireAzOutputLock(env, requestRecord);
@@ -11706,6 +11713,11 @@ async function studioClearVibeCutPassthroughOutputs(env, requestId) {
             Selected_Clip_Count: null,
             Studio_Effective_Video_Duration_Seconds: null,
             Video_Duration_Seconds_Override: null,
+            // Drop Exact=1 (I4 defaults) so stamp/T1 can expand many beat trims.
+            Requested_Video_Clip_Count_Mode: "AI decides",
+            Requested_Video_Clip_Count_Exact: null,
+            Requested_Video_Clip_Count_Min: null,
+            Requested_Video_Clip_Count_Max: null,
             Timing_Status: "Pending",
             Timing_Timeline_JSON: null,
             Timing_Error_Message: null,
@@ -11739,7 +11751,10 @@ async function enqueueStudioProductionJob(env, requestId, options = {}) {
   const vibeDirective = vibeCut ? parseVibeCutDirective(studioRequestNotesText(record)) : null;
   const vibeTarget = Number(vibeDirective?.target_seconds || 0) || 0;
   let vibeCutNeedsRemount = vibeCutPassthrough || Boolean(existing?.heal?.force_multiclip_remount);
-  if (vibeCut && !vibeCutNeedsRemount && (Boolean(options.resume) || Boolean(options.remount) || step === "blocked")) {
+  // Always inspect outputs for Vibe Cut remount needs (single-head trim, wrong
+  // stamped duration after a notes rewrite). Do not wait for resume/blocked —
+  // cron fanout heal and fresh enqueue must rebuild Adler-style 30→45s jobs.
+  if (vibeCut && !vibeCutNeedsRemount) {
     const outputs = await azPlatformOutputsForRequest(env, requestId).catch(() => []);
     vibeCutNeedsRemount = (outputs || []).some((row) => {
       const count = Number(f(row, "Selected_Clip_Count") || 0) || 0;
@@ -11766,7 +11781,11 @@ async function enqueueStudioProductionJob(env, requestId, options = {}) {
         && vibeTarget > 0
         && frames > 0
         && frames < Math.round(vibeTarget * 30) - 15;
-      return singleHead || shortSingle;
+      const stampedDur = Number(f(row, "Studio_Effective_Video_Duration_Seconds") || 0) || 0;
+      const durationMismatch = vibeTarget > 0
+        && stampedDur > 0
+        && Math.abs(stampedDur - vibeTarget) >= 2;
+      return singleHead || shortSingle || durationMismatch;
     });
   }
   if (!existing?.job_id || vibeCutPassthrough || vibeCutNeedsRemount) {
@@ -15860,15 +15879,17 @@ function productionRequestFields(input, nowIso, { status = "Draft" } = {}) {
     Thumbnail_Mode: (/ez-input=finished-(video|stills|carousel)/i.test(notes) || vibeCut)
       ? "Yes"
       : input.thumbnail_mode,
+    // Vibe Cut expands one long master into many beat-synced trims in stamp/T1.
+    // Never lock Exact=1 (I4/form defaults) — that forces a single head-of-file trim.
+    Video_Clip_Count_Mode: vibeCut ? "AI decides" : input.video_clip_count_mode,
+    Video_Clip_Count_Exact: vibeCut ? null : input.video_clip_count_exact,
+    Video_Clip_Count_Min: vibeCut ? null : input.video_clip_count_min,
+    Video_Clip_Count_Max: vibeCut ? null : input.video_clip_count_max,
     Video_Duration_Seconds: (vibeCut && vibeTargetSeconds > 0)
       ? vibeTargetSeconds
       : input.video_duration_seconds,
     Voiceover_Duration_Seconds: input.voiceover_duration_seconds,
     Music_Start_Seconds: input.music_start_seconds,
-    Video_Clip_Count_Mode: input.video_clip_count_mode,
-    Video_Clip_Count_Exact: input.video_clip_count_exact,
-    Video_Clip_Count_Min: input.video_clip_count_min,
-    Video_Clip_Count_Max: input.video_clip_count_max,
     Carousel_Slide_Count_Mode: input.carousel_slide_count_mode,
     Carousel_Slide_Count_Exact: input.carousel_slide_count_exact,
     Carousel_Slide_Count_Min: input.carousel_slide_count_min,
@@ -31584,21 +31605,42 @@ async function studioHealPromotedMissingFanout(env, { limit = 8 } = {}) {
     try {
       const parentId = studioFirstLinkedId(f(requestRecord, "Promoted_Content_Item"));
       if (!parentId) continue;
+      const notesText = studioRequestNotesText(requestRecord);
+      // Re-enable horizontal Vibe Cut destinations (Standard + Short) when Short was
+      // left unchecked after an earlier 6-destination draft.
+      if (studioIsVibeCut(requestRecord) && isHorizontalVibeCutAspect(notesText)) {
+        const plan = item4ParseJson(f(requestRecord, "Studio_Output_Plan_JSON"), null);
+        const planItems = Array.isArray(plan?.items) ? plan.items : [];
+        const capped = capVibeCutPlanItems(planItems.length ? planItems : [
+          { platform: "YouTube", output_type: "Standard Video" },
+          { platform: "YouTube", output_type: "Short" },
+        ], { notes: notesText });
+        if (capped.length) {
+          await item4SyncPlanOutputs(env, requestRecord, capped);
+        }
+      }
       const enabled = (await outputRowsForProductionRequest(env, requestRecord.id))
         .filter((row) => Boolean(f(row, "Enabled")));
       if (!enabled.length) continue;
       const missing = enabled.filter((row) =>
         !arrayOrEmpty(f(row, "Platform_Output")).some((id) => /^rec[A-Za-z0-9]+$/.test(String(id || "")))
       );
-      if (!missing.length) continue;
-      const fanout = await fanoutProductionRequestOutputsToContentItems(env, requestRecord, parentId);
-      if (Number(fanout?.routed_count || 0) > 0) {
-        try { await enqueueStudioProductionJob(env, requestRecord.id); } catch {}
+      const job = parseStudioProductionJob(requestRecord);
+      const forceRemount = Boolean(job?.heal?.force_multiclip_remount)
+        || (studioIsVibeCut(requestRecord) && /remount/i.test(String(job?.detail || "")));
+      if (!missing.length && !forceRemount) continue;
+      let fanout = { routed_count: 0, blocked_count: 0, remaining: 0 };
+      if (missing.length) {
+        fanout = await fanoutProductionRequestOutputsToContentItems(env, requestRecord, parentId);
+      }
+      if (Number(fanout?.routed_count || 0) > 0 || forceRemount) {
+        try { await enqueueStudioProductionJob(env, requestRecord.id, { resume: true }); } catch {}
       }
       healed.push({
         request_id: requestRecord.id,
         content_item_id: parentId,
         missing_before: missing.length,
+        force_remount: forceRemount,
         routed: Number(fanout?.routed_count || 0),
         blocked: Number(fanout?.blocked_count || 0),
         remaining: Number(fanout?.remaining || 0),
