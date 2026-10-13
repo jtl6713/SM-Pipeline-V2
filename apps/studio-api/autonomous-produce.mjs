@@ -291,9 +291,22 @@ export function autonomousWaitingIsStale(last, nowMs = Date.now(), maxAgeMs = 12
   return nowMs - at >= maxAgeMs;
 }
 
-/** Preparing frames with no progress past maxAge — skip so Miami/NYC FIFO can advance. */
-export function autonomousPreparingIsStale(variantStatus, variantUpdatedAt, nowMs = Date.now(), maxAgeMs = 12 * 60 * 1000) {
+/**
+ * Preparing frames with no progress past maxAge — skip so Miami/NYC FIFO can advance.
+ * Resume kicks refresh Studio_Variant_Updated_At without finishing frames, so also
+ * treat long-lived Preparing drafts (by Created_At) as stale past absoluteMaxAgeMs.
+ */
+export function autonomousPreparingIsStale(
+  variantStatus,
+  variantUpdatedAt,
+  nowMs = Date.now(),
+  maxAgeMs = 12 * 60 * 1000,
+  draftCreatedAt = null,
+  absoluteMaxAgeMs = 45 * 60 * 1000,
+) {
   if (String(variantStatus || "").trim() !== "Preparing") return false;
+  const created = Date.parse(draftCreatedAt || "");
+  if (Number.isFinite(created) && nowMs - created >= absoluteMaxAgeMs) return true;
   const at = Date.parse(variantUpdatedAt || "");
   if (!Number.isFinite(at)) return true;
   return nowMs - at >= maxAgeMs;
@@ -314,7 +327,13 @@ export function firstAutonomousResumeDraft(drafts, enabledProfileIds, nowMs = Da
   for (const draft of Array.isArray(drafts) ? drafts : []) {
     const notes = String(draft?.notes || draft?.production_notes || "");
     if (isAutonomousResumeDeferred(notes)) continue;
-    if (autonomousPreparingIsStale(draft?.variant_status, draft?.variant_updated_at, nowMs)) continue;
+    if (autonomousPreparingIsStale(
+      draft?.variant_status,
+      draft?.variant_updated_at,
+      nowMs,
+      12 * 60 * 1000,
+      draft?.created_at || draft?.createdTime || null,
+    )) continue;
     if (!isAutonomousOrigin(notes)) return draft || null;
     const profileId = String(draft?.profile_id || "").trim();
     if (enabled.has(profileId)) return draft;

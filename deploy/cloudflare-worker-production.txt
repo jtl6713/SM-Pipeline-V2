@@ -237,3 +237,5 @@ Deploy Worker 0.10.489-engagement-ledger. Shrink the engagement ledger so Chicag
 
 2026-10-13: Worker 0.10.580-factory-promoted-done-exclude - Drop Promoted+job-done from ops request formula and Factory auto_high so finished Crandon Sunrise is not In Flight.
 2026-10-13: Worker 0.10.581-pipeline-content-id-live - enrich /api/outputs?mode=latest with Content_ID/Content_Title labels so Pipeline Content ID badges render immediately.
+
+2026-10-13: Worker 0.10.582-preparing-created-stale - Park Preparing drafts by Created_At so resume kicks cannot refresh FIFO forever; force after Golden Hour Crandon park.

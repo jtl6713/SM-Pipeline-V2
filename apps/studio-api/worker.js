@@ -680,7 +680,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.581-pipeline-content-id-live",
+          version: "0.10.582-preparing-created-stale",
           studio_factory_desk_v1: true,
           studio_factory_desk_actions_v1: true,
           studio_factory_desk_write_v1: true,
@@ -43131,9 +43131,10 @@ async function selectAutonomousResumeDraft(env, drafts) {
     }
     const variantStatus = String(f(requestRecord, "Studio_Variant_Status") || "").trim();
     const variantUpdatedAt = f(requestRecord, "Studio_Variant_Updated_At") || requestRecord.createdTime || "";
+    const draftCreatedAt = f(requestRecord, "Created_At") || requestRecord.createdTime || "";
     // Auto-park long-Preparing drafts so FIFO can reach the next city.
     if (isAutonomousOrigin(notes) && !isAutonomousResumeDeferred(notes)
-      && autonomousPreparingIsStale(variantStatus, variantUpdatedAt, nowMs)) {
+      && autonomousPreparingIsStale(variantStatus, variantUpdatedAt, nowMs, 12 * 60 * 1000, draftCreatedAt)) {
       try {
         await airtableFetch(env, PRODUCTION_REQUEST_TABLE, requestRecord.id, {
           method: "PATCH",
@@ -43153,6 +43154,7 @@ async function selectAutonomousResumeDraft(env, drafts) {
       profile_id: profileId,
       variant_status: variantStatus,
       variant_updated_at: variantUpdatedAt,
+      created_at: draftCreatedAt,
     });
   }
   const chosen = firstAutonomousResumeDraft(annotated, [...enabled], nowMs);
@@ -43331,9 +43333,10 @@ async function executeStudioAutonomousProduce(env, ctx, options = {}) {
     const jobStep = String(job?.step || "").trim();
     const variantStatus = String(f(requestRecord, "Studio_Variant_Status") || "").trim();
     const variantUpdatedAt = f(requestRecord, "Studio_Variant_Updated_At") || requestRecord?.createdTime || "";
+    const draftCreatedAt = f(requestRecord, "Created_At") || requestRecord?.createdTime || "";
     if (
       isAutonomousResumeDeferred(notes)
-      || autonomousPreparingIsStale(variantStatus, variantUpdatedAt)
+      || autonomousPreparingIsStale(variantStatus, variantUpdatedAt, Date.now(), 12 * 60 * 1000, draftCreatedAt)
     ) {
       if (!isAutonomousResumeDeferred(notes) && requestRecord) {
         await parkAutonomousResumeDraft(env, requestRecord, "preparing_stale");
