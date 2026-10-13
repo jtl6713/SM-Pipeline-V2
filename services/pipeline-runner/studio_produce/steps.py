@@ -9,7 +9,7 @@ from airtable.client import AirtableClient
 from studio_produce.constants import CAROUSEL_SLIDES_TABLE, CONTENT_ITEMS_TABLE, PLATFORM_OUTPUTS_TABLE, PRODUCTION_REQUESTS_TABLE
 from item4.processor import process_drain as process_smv1_drain
 from p3.helpers import caption_with_hashtags
-from render.fields import field, field_str
+from render.fields import field, field_str, first_linked_id
 from studio_produce.context import (
     expected_photo_count,
     master_assets,
@@ -41,6 +41,24 @@ class StepWait(RuntimeError):
     def __init__(self, detail: str):
         super().__init__(detail)
         self.detail = detail
+
+
+CONTENT_PROFILES_TABLE = "tblNYg2QB0BmmVACy"
+
+
+def studio_market_for_request(client, request, parent):
+    """Resolve the actual selected content market; never silently default to Chicago."""
+    profile_id = (
+        first_linked_id(field(parent or {}, "Content_Profile"))
+        or first_linked_id(field(request, "Content_Profile"))
+    )
+    if not profile_id:
+        raise StepBlocked("SAI1 city missing: Content Profile is required")
+    profile = client.get_record(CONTENT_PROFILES_TABLE, profile_id)
+    market = field_str(profile, "Market_Name").strip()
+    if not market:
+        raise StepBlocked("SAI1 city missing: Content Profile Market_Name is empty")
+    return market
 
 
 def source_kind(route: str) -> str:
@@ -380,14 +398,14 @@ def seed_ai_slides(
     )]
     missing = max(0, needed - len(covering))
     created = []
-    title = theme_title(request, parent) or field_str(request, "Production_Request_ID") or "Chicago"
+    title = theme_title(request, parent) or field_str(request, "Production_Request_ID") or "Untitled"
     caption = field_str(request, "Requested_Caption")
     for index in range(missing):
         theme = ((themes or {}).get("slides") or [None])[index] if themes else None
         theme = theme if isinstance(theme, dict) else {}
         number = len(live) + len(created) + 1
         prompt = str(theme.get("image_prompt") or "").strip() or (
-            f'Photorealistic Chicago travel photograph for ChicagoShining, complementary to "{title}". '
+            f'Photorealistic {studio_market_for_request(client, request, parent)} travel photograph, complementary to "{title}". '
             + (f"Context: {caption[:400]}" if caption else "")
             + " No logos, no watermarks, no burned-in text."
         )
@@ -588,6 +606,7 @@ def ensure_voiceover_script(client: AirtableClient, request: dict[str, Any], par
         covered_text="\n".join(f"{index + 1}. {text}" for index, text in enumerate(covered)) or "(none)",
         needed=0,
         total=max(1, len(covered)),
+        market=studio_market_for_request(client, request, parent),
     )
     next_themes = result.get("themes") or {}
     if not str(next_themes.get("voiceover_script") or "").strip():
@@ -607,12 +626,13 @@ def step_themes(client: AirtableClient, ctx: dict[str, Any]) -> str:
         if not caption_locked(request) and not field_str(parent, "Caption"):
             from sai1.processor import process_request
 
-            title = theme_title(request, parent) or field_str(request, "Production_Request_ID") or "Chicago"
+            title = theme_title(request, parent) or field_str(request, "Production_Request_ID") or "Untitled"
             result = process_request(
                 title=title,
                 covered_text="(none)",
                 needed=0,
                 total=1,
+                market=studio_market_for_request(client, request, parent),
             )
             themes = result.get("themes") or {}
             apply_caption(client, parent, ctx["outputs"], themes)
@@ -653,6 +673,7 @@ def step_themes(client: AirtableClient, ctx: dict[str, Any]) -> str:
         covered_text="\n".join(f"{index + 1}. {text}" for index, text in enumerate(covered)) or "(none)",
         needed=needed,
         total=max(slide_total, len(covered) + needed),
+        market=studio_market_for_request(client, request, parent),
     )
     if needed and not result.get("processed"):
         raise StepBlocked(result.get("reason") or "SAI1 did not return slide themes")

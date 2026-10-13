@@ -58,8 +58,28 @@ def _normalize_themes(parsed: dict[str, Any], *, needed: int) -> dict[str, Any]:
         "slide_voiceovers": slide_voiceovers,
         "voiceover_script": script,
         "post_caption": _sanitize_post_caption(str(parsed.get("post_caption") or "")),
-        "hashtags": str(parsed.get("hashtags") or "").strip(),
+        "hashtags": " ".join(list(dict.fromkeys(re.findall(r"#[A-Za-z0-9_]+", str(parsed.get("hashtags") or ""))))[:5]),
     }
+
+
+def validate_market_copy(themes: dict[str, Any], market: str, title: str = "") -> None:
+    """Reject generated captions and hashtags for an unrelated city."""
+    market_key = str(market or "").strip().lower()
+    markers = {
+        "chicago": r"\bchicago\b|#choosechicago\b",
+        "miami": r"\bmiami\b|#southbeach\b",
+        "los angeles": r"\blos angeles\b|#explorela\b",
+        "new york city": r"\bnew york(?: city)?\b|\bnyc\b",
+    }
+    caption = str(themes.get("post_caption") or "")
+    hashtags = str(themes.get("hashtags") or "")
+    for other, pattern in markers.items():
+        if other == market_key:
+            continue
+        if re.search(pattern, hashtags, flags=re.I):
+            raise ValueError(f"SAI1 cross-city hashtags: {other} in {market} output")
+        if re.search(pattern, caption, flags=re.I) and not re.search(pattern, title, flags=re.I):
+            raise ValueError(f"SAI1 cross-city caption: {other} in {market} output")
 
 
 def process_request(
@@ -68,9 +88,11 @@ def process_request(
     covered_text: str = "(none)",
     needed: int = 0,
     total: int | None = None,
-    market: str = "Chicago",
+    market: str | None = None,
     dry_run: bool = False,
 ) -> dict[str, Any]:
+    if not str(market or "").strip():
+        raise ValueError("SAI1 requires an explicit content-profile market")
     needed_count = max(0, int(needed))
     total_count = int(total) if total is not None else needed_count
     prompt = build_themer_prompt(
@@ -78,13 +100,13 @@ def process_request(
         covered_text=covered_text or "(none)",
         needed=needed_count,
         total=total_count,
-        market=str(market or "Chicago").strip() or "Chicago",
+        market=str(market).strip(),
     )
     preview = {
         "make_scenario_id": MAKE_SCENARIO_ID,
         "make_scenario_name": MAKE_SCENARIO_NAME,
         "title": title,
-        "market": str(market or "Chicago").strip() or "Chicago",
+        "market": str(market).strip(),
         "needed": needed_count,
         "total": total_count,
         "prompt_chars": len(prompt),
@@ -96,6 +118,7 @@ def process_request(
 
     generated = generate_themes(prompt)
     themes = _normalize_themes(generated["parsed"], needed=needed_count)
+    validate_market_copy(themes, str(market), title)
     if needed_count > 0 and not themes["slides"]:
         return {"processed": False, "reason": "empty_slides", "themes": themes, **preview}
     return {"processed": True, "themes": themes, **preview}
