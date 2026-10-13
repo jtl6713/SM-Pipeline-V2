@@ -219,4 +219,6 @@ Deploy Worker 0.10.489-engagement-ledger. Shrink the engagement ledger so Chicag
 2026-10-13: Worker 0.10.568-vibe-cut-16x9 - Cap horizontal Vibe Cut plans to YouTube Standard Video + Short.
 2026-10-13: Worker 0.10.569-vibe-cut-adler-563 - Adler Content 563: sync/cap horizontal Short fanout, AI clip-count, duration remount, heal Standard+Short.
 
-2026-10-13: Worker 0.10.570-vibe-cut-short-fanout - Fan out missing horizontal Vibe Cut Short on light cron + produce enqueue (Adler CI563).
+2026-10-13: Worker 0.10.571-schedule-4wk - Fan out missing horizontal Vibe Cut Short on light cron + produce enqueue (Adler CI563).
+
+2026-10-13: Worker 0.10.571-schedule-4wk — MAE/AZ package mains spread across 28 days (~1 week per platform).

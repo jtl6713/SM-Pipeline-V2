@@ -206,14 +206,16 @@ test("suggested map ignores industry 20:00 YouTube windows and uses MAE", () => 
   const instagram = localParts(stamps.get("Instagram::Reel"), zone);
   assert.equal(youtube.hour, 5);
   assert.equal(youtube.minute, 30);
-  assert.equal(instagram.hour, 11);
+  assert.equal(instagram.hour, 5);
   assert.equal(instagram.minute, 30);
+  assert.notEqual(dayOf(stamps.get("YouTube::Short"), zone), dayOf(stamps.get("Instagram::Reel"), zone));
+  assert.ok(Date.parse(stamps.get("Instagram::Reel")) - Date.parse(stamps.get("YouTube::Short")) >= 6 * 86400000);
   for (const iso of stamps.values()) {
     assert.equal(maeIsBlackoutLocalTime(Date.parse(iso), zone), false);
   }
 });
 
-test("a new short spreads morning afternoon evening then next-day MAE, not a same-day 4th", () => {
+test("a new short spreads each platform across different days in the 4-week window", () => {
   const zone = "America/New_York";
   const now = new Date("2026-10-05T08:00:00Z");
   const stamps = maeBuildSuggestedScheduleMap(
@@ -227,11 +229,21 @@ test("a new short spreads morning afternoon evening then next-day MAE, not a sam
     now,
     { timeZone: zone },
   );
-  const clocks = ["Instagram::Reel", "Facebook::Reel", "TikTok::Video Draft", "YouTube::Short"]
-    .map((key) => localParts(stamps.get(key), zone))
-    .map((part) => `${part.hour}:${String(part.minute).padStart(2, "0")}`);
-  assert.deepEqual(clocks, ["5:30", "11:30", "16:30", "5:30"]);
-  assert.notEqual(dayOf(stamps.get("Instagram::Reel"), zone), dayOf(stamps.get("YouTube::Short"), zone));
+  const days = ["Instagram::Reel", "Facebook::Reel", "TikTok::Video Draft", "YouTube::Short"]
+    .map((key) => dayOf(stamps.get(key), zone));
+  assert.equal(new Set(days).size, 4, `platforms should land on 4 days, got ${days.join(",")}`);
+  const instagram = Date.parse(stamps.get("Instagram::Reel"));
+  const facebook = Date.parse(stamps.get("Facebook::Reel"));
+  const tiktok = Date.parse(stamps.get("TikTok::Video Draft"));
+  const youtube = Date.parse(stamps.get("YouTube::Short"));
+  assert.ok(facebook - instagram >= 6 * 86400000, "Facebook should start about a week after Instagram");
+  assert.ok(tiktok - facebook >= 6 * 86400000, "TikTok should start about a week after Facebook");
+  assert.ok(youtube - tiktok >= 6 * 86400000, "YouTube should start about a week after TikTok");
+  const horizonEnd = now.getTime() + MAE_SUGGEST_HORIZON_DAYS * 86400000;
+  for (const iso of stamps.values()) {
+    assert.ok(Date.parse(iso) <= horizonEnd + 86400000);
+    assert.equal(maeIsBlackoutLocalTime(Date.parse(iso), zone), false);
+  }
 });
 
 test("Stories follow the same-platform main by 10 minutes even when MAE lanes are full", () => {
@@ -301,7 +313,7 @@ test("after 28 days of MAE are full, the 4th is day 1's largest gap", () => {
   assert.equal(dayOf(first, zone), "2026-10-05");
   assert.equal(localParts(first, zone).hour, 8);
   assert.equal(localParts(first, zone).minute, 30);
-  assert.equal(dayOf(second, zone), "2026-10-06");
+  assert.equal(dayOf(second, zone), "2026-10-19");
   assert.equal(localParts(second, zone).hour, 8);
   assert.equal(localParts(second, zone).minute, 30);
 });
@@ -446,9 +458,10 @@ test("occupancy load windows the Airtable query and sorts nearest-first", () => 
 test("Worker stamp paths use MAE not industry evening windows", () => {
   assert.match(worker, /from "\.\/mae-schedule\.mjs"/);
   assert.match(worker, /studio_mae_schedule_v1: true/);
+  assert.match(worker, /studio_mae_platform_spread_v1: true/);
   assert.match(worker, /studio_mae_profile_occupancy_v1: true/);
   assert.match(worker, /studio_schedule_occupancy_fields_v1: true/);
-  assert.match(worker, /0.10.570-vibe-cut-short-fanout/);
+  assert.match(worker, /0.10.571-schedule-4wk/);
   assert.match(worker, /STUDIO_OCCUPIED_HORIZON_MS = 28 \* 24/);
   assert.match(worker, /studioLoadPlanScheduleOccupancy/);
   assert.match(worker, /A stored 5:30 that lost its slot must be written/);

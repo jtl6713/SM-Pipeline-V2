@@ -267,7 +267,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.668-vibe-cut-16x9";
+  const BUILD_ID = "item4-0.6.669-schedule-4wk";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -8285,7 +8285,7 @@ function timedScriptAssetLabel(asset, index) {
     }).join("");
     ezWizardShowForm(
       `${rows ? `<div class="ez-wizard-schedules">${rows}</div>` : ""}
-       <p class="subtle">Automatic schedules fill morning, then afternoon, then evening. Once those three are taken, the next post goes in the largest open gap on that day, then the next day. Stories can share a time. Finished-video (AZ) auto-schedules after cover + caption — no Approve publish step. Other Studio requests still wait for Ready for Review → Approve publish.</p>
+       <p class="subtle">Automatic schedules look 4 weeks ahead. Instagram, Facebook, TikTok, and YouTube from the same package land on different days about a week apart. Same-platform extras still fill morning, then afternoon, then evening. Stories can share a time with their platform main. Finished-video (AZ) auto-schedules after cover + caption — no Approve publish step. Other Studio requests still wait for Ready for Review → Approve publish.</p>
        <div class="ez-wizard-form-actions"><button type="submit">Continue</button></div>`,
       () => {
         const schedules = {};

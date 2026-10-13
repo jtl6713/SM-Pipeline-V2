@@ -1,5 +1,5 @@
 export const SUGGESTED_SCHEDULE_GAP_MS = 3 * 60 * 60 * 1000;
-export const SUGGESTED_HORIZON_DAYS = 7;
+export const SUGGESTED_HORIZON_DAYS = 28;
 export const SUGGESTED_LEAD_MS = 10 * 60 * 1000;
 
 export function industryBestWindows(platform, outputType) {
@@ -148,11 +148,18 @@ export function pickBalancedSuggestedIso(windows, now = new Date(), options = {}
   const leadMs = options.leadMs ?? SUGGESTED_LEAD_MS;
   const windowList = Array.isArray(windows) && windows.length ? windows : ["12:00-13:00"];
   const nowMs = now.getTime() + leadMs;
-  const horizon = listHorizonCivils(now, options.horizonDays || SUGGESTED_HORIZON_DAYS);
+  const horizonDays = options.horizonDays || SUGGESTED_HORIZON_DAYS;
+  const rawHorizon = listHorizonCivils(now, horizonDays);
+  const start = rawHorizon.length
+    ? ((Number(options.startCivilIndex) || 0) % rawHorizon.length + rawHorizon.length) % rawHorizon.length
+    : 0;
+  const horizon = [...rawHorizon.slice(start), ...rawHorizon.slice(0, start)];
+  const avoid = new Set(options.avoidCivilKeys || []);
 
   const collect = () => {
     let best = null;
     for (const civil of horizon) {
+      if (avoid.has(civil.key)) continue;
       const preferred = !daysPref.length || daysPref.includes(civil.weekday);
       const crowding = occupiedOnDay(occupiedMs, civil).length;
       const platformCrowding = occupiedOnDay(platformOccupiedMs, civil).length;
@@ -250,6 +257,20 @@ export function buildSuggestedScheduleMap(items, occupiedByPlatform = {}, now = 
     return rank || a.index - b.index;
   });
   const stamps = new Map();
+  const platformOrder = [];
+  for (const { item } of indexed) {
+    if (storyRank(item.output_type) === 1) continue;
+    const platform = String(item.platform || "").trim();
+    if (platform && !platformOrder.includes(platform)) platformOrder.push(platform);
+  }
+  const packageDayByPlatform = new Map();
+  const rememberPackageDay = (platform, iso) => {
+    if (!iso || packageDayByPlatform.has(platform)) return;
+    const ms = Date.parse(iso);
+    if (!Number.isFinite(ms)) return;
+    const parts = chicagoDateTimeParts(new Date(ms));
+    packageDayByPlatform.set(platform, civilKey(parts.year, parts.month, parts.day));
+  };
   for (const { item } of indexed) {
     const platform = String(item.platform || "").trim();
     const outputType = String(item.output_type || "").trim();
@@ -261,18 +282,33 @@ export function buildSuggestedScheduleMap(items, occupiedByPlatform = {}, now = 
       const iso = new Date(existing).toISOString();
       stamps.set(key, iso);
       // Stories may share a wall-clock slot; keep them out of the platform lane.
-      if (!isStory) (reserved[platform] ||= []).push(Date.parse(iso));
+      if (!isStory) {
+        (reserved[platform] ||= []).push(Date.parse(iso));
+        rememberPackageDay(platform, iso);
+      }
       continue;
     }
     const industry = industryBestWindows(platform, outputType);
+    const spread = !isStory && platformOrder.length > 1;
+    const startCivilIndex = spread
+      ? Math.floor(Math.max(0, platformOrder.indexOf(platform)) * SUGGESTED_HORIZON_DAYS / platformOrder.length)
+      : 0;
+    const avoidCivilKeys = spread
+      ? [...packageDayByPlatform.entries()].filter(([name]) => name !== platform).map(([, day]) => day)
+      : [];
     const iso = pickBalancedSuggestedIso(industry.windows, now, {
       days: industry.days,
       // Stories ignore occupancy so IG/FB Stories can share a slot with mains.
       occupiedMs: isStory ? [] : flattenOccupiedByPlatform(reserved),
       platformOccupiedMs: isStory ? [] : (reserved[platform] || []),
+      startCivilIndex,
+      avoidCivilKeys,
     });
     stamps.set(key, iso);
-    if (!isStory) (reserved[platform] ||= []).push(Date.parse(iso));
+    if (!isStory) {
+      (reserved[platform] ||= []).push(Date.parse(iso));
+      rememberPackageDay(platform, iso);
+    }
   }
   return stamps;
 }

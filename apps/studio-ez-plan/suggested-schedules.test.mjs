@@ -25,7 +25,7 @@ test("suggested windows use Chicago time, not UTC wall clock", () => {
   assert.equal(iso, "2026-09-06T16:00:00.000Z");
 });
 
-test("preferred weekdays can land later than tomorrow inside 7 days", () => {
+test("preferred weekdays can land later than tomorrow inside 28 days", () => {
   const iso = suggestedChicagoIso(["11:00-13:00"], SATURDAY_EVENING, {
     days: ["Tue", "Wed", "Thu"],
   });
@@ -33,7 +33,7 @@ test("preferred weekdays can land later than tomorrow inside 7 days", () => {
   assert.equal(iso, "2026-09-08T16:00:00.000Z");
 });
 
-test("a packed today and tomorrow moves the suggestion later in the 7-day horizon", () => {
+test("a packed today and tomorrow moves the suggestion later in the 28-day horizon", () => {
   const chicago = chicagoDateTimeParts(SATURDAY_EVENING);
   const occupiedMs = [];
   for (let i = 0; i < 2; i++) {
@@ -55,7 +55,7 @@ test("a packed today and tomorrow moves the suggestion later in the 7-day horizo
   assert.ok(ageDays <= SUGGESTED_HORIZON_DAYS);
 });
 
-test("vertical video stamps stay in the 7-day window and spread across days", () => {
+test("vertical video stamps stay in the 28-day window and spread across days", () => {
   const items = planScheduleItems({
     items: [
       { platform: "Instagram", output_type: "Reel" },
@@ -78,7 +78,7 @@ test("vertical video stamps stay in the 7-day window and spread across days", ()
   const horizon = new Set(listHorizonCivils(SATURDAY_EVENING).map((day) => day.key));
   for (const iso of stamps.values()) {
     assert.ok(Date.parse(iso) > SATURDAY_EVENING.getTime());
-    assert.ok(horizon.has(civilFromIso(iso)), `outside 7-day horizon: ${iso}`);
+    assert.ok(horizon.has(civilFromIso(iso)), `outside 28-day horizon: ${iso}`);
   }
   const mainDays = new Set([
     stamps.get("Instagram::Reel"),
@@ -86,7 +86,7 @@ test("vertical video stamps stay in the 7-day window and spread across days", ()
     stamps.get("TikTok::Video Draft"),
     stamps.get("YouTube::Short"),
   ].map(civilFromIso));
-  assert.ok(mainDays.size >= 2, "empty calendar should not park every platform on one day");
+  assert.ok(mainDays.size >= 4, "empty calendar should spread each platform onto its own day");
 });
 
 test("a busy non-preferred day does not beat an open analytics window", () => {
@@ -114,7 +114,7 @@ test("cross-platform crowding moves the next suggestion to a less crowded prefer
   assert.equal(civilFromIso(iso), "2026-09-09");
 });
 
-test("a booked preferred-day window moves the next suggestion later inside 7 days", () => {
+test("a booked preferred-day window moves the next suggestion later inside 28 days", () => {
   const occupiedMs = [chicagoWallToUtcMs(2026, 9, 8, 11, 0)];
   const iso = suggestedChicagoIso(["11:00-13:00"], SATURDAY_EVENING, {
     days: ["Tue", "Wed", "Thu"],

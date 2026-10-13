@@ -6,7 +6,7 @@ import {
   pickBalancedSuggestedIso,
 } from "./suggested-schedules.mjs";
 
-export const AZ_HORIZON_DAYS = 7;
+export const AZ_HORIZON_DAYS = 28;
 export const AZ_OTHER_CLUSTER_MS = 30 * 60 * 1000;
 export const AZ_OTHER_NEAR_MS = 3 * 60 * 60 * 1000;
 export const AZ_STORY_OFFSET_MS = 10 * 60 * 1000;
@@ -176,6 +176,13 @@ export function buildAzCampaignSchedule(items, { occupiedMs = [], bestTimesByKey
   const stamps = new Map();
   const reservedAll = [...(occupiedMs || [])].filter((ms) => Number.isFinite(ms));
   const reservedByPlatform = {};
+  const platformOrder = [];
+  for (const item of ordered) {
+    if (isStoryType(item.output_type)) continue;
+    const platform = String(item.platform || "").trim();
+    if (platform && !platformOrder.includes(platform)) platformOrder.push(platform);
+  }
+  const usedDays = new Set();
   for (const item of ordered) {
     const platform = String(item.platform || "").trim();
     const outputType = String(item.output_type || "").trim();
@@ -183,17 +190,24 @@ export function buildAzCampaignSchedule(items, { occupiedMs = [], bestTimesByKey
     const key = scheduleKey(platform, outputType);
     const suggested = bestTimesByKey[key] || industryBestWindows(platform, outputType);
     const isStory = isStoryType(outputType);
+    const spread = !isStory && platformOrder.length > 1;
     const iso = pickBalancedSuggestedIso(suggested.windows || ["12:00-13:00"], now, {
       days: suggested.days || [],
       // Stories ignore occupancy so they can share a slot with the platform main.
       occupiedMs: isStory ? [] : reservedAll,
       platformOccupiedMs: isStory ? [] : (reservedByPlatform[platform] || []),
+      horizonDays: AZ_HORIZON_DAYS,
+      startCivilIndex: spread
+        ? Math.floor(Math.max(0, platformOrder.indexOf(platform)) * AZ_HORIZON_DAYS / platformOrder.length)
+        : 0,
+      avoidCivilKeys: spread ? [...usedDays] : [],
     });
     stamps.set(key, iso);
     const ms = Date.parse(iso);
     if (Number.isFinite(ms) && !isStory) {
       reservedAll.push(ms);
       (reservedByPlatform[platform] ||= []).push(ms);
+      usedDays.add(chicagoCivilFromMs(ms).key);
     }
   }
   const scheduledDays = [...new Set([...stamps.values()].map((iso) => chicagoCivilFromMs(Date.parse(iso)).key))];
@@ -202,6 +216,6 @@ export function buildAzCampaignSchedule(items, { occupiedMs = [], bestTimesByKey
     campaign: scheduledDays.length ? { key: scheduledDays[0] } : null,
     rationale: scheduledDays.length
       ? `spread across ${scheduledDays.length} day${scheduledDays.length === 1 ? "" : "s"} in the next ${AZ_HORIZON_DAYS} days`
-      : "no open schedule in the next 7 days",
+      : "no open schedule in the next 28 days",
   };
 }
