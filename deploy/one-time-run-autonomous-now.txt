@@ -1,0 +1,1 @@
+2026-10-13: Force-run autonomous produce for the stamped Miami/NYC photo-ready Draft queue (25 origin=autonomous PRs) after Arch Reflections finished Ready for Review. Kick POST /api/operations/ideas/run-autonomous with force=true.
