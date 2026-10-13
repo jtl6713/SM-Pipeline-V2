@@ -248,3 +248,5 @@ Deploy Worker 0.10.489-engagement-ledger. Shrink the engagement ledger so Chicag
 
 2026-10-13: Worker 0.10.586-factory-inflight-queue - Keep produce_stale / Ready for Render in Factory In Flight (Remotion stays serial; Repair is for real blocks).
 2026-10-13: Worker 0.10.587-mae-slot-occupancy - MAE occupancy reads the real 28-day calendar. Ancient Ready to Publish rows no longer hide taken mornings, so new posts stop piling onto 5:30 AM.
+
+2026-10-13: Worker 0.10.588-factory-approve-mae - Factory Approve with no stored time stamps the next MAE slot. A blank Scheduled_Post_Date is no longer treated as publish now.

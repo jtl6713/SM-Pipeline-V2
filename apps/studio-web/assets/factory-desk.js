@@ -348,7 +348,7 @@
           setStatus(`Approve failed: card ${id || "(missing)"} not found in desk payload.`, true);
           return;
         }
-        if (!window.confirm(`Approve “${cardLabel(card)}” for publishing?\n\nInstagram, Facebook, and YouTube will auto-publish. TikTok stays a draft.`)) return;
+        if (!window.confirm(`Approve “${cardLabel(card)}” for publishing?\n\nStudio will use the next open morning, afternoon, or evening. It will not publish immediately. TikTok stays a draft.`)) return;
         button.disabled = true;
         closeFactoryPreview();
         mutateDesk({ action: "approve", id: card.id, kind: card.kind || "output" })
@@ -471,7 +471,7 @@
     const heading = contentId ? `Content ${contentId} · ${title}` : title;
     const list = ready.map((card) => `• ${[card.platform, card.studio_output_type].filter(Boolean).join(" ") || cardLabel(card)}`).join("\n");
     const confirmed = window.confirm(
-      `Approve ${ready.length} outputs for “${heading}”?\n\nOnly this content item is included. Instagram, Facebook, and YouTube will auto-publish. TikTok stays a draft.\n\n${list}`
+      `Approve ${ready.length} outputs for “${heading}”?\n\nOnly this content item is included. Each output gets the next open morning, afternoon, or evening for its platform. Nothing publishes immediately. TikTok stays a draft.\n\n${list}`
     );
     if (!confirmed) return;
     if (button) {
