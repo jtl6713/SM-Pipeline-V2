@@ -305,7 +305,9 @@ import {
 } from "./idea-timed-script.mjs";
 import {
   anotherCutFromUnused,
+  capVibeCutPlanItems,
   defaultVibeCutConfig,
+  isHorizontalVibeCutAspect,
   isVibeCutNotes,
   mergeVibeCutIntoNotes,
   parseVibeCutDirective,
@@ -674,7 +676,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.567-daily-idea-produce",
+          version: "0.10.568-vibe-cut-16x9",
           studio_factory_desk_v1: true,
           studio_factory_desk_actions_v1: true,
           studio_factory_desk_write_v1: true,
@@ -9750,9 +9752,14 @@ async function buildItem4OutputPlan(request, env, url, authorization) {
     }
   }
   const finishedVideo = studioFinishedOriginKind(record) === "finished-video";
-  const plannedItems = finishedVideo
-    ? capFinishedPlanItems(items, { notes: studioRequestNotesText(record) })
-    : items;
+  const vibeCut = studioIsVibeCut(record);
+  const notesText = studioRequestNotesText(record);
+  let plannedItems = items;
+  if (finishedVideo) {
+    plannedItems = capFinishedPlanItems(items, { notes: notesText });
+  } else if (vibeCut) {
+    plannedItems = capVibeCutPlanItems(items, { notes: notesText });
+  }
   const plan={schema_version:"item4.output-plan.1",generated_at:new Date().toISOString(),production_request_record_id:recordId,source_asset_count:photoCount,photo_count_kind:item4PhotoCountKind(photoCount),items:plannedItems};
   needsReview = plannedItems.some((item) => !item.aspect_ratio);
 
@@ -15835,12 +15842,19 @@ function productionRequestFields(input, nowIso, { status = "Draft" } = {}) {
   const notes = String(input.production_notes || "");
   const az = /origin=az-finished-video/i.test(notes);
   const vibeCut = studioIsVibeCut(notes);
+  const vibeHorizontal = vibeCut && isHorizontalVibeCutAspect(notes);
   const vibeDirective = vibeCut ? parseVibeCutDirective(notes) : null;
   const vibeTargetSeconds = Number(vibeDirective?.target_seconds || 0);
   return {
     Request_Status: status,
-    Master_Content_Type: vibeCut ? "Vertical Short Video" : (input.content_type || null),
-    Target_Platforms: input.platforms || [],
+    Master_Content_Type: vibeCut
+      ? (vibeHorizontal
+        ? (input.content_type || "Longform Video")
+        : "Vertical Short Video")
+      : (input.content_type || null),
+    Target_Platforms: vibeHorizontal
+      ? ["YouTube"]
+      : (input.platforms || []),
     Voiceover_Mode: (az || vibeCut) ? "No" : input.voiceover_mode,
     Background_Music_Mode: az ? "No" : (vibeCut ? "Yes" : input.background_music_mode),
     Thumbnail_Mode: (/ez-input=finished-(video|stills|carousel)/i.test(notes) || vibeCut)

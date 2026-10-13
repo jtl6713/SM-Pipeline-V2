@@ -267,7 +267,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.666-factory-approve-content";
+  const BUILD_ID = "item4-0.6.667-vibe-cut-16x9";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -4212,14 +4212,16 @@
     showEzPortal({ silent: true });
   }
 
-  async function aspectPlanFromVideoFiles(files) {
+  async function aspectPlanFromVideoFiles(files, { inputKind = "" } = {}) {
     const video = Array.from(files || []).find(item4FileLooksLikeVideo);
     if (!video) return null;
     const meta = await imageMetadataForFiles([video]);
     const row = meta?.[0];
+    const kind = String(inputKind || ezIntakeKind || ezWizardAnswers?.inputKind || ezWizardPending?.inputKind || "").trim();
     const plan = ezPlanApi()?.ezPlanFromSourceAspect?.({
       width: row?.width,
       height: row?.height,
+      inputKind: kind,
     }) || null;
     if (!plan) return null;
     return { plan, width: row?.width, height: row?.height };
@@ -7593,6 +7595,7 @@ function timedScriptAssetLabel(asset, index) {
       const aspectPlan = helpers.ezPlanFromSourceAspect?.({
         width: answers.sourceVideoWidth,
         height: answers.sourceVideoHeight,
+        inputKind: answers.inputKind,
       }) || null;
       if (aspectPlan) planned = helpers.ezMergeAspectPlan?.(planned, aspectPlan) || planned;
     }
@@ -7678,15 +7681,23 @@ function timedScriptAssetLabel(asset, index) {
     if (captionFields.caption_mode === "Force exact" && !String(captionFields.requested_caption || "").trim()) {
       captionFields = { ...captionFields, caption_mode: "AI decides", requested_caption: "" };
     }
-    const contentType = (az || vibeCut || item4HasTimedScript())
-      ? "Vertical Short Video"
-      : (planned?.master_content_type || helpers?.ezMasterContentType?.(count) || "Photo Set");
+    const vibeHorizontal = vibeCut && (
+      String(planned?.source_aspect || pendingAnswers?.sourceAspect || "").toLowerCase() === "horizontal"
+      || helpers?.ezIsHorizontalSource?.(pendingAnswers?.sourceVideoWidth, pendingAnswers?.sourceVideoHeight)
+    );
+    const contentType = vibeHorizontal
+      ? (planned?.master_content_type || "Longform Video")
+      : (az || vibeCut || item4HasTimedScript())
+        ? "Vertical Short Video"
+        : (planned?.master_content_type || helpers?.ezMasterContentType?.(count) || "Photo Set");
     const stills = stillsTimingActive(contentType);
     return coerceForceExactTextModes({
       content_type: contentType,
-      platforms: (az || vibeCut || item4HasTimedScript())
-        ? ["Instagram", "Facebook", "TikTok", "YouTube"]
-        : (planned?.platforms || ezSelectedPlatforms()),
+      platforms: vibeHorizontal
+        ? (planned?.platforms?.length ? [...planned.platforms] : ["YouTube"])
+        : (az || vibeCut || item4HasTimedScript())
+          ? ["Instagram", "Facebook", "TikTok", "YouTube"]
+          : (planned?.platforms || ezSelectedPlatforms()),
       voiceover_mode: (finished || az || vibeCut) ? "No" : ($("ezAudioVoiceover")?.value || "Yes"),
       background_music_mode: (finished || az) ? "No" : (vibeCut ? "Yes" : ($("ezAudioMusic")?.value || "Yes")),
       thumbnail_mode: (finished || az || vibeCut) ? "Yes" : ($("ezThumbnail")?.value || "Yes"),
@@ -8534,7 +8545,9 @@ function timedScriptAssetLabel(asset, index) {
     try {
       let aspectBundle = null;
       if (nextFiles.length && (ezIntakeKind === "finished-video" || ezIntakeKind === "vibe-cut" || ezIsAzFinishedPath())) {
-        aspectBundle = await aspectPlanFromVideoFiles(nextFiles);
+        aspectBundle = await aspectPlanFromVideoFiles(nextFiles, {
+          inputKind: pending?.inputKind || ezIntakeKind,
+        });
         if (aspectBundle) applyAspectPlanToWizardState(aspectBundle);
       }
       const wizardPlanned = pending?.planned;
@@ -8554,6 +8567,9 @@ function timedScriptAssetLabel(asset, index) {
           inputKind: "vibe-cut",
           photoCount: 1,
           packageId: "video",
+          sourceAspect: aspectBundle?.plan?.source_aspect || pending?.sourceAspect,
+          sourceVideoWidth: aspectBundle?.width || pending?.sourceVideoWidth,
+          sourceVideoHeight: aspectBundle?.height || pending?.sourceVideoHeight,
           vibeTargetSeconds: pending?.vibeTargetSeconds,
           vibeStyle: pending?.vibeStyle,
           vibeEnergy: pending?.vibeEnergy,

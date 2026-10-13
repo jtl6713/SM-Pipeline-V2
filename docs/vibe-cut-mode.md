@@ -41,11 +41,14 @@ origin=ez-wizard; ez-input=vibe-cut; ez-caption=ai; ez-package=video
 
 Forced production defaults:
 
-- `Master_Content_Type=Vertical Short Video`
+- Vertical (9:16) source → `Master_Content_Type=Vertical Short Video` and the usual short package (IG/FB Reel, TikTok draft, YouTube Short, Stories)
+- Horizontal (16:9) source → `Master_Content_Type=Longform Video` and **YouTube Standard Video + YouTube Short only** (no Reels / TikTok / Stories). The Short is the 9:16 music remount; Standard stays 16:9.
 - `Voiceover_Mode=No`
 - `Background_Music_Mode=Yes`
 - `Thumbnail_Mode=Yes`
 - Beat sync on
+
+Notes include `source-aspect=horizontal|vertical` from the upload probe so plan/produce can keep that routing.
 
 ## Editing styles
 

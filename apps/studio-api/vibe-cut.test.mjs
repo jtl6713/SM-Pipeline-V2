@@ -5,12 +5,16 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 
 import {
+  VIBE_CUT_HORIZONTAL_KEYS,
   VIBE_CUT_INPUT,
   VIBE_CUT_STYLES,
+  VIBE_CUT_VERTICAL_KEYS,
   anotherCutFromUnused,
   buildVibeCutEdit,
+  capVibeCutPlanItems,
   defaultVibeCutConfig,
   formatVibeCutDirective,
+  isHorizontalVibeCutAspect,
   isVibeCutNotes,
   mergeVibeCutIntoNotes,
   normalizeVibeCutEnergy,
@@ -97,6 +101,36 @@ test("production defaults turn voiceover off and music on", () => {
   assert.equal(render.transition, "cut");
 });
 
+test("horizontal Vibe Cut defaults to YouTube Standard + Short", () => {
+  const notes = "origin=ez-wizard; ez-input=vibe-cut; source-aspect=horizontal";
+  assert.equal(isHorizontalVibeCutAspect(notes), true);
+  const defaults = vibeCutProductionDefaults({ target_seconds: 30 }, { notes });
+  assert.equal(defaults.content_type, "Longform Video");
+  assert.deepEqual(defaults.platforms, ["YouTube"]);
+  assert.equal(defaults.overrides.YouTube, "Standard Video");
+  assert.deepEqual(defaults.extras, ["YouTube::Short"]);
+  const capped = capVibeCutPlanItems([
+    { platform: "Instagram", output_type: "Reel" },
+    { platform: "YouTube", output_type: "Short" },
+    { platform: "TikTok", output_type: "Video Draft" },
+  ], { notes });
+  assert.deepEqual(
+    capped.map((item) => `${item.platform}::${item.output_type}`),
+    [...VIBE_CUT_HORIZONTAL_KEYS],
+  );
+  const vertical = capVibeCutPlanItems([
+    { platform: "Instagram", output_type: "Reel" },
+    { platform: "Facebook", output_type: "Reel" },
+    { platform: "TikTok", output_type: "Video Draft" },
+    { platform: "YouTube", output_type: "Short" },
+    { platform: "Instagram", output_type: "Story" },
+    { platform: "Facebook", output_type: "Story" },
+    { platform: "YouTube", output_type: "Standard Video" },
+  ], { notes: "ez-input=vibe-cut; source-aspect=vertical" });
+  assert.equal(vertical.length, VIBE_CUT_VERTICAL_KEYS.length);
+  assert.ok(!vertical.some((item) => item.output_type === "Standard Video"));
+});
+
 test("rank prefers unused footage when asked", () => {
   const selects = [
     { id: "a", start_seconds: 0, end_seconds: 3, score: 0.9 },
@@ -172,6 +206,9 @@ test("Worker wires vibe-cut module and plan route", () => {
   assert.match(worker, /planVibeCutRoute/);
   assert.match(worker, /\/api\/vibe-cut\/plan/);
   assert.match(worker, /isVibeCutNotes|studioIsVibeCut/);
+  assert.match(worker, /capVibeCutPlanItems/);
+  assert.match(worker, /isHorizontalVibeCutAspect/);
+  assert.match(worker, /Longform Video/);
 });
 
 test("Worker never treats Vibe Cut as finished-video passthrough", () => {
@@ -187,7 +224,7 @@ test("Worker never treats Vibe Cut as finished-video passthrough", () => {
   assert.match(worker, /force_multiclip_remount: false/);
   assert.match(worker, /Rebuilding Vibe Cut multi-clip montage/);
   assert.match(worker, /Must go through enqueueStudioProductionJob so Vibe Cut/);
-  assert.match(worker, /version: "0.10.567-daily-idea-produce"/);
+  assert.match(worker, /version: "0.10.568-vibe-cut-16x9"/);
 });
 
 test("Studio web exposes Vibe Cut creation path", () => {

@@ -12,7 +12,7 @@ const app = fs.readFileSync(
 );
 
 test("health advertises current worker build with faster-frames helpers", () => {
-  assert.match(worker, /version: "0.10.567-daily-idea-produce"/);
+  assert.match(worker, /version: "0.10.568-vibe-cut-16x9"/);
   assert.match(worker, /airtableBatchCreate/);
   assert.match(worker, /mapProductionRequestLight/);
 });
@@ -145,7 +145,7 @@ test("fractional video duration is stored as a whole-number cap and save errors 
 });
 
 test("UI polls GET /variants during Prepare and skips Save reload waterfall", () => {
-  assert.match(app, /BUILD_ID = "item4-0.6.666-factory-approve-content"/);
+  assert.match(app, /BUILD_ID = "item4-0.6.667-vibe-cut-16x9"/);
   assert.match(app, /pollItem4Variants/);
   const poll = app.slice(
     app.indexOf("async function pollItem4Variants"),
@@ -165,5 +165,5 @@ test("UI polls GET /variants during Prepare and skips Save reload waterfall", ()
 test("Worker heals orphan Ready to Render into Ready for Render", () => {
   assert.match(worker, /R4_READY_TO_RENDER_TYPO/);
   assert.match(worker, /Render_Status\}="Ready to Render"/);
-  assert.match(worker, /0.10.567-daily-idea-produce/);
+  assert.match(worker, /0.10.568-vibe-cut-16x9/);
 });
