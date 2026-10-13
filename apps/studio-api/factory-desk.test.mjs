@@ -9,6 +9,7 @@ import {
   FACTORY_NEEDS_ASSETS_MAX,
   classifyFactoryLane,
   emptyFactoryDeskControls,
+  factoryCardFromRow,
   normalizeFactoryDeskControls,
   partitionFactoryLanes,
   pinFactoryNeedsAssets,
@@ -99,6 +100,30 @@ test("partitionFactoryLanes puts pile in needs_assets and leaves candidates asid
   assert.equal(part.needs_assets_candidates[0].id, "recAsset2");
 });
 
+test("factoryCardFromRow exposes authenticated preview path for Ready for Review outputs", () => {
+  const card = factoryCardFromRow({
+    id: "recEyesPreview0001",
+    kind: "output",
+    studio_state: "Ready for Review",
+    final_file_url: "https://drive.google.com/file/d/abc/view",
+    thumbnail_url: "https://media.chicagoshining.com/publish/cover.jpg",
+    title: "Preview me",
+  }, { lane: "needs_eyes" });
+  assert.equal(card.preview_url, "/api/outputs/recEyesPreview0001/preview");
+  assert.equal(card.can_preview, true);
+  assert.equal(card.thumbnail_url, "https://media.chicagoshining.com/publish/cover.jpg");
+  assert.equal(card.final_file_url, "https://drive.google.com/file/d/abc/view");
+
+  const idea = factoryCardFromRow({
+    id: "recIdeaNoPreview001",
+    kind: "idea",
+    studio_state: "Waiting for photos",
+    title: "Stills",
+  }, { lane: "needs_assets" });
+  assert.equal(idea.preview_url, null);
+  assert.equal(idea.can_preview, false);
+});
+
 test("Worker exposes factory desk routes and version flag", async () => {
   const worker = await readFile(path.join(here, "worker.js"), "utf8");
   assert.match(worker, /\/api\/factory\/desk/);
@@ -109,14 +134,15 @@ test("Worker exposes factory desk routes and version flag", async () => {
   assert.match(worker, /factorySendBackOutput/);
   assert.match(worker, /action === "approve"/);
   assert.match(worker, /action === "send_back"/);
-  assert.match(worker, /0\.10\.564-factory-approve/);
+  assert.match(worker, /0\.10\.565-factory-preview/);
   assert.match(worker, /studio_factory_desk_v1:\s*true/);
+  assert.match(worker, /studio_factory_desk_preview_v1:\s*true/);
 });
 
 test("Worker allows Factory Desk POST through Phase 2A gate", async () => {
   const worker = await readFile(path.join(here, "worker.js"), "utf8");
   assert.match(worker, /const isFactoryDeskWrite = isFactoryDeskRoute && request\.method === "POST"/);
   assert.match(worker, /isFactoryDeskWrite \|/);
-  assert.match(worker, /version: "0\.10\.564-factory-approve"/);
+  assert.match(worker, /version: "0\.10\.565-factory-preview"/);
   assert.match(worker, /studio_factory_desk_write_v1: true/);
 });

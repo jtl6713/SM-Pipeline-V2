@@ -211,4 +211,6 @@ Deploy Worker 0.10.489-engagement-ledger. Shrink the engagement ledger so Chicag
 
 2026-10-12 Worker 0.10.563-factory-actions: Factory desk approve / send_back / delete actions.
 
-2026-10-13: Worker 0.10.564-factory-approve — allow Factory Desk POST through Phase 2A (Approve was 405).
+2026-10-13: Worker 0.10.565-factory-preview — allow Factory Desk POST through Phase 2A (Approve was 405).
+
+2026-10-13: Worker 0.10.565-factory-preview — Factory desk preview_url / can_preview on cards + studio_factory_desk_preview_v1.

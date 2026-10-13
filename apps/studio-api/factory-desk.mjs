@@ -172,9 +172,15 @@ export function classifyFactoryLane(row) {
 }
 
 export function factoryCardFromRow(row, { lane = null, inPile = false } = {}) {
+  const kind = row.kind || "request";
+  const finalFileUrl = String(row.final_file_url || "").trim() || null;
+  const thumbnailUrl = String(row.thumbnail_url || "").trim() || null;
+  const previewPath = kind === "output" && /^rec[A-Za-z0-9]+$/.test(String(row.id || ""))
+    ? `/api/outputs/${row.id}/preview`
+    : null;
   return {
     id: row.id,
-    kind: row.kind || "request",
+    kind,
     lane: lane || classifyFactoryLane(row),
     title: row.title || "Untitled",
     profile_name: row.profile_name || "",
@@ -191,6 +197,10 @@ export function factoryCardFromRow(row, { lane = null, inPile = false } = {}) {
     autonomous: isAutonomousOrigin(row),
     in_needs_assets_pile: Boolean(inPile),
     updated_at: row.updated_at || null,
+    final_file_url: finalFileUrl,
+    thumbnail_url: thumbnailUrl,
+    preview_url: previewPath,
+    can_preview: Boolean(previewPath && (finalFileUrl || thumbnailUrl || /ready for review/i.test(String(row.studio_state || "")))),
   };
 }
 
