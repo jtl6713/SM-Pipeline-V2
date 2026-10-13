@@ -605,13 +605,16 @@ test("Worker stamps photo-ready ideas and always adopts after 8am CT", async () 
   const path = await import("node:path");
   const here = path.dirname(fileURLToPath(import.meta.url));
   const worker = await readFile(path.join(here, "worker.js"), "utf8");
-  assert.match(worker, /version: "0\.10\.583-variant-reconcile-gap"/);
+  assert.match(worker, /version: "0\.10\.584-autonomous-fifo-chain"/);
   assert.match(worker, /async function stampPhotoReadyIdeaForAutonomousProduce/);
   assert.match(worker, /stampPhotoReadyIdeaForAutonomousProduce\(env, ideaReady, requestRecord\)/);
   assert.match(worker, /Always stamp photo-ready daily ideas after 8am CT/);
   assert.match(worker, /skip_stuck_waiting_for_next_draft/);
   assert.match(worker, /parkAutonomousResumeDraft/);
   assert.match(worker, /autonomousWaitingIsStale/);
+  assert.match(worker, /prior_job_done_advance_fifo/);
+  assert.match(worker, /resume_only: true/);
+  assert.match(worker, /resume_only_idle/);
   assert.doesNotMatch(
     worker.slice(
       worker.indexOf("if (dailyIdeaProduceHasStarted(chicago"),
