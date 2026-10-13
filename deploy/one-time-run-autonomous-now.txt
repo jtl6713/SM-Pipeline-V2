@@ -1,1 +1,3 @@
 2026-10-13: Force-run autonomous produce for the stamped Miami/NYC photo-ready Draft queue (25 origin=autonomous PRs) after Arch Reflections finished Ready for Review. Kick POST /api/operations/ideas/run-autonomous with force=true.
+
+2026-10-13: Force-run autonomous after 0.10.576 miami-queue-unstick — resume Color Rush / Miami Drafts past stuck NYC Preparing monopolizing FIFO.

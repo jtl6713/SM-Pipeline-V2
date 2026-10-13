@@ -11,11 +11,11 @@ test("typed library search is not idea-ranked", async () => {
   const worker = await readFile(path.join(here, "../studio-api/worker.js"), "utf8");
   const html = await readFile(path.join(here, "index.html"), "utf8");
   assert.match(app, /item4-0.6.670-schedule-4wk/);
-  assert.match(html, /UI build 0\.6\.669/);
+  assert.match(html, /UI build 0\.6\.670/);
   assert.match(app, /search is not limited to this idea/);
   assert.match(app, /\{ flat: operatorSearch \}/);
   assert.match(app, /\(operatorSearch \|\| quoted\.phrase\) \? \[\] : suggested/);
-  assert.match(worker, /0\.10\.575-photo-ready-auto-produce/);
+  assert.match(worker, /0\.10\.576-miami-queue-unstick/);
   assert.match(worker, /studio_idea_library_search_all_hits_v1: true/);
   assert.match(worker, /operator_search: operatorSearch/);
   assert.match(worker, /Typed search is operator choice only/);

@@ -262,12 +262,44 @@ export function stampAutonomousOrigin(notes) {
   return text ? `origin=autonomous\n${text}` : "origin=autonomous";
 }
 
+/** Park a Draft that is monopolizing FIFO (stuck Preparing / deferred by resume). */
+export function isAutonomousResumeDeferred(notes) {
+  return /(?:^|\n)\s*autonomous_resume\s*=\s*deferred\b/i.test(String(notes || ""));
+}
+
+export function stampAutonomousResumeDeferred(notes, reason = "variants_still_preparing") {
+  const text = String(notes || "").trim();
+  const reasonLine = `autonomous_resume=deferred reason=${String(reason || "variants_still_preparing").slice(0, 80)}`;
+  if (isAutonomousResumeDeferred(text)) {
+    return text.replace(/(?:^|\n)\s*autonomous_resume\s*=\s*deferred[^\n]*/i, `\n${reasonLine}`).replace(/^\n/, "");
+  }
+  return text ? `${text}\n${reasonLine}` : reasonLine;
+}
+
+/** waiting_variants / awaiting_i4 older than maxAge must not block the next city. */
+export function autonomousWaitingIsStale(last, nowMs = Date.now(), maxAgeMs = 12 * 60 * 1000) {
+  const status = String(last?.status || "").trim();
+  if (!["waiting_variants", "awaiting_i4"].includes(status)) return false;
+  const at = Date.parse(last?.at || "");
+  if (!Number.isFinite(at)) return true;
+  return nowMs - at >= maxAgeMs;
+}
+
+/** Preparing frames with no progress past maxAge — skip so Miami/NYC FIFO can advance. */
+export function autonomousPreparingIsStale(variantStatus, variantUpdatedAt, nowMs = Date.now(), maxAgeMs = 12 * 60 * 1000) {
+  if (String(variantStatus || "").trim() !== "Preparing") return false;
+  const at = Date.parse(variantUpdatedAt || "");
+  if (!Number.isFinite(at)) return true;
+  return nowMs - at >= maxAgeMs;
+}
+
 /**
  * Oldest draft the morning resume may start.
  * origin=autonomous runs only for profiles with Autonomous produce on.
+ * Deferred / long-Preparing drafts are skipped so one city cannot starve another.
  * Other resume stamps, such as prepare-to-review, are unchanged.
  */
-export function firstAutonomousResumeDraft(drafts, enabledProfileIds) {
+export function firstAutonomousResumeDraft(drafts, enabledProfileIds, nowMs = Date.now()) {
   const enabled = new Set(
     (Array.isArray(enabledProfileIds) ? enabledProfileIds : [])
       .map((id) => String(id || "").trim())
@@ -275,6 +307,8 @@ export function firstAutonomousResumeDraft(drafts, enabledProfileIds) {
   );
   for (const draft of Array.isArray(drafts) ? drafts : []) {
     const notes = String(draft?.notes || draft?.production_notes || "");
+    if (isAutonomousResumeDeferred(notes)) continue;
+    if (autonomousPreparingIsStale(draft?.variant_status, draft?.variant_updated_at, nowMs)) continue;
     if (!isAutonomousOrigin(notes)) return draft || null;
     const profileId = String(draft?.profile_id || "").trim();
     if (enabled.has(profileId)) return draft;
