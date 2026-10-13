@@ -72,9 +72,19 @@ test("classifyFactoryLane priority: manual > needs_eyes > needs_assets > auto_hi
     id: "rec4",
     kind: "request",
     request_status: "Promoted",
+    produce_step: "crops",
     studio_state: "Producing · crops",
     lane: "active",
   }), "auto_high");
+  assert.equal(classifyFactoryLane({
+    id: "rec4done",
+    kind: "request",
+    request_status: "Promoted",
+    produce_step: "done",
+    studio_state: "Promoted",
+    lane: "active",
+    title: "Crandon Sunrise Playbook",
+  }), null);
   assert.equal(classifyFactoryLane({
     id: "rec4b",
     kind: "request",
@@ -157,7 +167,7 @@ test("Worker exposes factory desk routes and version flag", async () => {
   assert.match(worker, /factorySendBackOutput/);
   assert.match(worker, /action === "approve"/);
   assert.match(worker, /action === "send_back"/);
-  assert.match(worker, /0\.10\.579-factory-cancelled-exclude/);
+  assert.match(worker, /0\.10\.580-factory-promoted-done-exclude/);
   assert.match(worker, /studio_factory_desk_v1:\s*true/);
   assert.match(worker, /studio_factory_desk_preview_v1:\s*true/);
 });
@@ -166,6 +176,6 @@ test("Worker allows Factory Desk POST through Phase 2A gate", async () => {
   const worker = await readFile(path.join(here, "worker.js"), "utf8");
   assert.match(worker, /const isFactoryDeskWrite = isFactoryDeskRoute && request\.method === "POST"/);
   assert.match(worker, /isFactoryDeskWrite \|/);
-  assert.match(worker, /version: "0\.10\.579-factory-cancelled-exclude"/);
+  assert.match(worker, /version: "0\.10\.580-factory-promoted-done-exclude"/);
   assert.match(worker, /studio_factory_desk_write_v1: true/);
 });
