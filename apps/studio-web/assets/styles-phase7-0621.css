@@ -4943,7 +4943,7 @@ body.nav-collapsed .sidebar{
 .timed-script-format-help pre{display:block;max-width:100%;overflow-x:auto;white-space:pre;padding:11px 12px;border:1px solid #dae4ef;border-radius:7px;background:#fff;color:#10233f;font-size:.78rem;line-height:1.65}
 .timed-script-format-help-body p{font-size:.78rem;line-height:1.55;color:#345;margin:8px 0 0}
 
-/* Factory Desk — one column, four labeled bands, Operations-style short lines (UI 0.6.663) */
+/* Factory Desk — one column, four labeled bands, Operations-style short lines (UI 0.6.665) */
 #page-factory .factory-lanes{
   display:flex;
   flex-direction:column;
@@ -4977,10 +4977,13 @@ body.nav-collapsed .sidebar{
   flex:0 0 auto;min-width:2.4rem;text-align:center;font-size:.82rem;font-weight:800;color:#fff;
   background:var(--factory-accent);border-radius:999px;padding:4px 10px;
 }
+#page-factory .factory-band,
+#page-factory .factory-lane-list,
+#page-factory .factory-line{min-width:0}
 #page-factory .factory-cols,
 #page-factory .factory-line{
-  display:grid;gap:8px;align-items:center;
-  grid-template-columns:22px minmax(120px,1.7fr) minmax(72px,.75fr) minmax(64px,.55fr) minmax(72px,.65fr) minmax(88px,.8fr) max-content;
+  display:grid;gap:6px;align-items:center;width:100%;
+  grid-template-columns:22px minmax(0,1.5fr) minmax(0,.7fr) minmax(0,.5fr) minmax(0,.5fr) minmax(0,.75fr) minmax(0,1.15fr);
 }
 #page-factory .factory-cols{
   padding:6px 12px;background:#fafbfc;border-bottom:1px solid var(--line,#d7e0ea);
@@ -4988,7 +4991,7 @@ body.nav-collapsed .sidebar{
 }
 #page-factory .factory-lane-list{
   display:flex;flex-direction:column;min-height:0;
-  max-height:min(32vh,280px);overflow:auto;
+  max-height:min(32vh,280px);overflow-x:hidden;overflow-y:auto;
 }
 #page-factory .factory-candidates{max-height:min(24vh,200px)}
 #page-factory .factory-subhead{
@@ -5014,7 +5017,7 @@ body.nav-collapsed .sidebar{
 #page-factory .factory-line-cell{min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:#243446}
 #page-factory .factory-line-state{color:#4d5f73}
 #page-factory .factory-line[data-lane="manual"] .factory-line-state{color:#7a2e2e}
-#page-factory .factory-line-actions{display:flex;flex-wrap:nowrap;gap:3px;justify-content:flex-end;align-items:center}
+#page-factory .factory-line-actions{display:flex;flex-wrap:wrap;gap:3px;justify-content:flex-end;align-items:center;min-width:0}
 #page-factory .factory-line-actions .primary-button,
 #page-factory .factory-line-actions .secondary-button,
 #page-factory .factory-line-actions .text-button{
