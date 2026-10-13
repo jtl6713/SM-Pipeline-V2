@@ -684,7 +684,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.585-photo-ready-30m-sla",
+          version: "0.10.586-factory-inflight-queue",
           studio_factory_desk_v1: true,
           studio_factory_desk_actions_v1: true,
           studio_factory_desk_write_v1: true,
@@ -41951,9 +41951,15 @@ async function getStudioOperationsQueue(request, env, authorization) {
     );
     const step = String(job?.step || "").trim();
     const status = String(f(record, "Request_Status") || "").trim();
+    // Transient produce_stale is heal backlog (often waiting on serial Remotion).
+    // Keep the Producing · step label so Factory In Flight does not read as Repair.
+    const transientProduceStale = stuck?.kind === "produce_stale" && stuck?.class === "transient"
+      && step && step !== "blocked" && step !== "escalated" && step !== "done";
     const studioState = producePaused
       ? "Paused"
-      : (stuck ? (stuck.kind || "Stuck") : (step && step !== "done" ? `Producing · ${step}` : status || "Draft"));
+      : (transientProduceStale
+        ? `Producing · ${step}`
+        : (stuck ? (stuck.kind || "Stuck") : (step && step !== "done" ? `Producing · ${step}` : status || "Draft")));
     const contentNumber = content ? f(content, "Content_ID") : null;
     const ideaLinkedId = firstOpsLinkedId(f(record, "Idea_Candidate")) || null;
     const row = {

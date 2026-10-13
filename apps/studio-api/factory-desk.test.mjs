@@ -109,6 +109,51 @@ test("classifyFactoryLane priority: manual > needs_eyes > needs_assets > auto_hi
     publish_status: "Scheduled",
     review_status: "Review Sent",
   }), null);
+  // Transient produce_stale while waiting on serial Remotion stays In Flight.
+  assert.equal(classifyFactoryLane({
+    id: "recStaleProduce",
+    kind: "request",
+    lane: "stuck",
+    stuck_kind: "produce_stale",
+    stuck_class: "transient",
+    request_status: "Promoted",
+    produce_step: "render",
+    studio_state: "produce_stale",
+    title: "Brickell Golden Hour",
+  }), "auto_high");
+  assert.equal(classifyFactoryLane({
+    id: "recRenderQueued",
+    kind: "output",
+    lane: "stuck",
+    stuck_kind: "produce_stale",
+    stuck_class: "transient",
+    request_status: "Promoted",
+    produce_step: "render",
+    studio_state: "Ready for Render",
+    render_status: "Ready for Render",
+    output_status: "In Production",
+    title: "High Line Fall Textures",
+  }), "auto_high");
+  assert.equal(classifyFactoryLane({
+    id: "recRenderDoneParent",
+    kind: "output",
+    request_status: "Promoted",
+    produce_step: "done",
+    studio_state: "Waiting in Render Queue",
+    render_status: "Waiting in Render Queue",
+    output_status: "In Production",
+    title: "Color Rush sibling",
+  }), "auto_high");
+  // Truly blocked / code_bug still lands in Repair.
+  assert.equal(classifyFactoryLane({
+    id: "recBlocked",
+    kind: "request",
+    stuck_kind: "produce_stale",
+    stuck_class: "transient",
+    produce_step: "blocked",
+    studio_state: "Blocked",
+    request_status: "Promoted",
+  }), "manual");
 });
 
 test("partitionFactoryLanes puts pile in needs_assets and leaves candidates aside", () => {
@@ -167,7 +212,7 @@ test("Worker exposes factory desk routes and version flag", async () => {
   assert.match(worker, /factorySendBackOutput/);
   assert.match(worker, /action === "approve"/);
   assert.match(worker, /action === "send_back"/);
-  assert.match(worker, /0\.10\.585-photo-ready-30m-sla/);
+  assert.match(worker, /0\.10\.586-factory-inflight-queue/);
   assert.match(worker, /studio_factory_desk_v1:\s*true/);
   assert.match(worker, /studio_factory_desk_preview_v1:\s*true/);
 });
@@ -176,6 +221,6 @@ test("Worker allows Factory Desk POST through Phase 2A gate", async () => {
   const worker = await readFile(path.join(here, "worker.js"), "utf8");
   assert.match(worker, /const isFactoryDeskWrite = isFactoryDeskRoute && request\.method === "POST"/);
   assert.match(worker, /isFactoryDeskWrite \|/);
-  assert.match(worker, /version: "0\.10\.585-photo-ready-30m-sla"/);
+  assert.match(worker, /version: "0\.10\.586-factory-inflight-queue"/);
   assert.match(worker, /studio_factory_desk_write_v1: true/);
 });
