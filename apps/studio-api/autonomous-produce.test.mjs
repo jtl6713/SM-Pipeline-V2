@@ -289,6 +289,14 @@ test("YouTube mapper keeps titles and picker requires assets", () => {
     status: "waiting_variants",
     at: "2026-10-13T12:10:00.000Z",
   }, Date.parse("2026-10-13T12:15:00.000Z")), false);
+  assert.equal(autonomousWaitingIsStale({
+    status: "resuming",
+    at: "2026-10-13T16:34:57.233Z",
+  }, Date.parse("2026-10-13T18:35:00.000Z")), true);
+  assert.equal(autonomousWaitingIsStale({
+    status: "resuming",
+    at: "2026-10-13T18:34:00.000Z",
+  }, Date.parse("2026-10-13T18:35:00.000Z")), false);
   assert.equal(autonomousPreparingIsStale("Preparing", "2026-10-13T12:00:00.000Z", Date.parse("2026-10-13T12:13:00.000Z")), true);
   assert.equal(autonomousPreparingIsStale("Ready", "2026-10-13T12:00:00.000Z", Date.parse("2026-10-13T12:20:00.000Z")), false);
   assert.equal(dailyIdeaProduceHasStarted({ hour: 1 }), false);
@@ -573,7 +581,7 @@ test("Worker stamps photo-ready ideas and always adopts after 8am CT", async () 
   const path = await import("node:path");
   const here = path.dirname(fileURLToPath(import.meta.url));
   const worker = await readFile(path.join(here, "worker.js"), "utf8");
-  assert.match(worker, /version: "0\.10\.577-miami-force-after-deploy"/);
+  assert.match(worker, /version: "0\.10\.579-factory-cancelled-exclude"/);
   assert.match(worker, /async function stampPhotoReadyIdeaForAutonomousProduce/);
   assert.match(worker, /stampPhotoReadyIdeaForAutonomousProduce\(env, ideaReady, requestRecord\)/);
   assert.match(worker, /Always stamp photo-ready daily ideas after 8am CT/);

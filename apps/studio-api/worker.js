@@ -680,7 +680,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.577-miami-force-after-deploy",
+          version: "0.10.579-factory-cancelled-exclude",
           studio_factory_desk_v1: true,
           studio_factory_desk_actions_v1: true,
           studio_factory_desk_write_v1: true,
@@ -43287,10 +43287,12 @@ async function executeStudioAutonomousProduce(env, ctx, options = {}) {
     authorization = await resolveStudioCronAuthorization(env);
   }
 
-  // A stuck Preparing / I4 wait must not monopolize FIFO (NYC blocked Miami Needs eyes).
+  // A stuck Preparing / I4 wait / hung resuming must not monopolize FIFO
+  // (Color Rush status=resuming for hours left Needs eyes empty).
+  const lastStatus = String(last?.status || "").trim();
   const waitingStale = autonomousWaitingIsStale(last) || (
     Boolean(options.force)
-    && ["waiting_variants", "awaiting_i4"].includes(String(last?.status || "").trim())
+    && ["waiting_variants", "awaiting_i4", "resuming", "picking"].includes(lastStatus)
   );
   if (waitingStale && last.production_request_id) {
     const stuck = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, last.production_request_id).catch(() => null);
@@ -43314,13 +43316,22 @@ async function executeStudioAutonomousProduce(env, ctx, options = {}) {
     const notes = f(requestRecord, "Production_Notes");
     const job = requestRecord ? parseStudioProductionJob(requestRecord) : null;
     const jobStep = String(job?.step || "").trim();
-    if (isAutonomousResumeDeferred(notes)) {
+    const variantStatus = String(f(requestRecord, "Studio_Variant_Status") || "").trim();
+    const variantUpdatedAt = f(requestRecord, "Studio_Variant_Updated_At") || requestRecord?.createdTime || "";
+    if (
+      isAutonomousResumeDeferred(notes)
+      || autonomousPreparingIsStale(variantStatus, variantUpdatedAt)
+    ) {
+      if (!isAutonomousResumeDeferred(notes) && requestRecord) {
+        await parkAutonomousResumeDraft(env, requestRecord, "preparing_stale");
+      }
       last = await studioSaveAutonomousLastRun(env, {
         status: "reset",
-        skip_reason: "skip_deferred_draft",
+        skip_reason: isAutonomousResumeDeferred(notes) ? "skip_deferred_draft" : "skip_preparing_stale_draft",
         chicago_date: chicago.date,
         idea_id: null,
         production_request_id: null,
+        parked_production_request_id: requestRecord?.id || last.production_request_id,
       });
     } else {
     const lastNeedsResume = ["waiting_variants", "awaiting_i4", "skipped", "reset", "picking", "resuming"].includes(String(last.status || "").trim())

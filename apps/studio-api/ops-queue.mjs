@@ -31,7 +31,7 @@ export function mergeOpsQueueOutputRecords(...lists) {
 
 /** Production Requests still moving toward Ready for Review. */
 export const OPS_QUEUE_REQUEST_FORMULA =
-  'AND({Test_Run_ID}=BLANK(),OR({Request_Status}="Draft",{Request_Status}="Ready",{Request_Status}="Submitted",{Request_Status}="Promoted",AND({Studio_Production_Job_JSON}!="",FIND(\'"step":"done"\',{Studio_Production_Job_JSON}&\'\')=0)))';
+  'AND({Test_Run_ID}=BLANK(),{Request_Status}!="Cancelled",OR({Request_Status}="Draft",{Request_Status}="Ready",{Request_Status}="Submitted",{Request_Status}="Promoted",AND({Studio_Production_Job_JSON}!="",FIND(\'"step":"done"\',{Studio_Production_Job_JSON}&\'\')=0)))';
 
 export const OPS_QUEUE_OUTPUT_FIELDS = [
   "Output_ID",
