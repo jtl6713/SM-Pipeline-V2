@@ -31625,15 +31625,22 @@ async function studioHealPromotedMissingFanout(env, { limit = 8 } = {}) {
       const missing = enabled.filter((row) =>
         !arrayOrEmpty(f(row, "Platform_Output")).some((id) => /^rec[A-Za-z0-9]+$/.test(String(id || "")))
       );
-      if (!missing.length) continue;
-      const fanout = await fanoutProductionRequestOutputsToContentItems(env, requestRecord, parentId);
-      if (Number(fanout?.routed_count || 0) > 0) {
-        try { await enqueueStudioProductionJob(env, requestRecord.id); } catch {}
+      const job = parseStudioProductionJob(requestRecord);
+      const forceRemount = Boolean(job?.heal?.force_multiclip_remount)
+        || (studioIsVibeCut(requestRecord) && /remount/i.test(String(job?.detail || "")));
+      if (!missing.length && !forceRemount) continue;
+      let fanout = { routed_count: 0, blocked_count: 0, remaining: 0 };
+      if (missing.length) {
+        fanout = await fanoutProductionRequestOutputsToContentItems(env, requestRecord, parentId);
+      }
+      if (Number(fanout?.routed_count || 0) > 0 || forceRemount) {
+        try { await enqueueStudioProductionJob(env, requestRecord.id, { resume: true }); } catch {}
       }
       healed.push({
         request_id: requestRecord.id,
         content_item_id: parentId,
         missing_before: missing.length,
+        force_remount: forceRemount,
         routed: Number(fanout?.routed_count || 0),
         blocked: Number(fanout?.blocked_count || 0),
         remaining: Number(fanout?.remaining || 0),
