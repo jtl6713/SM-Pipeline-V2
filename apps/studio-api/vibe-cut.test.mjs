@@ -220,8 +220,11 @@ test("Worker never treats Vibe Cut as finished-video passthrough", () => {
   assert.match(worker, /vibeCutNeedsRemount/);
   assert.match(worker, /force_multiclip_remount/);
   assert.match(worker, /parsedClipCount/);
+  assert.match(worker, /studioVibeCutOutputNeedsRemount/);
   assert.match(worker, /shortSingle/);
   assert.match(worker, /durationMismatch/);
+  assert.match(worker, /finishedWrong/);
+  assert.match(worker, /Music_Duration_Seconds/);
   assert.match(worker, /force_multiclip_remount: false/);
   assert.match(worker, /Rebuilding Vibe Cut multi-clip montage/);
   assert.match(worker, /Must go through enqueueStudioProductionJob so Vibe Cut/);
