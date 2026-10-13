@@ -187,7 +187,7 @@ test("Worker never treats Vibe Cut as finished-video passthrough", () => {
   assert.match(worker, /force_multiclip_remount: false/);
   assert.match(worker, /Rebuilding Vibe Cut multi-clip montage/);
   assert.match(worker, /Must go through enqueueStudioProductionJob so Vibe Cut/);
-  assert.match(worker, /version: "0.10.563-factory-actions"/);
+  assert.match(worker, /version: "0.10.564-factory-approve"/);
 });
 
 test("Studio web exposes Vibe Cut creation path", () => {

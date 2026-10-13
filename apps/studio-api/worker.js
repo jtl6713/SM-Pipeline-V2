@@ -495,6 +495,7 @@ export default {
       const isIdeaPrepareToReviewWrite = isIdeaPrepareToReviewRoute && request.method === "POST";
       const isOperationsQueuePauseWrite = isOperationsQueuePauseRoute && request.method === "POST";
       const isOperationsQueueReorderWrite = isOperationsQueueReorderRoute && request.method === "POST";
+      const isFactoryDeskWrite = isFactoryDeskRoute && request.method === "POST";
       const isIdeaWatchPhotosWrite = isIdeaWatchPhotosRoute && request.method === "POST";
       const isIdeaPhotoListeningSessionWrite = isIdeaPhotoListeningSessionRoute && request.method === "POST";
       const isIdeaMatchPhotosWrite = isIdeaMatchPhotosRoute && request.method === "POST";
@@ -612,6 +613,7 @@ export default {
         isOperationsAutonomousWrite ||
         isOperationsQueuePauseWrite ||
         isOperationsQueueReorderWrite ||
+        isFactoryDeskWrite ||
         isOperationsOutputScheduleWrite ||
         isOperationsOutputPublishedWrite ||
         isOperationsOutputPublishKickWrite ||
@@ -668,9 +670,10 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.563-factory-actions",
+          version: "0.10.564-factory-approve",
           studio_factory_desk_v1: true,
           studio_factory_desk_actions_v1: true,
+          studio_factory_desk_write_v1: true,
           studio_create_vo_matched_stills_v1: true,
           studio_idea_library_typeahead_v1: true,
           studio_idea_library_search_all_hits_v1: true,

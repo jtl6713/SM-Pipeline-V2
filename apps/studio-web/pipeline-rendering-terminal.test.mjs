@@ -106,7 +106,7 @@ test("Unpublished sibling of archived content can render without importing a ful
 });
 
 test("UI version and cache busts are aligned", () => {
-  assert.ok(app.includes('BUILD_ID = "item4-0.6.660-factory-grid2"'));
-  assert.ok(html.includes("UI build 0.6.660"));
-  assert.ok(html.includes("app-item4-1008.js?v=0.6.660-factory-grid2"));
+  assert.ok(app.includes('BUILD_ID = "item4-0.6.661-factory-approve"'));
+  assert.ok(html.includes("UI build 0.6.661"));
+  assert.ok(html.includes("app-item4-1008.js?v=0.6.661-factory-approve"));
 });
