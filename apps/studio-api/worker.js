@@ -676,7 +676,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.572-daily-ideas-1am",
+          version: "0.10.573-idea-generate-stale-lock",
           studio_factory_desk_v1: true,
           studio_factory_desk_actions_v1: true,
           studio_factory_desk_write_v1: true,
@@ -723,6 +723,7 @@ export default {
           studio_quality_agent_v1: true,
           studio_airtable_low_burn_cron_v1: true,
           studio_daily_ideas_1am_retry_v1: true,
+          studio_idea_generate_stale_lock_v1: true,
           studio_airtable_burn_kill_v1: true,
           studio_airtable_queue_hang_fix_v1: true,
           studio_pipeline_review_filter_v1: true,
@@ -40210,11 +40211,38 @@ function studioIdeaBatchView(record) {
   };
 }
 
+async function studioIdeaManualBatchStillRunning(env, batchId) {
+  const batch = await airtableFetch(env, STUDIO_IDEA_BATCH_TABLE_ID, batchId).catch(() => null);
+  if (!batch) return false;
+  const status = String(f(batch, "Status") || "").trim();
+  if (!["Pending", "Running"].includes(status)) return false;
+  const requestedAt = Date.parse(String(f(batch, "Requested_At") || batch.createdTime || ""));
+  const ageMs = Number.isFinite(requestedAt) ? Date.now() - requestedAt : Infinity;
+  // Abandoned waitUntil / crashed clears left Pending forever; only a fresh
+  // batch should block Generate.
+  return ageMs <= 20 * 60 * 1000;
+}
+
 async function studioIdeaEnabledProfile(env, authorization, profileId) {
-  const profile = await resolveWorkingContentProfile(env, authorization, profileId);
+  let profile = await resolveWorkingContentProfile(env, authorization, profileId);
   if (!Boolean(f(profile, "Active"))) throw new HttpError(409, "The selected content profile is not active");
-  const existingBatch = Array.isArray(f(profile, "Manual_Idea_Batch")) ? f(profile, "Manual_Idea_Batch") : [];
-  if (existingBatch.length) throw new HttpError(409, "Another manual idea batch is already starting. Try again after it finishes.");
+  const existingBatchIds = linkedRecordIds(f(profile, "Manual_Idea_Batch"));
+  if (!existingBatchIds.length) return profile;
+
+  let liveLock = false;
+  for (const batchId of existingBatchIds) {
+    if (await studioIdeaManualBatchStillRunning(env, batchId)) {
+      liveLock = true;
+      break;
+    }
+  }
+  if (liveLock) {
+    throw new HttpError(409, "Another manual idea batch is already starting. Try again after it finishes.");
+  }
+  // Stale Complete/Failed/expired Manual_Idea_Batch links used to hard-block
+  // Generate forever (NYC locked on IDEAS-20260922 after a missed clear).
+  await studioIdeaClearProfileOverrides(env, profile.id);
+  profile = await airtableFetch(env, STUDIO_IDEA_PROFILE_TABLE_ID, profile.id);
   return profile;
 }
 

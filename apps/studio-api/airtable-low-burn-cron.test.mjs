@@ -29,7 +29,7 @@ function scheduledBody() {
 }
 
 test("Worker health advertises airtable burn-kill cron build", () => {
-  assert.match(worker, /version: "0.10.572-daily-ideas-1am"/);
+  assert.match(worker, /version: "0.10.573-idea-generate-stale-lock"/);
   assert.match(worker, /studio_airtable_low_burn_cron_v1: true/);
   assert.match(worker, /studio_airtable_burn_kill_v1: true/);
   assert.match(worker, /studioCronAirtableCadence/);
@@ -131,3 +131,11 @@ test("studioCronAirtableCadence marks UTC :00 and :30 as heavy", () => {
   const forced = studioCronAirtableCadence(new Date("2026-09-27T18:17:00Z"), "0 * * * *");
   assert.equal(forced.heavy, true);
 });
+
+
+test("Generate Ideas clears stale Manual_Idea_Batch locks", () => {
+  assert.match(worker, /studioIdeaManualBatchStillRunning/);
+  assert.match(worker, /studio_idea_generate_stale_lock_v1: true/);
+  assert.match(worker, /Stale Complete\/Failed\/expired Manual_Idea_Batch/);
+});
+
