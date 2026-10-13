@@ -26,6 +26,10 @@ import {
   dailyIdeaProduceHasStarted,
   dailyIdeasReadyToProduce,
   stampAutonomousOrigin,
+  isAutonomousResumeDeferred,
+  stampAutonomousResumeDeferred,
+  autonomousWaitingIsStale,
+  autonomousPreparingIsStale,
   extractJsonObject,
   mapYoutubeSearchItems,
   observationIsRecent,
@@ -255,6 +259,36 @@ test("YouTube mapper keeps titles and picker requires assets", () => {
     { id: "la", notes: "origin=autonomous", profile_id: la },
     { id: "chicago", notes: "origin=autonomous", profile_id: "recChicago" },
   ], enabled), null);
+  assert.equal(firstAutonomousResumeDraft([
+    {
+      id: "stuck-nyc",
+      notes: "origin=autonomous\nautonomous_resume=deferred reason=preparing_stale",
+      profile_id: nyc,
+    },
+    { id: "miami", notes: "origin=autonomous", profile_id: miami },
+  ], enabled)?.id, "miami");
+  assert.equal(firstAutonomousResumeDraft([
+    {
+      id: "preparing-nyc",
+      notes: "origin=autonomous",
+      profile_id: nyc,
+      variant_status: "Preparing",
+      variant_updated_at: "2026-10-13T12:00:00.000Z",
+    },
+    { id: "miami", notes: "origin=autonomous", profile_id: miami },
+  ], enabled, Date.parse("2026-10-13T12:20:00.000Z"))?.id, "miami");
+  assert.equal(isAutonomousResumeDeferred("origin=autonomous\nautonomous_resume=deferred reason=x"), true);
+  assert.match(stampAutonomousResumeDeferred("origin=autonomous", "preparing_stale"), /autonomous_resume=deferred reason=preparing_stale/);
+  assert.equal(autonomousWaitingIsStale({
+    status: "waiting_variants",
+    at: "2026-10-13T12:00:00.000Z",
+  }, Date.parse("2026-10-13T12:15:00.000Z")), true);
+  assert.equal(autonomousWaitingIsStale({
+    status: "waiting_variants",
+    at: "2026-10-13T12:10:00.000Z",
+  }, Date.parse("2026-10-13T12:15:00.000Z")), false);
+  assert.equal(autonomousPreparingIsStale("Preparing", "2026-10-13T12:00:00.000Z", Date.parse("2026-10-13T12:13:00.000Z")), true);
+  assert.equal(autonomousPreparingIsStale("Ready", "2026-10-13T12:00:00.000Z", Date.parse("2026-10-13T12:20:00.000Z")), false);
   assert.equal(dailyIdeaProduceHasStarted({ hour: 1 }), false);
   assert.equal(dailyIdeaProduceHasStarted({ hour: 8 }), true);
   assert.equal(dailyIdeaProduceHasStarted({ hour: 1 }, { force: true }), true);
@@ -537,10 +571,13 @@ test("Worker stamps photo-ready ideas and always adopts after 8am CT", async () 
   const path = await import("node:path");
   const here = path.dirname(fileURLToPath(import.meta.url));
   const worker = await readFile(path.join(here, "worker.js"), "utf8");
-  assert.match(worker, /version: "0\.10\.575-photo-ready-auto-produce"/);
+  assert.match(worker, /version: "0\.10\.576-miami-queue-unstick"/);
   assert.match(worker, /async function stampPhotoReadyIdeaForAutonomousProduce/);
   assert.match(worker, /stampPhotoReadyIdeaForAutonomousProduce\(env, ideaReady, requestRecord\)/);
   assert.match(worker, /Always stamp photo-ready daily ideas after 8am CT/);
+  assert.match(worker, /skip_stuck_waiting_for_next_draft/);
+  assert.match(worker, /parkAutonomousResumeDraft/);
+  assert.match(worker, /autonomousWaitingIsStale/);
   assert.doesNotMatch(
     worker.slice(
       worker.indexOf("if (dailyIdeaProduceHasStarted(chicago"),

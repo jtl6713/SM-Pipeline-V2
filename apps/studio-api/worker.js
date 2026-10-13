@@ -160,6 +160,10 @@ import {
   dailyIdeaProduceHasStarted,
   dailyIdeasReadyToProduce,
   stampAutonomousOrigin,
+  isAutonomousResumeDeferred,
+  stampAutonomousResumeDeferred,
+  autonomousWaitingIsStale,
+  autonomousPreparingIsStale,
   autonomousRunIsBusy,
   autonomousSlot,
   autonomousSlotAlreadyClaimed,
@@ -676,7 +680,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.575-photo-ready-auto-produce",
+          version: "0.10.576-miami-queue-unstick",
           studio_factory_desk_v1: true,
           studio_factory_desk_actions_v1: true,
           studio_factory_desk_write_v1: true,
@@ -43101,6 +43105,7 @@ async function selectAutonomousResumeDraft(env, drafts) {
   })).map(mapOperationsProfile);
   const enabled = new Set(profiles.map((row) => row.id));
   const annotated = [];
+  const nowMs = Date.now();
   for (const requestRecord of drafts || []) {
     const notes = String(f(requestRecord, "Production_Notes") || "");
     let profileId = "";
@@ -43111,13 +43116,33 @@ async function selectAutonomousResumeDraft(env, drafts) {
         : null;
       profileId = firstLinkedRecordId(idea ? f(idea, "Content_Profile") : "");
     }
+    const variantStatus = String(f(requestRecord, "Studio_Variant_Status") || "").trim();
+    const variantUpdatedAt = f(requestRecord, "Studio_Variant_Updated_At") || requestRecord.createdTime || "";
+    // Auto-park long-Preparing drafts so FIFO can reach the next city.
+    if (isAutonomousOrigin(notes) && !isAutonomousResumeDeferred(notes)
+      && autonomousPreparingIsStale(variantStatus, variantUpdatedAt, nowMs)) {
+      try {
+        await airtableFetch(env, PRODUCTION_REQUEST_TABLE, requestRecord.id, {
+          method: "PATCH",
+          body: JSON.stringify({
+            fields: { Production_Notes: stampAutonomousResumeDeferred(notes, "preparing_stale") },
+            typecast: true,
+          }),
+        });
+      } catch (error) {
+        console.warn("autonomous defer preparing draft failed", requestRecord.id, error);
+      }
+      continue;
+    }
     annotated.push({
       requestRecord,
       notes,
       profile_id: profileId,
+      variant_status: variantStatus,
+      variant_updated_at: variantUpdatedAt,
     });
   }
-  const chosen = firstAutonomousResumeDraft(annotated, [...enabled]);
+  const chosen = firstAutonomousResumeDraft(annotated, [...enabled], nowMs);
   return chosen?.requestRecord || null;
 }
 
@@ -43236,13 +43261,50 @@ async function resumeAutonomousDrafts(env, authorization, ctx, drafts, chicago, 
   };
 }
 
+async function parkAutonomousResumeDraft(env, requestRecord, reason) {
+  if (!requestRecord?.id) return;
+  const notes = String(f(requestRecord, "Production_Notes") || "");
+  if (isAutonomousResumeDeferred(notes)) return;
+  try {
+    await airtableFetch(env, PRODUCTION_REQUEST_TABLE, requestRecord.id, {
+      method: "PATCH",
+      body: JSON.stringify({
+        fields: { Production_Notes: stampAutonomousResumeDeferred(notes, reason) },
+        typecast: true,
+      }),
+    });
+  } catch (error) {
+    console.warn("autonomous park draft failed", requestRecord.id, error);
+  }
+}
+
 async function executeStudioAutonomousProduce(env, ctx, options = {}) {
   const chicago = chicagoNowParts();
   const slot = autonomousSlot(chicago);
-  const last = await studioLoadAutonomousLastRun(env);
+  let last = await studioLoadAutonomousLastRun(env);
   let authorization = options.authorization;
   if (!authorization?.user?.record_id) {
     authorization = await resolveStudioCronAuthorization(env);
+  }
+
+  // A stuck Preparing / I4 wait must not monopolize FIFO (NYC blocked Miami Needs eyes).
+  const waitingStale = autonomousWaitingIsStale(last) || (
+    Boolean(options.force)
+    && ["waiting_variants", "awaiting_i4"].includes(String(last?.status || "").trim())
+  );
+  if (waitingStale && last.production_request_id) {
+    const stuck = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, last.production_request_id).catch(() => null);
+    await parkAutonomousResumeDraft(env, stuck, String(last.skip_reason || last.status || "waiting_stale"));
+    last = await studioSaveAutonomousLastRun(env, {
+      status: "reset",
+      skip_reason: "skip_stuck_waiting_for_next_draft",
+      chicago_date: chicago.date,
+      slot: null,
+      idea_id: null,
+      production_request_id: null,
+      parked_production_request_id: last.production_request_id,
+      parked_idea_id: last.idea_id || null,
+    });
   }
 
   if (last.production_request_id && last.idea_id) {
@@ -43252,6 +43314,15 @@ async function executeStudioAutonomousProduce(env, ctx, options = {}) {
     const notes = f(requestRecord, "Production_Notes");
     const job = requestRecord ? parseStudioProductionJob(requestRecord) : null;
     const jobStep = String(job?.step || "").trim();
+    if (isAutonomousResumeDeferred(notes)) {
+      last = await studioSaveAutonomousLastRun(env, {
+        status: "reset",
+        skip_reason: "skip_deferred_draft",
+        chicago_date: chicago.date,
+        idea_id: null,
+        production_request_id: null,
+      });
+    } else {
     const lastNeedsResume = ["waiting_variants", "awaiting_i4", "skipped", "reset", "picking", "resuming"].includes(String(last.status || "").trim())
       || autonomousRequestNeedsContinue(requestStatus, notes)
       || (isAutonomousOrigin(notes) && requestStatus === "Promoted" && !jobStep);
@@ -43284,21 +43355,36 @@ async function executeStudioAutonomousProduce(env, ctx, options = {}) {
       });
     }
     if (finished.waiting) {
+      // Second consecutive wait on the same PR while force-running → park and advance.
+      if (options.force && ["waiting_variants", "awaiting_i4"].includes(String(last.status || "").trim())) {
+        await parkAutonomousResumeDraft(env, requestRecord, finished.waiting_reason || "variants_still_preparing");
+        last = await studioSaveAutonomousLastRun(env, {
+          status: "reset",
+          skip_reason: "force_skip_stuck_waiting",
+          chicago_date: chicago.date,
+          idea_id: null,
+          production_request_id: null,
+          parked_production_request_id: requestRecord.id,
+        });
+      } else {
+        return studioSaveAutonomousLastRun(env, {
+          ...last,
+          status: finished.waiting_reason === "awaiting_i4" ? "awaiting_i4" : "waiting_variants",
+          skip_reason: finished.waiting_reason === "awaiting_i4" ? "awaiting_i4" : "variants_still_preparing",
+          chicago_date: chicago.date,
+        });
+      }
+    } else {
       return studioSaveAutonomousLastRun(env, {
         ...last,
-        status: finished.waiting_reason === "awaiting_i4" ? "awaiting_i4" : "waiting_variants",
-        skip_reason: finished.waiting_reason === "awaiting_i4" ? "awaiting_i4" : "variants_still_preparing",
+        status: "promoted",
+        skip_reason: null,
         chicago_date: chicago.date,
+        idea_id: finished.idea_id,
+        production_request_id: finished.production_request_id,
       });
     }
-    return studioSaveAutonomousLastRun(env, {
-      ...last,
-      status: "promoted",
-      skip_reason: null,
-      chicago_date: chicago.date,
-      idea_id: finished.idea_id,
-      production_request_id: finished.production_request_id,
-    });
+    }
     }
   }
 
@@ -43327,6 +43413,7 @@ async function executeStudioAutonomousProduce(env, ctx, options = {}) {
   if (pendingDrafts.length) {
     const resumed = await resumeAutonomousDrafts(env, authorization, ctx, pendingDrafts, chicago, slot, {
       scheduled: Boolean(options.scheduled),
+      force: Boolean(options.force),
     });
     if (resumed?.status !== "no_enabled_profile") return resumed;
   }

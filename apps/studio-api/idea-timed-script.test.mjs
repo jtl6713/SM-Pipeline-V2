@@ -294,7 +294,7 @@ test("Worker advertises the idea timed-script route", async () => {
   assert.match(worker, /ideaLibraryVideoFilterFormula/);
   assert.match(worker, /scripted short video discovery failed/);
   assert.match(worker, /allowVideo: true/);
-  assert.match(worker, /0.10.575-photo-ready-auto-produce/);
+  assert.match(worker, /0.10.576-miami-queue-unstick/);
   const css = await readFile(path.join(here, "../studio-web/assets/styles-phase7-0621.css"), "utf8");
   assert.match(css, /#page-ideas \.page-heading\{\s*flex-wrap:wrap;/);
   assert.match(css, /#page-ideas \.heading-actions\{/);
