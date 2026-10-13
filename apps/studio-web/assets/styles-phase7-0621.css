@@ -4943,7 +4943,7 @@ body.nav-collapsed .sidebar{
 .timed-script-format-help pre{display:block;max-width:100%;overflow-x:auto;white-space:pre;padding:11px 12px;border:1px solid #dae4ef;border-radius:7px;background:#fff;color:#10233f;font-size:.78rem;line-height:1.65}
 .timed-script-format-help-body p{font-size:.78rem;line-height:1.55;color:#345;margin:8px 0 0}
 
-/* Factory Desk — one column, four labeled bands, Operations-style short lines (UI 0.6.665) */
+/* Factory Desk — one column, four labeled bands, Operations-style short lines (UI 0.6.666) */
 #page-factory .factory-lanes{
   display:flex;
   flex-direction:column;
@@ -4998,6 +4998,17 @@ body.nav-collapsed .sidebar{
   margin:0;padding:6px 12px;background:#f4f7f9;border-top:1px solid var(--line,#d7e0ea);border-bottom:1px solid var(--line,#d7e0ea);
   font-size:.68rem;font-weight:800;letter-spacing:.05em;text-transform:uppercase;color:#4d5f73;
 }
+#page-factory .factory-content-bar{
+  display:flex;align-items:center;gap:8px;min-width:0;
+  padding:6px 12px;border-bottom:1px solid var(--line,#d7e0ea);
+  background:color-mix(in srgb, var(--factory-accent) 10%, #fff);
+}
+#page-factory .factory-content-title{
+  min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+  font-size:.8rem;font-weight:800;color:#012559;
+}
+#page-factory .factory-content-meta{flex:0 1 auto;min-width:0;font-size:.72rem;color:#4d5f73;white-space:nowrap}
+#page-factory .factory-content-approve{margin-left:auto;flex:0 0 auto;min-height:22px;height:22px;padding:0 10px;font-size:.72rem}
 #page-factory .factory-lane-empty{margin:0;padding:8px 12px;color:#6b7c8d;font-size:.78rem}
 #page-factory .factory-line{
   min-height:28px;padding:2px 12px;border-bottom:1px solid #edf1f4;font-size:.78rem;line-height:1.25;background:#fff;
@@ -5032,6 +5043,8 @@ body.nav-collapsed .sidebar{
   #page-factory .factory-line-cell{display:none}
   #page-factory .factory-line-state{display:block;grid-column:2}
   #page-factory .factory-line-actions{grid-column:1 / -1;justify-content:flex-start;flex-wrap:wrap;padding-bottom:4px}
+  #page-factory .factory-content-bar{flex-wrap:wrap}
+  #page-factory .factory-content-approve{margin-left:0}
 }
 
 /* PIPELINE_CONTENT_COVER_0_6_664: one download action under each shared content thumbnail. */

@@ -209,11 +209,56 @@
     </div>`;
   }
 
+  function contentGroupKey(card) {
+    const contentId = String(card?.content_id || "").trim();
+    if (contentId) return `content:${contentId}`;
+    return `solo:${card?.id || ""}`;
+  }
+
+  function groupByContent(cards) {
+    const groups = [];
+    const index = new Map();
+    for (const card of cards || []) {
+      const key = contentGroupKey(card);
+      if (!index.has(key)) {
+        const group = { key, cards: [] };
+        index.set(key, group);
+        groups.push(group);
+      }
+      index.get(key).cards.push(card);
+    }
+    return groups;
+  }
+
+  function readyContentCards(group) {
+    return (group?.cards || []).filter((card) => card?.kind === "output" && canReviewActions(card) && /^rec[A-Za-z0-9]+$/.test(String(card.id || "")));
+  }
+
+  function renderContentBar(group) {
+    const ready = readyContentCards(group);
+    if (ready.length < 2) return "";
+    const first = group.cards[0] || {};
+    const contentId = String(first.content_id || "").trim();
+    const title = first.title || "Untitled";
+    const meta = contentId ? `Content ${contentId} · ${ready.length} ready` : `${ready.length} ready`;
+    return `<div class="factory-content-bar" data-factory-content="${esc(group.key)}">
+      <span class="factory-content-title">${esc(title)}</span>
+      <span class="factory-content-meta">${esc(meta)}</span>
+      <button type="button" class="primary-button factory-content-approve" data-factory-approve-content="${esc(group.key)}">Approve all (${ready.length})</button>
+    </div>`;
+  }
+
   function renderLane(listId, cards, emptyCopy, options = {}) {
     const node = $(listId);
     if (!node) return;
     if (!cards?.length) {
       node.innerHTML = `<p class="subtle factory-lane-empty">${esc(emptyCopy)}</p>`;
+      return;
+    }
+    if (options.groupContent) {
+      node.innerHTML = groupByContent(cards).map((group) => (
+        renderContentBar(group) + group.cards.map((card) => renderCard(card, options)).join("")
+      )).join("");
       return;
     }
     node.innerHTML = cards.map((card) => renderCard(card, options)).join("");
@@ -284,6 +329,17 @@
         }).catch((error) => setStatus(error.message || String(error), true));
       });
     });
+    root.querySelectorAll("[data-factory-approve-content]").forEach((button) => {
+      button.addEventListener("click", () => {
+        const key = button.getAttribute("data-factory-approve-content");
+        approveContentGroup(key, button).catch((error) => {
+          button.disabled = false;
+          const message = error.message || String(error);
+          setStatus(message, true);
+          window.alert(`Factory Approve all failed:\n${message}`);
+        });
+      });
+    });
     root.querySelectorAll("[data-factory-approve]").forEach((button) => {
       button.addEventListener("click", () => {
         const id = button.getAttribute("data-factory-approve");
@@ -351,7 +407,7 @@
     state.desk = desk;
     renderSummary(desk.summary);
     renderLane("factoryLaneAutoHigh", desk.lanes?.auto_high, "Nothing in active produce/render right now.", { lane: "auto_high" });
-    renderLane("factoryLaneNeedsEyes", desk.lanes?.needs_eyes, "No Ready for Review items waiting on eyes.", { lane: "needs_eyes" });
+    renderLane("factoryLaneNeedsEyes", desk.lanes?.needs_eyes, "No Ready for Review items waiting on eyes.", { lane: "needs_eyes", groupContent: true });
     renderLane("factoryLaneNeedsAssets", desk.lanes?.needs_assets, "Pile empty — add up to 3 from candidates below.", { pile: true, lane: "needs_assets" });
     renderLane("factoryLaneManual", desk.lanes?.manual, "No stuck or failed work in view.", { lane: "manual" });
     renderLane(
@@ -376,6 +432,76 @@
     send_back: "Sent back to production.",
     delete: "Deleted / skipped.",
   };
+
+  function approveAllProgressText(result) {
+    if (result?.message) return String(result.message);
+    const approved = Number(result?.approved_count || 0);
+    const failed = Number(result?.failed_count || 0);
+    const total = Number(result?.total || 0);
+    return `${approved} of ${total} approved · ${failed} failed`;
+  }
+
+  async function watchApproveAll(result, profileId) {
+    let latest = result || {};
+    let jobId = String(latest.job_id || "").trim();
+    const started = Date.now();
+    while (jobId && (latest.status === "queued" || latest.status === "running")) {
+      setStatus(approveAllProgressText(latest));
+      if (Date.now() - started > 120000) {
+        throw new Error("Approval is taking too long. Refresh Factory to see which outputs were approved.");
+      }
+      await new Promise((resolve) => setTimeout(resolve, 1200));
+      const params = new URLSearchParams({ job_id: jobId });
+      if (profileId) params.set("profile", profileId);
+      latest = await fetchJson(`/api/outputs/approve-all?${params.toString()}`);
+      jobId = String(latest?.job_id || jobId).trim();
+    }
+    return latest;
+  }
+
+  async function approveContentGroup(key, button) {
+    const cards = (state.desk?.lanes?.needs_eyes || []).filter((card) => contentGroupKey(card) === key);
+    const ready = readyContentCards({ cards });
+    if (ready.length < 2) {
+      setStatus("This content does not have multiple outputs waiting for approval.", true);
+      return;
+    }
+    const title = ready[0].title || "this content";
+    const contentId = String(ready[0].content_id || "").trim();
+    const heading = contentId ? `Content ${contentId} · ${title}` : title;
+    const list = ready.map((card) => `• ${[card.platform, card.studio_output_type].filter(Boolean).join(" ") || cardLabel(card)}`).join("\n");
+    const confirmed = window.confirm(
+      `Approve ${ready.length} outputs for “${heading}”?\n\nOnly this content item is included. Instagram, Facebook, and YouTube will auto-publish. TikTok stays a draft.\n\n${list}`
+    );
+    if (!confirmed) return;
+    if (button) {
+      button.disabled = true;
+      button.textContent = "Approving…";
+    }
+    closeFactoryPreview();
+    const profileId = String(ready.find((card) => /^rec[A-Za-z0-9]+$/.test(String(card.profile_id || "")))?.profile_id || "").trim();
+    const body = {
+      notes: "Studio Factory Approve Content",
+      record_ids: ready.map((card) => card.id),
+      items: ready.map((card) => ({
+        id: card.id,
+        output_id: card.output_id || null,
+        platform: card.platform || null,
+        format: card.studio_output_type || null,
+      })),
+    };
+    if (profileId) body.content_profile_id = profileId;
+    setStatus(`Approve all started · 0 of ${ready.length} approved · 0 failed`);
+    const result = await fetchJson("/api/outputs/approve-all", {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+    const finished = await watchApproveAll(result, profileId);
+    await loadFactoryDesk(true);
+    const failed = Number(finished?.failed_count || 0);
+    setStatus(approveAllProgressText(finished), failed > 0);
+    if (failed > 0) window.alert(`Factory Approve all finished with failures:\n${approveAllProgressText(finished)}`);
+  }
 
   async function mutateDesk(payload) {
     setStatus("Saving…");
