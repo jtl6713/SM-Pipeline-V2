@@ -13,7 +13,7 @@ test("Pipeline open-pack uses the stored Studio_Pipeline_Open index", async () =
   assert.match(worker, /legacy \? STUDIO_PIPELINE_OPEN_LEGACY_FORMULA : STUDIO_PIPELINE_OPEN_FIELD_FORMULA/);
   assert.match(worker, /allowRefresh: url.searchParams.get\("refresh"\) !== "0"/);
   assert.match(worker, /if \(allowRefresh && !fresh\) scheduleMappedListRefresh/);
-  assert.match(worker, /version: "0.10.569-vibe-cut-adler-563"/);
+  assert.match(worker, /version: "0.10.570-vibe-cut-short-fanout"/);
 });
 
 test("Home polls the snapshot without triggering an Airtable rebuild", async () => {

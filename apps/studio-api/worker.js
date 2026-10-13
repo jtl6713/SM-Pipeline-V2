@@ -676,7 +676,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.569-vibe-cut-adler-563",
+          version: "0.10.570-vibe-cut-short-fanout",
           studio_factory_desk_v1: true,
           studio_factory_desk_actions_v1: true,
           studio_factory_desk_write_v1: true,
@@ -1866,6 +1866,13 @@ export default {
         await resumeStaleStudioProductionJobs(env);
       } catch (error) {
         console.warn("studio produce watchdog failed", error);
+      }
+      // Light tick: missing Platform Output fanout for Promoted Vibe Cuts (Adler Short).
+      // Heavy cron still runs the full heal; this unblocks Short gaps between :00/:30.
+      try {
+        await studioHealPromotedMissingFanout(env, { limit: 4 });
+      } catch (error) {
+        console.warn("studio promoted fanout heal (light) failed", error);
       }
       try {
         await startOrphanedStudioProductionJobs(env);
@@ -11833,6 +11840,35 @@ async function enqueueStudioProductionJob(env, requestId, options = {}) {
         typecast: false,
       }),
     });
+  }
+  // Horizontal Vibe Cut: remount alone does not create a missing YouTube Short PO.
+  // Fanout heal only runs on heavy cron (:00/:30), so Adler-style Short gaps sat
+  // for up to 30 minutes. Fan out missing enabled PROs here on every enqueue.
+  if (vibeCut) {
+    try {
+      const live = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, requestId);
+      const notesText = studioRequestNotesText(live);
+      const parentId = studioFirstLinkedId(f(live, "Promoted_Content_Item"));
+      if (parentId && isHorizontalVibeCutAspect(notesText)) {
+        const plan = item4ParseJson(f(live, "Studio_Output_Plan_JSON"), null);
+        const planItems = Array.isArray(plan?.items) ? plan.items : [];
+        const capped = capVibeCutPlanItems(planItems.length ? planItems : [
+          { platform: "YouTube", output_type: "Standard Video" },
+          { platform: "YouTube", output_type: "Short" },
+        ], { notes: notesText });
+        if (capped.length) await item4SyncPlanOutputs(env, live, capped);
+        const enabled = (await outputRowsForProductionRequest(env, requestId))
+          .filter((row) => Boolean(f(row, "Enabled")));
+        const missing = enabled.filter((row) =>
+          !arrayOrEmpty(f(row, "Platform_Output")).some((id) => /^rec[A-Za-z0-9]+$/.test(String(id || "")))
+        );
+        if (missing.length) {
+          await fanoutProductionRequestOutputsToContentItems(env, live, parentId, { onlyMissing: true });
+        }
+      }
+    } catch (error) {
+      console.warn("vibe-cut missing Short fanout failed", requestId, error);
+    }
   }
   if (Boolean(options.resume) || vibeCutPassthrough || vibeCutNeedsRemount || step === "blocked" || step === "escalated") {
     return item4PulseStudioProduceJob(env, requestId, { resume: true });

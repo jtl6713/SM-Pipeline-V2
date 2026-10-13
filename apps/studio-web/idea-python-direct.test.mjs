@@ -27,7 +27,7 @@ test("Studio idea generation accepts a batch then finishes Python I1 in waitUnti
   assert.match(run, /item4PulsePipelineStage\(env, "i1"/);
   assert.match(run, /batch_record_id: batch\.id/);
   assert.doesNotMatch(handler, /phase6ScenarioState/);
-  assert.match(source, /version: "0\.10\.569-vibe-cut-adler-563"/);
+  assert.match(source, /version: "0\.10\.570-vibe-cut-short-fanout"/);
 });
 
 test("Studio UI polls idea batches and explains aborted Generate starts", async () => {

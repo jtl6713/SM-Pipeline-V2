@@ -34,7 +34,7 @@ test("outputPreview wires Render_Server_URL through the render-server accept hel
   assert.match(worker, /item4UrlIsRenderServerVideo\(href\)/);
   assert.match(worker, /f\(record, "Render_Server_URL"\)/);
   assert.match(worker, /studio_render_server_preview_v1: true/);
-  assert.match(worker, /version: "0\.10\.569-vibe-cut-adler-563"/);
+  assert.match(worker, /version: "0\.10\.570-vibe-cut-short-fanout"/);
   assert.match(worker, /previewSource = item4UrlIsRenderServerVideo\(studioPreviewUrl\)/);
   assert.match(worker, /"render-server-out"/);
 });

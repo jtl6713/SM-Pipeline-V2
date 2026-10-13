@@ -225,11 +225,14 @@ test("Worker never treats Vibe Cut as finished-video passthrough", () => {
   assert.match(worker, /force_multiclip_remount: false/);
   assert.match(worker, /Rebuilding Vibe Cut multi-clip montage/);
   assert.match(worker, /Must go through enqueueStudioProductionJob so Vibe Cut/);
-  assert.match(worker, /version: "0.10.569-vibe-cut-adler-563"/);
+  assert.match(worker, /version: "0.10.570-vibe-cut-short-fanout"/);
   assert.match(worker, /Video_Clip_Count_Mode: vibeCut \? "AI decides"/);
   assert.match(worker, /Requested_Video_Clip_Count_Mode: "AI decides"/);
   assert.match(worker, /Horizontal Vibe Cut must keep YouTube Standard \+ Short/);
   assert.match(worker, /Re-enable horizontal Vibe Cut destinations/);
+  assert.match(worker, /vibe-cut missing Short fanout failed/);
+  assert.match(worker, /onlyMissing: true/);
+  assert.match(worker, /studioHealPromotedMissingFanout\(env, \{ limit: 4 \}\)/);
 });
 
 test("Smooth Vibes energy 1 at 45s builds multi-clip montage (not one trim)", () => {
