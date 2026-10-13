@@ -684,7 +684,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.588-factory-approve-mae",
+          version: "0.10.589-factory-approve-mae",
           studio_factory_desk_v1: true,
           studio_factory_desk_actions_v1: true,
           studio_factory_desk_write_v1: true,
@@ -42341,6 +42341,77 @@ async function factorySendBackOutput(env, id, actor, note) {
   };
 }
 
+async function factorySendBackContent(env, productionRequestId, outputIds, actor, note) {
+  const requestId = String(productionRequestId || "").trim();
+  if (!/^rec[A-Za-z0-9]+$/.test(requestId)) throw new HttpError(400, "Production Request is required");
+  const requestRecord = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, requestId);
+  const contentId = studioFirstLinkedId(f(requestRecord, "Promoted_Content_Item"));
+  const ids = [...new Set((Array.isArray(outputIds) ? outputIds : [])
+    .map((id) => String(id || "").trim())
+    .filter((id) => /^rec[A-Za-z0-9]+$/.test(id)))];
+  if (!ids.length) throw new HttpError(400, "No content outputs were supplied");
+
+  const stamp = new Date().toISOString();
+  let changed = 0;
+  for (const id of ids) {
+    const existing = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, id);
+    const linkedContent = studioFirstLinkedId(f(existing, "Content_Item"));
+    const linkedRequest = studioFirstLinkedId(f(existing, "Production_Request"));
+    if (contentId && linkedContent && linkedContent !== contentId) {
+      throw new HttpError(409, "All outputs must belong to the same Content Item");
+    }
+    if (linkedRequest && linkedRequest !== requestId) {
+      throw new HttpError(409, "All outputs must belong to the same Production Request");
+    }
+    const outputStatus = String(f(existing, "Output_Status") || "").trim();
+    const publishStatus = String(f(existing, "Publish_Status") || "").trim();
+    if (publishStatus === "Published" || outputStatus === "Published" || f(existing, "Published_At")) {
+      throw new HttpError(409, "Published outputs cannot be sent back to Production");
+    }
+    if (outputStatus === "Skipped") continue;
+    const existingNotes = String(f(existing, "Review_Notes") || "").trim();
+    const line = `Factory content send-back by ${actor || "operator"} at ${stamp}.${note ? ` ${note}` : ""}`;
+    await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, id, {
+      method: "PATCH",
+      body: JSON.stringify({
+        fields: {
+          Review_Status: "Changes Requested",
+          Output_Status: "In Production",
+          Publish_Status: "Not Ready",
+          Render_Status: "Pending",
+          Final_File_URL: null,
+          Studio_Preview_URL: null,
+          Publish_Asset_URL: null,
+          Remotion_Job_ID: null,
+          Review_Decision_At: stamp,
+          Review_Notes: [existingNotes, line].filter(Boolean).join("\n\n"),
+        },
+        typecast: true,
+      }),
+    });
+    changed += 1;
+  }
+
+  await airtableFetch(env, PRODUCTION_REQUEST_TABLE, requestId, {
+    method: "PATCH",
+    body: JSON.stringify({
+      fields: {
+        Request_Status: "Draft",
+        Studio_Production_Job_JSON: null,
+        Updated_At: stamp,
+      },
+      typecast: true,
+    }),
+  });
+
+  return {
+    production_request_id: requestId,
+    content_item_id: contentId || null,
+    output_count: changed,
+    message: `Sent ${changed} content output${changed === 1 ? "" : "s"} back to Production. Edit the package and approve it to rerender.`,
+  };
+}
+
 async function factoryDeleteDeskItem(env, id, kind, actor, note) {
   const stamp = new Date().toISOString();
   if (kind === "idea") {
@@ -42392,7 +42463,7 @@ async function mutateFactoryDesk(request, env, authorization, ctx = null) {
     next = result.controls;
   } else if (action === "unpin_needs_assets") {
     next = unpinFactoryNeedsAssets(controls, payload?.id || payload?.item?.id).controls;
-  } else if (action === "approve" || action === "send_back" || action === "delete") {
+  } else if (action === "approve" || action === "send_back" || action === "send_back_content" || action === "delete") {
     const id = String(payload?.id || payload?.item?.id || "").trim();
     const kind = String(payload?.kind || payload?.item?.kind || "output").trim().toLowerCase();
     const note = String(payload?.note || payload?.notes || "").trim().slice(0, 500);
@@ -42405,6 +42476,15 @@ async function mutateFactoryDesk(request, env, authorization, ctx = null) {
       if (kind !== "output") throw new HttpError(400, "Send back is only for outputs");
       requirePermission(authorization, "outputs_review");
       resultExtra = await factorySendBackOutput(env, id, actor, note);
+    } else if (action === "send_back_content") {
+      requirePermission(authorization, "outputs_review");
+      resultExtra = await factorySendBackContent(
+        env,
+        payload?.production_request_id,
+        payload?.output_ids,
+        actor,
+        note,
+      );
     } else {
       if (kind === "idea") requirePermission(authorization, "ideas_delete");
       else requireAnyPermission(authorization, ["outputs_review", "publishing_control", "tenant_admin"]);
@@ -42412,7 +42492,7 @@ async function mutateFactoryDesk(request, env, authorization, ctx = null) {
       next = unpinFactoryNeedsAssets(next, id).controls;
     }
   } else {
-    throw new HttpError(400, "action must be pin_needs_assets, unpin_needs_assets, approve, send_back, or delete");
+    throw new HttpError(400, "action must be pin_needs_assets, unpin_needs_assets, approve, send_back, send_back_content, or delete");
   }
 
   const saved = (

@@ -636,7 +636,7 @@ test("Worker stamps photo-ready ideas and drains the 30m SLA on light ticks", as
   const path = await import("node:path");
   const here = path.dirname(fileURLToPath(import.meta.url));
   const worker = await readFile(path.join(here, "worker.js"), "utf8");
-  assert.match(worker, /version: "0\.10\.588-factory-approve-mae"/);
+  assert.match(worker, /version: "0\.10\.589-factory-approve-mae"/);
   assert.match(worker, /async function stampPhotoReadyIdeaForAutonomousProduce/);
   assert.match(worker, /stampPhotoReadyIdeaForAutonomousProduce\(env, ideaReady, requestRecord\)/);
   assert.match(worker, /30m photo-ready SLA drain/);
