@@ -267,7 +267,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.672-content-id-data";
+  const BUILD_ID = "item4-0.6.673-mae-slot-occupancy";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -18493,8 +18493,8 @@ function timedScriptAssetLabel(asset, index) {
     for (const row of pipelineOutputs || []) {
       if (!row?.id || row.id === excludeId) continue;
       if (pipelineScheduleBucketKey(row) !== key || row.do_not_publish) continue;
-      const state = String(row.studio_state || row.publish_status || "");
-      if (/published/i.test(state)) continue;
+      // Published posts still occupy the slot. Skipping them made the next
+      // suggestion treat a taken 5:30 as empty.
       const iso = pipelineRecordScheduleIso(row);
       const ms = iso ? Date.parse(iso) : NaN;
       if (!Number.isNaN(ms)) taken.add(ms);
@@ -18510,8 +18510,6 @@ function timedScriptAssetLabel(asset, index) {
       if (!record?.id || record.id === excludeId) continue;
       if (String(record.platform || "").trim().toLowerCase() !== key) continue;
       if (record.do_not_publish) continue;
-      const state = String(record.studio_state || record.publish_status || "");
-      if (/published/i.test(state)) continue;
       const iso = pipelineRecordScheduleIso(record);
       const ms = iso ? Date.parse(iso) : NaN;
       if (!Number.isNaN(ms)) taken.add(ms);
@@ -18589,7 +18587,7 @@ function timedScriptAssetLabel(asset, index) {
     }
     for (const record of pipelineOutputs || []) {
       if (!record?.id || excludeIds.has(record.id)) continue;
-      if (record.do_not_publish || /published/i.test(String(record.studio_state || record.publish_status || ""))) continue;
+      if (record.do_not_publish) continue;
       const iso = pipelineRecordScheduleIso(record);
       const ms = iso ? Date.parse(iso) : NaN;
       if (!Number.isFinite(ms)) continue;
@@ -18607,7 +18605,7 @@ function timedScriptAssetLabel(asset, index) {
     for (const key of Object.keys(pipelineServerOccupiedMs)) delete pipelineServerOccupiedMs[key];
     for (const record of records || []) {
       const iso = studioEffectiveScheduleIso(record);
-      if (!iso || record?.do_not_publish || creativeIsPublished(record)) continue;
+      if (!iso || record?.do_not_publish) continue;
       rememberBookedScheduleMs(record.platform, iso, record);
     }
   }
@@ -18789,10 +18787,17 @@ function timedScriptAssetLabel(asset, index) {
     );
     const byId = new Map(ready.map((record) => [record.id, record]));
     const nodes = Array.from(document.querySelectorAll("[data-pipeline-schedule-suggest]"));
-    await Promise.all(nodes.map(async (suggestEl) => {
+    // One row at a time. A parallel pass gave every empty row the same server
+    // 5:30 because none of them could see the slot the others had just taken.
+    nodes.sort((left, right) => {
+      const a = byId.get(left.getAttribute("data-pipeline-schedule-suggest"));
+      const b = byId.get(right.getAttribute("data-pipeline-schedule-suggest"));
+      return pipelineOutputNumber(a) - pipelineOutputNumber(b);
+    });
+    for (const suggestEl of nodes) {
       const id = suggestEl.getAttribute("data-pipeline-schedule-suggest");
       const record = byId.get(id);
-      if (!record) return;
+      if (!record) continue;
       const useBtn = document.querySelector(`[data-pipeline-use-suggested="${id}"]`);
       suggestEl.hidden = false;
       suggestEl.textContent = "Loading suggestion…";
@@ -18826,7 +18831,7 @@ function timedScriptAssetLabel(asset, index) {
       } catch (error) {
         suggestEl.textContent = error?.message ? `Suggestion unavailable (${error.message}).` : "Suggestion unavailable.";
       }
-    }));
+    }
   }
 
   function stopPipelineApproveAllPoll() {

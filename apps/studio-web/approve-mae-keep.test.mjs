@@ -117,3 +117,22 @@ test("UI Approve uses candidate-aware next-open and never silent-fails", () => {
   assert.ok(firstHelperCall >= 0, "nextOpenScheduleIso must call an EZ helper");
   assert.match(nextOpen.slice(firstHelperCall, firstHelperCall + 40), /ezNextOpenScheduleIso/);
 });
+
+test("suggestion fill is one row at a time and published posts still occupy the slot", () => {
+  const refresh = app.slice(
+    app.indexOf("async function refreshPipelineScheduleSuggestions"),
+    app.indexOf("function stopPipelineApproveAllPoll"),
+  );
+  assert.doesNotMatch(refresh, /Promise\.all\(nodes/);
+  assert.match(refresh, /for \(const suggestEl of nodes\)/);
+  const merged = app.slice(
+    app.indexOf("function pipelineMergedOccupancy"),
+    app.indexOf("function resetPipelineScheduleOccupancyFromPersisted"),
+  );
+  assert.doesNotMatch(merged, /published\/i\.test/);
+  const bucket = app.slice(
+    app.indexOf("function pipelineOccupiedScheduleBucketMs"),
+    app.indexOf("function pipelineOccupiedScheduleMs"),
+  );
+  assert.doesNotMatch(bucket, /published\/i\.test/);
+});
