@@ -53,13 +53,13 @@ test("opening a platform output jumps immediately to the top of the page", () =>
 });
 
 
-test("pipeline output keeps Open post and Download Cover in the compact more-actions menu", () => {
-  assert.match(app, /const coverDownloadUrl = phase6ThumbnailDownloadUrl\(r\)/);
-  assert.match(app, /pipeline-cover-download/);
+test("pipeline keeps Open post per row and one shared Download Cover under the group thumbnail", () => {
+  assert.match(app, /pipeline-content-download-cover/);
+  assert.match(app, /Download Cover/);
   assert.match(app, /pipeline-row-more-menu/);
   assert.match(app, /Open post ↗/);
-  assert.match(app, /Download cover/);
   assert.match(app, /\$\{moreMenu\}<\/td>/);
+  assert.doesNotMatch(app, /pipeline-cover-download/);
 });
 
 

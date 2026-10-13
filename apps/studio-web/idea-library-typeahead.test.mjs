@@ -14,7 +14,7 @@ test("idea library search sequence + pins", async () => {
   assert.match(app, /Ignore stale responses so a slow empty-query open cannot wipe a later "Museum" search/);
   assert.match(app, /item4-0.6.668-vibe-cut-16x9/);
   assert.match(html, /UI build 0\.6\.668/);
-  assert.match(worker, /0\.10\.565-factory-preview/);
+  assert.match(worker, /0\.10\.569-vibe-cut-adler-563/);
   assert.match(worker, /studio_idea_library_typeahead_v1: true/);
   assert.match(worker, /ideaLibrarySearchHit/);
   assert.match(worker, /ideaLibrarySearchFilterKeys\(queryTokens\)/);
