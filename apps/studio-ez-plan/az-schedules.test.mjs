@@ -25,7 +25,7 @@ test("AZ spreads package mains across several days; Stories may share a platform
     ["Instagram::Reel", "Facebook::Reel", "TikTok::Video Draft", "YouTube::Short"]
       .map((key) => chicagoCivilFromMs(Date.parse(stamps.get(key))).key),
   );
-  assert.ok(mainDays.size >= 3, "main outputs should be spread across the week");
+  assert.ok(mainDays.size >= 4, "main outputs should be spread across the 4-week window");
 
   // Stories are exempt from the platform lane and may land with other Stories / mains.
   assert.ok(stamps.get("Instagram::Story"));

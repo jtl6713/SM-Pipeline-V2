@@ -694,6 +694,7 @@ export default {
           studio_engagement_v1: true,
           studio_mae_schedule_v1: true,
           studio_mae_28_day_schedule_v1: true,
+          studio_mae_platform_spread_v1: true,
           studio_promotion_reconcile_after_handoff_error_v1: true,
           studio_mae_profile_occupancy_v1: true,
           studio_schedule_occupancy_fields_v1: true,
@@ -10646,7 +10647,7 @@ const AZ_DEFAULT_OVERRIDES = Object.freeze({
   YouTube: "Short",
 });
 const AZ_DEFAULT_EXTRAS = Object.freeze(["Instagram::Story", "Facebook::Story"]);
-const AZ_HORIZON_DAYS = 7;
+const AZ_HORIZON_DAYS = 28;
 const AZ_OTHER_CLUSTER_MS = 30 * 60 * 1000;
 const AZ_OTHER_NEAR_MS = 3 * 60 * 60 * 1000;
 const AZ_STORY_OFFSET_MS = 10 * 60 * 1000;
@@ -10776,30 +10777,34 @@ function studioBuildAzCampaignSchedule(items, { occupiedMs = [], bestTimesByKey 
   const mains = list.filter((item) => !studioAzIsStory(item.output_type));
   const stories = list.filter((item) => studioAzIsStory(item.output_type));
   const days = studioAzHorizon(now);
-  let best = null;
-  for (const civil of days) {
-    const parts = mains.map((item) => {
-      const key = studioAzScheduleKey(item.platform, item.output_type);
-      return studioAzScoreMain(civil, bestTimesByKey[key] || studioIndustryBestWindows(item.platform, item.output_type), occupiedMs, now);
-    });
-    if (!parts.length) continue;
-    const worst = Math.min(...parts.map((part) => part.score));
-    const avg = parts.reduce((sum, part) => sum + part.score, 0) / parts.length;
-    const crowding = studioAzOccupiedOnDay(occupiedMs, civil).length;
-    const total = avg + Math.min(0, worst) * 0.15 - crowding * 6;
-    if (!best || total > best.total) best = { civil, total, parts, crowding };
+  const platformOrder = [];
+  for (const item of mains) {
+    const platform = String(item.platform || "").trim();
+    if (platform && !platformOrder.includes(platform)) platformOrder.push(platform);
   }
   const stamps = new Map();
-  if (!best?.civil) return { stamps, campaign: null, rationale: "no open campaign day" };
   const reserved = [...occupiedMs];
+  const usedDays = new Set();
   for (const item of mains) {
     const key = studioAzScheduleKey(item.platform, item.output_type);
     const suggested = bestTimesByKey[key] || studioIndustryBestWindows(item.platform, item.output_type);
-    const scored = studioAzScoreMain(best.civil, suggested, reserved, now);
-    const slot = scored.slot || studioAzWindowSlots(best.civil, suggested.windows || ["12:00-13:00"], now, reserved)[0];
+    const platform = String(item.platform || "").trim();
+    const start = platformOrder.length > 1
+      ? Math.floor(Math.max(0, platformOrder.indexOf(platform)) * days.length / platformOrder.length)
+      : 0;
+    const walk = [...days.slice(start), ...days.slice(0, start)];
+    let chosen = null;
+    for (const civil of walk) {
+      if (usedDays.has(civil.key) && platformOrder.length > 1) continue;
+      const scored = studioAzScoreMain(civil, suggested, reserved, now);
+      if (!scored.slot || scored.score < -200) continue;
+      if (!chosen || scored.score > chosen.score) chosen = { civil, ...scored };
+    }
+    const slot = chosen?.slot;
     if (!slot) continue;
     stamps.set(key, slot.iso);
     reserved.push(slot.ms);
+    usedDays.add(chosen.civil.key);
   }
   for (const story of stories) {
     const reel = mains.find((item) => String(item.platform) === String(story.platform));
@@ -10808,10 +10813,13 @@ function studioBuildAzCampaignSchedule(items, { occupiedMs = [], bestTimesByKey 
     if (!Number.isFinite(base)) continue;
     stamps.set(studioAzScheduleKey(story.platform, story.output_type), new Date(base + AZ_STORY_OFFSET_MS).toISOString());
   }
+  const scheduledDays = [...usedDays];
   return {
     stamps,
-    campaign: best.civil,
-    rationale: `campaign ${best.civil.key} (${best.civil.weekday}); spaced from other posts over ${AZ_HORIZON_DAYS} days`,
+    campaign: scheduledDays.length ? { key: scheduledDays[0] } : null,
+    rationale: scheduledDays.length
+      ? `spread across ${scheduledDays.length} day${scheduledDays.length === 1 ? "" : "s"} in the next ${AZ_HORIZON_DAYS} days`
+      : "no open schedule in the next 28 days",
   };
 }
 
@@ -21481,7 +21489,7 @@ async function getInsightsBestTimes(request, env, url, authorization) {
     similar_sample_size: 0,
     similar_profile: themeName,
     caption: null,
-    note: note || `${seasonLabel} stamps use the MAE rotation in ${timeZone}: fill MAE morning/afternoon/evening across 28 days, then 4th/5th widest-gap slots. Overnight 11:00 PM–3:00 AM is never used.`,
+    note: note || `${seasonLabel} stamps use the MAE rotation in ${timeZone}: fill MAE morning/afternoon/evening across 28 days. Different platforms in one package land about a week apart. Then 4th/5th widest-gap slots. Overnight 11:00 PM–3:00 AM is never used.`,
   });
 
   try {

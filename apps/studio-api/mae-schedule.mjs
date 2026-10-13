@@ -1,11 +1,13 @@
 /** Strict MAE rotation in profile-local time.
  * Fill each day's morning → afternoon → evening MAE slots across a 28-day
- * horizon before placing extras. Once those three are covered on every day in
- * range (or the next pick has no open MAE left), the 4th post on each day goes
- * in that day's largest open gap, walking day 1 → day 28. A 5th post repeats
- * the same day-by-day widest-gap walk.
- * One post per day-part across platforms: Instagram at 5:30 means Facebook
- * takes 11:30, not another 5:30. Stories may share a slot.
+ * (4-week) horizon before placing extras. Once those three are covered on every
+ * day in range (or the next pick has no open MAE left), the 4th post on each
+ * day goes in that day's largest open gap, walking day 1 → day 28. A 5th post
+ * repeats the same day-by-day widest-gap walk.
+ * Same-platform extras still share a day (IG morning, then IG afternoon).
+ * Different platforms in one package skip days already used by that package
+ * and start about a week apart so they spread across the 4-week window.
+ * Stories may share a slot with their platform main.
  * Never stamp 11:00 PM–3:00 AM local (inclusive).
  */
 
@@ -233,14 +235,53 @@ function maeHorizonCivils(local, horizonDays = MAE_SUGGEST_HORIZON_DAYS) {
   return days;
 }
 
-function maePickExtraIso(civils, nowMs, blockers, timeZone, extrasAlreadyOnDay) {
+function maeAvoidCivilKeys(value) {
+  if (!value) return new Set();
+  if (value instanceof Set) return value;
+  return new Set(Array.isArray(value) ? value : []);
+}
+
+function maeWalkCivils(civils, startCivilIndex = 0) {
+  if (!civils.length) return [];
+  const start = ((Number(startCivilIndex) || 0) % civils.length + civils.length) % civils.length;
+  return [...civils.slice(start), ...civils.slice(0, start)];
+}
+
+export function maePlatformSpreadStartIndex(platformIndex, platformCount, horizonDays = MAE_SUGGEST_HORIZON_DAYS) {
+  const count = Math.max(1, Number(platformCount) || 1);
+  const index = Math.max(0, Number(platformIndex) || 0);
+  const days = Math.max(1, Number(horizonDays) || MAE_SUGGEST_HORIZON_DAYS);
+  if (count <= 1) return 0;
+  return Math.floor((index % count) * days / count);
+}
+
+function maePickExtraIso(civils, nowMs, blockers, timeZone, extrasAlreadyOnDay, avoidCivilKeys) {
+  const avoid = maeAvoidCivilKeys(avoidCivilKeys);
   for (const civil of civils) {
+    if (avoid.has(civil.key)) continue;
     if (!maeDayStandardsCovered(civil, nowMs, blockers, timeZone)) continue;
     // 4th wave wants days with 0 extras; 5th wave wants days that already have one.
     if (maeExtraCountOnDay(civil, blockers, timeZone) !== extrasAlreadyOnDay) continue;
     const extra = maeExtraIsoOnDay(civil, nowMs, blockers, timeZone);
     if (extra) return extra;
   }
+  return "";
+}
+
+function maePickFromCivils(civils, nowMs, blockers, timeZone, avoidCivilKeys) {
+  const avoid = maeAvoidCivilKeys(avoidCivilKeys);
+  for (const civil of civils) {
+    if (avoid.has(civil.key)) continue;
+    for (const window of MAE_PRIORITY_SCHEDULE_WINDOWS) {
+      const ms = maeStandardSlotMs(civil, window, timeZone);
+      if (ms <= nowMs || maeIsBlackoutLocalTime(ms, timeZone) || maeScheduleConflicts(ms, blockers)) continue;
+      return new Date(ms).toISOString();
+    }
+  }
+  const fourth = maePickExtraIso(civils, nowMs, blockers, timeZone, 0, avoid);
+  if (fourth) return fourth;
+  const fifth = maePickExtraIso(civils, nowMs, blockers, timeZone, 1, avoid);
+  if (fifth) return fifth;
   return "";
 }
 
@@ -254,25 +295,12 @@ export function maePickBalancedSuggestedIso(_windows, now = new Date(), options 
   const horizonDays = Number(options.horizonDays) > 0
     ? Math.floor(Number(options.horizonDays))
     : MAE_SUGGEST_HORIZON_DAYS;
-  const civils = maeHorizonCivils(local, horizonDays);
+  const civils = maeWalkCivils(maeHorizonCivils(local, horizonDays), options.startCivilIndex);
+  const avoid = maeAvoidCivilKeys(options.avoidCivilKeys);
 
-  // Pass 1: MAE morning → afternoon → evening across the full 28-day horizon.
-  for (const civil of civils) {
-    for (const window of MAE_PRIORITY_SCHEDULE_WINDOWS) {
-      const ms = maeStandardSlotMs(civil, window, timeZone);
-      if (ms <= nowMs || maeIsBlackoutLocalTime(ms, timeZone) || maeScheduleConflicts(ms, blockers)) continue;
-      return new Date(ms).toISOString();
-    }
-  }
-
-  // Pass 2: 4th posts — day 1 → day 28, largest gap on each day.
-  const fourth = maePickExtraIso(civils, nowMs, blockers, timeZone, 0);
-  if (fourth) return fourth;
-
-  // Pass 3: 5th posts — same walk for a second widest-gap slot.
-  const fifth = maePickExtraIso(civils, nowMs, blockers, timeZone, 1);
-  if (fifth) return fifth;
-
+  const spread = maePickFromCivils(civils, nowMs, blockers, timeZone, avoid);
+  if (spread) return spread;
+  if (avoid.size) return maePickFromCivils(civils, nowMs, blockers, timeZone, new Set());
   return "";
 }
 
@@ -345,6 +373,25 @@ export function maeBuildSuggestedScheduleMap(items, occupiedByPlatform = {}, now
     return rank || a.index - b.index;
   });
   const stamps = new Map();
+  const platformOrder = [];
+  for (const { item } of indexed) {
+    if (/story/i.test(String(item.output_type || ""))) continue;
+    const platform = String(item.platform || "").trim();
+    if (platform && !platformOrder.includes(platform)) platformOrder.push(platform);
+  }
+  const spreadPlatforms = platformOrder.length > 1;
+  const packageDayByPlatform = new Map();
+  const rememberPackageDay = (platform, iso) => {
+    if (!iso || packageDayByPlatform.has(platform)) return;
+    const ms = Date.parse(iso);
+    if (!Number.isFinite(ms)) return;
+    packageDayByPlatform.set(platform, maeCivilWithKey(maeZonedDateTimeParts(new Date(ms), timeZone)).key);
+  };
+  const otherPackageDays = (platform) => new Set(
+    [...packageDayByPlatform.entries()]
+      .filter(([name]) => name !== platform)
+      .map(([, civilKey]) => civilKey),
+  );
   for (const { item } of indexed) {
     const platform = String(item.platform || "").trim();
     const outputType = String(item.output_type || "").trim();
@@ -379,7 +426,10 @@ export function maeBuildSuggestedScheduleMap(items, occupiedByPlatform = {}, now
         );
       if (reusable) {
         stamps.set(key, iso);
-        if (!isStory) (reserved[platform] ||= []).push(existingMs);
+        if (!isStory) {
+          (reserved[platform] ||= []).push(existingMs);
+          rememberPackageDay(platform, iso);
+        }
         continue;
       }
     }
@@ -392,26 +442,32 @@ export function maeBuildSuggestedScheduleMap(items, occupiedByPlatform = {}, now
         continue;
       }
     }
-    const iso = maePickBalancedSuggestedIso(MAE_PRIORITY_SCHEDULE_WINDOWS, scheduleNow, {
+    const pickOpts = {
       occupiedMs: isStory ? [] : maeFlattenOccupied(reserved),
       platformOccupiedMs: isStory ? [] : (reserved[platform] || []),
       timeZone,
-    });
+      startCivilIndex: isStory || !spreadPlatforms
+        ? 0
+        : maePlatformSpreadStartIndex(platformOrder.indexOf(platform), platformOrder.length),
+      avoidCivilKeys: isStory || !spreadPlatforms ? new Set() : otherPackageDays(platform),
+    };
+    const iso = maePickBalancedSuggestedIso(MAE_PRIORITY_SCHEDULE_WINDOWS, scheduleNow, pickOpts);
     // Defense in depth: even if a future scheduler change accidentally hands
     // back an expired candidate, never persist it from a regenerate.
     let safeIso = iso && Number.isFinite(Date.parse(iso)) && Date.parse(iso) > notBeforeMs
       ? iso
       : maePickBalancedSuggestedIso(MAE_PRIORITY_SCHEDULE_WINDOWS, scheduleNow, {
-          occupiedMs: isStory ? [] : maeFlattenOccupied(reserved),
-          platformOccupiedMs: isStory ? [] : (reserved[platform] || []),
-          timeZone,
+          ...pickOpts,
           leadMs: options.leadMs ?? MAE_SUGGEST_LEAD_MS,
         });
     if (isStory && !(safeIso && Number.isFinite(Date.parse(safeIso)) && Date.parse(safeIso) > notBeforeMs)) {
       safeIso = maeStoryCompanionIso(stamps, platform, notBeforeMs);
     }
     stamps.set(key, safeIso);
-    if (!isStory && safeIso) (reserved[platform] ||= []).push(Date.parse(safeIso));
+    if (!isStory && safeIso) {
+      (reserved[platform] ||= []).push(Date.parse(safeIso));
+      rememberPackageDay(platform, safeIso);
+    }
   }
   // Last resort: any Story still blank gets same-platform main + 10 minutes.
   for (const { item } of indexed) {
