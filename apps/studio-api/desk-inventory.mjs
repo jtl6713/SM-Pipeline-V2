@@ -628,6 +628,33 @@ export function classifyYoutubePrivateSourceFail(row) {
   }, row);
 }
 
+/**
+ * Autonomous cron saved status=skipped on a Factory revision hold and kept
+ * that production_request_id. Later ticks retry the same 409 and never reach
+ * the other photo-ready drafts. skipped does not age out. Do not defer the
+ * hold: Ready variants clear a defer stamp and the lock returns.
+ */
+export function classifyAutonomousRevisionLock(last, notes = "") {
+  const requestId = String(last?.production_request_id || "").trim();
+  if (!/^rec[A-Za-z0-9]+$/.test(requestId)) return null;
+  const status = String(last?.status || "").trim();
+  if (!status || status === "reset" || status === "promoted") return null;
+  const reason = String(last?.skip_reason || "");
+  const revisionReason = /open for Factory revision/i.test(reason);
+  const revisionNotes = String(notes || "")
+    .split(/\r?\n/)
+    .some((line) => String(line || "").trim().startsWith("[factory-revision-open]"));
+  if (!revisionReason && !revisionNotes) return null;
+  return withDeskIdentity({
+    kind: "autonomous_revision_lock",
+    class: "transient",
+    record_id: requestId,
+    fingerprint: fingerprint("autonomous_revision_lock", requestId, "factory_revision_open"),
+    actor: "worker_heal",
+    diagnosis: "STUDIO_AUTONOMOUS_LAST_RUN still points at a Factory revision hold. Promote returns 409, the catch saved skipped with the same request id, and photo-ready autonomous drafts in other cities never resume. Do not clear [factory-revision-open]. Do not Approve. Release the lock (null request id, skip_factory_revision_open) and skip revision-open notes in the resume selector. Proven: LA Walk of Fame rec64MuB8YqdXJ0El blocked Chicago on 2026-10-14. Same fingerprint after that release → code_bug.",
+  }, { request_id: requestId });
+}
+
 export function classifyAutonomousRequest({ status, notes, job, nowMs = Date.now() } = {}) {
   const text = String(notes || "");
   const requestStatus = String(status || "").trim();
@@ -1394,6 +1421,7 @@ export const CLASSIFIER_KINDS = Object.freeze([
   "produce_orphan",
   "crop_parked",
   "crop_stale",
+  "autonomous_revision_lock",
   "autonomous_stalled",
   "autonomous_produce_gap",
   "az_stalled",

@@ -14,6 +14,7 @@ import {
   classifyRenderRow,
   classifyCropRow,
   classifyAutonomousRequest,
+  classifyAutonomousRevisionLock,
   classifyAutonomousTopicCollision,
   classifyYoutubeCoverQuota,
   classifyYoutubePrivateSourceFail,
@@ -312,6 +313,26 @@ test("render, orphan, crop, autonomous, and health classifiers", () => {
     transfer_status: "Error",
     attempt_count: 6,
   }, now).kind, "crop_parked");
+  const revisionLock = classifyAutonomousRevisionLock({
+    status: "skipped",
+    skip_reason: "This content is open for Factory revision. Make your changes in Production, then click Approve.",
+    production_request_id: "rec64MuB8YqdXJ0El",
+    idea_id: "recpQ0ZyzTNlWPs0m",
+  }, "origin=autonomous\n[factory-revision-open] at=2026-10-14T05:15:25.634Z by=joseph.t.logan@gmail.com");
+  assert.equal(revisionLock.kind, "autonomous_revision_lock");
+  assert.equal(revisionLock.class, "transient");
+  assert.equal(revisionLock.actor, "worker_heal");
+  assert.equal(revisionLock.fingerprint, "autonomous_revision_lock:rec64MuB8YqdXJ0El:factory_revision_open");
+  assert.equal(classifyAutonomousRevisionLock({
+    status: "producing",
+    production_request_id: "recJDUF7s3TpdZDee",
+    skip_reason: null,
+  }, "origin=autonomous"), null);
+  assert.equal(classifyAutonomousRevisionLock({
+    status: "reset",
+    production_request_id: null,
+    skip_reason: "skip_factory_revision_open",
+  }, "origin=autonomous\n[factory-revision-open] at=2026-10-14T05:15:25.634Z"), null);
   assert.equal(classifyAutonomousRequest({
     status: "Submitted",
     notes: "origin=autonomous cited_trend=Navy Pier",

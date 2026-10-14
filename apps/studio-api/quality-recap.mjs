@@ -94,6 +94,10 @@ const COPY = {
     found: "Approved work is not moving toward Ready for Review.",
     action: "Restarted production so it can finish.",
   },
+  autonomous_revision_lock: {
+    found: "Automatic production stopped because it kept retrying one post that is open for revision.",
+    action: "Left that revision alone and moved on to the next ready idea.",
+  },
   autonomous_stalled: {
     found: "An automatic idea is sitting in approval instead of moving forward.",
     action: "Moved it through production so it can reach Ready for Review.",

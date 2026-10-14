@@ -23,6 +23,7 @@ export const QUALITY_HEALS = Object.freeze([
   "retarget_music_drive",
   "promote_rendered_ready_for_review",
   "return_phantom_rerender_to_review",
+  "release_autonomous_revision_lock",
   "extend_last_clip_requeue_r4",
   "ticket_only",
   "none",
@@ -72,6 +73,14 @@ export const QUALITY_CHECKS = Object.freeze([
     kind: "intake_oversize",
     actor: "worker_heal",
     heal: "none",
+  }),
+  check({
+    id: "autonomous_revision_lock",
+    title: "Check for the autonomous FIFO lock stuck on a Factory revision hold",
+    lane: "service",
+    kind: "autonomous_revision_lock",
+    actor: "worker_heal",
+    heal: "release_autonomous_revision_lock",
   }),
   check({
     id: "autonomous_stalled",
