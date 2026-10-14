@@ -14,12 +14,20 @@ import {
   AUTONOMOUS_DEFAULT_MUSIC_ASSET_ID,
   AUTONOMOUS_DEFAULT_VOICEOVER_TAIL_SECONDS,
   AUTONOMOUS_IDEA_CREATED_FIELD,
+  AUTONOMOUS_SCHEDULED_TARGET,
   pickAutonomousMusicAssetId,
   pickNarrationVoiceFromProfiles,
   resolveAutonomousNarrationVoice,
   autonomousRunIsBusy,
   autonomousSlot,
+  autonomousRefillSlot,
   autonomousSlotAlreadyClaimed,
+  autonomousScheduledTotal,
+  autonomousProfileNeedsScheduledRefill,
+  autonomousScheduledDeficit,
+  autonomousRefillScoresFromOverview,
+  autonomousProfilesNeedingRefill,
+  pickAutonomousRefillProfile,
   isAutonomousOrigin,
   autonomousRequestNeedsContinue,
   firstAutonomousResumeDraft,
@@ -161,6 +169,78 @@ test("slot keys are once per morning and afternoon", () => {
     status: "skipped",
     skip_reason: "no_unused_library_stills",
   }, "2026-09-07:pm"), false);
+});
+
+test("hourly refill slot and 200 Scheduled target helpers", () => {
+  assert.equal(AUTONOMOUS_SCHEDULED_TARGET, 200);
+  assert.equal(autonomousRefillSlot({ date: "2026-10-14", hour: 9 }), "2026-10-14:h09");
+  assert.equal(autonomousRefillSlot({ date: "2026-10-14", hour: 16 }), "2026-10-14:h16");
+  assert.equal(autonomousRefillSlot({ date: "2026-10-14", hour: 0 }), "2026-10-14:h00");
+  assert.equal(autonomousRefillSlot({ hour: 9 }), null);
+  assert.equal(
+    autonomousScheduledTotal({ Facebook: 14, Instagram: 20, TikTok: 17, YouTube: 16 }),
+    67,
+  );
+  assert.equal(autonomousScheduledTotal({ Facebook: 14, Instagram: 20 }), 34);
+  assert.equal(autonomousProfileNeedsScheduledRefill(67, 0), true);
+  assert.equal(autonomousProfileNeedsScheduledRefill(200, 0), false);
+  assert.equal(autonomousProfileNeedsScheduledRefill(67, 140), false);
+  assert.equal(autonomousProfileNeedsScheduledRefill(199, 0), true);
+  assert.equal(autonomousScheduledDeficit(67, 0), 133);
+  assert.equal(autonomousScheduledDeficit(67, 140), 0);
+  assert.equal(autonomousSlotAlreadyClaimed({
+    slot: "2026-10-14:h09",
+    status: "producing",
+    idea_id: "recIdea0000000001",
+  }, "2026-10-14:h09"), true);
+  assert.equal(autonomousSlotAlreadyClaimed({
+    slot: "2026-10-14:h09",
+    status: "skipped",
+    skip_reason: "scheduled_target_met",
+  }, "2026-10-14:h09"), false);
+});
+
+test("refill scores prefer the city with the largest Scheduled deficit", () => {
+  const scores = autonomousRefillScoresFromOverview([
+    {
+      id: "recChi",
+      name: "Chicago",
+      scheduled: { Facebook: 14, Instagram: 20, TikTok: 17, YouTube: 16 },
+      approval: 0,
+    },
+    {
+      id: "recLA",
+      name: "Los Angeles",
+      scheduled: { Facebook: 15, Instagram: 21, TikTok: 17, YouTube: 16 },
+      approval: 50,
+    },
+    {
+      id: "recMia",
+      name: "Miami",
+      scheduled: { Facebook: 50, Instagram: 50, TikTok: 50, YouTube: 50 },
+      approval: 10,
+    },
+  ]);
+  assert.equal(scores.recChi.scheduled_total, 67);
+  assert.equal(scores.recChi.needed, true);
+  assert.equal(scores.recChi.deficit, 133);
+  assert.equal(scores.recLA.needed, true);
+  assert.equal(scores.recLA.deficit, 81);
+  assert.equal(scores.recMia.needed, false);
+  const profiles = [
+    { id: "recChi", name: "Chicago" },
+    { id: "recLA", name: "Los Angeles" },
+    { id: "recMia", name: "Miami" },
+  ];
+  assert.deepEqual(
+    autonomousProfilesNeedingRefill(profiles, scores).map((row) => row.id),
+    ["recChi", "recLA"],
+  );
+  assert.equal(pickAutonomousRefillProfile(profiles, scores)?.id, "recChi");
+  assert.deepEqual(
+    autonomousProfileHarvestOrder(profiles, "recLA", scores).map((row) => row.id),
+    ["recChi", "recLA", "recMia"],
+  );
 });
 
 test("RSS parser reads CDATA titles", () => {
@@ -661,7 +741,20 @@ test("Worker stamps photo-ready ideas and drains the 30m SLA on light ticks", as
   const path = await import("node:path");
   const here = path.dirname(fileURLToPath(import.meta.url));
   const worker = await readFile(path.join(here, "worker.js"), "utf8");
-  assert.match(worker, /version: "0\.10\.594-revision-lock-heal"/);
+  assert.match(worker, /version: "0.10.595-scheduled-target-refill"/);
+  assert.match(worker, /studio_autonomous_scheduled_target_v1: true/);
+  assert.match(worker, /AUTONOMOUS_SCHEDULED_TARGET/);
+  assert.match(worker, /scheduled_target_met/);
+  assert.match(worker, /studioLoadAutonomousRefillScores/);
+  assert.match(worker, /autonomousRefillSlot/);
+  assert.match(worker, /pickAutonomousRefillProfile/);
+  assert.doesNotMatch(
+    worker.slice(
+      worker.indexOf("async function executeStudioAutonomousProduce"),
+      worker.indexOf("async function runStudioAutonomousProduce"),
+    ),
+    /outside_chicago_windows/,
+  );
   assert.match(worker, /async function stampPhotoReadyIdeaForAutonomousProduce/);
   assert.match(worker, /productionNotesRevisionOpen\(notes\)/);
   assert.match(worker, /async function releaseAutonomousRevisionLock/);
