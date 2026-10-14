@@ -213,3 +213,5 @@ jobs:
 # A2B final dedupe release 2026-10-12 re-trigger after regression test update
 
 # 2026-10-12: Deploy Studio active-profile AI market/hashtag correctness safeguard.
+# Trigger pipeline-runner deploy for profile-scoped music pool rotation
+# 2026-10-13 service_version=2026-10-13-profile-music-rotation
