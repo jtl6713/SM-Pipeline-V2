@@ -363,3 +363,29 @@
  .factory-feedback-hints{flex-direction:column;gap:4px}
  .production-factory-feedback{padding:12px}
 }
+
+/* Production: persistent, obvious review-notes alert for Factory revisions. */
+#page-content .production-see-review-notes[hidden]{display:none!important}
+#page-content .production-studio-hero .production-see-review-notes{
+  display:inline-flex;align-items:center;justify-content:center;gap:8px;
+  flex:0 0 auto;box-sizing:border-box;min-height:42px;
+  padding:9px 14px;border:2px solid #ba3038;border-radius:9px;
+  color:#8d141f;background:#fff0f0;font:inherit;font-size:.88rem;
+  font-weight:800;line-height:1.2;cursor:pointer;
+  box-shadow:0 2px 5px rgba(138,20,31,.09);
+}
+#page-content .production-studio-hero .production-see-review-notes:hover{
+  background:#ffe1e1;border-color:#981c27;
+}
+#page-content .production-studio-hero .production-see-review-notes:focus-visible{
+  outline:3px solid #da4a53;outline-offset:3px;
+}
+#page-content .production-review-notes-icon{font-size:1.2rem;line-height:1;color:#a71928}
+#page-content .production-factory-feedback{scroll-margin-top:96px}
+#page-content .production-factory-feedback:focus{outline:2px solid #b42834;outline-offset:3px}
+@media(max-width:760px){
+ #page-content .production-studio-hero .production-see-review-notes{
+   flex:1 1 100%;width:100%;min-height:46px;justify-content:flex-start;
+   padding:11px 14px;text-align:left;
+ }
+}

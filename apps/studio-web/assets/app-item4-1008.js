@@ -276,7 +276,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.684-factory-review-feedback";
+  const BUILD_ID = "item4-0.6.685-production-review-notes";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -12925,8 +12925,16 @@ function timedScriptAssetLabel(asset, index) {
     const revisionOpen = record?.revision_open === true;
     const factoryFeedback = record?.factory_review_feedback;
     const feedbackPanel = $("productionFactoryFeedback");
+    const feedbackButton = $("productionSeeReviewNotes");
+    const feedbackVisible = Boolean(revisionOpen && String(factoryFeedback?.instructions || "").trim());
+    if (feedbackButton) {
+      feedbackButton.hidden = !feedbackVisible;
+      feedbackButton.setAttribute("aria-label", feedbackVisible
+        ? "See review notes: changes requested in Factory"
+        : "No Factory review notes");
+    }
     if (feedbackPanel) {
-      const visible = Boolean(revisionOpen && factoryFeedback?.instructions);
+      const visible = feedbackVisible;
       feedbackPanel.hidden = !visible;
       if (visible) {
         const scope = String(factoryFeedback.scope || "content");
@@ -14684,6 +14692,13 @@ function timedScriptAssetLabel(asset, index) {
   $("prRequestedScript")?.addEventListener("change", syncProductionNarrationEstimate);
   $("prVoiceoverDuration")?.addEventListener("input", syncProductionNarrationEstimate);
   $("prVoiceoverDuration")?.addEventListener("change", syncProductionNarrationEstimate);
+
+  $("productionSeeReviewNotes")?.addEventListener("click", () => {
+    const panel = $("productionFactoryFeedback");
+    if (!panel || panel.hidden) return;
+    panel.scrollIntoView({ behavior: "smooth", block: "start" });
+    panel.focus({ preventScroll: true });
+  });
 
   $("productionRequestForm")?.addEventListener("submit", async (event) => {
     event.preventDefault();

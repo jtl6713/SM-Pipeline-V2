@@ -11,7 +11,7 @@ const worker = read("../studio-api/worker.js");
 test("Published Studio label, app BUILD_ID, and all cache versions agree", () => {
   const label = html.match(/UI build (\d+\.\d+\.\d+)/)?.[1];
   const build = app.match(/const BUILD_ID = "item4-(\d+\.\d+\.\d+)-/ )?.[1];
-  assert.equal(label, "0.6.684");
+  assert.equal(label, "0.6.685");
   assert.equal(build, label);
   const cache = [...html.matchAll(/\?v=(\d+\.\d+\.\d+)-/g)].map((m) => m[1]);
   assert.ok(cache.length > 10);
@@ -45,4 +45,18 @@ test("Reviewer feedback is persisted into Production and output history with no 
   assert.ok(html.includes('id="productionFactoryFeedbackBody"'));
   assert.ok(html.includes('id="productionFactoryFeedbackMeta"'));
   assert.match(app, /feedbackBody\.textContent = String\(factoryFeedback\.instructions\)/);
+});
+
+test("Returned Production item visibly advertises review notes and opens them from its header", () => {
+  assert.match(html, /id="productionSeeReviewNotes"[^>]*aria-controls="productionFactoryFeedback"[^>]*hidden/);
+  assert.match(html, /See review notes/);
+  assert.match(html, /id="productionFactoryFeedback"[^>]*tabindex="-1"/);
+  assert.match(app, /feedbackButton\.hidden = !feedbackVisible/);
+  assert.match(app, /feedbackButton\.setAttribute\("aria-label"/);
+  assert.match(app, /\$\("productionSeeReviewNotes"\)\?\.addEventListener\("click"/);
+  assert.match(app, /panel\.scrollIntoView\(\{ behavior: "smooth", block: "start" \}\)/);
+  assert.match(app, /panel\.focus\(\{ preventScroll: true \}\)/);
+  assert.match(css, /\.production-see-review-notes\[hidden\]/);
+  assert.match(css, /border:2px solid #ba3038/);
+  assert.match(css, /@media\(max-width:760px\)/);
 });
