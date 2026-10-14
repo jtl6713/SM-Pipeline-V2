@@ -42744,6 +42744,24 @@ async function factoryDeskRefreshPayload(request, env, authorization, controls, 
 
 async function factoryApproveOutput(env, id, actor, note, ctx = null) {
   const existing = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, id);
+  const outputStatus = String(f(existing, "Output_Status") || "").trim();
+  const reviewStatus = String(f(existing, "Review_Status") || "").trim();
+  const publishStatus = String(f(existing, "Publish_Status") || "").trim();
+  // Idempotent retry: a previous approve may have committed even if its
+  // subsequent Desk refresh failed. Never re-schedule or dispatch twice.
+  if (publishStatus === "Published" || outputStatus === "Published") {
+    return { id, already_published: true, message: "Output is already published." };
+  }
+  if (reviewStatus === "Approved" || outputStatus === "Approved for Publishing") {
+    return { id, already_approved: true, message: "Output is already approved; no second approval was sent." };
+  }
+  const renderStatus = String(f(existing, "Render_Status") || "").trim();
+  if (/^(?:Waiting in Render Queue|Ready for Render|Rendering|Queued)$/i.test(renderStatus)) {
+    throw new HttpError(409, `Cannot approve yet: rendering is incomplete (${renderStatus}). The output will return to Needs Eyes after rendering finishes.`);
+  }
+  if (!studioOutputReadyForPublishApproval(existing)) {
+    throw new HttpError(409, "Cannot approve this output yet: a finished render and Ready for Review are required.");
+  }
   const stamp = new Date().toISOString();
   const updated = await approveOutputRecordForPublishing(
     env,
@@ -43056,6 +43074,15 @@ async function mutateFactoryDesk(request, env, authorization, ctx = null) {
   )
     ? await writeFactoryDeskControls(env, next, actor)
     : next;
+  if (action === "approve") {
+    // The Airtable write above is the authoritative approval transaction.
+    // A later queue/idea fetch may fail or exceed request limits; do not turn
+    // a committed approval into HTTP 500 and invite a duplicate click.
+    return respond(request, env, {
+      ok: true, page: "factory-desk", action, result: resultExtra,
+      message: resultExtra.message || "Approved.", refresh_required: true,
+    });
+  }
   return factoryDeskRefreshPayload(request, env, authorization, saved, action, {
     result: resultExtra,
     message: resultExtra.message || null,

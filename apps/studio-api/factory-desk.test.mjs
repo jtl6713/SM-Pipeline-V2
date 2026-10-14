@@ -67,6 +67,17 @@ test("Content 617 review-ready output IDs remain in Needs Eyes", () => {
   assert.deepEqual(partitionFactoryLanes(rows).lanes.needs_eyes.map((r) => r.output_id), [3202, 3203, 3204, 3205, 3206, 3207]);
 });
 
+test("Content 654 output 3431 stays In Flight while rendering despite Ready for Review", () => {
+  const queueingStory = {
+    id: "recfSBXLxPm0IMw54", kind: "output", output_id: 3431, content_id: 654,
+    lane: "review", studio_state: "Ready for Review", output_status: "Ready for Review",
+    render_status: "Waiting in Render Queue", final_file_url: "https://example.test/video.mp4",
+  };
+  assert.equal(classifyFactoryLane(queueingStory), "auto_high");
+  const completed = { ...queueingStory, render_status: "Rendered" };
+  assert.equal(classifyFactoryLane(completed), "needs_eyes");
+});
+
 test("classifyFactoryLane priority: manual > needs_eyes > needs_assets > auto_high", () => {
   assert.equal(classifyFactoryLane({ id: "rec1", lane: "stuck", stuck_kind: "produce_clip_mismatch" }), "manual");
   assert.equal(classifyFactoryLane({ id: "rec2", studio_state: "Ready for Review", lane: "review" }), "needs_eyes");

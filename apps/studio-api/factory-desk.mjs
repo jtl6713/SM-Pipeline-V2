@@ -116,6 +116,10 @@ function isPastEyes(row) {
 
 function isReadyForReview(row) {
   if (isPastEyes(row)) return false;
+  // A stale Ready for Review badge must never override an unfinished render.
+  // Output 3431 / Content 654 had Output_Status=Ready for Review while Remotion
+  // still reported Waiting in Render Queue, so Factory incorrectly offered Approve.
+  if (row?.kind === "output" && isRenderQueueActive(row)) return false;
   const state = String(row?.studio_state || "").trim().toLowerCase();
   const output = String(row?.output_status || "").trim().toLowerCase();
   const review = String(row?.review_status || "").trim().toLowerCase();

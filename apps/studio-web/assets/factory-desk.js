@@ -673,8 +673,19 @@
       method: "POST",
       body: JSON.stringify(payload),
     });
-    renderDesk(desk);
-    setStatus(desk.message || ACTION_STATUS[payload.action] || "Updated.");
+    // A successful approval is a durable mutation, not a full Desk read.
+    // A subsequent refresh error must never be reported as approval failure.
+    const savedMessage = desk.message || ACTION_STATUS[payload.action] || "Updated.";
+    if (desk.lanes) {
+      renderDesk(desk);
+    } else if (desk.ok) {
+      const refreshed = await loadFactoryDesk(true);
+      if (!refreshed) {
+        setStatus(savedMessage + " Desk refresh failed; tap Refresh.", false);
+        return desk;
+      }
+    }
+    setStatus(savedMessage);
     return desk;
   }
 
