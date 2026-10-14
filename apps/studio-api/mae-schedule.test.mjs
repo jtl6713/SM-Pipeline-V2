@@ -10,6 +10,7 @@ import {
   maeIsBlackoutLocalTime,
   maeNextOpenScheduleIso,
   maePickBalancedSuggestedIso,
+  maeResolveStorySchedule,
   maeTimeZoneFromTheme,
   maeZonedWallToUtcMs,
 } from "./mae-schedule.mjs";
@@ -277,6 +278,55 @@ test("Stories follow the same-platform main by 10 minutes even when MAE lanes ar
   assert.equal(fb, fbReel + 10 * 60 * 1000);
 });
 
+test("Approve resolves a Story to the same-platform main plus 10 minutes", () => {
+  const zone = "America/New_York";
+  const notBefore = Date.parse("2026-10-14T16:00:00Z");
+  const reelMs = maeZonedWallToUtcMs(2026, 10, 27, 16, 30, zone);
+  const snapped = new Date(maeZonedWallToUtcMs(2026, 10, 14, 11, 30, zone)).toISOString();
+  const resolved = maeResolveStorySchedule({
+    platform: "Instagram",
+    siblings: [
+      { platform: "Instagram", output_type: "Reel", scheduled_at: new Date(reelMs).toISOString() },
+      { platform: "Instagram", output_type: "Story", scheduled_at: snapped },
+      { platform: "TikTok", output_type: "Video Draft", scheduled_at: new Date(maeZonedWallToUtcMs(2026, 10, 23, 10, 30, zone)).toISOString() },
+    ],
+    requestedIso: snapped,
+    existingIso: snapped,
+    notBeforeMs: notBefore,
+    occupiedMaeIso: snapped,
+    timeZone: zone,
+  });
+  assert.equal(resolved.source, "companion");
+  assert.equal(Date.parse(resolved.iso), reelMs + 10 * 60 * 1000);
+});
+
+test("A Story with no sibling does not keep the empty-lane MAE instant", () => {
+  const zone = "America/New_York";
+  const notBefore = Date.parse("2026-10-14T16:00:00Z");
+  const snapped = new Date(maeZonedWallToUtcMs(2026, 10, 14, 11, 30, zone)).toISOString();
+  const openMae = new Date(maeZonedWallToUtcMs(2026, 10, 23, 16, 30, zone)).toISOString();
+  const resolved = maeResolveStorySchedule({
+    platform: "Facebook",
+    siblings: [],
+    requestedIso: snapped,
+    existingIso: snapped,
+    notBeforeMs: notBefore,
+    occupiedMaeIso: openMae,
+    timeZone: zone,
+  });
+  assert.equal(resolved.source, "mae_plus_10");
+  assert.equal(Date.parse(resolved.iso), Date.parse(openMae) + 10 * 60 * 1000);
+  const held = maeResolveStorySchedule({
+    platform: "Facebook",
+    siblings: [],
+    existingIso: snapped,
+    notBeforeMs: notBefore,
+    timeZone: zone,
+    allowMaeFallback: false,
+  });
+  assert.equal(held.iso, "");
+});
+
 test("Stories keep a stored companion time without occupying the MAE lane", () => {
   const zone = "America/New_York";
   const now = new Date("2026-10-07T12:00:00Z");
@@ -477,7 +527,18 @@ test("Worker stamp paths use MAE not industry evening windows", () => {
   assert.match(worker, /studio_mae_platform_spread_v1: true/);
   assert.match(worker, /studio_mae_profile_occupancy_v1: true/);
   assert.match(worker, /studio_schedule_occupancy_fields_v1: true/);
-  assert.match(worker, /0.10.597-ai-master-content-profile/);
+  assert.match(worker, /0.10.598-story-companion-schedule/);
+  assert.match(worker, /studio_story_companion_schedule_v1: true/);
+  assert.match(worker, /storyCompanion/);
+  assert.match(worker, /maeResolveStorySchedule/);
+  assert.match(worker, /async function studioHealStoryCompanionDrift/);
+  assert.match(worker, /await studioHealStoryCompanionDrift\(env, \{ limit: 8 \}\)/);
+  const approveFn = worker.slice(
+    worker.indexOf("async function approveOutputRecordForPublishing"),
+    worker.indexOf("function mapApprovedOutputSummary"),
+  );
+  assert.match(approveFn, /studioResolveStoryPublishIso/);
+  assert.doesNotMatch(approveFn, /const lane = isStory \? \[\]/);
   assert.match(worker, /STUDIO_OCCUPIED_HORIZON_MS = 28 \* 24/);
   assert.match(worker, /studioLoadPlanScheduleOccupancy/);
   assert.match(worker, /A stored 5:30 that lost its slot must be written/);
