@@ -130,3 +130,52 @@ def test_exact_source_picker_honors_rotation_order_not_longest_track():
     )
 
     assert chosen["id"] == "recFirst"
+
+def test_profile_pool_deduplicates_two_records_pointing_to_same_audio_file():
+    first = _music("recLoveA")
+    duplicate = _music("recLoveB")
+    duplicate["fields"]["Google Drive URL"] = first["fields"]["Google Drive URL"]
+    candidates = [first, duplicate, _music("recOther")]
+    client = _FakeClient(_profile(["recLoveA", "recLoveB", "recOther"]))
+
+    scoped, context = scope_music_candidates_to_profile(
+        client,
+        content_item=_content(),
+        music_candidates=candidates,
+    )
+
+    assert [row["id"] for row in scoped] == ["recLoveA", "recOther"]
+    assert context["profile_pool_duplicate_audio_ids"] == ["recLoveB"]
+
+
+def test_recent_duplicate_alias_counts_as_same_physical_audio():
+    first = _music("recLoveA")
+    duplicate_url = first["fields"]["Google Drive URL"]
+    candidates = [first, _music("recOther"), _music("recThird")]
+    recent = [
+        _output(
+            105,
+            Content_Item=["recOLD"],
+            Content_Profile=["NYC - New York City"],
+            Selected_Music_Media_Asset_ID="recLoveB",
+            Selected_Music_URL=duplicate_url,
+        ),
+    ]
+    client = _FakeClient(_profile([row["id"] for row in candidates]), recent=recent)
+    scoped, context = scope_music_candidates_to_profile(
+        client,
+        content_item=_content(),
+        music_candidates=candidates,
+    )
+
+    rotated, context = rotate_profile_music_candidates(
+        client,
+        output=_output(106),
+        content_item=_content(),
+        music_candidates=scoped,
+        profile_context=context,
+    )
+
+    assert "recLoveA" in context["rotation_avoided_ids"]
+    assert [row["id"] for row in rotated] == ["recOther", "recThird"]
+
