@@ -277,7 +277,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.686-unified-platform-outputs";
+  const BUILD_ID = "item4-0.6.687-platforms-frames-details";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -7065,7 +7065,9 @@ function timedScriptAssetLabel(asset, index) {
       return;
     }
     if (planReady) {
-      hint.textContent = "Recommendations are saved below. Edit the output checkboxes and tap Save output selections; Recommend again resets to defaults.";
+      hint.textContent = item4OutputSelectionDirty
+        ? "Recommended formats are checked below and are not saved yet."
+        : "Saved outputs are checked below. Recommend again fills the boxes without saving until you tap Save output selections.";
       return;
     }
     if (hasAssets && !ezMasterSetReadyForPlan()) {
@@ -7091,6 +7093,11 @@ function timedScriptAssetLabel(asset, index) {
     if (!item4Workspace?.assets?.length && !ezWizardAllowsPlanWithoutAssets()) return;
     if (!ezMasterSetReadyForPlan()) return;
     if (!force && item4Workspace?.plan_status === "Ready" && item4Workspace?.plan?.items?.length) {
+      ezAutoPlanAfterUpload = false;
+      syncEzPlanChrome();
+      return;
+    }
+    if (!force && enabledProductionRequestOutputs().length) {
       ezAutoPlanAfterUpload = false;
       syncEzPlanChrome();
       return;
@@ -11068,8 +11075,14 @@ function timedScriptAssetLabel(asset, index) {
       return;
     }
     if (String(item4Workspace?.plan_status || "") !== "Ready") {
-      setRequestMessage("Building the platform plan before preparing frames…", "success");
-      await buildItem4Plan();
+      if (selectedOutputMatrix().length) {
+        setRequestMessage("Saving platform output selections before preparing frames…", "success");
+        await saveProductionRequestOutputs(activeProductionRequest);
+        await loadItem4Workspace(activeProductionRequest);
+      } else {
+        setRequestMessage("Building the platform plan before preparing frames…", "success");
+        await buildItem4Plan();
+      }
       if (String(item4Workspace?.plan_status || "") !== "Ready") {
         renderItem4Variants(item4Workspace || {});
         return;
@@ -12202,7 +12215,21 @@ function timedScriptAssetLabel(asset, index) {
     generateItem4AiImages({ reset: true, automatic: false, replaceCount: count, promptGuidance, assetNameBase });
   });
 
-  async function buildItem4Plan() {
+  function applyRecommendedOutputChecks(platforms) {
+    const allowed = new Set((Array.isArray(platforms) ? platforms : []).map((value) => String(value || "").trim()).filter(Boolean));
+    for (const platform of ["Instagram", "Facebook", "TikTok", "YouTube"]) {
+      const platformInputs = outputMatrixInputs().filter((input) => input.dataset.platform === platform);
+      if (!allowed.has(platform)) {
+        platformInputs.forEach((input) => { input.checked = false; });
+        continue;
+      }
+      applyDefaultOutputsForPlatform(platform, { replace: true });
+    }
+    item4DropUnsupportedStoryChecks(false);
+  }
+
+  async function buildItem4Plan(options = {}) {
+    const persist = options.persist !== false;
     if (!activeProductionRequest?.id) return;
     syncItem4PlatformsFromEz();
     const selected = ezSelectedPlatforms().length ? ezSelectedPlatforms() : item4SelectedPlatforms();
@@ -12220,6 +12247,18 @@ function timedScriptAssetLabel(asset, index) {
     item4ScopePlanStateToPlatforms(platforms);
     const activeOverrides = item4PlanOverridesForPlatforms(platforms);
     item4PlanOverrides = { ...activeOverrides };
+    if (!persist) {
+      applyRecommendedOutputChecks(platforms);
+      syncLegacyPlatformsFromOutputMatrix();
+      item4OutputSelectionDirty = true;
+      updateOutputMatrixSummary();
+      setItem4OutputSelectionHint("Recommended formats are checked. Nothing is saved until you tap Save output selections.");
+      setRequestMessage("Recommended formats are checked below. Edit them, then Save output selections.", "success");
+      syncEzPlanChrome();
+      const hint = $("item4PlanHint");
+      if (hint) hint.textContent = "Recommended formats are checked below and are not saved yet.";
+      return;
+    }
     const button = $("item4BuildPlan");
     if (button) { button.disabled = true; button.textContent = "Building plan…"; }
     setRequestMessage("Building the platform plan…");
@@ -12508,13 +12547,23 @@ function timedScriptAssetLabel(asset, index) {
     return dropped;
   }
 
+  function syncPlatformIncludeChecks() {
+    document.querySelectorAll("[data-pr-platform-include]").forEach((input) => {
+      input.checked = outputMatrixInputs().some((row) => row.dataset.platform === input.value && row.checked);
+    });
+  }
+
   function updateOutputMatrixSummary() {
     const outputs = selectedOutputMatrix();
-    const target = $("prOutputMatrixSummary");
-    if (!target) return;
-    target.textContent = outputs.length
+    const base = outputs.length
       ? `${outputs.length} requested output${outputs.length === 1 ? "" : "s"}: ${outputs.map(o => `${o.platform} ${o.output_type}`).join(" · ")}`
-      : "No custom outputs selected. Studio will use the recommended output for each selected platform.";
+      : "No requested outputs selected yet.";
+    const text = item4OutputSelectionDirty ? `${base} Unsaved.` : base;
+    const target = $("prOutputMatrixSummary");
+    if (target) target.textContent = text;
+    const details = $("prDetailsOutputSummary");
+    if (details) details.textContent = text;
+    syncPlatformIncludeChecks();
     hydrateEzOutputsFromMatrix();
     syncNativeVideoCoverRule();
   }
@@ -12892,24 +12941,15 @@ function timedScriptAssetLabel(asset, index) {
       outputMatrixInputs().forEach(input => {
         input.checked = selected.has(`${input.dataset.platform}::${input.value}`);
       });
-      if (ezIsClipRequest(record)) {
-        const slideshow = outputMatrixInputs().find((input) => input.dataset.platform === "Facebook" && input.value === "Slideshow Reel");
-        const reel = outputMatrixInputs().find((input) => input.dataset.platform === "Facebook" && input.value === "Reel");
-        if (slideshow?.checked && reel) {
-          slideshow.checked = false;
-          reel.checked = true;
-          item4PlanOverrides = { ...item4PlanOverrides, Facebook: "Reel" };
-        }
-      }
       item4DropUnsupportedStoryChecks(false);
     } else {
       seedOutputMatrixFromLegacyPlatforms(record);
     }
 
+    item4OutputSelectionDirty = false;
     syncLegacyPlatformsFromOutputMatrix();
     updateOutputMatrixSummary();
     productionOutputMatrixLoaded = true;
-    item4OutputSelectionDirty = false;
     renderProductionRequestOutputCards();
     setProductionRequestControlState(activeProductionRequest);
   }
@@ -12927,11 +12967,12 @@ function timedScriptAssetLabel(asset, index) {
     if (item4HasTimedScript(record) && $("prContentType")) {
       $("prContentType").value = "Vertical Short Video";
     }
-    // Timeline submissions always use the six standard vertical-video outputs:
-    // IG Reel + Story, FB Reel + Story, TikTok Video Draft, YouTube Short.
-    let outputs = item4HasTimedScript(record)
-      ? defaultOutputsForPlatforms(["Instagram", "Facebook", "TikTok", "YouTube"])
-      : selectedOutputMatrix();
+    // A checked matrix is the canonical selection. The six vertical-video
+    // defaults apply only when a timeline request has no boxes checked yet.
+    let outputs = selectedOutputMatrix();
+    if (!outputs.length && item4HasTimedScript(record)) {
+      outputs = defaultOutputsForPlatforms(["Instagram", "Facebook", "TikTok", "YouTube"]);
+    }
     if (!outputs.length && productionOutputMatrixLoaded) {
       throw new Error("Choose at least one platform output before saving.");
     }
@@ -14145,7 +14186,8 @@ function timedScriptAssetLabel(asset, index) {
       syncItem4LibraryAdd();
     }
   });
-  $("item4BuildPlan")?.addEventListener("click", buildItem4Plan);
+  $("item4BuildPlan")?.addEventListener("click", () => buildItem4Plan({ persist: false }));
+  $("prEditOutputsInFrames")?.addEventListener("click", () => setProductionWorkspaceTab("formats", { focus: true }));
   $("item4SaveOutputSelection")?.addEventListener("click", saveItem4OutputSelection);
   $("prOpenRenderingTab")?.addEventListener("click", () => {
     setProductionWorkspaceTab("rendering", { focus: true });
@@ -14702,6 +14744,21 @@ function timedScriptAssetLabel(asset, index) {
         item4DropUnsupportedStoryChecks(true);
         return;
       }
+      syncLegacyPlatformsFromOutputMatrix();
+      updateOutputMatrixSummary();
+    });
+  });
+
+  document.querySelectorAll("[data-pr-platform-include]").forEach((input) => {
+    input.addEventListener("change", () => {
+      const platformInputs = outputMatrixInputs().filter((row) => row.dataset.platform === input.value);
+      if (!input.checked) {
+        platformInputs.forEach((row) => { row.checked = false; });
+      } else if (!platformInputs.some((row) => row.checked)) {
+        applyDefaultOutputsForPlatform(input.value);
+      }
+      item4OutputSelectionDirty = true;
+      setItem4OutputSelectionHint("Unsaved selections. Tap Save output selections before preparing frames.");
       syncLegacyPlatformsFromOutputMatrix();
       updateOutputMatrixSummary();
     });

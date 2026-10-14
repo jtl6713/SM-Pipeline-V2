@@ -109,7 +109,7 @@ test("Production manual output matrix stays authoritative over plan recommendati
   assert.match(app, /await saveProductionRequestOutputs\(activeProductionRequest\)/);
   assert.match(app, /Never replace an operator's explicit output choices/);
   assert.doesNotMatch(app, /applyDefaultOutputsForPlatform\(input\.value, \{ replace: true \}\)/);
-  const start = app.indexOf("async function buildItem4Plan()");
+  const start = app.indexOf("async function buildItem4Plan(options = {})");
   const recommend = app.slice(start, app.indexOf("function selectedRequestPlatforms()", start));
   assert.match(recommend, /extras: \[\]/);
   assert.doesNotMatch(recommend, /restoreProductionOutputSelection\(/);

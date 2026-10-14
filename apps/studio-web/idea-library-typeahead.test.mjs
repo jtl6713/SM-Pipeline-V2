@@ -12,8 +12,8 @@ test("idea library search sequence + pins", async () => {
   const worker = await readFile(path.join(here, "../studio-api/worker.js"), "utf8");
   assert.match(app, /ideaLibraryLoadSequence/);
   assert.match(app, /Ignore stale responses so a slow empty-query open cannot wipe a later "Museum" search/);
-  assert.match(app, /item4-0.6.686-unified-platform-outputs/);
-  assert.match(html, /UI build 0.6.686/);
+  assert.match(app, /item4-0.6.687-platforms-frames-details/);
+  assert.match(html, /UI build 0.6.687/);
   assert.match(worker, /0.10.601-voiceover-once/);
   assert.match(worker, /studio_idea_library_typeahead_v1: true/);
   assert.match(worker, /ideaLibrarySearchHit/);
