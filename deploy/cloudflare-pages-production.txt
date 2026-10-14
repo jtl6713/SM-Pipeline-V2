@@ -320,3 +320,4 @@ UI 0.6.607 hashtag mismatch warning only; approval no longer blocked.
 2026-10-13: UI 0.6.677 — explicit human Production Approve sends revision_approve even if client revision_open has gone stale after Factory send-back.
 2026-10-13: Redeploy 0.6.677 after correcting Factory revision approval regression test syntax (no runtime code change).
 2026-10-13: Redeploy UI 0.6.677 after advancing existing Pages regression version pins to current build.
+2026-10-13: Redeploy UI 0.6.677 after updating footer version expectations in Pages release regression checks.
