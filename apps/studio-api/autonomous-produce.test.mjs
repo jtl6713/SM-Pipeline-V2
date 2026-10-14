@@ -14,17 +14,23 @@ import {
   AUTONOMOUS_DEFAULT_MUSIC_ASSET_ID,
   AUTONOMOUS_DEFAULT_VOICEOVER_TAIL_SECONDS,
   AUTONOMOUS_IDEA_CREATED_FIELD,
+  AUTONOMOUS_IDEAS_PER_HOUR,
+  AUTONOMOUS_SCHEDULED_SKIP_ABOVE,
   AUTONOMOUS_SCHEDULED_TARGET,
   pickAutonomousMusicAssetId,
   pickNarrationVoiceFromProfiles,
   resolveAutonomousNarrationVoice,
   autonomousRunIsBusy,
   autonomousSlot,
+  autonomousAtTopOfHour,
   autonomousRefillSlot,
   autonomousSlotAlreadyClaimed,
+  autonomousScheduledBand,
   autonomousScheduledTotal,
   autonomousProfileNeedsScheduledRefill,
+  autonomousProfileHourOpen,
   autonomousScheduledDeficit,
+  mergeAutonomousHourProgress,
   autonomousRefillScoresFromOverview,
   autonomousProfilesNeedingRefill,
   pickAutonomousRefillProfile,
@@ -155,24 +161,35 @@ test("slot keys are once per morning and afternoon", () => {
   assert.equal(autonomousSlot({ date: "2026-08-30", hour: 9 }), null);
   assert.equal(autonomousRunIsBusy({ status: "picking", at: "2026-08-30T13:27:00Z" }, Date.parse("2026-08-30T13:27:14Z")), true);
   assert.equal(autonomousRunIsBusy({ status: "reset" }), false);
-  assert.equal(autonomousSlotAlreadyClaimed({ slot: "2026-08-30:am", status: "waiting_variants" }, "2026-08-30:am"), true);
-  assert.equal(autonomousSlotAlreadyClaimed({ slot: "2026-08-30:am", status: "awaiting_i4" }, "2026-08-30:am"), true);
+  assert.equal(autonomousSlotAlreadyClaimed({ slot: "2026-08-30:am", status: "waiting_variants" }, "2026-08-30:am"), false);
+  assert.equal(autonomousSlotAlreadyClaimed({ slot: "2026-08-30:am", status: "awaiting_i4" }, "2026-08-30:am"), false);
   assert.equal(autonomousSlotAlreadyClaimed({ slot: "2026-08-30:am", status: "reset" }, "2026-08-30:am"), false);
   assert.equal(autonomousSlotAlreadyClaimed({
     slot: "2026-09-07:pm",
     status: "skipped",
     idea_id: "recdGHU0uHq3ktPje",
     skip_reason: "variants_still_preparing",
-  }, "2026-09-07:pm"), true);
+  }, "2026-09-07:pm"), false);
   assert.equal(autonomousSlotAlreadyClaimed({
     slot: "2026-09-07:pm",
     status: "skipped",
-    skip_reason: "no_unused_library_stills",
+    skip_reason: "no_library_stills",
   }, "2026-09-07:pm"), false);
+  assert.equal(autonomousSlotAlreadyClaimed({
+    slot: "2026-08-30:am",
+    status: "producing",
+    hour_complete: true,
+  }, "2026-08-30:am"), true);
 });
 
-test("hourly refill slot and 200 Scheduled target helpers", () => {
+test("hourly refill creates 10 ideas under 200 and skips over 209", () => {
   assert.equal(AUTONOMOUS_SCHEDULED_TARGET, 200);
+  assert.equal(AUTONOMOUS_SCHEDULED_SKIP_ABOVE, 209);
+  assert.equal(AUTONOMOUS_IDEAS_PER_HOUR, 10);
+  assert.equal(autonomousAtTopOfHour({ date: "2026-10-14", hour: 9, minute: 0 }), true);
+  assert.equal(autonomousAtTopOfHour({ date: "2026-10-14", hour: 9, minute: 5 }), false);
+  assert.equal(autonomousAtTopOfHour({ date: "2026-10-14", hour: 9, minute: 30 }), false);
+  assert.equal(autonomousAtTopOfHour({ date: "2026-10-14", hour: 9 }), false);
   assert.equal(autonomousRefillSlot({ date: "2026-10-14", hour: 9 }), "2026-10-14:h09");
   assert.equal(autonomousRefillSlot({ date: "2026-10-14", hour: 16 }), "2026-10-14:h16");
   assert.equal(autonomousRefillSlot({ date: "2026-10-14", hour: 0 }), "2026-10-14:h00");
@@ -182,22 +199,61 @@ test("hourly refill slot and 200 Scheduled target helpers", () => {
     67,
   );
   assert.equal(autonomousScheduledTotal({ Facebook: 14, Instagram: 20 }), 34);
+  assert.equal(autonomousScheduledBand(67), "refill");
+  assert.equal(autonomousScheduledBand(199), "refill");
+  assert.equal(autonomousScheduledBand(200), "hold");
+  assert.equal(autonomousScheduledBand(209), "hold");
+  assert.equal(autonomousScheduledBand(210), "skip");
   assert.equal(autonomousProfileNeedsScheduledRefill(67, 0), true);
   assert.equal(autonomousProfileNeedsScheduledRefill(200, 0), false);
-  assert.equal(autonomousProfileNeedsScheduledRefill(67, 140), false);
+  assert.equal(autonomousProfileNeedsScheduledRefill(209, 0), false);
+  assert.equal(autonomousProfileNeedsScheduledRefill(210, 0), false);
+  assert.equal(autonomousProfileNeedsScheduledRefill(67, 140), true);
   assert.equal(autonomousProfileNeedsScheduledRefill(199, 0), true);
   assert.equal(autonomousScheduledDeficit(67, 0), 133);
-  assert.equal(autonomousScheduledDeficit(67, 140), 0);
-  assert.equal(autonomousSlotAlreadyClaimed({
-    slot: "2026-10-14:h09",
+  assert.equal(autonomousScheduledDeficit(67, 140), 133);
+  assert.equal(autonomousScheduledDeficit(210, 0), 0);
+  const slot = "2026-10-14:h09";
+  const oneIdea = {
+    slot,
     status: "producing",
     idea_id: "recIdea0000000001",
-  }, "2026-10-14:h09"), true);
+    ideas_by_profile: { recChi: 1 },
+  };
+  assert.equal(autonomousSlotAlreadyClaimed(oneIdea, slot), false);
+  assert.equal(autonomousSlotAlreadyClaimed(oneIdea, slot, ["recChi"]), false);
+  assert.equal(autonomousProfileHourOpen(oneIdea, slot, "recChi"), true);
+  const fullHour = {
+    slot,
+    status: "producing",
+    ideas_by_profile: { recChi: 10, recLA: 9 },
+  };
+  assert.equal(autonomousProfileHourOpen(fullHour, slot, "recChi"), false);
+  assert.equal(autonomousProfileHourOpen(fullHour, slot, "recLA"), true);
+  assert.equal(autonomousSlotAlreadyClaimed(fullHour, slot, ["recChi"]), true);
+  assert.equal(autonomousSlotAlreadyClaimed(fullHour, slot, ["recChi", "recLA"]), false);
   assert.equal(autonomousSlotAlreadyClaimed({
-    slot: "2026-10-14:h09",
+    slot,
     status: "skipped",
     skip_reason: "scheduled_target_met",
-  }, "2026-10-14:h09"), false);
+  }, slot), false);
+  const kept = mergeAutonomousHourProgress(fullHour, {
+    status: "reset",
+    slot: null,
+    idea_id: null,
+    skip_reason: "prior_job_done_advance_fifo",
+  });
+  assert.equal(kept.slot, slot);
+  assert.equal(kept.ideas_by_profile.recChi, 10);
+  assert.equal(kept.ideas_by_profile.recLA, 9);
+  const nextHour = mergeAutonomousHourProgress(fullHour, {
+    status: "picking",
+    slot: "2026-10-14:h10",
+    ideas_by_profile: { recMia: 1 },
+  });
+  assert.equal(nextHour.slot, "2026-10-14:h10");
+  assert.equal(nextHour.ideas_by_profile.recChi, undefined);
+  assert.equal(nextHour.ideas_by_profile.recMia, 1);
 });
 
 test("refill scores prefer the city with the largest Scheduled deficit", () => {
@@ -223,10 +279,12 @@ test("refill scores prefer the city with the largest Scheduled deficit", () => {
   ]);
   assert.equal(scores.recChi.scheduled_total, 67);
   assert.equal(scores.recChi.needed, true);
+  assert.equal(scores.recChi.band, "refill");
   assert.equal(scores.recChi.deficit, 133);
   assert.equal(scores.recLA.needed, true);
-  assert.equal(scores.recLA.deficit, 81);
+  assert.equal(scores.recLA.deficit, 131);
   assert.equal(scores.recMia.needed, false);
+  assert.equal(scores.recMia.band, "hold");
   const profiles = [
     { id: "recChi", name: "Chicago" },
     { id: "recLA", name: "Los Angeles" },
@@ -270,7 +328,7 @@ test("YouTube mapper keeps titles and picker requires assets", () => {
     items: [{ snippet: { title: "Chicago river kayak", channelTitle: "Local", publishedAt: "2026-08-30T01:00:00Z" } }],
   });
   assert.equal(videos[0].title, "Chicago river kayak");
-  assert.equal(parseAutonomousPick({ skip: true, reason: "no_unused_library_stills" }).reason, "no_unused_library_stills");
+  assert.equal(parseAutonomousPick({ skip: true, reason: "no_distinct_subject" }).reason, "no_distinct_subject");
   const libraryFirst = buildAutonomousPickerPrompt({
     profile: { name: "Chicago" },
     trends: { news: [{ title: "Heat wave" }] },
@@ -286,11 +344,11 @@ test("YouTube mapper keeps titles and picker requires assets", () => {
   });
   assert.match(pinned, /OPERATOR PIN/);
   assert.match(pinned, /Chicago Theatre/);
-  assert.match(libraryFirst, /Start from unused library stills/);
+  assert.match(libraryFirst, /Start from library stills/);
   assert.match(libraryFirst, /5 to 10/);
   assert.match(libraryFirst, /post_caption/);
-  assert.match(libraryFirst, /no_unused_library_stills/);
-  assert.match(libraryFirst, /Fresh unused stills at a familiar landmark are OK/);
+  assert.match(libraryFirst, /no_distinct_subject/);
+  assert.match(libraryFirst, /Reusing a photo that already appeared on another post is OK/);
   assert.equal(libraryFirst.includes("no_asset_backed_trend"), false);
   assert.deepEqual(autonomousUnusedLibraryAssets([
     { id: "recAsset1234567890" },
@@ -527,7 +585,15 @@ test("occupied ideas block the same stills or the same place and subject", () =>
     neighborhood_or_area: "Lincoln Park",
     media_asset_ids: ["recZooStill0000002"],
   }, zooOccupied);
-  assert.equal(anotherZooAngle.conflict, false);
+  assert.equal(anotherZooAngle.conflict, true);
+  assert.equal(anotherZooAngle.reason, "similar_to_recent");
+  const reusedPhotoNewPlace = autonomousIdeaConflictsOccupied({
+    candidate_title: "Navy Pier sunset sail",
+    idea_summary: "Catch the lake light after work.",
+    primary_location: "Navy Pier",
+    media_asset_ids: ["recZooStill0000001", "recZooStill0000001", "recZooStill0000001"],
+  }, zooOccupied);
+  assert.equal(reusedPhotoNewPlace.conflict, false);
   assert.deepEqual(autonomousPlaceSubjects("Free Zoo Escape Lincoln Park Zoo"), [
     "lincoln park zoo",
     "lincoln park",
@@ -539,7 +605,7 @@ test("occupied ideas block the same stills or the same place and subject", () =>
   assert.equal(autonomousClusterConflictsOccupied({
     label: "Lincoln Park Zoo",
     assets: [{ id: "recZooStill0000002", location: "Lincoln Park Zoo" }],
-  }, zooOccupied), false);
+  }, zooOccupied), true);
   assert.equal(autonomousClusterConflictsOccupied({
     label: "Lincoln Park Zoo",
     assets: [{ id: "recZooStill0000001", location: "Lincoln Park Zoo" }],
@@ -555,7 +621,7 @@ test("occupied ideas block the same stills or the same place and subject", () =>
     { id: "recPierAsset000003", location: "Navy Pier" },
     { id: "recPierAsset000004", location: "Navy Pier" },
     { id: "recPierAsset000005", location: "Navy Pier" },
-  ], { occupied: zooOccupied })?.key, "place:lincoln park zoo");
+  ], { occupied: zooOccupied })?.key, "place:navy pier");
   assert.equal(AUTONOMOUS_IDEA_CREATED_FIELD, "Create_Date");
   const occupiedFromAirtable = collectAutonomousOccupiedFromIdeas([
     {
@@ -741,7 +807,16 @@ test("Worker stamps photo-ready ideas and drains the 30m SLA on light ticks", as
   const path = await import("node:path");
   const here = path.dirname(fileURLToPath(import.meta.url));
   const worker = await readFile(path.join(here, "worker.js"), "utf8");
-  assert.match(worker, /version: "0.10.601-voiceover-once"/);
+  assert.match(worker, /version: "0.10.602-ten-ideas-per-hour"/);
+  assert.match(worker, /studio_autonomous_ten_per_hour_v1: true/);
+  assert.match(worker, /AUTONOMOUS_IDEAS_PER_HOUR/);
+  assert.match(worker, /scheduled_over_209/);
+  assert.match(worker, /ideas_by_profile/);
+  assert.match(worker, /fillAutonomousScheduledHour/);
+  assert.match(worker, /autonomousAtTopOfHour/);
+  assert.match(worker, /not_top_of_hour/);
+  assert.match(worker, /if \(!cadence\.heavy\)/);
+  assert.doesNotMatch(worker, /rows\.length >= 180/);
   assert.match(worker, /studio_autonomous_scheduled_target_v1: true/);
   assert.match(worker, /studio_autonomous_music_variety_v1: true/);
   assert.match(worker, /AUTONOMOUS_SCHEDULED_TARGET/);
