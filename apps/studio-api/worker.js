@@ -158,6 +158,9 @@ import {
   autonomousProfileHarvestOrder,
   autonomousRequestNeedsContinue,
   firstAutonomousResumeDraft,
+  productionNotesRevisionOpen,
+  autonomousErrorIsFactoryRevision,
+  autonomousRevisionLockReset,
   dailyIdeaProduceHasStarted,
   dailyIdeasReadyToProduce,
   stampAutonomousOrigin,
@@ -685,7 +688,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.592-phantom-rerender",
+          version: "0.10.593-autonomous-revision-fifo",
           studio_factory_desk_v1: true,
           studio_factory_desk_actions_v1: true,
           studio_factory_desk_write_v1: true,
@@ -43519,6 +43522,9 @@ async function selectAutonomousResumeDraft(env, drafts) {
   const nowMs = Date.now();
   for (let requestRecord of drafts || []) {
     let notes = String(f(requestRecord, "Production_Notes") || "");
+    // Factory revision is an operator hold. Skip it before undefer: Ready
+    // variants would clear a deferred stamp and this draft would lock FIFO again.
+    if (productionNotesRevisionOpen(notes)) continue;
     let profileId = "";
     if (isAutonomousOrigin(notes)) {
       const ideaId = firstLinkedRecordId(f(requestRecord, "Idea_Candidate"));
@@ -43650,13 +43656,29 @@ async function resumeAutonomousDrafts(env, authorization, ctx, drafts, chicago, 
         });
       } catch (error) {
         console.warn("autonomous draft resume failed", requestRecord.id, error);
-        results.push({
-          production_request_id: requestRecord.id,
-          idea_id: ideaId,
-          status: "skipped",
-          skip_reason: String(error?.message || error).slice(0, 180),
-        });
+        if (autonomousErrorIsFactoryRevision(error)) {
+          results.push({
+            production_request_id: requestRecord.id,
+            idea_id: ideaId,
+            status: "reset",
+            skip_reason: "skip_factory_revision_open",
+          });
+        } else {
+          results.push({
+            production_request_id: requestRecord.id,
+            idea_id: ideaId,
+            status: "skipped",
+            skip_reason: String(error?.message || error).slice(0, 180),
+          });
+        }
       }
+    }
+    if (results.length && results.every((row) => row.skip_reason === "skip_factory_revision_open")) {
+      await releaseAutonomousRevisionLock(env, chicago, {
+        productionRequestId: results[0].production_request_id,
+        ideaId: results[0].idea_id,
+      });
+      return results;
     }
     const waitingI4 = results.some((row) => row.status === "awaiting_i4");
     const waiting = results.some((row) => row.status === "waiting_variants");
@@ -43713,6 +43735,14 @@ async function resumeAutonomousDrafts(env, authorization, ctx, drafts, chicago, 
     slot,
     resumed: results,
   };
+}
+
+async function releaseAutonomousRevisionLock(env, chicago, { productionRequestId = null, ideaId = null } = {}) {
+  return studioSaveAutonomousLastRun(env, autonomousRevisionLockReset({
+    chicagoDate: chicago?.date || null,
+    productionRequestId,
+    ideaId,
+  }));
 }
 
 async function parkAutonomousResumeDraft(env, requestRecord, reason) {
@@ -43812,6 +43842,12 @@ async function executeStudioAutonomousProduce(env, ctx, options = {}) {
         production_request_id: null,
         parked_production_request_id: requestRecord?.id || last.production_request_id,
       });
+    } else if (productionNotesRevisionOpen(notes)) {
+      // Operator hold. Fall through to the next draft. Do not keep this request id.
+      last = await releaseAutonomousRevisionLock(env, chicago, {
+        productionRequestId: requestRecord?.id || last.production_request_id,
+        ideaId: last.idea_id || null,
+      });
     } else {
     const lastNeedsResume = ["waiting_variants", "awaiting_i4", "skipped", "reset", "picking", "resuming"].includes(String(last.status || "").trim())
       || autonomousRequestNeedsContinue(requestStatus, notes)
@@ -43830,21 +43866,28 @@ async function executeStudioAutonomousProduce(env, ctx, options = {}) {
     if (!pick.media_asset_ids.length) {
       return studioSaveAutonomousLastRun(env, { ...last, status: "skipped", skip_reason: "waiting_variants_lost_assets" });
     }
-    let finished;
+    let finished = null;
     try {
       finished = await finishAutonomousProductionRequest(env, authorization, ctx, idea, requestRecord, pick, {
         awaitFinish: true,
         scheduled: Boolean(options.scheduled),
       });
     } catch (error) {
-      return studioSaveAutonomousLastRun(env, {
-        ...last,
-        status: "skipped",
-        skip_reason: String(error?.message || error).slice(0, 180),
-        chicago_date: chicago.date,
-      });
+      if (autonomousErrorIsFactoryRevision(error)) {
+        last = await releaseAutonomousRevisionLock(env, chicago, {
+          productionRequestId: requestRecord?.id || last.production_request_id,
+          ideaId: last.idea_id || null,
+        });
+      } else {
+        return studioSaveAutonomousLastRun(env, {
+          ...last,
+          status: "skipped",
+          skip_reason: String(error?.message || error).slice(0, 180),
+          chicago_date: chicago.date,
+        });
+      }
     }
-    if (finished.waiting) {
+    if (finished?.waiting) {
       // Force or 30m SLA breach on the same waiting PR → park and advance FIFO.
       const slaOverdue = photoReadySlaOverdue(draftCreatedAt) || photoReadySlaOverdue(last.at);
       if ((options.force || slaOverdue) && ["waiting_variants", "awaiting_i4"].includes(String(last.status || "").trim())) {
@@ -43865,7 +43908,7 @@ async function executeStudioAutonomousProduce(env, ctx, options = {}) {
           chicago_date: chicago.date,
         });
       }
-    } else {
+    } else if (finished) {
       return studioSaveAutonomousLastRun(env, {
         ...last,
         status: "promoted",

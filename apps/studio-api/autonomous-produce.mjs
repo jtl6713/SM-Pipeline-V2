@@ -292,6 +292,37 @@ export function stampAutonomousOrigin(notes) {
   return text ? `origin=autonomous\n${text}` : "origin=autonomous";
 }
 
+export const FACTORY_REVISION_NOTE_PREFIX = "[factory-revision-open]";
+
+/** Operator Factory send-back. Autonomous promote 409s until a human clicks Approve. */
+export function productionNotesRevisionOpen(notes) {
+  return String(notes || "")
+    .split(/\r?\n/)
+    .some((line) => String(line || "").trim().startsWith(FACTORY_REVISION_NOTE_PREFIX));
+}
+
+export function autonomousErrorIsFactoryRevision(error) {
+  return /open for Factory revision/i.test(String(error?.message || error || ""));
+}
+
+/**
+ * Drop the FIFO lock without keeping the held request id.
+ * Do not stamp autonomous_resume=deferred: Ready variants clear that stamp
+ * and the same hold is picked again.
+ */
+export function autonomousRevisionLockReset({ chicagoDate = null, productionRequestId = null, ideaId = null } = {}) {
+  return {
+    status: "reset",
+    skip_reason: "skip_factory_revision_open",
+    chicago_date: chicagoDate || null,
+    slot: null,
+    idea_id: null,
+    production_request_id: null,
+    parked_production_request_id: productionRequestId || null,
+    parked_idea_id: ideaId || null,
+  };
+}
+
 /** Park a Draft that is monopolizing FIFO (stuck Preparing / deferred by resume). */
 export function isAutonomousResumeDeferred(notes) {
   const text = String(notes || "");
@@ -360,8 +391,8 @@ export function autonomousPreparingIsStale(
 /**
  * Oldest draft the morning resume may start.
  * origin=autonomous runs only for profiles with Autonomous produce on.
- * Deferred / long-Preparing drafts are skipped so one city cannot starve another.
- * Other resume stamps, such as prepare-to-review, are unchanged.
+ * Deferred / long-Preparing / Factory-revision drafts are skipped so one city
+ * cannot starve another. Other resume stamps, such as prepare-to-review, are unchanged.
  */
 export function firstAutonomousResumeDraft(drafts, enabledProfileIds, nowMs = Date.now()) {
   const enabled = new Set(
@@ -372,6 +403,7 @@ export function firstAutonomousResumeDraft(drafts, enabledProfileIds, nowMs = Da
   for (const draft of Array.isArray(drafts) ? drafts : []) {
     const notes = String(draft?.notes || draft?.production_notes || "");
     if (isAutonomousResumeDeferred(notes)) continue;
+    if (productionNotesRevisionOpen(notes)) continue;
     if (autonomousPreparingIsStale(
       draft?.variant_status,
       draft?.variant_updated_at,
