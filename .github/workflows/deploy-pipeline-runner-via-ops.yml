@@ -217,3 +217,5 @@ jobs:
 # 2026-10-12: Deploy Studio active-profile AI market/hashtag correctness safeguard.
 # Trigger pipeline-runner deploy for profile-scoped music pool rotation
 # 2026-10-13 service_version=2026-10-13-profile-music-rotation
+# Re-trigger profile music rotation after duplicate-audio identity guard
+# source=66da8deef35f4b36610f76041cec644ebcd80955 version=2026-10-13-profile-music-rotation
