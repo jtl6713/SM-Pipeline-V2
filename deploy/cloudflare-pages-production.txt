@@ -338,3 +338,4 @@ UI 0.6.607 hashtag mismatch warning only; approval no longer blocked.
 2026-10-14: Deploy Studio UI 0.6.683. Factory Needs eyes accordion defaults first content expanded and others collapsed; apply responsive readable output cards/actions to Auto-High, Needs assets, Manual, and candidate paths.
 2026-10-14: Pages 0.6.683-factory-all-lanes - Align app BUILD_ID and regression pins so Cloudflare Pages can upload Studio 0.6.683.
 2026-10-14: Studio UI 0.6.684-factory-review-feedback. Send back opens notes dialog for content and single output, Production shows reviewer instructions, UI BUILD_ID/label/cache/test pins aligned.
+2026-10-14: Retry Studio UI 0.6.684 Factory feedback after updating all five legacy 0.6.683 regression assertions identified by the failed Pages run 38592698892. Worker feedback deployment already succeeded.
