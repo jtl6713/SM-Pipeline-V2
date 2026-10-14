@@ -236,16 +236,19 @@
 
   function renderContentBar(group) {
     const ready = readyContentCards(group);
-    if (ready.length < 2) return "";
+    if (!ready.length) return "";
     const first = group.cards[0] || {};
     const contentId = String(first.content_id || "").trim();
     const title = first.title || "Untitled";
     const meta = contentId ? `Content ${contentId} · ${ready.length} ready` : `${ready.length} ready`;
+    const approveAll = ready.length > 1
+      ? `<button type="button" class="primary-button factory-content-approve" data-factory-approve-content="${esc(group.key)}">Approve all (${ready.length})</button>`
+      : "";
     return `<div class="factory-content-bar" data-factory-content="${esc(group.key)}">
       <span class="factory-content-title">${esc(title)}</span>
       <span class="factory-content-meta">${esc(meta)}</span>
       <button type="button" class="secondary-button factory-content-send-back" data-factory-send-back-content="${esc(group.key)}">Send back to Production</button>
-      <button type="button" class="primary-button factory-content-approve" data-factory-approve-content="${esc(group.key)}">Approve all (${ready.length})</button>
+      ${approveAll}
     </div>`;
   }
 

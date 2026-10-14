@@ -14,7 +14,7 @@ test("Factory Desk is a separate page beside Operations", async () => {
 
   assert.match(html, /id="navFactory"[^>]*>Factory</);
   assert.match(html, /id="page-factory"/);
-  assert.match(html, /factory-desk\.js\?v=0\.6\.675-factory-approve-mae/);
+  assert.match(html, /factory-desk\.js\?v=0\.6\.675-factory-content-return/);
   assert.match(html, /"factory":\s*\[\s*"\/assets\/factory-desk\.js/);
   assert.doesNotMatch(html, /<script src="\/assets\/factory-desk\.js/);
   assert.match(html, /factory-band-auto/);
@@ -48,6 +48,8 @@ test("Factory Desk is a separate page beside Operations", async () => {
   assert.match(factory, /data-factory-send-back/);
   assert.match(factory, /data-factory-send-back-content/);
   assert.match(factory, /Send back to Production/);
+  assert.match(factory, /if \(!ready\.length\) return ""/);
+  assert.match(factory, /ready\.length > 1/);
   assert.match(factory, /send_back_content/);
   assert.match(app, /StudioOpenProductionRequestById/);
   assert.match(factory, /data-factory-delete/);
