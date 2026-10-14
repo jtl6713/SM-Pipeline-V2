@@ -314,3 +314,4 @@ UI 0.6.607 hashtag mismatch warning only; approval no longer blocked.
 2026-10-13: Reverify custom domain for UI 0.6.674-factory-content-send-back after Pages alias/cache propagation.
 2026-10-13: Studio UI 0.6.675-factory-approve-mae - Factory Approve with no stored time uses the next morning, afternoon, or evening. Explicit Publish Now still sends immediate.
 2026-10-13: Factory Needs Eyes content-level Send back to Production is shown even for single-output content packages; keep Approve all for multi-output packages only.
+2026-10-13: UI 0.6.676-factory-revision-unlock - Factory send-back opens a true editable Production revision; refreshes stale promoted lock and requires explicit Approve before rerender.
