@@ -293,3 +293,73 @@
  #page-factory .factory-band-eyes .factory-content-send-back{grid-column:1;grid-row:2}
  #page-factory .factory-band-eyes .factory-content-approve{grid-column:2;grid-row:2}
 }
+
+/* Factory review feedback: accessible, mobile-safe comments dialog. */
+.factory-feedback-backdrop[hidden],.production-factory-feedback[hidden]{display:none!important}
+.factory-feedback-backdrop{
+  position:fixed;inset:0;z-index:1100;
+  display:grid;place-items:center;overflow-y:auto;
+  box-sizing:border-box;padding:max(16px,env(safe-area-inset-top)) 16px max(16px,env(safe-area-inset-bottom));
+  background:rgba(9,25,49,.68);
+}
+.factory-feedback-dialog{
+  box-sizing:border-box;width:min(100%,640px);max-height:calc(100dvh - 32px);
+  overflow-y:auto;background:#fff;border-radius:16px;
+  box-shadow:0 20px 64px rgba(8,25,49,.3);color:#11243d;
+}
+.factory-feedback-header{
+  display:flex;justify-content:space-between;align-items:flex-start;gap:12px;
+  padding:18px 20px 14px;border-bottom:1px solid #dce5f0;
+}
+.factory-feedback-kicker{margin:0;color:#46658b;font-size:.72rem;font-weight:800;letter-spacing:.07em;text-transform:uppercase}
+.factory-feedback-header h2{margin:5px 0 0;color:#012559;font-size:1.2rem;line-height:1.25}
+.factory-feedback-close{
+  width:36px;height:36px;border:1px solid #ced8e6;border-radius:9px;
+  background:#fff;color:#012559;font-size:1.6rem;cursor:pointer;
+}
+.factory-feedback-body{padding:18px 20px}
+#factoryFeedbackTarget{display:block;color:#012559;font-size:1rem;overflow-wrap:anywhere}
+.factory-feedback-scope{margin:3px 0 14px;color:#50657e;font-size:.85rem}
+#factoryFeedbackIntro{margin:0 0 16px;font-size:.88rem;line-height:1.45}
+.factory-feedback-label{display:block;font-size:.82rem;font-weight:800;margin-bottom:7px}
+#factoryFeedbackNotes{
+  display:block;box-sizing:border-box;width:100%;min-height:160px;padding:12px;
+  border:1px solid #aebfd6;border-radius:10px;background:#fff;color:#11243d;
+  font:inherit;font-size:1rem;line-height:1.45;resize:vertical;
+}
+#factoryFeedbackNotes:focus-visible{outline:2px solid #1470cc;outline-offset:1px}
+.factory-feedback-hints{
+  display:flex;justify-content:space-between;gap:12px;align-items:flex-start;
+  margin:7px 0 0;color:#536780;font-size:.76rem;line-height:1.4;
+}
+#factoryFeedbackCount{flex:none;white-space:nowrap}
+.factory-feedback-error{padding:10px 12px;border-radius:8px;color:#8e2525;background:#fff0f0;font-size:.84rem}
+.factory-feedback-actions{
+  display:flex;justify-content:flex-end;gap:10px;padding:13px 20px 20px;
+  border-top:1px solid #e2e9f2;
+}
+.factory-feedback-actions button{min-height:42px;padding:9px 16px;border-radius:8px}
+.production-factory-feedback{
+  border:1px solid #d7b778;border-left:4px solid #9a7420;border-radius:10px;
+  padding:14px 16px;margin:12px 0 18px;background:#fff9e9;
+  box-sizing:border-box;min-width:0;
+}
+.production-factory-feedback-heading{display:flex;align-items:center;flex-wrap:wrap;gap:9px}
+.production-factory-feedback-heading strong{color:#583b00;font-size:1rem}
+.production-factory-feedback-pill{padding:3px 8px;border-radius:100px;background:#f1dfb6;color:#614409;font-size:.7rem;font-weight:800}
+.production-factory-feedback-meta{margin:5px 0 9px;color:#735c31;font-size:.78rem;overflow-wrap:anywhere}
+.production-factory-feedback-body{
+  white-space:pre-wrap;overflow-wrap:anywhere;background:#fff;border:1px solid #e9dcbf;
+  border-radius:8px;padding:12px;color:#172d47;font-size:.88rem;line-height:1.5;
+}
+.production-factory-feedback-help{margin:10px 0 0;color:#625233;font-size:.78rem;line-height:1.4}
+@media(max-width:520px){
+ .factory-feedback-backdrop{padding:10px 8px max(10px,env(safe-area-inset-bottom))}
+ .factory-feedback-dialog{border-radius:12px;max-height:calc(100dvh - 18px)}
+ .factory-feedback-header{padding:14px 14px 12px}
+ .factory-feedback-body{padding:14px}
+ .factory-feedback-actions{display:grid;grid-template-columns:1fr 1fr;padding:12px 14px 16px}
+ .factory-feedback-actions button{width:100%;min-width:0;padding:10px 8px;white-space:normal}
+ .factory-feedback-hints{flex-direction:column;gap:4px}
+ .production-factory-feedback{padding:12px}
+}

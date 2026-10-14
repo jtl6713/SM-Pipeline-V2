@@ -276,7 +276,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.683-factory-all-lanes";
+  const BUILD_ID = "item4-0.6.684-factory-review-feedback";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -12923,6 +12923,21 @@ function timedScriptAssetLabel(asset, index) {
   function setProductionRequestControlState(record) {
     const recordId = String(record?.id || "");
     const revisionOpen = record?.revision_open === true;
+    const factoryFeedback = record?.factory_review_feedback;
+    const feedbackPanel = $("productionFactoryFeedback");
+    if (feedbackPanel) {
+      const visible = Boolean(revisionOpen && factoryFeedback?.instructions);
+      feedbackPanel.hidden = !visible;
+      if (visible) {
+        const scope = String(factoryFeedback.scope || "content");
+        const date = factoryFeedback.at ? new Date(factoryFeedback.at).toLocaleString() : "";
+        const scopeLabel = scope.startsWith("output:") ? "Selected output" : "Entire content";
+        const feedbackMeta = $("productionFactoryFeedbackMeta");
+        const feedbackBody = $("productionFactoryFeedbackBody");
+        if (feedbackMeta) feedbackMeta.textContent = [scopeLabel, date, factoryFeedback.author].filter(Boolean).join(" · ");
+        if (feedbackBody) feedbackBody.textContent = String(factoryFeedback.instructions);
+      }
+    }
     const status = revisionOpen
       ? "Draft"
       : (item4PromotedRequestIds.has(recordId)

@@ -4,6 +4,7 @@
     loading: false,
     desk: null,
     expandedReviewGroup: null,
+    pendingFactoryFeedback: null,
   };
 
   function esc(value) {
@@ -333,6 +334,74 @@
     setCount("factoryCountManual", String(Number(summary.manual) || 0));
   }
 
+  // Review feedback is entered before any state-changing request is sent.
+  function openFactoryFeedback({ title, scope, payload }) {
+    const backdrop = $("factoryFeedbackBackdrop");
+    const textarea = $("factoryFeedbackNotes");
+    if (!backdrop || !textarea) {
+      setStatus("Review notes window is unavailable. Refresh Studio before sending back.", true);
+      return;
+    }
+    state.pendingFactoryFeedback = { payload, focusedElement: document.activeElement };
+    const heading = $("factoryFeedbackTarget");
+    const detail = $("factoryFeedbackScope");
+    const error = $("factoryFeedbackError");
+    if (heading) heading.textContent = title || "Untitled content";
+    if (detail) detail.textContent = scope || "Review changes";
+    if (error) { error.hidden = true; error.textContent = ""; }
+    textarea.value = "";
+    const count = $("factoryFeedbackCount");
+    if (count) count.textContent = "0 / 3000";
+    const submit = $("factoryFeedbackSubmit");
+    if (submit) { submit.disabled = false; submit.textContent = "Send back with notes"; }
+    backdrop.hidden = false;
+    textarea.focus();
+  }
+
+  function closeFactoryFeedback() {
+    const backdrop = $("factoryFeedbackBackdrop");
+    if (backdrop) backdrop.hidden = true;
+    const origin = state.pendingFactoryFeedback?.focusedElement;
+    state.pendingFactoryFeedback = null;
+    if (origin?.isConnected) origin.focus?.();
+  }
+
+  async function submitFactoryFeedback(event) {
+    event.preventDefault();
+    const pending = state.pendingFactoryFeedback;
+    if (!pending) return;
+    const notes = String($("factoryFeedbackNotes")?.value || "").trim();
+    const error = $("factoryFeedbackError");
+    if (!notes) {
+      if (error) { error.hidden = false; error.textContent = "Describe the changes needed before sending back."; }
+      $("factoryFeedbackNotes")?.focus();
+      return;
+    }
+    const submit = $("factoryFeedbackSubmit");
+    if (submit) { submit.disabled = true; submit.textContent = "Sending back…"; }
+    if (error) { error.hidden = true; error.textContent = ""; }
+    try {
+      closeFactoryPreview();
+      const desk = await mutateDesk({ ...pending.payload, note: notes });
+      const requestId = String(desk?.result?.production_request_id || pending.payload.production_request_id || "").trim();
+      closeFactoryFeedback();
+      if (requestId && typeof window.StudioOpenProductionRequestById === "function") {
+        try {
+          await window.StudioOpenProductionRequestById(requestId);
+          setStatus("Review feedback saved in Production. Edit, then Approve to rerender.");
+        } catch (openingError) {
+          setStatus("Review notes saved. Open Production to view feedback: " + (openingError.message || openingError), true);
+        }
+      } else {
+        setStatus("Review notes saved. Open the returned item in Production for changes.");
+      }
+    } catch (err) {
+      if (submit) { submit.disabled = false; submit.textContent = "Send back with notes"; }
+      if (error) { error.hidden = false; error.textContent = String(err?.message || err); }
+      setStatus("Could not send back: " + (err?.message || err), true);
+    }
+  }
+
   function bindCardActions(desk) {
     const byId = new Map();
     for (const lane of Object.values(desk?.lanes || {})) {
@@ -396,7 +465,7 @@
       });
     });
     root.querySelectorAll("[data-factory-send-back-content]").forEach((button) => {
-      button.addEventListener("click", async () => {
+      button.addEventListener("click", () => {
         const key = button.getAttribute("data-factory-send-back-content");
         const cards = (state.desk?.lanes?.needs_eyes || []).filter((card) => contentGroupKey(card) === key);
         const ready = readyContentCards({ cards });
@@ -410,29 +479,17 @@
           return;
         }
         const title = ready[0].title || "this content";
-        if (!window.confirm(`Send all ${ready.length} outputs for “${title}” back to Production?\n\nThe Production Request will reopen as a draft. You can change the package and approve it again to rerender.`)) return;
-        button.disabled = true;
-        closeFactoryPreview();
-        try {
-          const desk = await mutateDesk({
+        openFactoryFeedback({
+          title,
+          scope: `Entire content package · ${ready.length} ready output${ready.length === 1 ? "" : "s"}`,
+          payload: {
             action: "send_back_content",
             kind: "output",
             id: ready[0].id,
             production_request_id: productionRequestId,
             output_ids: ready.map((card) => card.id),
-          });
-          const requestId = String(desk?.result?.production_request_id || productionRequestId).trim();
-          if (requestId && typeof window.StudioOpenProductionRequestById === "function") {
-            await window.StudioOpenProductionRequestById(requestId);
-          } else {
-            setStatus("Sent back to Production. Open Production to edit the package.");
-          }
-        } catch (error) {
-          button.disabled = false;
-          const message = error.message || String(error);
-          setStatus(message, true);
-          window.alert(`Factory Send back to Production failed:\n${message}`);
-        }
+          },
+        });
       });
     });
     root.querySelectorAll("[data-factory-approve-content]").forEach((button) => {
@@ -473,16 +530,16 @@
           setStatus("Send back failed: card not found in desk payload.", true);
           return;
         }
-        if (!window.confirm(`Send “${cardLabel(card)}” back to production?\n\nReview becomes Changes Requested.`)) return;
-        button.disabled = true;
-        closeFactoryPreview();
-        mutateDesk({ action: "send_back", id: card.id, kind: card.kind || "output" })
-          .catch((error) => {
-            button.disabled = false;
-            const message = error.message || String(error);
-            setStatus(message, true);
-            window.alert(`Factory Send back failed:\n${message}`);
-          });
+        openFactoryFeedback({
+          title: card.title || cardLabel(card),
+          scope: [card.platform, card.studio_output_type, "Selected output only"].filter(Boolean).join(" · "),
+          payload: {
+            action: "send_back",
+            id: card.id,
+            kind: card.kind || "output",
+            production_request_id: card.production_request_id || null,
+          },
+        });
       });
     });
     root.querySelectorAll("[data-factory-delete]").forEach((button) => {
@@ -637,6 +694,23 @@
       state.loading = false;
     }
   }
+
+  $("factoryFeedbackForm")?.addEventListener("submit", submitFactoryFeedback);
+  $("factoryFeedbackCancel")?.addEventListener("click", closeFactoryFeedback);
+  $("factoryFeedbackClose")?.addEventListener("click", closeFactoryFeedback);
+  $("factoryFeedbackBackdrop")?.addEventListener("click", (event) => {
+    if (event.target === $("factoryFeedbackBackdrop") && !$("factoryFeedbackSubmit")?.disabled) closeFactoryFeedback();
+  });
+  $("factoryFeedbackNotes")?.addEventListener("input", (event) => {
+    const node = $("factoryFeedbackCount");
+    if (node) node.textContent = `${event.target.value.length} / 3000`;
+  });
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && !$("factoryFeedbackBackdrop")?.hidden && !$("factoryFeedbackSubmit")?.disabled) {
+      event.preventDefault();
+      closeFactoryFeedback();
+    }
+  });
 
   $("factoryDeskRefresh")?.addEventListener("click", () => {
     loadFactoryDesk(true).catch(() => {});

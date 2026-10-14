@@ -15785,6 +15785,7 @@ function mapProductionRequest(record, ideaTitle = null) {
     requested_script: f(record, "Requested_Script"),
     primary_location: String(f(record, "Primary_Location") || "").trim() || null,
     production_notes: stripFactoryRevisionNote(f(record, "Production_Notes")),
+    factory_review_feedback: factoryLatestReviewFeedback(f(record, "Production_Notes")),
     revision_open: productionRequestRevisionOpen(record),
     created_at: f(record, "Created_At"),
     updated_at: f(record, "Updated_At"),
@@ -42502,7 +42503,37 @@ async function factoryApproveOutput(env, id, actor, note, ctx = null) {
   };
 }
 
-async function factorySendBackOutput(env, id, actor, note) {
+// Factory revision feedback stays human-readable in Production_Notes and
+// machine-parsable for a future opt-in revision agent. It is never executed here.
+function factoryFeedbackBlock(note, { actor = "operator", stamp = "", scope = "content" } = {}) {
+  const instruction = String(note || "").trim();
+  if (!instruction) return "";
+  const safeScope = String(scope || "content").replace(/[^a-zA-Z0-9:_-]/g, "_").slice(0,96);
+  const safeActor = String(actor || "operator").replace(/[^a-zA-Z0-9@._-]/g, "_").slice(0,120);
+  const safeInstruction = instruction.replace(/\[\/factory-review-feedback\]/gi, "[end review feedback]");
+  return `[factory-review-feedback at=${stamp || new Date().toISOString()} scope=${safeScope} actor=${safeActor}]\n${safeInstruction}\n[/factory-review-feedback]`;
+}
+
+function factoryAppendFeedback(existing, note, metadata = {}) {
+  const clean = stripFactoryRevisionNote(existing);
+  const block = factoryFeedbackBlock(note, metadata);
+  const merged = [clean, block].filter(Boolean).join("\n\n");
+  // Reserve space for the Factory revision lock marker appended by the caller.
+  if (merged.length > 9750) throw new HttpError(409, "Production notes are full. Shorten existing notes before adding another review.");
+  return merged;
+}
+
+function factoryLatestReviewFeedback(notes) {
+  const source = String(notes || "");
+  const re = /\[factory-review-feedback at=([^\s\]]+) scope=([^\s\]]+) actor=([^\]]+)\]\r?\n([\s\S]*?)\r?\n\[\/factory-review-feedback\]/g;
+  let latest = null;
+  for (const match of source.matchAll(re)) {
+    latest = { at: match[1], scope: match[2], author: match[3], instructions: String(match[4] || "").trim() };
+  }
+  return latest;
+}
+
+async function factorySendBackOutput(env, id, actor, note, requestedProductionId = null) {
   const existing = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, id);
   const outputStatus = String(f(existing, "Output_Status") || "").trim();
   const reviewStatus = String(f(existing, "Review_Status") || "").trim();
@@ -42512,6 +42543,25 @@ async function factorySendBackOutput(env, id, actor, note) {
   }
   if (outputStatus === "Skipped") throw new HttpError(409, "Skipped outputs cannot be sent back");
   const stamp = new Date().toISOString();
+  const linkedRequestId = studioFirstLinkedId(f(existing, "Production_Request"));
+  const requestedId = String(requestedProductionId || "").trim();
+  if (requestedId && linkedRequestId && requestedId !== linkedRequestId) {
+    throw new HttpError(409, "Output belongs to a different Production Request");
+  }
+  const productionRequestId = linkedRequestId || (/^rec[A-Za-z0-9]+$/.test(requestedId) ? requestedId : null);
+  const requestRecord = productionRequestId
+    ? await airtableFetch(env, PRODUCTION_REQUEST_TABLE, productionRequestId)
+    : null;
+  if (requestRecord) {
+    const outputContentId = studioFirstLinkedId(f(existing, "Content_Item"));
+    const requestContentId = studioFirstLinkedId(f(requestRecord, "Promoted_Content_Item"));
+    if (outputContentId && requestContentId && outputContentId !== requestContentId) {
+      throw new HttpError(409, "Output and Production Request content do not match");
+    }
+  }
+  const productionNotes = requestRecord
+    ? factoryAppendFeedback(f(requestRecord, "Production_Notes"), note, { actor, stamp, scope: `output:${id}` })
+    : null;
   const existingNotes = String(f(existing, "Review_Notes") || "").trim();
   const line = `Factory Desk send-back by ${actor || "operator"} at ${stamp}.${note ? ` ${note}` : ""}`;
   await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, id, {
@@ -42519,18 +42569,37 @@ async function factorySendBackOutput(env, id, actor, note) {
     body: JSON.stringify({
       fields: {
         Review_Status: "Changes Requested",
-        Output_Status: "In Production",
+        Output_Status: "Changes Requested",
         Publish_Status: "Not Ready",
+        Render_Status: "Needs Changes",
+        Do_Not_Publish: true,
         Review_Decision_At: stamp,
         Review_Notes: [existingNotes, line].filter(Boolean).join("\n\n"),
       },
       typecast: true,
     }),
   });
+  if (requestRecord) {
+    await airtableFetch(env, PRODUCTION_REQUEST_TABLE, productionRequestId, {
+      method: "PATCH",
+      body: JSON.stringify({
+        fields: {
+          Request_Status: "Draft",
+          Active: true,
+          Submitted_At: null,
+          Studio_Production_Job_JSON: null,
+          Production_Notes: withFactoryRevisionOpen(productionNotes, { actor, stamp }),
+          Updated_At: stamp,
+        },
+        typecast: true,
+      }),
+    });
+  }
   return {
     id,
+    production_request_id: productionRequestId || null,
     prior_review_status: reviewStatus,
-    message: "Sent back to production (Changes Requested).",
+    message: "Sent back to Production with review feedback. Change the request, then approve to rerender.",
   };
 }
 
@@ -42587,6 +42656,9 @@ async function factorySendBackContent(env, productionRequestId, outputIds, actor
   }
 
   const stamp = new Date().toISOString();
+  const productionNotes = factoryAppendFeedback(f(requestRecord, "Production_Notes"), note, {
+    actor, stamp, scope: "content",
+  });
   const line = `Factory content send-back by ${actor || "operator"} at ${stamp}.${note ? ` ${note}` : ""}`;
   // Hold the last render for reference. Do not start any production work until
   // the operator explicitly clicks Approve after making revisions.
@@ -42615,7 +42687,7 @@ async function factorySendBackContent(env, productionRequestId, outputIds, actor
         Active: true,
         Submitted_At: null,
         Studio_Production_Job_JSON: null,
-        Production_Notes: withFactoryRevisionOpen(f(requestRecord, "Production_Notes"), { actor, stamp }),
+        Production_Notes: withFactoryRevisionOpen(productionNotes, { actor, stamp }),
         Updated_At: stamp,
       },
       typecast: true,
@@ -42685,7 +42757,7 @@ async function mutateFactoryDesk(request, env, authorization, ctx = null) {
   } else if (action === "approve" || action === "send_back" || action === "send_back_content" || action === "delete") {
     const id = String(payload?.id || payload?.item?.id || "").trim();
     const kind = String(payload?.kind || payload?.item?.kind || "output").trim().toLowerCase();
-    const note = String(payload?.note || payload?.notes || "").trim().slice(0, 500);
+    const note = String(payload?.note || payload?.notes || "").trim().slice(0, 3000);
     if (!/^rec[A-Za-z0-9]+$/.test(id)) throw new HttpError(400, "id must be an Airtable record id");
     if (action === "approve") {
       if (kind !== "output") throw new HttpError(400, "Approve is only for Ready for Review outputs");
@@ -42694,7 +42766,7 @@ async function mutateFactoryDesk(request, env, authorization, ctx = null) {
     } else if (action === "send_back") {
       if (kind !== "output") throw new HttpError(400, "Send back is only for outputs");
       requirePermission(authorization, "outputs_review");
-      resultExtra = await factorySendBackOutput(env, id, actor, note);
+      resultExtra = await factorySendBackOutput(env, id, actor, note, payload?.production_request_id);
     } else if (action === "send_back_content") {
       requirePermission(authorization, "outputs_review");
       resultExtra = await factorySendBackContent(
