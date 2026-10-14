@@ -155,7 +155,7 @@ function isManualLane(row) {
   // produce_stale after 3m of quiet job JSON used to dump the whole render queue
   // into Repair while only one Remotion job could run — operators saw In Flight=1.
   if (isTransientFactoryStuck(row) && !explicitlyBroken) return false;
-  // A parent voiceover/produce block (ElevenLabs 401 on LA 650–654) paints Pipeline
+  // A parent voiceover/produce block (ElevenLabs quota 401 on LA 650–654) paints Pipeline
   // as Preparing Assets / Queued / Waiting in render queue. That work stays In Flight.
   // The output's own Failed / Blocked badge still belongs in Repair. Code bugs stay there too.
   if (!outputBroken && !codeBug && parentBlocked && isInFlightFactoryState(row)) return false;

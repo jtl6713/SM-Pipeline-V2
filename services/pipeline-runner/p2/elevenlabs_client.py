@@ -31,65 +31,101 @@ def resolve_content_voice_id(item: dict[str, Any] | None) -> str:
     return voice_id_for_name(legacy_name)
 
 
-# Voices that returned 401 this process. Later scenes skip straight to Kate.
-_UNAUTHORIZED_VOICE_IDS: set[str] = set()
+def _clean_api_key(raw: str) -> str:
+    return str(raw or "").strip().strip('"').strip("'")
 
 
-def unauthorized_voice_ids() -> set[str]:
-    return set(_UNAUTHORIZED_VOICE_IDS)
+def _response_detail(response: requests.Response) -> str:
+    text = (response.text or "").strip().replace("\n", " ")
+    if len(text) > 400:
+        text = text[:400] + "…"
+    return text
 
 
-def reset_unauthorized_voices() -> None:
-    _UNAUTHORIZED_VOICE_IDS.clear()
+def _quota_exhausted_message(api_key: str, *, status_code: int, detail: str) -> str | None:
+    """Return a clear quota message when ElevenLabs rejects TTS for character limits."""
+    try:
+        user = requests.get(
+            "https://api.elevenlabs.io/v1/user",
+            headers={"xi-api-key": api_key, "Accept": "application/json"},
+            timeout=30,
+        )
+    except requests.RequestException:
+        return None
+    if not user.ok:
+        return None
+    try:
+        body = user.json()
+    except ValueError:
+        return None
+    sub = body.get("subscription") if isinstance(body, dict) else None
+    if not isinstance(sub, dict):
+        return None
+    try:
+        used = int(sub.get("character_count") or 0)
+        limit = int(sub.get("character_limit") or 0)
+    except (TypeError, ValueError):
+        return None
+    lowered = detail.lower()
+    detail_hints_quota = any(token in lowered for token in ("quota", "character", "limit", "credit"))
+    if not (limit > 0 and used >= limit) and not detail_hints_quota:
+        return None
+    reset = sub.get("next_character_count_reset_unix")
+    reset_bit = f" next_reset_unix={reset}" if reset not in (None, "") else ""
+    return (
+        f"ElevenLabs character quota exhausted ({used}/{limit}); "
+        f"TTS HTTP {status_code}.{reset_bit} "
+        "Upgrade the plan or wait for the monthly reset — the voice ID is not the problem."
+    )
 
 
 def synthesize_voiceover_by_id(text: str, *, voice_id: str, speed: float = 1.0) -> bytes:
     settings = load_settings()
-    api_key = str(settings.get("elevenlabs_api_key") or "").strip()
+    api_key = _clean_api_key(str(settings.get("elevenlabs_api_key") or ""))
     if not api_key:
         raise RuntimeError("ELEVENLABS_API_KEY is required for voiceover generation")
     voice_id = str(voice_id or "").strip()
     if not voice_id:
         raise RuntimeError("ElevenLabs voice_id is required")
-    # Briony (hv8WzBOrsvuSUeIQGOCM) 401'd on LA 650–654 while Kate still belongs
-    # to the account. Do not spend another request on a voice we already rejected.
-    if voice_id in _UNAUTHORIZED_VOICE_IDS and voice_id != VOICE_ID_DEFAULT:
-        voice_id = VOICE_ID_DEFAULT
     try:
         speech_speed = float(speed or 1.0)
     except (TypeError, ValueError):
         speech_speed = 1.0
     speech_speed = min(1.2, max(0.7, speech_speed))
-    requested = voice_id
-
-    def _post(active_voice_id: str):
-        return requests.post(
-            f"https://api.elevenlabs.io/v1/text-to-speech/{active_voice_id}",
-            headers={
-                "xi-api-key": api_key,
-                "Content-Type": "application/json",
-                "Accept": "audio/mpeg",
+    # output_format is a query parameter on the ElevenLabs TTS API (not a JSON body field).
+    response = requests.post(
+        f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}",
+        params={"output_format": ELEVENLABS_OUTPUT_FORMAT},
+        headers={
+            "xi-api-key": api_key,
+            "Content-Type": "application/json",
+            "Accept": "audio/mpeg",
+        },
+        json={
+            "text": text,
+            "model_id": ELEVENLABS_MODEL_ID,
+            "voice_settings": {
+                "stability": 0.5,
+                "similarity_boost": 0.75,
+                "speed": speech_speed,
+                "use_speaker_boost": False,
             },
-            json={
-                "text": text,
-                "model_id": ELEVENLABS_MODEL_ID,
-                "output_format": ELEVENLABS_OUTPUT_FORMAT,
-                "voice_settings": {
-                    "stability": 0.5,
-                    "similarity_boost": 0.75,
-                    "speed": speech_speed,
-                    "use_speaker_boost": False,
-                },
-                "apply_text_normalization": "auto",
-            },
-            timeout=300,
+            "apply_text_normalization": "auto",
+        },
+        timeout=300,
+    )
+    if not response.ok:
+        detail = _response_detail(response)
+        if response.status_code in (401, 402, 429):
+            quota_msg = _quota_exhausted_message(
+                api_key, status_code=response.status_code, detail=detail
+            )
+            if quota_msg:
+                raise RuntimeError(quota_msg)
+        suffix = f" body={detail}" if detail else ""
+        raise RuntimeError(
+            f"ElevenLabs TTS failed HTTP {response.status_code} for voice_id={voice_id}.{suffix}"
         )
-
-    response = _post(requested)
-    if response.status_code == 401 and requested != VOICE_ID_DEFAULT:
-        _UNAUTHORIZED_VOICE_IDS.add(requested)
-        response = _post(VOICE_ID_DEFAULT)
-    response.raise_for_status()
     content = response.content
     if not content:
         raise RuntimeError("ElevenLabs returned empty audio")

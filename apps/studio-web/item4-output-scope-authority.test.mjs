@@ -18,6 +18,8 @@ test("Production plan state stays scoped to explicitly selected platforms", () =
   const recommend = app.slice(start, app.indexOf("function selectedRequestPlatforms()", start));
   assert.match(recommend, /extras: \[\]/);
   assert.doesNotMatch(recommend, /overrides: item4PlanOverrides/);
+  // Recommend posts extras:[] — Platforms & Frames matrix Save owns custom companions.
+  assert.match(app, /extras: \[\]/);
   assert.doesNotMatch(app, /overrides: item4PlanOverrides,\s*\n\s*extras: item4EnabledExtraPairs\(\)/);
 });
 
