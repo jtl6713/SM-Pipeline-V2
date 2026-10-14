@@ -36,7 +36,16 @@
   }
 
   function productionRequestHeading(record) {
-    const title = activeIdea?.title || ideaTitleForRequest(record) || "Untitled piece";
+    // The opened Production Request and its linked Content Item are authoritative.
+    // activeIdea is a shared Ideas-drawer state and may belong to a different item.
+    const linkedIds = Array.isArray(record?.promoted_content_item_links) ? record.promoted_content_item_links : [];
+    const parent = linkedIds.map((id) => productionContentRecords.find((row) => row?.id === id)).find(Boolean);
+    const ideaId = ideaIdFromRequest(record);
+    const matchingActiveIdea = ideaId && String(activeIdea?.id || "") === String(ideaId) ? activeIdea : null;
+    const title = String(parent?.title || "").trim()
+      || ideaTitleForRequest(record)
+      || String(matchingActiveIdea?.title || "").trim()
+      || "Untitled piece";
     const contentNumber = contentNumberForProductionRequest(record);
     return contentNumber ? `${title} · Content ${contentNumber}` : title;
   }
@@ -267,7 +276,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.678-production-render-layout";
+  const BUILD_ID = "item4-0.6.679-production-record-identity";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -12832,9 +12841,13 @@ function timedScriptAssetLabel(asset, index) {
   }
 
   async function loadProductionRequestOutputs(record = activeProductionRequest) {
-    if (!record?.id) return;
+    if (!record?.id || activeProductionRequest?.id !== record.id) return;
+    const revision = item4WorkspaceRevision;
     productionOutputMatrixLoaded = false;
     const result = await api(`/api/production-requests/${encodeURIComponent(record.id)}/outputs`);
+    // A previous request's async output fetch must never replace this editor's
+    // platform selection and output matrix after the operator switches content.
+    if (activeProductionRequest?.id !== record.id || revision !== item4WorkspaceRevision) return;
     productionRequestOutputs = Array.isArray(result.records) ? result.records : [];
     clearOutputMatrix();
 
@@ -13107,6 +13120,14 @@ function timedScriptAssetLabel(asset, index) {
 
   function populateProductionRequestForm(record, { reveal = true } = {}) {
     const changingRequest = clearProductionMediaOnRequestChange(record);
+    // Never carry the previous Ideas drawer's identity, script, or location into
+    // the new request. Keep it only when the linked Idea_Candidate actually matches.
+    const requestIdeaId = ideaIdFromRequest(record);
+    if (!requestIdeaId || String(activeIdea?.id || "") !== String(requestIdeaId)) {
+      activeIdea = requestIdeaId
+        ? (ideasCache.find((idea) => String(idea.id) === String(requestIdeaId)) || null)
+        : null;
+    }
     voiceUserPicked = false;
     activeProductionRequest = record;
     productionOutputMatrixLoaded = false;
@@ -14900,10 +14921,8 @@ function timedScriptAssetLabel(asset, index) {
             let fullRecord = record;
             try {
               const fresh = await api(`/api/production-requests/${encodeURIComponent(record.id)}`, { timeoutMs: 12000, retries: 0 });
-              if (fresh?.record?.id) {
+              if (fresh?.record?.id === record.id && activeProductionRequest?.id === record.id) {
                 fullRecord = fresh.record;
-                const freshIdeaId = ideaIdFromRequest(fullRecord);
-                activeIdea = freshIdeaId ? ideasCache.find((idea) => idea.id === freshIdeaId) || activeIdea : activeIdea;
                 populateProductionRequestForm(fullRecord);
                 showProductionRequestWorkspace();
               }
@@ -14911,12 +14930,14 @@ function timedScriptAssetLabel(asset, index) {
               console.warn("production request detail refresh timed out; keeping list-record workspace open", error);
             }
 
+            if (activeProductionRequest?.id !== record.id) return;
             const hydration = await Promise.allSettled([
               loadProductionRequestOutputs(fullRecord),
               loadItem4Workspace(fullRecord),
               ensureProductionRequestMusic(),
               loadEzAudioOptions(),
             ]);
+            if (activeProductionRequest?.id !== record.id) return;
 
             const failed = hydration.filter((entry) => entry.status === "rejected");
             if (failed.length) {
@@ -15335,7 +15356,7 @@ function timedScriptAssetLabel(asset, index) {
               `/api/production-requests/${encodeURIComponent(requestId)}?fields=light`,
               { timeoutMs: 12000, retries: 0 },
             );
-            if (result?.record?.id) {
+            if (result?.record?.id === requestId && activeProductionRequest?.id === requestId) {
               fullRecord = result.record;
               populateProductionRequestForm(fullRecord);
               showProductionRequestWorkspace();
@@ -15344,10 +15365,12 @@ function timedScriptAssetLabel(asset, index) {
             console.warn("production request light open timed out; keeping stub workspace open", error);
           }
 
+          if (activeProductionRequest?.id !== requestId) return;
           const hydration = await Promise.allSettled([
             loadProductionRequestOutputs(fullRecord),
             loadItem4Workspace(fullRecord),
           ]);
+          if (activeProductionRequest?.id !== requestId) return;
           const failed = hydration.filter((entry) => entry.status === "rejected");
           if (failed.length) {
             setRequestMessage(
