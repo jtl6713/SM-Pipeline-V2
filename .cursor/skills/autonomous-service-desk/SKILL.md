@@ -135,6 +135,16 @@ Repair (per output):
 
 Auto-correct: Worker `studioHealAwaitingApprovalStaleRfr`. Proven: Miami Outputs **2155** TikTok / **2154** Facebook Inside PAMM Design (CI 434), **1841** Facebook Brickell or Coconut Grove? (CI 380). Same fingerprint after heal → `code_bug`.
 
+## Watch: Rerendering forever with the finished file already present
+
+Factory per-output send-back sets `Review_Status=Changes Requested` and `Output_Status=In Production`. Pipeline paints **Rerendering**. Native Photo Route never enters Remotion. A Story already `Waiting in Render Queue` with a `Remotion_Job_ID` is excluded from the render queue. Nothing is rendering, and the badge never clears.
+
+Kind `phantom_rerender`, class `transient`, actor `worker_heal`. Fingerprint `phantom_rerender:<output_rec>:native_still_present` or `:final_file_present`.
+
+This is not the content send-back hold (`Output_Status=Changes Requested`, `Render_Status=Needs Changes`, `Do_Not_Publish`, request Draft + `[factory-revision-open]`). Do not heal that hold. Do not heal `Ready for Render`, `Rendering`, `Failed`, or `Do_Not_Publish` voice-prep rerenders. An already-`Rendered` video waits 15 minutes after `Review_Decision_At` so voice prep can still queue.
+
+Auto-correct: Worker `studioHealPhantomRerender` (light cron) sets `Output_Status=Ready for Review`, `Review_Status=Review Sent`, `Publish_Status=Not Ready`, and `Render_Status=Rendered` unless the row is Native Photo Route. Do not clear the file, preview, schedule, or job id. Do not Approve. Proven: Output **3200** `rec5oq82z6HMKLPpU` and **3201** `rechnzbI0oceoBb8t` (Chicago native stills, Content 616) and Output **3186** `rec80kMyaX6hGbAdg` (Facebook Story, finished MP4, old job). Same fingerprint after a heal tick → `code_bug`.
+
 ## Watch: Escalated — needs investigation
 
 Parent `Studio_Production_Job_JSON.step=escalated` after five Worker resumes. Pipeline paints **Escalated — needs investigation** on every sibling output. Worker `resumeStaleStudioProductionJobs` used to skip this terminal step, so the row parked forever even when the block was recoverable (empty `Studio_Master_Assets_JSON` while library stills exist; outputs created after a "No Platform Outputs" block; transient HTTP that exhausted the budget). Kind `produce_escalated`, class `transient` when `deskRecoverableEscalatedError` matches, actor `worker_heal`. Clip-count mismatch stays `produce_clip_mismatch` / `code_bug`. Skip `Request_Status=Cancelled`.

@@ -34,6 +34,8 @@ import {
   classifyNativePhotoReviewStrand,
   classifyNativePhotoApproveIncomplete,
   classifyAwaitingApprovalStaleRfr,
+  classifyPhantomRerender,
+  PHANTOM_RERENDER_STALE_MS,
   classifyTesterNightly,
   classifyTesterCatalogAssert,
   originFromNotes,
@@ -1037,4 +1039,118 @@ test("awaiting_approval_stale_rfr catches Approved + Ready to Schedule stuck at 
     publish_status: "Ready to Schedule",
   }), null);
   assert.ok(CLASSIFIER_KINDS.includes("awaiting_approval_stale_rfr"));
+});
+
+test("phantom_rerender returns finished native stills and stuck stories to review", () => {
+  const sentBackAt = Date.parse("2026-10-14T05:09:00.000Z");
+  const justAfter = Date.parse("2026-10-14T05:10:00.000Z");
+  const out3200 = classifyPhantomRerender({
+    id: "rec5oq82z6HMKLPpU",
+    output_id: 3200,
+    output_status: "In Production",
+    review_status: "Changes Requested",
+    render_status: "Native Photo Route",
+    studio_output_type: "Single Image",
+    platform: "Instagram",
+    studio_preview_url: "https://media.chicagoshining.com/studio/previews/lettered/rec5oq82z6HMKLPpU/0.jpg",
+    review_decision_at: "2026-10-14T05:09:00.000Z",
+  }, justAfter);
+  assert.equal(out3200.kind, "phantom_rerender");
+  assert.equal(out3200.class, "transient");
+  assert.equal(out3200.actor, "worker_heal");
+  assert.equal(out3200.fingerprint, fingerprint("phantom_rerender", "rec5oq82z6HMKLPpU", "native_still_present"));
+  assert.match(out3200.diagnosis, /Ready for Review/);
+  assert.match(out3200.diagnosis, /3201/);
+
+  const out3201 = classifyPhantomRerender({
+    id: "rechnzbI0oceoBb8t",
+    output_id: 3201,
+    output_status: "In Production",
+    review_status: "Changes Requested",
+    render_status: "Native Photo Route",
+    studio_output_type: "Single Image",
+    platform: "Facebook",
+    thumbnail_url: "https://media.chicagoshining.com/studio/previews/lettered/rechnzbI0oceoBb8t/0.jpg",
+  }, justAfter);
+  assert.equal(out3201.fingerprint, fingerprint("phantom_rerender", "rechnzbI0oceoBb8t", "native_still_present"));
+
+  const out3186 = classifyPhantomRerender({
+    id: "rec80kMyaX6hGbAdg",
+    output_id: 3186,
+    output_status: "In Production",
+    review_status: "Changes Requested",
+    render_status: "Waiting in Render Queue",
+    studio_output_type: "Story",
+    platform: "Facebook",
+    final_file_url: "https://drive.google.com/file/d/1xOeyE5YBDpyDTM60DCPnPl0PJkVkCH8V/view",
+    remotion_job_id: "job-20261014043530-9e63d524",
+    review_decision_at: "2026-10-14T05:09:00.000Z",
+  }, justAfter);
+  assert.equal(out3186.fingerprint, fingerprint("phantom_rerender", "rec80kMyaX6hGbAdg", "final_file_present"));
+
+  assert.equal(classifyPhantomRerender({
+    id: "recLiveMix",
+    output_status: "In Production",
+    review_status: "Changes Requested",
+    render_status: "Ready for Render",
+    final_file_url: "https://drive.google.com/file/d/live/view",
+  }, justAfter), null);
+  assert.equal(classifyPhantomRerender({
+    id: "recRendering",
+    output_status: "In Production",
+    review_status: "Changes Requested",
+    render_status: "Rendering",
+    final_file_url: "https://drive.google.com/file/d/live/view",
+    remotion_job_id: "job-live",
+  }, justAfter), null);
+  assert.equal(classifyPhantomRerender({
+    id: "recVoicePrep",
+    output_status: "In Production",
+    review_status: "Changes Requested",
+    render_status: "Rendered",
+    do_not_publish: true,
+    final_file_url: "https://drive.google.com/file/d/vo/view",
+    review_decision_at: "2026-10-14T04:00:00.000Z",
+  }, justAfter), null);
+  assert.equal(classifyPhantomRerender({
+    id: "recFreshRendered",
+    output_status: "In Production",
+    review_status: "Changes Requested",
+    render_status: "Rendered",
+    final_file_url: "https://drive.google.com/file/d/fresh/view",
+    review_decision_at: new Date(justAfter - (PHANTOM_RERENDER_STALE_MS - 60 * 1000)).toISOString(),
+  }, justAfter), null);
+  const staleRendered = classifyPhantomRerender({
+    id: "recStaleRendered",
+    output_status: "In Production",
+    review_status: "Changes Requested",
+    render_status: "Rendered",
+    final_file_url: "https://drive.google.com/file/d/stale/view",
+    review_decision_at: new Date(sentBackAt).toISOString(),
+  }, sentBackAt + PHANTOM_RERENDER_STALE_MS);
+  assert.equal(staleRendered.fingerprint, fingerprint("phantom_rerender", "recStaleRendered", "final_file_present"));
+  assert.equal(classifyPhantomRerender({
+    id: "recHold",
+    output_status: "Changes Requested",
+    review_status: "Changes Requested",
+    render_status: "Needs Changes",
+    do_not_publish: true,
+    studio_preview_url: "https://media.chicagoshining.com/studio/previews/lettered/recHold/0.jpg",
+  }, justAfter), null);
+  assert.equal(classifyPhantomRerender({
+    id: "recQueuedReel",
+    output_status: "In Production",
+    review_status: "Changes Requested",
+    render_status: "Waiting in Render Queue",
+    studio_output_type: "Reel",
+    final_file_url: "https://drive.google.com/file/d/queued/view",
+    remotion_job_id: "",
+  }, justAfter), null);
+  assert.equal(classifyPhantomRerender({
+    id: "recNativeBare",
+    output_status: "In Production",
+    review_status: "Changes Requested",
+    render_status: "Native Photo Route",
+  }, justAfter), null);
+  assert.ok(CLASSIFIER_KINDS.includes("phantom_rerender"));
 });

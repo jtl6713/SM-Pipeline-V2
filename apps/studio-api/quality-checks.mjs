@@ -22,6 +22,7 @@ export const QUALITY_HEALS = Object.freeze([
   "backoff_then_retry_missing_child",
   "retarget_music_drive",
   "promote_rendered_ready_for_review",
+  "return_phantom_rerender_to_review",
   "extend_last_clip_requeue_r4",
   "ticket_only",
   "none",
@@ -412,6 +413,14 @@ export const QUALITY_CHECKS = Object.freeze([
     kind: "render_stale_rendering",
     actor: "worker_heal",
     heal: "promote_rendered_ready_for_review",
+  }),
+  check({
+    id: "phantom_rerender",
+    title: "Check for Changes Requested outputs painted Rerendering after the finished file is already present",
+    lane: "service",
+    kind: "phantom_rerender",
+    actor: "worker_heal",
+    heal: "return_phantom_rerender_to_review",
   }),
   check({
     id: "render_long",

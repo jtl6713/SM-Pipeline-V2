@@ -154,6 +154,18 @@ test("classifyFactoryLane priority: manual > needs_eyes > needs_assets > auto_hi
     studio_state: "Blocked",
     request_status: "Promoted",
   }), "manual");
+  // Finished file painted Rerendering is a Worker heal, not Repair.
+  assert.equal(classifyFactoryLane({
+    id: "recPhantom",
+    kind: "output",
+    lane: "stuck",
+    stuck_kind: "phantom_rerender",
+    studio_state: "Rerendering",
+    output_status: "In Production",
+    review_status: "Changes Requested",
+    render_status: "Native Photo Route",
+    title: "Wheel Silhouette Shot",
+  }), "auto_high");
 });
 
 test("partitionFactoryLanes puts pile in needs_assets and leaves candidates aside", () => {
@@ -223,6 +235,18 @@ test("Worker exposes factory desk routes and version flag", async () => {
   assert.match(approveFn, /forceWrite: publishNowImmediate/);
   assert.match(worker, /async function studioHealApprovedMissingSchedule/);
   assert.match(worker, /await studioHealApprovedMissingSchedule\(env, \{ limit: 16 \}\)/);
+  assert.match(worker, /async function studioHealPhantomRerender/);
+  assert.match(worker, /await studioHealPhantomRerender\(env, \{ limit: 8 \}\)/);
+  const phantomHeal = worker.slice(
+    worker.indexOf("async function studioHealPhantomRerender"),
+    worker.indexOf("async function studioHealFailedStatuses"),
+  );
+  assert.match(phantomHeal, /Output_Status: "Ready for Review"/);
+  assert.match(phantomHeal, /Review_Status: "Review Sent"/);
+  assert.match(phantomHeal, /Publish_Status: "Not Ready"/);
+  assert.match(phantomHeal, /Render_Status = "Rendered"/);
+  assert.match(phantomHeal, /Native Photo Route/);
+  assert.doesNotMatch(phantomHeal, /Approved for Publishing/);
   assert.match(worker, /action === "approve"/);
   assert.match(worker, /action === "send_back"/);
   assert.match(worker, /action === "send_back_content"/);
@@ -239,7 +263,7 @@ test("Worker exposes factory desk routes and version flag", async () => {
   assert.match(worker, /Do_Not_Publish: true/);
   assert.match(worker, /revision_approve/);
   assert.match(worker, /productionRequestRevisionOpen\(requestRecord\)/);
-  assert.match(worker, /0\.10\.591-factory-revision-unlock/);
+  assert.match(worker, /0\.10\.592-phantom-rerender/);
   assert.match(worker, /studio_factory_desk_v1:\s*true/);
   assert.match(worker, /studio_factory_desk_preview_v1:\s*true/);
 });
@@ -248,6 +272,6 @@ test("Worker allows Factory Desk POST through Phase 2A gate", async () => {
   const worker = await readFile(path.join(here, "worker.js"), "utf8");
   assert.match(worker, /const isFactoryDeskWrite = isFactoryDeskRoute && request\.method === "POST"/);
   assert.match(worker, /isFactoryDeskWrite \|/);
-  assert.match(worker, /version: "0\.10\.591-factory-revision-unlock"/);
+  assert.match(worker, /version: "0\.10\.592-phantom-rerender"/);
   assert.match(worker, /studio_factory_desk_write_v1: true/);
 });

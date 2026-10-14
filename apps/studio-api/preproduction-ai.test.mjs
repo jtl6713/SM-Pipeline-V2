@@ -11,7 +11,7 @@ test("Worker exposes pre-production AI master generation route", async () => {
   const source = await readFile(workerPath, "utf8");
   assert.match(source, /generate-ai-masters/);
   assert.match(source, /async function generateItem4PreProductionAiMaster/);
-  assert.match(source, /AI images can only be generated before this request is promoted/);
+  assert.match(source, /AI images can only be generated while this request is editable/);
   assert.match(source, /Carousel_Image_Mode/);
   assert.match(source, /Make AI Generated/);
   assert.match(source, /source:\s*"studio_ai_preproduction"/);
