@@ -276,7 +276,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.680-factory-needs-eyes-layout";
+  const BUILD_ID = "item4-0.6.681-factory-open-targets";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -13285,7 +13285,9 @@ function timedScriptAssetLabel(asset, index) {
   }
 
   async function openProductionRequestForIdea(idea, { fromWizard = false, productionRequest = null, successMessage = "", strict = false } = {}) {
-    if (!idea?.id) return;
+    // Exact Production opens are allowed without an Idea list row. Promoted and
+    // stale requests often disappear from the current Ideas list by design.
+    if (!idea?.id && !productionRequest?.id) return;
     const button = $("configureProductionButton");
     if (button) {
       button.disabled = true;
@@ -13330,7 +13332,7 @@ function timedScriptAssetLabel(asset, index) {
       if (!result?.record?.id) throw new Error("Production Request could not be resolved.");
 
       await closeIdeaDrawer({ save: false, resumePhotoListening: false });
-      activeIdea = idea;
+      activeIdea = idea?.id ? idea : null;
       ezEntryPath = "configure";
       switchToPage("content");
       populateProductionRequestForm(result.record);
@@ -13431,17 +13433,41 @@ function timedScriptAssetLabel(asset, index) {
       item4PromotedRequestIds.delete(String(record.id));
     }
     const ideaId = String(record.idea_record_id || (Array.isArray(record.idea_candidate_links) ? record.idea_candidate_links[0] : "") || "").trim();
-    if (!ideaId) throw new Error("The Production Request has no linked Idea Candidate.");
     await ensureIdeasCache().catch(() => []);
-    const idea = ideasCache.find((row) => row?.id === ideaId) || {
-      id: ideaId,
-      title: record.idea_title || record.requested_title || "Production item",
-    };
+    const idea = ideaId
+      ? (ideasCache.find((row) => row?.id === ideaId) || {
+          id: ideaId,
+          title: record.idea_title || record.requested_title || "Production item",
+        })
+      : null;
     return openProductionRequestForIdea(idea, {
       productionRequest: record,
-      successMessage: "Returned from Factory. Make your changes, then Approve to rerender the content package.",
+      successMessage: "Opened this Production item from Factory.",
       strict: true,
     });
+  };
+
+  window.StudioOpenIdeaById = async function StudioOpenIdeaById(ideaId) {
+    const id = String(ideaId || "").trim();
+    if (!/^rec[A-Za-z0-9]+$/.test(id)) throw new Error("Idea Candidate ID is missing.");
+    showStudioPage("ideas");
+    await ensureIdeasCache().catch(() => []);
+    let idea = ideasCache.find((row) => row?.id === id) || null;
+    if (!idea) {
+      const result = await api(`/api/ideas/${encodeURIComponent(id)}`, { timeoutMs: 12000, retries: 0 });
+      idea = result?.record || (result?.id ? result : null);
+    }
+    if (!idea?.id) throw new Error("Idea Candidate could not be loaded.");
+    await openIdeaDrawer(idea);
+    return true;
+  };
+
+  window.StudioOpenPipelineOutputById = async function StudioOpenPipelineOutputById(outputId) {
+    const id = String(outputId || "").trim();
+    if (!/^rec[A-Za-z0-9]+$/.test(id)) throw new Error("Platform Output ID is missing.");
+    showStudioPage("outputs");
+    await openCreativeEditor(id);
+    return true;
   };
 
   let ideaLibraryPickerItems = [];

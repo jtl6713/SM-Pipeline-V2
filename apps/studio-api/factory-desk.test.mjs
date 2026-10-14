@@ -239,7 +239,7 @@ test("Worker exposes factory desk routes and version flag", async () => {
   assert.match(worker, /Do_Not_Publish: true/);
   assert.match(worker, /revision_approve/);
   assert.match(worker, /productionRequestRevisionOpen\(requestRecord\)/);
-  assert.match(worker, /0\.10\.590-factory-content-roundtrip/);
+  assert.match(worker, /0\.10\.591-factory-revision-unlock/);
   assert.match(worker, /studio_factory_desk_v1:\s*true/);
   assert.match(worker, /studio_factory_desk_preview_v1:\s*true/);
 });

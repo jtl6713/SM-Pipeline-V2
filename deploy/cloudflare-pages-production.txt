@@ -329,3 +329,4 @@ UI 0.6.607 hashtag mismatch warning only; approval no longer blocked.
 2026-10-13: Redeploy UI 0.6.679 after correcting final escaped layout-footer regex; all Production identity tests enabled.
 2026-10-13: UI 0.6.680 Factory Needs eyes action-row redesign, 30px legible buttons, clear content-level action bar, expanded review scrolling, responsive metadata; Pages CSS cache-bust + regression.
 2026-10-13: Re-run Studio UI 0.6.680 Pages after aligning inherited Rendering-layout footer test with current 0.6.680 version; Factory new layout tests already passed.
+2026-10-13: Deploy Studio UI 0.6.681-factory-open-targets. Factory In Flight Open now resolves stale Production Requests and active Pipeline outputs by record ID, with an exact-record fallback when the Ideas list omits the item.

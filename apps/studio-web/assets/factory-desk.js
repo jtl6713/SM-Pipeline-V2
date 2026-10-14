@@ -47,11 +47,47 @@
     return bits.length ? `${bits.join(" · ")} — ${card.title || "Untitled"}` : (card.title || "Untitled");
   }
 
-  function openStudioTarget(card) {
-    let page = "outputs";
-    if (card.kind === "idea" || (!card.content_id && card.idea_id && !card.output_id)) page = "ideas";
-    else if (card.kind === "request" && !card.output_id) page = "content";
+  function selectFactoryProfile(profileId) {
+    const id = String(profileId || "").trim();
+    const select = $("studioProfileSelect");
+    if (!id || !select || select.value === id) return;
+    select.value = id;
+    select.dispatchEvent(new Event("change", { bubbles: true }));
+  }
+
+  function fallbackOpenPage(page) {
     document.querySelector(`.nav-item[data-page="${page}"]`)?.click();
+  }
+
+  async function openStudioTarget(card) {
+    const target = window.FactoryOpenTargets?.resolve?.(card) || {
+      entity: card?.kind === "output" ? "output" : (card?.kind === "idea" ? "idea" : "production_request"),
+      id: String(card?.production_request_id || card?.id || "").trim(),
+      page: card?.kind === "output" ? "outputs" : (card?.kind === "idea" ? "ideas" : "content"),
+      profileId: String(card?.profile_id || "").trim(),
+    };
+    selectFactoryProfile(target.profileId);
+
+    try {
+      if (target.entity === "production_request" && typeof window.StudioOpenProductionRequestById === "function") {
+        await window.StudioOpenProductionRequestById(target.id);
+        return;
+      }
+      if (target.entity === "output" && typeof window.StudioOpenPipelineOutputById === "function") {
+        await window.StudioOpenPipelineOutputById(target.id);
+        return;
+      }
+      if (target.entity === "idea" && typeof window.StudioOpenIdeaById === "function") {
+        await window.StudioOpenIdeaById(target.id);
+        return;
+      }
+      fallbackOpenPage(target.page);
+    } catch (error) {
+      // Keep a usable destination even if an exact record fetch fails. Production
+      // requests never fall back to Ideas, because promoted/stale ideas may be absent.
+      fallbackOpenPage(target.page);
+      setStatus(`Opened ${target.page === "content" ? "Production" : (target.page === "outputs" ? "Pipeline" : "Ideas")}, but the exact item could not be loaded: ${error.message || error}`, true);
+    }
   }
 
   function canReviewActions(card, { pile = false, candidate = false } = {}) {
@@ -294,9 +330,21 @@
     if (!root) return;
 
     root.querySelectorAll("[data-factory-open]").forEach((button) => {
-      button.addEventListener("click", () => {
+      button.addEventListener("click", async () => {
         const card = byId.get(button.getAttribute("data-factory-open"));
-        if (card) openStudioTarget(card);
+        if (!card) {
+          setStatus("Open failed: card not found in desk payload.", true);
+          return;
+        }
+        button.disabled = true;
+        const idleText = button.textContent || "Open";
+        button.textContent = "Opening…";
+        try {
+          await openStudioTarget(card);
+        } finally {
+          button.disabled = false;
+          button.textContent = idleText;
+        }
       });
     });
     root.querySelectorAll("[data-factory-preview]").forEach((button) => {

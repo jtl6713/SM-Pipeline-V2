@@ -33,6 +33,7 @@ jobs:
           set -euo pipefail
           node --check apps/studio-web/assets/app-item4-1008.js
           node --test \
+            apps/studio-web/factory-open-navigation.test.mjs \
             apps/studio-web/factory-revision-approval.test.mjs \
             apps/studio-web/production-record-identity.test.mjs \
             apps/studio-web/pipeline-rendering-terminal.test.mjs \
