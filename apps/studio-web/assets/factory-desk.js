@@ -3,6 +3,7 @@
   const state = {
     loading: false,
     desk: null,
+    expandedReviewGroup: null,
   };
 
   function esc(value) {
@@ -270,9 +271,8 @@
     return (group?.cards || []).filter((card) => card?.kind === "output" && canReviewActions(card) && /^rec[A-Za-z0-9]+$/.test(String(card.id || "")));
   }
 
-  function renderContentBar(group) {
+  function renderContentBar(group, expanded) {
     const ready = readyContentCards(group);
-    if (!ready.length) return "";
     const first = group.cards[0] || {};
     const contentId = String(first.content_id || "").trim();
     const title = first.title || "Untitled";
@@ -281,9 +281,11 @@
       ? `<button type="button" class="primary-button factory-content-approve" data-factory-approve-content="${esc(group.key)}">Approve all (${ready.length})</button>`
       : "";
     return `<div class="factory-content-bar" data-factory-content="${esc(group.key)}">
-      <span class="factory-content-title">${esc(title)}</span>
-      <span class="factory-content-meta">${esc(meta)}</span>
-      <button type="button" class="secondary-button factory-content-send-back" data-factory-send-back-content="${esc(group.key)}">Send back to Production</button>
+      <button type="button" class="factory-content-toggle" data-factory-toggle-content="${esc(group.key)}" aria-expanded="${expanded}" aria-controls="factory-review-${esc(group.key.replace(/[^a-zA-Z0-9_-]/g, "-"))}">
+        <span class="factory-content-chevron" aria-hidden="true">${expanded ? "▾" : "▸"}</span>
+        <span class="factory-content-label"><strong class="factory-content-title">${esc(title)}</strong><span class="factory-content-meta">${esc(meta)}</span></span>
+      </button>
+      ${ready.length ? `<button type="button" class="secondary-button factory-content-send-back" data-factory-send-back-content="${esc(group.key)}">Send back to Production</button>` : ""}
       ${approveAll}
     </div>`;
   }
@@ -296,9 +298,21 @@
       return;
     }
     if (options.groupContent) {
-      node.innerHTML = groupByContent(cards).map((group) => (
-        renderContentBar(group) + group.cards.map((card) => renderCard(card, options)).join("")
-      )).join("");
+      const groups = groupByContent(cards);
+      if (!groups.some((group) => group.key === state.expandedReviewGroup)) state.expandedReviewGroup = groups[0]?.key || null;
+      node.innerHTML = groups.map((group) => {
+        const expanded = group.key === state.expandedReviewGroup;
+        const id = `factory-review-${group.key.replace(/[^a-zA-Z0-9_-]/g, "-")}`;
+        return renderContentBar(group, expanded) +
+          `<div id="${esc(id)}" class="factory-content-rows" ${expanded ? "" : "hidden"}>${group.cards.map((card) => renderCard(card, options)).join("")}</div>`;
+      }).join("");
+      node.querySelectorAll("[data-factory-toggle-content]").forEach((button) => {
+        button.addEventListener("click", () => {
+          const key = button.dataset.factoryToggleContent;
+          state.expandedReviewGroup = state.expandedReviewGroup === key ? "" : key;
+          renderDesk(state.desk);
+        });
+      });
       return;
     }
     node.innerHTML = cards.map((card) => renderCard(card, options)).join("");
