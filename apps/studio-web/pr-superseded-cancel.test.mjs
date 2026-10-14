@@ -9,8 +9,8 @@ const app = fs.readFileSync(path.join(here, "assets/app-item4-1008.js"), "utf8")
 const html = fs.readFileSync(path.join(here, "index.html"), "utf8");
 
 test("Cancelled / superseded Production Requests do not keep Approve enabled", () => {
-  assert.match(app, /BUILD_ID = "item4-0.6.685-production-review-notes"/);
-  assert.match(html, /UI build 0.6.685/);
+  assert.match(app, /BUILD_ID = "item4-0.6.686-unified-platform-outputs"/);
+  assert.match(html, /UI build 0.6.686/);
   assert.match(app, /const cancelled = status === "Cancelled"/);
   assert.match(app, /promote\.textContent = "Cancelled"/);
   assert.match(app, /result\.superseded \|\| result\.promotion_state === "cancelled"/);
