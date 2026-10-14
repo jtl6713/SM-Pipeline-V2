@@ -14,6 +14,10 @@ test("Production plan state stays scoped to explicitly selected platforms", () =
   assert.match(app, /if \(allowed\.size && !allowed\.has\(row\.platform\)\) return false/);
   assert.match(app, /item4ScopePlanStateToPlatforms\(platforms\)/);
   assert.match(app, /overrides: activeOverrides/);
+  const start = app.indexOf("async function buildItem4Plan()");
+  const recommend = app.slice(start, app.indexOf("function selectedRequestPlatforms()", start));
+  assert.match(recommend, /extras: \[\]/);
+  assert.doesNotMatch(recommend, /overrides: item4PlanOverrides/);
   // Recommend posts extras:[] — Platforms & Frames matrix Save owns custom companions.
   assert.match(app, /extras: \[\]/);
   assert.doesNotMatch(app, /overrides: item4PlanOverrides,\s*\n\s*extras: item4EnabledExtraPairs\(\)/);

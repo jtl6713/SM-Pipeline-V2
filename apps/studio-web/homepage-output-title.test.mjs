@@ -102,11 +102,17 @@ test("Production shows a live narration duration estimate", () => {
 test("Production manual output matrix stays authoritative over plan recommendations", () => {
   assert.match(app, /function productionOutputSelectionKeys\(\)/);
   assert.match(app, /function restoreProductionOutputSelection\(keys\)/);
+  assert.match(app, /async function saveItem4OutputSelection\(\)/);
   // Recommend clears extras and reloads persisted matrix rows; Save owns companions.
   assert.match(app, /extras: \[\]/);
   assert.match(app, /await loadProductionRequestOutputs\(activeProductionRequest\)/);
   assert.match(app, /await saveProductionRequestOutputs\(activeProductionRequest\)/);
+  assert.match(app, /Never replace an operator's explicit output choices/);
   assert.doesNotMatch(app, /applyDefaultOutputsForPlatform\(input\.value, \{ replace: true \}\)/);
+  const start = app.indexOf("async function buildItem4Plan()");
+  const recommend = app.slice(start, app.indexOf("function selectedRequestPlatforms()", start));
+  assert.match(recommend, /extras: \[\]/);
+  assert.doesNotMatch(recommend, /restoreProductionOutputSelection\(/);
 });
 
 test("Rendered still-source video outputs classify as Photo Set instead of Carousel", () => {

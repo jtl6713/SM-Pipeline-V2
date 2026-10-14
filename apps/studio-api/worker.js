@@ -697,8 +697,9 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.599-unified-platform-outputs",
+          version: "0.10.600-factory-inflight-auto-high",
           studio_factory_desk_v1: true,
+          studio_factory_inflight_blocked_parent_v1: true,
           studio_factory_desk_actions_v1: true,
           studio_factory_desk_write_v1: true,
           studio_factory_desk_preview_v1: true,

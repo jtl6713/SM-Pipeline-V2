@@ -154,6 +154,41 @@ test("classifyFactoryLane priority: manual > needs_eyes > needs_assets > auto_hi
     studio_state: "Blocked",
     request_status: "Promoted",
   }), "manual");
+  // Parent voiceover block must not hide Pipeline in-flight rows from Auto-high.
+  // Proven: LA 650–654, job step blocked on ElevenLabs 401, Pipeline still says
+  // Preparing Assets / Queued / Waiting in render queue.
+  for (const studioState of ["Preparing Assets", "Queued", "Waiting in render queue"]) {
+    assert.equal(classifyFactoryLane({
+      id: `recInFlight${studioState}`,
+      kind: "output",
+      lane: "stuck",
+      stuck_kind: "produce_stale",
+      stuck_class: "transient",
+      produce_step: "blocked",
+      request_status: "Promoted",
+      studio_state: studioState,
+      render_status: studioState === "Waiting in render queue" ? "Waiting in Render Queue" : "",
+      output_status: "In Production",
+      title: "Corona Del Mar",
+    }), "auto_high");
+  }
+  assert.equal(classifyFactoryLane({
+    id: "recInFlightCodeBug",
+    kind: "output",
+    lane: "stuck",
+    stuck_kind: "produce_clip_mismatch",
+    stuck_class: "code_bug",
+    produce_step: "blocked",
+    studio_state: "Waiting in render queue",
+    output_status: "In Production",
+  }), "manual");
+  assert.equal(classifyFactoryLane({
+    id: "recInFlightFailed",
+    kind: "output",
+    produce_step: "blocked",
+    studio_state: "Failed",
+    output_status: "Failed",
+  }), "manual");
   // Finished file painted Rerendering is a Worker heal, not Repair.
   assert.equal(classifyFactoryLane({
     id: "recPhantom",
@@ -263,7 +298,8 @@ test("Worker exposes factory desk routes and version flag", async () => {
   assert.match(worker, /Do_Not_Publish: true/);
   assert.match(worker, /revision_approve/);
   assert.match(worker, /productionRequestRevisionOpen\(requestRecord\)/);
-  assert.match(worker, /0.10.599-unified-platform-outputs/);
+  assert.match(worker, /0.10.600-factory-inflight-auto-high/);
+  assert.match(worker, /studio_factory_inflight_blocked_parent_v1:\s*true/);
   assert.match(worker, /studio_factory_desk_v1:\s*true/);
   assert.match(worker, /studio_factory_desk_preview_v1:\s*true/);
 });
@@ -272,6 +308,6 @@ test("Worker allows Factory Desk POST through Phase 2A gate", async () => {
   const worker = await readFile(path.join(here, "worker.js"), "utf8");
   assert.match(worker, /const isFactoryDeskWrite = isFactoryDeskRoute && request\.method === "POST"/);
   assert.match(worker, /isFactoryDeskWrite \|/);
-  assert.match(worker, /version: "0.10.599-unified-platform-outputs"/);
+  assert.match(worker, /version: "0.10.600-factory-inflight-auto-high"/);
   assert.match(worker, /studio_factory_desk_write_v1: true/);
 });
