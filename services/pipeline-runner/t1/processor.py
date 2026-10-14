@@ -14,6 +14,7 @@ from integrations.google_drive import GoogleDriveClient
 from render.fields import field, field_str, first_linked_id, json_text
 from render.settings import get_timing_defaults
 from r2.candidates import fetch_music_candidates
+from r2.music_policy import scope_music_candidates_to_profile
 from audio.voiceover_duration import (
     measured_voiceover_seconds,
     voiceover_exceeds_video,
@@ -226,6 +227,8 @@ def _create_timing_for_asset(
 def _find_long_enough_music(
     *,
     client: AirtableClient,
+    output: dict[str, Any],
+    content_item: dict[str, Any] | None,
     selected_asset_id: str,
     required_seconds: float,
     request_body: dict[str, Any],
@@ -233,6 +236,12 @@ def _find_long_enough_music(
     drive: GoogleDriveClient,
 ) -> tuple[dict[str, Any] | None, dict[str, Any] | None, float]:
     candidates = fetch_music_candidates(client)
+    candidates, _music_policy = scope_music_candidates_to_profile(
+        client,
+        content_item=content_item,
+        music_candidates=candidates,
+        preferred_media_asset_id=field_str(output, "Preferred_Music_Media_Asset_ID"),
+    )
     known = [
         row for row in candidates
         if row.get("id") != selected_asset_id and _asset_duration_seconds(row) + 0.05 >= required_seconds
@@ -478,6 +487,8 @@ def process_one(
         if selected_track_seconds + 0.05 < duration:
             replacement, replacement_response, replacement_seconds = _find_long_enough_music(
                 client=client,
+                output=output,
+                content_item=content_item,
                 selected_asset_id=selected_asset_id,
                 required_seconds=duration,
                 request_body=request_body,
