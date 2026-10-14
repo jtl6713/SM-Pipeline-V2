@@ -41,7 +41,8 @@ jobs:
             apps/studio-web/pipeline-publish-now.test.mjs \
             apps/studio-web/pipeline-column-filters.test.mjs \
             apps/studio-web/production-rendering-request-isolation.test.mjs \
-            apps/studio-web/production-progress-timeline-truth.test.mjs
+            apps/studio-web/production-progress-timeline-truth.test.mjs \
+            apps/studio-web/production-render-layout.test.mjs
 
       - name: Validate Pages source and stage deployment directory
         shell: bash

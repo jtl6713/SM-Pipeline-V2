@@ -321,3 +321,4 @@ UI 0.6.607 hashtag mismatch warning only; approval no longer blocked.
 2026-10-13: Redeploy 0.6.677 after correcting Factory revision approval regression test syntax (no runtime code change).
 2026-10-13: Redeploy UI 0.6.677 after advancing existing Pages regression version pins to current build.
 2026-10-13: Redeploy UI 0.6.677 after updating footer version expectations in Pages release regression checks.
+2026-10-13: Deploy Studio UI 0.6.678-production-render-layout. Fix gray right edge/overflow from 880px Production cap plus ten-scene timed-script min-content width; keep rows horizontally scrollable on smaller screens.
