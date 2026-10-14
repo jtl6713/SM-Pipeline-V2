@@ -145,6 +145,12 @@ This is not the content send-back hold (`Output_Status=Changes Requested`, `Rend
 
 Auto-correct: Worker `studioHealPhantomRerender` (light cron) sets `Output_Status=Ready for Review`, `Review_Status=Review Sent`, `Publish_Status=Not Ready`, and `Render_Status=Rendered` unless the row is Native Photo Route. Do not clear the file, preview, schedule, or job id. Do not Approve. Proven: Output **3200** `rec5oq82z6HMKLPpU` and **3201** `rechnzbI0oceoBb8t` (Chicago native stills, Content 616) and Output **3186** `rec80kMyaX6hGbAdg` (Facebook Story, finished MP4, old job). Same fingerprint after a heal tick → `code_bug`.
 
+## Watch: Autonomous FIFO locked on a Factory revision hold
+
+`STUDIO_AUTONOMOUS_LAST_RUN` stays `status=skipped` with the same `production_request_id`, and `skip_reason` is `This content is open for Factory revision`. Photo-ready `origin=autonomous` drafts in other cities never resume. The held request has `[factory-revision-open]` and variants Ready, so a deferred stamp would be cleared and the lock would return. Kind `autonomous_revision_lock`, class `code_bug`, actor `desk_agent`. Fingerprint `autonomous_revision_lock:<production_request_rec>:factory_revision_open`.
+
+Do not clear `[factory-revision-open]`. Do not Approve. Do not publish. Worker `releaseAutonomousRevisionLock` saves `status=reset`, `skip_reason=skip_factory_revision_open`, null idea/request ids, and `firstAutonomousResumeDraft` skips revision-open notes. Proven: LA Walk of Fame `rec64MuB8YqdXJ0El` / idea `recpQ0ZyzTNlWPs0m` blocked Chicago photo-ready drafts on 2026-10-14. Same fingerprint after the Worker that skips revision-open is live → `code_bug`.
+
 ## Watch: Escalated — needs investigation
 
 Parent `Studio_Production_Job_JSON.step=escalated` after five Worker resumes. Pipeline paints **Escalated — needs investigation** on every sibling output. Worker `resumeStaleStudioProductionJobs` used to skip this terminal step, so the row parked forever even when the block was recoverable (empty `Studio_Master_Assets_JSON` while library stills exist; outputs created after a "No Platform Outputs" block; transient HTTP that exhausted the budget). Kind `produce_escalated`, class `transient` when `deskRecoverableEscalatedError` matches, actor `worker_heal`. Clip-count mismatch stays `produce_clip_mismatch` / `code_bug`. Skip `Request_Status=Cancelled`.

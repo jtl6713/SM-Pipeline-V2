@@ -23,6 +23,9 @@ import {
   isAutonomousOrigin,
   autonomousRequestNeedsContinue,
   firstAutonomousResumeDraft,
+  productionNotesRevisionOpen,
+  autonomousErrorIsFactoryRevision,
+  autonomousRevisionLockReset,
   dailyIdeaProduceHasStarted,
   dailyIdeasReadyToProduce,
   stampAutonomousOrigin,
@@ -272,6 +275,28 @@ test("YouTube mapper keeps titles and picker requires assets", () => {
     },
     { id: "miami", notes: "origin=autonomous", profile_id: miami },
   ], enabled)?.id, "miami");
+  const chicago = "recT2rbKX3MF7cVFU";
+  const walkNotes = "origin=autonomous\n[factory-revision-open] at=2026-10-14T05:15:25.634Z by=joseph.t.logan@gmail.com";
+  assert.equal(productionNotesRevisionOpen(walkNotes), true);
+  assert.equal(productionNotesRevisionOpen("origin=autonomous"), false);
+  assert.equal(autonomousErrorIsFactoryRevision(
+    new Error("This content is open for Factory revision. Make your changes in Production, then click Approve."),
+  ), true);
+  assert.equal(firstAutonomousResumeDraft([
+    { id: "walk", notes: walkNotes, profile_id: la, variant_status: "Ready" },
+    { id: "chicago", notes: "origin=autonomous", profile_id: chicago },
+  ], [la, chicago])?.id, "chicago");
+  const revisionReset = autonomousRevisionLockReset({
+    chicagoDate: "2026-10-14",
+    productionRequestId: "rec64MuB8YqdXJ0El",
+    ideaId: "recpQ0ZyzTNlWPs0m",
+  });
+  assert.equal(revisionReset.status, "reset");
+  assert.equal(revisionReset.skip_reason, "skip_factory_revision_open");
+  assert.equal(revisionReset.production_request_id, null);
+  assert.equal(revisionReset.idea_id, null);
+  assert.equal(revisionReset.parked_production_request_id, "rec64MuB8YqdXJ0El");
+  assert.equal(revisionReset.parked_idea_id, "recpQ0ZyzTNlWPs0m");
   assert.equal(firstAutonomousResumeDraft([
     {
       id: "preparing-nyc",
@@ -636,8 +661,22 @@ test("Worker stamps photo-ready ideas and drains the 30m SLA on light ticks", as
   const path = await import("node:path");
   const here = path.dirname(fileURLToPath(import.meta.url));
   const worker = await readFile(path.join(here, "worker.js"), "utf8");
-  assert.match(worker, /version: "0\.10\.592-phantom-rerender"/);
+  assert.match(worker, /version: "0\.10\.593-autonomous-revision-fifo"/);
   assert.match(worker, /async function stampPhotoReadyIdeaForAutonomousProduce/);
+  assert.match(worker, /productionNotesRevisionOpen\(notes\)/);
+  assert.match(worker, /async function releaseAutonomousRevisionLock/);
+  assert.match(worker, /skip_factory_revision_open/);
+  const lockBlock = worker.slice(
+    worker.indexOf("if (last.production_request_id && last.idea_id)"),
+    worker.indexOf("let priorProduceInFlight"),
+  );
+  const revisionIdx = lockBlock.indexOf("productionNotesRevisionOpen(notes)");
+  const finishIdx = lockBlock.indexOf("finishAutonomousProductionRequest");
+  assert.ok(revisionIdx >= 0 && finishIdx > revisionIdx);
+  const catchStart = lockBlock.indexOf("if (autonomousErrorIsFactoryRevision(error))");
+  const revisionCatch = lockBlock.slice(catchStart, lockBlock.indexOf("} else {", catchStart));
+  assert.match(revisionCatch, /releaseAutonomousRevisionLock/);
+  assert.doesNotMatch(revisionCatch, /status: "skipped"/);
   assert.match(worker, /stampPhotoReadyIdeaForAutonomousProduce\(env, ideaReady, requestRecord\)/);
   assert.match(worker, /30m photo-ready SLA drain/);
   assert.match(worker, /skip_stuck_waiting_for_next_draft/);
