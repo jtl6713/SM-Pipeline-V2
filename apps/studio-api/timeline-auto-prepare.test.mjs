@@ -26,7 +26,7 @@ test("Production UI kicks Prepare once for timeline drafts with Ready plan and N
   assert.match(app, /function maybeAutoPrepareTimelineVariants/);
   assert.match(app, /maybeAutoPrepareTimelineVariants\(status\)/);
   assert.match(app, /prepareItem4Variants\(\{ autoRetry: false \}\)/);
-  assert.match(app, /BUILD_ID = "item4-0.6.683-factory-all-lanes"/);
-  assert.match(html, /app-item4-1008\.js\?v=0.6.683-factory-all-lanes/);
-  assert.match(html, /UI build 0.6.683/);
+  assert.match(app, /BUILD_ID = "item4-0.6.685-production-review-notes"/);
+  assert.match(html, /app-item4-1008\.js\?v=0.6.685-production-review-notes/);
+  assert.match(html, /UI build 0.6.685/);
 });
