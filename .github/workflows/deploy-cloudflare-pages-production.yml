@@ -34,6 +34,7 @@ jobs:
           node --check apps/studio-web/assets/app-item4-1008.js
           node --test \
             apps/studio-web/factory-revision-approval.test.mjs \
+            apps/studio-web/production-record-identity.test.mjs \
             apps/studio-web/pipeline-rendering-terminal.test.mjs \
             apps/studio-web/vibe-cut-mode.test.mjs \
             apps/studio-web/vibe-cut-passthrough-guard.test.mjs \
