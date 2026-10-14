@@ -390,7 +390,7 @@
  }
 }
 
-/* Studio 0.6.686: one editable output matrix in Platforms & Frames. */
+/* Studio 0.6.687: one editable output matrix in Platforms & Frames. */
 #page-content #item4PlatformToggles[hidden],
 #page-content #item4OutputPlan[hidden] { display:none!important; }
 #page-content .item4-output-plan-section #prOutputMatrixSection{

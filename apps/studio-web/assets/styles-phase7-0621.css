@@ -239,6 +239,26 @@
   justify-self:start!important;
   align-self:center!important;
 }
+.output-platform-card legend .output-platform-include{
+  display:flex!important;
+  grid-template-columns:none!important;
+  border:0!important;
+  background:transparent!important;
+  padding:0 2px!important;
+  min-height:0;
+  width:auto;
+  font-size:.9rem;
+  font-weight:850;
+  column-gap:8px!important;
+}
+.output-platform-card legend .output-platform-include:has(input:checked){
+  border:0!important;
+  background:transparent!important;
+}
+.output-platform-card:has(legend .output-platform-include input:not(:checked)){
+  opacity:.62;
+}
+#prDetailsOutputSummarySection .output-matrix-summary{border-top:0;padding-top:0}
 
 
 /* Phase 2B 0.4.2 — per-output overrides */

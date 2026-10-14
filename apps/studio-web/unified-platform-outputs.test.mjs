@@ -27,18 +27,62 @@ test("Platforms & Frames owns the only visible editable output matrix", () => {
   assert.doesNotMatch(app, /<select data-item4-format/);
 });
 
-test("Recommend checks persisted output rows and manual Save syncs Frames", () => {
-  const start = app.indexOf("async function buildItem4Plan()");
+test("Recommend checks visible boxes before Save and the persist path stays available", () => {
+  const start = app.indexOf("async function buildItem4Plan(options = {})");
   const end = app.indexOf("function selectedRequestPlatforms()", start);
   const recommend = app.slice(start, end);
+  assert.ok(start > 0 && end > start);
+  assert.match(recommend, /const persist = options\.persist !== false/);
+  assert.match(recommend, /applyRecommendedOutputChecks\(platforms\)/);
+  assert.match(recommend, /item4OutputSelectionDirty = true/);
+  assert.match(recommend, /if \(!persist\)/);
   assert.match(recommend, /extras: \[\]/);
   assert.match(recommend, /await loadProductionRequestOutputs\(activeProductionRequest\)/);
   assert.doesNotMatch(recommend, /restoreProductionOutputSelection\(/);
+  assert.match(app, /buildItem4Plan\(\{ persist: false \}\)/);
   assert.match(app, /async function saveItem4OutputSelection\(\)/);
   assert.match(app, /await saveProductionRequestOutputs\(activeProductionRequest\)/);
-  assert.match(app, /item4OutputSelectionDirty = true/);
   assert.match(app, /Save your platform output selections before preparing frames/);
   assert.match(app, /"item4SaveOutputSelection"\)\?\.addEventListener\("click", saveItem4OutputSelection\)/);
+});
+
+test("Details summarizes the same matrix and each platform can be turned off", () => {
+  const detailsStart = html.indexOf('id="ezAdvancedOptions"');
+  const detailsEnd = html.indexOf('id="productionRequestListPanel"', detailsStart);
+  const details = html.slice(detailsStart, detailsEnd);
+  assert.match(details, /id="prDetailsOutputSummary"/);
+  assert.match(details, /id="prEditOutputsInFrames"/);
+  assert.doesNotMatch(details, /data-pr-output/);
+  assert.match(html, /data-pr-platform-include value="Instagram"/);
+  assert.match(html, /data-pr-platform-include value="Facebook"/);
+  assert.match(html, /data-pr-platform-include value="TikTok"/);
+  assert.match(html, /data-pr-platform-include value="YouTube"/);
+  assert.equal(html.split('id="prOutputMatrix"').length - 1, 1);
+  assert.match(app, /function syncPlatformIncludeChecks\(\)/);
+  assert.match(app, /prDetailsOutputSummary/);
+  assert.match(app, /setProductionWorkspaceTab\("formats", \{ focus: true \}\)/);
+});
+
+test("Saved selections are not silently replaced on open or timeline save", () => {
+  const loadStart = app.indexOf("async function loadProductionRequestOutputs(");
+  const loadEnd = app.indexOf("function defaultOutputsForPlatforms(", loadStart);
+  const loadBody = app.slice(loadStart, loadEnd);
+  assert.doesNotMatch(loadBody, /Slideshow Reel/);
+  assert.doesNotMatch(loadBody, /item4PlanOverrides = \{ \.\.\.item4PlanOverrides, Facebook: "Reel" \}/);
+  const saveStart = app.indexOf("async function saveProductionRequestOutputs(");
+  const saveEnd = app.indexOf("function setProductionRequestControlState(", saveStart);
+  const saveBody = app.slice(saveStart, saveEnd);
+  assert.match(saveBody, /let outputs = selectedOutputMatrix\(\)/);
+  assert.match(saveBody, /if \(!outputs\.length && item4HasTimedScript\(record\)\)/);
+  assert.doesNotMatch(saveBody, /item4HasTimedScript\(record\)\s*\?\s*defaultOutputsForPlatforms/);
+  const autoStart = app.indexOf("async function maybeAutoEzPlan(");
+  const autoEnd = app.indexOf("function renderEzPerPhotoCaptions(", autoStart);
+  assert.match(app.slice(autoStart, autoEnd), /enabledProductionRequestOutputs\(\)\.length/);
+  const prepStart = app.indexOf("async function prepareItem4Variants(");
+  const prepEnd = app.indexOf("function renderItem4Workspace(", prepStart);
+  const prep = app.slice(prepStart, prepEnd);
+  assert.match(prep, /selectedOutputMatrix\(\)\.length/);
+  assert.match(prep, /await saveProductionRequestOutputs\(activeProductionRequest\)/);
 });
 
 test("Worker output synchronization REPLACES stale plan items with enabled output types", () => {
@@ -55,9 +99,9 @@ test("Worker output synchronization REPLACES stale plan items with enabled outpu
 });
 
 test("Studio build label, app BUILD_ID, and asset versions are aligned", () => {
-  assert.match(html, /UI build 0\.6\.686/);
-  assert.match(app, /const BUILD_ID = "item4-0\.6\.686-unified-platform-outputs"/);
+  assert.match(html, /UI build 0\.6\.687/);
+  assert.match(app, /const BUILD_ID = "item4-0\.6\.687-platforms-frames-details"/);
   const versions = [...html.matchAll(/\?v=(\d+\.\d+\.\d+)-/g)].map((x) => x[1]);
   assert.ok(versions.length > 10);
-  assert.ok(versions.every((x) => x === "0.6.686"));
+  assert.ok(versions.every((x) => x === "0.6.687"));
 });
