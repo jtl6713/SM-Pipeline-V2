@@ -527,7 +527,7 @@ test("Worker stamp paths use MAE not industry evening windows", () => {
   assert.match(worker, /studio_mae_platform_spread_v1: true/);
   assert.match(worker, /studio_mae_profile_occupancy_v1: true/);
   assert.match(worker, /studio_schedule_occupancy_fields_v1: true/);
-  assert.match(worker, /0.10.601-voiceover-once/);
+  assert.match(worker, /0.10.602-ten-ideas-per-hour/);
   assert.match(worker, /studio_story_companion_schedule_v1: true/);
   assert.match(worker, /storyCompanion/);
   assert.match(worker, /maeResolveStorySchedule/);

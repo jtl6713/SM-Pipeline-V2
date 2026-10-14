@@ -5,6 +5,12 @@ import { IDEA_LIBRARY_NAMED_PLACES } from "./idea-photo-wait.mjs";
 
 /** All-Profiles parenthesis total per city: keep Scheduled at or above this. */
 export const AUTONOMOUS_SCHEDULED_TARGET = 200;
+/** Parenthesis total above this skips that city for the Chicago hour. 200–209 holds. */
+export const AUTONOMOUS_SCHEDULED_SKIP_ABOVE = 209;
+/** Distinct-subject ideas to open per city per Chicago hour while Scheduled is under target. */
+export const AUTONOMOUS_IDEAS_PER_HOUR = 10;
+/** Safety stop while paging the classified library. This is not a newest-N window. */
+export const AUTONOMOUS_LIBRARY_SCAN_CAP = 8000;
 /** Legacy twice-daily windows; harvest now keys off the scheduled target instead. */
 export const AUTONOMOUS_WINDOWS = Object.freeze([8, 16]);
 export const AUTONOMOUS_NEWS_FEEDS = Object.freeze([
@@ -115,29 +121,42 @@ export function autonomousScheduledTotal(scheduledByPlatform) {
 }
 
 /**
- * Produce when Scheduled is under the target and Ready-for-Review backlog
- * cannot already cover the gap (Approve still fills Scheduled).
+ * refill: Scheduled under target (create this hour's ideas).
+ * hold: at target through the skip ceiling (do not harvest).
+ * skip: above the ceiling (skip that city this hour).
+ * Awaiting Approval does not change the band.
  */
-export function autonomousProfileNeedsScheduledRefill(
+export function autonomousScheduledBand(
   scheduledTotal,
-  awaitingApproval = 0,
   target = AUTONOMOUS_SCHEDULED_TARGET,
+  skipAbove = AUTONOMOUS_SCHEDULED_SKIP_ABOVE,
 ) {
   const scheduled = Math.max(0, Number(scheduledTotal) || 0);
-  const awaiting = Math.max(0, Number(awaitingApproval) || 0);
   const floor = Math.max(1, Number(target) || AUTONOMOUS_SCHEDULED_TARGET);
-  return scheduled < floor && (scheduled + awaiting) < floor;
+  const ceiling = Math.max(floor, Number(skipAbove) || AUTONOMOUS_SCHEDULED_SKIP_ABOVE);
+  if (scheduled > ceiling) return "skip";
+  if (scheduled < floor) return "refill";
+  return "hold";
+}
+
+/** True only when the parenthesis total is under the target. Awaiting Approval is ignored. */
+export function autonomousProfileNeedsScheduledRefill(
+  scheduledTotal,
+  _awaitingApproval = 0,
+  target = AUTONOMOUS_SCHEDULED_TARGET,
+) {
+  return autonomousScheduledBand(scheduledTotal, target) === "refill";
 }
 
 export function autonomousScheduledDeficit(
   scheduledTotal,
-  awaitingApproval = 0,
+  _awaitingApproval = 0,
   target = AUTONOMOUS_SCHEDULED_TARGET,
 ) {
   const scheduled = Math.max(0, Number(scheduledTotal) || 0);
-  const awaiting = Math.max(0, Number(awaitingApproval) || 0);
   const floor = Math.max(1, Number(target) || AUTONOMOUS_SCHEDULED_TARGET);
-  return Math.max(0, floor - scheduled - awaiting);
+  if (autonomousScheduledBand(scheduled, target) !== "refill") return 0;
+  return Math.max(0, floor - scheduled);
 }
 
 /**
@@ -151,13 +170,15 @@ export function autonomousRefillScoresFromOverview(overviewRows, target = AUTONO
     if (!id) continue;
     const scheduledTotal = autonomousScheduledTotal(row?.scheduled);
     const awaiting = Math.max(0, Number(row?.approval ?? row?.metrics?.awaiting_approval) || 0);
+    const band = autonomousScheduledBand(scheduledTotal, target);
     const deficit = autonomousScheduledDeficit(scheduledTotal, awaiting, target);
-    const needed = autonomousProfileNeedsScheduledRefill(scheduledTotal, awaiting, target);
+    const needed = band === "refill";
     byId[id] = {
       id,
       name: String(row?.name || row?.city_label || "").trim(),
       scheduled_total: scheduledTotal,
       awaiting_approval: awaiting,
+      band,
       deficit,
       needed,
       target: Math.max(1, Number(target) || AUTONOMOUS_SCHEDULED_TARGET),
@@ -192,15 +213,82 @@ export function autonomousRunIsBusy(last, nowMs = Date.now(), maxAgeMs = 15 * 60
   return nowMs - at < maxAgeMs;
 }
 
-export function autonomousSlotAlreadyClaimed(last, slot) {
-  if (!slot || String(last?.slot || "") !== slot) return false;
-  const status = String(last?.status || "").trim();
-  if (["picking", "resuming", "waiting_variants", "awaiting_i4", "producing", "promoted"].includes(status)) {
-    return true;
+export function autonomousProfileIdeasThisHour(last, slot, profileId) {
+  if (!slot || String(last?.slot || "") !== String(slot || "")) return 0;
+  const id = String(profileId || "").trim();
+  if (!id) return 0;
+  return Math.max(0, Number(last?.ideas_by_profile?.[id]) || 0);
+}
+
+/** A city still owes ideas this Chicago hour when it is under the per-hour goal and not exhausted. */
+export function autonomousProfileHourOpen(last, slot, profileId, goal = AUTONOMOUS_IDEAS_PER_HOUR) {
+  const id = String(profileId || "").trim();
+  if (!id || !slot) return false;
+  if (String(last?.slot || "") !== String(slot)) return true;
+  if (autonomousProfileIdeasThisHour(last, slot, id) >= Math.max(1, Number(goal) || AUTONOMOUS_IDEAS_PER_HOUR)) {
+    return false;
   }
-  // A successful pick already created an idea this slot. Do not harvest again if
-  // produce later saved status=skipped (variant timeout, I4 wait, enqueue error).
-  return Boolean(String(last?.idea_id || "").trim()) && status !== "reset";
+  if (last?.hour_profile_skip?.[id]) return false;
+  return true;
+}
+
+export function autonomousRefillProfilesStillOpen(profiles, refillByProfileId, last, slot, goal = AUTONOMOUS_IDEAS_PER_HOUR) {
+  return autonomousProfilesNeedingRefill(profiles, refillByProfileId)
+    .filter((row) => autonomousProfileHourOpen(last, slot, row?.id, goal));
+}
+
+/**
+ * The Chicago hour is finished only when every refill city has its 10 ideas
+ * (or was marked exhausted). One idea_id does not close the hour.
+ * With no profile list, only an explicit hour_complete flag claims the slot.
+ */
+export function autonomousSlotAlreadyClaimed(last, slot, refillProfileIds = null) {
+  if (!slot || String(last?.slot || "") !== slot) return false;
+  if (Array.isArray(refillProfileIds)) {
+    const ids = refillProfileIds.map((id) => String(id || "").trim()).filter(Boolean);
+    if (!ids.length) return false;
+    return ids.every((id) => !autonomousProfileHourOpen(last, slot, id));
+  }
+  return last?.hour_complete === true;
+}
+
+/**
+ * FIFO resets null the slot after one produce finishes. Keep this hour's
+ * per-city counts so the next tick continues toward 10 instead of starting over.
+ */
+export function mergeAutonomousHourProgress(previous, payload) {
+  const prev = previous && typeof previous === "object" ? previous : {};
+  const next = payload && typeof payload === "object" ? payload : {};
+  const prevSlot = String(prev.slot || "");
+  const hasSlot = Object.prototype.hasOwnProperty.call(next, "slot");
+  const nextSlotRaw = hasSlot ? next.slot : undefined;
+  const slot = nextSlotRaw === null
+    ? (prevSlot || null)
+    : (nextSlotRaw === undefined ? (prevSlot || null) : nextSlotRaw);
+  const sameHour = Boolean(slot) && slot === prevSlot;
+  const ideas = { ...(sameHour && prev.ideas_by_profile && typeof prev.ideas_by_profile === "object" ? prev.ideas_by_profile : {}) };
+  if (next.ideas_by_profile && typeof next.ideas_by_profile === "object") {
+    for (const [id, count] of Object.entries(next.ideas_by_profile)) {
+      const key = String(id || "").trim();
+      if (!key) continue;
+      const n = Math.max(0, Number(count) || 0);
+      ideas[key] = Math.max(Number(ideas[key]) || 0, n);
+    }
+  }
+  const skips = { ...(sameHour && prev.hour_profile_skip && typeof prev.hour_profile_skip === "object" ? prev.hour_profile_skip : {}) };
+  if (next.hour_profile_skip && typeof next.hour_profile_skip === "object") {
+    for (const [id, reason] of Object.entries(next.hour_profile_skip)) {
+      const key = String(id || "").trim();
+      if (!key || !reason) continue;
+      skips[key] = String(reason).slice(0, 80);
+    }
+  }
+  return {
+    ...next,
+    slot,
+    ideas_by_profile: ideas,
+    hour_profile_skip: skips,
+  };
 }
 
 export function parseAutonomousLastRun(raw) {
@@ -704,21 +792,13 @@ export function filterAutonomousOccupiedForProfile(occupied = [], profileId = ""
   return (occupied || []).filter((row) => !row?.content_profile_id || row.content_profile_id === id);
 }
 
+/** Same place, location, or subject conflicts. Reusing a photo does not. */
 export function autonomousIdeaConflictsOccupied(pick, occupied = []) {
-  const pickMedia = new Set(pick?.media_asset_ids || []);
   const pickHay = autonomousPickHaystack(pick);
   const pickTokens = autonomousTopicTokens(pickHay);
   const pickPlaces = new Set(autonomousPlaceSubjects(pickHay));
   const pickLocation = autonomousNormalizedPlace(pick?.primary_location || pick?.location);
-  const freshMedia = autonomousPickUsesFreshMedia(pick, occupied);
   for (const row of occupied) {
-    const otherMedia = new Set(row?.media_asset_ids || []);
-    const sharedMedia = [...pickMedia].filter((id) => otherMedia.has(id));
-    const mediaRatio = pickMedia.size ? sharedMedia.length / pickMedia.size : 0;
-    if (sharedMedia.length >= 3 || (sharedMedia.length >= 2 && mediaRatio >= 0.5)) {
-      return autonomousConflictResult(row);
-    }
-    if (freshMedia) continue;
     const otherHay = autonomousOccupiedHaystack(row);
     const otherPlaces = autonomousPlaceSubjects(otherHay);
     if (otherPlaces.some((place) => pickPlaces.has(place))) {
@@ -749,17 +829,44 @@ export function autonomousOccupiedLocationKeys(occupied = []) {
   );
 }
 
+/** A cluster conflicts when its place, location, or topic is already in flight. Asset ids do not. */
 export function autonomousClusterConflictsOccupied(cluster, occupied = []) {
   const assets = cluster?.assets || [];
-  if (!assets.length) return false;
-  const used = autonomousOccupiedMediaIdSet(occupied);
-  return assets.some((row) => {
-    const id = String(row?.id || row?.media_asset_id || "").trim();
-    return id && used.has(id);
-  });
+  if (!assets.length || !(occupied || []).length) return false;
+  const places = autonomousOccupiedPlaceKeys(occupied);
+  const locations = autonomousOccupiedLocationKeys(occupied);
+  const key = String(cluster?.key || "");
+  if (key.startsWith("place:")) {
+    const place = key.slice("place:".length);
+    if (place && places.has(place)) return true;
+  }
+  if (key.startsWith("location:")) {
+    const location = key.slice("location:".length);
+    if (location && (locations.has(location) || places.has(location))) return true;
+  }
+  if (key.startsWith("topic:")) {
+    const topicText = autonomousNormalizedPlace(key.slice("topic:".length).replace(/\//g, " "));
+    if (topicText) {
+      for (const row of occupied) {
+        const hay = autonomousNormalizedPlace(autonomousOccupiedHaystack(row));
+        if (hay && (hay === topicText || hay.includes(topicText))) return true;
+      }
+    }
+  }
+  const label = String(cluster?.label || "");
+  if (autonomousPlaceSubjects(label).some((place) => places.has(place))) return true;
+  const labelLocation = autonomousNormalizedPlace(label);
+  if (labelLocation && labelLocation !== "chicago" && locations.has(labelLocation)) return true;
+  for (const row of assets) {
+    const hay = autonomousOccupiedHaystack(row);
+    if (autonomousPlaceSubjects(hay).some((place) => places.has(place))) return true;
+    const location = autonomousNormalizedPlace(row?.location);
+    if (location && location !== "chicago" && (locations.has(location) || places.has(location))) return true;
+  }
+  return false;
 }
 
-/** Unused means the still ID has not appeared on an in-flight or recent output. Occupied places are skipped later, at cluster pick. */
+/** Legacy id filter. Hourly harvest does not use it; subject dedup is the gate. */
 export function autonomousUnusedLibraryAssets(assets, occupied = []) {
   const used = new Set((occupied || []).flatMap((row) => row?.media_asset_ids || []));
   return (assets || []).filter((row) => {
@@ -1041,37 +1148,37 @@ OPERATOR PIN (this run only)
 Use only stills of: ${pin}. Title, location, and media_asset_ids must be that landmark. If none of the listed stills match, return {"skip":true,"reason":"no_matching_subject_stills"}.`
     : "";
   const clusterLine = clusterLabel
-    ? `The listed stills are one unused related set: ${clusterLabel}. Use 5 to 10 of them.`
-    : "Pick 5 to 10 stills of ONE related unused topic. Do not mix unrelated places.";
-  return `You are ChicagoShining's autonomous producer. Start from unused library stills that have not appeared on a platform output. Review the unused overview, then write ONE idea that best uses a related set of 5 to 10 photos.
+    ? `The listed stills are one related subject: ${clusterLabel}. Use 5 to 10 of them.`
+    : "Pick 5 to 10 stills of ONE related subject. Do not mix unrelated places.";
+  return `You are ChicagoShining's autonomous producer. Start from library stills of one place or subject. Review the overview, then write ONE idea that best uses a related set of 5 to 10 photos.
 
 Return ONLY one raw JSON object. No markdown.
 
-A news/social trend is optional flavor. Do not skip because no headline matches a still. Do not invent events, dates, prices, or rankings. Do not pick generic skyline filler. Do not reuse media_asset_ids from an in-flight or recent idea. Fresh unused stills at a familiar landmark are OK when every media_asset_id in your pick is new.${pinBlock}
+A news/social trend is optional flavor. Do not skip because no headline matches a still. Do not invent events, dates, prices, or rankings. Do not pick generic skyline filler. Reusing a photo that already appeared on another post is OK. Do not repeat a subject, place, or landmark that is already in flight or recent.${pinBlock}
 
 ACTIVE PROFILE
 Name: ${profileName}
 Voice: ${voice}
 Avoid topics: ${avoid}
 
-UNUSED LIBRARY OVERVIEW (counts only; do not invent stills)
+LIBRARY OVERVIEW (counts only; do not invent stills)
 ${JSON.stringify(overview || {}, null, 2)}
 
-RELATED UNUSED SET (review these; use only these media_asset_ids)
+RELATED SUBJECT SET (review these; use only these media_asset_ids)
 ${clusterLine}
 ${JSON.stringify(assets, null, 2)}
 
 OPTIONAL TREND HARVEST (cite only if it actually fits the stills you picked)
 ${JSON.stringify(trends, null, 2)}
 
-IN FLIGHT OR RECENT IDEAS (do not repeat these subjects, places, or stills)
+IN FLIGHT OR RECENT IDEAS (do not repeat these subjects or places)
 ${JSON.stringify(occupiedIdeas || recentTitles || [], null, 2)}
 
-If every listed still conflicts with an in-flight or recent idea, return:
-{"skip":true,"reason":"no_unused_library_stills"}
+If every listed still is the same subject as an in-flight or recent idea, return:
+{"skip":true,"reason":"no_distinct_subject"}
 
 If the related set is too thin to make a post, return:
-{"skip":true,"reason":"no_related_unused_cluster"}
+{"skip":true,"reason":"no_related_subject_cluster"}
 
 Otherwise return:
 {

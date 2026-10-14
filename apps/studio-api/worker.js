@@ -140,8 +140,11 @@ import {
 import {
   AUTONOMOUS_DEFAULT_MUSIC_ASSET_ID,
   AUTONOMOUS_IDEA_CREATED_FIELD,
+  AUTONOMOUS_IDEAS_PER_HOUR,
+  AUTONOMOUS_LIBRARY_SCAN_CAP,
   AUTONOMOUS_RELATED_STILL_MIN,
   AUTONOMOUS_NEWS_FEEDS,
+  AUTONOMOUS_SCHEDULED_SKIP_ABOVE,
   AUTONOMOUS_SCHEDULED_TARGET,
   AUTONOMOUS_STANDARD_PLATFORMS,
   AUTONOMOUS_YOUTUBE_QUERIES,
@@ -156,8 +159,11 @@ import {
   autonomousPlanOverrides,
   autonomousPreferredSubject,
   autonomousProfilesNeedingRefill,
+  autonomousProfileHourOpen,
+  autonomousRefillProfilesStillOpen,
   autonomousRefillScoresFromOverview,
   autonomousRefillSlot,
+  mergeAutonomousHourProgress,
   pickAutonomousEnabledProfile,
   pickAutonomousRefillProfile,
   autonomousProfileHarvestOrder,
@@ -180,7 +186,6 @@ import {
   autonomousRunIsBusy,
   autonomousSlot,
   autonomousSlotAlreadyClaimed,
-  autonomousUnusedLibraryAssets,
   buildAutonomousPickerPrompt,
   completeRelatedStillPick,
   pickRelatedUnusedStillCluster,
@@ -698,7 +703,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.601-voiceover-once",
+          version: "0.10.602-ten-ideas-per-hour",
           studio_voiceover_once_v1: true,
           studio_factory_desk_v1: true,
           studio_factory_inflight_blocked_parent_v1: true,
@@ -734,6 +739,7 @@ export default {
           studio_auto_compress_v1: true,
           studio_autonomous_produce_v1: true,
           studio_autonomous_scheduled_target_v1: true,
+          studio_autonomous_ten_per_hour_v1: true,
           studio_autonomous_music_variety_v1: true,
           studio_az_finished_video_v1: true,
           studio_az_auto_queue_v1: true,
@@ -1939,8 +1945,8 @@ export default {
       } catch (error) {
         console.warn("autonomous revision lock heal failed", error);
       }
-      // Light tick: 30m photo-ready SLA drain. Adopt matched ideas + resume prepare
-      // even while a prior Remotion job is in flight. Heavy cron still owns harvest.
+      // Light tick: 30m photo-ready SLA drain, and keep filling this hour's 10
+      // ideas per under-200 city. A city over 209 is skipped inside the harvest.
       try {
         await runStudioAutonomousProduce(null, env, { permissions: { tenant_admin: true } }, ctx, {
           scheduled: true,
@@ -43438,17 +43444,19 @@ function studioInternalJsonRequest(pathname, body) {
 }
 
 async function studioSaveAutonomousLastRun(env, payload) {
-  const value = JSON.stringify({
-    ...payload,
-    at: payload.at || new Date().toISOString(),
-  });
+  const previous = await studioLoadAutonomousLastRun(env).catch(() => ({}));
+  const merged = mergeAutonomousHourProgress(previous, payload || {});
+  const stored = {
+    ...merged,
+    at: payload?.at || new Date().toISOString(),
+  };
   await studioUpsertSetting(
     env,
     STUDIO_AUTONOMOUS_LAST_SETTING,
-    value,
-    String(payload.skip_reason || payload.status || "autonomous run").slice(0, 500)
+    JSON.stringify(stored),
+    String(stored.skip_reason || stored.status || "autonomous run").slice(0, 500)
   );
-  return payload;
+  return stored;
 }
 
 async function studioLoadAutonomousLastRun(env) {
@@ -43562,15 +43570,35 @@ async function harvestAutonomousLibraryCatalog(env, subject = "", profileId = ""
   const pin = autonomousPreferredSubject(subject);
   const crossScope = await readLibraryCrossScopeSetting(env);
   const scopeFormula = await mediaAssetProfileScopeForId(env, profileId, { crossScope, includeUnscoped: false });
-  const records = await listRecords(env, env.AIRTABLE_MEDIA_TABLE_ID || ITEM4_MEDIA_ASSET_TABLE, {
-    limit: 400,
-    sortField: LIBRARY_ADDED_AT_FIELD,
-    sortDirection: "desc",
-    filterFormula: combineAirtableFormulas(ideaLibraryFilterFormula(pin ? [pin.toLowerCase()] : []), scopeFormula),
-  }).catch((error) => {
+  let records = [];
+  try {
+    records = await listRecords(env, env.AIRTABLE_MEDIA_TABLE_ID || ITEM4_MEDIA_ASSET_TABLE, {
+      limit: AUTONOMOUS_LIBRARY_SCAN_CAP,
+      sortField: LIBRARY_ADDED_AT_FIELD,
+      sortDirection: "desc",
+      fields: [
+        "Asset Name",
+        "Location",
+        "Topic",
+        "Subtopic",
+        "Media_Class",
+        "MIME_Type",
+        "Classification_Status",
+        "Raw_Source_Eligibility",
+        "Asset_Status",
+        "Do_Not_Use",
+        "Active",
+        "Google Drive File ID",
+        "Google Drive URL",
+        LIBRARY_ADDED_AT_FIELD,
+        "Intake_Date",
+      ],
+      filterFormula: combineAirtableFormulas(ideaLibraryFilterFormula(pin ? [pin.toLowerCase()] : []), scopeFormula),
+    });
+  } catch (error) {
     console.warn("autonomous library catalog failed", profileId, error);
-    return [];
-  });
+    throw error;
+  }
   const rows = [];
   for (const record of records || []) {
     if (!ideaLibraryIsEligibleImage(record)) continue;
@@ -43583,7 +43611,6 @@ async function harvestAutonomousLibraryCatalog(env, subject = "", profileId = ""
       subtopic: f(record, "Subtopic") || null,
       intake_date: ideaLibraryIntakeDate(record) || null,
     });
-    if (rows.length >= 180) break;
   }
   return rows;
 }
@@ -43603,7 +43630,7 @@ async function harvestAutonomousRecentTitles(env) {
 
 async function harvestAutonomousOccupiedTopics(env, profileId = "") {
   const ideaQuery = {
-    limit: 50,
+    limit: 200,
     sortField: AUTONOMOUS_IDEA_CREATED_FIELD,
     sortDirection: "desc",
     filterFormula: "{Test_Run_ID}=BLANK()",
@@ -43616,7 +43643,7 @@ async function harvestAutonomousOccupiedTopics(env, profileId = "") {
     }).catch(() => []);
   }
   const requests = (await listRecords(env, PRODUCTION_REQUEST_TABLE, {
-    limit: 50,
+    limit: 100,
     sortField: "Created_At",
     sortDirection: "desc",
     filterFormula: "AND({Test_Run_ID}=BLANK(),{Request_Status}!='Cancelled')",
@@ -44268,6 +44295,331 @@ async function parkAutonomousResumeDraft(env, requestRecord, reason) {
   }
 }
 
+function autonomousRememberSubject(occupied, title, location, profileId = "") {
+  occupied.push({
+    source: "in_flight",
+    title: String(title || location || "subject").trim(),
+    location: String(location || title || "").trim(),
+    media_asset_ids: [],
+    content_profile_id: profileId || null,
+  });
+}
+
+/**
+ * Create up to AUTONOMOUS_IDEAS_PER_HOUR distinct-subject drafts for one city.
+ * Variants and produce stay on the existing resume path so this pass does not
+ * wait out a render for every idea.
+ */
+async function fillAutonomousCityIdeas(env, authorization, {
+  chicago,
+  slot,
+  profileId,
+  counts,
+  skips,
+  preferredSubject,
+  refillScores,
+}) {
+  const goal = AUTONOMOUS_IDEAS_PER_HOUR;
+  let count = Math.max(0, Number(counts?.[profileId]) || 0);
+  const profile = await airtableFetch(env, STUDIO_IDEA_PROFILE_TABLE_ID, profileId);
+  const profileSettings = mapOperationsProfile(profile);
+  let saved = await studioSaveAutonomousLastRun(env, {
+    status: "picking",
+    skip_reason: null,
+    chicago_date: chicago.date,
+    chicago_hour: chicago.hour,
+    slot,
+    preferred_subject: preferredSubject || null,
+    scheduled_target: AUTONOMOUS_SCHEDULED_TARGET,
+    ideas_per_hour: goal,
+    refill_profile_id: profileId,
+    ideas_by_profile: { ...counts, [profileId]: count },
+    hour_profile_skip: { ...skips },
+    refill: refillScores ? Object.values(refillScores) : null,
+  });
+  const profileTheme = studioThemeForProfile(profile);
+  const observations = await studioInsightsLoadObservations(env, { profile: profileTheme, limit: 80 }).catch(() => []);
+  const similar = summarizeObservations(observations);
+  const [news, youtube, occupiedIdeas] = await Promise.all([
+    profileTheme === "chicago" ? harvestAutonomousNewsHeadlines() : Promise.resolve([]),
+    harvestAutonomousYoutube(env, { theme: profileTheme }),
+    harvestAutonomousOccupiedTopics(env, profileId),
+  ]);
+  const occupied = Array.isArray(occupiedIdeas) ? occupiedIdeas.slice() : [];
+  const trends = { similar, news, youtube };
+  const recentTitles = occupied.map((row) => row.title);
+  let created = 0;
+  let attempts = 0;
+  const createDeadline = Date.now() + 45000;
+  const persist = async (status, skipReason) => {
+    saved = await studioSaveAutonomousLastRun(env, {
+      status,
+      skip_reason: skipReason || null,
+      chicago_date: chicago.date,
+      chicago_hour: chicago.hour,
+      slot,
+      ideas_by_profile: { ...counts, [profileId]: count },
+      hour_profile_skip: { ...skips },
+      ideas_per_hour: goal,
+      ideas_created_this_pass: created,
+      refill_profile_id: profileId,
+      scheduled_target: AUTONOMOUS_SCHEDULED_TARGET,
+      scheduled_skip_above: AUTONOMOUS_SCHEDULED_SKIP_ABOVE,
+    });
+    return saved;
+  };
+  let catalog = [];
+  try {
+    catalog = await harvestAutonomousLibraryCatalog(env, preferredSubject, profileId);
+  } catch (error) {
+    console.warn("autonomous library catalog failed", profileId, error);
+    await persist("skipped", String(error?.message || error).slice(0, 180));
+    return { created_count: 0, last: saved, counts, skips, stop: true };
+  }
+  if (!catalog.length) {
+    const reason = preferredSubject ? "no_matching_subject_stills" : "no_library_stills";
+    skips[profileId] = reason;
+    await persist("skipped", reason);
+    return { created_count: 0, last: saved, counts, skips, stop: false };
+  }
+  let pool = catalog.slice();
+  while (count < goal) {
+    if (attempts > 0 && (attempts >= 12 || Date.now() > createDeadline)) break;
+    attempts += 1;
+    const cluster = pickRelatedUnusedStillCluster(pool, { occupied });
+    if (!cluster) {
+      if (count < goal) {
+        skips[profileId] = preferredSubject ? "no_matching_subject_stills" : "no_distinct_subject";
+      }
+      await persist(created ? "producing" : "skipped", created ? null : skips[profileId]);
+      return { created_count: created, last: saved, counts, skips, stop: false };
+    }
+    const usedIds = new Set((cluster.assets || []).map((row) => row.id));
+    pool = pool.filter((row) => !usedIds.has(row.id));
+    const overview = summarizeUnusedLibraryOverview(pool);
+    const prompt = buildAutonomousPickerPrompt({
+      profile: {
+        name: f(profile, "Profile_Name"),
+        brand_voice: f(profile, "Brand_Voice"),
+        avoid_topics: f(profile, "Avoid_Topics"),
+      },
+      trends,
+      assets: cluster.assets.map((row) => ({
+        media_asset_id: row.id,
+        name: row.name,
+        location: row.location,
+        topic: row.topic,
+        subtopic: row.subtopic,
+      })),
+      recentTitles,
+      occupiedIdeas: occupied,
+      preferredSubject,
+      overview,
+      clusterLabel: cluster.label,
+    });
+    let pick;
+    try {
+      pick = await studioAutonomousOpenAiPick(env, prompt);
+    } catch (error) {
+      console.warn("autonomous hour pick failed", profileId, error);
+      await persist(created ? "producing" : "skipped", String(error?.message || error).slice(0, 180));
+      return { created_count: created, last: saved, counts, skips, stop: true };
+    }
+    if (pick.skip) {
+      autonomousRememberSubject(occupied, cluster.label, cluster.label, profileId);
+      continue;
+    }
+    pick.media_asset_ids = completeRelatedStillPick(pick.media_asset_ids, cluster.assets);
+    pick.cluster_label = cluster.label;
+    pick.content_type = autonomousCanonicalContentType(pick.content_type);
+    if (pick.media_asset_ids.length < AUTONOMOUS_RELATED_STILL_MIN) {
+      autonomousRememberSubject(occupied, cluster.label, cluster.label, profileId);
+      continue;
+    }
+    const conflict = autonomousIdeaConflictsOccupied(pick, occupied);
+    if (conflict.conflict) {
+      autonomousRememberSubject(
+        occupied,
+        pick.candidate_title || cluster.label,
+        pick.primary_location || cluster.label,
+        profileId,
+      );
+      continue;
+    }
+    try {
+      const idea = await createAutonomousIdea(env, profile, pick);
+      const defaults = productionRequestDefaultsFromIdea(idea);
+      const narration = resolveAutonomousNarrationVoice(profileSettings, {
+        voice_id: PHASE6_DEFAULT_VOICE_ID,
+        voice_name: "Kate",
+      });
+      const musicAssetId = pickAutonomousMusicAssetId(
+        profileSettings.autonomous_music_asset_ids,
+        AUTONOMOUS_DEFAULT_MUSIC_ASSET_ID,
+      );
+      const input = await cleanProductionRequestPayload({
+        ...defaults,
+        content_type: pick.content_type,
+        platforms: [...AUTONOMOUS_STANDARD_PLATFORMS],
+        voiceover_mode: "Yes",
+        background_music_mode: "Yes",
+        thumbnail_mode: "Yes",
+        video_duration_seconds: null,
+        voiceover_duration_seconds: null,
+        voiceover_tail_seconds: 0,
+        music_start_seconds: 0,
+        selected_music_asset_id: musicAssetId,
+        voice_id: narration.voice_id || PHASE6_DEFAULT_VOICE_ID,
+        voice_name: narration.voice_name || "Kate",
+        carousel_image_mode: "Manual Upload",
+        caption_mode: pick.post_caption ? "AI improve" : "AI decides",
+        requested_caption: pick.post_caption || "",
+        production_notes: `origin=autonomous cited_trend=${pick.cited_trend || ""}`.slice(0, 3000),
+        primary_location: pick.primary_location || defaults.primary_location,
+      }, env);
+      const requestRecord = await createDraftForIdea(env, idea, authorization, input);
+      await attachItem4LibraryAssetIds(env, requestRecord.id, pick.media_asset_ids, authorization);
+      autonomousRememberSubject(
+        occupied,
+        pick.candidate_title,
+        pick.primary_location || cluster.label,
+        profileId,
+      );
+      count += 1;
+      created += 1;
+      counts[profileId] = count;
+      saved = await studioSaveAutonomousLastRun(env, {
+        status: "producing",
+        skip_reason: null,
+        chicago_date: chicago.date,
+        chicago_hour: chicago.hour,
+        slot,
+        idea_id: idea.id,
+        production_request_id: requestRecord.id,
+        ideas_by_profile: { ...counts },
+        hour_profile_skip: { ...skips },
+        ideas_per_hour: goal,
+        ideas_created_this_pass: created,
+        refill_profile_id: profileId,
+        scheduled_target: AUTONOMOUS_SCHEDULED_TARGET,
+        scheduled_skip_above: AUTONOMOUS_SCHEDULED_SKIP_ABOVE,
+      });
+    } catch (error) {
+      console.warn("autonomous hour idea failed", profileId, error);
+      autonomousRememberSubject(
+        occupied,
+        pick.candidate_title || cluster.label,
+        pick.primary_location || cluster.label,
+        profileId,
+      );
+      await persist(created ? "producing" : "skipped", String(error?.message || error).slice(0, 180));
+      return { created_count: created, last: saved, counts, skips, stop: true };
+    }
+  }
+  await persist("producing", null);
+  return { created_count: created, last: saved, counts, skips, stop: false };
+}
+
+async function fillAutonomousScheduledHour(env, authorization, {
+  chicago,
+  slot,
+  last,
+  profiles,
+  preferredSubject = "",
+}) {
+  const refillMeta = await studioLoadAutonomousRefillScores(env, profiles);
+  const loadedScores = refillMeta?.scores || {};
+  const scoreCount = Object.keys(loadedScores).length;
+  let refillScores = null;
+  if (!scoreCount || refillMeta?.source === "error" || refillMeta?.source === "empty") {
+    console.warn("autonomous refill scores unavailable; harvesting without target gate", refillMeta?.source || "missing");
+  } else {
+    refillScores = loadedScores;
+  }
+  const needing = refillScores ? autonomousProfilesNeedingRefill(profiles, refillScores) : (profiles || []);
+  const sameSlot = String(last?.slot || "") === String(slot || "");
+  if (refillScores && !needing.length) {
+    const bands = Object.values(refillScores).map((row) => row?.band);
+    const skipReason = bands.length && bands.every((band) => band === "skip")
+      ? "scheduled_over_209"
+      : "scheduled_target_met";
+    if (sameSlot && last?.status === "skipped" && last?.skip_reason === skipReason) {
+      return { terminal: true, created_count: 0, last, result: last };
+    }
+    const saved = await studioSaveAutonomousLastRun(env, {
+      skipped: skipReason,
+      chicago_date: chicago.date,
+      chicago_hour: chicago.hour,
+      slot,
+      status: "skipped",
+      skip_reason: skipReason,
+      scheduled_target: AUTONOMOUS_SCHEDULED_TARGET,
+      scheduled_skip_above: AUTONOMOUS_SCHEDULED_SKIP_ABOVE,
+      ideas_per_hour: AUTONOMOUS_IDEAS_PER_HOUR,
+      refill: Object.values(refillScores),
+      refill_source: refillMeta?.source || null,
+    });
+    return { terminal: true, created_count: 0, last: saved, result: saved };
+  }
+  const open = refillScores
+    ? autonomousRefillProfilesStillOpen(profiles, refillScores, last, slot)
+    : (profiles || []).filter((row) => autonomousProfileHourOpen(last, slot, row?.id));
+  if (!open.length) {
+    const exhausted = needing.length > 0 && needing.every((row) => sameSlot && last?.hour_profile_skip?.[row.id]);
+    const skipReason = exhausted ? "no_distinct_subject" : "hour_quota_met";
+    if (sameSlot && last?.status === "skipped" && last?.skip_reason === skipReason) {
+      return { terminal: true, created_count: 0, last, result: last };
+    }
+    const saved = await studioSaveAutonomousLastRun(env, {
+      skipped: skipReason,
+      chicago_date: chicago.date,
+      chicago_hour: chicago.hour,
+      slot,
+      status: "skipped",
+      skip_reason: skipReason,
+      scheduled_target: AUTONOMOUS_SCHEDULED_TARGET,
+      ideas_per_hour: AUTONOMOUS_IDEAS_PER_HOUR,
+      hour_complete: skipReason === "hour_quota_met",
+      ideas_by_profile: sameSlot ? (last?.ideas_by_profile || {}) : {},
+      hour_profile_skip: sameSlot ? (last?.hour_profile_skip || {}) : {},
+      refill: refillScores ? Object.values(refillScores) : null,
+    });
+    return { terminal: true, created_count: 0, last: saved, result: saved };
+  }
+  const picked = pickAutonomousRefillProfile(open, refillScores) || open[0];
+  const order = autonomousProfileHarvestOrder(open, picked?.id, refillScores);
+  const counts = sameSlot && last?.ideas_by_profile ? { ...last.ideas_by_profile } : {};
+  const skips = sameSlot && last?.hour_profile_skip ? { ...last.hour_profile_skip } : {};
+  let createdCount = 0;
+  let workingLast = last;
+  for (const candidate of order) {
+    if (!candidate?.id || !autonomousProfileHourOpen({ slot, ideas_by_profile: counts, hour_profile_skip: skips }, slot, candidate.id)) {
+      continue;
+    }
+    const outcome = await fillAutonomousCityIdeas(env, authorization, {
+      chicago,
+      slot,
+      profileId: candidate.id,
+      counts,
+      skips,
+      preferredSubject,
+      refillScores,
+    });
+    workingLast = outcome.last || workingLast;
+    createdCount += outcome.created_count || 0;
+    if (outcome.created_count > 0 || outcome.stop) break;
+  }
+  const stillOpen = refillScores
+    ? autonomousRefillProfilesStillOpen(profiles, refillScores, workingLast, slot)
+    : (profiles || []).filter((row) => autonomousProfileHourOpen(workingLast, slot, row?.id));
+  return {
+    terminal: stillOpen.length === 0,
+    created_count: createdCount,
+    last: workingLast,
+    result: workingLast,
+  };
+}
+
 async function executeStudioAutonomousProduce(env, ctx, options = {}) {
   const chicago = chicagoNowParts();
   // Hourly refill slot (date:hHH). Legacy am/pm slots still match claimed hours at 8/16.
@@ -44480,21 +44832,6 @@ async function executeStudioAutonomousProduce(env, ctx, options = {}) {
   }
 
   const pendingDrafts = await listAutonomousDraftRequests(env);
-  if (pendingDrafts.length) {
-    const resumed = await resumeAutonomousDrafts(env, authorization, ctx, pendingDrafts, chicago, slot, {
-      scheduled: Boolean(options.scheduled),
-      force: Boolean(options.force),
-      deferProduce: priorProduceInFlight,
-      priorProduceRequestId,
-    });
-    if (resumed?.status !== "no_enabled_profile") return resumed;
-  }
-
-  // Light ticks only advance the existing Draft queue — never harvest a new idea.
-  if (options.resume_only) {
-    return { skipped: "resume_only_idle", chicago_date: chicago.date, last };
-  }
-
   const profiles = (await listRecords(env, STUDIO_IDEA_PROFILE_TABLE_ID, {
     limit: 50,
     filterFormula: "AND({Active}=1,{Autonomous_Produce_Enabled}=1)",
@@ -44505,8 +44842,53 @@ async function executeStudioAutonomousProduce(env, ctx, options = {}) {
     return result;
   }
 
-  // Scheduled cron: harvest only when a city's All-Profiles Scheduled total
-  // (parenthesis) is under 200 and Ready-for-Review cannot already cover the gap.
+  // Scheduled hour: 10 distinct-subject ideas per city under 200. Over 209 skips.
+  // Light ticks continue a short hour. Draft resume still advances produce.
+  if (options.scheduled && !options.force && !options.dry_run) {
+    const hourPass = await fillAutonomousScheduledHour(env, authorization, {
+      chicago,
+      slot,
+      last,
+      profiles,
+      preferredSubject: autonomousPreferredSubject(options.preferred_subject || last.preferred_subject),
+    });
+    if (hourPass?.last) last = hourPass.last;
+    const draftsNow = hourPass?.created_count
+      ? await listAutonomousDraftRequests(env)
+      : pendingDrafts;
+    if (draftsNow.length) {
+      const resumed = await resumeAutonomousDrafts(env, authorization, ctx, draftsNow, chicago, slot, {
+        scheduled: true,
+        force: false,
+        deferProduce: priorProduceInFlight,
+        priorProduceRequestId,
+      });
+      if (resumed?.status !== "no_enabled_profile") return resumed;
+    }
+    return hourPass?.result || {
+      skipped: "resume_only_idle",
+      chicago_date: chicago.date,
+      slot,
+      last,
+    };
+  }
+
+  if (pendingDrafts.length) {
+    const resumed = await resumeAutonomousDrafts(env, authorization, ctx, pendingDrafts, chicago, slot, {
+      scheduled: Boolean(options.scheduled),
+      force: Boolean(options.force),
+      deferProduce: priorProduceInFlight,
+      priorProduceRequestId,
+    });
+    if (resumed?.status !== "no_enabled_profile") return resumed;
+  }
+
+  if (options.resume_only) {
+    return { skipped: "resume_only_idle", chicago_date: chicago.date, last };
+  }
+
+  // Manual / dry-run: one idea. Scheduled hours already returned above.
+  // Hold at 200–209. Skip the hour when the parenthesis total is over 209.
   let refillScores = null;
   let refillMeta = null;
   if (options.scheduled && !options.force) {
@@ -44521,14 +44903,19 @@ async function executeStudioAutonomousProduce(env, ctx, options = {}) {
       refillScores = loadedScores;
       const needing = autonomousProfilesNeedingRefill(profiles, refillScores);
       if (!needing.length) {
+        const bands = Object.values(refillScores).map((row) => row?.band);
+        const skipReason = bands.length && bands.every((band) => band === "skip")
+          ? "scheduled_over_209"
+          : "scheduled_target_met";
         const result = {
-          skipped: "scheduled_target_met",
+          skipped: skipReason,
           chicago_date: chicago.date,
           chicago_hour: chicago.hour,
           slot,
           status: "skipped",
-          skip_reason: "scheduled_target_met",
+          skip_reason: skipReason,
           scheduled_target: AUTONOMOUS_SCHEDULED_TARGET,
+          scheduled_skip_above: AUTONOMOUS_SCHEDULED_SKIP_ABOVE,
           refill: Object.values(refillScores || {}),
           refill_source: refillMeta.source,
         };
@@ -44602,9 +44989,9 @@ async function executeStudioAutonomousProduce(env, ctx, options = {}) {
   let cluster = null;
   for (const candidate of autonomousProfileHarvestOrder(harvestProfiles, selected.id, refillScores)) {
     const nextCatalog = await harvestAutonomousLibraryCatalog(env, preferredSubject, candidate.id);
-    const nextUnused = autonomousUnusedLibraryAssets(nextCatalog, occupiedIdeas);
-    const nextOverview = summarizeUnusedLibraryOverview(nextUnused);
-    const nextCluster = pickRelatedUnusedStillCluster(nextUnused, { occupied: occupiedIdeas });
+    const nextUnused = nextCatalog;
+    const nextOverview = summarizeUnusedLibraryOverview(nextCatalog);
+    const nextCluster = pickRelatedUnusedStillCluster(nextCatalog, { occupied: occupiedIdeas });
     if (!catalog.length || nextUnused.length > unusedAssets.length) {
       catalog = nextCatalog;
       unusedAssets = nextUnused;
@@ -44624,11 +45011,11 @@ async function executeStudioAutonomousProduce(env, ctx, options = {}) {
   const trends = { similar, news, youtube };
   if (!unusedAssets.length) {
     const result = {
-      skipped: preferredSubject ? "no_matching_subject_stills" : "no_unused_library_stills",
+      skipped: preferredSubject ? "no_matching_subject_stills" : "no_library_stills",
       chicago_date: chicago.date,
       slot,
       status: "skipped",
-      skip_reason: preferredSubject ? "no_matching_subject_stills" : "no_unused_library_stills",
+      skip_reason: preferredSubject ? "no_matching_subject_stills" : "no_library_stills",
       harvest: {
         similar: similar.length,
         news: news.length,
@@ -44643,11 +45030,11 @@ async function executeStudioAutonomousProduce(env, ctx, options = {}) {
   }
   if (!cluster) {
     const result = {
-      skipped: "no_related_unused_cluster",
+      skipped: "no_distinct_subject",
       chicago_date: chicago.date,
       slot,
       status: "skipped",
-      skip_reason: "no_related_unused_cluster",
+      skip_reason: "no_distinct_subject",
       harvest: {
         similar: similar.length,
         news: news.length,
