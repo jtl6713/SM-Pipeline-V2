@@ -163,6 +163,7 @@ import {
   autonomousRefillProfilesStillOpen,
   autonomousRefillScoresFromOverview,
   autonomousAtTopOfHour,
+  autonomousClockForCron,
   autonomousRefillSlot,
   mergeAutonomousHourProgress,
   pickAutonomousEnabledProfile,
@@ -704,7 +705,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.602-ten-ideas-per-hour",
+          version: "0.10.603-top-of-hour-tick",
           studio_voiceover_once_v1: true,
           studio_factory_desk_v1: true,
           studio_factory_inflight_blocked_parent_v1: true,
@@ -741,6 +742,7 @@ export default {
           studio_autonomous_produce_v1: true,
           studio_autonomous_scheduled_target_v1: true,
           studio_autonomous_ten_per_hour_v1: true,
+          studio_autonomous_cron_minute_v1: true,
           studio_autonomous_music_variety_v1: true,
           studio_az_finished_video_v1: true,
           studio_az_auto_queue_v1: true,
@@ -1871,12 +1873,30 @@ export default {
     // cooldowns (603 Worker hung-cancels in 3h). Light = publish/produce rescue
     // only. Heavy (UTC :00/:30) owns platform polls, heals, insights, ingest,
     // post-publish release. Skip the whole pass while Airtable is cooling down.
-    const cadence = studioCronAirtableCadence(new Date(), event?.cron || "");
+    // scheduledTime is the tick Cloudflare owed us. new Date() is whenever this
+    // isolate actually started, which can already be past :00.
+    const cronInstant = Number(event?.scheduledTime);
+    const cadenceNow = Number.isFinite(cronInstant) && cronInstant > 1e12 ? new Date(cronInstant) : new Date();
+    const cadence = studioCronAirtableCadence(cadenceNow, event?.cron || "");
     ctx.waitUntil((async () => {
       const coolMs = airtableCooldownWaitMs();
       if (coolMs > AIRTABLE_SLOT_FAIL_FAST_MS) {
         console.warn("cron skipped: Airtable cooling down", { waitMs: coolMs, heavy: cadence.heavy });
         return;
+      }
+
+      // Create the hour's ideas before publish heals. Those heals were still
+      // running at :12, so the harvest saw a non-zero minute and created nothing.
+      if (cadence.heavy && Number(cadence.minute) === 0) {
+        try {
+          await runStudioAutonomousProduce(null, env, { permissions: { tenant_admin: true } }, ctx, {
+            scheduled: true,
+            cron: event?.cron || "",
+            cronMinute: cadence.minute,
+          });
+        } catch (error) {
+          console.warn("autonomous top-of-hour harvest failed", error);
+        }
       }
 
       // --- LIGHT (every 5 min): due-publish + stuck produce/render only ---
@@ -2121,13 +2141,17 @@ export default {
       } catch (error) {
         console.warn("item4 preparing variant-gap heal failed", error);
       }
-      try {
-        await runStudioAutonomousProduce(null, env, { permissions: { tenant_admin: true } }, ctx, {
-          scheduled: true,
-          cron: event?.cron || "",
-        });
-      } catch (error) {
-        console.warn("autonomous produce cadence failed", error);
+      // :00 already harvested above. :30 resumes drafts already opened.
+      if (Number(cadence.minute) !== 0) {
+        try {
+          await runStudioAutonomousProduce(null, env, { permissions: { tenant_admin: true } }, ctx, {
+            scheduled: true,
+            cron: event?.cron || "",
+            cronMinute: cadence.minute,
+          });
+        } catch (error) {
+          console.warn("autonomous produce cadence failed", error);
+        }
       }
       try {
         await syncProductionCadence(env, { skipRenderPulse: true });
@@ -44629,7 +44653,7 @@ async function fillAutonomousScheduledHour(env, authorization, {
 }
 
 async function executeStudioAutonomousProduce(env, ctx, options = {}) {
-  const chicago = chicagoNowParts();
+  const chicago = autonomousClockForCron(chicagoNowParts(), options.cronMinute);
   // Hourly refill slot (date:hHH). Legacy am/pm slots still match claimed hours at 8/16.
   const slot = autonomousRefillSlot(chicago) || autonomousSlot(chicago);
   let last = await studioLoadAutonomousLastRun(env);
