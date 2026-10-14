@@ -152,6 +152,13 @@ Before returning JSON:
 - If a complete preferred-music override exists, verify selected_music ID and URL exactly equal the preferred values and render_prep.music_url equals the preferred URL.
 - If no preferred-music override exists, normal MUSIC_CANDIDATE selection rules apply.
 
+PROFILE MUSIC POOL + ROTATION CONTRACT
+- Unless an explicit complete preferred-music override is present, MUSIC_CANDIDATES have already been scoped by the pipeline to the active Content Profile's configured music pool when that profile has one.
+- Do not select music outside MUSIC_CANDIDATES.
+- MUSIC_CANDIDATES are ordered by profile rotation priority after recently used tracks are suppressed. Among similarly suitable tracks, prefer the lower candidate number / lower rotation_priority so the same background track is not reused repeatedly.
+- Match the remaining candidates to the content using mood, AI tags, topic, asset description, title, location, Content_Themes, and the overall pace of the output.
+- A sibling platform output for the same Content Item may intentionally expose only one music candidate. Preserve that track so the same content package stays sonically consistent across platforms.
+
 Target length and clip count:
 - Use Target_Final_Length when provided. If missing or invalid, use 30 seconds.
 - fps = 30.
