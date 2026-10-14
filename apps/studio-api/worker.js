@@ -693,7 +693,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.595-scheduled-target-refill",
+          version: "0.10.596-autonomous-music-variety",
           studio_factory_desk_v1: true,
           studio_factory_desk_actions_v1: true,
           studio_factory_desk_write_v1: true,
@@ -726,6 +726,7 @@ export default {
           studio_auto_compress_v1: true,
           studio_autonomous_produce_v1: true,
           studio_autonomous_scheduled_target_v1: true,
+          studio_autonomous_music_variety_v1: true,
           studio_az_finished_video_v1: true,
           studio_az_auto_queue_v1: true,
           studio_az_large_video_staging_v1: true,
@@ -17787,27 +17788,38 @@ async function preferredMusicForProductionRequestOutput(env, outputRow, requestR
   return studioMusicFromMediaRecord(media);
 }
 
+function studioCatalogMusicScore(record) {
+  const name = String(f(record, "Asset Name") || "").toLowerCase();
+  let value = 0;
+  if (Boolean(f(record, "Studio_Favorite"))) value += 200;
+  if (name.includes("cinematic")) value += 80;
+  if (name.includes("drone")) value += 40;
+  if (name.includes("epic")) value += 30;
+  if (name.includes("night") || name.includes("city")) value += 20;
+  if (name.includes("yoga") || name.includes("meditat") || name.includes("harp")) value -= 40;
+  return value;
+}
+
+/** Prefer a random track among the top-scoring tier so blank Selected_Music_Asset does not lock one favorite forever. */
+function pickCatalogFallbackMusicRecord(records, { random = Math.random } = {}) {
+  const usable = (Array.isArray(records) ? records : [])
+    .filter((record) => Boolean(studioMusicFromMediaRecord(record).url));
+  if (!usable.length) return null;
+  const ranked = [...usable].sort((a, b) => studioCatalogMusicScore(b) - studioCatalogMusicScore(a));
+  const topScore = studioCatalogMusicScore(ranked[0]);
+  const topTier = ranked.filter((record) => studioCatalogMusicScore(record) === topScore);
+  const pool = topTier.length >= 2 ? topTier : ranked.slice(0, Math.min(8, ranked.length));
+  const index = Math.floor(Number(random()) * pool.length) % pool.length;
+  return pool[Math.max(0, index)] || ranked[0];
+}
+
 async function catalogFallbackMusic(env) {
   const records = await listRecords(env, env.AIRTABLE_MEDIA_TABLE_ID, {
     limit: 50,
     filterFormula: "AND({Asset_Role}='Music',NOT({Do_Not_Use}))",
   });
-  const usable = records.filter((record) => Boolean(studioMusicFromMediaRecord(record).url));
-  if (!usable.length) return emptyStudioMusic();
-
-  const score = (record) => {
-    const name = String(f(record, "Asset Name") || "").toLowerCase();
-    let value = 0;
-    if (Boolean(f(record, "Studio_Favorite"))) value += 200;
-    if (name.includes("cinematic")) value += 80;
-    if (name.includes("drone")) value += 40;
-    if (name.includes("epic")) value += 30;
-    if (name.includes("night") || name.includes("city")) value += 20;
-    if (name.includes("yoga") || name.includes("meditat") || name.includes("harp")) value -= 40;
-    return value;
-  };
-
-  return studioMusicFromMediaRecord(usable.sort((a, b) => score(b) - score(a))[0]);
+  const picked = pickCatalogFallbackMusicRecord(records);
+  return picked ? studioMusicFromMediaRecord(picked) : emptyStudioMusic();
 }
 
 async function resolveStudioRenderMusic(env, outputRow, requestRecord, effective) {
@@ -24436,12 +24448,16 @@ async function acceptScriptedShortRoute(request, env, authorization, ctx = null)
   const stampedNotes = `${notes}\nidea-vo-timeline=1\nscripted-short=proposal`.trim();
   const duration = Math.max(5, Math.round(Number(timeline.duration_seconds) || 0));
   const missing = unassignedSuggestionCount(timeline);
+  const scriptedMusicId = pickAutonomousMusicAssetId(
+    mapOperationsProfile(profile).autonomous_music_asset_ids,
+    AUTONOMOUS_DEFAULT_MUSIC_ASSET_ID,
+  );
   requestRecord = await item4UpdateRequestState(env, requestRecord.id, {
     Master_Content_Type: "Vertical Short Video",
     Voiceover_Mode: "Yes",
     Background_Music_Mode: "Yes",
     Thumbnail_Mode: "Yes",
-    Selected_Music_Asset: [AUTONOMOUS_DEFAULT_MUSIC_ASSET_ID],
+    Selected_Music_Asset: [scriptedMusicId],
     Script_Mode: "Force exact",
     Requested_Script: script,
     Requested_Title: title,
@@ -43336,7 +43352,7 @@ async function waitAutonomousVariantsReady(env, recordId, ctx, maxMs = 80000) {
 
 async function finishAutonomousProductionRequest(env, authorization, ctx, idea, requestRecord, pick, options = {}) {
   const requestId = requestRecord.id;
-  let current = requestRecord;
+  let current = await ensureAutonomousSelectedMusic(env, requestRecord);
   const incoming = autonomousIncomingMediaIds(
     item4ParseJson(f(current, "Studio_Master_Assets_JSON"), []),
     pick.media_asset_ids
@@ -43468,18 +43484,59 @@ function ideaMatchedMediaIds(idea) {
     .filter((id) => /^rec[A-Za-z0-9]+$/.test(id));
 }
 
+/**
+ * Stamp a random Autonomous_Music_Pool track when Selected_Music_Asset is blank.
+ * Photo-ready daily ideas used to skip this and every Remotion job fell through to
+ * the same catalog favorite (Clocking In).
+ */
+async function ensureAutonomousSelectedMusic(env, requestRecord, profileRecord = null) {
+  if (!requestRecord?.id) return requestRecord;
+  if (linkedRecordIds(f(requestRecord, "Selected_Music_Asset")).length) return requestRecord;
+  let profile = profileRecord;
+  if (!profile) {
+    const profileId = firstLinkedRecordId(f(requestRecord, "Content_Profile"));
+    if (!profileId) return requestRecord;
+    profile = await airtableFetch(env, STUDIO_IDEA_PROFILE_TABLE_ID, profileId).catch(() => null);
+  }
+  if (!profile?.id) return requestRecord;
+  const musicAssetId = pickAutonomousMusicAssetId(
+    mapOperationsProfile(profile).autonomous_music_asset_ids,
+    AUTONOMOUS_DEFAULT_MUSIC_ASSET_ID,
+  );
+  const fields = {
+    Selected_Music_Asset: [musicAssetId],
+    Background_Music_Mode: "Yes",
+  };
+  return airtableFetch(env, PRODUCTION_REQUEST_TABLE, requestRecord.id, {
+    method: "PATCH",
+    body: JSON.stringify({ fields, typecast: true }),
+  });
+}
+
 /** Stamp photo-ready daily ideas so one-at-a-time resume can produce them into Factory Needs eyes. */
 async function stampPhotoReadyIdeaForAutonomousProduce(env, idea, requestRecord) {
   if (!idea?.id || !requestRecord?.id) return requestRecord;
-  if (isAutonomousOrigin(f(requestRecord, "Production_Notes"))) return requestRecord;
-  const profileId = firstLinkedRecordId(f(idea, "Content_Profile"));
+  const alreadyAutonomous = isAutonomousOrigin(f(requestRecord, "Production_Notes"));
+  const profileId = firstLinkedRecordId(f(idea, "Content_Profile"))
+    || firstLinkedRecordId(f(requestRecord, "Content_Profile"));
   if (!profileId) return requestRecord;
   const profile = await airtableFetch(env, STUDIO_IDEA_PROFILE_TABLE_ID, profileId).catch(() => null);
   if (!f(profile, "Active") || !f(profile, "Autonomous_Produce_Enabled")) return requestRecord;
-  const notes = stampAutonomousOrigin(f(requestRecord, "Production_Notes"));
+  const fields = {};
+  if (!alreadyAutonomous) {
+    fields.Production_Notes = stampAutonomousOrigin(f(requestRecord, "Production_Notes"));
+  }
+  if (!linkedRecordIds(f(requestRecord, "Selected_Music_Asset")).length) {
+    fields.Selected_Music_Asset = [pickAutonomousMusicAssetId(
+      mapOperationsProfile(profile).autonomous_music_asset_ids,
+      AUTONOMOUS_DEFAULT_MUSIC_ASSET_ID,
+    )];
+    fields.Background_Music_Mode = "Yes";
+  }
+  if (!Object.keys(fields).length) return requestRecord;
   return airtableFetch(env, PRODUCTION_REQUEST_TABLE, requestRecord.id, {
     method: "PATCH",
-    body: JSON.stringify({ fields: { Production_Notes: notes }, typecast: true }),
+    body: JSON.stringify({ fields, typecast: true }),
   });
 }
 
@@ -43549,10 +43606,25 @@ async function adoptNextReadyDailyIdea(env, authorization, { limit = 8 } = {}) {
         continue;
       }
     }
-    const notes = stampAutonomousOrigin(f(draft, "Production_Notes"));
+    const profile = profiles.find((row) => row.id === idea.profile_id) || null;
+    const profileRecord = profile?.id
+      ? await airtableFetch(env, STUDIO_IDEA_PROFILE_TABLE_ID, profile.id).catch(() => null)
+      : null;
+    const fields = {
+      Production_Notes: stampAutonomousOrigin(f(draft, "Production_Notes")),
+    };
+    if (!linkedRecordIds(f(draft, "Selected_Music_Asset")).length) {
+      fields.Selected_Music_Asset = [pickAutonomousMusicAssetId(
+        (profile?.autonomous_music_asset_ids?.length
+          ? profile.autonomous_music_asset_ids
+          : mapOperationsProfile(profileRecord || {}).autonomous_music_asset_ids),
+        AUTONOMOUS_DEFAULT_MUSIC_ASSET_ID,
+      )];
+      fields.Background_Music_Mode = "Yes";
+    }
     await airtableFetch(env, PRODUCTION_REQUEST_TABLE, draft.id, {
       method: "PATCH",
-      body: JSON.stringify({ fields: { Production_Notes: notes }, typecast: true }),
+      body: JSON.stringify({ fields, typecast: true }),
     });
     adopted.push({ idea_id: idea.id, production_request_id: draft.id });
   }
