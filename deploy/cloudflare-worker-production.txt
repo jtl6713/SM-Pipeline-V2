@@ -270,3 +270,4 @@ Deploy Worker 0.10.489-engagement-ledger. Shrink the engagement ledger so Chicag
 2026-10-14: Worker 0.10.602-ten-ideas-per-hour. Hourly autonomous harvest creates 10 distinct-subject ideas per city when Scheduled is under 200, skips a city over 209, and scans the library instead of the newest 180 unused photos.
 2026-10-14: Worker 0.10.602-ten-ideas-per-hour. The 10-idea harvest runs at the top of the Chicago hour only. :05 and :30 ticks resume drafts already opened.
 2026-10-14: Worker 0.10.603-top-of-hour-tick. The 10-idea harvest uses the cron tick minute and runs before the other :00 heals. The 5pm Chicago batch saw the wall clock after those heals and created no ideas.
+2026-10-14: Worker 0.10.604-hour-create-budget. Each city's 10-idea create window starts after the library scan and lasts 3 minutes. The 6pm Chicago hour stopped at one Miami idea because the old 45-second cap included the scan.

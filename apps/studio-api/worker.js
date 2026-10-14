@@ -140,6 +140,7 @@ import {
 import {
   AUTONOMOUS_DEFAULT_MUSIC_ASSET_ID,
   AUTONOMOUS_IDEA_CREATED_FIELD,
+  AUTONOMOUS_CITY_CREATE_MS,
   AUTONOMOUS_IDEAS_PER_HOUR,
   AUTONOMOUS_LIBRARY_SCAN_CAP,
   AUTONOMOUS_RELATED_STILL_MIN,
@@ -705,7 +706,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.603-top-of-hour-tick",
+          version: "0.10.604-hour-create-budget",
           studio_voiceover_once_v1: true,
           studio_factory_desk_v1: true,
           studio_factory_inflight_blocked_parent_v1: true,
@@ -743,6 +744,7 @@ export default {
           studio_autonomous_scheduled_target_v1: true,
           studio_autonomous_ten_per_hour_v1: true,
           studio_autonomous_cron_minute_v1: true,
+          studio_autonomous_hour_create_budget_v1: true,
           studio_autonomous_music_variety_v1: true,
           studio_az_finished_video_v1: true,
           studio_az_auto_queue_v1: true,
@@ -44383,7 +44385,6 @@ async function fillAutonomousCityIdeas(env, authorization, {
   const recentTitles = occupied.map((row) => row.title);
   let created = 0;
   let attempts = 0;
-  const createDeadline = Date.now() + 45000;
   const persist = async (status, skipReason) => {
     saved = await studioSaveAutonomousLastRun(env, {
       status,
@@ -44416,6 +44417,7 @@ async function fillAutonomousCityIdeas(env, authorization, {
     return { created_count: 0, last: saved, counts, skips, stop: false };
   }
   let pool = catalog.slice();
+  const createDeadline = Date.now() + AUTONOMOUS_CITY_CREATE_MS;
   while (count < goal) {
     if (attempts > 0 && (attempts >= 12 || Date.now() > createDeadline)) break;
     attempts += 1;
