@@ -267,7 +267,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.676-factory-revision-unlock";
+  const BUILD_ID = "item4-0.6.677-factory-revision-approve";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -14749,7 +14749,11 @@ function timedScriptAssetLabel(asset, index) {
 
       const result = await api(`/api/production-requests/${encodeURIComponent(activeProductionRequest.id)}/promote`, {
         method: "POST",
-        body: JSON.stringify({ revision_approve: activeProductionRequest?.revision_open === true }),
+        // This listener runs only for the human-clicked Approve control. Always send
+        // explicit revision consent: a stale/light request response can omit
+        // revision_open even while the Worker still has the Factory marker.
+        // Background promotion paths never set this flag.
+        body: JSON.stringify({ revision_approve: true }),
         timeoutMs: 120000,
       });
 
