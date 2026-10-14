@@ -661,7 +661,7 @@ test("Worker stamps photo-ready ideas and drains the 30m SLA on light ticks", as
   const path = await import("node:path");
   const here = path.dirname(fileURLToPath(import.meta.url));
   const worker = await readFile(path.join(here, "worker.js"), "utf8");
-  assert.match(worker, /version: "0\.10\.593-autonomous-revision-fifo"/);
+  assert.match(worker, /version: "0\.10\.594-revision-lock-heal"/);
   assert.match(worker, /async function stampPhotoReadyIdeaForAutonomousProduce/);
   assert.match(worker, /productionNotesRevisionOpen\(notes\)/);
   assert.match(worker, /async function releaseAutonomousRevisionLock/);

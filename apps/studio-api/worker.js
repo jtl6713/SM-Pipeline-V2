@@ -6,6 +6,7 @@ import {
   PUBLIC_HEALTH_TARGETS,
   buildDeskInventoryPayload,
   classifyAutonomousRequest,
+  classifyAutonomousRevisionLock,
   classifyAutonomousRfrGate,
   classifyAutonomousTopicCollision,
   classifyAzNotAutoFinished,
@@ -688,7 +689,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.593-autonomous-revision-fifo",
+          version: "0.10.594-revision-lock-heal",
           studio_factory_desk_v1: true,
           studio_factory_desk_actions_v1: true,
           studio_factory_desk_write_v1: true,
@@ -1908,6 +1909,13 @@ export default {
         await startOrphanedStudioProductionJobs(env);
       } catch (error) {
         console.warn("studio produce orphan kick failed", error);
+      }
+      // A skipped Factory-revision lock retries the same 409 and never reaches
+      // the other cities. Release it before resume so this tick can move on.
+      try {
+        await studioHealAutonomousRevisionLock(env);
+      } catch (error) {
+        console.warn("autonomous revision lock heal failed", error);
       }
       // Light tick: 30m photo-ready SLA drain. Adopt matched ideas + resume prepare
       // even while a prior Remotion job is in flight. Heavy cron still owns harvest.
@@ -41404,6 +41412,14 @@ async function gatherStudioDeskInventory(env) {
       updated_at: f(record, "Updated_At"),
     }, nowMs));
   }
+  scanned("autonomous_revision_lock");
+  const lastRunRow = await studioSettingsByName(env, STUDIO_AUTONOMOUS_LAST_SETTING).catch(() => null);
+  const lastRun = parseAutonomousLastRun(f(lastRunRow, "Setting_Value"));
+  const lockedId = String(lastRun?.production_request_id || "").trim();
+  if (lockedId) {
+    const locked = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, lockedId).catch(() => null);
+    push(classifyAutonomousRevisionLock(lastRun, f(locked, "Production_Notes")));
+  }
   scanned("autonomous_stalled", "autonomous_produce_gap", "az_stalled");
   for (const record of [...(autonomousRows || []), ...(azRows || [])]) {
     const job = parseStudioProductionJob(record) || {};
@@ -43735,6 +43751,20 @@ async function resumeAutonomousDrafts(env, authorization, ctx, drafts, chicago, 
     slot,
     resumed: results,
   };
+}
+
+async function studioHealAutonomousRevisionLock(env) {
+  const last = await studioLoadAutonomousLastRun(env);
+  const requestId = String(last?.production_request_id || "").trim();
+  if (!requestId) return { healed: 0 };
+  const requestRecord = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, requestId).catch(() => null);
+  const finding = classifyAutonomousRevisionLock(last, f(requestRecord, "Production_Notes"));
+  if (!finding) return { healed: 0 };
+  await releaseAutonomousRevisionLock(env, chicagoNowParts(), {
+    productionRequestId: requestId,
+    ideaId: last?.idea_id || null,
+  });
+  return { healed: 1, fingerprint: finding.fingerprint, record_id: requestId };
 }
 
 async function releaseAutonomousRevisionLock(env, chicago, { productionRequestId = null, ideaId = null } = {}) {

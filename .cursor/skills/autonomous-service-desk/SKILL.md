@@ -147,9 +147,9 @@ Auto-correct: Worker `studioHealPhantomRerender` (light cron) sets `Output_Statu
 
 ## Watch: Autonomous FIFO locked on a Factory revision hold
 
-`STUDIO_AUTONOMOUS_LAST_RUN` stays `status=skipped` with the same `production_request_id`, and `skip_reason` is `This content is open for Factory revision`. Photo-ready `origin=autonomous` drafts in other cities never resume. The held request has `[factory-revision-open]` and variants Ready, so a deferred stamp would be cleared and the lock would return. Kind `autonomous_revision_lock`, class `code_bug`, actor `desk_agent`. Fingerprint `autonomous_revision_lock:<production_request_rec>:factory_revision_open`.
+`STUDIO_AUTONOMOUS_LAST_RUN` stays `status=skipped` (or any non-reset status) with the same `production_request_id`, and `skip_reason` is `This content is open for Factory revision` or the held request notes start with `[factory-revision-open]`. Photo-ready `origin=autonomous` drafts in other cities never resume. Variants Ready would clear a deferred stamp and the lock would return. Kind `autonomous_revision_lock`, class `transient`, actor `worker_heal`. Fingerprint `autonomous_revision_lock:<production_request_rec>:factory_revision_open`. Catalog id `autonomous_revision_lock`.
 
-Do not clear `[factory-revision-open]`. Do not Approve. Do not publish. Worker `releaseAutonomousRevisionLock` saves `status=reset`, `skip_reason=skip_factory_revision_open`, null idea/request ids, and `firstAutonomousResumeDraft` skips revision-open notes. Proven: LA Walk of Fame `rec64MuB8YqdXJ0El` / idea `recpQ0ZyzTNlWPs0m` blocked Chicago photo-ready drafts on 2026-10-14. Same fingerprint after the Worker that skips revision-open is live → `code_bug`.
+Do not clear `[factory-revision-open]`. Do not Approve. Do not publish. Light cron `studioHealAutonomousRevisionLock` runs before autonomous resume and saves `status=reset`, `skip_reason=skip_factory_revision_open`, null idea/request ids. `firstAutonomousResumeDraft` skips revision-open notes. Proven: LA Walk of Fame `rec64MuB8YqdXJ0El` / idea `recpQ0ZyzTNlWPs0m` blocked Chicago photo-ready drafts on 2026-10-14. Same fingerprint after that release → `code_bug`.
 
 ## Watch: Escalated — needs investigation
 
