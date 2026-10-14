@@ -8,9 +8,11 @@ from typing import Any
 
 from airtable.client import AirtableClient
 from airtable.constants import (
+    CONTENT_ITEMS_TABLE,
     CONTENT_PROFILES_TABLE,
     MEDIA_TRANSFER_QUEUE_TABLE,
     PRODUCTION_REQUESTS_TABLE,
+    SOURCE_CANDIDATES_TABLE,
 )
 from asset.constants import GDRIVE_STUDIO_INTAKE_FOLDER
 from branding.watermark import (
@@ -44,12 +46,47 @@ def _first_linked_id(value: Any) -> str:
 
 
 def _production_profile(client: AirtableClient, fields: dict[str, Any]) -> tuple[str, str]:
+    """Resolve Content_Profile for Item 4 masters/variants.
+
+    Production Requests usually have no Content_Profile field. Prefer any profile
+    already on the queue row, then Idea Candidate, then Promoted Content Item —
+    matching Studio Worker item4ProductionProfileRecord.
+    """
+    direct = _first_linked_id(fields.get("Content_Profile"))
+    if direct:
+        try:
+            profile = client.get_record(CONTENT_PROFILES_TABLE, direct)
+            return direct, str(field(profile, "Profile_Name") or "").strip()
+        except Exception:
+            pass
+
     request_id = str(fields.get("Production_Request_Record_ID") or "").strip()
     if not request_id:
         return "", ""
     try:
         request_record = client.get_record(PRODUCTION_REQUESTS_TABLE, request_id)
         profile_id = _first_linked_id(field(request_record, "Content_Profile"))
+
+        if not profile_id:
+            idea_id = _first_linked_id(field(request_record, "Idea_Candidate"))
+            if idea_id:
+                try:
+                    idea = client.get_record(SOURCE_CANDIDATES_TABLE, idea_id)
+                    profile_id = _first_linked_id(field(idea, "Content_Profile"))
+                except Exception:
+                    pass
+
+        if not profile_id:
+            content_id = _first_linked_id(field(request_record, "Promoted_Content_Item")) or _first_linked_id(
+                field(request_record, "Content Items")
+            )
+            if content_id:
+                try:
+                    content = client.get_record(CONTENT_ITEMS_TABLE, content_id)
+                    profile_id = _first_linked_id(field(content, "Content_Profile"))
+                except Exception:
+                    pass
+
         if not profile_id:
             return "", ""
         profile = client.get_record(CONTENT_PROFILES_TABLE, profile_id)

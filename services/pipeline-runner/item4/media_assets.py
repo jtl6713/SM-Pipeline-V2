@@ -190,6 +190,15 @@ def ensure_media_asset(
 ) -> str:
     existing = find_by_transfer_id(client, transfer_id)
     if existing:
+        # AI masters can land before profile resolution existed. Backfill blank
+        # Content_Profile from the queue/handoff fields so Asset Manager scopes them.
+        wanted = fields.get("Content_Profile")
+        existing_fields = existing.get("fields") if isinstance(existing.get("fields"), dict) else {}
+        if wanted and not existing_fields.get("Content_Profile"):
+            try:
+                client.update_record(MEDIA_ASSETS_TABLE, existing["id"], {"Content_Profile": wanted})
+            except Exception:
+                pass
         return existing["id"]
     if kind == "Master Original":
         created = create_master_media_asset(client, fields, drive_id, drive_url, transfer_id)
