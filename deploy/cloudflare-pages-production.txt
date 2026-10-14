@@ -325,3 +325,4 @@ UI 0.6.607 hashtag mismatch warning only; approval no longer blocked.
 2026-10-13: Retry UI 0.6.678 production Pages after synchronizing unchanged app core BUILD_ID and version-pinned regression checks with the new cache key.
 2026-10-13: Re-trigger UI 0.6.678 after updating Factory revision approval regression pinned to prior UI build; no production behavior changed.
 2026-10-13: UI 0.6.679 fix Production cross-record identity leak (Content 597 title, script), and guard stale async output/request hydrations.
+2026-10-13: Redeploy 0.6.679 with active Production record identity regression tests and synchronized build pins.
