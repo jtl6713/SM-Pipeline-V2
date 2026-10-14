@@ -98,6 +98,41 @@ def profile_music_pool_ids(profile: dict[str, Any] | None) -> list[str]:
     return linked_record_ids(_field(profile, "Autonomous_Music_Pool"))
 
 
+def music_identity(row: dict[str, Any] | None) -> str:
+    """Stable physical-audio identity so duplicate Airtable rows do not fake rotation."""
+    file_id = str(_field(row, "Google Drive File ID") or "").strip()
+    if file_id:
+        return f"drive:{file_id}"
+    url = str(_field(row, "Google Drive URL") or "").strip()
+    if url:
+        return f"url:{url}"
+    record_id = str((row or {}).get("id") or "").strip()
+    return f"record:{record_id}" if record_id else ""
+
+
+def _selected_music_identity(row: dict[str, Any]) -> str:
+    url = str(_field(row, "Selected_Music_URL") or _field(row, "Music_URL") or "").strip()
+    if url:
+        return f"url:{url}"
+    record_id = str(_field(row, "Selected_Music_Media_Asset_ID") or "").strip()
+    return f"record:{record_id}" if record_id else ""
+
+
+def _dedupe_physical_audio(rows: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], list[str]]:
+    unique: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    duplicate_ids: list[str] = []
+    for row in rows:
+        identity = music_identity(row)
+        if identity and identity in seen:
+            duplicate_ids.append(str(row.get("id") or ""))
+            continue
+        if identity:
+            seen.add(identity)
+        unique.append(row)
+    return unique, [asset_id for asset_id in duplicate_ids if asset_id]
+
+
 def scope_music_candidates_to_profile(
     client,
     *,
@@ -137,8 +172,16 @@ def scope_music_candidates_to_profile(
     by_id = {str(row.get("id") or ""): row for row in rows if row.get("id")}
     scoped = [by_id[asset_id] for asset_id in pool_ids if asset_id in by_id]
     preferred = str(preferred_media_asset_id or "").strip()
-    if preferred and preferred in by_id and preferred not in {str(row.get("id") or "") for row in scoped}:
-        scoped.insert(0, by_id[preferred])
+    if preferred and preferred in by_id:
+        preferred_row = by_id[preferred]
+        preferred_identity = music_identity(preferred_row)
+        scoped = [
+            row for row in scoped
+            if str(row.get("id") or "") == preferred or music_identity(row) != preferred_identity
+        ]
+        scoped = [row for row in scoped if str(row.get("id") or "") != preferred]
+        scoped.insert(0, preferred_row)
+    scoped, duplicate_ids = _dedupe_physical_audio(scoped)
 
     return scoped, {
         "profile_id": profile_id,
@@ -147,6 +190,7 @@ def scope_music_candidates_to_profile(
         "profile_pool_count": len(pool_ids),
         "profile_pool_eligible_count": len(scoped),
         "profile_pool_ids": pool_ids,
+        "profile_pool_duplicate_audio_ids": duplicate_ids,
     }
 
 
@@ -189,6 +233,11 @@ def rotate_profile_music_candidates(
     content_item_id = str((content_item or {}).get("id") or "")
     output_record_id = str(output.get("id") or "")
     candidate_ids = {str(row.get("id") or "") for row in rows if row.get("id")}
+    candidate_by_identity = {
+        music_identity(row): row
+        for row in rows
+        if music_identity(row)
+    }
 
     recent_outputs = client.list_records(
         PLATFORM_OUTPUTS_TABLE,
@@ -198,21 +247,30 @@ def rotate_profile_music_candidates(
             "Content_Item",
             "Content_Profile",
             "Selected_Music_Media_Asset_ID",
+            "Selected_Music_URL",
+            "Music_URL",
         ],
         sort_field="Output_ID",
         sort_direction="desc",
     )
 
     sibling_music_id = ""
+    sibling_identity = ""
     recent_ids: list[str] = []
+    recent_identities: list[str] = []
     for prior in recent_outputs:
         if str(prior.get("id") or "") == output_record_id:
             continue
         selected_id = str(_field(prior, "Selected_Music_Media_Asset_ID") or "").strip()
-        if not selected_id or selected_id not in candidate_ids:
+        prior_identity = _selected_music_identity(prior)
+        sibling = candidate_by_identity.get(prior_identity)
+        if not sibling and selected_id in candidate_ids:
+            sibling = next((row for row in rows if str(row.get("id") or "") == selected_id), None)
+        if not sibling:
             continue
         if not preferred and _same_content_item(prior, content_item_id):
-            sibling_music_id = selected_id
+            sibling_music_id = str(sibling.get("id") or "")
+            sibling_identity = music_identity(sibling)
             break
 
     if sibling_music_id:
@@ -223,6 +281,7 @@ def rotate_profile_music_candidates(
                 "rotation_avoided_ids": [],
                 "rotation_recent_ids": [],
                 "rotation_sibling_music_id": sibling_music_id,
+                "rotation_sibling_audio_identity": sibling_identity,
                 "rotation_mode": "reuse_sibling_content_track",
             })
             return [sibling], context
@@ -233,8 +292,17 @@ def rotate_profile_music_candidates(
         if not _same_profile(prior, profile_name):
             continue
         selected_id = str(_field(prior, "Selected_Music_Media_Asset_ID") or "").strip()
-        if selected_id and selected_id in candidate_ids and selected_id not in recent_ids:
-            recent_ids.append(selected_id)
+        prior_identity = _selected_music_identity(prior)
+        candidate = candidate_by_identity.get(prior_identity)
+        if not candidate and selected_id in candidate_ids:
+            candidate = next((row for row in rows if str(row.get("id") or "") == selected_id), None)
+        if not candidate:
+            continue
+        candidate_id = str(candidate.get("id") or "")
+        candidate_identity = music_identity(candidate)
+        if candidate_identity and candidate_identity not in recent_identities:
+            recent_identities.append(candidate_identity)
+            recent_ids.append(candidate_id)
 
     if preferred:
         context.update({
@@ -251,27 +319,29 @@ def rotate_profile_music_candidates(
         max(0, len(rows) - MIN_ROTATION_REMAINDER),
     )
     avoided_ids = [asset_id for asset_id in recent_ids[:avoid_count] if asset_id in candidate_ids]
-    avoided = set(avoided_ids)
-    filtered = [row for row in rows if str(row.get("id") or "") not in avoided]
+    avoided_identities = set(recent_identities[:avoid_count])
+    filtered = [row for row in rows if music_identity(row) not in avoided_identities]
     if not filtered:
         filtered = rows
         avoided_ids = []
 
-    recent_rank = {asset_id: index for index, asset_id in enumerate(recent_ids)}
+    recent_rank = {identity: index for index, identity in enumerate(recent_identities)}
     original_rank = {str(row.get("id") or ""): index for index, row in enumerate(rows)}
 
     def sort_key(row: dict[str, Any]) -> tuple[int, int, int]:
         asset_id = str(row.get("id") or "")
-        if asset_id not in recent_rank:
+        identity = music_identity(row)
+        if identity not in recent_rank:
             return (0, 0, original_rank.get(asset_id, 9999))
         # Larger recent-rank index means older use, so prefer it first.
-        return (1, -recent_rank[asset_id], original_rank.get(asset_id, 9999))
+        return (1, -recent_rank[identity], original_rank.get(asset_id, 9999))
 
     filtered.sort(key=sort_key)
     context.update({
         "rotation_candidate_count": len(filtered),
         "rotation_avoided_ids": avoided_ids,
         "rotation_recent_ids": recent_ids,
+        "rotation_recent_audio_identities": recent_identities,
         "rotation_sibling_music_id": "",
         "rotation_mode": "profile_lru",
     })
