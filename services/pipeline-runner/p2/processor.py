@@ -27,6 +27,13 @@ from p2.constants import (
     VOICEOVER_DRIVE_FOLDER_ID,
 )
 from p2.elevenlabs_client import resolve_content_voice_id, synthesize_voiceover_by_id
+from p2.voiceover_claim import (
+    content_tts_lock,
+    drive_voiceover_url,
+    lease_is_fresh,
+    lease_text,
+    script_fingerprint,
+)
 from p2.formulas import (
     p2_exact_content_formula,
     recheck_silent_thumbnail,
@@ -225,6 +232,27 @@ def _route_for_item(item: dict[str, Any]) -> str | None:
     return None
 
 
+def _commit_existing_voiceover(
+    client: AirtableClient,
+    item: dict[str, Any],
+    link: str,
+    file_id: str,
+) -> None:
+    client.update_record(
+        CONTENT_ITEMS_TABLE,
+        item["id"],
+        {
+            "Voiceover_URL": link,
+            "Voiceover_Status": "Generated",
+            "Voiceover_Google_Drive_File_ID": file_id,
+            "Voiceover_Normalization_Details": (
+                "Reused the Drive voiceover already paid for. ElevenLabs was not called again."
+            ),
+        },
+        typecast=True,
+    )
+
+
 def _preview(item: dict[str, Any], *, route: str | None) -> dict[str, Any]:
     return {
         "content_item_record_id": item["id"],
@@ -264,6 +292,32 @@ def process_request(
     if clears and not dry_run:
         client.update_record(CONTENT_ITEMS_TABLE, item["id"], clears, typecast=True)
         item = client.get_record(CONTENT_ITEMS_TABLE, item["id"])
+
+    existing_file = field_str(item, "Voiceover_Google_Drive_File_ID")
+    if not dry_run and existing_file and not field_str(item, "Voiceover_URL"):
+        drive = GoogleDriveClient()
+        try:
+            meta = drive.get_file(existing_file)
+        except Exception as exc:
+            return {
+                "processed": False,
+                "reason": "voiceover_drive_reuse_failed",
+                "error": str(exc),
+                "skipped_tts": True,
+                "content_item_record_id": item["id"],
+                "make_scenario_id": MAKE_SCENARIO_ID,
+            }
+        if not meta.get("trashed"):
+            link = drive_voiceover_url(meta, existing_file)
+            _commit_existing_voiceover(client, item, link, existing_file)
+            return {
+                "processed": True,
+                "reason": "voiceover_reused_drive_file",
+                "voiceover_drive_file_id": existing_file,
+                "skipped_tts": True,
+                "content_item_record_id": item["id"],
+                "make_scenario_id": MAKE_SCENARIO_ID,
+            }
 
     settings_store = pipeline_settings(client)
     normalizer_url = settings_store.get(PIPELINE_SETTING_NORMALIZER_URL)
@@ -356,188 +410,253 @@ def process_request(
     spoken_script = field_str(item, "Voiceover_Script")
     from p2.voiceover_floor import lengthen_voiceover_script, speak_until_minimum
 
-    if timeline and timeline.get("segments"):
-        # Per-scene TTS + measured durations. Import clocks are hints only —
-        # still N must last as long as scene N speech (NYC CI 290: import 20s
-        # while TTS spoke ~13s left ~15s of silence when stills stayed locked).
-        # Normalize each spoken scene before concat because separate ElevenLabs
-        # requests can arrive at radically different levels. A whole-file
-        # loudnorm pass cannot repair that relative scene-to-scene imbalance.
-        # The spoken total still cannot be under 4 seconds.
-        scene_normalization_payloads: list[dict[str, Any]] = []
+    with content_tts_lock(item["id"]):
+        item = client.get_record(CONTENT_ITEMS_TABLE, item["id"])
+        if field_str(item, "Voiceover_URL"):
+            return {
+                **preview,
+                "processed": True,
+                "reason": "voiceover_already_saved",
+                "skipped_tts": True,
+            }
+        existing_file = field_str(item, "Voiceover_Google_Drive_File_ID")
+        if existing_file:
+            try:
+                meta = drive.get_file(existing_file)
+            except Exception as exc:
+                return {
+                    **preview,
+                    "processed": False,
+                    "reason": "voiceover_drive_reuse_failed",
+                    "error": str(exc),
+                    "skipped_tts": True,
+                }
+            if not meta.get("trashed"):
+                link = drive_voiceover_url(meta, existing_file)
+                _commit_existing_voiceover(client, item, link, existing_file)
+                return {
+                    **preview,
+                    "processed": True,
+                    "reason": "voiceover_reused_drive_file",
+                    "voiceover_drive_file_id": existing_file,
+                    "skipped_tts": True,
+                }
+        fingerprint = script_fingerprint(voice_id, spoken_script)
+        if lease_is_fresh(field_str(item, "Voiceover_Normalization_Details"), fingerprint):
+            return {
+                **preview,
+                "processed": False,
+                "reason": "voiceover_already_in_flight",
+                "skipped_tts": True,
+            }
+        # Last writer wins. A racer that sees a different claim backs off
+        # without calling ElevenLabs.
+        lease = lease_text(fingerprint)
+        client.update_record(
+            CONTENT_ITEMS_TABLE,
+            item["id"],
+            {
+                "Voiceover_Normalization_Details": lease,
+                "Voiceover_Normalized_At": _now_iso(),
+            },
+            typecast=True,
+        )
+        claimed = client.get_record(CONTENT_ITEMS_TABLE, item["id"])
+        if field_str(claimed, "Voiceover_URL"):
+            return {
+                **preview,
+                "processed": True,
+                "reason": "voiceover_already_saved",
+                "skipped_tts": True,
+            }
+        if field_str(claimed, "Voiceover_Normalization_Details").strip() != lease:
+            return {
+                **preview,
+                "processed": False,
+                "reason": "voiceover_already_in_flight",
+                "skipped_tts": True,
+            }
+        item = claimed
 
-        def _normalize_timed_scene(raw: bytes, scene_index: int, _text: str) -> bytes:
-            payload, leveled = normalize_voiceover(
-                raw,
-                filename=f"{content_id}_voice_scene_{scene_index:02d}.mp3",
-                normalizer_base_url=normalizer_url,
+        if timeline and timeline.get("segments"):
+            # Per-scene TTS + measured durations. One pass per scene, then the
+            # file is saved before any later thumbnail or duration work.
+            scene_normalization_payloads: list[dict[str, Any]] = []
+
+            def _normalize_timed_scene(raw: bytes, scene_index: int, _text: str) -> bytes:
+                payload, leveled = normalize_voiceover(
+                    raw,
+                    filename=f"{content_id}_voice_scene_{scene_index:02d}.mp3",
+                    normalizer_base_url=normalizer_url,
+                )
+                scene_normalization_payloads.append(payload)
+                return leveled
+
+            raw_mp3, measured_timeline, segment_seconds = synthesize_timed_script_voiceover(
+                timeline,
+                voice_id=voice_id,
+                synthesize=synthesize_voiceover_by_id,
+                normalize_segment=_normalize_timed_scene,
             )
-            scene_normalization_payloads.append(payload)
-            return leveled
-
-        raw_mp3, measured_timeline, segment_seconds = synthesize_timed_script_voiceover(
-            timeline,
-            voice_id=voice_id,
-            synthesize=synthesize_voiceover_by_id,
-            normalize_segment=_normalize_timed_scene,
-        )
-        norm_payload, normalized_mp3 = normalize_voiceover(
-            raw_mp3,
-            filename=f"{content_id}_voice.mp3",
-            normalizer_base_url=normalizer_url,
-        )
-        measured_seconds = probe_audio_duration_bytes(normalized_mp3)
-    else:
-        speed = speech_speed_for_timeline(timeline)
-
-        def _synthesize(script: str) -> bytes:
-            return synthesize_voiceover_by_id(script, voice_id=voice_id, speed=speed)
-
-        def _normalize(raw: bytes):
-            return normalize_voiceover(
-                raw,
+            norm_payload, normalized_mp3 = normalize_voiceover(
+                raw_mp3,
                 filename=f"{content_id}_voice.mp3",
                 normalizer_base_url=normalizer_url,
             )
-
-        normalized_mp3, measured_seconds, spoken_script, norm_payload = speak_until_minimum(
-            spoken_script,
-            synthesize=_synthesize,
-            normalize=_normalize,
-            probe=probe_audio_duration_bytes,
-            lengthen=lengthen_voiceover_script,
-        )
-    if measured_seconds + DURATION_EPSILON_SECONDS < MIN_VOICEOVER_SECONDS:
-        raise VoiceoverTooShort(
-            f"Voiceover is {measured_seconds:.3f}s. Spoken audio must be at least "
-            f"{MIN_VOICEOVER_SECONDS:.0f} seconds. Not saved."
-        )
-    if measured_timeline and segment_seconds:
-        # Loudness normalization can nudge total length by a few ms. Scale the
-        # measured scene windows so still boundaries still sum to the final file.
-        raw_sum = sum(segment_seconds) or measured_seconds
-        scale = measured_seconds / raw_sum if raw_sum > 0 else 1.0
-        scaled = [max(1.0, seconds * scale) for seconds in segment_seconds]
-        drift = measured_seconds - sum(scaled)
-        scaled[-1] = max(1.0, scaled[-1] + drift)
-        from studio_produce.timed_script import apply_measured_durations
-
-        measured_timeline = apply_measured_durations(measured_timeline or timeline, scaled) or measured_timeline
-        _persist_measured_timed_script(
-            client,
-            item=item,
-            request=request,
-            timeline=measured_timeline,
-            measured_seconds=measured_seconds,
-        )
-        scene_detail = ",".join(f"{seconds:.2f}" for seconds in scaled)
-        scene_lufs = []
-        for payload in scene_normalization_payloads:
-            metrics = payload.get("metrics") or {}
-            value = metrics.get("output_integrated_lufs")
-            try:
-                scene_lufs.append(float(value))
-            except (TypeError, ValueError):
-                continue
-        if len(scene_lufs) >= 2:
-            spread = max(scene_lufs) - min(scene_lufs)
-            if spread > 6.0:
-                raise RuntimeError(
-                    f"Timed-script scene loudness spread is {spread:.2f} LU after normalization; "
-                    "refusing to save a voiceover with inconsistent scene levels."
-                )
-            loudness_detail = f"; scene LUFS spread {spread:.2f}"
+            measured_seconds = probe_audio_duration_bytes(normalized_mp3)
         else:
-            loudness_detail = ""
-        norm_details_extra = (
-            f" | Timed-script VO-driven scenes [{scene_detail}]s"
-            f" | Per-scene loudness normalization applied{loudness_detail}"
-        )
-    else:
-        norm_details_extra = ""
-        if not timeline:
-            cap_error = validate_voiceover_for_owner_cap(
-                voiceover_seconds=measured_seconds,
-                content_item=item,
-                request=request,
-            )
-            if cap_error:
-                # The synthesized file is the truth. Do not fail production because speech
-                # ran longer than the planning target; extend every non-Story video target
-                # to fit the narration plus the configured tail.
-                _extend_video_duration_for_voiceover(client, item, request, measured_seconds)
-    voice_file = drive.upload_and_share(
-        VOICEOVER_DRIVE_FOLDER_ID,
-        f"{content_id}_voice_normalized.mp3",
-        normalized_mp3,
-        "audio/mpeg",
-    )
-    norm_details = (
-        f"{normalization_details(norm_payload)} | Audio duration {measured_seconds:.3f}s"
-        f"{norm_details_extra}"
-    )
-    sent_at = _now_iso()
-    want_thumbnail = item_wants_ai_thumbnail(item)
+            speed = speech_speed_for_timeline(timeline)
 
-    thumb_file: dict[str, Any] | None = None
-    if want_thumbnail:
-        png_bytes = _branded_thumbnail(field_str(item, "Thumbnail_Prompt"))
-        thumb_file = drive.upload_and_share(
-            THUMBNAIL_DRIVE_FOLDER_ID,
-            f"{content_id}_thumb.png",
-            png_bytes,
-            "image/png",
+            def _synthesize(script: str) -> bytes:
+                return synthesize_voiceover_by_id(script, voice_id=voice_id, speed=speed)
+
+            def _normalize(raw: bytes):
+                return normalize_voiceover(
+                    raw,
+                    filename=f"{content_id}_voice.mp3",
+                    normalizer_base_url=normalizer_url,
+                )
+
+            normalized_mp3, measured_seconds, spoken_script, norm_payload = speak_until_minimum(
+                spoken_script,
+                synthesize=_synthesize,
+                normalize=_normalize,
+                probe=probe_audio_duration_bytes,
+                lengthen=lengthen_voiceover_script,
+            )
+        if measured_seconds + DURATION_EPSILON_SECONDS < MIN_VOICEOVER_SECONDS:
+            raise VoiceoverTooShort(
+                f"Voiceover is {measured_seconds:.3f}s. Spoken audio must be at least "
+                f"{MIN_VOICEOVER_SECONDS:.0f} seconds. Not saved."
+            )
+        cap_error = None
+        if measured_timeline and segment_seconds:
+            raw_sum = sum(segment_seconds) or measured_seconds
+            scale = measured_seconds / raw_sum if raw_sum > 0 else 1.0
+            scaled = [max(1.0, seconds * scale) for seconds in segment_seconds]
+            drift = measured_seconds - sum(scaled)
+            scaled[-1] = max(1.0, scaled[-1] + drift)
+            from studio_produce.timed_script import apply_measured_durations
+
+            measured_timeline = apply_measured_durations(measured_timeline or timeline, scaled) or measured_timeline
+            _persist_measured_timed_script(
+                client,
+                item=item,
+                request=request,
+                timeline=measured_timeline,
+                measured_seconds=measured_seconds,
+            )
+            scene_detail = ",".join(f"{seconds:.2f}" for seconds in scaled)
+            scene_lufs = []
+            for payload in scene_normalization_payloads:
+                metrics = payload.get("metrics") or {}
+                value = metrics.get("output_integrated_lufs")
+                try:
+                    scene_lufs.append(float(value))
+                except (TypeError, ValueError):
+                    continue
+            if len(scene_lufs) >= 2:
+                spread = max(scene_lufs) - min(scene_lufs)
+                if spread > 6.0:
+                    raise RuntimeError(
+                        f"Timed-script scene loudness spread is {spread:.2f} LU after normalization; "
+                        "refusing to save a voiceover with inconsistent scene levels."
+                    )
+                loudness_detail = f"; scene LUFS spread {spread:.2f}"
+            else:
+                loudness_detail = ""
+            norm_details_extra = (
+                f" | Timed-script VO-driven scenes [{scene_detail}]s"
+                f" | Per-scene loudness normalization applied{loudness_detail}"
+            )
+        else:
+            norm_details_extra = ""
+            if not timeline:
+                cap_error = validate_voiceover_for_owner_cap(
+                    voiceover_seconds=measured_seconds,
+                    content_item=item,
+                    request=request,
+                )
+        voice_file = drive.upload_and_share(
+            VOICEOVER_DRIVE_FOLDER_ID,
+            f"{content_id}_voice_normalized.mp3",
+            normalized_mp3,
+            "audio/mpeg",
         )
-    latest = client.get_record(CONTENT_ITEMS_TABLE, item["id"])
-    if not can_commit_generated_media(latest, generated_thumb=want_thumbnail):
+        norm_details = (
+            f"{normalization_details(norm_payload)} | Audio duration {measured_seconds:.3f}s"
+            f"{norm_details_extra}"
+        )
+        sent_at = _now_iso()
+        want_thumbnail = item_wants_ai_thumbnail(item)
+        # Save the paid file before thumbnail or duration patches. A later
+        # failure must not leave Voiceover_URL blank, or the next pass buys
+        # the same sentence again.
+        voice_link = voice_file.get("webContentLink") or drive_voiceover_url(voice_file, voice_file.get("id") or "")
+        # The id and URL land first. A later thumbnail or duration failure
+        # must still leave a file the next pass can reuse.
+        client.update_record(
+            CONTENT_ITEMS_TABLE,
+            item["id"],
+            {
+                "Voiceover_URL": voice_link,
+                "Voiceover_Status": "Generated",
+                "Voiceover_Google_Drive_File_ID": voice_file.get("id"),
+            },
+            typecast=True,
+        )
+        voice_fields: dict[str, Any] = {
+            "Voiceover_Normalized_At": sent_at,
+            "Voiceover_Render_Volume": "1",
+            "Voiceover_Normalization_Status": "Normalized",
+            "Voiceover_Normalization_Details": norm_details,
+            "Voiceover_Duration_Seconds": round(measured_seconds, 3),
+        }
+        if not want_thumbnail:
+            voice_fields["Content_Status"] = "Thumbnail Ready"
+            voice_fields["Thumbnail_Status"] = "Not Needed"
+        if spoken_script and spoken_script != field_str(item, "Voiceover_Script"):
+            voice_fields["Voiceover_Script"] = spoken_script
+        client.update_record(CONTENT_ITEMS_TABLE, item["id"], voice_fields, typecast=True)
+        if cap_error:
+            _extend_video_duration_for_voiceover(client, item, request, measured_seconds)
+
+        thumb_file: dict[str, Any] | None = None
+        thumb_error = ""
+        if want_thumbnail:
+            try:
+                png_bytes = _branded_thumbnail(field_str(item, "Thumbnail_Prompt"))
+                thumb_file = drive.upload_and_share(
+                    THUMBNAIL_DRIVE_FOLDER_ID,
+                    f"{content_id}_thumb.png",
+                    png_bytes,
+                    "image/png",
+                )
+                client.update_record(
+                    CONTENT_ITEMS_TABLE,
+                    item["id"],
+                    {
+                        "Thumbnail_URL": thumb_file.get("webContentLink"),
+                        "Content_Status": "Thumbnail Ready",
+                        "Thumbnail_Status": "Generated",
+                        "Thumbnail_Google_Drive_File_ID": thumb_file.get("id"),
+                    },
+                    typecast=True,
+                )
+            except Exception as exc:
+                thumb_error = str(exc)
+        p3_source = (
+            "P-series daisy chain (python)"
+            if want_thumbnail
+            else "P2 optional-thumbnail branch (python)"
+        )
+        p3 = _trigger_p3(content_record_id=item["id"], test_run_id=test_run, source=p3_source)
         return {
-            **preview,
-            "reason": "voiceover_thumbnail_recheck_failed" if want_thumbnail else "voiceover_only_recheck_failed",
+            "processed": True,
+            "route": "voiceover_thumbnail" if want_thumbnail else "voiceover_only",
             "voiceover_drive_file_id": voice_file.get("id"),
             "thumbnail_drive_file_id": (thumb_file or {}).get("id"),
+            "thumbnail_error": thumb_error or None,
+            "p3_trigger": p3,
+            **_preview(item, route=route),
         }
-    if want_thumbnail:
-        update_fields = {
-            "Thumbnail_URL": thumb_file.get("webContentLink"),
-            "Voiceover_URL": voice_file.get("webContentLink"),
-            "Content_Status": "Thumbnail Ready",
-            "Thumbnail_Status": "Generated",
-            "Voiceover_Status": "Generated",
-            "Voiceover_Normalized_At": sent_at,
-            "Voiceover_Render_Volume": "1",
-            "Thumbnail_Google_Drive_File_ID": thumb_file.get("id"),
-            "Voiceover_Google_Drive_File_ID": voice_file.get("id"),
-            "Voiceover_Normalization_Status": "Normalized",
-            "Voiceover_Normalization_Details": norm_details,
-            "Voiceover_Duration_Seconds": round(measured_seconds, 3),
-        }
-        if spoken_script and spoken_script != field_str(item, "Voiceover_Script"):
-            update_fields["Voiceover_Script"] = spoken_script
-        p3_source = "P-series daisy chain (python)"
-    else:
-        update_fields = {
-            "Voiceover_URL": voice_file.get("webContentLink"),
-            "Content_Status": "Thumbnail Ready",
-            "Thumbnail_Status": "Not Needed",
-            "Voiceover_Status": "Generated",
-            "Voiceover_Normalized_At": sent_at,
-            "Voiceover_Render_Volume": "1",
-            "Voiceover_Google_Drive_File_ID": voice_file.get("id"),
-            "Voiceover_Normalization_Status": "Normalized",
-            "Voiceover_Normalization_Details": norm_details,
-            "Voiceover_Duration_Seconds": round(measured_seconds, 3),
-        }
-        if spoken_script and spoken_script != field_str(item, "Voiceover_Script"):
-            update_fields["Voiceover_Script"] = spoken_script
-        p3_source = "P2 optional-thumbnail branch (python)"
-
-    client.update_record(CONTENT_ITEMS_TABLE, latest["id"], update_fields, typecast=True)
-    p3 = _trigger_p3(content_record_id=latest["id"], test_run_id=test_run, source=p3_source)
-    return {
-        "processed": True,
-        "route": "voiceover_thumbnail" if want_thumbnail else "voiceover_only",
-        "voiceover_drive_file_id": voice_file.get("id"),
-        "thumbnail_drive_file_id": (thumb_file or {}).get("id"),
-        "p3_trigger": p3,
-        **_preview(item, route=route),
-    }

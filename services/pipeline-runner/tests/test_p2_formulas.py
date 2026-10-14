@@ -28,20 +28,21 @@ def test_recheck_formulas_include_record_id():
     assert record_id in recheck_silent_thumbnail(record_id)
 
 
-def test_stale_media_run_clears_voiceover_residue():
+def test_stale_media_run_keeps_paid_voiceover_file():
     parent = {
         "fields": {
             "Include_Voiceover": "Yes",
             "Voiceover_URL": "",
             "Voiceover_Google_Drive_File_ID": "drive123",
             "Voiceover_Normalization_Status": "Normalized",
-            "Voiceover_Normalization_Details": "details",
+            "Voiceover_Normalization_Details": "tts-lease:2026-10-14T18:00:00+00:00:abc",
             "Voiceover_Normalized_At": "2026-01-01T00:00:00Z",
         }
     }
     clears = stale_media_run_clears(parent)
-    assert clears["Voiceover_Google_Drive_File_ID"] is None
-    assert clears["Voiceover_Normalization_Status"] is None
+    assert "Voiceover_Google_Drive_File_ID" not in clears
+    assert "Voiceover_Normalization_Details" not in clears
+    assert "Voiceover_Normalization_Status" not in clears
 
 
 def test_stale_media_run_clears_thumbnail_residue():
