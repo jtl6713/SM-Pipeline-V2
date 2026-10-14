@@ -49,7 +49,7 @@ test("Factory Desk is a separate page beside Operations", async () => {
   assert.match(factory, /data-factory-send-back/);
   assert.match(factory, /data-factory-send-back-content/);
   assert.match(factory, /Send back to Production/);
-  assert.match(factory, /if \(!ready\.length\) return ""/);
+  assert.match(factory, /if \(!ready\.length\) \{/);
   assert.match(factory, /ready\.length > 1/);
   assert.match(factory, /send_back_content/);
   assert.match(app, /StudioOpenProductionRequestById/);
