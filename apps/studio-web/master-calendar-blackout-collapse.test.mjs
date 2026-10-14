@@ -15,7 +15,7 @@ assert.match(app, /rowBlackout && !pipelineScheduleBlackoutHoursOpen/);
 assert.match(app, /pipelineScheduleIsBlackout/);
 assert.match(css, /pipeline-schedule-blackout-band/);
 assert.match(css, /pipeline-schedule-blackout-toggle/);
-assert.match(html, /UI build 0.6.683/);
-assert.match(html, /app-item4-1008\.js\?v=0.6.683-factory-all-lanes/);
+assert.match(html, /UI build 0.6.685/);
+assert.match(html, /app-item4-1008\.js\?v=0.6.685-production-review-notes/);
 
 console.log("master calendar blackout collapse contract: PASS");

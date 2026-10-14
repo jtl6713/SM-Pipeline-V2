@@ -693,7 +693,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.596-autonomous-music-variety",
+          version: "0.10.597-ai-master-content-profile",
           studio_factory_desk_v1: true,
           studio_factory_desk_actions_v1: true,
           studio_factory_desk_write_v1: true,
@@ -6806,6 +6806,25 @@ async function item4CreateMasterMediaAsset(env, recordId, asset, driveId, driveU
   return Array.isArray(body?.records) ? body.records[0] : null;
 }
 
+/** Stamp Content_Profile on a Media Asset that was created without one (AI masters). */
+async function item4EnsureMediaAssetContentProfile(env, mediaAssetId, profileId) {
+  const assetId = String(mediaAssetId || "").trim();
+  const wanted = String(profileId || "").trim();
+  if (!/^rec[A-Za-z0-9]+$/.test(assetId) || !/^rec[A-Za-z0-9]+$/.test(wanted)) return null;
+  try {
+    const existing = await airtableFetch(env, ITEM4_MEDIA_ASSET_TABLE, assetId);
+    const current = studioFirstLinkedId(f(existing, "Content_Profile"));
+    if (current) return existing;
+    return await airtableFetch(env, ITEM4_MEDIA_ASSET_TABLE, assetId, {
+      method: "PATCH",
+      body: JSON.stringify({ fields: { Content_Profile: [wanted] }, typecast: true }),
+    });
+  } catch (error) {
+    console.warn("Item 4 media-asset profile backfill failed", assetId, error?.message || error);
+    return null;
+  }
+}
+
 
 async function item4SanitizeStudioImageMediaAsset(env, mediaAssetId) {
   if (!mediaAssetId || !/^rec[A-Za-z0-9]+$/.test(String(mediaAssetId))) return null;
@@ -6854,7 +6873,8 @@ async function item4ReconcileMasterAuthority(env, recordId, record = null) {
   let readyCount = 0;
   const failedErrorsByAsset = new Map();
 
-  for (const asset of assets) {
+  for (const rawAsset of assets) {
+    let asset = rawAsset;
     const transferId = item4MasterTransferId(recordId, asset.id);
     const q = byTransferId.get(transferId) || null;
     let driveId = String(asset?.google_drive_file_id || "").trim();
@@ -6896,6 +6916,22 @@ async function item4ReconcileMasterAuthority(env, recordId, record = null) {
           mediaAsset = await item4CreateMasterMediaAsset(env, recordId, asset, driveId, driveUrl, transferId, currentRecord);
         }
         mediaAssetId = mediaAsset?.id || "";
+      }
+
+      // AI masters often get a Drive/Media Asset row from SMV1 before profile was
+      // resolved. Backfill blank Content_Profile from the manifest stamp or Idea.
+      if (mediaAssetId) {
+        let profileId = String(asset?.content_profile_id || "").trim();
+        if (!/^rec[A-Za-z0-9]+$/.test(profileId)) {
+          const profile = await item4ProductionProfileRecord(env, currentRecord).catch(() => null);
+          profileId = String(profile?.id || "").trim();
+        }
+        if (profileId) {
+          await item4EnsureMediaAssetContentProfile(env, mediaAssetId, profileId);
+          if (!String(asset?.content_profile_id || "").trim()) {
+            asset = { ...asset, content_profile_id: profileId };
+          }
+        }
       }
 
       if (driveId && mediaAssetId) {
@@ -18366,9 +18402,17 @@ async function generateItem4PreProductionAiMaster(request, env, url, authorizati
   const requestedTarget = Math.round(Number(body?.target_ai_count || 0));
   const requestedAdd = Math.round(Number(body?.add_ai_count || 0));
   const promptGuidance = String(body?.prompt_guidance || "").trim().slice(0, 2000);
+  // Prefer the profile the operator is currently on (UI selectedProfileId). Idea /
+  // Content fallbacks only apply when the request body has no profile.
   const preferredProfileId = requestedProfileId(url, body);
-  const productionProfile = await item4ProductionProfileRecord(env, record, preferredProfileId)
-    || await resolveWorkingContentProfile(env, authorization, preferredProfileId || null);
+  let productionProfile = null;
+  if (/^rec[A-Za-z0-9]+$/.test(String(preferredProfileId || "").trim())) {
+    productionProfile = await resolveWorkingContentProfile(env, authorization, preferredProfileId).catch(() => null);
+  }
+  if (!productionProfile?.id) {
+    productionProfile = await item4ProductionProfileRecord(env, record, preferredProfileId)
+      || await resolveWorkingContentProfile(env, authorization, preferredProfileId || null);
+  }
   if (!productionProfile?.id) {
     throw new HttpError(409, "This Production Request does not have a Content Profile");
   }
@@ -18723,6 +18767,8 @@ async function item4IngestAiSlideAsMaster(env, requestRecord, slide) {
     httpMetadata: { contentType: mime },
     customMetadata: { productionRequestId: requestRecord.id, assetId: id, carouselSlideId: slideId },
   });
+  const productionProfile = await item4ProductionProfileRecord(env, requestRecord).catch(() => null);
+  const profileId = String(productionProfile?.id || "").trim();
   const nextAssets = [...assets, {
     id,
     order: assets.length + 1,
@@ -18738,6 +18784,7 @@ async function item4IngestAiSlideAsMaster(env, requestRecord, slide) {
     source: "studio_ai",
     carousel_slide_id: slideId,
     caption_mode: "ai",
+    ...(profileId ? { content_profile_id: profileId } : {}),
     // Carry the themed caption across so Remotion burns in the thing this photo
     // actually depicts. Without it the overlay is skipped entirely.
     caption: String(f(slide, "Studio_Slide_Caption") || "").trim(),

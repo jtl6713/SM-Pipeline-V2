@@ -94,6 +94,7 @@ test("Production AI inherits the Production profile and reuses Asset Manager num
   const handler = source.slice(start, end);
 
   assert.match(handler, /body\?\.asset_name_base/);
+  assert.match(handler, /resolveWorkingContentProfile\(env, authorization, preferredProfileId\)/);
   assert.match(handler, /item4ProductionProfileRecord\(env, record, preferredProfileId\)/);
   assert.match(handler, /mediaAssetProfileScopeFormula\(productionProfile\.id/);
   assert.match(handler, /listLibraryBatchExistingNames\(env, assetBase, profileScope\)/);
@@ -107,6 +108,24 @@ test("Production AI inherits the Production profile and reuses Asset Manager num
   const creator = source.slice(createStart, createEnd);
   assert.match(creator, /asset\?\.library_asset_name/);
   assert.match(creator, /Content_Profile:\s*\[profileId\]/);
+});
+
+test("AI masters stamp and backfill Content_Profile onto Media Assets", async () => {
+  const source = await readFile(workerPath, "utf8");
+
+  const ingestStart = source.indexOf("async function item4IngestAiSlideAsMaster");
+  const ingestEnd = source.indexOf("async function item4EnsureVariantQueueForReadyMasters", ingestStart);
+  assert.ok(ingestStart >= 0 && ingestEnd > ingestStart);
+  const ingest = source.slice(ingestStart, ingestEnd);
+  assert.match(ingest, /item4ProductionProfileRecord\(env, requestRecord\)/);
+  assert.match(ingest, /content_profile_id:\s*profileId/);
+
+  assert.match(source, /async function item4EnsureMediaAssetContentProfile/);
+  const reconcileStart = source.indexOf("async function item4ReconcileMasterAuthority");
+  const reconcileEnd = source.indexOf("async function item4UpdateRequestState", reconcileStart);
+  assert.ok(reconcileStart >= 0 && reconcileEnd > reconcileStart);
+  const reconcile = source.slice(reconcileStart, reconcileEnd);
+  assert.match(reconcile, /item4EnsureMediaAssetContentProfile\(env, mediaAssetId, profileId\)/);
 });
 
 test("Production profile resolution falls back to the linked Idea", async () => {

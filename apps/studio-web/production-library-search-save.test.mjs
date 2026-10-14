@@ -9,8 +9,8 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 test("Production library picker uses flat operator search like Ideas", async () => {
   const app = await readFile(path.join(here, "assets/app-item4-1008.js"), "utf8");
   const html = await readFile(path.join(here, "index.html"), "utf8");
-  assert.match(app, /BUILD_ID = "item4-0.6.683-factory-all-lanes"/);
-  assert.match(html, /UI build 0.6.683/);
+  assert.match(app, /BUILD_ID = "item4-0.6.685-production-review-notes"/);
+  assert.match(html, /UI build 0.6.685/);
   const start = app.indexOf("function renderItem4LibraryPicker");
   const fn = app.slice(start, start + 1600);
   assert.match(fn, /const operatorSearch = Boolean\(searchValue\)/);
@@ -31,7 +31,9 @@ test("Save draft busy label is manual-only and survives control-state redraws", 
   assert.match(save, /if \(!quiet && button\) \{\s*delete button\.dataset\.busy/s);
 
   const controlStart = app.indexOf("function setProductionRequestControlState");
-  const control = app.slice(controlStart, controlStart + 2200);
+  // Factory feedback block lengthened this function; keep enough of the body
+  // that the busy-label guard is inside the hermetic window.
+  const control = app.slice(controlStart, controlStart + 3600);
   assert.match(control, /save\.dataset\.busy === "true"/);
   assert.match(control, /Saving draft…/);
 });

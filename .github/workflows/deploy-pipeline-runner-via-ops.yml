@@ -219,3 +219,6 @@ jobs:
 # 2026-10-13 service_version=2026-10-13-profile-music-rotation
 # Re-trigger profile music rotation after duplicate-audio identity guard
 # source=66da8deef35f4b36610f76041cec644ebcd80955 version=2026-10-13-profile-music-rotation
+
+# Trigger pipeline-runner deploy for AI master Content_Profile via Idea/Content fallback
+# 2026-10-14 service_version=2026-10-14-ai-master-content-profile
