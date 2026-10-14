@@ -83,17 +83,15 @@ def pick_music_without_openai(
             if row.get("id") == preferred:
                 return row
     if required_seconds > 0:
-        qualifying = []
         for row in rows:
             try:
                 duration = float(row.get("fields", {}).get("Duration_Seconds") or 0)
             except (TypeError, ValueError):
                 duration = 0.0
+            # R2 already orders the eligible rows by profile rotation priority.
+            # Preserve that ordering instead of repeatedly choosing the longest track.
             if duration + 0.05 >= required_seconds:
-                qualifying.append((duration, row))
-        if qualifying:
-            qualifying.sort(key=lambda item: item[0], reverse=True)
-            return qualifying[0][1]
+                return row
     return rows[0] if rows else None
 
 
