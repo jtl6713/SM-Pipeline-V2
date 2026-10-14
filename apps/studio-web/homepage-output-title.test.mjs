@@ -102,8 +102,9 @@ test("Production shows a live narration duration estimate", () => {
 test("Production manual output matrix stays authoritative over plan recommendations", () => {
   assert.match(app, /function productionOutputSelectionKeys\(\)/);
   assert.match(app, /function restoreProductionOutputSelection\(keys\)/);
-  assert.match(app, /const manualOutputSelection = productionOutputMatrixLoaded \? productionOutputSelectionKeys\(\) : \[\]/);
-  assert.match(app, /restoreProductionOutputSelection\(manualOutputSelection\)/);
+  // Recommend clears extras and reloads persisted matrix rows; Save owns companions.
+  assert.match(app, /extras: \[\]/);
+  assert.match(app, /await loadProductionRequestOutputs\(activeProductionRequest\)/);
   assert.match(app, /await saveProductionRequestOutputs\(activeProductionRequest\)/);
   assert.doesNotMatch(app, /applyDefaultOutputsForPlatform\(input\.value, \{ replace: true \}\)/);
 });

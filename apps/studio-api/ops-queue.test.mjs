@@ -284,7 +284,7 @@ test("worker and UI wire Operations multi-queue + prepare-to-review", () => {
   assert.match(worker, /mergeOpsQueueOutputRecords/);
   assert.match(worker, /OPS_QUEUE_RENDER_FORMULA/);
   assert.match(worker, /async function prepareIdeaToReview/);
-  assert.match(worker, /version: "0.10.598-story-companion-schedule"/);
+  assert.match(worker, /version: "0.10.599-unified-platform-outputs"/);
   assert.match(worker, /origin=prepare-to-review/);
   assert.match(worker, /readOpsQueueControls/);
   assert.match(html, /data-ops-tab="queue"/);
@@ -304,7 +304,7 @@ test("worker and UI wire Operations multi-queue + prepare-to-review", () => {
   assert.match(html, /ops-queue-cols-publish[\s\S]*?>Type<\/div><div>Status</);
   assert.match(html, /ops-queue-cols-e2e[\s\S]*?>Platform<\/div><div>Type</);
   assert.match(html, /prepareIdeaToReviewButton/);
-  assert.match(app, /BUILD_ID = "item4-0.6.685-production-review-notes"/);
+  assert.match(app, /BUILD_ID = "item4-0.6.686-unified-platform-outputs"/);
   assert.match(app, /function opsQueueOutputTypeLabel/);
   assert.match(app, /studio_output_type \|\| row\?\.format/);
   assert.match(app, /platforms: "Plat"/);
