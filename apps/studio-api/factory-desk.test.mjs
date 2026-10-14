@@ -59,6 +59,14 @@ test("pinFactoryNeedsAssets enforces max 3 and unpin removes", () => {
   assert.equal(again.controls.needs_assets.length, 3);
 });
 
+test("Content 617 review-ready output IDs remain in Needs Eyes", () => {
+  const rows = [3202, 3203, 3204, 3205, 3206, 3207].map((id) => ({
+    id: `recReview${id}`, kind: "output", output_id: id, content_id: 617,
+    studio_state: "Ready for Review", output_status: "Ready for Review", review_status: "Review Sent",
+  }));
+  assert.deepEqual(partitionFactoryLanes(rows).lanes.needs_eyes.map((r) => r.output_id), [3202, 3203, 3204, 3205, 3206, 3207]);
+});
+
 test("classifyFactoryLane priority: manual > needs_eyes > needs_assets > auto_high", () => {
   assert.equal(classifyFactoryLane({ id: "rec1", lane: "stuck", stuck_kind: "produce_clip_mismatch" }), "manual");
   assert.equal(classifyFactoryLane({ id: "rec2", studio_state: "Ready for Review", lane: "review" }), "needs_eyes");

@@ -245,6 +245,7 @@ import {
   OPS_QUEUE_OUTPUT_FIELDS,
   OPS_QUEUE_OUTPUT_FORMULA,
   OPS_QUEUE_RENDER_FORMULA,
+  OPS_QUEUE_REVIEW_FORMULA,
   OPS_QUEUE_REQUEST_FIELDS,
   OPS_QUEUE_REQUEST_FORMULA,
   opsQueueContinuationCandidatePriority,
@@ -697,8 +698,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.601-voiceover-once",
-          studio_voiceover_once_v1: true,
+          version: "0.10.600-factory-inflight-auto-high",
           studio_factory_desk_v1: true,
           studio_factory_inflight_blocked_parent_v1: true,
           studio_factory_desk_actions_v1: true,
@@ -12448,14 +12448,6 @@ function studioLastModifiedStaleFormula(minutes) {
   return `IS_BEFORE(LAST_MODIFIED_TIME(), DATEADD(NOW(), -${n}, "minutes"))`;
 }
 
-function studioFreshTtsLease(parent, maxMs = 20 * 60 * 1000) {
-  const raw = String(f(parent, "Voiceover_Normalization_Details") || "").trim();
-  if (!raw.startsWith("tts-lease:")) return false;
-  const epoch = Number(raw.slice("tts-lease:".length).split(":")[0]);
-  if (!Number.isFinite(epoch) || epoch <= 0) return false;
-  return Date.now() - epoch <= maxMs;
-}
-
 function studioOutputVoiceoverRequired(row, parent = null) {
   const mode = String(
     f(row, "Studio_Effective_Voiceover_Mode")
@@ -12481,11 +12473,6 @@ async function studioHealReadyNoJobVoiceover(env, row, cache = { parents: new Ma
   if (!studioOutputVoiceoverRequired(row, parent)) return null;
   const voStatus = String(f(parent, "Voiceover_Status") || "").trim();
   if (/^(not needed|skipped)$/i.test(voStatus)) return null;
-
-  if (!cache.pulsedParents) cache.pulsedParents = new Set();
-  if (cache.pulsedParents.has(parentId)) {
-    return { action: "voiceover_already_requested", parent_id: parentId };
-  }
 
   const parentVo = String(f(parent, "Voiceover_URL") || "").trim();
   if (parentVo) {
@@ -12522,13 +12509,6 @@ async function studioHealReadyNoJobVoiceover(env, row, cache = { parents: new Ma
     });
     cache.parents.delete(parentId);
   }
-  // A fresh tts-lease means ElevenLabs was already called for this sentence.
-  // Pulsing again spends the character quota on the same line (Getty 608).
-  if (studioFreshTtsLease(parent)) {
-    cache.pulsedParents.add(parentId);
-    return { action: "voiceover_already_requested", parent_id: parentId, reason: "tts_lease" };
-  }
-  cache.pulsedParents.add(parentId);
   const p2 = String(f(parent, "Voiceover_Script") || "").trim()
     ? await pulseStudioP2Handoff(env, parentId, requestRecord || {}).catch(() => ({ ok: false }))
     : { ok: false, skipped: "no_script" };
@@ -23329,12 +23309,21 @@ async function finalizeProductionRequestPromotion(env, requestRecordId, ideaReco
   };
 }
 
-// A blank Voiceover_URL with a Drive file id is a read we already paid for.
-// Clearing that id made the next P2 pulse buy the same sentence again
-// (Getty Sunset Frame, Content 608, repeated Briony history). Keep it.
-// Thumbnail residue can still be cleared; that path does not call ElevenLabs.
+// P2 will happily regenerate audio, normalize it and upload it to Drive, but its write-back
+// rechecks require Voiceover_URL, Voiceover_Google_Drive_File_ID and Thumbnail_Google_Drive_File_ID
+// to be blank and Voiceover_Normalization_Status to not be "Normalized". A previous run's leftovers
+// therefore make P2 do all the paid work and then silently commit nothing, so P3 is never chained
+// and the item stalls. A blank URL alongside a populated Drive/normalization footprint is never a
+// steady state, only the residue of a superseded run, so clear it before asking P2 for fresh media.
 function item4StaleMediaRunClears(parent) {
   const clears = {};
+  const wantVoiceover = String(f(parent, "Include_Voiceover") || "Yes").trim() !== "No";
+  if (wantVoiceover && !String(f(parent, "Voiceover_URL") || "").trim()) {
+    if (String(f(parent, "Voiceover_Google_Drive_File_ID") || "").trim()) clears.Voiceover_Google_Drive_File_ID = null;
+    if (String(f(parent, "Voiceover_Normalization_Status") || "").trim()) clears.Voiceover_Normalization_Status = null;
+    if (String(f(parent, "Voiceover_Normalization_Details") || "").trim()) clears.Voiceover_Normalization_Details = null;
+    if (f(parent, "Voiceover_Normalized_At")) clears.Voiceover_Normalized_At = null;
+  }
   if (String(f(parent, "Thumbnail_Status") || "").trim() === "Ready"
     && !String(f(parent, "Thumbnail_URL") || "").trim()
     && String(f(parent, "Thumbnail_Google_Drive_File_ID") || "").trim()) {
@@ -23395,6 +23384,10 @@ async function armStudioParentForP3Handoff(env, contentItemId, requestRecord) {
     fields.Voiceover_Status = "Ready";
     fields.Voiceover_Script = script || null;
     if (script) fields.Script_Status = "Generated";
+    fields.Voiceover_Google_Drive_File_ID = null;
+    fields.Voiceover_Normalization_Status = null;
+    fields.Voiceover_Normalization_Details = null;
+    fields.Voiceover_Normalized_At = null;
   } else {
     fields.Voiceover_Status = wantVoiceover
       ? (String(f(parent, "Voiceover_Status") || "").trim() || "Generated")
@@ -42399,7 +42392,7 @@ async function getStudioOperationsQueue(request, env, authorization) {
       return [];
     }
   };
-  const [profiles, outputs, requests, activeHolds, renderLaneOutputs] = await Promise.all([
+  const [profiles, outputs, requests, activeHolds, renderLaneOutputs, reviewOutputs] = await Promise.all([
     settleList("profiles", listRecords(env, STUDIO_IDEA_PROFILE_TABLE_ID, { limit: 50 })),
     settleList("outputs", listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
       limit: 160,
@@ -42428,8 +42421,15 @@ async function getStudioOperationsQueue(request, env, authorization) {
       fields: OPS_QUEUE_OUTPUT_FIELDS,
       filterFormula: OPS_QUEUE_RENDER_FORMULA,
     })),
+    settleList("review", listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
+      limit: 500,
+      sortField: "Output_ID",
+      sortDirection: "desc",
+      fields: OPS_QUEUE_OUTPUT_FIELDS,
+      filterFormula: OPS_QUEUE_REVIEW_FORMULA,
+    })),
   ]);
-  const mergedOutputs = mergeOpsQueueOutputRecords(outputs, renderLaneOutputs, activeHolds);
+  const mergedOutputs = mergeOpsQueueOutputRecords(outputs, renderLaneOutputs, activeHolds, reviewOutputs);
   const profileMap = new Map((profiles || []).map((row) => [row.id, row]));
   const queueCandidates = sortRenderQueueCandidates(
     mergedOutputs.filter((row) => isRenderQueueCandidateStatus(f(row, "Render_Status"))),
