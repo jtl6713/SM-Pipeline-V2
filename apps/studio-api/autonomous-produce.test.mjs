@@ -741,13 +741,36 @@ test("Worker stamps photo-ready ideas and drains the 30m SLA on light ticks", as
   const path = await import("node:path");
   const here = path.dirname(fileURLToPath(import.meta.url));
   const worker = await readFile(path.join(here, "worker.js"), "utf8");
-  assert.match(worker, /version: "0.10.595-scheduled-target-refill"/);
+  assert.match(worker, /version: "0.10.596-autonomous-music-variety"/);
   assert.match(worker, /studio_autonomous_scheduled_target_v1: true/);
+  assert.match(worker, /studio_autonomous_music_variety_v1: true/);
   assert.match(worker, /AUTONOMOUS_SCHEDULED_TARGET/);
   assert.match(worker, /scheduled_target_met/);
   assert.match(worker, /studioLoadAutonomousRefillScores/);
   assert.match(worker, /autonomousRefillSlot/);
   assert.match(worker, /pickAutonomousRefillProfile/);
+  assert.match(worker, /async function ensureAutonomousSelectedMusic/);
+  assert.match(worker, /pickCatalogFallbackMusicRecord/);
+  assert.match(worker, /Selected_Music_Asset/);
+  assert.doesNotMatch(
+    worker.slice(
+      worker.indexOf("async function stampPhotoReadyIdeaForAutonomousProduce"),
+      worker.indexOf("async function adoptNextReadyDailyIdea"),
+    ),
+    /if \(isAutonomousOrigin\(f\(requestRecord, "Production_Notes"\)\)\) return requestRecord;/,
+  );
+  const stampMusicBlock = worker.slice(
+    worker.indexOf("async function stampPhotoReadyIdeaForAutonomousProduce"),
+    worker.indexOf("async function adoptNextReadyDailyIdea"),
+  );
+  assert.match(stampMusicBlock, /pickAutonomousMusicAssetId/);
+  assert.match(stampMusicBlock, /Selected_Music_Asset/);
+  const adoptMusicBlock = worker.slice(
+    worker.indexOf("async function adoptNextReadyDailyIdea"),
+    worker.indexOf("async function listAutonomousDraftRequests"),
+  );
+  assert.match(adoptMusicBlock, /pickAutonomousMusicAssetId/);
+  assert.match(adoptMusicBlock, /Selected_Music_Asset/);
   assert.doesNotMatch(
     worker.slice(
       worker.indexOf("async function executeStudioAutonomousProduce"),

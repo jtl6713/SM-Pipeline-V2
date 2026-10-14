@@ -34,7 +34,7 @@ test("outputPreview wires Render_Server_URL through the render-server accept hel
   assert.match(worker, /item4UrlIsRenderServerVideo\(href\)/);
   assert.match(worker, /f\(record, "Render_Server_URL"\)/);
   assert.match(worker, /studio_render_server_preview_v1: true/);
-  assert.match(worker, /version: "0.10.595-scheduled-target-refill"/);
+  assert.match(worker, /version: "0.10.596-autonomous-music-variety"/);
   assert.match(worker, /previewSource = item4UrlIsRenderServerVideo\(studioPreviewUrl\)/);
   assert.match(worker, /"render-server-out"/);
 });
