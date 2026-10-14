@@ -136,7 +136,8 @@ function isTransientFactoryStuck(row) {
     || stuckKind === "crop_stale"
     || stuckKind === "render_stale_rendering"
     || stuckKind === "render_ready_waiting_voiceover"
-    || stuckKind === "awaiting_approval_stale_rfr";
+    || stuckKind === "awaiting_approval_stale_rfr"
+    || stuckKind === "phantom_rerender";
 }
 
 function isManualLane(row) {

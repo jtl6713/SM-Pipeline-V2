@@ -1225,6 +1225,72 @@ export function classifyAwaitingApprovalStaleRfr(row) {
   }, row);
 }
 
+/** Factory per-output send-back paints Rerendering (Changes Requested + In Production) with no render running. */
+export const PHANTOM_RERENDER_STALE_MS = STALE_RENDER_MINUTES * 60 * 1000;
+
+const PHANTOM_RERENDER_LIVE_RENDER = new Set([
+  "ready for render",
+  "rendering",
+  "failed",
+  "blocked",
+  "needs changes",
+]);
+
+function phantomRerenderAgeMs(row, nowMs) {
+  const stamp = Date.parse(String(row?.review_decision_at || row?.last_modified || ""));
+  if (!Number.isFinite(stamp)) return PHANTOM_RERENDER_STALE_MS;
+  return nowMs - stamp;
+}
+
+export function classifyPhantomRerender(row, nowMs = Date.now()) {
+  if (String(row?.test_run_id || "").trim()) return null;
+  if (Boolean(row?.do_not_publish)) return null;
+  if (row?.published_at || String(row?.publish_status || "").trim() === "Published") return null;
+  if (String(row?.output_status || "").trim() !== "In Production") return null;
+  if (String(row?.review_status || "").trim() !== "Changes Requested") return null;
+  const render = String(row?.render_status || "").trim();
+  if (PHANTOM_RERENDER_LIVE_RENDER.has(render.toLowerCase())) return null;
+
+  const finalUrl = String(row?.final_file_url || "").trim();
+  const preview = String(row?.studio_preview_url || "").trim();
+  const thumb = String(row?.thumbnail_url || "").trim();
+  const type = `${row?.studio_output_type || ""} ${row?.platform_output_type || ""} ${row?.output_type || ""}`;
+  const story = /story/i.test(type);
+  const jobId = String(row?.remotion_job_id || "").trim();
+  let reason = "";
+  if (render === "Native Photo Route" && (preview || thumb || finalUrl)) {
+    // Native stills never enter Remotion. The badge cannot clear on its own.
+    reason = "native_still_present";
+  } else if (
+    finalUrl
+    && (render === "Waiting in Render Queue" || render === "Ready to Render")
+    && (story || jobId)
+  ) {
+    // Stories with a job id are excluded from the render queue, so Waiting never starts.
+    reason = "final_file_present";
+  } else if ((render === "Rendered" || render === "") && finalUrl) {
+    // Voice prep may still be about to set Ready for Render. Wait out that window.
+    if (phantomRerenderAgeMs(row, nowMs) < PHANTOM_RERENDER_STALE_MS) return null;
+    reason = "final_file_present";
+  } else {
+    return null;
+  }
+
+  const recordId = String(row?.id || row?.record_id || "").trim();
+  return withDeskIdentity({
+    kind: "phantom_rerender",
+    class: "transient",
+    record_id: recordId || null,
+    fingerprint: fingerprint("phantom_rerender", recordId, reason),
+    actor: "worker_heal",
+    diagnosis: "Review_Status=Changes Requested and Output_Status=In Production paint Rerendering, but the finished file or native still is already present and no render is running. "
+      + "Factory per-output send-back sets that pair without starting Remotion. "
+      + "Worker returns Output_Status=Ready for Review, Review_Status=Review Sent, Publish_Status=Not Ready, and Render_Status=Rendered unless the row is Native Photo Route. "
+      + "Do not Approve. Content send-back (Output_Status=Changes Requested, Render_Status=Needs Changes, Do_Not_Publish) is a real revision hold and is not this finding. "
+      + "Proven: Output 3200 rec5oq82z6HMKLPpU, Output 3201 rechnzbI0oceoBb8t, Output 3186 rec80kMyaX6hGbAdg.",
+  }, row);
+}
+
 export function classifyNativeCover(row) {
   const recordId = String(row?.id || row?.record_id || "").trim();
   const outputStatus = String(row?.output_status || "").trim();
@@ -1346,6 +1412,7 @@ export const CLASSIFIER_KINDS = Object.freeze([
   "ig_carousel_rate_limited",
   "render_failed",
   "render_stale_rendering",
+  "phantom_rerender",
   "render_unfetchable_source",
   "render_private_drive_watermark",
   "voiceover_exceeds_render",

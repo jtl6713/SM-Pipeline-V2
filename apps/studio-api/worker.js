@@ -16,6 +16,7 @@ import {
   classifyNativePhotoReviewStrand,
   classifyNativePhotoApproveIncomplete,
   classifyAwaitingApprovalStaleRfr,
+  classifyPhantomRerender,
   classifyPreparingGap,
   classifyProduceJob,
   classifyPromotedNotRfr,
@@ -684,7 +685,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.591-factory-revision-unlock",
+          version: "0.10.592-phantom-rerender",
           studio_factory_desk_v1: true,
           studio_factory_desk_actions_v1: true,
           studio_factory_desk_write_v1: true,
@@ -707,6 +708,7 @@ export default {
           studio_mae_profile_occupancy_v1: true,
           studio_schedule_occupancy_fields_v1: true,
           studio_render_stale_rendering_v1: true,
+          studio_phantom_rerender_v1: true,
           studio_desk_inventory_v1: true,
           studio_desk_activity_v1: true,
           studio_tiktok_complete_v1: true,
@@ -1874,6 +1876,13 @@ export default {
         await healStuckStudioRenders(env);
       } catch (error) {
         console.warn("studio stuck-render heal failed", error);
+      }
+      // Changes Requested + In Production with a finished file and no live render
+      // paints Rerendering forever (native stills, stories already out of the queue).
+      try {
+        await studioHealPhantomRerender(env, { limit: 8 });
+      } catch (error) {
+        console.warn("phantom rerender heal failed", error);
       }
       try {
         await studioResumeApproveAllJobs(env, ctx);
@@ -12992,6 +13001,57 @@ async function studioHealAwaitingApprovalStaleRfr(env, options = {}) {
     }
   }
   if (healed.length) console.log("Studio awaiting-approval stale RFR heal", JSON.stringify({ count: healed.length, healed }));
+  return healed;
+}
+
+/** Rerendering badge with a finished file and no render running → back to Ready for Review. */
+async function studioHealPhantomRerender(env, options = {}) {
+  const limit = Math.max(1, Math.min(16, Number(options.limit || 8)));
+  const outputTable = env.AIRTABLE_OUTPUT_TABLE_ID;
+  const rows = await listRecords(env, outputTable, {
+    limit: Math.max(limit * 3, 24),
+    sortField: "Output_ID",
+    sortDirection: "desc",
+    filterFormula: 'AND({Test_Run_ID}=BLANK(),{Published_At}=BLANK(),{Do_Not_Publish}=0,{Output_Status}="In Production",{Review_Status}="Changes Requested",OR({Render_Status}="Native Photo Route",AND({Final_File_URL}!="",OR({Render_Status}="Waiting in Render Queue",{Render_Status}="Rendered",{Render_Status}="Ready to Render",{Render_Status}=BLANK()))))',
+  }).catch(() => []);
+  const healed = [];
+  const nowMs = Date.now();
+  for (const record of rows || []) {
+    if (healed.length >= limit) break;
+    const row = mapDeskInventoryOutput(record);
+    const finding = classifyPhantomRerender(row, nowMs);
+    if (!finding) continue;
+    const renderStatus = String(row.render_status || "").trim();
+    const existingNotes = String(f(record, "Review_Notes") || "").trim();
+    const line = `Cleared phantom rerender (${finding.fingerprint}). The finished file was already present and no render was running. Returned to Ready for Review without approving.`;
+    const fields = {
+      Output_Status: "Ready for Review",
+      Review_Status: "Review Sent",
+      Publish_Status: "Not Ready",
+      Review_Notes: [existingNotes, line].filter(Boolean).join("\n\n"),
+    };
+    if (renderStatus !== "Native Photo Route") fields.Render_Status = "Rendered";
+    try {
+      await airtableFetch(env, outputTable, record.id, {
+        method: "PATCH",
+        body: JSON.stringify({ fields, typecast: true }),
+      });
+      healed.push({
+        key: "PHANTOM_RERENDER",
+        id: record.id,
+        output_id: row.output_id || null,
+        fingerprint: finding.fingerprint,
+      });
+    } catch (error) {
+      healed.push({
+        key: "PHANTOM_RERENDER",
+        id: record.id,
+        output_id: row.output_id || null,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+  if (healed.length) console.log("Studio phantom rerender heal", JSON.stringify({ count: healed.length, healed }));
   return healed;
 }
 
@@ -41037,6 +41097,8 @@ const DESK_OUTPUT_IDENTITY_KINDS = new Set([
   "render_unfetchable_source",
   "render_ready_no_job",
   "render_ready_waiting_voiceover",
+  "render_stale_rendering",
+  "phantom_rerender",
   "render_long",
   "produce_orphan",
   "rfr_locked_missing_deliverable",
@@ -41111,6 +41173,7 @@ function mapDeskInventoryOutput(record, contentToRequest = new Map(), contentByI
     thumbnail_url: f(record, "Thumbnail_URL"),
     output_caption: f(record, "Output_Caption"),
     review_status: f(record, "Review_Status"),
+    review_decision_at: f(record, "Review_Decision_At"),
     publish_status: f(record, "Publish_Status"),
     published_at: f(record, "Published_At"),
     platform: f(record, "Platform"),
@@ -41490,6 +41553,20 @@ async function gatherStudioDeskInventory(env) {
     }
   } catch (error) {
     console.warn("desk awaiting-approval stale RFR scan failed", error);
+  }
+  try {
+    const phantomRerenderRows = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
+      limit: 24,
+      sortField: "Output_ID",
+      sortDirection: "desc",
+      filterFormula: 'AND({Test_Run_ID}=BLANK(),{Published_At}=BLANK(),{Do_Not_Publish}=0,{Output_Status}="In Production",{Review_Status}="Changes Requested",OR({Render_Status}="Native Photo Route",AND({Final_File_URL}!="",OR({Render_Status}="Waiting in Render Queue",{Render_Status}="Rendered",{Render_Status}="Ready to Render",{Render_Status}=BLANK()))))',
+    }).catch(() => []);
+    scanned("phantom_rerender");
+    for (const record of phantomRerenderRows || []) {
+      push(classifyPhantomRerender(mapOut(record), nowMs));
+    }
+  } catch (error) {
+    console.warn("desk phantom rerender scan failed", error);
   }
 
   try {
