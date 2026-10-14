@@ -335,3 +335,4 @@ UI 0.6.607 hashtag mismatch warning only; approval no longer blocked.
 2026-10-14: Deploy Studio UI 0.6.682 after fixing hardcoded 0.6.681 Factory layout regression test that blocked the controlled Cloudflare Pages production workflow.
 2026-10-14: Redeploy Studio UI 0.6.682 after aligning app BUILD_ID and Pages regression pins with factory-mobile-cards. The production gate was still asserting 0.6.681, so Cloudflare never received the upload.
 2026-10-14: Pages 0.6.682-factory-mobile-cards - Align BUILD_ID with index cache busts so hermetic UI pins match (scheduled-target-refill).
+2026-10-14: Deploy Studio UI 0.6.683. Factory Needs eyes accordion defaults first content expanded and others collapsed; apply responsive readable output cards/actions to Auto-High, Needs assets, Manual, and candidate paths.
