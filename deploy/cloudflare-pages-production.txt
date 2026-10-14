@@ -327,3 +327,4 @@ UI 0.6.607 hashtag mismatch warning only; approval no longer blocked.
 2026-10-13: UI 0.6.679 fix Production cross-record identity leak (Content 597 title, script), and guard stale async output/request hydrations.
 2026-10-13: Redeploy 0.6.679 with active Production record identity regression tests and synchronized build pins.
 2026-10-13: Redeploy UI 0.6.679 after correcting final escaped layout-footer regex; all Production identity tests enabled.
+2026-10-13: UI 0.6.680 Factory Needs eyes action-row redesign, 30px legible buttons, clear content-level action bar, expanded review scrolling, responsive metadata; Pages CSS cache-bust + regression.
