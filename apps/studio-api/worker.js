@@ -684,7 +684,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.590-factory-content-roundtrip",
+          version: "0.10.591-factory-revision-unlock",
           studio_factory_desk_v1: true,
           studio_factory_desk_actions_v1: true,
           studio_factory_desk_write_v1: true,
@@ -5593,7 +5593,7 @@ async function loadAuthorizedProductionRequestOutput(env, outputRecordId, author
 
 function assertEditableProductionRequest(parent) {
   const status = String(f(parent, "Request_Status") || "").trim();
-  if (!["Draft", "Ready"].includes(status)) {
+  if (!productionRequestEditable(parent)) {
     throw new HttpError(409, `Production Request is ${status || "locked"} and its requested outputs cannot be edited`);
   }
 }
@@ -11512,7 +11512,7 @@ async function advanceAzFinishedVideo(env, requestId, authorization, ctx = null,
     }
   }
   let status = String(f(record, "Request_Status") || "").trim();
-  if (["Draft", "Ready"].includes(status) && (phase === "auto" || phase === "promote")) {
+  if (["Draft", "Ready"].includes(status) && !productionRequestRevisionOpen(record) && (phase === "auto" || phase === "promote")) {
     const promoteCall = studioInternalJsonRequest(`/api/production-requests/${requestId}/promote`, {});
     await promoteProductionRequestViaI3I4(promoteCall.request, env, promoteCall.url, auth, ctx);
     record = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, requestId);
@@ -15246,6 +15246,7 @@ function item4TimelineAutoPrepareEligible(record) {
   if (!/idea-vo-timeline=/i.test(notes) && !/\[timed-script\]\s*\{/i.test(notes)) return false;
   const requestStatus = String(f(record, "Request_Status") || "").trim();
   if (!["Draft", "Ready"].includes(requestStatus)) return false;
+  if (productionRequestRevisionOpen(record)) return false;
   if (String(f(record, "Studio_Output_Plan_Status") || "").trim() !== "Ready") return false;
   const variantStatus = String(f(record, "Studio_Variant_Status") || "").trim() || "None";
   if (variantStatus !== "None") return false;
@@ -15706,7 +15707,8 @@ function mapProductionRequest(record, ideaTitle = null) {
     script_mode: f(record, "Script_Mode"),
     requested_script: f(record, "Requested_Script"),
     primary_location: String(f(record, "Primary_Location") || "").trim() || null,
-    production_notes: f(record, "Production_Notes"),
+    production_notes: stripFactoryRevisionNote(f(record, "Production_Notes")),
+    revision_open: productionRequestRevisionOpen(record),
     created_at: f(record, "Created_At"),
     updated_at: f(record, "Updated_At"),
     submitted_at: f(record, "Submitted_At"),
@@ -16417,7 +16419,8 @@ function mapProductionRequestLight(record, ideaTitle = null) {
     script_mode: f(record, "Script_Mode"),
     requested_script: f(record, "Requested_Script"),
     primary_location: String(f(record, "Primary_Location") || "").trim() || null,
-    production_notes: f(record, "Production_Notes"),
+    production_notes: stripFactoryRevisionNote(f(record, "Production_Notes")),
+    revision_open: productionRequestRevisionOpen(record),
     created_at: f(record, "Created_At"),
     updated_at: f(record, "Updated_At"),
     submitted_at: f(record, "Submitted_At"),
@@ -16477,6 +16480,7 @@ function mapProductionRequestSummary(record, ideaTitle = null) {
     requested_script: mapped.requested_script,
     primary_location: mapped.primary_location,
     production_notes: mapped.production_notes,
+    revision_open: mapped.revision_open,
     created_at: mapped.created_at,
     updated_at: mapped.updated_at,
     submitted_at: mapped.submitted_at,
@@ -16571,14 +16575,20 @@ async function updateProductionRequest(request, env, url, authorization) {
   const recordId = productionRequestRecordIdFromPath(url);
   const existing = await loadAuthorizedProductionRequest(env, recordId, authorization);
   const status = String(f(existing, "Request_Status") || "").trim();
-  if (!["Draft","Ready"].includes(status)) {
+  const revisionOpen = productionRequestRevisionOpen(existing);
+  if (!productionRequestEditable(existing)) {
     throw new HttpError(409, `Production Request is ${status || "locked"} and cannot be edited`);
   }
 
   const input = await cleanProductionRequestPayload({ ...mapProductionRequest(existing), ...payload }, env);
-  input.production_notes = mergeProductionRequestNotes(f(existing, "Production_Notes"), input.production_notes);
+  input.production_notes = mergeProductionRequestNotes(
+    stripFactoryRevisionNote(f(existing, "Production_Notes")),
+    input.production_notes
+  );
+  if (revisionOpen) input.production_notes = withFactoryRevisionOpen(input.production_notes);
   const now = new Date().toISOString();
-  const fields = productionRequestFields(input, now, { status });
+  const editableStatus = revisionOpen ? "Draft" : status;
+  const fields = productionRequestFields(input, now, { status: editableStatus });
   const slideCaptions = item4NormalizeSlideCaptions(payload?.slide_captions);
   if (slideCaptions.length) {
     const nextAssets = item4ApplySlideCaptions(
@@ -17130,6 +17140,35 @@ async function updateProductionRequestPromotionState(env, recordId, fields) {
       typecast: false,
     }),
   });
+}
+
+const FACTORY_REVISION_NOTE_PREFIX = "[factory-revision-open]";
+
+function stripFactoryRevisionNote(notes) {
+  return String(notes || "")
+    .split(/\r?\n/)
+    .filter((line) => !String(line || "").trim().startsWith(FACTORY_REVISION_NOTE_PREFIX))
+    .join("\n")
+    .trim();
+}
+
+function productionRequestRevisionOpen(record) {
+  return String(f(record, "Production_Notes") || "")
+    .split(/\r?\n/)
+    .some((line) => String(line || "").trim().startsWith(FACTORY_REVISION_NOTE_PREFIX));
+}
+
+function withFactoryRevisionOpen(notes, { actor = "", stamp = null } = {}) {
+  const clean = stripFactoryRevisionNote(notes);
+  const at = String(stamp || new Date().toISOString()).trim();
+  const who = String(actor || "").trim().replace(/\s+/g, "_").slice(0, 120);
+  const marker = `${FACTORY_REVISION_NOTE_PREFIX} at=${at}${who ? ` by=${who}` : ""}`;
+  return [clean, marker].filter(Boolean).join("\n").slice(0, 10000);
+}
+
+function productionRequestEditable(record) {
+  const status = String(f(record, "Request_Status") || "").trim();
+  return ["Draft", "Ready"].includes(status) || productionRequestRevisionOpen(record);
 }
 
 
@@ -18231,8 +18270,8 @@ async function generateItem4PreProductionAiMaster(request, env, url, authorizati
   const recordId = productionRequestRecordIdFromPath(url);
   let record = await loadAuthorizedProductionRequest(env, recordId, authorization);
   const status = String(f(record, "Request_Status") || "Draft").trim();
-  if (!["Draft", "Ready"].includes(status)) {
-    throw new HttpError(409, "AI images can only be generated before this request is promoted");
+  if (!productionRequestEditable(record)) {
+    throw new HttpError(409, "AI images can only be generated while this request is editable");
   }
   const body = await request.json().catch(() => ({}));
   const requestedTarget = Math.round(Number(body?.target_ai_count || 0));
@@ -19394,6 +19433,33 @@ function item4PlanItemForOutput(requestRecord, outputRow) {
 
 function platformOutputSeedFields(parentContentItem, requestRecord, outputRow, effective, sourcePackage) {
   const planItem = item4PlanItemForOutput(requestRecord, outputRow) || {};
+  const revisionReset = productionRequestRevisionOpen(requestRecord)
+    ? {
+        Review_Status: "Pending Review",
+        Publish_Status: "Not Ready",
+        Do_Not_Publish: false,
+        Review_Decision_At: null,
+        Final_File_URL: null,
+        Final_File_ID: null,
+        Output_URL: null,
+        Publish_Asset_URL: null,
+        Remotion_Job_ID: null,
+        Remotion_Status_URL: null,
+        Remotion_Props_JSON: null,
+        Remotion_Error_Message: null,
+        Final_File_Error_Message: null,
+        Final_File_Storage_Status: null,
+        Studio_Preview_URL: null,
+        Studio_Preview_R2_Key: null,
+        Studio_Preview_Updated_At: null,
+        Timing_Status: null,
+        Timing_Timeline_JSON: null,
+        Timing_Analysis_JSON: null,
+        Music_BPM: null,
+        Music_Duration_Seconds: null,
+        Scheduled_Post_Date: null,
+      }
+    : {};
   const route = effective.route || {};
   const clips = sourcePackage?.clips || [];
   const perClipFrames = sourcePackage?.clip_count ? Math.round(sourcePackage.total_frames / sourcePackage.clip_count) : 0;
@@ -19428,6 +19494,7 @@ function platformOutputSeedFields(parentContentItem, requestRecord, outputRow, e
     applied_at: new Date().toISOString(),
   };
   return {
+    ...revisionReset,
     Test_Run_ID: String(f(requestRecord, "Test_Run_ID") || "").trim() || null,
     Content_Item: [parentContentItem.id],
     Platform: effective.platform,
@@ -22949,10 +23016,13 @@ async function finalizeProductionRequestPromotion(env, requestRecordId, ideaReco
     assertProductionRequestFanoutComplete(outputFanout);
   }
 
+  const revisionOpen = productionRequestRevisionOpen(requestRecord);
   const fields = {
     Request_Status: "Promoted",
     Active: true,
+    Submitted_At: null,
   };
+  if (revisionOpen) fields.Production_Notes = stripFactoryRevisionNote(f(requestRecord, "Production_Notes")) || null;
   if (contentItemId) fields.Promoted_Content_Item = [contentItemId];
   requestRecord = await updateProductionRequestPromotionState(env, requestRecordId, fields);
 
@@ -23148,11 +23218,17 @@ async function pulseStudioC2Handoff(env, contentItemId, requestRecord = null) {
 async function promoteProductionRequestViaI3I4(request, env, url, authorization, ctx = null) {
   // Keep the write contract consistent even though the saved request itself is
   // the authoritative payload.
-  try { await request.json(); } catch { throw new HttpError(400, "Request body must be valid JSON"); }
+  let promotionPayload = {};
+  try { promotionPayload = await request.json(); } catch { throw new HttpError(400, "Request body must be valid JSON"); }
 
   const requestRecordId = productionRequestPromotionRecordIdFromPath(url);
   let requestRecord = await loadAuthorizedProductionRequest(env, requestRecordId, authorization);
-  const requestStatus = String(f(requestRecord, "Request_Status") || "").trim();
+  const revisionOpen = productionRequestRevisionOpen(requestRecord);
+  const revisionApprove = promotionPayload?.revision_approve === true;
+  if (revisionOpen && !revisionApprove) {
+    throw new HttpError(409, "This content is open for Factory revision. Make your changes in Production, then click Approve.");
+  }
+  const requestStatus = revisionOpen ? "Draft" : String(f(requestRecord, "Request_Status") || "").trim();
   const proposalNotes = String(f(requestRecord, "Production_Notes") || "");
   if (/scripted-short=proposal/i.test(proposalNotes)) {
     const proposalTimeline = timedScriptFromNotes(proposalNotes);
@@ -42395,28 +42471,18 @@ async function factorySendBackContent(env, productionRequestId, outputIds, actor
 
   const stamp = new Date().toISOString();
   const line = `Factory content send-back by ${actor || "operator"} at ${stamp}.${note ? ` ${note}` : ""}`;
+  // Hold the last render for reference. Do not start any production work until
+  // the operator explicitly clicks Approve after making revisions.
   const patches = targets.map((existing) => {
     const existingNotes = String(f(existing, "Review_Notes") || "").trim();
     return {
       id: existing.id,
       fields: {
         Review_Status: "Changes Requested",
-        Output_Status: "In Production",
+        Output_Status: "Changes Requested",
         Publish_Status: "Not Ready",
-        Render_Status: null,
-        Final_File_URL: null,
-        Final_File_ID: null,
-        Output_URL: null,
-        Studio_Preview_URL: null,
-        Studio_Preview_R2_Key: null,
-        Studio_Preview_Updated_At: null,
-        Publish_Asset_URL: null,
-        Remotion_Job_ID: null,
-        Remotion_Status_URL: null,
-        Remotion_Props_JSON: null,
-        Remotion_Error_Message: null,
-        Final_File_Error_Message: null,
-        Final_File_Storage_Status: null,
+        Render_Status: "Needs Changes",
+        Do_Not_Publish: true,
         Review_Decision_At: stamp,
         Review_Notes: [existingNotes, line].filter(Boolean).join("\n\n"),
       },
@@ -42432,6 +42498,7 @@ async function factorySendBackContent(env, productionRequestId, outputIds, actor
         Active: true,
         Submitted_At: null,
         Studio_Production_Job_JSON: null,
+        Production_Notes: withFactoryRevisionOpen(f(requestRecord, "Production_Notes"), { actor, stamp }),
         Updated_At: stamp,
       },
       typecast: true,

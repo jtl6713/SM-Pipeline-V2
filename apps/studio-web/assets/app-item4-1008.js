@@ -267,7 +267,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.675-factory-approve-mae";
+  const BUILD_ID = "item4-0.6.676-factory-revision-unlock";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -5007,6 +5007,7 @@
   }
 
   function productionRequestIsPromoted(record = activeProductionRequest) {
+    if (record?.revision_open === true) return false;
     const recordId = String(record?.id || "");
     if (item4PromotedRequestIds.has(recordId)) return true;
     return String(record?.status || "") === "Promoted";
@@ -6951,6 +6952,7 @@ function timedScriptAssetLabel(asset, index) {
   }
 
   function item4RequestEditable(record = activeProductionRequest) {
+    if (record?.revision_open === true) return true;
     return ["Draft", "Ready", ""].includes(String(record?.status || "Draft"));
   }
 
@@ -12907,11 +12909,14 @@ function timedScriptAssetLabel(asset, index) {
 
   function setProductionRequestControlState(record) {
     const recordId = String(record?.id || "");
-    const status = item4PromotedRequestIds.has(recordId)
-      ? "Promoted"
-      : String(record?.status || "Draft");
+    const revisionOpen = record?.revision_open === true;
+    const status = revisionOpen
+      ? "Draft"
+      : (item4PromotedRequestIds.has(recordId)
+        ? "Promoted"
+        : String(record?.status || "Draft"));
     const cancelled = status === "Cancelled";
-    const editable = !cancelled && (status === "Draft" || status === "Ready");
+    const editable = !cancelled && (revisionOpen || status === "Draft" || status === "Ready");
     const form = $("productionRequestForm");
 
     if (form) {
@@ -13401,6 +13406,9 @@ function timedScriptAssetLabel(asset, index) {
     const result = await api(`/api/production-requests/${encodeURIComponent(id)}`);
     const record = result?.record;
     if (!record?.id) throw new Error("Production Request could not be loaded.");
+    if (record.revision_open === true || ["Draft", "Ready"].includes(String(record.status || ""))) {
+      item4PromotedRequestIds.delete(String(record.id));
+    }
     const ideaId = String(record.idea_record_id || (Array.isArray(record.idea_candidate_links) ? record.idea_candidate_links[0] : "") || "").trim();
     if (!ideaId) throw new Error("The Production Request has no linked Idea Candidate.");
     await ensureIdeasCache().catch(() => []);
@@ -14694,7 +14702,7 @@ function timedScriptAssetLabel(asset, index) {
     if (!activeProductionRequest?.id) return;
     const promoteButton = $("promoteProductionRequest");
     if (item4PromoteInFlight || promoteButton?.dataset.busy === "true" || promoteButton?.disabled) return;
-    if (item4PromotedRequestIds.has(String(activeProductionRequest.id))) return;
+    if (item4PromotedRequestIds.has(String(activeProductionRequest.id)) && activeProductionRequest?.revision_open !== true) return;
 
     if (item4Workspace?.assets?.length && item4Workspace?.plan_status !== "Ready") {
       setRequestMessage("Save the platform plan first, then click Approve again.", "error-text");
@@ -14741,7 +14749,7 @@ function timedScriptAssetLabel(asset, index) {
 
       const result = await api(`/api/production-requests/${encodeURIComponent(activeProductionRequest.id)}/promote`, {
         method: "POST",
-        body: JSON.stringify({}),
+        body: JSON.stringify({ revision_approve: activeProductionRequest?.revision_open === true }),
         timeoutMs: 120000,
       });
 

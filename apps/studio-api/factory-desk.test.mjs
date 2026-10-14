@@ -232,7 +232,13 @@ test("Worker exposes factory desk routes and version flag", async () => {
   assert.match(worker, /Request_Status: "Draft"/);
   assert.match(worker, /Submitted_At: null/);
   assert.match(worker, /Studio_Production_Job_JSON: null/);
-  assert.match(worker, /Render_Status: null/);
+  assert.match(worker, /FACTORY_REVISION_NOTE_PREFIX/);
+  assert.match(worker, /Production_Notes: withFactoryRevisionOpen/);
+  assert.match(worker, /Output_Status: "Changes Requested"/);
+  assert.match(worker, /Render_Status: "Needs Changes"/);
+  assert.match(worker, /Do_Not_Publish: true/);
+  assert.match(worker, /revision_approve/);
+  assert.match(worker, /productionRequestRevisionOpen\(requestRecord\)/);
   assert.match(worker, /0\.10\.590-factory-content-roundtrip/);
   assert.match(worker, /studio_factory_desk_v1:\s*true/);
   assert.match(worker, /studio_factory_desk_preview_v1:\s*true/);
@@ -242,6 +248,6 @@ test("Worker allows Factory Desk POST through Phase 2A gate", async () => {
   const worker = await readFile(path.join(here, "worker.js"), "utf8");
   assert.match(worker, /const isFactoryDeskWrite = isFactoryDeskRoute && request\.method === "POST"/);
   assert.match(worker, /isFactoryDeskWrite \|/);
-  assert.match(worker, /version: "0\.10\.590-factory-content-roundtrip"/);
+  assert.match(worker, /version: "0\.10\.591-factory-revision-unlock"/);
   assert.match(worker, /studio_factory_desk_write_v1: true/);
 });
