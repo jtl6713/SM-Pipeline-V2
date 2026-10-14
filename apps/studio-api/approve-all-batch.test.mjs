@@ -39,6 +39,21 @@ test("approve-all batch helpers track progress and retry failed only", () => {
   assert.equal(job.status, "queued");
   assert.equal(approveAllJobCounts(job).pending_count, 3);
   assert.equal(nextPendingApproveAllItems(job, 2).length, 2);
+  const storyFirst = buildApproveAllJob({
+    jobId: "aj_story_order",
+    profileId: "recProfile1",
+    note: "",
+    schedules: {},
+    records: [
+      { id: "recStory", output_id: 10, platform: "Instagram", format: "Story" },
+      { id: "recReel", output_id: 11, platform: "Instagram", format: "Reel" },
+    ],
+    stamp: "2026-10-14T16:00:00.000Z",
+  });
+  assert.deepEqual(
+    nextPendingApproveAllItems(storyFirst, 2).map((item) => item.id),
+    ["recReel", "recStory"],
+  );
 
   job.items[0].status = "approved";
   job.items[1].status = "failed";
@@ -135,7 +150,7 @@ test("approve-all store stays under Airtable Setting_Value budget", () => {
 test("worker exposes durable approve-all batch routes and cron resume", () => {
   assert.match(worker, /from "\.\/approve-all-batch\.mjs"/);
   assert.match(worker, /studio_approve_all_batch_v1:\s*true/);
-  assert.match(worker, /0.10.597-ai-master-content-profile/);
+  assert.match(worker, /0.10.598-story-companion-schedule/);
   assert.match(worker, /async function studioProcessApproveAllJobSlice/);
   assert.match(worker, /async function studioResumeApproveAllJobs/);
   assert.match(worker, /studioResumeApproveAllJobs\(env, ctx\)/);

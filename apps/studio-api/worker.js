@@ -283,12 +283,16 @@ import {
 import {
   MAE_DEFAULT_TIME_ZONE,
   MAE_PRIORITY_SCHEDULE_WINDOWS,
+  MAE_STORY_COMPANION_OFFSET_MS,
+  MAE_SUGGEST_LEAD_MS,
+  maeAdvancePastBlackout,
   maeBuildSuggestedScheduleMap,
   maeIsBlackoutLocalTime,
   maeIsPriorityLocalTime,
   maeNextOpenScheduleIso,
   maeNormalizeTimeZone,
   maePickBalancedSuggestedIso,
+  maeResolveStorySchedule,
   maeScheduleConflicts,
   maeTimeZoneFromTheme,
 } from "./mae-schedule.mjs";
@@ -693,7 +697,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.597-ai-master-content-profile",
+          version: "0.10.598-story-companion-schedule",
           studio_factory_desk_v1: true,
           studio_factory_desk_actions_v1: true,
           studio_factory_desk_write_v1: true,
@@ -714,6 +718,7 @@ export default {
           studio_mae_platform_spread_v1: true,
           studio_promotion_reconcile_after_handoff_error_v1: true,
           studio_mae_profile_occupancy_v1: true,
+          studio_story_companion_schedule_v1: true,
           studio_schedule_occupancy_fields_v1: true,
           studio_render_stale_rendering_v1: true,
           studio_phantom_rerender_v1: true,
@@ -1871,6 +1876,14 @@ export default {
         await studioHealApprovedMissingSchedule(env, { limit: 16 });
       } catch (error) {
         console.warn("approved missing-schedule heal failed", error);
+      }
+      // A Story stamped on the next empty MAE slot publishes at that slot
+      // (often the same afternoon) while its Reel is weeks out. Move it to
+      // main + 10 minutes before the due-publish reconcile can send it.
+      try {
+        await studioHealStoryCompanionDrift(env, { limit: 8 });
+      } catch (error) {
+        console.warn("story companion drift heal failed", error);
       }
       try {
         await studioReconcileOverdueScheduledPublishes(env, { limit: 12 });
@@ -8938,6 +8951,10 @@ function studioPublishScheduleFields(payload = {}, record = null, options = {}) 
   const raw = payload?.scheduled_post_date;
   const immediate = raw === undefined || raw === null || String(raw).trim() === "" || String(raw).trim().toLowerCase() === "immediate";
   const exactOverride = options.exactOverride === true && !immediate;
+  // A Story companion is main + 10 minutes. That clock time is not an MAE
+  // slot, and it sits inside the 3-hour gap of its Reel. Snapping it back to
+  // the next open MAE slot is what published every Story at the same 11:30.
+  const storyCompanion = options.storyCompanion === true && !immediate;
   let requestedIso = "";
   if (immediate) {
     requestedIso = new Date().toISOString();
@@ -8951,7 +8968,10 @@ function studioPublishScheduleFields(payload = {}, record = null, options = {}) 
   const offMae = !immediate && !maeIsPriorityLocalTime(requestedMs, timeZone);
   const conflict = Boolean(occupiedMs) && maeScheduleConflicts(requestedMs, occupiedMs);
   let resolvedIso = requestedIso;
-  if (!immediate && !(exactOverride && !blackout) && (blackout || offMae || conflict)) {
+  if (storyCompanion) {
+    const advanced = maeAdvancePastBlackout(requestedMs, timeZone);
+    resolvedIso = new Date(advanced).toISOString();
+  } else if (!immediate && !(exactOverride && !blackout) && (blackout || offMae || conflict)) {
     resolvedIso = studioNextOpenScheduleIso(requestedIso, occupiedMs || [], STUDIO_SCHEDULE_GAP_MS, { timeZone }) || requestedIso;
     if (maeIsBlackoutLocalTime(Date.parse(resolvedIso), timeZone)) {
       resolvedIso = maePickBalancedSuggestedIso(MAE_PRIORITY_SCHEDULE_WINDOWS, new Date(), {
@@ -8987,6 +9007,64 @@ function studioPublishScheduleFields(payload = {}, record = null, options = {}) 
     }
   }
   return fields;
+}
+
+function studioStorySiblingStamp(row) {
+  if (!row) return null;
+  const platform = String(row.platform || f(row, "Platform") || "").trim();
+  const outputType = String(row.output_type || f(row, "Studio_Output_Type") || f(row, "Format") || "").trim();
+  const scheduled = String(
+    row.scheduled_at
+    || f(row, "Scheduled_Post_Date")
+    || f(row, "YouTube_Scheduled_Publish_At")
+    || ""
+  ).trim();
+  if (!platform || !outputType) return null;
+  return { platform, output_type: outputType, scheduled_at: scheduled };
+}
+
+async function studioResolveStoryPublishIso(env, record, options = {}) {
+  const platform = String(f(record, "Platform") || "").trim();
+  const timeZone = maeNormalizeTimeZone(options.timeZone);
+  const notBeforeMs = Date.now() + (options.leadMs ?? MAE_SUGGEST_LEAD_MS);
+  let siblingRows = options.siblingRows;
+  if (!siblingRows) {
+    const contentId = studioFirstLinkedId(f(record, "Content_Item"));
+    siblingRows = contentId
+      ? await loadContentPlatformOutputs(env, contentId).catch((error) => {
+        console.warn("story companion sibling read failed", record?.id, error);
+        return [];
+      })
+      : [];
+  }
+  const siblings = [];
+  for (const extra of options.extraSiblings || []) {
+    const stamp = studioStorySiblingStamp(extra);
+    if (stamp) siblings.push(stamp);
+  }
+  for (const row of siblingRows || []) {
+    if (row?.id && row.id === record?.id) continue;
+    const stamp = studioStorySiblingStamp(row);
+    if (stamp) siblings.push(stamp);
+  }
+  const lane = Array.isArray(options.occupiedMs) ? options.occupiedMs : [];
+  const occupiedMaeIso = options.allowMaeFallback === false
+    ? ""
+    : (maePickBalancedSuggestedIso(MAE_PRIORITY_SCHEDULE_WINDOWS, new Date(), {
+      occupiedMs: lane,
+      platformOccupiedMs: lane,
+      timeZone,
+    }) || "");
+  return maeResolveStorySchedule({
+    platform,
+    siblings,
+    requestedIso: options.requestedIso || "",
+    existingIso: options.existingIso || "",
+    notBeforeMs,
+    occupiedMaeIso,
+    timeZone,
+    allowMaeFallback: options.allowMaeFallback !== false,
+  });
 }
 
 function studioPublishScheduledMs(record) {
@@ -11282,7 +11360,10 @@ async function azAutoApproveIfReady(env, requestId, options = {}) {
   }));
   const notReady = assessed.filter((item) => !item.ready);
   const approveLimit = Math.max(1, Math.min(2, Number(options.approveLimit) || 1));
-  const toApprove = assessed.filter((item) => item.ready).slice(0, approveLimit).map((item) => item.row);
+  const toApprove = assessed.filter((item) => item.ready)
+    .sort((a, b) => Number(a.story) - Number(b.story))
+    .slice(0, approveLimit)
+    .map((item) => item.row);
   if (!toApprove.length) {
     if (notReady.some((item) => !item.story && (item.blockers.includes("cover") || item.blockers.includes("caption") || item.blockers.includes("final_file")))) {
       try { await enqueueStudioProductionJob(env, requestId); } catch {}
@@ -11336,37 +11417,51 @@ async function azAutoApproveIfReady(env, requestId, options = {}) {
     const outputType = String(f(row, "Studio_Output_Type") || f(row, "Format") || "").trim();
     const isStory = /story/i.test(outputType);
     // Stories may share a wall-clock slot; only non-stories occupy the platform lane.
-    const occupiedMs = isStory ? [] : studioOccupiedForPlatform(occupiedByPlatform, platform);
+    // The lane passed into approve is the real calendar. Stories use it only as a
+    // fallback when no sibling time exists yet, then sit 10 minutes after that slot.
+    const occupiedMs = studioOccupiedForPlatform(occupiedByPlatform, platform);
     const key = studioAzScheduleKey(platform, outputType);
-    const existingIso = String(f(row, "Scheduled_Post_Date") || f(row, "Studio_Scheduled_At") || "").trim();
-    let iso = existingIso && !Number.isNaN(Date.parse(existingIso))
-      ? new Date(existingIso).toISOString()
-      : "";
-    const existingMs = iso ? Date.parse(iso) : NaN;
-    if (
-      !iso
-      || maeIsBlackoutLocalTime(existingMs, timeZone)
-      || !maeIsPriorityLocalTime(existingMs, timeZone)
-    ) {
-      iso = studioSuggestedLocalDatetime(MAE_PRIORITY_SCHEDULE_WINDOWS, new Date(), {
-        occupiedMs: isStory ? [] : reservedAll,
-        platformOccupiedMs: occupiedMs,
-        timeZone,
-      });
-    } else {
-      iso = studioNextOpenScheduleIso(iso, occupiedMs, STUDIO_SCHEDULE_GAP_MS, { timeZone });
+    let iso = "";
+    if (!isStory) {
+      const existingIso = String(f(row, "Scheduled_Post_Date") || f(row, "Studio_Scheduled_At") || "").trim();
+      iso = existingIso && !Number.isNaN(Date.parse(existingIso))
+        ? new Date(existingIso).toISOString()
+        : "";
+      const existingMs = iso ? Date.parse(iso) : NaN;
+      if (
+        !iso
+        || maeIsBlackoutLocalTime(existingMs, timeZone)
+        || !maeIsPriorityLocalTime(existingMs, timeZone)
+      ) {
+        iso = studioSuggestedLocalDatetime(MAE_PRIORITY_SCHEDULE_WINDOWS, new Date(), {
+          occupiedMs: reservedAll,
+          platformOccupiedMs: occupiedMs,
+          timeZone,
+        });
+      } else {
+        iso = studioNextOpenScheduleIso(iso, occupiedMs, STUDIO_SCHEDULE_GAP_MS, { timeZone });
+      }
     }
-    await approveOutputRecordForPublishing(env, row, "AZ finished-video auto-queue", stamp, {
-      scheduled_post_date: iso,
+    const extraSiblings = Object.entries(scheduled).map(([scheduleKey, scheduleIso]) => {
+      const splitAt = scheduleKey.indexOf("::");
+      return {
+        platform: splitAt >= 0 ? scheduleKey.slice(0, splitAt) : scheduleKey,
+        output_type: splitAt >= 0 ? scheduleKey.slice(splitAt + 2) : "",
+        scheduled_at: scheduleIso,
+      };
+    });
+    const updated = await approveOutputRecordForPublishing(env, row, "AZ finished-video auto-queue", stamp, {
+      ...(iso ? { scheduled_post_date: iso } : {}),
       timezone: timeZone,
-    }, { occupiedMs, timeZone });
-    const booked = studioScheduleMs(iso) ?? Date.parse(iso);
+    }, { occupiedMs, timeZone, extraSiblings });
+    const bookedRaw = String(f(updated, "Scheduled_Post_Date") || iso || "").trim();
+    const booked = studioScheduleMs(bookedRaw) ?? Date.parse(bookedRaw);
     if (Number.isFinite(booked) && !isStory) {
       (occupiedByPlatform[platform] ||= []).push(booked);
       reservedAll.push(booked);
     }
     approved.push(row.id);
-    scheduled[key] = iso;
+    if (Number.isFinite(Date.parse(bookedRaw))) scheduled[key] = new Date(Date.parse(bookedRaw)).toISOString();
   }
   const notes = String(f(requestRecord, "Production_Notes") || "");
   if (!/az-schedule=/i.test(notes)) {
@@ -36532,18 +36627,28 @@ async function studioHealApprovedMissingSchedule(env, options = {}) {
     const outputType = String(f(row, "Studio_Output_Type") || f(row, "Format") || "").trim();
     const isStory = /story/i.test(outputType);
     const laneKey = Object.keys(occupiedByPlatform).find((key) => String(key || "").trim().toLowerCase() === platform.toLowerCase()) || platform;
-    const lane = isStory ? [] : (occupiedByPlatform[laneKey] || []);
+    // Stories do not read the empty lane. An empty lane is today's next MAE
+    // window, which the publisher treats as due.
+    const lane = occupiedByPlatform[laneKey] || [];
     const timeZone = await studioScheduleTimeZoneForRecord(env, row, null);
-    const iso = studioSuggestedLocalDatetime(MAE_PRIORITY_SCHEDULE_WINDOWS, new Date(), {
-      occupiedMs: lane,
-      platformOccupiedMs: lane,
-      timeZone,
-    });
+    let iso = "";
+    let storyCompanion = false;
+    if (isStory) {
+      const resolved = await studioResolveStoryPublishIso(env, row, { occupiedMs: lane, timeZone });
+      iso = resolved.iso || "";
+      storyCompanion = true;
+    } else {
+      iso = studioSuggestedLocalDatetime(MAE_PRIORITY_SCHEDULE_WINDOWS, new Date(), {
+        occupiedMs: lane,
+        platformOccupiedMs: lane,
+        timeZone,
+      });
+    }
     if (!iso) continue;
     const fields = studioPublishScheduleFields(
       { scheduled_post_date: iso, timezone: timeZone },
       row,
-      { occupiedMs: lane, timeZone, forceWrite: true },
+      { occupiedMs: isStory ? [] : lane, timeZone, forceWrite: true, storyCompanion },
     );
     if (!fields.Scheduled_Post_Date) continue;
     try {
@@ -36558,6 +36663,63 @@ async function studioHealApprovedMissingSchedule(env, options = {}) {
     const booked = Date.parse(fields.Scheduled_Post_Date);
     if (!isStory && Number.isFinite(booked)) (occupiedByPlatform[laneKey] ||= []).push(booked);
     healed.push({ id: row.id, output_id: f(row, "Output_ID") || null, scheduled_post_date: fields.Scheduled_Post_Date });
+  }
+  if (healed.length) studioInvalidateOccupiedScheduleCache();
+  return healed;
+}
+
+// Approved Stories that already carry today's next MAE instant (11:30 / 5:30 /
+// 16:30) still publish at that instant. Once the same-content main has a later
+// time, move the Story to main + 10 minutes before reconcile sends it.
+async function studioHealStoryCompanionDrift(env, options = {}) {
+  const limit = Math.max(1, Math.min(12, Number(options.limit || 8)));
+  let rows = [];
+  try {
+    rows = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
+      limit,
+      sortField: "Scheduled_Post_Date",
+      sortDirection: "asc",
+      filterFormula: 'AND({Test_Run_ID}=BLANK(),{Do_Not_Publish}=0,{Published_At}=BLANK(),{Studio_Scheduled_At}=BLANK(),{Scheduled_Post_Date}!="",IS_BEFORE({Scheduled_Post_Date},DATEADD(NOW(),7,"days")),{Output_Status}="Approved for Publishing",OR({Publish_Status}="Ready to Publish",{Publish_Status}="Ready to Schedule"),OR(FIND("Story",{Studio_Output_Type}&""),FIND("Story",{Format}&"")))',
+    });
+  } catch (error) {
+    console.warn("story companion drift scan failed", error);
+    return [];
+  }
+  const healed = [];
+  for (const row of rows || []) {
+    const currentRaw = String(f(row, "Scheduled_Post_Date") || "").trim();
+    const currentMs = Date.parse(currentRaw);
+    if (!Number.isFinite(currentMs)) continue;
+    const timeZone = await studioScheduleTimeZoneForRecord(env, row, null);
+    const resolved = await studioResolveStoryPublishIso(env, row, {
+      timeZone,
+      existingIso: currentRaw,
+      allowMaeFallback: false,
+    });
+    if (resolved.source !== "companion" || !resolved.iso) continue;
+    const companionMs = Date.parse(resolved.iso);
+    if (!Number.isFinite(companionMs) || Math.abs(companionMs - currentMs) < 2 * 60 * 1000) continue;
+    const fields = studioPublishScheduleFields(
+      { scheduled_post_date: resolved.iso, timezone: timeZone },
+      row,
+      { occupiedMs: [], timeZone, forceWrite: true, storyCompanion: true },
+    );
+    if (!fields.Scheduled_Post_Date) continue;
+    try {
+      await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, row.id, {
+        method: "PATCH",
+        body: JSON.stringify({ fields, typecast: true }),
+      });
+    } catch (error) {
+      console.warn("story companion drift stamp failed", row.id, error);
+      continue;
+    }
+    healed.push({
+      id: row.id,
+      output_id: f(row, "Output_ID") || null,
+      scheduled_post_date: fields.Scheduled_Post_Date,
+      offset_ms: MAE_STORY_COMPANION_OFFSET_MS,
+    });
   }
   if (healed.length) studioInvalidateOccupiedScheduleCache();
   return healed;
@@ -36888,13 +37050,17 @@ async function approveOutputRecordForPublishing(env, existing, note, stamp, payl
   const publishNowImmediate = Boolean(
     payload?.publish_now === true || rawIn.toLowerCase() === "immediate"
   );
-  // A locked operator time stays exact (Output 909). An existing slot is kept.
-  // Publish Now is the only path that means "right now". Factory Approve and every
-  // other approve with no stored time take the next MAE opening. A blank
-  // Scheduled_Post_Date is what Make and the worker treat as due, so writing
-  // nothing publishes the post immediately.
+  // A locked operator time stays exact (Output 909). An existing slot is kept
+  // for Reels, Shorts, and feed posts. Publish Now is the only path that means
+  // "right now". A blank Scheduled_Post_Date is what Make and the worker treat
+  // as due, so writing nothing publishes the post immediately.
+  // Stories do not take that next MAE opening. An empty lane returns today's
+  // 11:30, and every Story approved together published at that same minute.
+  // A Story is the same-platform main plus 10 minutes, and that time is stored
+  // as-is instead of being snapped back onto an MAE slot.
   let requestedRaw = rawIn;
   let exactOverride = false;
+  let storyCompanion = false;
   if (publishNowImmediate) {
     requestedRaw = "immediate";
   } else if (payload?.manual_schedule_override === true && requestedRaw) {
@@ -36902,10 +37068,24 @@ async function approveOutputRecordForPublishing(env, existing, note, stamp, payl
   } else if (markerIso) {
     requestedRaw = markerIso;
     exactOverride = true;
+  } else if (isStory) {
+    const resolved = await studioResolveStoryPublishIso(env, record, {
+      timeZone,
+      occupiedMs: occupiedMs || [],
+      requestedIso: requestedRaw,
+      existingIso: existingScheduleIso,
+      extraSiblings: options.extraSiblings || [],
+      siblingRows: options.siblingRows,
+    });
+    if (!resolved.iso) {
+      throw new HttpError(409, "No open morning, afternoon, or evening slot in the next 4 weeks");
+    }
+    requestedRaw = resolved.iso;
+    storyCompanion = true;
   } else if (!requestedRaw && existingScheduleIso) {
     requestedRaw = existingScheduleIso;
   } else if (!requestedRaw) {
-    const lane = isStory ? [] : (occupiedMs || []);
+    const lane = occupiedMs || [];
     requestedRaw = studioSuggestedLocalDatetime(MAE_PRIORITY_SCHEDULE_WINDOWS, new Date(), {
       occupiedMs: lane,
       platformOccupiedMs: lane,
@@ -36921,6 +37101,7 @@ async function approveOutputRecordForPublishing(env, existing, note, stamp, payl
     {
       occupiedMs: isStory ? [] : occupiedMs,
       exactOverride,
+      storyCompanion,
       timeZone,
       // Publish Now must store "now". Leaving the date blank is the same as due.
       forceWrite: publishNowImmediate,
@@ -37106,11 +37287,18 @@ async function studioProcessApproveAllJobSlice(env, jobId, options = {}) {
         }
         const platform = String(f(record, "Platform") || "").trim();
         const isStory = /story/i.test(String(f(record, "Studio_Output_Type") || f(record, "Format") || ""));
-        const occupiedMs = isStory ? [] : studioOccupiedForPlatform(occupiedByPlatform, platform);
+        const occupiedMs = studioOccupiedForPlatform(occupiedByPlatform, platform);
         const rowSchedule = job.schedules?.[record.id];
+        const extraSiblings = (job.items || [])
+          .filter((entry) => entry.status === "approved" && entry.scheduled_ms && !/story/i.test(String(entry.format || "")))
+          .map((entry) => ({
+            platform: entry.platform,
+            output_type: entry.format,
+            scheduled_at: new Date(Number(entry.scheduled_ms)).toISOString(),
+          }));
         const updated = await approveOutputRecordForPublishing(env, record, job.notes || "", new Date().toISOString(), {
           scheduled_post_date: rowSchedule,
-        }, { occupiedMs });
+        }, { occupiedMs, extraSiblings });
         const booked = studioScheduleMs(f(updated, "Scheduled_Post_Date")) ?? Date.now();
         if (!isStory) (occupiedByPlatform[platform] ||= []).push(booked);
         Object.assign(item, mapApproveAllEligibleSummary(updated), {

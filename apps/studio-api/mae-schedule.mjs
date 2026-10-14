@@ -329,6 +329,17 @@ export function maeNextOpenScheduleIso(candidateIso, occupiedMs, gapMs = MAE_SCH
   });
 }
 
+export function maeAdvancePastBlackout(ms, timeZone = MAE_DEFAULT_TIME_ZONE) {
+  if (!Number.isFinite(ms)) return ms;
+  let cursor = ms;
+  // Overnight blackout is 11:00 PM through 3:00 AM. Walk forward at most six hours.
+  for (let i = 0; i < 6 * 60; i += 1) {
+    if (!maeIsBlackoutLocalTime(cursor, timeZone)) return cursor;
+    cursor += 60 * 1000;
+  }
+  return cursor;
+}
+
 function maeStoryCompanionIso(stamps, platform, notBeforeMs) {
   const mainKeys = [
     `${platform}::Reel`,
@@ -353,6 +364,61 @@ function maeStoryCompanionIso(stamps, platform, notBeforeMs) {
     if (companion > notBeforeMs) return new Date(companion).toISOString();
   }
   return "";
+}
+
+export function maeStoryCompanionIsoFromSiblings(siblings, platform, notBeforeMs = 0) {
+  const stamps = new Map();
+  for (const row of siblings || []) {
+    const name = String(row?.platform || "").trim();
+    const outputType = String(row?.output_type || "").trim();
+    const iso = String(row?.scheduled_at || "").trim();
+    if (!name || !outputType || /story/i.test(outputType)) continue;
+    const ms = Date.parse(iso);
+    if (!Number.isFinite(ms)) continue;
+    const key = `${name}::${outputType}`;
+    if (!stamps.has(key)) stamps.set(key, new Date(ms).toISOString());
+  }
+  return maeStoryCompanionIso(stamps, platform, notBeforeMs);
+}
+
+function maeUsableStoredStoryIso(iso, notBeforeMs, timeZone) {
+  const ms = Date.parse(String(iso || "").trim());
+  if (!Number.isFinite(ms) || ms <= notBeforeMs) return "";
+  if (maeIsBlackoutLocalTime(ms, timeZone)) return "";
+  // 5:30 / 11:30 / 16:30 is the empty-lane snap that publishes a Story right away.
+  if (maeIsPriorityLocalTime(ms, timeZone)) return "";
+  return new Date(ms).toISOString();
+}
+
+/** Story publish time. Same-platform main + 10 minutes wins. A stored MAE
+ * instant does not: that is the slot an empty lane returns, and it goes out now. */
+export function maeResolveStorySchedule({
+  platform = "",
+  siblings = [],
+  requestedIso = "",
+  existingIso = "",
+  notBeforeMs = 0,
+  occupiedMaeIso = "",
+  timeZone = MAE_DEFAULT_TIME_ZONE,
+  allowMaeFallback = true,
+} = {}) {
+  const zone = maeNormalizeTimeZone(timeZone);
+  const companion = maeStoryCompanionIsoFromSiblings(siblings, platform, notBeforeMs);
+  if (companion) {
+    return {
+      iso: new Date(maeAdvancePastBlackout(Date.parse(companion), zone)).toISOString(),
+      source: "companion",
+    };
+  }
+  const stored = maeUsableStoredStoryIso(requestedIso, notBeforeMs, zone)
+    || maeUsableStoredStoryIso(existingIso, notBeforeMs, zone);
+  if (stored) return { iso: stored, source: "stored" };
+  if (!allowMaeFallback) return { iso: "", source: "" };
+  const maeMs = Date.parse(String(occupiedMaeIso || ""));
+  if (!Number.isFinite(maeMs)) return { iso: "", source: "" };
+  const plus = maeAdvancePastBlackout(maeMs + MAE_STORY_COMPANION_OFFSET_MS, zone);
+  if (plus <= notBeforeMs) return { iso: "", source: "" };
+  return { iso: new Date(plus).toISOString(), source: "mae_plus_10" };
 }
 
 export function maeBuildSuggestedScheduleMap(items, occupiedByPlatform = {}, now = new Date(), options = {}) {

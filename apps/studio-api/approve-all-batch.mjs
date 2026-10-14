@@ -260,7 +260,15 @@ export function resetFailedApproveAllItems(job, stamp) {
 
 export function nextPendingApproveAllItems(job, limit = APPROVE_ALL_BATCH_SIZE) {
   const max = Math.max(1, Math.min(12, Number(limit) || APPROVE_ALL_BATCH_SIZE));
-  return (job.items || []).filter((item) => item.status === "pending").slice(0, max);
+  const pending = (job.items || []).filter((item) => item.status === "pending");
+  // Mains first so a Story in the same batch can read the sibling time + 10 minutes
+  // instead of the next empty MAE slot.
+  pending.sort((a, b) => {
+    const aStory = /story/i.test(String(a.format || a.output_type || "")) ? 1 : 0;
+    const bStory = /story/i.test(String(b.format || b.output_type || "")) ? 1 : 0;
+    return aStory - bStory;
+  });
+  return pending.slice(0, max);
 }
 
 export function finalizeApproveAllJobStatus(job, stamp) {
