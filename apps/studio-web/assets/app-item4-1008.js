@@ -141,6 +141,7 @@
   }
   let item4WorkspaceRetryTimer = 0;
   let item4PlanOverrides = {};
+  let item4OutputSelectionDirty = false;
   let ezIntakeKind = null;
   let ezStagedFiles = [];
   let ezEntryPath = null;
@@ -276,7 +277,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.685-production-review-notes";
+  const BUILD_ID = "item4-0.6.686-unified-platform-outputs";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -7055,7 +7056,7 @@ function timedScriptAssetLabel(asset, index) {
     const hasAssets = Boolean(item4Workspace?.assets?.length);
     if (button) {
       button.hidden = false;
-      button.textContent = planReady ? "Update formats" : "Recommend formats";
+      button.textContent = planReady ? "Recommend again" : "Recommend formats";
       button.disabled = !hasAssets || item4Uploading || ezPlanInFlight || item4WorkspaceNeedsCompression();
     }
     if (!hint) return;
@@ -7064,7 +7065,7 @@ function timedScriptAssetLabel(asset, index) {
       return;
     }
     if (planReady) {
-      hint.textContent = "Formats are saved. Change one and tap Update formats if needed.";
+      hint.textContent = "Recommendations are saved below. Edit the output checkboxes and tap Save output selections; Recommend again resets to defaults.";
       return;
     }
     if (hasAssets && !ezMasterSetReadyForPlan()) {
@@ -9939,9 +9940,7 @@ function timedScriptAssetLabel(asset, index) {
     const ratio = item.aspect_ratio || "Needs review";
     const count = Number(item.source_asset_count || item4Workspace?.assets?.length || 0);
     const rationale = String(item.rationale || "").replace(/five photos/ig, `${count} photo${count === 1 ? "" : "s"}`);
-    const formatControl = companion
-      ? `<div class="form-field"><span>Format</span><strong>${escapeHtml(item.output_type)} companion</strong></div>`
-      : `<label class="form-field"><span>Format</span><select data-item4-format="${escapeHtml(item.platform)}">${options.map(x => `<option${x === item.output_type ? " selected" : ""}>${escapeHtml(x)}</option>`).join("")}</select></label>`;
+    const formatControl = `<div class="form-field"><span>Format</span><strong>${escapeHtml(item.output_type)}${companion ? " companion" : ""}</strong></div>`;
     return `<article class="item4-plan-card" data-item4-plan-platform="${escapeHtml(item.platform)}">
       <div class="item4-plan-card-top"><strong>${escapeHtml(item.platform)}</strong><span class="item4-ratio-chip">${escapeHtml(ratio)}</span></div>
       ${formatControl}
@@ -9972,17 +9971,6 @@ function timedScriptAssetLabel(asset, index) {
         .filter((item) => !item.companion && item.output_type !== "Story")
         .map((item) => [item.platform, item.output_type])
     );
-    host.querySelectorAll("[data-item4-format]").forEach(select => {
-      select.addEventListener("change", () => {
-        item4PlanOverrides[select.dataset.item4Format] = select.value;
-        if (ezIsOriginRecord()) {
-          maybeAutoEzPlan(true);
-          return;
-        }
-        const button = $("item4BuildPlan");
-        if (button) button.textContent = "Update formats";
-      });
-    });
     if (gate) gate.hidden = status?.plan_status !== "Ready";
     productionDecorateTooltips(host);
     syncProductionStudioState();
@@ -11068,6 +11056,11 @@ function timedScriptAssetLabel(asset, index) {
 
   async function prepareItem4Variants({ autoRetry = false } = {}) {
     if (!activeProductionRequest?.id || item4PreparingVariants) return;
+    if (item4OutputSelectionDirty) {
+      setRequestMessage("Save your platform output selections before preparing frames.", "error-text");
+      setItem4OutputSelectionHint("Save the changed output selections first.", true);
+      return;
+    }
     if (item4MastersNeedSave(item4Workspace || {})) {
       const message = item4UnsavedPrepareMessage();
       setRequestMessage(message, "error-text");
@@ -12211,11 +12204,12 @@ function timedScriptAssetLabel(asset, index) {
 
   async function buildItem4Plan() {
     if (!activeProductionRequest?.id) return;
-    const manualOutputSelection = productionOutputMatrixLoaded ? productionOutputSelectionKeys() : [];
     syncItem4PlatformsFromEz();
     const selected = ezSelectedPlatforms().length ? ezSelectedPlatforms() : item4SelectedPlatforms();
     const wizardCount = ezPlanApi()?.ezWizardPhotoCount?.(ezWizardPending || ezWizardAnswers) || 0;
     const count = item4Workspace?.assets?.length || wizardCount || 0;
+    // Re-recommend from media/content type, never from a stale one-format-per-platform override.
+    item4PlanOverrides = {};
     let platforms = ezPlanPlatforms(count || 1, selected);
     if (!platforms.length) {
       platforms = defaultPlanPlatforms(count || 1);
@@ -12235,7 +12229,9 @@ function timedScriptAssetLabel(asset, index) {
         body: JSON.stringify({
           platforms,
           overrides: activeOverrides,
-          extras: item4EnabledExtraPairs(platforms),
+          // Recommend is intentional: the server picks fresh defaults and supported
+          // automatic Story companions. Custom additions belong to the matrix Save.
+          extras: [],
           package: currentEzPackageId(),
           skip_fbs1_guard: true,
           schedules: ezWizardAnswers?.schedules || null,
@@ -12249,11 +12245,9 @@ function timedScriptAssetLabel(asset, index) {
       renderProductionRequestOutputCards();
       await loadItem4Workspace(activeProductionRequest);
       await loadProductionRequestOutputs(activeProductionRequest);
-      if (manualOutputSelection.length) {
-        restoreProductionOutputSelection(manualOutputSelection);
-        await saveProductionRequestOutputs(activeProductionRequest);
-      }
-      setRequestMessage(result.message || "Platform plan ready.", "success");
+      item4OutputSelectionDirty = false;
+      setItem4OutputSelectionHint("Recommended outputs selected and saved. Add or remove checkboxes, then Save output selections.");
+      setRequestMessage("Recommended outputs selected. Edit the checkboxes below or prepare frames.", "success");
     } catch (error) {
       setRequestMessage(
         isTimeoutError(error)
@@ -12264,7 +12258,7 @@ function timedScriptAssetLabel(asset, index) {
     } finally {
       if (button) {
         button.hidden = false;
-        button.textContent = item4Workspace?.plan?.items?.length ? "Update formats" : "Recommend formats";
+        button.textContent = item4Workspace?.plan?.items?.length ? "Recommend again" : "Recommend formats";
         button.disabled = !(item4Workspace?.assets?.length || ezWizardAllowsPlanWithoutAssets());
       }
       syncEzPlanChrome();
@@ -12381,6 +12375,46 @@ function timedScriptAssetLabel(asset, index) {
         ...(scheduled_at ? { scheduled_at } : {}),
       };
     });
+  }
+
+  function setItem4OutputSelectionHint(message, error = false) {
+    const hint = $("item4OutputSelectionHint");
+    if (!hint) return;
+    hint.textContent = String(message || "");
+    hint.classList.toggle("error-text", Boolean(error));
+  }
+
+  async function saveItem4OutputSelection() {
+    if (!activeProductionRequest?.id || !productionOutputMatrixLoaded) {
+      setItem4OutputSelectionHint("Wait until this Production Request finishes loading.", true);
+      return;
+    }
+    if (!selectedOutputMatrix().length) {
+      setItem4OutputSelectionHint("Choose at least one platform output.", true);
+      return;
+    }
+    const requestId = activeProductionRequest.id;
+    const button = $("item4SaveOutputSelection");
+    if (button) { button.disabled = true; button.textContent = "Saving outputs…"; }
+    setItem4OutputSelectionHint("Saving selected outputs and synchronizing Frames…");
+    try {
+      const result = await saveProductionRequestOutputs(activeProductionRequest);
+      if (activeProductionRequest?.id !== requestId) return;
+      if (result?.production_request) {
+        activeProductionRequest = mergeProductionRequestRecord(activeProductionRequest, result.production_request);
+      }
+      await loadItem4Workspace(activeProductionRequest);
+      await loadProductionRequestOutputs(activeProductionRequest);
+      item4OutputSelectionDirty = false;
+      setItem4OutputSelectionHint("Saved. Platforms & Frames now uses exactly these selected outputs.");
+      setRequestMessage("Platform output selections saved. Frames reflects the same output set.", "success");
+    } catch (error) {
+      setItem4OutputSelectionHint(error?.message || "Could not save outputs.", true);
+      setRequestMessage(error?.message || "Could not save outputs.", "error-text");
+    } finally {
+      if (button) { button.disabled = false; button.textContent = "Save output selections"; }
+      setProductionRequestControlState(activeProductionRequest);
+    }
   }
 
   function productionOutputSelectionKeys() {
@@ -12875,6 +12909,7 @@ function timedScriptAssetLabel(asset, index) {
     syncLegacyPlatformsFromOutputMatrix();
     updateOutputMatrixSummary();
     productionOutputMatrixLoaded = true;
+    item4OutputSelectionDirty = false;
     renderProductionRequestOutputCards();
     setProductionRequestControlState(activeProductionRequest);
   }
@@ -12897,6 +12932,9 @@ function timedScriptAssetLabel(asset, index) {
     let outputs = item4HasTimedScript(record)
       ? defaultOutputsForPlatforms(["Instagram", "Facebook", "TikTok", "YouTube"])
       : selectedOutputMatrix();
+    if (!outputs.length && productionOutputMatrixLoaded) {
+      throw new Error("Choose at least one platform output before saving.");
+    }
     if (!outputs.length) {
       const planPlatforms = item4SelectedPlatforms();
       const requestPlatforms = selectedRequestPlatforms();
@@ -12955,6 +12993,8 @@ function timedScriptAssetLabel(asset, index) {
     const editable = !cancelled && (revisionOpen || status === "Draft" || status === "Ready");
     const form = $("productionRequestForm");
 
+    const outputSave = $("item4SaveOutputSelection");
+    if (outputSave && outputSave.dataset.busy !== "true") outputSave.disabled = !editable || !productionOutputMatrixLoaded;
     if (form) {
       form.querySelectorAll("input, select, textarea").forEach((control) => {
         if (control.matches("[data-ez-asset-caption], [data-ez-caption-mode], #ezIdeaTitle, #ezIdeaSummary, #ezPrimaryLocation, #prPrimaryLocation")) return;
@@ -14106,6 +14146,7 @@ function timedScriptAssetLabel(asset, index) {
     }
   });
   $("item4BuildPlan")?.addEventListener("click", buildItem4Plan);
+  $("item4SaveOutputSelection")?.addEventListener("click", saveItem4OutputSelection);
   $("prOpenRenderingTab")?.addEventListener("click", () => {
     setProductionWorkspaceTab("rendering", { focus: true });
   });
@@ -14619,6 +14660,10 @@ function timedScriptAssetLabel(asset, index) {
         return activeProductionRequest;
       }
       const outputsResult = await saveProductionRequestOutputs(result.record);
+      if (outputsResult) {
+        item4OutputSelectionDirty = false;
+        setItem4OutputSelectionHint("Saved. Platforms & Frames uses these selected outputs.");
+      }
       if (outputsResult?.production_request) {
         activeProductionRequest = mergeProductionRequestRecord(activeProductionRequest, outputsResult.production_request);
       }
@@ -14633,7 +14678,10 @@ function timedScriptAssetLabel(asset, index) {
         renderProductionRequestOutputCards();
       }
       populateProductionRequestForm(activeProductionRequest);
-      if (outputsResult) productionOutputMatrixLoaded = true;
+      if (outputsResult) {
+        productionOutputMatrixLoaded = true;
+        await loadItem4Workspace(activeProductionRequest);
+      }
       setProductionRequestControlState(activeProductionRequest);
       setRequestMessage("Production Request draft and requested platform outputs saved.", "success");
       return activeProductionRequest;
@@ -14647,6 +14695,9 @@ function timedScriptAssetLabel(asset, index) {
 
   outputMatrixInputs().forEach(input => {
     input.addEventListener("change", () => {
+      item4OutputSelectionDirty = true;
+      setItem4OutputSelectionHint("Unsaved selections. Tap Save output selections before preparing frames.");
+
       if (input.dataset.platform === "TikTok" && input.value === "Story" && input.checked) {
         item4DropUnsupportedStoryChecks(true);
         return;

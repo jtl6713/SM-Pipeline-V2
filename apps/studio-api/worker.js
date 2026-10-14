@@ -697,7 +697,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.598-story-companion-schedule",
+          version: "0.10.599-unified-platform-outputs",
           studio_factory_desk_v1: true,
           studio_factory_desk_actions_v1: true,
           studio_factory_desk_write_v1: true,
@@ -9647,36 +9647,48 @@ function item4PlanItemFromChoice(platform, chosen, photoCount, mappingIndex, { c
 }
 
 async function item4ReconcilePlanWithEnabledOutputs(env, record, enabledPairs) {
+  // The selected Production Request Outputs are the sole authority for output
+  // destinations. Rebuild the plan from that exact set: the previous add-only
+  // reconciliation retained deleted formats and left Platforms/Frames misleading.
   const assets = item4AssetManifest(record);
   const photoCount = item4EffectivePhotoCount(record, assets) || Math.max(assets.length, 1);
   const hasVideo = item4PlanHasVideo(record, assets);
   const mappingIndex = await item4MappingIndex(env);
   const existingPlan = item4ParseJson(f(record, "Studio_Output_Plan_JSON"), null);
-  const items = Array.isArray(existingPlan?.items) ? [...existingPlan.items] : [];
-  const previousRatios = item4RequiredRatios(existingPlan).join("|");
-  let changed = false;
+  const previousItems = Array.isArray(existingPlan?.items) ? existingPlan.items : [];
+  const items = [];
+  const seen = new Set();
 
   for (const pair of enabledPairs || []) {
     const outputType = item4CanonicalOutputType(pair.platform, pair.output_type)
       || item4DefaultOutputType(pair.platform, photoCount, { hasVideo });
     if (!outputType || !ITEM4_PLAN_SPECS[pair.platform]) continue;
     if (item4IsUnsupportedCompanion(pair.platform, outputType)) continue;
-    if (hasVideo && item4IsNativeStillOutput(pair.platform, outputType)) continue;
-    const key = item4BridgePlanKey(pair.platform, outputType);
-    if (items.some((item) => item4BridgePlanKey(item.platform, item.output_type) === key)) continue;
-    try {
-      const chosen = item4PlanChoice(pair.platform, outputType, photoCount, { hasVideo });
-      items.push(item4PlanItemFromChoice(pair.platform, chosen, photoCount, mappingIndex, {
-        companion: item4IsCompanionOutputType(outputType),
-      }));
-      changed = true;
-    } catch {
-      continue;
+    if (hasVideo && item4IsNativeStillOutput(pair.platform, outputType)) {
+      throw new HttpError(409, `${pair.platform} ${outputType} needs still-image source assets; the current video/mixed-source planner cannot prepare that native still format.`);
     }
+    const key = item4BridgePlanKey(pair.platform, outputType);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const chosen = item4PlanChoice(pair.platform, outputType, photoCount, { hasVideo });
+    items.push(item4PlanItemFromChoice(pair.platform, chosen, photoCount, mappingIndex, {
+      companion: item4IsCompanionOutputType(outputType),
+    }));
   }
-  if (!changed) return record;
+  if (!items.length) throw new HttpError(409, "Choose at least one supported platform output");
 
+  const priorKeys = previousItems.map((item) => item4BridgePlanKey(item.platform, item.output_type));
+  const selectedKeys = items.map((item) => item4BridgePlanKey(item.platform, item.output_type));
+  const sameKeys = priorKeys.length === selectedKeys.length
+    && priorKeys.every((key, index) => key === selectedKeys[index]);
+  const needsReview = items.some((item) => !item.aspect_ratio);
+  const expectedStatus = needsReview ? "Needs Review" : "Ready";
+  const storedStatus = String(f(record, "Studio_Output_Plan_Status") || "");
+  if (sameKeys && storedStatus === expectedStatus) return record;
+
+  const previousRatios = item4RequiredRatios(existingPlan).join("|");
   const plan = {
+    ...(existingPlan && typeof existingPlan === "object" ? existingPlan : {}),
     schema_version: "item4.output-plan.1",
     generated_at: new Date().toISOString(),
     production_request_record_id: record.id,
@@ -9684,12 +9696,11 @@ async function item4ReconcilePlanWithEnabledOutputs(env, record, enabledPairs) {
     photo_count_kind: item4PhotoCountKind(photoCount),
     items,
   };
-  const needsReview = items.some((item) => !item.aspect_ratio);
   const nextRatios = item4RequiredRatios(plan).join("|");
   const fields = {
     Target_Platforms: [...new Set(items.map((item) => item.platform))],
     Studio_Output_Plan_JSON: JSON.stringify(plan),
-    Studio_Output_Plan_Status: needsReview ? "Needs Review" : "Ready",
+    Studio_Output_Plan_Status: expectedStatus,
   };
   if (previousRatios && previousRatios !== nextRatios) {
     fields.Studio_Variant_Status = "None";

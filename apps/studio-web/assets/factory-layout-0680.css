@@ -389,3 +389,47 @@
    padding:11px 14px;text-align:left;
  }
 }
+
+/* Studio 0.6.686: one editable output matrix in Platforms & Frames. */
+#page-content #item4PlatformToggles[hidden],
+#page-content #item4OutputPlan[hidden] { display:none!important; }
+#page-content .item4-output-plan-section #prOutputMatrixSection{
+  display:grid;gap:13px;min-width:0;width:100%;box-sizing:border-box;
+  background:#fff;border:1px solid #e1e7ef;border-radius:13px;
+  padding:16px;margin-top:10px;
+}
+#page-content #prOutputMatrixSection .request-section-heading h3{
+  font-size:1rem;font-weight:800;margin:0 0 3px;
+}
+#page-content #prOutputMatrixSection .request-section-heading p{
+  margin:0;color:#53657b;font-size:.83rem;line-height:1.45;
+}
+#page-content .item4-output-selection-actions{
+  display:flex;flex-wrap:wrap;align-items:center;gap:12px;
+}
+#page-content .item4-output-selection-actions .primary-button{
+  min-height:42px;white-space:normal;
+}
+#page-content #item4OutputSelectionHint{
+  min-width:0;flex:1 1 260px;overflow-wrap:anywhere;
+  line-height:1.45;font-size:.81rem;
+}
+#page-content .item4-output-plan-section #prOutputMatrix{
+  display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;
+}
+#page-content .item4-output-plan-section #prOutputMatrix .output-platform-card{
+  min-width:0;box-sizing:border-box;
+}
+@media(max-width:1100px){
+ #page-content .item4-output-plan-section #prOutputMatrix{
+   grid-template-columns:repeat(2,minmax(0,1fr));
+ }
+}
+@media(max-width:650px){
+ #page-content .item4-output-plan-section #prOutputMatrix{
+   grid-template-columns:1fr;gap:10px;
+ }
+ #page-content .item4-output-plan-section #prOutputMatrixSection{padding:12px;gap:12px}
+ #page-content .item4-output-selection-actions{display:grid;grid-template-columns:1fr}
+ #page-content .item4-output-selection-actions .primary-button{width:100%;min-height:46px}
+}

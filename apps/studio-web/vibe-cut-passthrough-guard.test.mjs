@@ -72,8 +72,8 @@ test("Vibe Cut uses longform when YouTube Standard is in the saved plan", () => 
 });
 
 test("Vibe Cut routing is preserved and output configuration cache is refreshed", () => {
-  assert.match(app, /BUILD_ID = "item4-0.6.685-production-review-notes"/);
-  assert.match(html, /app-item4-1008\.js\?v=0.6.685-production-review-notes/);
+  assert.match(app, /BUILD_ID = "item4-0.6.686-unified-platform-outputs"/);
+  assert.match(html, /app-item4-1008\.js\?v=0.6.686-unified-platform-outputs/);
   assert.match(app, /const originKind = ezIsVibeCut\(\) \? "vibe-cut" : "finished-video"/);
   assert.match(app, /if \(ezIsFinishedVideo\(\)\) \{[\s\S]*?Studio skips crops and Remotion/);
   assert.match(app, /const video = ezIsFinishedVideo\(\) \|\| ezIsVibeCut\(\)/);

@@ -9,20 +9,20 @@
  <link rel="preconnect" href="https://fonts.googleapis.com">
  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@1,600;1,700&family=Inter:wght@400;500;600;700;800&family=Oswald:wght@500&display=swap">
- <link rel="stylesheet" href="/assets/styles-phase7-0621.css?v=0.6.685-production-review-notes">
- <link rel="stylesheet" href="/assets/home-density-0517.css?v=0.6.685-production-review-notes">
- <link rel="stylesheet" href="/assets/engagement-1008.css?v=0.6.685-production-review-notes">
- <link rel="stylesheet" href="/assets/production-tablet-0622.css?v=0.6.685-production-review-notes">
- <link rel="stylesheet" href="/assets/insights-0622.css?v=0.6.685-production-review-notes">
- <link rel="stylesheet" href="/assets/clean-enterprise.css?v=0.6.685-production-review-notes">
- <link rel="stylesheet" href="/assets/ai-api-footer.css?v=0.6.685-production-review-notes">
- <link rel="stylesheet" href="/assets/sticky-footer-scroll.css?v=0.6.685-production-review-notes">
- <link rel="stylesheet" href="/assets/topbar-banner-0618.css?v=0.6.685-production-review-notes">
- <link rel="stylesheet" href="/assets/new-profile-1009.css?v=0.6.685-production-review-notes">
- <link rel="stylesheet" href="/assets/studio-clarity-0599.css?v=0.6.685-production-review-notes">
-<link rel="stylesheet" href="/assets/production-progress-0601.css?v=0.6.685-production-review-notes">
-<link rel="stylesheet" href="/assets/production-render-layout-0678.css?v=0.6.685-production-review-notes">
-<link rel="stylesheet" href="/assets/factory-layout-0680.css?v=0.6.685-production-review-notes">
+ <link rel="stylesheet" href="/assets/styles-phase7-0621.css?v=0.6.686-unified-platform-outputs">
+ <link rel="stylesheet" href="/assets/home-density-0517.css?v=0.6.686-unified-platform-outputs">
+ <link rel="stylesheet" href="/assets/engagement-1008.css?v=0.6.686-unified-platform-outputs">
+ <link rel="stylesheet" href="/assets/production-tablet-0622.css?v=0.6.686-unified-platform-outputs">
+ <link rel="stylesheet" href="/assets/insights-0622.css?v=0.6.686-unified-platform-outputs">
+ <link rel="stylesheet" href="/assets/clean-enterprise.css?v=0.6.686-unified-platform-outputs">
+ <link rel="stylesheet" href="/assets/ai-api-footer.css?v=0.6.686-unified-platform-outputs">
+ <link rel="stylesheet" href="/assets/sticky-footer-scroll.css?v=0.6.686-unified-platform-outputs">
+ <link rel="stylesheet" href="/assets/topbar-banner-0618.css?v=0.6.686-unified-platform-outputs">
+ <link rel="stylesheet" href="/assets/new-profile-1009.css?v=0.6.686-unified-platform-outputs">
+ <link rel="stylesheet" href="/assets/studio-clarity-0599.css?v=0.6.686-unified-platform-outputs">
+<link rel="stylesheet" href="/assets/production-progress-0601.css?v=0.6.686-unified-platform-outputs">
+<link rel="stylesheet" href="/assets/production-render-layout-0678.css?v=0.6.686-unified-platform-outputs">
+<link rel="stylesheet" href="/assets/factory-layout-0680.css?v=0.6.686-unified-platform-outputs">
 </head>
 <body>
  <header class="topbar">
@@ -601,14 +601,230 @@
  <h3>Platforms</h3>
  <span class="item4-state-pill" id="item4PlanStatus" data-state="idle">Not started</span>
  </div>
- <div class="item4-platform-toggles" id="item4PlatformToggles">
+ <div class="item4-platform-toggles" id="item4PlatformToggles" hidden aria-hidden="true">
  <label data-platform="Instagram"><input type="checkbox" data-item4-platform value="Instagram" checked> Instagram</label>
  <label data-platform="Facebook"><input type="checkbox" data-item4-platform value="Facebook" checked> Facebook</label>
  <label data-platform="TikTok"><input type="checkbox" data-item4-platform value="TikTok" checked> TikTok</label>
  <label data-platform="YouTube"><input type="checkbox" data-item4-platform value="YouTube" checked> YouTube</label>
  </div>
  <div class="item4-plan-actions"><button type="button" class="primary-button" id="item4BuildPlan">Recommend formats</button><span id="item4PlanHint"></span></div>
- <div class="item4-output-plan" id="item4OutputPlan"><div class="empty compact-empty"></div></div>
+ <div class="item4-output-plan" id="item4OutputPlan" hidden><div class="empty compact-empty"></div></div>
+ <div class="request-section" id="prOutputMatrixSection">
+ <div class="request-section-heading">
+ <h3>Choose platform outputs</h3>
+ <p>Recommended formats are checked below. Add or remove any output types, then save your choices. You may choose several per platform; these are the only outputs the Frames step will prepare.</p>
+ </div>
+ <div class="output-matrix" id="prOutputMatrix">
+ <fieldset class="output-platform-card"><legend>Instagram</legend>
+ <label><input type="checkbox" data-pr-output data-platform="Instagram" value="Reel"> Reel</label>
+ <label><input type="checkbox" data-pr-output data-platform="Instagram" value="Story"> Story</label>
+ <label><input type="checkbox" data-pr-output data-platform="Instagram" value="Single Image"> Single Image</label>
+ <label><input type="checkbox" data-pr-output data-platform="Instagram" value="Carousel"> Carousel</label>
+ </fieldset>
+ <fieldset class="output-platform-card"><legend>Facebook</legend>
+ <label><input type="checkbox" data-pr-output data-platform="Facebook" value="Reel"> Reel</label>
+ <label><input type="checkbox" data-pr-output data-platform="Facebook" value="Story"> Story</label>
+ <label><input type="checkbox" data-pr-output data-platform="Facebook" value="Single Image"> Single Image</label>
+ <label><input type="checkbox" data-pr-output data-platform="Facebook" value="Multi-Image Post"> Multi-Image Post (native album)</label>
+ <label><input type="checkbox" data-pr-output data-platform="Facebook" value="Slideshow Reel"> Slideshow Reel (optional 9:16 from photos)</label>
+ </fieldset>
+ <fieldset class="output-platform-card"><legend>TikTok</legend>
+ <label><input type="checkbox" data-pr-output data-platform="TikTok" value="Video Draft"> Video Draft</label>
+ <label><input type="checkbox" data-pr-output data-platform="TikTok" value="Story"> Story</label>
+ <label><input type="checkbox" data-pr-output data-platform="TikTok" value="Single Photo"> Single Photo</label>
+ <label><input type="checkbox" data-pr-output data-platform="TikTok" value="Multi-Photo"> Multi-Photo</label>
+ </fieldset>
+ <fieldset class="output-platform-card"><legend>YouTube</legend>
+ <label><input type="checkbox" data-pr-output data-platform="YouTube" value="Short"> Short</label>
+ <label><input type="checkbox" data-pr-output data-platform="YouTube" value="Standard Video"> Standard Video</label>
+ <label><input type="checkbox" data-pr-output data-platform="YouTube" value="Slideshow Video"> Slideshow Video</label>
+ </fieldset>
+ </div>
+ <div class="output-matrix-summary" id="prOutputMatrixSummary">No requested outputs selected yet.</div>
+ <div class="item4-output-selection-actions">
+ <button type="button" class="primary-button" id="item4SaveOutputSelection">Save output selections</button>
+ <span id="item4OutputSelectionHint" class="subtle" aria-live="polite">Choose the outputs you want. Save before preparing frames.</span>
+ </div>
+ <div class="requested-output-cards" id="prOutputCards"></div>
+
+ <div class="output-override-editor" id="prOutputOverrideEditor" hidden>
+ <div class="override-editor-header">
+ <div>
+ <div class="eyebrow">PER-OUTPUT OVERRIDES</div>
+ <h4 id="prOverrideHeading">Output override</h4>
+ <p id="prOverrideInheritedNote">Blank/Inherit values use the master Production Request.</p>
+ </div>
+ <button type="button" class="button secondary small" id="closePrOverride">Close override</button>
+ </div>
+
+ <input type="hidden" id="prOverrideRecordId">
+
+ <div class="override-grid">
+ <label>Voiceover
+ <select id="prOverrideVoiceover">
+ <option>Inherit</option>
+ <option>Use Profile Default</option>
+ <option>Yes</option>
+ <option>No</option>
+ </select>
+ </label>
+
+ <label>Background music
+ <select id="prOverrideMusicMode">
+ <option>Inherit</option>
+ <option>Use Profile Default</option>
+ <option>Yes</option>
+ <option>No</option>
+ </select>
+ </label>
+
+ <label>Thumbnail / cover
+ <select id="prOverrideThumbnail">
+ <option>Inherit</option>
+ <option>Use Profile Default</option>
+ <option>Yes</option>
+ <option>Use photo frame</option>
+ <option>No</option>
+ </select>
+ </label>
+
+ <label>Specific music track
+ <select id="prOverrideMusicAsset">
+ <option value="">Inherit master track</option>
+ </select>
+ </label>
+
+ <label id="prOverrideDurationField">Duration (seconds)
+ <input id="prOverrideDuration" type="number" min="5" max="600" step="1" placeholder="Inherit">
+ </label>
+
+ </div>
+
+ <div class="override-subsection" id="prOverrideClipSection">
+ <h5>Video clip count</h5>
+ <div class="override-grid count-grid">
+ <label>Mode
+ <select id="prOverrideClipMode">
+ <option>Inherit</option>
+ <option>AI decides</option>
+ <option>Exact</option>
+ <option>Target range</option>
+ </select>
+ </label>
+ <label>Exact
+ <input id="prOverrideClipExact" type="number" min="1" max="60" step="1" placeholder="Inherit">
+ </label>
+ <label>Min
+ <input id="prOverrideClipMin" type="number" min="1" max="60" step="1" placeholder="Inherit">
+ </label>
+ <label>Max
+ <input id="prOverrideClipMax" type="number" min="1" max="60" step="1" placeholder="Inherit">
+ </label>
+ </div>
+ </div>
+
+ <div class="override-subsection" id="prOverrideSlideSection">
+ <h5>Slide / photo count</h5>
+ <div class="override-grid count-grid">
+ <label>Mode
+ <select id="prOverrideSlideMode">
+ <option>Inherit</option>
+ <option>AI decides</option>
+ <option>Exact</option>
+ <option>Target range</option>
+ </select>
+ </label>
+ <label>Exact
+ <input id="prOverrideSlideExact" type="number" min="1" step="1" placeholder="Inherit">
+ </label>
+ <label>Min
+ <input id="prOverrideSlideMin" type="number" min="1" step="1" placeholder="Inherit">
+ </label>
+ <label>Max
+ <input id="prOverrideSlideMax" type="number" min="1" step="1" placeholder="Inherit">
+ </label>
+ <label>Image mode
+ <select id="prOverrideImageMode">
+ <option>Inherit</option>
+ <option>Make AI Generated</option>
+ <option>Manual Upload</option>
+ </select>
+ </label>
+ </div>
+ </div>
+
+ <div class="override-subsection">
+ <h5>Text direction</h5>
+ <div class="override-text-row">
+ <label>Title mode
+ <select id="prOverrideTitleMode">
+ <option>Inherit</option>
+ <option>AI decides</option>
+ <option>Force exact</option>
+ <option>AI improve</option>
+ </select>
+ </label>
+ <label class="grow">Title
+ <input id="prOverrideTitle" type="text" maxlength="500" placeholder="Inherit master title direction">
+ </label>
+ </div>
+ <div class="override-text-row">
+ <label>Caption mode
+ <select id="prOverrideCaptionMode">
+ <option>Inherit</option>
+ <option>AI decides</option>
+ <option>Force exact</option>
+ <option>AI improve</option>
+ </select>
+ </label>
+ <label class="grow">Caption
+ <textarea id="prOverrideCaption" rows="3" placeholder="Inherit master caption direction"></textarea>
+ </label>
+ </div>
+ <div class="override-text-row">
+ <label>Script mode
+ <select id="prOverrideScriptMode">
+ <option>Inherit</option>
+ <option>AI decides</option>
+ <option>Force exact</option>
+ <option>AI improve</option>
+ </select>
+ </label>
+ <label class="grow">Script / voiceover direction
+ <textarea id="prOverrideScript" rows="3" placeholder="Inherit master script direction"></textarea>
+ </label>
+ </div>
+ </div>
+
+ <div class="override-subsection">
+ <h5>Publishing &amp; notes</h5>
+ <div class="override-grid">
+ <label>Publish mode
+ <select id="prOverridePublishMode">
+ <option>Inherit</option>
+ <option>Auto Publish</option>
+ <option>Manual Review</option>
+ <option>Do Not Publish</option>
+ </select>
+ </label>
+ <label>Scheduled post time
+ <input id="prOverrideScheduledAt" type="datetime-local">
+ <span class="subtle" id="prOverrideScheduledHint"></span>
+ </label>
+ </div>
+ <label class="full-width-label">Output-specific notes
+ <textarea id="prOverrideNotes" rows="4" placeholder="Only instructions that differ for this output"></textarea>
+ </label>
+ </div>
+
+ <div class="effective-preview" id="prOverrideEffectivePreview"></div>
+
+ <div class="override-editor-actions">
+ <span class="form-message" id="prOverrideMessage"></span>
+ <button type="button" class="button primary" id="savePrOverride">Save output override</button>
+ </div>
+ </div>
+ </div>
  <div class="item4-production-gate" id="item4ProductionGate" hidden>
  <strong>Ready.</strong>
  <span>Frame each post next.</span>
@@ -829,219 +1045,7 @@
  </fieldset>
  </div>
 
- <div class="request-section" id="prOutputMatrixSection">
- <div class="request-section-heading">
- <h3>4. Requested platform outputs</h3>
- <p>Advanced output selection. The recommended plan above selects these automatically; use this matrix only when you want additional or alternative outputs.</p>
- </div>
- <div class="output-matrix" id="prOutputMatrix">
- <fieldset class="output-platform-card"><legend>Instagram</legend>
- <label><input type="checkbox" data-pr-output data-platform="Instagram" value="Reel"> Reel</label>
- <label><input type="checkbox" data-pr-output data-platform="Instagram" value="Story"> Story</label>
- <label><input type="checkbox" data-pr-output data-platform="Instagram" value="Single Image"> Single Image</label>
- <label><input type="checkbox" data-pr-output data-platform="Instagram" value="Carousel"> Carousel</label>
- </fieldset>
- <fieldset class="output-platform-card"><legend>Facebook</legend>
- <label><input type="checkbox" data-pr-output data-platform="Facebook" value="Reel"> Reel</label>
- <label><input type="checkbox" data-pr-output data-platform="Facebook" value="Story"> Story</label>
- <label><input type="checkbox" data-pr-output data-platform="Facebook" value="Single Image"> Single Image</label>
- <label><input type="checkbox" data-pr-output data-platform="Facebook" value="Multi-Image Post"> Multi-Image Post (native album)</label>
- <label><input type="checkbox" data-pr-output data-platform="Facebook" value="Slideshow Reel"> Slideshow Reel (optional 9:16 from photos)</label>
- </fieldset>
- <fieldset class="output-platform-card"><legend>TikTok</legend>
- <label><input type="checkbox" data-pr-output data-platform="TikTok" value="Video Draft"> Video Draft</label>
- <label><input type="checkbox" data-pr-output data-platform="TikTok" value="Story"> Story</label>
- <label><input type="checkbox" data-pr-output data-platform="TikTok" value="Single Photo"> Single Photo</label>
- <label><input type="checkbox" data-pr-output data-platform="TikTok" value="Multi-Photo"> Multi-Photo</label>
- </fieldset>
- <fieldset class="output-platform-card"><legend>YouTube</legend>
- <label><input type="checkbox" data-pr-output data-platform="YouTube" value="Short"> Short</label>
- <label><input type="checkbox" data-pr-output data-platform="YouTube" value="Standard Video"> Standard Video</label>
- <label><input type="checkbox" data-pr-output data-platform="YouTube" value="Slideshow Video"> Slideshow Video</label>
- </fieldset>
- </div>
- <div class="output-matrix-summary" id="prOutputMatrixSummary">No requested outputs selected yet.</div>
- <div class="requested-output-cards" id="prOutputCards"></div>
-
- <div class="output-override-editor" id="prOutputOverrideEditor" hidden>
- <div class="override-editor-header">
- <div>
- <div class="eyebrow">PER-OUTPUT OVERRIDES</div>
- <h4 id="prOverrideHeading">Output override</h4>
- <p id="prOverrideInheritedNote">Blank/Inherit values use the master Production Request.</p>
- </div>
- <button type="button" class="button secondary small" id="closePrOverride">Close override</button>
- </div>
-
- <input type="hidden" id="prOverrideRecordId">
-
- <div class="override-grid">
- <label>Voiceover
- <select id="prOverrideVoiceover">
- <option>Inherit</option>
- <option>Use Profile Default</option>
- <option>Yes</option>
- <option>No</option>
- </select>
- </label>
-
- <label>Background music
- <select id="prOverrideMusicMode">
- <option>Inherit</option>
- <option>Use Profile Default</option>
- <option>Yes</option>
- <option>No</option>
- </select>
- </label>
-
- <label>Thumbnail / cover
- <select id="prOverrideThumbnail">
- <option>Inherit</option>
- <option>Use Profile Default</option>
- <option>Yes</option>
- <option>Use photo frame</option>
- <option>No</option>
- </select>
- </label>
-
- <label>Specific music track
- <select id="prOverrideMusicAsset">
- <option value="">Inherit master track</option>
- </select>
- </label>
-
- <label id="prOverrideDurationField">Duration (seconds)
- <input id="prOverrideDuration" type="number" min="5" max="600" step="1" placeholder="Inherit">
- </label>
-
- </div>
-
- <div class="override-subsection" id="prOverrideClipSection">
- <h5>Video clip count</h5>
- <div class="override-grid count-grid">
- <label>Mode
- <select id="prOverrideClipMode">
- <option>Inherit</option>
- <option>AI decides</option>
- <option>Exact</option>
- <option>Target range</option>
- </select>
- </label>
- <label>Exact
- <input id="prOverrideClipExact" type="number" min="1" max="60" step="1" placeholder="Inherit">
- </label>
- <label>Min
- <input id="prOverrideClipMin" type="number" min="1" max="60" step="1" placeholder="Inherit">
- </label>
- <label>Max
- <input id="prOverrideClipMax" type="number" min="1" max="60" step="1" placeholder="Inherit">
- </label>
- </div>
- </div>
-
- <div class="override-subsection" id="prOverrideSlideSection">
- <h5>Slide / photo count</h5>
- <div class="override-grid count-grid">
- <label>Mode
- <select id="prOverrideSlideMode">
- <option>Inherit</option>
- <option>AI decides</option>
- <option>Exact</option>
- <option>Target range</option>
- </select>
- </label>
- <label>Exact
- <input id="prOverrideSlideExact" type="number" min="1" step="1" placeholder="Inherit">
- </label>
- <label>Min
- <input id="prOverrideSlideMin" type="number" min="1" step="1" placeholder="Inherit">
- </label>
- <label>Max
- <input id="prOverrideSlideMax" type="number" min="1" step="1" placeholder="Inherit">
- </label>
- <label>Image mode
- <select id="prOverrideImageMode">
- <option>Inherit</option>
- <option>Make AI Generated</option>
- <option>Manual Upload</option>
- </select>
- </label>
- </div>
- </div>
-
- <div class="override-subsection">
- <h5>Text direction</h5>
- <div class="override-text-row">
- <label>Title mode
- <select id="prOverrideTitleMode">
- <option>Inherit</option>
- <option>AI decides</option>
- <option>Force exact</option>
- <option>AI improve</option>
- </select>
- </label>
- <label class="grow">Title
- <input id="prOverrideTitle" type="text" maxlength="500" placeholder="Inherit master title direction">
- </label>
- </div>
- <div class="override-text-row">
- <label>Caption mode
- <select id="prOverrideCaptionMode">
- <option>Inherit</option>
- <option>AI decides</option>
- <option>Force exact</option>
- <option>AI improve</option>
- </select>
- </label>
- <label class="grow">Caption
- <textarea id="prOverrideCaption" rows="3" placeholder="Inherit master caption direction"></textarea>
- </label>
- </div>
- <div class="override-text-row">
- <label>Script mode
- <select id="prOverrideScriptMode">
- <option>Inherit</option>
- <option>AI decides</option>
- <option>Force exact</option>
- <option>AI improve</option>
- </select>
- </label>
- <label class="grow">Script / voiceover direction
- <textarea id="prOverrideScript" rows="3" placeholder="Inherit master script direction"></textarea>
- </label>
- </div>
- </div>
-
- <div class="override-subsection">
- <h5>Publishing &amp; notes</h5>
- <div class="override-grid">
- <label>Publish mode
- <select id="prOverridePublishMode">
- <option>Inherit</option>
- <option>Auto Publish</option>
- <option>Manual Review</option>
- <option>Do Not Publish</option>
- </select>
- </label>
- <label>Scheduled post time
- <input id="prOverrideScheduledAt" type="datetime-local">
- <span class="subtle" id="prOverrideScheduledHint"></span>
- </label>
- </div>
- <label class="full-width-label">Output-specific notes
- <textarea id="prOverrideNotes" rows="4" placeholder="Only instructions that differ for this output"></textarea>
- </label>
- </div>
-
- <div class="effective-preview" id="prOverrideEffectivePreview"></div>
-
- <div class="override-editor-actions">
- <span class="form-message" id="prOverrideMessage"></span>
- <button type="button" class="button primary" id="savePrOverride">Save output override</button>
- </div>
- </div>
- </div>
-
+ 
  <div class="request-section">
  <div class="request-section-heading"><h3>5. Structure</h3><p>Use AI, force an exact count, or provide a target range.</p></div>
  <div class="request-grid">
@@ -2191,7 +2195,7 @@
  <h2>Idea through publish on every platform</h2>
  <p>This is the photo-based path ChicagoShining Studio uses today: write or pick an idea, attach stills, let Studio plan the packages, review the renders, then approve. Instagram, Facebook, and YouTube publish publicly. TikTok is saved as a draft.</p>
  <figure class="support-shot">
- <img src="/assets/support/home.jpg?v=0.6.685-production-review-notes" alt="Home page with the publishing wizard" width="1440" height="920">
+ <img src="/assets/support/home.jpg?v=0.6.686-unified-platform-outputs" alt="Home page with the publishing wizard" width="1440" height="920">
  <figcaption>Home is the publishing wizard. Same pipeline underneath.</figcaption>
  </figure>
  <ol class="support-steps">
@@ -2204,7 +2208,7 @@
  <strong>Start in the publishing wizard.</strong>
  <span>On Home, answer where you want to start: an idea, photos you already have, AI images, or a mix. Then pick a platform package. Ideas and Production stay in the sidebar if you already know the path.</span>
  <figure class="support-shot">
- <img src="/assets/support/ideas.jpg?v=0.6.685-production-review-notes" alt="Ideas page with start form and candidate table" width="1440" height="920">
+ <img src="/assets/support/ideas.jpg?v=0.6.686-unified-platform-outputs" alt="Ideas page with start form and candidate table" width="1440" height="920">
  <figcaption>Ideas — select an existing candidate or enter one, then continue. Manage opens the drawer to add photos.</figcaption>
  </figure>
  <button type="button" class="text-button" data-open-page="ideas">Open Ideas</button>
@@ -2217,7 +2221,7 @@
  <strong>Confirm platforms and crops in Production.</strong>
  <span>Two default packages. Vertical video: Instagram Reel, Facebook Reel, TikTok draft, YouTube Short, plus Instagram and Facebook 9:16 Stories and a grid thumbnail. Voiceover and music stay on. Scrollable slides: Instagram carousel, Facebook album, TikTok photos; YouTube is a rendered Slideshow Video (no image post). First slide can introduce a multi-day event; later slides hold the details. Reframe crops, write or AI-fill captions, then Save.</span>
  <figure class="support-shot">
- <img src="/assets/support/production.jpg?v=0.6.685-production-review-notes" alt="Production start-with-content screen with photo drop zone" width="1440" height="920">
+ <img src="/assets/support/production.jpg?v=0.6.686-unified-platform-outputs" alt="Production start-with-content screen with photo drop zone" width="1440" height="920">
  <figcaption>Production — name the piece, choose single or multiple photos, drop stills, then set platforms and audio.</figcaption>
  </figure>
  <button type="button" class="text-button" data-open-page="content">Open Production</button>
@@ -2230,7 +2234,7 @@
  <strong>Watch Pipeline until Ready for Review.</strong>
  <span>Open Platform Pipeline. Rows move through package, asset selection, Remotion render, and review mail. Click a row to open the creative editor: preview, audio mix, per-photo titles, then <em>Save &amp; rerender preview</em> if you change the mix.</span>
  <figure class="support-shot">
- <img src="/assets/support/pipeline.jpg?v=0.6.685-production-review-notes" alt="Platform pipeline table with Instagram Facebook TikTok and YouTube outputs" width="1440" height="920">
+ <img src="/assets/support/pipeline.jpg?v=0.6.686-unified-platform-outputs" alt="Platform pipeline table with Instagram Facebook TikTok and YouTube outputs" width="1440" height="920">
  <figcaption>Pipeline — one row per platform output. Open review when Ready for Review, then Approve for publishing or Approve All.</figcaption>
  </figure>
  <button type="button" class="text-button" data-open-page="outputs">Open Pipeline</button>
@@ -2252,7 +2256,7 @@
  <strong>Confirm in Operations if you need a clock or a manual mark.</strong>
  <span>Ready to schedule lists approved rows that still need a post time. Ready to publish lists due packages. Use <em>mark published</em> only when you posted by hand. Profiles, Drive intake, and render repair live on the same page (admin roles).</span>
  <figure class="support-shot">
- <img src="/assets/support/operations.jpg?v=0.6.685-production-review-notes" alt="Operations page with daily ideas, intake, and publish queues" width="1440" height="920">
+ <img src="/assets/support/operations.jpg?v=0.6.686-unified-platform-outputs" alt="Operations page with daily ideas, intake, and publish queues" width="1440" height="920">
  <figcaption>Operations — schedule a post time, mark a hand-posted URL, or pulse intake and render repair.</figcaption>
  </figure>
  <button type="button" class="text-button" data-open-page="operations">Open Operations</button>
@@ -2263,7 +2267,7 @@
  <article class="support-article" id="helpArticleHome" data-support-article="home" role="tabpanel" aria-labelledby="helpTabHome" hidden>
  <h2>Home</h2>
  <figure class="support-shot">
- <img src="/assets/support/home.jpg?v=0.6.685-production-review-notes" alt="Home page with the publishing wizard" width="1440" height="920">
+ <img src="/assets/support/home.jpg?v=0.6.686-unified-platform-outputs" alt="Home page with the publishing wizard" width="1440" height="920">
  <figcaption>Home does not run the pipeline. It asks a few questions, then opens the right screen.</figcaption>
  </figure>
  <p>Home is the start screen. It does not run the pipeline by itself.</p>
@@ -2277,7 +2281,7 @@
  <article class="support-article" id="helpArticleDashboard" data-support-article="dashboard" role="tabpanel" aria-labelledby="helpTabDashboard" hidden>
  <h2>Dashboard</h2>
  <figure class="support-shot">
- <img src="/assets/support/dashboard.jpg?v=0.6.685-production-review-notes" alt="Dashboard metric cards and scheduled content overview" width="1440" height="920">
+ <img src="/assets/support/dashboard.jpg?v=0.6.686-unified-platform-outputs" alt="Dashboard metric cards and scheduled content overview" width="1440" height="920">
  <figcaption>Dashboard cards stay on the page. Click a card to filter the table underneath.</figcaption>
  </figure>
  <p>Dashboard is the queue overview. Metric cards stay on the page and filter the table under them.</p>
@@ -2292,7 +2296,7 @@
  <article class="support-article" id="helpArticleIdeas" data-support-article="ideas" role="tabpanel" aria-labelledby="helpTabIdeas" hidden>
  <h2>Ideas</h2>
  <figure class="support-shot">
- <img src="/assets/support/ideas.jpg?v=0.6.685-production-review-notes" alt="Ideas intake table and start form" width="1440" height="920">
+ <img src="/assets/support/ideas.jpg?v=0.6.686-unified-platform-outputs" alt="Ideas intake table and start form" width="1440" height="920">
  <figcaption>The table is the candidate queue. Nothing here publishes.</figcaption>
  </figure>
  <p>Ideas holds Idea Candidates before they become Content Items. Nothing here publishes.</p>
@@ -2407,7 +2411,7 @@
  <li><strong>Photo reel length</strong> — Studio writes a line for each selected still, records the voiceover, then holds each slide for that line. The video lasts as long as those slides. There is no separate length target and no extra time after the voiceover.</li>
  </ul>
  <figure class="support-shot">
- <img src="/assets/support/ideas-new.jpg?v=0.6.685-production-review-notes" alt="New idea form on the Ideas page" width="1440" height="920">
+ <img src="/assets/support/ideas-new.jpg?v=0.6.686-unified-platform-outputs" alt="New idea form on the Ideas page" width="1440" height="920">
  <figcaption>+ New idea opens the same form in manual mode so you can type a title without picking from the queue.</figcaption>
  </figure>
  <p>Ready to produce means the idea is in the queue. Promote it here; nothing publishes until Ready for Review → Approve publish.</p>
@@ -2416,7 +2420,7 @@
  <article class="support-article" id="helpArticleProduction" data-support-article="production" role="tabpanel" aria-labelledby="helpTabProduction" hidden>
  <h2>Production</h2>
  <figure class="support-shot">
- <img src="/assets/support/production.jpg?v=0.6.685-production-review-notes" alt="Production photo intake and platform checks" width="1440" height="920">
+ <img src="/assets/support/production.jpg?v=0.6.686-unified-platform-outputs" alt="Production photo intake and platform checks" width="1440" height="920">
  <figcaption>Start with Content lands here. Home → Ideas → Add photos uses the same workspace after photos are attached.</figcaption>
  </figure>
  <p>Production is where photos become a platform plan and a Content Item. The master content type from the idea (Vertical Short Video, Photo Set, Carousel, and the rest) is what chose those default packages — see the graphic on the <button type="button" class="text-button" data-support-doc="ideas">Ideas</button> Help tab.</p>
@@ -2432,7 +2436,7 @@
  <article class="support-article" id="helpArticlePipeline" data-support-article="pipeline" role="tabpanel" aria-labelledby="helpTabPipeline" hidden>
  <h2>Pipeline</h2>
  <figure class="support-shot">
- <img src="/assets/support/pipeline.jpg?v=0.6.685-production-review-notes" alt="Platform pipeline with Open review on each output" width="1440" height="920">
+ <img src="/assets/support/pipeline.jpg?v=0.6.686-unified-platform-outputs" alt="Platform pipeline with Open review on each output" width="1440" height="920">
  <figcaption>Each row is one destination. Approve All uses the same live publish path as a single Approve for publishing.</figcaption>
  </figure>
  <p>Platform Pipeline is execution plus creative review. It refreshes while the page is open.</p>
@@ -2448,7 +2452,7 @@
  <article class="support-article" id="helpArticleMusic" data-support-article="music" role="tabpanel" aria-labelledby="helpTabMusic" hidden>
  <h2>Music Manager</h2>
  <figure class="support-shot">
- <img src="/assets/support/music.jpg?v=0.6.685-production-review-notes" alt="Music Manager track cards" width="1440" height="920">
+ <img src="/assets/support/music.jpg?v=0.6.686-unified-platform-outputs" alt="Music Manager track cards" width="1440" height="920">
  <figcaption>Cleared tracks from the Airtable catalogue. Production still decides Yes/No and the mix in Pipeline review.</figcaption>
  </figure>
  <p>Music Manager is the Airtable background-music catalogue plus tracks you add as MP3 or WAV files.</p>
@@ -2477,7 +2481,7 @@
  <article class="support-article" id="helpArticleOperations" data-support-article="operations" role="tabpanel" aria-labelledby="helpTabOperations" hidden>
  <h2>Operations</h2>
  <figure class="support-shot">
- <img src="/assets/support/operations.jpg?v=0.6.685-production-review-notes" alt="Operations control page" width="1440" height="920">
+ <img src="/assets/support/operations.jpg?v=0.6.686-unified-platform-outputs" alt="Operations control page" width="1440" height="920">
  <figcaption>Admin-only control room. Control and Quality Agent are separate pages. Control tools are text tabs so only one section is open at a time.</figcaption>
  </figure>
  <p>Operations is the control room. The sidebar item is limited to tenant admin, publishing, and production-configure roles. Use <strong>Control</strong> for daily jobs and queues. Use <strong>Quality Agent</strong> for the check catalog, stuck inventory, and activity log. Refresh reloads the current page from the API.</p>
@@ -2612,7 +2616,7 @@
  <div class="studio-footer-meta">
  <span id="aiApiFooter" aria-live="polite"><strong>AI API:</strong> loading…</span>
  <span id="apiStatus" class="topbar-status">Connecting…</span>
- <span id="uiBuildLabel">UI build 0.6.685</span>
+ <span id="uiBuildLabel">UI build 0.6.686</span>
  <span id="workerBuildLabel">Worker …</span> </div>
  </footer>
 
@@ -2783,67 +2787,67 @@
  </div>
  </aside>
 
- <script src="/assets/config-0621.js?v=0.6.685-production-review-notes"></script>
- <script src="/assets/ez-plan.js?v=0.6.685-production-review-notes"></script>
+ <script src="/assets/config-0621.js?v=0.6.686-unified-platform-outputs"></script>
+ <script src="/assets/ez-plan.js?v=0.6.686-unified-platform-outputs"></script>
  <script type="application/json" id="studioLazyManifest">
 {
-  "v": "0.6.685-production-review-notes",
+  "v": "0.6.686-unified-platform-outputs",
   "core": [
-    "/assets/app-item4-1008.js?v=0.6.685-production-review-notes",
-    "/assets/ai-api-footer.js?v=0.6.685-production-review-notes",
-    "/assets/sticky-footer-scroll.js?v=0.6.685-production-review-notes",
-    "/assets/studio-profile-identity-0599.js?v=0.6.685-production-review-notes"
+    "/assets/app-item4-1008.js?v=0.6.686-unified-platform-outputs",
+    "/assets/ai-api-footer.js?v=0.6.686-unified-platform-outputs",
+    "/assets/sticky-footer-scroll.js?v=0.6.686-unified-platform-outputs",
+    "/assets/studio-profile-identity-0599.js?v=0.6.686-unified-platform-outputs"
   ],
   "afterHome": [
-    "/assets/all-profiles-overview-1007.js?v=0.6.685-production-review-notes"
+    "/assets/all-profiles-overview-1007.js?v=0.6.686-unified-platform-outputs"
   ],
   "groups": {
     "home": [],
     "ideas": [
-      "/assets/timed-script.js?v=0.6.685-production-review-notes",
-      "/assets/vibe-cut.js?v=0.6.685-production-review-notes"
+      "/assets/timed-script.js?v=0.6.686-unified-platform-outputs",
+      "/assets/vibe-cut.js?v=0.6.686-unified-platform-outputs"
     ],
     "content": [
-      "/assets/timed-script.js?v=0.6.685-production-review-notes",
-      "/assets/vibe-cut.js?v=0.6.685-production-review-notes",
-      "/assets/production-asset-labels.js?v=0.6.685-production-review-notes",
-      "/assets/production-progress-0601.js?v=0.6.685-production-review-notes"
+      "/assets/timed-script.js?v=0.6.686-unified-platform-outputs",
+      "/assets/vibe-cut.js?v=0.6.686-unified-platform-outputs",
+      "/assets/production-asset-labels.js?v=0.6.686-unified-platform-outputs",
+      "/assets/production-progress-0601.js?v=0.6.686-unified-platform-outputs"
     ],
     "outputs": [
-      "/assets/pipeline-schedule-grid-0622.js?v=0.6.685-production-review-notes",
-      "/assets/platform-schedule-calendar-0924.js?v=0.6.685-production-review-notes"
+      "/assets/pipeline-schedule-grid-0622.js?v=0.6.686-unified-platform-outputs",
+      "/assets/platform-schedule-calendar-0924.js?v=0.6.686-unified-platform-outputs"
     ],
     "insights": [
-      "/assets/insights-0622.js?v=0.6.685-production-review-notes"
+      "/assets/insights-0622.js?v=0.6.686-unified-platform-outputs"
     ],
     "engagement": [
-      "/assets/engagement-1008.js?v=0.6.685-production-review-notes"
+      "/assets/engagement-1008.js?v=0.6.686-unified-platform-outputs"
     ],
     "profiles": [
-      "/assets/new-profile-1009.js?v=0.6.685-production-review-notes"
+      "/assets/new-profile-1009.js?v=0.6.686-unified-platform-outputs"
     ],
     "library": [
-      "/assets/production-asset-labels.js?v=0.6.685-production-review-notes"
+      "/assets/production-asset-labels.js?v=0.6.686-unified-platform-outputs"
     ],
     "factory": [
-      "/assets/factory-open-target.js?v=0.6.685-production-review-notes",
-      "/assets/factory-desk.js?v=0.6.685-production-review-notes"
+      "/assets/factory-open-target.js?v=0.6.686-unified-platform-outputs",
+      "/assets/factory-desk.js?v=0.6.686-unified-platform-outputs"
     ]
   },
   "prefetch": [
-    "/assets/pipeline-schedule-grid-0622.js?v=0.6.685-production-review-notes",
-    "/assets/platform-schedule-calendar-0924.js?v=0.6.685-production-review-notes",
-    "/assets/timed-script.js?v=0.6.685-production-review-notes",
-    "/assets/vibe-cut.js?v=0.6.685-production-review-notes",
-    "/assets/new-profile-1009.js?v=0.6.685-production-review-notes",
-    "/assets/insights-0622.js?v=0.6.685-production-review-notes",
-    "/assets/engagement-1008.js?v=0.6.685-production-review-notes",
-    "/assets/production-asset-labels.js?v=0.6.685-production-review-notes",
-    "/assets/production-progress-0601.js?v=0.6.685-production-review-notes"
+    "/assets/pipeline-schedule-grid-0622.js?v=0.6.686-unified-platform-outputs",
+    "/assets/platform-schedule-calendar-0924.js?v=0.6.686-unified-platform-outputs",
+    "/assets/timed-script.js?v=0.6.686-unified-platform-outputs",
+    "/assets/vibe-cut.js?v=0.6.686-unified-platform-outputs",
+    "/assets/new-profile-1009.js?v=0.6.686-unified-platform-outputs",
+    "/assets/insights-0622.js?v=0.6.686-unified-platform-outputs",
+    "/assets/engagement-1008.js?v=0.6.686-unified-platform-outputs",
+    "/assets/production-asset-labels.js?v=0.6.686-unified-platform-outputs",
+    "/assets/production-progress-0601.js?v=0.6.686-unified-platform-outputs"
   ]
 }
  </script>
- <script src="/assets/studio-lazy-pages.js?v=0.6.685-production-review-notes"></script>
+ <script src="/assets/studio-lazy-pages.js?v=0.6.686-unified-platform-outputs"></script>
  <script>window.StudioLazyLoad.boot();</script>
 <script>
 (function(){

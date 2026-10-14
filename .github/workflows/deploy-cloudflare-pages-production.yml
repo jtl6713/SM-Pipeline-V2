@@ -46,7 +46,8 @@ jobs:
             apps/studio-web/production-progress-timeline-truth.test.mjs \
             apps/studio-web/production-render-layout.test.mjs \
             apps/studio-web/factory-needs-eyes-layout.test.mjs \
-            apps/studio-web/factory-review-feedback.test.mjs
+            apps/studio-web/factory-review-feedback.test.mjs \
+            apps/studio-web/unified-platform-outputs.test.mjs
 
       - name: Validate Pages source and stage deployment directory
         shell: bash
