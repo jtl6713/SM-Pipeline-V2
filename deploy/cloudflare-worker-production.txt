@@ -265,3 +265,4 @@ Deploy Worker 0.10.489-engagement-ledger. Shrink the engagement ledger so Chicag
 2026-10-14: Worker 0.10.601-voiceover-once. Speak each voiceover once. A later pass reuses the Drive file instead of buying the same sentence from ElevenLabs again. Proven: Getty Sunset Frame Content 608.
 
 2026-10-14: Factory Needs Eyes dedicated review output query. Include all review-ready outputs independently of bounded scheduled/publishing Operations backlog; regression covers Content 617 outputs 3202-3207.
+2026-10-14 fix-factory-approve-654-717: guard render readiness; committed approval response; stale review classification

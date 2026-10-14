@@ -343,3 +343,4 @@ UI 0.6.607 hashtag mismatch warning only; approval no longer blocked.
 2026-10-14: UI 0.6.686-unified-platform-outputs. Move authoritative requested outputs matrix to Platforms & Frames; Recommend populates selections, Save syncs exact output plan; update cache/BUILD_ID and tests.
 
 2026-10-14: UI 0.6.687-platforms-frames-details. Recommend formats checks Platforms & Frames before Save; Details shows the same selection read-only; saved matrices are not overwritten on open.
+2026-10-14 fix-factory-approve-654-717: guard render readiness; committed approval response; stale review classification
