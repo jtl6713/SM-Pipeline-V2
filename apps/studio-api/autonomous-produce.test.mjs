@@ -741,7 +741,7 @@ test("Worker stamps photo-ready ideas and drains the 30m SLA on light ticks", as
   const path = await import("node:path");
   const here = path.dirname(fileURLToPath(import.meta.url));
   const worker = await readFile(path.join(here, "worker.js"), "utf8");
-  assert.match(worker, /version: "0.10.598-story-companion-schedule"/);
+  assert.match(worker, /version: "0.10.599-unified-platform-outputs"/);
   assert.match(worker, /studio_autonomous_scheduled_target_v1: true/);
   assert.match(worker, /studio_autonomous_music_variety_v1: true/);
   assert.match(worker, /AUTONOMOUS_SCHEDULED_TARGET/);
