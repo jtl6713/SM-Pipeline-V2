@@ -331,3 +331,4 @@ UI 0.6.607 hashtag mismatch warning only; approval no longer blocked.
 2026-10-13: Re-run Studio UI 0.6.680 Pages after aligning inherited Rendering-layout footer test with current 0.6.680 version; Factory new layout tests already passed.
 2026-10-13: Deploy Studio UI 0.6.681-factory-open-targets. Factory In Flight Open now resolves stale Production Requests and active Pipeline outputs by record ID, with an exact-record fallback when the Ideas list omits the item.
 2026-10-14: Deploy Studio UI 0.6.682-factory-mobile-cards. Fix iPhone Factory Needs eyes cards, remove desktop-width overflow, make action buttons and output rows readable.
+2026-10-14: Redeploy Studio 0.6.682 after correcting visible UI build label from 0.6.681 to 0.6.682; mobile Factory CSS cache-bust already included.
