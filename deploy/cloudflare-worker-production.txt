@@ -263,3 +263,5 @@ Deploy Worker 0.10.489-engagement-ledger. Shrink the engagement ledger so Chicag
 2026-10-14: Worker 0.10.599-unified-platform-outputs (rebased on 0.10.598-story-companion-schedule). Replace additive output-plan reconciliation with exact selected output destinations in Production.
 2026-10-14: Worker 0.10.600-factory-inflight-auto-high. Pipeline Preparing Assets, Queued, and Waiting in render queue stay in Factory Auto-high when the parent produce job is blocked. Proven: LA Content 650-654. Briony is fine; the 401 is the creator-plan character quota.
 2026-10-14: Worker 0.10.601-voiceover-once. Speak each voiceover once. A later pass reuses the Drive file instead of buying the same sentence from ElevenLabs again. Proven: Getty Sunset Frame Content 608.
+
+2026-10-14: Factory Needs Eyes dedicated review output query. Include all review-ready outputs independently of bounded scheduled/publishing Operations backlog; regression covers Content 617 outputs 3202-3207.
