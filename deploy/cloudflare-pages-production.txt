@@ -328,3 +328,4 @@ UI 0.6.607 hashtag mismatch warning only; approval no longer blocked.
 2026-10-13: Redeploy 0.6.679 with active Production record identity regression tests and synchronized build pins.
 2026-10-13: Redeploy UI 0.6.679 after correcting final escaped layout-footer regex; all Production identity tests enabled.
 2026-10-13: UI 0.6.680 Factory Needs eyes action-row redesign, 30px legible buttons, clear content-level action bar, expanded review scrolling, responsive metadata; Pages CSS cache-bust + regression.
+2026-10-13: Re-run Studio UI 0.6.680 Pages after aligning inherited Rendering-layout footer test with current 0.6.680 version; Factory new layout tests already passed.
