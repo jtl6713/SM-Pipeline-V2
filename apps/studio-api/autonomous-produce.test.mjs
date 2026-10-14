@@ -23,6 +23,7 @@ import {
   autonomousRunIsBusy,
   autonomousSlot,
   autonomousAtTopOfHour,
+  autonomousClockForCron,
   autonomousRefillSlot,
   autonomousSlotAlreadyClaimed,
   autonomousScheduledBand,
@@ -190,6 +191,12 @@ test("hourly refill creates 10 ideas under 200 and skips over 209", () => {
   assert.equal(autonomousAtTopOfHour({ date: "2026-10-14", hour: 9, minute: 5 }), false);
   assert.equal(autonomousAtTopOfHour({ date: "2026-10-14", hour: 9, minute: 30 }), false);
   assert.equal(autonomousAtTopOfHour({ date: "2026-10-14", hour: 9 }), false);
+  const cronClock = autonomousClockForCron({ date: "2026-10-14", hour: 17, minute: 12 }, 0);
+  assert.equal(cronClock.minute, 0);
+  assert.equal(cronClock.hour, 17);
+  assert.equal(autonomousAtTopOfHour(cronClock), true);
+  assert.equal(autonomousClockForCron({ date: "2026-10-14", hour: 17, minute: 4 }).minute, 4);
+  assert.equal(autonomousClockForCron({ date: "2026-10-14", hour: 17, minute: 4 }, "nope").minute, 4);
   assert.equal(autonomousRefillSlot({ date: "2026-10-14", hour: 9 }), "2026-10-14:h09");
   assert.equal(autonomousRefillSlot({ date: "2026-10-14", hour: 16 }), "2026-10-14:h16");
   assert.equal(autonomousRefillSlot({ date: "2026-10-14", hour: 0 }), "2026-10-14:h00");
@@ -807,13 +814,15 @@ test("Worker stamps photo-ready ideas and drains the 30m SLA on light ticks", as
   const path = await import("node:path");
   const here = path.dirname(fileURLToPath(import.meta.url));
   const worker = await readFile(path.join(here, "worker.js"), "utf8");
-  assert.match(worker, /version: "0.10.602-ten-ideas-per-hour"/);
+  assert.match(worker, /version: "0.10.603-top-of-hour-tick"/);
   assert.match(worker, /studio_autonomous_ten_per_hour_v1: true/);
   assert.match(worker, /AUTONOMOUS_IDEAS_PER_HOUR/);
   assert.match(worker, /scheduled_over_209/);
   assert.match(worker, /ideas_by_profile/);
   assert.match(worker, /fillAutonomousScheduledHour/);
   assert.match(worker, /autonomousAtTopOfHour/);
+  assert.match(worker, /autonomousClockForCron/);
+  assert.match(worker, /cronMinute: cadence\.minute/);
   assert.match(worker, /not_top_of_hour/);
   assert.match(worker, /if \(!cadence\.heavy\)/);
   assert.doesNotMatch(worker, /rows\.length >= 180/);

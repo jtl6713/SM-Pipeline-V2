@@ -110,6 +110,18 @@ export function autonomousAtTopOfHour(chicago) {
   return Number.isFinite(minute) && minute === 0;
 }
 
+/**
+ * Use the cron tick's minute, not the wall clock after publish heals.
+ * A :00 invocation that reaches harvest at :12 still counts as the top of the hour.
+ */
+export function autonomousClockForCron(chicago, cronMinute) {
+  if (!chicago || typeof chicago !== "object") return chicago;
+  if (cronMinute === undefined || cronMinute === null || cronMinute === "") return chicago;
+  const minute = Number(cronMinute);
+  if (!Number.isFinite(minute)) return chicago;
+  return { ...chicago, minute };
+}
+
 export function autonomousInWindow(chicago, cron = "") {
   const hour = Number(chicago?.hour);
   if (hour === 8 || hour === 16) return true;

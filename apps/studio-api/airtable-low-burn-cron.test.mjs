@@ -29,7 +29,7 @@ function scheduledBody() {
 }
 
 test("Worker health advertises airtable burn-kill cron build", () => {
-  assert.match(worker, /version: "0.10.602-ten-ideas-per-hour"/);
+  assert.match(worker, /version: "0.10.603-top-of-hour-tick"/);
   assert.match(worker, /studio_airtable_low_burn_cron_v1: true/);
   assert.match(worker, /studio_airtable_burn_kill_v1: true/);
   assert.match(worker, /studioCronAirtableCadence/);
@@ -93,8 +93,10 @@ test("light ticks only run publish/produce rescue; heavy owns platform heals", (
   assert.match(beforeHeavy, /studioHealPhantomRerender/);
   assert.match(beforeHeavy, /studioHealAutonomousRevisionLock/);
   const revisionHeal = beforeHeavy.indexOf("studioHealAutonomousRevisionLock");
-  const autonomousResume = beforeHeavy.indexOf("runStudioAutonomousProduce");
-  assert.ok(revisionHeal >= 0 && autonomousResume > revisionHeal);
+  const lightResume = beforeHeavy.indexOf("resume_only: true");
+  assert.ok(revisionHeal >= 0 && lightResume > revisionHeal);
+  assert.match(beforeHeavy, /cronMinute: cadence\.minute/);
+  assert.match(scheduled, /event\?\.scheduledTime/);
   assert.doesNotMatch(beforeHeavy, /studioReconcileTiktokDrafts/);
   assert.doesNotMatch(beforeHeavy, /studioReconcilePublishingInstagramReels/);
   assert.doesNotMatch(beforeHeavy, /studioReconcileYoutubePublishes/);
