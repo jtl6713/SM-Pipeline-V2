@@ -42,7 +42,10 @@ def _aggregate_candidates(rows: list[dict[str, Any]], *, kind: str) -> str:
                     f"duration_seconds: {fields.get('Duration_Seconds', '')}",
                     f"topic: {fields.get('Topic', '')}",
                     f"location: {fields.get('Location', '')}",
-                    f"asset_description: {fields.get('Asset Description', '')}",
+                    f"mood: {fields.get('Mood', '')}",
+                    f"ai_tags: {fields.get('AI_Tags', '')}",
+                    f"asset_description: {fields.get('Asset_Description', '') or fields.get('Asset Description', '')}",
+                    f"rotation_priority: {index if kind == 'music' else ''}",
                 ]
             )
         )
