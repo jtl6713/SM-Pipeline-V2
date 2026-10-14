@@ -24,9 +24,14 @@ from p2.constants import (
     MAKE_SCENARIO_NAME,
     PIPELINE_SETTING_NORMALIZER_URL,
     THUMBNAIL_DRIVE_FOLDER_ID,
+    VOICE_ID_DEFAULT,
     VOICEOVER_DRIVE_FOLDER_ID,
 )
-from p2.elevenlabs_client import resolve_content_voice_id, synthesize_voiceover_by_id
+from p2.elevenlabs_client import (
+    resolve_content_voice_id,
+    synthesize_voiceover_by_id,
+    unauthorized_voice_ids,
+)
 from p2.formulas import (
     p2_exact_content_formula,
     recheck_silent_thumbnail,
@@ -406,6 +411,15 @@ def process_request(
             normalize=_normalize,
             probe=probe_audio_duration_bytes,
             lengthen=lengthen_voiceover_script,
+        )
+    if voice_id in unauthorized_voice_ids() and voice_id != VOICE_ID_DEFAULT:
+        # The profile voice 401'd (LA Briony hv8WzBOrsvuSUeIQGOCM). Keep Kate on
+        # the Content Item so the next resume does not start on the rejected id.
+        client.update_record(
+            CONTENT_ITEMS_TABLE,
+            item["id"],
+            {"Voice_ID": VOICE_ID_DEFAULT, "Voice_Name": "Kate"},
+            typecast=True,
         )
     if measured_seconds + DURATION_EPSILON_SECONDS < MIN_VOICEOVER_SECONDS:
         raise VoiceoverTooShort(

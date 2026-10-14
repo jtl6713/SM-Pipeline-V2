@@ -144,16 +144,21 @@ function isManualLane(row) {
   const state = String(row?.studio_state || "").toLowerCase();
   const status = String(row?.output_status || row?.request_status || "").toLowerCase();
   const step = String(row?.produce_step || "").toLowerCase();
-  const explicitlyBroken = state.includes("blocked")
+  const outputBroken = state.includes("blocked")
     || state.includes("failed")
     || state.includes("escalat")
     || status === "blocked"
-    || status === "failed"
-    || step === "blocked"
-    || step === "escalated";
+    || status === "failed";
+  const parentBlocked = step === "blocked" || step === "escalated";
+  const explicitlyBroken = outputBroken || parentBlocked;
+  const codeBug = String(row?.stuck_class || "").toLowerCase() === "code_bug";
   // produce_stale after 3m of quiet job JSON used to dump the whole render queue
   // into Repair while only one Remotion job could run — operators saw In Flight=1.
   if (isTransientFactoryStuck(row) && !explicitlyBroken) return false;
+  // A parent voiceover/produce block (ElevenLabs 401 on LA 650–654) paints Pipeline
+  // as Preparing Assets / Queued / Waiting in render queue. That work stays In Flight.
+  // The output's own Failed / Blocked badge still belongs in Repair. Code bugs stay there too.
+  if (!outputBroken && !codeBug && parentBlocked && isInFlightFactoryState(row)) return false;
   if (row?.lane === "stuck") return true;
   if (row?.stuck_kind) return true;
   if (explicitlyBroken) return true;
@@ -183,6 +188,23 @@ function isRenderQueueActive(row) {
     || /ready for render|waiting in render queue|^rendering$/.test(render);
 }
 
+/**
+ * Pipeline labels that mean the package is still being produced or rendered.
+ * Parent job step=blocked must not hide these from Auto-high.
+ */
+export function isInFlightFactoryState(row) {
+  const state = String(row?.studio_state || "").trim().toLowerCase();
+  const render = String(row?.render_status || "").trim().toLowerCase();
+  if (state === "queued" || state === "preparing assets" || state === "trying again") return true;
+  if (
+    /waiting in render queue|ready for render/.test(state)
+    || state.includes("rendering")
+    || state.includes("producing")
+    || state.includes("in production")
+  ) return true;
+  return /waiting in render queue|ready for render|^rendering$|^queued$/.test(render);
+}
+
 function isAutoHigh(row) {
   if (isManualLane(row) || isReadyForReview(row) || isNeedsAssetsCandidate(row)) return false;
   if (row?.lane === "publish" || row?.lane === "done") return false;
@@ -191,9 +213,12 @@ function isAutoHigh(row) {
   const produceStep = String(row?.produce_step || "").trim().toLowerCase();
   const stuckKind = String(row?.stuck_kind || "").toLowerCase();
   const renderActive = isRenderQueueActive(row);
-  // Parent produce may be done while sibling outputs still wait on serial Remotion.
-  if (produceStep === "done" && !renderActive) return false;
+  const inFlight = isInFlightFactoryState(row);
+  // Parent produce may be done while sibling outputs still wait on serial Remotion
+  // or still show Pipeline's Preparing Assets / Queued labels.
+  if (produceStep === "done" && !renderActive && !inFlight) return false;
   const active = renderActive
+    || inFlight
     || state.includes("producing")
     || state.includes("in production")
     || state === "produce_stale"
