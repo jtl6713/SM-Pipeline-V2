@@ -22,14 +22,16 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      - name: Test A2B Drive-ID duplicate prevention (no external writes)
+      - name: Test runner safety regressions (no external writes)
         shell: bash
         run: |
           set -euo pipefail
           python -m pip install --quiet -r services/pipeline-runner/requirements.txt pytest
           PYTHONPATH=services/pipeline-runner python -m pytest -q \
             services/pipeline-runner/tests/test_a2b_existing_lookup.py \
-            services/pipeline-runner/tests/test_airtable_atomic_upsert.py
+            services/pipeline-runner/tests/test_airtable_atomic_upsert.py \
+            services/pipeline-runner/tests/test_r2_studio_exact_source.py \
+            services/pipeline-runner/tests/test_profile_music_policy.py
 
       - name: Deploy Pipeline Runner through allowlisted Ops action
         shell: bash
