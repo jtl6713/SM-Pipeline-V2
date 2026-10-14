@@ -142,20 +142,24 @@ import {
   AUTONOMOUS_IDEA_CREATED_FIELD,
   AUTONOMOUS_RELATED_STILL_MIN,
   AUTONOMOUS_NEWS_FEEDS,
+  AUTONOMOUS_SCHEDULED_TARGET,
   AUTONOMOUS_STANDARD_PLATFORMS,
   AUTONOMOUS_YOUTUBE_QUERIES,
   autonomousYoutubeQueriesForTheme,
   filterAutonomousOccupiedForProfile,
   autonomousDefaultVoiceoverSeconds,
   autonomousIdeaConflictsOccupied,
-  autonomousInWindow,
   autonomousIncomingMediaIds,
   autonomousMasterMediaIds,
   autonomousCanonicalContentType,
   autonomousPlanExtras,
   autonomousPlanOverrides,
   autonomousPreferredSubject,
+  autonomousProfilesNeedingRefill,
+  autonomousRefillScoresFromOverview,
+  autonomousRefillSlot,
   pickAutonomousEnabledProfile,
+  pickAutonomousRefillProfile,
   autonomousProfileHarvestOrder,
   autonomousRequestNeedsContinue,
   firstAutonomousResumeDraft,
@@ -689,7 +693,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.594-revision-lock-heal",
+          version: "0.10.595-scheduled-target-refill",
           studio_factory_desk_v1: true,
           studio_factory_desk_actions_v1: true,
           studio_factory_desk_write_v1: true,
@@ -721,6 +725,7 @@ export default {
           studio_youtube_complete_v1: true,
           studio_auto_compress_v1: true,
           studio_autonomous_produce_v1: true,
+          studio_autonomous_scheduled_target_v1: true,
           studio_az_finished_video_v1: true,
           studio_az_auto_queue_v1: true,
           studio_az_large_video_staging_v1: true,
@@ -43073,6 +43078,43 @@ async function studioLoadAutonomousLastRun(env) {
   return parseAutonomousLastRun(f(row, "Setting_Value"));
 }
 
+/**
+ * All-Profiles Scheduled totals (parenthesis) + awaiting-approval for refill.
+ * Prefer the overview snapshot so hourly autonomous does not add a full scan.
+ */
+async function studioLoadAutonomousRefillScores(env, profiles, { refresh = false } = {}) {
+  const enabled = (Array.isArray(profiles) ? profiles : []).filter((row) => row?.id);
+  if (!enabled.length) return { scores: {}, overview: [], source: "empty" };
+  const authKey = studioProfilesOverviewAuthKey(enabled);
+  let rows = [];
+  let source = "snapshot";
+  const snapshot = await readStudioProfilesOverviewSnapshot(env).catch(() => null);
+  if (snapshot?.rows?.length) {
+    rows = snapshot.rows;
+  }
+  const age = snapshot?.at ? Date.now() - snapshot.at : Infinity;
+  const stale = !rows.length || age > Math.max(STUDIO_PROFILES_OVERVIEW_CACHE_MS, 15 * 60 * 1000);
+  if (refresh || stale) {
+    try {
+      rows = await buildStudioProfilesOverviewRows(env, enabled);
+      await writeStudioProfilesOverviewSnapshot(env, rows, authKey).catch(() => null);
+      source = "live";
+    } catch (error) {
+      console.warn("autonomous refill overview load failed", error);
+      if (!rows.length) return { scores: {}, overview: [], source: "error", error: String(error?.message || error).slice(0, 180) };
+      source = "stale_snapshot";
+    }
+  }
+  const byEnabled = new Set(enabled.map((row) => String(row.id)));
+  const overview = (rows || []).filter((row) => byEnabled.has(String(row?.id || "")));
+  return {
+    scores: autonomousRefillScoresFromOverview(overview, AUTONOMOUS_SCHEDULED_TARGET),
+    overview,
+    source,
+    target: AUTONOMOUS_SCHEDULED_TARGET,
+  };
+}
+
 async function harvestAutonomousNewsHeadlines() {
   const titles = [];
   for (const feed of AUTONOMOUS_NEWS_FEEDS) {
@@ -43794,7 +43836,8 @@ async function parkAutonomousResumeDraft(env, requestRecord, reason) {
 
 async function executeStudioAutonomousProduce(env, ctx, options = {}) {
   const chicago = chicagoNowParts();
-  const slot = autonomousSlot(chicago);
+  // Hourly refill slot (date:hHH). Legacy am/pm slots still match claimed hours at 8/16.
+  const slot = autonomousRefillSlot(chicago) || autonomousSlot(chicago);
   let last = await studioLoadAutonomousLastRun(env);
   let authorization = options.authorization;
   if (!authorization?.user?.record_id) {
@@ -44018,16 +44061,83 @@ async function executeStudioAutonomousProduce(env, ctx, options = {}) {
     return { skipped: "resume_only_idle", chicago_date: chicago.date, last };
   }
 
-  if (options.scheduled) {
-    if (!autonomousInWindow(chicago, options.cron)) {
-      return { skipped: "outside_chicago_windows", chicago_date: chicago.date, chicago_hour: chicago.hour };
-    }
+  const profiles = (await listRecords(env, STUDIO_IDEA_PROFILE_TABLE_ID, {
+    limit: 50,
+    filterFormula: "AND({Active}=1,{Autonomous_Produce_Enabled}=1)",
+  })).map(mapOperationsProfile);
+  if (!profiles.length) {
+    const result = { skipped: "no_enabled_profiles", chicago_date: chicago.date, slot, status: "skipped", skip_reason: "no_enabled_profiles" };
+    if (options.scheduled) await studioSaveAutonomousLastRun(env, result);
+    return result;
   }
+
+  // Scheduled cron: harvest only when a city's All-Profiles Scheduled total
+  // (parenthesis) is under 200 and Ready-for-Review cannot already cover the gap.
+  let refillScores = null;
+  let refillMeta = null;
+  if (options.scheduled && !options.force) {
+    refillMeta = await studioLoadAutonomousRefillScores(env, profiles);
+    const loadedScores = refillMeta?.scores || {};
+    const scoreCount = Object.keys(loadedScores).length;
+    if (!scoreCount || refillMeta?.source === "error" || refillMeta?.source === "empty") {
+      // Fail open — do not freeze harvest when overview counts are unavailable.
+      console.warn("autonomous refill scores unavailable; harvesting without target gate", refillMeta?.source || "missing");
+      refillScores = null;
+    } else {
+      refillScores = loadedScores;
+      const needing = autonomousProfilesNeedingRefill(profiles, refillScores);
+      if (!needing.length) {
+        const result = {
+          skipped: "scheduled_target_met",
+          chicago_date: chicago.date,
+          chicago_hour: chicago.hour,
+          slot,
+          status: "skipped",
+          skip_reason: "scheduled_target_met",
+          scheduled_target: AUTONOMOUS_SCHEDULED_TARGET,
+          refill: Object.values(refillScores || {}),
+          refill_source: refillMeta.source,
+        };
+        await studioSaveAutonomousLastRun(env, result);
+        return result;
+      }
+    }
+  } else if (options.scheduled || options.force) {
+    refillMeta = await studioLoadAutonomousRefillScores(env, profiles).catch(() => null);
+    refillScores = Object.keys(refillMeta?.scores || {}).length ? refillMeta.scores : null;
+  }
+
   if (autonomousSlotAlreadyClaimed(last, slot)) {
     return { skipped: "already_ran_slot", chicago_date: chicago.date, slot, last };
   }
 
   const preferredSubject = autonomousPreferredSubject(options.preferred_subject || last.preferred_subject);
+  const refillPick = pickAutonomousRefillProfile(profiles, refillScores);
+  const selected = pickAutonomousEnabledProfile(
+    profiles,
+    options.content_profile_id || refillPick?.id,
+  );
+  if (!selected) {
+    const result = { skipped: "no_enabled_profiles", chicago_date: chicago.date, slot, status: "skipped", skip_reason: "no_enabled_profiles" };
+    if (options.scheduled) await studioSaveAutonomousLastRun(env, result);
+    return result;
+  }
+
+  const harvestProfiles = options.scheduled && !options.force && refillScores
+    ? autonomousProfilesNeedingRefill(profiles, refillScores)
+    : profiles;
+  if (options.scheduled && !options.force && refillScores && !harvestProfiles.length) {
+    const result = {
+      skipped: "scheduled_target_met",
+      chicago_date: chicago.date,
+      slot,
+      status: "skipped",
+      skip_reason: "scheduled_target_met",
+      scheduled_target: AUTONOMOUS_SCHEDULED_TARGET,
+    };
+    await studioSaveAutonomousLastRun(env, result);
+    return result;
+  }
 
   if (!options.dry_run) {
     await studioSaveAutonomousLastRun(env, {
@@ -44036,18 +44146,10 @@ async function executeStudioAutonomousProduce(env, ctx, options = {}) {
       chicago_date: chicago.date,
       slot,
       preferred_subject: preferredSubject || null,
+      scheduled_target: AUTONOMOUS_SCHEDULED_TARGET,
+      refill_profile_id: selected.id,
+      refill: refillScores ? Object.values(refillScores) : null,
     });
-  }
-
-  const profiles = (await listRecords(env, STUDIO_IDEA_PROFILE_TABLE_ID, {
-    limit: 50,
-    filterFormula: "AND({Active}=1,{Autonomous_Produce_Enabled}=1)",
-  })).map(mapOperationsProfile);
-  const selected = pickAutonomousEnabledProfile(profiles, options.content_profile_id);
-  if (!selected) {
-    const result = { skipped: "no_enabled_profiles", chicago_date: chicago.date, slot, status: "skipped", skip_reason: "no_enabled_profiles" };
-    if (options.scheduled) await studioSaveAutonomousLastRun(env, result);
-    return result;
   }
 
   const profileTheme = studioThemeForProfile(await airtableFetch(env, STUDIO_IDEA_PROFILE_TABLE_ID, selected.id).catch(() => selected));
@@ -44064,7 +44166,7 @@ async function executeStudioAutonomousProduce(env, ctx, options = {}) {
   let unusedAssets = [];
   let overview = { unused_count: 0, cluster_count: 0, clusters: [] };
   let cluster = null;
-  for (const candidate of autonomousProfileHarvestOrder(profiles, selected.id)) {
+  for (const candidate of autonomousProfileHarvestOrder(harvestProfiles, selected.id, refillScores)) {
     const nextCatalog = await harvestAutonomousLibraryCatalog(env, preferredSubject, candidate.id);
     const nextUnused = autonomousUnusedLibraryAssets(nextCatalog, occupiedIdeas);
     const nextOverview = summarizeUnusedLibraryOverview(nextUnused);

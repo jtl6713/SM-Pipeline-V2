@@ -1,8 +1,11 @@
-/** Pure helpers for the twice-daily Chicago autonomous produce path. */
+/** Pure helpers for the autonomous produce path (hourly scheduled-target refill). */
 
 import { firstLinkedRecordId } from "./asset-library.mjs";
 import { IDEA_LIBRARY_NAMED_PLACES } from "./idea-photo-wait.mjs";
 
+/** All-Profiles parenthesis total per city: keep Scheduled at or above this. */
+export const AUTONOMOUS_SCHEDULED_TARGET = 200;
+/** Legacy twice-daily windows; harvest now keys off the scheduled target instead. */
 export const AUTONOMOUS_WINDOWS = Object.freeze([8, 16]);
 export const AUTONOMOUS_NEWS_FEEDS = Object.freeze([
   "https://blockclubchicago.org/feed/",
@@ -86,10 +89,99 @@ export function autonomousSlot(chicago) {
   return null;
 }
 
+/** One harvest claim per Chicago clock hour for scheduled-target refill. */
+export function autonomousRefillSlot(chicago) {
+  const date = String(chicago?.date || "").trim();
+  const hour = Number(chicago?.hour);
+  if (!date || !Number.isFinite(hour)) return null;
+  return `${date}:h${String(Math.trunc(hour)).padStart(2, "0")}`;
+}
+
 export function autonomousInWindow(chicago, cron = "") {
   const hour = Number(chicago?.hour);
   if (hour === 8 || hour === 16) return true;
   return cron === "0 13 * * *" || cron === "0 21 * * *";
+}
+
+/** Sum All-Profiles Scheduled cells (Facebook+Instagram+TikTok+YouTube). */
+export function autonomousScheduledTotal(scheduledByPlatform) {
+  if (!scheduledByPlatform || typeof scheduledByPlatform !== "object") return 0;
+  let total = 0;
+  for (const key of ["Facebook", "Instagram", "TikTok", "YouTube"]) {
+    const n = Number(scheduledByPlatform[key]);
+    if (Number.isFinite(n) && n > 0) total += n;
+  }
+  return total;
+}
+
+/**
+ * Produce when Scheduled is under the target and Ready-for-Review backlog
+ * cannot already cover the gap (Approve still fills Scheduled).
+ */
+export function autonomousProfileNeedsScheduledRefill(
+  scheduledTotal,
+  awaitingApproval = 0,
+  target = AUTONOMOUS_SCHEDULED_TARGET,
+) {
+  const scheduled = Math.max(0, Number(scheduledTotal) || 0);
+  const awaiting = Math.max(0, Number(awaitingApproval) || 0);
+  const floor = Math.max(1, Number(target) || AUTONOMOUS_SCHEDULED_TARGET);
+  return scheduled < floor && (scheduled + awaiting) < floor;
+}
+
+export function autonomousScheduledDeficit(
+  scheduledTotal,
+  awaitingApproval = 0,
+  target = AUTONOMOUS_SCHEDULED_TARGET,
+) {
+  const scheduled = Math.max(0, Number(scheduledTotal) || 0);
+  const awaiting = Math.max(0, Number(awaitingApproval) || 0);
+  const floor = Math.max(1, Number(target) || AUTONOMOUS_SCHEDULED_TARGET);
+  return Math.max(0, floor - scheduled - awaiting);
+}
+
+/**
+ * Build per-profile refill scores from All-Profiles overview rows
+ * (`scheduled` map + `approval` awaiting-approval count).
+ */
+export function autonomousRefillScoresFromOverview(overviewRows, target = AUTONOMOUS_SCHEDULED_TARGET) {
+  const byId = Object.create(null);
+  for (const row of Array.isArray(overviewRows) ? overviewRows : []) {
+    const id = String(row?.id || "").trim();
+    if (!id) continue;
+    const scheduledTotal = autonomousScheduledTotal(row?.scheduled);
+    const awaiting = Math.max(0, Number(row?.approval ?? row?.metrics?.awaiting_approval) || 0);
+    const deficit = autonomousScheduledDeficit(scheduledTotal, awaiting, target);
+    const needed = autonomousProfileNeedsScheduledRefill(scheduledTotal, awaiting, target);
+    byId[id] = {
+      id,
+      name: String(row?.name || row?.city_label || "").trim(),
+      scheduled_total: scheduledTotal,
+      awaiting_approval: awaiting,
+      deficit,
+      needed,
+      target: Math.max(1, Number(target) || AUTONOMOUS_SCHEDULED_TARGET),
+    };
+  }
+  return byId;
+}
+
+export function autonomousProfilesNeedingRefill(profiles, refillByProfileId) {
+  const rows = Array.isArray(profiles) ? profiles : [];
+  if (!refillByProfileId || typeof refillByProfileId !== "object") return rows;
+  return rows.filter((row) => refillByProfileId[String(row?.id || "")]?.needed);
+}
+
+/** Prefer the city with the largest Scheduled deficit. */
+export function pickAutonomousRefillProfile(profiles, refillByProfileId) {
+  const needing = autonomousProfilesNeedingRefill(profiles, refillByProfileId);
+  if (!needing.length) return null;
+  return [...needing].sort((a, b) => {
+    const da = Number(refillByProfileId[String(a?.id || "")]?.deficit) || 0;
+    const db = Number(refillByProfileId[String(b?.id || "")]?.deficit) || 0;
+    if (db !== da) return db - da;
+    return String(a?.id || "").localeCompare(String(b?.id || ""));
+  })[0] || null;
 }
 
 export function autonomousRunIsBusy(last, nowMs = Date.now(), maxAgeMs = 15 * 60 * 1000) {
@@ -909,7 +1001,7 @@ export function pickAutonomousEnabledProfile(profiles, requestedId) {
   return rows[0] || null;
 }
 
-export function autonomousProfileHarvestOrder(profiles, requestedId) {
+export function autonomousProfileHarvestOrder(profiles, requestedId, refillByProfileId = null) {
   const selected = pickAutonomousEnabledProfile(profiles, requestedId);
   const ordered = [];
   const seen = new Set();
@@ -919,7 +1011,13 @@ export function autonomousProfileHarvestOrder(profiles, requestedId) {
     seen.add(id);
     ordered.push(row);
   }
-  return ordered;
+  if (!refillByProfileId || typeof refillByProfileId !== "object") return ordered;
+  return [...ordered].sort((a, b) => {
+    const da = Number(refillByProfileId[String(a?.id || "")]?.deficit) || 0;
+    const db = Number(refillByProfileId[String(b?.id || "")]?.deficit) || 0;
+    if (db !== da) return db - da;
+    return 0;
+  });
 }
 
 export function buildAutonomousPickerPrompt({
