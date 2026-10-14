@@ -10,6 +10,7 @@ from r2.candidates import fetch_music_candidates, fetch_video_candidates
 from r2.constants import MAKE_SCENARIO_ID, MAKE_SCENARIO_NAME
 from r2.formulas import r2_exact_output_formula, r2_production_formula
 from r2.openai_selection import select_canonical_package
+from r2.music_policy import rotate_profile_music_candidates, scope_music_candidates_to_profile
 from r2.p4_webhook import trigger_p4
 from r2.studio_exact_source import build_exact_source_selection, requires_openai_for_output
 from r2.updates import apply_selection, fail_fast_zero_candidates, mark_selecting
@@ -123,9 +124,24 @@ def process_one(
         client.get_record(CONTENT_ITEMS_TABLE, content_item_id) if content_item_id else None
     )
     required_music_seconds = _required_music_seconds(output, content_item)
+    preferred_music_id = _field(output, "Preferred_Music_Media_Asset_ID")
+    music_candidates, music_policy = scope_music_candidates_to_profile(
+        client,
+        content_item=content_item,
+        music_candidates=music_candidates,
+        preferred_media_asset_id=preferred_music_id,
+    )
     music_candidates, music_duration_fallback = _duration_eligible_music(
         music_candidates,
         required_music_seconds,
+    )
+    music_candidates, music_policy = rotate_profile_music_candidates(
+        client,
+        output=output,
+        content_item=content_item,
+        music_candidates=music_candidates,
+        profile_context=music_policy,
+        preferred_media_asset_id=preferred_music_id,
     )
 
     preview = {
@@ -135,6 +151,12 @@ def process_one(
         "music_candidate_count": len(music_candidates),
         "required_music_seconds": round(required_music_seconds, 3) if required_music_seconds else 0,
         "music_duration_fallback": music_duration_fallback,
+        "profile_music_pool_configured": bool(music_policy.get("profile_pool_configured")),
+        "profile_music_pool_count": int(music_policy.get("profile_pool_count") or 0),
+        "profile_music_pool_eligible_count": int(music_policy.get("profile_pool_eligible_count") or 0),
+        "music_rotation_mode": str(music_policy.get("rotation_mode") or ""),
+        "music_rotation_avoided_ids": list(music_policy.get("rotation_avoided_ids") or []),
+        "music_rotation_sibling_music_id": str(music_policy.get("rotation_sibling_music_id") or ""),
         "make_scenario_id": MAKE_SCENARIO_ID,
         "make_scenario_name": MAKE_SCENARIO_NAME,
     }
