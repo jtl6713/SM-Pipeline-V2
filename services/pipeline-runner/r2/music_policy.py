@@ -100,12 +100,14 @@ def profile_music_pool_ids(profile: dict[str, Any] | None) -> list[str]:
 
 def music_identity(row: dict[str, Any] | None) -> str:
     """Stable physical-audio identity so duplicate Airtable rows do not fake rotation."""
-    file_id = str(_field(row, "Google Drive File ID") or "").strip()
-    if file_id:
-        return f"drive:{file_id}"
+    # Prefer URL because Platform Outputs persist Selected_Music_URL, letting current
+    # candidates match historical use even when the output does not retain Drive file ID.
     url = str(_field(row, "Google Drive URL") or "").strip()
     if url:
         return f"url:{url}"
+    file_id = str(_field(row, "Google Drive File ID") or "").strip()
+    if file_id:
+        return f"drive:{file_id}"
     record_id = str((row or {}).get("id") or "").strip()
     return f"record:{record_id}" if record_id else ""
 
