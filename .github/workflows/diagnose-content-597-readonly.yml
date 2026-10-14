@@ -1,0 +1,84 @@
+name: Diagnose Content 597 Read Only
+
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/diagnose-content-597-readonly.yml']
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      AIRTABLE_PAT: ${{ secrets.AIRTABLE_PAT }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+    steps:
+      - uses: actions/checkout@v6
+      - name: Read exact Content 597 and linked production and output records
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          if [[ -z "${AIRTABLE_PAT:-}" ]]; then
+            openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:CLOUDFLARE_API_TOKEN -in deploy/credential-envelope/private.pem.enc -out /tmp/content597-key.pem
+            base64 -d deploy/credential-envelope/airtable_pat.ciphertext.b64 >/tmp/content597-pat.enc
+            openssl pkeyutl -decrypt -inkey /tmp/content597-key.pem -in /tmp/content597-pat.enc -pkeyopt rsa_padding_mode:oaep -pkeyopt rsa_oaep_md:sha256 -pkeyopt rsa_mgf1_md:sha256 -out /tmp/content597-pat.txt
+            export AIRTABLE_PAT="$(cat /tmp/content597-pat.txt)"
+          fi
+          python - <<'PY'
+          import os, json, urllib.request, urllib.parse, urllib.error, re
+          BASE='appe33zkZn35yirTL'
+          PAT=os.environ['AIRTABLE_PAT'].strip()
+          headers={'Authorization':'Bearer '+PAT,'Accept':'application/json'}
+          def query(table,record='',params=None):
+            path='https://api.airtable.com/v0/'+BASE+'/'+urllib.parse.quote(table,safe='')
+            if record: path+='/'+urllib.parse.quote(record,safe='')
+            if params: path+='?'+urllib.parse.urlencode(params)
+            req=urllib.request.Request(path,headers=headers)
+            try:
+              with urllib.request.urlopen(req,timeout=30) as r:return json.load(r)
+            except urllib.error.HTTPError as e:
+              print('API_ERROR',json.dumps({'table':table,'status':e.code,'error':e.read().decode()[:250]}))
+              return None
+          def mini(row,tag):
+            if not row:return
+            f=row.get('fields') or {}
+            include=re.compile(r'(^|_)(status|error|step|updated|created|modified|attempt|queue|job|review|publish|render|asset|source|clip|content|production|request|output|type|profile|title|voiceover|music|composition|duration|state|approval|notes|timestamp|retry|blocked|priority|paused|stage)($|_)|^Platform$|^Do_Not_Publish$|^Final_File_URL$',re.I)
+            wanted={}
+            for k,v in f.items():
+              if not include.search(k):continue
+              if re.search(r'(json|notes|script|manifest|list_json|directives)',k,re.I):
+                if k in ('Studio_Production_Job_JSON','Render_Error_Message','Production_Notes','Output_Notes','Remotion_Error_Message','Final_File_Error_Message','Review_Notes'):v=str(v)[:1250]
+                else:v='present:'+str(len(str(v)))
+              elif re.search(r'(url|file_id|token|secret)',k,re.I):v=bool(v)
+              elif isinstance(v,list) and len(v)>35:v=v[:35]
+              wanted[k]=v
+            print(tag,json.dumps({'id':row.get('id'),'fields':wanted},default=str,ensure_ascii=True))
+          c=query('Content Items',params={'filterByFormula':'{Content_ID}=597','pageSize':10})
+          if not c:raise SystemExit('Content table read failed')
+          rows=c.get('records',[])
+          print('CONTENT_MATCHES',len(rows))
+          for parent in rows:
+            mini(parent,'CONTENT')
+            f=parent.get('fields') or {}
+            linkedPo=f.get('Platform Outputs') or f.get('Platform_Outputs') or []
+            linkedPR=f.get('Production_Request') or f.get('Production Requests') or []
+            if isinstance(linkedPo,str):linkedPo=[]
+            if isinstance(linkedPR,str):linkedPR=[]
+            print('LINKS',json.dumps({'output_count':len(linkedPo),'production_count':len(linkedPR),'output_ids':linkedPo[:25],'production_ids':linkedPR[:10]}))
+            for pid in linkedPR[:10]:
+              mini(query('Production Requests',pid),'PRODUCTION')
+            for oid in linkedPo[:25]:
+              mini(query('tblrlPeboBthkplH0',oid),'OUTPUT')
+          print('READ_ONLY_COMPLETE')
+          PY
+      - name: Remove transient secret files
+        if: always()
+        shell: bash
+        run: |
+          for f in /tmp/content597-key.pem /tmp/content597-pat.enc /tmp/content597-pat.txt; do
+            [[ ! -e "$f" ]] || shred -u "$f" 2>/dev/null || rm -f "$f"
+          done
