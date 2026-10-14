@@ -317,7 +317,7 @@ test("Worker exposes factory desk routes and version flag", async () => {
   assert.match(worker, /Do_Not_Publish: true/);
   assert.match(worker, /revision_approve/);
   assert.match(worker, /productionRequestRevisionOpen\(requestRecord\)/);
-  assert.match(worker, /0.10.603-top-of-hour-tick/);
+  assert.match(worker, /0.10.604-hour-create-budget/);
   assert.match(worker, /studio_factory_inflight_blocked_parent_v1:\s*true/);
   assert.match(worker, /studio_factory_desk_v1:\s*true/);
   assert.match(worker, /studio_factory_desk_preview_v1:\s*true/);
@@ -327,6 +327,6 @@ test("Worker allows Factory Desk POST through Phase 2A gate", async () => {
   const worker = await readFile(path.join(here, "worker.js"), "utf8");
   assert.match(worker, /const isFactoryDeskWrite = isFactoryDeskRoute && request\.method === "POST"/);
   assert.match(worker, /isFactoryDeskWrite \|/);
-  assert.match(worker, /version: "0.10.603-top-of-hour-tick"/);
+  assert.match(worker, /version: "0.10.604-hour-create-budget"/);
   assert.match(worker, /studio_factory_desk_write_v1: true/);
 });
