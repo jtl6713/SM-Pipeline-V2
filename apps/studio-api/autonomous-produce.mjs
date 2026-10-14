@@ -103,6 +103,13 @@ export function autonomousRefillSlot(chicago) {
   return `${date}:h${String(Math.trunc(hour)).padStart(2, "0")}`;
 }
 
+/** The 10-idea harvest runs when the Chicago clock is at :00, not :05 or :30. */
+export function autonomousAtTopOfHour(chicago) {
+  if (chicago?.minute === undefined || chicago?.minute === null || chicago?.minute === "") return false;
+  const minute = Number(chicago.minute);
+  return Number.isFinite(minute) && minute === 0;
+}
+
 export function autonomousInWindow(chicago, cron = "") {
   const hour = Number(chicago?.hour);
   if (hour === 8 || hour === 16) return true;

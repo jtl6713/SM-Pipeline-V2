@@ -22,6 +22,7 @@ import {
   resolveAutonomousNarrationVoice,
   autonomousRunIsBusy,
   autonomousSlot,
+  autonomousAtTopOfHour,
   autonomousRefillSlot,
   autonomousSlotAlreadyClaimed,
   autonomousScheduledBand,
@@ -185,6 +186,10 @@ test("hourly refill creates 10 ideas under 200 and skips over 209", () => {
   assert.equal(AUTONOMOUS_SCHEDULED_TARGET, 200);
   assert.equal(AUTONOMOUS_SCHEDULED_SKIP_ABOVE, 209);
   assert.equal(AUTONOMOUS_IDEAS_PER_HOUR, 10);
+  assert.equal(autonomousAtTopOfHour({ date: "2026-10-14", hour: 9, minute: 0 }), true);
+  assert.equal(autonomousAtTopOfHour({ date: "2026-10-14", hour: 9, minute: 5 }), false);
+  assert.equal(autonomousAtTopOfHour({ date: "2026-10-14", hour: 9, minute: 30 }), false);
+  assert.equal(autonomousAtTopOfHour({ date: "2026-10-14", hour: 9 }), false);
   assert.equal(autonomousRefillSlot({ date: "2026-10-14", hour: 9 }), "2026-10-14:h09");
   assert.equal(autonomousRefillSlot({ date: "2026-10-14", hour: 16 }), "2026-10-14:h16");
   assert.equal(autonomousRefillSlot({ date: "2026-10-14", hour: 0 }), "2026-10-14:h00");
@@ -808,6 +813,9 @@ test("Worker stamps photo-ready ideas and drains the 30m SLA on light ticks", as
   assert.match(worker, /scheduled_over_209/);
   assert.match(worker, /ideas_by_profile/);
   assert.match(worker, /fillAutonomousScheduledHour/);
+  assert.match(worker, /autonomousAtTopOfHour/);
+  assert.match(worker, /not_top_of_hour/);
+  assert.match(worker, /if \(!cadence\.heavy\)/);
   assert.doesNotMatch(worker, /rows\.length >= 180/);
   assert.match(worker, /studio_autonomous_scheduled_target_v1: true/);
   assert.match(worker, /studio_autonomous_music_variety_v1: true/);

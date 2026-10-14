@@ -268,3 +268,4 @@ Deploy Worker 0.10.489-engagement-ledger. Shrink the engagement ledger so Chicag
 2026-10-14 fix-factory-approve-654-717: guard render readiness; committed approval response; stale review classification
 
 2026-10-14: Worker 0.10.602-ten-ideas-per-hour. Hourly autonomous harvest creates 10 distinct-subject ideas per city when Scheduled is under 200, skips a city over 209, and scans the library instead of the newest 180 unused photos.
+2026-10-14: Worker 0.10.602-ten-ideas-per-hour. The 10-idea harvest runs at the top of the Chicago hour only. :05 and :30 ticks resume drafts already opened.

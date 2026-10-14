@@ -162,6 +162,7 @@ import {
   autonomousProfileHourOpen,
   autonomousRefillProfilesStillOpen,
   autonomousRefillScoresFromOverview,
+  autonomousAtTopOfHour,
   autonomousRefillSlot,
   mergeAutonomousHourProgress,
   pickAutonomousEnabledProfile,
@@ -1945,16 +1946,18 @@ export default {
       } catch (error) {
         console.warn("autonomous revision lock heal failed", error);
       }
-      // Light tick: 30m photo-ready SLA drain, and keep filling this hour's 10
-      // ideas per under-200 city. A city over 209 is skipped inside the harvest.
-      try {
-        await runStudioAutonomousProduce(null, env, { permissions: { tenant_admin: true } }, ctx, {
-          scheduled: true,
-          cron: event?.cron || "",
-          resume_only: true,
-        });
-      } catch (error) {
-        console.warn("autonomous FIFO resume (light) failed", error);
+      // Light tick: 30m photo-ready SLA drain. New ideas wait for the top of
+      // the hour, so this resume does not run on the same tick as that harvest.
+      if (!cadence.heavy) {
+        try {
+          await runStudioAutonomousProduce(null, env, { permissions: { tenant_admin: true } }, ctx, {
+            scheduled: true,
+            cron: event?.cron || "",
+            resume_only: true,
+          });
+        } catch (error) {
+          console.warn("autonomous FIFO resume (light) failed", error);
+        }
       }
       try {
         await resumeAzFinishedVideoRequests(env, ctx);
@@ -41243,11 +41246,17 @@ function chicagoNowParts() {
     month: "2-digit",
     day: "2-digit",
     hour: "2-digit",
+    minute: "2-digit",
     hourCycle: "h23",
   }).formatToParts(new Date());
   const get = (type) => parts.find((part) => part.type === type)?.value || "";
   const date = `${get("year")}-${get("month")}-${get("day")}`;
-  return { date, hour: Number(get("hour")) };
+  const minuteRaw = get("minute");
+  return {
+    date,
+    hour: Number(get("hour")),
+    minute: minuteRaw === "" ? null : Number(minuteRaw),
+  };
 }
 
 function mapOperationsOutput(record) {
@@ -44607,7 +44616,6 @@ async function fillAutonomousScheduledHour(env, authorization, {
     });
     workingLast = outcome.last || workingLast;
     createdCount += outcome.created_count || 0;
-    if (outcome.created_count > 0 || outcome.stop) break;
   }
   const stillOpen = refillScores
     ? autonomousRefillProfilesStillOpen(profiles, refillScores, workingLast, slot)
@@ -44819,7 +44827,9 @@ async function executeStudioAutonomousProduce(env, ctx, options = {}) {
   }
   if (!priorProduceInFlight) priorProduceRequestId = null;
 
-  if (autonomousRunIsBusy(last) && !priorProduceInFlight) {
+  const topOfHour = autonomousAtTopOfHour(chicago);
+  const harvestThisHour = options.scheduled && !options.force && !options.dry_run && !options.resume_only && topOfHour;
+  if (autonomousRunIsBusy(last) && !priorProduceInFlight && !harvestThisHour) {
     return { skipped: "in_flight", chicago_date: chicago.date, slot, last };
   }
 
@@ -44842,9 +44852,9 @@ async function executeStudioAutonomousProduce(env, ctx, options = {}) {
     return result;
   }
 
-  // Scheduled hour: 10 distinct-subject ideas per city under 200. Over 209 skips.
-  // Light ticks continue a short hour. Draft resume still advances produce.
-  if (options.scheduled && !options.force && !options.dry_run) {
+  // Top of the Chicago hour only: 10 distinct-subject ideas per city under 200.
+  // :05 and :30 ticks resume drafts already opened. Over 209 skips that city.
+  if (harvestThisHour) {
     const hourPass = await fillAutonomousScheduledHour(env, authorization, {
       chicago,
       slot,
@@ -44883,8 +44893,13 @@ async function executeStudioAutonomousProduce(env, ctx, options = {}) {
     if (resumed?.status !== "no_enabled_profile") return resumed;
   }
 
-  if (options.resume_only) {
-    return { skipped: "resume_only_idle", chicago_date: chicago.date, last };
+  if (options.resume_only || (options.scheduled && !options.force && !options.dry_run)) {
+    return {
+      skipped: options.resume_only ? "resume_only_idle" : "not_top_of_hour",
+      chicago_date: chicago.date,
+      slot,
+      last,
+    };
   }
 
   // Manual / dry-run: one idea. Scheduled hours already returned above.
