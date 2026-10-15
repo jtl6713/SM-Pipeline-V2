@@ -109,5 +109,5 @@ test("Factory Open uses direct record helpers and Production tolerates a missing
   const deskAsset = html.indexOf("/assets/factory-desk.js");
   assert.ok(resolverAsset > 0 && deskAsset > resolverAsset, "Factory target resolver must load before the desk binder");
   assert.match(app, /BUILD_ID = "item4-0.6.688-suggested-schedule-prefill"/);
-  assert.match(html, /UI build 0.6.687/);
+  assert.match(html, /UI build 0.6.688/);
 });
