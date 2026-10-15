@@ -1,3 +1,4 @@
+import { isQueuedForPlatformDispatch } from "./overview-dispatch-counts.mjs";
 import { createProfileOnboarding } from "./profile-onboarding.mjs";
 import {
   studioReadSource,
@@ -7421,6 +7422,12 @@ export function studioPublishIsDue(record, graceMs = 120000) {
 /*__STUDIO_WORKER_END:studioPublishIsDue__*/
 
 export function studioPublishCanDispatchNow(record) {
+  // Initial scheduled dispatch shares the overview eligibility decision.
+  // Retries/recovery (already attempted) and intentional unscheduled manual dispatches
+  // continue through their existing gates, rather than being silently disabled.
+  const hasSchedule = Boolean(f(record, "Studio_Scheduled_At") || f(record, "Scheduled_Post_Date") || f(record, "YouTube_Scheduled_Publish_At"));
+  const wasAttempted = Boolean(f(record, "Studio_Publish_Dispatch_At") || Number(f(record, "Studio_Publish_Dispatch_Count") || 0));
+  if (hasSchedule && !wasAttempted && !isQueuedForPlatformDispatch(mapOutput(record, null))) return false;
   const platform = String(f(record, "Platform") || "").trim();
   if (platform === "TikTok") return studioTikTokInboxIsDue(record);
   if (studioPublishIsDue(record)) return true;
