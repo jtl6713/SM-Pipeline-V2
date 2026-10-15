@@ -19536,12 +19536,12 @@ function timedScriptAssetLabel(asset, index) {
       });
     });
     // Resume any in-flight regeneration after refresh/navigation.
-    api("/api/outputs/schedule-regen").then((data) => {
+    api("/api/outputs/schedule-regen", { timeoutMs: 90000, retries: 1 }).then((data) => {
       if (data?.status === "queued" || data?.status === "running") {
         button.disabled = true;
         button.textContent = "Regenerating…";
         renderScheduleRegenProgress(data);
-        queuePipelineScheduleRegenPoll(data.id || data.job_id, button, 300);
+        queuePipelineScheduleRegenPoll(data.id || data.job_id, button, 1200);
       }
     }).catch(() => {});
   }
@@ -19605,7 +19605,7 @@ function timedScriptAssetLabel(asset, index) {
     const jobId = job?.id || started?.job_id;
     if (!jobId) throw new Error("Schedule regeneration did not return a job id.");
     renderScheduleRegenProgress(job);
-    queuePipelineScheduleRegenPoll(jobId, button, 300);
+    queuePipelineScheduleRegenPoll(jobId, button, 1200);
   }
 
   async function regeneratePipelineContentSchedule(groupKey, button = null) {
