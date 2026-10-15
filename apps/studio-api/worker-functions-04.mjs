@@ -1856,6 +1856,29 @@ export function studioNormalizeRegenFilters(payload = {}) {
 }
 /*__STUDIO_WORKER_END:studioNormalizeRegenFilters__*/
 
+export function studioScheduleRegenFormulaText(value) {
+  return String(value || "").replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+}
+/*__STUDIO_WORKER_END:studioScheduleRegenFormulaText__*/
+
+export function studioScheduleRegenCandidateFormula(profile, platform, outputType) {
+  const platformWant = studioScheduleRegenFormulaText(String(platform || "").trim().toLowerCase());
+  const typeWant = studioScheduleRegenFormulaText(String(outputType || "").trim().toLowerCase());
+  const clauses = [
+    "{Test_Run_ID}=BLANK()",
+    "{Do_Not_Publish}=0",
+    "{Published_At}=BLANK()",
+    '{Publish_Status}!="Published"',
+    '{Output_Status}!="Published"',
+    `LOWER({Platform})="${platformWant}"`,
+    `OR(LOWER({Studio_Output_Type})="${typeWant}",LOWER({Format})="${typeWant}")`,
+  ];
+  const profileFormula = contentProfileFilterFormula(profile);
+  if (profileFormula) clauses.push(profileFormula);
+  return `AND(${clauses.join(",")})`;
+}
+/*__STUDIO_WORKER_END:studioScheduleRegenCandidateFormula__*/
+
 export async function studioProcessScheduleRegenJobSlice(env, jobId, options = {}) {
   let job = await studioGetScheduleRegenJob(env, jobId);
   if (!job) return null;
@@ -1895,35 +1918,26 @@ export async function studioProcessScheduleRegenJobSlice(env, jobId, options = {
     const horizonMs = nowMs + horizonDays * 24 * 60 * 60 * 1000;
     const platformWant = String(combo.platform || "").trim().toLowerCase();
     const typeWant = String(combo.output_type || "").trim().toLowerCase();
+    // Regeneration candidates must include unscheduled outputs. The generic occupancy
+    // filter intentionally requires a schedule timestamp, so using it here made an
+    // empty/partially empty calendar finish "successfully" with zero rows changed.
     const rows = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
       limit: STUDIO_OCCUPIED_LIST_LIMIT,
       sortField: "Scheduled_Post_Date",
       sortDirection: "asc",
-      filterFormula: studioOccupiedFilterFormula(nowMs, profile),
+      filterFormula: studioScheduleRegenCandidateFormula(profile, combo.platform, combo.output_type),
       fields: ["Platform", "Scheduled_Post_Date", "YouTube_Scheduled_Publish_At", "Studio_Scheduled_At", "Publish_Status", "Studio_Output_Type", "Format", "Content_Profile", "Published_At", "Do_Not_Publish", "Output_Status", "Output_ID"],
     });
     const eligible = [];
-    const protectedTimes = [];
     for (const row of rows || []) {
       if (!studioOccupiedRowMatchesProfile(row, profile)) continue;
       const platform = String(f(row, "Platform") || "").trim();
       const outputType = String(f(row, "Studio_Output_Type") || f(row, "Format") || "").trim();
       if (platform.toLowerCase() !== platformWant) continue;
       if (outputType.toLowerCase() !== typeWant) continue;
-      const published = Boolean(String(f(row, "Published_At") || "").trim())
-        || String(f(row, "Publish_Status") || "").trim() === "Published"
-        || String(f(row, "Output_Status") || "").trim() === "Published";
-      const ms = studioOccupiedMsFromRow(row, nowMs);
-      if (published || Boolean(f(row, "Do_Not_Publish"))) {
-        if (ms != null) protectedTimes.push(ms);
-        continue;
-      }
       const iso = String(f(row, "Scheduled_Post_Date") || f(row, "YouTube_Scheduled_Publish_At") || "").trim();
       const stamp = iso ? Date.parse(iso) : NaN;
-      if (iso && Number.isFinite(stamp) && stamp <= nowMs) {
-        protectedTimes.push(stamp);
-        continue;
-      }
+      if (iso && Number.isFinite(stamp) && stamp <= nowMs) continue;
       if (iso && Number.isFinite(stamp) && stamp > horizonMs) continue;
       eligible.push(row);
     }
@@ -1934,8 +1948,16 @@ export async function studioProcessScheduleRegenJobSlice(env, jobId, options = {
     job = { ...job, combinations: combos, updated_at: new Date().toISOString() };
     await studioPutScheduleRegenJob(env, job);
 
+    const occupiedByLane = await studioOccupiedSchedulesOrEmpty(env, {
+      excludeIds: eligible.map((row) => row.id),
+      profile,
+    });
+    const lane = maeScheduleLaneKey(combo.platform, combo.output_type)
+      || String(combo.platform || "").trim().toLowerCase();
     const plan = [];
-    const reserved = protectedTimes.slice();
+    const reserved = Array.isArray(occupiedByLane?.[lane])
+      ? occupiedByLane[lane].filter(Number.isFinite)
+      : [];
     for (const row of eligible) {
       const picked = maeScheduleNextSlot({
         timeZone,
