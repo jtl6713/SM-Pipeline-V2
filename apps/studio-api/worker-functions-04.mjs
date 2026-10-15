@@ -1856,29 +1856,6 @@ export function studioNormalizeRegenFilters(payload = {}) {
 }
 /*__STUDIO_WORKER_END:studioNormalizeRegenFilters__*/
 
-export function studioScheduleRegenFormulaText(value) {
-  return String(value || "").replace(/\\/g, "\\\\").replace(/"/g, '\\"');
-}
-/*__STUDIO_WORKER_END:studioScheduleRegenFormulaText__*/
-
-export function studioScheduleRegenCandidateFormula(profile, platform, outputType) {
-  const platformWant = studioScheduleRegenFormulaText(String(platform || "").trim().toLowerCase());
-  const typeWant = studioScheduleRegenFormulaText(String(outputType || "").trim().toLowerCase());
-  const clauses = [
-    "{Test_Run_ID}=BLANK()",
-    "{Do_Not_Publish}=0",
-    "{Published_At}=BLANK()",
-    '{Publish_Status}!="Published"',
-    '{Output_Status}!="Published"',
-    `LOWER({Platform})="${platformWant}"`,
-    `OR(LOWER({Studio_Output_Type})="${typeWant}",LOWER({Format})="${typeWant}")`,
-  ];
-  const profileFormula = contentProfileFilterFormula(profile);
-  if (profileFormula) clauses.push(profileFormula);
-  return `AND(${clauses.join(",")})`;
-}
-/*__STUDIO_WORKER_END:studioScheduleRegenCandidateFormula__*/
-
 export async function studioProcessScheduleRegenJobSlice(env, jobId, options = {}) {
   let job = await studioGetScheduleRegenJob(env, jobId);
   if (!job) return null;
@@ -1921,11 +1898,23 @@ export async function studioProcessScheduleRegenJobSlice(env, jobId, options = {
     // Regeneration candidates must include unscheduled outputs. The generic occupancy
     // filter intentionally requires a schedule timestamp, so using it here made an
     // empty/partially empty calendar finish "successfully" with zero rows changed.
+    const formulaText = (value) => String(value || "").replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+    const profileFormula = contentProfileFilterFormula(profile);
+    const candidateClauses = [
+      "{Test_Run_ID}=BLANK()",
+      "{Do_Not_Publish}=0",
+      "{Published_At}=BLANK()",
+      '{Publish_Status}!="Published"',
+      '{Output_Status}!="Published"',
+      `LOWER({Platform})="${formulaText(platformWant)}"`,
+      `OR(LOWER({Studio_Output_Type})="${formulaText(typeWant)}",LOWER({Format})="${formulaText(typeWant)}")`,
+    ];
+    if (profileFormula) candidateClauses.push(profileFormula);
     const rows = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
       limit: STUDIO_OCCUPIED_LIST_LIMIT,
       sortField: "Scheduled_Post_Date",
       sortDirection: "asc",
-      filterFormula: studioScheduleRegenCandidateFormula(profile, combo.platform, combo.output_type),
+      filterFormula: `AND(${candidateClauses.join(",")})`,
       fields: ["Platform", "Scheduled_Post_Date", "YouTube_Scheduled_Publish_At", "Studio_Scheduled_At", "Publish_Status", "Studio_Output_Type", "Format", "Content_Profile", "Published_At", "Do_Not_Publish", "Output_Status", "Output_ID"],
     });
     const eligible = [];
