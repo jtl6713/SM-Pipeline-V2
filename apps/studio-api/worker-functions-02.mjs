@@ -9605,6 +9605,7 @@ export function keepFinishedOutputRows(rows, record = null) {
 
 export async function fanoutProductionRequestOutputsToContentItems(env, requestRecord, parentContentItemId, options = {}) {
   const onlyMissing = Boolean(options.onlyMissing);
+  if (String(f(requestRecord, "Request_Status") || "").trim() === "Cancelled") return {enabled_output_count:0,routed_count:0,blocked_count:0,remaining:0,work_items:[],single_parent_mode:true,discarded_request:true};
   const limit = Number(options.limit);
   const finishedVideo = studioFinishedOriginKind(requestRecord) === "finished-video";
   if (finishedVideo) {
@@ -9637,6 +9638,7 @@ export async function fanoutProductionRequestOutputsToContentItems(env, requestR
     };
   }
   let parent=await airtableFetch(env,env.AIRTABLE_CONTENT_TABLE_ID,parentContentItemId);
+  if (String(f(parent, "Content_Status") || "").trim() === "Archived") return {enabled_output_count:outputRows.length,routed_count:0,blocked_count:candidates.length,remaining:0,work_items:[],single_parent_mode:true,discarded_archived_parent:true};
   const filledAssets = item4FillAiOverlayFallbacks(item4ParseJson(f(requestRecord, "Studio_Master_Assets_JSON"), []), requestRecord, parent);
   if (JSON.stringify(filledAssets) !== JSON.stringify(item4ParseJson(f(requestRecord, "Studio_Master_Assets_JSON"), []))) {
     requestRecord = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, requestRecord.id, {
