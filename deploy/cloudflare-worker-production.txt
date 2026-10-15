@@ -296,3 +296,5 @@ Deploy Worker 0.10.489-engagement-ledger. Shrink the engagement ledger so Chicag
 2026-10-15: Worker 0.10.613-open-ideas-drain-20 redeploy. Prior production deploy rolled back after postdeploy content/v2 Cloudflare 404; code already on main.
 
 2026-10-15: Worker 0.10.614-scheduled-plus-awaiting. Autonomous 200/209 ceiling uses Scheduled + Awaiting Approval combined.
+
+2026-10-15: Worker 0.10.615-unique-titles. Hourly ideas no longer reuse an exact title already on an idea or content item. Little Havana, Miami 2 stays taken; the next package is numbered past it.

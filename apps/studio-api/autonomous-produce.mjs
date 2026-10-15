@@ -1009,12 +1009,31 @@ export function summarizeUnusedLibraryOverview(assets, { limit = 16 } = {}) {
   };
 }
 
-function autonomousHourTitle(base, seen) {
+export function autonomousTitleKey(title) {
+  return String(title || "").replace(/\s+/g, " ").trim().toLowerCase();
+}
+
+/**
+ * Next exact title that is not already used.
+ * "Little Havana, Miami 2" stays taken across hours; the next idea is 3, then 4.
+ */
+export function claimAutonomousTitle(base, taken) {
+  const set = taken instanceof Set ? taken : new Set();
+  if (!(taken instanceof Set)) {
+    for (const title of Array.isArray(taken) ? taken : []) {
+      const key = autonomousTitleKey(title);
+      if (key) set.add(key);
+    }
+  }
   const clean = String(base || "Library stills").replace(/\s+/g, " ").trim().slice(0, 72) || "Library stills";
-  const key = clean.toLowerCase();
-  const n = (seen.get(key) || 0) + 1;
-  seen.set(key, n);
-  return n === 1 ? clean : `${clean} ${n}`.slice(0, 80);
+  let candidate = clean;
+  let n = 1;
+  while (set.has(autonomousTitleKey(candidate)) && n < 500) {
+    n += 1;
+    candidate = `${clean} ${n}`.slice(0, 80);
+  }
+  set.add(autonomousTitleKey(candidate));
+  return candidate;
 }
 
 function autonomousRecordIds(rows, max) {
@@ -1039,6 +1058,7 @@ export function planAutonomousHourIdeas(assets, {
   max = AUTONOMOUS_RELATED_STILL_MAX,
   profileName = "",
   startIndex = 0,
+  existingTitles = null,
 } = {}) {
   const need = Math.max(0, Number(goal) || 0);
   const cap = Math.max(1, Number(max) || AUTONOMOUS_RELATED_STILL_MAX);
@@ -1081,7 +1101,9 @@ export function planAutonomousHourIdeas(assets, {
     });
   }
 
-  const seen = new Map();
+  const taken = existingTitles instanceof Set
+    ? existingTitles
+    : new Set((Array.isArray(existingTitles) ? existingTitles : []).map(autonomousTitleKey).filter(Boolean));
   const city = String(profileName || "Profile").trim() || "Profile";
   const ideas = [];
   for (let i = 0; i < need; i += 1) {
@@ -1090,7 +1112,7 @@ export function planAutonomousHourIdeas(assets, {
     if (packet?.media_asset_ids?.length) {
       const place = String(packet.location || packet.label || "Library stills").trim() || "Library stills";
       ideas.push({
-        candidate_title: autonomousHourTitle(place, seen),
+        candidate_title: claimAutonomousTitle(place, taken),
         idea_summary: `Library stills from ${place}.`.slice(0, 180),
         hook: place.slice(0, 80),
         primary_location: place.slice(0, 80),
@@ -1107,7 +1129,7 @@ export function planAutonomousHourIdeas(assets, {
       });
     } else {
       ideas.push({
-        candidate_title: autonomousHourTitle(`${city} stills needed`, seen),
+        candidate_title: claimAutonomousTitle(`${city} stills needed`, taken),
         idea_summary: "Waiting for library stills.",
         hook: "",
         primary_location: city.slice(0, 80),

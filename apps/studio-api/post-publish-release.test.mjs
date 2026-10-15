@@ -28,7 +28,7 @@ function output(fields, id = "recOUT1") {
 }
 
 test("health and cron advertise post-publish release", () => {
-  assert.match(worker, /version: "0.10.614-scheduled-plus-awaiting"/);
+  assert.match(worker, /version: "0.10.615-unique-titles"/);
   assert.match(worker, /studio_post_publish_release_v1: true/);
   assert.match(worker, /studioSweepPostPublishMediaRelease/);
   assert.match(worker, /releasePublishedOutputMedia/);

@@ -210,6 +210,7 @@ import {
   completeRelatedStillPick,
   pickRelatedUnusedStillCluster,
   planAutonomousHourIdeas,
+  autonomousTitleKey,
   summarizeUnusedLibraryOverview,
   collectAutonomousOccupiedFromIdeas,
   collectAutonomousTopicCollisions,
@@ -728,7 +729,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.614-scheduled-plus-awaiting",
+          version: "0.10.615-unique-titles",
           studio_supabase_pipeline_reads_v1: true,
           studio_supabase_sync_gate_v1: true,
           studio_supabase_phase3_stable_v1: true,
@@ -782,6 +783,7 @@ export default {
           studio_autonomous_hour_create_budget_v1: true,
           studio_autonomous_keep_picking_v1: true,
           studio_autonomous_ten_ideas_anyway_v1: true,
+          studio_autonomous_unique_titles_v1: true,
           studio_autonomous_music_variety_v1: true,
           studio_az_finished_video_v1: true,
           studio_az_auto_queue_v1: true,
@@ -44631,6 +44633,40 @@ async function parkAutonomousResumeDraft(env, requestRecord, reason) {
 const AUTONOMOUS_OPEN_IDEAS_FORMULA =
   "AND({Promoted_Content_Record_ID}=BLANK(),{Test_Run_ID}=BLANK(),{Candidate_Status}!='Rejected',{Candidate_Status}!='On Hold')";
 
+/** Idea and content titles already on the board. Exact repeats are not allowed. */
+async function loadAutonomousTakenTitles(env) {
+  const taken = new Set();
+  const addRows = (rows, field) => {
+    for (const row of rows || []) {
+      const key = autonomousTitleKey(f(row, field));
+      if (key) taken.add(key);
+    }
+  };
+  const [ideas, contents] = await Promise.all([
+    env.AIRTABLE_IDEA_TABLE_ID
+      ? listRecords(env, env.AIRTABLE_IDEA_TABLE_ID, {
+        limit: 2500,
+        fields: ["Candidate_Title"],
+      }).catch((error) => {
+        console.warn("autonomous title scan ideas failed", error);
+        return [];
+      })
+      : [],
+    env.AIRTABLE_CONTENT_TABLE_ID
+      ? listRecords(env, env.AIRTABLE_CONTENT_TABLE_ID, {
+        limit: 2500,
+        fields: ["Content_Title"],
+      }).catch((error) => {
+        console.warn("autonomous title scan content failed", error);
+        return [];
+      })
+      : [],
+  ]);
+  addRows(ideas, "Candidate_Title");
+  addRows(contents, "Content_Title");
+  return taken;
+}
+
 /** Count open ideas up to cap+1 so we can tell at-cap without paging the whole table. */
 async function countAutonomousOpenIdeas(env, { cap = AUTONOMOUS_OPEN_IDEAS_CAP } = {}) {
   if (!env?.AIRTABLE_IDEA_TABLE_ID) return 0;
@@ -44660,6 +44696,7 @@ async function fillAutonomousCityIdeas(env, authorization, {
   preferredSubject,
   refillScores,
   createBudget = AUTONOMOUS_IDEAS_PER_HOUR,
+  takenTitles = null,
 }) {
   const hourGoal = AUTONOMOUS_IDEAS_PER_HOUR;
   let count = Math.max(0, Number(counts?.[profileId]) || 0);
@@ -44725,6 +44762,7 @@ async function fillAutonomousCityIdeas(env, authorization, {
     goal: Math.max(0, goal - count),
     profileName: String(f(profile, "Profile_Name") || "").trim(),
     startIndex: count,
+    existingTitles: takenTitles,
   });
   for (const plannedPick of planned) {
     if (count >= goal) break;
@@ -44889,6 +44927,7 @@ async function fillAutonomousScheduledHour(env, authorization, {
     });
     return { terminal: true, created_count: 0, last: saved, result: saved };
   }
+  const takenTitles = await loadAutonomousTakenTitles(env);
   const picked = pickAutonomousRefillProfile(open, refillScores) || open[0];
   const order = autonomousProfileHarvestOrder(open, picked?.id, refillScores);
   const counts = sameSlot && last?.ideas_by_profile ? { ...last.ideas_by_profile } : {};
@@ -44910,6 +44949,7 @@ async function fillAutonomousScheduledHour(env, authorization, {
       preferredSubject,
       refillScores,
       createBudget,
+      takenTitles,
     });
     workingLast = outcome.last || workingLast;
     createdCount += outcome.created_count || 0;

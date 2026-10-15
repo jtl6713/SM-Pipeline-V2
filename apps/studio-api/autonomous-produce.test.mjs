@@ -82,6 +82,7 @@ import {
   pickAutonomousEnabledProfile,
   pickRelatedUnusedStillCluster,
   planAutonomousHourIdeas,
+  claimAutonomousTitle,
   summarizeUnusedLibraryOverview,
   autonomousClusterConflictsOccupied,
   autonomousPreferredSubject,
@@ -890,6 +891,38 @@ test("under 200 the hour plans 10 ideas even when subjects repeat or stills are 
   assert.notEqual(split[0].candidate_title, split[1].candidate_title);
 });
 
+test("a later hour does not reuse an exact title already on the board", () => {
+  const stills = [];
+  for (let index = 0; index < 20; index += 1) {
+    stills.push({
+      id: `recHavana${String(index).padStart(10, "0")}`,
+      name: `Havana ${index}.jpeg`,
+      location: "Little Havana, Miami",
+    });
+  }
+  const taken = [
+    "Little Havana, Miami",
+    "Little Havana, Miami 2",
+    "Little Havana, Miami 3",
+  ];
+  const next = planAutonomousHourIdeas(stills, {
+    profileName: "Miami",
+    goal: 2,
+    existingTitles: taken,
+  });
+  assert.deepEqual(next.map((row) => row.candidate_title), [
+    "Little Havana, Miami 4",
+    "Little Havana, Miami 5",
+  ]);
+  const shared = new Set(taken.map((title) => title.toLowerCase()));
+  const firstCity = planAutonomousHourIdeas(stills, { goal: 1, existingTitles: shared });
+  const secondCity = planAutonomousHourIdeas(stills, { goal: 1, existingTitles: shared });
+  assert.equal(firstCity[0].candidate_title, "Little Havana, Miami 4");
+  assert.equal(secondCity[0].candidate_title, "Little Havana, Miami 5");
+  assert.equal(claimAutonomousTitle("Little Havana, Miami", shared), "Little Havana, Miami 6");
+  assert.equal(claimAutonomousTitle("Griffith Golden Hour", ["griffith golden hour"]), "Griffith Golden Hour 2");
+});
+
 test("JSON fences unwrap and last-run notes stay readable", () => {
   assert.equal(extractJsonObject("```json\n{\"skip\":true}\n```").skip, true);
   assert.equal(parseAutonomousLastRun("not-json").notes, "not-json");
@@ -902,7 +935,7 @@ test("Worker stamps photo-ready ideas and drains the 30m SLA on light ticks", as
   const path = await import("node:path");
   const here = path.dirname(fileURLToPath(import.meta.url));
   const worker = await readFile(path.join(here, "worker.js"), "utf8");
-  assert.match(worker, /version: "0.10.614-scheduled-plus-awaiting"/);
+  assert.match(worker, /version: "0.10.615-unique-titles"/);
   assert.match(worker, /studio_autonomous_ten_ideas_anyway_v1: true/);
   assert.match(worker, /planAutonomousHourIdeas/);
   const hourFill = worker.slice(
@@ -910,6 +943,9 @@ test("Worker stamps photo-ready ideas and drains the 30m SLA on light ticks", as
     worker.indexOf("async function fillAutonomousScheduledHour"),
   );
   assert.match(hourFill, /planAutonomousHourIdeas/);
+  assert.match(hourFill, /existingTitles: takenTitles/);
+  assert.match(worker, /loadAutonomousTakenTitles/);
+  assert.match(worker, /studio_autonomous_unique_titles_v1: true/);
   assert.doesNotMatch(hourFill, /no_distinct_subject/);
   assert.match(worker, /Studio_Photo_Wait_Status = "Waiting"/);
   assert.match(worker, /if \(!harvestThisHour && last\.production_request_id && last\.idea_id\)/);
