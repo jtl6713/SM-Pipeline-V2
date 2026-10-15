@@ -23,7 +23,7 @@ test("home portal exposes three EZ path cards", () => {
   assert.match(html, /data-ez-portal-path="completed"/);
   assert.match(html, /data-ez-portal-path="wizard"/);
   assert.match(app, /function bindEzPortal/);
-  assert.match(app, /0.6.694-factory-approve-story-bounce/);
+  assert.match(app, /0.6.695-approve-all-fast-stamp/);
 });
 
 test("compact launcher remains single-column on narrow screens", () => {
@@ -31,7 +31,7 @@ test("compact launcher remains single-column on narrow screens", () => {
 });
 
 test("compact launcher uses a cache-busted Pages stylesheet and Pages build", () => {
-  assert.match(html, /styles-phase7-0621\.css\?v=0.6.694-factory-approve-story-bounce/);
-  assert.match(html, /home-density-0517\.css\?v=0.6.694-factory-approve-story-bounce/);
-  assert.match(html, /UI build 0.6.694/);
+  assert.match(html, /styles-phase7-0621\.css\?v=0.6.695-approve-all-fast-stamp/);
+  assert.match(html, /home-density-0517\.css\?v=0.6.695-approve-all-fast-stamp/);
+  assert.match(html, /UI build 0.6.695/);
 });

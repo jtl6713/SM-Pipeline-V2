@@ -20,7 +20,7 @@ test("idea promote drawer documents duration vs voiceover precedence", () => {
   assert.ok(scriptBuild);
   assert.ok(appBuild);
   assert.equal(appBuild, scriptBuild.split("&")[0]);
-  assert.equal(uiBuild, "0.6.694");
+  assert.equal(uiBuild, "0.6.695");
   assert.match(html, /id="ideaLibraryPickerForm"/);
   assert.match(html, /class="idea-type-guide"/);
   assert.match(html, /Photo Set turns stills into Reels|Photo Set/);

@@ -229,7 +229,7 @@ test("Worker never treats Vibe Cut as finished-video passthrough", () => {
   assert.match(worker, /force_multiclip_remount: false/);
   assert.match(worker, /Rebuilding Vibe Cut multi-clip montage/);
   assert.match(worker, /Must go through enqueueStudioProductionJob so Vibe Cut/);
-  assert.match(worker, /version: "0.10.619-factory-approve-story-bounce"/);
+  assert.match(worker, /version: "0.10.620-approve-all-fast-stamp"/);
   assert.match(worker, /Video_Clip_Count_Mode: vibeCut \? "AI decides"/);
   assert.match(worker, /Requested_Video_Clip_Count_Mode: "AI decides"/);
   assert.match(worker, /Horizontal Vibe Cut must keep YouTube Standard \+ Short/);

@@ -1,8 +1,9 @@
 /** Durable Approve All batch job helpers (Pipeline Settings JSON store). */
 
 export const APPROVE_ALL_JOBS_SETTING = "APPROVE_ALL_JOBS_V1";
-export const APPROVE_ALL_BATCH_SIZE = 3;
-export const APPROVE_ALL_MAX_SLICES_PER_INVOKE = 8;
+/** Airtable allows 10 records per batch request; keep headroom under rate limits. */
+export const APPROVE_ALL_BATCH_SIZE = 8;
+export const APPROVE_ALL_MAX_SLICES_PER_INVOKE = 12;
 export const APPROVE_ALL_JOB_TTL_MS = 24 * 60 * 60 * 1000;
 /** Airtable long text rejects Setting_Value above 100,000 characters. */
 export const APPROVE_ALL_STORE_CHAR_BUDGET = 80000;

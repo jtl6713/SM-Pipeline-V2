@@ -12,7 +12,7 @@ const worker = readStudioWorkerSource();
 test("Published Studio label, app BUILD_ID, and all cache versions agree", () => {
   const label = html.match(/UI build (\d+\.\d+\.\d+)/)?.[1];
   const build = app.match(/const BUILD_ID = "item4-(\d+\.\d+\.\d+)-/ )?.[1];
-  assert.equal(label, "0.6.694");
+  assert.equal(label, "0.6.695");
   assert.equal(build, label);
   const cache = [...html.matchAll(/\?v=(\d+\.\d+\.\d+)-/g)].map((m) => m[1]);
   assert.ok(cache.length > 10);

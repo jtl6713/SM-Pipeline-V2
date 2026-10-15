@@ -90,7 +90,7 @@ test("approve-all job store prunes terminal jobs and active map", () => {
   assert.equal(store.active_by_profile.recP, undefined);
   assert.equal(store.active_by_profile.recQ, "aj_live");
   assert.deepEqual(parseApproveAllJobStore("not-json").jobs, {});
-  assert.equal(APPROVE_ALL_BATCH_SIZE, 3);
+  assert.equal(APPROVE_ALL_BATCH_SIZE, 8);
   assert.equal(APPROVE_ALL_JOBS_SETTING, "APPROVE_ALL_JOBS_V1");
 });
 
@@ -151,8 +151,13 @@ test("approve-all store stays under Airtable Setting_Value budget", () => {
 test("worker exposes durable approve-all batch routes and cron resume", () => {
   assert.match(worker, /from "\.\/approve-all-batch\.mjs"/);
   assert.match(worker, /studio_approve_all_batch_v1:\s*true/);
-  assert.match(worker, /0.10.619-factory-approve-story-bounce/);
+  assert.match(worker, /0.10.620-approve-all-fast-stamp/);
+  assert.match(worker, /async function studioFetchApproveAllRecordsByIds/);
   assert.match(worker, /async function studioProcessApproveAllJobSlice/);
+  assert.match(worker, /skipOccupancyRefresh: true/);
+  assert.match(worker, /siblingRows: \[\]/);
+  assert.match(worker, /writeThroughQueue/);
+  assert.match(worker, /One Settings write at start \+ one at end/);
   assert.match(worker, /async function studioResumeApproveAllJobs/);
   assert.match(worker, /studioResumeApproveAllJobs\(env, ctx\)/);
   assert.match(worker, /action === "retry"/);
@@ -166,7 +171,7 @@ test("worker exposes durable approve-all batch routes and cron resume", () => {
 });
 
 test("Studio UI starts Approve All as a background job and polls progress", () => {
-  assert.match(app, /item4-0.6.694-factory-approve-story-bounce/);
+  assert.match(app, /item4-0.6.695-approve-all-fast-stamp/);
   assert.match(app, /startPipelineApproveAllJobWatch/);
   assert.match(app, /pollPipelineApproveAllJob/);
   assert.match(app, /Retry failed/);
@@ -176,5 +181,6 @@ test("Studio UI starts Approve All as a background job and polls progress", () =
   assert.match(app, /clearPipelineGroupApproveBusy/);
   assert.match(app, /Approve timed out while Airtable was slow/);
   assert.match(app, /Approve All started/);
+  assert.match(app, /Approval still running in the background/);
   assert.match(app, /const next = \{\};/);
 });

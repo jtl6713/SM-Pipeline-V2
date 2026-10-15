@@ -277,7 +277,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.694-factory-approve-story-bounce";
+  const BUILD_ID = "item4-0.6.695-approve-all-fast-stamp";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -19209,9 +19209,21 @@ function timedScriptAssetLabel(asset, index) {
       setPipelineLiveHint(error?.message || "Approve All progress check failed — retrying…");
     }
     pipelineApproveAllPollFailures += 1;
-    if (Date.now() - pipelineApproveAllStartedAt > 120000 || pipelineApproveAllPollFailures > 70) {
-      applyPipelineApproveAllProgress({ job_id: id, status: "stalled", message: "Approval is taking too long. Refresh the list to check which outputs were approved before retrying." }, { terminal: true });
+    // Soft stall only: Worker slices continue via waitUntil/cron. Keep the job id
+    // visible so the operator can refresh instead of thinking Approve died.
+    if (Date.now() - pipelineApproveAllStartedAt > 600000 || pipelineApproveAllPollFailures > 200) {
+      applyPipelineApproveAllProgress({
+        job_id: id,
+        status: "running",
+        message: "Approval still running in the background. Refresh the list in a minute — do not re-Approve rows that already left Ready for Review.",
+      }, { terminal: false });
       await refreshPipelineOutputs({ silent: true, force: true }).catch(() => null);
+      stopPipelineApproveAllPoll();
+      pipelineApproveAllPollTimer = setTimeout(() => {
+        pollPipelineApproveAllJob(id).catch(() => null);
+      }, 5000);
+      pipelineApproveAllStartedAt = Date.now();
+      pipelineApproveAllPollFailures = 0;
       return;
     }
     stopPipelineApproveAllPoll();
