@@ -277,7 +277,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.690-mae-horizon-overflow";
+  const BUILD_ID = "item4-0.6.691-calendar-scheduled-only";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -20725,19 +20725,6 @@ function timedScriptAssetLabel(asset, index) {
     return `<button type="button" class="${classes}" data-pipeline-schedule-entry="${escapeHtml(recordId)}" data-platform="${escapeHtml(platformSlug)}" data-schedule-tooltip="${escapeHtml(tooltip)}" aria-label="${escapeHtml(tooltip)}" draggable="${canMove && !pending ? "true" : "false"}"${pending ? " disabled" : ""}><span class="pipeline-schedule-entry-code">${escapeHtml(platformCode)}</span><span class="pipeline-schedule-entry-text">${escapeHtml(outputId ? `${outputId} · ${title}` : title)}</span>${statusMarkup}</button>`;
   }
 
-  function pipelineUnscheduledScheduleRecords() {
-    return (pipelineOutputs || [])
-      .filter((record) => creativeCanSetSchedule(record))
-      .filter((record) => !studioEffectiveScheduleIso(record))
-      .slice()
-      .sort((left, right) => {
-        const leftId = Number(left?.output_id);
-        const rightId = Number(right?.output_id);
-        if (Number.isFinite(leftId) && Number.isFinite(rightId)) return leftId - rightId;
-        return pipelineScheduleEntryTitle(left).localeCompare(pipelineScheduleEntryTitle(right));
-      });
-  }
-
   function setPipelineScheduleGridMessage(text, isError = false) {
     const message = $("pipelineScheduleGridMessage");
     if (!message) return;
@@ -20959,13 +20946,12 @@ function timedScriptAssetLabel(asset, index) {
     const visibleRecords = (Array.isArray(records) ? records : []).filter(pipelineScheduleRecordVisible);
     const cells = helper.aggregate(visibleRecords, windowValue);
     const total = [...cells.values()].reduce((sum, cell) => sum + Number(cell?.total || 0), 0);
-    const unscheduled = pipelineUnscheduledScheduleRecords().filter(pipelineScheduleRecordVisible);
     const timezone = workingStudioTimeZone();
     const rangeLabel = pipelineScheduleWindowLabel(windowValue);
     if (summary) {
       summary.textContent = error
         ? `${total} scheduled in the loaded Pipeline rows · schedule service retrying · ${rangeLabel} · ${timezone}`
-        : `${total} scheduled output${total === 1 ? "" : "s"} · ${unscheduled.length} ready to schedule · ${rangeLabel} · ${timezone} · blackout hours ${pipelineScheduleBlackoutHoursOpen ? "shown" : "collapsed"} (11 PM–3 AM, off limits)`;
+        : `${total} scheduled output${total === 1 ? "" : "s"} · ${rangeLabel} · ${timezone} · blackout hours ${pipelineScheduleBlackoutHoursOpen ? "shown" : "collapsed"} (8 PM–3:30 AM, off limits)`;
     }
 
     const now = new Date();
@@ -21028,9 +21014,10 @@ function timedScriptAssetLabel(asset, index) {
       return `<tr${rowBlackout ? ' class="is-blackout-row"' : ""}><th scope="row" class="pipeline-schedule-hour${rowBlackout ? " is-blackout" : ""}"${rowBlackout ? ' title="Off limits: 11:00 PM–3:00 AM local"' : ""}>${escapeHtml(pipelineScheduleSlotLabel(slotIndex))}</th>${cellsHtml}</tr>`;
     }).join("");
 
-    const windowToolbar = `<div class="pipeline-schedule-window-toolbar" aria-label="Calendar date range controls"><div class="pipeline-schedule-window-controls"><button type="button" class="secondary-button" data-pipeline-schedule-window-shift="-7">← Previous 7 days</button><button type="button" class="text-button" data-pipeline-schedule-window-today${pipelineScheduleWindowStartsToday(windowValue) ? ' disabled aria-current="date"' : ""}>Today</button><button type="button" class="secondary-button" data-pipeline-schedule-window-shift="7">Next 7 days →</button><button type="button" class="secondary-button" data-pipeline-blackout-toggle aria-expanded="${pipelineScheduleBlackoutHoursOpen ? "true" : "false"}">${pipelineScheduleBlackoutHoursOpen ? "Hide blackout hours" : "Show blackout hours"}</button></div><strong class="pipeline-schedule-window-range">${escapeHtml(rangeLabel)}</strong><span class="pipeline-schedule-window-hint">Select a bubble, change the 7-day window if needed, then click its destination slot. Blackout hours (11:00 PM–3:00 AM local) are collapsed by default; expand them any time to verify nothing is scheduled there.</span></div>`;
-    const tray = `<section class="pipeline-schedule-unscheduled" aria-label="Ready to schedule"><div class="pipeline-schedule-unscheduled-copy"><strong>Ready to schedule</strong><span>Outputs stay here until a schedule is saved. Use default schedules can fill intelligent row suggestions without removing them from this tray, or drag a bubble directly into a 30-minute slot.</span></div><div class="pipeline-schedule-unscheduled-list">${unscheduled.length ? unscheduled.map((record) => pipelineScheduleEntryMarkup(record, { unscheduled: true })).join("") : '<span class="subtle">No ready outputs are waiting for a saved schedule.</span>'}</div></section>`;
-    target.innerHTML = `${windowToolbar}${tray}<div class="pipeline-schedule-grid-scroll"><table class="pipeline-schedule-grid-table"><thead><tr><th class="pipeline-hour-head" scope="col">Time</th>${head}</tr></thead><tbody>${rows}</tbody></table></div>`;
+    const windowToolbar = `<div class="pipeline-schedule-window-toolbar" aria-label="Calendar date range controls"><div class="pipeline-schedule-window-controls"><button type="button" class="secondary-button" data-pipeline-schedule-window-shift="-7">← Previous 7 days</button><button type="button" class="text-button" data-pipeline-schedule-window-today${pipelineScheduleWindowStartsToday(windowValue) ? ' disabled aria-current="date"' : ""}>Today</button><button type="button" class="secondary-button" data-pipeline-schedule-window-shift="7">Next 7 days →</button><button type="button" class="secondary-button" data-pipeline-blackout-toggle aria-expanded="${pipelineScheduleBlackoutHoursOpen ? "true" : "false"}">${pipelineScheduleBlackoutHoursOpen ? "Hide blackout hours" : "Show blackout hours"}</button></div><strong class="pipeline-schedule-window-range">${escapeHtml(rangeLabel)}</strong><span class="pipeline-schedule-window-hint">Only approved posts with a publish time appear here. Select a bubble, change the 7-day window if needed, then click its destination slot. Blackout hours (8:00 PM–3:30 AM local) are collapsed by default.</span></div>`;
+    // Unscheduled / waiting-for-approval rows stay off the calendar. Scheduling
+    // is assigned at Approve time, so the old Ready-to-schedule tray is gone.
+    target.innerHTML = `${windowToolbar}<div class="pipeline-schedule-grid-scroll"><table class="pipeline-schedule-grid-table"><thead><tr><th class="pipeline-hour-head" scope="col">Time</th>${head}</tr></thead><tbody>${rows}</tbody></table></div>`;
     bindPipelineScheduleGridWindowControls(target);
     bindPipelineScheduleBlackoutControls(target);
     bindPipelineScheduleGridInteractions(target);

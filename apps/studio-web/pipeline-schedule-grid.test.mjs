@@ -111,10 +111,10 @@ test("Pipeline calendar supports drag/drop scheduling with full output identity 
   assert.match(app, /event\.dataTransfer\.setData\("text\/plain", id\)/);
   assert.match(app, /manual_schedule_override:\s*true/);
   assert.match(app, /event\.key !== "Enter" && event\.key !== " "/);
-  assert.match(app, /pipelineUnscheduledScheduleRecords/);
+  assert.doesNotMatch(app, /function pipelineUnscheduledScheduleRecords/);
 });
 
-test("platform legend checkboxes filter scheduled bubbles and ready tray without changing saved schedules", () => {
+test("platform legend checkboxes filter scheduled bubbles without changing saved schedules", () => {
   const here = path.dirname(fileURLToPath(import.meta.url));
   const html = fs.readFileSync(path.join(here, "index.html"), "utf8");
   const app = fs.readFileSync(path.join(here, "assets", "app-item4-1008.js"), "utf8");
@@ -125,7 +125,7 @@ test("platform legend checkboxes filter scheduled bubbles and ready tray without
   assert.match(app, /const pipelineScheduleVisiblePlatforms = new Set\(PIPELINE_SCHEDULE_PLATFORM_KEYS\)/);
   assert.match(app, /function pipelineScheduleRecordVisible/);
   assert.match(app, /visibleRecords = \(Array\.isArray\(records\) \? records : \[\]\)\.filter\(pipelineScheduleRecordVisible\)/);
-  assert.match(app, /pipelineUnscheduledScheduleRecords\(\)\.filter\(pipelineScheduleRecordVisible\)/);
+  assert.doesNotMatch(app, /pipelineUnscheduledScheduleRecords/);
   assert.match(app, /checkbox\.addEventListener\("change"/);
   assert.match(app, /renderPipelineScheduleGrid\(pipelineScheduleGridRecords\)/);
 });
@@ -138,24 +138,35 @@ test("30-minute schedule grid exposes slot helpers", () => {
 });
 
 
-test("default schedule suggestions start off, clear on untick, and do not hide ready outputs from the tray", () => {
+test("calendar omits the Ready to schedule tray; only scheduled posts render", () => {
   const here = path.dirname(fileURLToPath(import.meta.url));
   const app = fs.readFileSync(path.join(here, "assets", "app-item4-1008.js"), "utf8");
-  // Header toggle retired: restore is a no-op; intelligent rolling-14-day scheduling stays on.
+  const html = fs.readFileSync(path.join(here, "index.html"), "utf8");
+  const renderFn = app.slice(
+    app.indexOf("function renderPipelineScheduleGrid"),
+    app.indexOf("function pipelineScheduleGridApiPath"),
+  );
+  assert.match(renderFn, /Only approved posts with a publish time appear here/);
+  assert.doesNotMatch(renderFn, /pipeline-schedule-unscheduled/);
+  assert.doesNotMatch(renderFn, /Ready to schedule/);
+  assert.doesNotMatch(renderFn, /ready to schedule/);
+  assert.match(html, /Only posts that already have a publish time appear here/);
+  assert.doesNotMatch(html, /Ready to schedule tray stays visible/);
+});
+
+test("default schedule suggestions stay unbound until approval", () => {
+  const here = path.dirname(fileURLToPath(import.meta.url));
+  const app = fs.readFileSync(path.join(here, "assets", "app-item4-1008.js"), "utf8");
   assert.match(app, /function restorePipelineUseDefaultSchedules\(\) \{\s*\/\/ Header toggle retired/);
   assert.match(app, /function clearDefaultSchedulesFromUnapprovedRows/);
   assert.match(app, /pipelineScheduleDrafts\.delete\(record\.id\)/);
   assert.match(app, /pipelineScheduleDirty\.delete\(record\.id\)/);
   assert.match(app, /function paintPipelineSuggestedSchedule/);
-  assert.match(app, /pipelineRowHasSchedule\(record\)\) return false/);
-  assert.match(app, /Stories used an empty lane/);
-  assert.match(app, /\.filter\(\(record\) => !studioEffectiveScheduleIso\(record\)\)/);
-  assert.match(app, /<strong>Ready to schedule<\/strong>/);
+  assert.match(app, /Will be scheduled on approval/);
   assert.match(app, /if \(next === "outputs"\)[\s\S]{0,220}previous !== "outputs"[\s\S]{0,220}restorePipelineUseDefaultSchedules\(\)[\s\S]{0,120}clearDefaultSchedulesFromUnapprovedRows\(\)/);
 });
 
-
-test("platform colors are visually distinct and the ready tray stays visible while the grid is collapsed", () => {
+test("platform colors are visually distinct and the calendar grid collapses cleanly", () => {
   const here = path.dirname(fileURLToPath(import.meta.url));
   const html = fs.readFileSync(path.join(here, "index.html"), "utf8");
   const css = fs.readFileSync(path.join(here, "assets", "styles-phase7-0621.css"), "utf8");

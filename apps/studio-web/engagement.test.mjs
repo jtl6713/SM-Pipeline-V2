@@ -14,10 +14,10 @@ const matrix = fs.readFileSync(path.join(here, "../../docs/engagement-capability
 test("Engagement nav page and assets ship with UI 0.6.553", () => {
   assert.match(html, /data-page="engagement"/);
   assert.match(html, /id="page-engagement"/);
-  assert.match(html, /engagement-1008\.js\?v=0.6.690-mae-horizon-overflow/);
-  assert.match(html, /engagement-1008\.css\?v=0.6.690-mae-horizon-overflow/);
-  assert.match(html, /UI build 0.6.690/);
-  assert.match(app, /BUILD_ID = "item4-0.6.690-mae-horizon-overflow"/);
+  assert.match(html, /engagement-1008\.js\?v=0.6.691-calendar-scheduled-only/);
+  assert.match(html, /engagement-1008\.css\?v=0.6.691-calendar-scheduled-only/);
+  assert.match(html, /UI build 0.6.691/);
+  assert.match(app, /BUILD_ID = "item4-0.6.691-calendar-scheduled-only"/);
   assert.match(app, /page === "engagement"/);
   assert.match(app, /StudioEngagement/);
 });
