@@ -1,3 +1,4 @@
+import { readStudioWorkerSource } from "../studio-api/worker-source-reader.mjs";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
@@ -7,7 +8,7 @@ import { fileURLToPath } from "node:url";
 const here = path.dirname(fileURLToPath(import.meta.url));
 const app = fs.readFileSync(path.join(here, "assets/app-item4-1008.js"), "utf8");
 const overview = fs.readFileSync(path.join(here, "assets/all-profiles-overview-1007.js"), "utf8");
-const worker = fs.readFileSync(path.join(here, "../studio-api/worker.js"), "utf8");
+const worker = readStudioWorkerSource();
 
 test("Pipeline always loads the full outputs list (not lean mode=review)", () => {
   const refresh = app.slice(
