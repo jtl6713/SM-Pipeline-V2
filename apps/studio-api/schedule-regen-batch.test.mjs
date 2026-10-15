@@ -115,6 +115,7 @@ test("Worker and Pipeline wire durable schedule regeneration", () => {
   assert.match(worker, /maeScheduleNextSlot/);
   assert.match(worker, /studioLoadOccupiedScheduleRows/);
   assert.match(worker, /platformProtectedTimes/);
+  assert.match(worker, /unsettledPlatformTypes/);
   assert.match(worker, /platformOccupiedMs:\s*reservedPlatform/);
   assert.match(app, /\/api\/outputs\/schedule-regen/);
   assert.match(app, /pathname === "\/api\/outputs\/schedule-regen"/);
