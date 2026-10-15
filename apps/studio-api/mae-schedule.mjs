@@ -1,12 +1,13 @@
 /** Strict MAE rotation in profile-local time.
- * Fill each day's morning → afternoon → evening MAE slots across a 28-day
- * (4-week) horizon before placing extras. Once those three are covered on every
- * day in range (or the next pick has no open MAE left), the 4th post on each
- * day goes in that day's largest open gap, walking day 1 → day 28. A 5th post
- * repeats the same day-by-day widest-gap walk.
- * Same-platform extras still share a day (IG morning, then IG afternoon).
- * Different platforms in one package skip days already used by that package
- * and start about a week apart so they spread across the 4-week window.
+ * Balance one platform across a 28-day (4-week) horizon. Each new post goes
+ * to a day that already has the fewest posts for that platform. Ties keep the
+ * earlier day in the walk, so a package still starts each platform about a
+ * week apart. On the chosen day, use the next open morning, then afternoon,
+ * then evening. Once morning, afternoon, and evening are full on every day,
+ * walk day 1 through day 28 again and place the post in that day's widest
+ * open gap (a 4th, then a 5th). Never stack the next posts onto today's
+ * remaining windows while a later day in the four weeks has fewer posts for
+ * this platform.
  * Stories may share a slot with their platform main.
  * Never stamp 11:00 PM–3:00 AM local (inclusive).
  */
@@ -255,34 +256,44 @@ export function maePlatformSpreadStartIndex(platformIndex, platformCount, horizo
   return Math.floor((index % count) * days / count);
 }
 
-function maePickExtraIso(civils, nowMs, blockers, timeZone, extrasAlreadyOnDay, avoidCivilKeys) {
-  const avoid = maeAvoidCivilKeys(avoidCivilKeys);
-  for (const civil of civils) {
-    if (avoid.has(civil.key)) continue;
-    if (!maeDayStandardsCovered(civil, nowMs, blockers, timeZone)) continue;
-    // 4th wave wants days with 0 extras; 5th wave wants days that already have one.
-    if (maeExtraCountOnDay(civil, blockers, timeZone) !== extrasAlreadyOnDay) continue;
-    const extra = maeExtraIsoOnDay(civil, nowMs, blockers, timeZone);
-    if (extra) return extra;
+function maeOpenMaeSlot(civil, nowMs, blockers, timeZone) {
+  for (const window of MAE_PRIORITY_SCHEDULE_WINDOWS) {
+    const ms = maeStandardSlotMs(civil, window, timeZone);
+    if (ms <= nowMs || maeIsBlackoutLocalTime(ms, timeZone) || maeScheduleConflicts(ms, blockers)) continue;
+    return new Date(ms).toISOString();
   }
   return "";
 }
 
-function maePickFromCivils(civils, nowMs, blockers, timeZone, avoidCivilKeys) {
+function maeDayPostCount(civil, times, timeZone) {
+  return maeOccupiedOnDay(times, maeCivilWithKey(civil), timeZone).length;
+}
+
+function maePickFromCivils(civils, nowMs, blockers, timeZone, avoidCivilKeys, platformTimes) {
   const avoid = maeAvoidCivilKeys(avoidCivilKeys);
+  const countsFrom = platformTimes || blockers;
+  const open = [];
   for (const civil of civils) {
     if (avoid.has(civil.key)) continue;
-    for (const window of MAE_PRIORITY_SCHEDULE_WINDOWS) {
-      const ms = maeStandardSlotMs(civil, window, timeZone);
-      if (ms <= nowMs || maeIsBlackoutLocalTime(ms, timeZone) || maeScheduleConflicts(ms, blockers)) continue;
-      return new Date(ms).toISOString();
-    }
+    const mae = maeOpenMaeSlot(civil, nowMs, blockers, timeZone);
+    if (!mae) continue;
+    open.push({ iso: mae, count: maeDayPostCount(civil, countsFrom, timeZone) });
   }
-  const fourth = maePickExtraIso(civils, nowMs, blockers, timeZone, 0, avoid);
-  if (fourth) return fourth;
-  const fifth = maePickExtraIso(civils, nowMs, blockers, timeZone, 1, avoid);
-  if (fifth) return fifth;
-  return "";
+  if (open.length) {
+    const min = Math.min(...open.map((row) => row.count));
+    return open.find((row) => row.count === min).iso;
+  }
+  let best = null;
+  for (const civil of civils) {
+    if (avoid.has(civil.key)) continue;
+    if (maeExtraCountOnDay(civil, blockers, timeZone) >= MAE_MAX_EXTRA_POSTS_PER_DAY) continue;
+    if (!maeDayStandardsCovered(civil, nowMs, blockers, timeZone)) continue;
+    const extra = maeExtraIsoOnDay(civil, nowMs, blockers, timeZone);
+    if (!extra) continue;
+    const count = maeDayPostCount(civil, countsFrom, timeZone);
+    if (!best || count < best.count) best = { iso: extra, count };
+  }
+  return best ? best.iso : "";
 }
 
 export function maePickBalancedSuggestedIso(_windows, now = new Date(), options = {}) {
@@ -298,9 +309,9 @@ export function maePickBalancedSuggestedIso(_windows, now = new Date(), options 
   const civils = maeWalkCivils(maeHorizonCivils(local, horizonDays), options.startCivilIndex);
   const avoid = maeAvoidCivilKeys(options.avoidCivilKeys);
 
-  const spread = maePickFromCivils(civils, nowMs, blockers, timeZone, avoid);
+  const spread = maePickFromCivils(civils, nowMs, blockers, timeZone, avoid, platformOccupiedMs);
   if (spread) return spread;
-  if (avoid.size) return maePickFromCivils(civils, nowMs, blockers, timeZone, new Set());
+  if (avoid.size) return maePickFromCivils(civils, nowMs, blockers, timeZone, new Set(), platformOccupiedMs);
   return "";
 }
 

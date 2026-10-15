@@ -697,14 +697,17 @@
     return out;
   }
 
-  function ezPickExtraIso(civils, nowMs, blockers, timeZone, extrasAlreadyOnDay) {
-    for (const civil of civils) {
-      if (!ezDayStandardsCovered(civil, nowMs, blockers, timeZone)) continue;
-      if (ezExtraCountOnDay(civil, blockers, timeZone) !== extrasAlreadyOnDay) continue;
-      const extra = ezExtraIsoOnDay(civil, nowMs, blockers, timeZone);
-      if (extra) return extra;
+  function ezOpenMaeSlot(civil, nowMs, blockers, timeZone) {
+    for (const window of EZ_PRIORITY_SCHEDULE_WINDOWS) {
+      const ms = ezStandardSlotMs(civil, window, timeZone);
+      if (ms <= nowMs || ezIsBlackoutLocalTime(ms, timeZone) || ezScheduleConflicts(ms, blockers)) continue;
+      return new Date(ms).toISOString();
     }
     return "";
+  }
+
+  function ezDayPostCount(civil, times, timeZone) {
+    return ezOccupiedOnDay(times, ezCivilWithKey(civil), timeZone).length;
   }
 
   function ezPickBalancedSuggestedIso(windows, now = new Date(), options = {}) {
@@ -725,24 +728,32 @@
       civils.push(ezCivilWithKey(civil));
     }
 
-    // Pass 1: MAE morning → afternoon → evening across the full 28-day horizon.
+    // Lightest day in the 4-week walk. On that day: morning, then afternoon,
+    // then evening. Equal counts keep the earlier day, so posts do not stack
+    // on today while a later day has fewer posts for this platform.
+    const open = [];
     for (const civil of civils) {
-      for (const window of EZ_PRIORITY_SCHEDULE_WINDOWS) {
-        const ms = ezStandardSlotMs(civil, window, timeZone);
-        if (ms <= nowMs || ezIsBlackoutLocalTime(ms, timeZone) || ezScheduleConflicts(ms, blockers)) continue;
-        return new Date(ms).toISOString();
-      }
+      const mae = ezOpenMaeSlot(civil, nowMs, blockers, timeZone);
+      if (!mae) continue;
+      open.push({ iso: mae, count: ezDayPostCount(civil, platformOccupiedMs, timeZone) });
+    }
+    if (open.length) {
+      const min = Math.min(...open.map((row) => row.count));
+      return open.find((row) => row.count === min).iso;
     }
 
-    // Pass 2: 4th posts — day 1 → day 28, widest gap on each day.
-    const fourth = ezPickExtraIso(civils, nowMs, blockers, timeZone, 0);
-    if (fourth) return fourth;
-
-    // Pass 3: 5th posts — same walk for a second widest-gap slot.
-    const fifth = ezPickExtraIso(civils, nowMs, blockers, timeZone, 1);
-    if (fifth) return fifth;
-
-    return "";
+    // MAE trio is full. Walk day 1 → day 28 and use each day's widest gap,
+    // still preferring the day with the fewest posts (4th, then 5th).
+    let best = null;
+    for (const civil of civils) {
+      if (ezExtraCountOnDay(civil, blockers, timeZone) >= EZ_MAX_EXTRA_POSTS_PER_DAY) continue;
+      if (!ezDayStandardsCovered(civil, nowMs, blockers, timeZone)) continue;
+      const extra = ezExtraIsoOnDay(civil, nowMs, blockers, timeZone);
+      if (!extra) continue;
+      const count = ezDayPostCount(civil, platformOccupiedMs, timeZone);
+      if (!best || count < best.count) best = { iso: extra, count };
+    }
+    return best ? best.iso : "";
   }
 
   function ezSuggestedChicagoIso(windows, now = new Date(), options = {}) {

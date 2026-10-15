@@ -277,7 +277,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.688-suggested-schedule-prefill";
+  const BUILD_ID = "item4-0.6.689-balanced-four-week-slots";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -19516,12 +19516,12 @@ function timedScriptAssetLabel(asset, index) {
 
     button.disabled = true;
     button.textContent = "Regenerating…";
-    setPipelineScheduleGridMessage(`Rebuilding ${eligible.length} post schedule${eligible.length === 1 ? "" : "s"} for the active ${workingStudioCityLabel()} profile using morning → afternoon → evening on each day…`);
+    setPipelineScheduleGridMessage(`Rebuilding ${eligible.length} post schedule${eligible.length === 1 ? "" : "s"} for the active ${workingStudioCityLabel()} profile, balancing each platform across the next four weeks…`);
     let saved = 0;
     let failed = 0;
     // Process one platform completely before moving to the next selected platform.
-    // Each platform walks M then A then E on a day before the next day, so two
-    // TikToks become Monday 5:30 and Monday 11:30, not two Monday mornings.
+    // Each platform's posts stay as even as possible across the four weeks:
+    // Monday 5:30, then Tuesday 5:30, not two posts stacked on Monday.
     const platformOrder = [...selected];
     const orderedEligible = platformOrder.flatMap((platform) =>
       eligible.filter((record) => pipelineSchedulePlatformKey(record) === platform)

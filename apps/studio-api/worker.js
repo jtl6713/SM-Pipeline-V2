@@ -728,7 +728,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.616-suggested-schedule-prefill",
+          version: "0.10.617-balanced-four-week-slots",
           studio_supabase_pipeline_reads_v1: true,
           studio_supabase_sync_gate_v1: true,
           studio_supabase_phase3_stable_v1: true,
@@ -21989,7 +21989,7 @@ async function getInsightsBestTimes(request, env, url, authorization) {
     similar_sample_size: 0,
     similar_profile: themeName,
     caption: null,
-    note: note || `${seasonLabel} stamps use the MAE rotation in ${timeZone}: fill MAE morning/afternoon/evening across 28 days. Different platforms in one package land about a week apart. Then 4th/5th widest-gap slots. Overnight 11:00 PM–3:00 AM is never used.`,
+    note: note || `${seasonLabel} stamps use the MAE rotation in ${timeZone}: balance each platform across 28 days (morning, then afternoon, then evening on the lightest day). Different platforms in one package land about a week apart. Once those slots are full, each extra uses that day's widest gap. Overnight 11:00 PM–3:00 AM is never used.`,
   });
 
   try {
@@ -22082,7 +22082,7 @@ async function getInsightsBestTimes(request, env, url, authorization) {
       similar_sample_size: similar?.sample_size || 0,
       similar_profile: similar?.profile || theme,
       caption,
-      note: `${seasonLabel} stamps use the MAE rotation in ${timeZone}: fill MAE morning/afternoon/evening across 28 days, then 4th/5th widest-gap slots. Overnight 11:00 PM–3:00 AM is never used.`,
+      note: `${seasonLabel} stamps use the MAE rotation in ${timeZone}: balance each platform across 28 days (morning, then afternoon, then evening on the lightest day). Once those slots are full, each extra uses that day's widest gap. Overnight 11:00 PM–3:00 AM is never used.`,
     });
   } catch (error) {
     console.warn("best-times failed; MAE fallback", error);

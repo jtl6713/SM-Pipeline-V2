@@ -70,27 +70,21 @@ test("automatic suggestions use the first-priority morning window in each profil
   }
 });
 
-test("scheduler fills same-day afternoon after morning, then evening, then next-day MAE", () => {
+test("scheduler spreads the next same-platform post onto the lightest later day", () => {
   const zone = "America/Chicago";
   const now = new Date("2026-10-03T08:00:00Z");
   const occupied = [wallMs(2026, 10, 3, 5, 30, zone)];
-  const midday = plan.ezPickBalancedSuggestedIso([], now, { timeZone: zone, platformOccupiedMs: occupied });
-  assert.deepEqual(localParts(midday, zone), { hour: 11, minute: 30 });
+  const next = plan.ezPickBalancedSuggestedIso([], now, { timeZone: zone, platformOccupiedMs: occupied });
+  assert.equal(dayOf(next, zone), "2026-10-04");
+  assert.deepEqual(localParts(next, zone), { hour: 5, minute: 30 });
 
-  occupied.push(Date.parse(midday));
-  const afternoon = plan.ezPickBalancedSuggestedIso([], now, {
+  occupied.push(Date.parse(next));
+  const third = plan.ezPickBalancedSuggestedIso([], now, {
     timeZone: zone,
     platformOccupiedMs: occupied,
   });
-  assert.deepEqual(localParts(afternoon, zone), { hour: 16, minute: 30 });
-
-  occupied.push(Date.parse(afternoon));
-  const nextMorning = plan.ezPickBalancedSuggestedIso([], now, {
-    timeZone: zone,
-    platformOccupiedMs: occupied,
-  });
-  assert.equal(dayOf(nextMorning, zone), "2026-10-04");
-  assert.deepEqual(localParts(nextMorning, zone), { hour: 5, minute: 30 });
+  assert.equal(dayOf(third, zone), "2026-10-05");
+  assert.deepEqual(localParts(third, zone), { hour: 5, minute: 30 });
 });
 
 test("once the 28-day MAE horizon is covered, the extra is day 1's largest gap", () => {
@@ -135,13 +129,13 @@ test("conflict fallback re-picks MAE instead of walking into overnight blackout"
   assert.equal(plan.ezIsBlackoutLocalTime(Date.parse(iso), zone), false);
 });
 
-test("scheduler uses same-day afternoon when morning is taken, not a second morning", () => {
+test("a taken morning moves the next same-platform post to the next day's morning", () => {
   const zone = "America/Chicago";
   const now = new Date("2026-10-03T08:00:00Z");
   const occupied = [wallMs(2026, 10, 3, 5, 30, zone)];
   const iso = plan.ezPickBalancedSuggestedIso([], now, { timeZone: zone, platformOccupiedMs: occupied });
-  assert.equal(dayOf(iso, zone), "2026-10-03");
-  assert.deepEqual(localParts(iso, zone), { hour: 11, minute: 30 });
+  assert.equal(dayOf(iso, zone), "2026-10-04");
+  assert.deepEqual(localParts(iso, zone), { hour: 5, minute: 30 });
 });
 
 test("another platform's morning pushes this post to the same-day afternoon", () => {
@@ -209,7 +203,8 @@ test("initial suggested schedule map honors the active Los Angeles profile timez
   const story = Date.parse(schedules.get("Facebook::Story"));
   assert.ok(Math.abs(photo - reel) >= 3 * 60 * 60 * 1000);
   assert.equal(localParts(schedules.get("Facebook::Photo"), zone).hour, 5);
-  assert.equal(localParts(schedules.get("Facebook::Reel"), zone).hour, 11);
+  assert.equal(localParts(schedules.get("Facebook::Reel"), zone).hour, 5);
+  assert.notEqual(dayOf(schedules.get("Facebook::Photo"), zone), dayOf(schedules.get("Facebook::Reel"), zone));
   assert.equal(story, photo);
 });
 
@@ -239,7 +234,8 @@ test("Facebook and Instagram Stories may share a slot; other types share a platf
     { timeZone: zone },
   );
   assert.deepEqual(localParts(tt.get("TikTok::Video Draft"), zone), { hour: 11, minute: 30 });
-  assert.deepEqual(localParts(tt.get("TikTok::Multi-Photo"), zone), { hour: 16, minute: 30 });
+  assert.deepEqual(localParts(tt.get("TikTok::Multi-Photo"), zone), { hour: 5, minute: 30 });
+  assert.equal(dayOf(tt.get("TikTok::Multi-Photo"), zone), "2026-10-05");
 });
 
 test("existing automatic schedule inside LA blackout is replaced using LA profile time", () => {
@@ -257,7 +253,7 @@ test("existing automatic schedule inside LA blackout is replaced using LA profil
   assert.equal(plan.ezIsBlackoutLocalTime(Date.parse(iso), zone), false);
 });
 
-test("picker fills morning then afternoon then evening before the next day", () => {
+test("picker spreads mornings across days before it uses afternoon", () => {
   const zone = "America/New_York";
   const now = new Date("2026-10-04T08:00:00Z");
   const occupied = [];
@@ -274,9 +270,8 @@ test("picker fills morning then afternoon then evening before the next day", () 
   const local = picks.map((iso) => new Intl.DateTimeFormat("en-US", {
     timeZone: zone, hour: "2-digit", minute: "2-digit", hourCycle: "h23",
   }).format(new Date(iso)));
-  assert.deepEqual(local.slice(0, 3), ["05:30", "11:30", "16:30"]);
-  assert.equal(local[3], "05:30");
-  assert.notEqual(dayOf(picks[3], zone), dayOf(picks[0], zone));
+  assert.deepEqual(local, ["05:30", "05:30", "05:30", "05:30"]);
+  assert.equal(new Set(picks.map((iso) => dayOf(iso, zone))).size, 4);
   assert.ok(picks.every((iso) => !plan.ezIsBlackoutLocalTime(Date.parse(iso), zone)));
 });
 
