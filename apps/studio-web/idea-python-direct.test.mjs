@@ -1,3 +1,4 @@
+import { readStudioWorkerSource } from "../studio-api/worker-source-reader.mjs";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
@@ -9,7 +10,7 @@ const workerPath = path.join(here, "..", "studio-api", "worker.js");
 const appPath = path.join(here, "assets", "app-item4-1008.js");
 
 test("Studio idea generation accepts a batch then finishes Python I1 in waitUntil", async () => {
-  const source = await readFile(workerPath, "utf8");
+  const source = readStudioWorkerSource();
   const start = source.indexOf("async function startStudioIdeaGeneration");
   const end = source.indexOf("async function studioIdeaGenerationStatus", start);
   assert.ok(start >= 0 && end > start, "idea generation handler should exist");
