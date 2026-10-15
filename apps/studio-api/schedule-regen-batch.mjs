@@ -126,6 +126,41 @@ export function buildScheduleRegenCombinations({
   return maeSortRegenCombinations(combos);
 }
 
+export function scheduleRegenCandidateFilterFormula({
+  nowMs = Date.now(),
+  horizonDays = 30,
+  profileFormula = "",
+  platform = "",
+  outputType = "",
+} = {}) {
+  const stamp = Number(nowMs);
+  const startMs = Number.isFinite(stamp) ? stamp : Date.now();
+  const days = Math.max(1, Math.floor(Number(horizonDays) || 30));
+  const startIso = new Date(startMs).toISOString();
+  const horizonIso = new Date(startMs + days * 24 * 60 * 60 * 1000).toISOString();
+  const fields = ["Scheduled_Post_Date", "YouTube_Scheduled_Publish_At", "Studio_Scheduled_At"];
+  const escaped = (value) => String(value || "").replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+  const scheduleBlank = `AND(${fields.map((field) => `{${field}}=BLANK()`).join(",")})`;
+  const scheduleFuture = fields.map((field) =>
+    `AND({${field}}!="",IS_AFTER({${field}},DATETIME_PARSE("${startIso}")),IS_BEFORE({${field}},DATETIME_PARSE("${horizonIso}")))`
+  ).join(",");
+  const clauses = [
+    "{Test_Run_ID}=BLANK()",
+    "{Do_Not_Publish}=0",
+    "{Published_At}=BLANK()",
+    '{Publish_Status}!="Published"',
+    '{Output_Status}!="Published"',
+  ];
+  const p = String(platform || "").trim();
+  if (p) clauses.push(`{Platform}="${escaped(p)}"`);
+  const t = String(outputType || "").trim();
+  if (t) clauses.push(`OR({Studio_Output_Type}="${escaped(t)}",{Format}="${escaped(t)}")`);
+  clauses.push(`OR(${scheduleBlank},${scheduleFuture})`);
+  const base = `AND(${clauses.join(",")})`;
+  const scope = String(profileFormula || "").trim();
+  return scope ? `AND(${scope},${base})` : base;
+}
+
 export function scheduleRegenJobCounts(job) {
   const combos = Array.isArray(job?.combinations) ? job.combinations : [];
   let completed = 0;
