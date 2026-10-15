@@ -83,7 +83,7 @@ test("worker wires supabase pipeline reads behind a flag", async () => {
   assert.match(worker, /listSupabaseScheduleGrid/);
   assert.match(worker, /syncAirtableOutputRowToSupabase/);
   assert.match(worker, /studioSupabaseWriteThroughOutput/);
-  assert.match(worker, /supabase approve write-through failed/);
+  assert.match(worker, /supabase \$\{label\} write-through failed/);
   assert.match(worker, /\/api\/ops\/supabase\/sync/);
   assert.match(worker, /studioSyncSupabasePipelineReads/);
   assert.match(worker, /listOpenOutputs/);
