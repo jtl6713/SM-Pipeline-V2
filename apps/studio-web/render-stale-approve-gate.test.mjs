@@ -11,10 +11,10 @@ const html = fs.readFileSync(path.join(here, "index.html"), "utf8");
 const worker = readStudioWorkerSource();
 
 test("UI 0.6.516 Approve gate rejects stale Rendering / In Production (Output 1807)", () => {
-  assert.match(app, /BUILD_ID = "item4-0.6.693-factory-approve-wait-stories"/);
-  assert.match(html, /UI build 0.6.693/);
-  assert.match(html, /app-item4-1008\.js\?v=0.6.693-factory-approve-wait-stories/);
-  assert.match(html, /styles-phase7-0621\.css\?v=0.6.693-factory-approve-wait-stories/);
+  assert.match(app, /BUILD_ID = "item4-0.6.694-factory-approve-story-bounce"/);
+  assert.match(html, /UI build 0.6.694/);
+  assert.match(html, /app-item4-1008\.js\?v=0.6.694-factory-approve-story-bounce/);
+  assert.match(html, /styles-phase7-0621\.css\?v=0.6.694-factory-approve-story-bounce/);
   assert.match(app, /function creativeCanApproveForPublishing\(/);
   assert.match(
     app,
@@ -24,7 +24,7 @@ test("UI 0.6.516 Approve gate rejects stale Rendering / In Production (Output 18
 });
 
 test("Worker 0.10.478 heals Final_File_URL + Rendering to Ready for Review", () => {
-  assert.match(worker, /version: "0.10.618-mae-horizon-overflow"/);
+  assert.match(worker, /version: "0.10.619-factory-approve-story-bounce"/);
   assert.match(worker, /studio_render_stale_rendering_v1: true/);
   assert.match(worker, /R5_STALE_RENDERING_FINALIZED/);
   assert.match(worker, /\{Render_Status\}="Rendering",\{Final_File_URL\}!=""/);

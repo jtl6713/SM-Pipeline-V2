@@ -52,5 +52,5 @@ test("Worker budgets overview Airtable work so home never waits 60s", () => {
   assert.match(worker, /studio_home_overview_budget_v1:\s*true/);
   assert.match(worker, /STUDIO_PROFILES_OVERVIEW_BUILD_BUDGET_MS/);
   assert.match(worker, /raceStudioOverviewBudget/);
-  assert.match(worker, /0.10.618-mae-horizon-overflow/);
+  assert.match(worker, /0.10.619-factory-approve-story-bounce/);
 });
