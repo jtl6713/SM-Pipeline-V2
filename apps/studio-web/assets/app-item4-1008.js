@@ -277,7 +277,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.687-platforms-frames-details";
+  const BUILD_ID = "item4-0.6.689-balanced-four-week-slots";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -18851,6 +18851,64 @@ function timedScriptAssetLabel(asset, index) {
     }
   }
 
+  function pipelinePlatformLaneMs(record) {
+    const { byPlatform } = pipelineMergedOccupancy(new Set([record?.id].filter(Boolean)));
+    const platform = String(record?.platform || "").trim().toLowerCase();
+    return byPlatform[platform] || pipelineOccupiedScheduleBucketMs(record);
+  }
+
+  function pipelineStoryCompanionIso(record) {
+    const platform = String(record?.platform || "").trim().toLowerCase();
+    const groupKey = pipelineContentGroupKey(record);
+    const peers = (pipelineOutputs || []).filter((row) =>
+      row?.id
+      && row.id !== record.id
+      && pipelineContentGroupKey(row) === groupKey
+      && String(row.platform || "").trim().toLowerCase() === platform
+      && !pipelineScheduleIsStory(row)
+    );
+    for (const peer of peers) {
+      const iso = pipelineRecordScheduleIso(peer);
+      const ms = Date.parse(iso || "");
+      if (Number.isFinite(ms)) return new Date(ms + 10 * 60 * 1000).toISOString();
+    }
+    return "";
+  }
+
+  function pipelinePrefillOpenIso(record, _candidateIso, hint = {}) {
+    const lane = pipelinePlatformLaneMs(record);
+    // Ignore the best-times payload. That route blocks a Reel with TikTok and
+    // YouTube times too, so a busy city returns no slot and the cell stays blank.
+    // Stories used an empty lane and therefore always showed today's window.
+    const mae = nextOpenScheduleIso("", lane, hint, PIPELINE_SCHEDULE_GAP_MS, lane);
+    if (pipelineScheduleIsStory(record)) {
+      const companion = pipelineStoryCompanionIso(record);
+      if (companion && !pipelineScheduleIsBlackout(companion, workingStudioTimeZone())) return companion;
+      const ms = Date.parse(mae || "");
+      if (!Number.isFinite(ms)) return "";
+      const plus = new Date(ms + 10 * 60 * 1000).toISOString();
+      return pipelineScheduleIsBlackout(plus, workingStudioTimeZone()) ? "" : plus;
+    }
+    return mae;
+  }
+
+  function paintPipelineSuggestedSchedule(record, candidateIso, hint = {}) {
+    if (!pipelineUseDefaultSchedules() || !record?.id || pipelineRowHasSchedule(record)) return false;
+    const openIso = pipelinePrefillOpenIso(record, candidateIso, hint);
+    if (!openIso || pipelineScheduleIsBlackout(openIso, workingStudioTimeZone())) return false;
+    const input = document.querySelector(`[data-pipeline-schedule="${record.id}"]`);
+    if (input) {
+      if (!applySuggestedIsoToScheduleInput(input, openIso)) return false;
+    } else {
+      const local = formatDateTimeLocalInput(openIso);
+      if (!local) return false;
+      pipelineScheduleDrafts.set(record.id, local);
+      pipelineScheduleDirty.delete(record.id);
+    }
+    rememberBookedScheduleMs(record.platform, openIso, record);
+    return true;
+  }
+
   function clearDefaultSchedulesFromUnapprovedRows(records = pipelineOutputs) {
     const clearable = pipelineApprovableOutputs(records);
     for (const record of clearable) {
@@ -18870,21 +18928,19 @@ function timedScriptAssetLabel(asset, index) {
   async function applyDefaultSchedulesToReadyRows(records = pipelineOutputs) {
     const ready = pipelineApprovableOutputs(records)
       .slice()
-      .sort((a, b) => pipelineOutputNumber(a) - pipelineOutputNumber(b));
+      .sort((a, b) => (pipelineScheduleIsStory(a) ? 1 : 0) - (pipelineScheduleIsStory(b) ? 1 : 0)
+        || pipelineOutputNumber(a) - pipelineOutputNumber(b));
     const { reserved, byPlatform } = pipelineMergedOccupancy();
     for (const record of ready) {
       if (pipelineRowHasSchedule(record)) continue;
       try {
         const data = await fetchBestTimesForOutput(record);
         const suggested = String(data?.suggested_iso || "").trim();
-        if (!suggested) continue;
         const platform = String(record.platform || "").trim().toLowerCase();
         const bucket = pipelineScheduleBucketKey(record);
         const hint = suggestedTimeHint(data);
         rememberSuggestedHint(platform, hint);
-        const lane = pipelineScheduleIsStory(record) ? [] : (byPlatform[platform] || reserved[bucket] || []);
-        const allOccupied = Object.values(byPlatform).flat().filter(Number.isFinite);
-        const iso = nextOpenScheduleIso(suggested, lane, hint, PIPELINE_SCHEDULE_GAP_MS, allOccupied);
+        const iso = pipelinePrefillOpenIso(record, suggested, hint);
         if (!iso || pipelineScheduleIsBlackout(iso, workingStudioTimeZone())) continue;
         const input = document.querySelector(`[data-pipeline-schedule="${record.id}"]`);
         if (input) applySuggestedIsoToScheduleInput(input, iso);
@@ -18908,13 +18964,12 @@ function timedScriptAssetLabel(asset, index) {
       const bucket = pipelineScheduleBucketKey(record);
       const requested = source[record.id] || new Date().toISOString();
       const lane = pipelineScheduleIsStory(record) ? [] : (byPlatform[platform] || reserved[bucket] || []);
-      const allOccupied = Object.values(byPlatform).flat().filter(Number.isFinite);
       const iso = nextOpenScheduleIso(
         requested,
         lane,
         hintForPlatform(platform),
         PIPELINE_SCHEDULE_GAP_MS,
-        allOccupied,
+        lane,
         { keepAnyNonClashing: true },
       );
       if (!iso) continue;
@@ -19022,18 +19077,22 @@ function timedScriptAssetLabel(asset, index) {
   }
 
   async function refreshPipelineScheduleSuggestions(records) {
-    const ready = (Array.isArray(records) ? records : []).filter((record) =>
-      /ready for review/i.test(String(record?.studio_state || record?.output_status || record?.review_status || ""))
-      || creativeCanReschedule(record)
-    );
-    const byId = new Map(ready.map((record) => [record.id, record]));
+    const eligible = (Array.isArray(records) ? records : []).filter((record) => {
+      if (!record?.id || record.do_not_publish) return false;
+      if (creativeIsPublished(record)) return false;
+      return true;
+    });
+    const byId = new Map(eligible.map((record) => [record.id, record]));
     const nodes = Array.from(document.querySelectorAll("[data-pipeline-schedule-suggest]"));
-    // One row at a time. A parallel pass gave every empty row the same server
-    // 5:30 because none of them could see the slot the others had just taken.
+    // One row at a time, mains before Stories. A parallel pass gave every empty
+    // row the same server 5:30 because none of them could see the slot the
+    // others had just taken. Stories then sit 10 minutes after their main.
     nodes.sort((left, right) => {
       const a = byId.get(left.getAttribute("data-pipeline-schedule-suggest"));
       const b = byId.get(right.getAttribute("data-pipeline-schedule-suggest"));
-      return pipelineOutputNumber(a) - pipelineOutputNumber(b);
+      const aStory = pipelineScheduleIsStory(a) ? 1 : 0;
+      const bStory = pipelineScheduleIsStory(b) ? 1 : 0;
+      return aStory - bStory || pipelineOutputNumber(a) - pipelineOutputNumber(b);
     });
     for (const suggestEl of nodes) {
       const id = suggestEl.getAttribute("data-pipeline-schedule-suggest");
@@ -19058,19 +19117,10 @@ function timedScriptAssetLabel(asset, index) {
           useBtn.dataset.suggestedDays = JSON.stringify(hint.days);
           useBtn.dataset.suggestedWindows = JSON.stringify(hint.windows);
         }
-        if (pipelineUseDefaultSchedules() && iso && creativeCanApproveForPublishing(record) && !pipelineRowHasSchedule(record)) {
-          const input = document.querySelector(`[data-pipeline-schedule="${id}"]`);
-          const { byPlatform } = pipelineMergedOccupancy();
-          const platform = String(record.platform || "").trim().toLowerCase();
-          const lane = pipelineScheduleIsStory(record) ? [] : (byPlatform[platform] || pipelineOccupiedScheduleBucketMs(record));
-          const allOccupied = Object.values(byPlatform).flat().filter(Number.isFinite);
-          const openIso = nextOpenScheduleIso(iso, lane, hint, PIPELINE_SCHEDULE_GAP_MS, allOccupied);
-          if (openIso && !pipelineScheduleIsBlackout(openIso, workingStudioTimeZone()) && applySuggestedIsoToScheduleInput(input, openIso)) {
-            rememberBookedScheduleMs(record.platform, openIso, record);
-          }
-        }
+        paintPipelineSuggestedSchedule(record, iso, hint);
       } catch (error) {
         suggestEl.textContent = error?.message ? `Suggestion unavailable (${error.message}).` : "Suggestion unavailable.";
+        paintPipelineSuggestedSchedule(record, "", {});
       }
     }
   }
@@ -19466,12 +19516,12 @@ function timedScriptAssetLabel(asset, index) {
 
     button.disabled = true;
     button.textContent = "Regenerating…";
-    setPipelineScheduleGridMessage(`Rebuilding ${eligible.length} post schedule${eligible.length === 1 ? "" : "s"} for the active ${workingStudioCityLabel()} profile using morning → afternoon → evening on each day…`);
+    setPipelineScheduleGridMessage(`Rebuilding ${eligible.length} post schedule${eligible.length === 1 ? "" : "s"} for the active ${workingStudioCityLabel()} profile, balancing each platform across the next four weeks…`);
     let saved = 0;
     let failed = 0;
     // Process one platform completely before moving to the next selected platform.
-    // Each platform walks M then A then E on a day before the next day, so two
-    // TikToks become Monday 5:30 and Monday 11:30, not two Monday mornings.
+    // Each platform's posts stay as even as possible across the four weeks:
+    // Monday 5:30, then Tuesday 5:30, not two posts stacked on Monday.
     const platformOrder = [...selected];
     const orderedEligible = platformOrder.flatMap((platform) =>
       eligible.filter((record) => pipelineSchedulePlatformKey(record) === platform)

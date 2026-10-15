@@ -9,7 +9,7 @@ const app = fs.readFileSync(path.join(here, "assets/app-item4-1008.js"), "utf8")
 const css = fs.readFileSync(path.join(here, "assets/styles-phase7-0621.css"), "utf8");
 
 test("Pipeline typed schedule autosaves without requiring Save", () => {
-  assert.match(app, /item4-0.6.687-platforms-frames-details/);
+  assert.match(app, /item4-0.6.689-balanced-four-week-slots/);
   assert.match(app, /input\.addEventListener\("change", \(\) => \{\s*markDirty\(\);\s*saveTypedValue\(\);/);
   assert.match(app, /input\.addEventListener\("blur", saveTypedValue\)/);
   assert.match(app, /if \(event\.key !== "Enter"\) return;[\s\S]*saveTypedValue\(\)/);
@@ -28,6 +28,21 @@ test("Published Pipeline schedules render locked and cannot save", () => {
 
 test("Compact schedule row no longer reserves a Save-button column", () => {
   assert.match(css, /pipeline-schedule-controls\{display:grid;grid-template-columns:minmax\(0,1fr\) 30px;/);
+});
+
+test("Pipeline prefills every output from that platform calendar, Stories after mains", () => {
+  assert.match(app, /function pipelinePrefillOpenIso/);
+  assert.match(app, /function paintPipelineSuggestedSchedule/);
+  assert.match(app, /Stories used an empty lane and therefore always showed today's window/);
+  assert.match(app, /pipelineStoryCompanionIso\(record\)/);
+  assert.match(app, /10 \* 60 \* 1000/);
+  const refresh = app.slice(
+    app.indexOf("async function refreshPipelineScheduleSuggestions"),
+    app.indexOf("function stopPipelineApproveAllPoll"),
+  );
+  assert.match(refresh, /paintPipelineSuggestedSchedule\(record, iso, hint\)/);
+  assert.match(refresh, /aStory - bStory \|\| pipelineOutputNumber/);
+  assert.doesNotMatch(refresh, /allOccupied/);
 });
 
 test("Bulk schedule regeneration includes blank unpublished schedules", () => {

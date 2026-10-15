@@ -73,7 +73,7 @@ test("supabase read-route inventory is explicit", () => {
 
 test("worker wires supabase pipeline reads behind a flag", async () => {
   const worker = await readFile(path.join(here, "worker.js"), "utf8");
-  assert.match(worker, /version: "0\.10\.614-scheduled-plus-awaiting"/);
+  assert.match(worker, /version: "0\.10\.617-balanced-four-week-slots"/);
   assert.match(worker, /studio_supabase_pipeline_reads_v1: true/);
   assert.match(worker, /studio_supabase_phase3_stable_v1: true/);
   assert.match(worker, /studio_supabase_schedule_writethrough_v1: true/);

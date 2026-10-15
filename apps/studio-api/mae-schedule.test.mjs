@@ -81,34 +81,66 @@ test("MAE never stamps NYC midnight or 11 PM for YouTube/Instagram", () => {
   assert.ok(!hours.includes(0) && !hours.includes(1) && !hours.includes(23) && !hours.includes(22), hours.join(","));
 });
 
-test("Worker MAE fills morning then afternoon then evening before the next day's MAE", () => {
+test("successive same-platform picks spread one morning across each day", () => {
   const zone = "America/New_York";
-  const now = new Date("2026-10-04T08:00:00Z");
+  const now = new Date("2026-10-05T08:00:00Z");
   const occupied = [];
-  const locals = [];
   const days = [];
-  for (let i = 0; i < 4; i++) {
+  for (let i = 0; i < 8; i++) {
     const iso = maePickBalancedSuggestedIso(MAE_PRIORITY_SCHEDULE_WINDOWS, now, {
       occupiedMs: occupied,
       platformOccupiedMs: occupied,
       timeZone: zone,
     });
-    locals.push(localParts(iso, zone));
+    const local = localParts(iso, zone);
+    assert.equal(local.hour, 5, iso);
+    assert.equal(local.minute, 30, iso);
     days.push(dayOf(iso, zone));
     occupied.push(Date.parse(iso));
   }
-  assert.deepEqual(locals.slice(0, 3).map((part) => `${part.hour}:${String(part.minute).padStart(2, "0")}`), [
-    "5:30",
-    "11:30",
-    "16:30",
-  ]);
-  assert.equal(locals[3].hour, 5);
-  assert.equal(locals[3].minute, 30);
-  assert.equal(days[0], days[2]);
-  assert.notEqual(days[3], days[0]);
+  assert.equal(new Set(days).size, 8);
+  assert.equal(days[0], "2026-10-05");
+  assert.equal(days[7], "2026-10-12");
 });
 
-test("two TikToks take Monday morning then Monday afternoon, not two mornings", () => {
+test("a full early week does not take the next post while later days are empty", () => {
+  const zone = "America/New_York";
+  const now = new Date("2026-10-05T08:00:00Z");
+  const occupied = fillMaeHorizon(zone, { year: 2026, month: 10, day: 5 }, 7);
+  const iso = maePickBalancedSuggestedIso([], now, {
+    timeZone: zone,
+    occupiedMs: occupied,
+    platformOccupiedMs: occupied,
+  });
+  assert.equal(dayOf(iso, zone), "2026-10-12");
+  assert.equal(localParts(iso, zone).hour, 5);
+  assert.equal(localParts(iso, zone).minute, 30);
+});
+
+test("afternoons start only after every day in the four weeks has a morning", () => {
+  const zone = "America/New_York";
+  const now = new Date("2026-10-05T08:00:00Z");
+  const occupied = [];
+  for (let i = 0; i < MAE_SUGGEST_HORIZON_DAYS; i++) {
+    const iso = maePickBalancedSuggestedIso([], now, {
+      timeZone: zone,
+      occupiedMs: occupied,
+      platformOccupiedMs: occupied,
+    });
+    assert.equal(localParts(iso, zone).hour, 5, iso);
+    occupied.push(Date.parse(iso));
+  }
+  const afternoon = maePickBalancedSuggestedIso([], now, {
+    timeZone: zone,
+    occupiedMs: occupied,
+    platformOccupiedMs: occupied,
+  });
+  assert.equal(dayOf(afternoon, zone), "2026-10-05");
+  assert.equal(localParts(afternoon, zone).hour, 11);
+  assert.equal(localParts(afternoon, zone).minute, 30);
+});
+
+test("two TikToks take Monday morning then Tuesday morning, not the same day", () => {
   const zone = "America/New_York";
   const now = new Date("2026-10-05T08:00:00Z"); // 4:00 AM EDT Monday
   const stamps = maeBuildSuggestedScheduleMap(
@@ -124,9 +156,10 @@ test("two TikToks take Monday morning then Monday afternoon, not two mornings", 
   const second = localParts(stamps.get("TikTok::Multi-Photo"), zone);
   assert.equal(first.hour, 5);
   assert.equal(first.minute, 30);
-  assert.equal(second.hour, 11);
+  assert.equal(second.hour, 5);
   assert.equal(second.minute, 30);
-  assert.equal(dayOf(stamps.get("TikTok::Video Draft"), zone), dayOf(stamps.get("TikTok::Multi-Photo"), zone));
+  assert.equal(dayOf(stamps.get("TikTok::Video Draft"), zone), "2026-10-05");
+  assert.equal(dayOf(stamps.get("TikTok::Multi-Photo"), zone), "2026-10-06");
 });
 
 test("blackout 12 AM NY is replaced with the next MAE slot, not +3h", () => {
@@ -449,14 +482,15 @@ test("a taken 5:30 is not reused; the next MAE opening is chosen", () => {
   const reel = localParts(stamps.get("Instagram::Reel"), zone);
   const carousel = localParts(stamps.get("Instagram::Carousel"), zone);
   assert.notEqual(stamps.get("Instagram::Reel"), morning);
-  assert.equal(reel.hour, 11);
+  assert.equal(reel.hour, 5);
   assert.equal(reel.minute, 30);
-  assert.equal(carousel.hour, 16);
+  assert.equal(carousel.hour, 5);
   assert.equal(carousel.minute, 30);
-  assert.equal(dayOf(stamps.get("Instagram::Reel"), zone), dayOf(morning, zone));
+  assert.equal(dayOf(stamps.get("Instagram::Reel"), zone), "2026-10-06");
+  assert.equal(dayOf(stamps.get("Instagram::Carousel"), zone), "2026-10-07");
 });
 
-test("two Instagrams stored on the same free 5:30 become morning then afternoon", () => {
+test("two Instagrams stored on the same free 5:30 keep the first and move the second to the next day", () => {
   const zone = "America/New_York";
   const now = new Date("2026-10-05T08:00:00Z");
   const morning = maePickBalancedSuggestedIso([], now, {
@@ -478,8 +512,9 @@ test("two Instagrams stored on the same free 5:30 become morning then afternoon"
   assert.equal(stamps.get("Instagram::Reel"), new Date(morning).toISOString());
   assert.equal(reel.hour, 5);
   assert.equal(reel.minute, 30);
-  assert.equal(carousel.hour, 11);
+  assert.equal(carousel.hour, 5);
   assert.equal(carousel.minute, 30);
+  assert.equal(dayOf(stamps.get("Instagram::Carousel"), zone), "2026-10-06");
 });
 
 test("occupancy load windows the Airtable query and sorts nearest-first", () => {
@@ -527,7 +562,7 @@ test("Worker stamp paths use MAE not industry evening windows", () => {
   assert.match(worker, /studio_mae_platform_spread_v1: true/);
   assert.match(worker, /studio_mae_profile_occupancy_v1: true/);
   assert.match(worker, /studio_schedule_occupancy_fields_v1: true/);
-  assert.match(worker, /0.10.614-scheduled-plus-awaiting/);
+  assert.match(worker, /0.10.617-balanced-four-week-slots/);
   assert.match(worker, /studio_story_companion_schedule_v1: true/);
   assert.match(worker, /storyCompanion/);
   assert.match(worker, /maeResolveStorySchedule/);

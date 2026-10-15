@@ -149,7 +149,9 @@ test("default schedule suggestions start off, clear on untick, and do not hide r
   assert.match(app, /function clearDefaultSchedulesFromUnapprovedRows/);
   assert.match(app, /pipelineScheduleDrafts\.delete\(record\.id\)/);
   assert.match(app, /pipelineScheduleDirty\.delete\(record\.id\)/);
-  assert.match(app, /creativeCanApproveForPublishing\(record\) && !pipelineRowHasSchedule\(record\)/);
+  assert.match(app, /function paintPipelineSuggestedSchedule/);
+  assert.match(app, /pipelineRowHasSchedule\(record\)\) return false/);
+  assert.match(app, /Stories used an empty lane/);
   assert.match(app, /\.filter\(\(record\) => !studioEffectiveScheduleIso\(record\)\)/);
   assert.match(app, /<strong>Ready to schedule<\/strong>/);
   assert.match(app, /if \(next === "outputs"\)[\s\S]{0,220}previous !== "outputs"[\s\S]{0,220}restorePipelineUseDefaultSchedules\(\)[\s\S]{0,120}clearDefaultSchedulesFromUnapprovedRows\(\)/);

@@ -296,3 +296,6 @@ Deploy Worker 0.10.489-engagement-ledger. Shrink the engagement ledger so Chicag
 2026-10-15: Worker 0.10.613-open-ideas-drain-20 redeploy. Prior production deploy rolled back after postdeploy content/v2 Cloudflare 404; code already on main.
 
 2026-10-15: Worker 0.10.614-scheduled-plus-awaiting. Autonomous 200/209 ceiling uses Scheduled + Awaiting Approval combined.
+2026-10-15: Worker 0.10.616-suggested-schedule-prefill. Pipeline prefills a morning/afternoon/evening time on every output from that platform's calendar. Factory Approve and Factory Approve All recheck the best open slot and store it.
+
+2026-10-15: Worker 0.10.617-balanced-four-week-slots. Each platform is balanced across the next four weeks. A full morning/afternoon/evening day uses that day's widest gap instead of stacking the next posts on today.

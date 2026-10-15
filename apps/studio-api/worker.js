@@ -728,7 +728,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.614-scheduled-plus-awaiting",
+          version: "0.10.617-balanced-four-week-slots",
           studio_supabase_pipeline_reads_v1: true,
           studio_supabase_sync_gate_v1: true,
           studio_supabase_phase3_stable_v1: true,
@@ -824,6 +824,7 @@ export default {
           studio_platform_calendar_v1: true,
           studio_insights_best_times_v1: true,
           studio_prefill_suggested_schedules_v1: true,
+          studio_factory_recheck_schedule_v1: true,
           studio_insights_similar_times_v1: true,
           studio_insights_learning_db_v1: true,
           studio_prepare_unsaved_guard_v1: true,
@@ -21988,7 +21989,7 @@ async function getInsightsBestTimes(request, env, url, authorization) {
     similar_sample_size: 0,
     similar_profile: themeName,
     caption: null,
-    note: note || `${seasonLabel} stamps use the MAE rotation in ${timeZone}: fill MAE morning/afternoon/evening across 28 days. Different platforms in one package land about a week apart. Then 4th/5th widest-gap slots. Overnight 11:00 PM–3:00 AM is never used.`,
+    note: note || `${seasonLabel} stamps use the MAE rotation in ${timeZone}: balance each platform across 28 days (morning, then afternoon, then evening on the lightest day). Different platforms in one package land about a week apart. Once those slots are full, each extra uses that day's widest gap. Overnight 11:00 PM–3:00 AM is never used.`,
   });
 
   try {
@@ -22081,7 +22082,7 @@ async function getInsightsBestTimes(request, env, url, authorization) {
       similar_sample_size: similar?.sample_size || 0,
       similar_profile: similar?.profile || theme,
       caption,
-      note: `${seasonLabel} stamps use the MAE rotation in ${timeZone}: fill MAE morning/afternoon/evening across 28 days, then 4th/5th widest-gap slots. Overnight 11:00 PM–3:00 AM is never used.`,
+      note: `${seasonLabel} stamps use the MAE rotation in ${timeZone}: balance each platform across 28 days (morning, then afternoon, then evening on the lightest day). Once those slots are full, each extra uses that day's widest gap. Overnight 11:00 PM–3:00 AM is never used.`,
     });
   } catch (error) {
     console.warn("best-times failed; MAE fallback", error);
@@ -37369,30 +37370,35 @@ async function approveOutputRecordForPublishing(env, existing, note, stamp, payl
   const publishNowImmediate = Boolean(
     payload?.publish_now === true || rawIn.toLowerCase() === "immediate"
   );
-  // A locked operator time stays exact (Output 909). An existing slot is kept
-  // for Reels, Shorts, and feed posts. Publish Now is the only path that means
-  // "right now". A blank Scheduled_Post_Date is what Make and the worker treat
-  // as due, so writing nothing publishes the post immediately.
+  // A locked operator time stays exact (Output 909). Pipeline Approve keeps an
+  // existing slot for Reels, Shorts, and feed posts. Factory Approve and Factory
+  // Approve All set recheckBestSlot so a displayed suggestion is not the lock:
+  // the best open morning, afternoon, or evening at click time is what gets saved.
+  // Publish Now is the only path that means "right now". A blank
+  // Scheduled_Post_Date is what Make and the worker treat as due, so writing
+  // nothing publishes the post immediately.
   // Stories do not take that next MAE opening. An empty lane returns today's
   // 11:30, and every Story approved together published at that same minute.
   // A Story is the same-platform main plus 10 minutes, and that time is stored
   // as-is instead of being snapped back onto an MAE slot.
-  let requestedRaw = rawIn;
+  const recheckBestSlot = options.recheckBestSlot === true;
+  let requestedRaw = recheckBestSlot ? "" : rawIn;
   let exactOverride = false;
   let storyCompanion = false;
   if (publishNowImmediate) {
     requestedRaw = "immediate";
-  } else if (payload?.manual_schedule_override === true && requestedRaw) {
+  } else if (payload?.manual_schedule_override === true && rawIn) {
+    requestedRaw = rawIn;
     exactOverride = true;
-  } else if (markerIso) {
+  } else if (markerIso && !recheckBestSlot) {
     requestedRaw = markerIso;
     exactOverride = true;
   } else if (isStory) {
     const resolved = await studioResolveStoryPublishIso(env, record, {
       timeZone,
       occupiedMs: occupiedMs || [],
-      requestedIso: requestedRaw,
-      existingIso: existingScheduleIso,
+      requestedIso: recheckBestSlot ? "" : requestedRaw,
+      existingIso: recheckBestSlot ? "" : existingScheduleIso,
       extraSiblings: options.extraSiblings || [],
       siblingRows: options.siblingRows,
     });
@@ -37401,7 +37407,7 @@ async function approveOutputRecordForPublishing(env, existing, note, stamp, payl
     }
     requestedRaw = resolved.iso;
     storyCompanion = true;
-  } else if (!requestedRaw && existingScheduleIso) {
+  } else if (!recheckBestSlot && !requestedRaw && existingScheduleIso) {
     requestedRaw = existingScheduleIso;
   } else if (!requestedRaw) {
     const lane = occupiedMs || [];
@@ -37610,7 +37616,10 @@ async function studioProcessApproveAllJobSlice(env, jobId, options = {}) {
         const platform = String(f(record, "Platform") || "").trim();
         const isStory = /story/i.test(String(f(record, "Studio_Output_Type") || f(record, "Format") || ""));
         const occupiedMs = studioOccupiedForPlatform(occupiedByPlatform, platform);
-        const rowSchedule = job.schedules?.[record.id];
+        const rowSchedule = String(job.schedules?.[record.id] || "").trim();
+        // Factory Approve All sends no client times. Recheck the calendar and
+        // store that slot. Pipeline Approve All sends the time already on the row.
+        const recheckBestSlot = !rowSchedule;
         const extraSiblings = (job.items || [])
           .filter((entry) => entry.status === "approved" && entry.scheduled_ms && !/story/i.test(String(entry.format || "")))
           .map((entry) => ({
@@ -37619,8 +37628,8 @@ async function studioProcessApproveAllJobSlice(env, jobId, options = {}) {
             scheduled_at: new Date(Number(entry.scheduled_ms)).toISOString(),
           }));
         const updated = await approveOutputRecordForPublishing(env, record, job.notes || "", new Date().toISOString(), {
-          scheduled_post_date: rowSchedule,
-        }, { occupiedMs, extraSiblings });
+          scheduled_post_date: rowSchedule || undefined,
+        }, { occupiedMs, extraSiblings, recheckBestSlot });
         const booked = studioScheduleMs(f(updated, "Scheduled_Post_Date")) ?? Date.now();
         if (!isStory) (occupiedByPlatform[platform] ||= []).push(booked);
         Object.assign(item, mapApproveAllEligibleSummary(updated), {
@@ -43076,6 +43085,7 @@ async function factoryApproveOutput(env, id, actor, note, ctx = null) {
     note || `Factory Desk approve by ${actor || "operator"}`,
     stamp,
     {},
+    { recheckBestSlot: true },
   );
   const held = !studioPublishCanDispatchNow(updated);
   if (ctx && typeof ctx.waitUntil === "function") {
