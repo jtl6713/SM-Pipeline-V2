@@ -26,6 +26,9 @@ import {
   classifyAutonomousRfrGate,
   classifyPublishDispatch,
   classifyPublishFailed,
+  classifyPublishLiveFailedStatus,
+  classifyTtd0RouteBlankDraft,
+  classifyFacebookPublishRateLimit,
   classifyIgCarouselTooManyChildren,
   classifyIgCarouselChildVerificationRace,
   classifyIgCarouselChildPollFailure,
@@ -524,9 +527,50 @@ test("promoted advancement is origin-aware and does not treat Ready for Review a
     last_modified: "2026-09-07T03:00:00Z",
   }, now), null);
   assert.ok(CLASSIFIER_KINDS.includes("publish_failed_transient"));
+  assert.ok(CLASSIFIER_KINDS.includes("publish_live_failed_status"));
+  assert.ok(CLASSIFIER_KINDS.includes("ttd0_route_blank_draft"));
+  assert.ok(CLASSIFIER_KINDS.includes("facebook_publish_rate_limit"));
   assert.ok(CLASSIFIER_KINDS.includes("render_failed"));
   assert.ok(CLASSIFIER_KINDS.includes("render_unfetchable_source"));
   assert.ok(CLASSIFIER_KINDS.includes("render_private_drive_watermark"));
+  const liveFailed1338 = classifyPublishLiveFailedStatus({
+    id: "recsjWNjzcO4nITmZ",
+    publish_status: "Failed",
+    published_at: "2026-10-14T18:36:03.299Z",
+    platform_post_id: "1437981591868633",
+    platform_post_url: "https://www.facebook.com/reel/1437981591868633/",
+    platform: "Facebook",
+  });
+  assert.equal(liveFailed1338.kind, "publish_live_failed_status");
+  assert.equal(liveFailed1338.fingerprint, fingerprint("publish_live_failed_status", "recsjWNjzcO4nITmZ", "post_live"));
+  assert.equal(classifyPublishFailed({
+    id: "recsjWNjzcO4nITmZ",
+    publish_status: "Failed",
+    published_at: "2026-10-14T18:36:03.299Z",
+    platform_post_id: "1437981591868633",
+    output_status: "Approved for Publishing",
+  }, now), null);
+  const ttd0Blank = classifyTtd0RouteBlankDraft({
+    id: "recLParqcGimTvAr8",
+    platform: "TikTok",
+    platform_output_type: "TikTok Video",
+    publish_error_stage: "TTD0_ROUTE",
+    publish_error: "TTD0 found neither a TikTok Draft 9:16 photo set nor a public media.chicagoshining.com video URL.",
+    final_file_url: "https://media.chicagoshining.com/publish/platform-output-2863/x.mp4",
+    tiktok_draft_type: "",
+  });
+  assert.equal(ttd0Blank.kind, "ttd0_route_blank_draft");
+  assert.equal(ttd0Blank.fingerprint, fingerprint("ttd0_route_blank_draft", "recLParqcGimTvAr8", "cdn_video"));
+  const fbRate = classifyFacebookPublishRateLimit({
+    id: "recBp5anIszX6Ja5k",
+    platform: "Facebook",
+    publish_status: "Failed",
+    publish_error_stage: "FBS3_INIT",
+    publish_error: "Facebook did not create a Reel upload session.",
+    fb_slideshow_error: "FBS3 FBS3_INIT failed. HTTP 400: We limit how often you can post, comment or do other things in a given amount of time in order to help protect the community from spam.",
+  });
+  assert.equal(fbRate.kind, "facebook_publish_rate_limit");
+  assert.equal(fbRate.fingerprint, fingerprint("facebook_publish_rate_limit", "recBp5anIszX6Ja5k", "graph_368"));
   assert.equal(classifyPublishFailed({
     id: "recHsN9TCoV8HsAdT",
     output_status: "Approved for Publishing",

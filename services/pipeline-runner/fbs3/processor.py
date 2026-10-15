@@ -21,6 +21,7 @@ from fbs3.constants import (
     PUBLISH_LOCKED_BY,
     PUBLISH_STATUS_FAILED,
     PUBLISH_STATUS_PUBLISHING,
+    RATE_LIMIT_RETRY_MINUTES,
     RETRY_MINUTES,
     STATUS_INITIALIZING,
     STATUS_PROCESSING,
@@ -40,7 +41,27 @@ _PUBLIC_MESSAGES = {
     "FBS3_UPLOAD": "Facebook did not accept the hosted slideshow MP4.",
     "FBS3_FINISH": "Facebook rejected the Reel finish request.",
     "FBS3_AMBIGUOUS": "Facebook Reel finish outcome was ambiguous.",
+    "FBS3_RATE_LIMIT": (
+        "Facebook rate limit (368/1390008): We limit how often you can post. "
+        "Retry after cooldown."
+    ),
 }
+
+
+def _is_facebook_rate_limit(exc: FacebookReelError) -> bool:
+    blob = " ".join(
+        [
+            str(exc),
+            str(exc.status_code or ""),
+            str(exc.payload or ""),
+        ]
+    ).casefold()
+    return (
+        "limit how often you can post" in blob
+        or "protect the community from spam" in blob
+        or "1390008" in blob
+        or ("'code': 368" in blob or '"code": 368' in blob or " code 368" in blob)
+    )
 
 
 def _ensure_public_reel_mp4(client, output: dict[str, Any]) -> bool:
@@ -281,16 +302,20 @@ def _mark_graph_failed(
             **preview,
         }
 
+    rate_limited = _is_facebook_rate_limit(exc)
+    if rate_limited:
+        stage = "FBS3_RATE_LIMIT"
     fields = _unlock_retry(
         stage=stage,
-        message=_PUBLIC_MESSAGES[stage],
+        message=_PUBLIC_MESSAGES.get(stage) or _PUBLIC_MESSAGES["FBS3_INIT"],
         detail=f"FBS3 {stage} failed. HTTP {exc.status_code}: {exc}",
         payload=exc.payload,
+        minutes=RATE_LIMIT_RETRY_MINUTES if rate_limited else RETRY_MINUTES,
     )
     client.update_record(PLATFORM_OUTPUTS_TABLE, output["id"], fields, typecast=True)
     return {
         "processed": False,
-        "reason": "graph_failed",
+        "reason": "graph_rate_limited" if rate_limited else "graph_failed",
         "error": str(exc),
         "attempt_count": attempt,
         **preview,

@@ -472,6 +472,8 @@ import {
   studioHealNativePhotoReviewStrands,
   studioHealAwaitingApprovalStaleRfr,
   studioHealPhantomRerender,
+  studioHealLiveFailedPublishStatus,
+  studioHealTtd0RouteBlankDraft,
   studioHealFailedStatuses,
   studioHealIgCarouselTooManyChildren,
   studioHealIgCarouselChildVerificationRace,
@@ -1000,7 +1002,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.622-schedule-regen-live",
+          version: "0.10.623-failed-publish-selfheal",
           studio_supabase_pipeline_reads_v1: true,
           studio_supabase_sync_gate_v1: true,
           studio_supabase_phase3_stable_v1: true,
@@ -2353,6 +2355,16 @@ export default {
         console.warn("ops az navy pier title patch failed", error);
       }
       try {
+        await studioHealLiveFailedPublishStatus(env, { limit: 8 });
+      } catch (error) {
+        console.warn("studio live-failed publish heal failed", error);
+      }
+      try {
+        await studioHealTtd0RouteBlankDraft(env, { limit: 4 });
+      } catch (error) {
+        console.warn("studio TTD0 blank-draft heal failed", error);
+      }
+      try {
         await studioHealFailedStatuses(env, { limit: 6 });
       } catch (error) {
         console.warn("studio failed-status heal failed", error);
@@ -3492,6 +3504,10 @@ const AZ_SCHEDULE_LEAD_MS = 10 * 60 * 1000;
 /*__STUDIO_WORKER_EXTRACT:studioHealAwaitingApprovalStaleRfr__*/
 /** Rerendering badge with a finished file and no render running → back to Ready for Review. */
 /*__STUDIO_WORKER_EXTRACT:studioHealPhantomRerender__*/
+/** Publish_Status=Failed while Platform_Post_ID / Published_At already prove live. */
+/*__STUDIO_WORKER_EXTRACT:studioHealLiveFailedPublishStatus__*/
+/** TTD0_ROUTE with CDN MP4 but blank TikTok_Draft_Type. */
+/*__STUDIO_WORKER_EXTRACT:studioHealTtd0RouteBlankDraft__*/
 /*__STUDIO_WORKER_EXTRACT:studioHealFailedStatuses__*/
 /*__STUDIO_WORKER_EXTRACT:studioHealIgCarouselTooManyChildren__*/
 /*__STUDIO_WORKER_EXTRACT:studioHealIgCarouselChildVerificationRace__*/

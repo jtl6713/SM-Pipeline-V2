@@ -101,16 +101,22 @@ export function deskTransientRenderError(text) {
     || /exit code 1|delayrender|request closed|timed?\s*out|timeout|502|503|504|econnreset|connection reset/i.test(value);
 }
 
+export function isFacebookPublishRateLimitError(text) {
+  const value = String(text || "");
+  return /limit how often you can post|protect the community from spam|FBS3_RATE_LIMIT|error_subcode['":\s]*1390008|(^|[^0-9])368([^0-9]|$)/i.test(value);
+}
+
 export function deskTransientPublishError(text) {
   const value = String(text || "");
   if (!value.trim()) return false;
   if (/copyright|permission denied|invalid video|unsupported format|video too long|duplicate/i.test(value)) {
     return false;
   }
+  if (isFacebookPublishRateLimitError(value)) return true;
   const errorClass = errorClassFromText(value);
   return errorClass === "transient_http"
     || errorClass === "in_progress"
-    || /in_progress|still being processed|still in progress|timed?\s*out|timeout|502|503|504|10053|connection aborted|econnreset|capacity|try again|2207082|media upload has failed|(^|[^0-9])401([^0-9]|$)|unauthorized/i.test(value);
+    || /in_progress|still being processed|still in progress|timed?\s*out|timeout|502|503|504|10053|connection aborted|econnreset|capacity|try again|2207082|media upload has failed|FBS2_DIRECT_STORAGE|R2 upload|did not create a Reel upload session|(^|[^0-9])401([^0-9]|$)|unauthorized/i.test(value);
 }
 
 export function deskPermanentFailedError(text) {
@@ -983,7 +989,74 @@ export function classifyIgCarouselRateLimited(row) {
   }, row);
 }
 
+export function classifyPublishLiveFailedStatus(row) {
+  const publish = String(row?.publish_status || "").trim();
+  if (publish !== "Failed") return null;
+  const postId = String(row?.platform_post_id || row?.youtube_video_id || "").trim();
+  const publishedAt = String(row?.published_at || "").trim();
+  const postUrl = String(row?.platform_post_url || "").trim();
+  if (!postId && !publishedAt && !postUrl) return null;
+  if (Boolean(row?.do_not_publish)) return null;
+  const recordId = String(row?.id || row?.record_id || "").trim();
+  return withDeskIdentity({
+    kind: "publish_live_failed_status",
+    class: "transient",
+    record_id: recordId || null,
+    fingerprint: fingerprint("publish_live_failed_status", recordId, "post_live"),
+    actor: "worker_heal",
+    diagnosis: "Platform_Post_ID / Published_At / Platform_Post_URL already prove the post is live, but Publish_Status is still Failed (often after Facebook cover attach left Failed when Published_At was already set). Worker promotes to Published and clears Retry Pending FB slideshow flags. Do not Publish Now. Proven: Output 1338 / recsjWNjzcO4nITmZ.",
+  }, row);
+}
+
+export function classifyTtd0RouteBlankDraft(row) {
+  const stage = String(row?.publish_error_stage || "").trim().toUpperCase();
+  const err = String(row?.publish_error || "").trim();
+  if (stage !== "TTD0_ROUTE" && !/TTD0 found neither a TikTok Draft/i.test(err)) return null;
+  const platform = String(row?.platform || "").trim();
+  if (platform !== "TikTok") return null;
+  const draftType = String(row?.tiktok_draft_type || "").trim();
+  if (draftType && /video/i.test(draftType) === false && /photo|carousel/i.test(draftType)) return null;
+  const cdn = String(row?.publish_asset_url || row?.final_file_url || "").trim();
+  const hasCdn = /^https:\/\/media\.chicagoshining\.com\//i.test(cdn);
+  const looksVideo = /tiktok\s*video/i.test(String(row?.platform_output_type || ""))
+    || /video/i.test(String(row?.studio_output_type || ""))
+    || !draftType;
+  if (!hasCdn || !looksVideo) return null;
+  if (Boolean(row?.do_not_publish)) return null;
+  const recordId = String(row?.id || row?.record_id || "").trim();
+  return withDeskIdentity({
+    kind: "ttd0_route_blank_draft",
+    class: "transient",
+    record_id: recordId || null,
+    fingerprint: fingerprint("ttd0_route_blank_draft", recordId, "cdn_video"),
+    actor: "worker_heal",
+    diagnosis: "TTD0_ROUTE with a public media.chicagoshining.com MP4 but blank TikTok_Draft_Type. is_video_route used to require Draft_Type=Video, so Ready TikTok Videos looped forever (Output 2863 / 55 attempts). Worker stamps TikTok_Draft_Type=Video, copies Publish_Asset_URL from the CDN Final_File_URL when needed, clears the error, and pulses TTD0. Do not Approve.",
+  }, row);
+}
+
+export function classifyFacebookPublishRateLimit(row) {
+  const err = `${row?.publish_error || ""} ${row?.fb_slideshow_error || ""} ${row?.publish_error_stage || ""}`;
+  if (!isFacebookPublishRateLimitError(err)) return null;
+  const publish = String(row?.publish_status || "").trim();
+  if (publish !== "Failed" && publish !== "Ready to Publish") return null;
+  if (String(row?.platform || "").trim() !== "Facebook") return null;
+  if (Boolean(row?.do_not_publish)) return null;
+  if (row?.published_at || row?.platform_post_id) return null;
+  const recordId = String(row?.id || row?.record_id || "").trim();
+  return withDeskIdentity({
+    kind: "facebook_publish_rate_limit",
+    class: "transient",
+    record_id: recordId || null,
+    fingerprint: fingerprint("facebook_publish_rate_limit", recordId, "graph_368"),
+    actor: "worker_heal",
+    diagnosis: "Facebook Graph OAuthException 368 / subcode 1390008 (spam/rate limit) during FBS3 Reel session start. Generic Publish_Error used to say 'did not create a Reel upload session' while FB_Slideshow_Error held the real text. Worker parks Publish_Next_Retry_At ~6h and must not storm FBS3. Proven: LA Outputs 3544 / 2408.",
+  }, row);
+}
+
 export function classifyPublishFailed(row, nowMs = Date.now()) {
+  if (classifyPublishLiveFailedStatus(row)) return null;
+  if (classifyTtd0RouteBlankDraft(row)) return null;
+  if (classifyFacebookPublishRateLimit(row)) return null;
   if (row?.published_at) return null;
   if (classifyTikTokAuthSignature(row)) return null;
   if (classifyIgCarouselTooManyChildren(row)) return null;
@@ -1433,6 +1506,9 @@ export const CLASSIFIER_KINDS = Object.freeze([
   "autonomous_rfr_gate",
   "publish_never_dispatch",
   "publish_failed_transient",
+  "publish_live_failed_status",
+  "ttd0_route_blank_draft",
+  "facebook_publish_rate_limit",
   "tiktok_auth_signature",
   "ig_carousel_too_many_children",
   "ig_carousel_child_verification_race",

@@ -34,6 +34,9 @@ import {
   classifyPromotedNotRfr,
   classifyPublishDispatch,
   classifyPublishFailed,
+  classifyPublishLiveFailedStatus,
+  classifyTtd0RouteBlankDraft,
+  classifyFacebookPublishRateLimit,
   classifyIgCarouselTooManyChildren,
   classifyIgCarouselChildVerificationRace,
   classifyIgCarouselChildPollFailure,
@@ -1488,7 +1491,7 @@ export async function studioReconcileFacebookReels(env, options = {}) {
     try {
       ready = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
         limit,
-        filterFormula: 'AND({Test_Run_ID}=BLANK(),{Do_Not_Publish}=0,OR({Scheduled_Post_Date}=BLANK(),IS_BEFORE({Scheduled_Post_Date},NOW())),OR(AND({FB_Slideshow_Status}="Video Ready",{FB_Slideshow_Public_URL}!=""),AND({FB_Slideshow_Status}="Retry Pending",FIND("FBS3",UPPER({Publish_Error_Stage}&""))>0)))',
+        filterFormula: 'AND({Test_Run_ID}=BLANK(),{Do_Not_Publish}=0,OR({Publish_Next_Retry_At}=BLANK(),IS_BEFORE({Publish_Next_Retry_At},NOW())),OR({Scheduled_Post_Date}=BLANK(),IS_BEFORE({Scheduled_Post_Date},NOW())),OR(AND({FB_Slideshow_Status}="Video Ready",{FB_Slideshow_Public_URL}!=""),AND({FB_Slideshow_Status}="Retry Pending",OR(FIND("FBS3",UPPER({Publish_Error_Stage}&""))>0,FIND("RATE_LIMIT",UPPER({Publish_Error_Stage}&""))>0))))',
         sortField: "Scheduled_Post_Date",
         sortDirection: "asc",
       });
@@ -6488,6 +6491,11 @@ export function mapDeskInventoryOutput(record, contentToRequest = new Map(), con
     cover_attached: note.includes("facebook-cover=attached"),
     publish_error: f(record, "Publish_Error_Message"),
     publish_error_stage: f(record, "Publish_Error_Stage"),
+    platform_post_id: f(record, "Platform_Post_ID"),
+    platform_post_url: f(record, "Platform_Post_URL"),
+    publish_asset_url: f(record, "Publish_Asset_URL"),
+    fb_slideshow_error: f(record, "FB_Slideshow_Error_Message"),
+    tiktok_draft_type: f(record, "TikTok_Draft_Type"),
     ig_carousel_status: f(record, "IG_Carousel_Status"),
     ig_carousel_error: f(record, "IG_Carousel_Error_Message"),
     ig_carousel_error_stage: f(record, "IG_Carousel_Error_Stage"),
@@ -6758,15 +6766,19 @@ export async function gatherStudioDeskInventory(env) {
       sortDirection: "desc",
       filterFormula: 'AND({Test_Run_ID}=BLANK(),OR({Render_Status}="Failed",{Publish_Status}="Failed",AND({Publish_Error_Message}!="",{Published_At}=BLANK()),AND({IG_Carousel_Error_Message}!="",{Published_At}=BLANK())))',
     }).catch(() => []);
-    scanned("render_failed", "publish_failed_transient", "tiktok_auth_signature", "ig_carousel_too_many_children", "ig_carousel_child_verification_race", "ig_carousel_child_poll_failure", "ig_carousel_rate_limited");
+    scanned("render_failed", "publish_failed_transient", "publish_live_failed_status", "ttd0_route_blank_draft", "facebook_publish_rate_limit", "tiktok_auth_signature", "ig_carousel_too_many_children", "ig_carousel_child_verification_race", "ig_carousel_child_poll_failure", "ig_carousel_rate_limited");
     for (const record of failedRows || []) {
-      push(classifyRenderRow(mapOut(record), nowMs));
-      push(classifyTikTokAuthSignature(mapOut(record)));
-      push(classifyIgCarouselTooManyChildren(mapOut(record)));
-      push(classifyIgCarouselChildVerificationRace(mapOut(record)));
-      push(classifyIgCarouselChildPollFailure(mapOut(record)));
-      push(classifyIgCarouselRateLimited(mapOut(record)));
-      push(classifyPublishFailed(mapOut(record), nowMs));
+      const mapped = mapOut(record);
+      push(classifyRenderRow(mapped, nowMs));
+      push(classifyPublishLiveFailedStatus(mapped));
+      push(classifyTtd0RouteBlankDraft(mapped));
+      push(classifyFacebookPublishRateLimit(mapped));
+      push(classifyTikTokAuthSignature(mapped));
+      push(classifyIgCarouselTooManyChildren(mapped));
+      push(classifyIgCarouselChildVerificationRace(mapped));
+      push(classifyIgCarouselChildPollFailure(mapped));
+      push(classifyIgCarouselRateLimited(mapped));
+      push(classifyPublishFailed(mapped, nowMs));
     }
   } catch (error) {
     console.warn("desk failed-status scan failed", error);

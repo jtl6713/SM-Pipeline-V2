@@ -119,10 +119,17 @@ def test_asset_helpers():
         TikTok_Draft_Type="Single Photo",
     )
     video = _record(TikTok_Draft_Type="Video", Publish_Asset_URL="https://media.chicagoshining.com/clip.mp4")
+    blank_draft_cdn = _record(
+        Platform_Output_Type="TikTok Video",
+        Final_File_URL="https://media.chicagoshining.com/publish/platform-output-2863/x.mp4",
+    )
+    draft_drive_only = _record(TikTok_Draft_Type="Video", Final_File_ID="1abcDriveFileId")
     assert is_photo_route(photo) is True
     assert is_photo_route(legacy) is True
     assert is_video_route(photo) is False
     assert is_video_route(video) is True
+    assert is_video_route(blank_draft_cdn) is True
+    assert is_video_route(draft_drive_only) is True
     assert draft_type_for_photos(1) == "Single Photo"
     assert draft_type_for_photos(3) == "Photo Carousel"
     assert photo_manifest(["https://a", "https://b"]) == '["https://a","https://b"]'

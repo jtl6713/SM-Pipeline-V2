@@ -622,6 +622,8 @@ import {
   loadStudioProductionJobsForOutputs,
   resumeStaleStudioProductionJobs,
   healStuckStudioRenders,
+  studioHealLiveFailedPublishStatus,
+  studioHealTtd0RouteBlankDraft,
   studioHealFailedStatuses,
   studioHealIgCarouselTooManyChildren,
   studioHealIgCarouselChildVerificationRace,
@@ -8649,6 +8651,12 @@ export async function pulseOnDemandRenderChain(env, options = {}) {
   try { pulses.push(...await healStuckStudioRenders(env)); } catch (error) {
     pulses.push({ key: "STUDIO_STUCK_RENDER", error: error instanceof Error ? error.message : String(error) });
   }
+  try { pulses.push(...await studioHealLiveFailedPublishStatus(env, { limit: 4 })); } catch (error) {
+    pulses.push({ key: "STUDIO_LIVE_FAILED_STATUS", error: error instanceof Error ? error.message : String(error) });
+  }
+  try { pulses.push(...await studioHealTtd0RouteBlankDraft(env, { limit: 4 })); } catch (error) {
+    pulses.push({ key: "STUDIO_TTD0_BLANK_DRAFT", error: error instanceof Error ? error.message : String(error) });
+  }
   try { pulses.push(...await studioHealFailedStatuses(env, { limit: 4 })); } catch (error) {
     pulses.push({ key: "STUDIO_FAILED_STATUS", error: error instanceof Error ? error.message : String(error) });
   }
@@ -9406,7 +9414,6 @@ export async function studioAttachFacebookNativeCover(env, record) {
   const payload = await response.json().catch(() => ({}));
   const last = { status: response.status, payload };
   if (response.ok && !payload?.error) {
-      const published = /published/i.test(String(f(record, "Publish_Status") || "")) || Boolean(f(record, "Published_At"));
       const postId = String(f(record, "Platform_Post_ID") || videoId || "").trim();
       const storedPostUrl = String(f(record, "Platform_Post_URL") || "").trim();
       const postUrl = storedPostUrl || (postId ? `https://www.facebook.com/reel/${encodeURIComponent(postId)}/` : "");
@@ -9414,6 +9421,9 @@ export async function studioAttachFacebookNativeCover(env, record) {
         .filter(Boolean)
         .join("\n")
         .slice(0, 900);
+      // Always promote to Published when cover attach confirms the Reel is live.
+      // Leaving Publish_Status=Failed when Published_At was already set painted
+      // Pipeline Failed for Output 1338 after a successful Facebook post.
       await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, record.id, {
         method: "PATCH",
         body: JSON.stringify({
@@ -9435,12 +9445,12 @@ export async function studioAttachFacebookNativeCover(env, record) {
             // Stale FBS2 staging errors must not keep painting Failed after a live Reel exists.
             FB_Slideshow_Error_Message: "",
             Publish_Asset_Error_Message: "",
-            ...(published ? {} : {
-              Publish_Status: "Published",
-              Published_At: new Date().toISOString(),
-              FB_Publish_Status: "Published",
-              FB_Slideshow_Status: "Published",
-            }),
+            Publish_Status: "Published",
+            Published_At: f(record, "Published_At") || new Date().toISOString(),
+            FB_Publish_Status: "Published",
+            FB_Slideshow_Status: "Published",
+            Publish_Retry_Eligible: false,
+            Publish_Next_Retry_At: null,
           },
         }),
       });

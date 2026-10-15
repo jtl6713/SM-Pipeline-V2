@@ -34,6 +34,10 @@ import {
   classifyPromotedNotRfr,
   classifyPublishDispatch,
   classifyPublishFailed,
+  classifyPublishLiveFailedStatus,
+  classifyTtd0RouteBlankDraft,
+  classifyFacebookPublishRateLimit,
+  isFacebookPublishRateLimitError,
   classifyIgCarouselTooManyChildren,
   classifyIgCarouselChildVerificationRace,
   classifyIgCarouselChildPollFailure,
@@ -11622,6 +11626,114 @@ export async function studioHealPhantomRerender(env, options = {}) {
 }
 /*__STUDIO_WORKER_END:studioHealPhantomRerender__*/
 
+export async function studioHealLiveFailedPublishStatus(env, options = {}) {
+  const limit = Math.max(1, Math.min(12, Number(options.limit || 8)));
+  const outputTable = env.AIRTABLE_OUTPUT_TABLE_ID;
+  const rows = await listRecords(env, outputTable, {
+    limit: Math.max(limit * 3, 24),
+    sortField: "Output_ID",
+    sortDirection: "desc",
+    filterFormula: 'AND({Test_Run_ID}=BLANK(),{Do_Not_Publish}=0,{Publish_Status}="Failed",OR({Published_At}!="",{Platform_Post_ID}!="",{Platform_Post_URL}!=""))',
+  }).catch(() => []);
+  const healed = [];
+  for (const record of rows || []) {
+    if (healed.length >= limit) break;
+    const row = mapDeskInventoryOutput(record);
+    const finding = classifyPublishLiveFailedStatus(row);
+    if (!finding) continue;
+    try {
+      const fields = {
+        Publish_Status: "Published",
+        Publish_Error_Message: "",
+        Publish_Error_Stage: "",
+        FB_Slideshow_Error_Message: "",
+        Publish_Retry_Eligible: false,
+        Publish_Next_Retry_At: null,
+      };
+      if (String(f(record, "Platform") || "") === "Facebook") {
+        fields.FB_Publish_Status = "Published";
+        fields.FB_Slideshow_Status = "Published";
+      }
+      await airtableFetch(env, outputTable, record.id, {
+        method: "PATCH",
+        body: JSON.stringify({ fields, typecast: true }),
+      });
+      healed.push({
+        key: "PUBLISH_LIVE_FAILED_STATUS",
+        id: record.id,
+        output_id: row.output_id || null,
+        fingerprint: finding.fingerprint,
+      });
+    } catch (error) {
+      healed.push({
+        key: "PUBLISH_LIVE_FAILED_STATUS",
+        id: record.id,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+  if (healed.length) console.log("Studio live-failed publish heal", JSON.stringify({ count: healed.length, healed }));
+  return healed;
+}
+/*__STUDIO_WORKER_END:studioHealLiveFailedPublishStatus__*/
+
+export async function studioHealTtd0RouteBlankDraft(env, options = {}) {
+  const limit = Math.max(1, Math.min(8, Number(options.limit || 4)));
+  const outputTable = env.AIRTABLE_OUTPUT_TABLE_ID;
+  const rows = await listRecords(env, outputTable, {
+    limit: Math.max(limit * 3, 18),
+    sortField: "Output_ID",
+    sortDirection: "desc",
+    filterFormula: 'AND({Test_Run_ID}=BLANK(),{Platform}="TikTok",{Do_Not_Publish}=0,{Auto_Publish_Enabled}=1,{Publish_Status}="Failed",OR({Publish_Error_Stage}="TTD0_ROUTE",FIND("TTD0 found neither",{Publish_Error_Message}&"")>0))',
+  }).catch(() => []);
+  const healed = [];
+  for (const record of rows || []) {
+    if (healed.length >= limit) break;
+    const row = mapDeskInventoryOutput(record);
+    const finding = classifyTtd0RouteBlankDraft(row);
+    if (!finding) continue;
+    const cdn = String(f(record, "Publish_Asset_URL") || f(record, "Final_File_URL") || "").trim();
+    try {
+      await airtableFetch(env, outputTable, record.id, {
+        method: "PATCH",
+        body: JSON.stringify({
+          fields: {
+            TikTok_Draft_Type: "Video",
+            ...(cdn.startsWith("https://media.chicagoshining.com/")
+              ? { Publish_Asset_URL: cdn, Publish_Asset_Host: "Cloudflare R2" }
+              : {}),
+            TikTok_Draft_Status: "Ready for Assets",
+            Publish_Status: "Ready to Publish",
+            Publish_Error_Message: "",
+            Publish_Error_Stage: "",
+            Publish_Retry_Eligible: true,
+            Publish_Next_Retry_At: null,
+            Publish_Locked_By: "",
+            Publish_Locked_At: null,
+            Studio_Publish_Dispatch_Count: 0,
+          },
+          typecast: true,
+        }),
+      });
+      healed.push({
+        key: "TTD0_ROUTE_BLANK_DRAFT",
+        id: record.id,
+        output_id: row.output_id || null,
+        fingerprint: finding.fingerprint,
+      });
+    } catch (error) {
+      healed.push({
+        key: "TTD0_ROUTE_BLANK_DRAFT",
+        id: record.id,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+  if (healed.length) console.log("Studio TTD0 blank-draft heal", JSON.stringify({ count: healed.length, healed }));
+  return healed;
+}
+/*__STUDIO_WORKER_END:studioHealTtd0RouteBlankDraft__*/
+
 export async function studioHealFailedStatuses(env, options = {}) {
   const limit = Math.max(1, Math.min(8, Number(options.limit || 6)));
   const outputTable = env.AIRTABLE_OUTPUT_TABLE_ID;
@@ -11633,7 +11745,11 @@ export async function studioHealFailedStatuses(env, options = {}) {
     filterFormula: 'AND({Test_Run_ID}=BLANK(),{Published_At}=BLANK(),{Do_Not_Publish}=0,{Auto_Publish_Enabled}=1,OR({Publish_Status}="Failed",AND({Publish_Error_Message}!="",OR({Publish_Status}="Ready to Publish",{Publish_Status}="Publishing"))))',
   }).catch(() => []);
   for (const row of failedPublish || []) {
-    const err = String(f(row, "Publish_Error_Message") || "");
+    const err = [
+      String(f(row, "Publish_Error_Message") || ""),
+      String(f(row, "FB_Slideshow_Error_Message") || ""),
+      String(f(row, "Publish_Error_Stage") || ""),
+    ].join(" ");
     const status = String(f(row, "Publish_Status") || "").trim();
     const tiktokTerminalAuthFailure = String(f(row, "Platform") || "") === "TikTok"
       && (
@@ -11648,6 +11764,39 @@ export async function studioHealFailedStatuses(env, options = {}) {
     // then rearms Ready for Delivery once and republishes.
     if (tiktokTerminalAuthFailure) {
       pulses.push({ key: "TIKTOK_AUTH_PARKED", id: row.id, skipped: "terminal_auth_failure" });
+      continue;
+    }
+    if (isFacebookPublishRateLimitError(err)) {
+      const nextRaw = f(row, "Publish_Next_Retry_At");
+      const nextMs = Date.parse(String(nextRaw || ""));
+      const parkUntil = Number.isFinite(nextMs) && nextMs > Date.now()
+        ? new Date(nextMs).toISOString()
+        : new Date(Date.now() + 6 * 60 * 60 * 1000).toISOString();
+      try {
+        await airtableFetch(env, outputTable, row.id, {
+          method: "PATCH",
+          body: JSON.stringify({
+            fields: {
+              Publish_Status: "Failed",
+              Publish_Error_Stage: "FBS3_RATE_LIMIT",
+              Publish_Error_Message: "Facebook rate limit (368/1390008): We limit how often you can post. Retry after cooldown.",
+              Publish_Retry_Eligible: true,
+              Publish_Next_Retry_At: parkUntil,
+              Publish_Locked_By: "",
+              Publish_Locked_At: null,
+              FB_Slideshow_Status: "Retry Pending",
+            },
+            typecast: true,
+          }),
+        });
+        pulses.push({ key: "FB_RATE_LIMIT_PARK", id: row.id, until: parkUntil });
+      } catch (error) {
+        pulses.push({
+          key: "FB_RATE_LIMIT_PARK",
+          id: row.id,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
       continue;
     }
     const needsHeal = deskFailedNeedsHeal({
