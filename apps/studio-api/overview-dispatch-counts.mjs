@@ -15,6 +15,8 @@ export function isQueuedForPlatformDispatch(row, now = Date.now()) {
   if (/failed|error|cancelled|canceled|skipped|published|publishing|uploading|processing|draft delivered|manual publish required/i.test(publish)) return false;
   if (/published|publishing|uploaded|uploading|processing|delivered|sent|completed|posted|failed|error/i.test(val("platform_publish_status"))) return false;
   if (row.manual_fallback_required) return false;
+  // A dispatch attempt is no longer an untouched scheduled queue item; retry/recovery is a separate lane.
+  if (row.studio_publish_dispatch_at || Number(row.studio_publish_dispatch_count || 0) > 0) return false;
   if (row.published_at || row.platform_post_url || row.manual_published_url || row.platform_post_id) return false;
   if (val("manual_completion_status").match(/complete|published/i)) return false;
   const dateValue = row.scheduled_at || row.scheduled_post_date || row.youtube_scheduled_publish_at;
@@ -24,10 +26,10 @@ export function isQueuedForPlatformDispatch(row, now = Date.now()) {
   if (!Number.isFinite(scheduledTime)) return false;
   if (row.platform === "YouTube") {
     // Private uploads are *already on YouTube*, even though not public.
-    if (row.youtube_video_id || /uploaded|processing|succeeded|complete/i.test(val("youtube_upload_status"))) return false;
+    if (row.youtube_video_id || row.youtube_upload_completed_at || /uploaded|processing|succeeded|complete/i.test(val("youtube_upload_status"))) return false;
   }
   if (row.platform === "TikTok") {
-    if (/delivered|sent|uploaded|publish complete|processing|uploading/i.test(val("tiktok_draft_status"))) return false;
+    if (row.tiktok_draft_delivered_at || row.tiktok_draft_publish_id || /delivered|sent|uploaded|publish complete|processing|uploading/i.test(val("tiktok_draft_status"))) return false;
   }
   if (row.platform === "Facebook") {
     if (/publishing|processing|uploading|published|completed|posted/i.test(val("facebook_publish_status") + " " + val("facebook_slideshow_status"))) return false;
