@@ -518,6 +518,7 @@ import {
   studioScheduleMs,
   studioOccupiedRowMatchesProfile,
   studioOccupiedFilterFormula,
+  studioLoadOccupiedScheduleRows,
   studioInvalidateOccupiedScheduleCache,
   studioOccupiedMsFromRow,
   studioPublishScheduleFields,
@@ -1941,19 +1942,34 @@ export async function studioProcessScheduleRegenJobSlice(env, jobId, options = {
     job = { ...job, combinations: combos, updated_at: new Date().toISOString() };
     await studioPutScheduleRegenJob(env, job);
 
+    const eligibleIds = new Set(eligible.map((row) => row.id));
+    const platformRows = await studioLoadOccupiedScheduleRows(env, { profile });
+    const platformProtectedTimes = [];
+    for (const row of platformRows || []) {
+      if (eligibleIds.has(row.id) || !studioOccupiedRowMatchesProfile(row, profile)) continue;
+      const platform = String(f(row, "Platform") || "").trim().toLowerCase();
+      if (platform !== platformWant) continue;
+      const ms = studioOccupiedMsFromRow(row, nowMs);
+      if (ms != null) platformProtectedTimes.push(ms);
+    }
+
     const plan = [];
-    const reserved = protectedTimes.slice();
+    const reservedLane = protectedTimes.slice();
+    const reservedPlatform = [...new Set([...platformProtectedTimes, ...protectedTimes])];
     for (const row of eligible) {
       const picked = maeScheduleNextSlot({
         timeZone,
-        occupiedMs: reserved,
+        laneOccupiedMs: reservedLane,
+        platformOccupiedMs: reservedPlatform,
         horizonDays,
       });
       if (!picked.ok) {
         throw new HttpError(409, picked.error || `Capacity failure for ${combo.platform} ${combo.output_type}`);
       }
       plan.push({ id: row.id, iso: picked.iso, record: row });
-      reserved.push(Date.parse(picked.iso));
+      const pickedMs = Date.parse(picked.iso);
+      reservedLane.push(pickedMs);
+      reservedPlatform.push(pickedMs);
     }
 
     // Apply in Airtable-sized chunks. The old per-row PATCH + job-store write
