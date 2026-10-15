@@ -23,10 +23,11 @@
 | Schedule grid | **Yes** | Same |
 | Cron Airtable→Supabase upsert | **Yes** (when secrets set) | Independent of `STUDIO_READ_SOURCE` |
 | Manual / status sync ops | **Yes** | tenant_admin |
+| Schedule Save write-through | **Yes** (upsert after Airtable PATCH) | Keeps calendar drag-drop from snapping back |
 | Factory desk | No | Airtable |
 | All Profiles overview | No | Airtable (+ R2 snapshot) |
 | Ideas / Production Requests | No | Airtable |
-| Approve / schedule / publish / produce | No | Airtable write SoR |
+| Approve / schedule / publish / produce | **Writes stay Airtable**; schedule also upserts Supabase | Airtable write SoR |
 | Asset / music library | No | Drive + Airtable |
 | Make / Remotion / platform publish | No | unchanged |
 
