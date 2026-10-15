@@ -313,3 +313,5 @@ Deploy Worker 0.10.489-engagement-ledger. Shrink the engagement ledger so Chicag
 2026-10-15: Worker 0.10.620-approve-all-fast-stamp. Actually ship the 1042-tolerant session verify workflow with the redeploy.
 
 2026-10-15: Deploy verified modular Worker runtime fix (PR #754, commit 8a653041) exporting airtableFetch to four worker-functions modules. Functional regression, Cloudflare source validation, Studio API tests, and Wrangler dry-run passed; preserve binding contract and rollback on failed authenticated session verification.
+
+2026-10-15: Deploy complete all-profiles overview counts PR #755 (merge 5b74b208); remove capped output/idea scans, retain R2 last-good snapshot and completeness validation; Wrangler and functional regression passed.
