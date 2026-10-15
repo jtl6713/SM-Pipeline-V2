@@ -314,8 +314,7 @@ Deploy Worker 0.10.489-engagement-ledger. Shrink the engagement ledger so Chicag
 
 2026-10-15: Deploy verified modular Worker runtime fix (PR #754, commit 8a653041) exporting airtableFetch to four worker-functions modules. Functional regression, Cloudflare source validation, Studio API tests, and Wrangler dry-run passed; preserve binding contract and rollback on failed authenticated session verification.
 
-<<<<<<< HEAD
 2026-10-15: Deploy complete all-profiles overview counts PR #755 (merge 5b74b208); remove capped output/idea scans, retain R2 last-good snapshot and completeness validation; Wrangler and functional regression passed.
-=======
 2026-10-15: Worker 0.10.621-approve-binding-dirty. Export studioMarkMappedListDirty (+3 other worker.js helpers) into extracted modules so Approve all does not 6/6 fail.
->>>>>>> eb27cea9 (Fix Approve all 6/6 fail: bind studioMarkMappedListDirty)
+
+2026-10-15: Deploy scheduled overview queue fix PR #757 (merge 0727792c). Count only approved future-dated outputs awaiting platform dispatch; exclude awaiting approval and platform-handoff states; bump cached overview snapshot schema. Wrangler dry run, source validation, and regression checks passed.
