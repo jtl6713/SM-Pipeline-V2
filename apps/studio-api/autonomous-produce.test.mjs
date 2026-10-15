@@ -14,6 +14,7 @@ import {
   AUTONOMOUS_DEFAULT_MUSIC_ASSET_ID,
   AUTONOMOUS_DEFAULT_VOICEOVER_TAIL_SECONDS,
   AUTONOMOUS_IDEA_CREATED_FIELD,
+  AUTONOMOUS_CITY_CREATE_ATTEMPTS,
   AUTONOMOUS_CITY_CREATE_MS,
   AUTONOMOUS_IDEAS_PER_HOUR,
   AUTONOMOUS_SCHEDULED_SKIP_ABOVE,
@@ -189,6 +190,7 @@ test("hourly refill creates 10 ideas under 200 and skips over 209", () => {
   assert.equal(AUTONOMOUS_SCHEDULED_SKIP_ABOVE, 209);
   assert.equal(AUTONOMOUS_IDEAS_PER_HOUR, 10);
   assert.equal(AUTONOMOUS_CITY_CREATE_MS, 180000);
+  assert.equal(AUTONOMOUS_CITY_CREATE_ATTEMPTS, 40);
   assert.equal(autonomousAtTopOfHour({ date: "2026-10-14", hour: 9, minute: 0 }), true);
   assert.equal(autonomousAtTopOfHour({ date: "2026-10-14", hour: 9, minute: 5 }), false);
   assert.equal(autonomousAtTopOfHour({ date: "2026-10-14", hour: 9, minute: 30 }), false);
@@ -816,10 +818,11 @@ test("Worker stamps photo-ready ideas and drains the 30m SLA on light ticks", as
   const path = await import("node:path");
   const here = path.dirname(fileURLToPath(import.meta.url));
   const worker = await readFile(path.join(here, "worker.js"), "utf8");
-  assert.match(worker, /version: "0.10.604-hour-create-budget"/);
+  assert.match(worker, /version: "0.10.605-keep-picking"/);
   assert.match(worker, /studio_autonomous_ten_per_hour_v1: true/);
   assert.match(worker, /AUTONOMOUS_IDEAS_PER_HOUR/);
   assert.match(worker, /AUTONOMOUS_CITY_CREATE_MS/);
+  assert.match(worker, /AUTONOMOUS_CITY_CREATE_ATTEMPTS/);
   assert.match(worker, /scheduled_over_209/);
   assert.match(worker, /ideas_by_profile/);
   assert.match(worker, /fillAutonomousScheduledHour/);

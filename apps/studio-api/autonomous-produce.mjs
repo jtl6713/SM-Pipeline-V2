@@ -11,6 +11,8 @@ export const AUTONOMOUS_SCHEDULED_SKIP_ABOVE = 209;
 export const AUTONOMOUS_IDEAS_PER_HOUR = 10;
 /** Create-loop budget per city, starting after the library scan. The old 45s cap included the scan and stopped at one idea. */
 export const AUTONOMOUS_CITY_CREATE_MS = 180000;
+/** Picks allowed while that clock is running. The 7pm hour stopped at 12, with 1–2 ideas saved. */
+export const AUTONOMOUS_CITY_CREATE_ATTEMPTS = 40;
 /** Safety stop while paging the classified library. This is not a newest-N window. */
 export const AUTONOMOUS_LIBRARY_SCAN_CAP = 8000;
 /** Legacy twice-daily windows; harvest now keys off the scheduled target instead. */
