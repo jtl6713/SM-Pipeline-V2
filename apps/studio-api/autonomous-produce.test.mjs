@@ -859,7 +859,7 @@ test("Worker stamps photo-ready ideas and drains the 30m SLA on light ticks", as
   const path = await import("node:path");
   const here = path.dirname(fileURLToPath(import.meta.url));
   const worker = await readFile(path.join(here, "worker.js"), "utf8");
-  assert.match(worker, /version: "0.10.606-ten-ideas-anyway"/);
+  assert.match(worker, /version: "0.10.607-supabase-pipeline-reads"/);
   assert.match(worker, /studio_autonomous_ten_ideas_anyway_v1: true/);
   assert.match(worker, /planAutonomousHourIdeas/);
   const hourFill = worker.slice(
