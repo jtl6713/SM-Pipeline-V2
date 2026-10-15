@@ -272,14 +272,59 @@
     return (group?.cards || []).filter((card) => card?.kind === "output" && canReviewActions(card) && /^rec[A-Za-z0-9]+$/.test(String(card.id || "")));
   }
 
+  function isStoryOutputCard(card) {
+    return /story/i.test(String(card?.studio_output_type || card?.format || ""));
+  }
+
+  /**
+   * Same-content outputs still in Auto-high / Manual (usually Stories still
+   * rendering). Approve all only sees Needs eyes, so without this gate mains
+   * approve first and Stories reappear alone as Ready for Review.
+   */
+  function pendingSiblingOutputsForGroup(group) {
+    const contentId = String(group?.cards?.[0]?.content_id || "").trim();
+    if (!contentId || !state.desk?.lanes) return [];
+    const readyIds = new Set((group?.cards || []).map((card) => String(card?.id || "")).filter(Boolean));
+    const elsewhere = [
+      ...(state.desk.lanes.auto_high || []),
+      ...(state.desk.lanes.manual || []),
+    ];
+    return elsewhere.filter((card) => {
+      if (card?.kind !== "output") return false;
+      if (String(card.content_id || "").trim() !== contentId) return false;
+      if (readyIds.has(String(card.id || ""))) return false;
+      return true;
+    });
+  }
+
+  function pendingSiblingMeta(pending) {
+    if (!pending.length) return "";
+    const stories = pending.filter(isStoryOutputCard).length;
+    if (stories && stories === pending.length) {
+      return `${stories} Stor${stories === 1 ? "y" : "ies"} still rendering`;
+    }
+    if (stories) {
+      return `${pending.length} still rendering (${stories} Stor${stories === 1 ? "y" : "ies"})`;
+    }
+    return `${pending.length} sibling${pending.length === 1 ? "" : "s"} still rendering`;
+  }
+
   function renderContentBar(group, expanded) {
     const ready = readyContentCards(group);
+    const pending = pendingSiblingOutputsForGroup(group);
+    const pendingLabel = pendingSiblingMeta(pending);
     const first = group.cards[0] || {};
     const contentId = String(first.content_id || "").trim();
     const title = first.title || "Untitled";
-    const meta = contentId ? `Content ${contentId} · ${ready.length} ready` : `${ready.length} ready`;
+    const bits = [];
+    if (contentId) bits.push(`Content ${contentId}`);
+    bits.push(`${ready.length} ready`);
+    if (pendingLabel) bits.push(pendingLabel);
+    const meta = bits.join(" · ");
     const approveAll = ready.length > 1
-      ? `<button type="button" class="primary-button factory-content-approve" data-factory-approve-content="${esc(group.key)}">Approve all (${ready.length})</button>`
+      ? (pending.length
+        ? `<button type="button" class="primary-button factory-content-approve" data-factory-approve-content="${esc(group.key)}" disabled title="Wait until sibling Stories finish rendering, then Approve all together">${esc(`Approve all (${ready.length}) — wait for Stories`)}</button>`
+        : `<button type="button" class="primary-button factory-content-approve" data-factory-approve-content="${esc(group.key)}">Approve all (${ready.length})</button>`)
       : "";
     return `<div class="factory-content-bar" data-factory-content="${esc(group.key)}">
       <button type="button" class="factory-content-toggle" data-factory-toggle-content="${esc(group.key)}" aria-expanded="${expanded}" aria-controls="factory-review-${esc(group.key.replace(/[^a-zA-Z0-9_-]/g, "-"))}">
@@ -630,6 +675,15 @@
       setStatus("This content does not have multiple outputs waiting for approval.", true);
       return;
     }
+    const pending = pendingSiblingOutputsForGroup({ cards });
+    if (pending.length) {
+      const pendingLabel = pendingSiblingMeta(pending);
+      setStatus(`Approve all is waiting — ${pendingLabel}. Approve when the whole content is Ready for Review so Stories do not come back alone.`, true);
+      window.alert(
+        `Approve all is held until sibling outputs finish.\n\n${pendingLabel}.\n\nStories usually land in Needs eyes a few minutes after Reels/Shorts. Wait, then Approve all together.`,
+      );
+      return;
+    }
     const title = ready[0].title || "this content";
     const contentId = String(ready[0].content_id || "").trim();
     const heading = contentId ? `Content ${contentId} · ${title}` : title;
@@ -663,7 +717,15 @@
     const finished = await watchApproveAll(result, profileId);
     await loadFactoryDesk(true);
     const failed = Number(finished?.failed_count || 0);
-    setStatus(approveAllProgressText(finished), failed > 0);
+    const leftover = (state.desk?.lanes?.needs_eyes || []).filter((card) => contentGroupKey(card) === key);
+    const leftoverStories = leftover.filter(isStoryOutputCard).length;
+    let message = approveAllProgressText(finished);
+    if (leftover.length) {
+      message += leftoverStories
+        ? ` · ${leftoverStories} Stor${leftoverStories === 1 ? "y" : "ies"} still need eyes (finished after this batch)`
+        : ` · ${leftover.length} sibling${leftover.length === 1 ? "" : "s"} still need eyes`;
+    }
+    setStatus(message, failed > 0 || leftover.length > 0);
     if (failed > 0) window.alert(`Factory Approve all finished with failures:\n${approveAllProgressText(finished)}`);
   }
 

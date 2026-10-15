@@ -1,17 +1,18 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import { readStudioWorkerSource } from "../studio-api/worker-source-reader.mjs";
 const read = (path) => readFileSync(new URL(path, import.meta.url), "utf8");
 const html = read("./index.html");
 const app = read("./assets/app-item4-1008.js");
 const factory = read("./assets/factory-desk.js");
 const css = read("./assets/factory-layout-0680.css");
-const worker = read("../studio-api/worker.js");
+const worker = readStudioWorkerSource();
 
 test("Published Studio label, app BUILD_ID, and all cache versions agree", () => {
   const label = html.match(/UI build (\d+\.\d+\.\d+)/)?.[1];
   const build = app.match(/const BUILD_ID = "item4-(\d+\.\d+\.\d+)-/ )?.[1];
-  assert.equal(label, "0.6.692");
+  assert.equal(label, "0.6.693");
   assert.equal(build, label);
   const cache = [...html.matchAll(/\?v=(\d+\.\d+\.\d+)-/g)].map((m) => m[1]);
   assert.ok(cache.length > 10);
