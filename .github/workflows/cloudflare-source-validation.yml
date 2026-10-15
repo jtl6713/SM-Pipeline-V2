@@ -6,12 +6,14 @@ on:
     branches: [main]
     paths:
       - 'apps/studio-api/worker.js'
+      - 'apps/studio-api/worker-functions-*.mjs'
       - 'apps/studio-web/index.html'
       - 'apps/studio-web/assets/**'
       - '.github/workflows/cloudflare-source-validation.yml'
   pull_request:
     paths:
       - 'apps/studio-api/worker.js'
+      - 'apps/studio-api/worker-functions-*.mjs'
       - 'apps/studio-web/index.html'
       - 'apps/studio-web/assets/**'
 
@@ -35,6 +37,10 @@ jobs:
           grep -qE 'export default|addEventListener\(' apps/studio-api/worker.js
           cp apps/studio-api/worker.js /tmp/studio-worker.mjs
           node --check /tmp/studio-worker.mjs
+          for module in apps/studio-api/worker-functions-0{1,2,3,4}.mjs; do
+            test -s "$module"
+            node --check "$module"
+          done
 
       - name: Validate Studio Pages source
         shell: bash
