@@ -321,3 +321,4 @@ Deploy Worker 0.10.489-engagement-ledger. Shrink the engagement ledger so Chicag
 
 2026-10-15: Worker 0.10.621-approve-binding-dirty. Redeploy after hung Wrangler install on #756 deploy; Approve all binding fix must reach production.
 Deploy scheduled overview and dispatch shared eligibility from main 3ed88f1 (2026-10-15).
+2026-10-15: Guard platform fanout against Cancelled Production Requests and Archived duplicate Content Items to stop output resurrection; regression tested.
