@@ -6,6 +6,7 @@ import {
   listSupabaseScheduleGrid,
   syncAllProfilesPipelineToSupabase,
   syncProfilePipelineToSupabase,
+  STUDIO_SUPABASE_PIPELINE_READ_ROUTES,
 } from "./supabase-pipeline-reads.mjs";
 import {
   DESK_SETTING_NAME,
@@ -716,14 +717,19 @@ export default {
       }
 
       if (url.pathname === "/health" || url.pathname === "/api/health") {
+        const supabaseSyncLast = await readStudioSupabaseSyncLast(env).catch(() => null);
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.608-supabase-sync-gate",
+          version: "0.10.609-supabase-phase3-stable",
           studio_supabase_pipeline_reads_v1: true,
           studio_supabase_sync_gate_v1: true,
+          studio_supabase_phase3_stable_v1: true,
           studio_read_source: studioReadSource(env),
           studio_supabase_configured: studioSupabaseConfigured(env),
+          studio_supabase_read_routes: STUDIO_SUPABASE_PIPELINE_READ_ROUTES,
+          studio_supabase_last_sync_at: supabaseSyncLast?.at || null,
+          studio_supabase_last_sync_ok: supabaseSyncLast?.ok ?? null,
           studio_voiceover_once_v1: true,
           studio_factory_desk_v1: true,
           studio_factory_inflight_blocked_parent_v1: true,
@@ -1129,8 +1135,9 @@ export default {
       }
 
       if (isOpsSupabaseSyncRoute) {
-        if (request.method !== "POST") throw new HttpError(405, "Method not allowed");
         requirePermission(authorization, "tenant_admin");
+        if (request.method === "GET") return getStudioSupabaseSyncStatus(request, env);
+        if (request.method !== "POST") throw new HttpError(405, "Method not allowed");
         assertWriteRequest(request, env);
         return postStudioSupabaseSync(request, env);
       }
@@ -26284,16 +26291,80 @@ async function buildPipelineOutputsPayload(env, profile, { limit, reviewOnly, ct
 }
 
 
+const STUDIO_SUPABASE_SYNC_LAST_KEY = "studio/state/supabase-pipeline-sync-last.json";
+
+async function readStudioSupabaseSyncLast(env) {
+  if (!env?.STUDIO_MEDIA?.get) return null;
+  try {
+    const object = await env.STUDIO_MEDIA.get(STUDIO_SUPABASE_SYNC_LAST_KEY);
+    if (!object) return null;
+    const body = await object.json();
+    return body && typeof body === "object" ? body : null;
+  } catch (error) {
+    console.warn("supabase sync last read failed", error);
+    return null;
+  }
+}
+
+async function writeStudioSupabaseSyncLast(env, payload) {
+  if (!env?.STUDIO_MEDIA?.put || !payload) return;
+  try {
+    await env.STUDIO_MEDIA.put(STUDIO_SUPABASE_SYNC_LAST_KEY, JSON.stringify(payload), {
+      httpMetadata: { contentType: "application/json" },
+    });
+  } catch (error) {
+    console.warn("supabase sync last write failed", error);
+  }
+}
+
 async function studioSyncSupabasePipelineReads(env, options = {}) {
   if (!studioSupabaseConfigured(env)) return { skipped: true, reason: "supabase_not_configured" };
   const profiles = (await listContentProfileRecords(env).catch(() => [])).filter((row) => Boolean(f(row, "Active")));
-  return syncAllProfilesPipelineToSupabase(env, profiles, {
+  const startedAt = new Date().toISOString();
+  const result = await syncAllProfilesPipelineToSupabase(env, profiles, {
     listRecords,
     f,
     contentProfileFilterFormula,
     outputFields: OUTPUT_LIST_FIELDS,
     outputLimit: options.outputLimit,
     contentLimit: options.contentLimit,
+    listOpenOutputs: async (profile) => {
+      const pack = await loadOpenPipelineOutputPack(env, profile);
+      return mergePipelineOutputRecords(pack.open || [], pack.siblings || []);
+    },
+  });
+  const profileResults = Array.isArray(result?.results) ? result.results : [];
+  const ok = profileResults.length > 0 && profileResults.every((row) => row?.ok || row?.skipped);
+  const stamp = {
+    at: Date.now(),
+    started_at: startedAt,
+    finished_at: new Date().toISOString(),
+    ok,
+    profile_count: profileResults.length,
+    profiles: profileResults.map((row) => ({
+      profile_id: row.profile_id || null,
+      ok: Boolean(row.ok),
+      skipped: Boolean(row.skipped),
+      content_items: row.content_items ?? null,
+      platform_outputs: row.platform_outputs ?? null,
+      newest_outputs: row.newest_outputs ?? null,
+      open_outputs: row.open_outputs ?? null,
+      error: row.error || null,
+    })),
+    read_source: studioReadSource(env),
+  };
+  await writeStudioSupabaseSyncLast(env, stamp);
+  return { ...result, stamp };
+}
+
+async function getStudioSupabaseSyncStatus(request, env) {
+  const last = await readStudioSupabaseSyncLast(env);
+  return respond(request, env, {
+    ok: true,
+    configured: studioSupabaseConfigured(env),
+    read_source: studioReadSource(env),
+    read_routes: STUDIO_SUPABASE_PIPELINE_READ_ROUTES,
+    last_sync: last,
   });
 }
 
@@ -26310,6 +26381,7 @@ async function postStudioSupabaseSync(request, env) {
   return respond(request, env, {
     ok: true,
     read_source: studioReadSource(env),
+    read_routes: STUDIO_SUPABASE_PIPELINE_READ_ROUTES,
     sync: result,
   });
 }

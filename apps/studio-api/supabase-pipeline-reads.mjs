@@ -2,7 +2,23 @@
  * Phase 3: Pipeline list / schedule-grid reads from Supabase.
  * Airtable remains write SoR. Default source is airtable until
  * STUDIO_READ_SOURCE=supabase and SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY are set.
+ *
+ * What currently relies on this module (when flag + secrets are set):
+ * - GET /api/outputs (full Pipeline list + mode=review)
+ * - GET /api/outputs?mode=latest
+ * - GET /api/outputs/schedule-grid
+ * - Heavy cron Airtable→Supabase upsert (studioSyncSupabasePipelineReads)
+ * - POST/GET /api/ops/supabase/sync
+ * Everything else (Factory, Overview, Approve, produce, publish, ideas, assets)
+ * still uses Airtable only.
  */
+
+export const STUDIO_SUPABASE_PIPELINE_READ_ROUTES = Object.freeze([
+  "GET /api/outputs",
+  "GET /api/outputs?mode=latest",
+  "GET /api/outputs?mode=review",
+  "GET /api/outputs/schedule-grid",
+]);
 
 export function studioSupabaseConfigured(env) {
   return Boolean(String(env?.SUPABASE_URL || "").trim() && String(env?.SUPABASE_SERVICE_ROLE_KEY || "").trim());
@@ -354,7 +370,7 @@ export async function syncProfilePipelineToSupabase(env, profile, deps = {}) {
   const outputLimit = Math.max(50, Math.min(1000, Number(deps.outputLimit) || 500));
   const contentLimit = Math.max(50, Math.min(500, Number(deps.contentLimit) || 250));
 
-  const [contents, outputs] = await Promise.all([
+  const [contents, newest, openExtra] = await Promise.all([
     listRecords(env, env.AIRTABLE_CONTENT_TABLE_ID, {
       limit: contentLimit,
       sortField: "Created_At",
@@ -368,7 +384,18 @@ export async function syncProfilePipelineToSupabase(env, profile, deps = {}) {
       filterFormula: profileFormula,
       fields: outputFields,
     }).catch(() => []),
+    typeof deps.listOpenOutputs === "function"
+      ? deps.listOpenOutputs(profile).catch(() => [])
+      : Promise.resolve([]),
   ]);
+
+  // Newest-N alone can drop older unfinished Pipeline rows. Merge the open pack
+  // so Ready for Review / Scheduled stay warm in Supabase between full imports.
+  const outputsById = new Map();
+  for (const row of [...(newest || []), ...(openExtra || [])]) {
+    if (row?.id) outputsById.set(row.id, row);
+  }
+  const outputs = [...outputsById.values()];
 
   const contentRows = (contents || []).map((row) => mapAirtableContentToSupabase(row, profileUuid));
   for (let i = 0; i < contentRows.length; i += 200) {
@@ -383,7 +410,7 @@ export async function syncProfilePipelineToSupabase(env, profile, deps = {}) {
     (contentUuidRows || []).map((row) => [row.airtable_record_id, row.id]),
   );
 
-  const outputRows = (outputs || []).map((row) => mapAirtableOutputToSupabase(row, {
+  const outputRows = outputs.map((row) => mapAirtableOutputToSupabase(row, {
     profileUuid,
     contentUuidByAirtableId,
   }));
@@ -396,6 +423,8 @@ export async function syncProfilePipelineToSupabase(env, profile, deps = {}) {
     profile_id: profile.id,
     content_items: contentRows.length,
     platform_outputs: outputRows.length,
+    newest_outputs: (newest || []).length,
+    open_outputs: (openExtra || []).length,
   };
 }
 
