@@ -5,6 +5,7 @@ on:
       - 'apps/studio-api/overview-dispatch-counts*'
       - 'apps/studio-api/worker-functions-01.mjs'
       - 'apps/studio-api/worker-functions-04.mjs'
+      - 'apps/studio-api/worker.js'
       - '.github/workflows/verify-scheduled-overview-queue.yml'
   workflow_dispatch:
 permissions: {contents: read}
