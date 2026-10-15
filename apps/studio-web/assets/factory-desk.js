@@ -734,6 +734,18 @@
     if (event.key === "Escape" && !$("factoryPreviewBackdrop")?.hidden) closeFactoryPreview();
   });
 
+  // Four streams start collapsed; operators expand only the queue they need.
+  $("factoryLanes")?.addEventListener("click", (event) => {
+    const toggle = event.target.closest?.("[data-factory-band-toggle]");
+    if (!toggle || !$("factoryLanes").contains(toggle)) return;
+    const band = toggle.closest(".factory-band");
+    if (!band) return;
+    const open = band.classList.toggle("is-collapsed") === false;
+    toggle.setAttribute("aria-expanded", open ? "true" : "false");
+    const chevron = toggle.querySelector(".factory-band-chevron");
+    if (chevron) chevron.textContent = open ? "▾" : "▸";
+  });
+
   window.StudioFactoryDesk = {
     load: loadFactoryDesk,
   };

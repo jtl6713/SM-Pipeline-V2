@@ -14,14 +14,23 @@ test("Factory Desk is a separate page beside Operations", async () => {
 
   assert.match(html, /id="navFactory"[^>]*>Factory</);
   assert.match(html, /id="page-factory"/);
-  assert.match(html, /factory-open-target\.js\?v=0.6.691-calendar-scheduled-only/);
-  assert.match(html, /factory-desk\.js\?v=0.6.691-calendar-scheduled-only/);
+  assert.match(html, /factory-open-target\.js\?v=0.6.692-factory-streams-collapsed/);
+  assert.match(html, /factory-desk\.js\?v=0.6.692-factory-streams-collapsed/);
   assert.match(html, /"factory":\s*\[\s*"\/assets\/factory-open-target\.js[\s\S]*"\/assets\/factory-desk\.js/);
   assert.doesNotMatch(html, /<script src="\/assets\/factory-desk\.js/);
   assert.match(html, /factory-band-auto/);
   assert.match(html, /factory-band-eyes/);
   assert.match(html, /factory-band-assets/);
   assert.match(html, /factory-band-manual/);
+  // Needs eyes is the first stream; all four start collapsed.
+  const lanes = html.slice(html.indexOf('id="factoryLanes"'), html.indexOf('id="factoryFeedbackBackdrop"'));
+  const eyesAt = lanes.indexOf("factory-band-eyes");
+  const autoAt = lanes.indexOf("factory-band-auto");
+  const assetsAt = lanes.indexOf("factory-band-assets");
+  const manualAt = lanes.indexOf("factory-band-manual");
+  assert.ok(eyesAt > 0 && eyesAt < autoAt && autoAt < assetsAt && assetsAt < manualAt);
+  assert.equal((lanes.match(/factory-band[^\n>]* is-collapsed/g) || []).length, 4);
+  assert.match(html, /data-factory-band-toggle/);
   assert.match(html, /id="factoryCountAutoHigh"/);
   assert.match(html, /id="factoryCountNeedsEyes"/);
   assert.match(html, /id="factoryCountNeedsAssets"/);
@@ -34,7 +43,7 @@ test("Factory Desk is a separate page beside Operations", async () => {
   const support = html.indexOf('id="page-support"');
   assert.ok(operations > 0 && factoryPage > operations && support > factoryPage);
 
-  assert.match(app, /BUILD_ID = "item4-0.6.691-calendar-scheduled-only"/);
+  assert.match(app, /BUILD_ID = "item4-0.6.692-factory-streams-collapsed"/);
   assert.match(app, /page === "factory"/);
   assert.match(app, /StudioFactoryDesk\?\.load/);
   assert.match(factory, /StudioFactoryDesk/);
@@ -64,9 +73,12 @@ test("Factory Desk is a separate page beside Operations", async () => {
   assert.match(css, /\.factory-band-auto\{--factory-accent:#0c7a72\}/);
   assert.match(css, /\.factory-band-assets\{--factory-accent:#1f4e89\}/);
   assert.match(css, /\.factory-line\{/);
+  assert.match(css, /\.factory-band\.is-collapsed \.factory-band-body\{display:none\}/);
   assert.doesNotMatch(css, /grid-template-areas:\s*"auto eyes"/);
   assert.match(factory, /factory-line/);
   assert.match(factory, /factoryCountNeedsEyes/);
+  assert.match(factory, /data-factory-band-toggle/);
+  assert.match(factory, /Four streams start collapsed/);
   assert.match(factory, /\/api\/factory\/desk/);
   assert.match(css, /\.factory-lanes/);
   assert.match(css, /#page-factory/);
