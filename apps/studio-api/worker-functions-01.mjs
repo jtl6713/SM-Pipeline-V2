@@ -578,7 +578,7 @@ export function studioCronAirtableCadence(now = new Date(), cronExpr = "") {
   const heavy = minute === 0 || minute === 30;
   return { heavy, insights: heavy, ingest: heavy, minute, cron };
 }
-
+/*__STUDIO_WORKER_END:studioCronAirtableCadence__*/
 
 export function accessIdentity(request) {
   const directEmail = String(request.headers.get("Cf-Access-Authenticated-User-Email") || "").trim();
@@ -601,7 +601,7 @@ export function accessIdentity(request) {
   return { email: null, source: null, jwt_present: false };
 }
 
-
+/*__STUDIO_WORKER_END:accessIdentity__*/
 
 export async function resolveAuthorization(request, env) {
   const identity = accessIdentity(request);
@@ -736,7 +736,7 @@ export async function resolveAuthorization(request, env) {
 
   return base;
 }
-
+/*__STUDIO_WORKER_END:resolveAuthorization__*/
 
 export async function resolveStudioCronAuthorization(env) {
   const preferred = String(env.STUDIO_CRON_USER_EMAIL || "chicagoshining@gmail.com").trim().toLowerCase();
@@ -767,7 +767,7 @@ export async function resolveStudioCronAuthorization(env) {
   }
   throw new HttpError(503, "Autonomous produce needs an active Studio user with organization and brand membership");
 }
-
+/*__STUDIO_WORKER_END:resolveStudioCronAuthorization__*/
 
 export function membershipAllowsBrand(authorization, brandLinks) {
   if (!authorization?.authorized || !authorization?.organization?.record_id) return false;
@@ -781,7 +781,7 @@ export function membershipAllowsBrand(authorization, brandLinks) {
   // City brands under the same Studio organization are selectable from the profile switcher.
   return true;
 }
-
+/*__STUDIO_WORKER_END:membershipAllowsBrand__*/
 
 export function requireConfig(env) {
   const required = [
@@ -795,12 +795,12 @@ export function requireConfig(env) {
   const missing = required.filter((key) => !env[key]);
   if (missing.length) throw new HttpError(500, `Missing Worker configuration: ${missing.join(", ")}`);
 }
-
+/*__STUDIO_WORKER_END:requireConfig__*/
 
 export function allowedOrigins(env) {
   return new Set(String(env.ALLOWED_ORIGINS || "").split(",").map((v) => v.trim()).filter(Boolean));
 }
-
+/*__STUDIO_WORKER_END:allowedOrigins__*/
 
 export function corsHeaders(request, env) {
   const origin = request.headers.get("Origin") || "";
@@ -813,14 +813,14 @@ export function corsHeaders(request, env) {
     "Vary": "Origin",
   };
 }
-
+/*__STUDIO_WORKER_END:corsHeaders__*/
 
 export function corsPreflight(request, env) {
   const origin = request.headers.get("Origin") || "";
   if (!allowedOrigins(env).has(origin)) return new Response(null, { status: 403 });
   return new Response(null, { status: 204, headers: corsHeaders(request, env) });
 }
-
+/*__STUDIO_WORKER_END:corsPreflight__*/
 
 export function respond(request, env, data, status = 200) {
   return new Response(JSON.stringify(data, null, 2), {
@@ -828,7 +828,7 @@ export function respond(request, env, data, status = 200) {
     headers: { ...JSON_HEADERS, ...corsHeaders(request, env) },
   });
 }
-
+/*__STUDIO_WORKER_END:respond__*/
 
 export function assertWriteRequest(request, env) {
   const origin = String(request.headers.get("Origin") || "").trim();
@@ -842,7 +842,7 @@ export function assertWriteRequest(request, env) {
     throw new HttpError(415, "Studio write requests must use application/json");
   }
 }
-
+/*__STUDIO_WORKER_END:assertWriteRequest__*/
 
 export function assertOriginWriteRequest(request, env) {
   const origin = String(request.headers.get("Origin") || "").trim();
@@ -851,7 +851,7 @@ export function assertOriginWriteRequest(request, env) {
     throw new HttpError(403, "Studio write request origin is not allowed");
   }
 }
-
+/*__STUDIO_WORKER_END:assertOriginWriteRequest__*/
 
 export function assertUploadWriteRequest(request, env) {
   assertOriginWriteRequest(request, env);
@@ -860,7 +860,7 @@ export function assertUploadWriteRequest(request, env) {
     throw new HttpError(415, "Master media uploads must use multipart/form-data");
   }
 }
-
+/*__STUDIO_WORKER_END:assertUploadWriteRequest__*/
 
 export async function readJsonBody(request, { required = true } = {}) {
   let payload = null;
@@ -875,29 +875,29 @@ export async function readJsonBody(request, { required = true } = {}) {
   }
   return payload || {};
 }
-
+/*__STUDIO_WORKER_END:readJsonBody__*/
 
 export function requirePermission(authorization, permission) {
   if (!authorization?.permissions?.[permission]) {
     throw new HttpError(403, `Permission required: ${permission}`);
   }
 }
-
+/*__STUDIO_WORKER_END:requirePermission__*/
 
 export function requireAnyPermission(authorization, permissions) {
   const ok = (permissions || []).some((permission) => authorization?.permissions?.[permission]);
   if (!ok) throw new HttpError(403, `Permission required: ${(permissions || []).join(" or ")}`);
 }
-
+/*__STUDIO_WORKER_END:requireAnyPermission__*/
 
 export function sleepMs(ms) {
   return new Promise((resolve) => setTimeout(resolve, Math.max(0, Number(ms) || 0)));
 }
-
+/*__STUDIO_WORKER_END:sleepMs__*/
 
 export function airtableCooldownWaitMs() {
   return Math.max(0, airtableNextRequestAt - Date.now());
-}
+}/*__STUDIO_WORKER_END:airtableCooldownWaitMs__*/
 
 export function airtableRetryDelayMs(response, attempt) {
   const raw = String(response?.headers?.get("Retry-After") || "").trim();
@@ -910,7 +910,7 @@ export function airtableRetryDelayMs(response, attempt) {
   return Math.max(30000, headerMs, Math.min(120000, 30000 * 2 ** (attempt - 1)))
     + Math.floor(Math.random() * 750);
 }
-
+/*__STUDIO_WORKER_END:airtableRetryDelayMs__*/
 
 export function studioReadCachePrune() {
   if (studioHotReadCache.size < 48) return;
@@ -919,14 +919,14 @@ export function studioReadCachePrune() {
     if (!hit?.promise && now - Number(hit?.at || 0) > 120000) studioHotReadCache.delete(key);
   }
 }
-
+/*__STUDIO_WORKER_END:studioReadCachePrune__*/
 
 export function studioReadCacheDropPrefix(prefix) {
   for (const key of studioHotReadCache.keys()) {
     if (String(key).startsWith(prefix)) studioHotReadCache.delete(key);
   }
 }
-
+/*__STUDIO_WORKER_END:studioReadCacheDropPrefix__*/
 
 export async function studioSupabaseWriteThroughOutput(env, record, label = "output") {
   if (!studioSupabaseConfigured(env) || !record?.id) return { skipped: true };
@@ -941,7 +941,7 @@ export async function studioSupabaseWriteThroughOutput(env, record, label = "out
     return { ok: false, error: error instanceof Error ? error.message : String(error) };
   }
 }
-
+/*__STUDIO_WORKER_END:studioSupabaseWriteThroughOutput__*/
 
 export function studioInvalidateHotReads(env, tableId, method) {
   const verb = String(method || "GET").toUpperCase();
@@ -966,7 +966,7 @@ export function studioInvalidateHotReads(env, tableId, method) {
     studioReadCacheDropPrefix("music:");
   }
 }
-
+/*__STUDIO_WORKER_END:studioInvalidateHotReads__*/
 
 export function studioReadCoalesce(key, ttlMs, loader) {
   studioReadCachePrune();
@@ -996,7 +996,7 @@ export function studioReadCoalesce(key, ttlMs, loader) {
   studioHotReadCache.set(key, { at: hit?.at || 0, value: hit?.value, promise });
   return promise;
 }
-
+/*__STUDIO_WORKER_END:studioReadCoalesce__*/
 
 export async function airtableBatchCreate(env, tableId, fieldRows, { typecast = true } = {}) {
   const rows = Array.isArray(fieldRows) ? fieldRows : [];
@@ -1011,7 +1011,7 @@ export async function airtableBatchCreate(env, tableId, fieldRows, { typecast = 
   }
   return created;
 }
-
+/*__STUDIO_WORKER_END:airtableBatchCreate__*/
 
 export async function airtableBatchUpdate(env, tableId, updates, { typecast = true } = {}) {
   const rows = Array.isArray(updates) ? updates.filter((row) => row?.id && row?.fields) : [];
@@ -1029,7 +1029,7 @@ export async function airtableBatchUpdate(env, tableId, updates, { typecast = tr
   }
   return updated;
 }
-
+/*__STUDIO_WORKER_END:airtableBatchUpdate__*/
 
 export async function mapPool(items, concurrency, worker) {
   const list = Array.isArray(items) ? items : [];
@@ -1047,13 +1047,13 @@ export async function mapPool(items, concurrency, worker) {
   }));
   return results;
 }
-
+/*__STUDIO_WORKER_END:mapPool__*/
 
 export function clampLimit(url, fallback = 50, max = 100) {
   const value = Number(url.searchParams.get("limit") || fallback);
   return Math.max(1, Math.min(max, Number.isFinite(value) ? Math.trunc(value) : fallback));
 }
-
+/*__STUDIO_WORKER_END:clampLimit__*/
 
 export async function listRecords(env, tableId, options = {}) {
   const {
@@ -1088,7 +1088,7 @@ export async function listRecords(env, tableId, options = {}) {
   }
   return records.slice(0, limit);
 }
-
+/*__STUDIO_WORKER_END:listRecords__*/
 
 export async function listRecordsPage(env, tableId, options = {}) {
   const limit = Math.max(1, Math.min(100, Number(options.limit) || 12));
@@ -1107,12 +1107,12 @@ export async function listRecordsPage(env, tableId, options = {}) {
     offset: result?.offset || null,
   };
 }
-
+/*__STUDIO_WORKER_END:listRecordsPage__*/
 
 export function f(record, field) {
   return record?.fields?.[field] ?? null;
 }
-
+/*__STUDIO_WORKER_END:f__*/
 
 export function studioOutputIsNativePhotoRoute(platform, outputType, mapping) {
   const p = String(platform || "").trim();
@@ -1129,7 +1129,7 @@ export function studioOutputIsNativePhotoRoute(platform, outputType, mapping) {
   )) return true;
   return false;
 }
-
+/*__STUDIO_WORKER_END:studioOutputIsNativePhotoRoute__*/
 
 export function studioOutputIsNativePhoto(record) {
   const platform = String(f(record, "Platform") || "").trim();
@@ -1151,7 +1151,7 @@ export function studioOutputIsNativePhoto(record) {
   if (!clips) return false;
   return true;
 }
-
+/*__STUDIO_WORKER_END:studioOutputIsNativePhoto__*/
 
 export function studioNativeStillsNeedLettering(record) {
   const renderStatus = String(f(record, "Render_Status") || "").trim();
@@ -1167,7 +1167,7 @@ export function studioNativeStillsNeedLettering(record) {
     return true;
   });
 }
-
+/*__STUDIO_WORKER_END:studioNativeStillsNeedLettering__*/
 
 export function studioOutputNeedsGridCoverForReview(record) {
   const platform = String(f(record, "Platform") || "").trim();
@@ -1177,13 +1177,13 @@ export function studioOutputNeedsGridCoverForReview(record) {
   if (platform === "Facebook" && /single image|facebook post/i.test(type) && !/reel|multi-image|photo set/i.test(type)) return false;
   return true;
 }
-
+/*__STUDIO_WORKER_END:studioOutputNeedsGridCoverForReview__*/
 
 export function studioOutputHasReviewCover(record) {
   if (!studioOutputNeedsGridCoverForReview(record)) return true;
   return Boolean(studioAiThumbnailUrl(f(record, "Thumbnail_URL")));
 }
-
+/*__STUDIO_WORKER_END:studioOutputHasReviewCover__*/
 
 export function studioOutputHasReviewableDeliverable(record) {
   if (studioOutputIsNativePhoto(record)) {
@@ -1216,13 +1216,13 @@ export function studioOutputHasReviewableDeliverable(record) {
   if (!studioOutputHasReviewCover(record)) return false;
   return true;
 }
-
+/*__STUDIO_WORKER_END:studioOutputHasReviewableDeliverable__*/
 
 export function studioClipPublicCdnUrl(clipOrUrl) {
   const url = String(clipOrUrl?.url || clipOrUrl?.src || clipOrUrl || "").trim();
   return url.startsWith("https://media.chicagoshining.com/") ? url : "";
 }
-
+/*__STUDIO_WORKER_END:studioClipPublicCdnUrl__*/
 
 export function item4UrlIsPublicPublishCdn(url) {
   const href = String(url || "").trim();
@@ -1231,14 +1231,14 @@ export function item4UrlIsPublicPublishCdn(url) {
   const path = href.slice("https://media.chicagoshining.com/".length);
   return path.startsWith("studio/previews/") || path.startsWith("publish/");
 }
-
+/*__STUDIO_WORKER_END:item4UrlIsPublicPublishCdn__*/
 
 export function studioYoutubePublicSourceUrl(record) {
   return ["Publish_Asset_URL", "Studio_Preview_URL"]
     .map((name) => String(f(record, name) || "").trim())
     .find((href) => item4UrlIsPublicPublishCdn(href)) || "";
 }
-
+/*__STUDIO_WORKER_END:studioYoutubePublicSourceUrl__*/
 
 export function mapYoutubePrivateSourceDeskRow(record) {
   return {
@@ -1262,17 +1262,17 @@ export function mapYoutubePrivateSourceDeskRow(record) {
     youtube_upload_job_id: f(record, "YouTube_Upload_Job_ID"),
   };
 }
-
+/*__STUDIO_WORKER_END:mapYoutubePrivateSourceDeskRow__*/
 
 export function studioYoutubeFailedPrivateSource(record) {
   return Boolean(classifyYoutubePrivateSourceFail(mapYoutubePrivateSourceDeskRow(record)));
 }
-
+/*__STUDIO_WORKER_END:studioYoutubeFailedPrivateSource__*/
 
 export function studioYoutubePublishAssetKey(record) {
   return youtubePublishAssetKey(f(record, "Output_ID"), f(record, "Final_File_ID"));
 }
-
+/*__STUDIO_WORKER_END:studioYoutubePublishAssetKey__*/
 
 export async function studioStageYoutubePublicMp4FromDrive(env, record) {
   const existing = studioYoutubePublicSourceUrl(record);
@@ -1339,14 +1339,14 @@ export async function studioStageYoutubePublicMp4FromDrive(env, record) {
   });
   return { url: staged.url, skip: "" };
 }
-
+/*__STUDIO_WORKER_END:studioStageYoutubePublicMp4FromDrive__*/
 
 export function item4FinishedVideoPreviewKey(requestId, assetId) {
   const req = String(requestId || "").trim();
   const id = String(assetId || "file").replace(/[^A-Za-z0-9_-]/g, "").slice(0, 24) || "file";
   return `studio/previews/finished-video/${req}/${id}.mp4`;
 }
-
+/*__STUDIO_WORKER_END:item4FinishedVideoPreviewKey__*/
 
 export function item4FinishedMasterPlayUrl(master, requestRecord) {
   const preview = String(master?.preview_public_url || "").trim();
@@ -1357,7 +1357,7 @@ export function item4FinishedMasterPlayUrl(master, requestRecord) {
   if (key.startsWith("studio/previews/")) return `${ITEM4_MEDIA_PUBLIC_BASE}/${key}`;
   return url;
 }
-
+/*__STUDIO_WORKER_END:item4FinishedMasterPlayUrl__*/
 
 export function item4UrlIsPublicPlayableVideo(url) {
   const href = String(url || "").trim();
@@ -1367,13 +1367,13 @@ export function item4UrlIsPublicPlayableVideo(url) {
   if (!(path.startsWith("studio/previews/") || path.startsWith("publish/") || path.startsWith("studio/master-assets/"))) return false;
   return /\.(mp4|mov|m4v|webm)(\?|#|$)/i.test(href) || path.startsWith("studio/master-assets/");
 }
-
+/*__STUDIO_WORKER_END:item4UrlIsPublicPlayableVideo__*/
 
 export function studioNativeClipsArePublicCdn(record) {
   const clips = selectedVisualClips(record);
   return clips.length > 0 && clips.every((clip) => studioClipPublicCdnUrl(clip));
 }
-
+/*__STUDIO_WORKER_END:studioNativeClipsArePublicCdn__*/
 
 export function studioNativeSlidePublicFields(clip, platform) {
   const url = studioClipPublicCdnUrl(clip);
@@ -1398,23 +1398,23 @@ export function studioNativeSlidePublicFields(clip, platform) {
   }
   return fields;
 }
-
+/*__STUDIO_WORKER_END:studioNativeSlidePublicFields__*/
 
 export function studioUrlLooksLikeImage(url) {
   return /\.(jpe?g|png|webp|gif)(\?|#|$)/i.test(String(url || ""));
 }
-
+/*__STUDIO_WORKER_END:studioUrlLooksLikeImage__*/
 
 export function studioUrlLooksLikeVideo(url) {
   return /\.(mp4|mov|webm|m4v)(\?|#|$)/i.test(String(url || ""))
     || /\/current\.mp4/i.test(String(url || ""));
 }
-
+/*__STUDIO_WORKER_END:studioUrlLooksLikeVideo__*/
 
 export function studioUrlLooksLikeDriveFile(url) {
   return /drive\.google\.com\/(?:file\/d\/|open\?id=|uc\?)/i.test(String(url || ""));
 }
-
+/*__STUDIO_WORKER_END:studioUrlLooksLikeDriveFile__*/
 
 export function outputHasVideoFinal(record) {
   if (String(f(record, "Final_File_ID") || "").trim()) return true;
@@ -1428,7 +1428,7 @@ export function outputHasVideoFinal(record) {
     return href && (studioUrlLooksLikeVideo(href) || studioUrlLooksLikeDriveFile(href));
   });
 }
-
+/*__STUDIO_WORKER_END:outputHasVideoFinal__*/
 
 export function studioMappedPreviewUrl(record) {
   const stored = String(f(record, "Studio_Preview_URL") || "").trim();
@@ -1438,7 +1438,7 @@ export function studioMappedPreviewUrl(record) {
   }
   return stored || studioNativeStillPreviewUrl(record) || null;
 }
-
+/*__STUDIO_WORKER_END:studioMappedPreviewUrl__*/
 
 export function studioPublicJpegCoverUrl(record) {
   const candidates = [
@@ -1451,14 +1451,14 @@ export function studioPublicJpegCoverUrl(record) {
   const jpeg = urls.find((url) => /\.(jpe?g)(\?|$)/i.test(url));
   return jpeg || urls[0] || "";
 }
-
+/*__STUDIO_WORKER_END:studioPublicJpegCoverUrl__*/
 
 export function studioNativeStillPreviewUrl(record) {
   const stored = String(f(record, "Studio_Preview_URL") || "").trim();
   if (stored && studioUrlLooksLikeImage(stored)) return stored;
   return studioPublicJpegCoverUrl(record);
 }
-
+/*__STUDIO_WORKER_END:studioNativeStillPreviewUrl__*/
 
 export function studioPreviewKind(record) {
   const stored = String(f(record, "Studio_Preview_URL") || "").trim();
@@ -1477,7 +1477,7 @@ export function studioPreviewKind(record) {
   if (stored || finalUrl) return "video";
   return still ? "still" : "none";
 }
-
+/*__STUDIO_WORKER_END:studioPreviewKind__*/
 
 export function studioArmedPublishStatus(record, scheduledPostDate = null) {
   const raw = String(scheduledPostDate || f(record, "Scheduled_Post_Date") || "").trim();
@@ -1486,7 +1486,7 @@ export function studioArmedPublishStatus(record, scheduledPostDate = null) {
   if (Number.isNaN(ms)) return "Ready to Publish";
   return ms <= Date.now() + 120000 ? "Ready to Publish" : "Ready to Schedule";
 }
-
+/*__STUDIO_WORKER_END:studioArmedPublishStatus__*/
 
 export function studioPublishHandoffFields(record, options = {}) {
   const platform = String(f(record, "Platform") || "").trim();
@@ -1622,7 +1622,7 @@ export function studioPublishHandoffFields(record, options = {}) {
   }
   return fields;
 }
-
+/*__STUDIO_WORKER_END:studioPublishHandoffFields__*/
 
 export async function studioPatchExistingNativeSlides(env, record, slideIds, clips) {
   const platform = String(f(record, "Platform") || "").trim();
@@ -1662,7 +1662,7 @@ export async function studioPatchExistingNativeSlides(env, record, slideIds, cli
     body: JSON.stringify({ records: updates, typecast: true }),
   });
 }
-
+/*__STUDIO_WORKER_END:studioPatchExistingNativeSlides__*/
 
 export async function studioEnsureNativePublishSlides(env, record) {
   if (!studioOutputIsNativePhoto(record)) return record;
@@ -1712,7 +1712,7 @@ export async function studioEnsureNativePublishSlides(env, record) {
   });
   return airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, record.id);
 }
-
+/*__STUDIO_WORKER_END:studioEnsureNativePublishSlides__*/
 
 export function studioMixRerenderInProgress(record) {
   const fields = record?.fields || {};
@@ -1733,7 +1733,7 @@ export function studioMixRerenderInProgress(record) {
   }
   return false;
 }
-
+/*__STUDIO_WORKER_END:studioMixRerenderInProgress__*/
 
 export function normalizedOutputState(record) {
   const fields = record?.fields || {};
@@ -1899,7 +1899,7 @@ export function normalizedOutputState(record) {
   if (inProduction) return "Preparing Assets";
   return "Queued";
 }
-
+/*__STUDIO_WORKER_END:normalizedOutputState__*/
 
 export function contentLifecycleFromOutputs(outputRecords = []) {
   const list = Array.isArray(outputRecords) ? outputRecords.filter(Boolean) : [];
@@ -1961,7 +1961,7 @@ export function contentLifecycleFromOutputs(outputRecords = []) {
     output_state_counts: counts,
   };
 }
-
+/*__STUDIO_WORKER_END:contentLifecycleFromOutputs__*/
 
 export function normalizedContentStage(record, outputRecords = null) {
   const rollup = contentLifecycleFromOutputs(outputRecords);
@@ -1982,7 +1982,7 @@ export function normalizedContentStage(record, outputRecords = null) {
   if (value("Content_Status").includes("ready for") || value("Content_Status").includes("generated") || value("Script_Status").includes("generated") || value("Voiceover_Status").includes("generated") || value("Thumbnail_Status").includes("generated")) return "Generating";
   return "Configuring";
 }
-
+/*__STUDIO_WORKER_END:normalizedContentStage__*/
 
 export function mapIdea(record) {
   return {
@@ -2031,7 +2031,7 @@ export function mapIdea(record) {
     production_request_id: firstIdeaProductionRequestId(record),
   };
 }
-
+/*__STUDIO_WORKER_END:mapIdea__*/
 
 export function parseIdeaPhotoMatchJson(raw) {
   if (!raw) return null;
@@ -2043,7 +2043,7 @@ export function parseIdeaPhotoMatchJson(raw) {
     return null;
   }
 }
-
+/*__STUDIO_WORKER_END:parseIdeaPhotoMatchJson__*/
 
 export function firstIdeaProductionRequestId(record) {
   const links = Array.isArray(f(record, "Production Requests"))
@@ -2051,7 +2051,7 @@ export function firstIdeaProductionRequestId(record) {
     : (Array.isArray(f(record, "Production_Request")) ? f(record, "Production_Request") : []);
   return String(links[0] || "").trim() || null;
 }
-
+/*__STUDIO_WORKER_END:firstIdeaProductionRequestId__*/
 
 export function ideaPhotoWaitApplies(input = {}) {
   const contentType = String(input.content_type || "").trim();
@@ -2061,7 +2061,7 @@ export function ideaPhotoWaitApplies(input = {}) {
     && mode === "Target range"
     && imageMode !== "Make AI Generated";
 }
-
+/*__STUDIO_WORKER_END:ideaPhotoWaitApplies__*/
 
 export function sortHighConfidenceMatches(matches) {
   return [...(matches || [])]
@@ -2075,7 +2075,7 @@ export function sortHighConfidenceMatches(matches) {
       return String(a.id).localeCompare(String(b.id));
     });
 }
-
+/*__STUDIO_WORKER_END:sortHighConfidenceMatches__*/
 
 export function selectMatchedPhotos({ matches, min, max, pendingBatchIds, force = false } = {}) {
   const floor = Math.max(1, Number(min) || 0);
@@ -2098,7 +2098,7 @@ export function selectMatchedPhotos({ matches, min, max, pendingBatchIds, force 
     reason: "min_met_take_all_up_to_max",
   };
 }
-
+/*__STUDIO_WORKER_END:selectMatchedPhotos__*/
 
 export function mapContent(record, outputRecords = null) {
   const linkedOutputs = Array.isArray(outputRecords) ? outputRecords : null;
@@ -2140,7 +2140,7 @@ export function mapContent(record, outputRecords = null) {
     output_state_counts: rollup?.output_state_counts || null,
   };
 }
-
+/*__STUDIO_WORKER_END:mapContent__*/
 
 export function outputProgressMilestoneFloor(record) {
   if (studioMixRerenderInProgress(record)) return 50;
@@ -2159,7 +2159,7 @@ export function outputProgressMilestoneFloor(record) {
   if (render.includes("rendering") || render.includes("ready for render")) return 50;
   return 0;
 }
-
+/*__STUDIO_WORKER_END:outputProgressMilestoneFloor__*/
 
 export function outputProgressPercent(record, state, job = null) {
   const processingRaw = f(record, "YouTube_Processing_Progress_Percent");
@@ -2209,7 +2209,7 @@ export function outputProgressPercent(record, state, job = null) {
   if (computed == null && !floor) return null;
   return Math.max(floor, computed == null ? 0 : computed);
 }
-
+/*__STUDIO_WORKER_END:outputProgressPercent__*/
 
 export function platformPublishStatus(record) {
   const platform = String(f(record, "Platform") || "").toLowerCase();
@@ -2228,7 +2228,7 @@ export function platformPublishStatus(record) {
   if (platform === "youtube") return f(record, "Publish_Status") || f(record, "YouTube_Processing_Status") || f(record, "YouTube_Upload_Status");
   return f(record, "Publish_Status");
 }
-
+/*__STUDIO_WORKER_END:platformPublishStatus__*/
 
 export function cleanMusicDisplayName(name) {
   let value = String(name || "").trim();
@@ -2241,7 +2241,7 @@ export function cleanMusicDisplayName(name) {
   value = value.replace(/\s{2,}/g, " ").trim();
   return value || String(name || "Untitled track");
 }
-
+/*__STUDIO_WORKER_END:cleanMusicDisplayName__*/
 
 export function selectedVisualClips(record) {
   const parsed = phase6ParseJson(f(record, "Selected_Assets_JSON"), null);
@@ -2250,7 +2250,7 @@ export function selectedVisualClips(record) {
   if (Array.isArray(parsed.clips) && parsed.clips.length) return parsed.clips;
   return [];
 }
-
+/*__STUDIO_WORKER_END:selectedVisualClips__*/
 
 export function outputCreativeAvailable(record) {
   // Creative review opens for native packages with slides, or whenever a
@@ -2260,7 +2260,7 @@ export function outputCreativeAvailable(record) {
   if (f(record, "Creative_Render_Manifest_JSON")) return true;
   return studioOutputHasReviewableDeliverable(record);
 }
-
+/*__STUDIO_WORKER_END:outputCreativeAvailable__*/
 
 export function mapOutput(record, job = null, queueMeta = null, contentRecord = null) {
   let studioState = normalizedOutputState(record);
@@ -2364,18 +2364,18 @@ export function mapOutput(record, job = null, queueMeta = null, contentRecord = 
     creative_available: outputCreativeAvailable(record),
   };
 }
-
+/*__STUDIO_WORKER_END:mapOutput__*/
 
 export function safeMusicExtension(record) {
   const ext = String(f(record, "File_Extension") || "mp3").toLowerCase().replace(/[^a-z0-9]/g, "");
   return ext || "mp3";
 }
-
+/*__STUDIO_WORKER_END:safeMusicExtension__*/
 
 export function musicPreviewKey(record) {
   return `music/previews/${record.id}.${safeMusicExtension(record)}`;
 }
-
+/*__STUDIO_WORKER_END:musicPreviewKey__*/
 
 export function extractGoogleDriveFileId(urlValue) {
   const value = String(urlValue || "").trim();
@@ -2389,27 +2389,27 @@ export function extractGoogleDriveFileId(urlValue) {
   } catch {}
   return null;
 }
-
+/*__STUDIO_WORKER_END:extractGoogleDriveFileId__*/
 
 export function googleDriveFileId(record) {
   return String(f(record, "Google Drive File ID") || extractGoogleDriveFileId(f(record, "Google Drive URL")) || "").trim() || null;
 }
-
+/*__STUDIO_WORKER_END:googleDriveFileId__*/
 
 export function googleDriveDownloadUrl(fileId) {
   return `https://drive.usercontent.google.com/download?id=${encodeURIComponent(fileId)}&export=download&confirm=t`;
 }
-
+/*__STUDIO_WORKER_END:googleDriveDownloadUrl__*/
 
 export function studioMusicLibraryUrlPrefix() {
   return `${ITEM4_MEDIA_PUBLIC_BASE}/studio/music-library/`;
 }
-
+/*__STUDIO_WORKER_END:studioMusicLibraryUrlPrefix__*/
 
 export function isStudioLibraryMusicUrl(urlValue) {
   return String(urlValue || "").trim().startsWith(studioMusicLibraryUrlPrefix());
 }
-
+/*__STUDIO_WORKER_END:isStudioLibraryMusicUrl__*/
 
 export function studioMusicR2KeyFromUrl(urlValue) {
   const value = String(urlValue || "").trim();
@@ -2421,7 +2421,7 @@ export function studioMusicR2KeyFromUrl(urlValue) {
     return value.slice(prefix.length);
   }
 }
-
+/*__STUDIO_WORKER_END:studioMusicR2KeyFromUrl__*/
 
 export function isMusicLibraryFile(file) {
   const mime = String(file?.type || "").toLowerCase();
@@ -2436,13 +2436,13 @@ export function isMusicLibraryFile(file) {
     ext === "wav"
   );
 }
-
+/*__STUDIO_WORKER_END:isMusicLibraryFile__*/
 
 export function isStudioLibraryMusicRecord(record, sourceUrl = "") {
   const transferId = String(f(record, "Studio_Transfer_ID") || "");
   return transferId.startsWith("MUSIC-") || isStudioLibraryMusicUrl(sourceUrl);
 }
-
+/*__STUDIO_WORKER_END:isStudioLibraryMusicRecord__*/
 
 export function mapMusic(record) {
   const driveFileId = googleDriveFileId(record);
@@ -2473,7 +2473,7 @@ export function mapMusic(record) {
 }
 
 
-
+/*__STUDIO_WORKER_END:mapMusic__*/
 
 export async function findOfficialLogoRecord(env) {
   // Media Assets is the current operational brand-asset source. Select a usable
@@ -2501,7 +2501,7 @@ export async function findOfficialLogoRecord(env) {
 
   return usable.sort((a, b) => score(b) - score(a))[0];
 }
-
+/*__STUDIO_WORKER_END:findOfficialLogoRecord__*/
 
 export async function fetchGoogleDriveImage(record) {
   const fileId = googleDriveFileId(record);
@@ -2532,7 +2532,7 @@ export async function fetchGoogleDriveImage(record) {
 
   throw new HttpError(lastResponse?.status || 502, `Google Drive logo fetch failed (${lastResponse?.status || "unknown"})`);
 }
-
+/*__STUDIO_WORKER_END:fetchGoogleDriveImage__*/
 
 export async function brandLogo(request, env, authorization) {
   if (!authorization?.authorized) {
@@ -2560,7 +2560,7 @@ export async function brandLogo(request, env, authorization) {
   });
 }
 
-
+/*__STUDIO_WORKER_END:brandLogo__*/
 
 export async function buildIdeasListPayload(env, profile, limit) {
   const records = await listRecords(env, env.AIRTABLE_IDEA_TABLE_ID, {
@@ -2570,7 +2570,7 @@ export async function buildIdeasListPayload(env, profile, limit) {
   });
   return { records: records.map(mapIdea), profile: mapStudioContentProfile(profile) };
 }
-
+/*__STUDIO_WORKER_END:buildIdeasListPayload__*/
 
 export async function listIdeas(request, env, url, authorization, ctx = null) {
   const profile = await resolveWorkingContentProfile(env, authorization, requestedProfileId(url));
@@ -2586,12 +2586,12 @@ export async function listIdeas(request, env, url, authorization, ctx = null) {
     builder: () => buildIdeasListPayload(env, profile, limit),
   });
 }
-
+/*__STUDIO_WORKER_END:listIdeas__*/
 
 export function airtableFormulaEscape(value) {
   return String(value || "").replace(/\\/g, "\\\\").replace(/"/g, '\\"');
 }
-
+/*__STUDIO_WORKER_END:airtableFormulaEscape__*/
 
 export function requestedProfileId(url, payload) {
   const raw = String(payload?.content_profile_id || payload?.profile_id || url?.searchParams?.get("content_profile_id") || url?.searchParams?.get("profile") || "").trim();
@@ -2599,7 +2599,7 @@ export function requestedProfileId(url, payload) {
   if (!/^rec[A-Za-z0-9]+$/.test(raw)) throw new HttpError(400, "Invalid Content Profile id");
   return raw;
 }
-
+/*__STUDIO_WORKER_END:requestedProfileId__*/
 
 export function studioNormalizeProfileKey(value) {
   return String(value || "")
@@ -2609,7 +2609,7 @@ export function studioNormalizeProfileKey(value) {
     .replace(/^-+|-+$/g, "")
     .slice(0, 80);
 }
-
+/*__STUDIO_WORKER_END:studioNormalizeProfileKey__*/
 
 export function studioThemeForProfile(record) {
   const explicit = studioNormalizeProfileKey(f(record, "Profile_Key"));
@@ -2629,7 +2629,7 @@ export function studioThemeForProfile(record) {
   if (marketSlug) return marketSlug;
   return studioNormalizeProfileKey(f(record, "Market_Name") || f(record, "Brand_Name") || f(record, "Profile_Name")) || "chicago";
 }
-
+/*__STUDIO_WORKER_END:studioThemeForProfile__*/
 
 export function studioSettingsPrefixForTheme(theme) {
   const normalized = studioNormalizeProfileKey(theme);
@@ -2639,7 +2639,7 @@ export function studioSettingsPrefixForTheme(theme) {
   if (normalized === "miami") return "MIAMI_";
   return normalized.toUpperCase().replace(/[^A-Z0-9]+/g, "_") + "_";
 }
-
+/*__STUDIO_WORKER_END:studioSettingsPrefixForTheme__*/
 
 export async function studioContentProfileRecordIdForOutput(env, record) {
   if (!record) return null;
@@ -2655,7 +2655,7 @@ export async function studioContentProfileRecordIdForOutput(env, record) {
     return null;
   }
 }
-
+/*__STUDIO_WORKER_END:studioContentProfileRecordIdForOutput__*/
 
 export async function studioThemeForPublishRecord(env, record) {
   if (!record) return "chicago";
@@ -2689,7 +2689,7 @@ export async function studioThemeForPublishRecord(env, record) {
     return direct;
   }
 }
-
+/*__STUDIO_WORKER_END:studioThemeForPublishRecord__*/
 
 export function studioCityLabel(theme, record) {
   if (theme === "la") return "Los Angeles";
@@ -2706,7 +2706,7 @@ export function studioCityLabel(theme, record) {
     ? String(theme).split("-").filter(Boolean).map((part) => part.charAt(0).toUpperCase() + part.slice(1)).join(" ")
     : "Chicago";
 }
-
+/*__STUDIO_WORKER_END:studioCityLabel__*/
 
 export function studioScheduleTimeZoneFromTheme(theme) {
   const normalized = studioNormalizeProfileKey(theme);
@@ -2715,7 +2715,7 @@ export function studioScheduleTimeZoneFromTheme(theme) {
   if (normalized === "washington-dc" || normalized === "boston") return "America/New_York";
   return maeTimeZoneFromTheme(theme);
 }
-
+/*__STUDIO_WORKER_END:studioScheduleTimeZoneFromTheme__*/
 
 export function studioScheduleTimeZoneForProfile(profile, fallback = MAE_DEFAULT_TIME_ZONE) {
   const explicit = String(f(profile, "Timezone") || "").trim();
@@ -2723,13 +2723,13 @@ export function studioScheduleTimeZoneForProfile(profile, fallback = MAE_DEFAULT
   const themed = studioScheduleTimeZoneFromTheme(studioThemeForProfile(profile));
   return maeNormalizeTimeZone(themed || fallback);
 }
-
+/*__STUDIO_WORKER_END:studioScheduleTimeZoneForProfile__*/
 
 export function studioScheduleTimeZoneFromPayload(payload, fallback = MAE_DEFAULT_TIME_ZONE) {
   const raw = String(payload?.timezone || payload?.time_zone || "").trim();
   return maeNormalizeTimeZone(raw || fallback);
 }
-
+/*__STUDIO_WORKER_END:studioScheduleTimeZoneFromPayload__*/
 
 export async function studioScheduleTimeZoneForRecord(env, record, payload = null) {
   if (payload?.timezone || payload?.time_zone) return studioScheduleTimeZoneFromPayload(payload);
@@ -2743,7 +2743,7 @@ export async function studioScheduleTimeZoneForRecord(env, record, payload = nul
   return studioScheduleTimeZoneFromTheme(theme);
 }
 
-
+/*__STUDIO_WORKER_END:studioScheduleTimeZoneForRecord__*/
 
 export function normalizeStudioBackgroundColor(value) {
   const raw = String(value || "").trim();
@@ -2752,13 +2752,13 @@ export function normalizeStudioBackgroundColor(value) {
   if (!match) return null;
   return `#${match[1].toLowerCase()}`;
 }
-
+/*__STUDIO_WORKER_END:normalizeStudioBackgroundColor__*/
 
 export function studioBackgroundColorForRecord(record) {
   const normalized = normalizeStudioBackgroundColor(f(record, "Studio_Background_Color"));
   return normalized || "";
 }
-
+/*__STUDIO_WORKER_END:studioBackgroundColorForRecord__*/
 
 export function mapStudioContentProfile(record) {
   const theme = studioThemeForProfile(record);
@@ -2788,7 +2788,7 @@ export function mapStudioContentProfile(record) {
     tiktok_handle: String(f(record, "TikTok_Handle") || "").trim(),
   };
 }
-
+/*__STUDIO_WORKER_END:mapStudioContentProfile__*/
 
 export function contentProfileFilterFormula(profile) {
   if (!profile?.id) return null;
@@ -2798,14 +2798,14 @@ export function contentProfileFilterFormula(profile) {
   if (name) parts.push(`FIND("${name}", ARRAYJOIN({Content_Profile})&"")`);
   return parts.length === 1 ? parts[0] : `OR(${parts.join(",")})`;
 }
-
+/*__STUDIO_WORKER_END:contentProfileFilterFormula__*/
 
 export function studioPipelineOpenOutputFormula(profile, { legacy = false } = {}) {
   const open = legacy ? STUDIO_PIPELINE_OPEN_LEGACY_FORMULA : STUDIO_PIPELINE_OPEN_FIELD_FORMULA;
   const profileFormula = contentProfileFilterFormula(profile);
   return profileFormula ? `AND(${profileFormula},${open})` : open;
 }
-
+/*__STUDIO_WORKER_END:studioPipelineOpenOutputFormula__*/
 
 export function mergePipelineOutputRecords(newest = [], open = []) {
   const byId = new Map();
@@ -2816,7 +2816,7 @@ export function mergePipelineOutputRecords(newest = [], open = []) {
     (a, b) => Number(f(b, "Output_ID") || 0) - Number(f(a, "Output_ID") || 0)
   );
 }
-
+/*__STUDIO_WORKER_END:mergePipelineOutputRecords__*/
 
 export function studioPipelineContentIdsFromOutputs(records = []) {
   return [...new Set(
@@ -2825,7 +2825,7 @@ export function studioPipelineContentIdsFromOutputs(records = []) {
       .filter((id) => /^rec[A-Za-z0-9]+$/.test(String(id || "")))
   )];
 }
-
+/*__STUDIO_WORKER_END:studioPipelineContentIdsFromOutputs__*/
 
 export async function listPipelineOutputsForContentIds(env, profile, contentIds, listOpts = {}) {
   const ids = [...new Set((contentIds || []).filter((id) => /^rec[A-Za-z0-9]+$/.test(String(id || ""))))];
@@ -2853,7 +2853,7 @@ export async function listPipelineOutputsForContentIds(env, profile, contentIds,
   });
   return pages.flat();
 }
-
+/*__STUDIO_WORKER_END:listPipelineOutputsForContentIds__*/
 
 export async function listPipelineContentByIds(env, contentIds = [], fields = null) {
   const ids = [...new Set((contentIds || []).filter((id) => /^rec[A-Za-z0-9]+$/.test(String(id || ""))))];
@@ -2876,14 +2876,14 @@ export async function listPipelineContentByIds(env, contentIds = [], fields = nu
   }
   return rows;
 }
-
+/*__STUDIO_WORKER_END:listPipelineContentByIds__*/
 
 export function studioApproveAllCandidateFormula(profile) {
   const ready = 'AND({Test_Run_ID}=BLANK(),NOT({Do_Not_Publish}),OR({Output_Status}="Ready for Review",{Review_Status}="Review Sent"),{Review_Status}!="Approved",{Output_Status}!="Approved for Publishing",{Output_Status}!="Published")';
   const profileFormula = contentProfileFilterFormula(profile);
   return profileFormula ? `AND(${profileFormula},${ready})` : ready;
 }
-
+/*__STUDIO_WORKER_END:studioApproveAllCandidateFormula__*/
 
 export async function listContentProfileRecords(env) {
   if (Array.isArray(env.__contentProfilesCache) && env.__contentProfilesCache.length) {
@@ -2895,7 +2895,7 @@ export async function listContentProfileRecords(env) {
   env.__contentProfilesCache = rows;
   return rows;
 }
-
+/*__STUDIO_WORKER_END:listContentProfileRecords__*/
 
 export async function resolveAuthorizedContentProfiles(env, authorization) {
   const profiles = await listContentProfileRecords(env);
@@ -2909,7 +2909,7 @@ export async function resolveAuthorizedContentProfiles(env, authorization) {
     return active && orgMatch && membershipAllowsBrand(authorization, brands);
   });
 }
-
+/*__STUDIO_WORKER_END:resolveAuthorizedContentProfiles__*/
 
 export async function resolveWorkingContentProfile(env, authorization, profileId) {
   const matches = await resolveAuthorizedContentProfiles(env, authorization);
@@ -2931,12 +2931,12 @@ export async function resolveWorkingContentProfile(env, authorization, profileId
   if (chicago.length === 1) return chicago[0];
   return matches[0];
 }
-
+/*__STUDIO_WORKER_END:resolveWorkingContentProfile__*/
 
 export async function resolveDefaultContentProfile(env, authorization) {
   return resolveWorkingContentProfile(env, authorization, null);
 }
-
+/*__STUDIO_WORKER_END:resolveDefaultContentProfile__*/
 
 export async function listStudioContentProfiles(request, env, authorization) {
   const profiles = await resolveAuthorizedContentProfiles(env, authorization);
@@ -2948,7 +2948,7 @@ export async function listStudioContentProfiles(request, env, authorization) {
     can_create_profile: Boolean(authorization?.permissions?.tenant_admin),
   });
 }
-
+/*__STUDIO_WORKER_END:listStudioContentProfiles__*/
 
 export function studioProfileOnboardingHandlers() {
   return createProfileOnboarding({
@@ -2969,19 +2969,19 @@ export function studioProfileOnboardingHandlers() {
   });
 }
 
-
+/*__STUDIO_WORKER_END:studioProfileOnboardingHandlers__*/
 
 export function studioProfileSetupRecordIdFromPath(url) {
   const match = /^\/api\/profile-setup\/(rec[A-Za-z0-9]+)/.exec(url.pathname);
   return match?.[1] || null;
 }
-
+/*__STUDIO_WORKER_END:studioProfileSetupRecordIdFromPath__*/
 
 export function studioProfileSetupPlatformFromPath(url) {
   const match = /^\/api\/profile-setup\/rec[A-Za-z0-9]+\/platform\/(instagram|facebook|youtube|tiktok)$/.exec(url.pathname);
   return profileSetupPlatformKey(match?.[1] || "");
 }
-
+/*__STUDIO_WORKER_END:studioProfileSetupPlatformFromPath__*/
 
 export function studioProfileSetupBelongsToAuthorization(profile, authorization) {
   if (!profile?.id || !authorization?.organization?.record_id) return false;
@@ -2989,7 +2989,7 @@ export function studioProfileSetupBelongsToAuthorization(profile, authorization)
   const orgMatch = !organizations.length || organizations.includes(authorization.organization.record_id);
   return orgMatch && membershipAllowsBrand(authorization, arrayOrEmpty(f(profile, "Brand")));
 }
-
+/*__STUDIO_WORKER_END:studioProfileSetupBelongsToAuthorization__*/
 
 export async function loadAuthorizedStudioProfileSetupRecord(env, authorization, profileId) {
   if (!/^rec[A-Za-z0-9]+$/.test(String(profileId || ""))) {
@@ -3001,7 +3001,7 @@ export async function loadAuthorizedStudioProfileSetupRecord(env, authorization,
   }
   return profile;
 }
-
+/*__STUDIO_WORKER_END:loadAuthorizedStudioProfileSetupRecord__*/
 
 export function studioProfileSetupStateFromRecord(profile, saved = null) {
   const defaults = arrayOrEmpty(f(profile, "Default_Platforms")).map((value) => String(value || ""));
@@ -3051,7 +3051,7 @@ export function studioProfileSetupStateFromRecord(profile, saved = null) {
   };
   return normalizeProfileSetupState({ ...recordState, ...(saved || {}), profile_id: profile.id }, saved || recordState);
 }
-
+/*__STUDIO_WORKER_END:studioProfileSetupStateFromRecord__*/
 
 export async function loadStudioProfileSetupState(env, profile) {
   const setting = await studioSettingsByName(env, profileSetupSettingName(profile.id)).catch(() => null);
@@ -3063,7 +3063,7 @@ export async function loadStudioProfileSetupState(env, profile) {
   }
   return studioProfileSetupStateFromRecord(profile, saved);
 }
-
+/*__STUDIO_WORKER_END:loadStudioProfileSetupState__*/
 
 export async function saveStudioProfileSetupState(env, state) {
   const normalized = normalizeProfileSetupState(state, state);
@@ -3075,7 +3075,7 @@ export async function saveStudioProfileSetupState(env, state) {
   );
   return normalized;
 }
-
+/*__STUDIO_WORKER_END:saveStudioProfileSetupState__*/
 
 export function studioProfileSetupBrandId(state) {
   const seed = String(state.short_code || state.slug || state.city || "CITY")
@@ -3085,7 +3085,7 @@ export function studioProfileSetupBrandId(state) {
     .slice(0, 24);
   return `BRD-${seed || "CITY"}`;
 }
-
+/*__STUDIO_WORKER_END:studioProfileSetupBrandId__*/
 
 export function studioProfileSetupProfileFields(state, brandRecordId, organizationRecordId) {
   const fields = {
@@ -3116,7 +3116,7 @@ export function studioProfileSetupProfileFields(state, brandRecordId, organizati
   if (bg) fields.Studio_Background_Color = bg;
   return fields;
 }
-
+/*__STUDIO_WORKER_END:studioProfileSetupProfileFields__*/
 
 export async function studioProfileSetupConnectionSnapshot(env, profile) {
   const settings = await studioActivePipelineSettings(env, [
@@ -3214,7 +3214,7 @@ export async function studioProfileSetupConnectionSnapshot(env, profile) {
 
   return connectionState;
 }
-
+/*__STUDIO_WORKER_END:studioProfileSetupConnectionSnapshot__*/
 
 export async function studioProfileSetupSummary(env, profile) {
   const [state, connections] = await Promise.all([
@@ -3229,7 +3229,7 @@ export async function studioProfileSetupSummary(env, profile) {
     checklist,
   };
 }
-
+/*__STUDIO_WORKER_END:studioProfileSetupSummary__*/
 
 export async function listStudioProfileSetups(request, env, authorization) {
   const profiles = (await listContentProfileRecords(env)).filter((profile) =>
@@ -3252,7 +3252,7 @@ export async function listStudioProfileSetups(request, env, authorization) {
       .map(mapStudioContentProfile),
   });
 }
-
+/*__STUDIO_WORKER_END:listStudioProfileSetups__*/
 
 export async function createStudioProfileSetup(request, env, authorization) {
   const payload = await readJsonBody(request);
@@ -3322,7 +3322,7 @@ export async function createStudioProfileSetup(request, env, authorization) {
     ...(await studioProfileSetupSummary(env, profile)),
   }, 201);
 }
-
+/*__STUDIO_WORKER_END:createStudioProfileSetup__*/
 
 export async function getStudioProfileSetup(request, env, url, authorization) {
   const profile = await loadAuthorizedStudioProfileSetupRecord(
@@ -3332,7 +3332,7 @@ export async function getStudioProfileSetup(request, env, url, authorization) {
   );
   return respond(request, env, { ok: true, ...(await studioProfileSetupSummary(env, profile)) });
 }
-
+/*__STUDIO_WORKER_END:getStudioProfileSetup__*/
 
 export async function patchStudioProfileSetup(request, env, url, authorization) {
   const profileId = studioProfileSetupRecordIdFromPath(url);
@@ -3379,7 +3379,7 @@ export async function patchStudioProfileSetup(request, env, url, authorization) 
   const refreshed = await airtableFetch(env, STUDIO_IDEA_PROFILE_TABLE_ID, profileId);
   return respond(request, env, { ok: true, ...(await studioProfileSetupSummary(env, refreshed)) });
 }
-
+/*__STUDIO_WORKER_END:patchStudioProfileSetup__*/
 
 export async function updateStudioProfileSetupPlatform(request, env, url, authorization) {
   const profileId = studioProfileSetupRecordIdFromPath(url);
@@ -3476,7 +3476,7 @@ export async function updateStudioProfileSetupPlatform(request, env, url, author
     checklist,
   });
 }
-
+/*__STUDIO_WORKER_END:updateStudioProfileSetupPlatform__*/
 
 export async function activateStudioProfileSetup(request, env, url, authorization) {
   const profileId = studioProfileSetupRecordIdFromPath(url);
@@ -3512,7 +3512,7 @@ export async function activateStudioProfileSetup(request, env, url, authorizatio
   });
 }
 
-
+/*__STUDIO_WORKER_END:activateStudioProfileSetup__*/
 
 export function cleanIdeaCreatePayload(payload) {
   const title = String(payload?.title || "").trim();
@@ -3526,7 +3526,7 @@ export function cleanIdeaCreatePayload(payload) {
 
   return { title, summary, primary_location: primaryLocation };
 }
-
+/*__STUDIO_WORKER_END:cleanIdeaCreatePayload__*/
 
 export async function createIdea(request, env, authorization) {
   let payload;
@@ -3579,14 +3579,14 @@ export async function createIdea(request, env, authorization) {
     },
   }, 201);
 }
-
+/*__STUDIO_WORKER_END:createIdea__*/
 
 export function ideaRecordIdFromPath(url) {
   const match = url.pathname.match(/\/api\/ideas\/(rec[A-Za-z0-9]+)/);
   if (!match) throw new HttpError(400, "Invalid Airtable record ID");
   return match[1];
 }
-
+/*__STUDIO_WORKER_END:ideaRecordIdFromPath__*/
 
 export async function loadAuthorizedIdea(env, recordId, authorization) {
   if (!/^rec[A-Za-z0-9]+$/.test(recordId)) {
@@ -3604,7 +3604,7 @@ export async function loadAuthorizedIdea(env, recordId, authorization) {
 
   return record;
 }
-
+/*__STUDIO_WORKER_END:loadAuthorizedIdea__*/
 
 export function assertIdeaUnpromoted(record, actionLabel) {
   const contentLinks = Array.isArray(f(record, "Content Items")) ? f(record, "Content Items") : [];
@@ -3613,7 +3613,7 @@ export function assertIdeaUnpromoted(record, actionLabel) {
     throw new HttpError(409, `${actionLabel} is not allowed after an Idea Candidate has been promoted`);
   }
 }
-
+/*__STUDIO_WORKER_END:assertIdeaUnpromoted__*/
 
 export function assertIdeaNotApproved(record, actionLabel) {
   const status = String(f(record, "Candidate_Status") || "").trim();
@@ -3624,7 +3624,7 @@ export function assertIdeaNotApproved(record, actionLabel) {
     );
   }
 }
-
+/*__STUDIO_WORKER_END:assertIdeaNotApproved__*/
 
 export function cleanIdeaUpdatePayload(payload) {
   const title = String(payload?.title ?? "").trim();
@@ -3638,7 +3638,7 @@ export function cleanIdeaUpdatePayload(payload) {
 
   return { title, summary, primary_location: primaryLocation };
 }
-
+/*__STUDIO_WORKER_END:cleanIdeaUpdatePayload__*/
 
 export async function updateIdea(request, env, url, authorization) {
   let payload;
@@ -3693,7 +3693,7 @@ export async function updateIdea(request, env, url, authorization) {
     record: mapIdea(updated),
   });
 }
-
+/*__STUDIO_WORKER_END:updateIdea__*/
 
 export async function holdIdea(request, env, url, authorization) {
   // Parse the JSON body even though this action currently has no user fields.
@@ -3729,7 +3729,7 @@ export async function holdIdea(request, env, url, authorization) {
     record: mapIdea(updated),
   });
 }
-
+/*__STUDIO_WORKER_END:holdIdea__*/
 
 export async function restoreIdea(request, env, url, authorization) {
   try { await request.json(); } catch { throw new HttpError(400, "Request body must be valid JSON"); }
@@ -3766,7 +3766,7 @@ export async function restoreIdea(request, env, url, authorization) {
     record: mapIdea(updated),
   });
 }
-
+/*__STUDIO_WORKER_END:restoreIdea__*/
 
 export async function deleteIdea(request, env, url, authorization) {
   try { await request.json(); } catch { throw new HttpError(400, "Request body must be valid JSON"); }
@@ -3790,28 +3790,28 @@ export async function deleteIdea(request, env, url, authorization) {
 }
 
 
-
+/*__STUDIO_WORKER_END:deleteIdea__*/
 
 export function productionRequestIdFromOutputsPath(url) {
   const match = url.pathname.match(/^\/api\/production-requests\/(rec[A-Za-z0-9]+)\/outputs$/);
   if (!match) throw new HttpError(400, "Invalid Production Request outputs route");
   return match[1];
 }
-
+/*__STUDIO_WORKER_END:productionRequestIdFromOutputsPath__*/
 
 export function productionRequestOutputIdFromPath(url) {
   const match = url.pathname.match(/^\/api\/production-request-outputs\/(rec[A-Za-z0-9]+)$/);
   if (!match) throw new HttpError(400, "Invalid Production Request Output route");
   return match[1];
 }
-
+/*__STUDIO_WORKER_END:productionRequestOutputIdFromPath__*/
 
 export function makeProductionRequestOutputId() {
   const stamp = new Date().toISOString().replace(/[-:TZ.]/g, "").slice(0, 14);
   const random = Math.random().toString(36).slice(2, 8).toUpperCase();
   return `PRO-${stamp}-${random}`;
 }
-
+/*__STUDIO_WORKER_END:makeProductionRequestOutputId__*/
 
 export function normalizeOutputType(platform, outputType) {
   const p = String(platform || "").trim();
@@ -3822,7 +3822,7 @@ export function normalizeOutputType(platform, outputType) {
   }
   return { platform: p, output_type: o };
 }
-
+/*__STUDIO_WORKER_END:normalizeOutputType__*/
 
 export function mapProductionRequestOutput(record, master = null) {
   const links = (name) => Array.isArray(f(record, name)) ? f(record, name) : [];
@@ -3923,7 +3923,7 @@ export function mapProductionRequestOutput(record, master = null) {
 
   return mapped;
 }
-
+/*__STUDIO_WORKER_END:mapProductionRequestOutput__*/
 
 export async function outputRowsForProductionRequest(env, productionRequestId, options = {}) {
   const includeInactive = Boolean(options.includeInactive);
@@ -3972,7 +3972,7 @@ export async function outputRowsForProductionRequest(env, productionRequestId, o
   const filtered = includeInactive ? rows : rows.filter((row) => Boolean(f(row, "Active")));
   return filtered.sort((a, b) => Number(f(a, "Output_Order") || 0) - Number(f(b, "Output_Order") || 0));
 }
-
+/*__STUDIO_WORKER_END:outputRowsForProductionRequest__*/
 
 export async function loadAuthorizedProductionRequestOutput(env, outputRecordId, authorization) {
   const row = await airtableFetch(env, PRODUCTION_REQUEST_OUTPUT_TABLE, outputRecordId);
@@ -3988,7 +3988,7 @@ export async function loadAuthorizedProductionRequestOutput(env, outputRecordId,
   }
   return { row, parent };
 }
-
+/*__STUDIO_WORKER_END:loadAuthorizedProductionRequestOutput__*/
 
 export function assertEditableProductionRequest(parent) {
   const status = String(f(parent, "Request_Status") || "").trim();
@@ -3996,7 +3996,7 @@ export function assertEditableProductionRequest(parent) {
     throw new HttpError(409, `Production Request is ${status || "locked"} and its requested outputs cannot be edited`);
   }
 }
-
+/*__STUDIO_WORKER_END:assertEditableProductionRequest__*/
 
 export async function listProductionRequestOutputs(request, env, url, authorization, ctx) {
   // v0.10.6: this endpoint is part of every Production workspace data refresh.
@@ -4014,7 +4014,7 @@ export async function listProductionRequestOutputs(request, env, url, authorizat
     ),
   });
 }
-
+/*__STUDIO_WORKER_END:listProductionRequestOutputs__*/
 
 export async function syncProductionRequestOutputs(request, env, url, authorization) {
   let payload;
@@ -4227,7 +4227,7 @@ export async function syncProductionRequestOutputs(request, env, url, authorizat
     records: rows.map(row => mapProductionRequestOutput(row, updatedParent)),
   });
 }
-
+/*__STUDIO_WORKER_END:syncProductionRequestOutputs__*/
 
 export function cleanProductionRequestOutputPatch(payload) {
   const fields = {};
@@ -4280,7 +4280,7 @@ export function cleanProductionRequestOutputPatch(payload) {
   }
   return fields;
 }
-
+/*__STUDIO_WORKER_END:cleanProductionRequestOutputPatch__*/
 
 export async function getProductionRequestOutput(request, env, url, authorization) {
   const outputRecordId = productionRequestOutputIdFromPath(url);
@@ -4291,7 +4291,7 @@ export async function getProductionRequestOutput(request, env, url, authorizatio
     production_request: mapProductionRequest(parent),
   });
 }
-
+/*__STUDIO_WORKER_END:getProductionRequestOutput__*/
 
 export async function updateProductionRequestOutput(request, env, url, authorization) {
   let payload;
@@ -4321,64 +4321,64 @@ export async function updateProductionRequestOutput(request, env, url, authoriza
   });
 }
 
-
+/*__STUDIO_WORKER_END:updateProductionRequestOutput__*/
 
 export function item4ParseJson(value, fallback = null) {
   if (value === null || value === undefined || value === "") return fallback;
   if (typeof value === "object") return value;
   try { return JSON.parse(String(value)); } catch { return fallback; }
 }
-
+/*__STUDIO_WORKER_END:item4ParseJson__*/
 
 export function item4RequestIdFromPath(url) {
   const match = url.pathname.match(/^\/api\/production-requests\/(rec[A-Za-z0-9]+)/);
   if (!match) throw new HttpError(400, "Invalid Production Request Item 4 route");
   return match[1];
 }
-
+/*__STUDIO_WORKER_END:item4RequestIdFromPath__*/
 
 export function item4AssetIdFromPath(url) {
   const match = url.pathname.match(/^\/api\/production-requests\/rec[A-Za-z0-9]+\/assets\/([A-Za-z0-9_-]+)(?:\/poster)?$/);
   return match ? match[1] : null;
 }
-
+/*__STUDIO_WORKER_END:item4AssetIdFromPath__*/
 
 export function item4SafeFileName(name) {
   const clean = String(name || "photo").replace(/[^A-Za-z0-9._-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 120);
   return clean || "photo";
 }
-
+/*__STUDIO_WORKER_END:item4SafeFileName__*/
 
 export function item4FileExtension(name) {
   const match = String(name || "").toLowerCase().match(/\.([a-z0-9]+)$/);
   return match ? match[1] : "";
 }
-
+/*__STUDIO_WORKER_END:item4FileExtension__*/
 
 export function item4IsHeicFile(file) {
   const mime = String(file?.type || "").toLowerCase();
   const ext = item4FileExtension(file?.name);
   return mime.includes("heic") || mime.includes("heif") || ext === "heic" || ext === "heif";
 }
-
+/*__STUDIO_WORKER_END:item4IsHeicFile__*/
 
 export function item4IsSupportedImageFile(file) {
   const mime = String(file?.type || "").toLowerCase();
   return mime.startsWith("image/") || item4IsHeicFile(file);
 }
-
+/*__STUDIO_WORKER_END:item4IsSupportedImageFile__*/
 
 export function item4IsSupportedVideoFile(file) {
   const mime = String(file?.type || "").toLowerCase();
   const ext = item4FileExtension(file?.name);
   return mime.startsWith("video/") || ["mp4", "mov", "m4v", "webm"].includes(ext);
 }
-
+/*__STUDIO_WORKER_END:item4IsSupportedVideoFile__*/
 
 export function item4IsClipInputKind(kind) {
   return ITEM4_CLIP_INPUTS.includes(String(kind || "").trim().toLowerCase());
 }
-
+/*__STUDIO_WORKER_END:item4IsClipInputKind__*/
 
 export function item4LooksLikeVideoAsset(asset) {
   const kind = String(asset?.media_kind || "").trim().toLowerCase();
@@ -4388,7 +4388,7 @@ export function item4LooksLikeVideoAsset(asset) {
   const name = String(asset?.name || "").toLowerCase();
   return mime.startsWith("video/") || /\.(mp4|mov|m4v|webm)$/i.test(name);
 }
-
+/*__STUDIO_WORKER_END:item4LooksLikeVideoAsset__*/
 
 export function item4AssetCompressionPending(asset) {
   const status = String(asset?.compression_status || "").trim().toLowerCase();
@@ -4399,12 +4399,12 @@ export function item4AssetCompressionPending(asset) {
     && Number(asset?.size_bytes || 0) > ITEM4_COMPRESS_THRESHOLD_BYTES
     && !item4UrlIsPublicPublishCdn(asset?.preview_public_url || asset?.url);
 }
-
+/*__STUDIO_WORKER_END:item4AssetCompressionPending__*/
 
 export function item4AssetsNeedStudioCompress(assets) {
   return (Array.isArray(assets) ? assets : []).some(item4AssetCompressionPending);
 }
-
+/*__STUDIO_WORKER_END:item4AssetsNeedStudioCompress__*/
 
 export function item4HealStaleCompressionAssets(assets) {
   let changed = false;
@@ -4430,17 +4430,17 @@ export function item4HealStaleCompressionAssets(assets) {
   });
   return { assets: next, changed };
 }
-
+/*__STUDIO_WORKER_END:item4HealStaleCompressionAssets__*/
 
 export function item4HasVideoMasters(assets) {
   return (Array.isArray(assets) ? assets : []).some(item4LooksLikeVideoAsset);
 }
-
+/*__STUDIO_WORKER_END:item4HasVideoMasters__*/
 
 export function item4AssetMediaKind(asset) {
   return item4LooksLikeVideoAsset(asset) ? "video" : "photo";
 }
-
+/*__STUDIO_WORKER_END:item4AssetMediaKind__*/
 
 export function item4LooksLikeImagePreviewUrl(url) {
   const raw = String(url || "").trim();
@@ -4449,13 +4449,13 @@ export function item4LooksLikeImagePreviewUrl(url) {
     || raw.includes("/studio/previews/clip-posters/")
     || /\/api\/media-assets\/rec[^/]+\/preview/i.test(raw);
 }
-
+/*__STUDIO_WORKER_END:item4LooksLikeImagePreviewUrl__*/
 
 export function item4IsClipPosterFile(file) {
   const mime = String(file?.type || "").toLowerCase();
   return mime === "image/jpeg" || mime === "image/jpg" || mime === "image/png" || mime === "image/webp";
 }
-
+/*__STUDIO_WORKER_END:item4IsClipPosterFile__*/
 
 export async function item4PutClipPoster(env, recordId, assetId, bytes, contentType = "image/jpeg") {
   const key = `studio/previews/clip-posters/${recordId}/${assetId}.jpg`;
@@ -4465,7 +4465,7 @@ export async function item4PutClipPoster(env, recordId, assetId, bytes, contentT
   });
   return { key, url: `${ITEM4_MEDIA_PUBLIC_BASE}/${key}` };
 }
-
+/*__STUDIO_WORKER_END:item4PutClipPoster__*/
 
 export async function item4GoogleAccessToken(env) {
   const clientId = String(env?.GOOGLE_CLIENT_ID || "").trim();
@@ -4494,7 +4494,7 @@ export async function item4GoogleAccessToken(env) {
     return "";
   }
 }
-
+/*__STUDIO_WORKER_END:item4GoogleAccessToken__*/
 
 export async function studioFetchAuthenticatedDriveImageBytes(driveId, env) {
   const id = String(driveId || "").trim();
@@ -4521,7 +4521,7 @@ export async function studioFetchAuthenticatedDriveImageBytes(driveId, env) {
   if (!bytes || bytes.byteLength < 80) throw new HttpError(502, "Brand watermark Drive file was empty");
   return { bytes, contentType: contentType || "image/png" };
 }
-
+/*__STUDIO_WORKER_END:studioFetchAuthenticatedDriveImageBytes__*/
 
 export async function studioEnsurePublicChicagoWatermark(env) {
   if (!env?.STUDIO_MEDIA) throw new HttpError(503, "Studio media storage is not configured");
@@ -4546,7 +4546,7 @@ export async function studioEnsurePublicChicagoWatermark(env) {
   if (!object) throw new HttpError(502, "Brand watermark public cache write did not persist");
   return object;
 }
-
+/*__STUDIO_WORKER_END:studioEnsurePublicChicagoWatermark__*/
 
 export async function publicChicagoShiningWatermark(request, env) {
   const object = await studioEnsurePublicChicagoWatermark(env);
@@ -4566,7 +4566,7 @@ export async function publicChicagoShiningWatermark(request, env) {
   }
   return new Response(object.body, { status: 200, headers });
 }
-
+/*__STUDIO_WORKER_END:publicChicagoShiningWatermark__*/
 
 export async function item4FetchDriveThumbnailBytes(driveId, env = null) {
   const id = String(driveId || "").trim();
@@ -4623,7 +4623,7 @@ export async function item4FetchDriveThumbnailBytes(driveId, env = null) {
   }
   return null;
 }
-
+/*__STUDIO_WORKER_END:item4FetchDriveThumbnailBytes__*/
 
 export async function item4StampAssetPoster(env, recordId, assetId, stored) {
   const record = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, recordId);
@@ -4636,7 +4636,7 @@ export async function item4StampAssetPoster(env, recordId, assetId, stored) {
   });
   return { record: updated, assets: nextAssets, poster_url: stored.url };
 }
-
+/*__STUDIO_WORKER_END:item4StampAssetPoster__*/
 
 export async function item4BuildClipPostersLocally(env, recordId, { assetId = "" } = {}) {
   if (!env?.STUDIO_MEDIA) return { ok: false, posters: [] };
@@ -4657,7 +4657,7 @@ export async function item4BuildClipPostersLocally(env, recordId, { assetId = ""
   }
   return { ok: Boolean(posters.length), posters };
 }
-
+/*__STUDIO_WORKER_END:item4BuildClipPostersLocally__*/
 
 export function item4PlayableMediaUrl(asset) {
   const urls = [
@@ -4668,14 +4668,14 @@ export function item4PlayableMediaUrl(asset) {
   const publicHttp = urls.find((value) => /^https?:\/\//i.test(value) && !value.startsWith("/") && !item4LooksLikeImagePreviewUrl(value));
   return publicHttp || "";
 }
-
+/*__STUDIO_WORKER_END:item4PlayableMediaUrl__*/
 
 export function item4VideoStreamPath(asset) {
   const recordId = String(asset?.media_asset_record_id || "").trim();
   if (!/^rec[A-Za-z0-9]+$/.test(recordId)) return "";
   return `/api/media-assets/${recordId}/stream`;
 }
-
+/*__STUDIO_WORKER_END:item4VideoStreamPath__*/
 
 export function item4VideoVariantReady(asset) {
   return Boolean(
@@ -4683,13 +4683,13 @@ export function item4VideoVariantReady(asset) {
     && String(asset?.google_drive_file_id || "").trim()
   );
 }
-
+/*__STUDIO_WORKER_END:item4VideoVariantReady__*/
 
 export function item4IsNativeStillOutput(platform, outputType) {
   const types = ITEM4_NATIVE_STILL_OUTPUTS[String(platform || "").trim()] || [];
   return types.includes(String(outputType || "").trim());
 }
-
+/*__STUDIO_WORKER_END:item4IsNativeStillOutput__*/
 
 export function item4NormalizedMimeType(file) {
   const mime = String(file?.type || "").toLowerCase();
@@ -4703,7 +4703,7 @@ export function item4NormalizedMimeType(file) {
   return "application/octet-stream";
 }
 
-
+/*__STUDIO_WORKER_END:item4NormalizedMimeType__*/
 
 export function item4AssetManifest(record) {
   const parsed = item4ParseJson(f(record, "Studio_Master_Assets_JSON"), []);
@@ -4711,7 +4711,7 @@ export function item4AssetManifest(record) {
     ? parsed.filter((x) => x && x.id && (x.google_drive_file_id || x.r2_key || x.url))
     : [];
 }
-
+/*__STUDIO_WORKER_END:item4AssetManifest__*/
 
 export function item4NormalizeSlideCaptions(raw) {
   if (!Array.isArray(raw)) return [];
@@ -4724,7 +4724,7 @@ export function item4NormalizeSlideCaptions(raw) {
     };
   }).filter((row) => row.id);
 }
-
+/*__STUDIO_WORKER_END:item4NormalizeSlideCaptions__*/
 
 export function item4ApplySlideCaptions(assets, captions) {
   const byId = new Map(item4NormalizeSlideCaptions(captions).map((row) => [row.id, row]));
@@ -4745,7 +4745,7 @@ export function item4ApplySlideCaptions(assets, captions) {
     };
   });
 }
-
+/*__STUDIO_WORKER_END:item4ApplySlideCaptions__*/
 
 export function item4JoinedSlideCaptions(assets) {
   return (Array.isArray(assets) ? assets : [])
@@ -4754,7 +4754,7 @@ export function item4JoinedSlideCaptions(assets) {
     .map((asset) => String(asset?.caption || "").trim())
     .filter(Boolean);
 }
-
+/*__STUDIO_WORKER_END:item4JoinedSlideCaptions__*/
 
 export function item4RequestedCaptionIsSlideDump(caption, assets) {
   const manuals = item4JoinedSlideCaptions(assets);
@@ -4762,12 +4762,12 @@ export function item4RequestedCaptionIsSlideDump(caption, assets) {
   const text = String(caption || "").trim();
   return Boolean(text) && (text === manuals.join("\n\n") || text === manuals.join("\n"));
 }
-
+/*__STUDIO_WORKER_END:item4RequestedCaptionIsSlideDump__*/
 
 export function item4IsLeftoverOverlayText(text) {
   return ITEM4_LEFTOVER_OVERLAYS.has(String(text || "").trim().toLowerCase());
 }
-
+/*__STUDIO_WORKER_END:item4IsLeftoverOverlayText__*/
 
 export function item4OutputHasLeftoverOverlay(po) {
   const blobs = [f(po, "Selected_Assets_JSON"), f(po, "Render_Clip_List_JSON")];
@@ -4776,7 +4776,7 @@ export function item4OutputHasLeftoverOverlay(po) {
     return [...ITEM4_LEFTOVER_OVERLAYS].some((phrase) => text.includes(phrase));
   });
 }
-
+/*__STUDIO_WORKER_END:item4OutputHasLeftoverOverlay__*/
 
 export function item4PreferredOverlayText(requestRecord, parentContentItem, sourceText) {
   const raw = String(sourceText || "").trim();
@@ -4796,7 +4796,7 @@ export function item4PreferredOverlayText(requestRecord, parentContentItem, sour
   if (title && title.length <= 80 && !item4IsLeftoverOverlayText(title)) return title;
   return "";
 }
-
+/*__STUDIO_WORKER_END:item4PreferredOverlayText__*/
 
 export function item4UnletteredClipUrl(packageJson, index, clip) {
   const prep = packageJson && typeof packageJson === "object" ? (packageJson.render_prep || {}) : {};
@@ -4809,7 +4809,7 @@ export function item4UnletteredClipUrl(packageJson, index, clip) {
   if (current && !/\/lettered\//i.test(current)) return current;
   return fromList || current;
 }
-
+/*__STUDIO_WORKER_END:item4UnletteredClipUrl__*/
 
 export function item4FillAiOverlayFallbacks(assets, requestRecord, parentContentItem) {
   const rows = Array.isArray(assets) ? assets.slice() : [];
@@ -4835,7 +4835,7 @@ export function item4FillAiOverlayFallbacks(assets, requestRecord, parentContent
     return { ...asset, caption: text };
   });
 }
-
+/*__STUDIO_WORKER_END:item4FillAiOverlayFallbacks__*/
 
 export function item4OverlayCaptionBySourceId(requestRecord) {
   const assets = item4ParseJson(f(requestRecord, "Studio_Master_Assets_JSON"), []);
@@ -4849,7 +4849,7 @@ export function item4OverlayCaptionBySourceId(requestRecord) {
   }
   return map;
 }
-
+/*__STUDIO_WORKER_END:item4OverlayCaptionBySourceId__*/
 
 export async function studioRepairLeftoverNativeLettering(env, po, context) {
   const parsed = item4ParseJson(f(po, "Selected_Assets_JSON"), {});
@@ -4897,24 +4897,24 @@ export async function studioRepairLeftoverNativeLettering(env, po, context) {
     }),
   });
 }
-
+/*__STUDIO_WORKER_END:studioRepairLeftoverNativeLettering__*/
 
 export function studioBurnedInOverlayPosition(aspectRatio = "9:16") {
   return String(aspectRatio || "").replace("x", ":") === "9:16" ? "lower-third" : "bottom";
 }
-
+/*__STUDIO_WORKER_END:studioBurnedInOverlayPosition__*/
 
 export function phase6DefaultOverlayPosition(aspectRatio = "") {
   return String(aspectRatio || "").replace("x", ":") === "9:16" ? "lower-third" : "center";
 }
-
+/*__STUDIO_WORKER_END:phase6DefaultOverlayPosition__*/
 
 export function studioSharedVerticalShortOutput(record) {
   const ratio = String(f(record, "Aspect_Ratio") || "").replace("x", ":");
   const outputType = String(f(record, "Studio_Output_Type") || f(record, "Output_Type") || "").trim();
   return ratio === "9:16" && STUDIO_SHARED_VERTICAL_SHORT_TYPES.has(outputType);
 }
-
+/*__STUDIO_WORKER_END:studioSharedVerticalShortOutput__*/
 
 export async function studioSiblingVerticalShortOutputs(env, record) {
   const contentId = studioFirstLinkedId(f(record, "Content_Item"));
@@ -4931,7 +4931,7 @@ export async function studioSiblingVerticalShortOutputs(env, record) {
   }
   return rows.filter(studioSharedVerticalShortOutput);
 }
-
+/*__STUDIO_WORKER_END:studioSiblingVerticalShortOutputs__*/
 
 export function studioSharedAudioMixFieldNames() {
   return [
@@ -4943,7 +4943,7 @@ export function studioSharedAudioMixFieldNames() {
     "Music_Duck_Fade_Frames",
   ];
 }
-
+/*__STUDIO_WORKER_END:studioSharedAudioMixFieldNames__*/
 
 export function studioPickSharedAudioMixFields(fields = {}) {
   const picked = {};
@@ -4952,7 +4952,7 @@ export function studioPickSharedAudioMixFields(fields = {}) {
   }
   return picked;
 }
-
+/*__STUDIO_WORKER_END:studioPickSharedAudioMixFields__*/
 
 export function studioSharedRenderRerenderFields() {
   return {
@@ -4973,7 +4973,7 @@ export function studioSharedRenderRerenderFields() {
     Studio_Preview_Updated_At: "",
   };
 }
-
+/*__STUDIO_WORKER_END:studioSharedRenderRerenderFields__*/
 
 export async function studioPatchSiblingVerticalShortOutputs(env, sourceRecord, fields, options = {}) {
   const siblings = await studioSiblingVerticalShortOutputs(env, sourceRecord);
@@ -4994,7 +4994,7 @@ export async function studioPatchSiblingVerticalShortOutputs(env, sourceRecord, 
   }));
   return siblings;
 }
-
+/*__STUDIO_WORKER_END:studioPatchSiblingVerticalShortOutputs__*/
 
 export function item4PhotoOverlayFromCaption(text, { aspectRatio = "9:16" } = {}) {
   const overlayText = String(text || "").trim();
@@ -5012,18 +5012,18 @@ export function item4PhotoOverlayFromCaption(text, { aspectRatio = "9:16" } = {}
     backgroundOpacity: 0.4,
   };
 }
-
+/*__STUDIO_WORKER_END:item4PhotoOverlayFromCaption__*/
 
 export function item4MasterTransferId(recordId, assetId) {
   return `ITEM4-MASTER-${recordId}-${assetId}`;
 }
-
+/*__STUDIO_WORKER_END:item4MasterTransferId__*/
 
 export async function item4MasterQueueRows(env, recordId) {
   const rows = await item4VariantQueueRows(env, recordId);
   return rows.filter((row) => String(f(row, "Asset_Kind") || "").trim() === "Master Original");
 }
-
+/*__STUDIO_WORKER_END:item4MasterQueueRows__*/
 
 export async function item4UpsertMasterQueue(env, recordId, assets) {
   const ownerRecord = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, recordId);
@@ -5105,7 +5105,7 @@ export async function item4UpsertMasterQueue(env, recordId, assets) {
   }
   return expected;
 }
-
+/*__STUDIO_WORKER_END:item4UpsertMasterQueue__*/
 
 export async function item4FindMasterMediaAsset(env, transferId) {
   const rows = await listRecords(env, ITEM4_MEDIA_ASSET_TABLE, {
@@ -5114,7 +5114,7 @@ export async function item4FindMasterMediaAsset(env, transferId) {
   });
   return rows[0] || null;
 }
-
+/*__STUDIO_WORKER_END:item4FindMasterMediaAsset__*/
 
 export async function item4CreateMasterMediaAsset(env, recordId, asset, driveId, driveUrl, transferId, requestRecord = null) {
   let profileId = String(asset?.content_profile_id || "").trim();
@@ -5157,7 +5157,7 @@ export async function item4CreateMasterMediaAsset(env, recordId, asset, driveId,
   });
   return Array.isArray(body?.records) ? body.records[0] : null;
 }
-
+/*__STUDIO_WORKER_END:item4CreateMasterMediaAsset__*/
 
 export async function item4EnsureMediaAssetContentProfile(env, mediaAssetId, profileId) {
   const assetId = String(mediaAssetId || "").trim();
@@ -5177,7 +5177,7 @@ export async function item4EnsureMediaAssetContentProfile(env, mediaAssetId, pro
   }
 }
 
-
+/*__STUDIO_WORKER_END:item4EnsureMediaAssetContentProfile__*/
 
 export async function item4SanitizeStudioImageMediaAsset(env, mediaAssetId) {
   if (!mediaAssetId || !/^rec[A-Za-z0-9]+$/.test(String(mediaAssetId))) return null;
@@ -5203,7 +5203,7 @@ export async function item4SanitizeStudioImageMediaAsset(env, mediaAssetId) {
     return null;
   }
 }
-
+/*__STUDIO_WORKER_END:item4SanitizeStudioImageMediaAsset__*/
 
 export async function item4ReconcileMasterAuthority(env, recordId, record = null) {
   let currentRecord = record || await airtableFetch(env, PRODUCTION_REQUEST_TABLE, recordId);
@@ -5412,7 +5412,7 @@ export async function item4ReconcileMasterAuthority(env, recordId, record = null
     error: failedError,
   };
 }
-
+/*__STUDIO_WORKER_END:item4ReconcileMasterAuthority__*/
 
 export async function item4UpdateRequestState(env, recordId, fields) {
   return airtableFetch(env, PRODUCTION_REQUEST_TABLE, recordId, {
@@ -5420,7 +5420,7 @@ export async function item4UpdateRequestState(env, recordId, fields) {
     body: JSON.stringify({ fields: { ...fields, Updated_At: new Date().toISOString() }, typecast: false }),
   });
 }
-
+/*__STUDIO_WORKER_END:item4UpdateRequestState__*/
 
 export async function getItem4MasterAssets(request, env, url, authorization) {
   const recordId = item4RequestIdFromPath(url);
@@ -5459,19 +5459,19 @@ export async function getItem4MasterAssets(request, env, url, authorization) {
     assets,
   });
 }
-
+/*__STUDIO_WORKER_END:getItem4MasterAssets__*/
 
 export function item4LargeUploadSessionIdFromPath(url) {
   const match = String(url?.pathname || "").match(/\/assets\/upload-session\/([A-Za-z0-9_-]+)/);
   return match ? match[1] : "";
 }
-
+/*__STUDIO_WORKER_END:item4LargeUploadSessionIdFromPath__*/
 
 export function item4LargeUploadPartNumberFromPath(url) {
   const match = String(url?.pathname || "").match(/\/parts\/(\d+)$/);
   return match ? Number(match[1]) : 0;
 }
-
+/*__STUDIO_WORKER_END:item4LargeUploadPartNumberFromPath__*/
 
 export function item4FindLargeUploadDraft(assets, assetId) {
   const id = String(assetId || "").trim();
@@ -5482,7 +5482,7 @@ export function item4FindLargeUploadDraft(assets, assetId) {
     && String(row?.r2_key || "").trim()
   )) || null;
 }
-
+/*__STUDIO_WORKER_END:item4FindLargeUploadDraft__*/
 
 export async function createItem4LargeVideoUploadSession(request, env, url, authorization) {
   if (!env.STUDIO_MEDIA) throw new HttpError(503, "Studio media storage is not configured");
@@ -5558,7 +5558,7 @@ export async function createItem4LargeVideoUploadSession(request, env, url, auth
     message: "Upload session ready. Send the file in parts — Studio will compress after it lands.",
   }, 201);
 }
-
+/*__STUDIO_WORKER_END:createItem4LargeVideoUploadSession__*/
 
 export async function uploadItem4LargeVideoPart(request, env, url, authorization) {
   if (!env.STUDIO_MEDIA) throw new HttpError(503, "Studio media storage is not configured");
@@ -5582,7 +5582,7 @@ export async function uploadItem4LargeVideoPart(request, env, url, authorization
     etag: String(uploaded?.etag || ""),
   });
 }
-
+/*__STUDIO_WORKER_END:uploadItem4LargeVideoPart__*/
 
 export async function completeItem4LargeVideoUploadSession(request, env, url, authorization, ctx) {
   if (!env.STUDIO_MEDIA) throw new HttpError(503, "Studio media storage is not configured");
@@ -5690,7 +5690,7 @@ export async function completeItem4LargeVideoUploadSession(request, env, url, au
       : "Finished video is stored. Studio will thumbnail, schedule, and queue the platforms.",
   }, 201);
 }
-
+/*__STUDIO_WORKER_END:completeItem4LargeVideoUploadSession__*/
 
 export async function abortItem4LargeVideoUploadSession(request, env, url, authorization) {
   if (!env.STUDIO_MEDIA) throw new HttpError(503, "Studio media storage is not configured");
@@ -5722,7 +5722,7 @@ export async function abortItem4LargeVideoUploadSession(request, env, url, autho
     record: mapProductionRequest(record),
   });
 }
-
+/*__STUDIO_WORKER_END:abortItem4LargeVideoUploadSession__*/
 
 export async function uploadItem4MasterAssets(request, env, url, authorization, ctx) {
   if (!env.STUDIO_MEDIA) throw new HttpError(503, "Studio media storage is not configured");
@@ -5987,7 +5987,7 @@ export async function uploadItem4MasterAssets(request, env, url, authorization, 
     throw error;
   }
 }
-
+/*__STUDIO_WORKER_END:uploadItem4MasterAssets__*/
 
 export async function reorderItem4MasterAssets(request, env, url, authorization) {
   let payload = {};
@@ -6040,7 +6040,7 @@ export async function reorderItem4MasterAssets(request, env, url, authorization)
     production_request: mapProductionRequest(updated),
   });
 }
-
+/*__STUDIO_WORKER_END:reorderItem4MasterAssets__*/
 
 export async function deleteItem4MasterAsset(request, env, url, authorization) {
   try { await request.json(); } catch { throw new HttpError(400, "Request body must be valid JSON"); }
@@ -6115,7 +6115,7 @@ export async function deleteItem4MasterAsset(request, env, url, authorization) {
     production_request: mapProductionRequest(updated),
   });
 }
-
+/*__STUDIO_WORKER_END:deleteItem4MasterAsset__*/
 
 export async function uploadItem4ClipPoster(request, env, url, authorization) {
   if (!env.STUDIO_MEDIA) throw new HttpError(503, "Studio media storage is not configured");
@@ -6188,7 +6188,7 @@ export async function uploadItem4ClipPoster(request, env, url, authorization) {
     record: mapProductionRequest(refreshed),
   });
 }
-
+/*__STUDIO_WORKER_END:uploadItem4ClipPoster__*/
 
 export function ideaLibraryTokens(text) {
   return [...new Set(String(text || "")
@@ -6197,7 +6197,7 @@ export function ideaLibraryTokens(text) {
     .split(/\s+/)
     .filter((token) => token.length >= 3 && !IDEA_LIBRARY_STOPWORDS.has(token)))];
 }
-
+/*__STUDIO_WORKER_END:ideaLibraryTokens__*/
 
 export function ideaLibraryStrongTokens(tokens) {
   return tokens.filter((token) => {
@@ -6206,7 +6206,7 @@ export function ideaLibraryStrongTokens(tokens) {
     return IDEA_LIBRARY_SHORT_SUBJECTS.has(token);
   });
 }
-
+/*__STUDIO_WORKER_END:ideaLibraryStrongTokens__*/
 
 export function ideaLibraryHasToken(text, token) {
   const hay = String(text || "").toLowerCase();
@@ -6215,7 +6215,7 @@ export function ideaLibraryHasToken(text, token) {
   const escaped = key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   return new RegExp(`(?:^|[^a-z0-9])${escaped}(?:[^a-z0-9]|$)`).test(hay);
 }
-
+/*__STUDIO_WORKER_END:ideaLibraryHasToken__*/
 
 export function ideaLibrarySearchHit(text, token) {
   const hay = String(text || "").toLowerCase();
@@ -6226,7 +6226,7 @@ export function ideaLibrarySearchHit(text, token) {
   const escaped = key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   return new RegExp(`(?:^|[^a-z0-9])${escaped}[a-z0-9]`).test(hay);
 }
-
+/*__STUDIO_WORKER_END:ideaLibrarySearchHit__*/
 
 export function ideaLibrarySearchFilterKeys(queryTokens = []) {
   const tokens = (queryTokens || []).map((token) => String(token || "").toLowerCase()).filter(Boolean);
@@ -6234,7 +6234,7 @@ export function ideaLibrarySearchFilterKeys(queryTokens = []) {
   const strong = ideaLibraryStrongTokens(tokens);
   return strong.length ? strong : [...new Set(tokens.filter((token) => token.length >= 3))];
 }
-
+/*__STUDIO_WORKER_END:ideaLibrarySearchFilterKeys__*/
 
 export function ideaLibraryTokenForms(token) {
   const value = String(token || "").toLowerCase();
@@ -6245,14 +6245,14 @@ export function ideaLibraryTokenForms(token) {
   else forms.add(`${value}s`);
   return [...forms];
 }
-
+/*__STUDIO_WORKER_END:ideaLibraryTokenForms__*/
 
 export function ideaLibraryFieldHits(text, keys) {
   return (keys || []).filter((key) =>
     ideaLibraryTokenForms(key).some((form) => ideaLibraryHasToken(text, form))
   );
 }
-
+/*__STUDIO_WORKER_END:ideaLibraryFieldHits__*/
 
 export function ideaLibraryNamedPlaceKeys(text) {
   const hay = String(text || "").toLowerCase();
@@ -6263,7 +6263,7 @@ export function ideaLibraryNamedPlaceKeys(text) {
   }
   return [...new Set(keys)];
 }
-
+/*__STUDIO_WORKER_END:ideaLibraryNamedPlaceKeys__*/
 
 export function ideaLibraryMatchKeys(idea, query = "") {
   const primaryLocation = f(idea, "Primary_Location");
@@ -6281,7 +6281,7 @@ export function ideaLibraryMatchKeys(idea, query = "") {
     scanKeys: [...new Set([...placeKeys, ...subjectKeys])],
   };
 }
-
+/*__STUDIO_WORKER_END:ideaLibraryMatchKeys__*/
 
 export function ideaLibraryFilterKeys(placeKeys = [], subjectKeys = []) {
   const brands = (subjectKeys || []).filter((token) => IDEA_LIBRARY_BRAND_SUBJECTS.has(token));
@@ -6291,17 +6291,17 @@ export function ideaLibraryFilterKeys(placeKeys = [], subjectKeys = []) {
   }
   return [...new Set(subjectKeys || [])];
 }
-
+/*__STUDIO_WORKER_END:ideaLibraryFilterKeys__*/
 
 export function ideaLibraryPlaceKeys(idea, query = "") {
   return ideaLibraryMatchKeys(idea, query).placeKeys;
 }
-
+/*__STUDIO_WORKER_END:ideaLibraryPlaceKeys__*/
 
 export function ideaLibraryAirtableEscape(value) {
   return String(value || "").replace(/\\/g, "\\\\").replace(/"/g, '\\"');
 }
-
+/*__STUDIO_WORKER_END:ideaLibraryAirtableEscape__*/
 
 export function ideaLibraryNamePhraseFormula(phrase, { includeVideo = false } = {}) {
   const media = includeVideo
@@ -6311,7 +6311,7 @@ export function ideaLibraryNamePhraseFormula(phrase, { includeVideo = false } = 
   const base = `AND(${media},{Classification_Status}='Classified',{Active},NOT({Do_Not_Use}),${notDerived})`;
   return `AND(${base},${libraryAssetNameFindFormula(phrase)})`;
 }
-
+/*__STUDIO_WORKER_END:ideaLibraryNamePhraseFormula__*/
 
 export function ideaLibraryFilterFormula(placeKeys, { includeVideo = false } = {}) {
   const media = includeVideo
@@ -6329,7 +6329,7 @@ export function ideaLibraryFilterFormula(placeKeys, { includeVideo = false } = {
   const clauses = keys.map((key) => `FIND("${ideaLibraryAirtableEscape(String(key).toLowerCase())}", ${hay})`);
   return `AND(${base},OR(${clauses.join(",")}))`;
 }
-
+/*__STUDIO_WORKER_END:ideaLibraryFilterFormula__*/
 
 export function ideaLibraryVideoFilterFormula(placeKeys) {
   const media = "OR({Media_Class}='Video',LEFT(LOWER({MIME_Type}),6)='video/')";
@@ -6341,7 +6341,7 @@ export function ideaLibraryVideoFilterFormula(placeKeys) {
   const clauses = keys.map((key) => `FIND("${ideaLibraryAirtableEscape(String(key).toLowerCase())}", ${hay})`);
   return `AND(${base},OR(${clauses.join(",")}))`;
 }
-
+/*__STUDIO_WORKER_END:ideaLibraryVideoFilterFormula__*/
 
 export function ideaLibraryHaystack(record) {
   const tags = f(record, "AI_Tags");
@@ -6356,12 +6356,12 @@ export function ideaLibraryHaystack(record) {
     Array.isArray(keywords) ? keywords.join(" ") : keywords,
   ].filter(Boolean).join(" ").toLowerCase();
 }
-
+/*__STUDIO_WORKER_END:ideaLibraryHaystack__*/
 
 export function ideaLibraryIntakeDate(record) {
   return libraryAssetAddedAt(record);
 }
-
+/*__STUDIO_WORKER_END:ideaLibraryIntakeDate__*/
 
 export function ideaLibraryFileBytes(record) {
   const rawBytes = f(record, "File_Size_Bytes");
@@ -6372,7 +6372,7 @@ export function ideaLibraryFileBytes(record) {
   if (Number.isFinite(mb) && mb > 0) return Math.round(mb * 1024 * 1024);
   return 0;
 }
-
+/*__STUDIO_WORKER_END:ideaLibraryFileBytes__*/
 
 export function ideaLibraryIsEligibleVideo(record) {
   const mediaClass = String(f(record, "Media_Class") || "").trim().toLowerCase();
@@ -6395,7 +6395,7 @@ export function ideaLibraryIsEligibleVideo(record) {
   if (String(f(record, "Exclusion_Reasons") || "").trim()) return false;
   return Boolean(googleDriveFileId(record) || String(f(record, "Google Drive URL") || "").trim());
 }
-
+/*__STUDIO_WORKER_END:ideaLibraryIsEligibleVideo__*/
 
 export function ideaLibraryIsEligibleImage(record) {
   const mediaClass = String(f(record, "Media_Class") || "").trim().toLowerCase();
@@ -6414,7 +6414,7 @@ export function ideaLibraryIsEligibleImage(record) {
   if (status && status !== "available") return false;
   return Boolean(googleDriveFileId(record));
 }
-
+/*__STUDIO_WORKER_END:ideaLibraryIsEligibleImage__*/
 
 export function ideaLibraryRankAsset(record, { placeKeys, subjectKeys, strongIdeaTokens, ideaTokens, queryTokens, today }) {
   const location = String(f(record, "Location") || "").toLowerCase();
@@ -6474,7 +6474,7 @@ export function ideaLibraryRankAsset(record, { placeKeys, subjectKeys, strongIde
     preselected: confidence === "high",
   };
 }
-
+/*__STUDIO_WORKER_END:ideaLibraryRankAsset__*/
 
 export function mapIdeaLibraryAsset(record, row = {}) {
   const video = ideaLibraryIsEligibleVideo(record);
@@ -6495,7 +6495,7 @@ export function mapIdeaLibraryAsset(record, row = {}) {
     intake_batch_id: row.intake_batch_id || String(f(record, "Intake_Batch_ID") || "").trim() || null,
   };
 }
-
+/*__STUDIO_WORKER_END:mapIdeaLibraryAsset__*/
 
 export async function getMediaLibraryStills(request, env, url, authorization) {
   if (!env.AIRTABLE_MEDIA_TABLE_ID) throw new HttpError(503, "Media Assets table is not configured");
@@ -6547,7 +6547,7 @@ export async function getMediaLibraryStills(request, env, url, authorization) {
     records: capped,
   });
 }
-
+/*__STUDIO_WORKER_END:getMediaLibraryStills__*/
 
 export async function getIdeaLibrarySuggestions(request, env, url, authorization) {
   if (!env.AIRTABLE_MEDIA_TABLE_ID) throw new HttpError(503, "Media Assets table is not configured");
@@ -6666,7 +6666,7 @@ export async function getIdeaLibrarySuggestions(request, env, url, authorization
     matches: operatorSearch ? capped : capped.filter((row) => !row.preselected),
   });
 }
-
+/*__STUDIO_WORKER_END:getIdeaLibrarySuggestions__*/
 
 export function ideaLibraryRejectReason(record, { allowVideo = false } = {}) {
   const mediaClass = String(f(record, "Media_Class") || "").trim().toLowerCase();
@@ -6681,7 +6681,7 @@ export function ideaLibraryRejectReason(record, { allowVideo = false } = {}) {
   if (isVideo && ideaLibraryFileBytes(record) > ITEM4_MAX_CLIP_FILE_BYTES) return `${name} exceeds the 200 MB clip limit`;
   return null;
 }
-
+/*__STUDIO_WORKER_END:ideaLibraryRejectReason__*/
 
 export function studioProfileRequiresChicagoWatermark(profile) {
   const normalized = String(f(profile || {}, "Profile_Name") || "")
@@ -6689,7 +6689,7 @@ export function studioProfileRequiresChicagoWatermark(profile) {
     .replace(/[^a-z0-9]+/g, "");
   return normalized.startsWith("chicagoshining");
 }
-
+/*__STUDIO_WORKER_END:studioProfileRequiresChicagoWatermark__*/
 
 export async function item4ProductionProfileRecord(env, requestRecord, preferredProfileId = "") {
   let profileId = studioFirstLinkedId(f(requestRecord || {}, "Content_Profile"));
@@ -6735,18 +6735,18 @@ export async function item4ProductionProfileRecord(env, requestRecord, preferred
     return null;
   }
 }
-
+/*__STUDIO_WORKER_END:item4ProductionProfileRecord__*/
 
 export function studioAssetHasChicagoWatermark(record) {
   return /\[watermarked:chicagoshining[^\]]*\]/i.test(String(f(record || {}, "Asset_Description") || ""));
 }
-
+/*__STUDIO_WORKER_END:studioAssetHasChicagoWatermark__*/
 
 export function studioAssetSourceDriveId(record) {
   const description = String(f(record || {}, "Asset_Description") || "");
   return String(/Source master Drive ID:\s*([A-Za-z0-9_-]+)/i.exec(description)?.[1] || "").trim();
 }
-
+/*__STUDIO_WORKER_END:studioAssetSourceDriveId__*/
 
 export async function ensureChicagoWatermarkedLibraryAssetForProfile(env, media, profile) {
   if (!studioProfileRequiresChicagoWatermark(profile)) return media;
@@ -6801,13 +6801,13 @@ export async function ensureChicagoWatermarkedLibraryAssetForProfile(env, media,
     body: JSON.stringify({ fields, typecast: true }),
   });
 }
-
+/*__STUDIO_WORKER_END:ensureChicagoWatermarkedLibraryAssetForProfile__*/
 
 export async function ensureChicagoWatermarkedLibraryAsset(env, media, requestRecord) {
   const profile = await item4ProductionProfileRecord(env, requestRecord);
   return ensureChicagoWatermarkedLibraryAssetForProfile(env, media, profile);
 }
-
+/*__STUDIO_WORKER_END:ensureChicagoWatermarkedLibraryAsset__*/
 
 export async function attachItem4LibraryAssets(request, env, url, authorization) {
   const recordId = item4RequestIdFromPath(url);
@@ -6927,7 +6927,7 @@ export async function attachItem4LibraryAssets(request, env, url, authorization)
       : "Selected library items were already attached.",
   }, 201);
 }
-
+/*__STUDIO_WORKER_END:attachItem4LibraryAssets__*/
 
 export async function attachItem4LibraryAssetIds(env, recordId, mediaAssetIds, authorization) {
   const url = new URL(`https://studio.chicagoshining.com/api/production-requests/${recordId}/assets/library`);
@@ -6938,7 +6938,7 @@ export async function attachItem4LibraryAssetIds(env, recordId, mediaAssetIds, a
   });
   return attachItem4LibraryAssets(request, env, url, authorization);
 }
-
+/*__STUDIO_WORKER_END:attachItem4LibraryAssetIds__*/
 
 export async function item4EnsureFacebookSlideshowVoiceoverPayload(env, authorization) {
   void env;
@@ -6946,14 +6946,14 @@ export async function item4EnsureFacebookSlideshowVoiceoverPayload(env, authoriz
   // Facebook slideshow voiceover is assembled by Python FBS1. Do not PATCH Make.
   return { ok: true, skipped: "make_retired" };
 }
-
+/*__STUDIO_WORKER_END:item4EnsureFacebookSlideshowVoiceoverPayload__*/
 
 export function item4DynamicRationale(text, count) {
   const n = Math.max(0, Number(count || 0));
   const phrase = `${n} photo${n === 1 ? "" : "s"}`;
   return String(text || "").replace(/five photos/gi, phrase);
 }
-
+/*__STUDIO_WORKER_END:item4DynamicRationale__*/
 
 export async function item4MappingIndex(env) {
   const records = await listRecords(env, ITEM4_MAPPING_TABLE, { limit: 100 });
@@ -6966,12 +6966,12 @@ export async function item4MappingIndex(env) {
   }
   return index;
 }
-
+/*__STUDIO_WORKER_END:item4MappingIndex__*/
 
 export function item4PhotoCountKind(count) {
   return Math.max(0, Number(count) || 0) <= 1 ? "single-photo" : "multiple-photos";
 }
-
+/*__STUDIO_WORKER_END:item4PhotoCountKind__*/
 
 export function item4ParseEzOrigin(record) {
   const text = [
@@ -6988,12 +6988,12 @@ export function item4ParseEzOrigin(record) {
     aiCount: Number.isFinite(ai) && ai > 0 ? Math.round(ai) : null,
   };
 }
-
+/*__STUDIO_WORKER_END:item4ParseEzOrigin__*/
 
 export function item4MasterLooksLikeVideo(asset) {
   return item4LooksLikeVideoAsset(asset);
 }
-
+/*__STUDIO_WORKER_END:item4MasterLooksLikeVideo__*/
 
 export function studioRewriteFinishedOriginNotes(existing, kind) {
   const nextKind = studioNormalizeFinishedOriginKind(kind);
@@ -7014,7 +7014,7 @@ export function studioRewriteFinishedOriginNotes(existing, kind) {
   if (replaced !== text) return replaced;
   return `${stamp}\n\n${text}`;
 }
-
+/*__STUDIO_WORKER_END:studioRewriteFinishedOriginNotes__*/
 
 export function studioRewriteClipOriginNotes(existing, kind) {
   const nextKind = item4IsClipInputKind(kind) ? String(kind).trim().toLowerCase() : "photos-and-clips";
@@ -7026,7 +7026,7 @@ export function studioRewriteClipOriginNotes(existing, kind) {
   if (replaced !== text) return replaced;
   return `${stamp}\n\n${text}`;
 }
-
+/*__STUDIO_WORKER_END:studioRewriteClipOriginNotes__*/
 
 export function studioFinishedOriginKind(record) {
   // Vibe Cut is a music montage of one long source — never finished-file passthrough.
@@ -7043,7 +7043,7 @@ export function studioFinishedOriginKind(record) {
   if (videos.length === 1 && photos.length === 0 && assets.length === 1) return "finished-video";
   return "";
 }
-
+/*__STUDIO_WORKER_END:studioFinishedOriginKind__*/
 
 export function item4PlanHasVideo(record, assets) {
   if (item4HasVideoMasters(assets)) return true;
@@ -7057,19 +7057,19 @@ export function item4PlanHasVideo(record, assets) {
   if (/ez-input=photos-and-clips|ez-input=video-clips|ez-clips=\d+/i.test(notes)) return true;
   return studioFinishedOriginKind(record) === "finished-video";
 }
-
+/*__STUDIO_WORKER_END:item4PlanHasVideo__*/
 
 export function studioNormalizeFinishedOriginKind(value) {
   const kind = String(value || "").trim().toLowerCase();
   if (kind === "finished-video" || kind === "finished-stills" || kind === "finished-carousel") return kind;
   return "";
 }
-
+/*__STUDIO_WORKER_END:studioNormalizeFinishedOriginKind__*/
 
 export function studioIsFinishedPassthrough(record) {
   return Boolean(studioFinishedOriginKind(record));
 }
-
+/*__STUDIO_WORKER_END:studioIsFinishedPassthrough__*/
 
 export function studioOutputTypeLabel(record) {
   return String(
@@ -7080,13 +7080,13 @@ export function studioOutputTypeLabel(record) {
     || ""
   ).trim();
 }
-
+/*__STUDIO_WORKER_END:studioOutputTypeLabel__*/
 
 export function studioIsFinishedVideoFilePassthrough(record) {
   if (studioFinishedOriginKind(record) !== "finished-video") return false;
   return !studioAzIsStory(studioOutputTypeLabel(record));
 }
-
+/*__STUDIO_WORKER_END:studioIsFinishedVideoFilePassthrough__*/
 
 export function item4FinishedStoryTeaserReady(record) {
   const notes = String(f(record, "Output_Notes") || "");
@@ -7099,12 +7099,12 @@ export function item4FinishedStoryTeaserReady(record) {
     && keepAudio
     && String(f(record, "Composition_ID") || "").trim() === "ChicagoShiningPhotoSequence";
 }
-
+/*__STUDIO_WORKER_END:item4FinishedStoryTeaserReady__*/
 
 export function item4FinishedPublicUrl(asset) {
   return String(asset?.url || "").startsWith("https://media.chicagoshining.com/");
 }
-
+/*__STUDIO_WORKER_END:item4FinishedPublicUrl__*/
 
 export function item4FinishedMasterReady(asset) {
   if (item4AssetCompressionPending(asset)) return false;
@@ -7112,32 +7112,32 @@ export function item4FinishedMasterReady(asset) {
   return Boolean(String(asset?.google_drive_file_id || "").trim())
     && /^rec[A-Za-z0-9]+$/.test(String(asset?.media_asset_record_id || "").trim());
 }
-
+/*__STUDIO_WORKER_END:item4FinishedMasterReady__*/
 
 export function item4FinishedVideoMastersReady(record, assets) {
   if (studioFinishedOriginKind(record) !== "finished-video") return false;
   return Array.isArray(assets) && assets.length > 0 && assets.every((asset) => item4FinishedMasterReady(asset));
 }
-
+/*__STUDIO_WORKER_END:item4FinishedVideoMastersReady__*/
 
 export function studioFinishedVariantsSkipped(record) {
   if (!studioIsFinishedPassthrough(record)) return false;
   const status = String(f(record, "Studio_Variant_Status") || "").trim();
   return status === "Ready" || status === "Not Needed" || status === "None";
 }
-
+/*__STUDIO_WORKER_END:studioFinishedVariantsSkipped__*/
 
 export function studioScheduleMs(value) {
   const ms = Date.parse(value);
   return Number.isNaN(ms) ? null : ms;
 }
-
+/*__STUDIO_WORKER_END:studioScheduleMs__*/
 
 export function studioScheduleConflicts(ms, occupiedMs, gapMs = STUDIO_SCHEDULE_GAP_MS) {
   if (!Number.isFinite(ms)) return false;
   return (occupiedMs || []).some((other) => Number.isFinite(other) && Math.abs(other - ms) < gapMs);
 }
-
+/*__STUDIO_WORKER_END:studioScheduleConflicts__*/
 
 export function studioNextOpenScheduleIso(candidateIso, occupiedMs, gapMs = STUDIO_SCHEDULE_GAP_MS, options = {}) {
   if (gapMs && typeof gapMs === "object") {
@@ -7153,12 +7153,12 @@ export function studioNextOpenScheduleIso(candidateIso, occupiedMs, gapMs = STUD
     keepAnyNonClashing: options.keepAnyNonClashing === true,
   });
 }
-
+/*__STUDIO_WORKER_END:studioNextOpenScheduleIso__*/
 
 export function studioOccupiedDateInWindowFormula(field, lookback, horizon) {
   return `AND({${field}}!="",IS_AFTER({${field}},DATETIME_PARSE("${lookback}")),IS_BEFORE({${field}},DATETIME_PARSE("${horizon}")))`;
 }
-
+/*__STUDIO_WORKER_END:studioOccupiedDateInWindowFormula__*/
 
 export function studioOccupiedLinkedIds(value) {
   return arrayOrEmpty(value).map((item) => {
@@ -7166,12 +7166,12 @@ export function studioOccupiedLinkedIds(value) {
     return String(item?.id || "").trim();
   }).filter((id) => /^rec[A-Za-z0-9]+$/.test(id));
 }
-
+/*__STUDIO_WORKER_END:studioOccupiedLinkedIds__*/
 
 export function studioOccupiedCacheKey(profile) {
   return String(profile?.id || "").trim() || "_all";
 }
-
+/*__STUDIO_WORKER_END:studioOccupiedCacheKey__*/
 
 export function studioOccupiedRowMatchesProfile(row, profile) {
   if (!profile?.id) return true;
@@ -7181,7 +7181,7 @@ export function studioOccupiedRowMatchesProfile(row, profile) {
   if (brandId && studioOccupiedLinkedIds(f(row, "Brand")).includes(brandId)) return true;
   return false;
 }
-
+/*__STUDIO_WORKER_END:studioOccupiedRowMatchesProfile__*/
 
 export function studioOccupiedFilterFormula(now = Date.now(), profile = null) {
   const lookback = airtableFormulaEscape(new Date(now - STUDIO_OCCUPIED_LOOKBACK_MS - 1000).toISOString());
@@ -7199,7 +7199,7 @@ export function studioOccupiedFilterFormula(now = Date.now(), profile = null) {
   const profileFormula = contentProfileFilterFormula(profile);
   return profileFormula ? `AND(${profileFormula},${base})` : base;
 }
-
+/*__STUDIO_WORKER_END:studioOccupiedFilterFormula__*/
 
 export function studioOccupiedCacheSlot(profile) {
   const key = studioOccupiedCacheKey(profile);
@@ -7208,12 +7208,12 @@ export function studioOccupiedCacheSlot(profile) {
   }
   return studioOccupiedScheduleCaches.get(key);
 }
-
+/*__STUDIO_WORKER_END:studioOccupiedCacheSlot__*/
 
 export function studioInvalidateOccupiedScheduleCache() {
   studioOccupiedScheduleCaches.clear();
 }
-
+/*__STUDIO_WORKER_END:studioInvalidateOccupiedScheduleCache__*/
 
 export function studioOccupiedMsFromRow(row, now = Date.now()) {
   const raw = f(row, "Scheduled_Post_Date") || f(row, "YouTube_Scheduled_Publish_At") || f(row, "Studio_Scheduled_At");
@@ -7224,7 +7224,7 @@ export function studioOccupiedMsFromRow(row, now = Date.now()) {
   if (ms >= now - STUDIO_OCCUPIED_LOOKBACK_MS && ms <= now + STUDIO_OCCUPIED_HORIZON_MS) return ms;
   return null;
 }
-
+/*__STUDIO_WORKER_END:studioOccupiedMsFromRow__*/
 
 export async function studioLoadOccupiedScheduleRows(env, { profile = null } = {}) {
   const now = Date.now();
@@ -7254,7 +7254,7 @@ export async function studioLoadOccupiedScheduleRows(env, { profile = null } = {
   });
   return cache.inflight;
 }
-
+/*__STUDIO_WORKER_END:studioLoadOccupiedScheduleRows__*/
 
 export async function studioLoadOccupiedSchedules(env, { excludeIds = [], profile = null } = {}) {
   const skip = new Set((excludeIds || []).filter(Boolean));
@@ -7274,7 +7274,7 @@ export async function studioLoadOccupiedSchedules(env, { excludeIds = [], profil
   }
   return byLane;
 }
-
+/*__STUDIO_WORKER_END:studioLoadOccupiedSchedules__*/
 
 export function studioPublishScheduleFields(payload = {}, record = null, options = {}) {
   const occupiedMs = Array.isArray(options.occupiedMs) ? options.occupiedMs : null;
@@ -7339,7 +7339,7 @@ export function studioPublishScheduleFields(payload = {}, record = null, options
   }
   return fields;
 }
-
+/*__STUDIO_WORKER_END:studioPublishScheduleFields__*/
 
 export function studioStorySiblingStamp(row) {
   if (!row) return null;
@@ -7354,7 +7354,7 @@ export function studioStorySiblingStamp(row) {
   if (!platform || !outputType) return null;
   return { platform, output_type: outputType, scheduled_at: scheduled };
 }
-
+/*__STUDIO_WORKER_END:studioStorySiblingStamp__*/
 
 export async function studioResolveStoryPublishIso(env, record, options = {}) {
   const platform = String(f(record, "Platform") || "").trim();
@@ -7399,7 +7399,7 @@ export async function studioResolveStoryPublishIso(env, record, options = {}) {
     allowMaeFallback: options.allowMaeFallback !== false,
   });
 }
-
+/*__STUDIO_WORKER_END:studioResolveStoryPublishIso__*/
 
 export function studioPublishScheduledMs(record) {
   const raw = String(f(record, "Scheduled_Post_Date") || "").trim();
@@ -7407,14 +7407,14 @@ export function studioPublishScheduledMs(record) {
   const ms = Date.parse(raw);
   return Number.isNaN(ms) ? null : ms;
 }
-
+/*__STUDIO_WORKER_END:studioPublishScheduledMs__*/
 
 export function studioPublishIsDue(record, graceMs = 120000) {
   const ms = studioPublishScheduledMs(record);
   if (ms == null) return true;
   return ms <= Date.now() + graceMs;
 }
-
+/*__STUDIO_WORKER_END:studioPublishIsDue__*/
 
 export function studioPublishCanDispatchNow(record) {
   const platform = String(f(record, "Platform") || "").trim();
@@ -7423,7 +7423,7 @@ export function studioPublishCanDispatchNow(record) {
   // YouTube can upload now and let the channel release at publishAt.
   return platform === "YouTube" && Boolean(String(f(record, "YouTube_Scheduled_Publish_At") || "").trim());
 }
-
+/*__STUDIO_WORKER_END:studioPublishCanDispatchNow__*/
 
 export async function studioPromoteDuePublishStatus(env, record) {
   const id = String(record?.id || "").trim();
@@ -7464,13 +7464,13 @@ export async function studioPromoteDuePublishStatus(env, record) {
     return record;
   }
 }
-
+/*__STUDIO_WORKER_END:studioPromoteDuePublishStatus__*/
 
 export function studioPublishHeldUntilIso(record) {
   const ms = studioPublishScheduledMs(record);
   return ms == null ? "" : new Date(ms).toISOString();
 }
-
+/*__STUDIO_WORKER_END:studioPublishHeldUntilIso__*/
 
 export function item4EffectivePhotoCount(record, assets) {
   const n = Array.isArray(assets) ? assets.length : 0;
@@ -7490,12 +7490,12 @@ export function item4EffectivePhotoCount(record, assets) {
   if (!n && mode === "Make AI Generated" && Number.isFinite(exact) && exact >= 1) return exact;
   return n;
 }
-
+/*__STUDIO_WORKER_END:item4EffectivePhotoCount__*/
 
 export function item4StudioDirectiveYes(value) {
   return String(value || "").trim() !== "No";
 }
-
+/*__STUDIO_WORKER_END:item4StudioDirectiveYes__*/
 
 export function item4ThumbnailSource(value) {
   const v = String(value || "").trim();
@@ -7503,17 +7503,17 @@ export function item4ThumbnailSource(value) {
   if (/^use photo frame$/i.test(v) || /^photo frame$/i.test(v)) return "frame";
   return "ai";
 }
-
+/*__STUDIO_WORKER_END:item4ThumbnailSource__*/
 
 export function item4UrlIsStudioPhotoCrop(url) {
   return /ITEM4-VARIANT-fill-crop/i.test(String(url || ""));
 }
-
+/*__STUDIO_WORKER_END:item4UrlIsStudioPhotoCrop__*/
 
 export function studioUrlLooksLikeVideoFile(url) {
   return /\.(mp4|mov|m4v|webm)(\?|#|$)/i.test(String(url || "").trim());
 }
-
+/*__STUDIO_WORKER_END:studioUrlLooksLikeVideoFile__*/
 
 export function studioUrlLooksLikeDriveFetch(url) {
   const href = String(url || "").trim();
@@ -7522,7 +7522,7 @@ export function studioUrlLooksLikeDriveFetch(url) {
     || /\/uc\?id=/i.test(href)
     || /googleusercontent\.com/i.test(href);
 }
-
+/*__STUDIO_WORKER_END:studioUrlLooksLikeDriveFetch__*/
 
 export function studioAiThumbnailUrl(value) {
   const url = String(value || "").trim();
@@ -7532,7 +7532,7 @@ export function studioAiThumbnailUrl(value) {
   if (!/^https:\/\/media\.chicagoshining\.com\/(publish|studio\/previews)\//i.test(url)) return "";
   return url;
 }
-
+/*__STUDIO_WORKER_END:studioAiThumbnailUrl__*/
 
 export function studioNeedsAiThumbnail(parent, requestRecord) {
   const mode = String(f(requestRecord || {}, "Thumbnail_Mode") || f(parent || {}, "Include_Thumbnail") || "Yes").trim();
@@ -7540,7 +7540,7 @@ export function studioNeedsAiThumbnail(parent, requestRecord) {
   if (String(f(parent || {}, "Include_Thumbnail") || "").trim() === "No") return false;
   return !studioAiThumbnailUrl(f(parent || {}, "Thumbnail_URL"));
 }
-
+/*__STUDIO_WORKER_END:studioNeedsAiThumbnail__*/
 
 export async function studioStampParentAiCoverOnOutput(env, po, parent) {
   const ai = studioAiThumbnailUrl(f(parent || {}, "Thumbnail_URL"));
@@ -7584,7 +7584,7 @@ export async function studioStampParentAiCoverOnOutput(env, po, parent) {
   });
   return true;
 }
-
+/*__STUDIO_WORKER_END:studioStampParentAiCoverOnOutput__*/
 
 export function studioCoverContentStatusFields(parent) {
   const status = String(f(parent, "Content_Status") || "").trim();
@@ -7592,7 +7592,7 @@ export function studioCoverContentStatusFields(parent) {
   if (/^ready for voiceover$/i.test(status) && !vo) return {};
   return { Content_Status: "Thumbnail Ready" };
 }
-
+/*__STUDIO_WORKER_END:studioCoverContentStatusFields__*/
 
 export async function studioEnsurePublicAiCover(env, parent, requestRecord = null) {
   if (!parent?.id) return { url: "", skip: "missing_parent" };
@@ -7620,7 +7620,7 @@ export async function studioEnsurePublicAiCover(env, parent, requestRecord = nul
   });
   return { url: staged.url, staged: true };
 }
-
+/*__STUDIO_WORKER_END:studioEnsurePublicAiCover__*/
 
 export async function studioStampPackageReviewCovers(env, parent, outputs) {
   let stamped = 0;
@@ -7630,7 +7630,7 @@ export async function studioStampPackageReviewCovers(env, parent, outputs) {
   }
   return stamped;
 }
-
+/*__STUDIO_WORKER_END:studioStampPackageReviewCovers__*/
 
 export async function studioHealRfrMissingDeliverable(env, options = {}) {
   const limit = Math.max(1, Math.min(12, Number(options.limit) || 8));
@@ -7701,7 +7701,7 @@ export async function studioHealRfrMissingDeliverable(env, options = {}) {
   if (results.length) console.log("Studio rfr missing-deliverable heal", JSON.stringify({ count: results.length, results }));
   return results;
 }
-
+/*__STUDIO_WORKER_END:studioHealRfrMissingDeliverable__*/
 
 export function item4StudioThumbnailPrompt(requestRecord, parent) {
   const existing = String(f(parent, "Thumbnail_Prompt") || "").trim();
@@ -7728,12 +7728,12 @@ export function item4StudioThumbnailPrompt(requestRecord, parent) {
     "Photorealistic and readable. Do not invent logos, watermarks, platform UI, or distorted letters.",
   ].filter(Boolean).join("\n");
 }
-
+/*__STUDIO_WORKER_END:item4StudioThumbnailPrompt__*/
 
 export function item4SlideImageUrl(row) {
   return String(f(row, "Final Image URL") || f(row, "AI Image URL") || f(row, "Current Image URL") || "").trim();
 }
-
+/*__STUDIO_WORKER_END:item4SlideImageUrl__*/
 
 export function item4PackageOverrides(packageId, photoCount, { hasVideo = false } = {}) {
   const pkg = String(packageId || "").trim().toLowerCase();
@@ -7749,7 +7749,7 @@ export function item4PackageOverrides(packageId, photoCount, { hasVideo = false 
   }
   return null;
 }
-
+/*__STUDIO_WORKER_END:item4PackageOverrides__*/
 
 export function item4ResolvePackageId(record, payloadPackage = "") {
   const fromPayload = String(payloadPackage || "").trim().toLowerCase();
@@ -7764,7 +7764,7 @@ export function item4ResolvePackageId(record, payloadPackage = "") {
   }
   return "";
 }
-
+/*__STUDIO_WORKER_END:item4ResolvePackageId__*/
 
 export function item4DefaultOutputType(platform, photoCount, { hasVideo = false, packageId = "" } = {}) {
   const packaged = item4PackageOverrides(packageId, photoCount, { hasVideo });
@@ -7776,22 +7776,22 @@ export function item4DefaultOutputType(platform, photoCount, { hasVideo = false,
   const map = n <= 1 ? single : multiple;
   return map[platform] || null;
 }
-
+/*__STUDIO_WORKER_END:item4DefaultOutputType__*/
 
 export function item4CanonicalOutputType(platform, outputType) {
   return String(outputType || "").trim();
 }
-
+/*__STUDIO_WORKER_END:item4CanonicalOutputType__*/
 
 export function item4IsCompanionOutputType(outputType) {
   return String(outputType || "").trim() === "Story";
 }
-
+/*__STUDIO_WORKER_END:item4IsCompanionOutputType__*/
 
 export function item4IsUnsupportedCompanion(platform, outputType) {
   return String(platform || "").trim() === "TikTok" && item4IsCompanionOutputType(outputType);
 }
-
+/*__STUDIO_WORKER_END:item4IsUnsupportedCompanion__*/
 
 export function item4ResolvedVideoDurationSeconds({ storyTeaser, clipCount, effective, requestRecord, outputRow }) {
   const outputOverride = Number(f(outputRow || {}, "Video_Duration_Seconds_Override") || 0);
@@ -7807,7 +7807,7 @@ export function item4ResolvedVideoDurationSeconds({ storyTeaser, clipCount, effe
   if (clipCount <= 1) return ITEM4_SINGLE_STILL_SECONDS;
   return Math.min(30, Math.max(clipCount * 3, 9));
 }
-
+/*__STUDIO_WORKER_END:item4ResolvedVideoDurationSeconds__*/
 
 export function item4CompanionStoryFields(outputType, { finishedVideo = false } = {}) {
   if (!item4IsCompanionOutputType(outputType)) return {};
@@ -7820,12 +7820,12 @@ export function item4CompanionStoryFields(outputType, { finishedVideo = false } 
     Video_Clip_Count_Exact_Override: 1,
   };
 }
-
+/*__STUDIO_WORKER_END:item4CompanionStoryFields__*/
 
 export function item4RowHasPlatformOutput(row) {
   return arrayOrEmpty(f(row, "Platform_Output")).some((id) => /^rec[A-Za-z0-9]+$/.test(String(id || "")));
 }
-
+/*__STUDIO_WORKER_END:item4RowHasPlatformOutput__*/
 
 export function item4PlatformOutputHasPublishedIdentity(row) {
   const outputStatus = String(f(row, "Output_Status") || "").trim().toLowerCase();
@@ -7842,7 +7842,7 @@ export function item4PlatformOutputHasPublishedIdentity(row) {
     "Published_At",
   ].some((name) => Boolean(String(f(row, name) || "").trim()));
 }
-
+/*__STUDIO_WORKER_END:item4PlatformOutputHasPublishedIdentity__*/
 
 export async function item4ReconcileCreatedPlatformOutput(env, outputRow, createdPo) {
   const rawProId = String(f(outputRow, "Production_Request_Output_ID") || "").trim();
@@ -7884,7 +7884,7 @@ export async function item4ReconcileCreatedPlatformOutput(env, outputRow, create
   }
   return { keeper, deleted_ids: deletedIds, unsafe_extra_ids: unsafeExtraIds };
 }
-
+/*__STUDIO_WORKER_END:item4ReconcileCreatedPlatformOutput__*/
 
 export async function item4CollapseDuplicatePlanOutputs(env, rows, { finishedVideo = false } = {}) {
   const mapped = (rows || []).map((row) => ({
@@ -7931,7 +7931,7 @@ export async function item4CollapseDuplicatePlanOutputs(env, rows, { finishedVid
   }
   return { collapsed, extra_ids: extras.map((item) => item.id) };
 }
-
+/*__STUDIO_WORKER_END:item4CollapseDuplicatePlanOutputs__*/
 
 export function item4NormalizePlanExtras(payloadExtras, platforms, existingItems = []) {
   const allowed = new Set((Array.isArray(platforms) ? platforms : []).map((platform) => String(platform || "").trim()).filter(Boolean));
@@ -7961,7 +7961,7 @@ export function item4NormalizePlanExtras(payloadExtras, platforms, existingItems
   }
   return extras;
 }
-
+/*__STUDIO_WORKER_END:item4NormalizePlanExtras__*/
 
 export function item4PlanChoice(platform, requestedOutputType, photoCount, { hasVideo = false, packageId = "" } = {}) {
   const spec = ITEM4_PLAN_SPECS[platform];
@@ -7978,7 +7978,7 @@ export function item4PlanChoice(platform, requestedOutputType, photoCount, { has
     : Object.keys(spec.options);
   return { output_type: outputType, ...selected, available_output_types: available };
 }
-
+/*__STUDIO_WORKER_END:item4PlanChoice__*/
 
 export function item4PlanItemFromChoice(platform, chosen, photoCount, mappingIndex, { companion = false } = {}) {
   const mapping = mappingIndex.get(`${platform}::${chosen.mapping_type}`) || null;
@@ -8005,7 +8005,7 @@ export function item4PlanItemFromChoice(platform, chosen, photoCount, mappingInd
     companion: Boolean(companion || chosen.output_type === "Story"),
   };
 }
-
+/*__STUDIO_WORKER_END:item4PlanItemFromChoice__*/
 
 export async function item4ReconcilePlanWithEnabledOutputs(env, record, enabledPairs) {
   // The selected Production Request Outputs are the sole authority for output
@@ -8071,7 +8071,7 @@ export async function item4ReconcilePlanWithEnabledOutputs(env, record, enabledP
   }
   return item4UpdateRequestState(env, record.id, fields);
 }
-
+/*__STUDIO_WORKER_END:item4ReconcilePlanWithEnabledOutputs__*/
 
 export async function item4DisableUnsupportedCompanions(env, requestRecord) {
   const rows = await outputRowsForProductionRequest(env, requestRecord.id);
@@ -8089,7 +8089,7 @@ export async function item4DisableUnsupportedCompanions(env, requestRecord) {
   }
   return changed;
 }
-
+/*__STUDIO_WORKER_END:item4DisableUnsupportedCompanions__*/
 
 export async function item4ReconcileEnabledPlanOutputs(env, requestRecord) {
   await item4DisableUnsupportedCompanions(env, requestRecord);
@@ -8118,7 +8118,7 @@ export async function item4ReconcileEnabledPlanOutputs(env, requestRecord) {
   return item4RelinkVariantQueueOutputs(env, updated);
 }
 
-
+/*__STUDIO_WORKER_END:item4ReconcileEnabledPlanOutputs__*/
 
 export async function acquireAzOutputLock(env, requestRecord) {
   const notes = String(f(requestRecord, "Production_Notes") || "");
@@ -8130,7 +8130,7 @@ export async function acquireAzOutputLock(env, requestRecord) {
   const held = azOutputLockHeld(String(f(record, "Production_Notes") || ""), token);
   return { acquired: held, record, token };
 }
-
+/*__STUDIO_WORKER_END:acquireAzOutputLock__*/
 
 export function finishedEnabledKeysFromRows(rows, record = null) {
   const horizontal = record ? isHorizontalFinishedAspect(studioRequestNotesText(record)) : false;
@@ -8142,7 +8142,7 @@ export function finishedEnabledKeysFromRows(rows, record = null) {
   }
   return keys;
 }
-
+/*__STUDIO_WORKER_END:finishedEnabledKeysFromRows__*/
 
 export async function item4SyncPlanOutputs(env, requestRecord, items, { schedules = null } = {}) {
   const productionRequestId = requestRecord.id;
@@ -8274,7 +8274,7 @@ export async function item4SyncPlanOutputs(env, requestRecord, items, { schedule
     { finishedVideo }
   );
 }
-
+/*__STUDIO_WORKER_END:item4SyncPlanOutputs__*/
 
 export async function buildItem4OutputPlan(request, env, url, authorization) {
   let payload={};
@@ -8371,27 +8371,27 @@ export async function buildItem4OutputPlan(request, env, url, authorization) {
   const rows=await outputRowsForProductionRequest(env,recordId);
   return respond(request,env,{ok:true,plan,production_request:mapProductionRequest(record),outputs:rows.map(row=>mapProductionRequestOutput(row,record)),message:needsReview?"Platform plan created; one or more ratio mappings need review.":"Platform plan created from the current master photos and ratio authority."});
 }
-
+/*__STUDIO_WORKER_END:buildItem4OutputPlan__*/
 
 export async function getItem4OutputPlan(request, env, url, authorization) {
   const recordId=item4RequestIdFromPath(url);
   const record=await loadAuthorizedProductionRequest(env,recordId,authorization);
   return respond(request,env,{ok:true,status:f(record,"Studio_Output_Plan_Status")||"Needs Plan",plan:item4ParseJson(f(record,"Studio_Output_Plan_JSON"),null)});
 }
-
+/*__STUDIO_WORKER_END:getItem4OutputPlan__*/
 
 export function studioFacebookGraphPublishHeld(env) {
   void env;
   // Make.com is retired. Approved Facebook outputs publish through the native
   // Graph/Python path; do not reinterpret a missing legacy flag as a publish hold.
   return false;
-}
+}/*__STUDIO_WORKER_END:studioFacebookGraphPublishHeld__*/
 
 export function item4VariantManifest(record) {
   const parsed = item4ParseJson(f(record, "Studio_Variant_Manifest_JSON"), null);
   return parsed && typeof parsed === "object" ? parsed : null;
 }
-
+/*__STUDIO_WORKER_END:item4VariantManifest__*/
 
 export function item4CoverStillUrl(requestRecord, outputRow = null) {
   const manifest = item4VariantManifest(requestRecord);
@@ -8423,7 +8423,7 @@ export function item4CoverStillUrl(requestRecord, outputRow = null) {
   }
   return "";
 }
-
+/*__STUDIO_WORKER_END:item4CoverStillUrl__*/
 
 export function item4PlanRatios(plan) {
   const ratios = [];
@@ -8434,7 +8434,7 @@ export function item4PlanRatios(plan) {
   }
   return ratios;
 }
-
+/*__STUDIO_WORKER_END:item4PlanRatios__*/
 
 export function item4CoverExtraRatios(plan) {
   const extras = [];
@@ -8443,18 +8443,18 @@ export function item4CoverExtraRatios(plan) {
   if (needsYoutubeCover && !item4PlanRatios(plan).includes("16:9")) extras.push("16:9");
   return extras;
 }
-
+/*__STUDIO_WORKER_END:item4CoverExtraRatios__*/
 
 export function item4RequiredRatios(plan) {
   return [...item4PlanRatios(plan), ...item4CoverExtraRatios(plan)];
 }
-
+/*__STUDIO_WORKER_END:item4RequiredRatios__*/
 
 export function item4CoverHeroAsset(assets) {
   return [...(assets || [])]
     .sort((left, right) => Number(left?.order || 0) - Number(right?.order || 0))[0] || null;
 }
-
+/*__STUDIO_WORKER_END:item4CoverHeroAsset__*/
 
 export function item4RatiosForAsset(plan, asset, assets) {
   const planRatios = item4PlanRatios(plan || {});
@@ -8464,7 +8464,7 @@ export function item4RatiosForAsset(plan, asset, assets) {
   if (!isHero) return planRatios;
   return [...planRatios, ...extras.filter((ratio) => !planRatios.includes(ratio))];
 }
-
+/*__STUDIO_WORKER_END:item4RatiosForAsset__*/
 
 export function item4ExpectedVariantKeys(recordId, assets, plan) {
   return (assets || [])
@@ -8477,12 +8477,12 @@ export function item4ExpectedVariantKeys(recordId, assets, plan) {
       }))
     );
 }
-
+/*__STUDIO_WORKER_END:item4ExpectedVariantKeys__*/
 
 export function item4VariantRatioKey(ratio) {
   return String(ratio || "").replace(":", "x");
 }
-
+/*__STUDIO_WORKER_END:item4VariantRatioKey__*/
 
 export function item4VariantTargetFileName(asset, ratio) {
   const original = String(asset?.name || "photo").trim() || "photo";
@@ -8491,7 +8491,7 @@ export function item4VariantTargetFileName(asset, ratio) {
   const suffix = item4CropTransferSuffix(asset, ratio);
   return suffix ? filename.replace(/\.jpg$/i, `${suffix}.jpg`) : filename;
 }
-
+/*__STUDIO_WORKER_END:item4VariantTargetFileName__*/
 
 export function item4NormalizedCrop(asset, ratio) {
   const raw = asset?.crops?.[ratio] || asset?.crops?.[String(ratio)] || null;
@@ -8503,20 +8503,20 @@ export function item4NormalizedCrop(asset, ratio) {
     y: Math.min(1, Math.max(0, y)),
   };
 }
-
+/*__STUDIO_WORKER_END:item4NormalizedCrop__*/
 
 export function item4CropStyleToken(asset, ratio) {
   const crop = item4NormalizedCrop(asset, ratio);
   if (Math.abs(crop.x - 0.5) < 0.005 && Math.abs(crop.y - 0.5) < 0.005) return "center";
   return `${crop.x.toFixed(2)}x${crop.y.toFixed(2)}`;
 }
-
+/*__STUDIO_WORKER_END:item4CropStyleToken__*/
 
 export function item4CropTransferSuffix(asset, ratio) {
   const token = item4CropStyleToken(asset, ratio);
   return token === "center" ? "" : `-g${token}`;
 }
-
+/*__STUDIO_WORKER_END:item4CropTransferSuffix__*/
 
 export function item4MergeAssetCrops(assets, cropsPayload) {
   if (!cropsPayload || typeof cropsPayload !== "object") return assets;
@@ -8536,35 +8536,35 @@ export function item4MergeAssetCrops(assets, cropsPayload) {
     return { ...asset, crops };
   });
 }
-
+/*__STUDIO_WORKER_END:item4MergeAssetCrops__*/
 
 export function item4QueueTransferId(recordId, assetId, ratio, asset = null) {
   return `ITEM4-VARIANT-${ITEM4_VARIANT_RECIPE_VERSION}-${recordId}-${assetId}-${item4VariantRatioKey(ratio)}${item4CropTransferSuffix(asset, ratio)}`;
 }
-
+/*__STUDIO_WORKER_END:item4QueueTransferId__*/
 
 export function item4QueueStatus(row) {
   return String(f(row, "Transfer_Status") || "").trim();
 }
-
+/*__STUDIO_WORKER_END:item4QueueStatus__*/
 
 export function item4QueueRowHasAuthority(row) {
   return Boolean(item4QueueDriveFileId(row) && item4QueueMediaAssetId(row));
 }
-
+/*__STUDIO_WORKER_END:item4QueueRowHasAuthority__*/
 
 export function item4QueueRowCountsReady(row) {
   if (item4QueueStatus(row) === "Ready") return true;
   return item4QueueRowHasAuthority(row);
 }
-
+/*__STUDIO_WORKER_END:item4QueueRowCountsReady__*/
 
 export function item4QueueErrorIsTransient(message) {
   return /(network connection lost|timed?\s*out|timeout|502|503|504|image transformation failed|stalled processing|connection reset|connection aborted)/i.test(
     String(message || "")
   );
 }
-
+/*__STUDIO_WORKER_END:item4QueueErrorIsTransient__*/
 
 export async function item4RequeueTransientVariantFailures(env, rows) {
   const next = [];
@@ -8594,7 +8594,7 @@ export async function item4RequeueTransientVariantFailures(env, rows) {
   }
   return next;
 }
-
+/*__STUDIO_WORKER_END:item4RequeueTransientVariantFailures__*/
 
 export async function item4RequeueFailedVariantsForHeal(env, rows) {
   const next = [];
@@ -8624,7 +8624,7 @@ export async function item4RequeueFailedVariantsForHeal(env, rows) {
   }
   return next;
 }
-
+/*__STUDIO_WORKER_END:item4RequeueFailedVariantsForHeal__*/
 
 export async function item4RequeueStaleProcessing(env, rows) {
   const now = Date.now();
@@ -8665,19 +8665,19 @@ export async function item4RequeueStaleProcessing(env, rows) {
   }
   return next;
 }
-
+/*__STUDIO_WORKER_END:item4RequeueStaleProcessing__*/
 
 export function item4QueueMediaAssetId(row) {
   const generated = arrayOrEmpty(f(row, "Generated_Media_Asset"));
   if (generated.length) return generated[0];
   return String(f(row, "Media_Asset_Record_ID") || "").trim() || null;
 }
-
+/*__STUDIO_WORKER_END:item4QueueMediaAssetId__*/
 
 export function item4QueueDriveFileId(row) {
   return String(f(row, "Drive_File_ID") || "").trim() || null;
 }
-
+/*__STUDIO_WORKER_END:item4QueueDriveFileId__*/
 
 export function item4OutputIdsForRatio(outputRows, plan, ratio) {
   // Link each physical variant to the outputs that actually request that ratio.
@@ -8697,14 +8697,14 @@ export function item4OutputIdsForRatio(outputRows, plan, ratio) {
     })
     .map((row) => row.id);
 }
-
+/*__STUDIO_WORKER_END:item4OutputIdsForRatio__*/
 
 export function item4SameRecordIds(left, right) {
   const a = [...new Set((Array.isArray(left) ? left : []).filter(Boolean))].sort();
   const b = [...new Set((Array.isArray(right) ? right : []).filter(Boolean))].sort();
   return a.length === b.length && a.every((id, index) => id === b[index]);
 }
-
+/*__STUDIO_WORKER_END:item4SameRecordIds__*/
 
 export async function item4RelinkVariantQueueOutputs(env, record, { maxPatches = 12 } = {}) {
   const plan = item4ParseJson(f(record, "Studio_Output_Plan_JSON"), null);
@@ -8728,7 +8728,7 @@ export async function item4RelinkVariantQueueOutputs(env, record, { maxPatches =
   }
   return record;
 }
-
+/*__STUDIO_WORKER_END:item4RelinkVariantQueueOutputs__*/
 
 export async function item4VariantQueueRows(env, recordId) {
   return listRecords(env, ITEM4_VARIANT_QUEUE_TABLE, {
@@ -8736,7 +8736,7 @@ export async function item4VariantQueueRows(env, recordId) {
     filterFormula: `{Production_Request_Record_ID}='${String(recordId).replace(/'/g, "\\'")}'`,
   });
 }
-
+/*__STUDIO_WORKER_END:item4VariantQueueRows__*/
 
 export async function syncMiamiTikTokPipelineSecret(request, env) {
   const payload = await readJsonBody(request);
@@ -8773,7 +8773,7 @@ export async function syncMiamiTikTokPipelineSecret(request, env) {
     synchronized: true,
   });
 }
-
+/*__STUDIO_WORKER_END:syncMiamiTikTokPipelineSecret__*/
 
 export async function item4PipelineSetting(env, name) {
   const rows = await listRecords(env, "Pipeline Settings", {
@@ -8782,7 +8782,7 @@ export async function item4PipelineSetting(env, name) {
   });
   return String(rows[0] ? f(rows[0], "Setting_Value") || "" : "").trim();
 }
-
+/*__STUDIO_WORKER_END:item4PipelineSetting__*/
 
 export async function item4UpsertVariantQueue(env, recordId, assets, ratios, outputRows, plan, options = {}) {
   const forceRetry = Boolean(options.forceRetry);
@@ -8917,16 +8917,16 @@ export async function item4UpsertVariantQueue(env, recordId, assets, ratios, out
   return expected;
 }
 
-
+/*__STUDIO_WORKER_END:item4UpsertVariantQueue__*/
 
 export function item4Smv1FormulaQuoted(value) {
   return String(value || "").replace(/\\/g, "\\\\").replace(/"/g, '\\"');
-}
+}/*__STUDIO_WORKER_END:item4Smv1FormulaQuoted__*/
 
 export function item4Smv1ExactTestFormula(recordId, testRunId) {
   return item4Smv1ExactRequestFormula(recordId, testRunId);
 }
-
+/*__STUDIO_WORKER_END:item4Smv1ExactTestFormula__*/
 
 export function item4Smv1ExactRequestFormula(recordId, testRunId = "") {
   const testClause = testRunId
@@ -8934,14 +8934,14 @@ export function item4Smv1ExactRequestFormula(recordId, testRunId = "") {
     : `{Test_Run_ID}=BLANK()`;
   return `AND({Production_Request_Record_ID}="${item4Smv1FormulaQuoted(recordId)}",${testClause},${ITEM4_SMV1_BASE_ELIGIBILITY_FORMULA})`;
 }
-
+/*__STUDIO_WORKER_END:item4Smv1ExactRequestFormula__*/
 
 export function item4QueueRowIsOutstanding(row) {
   const status = item4QueueStatus(row);
   if (["Pending", "Drive Uploaded", "Processing"].includes(status)) return true;
   return status === "Ready" && String(f(row, "Preview_Status") || "").trim() === "Pending";
 }
-
+/*__STUDIO_WORKER_END:item4QueueRowIsOutstanding__*/
 
 export function pipelineStageBackend(env, stageKey) {
   const runnerUrl = String(env.PIPELINE_RUNNER_URL || "").trim().replace(/\/+$/, "");
@@ -8950,14 +8950,14 @@ export function pipelineStageBackend(env, stageKey) {
   void stageKey;
   return { mode: "python", runnerUrl };
 }
-
+/*__STUDIO_WORKER_END:pipelineStageBackend__*/
 
 export function cadenceScenarioManagedByPython(env, scenarioId) {
   void env;
   void scenarioId;
   return true;
 }
-
+/*__STUDIO_WORKER_END:cadenceScenarioManagedByPython__*/
 
 export function parseStudioProductionJob(recordOrRaw) {
   if (recordOrRaw && typeof recordOrRaw === "object" && recordOrRaw.fields) {
@@ -8965,7 +8965,7 @@ export function parseStudioProductionJob(recordOrRaw) {
   }
   return item4ParseJson(recordOrRaw, null);
 }
-
+/*__STUDIO_WORKER_END:parseStudioProductionJob__*/
 
 export function studioProductionJobLabel(job) {
   if (!job || typeof job !== "object") return null;
@@ -8978,7 +8978,7 @@ export function studioProductionJobLabel(job) {
   if (/^Rendering(\s+\d+\/\d+)?$/i.test(detail) || String(job.step || "") === "render") return "Rendering";
   return detail || null;
 }
-
+/*__STUDIO_WORKER_END:studioProductionJobLabel__*/
 
 export async function item4RunnerClipPosterRoutes(env) {
   const runnerUrl = String(env.PIPELINE_RUNNER_URL || "").trim().replace(/\/+$/, "");
@@ -9006,7 +9006,7 @@ export async function item4RunnerClipPosterRoutes(env) {
     return { runnerUrl, hasStage: false, hasJob: false, version: "" };
   }
 }
-
+/*__STUDIO_WORKER_END:item4RunnerClipPosterRoutes__*/
 
 export async function item4PulseClipPosterJob(env, recordId, { assetId = "" } = {}) {
   const advertised = await item4RunnerClipPosterRoutes(env);
@@ -9053,7 +9053,7 @@ export async function item4PulseClipPosterJob(env, recordId, { assetId = "" } = 
   );
   return { ok: false, skipped: "runner-missing-clip-poster", runner_version: advertised.version || null };
 }
-
+/*__STUDIO_WORKER_END:item4PulseClipPosterJob__*/
 
 export async function item4RunnerStudioCompressRoutes(env) {
   const runnerUrl = String(env.PIPELINE_RUNNER_URL || "").trim().replace(/\/+$/, "");
@@ -9081,7 +9081,7 @@ export async function item4RunnerStudioCompressRoutes(env) {
     return { runnerUrl, hasStage: false, hasJob: false, version: "" };
   }
 }
-
+/*__STUDIO_WORKER_END:item4RunnerStudioCompressRoutes__*/
 
 export async function item4PulseStudioCompressJob(env, recordId, { assetId = "" } = {}) {
   const advertised = await item4RunnerStudioCompressRoutes(env);
@@ -9128,7 +9128,7 @@ export async function item4PulseStudioCompressJob(env, recordId, { assetId = "" 
   );
   return { ok: false, skipped: "runner-missing-studio-compress", runner_version: advertised.version || null };
 }
-
+/*__STUDIO_WORKER_END:item4PulseStudioCompressJob__*/
 
 export async function item4PulseStudioProduceJob(env, recordId, { resume = false } = {}) {
   const runnerUrl = String(env.PIPELINE_RUNNER_URL || "").trim().replace(/\/+$/, "");
@@ -9152,7 +9152,7 @@ export async function item4PulseStudioProduceJob(env, recordId, { resume = false
   }
   return { response, payload };
 }
-
+/*__STUDIO_WORKER_END:item4PulseStudioProduceJob__*/
 
 export function studioRequestNotesText(record) {
   return [
@@ -9162,14 +9162,14 @@ export function studioRequestNotesText(record) {
     f(record, "Production_Request_Notes"),
   ].map((value) => String(value || "")).join("\n");
 }
-
+/*__STUDIO_WORKER_END:studioRequestNotesText__*/
 
 export function studioIsAzFinishedVideo(record) {
   const text = studioRequestNotesText(record);
   return /origin=az-finished-video/i.test(text)
     || (/az-auto-queue=1/i.test(text) && /ez-input=finished-video/i.test(text));
 }
-
+/*__STUDIO_WORKER_END:studioIsAzFinishedVideo__*/
 
 export function studioIsVibeCut(recordOrNotes) {
   if (recordOrNotes && typeof recordOrNotes === "object" && !Array.isArray(recordOrNotes)) {
@@ -9177,50 +9177,50 @@ export function studioIsVibeCut(recordOrNotes) {
   }
   return isVibeCutNotes(recordOrNotes);
 }
-
+/*__STUDIO_WORKER_END:studioIsVibeCut__*/
 
 export function skipsProductionApprove(text) {
   return String(text || "").includes("origin=autonomous") || /origin=az-finished-video/i.test(String(text || ""));
 }
-
+/*__STUDIO_WORKER_END:skipsProductionApprove__*/
 
 export function studioChicagoWeekdayShort(date = new Date()) {
   return new Intl.DateTimeFormat("en-US", { timeZone: "America/Chicago", weekday: "short" }).format(date);
 }
-
+/*__STUDIO_WORKER_END:studioChicagoWeekdayShort__*/
 
 export function studioAzCivilKey(year, month, day) {
   return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
 }
-
+/*__STUDIO_WORKER_END:studioAzCivilKey__*/
 
 export function studioAzParseWindowStart(window) {
   const first = String(window || "12:00-13:00").split("-")[0] || "12:00";
   const [hh, mm] = first.split(":").map((n) => Number(n) || 0);
   return { hour: hh, minute: mm || 0 };
 }
-
+/*__STUDIO_WORKER_END:studioAzParseWindowStart__*/
 
 export function studioAzCivilFromMs(ms) {
   const parts = studioChicagoDateTimeParts(new Date(ms));
   return { ...parts, weekday: studioChicagoWeekdayShort(new Date(ms)), key: studioAzCivilKey(parts.year, parts.month, parts.day) };
 }
-
+/*__STUDIO_WORKER_END:studioAzCivilFromMs__*/
 
 export function studioAzIsStory(outputType) {
   return /story/i.test(String(outputType || ""));
 }
-
+/*__STUDIO_WORKER_END:studioAzIsStory__*/
 
 export function studioAzScheduleKey(platform, outputType) {
   return `${String(platform || "").trim()}::${String(outputType || "").trim()}`;
 }
-
+/*__STUDIO_WORKER_END:studioAzScheduleKey__*/
 
 export function studioAzTooClose(ms, occupiedMs, gapMs = AZ_OTHER_CLUSTER_MS) {
   return (occupiedMs || []).some((other) => Number.isFinite(other) && Math.abs(other - ms) < gapMs);
 }
-
+/*__STUDIO_WORKER_END:studioAzTooClose__*/
 
 export function studioAzNearPenalty(ms, occupiedMs) {
   let penalty = 0;
@@ -9232,12 +9232,12 @@ export function studioAzNearPenalty(ms, occupiedMs) {
   }
   return penalty;
 }
-
+/*__STUDIO_WORKER_END:studioAzNearPenalty__*/
 
 export function studioAzOccupiedOnDay(occupiedMs, civil) {
   return (occupiedMs || []).filter((ms) => Number.isFinite(ms) && studioAzCivilFromMs(ms).key === civil.key);
 }
-
+/*__STUDIO_WORKER_END:studioAzOccupiedOnDay__*/
 
 export function studioAzHorizon(now = new Date()) {
   const chicago = studioChicagoDateTimeParts(now);
@@ -9256,7 +9256,7 @@ export function studioAzHorizon(now = new Date()) {
   }
   return days;
 }
-
+/*__STUDIO_WORKER_END:studioAzHorizon__*/
 
 export function studioAzWindowSlots(civil, windows, now, occupiedMs) {
   const nowMs = now.getTime() + AZ_SCHEDULE_LEAD_MS;
@@ -9270,7 +9270,7 @@ export function studioAzWindowSlots(civil, windows, now, occupiedMs) {
   }
   return slots;
 }
-
+/*__STUDIO_WORKER_END:studioAzWindowSlots__*/
 
 export function studioAzScoreMain(civil, suggested, occupiedMs, now) {
   const days = Array.isArray(suggested?.days) ? suggested.days : [];
@@ -9287,7 +9287,7 @@ export function studioAzScoreMain(civil, suggested, occupiedMs, now) {
   if (crowding === 0 && civil.index > 0) score += 8;
   return { score, slot, preferred, crowding };
 }
-
+/*__STUDIO_WORKER_END:studioAzScoreMain__*/
 
 export function studioBuildAzCampaignSchedule(items, { occupiedMs = [], bestTimesByKey = {}, now = new Date() } = {}) {
   const list = Array.isArray(items) ? items : [];
@@ -9339,7 +9339,7 @@ export function studioBuildAzCampaignSchedule(items, { occupiedMs = [], bestTime
       : "no open schedule in the scheduling horizon",
   };
 }
-
+/*__STUDIO_WORKER_END:studioBuildAzCampaignSchedule__*/
 
 export async function studioLoadAzOccupiedTimes(env, { excludeIds = [] } = {}) {
   const skip = new Set((excludeIds || []).filter(Boolean));
@@ -9365,7 +9365,7 @@ export async function studioLoadAzOccupiedTimes(env, { excludeIds = [] } = {}) {
   }
   return { allMs };
 }
-
+/*__STUDIO_WORKER_END:studioLoadAzOccupiedTimes__*/
 
 export async function studioResolveAzBestTimes(env, platform, outputType) {
   const industry = studioIndustryBestWindows(platform, outputType);
@@ -9401,7 +9401,7 @@ export async function studioResolveAzBestTimes(env, platform, outputType) {
   }
   return { ...industry, source: "industry_default" };
 }
-
+/*__STUDIO_WORKER_END:studioResolveAzBestTimes__*/
 
 export async function azPlatformOutputsForRequest(env, requestId) {
   const outputRows = await outputRowsForProductionRequest(env, requestId);
@@ -9421,7 +9421,7 @@ export async function azPlatformOutputsForRequest(env, requestId) {
     filterFormula: `AND({Test_Run_ID}=BLANK(),FIND("${contentId}", ARRAYJOIN({Content_Item})))`,
   }).catch(() => []);
 }
-
+/*__STUDIO_WORKER_END:azPlatformOutputsForRequest__*/
 
 export function azOutputReadyToQueue(record) {
   if (Boolean(f(record, "Do_Not_Publish"))) return false;
@@ -9433,7 +9433,7 @@ export function azOutputReadyToQueue(record) {
   const thumb = studioAiThumbnailUrl(f(record, "Thumbnail_URL"));
   return Boolean(url && caption && (story || thumb));
 }
-
+/*__STUDIO_WORKER_END:azOutputReadyToQueue__*/
 
 export function azOutputQueueBlockers(record) {
   const blockers = [];
@@ -9445,7 +9445,7 @@ export function azOutputQueueBlockers(record) {
   if (!story && !studioAiThumbnailUrl(f(record, "Thumbnail_URL"))) blockers.push("cover");
   return blockers;
 }
-
+/*__STUDIO_WORKER_END:azOutputQueueBlockers__*/
 
 export async function azStagePublicCoverFromSource(env, parent, sourceUrl, driveFileId = "") {
   const parentId = String(parent?.id || "").trim();
@@ -9506,7 +9506,7 @@ export async function azStagePublicCoverFromSource(env, parent, sourceUrl, drive
   }
   return { url: uploaded.url, skip: "" };
 }
-
+/*__STUDIO_WORKER_END:azStagePublicCoverFromSource__*/
 
 export async function azEnsurePublicCovers(env, requestId, options = {}) {
   const stampLimit = Math.max(1, Math.min(6, Number(options.stampLimit) || 3));
@@ -9566,7 +9566,7 @@ export async function azEnsurePublicCovers(env, requestId, options = {}) {
   }
   return { ok: true, url: publicUrl, stamped, remaining, parent_id: contentId };
 }
-
+/*__STUDIO_WORKER_END:azEnsurePublicCovers__*/
 
 export async function azEnsurePublicFinalFiles(env, requestId, options = {}) {
   const stampLimit = Math.max(1, Math.min(6, Number(options.stampLimit) || 3));
@@ -9620,7 +9620,7 @@ export async function azEnsurePublicFinalFiles(env, requestId, options = {}) {
   }
   return { ok: true, url: publicUrl, stamped, remaining, mains: mains.length };
 }
-
+/*__STUDIO_WORKER_END:azEnsurePublicFinalFiles__*/
 
 export async function azRestampFinishedStories(env, requestId, options = {}) {
   const limit = Math.max(1, Math.min(4, Number(options.limit) || 2));
@@ -9668,7 +9668,7 @@ export async function azRestampFinishedStories(env, requestId, options = {}) {
   }
   return { ok: true, restamped, remaining, ids };
 }
-
+/*__STUDIO_WORKER_END:azRestampFinishedStories__*/
 
 export async function azAutoApproveIfReady(env, requestId, options = {}) {
   const requestRecord = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, requestId);
@@ -9840,7 +9840,7 @@ export async function azAutoApproveIfReady(env, requestId, options = {}) {
     })),
   };
 }
-
+/*__STUDIO_WORKER_END:azAutoApproveIfReady__*/
 
 export async function azBuildPlanItems(env, record) {
   const notes = studioRequestNotesText(record);
@@ -9891,7 +9891,7 @@ export async function azBuildPlanItems(env, record) {
   }
   return capFinishedPlanItems(items, { notes, horizontal: false });
 }
-
+/*__STUDIO_WORKER_END:azBuildPlanItems__*/
 
 export async function azEnsurePlatformOutputs(env, requestRecord, options = {}) {
   if (!requestRecord?.id) return { skipped: "missing_request" };
@@ -9980,7 +9980,7 @@ export async function azEnsurePlatformOutputs(env, requestRecord, options = {}) 
     content_item_id: contentId,
   };
 }
-
+/*__STUDIO_WORKER_END:azEnsurePlatformOutputs__*/
 
 export async function advanceAzFinishedVideo(env, requestId, authorization, ctx = null, options = {}) {
   if (!requestId) return { skipped: "missing_request" };
@@ -10163,7 +10163,7 @@ export async function advanceAzFinishedVideo(env, requestId, authorization, ctx 
   }
   return { waiting: status || "unknown", production_request_id: requestId, phase };
 }
-
+/*__STUDIO_WORKER_END:advanceAzFinishedVideo__*/
 
 export async function opsForceAzNavyPierTitle(env, options = {}) {
   const requestId = "reca7v6zi1b9QNanJ";
@@ -10231,7 +10231,7 @@ export async function opsForceAzNavyPierTitle(env, options = {}) {
     advance,
   };
 }
-
+/*__STUDIO_WORKER_END:opsForceAzNavyPierTitle__*/
 
 export async function resumeAzFinishedVideoRequests(env, ctx = null) {
   const rows = await listRecords(env, PRODUCTION_REQUEST_TABLE, {
@@ -10252,7 +10252,7 @@ export async function resumeAzFinishedVideoRequests(env, ctx = null) {
   }
   return { resumed: results.length, results };
 }
-
+/*__STUDIO_WORKER_END:resumeAzFinishedVideoRequests__*/
 
 export function studioVibeCutOutputNeedsRemount(row, vibeTarget = 0) {
   const count = Number(f(row, "Selected_Clip_Count") || 0) || 0;
@@ -10296,7 +10296,7 @@ export function studioVibeCutOutputNeedsRemount(row, vibeTarget = 0) {
     );
   return singleHead || shortSingle || durationMismatch || finishedWrong;
 }
-
+/*__STUDIO_WORKER_END:studioVibeCutOutputNeedsRemount__*/
 
 export async function studioClearVibeCutPassthroughOutputs(env, requestId, { vibeTarget = 0 } = {}) {
   const outputs = await azPlatformOutputsForRequest(env, requestId).catch(() => []);
@@ -10354,7 +10354,7 @@ export async function studioClearVibeCutPassthroughOutputs(env, requestId, { vib
     }
   }
 }
-
+/*__STUDIO_WORKER_END:studioClearVibeCutPassthroughOutputs__*/
 
 export async function enqueueStudioProductionJob(env, requestId, options = {}) {
   if (!requestId) return null;
@@ -10460,14 +10460,14 @@ export async function enqueueStudioProductionJob(env, requestId, options = {}) {
   }
   return item4PulseStudioProduceJob(env, requestId);
 }
-
+/*__STUDIO_WORKER_END:enqueueStudioProductionJob__*/
 
 export function studioOutputProductionRequestId(record, contentToRequest = new Map()) {
   return studioFirstLinkedId(f(record, "Production_Request"))
     || contentToRequest.get(studioFirstLinkedId(f(record, "Content_Item")))
     || null;
 }
-
+/*__STUDIO_WORKER_END:studioOutputProductionRequestId__*/
 
 export async function loadStudioProductionJobsForOutputs(env, records) {
   const directIds = [];
@@ -10523,7 +10523,7 @@ export async function loadStudioProductionJobsForOutputs(env, records) {
     },
   };
 }
-
+/*__STUDIO_WORKER_END:loadStudioProductionJobsForOutputs__*/
 
 export async function startOrphanedStudioProductionJobs(env) {
   const orphans = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
@@ -10564,7 +10564,7 @@ export async function startOrphanedStudioProductionJobs(env) {
   if (pulses.length) console.log("Studio produce orphan kick", JSON.stringify({ count: pulses.length, pulses }));
   return pulses;
 }
-
+/*__STUDIO_WORKER_END:startOrphanedStudioProductionJobs__*/
 
 export async function pulseStudioProduceOpsAlert(env, requestId, job) {
   const runnerUrl = String(env.PIPELINE_RUNNER_URL || "").trim().replace(/\/+$/, "");
@@ -10609,7 +10609,7 @@ export async function pulseStudioProduceOpsAlert(env, requestId, job) {
   }
   return { response, payload };
 }
-
+/*__STUDIO_WORKER_END:pulseStudioProduceOpsAlert__*/
 
 export function studioProduceHealState(job) {
   const raw = job && typeof job.heal === "object" && job.heal ? job.heal : {};
@@ -10625,12 +10625,12 @@ export function studioProduceHealState(job) {
     notified_at: raw.notified_at || null,
   };
 }
-
+/*__STUDIO_WORKER_END:studioProduceHealState__*/
 
 export function isTransientRenderBlockError(blockError) {
   return /(timed?\s*out|timeout|connectionpool|connection reset|502|503|504)/i.test(String(blockError || ""));
 }
-
+/*__STUDIO_WORKER_END:isTransientRenderBlockError__*/
 
 export async function resumeStaleStudioProductionJobs(env, options = {}) {
   // Prefer Updated_At so an older active Vibe Cut (Chicago Walk with me) is not
@@ -10798,13 +10798,13 @@ export async function resumeStaleStudioProductionJobs(env, options = {}) {
   if (pulses.length) console.log("Studio produce watchdog", JSON.stringify({ count: pulses.length, pulses }));
   return pulses;
 }
-
+/*__STUDIO_WORKER_END:resumeStaleStudioProductionJobs__*/
 
 export function studioLastModifiedStaleFormula(minutes) {
   const n = Math.max(1, Math.round(Number(minutes) || 2));
   return `IS_BEFORE(LAST_MODIFIED_TIME(), DATEADD(NOW(), -${n}, "minutes"))`;
 }
-
+/*__STUDIO_WORKER_END:studioLastModifiedStaleFormula__*/
 
 export function studioFreshTtsLease(parent, maxMs = 20 * 60 * 1000) {
   const raw = String(f(parent, "Voiceover_Normalization_Details") || "").trim();
@@ -10813,7 +10813,7 @@ export function studioFreshTtsLease(parent, maxMs = 20 * 60 * 1000) {
   if (!Number.isFinite(epoch) || epoch <= 0) return false;
   return Date.now() - epoch <= maxMs;
 }
-
+/*__STUDIO_WORKER_END:studioFreshTtsLease__*/
 
 export function studioOutputVoiceoverRequired(row, parent = null) {
   const mode = String(
@@ -10823,7 +10823,7 @@ export function studioOutputVoiceoverRequired(row, parent = null) {
   ).trim().toLowerCase();
   return mode === "yes" || mode === "true" || mode === "1";
 }
-
+/*__STUDIO_WORKER_END:studioOutputVoiceoverRequired__*/
 
 export async function studioHealReadyNoJobVoiceover(env, row, cache = { parents: new Map(), requests: new Map() }) {
   if (String(f(row, "Voiceover_URL") || "").trim()) return null;
@@ -10902,14 +10902,14 @@ export async function studioHealReadyNoJobVoiceover(env, row, cache = { parents:
     resumed,
   };
 }
-
+/*__STUDIO_WORKER_END:studioHealReadyNoJobVoiceover__*/
 
 export function studioStreamMediaAssetId(value) {
   const text = String(value || "").trim();
   const match = text.match(/^\/api\/media-assets\/(rec[A-Za-z0-9]+)\/stream(?:\?|$)/);
   return match ? match[1] : "";
 }
-
+/*__STUDIO_WORKER_END:studioStreamMediaAssetId__*/
 
 export async function studioRepairUnfetchableRenderSources(env, row) {
   const raw = String(f(row, "Render_Clip_List_JSON") || "").trim();
@@ -10978,7 +10978,7 @@ export async function studioRepairUnfetchableRenderSources(env, row) {
   });
   return { repaired, unresolved: [] };
 }
-
+/*__STUDIO_WORKER_END:studioRepairUnfetchableRenderSources__*/
 
 export function studioPrivateDriveWatermarkSignature(row) {
   const props = String(f(row, "Remotion_Props_JSON") || "");
@@ -10989,14 +10989,14 @@ export function studioPrivateDriveWatermarkSignature(row) {
       && /drive\.google\.com|ERR_BLOCKED_BY_ORB|HTTP status code:\s*403|Error loading image with src/i.test(err));
   return propsMatch || errorMatch;
 }
-
+/*__STUDIO_WORKER_END:studioPrivateDriveWatermarkSignature__*/
 
 export function studioChicagoWatermarkOutput(row) {
   const brand = String(f(row, "Brand_Text") || "");
   const profile = JSON.stringify(f(row, "Content_Profile") || "");
   return /chicagoshining/i.test(`${brand} ${profile}`);
 }
-
+/*__STUDIO_WORKER_END:studioChicagoWatermarkOutput__*/
 
 export async function studioParkChicagoWatermarkRender(env, row) {
   await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, row.id, {
@@ -11015,7 +11015,7 @@ export async function studioParkChicagoWatermarkRender(env, row) {
     }),
   });
 }
-
+/*__STUDIO_WORKER_END:studioParkChicagoWatermarkRender__*/
 
 export async function studioRemotionPrivateDriveLocalizationReady(env = null) {
   // Remotion must localize Drive watermarks via pipeline-runner. Do NOT treat the
@@ -11035,7 +11035,7 @@ export async function studioRemotionPrivateDriveLocalizationReady(env = null) {
   } catch {}
   return false;
 }
-
+/*__STUDIO_WORKER_END:studioRemotionPrivateDriveLocalizationReady__*/
 
 export async function studioResetPrivateDriveWatermarkRender(env, row) {
   await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, row.id, {
@@ -11058,7 +11058,7 @@ export async function studioResetPrivateDriveWatermarkRender(env, row) {
     }),
   });
 }
-
+/*__STUDIO_WORKER_END:studioResetPrivateDriveWatermarkRender__*/
 
 export function studioExtendClipsToCoverVoiceover(row) {
   // Output 2156: spoken VO slightly longer than stamped render duration after
@@ -11118,7 +11118,7 @@ export function studioExtendClipsToCoverVoiceover(row) {
   }
   return fields;
 }
-
+/*__STUDIO_WORKER_END:studioExtendClipsToCoverVoiceover__*/
 
 export async function studioHealVoiceoverExceedsRender(env, options = {}) {
   const outputTable = env.AIRTABLE_OUTPUT_TABLE_ID;
@@ -11156,7 +11156,7 @@ export async function studioHealVoiceoverExceedsRender(env, options = {}) {
   }
   return { healed, pulses };
 }
-
+/*__STUDIO_WORKER_END:studioHealVoiceoverExceedsRender__*/
 
 export async function healStuckStudioRenders(env) {
   const outputTable = env.AIRTABLE_OUTPUT_TABLE_ID;
@@ -11404,7 +11404,7 @@ export async function healStuckStudioRenders(env) {
   }
   return pulses;
 }
-
+/*__STUDIO_WORKER_END:healStuckStudioRenders__*/
 
 export async function studioCompleteNativePhotoPublishArming(env, record, note = "Native photo approve-incomplete heal") {
   const stamp = new Date().toISOString();
@@ -11437,7 +11437,7 @@ export async function studioCompleteNativePhotoPublishArming(env, record, note =
     body: JSON.stringify({ fields, typecast: true }),
   });
 }
-
+/*__STUDIO_WORKER_END:studioCompleteNativePhotoPublishArming__*/
 
 export async function studioHealNativePhotoReviewStrands(env, options = {}) {
   const limit = Math.max(1, Math.min(12, Number(options.limit || 8)));
@@ -11509,7 +11509,7 @@ export async function studioHealNativePhotoReviewStrands(env, options = {}) {
   if (healed.length) console.log("Studio native-photo review/approve heal", JSON.stringify({ count: healed.length, healed }));
   return healed;
 }
-
+/*__STUDIO_WORKER_END:studioHealNativePhotoReviewStrands__*/
 
 export async function studioHealAwaitingApprovalStaleRfr(env, options = {}) {
   const limit = Math.max(1, Math.min(20, Number(options.limit || 12)));
@@ -11553,7 +11553,7 @@ export async function studioHealAwaitingApprovalStaleRfr(env, options = {}) {
   if (healed.length) console.log("Studio awaiting-approval stale RFR heal", JSON.stringify({ count: healed.length, healed }));
   return healed;
 }
-
+/*__STUDIO_WORKER_END:studioHealAwaitingApprovalStaleRfr__*/
 
 export async function studioHealPhantomRerender(env, options = {}) {
   const limit = Math.max(1, Math.min(16, Number(options.limit || 8)));
@@ -11604,7 +11604,7 @@ export async function studioHealPhantomRerender(env, options = {}) {
   if (healed.length) console.log("Studio phantom rerender heal", JSON.stringify({ count: healed.length, healed }));
   return healed;
 }
-
+/*__STUDIO_WORKER_END:studioHealPhantomRerender__*/
 
 export async function studioHealFailedStatuses(env, options = {}) {
   const limit = Math.max(1, Math.min(8, Number(options.limit || 6)));
@@ -11719,7 +11719,7 @@ export async function studioHealFailedStatuses(env, options = {}) {
   }
   return pulses;
 }
-
+/*__STUDIO_WORKER_END:studioHealFailedStatuses__*/
 
 export async function studioHealIgCarouselTooManyChildren(env, options = {}) {
   const limit = Math.max(1, Math.min(6, Number(options.limit || 4)));
@@ -11794,7 +11794,7 @@ export async function studioHealIgCarouselTooManyChildren(env, options = {}) {
   return pulses;
 }
 
-
+/*__STUDIO_WORKER_END:studioHealIgCarouselTooManyChildren__*/
 
 export async function studioHealIgCarouselChildVerificationRace(env, options = {}) {
   const limit = Math.max(1, Math.min(6, Number(options.limit || 4)));
@@ -11943,7 +11943,7 @@ export async function studioHealIgCarouselChildVerificationRace(env, options = {
   return pulses;
 }
 
-
+/*__STUDIO_WORKER_END:studioHealIgCarouselChildVerificationRace__*/
 
 export async function studioHealIgCarouselChildPollFailure(env, options = {}) {
   const limit = Math.max(1, Math.min(6, Number(options.limit || 4)));
@@ -12122,7 +12122,7 @@ export async function studioHealIgCarouselChildPollFailure(env, options = {}) {
   return pulses;
 }
 
-
+/*__STUDIO_WORKER_END:studioHealIgCarouselChildPollFailure__*/
 
 export async function studioHealIgCarouselRateLimit(env, options = {}) {
   const limit = Math.max(1, Math.min(6, Number(options.limit || 4)));
@@ -12262,4 +12262,4 @@ export async function studioHealIgCarouselRateLimit(env, options = {}) {
   }
   return pulses;
 }
-
+/*__STUDIO_WORKER_END:studioHealIgCarouselRateLimit__*/

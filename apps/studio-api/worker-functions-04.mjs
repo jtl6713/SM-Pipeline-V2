@@ -665,7 +665,7 @@ export async function healStaleManualFlagsOnPublishedRecord(env, record) {
     return record;
   }
 }
-
+/*__STUDIO_WORKER_END:healStaleManualFlagsOnPublishedRecord__*/
 
 export async function healYoutubeManualWithLiveVideoRecord(env, record, options = {}) {
   const candidate = youtubeManualLiveVideoHealCandidate(record?.fields || record);
@@ -684,7 +684,7 @@ export async function healYoutubeManualWithLiveVideoRecord(env, record, options 
     return record;
   }
 }
-
+/*__STUDIO_WORKER_END:healYoutubeManualWithLiveVideoRecord__*/
 
 export async function studioCloseYoutubeManualWithLiveVideo(env, options = {}) {
   const limit = Number(options.limit || 3);
@@ -718,7 +718,7 @@ export async function studioCloseYoutubeManualWithLiveVideo(env, options = {}) {
   }
   return results;
 }
-
+/*__STUDIO_WORKER_END:studioCloseYoutubeManualWithLiveVideo__*/
 
 export async function studioRearmDueYoutubeManualPublishes(env, options = {}) {
   const limit = Number(options.limit || 3);
@@ -772,7 +772,7 @@ export async function studioRearmDueYoutubeManualPublishes(env, options = {}) {
   return results;
 }
 
-
+/*__STUDIO_WORKER_END:studioRearmDueYoutubeManualPublishes__*/
 
 export async function studioReconcileYoutubePublishes(env, options = {}) {
   if (pipelineStageBackend(env, "YT0").mode !== "python") return [];
@@ -863,7 +863,7 @@ export async function studioReconcileYoutubePublishes(env, options = {}) {
   }
   return results;
 }
-
+/*__STUDIO_WORKER_END:studioReconcileYoutubePublishes__*/
 
 export async function studioReconcileTiktokDrafts(env, options = {}) {
   if (pipelineStageBackend(env, "TTD0").mode !== "python") return [];
@@ -921,7 +921,7 @@ export async function studioReconcileTiktokDrafts(env, options = {}) {
   }
   return results;
 }
-
+/*__STUDIO_WORKER_END:studioReconcileTiktokDrafts__*/
 
 export async function studioReconcileFacebookPhotos(env, options = {}) {
   if (studioFacebookGraphPublishHeld(env)) return [];
@@ -976,7 +976,7 @@ export async function studioReconcileFacebookPhotos(env, options = {}) {
   }
   return results;
 }
-
+/*__STUDIO_WORKER_END:studioReconcileFacebookPhotos__*/
 
 export async function studioReconcileInstagramCarousels(env, options = {}) {
   if (pipelineStageBackend(env, "AP0C").mode !== "python") return [];
@@ -1047,7 +1047,7 @@ export async function studioReconcileInstagramCarousels(env, options = {}) {
   }
   return results;
 }
-
+/*__STUDIO_WORKER_END:studioReconcileInstagramCarousels__*/
 
 export function studioPublishLockIsStale(record, staleMs = 10 * 60 * 1000) {
   const raw = String(f(record, "Publish_Locked_At") || "").trim();
@@ -1055,7 +1055,7 @@ export function studioPublishLockIsStale(record, staleMs = 10 * 60 * 1000) {
   const ms = Date.parse(raw);
   return Number.isNaN(ms) || ms <= Date.now() - staleMs;
 }
-
+/*__STUDIO_WORKER_END:studioPublishLockIsStale__*/
 
 export async function studioHealOverdueTikTokPrep(env, record) {
   if (String(f(record, "Platform") || "").trim() !== "TikTok") return record;
@@ -1083,7 +1083,7 @@ export async function studioHealOverdueTikTokPrep(env, record) {
     return record;
   }
 }
-
+/*__STUDIO_WORKER_END:studioHealOverdueTikTokPrep__*/
 
 export async function studioReconcileOverdueScheduledPublishes(env, options = {}) {
   const limit = Math.max(1, Math.min(20, Number(options.limit || 12)));
@@ -1125,7 +1125,7 @@ export async function studioReconcileOverdueScheduledPublishes(env, options = {}
   }
   return results;
 }
-
+/*__STUDIO_WORKER_END:studioReconcileOverdueScheduledPublishes__*/
 
 export async function studioHealApprovedMissingSchedule(env, options = {}) {
   const limit = Math.max(1, Math.min(20, Number(options.limit || 16)));
@@ -1205,7 +1205,7 @@ export async function studioHealApprovedMissingSchedule(env, options = {}) {
   if (healed.length) studioInvalidateOccupiedScheduleCache();
   return healed;
 }
-
+/*__STUDIO_WORKER_END:studioHealApprovedMissingSchedule__*/
 
 export async function studioHealStoryCompanionDrift(env, options = {}) {
   const limit = Math.max(1, Math.min(12, Number(options.limit || 8)));
@@ -1260,7 +1260,7 @@ export async function studioHealStoryCompanionDrift(env, options = {}) {
   if (healed.length) studioInvalidateOccupiedScheduleCache();
   return healed;
 }
-
+/*__STUDIO_WORKER_END:studioHealStoryCompanionDrift__*/
 
 export async function studioReconcileApprovedPublishes(env, options = {}) {
   await studioHealApprovedMissingSchedule(env, { limit: 16 }).catch((error) => {
@@ -1297,7 +1297,7 @@ export async function studioReconcileApprovedPublishes(env, options = {}) {
   }
   return results;
 }
-
+/*__STUDIO_WORKER_END:studioReconcileApprovedPublishes__*/
 
 export async function studioReconcileFacebookPublicMake(env, options = {}) {
   if (!studioFacebookGraphPublishHeld(env)) return [];
@@ -1328,7 +1328,7 @@ export async function studioReconcileFacebookPublicMake(env, options = {}) {
   }
   return results;
 }
-
+/*__STUDIO_WORKER_END:studioReconcileFacebookPublicMake__*/
 
 export async function studioReconcileFacebookVideoCovers(env, options = {}) {
   const limit = Number(options.limit || 8);
@@ -1362,7 +1362,7 @@ export async function studioReconcileFacebookVideoCovers(env, options = {}) {
   }
   return results;
 }
-
+/*__STUDIO_WORKER_END:studioReconcileFacebookVideoCovers__*/
 
 export async function studioReconcilePublishingInstagramStories(env, options = {}) {
   if (pipelineStageBackend(env, "AP1_IGS").mode !== "python") return [];
@@ -1390,7 +1390,7 @@ export async function studioReconcilePublishingInstagramStories(env, options = {
   }
   return results;
 }
-
+/*__STUDIO_WORKER_END:studioReconcilePublishingInstagramStories__*/
 
 export async function studioReconcilePublishingInstagramReels(env, options = {}) {
   if (pipelineStageBackend(env, "AP1_IG").mode !== "python") return [];
@@ -1423,7 +1423,7 @@ export async function studioReconcilePublishingInstagramReels(env, options = {})
   }
   return results;
 }
-
+/*__STUDIO_WORKER_END:studioReconcilePublishingInstagramReels__*/
 
 export async function studioReconcileFacebookSlideshows(env, options = {}) {
   if (pipelineStageBackend(env, "FBS1").mode !== "python") return [];
@@ -1469,7 +1469,7 @@ export async function studioReconcileFacebookSlideshows(env, options = {}) {
   }
   return results;
 }
-
+/*__STUDIO_WORKER_END:studioReconcileFacebookSlideshows__*/
 
 export async function studioReconcileFacebookReels(env, options = {}) {
   if (pipelineStageBackend(env, "FBS3").mode !== "python") return [];
@@ -1556,7 +1556,7 @@ export async function studioReconcileFacebookReels(env, options = {}) {
   }
   return results;
 }
-
+/*__STUDIO_WORKER_END:studioReconcileFacebookReels__*/
 
 export async function approveOutputRecordForPublishing(env, existing, note, stamp, payload = {}, options = {}) {
   const id = existing.id;
@@ -1706,7 +1706,7 @@ export async function approveOutputRecordForPublishing(env, existing, note, stam
   await studioSupabaseWriteThroughOutput(env, updated, "approve");
   return updated;
 }
-
+/*__STUDIO_WORKER_END:approveOutputRecordForPublishing__*/
 
 export function mapApprovedOutputSummary(record) {
   return {
@@ -1716,7 +1716,7 @@ export function mapApprovedOutputSummary(record) {
     format: f(record, "Format") || f(record, "Platform_Output_Type") || f(record, "Studio_Output_Type"),
   };
 }
-
+/*__STUDIO_WORKER_END:mapApprovedOutputSummary__*/
 
 export async function studioLoadApproveAllJobStore(env) {
   const row = await studioSettingsByName(env, APPROVE_ALL_JOBS_SETTING).catch(() => null);
@@ -1724,7 +1724,7 @@ export async function studioLoadApproveAllJobStore(env) {
     parseApproveAllJobStore(row?.fields?.Setting_Value || row?.fields?.Value || "{}"),
   );
 }
-
+/*__STUDIO_WORKER_END:studioLoadApproveAllJobStore__*/
 
 export async function studioSaveApproveAllJobStore(env, store) {
   let pruned = pruneApproveAllJobStore(store);
@@ -1755,13 +1755,13 @@ export async function studioSaveApproveAllJobStore(env, store) {
     }
   }
 }
-
+/*__STUDIO_WORKER_END:studioSaveApproveAllJobStore__*/
 
 export async function studioGetApproveAllJob(env, jobId) {
   const store = await studioLoadApproveAllJobStore(env);
   return store.jobs[String(jobId || "").trim()] || null;
 }
-
+/*__STUDIO_WORKER_END:studioGetApproveAllJob__*/
 
 export async function studioPutApproveAllJob(env, job) {
   const store = await studioLoadApproveAllJobStore(env);
@@ -1774,7 +1774,7 @@ export async function studioPutApproveAllJob(env, job) {
   await studioSaveApproveAllJobStore(env, store);
   return job;
 }
-
+/*__STUDIO_WORKER_END:studioPutApproveAllJob__*/
 
 export function mapApproveAllEligibleSummary(record) {
   return {
@@ -1785,7 +1785,7 @@ export function mapApproveAllEligibleSummary(record) {
   };
 }
 
-
+/*__STUDIO_WORKER_END:mapApproveAllEligibleSummary__*/
 
 export async function studioLoadScheduleRegenJobStore(env) {
   const row = await studioSettingsByName(env, SCHEDULE_REGEN_JOBS_SETTING).catch(() => null);
@@ -1793,20 +1793,20 @@ export async function studioLoadScheduleRegenJobStore(env) {
     parseScheduleRegenJobStore(row?.fields?.Setting_Value || row?.fields?.Value || "{}"),
   );
 }
-
+/*__STUDIO_WORKER_END:studioLoadScheduleRegenJobStore__*/
 
 export async function studioPutScheduleRegenJobStore(env, store, notes = "Schedule regeneration job store") {
   const pruned = pruneScheduleRegenJobStore(store);
   await studioUpsertSetting(env, SCHEDULE_REGEN_JOBS_SETTING, JSON.stringify(pruned), notes);
   return pruned;
 }
-
+/*__STUDIO_WORKER_END:studioPutScheduleRegenJobStore__*/
 
 export async function studioGetScheduleRegenJob(env, jobId) {
   const store = await studioLoadScheduleRegenJobStore(env);
   return store.jobs[String(jobId || "").trim()] || null;
 }
-
+/*__STUDIO_WORKER_END:studioGetScheduleRegenJob__*/
 
 export async function studioPutScheduleRegenJob(env, job) {
   const store = await studioLoadScheduleRegenJobStore(env);
@@ -1822,7 +1822,7 @@ export async function studioPutScheduleRegenJob(env, job) {
   await studioPutScheduleRegenJobStore(env, store);
   return store.jobs[job.id];
 }
-
+/*__STUDIO_WORKER_END:studioPutScheduleRegenJob__*/
 
 export function studioNormalizeRegenFilters(payload = {}) {
   const platforms = Array.isArray(payload.platforms)
@@ -1839,7 +1839,7 @@ export function studioNormalizeRegenFilters(payload = {}) {
     : [];
   return { platforms, outputTypes, profiles };
 }
-
+/*__STUDIO_WORKER_END:studioNormalizeRegenFilters__*/
 
 export async function studioProcessScheduleRegenJobSlice(env, jobId, options = {}) {
   let job = await studioGetScheduleRegenJob(env, jobId);
@@ -1975,7 +1975,7 @@ export async function studioProcessScheduleRegenJobSlice(env, jobId, options = {
   await studioPutScheduleRegenJob(env, job);
   return job;
 }
-
+/*__STUDIO_WORKER_END:studioProcessScheduleRegenJobSlice__*/
 
 export async function startScheduleRegenJob(request, env, authorization, ctx = null) {
   const payload = await readJsonBody(request);
@@ -2025,7 +2025,7 @@ export async function startScheduleRegenJob(request, env, authorization, ctx = n
     message: scheduleRegenProgressMessage(job),
   });
 }
-
+/*__STUDIO_WORKER_END:startScheduleRegenJob__*/
 
 export async function getScheduleRegenJobStatus(request, env, authorization) {
   const url = new URL(request.url);
@@ -2050,7 +2050,7 @@ export async function getScheduleRegenJobStatus(request, env, authorization) {
   }
   return respond(request, env, summarizeScheduleRegenJob(job));
 }
-
+/*__STUDIO_WORKER_END:getScheduleRegenJobStatus__*/
 
 export async function getStudioScheduleSettings(request, env, authorization) {
   const horizonDays = await studioScheduleHorizonDays(env);
@@ -2063,7 +2063,7 @@ export async function getStudioScheduleSettings(request, env, authorization) {
     blackout: "20:00-03:30",
   });
 }
-
+/*__STUDIO_WORKER_END:getStudioScheduleSettings__*/
 
 export async function putStudioScheduleSettings(request, env, authorization) {
   const payload = await readJsonBody(request);
@@ -2084,7 +2084,7 @@ export async function putStudioScheduleSettings(request, env, authorization) {
   });
 }
 
-
+/*__STUDIO_WORKER_END:putStudioScheduleSettings__*/
 
 export async function getApproveAllJobStatus(request, env, authorization) {
   const url = new URL(request.url);
@@ -2111,7 +2111,7 @@ export async function getApproveAllJobStatus(request, env, authorization) {
   }
   return respond(request, env, summarizeApproveAllJob(job));
 }
-
+/*__STUDIO_WORKER_END:getApproveAllJobStatus__*/
 
 export async function studioProcessApproveAllJobSlice(env, jobId, options = {}) {
   const maxSlices = Math.max(1, Math.min(20, Number(options.maxSlices || APPROVE_ALL_MAX_SLICES_PER_INVOKE)));
@@ -2218,7 +2218,7 @@ export async function studioProcessApproveAllJobSlice(env, jobId, options = {}) 
   await studioPutApproveAllJob(env, job);
   return { job, approvedThisInvoke };
 }
-
+/*__STUDIO_WORKER_END:studioProcessApproveAllJobSlice__*/
 
 export async function studioRunApproveAllJob(env, jobId, ctx = null) {
   const result = await studioProcessApproveAllJobSlice(env, jobId);
@@ -2244,7 +2244,7 @@ export async function studioRunApproveAllJob(env, jobId, ctx = null) {
   }
   return job;
 }
-
+/*__STUDIO_WORKER_END:studioRunApproveAllJob__*/
 
 export async function studioResumeApproveAllJobs(env, ctx = null) {
   const store = await studioLoadApproveAllJobStore(env);
@@ -2276,7 +2276,7 @@ export async function studioResumeApproveAllJobs(env, ctx = null) {
   }
   return seen.size;
 }
-
+/*__STUDIO_WORKER_END:studioResumeApproveAllJobs__*/
 
 export async function approveAllOutputsForPublishing(request, env, authorization, ctx = null) {
   let payload = {};
@@ -2416,7 +2416,7 @@ export async function approveAllOutputsForPublishing(request, env, authorization
     message: `Approve All started · 0 of ${eligibleSummaries.length} approved · 0 failed`,
   });
 }
-
+/*__STUDIO_WORKER_END:approveAllOutputsForPublishing__*/
 
 export async function reviewOutputCreative(request, env, url, authorization, ctx = null) {
   let payload;
@@ -2699,7 +2699,7 @@ export async function reviewOutputCreative(request, env, url, authorization, ctx
         : "Changes requested. Studio is continuing the resumable voice/render handoff automatically; publishing remains blocked."),
   });
 }
-
+/*__STUDIO_WORKER_END:reviewOutputCreative__*/
 
 export async function getRecordRoute(request, env, url, tableId, kind) {
   const id = decodeURIComponent(url.pathname.split("/").pop() || "");
@@ -2708,7 +2708,7 @@ export async function getRecordRoute(request, env, url, tableId, kind) {
   const mapped = kind === "idea" ? mapIdea(record) : mapContent(record);
   return respond(request, env, { ok: true, record: mapped });
 }
-
+/*__STUDIO_WORKER_END:getRecordRoute__*/
 
 export async function getOutputRoute(request, env, url) {
   const id = decodeURIComponent(url.pathname.split("/").pop() || "");
@@ -2720,7 +2720,7 @@ export async function getOutputRoute(request, env, url) {
     record: mapOutput(record, jobs.get(record)),
   });
 }
-
+/*__STUDIO_WORKER_END:getOutputRoute__*/
 
 export function studioOverviewScheduledCounts(mappedOutputs) {
   const platformOrder = ["Facebook", "Instagram", "TikTok", "YouTube"];
@@ -2739,7 +2739,7 @@ export function studioOverviewScheduledCounts(mappedOutputs) {
   }
   return counts;
 }
-
+/*__STUDIO_WORKER_END:studioOverviewScheduledCounts__*/
 
 export function studioOverviewOperationalMetrics(mappedOutputs, ideas) {
   const attentionStates = new Set(["Failed", "Retry Pending", "Manual Action Required"]);
@@ -2770,12 +2770,12 @@ export function studioOverviewOperationalMetrics(mappedOutputs, ideas) {
     platform_outputs: mappedOutputs.length,
   };
 }
-
+/*__STUDIO_WORKER_END:studioOverviewOperationalMetrics__*/
 
 export function studioOverviewBudgetError(label = "overview") {
   return new HttpError(429, `Airtable cooling down (${label} budget); try again shortly`);
 }
-
+/*__STUDIO_WORKER_END:studioOverviewBudgetError__*/
 
 export async function raceStudioOverviewBudget(promise, budgetMs, label = "overview") {
   let timer = 0;
@@ -2790,12 +2790,12 @@ export async function raceStudioOverviewBudget(promise, budgetMs, label = "overv
     if (timer) clearTimeout(timer);
   }
 }
-
+/*__STUDIO_WORKER_END:raceStudioOverviewBudget__*/
 
 export function studioProfilesOverviewAuthKey(profiles = []) {
   return (profiles || []).map((profile) => String(profile?.id || "").trim()).filter(Boolean).sort().join(",");
 }
-
+/*__STUDIO_WORKER_END:studioProfilesOverviewAuthKey__*/
 
 export function studioProfilesOverviewCombinedFormula(profiles = []) {
   const formulas = (profiles || []).map((profile) => contentProfileFilterFormula(profile)).filter(Boolean);
@@ -2803,7 +2803,7 @@ export function studioProfilesOverviewCombinedFormula(profiles = []) {
   if (formulas.length === 1) return formulas[0];
   return `OR(${formulas.join(",")})`;
 }
-
+/*__STUDIO_WORKER_END:studioProfilesOverviewCombinedFormula__*/
 
 export function studioOverviewRowMatchesProfile(row, profile) {
   if (!profile?.id) return true;
@@ -2815,7 +2815,7 @@ export function studioOverviewRowMatchesProfile(row, profile) {
     .join(" ");
   return joined.includes(name);
 }
-
+/*__STUDIO_WORKER_END:studioOverviewRowMatchesProfile__*/
 
 export async function buildStudioProfilesOverviewRows(env, profiles) {
   const formula = studioProfilesOverviewCombinedFormula(profiles);
@@ -2853,14 +2853,14 @@ export async function buildStudioProfilesOverviewRows(env, profiles) {
     };
   });
 }
-
+/*__STUDIO_WORKER_END:buildStudioProfilesOverviewRows__*/
 
 export function isAirtableCoolingError(error) {
   const status = Number(error?.status || 0);
   const message = String(error?.message || error || "");
   return status === 429 || /cooling down|rate.?limit|too many requests/i.test(message);
 }
-
+/*__STUDIO_WORKER_END:isAirtableCoolingError__*/
 
 export function respondProfilesOverviewSoft(request, env, { records = [], cached = false, stale = false, cooling = false, refreshing = false, snapshot = false } = {}) {
   // Never HTTP 429 the home overview — cold isolates + Airtable cooldown used to
@@ -2876,7 +2876,7 @@ export function respondProfilesOverviewSoft(request, env, { records = [], cached
     records: Array.isArray(records) ? records : [],
   });
 }
-
+/*__STUDIO_WORKER_END:respondProfilesOverviewSoft__*/
 
 export function rememberProfilesOverviewSnapshot(snapshot) {
   const rows = Array.isArray(snapshot?.rows) ? snapshot.rows : [];
@@ -2890,7 +2890,7 @@ export function rememberProfilesOverviewSnapshot(snapshot) {
     authKey: studioProfilesOverviewCache.authKey,
   };
 }
-
+/*__STUDIO_WORKER_END:rememberProfilesOverviewSnapshot__*/
 
 export async function readStudioProfilesOverviewSnapshot(env) {
   const cache = studioProfilesOverviewCache;
@@ -2907,7 +2907,7 @@ export async function readStudioProfilesOverviewSnapshot(env) {
     return null;
   }
 }
-
+/*__STUDIO_WORKER_END:readStudioProfilesOverviewSnapshot__*/
 
 export async function writeStudioProfilesOverviewSnapshot(env, rows, authKey) {
   const snapshot = rememberProfilesOverviewSnapshot({ rows, authKey, at: Date.now() });
@@ -2923,7 +2923,7 @@ export async function writeStudioProfilesOverviewSnapshot(env, rows, authKey) {
   }
   return snapshot;
 }
-
+/*__STUDIO_WORKER_END:writeStudioProfilesOverviewSnapshot__*/
 
 export async function refreshStudioProfilesOverviewSnapshot(env, authorization) {
   const cache = studioProfilesOverviewCache;
@@ -2943,7 +2943,7 @@ export async function refreshStudioProfilesOverviewSnapshot(env, authorization) 
   cache.inflight = run;
   return run;
 }
-
+/*__STUDIO_WORKER_END:refreshStudioProfilesOverviewSnapshot__*/
 
 export function scheduleStudioProfilesOverviewRefresh(ctx, env, authorization) {
   const pending = refreshStudioProfilesOverviewSnapshot(env, authorization);
@@ -2952,7 +2952,7 @@ export function scheduleStudioProfilesOverviewRefresh(ctx, env, authorization) {
   }));
   return pending;
 }
-
+/*__STUDIO_WORKER_END:scheduleStudioProfilesOverviewRefresh__*/
 
 export async function profilesOverview(request, env, authorization, ctx) {
   const snapshot = await readStudioProfilesOverviewSnapshot(env);
@@ -3031,7 +3031,7 @@ export async function profilesOverview(request, env, authorization, ctx) {
     throw error;
   }
 }
-
+/*__STUDIO_WORKER_END:profilesOverview__*/
 
 export async function dashboard(request, env, url, authorization) {
   const profile = await resolveWorkingContentProfile(env, authorization, requestedProfileId(url));
@@ -3089,7 +3089,7 @@ export async function dashboard(request, env, url, authorization) {
   });
 }
 
-
+/*__STUDIO_WORKER_END:dashboard__*/
 
 export function respondHtml(request, env, html, status = 200) {
   return new Response(html, {
@@ -3102,7 +3102,7 @@ export function respondHtml(request, env, html, status = 200) {
     },
   });
 }
-
+/*__STUDIO_WORKER_END:respondHtml__*/
 
 export async function listPipelineSettingsForAdmin(env) {
   const records = [];
@@ -3120,7 +3120,7 @@ export async function listPipelineSettingsForAdmin(env) {
   } while (offset);
   return records;
 }
-
+/*__STUDIO_WORKER_END:listPipelineSettingsForAdmin__*/
 
 export function pipelineSettingValue(records, name) {
   const match = records.find((record) =>
@@ -3130,27 +3130,27 @@ export function pipelineSettingValue(records, name) {
   return match ? String(match.fields.Setting_Value || "").trim() : "";
 }
 
-
+/*__STUDIO_WORKER_END:pipelineSettingValue__*/
 
 export function repairJson(value, fallback = null) {
   if (!value) return fallback;
   if (typeof value === "object") return value;
   try { return JSON.parse(String(value)); } catch { return fallback; }
 }
-
+/*__STUDIO_WORKER_END:repairJson__*/
 
 export function repairIsoMs(value) {
   const ms = Date.parse(String(value || ""));
   return Number.isFinite(ms) ? ms : NaN;
 }
-
+/*__STUDIO_WORKER_END:repairIsoMs__*/
 
 export function repairString(value, name, max = 160) {
   const text = String(value || "").trim();
   if (!text || text.length > max) throw new HttpError(400, `${name} is required and must be <= ${max} characters`);
   return text;
 }
-
+/*__STUDIO_WORKER_END:repairString__*/
 
 export function repairRecordIds(value, name) {
   const ids = Array.isArray(value) ? value.map((v) => String(v || "").trim()).filter(Boolean) : [];
@@ -3160,7 +3160,7 @@ export function repairRecordIds(value, name) {
   }
   return [...new Set(ids)];
 }
-
+/*__STUDIO_WORKER_END:repairRecordIds__*/
 
 export function repairLeaseState(record) {
   const contract = repairJson(record?.fields?.Request_JSON, {}) || {};
@@ -3178,7 +3178,7 @@ export function repairLeaseState(record) {
     runs_used: Number(state.runs_used || 0),
   };
 }
-
+/*__STUDIO_WORKER_END:repairLeaseState__*/
 
 export async function repairLeaseRecords(env, scenarioId = null) {
   const formulas = ['{Status}="Processing"', `FIND("${REPAIR_LEASE_NOTE_PREFIX}", {Notes}&"")>0`];
@@ -3190,7 +3190,7 @@ export async function repairLeaseRecords(env, scenarioId = null) {
     filterFormula: `AND(${formulas.join(",")})`,
   });
 }
-
+/*__STUDIO_WORKER_END:repairLeaseRecords__*/
 
 export async function repairClearR4LeaseToken(env, lease) {
   if (Number(lease?.scenario_id) !== 5556716) return { cleared: 0 };
@@ -3209,7 +3209,7 @@ export async function repairClearR4LeaseToken(env, lease) {
   }
   return { cleared };
 }
-
+/*__STUDIO_WORKER_END:repairClearR4LeaseToken__*/
 
 export async function repairCloseLease(env, lease, status, resultPatch = {}) {
   if (!lease?.record_id) return;
@@ -3225,7 +3225,7 @@ export async function repairCloseLease(env, lease, status, resultPatch = {}) {
     } }),
   });
 }
-
+/*__STUDIO_WORKER_END:repairCloseLease__*/
 
 export async function repairVerifyOutputRecord(env, recordId, allowPublicPublish = false, expectedTestRunId = null) {
   const record = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, recordId);
@@ -3252,7 +3252,7 @@ export async function repairVerifyOutputRecord(env, recordId, allowPublicPublish
     output_status: fields.Output_Status?.name || fields.Output_Status || null,
   };
 }
-
+/*__STUDIO_WORKER_END:repairVerifyOutputRecord__*/
 
 export async function repairSweepExpiredLeases(env, scenarioId = null) {
   const records = await repairLeaseRecords(env, scenarioId);
@@ -3278,7 +3278,7 @@ export async function repairSweepExpiredLeases(env, scenarioId = null) {
   return results;
 }
 
-
+/*__STUDIO_WORKER_END:repairSweepExpiredLeases__*/
 
 export async function repairVerifyContentItemRecord(env, recordId, expectedTestRunId) {
   if (!/^rec[A-Za-z0-9]{14}$/.test(String(recordId || ""))) throw new HttpError(400, "Invalid Content Item record ID");
@@ -3290,7 +3290,7 @@ export async function repairVerifyContentItemRecord(env, recordId, expectedTestR
   }
   return record;
 }
-
+/*__STUDIO_WORKER_END:repairVerifyContentItemRecord__*/
 
 export async function repairAcquireLease(env, input, authorization) {
   const testRunId = repairString(input.test_run_id, "test_run_id");
@@ -3394,7 +3394,7 @@ export async function repairAcquireLease(env, input, authorization) {
   if (!record?.id) throw new HttpError(502, "Could not persist repair lease");
   return { lease: repairLeaseState(record), outputs, content_items: contentItems };
 }
-
+/*__STUDIO_WORKER_END:repairAcquireLease__*/
 
 export async function repairFindLease(env, input) {
   const scenarioId = Number(input.scenario_id);
@@ -3416,7 +3416,7 @@ export async function repairFindLease(env, input) {
   if (repairIsoMs(lease.expires_at) <= Date.now()) throw new HttpError(409, "Repair lease has expired");
   return lease;
 }
-
+/*__STUDIO_WORKER_END:repairFindLease__*/
 
 export async function repairReserveBudget(env, lease, { operationCost = 1, runCost = 0, action = "operation" } = {}) {
   const maxOperations = Number(lease.contract.max_operations || 0);
@@ -3439,7 +3439,7 @@ export async function repairReserveBudget(env, lease, { operationCost = 1, runCo
   return lease;
 }
 
-
+/*__STUDIO_WORKER_END:repairReserveBudget__*/
 
 export function repairScenarioModuleById(flow, moduleId) {
   for (const node of flow || []) {
@@ -3451,7 +3451,7 @@ export function repairScenarioModuleById(flow, moduleId) {
   }
   return null;
 }
-
+/*__STUDIO_WORKER_END:repairScenarioModuleById__*/
 
 export function repairScenarioModuleIds(flow, out = []) {
   for (const node of flow || []) {
@@ -3460,7 +3460,7 @@ export function repairScenarioModuleIds(flow, out = []) {
   }
   return out;
 }
-
+/*__STUDIO_WORKER_END:repairScenarioModuleIds__*/
 
 export async function repairReadMakeBlueprint(env, scenarioId) {
   const raw = await phase6MakeApiJson(env, `/scenarios/${scenarioId}/blueprint?draft=false`, { method: "GET" });
@@ -3469,7 +3469,7 @@ export async function repairReadMakeBlueprint(env, scenarioId) {
   if (!blueprint || typeof blueprint !== "object" || Array.isArray(blueprint)) throw new HttpError(502, `Make scenario ${scenarioId} returned an invalid blueprint`);
   return { blueprint, original_payload: typeof wrapped === "string" ? wrapped : JSON.stringify(blueprint) };
 }
-
+/*__STUDIO_WORKER_END:repairReadMakeBlueprint__*/
 
 export function repairP1Eligibility(fields) {
   const contentStatus = String(fields?.Content_Status || "");
@@ -3486,7 +3486,7 @@ export function repairP1Eligibility(fields) {
     ["", "Not Started", "Ready"].includes(scriptStatus)
   );
 }
-
+/*__STUDIO_WORKER_END:repairP1Eligibility__*/
 
 export async function repairWaitForP1Package(env, recordId, expectedTestRunId, timeoutMs = 90000) {
   const started = Date.now();
@@ -3502,7 +3502,7 @@ export async function repairWaitForP1Package(env, recordId, expectedTestRunId, t
   }
   return { matched: false, record: last };
 }
-
+/*__STUDIO_WORKER_END:repairWaitForP1Package__*/
 
 export async function repairPulseP1TestSelector(env, lease, input, action) {
   const P1_SCENARIO_ID = STUDIO_P1_SCENARIO_ID;
@@ -3670,7 +3670,7 @@ export async function repairPulseP1TestSelector(env, lease, input, action) {
   };
 }
 
-
+/*__STUDIO_WORKER_END:repairPulseP1TestSelector__*/
 
 export function repairItem7CanonicalMaxRecords(scenarioId) {
   const sid = Number(scenarioId);
@@ -3679,7 +3679,7 @@ export function repairItem7CanonicalMaxRecords(scenarioId) {
   if (sid === 5576363) return "10";
   return "1";
 }
-
+/*__STUDIO_WORKER_END:repairItem7CanonicalMaxRecords__*/
 
 export function repairItem7StageCheckpoint(scenarioId, fields = {}) {
   if (scenarioId === 5569495) {
@@ -3713,7 +3713,7 @@ export function repairItem7StageCheckpoint(scenarioId, fields = {}) {
   }
   throw new HttpError(403, `Scenario ${scenarioId} is not an Item 7 exact-stage scenario`);
 }
-
+/*__STUDIO_WORKER_END:repairItem7StageCheckpoint__*/
 
 export async function repairReadItem7Output(env, recordId, testRunId) {
   const record = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, recordId);
@@ -3723,7 +3723,7 @@ export async function repairReadItem7Output(env, recordId, testRunId) {
   if (fields.Do_Not_Publish !== true) throw new HttpError(409, `Platform Output ${recordId} must remain Do_Not_Publish=true during Item 7`);
   return record;
 }
-
+/*__STUDIO_WORKER_END:repairReadItem7Output__*/
 
 export async function repairWaitItem7Checkpoint(env, scenarioId, recordId, testRunId, timeoutMs) {
   const deadline = Date.now() + timeoutMs;
@@ -3744,7 +3744,7 @@ export async function repairWaitItem7Checkpoint(env, scenarioId, recordId, testR
   }
   return last;
 }
-
+/*__STUDIO_WORKER_END:repairWaitItem7Checkpoint__*/
 
 export async function repairPulseItem7ExactStage(env, lease, input, action) {
   const scenarioId = Number(input.scenario_id);
@@ -3878,7 +3878,7 @@ export async function repairPulseItem7ExactStage(env, lease, input, action) {
   if (failure || !restored) throw new HttpError(502, failure || `${config.stage} Item 7 exact-stage restoration failed`);
   return { stage: config.stage, scenario_id: scenarioId, platform_output_record_id: recordId, test_run_id: lease.test_run_id, cycles_run: cyclesRun, checkpoint: observed?.checkpoint?.summary || null, scenario_started: true, scenario_stopped: stop?.inactive === true, selector_restored: true, schedule_preserved: true, do_not_publish_preserved: true, stranded_selector_recovered: strandedSelectorRecovered };
 }
-
+/*__STUDIO_WORKER_END:repairPulseItem7ExactStage__*/
 
 export async function repairCleanupItem7ExactStage(env, lease, input) {
   const scenarioId = Number(input.scenario_id);
@@ -3954,24 +3954,24 @@ export async function repairCleanupItem7ExactStage(env, lease, input) {
     lease_terminalized: true,
   };
 }
-
+/*__STUDIO_WORKER_END:repairCleanupItem7ExactStage__*/
 
 export function item6Choice(value) {
   if (value && typeof value === "object" && !Array.isArray(value)) return value.name || value.id || null;
   return value ?? null;
 }
-
+/*__STUDIO_WORKER_END:item6Choice__*/
 
 export function item6Platform(fields) {
   return String(item6Choice(fields?.Platform) || "").trim();
 }
-
+/*__STUDIO_WORKER_END:item6Platform__*/
 
 export function item6SnapshotFieldNames(fields) {
   const platform = item6Platform(fields);
   return [...ITEM6_REPLACE_COMMON_FIELDS, ...(ITEM6_REPLACE_PLATFORM_FIELDS[platform] || [])];
 }
-
+/*__STUDIO_WORKER_END:item6SnapshotFieldNames__*/
 
 export function item6PublicationSnapshot(record) {
   const fields = record?.fields || {};
@@ -3980,7 +3980,7 @@ export function item6PublicationSnapshot(record) {
   for (const name of names) values[name] = Object.prototype.hasOwnProperty.call(fields, name) ? fields[name] : null;
   return { schema: "ITEM6_LAST_GOOD_V1", record_id: record.id, platform: item6Platform(fields), captured_at: new Date().toISOString(), fields: values };
 }
-
+/*__STUDIO_WORKER_END:item6PublicationSnapshot__*/
 
 export function item6ParseSnapshot(value, recordId) {
   let snapshot;
@@ -3990,7 +3990,7 @@ export function item6ParseSnapshot(value, recordId) {
   }
   return snapshot;
 }
-
+/*__STUDIO_WORKER_END:item6ParseSnapshot__*/
 
 export function item6Identity(fields) {
   const platform = item6Platform(fields);
@@ -4001,19 +4001,19 @@ export function item6Identity(fields) {
   if (platform === "YouTube") return first(fields.YouTube_Video_ID, fields.Platform_Post_ID, fields.Platform_Post_URL);
   return first(fields.Platform_Post_ID, fields.Platform_Post_URL);
 }
-
+/*__STUDIO_WORKER_END:item6Identity__*/
 
 export function item6IdentityFromSnapshot(snapshot) {
   return item6Identity({ Platform: snapshot.platform, ...(snapshot.fields || {}) });
 }
-
+/*__STUDIO_WORKER_END:item6IdentityFromSnapshot__*/
 
 export function item6SafeJson(value, fallback = null) {
   if (value === null || value === undefined || value === "") return fallback;
   if (typeof value === "object") return value;
   try { return JSON.parse(String(value)); } catch { return fallback; }
 }
-
+/*__STUDIO_WORKER_END:item6SafeJson__*/
 
 export async function item6LoadAllowedOutput(env, lease, input) {
   const recordId = repairString(input.platform_output_record_id, "platform_output_record_id", 32);
@@ -4023,12 +4023,12 @@ export async function item6LoadAllowedOutput(env, lease, input) {
   if (!record?.id) throw new HttpError(404, `Platform Output ${recordId} not found`);
   return record;
 }
-
+/*__STUDIO_WORKER_END:item6LoadAllowedOutput__*/
 
 export async function item6PatchOutput(env, recordId, fields) {
   return airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, recordId, { method: "PATCH", body: JSON.stringify({ fields, typecast: true }) });
 }
-
+/*__STUDIO_WORKER_END:item6PatchOutput__*/
 
 export function item6PrepareResetPatch(record, transactionId, fingerprint) {
   const fields = record.fields || {};
@@ -4043,7 +4043,7 @@ export function item6PrepareResetPatch(record, transactionId, fingerprint) {
   if (platform === "YouTube") patch.YouTube_Idempotency_Key = `item6:${record.id}:${transactionId}:${fingerprint}`.slice(0, 250);
   return patch;
 }
-
+/*__STUDIO_WORKER_END:item6PrepareResetPatch__*/
 
 export function item6ObsoleteInventory(snapshot) {
   const fields = snapshot.fields || {};
@@ -4057,7 +4057,7 @@ export function item6ObsoleteInventory(snapshot) {
     youtube_video_id: fields.YouTube_Video_ID || null
   };
 }
-
+/*__STUDIO_WORKER_END:item6ObsoleteInventory__*/
 
 export async function item6ReplaceControlAction(env, action, lease, input) {
   const record = await item6LoadAllowedOutput(env, lease, input);
@@ -4166,7 +4166,7 @@ export async function item6ReplaceControlAction(env, action, lease, input) {
   }
 
   throw new HttpError(400, `Unsupported Item 6 replacement action ${action}`);
-}
+}/*__STUDIO_WORKER_END:item6ReplaceControlAction__*/
 
 export async function repairRecoverItem7ExactSelector(env, input) {
   const confirm = repairString(input.confirm, "confirm", 96);
@@ -4229,7 +4229,7 @@ export async function repairRecoverItem7ExactSelector(env, input) {
 
   return { stage: config.stage, scenario_id: scenarioId, platform_output_record_id: recordId, test_run_id: testRunId, scenario_stopped: true, selector_restored: true, already_canonical: false, schedule_preserved: true };
 }
-
+/*__STUDIO_WORKER_END:repairRecoverItem7ExactSelector__*/
 
 export async function repairControlAction(env, input) {
   const action = repairString(input.action, "action", 40).toLowerCase();
@@ -4533,14 +4533,14 @@ export async function repairControlAction(env, input) {
   throw new HttpError(400, `Unsupported repair control action: ${action}`);
 }
 
-
+/*__STUDIO_WORKER_END:repairControlAction__*/
 
 export async function repairSha256Hex(value) {
   const bytes = new TextEncoder().encode(String(value || ""));
   const digest = await crypto.subtle.digest("SHA-256", bytes);
   return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
-
+/*__STUDIO_WORKER_END:repairSha256Hex__*/
 
 export function repairMakeAdminFindModule19(blueprint) {
   const matches = [];
@@ -4557,7 +4557,7 @@ export function repairMakeAdminFindModule19(blueprint) {
   if (module?.metadata?.designer?.name !== "19 - Record GET_BLUEPRINT Result") throw new HttpError(409, "MAKE-ADMIN module 19 name changed unexpectedly");
   return module;
 }
-
+/*__STUDIO_WORKER_END:repairMakeAdminFindModule19__*/
 
 export async function repairMakeAdminModule19(env) {
   const scenarioId = 5893243;
@@ -4656,7 +4656,7 @@ export async function repairMakeAdminModule19(env) {
   }
 }
 
-
+/*__STUDIO_WORKER_END:repairMakeAdminModule19__*/
 
 export function repairInspectorClone(value, depth = 0) {
   if (depth > 10) return "[depth-limit]";
@@ -4678,7 +4678,7 @@ export function repairInspectorClone(value, depth = 0) {
 }
 
 
-
+/*__STUDIO_WORKER_END:repairInspectorClone__*/
 
 export function repairProbeModuleIndex(blueprint) {
   const found = [];
@@ -4700,7 +4700,7 @@ export function repairProbeModuleIndex(blueprint) {
   walk(blueprint?.flow);
   return found;
 }
-
+/*__STUDIO_WORKER_END:repairProbeModuleIndex__*/
 
 export async function repairProbeMakeStartScenarioSchema(env) {
   const anchorState = await phase6ScenarioState(env, 5556716);
@@ -4809,7 +4809,7 @@ export async function repairProbeMakeStartScenarioSchema(env) {
   if (evidence.scratch.created && !evidence.scratch.deleted) throw new HttpError(500, 'Disposable Make scratch scenario could not be verified deleted');
   return evidence;
 }
-
+/*__STUDIO_WORKER_END:repairProbeMakeStartScenarioSchema__*/
 
 export async function repairListMakeScenariosCompact(env) {
   const anchorScenarioId = 5556716;
@@ -4869,7 +4869,7 @@ export async function repairListMakeScenariosCompact(env) {
     on_demand_with_interfaces: inputDetails,
   };
 }
-
+/*__STUDIO_WORKER_END:repairListMakeScenariosCompact__*/
 
 export async function repairInspectMakeScenarioModules(env, scenarioId, requestedIds) {
   const id = Number(scenarioId);
@@ -4916,7 +4916,7 @@ export async function repairInspectMakeScenarioModules(env, scenarioId, requeste
   };
 }
 
-
+/*__STUDIO_WORKER_END:repairInspectMakeScenarioModules__*/
 
 export function repairR4FindModule(blueprint, moduleId) {
   const matches = [];
@@ -4930,7 +4930,7 @@ export function repairR4FindModule(blueprint, moduleId) {
   if (matches.length !== 1) throw new HttpError(409, `Expected exactly one R4 module ${moduleId}; found ${matches.length}`);
   return matches[0];
 }
-
+/*__STUDIO_WORKER_END:repairR4FindModule__*/
 
 export function repairR4ModuleMap(blueprint) {
   const map = new Map();
@@ -4945,7 +4945,7 @@ export function repairR4ModuleMap(blueprint) {
   walk(blueprint?.flow);
   return map;
 }
-
+/*__STUDIO_WORKER_END:repairR4ModuleMap__*/
 
 export async function repairR4TokenSelector(env) {
   const scenarioId = 5556716;
@@ -5024,7 +5024,7 @@ export async function repairR4TokenSelector(env) {
     throw error;
   }
 }
-
+/*__STUDIO_WORKER_END:repairR4TokenSelector__*/
 
 export async function repairR4ExactOutputEntry(env) {
   const scenarioId = 5556716;
@@ -5231,7 +5231,7 @@ export async function repairR4ExactOutputEntry(env) {
   }
 }
 
-
+/*__STUDIO_WORKER_END:repairR4ExactOutputEntry__*/
 
 export async function repairInspectMakeBlueprintHistory(env, scenarioId, moduleId) {
   const id = Number(scenarioId);
@@ -5282,7 +5282,7 @@ export async function repairInspectMakeBlueprintHistory(env, scenarioId, moduleI
   };
 }
 
-
+/*__STUDIO_WORKER_END:repairInspectMakeBlueprintHistory__*/
 
 export async function repairInspectMakeExecution(env, scenarioId, executionId) {
   const id = Number(scenarioId);
@@ -5298,7 +5298,7 @@ export async function repairInspectMakeExecution(env, scenarioId, executionId) {
     details: repairInspectorClone(details),
   };
 }
-
+/*__STUDIO_WORKER_END:repairInspectMakeExecution__*/
 
 export async function adminRepairControlStatus(request, env) {
   const records = await repairLeaseRecords(env);
@@ -5317,7 +5317,7 @@ export async function adminRepairControlStatus(request, env) {
   }));
   return respond(request, env, { ok: true, repair_control: "lease-v1", run_enabled: false, leases });
 }
-
+/*__STUDIO_WORKER_END:adminRepairControlStatus__*/
 
 export async function adminRepairControl(request, env, authorization) {
   const input = await request.json();
@@ -5380,7 +5380,7 @@ export async function adminRepairControl(request, env, authorization) {
   const result = await repairControlAction(env, input);
   return respond(request, env, { ok: true, ...result });
 }
-
+/*__STUDIO_WORKER_END:adminRepairControl__*/
 
 export async function adminMakeDeployPage(request, env, authorization) {
   const displayName = String(authorization?.user?.display_name || authorization?.email || "Studio admin");
@@ -5434,7 +5434,7 @@ document.getElementById('deploy').addEventListener('click', async () => {
 </main></body></html>`;
   return respondHtml(request, env, html);
 }
-
+/*__STUDIO_WORKER_END:adminMakeDeployPage__*/
 
 export function escapeHtml(value) {
   return String(value ?? "")
@@ -5444,7 +5444,7 @@ export function escapeHtml(value) {
     .replaceAll('"', "&quot;")
     .replaceAll("'", "&#039;");
 }
-
+/*__STUDIO_WORKER_END:escapeHtml__*/
 
 export async function adminMakeDeploy(request, env, authorization) {
   const input = await request.json();
@@ -5621,14 +5621,14 @@ export async function adminMakeDeploy(request, env, authorization) {
     throw error instanceof HttpError ? error : new HttpError(502, String(error?.message || error));
   }
 }
-
+/*__STUDIO_WORKER_END:adminMakeDeploy__*/
 
 export function studioIdeaBatchRecordIdFromPath(url) {
   const match = /^\/api\/ideas\/generate\/(rec[A-Za-z0-9]+)$/.exec(url.pathname);
   if (!match) throw new HttpError(400, "Invalid idea-generation batch path");
   return match[1];
 }
-
+/*__STUDIO_WORKER_END:studioIdeaBatchRecordIdFromPath__*/
 
 export function studioIdeaBatchView(record) {
   const requested = Math.max(0, Number(f(record, "Requested_Count")) || 0);
@@ -5645,7 +5645,7 @@ export function studioIdeaBatchView(record) {
     error: f(record, "Error") || null,
   };
 }
-
+/*__STUDIO_WORKER_END:studioIdeaBatchView__*/
 
 export async function studioIdeaManualBatchStillRunning(env, batchId) {
   const batch = await airtableFetch(env, STUDIO_IDEA_BATCH_TABLE_ID, batchId).catch(() => null);
@@ -5658,7 +5658,7 @@ export async function studioIdeaManualBatchStillRunning(env, batchId) {
   // batch should block Generate.
   return ageMs <= 20 * 60 * 1000;
 }
-
+/*__STUDIO_WORKER_END:studioIdeaManualBatchStillRunning__*/
 
 export async function studioIdeaEnabledProfile(env, authorization, profileId) {
   let profile = await resolveWorkingContentProfile(env, authorization, profileId);
@@ -5682,7 +5682,7 @@ export async function studioIdeaEnabledProfile(env, authorization, profileId) {
   profile = await airtableFetch(env, STUDIO_IDEA_PROFILE_TABLE_ID, profile.id);
   return profile;
 }
-
+/*__STUDIO_WORKER_END:studioIdeaEnabledProfile__*/
 
 export async function studioIdeaCreateBatch(env, profile, count, quality, authorization) {
   const stamp = new Date().toISOString();
@@ -5708,7 +5708,7 @@ export async function studioIdeaCreateBatch(env, profile, count, quality, author
   if (!record?.id) throw new HttpError(502, "Studio could not create the idea-generation batch");
   return record;
 }
-
+/*__STUDIO_WORKER_END:studioIdeaCreateBatch__*/
 
 export async function studioIdeaUpdateBatch(env, recordId, fields) {
   return airtableFetch(env, STUDIO_IDEA_BATCH_TABLE_ID, recordId, {
@@ -5716,7 +5716,7 @@ export async function studioIdeaUpdateBatch(env, recordId, fields) {
     body: JSON.stringify({ fields, typecast: true }),
   });
 }
-
+/*__STUDIO_WORKER_END:studioIdeaUpdateBatch__*/
 
 export async function studioIdeaSetProfileOverrides(env, profileId, batchRecordId, count, quality) {
   return airtableFetch(env, STUDIO_IDEA_PROFILE_TABLE_ID, profileId, {
@@ -5731,7 +5731,7 @@ export async function studioIdeaSetProfileOverrides(env, profileId, batchRecordI
     }),
   });
 }
-
+/*__STUDIO_WORKER_END:studioIdeaSetProfileOverrides__*/
 
 export async function studioIdeaClearProfileOverrides(env, profileId) {
   return airtableFetch(env, STUDIO_IDEA_PROFILE_TABLE_ID, profileId, {
@@ -5746,7 +5746,7 @@ export async function studioIdeaClearProfileOverrides(env, profileId) {
     }),
   });
 }
-
+/*__STUDIO_WORKER_END:studioIdeaClearProfileOverrides__*/
 
 export function studioIdeaUnwrapBlueprint(body) {
   const value = body?.blueprint ?? body?.response?.blueprint ?? body;
@@ -5755,7 +5755,7 @@ export function studioIdeaUnwrapBlueprint(body) {
   }
   return value && typeof value === "object" ? value : null;
 }
-
+/*__STUDIO_WORKER_END:studioIdeaUnwrapBlueprint__*/
 
 export async function studioIdeaReadI1Blueprint(env) {
   const body = await phase6MakeApiJson(env, `/scenarios/${STUDIO_IDEA_I1_SCENARIO_ID}/blueprint?draft=false`, { method: "GET" });
@@ -5763,7 +5763,7 @@ export async function studioIdeaReadI1Blueprint(env) {
   if (!blueprint?.flow) throw new HttpError(502, "I1 did not return a usable live blueprint");
   return blueprint;
 }
-
+/*__STUDIO_WORKER_END:studioIdeaReadI1Blueprint__*/
 
 export async function studioIdeaWriteI1Blueprint(env, blueprint) {
   await phase6MakeApiJson(env, `/scenarios/${STUDIO_IDEA_I1_SCENARIO_ID}?confirmed=true`, {
@@ -5771,7 +5771,7 @@ export async function studioIdeaWriteI1Blueprint(env, blueprint) {
     body: JSON.stringify({ blueprint: JSON.stringify(blueprint) }),
   });
 }
-
+/*__STUDIO_WORKER_END:studioIdeaWriteI1Blueprint__*/
 
 export async function studioIdeaInstallExactProfileSelector(env, profileId) {
   const original = await studioIdeaReadI1Blueprint(env);
@@ -5798,7 +5798,7 @@ export async function studioIdeaInstallExactProfileSelector(env, profileId) {
   }
   return original;
 }
-
+/*__STUDIO_WORKER_END:studioIdeaInstallExactProfileSelector__*/
 
 export async function studioIdeaExecuteBatch(env, profile, batchRecord) {
   let originalBlueprint = null;
@@ -5879,7 +5879,7 @@ export async function studioIdeaExecuteBatch(env, profile, batchRecord) {
     try { await studioIdeaClearProfileOverrides(env, profile.id); } catch (error) { console.error("Could not clear manual idea overrides", error); }
   }
 }
-
+/*__STUDIO_WORKER_END:studioIdeaExecuteBatch__*/
 
 export async function studioIdeaStartPhotoListening(env, authorization, createdIds) {
   const photoListening = [];
@@ -5922,7 +5922,7 @@ export async function studioIdeaStartPhotoListening(env, authorization, createdI
   }
   return photoListening;
 }
-
+/*__STUDIO_WORKER_END:studioIdeaStartPhotoListening__*/
 
 export async function studioIdeaRunPythonBatch(env, authorization, profile, batch, count, quality) {
   await studioIdeaUpdateBatch(env, batch.id, {
@@ -5980,7 +5980,7 @@ export async function studioIdeaRunPythonBatch(env, authorization, profile, batc
   });
   return { created, createdIds, photoListening };
 }
-
+/*__STUDIO_WORKER_END:studioIdeaRunPythonBatch__*/
 
 export async function startStudioIdeaGeneration(request, env, authorization, ctx = null) {
   let payload;
@@ -6058,7 +6058,7 @@ export async function startStudioIdeaGeneration(request, env, authorization, ctx
     message: `${created} idea${created === 1 ? "" : "s"} created. Ideas are listening for photos automatically.`,
   }, 200);
 }
-
+/*__STUDIO_WORKER_END:startStudioIdeaGeneration__*/
 
 export async function studioIdeaGenerationStatus(request, env, url) {
   const recordId = studioIdeaBatchRecordIdFromPath(url);
@@ -6085,7 +6085,7 @@ export async function studioIdeaGenerationStatus(request, env, url) {
     view = studioIdeaBatchView(record);
   }
   return respond(request, env, { ok: true, batch: view });
-}
+}/*__STUDIO_WORKER_END:studioIdeaGenerationStatus__*/
 
 export function chicagoNowParts() {
   const parts = new Intl.DateTimeFormat("en-US", {
@@ -6106,7 +6106,7 @@ export function chicagoNowParts() {
     minute: minuteRaw === "" ? null : Number(minuteRaw),
   };
 }
-
+/*__STUDIO_WORKER_END:chicagoNowParts__*/
 
 export function mapOperationsOutput(record) {
   return {
@@ -6114,7 +6114,7 @@ export function mapOperationsOutput(record) {
     output_notes: f(record, "Output_Notes") || "",
   };
 }
-
+/*__STUDIO_WORKER_END:mapOperationsOutput__*/
 
 export function linkedRecordIds(value) {
   return arrayOrEmpty(value)
@@ -6122,7 +6122,7 @@ export function linkedRecordIds(value) {
     .map((id) => String(id || "").trim())
     .filter((id) => /^rec[a-zA-Z0-9]{14}$/.test(id));
 }
-
+/*__STUDIO_WORKER_END:linkedRecordIds__*/
 
 export function mapOperationsProfile(record) {
   const limit = Number(f(record, "Daily_Idea_Limit"));
@@ -6142,7 +6142,7 @@ export function mapOperationsProfile(record) {
     autonomous_music_asset_ids: linkedRecordIds(f(record, "Autonomous_Music_Pool")),
   };
 }
-
+/*__STUDIO_WORKER_END:mapOperationsProfile__*/
 
 export async function studioSettingsByName(env, name) {
   const rows = await listRecords(env, STUDIO_PIPELINE_SETTINGS_TABLE_ID, {
@@ -6151,7 +6151,7 @@ export async function studioSettingsByName(env, name) {
   });
   return rows[0] || null;
 }
-
+/*__STUDIO_WORKER_END:studioSettingsByName__*/
 
 export async function studioUpsertSetting(env, name, value, notes) {
   const existing = await studioSettingsByName(env, name);
@@ -6173,7 +6173,7 @@ export async function studioUpsertSetting(env, name, value, notes) {
   });
   return created?.records?.[0] || null;
 }
-
+/*__STUDIO_WORKER_END:studioUpsertSetting__*/
 
 export async function probeDeskHealthTarget(target) {
   if (target?.public === false) {
@@ -6199,7 +6199,7 @@ export async function probeDeskHealthTarget(target) {
     };
   }
 }
-
+/*__STUDIO_WORKER_END:probeDeskHealthTarget__*/
 
 export function deskContentRecIdsFromRecords(records = []) {
   const ids = [];
@@ -6211,7 +6211,7 @@ export function deskContentRecIdsFromRecords(records = []) {
   }
   return ids;
 }
-
+/*__STUDIO_WORKER_END:deskContentRecIdsFromRecords__*/
 
 export async function loadDeskContentById(env, recIds) {
   const unique = [...new Set((recIds || []).map((id) => String(id || "").trim()).filter((id) => /^rec[A-Za-z0-9]+$/.test(id)))];
@@ -6228,7 +6228,7 @@ export async function loadDeskContentById(env, recIds) {
   }));
   return map;
 }
-
+/*__STUDIO_WORKER_END:loadDeskContentById__*/
 
 export function deskRequestWorkIdentity(record, contentById = new Map()) {
   const contentItemId = studioFirstLinkedId(f(record, "Promoted_Content_Item"));
@@ -6239,7 +6239,7 @@ export function deskRequestWorkIdentity(record, contentById = new Map()) {
     content_title: content.content_title || String(f(record, "Requested_Title") || "").trim() || null,
   });
 }
-
+/*__STUDIO_WORKER_END:deskRequestWorkIdentity__*/
 
 export function deskEventRecordId(event) {
   const body = event?.payload && typeof event.payload === "object" ? event.payload : {};
@@ -6249,7 +6249,7 @@ export function deskEventRecordId(event) {
   const rec = fingerprint.split(":")[1] || "";
   return /^rec[A-Za-z0-9]+$/.test(rec) ? rec : "";
 }
-
+/*__STUDIO_WORKER_END:deskEventRecordId__*/
 
 export async function enrichDeskActivityIdentity(env, events, identityByRecord, contentById) {
   const rows = Array.isArray(events) ? events : [];
@@ -6300,7 +6300,7 @@ export async function enrichDeskActivityIdentity(env, events, identityByRecord, 
     return { ...event, payload: { ...ident, ...body } };
   });
 }
-
+/*__STUDIO_WORKER_END:enrichDeskActivityIdentity__*/
 
 export function mapDeskInventoryOutput(record, contentToRequest = new Map(), contentById = new Map()) {
   const note = String(f(record, "Studio_Publish_Dispatch_Note") || "");
@@ -6362,14 +6362,14 @@ export function mapDeskInventoryOutput(record, contentToRequest = new Map(), con
     remotion_props_json: f(record, "Remotion_Props_JSON"),
   };
 }
-
+/*__STUDIO_WORKER_END:mapDeskInventoryOutput__*/
 
 export function deskOutputsForRequest(outputs, requestId) {
   const id = String(requestId || "").trim();
   if (!id) return [];
   return (outputs || []).filter((row) => String(row.request_id || "").trim() === id);
 }
-
+/*__STUDIO_WORKER_END:deskOutputsForRequest__*/
 
 export async function gatherStudioDeskInventory(env) {
   const chicago = chicagoNowParts();
@@ -6847,19 +6847,19 @@ export async function gatherStudioDeskInventory(env) {
     activityEvents,
   });
 }
-
+/*__STUDIO_WORKER_END:gatherStudioDeskInventory__*/
 
 export async function getStudioDeskInventory(request, env) {
   const payload = await gatherStudioDeskInventory(env);
   return respond(request, env, payload);
 }
-
+/*__STUDIO_WORKER_END:getStudioDeskInventory__*/
 
 export function isStudioTestActivityEvent(row) {
   const type = String(row?.type || "").trim();
   return type === "test_result" || type === "github_actions" || type === "regression";
 }
-
+/*__STUDIO_WORKER_END:isStudioTestActivityEvent__*/
 
 export function sortStudioActivityEvents(rows) {
   return [...rows].sort((left, right) => {
@@ -6868,7 +6868,7 @@ export function sortStudioActivityEvents(rows) {
     return Date.parse(right?.created_at || 0) - Date.parse(left?.created_at || 0);
   });
 }
-
+/*__STUDIO_WORKER_END:sortStudioActivityEvents__*/
 
 export async function fetchTaskActivityEvents(endpoint, type, limit = 40) {
   const sep = endpoint.includes("?") ? "&" : "?";
@@ -6882,7 +6882,7 @@ export async function fetchTaskActivityEvents(endpoint, type, limit = 40) {
   const events = Array.isArray(body.events) ? body.events : Array.isArray(body) ? body : [];
   return { ok: true, events };
 }
-
+/*__STUDIO_WORKER_END:fetchTaskActivityEvents__*/
 
 export async function getStudioDeskActivity(request, env) {
   const endpoint = String(env.TASKS_ACTIVITY_URL || "https://tasks.chicagoshining.com/agent-activity/log-event").replace(/\/$/, "");
@@ -6927,7 +6927,7 @@ export async function getStudioDeskActivity(request, env) {
     });
   }
 }
-
+/*__STUDIO_WORKER_END:getStudioDeskActivity__*/
 
 export async function studioAiApiRunnerStatus(env) {
   const runnerUrl = String(env.PIPELINE_RUNNER_URL || "").trim().replace(/\/+$/, "");
@@ -6948,7 +6948,7 @@ export async function studioAiApiRunnerStatus(env) {
     return null;
   }
 }
-
+/*__STUDIO_WORKER_END:studioAiApiRunnerStatus__*/
 
 export async function getStudioAiApiStatus(request, env) {
   // Parallel + soft-soft: Airtable settings must never blank the footer under 429 cooldown.
@@ -6988,7 +6988,7 @@ export async function getStudioAiApiStatus(request, env) {
     settings_cached: !row,
   });
 }
-
+/*__STUDIO_WORKER_END:getStudioAiApiStatus__*/
 
 export async function patchStudioAiApiPreference(request, env) {
   let payload;
@@ -7010,7 +7010,7 @@ export async function patchStudioAiApiPreference(request, env) {
     failover_provider: provider === "OpenAI" ? "Azure" : "OpenAI",
   });
 }
-
+/*__STUDIO_WORKER_END:patchStudioAiApiPreference__*/
 
 export async function patchStudioDeskMode(request, env) {
   let payload;
@@ -7024,7 +7024,7 @@ export async function patchStudioDeskMode(request, env) {
   const inventory = await gatherStudioDeskInventory(env);
   return respond(request, env, { ok: true, ...inventory });
 }
-
+/*__STUDIO_WORKER_END:patchStudioDeskMode__*/
 
 export async function patchLibraryCrossScope(request, env) {
   let payload;
@@ -7047,7 +7047,7 @@ export async function patchLibraryCrossScope(request, env) {
     setting: LIBRARY_CROSS_SCOPE_SETTING,
   });
 }
-
+/*__STUDIO_WORKER_END:patchLibraryCrossScope__*/
 
 export function parseA1JobValue(value) {
   const parts = String(value || "").split("|");
@@ -7070,7 +7070,7 @@ export function parseA1JobValue(value) {
     job_id: String(parts[1] || "").trim(),
   };
 }
-
+/*__STUDIO_WORKER_END:parseA1JobValue__*/
 
 export function compressionPhaseLabel(phase) {
   const normalized = String(phase || "").trim().toLowerCase();
@@ -7081,7 +7081,7 @@ export function compressionPhaseLabel(phase) {
   if (normalized === "finished") return "Finished";
   return "Compressing";
 }
-
+/*__STUDIO_WORKER_END:compressionPhaseLabel__*/
 
 export function compressionPhaseTone(phase) {
   const normalized = String(phase || "").trim().toLowerCase();
@@ -7090,7 +7090,7 @@ export function compressionPhaseTone(phase) {
   if (normalized === "finished") return "ok";
   return "compressing";
 }
-
+/*__STUDIO_WORKER_END:compressionPhaseTone__*/
 
 export function parseProgressPercent(notes, livePercent) {
   const live = Number(livePercent);
@@ -7099,7 +7099,7 @@ export function parseProgressPercent(notes, livePercent) {
   if (!match) return null;
   return Math.max(0, Math.min(100, Number(match[1])));
 }
-
+/*__STUDIO_WORKER_END:parseProgressPercent__*/
 
 export function mapA1CompressionJob(record) {
   const settingName = String(f(record, "Setting_Name") || "").trim();
@@ -7125,7 +7125,7 @@ export function mapA1CompressionJob(record) {
     updated_at: parsed.updated_at || f(record, "Last_Modified") || null,
   };
 }
-
+/*__STUDIO_WORKER_END:mapA1CompressionJob__*/
 
 export async function enrichCompressionJobsLive(env, jobs) {
   if (!jobs.length) return jobs;
@@ -7159,7 +7159,7 @@ export async function enrichCompressionJobsLive(env, jobs) {
     return jobs;
   }
 }
-
+/*__STUDIO_WORKER_END:enrichCompressionJobsLive__*/
 
 export async function listActiveA1CompressionJobs(env) {
   const records = await listRecords(env, STUDIO_PIPELINE_SETTINGS_TABLE_ID, {
@@ -7168,7 +7168,7 @@ export async function listActiveA1CompressionJobs(env) {
   });
   return enrichCompressionJobsLive(env, records.map(mapA1CompressionJob).filter(Boolean));
 }
-
+/*__STUDIO_WORKER_END:listActiveA1CompressionJobs__*/
 
 export async function getStudioCompressionStatus(request, env) {
   const [jobs, oversized] = await Promise.all([
@@ -7183,7 +7183,7 @@ export async function getStudioCompressionStatus(request, env) {
     headline: jobs[0]?.headline || null,
   });
 }
-
+/*__STUDIO_WORKER_END:getStudioCompressionStatus__*/
 
 export function mapOversizedIntakeDriveFile(row) {
   const fileId = String(row?.id || "").trim();
@@ -7202,7 +7202,7 @@ export function mapOversizedIntakeDriveFile(row) {
     source: "intake_folder",
   };
 }
-
+/*__STUDIO_WORKER_END:mapOversizedIntakeDriveFile__*/
 
 export async function listOversizedIntakeVideos(env) {
   const backend = pipelineStageBackend(env, "A1S");
@@ -7218,7 +7218,7 @@ export async function listOversizedIntakeVideos(env) {
     return [];
   }
 }
-
+/*__STUDIO_WORKER_END:listOversizedIntakeVideos__*/
 
 export async function listOversizedMediaFromAirtable(env) {
   const records = await listRecords(env, env.AIRTABLE_MEDIA_TABLE_ID, {
@@ -7235,7 +7235,7 @@ export async function listOversizedMediaFromAirtable(env) {
     source: "airtable",
   })).filter((row) => row.google_drive_file_id);
 }
-
+/*__STUDIO_WORKER_END:listOversizedMediaFromAirtable__*/
 
 export async function listOversizedMedia(env) {
   const [airtableRows, intakeRows] = await Promise.all([
@@ -7251,12 +7251,12 @@ export async function listOversizedMedia(env) {
   }
   return [...byDriveId.values()].sort((a, b) => (Number(b.file_size_mb) || 0) - (Number(a.file_size_mb) || 0));
 }
-
+/*__STUDIO_WORKER_END:listOversizedMedia__*/
 
 export function firstOpsLinkedId(value) {
   return firstLinkedRecordId(value) || studioFirstLinkedId(value) || "";
 }
-
+/*__STUDIO_WORKER_END:firstOpsLinkedId__*/
 
 export function mapOpsQueueProfileName(profileMap, linked) {
   const id = firstOpsLinkedId(linked);
@@ -7267,7 +7267,7 @@ export function mapOpsQueueProfileName(profileMap, linked) {
     profile_name: profile ? String(f(profile, "Profile_Name") || "") : "",
   };
 }
-
+/*__STUDIO_WORKER_END:mapOpsQueueProfileName__*/
 
 export async function getStudioOperationsQueue(request, env, authorization) {
   const controls = await readOpsQueueControls(env);
@@ -7572,7 +7572,7 @@ export async function getStudioOperationsQueue(request, env, authorization) {
       : null,
   });
 }
-
+/*__STUDIO_WORKER_END:getStudioOperationsQueue__*/
 
 export async function getFactoryDesk(request, env, authorization) {
   const [queueResponse, deskControls, ideaCandidates] = await Promise.all([
@@ -7604,7 +7604,7 @@ export async function getFactoryDesk(request, env, authorization) {
     warning: warningBits.length ? warningBits.join(" · ") : null,
   });
 }
-
+/*__STUDIO_WORKER_END:getFactoryDesk__*/
 
 export async function factoryDeskRefreshPayload(request, env, authorization, controls, action, extra = {}) {
   const queueResponse = await getStudioOperationsQueue(request, env, authorization);
@@ -7624,7 +7624,7 @@ export async function factoryDeskRefreshPayload(request, env, authorization, con
     ...extra,
   });
 }
-
+/*__STUDIO_WORKER_END:factoryDeskRefreshPayload__*/
 
 export async function factoryApproveOutput(env, id, actor, note, ctx = null) {
   const existing = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, id);
@@ -7668,7 +7668,7 @@ export async function factoryApproveOutput(env, id, actor, note, ctx = null) {
       : "Approved for publishing. Studio is starting the publisher.",
   };
 }
-
+/*__STUDIO_WORKER_END:factoryApproveOutput__*/
 
 export function factoryFeedbackBlock(note, { actor = "operator", stamp = "", scope = "content" } = {}) {
   const instruction = String(note || "").trim();
@@ -7678,7 +7678,7 @@ export function factoryFeedbackBlock(note, { actor = "operator", stamp = "", sco
   const safeInstruction = instruction.replace(/\[\/factory-review-feedback\]/gi, "[end review feedback]");
   return `[factory-review-feedback at=${stamp || new Date().toISOString()} scope=${safeScope} actor=${safeActor}]\n${safeInstruction}\n[/factory-review-feedback]`;
 }
-
+/*__STUDIO_WORKER_END:factoryFeedbackBlock__*/
 
 export function factoryAppendFeedback(existing, note, metadata = {}) {
   const clean = stripFactoryRevisionNote(existing);
@@ -7688,7 +7688,7 @@ export function factoryAppendFeedback(existing, note, metadata = {}) {
   if (merged.length > 9750) throw new HttpError(409, "Production notes are full. Shorten existing notes before adding another review.");
   return merged;
 }
-
+/*__STUDIO_WORKER_END:factoryAppendFeedback__*/
 
 export function factoryLatestReviewFeedback(notes) {
   const source = String(notes || "");
@@ -7699,7 +7699,7 @@ export function factoryLatestReviewFeedback(notes) {
   }
   return latest;
 }
-
+/*__STUDIO_WORKER_END:factoryLatestReviewFeedback__*/
 
 export async function factorySendBackOutput(env, id, actor, note, requestedProductionId = null) {
   const existing = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, id);
@@ -7770,7 +7770,7 @@ export async function factorySendBackOutput(env, id, actor, note, requestedProdu
     message: "Sent back to Production with review feedback. Change the request, then approve to rerender.",
   };
 }
-
+/*__STUDIO_WORKER_END:factorySendBackOutput__*/
 
 export async function factorySendBackContent(env, productionRequestId, outputIds, actor, note) {
   const requestId = String(productionRequestId || "").trim();
@@ -7871,7 +7871,7 @@ export async function factorySendBackContent(env, productionRequestId, outputIds
     message: `Sent the full content package (${patches.length} output${patches.length === 1 ? "" : "s"}) back to Production. Make changes and Approve to rerender.`,
   };
 }
-
+/*__STUDIO_WORKER_END:factorySendBackContent__*/
 
 export async function factoryDeleteDeskItem(env, id, kind, actor, note) {
   const stamp = new Date().toISOString();
@@ -7908,7 +7908,7 @@ export async function factoryDeleteDeskItem(env, id, kind, actor, note) {
   });
   return { id, kind: "output", message: "Output marked Skipped (removed from Factory queues)." };
 }
-
+/*__STUDIO_WORKER_END:factoryDeleteDeskItem__*/
 
 export async function mutateFactoryDesk(request, env, authorization, ctx = null) {
   let payload;
@@ -7978,7 +7978,7 @@ export async function mutateFactoryDesk(request, env, authorization, ctx = null)
     message: resultExtra.message || null,
   });
 }
-
+/*__STUDIO_WORKER_END:mutateFactoryDesk__*/
 
 export async function pauseStudioOperationsQueueItem(request, env, authorization) {
   let payload;
@@ -8034,7 +8034,7 @@ export async function pauseStudioOperationsQueueItem(request, env, authorization
   const saved = await writeOpsQueueControls(env, next, actor);
   return respond(request, env, { ok: true, controls: saved, kind, id, paused });
 }
-
+/*__STUDIO_WORKER_END:pauseStudioOperationsQueueItem__*/
 
 export async function reorderStudioOperationsRenderQueue(request, env, authorization) {
   let payload;
@@ -8085,14 +8085,14 @@ export async function reorderStudioOperationsRenderQueue(request, env, authoriza
     queue: [...byId.entries()].map(([id, meta]) => ({ id, ...meta })),
   });
 }
-
+/*__STUDIO_WORKER_END:reorderStudioOperationsRenderQueue__*/
 
 export function stampPrepareToReviewNotes(existing) {
   const text = String(existing || "").trim();
   if (/origin=(prepare-to-review|autonomous|az-finished-video)/i.test(text)) return text || "origin=prepare-to-review";
   return [text, "origin=prepare-to-review"].filter(Boolean).join("\n").slice(0, 3000);
 }
-
+/*__STUDIO_WORKER_END:stampPrepareToReviewNotes__*/
 
 export async function prepareIdeaToReview(request, env, url, authorization, ctx = null) {
   const match = /^\/api\/ideas\/(rec[A-Za-z0-9]+)\/prepare-to-review$/.exec(url.pathname);
@@ -8210,7 +8210,7 @@ export async function prepareIdeaToReview(request, env, url, authorization, ctx 
     gate: "ready_for_review",
   });
 }
-
+/*__STUDIO_WORKER_END:prepareIdeaToReview__*/
 
 export async function getStudioOperations(request, env, authorization) {
   const chicago = chicagoNowParts();
@@ -8252,7 +8252,7 @@ export async function getStudioOperations(request, env, authorization) {
     library_include_cross_scope: libraryCrossScopeEnabled(f(libraryCrossScopeRow, "Setting_Value")),
   });
 }
-
+/*__STUDIO_WORKER_END:getStudioOperations__*/
 
 export async function getStudioOperationsProfiles(request, env, authorization) {
   const profiles = await listRecords(env, STUDIO_IDEA_PROFILE_TABLE_ID, { limit: 50 });
@@ -8263,7 +8263,7 @@ export async function getStudioOperationsProfiles(request, env, authorization) {
     profiles: (profiles || []).map(mapOperationsProfile),
   });
 }
-
+/*__STUDIO_WORKER_END:getStudioOperationsProfiles__*/
 
 export async function patchStudioOperationsProfile(request, env, url, authorization) {
   const match = /^\/api\/operations\/profiles\/(rec[A-Za-z0-9]+)$/.exec(url.pathname);
@@ -8320,7 +8320,7 @@ export async function patchStudioOperationsProfile(request, env, url, authorizat
   env.__contentProfilesPromise = null;
   return respond(request, env, { ok: true, profile: mapOperationsProfile(updated) });
 }
-
+/*__STUDIO_WORKER_END:patchStudioOperationsProfile__*/
 
 export function studioInternalJsonRequest(pathname, body) {
   const url = new URL(`https://studio.chicagoshining.com${pathname}`);
@@ -8333,7 +8333,7 @@ export function studioInternalJsonRequest(pathname, body) {
     }),
   };
 }
-
+/*__STUDIO_WORKER_END:studioInternalJsonRequest__*/
 
 export async function studioSaveAutonomousLastRun(env, payload) {
   const previous = await studioLoadAutonomousLastRun(env).catch(() => ({}));
@@ -8350,13 +8350,13 @@ export async function studioSaveAutonomousLastRun(env, payload) {
   );
   return stored;
 }
-
+/*__STUDIO_WORKER_END:studioSaveAutonomousLastRun__*/
 
 export async function studioLoadAutonomousLastRun(env) {
   const row = await studioSettingsByName(env, STUDIO_AUTONOMOUS_LAST_SETTING);
   return parseAutonomousLastRun(f(row, "Setting_Value"));
 }
-
+/*__STUDIO_WORKER_END:studioLoadAutonomousLastRun__*/
 
 export async function studioLoadAutonomousRefillScores(env, profiles, { refresh = false } = {}) {
   const enabled = (Array.isArray(profiles) ? profiles : []).filter((row) => row?.id);
@@ -8390,7 +8390,7 @@ export async function studioLoadAutonomousRefillScores(env, profiles, { refresh 
     target: AUTONOMOUS_SCHEDULED_TARGET,
   };
 }
-
+/*__STUDIO_WORKER_END:studioLoadAutonomousRefillScores__*/
 
 export async function harvestAutonomousNewsHeadlines() {
   const titles = [];
@@ -8405,7 +8405,7 @@ export async function harvestAutonomousNewsHeadlines() {
   }
   return [...new Set(titles)].slice(0, 8).map((title) => ({ source: "news", title }));
 }
-
+/*__STUDIO_WORKER_END:harvestAutonomousNewsHeadlines__*/
 
 export async function harvestAutonomousYoutube(env, options = {}) {
   const queries = autonomousYoutubeQueriesForTheme(options.theme);
@@ -8457,7 +8457,7 @@ export async function harvestAutonomousYoutube(env, options = {}) {
     return [];
   }
 }
-
+/*__STUDIO_WORKER_END:harvestAutonomousYoutube__*/
 
 export async function harvestAutonomousLibraryCatalog(env, subject = "", profileId = "") {
   const pin = autonomousPreferredSubject(subject);
@@ -8507,7 +8507,7 @@ export async function harvestAutonomousLibraryCatalog(env, subject = "", profile
   }
   return rows;
 }
-
+/*__STUDIO_WORKER_END:harvestAutonomousLibraryCatalog__*/
 
 export async function harvestAutonomousRecentTitles(env) {
   const rows = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
@@ -8521,7 +8521,7 @@ export async function harvestAutonomousRecentTitles(env) {
     .filter(Boolean)
     .slice(0, 8);
 }
-
+/*__STUDIO_WORKER_END:harvestAutonomousRecentTitles__*/
 
 export async function harvestAutonomousOccupiedTopics(env, profileId = "") {
   const ideaQuery = {
@@ -8550,7 +8550,7 @@ export async function harvestAutonomousOccupiedTopics(env, profileId = "") {
     published.map((title) => ({ source: "recent", title, location: "", media_asset_ids: [] })),
   ]), profileId);
 }
-
+/*__STUDIO_WORKER_END:harvestAutonomousOccupiedTopics__*/
 
 export async function studioAutonomousOpenAiPick(env, prompt) {
   const runnerUrl = String(env.PIPELINE_RUNNER_URL || "").trim().replace(/\/+$/, "");
@@ -8574,7 +8574,7 @@ export async function studioAutonomousOpenAiPick(env, prompt) {
   const parsed = payload?.parsed && typeof payload.parsed === "object" ? payload.parsed : payload;
   return parseAutonomousPick(parsed);
 }
-
+/*__STUDIO_WORKER_END:studioAutonomousOpenAiPick__*/
 
 export async function createAutonomousIdea(env, profile, pick) {
   const fields = {
@@ -8606,7 +8606,7 @@ export async function createAutonomousIdea(env, profile, pick) {
     body: JSON.stringify({ fields, typecast: true }),
   });
 }
-
+/*__STUDIO_WORKER_END:createAutonomousIdea__*/
 
 export function autonomousPlanVariantsReady(record, reconciled = null) {
   const current = reconciled?.record || record;
@@ -8616,7 +8616,7 @@ export function autonomousPlanVariantsReady(record, reconciled = null) {
   const plan = item4ParseJson(f(current, "Studio_Output_Plan_JSON"), null);
   return item4VariantManifestPlanComplete(manifest, plan, item4AssetManifest(current));
 }
-
+/*__STUDIO_WORKER_END:autonomousPlanVariantsReady__*/
 
 export async function waitAutonomousVariantsReady(env, recordId, ctx, maxMs = 80000) {
   const deadline = Date.now() + maxMs;
@@ -8640,7 +8640,7 @@ export async function waitAutonomousVariantsReady(env, recordId, ctx, maxMs = 80
   }
   return record;
 }
-
+/*__STUDIO_WORKER_END:waitAutonomousVariantsReady__*/
 
 export async function finishAutonomousProductionRequest(env, authorization, ctx, idea, requestRecord, pick, options = {}) {
   const requestId = requestRecord.id;
@@ -8767,7 +8767,7 @@ export async function finishAutonomousProductionRequest(env, authorization, ctx,
 
   return continueAfterPlan();
 }
-
+/*__STUDIO_WORKER_END:finishAutonomousProductionRequest__*/
 
 export function ideaMatchedMediaIds(idea) {
   const raw = f(idea, "Studio_Matched_Media_Assets");
@@ -8776,7 +8776,7 @@ export function ideaMatchedMediaIds(idea) {
     .map((row) => String(row || "").trim())
     .filter((id) => /^rec[A-Za-z0-9]+$/.test(id));
 }
-
+/*__STUDIO_WORKER_END:ideaMatchedMediaIds__*/
 
 export async function ensureAutonomousSelectedMusic(env, requestRecord, profileRecord = null) {
   if (!requestRecord?.id) return requestRecord;
@@ -8801,7 +8801,7 @@ export async function ensureAutonomousSelectedMusic(env, requestRecord, profileR
     body: JSON.stringify({ fields, typecast: true }),
   });
 }
-
+/*__STUDIO_WORKER_END:ensureAutonomousSelectedMusic__*/
 
 export async function stampPhotoReadyIdeaForAutonomousProduce(env, idea, requestRecord) {
   if (!idea?.id || !requestRecord?.id) return requestRecord;
@@ -8828,7 +8828,7 @@ export async function stampPhotoReadyIdeaForAutonomousProduce(env, idea, request
     body: JSON.stringify({ fields, typecast: true }),
   });
 }
-
+/*__STUDIO_WORKER_END:stampPhotoReadyIdeaForAutonomousProduce__*/
 
 export async function adoptNextReadyDailyIdea(env, authorization, { limit = 8 } = {}) {
   const profiles = (await listRecords(env, STUDIO_IDEA_PROFILE_TABLE_ID, {
@@ -8919,7 +8919,7 @@ export async function adoptNextReadyDailyIdea(env, authorization, { limit = 8 } 
   }
   return adopted;
 }
-
+/*__STUDIO_WORKER_END:adoptNextReadyDailyIdea__*/
 
 export async function listAutonomousDraftRequests(env) {
   return listRecords(env, PRODUCTION_REQUEST_TABLE, {
@@ -8931,7 +8931,7 @@ export async function listAutonomousDraftRequests(env) {
     sortDirection: "asc",
   });
 }
-
+/*__STUDIO_WORKER_END:listAutonomousDraftRequests__*/
 
 export async function annotateAutonomousResumeDrafts(env, drafts) {
   const profiles = (await listRecords(env, STUDIO_IDEA_PROFILE_TABLE_ID, {
@@ -9013,14 +9013,14 @@ export async function annotateAutonomousResumeDrafts(env, drafts) {
   }
   return { annotated, enabledIds: [...enabled], nowMs };
 }
-
+/*__STUDIO_WORKER_END:annotateAutonomousResumeDrafts__*/
 
 export async function selectAutonomousResumeDraft(env, drafts) {
   const { annotated, enabledIds, nowMs } = await annotateAutonomousResumeDrafts(env, drafts);
   const chosen = firstAutonomousResumeDraft(annotated, enabledIds, nowMs);
   return chosen?.requestRecord || null;
 }
-
+/*__STUDIO_WORKER_END:selectAutonomousResumeDraft__*/
 
 export async function selectAutonomousResumeDraftBatch(env, drafts, { limit = AUTONOMOUS_HOUR_ASSET_DRAIN } = {}) {
   const { annotated, enabledIds, nowMs } = await annotateAutonomousResumeDrafts(env, drafts);
@@ -9028,7 +9028,7 @@ export async function selectAutonomousResumeDraftBatch(env, drafts, { limit = AU
     .map((row) => row?.requestRecord)
     .filter(Boolean);
 }
-
+/*__STUDIO_WORKER_END:selectAutonomousResumeDraftBatch__*/
 
 export async function alignAutonomousDraftContentType(env, requestRecord, contentType) {
   const current = String(f(requestRecord, "Master_Content_Type") || "").trim();
@@ -9038,7 +9038,7 @@ export async function alignAutonomousDraftContentType(env, requestRecord, conten
     body: JSON.stringify({ fields: { Master_Content_Type: contentType }, typecast: true }),
   });
 }
-
+/*__STUDIO_WORKER_END:alignAutonomousDraftContentType__*/
 
 export async function resumeAutonomousDrafts(env, authorization, ctx, drafts, chicago, slot, options = {}) {
   const drainLimit = Math.max(
@@ -9186,7 +9186,7 @@ export async function resumeAutonomousDrafts(env, authorization, ctx, drafts, ch
     resumed: results,
   };
 }
-
+/*__STUDIO_WORKER_END:resumeAutonomousDrafts__*/
 
 export async function studioHealAutonomousRevisionLock(env) {
   const last = await studioLoadAutonomousLastRun(env);
@@ -9201,7 +9201,7 @@ export async function studioHealAutonomousRevisionLock(env) {
   });
   return { healed: 1, fingerprint: finding.fingerprint, record_id: requestId };
 }
-
+/*__STUDIO_WORKER_END:studioHealAutonomousRevisionLock__*/
 
 export async function releaseAutonomousRevisionLock(env, chicago, { productionRequestId = null, ideaId = null } = {}) {
   return studioSaveAutonomousLastRun(env, autonomousRevisionLockReset({
@@ -9210,7 +9210,7 @@ export async function releaseAutonomousRevisionLock(env, chicago, { productionRe
     ideaId,
   }));
 }
-
+/*__STUDIO_WORKER_END:releaseAutonomousRevisionLock__*/
 
 export async function parkAutonomousResumeDraft(env, requestRecord, reason) {
   if (!requestRecord?.id) return;
@@ -9228,7 +9228,7 @@ export async function parkAutonomousResumeDraft(env, requestRecord, reason) {
     console.warn("autonomous park draft failed", requestRecord.id, error);
   }
 }
-
+/*__STUDIO_WORKER_END:parkAutonomousResumeDraft__*/
 
 export async function countAutonomousOpenIdeas(env, { cap = AUTONOMOUS_OPEN_IDEAS_CAP } = {}) {
   if (!env?.AIRTABLE_IDEA_TABLE_ID) return 0;
@@ -9240,7 +9240,7 @@ export async function countAutonomousOpenIdeas(env, { cap = AUTONOMOUS_OPEN_IDEA
   }).catch(() => []);
   return Array.isArray(rows) ? rows.length : 0;
 }
-
+/*__STUDIO_WORKER_END:countAutonomousOpenIdeas__*/
 
 export async function fillAutonomousCityIdeas(env, authorization, {
   chicago,
@@ -9393,7 +9393,7 @@ export async function fillAutonomousCityIdeas(env, authorization, {
   await persist(created ? "producing" : "skipped", created ? null : "hour_create_short");
   return { created_count: created, last: saved, counts, skips, stop: false };
 }
-
+/*__STUDIO_WORKER_END:fillAutonomousCityIdeas__*/
 
 export async function fillAutonomousScheduledHour(env, authorization, {
   chicago,
@@ -9520,7 +9520,7 @@ export async function fillAutonomousScheduledHour(env, authorization, {
     result: workingLast,
   };
 }
-
+/*__STUDIO_WORKER_END:fillAutonomousScheduledHour__*/
 
 export async function executeStudioAutonomousProduce(env, ctx, options = {}) {
   const chicago = autonomousClockForCron(chicagoNowParts(), options.cronMinute);
@@ -10146,7 +10146,7 @@ export async function executeStudioAutonomousProduce(env, ctx, options = {}) {
     production_request_id: finished.production_request_id,
   });
 }
-
+/*__STUDIO_WORKER_END:executeStudioAutonomousProduce__*/
 
 export async function runStudioAutonomousProduce(request, env, authorization, ctx, options = {}) {
   let dryRun = Boolean(options.dry_run);
@@ -10177,7 +10177,7 @@ export async function runStudioAutonomousProduce(request, env, authorization, ct
   if (!request) return result;
   return respond(request, env, { ok: true, ...result }, result.skipped || result.dry_run ? 200 : 202);
 }
-
+/*__STUDIO_WORKER_END:runStudioAutonomousProduce__*/
 
 export async function studioDailyCadenceRecentBatchForProfile(env, profileId) {
   const sinceMs = Date.now() - 3 * 60 * 60 * 1000;
@@ -10194,7 +10194,7 @@ export async function studioDailyCadenceRecentBatchForProfile(env, profileId) {
   }
   return null;
 }
-
+/*__STUDIO_WORKER_END:studioDailyCadenceRecentBatchForProfile__*/
 
 export async function executeStudioDailyIdeas(env, ctx, options = {}) {
   const chicago = chicagoNowParts();
@@ -10291,14 +10291,14 @@ export async function executeStudioDailyIdeas(env, ctx, options = {}) {
     errors,
   };
 }
-
+/*__STUDIO_WORKER_END:executeStudioDailyIdeas__*/
 
 export async function runStudioDailyIdeas(request, env, authorization, ctx, options = {}) {
   const result = await executeStudioDailyIdeas(env, ctx, options);
   if (!request) return result;
   return respond(request, env, { ok: true, ...result }, result.started ? 202 : 200);
 }
-
+/*__STUDIO_WORKER_END:runStudioDailyIdeas__*/
 
 export async function kickStudioOutputPublish(request, env, url, authorization, ctx = null) {
   const match = /^\/api\/operations\/outputs\/(rec[A-Za-z0-9]+)\/publish-kick$/.exec(url.pathname);
@@ -10331,7 +10331,7 @@ export async function kickStudioOutputPublish(request, env, url, authorization, 
     ),
   });
 }
-
+/*__STUDIO_WORKER_END:kickStudioOutputPublish__*/
 
 export async function scheduleStudioPublishOutput(request, env, url, authorization, ctx = null) {
   const match = /^\/api\/operations\/outputs\/(rec[A-Za-z0-9]+)\/schedule$/.exec(url.pathname);
@@ -10421,7 +10421,7 @@ export async function scheduleStudioPublishOutput(request, env, url, authorizati
       : null,
   });
 }
-
+/*__STUDIO_WORKER_END:scheduleStudioPublishOutput__*/
 
 export function isTikTokPostUrl(url) {
   // Keep aligned with apps/studio-api/tiktok-complete.mjs (Worker deploy is this file only).
@@ -10429,7 +10429,7 @@ export function isTikTokPostUrl(url) {
   if (!value) return false;
   return value.toLowerCase().includes("tiktok.com");
 }
-
+/*__STUDIO_WORKER_END:isTikTokPostUrl__*/
 
 export function tiktokCompleteEligibility(record = {}) {
   const platform = String(record.platform || "").trim().toLowerCase();
@@ -10450,7 +10450,7 @@ export function tiktokCompleteEligibility(record = {}) {
   if (!awaiting) return "manual_completion_not_required";
   return null;
 }
-
+/*__STUDIO_WORKER_END:tiktokCompleteEligibility__*/
 
 export function tiktokMusicStatusFromChoice(choice, currentMusicStatus) {
   const music = String(choice || "").trim().toLowerCase();
@@ -10461,7 +10461,7 @@ export function tiktokMusicStatusFromChoice(choice, currentMusicStatus) {
   if (current.includes("manual action")) return { status: "Manual Action Required", completedAt: false };
   return { status: "Not Required", completedAt: false };
 }
-
+/*__STUDIO_WORKER_END:tiktokMusicStatusFromChoice__*/
 
 export function tiktokManualPublishFields({
   url,
@@ -10498,7 +10498,7 @@ export function tiktokManualPublishFields({
     TikTok_Public_Confirmation_At: stamp,
   };
 }
-
+/*__STUDIO_WORKER_END:tiktokManualPublishFields__*/
 
 export function tiktokCompleteViewFromRecord(record) {
   return {
@@ -10512,7 +10512,7 @@ export function tiktokCompleteViewFromRecord(record) {
     music_status: f(record, "Music_Status"),
   };
 }
-
+/*__STUDIO_WORKER_END:tiktokCompleteViewFromRecord__*/
 
 export async function patchTiktokManualPublish(env, record, { url, musicCompleted } = {}) {
   const music = tiktokMusicStatusFromChoice(musicCompleted, f(record, "Music_Status"));
@@ -10528,7 +10528,7 @@ export async function patchTiktokManualPublish(env, record, { url, musicComplete
     body: JSON.stringify({ fields, typecast: true }),
   });
 }
-
+/*__STUDIO_WORKER_END:patchTiktokManualPublish__*/
 
 export function youtubeCompleteViewFromRecord(record) {
   return {
@@ -10547,7 +10547,7 @@ export function youtubeCompleteViewFromRecord(record) {
     studio_state: normalizedOutputState(record),
   };
 }
-
+/*__STUDIO_WORKER_END:youtubeCompleteViewFromRecord__*/
 
 export async function patchYoutubeManualClose(env, record, { url, autoHealed = false } = {}) {
   const fields = youtubeManualCloseFields({
@@ -10563,7 +10563,7 @@ export async function patchYoutubeManualClose(env, record, { url, autoHealed = f
     body: JSON.stringify({ fields, typecast: true }),
   });
 }
-
+/*__STUDIO_WORKER_END:patchYoutubeManualClose__*/
 
 export async function markStudioYoutubeComplete(request, env, url) {
   const match = /^\/api\/outputs\/(rec[A-Za-z0-9]+)\/youtube-complete$/.exec(url.pathname);
@@ -10582,7 +10582,7 @@ export async function markStudioYoutubeComplete(request, env, url) {
   const updated = await patchYoutubeManualClose(env, current, { url: postUrl });
   return respond(request, env, { ok: true, published: true, record: mapOutput(updated) });
 }
-
+/*__STUDIO_WORKER_END:markStudioYoutubeComplete__*/
 
 export async function markStudioTiktokComplete(request, env, url) {
   const match = /^\/api\/outputs\/(rec[A-Za-z0-9]+)\/tiktok-complete$/.exec(url.pathname);
@@ -10604,7 +10604,7 @@ export async function markStudioTiktokComplete(request, env, url) {
   });
   return respond(request, env, { ok: true, published: true, record: mapOutput(updated) });
 }
-
+/*__STUDIO_WORKER_END:markStudioTiktokComplete__*/
 
 export async function resendStudioTiktokDraft(request, env, url, authorization, ctx = null) {
   const match = /^\/api\/outputs\/(rec[A-Za-z0-9]+)\/tiktok-resend$/.exec(url.pathname);
@@ -10647,7 +10647,7 @@ export async function resendStudioTiktokDraft(request, env, url, authorization, 
     record: mapOutput(refreshed),
   });
 }
-
+/*__STUDIO_WORKER_END:resendStudioTiktokDraft__*/
 
 export async function markStudioOutputPublished(request, env, url, authorization) {
   const match = /^\/api\/operations\/outputs\/(rec[A-Za-z0-9]+)\/published$/.exec(url.pathname);
@@ -10694,7 +10694,7 @@ export async function markStudioOutputPublished(request, env, url, authorization
   });
   return respond(request, env, { ok: true, record: mapOperationsOutput(updated) });
 }
-
+/*__STUDIO_WORKER_END:markStudioOutputPublished__*/
 
 export async function pulseA1SCompression(env, { driveFileId = null, ctx } = {}) {
   const normalizedId = String(driveFileId || "").trim();
@@ -10733,7 +10733,7 @@ export async function pulseA1SCompression(env, { driveFileId = null, ctx } = {})
   else await task;
   return { driveFileId: normalizedId || null, backend: python.mode };
 }
-
+/*__STUDIO_WORKER_END:pulseA1SCompression__*/
 
 export async function pulseA1SForDriveFile(request, env, authorization, ctx) {
   void authorization;
@@ -10770,7 +10770,7 @@ export async function pulseA1SForDriveFile(request, env, authorization, ctx) {
       : "A1S scanned the ingestion folder and started compression for eligible oversized videos.",
   }, 202);
 }
-
+/*__STUDIO_WORKER_END:pulseA1SForDriveFile__*/
 
 export async function pulseM1ResetRenderUrls(request, env, ctx) {
   const result = await pulseOnDemandM1(env, { force: true });
@@ -10781,7 +10781,7 @@ export async function pulseM1ResetRenderUrls(request, env, ctx) {
     message: "M1 will reset Rendering jobs that still point at an old Remotion URL, then those jobs can rerun R4.",
   }, 202);
 }
-
+/*__STUDIO_WORKER_END:pulseM1ResetRenderUrls__*/
 
 export async function pulseR2BRetryAssetSelection(request, env, ctx) {
   const result = await pulseOnDemandR2B(env);
@@ -10795,7 +10795,7 @@ export async function pulseR2BRetryAssetSelection(request, env, ctx) {
       : "R2B is retrying asset selection for the waiting output.",
   }, skipped ? 200 : 202);
 }
-
+/*__STUDIO_WORKER_END:pulseR2BRetryAssetSelection__*/
 
 export async function pulseMakeAdminBridgeQueue(request, env, ctx) {
   const result = await pulseOnDemandMakeAdminBridge(env);
@@ -10809,7 +10809,7 @@ export async function pulseMakeAdminBridgeQueue(request, env, ctx) {
       : "Make admin is retired. Pipeline stages run on the local Python runner.",
   }, skipped ? 200 : 202);
 }
-
+/*__STUDIO_WORKER_END:pulseMakeAdminBridgeQueue__*/
 
 export async function pulseAudioLeadingSilence(request, env) {
   const runnerUrl = String(env.PIPELINE_RUNNER_URL || "").trim().replace(/\/+$/, "");
@@ -10848,7 +10848,7 @@ export async function pulseAudioLeadingSilence(request, env) {
       : `Capped ${capped}, already short enough ${notNeeded}, failed ${failed}.`,
   });
 }
-
+/*__STUDIO_WORKER_END:pulseAudioLeadingSilence__*/
 
 export async function pulseStudioLibraryIntake(request, env, authorization, ctx) {
   void authorization;
@@ -10891,7 +10891,7 @@ export async function pulseStudioLibraryIntake(request, env, authorization, ctx)
     message: status.summary,
   }, status.complete ? 200 : 202);
 }
-
+/*__STUDIO_WORKER_END:pulseStudioLibraryIntake__*/
 
 export function mapLibraryIntakeAsset(record) {
   const profileId = firstLinkedRecordId(f(record, "Content_Profile"));
@@ -10906,7 +10906,7 @@ export function mapLibraryIntakeAsset(record) {
     needs_profile: !profileId,
   };
 }
-
+/*__STUDIO_WORKER_END:mapLibraryIntakeAsset__*/
 
 export function mapLibraryIntakeSnapshot(needingClassification, oversized) {
   const classify = (needingClassification || []).map(mapLibraryIntakeAsset);
@@ -10929,7 +10929,7 @@ export function mapLibraryIntakeSnapshot(needingClassification, oversized) {
     oversized_count: oversize.length,
   };
 }
-
+/*__STUDIO_WORKER_END:mapLibraryIntakeSnapshot__*/
 
 export function mapMakeIntakeRun(row) {
   if (!row) return null;
@@ -10950,7 +10950,7 @@ export function mapMakeIntakeRun(row) {
     status_code: Number.isFinite(statusCode) ? statusCode : null,
   };
 }
-
+/*__STUDIO_WORKER_END:mapMakeIntakeRun__*/
 
 export function makeExecutionList(body) {
   const bags = [];
@@ -10976,13 +10976,13 @@ export function makeExecutionList(body) {
   }
   return [];
 }
-
+/*__STUDIO_WORKER_END:makeExecutionList__*/
 
 export async function listMakeIntakeExecutions(env, scenarioId) {
   const body = await phase6MakeApiJson(env, `/scenarios/${scenarioId}/logs?pg%5Blimit%5D=12`, { method: "GET", timeoutMs: 8000 });
   return makeExecutionList(body);
 }
-
+/*__STUDIO_WORKER_END:listMakeIntakeExecutions__*/
 
 export function pythonIntakeRun(startedAt, operations) {
   return {
@@ -10994,7 +10994,7 @@ export function pythonIntakeRun(startedAt, operations) {
     status_code: 1,
   };
 }
-
+/*__STUDIO_WORKER_END:pythonIntakeRun__*/
 
 export async function pythonA2RunSince(env, startedAt) {
   if (!startedAt) return null;
@@ -11009,7 +11009,7 @@ export async function pythonA2RunSince(env, startedAt) {
   if (Number.isFinite(startMs) && Date.now() - startMs > 25000) return pythonIntakeRun(startedAt, 2);
   return null;
 }
-
+/*__STUDIO_WORKER_END:pythonA2RunSince__*/
 
 export function firstRunSince(runs, startedAt) {
   if (!runs.length) return null;
@@ -11026,7 +11026,7 @@ export function firstRunSince(runs, startedAt) {
   if (Number.isFinite(newestMs) && Math.abs(newestMs - startMs) < 20000) return newest;
   return null;
 }
-
+/*__STUDIO_WORKER_END:firstRunSince__*/
 
 export function describeA2Run(run) {
   if (!run) return { files_found: null, result: "waiting", detail: "Starting A2…" };
@@ -11063,7 +11063,7 @@ export function describeA2Run(run) {
   }
   return { files_found: true, result: "processed", detail: `A2 found files to intake (${run.operations} Make operations).` };
 }
-
+/*__STUDIO_WORKER_END:describeA2Run__*/
 
 export async function buildLibraryIntakeStatus(env, startedAt, knownA2 = null) {
   const a2Python = pipelineStageBackend(env, "A2").mode === "python";
@@ -11133,7 +11133,7 @@ export async function buildLibraryIntakeStatus(env, startedAt, knownA2 = null) {
     library_intake: mapLibraryIntakeSnapshot(needingClassification, oversized),
   };
 }
-
+/*__STUDIO_WORKER_END:buildLibraryIntakeStatus__*/
 
 export async function getStudioLibraryIntakeStatus(request, env, url) {
   const startedAt = String(url.searchParams.get("started_at") || "").trim() || null;
@@ -11141,4 +11141,4 @@ export async function getStudioLibraryIntakeStatus(request, env, url) {
   return respond(request, env, { ok: true, ...status });
 }
 
-
+/*__STUDIO_WORKER_END:getStudioLibraryIntakeStatus__*/

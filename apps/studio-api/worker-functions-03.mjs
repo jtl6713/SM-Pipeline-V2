@@ -685,7 +685,7 @@ export async function findDraftProductionRequestForIdea(env, ideaRecordId) {
   if (!chosen?.id) return null;
   return airtableFetch(env, PRODUCTION_REQUEST_TABLE, chosen.id);
 }
-
+/*__STUDIO_WORKER_END:findDraftProductionRequestForIdea__*/
 
 export async function rankStillsForIdeaPhotoWait(env, idea) {
   const ideaTokens = ideaLibraryTokens([
@@ -739,7 +739,7 @@ export async function rankStillsForIdeaPhotoWait(env, idea) {
   }
   return ranked;
 }
-
+/*__STUDIO_WORKER_END:rankStillsForIdeaPhotoWait__*/
 
 export async function rankVideosForScriptedShortProposal(env, idea) {
   const ideaTokens = ideaLibraryTokens([
@@ -793,7 +793,7 @@ export async function rankVideosForScriptedShortProposal(env, idea) {
   }
   return ranked;
 }
-
+/*__STUDIO_WORKER_END:rankVideosForScriptedShortProposal__*/
 
 export async function unfinishedIntakeBatchIds(env, batchIds) {
   const unique = [...new Set((batchIds || []).map((id) => String(id || "").trim()).filter(Boolean))];
@@ -807,7 +807,7 @@ export async function unfinishedIntakeBatchIds(env, batchIds) {
   }
   return pending;
 }
-
+/*__STUDIO_WORKER_END:unfinishedIntakeBatchIds__*/
 
 export async function applyLibraryAssetsToProductionRequest(env, requestRecord, mediaIds, { replaceWaitAssets = false, allowManagePaused = false, replaceAll = false, allowVideo = false } = {}) {
   const existingAll = item4AssetManifest(requestRecord);
@@ -893,7 +893,7 @@ export async function applyLibraryAssetsToProductionRequest(env, requestRecord, 
   });
   return { record: updated, assets, appended: appended.length };
 }
-
+/*__STUDIO_WORKER_END:applyLibraryAssetsToProductionRequest__*/
 
 export async function evaluateAndMaybeAttachWaitingIdeaPhotos(env, idea, { authorization = null, force = false, productionRequest = null } = {}) {
   // Always refresh before matching. Manage Idea writes a short-lived pause token and
@@ -1022,7 +1022,7 @@ export async function evaluateAndMaybeAttachWaitingIdeaPhotos(env, idea, { autho
   });
   return { ...decision, idea: ideaWaiting, production_request: requestRecord, match: matchJson };
 }
-
+/*__STUDIO_WORKER_END:evaluateAndMaybeAttachWaitingIdeaPhotos__*/
 
 export async function runWaitingIdeaPhotoMatches(env, { limit = 8 } = {}) {
   const records = await listRecords(env, env.AIRTABLE_IDEA_TABLE_ID, {
@@ -1045,7 +1045,7 @@ export async function runWaitingIdeaPhotoMatches(env, { limit = 8 } = {}) {
   return { evaluated: results.length, ready: results.filter((row) => row.action === "ready").length };
 }
 
-
+/*__STUDIO_WORKER_END:runWaitingIdeaPhotoMatches__*/
 
 export async function listContent(request, env, url, authorization) {
   const profile = await resolveWorkingContentProfile(env, authorization, requestedProfileId(url));
@@ -1093,7 +1093,7 @@ export async function listContent(request, env, url, authorization) {
   });
   return respond(request, env, { ok: true, ...payload });
 }
-
+/*__STUDIO_WORKER_END:listContent__*/
 
 export async function scheduleGridContentById(env, outputRecords) {
   const ids = [...new Set((outputRecords || [])
@@ -1113,7 +1113,7 @@ export async function scheduleGridContentById(env, outputRecords) {
   }
   return byId;
 }
-
+/*__STUDIO_WORKER_END:scheduleGridContentById__*/
 
 export async function listOutputScheduleGrid(request, env, url, authorization) {
   const profile = await resolveWorkingContentProfile(env, authorization, requestedProfileId(url));
@@ -1199,14 +1199,14 @@ export async function listOutputScheduleGrid(request, env, url, authorization) {
   });
   return respond(request, env, body);
 }
-
+/*__STUDIO_WORKER_END:listOutputScheduleGrid__*/
 
 export function studioMappedListSnapshotFresh(remembered, ttlMs) {
   if (!remembered?.payload || !Array.isArray(remembered.payload.records)) return false;
   if (Number(remembered.writeGen || 0) !== studioListWriteGeneration) return false;
   return Date.now() - Number(remembered.at || 0) < Math.max(1000, Number(ttlMs) || STUDIO_READ_SNAPSHOT_FRESH_MS);
 }
-
+/*__STUDIO_WORKER_END:studioMappedListSnapshotFresh__*/
 
 export async function readMappedListSnapshot(env, memoryKey, snapshotKey) {
   const hit = studioHotReadCache.get(memoryKey);
@@ -1228,7 +1228,7 @@ export async function readMappedListSnapshot(env, memoryKey, snapshotKey) {
     return null;
   }
 }
-
+/*__STUDIO_WORKER_END:readMappedListSnapshot__*/
 
 export async function writeMappedListSnapshot(env, memoryKey, snapshotKey, payload) {
   if (!payload || !Array.isArray(payload.records)) return;
@@ -1244,7 +1244,7 @@ export async function writeMappedListSnapshot(env, memoryKey, snapshotKey, paylo
     console.warn("mapped list snapshot write failed", snapshotKey, error);
   }
 }
-
+/*__STUDIO_WORKER_END:writeMappedListSnapshot__*/
 
 export function scheduleMappedListRefresh(ctx, env, memoryKey, snapshotKey, ttlMs, builder) {
   if (airtableCooldownWaitMs() > AIRTABLE_SLOT_FAIL_FAST_MS) return null;
@@ -1255,7 +1255,7 @@ export function scheduleMappedListRefresh(ctx, env, memoryKey, snapshotKey, ttlM
   ctx?.waitUntil?.(pending.catch((error) => console.warn("mapped list refresh failed", snapshotKey, error)));
   return pending;
 }
-
+/*__STUDIO_WORKER_END:scheduleMappedListRefresh__*/
 
 export function respondStudioMappedList(request, env, ctx, { memoryKey, snapshotKey, profile, ttlMs, builder, allowRefresh = true }) {
   const freshMs = Math.max(1000, Number(ttlMs) || STUDIO_READ_SNAPSHOT_FRESH_MS);
@@ -1274,7 +1274,7 @@ export function respondStudioMappedList(request, env, ctx, { memoryKey, snapshot
     });
   });
 }
-
+/*__STUDIO_WORKER_END:respondStudioMappedList__*/
 
 export async function loadOpenPipelineOutputPack(env, profile) {
   const listOpts = {
@@ -1312,7 +1312,7 @@ export async function loadOpenPipelineOutputPack(env, profile) {
     return { open, siblings, openContentIds };
   });
 }
-
+/*__STUDIO_WORKER_END:loadOpenPipelineOutputPack__*/
 
 export async function pipelineContentLabelsById(env, profile, contentIds) {
   const ids = [...new Set((contentIds || []).filter((id) => /^rec[A-Za-z0-9]+$/.test(String(id || ""))))].sort();
@@ -1328,18 +1328,18 @@ export async function pipelineContentLabelsById(env, profile, contentIds) {
   }
   return labels;
 }
-
+/*__STUDIO_WORKER_END:pipelineContentLabelsById__*/
 
 export async function readPipelineOutputsSnapshot(env, memoryKey, snapshotKey) {
   return readMappedListSnapshot(env, memoryKey, snapshotKey);
 }
-
+/*__STUDIO_WORKER_END:readPipelineOutputsSnapshot__*/
 
 export async function writePipelineOutputsSnapshot(env, snapshotKey, payload) {
   const memoryKey = String(snapshotKey || "").replace(/^studio\/state\//, "outputs:");
   return writeMappedListSnapshot(env, memoryKey, snapshotKey, payload);
 }
-
+/*__STUDIO_WORKER_END:writePipelineOutputsSnapshot__*/
 
 export async function buildPipelineOutputsPayloadFromSupabase(env, profile, { limit, reviewOnly, ctx = null } = {}) {
   const packed = await listSupabasePipelineOutputs(env, {
@@ -1383,7 +1383,7 @@ export async function buildPipelineOutputsPayloadFromSupabase(env, profile, { li
     read_source: "supabase",
   };
 }
-
+/*__STUDIO_WORKER_END:buildPipelineOutputsPayloadFromSupabase__*/
 
 export async function buildPipelineOutputsPayload(env, profile, { limit, reviewOnly, ctx = null } = {}) {
   if (studioReadSource(env) === "supabase") {
@@ -1451,7 +1451,7 @@ export async function buildPipelineOutputsPayload(env, profile, { limit, reviewO
   };
 }
 
-
+/*__STUDIO_WORKER_END:buildPipelineOutputsPayload__*/
 
 export async function readStudioSupabaseSyncLast(env) {
   if (!env?.STUDIO_MEDIA?.get) return null;
@@ -1465,7 +1465,7 @@ export async function readStudioSupabaseSyncLast(env) {
     return null;
   }
 }
-
+/*__STUDIO_WORKER_END:readStudioSupabaseSyncLast__*/
 
 export async function writeStudioSupabaseSyncLast(env, payload) {
   if (!env?.STUDIO_MEDIA?.put || !payload) return;
@@ -1477,7 +1477,7 @@ export async function writeStudioSupabaseSyncLast(env, payload) {
     console.warn("supabase sync last write failed", error);
   }
 }
-
+/*__STUDIO_WORKER_END:writeStudioSupabaseSyncLast__*/
 
 export async function studioSyncSupabasePipelineReads(env, options = {}) {
   if (!studioSupabaseConfigured(env)) return { skipped: true, reason: "supabase_not_configured" };
@@ -1518,7 +1518,7 @@ export async function studioSyncSupabasePipelineReads(env, options = {}) {
   await writeStudioSupabaseSyncLast(env, stamp);
   return { ...result, stamp };
 }
-
+/*__STUDIO_WORKER_END:studioSyncSupabasePipelineReads__*/
 
 export async function getStudioSupabaseSyncStatus(request, env) {
   const last = await readStudioSupabaseSyncLast(env);
@@ -1530,7 +1530,7 @@ export async function getStudioSupabaseSyncStatus(request, env) {
     last_sync: last,
   });
 }
-
+/*__STUDIO_WORKER_END:getStudioSupabaseSyncStatus__*/
 
 export async function postStudioSupabaseSync(request, env) {
   if (!studioSupabaseConfigured(env)) {
@@ -1549,7 +1549,7 @@ export async function postStudioSupabaseSync(request, env) {
     sync: result,
   });
 }
-
+/*__STUDIO_WORKER_END:postStudioSupabaseSync__*/
 
 export async function warmOldestStudioReadSnapshot(env) {
   if (airtableCooldownWaitMs() > AIRTABLE_SLOT_FAIL_FAST_MS) return { skipped: "cooling" };
@@ -1583,7 +1583,7 @@ export async function warmOldestStudioReadSnapshot(env) {
   );
   return { warmed: true, profile_id: profile.id };
 }
-
+/*__STUDIO_WORKER_END:warmOldestStudioReadSnapshot__*/
 
 export async function listOutputs(request, env, url, authorization, ctx = null) {
   const profile = await resolveWorkingContentProfile(env, authorization, requestedProfileId(url));
@@ -1666,7 +1666,7 @@ export async function listOutputs(request, env, url, authorization, ctx = null) 
   });
 }
 
-
+/*__STUDIO_WORKER_END:listOutputs__*/
 
 export async function listMusic(request, env, url) {
   const limit = clampLimit(url, 100, 100);
@@ -1694,12 +1694,12 @@ export async function listMusic(request, env, url) {
   });
   return respond(request, env, { ok: true, ...payload });
 }
-
+/*__STUDIO_WORKER_END:listMusic__*/
 
 export function musicSortName(record) {
   return String(cleanMusicDisplayName(f(record, "Asset Name")) || f(record, "Asset Name") || "").toLowerCase();
 }
-
+/*__STUDIO_WORKER_END:musicSortName__*/
 
 export function sortMusicRecords(records) {
   return [...records].sort((left, right) => {
@@ -1709,7 +1709,7 @@ export function sortMusicRecords(records) {
     return musicSortName(left).localeCompare(musicSortName(right));
   });
 }
-
+/*__STUDIO_WORKER_END:sortMusicRecords__*/
 
 export async function toggleMusicFavorite(request, env, url) {
   if (!env.AIRTABLE_MEDIA_TABLE_ID) throw new HttpError(503, "Media Assets table is not configured");
@@ -1733,7 +1733,7 @@ export async function toggleMusicFavorite(request, env, url) {
   });
   return respond(request, env, { ok: true, record: mapMusic(updated) });
 }
-
+/*__STUDIO_WORKER_END:toggleMusicFavorite__*/
 
 export async function findMusicLibraryUsages(env, recordId) {
   const needle = ideaLibraryAirtableEscape(recordId);
@@ -1759,7 +1759,7 @@ export async function findMusicLibraryUsages(env, recordId) {
     content_items: content,
   };
 }
-
+/*__STUDIO_WORKER_END:findMusicLibraryUsages__*/
 
 export async function trashStudioMusicOnDrive(env, fileId) {
   const driveId = String(fileId || "").trim();
@@ -1781,7 +1781,7 @@ export async function trashStudioMusicOnDrive(env, fileId) {
   }
   return { ok: true, trashed: Boolean(payload?.trashed), google_drive_file_id: driveId };
 }
-
+/*__STUDIO_WORKER_END:trashStudioMusicOnDrive__*/
 
 export async function deleteMusicLibraryTrack(request, env, url) {
   if (!env.AIRTABLE_MEDIA_TABLE_ID) throw new HttpError(503, "Media Assets table is not configured");
@@ -1824,7 +1824,7 @@ export async function deleteMusicLibraryTrack(request, env, url) {
     drive,
   });
 }
-
+/*__STUDIO_WORKER_END:deleteMusicLibraryTrack__*/
 
 export async function promoteStudioMusicToDrive(env, { filename, bytes, contentType }) {
   const runnerUrl = String(env.PIPELINE_RUNNER_URL || "").trim().replace(/\/+$/, "");
@@ -1862,7 +1862,7 @@ export async function promoteStudioMusicToDrive(env, { filename, bytes, contentT
     Leading_Silence_Processed_At: payload.Leading_Silence_Processed_At || null,
   };
 }
-
+/*__STUDIO_WORKER_END:promoteStudioMusicToDrive__*/
 
 export async function uploadMusicLibraryTracks(request, env, authorization) {
   if (!env.AIRTABLE_MEDIA_TABLE_ID) throw new HttpError(503, "Media Assets table is not configured");
@@ -1952,7 +1952,7 @@ export async function uploadMusicLibraryTracks(request, env, authorization) {
       : `${uploaded.length} tracks added to Music Manager.`,
   }, 201);
 }
-
+/*__STUDIO_WORKER_END:uploadMusicLibraryTracks__*/
 
 export function coerceLibraryDurationSeconds(raw) {
   const value = Number(raw);
@@ -1961,7 +1961,7 @@ export function coerceLibraryDurationSeconds(raw) {
   if (rounded < 1 || rounded > 12 * 60 * 60) return null;
   return rounded;
 }
-
+/*__STUDIO_WORKER_END:coerceLibraryDurationSeconds__*/
 
 export function publishedLibraryFilterFormula(query) {
   const parts = [PUBLISHED_LIBRARY_LIST_FORMULA];
@@ -1973,7 +1973,7 @@ export function publishedLibraryFilterFormula(query) {
   }
   return parts.length === 1 ? parts[0] : `AND(${parts.join(",")})`;
 }
-
+/*__STUDIO_WORKER_END:publishedLibraryFilterFormula__*/
 
 export function publishedFinalFileId(record) {
   return String(
@@ -1983,7 +1983,7 @@ export function publishedFinalFileId(record) {
     || ""
   ).trim();
 }
-
+/*__STUDIO_WORKER_END:publishedFinalFileId__*/
 
 export function publishedDurationSeconds(record) {
   const stored = Number(f(record, "Duration_Seconds") || 0);
@@ -1992,7 +1992,7 @@ export function publishedDurationSeconds(record) {
   if (Number.isFinite(frames) && frames > 0) return Math.round(frames / 30);
   return null;
 }
-
+/*__STUDIO_WORKER_END:publishedDurationSeconds__*/
 
 export function collectJsonDriveIds(raw, { finishedOnly = false } = {}) {
   const ids = [];
@@ -2024,7 +2024,7 @@ export function collectJsonDriveIds(raw, { finishedOnly = false } = {}) {
   walk(parsed);
   return [...new Set(ids)];
 }
-
+/*__STUDIO_WORKER_END:collectJsonDriveIds__*/
 
 export function publicMediaObjectKey(urlOrKey) {
   let path = String(urlOrKey || "").trim();
@@ -2036,7 +2036,7 @@ export function publicMediaObjectKey(urlOrKey) {
   if (path.startsWith("studio/previews/") || path.startsWith("publish/") || path.startsWith("studio/master-assets/")) return path;
   return "";
 }
-
+/*__STUDIO_WORKER_END:publicMediaObjectKey__*/
 
 export function publishedLibraryObjectKey(record) {
   const candidates = [
@@ -2051,7 +2051,7 @@ export function publishedLibraryObjectKey(record) {
   }
   return "";
 }
-
+/*__STUDIO_WORKER_END:publishedLibraryObjectKey__*/
 
 export async function attachPublishedLibraryFileSizes(env, records, mapped) {
   if (!Array.isArray(mapped) || !mapped.length) return mapped;
@@ -2074,7 +2074,7 @@ export async function attachPublishedLibraryFileSizes(env, records, mapped) {
   }));
   return mapped;
 }
-
+/*__STUDIO_WORKER_END:attachPublishedLibraryFileSizes__*/
 
 export function mapPublishedLibraryFile(record) {
   const platform = String(f(record, "Platform") || "").trim();
@@ -2107,7 +2107,7 @@ export function mapPublishedLibraryFile(record) {
     output_filename: String(f(record, "Output_Filename") || "").trim() || null,
   };
 }
-
+/*__STUDIO_WORKER_END:mapPublishedLibraryFile__*/
 
 export function publishedFileReleaseGuard(record, { masterDriveIds = [] } = {}) {
   if (!String(f(record, "Published_At") || "").trim()) {
@@ -2136,7 +2136,7 @@ export function publishedFileReleaseGuard(record, { masterDriveIds = [] } = {}) 
   }
   return { ok: true, final_file_id: finalFileId || null, already_released: false };
 }
-
+/*__STUDIO_WORKER_END:publishedFileReleaseGuard__*/
 
 export async function collectPublishedMasterDriveIds(env, record) {
   const ids = new Set(collectJsonDriveIds(f(record, "Selected_Assets_JSON"), { finishedOnly: true }));
@@ -2155,7 +2155,7 @@ export async function collectPublishedMasterDriveIds(env, record) {
   }
   return [...ids];
 }
-
+/*__STUDIO_WORKER_END:collectPublishedMasterDriveIds__*/
 
 export async function listPublishedLibraryFiles(request, env, url) {
   if (!env.AIRTABLE_OUTPUT_TABLE_ID) throw new HttpError(503, "Platform Outputs table is not configured");
@@ -2192,20 +2192,20 @@ export async function listPublishedLibraryFiles(request, env, url) {
     records: mapped,
   });
 }
-
+/*__STUDIO_WORKER_END:listPublishedLibraryFiles__*/
 
 export async function readLibraryCrossScopeSetting(env) {
   const row = await studioSettingsByName(env, LIBRARY_CROSS_SCOPE_SETTING).catch(() => null);
   return libraryCrossScopeEnabled(f(row, "Setting_Value"));
 }
-
+/*__STUDIO_WORKER_END:readLibraryCrossScopeSetting__*/
 
 export async function resolveLibraryCrossScope(env, url, { useSetting = true } = {}) {
   if (!useSetting) return resolveAssetManagerCrossScopeFlag(url);
   const settingEnabled = await readLibraryCrossScopeSetting(env);
   return resolveLibraryCrossScopeFlag(url, settingEnabled ? "1" : "0");
 }
-
+/*__STUDIO_WORKER_END:resolveLibraryCrossScope__*/
 
 export async function mediaAssetProfileScopeForId(env, profileId, {
   crossScope = false,
@@ -2223,7 +2223,7 @@ export async function mediaAssetProfileScopeForId(env, profileId, {
     profileName: f(profile, "Profile_Name") || "",
   });
 }
-
+/*__STUDIO_WORKER_END:mediaAssetProfileScopeForId__*/
 
 export async function resolveLibraryScopeProfileId(env, authorization, url, { idea = null, profileId = null } = {}) {
   if (profileId && /^rec[A-Za-z0-9]+$/.test(String(profileId))) return String(profileId);
@@ -2235,7 +2235,7 @@ export async function resolveLibraryScopeProfileId(env, authorization, url, { id
   const profile = await resolveWorkingContentProfile(env, authorization, requestedProfileId(url));
   return profile?.id || "";
 }
-
+/*__STUDIO_WORKER_END:resolveLibraryScopeProfileId__*/
 
 export async function resolveLibraryScopeProfile(env, authorization, url, options = {}) {
   const profileId = await resolveLibraryScopeProfileId(env, authorization, url, options);
@@ -2249,7 +2249,7 @@ export async function resolveLibraryScopeProfile(env, authorization, url, option
   const profiles = await listContentProfileRecords(env).catch(() => []);
   return profiles.find((row) => row.id === profileId) || { id: profileId, fields: {} };
 }
-
+/*__STUDIO_WORKER_END:resolveLibraryScopeProfile__*/
 
 export async function libraryProfileScopeFormula(env, authorization, url, options = {}) {
   const crossScope = options.crossScope != null
@@ -2262,7 +2262,7 @@ export async function libraryProfileScopeFormula(env, authorization, url, option
     profileName: f(profile, "Profile_Name") || "",
   });
 }
-
+/*__STUDIO_WORKER_END:libraryProfileScopeFormula__*/
 
 export function assetLibraryFilterFormula(query, kind, needsProfile = false) {
   const parts = [ASSET_LIBRARY_LIST_FORMULA];
@@ -2291,7 +2291,7 @@ export function assetLibraryFilterFormula(query, kind, needsProfile = false) {
   }
   return `AND(${parts.join(",")})`;
 }
-
+/*__STUDIO_WORKER_END:assetLibraryFilterFormula__*/
 
 export function mapLibraryAsset(record, profilesById = {}) {
   const video = ideaLibraryIsEligibleVideo(record)
@@ -2327,7 +2327,7 @@ export function mapLibraryAsset(record, profilesById = {}) {
     content_profile_name: profile ? String(f(profile, "Profile_Name") || "").trim() || null : null,
   };
 }
-
+/*__STUDIO_WORKER_END:mapLibraryAsset__*/
 
 export async function listAssetLibrary(request, env, url, authorization) {
   const kind = String(url.searchParams.get("kind") || "").trim().toLowerCase();
@@ -2390,7 +2390,7 @@ export async function listAssetLibrary(request, env, url, authorization) {
     records: mapped,
   });
 }
-
+/*__STUDIO_WORKER_END:listAssetLibrary__*/
 
 export async function promoteStudioAssetToDrive(env, { filename, bytes, contentType, profileName = "" }) {
   const runnerUrl = String(env.PIPELINE_RUNNER_URL || "").trim().replace(/\/+$/, "");
@@ -2429,7 +2429,7 @@ export async function promoteStudioAssetToDrive(env, { filename, bytes, contentT
   }
   return payload;
 }
-
+/*__STUDIO_WORKER_END:promoteStudioAssetToDrive__*/
 
 export async function listLibraryBatchExistingNames(env, baseName, scopeFormula = null) {
   const filterFormula = combineAirtableFormulas(libraryBatchNameFilterFormula(baseName), scopeFormula);
@@ -2444,7 +2444,7 @@ export async function listLibraryBatchExistingNames(env, baseName, scopeFormula 
     .map((record) => stripLibraryAssetExtension(f(record, "Asset Name")))
     .filter(Boolean);
 }
-
+/*__STUDIO_WORKER_END:listLibraryBatchExistingNames__*/
 
 export async function uploadAssetLibraryItems(request, env, authorization, ctx) {
   if (!env.AIRTABLE_MEDIA_TABLE_ID) throw new HttpError(503, "Media Assets table is not configured");
@@ -2634,7 +2634,7 @@ export async function uploadAssetLibraryItems(request, env, authorization, ctx) 
       : addedMessage,
   }, 201);
 }
-
+/*__STUDIO_WORKER_END:uploadAssetLibraryItems__*/
 
 export async function findAssetLibraryUsages(env, recordId) {
   const needle = ideaLibraryAirtableEscape(recordId);
@@ -2644,7 +2644,7 @@ export async function findAssetLibraryUsages(env, recordId) {
   }).catch(() => []);
   return { production_requests: requests };
 }
-
+/*__STUDIO_WORKER_END:findAssetLibraryUsages__*/
 
 export async function trashStudioAssetOnDrive(env, fileId) {
   const driveId = String(fileId || "").trim();
@@ -2666,7 +2666,7 @@ export async function trashStudioAssetOnDrive(env, fileId) {
   }
   return { ok: true, trashed: Boolean(payload?.trashed), google_drive_file_id: driveId };
 }
-
+/*__STUDIO_WORKER_END:trashStudioAssetOnDrive__*/
 
 export async function renameStudioAssetOnDrive(env, fileId, filename) {
   const driveId = String(fileId || "").trim();
@@ -2694,13 +2694,13 @@ export async function renameStudioAssetOnDrive(env, fileId, filename) {
     filename: String(payload?.filename || name),
   };
 }
-
+/*__STUDIO_WORKER_END:renameStudioAssetOnDrive__*/
 
 export async function libraryAssetProfilesById(env) {
   const profiles = await listContentProfileRecords(env).catch(() => []);
   return Object.fromEntries((profiles || []).map((row) => [row.id, row]));
 }
-
+/*__STUDIO_WORKER_END:libraryAssetProfilesById__*/
 
 export function assertLibrarySourceAsset(record) {
   const role = String(f(record, "Asset_Role") || "").trim();
@@ -2710,7 +2710,7 @@ export function assertLibrarySourceAsset(record) {
     throw new HttpError(409, "Only photo and video library assets can be updated here");
   }
 }
-
+/*__STUDIO_WORKER_END:assertLibrarySourceAsset__*/
 
 export async function assignLibraryAssetProfile(request, env, url, authorization, ctx) {
   if (!env.AIRTABLE_MEDIA_TABLE_ID) throw new HttpError(503, "Media Assets table is not configured");
@@ -2763,7 +2763,7 @@ export async function assignLibraryAssetProfile(request, env, url, authorization
       : `Saved ${profileName || "profile"}. Use Classify all when you are done assigning profiles.`,
   });
 }
-
+/*__STUDIO_WORKER_END:assignLibraryAssetProfile__*/
 
 export async function stampLibraryAssetsClassifying(env, recordIds) {
   const ids = [...new Set((recordIds || []).filter((id) => /^rec[A-Za-z0-9]+$/.test(id)))];
@@ -2782,7 +2782,7 @@ export async function stampLibraryAssetsClassifying(env, recordIds) {
   }
   return ids;
 }
-
+/*__STUDIO_WORKER_END:stampLibraryAssetsClassifying__*/
 
 export async function classifyAllLibraryAssets(request, env, url, authorization, ctx) {
   if (!env.AIRTABLE_MEDIA_TABLE_ID) throw new HttpError(503, "Media Assets table is not configured");
@@ -2836,7 +2836,7 @@ export async function classifyAllLibraryAssets(request, env, url, authorization,
       : `Classifying ${recordIds.length} assets in the background${truncated ? " (first batch)" : ""}.`,
   });
 }
-
+/*__STUDIO_WORKER_END:classifyAllLibraryAssets__*/
 
 export async function pulseLibraryAssetClassification(env, recordId) {
   const { response, payload } = await item4PulsePipelineStage(env, "a3", {
@@ -2852,7 +2852,7 @@ export async function pulseLibraryAssetClassification(env, recordId) {
   }
   return payload;
 }
-
+/*__STUDIO_WORKER_END:pulseLibraryAssetClassification__*/
 
 export async function renameAssetLibraryItem(request, env, url, ctx) {
   if (!env.AIRTABLE_MEDIA_TABLE_ID) throw new HttpError(503, "Media Assets table is not configured");
@@ -2916,7 +2916,7 @@ export async function renameAssetLibraryItem(request, env, url, ctx) {
     message,
   });
 }
-
+/*__STUDIO_WORKER_END:renameAssetLibraryItem__*/
 
 export async function deleteAssetLibraryItem(request, env, url) {
   if (!env.AIRTABLE_MEDIA_TABLE_ID) throw new HttpError(503, "Media Assets table is not configured");
@@ -2949,7 +2949,7 @@ export async function deleteAssetLibraryItem(request, env, url) {
     drive,
   });
 }
-
+/*__STUDIO_WORKER_END:deleteAssetLibraryItem__*/
 
 export async function patchAssetLibraryDuration(request, env, url) {
   if (!env.AIRTABLE_MEDIA_TABLE_ID) throw new HttpError(503, "Media Assets table is not configured");
@@ -2974,13 +2974,13 @@ export async function patchAssetLibraryDuration(request, env, url) {
   });
   return respond(request, env, { ok: true, id: recordId, duration_seconds: seconds, updated: true });
 }
-
+/*__STUDIO_WORKER_END:patchAssetLibraryDuration__*/
 
 export function driveTrashLooksGone(result) {
   const error = String(result?.error || result?.reason || "").toLowerCase();
   return /404|410|not found|trashed|already/.test(error);
 }
-
+/*__STUDIO_WORKER_END:driveTrashLooksGone__*/
 
 export async function stampPublishedFileReleased(env, recordId, { clearBlobs = false } = {}) {
   return airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, recordId, {
@@ -2991,7 +2991,7 @@ export async function stampPublishedFileReleased(env, recordId, { clearBlobs = f
     }),
   });
 }
-
+/*__STUDIO_WORKER_END:stampPublishedFileReleased__*/
 
 export async function deletePublishedR2Keys(env, keys, { dryRun = false } = {}) {
   const list = [...new Set((keys || []).map((key) => String(key || "").trim()).filter(Boolean))];
@@ -3022,7 +3022,7 @@ export async function deletePublishedR2Keys(env, keys, { dryRun = false } = {}) 
   }
   return { ok: errors.length === 0, deleted, missing, errors, dry_run: dryRun };
 }
-
+/*__STUDIO_WORKER_END:deletePublishedR2Keys__*/
 
 export async function loadContentItemSiblingOutputs(env, contentItemId) {
   const id = String(contentItemId || "").trim();
@@ -3033,7 +3033,7 @@ export async function loadContentItemSiblingOutputs(env, contentItemId) {
     fields: POST_PUBLISH_RELEASE_LIST_FIELDS,
   }).catch(() => []);
 }
-
+/*__STUDIO_WORKER_END:loadContentItemSiblingOutputs__*/
 
 export async function clearParentProductionJobJsonIfFullyReleased(env, siblings) {
   const list = Array.isArray(siblings) ? siblings : [];
@@ -3064,7 +3064,7 @@ export async function clearParentProductionJobJsonIfFullyReleased(env, siblings)
   }
   return { cleared: cleared > 0, request_count: cleared };
 }
-
+/*__STUDIO_WORKER_END:clearParentProductionJobJsonIfFullyReleased__*/
 
 export function outputNeedsMediaReleaseLocal(record) {
   const storage = String(f(record, "Final_File_Storage_Status") || "").trim().toLowerCase();
@@ -3081,7 +3081,7 @@ export function outputNeedsMediaReleaseLocal(record) {
     || String(f(record, "Publish_Asset_URL") || "").trim()
   );
 }
-
+/*__STUDIO_WORKER_END:outputNeedsMediaReleaseLocal__*/
 
 export async function releasePublishedOutputMedia(env, record, {
   dryRun = false,
@@ -3152,7 +3152,7 @@ export async function releasePublishedOutputMedia(env, record, {
     r2,
   };
 }
-
+/*__STUDIO_WORKER_END:releasePublishedOutputMedia__*/
 
 export async function releasePublishedLibraryFile(request, env, url) {
   if (!env.AIRTABLE_OUTPUT_TABLE_ID) throw new HttpError(503, "Platform Outputs table is not configured");
@@ -3174,7 +3174,7 @@ export async function releasePublishedLibraryFile(request, env, url) {
     r2: result.r2,
   });
 }
-
+/*__STUDIO_WORKER_END:releasePublishedLibraryFile__*/
 
 export async function studioPostPublishReleaseDryRunEnabled(env) {
   const row = await studioSettingsByName(env, POST_PUBLISH_RELEASE_DRY_RUN_SETTING).catch(() => null);
@@ -3184,7 +3184,7 @@ export async function studioPostPublishReleaseDryRunEnabled(env) {
   if (!raw) return true;
   return dryRunFlagEnabled(raw);
 }
-
+/*__STUDIO_WORKER_END:studioPostPublishReleaseDryRunEnabled__*/
 
 export async function studioSweepPostPublishMediaRelease(env, { limit = POST_PUBLISH_RELEASE_BATCH_LIMIT } = {}) {
   if (!env.AIRTABLE_OUTPUT_TABLE_ID) return { ok: false, skipped: "no_output_table" };
@@ -3257,7 +3257,7 @@ export async function studioSweepPostPublishMediaRelease(env, { limit = POST_PUB
   }));
   return { ok: true, dry_run: dryRun, released, skipped, examined_groups: examined };
 }
-
+/*__STUDIO_WORKER_END:studioSweepPostPublishMediaRelease__*/
 
 export async function studioReleaseDerivedFillCropsForOutput(env, outputRecord, { dryRun = false } = {}) {
   if (!env.AIRTABLE_MEDIA_TABLE_ID) return { ok: false, skipped: "no_media_table" };
@@ -3305,7 +3305,7 @@ export async function studioReleaseDerivedFillCropsForOutput(env, outputRecord, 
   }
   return { ok: true, trashed };
 }
-
+/*__STUDIO_WORKER_END:studioReleaseDerivedFillCropsForOutput__*/
 
 export async function studioReleaseContentItemVoiceoverThumbnail(env, outputRecord, siblings, { dryRun = false } = {}) {
   const contentId = contentItemIdFromOutput(outputRecord);
@@ -3343,7 +3343,7 @@ export async function studioReleaseContentItemVoiceoverThumbnail(env, outputReco
   }
   return { ok: true, trashed };
 }
-
+/*__STUDIO_WORKER_END:studioReleaseContentItemVoiceoverThumbnail__*/
 
 export async function fetchGoogleDriveAudio(record, request) {
   const mapped = mapMusic(record);
@@ -3377,7 +3377,7 @@ export async function fetchGoogleDriveAudio(record, request) {
 
   throw new HttpError(lastResponse?.status || 502, `Google Drive preview fetch failed (${lastResponse?.status || "unknown"})`);
 }
-
+/*__STUDIO_WORKER_END:fetchGoogleDriveAudio__*/
 
 export function copyDriveAudioHeaders(upstream, mapped) {
   const headers = new Headers();
@@ -3396,7 +3396,7 @@ export function copyDriveAudioHeaders(upstream, mapped) {
   headers.delete("Content-Disposition");
   return headers;
 }
-
+/*__STUDIO_WORKER_END:copyDriveAudioHeaders__*/
 
 export async function studioMusicR2Preview(request, env, mapped) {
   const key = String(mapped.r2_preview_key || studioMusicR2KeyFromUrl(mapped.google_drive_url) || "").trim();
@@ -3418,7 +3418,7 @@ export async function studioMusicR2Preview(request, env, mapped) {
   }
   return new Response(object.body, { status: 200, headers });
 }
-
+/*__STUDIO_WORKER_END:studioMusicR2Preview__*/
 
 export async function musicPreview(request, env, url) {
   const identity = accessIdentity(request);
@@ -3472,22 +3472,22 @@ export async function musicPreview(request, env, url) {
 }
 
 
-
+/*__STUDIO_WORKER_END:musicPreview__*/
 
 export function item4PreviewSettingValueExpr(settingName) {
   return `{{get(map(61.array; "setting_value"; "setting_name"; "${settingName}"); 1)}}`;
 }
-
+/*__STUDIO_WORKER_END:item4PreviewSettingValueExpr__*/
 
 export function item4PreviewR2KeyExpr(suffix) {
   return `${item4PreviewSettingValueExpr("STUDIO_PREVIEW_R2_PREFIX")}/item4/{{1.Production_Request_Record_ID}}/{{1.Transfer_ID}}${suffix}`;
 }
-
+/*__STUDIO_WORKER_END:item4PreviewR2KeyExpr__*/
 
 export function item4PreviewR2UrlExpr(suffix) {
   return `https://media.chicagoshining.com/${item4PreviewR2KeyExpr(suffix)}`;
 }
-
+/*__STUDIO_WORKER_END:item4PreviewR2UrlExpr__*/
 
 export function item4PreviewR2UploadModule(id, x, y, name, dataExpr, contentTypeExpr, suffix, moduleFilter = null) {
   const module = {
@@ -3526,7 +3526,7 @@ export function item4PreviewR2UploadModule(id, x, y, name, dataExpr, contentType
   if (moduleFilter) module.filter = moduleFilter;
   return module;
 }
-
+/*__STUDIO_WORKER_END:item4PreviewR2UploadModule__*/
 
 export function item4PreviewQueueReadyModule(id, x, y, name, uploadModuleId, suffix) {
   return {
@@ -3558,7 +3558,7 @@ export function item4PreviewQueueReadyModule(id, x, y, name, uploadModuleId, suf
     parameters: { __IMTCONN__: 9293192 },
   };
 }
-
+/*__STUDIO_WORKER_END:item4PreviewQueueReadyModule__*/
 
 export function item4PreviewRouteBlueprint() {
   const browserMasterExtensions = ["png", "jpg", "jpeg", "webp", "gif", "avif", "bmp"];
@@ -3738,7 +3738,7 @@ export function item4PreviewRouteBlueprint() {
   };
 }
 
-
+/*__STUDIO_WORKER_END:item4PreviewRouteBlueprint__*/
 
 export function item4ValidateGeneratedMakeBlueprint(flow, path = "flow") {
   if (!Array.isArray(flow)) {
@@ -3768,7 +3768,7 @@ export function item4ValidateGeneratedMakeBlueprint(flow, path = "flow") {
     }
   }
 }
-
+/*__STUDIO_WORKER_END:item4ValidateGeneratedMakeBlueprint__*/
 
 export function item4AssertPreviewBranchFilters(blueprint) {
   const required = [
@@ -3790,7 +3790,7 @@ export function item4AssertPreviewBranchFilters(blueprint) {
     }
   }
 }
-
+/*__STUDIO_WORKER_END:item4AssertPreviewBranchFilters__*/
 
 export function item4SourceAuthorityInterfaceRows() {
   return [
@@ -3800,7 +3800,7 @@ export function item4SourceAuthorityInterfaceRows() {
     {name:"Studio_Source_Composition_ID",type:"text",label:"Studio_Source_Composition_ID"},
   ];
 }
-
+/*__STUDIO_WORKER_END:item4SourceAuthorityInterfaceRows__*/
 
 export function item4CollectStringSlots(value, path = [], rows = []) {
   if (typeof value === "string") {
@@ -3816,14 +3816,14 @@ export function item4CollectStringSlots(value, path = [], rows = []) {
   }
   return rows;
 }
-
+/*__STUDIO_WORKER_END:item4CollectStringSlots__*/
 
 export function item4SetPath(root, path, value) {
   let cursor = root;
   for (let i=0;i<path.length-1;i++) cursor = cursor[path[i]];
   cursor[path[path.length-1]] = value;
 }
-
+/*__STUDIO_WORKER_END:item4SetPath__*/
 
 export function item4R2PromptSlot(module12) {
   const all = item4CollectStringSlots(module12?.mapper || {})
@@ -3846,7 +3846,7 @@ export function item4R2PromptSlot(module12) {
   });
   return canonical[0] || all[0] || null;
 }
-
+/*__STUDIO_WORKER_END:item4R2PromptSlot__*/
 
 export function item4FlattenMakeModules(flow, rows = []) {
   if (!Array.isArray(flow)) return rows;
@@ -3859,7 +3859,7 @@ export function item4FlattenMakeModules(flow, rows = []) {
   }
   return rows;
 }
-
+/*__STUDIO_WORKER_END:item4FlattenMakeModules__*/
 
 export function item4FindR2ContextModule(blueprint) {
   const exact = phase6FindModule(blueprint?.flow,3);
@@ -3869,7 +3869,7 @@ export function item4FindR2ContextModule(blueprint) {
       || modules.find(m => m?.module === "airtable:ActionGetRecord")
       || null;
 }
-
+/*__STUDIO_WORKER_END:item4FindR2ContextModule__*/
 
 export function item4FindR2AiModule(blueprint) {
   const exact = phase6FindModule(blueprint?.flow,12);
@@ -3877,7 +3877,7 @@ export function item4FindR2AiModule(blueprint) {
   const modules=item4FlattenMakeModules(blueprint?.flow);
   return modules.find(m => String(m?.module||"").toLowerCase().includes("openai") && item4R2PromptSlot(m)) || null;
 }
-
+/*__STUDIO_WORKER_END:item4FindR2AiModule__*/
 
 export function item4FindR2FailfastModule(blueprint) {
   const exact = phase6FindModule(blueprint?.flow,14);
@@ -3889,7 +3889,7 @@ export function item4FindR2FailfastModule(blueprint) {
   }) || null;
 }
 
-
+/*__STUDIO_WORKER_END:item4FindR2FailfastModule__*/
 
 export async function item4RecoverStaleR2BaselineReads(env, staleMs = 180000) {
   // GET_BLUEPRINT queue rows can remain Processing when the R2 blueprint is too
@@ -3934,7 +3934,7 @@ export async function item4RecoverStaleR2BaselineReads(env, staleMs = 180000) {
   }
   return { ok: true, recovered, inspected: rows.length };
 }
-
+/*__STUDIO_WORKER_END:item4RecoverStaleR2BaselineReads__*/
 
 export function deferItem4MakeHardening(ctx, env) {
   const work = item4EnsureMakeHardeningFromWorkspaceOpen(env).catch((error) => {
@@ -3942,7 +3942,7 @@ export function deferItem4MakeHardening(ctx, env) {
   });
   if (ctx && typeof ctx.waitUntil === "function") ctx.waitUntil(work);
 }
-
+/*__STUDIO_WORKER_END:deferItem4MakeHardening__*/
 
 export async function item4EnsureR2StudioExactSourceGuard(env) {
   if (pipelineStageBackend(env, "R2").mode === "python") {
@@ -4090,7 +4090,7 @@ export async function item4EnsureR2StudioExactSourceGuard(env) {
     throw error;
   }
 }
-
+/*__STUDIO_WORKER_END:item4EnsureR2StudioExactSourceGuard__*/
 
 export function item4P3SourceFieldInterfaceRows() {
   return [
@@ -4108,7 +4108,7 @@ export function item4P3SourceFieldInterfaceRows() {
     {name:"Studio_Source_Composition_ID",type:"text",label:"Studio_Source_Composition_ID"},
   ];
 }
-
+/*__STUDIO_WORKER_END:item4P3SourceFieldInterfaceRows__*/
 
 export async function item4EnsureP3StudioSourceAuthority(env) {
   const { makeApiBase, headers } = await phase6MakeApiConfig(env);
@@ -4230,7 +4230,7 @@ export async function item4EnsureP3StudioSourceAuthority(env) {
 }
 
 
-
+/*__STUDIO_WORKER_END:item4EnsureP3StudioSourceAuthority__*/
 
 export function item4P3SingleParentEnrichmentRecord() {
   return {
@@ -4244,7 +4244,7 @@ export function item4P3SingleParentEnrichmentRecord() {
     Output_Notes:`{{102.Output_Notes}}\nP3 v4.8 ${STUDIO_P3_REMOTION_HANDOFF_MARKER}: Multi-Photo / Instagram Carousel / Facebook Multi-Image Post stay Ready for Review; Instagram and Facebook Story plus other Remotion Studio outputs stay In Production with assets Selected so R3/R4 can render the 10-second Story teaser. Enrichment from Content Item {{101.Content_ID}}.`
   };
 }
-
+/*__STUDIO_WORKER_END:item4P3SingleParentEnrichmentRecord__*/
 
 export function item4P3Module103HasRemotionHandoff(mod) {
   const rec = mod?.mapper?.record || {};
@@ -4258,13 +4258,13 @@ export function item4P3Module103HasRemotionHandoff(mod) {
     && Object.prototype.hasOwnProperty.call(rec, "Asset_Selection_Status")
     && String(rec.Output_Notes || "").includes(STUDIO_P3_REMOTION_HANDOFF_MARKER);
 }
-
+/*__STUDIO_WORKER_END:item4P3Module103HasRemotionHandoff__*/
 
 export function item4ApplyP3RemotionHandoff(mod) {
   if (!mod?.mapper) throw new HttpError(409, "P3 module 103 is missing");
   mod.mapper.record = Object.assign({}, mod.mapper.record || {}, item4P3SingleParentEnrichmentRecord());
 }
-
+/*__STUDIO_WORKER_END:item4ApplyP3RemotionHandoff__*/
 
 export function item4PatchP3SingleParentBlueprint(blueprint) {
   if (!blueprint || typeof blueprint !== "object") throw new HttpError(502, "P3 single-parent patch source blueprint is unusable");
@@ -4305,7 +4305,7 @@ export function item4PatchP3SingleParentBlueprint(blueprint) {
   item4ValidateGeneratedMakeBlueprint(patched.flow);
   return {patched,already_ready:false};
 }
-
+/*__STUDIO_WORKER_END:item4PatchP3SingleParentBlueprint__*/
 
 export async function item4QueueP3SingleParentViaAdminBridge(env, sourceBlueprint, reason="direct-make-unavailable") {
   const built=item4PatchP3SingleParentBlueprint(sourceBlueprint);
@@ -4336,7 +4336,7 @@ export async function item4QueueP3SingleParentViaAdminBridge(env, sourceBlueprin
   }
   return {ok:true,already_ready:false,queued:true,via:"admin-queue",queue_record_id:queueRecordId,reason};
 }
-
+/*__STUDIO_WORKER_END:item4QueueP3SingleParentViaAdminBridge__*/
 
 export async function item4LatestP3BlueprintFromAdminQueue(env) {
   const formula=`AND({Scenario_ID}=${ITEM4_P3_SCENARIO_ID},{Action}="GET_BLUEPRINT",{Status}="Succeeded",{Result_JSON}!=BLANK())`;
@@ -4350,7 +4350,7 @@ export async function item4LatestP3BlueprintFromAdminQueue(env) {
   }
   throw new HttpError(404,"No successful P3 GET_BLUEPRINT result is available in Make Admin Queue for fallback hardening");
 }
-
+/*__STUDIO_WORKER_END:item4LatestP3BlueprintFromAdminQueue__*/
 
 export async function item4EnsureP3SingleParentRouteDirect(env) {
   const {makeApiBase,headers}=await phase6MakeApiConfig(env);
@@ -4374,7 +4374,7 @@ export async function item4EnsureP3SingleParentRouteDirect(env) {
     if(auditId){try{await airtableFetch(env,"Make Admin Queue",auditId,{method:"PATCH",body:JSON.stringify({fields:{Status:"Succeeded",Completed_At:new Date().toISOString(),Result_JSON:JSON.stringify({ok:true,worker_build:"0.10.20-native-photo-carousel",scenario_id:ITEM4_P3_SCENARIO_ID,live_name:live?.name||null})},typecast:true})});}catch{}}
     return {ok:true,already_ready:false,live_name:live?.name||patched.name};
   }catch(error){if(auditId){try{await airtableFetch(env,"Make Admin Queue",auditId,{method:"PATCH",body:JSON.stringify({fields:{Status:"Failed",Completed_At:new Date().toISOString(),Error_Message:error instanceof Error?error.message:String(error)},typecast:true})});}catch{}}throw error;}
-}
+}/*__STUDIO_WORKER_END:item4EnsureP3SingleParentRouteDirect__*/
 
 export async function item4RecordP3DirectDiagnostic(env, directError) {
   const now = new Date().toISOString();
@@ -4401,7 +4401,7 @@ export async function item4RecordP3DirectDiagnostic(env, directError) {
     console.warn("Could not persist P3 direct diagnostic", auditError);
   }
 }
-
+/*__STUDIO_WORKER_END:item4RecordP3DirectDiagnostic__*/
 
 export async function item4EnsureP3SingleParentRoute(env) {
   try {
@@ -4418,7 +4418,7 @@ export async function item4EnsureP3SingleParentRoute(env) {
   }
 }
 
-
+/*__STUDIO_WORKER_END:item4EnsureP3SingleParentRoute__*/
 
 export async function item4EnsureSmv1PreviewCacheWorker(env) {
   if (pipelineStageBackend(env, "SMV1").mode === "python") {
@@ -4695,7 +4695,7 @@ export async function item4EnsureSmv1PreviewCacheWorker(env) {
     throw error;
   }
 }
-
+/*__STUDIO_WORKER_END:item4EnsureSmv1PreviewCacheWorker__*/
 
 export async function item4PreviewPendingRows(env, recordId) {
   return listRecords(env, ITEM4_VARIANT_QUEUE_TABLE, {
@@ -4704,21 +4704,21 @@ export async function item4PreviewPendingRows(env, recordId) {
       `AND({Production_Request_Record_ID}='${String(recordId).replace(/'/g, "\\'")}',{Transfer_Status}='Ready',{Preview_Status}='Pending')`,
   });
 }
-
+/*__STUDIO_WORKER_END:item4PreviewPendingRows__*/
 
 export async function item4DrainPreviewCacheWorker(env, recordId, maxRuns = 30) {
   const pending = await item4PreviewPendingRows(env, recordId);
   if (!pending.length) return [];
   return item4PulseSmv1Python(env, recordId, maxRuns);
 }
-
+/*__STUDIO_WORKER_END:item4DrainPreviewCacheWorker__*/
 
 export function mediaAssetPreviewRecordIdFromPath(url) {
   const match = url.pathname.match(/^\/api\/media-assets\/(rec[A-Za-z0-9]+)\/(?:preview|stream)$/);
   if (!match) throw new HttpError(400, "Invalid media asset preview route");
   return match[1];
 }
-
+/*__STUDIO_WORKER_END:mediaAssetPreviewRecordIdFromPath__*/
 
 export async function fetchGoogleDriveInlineImage(record, request) {
   const fileId = googleDriveFileId(record);
@@ -4754,7 +4754,7 @@ export async function fetchGoogleDriveInlineImage(record, request) {
     `Google Drive image preview fetch failed (${lastResponse?.status || "unknown"})`
   );
 }
-
+/*__STUDIO_WORKER_END:fetchGoogleDriveInlineImage__*/
 
 export function copyDriveImageHeaders(upstream, record) {
   const headers = new Headers();
@@ -4770,7 +4770,7 @@ export function copyDriveImageHeaders(upstream, record) {
   return headers;
 }
 
-
+/*__STUDIO_WORKER_END:copyDriveImageHeaders__*/
 
 export async function item4PreviewQueueRowForMediaAsset(env, mediaAssetRecordId) {
   const safeId = String(mediaAssetRecordId || "").trim();
@@ -4791,7 +4791,7 @@ export async function item4PreviewQueueRowForMediaAsset(env, mediaAssetRecordId)
   };
   return [...rows].sort((a, b) => score(b) - score(a))[0] || null;
 }
-
+/*__STUDIO_WORKER_END:item4PreviewQueueRowForMediaAsset__*/
 
 export async function fetchStudioR2Preview(previewUrl, request) {
   const source = String(previewUrl || "").trim();
@@ -4809,7 +4809,7 @@ export async function fetchStudioR2Preview(previewUrl, request) {
   }
   return response;
 }
-
+/*__STUDIO_WORKER_END:fetchStudioR2Preview__*/
 
 export async function mediaAssetDriveThumbnailPreview(record, env, request, source = "drive-photo-thumbnail") {
   const driveId = googleDriveFileId(record);
@@ -4825,7 +4825,7 @@ export async function mediaAssetDriveThumbnailPreview(record, env, request, sour
   if (request.method === "HEAD") return new Response(null, { status: 200, headers });
   return new Response(grabbed.bytes, { status: 200, headers });
 }
-
+/*__STUDIO_WORKER_END:mediaAssetDriveThumbnailPreview__*/
 
 export async function mediaAssetImagePreview(request, env, url, authorization) {
   if (!authorization?.authenticated || !authorization?.authorized) {
@@ -4954,14 +4954,14 @@ export async function mediaAssetImagePreview(request, env, url, authorization) {
     headers: copyDriveImageHeaders(upstream, record),
   });
 }
-
+/*__STUDIO_WORKER_END:mediaAssetImagePreview__*/
 
 export function outputPreviewRecordIdFromPath(url) {
   const match = url.pathname.match(/^\/api\/outputs\/(rec[A-Za-z0-9]+)\/preview$/);
   if (!match) throw new HttpError(400, "Invalid output preview route");
   return match[1];
 }
-
+/*__STUDIO_WORKER_END:outputPreviewRecordIdFromPath__*/
 
 export async function mediaAssetVideoStream(request, env, url, authorization) {
   if (!authorization?.authenticated || !authorization?.authorized) {
@@ -4993,7 +4993,7 @@ export async function mediaAssetVideoStream(request, env, url, authorization) {
     headers: copyDriveVideoHeaders(upstream),
   });
 }
-
+/*__STUDIO_WORKER_END:mediaAssetVideoStream__*/
 
 export async function fetchGoogleDriveVideo(fileId, finalFileUrl, request, env = null) {
   if (!fileId) throw new HttpError(404, "Rendered preview file ID is not available");
@@ -5038,7 +5038,7 @@ export async function fetchGoogleDriveVideo(fileId, finalFileUrl, request, env =
 
   throw new HttpError(lastResponse?.status || 502, `Google Drive rendered preview fetch failed (${lastResponse?.status || "unknown"})`);
 }
-
+/*__STUDIO_WORKER_END:fetchGoogleDriveVideo__*/
 
 export function copyDriveVideoHeaders(upstream) {
   const headers = new Headers();
@@ -5054,7 +5054,7 @@ export function copyDriveVideoHeaders(upstream) {
   headers.delete("Content-Disposition");
   return headers;
 }
-
+/*__STUDIO_WORKER_END:copyDriveVideoHeaders__*/
 
 export async function fetchStudioPreviewVideo(previewUrl, request) {
   const source = String(previewUrl || "").trim();
@@ -5077,7 +5077,7 @@ export async function fetchStudioPreviewVideo(previewUrl, request) {
   }
   return response;
 }
-
+/*__STUDIO_WORKER_END:fetchStudioPreviewVideo__*/
 
 export function copyStudioPreviewHeaders(upstream, source = "cloudflare-r2-studio-preview") {
   const headers = new Headers();
@@ -5093,7 +5093,7 @@ export function copyStudioPreviewHeaders(upstream, source = "cloudflare-r2-studi
   headers.delete("Content-Disposition");
   return headers;
 }
-
+/*__STUDIO_WORKER_END:copyStudioPreviewHeaders__*/
 
 export async function outputPreview(request, env, url, authorization) {
   if (!authorization?.authorized) throw new HttpError(403, "Authorized Studio membership required");
@@ -5167,7 +5167,7 @@ export async function outputPreview(request, env, url, authorization) {
   return new Response(upstream.body, { status, headers });
 }
 
-
+/*__STUDIO_WORKER_END:outputPreview__*/
 
 export function phase6NarrationVoiceFallback(voiceId, voiceName) {
   const id = String(voiceId || "").trim();
@@ -5175,7 +5175,7 @@ export function phase6NarrationVoiceFallback(voiceId, voiceName) {
   if (id) return { voice_id: id, voice_name: name || id };
   return { voice_id: PHASE6_DEFAULT_VOICE_ID, voice_name: "Kate" };
 }
-
+/*__STUDIO_WORKER_END:phase6NarrationVoiceFallback__*/
 
 export async function phase6ResolveNarrationVoice(env, outputRecord, parentRecord = null) {
   const fromOutput = phase6NarrationVoiceFallback(
@@ -5230,7 +5230,7 @@ export async function phase6ResolveNarrationVoice(env, outputRecord, parentRecor
   }
   return fromOutput.voice_id ? fromOutput : { voice_id: PHASE6_DEFAULT_VOICE_ID, voice_name: "Kate" };
 }
-
+/*__STUDIO_WORKER_END:phase6ResolveNarrationVoice__*/
 
 export function phase6NarrationVoiceFromRequest(requestRecord, parentRecord = null) {
   const fromRequest = phase6NarrationVoiceFallback(
@@ -5244,42 +5244,42 @@ export function phase6NarrationVoiceFromRequest(requestRecord, parentRecord = nu
   );
   if (fromParent.voice_id && fromParent.voice_id !== PHASE6_DEFAULT_VOICE_ID) return fromParent;
   return fromRequest.voice_id ? fromRequest : (fromParent.voice_id ? fromParent : { voice_id: PHASE6_DEFAULT_VOICE_ID, voice_name: "Kate" });
-}
+}/*__STUDIO_WORKER_END:phase6NarrationVoiceFromRequest__*/
 
 export function phase6RecordIdFromPath(url) {
   const match = url.pathname.match(/^\/api\/outputs\/(rec[A-Za-z0-9]+)\/creative(?:\/review)?$/);
   if (!match) throw new HttpError(400, "Invalid Phase 6 creative route");
   return match[1];
 }
-
+/*__STUDIO_WORKER_END:phase6RecordIdFromPath__*/
 
 export function phase6ParseJson(value, fallback = null) {
   if (!value) return fallback;
   if (typeof value === "object") return value;
   try { return JSON.parse(String(value)); } catch { return fallback; }
 }
-
+/*__STUDIO_WORKER_END:phase6ParseJson__*/
 
 export function phase6Number(value, fallback = null) {
   if (value === null || value === undefined || value === "") return fallback;
   const n = Number(value);
   return Number.isFinite(n) ? n : fallback;
 }
-
+/*__STUDIO_WORKER_END:phase6Number__*/
 
 export function phase6Clamp(value, min, max, fallback) {
   const n = phase6Number(value, fallback);
   if (n === null || n === undefined) return fallback;
   return Math.max(min, Math.min(max, n));
 }
-
+/*__STUDIO_WORKER_END:phase6Clamp__*/
 
 export function phase6ResolvedVoiceoverVolume(record, fallback = 1) {
   const primary = f(record, "Voiceover_Volume");
   const render = f(record, "Voiceover_Render_Volume");
   return phase6Clamp(primary == null || primary === "" ? render : primary, 0, 1.25, fallback);
 }
-
+/*__STUDIO_WORKER_END:phase6ResolvedVoiceoverVolume__*/
 
 export function phase6AudioMixFieldsFromPayload(payload, current) {
   const audio = payload?.audio && typeof payload.audio === "object" ? payload.audio : {};
@@ -5305,12 +5305,12 @@ export function phase6AudioMixFieldsFromPayload(payload, current) {
     Music_Duck_Fade_Frames: duckFade,
   };
 }
-
+/*__STUDIO_WORKER_END:phase6AudioMixFieldsFromPayload__*/
 
 export function phase6ProductionMixAction(action) {
   return ["apply_audio_mix", "apply_mix", "remix", "changes", "changes_requested", "revise", "revision"].includes(String(action || ""));
 }
-
+/*__STUDIO_WORKER_END:phase6ProductionMixAction__*/
 
 export function phase6AssertProductionAudioMixAllowed(record) {
   if (Boolean(f(record, "Do_Not_Publish"))) {
@@ -5338,7 +5338,7 @@ export function phase6AssertProductionAudioMixAllowed(record) {
     throw new HttpError(409, "Audio mix can be changed only while this output is in review");
   }
 }
-
+/*__STUDIO_WORKER_END:phase6AssertProductionAudioMixAllowed__*/
 
 export function phase6AllowsProductionMixContinuation(record) {
   const renderStatus = String(f(record, "Render_Status") || "");
@@ -5350,7 +5350,7 @@ export function phase6AllowsProductionMixContinuation(record) {
   if (outputStatus === "In Production" && !phase6PreviewFulfillsCurrentReview(record)) return true;
   return false;
 }
-
+/*__STUDIO_WORKER_END:phase6AllowsProductionMixContinuation__*/
 
 export function phase6Bool(value, fallback = false) {
   if (value === null || value === undefined || value === "") return fallback;
@@ -5360,12 +5360,12 @@ export function phase6Bool(value, fallback = false) {
   if (["false", "0", "no", "off"].includes(text)) return false;
   return fallback;
 }
-
+/*__STUDIO_WORKER_END:phase6Bool__*/
 
 export function phase6Text(value, max = 10000) {
   return String(value ?? "").trim().slice(0, max);
 }
-
+/*__STUDIO_WORKER_END:phase6Text__*/
 
 export function phase6VariantForRatio(slide, ratio) {
   if (ratio === "4:5") return f(slide, "Asset_4x5_Public_URL") || f(slide, "Asset_4x5_File_URL");
@@ -5373,14 +5373,14 @@ export function phase6VariantForRatio(slide, ratio) {
   if (ratio === "1:1") return f(slide, "Asset_1x1_Public_URL") || f(slide, "Asset_1x1_File_URL");
   return null;
 }
-
+/*__STUDIO_WORKER_END:phase6VariantForRatio__*/
 
 export function phase6SlidePreviewUrl(slide, ratio) {
   return phase6VariantForRatio(slide, ratio) ||
     f(slide, "Final Image URL") || f(slide, "Watermarked Image URL") ||
     f(slide, "Current Image URL") || f(slide, "AI Image URL") || null;
 }
-
+/*__STUDIO_WORKER_END:phase6SlidePreviewUrl__*/
 
 export function mapPhase6CreativeSlide(slide, targetRatio = null, defaultVoiceoverVolume = 1, platform = "", preferredVoice = null) {
   const directives = phase6ParseJson(f(slide, "Creative_Directives_JSON"), {}) || {};
@@ -5470,7 +5470,7 @@ export function mapPhase6CreativeSlide(slide, targetRatio = null, defaultVoiceov
     creative_directives_raw: f(slide, "Creative_Directives_JSON"),
   };
 }
-
+/*__STUDIO_WORKER_END:mapPhase6CreativeSlide__*/
 
 export function phase6VirtualSlidesFromSelectedAssets(outputRecord, preferredVoice = null) {
   const parsed = phase6ParseJson(f(outputRecord, "Selected_Assets_JSON"), null) || {};
@@ -5548,7 +5548,7 @@ export function phase6VirtualSlidesFromSelectedAssets(outputRecord, preferredVoi
     };
   }).sort((a, b) => Number(a.order || 0) - Number(b.order || 0));
 }
-
+/*__STUDIO_WORKER_END:phase6VirtualSlidesFromSelectedAssets__*/
 
 export async function phase6SlidesForOutput(env, outputRecord, preferredVoice = null) {
   const narration = preferredVoice || await phase6ResolveNarrationVoice(env, outputRecord);
@@ -5561,7 +5561,7 @@ export async function phase6SlidesForOutput(env, outputRecord, preferredVoice = 
   return records.map(record => mapPhase6CreativeSlide(record, ratio, defaultVoiceoverVolume, platform, narration))
     .sort((a, b) => Number(a.order || 0) - Number(b.order || 0));
 }
-
+/*__STUDIO_WORKER_END:phase6SlidesForOutput__*/
 
 export async function phase6CachedVoiceCatalog(env) {
   let records = [];
@@ -5596,7 +5596,7 @@ export async function phase6CachedVoiceCatalog(env) {
   }
   return voices;
 }
-
+/*__STUDIO_WORKER_END:phase6CachedVoiceCatalog__*/
 
 export function mapElevenLabsVoice(voice) {
   const labels = voice?.labels && typeof voice.labels === "object" ? voice.labels : {};
@@ -5617,7 +5617,7 @@ export function mapElevenLabsVoice(voice) {
     source: "elevenlabs-live",
   };
 }
-
+/*__STUDIO_WORKER_END:mapElevenLabsVoice__*/
 
 export function phase6ElevenLabsErrorDetail(status, body) {
   const detail = body?.detail;
@@ -5631,7 +5631,7 @@ export function phase6ElevenLabsErrorDetail(status, body) {
   if (typeof message === "string" && message.trim()) return message.trim().slice(0, 240);
   return `ElevenLabs request failed (${status})`;
 }
-
+/*__STUDIO_WORKER_END:phase6ElevenLabsErrorDetail__*/
 
 export async function phase6FetchElevenLabsJson(env, path) {
   const apiKey = String(env.ELEVENLABS_API_KEY || "").trim();
@@ -5651,12 +5651,12 @@ export async function phase6FetchElevenLabsJson(env, path) {
     error: response.ok ? null : phase6ElevenLabsErrorDetail(response.status, body),
   };
 }
-
+/*__STUDIO_WORKER_END:phase6FetchElevenLabsJson__*/
 
 export function phase6CollectElevenLabsVoices(body) {
   return (Array.isArray(body?.voices) ? body.voices : []).map(mapElevenLabsVoice).filter(Boolean);
 }
-
+/*__STUDIO_WORKER_END:phase6CollectElevenLabsVoices__*/
 
 export async function phase6LiveElevenLabsVoices(env) {
   const apiKey = String(env.ELEVENLABS_API_KEY || "").trim();
@@ -5704,7 +5704,7 @@ export async function phase6LiveElevenLabsVoices(env) {
     return { configured: true, voices: [], error: error instanceof Error ? error.message : "ElevenLabs voice catalog unavailable", source: null };
   }
 }
-
+/*__STUDIO_WORKER_END:phase6LiveElevenLabsVoices__*/
 
 export async function phase6VoiceCatalog(env) {
   const cached = await phase6CachedVoiceCatalog(env);
@@ -5731,7 +5731,7 @@ export async function phase6VoiceCatalog(env) {
     default_voice_id: PHASE6_DEFAULT_VOICE_ID,
   };
 }
-
+/*__STUDIO_WORKER_END:phase6VoiceCatalog__*/
 
 export async function listPhase6Voices(request, env, authorization) {
   const catalog = await phase6VoiceCatalog(env);
@@ -5743,7 +5743,7 @@ export async function listPhase6Voices(request, env, authorization) {
     make_mapping: "finalized-server-side-on-creative-save",
   });
 }
-
+/*__STUDIO_WORKER_END:listPhase6Voices__*/
 
 export async function phase6VoicePreviewUrl(env, voiceId) {
   const apiKey = String(env.ELEVENLABS_API_KEY || "").trim();
@@ -5755,7 +5755,7 @@ export async function phase6VoicePreviewUrl(env, voiceId) {
   const catalog = await phase6VoiceCatalog(env);
   return catalog.voices.find((voice) => voice.id === voiceId)?.preview_url || null;
 }
-
+/*__STUDIO_WORKER_END:phase6VoicePreviewUrl__*/
 
 export async function phase6VoicePreview(request, env, url) {
   const identity = accessIdentity(request);
@@ -5794,7 +5794,7 @@ export async function phase6VoicePreview(request, env, url) {
   }
   return new Response(upstream.body, { status: 200, headers });
 }
-
+/*__STUDIO_WORKER_END:phase6VoicePreview__*/
 
 export function phase6FindModule(flow, moduleId) {
   for (const item of Array.isArray(flow) ? flow : []) {
@@ -5808,7 +5808,7 @@ export function phase6FindModule(flow, moduleId) {
   }
   return null;
 }
-
+/*__STUDIO_WORKER_END:phase6FindModule__*/
 
 export async function phase6EnsureP0202DynamicVoiceMapping(env, authorization) {
   const settings = await listPipelineSettingsForAdmin(env);
@@ -5908,7 +5908,7 @@ export async function phase6EnsureP0202DynamicVoiceMapping(env, authorization) {
     throw new HttpError(502, error instanceof Error ? error.message : "P020-2 dynamic voice migration failed");
   }
 }
-
+/*__STUDIO_WORKER_END:phase6EnsureP0202DynamicVoiceMapping__*/
 
 export function mapPhase6CreativeOutput(record) {
   const manifest = phase6ParseJson(f(record, "Creative_Render_Manifest_JSON"), null);
@@ -5968,7 +5968,7 @@ export function mapPhase6CreativeOutput(record) {
     creative_manifest: manifest,
   };
 }
-
+/*__STUDIO_WORKER_END:mapPhase6CreativeOutput__*/
 
 export async function getOutputCreative(request, env, url, authorization) {
   const id = phase6RecordIdFromPath(url);
@@ -6011,13 +6011,13 @@ export async function getOutputCreative(request, env, url, authorization) {
     },
   });
 }
-
+/*__STUDIO_WORKER_END:getOutputCreative__*/
 
 export function phase6Select(value, allowed, fallback) {
   const text = phase6Text(value, 100);
   return allowed.includes(text) ? text : fallback;
 }
-
+/*__STUDIO_WORKER_END:phase6Select__*/
 
 export function phase6SlideDirectiveFromPayload(input, existing) {
   const old = phase6ParseJson(f(existing, "Creative_Directives_JSON"), {}) || {};
@@ -6096,7 +6096,7 @@ export function phase6SlideDirectiveFromPayload(input, existing) {
     },
   };
 }
-
+/*__STUDIO_WORKER_END:phase6SlideDirectiveFromPayload__*/
 
 export async function updateOutputCreative(request, env, url, authorization) {
   let payload;
@@ -6293,7 +6293,7 @@ export async function updateOutputCreative(request, env, url, authorization) {
   });
 }
 
-
+/*__STUDIO_WORKER_END:updateOutputCreative__*/
 
 export function phase6DimensionsForRatio(ratio) {
   if (ratio === "16:9") return { width: 1920, height: 1080 };
@@ -6301,13 +6301,13 @@ export function phase6DimensionsForRatio(ratio) {
   if (ratio === "4:5") return { width: 1080, height: 1350 };
   return { width: 1080, height: 1920 };
 }
-
+/*__STUDIO_WORKER_END:phase6DimensionsForRatio__*/
 
 export function phase6AssetSourceForSlide(slide, ratio) {
   if (slide?.variants?.[ratio]) return `prepared_${String(ratio).replace(":", "x")}`;
   return "fallback_source";
 }
-
+/*__STUDIO_WORKER_END:phase6AssetSourceForSlide__*/
 
 export function phase6TitleEditIdentity(overlay, _durationSeconds = 4) {
   const o = overlay && typeof overlay === "object" ? overlay : {};
@@ -6325,7 +6325,7 @@ export function phase6TitleEditIdentity(overlay, _durationSeconds = 4) {
     Math.max(start, end),
   ].join("|");
 }
-
+/*__STUDIO_WORKER_END:phase6TitleEditIdentity__*/
 
 export function phase6NextTitleVersion(oldOverlay, newOverlay, durationSeconds = 4) {
   const previous = oldOverlay && typeof oldOverlay === "object" ? oldOverlay : {};
@@ -6337,7 +6337,7 @@ export function phase6NextTitleVersion(oldOverlay, newOverlay, durationSeconds =
   }
   return hadVersion ? prevVersion + 1 : 1;
 }
-
+/*__STUDIO_WORKER_END:phase6NextTitleVersion__*/
 
 export function phase6TitleLockState({ reviewStatus = "", lock = null, overlayChanged = false, unlockRequested = false } = {}) {
   const stored = lock && typeof lock === "object" ? lock : {};
@@ -6351,7 +6351,7 @@ export function phase6TitleLockState({ reviewStatus = "", lock = null, overlayCh
   }
   return { schema: "studio-title-edit-v1", locked, allow: true, code: locked ? "locked-unchanged" : "unlocked" };
 }
-
+/*__STUDIO_WORKER_END:phase6TitleLockState__*/
 
 export function phase6TitleLockView(record, slides = []) {
   const settings = phase6ParseJson(f(record, "Studio_Creative_Settings_JSON"), {}) || {};
@@ -6372,7 +6372,7 @@ export function phase6TitleLockView(record, slides = []) {
     unlocked_at: lock.unlocked_at || null,
   };
 }
-
+/*__STUDIO_WORKER_END:phase6TitleLockView__*/
 
 export function phase6TitleRenderInput(slide, options = {}) {
   const overlay = phase6RenderOverlayFromSlide(slide, options);
@@ -6395,7 +6395,7 @@ export function phase6TitleRenderInput(slide, options = {}) {
   ].join("|");
   return overlay;
 }
-
+/*__STUDIO_WORKER_END:phase6TitleRenderInput__*/
 
 export function phase6SlidesWithTitleRenderInput(outputRecord, slides = []) {
   const platform = String(f(outputRecord, "Platform") || "").trim();
@@ -6409,7 +6409,7 @@ export function phase6SlidesWithTitleRenderInput(outputRecord, slides = []) {
     }),
   }));
 }
-
+/*__STUDIO_WORKER_END:phase6SlidesWithTitleRenderInput__*/
 
 export function phase6RenderOverlayFromSlide(slide, options = {}) {
   const o = slide?.overlay || {};
@@ -6454,7 +6454,7 @@ export function phase6RenderOverlayFromSlide(slide, options = {}) {
   }
   return overlay;
 }
-
+/*__STUDIO_WORKER_END:phase6RenderOverlayFromSlide__*/
 
 export async function phase6BuildPreviewRenderPackage(env, outputRecord) {
   const mapped = mapPhase6CreativeOutput(outputRecord);
@@ -6617,7 +6617,7 @@ export async function phase6BuildPreviewRenderPackage(env, outputRecord) {
 
   return { clips, totalFrames, filename, manifest, composition, musicUrl };
 }
-
+/*__STUDIO_WORKER_END:phase6BuildPreviewRenderPackage__*/
 
 export function phase6PendingVoicePrepSlides(slides) {
   return (Array.isArray(slides) ? slides : [])
@@ -6637,7 +6637,7 @@ export function phase6PendingVoicePrepSlides(slides) {
       reason: !slide?.voiceover?.url ? "missing_url" : "missing_duration",
     }));
 }
-
+/*__STUDIO_WORKER_END:phase6PendingVoicePrepSlides__*/
 
 export async function phase6EnsureP0202ProductionGeneric(env, authorization) {
   const { makeApiBase, headers } = await phase6MakeApiConfig(env);
@@ -6752,7 +6752,7 @@ export async function phase6EnsureP0202ProductionGeneric(env, authorization) {
     throw error;
   }
 }
-
+/*__STUDIO_WORKER_END:phase6EnsureP0202ProductionGeneric__*/
 
 export function phase6Mp3DurationSeconds(bytes) {
   if (!(bytes instanceof Uint8Array) || bytes.length < 4) return null;
@@ -6789,7 +6789,7 @@ export function phase6Mp3DurationSeconds(bytes) {
   }
   return frames > 0 && duration > 0 ? duration : null;
 }
-
+/*__STUDIO_WORKER_END:phase6Mp3DurationSeconds__*/
 
 export async function phase6MeasureAndPersistMissingVoiceDurations(env, outputRecord) {
   const slides = await phase6SlidesForOutput(env, outputRecord);
@@ -6817,24 +6817,24 @@ export async function phase6MeasureAndPersistMissingVoiceDurations(env, outputRe
   }
   return measured;
 }
-
+/*__STUDIO_WORKER_END:phase6MeasureAndPersistMissingVoiceDurations__*/
 
 export async function phase6ScenarioState(env, scenarioId) {
   const body = await phase6MakeApiJson(env, `/scenarios/${scenarioId}`, { method: "GET" });
   const scenario = body?.scenario || body?.response?.scenario || body || {};
   return { isActive: scenario?.isActive === true, scenario };
 }
-
+/*__STUDIO_WORKER_END:phase6ScenarioState__*/
 
 export async function phase6SetScenarioActive(env, scenarioId, active) {
   await phase6MakeApiJson(env, `/scenarios/${scenarioId}/${active ? "start" : "stop"}`, { method: "POST" });
 }
-
+/*__STUDIO_WORKER_END:phase6SetScenarioActive__*/
 
 export function phase6RunAlreadyActiveError(error) {
   return /422|already.*running|currently.*running|active execution/i.test(String(error?.message || error || ""));
 }
-
+/*__STUDIO_WORKER_END:phase6RunAlreadyActiveError__*/
 
 export async function phase6PulseOnDemandScenario(env, scenarioId, options = {}) {
   void env;
@@ -6863,7 +6863,7 @@ export async function phase6PulseOnDemandScenario(env, scenarioId, options = {})
     }
   }
 }
-
+/*__STUDIO_WORKER_END:phase6PulseOnDemandScenario__*/
 
 export async function phase6WaitForOutputStatus(env, outputRecordId, predicate, timeoutMs = 90000, pollMs = 2500) {
   const started = Date.now();
@@ -6875,7 +6875,7 @@ export async function phase6WaitForOutputStatus(env, outputRecordId, predicate, 
   }
   return { matched: false, record };
 }
-
+/*__STUDIO_WORKER_END:phase6WaitForOutputStatus__*/
 
 export async function phase6AutoRunRenderPipeline(env, outputRecordId) {
   const r4State = await phase6ScenarioState(env, PHASE6_R4_SCENARIO_ID);
@@ -6935,7 +6935,7 @@ export async function phase6AutoRunRenderPipeline(env, outputRecordId) {
     try { if (!r5State.isActive) await phase6SetScenarioActive(env, PHASE6_R5_SCENARIO_ID, false); } catch {}
   }
 }
-
+/*__STUDIO_WORKER_END:phase6AutoRunRenderPipeline__*/
 
 export async function phase6StopScenarioVerified(env, scenarioId, attempts = 3) {
   let lastError = null;
@@ -6976,7 +6976,7 @@ export async function phase6StopScenarioVerified(env, scenarioId, attempts = 3) 
   }
   return { inactive: false, attempts, error: lastError instanceof Error ? lastError.message : null };
 }
-
+/*__STUDIO_WORKER_END:phase6StopScenarioVerified__*/
 
 export async function phase6PulseInactiveScenario(env, scenarioId, outputRecordId, predicate, waitMs = 9000) {
   const before = await phase6ScenarioState(env, scenarioId);
@@ -7023,13 +7023,13 @@ export async function phase6PulseInactiveScenario(env, scenarioId, outputRecordI
     if (!cleanup.inactive) console.error(`Phase 6 could not restore scenario ${scenarioId} inactive`, cleanup);
   }
 }
-
+/*__STUDIO_WORKER_END:phase6PulseInactiveScenario__*/
 
 export function phase6TimeMs(value) {
   const ms = Date.parse(String(value || ""));
   return Number.isFinite(ms) ? ms : null;
 }
-
+/*__STUDIO_WORKER_END:phase6TimeMs__*/
 
 export function phase6CompactTimestampMs(value) {
   const match = String(value || "").match(/(20\d{12})/);
@@ -7038,7 +7038,7 @@ export function phase6CompactTimestampMs(value) {
   const iso = `${s.slice(0,4)}-${s.slice(4,6)}-${s.slice(6,8)}T${s.slice(8,10)}:${s.slice(10,12)}:${s.slice(12,14)}Z`;
   return phase6TimeMs(iso);
 }
-
+/*__STUDIO_WORKER_END:phase6CompactTimestampMs__*/
 
 export function phase6CurrentRenderStartedAfterReview(record) {
   const requestedAt = phase6TimeMs(f(record, "Review_Decision_At"));
@@ -7046,7 +7046,7 @@ export function phase6CurrentRenderStartedAfterReview(record) {
   const jobAt = phase6CompactTimestampMs(f(record, "Remotion_Job_ID"));
   return jobAt !== null && jobAt >= requestedAt - 5000;
 }
-
+/*__STUDIO_WORKER_END:phase6CurrentRenderStartedAfterReview__*/
 
 export function phase6CurrentFinalFileAfterReview(record) {
   const requestedAt = phase6TimeMs(f(record, "Review_Decision_At"));
@@ -7054,7 +7054,7 @@ export function phase6CurrentFinalFileAfterReview(record) {
   const fileAt = phase6CompactTimestampMs(f(record, "Final_File_Name"));
   return fileAt !== null && fileAt >= requestedAt - 5000;
 }
-
+/*__STUDIO_WORKER_END:phase6CurrentFinalFileAfterReview__*/
 
 export function phase6PreviewFulfillsCurrentReview(record) {
   const renderStatus = String(f(record, "Render_Status") || "");
@@ -7073,7 +7073,7 @@ export function phase6PreviewFulfillsCurrentReview(record) {
   if (requestedAt === null || previewAt === null) return false;
   return previewAt >= requestedAt;
 }
-
+/*__STUDIO_WORKER_END:phase6PreviewFulfillsCurrentReview__*/
 
 export async function phase6RestoreProductionReviewReady(env, record) {
   if (Boolean(f(record, "Do_Not_Publish"))) return record;
@@ -7102,7 +7102,7 @@ export async function phase6RestoreProductionReviewReady(env, record) {
     }),
   });
 }
-
+/*__STUDIO_WORKER_END:phase6RestoreProductionReviewReady__*/
 
 export async function inspectRemotionOrCloudConvertStatus(statusUrl) {
   const url = String(statusUrl || "").trim();
@@ -7123,7 +7123,7 @@ export async function inspectRemotionOrCloudConvertStatus(statusUrl) {
     return { still_running: false, terminal: false, status: "unreachable" };
   }
 }
-
+/*__STUDIO_WORKER_END:inspectRemotionOrCloudConvertStatus__*/
 
 export function phase6RenderHandoffState(record) {
   const renderStatus = String(f(record, "Render_Status") || "");
@@ -7136,7 +7136,7 @@ export function phase6RenderHandoffState(record) {
   if (renderStatus === "Rendered" && phase6CurrentRenderStartedAfterReview(record)) return "finalizing";
   return "render_prep_needed";
 }
-
+/*__STUDIO_WORKER_END:phase6RenderHandoffState__*/
 
 export function phase6CreativeMixRevisionInFlight(record) {
   const renderStatus = String(f(record, "Render_Status") || "").trim();
@@ -7148,7 +7148,7 @@ export function phase6CreativeMixRevisionInFlight(record) {
   if (outputStatus === "In Production") return true;
   return false;
 }
-
+/*__STUDIO_WORKER_END:phase6CreativeMixRevisionInFlight__*/
 
 export function phase6CreativeHandoffStatus(record, slides = []) {
   const reviewStatus = String(f(record, "Review_Status") || "");
@@ -7213,7 +7213,7 @@ export function phase6CreativeHandoffStatus(record, slides = []) {
       : current ? current.detail : "No creative-change handoff is active.",
   };
 }
-
+/*__STUDIO_WORKER_END:phase6CreativeHandoffStatus__*/
 
 export async function getOutputCreativeHandoffStatus(request, env, url, authorization) {
   const match = url.pathname.match(/^\/api\/outputs\/(rec[A-Za-z0-9]+)\/creative\/handoff\/status$/);
@@ -7230,7 +7230,7 @@ export async function getOutputCreativeHandoffStatus(request, env, url, authoriz
     output: mapPhase6CreativeOutput(record),
   });
 }
-
+/*__STUDIO_WORKER_END:getOutputCreativeHandoffStatus__*/
 
 export async function phase6AdvanceRenderPipelineShort(env, outputRecordId) {
   let current = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, outputRecordId);
@@ -7321,7 +7321,7 @@ export async function phase6AdvanceRenderPipelineShort(env, outputRecordId) {
 
   return { completed: false, handoff_state: state, record: current };
 }
-
+/*__STUDIO_WORKER_END:phase6AdvanceRenderPipelineShort__*/
 
 export async function phase6EnsureRenderPackageForContinuation(env, outputRecord) {
   const status = String(f(outputRecord, "Render_Status") || "");
@@ -7357,7 +7357,7 @@ export async function phase6EnsureRenderPackageForContinuation(env, outputRecord
     }),
   });
 }
-
+/*__STUDIO_WORKER_END:phase6EnsureRenderPackageForContinuation__*/
 
 export async function continueOutputCreativeHandoff(request, env, url, authorization) {
   const match = url.pathname.match(/^\/api\/outputs\/(rec[A-Za-z0-9]+)\/creative\/render\/continue$/);
@@ -7428,13 +7428,13 @@ export async function continueOutputCreativeHandoff(request, env, url, authoriza
       : (step.error || step.message || "Studio is continuing the rerender automatically.")),
   });
 }
-
+/*__STUDIO_WORKER_END:continueOutputCreativeHandoff__*/
 
 export async function phase6MakeApiConfig(env) {
   void env;
   throw new HttpError(410, "Make.com is retired. Pipeline stages run on the Python runner.");
 }
-
+/*__STUDIO_WORKER_END:phase6MakeApiConfig__*/
 
 export async function phase6MakeApiJson(env, path, init = {}) {
   const { makeApiBase, headers } = await phase6MakeApiConfig(env);
@@ -7454,7 +7454,7 @@ export async function phase6MakeApiJson(env, path, init = {}) {
   }
   return body;
 }
-
+/*__STUDIO_WORKER_END:phase6MakeApiJson__*/
 
 export async function phase6EnsureScenarioActive(env, scenarioId) {
   const body = await phase6MakeApiJson(env, `/scenarios/${scenarioId}`, { method: "GET" });
@@ -7463,7 +7463,7 @@ export async function phase6EnsureScenarioActive(env, scenarioId) {
   const started = await phase6MakeApiJson(env, `/scenarios/${scenarioId}/start`, { method: "POST" });
   return started?.scenario || started?.response?.scenario || started || scenario;
 }
-
+/*__STUDIO_WORKER_END:phase6EnsureScenarioActive__*/
 
 export function cadenceScheduleSync(ctx, env, options = {}) {
   const run = syncProductionCadence(env, options).catch((error) => {
@@ -7472,7 +7472,7 @@ export function cadenceScheduleSync(ctx, env, options = {}) {
   if (ctx && typeof ctx.waitUntil === "function") ctx.waitUntil(run);
   return run;
 }
-
+/*__STUDIO_WORKER_END:cadenceScheduleSync__*/
 
 export async function studioHealPromotedMissingFanout(env, { limit = 8 } = {}) {
   const requests = await listRecords(env, PRODUCTION_REQUEST_TABLE, {
@@ -7536,7 +7536,7 @@ export async function studioHealPromotedMissingFanout(env, { limit = 8 } = {}) {
   if (healed.length) console.log("Studio promoted fanout heal", JSON.stringify({ count: healed.length, healed }));
   return healed;
 }
-
+/*__STUDIO_WORKER_END:studioHealPromotedMissingFanout__*/
 
 export function continueParkedProductionAfterPromote(ctx, env, requestId = null) {
   const run = (async () => {
@@ -7563,7 +7563,7 @@ export function continueParkedProductionAfterPromote(ctx, env, requestId = null)
   if (ctx && typeof ctx.waitUntil === "function") ctx.waitUntil(run);
   return run;
 }
-
+/*__STUDIO_WORKER_END:continueParkedProductionAfterPromote__*/
 
 export async function cadenceQueueHasWork(env, tableId, query) {
   try {
@@ -7578,7 +7578,7 @@ export async function cadenceQueueHasWork(env, tableId, query) {
     return false;
   }
 }
-
+/*__STUDIO_WORKER_END:cadenceQueueHasWork__*/
 
 export async function cadenceRepairInProgress(env) {
   try {
@@ -7591,7 +7591,7 @@ export async function cadenceRepairInProgress(env) {
     return false;
   }
 }
-
+/*__STUDIO_WORKER_END:cadenceRepairInProgress__*/
 
 export async function pulseStudioP3ForPlannedOutputs(env) {
   const rows = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
@@ -7620,7 +7620,7 @@ export async function pulseStudioP3ForPlannedOutputs(env) {
   }
   return pulses;
 }
-
+/*__STUDIO_WORKER_END:pulseStudioP3ForPlannedOutputs__*/
 
 export async function cadenceHasRenderWork(env) {
   const outputTable = env.AIRTABLE_OUTPUT_TABLE_ID;
@@ -7634,7 +7634,7 @@ export async function cadenceHasRenderWork(env) {
   ]);
   return checks.some(Boolean);
 }
-
+/*__STUDIO_WORKER_END:cadenceHasRenderWork__*/
 
 export function studioFirstLinkedId(value) {
   const rows = Array.isArray(value) ? value : [value];
@@ -7645,7 +7645,7 @@ export function studioFirstLinkedId(value) {
   }
   return null;
 }
-
+/*__STUDIO_WORKER_END:studioFirstLinkedId__*/
 
 export function studioOutputIsPhotoSequenceRoute(record) {
   if (studioOutputIsNativePhotoRoute(
@@ -7655,21 +7655,21 @@ export function studioOutputIsPhotoSequenceRoute(record) {
   )) return true;
   return String(f(record, "Composition_ID") || "").trim() === "ChicagoShiningPhotoSequence";
 }
-
+/*__STUDIO_WORKER_END:studioOutputIsPhotoSequenceRoute__*/
 
 export function studioOutputIsStoryRoute(record) {
   const format = String(f(record, "Format") || "").trim();
   const studioType = String(f(record, "Studio_Output_Type") || "").trim();
   return format === "Story" || studioType === "Story";
 }
-
+/*__STUDIO_WORKER_END:studioOutputIsStoryRoute__*/
 
 export function studioClipLooksLikeVideo(clip) {
   const url = String(clip?.src || clip?.url || "");
   const name = String(clip?.asset_name || clip?.file_name || "");
   return /\.(mp4|mov|webm|m4v)(\?|$)/i.test(url) || /\.(mp4|mov|webm|m4v)$/i.test(name);
 }
-
+/*__STUDIO_WORKER_END:studioClipLooksLikeVideo__*/
 
 export function studioPhotoSequenceNeedsContainHeal(po) {
   if (studioOutputIsStoryRoute(po)) return false;
@@ -7693,7 +7693,7 @@ export function studioPhotoSequenceNeedsContainHeal(po) {
     return false;
   });
 }
-
+/*__STUDIO_WORKER_END:studioPhotoSequenceNeedsContainHeal__*/
 
 export async function studioContinuationApplyInspectAction(env, po, result) {
   const action = String(result?.action || "");
@@ -7717,7 +7717,7 @@ export async function studioContinuationApplyInspectAction(env, po, result) {
   }
   return null;
 }
-
+/*__STUDIO_WORKER_END:studioContinuationApplyInspectAction__*/
 
 export function studioOutputNeedsRemotionPackage(record) {
   if (studioOutputIsNativePhotoRoute(
@@ -7729,14 +7729,14 @@ export function studioOutputNeedsRemotionPackage(record) {
   if (!/^ready for review$/i.test(String(f(record, "Output_Status") || ""))) return false;
   return !String(f(record, "Final_File_URL") || "").trim();
 }
-
+/*__STUDIO_WORKER_END:studioOutputNeedsRemotionPackage__*/
 
 export function studioOutputIsTerminalForContinuation(record) {
   const status = String(f(record, "Output_Status") || "");
   const publish = String(f(record, "Publish_Status") || "");
   return /published/i.test(status) || /published/i.test(publish) || /approved for publishing/i.test(status);
 }
-
+/*__STUDIO_WORKER_END:studioOutputIsTerminalForContinuation__*/
 
 export function studioOutputWrongVideoSelectorPath(record) {
   const selection = String(f(record, "Asset_Selection_Status") || "");
@@ -7744,7 +7744,7 @@ export function studioOutputWrongVideoSelectorPath(record) {
     || Boolean(f(record, "Asset_Selection_Retry_Eligible"))
     || /partial match/i.test(String(f(record, "Asset_Match_Status") || ""));
 }
-
+/*__STUDIO_WORKER_END:studioOutputWrongVideoSelectorPath__*/
 
 export function studioContinuationClearRetryFields() {
   return {
@@ -7753,7 +7753,7 @@ export function studioContinuationClearRetryFields() {
     Final_File_Error_Message: null,
   };
 }
-
+/*__STUDIO_WORKER_END:studioContinuationClearRetryFields__*/
 
 export async function resetEmptyP3RemotionHandoffForR2(env) {
   const rows = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
@@ -7781,7 +7781,7 @@ export async function resetEmptyP3RemotionHandoffForR2(env) {
   }
   return { key: "R2-requeue", reset };
 }
-
+/*__STUDIO_WORKER_END:resetEmptyP3RemotionHandoffForR2__*/
 
 export async function studioContinuationLoadContext(env, po, cache) {
   const outputRowId = studioFirstLinkedId(f(po, "Production_Request_Output"));
@@ -7808,7 +7808,7 @@ export async function studioContinuationLoadContext(env, po, cache) {
   const effective = await buildOutputWorkItemEffective(env, outputRow, requestRecord, parent, cache.profiles.get(parentId));
   return { outputRow, requestRecord, parent, effective };
 }
-
+/*__STUDIO_WORKER_END:studioContinuationLoadContext__*/
 
 export async function studioContinuationStampPackage(env, po, context) {
   const { outputRow, requestRecord, parent, effective } = context;
@@ -7935,7 +7935,7 @@ export async function studioContinuationStampPackage(env, po, context) {
     body: JSON.stringify({ fields, typecast: true }),
   });
 }
-
+/*__STUDIO_WORKER_END:studioContinuationStampPackage__*/
 
 export async function studioContinuationInspectOutput(env, po, cache) {
   if (studioOutputIsTerminalForContinuation(po)) return { action: "stop", reason: "terminal" };
@@ -8223,7 +8223,7 @@ export async function studioContinuationInspectOutput(env, po, cache) {
 
   return { action: "skip", reason: "no_package" };
 }
-
+/*__STUDIO_WORKER_END:studioContinuationInspectOutput__*/
 
 export async function listStudioContinuationCandidates(env, options = {}) {
   const contentItemId = String(options.contentItemId || "").trim();
@@ -8277,7 +8277,7 @@ export async function listStudioContinuationCandidates(env, options = {}) {
     return left === 0 ? aId - bId : bId - aId;
   });
 }
-
+/*__STUDIO_WORKER_END:listStudioContinuationCandidates__*/
 
 export async function pulseStudioContinuationJobs(env, options = {}) {
   const waitMs = Number(options.waitMs || 15000);
@@ -8394,7 +8394,7 @@ export async function pulseStudioContinuationJobs(env, options = {}) {
   }
   return pulses;
 }
-
+/*__STUDIO_WORKER_END:pulseStudioContinuationJobs__*/
 
 export async function studioContinuationMediaGate(env, po, cache) {
   if (studioOutputIsTerminalForContinuation(po)) return { action: "stop", reason: "terminal" };
@@ -8454,7 +8454,7 @@ export async function studioContinuationMediaGate(env, po, cache) {
   }
   return { action: "media_ok", contentItemId: parentId };
 }
-
+/*__STUDIO_WORKER_END:studioContinuationMediaGate__*/
 
 export async function pulseStudioP2ForWaitingParents(env, parentIds, pulses) {
   for (const parentId of parentIds) {
@@ -8486,7 +8486,7 @@ export async function pulseStudioP2ForWaitingParents(env, parentIds, pulses) {
     }
   }
 }
-
+/*__STUDIO_WORKER_END:pulseStudioP2ForWaitingParents__*/
 
 export async function advanceStudioProductionOutputs(env, options = {}) {
   const cache = { outputRows: new Map(), requests: new Map(), parents: new Map(), profiles: new Map() };
@@ -8616,7 +8616,7 @@ export async function advanceStudioProductionOutputs(env, options = {}) {
   }));
   return { inspected, pulses };
 }
-
+/*__STUDIO_WORKER_END:advanceStudioProductionOutputs__*/
 
 export async function pulseOnDemandRenderChain(env, options = {}) {
   const pulses = [];
@@ -8649,7 +8649,7 @@ export async function pulseOnDemandRenderChain(env, options = {}) {
   }
   return pulses;
 }
-
+/*__STUDIO_WORKER_END:pulseOnDemandRenderChain__*/
 
 export async function pulseOnDemandPublishChain(env) {
   const outputTable = env.AIRTABLE_OUTPUT_TABLE_ID;
@@ -8688,7 +8688,7 @@ export async function pulseOnDemandPublishChain(env) {
   }
   return pulses;
 }
-
+/*__STUDIO_WORKER_END:pulseOnDemandPublishChain__*/
 
 export async function pulseOnDemandMediaChain(env) {
   const pulses = [];
@@ -8732,7 +8732,7 @@ export async function pulseOnDemandMediaChain(env) {
   }
   return pulses;
 }
-
+/*__STUDIO_WORKER_END:pulseOnDemandMediaChain__*/
 
 export async function pulseOnDemandCarouselChain(env, options = {}) {
   const parentIds = [...new Set((Array.isArray(options.contentItemIds) ? options.contentItemIds : [])
@@ -8764,7 +8764,7 @@ export async function pulseOnDemandCarouselChain(env, options = {}) {
   }
   return pulses;
 }
-
+/*__STUDIO_WORKER_END:pulseOnDemandCarouselChain__*/
 
 export async function pulseOnDemandR2B(env) {
   const hasWork = await cadenceQueueHasWork(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
@@ -8783,7 +8783,7 @@ export async function pulseOnDemandR2B(env) {
     return [{ key: "R2B", error: error instanceof Error ? error.message : String(error) }];
   }
 }
-
+/*__STUDIO_WORKER_END:pulseOnDemandR2B__*/
 
 export async function pulseOnDemandM1(env, { force = false } = {}) {
   if (!force) {
@@ -8807,13 +8807,13 @@ export async function pulseOnDemandM1(env, { force = false } = {}) {
     return [{ key: "M1", error: error instanceof Error ? error.message : String(error) }];
   }
 }
-
+/*__STUDIO_WORKER_END:pulseOnDemandM1__*/
 
 export async function pulseOnDemandMakeAdminBridge(env) {
   void env;
   return [{ key: "MAKEADMIN", skipped: "make_retired" }];
 }
-
+/*__STUDIO_WORKER_END:pulseOnDemandMakeAdminBridge__*/
 
 export function timingSafeSecretEqual(left, right) {
   const a = String(left || "");
@@ -8823,7 +8823,7 @@ export function timingSafeSecretEqual(left, right) {
   for (let i = 0; i < a.length; i += 1) mismatch |= a.charCodeAt(i) ^ b.charCodeAt(i);
   return mismatch === 0;
 }
-
+/*__STUDIO_WORKER_END:timingSafeSecretEqual__*/
 
 export async function r5DoneCallbackSecret(env) {
   const fromEnv = String(env.R5_CALLBACK_SECRET || "").trim();
@@ -8832,7 +8832,7 @@ export async function r5DoneCallbackSecret(env) {
   const fromSettings = String(f(row, "Setting_Value") || "").trim();
   return fromSettings || STUDIO_R5_DONE_HOOK_TOKEN;
 }
-
+/*__STUDIO_WORKER_END:r5DoneCallbackSecret__*/
 
 export async function handleR5DoneCallback(request, env, ctx) {
   if (request.method !== "POST") throw new HttpError(405, "Method not allowed");
@@ -8890,7 +8890,7 @@ export async function handleR5DoneCallback(request, env, ctx) {
     eligible: eligible.length,
   }, 202);
 }
-
+/*__STUDIO_WORKER_END:handleR5DoneCallback__*/
 
 export async function cadenceHasPublishWork(env) {
   const outputTable = env.AIRTABLE_OUTPUT_TABLE_ID;
@@ -8902,7 +8902,7 @@ export async function cadenceHasPublishWork(env) {
   ]);
   return checks.some(Boolean);
 }
-
+/*__STUDIO_WORKER_END:cadenceHasPublishWork__*/
 
 export async function cadenceSetActive(env, scenarioId, active) {
   try {
@@ -8928,7 +8928,7 @@ export async function cadenceSetActive(env, scenarioId, active) {
     return { id: scenarioId, active, ok: false, error: message };
   }
 }
-
+/*__STUDIO_WORKER_END:cadenceSetActive__*/
 
 export async function phase6RunScenario(env, scenarioId, data = null) {
   // Match the proven MAKE-ADMIN-BRIDGE contract: no-input runs send {}.
@@ -8943,7 +8943,7 @@ export async function phase6RunScenario(env, scenarioId, data = null) {
   if (!executionId) throw new HttpError(502, `Make did not return an executionId for scenario ${scenarioId}`);
   return { executionId, body };
 }
-
+/*__STUDIO_WORKER_END:phase6RunScenario__*/
 
 export async function phase6StopExactScenarioExecution(env, scenarioId, executionId) {
   if (!executionId) return { attempted: false, stopped: false, reason: "missing-execution-id" };
@@ -8962,7 +8962,7 @@ export async function phase6StopExactScenarioExecution(env, scenarioId, executio
     };
   }
 }
-
+/*__STUDIO_WORKER_END:phase6StopExactScenarioExecution__*/
 
 export async function phase6WaitForScenarioExecution(env, scenarioId, executionId, timeoutMs = 90000, pollMs = 3000) {
   const started = Date.now();
@@ -8983,7 +8983,7 @@ export async function phase6WaitForScenarioExecution(env, scenarioId, executionI
   }
   return { done: false, success: false, status: "TIMEOUT", details: null };
 }
-
+/*__STUDIO_WORKER_END:phase6WaitForScenarioExecution__*/
 
 export async function phase6WaitForVoicePrepCompletion(env, outputRecord, timeoutMs = 90000, pollMs = 2500) {
   const started = Date.now();
@@ -8996,7 +8996,7 @@ export async function phase6WaitForVoicePrepCompletion(env, outputRecord, timeou
   }
   return { completed: pending.length === 0, pending, slides };
 }
-
+/*__STUDIO_WORKER_END:phase6WaitForVoicePrepCompletion__*/
 
 export async function phase6ClearVoicePrepTokens(env, slides) {
   for (const slide of Array.isArray(slides) ? slides : []) {
@@ -9009,7 +9009,7 @@ export async function phase6ClearVoicePrepTokens(env, slides) {
     } catch {}
   }
 }
-
+/*__STUDIO_WORKER_END:phase6ClearVoicePrepTokens__*/
 
 export async function phase6AdvanceVoicePrepShort(env, outputRecord) {
   let slides = await phase6SlidesForOutput(env, outputRecord);
@@ -9077,7 +9077,7 @@ export async function phase6AdvanceVoicePrepShort(env, outputRecord) {
     request_id: requestId,
   };
 }
-
+/*__STUDIO_WORKER_END:phase6AdvanceVoicePrepShort__*/
 
 export async function phase6AutoVoicePrepForOutput(env, outputRecord, authorization) {
   const python = pipelineStageBackend(env, "P0202").mode === "python";
@@ -9160,7 +9160,7 @@ export async function phase6AutoVoicePrepForOutput(env, outputRecord, authorizat
     try { if (!python && !priorState.isActive) await phase6SetScenarioActive(env, PHASE6_P0202_SCENARIO_ID, false); } catch {}
   }
 }
-
+/*__STUDIO_WORKER_END:phase6AutoVoicePrepForOutput__*/
 
 export function studioOutputReadyForPublishApproval(record) {
   const reviewStatus = String(f(record, "Review_Status") || "").trim();
@@ -9179,7 +9179,7 @@ export function studioOutputReadyForPublishApproval(record) {
   if (!rendered && !studioOutputIsNativePhoto(record) && !finished) return false;
   return outputStatus === "Ready for Review" || reviewStatus === "Review Sent";
 }
-
+/*__STUDIO_WORKER_END:studioOutputReadyForPublishApproval__*/
 
 export async function studioPipelineSettingsProfileRecord(env, contextRecord) {
   if (!contextRecord) return null;
@@ -9201,7 +9201,7 @@ export async function studioPipelineSettingsProfileRecord(env, contextRecord) {
   const profiles = await listContentProfileRecords(env).catch(() => []);
   return profiles.find((record) => Boolean(f(record, "Active")) && studioThemeForProfile(record) === theme) || null;
 }
-
+/*__STUDIO_WORKER_END:studioPipelineSettingsProfileRecord__*/
 
 export function studioLegacyDestinationPrefix(theme) {
   if (theme === "la") return "LA_";
@@ -9209,7 +9209,7 @@ export function studioLegacyDestinationPrefix(theme) {
   if (theme === "miami") return "MIAMI_";
   return "";
 }
-
+/*__STUDIO_WORKER_END:studioLegacyDestinationPrefix__*/
 
 export function studioProfileDestinationFieldValue(profile, settingName) {
   if (!profile) return "";
@@ -9221,7 +9221,7 @@ export function studioProfileDestinationFieldValue(profile, settingName) {
   const field = fields[settingName];
   return field ? String(f(profile, field) || "").trim() : "";
 }
-
+/*__STUDIO_WORKER_END:studioProfileDestinationFieldValue__*/
 
 export async function studioActivePipelineSettings(env, names, contextRecord) {
   const wanted = [...new Set((names || []).map((name) => String(name || "").trim()).filter(Boolean))];
@@ -9269,7 +9269,7 @@ export async function studioActivePipelineSettings(env, names, contextRecord) {
   }
   return resolved;
 }
-
+/*__STUDIO_WORKER_END:studioActivePipelineSettings__*/
 
 export async function studioPulseMakeWebhook(env, url, recordId, target, extra = {}) {
   void env;
@@ -9278,12 +9278,12 @@ export async function studioPulseMakeWebhook(env, url, recordId, target, extra =
   console.warn("Make webhook retired; use the pipeline runner", target, recordId);
   return { ok: false, skipped: "make-retired", target };
 }
-
+/*__STUDIO_WORKER_END:studioPulseMakeWebhook__*/
 
 export function studioFacebookPublicMakeWebhookUrl(env) {
   return String(env?.FB_PUBLIC_MAKE_WEBHOOK_URL || STUDIO_FB_PUBLIC_WEBHOOK_URL || "").trim();
 }
-
+/*__STUDIO_WORKER_END:studioFacebookPublicMakeWebhookUrl__*/
 
 export function studioFacebookPublicCdnUrl(record) {
   const preview = String(f(record, "Studio_Preview_URL") || "").trim();
@@ -9294,7 +9294,7 @@ export function studioFacebookPublicCdnUrl(record) {
   if (preview.startsWith("https://media.chicagoshining.com/")) return preview;
   return "";
 }
-
+/*__STUDIO_WORKER_END:studioFacebookPublicCdnUrl__*/
 
 export function studioFacebookVideoId(record) {
   const meta = String(f(record, "FB_Slideshow_Meta_Video_ID") || "").trim();
@@ -9304,7 +9304,7 @@ export function studioFacebookVideoId(record) {
   const tail = post.split("_").pop() || "";
   return /^\d{6,}$/.test(tail) ? tail : "";
 }
-
+/*__STUDIO_WORKER_END:studioFacebookVideoId__*/
 
 export function studioFacebookVideoSurface(record) {
   const mapping = String(f(record, "Platform_Output_Type") || "").trim();
@@ -9314,7 +9314,7 @@ export function studioFacebookVideoSurface(record) {
     || outputType === "Slideshow Reel"
     || outputType === "Story";
 }
-
+/*__STUDIO_WORKER_END:studioFacebookVideoSurface__*/
 
 export function studioFacebookNativeCoverRequired(record) {
   const mapping = String(f(record, "Platform_Output_Type") || "").trim();
@@ -9322,7 +9322,7 @@ export function studioFacebookNativeCoverRequired(record) {
   if (mapping === "Facebook Story" || outputType === "Story") return false;
   return mapping === "Facebook Reel" || outputType === "Slideshow Reel";
 }
-
+/*__STUDIO_WORKER_END:studioFacebookNativeCoverRequired__*/
 
 export function studioFacebookNativeCoverUrl(record) {
   const thumb = studioAiThumbnailUrl(f(record, "Thumbnail_URL"));
@@ -9331,7 +9331,7 @@ export function studioFacebookNativeCoverUrl(record) {
   const cover = studioPublicJpegCoverUrl(record);
   return item4UrlIsPublicPublishCdn(cover) ? cover : "";
 }
-
+/*__STUDIO_WORKER_END:studioFacebookNativeCoverUrl__*/
 
 export function studioFacebookCoverAlreadyAttached(record) {
   const blob = [
@@ -9341,7 +9341,7 @@ export function studioFacebookCoverAlreadyAttached(record) {
   ].map((value) => String(value || "")).join("\n");
   return blob.includes(STUDIO_FB_COVER_ATTACHED_MARK);
 }
-
+/*__STUDIO_WORKER_END:studioFacebookCoverAlreadyAttached__*/
 
 export async function studioAttachFacebookNativeCover(env, record) {
   if (String(f(record, "Platform") || "").trim() !== "Facebook") {
@@ -9436,13 +9436,13 @@ export async function studioAttachFacebookNativeCover(env, record) {
   }
   return { ok: false, video_id: videoId, cover_url: coverUrl, status: last.status, message };
 }
-
+/*__STUDIO_WORKER_END:studioAttachFacebookNativeCover__*/
 
 export function studioFacebookPublicMakeRoutable(record) {
   const plan = studioPublishDispatchTarget(record);
   return Boolean(plan && (plan.target === "FB0" || plan.target === "FBS3" || plan.graphStory));
 }
-
+/*__STUDIO_WORKER_END:studioFacebookPublicMakeRoutable__*/
 
 export function studioFacebookPublicMakeEligible(record) {
   const plan = studioPublishDispatchTarget(record);
@@ -9451,7 +9451,7 @@ export function studioFacebookPublicMakeEligible(record) {
   if (plan.target === "FBS3" || plan.graphStory) return Boolean(studioFacebookPublicCdnUrl(record));
   return false;
 }
-
+/*__STUDIO_WORKER_END:studioFacebookPublicMakeEligible__*/
 
 export async function studioPulseFacebookPublicMake(env, record) {
   const recordId = String(record?.id || "").trim();
@@ -9483,7 +9483,7 @@ export async function studioPulseFacebookPublicMake(env, record) {
     plan: { target },
   };
 }
-
+/*__STUDIO_WORKER_END:studioPulseFacebookPublicMake__*/
 
 export function studioPublishDispatchTarget(record) {
   const platform = String(f(record, "Platform") || "").trim();
@@ -9525,7 +9525,7 @@ export function studioPublishDispatchTarget(record) {
   }
   return null;
 }
-
+/*__STUDIO_WORKER_END:studioPublishDispatchTarget__*/
 
 export function studioGraphCaption(record) {
   const caption = String(f(record, "Output_Caption") || "").trim();
@@ -9533,7 +9533,7 @@ export function studioGraphCaption(record) {
   if (!hashtags || caption.includes(hashtags)) return caption;
   return `${caption}\n\n${hashtags}`.trim();
 }
-
+/*__STUDIO_WORKER_END:studioGraphCaption__*/
 
 export async function studioFetchImageBytes(source) {
   const url = String(source || "").trim();
@@ -9565,7 +9565,7 @@ export async function studioFetchImageBytes(source) {
   }
   return null;
 }
-
+/*__STUDIO_WORKER_END:studioFetchImageBytes__*/
 
 export async function studioPublicJpegIsReachable(url) {
   const href = String(url || "").trim();
@@ -9582,7 +9582,7 @@ export async function studioPublicJpegIsReachable(url) {
     return false;
   }
 }
-
+/*__STUDIO_WORKER_END:studioPublicJpegIsReachable__*/
 
 export function studioImageContentType(buffer) {
   const bytes = new Uint8Array(buffer.slice(0, 12));
@@ -9591,7 +9591,7 @@ export function studioImageContentType(buffer) {
   if (bytes[0] === 0x52 && bytes[1] === 0x49 && bytes[2] === 0x46 && bytes[3] === 0x46 && bytes[8] === 0x57) return "image/webp";
   return "image/jpeg";
 }
-
+/*__STUDIO_WORKER_END:studioImageContentType__*/
 
 export async function studioR2UploadWorkerConfig(env) {
   const settings = await studioActivePipelineSettings(env, [
@@ -9605,7 +9605,7 @@ export async function studioR2UploadWorkerConfig(env) {
   ].filter(Boolean))];
   return { secret, endpoints };
 }
-
+/*__STUDIO_WORKER_END:studioR2UploadWorkerConfig__*/
 
 export function studioR2UploadWorkerHeaders(secret, input = {}, extra = {}) {
   const headers = {
@@ -9618,7 +9618,7 @@ export function studioR2UploadWorkerHeaders(secret, input = {}, extra = {}) {
   };
   return headers;
 }
-
+/*__STUDIO_WORKER_END:studioR2UploadWorkerHeaders__*/
 
 export async function studioPutPublicObjectViaUploadWorker(env, input) {
   const key = String(input?.key || "").trim().replace(/^\/+/, "");
@@ -9651,7 +9651,7 @@ export async function studioPutPublicObjectViaUploadWorker(env, input) {
   }
   return { url: "", skip: lastStatus ? `upload-http-${lastStatus}` : "upload-worker-failed" };
 }
-
+/*__STUDIO_WORKER_END:studioPutPublicObjectViaUploadWorker__*/
 
 export async function studioPutPublicObjectMultipartFromDrive(env, input) {
   const key = String(input?.key || "").trim().replace(/^\/+/, "");
@@ -9753,7 +9753,7 @@ export async function studioPutPublicObjectMultipartFromDrive(env, input) {
   }
   return { url: "", skip: lastSkip };
 }
-
+/*__STUDIO_WORKER_END:studioPutPublicObjectMultipartFromDrive__*/
 
 export async function studioPublicVideoIsReachable(url) {
   const href = String(url || "").trim();
@@ -9770,7 +9770,7 @@ export async function studioPublicVideoIsReachable(url) {
     return false;
   }
 }
-
+/*__STUDIO_WORKER_END:studioPublicVideoIsReachable__*/
 
 export async function studioEnsureFinishedVideoPublicPreview(env, context, cache) {
   const requestRecord = context?.requestRecord;
@@ -9833,7 +9833,7 @@ export async function studioEnsureFinishedVideoPublicPreview(env, context, cache
   }
   return staged.url;
 }
-
+/*__STUDIO_WORKER_END:studioEnsureFinishedVideoPublicPreview__*/
 
 export async function studioPutPublicJpegViaUploadWorker(env, record, buffer) {
   const contentType = studioImageContentType(buffer);
@@ -9847,7 +9847,7 @@ export async function studioPutPublicJpegViaUploadWorker(env, record, buffer) {
     outputId: record.id,
   });
 }
-
+/*__STUDIO_WORKER_END:studioPutPublicJpegViaUploadWorker__*/
 
 export async function studioEnsurePublicJpegForPublish(env, record) {
   const existing = studioClipPublicCdnUrl(f(record, "Publish_Asset_URL"))
@@ -9891,7 +9891,7 @@ export async function studioEnsurePublicJpegForPublish(env, record) {
   });
   return { record: updated || record, url: uploaded.url };
 }
-
+/*__STUDIO_WORKER_END:studioEnsurePublicJpegForPublish__*/
 
 export async function studioPublishInstagramFeedPhoto(env, record) {
   try {
@@ -9905,7 +9905,7 @@ export async function studioPublishInstagramFeedPhoto(env, record) {
     };
   }
 }
-
+/*__STUDIO_WORKER_END:studioPublishInstagramFeedPhoto__*/
 
 export function studioNormPlaceText(value) {
   return String(value || "")
@@ -9914,7 +9914,7 @@ export function studioNormPlaceText(value) {
     .replace(/\s+/g, " ")
     .trim();
 }
-
+/*__STUDIO_WORKER_END:studioNormPlaceText__*/
 
 export function studioMarketName(record) {
   const raw = f(record, "Market_Name");
@@ -9924,7 +9924,7 @@ export function studioMarketName(record) {
   }
   return String(raw || "").trim();
 }
-
+/*__STUDIO_WORKER_END:studioMarketName__*/
 
 export function studioMatchKnownPlace(text) {
   const hay = ` ${studioNormPlaceText(text)} `;
@@ -9934,7 +9934,7 @@ export function studioMatchKnownPlace(text) {
   }
   return "";
 }
-
+/*__STUDIO_WORKER_END:studioMatchKnownPlace__*/
 
 export function studioLookupPlacePageId(name) {
   const key = studioNormPlaceText(name);
@@ -9949,7 +9949,7 @@ export function studioLookupPlacePageId(name) {
   }
   return null;
 }
-
+/*__STUDIO_WORKER_END:studioLookupPlacePageId__*/
 
 export async function studioResolvePublishLocation(env, outputRecord) {
   const contentId = studioFirstLinkedId(f(outputRecord, "Content_Item"));
@@ -10004,7 +10004,7 @@ export async function studioResolvePublishLocation(env, outputRecord) {
     query: market ? `${name}, ${market}` : name,
   };
 }
-
+/*__STUDIO_WORKER_END:studioResolvePublishLocation__*/
 
 export async function studioPublishInstagramFeedPhotoInner(env, record) {
   const prepared = await studioEnsurePublicJpegForPublish(env, record);
@@ -10108,7 +10108,7 @@ export async function studioPublishInstagramFeedPhotoInner(env, record) {
   });
   return { ok: true, target: "IG-FEED-GRAPH", post_id: mediaId, permalink, location: location || null };
 }
-
+/*__STUDIO_WORKER_END:studioPublishInstagramFeedPhotoInner__*/
 
 export async function studioPublishFacebookPageStory(env, record) {
   const preview = String(f(record, "Publish_Asset_URL") || f(record, "Studio_Preview_URL") || "").trim();
@@ -10205,7 +10205,7 @@ export async function studioPublishFacebookPageStory(env, record) {
   });
   return { ok: true, post_id: postId, location: location || null };
 }
-
+/*__STUDIO_WORKER_END:studioPublishFacebookPageStory__*/
 
 export async function studioPulseAp0PublicAsset(env, record) {
   const recordId = String(record?.id || "").trim();
@@ -10245,7 +10245,7 @@ export async function studioPulseAp0PublicAsset(env, record) {
   }
   return { ok: false, skipped: "make_retired", target: "AP0" };
 }
-
+/*__STUDIO_WORKER_END:studioPulseAp0PublicAsset__*/
 
 export async function studioPulseAp1IgReel(env, record) {
   const recordId = String(record?.id || "").trim();
@@ -10272,7 +10272,7 @@ export async function studioPulseAp1IgReel(env, record) {
     permalink: payload?.details?.run?.permalink,
   };
 }
-
+/*__STUDIO_WORKER_END:studioPulseAp1IgReel__*/
 
 export async function studioPulseAp1Igs(env, record) {
   const recordId = String(record?.id || "").trim();
@@ -10299,7 +10299,7 @@ export async function studioPulseAp1Igs(env, record) {
     container_id: payload?.details?.run?.container_id,
   };
 }
-
+/*__STUDIO_WORKER_END:studioPulseAp1Igs__*/
 
 export async function studioPulseFbs1(env, record) {
   const recordId = String(record?.id || "").trim();
@@ -10326,7 +10326,7 @@ export async function studioPulseFbs1(env, record) {
     job_id: payload?.details?.run?.job_id,
   };
 }
-
+/*__STUDIO_WORKER_END:studioPulseFbs1__*/
 
 export async function studioPulseFbs2(env, record) {
   const recordId = String(record?.id || "").trim();
@@ -10353,7 +10353,7 @@ export async function studioPulseFbs2(env, record) {
     public_url: payload?.details?.run?.public_url,
   };
 }
-
+/*__STUDIO_WORKER_END:studioPulseFbs2__*/
 
 export async function studioEnsureFacebookSlideshowAsset(env, record) {
   const status = String(f(record, "FB_Slideshow_Status") || "");
@@ -10370,7 +10370,7 @@ export async function studioEnsureFacebookSlideshowAsset(env, record) {
   if (!created.skipped) return created;
   return studioPulseFbs2(env, record);
 }
-
+/*__STUDIO_WORKER_END:studioEnsureFacebookSlideshowAsset__*/
 
 export async function studioPublishFacebookReelNative(env, record) {
   const recordId = String(record?.id || "").trim();
@@ -10548,7 +10548,7 @@ export async function studioPublishFacebookReelNative(env, record) {
   });
   return { ok: true, target: "FBS3-NATIVE", backend: "graph", needs_poll: true, video_id: videoId };
 }
-
+/*__STUDIO_WORKER_END:studioPublishFacebookReelNative__*/
 
 export async function studioPulseFbs3(env, record) {
   const recordId = String(record?.id || "").trim();
@@ -10580,7 +10580,7 @@ export async function studioPulseFbs3(env, record) {
     video_id: payload?.details?.run?.video_id,
   };
 }
-
+/*__STUDIO_WORKER_END:studioPulseFbs3__*/
 
 export async function studioPulseFbs4(env, record) {
   const recordId = String(record?.id || "").trim();
@@ -10608,7 +10608,7 @@ export async function studioPulseFbs4(env, record) {
     permalink: payload?.details?.run?.permalink,
   };
 }
-
+/*__STUDIO_WORKER_END:studioPulseFbs4__*/
 
 export async function studioPulseYtRecord(env, stagePath, target, record) {
   const recordId = String(record?.id || "").trim();
@@ -10644,7 +10644,7 @@ export async function studioPulseYtRecord(env, stagePath, target, record) {
     youtube_stage: run.youtube_stage,
   };
 }
-
+/*__STUDIO_WORKER_END:studioPulseYtRecord__*/
 
 export async function studioEnsureYoutubePublish(env, record) {
   const stage = String(f(record, "YouTube_Stage") || "").trim();
@@ -10701,7 +10701,7 @@ export async function studioEnsureYoutubePublish(env, record) {
   const uploaded = await studioPulseYtRecord(env, "yts1", "YTS1", record);
   return { ...uploaded, prepare: prepared, start: started };
 }
-
+/*__STUDIO_WORKER_END:studioEnsureYoutubePublish__*/
 
 export async function studioPulseTtd0(env, record) {
   const recordId = String(record?.id || "").trim();
@@ -10727,7 +10727,7 @@ export async function studioPulseTtd0(env, record) {
     needs_init: Boolean(payload?.details?.run?.needs_init),
   };
 }
-
+/*__STUDIO_WORKER_END:studioPulseTtd0__*/
 
 export async function studioPulseTtd1(env, record) {
   const recordId = String(record?.id || "").trim();
@@ -10758,7 +10758,7 @@ export async function studioPulseTtd1(env, record) {
     publish_id: payload?.details?.run?.publish_id,
   };
 }
-
+/*__STUDIO_WORKER_END:studioPulseTtd1__*/
 
 export async function studioPulseTtd2(env, record) {
   const recordId = String(record?.id || "").trim();
@@ -10790,7 +10790,7 @@ export async function studioPulseTtd2(env, record) {
     publish_id: payload?.details?.run?.publish_id,
   };
 }
-
+/*__STUDIO_WORKER_END:studioPulseTtd2__*/
 
 export async function studioPulseTtd3(env, record) {
   const recordId = String(record?.id || "").trim();
@@ -10816,7 +10816,7 @@ export async function studioPulseTtd3(env, record) {
     email_sent: Boolean(payload?.details?.run?.email_sent),
   };
 }
-
+/*__STUDIO_WORKER_END:studioPulseTtd3__*/
 
 export async function studioEnsureTiktokDraft(env, record) {
   const status = String(f(record, "TikTok_Draft_Status") || "");
@@ -10838,7 +10838,7 @@ export async function studioEnsureTiktokDraft(env, record) {
   if (!prepared.skipped) return prepared;
   return studioPulseTtd1(env, record);
 }
-
+/*__STUDIO_WORKER_END:studioEnsureTiktokDraft__*/
 
 export async function studioPulseFbRecord(env, stagePath, target, record) {
   const recordId = String(record?.id || "").trim();
@@ -10876,32 +10876,32 @@ export async function studioPulseFbRecord(env, stagePath, target, record) {
     platform_post_id: run.platform_post_id,
   };
 }
-
+/*__STUDIO_WORKER_END:studioPulseFbRecord__*/
 
 export async function studioPulseFb0(env, record) {
   return studioPulseFbRecord(env, "fb0", "FB0", record);
 }
-
+/*__STUDIO_WORKER_END:studioPulseFb0__*/
 
 export async function studioPulseFb1(env, record) {
   return studioPulseFbRecord(env, "fb1", "FB1", record);
 }
-
+/*__STUDIO_WORKER_END:studioPulseFb1__*/
 
 export async function studioPulseFb2(env, record) {
   return studioPulseFbRecord(env, "fb2", "FB2", record);
 }
-
+/*__STUDIO_WORKER_END:studioPulseFb2__*/
 
 export async function studioPulseFb2r(env, record) {
   return studioPulseFbRecord(env, "fb2r", "FB2R", record);
 }
-
+/*__STUDIO_WORKER_END:studioPulseFb2r__*/
 
 export async function studioPulseFb3(env, record) {
   return studioPulseFbRecord(env, "fb3", "FB3", record);
 }
-
+/*__STUDIO_WORKER_END:studioPulseFb3__*/
 
 export async function studioEnsureFacebookPhotoPublish(env, record) {
   const status = String(f(record, "FB_Publish_Status") || "");
@@ -10933,7 +10933,7 @@ export async function studioEnsureFacebookPhotoPublish(env, record) {
   }
   return prepared;
 }
-
+/*__STUDIO_WORKER_END:studioEnsureFacebookPhotoPublish__*/
 
 export async function studioPulseApcRecord(env, stagePath, target, record) {
   const recordId = String(record?.id || "").trim();
@@ -10978,47 +10978,47 @@ export async function studioPulseApcRecord(env, stagePath, target, record) {
     permalink: run.permalink,
   };
 }
-
+/*__STUDIO_WORKER_END:studioPulseApcRecord__*/
 
 export async function studioPulseAp0c(env, record) {
   return studioPulseApcRecord(env, "ap0c", "AP0C", record);
 }
-
+/*__STUDIO_WORKER_END:studioPulseAp0c__*/
 
 export async function studioPulseAp1c(env, record) {
   return studioPulseApcRecord(env, "ap1c", "AP1C", record);
 }
-
+/*__STUDIO_WORKER_END:studioPulseAp1c__*/
 
 export async function studioPulseAp2c(env, record) {
   return studioPulseApcRecord(env, "ap2c", "AP2C", record);
 }
-
+/*__STUDIO_WORKER_END:studioPulseAp2c__*/
 
 export async function studioPulseAp3c(env, record) {
   return studioPulseApcRecord(env, "ap3c", "AP3C", record);
 }
-
+/*__STUDIO_WORKER_END:studioPulseAp3c__*/
 
 export async function studioPulseAp3p(env, record) {
   return studioPulseApcRecord(env, "ap3p", "AP3P", record);
 }
-
+/*__STUDIO_WORKER_END:studioPulseAp3p__*/
 
 export async function studioPulseAp4c(env, record) {
   return studioPulseApcRecord(env, "ap4c", "AP4C", record);
 }
-
+/*__STUDIO_WORKER_END:studioPulseAp4c__*/
 
 export async function studioPulseAp4r(env, record) {
   return studioPulseApcRecord(env, "ap4r", "AP4R", record);
 }
-
+/*__STUDIO_WORKER_END:studioPulseAp4r__*/
 
 export async function studioPulseAp5c(env, record) {
   return studioPulseApcRecord(env, "ap5c", "AP5C", record);
 }
-
+/*__STUDIO_WORKER_END:studioPulseAp5c__*/
 
 export async function studioEnsureInstagramCarouselPublish(env, record) {
   const status = String(f(record, "IG_Carousel_Status") || "");
@@ -11052,7 +11052,7 @@ export async function studioEnsureInstagramCarouselPublish(env, record) {
   }
   return { ...published, parentPoll, parent, poll: polled, children, prepare: prepared };
 }
-
+/*__STUDIO_WORKER_END:studioEnsureInstagramCarouselPublish__*/
 
 export async function studioTiktokComplete(request, env) {
   const incoming = new URL(request.url);
@@ -11072,7 +11072,7 @@ export async function studioTiktokComplete(request, env) {
     headers: { "Content-Type": response.headers.get("Content-Type") || "text/html; charset=UTF-8" },
   });
 }
-
+/*__STUDIO_WORKER_END:studioTiktokComplete__*/
 
 export async function studioPulseAp1IgsPoll(env, record) {
   const recordId = String(record?.id || "").trim();
@@ -11100,7 +11100,7 @@ export async function studioPulseAp1IgsPoll(env, record) {
     container_id: payload?.details?.run?.container_id,
   };
 }
-
+/*__STUDIO_WORKER_END:studioPulseAp1IgsPoll__*/
 
 export async function studioArmPublishScenarios(env, target) {
   const armed = [];
@@ -11115,7 +11115,7 @@ export async function studioArmPublishScenarios(env, target) {
   }
   return armed;
 }
-
+/*__STUDIO_WORKER_END:studioArmPublishScenarios__*/
 
 export async function studioRunPublishOrchestrator(env, target) {
   const scenarioId = STUDIO_PUBLISH_DISPATCH_SCENARIOS[target]?.orchestrator;
@@ -11138,7 +11138,7 @@ export async function studioRunPublishOrchestrator(env, target) {
     return { ok: false, id: scenarioId };
   }
 }
-
+/*__STUDIO_WORKER_END:studioRunPublishOrchestrator__*/
 
 export async function studioEnsureOutputCaption(env, record) {
   const existingCaption = String(f(record, "Output_Caption") || "").trim();
@@ -11175,7 +11175,7 @@ export async function studioEnsureOutputCaption(env, record) {
     return record;
   }
 }
-
+/*__STUDIO_WORKER_END:studioEnsureOutputCaption__*/
 
 export async function studioDispatchApprovedPublishNow(env, record) {
   if (!studioPublishCanDispatchNow(record)) {
@@ -11273,7 +11273,7 @@ export async function studioDispatchApprovedPublishNow(env, record) {
   });
   return { ...pulsed, ap0, armed, plan, settings, record };
 }
-
+/*__STUDIO_WORKER_END:studioDispatchApprovedPublishNow__*/
 
 export async function studioDispatchApprovedPublishTail(env, record, primary) {
   const plan = primary?.plan;
@@ -11288,7 +11288,7 @@ export async function studioDispatchApprovedPublishTail(env, record, primary) {
   await new Promise((resolve) => setTimeout(resolve, 10000));
   return studioRunPublishOrchestrator(env, plan.target);
 }
-
+/*__STUDIO_WORKER_END:studioDispatchApprovedPublishTail__*/
 
 export function studioPublishDispatchNote(result) {
   if (!result) return "no result";
@@ -11302,7 +11302,7 @@ export function studioPublishDispatchNote(result) {
     result.ap0 ? `ap0=${result.ap0.skipped || (result.ap0.ok ? "ok" : "failed")}` : "",
   ].filter(Boolean).join(" | ");
 }
-
+/*__STUDIO_WORKER_END:studioPublishDispatchNote__*/
 
 export async function studioStampPublishDispatch(env, record, note) {
   const id = String(record?.id || "").trim();
@@ -11324,7 +11324,7 @@ export async function studioStampPublishDispatch(env, record, note) {
     console.warn("publish dispatch receipt write failed", id, error);
   }
 }
-
+/*__STUDIO_WORKER_END:studioStampPublishDispatch__*/
 
 export async function studioDispatchApprovedPublishAndSchedule(ctx, env, record) {
   if (!studioPublishCanDispatchNow(record)) {
@@ -11364,7 +11364,7 @@ export async function studioDispatchApprovedPublishAndSchedule(ctx, env, record)
   if (ctx && typeof ctx.waitUntil === "function") ctx.waitUntil(tail);
   return primary;
 }
-
+/*__STUDIO_WORKER_END:studioDispatchApprovedPublishAndSchedule__*/
 
 export async function studioResetYoutubeUploadForRetry(env, record) {
   await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, record.id, {
@@ -11388,7 +11388,7 @@ export async function studioResetYoutubeUploadForRetry(env, record) {
     }),
   });
 }
-
+/*__STUDIO_WORKER_END:studioResetYoutubeUploadForRetry__*/
 
 export async function studioHealFailedYoutubeSourceDownloads(env, options = {}) {
   const limit = Number(options.limit || 3);
@@ -11465,7 +11465,7 @@ export async function studioHealFailedYoutubeSourceDownloads(env, options = {}) 
   return results;
 }
 
-
+/*__STUDIO_WORKER_END:studioHealFailedYoutubeSourceDownloads__*/
 
 export async function studioParkStaleYoutubeQuotaPolls(env, options = {}) {
   const limit = Number(options.limit || 5);
@@ -11517,4 +11517,4 @@ export async function studioParkStaleYoutubeQuotaPolls(env, options = {}) {
   return results;
 }
 
-
+/*__STUDIO_WORKER_END:studioParkStaleYoutubeQuotaPolls__*/

@@ -2574,7 +2574,7 @@ export default {
 };
 
 /** Light vs heavy Airtable spend for Worker cron (UTC minute buckets on five-minute ticks). */
-
+/*__STUDIO_WORKER_EXTRACT:studioCronAirtableCadence__*/
 class HttpError extends Error {
   constructor(status, message) {
     super(message);
@@ -2582,7 +2582,7 @@ class HttpError extends Error {
   }
 }
 
-
+/*__STUDIO_WORKER_EXTRACT:accessIdentity__*/
 const STUDIO_TABLES = {
   users: "Studio Users",
   memberships: "Studio Memberships",
@@ -2643,21 +2643,21 @@ const ROLE_PERMISSIONS = {
   },
 };
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+/*__STUDIO_WORKER_EXTRACT:resolveAuthorization__*/
+/*__STUDIO_WORKER_EXTRACT:resolveStudioCronAuthorization__*/
+/*__STUDIO_WORKER_EXTRACT:membershipAllowsBrand__*/
+/*__STUDIO_WORKER_EXTRACT:requireConfig__*/
+/*__STUDIO_WORKER_EXTRACT:allowedOrigins__*/
+/*__STUDIO_WORKER_EXTRACT:corsHeaders__*/
+/*__STUDIO_WORKER_EXTRACT:corsPreflight__*/
+/*__STUDIO_WORKER_EXTRACT:respond__*/
+/*__STUDIO_WORKER_EXTRACT:assertWriteRequest__*/
+/*__STUDIO_WORKER_EXTRACT:assertOriginWriteRequest__*/
+/*__STUDIO_WORKER_EXTRACT:assertUploadWriteRequest__*/
+/*__STUDIO_WORKER_EXTRACT:readJsonBody__*/
+/*__STUDIO_WORKER_EXTRACT:requirePermission__*/
+/*__STUDIO_WORKER_EXTRACT:requireAnyPermission__*/
+/*__STUDIO_WORKER_EXTRACT:sleepMs__*/
 // Pace Airtable calls per isolate without a shared Promise chain.
 // A module-level `airtableQueue.then(...)` wedged the isolate when a request
 // was canceled mid-slot (CF hung / "will never generate a response" / UI 500):
@@ -2668,7 +2668,7 @@ const AIRTABLE_MIN_GAP_MS = 250;
 // returns the list. Only a real Airtable penalty (30s) fails fast.
 const AIRTABLE_SLOT_FAIL_FAST_MS = 8000;
 let airtableNextRequestAt = 0;
-
+/*__STUDIO_WORKER_EXTRACT:airtableCooldownWaitMs__*/
 async function airtableRequestSlot() {
   const now = Date.now();
   const wait = Math.max(0, airtableNextRequestAt - now);
@@ -2679,19 +2679,19 @@ async function airtableRequestSlot() {
   if (wait) await sleepMs(wait);
 }
 
-
+/*__STUDIO_WORKER_EXTRACT:airtableRetryDelayMs__*/
 const studioHotReadCache = new Map();
 
-
-
+/*__STUDIO_WORKER_EXTRACT:studioReadCachePrune__*/
+/*__STUDIO_WORKER_EXTRACT:studioReadCacheDropPrefix__*/
 let studioListWriteGeneration = 0;
 function studioMarkMappedListDirty() {
   studioListWriteGeneration += 1;
 }
 
-
-
-
+/*__STUDIO_WORKER_EXTRACT:studioSupabaseWriteThroughOutput__*/
+/*__STUDIO_WORKER_EXTRACT:studioInvalidateHotReads__*/
+/*__STUDIO_WORKER_EXTRACT:studioReadCoalesce__*/
 async function airtableFetch(env, tableId, pathOrParams = "", options = {}) {
   studioInvalidateHotReads(env, tableId, options?.method);
   const suffix = pathOrParams ? (pathOrParams.startsWith("?") || pathOrParams.startsWith("/") ? pathOrParams : `/${pathOrParams}`) : "";
@@ -2725,48 +2725,48 @@ async function airtableFetch(env, tableId, pathOrParams = "", options = {}) {
 
 const AIRTABLE_BATCH_LIMIT = 10;
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+/*__STUDIO_WORKER_EXTRACT:airtableBatchCreate__*/
+/*__STUDIO_WORKER_EXTRACT:airtableBatchUpdate__*/
+/*__STUDIO_WORKER_EXTRACT:mapPool__*/
+/*__STUDIO_WORKER_EXTRACT:clampLimit__*/
+/*__STUDIO_WORKER_EXTRACT:listRecords__*/
+/*__STUDIO_WORKER_EXTRACT:listRecordsPage__*/
+/*__STUDIO_WORKER_EXTRACT:f__*/
+/*__STUDIO_WORKER_EXTRACT:studioOutputIsNativePhotoRoute__*/
+/*__STUDIO_WORKER_EXTRACT:studioOutputIsNativePhoto__*/
+/*__STUDIO_WORKER_EXTRACT:studioNativeStillsNeedLettering__*/
+/*__STUDIO_WORKER_EXTRACT:studioOutputNeedsGridCoverForReview__*/
+/*__STUDIO_WORKER_EXTRACT:studioOutputHasReviewCover__*/
+/*__STUDIO_WORKER_EXTRACT:studioOutputHasReviewableDeliverable__*/
+/*__STUDIO_WORKER_EXTRACT:studioClipPublicCdnUrl__*/
+/*__STUDIO_WORKER_EXTRACT:item4UrlIsPublicPublishCdn__*/
+/*__STUDIO_WORKER_EXTRACT:studioYoutubePublicSourceUrl__*/
+/*__STUDIO_WORKER_EXTRACT:mapYoutubePrivateSourceDeskRow__*/
+/*__STUDIO_WORKER_EXTRACT:studioYoutubeFailedPrivateSource__*/
+/*__STUDIO_WORKER_EXTRACT:studioYoutubePublishAssetKey__*/
+/*__STUDIO_WORKER_EXTRACT:studioStageYoutubePublicMp4FromDrive__*/
+/*__STUDIO_WORKER_EXTRACT:item4FinishedVideoPreviewKey__*/
+/*__STUDIO_WORKER_EXTRACT:item4FinishedMasterPlayUrl__*/
+/*__STUDIO_WORKER_EXTRACT:item4UrlIsPublicPlayableVideo__*/
+/*__STUDIO_WORKER_EXTRACT:studioNativeClipsArePublicCdn__*/
+/*__STUDIO_WORKER_EXTRACT:studioNativeSlidePublicFields__*/
+/*__STUDIO_WORKER_EXTRACT:studioUrlLooksLikeImage__*/
+/*__STUDIO_WORKER_EXTRACT:studioUrlLooksLikeVideo__*/
+/*__STUDIO_WORKER_EXTRACT:studioUrlLooksLikeDriveFile__*/
+/*__STUDIO_WORKER_EXTRACT:outputHasVideoFinal__*/
+/*__STUDIO_WORKER_EXTRACT:studioMappedPreviewUrl__*/
+/*__STUDIO_WORKER_EXTRACT:studioPublicJpegCoverUrl__*/
+/*__STUDIO_WORKER_EXTRACT:studioNativeStillPreviewUrl__*/
+/*__STUDIO_WORKER_EXTRACT:studioPreviewKind__*/
 // Approve used to stamp every platform "Ready to Publish" / TikTok "Ready for Assets"
 // even when Scheduled_Post_Date is still in the future. That reads like unfinished
  // asset work when the render is already done and the only wait is the schedule window.
-
-
-
-
-
-
+/*__STUDIO_WORKER_EXTRACT:studioArmedPublishStatus__*/
+/*__STUDIO_WORKER_EXTRACT:studioPublishHandoffFields__*/
+/*__STUDIO_WORKER_EXTRACT:studioPatchExistingNativeSlides__*/
+/*__STUDIO_WORKER_EXTRACT:studioEnsureNativePublishSlides__*/
+/*__STUDIO_WORKER_EXTRACT:studioMixRerenderInProgress__*/
+/*__STUDIO_WORKER_EXTRACT:normalizedOutputState__*/
 const CONTENT_OUTPUT_TERMINAL_STATES = new Set([
   "Published",
   "Scheduled",
@@ -2774,45 +2774,45 @@ const CONTENT_OUTPUT_TERMINAL_STATES = new Set([
   "Skipped",
 ]);
 
-
-
-
-
-
+/*__STUDIO_WORKER_EXTRACT:contentLifecycleFromOutputs__*/
+/*__STUDIO_WORKER_EXTRACT:normalizedContentStage__*/
+/*__STUDIO_WORKER_EXTRACT:mapIdea__*/
+/*__STUDIO_WORKER_EXTRACT:parseIdeaPhotoMatchJson__*/
+/*__STUDIO_WORKER_EXTRACT:firstIdeaProductionRequestId__*/
 const IDEA_PHOTO_WAIT_TYPES = new Set(["Carousel", "Photo Set", "Feed Post", "Vertical Short Video"]);
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+/*__STUDIO_WORKER_EXTRACT:ideaPhotoWaitApplies__*/
+/*__STUDIO_WORKER_EXTRACT:sortHighConfidenceMatches__*/
+/*__STUDIO_WORKER_EXTRACT:selectMatchedPhotos__*/
+/*__STUDIO_WORKER_EXTRACT:mapContent__*/
+/*__STUDIO_WORKER_EXTRACT:outputProgressMilestoneFloor__*/
+/*__STUDIO_WORKER_EXTRACT:outputProgressPercent__*/
+/*__STUDIO_WORKER_EXTRACT:platformPublishStatus__*/
+/*__STUDIO_WORKER_EXTRACT:cleanMusicDisplayName__*/
+/*__STUDIO_WORKER_EXTRACT:selectedVisualClips__*/
+/*__STUDIO_WORKER_EXTRACT:outputCreativeAvailable__*/
+/*__STUDIO_WORKER_EXTRACT:mapOutput__*/
+/*__STUDIO_WORKER_EXTRACT:safeMusicExtension__*/
+/*__STUDIO_WORKER_EXTRACT:musicPreviewKey__*/
+/*__STUDIO_WORKER_EXTRACT:extractGoogleDriveFileId__*/
+/*__STUDIO_WORKER_EXTRACT:googleDriveFileId__*/
+/*__STUDIO_WORKER_EXTRACT:googleDriveDownloadUrl__*/
+/*__STUDIO_WORKER_EXTRACT:studioMusicLibraryUrlPrefix__*/
+/*__STUDIO_WORKER_EXTRACT:isStudioLibraryMusicUrl__*/
+/*__STUDIO_WORKER_EXTRACT:studioMusicR2KeyFromUrl__*/
+/*__STUDIO_WORKER_EXTRACT:isMusicLibraryFile__*/
+/*__STUDIO_WORKER_EXTRACT:isStudioLibraryMusicRecord__*/
+/*__STUDIO_WORKER_EXTRACT:mapMusic__*/
+/*__STUDIO_WORKER_EXTRACT:findOfficialLogoRecord__*/
+/*__STUDIO_WORKER_EXTRACT:fetchGoogleDriveImage__*/
+/*__STUDIO_WORKER_EXTRACT:brandLogo__*/
+/*__STUDIO_WORKER_EXTRACT:buildIdeasListPayload__*/
+/*__STUDIO_WORKER_EXTRACT:listIdeas__*/
+/*__STUDIO_WORKER_EXTRACT:airtableFormulaEscape__*/
+/*__STUDIO_WORKER_EXTRACT:requestedProfileId__*/
+/*__STUDIO_WORKER_EXTRACT:studioNormalizeProfileKey__*/
+/*__STUDIO_WORKER_EXTRACT:studioThemeForProfile__*/
+/*__STUDIO_WORKER_EXTRACT:studioSettingsPrefixForTheme__*/
 const STUDIO_CITY_DESTINATION_KEYS = new Set([
   "FACEBOOK_PAGE_ID",
   "FACEBOOK_PAGE_ACCESS_TOKEN",
@@ -2824,17 +2824,17 @@ const STUDIO_CITY_DESTINATION_KEYS = new Set([
   "TIKTOK_WORKER_BASE_URL",
 ]);
 
-
-
-
-
-
-
-
-
-
-
-
+/*__STUDIO_WORKER_EXTRACT:studioContentProfileRecordIdForOutput__*/
+/*__STUDIO_WORKER_EXTRACT:studioThemeForPublishRecord__*/
+/*__STUDIO_WORKER_EXTRACT:studioCityLabel__*/
+/*__STUDIO_WORKER_EXTRACT:studioScheduleTimeZoneFromTheme__*/
+/*__STUDIO_WORKER_EXTRACT:studioScheduleTimeZoneForProfile__*/
+/*__STUDIO_WORKER_EXTRACT:studioScheduleTimeZoneFromPayload__*/
+/*__STUDIO_WORKER_EXTRACT:studioScheduleTimeZoneForRecord__*/
+/*__STUDIO_WORKER_EXTRACT:normalizeStudioBackgroundColor__*/
+/*__STUDIO_WORKER_EXTRACT:studioBackgroundColorForRecord__*/
+/*__STUDIO_WORKER_EXTRACT:mapStudioContentProfile__*/
+/*__STUDIO_WORKER_EXTRACT:contentProfileFilterFormula__*/
 // Keep unfinished / scheduled / draft-delivered rows on Pipeline even after newer
 // packages push them past the newest-N window (CI 206 / outputs 887–892 fell off
 // when Output_ID crossed ~1034 while the UI only fetched newest 100).
@@ -2857,46 +2857,46 @@ const STUDIO_PIPELINE_OPEN_LEGACY_FORMULA = 'AND({Test_Run_ID}=BLANK(),{Output_S
   + '{TikTok_Draft_Status}="Retry Pending"'
   + '))';
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+/*__STUDIO_WORKER_EXTRACT:studioPipelineOpenOutputFormula__*/
+/*__STUDIO_WORKER_EXTRACT:mergePipelineOutputRecords__*/
+/*__STUDIO_WORKER_EXTRACT:studioPipelineContentIdsFromOutputs__*/
+/*__STUDIO_WORKER_EXTRACT:listPipelineOutputsForContentIds__*/
+/*__STUDIO_WORKER_EXTRACT:listPipelineContentByIds__*/
+/*__STUDIO_WORKER_EXTRACT:studioApproveAllCandidateFormula__*/
+/*__STUDIO_WORKER_EXTRACT:listContentProfileRecords__*/
+/*__STUDIO_WORKER_EXTRACT:resolveAuthorizedContentProfiles__*/
+/*__STUDIO_WORKER_EXTRACT:resolveWorkingContentProfile__*/
+/*__STUDIO_WORKER_EXTRACT:resolveDefaultContentProfile__*/
+/*__STUDIO_WORKER_EXTRACT:listStudioContentProfiles__*/
+/*__STUDIO_WORKER_EXTRACT:studioProfileOnboardingHandlers__*/
+/*__STUDIO_WORKER_EXTRACT:studioProfileSetupRecordIdFromPath__*/
+/*__STUDIO_WORKER_EXTRACT:studioProfileSetupPlatformFromPath__*/
+/*__STUDIO_WORKER_EXTRACT:studioProfileSetupBelongsToAuthorization__*/
+/*__STUDIO_WORKER_EXTRACT:loadAuthorizedStudioProfileSetupRecord__*/
+/*__STUDIO_WORKER_EXTRACT:studioProfileSetupStateFromRecord__*/
+/*__STUDIO_WORKER_EXTRACT:loadStudioProfileSetupState__*/
+/*__STUDIO_WORKER_EXTRACT:saveStudioProfileSetupState__*/
+/*__STUDIO_WORKER_EXTRACT:studioProfileSetupBrandId__*/
+/*__STUDIO_WORKER_EXTRACT:studioProfileSetupProfileFields__*/
+/*__STUDIO_WORKER_EXTRACT:studioProfileSetupConnectionSnapshot__*/
+/*__STUDIO_WORKER_EXTRACT:studioProfileSetupSummary__*/
+/*__STUDIO_WORKER_EXTRACT:listStudioProfileSetups__*/
+/*__STUDIO_WORKER_EXTRACT:createStudioProfileSetup__*/
+/*__STUDIO_WORKER_EXTRACT:getStudioProfileSetup__*/
+/*__STUDIO_WORKER_EXTRACT:patchStudioProfileSetup__*/
+/*__STUDIO_WORKER_EXTRACT:updateStudioProfileSetupPlatform__*/
+/*__STUDIO_WORKER_EXTRACT:activateStudioProfileSetup__*/
+/*__STUDIO_WORKER_EXTRACT:cleanIdeaCreatePayload__*/
+/*__STUDIO_WORKER_EXTRACT:createIdea__*/
+/*__STUDIO_WORKER_EXTRACT:ideaRecordIdFromPath__*/
+/*__STUDIO_WORKER_EXTRACT:loadAuthorizedIdea__*/
+/*__STUDIO_WORKER_EXTRACT:assertIdeaUnpromoted__*/
+/*__STUDIO_WORKER_EXTRACT:assertIdeaNotApproved__*/
+/*__STUDIO_WORKER_EXTRACT:cleanIdeaUpdatePayload__*/
+/*__STUDIO_WORKER_EXTRACT:updateIdea__*/
+/*__STUDIO_WORKER_EXTRACT:holdIdea__*/
+/*__STUDIO_WORKER_EXTRACT:restoreIdea__*/
+/*__STUDIO_WORKER_EXTRACT:deleteIdea__*/
 const PRODUCTION_REQUEST_OUTPUT_TABLE = "Production Request Outputs";
 
 const PRO_OUTPUT_TYPES_BY_PLATFORM = Object.freeze({
@@ -2913,19 +2913,19 @@ const PRO_OUTPUT_CAROUSEL_IMAGE_MODES = new Set(["Inherit", "Make AI Generated",
 const PRO_OUTPUT_TEXT_MODES = new Set(["Inherit", "AI decides", "Force exact", "AI improve", "Leave blank"]);
 const PRO_OUTPUT_PUBLISH_MODES = new Set(["Inherit", "Auto Publish", "Manual Review", "Do Not Publish"]);
 
-
-
-
-
-
-
-
-
-
-
-
-
-
+/*__STUDIO_WORKER_EXTRACT:productionRequestIdFromOutputsPath__*/
+/*__STUDIO_WORKER_EXTRACT:productionRequestOutputIdFromPath__*/
+/*__STUDIO_WORKER_EXTRACT:makeProductionRequestOutputId__*/
+/*__STUDIO_WORKER_EXTRACT:normalizeOutputType__*/
+/*__STUDIO_WORKER_EXTRACT:mapProductionRequestOutput__*/
+/*__STUDIO_WORKER_EXTRACT:outputRowsForProductionRequest__*/
+/*__STUDIO_WORKER_EXTRACT:loadAuthorizedProductionRequestOutput__*/
+/*__STUDIO_WORKER_EXTRACT:assertEditableProductionRequest__*/
+/*__STUDIO_WORKER_EXTRACT:listProductionRequestOutputs__*/
+/*__STUDIO_WORKER_EXTRACT:syncProductionRequestOutputs__*/
+/*__STUDIO_WORKER_EXTRACT:cleanProductionRequestOutputPatch__*/
+/*__STUDIO_WORKER_EXTRACT:getProductionRequestOutput__*/
+/*__STUDIO_WORKER_EXTRACT:updateProductionRequestOutput__*/
 const ITEM4_MEDIA_PUBLIC_BASE = "https://media.chicagoshining.com";
 const STUDIO_CHICAGO_WATERMARK_MEDIA_ASSET_ID = "recTnq3abS2rcsTzK";
 const STUDIO_CHICAGO_WATERMARK_R2_KEY = "studio/previews/branding/chicagoshining-watermark.png";
@@ -2997,41 +2997,41 @@ const ITEM4_PLAN_SPECS = Object.freeze({
   }),
 });
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+/*__STUDIO_WORKER_EXTRACT:item4ParseJson__*/
+/*__STUDIO_WORKER_EXTRACT:item4RequestIdFromPath__*/
+/*__STUDIO_WORKER_EXTRACT:item4AssetIdFromPath__*/
+/*__STUDIO_WORKER_EXTRACT:item4SafeFileName__*/
+/*__STUDIO_WORKER_EXTRACT:item4FileExtension__*/
+/*__STUDIO_WORKER_EXTRACT:item4IsHeicFile__*/
+/*__STUDIO_WORKER_EXTRACT:item4IsSupportedImageFile__*/
+/*__STUDIO_WORKER_EXTRACT:item4IsSupportedVideoFile__*/
+/*__STUDIO_WORKER_EXTRACT:item4IsClipInputKind__*/
+/*__STUDIO_WORKER_EXTRACT:item4LooksLikeVideoAsset__*/
+/*__STUDIO_WORKER_EXTRACT:item4AssetCompressionPending__*/
+/*__STUDIO_WORKER_EXTRACT:item4AssetsNeedStudioCompress__*/
+/*__STUDIO_WORKER_EXTRACT:item4HealStaleCompressionAssets__*/
+/*__STUDIO_WORKER_EXTRACT:item4HasVideoMasters__*/
+/*__STUDIO_WORKER_EXTRACT:item4AssetMediaKind__*/
+/*__STUDIO_WORKER_EXTRACT:item4LooksLikeImagePreviewUrl__*/
+/*__STUDIO_WORKER_EXTRACT:item4IsClipPosterFile__*/
+/*__STUDIO_WORKER_EXTRACT:item4PutClipPoster__*/
+/*__STUDIO_WORKER_EXTRACT:item4GoogleAccessToken__*/
+/*__STUDIO_WORKER_EXTRACT:studioFetchAuthenticatedDriveImageBytes__*/
+/*__STUDIO_WORKER_EXTRACT:studioEnsurePublicChicagoWatermark__*/
+/*__STUDIO_WORKER_EXTRACT:publicChicagoShiningWatermark__*/
+/*__STUDIO_WORKER_EXTRACT:item4FetchDriveThumbnailBytes__*/
+/*__STUDIO_WORKER_EXTRACT:item4StampAssetPoster__*/
+/*__STUDIO_WORKER_EXTRACT:item4BuildClipPostersLocally__*/
+/*__STUDIO_WORKER_EXTRACT:item4PlayableMediaUrl__*/
+/*__STUDIO_WORKER_EXTRACT:item4VideoStreamPath__*/
+/*__STUDIO_WORKER_EXTRACT:item4VideoVariantReady__*/
+/*__STUDIO_WORKER_EXTRACT:item4IsNativeStillOutput__*/
+/*__STUDIO_WORKER_EXTRACT:item4NormalizedMimeType__*/
+/*__STUDIO_WORKER_EXTRACT:item4AssetManifest__*/
+/*__STUDIO_WORKER_EXTRACT:item4NormalizeSlideCaptions__*/
+/*__STUDIO_WORKER_EXTRACT:item4ApplySlideCaptions__*/
+/*__STUDIO_WORKER_EXTRACT:item4JoinedSlideCaptions__*/
+/*__STUDIO_WORKER_EXTRACT:item4RequestedCaptionIsSlideDump__*/
 const ITEM4_LEFTOVER_OVERLAYS = new Set([
   "rainy downtown chicago",
   "chicago loop",
@@ -3039,48 +3039,48 @@ const ITEM4_LEFTOVER_OVERLAYS = new Set([
   "the chicago riverwalk",
 ]);
 
-
-
-
-
-
-
-
-
-
+/*__STUDIO_WORKER_EXTRACT:item4IsLeftoverOverlayText__*/
+/*__STUDIO_WORKER_EXTRACT:item4OutputHasLeftoverOverlay__*/
+/*__STUDIO_WORKER_EXTRACT:item4PreferredOverlayText__*/
+/*__STUDIO_WORKER_EXTRACT:item4UnletteredClipUrl__*/
+/*__STUDIO_WORKER_EXTRACT:item4FillAiOverlayFallbacks__*/
+/*__STUDIO_WORKER_EXTRACT:item4OverlayCaptionBySourceId__*/
+/*__STUDIO_WORKER_EXTRACT:studioRepairLeftoverNativeLettering__*/
+/*__STUDIO_WORKER_EXTRACT:studioBurnedInOverlayPosition__*/
+/*__STUDIO_WORKER_EXTRACT:phase6DefaultOverlayPosition__*/
 const STUDIO_SHARED_VERTICAL_SHORT_TYPES = new Set(["Reel", "Short", "Video Draft"]);
 
-
-
-
-
-
-
-
+/*__STUDIO_WORKER_EXTRACT:studioSharedVerticalShortOutput__*/
+/*__STUDIO_WORKER_EXTRACT:studioSiblingVerticalShortOutputs__*/
+/*__STUDIO_WORKER_EXTRACT:studioSharedAudioMixFieldNames__*/
+/*__STUDIO_WORKER_EXTRACT:studioPickSharedAudioMixFields__*/
+/*__STUDIO_WORKER_EXTRACT:studioSharedRenderRerenderFields__*/
+/*__STUDIO_WORKER_EXTRACT:studioPatchSiblingVerticalShortOutputs__*/
+/*__STUDIO_WORKER_EXTRACT:item4PhotoOverlayFromCaption__*/
 const ITEM4_MEDIA_ASSET_TABLE = "tblSITCujCsJTNcDe";
 
-
-
-
-
-
+/*__STUDIO_WORKER_EXTRACT:item4MasterTransferId__*/
+/*__STUDIO_WORKER_EXTRACT:item4MasterQueueRows__*/
+/*__STUDIO_WORKER_EXTRACT:item4UpsertMasterQueue__*/
+/*__STUDIO_WORKER_EXTRACT:item4FindMasterMediaAsset__*/
+/*__STUDIO_WORKER_EXTRACT:item4CreateMasterMediaAsset__*/
 /** Stamp Content_Profile on a Media Asset that was created without one (AI masters). */
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+/*__STUDIO_WORKER_EXTRACT:item4EnsureMediaAssetContentProfile__*/
+/*__STUDIO_WORKER_EXTRACT:item4SanitizeStudioImageMediaAsset__*/
+/*__STUDIO_WORKER_EXTRACT:item4ReconcileMasterAuthority__*/
+/*__STUDIO_WORKER_EXTRACT:item4UpdateRequestState__*/
+/*__STUDIO_WORKER_EXTRACT:getItem4MasterAssets__*/
+/*__STUDIO_WORKER_EXTRACT:item4LargeUploadSessionIdFromPath__*/
+/*__STUDIO_WORKER_EXTRACT:item4LargeUploadPartNumberFromPath__*/
+/*__STUDIO_WORKER_EXTRACT:item4FindLargeUploadDraft__*/
+/*__STUDIO_WORKER_EXTRACT:createItem4LargeVideoUploadSession__*/
+/*__STUDIO_WORKER_EXTRACT:uploadItem4LargeVideoPart__*/
+/*__STUDIO_WORKER_EXTRACT:completeItem4LargeVideoUploadSession__*/
+/*__STUDIO_WORKER_EXTRACT:abortItem4LargeVideoUploadSession__*/
+/*__STUDIO_WORKER_EXTRACT:uploadItem4MasterAssets__*/
+/*__STUDIO_WORKER_EXTRACT:reorderItem4MasterAssets__*/
+/*__STUDIO_WORKER_EXTRACT:deleteItem4MasterAsset__*/
+/*__STUDIO_WORKER_EXTRACT:uploadItem4ClipPoster__*/
 /**
  * Idea ↔ library still matching.
  *
@@ -3141,75 +3141,75 @@ const IDEA_LIBRARY_NAMED_PLACES = [
   "venice beach", "venice canals", "rodeo drive", "hollywood sign",
 ];
 
-
-
-
+/*__STUDIO_WORKER_EXTRACT:ideaLibraryTokens__*/
+/*__STUDIO_WORKER_EXTRACT:ideaLibraryStrongTokens__*/
+/*__STUDIO_WORKER_EXTRACT:ideaLibraryHasToken__*/
 /**
  * Operator typeahead / library search: whole-word or word-start prefix so
  * "museu" and "Museum" both find "museum". Place/auto-match still uses
  * whole-word `ideaLibraryHasToken`.
  */
-
+/*__STUDIO_WORKER_EXTRACT:ideaLibrarySearchHit__*/
 /** Airtable FIND keys for operator-typed search (keep weak tokens like museum). */
-
-
-
-
-
+/*__STUDIO_WORKER_EXTRACT:ideaLibrarySearchFilterKeys__*/
+/*__STUDIO_WORKER_EXTRACT:ideaLibraryTokenForms__*/
+/*__STUDIO_WORKER_EXTRACT:ideaLibraryFieldHits__*/
+/*__STUDIO_WORKER_EXTRACT:ideaLibraryNamedPlaceKeys__*/
+/*__STUDIO_WORKER_EXTRACT:ideaLibraryMatchKeys__*/
 /** Place anchors plus brand/transit subjects (Metra/CTA) so station locations do not hide title brands. */
-
+/*__STUDIO_WORKER_EXTRACT:ideaLibraryFilterKeys__*/
 /** Named places plus operator search. Title nouns like cars/ride are subjects, not places. */
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+/*__STUDIO_WORKER_EXTRACT:ideaLibraryPlaceKeys__*/
+/*__STUDIO_WORKER_EXTRACT:ideaLibraryAirtableEscape__*/
+/*__STUDIO_WORKER_EXTRACT:ideaLibraryNamePhraseFormula__*/
+/*__STUDIO_WORKER_EXTRACT:ideaLibraryFilterFormula__*/
+/*__STUDIO_WORKER_EXTRACT:ideaLibraryVideoFilterFormula__*/
+/*__STUDIO_WORKER_EXTRACT:ideaLibraryHaystack__*/
+/*__STUDIO_WORKER_EXTRACT:ideaLibraryIntakeDate__*/
+/*__STUDIO_WORKER_EXTRACT:ideaLibraryFileBytes__*/
+/*__STUDIO_WORKER_EXTRACT:ideaLibraryIsEligibleVideo__*/
+/*__STUDIO_WORKER_EXTRACT:ideaLibraryIsEligibleImage__*/
+/*__STUDIO_WORKER_EXTRACT:ideaLibraryRankAsset__*/
+/*__STUDIO_WORKER_EXTRACT:mapIdeaLibraryAsset__*/
+/*__STUDIO_WORKER_EXTRACT:getMediaLibraryStills__*/
+/*__STUDIO_WORKER_EXTRACT:getIdeaLibrarySuggestions__*/
+/*__STUDIO_WORKER_EXTRACT:ideaLibraryRejectReason__*/
+/*__STUDIO_WORKER_EXTRACT:studioProfileRequiresChicagoWatermark__*/
+/*__STUDIO_WORKER_EXTRACT:item4ProductionProfileRecord__*/
+/*__STUDIO_WORKER_EXTRACT:studioAssetHasChicagoWatermark__*/
+/*__STUDIO_WORKER_EXTRACT:studioAssetSourceDriveId__*/
+/*__STUDIO_WORKER_EXTRACT:ensureChicagoWatermarkedLibraryAssetForProfile__*/
+/*__STUDIO_WORKER_EXTRACT:ensureChicagoWatermarkedLibraryAsset__*/
+/*__STUDIO_WORKER_EXTRACT:attachItem4LibraryAssets__*/
+/*__STUDIO_WORKER_EXTRACT:attachItem4LibraryAssetIds__*/
 const ITEM4_FBS1_SCENARIO_ID = 5816409;
 const ITEM4_FBS1_EXPECTED_WEBHOOK_ID = 2639647;
 
-
-
-
-
-
-
-
-
-
-
-
-
-
+/*__STUDIO_WORKER_EXTRACT:item4EnsureFacebookSlideshowVoiceoverPayload__*/
+/*__STUDIO_WORKER_EXTRACT:item4DynamicRationale__*/
+/*__STUDIO_WORKER_EXTRACT:item4MappingIndex__*/
+/*__STUDIO_WORKER_EXTRACT:item4PhotoCountKind__*/
+/*__STUDIO_WORKER_EXTRACT:item4ParseEzOrigin__*/
+/*__STUDIO_WORKER_EXTRACT:item4MasterLooksLikeVideo__*/
+/*__STUDIO_WORKER_EXTRACT:studioRewriteFinishedOriginNotes__*/
+/*__STUDIO_WORKER_EXTRACT:studioRewriteClipOriginNotes__*/
+/*__STUDIO_WORKER_EXTRACT:studioFinishedOriginKind__*/
+/*__STUDIO_WORKER_EXTRACT:item4PlanHasVideo__*/
+/*__STUDIO_WORKER_EXTRACT:studioNormalizeFinishedOriginKind__*/
+/*__STUDIO_WORKER_EXTRACT:studioIsFinishedPassthrough__*/
+/*__STUDIO_WORKER_EXTRACT:studioOutputTypeLabel__*/
 /** Full finished-video file passthrough (Reels/Shorts/TikTok). Stories use a short Remotion teaser instead. */
-
-
-
-
-
-
+/*__STUDIO_WORKER_EXTRACT:studioIsFinishedVideoFilePassthrough__*/
+/*__STUDIO_WORKER_EXTRACT:item4FinishedStoryTeaserReady__*/
+/*__STUDIO_WORKER_EXTRACT:item4FinishedPublicUrl__*/
+/*__STUDIO_WORKER_EXTRACT:item4FinishedMasterReady__*/
+/*__STUDIO_WORKER_EXTRACT:item4FinishedVideoMastersReady__*/
+/*__STUDIO_WORKER_EXTRACT:studioFinishedVariantsSkipped__*/
 const STUDIO_SCHEDULE_GAP_MS = 3 * 60 * 60 * 1000;
 
-
-
-
+/*__STUDIO_WORKER_EXTRACT:studioScheduleMs__*/
+/*__STUDIO_WORKER_EXTRACT:studioScheduleConflicts__*/
+/*__STUDIO_WORKER_EXTRACT:studioNextOpenScheduleIso__*/
 const STUDIO_OCCUPIED_CACHE_MS = 45 * 1000;
 // Profile × platform × output-type lanes × (3 MAE + overflow) × up to 30 days.
 // Headroom stays under a full horizon calendar so the nearest sort cannot
@@ -3218,72 +3218,72 @@ const STUDIO_OCCUPIED_LIST_LIMIT = 1200;
 const STUDIO_OCCUPIED_LOOKBACK_MS = 12 * 60 * 60 * 1000;
 const STUDIO_OCCUPIED_HORIZON_MS = MAE_SUGGEST_HORIZON_DAYS * 24 * 60 * 60 * 1000;
 
-
-
-
-
-
+/*__STUDIO_WORKER_EXTRACT:studioOccupiedDateInWindowFormula__*/
+/*__STUDIO_WORKER_EXTRACT:studioOccupiedLinkedIds__*/
+/*__STUDIO_WORKER_EXTRACT:studioOccupiedCacheKey__*/
+/*__STUDIO_WORKER_EXTRACT:studioOccupiedRowMatchesProfile__*/
+/*__STUDIO_WORKER_EXTRACT:studioOccupiedFilterFormula__*/
 const studioOccupiedScheduleCaches = new Map();
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+/*__STUDIO_WORKER_EXTRACT:studioOccupiedCacheSlot__*/
+/*__STUDIO_WORKER_EXTRACT:studioInvalidateOccupiedScheduleCache__*/
+/*__STUDIO_WORKER_EXTRACT:studioOccupiedMsFromRow__*/
+/*__STUDIO_WORKER_EXTRACT:studioLoadOccupiedScheduleRows__*/
+/*__STUDIO_WORKER_EXTRACT:studioLoadOccupiedSchedules__*/
+/*__STUDIO_WORKER_EXTRACT:studioPublishScheduleFields__*/
+/*__STUDIO_WORKER_EXTRACT:studioStorySiblingStamp__*/
+/*__STUDIO_WORKER_EXTRACT:studioResolveStoryPublishIso__*/
+/*__STUDIO_WORKER_EXTRACT:studioPublishScheduledMs__*/
+/*__STUDIO_WORKER_EXTRACT:studioPublishIsDue__*/
+/*__STUDIO_WORKER_EXTRACT:studioPublishCanDispatchNow__*/
+/*__STUDIO_WORKER_EXTRACT:studioPromoteDuePublishStatus__*/
+/*__STUDIO_WORKER_EXTRACT:studioPublishHeldUntilIso__*/
+/*__STUDIO_WORKER_EXTRACT:item4EffectivePhotoCount__*/
+/*__STUDIO_WORKER_EXTRACT:item4StudioDirectiveYes__*/
+/*__STUDIO_WORKER_EXTRACT:item4ThumbnailSource__*/
+/*__STUDIO_WORKER_EXTRACT:item4UrlIsStudioPhotoCrop__*/
+/*__STUDIO_WORKER_EXTRACT:studioUrlLooksLikeVideoFile__*/
+/*__STUDIO_WORKER_EXTRACT:studioUrlLooksLikeDriveFetch__*/
+/*__STUDIO_WORKER_EXTRACT:studioAiThumbnailUrl__*/
+/*__STUDIO_WORKER_EXTRACT:studioNeedsAiThumbnail__*/
+/*__STUDIO_WORKER_EXTRACT:studioStampParentAiCoverOnOutput__*/
 // "Ready for Voiceover" is the P2 selector. A cover write that overwrites it with
 // "Thumbnail Ready" while Voiceover_URL is blank turns narration off and leaves R4
 // returning waiting_for_voiceover forever (Output 432 / CI 137). Keep the
 // selector until the voiceover exists.
-
-
-
-
-
-
-
+/*__STUDIO_WORKER_EXTRACT:studioCoverContentStatusFields__*/
+/*__STUDIO_WORKER_EXTRACT:studioEnsurePublicAiCover__*/
+/*__STUDIO_WORKER_EXTRACT:studioStampPackageReviewCovers__*/
+/*__STUDIO_WORKER_EXTRACT:studioHealRfrMissingDeliverable__*/
+/*__STUDIO_WORKER_EXTRACT:item4StudioThumbnailPrompt__*/
+/*__STUDIO_WORKER_EXTRACT:item4SlideImageUrl__*/
+/*__STUDIO_WORKER_EXTRACT:item4PackageOverrides__*/
 /** Infer video vs slides package when /plan omits package and notes lack ez-package=. */
-
-
-
-
-
+/*__STUDIO_WORKER_EXTRACT:item4ResolvePackageId__*/
+/*__STUDIO_WORKER_EXTRACT:item4DefaultOutputType__*/
+/*__STUDIO_WORKER_EXTRACT:item4CanonicalOutputType__*/
+/*__STUDIO_WORKER_EXTRACT:item4IsCompanionOutputType__*/
+/*__STUDIO_WORKER_EXTRACT:item4IsUnsupportedCompanion__*/
 const ITEM4_STORY_TEASER_SECONDS = 10;
 const ITEM4_SINGLE_STILL_SECONDS = 5;
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+/*__STUDIO_WORKER_EXTRACT:item4ResolvedVideoDurationSeconds__*/
+/*__STUDIO_WORKER_EXTRACT:item4CompanionStoryFields__*/
+/*__STUDIO_WORKER_EXTRACT:item4RowHasPlatformOutput__*/
+/*__STUDIO_WORKER_EXTRACT:item4PlatformOutputHasPublishedIdentity__*/
+/*__STUDIO_WORKER_EXTRACT:item4ReconcileCreatedPlatformOutput__*/
+/*__STUDIO_WORKER_EXTRACT:item4CollapseDuplicatePlanOutputs__*/
+/*__STUDIO_WORKER_EXTRACT:item4NormalizePlanExtras__*/
+/*__STUDIO_WORKER_EXTRACT:item4PlanChoice__*/
+/*__STUDIO_WORKER_EXTRACT:item4PlanItemFromChoice__*/
+/*__STUDIO_WORKER_EXTRACT:item4ReconcilePlanWithEnabledOutputs__*/
+/*__STUDIO_WORKER_EXTRACT:item4DisableUnsupportedCompanions__*/
+/*__STUDIO_WORKER_EXTRACT:item4ReconcileEnabledPlanOutputs__*/
+/*__STUDIO_WORKER_EXTRACT:acquireAzOutputLock__*/
+/*__STUDIO_WORKER_EXTRACT:finishedEnabledKeysFromRows__*/
+/*__STUDIO_WORKER_EXTRACT:item4SyncPlanOutputs__*/
+/*__STUDIO_WORKER_EXTRACT:buildItem4OutputPlan__*/
+/*__STUDIO_WORKER_EXTRACT:getItem4OutputPlan__*/
 const ITEM4_VARIANT_QUEUE_TABLE = "tblBZLXPd1p2NRWRK";
 const ITEM4_SMV1_SCENARIO_ID = 5894885;
 const ITEM4_VARIANT_RECIPE_VERSION = "fill-crop-v2";
@@ -3338,7 +3338,7 @@ const STUDIO_FB2_SCENARIO_ID = 5813487;
 const STUDIO_FB2R_SCENARIO_ID = 5813511;
 const STUDIO_FB3_SCENARIO_ID = 5813534;
 const STUDIO_FB_ORCH_SCENARIO_ID = 5813561;
-
+/*__STUDIO_WORKER_EXTRACT:studioFacebookGraphPublishHeld__*/
 const STUDIO_AP0C_SCENARIO_ID = 5786899;
 const STUDIO_AP1C_SCENARIO_ID = 5790745;
 const STUDIO_AP2C_SCENARIO_ID = 5791231;
@@ -3352,46 +3352,46 @@ const STUDIO_IG_ORCH_SCENARIO_ID = 5864632;
 
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+/*__STUDIO_WORKER_EXTRACT:item4VariantManifest__*/
+/*__STUDIO_WORKER_EXTRACT:item4CoverStillUrl__*/
+/*__STUDIO_WORKER_EXTRACT:item4PlanRatios__*/
+/*__STUDIO_WORKER_EXTRACT:item4CoverExtraRatios__*/
+/*__STUDIO_WORKER_EXTRACT:item4RequiredRatios__*/
+/*__STUDIO_WORKER_EXTRACT:item4CoverHeroAsset__*/
+/*__STUDIO_WORKER_EXTRACT:item4RatiosForAsset__*/
+/*__STUDIO_WORKER_EXTRACT:item4ExpectedVariantKeys__*/
+/*__STUDIO_WORKER_EXTRACT:item4VariantRatioKey__*/
+/*__STUDIO_WORKER_EXTRACT:item4VariantTargetFileName__*/
+/*__STUDIO_WORKER_EXTRACT:item4NormalizedCrop__*/
+/*__STUDIO_WORKER_EXTRACT:item4CropStyleToken__*/
+/*__STUDIO_WORKER_EXTRACT:item4CropTransferSuffix__*/
+/*__STUDIO_WORKER_EXTRACT:item4MergeAssetCrops__*/
+/*__STUDIO_WORKER_EXTRACT:item4QueueTransferId__*/
+/*__STUDIO_WORKER_EXTRACT:item4QueueStatus__*/
+/*__STUDIO_WORKER_EXTRACT:item4QueueRowHasAuthority__*/
+/*__STUDIO_WORKER_EXTRACT:item4QueueRowCountsReady__*/
+/*__STUDIO_WORKER_EXTRACT:item4QueueErrorIsTransient__*/
+/*__STUDIO_WORKER_EXTRACT:item4RequeueTransientVariantFailures__*/
 // Quality Agent / Worker heal: same effect as Production "Retry remaining" —
 // requeue every Failed/Error crop that still lacks Drive authority so large
 // frame batches do not park until a human clicks the button.
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+/*__STUDIO_WORKER_EXTRACT:item4RequeueFailedVariantsForHeal__*/
+/*__STUDIO_WORKER_EXTRACT:item4RequeueStaleProcessing__*/
+/*__STUDIO_WORKER_EXTRACT:item4QueueMediaAssetId__*/
+/*__STUDIO_WORKER_EXTRACT:item4QueueDriveFileId__*/
+/*__STUDIO_WORKER_EXTRACT:item4OutputIdsForRatio__*/
+/*__STUDIO_WORKER_EXTRACT:item4SameRecordIds__*/
+/*__STUDIO_WORKER_EXTRACT:item4RelinkVariantQueueOutputs__*/
+/*__STUDIO_WORKER_EXTRACT:item4VariantQueueRows__*/
+/*__STUDIO_WORKER_EXTRACT:syncMiamiTikTokPipelineSecret__*/
+/*__STUDIO_WORKER_EXTRACT:item4PipelineSetting__*/
+/*__STUDIO_WORKER_EXTRACT:item4UpsertVariantQueue__*/
+/*__STUDIO_WORKER_EXTRACT:item4Smv1FormulaQuoted__*/
+/*__STUDIO_WORKER_EXTRACT:item4Smv1ExactTestFormula__*/
+/*__STUDIO_WORKER_EXTRACT:item4Smv1ExactRequestFormula__*/
+/*__STUDIO_WORKER_EXTRACT:item4QueueRowIsOutstanding__*/
+/*__STUDIO_WORKER_EXTRACT:pipelineStageBackend__*/
+/*__STUDIO_WORKER_EXTRACT:cadenceScenarioManagedByPython__*/
 const STUDIO_PRODUCTION_JOB_LABELS = {
   themes: "Writing slide themes",
   audio: "Generating voiceover and cover",
@@ -3405,13 +3405,13 @@ const STUDIO_PRODUCTION_JOB_LABELS = {
   blocked: "Blocked",
 };
 
-
-
-
-
-
-
-
+/*__STUDIO_WORKER_EXTRACT:parseStudioProductionJob__*/
+/*__STUDIO_WORKER_EXTRACT:studioProductionJobLabel__*/
+/*__STUDIO_WORKER_EXTRACT:item4RunnerClipPosterRoutes__*/
+/*__STUDIO_WORKER_EXTRACT:item4PulseClipPosterJob__*/
+/*__STUDIO_WORKER_EXTRACT:item4RunnerStudioCompressRoutes__*/
+/*__STUDIO_WORKER_EXTRACT:item4PulseStudioCompressJob__*/
+/*__STUDIO_WORKER_EXTRACT:item4PulseStudioProduceJob__*/
 const AZ_DEFAULT_PLATFORMS = Object.freeze(["Instagram", "Facebook", "TikTok", "YouTube"]);
 const AZ_DEFAULT_OVERRIDES = Object.freeze({
   Instagram: "Reel",
@@ -3426,125 +3426,125 @@ const AZ_OTHER_NEAR_MS = 3 * 60 * 60 * 1000;
 const AZ_STORY_OFFSET_MS = 10 * 60 * 1000;
 const AZ_SCHEDULE_LEAD_MS = 10 * 60 * 1000;
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+/*__STUDIO_WORKER_EXTRACT:studioRequestNotesText__*/
+/*__STUDIO_WORKER_EXTRACT:studioIsAzFinishedVideo__*/
+/*__STUDIO_WORKER_EXTRACT:studioIsVibeCut__*/
+/*__STUDIO_WORKER_EXTRACT:skipsProductionApprove__*/
+/*__STUDIO_WORKER_EXTRACT:studioChicagoWeekdayShort__*/
+/*__STUDIO_WORKER_EXTRACT:studioAzCivilKey__*/
+/*__STUDIO_WORKER_EXTRACT:studioAzParseWindowStart__*/
+/*__STUDIO_WORKER_EXTRACT:studioAzCivilFromMs__*/
+/*__STUDIO_WORKER_EXTRACT:studioAzIsStory__*/
+/*__STUDIO_WORKER_EXTRACT:studioAzScheduleKey__*/
+/*__STUDIO_WORKER_EXTRACT:studioAzTooClose__*/
+/*__STUDIO_WORKER_EXTRACT:studioAzNearPenalty__*/
+/*__STUDIO_WORKER_EXTRACT:studioAzOccupiedOnDay__*/
+/*__STUDIO_WORKER_EXTRACT:studioAzHorizon__*/
+/*__STUDIO_WORKER_EXTRACT:studioAzWindowSlots__*/
+/*__STUDIO_WORKER_EXTRACT:studioAzScoreMain__*/
+/*__STUDIO_WORKER_EXTRACT:studioBuildAzCampaignSchedule__*/
+/*__STUDIO_WORKER_EXTRACT:studioLoadAzOccupiedTimes__*/
+/*__STUDIO_WORKER_EXTRACT:studioResolveAzBestTimes__*/
+/*__STUDIO_WORKER_EXTRACT:azPlatformOutputsForRequest__*/
+/*__STUDIO_WORKER_EXTRACT:azOutputReadyToQueue__*/
+/*__STUDIO_WORKER_EXTRACT:azOutputQueueBlockers__*/
+/*__STUDIO_WORKER_EXTRACT:azStagePublicCoverFromSource__*/
+/*__STUDIO_WORKER_EXTRACT:azEnsurePublicCovers__*/
+/*__STUDIO_WORKER_EXTRACT:azEnsurePublicFinalFiles__*/
+/*__STUDIO_WORKER_EXTRACT:azRestampFinishedStories__*/
+/*__STUDIO_WORKER_EXTRACT:azAutoApproveIfReady__*/
+/*__STUDIO_WORKER_EXTRACT:azBuildPlanItems__*/
+/*__STUDIO_WORKER_EXTRACT:azEnsurePlatformOutputs__*/
+/*__STUDIO_WORKER_EXTRACT:advanceAzFinishedVideo__*/
+/*__STUDIO_WORKER_EXTRACT:opsForceAzNavyPierTitle__*/
+/*__STUDIO_WORKER_EXTRACT:resumeAzFinishedVideoRequests__*/
+/*__STUDIO_WORKER_EXTRACT:studioVibeCutOutputNeedsRemount__*/
+/*__STUDIO_WORKER_EXTRACT:studioClearVibeCutPassthroughOutputs__*/
+/*__STUDIO_WORKER_EXTRACT:enqueueStudioProductionJob__*/
+/*__STUDIO_WORKER_EXTRACT:studioOutputProductionRequestId__*/
+/*__STUDIO_WORKER_EXTRACT:loadStudioProductionJobsForOutputs__*/
+/*__STUDIO_WORKER_EXTRACT:startOrphanedStudioProductionJobs__*/
+/*__STUDIO_WORKER_EXTRACT:pulseStudioProduceOpsAlert__*/
+/*__STUDIO_WORKER_EXTRACT:studioProduceHealState__*/
+/*__STUDIO_WORKER_EXTRACT:isTransientRenderBlockError__*/
+/*__STUDIO_WORKER_EXTRACT:resumeStaleStudioProductionJobs__*/
+/*__STUDIO_WORKER_EXTRACT:studioLastModifiedStaleFormula__*/
+/*__STUDIO_WORKER_EXTRACT:studioFreshTtsLease__*/
+/*__STUDIO_WORKER_EXTRACT:studioOutputVoiceoverRequired__*/
 // Ready for Render with no Remotion job while the output wants narration but has no
 // Voiceover_URL. R4 returns waiting_for_voiceover on every pulse, so pulsing R4 again is
 // useless. Either copy the parent's voiceover down or put the parent back on the P2
 // selector (Content_Status "Ready for Voiceover") and resume produce at audio.
-
-
-
-
-
-
-
-
-
-
-
-
-
+/*__STUDIO_WORKER_EXTRACT:studioHealReadyNoJobVoiceover__*/
+/*__STUDIO_WORKER_EXTRACT:studioStreamMediaAssetId__*/
+/*__STUDIO_WORKER_EXTRACT:studioRepairUnfetchableRenderSources__*/
+/*__STUDIO_WORKER_EXTRACT:studioPrivateDriveWatermarkSignature__*/
+/*__STUDIO_WORKER_EXTRACT:studioChicagoWatermarkOutput__*/
+/*__STUDIO_WORKER_EXTRACT:studioParkChicagoWatermarkRender__*/
+/*__STUDIO_WORKER_EXTRACT:studioRemotionPrivateDriveLocalizationReady__*/
+/*__STUDIO_WORKER_EXTRACT:studioResetPrivateDriveWatermarkRender__*/
+/*__STUDIO_WORKER_EXTRACT:studioExtendClipsToCoverVoiceover__*/
+/*__STUDIO_WORKER_EXTRACT:studioHealVoiceoverExceedsRender__*/
+/*__STUDIO_WORKER_EXTRACT:healStuckStudioRenders__*/
+/*__STUDIO_WORKER_EXTRACT:studioCompleteNativePhotoPublishArming__*/
+/*__STUDIO_WORKER_EXTRACT:studioHealNativePhotoReviewStrands__*/
 /** Output_Status stuck Ready for Review after Approve → phantom All-Profiles Awaiting Approval. */
-
+/*__STUDIO_WORKER_EXTRACT:studioHealAwaitingApprovalStaleRfr__*/
 /** Rerendering badge with a finished file and no render running → back to Ready for Review. */
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+/*__STUDIO_WORKER_EXTRACT:studioHealPhantomRerender__*/
+/*__STUDIO_WORKER_EXTRACT:studioHealFailedStatuses__*/
+/*__STUDIO_WORKER_EXTRACT:studioHealIgCarouselTooManyChildren__*/
+/*__STUDIO_WORKER_EXTRACT:studioHealIgCarouselChildVerificationRace__*/
+/*__STUDIO_WORKER_EXTRACT:studioHealIgCarouselChildPollFailure__*/
+/*__STUDIO_WORKER_EXTRACT:studioHealIgCarouselRateLimit__*/
+/*__STUDIO_WORKER_EXTRACT:studioMediaIdsFromSourcePackage__*/
+/*__STUDIO_WORKER_EXTRACT:studioIdeaProxyFromProduceRequest__*/
+/*__STUDIO_WORKER_EXTRACT:studioRecoverEscalatedMasters__*/
+/*__STUDIO_WORKER_EXTRACT:studioHealEscalatedProduce__*/
+/*__STUDIO_WORKER_EXTRACT:resumeStalePlatformOutputs__*/
+/*__STUDIO_WORKER_EXTRACT:item4PulsePipelineStage__*/
+/*__STUDIO_WORKER_EXTRACT:item4PulseSmv1Python__*/
+/*__STUDIO_WORKER_EXTRACT:item4PulseR2BPython__*/
+/*__STUDIO_WORKER_EXTRACT:item4PulseR2Python__*/
+/*__STUDIO_WORKER_EXTRACT:item4PulseR3Python__*/
+/*__STUDIO_WORKER_EXTRACT:item4PulseT1Python__*/
+/*__STUDIO_WORKER_EXTRACT:studioGateR4ForPrivateDriveWatermark__*/
+/*__STUDIO_WORKER_EXTRACT:studioRemotionRenderBusy__*/
+/*__STUDIO_WORKER_EXTRACT:studioStampRenderQueueWaiting__*/
+/*__STUDIO_WORKER_EXTRACT:readOpsQueueControls__*/
+/*__STUDIO_WORKER_EXTRACT:readFactoryDeskControls__*/
+/*__STUDIO_WORKER_EXTRACT:writeFactoryDeskControls__*/
+/*__STUDIO_WORKER_EXTRACT:loadFactoryIdeaCandidates__*/
+/*__STUDIO_WORKER_EXTRACT:writeOpsQueueControls__*/
+/*__STUDIO_WORKER_EXTRACT:studioLoadRenderQueueCandidates__*/
+/*__STUDIO_WORKER_EXTRACT:studioAdmitRenderQueue__*/
+/*__STUDIO_WORKER_EXTRACT:item4PulseR4Python__*/
+/*__STUDIO_WORKER_EXTRACT:item4PulseR5Python__*/
+/*__STUDIO_WORKER_EXTRACT:item4PulseLetterPython__*/
+/*__STUDIO_WORKER_EXTRACT:item4RefreshNativeLetteredSlides__*/
+/*__STUDIO_WORKER_EXTRACT:item4PulseRR2Python__*/
+/*__STUDIO_WORKER_EXTRACT:handleRr2ReviewDecision__*/
+/*__STUDIO_WORKER_EXTRACT:item4PulseRR1Python__*/
+/*__STUDIO_WORKER_EXTRACT:item4PulseP1Python__*/
+/*__STUDIO_WORKER_EXTRACT:item4PulseP2Python__*/
+/*__STUDIO_WORKER_EXTRACT:item4PulseP3Python__*/
+/*__STUDIO_WORKER_EXTRACT:item4SetSmv1SelectorFormula__*/
+/*__STUDIO_WORKER_EXTRACT:item4DrainVariantWorker__*/
+/*__STUDIO_WORKER_EXTRACT:item4ListPendingQueueRequestIds__*/
+/*__STUDIO_WORKER_EXTRACT:item4DrainAllPendingWork__*/
+/*__STUDIO_WORKER_EXTRACT:item4BuildDriveManifest__*/
+/*__STUDIO_WORKER_EXTRACT:item4VariantManifestPlanComplete__*/
+/*__STUDIO_WORKER_EXTRACT:item4ReconcileVariants__*/
+/*__STUDIO_WORKER_EXTRACT:runItem4VariantPrepareCore__*/
+/*__STUDIO_WORKER_EXTRACT:ensureItem4VariantsReadyForPromotion__*/
+/*__STUDIO_WORKER_EXTRACT:prepareItem4Variants__*/
+/*__STUDIO_WORKER_EXTRACT:getItem4Variants__*/
+/*__STUDIO_WORKER_EXTRACT:item4ResumePendingMasterAuthority__*/
+/*__STUDIO_WORKER_EXTRACT:item4ResumePendingVariants__*/
+/*__STUDIO_WORKER_EXTRACT:item4TimelineAutoPrepareEligible__*/
+/*__STUDIO_WORKER_EXTRACT:item4HealTimelineAutoPrepare__*/
+/*__STUDIO_WORKER_EXTRACT:item4HealIncompletePreparingVariants__*/
+/*__STUDIO_WORKER_EXTRACT:getItem4WorkspaceStatus__*/
 const PRODUCTION_REQUEST_TABLE = "Production Requests";
 const PR_STATUSES = new Set(["Draft", "Ready", "Submitted", "Promoted", "Cancelled"]);
 const PR_CONTENT_TYPES = new Set([
@@ -3570,38 +3570,38 @@ const PR_PLATFORM_ALIASES = new Map([
   ["twitter", "X"],
 ]);
 
-
-
+/*__STUDIO_WORKER_EXTRACT:canonicalProductionPlatform__*/
+/*__STUDIO_WORKER_EXTRACT:canonicalProductionPlatforms__*/
 const PR_TRISTATE = new Set(["Use Profile Default","Yes","No"]);
 const PR_THUMBNAIL_MODES = new Set(["Use Profile Default","Yes","No","Use photo frame"]);
 const PR_COUNT_MODES = new Set(["AI decides","Exact","Target range"]);
 const PR_TEXT_MODES = new Set(["AI decides","Force exact","AI improve","Leave blank"]);
 const PR_CAROUSEL_IMAGE_MODES = new Set(["Make AI Generated","Manual Upload"]);
 
-
-
+/*__STUDIO_WORKER_EXTRACT:ideaRecordIdFromProductionRequest__*/
+/*__STUDIO_WORKER_EXTRACT:uniqueIdeaRecordIds__*/
 // One formula page per chunk. Per-idea GETs blow the Worker subrequest cap
 // once Production has more than a handful of open drafts, and the list 500s.
-
-
-
-
-
-
-
-
-
+/*__STUDIO_WORKER_EXTRACT:loadIdeaListMetaByRecordId__*/
+/*__STUDIO_WORKER_EXTRACT:loadIdeaTitlesByRecordId__*/
+/*__STUDIO_WORKER_EXTRACT:loadIdeaPhotoWaitStatesByRecordId__*/
+/*__STUDIO_WORKER_EXTRACT:mapProductionRequest__*/
+/*__STUDIO_WORKER_EXTRACT:productionRequestRecordIdFromPath__*/
+/*__STUDIO_WORKER_EXTRACT:makeProductionRequestId__*/
+/*__STUDIO_WORKER_EXTRACT:loadAuthorizedProductionRequest__*/
+/*__STUDIO_WORKER_EXTRACT:normalizeChoice__*/
+/*__STUDIO_WORKER_EXTRACT:nullableInt__*/
 // Timed-script lengths can be fractional seconds (90.4). The Airtable duration
 // field is a whole-number cap, so store the ceiling. 90 stays 90.
-
-
-
-
-
-
-
-
-
+/*__STUDIO_WORKER_EXTRACT:nullableWholeSeconds__*/
+/*__STUDIO_WORKER_EXTRACT:nullableNumber__*/
+/*__STUDIO_WORKER_EXTRACT:validateMusicAsset__*/
+/*__STUDIO_WORKER_EXTRACT:normalizeRequestedVoice__*/
+/*__STUDIO_WORKER_EXTRACT:requestedVoiceFromProductionRequest__*/
+/*__STUDIO_WORKER_EXTRACT:cleanProductionRequestPayload__*/
+/*__STUDIO_WORKER_EXTRACT:productionRequestFields__*/
+/*__STUDIO_WORKER_EXTRACT:productionRequestDefaultsFromIdea__*/
+/*__STUDIO_WORKER_EXTRACT:suggestPrimaryLocationFromIdea__*/
 const PRODUCTION_REQUEST_LIST_FIELDS = [
   "Production_Request_ID",
   "Test_Run_ID",
@@ -3658,55 +3658,55 @@ const PRODUCTION_REQUEST_LIST_FIELDS = [
 
 const OPEN_PRODUCTION_REQUEST_FORMULA = 'OR({Request_Status}="Draft",{Request_Status}="Ready",{Request_Status}="Submitted")';
 
-
-
-
-
-
-
-
-
-
-
-
+/*__STUDIO_WORKER_EXTRACT:listOpenProductionRequests__*/
+/*__STUDIO_WORKER_EXTRACT:existingDraftForIdea__*/
+/*__STUDIO_WORKER_EXTRACT:loadContentProfileRecord__*/
+/*__STUDIO_WORKER_EXTRACT:resolveDraftNarrationVoice__*/
+/*__STUDIO_WORKER_EXTRACT:isUnsetOrKateDefaultVoice__*/
+/*__STUDIO_WORKER_EXTRACT:maybeHealDraftNarrationVoice__*/
+/*__STUDIO_WORKER_EXTRACT:createDraftForIdea__*/
+/*__STUDIO_WORKER_EXTRACT:getOrCreateProductionRequestForIdea__*/
+/*__STUDIO_WORKER_EXTRACT:createProductionRequestFromBody__*/
+/*__STUDIO_WORKER_EXTRACT:mapProductionRequestLight__*/
+/*__STUDIO_WORKER_EXTRACT:mapProductionRequestSummary__*/
 // QA-PRODUCTION-PHOTO-WAIT: a stale Idea 'Waiting' flag must not hide an
 // operator-owned draft with exact narration and attached photos. Untouched
 // photo-listening shells remain hidden until they actually enter Production.
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+/*__STUDIO_WORKER_EXTRACT:productionRequestPhotoWaitHidden__*/
+/*__STUDIO_WORKER_EXTRACT:listProductionRequests__*/
+/*__STUDIO_WORKER_EXTRACT:getProductionRequest__*/
+/*__STUDIO_WORKER_EXTRACT:updateProductionRequest__*/
+/*__STUDIO_WORKER_EXTRACT:productionRequestBridgeRecordIdFromPath__*/
+/*__STUDIO_WORKER_EXTRACT:item4DerivedIdeaSummary__*/
+/*__STUDIO_WORKER_EXTRACT:ensureProductionRequestIdeaSummary__*/
+/*__STUDIO_WORKER_EXTRACT:item4BridgePlanKey__*/
+/*__STUDIO_WORKER_EXTRACT:item4SourceToProductionBridgePreflight__*/
+/*__STUDIO_WORKER_EXTRACT:productionRequestBridgePreflightRoute__*/
+/*__STUDIO_WORKER_EXTRACT:productionRequestPromotionRecordIdFromPath__*/
+/*__STUDIO_WORKER_EXTRACT:linkedContentItemRecordId__*/
+/*__STUDIO_WORKER_EXTRACT:studioOutputSupportsStudioAudio__*/
+/*__STUDIO_WORKER_EXTRACT:productionRequestWantsStudioAudio__*/
+/*__STUDIO_WORKER_EXTRACT:productionRequestAudioPlatformWarnings__*/
+/*__STUDIO_WORKER_EXTRACT:productionRequestCompatibilityIssues__*/
+/*__STUDIO_WORKER_EXTRACT:promotionThumbnailTriState__*/
+/*__STUDIO_WORKER_EXTRACT:promotionInputFromProductionRequest__*/
+/*__STUDIO_WORKER_EXTRACT:updateProductionRequestPromotionState__*/
 const FACTORY_REVISION_NOTE_PREFIX = "[factory-revision-open]";
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+/*__STUDIO_WORKER_EXTRACT:stripFactoryRevisionNote__*/
+/*__STUDIO_WORKER_EXTRACT:productionRequestRevisionOpen__*/
+/*__STUDIO_WORKER_EXTRACT:withFactoryRevisionOpen__*/
+/*__STUDIO_WORKER_EXTRACT:productionRequestEditable__*/
+/*__STUDIO_WORKER_EXTRACT:productionRequestSyncRecordIdFromPath__*/
+/*__STUDIO_WORKER_EXTRACT:productionRequestTimedScriptRecordIdFromPath__*/
+/*__STUDIO_WORKER_EXTRACT:loadContentPlatformOutputs__*/
+/*__STUDIO_WORKER_EXTRACT:outputNeedsTimedScriptRerender__*/
+/*__STUDIO_WORKER_EXTRACT:outputAlreadyApprovedForPublishing__*/
+/*__STUDIO_WORKER_EXTRACT:applyPromotedTimedScriptRoute__*/
+/*__STUDIO_WORKER_EXTRACT:productionRequestPreferredMusic__*/
+/*__STUDIO_WORKER_EXTRACT:productionRequestDirectiveSnapshot__*/
+/*__STUDIO_WORKER_EXTRACT:syncProductionRequestDirectivesToContentItem__*/
+/*__STUDIO_WORKER_EXTRACT:syncProductionRequestDirectivesRoute__*/
 const STUDIO_OUTPUT_ROUTE_SPECS = Object.freeze({
   "Instagram::Reel": {
     pipeline_family: "Video",
@@ -3791,102 +3791,102 @@ const STUDIO_OUTPUT_ROUTE_SPECS = Object.freeze({
   },
 });
 
-
-
-
-
-
-
-
-
-
-
+/*__STUDIO_WORKER_EXTRACT:studioOutputRouteSpec__*/
+/*__STUDIO_WORKER_EXTRACT:stringOrNull__*/
+/*__STUDIO_WORKER_EXTRACT:arrayOrEmpty__*/
+/*__STUDIO_WORKER_EXTRACT:resolvedOutputTriState__*/
+/*__STUDIO_WORKER_EXTRACT:resolvedThumbnailMode__*/
+/*__STUDIO_WORKER_EXTRACT:productionProfileDefaultsForParentContentItem__*/
+/*__STUDIO_WORKER_EXTRACT:emptyStudioMusic__*/
+/*__STUDIO_WORKER_EXTRACT:studioMusicFromMediaRecord__*/
+/*__STUDIO_WORKER_EXTRACT:preferredMusicForProductionRequestOutput__*/
+/*__STUDIO_WORKER_EXTRACT:studioCatalogMusicScore__*/
 /** Prefer a random track among the top-scoring tier so blank Selected_Music_Asset does not lock one favorite forever. */
-
-
-
-
-
-
-
-
-
-
+/*__STUDIO_WORKER_EXTRACT:pickCatalogFallbackMusicRecord__*/
+/*__STUDIO_WORKER_EXTRACT:catalogFallbackMusic__*/
+/*__STUDIO_WORKER_EXTRACT:resolveStudioRenderMusic__*/
+/*__STUDIO_WORKER_EXTRACT:outputEffectiveChoice__*/
+/*__STUDIO_WORKER_EXTRACT:outputEffectiveNumber__*/
+/*__STUDIO_WORKER_EXTRACT:outputEffectiveText__*/
+/*__STUDIO_WORKER_EXTRACT:outputWorkItemIssues__*/
+/*__STUDIO_WORKER_EXTRACT:buildOutputWorkItemEffective__*/
+/*__STUDIO_WORKER_EXTRACT:copyWritableParentFields__*/
+/*__STUDIO_WORKER_EXTRACT:item4ListParentCarouselSlides__*/
 // The production request only carries a title when the creator forced one, so the
 // theme normally lives on the promoted Content Item.
-
+/*__STUDIO_WORKER_EXTRACT:item4StudioThemeTitle__*/
 // SAI1 decides what each AI slot depicts and writes the narration for the whole
 // video, so a slot's photo, its burned-in caption, and the voiceover all name the
 // same thing to do instead of drifting apart.
 // needed may be 0: SAI1 also authors the post caption, which is required even for an
 // all-manual photo set that has no AI slots to theme.
-
-
-
+/*__STUDIO_WORKER_EXTRACT:item4CaptionContextKey__*/
+/*__STUDIO_WORKER_EXTRACT:item4AssetCaptionForAiContext__*/
+/*__STUDIO_WORKER_EXTRACT:item4RequestAiSlideThemes__*/
 // The post caption is what gets published with the video and what the platform handoff
 // emails ask you to copy. Under "AI decides" nothing else in the Studio path authors it:
 // the output seed copies a caption that does not exist yet, so it stays blank all the way
 // to publish unless the caption is written here.
-
+/*__STUDIO_WORKER_EXTRACT:item4StudioCaptionIsLocked__*/
 // Asset filenames are production metadata, never publishable copy. SAI1 can see captions
 // attached to masters for visual context, but generic labels such as "Photo 2" must not
 // leak into a social caption (for example "Featuring: Photo 2, Photo 3...").
-
-
-
-
-
-
-
-
-
-
+/*__STUDIO_WORKER_EXTRACT:item4StripAssetFilenameCaptionText__*/
+/*__STUDIO_WORKER_EXTRACT:item4WriteStudioPostCaption__*/
+/*__STUDIO_WORKER_EXTRACT:item4EnsureStudioPostCaption__*/
+/*__STUDIO_WORKER_EXTRACT:item4PreProductionAiRequestedCount__*/
+/*__STUDIO_WORKER_EXTRACT:item4PreProductionAiRatio__*/
+/*__STUDIO_WORKER_EXTRACT:item4PreProductionAiContext__*/
+/*__STUDIO_WORKER_EXTRACT:item4GeneratePreProductionImageBytes__*/
+/*__STUDIO_WORKER_EXTRACT:generateItem4PreProductionAiMaster__*/
+/*__STUDIO_WORKER_EXTRACT:item4SeedAiCarouselSlides__*/
+/*__STUDIO_WORKER_EXTRACT:item4IngestAiSlideAsMaster__*/
 // An AI master is ingested straight from the carousel slide, before SMV1 has given
 // it a Drive file and Media Asset record, so the variant upsert that runs at ingest
 // time cannot queue its crops yet. Without a re-queue once the master turns Ready
 // the request waits forever on crops nobody ever asked for.
-
-
-
-
-
-
-
-
-
-
+/*__STUDIO_WORKER_EXTRACT:item4EnsureVariantQueueForReadyMasters__*/
+/*__STUDIO_WORKER_EXTRACT:item4EnsureAiSourceMasters__*/
+/*__STUDIO_WORKER_EXTRACT:item4PublicCdnUrl__*/
+/*__STUDIO_WORKER_EXTRACT:item4MasterForSource__*/
+/*__STUDIO_WORKER_EXTRACT:item4NormalizeAspectRatioKey__*/
+/*__STUDIO_WORKER_EXTRACT:item4VariantLooksRenderable__*/
+/*__STUDIO_WORKER_EXTRACT:item4PickSourceVariantForRatio__*/
+/*__STUDIO_WORKER_EXTRACT:item4FinishedSourcePackageForOutput__*/
+/*__STUDIO_WORKER_EXTRACT:item4StudioSourcePackageForOutput__*/
+/*__STUDIO_WORKER_EXTRACT:outputWorkItemFields__*/
 const STUDIO_PLATFORM_OUTPUT_TABLE = "tblrlPeboBthkplH0";
 
-
-
-
+/*__STUDIO_WORKER_EXTRACT:item4PlanItemForOutput__*/
+/*__STUDIO_WORKER_EXTRACT:platformOutputSeedFields__*/
+/*__STUDIO_WORKER_EXTRACT:studioFinishedSeedOverlay__*/
 const STUDIO_SIMILAR_WATCHLIST_SETTING = "SIMILAR_ACCOUNT_WATCHLIST";
 
-
-
-
-
+/*__STUDIO_WORKER_EXTRACT:studioIndustryBestWindows__*/
+/*__STUDIO_WORKER_EXTRACT:studioChicagoDateTimeParts__*/
+/*__STUDIO_WORKER_EXTRACT:studioChicagoWallToUtcMs__*/
+/*__STUDIO_WORKER_EXTRACT:studioAddCivilDays__*/
 const STUDIO_SUGGEST_HORIZON_DAYS = MAE_SUGGEST_HORIZON_DAYS;
 const STUDIO_SUGGEST_LEAD_MS = 10 * 60 * 1000;
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+/*__STUDIO_WORKER_EXTRACT:studioScheduleHorizonDays__*/
+/*__STUDIO_WORKER_EXTRACT:studioSuggestCivilKey__*/
+/*__STUDIO_WORKER_EXTRACT:studioSuggestParseWindowStart__*/
+/*__STUDIO_WORKER_EXTRACT:studioSuggestHorizon__*/
+/*__STUDIO_WORKER_EXTRACT:studioOccupiedOnCivilDay__*/
+/*__STUDIO_WORKER_EXTRACT:studioFlattenOccupiedByPlatform__*/
+/*__STUDIO_WORKER_EXTRACT:studioOccupiedForPlatform__*/
+/*__STUDIO_WORKER_EXTRACT:studioOccupiedForLane__*/
+/*__STUDIO_WORKER_EXTRACT:studioScheduleTimeCrowding__*/
+/*__STUDIO_WORKER_EXTRACT:studioScoreAnalyticsSlot__*/
+/*__STUDIO_WORKER_EXTRACT:studioPickBalancedSuggestedIso__*/
+/*__STUDIO_WORKER_EXTRACT:studioSuggestedLocalDatetime__*/
+/*__STUDIO_WORKER_EXTRACT:studioScheduleStoryRank__*/
+/*__STUDIO_WORKER_EXTRACT:studioScheduleOverridesFromPayload__*/
+/*__STUDIO_WORKER_EXTRACT:studioBuildSuggestedScheduleMap__*/
+/*__STUDIO_WORKER_EXTRACT:studioOccupiedSchedulesOrEmpty__*/
+/*__STUDIO_WORKER_EXTRACT:studioDestinationScheduleStamp__*/
+/*__STUDIO_WORKER_EXTRACT:studioLoadPlanScheduleOccupancy__*/
 const STUDIO_WATCHLIST_PLATFORMS = new Set(["instagram", "youtube", "tiktok", "facebook"]);
 // Competitor Instagram timing is paused until Meta business_discovery permission #10 is fixed.
 const STUDIO_SIMILAR_TIMED_PLATFORMS = new Set(["youtube"]);
@@ -3904,42 +3904,42 @@ const STUDIO_INSIGHTS_LEARNED_TABLE = "tblb6LfRv7CemHHN6";
 const STUDIO_INSIGHTS_SEASONS = Object.freeze(["winter", "spring", "summer", "fall"]);
 const STUDIO_INSIGHTS_CTA_PATTERN = /\b(follow|save|link in bio|link|tap|comment|share|visit|book|dm|click|learn more|tag a friend)\b/i;
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+/*__STUDIO_WORKER_EXTRACT:studioInsightsObservationsTable__*/
+/*__STUDIO_WORKER_EXTRACT:studioInsightsLearnedTable__*/
+/*__STUDIO_WORKER_EXTRACT:studioInsightsDbEnabled__*/
+/*__STUDIO_WORKER_EXTRACT:studioChicagoMonthDay__*/
+/*__STUDIO_WORKER_EXTRACT:studioChicagoSeason__*/
+/*__STUDIO_WORKER_EXTRACT:studioNormalizeInsightsSeason__*/
+/*__STUDIO_WORKER_EXTRACT:studioSeasonLabel__*/
+/*__STUDIO_WORKER_EXTRACT:studioAnalyzeCaption__*/
+/*__STUDIO_WORKER_EXTRACT:studioInsightsEngagementScore__*/
+/*__STUDIO_WORKER_EXTRACT:studioInsightsObservationKey__*/
+/*__STUDIO_WORKER_EXTRACT:studioInsightsLearnedKey__*/
+/*__STUDIO_WORKER_EXTRACT:studioInsightsNumberOrNull__*/
+/*__STUDIO_WORKER_EXTRACT:studioInsightsObservationFields__*/
+/*__STUDIO_WORKER_EXTRACT:studioInsightsObservationToPost__*/
+/*__STUDIO_WORKER_EXTRACT:studioInsightsPlatformMatches__*/
+/*__STUDIO_WORKER_EXTRACT:studioInsightsOutputTypeMatches__*/
+/*__STUDIO_WORKER_EXTRACT:studioInsightsSeasonFilterFormula__*/
+/*__STUDIO_WORKER_EXTRACT:studioInsightsFindObservation__*/
+/*__STUDIO_WORKER_EXTRACT:studioInsightsUpsertObservation__*/
+/*__STUDIO_WORKER_EXTRACT:studioInsightsUpsertObservations__*/
+/*__STUDIO_WORKER_EXTRACT:studioInsightsLoadObservations__*/
+/*__STUDIO_WORKER_EXTRACT:parseSimilarAccountStatusCache__*/
+/*__STUDIO_WORKER_EXTRACT:studioLoadSimilarAccountStatusCache__*/
+/*__STUDIO_WORKER_EXTRACT:studioSlimSimilarStatusCache__*/
+/*__STUDIO_WORKER_EXTRACT:studioSaveSimilarAccountStatusCache__*/
+/*__STUDIO_WORKER_EXTRACT:studioInsightsMigrateCacheToDb__*/
+/*__STUDIO_WORKER_EXTRACT:studioInsightsBuildCaptionLearned__*/
+/*__STUDIO_WORKER_EXTRACT:studioInsightsLearnedFromHeatmap__*/
+/*__STUDIO_WORKER_EXTRACT:studioInsightsFindLearned__*/
+/*__STUDIO_WORKER_EXTRACT:studioInsightsUpsertLearned__*/
+/*__STUDIO_WORKER_EXTRACT:studioInsightsLoadLearned__*/
+/*__STUDIO_WORKER_EXTRACT:studioInsightsLatestFirstPartyPosts__*/
+/*__STUDIO_WORKER_EXTRACT:studioRecomputeInsightsLearned__*/
+/*__STUDIO_WORKER_EXTRACT:studioIngestFirstPartyObservations__*/
+/*__STUDIO_WORKER_EXTRACT:studioInsightsResolveSeason__*/
+/*__STUDIO_WORKER_EXTRACT:studioInsightsPostsForView__*/
 const STUDIO_HEATMAP_DAYS = Object.freeze(["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]);
 const STUDIO_HEATMAP_WINDOWS = Object.freeze([
   "00:00-06:00",
@@ -4099,52 +4099,52 @@ const STUDIO_SIMILAR_SEEDS = Object.freeze([
   { platform: "facebook", handle: "PAMM", source: "research", profile: "miami" },
 ]);
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+/*__STUDIO_WORKER_EXTRACT:studioNormalizeSimilarProfile__*/
+/*__STUDIO_WORKER_EXTRACT:studioSimilarProfileLabel__*/
+/*__STUDIO_WORKER_EXTRACT:parseSimilarWatchlist__*/
+/*__STUDIO_WORKER_EXTRACT:studioSimilarAccountKey__*/
+/*__STUDIO_WORKER_EXTRACT:parseSimilarTimesCache__*/
+/*__STUDIO_WORKER_EXTRACT:studioChicagoWeekdayHour__*/
+/*__STUDIO_WORKER_EXTRACT:studioHeatmapWindow__*/
+/*__STUDIO_WORKER_EXTRACT:studioBuildSimilarHeatmap__*/
+/*__STUDIO_WORKER_EXTRACT:studioOwnScheduleHeatmap__*/
+/*__STUDIO_WORKER_EXTRACT:studioMergeSeedWatchlist__*/
+/*__STUDIO_WORKER_EXTRACT:studioReadSimilarWatchlist__*/
+/*__STUDIO_WORKER_EXTRACT:studioEnsureSimilarWatchlist__*/
+/*__STUDIO_WORKER_EXTRACT:studioResolveSimilarTimesTheme__*/
+/*__STUDIO_WORKER_EXTRACT:studioTimedWatchlistAccounts__*/
+/*__STUDIO_WORKER_EXTRACT:studioManualSweepWatchlistAccounts__*/
+/*__STUDIO_WORKER_EXTRACT:studioSimilarAccountStale__*/
+/*__STUDIO_WORKER_EXTRACT:studioNormalizeSimilarStatus__*/
+/*__STUDIO_WORKER_EXTRACT:studioInsightsBuildOverview__*/
+/*__STUDIO_WORKER_EXTRACT:studioBuildSimilarTimesView__*/
+/*__STUDIO_WORKER_EXTRACT:getInsightsWatchlist__*/
+/*__STUDIO_WORKER_EXTRACT:putInsightsWatchlist__*/
+/*__STUDIO_WORKER_EXTRACT:studioLoadSimilarTimesView__*/
+/*__STUDIO_WORKER_EXTRACT:studioInsightsSafeJson__*/
+/*__STUDIO_WORKER_EXTRACT:studioInsightsMetaIdentity__*/
+/*__STUDIO_WORKER_EXTRACT:studioInsightsConnectionStateFromError__*/
+/*__STUDIO_WORKER_EXTRACT:studioInsightsLatestSyncByPlatform__*/
+/*__STUDIO_WORKER_EXTRACT:getInsightsConnections__*/
+/*__STUDIO_WORKER_EXTRACT:studioInsightsMilestoneSnapshot__*/
+/*__STUDIO_WORKER_EXTRACT:getInsightsPosts__*/
+/*__STUDIO_WORKER_EXTRACT:postInsightsChat__*/
+/*__STUDIO_WORKER_EXTRACT:getInsightsBestTimes__*/
+/*__STUDIO_WORKER_EXTRACT:getInsightsCaptions__*/
+/*__STUDIO_WORKER_EXTRACT:getInsightsSimilarTimes__*/
+/*__STUDIO_WORKER_EXTRACT:postInsightsSimilarTimesSweep__*/
+/*__STUDIO_WORKER_EXTRACT:studioOutputNativeIdFields__*/
+/*__STUDIO_WORKER_EXTRACT:studioFirstPartySnapshotFields__*/
+/*__STUDIO_WORKER_EXTRACT:studioPersistFirstPartySnapshot__*/
+/*__STUDIO_WORKER_EXTRACT:studioResolveTikTokOwnedVideoId__*/
+/*__STUDIO_WORKER_EXTRACT:studioFetchOwnedOutputAnalytics__*/
+/*__STUDIO_WORKER_EXTRACT:studioSweepPublishedInsights__*/
+/*__STUDIO_WORKER_EXTRACT:studioFetchOutputInsights__*/
+/*__STUDIO_WORKER_EXTRACT:studioSanitizeIgHandle__*/
+/*__STUDIO_WORKER_EXTRACT:studioSanitizeYtHandle__*/
+/*__STUDIO_WORKER_EXTRACT:studioTruncateInsightError__*/
+/*__STUDIO_WORKER_EXTRACT:studioFetchInstagramBusinessDiscovery__*/
+/*__STUDIO_WORKER_EXTRACT:studioFetchYoutubePublicUploads__*/
 const STUDIO_INSIGHTS_DISCOVERY_QUERIES = Object.freeze({
   chicago: [
     "Chicago travel vlog",
@@ -4171,39 +4171,39 @@ const STUDIO_INSIGHTS_DISCOVERY_QUERIES = Object.freeze({
   ],
 });
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+/*__STUDIO_WORKER_EXTRACT:studioStampYoutubeCreatorDiscoveryRun__*/
+/*__STUDIO_WORKER_EXTRACT:studioDiscoverYoutubeChicagoCreators__*/
+/*__STUDIO_WORKER_EXTRACT:postInsightsDiscover__*/
+/*__STUDIO_WORKER_EXTRACT:engagementThemeContextRecord__*/
+/*__STUDIO_WORKER_EXTRACT:engagementDeps__*/
+/*__STUDIO_WORKER_EXTRACT:resolveEngagementProfile__*/
+/*__STUDIO_WORKER_EXTRACT:getEngagementSettings__*/
+/*__STUDIO_WORKER_EXTRACT:putEngagementSettings__*/
+/*__STUDIO_WORKER_EXTRACT:postEngagementDiscover__*/
+/*__STUDIO_WORKER_EXTRACT:getEngagementRecommendations__*/
+/*__STUDIO_WORKER_EXTRACT:postEngagementAction__*/
+/*__STUDIO_WORKER_EXTRACT:getEngagementInsights__*/
+/*__STUDIO_WORKER_EXTRACT:studioSweepSimilarAccountTimes__*/
+/*__STUDIO_WORKER_EXTRACT:restoreParentContentItemFromStudioUmbrella__*/
+/*__STUDIO_WORKER_EXTRACT:markParentContentItemAsStudioUmbrella__*/
+/*__STUDIO_WORKER_EXTRACT:finishedDestinationKeyFromPlatformOutput__*/
+/*__STUDIO_WORKER_EXTRACT:listExistingFinishedPlatformOutputs__*/
+/*__STUDIO_WORKER_EXTRACT:keepFinishedOutputRows__*/
+/*__STUDIO_WORKER_EXTRACT:fanoutProductionRequestOutputsToContentItems__*/
+/*__STUDIO_WORKER_EXTRACT:completeProductionRequestPromotionSideEffects__*/
+/*__STUDIO_WORKER_EXTRACT:assertProductionRequestFanoutComplete__*/
+/*__STUDIO_WORKER_EXTRACT:cancelSiblingProductionRequestsForIdea__*/
+/*__STUDIO_WORKER_EXTRACT:finalizeProductionRequestPromotion__*/
 // A blank Voiceover_URL with a Drive file id is a read we already paid for.
 // Clearing that id made the next P2 pulse buy the same sentence again
 // (Getty Sunset Frame, Content 608, repeated Briony history). Keep it.
 // Thumbnail residue can still be cleared; that path does not call ElevenLabs.
-
-
-
-
-
-
+/*__STUDIO_WORKER_EXTRACT:item4StaleMediaRunClears__*/
+/*__STUDIO_WORKER_EXTRACT:armStudioParentForP3Handoff__*/
+/*__STUDIO_WORKER_EXTRACT:pulseStudioP2Handoff__*/
+/*__STUDIO_WORKER_EXTRACT:pulseStudioP3Handoff__*/
+/*__STUDIO_WORKER_EXTRACT:pulseStudioC2Handoff__*/
+/*__STUDIO_WORKER_EXTRACT:promoteProductionRequestViaI3I4__*/
 const STUDIO_PROMOTION_CONTENT_TYPES = new Set([
   "Vertical Short Video",
   "Story",
@@ -4223,48 +4223,48 @@ const STUDIO_PROMOTION_CONTENT_TYPES = new Set([
 const STUDIO_PROMOTION_PLATFORMS = new Set(["Instagram", "Facebook", "TikTok", "YouTube"]);
 const STUDIO_TRISTATE = new Set(["Use Profile Default", "Yes", "No"]);
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+/*__STUDIO_WORKER_EXTRACT:cleanPromotionPayload__*/
+/*__STUDIO_WORKER_EXTRACT:promotionWebhookUrl__*/
+/*__STUDIO_WORKER_EXTRACT:fetchPromotionHandoff__*/
+/*__STUDIO_WORKER_EXTRACT:promotionCompleted__*/
+/*__STUDIO_WORKER_EXTRACT:waitForPromotionResult__*/
+/*__STUDIO_WORKER_EXTRACT:promoteIdeaViaI3I4__*/
+/*__STUDIO_WORKER_EXTRACT:ideaPhotoListeningSessionRoute__*/
+/*__STUDIO_WORKER_EXTRACT:lockIdeaPhotoListeningForProduction__*/
+/*__STUDIO_WORKER_EXTRACT:ideaSelectedPhotoIds__*/
+/*__STUDIO_WORKER_EXTRACT:sameIdeaPhotoWaitSelection__*/
+/*__STUDIO_WORKER_EXTRACT:hydrateIdeaProductionAfterOpen__*/
+/*__STUDIO_WORKER_EXTRACT:queueIdeaProductionAfterOpen__*/
+/*__STUDIO_WORKER_EXTRACT:getAuthorizedIdeaRoute__*/
+/*__STUDIO_WORKER_EXTRACT:approveIdeaAndWaitForPhotos__*/
+/*__STUDIO_WORKER_EXTRACT:ideaPhotoWatchContentType__*/
+/*__STUDIO_WORKER_EXTRACT:ideaPhotoWatchRange__*/
+/*__STUDIO_WORKER_EXTRACT:ideaPhotoAutoListenContentType__*/
+/*__STUDIO_WORKER_EXTRACT:ideaHasExplicitPhotoProductionConfig__*/
+/*__STUDIO_WORKER_EXTRACT:autoListenOpenPhotoIdeas__*/
+/*__STUDIO_WORKER_EXTRACT:watchIdeaPhotosRoute__*/
+/*__STUDIO_WORKER_EXTRACT:matchIdeaPhotosRoute__*/
+/*__STUDIO_WORKER_EXTRACT:ideaTimedScriptCatalogRow__*/
+/*__STUDIO_WORKER_EXTRACT:pulseIdeaTimedScriptWriter__*/
+/*__STUDIO_WORKER_EXTRACT:scriptedShortUnassignedMessage__*/
+/*__STUDIO_WORKER_EXTRACT:proposeScriptedShortRoute__*/
+/*__STUDIO_WORKER_EXTRACT:acceptScriptedShortRoute__*/
+/*__STUDIO_WORKER_EXTRACT:feedPostNotesWithoutTimeline__*/
+/*__STUDIO_WORKER_EXTRACT:acceptSingleImageFeedPost__*/
 /** Feed Post / Carousel / Photo Set: attach chosen stills with no voiceover timeline. */
-
-
-
-
-
-
-
-
-
-
-
-
-
+/*__STUDIO_WORKER_EXTRACT:acceptStillsIdeaPackage__*/
+/*__STUDIO_WORKER_EXTRACT:vibeCutPlanFromBody__*/
+/*__STUDIO_WORKER_EXTRACT:planVibeCutRoute__*/
+/*__STUDIO_WORKER_EXTRACT:anotherVibeCutRoute__*/
+/*__STUDIO_WORKER_EXTRACT:createIdeaTimedScriptRoute__*/
+/*__STUDIO_WORKER_EXTRACT:findDraftProductionRequestForIdea__*/
+/*__STUDIO_WORKER_EXTRACT:rankStillsForIdeaPhotoWait__*/
+/*__STUDIO_WORKER_EXTRACT:rankVideosForScriptedShortProposal__*/
+/*__STUDIO_WORKER_EXTRACT:unfinishedIntakeBatchIds__*/
+/*__STUDIO_WORKER_EXTRACT:applyLibraryAssetsToProductionRequest__*/
+/*__STUDIO_WORKER_EXTRACT:evaluateAndMaybeAttachWaitingIdeaPhotos__*/
+/*__STUDIO_WORKER_EXTRACT:runWaitingIdeaPhotoMatches__*/
+/*__STUDIO_WORKER_EXTRACT:listContent__*/
 const OUTPUT_LIST_FIELDS = [
   "Output_ID",
   "Platform",
@@ -4341,21 +4341,21 @@ const OUTPUT_LIST_FIELDS = [
   "YouTube_Privacy_Status",
 ];
 
-
-
+/*__STUDIO_WORKER_EXTRACT:scheduleGridContentById__*/
+/*__STUDIO_WORKER_EXTRACT:listOutputScheduleGrid__*/
 const STUDIO_READ_SNAPSHOT_FRESH_MS = 25000;
 const PIPELINE_OUTPUT_LIST_CACHE_MS = STUDIO_READ_SNAPSHOT_FRESH_MS;
 const PIPELINE_OPEN_PACK_CACHE_MS = 30000;
 const STUDIO_READ_SNAPSHOT_WARM_MS = 2 * 60 * 1000;
 let pipelineListHealAt = 0;
 
-
-
-
-
-
-
-
+/*__STUDIO_WORKER_EXTRACT:studioMappedListSnapshotFresh__*/
+/*__STUDIO_WORKER_EXTRACT:readMappedListSnapshot__*/
+/*__STUDIO_WORKER_EXTRACT:writeMappedListSnapshot__*/
+/*__STUDIO_WORKER_EXTRACT:scheduleMappedListRefresh__*/
+/*__STUDIO_WORKER_EXTRACT:respondStudioMappedList__*/
+/*__STUDIO_WORKER_EXTRACT:loadOpenPipelineOutputPack__*/
+/*__STUDIO_WORKER_EXTRACT:pipelineContentLabelsById__*/
 function schedulePipelineListHeal(ctx, env, records) {
   if (!ctx || typeof ctx.waitUntil !== "function") return;
   const now = Date.now();
@@ -4412,118 +4412,118 @@ function schedulePipelineListHeal(ctx, env, records) {
   })());
 }
 
-
-
-
-
+/*__STUDIO_WORKER_EXTRACT:readPipelineOutputsSnapshot__*/
+/*__STUDIO_WORKER_EXTRACT:writePipelineOutputsSnapshot__*/
+/*__STUDIO_WORKER_EXTRACT:buildPipelineOutputsPayloadFromSupabase__*/
+/*__STUDIO_WORKER_EXTRACT:buildPipelineOutputsPayload__*/
 const STUDIO_SUPABASE_SYNC_LAST_KEY = "studio/state/supabase-pipeline-sync-last.json";
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+/*__STUDIO_WORKER_EXTRACT:readStudioSupabaseSyncLast__*/
+/*__STUDIO_WORKER_EXTRACT:writeStudioSupabaseSyncLast__*/
+/*__STUDIO_WORKER_EXTRACT:studioSyncSupabasePipelineReads__*/
+/*__STUDIO_WORKER_EXTRACT:getStudioSupabaseSyncStatus__*/
+/*__STUDIO_WORKER_EXTRACT:postStudioSupabaseSync__*/
+/*__STUDIO_WORKER_EXTRACT:warmOldestStudioReadSnapshot__*/
+/*__STUDIO_WORKER_EXTRACT:listOutputs__*/
+/*__STUDIO_WORKER_EXTRACT:listMusic__*/
+/*__STUDIO_WORKER_EXTRACT:musicSortName__*/
+/*__STUDIO_WORKER_EXTRACT:sortMusicRecords__*/
+/*__STUDIO_WORKER_EXTRACT:toggleMusicFavorite__*/
+/*__STUDIO_WORKER_EXTRACT:findMusicLibraryUsages__*/
+/*__STUDIO_WORKER_EXTRACT:trashStudioMusicOnDrive__*/
+/*__STUDIO_WORKER_EXTRACT:deleteMusicLibraryTrack__*/
 const MUSIC_LIBRARY_MAX_FILES = 8;
 const MUSIC_LIBRARY_MAX_FILE_BYTES = 40 * 1024 * 1024;
 const GDRIVE_MUSIC_FOLDER_ID = "1mzNHcVmeXb6I2WybJD5iOTrJUDRQJIN3";
 
-
-
+/*__STUDIO_WORKER_EXTRACT:promoteStudioMusicToDrive__*/
+/*__STUDIO_WORKER_EXTRACT:uploadMusicLibraryTracks__*/
 const ASSET_LIBRARY_MAX_FILES = 8;
 const ASSET_LIBRARY_LIST_FORMULA = "AND(OR({Media_Class}='Image',{Media_Class}='Graphic',{Media_Class}='Video'),OR({Asset_Role}!='Music',{Asset_Role}=BLANK()),NOT(FIND('fill-crop',LOWER({Asset Name}&''))))";
 const ASSET_LIBRARY_PAGE_SIZE = 5;
 const ASSET_LIBRARY_MAX_PAGE_SIZE = 50;
 const PUBLISHED_LIBRARY_LIST_FORMULA = 'AND({Test_Run_ID}=BLANK(),{Published_At}!="")';
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+/*__STUDIO_WORKER_EXTRACT:coerceLibraryDurationSeconds__*/
+/*__STUDIO_WORKER_EXTRACT:publishedLibraryFilterFormula__*/
+/*__STUDIO_WORKER_EXTRACT:publishedFinalFileId__*/
+/*__STUDIO_WORKER_EXTRACT:publishedDurationSeconds__*/
+/*__STUDIO_WORKER_EXTRACT:collectJsonDriveIds__*/
+/*__STUDIO_WORKER_EXTRACT:publicMediaObjectKey__*/
+/*__STUDIO_WORKER_EXTRACT:publishedLibraryObjectKey__*/
+/*__STUDIO_WORKER_EXTRACT:attachPublishedLibraryFileSizes__*/
+/*__STUDIO_WORKER_EXTRACT:mapPublishedLibraryFile__*/
+/*__STUDIO_WORKER_EXTRACT:publishedFileReleaseGuard__*/
+/*__STUDIO_WORKER_EXTRACT:collectPublishedMasterDriveIds__*/
+/*__STUDIO_WORKER_EXTRACT:listPublishedLibraryFiles__*/
+/*__STUDIO_WORKER_EXTRACT:readLibraryCrossScopeSetting__*/
+/*__STUDIO_WORKER_EXTRACT:resolveLibraryCrossScope__*/
+/*__STUDIO_WORKER_EXTRACT:mediaAssetProfileScopeForId__*/
+/*__STUDIO_WORKER_EXTRACT:resolveLibraryScopeProfileId__*/
+/*__STUDIO_WORKER_EXTRACT:resolveLibraryScopeProfile__*/
+/*__STUDIO_WORKER_EXTRACT:libraryProfileScopeFormula__*/
+/*__STUDIO_WORKER_EXTRACT:assetLibraryFilterFormula__*/
+/*__STUDIO_WORKER_EXTRACT:mapLibraryAsset__*/
+/*__STUDIO_WORKER_EXTRACT:listAssetLibrary__*/
+/*__STUDIO_WORKER_EXTRACT:promoteStudioAssetToDrive__*/
+/*__STUDIO_WORKER_EXTRACT:listLibraryBatchExistingNames__*/
+/*__STUDIO_WORKER_EXTRACT:uploadAssetLibraryItems__*/
+/*__STUDIO_WORKER_EXTRACT:findAssetLibraryUsages__*/
+/*__STUDIO_WORKER_EXTRACT:trashStudioAssetOnDrive__*/
+/*__STUDIO_WORKER_EXTRACT:renameStudioAssetOnDrive__*/
+/*__STUDIO_WORKER_EXTRACT:libraryAssetProfilesById__*/
+/*__STUDIO_WORKER_EXTRACT:assertLibrarySourceAsset__*/
+/*__STUDIO_WORKER_EXTRACT:assignLibraryAssetProfile__*/
 const LIBRARY_CLASSIFY_ALL_LIMIT = 200;
 const LIBRARY_CLASSIFY_PENDING_FORMULA = libraryClassifyPendingFormula(ASSET_LIBRARY_LIST_FORMULA);
 
-
+/*__STUDIO_WORKER_EXTRACT:stampLibraryAssetsClassifying__*/
 // Studio "Classify all": every photo/clip that already has a Content Profile and is still
 // Needs Classification / Classification Error goes to A3 in one background run.
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+/*__STUDIO_WORKER_EXTRACT:classifyAllLibraryAssets__*/
+/*__STUDIO_WORKER_EXTRACT:pulseLibraryAssetClassification__*/
+/*__STUDIO_WORKER_EXTRACT:renameAssetLibraryItem__*/
+/*__STUDIO_WORKER_EXTRACT:deleteAssetLibraryItem__*/
+/*__STUDIO_WORKER_EXTRACT:patchAssetLibraryDuration__*/
+/*__STUDIO_WORKER_EXTRACT:driveTrashLooksGone__*/
+/*__STUDIO_WORKER_EXTRACT:stampPublishedFileReleased__*/
+/*__STUDIO_WORKER_EXTRACT:deletePublishedR2Keys__*/
+/*__STUDIO_WORKER_EXTRACT:loadContentItemSiblingOutputs__*/
+/*__STUDIO_WORKER_EXTRACT:clearParentProductionJobJsonIfFullyReleased__*/
+/*__STUDIO_WORKER_EXTRACT:outputNeedsMediaReleaseLocal__*/
+/*__STUDIO_WORKER_EXTRACT:releasePublishedOutputMedia__*/
+/*__STUDIO_WORKER_EXTRACT:releasePublishedLibraryFile__*/
+/*__STUDIO_WORKER_EXTRACT:studioPostPublishReleaseDryRunEnabled__*/
+/*__STUDIO_WORKER_EXTRACT:studioSweepPostPublishMediaRelease__*/
+/*__STUDIO_WORKER_EXTRACT:studioReleaseDerivedFillCropsForOutput__*/
+/*__STUDIO_WORKER_EXTRACT:studioReleaseContentItemVoiceoverThumbnail__*/
+/*__STUDIO_WORKER_EXTRACT:fetchGoogleDriveAudio__*/
+/*__STUDIO_WORKER_EXTRACT:copyDriveAudioHeaders__*/
+/*__STUDIO_WORKER_EXTRACT:studioMusicR2Preview__*/
+/*__STUDIO_WORKER_EXTRACT:musicPreview__*/
 const ITEM4_PREVIEW_SMV1_NAME =
   "SMV1 - Studio Media Authority + Platform Variant Worker v0.6.3 - Media Link Isolation";
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+/*__STUDIO_WORKER_EXTRACT:item4PreviewSettingValueExpr__*/
+/*__STUDIO_WORKER_EXTRACT:item4PreviewR2KeyExpr__*/
+/*__STUDIO_WORKER_EXTRACT:item4PreviewR2UrlExpr__*/
+/*__STUDIO_WORKER_EXTRACT:item4PreviewR2UploadModule__*/
+/*__STUDIO_WORKER_EXTRACT:item4PreviewQueueReadyModule__*/
+/*__STUDIO_WORKER_EXTRACT:item4PreviewRouteBlueprint__*/
+/*__STUDIO_WORKER_EXTRACT:item4ValidateGeneratedMakeBlueprint__*/
+/*__STUDIO_WORKER_EXTRACT:item4AssertPreviewBranchFilters__*/
+/*__STUDIO_WORKER_EXTRACT:item4SourceAuthorityInterfaceRows__*/
+/*__STUDIO_WORKER_EXTRACT:item4CollectStringSlots__*/
+/*__STUDIO_WORKER_EXTRACT:item4SetPath__*/
+/*__STUDIO_WORKER_EXTRACT:item4R2PromptSlot__*/
+/*__STUDIO_WORKER_EXTRACT:item4FlattenMakeModules__*/
+/*__STUDIO_WORKER_EXTRACT:item4FindR2ContextModule__*/
+/*__STUDIO_WORKER_EXTRACT:item4FindR2AiModule__*/
+/*__STUDIO_WORKER_EXTRACT:item4FindR2FailfastModule__*/
 let item4MakeHardeningOpenCache = { at: 0, promise: null, result: null };
 
-
-
+/*__STUDIO_WORKER_EXTRACT:item4RecoverStaleR2BaselineReads__*/
+/*__STUDIO_WORKER_EXTRACT:deferItem4MakeHardening__*/
 async function item4EnsureMakeHardeningFromWorkspaceOpen(env, options = {}) {
   // Ordinary Item 4 polling may reuse a short-lived result, but an explicit
   // /item4 status GET MUST be able to force a fresh live Make inspection after
@@ -4557,9 +4557,9 @@ async function item4EnsureMakeHardeningFromWorkspaceOpen(env, options = {}) {
   }
 }
 
-
-
-
+/*__STUDIO_WORKER_EXTRACT:item4EnsureR2StudioExactSourceGuard__*/
+/*__STUDIO_WORKER_EXTRACT:item4P3SourceFieldInterfaceRows__*/
+/*__STUDIO_WORKER_EXTRACT:item4EnsureP3StudioSourceAuthority__*/
 const STUDIO_P3_REMOTION_HANDOFF_MARKER = "STUDIO_P3_REMOTION_HANDOFF_V4";
 // Make IML has no or() function. Use | inside if(), matching Make's own repair hint.
 const STUDIO_P3_NATIVE_PHOTO_STATUS_IF =
@@ -4567,32 +4567,32 @@ const STUDIO_P3_NATIVE_PHOTO_STATUS_IF =
 const STUDIO_P3_NATIVE_PHOTO_SELECTION_IF =
   '{{if(102.Studio_Output_Type = "Multi-Photo" | 102.Studio_Output_Type = "Carousel" | 102.Studio_Output_Type = "Multi-Image Post"; ""; "Selected")}}';
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+/*__STUDIO_WORKER_EXTRACT:item4P3SingleParentEnrichmentRecord__*/
+/*__STUDIO_WORKER_EXTRACT:item4P3Module103HasRemotionHandoff__*/
+/*__STUDIO_WORKER_EXTRACT:item4ApplyP3RemotionHandoff__*/
+/*__STUDIO_WORKER_EXTRACT:item4PatchP3SingleParentBlueprint__*/
+/*__STUDIO_WORKER_EXTRACT:item4QueueP3SingleParentViaAdminBridge__*/
+/*__STUDIO_WORKER_EXTRACT:item4LatestP3BlueprintFromAdminQueue__*/
+/*__STUDIO_WORKER_EXTRACT:item4EnsureP3SingleParentRouteDirect__*/
+/*__STUDIO_WORKER_EXTRACT:item4RecordP3DirectDiagnostic__*/
+/*__STUDIO_WORKER_EXTRACT:item4EnsureP3SingleParentRoute__*/
+/*__STUDIO_WORKER_EXTRACT:item4EnsureSmv1PreviewCacheWorker__*/
+/*__STUDIO_WORKER_EXTRACT:item4PreviewPendingRows__*/
+/*__STUDIO_WORKER_EXTRACT:item4DrainPreviewCacheWorker__*/
+/*__STUDIO_WORKER_EXTRACT:mediaAssetPreviewRecordIdFromPath__*/
+/*__STUDIO_WORKER_EXTRACT:fetchGoogleDriveInlineImage__*/
+/*__STUDIO_WORKER_EXTRACT:copyDriveImageHeaders__*/
+/*__STUDIO_WORKER_EXTRACT:item4PreviewQueueRowForMediaAsset__*/
+/*__STUDIO_WORKER_EXTRACT:fetchStudioR2Preview__*/
+/*__STUDIO_WORKER_EXTRACT:mediaAssetDriveThumbnailPreview__*/
+/*__STUDIO_WORKER_EXTRACT:mediaAssetImagePreview__*/
+/*__STUDIO_WORKER_EXTRACT:outputPreviewRecordIdFromPath__*/
+/*__STUDIO_WORKER_EXTRACT:mediaAssetVideoStream__*/
+/*__STUDIO_WORKER_EXTRACT:fetchGoogleDriveVideo__*/
+/*__STUDIO_WORKER_EXTRACT:copyDriveVideoHeaders__*/
+/*__STUDIO_WORKER_EXTRACT:fetchStudioPreviewVideo__*/
+/*__STUDIO_WORKER_EXTRACT:copyStudioPreviewHeaders__*/
+/*__STUDIO_WORKER_EXTRACT:outputPreview__*/
 const PHASE6_CAROUSEL_SLIDES_TABLE = "Carousel Slides";
 const PHASE6_STYLE_PRESETS = [
   "Chicago Editorial", "Glass Card", "Black Gold Arched", "Plain / Minimal", "No Text",
@@ -4609,14 +4609,14 @@ const PHASE6_VOICE_CATALOG_TABLE = "ElevenLabs Voices";
 const PHASE6_DEFAULT_VOICE_ID = "xVQH621DS3eyBYrseRt5";
 const PHASE6_GEORGE_VOICE_ID = "JBFqnCBsd6RMkjVDRZzb";
 
-
+/*__STUDIO_WORKER_EXTRACT:phase6NarrationVoiceFallback__*/
 /**
  * Prefer Production Request / Content Item Voice_ID, then the Content Profile
  * default narration voice (Miami=Mary). Do not fall through to Kate while those
  * are present — Pipeline Open Review used to ignore them and show Kate.
  */
-
-
+/*__STUDIO_WORKER_EXTRACT:phase6ResolveNarrationVoice__*/
+/*__STUDIO_WORKER_EXTRACT:phase6NarrationVoiceFromRequest__*/
 const PHASE6_P0202_SCENARIO_ID = 5893683;
 const PHASE6_R2_SCENARIO_ID = 5569495;
 const PHASE6_R3_SCENARIO_ID = 5557966;
@@ -4626,78 +4626,78 @@ const PHASE6_RR1_SCENARIO_ID = 5576363;
 const PHASE6_RR2_SCENARIO_ID = 5576353;
 const STUDIO_R5_DONE_HOOK_TOKEN = "r5done_7kqp2nvm4w8x1c9h3z";
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+/*__STUDIO_WORKER_EXTRACT:phase6RecordIdFromPath__*/
+/*__STUDIO_WORKER_EXTRACT:phase6ParseJson__*/
+/*__STUDIO_WORKER_EXTRACT:phase6Number__*/
+/*__STUDIO_WORKER_EXTRACT:phase6Clamp__*/
+/*__STUDIO_WORKER_EXTRACT:phase6ResolvedVoiceoverVolume__*/
+/*__STUDIO_WORKER_EXTRACT:phase6AudioMixFieldsFromPayload__*/
+/*__STUDIO_WORKER_EXTRACT:phase6ProductionMixAction__*/
+/*__STUDIO_WORKER_EXTRACT:phase6AssertProductionAudioMixAllowed__*/
+/*__STUDIO_WORKER_EXTRACT:phase6AllowsProductionMixContinuation__*/
+/*__STUDIO_WORKER_EXTRACT:phase6Bool__*/
+/*__STUDIO_WORKER_EXTRACT:phase6Text__*/
+/*__STUDIO_WORKER_EXTRACT:phase6VariantForRatio__*/
+/*__STUDIO_WORKER_EXTRACT:phase6SlidePreviewUrl__*/
+/*__STUDIO_WORKER_EXTRACT:mapPhase6CreativeSlide__*/
+/*__STUDIO_WORKER_EXTRACT:phase6VirtualSlidesFromSelectedAssets__*/
+/*__STUDIO_WORKER_EXTRACT:phase6SlidesForOutput__*/
+/*__STUDIO_WORKER_EXTRACT:phase6CachedVoiceCatalog__*/
+/*__STUDIO_WORKER_EXTRACT:mapElevenLabsVoice__*/
+/*__STUDIO_WORKER_EXTRACT:phase6ElevenLabsErrorDetail__*/
+/*__STUDIO_WORKER_EXTRACT:phase6FetchElevenLabsJson__*/
+/*__STUDIO_WORKER_EXTRACT:phase6CollectElevenLabsVoices__*/
+/*__STUDIO_WORKER_EXTRACT:phase6LiveElevenLabsVoices__*/
+/*__STUDIO_WORKER_EXTRACT:phase6VoiceCatalog__*/
+/*__STUDIO_WORKER_EXTRACT:listPhase6Voices__*/
+/*__STUDIO_WORKER_EXTRACT:phase6VoicePreviewUrl__*/
+/*__STUDIO_WORKER_EXTRACT:phase6VoicePreview__*/
+/*__STUDIO_WORKER_EXTRACT:phase6FindModule__*/
+/*__STUDIO_WORKER_EXTRACT:phase6EnsureP0202DynamicVoiceMapping__*/
+/*__STUDIO_WORKER_EXTRACT:mapPhase6CreativeOutput__*/
+/*__STUDIO_WORKER_EXTRACT:getOutputCreative__*/
+/*__STUDIO_WORKER_EXTRACT:phase6Select__*/
+/*__STUDIO_WORKER_EXTRACT:phase6SlideDirectiveFromPayload__*/
+/*__STUDIO_WORKER_EXTRACT:updateOutputCreative__*/
+/*__STUDIO_WORKER_EXTRACT:phase6DimensionsForRatio__*/
+/*__STUDIO_WORKER_EXTRACT:phase6AssetSourceForSlide__*/
+/*__STUDIO_WORKER_EXTRACT:phase6TitleEditIdentity__*/
+/*__STUDIO_WORKER_EXTRACT:phase6NextTitleVersion__*/
+/*__STUDIO_WORKER_EXTRACT:phase6TitleLockState__*/
+/*__STUDIO_WORKER_EXTRACT:phase6TitleLockView__*/
+/*__STUDIO_WORKER_EXTRACT:phase6TitleRenderInput__*/
+/*__STUDIO_WORKER_EXTRACT:phase6SlidesWithTitleRenderInput__*/
+/*__STUDIO_WORKER_EXTRACT:phase6RenderOverlayFromSlide__*/
+/*__STUDIO_WORKER_EXTRACT:phase6BuildPreviewRenderPackage__*/
+/*__STUDIO_WORKER_EXTRACT:phase6PendingVoicePrepSlides__*/
+/*__STUDIO_WORKER_EXTRACT:phase6EnsureP0202ProductionGeneric__*/
+/*__STUDIO_WORKER_EXTRACT:phase6Mp3DurationSeconds__*/
+/*__STUDIO_WORKER_EXTRACT:phase6MeasureAndPersistMissingVoiceDurations__*/
+/*__STUDIO_WORKER_EXTRACT:phase6ScenarioState__*/
+/*__STUDIO_WORKER_EXTRACT:phase6SetScenarioActive__*/
+/*__STUDIO_WORKER_EXTRACT:phase6RunAlreadyActiveError__*/
+/*__STUDIO_WORKER_EXTRACT:phase6PulseOnDemandScenario__*/
+/*__STUDIO_WORKER_EXTRACT:phase6WaitForOutputStatus__*/
+/*__STUDIO_WORKER_EXTRACT:phase6AutoRunRenderPipeline__*/
+/*__STUDIO_WORKER_EXTRACT:phase6StopScenarioVerified__*/
+/*__STUDIO_WORKER_EXTRACT:phase6PulseInactiveScenario__*/
+/*__STUDIO_WORKER_EXTRACT:phase6TimeMs__*/
+/*__STUDIO_WORKER_EXTRACT:phase6CompactTimestampMs__*/
+/*__STUDIO_WORKER_EXTRACT:phase6CurrentRenderStartedAfterReview__*/
+/*__STUDIO_WORKER_EXTRACT:phase6CurrentFinalFileAfterReview__*/
+/*__STUDIO_WORKER_EXTRACT:phase6PreviewFulfillsCurrentReview__*/
+/*__STUDIO_WORKER_EXTRACT:phase6RestoreProductionReviewReady__*/
+/*__STUDIO_WORKER_EXTRACT:inspectRemotionOrCloudConvertStatus__*/
+/*__STUDIO_WORKER_EXTRACT:phase6RenderHandoffState__*/
+/*__STUDIO_WORKER_EXTRACT:phase6CreativeMixRevisionInFlight__*/
+/*__STUDIO_WORKER_EXTRACT:phase6CreativeHandoffStatus__*/
+/*__STUDIO_WORKER_EXTRACT:getOutputCreativeHandoffStatus__*/
+/*__STUDIO_WORKER_EXTRACT:phase6AdvanceRenderPipelineShort__*/
+/*__STUDIO_WORKER_EXTRACT:phase6EnsureRenderPackageForContinuation__*/
+/*__STUDIO_WORKER_EXTRACT:continueOutputCreativeHandoff__*/
+/*__STUDIO_WORKER_EXTRACT:phase6MakeApiConfig__*/
+/*__STUDIO_WORKER_EXTRACT:phase6MakeApiJson__*/
+/*__STUDIO_WORKER_EXTRACT:phase6EnsureScenarioActive__*/
 const STUDIO_R2_WORK_FORMULA = 'AND({Test_Run_ID}=BLANK(),NOT({Do_Not_Publish}),{Content_Item}!=BLANK(),{Output_Status}="Ready for Review",OR({Asset_Need_Status}="Not Needed",{Asset_Need_Status}="Fulfilled"),{Asset_Selection_Status}=BLANK(),{Render_Status}=BLANK(),{Remotion_Job_ID}=BLANK(),{Final_File_URL}="")';
 const STUDIO_R3_WORK_FORMULA = 'AND({Test_Run_ID}=BLANK(),AND({Asset_Selection_Status}="Selected",{Selected_Assets_JSON}!="",{Render_Status}=BLANK(),{Format}!="Story",{Studio_Output_Type}!="Story",OR({Format}="Vertical Short Video",{Format}="Longform Video",{Format}="Feed Post",{Format}="Reel",{Format}="Slideshow Reel",{Format}="Video Draft",{Format}="Short",{Format}="Standard Video",{Format}="Slideshow Video")))';
 const STUDIO_T1_WORK_FORMULA = 'AND({Test_Run_ID}=BLANK(),OR({Render_Status}="Ready for Render",{Render_Status}="Waiting in Render Queue"),{Composition_ID}!="",{Output_Filename}!="",{Render_Clip_List_JSON}!="",{Render_Total_Frames}>0,{Format}!="Story",{Studio_Output_Type}!="Story",OR({Timing_Status}=BLANK(),{Timing_Status}="Pending"),OR({Music_URL}!="",{Selected_Music_URL}!=""))';
@@ -4817,44 +4817,44 @@ let productionCadenceParkAssertedAt = 0;
 let productionCadenceRenderHoldUntil = 0;
 let productionCadencePublishHoldUntil = 0;
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+/*__STUDIO_WORKER_EXTRACT:cadenceScheduleSync__*/
+/*__STUDIO_WORKER_EXTRACT:studioHealPromotedMissingFanout__*/
+/*__STUDIO_WORKER_EXTRACT:continueParkedProductionAfterPromote__*/
+/*__STUDIO_WORKER_EXTRACT:cadenceQueueHasWork__*/
+/*__STUDIO_WORKER_EXTRACT:cadenceRepairInProgress__*/
+/*__STUDIO_WORKER_EXTRACT:pulseStudioP3ForPlannedOutputs__*/
+/*__STUDIO_WORKER_EXTRACT:cadenceHasRenderWork__*/
+/*__STUDIO_WORKER_EXTRACT:studioFirstLinkedId__*/
+/*__STUDIO_WORKER_EXTRACT:studioOutputIsPhotoSequenceRoute__*/
+/*__STUDIO_WORKER_EXTRACT:studioOutputIsStoryRoute__*/
+/*__STUDIO_WORKER_EXTRACT:studioClipLooksLikeVideo__*/
+/*__STUDIO_WORKER_EXTRACT:studioPhotoSequenceNeedsContainHeal__*/
+/*__STUDIO_WORKER_EXTRACT:studioContinuationApplyInspectAction__*/
+/*__STUDIO_WORKER_EXTRACT:studioOutputNeedsRemotionPackage__*/
+/*__STUDIO_WORKER_EXTRACT:studioOutputIsTerminalForContinuation__*/
+/*__STUDIO_WORKER_EXTRACT:studioOutputWrongVideoSelectorPath__*/
+/*__STUDIO_WORKER_EXTRACT:studioContinuationClearRetryFields__*/
+/*__STUDIO_WORKER_EXTRACT:resetEmptyP3RemotionHandoffForR2__*/
+/*__STUDIO_WORKER_EXTRACT:studioContinuationLoadContext__*/
+/*__STUDIO_WORKER_EXTRACT:studioContinuationStampPackage__*/
+/*__STUDIO_WORKER_EXTRACT:studioContinuationInspectOutput__*/
+/*__STUDIO_WORKER_EXTRACT:listStudioContinuationCandidates__*/
+/*__STUDIO_WORKER_EXTRACT:pulseStudioContinuationJobs__*/
+/*__STUDIO_WORKER_EXTRACT:studioContinuationMediaGate__*/
+/*__STUDIO_WORKER_EXTRACT:pulseStudioP2ForWaitingParents__*/
+/*__STUDIO_WORKER_EXTRACT:advanceStudioProductionOutputs__*/
+/*__STUDIO_WORKER_EXTRACT:pulseOnDemandRenderChain__*/
+/*__STUDIO_WORKER_EXTRACT:pulseOnDemandPublishChain__*/
+/*__STUDIO_WORKER_EXTRACT:pulseOnDemandMediaChain__*/
+/*__STUDIO_WORKER_EXTRACT:pulseOnDemandCarouselChain__*/
+/*__STUDIO_WORKER_EXTRACT:pulseOnDemandR2B__*/
+/*__STUDIO_WORKER_EXTRACT:pulseOnDemandM1__*/
+/*__STUDIO_WORKER_EXTRACT:pulseOnDemandMakeAdminBridge__*/
+/*__STUDIO_WORKER_EXTRACT:timingSafeSecretEqual__*/
+/*__STUDIO_WORKER_EXTRACT:r5DoneCallbackSecret__*/
+/*__STUDIO_WORKER_EXTRACT:handleR5DoneCallback__*/
+/*__STUDIO_WORKER_EXTRACT:cadenceHasPublishWork__*/
+/*__STUDIO_WORKER_EXTRACT:cadenceSetActive__*/
 async function syncProductionCadence(env, { force = false, startRender = false, startPublish = false, startCarousel = false, skipRenderPulse = false } = {}) {
   const now = Date.now();
   if (!force && !startRender && !startPublish && !startCarousel && now - productionCadenceLastSyncAt < PRODUCTION_CADENCE_THROTTLE_MS) {
@@ -4923,49 +4923,49 @@ async function syncProductionCadence(env, { force = false, startRender = false, 
   };
 }
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+/*__STUDIO_WORKER_EXTRACT:phase6RunScenario__*/
+/*__STUDIO_WORKER_EXTRACT:phase6StopExactScenarioExecution__*/
+/*__STUDIO_WORKER_EXTRACT:phase6WaitForScenarioExecution__*/
+/*__STUDIO_WORKER_EXTRACT:phase6WaitForVoicePrepCompletion__*/
+/*__STUDIO_WORKER_EXTRACT:phase6ClearVoicePrepTokens__*/
+/*__STUDIO_WORKER_EXTRACT:phase6AdvanceVoicePrepShort__*/
+/*__STUDIO_WORKER_EXTRACT:phase6AutoVoicePrepForOutput__*/
+/*__STUDIO_WORKER_EXTRACT:studioOutputReadyForPublishApproval__*/
+/*__STUDIO_WORKER_EXTRACT:studioPipelineSettingsProfileRecord__*/
+/*__STUDIO_WORKER_EXTRACT:studioLegacyDestinationPrefix__*/
+/*__STUDIO_WORKER_EXTRACT:studioProfileDestinationFieldValue__*/
+/*__STUDIO_WORKER_EXTRACT:studioActivePipelineSettings__*/
+/*__STUDIO_WORKER_EXTRACT:studioPulseMakeWebhook__*/
+/*__STUDIO_WORKER_EXTRACT:studioFacebookPublicMakeWebhookUrl__*/
+/*__STUDIO_WORKER_EXTRACT:studioFacebookPublicCdnUrl__*/
 const STUDIO_FB_COVER_ATTACHED_MARK = "facebook-cover=attached";
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+/*__STUDIO_WORKER_EXTRACT:studioFacebookVideoId__*/
+/*__STUDIO_WORKER_EXTRACT:studioFacebookVideoSurface__*/
+/*__STUDIO_WORKER_EXTRACT:studioFacebookNativeCoverRequired__*/
+/*__STUDIO_WORKER_EXTRACT:studioFacebookNativeCoverUrl__*/
+/*__STUDIO_WORKER_EXTRACT:studioFacebookCoverAlreadyAttached__*/
+/*__STUDIO_WORKER_EXTRACT:studioAttachFacebookNativeCover__*/
+/*__STUDIO_WORKER_EXTRACT:studioFacebookPublicMakeRoutable__*/
+/*__STUDIO_WORKER_EXTRACT:studioFacebookPublicMakeEligible__*/
+/*__STUDIO_WORKER_EXTRACT:studioPulseFacebookPublicMake__*/
+/*__STUDIO_WORKER_EXTRACT:studioPublishDispatchTarget__*/
+/*__STUDIO_WORKER_EXTRACT:studioGraphCaption__*/
+/*__STUDIO_WORKER_EXTRACT:studioFetchImageBytes__*/
+/*__STUDIO_WORKER_EXTRACT:studioPublicJpegIsReachable__*/
+/*__STUDIO_WORKER_EXTRACT:studioImageContentType__*/
 const R2_UPLOAD_WORKER_PUBLIC = "https://chicagoshining-r2-upload.joseph-t-logan.workers.dev";
 const STUDIO_UPLOAD_WORKER_UA = "chicagoshining-studio-api/publish-dispatch";
 
-
-
-
-
-
-
-
-
-
+/*__STUDIO_WORKER_EXTRACT:studioR2UploadWorkerConfig__*/
+/*__STUDIO_WORKER_EXTRACT:studioR2UploadWorkerHeaders__*/
+/*__STUDIO_WORKER_EXTRACT:studioPutPublicObjectViaUploadWorker__*/
+/*__STUDIO_WORKER_EXTRACT:studioPutPublicObjectMultipartFromDrive__*/
+/*__STUDIO_WORKER_EXTRACT:studioPublicVideoIsReachable__*/
+/*__STUDIO_WORKER_EXTRACT:studioEnsureFinishedVideoPublicPreview__*/
+/*__STUDIO_WORKER_EXTRACT:studioPutPublicJpegViaUploadWorker__*/
+/*__STUDIO_WORKER_EXTRACT:studioEnsurePublicJpegForPublish__*/
+/*__STUDIO_WORKER_EXTRACT:studioPublishInstagramFeedPhoto__*/
 const STUDIO_CHICAGO_PLACE_PAGE_IDS = {
   andersonville: "213085162",
   bridgeport: "215445468",
@@ -5006,48 +5006,48 @@ const STUDIO_CHICAGO_PLACE_PAGE_IDS = {
   "wicker park": "212926625",
 };
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+/*__STUDIO_WORKER_EXTRACT:studioNormPlaceText__*/
+/*__STUDIO_WORKER_EXTRACT:studioMarketName__*/
+/*__STUDIO_WORKER_EXTRACT:studioMatchKnownPlace__*/
+/*__STUDIO_WORKER_EXTRACT:studioLookupPlacePageId__*/
+/*__STUDIO_WORKER_EXTRACT:studioResolvePublishLocation__*/
+/*__STUDIO_WORKER_EXTRACT:studioPublishInstagramFeedPhotoInner__*/
+/*__STUDIO_WORKER_EXTRACT:studioPublishFacebookPageStory__*/
+/*__STUDIO_WORKER_EXTRACT:studioPulseAp0PublicAsset__*/
+/*__STUDIO_WORKER_EXTRACT:studioPulseAp1IgReel__*/
+/*__STUDIO_WORKER_EXTRACT:studioPulseAp1Igs__*/
+/*__STUDIO_WORKER_EXTRACT:studioPulseFbs1__*/
+/*__STUDIO_WORKER_EXTRACT:studioPulseFbs2__*/
+/*__STUDIO_WORKER_EXTRACT:studioEnsureFacebookSlideshowAsset__*/
+/*__STUDIO_WORKER_EXTRACT:studioPublishFacebookReelNative__*/
+/*__STUDIO_WORKER_EXTRACT:studioPulseFbs3__*/
+/*__STUDIO_WORKER_EXTRACT:studioPulseFbs4__*/
+/*__STUDIO_WORKER_EXTRACT:studioPulseYtRecord__*/
+/*__STUDIO_WORKER_EXTRACT:studioEnsureYoutubePublish__*/
+/*__STUDIO_WORKER_EXTRACT:studioPulseTtd0__*/
+/*__STUDIO_WORKER_EXTRACT:studioPulseTtd1__*/
+/*__STUDIO_WORKER_EXTRACT:studioPulseTtd2__*/
+/*__STUDIO_WORKER_EXTRACT:studioPulseTtd3__*/
+/*__STUDIO_WORKER_EXTRACT:studioEnsureTiktokDraft__*/
+/*__STUDIO_WORKER_EXTRACT:studioPulseFbRecord__*/
+/*__STUDIO_WORKER_EXTRACT:studioPulseFb0__*/
+/*__STUDIO_WORKER_EXTRACT:studioPulseFb1__*/
+/*__STUDIO_WORKER_EXTRACT:studioPulseFb2__*/
+/*__STUDIO_WORKER_EXTRACT:studioPulseFb2r__*/
+/*__STUDIO_WORKER_EXTRACT:studioPulseFb3__*/
+/*__STUDIO_WORKER_EXTRACT:studioEnsureFacebookPhotoPublish__*/
+/*__STUDIO_WORKER_EXTRACT:studioPulseApcRecord__*/
+/*__STUDIO_WORKER_EXTRACT:studioPulseAp0c__*/
+/*__STUDIO_WORKER_EXTRACT:studioPulseAp1c__*/
+/*__STUDIO_WORKER_EXTRACT:studioPulseAp2c__*/
+/*__STUDIO_WORKER_EXTRACT:studioPulseAp3c__*/
+/*__STUDIO_WORKER_EXTRACT:studioPulseAp3p__*/
+/*__STUDIO_WORKER_EXTRACT:studioPulseAp4c__*/
+/*__STUDIO_WORKER_EXTRACT:studioPulseAp4r__*/
+/*__STUDIO_WORKER_EXTRACT:studioPulseAp5c__*/
+/*__STUDIO_WORKER_EXTRACT:studioEnsureInstagramCarouselPublish__*/
+/*__STUDIO_WORKER_EXTRACT:studioTiktokComplete__*/
+/*__STUDIO_WORKER_EXTRACT:studioPulseAp1IgsPoll__*/
 // Approve pulses these publisher webhooks directly, and a Make webhook aimed at a stopped
 // scenario answers 200 and goes nowhere. Background cadence is supposed to keep the webhook
 // scenarios live and run the on-demand orchestrators, but it parks aggressively and cannot be
@@ -5064,7 +5064,7 @@ const STUDIO_PUBLISH_DISPATCH_SCENARIOS = Object.freeze({
   "TTD0": { webhooks: [STUDIO_TTD0_SCENARIO_ID, STUDIO_TTD1_SCENARIO_ID, STUDIO_TTD2_SCENARIO_ID, STUDIO_TTD3_SCENARIO_ID, STUDIO_TTD4_SCENARIO_ID], orchestrator: STUDIO_TTD_ORCH_SCENARIO_ID },
 });
 
-
+/*__STUDIO_WORKER_EXTRACT:studioArmPublishScenarios__*/
 // The webhook scenario only stages the platform payload; an on-demand orchestrator carries the
 // record the rest of the way, so approval has to run it too or the output stops at the staging step.
 const STUDIO_PUBLISH_ORCH_PYTHON = Object.freeze({
@@ -5075,22 +5075,22 @@ const STUDIO_PUBLISH_ORCH_PYTHON = Object.freeze({
   [STUDIO_IG_ORCH_SCENARIO_ID]: Object.freeze({ stage: "publish_igrs", flag: "IG_ORCH" }),
 });
 
-
+/*__STUDIO_WORKER_EXTRACT:studioRunPublishOrchestrator__*/
 // Only SAI1 or an explicitly locked user caption may author publishable copy. This
 // gate can copy the parent's caption and remove leaked asset inventory, but it must
 // never invent a caption from an output title or another production field.
-
+/*__STUDIO_WORKER_EXTRACT:studioEnsureOutputCaption__*/
 // The webhook POST is the only step that actually hands an output to a publisher. Everything
 // after it is recoverable on a later pass, so it is split off: this half runs on the request
 // path where it cannot be dropped by a cancelled background task or an exhausted invocation.
-
-
-
+/*__STUDIO_WORKER_EXTRACT:studioDispatchApprovedPublishNow__*/
+/*__STUDIO_WORKER_EXTRACT:studioDispatchApprovedPublishTail__*/
+/*__STUDIO_WORKER_EXTRACT:studioPublishDispatchNote__*/
 // Without a receipt every dispatch failure is invisible: the output looks approved, no publisher
 // ran, and nothing on the record says an attempt was ever made. The stamp is also the retry clock
 // the reconcile sweep reads, so it has to be written on success and failure alike.
-
-
+/*__STUDIO_WORKER_EXTRACT:studioStampPublishDispatch__*/
+/*__STUDIO_WORKER_EXTRACT:studioDispatchApprovedPublishAndSchedule__*/
 // Redispatching an output whose publisher already started can post it to the platform twice, so
  // most platform statuses are matched against an allowlist of states that mean "no publisher has
  // begun". Instagram carousels are the exception: EnsureInstagramCarouselPublish is stage-gated and
@@ -5109,17 +5109,17 @@ const STUDIO_PUBLISH_RECONCILE_FORMULA = 'AND({Test_Run_ID}=BLANK(),{Do_Not_Publ
   + 'OR({Studio_Publish_Dispatch_Count}=BLANK(),{Studio_Publish_Dispatch_Count}<8),'
   + 'OR({Studio_Publish_Dispatch_At}=BLANK(),DATETIME_DIFF(NOW(),{Studio_Publish_Dispatch_At},"minutes")>=6))';
 
-
-
-
-
-
-
-
-
-
-
-
+/*__STUDIO_WORKER_EXTRACT:studioResetYoutubeUploadForRetry__*/
+/*__STUDIO_WORKER_EXTRACT:studioHealFailedYoutubeSourceDownloads__*/
+/*__STUDIO_WORKER_EXTRACT:studioParkStaleYoutubeQuotaPolls__*/
+/*__STUDIO_WORKER_EXTRACT:healStaleManualFlagsOnPublishedRecord__*/
+/*__STUDIO_WORKER_EXTRACT:healYoutubeManualWithLiveVideoRecord__*/
+/*__STUDIO_WORKER_EXTRACT:studioCloseYoutubeManualWithLiveVideo__*/
+/*__STUDIO_WORKER_EXTRACT:studioRearmDueYoutubeManualPublishes__*/
+/*__STUDIO_WORKER_EXTRACT:studioReconcileYoutubePublishes__*/
+/*__STUDIO_WORKER_EXTRACT:studioReconcileTiktokDrafts__*/
+/*__STUDIO_WORKER_EXTRACT:studioReconcileFacebookPhotos__*/
+/*__STUDIO_WORKER_EXTRACT:studioReconcileInstagramCarousels__*/
 // Scheduled posts are a hard deadline. This rescue deliberately ignores the normal
 // publisher-stage allowlist and looks only for already-approved rows whose scheduled time
 // has passed. That catches downstream-but-not-started states such as Facebook Reel
@@ -5128,51 +5128,51 @@ const STUDIO_OVERDUE_SCHEDULED_FORMULA = 'AND({Test_Run_ID}=BLANK(),{Do_Not_Publ
   + '{Output_Status}="Approved for Publishing",{Review_Status}="Approved",{Publish_Status}="Ready to Schedule",'
   + '{Scheduled_Post_Date}!="",IS_BEFORE({Scheduled_Post_Date},NOW()))';
 
-
-
-
+/*__STUDIO_WORKER_EXTRACT:studioPublishLockIsStale__*/
+/*__STUDIO_WORKER_EXTRACT:studioHealOverdueTikTokPrep__*/
+/*__STUDIO_WORKER_EXTRACT:studioReconcileOverdueScheduledPublishes__*/
 // Approval is one click, and it has to survive a publisher scenario that drifted off, a Make API
 // hiccup, and a Worker invocation that ran out of budget before reaching the webhook. Nothing else
 // guarantees an approved output reaches a publisher, so this sweep runs first on every cron tick.
-
+/*__STUDIO_WORKER_EXTRACT:studioHealApprovedMissingSchedule__*/
 // Approved Stories that already carry today's next MAE instant (11:30 / 5:30 /
 // 16:30) still publish at that instant. Once the same-content main has a later
 // time, move the Story to main + 10 minutes before reconcile sends it.
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+/*__STUDIO_WORKER_EXTRACT:studioHealStoryCompanionDrift__*/
+/*__STUDIO_WORKER_EXTRACT:studioReconcileApprovedPublishes__*/
+/*__STUDIO_WORKER_EXTRACT:studioReconcileFacebookPublicMake__*/
+/*__STUDIO_WORKER_EXTRACT:studioReconcileFacebookVideoCovers__*/
+/*__STUDIO_WORKER_EXTRACT:studioReconcilePublishingInstagramStories__*/
+/*__STUDIO_WORKER_EXTRACT:studioReconcilePublishingInstagramReels__*/
+/*__STUDIO_WORKER_EXTRACT:studioReconcileFacebookSlideshows__*/
+/*__STUDIO_WORKER_EXTRACT:studioReconcileFacebookReels__*/
+/*__STUDIO_WORKER_EXTRACT:approveOutputRecordForPublishing__*/
+/*__STUDIO_WORKER_EXTRACT:mapApprovedOutputSummary__*/
+/*__STUDIO_WORKER_EXTRACT:studioLoadApproveAllJobStore__*/
+/*__STUDIO_WORKER_EXTRACT:studioSaveApproveAllJobStore__*/
+/*__STUDIO_WORKER_EXTRACT:studioGetApproveAllJob__*/
+/*__STUDIO_WORKER_EXTRACT:studioPutApproveAllJob__*/
+/*__STUDIO_WORKER_EXTRACT:mapApproveAllEligibleSummary__*/
+/*__STUDIO_WORKER_EXTRACT:studioLoadScheduleRegenJobStore__*/
+/*__STUDIO_WORKER_EXTRACT:studioPutScheduleRegenJobStore__*/
+/*__STUDIO_WORKER_EXTRACT:studioGetScheduleRegenJob__*/
+/*__STUDIO_WORKER_EXTRACT:studioPutScheduleRegenJob__*/
+/*__STUDIO_WORKER_EXTRACT:studioNormalizeRegenFilters__*/
+/*__STUDIO_WORKER_EXTRACT:studioProcessScheduleRegenJobSlice__*/
+/*__STUDIO_WORKER_EXTRACT:startScheduleRegenJob__*/
+/*__STUDIO_WORKER_EXTRACT:getScheduleRegenJobStatus__*/
+/*__STUDIO_WORKER_EXTRACT:getStudioScheduleSettings__*/
+/*__STUDIO_WORKER_EXTRACT:putStudioScheduleSettings__*/
+/*__STUDIO_WORKER_EXTRACT:getApproveAllJobStatus__*/
+/*__STUDIO_WORKER_EXTRACT:studioProcessApproveAllJobSlice__*/
+/*__STUDIO_WORKER_EXTRACT:studioRunApproveAllJob__*/
+/*__STUDIO_WORKER_EXTRACT:studioResumeApproveAllJobs__*/
+/*__STUDIO_WORKER_EXTRACT:approveAllOutputsForPublishing__*/
+/*__STUDIO_WORKER_EXTRACT:reviewOutputCreative__*/
+/*__STUDIO_WORKER_EXTRACT:getRecordRoute__*/
+/*__STUDIO_WORKER_EXTRACT:getOutputRoute__*/
+/*__STUDIO_WORKER_EXTRACT:studioOverviewScheduledCounts__*/
+/*__STUDIO_WORKER_EXTRACT:studioOverviewOperationalMetrics__*/
 // Last-good counts. Home reads the snapshot and does not scan Airtable on open.
 // Isolate memory is only a hot copy; R2 keeps it across cold Workers.
 const STUDIO_PROFILES_OVERVIEW_CACHE_MS = 3 * 60 * 1000;
@@ -5184,25 +5184,25 @@ const STUDIO_PROFILES_OVERVIEW_OUTPUT_LIMIT = 800;
 const STUDIO_PROFILES_OVERVIEW_IDEA_LIMIT = 300;
 const studioProfilesOverviewCache = { at: 0, authKey: "", rows: null, inflight: null };
 
-
-
-
-
-
-
-
-
-
-
-
-
-
+/*__STUDIO_WORKER_EXTRACT:studioOverviewBudgetError__*/
+/*__STUDIO_WORKER_EXTRACT:raceStudioOverviewBudget__*/
+/*__STUDIO_WORKER_EXTRACT:studioProfilesOverviewAuthKey__*/
+/*__STUDIO_WORKER_EXTRACT:studioProfilesOverviewCombinedFormula__*/
+/*__STUDIO_WORKER_EXTRACT:studioOverviewRowMatchesProfile__*/
+/*__STUDIO_WORKER_EXTRACT:buildStudioProfilesOverviewRows__*/
+/*__STUDIO_WORKER_EXTRACT:isAirtableCoolingError__*/
+/*__STUDIO_WORKER_EXTRACT:respondProfilesOverviewSoft__*/
+/*__STUDIO_WORKER_EXTRACT:rememberProfilesOverviewSnapshot__*/
+/*__STUDIO_WORKER_EXTRACT:readStudioProfilesOverviewSnapshot__*/
+/*__STUDIO_WORKER_EXTRACT:writeStudioProfilesOverviewSnapshot__*/
+/*__STUDIO_WORKER_EXTRACT:refreshStudioProfilesOverviewSnapshot__*/
+/*__STUDIO_WORKER_EXTRACT:scheduleStudioProfilesOverviewRefresh__*/
 /** One Worker request for All Profiles home table — no N× /api/dashboard fan-out. */
-
-
-
-
-
+/*__STUDIO_WORKER_EXTRACT:profilesOverview__*/
+/*__STUDIO_WORKER_EXTRACT:dashboard__*/
+/*__STUDIO_WORKER_EXTRACT:respondHtml__*/
+/*__STUDIO_WORKER_EXTRACT:listPipelineSettingsForAdmin__*/
+/*__STUDIO_WORKER_EXTRACT:pipelineSettingValue__*/
 const REPAIR_LEASE_NOTE_PREFIX = "REPAIR_LEASE_V1";
 const REPAIR_LEASE_TABLE_ID = "tbltuSt9UibYzxpah";
 const REPAIR_CONTROL_SCENARIOS = new Set([
@@ -5220,27 +5220,27 @@ const REPAIR_CONTROL_SCENARIOS = new Set([
 const REPAIR_LEASE_MAX_MS = 30 * 60 * 1000;
 const REPAIR_LEASE_MIN_MS = 60 * 1000;
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+/*__STUDIO_WORKER_EXTRACT:repairJson__*/
+/*__STUDIO_WORKER_EXTRACT:repairIsoMs__*/
+/*__STUDIO_WORKER_EXTRACT:repairString__*/
+/*__STUDIO_WORKER_EXTRACT:repairRecordIds__*/
+/*__STUDIO_WORKER_EXTRACT:repairLeaseState__*/
+/*__STUDIO_WORKER_EXTRACT:repairLeaseRecords__*/
+/*__STUDIO_WORKER_EXTRACT:repairClearR4LeaseToken__*/
+/*__STUDIO_WORKER_EXTRACT:repairCloseLease__*/
+/*__STUDIO_WORKER_EXTRACT:repairVerifyOutputRecord__*/
+/*__STUDIO_WORKER_EXTRACT:repairSweepExpiredLeases__*/
+/*__STUDIO_WORKER_EXTRACT:repairVerifyContentItemRecord__*/
+/*__STUDIO_WORKER_EXTRACT:repairAcquireLease__*/
+/*__STUDIO_WORKER_EXTRACT:repairFindLease__*/
+/*__STUDIO_WORKER_EXTRACT:repairReserveBudget__*/
+/*__STUDIO_WORKER_EXTRACT:repairScenarioModuleById__*/
+/*__STUDIO_WORKER_EXTRACT:repairScenarioModuleIds__*/
+/*__STUDIO_WORKER_EXTRACT:repairReadMakeBlueprint__*/
+/*__STUDIO_WORKER_EXTRACT:repairP1Eligibility__*/
+/*__STUDIO_WORKER_EXTRACT:repairWaitForP1Package__*/
+/*__STUDIO_WORKER_EXTRACT:repairPulseP1TestSelector__*/
+/*__STUDIO_WORKER_EXTRACT:repairItem7CanonicalMaxRecords__*/
 // ITEM7_EXACT_STAGE_TEST_MODE_V1_BEGIN
 const ITEM7_EXACT_STAGE_CONFIG = Object.freeze({
   5569495: Object.freeze({ stage: "R2", max_cycles: 1, wait_ms_per_cycle: 90000 }),
@@ -5249,14 +5249,14 @@ const ITEM7_EXACT_STAGE_CONFIG = Object.freeze({
   5576363: Object.freeze({ stage: "RR1", max_cycles: 1, wait_ms_per_cycle: 90000 }),
 });
 
-
-
-
-
+/*__STUDIO_WORKER_EXTRACT:repairItem7StageCheckpoint__*/
+/*__STUDIO_WORKER_EXTRACT:repairReadItem7Output__*/
+/*__STUDIO_WORKER_EXTRACT:repairWaitItem7Checkpoint__*/
+/*__STUDIO_WORKER_EXTRACT:repairPulseItem7ExactStage__*/
 // ITEM7_FRESH_INVOCATION_CLEANUP_V5: cleanup is intentionally a separate request so
 // a long stage pulse cannot consume the subrequest capacity needed to stop, restore,
 // verify, and terminalize its own exact lease.
-
+/*__STUDIO_WORKER_EXTRACT:repairCleanupItem7ExactStage__*/
 // ITEM7_EXACT_STAGE_TEST_MODE_V1_END
 
 // ITEM6_REPLACE_TRANSACTION_V1_BEGIN
@@ -5304,45 +5304,45 @@ const ITEM6_REPLACE_PLATFORM_FIELDS = Object.freeze({
   ])
 });
 
-
-
-
-
-
-
-
-
-
-
-
-
-
+/*__STUDIO_WORKER_EXTRACT:item6Choice__*/
+/*__STUDIO_WORKER_EXTRACT:item6Platform__*/
+/*__STUDIO_WORKER_EXTRACT:item6SnapshotFieldNames__*/
+/*__STUDIO_WORKER_EXTRACT:item6PublicationSnapshot__*/
+/*__STUDIO_WORKER_EXTRACT:item6ParseSnapshot__*/
+/*__STUDIO_WORKER_EXTRACT:item6Identity__*/
+/*__STUDIO_WORKER_EXTRACT:item6IdentityFromSnapshot__*/
+/*__STUDIO_WORKER_EXTRACT:item6SafeJson__*/
+/*__STUDIO_WORKER_EXTRACT:item6LoadAllowedOutput__*/
+/*__STUDIO_WORKER_EXTRACT:item6PatchOutput__*/
+/*__STUDIO_WORKER_EXTRACT:item6PrepareResetPatch__*/
+/*__STUDIO_WORKER_EXTRACT:item6ObsoleteInventory__*/
+/*__STUDIO_WORKER_EXTRACT:item6ReplaceControlAction__*/
 // ITEM6_REPLACE_TRANSACTION_V1_END
 
 // ITEM7_STANDALONE_SELECTOR_RECOVERY_V6: safety-only recovery for an exact selector
 // stranded by a failed Item 7 pulse. This path intentionally does not load or consume
 // a lease and can never activate/run a Make scenario.
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+/*__STUDIO_WORKER_EXTRACT:repairRecoverItem7ExactSelector__*/
+/*__STUDIO_WORKER_EXTRACT:repairControlAction__*/
+/*__STUDIO_WORKER_EXTRACT:repairSha256Hex__*/
+/*__STUDIO_WORKER_EXTRACT:repairMakeAdminFindModule19__*/
+/*__STUDIO_WORKER_EXTRACT:repairMakeAdminModule19__*/
+/*__STUDIO_WORKER_EXTRACT:repairInspectorClone__*/
+/*__STUDIO_WORKER_EXTRACT:repairProbeModuleIndex__*/
+/*__STUDIO_WORKER_EXTRACT:repairProbeMakeStartScenarioSchema__*/
+/*__STUDIO_WORKER_EXTRACT:repairListMakeScenariosCompact__*/
+/*__STUDIO_WORKER_EXTRACT:repairInspectMakeScenarioModules__*/
+/*__STUDIO_WORKER_EXTRACT:repairR4FindModule__*/
+/*__STUDIO_WORKER_EXTRACT:repairR4ModuleMap__*/
+/*__STUDIO_WORKER_EXTRACT:repairR4TokenSelector__*/
+/*__STUDIO_WORKER_EXTRACT:repairR4ExactOutputEntry__*/
+/*__STUDIO_WORKER_EXTRACT:repairInspectMakeBlueprintHistory__*/
+/*__STUDIO_WORKER_EXTRACT:repairInspectMakeExecution__*/
+/*__STUDIO_WORKER_EXTRACT:adminRepairControlStatus__*/
+/*__STUDIO_WORKER_EXTRACT:adminRepairControl__*/
+/*__STUDIO_WORKER_EXTRACT:adminMakeDeployPage__*/
+/*__STUDIO_WORKER_EXTRACT:escapeHtml__*/
+/*__STUDIO_WORKER_EXTRACT:adminMakeDeploy__*/
 // STUDIO_MANUAL_IDEA_GENERATOR_V1
 // Manual/on-demand Idea generation reuses canonical I1, but temporarily scopes
 // Module 2 to exactly one Content Profile while I1 is inactive. The original
@@ -5371,36 +5371,36 @@ const STUDIO_IDEA_MIN_COUNT = 1;
 const STUDIO_IDEA_MAX_COUNT = 10;
 const STUDIO_IDEA_ALLOWED_QUALITIES = new Set(["Highest Quality", "Balanced", "Quantity"]);
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+/*__STUDIO_WORKER_EXTRACT:studioIdeaBatchRecordIdFromPath__*/
+/*__STUDIO_WORKER_EXTRACT:studioIdeaBatchView__*/
+/*__STUDIO_WORKER_EXTRACT:studioIdeaManualBatchStillRunning__*/
+/*__STUDIO_WORKER_EXTRACT:studioIdeaEnabledProfile__*/
+/*__STUDIO_WORKER_EXTRACT:studioIdeaCreateBatch__*/
+/*__STUDIO_WORKER_EXTRACT:studioIdeaUpdateBatch__*/
+/*__STUDIO_WORKER_EXTRACT:studioIdeaSetProfileOverrides__*/
+/*__STUDIO_WORKER_EXTRACT:studioIdeaClearProfileOverrides__*/
+/*__STUDIO_WORKER_EXTRACT:studioIdeaUnwrapBlueprint__*/
+/*__STUDIO_WORKER_EXTRACT:studioIdeaReadI1Blueprint__*/
+/*__STUDIO_WORKER_EXTRACT:studioIdeaWriteI1Blueprint__*/
+/*__STUDIO_WORKER_EXTRACT:studioIdeaInstallExactProfileSelector__*/
+/*__STUDIO_WORKER_EXTRACT:studioIdeaExecuteBatch__*/
+/*__STUDIO_WORKER_EXTRACT:studioIdeaStartPhotoListening__*/
+/*__STUDIO_WORKER_EXTRACT:studioIdeaRunPythonBatch__*/
+/*__STUDIO_WORKER_EXTRACT:startStudioIdeaGeneration__*/
+/*__STUDIO_WORKER_EXTRACT:studioIdeaGenerationStatus__*/
 // STUDIO_MANUAL_IDEA_GENERATOR_V1_END
 
-
-
-
-
-
-
-
-
-
-
-
+/*__STUDIO_WORKER_EXTRACT:chicagoNowParts__*/
+/*__STUDIO_WORKER_EXTRACT:mapOperationsOutput__*/
+/*__STUDIO_WORKER_EXTRACT:linkedRecordIds__*/
+/*__STUDIO_WORKER_EXTRACT:mapOperationsProfile__*/
+/*__STUDIO_WORKER_EXTRACT:studioSettingsByName__*/
+/*__STUDIO_WORKER_EXTRACT:studioUpsertSetting__*/
+/*__STUDIO_WORKER_EXTRACT:probeDeskHealthTarget__*/
+/*__STUDIO_WORKER_EXTRACT:deskContentRecIdsFromRecords__*/
+/*__STUDIO_WORKER_EXTRACT:loadDeskContentById__*/
+/*__STUDIO_WORKER_EXTRACT:deskRequestWorkIdentity__*/
+/*__STUDIO_WORKER_EXTRACT:deskEventRecordId__*/
 const DESK_OUTPUT_IDENTITY_KINDS = new Set([
   "publish_failed_transient",
   "tiktok_auth_signature",
@@ -5420,95 +5420,95 @@ const DESK_OUTPUT_IDENTITY_KINDS = new Set([
   "youtube_cover_quota",
 ]);
 
-
-
-
-
-
-
-
-
-
-
+/*__STUDIO_WORKER_EXTRACT:enrichDeskActivityIdentity__*/
+/*__STUDIO_WORKER_EXTRACT:mapDeskInventoryOutput__*/
+/*__STUDIO_WORKER_EXTRACT:deskOutputsForRequest__*/
+/*__STUDIO_WORKER_EXTRACT:gatherStudioDeskInventory__*/
+/*__STUDIO_WORKER_EXTRACT:getStudioDeskInventory__*/
+/*__STUDIO_WORKER_EXTRACT:isStudioTestActivityEvent__*/
+/*__STUDIO_WORKER_EXTRACT:sortStudioActivityEvents__*/
+/*__STUDIO_WORKER_EXTRACT:fetchTaskActivityEvents__*/
+/*__STUDIO_WORKER_EXTRACT:getStudioDeskActivity__*/
+/*__STUDIO_WORKER_EXTRACT:studioAiApiRunnerStatus__*/
 let studioAiApiPreferenceCache = { preferred: "OpenAI", failoverEnabled: true, at: 0 };
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+/*__STUDIO_WORKER_EXTRACT:getStudioAiApiStatus__*/
+/*__STUDIO_WORKER_EXTRACT:patchStudioAiApiPreference__*/
+/*__STUDIO_WORKER_EXTRACT:patchStudioDeskMode__*/
+/*__STUDIO_WORKER_EXTRACT:patchLibraryCrossScope__*/
+/*__STUDIO_WORKER_EXTRACT:parseA1JobValue__*/
+/*__STUDIO_WORKER_EXTRACT:compressionPhaseLabel__*/
+/*__STUDIO_WORKER_EXTRACT:compressionPhaseTone__*/
+/*__STUDIO_WORKER_EXTRACT:parseProgressPercent__*/
+/*__STUDIO_WORKER_EXTRACT:mapA1CompressionJob__*/
+/*__STUDIO_WORKER_EXTRACT:enrichCompressionJobsLive__*/
+/*__STUDIO_WORKER_EXTRACT:listActiveA1CompressionJobs__*/
+/*__STUDIO_WORKER_EXTRACT:getStudioCompressionStatus__*/
+/*__STUDIO_WORKER_EXTRACT:mapOversizedIntakeDriveFile__*/
+/*__STUDIO_WORKER_EXTRACT:listOversizedIntakeVideos__*/
+/*__STUDIO_WORKER_EXTRACT:listOversizedMediaFromAirtable__*/
+/*__STUDIO_WORKER_EXTRACT:listOversizedMedia__*/
+/*__STUDIO_WORKER_EXTRACT:firstOpsLinkedId__*/
+/*__STUDIO_WORKER_EXTRACT:mapOpsQueueProfileName__*/
+/*__STUDIO_WORKER_EXTRACT:getStudioOperationsQueue__*/
+/*__STUDIO_WORKER_EXTRACT:getFactoryDesk__*/
+/*__STUDIO_WORKER_EXTRACT:factoryDeskRefreshPayload__*/
+/*__STUDIO_WORKER_EXTRACT:factoryApproveOutput__*/
 // Factory revision feedback stays human-readable in Production_Notes and
 // machine-parsable for a future opt-in revision agent. It is never executed here.
-
-
-
-
-
-
-
-
-
-
-
-
+/*__STUDIO_WORKER_EXTRACT:factoryFeedbackBlock__*/
+/*__STUDIO_WORKER_EXTRACT:factoryAppendFeedback__*/
+/*__STUDIO_WORKER_EXTRACT:factoryLatestReviewFeedback__*/
+/*__STUDIO_WORKER_EXTRACT:factorySendBackOutput__*/
+/*__STUDIO_WORKER_EXTRACT:factorySendBackContent__*/
+/*__STUDIO_WORKER_EXTRACT:factoryDeleteDeskItem__*/
+/*__STUDIO_WORKER_EXTRACT:mutateFactoryDesk__*/
+/*__STUDIO_WORKER_EXTRACT:pauseStudioOperationsQueueItem__*/
+/*__STUDIO_WORKER_EXTRACT:reorderStudioOperationsRenderQueue__*/
+/*__STUDIO_WORKER_EXTRACT:stampPrepareToReviewNotes__*/
+/*__STUDIO_WORKER_EXTRACT:prepareIdeaToReview__*/
+/*__STUDIO_WORKER_EXTRACT:getStudioOperations__*/
 /** Lean Profiles tab payload — Content Profiles only (voice/music settings). */
-
-
-
-
-
+/*__STUDIO_WORKER_EXTRACT:getStudioOperationsProfiles__*/
+/*__STUDIO_WORKER_EXTRACT:patchStudioOperationsProfile__*/
+/*__STUDIO_WORKER_EXTRACT:studioInternalJsonRequest__*/
+/*__STUDIO_WORKER_EXTRACT:studioSaveAutonomousLastRun__*/
+/*__STUDIO_WORKER_EXTRACT:studioLoadAutonomousLastRun__*/
 /**
  * All-Profiles Scheduled totals (parenthesis) + awaiting-approval for refill.
  * Prefer the overview snapshot so hourly autonomous does not add a full scan.
  */
-
-
-
-
-
-
-
-
-
-
-
-
+/*__STUDIO_WORKER_EXTRACT:studioLoadAutonomousRefillScores__*/
+/*__STUDIO_WORKER_EXTRACT:harvestAutonomousNewsHeadlines__*/
+/*__STUDIO_WORKER_EXTRACT:harvestAutonomousYoutube__*/
+/*__STUDIO_WORKER_EXTRACT:harvestAutonomousLibraryCatalog__*/
+/*__STUDIO_WORKER_EXTRACT:harvestAutonomousRecentTitles__*/
+/*__STUDIO_WORKER_EXTRACT:harvestAutonomousOccupiedTopics__*/
+/*__STUDIO_WORKER_EXTRACT:studioAutonomousOpenAiPick__*/
+/*__STUDIO_WORKER_EXTRACT:createAutonomousIdea__*/
+/*__STUDIO_WORKER_EXTRACT:autonomousPlanVariantsReady__*/
+/*__STUDIO_WORKER_EXTRACT:waitAutonomousVariantsReady__*/
+/*__STUDIO_WORKER_EXTRACT:finishAutonomousProductionRequest__*/
+/*__STUDIO_WORKER_EXTRACT:ideaMatchedMediaIds__*/
 /**
  * Stamp a random Autonomous_Music_Pool track when Selected_Music_Asset is blank.
  * Photo-ready daily ideas used to skip this and every Remotion job fell through to
  * the same catalog favorite (Clocking In).
  */
-
+/*__STUDIO_WORKER_EXTRACT:ensureAutonomousSelectedMusic__*/
 /** Stamp photo-ready daily ideas so one-at-a-time resume can produce them into Factory Needs eyes. */
-
+/*__STUDIO_WORKER_EXTRACT:stampPhotoReadyIdeaForAutonomousProduce__*/
 /** Stamp photo-ready 1 a.m. ideas (up to a small batch) so resume can produce them. */
-
-
-
-
-
-
-
-
-
-
+/*__STUDIO_WORKER_EXTRACT:adoptNextReadyDailyIdea__*/
+/*__STUDIO_WORKER_EXTRACT:listAutonomousDraftRequests__*/
+/*__STUDIO_WORKER_EXTRACT:annotateAutonomousResumeDrafts__*/
+/*__STUDIO_WORKER_EXTRACT:selectAutonomousResumeDraft__*/
+/*__STUDIO_WORKER_EXTRACT:selectAutonomousResumeDraftBatch__*/
+/*__STUDIO_WORKER_EXTRACT:alignAutonomousDraftContentType__*/
+/*__STUDIO_WORKER_EXTRACT:resumeAutonomousDrafts__*/
+/*__STUDIO_WORKER_EXTRACT:studioHealAutonomousRevisionLock__*/
+/*__STUDIO_WORKER_EXTRACT:releaseAutonomousRevisionLock__*/
+/*__STUDIO_WORKER_EXTRACT:parkAutonomousResumeDraft__*/
 /**
  * Unpromoted Idea Candidates that still clog Factory / Ideas.
  * Rejected and On Hold do not count toward the open-ideas cap.
@@ -5517,7 +5517,7 @@ const AUTONOMOUS_OPEN_IDEAS_FORMULA =
   "AND({Promoted_Content_Record_ID}=BLANK(),{Test_Run_ID}=BLANK(),{Candidate_Status}!='Rejected',{Candidate_Status}!='On Hold')";
 
 /** Count open ideas up to cap+1 so we can tell at-cap without paging the whole table. */
-
+/*__STUDIO_WORKER_EXTRACT:countAutonomousOpenIdeas__*/
 /**
  * Create AUTONOMOUS_IDEAS_PER_HOUR ideas for one city under 200 Scheduled+Awaiting Approval.
  * Subjects already in flight do not reduce the count. A library photo group
@@ -5526,20 +5526,20 @@ const AUTONOMOUS_OPEN_IDEAS_FORMULA =
  * Variants and produce stay on the resume path.
  * `createBudget` is the remaining global open-ideas room for this pass.
  */
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+/*__STUDIO_WORKER_EXTRACT:fillAutonomousCityIdeas__*/
+/*__STUDIO_WORKER_EXTRACT:fillAutonomousScheduledHour__*/
+/*__STUDIO_WORKER_EXTRACT:executeStudioAutonomousProduce__*/
+/*__STUDIO_WORKER_EXTRACT:runStudioAutonomousProduce__*/
+/*__STUDIO_WORKER_EXTRACT:studioDailyCadenceRecentBatchForProfile__*/
+/*__STUDIO_WORKER_EXTRACT:executeStudioDailyIdeas__*/
+/*__STUDIO_WORKER_EXTRACT:runStudioDailyIdeas__*/
+/*__STUDIO_WORKER_EXTRACT:kickStudioOutputPublish__*/
+/*__STUDIO_WORKER_EXTRACT:scheduleStudioPublishOutput__*/
+/*__STUDIO_WORKER_EXTRACT:isTikTokPostUrl__*/
+/*__STUDIO_WORKER_EXTRACT:tiktokCompleteEligibility__*/
+/*__STUDIO_WORKER_EXTRACT:tiktokMusicStatusFromChoice__*/
+/*__STUDIO_WORKER_EXTRACT:tiktokManualPublishFields__*/
+/*__STUDIO_WORKER_EXTRACT:tiktokCompleteViewFromRecord__*/
 const TIKTOK_COMPLETE_ERRORS = {
   not_tiktok: "This output is not a TikTok draft.",
   do_not_publish: "Publishing is blocked on this output.",
@@ -5547,37 +5547,37 @@ const TIKTOK_COMPLETE_ERRORS = {
   manual_completion_not_required: "This TikTok output is not waiting for a live post URL yet.",
 };
 
-
-
+/*__STUDIO_WORKER_EXTRACT:patchTiktokManualPublish__*/
+/*__STUDIO_WORKER_EXTRACT:youtubeCompleteViewFromRecord__*/
 const YOUTUBE_COMPLETE_ERRORS = {
   not_youtube: "This output is not a YouTube row.",
   do_not_publish: "Publishing is blocked on this output.",
   already_published: "This YouTube output is already marked Published.",
 };
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+/*__STUDIO_WORKER_EXTRACT:patchYoutubeManualClose__*/
+/*__STUDIO_WORKER_EXTRACT:markStudioYoutubeComplete__*/
+/*__STUDIO_WORKER_EXTRACT:markStudioTiktokComplete__*/
+/*__STUDIO_WORKER_EXTRACT:resendStudioTiktokDraft__*/
+/*__STUDIO_WORKER_EXTRACT:markStudioOutputPublished__*/
+/*__STUDIO_WORKER_EXTRACT:pulseA1SCompression__*/
+/*__STUDIO_WORKER_EXTRACT:pulseA1SForDriveFile__*/
+/*__STUDIO_WORKER_EXTRACT:pulseM1ResetRenderUrls__*/
+/*__STUDIO_WORKER_EXTRACT:pulseR2BRetryAssetSelection__*/
+/*__STUDIO_WORKER_EXTRACT:pulseMakeAdminBridgeQueue__*/
+/*__STUDIO_WORKER_EXTRACT:pulseAudioLeadingSilence__*/
+/*__STUDIO_WORKER_EXTRACT:pulseStudioLibraryIntake__*/
+/*__STUDIO_WORKER_EXTRACT:mapLibraryIntakeAsset__*/
+/*__STUDIO_WORKER_EXTRACT:mapLibraryIntakeSnapshot__*/
+/*__STUDIO_WORKER_EXTRACT:mapMakeIntakeRun__*/
+/*__STUDIO_WORKER_EXTRACT:makeExecutionList__*/
+/*__STUDIO_WORKER_EXTRACT:listMakeIntakeExecutions__*/
+/*__STUDIO_WORKER_EXTRACT:pythonIntakeRun__*/
+/*__STUDIO_WORKER_EXTRACT:pythonA2RunSince__*/
+/*__STUDIO_WORKER_EXTRACT:firstRunSince__*/
+/*__STUDIO_WORKER_EXTRACT:describeA2Run__*/
+/*__STUDIO_WORKER_EXTRACT:buildLibraryIntakeStatus__*/
+/*__STUDIO_WORKER_EXTRACT:getStudioLibraryIntakeStatus__*/
 // Shared bindings for the extracted function modules (live ESM references).
 export {
   JSON_HEADERS,
