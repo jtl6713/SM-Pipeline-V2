@@ -280,3 +280,5 @@ Deploy Worker 0.10.489-engagement-ledger. Shrink the engagement ledger so Chicag
 2026-10-15: Worker 0.10.608-supabase-sync-gate. Allow POST /api/ops/supabase/sync through the Phase 2A method gate so the one-time Supabase warm sync can run.
 
 2026-10-15: Worker 0.10.608-supabase-sync-gate redeploy. Allow SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY / STUDIO_READ_SOURCE as optional bindings so production deploy passes after Phase 3 vars were added in the Cloudflare UI.
+
+2026-10-15: Worker 0.10.609-supabase-phase3-stable. Phase 3 stabilize: sync open Pipeline pack + newest-N, last-sync stamp on health/GET /api/ops/supabase/sync, explicit read-route inventory.

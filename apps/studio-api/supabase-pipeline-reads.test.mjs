@@ -8,6 +8,7 @@ import {
   studioSupabaseConfigured,
   airtableShapedOutputFromSupabase,
   mapAirtableOutputToSupabase,
+  STUDIO_SUPABASE_PIPELINE_READ_ROUTES,
 } from "./supabase-pipeline-reads.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -65,14 +66,23 @@ test("mapAirtableOutputToSupabase maps lean Pipeline fields", () => {
   assert.equal(row.content_profile_id, "11111111-1111-1111-1111-111111111111");
 });
 
+test("supabase read-route inventory is explicit", () => {
+  assert.ok(STUDIO_SUPABASE_PIPELINE_READ_ROUTES.includes("GET /api/outputs"));
+  assert.ok(STUDIO_SUPABASE_PIPELINE_READ_ROUTES.includes("GET /api/outputs/schedule-grid"));
+});
+
 test("worker wires supabase pipeline reads behind a flag", async () => {
   const worker = await readFile(path.join(here, "worker.js"), "utf8");
-  assert.match(worker, /version: "0\.10\.608-supabase-sync-gate"/);
+  assert.match(worker, /version: "0\.10\.609-supabase-phase3-stable"/);
   assert.match(worker, /studio_supabase_pipeline_reads_v1: true/);
+  assert.match(worker, /studio_supabase_phase3_stable_v1: true/);
   assert.match(worker, /from "\.\/supabase-pipeline-reads\.mjs"/);
   assert.match(worker, /buildPipelineOutputsPayloadFromSupabase/);
   assert.match(worker, /listSupabaseScheduleGrid/);
   assert.match(worker, /\/api\/ops\/supabase\/sync/);
   assert.match(worker, /studioSyncSupabasePipelineReads/);
+  assert.match(worker, /listOpenOutputs/);
+  assert.match(worker, /getStudioSupabaseSyncStatus/);
   assert.match(worker, /studio_read_source: studioReadSource\(env\)/);
+  assert.match(worker, /studio_supabase_last_sync_at/);
 });
