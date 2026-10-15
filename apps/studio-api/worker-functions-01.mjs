@@ -2347,6 +2347,8 @@ export function mapOutput(record, job = null, queueMeta = null, contentRecord = 
     tiktok_draft_status: f(record, "TikTok_Draft_Status"),
     manual_completion_status: f(record, "Manual_Completion_Status"),
     manual_published_url: f(record, "Manual_Published_URL"),
+    instagram_carousel_status: f(record, "IG_Carousel_Status"),
+    instagram_story_status: f(record, "IG_Story_Status"),
     music_status: f(record, "Music_Status"),
     facebook_publish_status: f(record, "FB_Publish_Status"),
     facebook_slideshow_status: f(record, "FB_Slideshow_Status"),

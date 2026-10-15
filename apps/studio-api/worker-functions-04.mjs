@@ -1,3 +1,4 @@
+import { countPendingPlatformDispatch } from "./overview-dispatch-counts.mjs";
 import { createProfileOnboarding } from "./profile-onboarding.mjs";
 import {
   studioReadSource,
@@ -2802,21 +2803,7 @@ export async function getOutputRoute(request, env, url) {
 /*__STUDIO_WORKER_END:getOutputRoute__*/
 
 export function studioOverviewScheduledCounts(mappedOutputs) {
-  const platformOrder = ["Facebook", "Instagram", "TikTok", "YouTube"];
-  const counts = Object.fromEntries(platformOrder.map((p) => [p, 0]));
-  for (const row of mappedOutputs || []) {
-    const platform = String(row?.platform || "").trim();
-    if (!(platform in counts)) continue;
-    const publishStatus = String(row?.publish_status || "");
-    const youtubePrivacy = String(row?.youtube_privacy_status || "").trim().toLowerCase();
-    const youtubeNotPublic = platform === "YouTube" && /^(private|unlisted)$/.test(youtubePrivacy);
-    const published = !youtubeNotPublic && (Boolean(row?.published_at) || /published/i.test(publishStatus));
-    const scheduled = Boolean(row?.scheduled_post_date || row?.youtube_scheduled_publish_at || row?.studio_scheduled_at)
-      || /scheduled|ready to publish|publishing/i.test(publishStatus)
-      || youtubeNotPublic;
-    if (!published && scheduled) counts[platform] += 1;
-  }
-  return counts;
+  return countPendingPlatformDispatch(mappedOutputs);
 }
 /*__STUDIO_WORKER_END:studioOverviewScheduledCounts__*/
 
