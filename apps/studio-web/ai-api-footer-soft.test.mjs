@@ -1,3 +1,4 @@
+import { readStudioWorkerSource } from "../studio-api/worker-source-reader.mjs";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
@@ -6,7 +7,7 @@ import { fileURLToPath } from "node:url";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const footer = fs.readFileSync(path.join(here, "assets/ai-api-footer.js"), "utf8");
-const worker = fs.readFileSync(path.join(here, "../studio-api/worker.js"), "utf8");
+const worker = readStudioWorkerSource();
 
 test("AI API footer keeps last known preference when status fetch fails", () => {
   assert.match(footer, /CACHE_KEY = "studio\.ai_api_status_v1"/);
