@@ -9,6 +9,7 @@ import {
   SCHEDULE_REGEN_STATUS,
   buildScheduleRegenCombinations,
   createScheduleRegenJob,
+  scheduleRegenCandidateFilterFormula,
   scheduleRegenJobCounts,
   scheduleRegenProgressMessage,
   summarizeScheduleRegenJob,
@@ -41,6 +42,25 @@ test("combinations sort platform → output type → profile and start Pending",
     ],
   );
   assert.ok(combos.every((row) => row.status === SCHEDULE_REGEN_STATUS.PENDING));
+});
+
+test("candidate filter includes unscheduled and future rows in the selected profile/lane", () => {
+  const formula = scheduleRegenCandidateFilterFormula({
+    nowMs: Date.parse("2026-10-15T18:00:00Z"),
+    horizonDays: 30,
+    profileFormula: 'FIND("recCHI", ARRAYJOIN({Content_Profile})&"")',
+    platform: "Instagram",
+    outputType: "Reel",
+  });
+  assert.match(formula, /recCHI/);
+  assert.match(formula, /\\{Platform\\}="Instagram"/);
+  assert.match(formula, /Studio_Output_Type.*Reel/);
+  assert.match(formula, /Scheduled_Post_Date.*BLANK/);
+  assert.match(formula, /YouTube_Scheduled_Publish_At.*BLANK/);
+  assert.match(formula, /Studio_Scheduled_At.*BLANK/);
+  assert.match(formula, /IS_AFTER/);
+  assert.match(formula, /IS_BEFORE/);
+  assert.match(formula, /Published_At.*BLANK/);
 });
 
 test("progress counts report actual combination completion", () => {
@@ -94,6 +114,9 @@ test("Worker and Pipeline wire durable schedule regeneration", () => {
   assert.match(worker, /SCHEDULE_REGEN_STATUS\.PROCESSING/);
   assert.match(worker, /maeScheduleNextSlot/);
   assert.match(app, /\/api\/outputs\/schedule-regen/);
+  assert.match(app, /pathname === "\/api\/outputs\/schedule-regen"/);
+  assert.match(app, /queuePipelineScheduleRegenPoll/);
+  assert.match(app, /loadPipelineScheduleGridWindow/);
   assert.match(app, /Will be scheduled on approval/);
   assert.match(app, /operationsScheduleHorizonDays/);
   assert.match(app, /MAE-first, balanced-overflow/);
