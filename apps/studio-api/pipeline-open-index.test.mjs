@@ -18,7 +18,7 @@ test("Pipeline open-pack uses the stored Studio_Pipeline_Open index", async () =
 
 test("Home polls the snapshot without triggering an Airtable rebuild", async () => {
   const app = await readFile(path.join(here, "../studio-web/assets/app-item4-1008.js"), "utf8");
-  assert.match(app, /BUILD_ID = "item4-0.6.690-mae-horizon-overflow"/);
+  assert.match(app, /BUILD_ID = "item4-0.6.691-calendar-scheduled-only"/);
   assert.match(app, /const DASHBOARD_POLL_MS = 60000/);
   assert.match(app, /loadDashboard\(true, \{ snapshotOnly: true \}\)/);
   assert.match(app, /api\(`\/api\/outputs\?limit=250\$\{snapshotOnly \? "&refresh=0" : ""\}/);
