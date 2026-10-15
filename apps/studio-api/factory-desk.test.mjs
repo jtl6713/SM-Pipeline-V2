@@ -319,7 +319,10 @@ test("Worker exposes factory desk routes and version flag", async () => {
     worker.indexOf("async function studioProcessApproveAllJobSlice"),
     worker.indexOf("async function studioRunApproveAllJob"),
   );
-  assert.match(approveSlice, /const recheckBestSlot = !markerIso/);
+  assert.match(approveSlice, /const recheckBestSlot = !markerIso && !existingOk/);
+  assert.match(approveSlice, /skipOccupancyRefresh: true/);
+  assert.match(approveSlice, /siblingRows: \[\]/);
+  assert.match(approveSlice, /studioFetchApproveAllRecordsByIds/);
   assert.match(approveSlice, /studioOccupiedForLane/);
   assert.match(approveSlice, /waiting_for_render:/);
   assert.match(approveSlice, /stillRendering/);
@@ -357,7 +360,7 @@ test("Worker exposes factory desk routes and version flag", async () => {
   assert.match(worker, /Do_Not_Publish: true/);
   assert.match(worker, /revision_approve/);
   assert.match(worker, /productionRequestRevisionOpen\(requestRecord\)/);
-  assert.match(worker, /0.10.619-factory-approve-story-bounce/);
+  assert.match(worker, /0.10.620-approve-all-fast-stamp/);
   assert.match(worker, /studio_factory_inflight_blocked_parent_v1:\s*true/);
   assert.match(worker, /studio_factory_desk_v1:\s*true/);
   assert.match(worker, /studio_factory_desk_preview_v1:\s*true/);
@@ -367,7 +370,7 @@ test("Worker allows Factory Desk POST through Phase 2A gate", async () => {
   const worker = readStudioWorkerSource();
   assert.match(worker, /const isFactoryDeskWrite = isFactoryDeskRoute && request\.method === "POST"/);
   assert.match(worker, /isFactoryDeskWrite \|/);
-  assert.match(worker, /version: "0.10.619-factory-approve-story-bounce"/);
+  assert.match(worker, /version: "0.10.620-approve-all-fast-stamp"/);
   assert.match(worker, /studio_factory_desk_write_v1: true/);
 });
 
@@ -376,5 +379,5 @@ test("Worker allows Supabase sync POST through Phase 2A gate", async () => {
   assert.match(worker, /const isOpsSupabaseSyncWrite = isOpsSupabaseSyncRoute && request\.method === "POST"/);
   assert.match(worker, /isOpsSupabaseSyncWrite \|/);
   assert.match(worker, /studio_supabase_sync_gate_v1: true/);
-  assert.match(worker, /version: "0.10.619-factory-approve-story-bounce"/);
+  assert.match(worker, /version: "0.10.620-approve-all-fast-stamp"/);
 });

@@ -1652,7 +1652,15 @@ export async function approveOutputRecordForPublishing(env, existing, note, stam
   }
 
   // Concurrency guard: two near-simultaneous approvals must not claim the same slot.
-  if (!publishNowImmediate && !exactOverride && requestedRaw && requestedRaw !== "immediate") {
+  // Approve All already holds a shared in-memory occupancy map for the whole job —
+  // reloading the calendar from Airtable for every row is what made 50 Approves time out.
+  if (
+    !options.skipOccupancyRefresh
+    && !publishNowImmediate
+    && !exactOverride
+    && requestedRaw
+    && requestedRaw !== "immediate"
+  ) {
     studioInvalidateOccupiedScheduleCache();
     const fresh = await studioOccupiedSchedulesOrEmpty(env, { excludeIds: [id], profile });
     const freshLane = studioOccupiedForLane(fresh, platform, outputType);
@@ -1700,10 +1708,15 @@ export async function approveOutputRecordForPublishing(env, existing, note, stam
     method: "PATCH",
     body: JSON.stringify({ fields: { ...fields, ...preparedHandoff, ...scheduleFields }, typecast: true }),
   });
-  studioInvalidateOccupiedScheduleCache();
+  if (!options.skipOccupancyRefresh) studioInvalidateOccupiedScheduleCache();
   // Phase 3: Factory/Approve updates Airtable; Pipeline list/grid read Supabase.
   // Without write-through, Approved rows stay "Ready for Review" in Pipeline.
-  await studioSupabaseWriteThroughOutput(env, updated, "approve");
+  const writeThrough = studioSupabaseWriteThroughOutput(env, updated, "approve");
+  if (Array.isArray(options.writeThroughQueue)) {
+    options.writeThroughQueue.push(writeThrough);
+  } else {
+    await writeThrough;
+  }
   return updated;
 }
 /*__STUDIO_WORKER_END:approveOutputRecordForPublishing__*/
@@ -2113,14 +2126,45 @@ export async function getApproveAllJobStatus(request, env, authorization) {
 }
 /*__STUDIO_WORKER_END:getApproveAllJobStatus__*/
 
+export async function studioFetchApproveAllRecordsByIds(env, ids = []) {
+  const unique = [...new Set((ids || []).map((id) => String(id || "").trim()).filter((id) => /^rec[A-Za-z0-9]+$/.test(id)))];
+  if (!unique.length) return new Map();
+  const byId = new Map();
+  for (let i = 0; i < unique.length; i += 10) {
+    const chunk = unique.slice(i, i + 10);
+    const formula = chunk.length === 1
+      ? `RECORD_ID()="${chunk[0]}"`
+      : `OR(${chunk.map((id) => `RECORD_ID()="${id}"`).join(",")})`;
+    const rows = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
+      limit: chunk.length,
+      filterFormula: formula,
+    }).catch(() => []);
+    for (const row of rows || []) {
+      if (row?.id) byId.set(row.id, row);
+    }
+    for (const id of chunk) {
+      if (byId.has(id)) continue;
+      try {
+        byId.set(id, await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, id));
+      } catch {
+        // Leave missing; caller marks failed.
+      }
+    }
+  }
+  return byId;
+}
+/*__STUDIO_WORKER_END:studioFetchApproveAllRecordsByIds__*/
+
 export async function studioProcessApproveAllJobSlice(env, jobId, options = {}) {
-  const maxSlices = Math.max(1, Math.min(20, Number(options.maxSlices || APPROVE_ALL_MAX_SLICES_PER_INVOKE)));
+  const maxSlices = Math.max(1, Math.min(24, Number(options.maxSlices || APPROVE_ALL_MAX_SLICES_PER_INVOKE)));
   let job = await studioGetApproveAllJob(env, jobId);
   if (!job) return null;
   if (job.status === "completed" || job.status === "failed") return job;
 
   const stamp = new Date().toISOString();
   job = { ...job, status: "running", updated_at: stamp, items: (job.items || []).map((item) => ({ ...item })) };
+  // One Settings write at start + one at end. Rewriting APPROVE_ALL_JOBS after every
+  // few rows was a major timeout driver under Airtable rate limits.
   await studioPutApproveAllJob(env, job);
 
   const profile = job.profile_id
@@ -2131,6 +2175,8 @@ export async function studioProcessApproveAllJobSlice(env, jobId, options = {}) 
     profile,
   });
   const horizonDays = await studioScheduleHorizonDays(env).catch(() => MAE_SUGGEST_HORIZON_DAYS);
+  // One profile timezone for the whole job — avoid per-row Airtable theme lookups.
+  const timeZone = studioScheduleTimeZoneForProfile(profile, MAE_DEFAULT_TIME_ZONE);
   // Seed occupancy with schedules already booked by earlier approved items in this job.
   for (const item of job.items || []) {
     if (item.status !== "approved" || !item.scheduled_ms) continue;
@@ -2143,15 +2189,18 @@ export async function studioProcessApproveAllJobSlice(env, jobId, options = {}) 
 
   let slices = 0;
   let approvedThisInvoke = 0;
+  const writeThroughQueue = [];
   while (slices < maxSlices) {
     const pending = nextPendingApproveAllItems(job, APPROVE_ALL_BATCH_SIZE);
     if (!pending.length) break;
     slices += 1;
+    const recordsById = await studioFetchApproveAllRecordsByIds(env, pending.map((row) => row.id));
     for (const pendingItem of pending) {
       const item = (job.items || []).find((row) => row.id === pendingItem.id);
       if (!item || item.status !== "pending") continue;
       try {
-        const record = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, item.id);
+        const record = recordsById.get(item.id);
+        if (!record) throw new HttpError(404, "Output record not found");
         const publishStatus = String(f(record, "Publish_Status") || "").trim();
         const outputStatus = String(f(record, "Output_Status") || "").trim();
         const reviewStatus = String(f(record, "Review_Status") || "").trim();
@@ -2185,8 +2234,15 @@ export async function studioProcessApproveAllJobSlice(env, jobId, options = {}) 
         const occupiedMs = studioOccupiedForLane(occupiedByLane, platform, outputType);
         const rowSchedule = String(job.schedules?.[record.id] || "").trim();
         const markerIso = String(f(record, "Studio_Scheduled_At") || "").trim();
-        // Always calculate at approve time unless the operator locked a manual time.
-        const recheckBestSlot = !markerIso;
+        const existingIso = String(
+          f(record, "Scheduled_Post_Date") || f(record, "YouTube_Scheduled_Publish_At") || ""
+        ).trim();
+        // Keep a usable prefilled schedule when it does not collide with this job's
+        // in-memory occupancy. Only re-pick when blank or conflicting.
+        const existingMs = existingIso ? Date.parse(existingIso) : NaN;
+        const existingOk = Number.isFinite(existingMs)
+          && !maeScheduleConflicts(existingMs, occupiedMs || []);
+        const recheckBestSlot = !markerIso && !existingOk;
         const extraSiblings = (job.items || [])
           .filter((entry) => entry.status === "approved" && entry.scheduled_ms && !/story/i.test(String(entry.format || "")))
           .map((entry) => ({
@@ -2195,14 +2251,21 @@ export async function studioProcessApproveAllJobSlice(env, jobId, options = {}) 
             scheduled_at: new Date(Number(entry.scheduled_ms)).toISOString(),
           }));
         const updated = await approveOutputRecordForPublishing(env, record, job.notes || "", new Date().toISOString(), {
-          scheduled_post_date: markerIso ? rowSchedule || undefined : undefined,
+          scheduled_post_date: markerIso
+            ? (rowSchedule || undefined)
+            : (existingOk ? existingIso : undefined),
           manual_schedule_override: Boolean(markerIso),
         }, {
           occupiedMs,
           extraSiblings,
+          // Skip Airtable sibling fan-out; companions come from this job's approved mains.
+          siblingRows: [],
           recheckBestSlot,
+          skipOccupancyRefresh: true,
+          writeThroughQueue,
           horizonDays,
           profile,
+          timeZone,
         });
         const booked = studioScheduleMs(f(updated, "Scheduled_Post_Date")) ?? Date.now();
         const lane = maeScheduleLaneKey(platform, outputType) || platform.toLowerCase();
@@ -2220,10 +2283,15 @@ export async function studioProcessApproveAllJobSlice(env, jobId, options = {}) 
       job.updated_at = new Date().toISOString();
     }
     job = finalizeApproveAllJobStatus(job, new Date().toISOString());
-    await studioPutApproveAllJob(env, job);
     if (job.status === "completed" || job.status === "failed") break;
   }
 
+  if (writeThroughQueue.length) {
+    await Promise.all(writeThroughQueue.map((promise) => Promise.resolve(promise).catch((error) => {
+      console.warn("approve-all supabase write-through failed", error);
+    })));
+  }
+  studioInvalidateOccupiedScheduleCache();
   job = finalizeApproveAllJobStatus(job, new Date().toISOString());
   await studioPutApproveAllJob(env, job);
   return { job, approvedThisInvoke };

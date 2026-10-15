@@ -662,12 +662,19 @@
     let latest = result || {};
     let jobId = String(latest.job_id || "").trim();
     const started = Date.now();
+    // Soft ceiling only: the Worker keeps stamping in the background via
+    // waitUntil / cron. Do not fail the click — reload the desk and show progress.
+    const softMs = 600000;
     while (jobId && (latest.status === "queued" || latest.status === "running")) {
       setStatus(approveAllProgressText(latest));
-      if (Date.now() - started > 120000) {
-        throw new Error("Approval is taking too long. Refresh Factory to see which outputs were approved.");
+      if (Date.now() - started > softMs) {
+        return {
+          ...latest,
+          status: "running",
+          message: `${approveAllProgressText(latest)} · still running in background — refresh Factory in a minute`,
+        };
       }
-      await new Promise((resolve) => setTimeout(resolve, 1200));
+      await new Promise((resolve) => setTimeout(resolve, 1500));
       const params = new URLSearchParams({ job_id: jobId });
       if (profileId) params.set("profile", profileId);
       latest = await fetchJson(`/api/outputs/approve-all?${params.toString()}`);

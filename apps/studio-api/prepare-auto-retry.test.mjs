@@ -36,7 +36,7 @@ test("Worker heal requeues Failed/Error leftovers like Retry remaining", () => {
   assert.match(worker, /Requeued by Quality Agent prepare heal/);
   assert.match(worker, /Studio_Variant_Status\}="Error"/);
   assert.match(worker, /Math\.min\(40,/);
-  assert.match(worker, /0.10.619-factory-approve-story-bounce/);
+  assert.match(worker, /0.10.620-approve-all-fast-stamp/);
   assert.match(worker, /item4HealIncompletePreparingVariants/);
   assert.match(worker, /item4HealTimelineAutoPrepare/);
   // Preparing parents with finished crops must reconcile even when drain is idle.
@@ -53,6 +53,6 @@ test("Production UI auto-retries prepare when the poll window expires", () => {
   assert.match(app, /item4NextVariantAutoRetry/);
   assert.match(app, /prepareItem4Variants\(\{ autoRetry: true \}\)/);
   assert.match(app, /Automatic retry \$\{item4VariantAutoRetries\}\/\$\{ITEM4_VARIANT_AUTO_RETRIES\}/);
-  assert.match(app, /BUILD_ID = "item4-0.6.694-factory-approve-story-bounce"/);
+  assert.match(app, /BUILD_ID = "item4-0.6.695-approve-all-fast-stamp"/);
   assert.match(app, /maybeAutoPrepareTimelineVariants/);
 });

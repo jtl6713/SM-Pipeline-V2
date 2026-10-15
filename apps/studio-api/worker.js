@@ -1000,7 +1000,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.619-factory-approve-story-bounce",
+          version: "0.10.620-approve-all-fast-stamp",
           studio_supabase_pipeline_reads_v1: true,
           studio_supabase_sync_gate_v1: true,
           studio_supabase_phase3_stable_v1: true,
@@ -5165,6 +5165,7 @@ const STUDIO_OVERDUE_SCHEDULED_FORMULA = 'AND({Test_Run_ID}=BLANK(),{Do_Not_Publ
 /*__STUDIO_WORKER_EXTRACT:getStudioScheduleSettings__*/
 /*__STUDIO_WORKER_EXTRACT:putStudioScheduleSettings__*/
 /*__STUDIO_WORKER_EXTRACT:getApproveAllJobStatus__*/
+/*__STUDIO_WORKER_EXTRACT:studioFetchApproveAllRecordsByIds__*/
 /*__STUDIO_WORKER_EXTRACT:studioProcessApproveAllJobSlice__*/
 /*__STUDIO_WORKER_EXTRACT:studioRunApproveAllJob__*/
 /*__STUDIO_WORKER_EXTRACT:studioResumeApproveAllJobs__*/

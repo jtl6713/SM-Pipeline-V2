@@ -13,9 +13,9 @@ test("idea library search sequence + pins", async () => {
   const worker = readStudioWorkerSource();
   assert.match(app, /ideaLibraryLoadSequence/);
   assert.match(app, /Ignore stale responses so a slow empty-query open cannot wipe a later "Museum" search/);
-  assert.match(app, /item4-0.6.694-factory-approve-story-bounce/);
-  assert.match(html, /UI build 0.6.694/);
-  assert.match(worker, /0.10.619-factory-approve-story-bounce/);
+  assert.match(app, /item4-0.6.695-approve-all-fast-stamp/);
+  assert.match(html, /UI build 0.6.695/);
+  assert.match(worker, /0.10.620-approve-all-fast-stamp/);
   assert.match(worker, /studio_idea_library_typeahead_v1: true/);
   assert.match(worker, /ideaLibrarySearchHit/);
   assert.match(worker, /ideaLibrarySearchFilterKeys\(queryTokens\)/);

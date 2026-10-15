@@ -5,7 +5,7 @@ import { readStudioWorkerSource } from "../studio-api/worker-source-reader.mjs";
 
 test("Factory return to Production: explicit Approve always authorizes revision", async () => {
   const app = await readFile(new URL("./assets/app-item4-1008.js", import.meta.url), "utf8");
-  assert.ok(app.includes('BUILD_ID = "item4-0.6.694-factory-approve-story-bounce"'));
+  assert.ok(app.includes('BUILD_ID = "item4-0.6.695-approve-all-fast-stamp"'));
   assert.ok(app.includes("body: JSON.stringify({ revision_approve: true })"));
   assert.ok(!app.includes("revision_approve: activeProductionRequest?.revision_open === true"));
   assert.ok(app.includes("await saveActiveProductionRequest({ quiet: true })"));
