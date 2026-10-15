@@ -42,7 +42,7 @@ test("Recommend checks visible boxes before Save and the persist path stays avai
   assert.match(app, /buildItem4Plan\(\{ persist: false \}\)/);
   assert.match(app, /async function saveItem4OutputSelection\(\)/);
   assert.match(app, /await saveProductionRequestOutputs\(activeProductionRequest\)/);
-  assert.match(app, /Save your platform output selections before preparing frames/);
+  assert.match(app, /Saving selected formats before preparing frames/);
   assert.match(app, /"item4SaveOutputSelection"\)\?\.addEventListener\("click", saveItem4OutputSelection\)/);
 });
 
@@ -81,8 +81,9 @@ test("Saved selections are not silently replaced on open or timeline save", () =
   const prepStart = app.indexOf("async function prepareItem4Variants(");
   const prepEnd = app.indexOf("function renderItem4Workspace(", prepStart);
   const prep = app.slice(prepStart, prepEnd);
-  assert.match(prep, /selectedOutputMatrix\(\)\.length/);
+  assert.match(prep, /productionOutputSelectionKeys\(\)/);
   assert.match(prep, /await saveProductionRequestOutputs\(activeProductionRequest\)/);
+  assert.match(prep, /restoreProductionOutputSelection\(requestedKeys\)/);
 });
 
 test("Worker output synchronization REPLACES stale plan items with enabled output types", () => {
