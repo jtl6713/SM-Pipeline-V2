@@ -585,6 +585,7 @@ export default {
       const isOpsAzNavyPierKickWrite = isOpsAzNavyPierKickRoute && request.method === "POST";
       const isOpsMiamiTikTokSecretWrite = isOpsMiamiTikTokSecretRoute && request.method === "POST";
       const isOpsDeskModeWrite = isOpsDeskModeRoute && request.method === "PATCH";
+      const isOpsSupabaseSyncWrite = isOpsSupabaseSyncRoute && request.method === "POST";
       const isAiApiWrite = isAiApiRoute && request.method === "PATCH";
       const isOperationsResetRenderUrlsWrite = isOperationsResetRenderUrlsRoute && request.method === "POST";
       const isOperationsRetryAssetSelectionWrite = isOperationsRetryAssetSelectionRoute && request.method === "POST";
@@ -668,6 +669,7 @@ export default {
         isOpsAzNavyPierKickWrite ||
         isOpsMiamiTikTokSecretWrite ||
         isOpsDeskModeWrite ||
+        isOpsSupabaseSyncWrite ||
         isAiApiWrite ||
         isOperationsResetRenderUrlsWrite ||
         isOperationsRetryAssetSelectionWrite ||
@@ -717,8 +719,9 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.607-supabase-pipeline-reads",
+          version: "0.10.608-supabase-sync-gate",
           studio_supabase_pipeline_reads_v1: true,
+          studio_supabase_sync_gate_v1: true,
           studio_read_source: studioReadSource(env),
           studio_supabase_configured: studioSupabaseConfigured(env),
           studio_voiceover_once_v1: true,

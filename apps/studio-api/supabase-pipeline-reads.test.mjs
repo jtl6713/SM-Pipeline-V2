@@ -67,7 +67,7 @@ test("mapAirtableOutputToSupabase maps lean Pipeline fields", () => {
 
 test("worker wires supabase pipeline reads behind a flag", async () => {
   const worker = await readFile(path.join(here, "worker.js"), "utf8");
-  assert.match(worker, /version: "0\.10\.607-supabase-pipeline-reads"/);
+  assert.match(worker, /version: "0\.10\.608-supabase-sync-gate"/);
   assert.match(worker, /studio_supabase_pipeline_reads_v1: true/);
   assert.match(worker, /from "\.\/supabase-pipeline-reads\.mjs"/);
   assert.match(worker, /buildPipelineOutputsPayloadFromSupabase/);

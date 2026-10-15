@@ -276,3 +276,5 @@ Deploy Worker 0.10.489-engagement-ledger. Shrink the engagement ledger so Chicag
 2026-10-15: Worker 0.10.606-ten-ideas-anyway. A city under 200 scheduled outputs creates 10 ideas even when the subject is already in flight or the library has fewer than five stills. Photo groups are attached and those drafts continue to final approval. Ideas with no stills are stamped Waiting for Factory Needs Assets. An open draft no longer skips the top-of-hour create.
 
 2026-10-15: Worker 0.10.607-supabase-pipeline-reads. Pipeline /api/outputs and schedule-grid can read from Supabase when STUDIO_READ_SOURCE=supabase (Airtable remains write SoR; default stays airtable).
+
+2026-10-15: Worker 0.10.608-supabase-sync-gate. Allow POST /api/ops/supabase/sync through the Phase 2A method gate so the one-time Supabase warm sync can run.
