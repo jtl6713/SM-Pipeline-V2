@@ -16,10 +16,12 @@ Studio’s operational database is Airtable. The Worker already spends significa
 **What slows Studio today (verified from code + live schema counts):**
 
 1. Airtable’s per-base rate limits + Worker slot serialization collide with UI polling and cron heals.
-2. Pipeline warm builds perform **multiple Airtable list scans** (newest page + open-pack up to 1000 + sibling fan-out + content label batches + render-queue candidates), then cache the result.
-3. Auth resolution lists entire `Studio Users` and `Studio Memberships` tables and filters in memory on every authorized request path that calls `resolveAuthorization`.
-4. Large multiline JSON fields (`Selected_Assets_JSON`, Remotion props/manifests, production job JSON) blow Airtable long-text limits and inflate payloads when not projected away.
-5. Cron historically burned credits with oversized list scans; light/heavy cadence was required after hung-cancel storms.
+2. Pipeline warm builds perform **multiple Airtable list scans** (newest page + open-pack up to 1000 + sibling fan-out + content label batches + render-queue candidates), then cache the result; Content list reuses that open-pack.
+3. Factory/ops desk pays **six parallel lists** every refresh (including review ≤500).
+4. Auth resolution lists entire `Studio Users` and `Studio Memberships` tables and filters in memory on every authorized request path that calls `resolveAuthorization`.
+5. Linked-record N+1 (`loadContentPlatformOutputs`) and schedule occupancy scans (≤800 / 28d) add further Airtable pressure beside list UIs.
+6. Large multiline JSON fields (`Selected_Assets_JSON`, Remotion props/manifests, production job JSON) blow Airtable long-text limits and inflate payloads when not projected away.
+7. Cron + **pipeline-runner** (separate Python Airtable client, ~116 modules) compete with UI for the same base.
 
 **What Postgres would fix first:** indexed joins for Pipeline (outputs + content labels in one query), true uniqueness on Drive file IDs / output numbers, and Worker access via Supabase HTTP (PostgREST) or pooled SQL without Airtable’s 5 req/s class limits.
 
@@ -38,11 +40,11 @@ Legend: **Code** = verified in repository. **Measured** = live Airtable aggregat
 | Screen | Primary endpoints | Request pattern | Airtable tables | Notes |
 |---|---|---|---|---|
 | **Pipeline** | `GET /api/outputs?mode=latest`, `GET /api/outputs?limit=250`, `GET /api/outputs/schedule-grid` | **Concurrent** (latest + full + schedule) | Platform Outputs, Content Items | Full path returns R2/memory snapshot immediately; live rebuild is background. Latest path hits Airtable (~60 rows) + content label lookup. |
-| **Factory** | `GET /api/factory/desk` | One Worker call; internally concurrent queue + ideas + R2 controls | Platform Outputs, Idea Candidates (+ ops queue helpers) | Desk partitions Worker ops queue rows; approve/send-back mutate Platform Outputs. |
-| **Production** | `GET /api/production-requests`, `GET /api/production-requests/:id`, assets/plan/variants/promote | List + frequent per-record follows | Production Requests, Idea Candidates, Media Assets, Content Items, Platform Outputs, Transfer Queue | Highest write surface; JSON masters/plans/variants. |
-| **Scheduling** | Pipeline schedule grid + `/api/operations/outputs/:id/schedule` | Grid read concurrent with Pipeline; writes per output | Platform Outputs | Grid filters by `Scheduled_Post_Date` range then batches content labels (40 IDs/OR). |
-| **Content Details** | `/api/content`, `/api/outputs/:id/creative`, preview | Content list coalesced; creative fetches full PO | Content Items, Platform Outputs | Creative routes intentionally load full records (large JSON). |
-| **Platforms / Frames** | Production request `plan` / `variants` / assets | Sequential status polls while preparing | Production Requests, Media Assets, Transfer Queue | Variant queue is `Studio Media Transfer Queue` (6,120 rows). |
+| **Factory** | `GET /api/factory/desk` | One Worker call; `getStudioOperationsQueue` runs **6 parallel** Airtable lists | Platform Outputs (×4 filtered lists, review ≤**500**), Production Requests, Content Profiles, Content Items, Idea Candidates | Desk partitions ops-queue rows; approve/send-back mutate Platform Outputs. Live Airtable every refresh (R2 holds controls only). |
+| **Production** | `GET /api/production-requests`, `GET /api/production-requests/:id`, assets/plan/variants/promote | List + frequent per-record follows | Production Requests, Idea Candidates, Media Assets, Content Items, Platform Outputs, Transfer Queue | Highest write surface; JSON masters/plans/variants. `listContent` **reuses** `loadOpenPipelineOutputPack` (same open-pack cost as Pipeline). |
+| **Scheduling** | Pipeline schedule grid + `/api/operations/outputs/:id/schedule` + MAE occupancy | Grid concurrent with Pipeline; occupancy for suggest/approve | Platform Outputs | Grid: date-range filter + content label batches (40). Occupancy: up to **`STUDIO_OCCUPIED_LIST_LIMIT = 800`** rows over a 28-day horizon (`studioLoadOccupiedScheduleRows`). |
+| **Content Details** | `/api/content`, `/api/outputs/:id/creative`, preview | Content list coalesced; creative fetches full PO | Content Items, Platform Outputs, Carousel Slides | Creative routes load full records (large JSON). `loadContentPlatformOutputs` is a true per-id N+1 (below). |
+| **Platforms / Frames** | Production request `plan` / `variants` / assets | Sequential status polls while preparing | Production Requests, Media Assets, Transfer Queue | Variant queue is `Studio Media Transfer Queue` (6,120 rows). Non-`snapshot=1` Item4 can reconcile/mutate on open. |
 
 Evidence (frontend concurrency):
 
@@ -69,15 +71,18 @@ Evidence (Pipeline warm build multi-scan):
 
 `loadOpenPipelineOutputPack` lists up to `STUDIO_PIPELINE_OPEN_OUTPUT_LIMIT = 1000` open outputs, then another list for siblings by content IDs (`apps/studio-api/worker.js`).
 
-### 2.2 Top five bottlenecks
+### 2.2 Top bottlenecks
 
 | # | Bottleneck | Evidence | Class |
 |---|---|---|---|
 | 1 | **Airtable rate limit + 250ms slot queue** | `airtableRequestSlot`, fail-fast 429 after 8s cooldown wait; cron skips when cooling | Code + ops history in comments (603 hung-cancels / 3h on 2026-10-11) |
-| 2 | **Pipeline warm path = many list scans** | newest + open(≤1000) + siblings + labels + jobs + render-queue candidates | Code |
-| 3 | **Auth lists full user/membership tables** | `resolveAuthorization` → `listRecords(Studio Users)` + `listRecords(Studio Memberships)` then `.find`/`.filter` | Code |
-| 4 | **Large JSON long-text fields** | `Selected_Assets_JSON` can exceed Airtable 100k char limit (desk incident class `produce_stamp_422`); Pipeline deliberately omits it from `OUTPUT_LIST_FIELDS` | Code + prior production incidents |
-| 5 | **Background heal/cron competing with UI** | Low-burn cron redesign; insights scan capped after “top Airtable credit burner” comment | Code |
+| 2 | **Pipeline warm path = many list scans** | newest + open(≤1000) + siblings + labels + jobs + render-queue candidates; Content list reuses the same open-pack | Code |
+| 3 | **Factory / ops-queue multi-list** | `getStudioOperationsQueue`: 6 parallel lists including review `limit: 500` | Code |
+| 4 | **Auth lists full user/membership tables** | `resolveAuthorization` → `listRecords(Studio Users)` + `listRecords(Studio Memberships)` then `.find`/`.filter` | Code |
+| 5 | **True N+1 linked Output GETs** | `loadContentPlatformOutputs`: `Promise.all(ids.map((id) => airtableFetch(OUTPUT, id)))` (up to 50) | Code |
+| 6 | **Schedule occupancy scans** | `STUDIO_OCCUPIED_LIST_LIMIT = 800`, 28-day horizon, 45s cache — used by MAE / approve spacing | Code |
+| 7 | **Large JSON long-text fields** | `Selected_Assets_JSON` can exceed Airtable 100k char limit (desk incident class `produce_stamp_422`); Pipeline deliberately omits it from `OUTPUT_LIST_FIELDS` | Code + prior production incidents |
+| 8 | **Background heal/cron + pipeline-runner writes** | Low-burn cron redesign; separate Python `AirtableClient` across ~116 pipeline-runner modules (no Worker coalesce) | Code |
 
 ### 2.3 Caching already present (important for migration design)
 
@@ -101,13 +106,14 @@ Runtime Worker/Airtable latency was **not measured in this session** (no product
 
 ### 3.1 Scale of integration
 
-| Location | Approx. `airtableFetch` / `listRecords` call sites |
+| Location | Approx. call sites / modules |
 |---|---|
-| `apps/studio-api/worker.js` | **706** |
+| `apps/studio-api/worker.js` | **~706** `airtableFetch` / `listRecords` |
 | `apps/studio-api/profile-onboarding.mjs` | 10 |
 | `apps/studio-api/engagement-service.mjs` | 5 |
+| `services/pipeline-runner/**` (Python) | **~116** modules using `AirtableClient` (`airtable/client.py`; table IDs in `airtable/constants.py`) |
 
-Studio Web talks to Airtable **only through the Worker** (no direct PAT in browser).
+Studio Web talks to Airtable **only through the Worker** (no direct PAT in browser). Pipeline-runner stages (produce, Remotion handoff, publish processors) are a **second write surface** that bypasses Worker read coalesce — Phase 5–6 must cover both clients, not only `worker.js`.
 
 ### 3.2 Active tables (32 in base)
 
@@ -153,8 +159,11 @@ Studio Web talks to Airtable **only through the Worker** (no direct PAT in brows
 |---|---|---|
 | List all Studio Users then find by email | `resolveAuthorization` | `unique(lower(email))` lookup |
 | List memberships then filter by user | same | `where user_id = $1` |
-| Open-pack scan ≤1000 + sibling re-list | `loadOpenPipelineOutputPack` | Partial index on unfinished outputs + `WHERE content_item_id IN (...)` join |
+| Open-pack scan ≤1000 + sibling re-list | `loadOpenPipelineOutputPack` (also reused by `listContent`) | Partial index on unfinished outputs + `WHERE content_item_id IN (...)` join |
 | Content labels via batched `OR(RECORD_ID()=...)` | `pipelineContentLabelsById` / `scheduleGridContentById` | `JOIN content_items` |
+| Per-id Output GETs from Content link array | `loadContentPlatformOutputs` | `SELECT * FROM platform_outputs WHERE content_item_id = $1` |
+| Factory six-list fan-in (review ≤500) | `getStudioOperationsQueue` | One indexed query / materialized desk view |
+| Occupancy ≤800 / 28d horizon | `studioLoadOccupiedScheduleRows` | Range index on `scheduled_post_date` (already in `001_core_schema.sql`) |
 | Music/library formula scans | `listMusic`, asset library | Indexes on `asset_role`, `media_class`, Drive ID |
 
 ---
@@ -375,12 +384,16 @@ Files:
 ## Appendix B — Key code references
 
 - Airtable slotting: `apps/studio-api/worker.js` (`AIRTABLE_MIN_GAP_MS`, `airtableRequestSlot`)  
-- Pipeline list + snapshots: `listOutputs`, `buildPipelineOutputsPayload`, `respondStudioMappedList`  
+- Pipeline list + snapshots: `listOutputs`, `buildPipelineOutputsPayload`, `loadOpenPipelineOutputPack`, `respondStudioMappedList`  
 - Lean fields: `OUTPUT_LIST_FIELDS`  
 - Auth: `resolveAuthorization`  
-- Factory: `getFactoryDesk`  
+- Factory / ops queue: `getFactoryDesk`, `getStudioOperationsQueue` (6 parallel lists; review limit 500)  
+- N+1 linked outputs: `loadContentPlatformOutputs`  
+- Occupancy: `STUDIO_OCCUPIED_LIST_LIMIT`, `studioLoadOccupiedScheduleRows`  
 - Cron burn control: `scheduled` handler comments (~2026-10-11)  
-- Existing unrelated Supabase: `apps/tasks-api/worker.js` (`events` table only)
+- Pipeline-runner Airtable: `services/pipeline-runner/airtable/client.py`, `constants.py`  
+- Existing unrelated Supabase: `apps/tasks-api/worker.js` (`events` table only)  
+- Follow-up inventory pass: [Inventory Airtable API usage](bc-cd241ef7-cfe8-5686-994e-2a5b90badf0c)
 
 ## Appendix C — Phase 1 completion checklist
 
