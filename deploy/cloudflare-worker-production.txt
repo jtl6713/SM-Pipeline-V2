@@ -286,3 +286,5 @@ Deploy Worker 0.10.489-engagement-ledger. Shrink the engagement ledger so Chicag
 2026-10-15: Worker 0.10.610-supabase-schedule-writethrough. After calendar schedule Save, write-through Scheduled_Post_Date into Supabase so Pipeline schedule-grid does not snap the bubble back.
 
 2026-10-15: Worker 0.10.610-supabase-schedule-writethrough redeploy. Prior production deploy rolled back after verify-bridge Cloudflare 1042; code already on main.
+
+2026-10-15: Worker 0.10.611-supabase-approve-writethrough. After Factory/Pipeline Approve, write-through Output_Status into Supabase so Awaiting Approval does not lag behind Factory gate.
