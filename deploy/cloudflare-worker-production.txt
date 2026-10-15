@@ -305,3 +305,5 @@ Deploy Worker 0.10.489-engagement-ledger. Shrink the engagement ledger so Chicag
 2026-10-15: Worker 0.10.619-factory-approve-story-bounce. Continuation re-fetches before opening Ready for Review so Approve cannot be stomped; approve-all retries Stories still rendering.
 
 2026-10-15: Worker 0.10.620-approve-all-fast-stamp. Approve all: batch record fetch, skipOccupancyRefresh, siblingRows=[], one Settings write per slice, deferred Supabase write-through.
+
+2026-10-15: Worker 0.10.620-approve-all-fast-stamp. Redeploy after session-verify rollback left production on 0.10.618.

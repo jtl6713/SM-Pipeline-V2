@@ -360,3 +360,5 @@ UI 0.6.607 hashtag mismatch warning only; approval no longer blocked.
 2026-10-15: UI 0.6.694-factory-approve-story-bounce. Factory Approve all only claims Airtable Ready-for-Review rows; premature Stories stay In Flight so they do not bounce back alone.
 
 2026-10-15: UI 0.6.695-approve-all-fast-stamp. Approve all stamps without per-row occupancy reload / sibling fan-out; soft background watch instead of hard timeout.
+
+2026-10-15: UI 0.6.695-approve-all-fast-stamp. Redeploy Pages after custom-domain verify lag on first #752 attempt.
