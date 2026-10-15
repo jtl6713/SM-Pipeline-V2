@@ -2959,11 +2959,13 @@ export function rememberProfilesOverviewSnapshot(snapshot) {
   studioProfilesOverviewCache.at = Number(snapshot.at) || 0;
   studioProfilesOverviewCache.authKey = String(snapshot.authKey || "");
   studioProfilesOverviewCache.complete = snapshot.complete === true;
+  studioProfilesOverviewCache.schemaVersion = Number(snapshot.schemaVersion || 0);
   return {
     rows,
     at: studioProfilesOverviewCache.at,
     authKey: studioProfilesOverviewCache.authKey,
     complete: studioProfilesOverviewCache.complete,
+    schemaVersion: studioProfilesOverviewCache.schemaVersion,
   };
 }
 /*__STUDIO_WORKER_END:rememberProfilesOverviewSnapshot__*/
@@ -2971,7 +2973,7 @@ export function rememberProfilesOverviewSnapshot(snapshot) {
 export async function readStudioProfilesOverviewSnapshot(env) {
   const cache = studioProfilesOverviewCache;
   if (cache.rows?.length) {
-    return { rows: cache.rows, at: cache.at, authKey: cache.authKey, complete: cache.complete === true };
+    return { rows: cache.rows, at: cache.at, authKey: cache.authKey, complete: cache.complete === true, schemaVersion: cache.schemaVersion || 0 };
   }
   if (!env?.STUDIO_MEDIA?.get) return null;
   try {
@@ -2986,7 +2988,7 @@ export async function readStudioProfilesOverviewSnapshot(env) {
 /*__STUDIO_WORKER_END:readStudioProfilesOverviewSnapshot__*/
 
 export async function writeStudioProfilesOverviewSnapshot(env, rows, authKey) {
-  const snapshot = rememberProfilesOverviewSnapshot({ rows, authKey, at: Date.now(), complete: true });
+  const snapshot = rememberProfilesOverviewSnapshot({ rows, authKey, at: Date.now(), complete: true, schemaVersion: 2 });
   if (!snapshot || !env?.STUDIO_MEDIA?.put) return snapshot;
   try {
     await env.STUDIO_MEDIA.put(
@@ -3033,7 +3035,7 @@ export function scheduleStudioProfilesOverviewRefresh(ctx, env, authorization) {
 export async function profilesOverview(request, env, authorization, ctx) {
   const snapshot = await readStudioProfilesOverviewSnapshot(env);
   const age = snapshot?.at ? Date.now() - snapshot.at : Infinity;
-  if (snapshot?.rows?.length && snapshot.complete === true && age < STUDIO_PROFILES_OVERVIEW_CACHE_MS) {
+  if (snapshot?.rows?.length && snapshot.complete === true && snapshot.schemaVersion === 2 && age < STUDIO_PROFILES_OVERVIEW_CACHE_MS) {
     return respondProfilesOverviewSoft(request, env, {
       records: snapshot.rows,
       cached: true,
