@@ -518,6 +518,7 @@ import {
   studioScheduleMs,
   studioOccupiedRowMatchesProfile,
   studioOccupiedFilterFormula,
+  studioLoadOccupiedScheduleRows,
   studioInvalidateOccupiedScheduleCache,
   studioOccupiedMsFromRow,
   studioPublishScheduleFields,
@@ -1941,19 +1942,62 @@ export async function studioProcessScheduleRegenJobSlice(env, jobId, options = {
     job = { ...job, combinations: combos, updated_at: new Date().toISOString() };
     await studioPutScheduleRegenJob(env, job);
 
+    const eligibleIds = new Set(eligible.map((row) => row.id));
+    // A bulk regeneration is a clean rebuild of every still-unprocessed lane on
+    // this platform. Their old future stamps must not constrain the first lane,
+    // but lanes already completed in this job must immediately become blockers.
+    const unsettledPlatformTypes = new Set(
+      combos
+        .filter((row, comboIndex) => {
+          if (comboIndex < index) return false;
+          if (String(row?.profile_id || "") !== String(combo.profile_id || "")) return false;
+          if (String(row?.platform || "").trim().toLowerCase() !== platformWant) return false;
+          return [SCHEDULE_REGEN_STATUS.PENDING, SCHEDULE_REGEN_STATUS.PROCESSING].includes(String(row?.status || ""));
+        })
+        .map((row) => String(row?.output_type || "").trim().toLowerCase())
+        .filter(Boolean),
+    );
+    const platformRows = await studioLoadOccupiedScheduleRows(env, { profile });
+    const platformProtectedTimes = [];
+    for (const row of platformRows || []) {
+      if (eligibleIds.has(row.id) || !studioOccupiedRowMatchesProfile(row, profile)) continue;
+      const platform = String(f(row, "Platform") || "").trim().toLowerCase();
+      if (platform !== platformWant) continue;
+      const outputType = String(f(row, "Studio_Output_Type") || f(row, "Format") || "").trim().toLowerCase();
+      const published = Boolean(String(f(row, "Published_At") || "").trim())
+        || String(f(row, "Publish_Status") || "").trim() === "Published"
+        || String(f(row, "Output_Status") || "").trim() === "Published";
+      const ms = studioOccupiedMsFromRow(row, nowMs);
+      if (
+        ms != null
+        && ms > nowMs
+        && ms <= horizonMs
+        && !published
+        && !Boolean(f(row, "Do_Not_Publish"))
+        && unsettledPlatformTypes.has(outputType)
+      ) {
+        continue;
+      }
+      if (ms != null) platformProtectedTimes.push(ms);
+    }
+
     const plan = [];
-    const reserved = protectedTimes.slice();
+    const reservedLane = protectedTimes.slice();
+    const reservedPlatform = [...new Set([...platformProtectedTimes, ...protectedTimes])];
     for (const row of eligible) {
       const picked = maeScheduleNextSlot({
         timeZone,
-        occupiedMs: reserved,
+        laneOccupiedMs: reservedLane,
+        platformOccupiedMs: reservedPlatform,
         horizonDays,
       });
       if (!picked.ok) {
         throw new HttpError(409, picked.error || `Capacity failure for ${combo.platform} ${combo.output_type}`);
       }
       plan.push({ id: row.id, iso: picked.iso, record: row });
-      reserved.push(Date.parse(picked.iso));
+      const pickedMs = Date.parse(picked.iso);
+      reservedLane.push(pickedMs);
+      reservedPlatform.push(pickedMs);
     }
 
     // Apply in Airtable-sized chunks. The old per-row PATCH + job-store write

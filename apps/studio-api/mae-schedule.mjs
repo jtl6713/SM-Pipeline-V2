@@ -9,9 +9,10 @@
  * (earliest day wins ties) in that day's widest valid publishing gap. Repeat
  * Day 1 → Day X until capacity is exhausted.
  *
- * Lanes are independent per profile × platform × output type. Stories do not
- * share a lane with Reels (or any other type). Two types may share a wall-clock
- * time because their schedules are independent.
+ * Lanes remain distinct per profile × platform × output type for sequencing,
+ * but a platform has one wall-clock occupancy. Different output types on the
+ * same platform must not stack at the same publish time. Different platforms
+ * may share the same time. Stories may intentionally sit near their companion main.
  *
  * Overnight blackout: 8:00 PM through 3:30 AM profile-local (inclusive).
  */
@@ -22,9 +23,9 @@
 export const MAE_SCHEDULE_GAP_MS = 90 * 60 * 1000;
 export const MAE_SUGGEST_HORIZON_DAYS = 30;
 export const MAE_PRIORITY_SCHEDULE_WINDOWS = Object.freeze([
-  "05:00-07:00",
-  "10:30-12:30",
-  "16:00-18:00",
+  "05:30-07:00",
+  "11:30-13:00",
+  "16:30-18:00",
 ]);
 export const MAE_SUGGEST_LEAD_MS = 10 * 60 * 1000;
 /** Companion Stories sit this far after the same-platform main when MAE has no open slot. */
@@ -374,10 +375,11 @@ export function maeScheduleNextSlot(options = {}) {
   const timeZone = maeNormalizeTimeZone(options.timeZone);
   const now = options.now instanceof Date ? options.now : new Date();
   const horizonDays = maeNormalizeHorizonDays(options.horizonDays, MAE_SUGGEST_HORIZON_DAYS);
-  const occupiedMs = options.occupiedMs || options.laneOccupiedMs || [];
+  const laneOccupiedMs = options.laneOccupiedMs || options.occupiedMs || [];
+  const platformOccupiedMs = options.platformOccupiedMs || laneOccupiedMs;
   const iso = maePickBalancedSuggestedIso(MAE_PRIORITY_SCHEDULE_WINDOWS, now, {
-    occupiedMs,
-    platformOccupiedMs: occupiedMs,
+    occupiedMs: laneOccupiedMs,
+    platformOccupiedMs,
     timeZone,
     horizonDays,
     leadMs: options.leadMs,
@@ -570,6 +572,16 @@ export function maeBuildSuggestedScheduleMap(items, occupiedByLane = {}, now = n
     return maeBlockingTimes(typed, legacy);
   };
 
+  const platformTimes = (platform) => {
+    const wanted = String(platform || "").trim().toLowerCase();
+    const all = [];
+    for (const [key, times] of Object.entries(reserved)) {
+      const normalized = String(key || "").trim().toLowerCase();
+      if (normalized === wanted || normalized.startsWith(`${wanted}::`)) all.push(...(times || []));
+    }
+    return maeBlockingTimes(all, []);
+  };
+
   for (const { item } of indexed) {
     const platform = String(item.platform || "").trim();
     const outputType = String(item.output_type || "").trim();
@@ -609,7 +621,7 @@ export function maeBuildSuggestedScheduleMap(items, occupiedByLane = {}, now = n
     }
     const pickOpts = {
       occupiedMs: laneTimes(platform, outputType),
-      platformOccupiedMs: laneTimes(platform, outputType),
+      platformOccupiedMs: platformTimes(platform),
       timeZone,
       horizonDays,
       startCivilIndex: isStory || !spreadPlatforms
