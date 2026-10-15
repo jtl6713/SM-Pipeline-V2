@@ -74,6 +74,7 @@ import {
   autonomousProfileHarvestOrder,
   pickAutonomousEnabledProfile,
   pickRelatedUnusedStillCluster,
+  planAutonomousHourIdeas,
   summarizeUnusedLibraryOverview,
   autonomousClusterConflictsOccupied,
   autonomousPreferredSubject,
@@ -806,6 +807,46 @@ test("unused stills cluster into a related 5-10 set", () => {
   assert.deepEqual(occupiedRequest.media_asset_ids, ["recPilsen0000000000"]);
 });
 
+test("under 200 the hour plans 10 ideas even when subjects repeat or stills are thin", () => {
+  const thin = [
+    {
+      id: "recThin0000000001",
+      name: "Pool 1.jpeg",
+      location: "Venetian Pool",
+    },
+    {
+      id: "recThin0000000002",
+      name: "Pool 2.jpeg",
+      location: "Venetian Pool",
+    },
+  ];
+  const planned = planAutonomousHourIdeas(thin, { profileName: "Miami", goal: 10 });
+  assert.equal(planned.length, 10);
+  assert.equal(planned.filter((row) => row.media_asset_ids.length).length, 1);
+  assert.deepEqual(planned[0].media_asset_ids, ["recThin0000000001", "recThin0000000002"]);
+  assert.equal(planned[0].needs_assets, false);
+  assert.equal(planned.filter((row) => row.needs_assets).length, 9);
+  assert.equal(planned[1].media_asset_ids.length, 0);
+  assert.equal(planned[1].candidate_title, "Miami stills needed");
+  const empty = planAutonomousHourIdeas([], { profileName: "Chicago", goal: 10 });
+  assert.equal(empty.length, 10);
+  assert.equal(empty.every((row) => row.needs_assets && row.media_asset_ids.length === 0), true);
+  const many = [];
+  for (let index = 0; index < 12; index += 1) {
+    many.push({
+      id: `recPark${String(index).padStart(12, "0")}`,
+      name: `Park ${index}.jpeg`,
+      location: "Millennium Park",
+    });
+  }
+  const split = planAutonomousHourIdeas(many, { profileName: "Chicago", goal: 10 });
+  assert.equal(split.filter((row) => row.media_asset_ids.length).length, 2);
+  assert.equal(split[0].media_asset_ids.length, 10);
+  assert.equal(split[1].media_asset_ids.length, 2);
+  assert.equal(split.filter((row) => row.needs_assets).length, 8);
+  assert.notEqual(split[0].candidate_title, split[1].candidate_title);
+});
+
 test("JSON fences unwrap and last-run notes stay readable", () => {
   assert.equal(extractJsonObject("```json\n{\"skip\":true}\n```").skip, true);
   assert.equal(parseAutonomousLastRun("not-json").notes, "not-json");
@@ -818,7 +859,17 @@ test("Worker stamps photo-ready ideas and drains the 30m SLA on light ticks", as
   const path = await import("node:path");
   const here = path.dirname(fileURLToPath(import.meta.url));
   const worker = await readFile(path.join(here, "worker.js"), "utf8");
-  assert.match(worker, /version: "0.10.605-keep-picking"/);
+  assert.match(worker, /version: "0.10.606-ten-ideas-anyway"/);
+  assert.match(worker, /studio_autonomous_ten_ideas_anyway_v1: true/);
+  assert.match(worker, /planAutonomousHourIdeas/);
+  const hourFill = worker.slice(
+    worker.indexOf("async function fillAutonomousCityIdeas"),
+    worker.indexOf("async function fillAutonomousScheduledHour"),
+  );
+  assert.match(hourFill, /planAutonomousHourIdeas/);
+  assert.doesNotMatch(hourFill, /no_distinct_subject/);
+  assert.match(worker, /Studio_Photo_Wait_Status = "Waiting"/);
+  assert.match(worker, /if \(!harvestThisHour && last\.production_request_id && last\.idea_id\)/);
   assert.match(worker, /studio_autonomous_ten_per_hour_v1: true/);
   assert.match(worker, /AUTONOMOUS_IDEAS_PER_HOUR/);
   assert.match(worker, /AUTONOMOUS_CITY_CREATE_MS/);
@@ -873,7 +924,7 @@ test("Worker stamps photo-ready ideas and drains the 30m SLA on light ticks", as
   assert.match(worker, /async function releaseAutonomousRevisionLock/);
   assert.match(worker, /skip_factory_revision_open/);
   const lockBlock = worker.slice(
-    worker.indexOf("if (last.production_request_id && last.idea_id)"),
+    worker.indexOf("if (!harvestThisHour && last.production_request_id && last.idea_id)"),
     worker.indexOf("let priorProduceInFlight"),
   );
   const revisionIdx = lockBlock.indexOf("productionNotesRevisionOpen(notes)");
