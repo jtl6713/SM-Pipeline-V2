@@ -1,3 +1,4 @@
+import { readStudioWorkerSource } from "./worker-source-reader.mjs";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
@@ -237,7 +238,7 @@ test("Create VO prefers operator-selected stills over place ranking", () => {
 });
 
 test("Worker advertises the idea timed-script route", async () => {
-  const worker = await readFile(path.join(here, "worker.js"), "utf8");
+  const worker = readStudioWorkerSource();
   const app = await readFile(path.join(here, "../studio-web/assets/app-item4-1008.js"), "utf8");
   const html = await readFile(path.join(here, "../studio-web/index.html"), "utf8");
   assert.match(worker, /isIdeaTimedScriptRoute/);

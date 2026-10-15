@@ -1,10 +1,11 @@
+import { readStudioWorkerSource } from "./worker-source-reader.mjs";
 import fs from "node:fs";
 import path from "node:path";
 import test from "node:test";
 import assert from "node:assert/strict";
 
 const here = path.dirname(new URL(import.meta.url).pathname);
-const worker = fs.readFileSync(path.join(here, "worker.js"), "utf8");
+const worker = readStudioWorkerSource();
 
 test("idea promotion reconciles successful side effects after transient handoff errors", () => {
   assert.match(worker, /0.10.618-mae-horizon-overflow/);

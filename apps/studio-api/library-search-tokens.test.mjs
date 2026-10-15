@@ -1,3 +1,4 @@
+import { readStudioWorkerSource } from "./worker-source-reader.mjs";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
@@ -7,7 +8,7 @@ import path from "path";
 const here = path.dirname(fileURLToPath(import.meta.url));
 
 test("assetLibraryFilterFormula uses token OR FIND for unquoted search", async () => {
-  const worker = await readFile(path.join(here, "worker.js"), "utf8");
+  const worker = readStudioWorkerSource();
   const start = worker.indexOf("function assetLibraryFilterFormula");
   assert.ok(start > 0);
   const fn = worker.slice(start, start + 1400);
