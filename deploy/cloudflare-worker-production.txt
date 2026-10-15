@@ -300,4 +300,6 @@ Deploy Worker 0.10.489-engagement-ledger. Shrink the engagement ledger so Chicag
 
 2026-10-15: Worker 0.10.617-balanced-four-week-slots. Each platform is balanced across the next four weeks. A full morning/afternoon/evening day uses that day's widest gap instead of stacking the next posts on today.
 
-2026-10-15: Worker 0.10.618-mae-horizon-overflow. Central MAE-first/balanced-overflow engine, STUDIO_SCHEDULE_HORIZON_DAYS, per platform×outputType occupancy, schedule-regen job, dynamic Factory/Pipeline approval scheduling.
+2026-10-15: Worker 0.10.619-factory-approve-story-bounce. Central MAE-first/balanced-overflow engine, STUDIO_SCHEDULE_HORIZON_DAYS, per platform×outputType occupancy, schedule-regen job, dynamic Factory/Pipeline approval scheduling.
+
+2026-10-15: Worker 0.10.619-factory-approve-story-bounce. Continuation re-fetches before opening Ready for Review so Approve cannot be stomped; approve-all retries Stories still rendering.

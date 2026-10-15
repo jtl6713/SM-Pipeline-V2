@@ -2168,6 +2168,16 @@ export async function studioProcessApproveAllJobSlice(env, jobId, options = {}) 
           continue;
         }
         if (!studioOutputReadyForPublishApproval(record)) {
+          const renderStatus = String(f(record, "Render_Status") || "").trim();
+          const stillRendering = outputStatus === "In Production"
+            || /^(?:Waiting in Render Queue|Ready for Render|Rendering|Queued)$/i.test(renderStatus);
+          // Stories often land in the batch a moment before Remotion finishes.
+          // Keep them pending so a later slice/cron retries instead of failing
+          // the row and leaving 1–2 Stories alone on Needs Eyes.
+          if (stillRendering) {
+            item.error = `waiting_for_render:${renderStatus || outputStatus || "In Production"}`;
+            continue;
+          }
           throw new HttpError(409, "This output is not ready for publishing approval");
         }
         const platform = String(f(record, "Platform") || "").trim();

@@ -7734,9 +7734,36 @@ export function studioOutputNeedsRemotionPackage(record) {
 export function studioOutputIsTerminalForContinuation(record) {
   const status = String(f(record, "Output_Status") || "");
   const publish = String(f(record, "Publish_Status") || "");
-  return /published/i.test(status) || /published/i.test(publish) || /approved for publishing/i.test(status);
+  const review = String(f(record, "Review_Status") || "");
+  // Review Approved must stop continuation even when Output_Status was raced
+  // back to Ready for Review (stale-RFR Stories after Approve All).
+  return /published/i.test(status)
+    || /published/i.test(publish)
+    || /approved for publishing/i.test(status)
+    || /^approved$/i.test(review);
 }
 /*__STUDIO_WORKER_END:studioOutputIsTerminalForContinuation__*/
+
+/**
+ * Re-fetch before opening Ready for Review so a concurrent Approve All cannot
+ * be stomped back to Needs Eyes (Review Approved + Output_Status RFR).
+ */
+export async function studioContinuationOpenReadyForReview(env, po, reason) {
+  const live = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, po.id).catch(() => po);
+  if (studioOutputIsTerminalForContinuation(live)) {
+    return { action: "stop", reason: "terminal" };
+  }
+  const status = String(f(live, "Output_Status") || "");
+  if (/^ready for review$/i.test(status)) {
+    return { action: "reviewable", reason: reason || "already_ready" };
+  }
+  await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, po.id, {
+    method: "PATCH",
+    body: JSON.stringify({ fields: { Output_Status: "Ready for Review" }, typecast: true }),
+  });
+  return { action: "opened_review", reason: reason || "opened_review" };
+}
+/*__STUDIO_WORKER_END:studioContinuationOpenReadyForReview__*/
 
 export function studioOutputWrongVideoSelectorPath(record) {
   const selection = String(f(record, "Asset_Selection_Status") || "");
@@ -7987,11 +8014,8 @@ export async function studioContinuationInspectOutput(env, po, cache) {
     }
     const status = String(f(po, "Output_Status") || "");
     if (!/^ready for review$/i.test(status) && (finalUrl || nativePhoto)) {
-      await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, po.id, {
-        method: "PATCH",
-        body: JSON.stringify({ fields: { Output_Status: "Ready for Review" }, typecast: true }),
-      }).catch(() => null);
-      return { action: "opened_review", reason: "finished_passthrough" };
+      const opened = await studioContinuationOpenReadyForReview(env, po, "finished_passthrough");
+      if (opened) return opened;
     }
     return { action: "reviewable", reason: "finished_passthrough" };
   }
@@ -8043,11 +8067,8 @@ export async function studioContinuationInspectOutput(env, po, cache) {
       await studioStampParentAiCoverOnOutput(env, po, readyContext.parent).catch(() => null);
     }
     if (!/^ready for review$/i.test(outputStatus)) {
-      await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, po.id, {
-        method: "PATCH",
-        body: JSON.stringify({ fields: { Output_Status: "Ready for Review" }, typecast: true }),
-      });
-      return { action: "opened_review", reason: "rendered_file" };
+      const opened = await studioContinuationOpenReadyForReview(env, po, "rendered_file");
+      if (opened) return opened;
     }
     return { action: "reviewable", reason: "rendered_file" };
   }

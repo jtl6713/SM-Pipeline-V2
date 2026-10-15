@@ -123,6 +123,16 @@ function isReadyForReview(row) {
   const state = String(row?.studio_state || "").trim().toLowerCase();
   const output = String(row?.output_status || "").trim().toLowerCase();
   const review = String(row?.review_status || "").trim().toLowerCase();
+  // Platform Outputs: studio_state alone can say Ready for Review while
+  // Output_Status is still In Production (Rendered file present). Approve All
+  // then 409s those Stories and they reappear alone after the mains clear
+  // (Content 841 FB Story 4559 during 2026-10-15 Approve Content).
+  if (row?.kind === "output") {
+    if (output === "in production" || output === "rendering" || output === "ready for render") return false;
+    if (output === "ready for review") return true;
+    if (review === "review sent" || review === "ready for review") return true;
+    return false;
+  }
   if (row?.lane === "review") return true;
   if (state === "ready for review") return true;
   if (output === "ready for review") return true;
@@ -199,6 +209,13 @@ function isRenderQueueActive(row) {
 export function isInFlightFactoryState(row) {
   const state = String(row?.studio_state || "").trim().toLowerCase();
   const render = String(row?.render_status || "").trim().toLowerCase();
+  const output = String(row?.output_status || "").trim().toLowerCase();
+  // Output_Status In Production wins even when studio_state already paints Ready
+  // for Review from a finished Remotion file — keep the card in Auto-high so
+  // Approve all does not claim it early.
+  if (row?.kind === "output" && (output === "in production" || output === "rendering" || output === "ready for render")) {
+    return true;
+  }
   if (state === "queued" || state === "preparing assets" || state === "trying again") return true;
   if (
     /waiting in render queue|ready for render/.test(state)
@@ -264,6 +281,9 @@ export function factoryCardFromRow(row, { lane = null, inPile = false } = {}) {
     profile_name: row.profile_name || "",
     profile_id: row.profile_id || null,
     studio_state: row.studio_state || "",
+    output_status: row.output_status || null,
+    review_status: row.review_status || null,
+    render_status: row.render_status || null,
     platform: row.platform || null,
     studio_output_type: row.studio_output_type || row.format || null,
     content_id: row.content_id || null,

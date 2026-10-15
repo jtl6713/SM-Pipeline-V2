@@ -79,9 +79,29 @@ test("Content 654 output 3431 stays In Flight while rendering despite Ready for 
   assert.equal(classifyFactoryLane(completed), "needs_eyes");
 });
 
+test("Content 841-style Story stays In Flight when studio_state is Ready but Output_Status is In Production", () => {
+  const prematureStory = {
+    id: "recDfMQX06SEMSNWV",
+    kind: "output",
+    output_id: 4559,
+    content_id: 841,
+    studio_state: "Ready for Review",
+    output_status: "In Production",
+    render_status: "Rendered",
+    final_file_url: "https://drive.google.com/file/d/example/view",
+    studio_output_type: "Story",
+    platform: "Facebook",
+  };
+  assert.equal(classifyFactoryLane(prematureStory), "auto_high");
+  assert.equal(classifyFactoryLane({
+    ...prematureStory,
+    output_status: "Ready for Review",
+  }), "needs_eyes");
+});
+
 test("classifyFactoryLane priority: manual > needs_eyes > needs_assets > auto_high", () => {
   assert.equal(classifyFactoryLane({ id: "rec1", lane: "stuck", stuck_kind: "produce_clip_mismatch" }), "manual");
-  assert.equal(classifyFactoryLane({ id: "rec2", studio_state: "Ready for Review", lane: "review" }), "needs_eyes");
+  assert.equal(classifyFactoryLane({ id: "rec2", kind: "output", studio_state: "Ready for Review", output_status: "Ready for Review", lane: "review" }), "needs_eyes");
   assert.equal(classifyFactoryLane({
     id: "rec3",
     kind: "idea",
@@ -226,7 +246,7 @@ test("classifyFactoryLane priority: manual > needs_eyes > needs_assets > auto_hi
 test("partitionFactoryLanes puts pile in needs_assets and leaves candidates aside", () => {
   const rows = [
     { id: "recManual1", kind: "output", lane: "stuck", stuck_kind: "x", title: "Stuck", studio_state: "Blocked" },
-    { id: "recEyes1", kind: "output", lane: "review", studio_state: "Ready for Review", title: "Review me" },
+    { id: "recEyes1", kind: "output", lane: "review", studio_state: "Ready for Review", output_status: "Ready for Review", title: "Review me" },
     { id: "recAuto1", kind: "request", lane: "active", request_status: "Promoted", studio_state: "Producing · audio", title: "Auto" },
     { id: "recAsset1", kind: "idea", photo_wait_status: "Waiting", studio_state: "Waiting", title: "Need stills" },
     { id: "recAsset2", kind: "idea", photo_wait_status: "Waiting", studio_state: "Waiting", title: "Also need" },
@@ -301,6 +321,10 @@ test("Worker exposes factory desk routes and version flag", async () => {
   );
   assert.match(approveSlice, /const recheckBestSlot = !markerIso/);
   assert.match(approveSlice, /studioOccupiedForLane/);
+  assert.match(approveSlice, /waiting_for_render:/);
+  assert.match(approveSlice, /stillRendering/);
+  assert.match(worker, /async function studioContinuationOpenReadyForReview/);
+  assert.match(worker, /\|\| \/\^approved\$\/i\.test\(review\)/);
   assert.match(worker, /studio_factory_recheck_schedule_v1:\s*true/);
   assert.match(approveFn, /forceWrite: publishNowImmediate/);
   assert.match(worker, /async function studioHealApprovedMissingSchedule/);
@@ -333,7 +357,7 @@ test("Worker exposes factory desk routes and version flag", async () => {
   assert.match(worker, /Do_Not_Publish: true/);
   assert.match(worker, /revision_approve/);
   assert.match(worker, /productionRequestRevisionOpen\(requestRecord\)/);
-  assert.match(worker, /0.10.618-mae-horizon-overflow/);
+  assert.match(worker, /0.10.619-factory-approve-story-bounce/);
   assert.match(worker, /studio_factory_inflight_blocked_parent_v1:\s*true/);
   assert.match(worker, /studio_factory_desk_v1:\s*true/);
   assert.match(worker, /studio_factory_desk_preview_v1:\s*true/);
@@ -343,7 +367,7 @@ test("Worker allows Factory Desk POST through Phase 2A gate", async () => {
   const worker = readStudioWorkerSource();
   assert.match(worker, /const isFactoryDeskWrite = isFactoryDeskRoute && request\.method === "POST"/);
   assert.match(worker, /isFactoryDeskWrite \|/);
-  assert.match(worker, /version: "0.10.618-mae-horizon-overflow"/);
+  assert.match(worker, /version: "0.10.619-factory-approve-story-bounce"/);
   assert.match(worker, /studio_factory_desk_write_v1: true/);
 });
 
@@ -352,5 +376,5 @@ test("Worker allows Supabase sync POST through Phase 2A gate", async () => {
   assert.match(worker, /const isOpsSupabaseSyncWrite = isOpsSupabaseSyncRoute && request\.method === "POST"/);
   assert.match(worker, /isOpsSupabaseSyncWrite \|/);
   assert.match(worker, /studio_supabase_sync_gate_v1: true/);
-  assert.match(worker, /version: "0.10.618-mae-horizon-overflow"/);
+  assert.match(worker, /version: "0.10.619-factory-approve-story-bounce"/);
 });

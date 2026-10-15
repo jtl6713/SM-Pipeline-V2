@@ -1000,7 +1000,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.618-mae-horizon-overflow",
+          version: "0.10.619-factory-approve-story-bounce",
           studio_supabase_pipeline_reads_v1: true,
           studio_supabase_sync_gate_v1: true,
           studio_supabase_phase3_stable_v1: true,
@@ -4832,6 +4832,7 @@ let productionCadencePublishHoldUntil = 0;
 /*__STUDIO_WORKER_EXTRACT:studioContinuationApplyInspectAction__*/
 /*__STUDIO_WORKER_EXTRACT:studioOutputNeedsRemotionPackage__*/
 /*__STUDIO_WORKER_EXTRACT:studioOutputIsTerminalForContinuation__*/
+/*__STUDIO_WORKER_EXTRACT:studioContinuationOpenReadyForReview__*/
 /*__STUDIO_WORKER_EXTRACT:studioOutputWrongVideoSelectorPath__*/
 /*__STUDIO_WORKER_EXTRACT:studioContinuationClearRetryFields__*/
 /*__STUDIO_WORKER_EXTRACT:resetEmptyP3RemotionHandoffForR2__*/

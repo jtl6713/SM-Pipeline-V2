@@ -94,7 +94,15 @@
 
   function canReviewActions(card, { pile = false, candidate = false } = {}) {
     if (pile || candidate) return false;
-    return card?.kind === "output" && /ready for review/i.test(String(card.studio_state || ""));
+    if (card?.kind !== "output") return false;
+    // studio_state can paint Ready for Review while Output_Status is still
+    // In Production. Approve all must only claim Airtable-ready rows.
+    const output = String(card.output_status || "").trim().toLowerCase();
+    const review = String(card.review_status || "").trim().toLowerCase();
+    if (output === "in production" || output === "rendering" || output === "ready for render") return false;
+    if (output === "ready for review") return true;
+    if (review === "review sent" || review === "ready for review") return true;
+    return /ready for review/i.test(String(card.studio_state || ""));
   }
 
   function canDelete(card, { candidate = false } = {}) {
@@ -721,9 +729,17 @@
     const leftoverStories = leftover.filter(isStoryOutputCard).length;
     let message = approveAllProgressText(finished);
     if (leftover.length) {
-      message += leftoverStories
-        ? ` · ${leftoverStories} Stor${leftoverStories === 1 ? "y" : "ies"} still need eyes (finished after this batch)`
-        : ` · ${leftover.length} sibling${leftover.length === 1 ? "" : "s"} still need eyes`;
+      const failedItems = Array.isArray(finished?.failed) ? finished.failed : [];
+      const leftoverFailed = leftover.filter((card) => failedItems.some((row) => row.id === card.id)).length;
+      if (leftoverFailed) {
+        message += leftoverStories
+          ? ` · ${leftoverStories} Stor${leftoverStories === 1 ? "y" : "ies"} still need eyes (approval did not stick)`
+          : ` · ${leftover.length} still need eyes (approval did not stick)`;
+      } else {
+        message += leftoverStories
+          ? ` · ${leftoverStories} Stor${leftoverStories === 1 ? "y" : "ies"} still need eyes (not ready yet — wait, then Approve all again)`
+          : ` · ${leftover.length} sibling${leftover.length === 1 ? "" : "s"} still need eyes`;
+      }
     }
     setStatus(message, failed > 0 || leftover.length > 0);
     if (failed > 0) window.alert(`Factory Approve all finished with failures:\n${approveAllProgressText(finished)}`);

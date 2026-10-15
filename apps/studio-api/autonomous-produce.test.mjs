@@ -903,7 +903,7 @@ test("Worker stamps photo-ready ideas and drains the 30m SLA on light ticks", as
   const path = await import("node:path");
   const here = path.dirname(fileURLToPath(import.meta.url));
   const worker = readStudioWorkerSource();
-  assert.match(worker, /version: "0.10.618-mae-horizon-overflow"/);
+  assert.match(worker, /version: "0.10.619-factory-approve-story-bounce"/);
   assert.match(worker, /studio_autonomous_ten_ideas_anyway_v1: true/);
   assert.match(worker, /planAutonomousHourIdeas/);
   const hourFill = worker.slice(

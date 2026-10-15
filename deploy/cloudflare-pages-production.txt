@@ -351,8 +351,10 @@ UI 0.6.607 hashtag mismatch warning only; approval no longer blocked.
 
 2026-10-15: UI 0.6.690-mae-horizon-overflow. MAE-first Day1→DayX, balanced overflow, configurable 30-day horizon, output-type lanes, schedule-on-approval, durable regen progress.
 
-2026-10-15: UI 0.6.693-factory-approve-wait-stories. Pipeline calendar shows only scheduled posts; Ready-to-schedule tray removed (schedule assigned at Approve).
+2026-10-15: UI 0.6.694-factory-approve-story-bounce. Pipeline calendar shows only scheduled posts; Ready-to-schedule tray removed (schedule assigned at Approve).
 
-2026-10-15: UI 0.6.693-factory-approve-wait-stories. Factory: Needs eyes first; all four streams start collapsed.
+2026-10-15: UI 0.6.694-factory-approve-story-bounce. Factory: Needs eyes first; all four streams start collapsed.
 
-2026-10-15: UI 0.6.693-factory-approve-wait-stories. Factory Approve all waits for sibling Stories still rendering so they do not reappear alone after 4 of 4.
+2026-10-15: UI 0.6.694-factory-approve-story-bounce. Factory Approve all waits for sibling Stories still rendering so they do not reappear alone after 4 of 4.
+
+2026-10-15: UI 0.6.694-factory-approve-story-bounce. Factory Approve all only claims Airtable Ready-for-Review rows; premature Stories stay In Flight so they do not bounce back alone.

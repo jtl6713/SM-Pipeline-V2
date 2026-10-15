@@ -18,7 +18,7 @@ test("Worker heal auto-starts Prepare for timeline drafts stuck at None", () => 
   assert.match(worker, /item4HealTimelineAutoPrepare\(env, ctx\)/);
   assert.match(worker, /Studio_Variant_Status\}="None"/);
   assert.match(worker, /FIND\("idea-vo-timeline=",\{Production_Notes\}\)/);
-  assert.match(worker, /version: "0.10.618-mae-horizon-overflow"/);
+  assert.match(worker, /version: "0.10.619-factory-approve-story-bounce"/);
 });
 
 test("Production UI kicks Prepare once for timeline drafts with Ready plan and None variants", () => {
@@ -27,7 +27,7 @@ test("Production UI kicks Prepare once for timeline drafts with Ready plan and N
   assert.match(app, /function maybeAutoPrepareTimelineVariants/);
   assert.match(app, /maybeAutoPrepareTimelineVariants\(status\)/);
   assert.match(app, /prepareItem4Variants\(\{ autoRetry: false \}\)/);
-  assert.match(app, /BUILD_ID = "item4-0.6.693-factory-approve-wait-stories"/);
-  assert.match(html, /app-item4-1008\.js\?v=0.6.693-factory-approve-wait-stories/);
-  assert.match(html, /UI build 0.6.693/);
+  assert.match(app, /BUILD_ID = "item4-0.6.694-factory-approve-story-bounce"/);
+  assert.match(html, /app-item4-1008\.js\?v=0.6.694-factory-approve-story-bounce/);
+  assert.match(html, /UI build 0.6.694/);
 });
