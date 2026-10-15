@@ -1,3 +1,4 @@
+import { readStudioWorkerSource } from "./worker-source-reader.mjs";
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
@@ -5,7 +6,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-const worker = fs.readFileSync(path.join(here, "worker.js"), "utf8");
+const worker = readStudioWorkerSource();
 const m = worker.match(/const OUTPUT_LIST_FIELDS = \[([\s\S]*?)\];/);
 const parsed = m ? [...m[1].matchAll(/^\s*"([^"]+)",/gm)].map(item => item[1]) : [];
 // Platform Outputs schema names verified against live Airtable on 2026-10-11.

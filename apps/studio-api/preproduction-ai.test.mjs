@@ -1,3 +1,4 @@
+import { readStudioWorkerSource } from "./worker-source-reader.mjs";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
@@ -8,7 +9,7 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const workerPath = path.join(here, "worker.js");
 
 test("Worker exposes pre-production AI master generation route", async () => {
-  const source = await readFile(workerPath, "utf8");
+  const source = readStudioWorkerSource();
   assert.match(source, /generate-ai-masters/);
   assert.match(source, /async function generateItem4PreProductionAiMaster/);
   assert.match(source, /AI images can only be generated while this request is editable/);
@@ -18,12 +19,12 @@ test("Worker exposes pre-production AI master generation route", async () => {
 });
 
 test("pre-production AI POST route is admitted by the global method allowlist", async () => {
-  const source = await readFile(workerPath, "utf8");
+  const source = readStudioWorkerSource();
   assert.match(source, /isProductionRequestAiMastersRoute && request\.method === "POST"/);
 });
 
 test("pre-production AI generation uses the pipeline runner image job", async () => {
-  const source = await readFile(workerPath, "utf8");
+  const source = readStudioWorkerSource();
   assert.match(source, /\/jobs\/studio-ai-image/);
   assert.match(source, /PIPELINE_RUNNER_URL/);
   assert.match(source, /PIPELINE_RUNNER_SHARED_SECRET/);
@@ -32,7 +33,7 @@ test("pre-production AI generation uses the pipeline runner image job", async ()
 });
 
 test("pre-production AI assets persist on the Production Request before approval", async () => {
-  const source = await readFile(workerPath, "utf8");
+  const source = readStudioWorkerSource();
   const start = source.indexOf("async function generateItem4PreProductionAiMaster");
   const end = source.indexOf("async function item4SeedAiCarouselSlides", start);
   assert.ok(start >= 0 && end > start);
@@ -46,7 +47,7 @@ test("pre-production AI assets persist on the Production Request before approval
 
 
 test("pre-production AI supports explicit additive targets without a Production asset-pool cap", async () => {
-  const source = await readFile(workerPath, "utf8");
+  const source = readStudioWorkerSource();
   const start = source.indexOf("async function generateItem4PreProductionAiMaster");
   const end = source.indexOf("async function item4SeedAiCarouselSlides", start);
   assert.ok(start >= 0 && end > start);
@@ -58,7 +59,7 @@ test("pre-production AI supports explicit additive targets without a Production 
 });
 
 test("user prompt guidance takes priority while preserving Studio context", async () => {
-  const source = await readFile(workerPath, "utf8");
+  const source = readStudioWorkerSource();
   const start = source.indexOf("async function generateItem4PreProductionAiMaster");
   const end = source.indexOf("async function item4SeedAiCarouselSlides", start);
   assert.ok(start >= 0 && end > start);
@@ -71,7 +72,7 @@ test("user prompt guidance takes priority while preserving Studio context", asyn
 
 
 test("deleting an AI master disables automatic regeneration and clears stale links", async () => {
-  const source = await readFile(workerPath, "utf8");
+  const source = readStudioWorkerSource();
   const start = source.indexOf("async function deleteItem4MasterAsset");
   const end = source.indexOf("async function uploadItem4ClipPoster", start);
   assert.ok(start >= 0 && end > start);
@@ -87,7 +88,7 @@ test("deleting an AI master disables automatic regeneration and clears stale lin
 
 
 test("Production AI inherits the Production profile and reuses Asset Manager numbering", async () => {
-  const source = await readFile(workerPath, "utf8");
+  const source = readStudioWorkerSource();
   const start = source.indexOf("async function generateItem4PreProductionAiMaster");
   const end = source.indexOf("async function item4SeedAiCarouselSlides", start);
   assert.ok(start >= 0 && end > start);
@@ -111,7 +112,7 @@ test("Production AI inherits the Production profile and reuses Asset Manager num
 });
 
 test("AI masters stamp and backfill Content_Profile onto Media Assets", async () => {
-  const source = await readFile(workerPath, "utf8");
+  const source = readStudioWorkerSource();
 
   const ingestStart = source.indexOf("async function item4IngestAiSlideAsMaster");
   const ingestEnd = source.indexOf("async function item4EnsureVariantQueueForReadyMasters", ingestStart);
@@ -129,7 +130,7 @@ test("AI masters stamp and backfill Content_Profile onto Media Assets", async ()
 });
 
 test("Production profile resolution falls back to the linked Idea", async () => {
-  const source = await readFile(workerPath, "utf8");
+  const source = readStudioWorkerSource();
   const start = source.indexOf("async function item4ProductionProfileRecord");
   const end = source.indexOf("function studioAssetHasChicagoWatermark", start);
   assert.ok(start >= 0 && end > start);
@@ -141,7 +142,7 @@ test("Production profile resolution falls back to the linked Idea", async () => 
 });
 
 test("background master reconciliation cannot resurrect a deleted Production asset", async () => {
-  const source = await readFile(workerPath, "utf8");
+  const source = readStudioWorkerSource();
   const start = source.indexOf("async function item4ReconcileMasterAuthority");
   const end = source.indexOf("async function item4UpdateRequestState", start);
   assert.ok(start >= 0 && end > start);
@@ -156,7 +157,7 @@ test("background master reconciliation cannot resurrect a deleted Production ass
 });
 
 test("an AI delete that lands during image generation wins before commit", async () => {
-  const source = await readFile(workerPath, "utf8");
+  const source = readStudioWorkerSource();
   const start = source.indexOf("async function generateItem4PreProductionAiMaster");
   const end = source.indexOf("async function item4SeedAiCarouselSlides", start);
   assert.ok(start >= 0 && end > start);

@@ -1,3 +1,4 @@
+import { readStudioWorkerSource } from "./worker-source-reader.mjs";
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
@@ -18,7 +19,7 @@ import {
 } from "./render-queue.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-const worker = fs.readFileSync(path.join(here, "worker.js"), "utf8");
+const worker = readStudioWorkerSource();
 const app = fs.readFileSync(path.join(here, "../studio-web/assets/app-item4-1008.js"), "utf8");
 const html = fs.readFileSync(path.join(here, "../studio-web/index.html"), "utf8");
 const r4 = fs.readFileSync(path.join(here, "../../services/pipeline-runner/r4/processor.py"), "utf8");

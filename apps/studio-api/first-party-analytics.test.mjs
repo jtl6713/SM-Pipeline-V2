@@ -1,3 +1,4 @@
+import { readStudioWorkerSource } from "./worker-source-reader.mjs";
 import assert from "node:assert/strict";
 import test from "node:test";
 import fs from "node:fs";
@@ -121,7 +122,7 @@ test("Facebook owned analytics works for video-style objects without reactions",
 });
 
 
-const workerSource = fs.readFileSync(new URL("./worker.js", import.meta.url), "utf8");
+const workerSource = readStudioWorkerSource();
 
 test("connection status helper does not reference sweep-local counters", () => {
   const start = workerSource.indexOf("function studioInsightsLatestSyncByPlatform(rows) {");

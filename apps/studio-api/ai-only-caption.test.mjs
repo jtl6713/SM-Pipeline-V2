@@ -1,3 +1,4 @@
+import { readStudioWorkerSource } from "./worker-source-reader.mjs";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
@@ -6,7 +7,7 @@ import { fileURLToPath } from "node:url";
 import vm from "node:vm";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-const worker = fs.readFileSync(path.join(here, "worker.js"), "utf8");
+const worker = readStudioWorkerSource();
 
 function loadHelpers() {
   const contextStart = worker.indexOf("function item4CaptionContextKey");

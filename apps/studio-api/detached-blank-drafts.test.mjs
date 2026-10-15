@@ -1,3 +1,4 @@
+import { readStudioWorkerSource } from "./worker-source-reader.mjs";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
@@ -7,7 +8,7 @@ import path from "node:path";
 const here = path.dirname(fileURLToPath(import.meta.url));
 
 test("Production Request list excludes detached blank Drafts", async () => {
-  const source = await readFile(path.join(here, "worker.js"), "utf8");
+  const source = readStudioWorkerSource();
   const start = source.indexOf("async function listProductionRequests");
   const end = source.indexOf("async function", start + 20);
   const fn = source.slice(start, end > start ? end : start + 12000);

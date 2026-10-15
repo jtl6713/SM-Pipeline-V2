@@ -1,3 +1,4 @@
+import { readStudioWorkerSource } from "./worker-source-reader.mjs";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
@@ -7,7 +8,7 @@ import path from "node:path";
 const here = path.dirname(fileURLToPath(import.meta.url));
 
 test("Pipeline open-pack uses the stored Studio_Pipeline_Open index", async () => {
-  const worker = await readFile(path.join(here, "worker.js"), "utf8");
+  const worker = readStudioWorkerSource();
   assert.match(worker, /studio_pipeline_open_index_v1: true/);
   assert.match(worker, /const STUDIO_PIPELINE_OPEN_FIELD_FORMULA = "\{Studio_Pipeline_Open\}=1"/);
   assert.match(worker, /legacy \? STUDIO_PIPELINE_OPEN_LEGACY_FORMULA : STUDIO_PIPELINE_OPEN_FIELD_FORMULA/);

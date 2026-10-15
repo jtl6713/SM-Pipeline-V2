@@ -1,3 +1,4 @@
+import { readStudioWorkerSource } from "./worker-source-reader.mjs";
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
@@ -6,7 +7,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-const code = fs.readFileSync(path.join(here, "worker.js"), "utf8");
+const code = readStudioWorkerSource();
 const prefix = "https://media.chicagoshining.com/";
 
 test("Pipeline keeps lightweight native photo completeness evidence", () => {

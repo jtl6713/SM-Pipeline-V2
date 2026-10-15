@@ -1,3 +1,4 @@
+import { readStudioWorkerSource } from "./worker-source-reader.mjs";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
@@ -5,7 +6,7 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-const source = fs.readFileSync(path.join(here, "worker.js"), "utf8");
+const source = readStudioWorkerSource();
 const start = source.indexOf("async function getItem4WorkspaceStatus(");
 const end = source.indexOf("\nasync function ", start + 25);
 const handler = source.slice(start,end);

@@ -1,3 +1,4 @@
+import { readStudioWorkerSource } from "./worker-source-reader.mjs";
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
@@ -29,7 +30,7 @@ import {
 import { sortRenderQueueCandidates, assignRenderQueuePositions } from "./render-queue.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-const worker = fs.readFileSync(path.join(here, "worker.js"), "utf8");
+const worker = readStudioWorkerSource();
 const app = fs.readFileSync(path.join(here, "../studio-web/assets/app-item4-1008.js"), "utf8");
 const html = fs.readFileSync(path.join(here, "../studio-web/index.html"), "utf8");
 const css = fs.readFileSync(path.join(here, "../studio-web/assets/styles-phase7-0621.css"), "utf8");

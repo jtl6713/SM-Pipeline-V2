@@ -1,0 +1,54 @@
+name: Validate Studio Worker Source Split
+on:
+  push:
+    branches:
+      - refactor/split-studio-api-worker-20261015
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check module sizes and JS syntax
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          names = [Path('apps/studio-api/worker.js'), *sorted(Path('apps/studio-api').glob('worker-functions-*.mjs'))]
+          assert len(names)==5, [str(x) for x in names]
+          for p in names:
+              size=p.stat().st_size
+              print(f'{p}: {size} bytes')
+              assert 0<size<1000000, f'{p} exceeds the GitHub Contents API limit'
+          PY
+          node --check apps/studio-api/worker.js
+          for file in apps/studio-api/worker-functions-*.mjs; do node --check "$file"; done
+      - name: Run existing Studio API tests
+        shell: bash
+        run: node --test apps/studio-api/*.test.mjs
+      - name: Wrangler bundle dry run (no deploy)
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/studio-split-validate
+          cp apps/studio-api/worker.js /tmp/studio-split-validate/
+          cp apps/studio-api/*.mjs /tmp/studio-split-validate/
+          rm -f /tmp/studio-split-validate/*.test.mjs
+          cd /tmp/studio-split-validate
+          npm init -y >/dev/null
+          npm install --no-save wrangler@4.123.0
+          cat > wrangler.jsonc <<'EOF'
+          {
+            "name": "studio-worker-split-validation",
+            "main": "worker.js",
+            "compatibility_date": "2026-08-02",
+            "workers_dev": false,
+            "r2_buckets": [{"binding":"STUDIO_MEDIA","bucket_name":"dummy"}]
+          }
+          EOF
+          ./node_modules/.bin/wrangler deploy --config wrangler.jsonc --dry-run

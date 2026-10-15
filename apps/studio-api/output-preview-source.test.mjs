@@ -1,3 +1,4 @@
+import { readStudioWorkerSource } from "./worker-source-reader.mjs";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
@@ -7,7 +8,7 @@ import { fileURLToPath } from "node:url";
 import { item4UrlIsRenderServerVideo } from "./output-preview-source.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-const worker = fs.readFileSync(path.join(here, "worker.js"), "utf8");
+const worker = readStudioWorkerSource();
 const app = fs.readFileSync(path.join(here, "../studio-web/assets/app-item4-1008.js"), "utf8");
 
 const RENDER_MP4 = "https://render.chicagoshining.com/out/platform-output-2487.mp4";

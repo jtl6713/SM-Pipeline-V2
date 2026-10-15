@@ -40,7 +40,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          for f in worker.js desk-inventory.mjs quality-checks.mjs asset-library.mjs operations-oversized.mjs; do
+          for f in worker.js worker-functions-01.mjs worker-functions-02.mjs worker-functions-03.mjs worker-functions-04.mjs desk-inventory.mjs quality-checks.mjs asset-library.mjs operations-oversized.mjs; do
             if [[ ! -s "apps/studio-api/$f" ]]; then
               echo "missing or empty: apps/studio-api/$f" >&2
               ls -la apps/studio-api >&2 || true
@@ -204,11 +204,11 @@ jobs:
               ]
               missing = [marker.decode() for marker in markers if marker not in live]
               bundled = live.startswith(b'var __defProp') or b'// worker.js' in live[:500]
-              # Wrangler inlines ESM imports (engagement, vibe-cut, …) so the live
-              # module is larger than apps/studio-api/worker.js alone. Allow 30% /
-              # 512KB headroom; marker checks still catch a wrong deploy.
-              size_ok = abs(len(live) - len(repo)) <= max(int(len(repo) * 0.30), 512000)
-              print(f'repo_bytes={len(repo)} live_bytes={len(live)} bundled={bundled} size_ok={size_ok} missing={missing}')
+              # The entry file is now split into ESM function modules. Compare the
+              # bundled live size to the combined source sizes, not the entry alone.
+              source_bytes = len(repo) + sum(p.stat().st_size for p in Path('apps/studio-api').glob('worker-functions-*.mjs'))
+              size_ok = abs(len(live) - source_bytes) <= max(int(source_bytes * 0.30), 512000)
+              print(f'repo_bytes={len(repo)} modular_source_bytes={source_bytes} live_bytes={len(live)} bundled={bundled} size_ok={size_ok} missing={missing}')
               if bundled and size_ok and not missing:
                   print('active_source_byte_match=WRANGLER_BUNDLE_EQUIVALENT')
               else:

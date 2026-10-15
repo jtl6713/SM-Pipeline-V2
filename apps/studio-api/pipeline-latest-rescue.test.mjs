@@ -1,8 +1,9 @@
+import { readStudioWorkerSource } from "./worker-source-reader.mjs";
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import vm from "node:vm";
-const worker=fs.readFileSync(new URL("./worker.js",import.meta.url),"utf8");
+const worker=readStudioWorkerSource();
 const app=fs.readFileSync(new URL("../studio-web/assets/app-item4-1008.js",import.meta.url),"utf8");
 
 test("Worker latest mode fetches one live Airtable page before history snapshot",()=>{

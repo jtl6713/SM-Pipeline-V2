@@ -1,3 +1,4 @@
+import { readStudioWorkerSource } from "./worker-source-reader.mjs";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
@@ -7,7 +8,7 @@ import path from "node:path";
 const here = path.dirname(fileURLToPath(import.meta.url));
 
 test("Production slide-count validation accepts attached still counts beyond 20", async () => {
-  const worker = await readFile(path.join(here, "worker.js"), "utf8");
+  const worker = readStudioWorkerSource();
   const start = worker.indexOf("async function cleanProductionRequestPayload");
   const end = worker.indexOf("function productionRequestFields", start);
   assert.ok(start >= 0 && end > start);
@@ -19,7 +20,7 @@ test("Production slide-count validation accepts attached still counts beyond 20"
 
 
 test("bridge preflight accepts carousel counts above 20", async () => {
-  const worker = await readFile(path.join(here, "worker.js"), "utf8");
+  const worker = readStudioWorkerSource();
   const start = worker.indexOf("function productionRequestCompatibilityIssues");
   const end = worker.indexOf("function productionRequestFields", start);
   const handler = worker.slice(start, end > start ? end : start + 12000);
@@ -33,7 +34,7 @@ test("bridge preflight accepts carousel counts above 20", async () => {
 
 
 test("approve path has no internal 20-slide ceiling", async () => {
-  const worker = await readFile(path.join(here, "worker.js"), "utf8");
+  const worker = readStudioWorkerSource();
 
   const promoteStart = worker.indexOf("function cleanPromotionPayload");
   const promoteEnd = worker.indexOf("function promotionWebhookUrl", promoteStart);

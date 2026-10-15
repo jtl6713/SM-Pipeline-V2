@@ -1,3 +1,4 @@
+import { readStudioWorkerSource } from "./worker-source-reader.mjs";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
@@ -273,7 +274,7 @@ test("factoryCardFromRow exposes authenticated preview path for Ready for Review
 });
 
 test("Worker exposes factory desk routes and version flag", async () => {
-  const worker = await readFile(path.join(here, "worker.js"), "utf8");
+  const worker = readStudioWorkerSource();
   assert.match(worker, /\/api\/factory\/desk/);
   assert.match(worker, /FACTORY_DESK_KEY/);
   assert.match(worker, /getFactoryDesk/);
@@ -339,7 +340,7 @@ test("Worker exposes factory desk routes and version flag", async () => {
 });
 
 test("Worker allows Factory Desk POST through Phase 2A gate", async () => {
-  const worker = await readFile(path.join(here, "worker.js"), "utf8");
+  const worker = readStudioWorkerSource();
   assert.match(worker, /const isFactoryDeskWrite = isFactoryDeskRoute && request\.method === "POST"/);
   assert.match(worker, /isFactoryDeskWrite \|/);
   assert.match(worker, /version: "0.10.618-mae-horizon-overflow"/);
@@ -347,7 +348,7 @@ test("Worker allows Factory Desk POST through Phase 2A gate", async () => {
 });
 
 test("Worker allows Supabase sync POST through Phase 2A gate", async () => {
-  const worker = await readFile(path.join(here, "worker.js"), "utf8");
+  const worker = readStudioWorkerSource();
   assert.match(worker, /const isOpsSupabaseSyncWrite = isOpsSupabaseSyncRoute && request\.method === "POST"/);
   assert.match(worker, /isOpsSupabaseSyncWrite \|/);
   assert.match(worker, /studio_supabase_sync_gate_v1: true/);

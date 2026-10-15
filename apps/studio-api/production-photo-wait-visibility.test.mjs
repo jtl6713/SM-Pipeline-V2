@@ -1,9 +1,10 @@
+import { readStudioWorkerSource } from "./worker-source-reader.mjs";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import vm from "node:vm";
 
-const worker = readFileSync(new URL("./worker.js", import.meta.url), "utf8");
+const worker = readStudioWorkerSource();
 const start = worker.indexOf("function productionRequestPhotoWaitHidden(");
 const end = worker.indexOf("\nasync function listProductionRequests(", start);
 assert.ok(start > 0 && end > start, "Worker must include the standalone photo-wait visibility guard");

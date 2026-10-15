@@ -1,3 +1,4 @@
+import { readStudioWorkerSource } from "./worker-source-reader.mjs";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import test from "node:test";
@@ -144,7 +145,7 @@ test("Airtable Selected_Assets_JSON 422 is produce_stamp_422, not a Worker resum
   assert.match(blocked.diagnosis, /100,000/);
   assert.equal(deskRecoverableEscalatedError(bare), false);
   assert.ok(CLASSIFIER_KINDS.includes("produce_stamp_422"));
-  const worker = fs.readFileSync(new URL("./worker.js", import.meta.url), "utf8");
+  const worker = readStudioWorkerSource();
   assert.match(worker, /skipped: "produce_stamp_422"/);
   assert.match(worker, /isProduceStamp422Error\(blockError\)/);
   assert.match(worker, /isProduceStamp422Error\(err\)/);

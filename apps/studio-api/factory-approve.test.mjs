@@ -1,8 +1,9 @@
+import { readStudioWorkerSource } from "./worker-source-reader.mjs";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 
-const worker = await readFile(new URL("./worker.js", import.meta.url), "utf8");
+const worker = readStudioWorkerSource();
 const start = worker.indexOf("async function factoryApproveOutput(");
 const end = worker.indexOf("// Factory revision feedback", start);
 assert.ok(start > 0 && end > start, "Factory approval implementation exists");
