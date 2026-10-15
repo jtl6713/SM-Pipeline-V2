@@ -9,6 +9,11 @@ export const AUTONOMOUS_SCHEDULED_TARGET = 200;
 export const AUTONOMOUS_SCHEDULED_SKIP_ABOVE = 209;
 /** Distinct-subject ideas to open per city per Chicago hour while Scheduled is under target. */
 export const AUTONOMOUS_IDEAS_PER_HOUR = 10;
+/**
+ * Hard ceiling on unpromoted Idea Candidates across all cities.
+ * Scheduled-target refill (even under 200) must not open more than this.
+ */
+export const AUTONOMOUS_OPEN_IDEAS_CAP = 50;
 /** Create-loop budget per city, starting after the library scan. The old 45s cap included the scan and stopped at one idea. */
 export const AUTONOMOUS_CITY_CREATE_MS = 180000;
 /** Picks allowed while that clock is running. The 7pm hour stopped at 12, with 1–2 ideas saved. */
@@ -169,6 +174,32 @@ export function autonomousProfileNeedsScheduledRefill(
   target = AUTONOMOUS_SCHEDULED_TARGET,
 ) {
   return autonomousScheduledBand(scheduledTotal, target) === "refill";
+}
+
+/** How many new ideas may still be opened before hitting the global open-ideas cap. */
+export function autonomousOpenIdeasRoom(openCount, cap = AUTONOMOUS_OPEN_IDEAS_CAP) {
+  const open = Math.max(0, Number(openCount) || 0);
+  const floor = Math.max(1, Number(cap) || AUTONOMOUS_OPEN_IDEAS_CAP);
+  return Math.max(0, floor - open);
+}
+
+export function autonomousOpenIdeasAtCap(openCount, cap = AUTONOMOUS_OPEN_IDEAS_CAP) {
+  return autonomousOpenIdeasRoom(openCount, cap) <= 0;
+}
+
+/**
+ * Remaining create budget for this harvest pass after ideas already stamped
+ * in the same hour (openCount is the pre-pass Airtable count).
+ */
+export function autonomousOpenIdeasCreateBudget(
+  openCount,
+  alreadyCreated = 0,
+  cap = AUTONOMOUS_OPEN_IDEAS_CAP,
+) {
+  return Math.max(
+    0,
+    autonomousOpenIdeasRoom(openCount, cap) - Math.max(0, Number(alreadyCreated) || 0),
+  );
 }
 
 export function autonomousScheduledDeficit(

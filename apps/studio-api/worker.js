@@ -154,6 +154,7 @@ import {
   AUTONOMOUS_CITY_CREATE_MS,
   AUTONOMOUS_IDEAS_PER_HOUR,
   AUTONOMOUS_LIBRARY_SCAN_CAP,
+  AUTONOMOUS_OPEN_IDEAS_CAP,
   AUTONOMOUS_RELATED_STILL_MIN,
   AUTONOMOUS_NEWS_FEEDS,
   AUTONOMOUS_SCHEDULED_SKIP_ABOVE,
@@ -176,6 +177,9 @@ import {
   autonomousRefillScoresFromOverview,
   autonomousAtTopOfHour,
   autonomousClockForCron,
+  autonomousOpenIdeasAtCap,
+  autonomousOpenIdeasCreateBudget,
+  autonomousOpenIdeasRoom,
   autonomousRefillSlot,
   mergeAutonomousHourProgress,
   pickAutonomousEnabledProfile,
@@ -722,7 +726,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.611-supabase-approve-writethrough",
+          version: "0.10.612-open-ideas-cap",
           studio_supabase_pipeline_reads_v1: true,
           studio_supabase_sync_gate_v1: true,
           studio_supabase_phase3_stable_v1: true,
@@ -768,6 +772,7 @@ export default {
           studio_auto_compress_v1: true,
           studio_autonomous_produce_v1: true,
           studio_autonomous_scheduled_target_v1: true,
+          studio_autonomous_open_ideas_cap_v1: true,
           studio_autonomous_ten_per_hour_v1: true,
           studio_autonomous_cron_minute_v1: true,
           studio_autonomous_hour_create_budget_v1: true,
@@ -44591,11 +44596,31 @@ async function parkAutonomousResumeDraft(env, requestRecord, reason) {
 }
 
 /**
+ * Unpromoted Idea Candidates that still clog Factory / Ideas.
+ * Rejected and On Hold do not count toward the open-ideas cap.
+ */
+const AUTONOMOUS_OPEN_IDEAS_FORMULA =
+  "AND({Promoted_Content_Record_ID}=BLANK(),{Test_Run_ID}=BLANK(),{Candidate_Status}!='Rejected',{Candidate_Status}!='On Hold')";
+
+/** Count open ideas up to cap+1 so we can tell at-cap without paging the whole table. */
+async function countAutonomousOpenIdeas(env, { cap = AUTONOMOUS_OPEN_IDEAS_CAP } = {}) {
+  if (!env?.AIRTABLE_IDEA_TABLE_ID) return 0;
+  const limit = Math.max(1, Number(cap) || AUTONOMOUS_OPEN_IDEAS_CAP) + 1;
+  const rows = await listRecords(env, env.AIRTABLE_IDEA_TABLE_ID, {
+    limit,
+    fields: ["Candidate_Status", "Promoted_Content_Record_ID"],
+    filterFormula: AUTONOMOUS_OPEN_IDEAS_FORMULA,
+  }).catch(() => []);
+  return Array.isArray(rows) ? rows.length : 0;
+}
+
+/**
  * Create AUTONOMOUS_IDEAS_PER_HOUR ideas for one city under 200 scheduled.
  * Subjects already in flight do not reduce the count. A library photo group
  * is attached when one exists so resume can take that draft to final approval.
  * An idea with no stills is stamped Waiting for Factory Needs Assets.
  * Variants and produce stay on the resume path.
+ * `createBudget` is the remaining global open-ideas room for this pass.
  */
 async function fillAutonomousCityIdeas(env, authorization, {
   chicago,
@@ -44605,9 +44630,12 @@ async function fillAutonomousCityIdeas(env, authorization, {
   skips,
   preferredSubject,
   refillScores,
+  createBudget = AUTONOMOUS_IDEAS_PER_HOUR,
 }) {
-  const goal = AUTONOMOUS_IDEAS_PER_HOUR;
+  const hourGoal = AUTONOMOUS_IDEAS_PER_HOUR;
   let count = Math.max(0, Number(counts?.[profileId]) || 0);
+  const budget = Math.max(0, Number(createBudget) || 0);
+  const goal = Math.min(hourGoal, count + budget);
   const profile = await airtableFetch(env, STUDIO_IDEA_PROFILE_TABLE_ID, profileId);
   const profileSettings = mapOperationsProfile(profile);
   let saved = await studioSaveAutonomousLastRun(env, {
@@ -44618,7 +44646,8 @@ async function fillAutonomousCityIdeas(env, authorization, {
     slot,
     preferred_subject: preferredSubject || null,
     scheduled_target: AUTONOMOUS_SCHEDULED_TARGET,
-    ideas_per_hour: goal,
+    open_ideas_cap: AUTONOMOUS_OPEN_IDEAS_CAP,
+    ideas_per_hour: hourGoal,
     refill_profile_id: profileId,
     ideas_by_profile: { ...counts, [profileId]: count },
     hour_profile_skip: { ...skips },
@@ -44634,7 +44663,8 @@ async function fillAutonomousCityIdeas(env, authorization, {
       slot,
       ideas_by_profile: { ...counts, [profileId]: count },
       hour_profile_skip: { ...skips },
-      ideas_per_hour: goal,
+      ideas_per_hour: hourGoal,
+      open_ideas_cap: AUTONOMOUS_OPEN_IDEAS_CAP,
       ideas_created_this_pass: created,
       refill_profile_id: profileId,
       scheduled_target: AUTONOMOUS_SCHEDULED_TARGET,
@@ -44642,6 +44672,14 @@ async function fillAutonomousCityIdeas(env, authorization, {
     });
     return saved;
   };
+  if (budget <= 0) {
+    await persist("skipped", "open_ideas_cap");
+    return { created_count: 0, last: saved, counts, skips, stop: true };
+  }
+  if (count >= goal) {
+    await persist("skipped", "hour_quota_met");
+    return { created_count: 0, last: saved, counts, skips, stop: false };
+  }
   let catalog = [];
   try {
     catalog = await harvestAutonomousLibraryCatalog(env, "", profileId);
@@ -44719,7 +44757,8 @@ async function fillAutonomousCityIdeas(env, authorization, {
           production_request_id: requestRecord?.id || null,
           ideas_by_profile: { ...counts },
           hour_profile_skip: { ...skips },
-          ideas_per_hour: goal,
+          ideas_per_hour: hourGoal,
+          open_ideas_cap: AUTONOMOUS_OPEN_IDEAS_CAP,
           ideas_created_this_pass: created,
           refill_profile_id: profileId,
           scheduled_target: AUTONOMOUS_SCHEDULED_TARGET,
@@ -44742,6 +44781,27 @@ async function fillAutonomousScheduledHour(env, authorization, {
   profiles,
   preferredSubject = "",
 }) {
+  const openIdeasCount = await countAutonomousOpenIdeas(env);
+  const openIdeasRoom = autonomousOpenIdeasRoom(openIdeasCount);
+  const sameSlot = String(last?.slot || "") === String(slot || "");
+  if (autonomousOpenIdeasAtCap(openIdeasCount)) {
+    if (sameSlot && last?.status === "skipped" && last?.skip_reason === "open_ideas_cap") {
+      return { terminal: true, created_count: 0, last, result: last };
+    }
+    const saved = await studioSaveAutonomousLastRun(env, {
+      skipped: "open_ideas_cap",
+      chicago_date: chicago.date,
+      chicago_hour: chicago.hour,
+      slot,
+      status: "skipped",
+      skip_reason: "open_ideas_cap",
+      open_ideas_count: openIdeasCount,
+      open_ideas_cap: AUTONOMOUS_OPEN_IDEAS_CAP,
+      scheduled_target: AUTONOMOUS_SCHEDULED_TARGET,
+      ideas_per_hour: AUTONOMOUS_IDEAS_PER_HOUR,
+    });
+    return { terminal: true, created_count: 0, last: saved, result: saved };
+  }
   const refillMeta = await studioLoadAutonomousRefillScores(env, profiles);
   const loadedScores = refillMeta?.scores || {};
   const scoreCount = Object.keys(loadedScores).length;
@@ -44752,7 +44812,6 @@ async function fillAutonomousScheduledHour(env, authorization, {
     refillScores = loadedScores;
   }
   const needing = refillScores ? autonomousProfilesNeedingRefill(profiles, refillScores) : (profiles || []);
-  const sameSlot = String(last?.slot || "") === String(slot || "");
   if (refillScores && !needing.length) {
     const bands = Object.values(refillScores).map((row) => row?.band);
     const skipReason = bands.length && bands.every((band) => band === "skip")
@@ -44808,6 +44867,8 @@ async function fillAutonomousScheduledHour(env, authorization, {
   let createdCount = 0;
   let workingLast = last;
   for (const candidate of order) {
+    const createBudget = autonomousOpenIdeasCreateBudget(openIdeasCount, createdCount);
+    if (createBudget <= 0) break;
     if (!candidate?.id || !autonomousProfileHourOpen({ slot, ideas_by_profile: counts, hour_profile_skip: skips }, slot, candidate.id)) {
       continue;
     }
@@ -44819,15 +44880,20 @@ async function fillAutonomousScheduledHour(env, authorization, {
       skips,
       preferredSubject,
       refillScores,
+      createBudget,
     });
     workingLast = outcome.last || workingLast;
     createdCount += outcome.created_count || 0;
+    if (outcome.stop || autonomousOpenIdeasCreateBudget(openIdeasCount, createdCount) <= 0) break;
   }
   const stillOpen = refillScores
     ? autonomousRefillProfilesStillOpen(profiles, refillScores, workingLast, slot)
     : (profiles || []).filter((row) => autonomousProfileHourOpen(workingLast, slot, row?.id));
+  // Cap may leave per-city hour quotas open; still treat the hour as done so
+  // the scheduled-target refill cannot keep minting past 50 open ideas.
+  const cappedOut = openIdeasRoom > 0 && autonomousOpenIdeasCreateBudget(openIdeasCount, createdCount) <= 0;
   return {
-    terminal: stillOpen.length === 0,
+    terminal: stillOpen.length === 0 || cappedOut,
     created_count: createdCount,
     last: workingLast,
     result: workingLast,
@@ -45126,6 +45192,23 @@ async function executeStudioAutonomousProduce(env, ctx, options = {}) {
 
   // Manual / dry-run: one idea. Scheduled hours already returned above.
   // Hold at 200–209. Skip the hour when the parenthesis total is over 209.
+  // Global open-ideas cap still wins over the scheduled-target refill.
+  const openIdeasCount = await countAutonomousOpenIdeas(env);
+  if (autonomousOpenIdeasAtCap(openIdeasCount)) {
+    const result = {
+      skipped: "open_ideas_cap",
+      chicago_date: chicago.date,
+      chicago_hour: chicago.hour,
+      slot,
+      status: "skipped",
+      skip_reason: "open_ideas_cap",
+      open_ideas_count: openIdeasCount,
+      open_ideas_cap: AUTONOMOUS_OPEN_IDEAS_CAP,
+      scheduled_target: AUTONOMOUS_SCHEDULED_TARGET,
+    };
+    if (options.scheduled || options.force) await studioSaveAutonomousLastRun(env, result);
+    return result;
+  }
   let refillScores = null;
   let refillMeta = null;
   if (options.scheduled && !options.force) {
