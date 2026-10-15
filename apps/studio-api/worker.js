@@ -722,11 +722,12 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.610-supabase-schedule-writethrough",
+          version: "0.10.611-supabase-approve-writethrough",
           studio_supabase_pipeline_reads_v1: true,
           studio_supabase_sync_gate_v1: true,
           studio_supabase_phase3_stable_v1: true,
           studio_supabase_schedule_writethrough_v1: true,
+          studio_supabase_approve_writethrough_v1: true,
           studio_read_source: studioReadSource(env),
           studio_supabase_configured: studioSupabaseConfigured(env),
           studio_supabase_read_routes: STUDIO_SUPABASE_PIPELINE_READ_ROUTES,
@@ -2701,6 +2702,20 @@ function studioReadCacheDropPrefix(prefix) {
 let studioListWriteGeneration = 0;
 function studioMarkMappedListDirty() {
   studioListWriteGeneration += 1;
+}
+
+async function studioSupabaseWriteThroughOutput(env, record, label = "output") {
+  if (!studioSupabaseConfigured(env) || !record?.id) return { skipped: true };
+  try {
+    const result = await syncAirtableOutputRowToSupabase(env, record);
+    studioMarkMappedListDirty();
+    studioReadCacheDropPrefix("outputs:");
+    studioReadCacheDropPrefix("schedule-grid:");
+    return result;
+  } catch (error) {
+    console.warn(`supabase ${label} write-through failed`, record.id, error);
+    return { ok: false, error: error instanceof Error ? error.message : String(error) };
+  }
 }
 
 function studioInvalidateHotReads(env, tableId, method) {
@@ -13235,13 +13250,14 @@ async function studioHealAwaitingApprovalStaleRfr(env, options = {}) {
     const finding = classifyAwaitingApprovalStaleRfr(row);
     if (!finding) continue;
     try {
-      await airtableFetch(env, outputTable, record.id, {
+      const updated = await airtableFetch(env, outputTable, record.id, {
         method: "PATCH",
         body: JSON.stringify({
           fields: { Output_Status: "Approved for Publishing" },
           typecast: true,
         }),
       });
+      await studioSupabaseWriteThroughOutput(env, updated, "stale-rfr-heal");
       healed.push({
         key: "AWAITING_APPROVAL_STALE_RFR",
         id: record.id,
@@ -37424,6 +37440,9 @@ async function approveOutputRecordForPublishing(env, existing, note, stamp, payl
     body: JSON.stringify({ fields: { ...fields, ...preparedHandoff, ...scheduleFields }, typecast: true }),
   });
   studioInvalidateOccupiedScheduleCache();
+  // Phase 3: Factory/Approve updates Airtable; Pipeline list/grid read Supabase.
+  // Without write-through, Approved rows stay "Ready for Review" in Pipeline.
+  await studioSupabaseWriteThroughOutput(env, updated, "approve");
   return updated;
 }
 
@@ -45637,14 +45656,7 @@ async function scheduleStudioPublishOutput(request, env, url, authorization, ctx
   studioInvalidateOccupiedScheduleCache();
   // Phase 3: keep Supabase schedule-grid in lockstep so the calendar does not
   // snap the bubble back after refreshPipelineOutputs reloads from Supabase.
-  if (studioSupabaseConfigured(env)) {
-    try {
-      await syncAirtableOutputRowToSupabase(env, updated);
-      studioReadCacheDropPrefix("schedule-grid:");
-    } catch (error) {
-      console.warn("supabase schedule write-through failed", match[1], error);
-    }
-  }
+  await studioSupabaseWriteThroughOutput(env, updated, "schedule");
   const due = studioPublishIsDue(updated);
   const approved = String(f(updated, "Output_Status") || "").trim() === "Approved for Publishing"
     || String(f(updated, "Review_Status") || "").trim() === "Approved";

@@ -24,7 +24,8 @@
 | Cron Airtable→Supabase upsert | **Yes** (when secrets set) | Independent of `STUDIO_READ_SOURCE` |
 | Manual / status sync ops | **Yes** | tenant_admin |
 | Schedule Save write-through | **Yes** (upsert after Airtable PATCH) | Keeps calendar drag-drop from snapping back |
-| Factory desk | No | Airtable |
+| Approve / Approve All write-through | **Yes** (upsert after Airtable PATCH) | Keeps Pipeline from showing stale Ready for Review |
+| Factory desk | **No** (Airtable live) | Why Factory can look “approved” while Pipeline lags |
 | All Profiles overview | No | Airtable (+ R2 snapshot) |
 | Ideas / Production Requests | No | Airtable |
 | Approve / schedule / publish / produce | **Writes stay Airtable**; schedule also upserts Supabase | Airtable write SoR |
