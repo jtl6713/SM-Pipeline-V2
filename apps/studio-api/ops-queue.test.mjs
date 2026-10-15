@@ -284,7 +284,7 @@ test("worker and UI wire Operations multi-queue + prepare-to-review", () => {
   assert.match(worker, /mergeOpsQueueOutputRecords/);
   assert.match(worker, /OPS_QUEUE_RENDER_FORMULA/);
   assert.match(worker, /async function prepareIdeaToReview/);
-  assert.match(worker, /version: "0.10.609-supabase-phase3-stable"/);
+  assert.match(worker, /version: "0.10.610-supabase-schedule-writethrough"/);
   assert.match(worker, /origin=prepare-to-review/);
   assert.match(worker, /readOpsQueueControls/);
   assert.match(html, /data-ops-tab="queue"/);

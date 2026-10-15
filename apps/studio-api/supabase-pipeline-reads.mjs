@@ -441,3 +441,51 @@ export async function syncAllProfilesPipelineToSupabase(env, profiles, deps = {}
   }
   return { ok: true, results };
 }
+
+/**
+ * Write-through after an Airtable schedule (or similar) PATCH so Pipeline
+ * schedule-grid reads do not snap the bubble back to a stale Supabase time.
+ */
+export async function syncAirtableOutputRowToSupabase(env, record) {
+  if (!studioSupabaseConfigured(env)) return { skipped: true, reason: "supabase_not_configured" };
+  if (!record?.id) return { skipped: true, reason: "missing_record" };
+
+  const profileAirtableId = firstLink(record.fields?.Content_Profile);
+  let profileUuid = profileAirtableId ? await resolveSupabaseProfileId(env, profileAirtableId) : null;
+  if (!profileUuid) {
+    // Patch schedule fields only when the row already exists from cron sync.
+    await supabaseRest(
+      env,
+      `platform_outputs?airtable_record_id=eq.${encodeURIComponent(record.id)}`,
+      {
+        method: "PATCH",
+        body: {
+          scheduled_post_date: record.fields?.Scheduled_Post_Date || null,
+          studio_scheduled_at: record.fields?.Studio_Scheduled_At || null,
+          youtube_scheduled_publish_at: record.fields?.YouTube_Scheduled_Publish_At || null,
+          publish_status: selectName(record.fields?.Publish_Status),
+          output_status: selectName(record.fields?.Output_Status),
+          review_status: selectName(record.fields?.Review_Status),
+        },
+        headers: { Prefer: "return=minimal" },
+      },
+    );
+    return { ok: true, mode: "patch" };
+  }
+
+  const contentAirtableId = firstLink(record.fields?.Content_Item);
+  const contentUuidByAirtableId = new Map();
+  if (contentAirtableId) {
+    const contentRows = await supabaseRest(
+      env,
+      `content_items?airtable_record_id=eq.${encodeURIComponent(contentAirtableId)}&select=id,airtable_record_id&limit=1`,
+    ).catch(() => []);
+    if (Array.isArray(contentRows) && contentRows[0]?.id) {
+      contentUuidByAirtableId.set(contentAirtableId, contentRows[0].id);
+    }
+  }
+
+  const row = mapAirtableOutputToSupabase(record, { profileUuid, contentUuidByAirtableId });
+  await upsertChunk(env, "platform_outputs", [row]);
+  return { ok: true, mode: "upsert" };
+}
