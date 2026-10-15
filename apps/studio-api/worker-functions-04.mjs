@@ -2897,7 +2897,9 @@ export function studioOverviewRowMatchesProfile(row, profile) {
 
 export async function buildStudioProfilesOverviewRows(env, profiles) {
   const formula = studioProfilesOverviewCombinedFormula(profiles);
-  // Two Airtable reads total (was 2×N). Slot serialization still applies inside listRecords.
+  // Fetch every matching row; the previous global 800/300 caps silently excluded
+  // older profiles. listRecords follows Airtable offsets until exhausted.
+  // Treat reaching the safety ceiling as incomplete, never as a valid snapshot.
   const outputRows = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
     limit: STUDIO_PROFILES_OVERVIEW_OUTPUT_LIMIT,
     filterFormula: formula,
@@ -2905,11 +2907,17 @@ export async function buildStudioProfilesOverviewRows(env, profiles) {
     sortDirection: "desc",
     fields: OUTPUT_LIST_FIELDS,
   });
+  if (outputRows.length >= STUDIO_PROFILES_OVERVIEW_OUTPUT_LIMIT) {
+    throw new Error("Profiles overview outputs exceeded complete-scan safety ceiling");
+  }
   const ideaRows = await listRecords(env, env.AIRTABLE_IDEA_TABLE_ID, {
     limit: STUDIO_PROFILES_OVERVIEW_IDEA_LIMIT,
     sortField: "Create_Date",
     filterFormula: formula,
   });
+  if (ideaRows.length >= STUDIO_PROFILES_OVERVIEW_IDEA_LIMIT) {
+    throw new Error("Profiles overview ideas exceeded complete-scan safety ceiling");
+  }
   return (profiles || []).map((profile) => {
     const profileOutputs = (outputRows || []).filter((row) => studioOverviewRowMatchesProfile(row, profile));
     const profileIdeas = (ideaRows || []).filter((row) => studioOverviewRowMatchesProfile(row, profile));
@@ -2962,10 +2970,12 @@ export function rememberProfilesOverviewSnapshot(snapshot) {
   studioProfilesOverviewCache.rows = rows;
   studioProfilesOverviewCache.at = Number(snapshot.at) || 0;
   studioProfilesOverviewCache.authKey = String(snapshot.authKey || "");
+  studioProfilesOverviewCache.complete = snapshot.complete === true;
   return {
     rows,
     at: studioProfilesOverviewCache.at,
     authKey: studioProfilesOverviewCache.authKey,
+    complete: studioProfilesOverviewCache.complete,
   };
 }
 /*__STUDIO_WORKER_END:rememberProfilesOverviewSnapshot__*/
@@ -2973,7 +2983,7 @@ export function rememberProfilesOverviewSnapshot(snapshot) {
 export async function readStudioProfilesOverviewSnapshot(env) {
   const cache = studioProfilesOverviewCache;
   if (cache.rows?.length) {
-    return { rows: cache.rows, at: cache.at, authKey: cache.authKey };
+    return { rows: cache.rows, at: cache.at, authKey: cache.authKey, complete: cache.complete === true };
   }
   if (!env?.STUDIO_MEDIA?.get) return null;
   try {
@@ -2988,7 +2998,7 @@ export async function readStudioProfilesOverviewSnapshot(env) {
 /*__STUDIO_WORKER_END:readStudioProfilesOverviewSnapshot__*/
 
 export async function writeStudioProfilesOverviewSnapshot(env, rows, authKey) {
-  const snapshot = rememberProfilesOverviewSnapshot({ rows, authKey, at: Date.now() });
+  const snapshot = rememberProfilesOverviewSnapshot({ rows, authKey, at: Date.now(), complete: true });
   if (!snapshot || !env?.STUDIO_MEDIA?.put) return snapshot;
   try {
     await env.STUDIO_MEDIA.put(
@@ -3035,7 +3045,7 @@ export function scheduleStudioProfilesOverviewRefresh(ctx, env, authorization) {
 export async function profilesOverview(request, env, authorization, ctx) {
   const snapshot = await readStudioProfilesOverviewSnapshot(env);
   const age = snapshot?.at ? Date.now() - snapshot.at : Infinity;
-  if (snapshot?.rows?.length && age < STUDIO_PROFILES_OVERVIEW_CACHE_MS) {
+  if (snapshot?.rows?.length && snapshot.complete === true && age < STUDIO_PROFILES_OVERVIEW_CACHE_MS) {
     return respondProfilesOverviewSoft(request, env, {
       records: snapshot.rows,
       cached: true,
