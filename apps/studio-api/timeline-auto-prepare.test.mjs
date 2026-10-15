@@ -17,7 +17,7 @@ test("Worker heal auto-starts Prepare for timeline drafts stuck at None", () => 
   assert.match(worker, /item4HealTimelineAutoPrepare\(env, ctx\)/);
   assert.match(worker, /Studio_Variant_Status\}="None"/);
   assert.match(worker, /FIND\("idea-vo-timeline=",\{Production_Notes\}\)/);
-  assert.match(worker, /version: "0.10.612-open-ideas-cap"/);
+  assert.match(worker, /version: "0.10.613-open-ideas-drain-20"/);
 });
 
 test("Production UI kicks Prepare once for timeline drafts with Ready plan and None variants", () => {

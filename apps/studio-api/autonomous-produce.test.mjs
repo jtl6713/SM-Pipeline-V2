@@ -17,12 +17,14 @@ import {
   AUTONOMOUS_CITY_CREATE_ATTEMPTS,
   AUTONOMOUS_CITY_CREATE_MS,
   AUTONOMOUS_IDEAS_PER_HOUR,
+  AUTONOMOUS_HOUR_ASSET_DRAIN,
   AUTONOMOUS_OPEN_IDEAS_CAP,
   AUTONOMOUS_SCHEDULED_SKIP_ABOVE,
   AUTONOMOUS_SCHEDULED_TARGET,
   autonomousOpenIdeasAtCap,
   autonomousOpenIdeasCreateBudget,
   autonomousOpenIdeasRoom,
+  listAutonomousResumeDrafts,
   pickAutonomousMusicAssetId,
   pickNarrationVoiceFromProfiles,
   resolveAutonomousNarrationVoice,
@@ -190,19 +192,30 @@ test("slot keys are once per morning and afternoon", () => {
   }, "2026-08-30:am"), true);
 });
 
-test("open ideas cap is 50 and shrinks hour create budget", () => {
-  assert.equal(AUTONOMOUS_OPEN_IDEAS_CAP, 50);
-  assert.equal(autonomousOpenIdeasRoom(0), 50);
-  assert.equal(autonomousOpenIdeasRoom(49), 1);
-  assert.equal(autonomousOpenIdeasRoom(50), 0);
+test("open ideas cap is 20 and hour drain advances asset-ready drafts", () => {
+  assert.equal(AUTONOMOUS_OPEN_IDEAS_CAP, 20);
+  assert.equal(AUTONOMOUS_HOUR_ASSET_DRAIN, 20);
+  assert.equal(autonomousOpenIdeasRoom(0), 20);
+  assert.equal(autonomousOpenIdeasRoom(19), 1);
+  assert.equal(autonomousOpenIdeasRoom(20), 0);
   assert.equal(autonomousOpenIdeasRoom(200), 0);
-  assert.equal(autonomousOpenIdeasAtCap(49), false);
-  assert.equal(autonomousOpenIdeasAtCap(50), true);
-  assert.equal(autonomousOpenIdeasAtCap(200), true);
-  assert.equal(autonomousOpenIdeasCreateBudget(45, 0), 5);
-  assert.equal(autonomousOpenIdeasCreateBudget(45, 5), 0);
-  assert.equal(autonomousOpenIdeasCreateBudget(50, 0), 0);
-  assert.equal(autonomousOpenIdeasCreateBudget(40, 3), 7);
+  assert.equal(autonomousOpenIdeasAtCap(19), false);
+  assert.equal(autonomousOpenIdeasAtCap(20), true);
+  assert.equal(autonomousOpenIdeasAtCap(74), true);
+  assert.equal(autonomousOpenIdeasCreateBudget(15, 0), 5);
+  assert.equal(autonomousOpenIdeasCreateBudget(15, 5), 0);
+  assert.equal(autonomousOpenIdeasCreateBudget(20, 0), 0);
+  assert.equal(autonomousOpenIdeasCreateBudget(10, 3), 7);
+  const drafts = Array.from({ length: 25 }, (_, index) => ({
+    notes: "origin=autonomous",
+    profile_id: "recChi",
+    variant_status: "Ready",
+    requestRecord: { id: `recDraft${String(index).padStart(10, "0")}` },
+  }));
+  const batch = listAutonomousResumeDrafts(drafts, ["recChi"], { limit: AUTONOMOUS_HOUR_ASSET_DRAIN });
+  assert.equal(batch.length, 20);
+  assert.equal(batch[0].requestRecord.id, "recDraft0000000000");
+  assert.equal(batch[19].requestRecord.id, "recDraft0000000019");
 });
 
 test("hourly refill creates 10 ideas under 200 and skips over 209", () => {
@@ -878,7 +891,7 @@ test("Worker stamps photo-ready ideas and drains the 30m SLA on light ticks", as
   const path = await import("node:path");
   const here = path.dirname(fileURLToPath(import.meta.url));
   const worker = await readFile(path.join(here, "worker.js"), "utf8");
-  assert.match(worker, /version: "0.10.612-open-ideas-cap"/);
+  assert.match(worker, /version: "0.10.613-open-ideas-drain-20"/);
   assert.match(worker, /studio_autonomous_ten_ideas_anyway_v1: true/);
   assert.match(worker, /planAutonomousHourIdeas/);
   const hourFill = worker.slice(
@@ -891,10 +904,14 @@ test("Worker stamps photo-ready ideas and drains the 30m SLA on light ticks", as
   assert.match(worker, /if \(!harvestThisHour && last\.production_request_id && last\.idea_id\)/);
   assert.match(worker, /studio_autonomous_ten_per_hour_v1: true/);
   assert.match(worker, /studio_autonomous_open_ideas_cap_v1: true/);
+  assert.match(worker, /studio_autonomous_hour_asset_drain_v1: true/);
   assert.match(worker, /AUTONOMOUS_IDEAS_PER_HOUR/);
   assert.match(worker, /AUTONOMOUS_OPEN_IDEAS_CAP/);
+  assert.match(worker, /AUTONOMOUS_HOUR_ASSET_DRAIN/);
   assert.match(worker, /countAutonomousOpenIdeas/);
   assert.match(worker, /open_ideas_cap/);
+  assert.match(worker, /hourAssetDrain: true/);
+  assert.match(worker, /selectAutonomousResumeDraftBatch/);
   assert.match(worker, /AUTONOMOUS_CITY_CREATE_MS/);
   assert.match(worker, /AUTONOMOUS_CITY_CREATE_ATTEMPTS/);
   assert.match(worker, /scheduled_over_209/);

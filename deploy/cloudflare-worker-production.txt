@@ -290,3 +290,5 @@ Deploy Worker 0.10.489-engagement-ledger. Shrink the engagement ledger so Chicag
 2026-10-15: Worker 0.10.611-supabase-approve-writethrough. After Factory/Pipeline Approve, write-through Output_Status into Supabase so Awaiting Approval does not lag behind Factory gate.
 
 2026-10-15: Worker 0.10.612-open-ideas-cap. Cap unpromoted Idea Candidates at 50; hourly scheduled-target refill skips or shrinks create when at/near the cap.
+
+2026-10-15: Worker 0.10.613-open-ideas-drain-20. Cap open ideas at 20; top-of-hour skips create when at/over cap and drains up to 20 asset-ready drafts toward Ready for Review.

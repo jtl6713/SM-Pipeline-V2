@@ -28,7 +28,7 @@ test("a failed linked-request lookup cannot silently regenerate a duplicate", ()
 });
 
 test("Worker version is incremented for deployed idempotency fix", () => {
-  assert.match(worker, /version: "0.10.612-open-ideas-cap"/);
+  assert.match(worker, /version: "0.10.613-open-ideas-drain-20"/);
 });
 
 test("explicit Create VO Timeline does not silently make a Photo Set", () => {

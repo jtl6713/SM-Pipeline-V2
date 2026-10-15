@@ -11,9 +11,12 @@ export const AUTONOMOUS_SCHEDULED_SKIP_ABOVE = 209;
 export const AUTONOMOUS_IDEAS_PER_HOUR = 10;
 /**
  * Hard ceiling on unpromoted Idea Candidates across all cities.
- * Scheduled-target refill (even under 200) must not open more than this.
+ * When open ≥ this at the Chicago top of hour, skip create and drain
+ * asset-ready drafts through promote / produce instead.
  */
-export const AUTONOMOUS_OPEN_IDEAS_CAP = 50;
+export const AUTONOMOUS_OPEN_IDEAS_CAP = 20;
+/** How many asset-ready autonomous drafts the top-of-hour tick may advance toward Ready for Review. */
+export const AUTONOMOUS_HOUR_ASSET_DRAIN = 20;
 /** Create-loop budget per city, starting after the library scan. The old 45s cap included the scan and stopped at one idea. */
 export const AUTONOMOUS_CITY_CREATE_MS = 180000;
 /** Picks allowed while that clock is running. The 7pm hour stopped at 12, with 1–2 ideas saved. */
@@ -629,11 +632,24 @@ export function autonomousPreparingIsStale(
  * cannot starve another. Other resume stamps, such as prepare-to-review, are unchanged.
  */
 export function firstAutonomousResumeDraft(drafts, enabledProfileIds, nowMs = Date.now()) {
+  return listAutonomousResumeDrafts(drafts, enabledProfileIds, { limit: 1, nowMs })[0] || null;
+}
+
+/**
+ * Ordered FIFO of drafts eligible for autonomous resume.
+ * `limit` caps how many the hour drain may advance (asset filter is applied later).
+ */
+export function listAutonomousResumeDrafts(drafts, enabledProfileIds, {
+  limit = 1,
+  nowMs = Date.now(),
+} = {}) {
   const enabled = new Set(
     (Array.isArray(enabledProfileIds) ? enabledProfileIds : [])
       .map((id) => String(id || "").trim())
       .filter(Boolean),
   );
+  const cap = Math.max(1, Number(limit) || 1);
+  const out = [];
   for (const draft of Array.isArray(drafts) ? drafts : []) {
     const notes = String(draft?.notes || draft?.production_notes || "");
     if (isAutonomousResumeDeferred(notes)) continue;
@@ -645,11 +661,16 @@ export function firstAutonomousResumeDraft(drafts, enabledProfileIds, nowMs = Da
       12 * 60 * 1000,
       draft?.created_at || draft?.createdTime || null,
     )) continue;
-    if (!isAutonomousOrigin(notes)) return draft || null;
-    const profileId = String(draft?.profile_id || "").trim();
-    if (enabled.has(profileId)) return draft;
+    if (!isAutonomousOrigin(notes)) {
+      out.push(draft);
+    } else {
+      const profileId = String(draft?.profile_id || "").trim();
+      if (!enabled.has(profileId)) continue;
+      out.push(draft);
+    }
+    if (out.length >= cap) break;
   }
-  return null;
+  return out;
 }
 
 /** Draft / Ready / Submitted autonomous PRs must keep moving. Submitted is not a stop. */
