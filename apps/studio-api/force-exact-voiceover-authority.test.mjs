@@ -1,3 +1,4 @@
+import { readStudioWorkerSource } from "./worker-source-reader.mjs";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
@@ -7,7 +8,7 @@ import path from "node:path";
 const here = path.dirname(fileURLToPath(import.meta.url));
 
 test("Force exact Production script invalidates stale generated voiceover", async () => {
-  const worker = await readFile(path.join(here, "worker.js"), "utf8");
+  const worker = readStudioWorkerSource();
   const start = worker.indexOf("async function syncProductionRequestDirectivesToContentItem");
   const end = worker.indexOf("async function syncProductionRequestDirectivesRoute", start);
   assert.ok(start >= 0 && end > start);
@@ -25,7 +26,7 @@ test("Force exact Production script invalidates stale generated voiceover", asyn
 });
 
 test("Promoted timed-script Apply always invalidates voiceover for remeasure", async () => {
-  const worker = await readFile(path.join(here, "worker.js"), "utf8");
+  const worker = readStudioWorkerSource();
   const start = worker.indexOf("async function applyPromotedTimedScriptRoute");
   const end = worker.indexOf("async function productionRequestPreferredMusic", start);
   assert.ok(start >= 0 && end > start);

@@ -1,8 +1,9 @@
+import { readStudioWorkerSource } from "./worker-source-reader.mjs";
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 
-const worker = fs.readFileSync(new URL("./worker.js", import.meta.url), "utf8");
+const worker = readStudioWorkerSource();
 
 test("Facebook native photo handoff caps image packages at ten", () => {
   assert.match(worker, /Math\.min\(clipCount \|\| 1, 10\)/);
