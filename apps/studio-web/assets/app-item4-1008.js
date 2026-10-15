@@ -19466,6 +19466,15 @@ function timedScriptAssetLabel(asset, index) {
     const data = await api(`/api/outputs/schedule-regen?job_id=${encodeURIComponent(jobId)}`);
     renderScheduleRegenProgress(data);
     if (data?.status === "queued" || data?.status === "running") {
+      // A regeneration slice can move an entire platform/output lane. Refresh the
+      // visible calendar after every completed slice so the user sees posts move
+      // while the button remains locked, instead of only seeing the final state.
+      try {
+        await refreshPipelineOutputs({ silent: true, force: true });
+        await loadPipelineScheduleGridWindow();
+      } catch (refreshError) {
+        console.warn("schedule regeneration live calendar refresh failed", refreshError);
+      }
       pipelineScheduleRegenPollTimer = setTimeout(() => {
         pollScheduleRegenJob(jobId, button).catch((error) => {
           if (button) {
@@ -19507,7 +19516,24 @@ function timedScriptAssetLabel(asset, index) {
         setPipelineScheduleGridMessage("Select at least one platform using the calendar checkboxes.", true);
         return;
       }
-      regeneratePipelineSchedulesForPlatforms(platforms, button).catch((error) => {
+      regeneratePipelineSchedulesForPlatforms(platforms, button).catch(async (error) => {
+        // If a prior click already created the durable job, a duplicate POST returns
+        // 409. Resume that job instead of immediately unlocking the button and making
+        // the calendar look like nothing happened.
+        if (/already running/i.test(String(error?.message || ""))) {
+          try {
+            const active = await api("/api/outputs/schedule-regen");
+            if (active?.status === "queued" || active?.status === "running") {
+              button.disabled = true;
+              button.textContent = "Regenerating…";
+              renderScheduleRegenProgress(active);
+              await pollScheduleRegenJob(active.id || active.job_id, button);
+              return;
+            }
+          } catch (resumeError) {
+            console.warn("schedule regeneration resume failed", resumeError);
+          }
+        }
         button.disabled = false;
         button.textContent = "Regenerate schedules";
         setPipelineScheduleGridMessage(error?.message || "Could not regenerate schedules.", true);
