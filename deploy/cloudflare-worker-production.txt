@@ -318,3 +318,5 @@ Deploy Worker 0.10.489-engagement-ledger. Shrink the engagement ledger so Chicag
 2026-10-15: Worker 0.10.621-approve-binding-dirty. Export studioMarkMappedListDirty (+3 other worker.js helpers) into extracted modules so Approve all does not 6/6 fail.
 
 2026-10-15: Deploy scheduled overview queue fix PR #757 (merge 0727792c). Count only approved future-dated outputs awaiting platform dispatch; exclude awaiting approval and platform-handoff states; bump cached overview snapshot schema. Wrangler dry run, source validation, and regression checks passed.
+
+2026-10-15: Worker 0.10.621-approve-binding-dirty. Redeploy after hung Wrangler install on #756 deploy; Approve all binding fix must reach production.
