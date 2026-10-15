@@ -93,6 +93,9 @@ test("Worker and Pipeline wire durable schedule regeneration", () => {
   assert.match(worker, /async function studioProcessScheduleRegenJobSlice/);
   assert.match(worker, /SCHEDULE_REGEN_STATUS\.PROCESSING/);
   assert.match(worker, /maeScheduleNextSlot/);
+  assert.match(worker, /studioScheduleRegenCandidateFormula/);
+  assert.match(worker, /excludeIds:\s*eligible\.map/);
+  assert.match(worker, /studioOccupiedSchedulesOrEmpty/);
   assert.match(app, /\/api\/outputs\/schedule-regen/);
   assert.match(app, /Will be scheduled on approval/);
   assert.match(app, /operationsScheduleHorizonDays/);
