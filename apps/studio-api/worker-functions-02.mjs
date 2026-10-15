@@ -407,6 +407,7 @@ import {
 
 // Functions extracted verbatim from worker.js. No route, response, or state changes.
 import {
+  airtableFetch,
   STUDIO_DEFAULT_MUSIC_VOLUME,
   HttpError,
   IDEA_PHOTO_WAIT_TYPES,

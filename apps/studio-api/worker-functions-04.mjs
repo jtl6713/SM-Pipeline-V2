@@ -407,6 +407,7 @@ import {
 
 // Functions extracted verbatim from worker.js. No route, response, or state changes.
 import {
+  airtableFetch,
   HttpError,
   AIRTABLE_SLOT_FAIL_FAST_MS,
   ITEM4_MEDIA_ASSET_TABLE,
