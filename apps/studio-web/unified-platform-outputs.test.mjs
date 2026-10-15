@@ -1,12 +1,13 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import { readStudioWorkerSource } from "../studio-api/worker-source-reader.mjs";
 const root = new URL("./", import.meta.url);
 const read = (rel) => readFileSync(new URL(rel, root), "utf8");
 const html = read("index.html");
 const app = read("assets/app-item4-1008.js");
 const css = read("assets/factory-layout-0680.css");
-const worker = read("../studio-api/worker.js");
+const worker = readStudioWorkerSource();
 
 test("Platforms & Frames owns the only visible editable output matrix", () => {
   const formatStart = html.indexOf('id="item4PlatformToggles"');
@@ -100,9 +101,9 @@ test("Worker output synchronization REPLACES stale plan items with enabled outpu
 });
 
 test("Studio build label, app BUILD_ID, and asset versions are aligned", () => {
-  assert.match(html, /UI build 0\.6\.692/);
-  assert.match(app, /const BUILD_ID = "item4-0\.6\.692-factory-streams-collapsed"/);
+  assert.match(html, /UI build 0\.6\.693/);
+  assert.match(app, /const BUILD_ID = "item4-0\.6\.693-factory-approve-wait-stories"/);
   const versions = [...html.matchAll(/\?v=(\d+\.\d+\.\d+)-/g)].map((x) => x[1]);
   assert.ok(versions.length > 10);
-  assert.ok(versions.every((x) => x === "0.6.692"));
+  assert.ok(versions.every((x) => x === "0.6.693"));
 });

@@ -3,7 +3,16 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 REMOTION_SOURCE = REPO_ROOT / "services" / "remotion-renderer" / "src" / "ChicagoShiningPhotoSequence.tsx"
-WORKER_SOURCE = REPO_ROOT / "apps" / "studio-api" / "worker.js"
+STUDIO_API = REPO_ROOT / "apps" / "studio-api"
+WORKER_ENTRY = STUDIO_API / "worker.js"
+
+
+def read_studio_worker_source() -> str:
+    """Concatenate the split Worker entry + function modules for static contracts."""
+    chunks = [WORKER_ENTRY.read_text(encoding="utf-8")]
+    for suffix in ("01", "02", "03", "04"):
+        chunks.append((STUDIO_API / f"worker-functions-{suffix}.mjs").read_text(encoding="utf-8"))
+    return "\n".join(chunks)
 
 
 def test_remotion_applies_persistent_brand_watermark_to_entire_render():
@@ -15,8 +24,8 @@ def test_remotion_applies_persistent_brand_watermark_to_entire_render():
 
 
 def test_native_photo_branding_includes_finished_still_passthroughs():
-    source = WORKER_SOURCE.read_text(encoding="utf-8")
-    start = source.index("async function approveOutputRecordForPublishing")
+    source = read_studio_worker_source()
+    start = source.index("function approveOutputRecordForPublishing")
     end = source.index("function mapApprovedOutputSummary", start)
     approval = source[start:end]
     assert "if (studioOutputIsNativePhoto(record)) {" in approval
@@ -29,5 +38,5 @@ def test_native_photo_branding_includes_finished_still_passthroughs():
 
 
 def test_worker_advertises_visual_watermark_guarantee():
-    source = WORKER_SOURCE.read_text(encoding="utf-8")
+    source = WORKER_ENTRY.read_text(encoding="utf-8")
     assert "studio_all_visual_watermark_v1: true" in source

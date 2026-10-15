@@ -305,7 +305,7 @@ test("worker and UI wire Operations multi-queue + prepare-to-review", () => {
   assert.match(html, /ops-queue-cols-publish[\s\S]*?>Type<\/div><div>Status</);
   assert.match(html, /ops-queue-cols-e2e[\s\S]*?>Platform<\/div><div>Type</);
   assert.match(html, /prepareIdeaToReviewButton/);
-  assert.match(app, /BUILD_ID = "item4-0.6.692-factory-streams-collapsed"/);
+  assert.match(app, /BUILD_ID = "item4-0.6.693-factory-approve-wait-stories"/);
   assert.match(app, /function opsQueueOutputTypeLabel/);
   assert.match(app, /studio_output_type \|\| row\?\.format/);
   assert.match(app, /platforms: "Plat"/);

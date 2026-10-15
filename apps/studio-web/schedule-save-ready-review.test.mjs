@@ -3,16 +3,17 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { readStudioWorkerSource } from "../studio-api/worker-source-reader.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const app = fs.readFileSync(path.join(here, "assets/app-item4-1008.js"), "utf8");
 const html = fs.readFileSync(path.join(here, "index.html"), "utf8");
-const worker = fs.readFileSync(path.join(here, "../studio-api/worker.js"), "utf8");
+const worker = readStudioWorkerSource();
 
 test("UI enables Save schedule for Ready for Review (Output 1795)", () => {
-  assert.match(app, /BUILD_ID = "item4-0.6.692-factory-streams-collapsed"/);
-  assert.match(html, /UI build 0.6.692/);
-  assert.match(html, /app-item4-1008\.js\?v=0.6.692-factory-streams-collapsed/);
+  assert.match(app, /BUILD_ID = "item4-0.6.693-factory-approve-wait-stories"/);
+  assert.match(html, /UI build 0.6.693/);
+  assert.match(html, /app-item4-1008\.js\?v=0.6.693-factory-approve-wait-stories/);
   // setCreativeBusy must gate Save on creativeCanSetSchedule, not only approved reschedule.
   assert.match(
     app,

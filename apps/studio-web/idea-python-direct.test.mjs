@@ -3,13 +3,13 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
+import { readStudioWorkerSource } from "../studio-api/worker-source-reader.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-const workerPath = path.join(here, "..", "studio-api", "worker.js");
 const appPath = path.join(here, "assets", "app-item4-1008.js");
 
 test("Studio idea generation accepts a batch then finishes Python I1 in waitUntil", async () => {
-  const source = await readFile(workerPath, "utf8");
+  const source = readStudioWorkerSource();
   const start = source.indexOf("async function startStudioIdeaGeneration");
   const end = source.indexOf("async function studioIdeaGenerationStatus", start);
   assert.ok(start >= 0 && end > start, "idea generation handler should exist");
@@ -37,5 +37,5 @@ test("Studio UI polls idea batches and explains aborted Generate starts", async 
   assert.match(source, /timeoutMs: 45000/);
   assert.match(source, /activeIdeaGenerationBatchId = result\.batch_record_id/);
   assert.match(source, /connection dropped/);
-  assert.match(source, /BUILD_ID = "item4-0.6.692-factory-streams-collapsed"/);
+  assert.match(source, /BUILD_ID = "item4-0.6.693-factory-approve-wait-stories"/);
 });
