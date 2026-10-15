@@ -29,7 +29,7 @@ test("a failed linked-request lookup cannot silently regenerate a duplicate", ()
 });
 
 test("Worker version is incremented for deployed idempotency fix", () => {
-  assert.match(worker, /version: "0.10.621-approve-binding-dirty"/);
+  assert.match(worker, /version: "0.10.622-schedule-regen-live"/);
 });
 
 test("explicit Create VO Timeline does not silently make a Photo Set", () => {

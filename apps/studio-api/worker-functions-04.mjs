@@ -332,6 +332,7 @@ import {
 import {
   SCHEDULE_REGEN_JOBS_SETTING,
   createScheduleRegenJob,
+  scheduleRegenCandidateFilterFormula,
   parseScheduleRegenJobStore,
   pruneScheduleRegenJobStore,
   scheduleRegenCombinationKey,
@@ -1899,7 +1900,13 @@ export async function studioProcessScheduleRegenJobSlice(env, jobId, options = {
       limit: STUDIO_OCCUPIED_LIST_LIMIT,
       sortField: "Scheduled_Post_Date",
       sortDirection: "asc",
-      filterFormula: studioOccupiedFilterFormula(nowMs, profile),
+      filterFormula: scheduleRegenCandidateFilterFormula({
+        nowMs,
+        horizonDays,
+        profileFormula: contentProfileFilterFormula(profile) || "",
+        platform: combo.platform,
+        outputType: combo.output_type,
+      }),
       fields: ["Platform", "Scheduled_Post_Date", "YouTube_Scheduled_Publish_At", "Studio_Scheduled_At", "Publish_Status", "Studio_Output_Type", "Format", "Content_Profile", "Published_At", "Do_Not_Publish", "Output_Status", "Output_ID"],
     });
     const eligible = [];
@@ -1918,7 +1925,7 @@ export async function studioProcessScheduleRegenJobSlice(env, jobId, options = {
         if (ms != null) protectedTimes.push(ms);
         continue;
       }
-      const iso = String(f(row, "Scheduled_Post_Date") || f(row, "YouTube_Scheduled_Publish_At") || "").trim();
+      const iso = String(f(row, "Scheduled_Post_Date") || f(row, "YouTube_Scheduled_Publish_At") || f(row, "Studio_Scheduled_At") || "").trim();
       const stamp = iso ? Date.parse(iso) : NaN;
       if (iso && Number.isFinite(stamp) && stamp <= nowMs) {
         protectedTimes.push(stamp);
@@ -1949,20 +1956,30 @@ export async function studioProcessScheduleRegenJobSlice(env, jobId, options = {
       reserved.push(Date.parse(picked.iso));
     }
 
-    // Apply the full combination plan before advancing — avoid partial reschedule.
-    for (const entry of plan) {
-      const fields = studioPublishScheduleFields(
-        { scheduled_post_date: entry.iso, timezone: timeZone },
-        entry.record,
-        { occupiedMs: [], timeZone, forceWrite: true, exactOverride: true },
+    // Apply in Airtable-sized chunks. The old per-row PATCH + job-store write
+    // made a Chicago combination slow enough for the UI status poll to time out.
+    for (let planIndex = 0; planIndex < plan.length; planIndex += 10) {
+      const chunk = plan.slice(planIndex, planIndex + 10).map((entry) => ({
+        ...entry,
+        fields: studioPublishScheduleFields(
+          { scheduled_post_date: entry.iso, timezone: timeZone },
+          entry.record,
+          { occupiedMs: [], timeZone, forceWrite: true, exactOverride: true },
+        ),
+      }));
+      await airtableBatchUpdate(
+        env,
+        env.AIRTABLE_OUTPUT_TABLE_ID,
+        chunk.map((entry) => ({ id: entry.id, fields: entry.fields })),
+        { typecast: true },
       );
-      await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, entry.id, {
-        method: "PATCH",
-        body: JSON.stringify({ fields, typecast: true }),
-      });
-      await studioSupabaseWriteThroughOutput(env, { id: entry.id, fields: { ...(entry.record.fields || {}), ...fields } }, "schedule-regen").catch(() => null);
-      combo.completed_posts += 1;
-      combo.rescheduled += 1;
+      await Promise.all(chunk.map((entry) => studioSupabaseWriteThroughOutput(
+        env,
+        { id: entry.id, fields: { ...(entry.record.fields || {}), ...entry.fields } },
+        "schedule-regen",
+      ).catch(() => null)));
+      combo.completed_posts += chunk.length;
+      combo.rescheduled += chunk.length;
       combos[index] = { ...combo };
       job = { ...job, combinations: combos, updated_at: new Date().toISOString() };
       await studioPutScheduleRegenJob(env, job);
@@ -2061,7 +2078,10 @@ export async function getScheduleRegenJobStatus(request, env, authorization) {
     });
   }
   if (job.status === "queued" || job.status === "running") {
-    job = await studioProcessScheduleRegenJobSlice(env, job.id) || job;
+    const sliceAlreadyRunning = (job.combinations || []).some(
+      (row) => String(row?.status || "") === SCHEDULE_REGEN_STATUS.PROCESSING,
+    );
+    if (!sliceAlreadyRunning) job = await studioProcessScheduleRegenJobSlice(env, job.id) || job;
   }
   return respond(request, env, summarizeScheduleRegenJob(job));
 }
