@@ -366,3 +366,4 @@ UI 0.6.607 hashtag mismatch warning only; approval no longer blocked.
 2026-10-15: UI 0.6.696-approve-binding-dirty. Factory Approve all alert shows real failure reasons (e.g. unbound Worker helper).
 
 2026-10-15: UI 0.6.696-approve-binding-dirty. Redeploy Pages after custom-domain verify connection reset on #756.
+Redeploy Studio Pages from main 3ed88f1 alongside scheduled overview/dispatch backend (2026-10-15).
