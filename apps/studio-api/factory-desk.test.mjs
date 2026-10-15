@@ -284,10 +284,11 @@ test("Worker exposes factory desk routes and version flag", async () => {
     worker.indexOf("async function approveOutputRecordForPublishing"),
     worker.indexOf("function mapApprovedOutputSummary"),
   );
-  assert.match(approveFn, /studioSuggestedLocalDatetime\(MAE_PRIORITY_SCHEDULE_WINDOWS/);
-  assert.match(approveFn, /const recheckBestSlot = options\.recheckBestSlot === true/);
+  assert.match(approveFn, /maeScheduleNextSlot/);
+  assert.match(approveFn, /recheckBestSlot/);
   assert.match(approveFn, /existingIso: recheckBestSlot \? "" : existingScheduleIso/);
-  assert.match(approveFn, /No open morning, afternoon, or evening slot in the next 4 weeks/);
+  assert.match(approveFn, /No open morning, afternoon, evening, or overflow slot/);
+  assert.match(approveFn, /maeScheduleLaneKey/);
   const factoryApprove = worker.slice(
     worker.indexOf("async function factoryApproveOutput"),
     worker.indexOf("function factoryFeedbackBlock"),
@@ -297,7 +298,8 @@ test("Worker exposes factory desk routes and version flag", async () => {
     worker.indexOf("async function studioProcessApproveAllJobSlice"),
     worker.indexOf("async function studioRunApproveAllJob"),
   );
-  assert.match(approveSlice, /const recheckBestSlot = !rowSchedule/);
+  assert.match(approveSlice, /const recheckBestSlot = !markerIso/);
+  assert.match(approveSlice, /studioOccupiedForLane/);
   assert.match(worker, /studio_factory_recheck_schedule_v1:\s*true/);
   assert.match(approveFn, /forceWrite: publishNowImmediate/);
   assert.match(worker, /async function studioHealApprovedMissingSchedule/);
@@ -330,7 +332,7 @@ test("Worker exposes factory desk routes and version flag", async () => {
   assert.match(worker, /Do_Not_Publish: true/);
   assert.match(worker, /revision_approve/);
   assert.match(worker, /productionRequestRevisionOpen\(requestRecord\)/);
-  assert.match(worker, /0.10.617-balanced-four-week-slots/);
+  assert.match(worker, /0.10.618-mae-horizon-overflow/);
   assert.match(worker, /studio_factory_inflight_blocked_parent_v1:\s*true/);
   assert.match(worker, /studio_factory_desk_v1:\s*true/);
   assert.match(worker, /studio_factory_desk_preview_v1:\s*true/);
@@ -340,7 +342,7 @@ test("Worker allows Factory Desk POST through Phase 2A gate", async () => {
   const worker = await readFile(path.join(here, "worker.js"), "utf8");
   assert.match(worker, /const isFactoryDeskWrite = isFactoryDeskRoute && request\.method === "POST"/);
   assert.match(worker, /isFactoryDeskWrite \|/);
-  assert.match(worker, /version: "0.10.617-balanced-four-week-slots"/);
+  assert.match(worker, /version: "0.10.618-mae-horizon-overflow"/);
   assert.match(worker, /studio_factory_desk_write_v1: true/);
 });
 
@@ -349,5 +351,5 @@ test("Worker allows Supabase sync POST through Phase 2A gate", async () => {
   assert.match(worker, /const isOpsSupabaseSyncWrite = isOpsSupabaseSyncRoute && request\.method === "POST"/);
   assert.match(worker, /isOpsSupabaseSyncWrite \|/);
   assert.match(worker, /studio_supabase_sync_gate_v1: true/);
-  assert.match(worker, /version: "0.10.617-balanced-four-week-slots"/);
+  assert.match(worker, /version: "0.10.618-mae-horizon-overflow"/);
 });

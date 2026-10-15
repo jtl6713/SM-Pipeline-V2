@@ -82,20 +82,17 @@ test("manual schedule overrides mark dirty then autosave on change/blur/Enter", 
 test("automatic scheduling uses wider weekly spacing", () => {
   const here = path.dirname(fileURLToPath(import.meta.url));
   const app = fs.readFileSync(path.join(here, "assets", "app-item4-1008.js"), "utf8");
-  assert.match(app, /PIPELINE_SCHEDULE_GAP_MS = 3 \* 60 \* 60 \* 1000/);
-  assert.match(app, /spread across the week/);
+  assert.match(app, /PIPELINE_SCHEDULE_GAP_MS = 90 \* 60 \* 1000/);
+  assert.match(app, /Will be scheduled on approval/);
 });
 
-test("Pipeline occupancy is platform-wide except Stories may stack", () => {
+test("Pipeline occupancy is independent per platform × output type", () => {
   const here = path.dirname(fileURLToPath(import.meta.url));
   const app = fs.readFileSync(path.join(here, "assets", "app-item4-1008.js"), "utf8");
   assert.match(app, /function pipelineScheduleIsStory\(record\)/);
-  assert.match(app, /\$\{platform\}::story:\$\{id\}/);
-  assert.match(app, /TikTok Video and Slideshow cannot both take 5:30/);
-  assert.match(app, /if \(pipelineScheduleIsStory\(record\)\)/);
-  // Non-story outputs must return the bare platform key (not platform::outputType).
-  assert.match(app, /return platform;\n  \}/);
-  assert.doesNotMatch(app, /return platform && outputType \? `\$\{platform\}::\$\{outputType\}` : platform/);
+  assert.match(app, /Independent lane per platform/);
+  assert.match(app, /\$\{platform\}::\$\{outputType\}/);
+  assert.match(app, /Will be scheduled on approval/);
 });
 
 

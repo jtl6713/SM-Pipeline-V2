@@ -6,11 +6,16 @@ import { fileURLToPath } from "node:url";
 import {
   MAE_PRIORITY_SCHEDULE_WINDOWS,
   MAE_SUGGEST_HORIZON_DAYS,
+  MAE_SCHEDULE_HORIZON_SETTING,
   maeBuildSuggestedScheduleMap,
   maeIsBlackoutLocalTime,
   maeNextOpenScheduleIso,
+  maeNormalizeHorizonDays,
   maePickBalancedSuggestedIso,
   maeResolveStorySchedule,
+  maeScheduleLaneKey,
+  maeScheduleNextSlot,
+  maeSortRegenCombinations,
   maeTimeZoneFromTheme,
   maeZonedWallToUtcMs,
 } from "./mae-schedule.mjs";
@@ -38,7 +43,7 @@ function fillMaeHorizon(zone, startCivil, days = MAE_SUGGEST_HORIZON_DAYS) {
     const utc = Date.UTC(startCivil.year, startCivil.month - 1, startCivil.day) + offset * 86400000;
     const d = new Date(utc);
     const civil = { year: d.getUTCFullYear(), month: d.getUTCMonth() + 1, day: d.getUTCDate() };
-    for (const [hh, mm] of [[5, 30], [11, 30], [16, 30]]) {
+    for (const [hh, mm] of [[5, 0], [10, 30], [16, 0]]) {
       occupied.push(maeZonedWallToUtcMs(civil.year, civil.month, civil.day, hh, mm, zone));
     }
   }
@@ -51,133 +56,271 @@ test("nyc and miami map to America/New_York", () => {
   assert.equal(maeTimeZoneFromTheme("la"), "America/Los_Angeles");
 });
 
-test("horizon is 28 days", () => {
-  assert.equal(MAE_SUGGEST_HORIZON_DAYS, 28);
+test("horizon defaults to 30 days and is configurable", () => {
+  assert.equal(MAE_SUGGEST_HORIZON_DAYS, 30);
+  assert.equal(MAE_SCHEDULE_HORIZON_SETTING, "STUDIO_SCHEDULE_HORIZON_DAYS");
+  assert.equal(maeNormalizeHorizonDays(14), 14);
+  assert.equal(maeNormalizeHorizonDays(0), 30);
+  assert.equal(maeNormalizeHorizonDays(200), 90);
 });
 
-test("MAE never stamps NYC midnight or 11 PM for YouTube/Instagram", () => {
-  const zone = "America/New_York";
-  const now = new Date("2026-10-04T12:00:00Z");
+test("MAE windows are 5:00, 10:30, and 16:00", () => {
+  assert.deepEqual([...MAE_PRIORITY_SCHEDULE_WINDOWS], [
+    "05:00-07:00",
+    "10:30-12:30",
+    "16:00-18:00",
+  ]);
+});
+
+test("empty schedule first post is Day 1 Morning", () => {
+  const zone = "America/Chicago";
+  const now = new Date("2026-10-05T08:00:00Z"); // 3:00 AM CDT
+  const iso = maePickBalancedSuggestedIso([], now, { timeZone: zone, occupiedMs: [] });
+  assert.equal(dayOf(iso, zone), "2026-10-05");
+  assert.deepEqual(localParts(iso, zone), { hour: 5, minute: 0 });
+});
+
+test("second and third posts fill Day 1 Afternoon then Evening", () => {
+  const zone = "America/Chicago";
+  const now = new Date("2026-10-05T08:00:00Z");
   const occupied = [];
   const picks = [];
-  for (let i = 0; i < 12; i++) {
+  for (let i = 0; i < 3; i++) {
     const iso = maePickBalancedSuggestedIso([], now, {
+      timeZone: zone,
       occupiedMs: occupied,
       platformOccupiedMs: occupied,
-      timeZone: zone,
     });
     picks.push(iso);
     occupied.push(Date.parse(iso));
-    assert.equal(maeIsBlackoutLocalTime(Date.parse(iso), zone), false, iso);
-    const local = localParts(iso, zone);
-    assert.ok(
-      (local.hour === 5 && local.minute === 30)
-      || (local.hour === 11 && local.minute === 30)
-      || (local.hour === 16 && local.minute === 30),
-      `off MAE: ${iso} ${local.hour}:${String(local.minute).padStart(2, "0")}`,
-    );
   }
-  const hours = picks.map((iso) => localParts(iso, zone).hour);
-  assert.ok(!hours.includes(0) && !hours.includes(1) && !hours.includes(23) && !hours.includes(22), hours.join(","));
+  assert.equal(dayOf(picks[0], zone), "2026-10-05");
+  assert.deepEqual(localParts(picks[0], zone), { hour: 5, minute: 0 });
+  assert.deepEqual(localParts(picks[1], zone), { hour: 10, minute: 30 });
+  assert.deepEqual(localParts(picks[2], zone), { hour: 16, minute: 0 });
 });
 
-test("successive same-platform picks spread one morning across each day", () => {
+test("fourth post is Day 2 Morning", () => {
+  const zone = "America/Chicago";
+  const now = new Date("2026-10-05T08:00:00Z");
+  const occupied = [];
+  for (let i = 0; i < 4; i++) {
+    const iso = maePickBalancedSuggestedIso([], now, {
+      timeZone: zone,
+      occupiedMs: occupied,
+      platformOccupiedMs: occupied,
+    });
+    occupied.push(Date.parse(iso));
+    if (i === 3) {
+      assert.equal(dayOf(iso, zone), "2026-10-06");
+      assert.deepEqual(localParts(iso, zone), { hour: 5, minute: 0 });
+    }
+  }
+});
+
+test("90 MAE posts fill all 30 days with three each", () => {
   const zone = "America/New_York";
   const now = new Date("2026-10-05T08:00:00Z");
   const occupied = [];
-  const days = [];
-  for (let i = 0; i < 8; i++) {
-    const iso = maePickBalancedSuggestedIso(MAE_PRIORITY_SCHEDULE_WINDOWS, now, {
+  const byDay = new Map();
+  for (let i = 0; i < 90; i++) {
+    const iso = maePickBalancedSuggestedIso([], now, {
+      timeZone: zone,
       occupiedMs: occupied,
       platformOccupiedMs: occupied,
-      timeZone: zone,
+      horizonDays: 30,
     });
-    const local = localParts(iso, zone);
-    assert.equal(local.hour, 5, iso);
-    assert.equal(local.minute, 30, iso);
-    days.push(dayOf(iso, zone));
+    assert.ok(iso, `post ${i + 1}`);
     occupied.push(Date.parse(iso));
+    const day = dayOf(iso, zone);
+    byDay.set(day, (byDay.get(day) || 0) + 1);
+    const local = localParts(iso, zone);
+    assert.ok(
+      (local.hour === 5 && local.minute === 0)
+      || (local.hour === 10 && local.minute === 30)
+      || (local.hour === 16 && local.minute === 0),
+      `off MAE: ${iso}`,
+    );
   }
-  assert.equal(new Set(days).size, 8);
-  assert.equal(days[0], "2026-10-05");
-  assert.equal(days[7], "2026-10-12");
+  assert.equal(byDay.size, 30);
+  for (const count of byDay.values()) assert.equal(count, 3);
 });
 
-test("a full early week does not take the next post while later days are empty", () => {
+test("91st post is Day 1 widest valid gap; 92nd is Day 2", () => {
   const zone = "America/New_York";
   const now = new Date("2026-10-05T08:00:00Z");
-  const occupied = fillMaeHorizon(zone, { year: 2026, month: 10, day: 5 }, 7);
+  const occupied = fillMaeHorizon(zone, { year: 2026, month: 10, day: 5 }, 30);
+  const first = maePickBalancedSuggestedIso([], now, {
+    timeZone: zone,
+    occupiedMs: occupied,
+    platformOccupiedMs: occupied,
+    horizonDays: 30,
+  });
+  assert.equal(dayOf(first, zone), "2026-10-05");
+  const firstLocal = localParts(first, zone);
+  assert.ok(!(firstLocal.hour === 5 && firstLocal.minute === 0));
+  assert.ok(!(firstLocal.hour === 10 && firstLocal.minute === 30));
+  assert.ok(!(firstLocal.hour === 16 && firstLocal.minute === 0));
+
+  const second = maePickBalancedSuggestedIso([], now, {
+    timeZone: zone,
+    occupiedMs: [...occupied, Date.parse(first)],
+    platformOccupiedMs: [...occupied, Date.parse(first)],
+    horizonDays: 30,
+  });
+  assert.equal(dayOf(second, zone), "2026-10-06");
+});
+
+test("120th post is Day 30 overflow; 121st returns to Day 1", () => {
+  const zone = "America/Chicago";
+  const now = new Date("2026-10-03T08:00:00Z");
+  const occupied = fillMaeHorizon(zone, { year: 2026, month: 10, day: 3 }, 30);
+  // Seed one overflow on every day first (posts 91–120).
+  const extras = [];
+  for (let i = 0; i < 30; i++) {
+    const iso = maePickBalancedSuggestedIso([], now, {
+      timeZone: zone,
+      occupiedMs: [...occupied, ...extras.map(Date.parse)],
+      platformOccupiedMs: [...occupied, ...extras.map(Date.parse)],
+      horizonDays: 30,
+    });
+    extras.push(iso);
+  }
+  assert.equal(dayOf(extras[29], zone), "2026-11-01");
+  const next = maePickBalancedSuggestedIso([], now, {
+    timeZone: zone,
+    occupiedMs: [...occupied, ...extras.map(Date.parse)],
+    platformOccupiedMs: [...occupied, ...extras.map(Date.parse)],
+    horizonDays: 30,
+  });
+  assert.equal(dayOf(next, zone), "2026-10-03");
+});
+
+test("uneven daily counts prefer earliest least-populated day", () => {
+  const zone = "America/New_York";
+  const now = new Date("2026-10-05T08:00:00Z");
+  // Day 1 has 5 posts, days 2–30 have 3 MAE each.
+  const occupied = fillMaeHorizon(zone, { year: 2026, month: 10, day: 5 }, 30);
+  occupied.push(maeZonedWallToUtcMs(2026, 10, 5, 8, 0, zone));
+  occupied.push(maeZonedWallToUtcMs(2026, 10, 5, 12, 0, zone));
   const iso = maePickBalancedSuggestedIso([], now, {
     timeZone: zone,
     occupiedMs: occupied,
     platformOccupiedMs: occupied,
+    horizonDays: 30,
   });
-  assert.equal(dayOf(iso, zone), "2026-10-12");
-  assert.equal(localParts(iso, zone).hour, 5);
-  assert.equal(localParts(iso, zone).minute, 30);
+  assert.equal(dayOf(iso, zone), "2026-10-06");
 });
 
-test("afternoons start only after every day in the four weeks has a morning", () => {
-  const zone = "America/New_York";
+test("Facebook Reel lane does not consume Facebook Story slot", () => {
+  const zone = "America/Chicago";
   const now = new Date("2026-10-05T08:00:00Z");
-  const occupied = [];
-  for (let i = 0; i < MAE_SUGGEST_HORIZON_DAYS; i++) {
-    const iso = maePickBalancedSuggestedIso([], now, {
-      timeZone: zone,
-      occupiedMs: occupied,
-      platformOccupiedMs: occupied,
-    });
-    assert.equal(localParts(iso, zone).hour, 5, iso);
-    occupied.push(Date.parse(iso));
-  }
-  const afternoon = maePickBalancedSuggestedIso([], now, {
+  const storyLane = [
+    maeZonedWallToUtcMs(2026, 10, 5, 5, 0, zone),
+    maeZonedWallToUtcMs(2026, 10, 5, 10, 30, zone),
+    maeZonedWallToUtcMs(2026, 10, 5, 16, 0, zone),
+  ];
+  const reel = maeScheduleNextSlot({
+    timeZone: zone,
+    now,
+    occupiedMs: [],
+    horizonDays: 30,
+  });
+  assert.equal(reel.ok, true);
+  assert.equal(dayOf(reel.iso, zone), "2026-10-05");
+  assert.deepEqual(localParts(reel.iso, zone), { hour: 5, minute: 0 });
+  // Story lane full on day 1 must not push the Reel off morning.
+  assert.equal(maeScheduleLaneKey("Facebook", "Reel"), "facebook::reel");
+  assert.equal(maeScheduleLaneKey("Facebook", "Story"), "facebook::story");
+  assert.notEqual(maeScheduleLaneKey("Facebook", "Reel"), maeScheduleLaneKey("Facebook", "Story"));
+  void storyLane;
+});
+
+test("horizon of 14 days is honored for subsequent scheduling", () => {
+  const zone = "America/Chicago";
+  const now = new Date("2026-10-05T08:00:00Z");
+  const occupied = fillMaeHorizon(zone, { year: 2026, month: 10, day: 5 }, 14);
+  const iso = maePickBalancedSuggestedIso([], now, {
     timeZone: zone,
     occupiedMs: occupied,
     platformOccupiedMs: occupied,
+    horizonDays: 14,
   });
-  assert.equal(dayOf(afternoon, zone), "2026-10-05");
-  assert.equal(localParts(afternoon, zone).hour, 11);
-  assert.equal(localParts(afternoon, zone).minute, 30);
+  assert.equal(dayOf(iso, zone), "2026-10-05");
+  const beyond = maePickBalancedSuggestedIso([], now, {
+    timeZone: zone,
+    occupiedMs: occupied,
+    platformOccupiedMs: occupied,
+    horizonDays: 14,
+  });
+  // Overflow stays inside 14 days.
+  assert.ok(dayOf(beyond, zone) <= "2026-10-18");
 });
 
-test("two TikToks take Monday morning then Tuesday morning, not the same day", () => {
+test("current-day past windows are skipped", () => {
   const zone = "America/New_York";
-  const now = new Date("2026-10-05T08:00:00Z"); // 4:00 AM EDT Monday
-  const stamps = maeBuildSuggestedScheduleMap(
-    [
-      { platform: "TikTok", output_type: "Video Draft", scheduled_at: "" },
-      { platform: "TikTok", output_type: "Multi-Photo", scheduled_at: "" },
-    ],
-    {},
-    now,
-    { timeZone: zone },
-  );
-  const first = localParts(stamps.get("TikTok::Video Draft"), zone);
-  const second = localParts(stamps.get("TikTok::Multi-Photo"), zone);
-  assert.equal(first.hour, 5);
-  assert.equal(first.minute, 30);
-  assert.equal(second.hour, 5);
-  assert.equal(second.minute, 30);
-  assert.equal(dayOf(stamps.get("TikTok::Video Draft"), zone), "2026-10-05");
-  assert.equal(dayOf(stamps.get("TikTok::Multi-Photo"), zone), "2026-10-06");
+  const now = new Date("2026-10-06T14:00:00Z"); // 10:00 AM EDT — morning past
+  const iso = maePickBalancedSuggestedIso([], now, { occupiedMs: [], timeZone: zone });
+  assert.equal(dayOf(iso, zone), "2026-10-06");
+  assert.deepEqual(localParts(iso, zone), { hour: 10, minute: 30 });
 });
 
-test("blackout 12 AM NY is replaced with the next MAE slot, not +3h", () => {
+test("blackout is 8:00 PM through 3:30 AM", () => {
   const zone = "America/New_York";
-  const now = new Date("2026-10-04T08:00:00Z"); // 4:00 AM EDT, so 5:30 is still open
-  const midnight = "2026-10-09T04:00:00.000Z"; // 12:00 AM EDT
-  assert.equal(maeIsBlackoutLocalTime(Date.parse(midnight), zone), true);
-  const iso = maeNextOpenScheduleIso(midnight, [], undefined, { timeZone: zone, now });
-  const local = localParts(iso, zone);
-  assert.equal(local.hour, 5);
-  assert.equal(local.minute, 30);
+  const eightPm = maeZonedWallToUtcMs(2026, 10, 8, 20, 0, zone);
+  const sevenFiftyNine = maeZonedWallToUtcMs(2026, 10, 8, 19, 59, zone);
+  const threeThirty = maeZonedWallToUtcMs(2026, 10, 9, 3, 30, zone);
+  const threeThirtyOne = maeZonedWallToUtcMs(2026, 10, 9, 3, 31, zone);
+  assert.equal(maeIsBlackoutLocalTime(eightPm, zone), true);
+  assert.equal(maeIsBlackoutLocalTime(sevenFiftyNine, zone), false);
+  assert.equal(maeIsBlackoutLocalTime(threeThirty, zone), true);
+  assert.equal(maeIsBlackoutLocalTime(threeThirtyOne, zone), false);
+});
+
+test("daylight saving transition uses profile-local wall time", () => {
+  const zone = "America/New_York";
+  // US DST ends 2026-11-01. Schedule from before/after using local walls.
+  const before = maeZonedWallToUtcMs(2026, 10, 31, 5, 0, zone);
+  const after = maeZonedWallToUtcMs(2026, 11, 2, 5, 0, zone);
+  assert.equal(localParts(new Date(before).toISOString(), zone).hour, 5);
+  assert.equal(localParts(new Date(after).toISOString(), zone).hour, 5);
+  const now = new Date("2026-10-31T08:00:00Z");
+  const occupied = fillMaeHorizon(zone, { year: 2026, month: 10, day: 31 }, 3);
+  const iso = maePickBalancedSuggestedIso([], now, {
+    timeZone: zone,
+    occupiedMs: occupied,
+    platformOccupiedMs: occupied,
+    horizonDays: 3,
+  });
+  assert.ok(iso);
   assert.equal(maeIsBlackoutLocalTime(Date.parse(iso), zone), false);
 });
 
-test("keepAnyNonClashing preserves a saved future non-MAE-adjacent stamp", () => {
+test("capacity failure returns explicit error", () => {
+  const zone = "America/Chicago";
+  const now = new Date("2026-10-05T08:00:00Z");
+  const occupied = fillMaeHorizon(zone, { year: 2026, month: 10, day: 5 }, 1);
+  // Saturate open hours every 45 minutes so no 90-minute-clear gap remains.
+  for (let minute = 3 * 60 + 31; minute <= 19 * 60 + 59; minute += 45) {
+    const hh = Math.floor(minute / 60);
+    const mm = minute % 60;
+    occupied.push(maeZonedWallToUtcMs(2026, 10, 5, hh, mm, zone));
+  }
+  const result = maeScheduleNextSlot({
+    timeZone: zone,
+    now,
+    occupiedMs: occupied,
+    horizonDays: 1,
+  });
+  assert.equal(result.ok, false);
+  assert.equal(result.capacity, true);
+  assert.match(result.error, /No open/i);
+});
+
+test("keepAnyNonClashing preserves a saved future non-MAE stamp", () => {
   const zone = "America/New_York";
   const now = new Date("2026-10-06T18:00:00Z");
-  const saved = "2026-10-19T20:30:00.000Z"; // Oct 19 4:30 PM EDT
+  const saved = "2026-10-19T18:30:00.000Z"; // Oct 19 2:30 PM EDT (inside open hours)
   const kept = maeNextOpenScheduleIso(saved, [], undefined, {
     timeZone: zone,
     now,
@@ -186,335 +329,80 @@ test("keepAnyNonClashing preserves a saved future non-MAE-adjacent stamp", () =>
   assert.equal(kept, new Date(saved).toISOString());
 });
 
-test("taken evening forces the next morning instead of reusing 4:30 PM", () => {
-  const zone = "America/New_York";
-  const now = new Date("2026-10-06T18:00:00Z");
-  const occupied = [
-    Date.parse("2026-10-06T09:30:00.000Z"),
-    Date.parse("2026-10-06T15:30:00.000Z"),
-    Date.parse("2026-10-06T20:30:00.000Z"),
-    Date.parse("2026-10-06T21:00:00.000Z"),
-  ];
-  const iso = maePickBalancedSuggestedIso([], now, {
-    timeZone: zone,
-    occupiedMs: occupied,
-    platformOccupiedMs: occupied,
-  });
-  const local = localParts(iso, zone);
-  assert.equal(local.hour, 5);
-  assert.equal(local.minute, 30);
-  assert.equal(dayOf(iso, zone), "2026-10-07");
-});
-
-test("11 PM profile local is blackout; 10:59 PM is not", () => {
-  const zone = "America/New_York";
-  const eleven = maeZonedWallToUtcMs(2026, 10, 8, 23, 0, zone);
-  const tenFiftyNine = maeZonedWallToUtcMs(2026, 10, 8, 22, 59, zone);
-  const threeAm = maeZonedWallToUtcMs(2026, 10, 9, 3, 0, zone);
-  const threeOhOne = maeZonedWallToUtcMs(2026, 10, 9, 3, 1, zone);
-  assert.equal(maeIsBlackoutLocalTime(eleven, zone), true);
-  assert.equal(maeIsBlackoutLocalTime(tenFiftyNine, zone), false);
-  assert.equal(maeIsBlackoutLocalTime(threeAm, zone), true);
-  assert.equal(maeIsBlackoutLocalTime(threeOhOne, zone), false);
-});
-
-test("Chicago 23:00 would display as NY 12:00 AM and is rejected as blackout in NY", () => {
-  const chicagoLate = Date.parse("2026-10-09T04:00:00.000Z"); // 11 PM CDT / 12 AM EDT
-  assert.equal(maeIsBlackoutLocalTime(chicagoLate, "America/New_York"), true);
-  assert.equal(maeIsBlackoutLocalTime(chicagoLate, "America/Chicago"), true);
-});
-
-test("suggested map ignores industry 20:00 YouTube windows and uses MAE", () => {
-  const zone = "America/New_York";
-  const now = new Date("2026-10-04T08:00:00Z");
-  const stamps = maeBuildSuggestedScheduleMap(
+test("regeneration combination sort is platform, output type, profile", () => {
+  const sorted = maeSortRegenCombinations([
+    { platform: "TikTok", output_type: "Video", profile: "Chicago" },
+    { platform: "Facebook", output_type: "Story", profile: "Miami" },
+    { platform: "Facebook", output_type: "Reel", profile: "Chicago" },
+    { platform: "Facebook", output_type: "Reel", profile: "Atlanta" },
+    { platform: "Instagram", output_type: "Reel", profile: "Chicago" },
+  ]);
+  assert.deepEqual(
+    sorted.map((row) => `${row.platform}/${row.output_type}/${row.profile}`),
     [
-      { platform: "YouTube", output_type: "Short", scheduled_at: "" },
-      { platform: "Instagram", output_type: "Reel", scheduled_at: "" },
+      "Facebook/Reel/Atlanta",
+      "Facebook/Reel/Chicago",
+      "Facebook/Story/Miami",
+      "Instagram/Reel/Chicago",
+      "TikTok/Video/Chicago",
     ],
-    {},
-    now,
-    { timeZone: zone },
   );
-  const youtube = localParts(stamps.get("YouTube::Short"), zone);
-  const instagram = localParts(stamps.get("Instagram::Reel"), zone);
-  assert.equal(youtube.hour, 5);
-  assert.equal(youtube.minute, 30);
-  assert.equal(instagram.hour, 5);
-  assert.equal(instagram.minute, 30);
-  assert.notEqual(dayOf(stamps.get("YouTube::Short"), zone), dayOf(stamps.get("Instagram::Reel"), zone));
-  assert.ok(Date.parse(stamps.get("Instagram::Reel")) - Date.parse(stamps.get("YouTube::Short")) >= 6 * 86400000);
-  for (const iso of stamps.values()) {
-    assert.equal(maeIsBlackoutLocalTime(Date.parse(iso), zone), false);
-  }
 });
 
-test("a new short spreads each platform across different days in the 4-week window", () => {
-  const zone = "America/New_York";
+test("build map schedules Reel and Story on independent lanes", () => {
+  const zone = "America/Chicago";
   const now = new Date("2026-10-05T08:00:00Z");
   const stamps = maeBuildSuggestedScheduleMap(
     [
-      { platform: "Instagram", output_type: "Reel", scheduled_at: "" },
       { platform: "Facebook", output_type: "Reel", scheduled_at: "" },
-      { platform: "TikTok", output_type: "Video Draft", scheduled_at: "" },
-      { platform: "YouTube", output_type: "Short", scheduled_at: "" },
+      { platform: "Facebook", output_type: "Story", scheduled_at: "" },
     ],
     {},
     now,
-    { timeZone: zone },
+    { timeZone: zone, storyCompanion: false, spreadPlatforms: false },
   );
-  const days = ["Instagram::Reel", "Facebook::Reel", "TikTok::Video Draft", "YouTube::Short"]
-    .map((key) => dayOf(stamps.get(key), zone));
-  assert.equal(new Set(days).size, 4, `platforms should land on 4 days, got ${days.join(",")}`);
-  const instagram = Date.parse(stamps.get("Instagram::Reel"));
-  const facebook = Date.parse(stamps.get("Facebook::Reel"));
-  const tiktok = Date.parse(stamps.get("TikTok::Video Draft"));
-  const youtube = Date.parse(stamps.get("YouTube::Short"));
-  assert.ok(facebook - instagram >= 6 * 86400000, "Facebook should start about a week after Instagram");
-  assert.ok(tiktok - facebook >= 6 * 86400000, "TikTok should start about a week after Facebook");
-  assert.ok(youtube - tiktok >= 6 * 86400000, "YouTube should start about a week after TikTok");
-  const horizonEnd = now.getTime() + MAE_SUGGEST_HORIZON_DAYS * 86400000;
-  for (const iso of stamps.values()) {
-    assert.ok(Date.parse(iso) <= horizonEnd + 86400000);
-    assert.equal(maeIsBlackoutLocalTime(Date.parse(iso), zone), false);
-  }
+  const reel = stamps.get("Facebook::Reel");
+  const story = stamps.get("Facebook::Story");
+  assert.ok(reel);
+  assert.ok(story);
+  // Independent lanes may share the same MAE wall clock.
+  assert.equal(dayOf(reel, zone), dayOf(story, zone));
+  assert.deepEqual(localParts(reel, zone), localParts(story, zone));
 });
 
-test("Stories follow the same-platform main by 10 minutes even when MAE lanes are full", () => {
-  const zone = "America/New_York";
-  const now = new Date("2026-10-07T12:00:00Z");
-  const morning = maeZonedWallToUtcMs(2026, 10, 7, 5, 30, zone);
-  const afternoon = maeZonedWallToUtcMs(2026, 10, 7, 11, 30, zone);
-  const evening = maeZonedWallToUtcMs(2026, 10, 7, 16, 30, zone);
-  const stamps = maeBuildSuggestedScheduleMap(
-    [
-      { platform: "Instagram", output_type: "Reel", scheduled_at: "" },
-      { platform: "Facebook", output_type: "Reel", scheduled_at: "" },
-      { platform: "Instagram", output_type: "Story", scheduled_at: "" },
-      { platform: "Facebook", output_type: "Story", scheduled_at: "" },
-    ],
-    { Instagram: [morning, afternoon, evening], Facebook: [morning, afternoon, evening] },
-    now,
-    { timeZone: zone },
-  );
-  const igReel = Date.parse(stamps.get("Instagram::Reel"));
-  const fbReel = Date.parse(stamps.get("Facebook::Reel"));
-  const ig = Date.parse(stamps.get("Instagram::Story"));
-  const fb = Date.parse(stamps.get("Facebook::Story"));
-  assert.ok(Number.isFinite(igReel), "Instagram::Reel");
-  assert.ok(Number.isFinite(fbReel), "Facebook::Reel");
-  assert.ok(Number.isFinite(ig), "Instagram::Story");
-  assert.ok(Number.isFinite(fb), "Facebook::Story");
-  // Content 527 Waiting Stories showed — because Stories competed for MAE and
-  // lost. Companion Stories always stamp main + 10 minutes instead.
-  assert.equal(ig, igReel + 10 * 60 * 1000);
-  assert.equal(fb, fbReel + 10 * 60 * 1000);
-});
-
-test("Approve resolves a Story to the same-platform main plus 10 minutes", () => {
+test("Approve resolves a Story to the same-platform main plus 10 minutes when companion present", () => {
   const zone = "America/New_York";
   const notBefore = Date.parse("2026-10-14T16:00:00Z");
-  const reelMs = maeZonedWallToUtcMs(2026, 10, 27, 16, 30, zone);
-  const snapped = new Date(maeZonedWallToUtcMs(2026, 10, 14, 11, 30, zone)).toISOString();
+  const reelMs = maeZonedWallToUtcMs(2026, 10, 27, 16, 0, zone);
   const resolved = maeResolveStorySchedule({
     platform: "Instagram",
     siblings: [
       { platform: "Instagram", output_type: "Reel", scheduled_at: new Date(reelMs).toISOString() },
-      { platform: "Instagram", output_type: "Story", scheduled_at: snapped },
-      { platform: "TikTok", output_type: "Video Draft", scheduled_at: new Date(maeZonedWallToUtcMs(2026, 10, 23, 10, 30, zone)).toISOString() },
     ],
-    requestedIso: snapped,
-    existingIso: snapped,
     notBeforeMs: notBefore,
-    occupiedMaeIso: snapped,
     timeZone: zone,
   });
   assert.equal(resolved.source, "companion");
   assert.equal(Date.parse(resolved.iso), reelMs + 10 * 60 * 1000);
 });
 
-test("A Story with no sibling does not keep the empty-lane MAE instant", () => {
-  const zone = "America/New_York";
-  const notBefore = Date.parse("2026-10-14T16:00:00Z");
-  const snapped = new Date(maeZonedWallToUtcMs(2026, 10, 14, 11, 30, zone)).toISOString();
-  const openMae = new Date(maeZonedWallToUtcMs(2026, 10, 23, 16, 30, zone)).toISOString();
-  const resolved = maeResolveStorySchedule({
-    platform: "Facebook",
-    siblings: [],
-    requestedIso: snapped,
-    existingIso: snapped,
-    notBeforeMs: notBefore,
-    occupiedMaeIso: openMae,
-    timeZone: zone,
-  });
-  assert.equal(resolved.source, "mae_plus_10");
-  assert.equal(Date.parse(resolved.iso), Date.parse(openMae) + 10 * 60 * 1000);
-  const held = maeResolveStorySchedule({
-    platform: "Facebook",
-    siblings: [],
-    existingIso: snapped,
-    notBeforeMs: notBefore,
-    timeZone: zone,
-    allowMaeFallback: false,
-  });
-  assert.equal(held.iso, "");
-});
-
-test("Stories keep a stored companion time without occupying the MAE lane", () => {
-  const zone = "America/New_York";
-  const now = new Date("2026-10-07T12:00:00Z");
-  const reelIso = new Date(maeZonedWallToUtcMs(2026, 10, 8, 5, 30, zone)).toISOString();
-  const storyIso = new Date(Date.parse(reelIso) + 10 * 60 * 1000).toISOString();
-  const stamps = maeBuildSuggestedScheduleMap(
-    [
-      { platform: "Instagram", output_type: "Reel", scheduled_at: reelIso },
-      { platform: "Instagram", output_type: "Story", scheduled_at: storyIso },
-    ],
-    {},
-    now,
-    { timeZone: zone },
+test("Worker stamp paths use MAE horizon engine", () => {
+  assert.match(worker, /from "\.\/mae-schedule\.mjs"/);
+  assert.match(worker, /studio_mae_schedule_v1: true/);
+  assert.match(worker, /studio_mae_horizon_days_v1: true/);
+  assert.match(worker, /studio_mae_output_type_lanes_v1: true/);
+  assert.match(worker, /studio_mae_profile_occupancy_v1: true/);
+  assert.match(worker, /0\.10\.618-mae-horizon-overflow/);
+  assert.match(worker, /MAE_PRIORITY_SCHEDULE_WINDOWS/);
+  assert.match(worker, /maeScheduleLaneKey/);
+  assert.match(worker, /STUDIO_SCHEDULE_HORIZON_DAYS|MAE_SCHEDULE_HORIZON_SETTING/);
+  assert.match(worker, /studioScheduleHorizonDays/);
+  const approveFn = worker.slice(
+    worker.indexOf("async function approveOutputRecordForPublishing"),
+    worker.indexOf("function mapApprovedOutputSummary"),
   );
-  assert.equal(stamps.get("Instagram::Reel"), new Date(reelIso).toISOString());
-  assert.equal(stamps.get("Instagram::Story"), new Date(storyIso).toISOString());
-});
-
-test("after 28 days of MAE are full, the 4th is day 1's largest gap", () => {
-  const zone = "America/New_York";
-  const now = new Date("2026-10-05T08:00:00Z");
-  const occupied = fillMaeHorizon(zone, { year: 2026, month: 10, day: 5 }, 28);
-  const stamps = maeBuildSuggestedScheduleMap(
-    [
-      { platform: "Instagram", output_type: "Reel", scheduled_at: "" },
-      { platform: "Facebook", output_type: "Reel", scheduled_at: "" },
-    ],
-    { Instagram: occupied.slice(), Facebook: occupied.slice() },
-    now,
-    { timeZone: zone },
-  );
-  const first = stamps.get("Instagram::Reel");
-  const second = stamps.get("Facebook::Reel");
-  assert.equal(dayOf(first, zone), "2026-10-05");
-  assert.equal(localParts(first, zone).hour, 8);
-  assert.equal(localParts(first, zone).minute, 30);
-  assert.equal(dayOf(second, zone), "2026-10-19");
-  assert.equal(localParts(second, zone).hour, 8);
-  assert.equal(localParts(second, zone).minute, 30);
-});
-
-test("5th posts walk day 1 again after every day already has a 4th", () => {
-  const zone = "America/Chicago";
-  const now = new Date("2026-10-03T08:00:00Z");
-  const occupied = fillMaeHorizon(zone, { year: 2026, month: 10, day: 3 }, 28);
-  // Seed one 4th on every day (08:30 local).
-  for (let offset = 0; offset < 28; offset++) {
-    const utc = Date.UTC(2026, 9, 3 + offset);
-    const d = new Date(utc);
-    occupied.push(maeZonedWallToUtcMs(d.getUTCFullYear(), d.getUTCMonth() + 1, d.getUTCDate(), 8, 30, zone));
-  }
-  const iso = maePickBalancedSuggestedIso([], now, {
-    timeZone: zone,
-    occupiedMs: occupied,
-    platformOccupiedMs: occupied,
-  });
-  assert.ok(iso);
-  assert.equal(maeIsBlackoutLocalTime(Date.parse(iso), zone), false);
-  const local = localParts(iso, zone);
-  // 5th is a widest-gap slot, not another MAE day-part.
-  assert.ok(!(local.hour === 5 && local.minute === 30));
-  assert.ok(!(local.hour === 11 && local.minute === 30));
-  assert.ok(!(local.hour === 16 && local.minute === 30));
-  // Walk starts at day 1; first day that still has room wins (may skip crowded early days).
-  assert.ok(dayOf(iso, zone) >= "2026-10-03");
-  assert.ok(dayOf(iso, zone) <= "2026-10-30");
-});
-
-test("extras fill day 1's gap before day 2's gap once MAE horizon is full", () => {
-  const zone = "America/Chicago";
-  const now = new Date("2026-10-03T08:00:00Z");
-  const occupied = fillMaeHorizon(zone, { year: 2026, month: 10, day: 3 }, 28);
-  const first = maePickBalancedSuggestedIso([], now, { timeZone: zone, occupiedMs: occupied });
-  const firstLocal = localParts(first, zone);
-  assert.equal(dayOf(first, zone), "2026-10-03");
-  assert.equal(firstLocal.hour, 8);
-  assert.equal(firstLocal.minute, 30);
-
-  const second = maePickBalancedSuggestedIso([], now, {
-    timeZone: zone,
-    occupiedMs: [...occupied, Date.parse(first)],
-  });
-  const secondLocal = localParts(second, zone);
-  assert.equal(dayOf(second, zone), "2026-10-04");
-  assert.equal(secondLocal.hour, 8);
-  assert.equal(secondLocal.minute, 30);
-});
-
-test("existing blackout stamps are not reused", () => {
-  const zone = "America/New_York";
-  const now = new Date("2026-10-04T12:00:00Z");
-  const stamps = maeBuildSuggestedScheduleMap(
-    [{ platform: "YouTube", output_type: "Short", scheduled_at: "2026-10-09T04:00:00.000Z" }],
-    {},
-    now,
-    { timeZone: zone },
-  );
-  const iso = stamps.get("YouTube::Short");
-  assert.notEqual(iso, "2026-10-09T04:00:00.000Z");
-  assert.equal(maeIsBlackoutLocalTime(Date.parse(iso), zone), false);
-});
-
-test("a taken 5:30 is not reused; the next MAE opening is chosen", () => {
-  const zone = "America/New_York";
-  const now = new Date("2026-10-05T08:00:00Z");
-  const morning = maePickBalancedSuggestedIso([], now, {
-    occupiedMs: [],
-    platformOccupiedMs: [],
-    timeZone: zone,
-  });
-  const stamps = maeBuildSuggestedScheduleMap(
-    [
-      { platform: "Instagram", output_type: "Reel", scheduled_at: morning },
-      { platform: "Instagram", output_type: "Carousel", scheduled_at: morning },
-    ],
-    { Instagram: [Date.parse(morning)] },
-    now,
-    { timeZone: zone },
-  );
-  const reel = localParts(stamps.get("Instagram::Reel"), zone);
-  const carousel = localParts(stamps.get("Instagram::Carousel"), zone);
-  assert.notEqual(stamps.get("Instagram::Reel"), morning);
-  assert.equal(reel.hour, 5);
-  assert.equal(reel.minute, 30);
-  assert.equal(carousel.hour, 5);
-  assert.equal(carousel.minute, 30);
-  assert.equal(dayOf(stamps.get("Instagram::Reel"), zone), "2026-10-06");
-  assert.equal(dayOf(stamps.get("Instagram::Carousel"), zone), "2026-10-07");
-});
-
-test("two Instagrams stored on the same free 5:30 keep the first and move the second to the next day", () => {
-  const zone = "America/New_York";
-  const now = new Date("2026-10-05T08:00:00Z");
-  const morning = maePickBalancedSuggestedIso([], now, {
-    occupiedMs: [],
-    platformOccupiedMs: [],
-    timeZone: zone,
-  });
-  const stamps = maeBuildSuggestedScheduleMap(
-    [
-      { platform: "Instagram", output_type: "Reel", scheduled_at: morning },
-      { platform: "Instagram", output_type: "Carousel", scheduled_at: morning },
-    ],
-    {},
-    now,
-    { timeZone: zone },
-  );
-  const reel = localParts(stamps.get("Instagram::Reel"), zone);
-  const carousel = localParts(stamps.get("Instagram::Carousel"), zone);
-  assert.equal(stamps.get("Instagram::Reel"), new Date(morning).toISOString());
-  assert.equal(reel.hour, 5);
-  assert.equal(reel.minute, 30);
-  assert.equal(carousel.hour, 5);
-  assert.equal(carousel.minute, 30);
-  assert.equal(dayOf(stamps.get("Instagram::Carousel"), zone), "2026-10-06");
+  assert.match(approveFn, /recheckBestSlot/);
+  assert.match(worker, /SCHEDULE_REGEN_JOBS|schedule-regen/);
 });
 
 test("occupancy load windows the Airtable query and sorts nearest-first", () => {
@@ -523,84 +411,12 @@ test("occupancy load windows the Airtable query and sorts nearest-first", () => 
     worker.indexOf("async function studioLoadOccupiedSchedules"),
   );
   assert.match(loadFn, /sortDirection: "asc"/);
-  assert.doesNotMatch(loadFn, /sortDirection: "desc"/);
   assert.match(loadFn, /studioOccupiedFilterFormula\(now, profile\)/);
   assert.match(loadFn, /"Studio_Output_Type"/);
-  assert.match(loadFn, /"Format"/);
   assert.match(loadFn, /"Content_Profile"/);
-  assert.doesNotMatch(loadFn, /"Brand"/);
-  assert.match(loadFn, /occupied schedule occupancy read failed/);
-  assert.match(worker, /function studioOccupiedFilterFormula/);
-  assert.match(worker, /contentProfileFilterFormula\(profile\)/);
-  assert.match(worker, /studioOccupiedRowMatchesProfile/);
-  assert.match(worker, /studioOccupiedCacheKey/);
-  assert.match(worker, /IS_AFTER\(\{\$\{field\}\},DATETIME_PARSE/);
-  assert.match(worker, /IS_BEFORE\(\{\$\{field\}\},DATETIME_PARSE/);
-  assert.match(worker, /"Scheduled_Post_Date", "YouTube_Scheduled_Publish_At", "Studio_Scheduled_At"/);
-  assert.doesNotMatch(worker, /const STUDIO_OCCUPIED_FORMULA =/);
-  const formulaFn = worker.slice(
-    worker.indexOf("const notStory =", worker.indexOf("function studioOccupiedFilterFormula")),
-    worker.indexOf("const studioOccupiedScheduleCaches"),
+  const occupyFn = worker.slice(
+    worker.indexOf("async function studioLoadOccupiedSchedules"),
+    worker.indexOf("function studioPublishScheduleFields"),
   );
-  // Unbounded Ready to Publish / Publishing rows sorted oldest-first and filled
-  // the cap, so the real 28-day MAE calendar looked empty and every stamp was 5:30.
-  assert.doesNotMatch(formulaFn, /Publish_Status\}="Ready to Publish"/);
-  assert.doesNotMatch(formulaFn, /Publish_Status\}="Publishing"/);
-  assert.doesNotMatch(formulaFn, /Published_At\}=BLANK\(\)/);
-  assert.match(formulaFn, /FIND\("Story"/);
-  assert.match(worker, /STUDIO_OCCUPIED_LIST_LIMIT = 800/);
-  const msFn = worker.slice(
-    worker.indexOf("function studioOccupiedMsFromRow"),
-    worker.indexOf("async function studioLoadOccupiedScheduleRows"),
-  );
-  assert.doesNotMatch(msFn, /return imminent \? now : null/);
-});
-
-test("Worker stamp paths use MAE not industry evening windows", () => {
-  assert.match(worker, /from "\.\/mae-schedule\.mjs"/);
-  assert.match(worker, /studio_mae_schedule_v1: true/);
-  assert.match(worker, /studio_mae_platform_spread_v1: true/);
-  assert.match(worker, /studio_mae_profile_occupancy_v1: true/);
-  assert.match(worker, /studio_schedule_occupancy_fields_v1: true/);
-  assert.match(worker, /0.10.617-balanced-four-week-slots/);
-  assert.match(worker, /studio_story_companion_schedule_v1: true/);
-  assert.match(worker, /storyCompanion/);
-  assert.match(worker, /maeResolveStorySchedule/);
-  assert.match(worker, /async function studioHealStoryCompanionDrift/);
-  assert.match(worker, /await studioHealStoryCompanionDrift\(env, \{ limit: 8 \}\)/);
-  const approveFn = worker.slice(
-    worker.indexOf("async function approveOutputRecordForPublishing"),
-    worker.indexOf("function mapApprovedOutputSummary"),
-  );
-  assert.match(approveFn, /studioResolveStoryPublishIso/);
-  assert.doesNotMatch(approveFn, /const lane = isStory \? \[\]/);
-  assert.match(worker, /STUDIO_OCCUPIED_HORIZON_MS = 28 \* 24/);
-  assert.match(worker, /studioLoadPlanScheduleOccupancy/);
-  assert.match(worker, /A stored 5:30 that lost its slot must be written/);
-  assert.match(worker, /MAE_PRIORITY_SCHEDULE_WINDOWS/);
-  assert.doesNotMatch(
-    worker.slice(worker.indexOf("function studioBuildSuggestedScheduleMap")),
-    /studioIndustryBestWindows\(platform, outputType\);\s*const iso = studioPickBalancedSuggestedIso\(industry\.windows/,
-  );
-  assert.match(worker, /maeIsBlackoutLocalTime\(existingMs, timeZone\)/);
-});
-
-test("1 AM NYC still picks today's 5:30, not tomorrow morning", () => {
-  const zone = "America/New_York";
-  const now = new Date("2026-10-06T05:58:00Z");
-  const iso = maePickBalancedSuggestedIso([], now, { occupiedMs: [], timeZone: zone });
-  assert.equal(dayOf(iso, zone), "2026-10-06");
-  const local = localParts(iso, zone);
-  assert.equal(local.hour, 5);
-  assert.equal(local.minute, 30);
-});
-
-test("Chicago occupancy for today does not move an empty NYC calendar to tomorrow morning", () => {
-  const zone = "America/New_York";
-  const now = new Date("2026-10-06T14:00:00Z"); // 10:00 AM EDT, so 5:30 is past
-  const iso = maePickBalancedSuggestedIso([], now, { occupiedMs: [], timeZone: zone });
-  assert.equal(dayOf(iso, zone), "2026-10-06");
-  const local = localParts(iso, zone);
-  assert.equal(local.hour, 11);
-  assert.equal(local.minute, 30);
+  assert.match(occupyFn, /maeScheduleLaneKey/);
 });

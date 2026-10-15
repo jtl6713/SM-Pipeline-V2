@@ -44,7 +44,7 @@ function wallMs(year, month, day, hour, minute, timeZone) {
   return ms;
 }
 
-function fillMaeHorizon(zone, year, month, day, days = 28) {
+function fillMaeHorizon(zone, year, month, day, days = 30) {
   const occupied = [];
   for (let offset = 0; offset < days; offset++) {
     const utc = Date.UTC(year, month - 1, day) + offset * 86400000;
@@ -52,7 +52,7 @@ function fillMaeHorizon(zone, year, month, day, days = 28) {
     const y = d.getUTCFullYear();
     const m = d.getUTCMonth() + 1;
     const dd = d.getUTCDate();
-    for (const [hh, mm] of [[5, 30], [11, 30], [16, 30]]) {
+    for (const [hh, mm] of [[5, 0], [10, 30], [16, 0]]) {
       occupied.push(wallMs(y, m, dd, hh, mm, zone));
     }
   }
@@ -65,225 +65,78 @@ test("automatic suggestions use the first-priority morning window in each profil
     const iso = plan.ezPickBalancedSuggestedIso([], now, { timeZone });
     const local = localParts(iso, timeZone);
     assert.equal(local.hour, 5);
-    assert.equal(local.minute, 30);
+    assert.equal(local.minute, 0);
     assert.equal(plan.ezIsBlackoutLocalTime(Date.parse(iso), timeZone), false);
   }
 });
 
-test("scheduler spreads the next same-platform post onto the lightest later day", () => {
+test("scheduler fills Day 1 MAE before moving to Day 2", () => {
   const zone = "America/Chicago";
   const now = new Date("2026-10-03T08:00:00Z");
-  const occupied = [wallMs(2026, 10, 3, 5, 30, zone)];
-  const next = plan.ezPickBalancedSuggestedIso([], now, { timeZone: zone, platformOccupiedMs: occupied });
-  assert.equal(dayOf(next, zone), "2026-10-04");
-  assert.deepEqual(localParts(next, zone), { hour: 5, minute: 30 });
-
-  occupied.push(Date.parse(next));
-  const third = plan.ezPickBalancedSuggestedIso([], now, {
-    timeZone: zone,
-    platformOccupiedMs: occupied,
-  });
-  assert.equal(dayOf(third, zone), "2026-10-05");
-  assert.deepEqual(localParts(third, zone), { hour: 5, minute: 30 });
+  const occupied = [];
+  const first = plan.ezPickBalancedSuggestedIso([], now, { timeZone: zone, platformOccupiedMs: occupied });
+  assert.deepEqual(localParts(first, zone), { hour: 5, minute: 0 });
+  occupied.push(Date.parse(first));
+  const second = plan.ezPickBalancedSuggestedIso([], now, { timeZone: zone, platformOccupiedMs: occupied });
+  assert.equal(dayOf(second, zone), "2026-10-03");
+  assert.deepEqual(localParts(second, zone), { hour: 10, minute: 30 });
+  occupied.push(Date.parse(second));
+  const third = plan.ezPickBalancedSuggestedIso([], now, { timeZone: zone, platformOccupiedMs: occupied });
+  assert.deepEqual(localParts(third, zone), { hour: 16, minute: 0 });
+  occupied.push(Date.parse(third));
+  const fourth = plan.ezPickBalancedSuggestedIso([], now, { timeZone: zone, platformOccupiedMs: occupied });
+  assert.equal(dayOf(fourth, zone), "2026-10-04");
+  assert.deepEqual(localParts(fourth, zone), { hour: 5, minute: 0 });
 });
 
-test("once the 28-day MAE horizon is covered, the extra is day 1's largest gap", () => {
+test("once the 30-day MAE horizon is covered, the extra is day 1's largest gap", () => {
   const zone = "America/Chicago";
   const now = new Date("2026-10-03T08:00:00Z");
-  const occupied = fillMaeHorizon(zone, 2026, 10, 3, 28);
+  const occupied = fillMaeHorizon(zone, 2026, 10, 3, 30);
   const iso = plan.ezPickBalancedSuggestedIso([], now, { timeZone: zone, platformOccupiedMs: occupied });
   assert.equal(dayOf(iso, zone), "2026-10-03");
-  assert.deepEqual(localParts(iso, zone), { hour: 8, minute: 30 });
+  const local = localParts(iso, zone);
+  assert.ok(!(local.hour === 5 && local.minute === 0));
+  assert.ok(!(local.hour === 10 && local.minute === 30));
+  assert.ok(!(local.hour === 16 && local.minute === 0));
 
   const next = plan.ezPickBalancedSuggestedIso([], now, {
     timeZone: zone,
     platformOccupiedMs: [...occupied, Date.parse(iso)],
   });
   assert.equal(dayOf(next, zone), "2026-10-04");
-  assert.deepEqual(localParts(next, zone), { hour: 8, minute: 30 });
 });
 
-test("11 PM through 3:00 AM is a blackout in profile local time", () => {
-  const zone = "America/New_York";
-  const samples = [
-    [wallMs(2026, 10, 3, 23, 0, zone), true],   // 11:00 PM
-    [wallMs(2026, 10, 4, 3, 0, zone), true],    // 3:00 AM
-    [wallMs(2026, 10, 4, 3, 1, zone), false],   // 3:01 AM
-    [wallMs(2026, 10, 3, 22, 59, zone), false], // 10:59 PM
-    [wallMs(2026, 10, 3, 20, 0, zone), false],  // 8:00 PM is now allowed
-  ];
-  for (const [ms, expected] of samples) {
-    assert.equal(plan.ezIsBlackoutLocalTime(ms, zone), expected, new Date(ms).toISOString());
-  }
-});
-
-test("conflict fallback re-picks MAE instead of walking into overnight blackout", () => {
+test("8:00 PM profile local is blackout; 7:59 PM is not", () => {
   const zone = "America/Los_Angeles";
-  const now = new Date("2026-10-03T12:00:00Z"); // 5:00 AM PDT, 5:30 still open
-  const candidate = "2026-10-04T07:00:00Z"; // midnight PDT — blackout
-  const occupied = [Date.parse(candidate)];
-  const iso = plan.ezNextOpenScheduleIso(candidate, occupied, 3 * 60 * 60 * 1000, { timeZone: zone, now });
-  const local = localParts(iso, zone);
-  assert.equal(local.hour, 5);
-  assert.equal(local.minute, 30);
-  assert.equal(plan.ezIsBlackoutLocalTime(Date.parse(iso), zone), false);
+  assert.equal(plan.ezIsBlackoutLocalTime(wallMs(2026, 10, 8, 20, 0, zone), zone), true);
+  assert.equal(plan.ezIsBlackoutLocalTime(wallMs(2026, 10, 8, 19, 59, zone), zone), false);
+  assert.equal(plan.ezIsBlackoutLocalTime(wallMs(2026, 10, 9, 3, 30, zone), zone), true);
+  assert.equal(plan.ezIsBlackoutLocalTime(wallMs(2026, 10, 9, 3, 31, zone), zone), false);
 });
 
-test("a taken morning moves the next same-platform post to the next day's morning", () => {
-  const zone = "America/Chicago";
-  const now = new Date("2026-10-03T08:00:00Z");
-  const occupied = [wallMs(2026, 10, 3, 5, 30, zone)];
-  const iso = plan.ezPickBalancedSuggestedIso([], now, { timeZone: zone, platformOccupiedMs: occupied });
-  assert.equal(dayOf(iso, zone), "2026-10-04");
-  assert.deepEqual(localParts(iso, zone), { hour: 5, minute: 30 });
-});
-
-test("another platform's morning pushes this post to the same-day afternoon", () => {
-  const zone = "America/Chicago";
-  const now = new Date("2026-10-03T08:00:00Z");
-  const occupiedMs = [wallMs(2026, 10, 3, 5, 30, zone)];
-  const iso = plan.ezPickBalancedSuggestedIso([], now, {
-    timeZone: zone,
-    occupiedMs,
-    platformOccupiedMs: [],
-  });
-  assert.equal(dayOf(iso, zone), "2026-10-03");
-  assert.deepEqual(localParts(iso, zone), { hour: 11, minute: 30 });
-});
-
-test("earlier day wins when days have equal profile load", () => {
-  const zone = "America/Chicago";
-  const now = new Date("2026-10-03T08:00:00Z");
-  const iso = plan.ezPickBalancedSuggestedIso([], now, {
-    timeZone: zone,
-    occupiedMs: [],
-    platformOccupiedMs: [],
-  });
-  assert.equal(dayOf(iso, zone), "2026-10-03");
-});
-
-test("widest-gap fallback never schedules beyond the rolling 28-day horizon", () => {
-  const zone = "America/Chicago";
-  const now = new Date("2026-10-03T08:00:00Z");
-  const occupied = fillMaeHorizon(zone, 2026, 10, 3, 28);
-  for (let offset = 0; offset < 28; offset++) {
-    const utc = Date.UTC(2026, 9, 3 + offset);
-    const d = new Date(utc);
-    occupied.push(wallMs(d.getUTCFullYear(), d.getUTCMonth() + 1, d.getUTCDate(), 8, 30, zone));
-    occupied.push(wallMs(d.getUTCFullYear(), d.getUTCMonth() + 1, d.getUTCDate(), 14, 0, zone));
-  }
-  const iso = plan.ezPickBalancedSuggestedIso([], now, {
-    timeZone: zone,
-    occupiedMs: occupied,
-    platformOccupiedMs: occupied,
-  });
-  if (iso) {
-    const horizonEnd = wallMs(2026, 10, 31, 23, 0, zone);
-    assert.ok(Date.parse(iso) < horizonEnd, iso);
-  }
-});
-
-test("initial suggested schedule map honors the active Los Angeles profile timezone", () => {
+test("widest-gap fallback never schedules beyond the rolling 30-day horizon", () => {
   const zone = "America/Los_Angeles";
-  const now = new Date("2026-10-04T06:00:00Z"); // 11 PM on Oct 3 in Los Angeles
-  const items = ["Photo", "Reel", "Story"].map((output_type) => ({ platform: "Facebook", output_type, scheduled_at: "" }));
-  const schedules = plan.ezBuildSuggestedScheduleMap(items, {}, now, { timeZone: zone });
-  const values = [...schedules.values()];
-  assert.equal(values.length, items.length);
-  for (const iso of values) {
-    const date = dayOf(iso, zone);
-    const local = localParts(iso, zone);
-    assert.ok(date >= "2026-10-03" && date < "2026-11-01", `outside 28-day profile horizon: ${iso} (${date})`);
-    assert.equal(plan.ezIsBlackoutLocalTime(Date.parse(iso), zone), false);
-    assert.ok(local.hour === 5 || local.hour === 11, `unexpected hour ${local.hour} for ${iso}`);
-    if (local.hour === 5) assert.equal(local.minute, 30);
-  }
-  const photo = Date.parse(schedules.get("Facebook::Photo"));
-  const reel = Date.parse(schedules.get("Facebook::Reel"));
-  const story = Date.parse(schedules.get("Facebook::Story"));
-  assert.ok(Math.abs(photo - reel) >= 3 * 60 * 60 * 1000);
-  assert.equal(localParts(schedules.get("Facebook::Photo"), zone).hour, 5);
-  assert.equal(localParts(schedules.get("Facebook::Reel"), zone).hour, 5);
-  assert.notEqual(dayOf(schedules.get("Facebook::Photo"), zone), dayOf(schedules.get("Facebook::Reel"), zone));
-  assert.equal(story, photo);
-});
-
-test("Facebook and Instagram Stories may share a slot; other types share a platform lane", () => {
-  const zone = "America/New_York";
-  const now = new Date("2026-10-04T12:00:00Z");
-  const fb = plan.ezBuildSuggestedScheduleMap(
-    ["Reel", "Story"].map((output_type) => ({ platform: "Facebook", output_type, scheduled_at: "" })),
-    {},
-    now,
-    { timeZone: zone },
-  );
-  assert.equal(Date.parse(fb.get("Facebook::Story")), Date.parse(fb.get("Facebook::Reel")));
-
-  const ig = plan.ezBuildSuggestedScheduleMap(
-    ["Carousel", "Story"].map((output_type) => ({ platform: "Instagram", output_type, scheduled_at: "" })),
-    {},
-    now,
-    { timeZone: zone },
-  );
-  assert.equal(Date.parse(ig.get("Instagram::Story")), Date.parse(ig.get("Instagram::Carousel")));
-
-  const tt = plan.ezBuildSuggestedScheduleMap(
-    ["Video Draft", "Multi-Photo"].map((output_type) => ({ platform: "TikTok", output_type, scheduled_at: "" })),
-    {},
-    now,
-    { timeZone: zone },
-  );
-  assert.deepEqual(localParts(tt.get("TikTok::Video Draft"), zone), { hour: 11, minute: 30 });
-  assert.deepEqual(localParts(tt.get("TikTok::Multi-Photo"), zone), { hour: 5, minute: 30 });
-  assert.equal(dayOf(tt.get("TikTok::Multi-Photo"), zone), "2026-10-05");
-});
-
-test("existing automatic schedule inside LA blackout is replaced using LA profile time", () => {
-  const zone = "America/Los_Angeles";
-  const now = new Date("2026-10-04T17:00:00Z");
-  const items = [{
-    platform: "Facebook",
-    output_type: "Story",
-    scheduled_at: "2026-10-09T09:00:00.000Z", // 2:00 AM PDT — forbidden in LA.
-  }];
-  const schedules = plan.ezBuildSuggestedScheduleMap(items, {}, now, { timeZone: zone });
-  const iso = schedules.get("Facebook::Story");
-  assert.ok(iso);
-  assert.notEqual(iso, items[0].scheduled_at);
-  assert.equal(plan.ezIsBlackoutLocalTime(Date.parse(iso), zone), false);
-});
-
-test("picker spreads mornings across days before it uses afternoon", () => {
-  const zone = "America/New_York";
-  const now = new Date("2026-10-04T08:00:00Z");
-  const occupied = [];
-  const picks = [];
-  for (let i = 0; i < 4; i++) {
+  const now = new Date("2026-10-03T12:00:00Z");
+  const occupied = fillMaeHorizon(zone, 2026, 10, 3, 30);
+  for (let i = 0; i < 5; i++) {
     const iso = plan.ezPickBalancedSuggestedIso([], now, {
-      occupiedMs: occupied,
-      platformOccupiedMs: occupied,
       timeZone: zone,
+      platformOccupiedMs: occupied,
+      horizonDays: 30,
     });
-    picks.push(iso);
+    assert.ok(iso);
     occupied.push(Date.parse(iso));
+    const date = dayOf(iso, zone);
+    assert.ok(date >= "2026-10-03" && date <= "2026-11-01", `outside 30-day profile horizon: ${iso} (${date})`);
   }
-  const local = picks.map((iso) => new Intl.DateTimeFormat("en-US", {
-    timeZone: zone, hour: "2-digit", minute: "2-digit", hourCycle: "h23",
-  }).format(new Date(iso)));
-  assert.deepEqual(local, ["05:30", "05:30", "05:30", "05:30"]);
-  assert.equal(new Set(picks.map((iso) => dayOf(iso, zone))).size, 4);
-  assert.ok(picks.every((iso) => !plan.ezIsBlackoutLocalTime(Date.parse(iso), zone)));
 });
 
-test("Studio calendars and blackout checks use the selected profile timezone", () => {
-  assert.match(app, /function workingStudioTimeZone\(\)/);
-  assert.match(app, /return studioTimezone\(\)/);
-  assert.match(app, /pipelineScheduleIsBlackout\(iso, workingStudioTimeZone\(\)\)/);
-  assert.match(app, /helper\.sevenDayWindow\(anchor, workingStudioTimeZone\(\)\)/);
-  assert.match(app, /helper\.sevenDayWindow\(new Date\(\), workingStudioTimeZone\(\)\)/);
-  assert.match(app, /localMinutes >= 23 \* 60 \|\| localMinutes <= 3 \* 60/);
-  assert.match(app, /11:00 PM–3:00 AM local/);
-  assert.match(app, /next 28 days/);
-  assert.match(html, /11:00 PM–3:00 AM local/);
-  assert.match(html, /selected content profile timezone/);
+test("Facebook Reel and Story use independent lanes", () => {
+  assert.equal(plan.ezScheduleLaneKey("Facebook", "Reel"), "facebook::reel");
+  assert.equal(plan.ezScheduleLaneKey("Facebook", "Story"), "facebook::story");
+  assert.match(app, /Independent lane per platform/);
+  assert.match(app, /Will be scheduled on approval/);
+  assert.match(html, /Scheduling Horizon \(Days\)/);
+  assert.equal(plan.EZ_SUGGEST_HORIZON_DAYS, 30);
 });

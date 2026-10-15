@@ -277,7 +277,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.689-balanced-four-week-slots";
+  const BUILD_ID = "item4-0.6.690-mae-horizon-overflow";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -18599,7 +18599,7 @@ function timedScriptAssetLabel(asset, index) {
     return Boolean(iso) && !pipelineScheduleIsBlackout(iso, workingStudioTimeZone());
   }
 
-  const PIPELINE_SCHEDULE_GAP_MS = 3 * 60 * 60 * 1000;
+  const PIPELINE_SCHEDULE_GAP_MS = 90 * 60 * 1000;
 
   function workingStudioTimeZone() {
     return studioTimezone();
@@ -18666,13 +18666,9 @@ function timedScriptAssetLabel(asset, index) {
   function pipelineScheduleBucketKey(record) {
     const platform = String(record?.platform || "").trim().toLowerCase();
     if (!platform) return "";
-    // IG/FB Stories may share a wall-clock slot with other Stories. Give each
-    // Story its own key so they never block each other. Every other output type
-    // shares one platform lane (TikTok Video and Slideshow cannot both take 5:30).
-    if (pipelineScheduleIsStory(record)) {
-      const id = String(record?.id || "").trim();
-      return id ? `${platform}::story:${id}` : `${platform}::story`;
-    }
+    const outputType = String(record?.studio_output_type || record?.format || record?.output_type || "").trim().toLowerCase();
+    // Independent lane per platform × output type (Reel vs Story vs Carousel).
+    if (outputType) return `${platform}::${outputType}`;
     return platform;
   }
 
@@ -18893,20 +18889,16 @@ function timedScriptAssetLabel(asset, index) {
   }
 
   function paintPipelineSuggestedSchedule(record, candidateIso, hint = {}) {
-    if (!pipelineUseDefaultSchedules() || !record?.id || pipelineRowHasSchedule(record)) return false;
-    const openIso = pipelinePrefillOpenIso(record, candidateIso, hint);
-    if (!openIso || pipelineScheduleIsBlackout(openIso, workingStudioTimeZone())) return false;
+    if (!record?.id || pipelineRowHasSchedule(record)) return false;
+    // Do not bind a suggested time before approval — it goes stale while content waits.
     const input = document.querySelector(`[data-pipeline-schedule="${record.id}"]`);
-    if (input) {
-      if (!applySuggestedIsoToScheduleInput(input, openIso)) return false;
-    } else {
-      const local = formatDateTimeLocalInput(openIso);
-      if (!local) return false;
-      pipelineScheduleDrafts.set(record.id, local);
-      pipelineScheduleDirty.delete(record.id);
+    const status = input?.closest(".pipeline-schedule-cell")?.querySelector("[data-pipeline-schedule-status]");
+    if (status && !String(input?.value || "").trim()) {
+      status.textContent = "Will be scheduled on approval";
     }
-    rememberBookedScheduleMs(record.platform, openIso, record);
-    return true;
+    void candidateIso;
+    void hint;
+    return false;
   }
 
   function clearDefaultSchedulesFromUnapprovedRows(records = pipelineOutputs) {
@@ -18926,30 +18918,11 @@ function timedScriptAssetLabel(asset, index) {
   }
 
   async function applyDefaultSchedulesToReadyRows(records = pipelineOutputs) {
-    const ready = pipelineApprovableOutputs(records)
-      .slice()
-      .sort((a, b) => (pipelineScheduleIsStory(a) ? 1 : 0) - (pipelineScheduleIsStory(b) ? 1 : 0)
-        || pipelineOutputNumber(a) - pipelineOutputNumber(b));
-    const { reserved, byPlatform } = pipelineMergedOccupancy();
-    for (const record of ready) {
+    // Scheduling is calculated at Approve time by the centralized MAE engine.
+    // Prefilling would bind a stale suggestion while the row waits for review.
+    for (const record of pipelineApprovableOutputs(records)) {
       if (pipelineRowHasSchedule(record)) continue;
-      try {
-        const data = await fetchBestTimesForOutput(record);
-        const suggested = String(data?.suggested_iso || "").trim();
-        const platform = String(record.platform || "").trim().toLowerCase();
-        const bucket = pipelineScheduleBucketKey(record);
-        const hint = suggestedTimeHint(data);
-        rememberSuggestedHint(platform, hint);
-        const iso = pipelinePrefillOpenIso(record, suggested, hint);
-        if (!iso || pipelineScheduleIsBlackout(iso, workingStudioTimeZone())) continue;
-        const input = document.querySelector(`[data-pipeline-schedule="${record.id}"]`);
-        if (input) applySuggestedIsoToScheduleInput(input, iso);
-        else pipelineScheduleDrafts.set(record.id, formatDateTimeLocalInput(iso));
-        const ms = Date.parse(iso);
-        if (bucket) (reserved[bucket] ||= []).push(ms);
-        if (!pipelineScheduleIsStory(record) && platform) (byPlatform[platform] ||= []).push(ms);
-        rememberBookedScheduleMs(platform, iso, record);
-      } catch {}
+      paintPipelineSuggestedSchedule(record, "", {});
     }
   }
 
@@ -19425,10 +19398,84 @@ function timedScriptAssetLabel(asset, index) {
       const minute = Number(parts.find((part) => part.type === "minute")?.value);
       if (!Number.isFinite(hour) || !Number.isFinite(minute)) return true;
       const localMinutes = hour * 60 + minute;
-      return localMinutes >= 23 * 60 || localMinutes <= 3 * 60;
+      return localMinutes >= 20 * 60 || localMinutes <= 3 * 60 + 30;
     } catch {
       return true;
     }
+  }
+
+  let pipelineScheduleRegenPollTimer = null;
+  let pipelineScheduleHorizonDays = 30;
+
+  async function loadPipelineScheduleHorizonDays() {
+    try {
+      const data = await api("/api/operations/schedule-settings");
+      const days = Number(data?.scheduling_horizon_days);
+      if (Number.isFinite(days) && days > 0) pipelineScheduleHorizonDays = Math.floor(days);
+    } catch {
+      pipelineScheduleHorizonDays = Number(window.ChicagoShiningEzPlan?.EZ_SUGGEST_HORIZON_DAYS) || 30;
+    }
+    return pipelineScheduleHorizonDays;
+  }
+
+  function pipelineRegenOutputTypes(records) {
+    const types = new Set();
+    for (const record of records || []) {
+      const type = String(record?.studio_output_type || record?.format || record?.output_type || "").trim();
+      if (type) types.add(type);
+    }
+    return [...types].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }));
+  }
+
+  function renderScheduleRegenProgress(job) {
+    if (!job || job.status === "idle") return;
+    const counts = job.counts || {};
+    const summary = job.summary || {};
+    const current = counts.current_platform
+      ? `${counts.current_platform} → ${counts.current_output_type || ""}${counts.current_profile ? ` (${counts.current_profile})` : ""}`
+      : "";
+    const lines = [
+      `Schedule Regeneration`,
+      `Overall progress: ${counts.done_combinations || 0} of ${counts.total_combinations || 0} combinations completed (${counts.overall_percent || 0}%).`,
+    ];
+    if (current && (job.status === "running" || job.status === "queued")) {
+      lines.push(`Currently processing: ${current}`);
+      lines.push(`Current combination: ${counts.active_percent || 0}% complete.`);
+    }
+    if (job.status === "completed" || job.status === "failed") {
+      lines.push(`Successfully completed: ${summary.completed_combinations || counts.completed_combinations || 0}`);
+      lines.push(`Failed: ${summary.failed_combinations || counts.failed_combinations || 0}`);
+      lines.push(`Total posts rescheduled: ${summary.posts_rescheduled || counts.posts_rescheduled || 0}`);
+    }
+    setPipelineScheduleGridMessage(lines.join(" "), job.status === "failed");
+  }
+
+  async function pollScheduleRegenJob(jobId, button) {
+    const data = await api(`/api/outputs/schedule-regen?job_id=${encodeURIComponent(jobId)}`);
+    renderScheduleRegenProgress(data);
+    if (data?.status === "queued" || data?.status === "running") {
+      pipelineScheduleRegenPollTimer = setTimeout(() => {
+        pollScheduleRegenJob(jobId, button).catch((error) => {
+          if (button) {
+            button.disabled = false;
+            button.textContent = "Regenerate schedules";
+          }
+          setPipelineScheduleGridMessage(error?.message || "Could not read regeneration progress.", true);
+        });
+      }, 1200);
+      return data;
+    }
+    if (pipelineScheduleRegenPollTimer) {
+      clearTimeout(pipelineScheduleRegenPollTimer);
+      pipelineScheduleRegenPollTimer = null;
+    }
+    if (button) {
+      button.disabled = false;
+      button.textContent = "Regenerate schedules";
+    }
+    await refreshPipelineOutputs({ silent: true, force: true });
+    await loadPipelineScheduleGridWindow();
+    return data;
   }
 
   function ensurePipelineBulkRegenerateControl() {
@@ -19440,7 +19487,7 @@ function timedScriptAssetLabel(asset, index) {
     button.id = "pipelineScheduleBulkRegenerate";
     button.className = "secondary-button";
     button.textContent = "Regenerate schedules";
-    button.title = "Regenerate upcoming schedules for the selected platforms, within the next 28 days.";
+    button.title = "Regenerate upcoming schedules for the selected platforms using MAE-first balanced overflow.";
     actions.insertBefore(button, toggle);
     button.addEventListener("click", () => {
       const platforms = [...pipelineScheduleVisiblePlatforms];
@@ -19448,128 +19495,66 @@ function timedScriptAssetLabel(asset, index) {
         setPipelineScheduleGridMessage("Select at least one platform using the calendar checkboxes.", true);
         return;
       }
-      const nowMs = Date.now();
-      const cutoffMs = nowMs + 28 * 24 * 60 * 60 * 1000;
-      const eligible = (pipelineOutputs || []).filter((record) => {
-        if (!record?.id || record.do_not_publish || creativeIsPublished(record)) return false;
-        if (!platforms.includes(pipelineSchedulePlatformKey(record))) return false;
-        const iso = pipelineRecordScheduleIso(record);
-        const ms = iso ? Date.parse(iso) : NaN;
-        // Unscheduled unpublished outputs are the primary recovery target.
-        // Do not require an existing future stamp to enter regeneration.
-        return !iso || !Number.isFinite(ms) || (ms > nowMs && ms <= cutoffMs);
-      });
-      const platformNames = platforms.map((key) => key[0].toUpperCase() + key.slice(1)).join(", ");
-      if (!eligible.length) {
-        setPipelineScheduleGridMessage("No unpublished posts for the selected platforms are scheduled in the next 28 days.");
-        return;
-      }
-      const confirmed = window.confirm(
-        `You are about to change ${eligible.length} post schedule${eligible.length === 1 ? "" : "s"} for ${platformNames} in the next 28 days. Apply the current spacing and local-time blackout rules?\n\nOK to continue, or Cancel to leave every schedule unchanged.`
-      );
-      if (!confirmed) return;
       regeneratePipelineSchedulesForPlatforms(platforms, button).catch((error) => {
         button.disabled = false;
         button.textContent = "Regenerate schedules";
         setPipelineScheduleGridMessage(error?.message || "Could not regenerate schedules.", true);
       });
     });
+    // Resume any in-flight regeneration after refresh/navigation.
+    api("/api/outputs/schedule-regen").then((data) => {
+      if (data?.status === "queued" || data?.status === "running") {
+        button.disabled = true;
+        button.textContent = "Regenerating…";
+        renderScheduleRegenProgress(data);
+        pollScheduleRegenJob(data.id || data.job_id, button).catch(() => {});
+      }
+    }).catch(() => {});
   }
 
   async function regeneratePipelineSchedulesForPlatforms(platforms, button) {
+    await loadPipelineScheduleHorizonDays();
     const nowMs = Date.now();
-    const cutoffMs = nowMs + 14 * 24 * 60 * 60 * 1000;
+    const cutoffMs = nowMs + pipelineScheduleHorizonDays * 24 * 60 * 60 * 1000;
     const selected = new Set((platforms || []).map((key) => String(key || "").toLowerCase()));
-    const eligible = (pipelineOutputs || [])
-      .filter((record) => {
-        if (!record?.id || record.do_not_publish || creativeIsPublished(record)) return false;
-        if (!selected.has(pipelineSchedulePlatformKey(record))) return false;
-        const iso = pipelineRecordScheduleIso(record);
-        const ms = iso ? Date.parse(iso) : NaN;
-        // Unscheduled unpublished outputs are the primary recovery target.
-        return !iso || !Number.isFinite(ms) || (ms > nowMs && ms <= cutoffMs);
-      })
-      .sort((a, b) => {
-        const aMs = Date.parse(pipelineRecordScheduleIso(a) || "") || Number.POSITIVE_INFINITY;
-        const bMs = Date.parse(pipelineRecordScheduleIso(b) || "") || Number.POSITIVE_INFINITY;
-        return aMs - bMs || pipelineOutputNumber(a) - pipelineOutputNumber(b);
-      });
-    if (!eligible.length) {
-      setPipelineScheduleGridMessage("No eligible unpublished posts remain in the selected 14-day window.");
-      return;
-    }
-
-    const eligibleIds = new Set(eligible.map((record) => record.id));
-    // Each platform is an independent publishing lane. A Facebook post must never
-    // consume an Instagram/TikTok/YouTube slot (and vice versa). Rebuild each
-    // selected platform separately, while preserving fixed schedules only from
-    // that same platform.
-    const fixedOccupiedByPlatform = {};
-    for (const record of pipelineOutputs || []) {
-      if (eligibleIds.has(record.id) || record.do_not_publish || creativeIsPublished(record)) continue;
-      const platform = pipelineSchedulePlatformKey(record);
+    const eligible = (pipelineOutputs || []).filter((record) => {
+      if (!record?.id || record.do_not_publish || creativeIsPublished(record)) return false;
+      if (!selected.has(pipelineSchedulePlatformKey(record))) return false;
       const iso = pipelineRecordScheduleIso(record);
       const ms = iso ? Date.parse(iso) : NaN;
-      if (platform && Number.isFinite(ms) && ms > nowMs) (fixedOccupiedByPlatform[platform] ||= []).push(ms);
+      return !iso || !Number.isFinite(ms) || (ms > nowMs && ms <= cutoffMs);
+    });
+    const outputTypes = pipelineRegenOutputTypes(eligible);
+    if (!eligible.length || !outputTypes.length) {
+      setPipelineScheduleGridMessage(`No unpublished posts for the selected platforms are scheduled in the next ${pipelineScheduleHorizonDays} days.`);
+      return;
     }
-    const regeneratedOccupiedByPlatform = {};
+    const platformNames = platforms.map((key) => key[0].toUpperCase() + key.slice(1)).join(", ");
+    const comboCount = platforms.length * outputTypes.length;
+    const confirmed = window.confirm(
+      `You are about to regenerate publishing schedules for ${eligible.length} future unpublished posts across ${comboCount} platform/output combinations (${platformNames}).\n\nExisting eligible future schedules will be replaced using the MAE-first, balanced-overflow scheduling algorithm.\n\nPublished posts and historical records will not be modified.\n\nContinue?`
+    );
+    if (!confirmed) return;
 
     button.disabled = true;
     button.textContent = "Regenerating…";
-    setPipelineScheduleGridMessage(`Rebuilding ${eligible.length} post schedule${eligible.length === 1 ? "" : "s"} for the active ${workingStudioCityLabel()} profile, balancing each platform across the next four weeks…`);
-    let saved = 0;
-    let failed = 0;
-    // Process one platform completely before moving to the next selected platform.
-    // Each platform's posts stay as even as possible across the four weeks:
-    // Monday 5:30, then Tuesday 5:30, not two posts stacked on Monday.
-    const platformOrder = [...selected];
-    const orderedEligible = platformOrder.flatMap((platform) =>
-      eligible.filter((record) => pipelineSchedulePlatformKey(record) === platform)
-    );
-    for (const record of orderedEligible) {
-      const platform = pipelineSchedulePlatformKey(record);
-      const occupied = [
-        ...(fixedOccupiedByPlatform[platform] || []),
-        ...(regeneratedOccupiedByPlatform[platform] || []),
-      ];
-      // Use the strict profile-wide picker directly. Never fall back to the legacy
-      // next-open scheduler here: that fallback packs records sequentially and can
-      // recreate the dense vertical stacks this bulk operation is meant to remove.
-      const picker = window.ChicagoShiningEzPlan?.ezPickBalancedSuggestedIso;
-      if (typeof picker !== "function") {
-        throw new Error("Strict 14-day schedule picker is unavailable; regeneration stopped before changing more schedules.");
-      }
-      const iso = picker([], new Date(), {
-        occupiedMs: occupied,
-        platformOccupiedMs: occupied,
-        timeZone: workingStudioTimeZone(),
-      });
-      const stamp = Date.parse(iso || "");
-      if (!iso || !Number.isFinite(stamp) || stamp > cutoffMs || pipelineScheduleIsBlackout(iso, workingStudioTimeZone())) {
-        failed += 1;
-        continue;
-      }
-      try {
-        const result = await api(`/api/operations/outputs/${encodeURIComponent(record.id)}/schedule`, {
-          method: "POST",
-          body: JSON.stringify(pipelineSchedulePostBody(iso, { manual_schedule_override: true })),
-        });
-        const savedRecord = result?.record || { ...record, scheduled_post_date: iso, manual_schedule_override: false };
-        applySavedPipelineSchedule(savedRecord);
-        (regeneratedOccupiedByPlatform[platform] ||= []).push(stamp);
-        saved += 1;
-      } catch {
-        failed += 1;
-      }
-    }
-
-    await refreshPipelineOutputs({ silent: true, force: true });
-    await loadPipelineScheduleGridWindow();
-    button.disabled = false;
-    button.textContent = "Regenerate schedules";
-    setPipelineScheduleGridMessage(failed
-      ? `Regenerated ${saved} schedule${saved === 1 ? "" : "s"}; ${failed} could not be regenerated.`
-      : `Regenerated ${saved} post schedule${saved === 1 ? "" : "s"} within the next 14 days.`);
+    setPipelineScheduleGridMessage(`Queueing schedule regeneration for ${eligible.length} posts across ${comboCount} combinations…`);
+    const started = await api("/api/outputs/schedule-regen", {
+      method: "POST",
+      body: JSON.stringify({
+        platforms: [...selected],
+        output_types: outputTypes,
+        horizon_days: pipelineScheduleHorizonDays,
+        eligible_count: eligible.length,
+        profiles: [{
+          id: selectedProfileId || "",
+          name: workingStudioCityLabel(),
+        }],
+      }),
+    });
+    const job = started?.job || started;
+    renderScheduleRegenProgress(job);
+    await pollScheduleRegenJob(job?.id || started?.job_id, button);
   }
 
   async function regeneratePipelineContentSchedule(groupKey, button = null) {
@@ -25127,6 +25112,42 @@ function timedScriptAssetLabel(asset, index) {
   }
 
   /** Profiles tab: lean fetch so voice changes are not blocked by full Ops inventory. */
+  async function loadOperationsScheduleSettings() {
+    const input = $("operationsScheduleHorizonDays");
+    const meta = $("operationsScheduleSettingsMeta");
+    try {
+      const data = await api("/api/operations/schedule-settings");
+      const days = Number(data?.scheduling_horizon_days);
+      if (input && Number.isFinite(days) && days > 0) input.value = String(Math.floor(days));
+      pipelineScheduleHorizonDays = Number.isFinite(days) && days > 0 ? Math.floor(days) : 30;
+      if (meta) {
+        meta.textContent = `Horizon ${pipelineScheduleHorizonDays} days. Morning 5:00–7:00, Afternoon 10:30–12:30, Evening 4:00–6:00. Blackout 8:00 PM–3:30 AM profile-local.`;
+      }
+    } catch (error) {
+      if (meta) meta.textContent = error?.message || "Could not load scheduling horizon.";
+    }
+  }
+
+  async function saveOperationsScheduleSettings() {
+    const input = $("operationsScheduleHorizonDays");
+    const meta = $("operationsScheduleSettingsMeta");
+    const days = Math.max(1, Math.min(90, Math.floor(Number(input?.value) || 30)));
+    if (input) input.value = String(days);
+    const data = await api("/api/operations/schedule-settings", {
+      method: "PUT",
+      body: JSON.stringify({ scheduling_horizon_days: days }),
+    });
+    pipelineScheduleHorizonDays = Number(data?.scheduling_horizon_days) || days;
+    if (meta) meta.textContent = data?.message || `Scheduling horizon set to ${pipelineScheduleHorizonDays} days.`;
+    setOperationsMessage(data?.message || `Scheduling horizon set to ${pipelineScheduleHorizonDays} days.`);
+  }
+
+  $("operationsSaveScheduleSettings")?.addEventListener("click", () => {
+    saveOperationsScheduleSettings().catch((error) => {
+      setOperationsMessage(error?.message || "Could not save scheduling horizon.", "error-text");
+    });
+  });
+
   async function loadOperationsProfilesPanel() {
     const meta = $("operationsIdeaMeta");
     if (meta && !String(meta.textContent || "").trim()) meta.textContent = "Loading profiles…";
@@ -25136,6 +25157,7 @@ function timedScriptAssetLabel(asset, index) {
         api("/api/voices", { timeoutMs: 20000 }).catch(() => ({ voices: [] })),
         api("/api/music?limit=100", { timeoutMs: 15000 }).catch(() => ({ records: [] })),
       ]);
+      loadOperationsScheduleSettings().catch(() => {});
       operationsVoiceOptions = phase6NormalizeVoices(voicesResult?.voices || voicesResult?.records || voicesResult?.items || []);
       operationsMusicOptions = sortClientMusic(
         (Array.isArray(musicResult?.records) ? musicResult.records : []).filter((record) => !record.do_not_use)
