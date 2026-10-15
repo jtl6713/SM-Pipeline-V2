@@ -35,3 +35,13 @@ test("past-due approved outputs remain in outstanding platform dispatch queue",(
  assert.equal(isQueuedForPlatformDispatch({...base,scheduled_post_date:"2026-10-10T18:00:00Z"},now),true);
  assert.equal(isQueuedForPlatformDispatch({...base,scheduled_post_date:"2026-10-10T18:00:00Z",platform_publish_status:"Published"},now),false);
 });
+
+test("initial dispatch is excluded after a dispatch stamp or provider receipt",()=>{
+ for (const patch of [
+  {studio_publish_dispatch_at:"2026-10-15T17:00:00Z"},
+  {studio_publish_dispatch_count:1},
+  {platform:"TikTok",tiktok_draft_publish_id:"pub_123"},
+  {platform:"TikTok",tiktok_draft_delivered_at:"2026-10-15T17:00:00Z"},
+  {platform:"YouTube",youtube_upload_completed_at:"2026-10-15T17:00:00Z"},
+ ]) assert.equal(isQueuedForPlatformDispatch({...base,...patch},now),false,JSON.stringify(patch));
+});
