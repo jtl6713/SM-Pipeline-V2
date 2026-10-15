@@ -44,7 +44,7 @@ function fillMaeHorizon(zone, startCivil, days = MAE_SUGGEST_HORIZON_DAYS) {
     const utc = Date.UTC(startCivil.year, startCivil.month - 1, startCivil.day) + offset * 86400000;
     const d = new Date(utc);
     const civil = { year: d.getUTCFullYear(), month: d.getUTCMonth() + 1, day: d.getUTCDate() };
-    for (const [hh, mm] of [[5, 0], [10, 30], [16, 0]]) {
+    for (const [hh, mm] of [[5, 30], [11, 30], [16, 30]]) {
       occupied.push(maeZonedWallToUtcMs(civil.year, civil.month, civil.day, hh, mm, zone));
     }
   }
@@ -65,11 +65,11 @@ test("horizon defaults to 30 days and is configurable", () => {
   assert.equal(maeNormalizeHorizonDays(200), 90);
 });
 
-test("MAE windows are 5:00, 10:30, and 16:00", () => {
+test("MAE windows are 5:30, 11:30, and 16:30", () => {
   assert.deepEqual([...MAE_PRIORITY_SCHEDULE_WINDOWS], [
-    "05:00-07:00",
-    "10:30-12:30",
-    "16:00-18:00",
+    "05:30-07:00",
+    "11:30-13:00",
+    "16:30-18:00",
   ]);
 });
 
@@ -78,7 +78,7 @@ test("empty schedule first post is Day 1 Morning", () => {
   const now = new Date("2026-10-05T08:00:00Z"); // 3:00 AM CDT
   const iso = maePickBalancedSuggestedIso([], now, { timeZone: zone, occupiedMs: [] });
   assert.equal(dayOf(iso, zone), "2026-10-05");
-  assert.deepEqual(localParts(iso, zone), { hour: 5, minute: 0 });
+  assert.deepEqual(localParts(iso, zone), { hour: 5, minute: 30 });
 });
 
 test("second and third posts fill Day 1 Afternoon then Evening", () => {
@@ -96,9 +96,9 @@ test("second and third posts fill Day 1 Afternoon then Evening", () => {
     occupied.push(Date.parse(iso));
   }
   assert.equal(dayOf(picks[0], zone), "2026-10-05");
-  assert.deepEqual(localParts(picks[0], zone), { hour: 5, minute: 0 });
-  assert.deepEqual(localParts(picks[1], zone), { hour: 10, minute: 30 });
-  assert.deepEqual(localParts(picks[2], zone), { hour: 16, minute: 0 });
+  assert.deepEqual(localParts(picks[0], zone), { hour: 5, minute: 30 });
+  assert.deepEqual(localParts(picks[1], zone), { hour: 11, minute: 30 });
+  assert.deepEqual(localParts(picks[2], zone), { hour: 16, minute: 30 });
 });
 
 test("fourth post is Day 2 Morning", () => {
@@ -114,7 +114,7 @@ test("fourth post is Day 2 Morning", () => {
     occupied.push(Date.parse(iso));
     if (i === 3) {
       assert.equal(dayOf(iso, zone), "2026-10-06");
-      assert.deepEqual(localParts(iso, zone), { hour: 5, minute: 0 });
+      assert.deepEqual(localParts(iso, zone), { hour: 5, minute: 30 });
     }
   }
 });
@@ -137,9 +137,9 @@ test("90 MAE posts fill all 30 days with three each", () => {
     byDay.set(day, (byDay.get(day) || 0) + 1);
     const local = localParts(iso, zone);
     assert.ok(
-      (local.hour === 5 && local.minute === 0)
-      || (local.hour === 10 && local.minute === 30)
-      || (local.hour === 16 && local.minute === 0),
+      (local.hour === 5 && local.minute === 30)
+      || (local.hour === 11 && local.minute === 30)
+      || (local.hour === 16 && local.minute === 30),
       `off MAE: ${iso}`,
     );
   }
@@ -159,9 +159,9 @@ test("91st post is Day 1 widest valid gap; 92nd is Day 2", () => {
   });
   assert.equal(dayOf(first, zone), "2026-10-05");
   const firstLocal = localParts(first, zone);
-  assert.ok(!(firstLocal.hour === 5 && firstLocal.minute === 0));
-  assert.ok(!(firstLocal.hour === 10 && firstLocal.minute === 30));
-  assert.ok(!(firstLocal.hour === 16 && firstLocal.minute === 0));
+  assert.ok(!(firstLocal.hour === 5 && firstLocal.minute === 30));
+  assert.ok(!(firstLocal.hour === 11 && firstLocal.minute === 30));
+  assert.ok(!(firstLocal.hour === 16 && firstLocal.minute === 30));
 
   const second = maePickBalancedSuggestedIso([], now, {
     timeZone: zone,
@@ -213,28 +213,25 @@ test("uneven daily counts prefer earliest least-populated day", () => {
   assert.equal(dayOf(iso, zone), "2026-10-06");
 });
 
-test("Facebook Reel lane does not consume Facebook Story slot", () => {
+test("same-platform occupancy blocks pileups even when output-type lanes differ", () => {
   const zone = "America/Chicago";
   const now = new Date("2026-10-05T08:00:00Z");
   const storyLane = [
-    maeZonedWallToUtcMs(2026, 10, 5, 5, 0, zone),
-    maeZonedWallToUtcMs(2026, 10, 5, 10, 30, zone),
-    maeZonedWallToUtcMs(2026, 10, 5, 16, 0, zone),
+    maeZonedWallToUtcMs(2026, 10, 5, 5, 30, zone),
   ];
   const reel = maeScheduleNextSlot({
     timeZone: zone,
     now,
-    occupiedMs: [],
+    laneOccupiedMs: [],
+    platformOccupiedMs: storyLane,
     horizonDays: 30,
   });
   assert.equal(reel.ok, true);
   assert.equal(dayOf(reel.iso, zone), "2026-10-05");
-  assert.deepEqual(localParts(reel.iso, zone), { hour: 5, minute: 0 });
-  // Story lane full on day 1 must not push the Reel off morning.
+  assert.deepEqual(localParts(reel.iso, zone), { hour: 11, minute: 30 });
   assert.equal(maeScheduleLaneKey("Facebook", "Reel"), "facebook::reel");
   assert.equal(maeScheduleLaneKey("Facebook", "Story"), "facebook::story");
   assert.notEqual(maeScheduleLaneKey("Facebook", "Reel"), maeScheduleLaneKey("Facebook", "Story"));
-  void storyLane;
 });
 
 test("horizon of 14 days is honored for subsequent scheduling", () => {
@@ -263,7 +260,7 @@ test("current-day past windows are skipped", () => {
   const now = new Date("2026-10-06T14:00:00Z"); // 10:00 AM EDT — morning past
   const iso = maePickBalancedSuggestedIso([], now, { occupiedMs: [], timeZone: zone });
   assert.equal(dayOf(iso, zone), "2026-10-06");
-  assert.deepEqual(localParts(iso, zone), { hour: 10, minute: 30 });
+  assert.deepEqual(localParts(iso, zone), { hour: 11, minute: 30 });
 });
 
 test("blackout is 8:00 PM through 3:30 AM", () => {
@@ -350,7 +347,7 @@ test("regeneration combination sort is platform, output type, profile", () => {
   );
 });
 
-test("build map schedules Reel and Story on independent lanes", () => {
+test("build map keeps output lanes distinct but prevents same-platform wall-clock pileups", () => {
   const zone = "America/Chicago";
   const now = new Date("2026-10-05T08:00:00Z");
   const stamps = maeBuildSuggestedScheduleMap(
@@ -366,9 +363,10 @@ test("build map schedules Reel and Story on independent lanes", () => {
   const story = stamps.get("Facebook::Story");
   assert.ok(reel);
   assert.ok(story);
-  // Independent lanes may share the same MAE wall clock.
   assert.equal(dayOf(reel, zone), dayOf(story, zone));
-  assert.deepEqual(localParts(reel, zone), localParts(story, zone));
+  assert.notDeepEqual(localParts(reel, zone), localParts(story, zone));
+  assert.deepEqual(localParts(reel, zone), { hour: 5, minute: 30 });
+  assert.deepEqual(localParts(story, zone), { hour: 11, minute: 30 });
 });
 
 test("Approve resolves a Story to the same-platform main plus 10 minutes when companion present", () => {
