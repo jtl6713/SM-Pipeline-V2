@@ -37,7 +37,37 @@ jobs:
           pip install -r services/timing-engine/requirements.txt
 
       - name: Hermetic packs
-        run: python tests/regression/runner.py hermetic
+        shell: bash
+        run: |
+          set +e
+          python tests/regression/runner.py hermetic > /tmp/hermetic.log 2>&1
+          code=$?
+          if [ "$code" -ne 0 ]; then
+            echo "::error::Hermetic regression failed with exit $code"
+            grep -E '^(not ok|# (fail|tests)|FAIL|ERROR|AssertionError|REGRESSION_FAILED|Traceback|\+ node|\+ python)' /tmp/hermetic.log | tail -100 || true
+            echo "--- Final 140 log lines ---"
+            tail -140 /tmp/hermetic.log
+          else
+            tail -15 /tmp/hermetic.log
+          fi
+          exit "$code"
+
+      - name: Wrangler bundling verification (dry-run, no deployment)
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/studio-wrangler-verify
+          cp apps/studio-api/worker.js /tmp/studio-wrangler-verify/worker.js
+          cp apps/studio-api/*.mjs /tmp/studio-wrangler-verify/
+          rm -f /tmp/studio-wrangler-verify/*.test.mjs
+          cd /tmp/studio-wrangler-verify
+          npm init -y >/dev/null 2>&1
+          npm install --no-save wrangler@4.123.0 >/tmp/wrangler-install.log 2>&1
+          printf '%s\n' '{"name":"studio-refactor-dry-run","main":"worker.js","compatibility_date":"2026-08-02","workers_dev":false,"r2_buckets":[{"binding":"STUDIO_MEDIA","bucket_name":"dummy"}]}' > wrangler.jsonc
+          ./node_modules/.bin/wrangler deploy --config wrangler.jsonc --dry-run >/tmp/wrangler-dry-run.log 2>&1 || { tail -120 /tmp/wrangler-dry-run.log; exit 1; }
+          echo "Wrangler dry-run PASS"
+          tail -12 /tmp/wrangler-dry-run.log
 
       - name: Log result to Task Organizer
         if: always()
