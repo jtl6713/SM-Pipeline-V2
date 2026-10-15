@@ -1,12 +1,13 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import { readStudioWorkerSource } from "../studio-api/worker-source-reader.mjs";
 const root = new URL("./", import.meta.url);
 const read = (rel) => readFileSync(new URL(rel, root), "utf8");
 const html = read("index.html");
 const app = read("assets/app-item4-1008.js");
 const css = read("assets/factory-layout-0680.css");
-const worker = read("../studio-api/worker.js");
+const worker = readStudioWorkerSource();
 
 test("Platforms & Frames owns the only visible editable output matrix", () => {
   const formatStart = html.indexOf('id="item4PlatformToggles"');

@@ -3,11 +3,12 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { readStudioWorkerSource } from "../studio-api/worker-source-reader.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const overview = fs.readFileSync(path.join(here, "assets/all-profiles-overview-1007.js"), "utf8");
 const html = fs.readFileSync(path.join(here, "index.html"), "utf8");
-const worker = fs.readFileSync(path.join(here, "../studio-api/worker.js"), "utf8");
+const worker = readStudioWorkerSource();
 
 test("All Profiles overview uses one lean /api/profiles/overview call", () => {
   assert.match(overview, /\/api\/profiles\/overview/);
