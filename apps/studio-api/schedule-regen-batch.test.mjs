@@ -53,7 +53,7 @@ test("candidate filter includes unscheduled and future rows in the selected prof
     outputType: "Reel",
   });
   assert.match(formula, /recCHI/);
-  assert.match(formula, /\\{Platform\\}="Instagram"/);
+  assert.ok(formula.includes('{Platform}="Instagram"'));
   assert.match(formula, /Studio_Output_Type.*Reel/);
   assert.match(formula, /Scheduled_Post_Date.*BLANK/);
   assert.match(formula, /YouTube_Scheduled_Publish_At.*BLANK/);
