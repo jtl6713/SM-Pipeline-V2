@@ -100,4 +100,8 @@ test("Worker and Pipeline wire durable schedule regeneration", () => {
   assert.match(app, /Will be scheduled on approval/);
   assert.match(app, /operationsScheduleHorizonDays/);
   assert.match(app, /MAE-first, balanced-overflow/);
+  assert.match(app, /schedule regeneration live calendar refresh failed/);
+  assert.match(app, /await refreshPipelineOutputs\(\{ silent: true, force: true \}\)/);
+  assert.match(app, /await loadPipelineScheduleGridWindow\(\)/);
+  assert.match(app, /already running/i);
 });
