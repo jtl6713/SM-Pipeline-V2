@@ -1,0 +1,84 @@
+Timing is on.
+=== G pipeline join 250 ===
+                                                                                   QUERY PLAN                                                                                   
+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Limit  (cost=0.42..8.35 rows=2 width=324) (actual time=0.080..0.623 rows=250 loops=1)
+   Buffers: shared hit=518
+   ->  Nested Loop Left Join  (cost=0.42..8.35 rows=2 width=324) (actual time=0.079..0.594 rows=250 loops=1)
+         Buffers: shared hit=518
+         ->  Index Scan using platform_outputs_profile_output_number_idx on platform_outputs po  (cost=0.27..3.61 rows=2 width=304) (actual time=0.053..0.133 rows=250 loops=1)
+               Index Cond: (content_profile_id = '3d0d5221-9e53-4513-972c-67b70963a97d'::uuid)
+               Buffers: shared hit=18
+         ->  Index Scan using content_items_pkey on content_items ci  (cost=0.14..2.36 rows=1 width=52) (actual time=0.001..0.001 rows=1 loops=250)
+               Index Cond: (id = po.content_item_id)
+               Buffers: shared hit=500
+ Planning:
+   Buffers: shared hit=471
+ Planning Time: 1.349 ms
+ Execution Time: 0.697 ms
+(14 rows)
+
+Time: 18.354 ms
+=== C awaiting approval ===
+                                                                                                                                                                                   QUERY PLAN                                                                                                                                                                                    
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Limit  (cost=6.03..6.03 rows=1 width=152) (actual time=0.446..0.466 rows=18 loops=1)
+   Buffers: shared hit=101
+   ->  Sort  (cost=6.03..6.03 rows=1 width=152) (actual time=0.445..0.463 rows=18 loops=1)
+         Sort Key: po.output_number DESC
+         Sort Method: quicksort  Memory: 27kB
+         Buffers: shared hit=101
+         ->  Nested Loop Left Join  (cost=0.42..6.02 rows=1 width=152) (actual time=0.028..0.416 rows=18 loops=1)
+               Buffers: shared hit=98
+               ->  Index Scan using platform_outputs_profile_output_number_idx on platform_outputs po  (cost=0.27..3.64 rows=1 width=132) (actual time=0.022..0.384 rows=18 loops=1)
+                     Index Cond: (content_profile_id = '3d0d5221-9e53-4513-972c-67b70963a97d'::uuid)
+                     Filter: ((NOT do_not_publish) AND (review_status IS DISTINCT FROM 'Approved'::text) AND (output_status IS DISTINCT FROM 'Approved for Publishing'::text) AND (output_status IS DISTINCT FROM 'Published'::text) AND (COALESCE(test_run_id, ''::text) = ''::text) AND ((output_status = 'Ready for Review'::text) OR (review_status = 'Review Sent'::text)))
+                     Rows Removed by Filter: 898
+                     Buffers: shared hit=62
+               ->  Index Scan using content_items_pkey on content_items ci  (cost=0.14..2.36 rows=1 width=52) (actual time=0.001..0.001 rows=1 loops=18)
+                     Index Cond: (id = po.content_item_id)
+                     Buffers: shared hit=36
+ Planning Time: 0.228 ms
+ Execution Time: 0.517 ms
+(18 rows)
+
+Time: 15.470 ms
+=== H occupancy 28d ===
+                                                                                                   QUERY PLAN                                                                                                   
+----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Limit  (cost=0.28..2.50 rows=1 width=136) (actual time=0.020..0.340 rows=429 loops=1)
+   Buffers: shared hit=405
+   ->  Index Scan using platform_outputs_scheduled_range_idx on platform_outputs  (cost=0.28..2.50 rows=1 width=136) (actual time=0.020..0.298 rows=429 loops=1)
+         Index Cond: ((content_profile_id = '3d0d5221-9e53-4513-972c-67b70963a97d'::uuid) AND (scheduled_post_date > (now() - '12:00:00'::interval)) AND (scheduled_post_date < (now() + '28 days'::interval)))
+         Buffers: shared hit=405
+ Planning:
+   Buffers: shared hit=14
+ Planning Time: 0.170 ms
+ Execution Time: 0.388 ms
+(9 rows)
+
+Time: 15.439 ms
+=== counts ===
+        t         | count 
+------------------+-------
+ content_items    |   166
+ platform_outputs |   916
+ content_profiles |     4
+(3 rows)
+
+Time: 14.721 ms
+=== reconciliation spot checks ===
+      output_status      | count 
+-------------------------+-------
+ Published               |   485
+ Approved for Publishing |   409
+ Ready for Review        |    22
+(3 rows)
+
+Time: 15.212 ms
+ orphan_outputs 
+----------------
+              0
+(1 row)
+
+Time: 15.756 ms
