@@ -154,6 +154,8 @@ import {
   AUTONOMOUS_CITY_CREATE_MS,
   AUTONOMOUS_IDEAS_PER_HOUR,
   AUTONOMOUS_LIBRARY_SCAN_CAP,
+  AUTONOMOUS_HOUR_ASSET_DRAIN,
+  AUTONOMOUS_OPEN_IDEAS_CAP,
   AUTONOMOUS_RELATED_STILL_MIN,
   AUTONOMOUS_NEWS_FEEDS,
   AUTONOMOUS_SCHEDULED_SKIP_ABOVE,
@@ -176,6 +178,9 @@ import {
   autonomousRefillScoresFromOverview,
   autonomousAtTopOfHour,
   autonomousClockForCron,
+  autonomousOpenIdeasAtCap,
+  autonomousOpenIdeasCreateBudget,
+  autonomousOpenIdeasRoom,
   autonomousRefillSlot,
   mergeAutonomousHourProgress,
   pickAutonomousEnabledProfile,
@@ -183,6 +188,7 @@ import {
   autonomousProfileHarvestOrder,
   autonomousRequestNeedsContinue,
   firstAutonomousResumeDraft,
+  listAutonomousResumeDrafts,
   productionNotesRevisionOpen,
   autonomousErrorIsFactoryRevision,
   autonomousRevisionLockReset,
@@ -722,7 +728,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.611-supabase-approve-writethrough",
+          version: "0.10.613-open-ideas-drain-20",
           studio_supabase_pipeline_reads_v1: true,
           studio_supabase_sync_gate_v1: true,
           studio_supabase_phase3_stable_v1: true,
@@ -768,6 +774,8 @@ export default {
           studio_auto_compress_v1: true,
           studio_autonomous_produce_v1: true,
           studio_autonomous_scheduled_target_v1: true,
+          studio_autonomous_open_ideas_cap_v1: true,
+          studio_autonomous_hour_asset_drain_v1: true,
           studio_autonomous_ten_per_hour_v1: true,
           studio_autonomous_cron_minute_v1: true,
           studio_autonomous_hour_create_budget_v1: true,
@@ -44317,7 +44325,7 @@ async function adoptNextReadyDailyIdea(env, authorization, { limit = 8 } = {}) {
 
 async function listAutonomousDraftRequests(env) {
   return listRecords(env, PRODUCTION_REQUEST_TABLE, {
-    limit: 25,
+    limit: Math.max(40, AUTONOMOUS_HOUR_ASSET_DRAIN + 10),
     // Autonomous harvest + operator Prepare-to-Review both need Draft/Ready/Submitted resume.
     // More than one row so a Chicago/LA draft cannot block the next Miami or NYC draft.
     filterFormula: "AND(OR({Request_Status}='Draft',{Request_Status}='Ready',{Request_Status}='Submitted'),OR(FIND('origin=autonomous',{Production_Notes}&'')>0,FIND('origin=prepare-to-review',{Production_Notes}&'')>0))",
@@ -44326,7 +44334,7 @@ async function listAutonomousDraftRequests(env) {
   });
 }
 
-async function selectAutonomousResumeDraft(env, drafts) {
+async function annotateAutonomousResumeDrafts(env, drafts) {
   const profiles = (await listRecords(env, STUDIO_IDEA_PROFILE_TABLE_ID, {
     limit: 50,
     filterFormula: "AND({Active}=1,{Autonomous_Produce_Enabled}=1)",
@@ -44404,8 +44412,20 @@ async function selectAutonomousResumeDraft(env, drafts) {
       created_at: draftCreatedAt,
     });
   }
-  const chosen = firstAutonomousResumeDraft(annotated, [...enabled], nowMs);
+  return { annotated, enabledIds: [...enabled], nowMs };
+}
+
+async function selectAutonomousResumeDraft(env, drafts) {
+  const { annotated, enabledIds, nowMs } = await annotateAutonomousResumeDrafts(env, drafts);
+  const chosen = firstAutonomousResumeDraft(annotated, enabledIds, nowMs);
   return chosen?.requestRecord || null;
+}
+
+async function selectAutonomousResumeDraftBatch(env, drafts, { limit = AUTONOMOUS_HOUR_ASSET_DRAIN } = {}) {
+  const { annotated, enabledIds, nowMs } = await annotateAutonomousResumeDrafts(env, drafts);
+  return listAutonomousResumeDrafts(annotated, enabledIds, { limit, nowMs })
+    .map((row) => row?.requestRecord)
+    .filter(Boolean);
 }
 
 async function alignAutonomousDraftContentType(env, requestRecord, contentType) {
@@ -44418,18 +44438,38 @@ async function alignAutonomousDraftContentType(env, requestRecord, contentType) 
 }
 
 async function resumeAutonomousDrafts(env, authorization, ctx, drafts, chicago, slot, options = {}) {
-  const selected = await selectAutonomousResumeDraft(env, drafts);
-  if (!selected) {
+  const drainLimit = Math.max(
+    1,
+    Number(options.drainLimit) || (options.hourAssetDrain ? AUTONOMOUS_HOUR_ASSET_DRAIN : 1),
+  );
+  const batch = await selectAutonomousResumeDraftBatch(env, drafts, { limit: Math.max(drainLimit * 2, drainLimit) });
+  if (!batch.length) {
     return { status: "no_enabled_profile", chicago_date: chicago.date, slot, resumed: [] };
   }
-  drafts = [selected];
+  // Prefer drafts that already have masters. Skip/park empty ones without burning the drain budget.
+  const withAssets = [];
+  for (const requestRecord of batch) {
+    if (withAssets.length >= drainLimit) break;
+    const mediaAssetIds = autonomousMasterMediaIds(item4ParseJson(f(requestRecord, "Studio_Master_Assets_JSON"), []));
+    if (!mediaAssetIds.length) {
+      await parkAutonomousResumeDraft(env, requestRecord, "resume_missing_assets");
+      continue;
+    }
+    withAssets.push({ requestRecord, mediaAssetIds });
+  }
+  if (!withAssets.length) {
+    return { status: "no_enabled_profile", chicago_date: chicago.date, slot, resumed: [], skip_reason: "resume_missing_assets" };
+  }
+  drafts = withAssets.map((row) => row.requestRecord);
   const ids = drafts.map((row) => row.id);
   const ideaIds = drafts.map((row) => firstLinkedRecordId(f(row, "Idea_Candidate"))).filter(Boolean);
-  const deferProduce = Boolean(options.deferProduce);
+  const baseDeferProduce = Boolean(options.deferProduce);
 
   const runAll = async () => {
     const results = [];
-    for (const requestRecord of drafts) {
+    let enqueuedProduce = false;
+    for (let index = 0; index < withAssets.length; index += 1) {
+      const { requestRecord, mediaAssetIds } = withAssets[index];
       const ideaId = firstLinkedRecordId(f(requestRecord, "Idea_Candidate"));
       if (!ideaId) {
         results.push({ production_request_id: requestRecord.id, status: "skipped", skip_reason: "missing_idea" });
@@ -44439,18 +44479,8 @@ async function resumeAutonomousDrafts(env, authorization, ctx, drafts, chicago, 
       const contentType = autonomousCanonicalContentType(
         String(f(idea, "Production_Content_Type") || "Vertical Short Video").trim()
       );
-      const mediaAssetIds = autonomousMasterMediaIds(item4ParseJson(f(requestRecord, "Studio_Master_Assets_JSON"), []));
-      if (!mediaAssetIds.length) {
-        // Empty-asset drafts monopolize FIFO if left unparked — park and advance.
-        await parkAutonomousResumeDraft(env, requestRecord, "resume_missing_assets");
-        results.push({
-          production_request_id: requestRecord.id,
-          idea_id: ideaId,
-          status: "skipped",
-          skip_reason: "resume_missing_assets",
-        });
-        continue;
-      }
+      // Serialize Remotion: only the first asset-ready draft enqueues produce in this pass.
+      const deferProduce = baseDeferProduce || enqueuedProduce || index > 0;
       try {
         await alignAutonomousDraftContentType(env, requestRecord, contentType);
         const finished = await finishAutonomousProductionRequest(env, authorization, ctx, idea, requestRecord, {
@@ -44461,6 +44491,7 @@ async function resumeAutonomousDrafts(env, authorization, ctx, drafts, chicago, 
           scheduled: Boolean(options.scheduled),
           deferProduce,
         });
+        if (!finished.waiting && !finished.deferred_produce) enqueuedProduce = true;
         results.push({
           production_request_id: finished.production_request_id,
           idea_id: finished.idea_id,
@@ -44501,14 +44532,15 @@ async function resumeAutonomousDrafts(env, authorization, ctx, drafts, chicago, 
       status: waitingI4 ? "awaiting_i4" : (waiting ? "waiting_variants" : (producing ? "producing" : "skipped")),
       skip_reason: waitingI4
         ? "awaiting_i4"
-        : (waiting ? "variants_still_preparing" : (deferProduce ? "deferred_produce_prior_in_flight" : null)),
+        : (waiting ? "variants_still_preparing" : (baseDeferProduce ? "deferred_produce_prior_in_flight" : null)),
       chicago_date: chicago.date,
       slot,
       idea_id: ideaIds[ideaIds.length - 1] || null,
       production_request_id: ids[ids.length - 1] || null,
       production_request_ids: ids,
       resumed: results,
-      deferred_produce: deferProduce || undefined,
+      hour_asset_drain: drainLimit,
+      deferred_produce: baseDeferProduce || undefined,
       prior_produce_request_id: options.priorProduceRequestId || null,
     });
     return results;
@@ -44522,6 +44554,7 @@ async function resumeAutonomousDrafts(env, authorization, ctx, drafts, chicago, 
     idea_id: ideaIds[0] || null,
     production_request_id: ids[0] || null,
     production_request_ids: ids,
+    hour_asset_drain: drainLimit,
     prior_produce_request_id: options.priorProduceRequestId || null,
   });
 
@@ -44591,11 +44624,31 @@ async function parkAutonomousResumeDraft(env, requestRecord, reason) {
 }
 
 /**
+ * Unpromoted Idea Candidates that still clog Factory / Ideas.
+ * Rejected and On Hold do not count toward the open-ideas cap.
+ */
+const AUTONOMOUS_OPEN_IDEAS_FORMULA =
+  "AND({Promoted_Content_Record_ID}=BLANK(),{Test_Run_ID}=BLANK(),{Candidate_Status}!='Rejected',{Candidate_Status}!='On Hold')";
+
+/** Count open ideas up to cap+1 so we can tell at-cap without paging the whole table. */
+async function countAutonomousOpenIdeas(env, { cap = AUTONOMOUS_OPEN_IDEAS_CAP } = {}) {
+  if (!env?.AIRTABLE_IDEA_TABLE_ID) return 0;
+  const limit = Math.max(1, Number(cap) || AUTONOMOUS_OPEN_IDEAS_CAP) + 1;
+  const rows = await listRecords(env, env.AIRTABLE_IDEA_TABLE_ID, {
+    limit,
+    fields: ["Candidate_Status", "Promoted_Content_Record_ID"],
+    filterFormula: AUTONOMOUS_OPEN_IDEAS_FORMULA,
+  }).catch(() => []);
+  return Array.isArray(rows) ? rows.length : 0;
+}
+
+/**
  * Create AUTONOMOUS_IDEAS_PER_HOUR ideas for one city under 200 scheduled.
  * Subjects already in flight do not reduce the count. A library photo group
  * is attached when one exists so resume can take that draft to final approval.
  * An idea with no stills is stamped Waiting for Factory Needs Assets.
  * Variants and produce stay on the resume path.
+ * `createBudget` is the remaining global open-ideas room for this pass.
  */
 async function fillAutonomousCityIdeas(env, authorization, {
   chicago,
@@ -44605,9 +44658,12 @@ async function fillAutonomousCityIdeas(env, authorization, {
   skips,
   preferredSubject,
   refillScores,
+  createBudget = AUTONOMOUS_IDEAS_PER_HOUR,
 }) {
-  const goal = AUTONOMOUS_IDEAS_PER_HOUR;
+  const hourGoal = AUTONOMOUS_IDEAS_PER_HOUR;
   let count = Math.max(0, Number(counts?.[profileId]) || 0);
+  const budget = Math.max(0, Number(createBudget) || 0);
+  const goal = Math.min(hourGoal, count + budget);
   const profile = await airtableFetch(env, STUDIO_IDEA_PROFILE_TABLE_ID, profileId);
   const profileSettings = mapOperationsProfile(profile);
   let saved = await studioSaveAutonomousLastRun(env, {
@@ -44618,7 +44674,8 @@ async function fillAutonomousCityIdeas(env, authorization, {
     slot,
     preferred_subject: preferredSubject || null,
     scheduled_target: AUTONOMOUS_SCHEDULED_TARGET,
-    ideas_per_hour: goal,
+    open_ideas_cap: AUTONOMOUS_OPEN_IDEAS_CAP,
+    ideas_per_hour: hourGoal,
     refill_profile_id: profileId,
     ideas_by_profile: { ...counts, [profileId]: count },
     hour_profile_skip: { ...skips },
@@ -44634,7 +44691,8 @@ async function fillAutonomousCityIdeas(env, authorization, {
       slot,
       ideas_by_profile: { ...counts, [profileId]: count },
       hour_profile_skip: { ...skips },
-      ideas_per_hour: goal,
+      ideas_per_hour: hourGoal,
+      open_ideas_cap: AUTONOMOUS_OPEN_IDEAS_CAP,
       ideas_created_this_pass: created,
       refill_profile_id: profileId,
       scheduled_target: AUTONOMOUS_SCHEDULED_TARGET,
@@ -44642,6 +44700,14 @@ async function fillAutonomousCityIdeas(env, authorization, {
     });
     return saved;
   };
+  if (budget <= 0) {
+    await persist("skipped", "open_ideas_cap");
+    return { created_count: 0, last: saved, counts, skips, stop: true };
+  }
+  if (count >= goal) {
+    await persist("skipped", "hour_quota_met");
+    return { created_count: 0, last: saved, counts, skips, stop: false };
+  }
   let catalog = [];
   try {
     catalog = await harvestAutonomousLibraryCatalog(env, "", profileId);
@@ -44719,7 +44785,8 @@ async function fillAutonomousCityIdeas(env, authorization, {
           production_request_id: requestRecord?.id || null,
           ideas_by_profile: { ...counts },
           hour_profile_skip: { ...skips },
-          ideas_per_hour: goal,
+          ideas_per_hour: hourGoal,
+          open_ideas_cap: AUTONOMOUS_OPEN_IDEAS_CAP,
           ideas_created_this_pass: created,
           refill_profile_id: profileId,
           scheduled_target: AUTONOMOUS_SCHEDULED_TARGET,
@@ -44742,6 +44809,27 @@ async function fillAutonomousScheduledHour(env, authorization, {
   profiles,
   preferredSubject = "",
 }) {
+  const openIdeasCount = await countAutonomousOpenIdeas(env);
+  const openIdeasRoom = autonomousOpenIdeasRoom(openIdeasCount);
+  const sameSlot = String(last?.slot || "") === String(slot || "");
+  if (autonomousOpenIdeasAtCap(openIdeasCount)) {
+    if (sameSlot && last?.status === "skipped" && last?.skip_reason === "open_ideas_cap") {
+      return { terminal: true, created_count: 0, last, result: last };
+    }
+    const saved = await studioSaveAutonomousLastRun(env, {
+      skipped: "open_ideas_cap",
+      chicago_date: chicago.date,
+      chicago_hour: chicago.hour,
+      slot,
+      status: "skipped",
+      skip_reason: "open_ideas_cap",
+      open_ideas_count: openIdeasCount,
+      open_ideas_cap: AUTONOMOUS_OPEN_IDEAS_CAP,
+      scheduled_target: AUTONOMOUS_SCHEDULED_TARGET,
+      ideas_per_hour: AUTONOMOUS_IDEAS_PER_HOUR,
+    });
+    return { terminal: true, created_count: 0, last: saved, result: saved };
+  }
   const refillMeta = await studioLoadAutonomousRefillScores(env, profiles);
   const loadedScores = refillMeta?.scores || {};
   const scoreCount = Object.keys(loadedScores).length;
@@ -44752,7 +44840,6 @@ async function fillAutonomousScheduledHour(env, authorization, {
     refillScores = loadedScores;
   }
   const needing = refillScores ? autonomousProfilesNeedingRefill(profiles, refillScores) : (profiles || []);
-  const sameSlot = String(last?.slot || "") === String(slot || "");
   if (refillScores && !needing.length) {
     const bands = Object.values(refillScores).map((row) => row?.band);
     const skipReason = bands.length && bands.every((band) => band === "skip")
@@ -44808,6 +44895,8 @@ async function fillAutonomousScheduledHour(env, authorization, {
   let createdCount = 0;
   let workingLast = last;
   for (const candidate of order) {
+    const createBudget = autonomousOpenIdeasCreateBudget(openIdeasCount, createdCount);
+    if (createBudget <= 0) break;
     if (!candidate?.id || !autonomousProfileHourOpen({ slot, ideas_by_profile: counts, hour_profile_skip: skips }, slot, candidate.id)) {
       continue;
     }
@@ -44819,15 +44908,20 @@ async function fillAutonomousScheduledHour(env, authorization, {
       skips,
       preferredSubject,
       refillScores,
+      createBudget,
     });
     workingLast = outcome.last || workingLast;
     createdCount += outcome.created_count || 0;
+    if (outcome.stop || autonomousOpenIdeasCreateBudget(openIdeasCount, createdCount) <= 0) break;
   }
   const stillOpen = refillScores
     ? autonomousRefillProfilesStillOpen(profiles, refillScores, workingLast, slot)
     : (profiles || []).filter((row) => autonomousProfileHourOpen(workingLast, slot, row?.id));
+  // Cap may leave per-city hour quotas open; still treat the hour as done so
+  // the scheduled-target refill cannot keep minting past 50 open ideas.
+  const cappedOut = openIdeasRoom > 0 && autonomousOpenIdeasCreateBudget(openIdeasCount, createdCount) <= 0;
   return {
-    terminal: stillOpen.length === 0,
+    terminal: stillOpen.length === 0 || cappedOut,
     created_count: createdCount,
     last: workingLast,
     result: workingLast,
@@ -45074,26 +45168,49 @@ async function executeStudioAutonomousProduce(env, ctx, options = {}) {
   }
 
   // Top of the Chicago hour only: 10 ideas per city under 200, even when the
-  // subject is already in flight. :05 and :30 ticks resume drafts that have
-  // assets. Over 209 skips that city.
+  // subject is already in flight. When open ideas are already at/over the cap
+  // (20), skip create and drain up to 20 asset-ready drafts toward Ready for
+  // Review instead. :05 and :30 ticks resume one draft. Over 209 skips that city.
   if (harvestThisHour) {
-    const hourPass = await fillAutonomousScheduledHour(env, authorization, {
-      chicago,
-      slot,
-      last,
-      profiles,
-      preferredSubject: autonomousPreferredSubject(options.preferred_subject || last.preferred_subject),
-    });
-    if (hourPass?.last) last = hourPass.last;
+    const openIdeasCount = await countAutonomousOpenIdeas(env);
+    const skipCreate = autonomousOpenIdeasAtCap(openIdeasCount);
+    let hourPass = null;
+    if (!skipCreate) {
+      hourPass = await fillAutonomousScheduledHour(env, authorization, {
+        chicago,
+        slot,
+        last,
+        profiles,
+        preferredSubject: autonomousPreferredSubject(options.preferred_subject || last.preferred_subject),
+      });
+      if (hourPass?.last) last = hourPass.last;
+    } else {
+      last = await studioSaveAutonomousLastRun(env, {
+        skipped: "open_ideas_cap",
+        chicago_date: chicago.date,
+        chicago_hour: chicago.hour,
+        slot,
+        status: "skipped",
+        skip_reason: "open_ideas_cap",
+        open_ideas_count: openIdeasCount,
+        open_ideas_cap: AUTONOMOUS_OPEN_IDEAS_CAP,
+        hour_asset_drain: AUTONOMOUS_HOUR_ASSET_DRAIN,
+        scheduled_target: AUTONOMOUS_SCHEDULED_TARGET,
+        ideas_per_hour: AUTONOMOUS_IDEAS_PER_HOUR,
+      });
+      hourPass = { terminal: true, created_count: 0, last, result: last };
+    }
     const draftsNow = hourPass?.created_count
       ? await listAutonomousDraftRequests(env)
-      : pendingDrafts;
+      : (skipCreate ? await listAutonomousDraftRequests(env) : pendingDrafts);
     if (draftsNow.length) {
       const resumed = await resumeAutonomousDrafts(env, authorization, ctx, draftsNow, chicago, slot, {
         scheduled: true,
         force: false,
         deferProduce: priorProduceInFlight,
         priorProduceRequestId,
+        hourAssetDrain: true,
+        drainLimit: AUTONOMOUS_HOUR_ASSET_DRAIN,
       });
       if (resumed?.status !== "no_enabled_profile") return resumed;
     }
@@ -45126,6 +45243,23 @@ async function executeStudioAutonomousProduce(env, ctx, options = {}) {
 
   // Manual / dry-run: one idea. Scheduled hours already returned above.
   // Hold at 200–209. Skip the hour when the parenthesis total is over 209.
+  // Global open-ideas cap still wins over the scheduled-target refill.
+  const openIdeasCount = await countAutonomousOpenIdeas(env);
+  if (autonomousOpenIdeasAtCap(openIdeasCount)) {
+    const result = {
+      skipped: "open_ideas_cap",
+      chicago_date: chicago.date,
+      chicago_hour: chicago.hour,
+      slot,
+      status: "skipped",
+      skip_reason: "open_ideas_cap",
+      open_ideas_count: openIdeasCount,
+      open_ideas_cap: AUTONOMOUS_OPEN_IDEAS_CAP,
+      scheduled_target: AUTONOMOUS_SCHEDULED_TARGET,
+    };
+    if (options.scheduled || options.force) await studioSaveAutonomousLastRun(env, result);
+    return result;
+  }
   let refillScores = null;
   let refillMeta = null;
   if (options.scheduled && !options.force) {

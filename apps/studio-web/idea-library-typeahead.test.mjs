@@ -14,7 +14,7 @@ test("idea library search sequence + pins", async () => {
   assert.match(app, /Ignore stale responses so a slow empty-query open cannot wipe a later "Museum" search/);
   assert.match(app, /item4-0.6.687-platforms-frames-details/);
   assert.match(html, /UI build 0.6.687/);
-  assert.match(worker, /0.10.611-supabase-approve-writethrough/);
+  assert.match(worker, /0.10.613-open-ideas-drain-20/);
   assert.match(worker, /studio_idea_library_typeahead_v1: true/);
   assert.match(worker, /ideaLibrarySearchHit/);
   assert.match(worker, /ideaLibrarySearchFilterKeys\(queryTokens\)/);
