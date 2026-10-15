@@ -3,6 +3,10 @@ on:
   push:
     branches:
       - refactor/split-studio-api-worker-20261015
+  pull_request:
+    paths:
+      - 'apps/studio-api/**'
+      - '.github/workflows/validate-studio-worker-split.yml'
   workflow_dispatch:
 permissions:
   contents: read
