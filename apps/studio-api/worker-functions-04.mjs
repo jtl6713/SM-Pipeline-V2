@@ -1,3 +1,4 @@
+import { countPendingPlatformDispatch } from "./overview-dispatch-counts.mjs";
 import { createProfileOnboarding } from "./profile-onboarding.mjs";
 import {
   studioReadSource,
@@ -2802,21 +2803,7 @@ export async function getOutputRoute(request, env, url) {
 /*__STUDIO_WORKER_END:getOutputRoute__*/
 
 export function studioOverviewScheduledCounts(mappedOutputs) {
-  const platformOrder = ["Facebook", "Instagram", "TikTok", "YouTube"];
-  const counts = Object.fromEntries(platformOrder.map((p) => [p, 0]));
-  for (const row of mappedOutputs || []) {
-    const platform = String(row?.platform || "").trim();
-    if (!(platform in counts)) continue;
-    const publishStatus = String(row?.publish_status || "");
-    const youtubePrivacy = String(row?.youtube_privacy_status || "").trim().toLowerCase();
-    const youtubeNotPublic = platform === "YouTube" && /^(private|unlisted)$/.test(youtubePrivacy);
-    const published = !youtubeNotPublic && (Boolean(row?.published_at) || /published/i.test(publishStatus));
-    const scheduled = Boolean(row?.scheduled_post_date || row?.youtube_scheduled_publish_at || row?.studio_scheduled_at)
-      || /scheduled|ready to publish|publishing/i.test(publishStatus)
-      || youtubeNotPublic;
-    if (!published && scheduled) counts[platform] += 1;
-  }
-  return counts;
+  return countPendingPlatformDispatch(mappedOutputs);
 }
 /*__STUDIO_WORKER_END:studioOverviewScheduledCounts__*/
 
@@ -2972,11 +2959,13 @@ export function rememberProfilesOverviewSnapshot(snapshot) {
   studioProfilesOverviewCache.at = Number(snapshot.at) || 0;
   studioProfilesOverviewCache.authKey = String(snapshot.authKey || "");
   studioProfilesOverviewCache.complete = snapshot.complete === true;
+  studioProfilesOverviewCache.schemaVersion = Number(snapshot.schemaVersion || 0);
   return {
     rows,
     at: studioProfilesOverviewCache.at,
     authKey: studioProfilesOverviewCache.authKey,
     complete: studioProfilesOverviewCache.complete,
+    schemaVersion: studioProfilesOverviewCache.schemaVersion,
   };
 }
 /*__STUDIO_WORKER_END:rememberProfilesOverviewSnapshot__*/
@@ -2984,7 +2973,7 @@ export function rememberProfilesOverviewSnapshot(snapshot) {
 export async function readStudioProfilesOverviewSnapshot(env) {
   const cache = studioProfilesOverviewCache;
   if (cache.rows?.length) {
-    return { rows: cache.rows, at: cache.at, authKey: cache.authKey, complete: cache.complete === true };
+    return { rows: cache.rows, at: cache.at, authKey: cache.authKey, complete: cache.complete === true, schemaVersion: cache.schemaVersion || 0 };
   }
   if (!env?.STUDIO_MEDIA?.get) return null;
   try {
@@ -2999,7 +2988,7 @@ export async function readStudioProfilesOverviewSnapshot(env) {
 /*__STUDIO_WORKER_END:readStudioProfilesOverviewSnapshot__*/
 
 export async function writeStudioProfilesOverviewSnapshot(env, rows, authKey) {
-  const snapshot = rememberProfilesOverviewSnapshot({ rows, authKey, at: Date.now(), complete: true });
+  const snapshot = rememberProfilesOverviewSnapshot({ rows, authKey, at: Date.now(), complete: true, schemaVersion: 2 });
   if (!snapshot || !env?.STUDIO_MEDIA?.put) return snapshot;
   try {
     await env.STUDIO_MEDIA.put(
@@ -3046,7 +3035,7 @@ export function scheduleStudioProfilesOverviewRefresh(ctx, env, authorization) {
 export async function profilesOverview(request, env, authorization, ctx) {
   const snapshot = await readStudioProfilesOverviewSnapshot(env);
   const age = snapshot?.at ? Date.now() - snapshot.at : Infinity;
-  if (snapshot?.rows?.length && snapshot.complete === true && age < STUDIO_PROFILES_OVERVIEW_CACHE_MS) {
+  if (snapshot?.rows?.length && snapshot.complete === true && snapshot.schemaVersion === 2 && age < STUDIO_PROFILES_OVERVIEW_CACHE_MS) {
     return respondProfilesOverviewSoft(request, env, {
       records: snapshot.rows,
       cached: true,

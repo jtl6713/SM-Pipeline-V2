@@ -1,0 +1,39 @@
+name: Verify Scheduled Overview Queue Counts
+on:
+  pull_request:
+    paths:
+      - 'apps/studio-api/overview-dispatch-counts*'
+      - 'apps/studio-api/worker-functions-01.mjs'
+      - 'apps/studio-api/worker-functions-04.mjs'
+      - '.github/workflows/verify-scheduled-overview-queue.yml'
+  workflow_dispatch:
+permissions: {contents: read}
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v4
+        with: {node-version: '22'}
+      - name: Test queue-only overview and Worker syntax
+        run: |
+          set -euo pipefail
+          node --test apps/studio-api/overview-dispatch-counts.test.mjs
+          node --check apps/studio-api/worker.js
+          node --check apps/studio-api/worker-functions-01.mjs
+          node --check apps/studio-api/worker-functions-04.mjs
+      - name: Check Wrangler production-layout bundle
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/w
+          cp apps/studio-api/worker.js /tmp/w/
+          cp apps/studio-api/*.mjs /tmp/w/
+          rm -f /tmp/w/*.test.mjs
+          cd /tmp/w
+          npm init -y >/dev/null
+          npm install --no-save wrangler@4.123.0 >/dev/null
+          cat >wrangler.jsonc <<'EOF'
+          {"name":"overview-queue-check","main":"worker.js","compatibility_date":"2026-08-02","workers_dev":false,"r2_buckets":[{"binding":"STUDIO_MEDIA","bucket_name":"dummy"}]}
+          EOF
+          ./node_modules/.bin/wrangler deploy --config wrangler.jsonc --dry-run
