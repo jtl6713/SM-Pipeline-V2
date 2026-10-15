@@ -268,11 +268,22 @@ jobs:
           SUBDOMAIN=$(jq -er '.result.subdomain' /tmp/account-subdomain.json)
           TOKEN=$(cat /tmp/verify-token.txt)
           URL="https://$VERIFY_BRIDGE.$SUBDOMAIN.workers.dev/$TOKEN"
+          # workers.dev for a just-uploaded bridge often returns Cloudflare 1042
+          # ("no Worker serving it") for 30–90s even after subdomain enabled=true.
+          # Rolling back a byte-matched deploy on that flake left production on 0.10.618.
           SESSION_CODE=000
-          for i in 1 2 3 4 5 6 7 8 9 10; do
+          for i in $(seq 1 40); do
             SESSION_CODE=$(curl -sS --max-time 60 -o /tmp/session.json -w '%{http_code}' "$URL" || true)
-            if [[ "$SESSION_CODE" == "200" ]] && jq -e '.ok==true and .authenticated==true and .authorized==true' /tmp/session.json >/dev/null 2>&1; then break; fi
-            sleep 2
+            BODY_HEAD=$(head -c 180 /tmp/session.json | tr '\n' ' ')
+            echo "session_attempt=$i http=$SESSION_CODE body=${BODY_HEAD}"
+            if grep -Fq 'error code: 1042' /tmp/session.json 2>/dev/null; then
+              sleep 3
+              continue
+            fi
+            if [[ "$SESSION_CODE" == "200" ]] && jq -e '.ok==true and .authenticated==true and .authorized==true' /tmp/session.json >/dev/null 2>&1; then
+              break
+            fi
+            sleep 3
           done
           test "$SESSION_CODE" = "200"
           jq -e '.ok==true and .authenticated==true and .authorized==true and .email=="joseph.t.logan@gmail.com"' /tmp/session.json >/dev/null

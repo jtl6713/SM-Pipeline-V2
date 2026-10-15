@@ -309,3 +309,5 @@ Deploy Worker 0.10.489-engagement-ledger. Shrink the engagement ledger so Chicag
 2026-10-15: Worker 0.10.620-approve-all-fast-stamp. Redeploy after session-verify rollback left production on 0.10.618.
 
 2026-10-15: Worker 0.10.620-approve-all-fast-stamp. Retry deploy; wait through workers.dev 1042 before session verify so we do not rollback a good publish.
+
+2026-10-15: Worker 0.10.620-approve-all-fast-stamp. Actually ship the 1042-tolerant session verify workflow with the redeploy.
