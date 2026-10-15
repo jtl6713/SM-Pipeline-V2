@@ -1,3 +1,4 @@
+import { readStudioWorkerSource } from "./worker-source-reader.mjs";
 import assert from "node:assert/strict";
 import test from "node:test";
 import { readFile } from "node:fs/promises";
@@ -8,7 +9,7 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const workerPath = path.join(here, "worker.js");
 
 test("ChicagoShining Asset Manager uploads fail closed without a watermarked derivative", async () => {
-  const source = await readFile(workerPath, "utf8");
+  const source = readStudioWorkerSource();
   const start = source.indexOf("async function uploadAssetLibraryItems");
   const end = source.indexOf("async function findAssetLibraryUsages", start);
   assert.ok(start >= 0 && end > start);
@@ -20,7 +21,7 @@ test("ChicagoShining Asset Manager uploads fail closed without a watermarked der
 });
 
 test("ChicagoShining existing library assets are watermarked before Production attachment", async () => {
-  const source = await readFile(workerPath, "utf8");
+  const source = readStudioWorkerSource();
   assert.match(source, /async function ensureChicagoWatermarkedLibraryAsset/);
   assert.match(source, /\/jobs\/studio-asset-watermark/);
   assert.match(source, /if \(!response\.ok \|\| !payload\?\.watermarked \|\| !payload\?\.google_drive_file_id\)/);
@@ -29,7 +30,7 @@ test("ChicagoShining existing library assets are watermarked before Production a
 });
 
 test("watermark enforcement is profile aware rather than globally Chicago-branded", async () => {
-  const source = await readFile(workerPath, "utf8");
+  const source = readStudioWorkerSource();
   const start = source.indexOf("function studioProfileRequiresChicagoWatermark");
   const end = source.indexOf("async function item4ProductionProfileRecord", start);
   assert.ok(start >= 0 && end > start);
@@ -41,7 +42,7 @@ test("watermark enforcement is profile aware rather than globally Chicago-brande
 
 
 test("assigning an existing asset to ChicagoShining upgrades it before profile save", async () => {
-  const source = await readFile(workerPath, "utf8");
+  const source = readStudioWorkerSource();
   const start = source.indexOf("async function assignLibraryAssetProfile");
   const end = source.indexOf("const LIBRARY_CLASSIFY_ALL_LIMIT", start);
   assert.ok(start >= 0 && end > start);

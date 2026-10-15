@@ -1,3 +1,4 @@
+import { readStudioWorkerSource } from "./worker-source-reader.mjs";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
@@ -47,7 +48,7 @@ test("new profile onboarding module is valid ESM and never requires a token in p
 });
 
 test("Studio worker supports generic city keys, profile-local timezone, and onboarding routes", async () => {
-  const source = await readFile(workerPath, "utf8");
+  const source = readStudioWorkerSource();
   assert.match(source, /import \{ createProfileOnboarding \} from "\.\/profile-onboarding\.mjs";/);
   assert.match(source, /isProfileSetupRoute/);
   assert.match(source, /isProfilePlatformValidateRoute/);
