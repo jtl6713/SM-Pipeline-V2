@@ -140,6 +140,7 @@ import {
 import {
   AUTONOMOUS_DEFAULT_MUSIC_ASSET_ID,
   AUTONOMOUS_IDEA_CREATED_FIELD,
+  AUTONOMOUS_CITY_CREATE_ATTEMPTS,
   AUTONOMOUS_CITY_CREATE_MS,
   AUTONOMOUS_IDEAS_PER_HOUR,
   AUTONOMOUS_LIBRARY_SCAN_CAP,
@@ -706,7 +707,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.604-hour-create-budget",
+          version: "0.10.605-keep-picking",
           studio_voiceover_once_v1: true,
           studio_factory_desk_v1: true,
           studio_factory_inflight_blocked_parent_v1: true,
@@ -745,6 +746,7 @@ export default {
           studio_autonomous_ten_per_hour_v1: true,
           studio_autonomous_cron_minute_v1: true,
           studio_autonomous_hour_create_budget_v1: true,
+          studio_autonomous_keep_picking_v1: true,
           studio_autonomous_music_variety_v1: true,
           studio_az_finished_video_v1: true,
           studio_az_auto_queue_v1: true,
@@ -44419,7 +44421,7 @@ async function fillAutonomousCityIdeas(env, authorization, {
   let pool = catalog.slice();
   const createDeadline = Date.now() + AUTONOMOUS_CITY_CREATE_MS;
   while (count < goal) {
-    if (attempts > 0 && (attempts >= 12 || Date.now() > createDeadline)) break;
+    if (attempts > 0 && (attempts >= AUTONOMOUS_CITY_CREATE_ATTEMPTS || Date.now() > createDeadline)) break;
     attempts += 1;
     const cluster = pickRelatedUnusedStillCluster(pool, { occupied });
     if (!cluster) {
@@ -44457,8 +44459,7 @@ async function fillAutonomousCityIdeas(env, authorization, {
       pick = await studioAutonomousOpenAiPick(env, prompt);
     } catch (error) {
       console.warn("autonomous hour pick failed", profileId, error);
-      await persist(created ? "producing" : "skipped", String(error?.message || error).slice(0, 180));
-      return { created_count: created, last: saved, counts, skips, stop: true };
+      continue;
     }
     if (pick.skip) {
       autonomousRememberSubject(occupied, cluster.label, cluster.label, profileId);
@@ -44547,8 +44548,7 @@ async function fillAutonomousCityIdeas(env, authorization, {
         pick.primary_location || cluster.label,
         profileId,
       );
-      await persist(created ? "producing" : "skipped", String(error?.message || error).slice(0, 180));
-      return { created_count: created, last: saved, counts, skips, stop: true };
+      continue;
     }
   }
   await persist("producing", null);
