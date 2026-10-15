@@ -31,6 +31,7 @@ jobs:
         shell: bash
         run: node --test apps/studio-api/*.test.mjs
       - name: Wrangler bundle dry run (no deploy)
+        if: always()
         shell: bash
         run: |
           set -euo pipefail
