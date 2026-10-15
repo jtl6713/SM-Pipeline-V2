@@ -417,6 +417,7 @@
       || pathname === "/api/content"
       || pathname === "/api/outputs"
       || pathname === "/api/outputs/approve-all"
+      || pathname === "/api/outputs/schedule-regen"
       || pathname === "/api/outputs/schedule-grid"
       || pathname === "/api/dashboard"
       || pathname === "/api/insights/best-times"
@@ -19462,19 +19463,40 @@ function timedScriptAssetLabel(asset, index) {
     setPipelineScheduleGridMessage(lines.join(" "), job.status === "failed");
   }
 
+  function queuePipelineScheduleRegenPoll(jobId, button, delayMs = 1200) {
+    if (!jobId) return;
+    if (pipelineScheduleRegenPollTimer) clearTimeout(pipelineScheduleRegenPollTimer);
+    pipelineScheduleRegenPollTimer = setTimeout(() => {
+      pollScheduleRegenJob(jobId, button).catch((error) => {
+        if (button) {
+          button.disabled = true;
+          button.textContent = "Regenerating…";
+        }
+        setPipelineScheduleGridMessage(
+          `${error?.message || "Could not read regeneration progress."} Regeneration is still running; retrying status…`,
+          true,
+        );
+        queuePipelineScheduleRegenPoll(jobId, button, 2500);
+      });
+    }, Math.max(100, Number(delayMs) || 1200));
+  }
+
   async function pollScheduleRegenJob(jobId, button) {
-    const data = await api(`/api/outputs/schedule-regen?job_id=${encodeURIComponent(jobId)}`);
+    if (!jobId) throw new Error("Schedule regeneration started without a job id.");
+    const data = await api(
+      `/api/outputs/schedule-regen?job_id=${encodeURIComponent(jobId)}`,
+      { timeoutMs: 90000, retries: 1 },
+    );
     renderScheduleRegenProgress(data);
     if (data?.status === "queued" || data?.status === "running") {
-      pipelineScheduleRegenPollTimer = setTimeout(() => {
-        pollScheduleRegenJob(jobId, button).catch((error) => {
-          if (button) {
-            button.disabled = false;
-            button.textContent = "Regenerate schedules";
-          }
-          setPipelineScheduleGridMessage(error?.message || "Could not read regeneration progress.", true);
-        });
-      }, 1200);
+      if (button) {
+        button.disabled = true;
+        button.textContent = "Regenerating…";
+      }
+      // Repaint after every completed backend slice so the operator can watch
+      // the bubbles move instead of waiting for the entire job to finish.
+      await loadPipelineScheduleGridWindow().catch(() => {});
+      queuePipelineScheduleRegenPoll(jobId, button);
       return data;
     }
     if (pipelineScheduleRegenPollTimer) {
@@ -19519,12 +19541,16 @@ function timedScriptAssetLabel(asset, index) {
         button.disabled = true;
         button.textContent = "Regenerating…";
         renderScheduleRegenProgress(data);
-        pollScheduleRegenJob(data.id || data.job_id, button).catch(() => {});
+        queuePipelineScheduleRegenPoll(data.id || data.job_id, button, 300);
       }
     }).catch(() => {});
   }
 
   async function regeneratePipelineSchedulesForPlatforms(platforms, button) {
+    if (button) {
+      button.disabled = true;
+      button.textContent = "Preparing regeneration…";
+    }
     await loadPipelineScheduleHorizonDays();
     const nowMs = Date.now();
     const cutoffMs = nowMs + pipelineScheduleHorizonDays * 24 * 60 * 60 * 1000;
@@ -19538,6 +19564,10 @@ function timedScriptAssetLabel(asset, index) {
     });
     const outputTypes = pipelineRegenOutputTypes(eligible);
     if (!eligible.length || !outputTypes.length) {
+      if (button) {
+        button.disabled = false;
+        button.textContent = "Regenerate schedules";
+      }
       setPipelineScheduleGridMessage(`No unpublished posts for the selected platforms are scheduled in the next ${pipelineScheduleHorizonDays} days.`);
       return;
     }
@@ -19546,7 +19576,13 @@ function timedScriptAssetLabel(asset, index) {
     const confirmed = window.confirm(
       `You are about to regenerate publishing schedules for ${eligible.length} future unpublished posts across ${comboCount} platform/output combinations (${platformNames}).\n\nExisting eligible future schedules will be replaced using the MAE-first, balanced-overflow scheduling algorithm.\n\nPublished posts and historical records will not be modified.\n\nContinue?`
     );
-    if (!confirmed) return;
+    if (!confirmed) {
+      if (button) {
+        button.disabled = false;
+        button.textContent = "Regenerate schedules";
+      }
+      return;
+    }
 
     button.disabled = true;
     button.textContent = "Regenerating…";
@@ -19554,6 +19590,7 @@ function timedScriptAssetLabel(asset, index) {
     const started = await api("/api/outputs/schedule-regen", {
       method: "POST",
       body: JSON.stringify({
+        content_profile_id: selectedProfileId || "",
         platforms: [...selected],
         output_types: outputTypes,
         horizon_days: pipelineScheduleHorizonDays,
@@ -19565,8 +19602,10 @@ function timedScriptAssetLabel(asset, index) {
       }),
     });
     const job = started?.job || started;
+    const jobId = job?.id || started?.job_id;
+    if (!jobId) throw new Error("Schedule regeneration did not return a job id.");
     renderScheduleRegenProgress(job);
-    await pollScheduleRegenJob(job?.id || started?.job_id, button);
+    queuePipelineScheduleRegenPoll(jobId, button, 300);
   }
 
   async function regeneratePipelineContentSchedule(groupKey, button = null) {
