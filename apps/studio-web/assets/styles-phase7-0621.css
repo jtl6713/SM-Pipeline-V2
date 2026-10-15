@@ -5006,19 +5006,36 @@ body.nav-collapsed .sidebar{
 #page-factory .factory-band-assets{--factory-accent:#1f4e89}
 #page-factory .factory-band-manual{--factory-accent:#8a3030}
 #page-factory .factory-band-head{
-  display:flex;align-items:center;justify-content:space-between;gap:12px;
-  padding:10px 14px;border-bottom:1px solid var(--line,#d7e0ea);
+  display:flex;align-items:center;justify-content:space-between;gap:12px;width:100%;
+  padding:10px 14px;border:0;border-bottom:1px solid var(--line,#d7e0ea);
   background:color-mix(in srgb, var(--factory-accent) 8%, #fff);
+  text-align:left;cursor:pointer;font:inherit;color:inherit;
+}
+#page-factory .factory-band-head:hover{
+  background:color-mix(in srgb, var(--factory-accent) 14%, #fff);
+}
+#page-factory .factory-band-head:focus-visible{
+  outline:2px solid var(--factory-accent);outline-offset:-2px;
+}
+#page-factory .factory-band-chevron{
+  flex:0 0 auto;width:1rem;font-size:.85rem;line-height:1;color:var(--factory-accent);
+}
+#page-factory .factory-band-copy{
+  flex:1 1 auto;min-width:0;display:grid;gap:1px;
 }
 #page-factory .factory-band-kicker{
   margin:0;font-size:.62rem;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:var(--factory-accent);
 }
-#page-factory .factory-band-head h2{margin:1px 0 0;font-size:1rem;line-height:1.2;color:#012559}
-#page-factory .factory-band-head p{margin:2px 0 0;font-size:.75rem;line-height:1.35;color:#4d5f73}
+#page-factory .factory-band-title{margin:1px 0 0;font-size:1rem;font-weight:700;line-height:1.2;color:#012559}
+#page-factory .factory-band-hint{margin:2px 0 0;font-size:.75rem;line-height:1.35;color:#4d5f73}
 #page-factory .factory-band-count{
   flex:0 0 auto;min-width:2.4rem;text-align:center;font-size:.82rem;font-weight:800;color:#fff;
   background:var(--factory-accent);border-radius:999px;padding:4px 10px;
 }
+#page-factory .factory-band.is-collapsed .factory-band-head{border-bottom:0}
+#page-factory .factory-band.is-collapsed .factory-band-body{display:none}
+#page-factory .factory-band.is-collapsed .factory-band-chevron{transform:none}
+#page-factory .factory-band:not(.is-collapsed) .factory-band-chevron{transform:rotate(90deg);display:inline-block}
 #page-factory .factory-band,
 #page-factory .factory-lane-list,
 #page-factory .factory-line{min-width:0}

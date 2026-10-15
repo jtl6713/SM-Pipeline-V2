@@ -351,4 +351,6 @@ UI 0.6.607 hashtag mismatch warning only; approval no longer blocked.
 
 2026-10-15: UI 0.6.690-mae-horizon-overflow. MAE-first Day1→DayX, balanced overflow, configurable 30-day horizon, output-type lanes, schedule-on-approval, durable regen progress.
 
-2026-10-15: UI 0.6.691-calendar-scheduled-only. Pipeline calendar shows only scheduled posts; Ready-to-schedule tray removed (schedule assigned at Approve).
+2026-10-15: UI 0.6.692-factory-streams-collapsed. Pipeline calendar shows only scheduled posts; Ready-to-schedule tray removed (schedule assigned at Approve).
+
+2026-10-15: UI 0.6.692-factory-streams-collapsed. Factory: Needs eyes first; all four streams start collapsed.
