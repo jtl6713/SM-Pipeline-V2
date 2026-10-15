@@ -11063,30 +11063,47 @@ function timedScriptAssetLabel(asset, index) {
 
   async function prepareItem4Variants({ autoRetry = false } = {}) {
     if (!activeProductionRequest?.id || item4PreparingVariants) return;
-    if (item4OutputSelectionDirty) {
-      setRequestMessage("Save your platform output selections before preparing frames.", "error-text");
-      setItem4OutputSelectionHint("Save the changed output selections first.", true);
-      return;
-    }
     if (item4MastersNeedSave(item4Workspace || {})) {
       const message = item4UnsavedPrepareMessage();
       setRequestMessage(message, "error-text");
       item4ShowVariantError(message);
       return;
     }
-    if (String(item4Workspace?.plan_status || "") !== "Ready") {
-      if (selectedOutputMatrix().length) {
-        setRequestMessage("Saving platform output selections before preparing frames…", "success");
+    // Prepare is an explicit action to use the currently visible selections.
+    // Recommend formats is intentionally non-persistent, so Prepare must save
+    // those choices rather than silently refusing to advance.
+    const requestId = activeProductionRequest.id;
+    const requestedKeys = productionOutputSelectionKeys();
+    try {
+      if (item4OutputSelectionDirty) {
+        if (!requestedKeys.length) throw new Error("Choose at least one output format before preparing frames.");
+        setRequestMessage("Saving selected formats before preparing frames…", "success");
         await saveProductionRequestOutputs(activeProductionRequest);
+        if (activeProductionRequest?.id !== requestId) return;
+        item4OutputSelectionDirty = false;
+        setItem4OutputSelectionHint("Selected formats saved. Preparing frames…");
         await loadItem4Workspace(activeProductionRequest);
-      } else {
-        setRequestMessage("Building the platform plan before preparing frames…", "success");
-        await buildItem4Plan();
       }
       if (String(item4Workspace?.plan_status || "") !== "Ready") {
-        renderItem4Variants(item4Workspace || {});
-        return;
+        setRequestMessage("Building the platform plan before preparing frames…", "success");
+        await buildItem4Plan();
+        if (activeProductionRequest?.id !== requestId) return;
+        if (String(item4Workspace?.plan_status || "") !== "Ready") {
+          throw new Error("The platform plan is not ready. Check the recommendation message and try Prepare again.");
+        }
+        // Server plan recommendations must not overwrite user-edited formats.
+        if (requestedKeys.length && restoreProductionOutputSelection(requestedKeys)) {
+          await saveProductionRequestOutputs(activeProductionRequest);
+          item4OutputSelectionDirty = false;
+          await loadItem4Workspace(activeProductionRequest);
+        }
       }
+    } catch (error) {
+      const message = error?.message || "Unable to save formats or build the plan.";
+      setRequestMessage(message, "error-text");
+      setItem4OutputSelectionHint(message, true);
+      item4ShowVariantError(message);
+      return;
     }
     if (!autoRetry) item4VariantAutoRetries = 0;
     item4PreparingVariants = true;
