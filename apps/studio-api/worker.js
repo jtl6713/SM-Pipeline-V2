@@ -728,7 +728,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.613-open-ideas-drain-20",
+          version: "0.10.614-scheduled-plus-awaiting",
           studio_supabase_pipeline_reads_v1: true,
           studio_supabase_sync_gate_v1: true,
           studio_supabase_phase3_stable_v1: true,
@@ -774,6 +774,7 @@ export default {
           studio_auto_compress_v1: true,
           studio_autonomous_produce_v1: true,
           studio_autonomous_scheduled_target_v1: true,
+          studio_autonomous_scheduled_plus_awaiting_v1: true,
           studio_autonomous_open_ideas_cap_v1: true,
           studio_autonomous_hour_asset_drain_v1: true,
           studio_autonomous_ten_per_hour_v1: true,
@@ -44643,7 +44644,7 @@ async function countAutonomousOpenIdeas(env, { cap = AUTONOMOUS_OPEN_IDEAS_CAP }
 }
 
 /**
- * Create AUTONOMOUS_IDEAS_PER_HOUR ideas for one city under 200 scheduled.
+ * Create AUTONOMOUS_IDEAS_PER_HOUR ideas for one city under 200 Scheduled+Awaiting Approval.
  * Subjects already in flight do not reduce the count. A library photo group
  * is attached when one exists so resume can take that draft to final approval.
  * An idea with no stills is stamped Waiting for Factory Needs Assets.
@@ -45167,10 +45168,11 @@ async function executeStudioAutonomousProduce(env, ctx, options = {}) {
     return result;
   }
 
-  // Top of the Chicago hour only: 10 ideas per city under 200, even when the
-  // subject is already in flight. When open ideas are already at/over the cap
-  // (20), skip create and drain up to 20 asset-ready drafts toward Ready for
-  // Review instead. :05 and :30 ticks resume one draft. Over 209 skips that city.
+  // Top of the Chicago hour only: 10 ideas per city under 200 Scheduled+Awaiting
+  // Approval, even when the subject is already in flight. When open ideas are
+  // already at/over the cap (20), skip create and drain up to 20 asset-ready
+  // drafts toward Ready for Review instead. :05 and :30 ticks resume one draft.
+  // Combined load over 209 skips that city.
   if (harvestThisHour) {
     const openIdeasCount = await countAutonomousOpenIdeas(env);
     const skipCreate = autonomousOpenIdeasAtCap(openIdeasCount);
@@ -45242,7 +45244,7 @@ async function executeStudioAutonomousProduce(env, ctx, options = {}) {
   }
 
   // Manual / dry-run: one idea. Scheduled hours already returned above.
-  // Hold at 200–209. Skip the hour when the parenthesis total is over 209.
+  // Hold at 200–209 Scheduled+Awaiting Approval. Skip when that combined load is over 209.
   // Global open-ideas cap still wins over the scheduled-target refill.
   const openIdeasCount = await countAutonomousOpenIdeas(env);
   if (autonomousOpenIdeasAtCap(openIdeasCount)) {

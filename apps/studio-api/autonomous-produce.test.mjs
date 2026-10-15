@@ -36,6 +36,7 @@ import {
   autonomousSlotAlreadyClaimed,
   autonomousScheduledBand,
   autonomousScheduledTotal,
+  autonomousPipelineLoadTotal,
   autonomousProfileNeedsScheduledRefill,
   autonomousProfileHourOpen,
   autonomousScheduledDeficit,
@@ -248,14 +249,19 @@ test("hourly refill creates 10 ideas under 200 and skips over 209", () => {
   assert.equal(autonomousScheduledBand(200), "hold");
   assert.equal(autonomousScheduledBand(209), "hold");
   assert.equal(autonomousScheduledBand(210), "skip");
+  assert.equal(autonomousPipelineLoadTotal(67, 140), 207);
+  assert.equal(autonomousPipelineLoadTotal(199, 1), 200);
   assert.equal(autonomousProfileNeedsScheduledRefill(67, 0), true);
   assert.equal(autonomousProfileNeedsScheduledRefill(200, 0), false);
   assert.equal(autonomousProfileNeedsScheduledRefill(209, 0), false);
   assert.equal(autonomousProfileNeedsScheduledRefill(210, 0), false);
-  assert.equal(autonomousProfileNeedsScheduledRefill(67, 140), true);
+  // Scheduled 67 + Awaiting Approval 140 = 207 → hold (not refill).
+  assert.equal(autonomousProfileNeedsScheduledRefill(67, 140), false);
   assert.equal(autonomousProfileNeedsScheduledRefill(199, 0), true);
+  assert.equal(autonomousProfileNeedsScheduledRefill(150, 60), false);
   assert.equal(autonomousScheduledDeficit(67, 0), 133);
-  assert.equal(autonomousScheduledDeficit(67, 140), 133);
+  assert.equal(autonomousScheduledDeficit(67, 140), 0);
+  assert.equal(autonomousScheduledDeficit(150, 20), 30);
   assert.equal(autonomousScheduledDeficit(210, 0), 0);
   const slot = "2026-10-14:h09";
   const oneIdea = {
@@ -300,7 +306,7 @@ test("hourly refill creates 10 ideas under 200 and skips over 209", () => {
   assert.equal(nextHour.ideas_by_profile.recMia, 1);
 });
 
-test("refill scores prefer the city with the largest Scheduled deficit", () => {
+test("refill scores prefer the city with the largest Scheduled+Awaiting Approval deficit", () => {
   const scores = autonomousRefillScoresFromOverview([
     {
       id: "recChi",
@@ -322,13 +328,18 @@ test("refill scores prefer the city with the largest Scheduled deficit", () => {
     },
   ]);
   assert.equal(scores.recChi.scheduled_total, 67);
+  assert.equal(scores.recChi.pipeline_load, 67);
   assert.equal(scores.recChi.needed, true);
   assert.equal(scores.recChi.band, "refill");
   assert.equal(scores.recChi.deficit, 133);
+  // LA scheduled 69 + awaiting 50 = 119 → still refill, smaller deficit than Chicago.
+  assert.equal(scores.recLA.pipeline_load, 119);
   assert.equal(scores.recLA.needed, true);
-  assert.equal(scores.recLA.deficit, 131);
+  assert.equal(scores.recLA.deficit, 81);
+  // Miami scheduled 200 + awaiting 10 = 210 → skip.
+  assert.equal(scores.recMia.pipeline_load, 210);
   assert.equal(scores.recMia.needed, false);
-  assert.equal(scores.recMia.band, "hold");
+  assert.equal(scores.recMia.band, "skip");
   const profiles = [
     { id: "recChi", name: "Chicago" },
     { id: "recLA", name: "Los Angeles" },
@@ -891,7 +902,7 @@ test("Worker stamps photo-ready ideas and drains the 30m SLA on light ticks", as
   const path = await import("node:path");
   const here = path.dirname(fileURLToPath(import.meta.url));
   const worker = await readFile(path.join(here, "worker.js"), "utf8");
-  assert.match(worker, /version: "0.10.613-open-ideas-drain-20"/);
+  assert.match(worker, /version: "0.10.614-scheduled-plus-awaiting"/);
   assert.match(worker, /studio_autonomous_ten_ideas_anyway_v1: true/);
   assert.match(worker, /planAutonomousHourIdeas/);
   const hourFill = worker.slice(
@@ -924,6 +935,7 @@ test("Worker stamps photo-ready ideas and drains the 30m SLA on light ticks", as
   assert.match(worker, /if \(!cadence\.heavy\)/);
   assert.doesNotMatch(worker, /rows\.length >= 180/);
   assert.match(worker, /studio_autonomous_scheduled_target_v1: true/);
+  assert.match(worker, /studio_autonomous_scheduled_plus_awaiting_v1: true/);
   assert.match(worker, /studio_autonomous_music_variety_v1: true/);
   assert.match(worker, /AUTONOMOUS_SCHEDULED_TARGET/);
   assert.match(worker, /scheduled_target_met/);

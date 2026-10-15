@@ -3,11 +3,11 @@
 import { firstLinkedRecordId } from "./asset-library.mjs";
 import { IDEA_LIBRARY_NAMED_PLACES } from "./idea-photo-wait.mjs";
 
-/** All-Profiles parenthesis total per city: keep Scheduled at or above this. */
+/** All-Profiles load per city: keep Scheduled + Awaiting Approval at or above this. */
 export const AUTONOMOUS_SCHEDULED_TARGET = 200;
-/** Parenthesis total above this skips that city for the Chicago hour. 200–209 holds. */
+/** Combined load above this skips that city for the Chicago hour. 200–209 holds. */
 export const AUTONOMOUS_SCHEDULED_SKIP_ABOVE = 209;
-/** Distinct-subject ideas to open per city per Chicago hour while Scheduled is under target. */
+/** Distinct-subject ideas to open per city per Chicago hour while Scheduled+Awaiting Approval is under target. */
 export const AUTONOMOUS_IDEAS_PER_HOUR = 10;
 /**
  * Hard ceiling on unpromoted Idea Candidates across all cities.
@@ -151,32 +151,40 @@ export function autonomousScheduledTotal(scheduledByPlatform) {
   return total;
 }
 
+/** Scheduled parenthesis total plus Awaiting Approval — the 200 / 209 ceiling uses this. */
+export function autonomousPipelineLoadTotal(scheduledTotal, awaitingApproval = 0) {
+  return Math.max(0, Number(scheduledTotal) || 0) + Math.max(0, Number(awaitingApproval) || 0);
+}
+
 /**
- * refill: Scheduled under target (create this hour's ideas).
+ * refill: combined load under target (create this hour's ideas).
  * hold: at target through the skip ceiling (do not harvest).
  * skip: above the ceiling (skip that city this hour).
- * Awaiting Approval does not change the band.
+ * `loadTotal` is Scheduled + Awaiting Approval.
  */
 export function autonomousScheduledBand(
-  scheduledTotal,
+  loadTotal,
   target = AUTONOMOUS_SCHEDULED_TARGET,
   skipAbove = AUTONOMOUS_SCHEDULED_SKIP_ABOVE,
 ) {
-  const scheduled = Math.max(0, Number(scheduledTotal) || 0);
+  const load = Math.max(0, Number(loadTotal) || 0);
   const floor = Math.max(1, Number(target) || AUTONOMOUS_SCHEDULED_TARGET);
   const ceiling = Math.max(floor, Number(skipAbove) || AUTONOMOUS_SCHEDULED_SKIP_ABOVE);
-  if (scheduled > ceiling) return "skip";
-  if (scheduled < floor) return "refill";
+  if (load > ceiling) return "skip";
+  if (load < floor) return "refill";
   return "hold";
 }
 
-/** True only when the parenthesis total is under the target. Awaiting Approval is ignored. */
+/** True only when Scheduled + Awaiting Approval is under the target. */
 export function autonomousProfileNeedsScheduledRefill(
   scheduledTotal,
-  _awaitingApproval = 0,
+  awaitingApproval = 0,
   target = AUTONOMOUS_SCHEDULED_TARGET,
 ) {
-  return autonomousScheduledBand(scheduledTotal, target) === "refill";
+  return autonomousScheduledBand(
+    autonomousPipelineLoadTotal(scheduledTotal, awaitingApproval),
+    target,
+  ) === "refill";
 }
 
 /** How many new ideas may still be opened before hitting the global open-ideas cap. */
@@ -207,18 +215,19 @@ export function autonomousOpenIdeasCreateBudget(
 
 export function autonomousScheduledDeficit(
   scheduledTotal,
-  _awaitingApproval = 0,
+  awaitingApproval = 0,
   target = AUTONOMOUS_SCHEDULED_TARGET,
 ) {
-  const scheduled = Math.max(0, Number(scheduledTotal) || 0);
+  const load = autonomousPipelineLoadTotal(scheduledTotal, awaitingApproval);
   const floor = Math.max(1, Number(target) || AUTONOMOUS_SCHEDULED_TARGET);
-  if (autonomousScheduledBand(scheduled, target) !== "refill") return 0;
-  return Math.max(0, floor - scheduled);
+  if (autonomousScheduledBand(load, target) !== "refill") return 0;
+  return Math.max(0, floor - load);
 }
 
 /**
  * Build per-profile refill scores from All-Profiles overview rows
  * (`scheduled` map + `approval` awaiting-approval count).
+ * Band / deficit use Scheduled + Awaiting Approval.
  */
 export function autonomousRefillScoresFromOverview(overviewRows, target = AUTONOMOUS_SCHEDULED_TARGET) {
   const byId = Object.create(null);
@@ -227,7 +236,8 @@ export function autonomousRefillScoresFromOverview(overviewRows, target = AUTONO
     if (!id) continue;
     const scheduledTotal = autonomousScheduledTotal(row?.scheduled);
     const awaiting = Math.max(0, Number(row?.approval ?? row?.metrics?.awaiting_approval) || 0);
-    const band = autonomousScheduledBand(scheduledTotal, target);
+    const pipelineLoad = autonomousPipelineLoadTotal(scheduledTotal, awaiting);
+    const band = autonomousScheduledBand(pipelineLoad, target);
     const deficit = autonomousScheduledDeficit(scheduledTotal, awaiting, target);
     const needed = band === "refill";
     byId[id] = {
@@ -235,6 +245,7 @@ export function autonomousRefillScoresFromOverview(overviewRows, target = AUTONO
       name: String(row?.name || row?.city_label || "").trim(),
       scheduled_total: scheduledTotal,
       awaiting_approval: awaiting,
+      pipeline_load: pipelineLoad,
       band,
       deficit,
       needed,
