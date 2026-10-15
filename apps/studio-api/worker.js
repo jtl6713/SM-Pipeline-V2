@@ -1000,7 +1000,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.620-approve-all-fast-stamp",
+          version: "0.10.621-approve-binding-dirty",
           studio_supabase_pipeline_reads_v1: true,
           studio_supabase_sync_gate_v1: true,
           studio_supabase_phase3_stable_v1: true,
@@ -5584,6 +5584,10 @@ const YOUTUBE_COMPLETE_ERRORS = {
 // Shared bindings for the extracted function modules (live ESM references).
 export {
   airtableFetch,
+  studioMarkMappedListDirty,
+  schedulePipelineListHeal,
+  item4EnsureMakeHardeningFromWorkspaceOpen,
+  syncProductionCadence,
   JSON_HEADERS,
   STUDIO_DEFAULT_MUSIC_VOLUME,
   STUDIO_DEFAULT_DUCKED_MUSIC_VOLUME,
