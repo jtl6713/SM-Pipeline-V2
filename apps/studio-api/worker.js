@@ -4296,6 +4296,7 @@ const OUTPUT_LIST_FIELDS = [
   "Studio_Preview_Updated_At",
   "Output_URL",
   "Platform_Post_URL",
+  "Platform_Post_ID",
   "Published_At",
   "TikTok_Draft_Status",
   "Manual_Published_URL",
