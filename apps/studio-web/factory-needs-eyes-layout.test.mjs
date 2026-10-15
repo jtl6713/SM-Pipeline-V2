@@ -8,7 +8,7 @@ const factory = readFileSync(new URL("assets/factory-desk.js", root), "utf8");
 
 test("Needs eyes responsive action layout is shipped after base stylesheet", () => {
   assert.match(html, /factory-layout-0680\.css\?v=0.6.690-mae-horizon-overflow/);
-  assert.match(html, /UI build 0\.6\.689/);
+  assert.match(html, /UI build 0\.6\.690/);
   assert.ok(html.indexOf("factory-layout-0680.css") > html.indexOf("styles-phase7-0621.css"));
 });
 test("Review buttons have two grid rows and an accessible size", () => {

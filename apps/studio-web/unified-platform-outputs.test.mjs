@@ -100,7 +100,7 @@ test("Worker output synchronization REPLACES stale plan items with enabled outpu
 });
 
 test("Studio build label, app BUILD_ID, and asset versions are aligned", () => {
-  assert.match(html, /UI build 0\.6\.689/);
+  assert.match(html, /UI build 0\.6\.690/);
   assert.match(app, /const BUILD_ID = "item4-0\.6\.690-mae-horizon-overflow"/);
   const versions = [...html.matchAll(/\?v=(\d+\.\d+\.\d+)-/g)].map((x) => x[1]);
   assert.ok(versions.length > 10);
