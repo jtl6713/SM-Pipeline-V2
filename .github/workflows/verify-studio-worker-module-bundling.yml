@@ -1,0 +1,46 @@
+name: Verify Studio Worker module bundling
+on:
+  pull_request:
+    paths:
+      - 'apps/studio-api/**'
+      - '.github/workflows/verify-studio-worker-module-bundling.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  bundle:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Verify extracted mapper and entry syntax
+        run: |
+          set -euo pipefail
+          node --check apps/studio-api/worker.js
+          node --check apps/studio-api/production-output-mapper.mjs
+      - name: Verify actual production-style Wrangler bundling
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/studio-wrangler-verify
+          cp apps/studio-api/worker.js /tmp/studio-wrangler-verify/
+          cp apps/studio-api/*.mjs /tmp/studio-wrangler-verify/
+          rm -f /tmp/studio-wrangler-verify/*.test.mjs
+          cd /tmp/studio-wrangler-verify
+          npm init -y >/dev/null
+          npm install --no-save wrangler@4.123.0
+          cat > wrangler.jsonc <<'EOF'
+          {
+            "name": "studio-module-validation",
+            "main": "worker.js",
+            "compatibility_date": "2026-08-02",
+            "workers_dev": false,
+            "r2_buckets": [{"binding": "STUDIO_MEDIA", "bucket_name": "dummy"}]
+          }
+          EOF
+          ./node_modules/.bin/wrangler deploy --config wrangler.jsonc --dry-run --outdir dist
+          test -s dist/worker.js
+          echo 'Wrangler bundle dry-run PASS'
