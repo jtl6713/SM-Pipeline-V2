@@ -1,3 +1,4 @@
+import { readStudioWorkerSource } from "./worker-source-reader.mjs";
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
@@ -20,7 +21,7 @@ import {
 } from "./approve-all-batch.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const worker = fs.readFileSync(path.join(__dirname, "worker.js"), "utf8");
+const worker = readStudioWorkerSource();
 const app = fs.readFileSync(path.join(__dirname, "../studio-web/assets/app-item4-1008.js"), "utf8");
 
 test("approve-all batch helpers track progress and retry failed only", () => {

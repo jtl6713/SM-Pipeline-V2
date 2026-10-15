@@ -1,3 +1,4 @@
+import { readStudioWorkerSource } from "./worker-source-reader.mjs";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
@@ -34,7 +35,7 @@ import {
 } from "./az-finished-video.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-const worker = fs.readFileSync(path.join(here, "worker.js"), "utf8");
+const worker = readStudioWorkerSource();
 
 test("AZ origin stamp keeps finished-video passthrough and auto-queue", () => {
   const stamp = azOriginStamp();

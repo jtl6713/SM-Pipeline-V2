@@ -1,3 +1,4 @@
+import { readStudioWorkerSource } from "./worker-source-reader.mjs";
 import assert from "node:assert/strict";
 import test from "node:test";
 
@@ -901,7 +902,7 @@ test("Worker stamps photo-ready ideas and drains the 30m SLA on light ticks", as
   const { fileURLToPath } = await import("node:url");
   const path = await import("node:path");
   const here = path.dirname(fileURLToPath(import.meta.url));
-  const worker = await readFile(path.join(here, "worker.js"), "utf8");
+  const worker = readStudioWorkerSource();
   assert.match(worker, /version: "0.10.618-mae-horizon-overflow"/);
   assert.match(worker, /studio_autonomous_ten_ideas_anyway_v1: true/);
   assert.match(worker, /planAutonomousHourIdeas/);
