@@ -73,12 +73,15 @@ test("supabase read-route inventory is explicit", () => {
 
 test("worker wires supabase pipeline reads behind a flag", async () => {
   const worker = await readFile(path.join(here, "worker.js"), "utf8");
-  assert.match(worker, /version: "0\.10\.609-supabase-phase3-stable"/);
+  assert.match(worker, /version: "0\.10\.610-supabase-schedule-writethrough"/);
   assert.match(worker, /studio_supabase_pipeline_reads_v1: true/);
   assert.match(worker, /studio_supabase_phase3_stable_v1: true/);
+  assert.match(worker, /studio_supabase_schedule_writethrough_v1: true/);
   assert.match(worker, /from "\.\/supabase-pipeline-reads\.mjs"/);
   assert.match(worker, /buildPipelineOutputsPayloadFromSupabase/);
   assert.match(worker, /listSupabaseScheduleGrid/);
+  assert.match(worker, /syncAirtableOutputRowToSupabase/);
+  assert.match(worker, /supabase schedule write-through failed/);
   assert.match(worker, /\/api\/ops\/supabase\/sync/);
   assert.match(worker, /studioSyncSupabasePipelineReads/);
   assert.match(worker, /listOpenOutputs/);

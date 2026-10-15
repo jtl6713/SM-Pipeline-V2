@@ -6,6 +6,7 @@ import {
   listSupabaseScheduleGrid,
   syncAllProfilesPipelineToSupabase,
   syncProfilePipelineToSupabase,
+  syncAirtableOutputRowToSupabase,
   STUDIO_SUPABASE_PIPELINE_READ_ROUTES,
 } from "./supabase-pipeline-reads.mjs";
 import {
@@ -721,10 +722,11 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.609-supabase-phase3-stable",
+          version: "0.10.610-supabase-schedule-writethrough",
           studio_supabase_pipeline_reads_v1: true,
           studio_supabase_sync_gate_v1: true,
           studio_supabase_phase3_stable_v1: true,
+          studio_supabase_schedule_writethrough_v1: true,
           studio_read_source: studioReadSource(env),
           studio_supabase_configured: studioSupabaseConfigured(env),
           studio_supabase_read_routes: STUDIO_SUPABASE_PIPELINE_READ_ROUTES,
@@ -45633,6 +45635,16 @@ async function scheduleStudioPublishOutput(request, env, url, authorization, ctx
     }),
   });
   studioInvalidateOccupiedScheduleCache();
+  // Phase 3: keep Supabase schedule-grid in lockstep so the calendar does not
+  // snap the bubble back after refreshPipelineOutputs reloads from Supabase.
+  if (studioSupabaseConfigured(env)) {
+    try {
+      await syncAirtableOutputRowToSupabase(env, updated);
+      studioReadCacheDropPrefix("schedule-grid:");
+    } catch (error) {
+      console.warn("supabase schedule write-through failed", match[1], error);
+    }
+  }
   const due = studioPublishIsDue(updated);
   const approved = String(f(updated, "Output_Status") || "").trim() === "Approved for Publishing"
     || String(f(updated, "Review_Status") || "").trim() === "Approved";
