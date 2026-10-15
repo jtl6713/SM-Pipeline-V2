@@ -1,5 +1,13 @@
 import { createProfileOnboarding } from "./profile-onboarding.mjs";
 import {
+  studioReadSource,
+  studioSupabaseConfigured,
+  listSupabasePipelineOutputs,
+  listSupabaseScheduleGrid,
+  syncAllProfilesPipelineToSupabase,
+  syncProfilePipelineToSupabase,
+} from "./supabase-pipeline-reads.mjs";
+import {
   DESK_SETTING_NAME,
   DESK_CAPS_SETTING_NAME,
   DESK_MODES,
@@ -475,6 +483,7 @@ export default {
       const isOpsDeskInventoryRoute = url.pathname === "/api/ops/desk/inventory";
       const isOpsDeskActivityRoute = url.pathname === "/api/ops/desk/activity";
       const isOpsDeskModeRoute = url.pathname === "/api/ops/desk/mode";
+      const isOpsSupabaseSyncRoute = url.pathname === "/api/ops/supabase/sync";
       const isAiApiRoute = url.pathname === "/api/ai-api";
       const isOpsLibraryCrossScopeRoute = url.pathname === "/api/ops/library/cross-scope";
       const isOperationsResetRenderUrlsRoute = url.pathname === "/api/operations/reset-render-urls";
@@ -708,7 +717,10 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.606-ten-ideas-anyway",
+          version: "0.10.607-supabase-pipeline-reads",
+          studio_supabase_pipeline_reads_v1: true,
+          studio_read_source: studioReadSource(env),
+          studio_supabase_configured: studioSupabaseConfigured(env),
           studio_voiceover_once_v1: true,
           studio_factory_desk_v1: true,
           studio_factory_inflight_blocked_parent_v1: true,
@@ -1111,6 +1123,13 @@ export default {
         if (request.method !== "GET") throw new HttpError(405, "Method not allowed");
         requireAnyPermission(authorization, ["tenant_admin", "publishing_control", "production_configure"]);
         return getStudioDeskInventory(request, env);
+      }
+
+      if (isOpsSupabaseSyncRoute) {
+        if (request.method !== "POST") throw new HttpError(405, "Method not allowed");
+        requirePermission(authorization, "tenant_admin");
+        assertWriteRequest(request, env);
+        return postStudioSupabaseSync(request, env);
       }
 
       if (isOpsDeskActivityRoute) {
@@ -2005,6 +2024,11 @@ export default {
         await warmOldestStudioReadSnapshot(env);
       } catch (error) {
         console.warn("studio list snapshot warm failed", error);
+      }
+      try {
+        await studioSyncSupabasePipelineReads(env, { outputLimit: 400, contentLimit: 200 });
+      } catch (error) {
+        console.warn("supabase pipeline sync cron failed", error);
       }
       try {
         await opsForceAzNavyPierTitle(env);
@@ -25885,6 +25909,29 @@ async function listOutputScheduleGrid(request, env, url, authorization) {
   const body = await studioReadCoalesce(`schedule-grid:${profile.id}:${startMs}:${endMs}`, 25000, async () => {
   const startFloor = new Date(startMs - 1000).toISOString();
   const endIso = new Date(endMs).toISOString();
+
+  if (studioReadSource(env) === "supabase") {
+    try {
+      const grid = await listSupabaseScheduleGrid(env, {
+        profileAirtableId: profile.id,
+        startIso: startFloor,
+        endIso,
+      });
+      if (!grid.profileMissing) {
+        return {
+          ok: true,
+          start: new Date(startMs).toISOString(),
+          end: endIso,
+          records: grid.records,
+          profile: mapStudioContentProfile(profile),
+          read_source: "supabase",
+        };
+      }
+    } catch (error) {
+      console.warn("supabase schedule-grid read failed; falling back to Airtable", error);
+    }
+  }
+
   const profileFormula = contentProfileFilterFormula(profile);
   const formula = `AND(${profileFormula},{Scheduled_Post_Date}!="",IS_AFTER({Scheduled_Post_Date},DATETIME_PARSE("${airtableFormulaEscape(startFloor)}")),IS_BEFORE({Scheduled_Post_Date},DATETIME_PARSE("${airtableFormulaEscape(endIso)}")))`;
   const records = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
@@ -25925,6 +25972,7 @@ async function listOutputScheduleGrid(request, env, url, authorization) {
       };
     }),
     profile: mapStudioContentProfile(profile),
+    read_source: "airtable",
   };
   });
   return respond(request, env, body);
@@ -26123,7 +26171,57 @@ async function writePipelineOutputsSnapshot(env, snapshotKey, payload) {
   return writeMappedListSnapshot(env, memoryKey, snapshotKey, payload);
 }
 
+async function buildPipelineOutputsPayloadFromSupabase(env, profile, { limit, reviewOnly, ctx = null } = {}) {
+  const packed = await listSupabasePipelineOutputs(env, {
+    profileAirtableId: profile.id,
+    limit: reviewOnly ? Math.min(limit, 80) : limit,
+    reviewOnly,
+  });
+  if (packed.profileMissing) {
+    throw new Error(`Supabase content profile missing for ${profile.id}; run supabase sync`);
+  }
+  const records = packed.records;
+  if (!reviewOnly) schedulePipelineListHeal(ctx, env, records);
+  const [jobs, queueControls, activeHolds] = await Promise.all([
+    loadStudioProductionJobsForOutputs(env, records).catch(() => new Map()),
+    readOpsQueueControls(env).catch(() => ({})),
+    listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
+      limit: 16,
+      fields: OUTPUT_LIST_FIELDS,
+      filterFormula: STUDIO_RENDER_QUEUE_ACTIVE_FORMULA,
+    }).catch(() => []),
+  ]);
+  const queueCandidates = await studioLoadRenderQueueCandidates(env, {
+    limit: 100,
+    fields: OUTPUT_LIST_FIELDS,
+    controls: queueControls,
+  }).catch(() => []);
+  const { byId: renderQueueById, total: renderQueueTotal } = assignRenderQueuePositions(
+    queueCandidates,
+    f,
+    { activeHolds, controls: queueControls },
+  );
+  return {
+    records: records.map((record) => mapOutput(
+      record,
+      jobs.get(record),
+      renderQueueById.get(record.id) || null,
+      packed.contentByAirtableId.get(studioFirstLinkedId(f(record, "Content_Item"))) || null,
+    )),
+    profile: mapStudioContentProfile(profile),
+    render_queue_total: renderQueueTotal,
+    read_source: "supabase",
+  };
+}
+
 async function buildPipelineOutputsPayload(env, profile, { limit, reviewOnly, ctx = null } = {}) {
+  if (studioReadSource(env) === "supabase") {
+    try {
+      return await buildPipelineOutputsPayloadFromSupabase(env, profile, { limit, reviewOnly, ctx });
+    } catch (error) {
+      console.warn("supabase pipeline list read failed; falling back to Airtable", error);
+    }
+  }
   const listOpts = {
     fields: OUTPUT_LIST_FIELDS,
     sortField: "Output_ID",
@@ -26178,7 +26276,39 @@ async function buildPipelineOutputsPayload(env, profile, { limit, reviewOnly, ct
     )),
     profile: mapStudioContentProfile(profile),
     render_queue_total: renderQueueTotal,
+    read_source: "airtable",
   };
+}
+
+
+async function studioSyncSupabasePipelineReads(env, options = {}) {
+  if (!studioSupabaseConfigured(env)) return { skipped: true, reason: "supabase_not_configured" };
+  const profiles = (await listContentProfileRecords(env).catch(() => [])).filter((row) => Boolean(f(row, "Active")));
+  return syncAllProfilesPipelineToSupabase(env, profiles, {
+    listRecords,
+    f,
+    contentProfileFilterFormula,
+    outputFields: OUTPUT_LIST_FIELDS,
+    outputLimit: options.outputLimit,
+    contentLimit: options.contentLimit,
+  });
+}
+
+async function postStudioSupabaseSync(request, env) {
+  if (!studioSupabaseConfigured(env)) {
+    throw new HttpError(503, "Supabase is not configured (set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY)");
+  }
+  let payload = {};
+  try { payload = await request.json(); } catch { payload = {}; }
+  const outputLimit = Number(payload?.output_limit || 500) || 500;
+  const contentLimit = Number(payload?.content_limit || 250) || 250;
+  const result = await studioSyncSupabasePipelineReads(env, { outputLimit, contentLimit });
+  studioMarkMappedListDirty();
+  return respond(request, env, {
+    ok: true,
+    read_source: studioReadSource(env),
+    sync: result,
+  });
 }
 
 async function warmOldestStudioReadSnapshot(env) {
@@ -26220,6 +26350,32 @@ async function listOutputs(request, env, url, authorization, ctx = null) {
   // a one-page live read of recent outputs scoped to this content profile.
   if (url.searchParams.get("mode") === "latest") {
     const key = `pipeline-latest:${profile.id}`;
+    if (studioReadSource(env) === "supabase") {
+      try {
+        const packed = await studioReadCoalesce(key, 7000, () => listSupabasePipelineOutputs(env, {
+          profileAirtableId: profile.id,
+          limit: 60,
+          reviewOnly: false,
+        }));
+        if (!packed.profileMissing) {
+          const recent = (packed.records || []).slice(0, 60);
+          return respond(request, env, {
+            ok: true,
+            fresh: true,
+            records: recent.map((record) => mapOutput(
+              record,
+              null,
+              null,
+              packed.contentByAirtableId.get(studioFirstLinkedId(f(record, "Content_Item"))) || null,
+            )),
+            profile: mapStudioContentProfile(profile),
+            read_source: "supabase",
+          });
+        }
+      } catch (error) {
+        console.warn("supabase pipeline latest read failed; falling back to Airtable", error);
+      }
+    }
     const recent = await studioReadCoalesce(key, 7000, () => listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
       fields: OUTPUT_LIST_FIELDS,
       sortField: "Output_ID",
@@ -26245,6 +26401,7 @@ async function listOutputs(request, env, url, authorization, ctx = null) {
         labels.get(studioFirstLinkedId(f(record, "Content_Item"))) || null,
       )),
       profile: mapStudioContentProfile(profile),
+      read_source: "airtable",
     });
   }
   // Newest first, plus unfinished rows that would otherwise age out of the page.
