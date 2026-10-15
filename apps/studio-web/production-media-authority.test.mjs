@@ -1,9 +1,10 @@
+import { readStudioWorkerSource } from "../studio-api/worker-source-reader.mjs";
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
 const app = fs.readFileSync(new URL('./assets/app-item4-1008.js', import.meta.url), 'utf8');
-const worker = fs.readFileSync(new URL('../studio-api/worker.js', import.meta.url), 'utf8');
+const worker = readStudioWorkerSource();
 function section(source, start, end) { return source.slice(source.indexOf(start), source.indexOf(end, source.indexOf(start))); }
 const loader = section(app, '  async function loadItem4Workspace(', '  function item4UploadFileExtension');
 function harness(api, extra = {}) {
