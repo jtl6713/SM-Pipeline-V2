@@ -11,10 +11,10 @@ const html = fs.readFileSync(path.join(here, "index.html"), "utf8");
 const worker = readStudioWorkerSource();
 
 test("UI 0.6.516 Approve gate rejects stale Rendering / In Production (Output 1807)", () => {
-  assert.match(app, /BUILD_ID = "item4-0.6.695-approve-all-fast-stamp"/);
-  assert.match(html, /UI build 0.6.695/);
-  assert.match(html, /app-item4-1008\.js\?v=0.6.695-approve-all-fast-stamp/);
-  assert.match(html, /styles-phase7-0621\.css\?v=0.6.695-approve-all-fast-stamp/);
+  assert.match(app, /BUILD_ID = "item4-0.6.696-approve-binding-dirty"/);
+  assert.match(html, /UI build 0.6.696/);
+  assert.match(html, /app-item4-1008\.js\?v=0.6.696-approve-binding-dirty/);
+  assert.match(html, /styles-phase7-0621\.css\?v=0.6.696-approve-binding-dirty/);
   assert.match(app, /function creativeCanApproveForPublishing\(/);
   assert.match(
     app,
@@ -24,7 +24,7 @@ test("UI 0.6.516 Approve gate rejects stale Rendering / In Production (Output 18
 });
 
 test("Worker 0.10.478 heals Final_File_URL + Rendering to Ready for Review", () => {
-  assert.match(worker, /version: "0.10.620-approve-all-fast-stamp"/);
+  assert.match(worker, /version: "0.10.621-approve-binding-dirty"/);
   assert.match(worker, /studio_render_stale_rendering_v1: true/);
   assert.match(worker, /R5_STALE_RENDERING_FINALIZED/);
   assert.match(worker, /\{Render_Status\}="Rendering",\{Final_File_URL\}!=""/);

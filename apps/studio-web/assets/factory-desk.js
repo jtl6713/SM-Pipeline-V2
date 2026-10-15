@@ -749,7 +749,14 @@
       }
     }
     setStatus(message, failed > 0 || leftover.length > 0);
-    if (failed > 0) window.alert(`Factory Approve all finished with failures:\n${approveAllProgressText(finished)}`);
+    if (failed > 0) {
+      const failedItems = Array.isArray(finished?.failed) ? finished.failed : [];
+      const reasons = [...new Set(failedItems.map((row) => String(row?.error || "").trim()).filter(Boolean))];
+      const reasonText = reasons.length
+        ? `\n\n${reasons.slice(0, 3).map((err) => `• ${err}`).join("\n")}${reasons.length > 3 ? `\n• …and ${reasons.length - 3} more` : ""}`
+        : "";
+      window.alert(`Factory Approve all finished with failures:\n${approveAllProgressText(finished)}${reasonText}`);
+    }
   }
 
   async function mutateDesk(payload) {

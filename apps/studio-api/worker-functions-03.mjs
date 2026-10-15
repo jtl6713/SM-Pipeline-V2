@@ -408,6 +408,10 @@ import {
 // Functions extracted verbatim from worker.js. No route, response, or state changes.
 import {
   airtableFetch,
+  studioMarkMappedListDirty,
+  schedulePipelineListHeal,
+  item4EnsureMakeHardeningFromWorkspaceOpen,
+  syncProductionCadence,
   STUDIO_DEFAULT_MUSIC_VOLUME,
   STUDIO_DEFAULT_DUCKED_MUSIC_VOLUME,
   HttpError,
