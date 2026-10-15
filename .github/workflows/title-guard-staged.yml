@@ -1,0 +1,36 @@
+name: Title Guard Staged Regression
+on:
+  pull_request:
+    paths:
+      - 'apps/studio-api/title-guard*'
+      - 'apps/studio-api/worker-functions-*.mjs'
+      - 'migrations/title-guard/**'
+      - '.github/workflows/title-guard-staged.yml'
+permissions: {contents: read}
+jobs:
+  title-guard-regression:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Node title guard and source checks
+        run: |
+          set -euo pipefail
+          node --test apps/studio-api/title-guard.test.mjs
+          node --check apps/studio-api/title-guard.mjs
+          node --check apps/studio-api/title-guard-runtime.mjs
+          node --check apps/studio-api/worker.js
+          for file in apps/studio-api/worker-functions-*.mjs; do node --check "$file"; done
+      - name: Wrangler Worker dry run
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/studio-title-worker
+          cp apps/studio-api/worker.js /tmp/studio-title-worker/
+          find apps/studio-api -maxdepth 1 -name '*.mjs' ! -name '*.test.mjs' -exec cp {} /tmp/studio-title-worker/ \;
+          cd /tmp/studio-title-worker
+          npm init -y >/dev/null
+          npm install --no-save wrangler@4.123.0
+          cat >wrangler.jsonc <<'EOF'
+          {"name":"studio-title-syntax-check","main":"worker.js","compatibility_date":"2026-08-02","workers_dev":false,"r2_buckets":[{"binding":"STUDIO_MEDIA","bucket_name":"dummy"}]}
+          EOF
+          ./node_modules/.bin/wrangler deploy --config wrangler.jsonc --dry-run

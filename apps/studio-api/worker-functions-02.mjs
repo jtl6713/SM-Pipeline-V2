@@ -1,4 +1,5 @@
 import { createProfileOnboarding } from "./profile-onboarding.mjs";
+import { titleGuardBeforeWrite, titleGuardRelease } from "./title-guard-runtime.mjs";
 import {
   studioReadSource,
   studioSupabaseConfigured,
@@ -3220,6 +3221,16 @@ export async function maybeHealDraftNarrationVoice(env, record, idea, authorizat
 /*__STUDIO_WORKER_END:maybeHealDraftNarrationVoice__*/
 
 export async function createDraftForIdea(env, idea, authorization, input = null, { preferredProfileId = null } = {}) {
+  const titleGuard = await titleGuardBeforeWrite({
+    env, stage: "production", source: "production_draft",
+    title: f(idea, "Candidate_Title"),
+    profileId: arrayOrEmpty(f(idea, "Content_Profile"))[0],
+    ideaId: idea.id, listRecords, airtableFetch,
+    ideaTableId: env.AIRTABLE_IDEA_TABLE_ID,
+    requestTableId: PRODUCTION_REQUEST_TABLE,
+    contentTableId: env.AIRTABLE_CONTENT_TABLE_ID,
+    outputTableId: STUDIO_PLATFORM_OUTPUT_TABLE,
+  });
   const now = new Date().toISOString();
   const defaults = productionRequestDefaultsFromIdea(idea);
   // HTML/EZ defaults send Kate. Treat that as unset unless the operator explicitly
@@ -3267,10 +3278,15 @@ export async function createDraftForIdea(env, idea, authorization, input = null,
     ...productionRequestFields(cleaned, now),
   };
 
-  return airtableFetch(env, PRODUCTION_REQUEST_TABLE, "", {
-    method: "POST",
-    body: JSON.stringify({ fields, typecast: true }),
-  });
+  try {
+    return await airtableFetch(env, PRODUCTION_REQUEST_TABLE, "", {
+      method: "POST",
+      body: JSON.stringify({ fields, typecast: true }),
+    });
+  } catch (error) {
+    await titleGuardRelease(env, titleGuard.reservation).catch(() => {});
+    throw error;
+  }
 }
 /*__STUDIO_WORKER_END:createDraftForIdea__*/
 

@@ -1,4 +1,5 @@
 import { createProfileOnboarding } from "./profile-onboarding.mjs";
+import { titleGuardBeforeWrite, titleGuardCommit, titleGuardRelease } from "./title-guard-runtime.mjs";
 import {
   studioReadSource,
   studioSupabaseConfigured,
@@ -3538,6 +3539,14 @@ export async function createIdea(request, env, authorization) {
 
   const input = cleanIdeaCreatePayload(payload);
   const profile = await resolveWorkingContentProfile(env, authorization, requestedProfileId(null, payload));
+  const titleGuard = await titleGuardBeforeWrite({
+    env, stage: "ideas", source: "manual", title: input.title, profileId: profile.id,
+    listRecords, airtableFetch,
+    ideaTableId: env.AIRTABLE_IDEA_TABLE_ID,
+    requestTableId: PRODUCTION_REQUEST_TABLE,
+    contentTableId: env.AIRTABLE_CONTENT_TABLE_ID,
+    outputTableId: STUDIO_PLATFORM_OUTPUT_TABLE,
+  });
   const fields = {
     Candidate_Title: input.title,
     Candidate_Status: "Generated",
@@ -3558,10 +3567,18 @@ export async function createIdea(request, env, authorization) {
   if (input.primary_location) fields.Primary_Location = input.primary_location;
   else if (inferredLocation.name) fields.Primary_Location = inferredLocation.name;
 
-  const created = await airtableFetch(env, env.AIRTABLE_IDEA_TABLE_ID, "", {
-    method: "POST",
-    body: JSON.stringify({ fields, typecast: false }),
-  });
+  let created;
+  try {
+    created = await airtableFetch(env, env.AIRTABLE_IDEA_TABLE_ID, "", {
+      method: "POST",
+      body: JSON.stringify({ fields, typecast: false }),
+    });
+  } catch (error) {
+    await titleGuardRelease(env, titleGuard.reservation).catch(() => {});
+    throw error;
+  }
+  await titleGuardCommit(env, titleGuard.reservation, created.id, "ideas")
+    .catch(error => console.warn("title_guard_commit_failed", created.id, error));
 
   return respond(request, env, {
     ok: true,
