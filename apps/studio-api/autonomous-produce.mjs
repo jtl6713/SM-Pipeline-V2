@@ -946,6 +946,125 @@ export function summarizeUnusedLibraryOverview(assets, { limit = 16 } = {}) {
   };
 }
 
+function autonomousHourTitle(base, seen) {
+  const clean = String(base || "Library stills").replace(/\s+/g, " ").trim().slice(0, 72) || "Library stills";
+  const key = clean.toLowerCase();
+  const n = (seen.get(key) || 0) + 1;
+  seen.set(key, n);
+  return n === 1 ? clean : `${clean} ${n}`.slice(0, 80);
+}
+
+function autonomousRecordIds(rows, max) {
+  const ids = [];
+  const cap = Math.max(1, Number(max) || AUTONOMOUS_RELATED_STILL_MAX);
+  for (const row of rows || []) {
+    const id = String(row?.id || row?.media_asset_id || "").trim();
+    if (!/^rec[A-Za-z0-9]+$/.test(id) || ids.includes(id)) continue;
+    ids.push(id);
+    if (ids.length >= cap) break;
+  }
+  return ids;
+}
+
+/**
+ * Plan exactly `goal` ideas from the library.
+ * Existing subjects do not reduce the count. Photo groups are attached when
+ * present. The rest are needs-assets ideas for Factory.
+ */
+export function planAutonomousHourIdeas(assets, {
+  goal = AUTONOMOUS_IDEAS_PER_HOUR,
+  max = AUTONOMOUS_RELATED_STILL_MAX,
+  profileName = "",
+  startIndex = 0,
+} = {}) {
+  const need = Math.max(0, Number(goal) || 0);
+  const cap = Math.max(1, Number(max) || AUTONOMOUS_RELATED_STILL_MAX);
+  const claimed = new Set();
+  const packets = [];
+  for (const cluster of groupUnusedLibraryClusters(assets)) {
+    const rows = [];
+    for (const row of cluster.assets || []) {
+      const id = String(row?.id || row?.media_asset_id || "").trim();
+      if (!/^rec[A-Za-z0-9]+$/.test(id) || claimed.has(id)) continue;
+      claimed.add(id);
+      rows.push(row);
+    }
+    for (let offset = 0; offset < rows.length; offset += cap) {
+      const slice = rows.slice(offset, offset + cap);
+      const ids = autonomousRecordIds(slice, cap);
+      if (!ids.length) continue;
+      const location = String(slice[0]?.location || cluster.label || "").trim();
+      packets.push({
+        label: String(cluster.label || location || "Library stills").trim(),
+        location,
+        media_asset_ids: ids,
+      });
+    }
+  }
+  const loose = [];
+  for (const row of assets || []) {
+    const id = String(row?.id || row?.media_asset_id || "").trim();
+    if (!/^rec[A-Za-z0-9]+$/.test(id) || claimed.has(id)) continue;
+    claimed.add(id);
+    loose.push(row);
+  }
+  const looseLabel = String(profileName || "Library stills").trim() || "Library stills";
+  for (let offset = 0; offset < loose.length; offset += cap) {
+    const slice = loose.slice(offset, offset + cap);
+    packets.push({
+      label: looseLabel,
+      location: String(slice[0]?.location || looseLabel).trim(),
+      media_asset_ids: autonomousRecordIds(slice, cap),
+    });
+  }
+
+  const seen = new Map();
+  const city = String(profileName || "Profile").trim() || "Profile";
+  const ideas = [];
+  for (let i = 0; i < need; i += 1) {
+    const packet = packets[i] || null;
+    const n = Math.max(0, Number(startIndex) || 0) + i + 1;
+    if (packet?.media_asset_ids?.length) {
+      const place = String(packet.location || packet.label || "Library stills").trim() || "Library stills";
+      ideas.push({
+        candidate_title: autonomousHourTitle(place, seen),
+        idea_summary: `Library stills from ${place}.`.slice(0, 180),
+        hook: place.slice(0, 80),
+        primary_location: place.slice(0, 80),
+        neighborhood_or_area: "",
+        suggested_visuals: place.slice(0, 80),
+        required_assets: "",
+        why_this_should_work: "Library stills are ready.",
+        content_type: "Vertical Short Video",
+        media_asset_ids: packet.media_asset_ids,
+        cited_trend: "library",
+        cluster_label: String(packet.label || place).slice(0, 80),
+        post_caption: "",
+        needs_assets: false,
+      });
+    } else {
+      ideas.push({
+        candidate_title: autonomousHourTitle(`${city} stills needed`, seen),
+        idea_summary: "Waiting for library stills.",
+        hook: "",
+        primary_location: city.slice(0, 80),
+        neighborhood_or_area: "",
+        suggested_visuals: "",
+        required_assets: "Library stills",
+        why_this_should_work: "Scheduled runway is under target.",
+        content_type: "Vertical Short Video",
+        media_asset_ids: [],
+        cited_trend: "",
+        cluster_label: "",
+        post_caption: "",
+        needs_assets: true,
+        hour_index: n,
+      });
+    }
+  }
+  return ideas;
+}
+
 export function pickRelatedUnusedStillCluster(assets, {
   min = AUTONOMOUS_RELATED_STILL_MIN,
   max = AUTONOMOUS_RELATED_STILL_MAX,
