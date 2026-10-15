@@ -11734,6 +11734,81 @@ export async function studioHealTtd0RouteBlankDraft(env, options = {}) {
 }
 /*__STUDIO_WORKER_END:studioHealTtd0RouteBlankDraft__*/
 
+export async function studioHealFacebookRateLimitRearm(env, options = {}) {
+  // After a Graph 368 park (including interim Auto_Publish=0 fences), re-arm once
+  // Publish_Next_Retry_At is due so FBS3 can try again without a human toggle.
+  const limit = Math.max(1, Math.min(8, Number(options.limit || 4)));
+  const outputTable = env.AIRTABLE_OUTPUT_TABLE_ID;
+  const rows = await listRecords(env, outputTable, {
+    limit: Math.max(limit * 3, 18),
+    sortField: "Output_ID",
+    sortDirection: "desc",
+    filterFormula: 'AND({Test_Run_ID}=BLANK(),{Platform}="Facebook",{Published_At}=BLANK(),{Do_Not_Publish}=0,{Publish_Status}="Failed",OR({Publish_Error_Stage}="FBS3_RATE_LIMIT",{Publish_Error_Stage}="FB_GRAPH_RATE_LIMIT"),OR({Publish_Next_Retry_At}=BLANK(),IS_BEFORE({Publish_Next_Retry_At},NOW())))',
+  }).catch(() => []);
+  const healed = [];
+  for (const record of rows || []) {
+    if (healed.length >= limit) break;
+    const err = [
+      String(f(record, "Publish_Error_Message") || ""),
+      String(f(record, "FB_Slideshow_Error_Message") || ""),
+      String(f(record, "Publish_Error_Stage") || ""),
+    ].join(" ");
+    if (!isFacebookPublishRateLimitError(err) && !/RATE_LIMIT/i.test(String(f(record, "Publish_Error_Stage") || ""))) {
+      continue;
+    }
+    const hasPublic = Boolean(
+      String(f(record, "Publish_Asset_URL") || f(record, "FB_Slideshow_Public_URL") || f(record, "Final_File_URL") || "")
+        .trim()
+        .startsWith("https://media.chicagoshining.com/")
+    );
+    try {
+      await airtableFetch(env, outputTable, record.id, {
+        method: "PATCH",
+        body: JSON.stringify({
+          fields: {
+            Auto_Publish_Enabled: true,
+            Publish_Retry_Eligible: true,
+            Publish_Status: "Ready to Publish",
+            Publish_Error_Stage: "",
+            Publish_Error_Message: "",
+            Publish_Next_Retry_At: null,
+            Publish_Locked_By: "",
+            Publish_Locked_At: null,
+            FB_Publish_Status: "Retry Pending",
+            FB_Slideshow_Status: hasPublic ? "Video Ready" : "Retry Pending",
+            FB_Slideshow_Error_Message: "",
+            Studio_Publish_Dispatch_Count: 0,
+          },
+          typecast: true,
+        }),
+      });
+      const refreshed = await airtableFetch(env, outputTable, record.id).catch(() => record);
+      const dispatched = hasPublic
+        ? await studioDispatchApprovedPublishNow(env, refreshed).catch((error) => ({
+          ok: false,
+          error: error instanceof Error ? error.message : String(error),
+        }))
+        : { ok: true, skipped: "waiting-fbs2-public-mp4" };
+      healed.push({
+        key: "FB_RATE_LIMIT_REARM",
+        id: record.id,
+        output_id: f(record, "Output_ID") || null,
+        ok: dispatched?.ok !== false,
+        target: dispatched?.target || dispatched?.skipped || null,
+      });
+    } catch (error) {
+      healed.push({
+        key: "FB_RATE_LIMIT_REARM",
+        id: record.id,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+  if (healed.length) console.log("Studio Facebook rate-limit rearm", JSON.stringify({ count: healed.length, healed }));
+  return healed;
+}
+/*__STUDIO_WORKER_END:studioHealFacebookRateLimitRearm__*/
+
 export async function studioHealFailedStatuses(env, options = {}) {
   const limit = Math.max(1, Math.min(8, Number(options.limit || 6)));
   const outputTable = env.AIRTABLE_OUTPUT_TABLE_ID;
@@ -11780,6 +11855,8 @@ export async function studioHealFailedStatuses(env, options = {}) {
               Publish_Status: "Failed",
               Publish_Error_Stage: "FBS3_RATE_LIMIT",
               Publish_Error_Message: "Facebook rate limit (368/1390008): We limit how often you can post. Retry after cooldown.",
+              // Keep Auto_Publish on for catalog visibility, but honor Next_Retry_At in FBS3 reconcile.
+              Auto_Publish_Enabled: true,
               Publish_Retry_Eligible: true,
               Publish_Next_Retry_At: parkUntil,
               Publish_Locked_By: "",

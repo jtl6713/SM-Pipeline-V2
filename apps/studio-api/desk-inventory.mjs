@@ -103,7 +103,7 @@ export function deskTransientRenderError(text) {
 
 export function isFacebookPublishRateLimitError(text) {
   const value = String(text || "");
-  return /limit how often you can post|protect the community from spam|FBS3_RATE_LIMIT|error_subcode['":\s]*1390008|(^|[^0-9])368([^0-9]|$)/i.test(value);
+  return /limit how often you can post|protect the community from spam|FBS3_RATE_LIMIT|FB_GRAPH_RATE_LIMIT|error_subcode['":\s]*1390008|(^|[^0-9])368([^0-9]|$)/i.test(value);
 }
 
 export function deskTransientPublishError(text) {
