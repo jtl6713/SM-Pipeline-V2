@@ -19823,7 +19823,7 @@ function timedScriptAssetLabel(asset, index) {
     const publish = String(pipelinePublishStatusLabel(record) || record?.publish_status || "");
     if (!filter || filter === "all") return true;
     if (filter === "published") return studio === "Published" || state === "Published";
-    if (filter === "attention") return ["Failed", "Retry Pending", "Manual Action Required"].includes(state);
+    if (filter === "attention") return state === "Manual Action Required";
     if (filter === "manual") return state === "Manual Action Required";
     if (filter === "failed") return state === "Failed" || /failed|error/i.test(render) || /failed|error/i.test(publish);
     // Match All-Profiles / dashboard awaiting_approval (studio_state), not the
