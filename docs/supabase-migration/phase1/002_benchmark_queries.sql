@@ -88,7 +88,19 @@ where po.content_profile_id = :'profile_id'::uuid
 order by po.output_number desc nulls last
 limit 250;
 
--- H) Unfinished pipeline open pack + siblings (replaces multi-scan open pack)
+-- H) Schedule occupancy window (replaces STUDIO_OCCUPIED_LIST_LIMIT=800 / 28d scan)
+explain analyze
+select platform, scheduled_post_date, youtube_scheduled_publish_at, studio_scheduled_at,
+       publish_status, studio_output_type, format
+from platform_outputs
+where content_profile_id = :'profile_id'::uuid
+  and scheduled_post_date is not null
+  and scheduled_post_date > (now() - interval '12 hours')
+  and scheduled_post_date < (now() + interval '28 days')
+order by scheduled_post_date asc
+limit 800;
+
+-- I) Unfinished pipeline open pack + siblings (replaces multi-scan open pack)
 explain analyze
 with open_outputs as (
   select *
