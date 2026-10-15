@@ -84,7 +84,7 @@ jobs:
                   if bad.search(line):
                       lines.append((total,line.rstrip()[:260]))
           print('regression_log_bytes=',os.path.getsize(p),'lines=',total,'diagnostic_matches=',len(lines))
-          for num,line in [x for x in lines if re.search(r'not ok\\s+\\d+', x[1])][:100]:
+          for num,line in [x for x in lines if re.search(r'not ok\s+\d+', x[1])][:100]:
               print(f'FAIL_TEST L{num}: {line}')
           print('--- final 35 lines (bounded) ---')
           from collections import deque
