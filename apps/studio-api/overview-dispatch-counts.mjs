@@ -9,15 +9,19 @@ export function isQueuedForPlatformDispatch(row, now = Date.now()) {
   const publish = val("publish_status").toLowerCase();
   if (row.do_not_publish) return false;
   // Do not interpret a provisional scheduling date as approval.
+  if (review && review !== "approved") return false;
   if (!(review === "approved" || output.includes("approved for publishing") || output === "approved")) return false;
   if (/ready for review|awaiting approval|in production|rendering|preparing|failed|retry|skipped|manual action|draft delivered|platform processing|published/i.test(state)) return false;
   if (/failed|error|cancelled|canceled|skipped|published|publishing|uploading|processing|draft delivered|manual publish required/i.test(publish)) return false;
+  if (/published|publishing|uploaded|uploading|processing|delivered|sent|completed|posted|failed|error/i.test(val("platform_publish_status"))) return false;
+  if (row.manual_fallback_required) return false;
   if (row.published_at || row.platform_post_url || row.manual_published_url || row.platform_post_id) return false;
   if (val("manual_completion_status").match(/complete|published/i)) return false;
   const dateValue = row.scheduled_at || row.scheduled_post_date || row.youtube_scheduled_publish_at;
   if (!dateValue) return false;
   const scheduledTime = Date.parse(String(dateValue));
-  if (!Number.isFinite(scheduledTime) || scheduledTime <= now) return false;
+  // Past-due rows remain outstanding until actual platform handoff; they must not disappear from queue totals.
+  if (!Number.isFinite(scheduledTime)) return false;
   if (row.platform === "YouTube") {
     // Private uploads are *already on YouTube*, even though not public.
     if (row.youtube_video_id || /uploaded|processing|succeeded|complete/i.test(val("youtube_upload_status"))) return false;
