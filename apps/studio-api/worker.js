@@ -5582,6 +5582,7 @@ const YOUTUBE_COMPLETE_ERRORS = {
 /*__STUDIO_WORKER_EXTRACT:getStudioLibraryIntakeStatus__*/
 // Shared bindings for the extracted function modules (live ESM references).
 export {
+  airtableFetch,
   JSON_HEADERS,
   STUDIO_DEFAULT_MUSIC_VOLUME,
   STUDIO_DEFAULT_DUCKED_MUSIC_VOLUME,

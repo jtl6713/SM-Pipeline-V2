@@ -407,6 +407,7 @@ import {
 
 // Functions extracted verbatim from worker.js. No route, response, or state changes.
 import {
+  airtableFetch,
   JSON_HEADERS,
   HttpError,
   STUDIO_TABLES,
