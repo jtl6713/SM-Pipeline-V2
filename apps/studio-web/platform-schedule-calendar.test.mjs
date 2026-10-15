@@ -71,13 +71,13 @@ test("schedule calendars shade overnight blackout hours as off limits", () => {
   const html = fs.readFileSync(path.join(here, "index.html"), "utf8");
   assert.match(app, /isBlackout \? "is-blackout"/);
   assert.match(app, /is-blackout-row/);
-  assert.match(app, /Off limits: 11:00 PM–3:00 AM local/);
+  assert.match(app, /Off limits: 8:00 PM–3:30 AM local/);
   assert.match(app, /save\.disabled = past \|\| blackout/);
   assert.match(app, /interactive = !isPast && !isBlackout/);
   assert.match(css, /\.pipeline-schedule-cell\.is-blackout/);
   assert.match(css, /\.platform-calendar-slot-button\.is-blackout/);
   assert.match(css, /rgba\(15, 23, 42, \.14\)/);
-  assert.match(html, /Darker shaded hours \(11:00 PM–3:00 AM local\) are off limits/);
+  assert.match(html, /Darker shaded hours \(8:00 PM–3:30 AM local\) are off limits/);
 });
 
 
