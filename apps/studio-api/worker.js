@@ -5177,14 +5177,15 @@ const STUDIO_OVERDUE_SCHEDULED_FORMULA = 'AND({Test_Run_ID}=BLANK(),{Do_Not_Publ
 /*__STUDIO_WORKER_EXTRACT:studioOverviewOperationalMetrics__*/
 // Last-good counts. Home reads the snapshot and does not scan Airtable on open.
 // Isolate memory is only a hot copy; R2 keeps it across cold Workers.
-const STUDIO_PROFILES_OVERVIEW_CACHE_MS = 3 * 60 * 1000;
+// Complete paginated refresh is more expensive than the previous capped scan.
+const STUDIO_PROFILES_OVERVIEW_CACHE_MS = 15 * 60 * 1000;
 const STUDIO_PROFILES_OVERVIEW_SNAPSHOT_KEY = "studio/state/profiles-overview.json";
 /** Hard wall for overview Airtable work so home never waits on a 60s browser abort. */
 const STUDIO_PROFILES_OVERVIEW_BUILD_BUDGET_MS = 4000;
 const STUDIO_PROFILES_OVERVIEW_RESOLVE_BUDGET_MS = 2500;
-const STUDIO_PROFILES_OVERVIEW_OUTPUT_LIMIT = 800;
-const STUDIO_PROFILES_OVERVIEW_IDEA_LIMIT = 300;
-const studioProfilesOverviewCache = { at: 0, authKey: "", rows: null, inflight: null };
+const STUDIO_PROFILES_OVERVIEW_OUTPUT_LIMIT = 10000;
+const STUDIO_PROFILES_OVERVIEW_IDEA_LIMIT = 10000;
+const studioProfilesOverviewCache = { at: 0, authKey: "", rows: null, complete: false, inflight: null };
 
 /*__STUDIO_WORKER_EXTRACT:studioOverviewBudgetError__*/
 /*__STUDIO_WORKER_EXTRACT:raceStudioOverviewBudget__*/

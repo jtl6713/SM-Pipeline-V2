@@ -1,0 +1,58 @@
+name: Validate Complete Profiles Overview Worker
+on:
+  pull_request:
+    paths:
+      - 'apps/studio-api/worker.js'
+      - 'apps/studio-api/worker-functions-04.mjs'
+      - '.github/workflows/validate-complete-profiles-overview.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Syntax and overview source assertions
+        run: |
+          set -euo pipefail
+          node --check apps/studio-api/worker.js
+          node --check apps/studio-api/worker-functions-04.mjs
+          node --input-type=module <<'EOF'
+          import fs from 'node:fs';
+          import assert from 'node:assert/strict';
+          const entry=fs.readFileSync('apps/studio-api/worker.js','utf8');
+          const module=fs.readFileSync('apps/studio-api/worker-functions-04.mjs','utf8');
+          assert.match(entry,/STUDIO_PROFILES_OVERVIEW_OUTPUT_LIMIT = 10000/);
+          assert.match(entry,/STUDIO_PROFILES_OVERVIEW_IDEA_LIMIT = 10000/);
+          assert.match(entry,/STUDIO_PROFILES_OVERVIEW_CACHE_MS = 15 \* 60 \* 1000/);
+          assert.match(module,/outputRows\.length >= STUDIO_PROFILES_OVERVIEW_OUTPUT_LIMIT/);
+          assert.match(module,/ideaRows\.length >= STUDIO_PROFILES_OVERVIEW_IDEA_LIMIT/);
+          assert.match(module,/snapshot\.complete === true/);
+          assert.match(module,/complete: true/);
+          console.log('overview source assertions PASS');
+          EOF
+      - name: Wrangler dry-run with production module copy layout
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/studio-overview-check
+          cp apps/studio-api/worker.js /tmp/studio-overview-check/
+          cp apps/studio-api/*.mjs /tmp/studio-overview-check/
+          rm -f /tmp/studio-overview-check/*.test.mjs
+          cd /tmp/studio-overview-check
+          npm init -y >/dev/null
+          npm install --no-save wrangler@4.123.0
+          cat >wrangler.jsonc <<'EOF'
+          {
+            "name":"studio-overview-check",
+            "main":"worker.js",
+            "compatibility_date":"2026-08-02",
+            "workers_dev":false,
+            "r2_buckets":[{"binding":"STUDIO_MEDIA","bucket_name":"dummy"}]
+          }
+          EOF
+          ./node_modules/.bin/wrangler deploy --config wrangler.jsonc --dry-run
