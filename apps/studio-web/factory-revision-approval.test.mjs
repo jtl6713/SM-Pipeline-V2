@@ -4,7 +4,7 @@ import { readFile } from "node:fs/promises";
 
 test("Factory return to Production: explicit Approve always authorizes revision", async () => {
   const app = await readFile(new URL("./assets/app-item4-1008.js", import.meta.url), "utf8");
-  assert.ok(app.includes('BUILD_ID = "item4-0.6.689-balanced-four-week-slots"'));
+  assert.ok(app.includes('BUILD_ID = "item4-0.6.690-mae-horizon-overflow"'));
   assert.ok(app.includes("body: JSON.stringify({ revision_approve: true })"));
   assert.ok(!app.includes("revision_approve: activeProductionRequest?.revision_open === true"));
   assert.ok(app.includes("await saveActiveProductionRequest({ quiet: true })"));

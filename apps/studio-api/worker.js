@@ -310,19 +310,35 @@ import {
 import {
   MAE_DEFAULT_TIME_ZONE,
   MAE_PRIORITY_SCHEDULE_WINDOWS,
+  MAE_SCHEDULE_HORIZON_SETTING,
   MAE_STORY_COMPANION_OFFSET_MS,
+  MAE_SUGGEST_HORIZON_DAYS,
   MAE_SUGGEST_LEAD_MS,
   maeAdvancePastBlackout,
   maeBuildSuggestedScheduleMap,
   maeIsBlackoutLocalTime,
   maeIsPriorityLocalTime,
   maeNextOpenScheduleIso,
+  maeNormalizeHorizonDays,
   maeNormalizeTimeZone,
   maePickBalancedSuggestedIso,
   maeResolveStorySchedule,
   maeScheduleConflicts,
+  maeScheduleLaneKey,
+  maeScheduleNextSlot,
   maeTimeZoneFromTheme,
 } from "./mae-schedule.mjs";
+import {
+  SCHEDULE_REGEN_JOBS_SETTING,
+  createScheduleRegenJob,
+  parseScheduleRegenJobStore,
+  pruneScheduleRegenJobStore,
+  scheduleRegenCombinationKey,
+  scheduleRegenJobCounts,
+  scheduleRegenProgressMessage,
+  summarizeScheduleRegenJob,
+  SCHEDULE_REGEN_STATUS,
+} from "./schedule-regen-batch.mjs";
 import {
   libraryAssetNameFindFormula,
   libraryNameHasPhrase,
@@ -461,6 +477,8 @@ export default {
       const isOutputCreativeRoute = /^\/api\/outputs\/rec[A-Za-z0-9]+\/creative$/.test(url.pathname);
       const isOutputCreativeReviewRoute = /^\/api\/outputs\/rec[A-Za-z0-9]+\/creative\/review$/.test(url.pathname);
       const isOutputApproveAllRoute = url.pathname === "/api/outputs/approve-all";
+      const isScheduleRegenRoute = url.pathname === "/api/outputs/schedule-regen";
+      const isScheduleSettingsRoute = url.pathname === "/api/operations/schedule-settings";
       const isOutputTiktokCompleteRoute = /^\/api\/outputs\/rec[A-Za-z0-9]+\/tiktok-complete$/.test(url.pathname);
       const isOutputTiktokResendRoute = /^\/api\/outputs\/rec[A-Za-z0-9]+\/tiktok-resend$/.test(url.pathname);
       const isOutputYoutubeCompleteRoute = /^\/api\/outputs\/rec[A-Za-z0-9]+\/youtube-complete$/.test(url.pathname);
@@ -728,7 +746,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.617-balanced-four-week-slots",
+          version: "0.10.618-mae-horizon-overflow",
           studio_supabase_pipeline_reads_v1: true,
           studio_supabase_sync_gate_v1: true,
           studio_supabase_phase3_stable_v1: true,
@@ -757,12 +775,15 @@ export default {
           studio_home_overview_budget_v1: true,
           studio_engagement_v1: true,
           studio_mae_schedule_v1: true,
-          studio_mae_28_day_schedule_v1: true,
+          studio_mae_horizon_days_v1: true,
+          studio_mae_output_type_lanes_v1: true,
+          studio_mae_30_day_schedule_v1: true,
           studio_mae_platform_spread_v1: true,
           studio_promotion_reconcile_after_handoff_error_v1: true,
           studio_mae_profile_occupancy_v1: true,
           studio_story_companion_schedule_v1: true,
           studio_schedule_occupancy_fields_v1: true,
+          studio_schedule_regen_job_v1: true,
           studio_render_stale_rendering_v1: true,
           studio_phantom_rerender_v1: true,
           studio_desk_inventory_v1: true,
@@ -1807,6 +1828,25 @@ export default {
         }
         assertWriteRequest(request, env);
         return approveAllOutputsForPublishing(request, env, authorization, ctx);
+      }
+
+      if (isScheduleRegenRoute) {
+        requirePermission(authorization, "outputs_review");
+        if (request.method === "GET") {
+          return getScheduleRegenJobStatus(request, env, authorization);
+        }
+        assertWriteRequest(request, env);
+        return startScheduleRegenJob(request, env, authorization, ctx);
+      }
+
+      if (isScheduleSettingsRoute) {
+        requireAnyPermission(authorization, ["tenant_admin", "publishing_control", "production_configure"]);
+        if (request.method === "GET") {
+          return getStudioScheduleSettings(request, env, authorization);
+        }
+        assertWriteRequest(request, env);
+        requirePermission(authorization, "tenant_admin");
+        return putStudioScheduleSettings(request, env, authorization);
       }
 
       if (isOutputTiktokCompleteWrite) {
@@ -8923,12 +8963,12 @@ function studioNextOpenScheduleIso(candidateIso, occupiedMs, gapMs = STUDIO_SCHE
 }
 
 const STUDIO_OCCUPIED_CACHE_MS = 45 * 1000;
-// 4 platforms × (3 MAE + 2 widest-gap extras) × 28 days = 560 blockers.
-// Headroom stays under a full 28-day calendar so the nearest sort cannot
+// Profile × platform × output-type lanes × (3 MAE + overflow) × up to 30 days.
+// Headroom stays under a full horizon calendar so the nearest sort cannot
 // drop day-1 mornings while ancient rows still fit in the page.
-const STUDIO_OCCUPIED_LIST_LIMIT = 800;
+const STUDIO_OCCUPIED_LIST_LIMIT = 1200;
 const STUDIO_OCCUPIED_LOOKBACK_MS = 12 * 60 * 60 * 1000;
-const STUDIO_OCCUPIED_HORIZON_MS = 28 * 24 * 60 * 60 * 1000;
+const STUDIO_OCCUPIED_HORIZON_MS = MAE_SUGGEST_HORIZON_DAYS * 24 * 60 * 60 * 1000;
 
 function studioOccupiedDateInWindowFormula(field, lookback, horizon) {
   return `AND({${field}}!="",IS_AFTER({${field}},DATETIME_PARSE("${lookback}")),IS_BEFORE({${field}},DATETIME_PARSE("${horizon}")))`;
@@ -8960,16 +9000,13 @@ function studioOccupiedFilterFormula(now = Date.now(), profile = null) {
   const dates = ["Scheduled_Post_Date", "YouTube_Scheduled_Publish_At", "Studio_Scheduled_At"]
     .map((field) => studioOccupiedDateInWindowFormula(field, lookback, horizon))
     .join(",");
-  // Every clause must be inside the 12h lookback → 28-day horizon. Undated
+  // Every clause must be inside the 12h lookback → horizon. Undated
   // ready-to-publish and publishing rows used to sort oldest-first and fill the
   // row cap. Those fell outside the window, today's MAE slots looked empty, and
-  // every new stamp piled onto the next 5:30 AM.
-  // Published rows stay in the window: a 5:30 that already went out is still a post.
-  // Stories do not occupy a MAE lane, so they must not consume the row cap.
-  // MAE occupancy is per Content Profile: Chicago's morning must not push a new
-  // NYC idea to tomorrow 5:30.
-  const notStory = 'NOT(OR(FIND("Story",{Studio_Output_Type}&""),FIND("Story",{Format}&"")))';
-  const base = `AND({Test_Run_ID}=BLANK(),{Do_Not_Publish}=0,${notStory},OR(${dates}))`;
+  // every new stamp piled onto the next morning.
+  // Published rows stay in the window: a morning that already went out is still a post.
+  // Occupancy is per profile × platform × output type (Stories have their own lane).
+  const base = `AND({Test_Run_ID}=BLANK(),{Do_Not_Publish}=0,OR(${dates}))`;
   const profileFormula = contentProfileFilterFormula(profile);
   return profileFormula ? `AND(${profileFormula},${base})` : base;
 }
@@ -9031,21 +9068,19 @@ async function studioLoadOccupiedSchedules(env, { excludeIds = [], profile = nul
   const skip = new Set((excludeIds || []).filter(Boolean));
   const rows = await studioLoadOccupiedScheduleRows(env, { profile });
   const now = Date.now();
-  const byPlatform = {};
+  const byLane = {};
   for (const row of rows || []) {
     if (skip.has(row.id)) continue;
     if (!studioOccupiedRowMatchesProfile(row, profile)) continue;
     const platform = String(f(row, "Platform") || "").trim();
     if (!platform) continue;
-    // IG/FB Stories may share a wall-clock slot and must not occupy the
-    // platform lane used by Reels, Videos, Slideshows, and feed posts.
     const outputType = String(f(row, "Studio_Output_Type") || f(row, "Format") || "").trim();
-    if (/story/i.test(outputType)) continue;
+    const lane = maeScheduleLaneKey(platform, outputType) || platform.toLowerCase();
     const ms = studioOccupiedMsFromRow(row, now);
     if (ms == null) continue;
-    (byPlatform[platform] ||= []).push(ms);
+    (byLane[lane] ||= []).push(ms);
   }
-  return byPlatform;
+  return byLane;
 }
 
 function studioPublishScheduleFields(payload = {}, record = null, options = {}) {
@@ -11106,7 +11141,7 @@ function studioBuildAzCampaignSchedule(items, { occupiedMs = [], bestTimesByKey 
     campaign: scheduledDays.length ? { key: scheduledDays[0] } : null,
     rationale: scheduledDays.length
       ? `spread across ${scheduledDays.length} day${scheduledDays.length === 1 ? "" : "s"} in the next ${AZ_HORIZON_DAYS} days`
-      : "no open schedule in the next 28 days",
+      : "no open schedule in the scheduling horizon",
   };
 }
 
@@ -20069,8 +20104,18 @@ function studioAddCivilDays(year, month, day, delta) {
   return { year: next.getUTCFullYear(), month: next.getUTCMonth() + 1, day: next.getUTCDate() };
 }
 
-const STUDIO_SUGGEST_HORIZON_DAYS = 28;
+const STUDIO_SUGGEST_HORIZON_DAYS = MAE_SUGGEST_HORIZON_DAYS;
 const STUDIO_SUGGEST_LEAD_MS = 10 * 60 * 1000;
+
+async function studioScheduleHorizonDays(env, fallback = MAE_SUGGEST_HORIZON_DAYS) {
+  try {
+    const settings = await studioActivePipelineSettings(env, [MAE_SCHEDULE_HORIZON_SETTING]);
+    const raw = settings?.[MAE_SCHEDULE_HORIZON_SETTING];
+    return maeNormalizeHorizonDays(raw, fallback);
+  } catch {
+    return maeNormalizeHorizonDays(fallback);
+  }
+}
 
 function studioSuggestCivilKey(year, month, day) {
   return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
@@ -20117,10 +20162,27 @@ function studioOccupiedForPlatform(occupiedByPlatform, platform) {
   if (!want) return [];
   const exact = occupiedByPlatform?.[platform];
   if (Array.isArray(exact)) return exact;
+  const merged = [];
   for (const [key, times] of Object.entries(occupiedByPlatform || {})) {
-    if (String(key || "").trim().toLowerCase() === want) return times || [];
+    const lane = String(key || "").trim().toLowerCase();
+    if (lane === want || lane.startsWith(`${want}::`)) {
+      for (const ms of times || []) {
+        if (Number.isFinite(ms)) merged.push(ms);
+      }
+    }
   }
-  return [];
+  return merged;
+}
+
+function studioOccupiedForLane(occupiedByLane, platform, outputType) {
+  const lane = maeScheduleLaneKey(platform, outputType);
+  if (!lane) return [];
+  if (Array.isArray(occupiedByLane?.[lane])) return occupiedByLane[lane];
+  for (const [key, times] of Object.entries(occupiedByLane || {})) {
+    if (String(key || "").trim().toLowerCase() === lane) return times || [];
+  }
+  // Legacy callers that still store bare platform keys.
+  return studioOccupiedForPlatform(occupiedByLane, platform);
 }
 
 function studioScheduleTimeCrowding(ms, occupiedMs, radiusMinutes = 90) {
@@ -20233,12 +20295,12 @@ async function studioLoadPlanScheduleOccupancy(env, { excludeRequestId = "", pro
       const requestIds = arrayOrEmpty(f(row, "Production_Request")).map((id) => String(id || "").trim());
       if (excludeRequestId && requestIds.includes(excludeRequestId)) continue;
       if (brandId && !studioOccupiedLinkedIds(f(row, "Brand")).includes(brandId)) continue;
-      const outputType = String(f(row, "Output_Type") || "");
-      if (/story/i.test(outputType)) continue;
+      const outputType = String(f(row, "Output_Type") || "").trim();
       const platform = String(f(row, "Platform") || "").trim();
       const ms = studioScheduleMs(f(row, "Scheduled_At"));
       if (!platform || ms == null) continue;
-      (occupied[platform] ||= []).push(ms);
+      const lane = maeScheduleLaneKey(platform, outputType) || platform.toLowerCase();
+      (occupied[lane] ||= []).push(ms);
     }
   } catch (error) {
     console.warn("pending plan schedule occupancy read failed", error);
@@ -21989,7 +22051,7 @@ async function getInsightsBestTimes(request, env, url, authorization) {
     similar_sample_size: 0,
     similar_profile: themeName,
     caption: null,
-    note: note || `${seasonLabel} stamps use the MAE rotation in ${timeZone}: balance each platform across 28 days (morning, then afternoon, then evening on the lightest day). Different platforms in one package land about a week apart. Once those slots are full, each extra uses that day's widest gap. Overnight 11:00 PM–3:00 AM is never used.`,
+    note: note || `${seasonLabel} stamps use MAE-first scheduling in ${timeZone}: Morning → Afternoon → Evening on Day 1, then Day 2 through the configured horizon (default 30). Each platform × output type is an independent lane. Once MAE is full, extras use each day's widest gap on the least-populated days. Overnight 8:00 PM–3:30 AM is never used.`,
   });
 
   try {
@@ -22082,7 +22144,7 @@ async function getInsightsBestTimes(request, env, url, authorization) {
       similar_sample_size: similar?.sample_size || 0,
       similar_profile: similar?.profile || theme,
       caption,
-      note: `${seasonLabel} stamps use the MAE rotation in ${timeZone}: balance each platform across 28 days (morning, then afternoon, then evening on the lightest day). Once those slots are full, each extra uses that day's widest gap. Overnight 11:00 PM–3:00 AM is never used.`,
+      note: `${seasonLabel} stamps use MAE-first scheduling in ${timeZone}: Day 1 Morning → Afternoon → Evening through the configured horizon, then balanced overflow on the least-populated days. Overnight 8:00 PM–3:30 AM is never used.`,
     });
   } catch (error) {
     console.warn("best-times failed; MAE fallback", error);
@@ -36942,15 +37004,14 @@ async function studioHealApprovedMissingSchedule(env, options = {}) {
     if (!occupiedByProfile.has(profileKey)) {
       occupiedByProfile.set(profileKey, await studioOccupiedSchedulesOrEmpty(env, { profile }).catch(() => ({})));
     }
-    const occupiedByPlatform = occupiedByProfile.get(profileKey) || {};
+    const occupiedByLane = occupiedByProfile.get(profileKey) || {};
     const platform = String(f(row, "Platform") || "").trim();
     const outputType = String(f(row, "Studio_Output_Type") || f(row, "Format") || "").trim();
     const isStory = /story/i.test(outputType);
-    const laneKey = Object.keys(occupiedByPlatform).find((key) => String(key || "").trim().toLowerCase() === platform.toLowerCase()) || platform;
-    // Stories do not read the empty lane. An empty lane is today's next MAE
-    // window, which the publisher treats as due.
-    const lane = occupiedByPlatform[laneKey] || [];
+    const laneKey = maeScheduleLaneKey(platform, outputType) || platform.toLowerCase();
+    const lane = studioOccupiedForLane(occupiedByLane, platform, outputType);
     const timeZone = await studioScheduleTimeZoneForRecord(env, row, null);
+    const horizonDays = await studioScheduleHorizonDays(env).catch(() => MAE_SUGGEST_HORIZON_DAYS);
     let iso = "";
     let storyCompanion = false;
     if (isStory) {
@@ -36962,13 +37023,23 @@ async function studioHealApprovedMissingSchedule(env, options = {}) {
         occupiedMs: lane,
         platformOccupiedMs: lane,
         timeZone,
+        horizonDays,
       });
+    }
+    if (!iso && isStory) {
+      iso = studioSuggestedLocalDatetime(MAE_PRIORITY_SCHEDULE_WINDOWS, new Date(), {
+        occupiedMs: lane,
+        platformOccupiedMs: lane,
+        timeZone,
+        horizonDays,
+      });
+      storyCompanion = false;
     }
     if (!iso) continue;
     const fields = studioPublishScheduleFields(
       { scheduled_post_date: iso, timezone: timeZone },
       row,
-      { occupiedMs: isStory ? [] : lane, timeZone, forceWrite: true, storyCompanion },
+      { occupiedMs: storyCompanion ? [] : lane, timeZone, forceWrite: true, storyCompanion },
     );
     if (!fields.Scheduled_Post_Date) continue;
     try {
@@ -36981,7 +37052,7 @@ async function studioHealApprovedMissingSchedule(env, options = {}) {
       continue;
     }
     const booked = Date.parse(fields.Scheduled_Post_Date);
-    if (!isStory && Number.isFinite(booked)) (occupiedByPlatform[laneKey] ||= []).push(booked);
+    if (Number.isFinite(booked)) (occupiedByLane[laneKey] ||= []).push(booked);
     healed.push({ id: row.id, output_id: f(row, "Output_ID") || null, scheduled_post_date: fields.Scheduled_Post_Date });
   }
   if (healed.length) studioInvalidateOccupiedScheduleCache();
@@ -37351,16 +37422,20 @@ async function approveOutputRecordForPublishing(env, existing, note, stamp, payl
     record = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, record.id);
   }
   const platform = String(f(record, "Platform") || "").trim();
+  const outputType = String(f(record, "Studio_Output_Type") || f(record, "Format") || "").trim();
+  const laneKey = maeScheduleLaneKey(platform, outputType) || String(platform || "").toLowerCase();
+  const profile = options.profile || await item4ProductionProfileRecord(env, record).catch(() => null);
+  const horizonDays = options.horizonDays
+    || await studioScheduleHorizonDays(env).catch(() => MAE_SUGGEST_HORIZON_DAYS);
   let occupiedMs = Array.isArray(options.occupiedMs) ? options.occupiedMs.slice() : null;
   if (!occupiedMs) {
     const occupied = await studioOccupiedSchedulesOrEmpty(env, {
       excludeIds: [id],
-      profile: await item4ProductionProfileRecord(env, record).catch(() => null),
+      profile,
     });
-    occupiedMs = occupied[platform] || [];
+    occupiedMs = studioOccupiedForLane(occupied, platform, outputType);
   }
   const timeZone = options.timeZone || await studioScheduleTimeZoneForRecord(env, record, payload);
-  const outputType = String(f(record, "Studio_Output_Type") || f(record, "Format") || "").trim();
   const isStory = /story/i.test(outputType);
   const markerIso = String(f(record, "Studio_Scheduled_At") || "").trim();
   const existingScheduleIso = String(
@@ -37370,21 +37445,29 @@ async function approveOutputRecordForPublishing(env, existing, note, stamp, payl
   const publishNowImmediate = Boolean(
     payload?.publish_now === true || rawIn.toLowerCase() === "immediate"
   );
-  // A locked operator time stays exact (Output 909). Pipeline Approve keeps an
-  // existing slot for Reels, Shorts, and feed posts. Factory Approve and Factory
-  // Approve All set recheckBestSlot so a displayed suggestion is not the lock:
-  // the best open morning, afternoon, or evening at click time is what gets saved.
-  // Publish Now is the only path that means "right now". A blank
-  // Scheduled_Post_Date is what Make and the worker treat as due, so writing
-  // nothing publishes the post immediately.
-  // Stories do not take that next MAE opening. An empty lane returns today's
-  // 11:30, and every Story approved together published at that same minute.
-  // A Story is the same-platform main plus 10 minutes, and that time is stored
-  // as-is instead of being snapped back onto an MAE slot.
-  const recheckBestSlot = options.recheckBestSlot === true;
+  // Manual override and Publish Now keep exact operator intent. Factory Approve,
+  // Pipeline Approve, and Approve All set recheckBestSlot so scheduling happens
+  // at click time from the centralized MAE-first / balanced-overflow engine.
+  // A blank Scheduled_Post_Date is what Make and the worker treat as due, so
+  // writing nothing publishes the post immediately.
+  const recheckBestSlot = options.recheckBestSlot === true
+    || (options.recheckBestSlot !== false
+      && !publishNowImmediate
+      && payload?.manual_schedule_override !== true
+      && !markerIso);
   let requestedRaw = recheckBestSlot ? "" : rawIn;
   let exactOverride = false;
   let storyCompanion = false;
+  const capacityMessage = `No open morning, afternoon, evening, or overflow slot in the next ${horizonDays} days`;
+  const pickLaneIso = (lane) => {
+    const picked = maeScheduleNextSlot({
+      timeZone,
+      occupiedMs: lane || [],
+      horizonDays,
+    });
+    if (!picked.ok) throw new HttpError(409, picked.error || capacityMessage);
+    return picked.iso;
+  };
   if (publishNowImmediate) {
     requestedRaw = "immediate";
   } else if (payload?.manual_schedule_override === true && rawIn) {
@@ -37403,28 +37486,38 @@ async function approveOutputRecordForPublishing(env, existing, note, stamp, payl
       siblingRows: options.siblingRows,
     });
     if (!resolved.iso) {
-      throw new HttpError(409, "No open morning, afternoon, or evening slot in the next 4 weeks");
+      requestedRaw = pickLaneIso(occupiedMs || []);
+      storyCompanion = false;
+    } else {
+      requestedRaw = resolved.iso;
+      storyCompanion = resolved.source === "companion" || resolved.source === "mae_plus_10";
     }
-    requestedRaw = resolved.iso;
-    storyCompanion = true;
   } else if (!recheckBestSlot && !requestedRaw && existingScheduleIso) {
     requestedRaw = existingScheduleIso;
   } else if (!requestedRaw) {
-    const lane = occupiedMs || [];
-    requestedRaw = studioSuggestedLocalDatetime(MAE_PRIORITY_SCHEDULE_WINDOWS, new Date(), {
-      occupiedMs: lane,
-      platformOccupiedMs: lane,
-      timeZone,
-    }) || "";
-    if (!requestedRaw) {
-      throw new HttpError(409, "No open morning, afternoon, or evening slot in the next 4 weeks");
+    requestedRaw = pickLaneIso(occupiedMs || []);
+  }
+
+  // Concurrency guard: two near-simultaneous approvals must not claim the same slot.
+  if (!publishNowImmediate && !exactOverride && requestedRaw && requestedRaw !== "immediate") {
+    studioInvalidateOccupiedScheduleCache();
+    const fresh = await studioOccupiedSchedulesOrEmpty(env, { excludeIds: [id], profile });
+    const freshLane = studioOccupiedForLane(fresh, platform, outputType);
+    const ms = Date.parse(requestedRaw);
+    if (Number.isFinite(ms) && maeScheduleConflicts(ms, freshLane)) {
+      requestedRaw = pickLaneIso(freshLane);
+      occupiedMs = freshLane;
+      storyCompanion = false;
+    } else {
+      occupiedMs = freshLane;
     }
   }
+
   const scheduleFields = studioPublishScheduleFields(
     { ...(payload || {}), scheduled_post_date: requestedRaw, timezone: timeZone },
     record,
     {
-      occupiedMs: isStory ? [] : occupiedMs,
+      occupiedMs: storyCompanion ? [] : occupiedMs,
       exactOverride,
       storyCompanion,
       timeZone,
@@ -37533,6 +37626,296 @@ function mapApproveAllEligibleSummary(record) {
   };
 }
 
+
+async function studioLoadScheduleRegenJobStore(env) {
+  const row = await studioSettingsByName(env, SCHEDULE_REGEN_JOBS_SETTING).catch(() => null);
+  return pruneScheduleRegenJobStore(
+    parseScheduleRegenJobStore(row?.fields?.Setting_Value || row?.fields?.Value || "{}"),
+  );
+}
+
+async function studioPutScheduleRegenJobStore(env, store, notes = "Schedule regeneration job store") {
+  const pruned = pruneScheduleRegenJobStore(store);
+  await studioUpsertSetting(env, SCHEDULE_REGEN_JOBS_SETTING, JSON.stringify(pruned), notes);
+  return pruned;
+}
+
+async function studioGetScheduleRegenJob(env, jobId) {
+  const store = await studioLoadScheduleRegenJobStore(env);
+  return store.jobs[String(jobId || "").trim()] || null;
+}
+
+async function studioPutScheduleRegenJob(env, job) {
+  const store = await studioLoadScheduleRegenJobStore(env);
+  store.jobs[job.id] = { ...job, updated_at: new Date().toISOString() };
+  if (job.profile_id && (job.status === "queued" || job.status === "running")) {
+    store.active_by_scope[job.profile_id] = job.id;
+  }
+  if (job.status === "completed" || job.status === "failed") {
+    for (const [scope, id] of Object.entries(store.active_by_scope)) {
+      if (id === job.id) delete store.active_by_scope[scope];
+    }
+  }
+  await studioPutScheduleRegenJobStore(env, store);
+  return store.jobs[job.id];
+}
+
+function studioNormalizeRegenFilters(payload = {}) {
+  const platforms = Array.isArray(payload.platforms)
+    ? payload.platforms.map((v) => String(v || "").trim()).filter(Boolean)
+    : [];
+  const outputTypes = Array.isArray(payload.output_types || payload.outputTypes)
+    ? (payload.output_types || payload.outputTypes).map((v) => String(v || "").trim()).filter(Boolean)
+    : [];
+  const profiles = Array.isArray(payload.profiles)
+    ? payload.profiles.map((row) => ({
+      id: String(row?.id || "").trim(),
+      name: String(row?.name || row?.profile || "").trim(),
+    })).filter((row) => row.id || row.name)
+    : [];
+  return { platforms, outputTypes, profiles };
+}
+
+async function studioProcessScheduleRegenJobSlice(env, jobId, options = {}) {
+  let job = await studioGetScheduleRegenJob(env, jobId);
+  if (!job) return null;
+  if (job.status === "completed" || job.status === "failed") return job;
+  const horizonDays = maeNormalizeHorizonDays(job.horizon_days, await studioScheduleHorizonDays(env));
+  job = { ...job, status: "running", updated_at: new Date().toISOString(), horizon_days: horizonDays };
+  await studioPutScheduleRegenJob(env, job);
+
+  const combos = Array.isArray(job.combinations) ? job.combinations.map((row) => ({ ...row })) : [];
+  const start = Math.max(0, Number(job.cursor) || 0);
+  // One combination per slice — sequential processing requirement.
+  const index = combos.findIndex((row, i) => i >= start && String(row.status || "") === SCHEDULE_REGEN_STATUS.PENDING);
+  if (index < 0) {
+    const failed = combos.some((row) => row.status === SCHEDULE_REGEN_STATUS.FAILED);
+    job = {
+      ...job,
+      combinations: combos,
+      cursor: combos.length,
+      status: failed ? "failed" : "completed",
+      updated_at: new Date().toISOString(),
+    };
+    await studioPutScheduleRegenJob(env, job);
+    return job;
+  }
+
+  const combo = { ...combos[index], status: SCHEDULE_REGEN_STATUS.PROCESSING, error: "" };
+  combos[index] = combo;
+  job = { ...job, combinations: combos, cursor: index, updated_at: new Date().toISOString() };
+  await studioPutScheduleRegenJob(env, job);
+
+  try {
+    const profile = combo.profile_id
+      ? await airtableFetch(env, "Content Profiles", combo.profile_id).catch(() => null)
+      : null;
+    const timeZone = studioScheduleTimeZoneForProfile(profile, MAE_DEFAULT_TIME_ZONE);
+    const nowMs = Date.now();
+    const horizonMs = nowMs + horizonDays * 24 * 60 * 60 * 1000;
+    const platformWant = String(combo.platform || "").trim().toLowerCase();
+    const typeWant = String(combo.output_type || "").trim().toLowerCase();
+    const rows = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
+      limit: STUDIO_OCCUPIED_LIST_LIMIT,
+      sortField: "Scheduled_Post_Date",
+      sortDirection: "asc",
+      filterFormula: studioOccupiedFilterFormula(nowMs, profile),
+      fields: ["Platform", "Scheduled_Post_Date", "YouTube_Scheduled_Publish_At", "Studio_Scheduled_At", "Publish_Status", "Studio_Output_Type", "Format", "Content_Profile", "Published_At", "Do_Not_Publish", "Output_Status", "Output_ID"],
+    });
+    const eligible = [];
+    const protectedTimes = [];
+    for (const row of rows || []) {
+      if (!studioOccupiedRowMatchesProfile(row, profile)) continue;
+      const platform = String(f(row, "Platform") || "").trim();
+      const outputType = String(f(row, "Studio_Output_Type") || f(row, "Format") || "").trim();
+      if (platform.toLowerCase() !== platformWant) continue;
+      if (outputType.toLowerCase() !== typeWant) continue;
+      const published = Boolean(String(f(row, "Published_At") || "").trim())
+        || String(f(row, "Publish_Status") || "").trim() === "Published"
+        || String(f(row, "Output_Status") || "").trim() === "Published";
+      const ms = studioOccupiedMsFromRow(row, nowMs);
+      if (published || Boolean(f(row, "Do_Not_Publish"))) {
+        if (ms != null) protectedTimes.push(ms);
+        continue;
+      }
+      const iso = String(f(row, "Scheduled_Post_Date") || f(row, "YouTube_Scheduled_Publish_At") || "").trim();
+      const stamp = iso ? Date.parse(iso) : NaN;
+      if (iso && Number.isFinite(stamp) && stamp <= nowMs) {
+        protectedTimes.push(stamp);
+        continue;
+      }
+      if (iso && Number.isFinite(stamp) && stamp > horizonMs) continue;
+      eligible.push(row);
+    }
+    combo.total_posts = eligible.length;
+    combo.completed_posts = 0;
+    combo.rescheduled = 0;
+    combos[index] = { ...combo };
+    job = { ...job, combinations: combos, updated_at: new Date().toISOString() };
+    await studioPutScheduleRegenJob(env, job);
+
+    const plan = [];
+    const reserved = protectedTimes.slice();
+    for (const row of eligible) {
+      const picked = maeScheduleNextSlot({
+        timeZone,
+        occupiedMs: reserved,
+        horizonDays,
+      });
+      if (!picked.ok) {
+        throw new HttpError(409, picked.error || `Capacity failure for ${combo.platform} ${combo.output_type}`);
+      }
+      plan.push({ id: row.id, iso: picked.iso, record: row });
+      reserved.push(Date.parse(picked.iso));
+    }
+
+    // Apply the full combination plan before advancing — avoid partial reschedule.
+    for (const entry of plan) {
+      const fields = studioPublishScheduleFields(
+        { scheduled_post_date: entry.iso, timezone: timeZone },
+        entry.record,
+        { occupiedMs: [], timeZone, forceWrite: true, exactOverride: true },
+      );
+      await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, entry.id, {
+        method: "PATCH",
+        body: JSON.stringify({ fields, typecast: true }),
+      });
+      await studioSupabaseWriteThroughOutput(env, { id: entry.id, fields: { ...(entry.record.fields || {}), ...fields } }, "schedule-regen").catch(() => null);
+      combo.completed_posts += 1;
+      combo.rescheduled += 1;
+      combos[index] = { ...combo };
+      job = { ...job, combinations: combos, updated_at: new Date().toISOString() };
+      await studioPutScheduleRegenJob(env, job);
+    }
+
+    combo.status = SCHEDULE_REGEN_STATUS.COMPLETED;
+    combo.error = "";
+  } catch (error) {
+    combo.status = SCHEDULE_REGEN_STATUS.FAILED;
+    combo.error = error?.message || "Schedule regeneration failed";
+  }
+
+  combos[index] = { ...combo };
+  const nextPending = combos.findIndex((row, i) => i > index && String(row.status || "") === SCHEDULE_REGEN_STATUS.PENDING);
+  const failed = combos.some((row) => row.status === SCHEDULE_REGEN_STATUS.FAILED);
+  const more = nextPending >= 0;
+  job = {
+    ...job,
+    combinations: combos,
+    cursor: more ? nextPending : combos.length,
+    status: more ? "running" : (failed ? "failed" : "completed"),
+    updated_at: new Date().toISOString(),
+  };
+  studioInvalidateOccupiedScheduleCache();
+  await studioPutScheduleRegenJob(env, job);
+  return job;
+}
+
+async function startScheduleRegenJob(request, env, authorization, ctx = null) {
+  const payload = await readJsonBody(request);
+  const profile = await resolveWorkingContentProfile(env, authorization, requestedProfileId(new URL(request.url), payload));
+  const { platforms, outputTypes, profiles } = studioNormalizeRegenFilters(payload);
+  if (!platforms.length || !outputTypes.length) {
+    throw new HttpError(400, "Select at least one platform and one output type");
+  }
+  const horizonDays = maeNormalizeHorizonDays(
+    payload.horizon_days ?? payload.horizonDays,
+    await studioScheduleHorizonDays(env),
+  );
+  const store = await studioLoadScheduleRegenJobStore(env);
+  const scope = String(profile?.id || "_all");
+  const activeId = store.active_by_scope[scope];
+  if (activeId && store.jobs[activeId] && ["queued", "running"].includes(store.jobs[activeId].status)) {
+    return respond(request, env, {
+      ok: false,
+      error: "A schedule regeneration job is already running for this profile",
+      job: summarizeScheduleRegenJob(store.jobs[activeId]),
+    }, 409);
+  }
+  const profileList = profiles.length
+    ? profiles
+    : [{ id: profile?.id || "", name: String(f(profile, "Name") || f(profile, "Profile_Name") || "").trim() }];
+  const job = createScheduleRegenJob({
+    profileId: profile?.id || "",
+    profiles: profileList,
+    platforms,
+    outputTypes,
+    horizonDays,
+    eligibleCount: Number(payload.eligible_count || payload.eligibleCount || 0) || 0,
+  });
+  store.jobs[job.id] = job;
+  store.active_by_scope[scope] = job.id;
+  await studioPutScheduleRegenJobStore(env, store);
+  if (ctx?.waitUntil) {
+    ctx.waitUntil(studioProcessScheduleRegenJobSlice(env, job.id).catch((error) => {
+      console.warn("schedule regen slice failed", job.id, error);
+    }));
+  } else {
+    await studioProcessScheduleRegenJobSlice(env, job.id);
+  }
+  return respond(request, env, {
+    ok: true,
+    job: summarizeScheduleRegenJob(job),
+    message: scheduleRegenProgressMessage(job),
+  });
+}
+
+async function getScheduleRegenJobStatus(request, env, authorization) {
+  const url = new URL(request.url);
+  const jobId = String(url.searchParams.get("job_id") || "").trim();
+  const profile = await resolveWorkingContentProfile(env, authorization, requestedProfileId(url, null));
+  const store = await studioLoadScheduleRegenJobStore(env);
+  let job = jobId ? store.jobs[jobId] : null;
+  if (!job && profile?.id) {
+    const activeId = store.active_by_scope[profile.id];
+    job = activeId ? store.jobs[activeId] : null;
+  }
+  if (!job) {
+    return respond(request, env, {
+      ok: true,
+      status: "idle",
+      job_id: null,
+      message: "No schedule regeneration job is running.",
+    });
+  }
+  if (job.status === "queued" || job.status === "running") {
+    job = await studioProcessScheduleRegenJobSlice(env, job.id) || job;
+  }
+  return respond(request, env, summarizeScheduleRegenJob(job));
+}
+
+async function getStudioScheduleSettings(request, env, authorization) {
+  const horizonDays = await studioScheduleHorizonDays(env);
+  return respond(request, env, {
+    ok: true,
+    scheduling_horizon_days: horizonDays,
+    default_horizon_days: MAE_SUGGEST_HORIZON_DAYS,
+    setting_name: MAE_SCHEDULE_HORIZON_SETTING,
+    mae_windows: [...MAE_PRIORITY_SCHEDULE_WINDOWS],
+    blackout: "20:00-03:30",
+  });
+}
+
+async function putStudioScheduleSettings(request, env, authorization) {
+  const payload = await readJsonBody(request);
+  const horizonDays = maeNormalizeHorizonDays(
+    payload.scheduling_horizon_days ?? payload.horizon_days ?? payload.horizonDays,
+    MAE_SUGGEST_HORIZON_DAYS,
+  );
+  await studioUpsertSetting(
+    env,
+    MAE_SCHEDULE_HORIZON_SETTING,
+    String(horizonDays),
+    "Global scheduling horizon in days (MAE-first / balanced overflow)",
+  );
+  return respond(request, env, {
+    ok: true,
+    scheduling_horizon_days: horizonDays,
+    message: `Scheduling horizon set to ${horizonDays} days. Existing schedules are unchanged; later approvals and regenerations use the new horizon.`,
+  });
+}
+
+
 async function getApproveAllJobStatus(request, env, authorization) {
   const url = new URL(request.url);
   const jobId = String(url.searchParams.get("job_id") || "").trim();
@@ -37572,16 +37955,19 @@ async function studioProcessApproveAllJobSlice(env, jobId, options = {}) {
   const profile = job.profile_id
     ? await airtableFetch(env, "Content Profiles", job.profile_id).catch(() => null)
     : null;
-  const occupiedByPlatform = await studioOccupiedSchedulesOrEmpty(env, {
+  const occupiedByLane = await studioOccupiedSchedulesOrEmpty(env, {
     excludeIds: (job.items || []).map((item) => item.id),
     profile,
   });
+  const horizonDays = await studioScheduleHorizonDays(env).catch(() => MAE_SUGGEST_HORIZON_DAYS);
   // Seed occupancy with schedules already booked by earlier approved items in this job.
   for (const item of job.items || []) {
     if (item.status !== "approved" || !item.scheduled_ms) continue;
     const platform = String(item.platform || "").trim();
-    if (!platform || /story/i.test(String(item.format || ""))) continue;
-    (occupiedByPlatform[platform] ||= []).push(Number(item.scheduled_ms));
+    const format = String(item.format || "").trim();
+    if (!platform) continue;
+    const lane = maeScheduleLaneKey(platform, format) || platform.toLowerCase();
+    (occupiedByLane[lane] ||= []).push(Number(item.scheduled_ms));
   }
 
   let slices = 0;
@@ -37614,12 +38000,12 @@ async function studioProcessApproveAllJobSlice(env, jobId, options = {}) {
           throw new HttpError(409, "This output is not ready for publishing approval");
         }
         const platform = String(f(record, "Platform") || "").trim();
-        const isStory = /story/i.test(String(f(record, "Studio_Output_Type") || f(record, "Format") || ""));
-        const occupiedMs = studioOccupiedForPlatform(occupiedByPlatform, platform);
+        const outputType = String(f(record, "Studio_Output_Type") || f(record, "Format") || "").trim();
+        const occupiedMs = studioOccupiedForLane(occupiedByLane, platform, outputType);
         const rowSchedule = String(job.schedules?.[record.id] || "").trim();
-        // Factory Approve All sends no client times. Recheck the calendar and
-        // store that slot. Pipeline Approve All sends the time already on the row.
-        const recheckBestSlot = !rowSchedule;
+        const markerIso = String(f(record, "Studio_Scheduled_At") || "").trim();
+        // Always calculate at approve time unless the operator locked a manual time.
+        const recheckBestSlot = !markerIso;
         const extraSiblings = (job.items || [])
           .filter((entry) => entry.status === "approved" && entry.scheduled_ms && !/story/i.test(String(entry.format || "")))
           .map((entry) => ({
@@ -37628,10 +38014,18 @@ async function studioProcessApproveAllJobSlice(env, jobId, options = {}) {
             scheduled_at: new Date(Number(entry.scheduled_ms)).toISOString(),
           }));
         const updated = await approveOutputRecordForPublishing(env, record, job.notes || "", new Date().toISOString(), {
-          scheduled_post_date: rowSchedule || undefined,
-        }, { occupiedMs, extraSiblings, recheckBestSlot });
+          scheduled_post_date: markerIso ? rowSchedule || undefined : undefined,
+          manual_schedule_override: Boolean(markerIso),
+        }, {
+          occupiedMs,
+          extraSiblings,
+          recheckBestSlot,
+          horizonDays,
+          profile,
+        });
         const booked = studioScheduleMs(f(updated, "Scheduled_Post_Date")) ?? Date.now();
-        if (!isStory) (occupiedByPlatform[platform] ||= []).push(booked);
+        const lane = maeScheduleLaneKey(platform, outputType) || platform.toLowerCase();
+        (occupiedByLane[lane] ||= []).push(booked);
         Object.assign(item, mapApproveAllEligibleSummary(updated), {
           status: "approved",
           error: null,

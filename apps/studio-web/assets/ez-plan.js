@@ -454,11 +454,10 @@
     return packages;
   }
 
-  const EZ_SCHEDULE_GAP_MS = 3 * 60 * 60 * 1000;
-  const EZ_SUGGEST_HORIZON_DAYS = 28;
-  const EZ_PRIORITY_SCHEDULE_WINDOWS = ["05:30-07:00", "11:30-13:00", "16:30-18:00"];
+  const EZ_SCHEDULE_GAP_MS = 90 * 60 * 1000;
+  const EZ_SUGGEST_HORIZON_DAYS = 30;
+  const EZ_PRIORITY_SCHEDULE_WINDOWS = ["05:00-07:00", "10:30-12:30", "16:00-18:00"];
   const EZ_SUGGEST_LEAD_MS = 10 * 60 * 1000;
-  const EZ_MAX_EXTRA_POSTS_PER_DAY = 2;
 
   function ezIndustryBestWindows(platform, outputType) {
     const p = String(platform || "").toLowerCase();
@@ -475,11 +474,25 @@
   }
 
   const EZ_DEFAULT_TIME_ZONE = "America/Chicago";
-  /** Inclusive local blackout: 11:00 PM through 3:00 AM profile time. */
-  const EZ_SCHEDULE_BLACKOUT_START_MINUTES = 23 * 60;
-  const EZ_SCHEDULE_BLACKOUT_END_MINUTES = 3 * 60;
-  const EZ_SCHEDULE_OPEN_START_MINUTES = 3 * 60 + 1;
-  const EZ_SCHEDULE_OPEN_END_MINUTES = 22 * 60 + 59;
+  /** Inclusive local blackout: 8:00 PM through 3:30 AM profile time. */
+  const EZ_SCHEDULE_BLACKOUT_START_MINUTES = 20 * 60;
+  const EZ_SCHEDULE_BLACKOUT_END_MINUTES = 3 * 60 + 30;
+  const EZ_SCHEDULE_OPEN_START_MINUTES = 3 * 60 + 31;
+  const EZ_SCHEDULE_OPEN_END_MINUTES = 19 * 60 + 59;
+
+  function ezNormalizeHorizonDays(value, fallback = EZ_SUGGEST_HORIZON_DAYS) {
+    const n = Number(value);
+    if (!Number.isFinite(n) || n <= 0) return Math.floor(Number(fallback) || EZ_SUGGEST_HORIZON_DAYS);
+    return Math.min(90, Math.max(1, Math.floor(n)));
+  }
+
+  function ezScheduleLaneKey(platform, outputType) {
+    const p = String(platform || "").trim().toLowerCase();
+    const t = String(outputType || "").trim().toLowerCase();
+    if (!p) return "";
+    if (!t) return p;
+    return `${p}::${t}`;
+  }
 
   function ezNormalizeTimeZone(value) {
     const zone = String(value || "").trim() || EZ_DEFAULT_TIME_ZONE;
@@ -629,13 +642,30 @@
     return { ...civil, key: ezCivilKey(civil.year, civil.month, civil.day) };
   }
 
-  function ezExtraCountOnDay(civil, blockers, timeZone) {
-    const day = ezCivilWithKey(civil);
-    let count = 0;
-    for (const ms of ezOccupiedOnDay(blockers, day, timeZone)) {
-      if (!ezIsPriorityLocalTime(ms, timeZone)) count += 1;
+  function ezExtraCandidateInGap(left, right, windowStart, windowEnd, nowMs, posts, timeZone, gapMs) {
+    const span = right - left;
+    if (span <= 0) return null;
+    const candidates = [];
+    const mid = Math.round((left + Math.round(span / 2)) / 60000) * 60000;
+    candidates.push(mid);
+    const earliest = Math.ceil((left + gapMs) / 60000) * 60000;
+    const latest = Math.floor((right - gapMs) / 60000) * 60000;
+    if (Number.isFinite(earliest)) candidates.push(earliest);
+    if (Number.isFinite(latest)) candidates.push(latest);
+    for (let ms = Math.max(windowStart, left); ms <= Math.min(windowEnd, right); ms += 15 * 60 * 1000) {
+      candidates.push(ms);
     }
-    return count;
+    let chosen = null;
+    for (const raw of candidates) {
+      const ms = Math.round(raw / 60000) * 60000;
+      if (ms < windowStart || ms > windowEnd || ms <= nowMs) continue;
+      if (ezIsBlackoutLocalTime(ms, timeZone) || ezScheduleConflicts(ms, posts, gapMs)) continue;
+      if (ezIsPriorityLocalTime(ms, timeZone)) continue;
+      if (!chosen || Math.abs(ms - mid) < Math.abs(chosen - mid) || (Math.abs(ms - mid) === Math.abs(chosen - mid) && ms < chosen)) {
+        chosen = ms;
+      }
+    }
+    return chosen == null ? null : { ms: chosen, span };
   }
 
   function ezExtraIsoOnDay(civil, nowMs, blockers, timeZone) {
@@ -675,13 +705,11 @@
     for (let i = 0; i < markers.length - 1; i++) {
       const left = markers[i];
       const right = markers[i + 1];
-      const span = right - left;
-      if (span <= 0) continue;
-      const ms = Math.round((left + Math.round(span / 2)) / 60000) * 60000;
-      if (ms < windowStart || ms > windowEnd || ms <= nowMs) continue;
-      if (ezIsBlackoutLocalTime(ms, timeZone) || ezScheduleConflicts(ms, posts)) continue;
-      if (ezIsPriorityLocalTime(ms, timeZone)) continue;
-      if (!best || span > best.span || (span === best.span && ms < best.ms)) best = { ms, span };
+      const candidate = ezExtraCandidateInGap(left, right, windowStart, windowEnd, nowMs, posts, timeZone, EZ_SCHEDULE_GAP_MS);
+      if (!candidate) continue;
+      if (!best || candidate.span > best.span || (candidate.span === best.span && candidate.ms < best.ms)) {
+        best = candidate;
+      }
     }
     return best ? new Date(best.ms).toISOString() : "";
   }
@@ -717,9 +745,7 @@
     const blockers = ezBlockingTimes(occupiedMs, platformOccupiedMs);
     const nowMs = now.getTime() + (options.leadMs ?? EZ_SUGGEST_LEAD_MS);
     const local = ezZonedDateTimeParts(now, timeZone);
-    const horizonDays = Number(options.horizonDays) > 0
-      ? Math.floor(Number(options.horizonDays))
-      : EZ_SUGGEST_HORIZON_DAYS;
+    const horizonDays = ezNormalizeHorizonDays(options.horizonDays, EZ_SUGGEST_HORIZON_DAYS);
     const civils = [];
     for (let i = 0; i < horizonDays; i++) {
       const civil = i === 0
@@ -728,30 +754,26 @@
       civils.push(ezCivilWithKey(civil));
     }
 
-    // Lightest day in the 4-week walk. On that day: morning, then afternoon,
-    // then evening. Equal counts keep the earlier day, so posts do not stack
-    // on today while a later day has fewer posts for this platform.
-    const open = [];
+    // Primary: Day 1 Morning → Afternoon → Evening, then Day 2, … Day X.
     for (const civil of civils) {
       const mae = ezOpenMaeSlot(civil, nowMs, blockers, timeZone);
-      if (!mae) continue;
-      open.push({ iso: mae, count: ezDayPostCount(civil, platformOccupiedMs, timeZone) });
-    }
-    if (open.length) {
-      const min = Math.min(...open.map((row) => row.count));
-      return open.find((row) => row.count === min).iso;
+      if (mae) return mae;
     }
 
-    // MAE trio is full. Walk day 1 → day 28 and use each day's widest gap,
-    // still preferring the day with the fewest posts (4th, then 5th).
+    // Overflow: least-populated eligible day (earliest on ties), widest gap.
     let best = null;
     for (const civil of civils) {
-      if (ezExtraCountOnDay(civil, blockers, timeZone) >= EZ_MAX_EXTRA_POSTS_PER_DAY) continue;
       if (!ezDayStandardsCovered(civil, nowMs, blockers, timeZone)) continue;
       const extra = ezExtraIsoOnDay(civil, nowMs, blockers, timeZone);
       if (!extra) continue;
       const count = ezDayPostCount(civil, platformOccupiedMs, timeZone);
-      if (!best || count < best.count) best = { iso: extra, count };
+      if (
+        !best
+        || count < best.count
+        || (count === best.count && Date.parse(extra) < Date.parse(best.iso))
+      ) {
+        best = { iso: extra, count };
+      }
     }
     return best ? best.iso : "";
   }
@@ -805,11 +827,12 @@
     return items;
   }
 
-  function ezBuildSuggestedScheduleMap(items, occupiedByPlatform = {}, now = new Date(), options = {}) {
+  function ezBuildSuggestedScheduleMap(items, occupiedByLane = {}, now = new Date(), options = {}) {
     const reserved = {};
-    for (const [platform, times] of Object.entries(occupiedByPlatform || {})) {
-      reserved[platform] = [...(times || [])];
+    for (const [lane, times] of Object.entries(occupiedByLane || {})) {
+      reserved[lane] = [...(times || [])];
     }
+    const horizonDays = ezNormalizeHorizonDays(options.horizonDays, EZ_SUGGEST_HORIZON_DAYS);
     const indexed = (items || []).map((item, index) => ({ item, index }));
     indexed.sort((a, b) => {
       const rank = (/story/i.test(String(a.item.output_type || "")) ? 1 : 0)
@@ -817,50 +840,52 @@
       return rank || a.index - b.index;
     });
     const stamps = new Map();
+    const laneTimes = (platform, outputType) => {
+      const lane = ezScheduleLaneKey(platform, outputType);
+      const typed = reserved[lane] || [];
+      const legacy = reserved[String(platform || "").trim()]
+        || reserved[String(platform || "").trim().toLowerCase()]
+        || [];
+      return ezBlockingTimes(typed, legacy);
+    };
     for (const { item } of indexed) {
       const platform = String(item.platform || "").trim();
       const outputType = String(item.output_type || "").trim();
       if (!platform || !outputType) continue;
       const key = `${platform}::${outputType}`;
-      const isStory = /story/i.test(outputType);
+      const lane = ezScheduleLaneKey(platform, outputType);
       const existing = String(item.scheduled_at || "").trim();
       if (existing && !Number.isNaN(Date.parse(existing))) {
         const iso = new Date(existing).toISOString();
         const existingMs = Date.parse(iso);
-        const lane = isStory ? [] : ezFlattenOccupied(reserved);
+        const occ = laneTimes(platform, outputType);
         const zone = options.timeZone;
         const existingCivil = ezCivilWithKey(ezZonedDateTimeParts(new Date(existingMs), zone));
-        const standardsCovered = !isStory && ezDayStandardsCovered(
+        const standardsCovered = ezDayStandardsCovered(
           existingCivil,
           now.getTime() + EZ_SUGGEST_LEAD_MS,
-          lane,
+          occ,
           zone,
         );
-        const extrasOnDay = isStory ? 0 : ezExtraCountOnDay(existingCivil, lane, zone);
-        // Keep a stored MAE time when that day-part is still open. Keep a stored
-        // extra only after that day's MAE trio is covered and room remains for a 4th/5th.
         const reusable = existingMs > now.getTime()
           && !ezIsBlackoutLocalTime(existingMs, zone)
-          && (isStory || !ezScheduleConflicts(existingMs, lane))
-          && (
-            ezIsPriorityLocalTime(existingMs, zone)
-            || (standardsCovered && extrasOnDay < EZ_MAX_EXTRA_POSTS_PER_DAY)
-          );
+          && !ezScheduleConflicts(existingMs, occ)
+          && (ezIsPriorityLocalTime(existingMs, zone) || standardsCovered);
         if (reusable) {
           stamps.set(key, iso);
-          if (!isStory) (reserved[platform] ||= []).push(existingMs);
+          (reserved[lane] ||= []).push(existingMs);
           continue;
         }
       }
+      const occ = laneTimes(platform, outputType);
       const iso = ezPickBalancedSuggestedIso(EZ_PRIORITY_SCHEDULE_WINDOWS, now, {
-        // Stories ignore occupancy entirely so IG/FB Stories can share a slot
-        // with each other and with the platform's main post.
-        occupiedMs: isStory ? [] : ezFlattenOccupied(reserved),
-        platformOccupiedMs: isStory ? [] : (reserved[platform] || []),
+        occupiedMs: occ,
+        platformOccupiedMs: occ,
         timeZone: options.timeZone,
+        horizonDays,
       });
       stamps.set(key, iso);
-      if (!isStory) (reserved[platform] ||= []).push(Date.parse(iso));
+      if (iso) (reserved[lane] ||= []).push(Date.parse(iso));
     }
     return stamps;
   }
@@ -980,5 +1005,9 @@
     ezIsBlackoutLocalTime,
     ezIsPriorityLocalTime,
     ezNormalizeTimeZone,
+    ezNormalizeHorizonDays,
+    ezScheduleLaneKey,
+    EZ_SUGGEST_HORIZON_DAYS,
+    EZ_PRIORITY_SCHEDULE_WINDOWS,
   };
 })();
