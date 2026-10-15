@@ -294,3 +294,5 @@ Deploy Worker 0.10.489-engagement-ledger. Shrink the engagement ledger so Chicag
 2026-10-15: Worker 0.10.613-open-ideas-drain-20. Cap open ideas at 20; top-of-hour skips create when at/over cap and drains up to 20 asset-ready drafts toward Ready for Review.
 
 2026-10-15: Worker 0.10.613-open-ideas-drain-20 redeploy. Prior production deploy rolled back after postdeploy content/v2 Cloudflare 404; code already on main.
+
+2026-10-15: Worker 0.10.614-scheduled-plus-awaiting. Autonomous 200/209 ceiling uses Scheduled + Awaiting Approval combined.
