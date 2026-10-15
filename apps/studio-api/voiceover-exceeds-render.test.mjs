@@ -1,3 +1,4 @@
+import { readStudioWorkerSource } from "./worker-source-reader.mjs";
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
@@ -5,7 +6,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-const worker = fs.readFileSync(path.join(here, "worker.js"), "utf8");
+const worker = readStudioWorkerSource();
 const quality = fs.readFileSync(path.join(here, "quality-checks.mjs"), "utf8");
 const desk = fs.readFileSync(path.join(here, "desk-inventory.mjs"), "utf8");
 

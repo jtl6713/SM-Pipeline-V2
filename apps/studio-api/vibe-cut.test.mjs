@@ -1,3 +1,4 @@
+import { readStudioWorkerSource } from "./worker-source-reader.mjs";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
@@ -201,7 +202,7 @@ test("scene timestamps become selects; empty falls back to provisional", () => {
 });
 
 test("Worker wires vibe-cut module and plan route", () => {
-  const worker = fs.readFileSync(path.join(here, "worker.js"), "utf8");
+  const worker = readStudioWorkerSource();
   assert.match(worker, /from "\.\/vibe-cut\.mjs"/);
   assert.match(worker, /planVibeCutRoute/);
   assert.match(worker, /\/api\/vibe-cut\/plan/);
@@ -212,7 +213,7 @@ test("Worker wires vibe-cut module and plan route", () => {
 });
 
 test("Worker never treats Vibe Cut as finished-video passthrough", () => {
-  const worker = fs.readFileSync(path.join(here, "worker.js"), "utf8");
+  const worker = readStudioWorkerSource();
   assert.match(worker, /function studioFinishedOriginKind\(record\)/);
   assert.match(worker, /if \(studioIsVibeCut\(record\)\) return ""/);
   assert.match(worker, /vibeCutPassthrough/);

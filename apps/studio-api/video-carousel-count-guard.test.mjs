@@ -1,3 +1,4 @@
+import { readStudioWorkerSource } from "./worker-source-reader.mjs";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
@@ -7,7 +8,7 @@ import path from "node:path";
 const here = path.dirname(fileURLToPath(import.meta.url));
 
 test("video Production requests ignore irrelevant carousel count validation", async () => {
-  const source = await readFile(path.join(here, "worker.js"), "utf8");
+  const source = readStudioWorkerSource();
   const start = source.indexOf("async function cleanProductionRequestPayload");
   const end = source.indexOf("function productionRequestFields", start);
   assert.ok(start >= 0 && end > start);
