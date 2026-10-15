@@ -50,7 +50,8 @@ test("Approve and Approve All fail soft when schedule occupancy cannot be read",
 test("approval preserves a previously saved manual schedule marker", () => {
   assert.match(source, /const markerIso = String\(f\(record, "Studio_Scheduled_At"\)/);
   assert.match(source, /const existingScheduleIso = String\(/);
-  assert.match(source, /else if \(markerIso\) \{\s*requestedRaw = markerIso;\s*exactOverride = true;/);
+  assert.match(source, /else if \(markerIso && !recheckBestSlot\) \{\s*requestedRaw = markerIso;\s*exactOverride = true;/);
+  assert.match(source, /const recheckBestSlot = options\.recheckBestSlot === true/);
   assert.match(source, /studio_yt_manual_schedule_lock_v1: true/);
 });
 

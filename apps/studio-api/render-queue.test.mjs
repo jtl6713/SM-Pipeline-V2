@@ -172,7 +172,7 @@ test("Trying Again only for real Remotion failures, never queue wait", () => {
 });
 
 test("Worker admit + mapOutput expose queue meta and Remotion job id", () => {
-  assert.match(worker, /version: "0.10.614-scheduled-plus-awaiting"/);
+  assert.match(worker, /version: "0.10.616-suggested-schedule-prefill"/);
   assert.match(worker, /studio_shared_render_queue_v1: true/);
   assert.match(worker, /studio_render_queue_wait_v1: true/);
   assert.match(worker, /async function studioAdmitRenderQueue/);
@@ -189,8 +189,8 @@ test("Worker admit + mapOutput expose queue meta and Remotion job id", () => {
 });
 
 test("UI shows Waiting in render queue and shared-render sibling wait", () => {
-  assert.match(app, /BUILD_ID = "item4-0.6.687-platforms-frames-details"/);
-  assert.match(html, /app-item4-1008\.js\?v=0.6.687-platforms-frames-details/);
+  assert.match(app, /BUILD_ID = "item4-0.6.688-suggested-schedule-prefill"/);
+  assert.match(html, /app-item4-1008\.js\?v=0.6.688-suggested-schedule-prefill/);
   assert.match(html, /UI build 0.6.687/);
   assert.match(app, /function pipelineRenderQueueLabel/);
   assert.match(app, /Waiting in render queue \(#\$\{pos\} of \$\{total\}\)/);
