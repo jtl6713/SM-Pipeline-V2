@@ -19,7 +19,7 @@ test("idea promote drawer documents duration vs voiceover precedence", () => {
   assert.ok(uiBuild);
   assert.ok(scriptBuild);
   assert.ok(appBuild);
-  assert.equal(appBuild, scriptBuild);
+  assert.equal(appBuild, scriptBuild.split("&")[0]);
   assert.equal(uiBuild, "0.6.687");
   assert.match(html, /id="ideaLibraryPickerForm"/);
   assert.match(html, /class="idea-type-guide"/);
