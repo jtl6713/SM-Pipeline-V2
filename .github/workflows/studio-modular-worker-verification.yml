@@ -1,0 +1,101 @@
+name: Verify Modular Studio Worker
+
+on:
+  pull_request:
+    paths:
+      - 'apps/studio-api/**'
+      - 'tests/regression/**'
+      - '.github/workflows/studio-modular-worker-verification.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  wrangler-dry-run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Parse all Studio API module sources
+        shell: bash
+        run: |
+          set -euo pipefail
+          find apps/studio-api -maxdepth 1 \( -name 'worker.js' -o -name '*.mjs' \) ! -name '*.test.mjs' -print0 | xargs -0 -n1 node --check
+      - name: Wrangler 4.123.0 bundle dry run (no production credentials)
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/studio-verify
+          cp apps/studio-api/worker.js /tmp/studio-verify/worker.js
+          cp apps/studio-api/*.mjs /tmp/studio-verify/
+          rm -f /tmp/studio-verify/*.test.mjs
+          cd /tmp/studio-verify
+          npm init -y >/dev/null 2>&1
+          npm install --no-save wrangler@4.123.0 >/tmp/studio-wrangler-install.log 2>&1
+          test "$(./node_modules/.bin/wrangler --version | tr -d '\r\n')" = "4.123.0"
+          cat >wrangler.jsonc <<'EOF'
+          {"name":"studio-modular-verify","main":"worker.js","compatibility_date":"2026-08-02","workers_dev":false,"r2_buckets":[{"binding":"STUDIO_MEDIA","bucket_name":"dummy"}]}
+          EOF
+          set +e
+          ./node_modules/.bin/wrangler deploy --config wrangler.jsonc --dry-run --outdir /tmp/studio-verify-bundle >/tmp/studio-wrangler-build.log 2>&1
+          STATUS=$?
+          set -e
+          tail -c 14000 /tmp/studio-wrangler-build.log
+          test "$STATUS" -eq 0
+          test -s /tmp/studio-verify-bundle/worker.js
+          echo "Wrangler pinned dry-run: PASS" >> "$GITHUB_STEP_SUMMARY"
+
+  hermetic-diagnostic:
+    runs-on: ubuntu-latest
+    timeout-minutes: 28
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install Python test deps
+        run: |
+          python -m pip install --upgrade pip -q
+          pip install pytest -q
+          pip install -q -r services/pipeline-runner/requirements.txt
+          pip install -q -r services/timing-engine/requirements.txt
+      - name: Execute hermetic regression with bounded diagnostic output
+        shell: bash
+        run: |
+          set +e
+          python tests/regression/runner.py hermetic >/tmp/studio-regression.log 2>&1
+          STATUS=$?
+          set -e
+          python - <<'PY'
+          import os,re
+          p='/tmp/studio-regression.log'
+          bad=re.compile(r'not ok|^.*failureType:|^.*error:|ERR_ASSERTION|ERR_MODULE|ReferenceError|SyntaxError|TypeError|FAILED|Traceback|^.*# fail ',re.I)
+          lines=[]
+          total=0
+          with open(p,'r',errors='replace') as f:
+              for line in f:
+                  total+=1
+                  if bad.search(line):
+                      lines.append((total,line.rstrip()[:260]))
+          print('regression_log_bytes=',os.path.getsize(p),'lines=',total,'diagnostic_matches=',len(lines))
+          for num,line in lines[:90]:
+              print(f'L{num}: {line}')
+          print('--- final 35 lines (bounded) ---')
+          from collections import deque
+          with open(p,'r',errors='replace') as f:
+              end=deque(f,maxlen=35)
+          for line in end:
+              print(line.rstrip()[:260])
+          PY
+          if [[ "$STATUS" == "0" ]]; then
+            echo 'Hermetic regression: PASS' >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo 'Hermetic regression: FAIL (inspect bounded failure lines)' >> "$GITHUB_STEP_SUMMARY"
+          fi
+          exit "$STATUS"
