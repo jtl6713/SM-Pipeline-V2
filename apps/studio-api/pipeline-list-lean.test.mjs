@@ -1,3 +1,4 @@
+import { readStudioWorkerSource } from "./worker-source-reader.mjs";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
@@ -7,7 +8,7 @@ import path from "node:path";
 const here = path.dirname(fileURLToPath(import.meta.url));
 
 test("Pipeline /api/outputs list stays lean and non-blocking", async () => {
-  const worker = await readFile(path.join(here, "worker.js"), "utf8");
+  const worker = readStudioWorkerSource();
   const app = await readFile(path.join(here, "../studio-web/assets/app-item4-1008.js"), "utf8");
   const listFieldsMatch = worker.match(/const OUTPUT_LIST_FIELDS = \[([\s\S]*?)\];/);
   assert.ok(listFieldsMatch, "OUTPUT_LIST_FIELDS present");
