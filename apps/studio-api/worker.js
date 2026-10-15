@@ -474,6 +474,7 @@ import {
   studioHealPhantomRerender,
   studioHealLiveFailedPublishStatus,
   studioHealTtd0RouteBlankDraft,
+  studioHealFacebookRateLimitRearm,
   studioHealFailedStatuses,
   studioHealIgCarouselTooManyChildren,
   studioHealIgCarouselChildVerificationRace,
@@ -2365,6 +2366,11 @@ export default {
         console.warn("studio TTD0 blank-draft heal failed", error);
       }
       try {
+        await studioHealFacebookRateLimitRearm(env, { limit: 4 });
+      } catch (error) {
+        console.warn("studio Facebook rate-limit rearm failed", error);
+      }
+      try {
         await studioHealFailedStatuses(env, { limit: 6 });
       } catch (error) {
         console.warn("studio failed-status heal failed", error);
@@ -3508,6 +3514,8 @@ const AZ_SCHEDULE_LEAD_MS = 10 * 60 * 1000;
 /*__STUDIO_WORKER_EXTRACT:studioHealLiveFailedPublishStatus__*/
 /** TTD0_ROUTE with CDN MP4 but blank TikTok_Draft_Type. */
 /*__STUDIO_WORKER_EXTRACT:studioHealTtd0RouteBlankDraft__*/
+/** Graph 368 park expired → restore Auto_Publish and pulse FBS3. */
+/*__STUDIO_WORKER_EXTRACT:studioHealFacebookRateLimitRearm__*/
 /*__STUDIO_WORKER_EXTRACT:studioHealFailedStatuses__*/
 /*__STUDIO_WORKER_EXTRACT:studioHealIgCarouselTooManyChildren__*/
 /*__STUDIO_WORKER_EXTRACT:studioHealIgCarouselChildVerificationRace__*/

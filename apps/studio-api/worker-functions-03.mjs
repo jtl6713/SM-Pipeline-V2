@@ -624,6 +624,7 @@ import {
   healStuckStudioRenders,
   studioHealLiveFailedPublishStatus,
   studioHealTtd0RouteBlankDraft,
+  studioHealFacebookRateLimitRearm,
   studioHealFailedStatuses,
   studioHealIgCarouselTooManyChildren,
   studioHealIgCarouselChildVerificationRace,
@@ -8656,6 +8657,9 @@ export async function pulseOnDemandRenderChain(env, options = {}) {
   }
   try { pulses.push(...await studioHealTtd0RouteBlankDraft(env, { limit: 4 })); } catch (error) {
     pulses.push({ key: "STUDIO_TTD0_BLANK_DRAFT", error: error instanceof Error ? error.message : String(error) });
+  }
+  try { pulses.push(...await studioHealFacebookRateLimitRearm(env, { limit: 4 })); } catch (error) {
+    pulses.push({ key: "STUDIO_FB_RATE_LIMIT_REARM", error: error instanceof Error ? error.message : String(error) });
   }
   try { pulses.push(...await studioHealFailedStatuses(env, { limit: 4 })); } catch (error) {
     pulses.push({ key: "STUDIO_FAILED_STATUS", error: error instanceof Error ? error.message : String(error) });
