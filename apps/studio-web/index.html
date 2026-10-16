@@ -22,7 +22,7 @@
  <link rel="stylesheet" href="/assets/studio-clarity-0599.css?v=0.6.706-tiktok-live-copy">
 <link rel="stylesheet" href="/assets/production-progress-0601.css?v=0.6.706-tiktok-live-copy">
 <link rel="stylesheet" href="/assets/production-render-layout-0678.css?v=0.6.706-tiktok-live-copy">
-<link rel="stylesheet" href="/assets/factory-layout-0680.css?v=0.6.706-tiktok-live-copy">
+<link rel="stylesheet" href="/assets/factory-layout-0680.css?v=0.6.707-factory-batch">
 </head>
 <body>
  <header class="topbar">
@@ -2117,6 +2117,21 @@
  <button class="secondary-button" id="factoryDeskRefresh" data-refresh="factory">Refresh</button>
  </div>
  <div class="form-message" id="factoryDeskStatus" aria-live="polite">Open Factory to load lanes.</div>
+ <section class="factory-batch-activity" id="factoryBatchActivity" aria-label="Batch approval activity" aria-live="polite">
+  <div class="factory-batch-heading"><strong>Batch Approval Activity</strong><span id="factoryBatchUpdated">Live status from Studio</span></div>
+  <p id="factoryBatchSummary">Checking recent approvals…</p>
+  <div class="factory-batch-actions">
+   <button type="button" class="secondary-button" id="factoryBatchInspect" aria-expanded="false" aria-controls="factoryBatchDetails" hidden>Inspect items</button>
+   <button type="button" class="secondary-button" id="factoryBatchRetry" hidden>Retry Failed</button>
+   <button type="button" class="secondary-button" id="factoryBatchRefresh">Refresh status</button>
+  </div>
+  <div id="factoryBatchDetails" hidden></div>
+ </section>
+ <div class="factory-batch-toolbar" id="factoryBatchToolbar" role="group" aria-label="Selected Factory approvals">
+  <span id="factoryBatchSelectionCount" aria-live="polite">0 outputs selected</span>
+  <button type="button" class="secondary-button" id="factoryBatchClear" disabled>Clear selection</button>
+  <button type="button" class="primary-button" id="factoryBatchSubmit" disabled>Submit Approvals</button>
+ </div>
  <div class="factory-lanes" id="factoryLanes">
  <section class="factory-band factory-band-eyes is-collapsed" aria-labelledby="factoryLaneNeedsEyesHeading">
  <button type="button" class="factory-band-head" data-factory-band-toggle aria-expanded="false" aria-controls="factoryBandBodyNeedsEyes">
@@ -2862,7 +2877,7 @@
     ],
     "factory": [
       "/assets/factory-open-target.js?v=0.6.706-tiktok-live-copy",
-      "/assets/factory-desk.js?v=0.6.706-tiktok-live-copy"
+      "/assets/factory-desk.js?v=0.6.707-factory-batch"
     ]
   },
   "prefetch": [
