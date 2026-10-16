@@ -347,6 +347,8 @@ import {
   SCHEDULE_REGEN_MAX_SLICES_PER_DRAIN,
   SCHEDULE_REGEN_LIVE_LEASE_MS,
   SCHEDULE_REGEN_DRAIN_LEASE_MS,
+  SCHEDULE_REGEN_DRAIN_LEASE_HEARTBEAT_MS,
+  scheduleRegenDrainLeaseIsLive,
   createScheduleRegenJob,
   scheduleRegenCandidateFilterFormula,
   emptyScheduleRegenJobStore,
@@ -2188,15 +2190,25 @@ export async function studioProcessScheduleRegenJobSlice(env, jobId, options = {
         const pickedMs = Date.parse(picked.iso);
         reservedLane.push(pickedMs);
         reservedPlatform.push(pickedMs);
+        // Checkpoint every 5 slots so a killed waitUntil keeps partial Story plans
+        // (Chicago 0/83 used to lose the whole 25-slot slice).
+        const planned = i - planStart + 1;
+        if (planned % 5 === 0 || i + 1 === planEnd) {
+          combo.plan = plan.slice();
+          combo.eligible_ids = eligibleIds;
+          combo.lane_reserved_ms = reservedLane.slice();
+          combo.platform_reserved_ms = reservedPlatform.slice();
+          combo.total_posts = eligibleIds.length;
+          combos[index] = { ...combo };
+          job = {
+            ...job,
+            combinations: combos,
+            drain_until: new Date(Date.now() + SCHEDULE_REGEN_DRAIN_LEASE_MS).toISOString(),
+            updated_at: new Date().toISOString(),
+          };
+          await studioPutScheduleRegenJob(env, job);
+        }
       }
-      combo.plan = plan;
-      combo.eligible_ids = eligibleIds;
-      combo.lane_reserved_ms = reservedLane;
-      combo.platform_reserved_ms = reservedPlatform;
-      combo.total_posts = eligibleIds.length;
-      combos[index] = { ...combo };
-      job = { ...job, combinations: combos, updated_at: new Date().toISOString() };
-      await studioPutScheduleRegenJob(env, job);
 
       if (!scheduleRegenComboPlanComplete(combo)) {
         // More MAE slots next slice — do not apply a partial plan.
@@ -2324,10 +2336,9 @@ export async function studioDrainScheduleRegenJob(env, jobId, options = {}) {
   if (!job) return null;
   if (job.status === "completed" || job.status === "failed") return job;
   const nowMs = Date.now();
-  const leaseUntilMs = Date.parse(job.drain_until || "") || 0;
-  // Another waitUntil (cron or status GET) already owns this job — bail so we do
-  // not overwrite its mid-plan checkpoints with a stale in-memory snapshot.
-  if (!force && leaseUntilMs > nowMs) return job;
+  // Honor only a live heartbeat lease. Zombie drain_until (lease future, updated_at
+  // stale) used to skip Chicago Story for 90s after every crashed waitUntil.
+  if (!force && scheduleRegenDrainLeaseIsLive(job, nowMs)) return job;
   job = {
     ...job,
     drain_until: new Date(nowMs + SCHEDULE_REGEN_DRAIN_LEASE_MS).toISOString(),
@@ -2896,11 +2907,25 @@ export async function studioResumeScheduleRegenJobs(env, ctx = null) {
       continue;
     }
     if (!open) continue;
-    const leaseUntilMs = Date.parse(job.drain_until || "") || 0;
-    if (leaseUntilMs > nowMs) continue;
+    if (scheduleRegenDrainLeaseIsLive(job, nowMs)) continue;
     candidates.push(job);
   }
   candidates.sort((a, b) => {
+    // Prefer scanned lanes that still need MAE plan slots (Chicago Story 0/83
+    // plan=[]) over fresh Pending scans so overnight does not starve mid-plan.
+    const aMid = (a.combinations || []).some((row) => (
+      scheduleRegenComboNeedsPlanning(row)
+      && Array.isArray(row.eligible_ids)
+      && row.eligible_ids.length > 0
+      && !(Array.isArray(row.plan) && row.plan.length > 0)
+    )) ? 0 : 1;
+    const bMid = (b.combinations || []).some((row) => (
+      scheduleRegenComboNeedsPlanning(row)
+      && Array.isArray(row.eligible_ids)
+      && row.eligible_ids.length > 0
+      && !(Array.isArray(row.plan) && row.plan.length > 0)
+    )) ? 0 : 1;
+    if (aMid !== bMid) return aMid - bMid;
     const aMs = Date.parse(a.updated_at || a.created_at || "") || 0;
     const bMs = Date.parse(b.updated_at || b.created_at || "") || 0;
     return aMs - bMs;

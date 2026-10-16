@@ -46,6 +46,24 @@ export const SCHEDULE_REGEN_MAX_SLICES_PER_DRAIN = 16;
  * shared R2/Airtable store — that wiped Chicago Facebook Story plan slots back to [].
  */
 export const SCHEDULE_REGEN_DRAIN_LEASE_MS = 90 * 1000;
+/**
+ * A drain_until in the future is only honored while updated_at is this fresh.
+ * waitUntil often dies after stamping the lease and before the first plan
+ * checkpoint — without this, Chicago Facebook Story sat behind a zombie lease
+ * for the full 90s every tick and never wrote plan slots.
+ */
+export const SCHEDULE_REGEN_DRAIN_LEASE_HEARTBEAT_MS = 25 * 1000;
+
+/** True when another drain still holds a live (non-zombie) lease on this job. */
+export function scheduleRegenDrainLeaseIsLive(job, nowMs = Date.now()) {
+  if (!job || typeof job !== "object") return false;
+  const leaseUntilMs = Date.parse(job.drain_until || "") || 0;
+  if (!(leaseUntilMs > nowMs)) return false;
+  const updatedMs = Date.parse(job.updated_at || job.created_at || "") || 0;
+  if (!updatedMs) return false;
+  const heartbeatMs = Math.max(10_000, Number(SCHEDULE_REGEN_DRAIN_LEASE_HEARTBEAT_MS) || 25_000);
+  return (nowMs - updatedMs) < heartbeatMs;
+}
 
 const CANONICAL_PLATFORMS = Object.freeze({
   instagram: "Instagram",

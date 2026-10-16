@@ -11,6 +11,9 @@ import {
   SCHEDULE_REGEN_PLAN_SLOTS_PER_SLICE,
   SCHEDULE_REGEN_MAX_SLICES_PER_DRAIN,
   SCHEDULE_REGEN_LIVE_LEASE_MS,
+  SCHEDULE_REGEN_DRAIN_LEASE_MS,
+  SCHEDULE_REGEN_DRAIN_LEASE_HEARTBEAT_MS,
+  scheduleRegenDrainLeaseIsLive,
   buildScheduleRegenCombinations,
   canonicalizeScheduleRegenPlatform,
   createScheduleRegenJob,
@@ -220,6 +223,25 @@ test("failed combination stays Failed and is counted separately", () => {
   assert.match(scheduleRegenProgressMessage(job), /failed/i);
 });
 
+test("scheduleRegenDrainLeaseIsLive ignores zombie drain_until without a fresh heartbeat", () => {
+  const now = Date.parse("2026-10-16T06:00:00.000Z");
+  assert.equal(SCHEDULE_REGEN_DRAIN_LEASE_MS >= 60_000, true);
+  assert.equal(SCHEDULE_REGEN_DRAIN_LEASE_HEARTBEAT_MS <= 30_000, true);
+  assert.equal(scheduleRegenDrainLeaseIsLive({
+    drain_until: "2026-10-16T06:01:30.000Z",
+    updated_at: "2026-10-16T05:59:55.000Z",
+  }, now), true);
+  // Lease still in the future but updated_at is stale → zombie, do not block.
+  assert.equal(scheduleRegenDrainLeaseIsLive({
+    drain_until: "2026-10-16T06:01:30.000Z",
+    updated_at: "2026-10-16T05:58:00.000Z",
+  }, now), false);
+  assert.equal(scheduleRegenDrainLeaseIsLive({
+    drain_until: "2026-10-16T05:59:00.000Z",
+    updated_at: "2026-10-16T05:59:55.000Z",
+  }, now), false);
+});
+
 test("preferScheduleRegenJobStore does not let empty Airtable seed shadow R2 active jobs", () => {
   const emptySeed = emptyScheduleRegenJobStore();
   const r2Active = {
@@ -278,13 +300,17 @@ test("Worker and Pipeline wire durable schedule regeneration", () => {
   assert.match(worker, /leasedProcessing/);
   assert.match(worker, /SCHEDULE_REGEN_LIVE_LEASE_MS/);
   assert.match(worker, /softLeaseMs/);
-  assert.match(worker, /version: "0.10.640-schedule-regen-serialize"/);
+  assert.match(worker, /version: "0.10.641-schedule-regen-zombie-lease"/);
   assert.match(worker, /SCHEDULE_REGEN_OVERNIGHT_V1/);
   assert.match(worker, /studioEnqueueOvernightScheduleRegenJobs/);
   assert.match(worker, /studioResumeScheduleRegenJobs/);
   assert.match(worker, /SCHEDULE_REGEN_DRAIN_LEASE_MS/);
+  assert.match(worker, /SCHEDULE_REGEN_DRAIN_LEASE_HEARTBEAT_MS/);
+  assert.match(worker, /scheduleRegenDrainLeaseIsLive/);
   assert.match(worker, /drain_until/);
   assert.match(worker, /One job per light-cron tick/);
+  assert.match(worker, /Checkpoint every 5 slots/);
+  assert.match(worker, /Prefer scanned lanes that still need MAE plan slots/);
   assert.match(worker, /Scanned\n\s*\/\/ eligible_ids with plan=\[\]/);
   assert.match(worker, /studio schedule-regen resume failed/);
   assert.match(worker, /scheduleRegenComboIsEmptyLane\(combo\)/);
