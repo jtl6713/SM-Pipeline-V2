@@ -9,7 +9,7 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const worker = readStudioWorkerSource();
 
 test("Worker health advertises airtable queue-hang fix build", () => {
-  assert.match(worker, /version: "0.10.626-schedule-regen-platform-case"/);
+  assert.match(worker, /version: "0.10.627-overview-supabase-page"/);
   assert.match(worker, /studio_airtable_queue_hang_fix_v1: true/);
 });
 

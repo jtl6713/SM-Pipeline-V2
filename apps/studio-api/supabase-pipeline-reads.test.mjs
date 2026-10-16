@@ -16,6 +16,7 @@ import {
   mapAirtableIdeaToSupabase,
   mapAirtableProductionRequestToSupabase,
   packOutputListFields,
+  supabaseRestAll,
   STUDIO_SUPABASE_PIPELINE_READ_ROUTES,
   STUDIO_SUPABASE_PHASE4_READ_ROUTES,
   STUDIO_SUPABASE_READ_ROUTES,
@@ -191,9 +192,42 @@ test("supabase read-route inventory includes Phase 3 and Phase 4", () => {
   assert.equal(STUDIO_SUPABASE_READ_ROUTES.length, STUDIO_SUPABASE_PIPELINE_READ_ROUTES.length + STUDIO_SUPABASE_PHASE4_READ_ROUTES.length);
 });
 
+test("supabaseRestAll pages past PostgREST max-rows so overview counts stay complete", async () => {
+  const calls = [];
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (url) => {
+    calls.push(String(url));
+    const offset = Number(new URL(url).searchParams.get("offset") || 0);
+    const limit = Number(new URL(url).searchParams.get("limit") || 0);
+    const start = offset + 1;
+    const rows = [];
+    for (let i = 0; i < limit && start + i <= 2500; i += 1) {
+      rows.push({ id: start + i });
+    }
+    return {
+      ok: true,
+      async text() { return JSON.stringify(rows); },
+    };
+  };
+  try {
+    const rows = await supabaseRestAll(
+      { SUPABASE_URL: "https://example.supabase.co", SUPABASE_SERVICE_ROLE_KEY: "sb_secret_test" },
+      "platform_outputs?select=id&order=output_number.desc.nullslast&limit=10000",
+      { pageSize: 1000, maxRows: 10000 },
+    );
+    assert.equal(rows.length, 2500);
+    assert.equal(calls.length, 3);
+    assert.match(calls[0], /limit=1000&offset=0/);
+    assert.match(calls[1], /limit=1000&offset=1000/);
+    assert.match(calls[2], /limit=1000&offset=2000/);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("worker wires supabase phase4 reads behind the same flag", async () => {
   const worker = readStudioWorkerSource();
-  assert.match(worker, /version: "0.10.626-schedule-regen-platform-case"/);
+  assert.match(worker, /version: "0.10.627-overview-supabase-page"/);
   assert.match(worker, /studio_supabase_pipeline_reads_v1: true/);
   assert.match(worker, /studio_supabase_phase3_stable_v1: true/);
   assert.match(worker, /studio_supabase_phase4_reads_v1: true/);
@@ -218,6 +252,13 @@ test("worker wires supabase phase4 reads behind the same flag", async () => {
   assert.match(worker, /supabase content list read failed/);
   assert.match(worker, /supabase profiles overview read failed/);
   assert.match(worker, /supabase factory\/ops queue read failed/);
+  assert.match(worker, /schemaVersion: 3/);
+  assert.match(worker, /ideaLimit: options\.ideaLimit \?\? 2000/);
+  assert.match(worker, /usedSupabaseOutputs/);
+  assert.match(worker, /Ideas column from Airtable/);
+  const reads = await readFile(path.join(here, "supabase-pipeline-reads.mjs"), "utf8");
+  assert.match(reads, /export async function supabaseRestAll/);
+  assert.match(reads, /listSupabaseOverviewPack[\s\S]*supabaseRestAll/);
 });
 
 test("phase4 docs exist", async () => {

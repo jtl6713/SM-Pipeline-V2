@@ -9,7 +9,7 @@ Additional read routes (Airtable fallback on error / empty pack):
 | Surface | Route | Notes |
 |---|---|---|
 | Content list | `GET /api/content` | Content items + open/recent outputs |
-| All Profiles overview | `GET /api/profiles/overview` | Outputs + ideas for authorized profiles |
+| All Profiles overview | `GET /api/profiles/overview` | Outputs from Supabase (paged past PostgREST max-rows); Ideas column still from Airtable until deep idea sync |
 | Factory desk | `GET /api/factory/desk` | Via operations-queue pack + photo-wait ideas |
 | Ops queue | `GET /api/operations/queue` | Same output/request pack as Factory |
 

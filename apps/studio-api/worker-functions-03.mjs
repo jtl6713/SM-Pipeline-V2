@@ -1528,6 +1528,8 @@ export async function studioSyncSupabasePipelineReads(env, options = {}) {
     outputFields: OUTPUT_LIST_FIELDS,
     outputLimit: options.outputLimit,
     contentLimit: options.contentLimit,
+    // Overview Ideas totals need a deep unpromoted inventory, not newest-200 only.
+    ideaLimit: options.ideaLimit ?? 2000,
     listOpenOutputs: async (profile) => {
       const pack = await loadOpenPipelineOutputPack(env, profile);
       return mergePipelineOutputRecords(pack.open || [], pack.siblings || []);

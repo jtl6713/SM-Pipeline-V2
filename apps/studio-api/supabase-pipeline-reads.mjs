@@ -156,6 +156,32 @@ export async function supabaseRest(env, pathAndQuery, { method = "GET", body = n
   return parsed;
 }
 
+/**
+ * PostgREST/Supabase caps a single response (often 1000 rows) even when limit=10000.
+ * Page with offset until exhausted or maxRows is reached.
+ */
+export async function supabaseRestAll(env, pathAndQuery, { pageSize = 1000, maxRows = 10000 } = {}) {
+  const size = Math.max(1, Math.min(1000, Number(pageSize) || 1000));
+  const ceiling = Math.max(1, Math.min(20000, Number(maxRows) || 10000));
+  const stripped = String(pathAndQuery || "")
+    .replace(/([?&])(limit|offset)=\d+/gi, "$1")
+    .replace(/[?&]$/, "")
+    .replace(/\?&/, "?")
+    .replace(/&&+/g, "&");
+  const joiner = stripped.includes("?") ? "&" : "?";
+  const rows = [];
+  let offset = 0;
+  while (rows.length < ceiling) {
+    const take = Math.min(size, ceiling - rows.length);
+    const page = await supabaseRest(env, `${stripped}${joiner}limit=${take}&offset=${offset}`);
+    const batch = Array.isArray(page) ? page : [];
+    rows.push(...batch);
+    if (batch.length < take) break;
+    offset += batch.length;
+  }
+  return rows;
+}
+
 function firstLink(value) {
   if (Array.isArray(value) && value.length) {
     const row = value[0];
@@ -605,24 +631,28 @@ export async function listSupabaseOverviewPack(env, { profileAirtableIds = [], o
   const profileFilter = uuids.length === 1
     ? `content_profile_id=eq.${uuids[0]}`
     : `content_profile_id=in.(${uuids.join(",")})`;
+  const outCeiling = Math.max(1, Math.min(10000, Number(outputLimit) || 10000));
+  const ideaCeiling = Math.max(1, Math.min(10000, Number(ideaLimit) || 10000));
 
+  // Must page: a bare limit=10000 is still capped by PostgREST max-rows (~1000),
+  // which silently dropped older Scheduled rows and crushed All Profiles totals.
   const [outputRows, ideaRows] = await Promise.all([
-    supabaseRest(
+    supabaseRestAll(
       env,
-      `platform_outputs?${profileFilter}&select=${OUTPUT_SELECT}`
-        + `&order=output_number.desc.nullslast&limit=${Math.max(1, Math.min(10000, Number(outputLimit) || 10000))}`,
+      `platform_outputs?${profileFilter}&select=${OUTPUT_SELECT}&order=output_number.desc.nullslast`,
+      { pageSize: 1000, maxRows: outCeiling },
     ),
-    supabaseRest(
+    supabaseRestAll(
       env,
-      `idea_candidates?${profileFilter}&select=${IDEA_SELECT}`
-        + `&order=created_at.desc.nullslast&limit=${Math.max(1, Math.min(10000, Number(ideaLimit) || 10000))}`,
+      `idea_candidates?${profileFilter}&select=${IDEA_SELECT}&order=created_at.desc.nullslast`,
+      { pageSize: 1000, maxRows: ideaCeiling },
     ).catch(() => []),
   ]);
 
-  if ((outputRows || []).length >= Math.min(10000, Number(outputLimit) || 10000)) {
+  if ((outputRows || []).length >= outCeiling) {
     throw new Error("Profiles overview outputs exceeded complete-scan safety ceiling");
   }
-  if ((ideaRows || []).length >= Math.min(10000, Number(ideaLimit) || 10000)) {
+  if ((ideaRows || []).length >= ideaCeiling) {
     throw new Error("Profiles overview ideas exceeded complete-scan safety ceiling");
   }
 
@@ -630,6 +660,8 @@ export async function listSupabaseOverviewPack(env, { profileAirtableIds = [], o
     profilesMissing: false,
     outputs: (outputRows || []).map(flattenOutputRow).map(airtableShapedOutputFromSupabase),
     ideas: (ideaRows || []).map(flattenIdeaRow).map(airtableShapedIdeaFromSupabase),
+    output_count: (outputRows || []).length,
+    idea_count: (ideaRows || []).length,
   };
 }
 
@@ -949,9 +981,10 @@ export async function syncProfilePipelineToSupabase(env, profile, deps = {}) {
   if (!profileUuid) throw new Error(`Supabase profile missing after upsert for ${profile.id}`);
 
   const profileFormula = contentProfileFilterFormula(profile);
-  const outputLimit = Math.max(50, Math.min(1000, Number(deps.outputLimit) || 500));
-  const contentLimit = Math.max(50, Math.min(500, Number(deps.contentLimit) || 250));
-  const ideaLimit = Math.max(20, Math.min(500, Number(deps.ideaLimit) || 200));
+  const outputLimit = Math.max(50, Math.min(2000, Number(deps.outputLimit) || 1000));
+  const contentLimit = Math.max(50, Math.min(1000, Number(deps.contentLimit) || 400));
+  // All Profiles Ideas column needs unpromoted inventory, not only the newest 200.
+  const ideaLimit = Math.max(20, Math.min(5000, Number(deps.ideaLimit) || 2000));
   const ideaTableId = deps.ideaTableId || env.AIRTABLE_IDEA_TABLE_ID;
 
   const leanContentFields = [
