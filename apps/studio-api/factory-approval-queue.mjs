@@ -197,8 +197,9 @@ export function factoryBatchFailure(error) {
 }
 export async function factoryBatchDrain(bucket, options) {
   assertBucket(bucket);
-  const { profileId, requestId, approve, maxItems = 6 } = options;
+  const { profileId, requestId, approve, maxItems = 6, maxElapsedMs = Infinity } = options;
   const now = options.now || (() => Date.now());
+  const startedAt = now();
   const owner = (options.makeOwner || (() => crypto.randomUUID()))();
   const lock = await factoryBatchLock(bucket, profileId, owner, now());
   if (!lock) return { claimed: false, job: await factoryBatchRead(bucket, profileId, requestId) };
@@ -212,7 +213,10 @@ export async function factoryBatchDrain(bucket, options) {
     const sorted = job.items.filter(x => !/story/i.test(String(x.format || "")))
       .concat(job.items.filter(x => /story/i.test(String(x.format || ""))));
     for (const item of sorted) {
-      if (processed >= maxItems) break;
+      // HTTP waitUntil has a bounded lifetime. Finish as many approvals as
+      // the budget allows rather than hard-stopping after only five.
+      // Remaining work stays durable for cron recovery after the client leaves.
+      if (processed >= maxItems || (processed > 0 && now() - startedAt >= maxElapsedMs)) break;
       if (done.has(item.status) || item.next_attempt_ms > now()) continue;
       const stamp = new Date(now()).toISOString();
       job = await cas(bucket, key, value => ({
