@@ -107,21 +107,26 @@ export async function factoryBatchRead(bucket, profileId, requestId) {
   assertBucket(bucket);
   return (await get(bucket, factoryBatchKey(profileId, requestId)))?.value || null;
 }
-export async function factoryBatchList(bucket, profileId, { limit = 100 } = {}) {
+export async function factoryBatchList(bucket, profileId, { limit = 40, maxScan = 2000 } = {}) {
   assertBucket(bucket);
   if (!ID.test(String(profileId || ""))) throw Error("Missing profile");
   const prefix = FACTORY_BATCH_PREFIX + "/jobs/" + profileId + "/";
-  const jobs = [];
+  const meta = [];
   let cursor;
   do {
-    const page = await bucket.list({ prefix, limit: 100, ...(cursor ? { cursor } : {}) });
-    const matches = page.objects || [];
-    const rows = await Promise.all(matches.map(row => get(bucket, row.key)));
-    for (const row of rows) if (row?.value?.schema === "studio.factory-batch.2") jobs.push(row.value);
+    const page = await bucket.list({ prefix, limit: 1000, ...(cursor ? { cursor } : {}) });
+    meta.push(...(page.objects || []));
     cursor = page.truncated ? page.cursor : null;
-  } while (cursor && jobs.length < limit);
-  jobs.sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at));
-  return jobs.slice(0, limit);
+  } while (cursor && meta.length < maxScan);
+  // R2 lists lexicographically by opaque request ID, NOT by recency.
+  // Compare object upload dates first to avoid showing a random historic job
+  // when more than one page of prior batches exists.
+  meta.sort((a, b) => new Date(b.uploaded || 0) - new Date(a.uploaded || 0));
+  const latest = meta.slice(0, Math.max(1, Math.min(limit, 40)));
+  const rows = await Promise.all(latest.map(row => get(bucket, row.key)));
+  return rows.filter(row => row?.value?.schema === "studio.factory-batch.2")
+    .map(row => row.value)
+    .sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at));
 }
 export async function factoryBatchLock(bucket, profileId, owner, nowMs, leaseMs = FACTORY_BATCH_LEASE_MS) {
   const key = factoryBatchLockKey(profileId);
