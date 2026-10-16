@@ -1008,7 +1008,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.626-schedule-regen-platform-case",
+          version: "0.10.627-overview-supabase-page",
           studio_supabase_pipeline_reads_v1: true,
           studio_supabase_sync_gate_v1: true,
           studio_supabase_phase3_stable_v1: true,

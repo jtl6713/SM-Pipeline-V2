@@ -2980,6 +2980,7 @@ export async function buildStudioProfilesOverviewRows(env, profiles) {
   let outputRows = null;
   let ideaRows = null;
   let readSource = "airtable";
+  let usedSupabaseOutputs = false;
 
   if (studioReadSource(env) === "supabase") {
     try {
@@ -2988,10 +2989,12 @@ export async function buildStudioProfilesOverviewRows(env, profiles) {
         outputLimit: STUDIO_PROFILES_OVERVIEW_OUTPUT_LIMIT,
         ideaLimit: STUDIO_PROFILES_OVERVIEW_IDEA_LIMIT,
       });
-      // Require outputs; ideas can be empty right after Phase 4 deploy until sync warms them.
+      // Require a non-empty output pack. Empty ideas used to short-circuit to 0
+      // Ideas totals while still painting supabase scheduled counts.
       if (!pack.profilesMissing && (pack.outputs || []).length) {
         outputRows = pack.outputs || [];
-        ideaRows = pack.ideas || [];
+        ideaRows = Array.isArray(pack.ideas) ? pack.ideas : [];
+        usedSupabaseOutputs = true;
         readSource = "supabase";
       }
     } catch (error) {
@@ -2999,8 +3002,8 @@ export async function buildStudioProfilesOverviewRows(env, profiles) {
     }
   }
 
-  if (!outputRows || !ideaRows) {
-    const formula = studioProfilesOverviewCombinedFormula(profiles);
+  const formula = studioProfilesOverviewCombinedFormula(profiles);
+  if (!usedSupabaseOutputs) {
     // Fetch every matching row; the previous global 800/300 caps silently excluded
     // older profiles. listRecords follows Airtable offsets until exhausted.
     // Treat reaching the safety ceiling as incomplete, never as a valid snapshot.
@@ -3014,15 +3017,18 @@ export async function buildStudioProfilesOverviewRows(env, profiles) {
     if (outputRows.length >= STUDIO_PROFILES_OVERVIEW_OUTPUT_LIMIT) {
       throw new Error("Profiles overview outputs exceeded complete-scan safety ceiling");
     }
-    ideaRows = await listRecords(env, env.AIRTABLE_IDEA_TABLE_ID, {
-      limit: STUDIO_PROFILES_OVERVIEW_IDEA_LIMIT,
-      sortField: "Create_Date",
-      filterFormula: formula,
-    });
-    if (ideaRows.length >= STUDIO_PROFILES_OVERVIEW_IDEA_LIMIT) {
-      throw new Error("Profiles overview ideas exceeded complete-scan safety ceiling");
-    }
     readSource = "airtable";
+  }
+
+  // Ideas sync is still newest-N and undercounts "not in production". Always take
+  // the Ideas column from Airtable until a deep idea inventory is the SoR.
+  ideaRows = await listRecords(env, env.AIRTABLE_IDEA_TABLE_ID, {
+    limit: STUDIO_PROFILES_OVERVIEW_IDEA_LIMIT,
+    sortField: "Create_Date",
+    filterFormula: formula,
+  });
+  if (ideaRows.length >= STUDIO_PROFILES_OVERVIEW_IDEA_LIMIT) {
+    throw new Error("Profiles overview ideas exceeded complete-scan safety ceiling");
   }
 
   return (profiles || []).map((profile) => {
@@ -3108,7 +3114,7 @@ export async function readStudioProfilesOverviewSnapshot(env) {
 /*__STUDIO_WORKER_END:readStudioProfilesOverviewSnapshot__*/
 
 export async function writeStudioProfilesOverviewSnapshot(env, rows, authKey) {
-  const snapshot = rememberProfilesOverviewSnapshot({ rows, authKey, at: Date.now(), complete: true, schemaVersion: 2 });
+  const snapshot = rememberProfilesOverviewSnapshot({ rows, authKey, at: Date.now(), complete: true, schemaVersion: 3 });
   if (!snapshot || !env?.STUDIO_MEDIA?.put) return snapshot;
   try {
     await env.STUDIO_MEDIA.put(
@@ -3155,7 +3161,7 @@ export function scheduleStudioProfilesOverviewRefresh(ctx, env, authorization) {
 export async function profilesOverview(request, env, authorization, ctx) {
   const snapshot = await readStudioProfilesOverviewSnapshot(env);
   const age = snapshot?.at ? Date.now() - snapshot.at : Infinity;
-  if (snapshot?.rows?.length && snapshot.complete === true && snapshot.schemaVersion === 2 && age < STUDIO_PROFILES_OVERVIEW_CACHE_MS) {
+  if (snapshot?.rows?.length && snapshot.complete === true && snapshot.schemaVersion === 3 && age < STUDIO_PROFILES_OVERVIEW_CACHE_MS) {
     return respondProfilesOverviewSoft(request, env, {
       records: snapshot.rows,
       cached: true,
