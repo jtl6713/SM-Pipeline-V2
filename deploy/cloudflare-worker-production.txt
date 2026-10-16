@@ -373,3 +373,5 @@ phase4-followup duplicate-skip 2026-10-16T16:50:00Z worker 0.10.646-duplicate-sk
 phase4-followup purge-deleted-duplicates 2026-10-16T19:15:00Z worker 0.10.647-purge-deleted-duplicates (delete Supabase rows and Pipeline snapshots for the removed Huntington, Downtown LA, Griffith, Brickell, Vizcaya, and Little Havana packages)
 
 phase4-followup purge-deleted-duplicates 2026-10-16T19:30:00Z worker 0.10.648-purge-deleted-duplicates (newest Pipeline read can no longer reattach the deleted packages; purge runs before an Airtable cooldown skip)
+
+phase4-followup purge-deleted-duplicates 2026-10-16T19:42:00Z worker 0.10.649-purge-deleted-duplicates (drop the later cancelled Huntington, Downtown LA, Griffith, Brickell, Vizcaya, and Little Havana copies that the read copy was still serving)
