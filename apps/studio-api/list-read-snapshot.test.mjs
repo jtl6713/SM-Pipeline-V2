@@ -42,7 +42,7 @@ test("Home, Pipeline, and Ideas list reads never block on a live Airtable scan",
   assert.match(listOutputs, /respondStudioMappedList/);
   assert.doesNotMatch(listOutputs, /raceStudioOverviewBudget/);
 
-  assert.match(app, /BUILD_ID = "item4-0.6.697-schedule-regen-live"/);
+  assert.match(app, /BUILD_ID = "item4-0.6.698-schedule-regen-r2"/);
   assert.match(app, /api\("\/api\/outputs\?limit=250", \{ timeoutMs: 8000, retries: 1 \}/);
   assert.match(app, /api\("\/api\/ideas\?limit=100", \{ timeoutMs: 8000, retries: 1 \}/);
   assert.match(app, /outputsSettled\.value\?\.refreshing && !outputs\.length/);

@@ -65,6 +65,42 @@ export function parseScheduleRegenJobStore(raw) {
   };
 }
 
+/** Higher score = more useful durable store (active work beats empty seed rows). */
+export function scheduleRegenStoreActivityScore(store) {
+  if (!store || typeof store !== "object") return -1;
+  const jobs = Object.values(store.jobs || {});
+  let score = 0;
+  let newest = 0;
+  for (const job of jobs) {
+    const status = String(job?.status || "");
+    if (status === "queued" || status === "running") score += 1000;
+    else if (status === "completed" || status === "failed") score += 10;
+    else score += 1;
+    const updated = Date.parse(job?.updated_at || job?.created_at || "") || 0;
+    if (updated > newest) newest = updated;
+  }
+  score += Object.keys(store.active_by_scope || {}).length * 100;
+  // Tiny tie-breaker so a freshly written R2 store wins over a stale empty Airtable seed.
+  score += Math.min(newest, 9_999_999_999_999) / 1e15;
+  return score;
+}
+
+/**
+ * Prefer the store with active/queued work. A seeded Airtable row with empty jobs{}
+ * must not shadow an R2 write (that was the Miami "button snaps back" failure mode).
+ * When scores tie, prefer `primary` (R2).
+ */
+export function preferScheduleRegenJobStore(primary, secondary) {
+  const a = primary && typeof primary === "object" ? primary : null;
+  const b = secondary && typeof secondary === "object" ? secondary : null;
+  if (!a && !b) return emptyScheduleRegenJobStore();
+  if (a && !b) return a;
+  if (!a && b) return b;
+  const aScore = scheduleRegenStoreActivityScore(a);
+  const bScore = scheduleRegenStoreActivityScore(b);
+  return bScore > aScore ? b : a;
+}
+
 export function scheduleRegenCombinationKey(combo) {
   const platform = String(combo?.platform || "").trim().toLowerCase();
   const outputType = String(combo?.output_type || combo?.outputType || "").trim().toLowerCase();
