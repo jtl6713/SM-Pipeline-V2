@@ -305,7 +305,7 @@
     const profileId = String($("studioProfileSelect")?.value || state.lastBatchProfile || "").trim();
     if (/^rec[A-Za-z0-9]+$/.test(profileId)) params.set("profile", profileId);
     try {
-      const batch = await fetchJson(`/api/outputs/approve-all?${params.toString()}`);
+      const batch = await fetchJson(`/api/factory/approval-batches?${params.toString()}`);
       renderFactoryBatchActivity(batch);
       return batch;
     } catch (error) {
@@ -328,10 +328,10 @@
     // Refuse to mix profiles rather than stamp an output in the wrong timezone.
     state.submittingBatch = true;
     updateFactoryBatchToolbar();
-    const requestId = (typeof crypto?.randomUUID === "function"
-      ? crypto.randomUUID() : `factory_${Date.now()}_${Math.random().toString(36).slice(2)}`).replace(/[^A-Za-z0-9_-]/g, "");
+    const requestId = (typeof window.crypto?.randomUUID === "function"
+      ? window.crypto.randomUUID() : `factory_${Date.now()}_${Math.random().toString(36).slice(2)}`).replace(/[^A-Za-z0-9_-]/g, "");
     try {
-      const batch = await fetchJson("/api/outputs/approve-all", {
+      const batch = await fetchJson("/api/factory/approval-batches", {
         method: "POST",
         body: JSON.stringify({
           action: "start",
@@ -374,10 +374,10 @@
     state.submittingBatch = true;
     updateFactoryBatchToolbar();
     try {
-      const result = await fetchJson("/api/outputs/approve-all", {
+      const result = await fetchJson("/api/factory/approval-batches", {
         method: "POST",
         body: JSON.stringify({
-          action: "retry", job_id: batch.job_id,
+          action: "retry", request_id: batch.request_id,
           content_profile_id: batch.profile_id,
         }),
       });
