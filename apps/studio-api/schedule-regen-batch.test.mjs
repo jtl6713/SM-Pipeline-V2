@@ -39,6 +39,7 @@ import {
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const worker = readStudioWorkerSource();
+const batch = fs.readFileSync(path.join(here, "schedule-regen-batch.mjs"), "utf8");
 const app = fs.readFileSync(path.join(here, "../studio-web/assets/app-item4-1008.js"), "utf8");
 
 test("combinations sort platform → output type → profile and start Pending", () => {
@@ -223,6 +224,26 @@ test("failed combination stays Failed and is counted separately", () => {
   assert.match(scheduleRegenProgressMessage(job), /failed/i);
 });
 
+test("orphan Processing never wipes mid-apply plan or completed_posts", () => {
+  assert.equal(scheduleRegenComboIsOrphanProcessing({
+    status: "Processing",
+    completed_posts: 15,
+    total_posts: 52,
+    plan: [{ id: "rec1", iso: "2026-10-17T12:00:00.000Z" }],
+  }), false);
+  assert.equal(scheduleRegenComboIsOrphanProcessing({
+    status: "Processing",
+    completed_posts: 0,
+    total_posts: 52,
+    plan: [{ id: "rec1", iso: "2026-10-17T12:00:00.000Z" }],
+  }), false);
+  assert.equal(scheduleRegenComboIsOrphanProcessing({
+    status: "Processing",
+    completed_posts: 0,
+    total_posts: 0,
+  }), true);
+});
+
 test("scheduleRegenDrainLeaseIsLive ignores zombie drain_until without a fresh heartbeat", () => {
   const now = Date.parse("2026-10-16T06:00:00.000Z");
   assert.equal(SCHEDULE_REGEN_DRAIN_LEASE_MS >= 60_000, true);
@@ -300,7 +321,7 @@ test("Worker and Pipeline wire durable schedule regeneration", () => {
   assert.match(worker, /leasedProcessing/);
   assert.match(worker, /SCHEDULE_REGEN_LIVE_LEASE_MS/);
   assert.match(worker, /softLeaseMs/);
-  assert.match(worker, /version: "0.10.641-schedule-regen-zombie-lease"/);
+  assert.match(worker, /version: "0.10.642-schedule-regen-sequential"/);
   assert.match(worker, /SCHEDULE_REGEN_OVERNIGHT_V1/);
   assert.match(worker, /studioEnqueueOvernightScheduleRegenJobs/);
   assert.match(worker, /studioResumeScheduleRegenJobs/);
@@ -308,9 +329,11 @@ test("Worker and Pipeline wire durable schedule regeneration", () => {
   assert.match(worker, /SCHEDULE_REGEN_DRAIN_LEASE_HEARTBEAT_MS/);
   assert.match(worker, /scheduleRegenDrainLeaseIsLive/);
   assert.match(worker, /drain_until/);
-  assert.match(worker, /One job per light-cron tick/);
+  assert.match(worker, /Sequential drains in one waitUntil/);
   assert.match(worker, /Checkpoint every 5 slots/);
-  assert.match(worker, /Prefer scanned lanes that still need MAE plan slots/);
+  assert.match(batch, /Never wipe mid-apply/);
+  assert.match(batch, /SCHEDULE_REGEN_STORE_CHAR_BUDGET = 150000/);
+  assert.match(worker, /Prefer mid-apply, then scanned lanes/);
   assert.match(worker, /Scanned\n\s*\/\/ eligible_ids with plan=\[\]/);
   assert.match(worker, /studio schedule-regen resume failed/);
   assert.match(worker, /scheduleRegenComboIsEmptyLane\(combo\)/);
