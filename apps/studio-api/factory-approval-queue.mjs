@@ -128,6 +128,50 @@ export async function factoryBatchList(bucket, profileId, { limit = 40, maxScan 
     .map(row => row.value)
     .sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at));
 }
+/**
+ * Durable rolling cron cursor. R2 lists jobs lexicographically, so scanning
+ * only the first 200 on every tick indefinitely starves later profile keys.
+ * This checkpoint makes progress through ALL pages across cron invocations.
+ * All writes use CAS so overlapping scheduled runs cannot corrupt the cursor.
+ * A full scan resets to the beginning so newly enqueued keys are discovered.
+ */
+export const FACTORY_BATCH_CRON_CURSOR_KEY = FACTORY_BATCH_PREFIX + "/cron/scan-v1.json";
+export async function factoryBatchCronScan(bucket, { maxScan = 200, pageSize = 100 } = {}) {
+  assertBucket(bucket);
+  const prefix = FACTORY_BATCH_PREFIX + "/jobs/";
+  const size = Math.max(1, Math.min(1000, Math.floor(pageSize)));
+  const budget = Math.max(1, Math.min(2000, Math.floor(maxScan)));
+  let checkpoint = await get(bucket, FACTORY_BATCH_CRON_CURSOR_KEY);
+  let cursor = checkpoint?.value?.cursor || undefined;
+  let scanned = 0;
+  const objects = [];
+  while (scanned < budget) {
+    const page = await bucket.list({
+      prefix,
+      limit: Math.min(size, budget - scanned),
+      ...(cursor ? { cursor } : {}),
+    });
+    const entries = page.objects || [];
+    objects.push(...entries);
+    scanned += entries.length;
+    if (!page.truncated) {
+      cursor = undefined;
+      break;
+    }
+    if (!page.cursor || page.cursor === cursor) {
+      throw Error("R2 factory batch listing did not advance its cursor");
+    }
+    cursor = page.cursor;
+  }
+  const next = { cursor: cursor || null, updated_at: new Date().toISOString() };
+  if (checkpoint) {
+    await cas(bucket, FACTORY_BATCH_CRON_CURSOR_KEY, () => next);
+  } else if (!await putAbsent(bucket, FACTORY_BATCH_CRON_CURSOR_KEY, next)) {
+    await cas(bucket, FACTORY_BATCH_CRON_CURSOR_KEY, () => next);
+  }
+  return { objects, scanned, wrapped: !cursor, next_cursor: cursor || null };
+}
+
 export async function factoryBatchLock(bucket, profileId, owner, nowMs, leaseMs = FACTORY_BATCH_LEASE_MS) {
   const key = factoryBatchLockKey(profileId);
   for (let i = 0; i < 8; i++) {
