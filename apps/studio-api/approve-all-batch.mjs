@@ -201,6 +201,12 @@ export function summarizeApproveAllJob(job) {
     pending_count: counts.pending_count,
     skipped_count: counts.skipped_count,
     done_count: counts.done_count,
+    request_id: job.request_id || null,
+    items: (Array.isArray(job.items) ? job.items : []).map((item) => ({
+      id: item.id, output_id: item.output_id || null,
+      platform: item.platform || null, format: item.format || null,
+      status: item.status || "pending", error: item.error || null,
+    })),
     can_retry: counts.failed_count > 0 && (job.status === "completed" || job.status === "failed"),
     message: approveAllProgressMessage(job),
     approved,
@@ -211,6 +217,7 @@ export function summarizeApproveAllJob(job) {
 export function buildApproveAllJob({
   jobId,
   profileId,
+  requestId = null,
   note,
   schedules,
   records,
@@ -237,6 +244,7 @@ export function buildApproveAllJob({
     id: jobId,
     status: "queued",
     profile_id: profileId || null,
+    request_id: requestId || null,
     notes: note || "",
     schedules: slimSchedules,
     items,
