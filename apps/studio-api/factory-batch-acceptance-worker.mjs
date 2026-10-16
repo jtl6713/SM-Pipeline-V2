@@ -77,18 +77,28 @@ export default {
         return json({ ...factoryBatchSummary(job), accepted: true });
       }
       if (req.method === "POST" && url.pathname === "/api/cleanup") {
-        // Acceptance harness only. This endpoint is NEVER installed on the
-        // production Worker. Only call with a dedicated throwaway R2 bucket.
+        // Even if a live Cloudflare R2 bucket is bound by a staging test,
+        // delete ONLY this fixed synthetic profile's test ledger and locks.
+        // Never list/delete a whole shared production bucket.
+        const prefixes = [
+          "studio/state/factory-approvals/v2/jobs/" + PROFILE + "/",
+          "studio/state/factory-approvals/v2/locks/" + PROFILE + ".json",
+          "studio/state/output-approval-locks/v1/recFactorySmoke",
+          PREFIX + "/" + rid + "/",
+        ];
         let deleted = 0;
-        for (let pageNumber = 0; pageNumber < 10; pageNumber++) {
-          const listing = await env.STUDIO_MEDIA.list({ limit: 1000 });
-          const keys = listing.objects.map(item => item.key);
-          if (!keys.length) break;
-          await env.STUDIO_MEDIA.delete(keys);
-          deleted += keys.length;
+        for (const prefix of prefixes) {
+          for (let pageNumber = 0; pageNumber < 3; pageNumber++) {
+            const listing = await env.STUDIO_MEDIA.list({ prefix, limit: 1000 });
+            const keys = listing.objects.map(item => item.key);
+            if (!keys.length) break;
+            await env.STUDIO_MEDIA.delete(keys);
+            deleted += keys.length;
+          }
         }
-        const verify = await env.STUDIO_MEDIA.list({ limit: 1 });
-        return json({ cleanup: true, deleted, empty: verify.objects.length === 0 });
+        const counts = await Promise.all(prefixes.map(async prefix =>
+          (await env.STUDIO_MEDIA.list({ prefix, limit: 1 })).objects.length));
+        return json({ cleanup: true, deleted, test_prefixes_empty: counts.every(n => n === 0) });
       }
       if (req.method === "POST" && url.pathname === "/api/diagnose") {
         const result = await drain(env, req);
