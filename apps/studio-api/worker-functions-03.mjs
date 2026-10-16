@@ -1166,11 +1166,16 @@ export async function listOutputScheduleGrid(request, env, url, authorization) {
     throw new HttpError(400, "Schedule grid range cannot exceed 8 days");
   }
 
-  const body = await studioReadCoalesce(`schedule-grid:${profile.id}:${startMs}:${endMs}`, 25000, async () => {
+  // fresh=1 (UI during schedule regen) bypasses Supabase + coalesce so the calendar
+  // paints Airtable times that regen just wrote. Supabase write-through can lag.
+  const forceFresh = ["1", "true", "yes"].includes(String(url.searchParams.get("fresh") || "").trim().toLowerCase())
+    || String(url.searchParams.get("source") || "").trim().toLowerCase() === "airtable";
+
+  const loadGrid = async () => {
   const startFloor = new Date(startMs - 1000).toISOString();
   const endIso = new Date(endMs).toISOString();
 
-  if (studioReadSource(env) === "supabase") {
+  if (!forceFresh && studioReadSource(env) === "supabase") {
     try {
       const grid = await listSupabaseScheduleGrid(env, {
         profileAirtableId: profile.id,
@@ -1234,7 +1239,11 @@ export async function listOutputScheduleGrid(request, env, url, authorization) {
     profile: mapStudioContentProfile(profile),
     read_source: "airtable",
   };
-  });
+  };
+
+  const body = forceFresh
+    ? await loadGrid()
+    : await studioReadCoalesce(`schedule-grid:${profile.id}:${startMs}:${endMs}`, 25000, loadGrid);
   return respond(request, env, body);
 }
 /*__STUDIO_WORKER_END:listOutputScheduleGrid__*/

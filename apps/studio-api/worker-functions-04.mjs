@@ -2097,11 +2097,27 @@ export async function studioProcessScheduleRegenJobSlice(env, jobId, options = {
         chunk.map((entry) => ({ id: entry.id, fields: entry.fields })),
         { typecast: true },
       );
+      // Content_Profile on Platform Outputs is often a lookup display name. Stamp the
+      // known profile rec id so Supabase upsert resolves content_profile_id and the
+      // calendar (Supabase schedule-grid) moves with Airtable.
+      const profileStamp = String(job.profile_id || combo.profile_id || "").trim();
       await Promise.all(chunk.map((entry) => studioSupabaseWriteThroughOutput(
         env,
-        { id: entry.id, fields: { ...(entry.record.fields || {}), ...entry.fields } },
+        {
+          id: entry.id,
+          fields: {
+            ...(entry.record.fields || {}),
+            ...entry.fields,
+            ...(profileStamp && /^rec[A-Za-z0-9]+$/.test(profileStamp)
+              ? { Content_Profile: [profileStamp] }
+              : {}),
+          },
+        },
         "schedule-regen",
-      ).catch(() => null)));
+      ).catch((error) => {
+        console.warn("schedule-regen supabase write-through failed", entry.id, error);
+        return null;
+      })));
       combo.completed_posts += chunk.length;
       combo.rescheduled += chunk.length;
       combos[index] = { ...combo };

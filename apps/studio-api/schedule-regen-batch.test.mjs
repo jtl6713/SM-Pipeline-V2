@@ -184,11 +184,16 @@ test("Worker and Pipeline wire durable schedule regeneration", () => {
   assert.match(worker, /preferScheduleRegenJobStore/);
   assert.match(worker, /did not persist/);
   assert.match(worker, /display names \("Miami - Miami"\)/);
-  assert.match(worker, /version: "0\.10\.630-schedule-regen-phase2a"/);
+  assert.match(worker, /forceFresh/);
+  assert.match(worker, /fresh=1 \(UI during schedule regen\)/);
+  assert.match(worker, /Content_Profile: \[profileStamp\]/);
+  assert.match(worker, /version: "0\.10\.631-schedule-regen-fresh"/);
   assert.match(app, /\/api\/outputs\/schedule-regen/);
   assert.match(app, /pathname === "\/api\/outputs\/schedule-regen"/);
   assert.match(app, /queuePipelineScheduleRegenPoll/);
-  assert.match(app, /loadPipelineScheduleGridWindow/);
+  assert.match(app, /loadPipelineScheduleGridWindow\("", \{ fresh: true \}\)/);
+  assert.match(app, /params\.set\("fresh", "1"\)/);
+  assert.match(app, /Posts rescheduled so far/);
   assert.match(app, /was lost after start/);
   assert.match(app, /window\.alert\(message\)/);
   assert.match(app, /Will be scheduled on approval/);
