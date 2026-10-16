@@ -7,7 +7,11 @@ export const SCHEDULE_REGEN_JOB_TTL_MS = 24 * 60 * 60 * 1000;
 export const SCHEDULE_REGEN_STORE_CHAR_BUDGET = 80000;
 export const SCHEDULE_REGEN_MAX_TERMINAL_JOBS = 3;
 /** A Processing combo older than this is treated as crashed; GET/POST may resume or reclaim. */
-export const SCHEDULE_REGEN_STALE_PROCESSING_MS = 2 * 60 * 1000;
+export const SCHEDULE_REGEN_STALE_PROCESSING_MS = 45 * 1000;
+/** Max Airtable/Supabase schedule writes per Worker slice so a 50+ Story lane cannot hang Regenerating… forever. */
+export const SCHEDULE_REGEN_POSTS_PER_SLICE = 10;
+/** Max slices to chain inside one waitUntil / drain invocation. */
+export const SCHEDULE_REGEN_MAX_SLICES_PER_DRAIN = 6;
 
 const CANONICAL_PLATFORMS = Object.freeze({
   instagram: "Instagram",
@@ -236,12 +240,21 @@ export function scheduleRegenJobIsStale(job, nowMs = Date.now(), staleMs = SCHED
   return false;
 }
 
-/** Reset crashed Processing combos back to Pending so a later slice can finish them. */
+/** True when a combination still has planned posts left to stamp. */
+export function scheduleRegenComboHasRemainingPlan(combo) {
+  if (!combo || typeof combo !== "object") return false;
+  const plan = Array.isArray(combo.plan) ? combo.plan : [];
+  const done = Math.max(0, Number(combo.completed_posts) || 0);
+  return plan.length > 0 && done < plan.length;
+}
+
+/** Reset crashed Processing combos so a later slice can finish them (keep plan progress). */
 export function reclaimStaleScheduleRegenJob(job, nowMs = Date.now()) {
   if (!job || typeof job !== "object") return job;
   if (!scheduleRegenJobIsStale(job, nowMs)) return job;
   const combinations = (Array.isArray(job.combinations) ? job.combinations : []).map((row) => {
     if (String(row?.status || "") !== SCHEDULE_REGEN_STATUS.PROCESSING) return row;
+    // Keep plan + completed_posts so a 57-Story lane resumes mid-plan instead of re-planning.
     return {
       ...row,
       status: SCHEDULE_REGEN_STATUS.PENDING,
