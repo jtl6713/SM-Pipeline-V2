@@ -331,3 +331,5 @@ phase4-reads 2026-10-16T01:47:22Z worker 0.10.625-supabase-phase4-reads
 phase4-followup schedule-regen-platform-case 2026-10-16T02:17:23Z worker 0.10.626
 
 phase4-followup overview-supabase-page 2026-10-16T02:28:32Z worker 0.10.627
+
+phase4-followup schedule-regen-store 2026-10-16T02:58:00Z worker 0.10.628

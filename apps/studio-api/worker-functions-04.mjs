@@ -341,6 +341,7 @@ import {
   SCHEDULE_REGEN_JOBS_SETTING,
   createScheduleRegenJob,
   scheduleRegenCandidateFilterFormula,
+  emptyScheduleRegenJobStore,
   parseScheduleRegenJobStore,
   pruneScheduleRegenJobStore,
   scheduleRegenCombinationKey,
@@ -1817,15 +1818,55 @@ export function mapApproveAllEligibleSummary(record) {
 
 export async function studioLoadScheduleRegenJobStore(env) {
   const row = await studioSettingsByName(env, SCHEDULE_REGEN_JOBS_SETTING).catch(() => null);
-  return pruneScheduleRegenJobStore(
-    parseScheduleRegenJobStore(row?.fields?.Setting_Value || row?.fields?.Value || "{}"),
-  );
+  if (row?.fields?.Setting_Value || row?.fields?.Value) {
+    return pruneScheduleRegenJobStore(
+      parseScheduleRegenJobStore(row?.fields?.Setting_Value || row?.fields?.Value || "{}"),
+    );
+  }
+  // R2 fallback when the Airtable setting row was never creatable by the Worker PAT.
+  const r2Key = "studio/state/schedule-regen-jobs-v1.json";
+  if (env?.STUDIO_MEDIA?.get) {
+    try {
+      const object = await env.STUDIO_MEDIA.get(r2Key);
+      if (object) {
+        const text = typeof object.text === "function" ? await object.text() : "";
+        return pruneScheduleRegenJobStore(parseScheduleRegenJobStore(text || "{}"));
+      }
+    } catch (error) {
+      console.warn("schedule regen R2 store read failed", error);
+    }
+  }
+  return pruneScheduleRegenJobStore(emptyScheduleRegenJobStore());
 }
 /*__STUDIO_WORKER_END:studioLoadScheduleRegenJobStore__*/
 
 export async function studioPutScheduleRegenJobStore(env, store, notes = "Schedule regeneration job store") {
   const pruned = pruneScheduleRegenJobStore(store);
-  await studioUpsertSetting(env, SCHEDULE_REGEN_JOBS_SETTING, JSON.stringify(pruned), notes);
+  const payload = JSON.stringify(pruned);
+  const r2Key = "studio/state/schedule-regen-jobs-v1.json";
+  let r2Ok = false;
+  if (env?.STUDIO_MEDIA?.put) {
+    try {
+      await env.STUDIO_MEDIA.put(r2Key, payload, {
+        httpMetadata: { contentType: "application/json" },
+      });
+      r2Ok = true;
+    } catch (error) {
+      console.warn("schedule regen R2 store write failed", error);
+    }
+  }
+  try {
+    await studioUpsertSetting(env, SCHEDULE_REGEN_JOBS_SETTING, payload, notes);
+  } catch (error) {
+    if (r2Ok) {
+      console.warn("schedule regen Airtable store write failed; continuing with R2", error);
+      return pruned;
+    }
+    throw new HttpError(
+      502,
+      `Could not persist schedule regeneration job (${error?.message || error}). Seed Pipeline Setting SCHEDULE_REGEN_JOBS_V1 or check STUDIO_MEDIA.`,
+    );
+  }
   return pruned;
 }
 /*__STUDIO_WORKER_END:studioPutScheduleRegenJobStore__*/
@@ -6358,7 +6399,15 @@ export async function studioSettingsByName(env, name) {
 /*__STUDIO_WORKER_END:studioSettingsByName__*/
 
 export async function studioUpsertSetting(env, name, value, notes) {
-  const existing = await studioSettingsByName(env, name);
+  let existing = await studioSettingsByName(env, name);
+  if (!existing) {
+    // Reactivate a seeded/inactive row — Worker PATs sometimes cannot CREATE settings.
+    const any = await listRecords(env, STUDIO_PIPELINE_SETTINGS_TABLE_ID, {
+      limit: 5,
+      filterFormula: `{Setting_Name}="${String(name).replace(/"/g, "")}"`,
+    }).catch(() => []);
+    existing = any[0] || null;
+  }
   const fields = {
     Setting_Name: name,
     Setting_Value: String(value || ""),
@@ -6375,7 +6424,14 @@ export async function studioUpsertSetting(env, name, value, notes) {
     method: "POST",
     body: JSON.stringify({ records: [{ fields }], typecast: true }),
   });
-  return created?.records?.[0] || null;
+  const row = created?.records?.[0] || null;
+  if (!row?.id) {
+    throw new HttpError(
+      502,
+      `Failed to create Pipeline Setting "${name}". Seed that Setting_Name row in Airtable (Active=1) so the Worker can PATCH it.`,
+    );
+  }
+  return row;
 }
 /*__STUDIO_WORKER_END:studioUpsertSetting__*/
 

@@ -7206,7 +7206,14 @@ export function studioOccupiedRowMatchesProfile(row, profile) {
   if (profileIds.includes(profile.id)) return true;
   const brandId = studioFirstLinkedId(f(profile, "Brand"));
   if (brandId && studioOccupiedLinkedIds(f(row, "Brand")).includes(brandId)) return true;
-  return false;
+  // Platform Outputs.Content_Profile is a lookup. Airtable REST often returns
+  // display names ("Miami - Miami"), not rec ids — id-only matching skipped every row.
+  const name = String(f(profile, "Profile_Name") || "").trim();
+  if (!name) return false;
+  const joined = arrayOrEmpty(f(row, "Content_Profile"))
+    .map((item) => (typeof item === "string" ? item : String(item?.name || item?.id || "")))
+    .join(" ");
+  return joined.includes(name);
 }
 /*__STUDIO_WORKER_END:studioOccupiedRowMatchesProfile__*/
 

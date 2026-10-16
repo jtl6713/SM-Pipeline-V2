@@ -173,7 +173,7 @@ test("Trying Again only for real Remotion failures, never queue wait", () => {
 });
 
 test("Worker admit + mapOutput expose queue meta and Remotion job id", () => {
-  assert.match(worker, /version: "0.10.627-overview-supabase-page"/);
+  assert.match(worker, /version: "0.10.628-schedule-regen-store"/);
   assert.match(worker, /studio_shared_render_queue_v1: true/);
   assert.match(worker, /studio_render_queue_wait_v1: true/);
   assert.match(worker, /async function studioAdmitRenderQueue/);

@@ -36,7 +36,7 @@ test("Worker heal requeues Failed/Error leftovers like Retry remaining", () => {
   assert.match(worker, /Requeued by Quality Agent prepare heal/);
   assert.match(worker, /Studio_Variant_Status\}="Error"/);
   assert.match(worker, /Math\.min\(40,/);
-  assert.match(worker, /0.10.627-overview-supabase-page/);
+  assert.match(worker, /0.10.628-schedule-regen-store/);
   assert.match(worker, /item4HealIncompletePreparingVariants/);
   assert.match(worker, /item4HealTimelineAutoPrepare/);
   // Preparing parents with finished crops must reconcile even when drain is idle.
