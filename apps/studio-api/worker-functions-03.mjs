@@ -10,6 +10,7 @@ import {
   syncAllProfilesPipelineToSupabase,
   syncProfilePipelineToSupabase,
   syncAirtableOutputRowToSupabase,
+  stripDeletedDuplicateOutputRecords,
   STUDIO_SUPABASE_PIPELINE_READ_ROUTES,
   STUDIO_SUPABASE_PHASE4_READ_ROUTES,
   STUDIO_SUPABASE_READ_ROUTES,
@@ -1819,8 +1820,12 @@ export async function listOutputs(request, env, url, authorization, ctx = null) 
     profile,
     ttlMs: PIPELINE_OUTPUT_LIST_CACHE_MS,
     allowRefresh: url.searchParams.get("refresh") !== "0",
-    builder: () => buildPipelineOutputsPayload(env, profile, { limit, reviewOnly, ctx }),
-    decorate: (records) => overlayLiveTikTokPublishRows(env, records),
+    builder: async () => {
+      const payload = await buildPipelineOutputsPayload(env, profile, { limit, reviewOnly, ctx });
+      if (Array.isArray(payload?.records)) payload.records = stripDeletedDuplicateOutputRecords(payload.records);
+      return payload;
+    },
+    decorate: (records) => overlayLiveTikTokPublishRows(env, stripDeletedDuplicateOutputRecords(records)),
   });
 }
 

@@ -368,3 +368,6 @@ phase4-followup manual-post-link 2026-10-16T12:40:00Z worker 0.10.644-manual-pos
 # 2026-10-16 skip redundant automatic video AI frames and explicit-prompt theme calls
 phase5-writes 2026-10-16T14:35:00Z worker 0.10.645-supabase-phase5-writes (Airtable SoR write-through for Platform Outputs and Content Items; best-effort side-effect outbox)
 phase4-followup duplicate-skip 2026-10-16T16:50:00Z worker 0.10.646-duplicate-skip (skipped rendered packages leave Awaiting Approval; Factory delete removes the unpublished content package)
+
+# 2026-10-16 physically delete duplicate packages from the Pipeline read copy
+phase4-followup purge-deleted-duplicates 2026-10-16T19:15:00Z worker 0.10.647-purge-deleted-duplicates (delete Supabase rows and Pipeline snapshots for the removed Huntington, Downtown LA, Griffith, Brickell, Vizcaya, and Little Havana packages)

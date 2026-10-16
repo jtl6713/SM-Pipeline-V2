@@ -11,6 +11,7 @@ import {
   syncProfilePipelineToSupabase,
   syncAirtableOutputRowToSupabase,
   syncAirtableContentRowToSupabase,
+  purgeDeletedDuplicatePackages,
   enqueueStudioSideEffectOutbox,
   STUDIO_SUPABASE_PIPELINE_READ_ROUTES,
   STUDIO_SUPABASE_PHASE4_READ_ROUTES,
@@ -1035,7 +1036,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.646-duplicate-skip",
+          version: "0.10.647-purge-deleted-duplicates",
           studio_supabase_pipeline_reads_v1: true,
           studio_supabase_sync_gate_v1: true,
           studio_supabase_phase3_stable_v1: true,
@@ -2382,6 +2383,15 @@ export default {
         if (age > 10 * 60 * 1000) await refreshStudioProfilesOverviewSnapshot(env, null);
       } catch (error) {
         console.warn("profiles overview snapshot refresh failed", error);
+      }
+
+      try {
+        const purged = await purgeDeletedDuplicatePackages(env);
+        if (purged?.outputs || purged?.content || purged?.snapshots) {
+          console.log("purged deleted duplicate packages", purged);
+        }
+      } catch (error) {
+        console.warn("purge deleted duplicate packages failed", error);
       }
 
       if (!cadence.heavy) return;

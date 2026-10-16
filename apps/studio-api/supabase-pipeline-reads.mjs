@@ -1345,3 +1345,102 @@ export async function enqueueStudioSideEffectOutbox(env, entry) {
     return { ok: false, error: error instanceof Error ? error.message : String(error) };
   }
 }
+
+// These content packages were deleted from Airtable. Supabase and the Pipeline
+// R2 snapshot are read copies and do not drop a row just because Airtable did.
+const DELETED_DUPLICATE_OUTPUT_IDS = [
+  "recKihcIDRMvDub6c", "recXBDHnArAuMgUj1", "recLFFt4f8qff6BOX", "recgOAq8BEp2CKIdo", "recfluZUndAj5r1ba", "recfTLNJNxKnFVU7z",
+  "recCK6MIgH5kx1KmE", "recVjxZ2wGT4ifTjf", "recfmUJxEawPLQBu8", "recQqRR2KSvQSJp4X", "reczThEQbfzBozo55", "recf8NpYdYRk2EQ6U",
+  "recGZ604BJTbnnJkJ", "recLKy5NHNghaH8G0", "recaIvISU0njbjH0G", "recTi10DHWXL0KK4K", "recTfwH2D15rub7LG", "recsxyG5HgyKL9S6W",
+  "rec38nhz4IGlokqgr", "recfgWqYNzwGvMjlm", "reco5BavmXllNDc5G", "recBU6dwAYmuxZpf7", "recKxDSxjcZKoyvEs", "rec6FWq1NW3aa9XpM",
+  "recoKSLhTyIaPgymu", "recblcyAdbtlcWBBK", "rec4F5CmSiDOIp02Y", "recgaHRga6qY4cCRt", "rechZDpxCQDbP9KWC", "rec1Zd8rtNgz72Cxy",
+  "recQjraGKDD6iNWAY", "rech2slvGcpkmJWUq", "recnPx7lXDhAcJTLT", "recMqtyHSq8MBY2rL", "recU35gRmvlaQGlya", "recv1NsDvvmJNXanC",
+  "recYZNbabMilub5mF", "rec49sX2QgBdPqTNN", "rec3IPjG8LeSpJexp", "recXMcA1m4KrOmhfZ", "recj6zWOkdfRfDW4v", "recWmOYCFFbOHKcco",
+  "recs511XeOM4AcOkX", "recNw5kxIJxyiGuTy", "rec9cJlKkRzDzkTZS", "recBdfzeRqVXdbIzN", "recbXWqwPEsbMXdjf", "recCtBWHqkywb7jWy",
+  "rec3MR1yuUY6MkWcs", "recENnnUz0wdr2xN4", "recTfKL4GT8ZCfOgn", "rec5P4mpBfTM5vicf", "recLfQxAhgYcsmtRe", "reczAWhOErFDU8A5z",
+  "recaQo4mJ1ZCsesDj", "rec10FJKKG2Zzz8iN", "recpD2wqojtWOPa2Y", "recffWZOkKQP91f0u", "recPBXJpmUUKjzqvO", "recqaN5dEzyQEno9m",
+];
+const DELETED_DUPLICATE_CONTENT_IDS = [
+  "recWNbnAIsxpYNbkJ", "recM7FoAUXSUp5x8I", "recBjFgzASl88oxdS", "recyMKQJ8p53i1HOq", "recsgloGPGs0WWkNw",
+  "recFXZY3CThReGs3q", "recRds0IM5AzMDcEh", "recSTJQC2MirB2j4h", "recjNXj1zlrbvUde4", "recHyP32DgUw2ADl0",
+];
+const DELETED_DUPLICATE_REQUEST_IDS = [
+  "recNCfAJB3dcNDIsz", "reczwn80zAwOsHUJ2", "recU74F9geoinOC16", "recQUS78jC1jNvlbv", "recnKInuP4CeV3VIh",
+  "recugssggS2Zl4pwO", "reck4k0RS3PeXboFR", "recXyBDBS8SHurdi7", "rec5VJBUpT0MwWHLT", "recT5KhNgKWE2PwAW",
+];
+const DELETED_DUPLICATE_IDEA_IDS = [
+  "rec3MEcGx2f57CMjf", "recPxlSeI2GTSqQKN", "rectCnhidhH8Cpgxy", "recrJBlA3riWLsU4p", "recZ4YHN22cxgfbjq",
+  "recADH46vGkP4wmF0", "recUse7oQCD9RZ5Vf", "recEnznMatnL5Ucot", "recKNaLQpFwMeDjsk", "recG1wQIPE9hJDevc",
+];
+const DELETED_DUPLICATE_PROFILE_IDS = ["recF7UAn0LkMZZrWZ", "recpNlNn6U6eq0M9r"];
+const deletedDuplicateOutputIdSet = new Set(DELETED_DUPLICATE_OUTPUT_IDS);
+
+export function stripDeletedDuplicateOutputRecords(records) {
+  if (!Array.isArray(records) || !records.length) return records;
+  const next = records.filter((row) => !deletedDuplicateOutputIdSet.has(String(row?.id || "")));
+  return next.length === records.length ? records : next;
+}
+
+async function deleteSupabaseByAirtableIds(env, table, ids) {
+  const unique = [...new Set((ids || []).filter((id) => /^rec[A-Za-z0-9]{14}$/.test(String(id || ""))))];
+  let deleted = 0;
+  for (let index = 0; index < unique.length; index += 30) {
+    const batch = unique.slice(index, index + 30);
+    const rows = await supabaseRest(env, `${table}?airtable_record_id=in.(${batch.join(",")})`, {
+      method: "DELETE",
+      headers: { Prefer: "return=representation" },
+    });
+    deleted += Array.isArray(rows) ? rows.length : 0;
+  }
+  return deleted;
+}
+
+async function stripDeletedDuplicateSnapshots(env) {
+  if (!env?.STUDIO_MEDIA?.get || !env?.STUDIO_MEDIA?.put) return 0;
+  let touched = 0;
+  for (const profileId of DELETED_DUPLICATE_PROFILE_IDS) {
+    for (const suffix of ["250-full", "250-review"]) {
+      const snapshotKey = `studio/state/pipeline-list-${profileId}-${suffix}.json`;
+      try {
+        const object = await env.STUDIO_MEDIA.get(snapshotKey);
+        if (!object) continue;
+        const body = await object.json();
+        const records = body?.payload?.records;
+        if (!Array.isArray(records)) continue;
+        const next = stripDeletedDuplicateOutputRecords(records);
+        if (next === records) continue;
+        body.payload = { ...body.payload, records: next };
+        body.at = Date.now();
+        await env.STUDIO_MEDIA.put(snapshotKey, JSON.stringify(body), {
+          httpMetadata: { contentType: "application/json" },
+        });
+        touched += 1;
+      } catch (error) {
+        console.warn("purge duplicate snapshot strip failed", snapshotKey, error);
+      }
+    }
+  }
+  return touched;
+}
+
+export async function purgeDeletedDuplicatePackages(env) {
+  const result = { outputs: 0, requests: 0, ideas: 0, content: 0, snapshots: 0 };
+  if (studioSupabaseConfigured(env)) {
+    result.outputs = await deleteSupabaseByAirtableIds(env, "platform_outputs", DELETED_DUPLICATE_OUTPUT_IDS);
+    for (const [key, table, ids] of [
+      ["requests", "production_requests", DELETED_DUPLICATE_REQUEST_IDS],
+      ["ideas", "idea_candidates", DELETED_DUPLICATE_IDEA_IDS],
+      ["content", "content_items", DELETED_DUPLICATE_CONTENT_IDS],
+    ]) {
+      try {
+        result[key] = await deleteSupabaseByAirtableIds(env, table, ids);
+      } catch (error) {
+        result[`${key}_error`] = String(error?.message || error).slice(0, 180);
+      }
+    }
+  } else {
+    result.skipped = "supabase_not_configured";
+  }
+  result.snapshots = await stripDeletedDuplicateSnapshots(env);
+  return result;
+}

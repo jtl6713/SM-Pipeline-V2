@@ -20,6 +20,8 @@ import {
   syncAirtableContentRowToSupabase,
   syncProfilePipelineToSupabase,
   enqueueStudioSideEffectOutbox,
+  purgeDeletedDuplicatePackages,
+  stripDeletedDuplicateOutputRecords,
   STUDIO_SUPABASE_PIPELINE_READ_ROUTES,
   STUDIO_SUPABASE_PHASE4_READ_ROUTES,
   STUDIO_SUPABASE_READ_ROUTES,
@@ -230,7 +232,7 @@ test("supabaseRestAll pages past PostgREST max-rows so overview counts stay comp
 
 test("worker wires supabase phase4 reads behind the same flag", async () => {
   const worker = readStudioWorkerSource();
-  assert.match(worker, /version: "0.10.646-duplicate-skip"/);
+  assert.match(worker, /version: "0.10.647-purge-deleted-duplicates"/);
   assert.match(worker, /studio_supabase_pipeline_reads_v1: true/);
   assert.match(worker, /studio_supabase_phase3_stable_v1: true/);
   assert.match(worker, /studio_supabase_phase4_reads_v1: true/);
@@ -465,6 +467,49 @@ test("profile sync refreshes Supabase rows that left the Airtable open pack", as
     assert.equal(skipped.do_not_publish, true);
     assert.equal(skipped.publish_status, "Not Ready");
     assert.equal(skipped.scheduled_post_date, null);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("purge deletes the removed duplicate packages from Supabase and the Pipeline snapshot", async () => {
+  const calls = [];
+  const originalFetch = globalThis.fetch;
+  const stored = new Map();
+  stored.set("studio/state/pipeline-list-recF7UAn0LkMZZrWZ-250-full.json", JSON.stringify({
+    at: 1,
+    payload: { records: [{ id: "recKihcIDRMvDub6c", output_title: "Huntington Beach, California" }, { id: "recKeepOutput0001", output_title: "Tar Pits To LACMA" }] },
+  }));
+  globalThis.fetch = async (url, init) => {
+    calls.push({ method: init?.method || "GET", url: String(url) });
+    return { ok: true, async text() { return JSON.stringify([{ airtable_record_id: "gone" }]); } };
+  };
+  const env = {
+    SUPABASE_URL: "https://example.supabase.co",
+    SUPABASE_SERVICE_ROLE_KEY: "sb_secret_test",
+    STUDIO_MEDIA: {
+      async get(key) {
+        const text = stored.get(key);
+        return text ? { async json() { return JSON.parse(text); } } : null;
+      },
+      async put(key, body) { stored.set(key, body); },
+    },
+  };
+  try {
+    assert.deepEqual(
+      stripDeletedDuplicateOutputRecords([
+        { id: "recKihcIDRMvDub6c" },
+        { id: "recKeepOutput0001" },
+      ]).map((row) => row.id),
+      ["recKeepOutput0001"],
+    );
+    const result = await purgeDeletedDuplicatePackages(env);
+    assert.ok(result.outputs >= 1);
+    assert.ok(calls.some((call) => call.method === "DELETE" && call.url.includes("platform_outputs?airtable_record_id=in.(") && call.url.includes("recKihcIDRMvDub6c")));
+    assert.ok(calls.some((call) => call.method === "DELETE" && call.url.includes("content_items?airtable_record_id=in.(") && call.url.includes("recWNbnAIsxpYNbkJ")));
+    const snapshot = JSON.parse(stored.get("studio/state/pipeline-list-recF7UAn0LkMZZrWZ-250-full.json"));
+    assert.deepEqual(snapshot.payload.records.map((row) => row.id), ["recKeepOutput0001"]);
+    assert.equal(result.snapshots, 1);
   } finally {
     globalThis.fetch = originalFetch;
   }
