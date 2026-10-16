@@ -33,5 +33,5 @@ test("compact launcher remains single-column on narrow screens", () => {
 test("compact launcher uses a cache-busted Pages stylesheet and Pages build", () => {
   assert.match(html, /styles-phase7-0621\.css\?v=0.6.708-factory-batch-gated/);
   assert.match(html, /home-density-0517\.css\?v=0.6.708-factory-batch-gated/);
-  assert.match(html, /UI build 0.6.707/);
+  assert.match(html, /UI build 0.6.708/);
 });
