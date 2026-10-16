@@ -42,7 +42,7 @@ function extract(startMarker,endMarker){
 }
 const lookup=(record,key)=>record.fields[key];
 class HttpError extends Error { constructor(status,message){super(message);this.status=status} }
-const eligibleSource=extract("function studioOutputReadyForPublishApproval(", "function studioPipelineSettingsProfileRecord(");
+const eligibleSource=extract("function studioOutputReadyForPublishApproval(", "/*__STUDIO_WORKER_END:studioOutputReadyForPublishApproval__*/");
 const eligible=new Function("f","studioIsFinishedPassthrough","studioFinishedOriginKind","studioOutputIsNativePhoto",
  eligibleSource+"\nreturn studioOutputReadyForPublishApproval")(
  lookup,()=>false,()=>"",()=>false,
