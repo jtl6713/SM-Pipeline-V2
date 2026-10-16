@@ -1,6 +1,6 @@
 # Factory Batch Approval V2 — implementation and operational release gate
 
-Status: **WIP / DRAFT PR #786. DO NOT MERGE OR DEPLOY AS RELEASE-COMPLETE.**
+Status: **Release candidate in DRAFT PR #789. New multi-select batch approval POST is server-side gated off by default.**
 
 ## What this branch changes
 
@@ -80,4 +80,13 @@ The only linked Airtable content base is **the production Content Creator base**
 - **Quality Agent live inventory:** Verify signatures surface in its operator-facing alerts, not merely in the validated catalog and API status.
 - **Release:** Complete repository-wide Worker/UI version bump, run all CI checks, review rollback point, merge to main and deploy through controlled Cloudflare workflows. Do not ship based solely on synthetic approval data.
 
-**PR #786 stays draft until production-route acceptance and release gates are satisfied.**
+**PR #789 is the clean-main release candidate. Deploy only with batch approval disabled; do not activate real posting without controlled, explicitly authorized live test records.**
+
+## Controlled gated production release (2026-10-16)
+
+- **Clean main integration:** Release PR #789 (`release/factory-batch-v2-main-sync-20261016`) reapplies the Factory changes onto the latest main without replacing the newer duplicate-purge, Supabase and Factory worker changes.
+- **Version identifiers:** Studio UI `0.6.708-factory-batch-gated`; Worker `0.10.650-factory-batch-gated`.
+- **Feature flag:** `FACTORY_BATCH_APPROVALS_ENABLED` is checked by `POST /api/factory/approval-batches`; only the exact case-insensitive value `true` enables batch writes. Missing/false returns HTTP 503 before parsing the payload; legacy Pipeline single approval and Approve All are unaffected. The GET status endpoint exposes `approvals_enabled: false` so the UI disables new batch submission while showing history.
+- **Safe activation order:** deploy default-off Worker first; verify Worker health/version and GET Factory batch status; deploy new UI and verify live script version, Needs Eyes card rendering and disabled Submit; check no unexpected dispatches or R2 active jobs. When separately authorized, provision nonproduction writable test outputs and disable social-platform transport; perform the actual API POST staging exercise, then enable the flag only through a controlled release decision.
+- **Rollback:** disable/remove flag first (disables POST immediately upon Worker env redeploy); revert deployment through Cloudflare's verified last-active-version capture if needed. Do not delete existing queue ledgers or historical R2 state to roll back.
+- **Important:** the permanent release branch does not contain a developer backdoor to force approvals or bypass platform publishing safeguards.
