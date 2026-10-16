@@ -541,6 +541,83 @@ def _reuse_matching_frame(source: bytes, ratio: str, gravity: str) -> bytes | No
     return source
 
 
+def _find_persistent_variant(client: AirtableClient, row: dict) -> dict | None:
+    """Reuse a completed variant from an earlier batch only with strict provenance.
+
+    Airtable's transfer queue is persistent; do not add a second mutable cache.
+    Require the same immutable Drive source, source identity, recipe, settings,
+    and resolved brand profile to prevent stale or cross-brand watermarks.
+    """
+    fields = row.get("fields") or {}
+    source = str(fields.get("Source_Drive_File_ID") or "").strip()
+    ratio = str(fields.get("Aspect_Ratio") or "").strip()
+    identity = str(fields.get("Source_Asset_ID") or "").strip()
+    source_key = str(fields.get("Source_R2_Key") or "").strip()
+    if not source or not ratio or not (identity or source_key):
+        return None
+    try:
+        formula = (
+            'AND({Asset_Kind}="Platform Variant",{Transfer_Status}="Ready",'
+            f'{{Source_Drive_File_ID}}="{airtable_quote(source)}",'
+            f'{{Aspect_Ratio}}="{airtable_quote(ratio)}")'
+        )
+        candidates = client.list_records(MEDIA_TRANSFER_QUEUE_TABLE, formula=formula, max_records=100)
+        profile = _production_profile(client, fields)[0]
+        if not profile:
+            return None
+        for candidate in candidates:
+            other = candidate.get("fields") or {}
+            if candidate.get("id") == row.get("id") or not _row_has_authority(other):
+                continue
+            if str(other.get("Source_Asset_ID") or "").strip() != identity:
+                continue
+            if str(other.get("Source_R2_Key") or "").strip() != source_key:
+                continue
+            if str(other.get("Variant_Style") or "center").strip() != str(fields.get("Variant_Style") or "center").strip():
+                continue
+            if str(other.get("Source_Size_Bytes") or "") != str(fields.get("Source_Size_Bytes") or ""):
+                continue
+            # Old, unversioned variants cannot prove their transformation recipe.
+            if VARIANT_RECIPE_VERSION not in str(other.get("Target_File_Name") or ""):
+                continue
+            if _production_profile(client, other)[0] != profile:
+                continue
+            return candidate
+    except Exception:
+        # Cache misses must not interrupt the existing rendering path.
+        return None
+    return None
+
+
+def _apply_cached_variant(client: AirtableClient, row: dict, cached: dict) -> dict:
+    """Reuse finished Drive/media authority without double-watermarking it."""
+    fields = row.get("fields") or {}
+    prior = cached.get("fields") or {}
+    drive_id = str(prior.get("Drive_File_ID") or "").strip()
+    media_id = _media_asset_id(prior)
+    if not drive_id or not media_id:
+        raise ValueError("Incomplete cached variant authority")
+    client.update_record(MEDIA_TRANSFER_QUEUE_TABLE, row["id"], {
+        "Transfer_Status": "Ready",
+        "Drive_File_ID": drive_id,
+        "Drive_URL": prior.get("Drive_URL") or f"https://drive.google.com/file/d/{drive_id}/view",
+        "Media_Asset_Record_ID": media_id,
+        "Generated_Media_Asset": [media_id],
+        "Completed_At": _now_iso(),
+        "Error_Message": None,
+        "Preview_Status": "Pending",
+    })
+    return {
+        "route": "variant_persistent_cache_reuse",
+        "queue_record_id": row["id"],
+        "transfer_id": str(fields.get("Transfer_ID") or "").strip(),
+        "drive_file_id": drive_id,
+        "media_asset_id": media_id,
+        "recipe": VARIANT_RECIPE_VERSION,
+        "ratio": str(fields.get("Aspect_Ratio") or "").strip(),
+    }
+
+
 def _process_variant_pending(
     client: AirtableClient,
     drive: GoogleDriveClient,
@@ -571,6 +648,9 @@ def _process_variant_pending(
             "ratio": ratio,
         }
 
+    cached = _find_persistent_variant(client, row)
+    if cached:
+        return _apply_cached_variant(client, row, cached)
     _claim_row(client, record_id, fields)
     source_bytes, _ = drive.download_file(source_drive_id)
     source_ext = str(fields.get("Source_Extension") or "")
@@ -641,6 +721,18 @@ def process_variant_group(
         else:
             _claim_row(client, row["id"], fields)
 
+    # Persistent cross-batch lookup before any source download or variant call.
+    still_pending = []
+    for row in pending_rows:
+        cached = _find_persistent_variant(client, row)
+        if cached:
+            try:
+                results.append(_apply_cached_variant(client, row, cached))
+            except Exception:
+                still_pending.append(row)
+        else:
+            still_pending.append(row)
+    pending_rows = still_pending
     if not pending_rows:
         return results
 
