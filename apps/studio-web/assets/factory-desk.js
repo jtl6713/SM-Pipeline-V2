@@ -14,6 +14,7 @@
   };
   const FACTORY_SELECTION_KEY = "studio.factory.batch-selection.v1";
   const FACTORY_LAST_BATCH_KEY = "studio.factory.last-batch.v1";
+  const FACTORY_PENDING_REQUEST_KEY = "studio.factory.pending-approval-request.v1";
   try {
     const saved = JSON.parse(localStorage.getItem(FACTORY_SELECTION_KEY) || "[]");
     state.selectedOutputs = new Set(Array.isArray(saved)
@@ -328,8 +329,19 @@
     // Refuse to mix profiles rather than stamp an output in the wrong timezone.
     state.submittingBatch = true;
     updateFactoryBatchToolbar();
-    const requestId = (typeof window.crypto?.randomUUID === "function"
-      ? window.crypto.randomUUID() : `factory_${Date.now()}_${Math.random().toString(36).slice(2)}`).replace(/[^A-Za-z0-9_-]/g, "");
+    const selectionIds = ready.map((card) => card.id);
+    let pending = null;
+    try { pending = JSON.parse(localStorage.getItem(FACTORY_PENDING_REQUEST_KEY) || "null"); } catch {}
+    const reuseRequest = pending && pending.profile_id === profiles[0]
+      && JSON.stringify(pending.ids) === JSON.stringify(selectionIds)
+      && Date.now() - Number(pending.saved_ms || 0) < 24 * 60 * 60 * 1000;
+    const requestId = reuseRequest
+      ? pending.request_id
+      : (typeof window.crypto?.randomUUID === "function"
+        ? window.crypto.randomUUID() : `factory_${Date.now()}_${Math.random().toString(36).slice(2)}`).replace(/[^A-Za-z0-9_-]/g, "");
+    try { localStorage.setItem(FACTORY_PENDING_REQUEST_KEY, JSON.stringify({
+      request_id: requestId, profile_id: profiles[0], ids: selectionIds, saved_ms: Date.now(),
+    })); } catch {}
     try {
       const batch = await fetchJson("/api/factory/approval-batches", {
         method: "POST",
@@ -353,6 +365,7 @@
       }
       state.lastBatchProfile = profiles[0];
       try { localStorage.setItem(FACTORY_LAST_BATCH_KEY, JSON.stringify({ job_id: batch.job_id, profile_id: profiles[0] })); } catch {}
+      try { localStorage.removeItem(FACTORY_PENDING_REQUEST_KEY); } catch {}
       ready.forEach((card) => state.selectedOutputs.delete(card.id));
       saveFactorySelection();
       closeFactoryPreview();
