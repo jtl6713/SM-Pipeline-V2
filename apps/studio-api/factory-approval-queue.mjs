@@ -1,0 +1,331 @@
+/**
+ * Durable Factory approval batches: R2 CAS per request + a CAS profile mutex.
+ * Browser-independent: HTTP waitUntil starts work, cron reclaims pending jobs.
+ */
+export const FACTORY_BATCH_PREFIX = "studio/state/factory-approvals/v2";
+export const FACTORY_BATCH_LEASE_MS = 12 * 60 * 1000;
+const ID = /^rec[A-Za-z0-9]+$/;
+const RID = /^[A-Za-z0-9_-]{12,128}$/;
+const done = new Set(["approved", "already_satisfied", "failed"]);
+
+function assertBucket(bucket) {
+  if (!bucket?.put || !bucket?.get || !bucket?.list) throw Error("STUDIO_MEDIA R2 storage required");
+}
+export function factoryBatchKey(profileId, requestId) {
+  if (!ID.test(String(profileId || "")) || !RID.test(String(requestId || ""))) throw Error("Invalid batch identity");
+  return FACTORY_BATCH_PREFIX + "/jobs/" + profileId + "/" + requestId + ".json";
+}
+export function factoryBatchLockKey(profileId) {
+  if (!ID.test(String(profileId || ""))) throw Error("Invalid profile");
+  return FACTORY_BATCH_PREFIX + "/locks/" + profileId + ".json";
+}
+export function factoryBatchCounts(job) {
+  const items = Array.isArray(job?.items) ? job.items : [];
+  const result = { total: items.length, approved_count: 0, skipped_count: 0, failed_count: 0, pending_count: 0 };
+  for (const item of items) {
+    if (item.status === "approved") result.approved_count++;
+    else if (item.status === "already_satisfied") result.skipped_count++;
+    else if (item.status === "failed") result.failed_count++;
+    else result.pending_count++;
+  }
+  return { ...result, done_count: result.approved_count + result.skipped_count + result.failed_count };
+}
+export function factoryBatchSummary(job) {
+  if (!job) return { ok: true, batch: true, status: "idle", job_id: null, items: [] };
+  const counts = factoryBatchCounts(job);
+  return {
+    ok: true, batch: true, job_id: job.id, profile_id: job.profile_id,
+    request_id: job.request_id, created_at: job.created_at, updated_at: job.updated_at,
+    status: job.status, ...counts,
+    can_retry: counts.failed_count > 0 && ["completed", "failed"].includes(job.status),
+    items: job.items.map(item => ({
+      id: item.id, output_id: item.output_id, platform: item.platform,
+      format: item.format, status: item.status, error: item.error || null,
+    })),
+  };
+}
+export function factoryBatchBuild({ profileId, requestId, records, note = "", now = new Date().toISOString() }) {
+  factoryBatchKey(profileId, requestId);
+  if (!Array.isArray(records) || !records.length || records.length > 100) throw Error("Select 1–100 output records");
+  const seen = new Set(), items = [];
+  for (const record of records) {
+    const id = String(record?.id || "").trim();
+    if (!ID.test(id)) throw Error("Invalid output record ID");
+    if (seen.has(id)) continue;
+    seen.add(id);
+    items.push({
+      id, output_id: record.output_id || null, platform: record.platform || null,
+      format: record.format || null, status: "pending", error: null,
+      attempts: 0, next_attempt_ms: 0,
+    });
+  }
+  return {
+    schema: "studio.factory-batch.2", id: "fb_" + requestId, request_id: requestId,
+    profile_id: profileId, status: "queued", created_at: now, updated_at: now,
+    notes: String(note || "").slice(0, 3000), items,
+  };
+}
+async function get(bucket, key) {
+  const obj = await bucket.get(key);
+  return obj ? { value: JSON.parse(await obj.text()), etag: obj.etag } : null;
+}
+async function putAbsent(bucket, key, value) {
+  return bucket.put(key, JSON.stringify(value), {
+    onlyIf: new Headers({ "If-None-Match": "*" }),
+    httpMetadata: { contentType: "application/json" },
+  });
+}
+async function putMatch(bucket, key, value, etag) {
+  return bucket.put(key, JSON.stringify(value), {
+    onlyIf: { etagMatches: etag },
+    httpMetadata: { contentType: "application/json" },
+  });
+}
+async function cas(bucket, key, fn, max = 8) {
+  for (let i = 0; i < max; i++) {
+    const old = await get(bucket, key);
+    if (!old) throw Error("Factory batch record disappeared");
+    const next = fn(old.value);
+    if (!next) return old.value;
+    if (await putMatch(bucket, key, next, old.etag)) return next;
+  }
+  throw Error("Concurrent batch update; retry after reading current status");
+}
+export async function factoryBatchEnqueue(bucket, options) {
+  assertBucket(bucket);
+  const job = factoryBatchBuild(options);
+  const key = factoryBatchKey(job.profile_id, job.request_id);
+  const written = await putAbsent(bucket, key, job);
+  if (written) return { job, already_submitted: false };
+  const prior = await get(bucket, key);
+  if (!prior) throw Error("Submission still committing; inspect activity status");
+  const previousIds = prior.value.items.map(x => x.id).join(",");
+  if (previousIds !== job.items.map(x => x.id).join(",")) throw Error("request_id already bound to different outputs");
+  return { job: prior.value, already_submitted: true };
+}
+export async function factoryBatchRead(bucket, profileId, requestId) {
+  assertBucket(bucket);
+  return (await get(bucket, factoryBatchKey(profileId, requestId)))?.value || null;
+}
+export async function factoryBatchList(bucket, profileId, { limit = 40, maxScan = 2000 } = {}) {
+  assertBucket(bucket);
+  if (!ID.test(String(profileId || ""))) throw Error("Missing profile");
+  const prefix = FACTORY_BATCH_PREFIX + "/jobs/" + profileId + "/";
+  const meta = [];
+  let cursor;
+  do {
+    const page = await bucket.list({ prefix, limit: 1000, ...(cursor ? { cursor } : {}) });
+    meta.push(...(page.objects || []));
+    cursor = page.truncated ? page.cursor : null;
+  } while (cursor && meta.length < maxScan);
+  // R2 lists lexicographically by opaque request ID, NOT by recency.
+  // Compare object upload dates first to avoid showing a random historic job
+  // when more than one page of prior batches exists.
+  meta.sort((a, b) => new Date(b.uploaded || 0) - new Date(a.uploaded || 0));
+  const latest = meta.slice(0, Math.max(1, Math.min(limit, 40)));
+  const rows = await Promise.all(latest.map(row => get(bucket, row.key)));
+  return rows.filter(row => row?.value?.schema === "studio.factory-batch.2")
+    .map(row => row.value)
+    .sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at));
+}
+/**
+ * Durable rolling cron cursor. R2 lists jobs lexicographically, so scanning
+ * only the first 200 on every tick indefinitely starves later profile keys.
+ * This checkpoint makes progress through ALL pages across cron invocations.
+ * All writes use CAS so overlapping scheduled runs cannot corrupt the cursor.
+ * A full scan resets to the beginning so newly enqueued keys are discovered.
+ */
+export const FACTORY_BATCH_CRON_CURSOR_KEY = FACTORY_BATCH_PREFIX + "/cron/scan-v1.json";
+export async function factoryBatchCronScan(bucket, { maxScan = 200, pageSize = 100 } = {}) {
+  assertBucket(bucket);
+  const prefix = FACTORY_BATCH_PREFIX + "/jobs/";
+  const size = Math.max(1, Math.min(1000, Math.floor(pageSize)));
+  const budget = Math.max(1, Math.min(2000, Math.floor(maxScan)));
+  let checkpoint = await get(bucket, FACTORY_BATCH_CRON_CURSOR_KEY);
+  let cursor = checkpoint?.value?.cursor || undefined;
+  let scanned = 0;
+  const objects = [];
+  while (scanned < budget) {
+    const page = await bucket.list({
+      prefix,
+      limit: Math.min(size, budget - scanned),
+      ...(cursor ? { cursor } : {}),
+    });
+    const entries = page.objects || [];
+    objects.push(...entries);
+    scanned += entries.length;
+    if (!page.truncated) {
+      cursor = undefined;
+      break;
+    }
+    if (!page.cursor || page.cursor === cursor) {
+      throw Error("R2 factory batch listing did not advance its cursor");
+    }
+    cursor = page.cursor;
+  }
+  const next = { cursor: cursor || null, updated_at: new Date().toISOString() };
+  if (checkpoint) {
+    await cas(bucket, FACTORY_BATCH_CRON_CURSOR_KEY, () => next);
+  } else if (!await putAbsent(bucket, FACTORY_BATCH_CRON_CURSOR_KEY, next)) {
+    await cas(bucket, FACTORY_BATCH_CRON_CURSOR_KEY, () => next);
+  }
+  return { objects, scanned, wrapped: !cursor, next_cursor: cursor || null };
+}
+
+export async function factoryBatchLock(bucket, profileId, owner, nowMs, leaseMs = FACTORY_BATCH_LEASE_MS) {
+  const key = factoryBatchLockKey(profileId);
+  for (let i = 0; i < 8; i++) {
+    const old = await get(bucket, key);
+    if (old?.value?.owner && old.value.expires_ms > nowMs) return false;
+    const value = { owner, expires_ms: nowMs + leaseMs };
+    const result = old ? await putMatch(bucket, key, value, old.etag) : await putAbsent(bucket, key, value);
+    if (result) return true;
+  }
+  return false;
+}
+export async function factoryBatchUnlock(bucket, profileId, owner) {
+  await cas(bucket, factoryBatchLockKey(profileId), old => old.owner === owner
+    ? { owner: null, expires_ms: 0 } : null).catch(() => {});
+}
+export function factoryBatchFailure(error) {
+  const code = Number(error?.status || error?.statusCode || 0);
+  const message = String(error?.message || error || "Approval failed").slice(0, 450);
+  const waitRender = /rendering is incomplete|waiting in render queue|still rendering/i.test(message);
+  const transient = waitRender || [408, 429].includes(code) || code >= 500
+    || /timeout|rate limit|temporarily unavailable|network error/i.test(message);
+  return { message, transient, waitRender };
+}
+export async function factoryBatchDrain(bucket, options) {
+  assertBucket(bucket);
+  const { profileId, requestId, approve, maxItems = 6, maxElapsedMs = Infinity } = options;
+  const now = options.now || (() => Date.now());
+  const startedAt = now();
+  const owner = (options.makeOwner || (() => crypto.randomUUID()))();
+  const lock = await factoryBatchLock(bucket, profileId, owner, now());
+  if (!lock) return { claimed: false, job: await factoryBatchRead(bucket, profileId, requestId) };
+  let processed = 0, job;
+  const key = factoryBatchKey(profileId, requestId);
+  try {
+    job = await factoryBatchRead(bucket, profileId, requestId);
+    if (!job || ["completed", "failed"].includes(job.status)) return { claimed: true, processed, job };
+    // A lock expires after an interrupted worker. Always reread canonical output
+    // state in approve() before mutation on recovery.
+    const sorted = job.items.filter(x => !/story/i.test(String(x.format || "")))
+      .concat(job.items.filter(x => /story/i.test(String(x.format || ""))));
+    for (const item of sorted) {
+      // HTTP waitUntil has a bounded lifetime. Finish as many approvals as
+      // the budget allows rather than hard-stopping after only five.
+      // Remaining work stays durable for cron recovery after the client leaves.
+      if (processed >= maxItems || (processed > 0 && now() - startedAt >= maxElapsedMs)) break;
+      if (done.has(item.status) || item.next_attempt_ms > now()) continue;
+      const stamp = new Date(now()).toISOString();
+      job = await cas(bucket, key, value => ({
+        ...value, status: "running", updated_at: stamp,
+        items: value.items.map(row => row.id === item.id
+          ? { ...row, status: "processing", attempts: (row.attempts || 0) + 1, error: null }
+          : row),
+      }));
+      processed++;
+      let outcome;
+      try {
+        const result = await approve(item.id, job);
+        outcome = {
+          status: result?.already_approved || result?.already_published ? "already_satisfied" : "approved",
+          error: null, next_attempt_ms: 0,
+        };
+      } catch (error) {
+        const failure = factoryBatchFailure(error);
+        const attempts = job.items.find(x => x.id === item.id)?.attempts || 1;
+        outcome = {
+          status: failure.transient && (failure.waitRender || attempts < 5) ? "pending" : "failed",
+          error: failure.message,
+          next_attempt_ms: failure.transient
+            ? now() + (failure.waitRender ? 300000 : Math.min(600000, 30000 * Math.pow(2, attempts)))
+            : 0,
+        };
+      }
+      job = await cas(bucket, key, value => {
+        const updated = {
+          ...value, updated_at: new Date(now()).toISOString(),
+          items: value.items.map(row => row.id === item.id ? { ...row, ...outcome } : row),
+        };
+        const counts = factoryBatchCounts(updated);
+        updated.status = counts.pending_count ? "running"
+          : counts.failed_count && !counts.approved_count && !counts.skipped_count ? "failed" : "completed";
+        return updated;
+      });
+      // CAS heartbeat prevents a second worker from claiming this profile
+      // while the canonical approval function is running.
+      await cas(bucket, factoryBatchLockKey(profileId), value => value.owner === owner
+        ? { ...value, expires_ms: now() + FACTORY_BATCH_LEASE_MS }
+        : null);
+    }
+    return { claimed: true, processed, job };
+  } finally {
+    await factoryBatchUnlock(bucket, profileId, owner);
+  }
+}
+export async function factoryBatchRetry(bucket, profileId, requestId) {
+  assertBucket(bucket);
+  const key = factoryBatchKey(profileId, requestId);
+  return cas(bucket, key, job => {
+    if (["queued", "running"].includes(job.status)) return null;
+    if (!job.items.some(item => item.status === "failed")) return null;
+    return {
+      ...job, status: "queued", updated_at: new Date().toISOString(),
+      items: job.items.map(item => item.status === "failed"
+        ? { ...item, status: "pending", error: null, attempts: 0, next_attempt_ms: 0 }
+        : item),
+    };
+  });
+}
+
+/**
+ * Explicit Quality Agent batch signatures. These classify the authoritative
+ * stored item ledger; derived counters cannot disagree unless the stored
+ * snapshot contains contradictory legacy metadata.
+ */
+export function factoryBatchQualitySignals(job, nowMs = Date.now()) {
+  if (!job) return [];
+  const signals = [];
+  const counts = factoryBatchCounts(job);
+  const ids = job.items.map(item => item.id);
+  if (new Set(ids).size !== ids.length) {
+    signals.push({ code: "QA-FACTORY-BATCH-DUPLICATE-ITEM", safe_auto_recover: false,
+      detail: "Duplicate output IDs in batch ledger; prevent any further dispatch" });
+  }
+  if ((job.status === "completed" || job.status === "failed") && counts.pending_count) {
+    signals.push({ code: "QA-FACTORY-BATCH-STATE-MISMATCH", safe_auto_recover: true,
+      detail: "Terminal job still has pending/processing items" });
+  }
+  if ((job.status === "queued" || job.status === "running") && !counts.pending_count) {
+    signals.push({ code: "QA-FACTORY-BATCH-STATE-MISMATCH", safe_auto_recover: true,
+      detail: "Active job has only terminal items" });
+  }
+  const updated = Date.parse(job.updated_at || job.created_at || "");
+  if (counts.pending_count && updated && nowMs - updated > 20 * 60 * 1000) {
+    signals.push({ code: "QA-FACTORY-BATCH-STALLED", safe_auto_recover: true,
+      detail: "No durable batch progress for over 20 minutes; cron may reclaim expired lease" });
+  }
+  if (job.items.some(item => item.status === "pending" && Number(item.next_attempt_ms) > nowMs)) {
+    signals.push({ code: "QA-FACTORY-BATCH-TRANSIENT-WAIT", safe_auto_recover: true,
+      detail: "Transient item(s) are scheduled for bounded retry; do not dispatch before backoff expires" });
+  }
+  if (counts.failed_count) {
+    signals.push({ code: "QA-FACTORY-BATCH-FAILED-ITEM", safe_auto_recover: false,
+      detail: "Failed outputs require inspection or Retry Failed; never retry successful rows" });
+  }
+  return signals;
+}
+export async function factoryBatchReconcile(bucket, profileId, requestId) {
+  assertBucket(bucket);
+  const key = factoryBatchKey(profileId, requestId);
+  return cas(bucket, key, job => {
+    if (new Set(job.items.map(item => item.id)).size !== job.items.length) return null;
+    const counts = factoryBatchCounts(job);
+    const expected = counts.pending_count ? "running"
+      : counts.failed_count && !counts.approved_count && !counts.skipped_count ? "failed" : "completed";
+    if (job.status === expected || (job.status === "queued" && counts.pending_count)) return null;
+    return { ...job, status: expected, updated_at: new Date().toISOString() };
+  });
+}
