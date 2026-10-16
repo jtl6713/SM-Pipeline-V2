@@ -30,7 +30,7 @@ function scheduledBody() {
 }
 
 test("Worker health advertises airtable burn-kill cron build", () => {
-  assert.match(worker, /version: "0.10.647-purge-deleted-duplicates"/);
+  assert.match(worker, /version: "0.10.648-purge-deleted-duplicates"/);
   assert.match(worker, /studio_airtable_low_burn_cron_v1: true/);
   assert.match(worker, /studio_airtable_burn_kill_v1: true/);
   assert.match(worker, /studioCronAirtableCadence/);
@@ -64,6 +64,9 @@ test("scheduled skips cron while Airtable is cooling down", () => {
   assert.match(scheduled, /airtableCooldownWaitMs\(\)/);
   assert.match(scheduled, /coolMs > AIRTABLE_SLOT_FAIL_FAST_MS/);
   assert.match(scheduled, /cron skipped: Airtable cooling down/);
+  const purge = scheduled.indexOf("purgeDeletedDuplicatePackages");
+  const skip = scheduled.indexOf("cron skipped: Airtable cooling down");
+  assert.ok(purge >= 0 && skip > purge, "duplicate purge must run before an Airtable cooldown return");
 });
 
 test("light ticks only run publish/produce rescue; heavy owns platform heals", () => {

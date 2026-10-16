@@ -232,7 +232,7 @@ test("supabaseRestAll pages past PostgREST max-rows so overview counts stay comp
 
 test("worker wires supabase phase4 reads behind the same flag", async () => {
   const worker = readStudioWorkerSource();
-  assert.match(worker, /version: "0.10.647-purge-deleted-duplicates"/);
+  assert.match(worker, /version: "0.10.648-purge-deleted-duplicates"/);
   assert.match(worker, /studio_supabase_pipeline_reads_v1: true/);
   assert.match(worker, /studio_supabase_phase3_stable_v1: true/);
   assert.match(worker, /studio_supabase_phase4_reads_v1: true/);
@@ -500,6 +500,7 @@ test("purge deletes the removed duplicate packages from Supabase and the Pipelin
       stripDeletedDuplicateOutputRecords([
         { id: "recKihcIDRMvDub6c" },
         { id: "recKeepOutput0001" },
+        { id: "recMissedSibling0001", content_item_id: "recWNbnAIsxpYNbkJ" },
       ]).map((row) => row.id),
       ["recKeepOutput0001"],
     );

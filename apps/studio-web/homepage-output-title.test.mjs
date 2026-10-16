@@ -133,7 +133,9 @@ test("Home dashboard exposes only actionable counts and filtered destinations", 
   assert.doesNotMatch(app, /label: "Published"/);
   assert.match(app, /if \(filter === "attention" \|\| filter === "manual"\) return studio === "Manual Action Required"/);
   assert.match(app, /if \(filter === "failed"\) return state === "Failed"/);
-  assert.match(app, /if \(filter === "approval"\) \{\s*const approvalState = studio === "Ready for Review"/);
+  assert.match(app, /if \(filter === "approval"\) \{[\s\S]*?const approvalState = studio === "Ready for Review"/);
+  assert.match(app, /if \(record\?\.do_not_publish\) return false/);
+  assert.match(app, /outputStatus === "skipped" \|\| outputStatus === "cancelled" \|\| outputStatus === "rejected"/);
   assert.match(app, /const awaitingApprovalCount = outputs\.filter\(\(record\) => pipelineRecordMatchesFilter\(record, "approval"\)\)\.length/);
   assert.doesNotMatch(app, /filter === "approval"[^\n]*review_status[^\n]*Pending/);
   assert.doesNotMatch(app, /if \(filter === "approval"\) return creativeCanApproveForPublishing\(record\) && !pipelineRecordIsAzAutoQueue\(record\)/);

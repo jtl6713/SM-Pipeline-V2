@@ -1188,7 +1188,7 @@ export async function listOutputScheduleGrid(request, env, url, authorization) {
           ok: true,
           start: new Date(startMs).toISOString(),
           end: endIso,
-          records: grid.records,
+          records: stripDeletedDuplicateOutputRecords(grid.records),
           profile: mapStudioContentProfile(profile),
           read_source: "supabase",
         };
@@ -1221,7 +1221,7 @@ export async function listOutputScheduleGrid(request, env, url, authorization) {
     ok: true,
     start: new Date(startMs).toISOString(),
     end: endIso,
-    records: records.map((record) => {
+    records: stripDeletedDuplicateOutputRecords(records.map((record) => {
       const contentItemId = studioFirstLinkedId(f(record, "Content_Item"));
       const content = contentById.get(contentItemId);
       return {
@@ -1236,7 +1236,7 @@ export async function listOutputScheduleGrid(request, env, url, authorization) {
         publish_status: f(record, "Publish_Status"),
         output_status: f(record, "Output_Status"),
       };
-    }),
+    })),
     profile: mapStudioContentProfile(profile),
     read_source: "airtable",
   };
@@ -1765,7 +1765,7 @@ export async function listOutputs(request, env, url, authorization, ctx = null) 
           return respond(request, env, {
             ok: true,
             fresh: true,
-            records: await overlayLiveTikTokPublishRows(env, mapped),
+            records: await overlayLiveTikTokPublishRows(env, stripDeletedDuplicateOutputRecords(mapped)),
             profile: mapStudioContentProfile(profile),
             read_source: "supabase",
           });
@@ -1798,7 +1798,7 @@ export async function listOutputs(request, env, url, authorization, ctx = null) 
     return respond(request, env, {
       ok: true,
       fresh: true,
-      records: await overlayLiveTikTokPublishRows(env, mapped),
+      records: await overlayLiveTikTokPublishRows(env, stripDeletedDuplicateOutputRecords(mapped)),
       profile: mapStudioContentProfile(profile),
       read_source: "airtable",
     });

@@ -522,7 +522,7 @@ export async function listSupabasePipelineOutputs(env, { profileAirtableId, limi
     }
   }
   return {
-    records: flat.map(airtableShapedOutputFromSupabase),
+    records: stripDeletedDuplicateOutputRecords(flat.map(airtableShapedOutputFromSupabase)),
     contentByAirtableId,
     profileMissing: false,
   };
@@ -542,7 +542,7 @@ export async function listSupabaseScheduleGrid(env, { profileAirtableId, startIs
   const flat = (rows || []).map(flattenOutputRow);
   return {
     profileMissing: false,
-    records: flat.map((row) => ({
+    records: stripDeletedDuplicateOutputRecords(flat.map((row) => ({
       id: row.airtable_record_id,
       output_id: row.output_number,
       platform: row.platform,
@@ -553,7 +553,7 @@ export async function listSupabaseScheduleGrid(env, { profileAirtableId, startIs
       scheduled_post_date: row.scheduled_post_date,
       publish_status: row.publish_status,
       output_status: row.output_status,
-    })),
+    }))),
   };
 }
 
@@ -618,7 +618,7 @@ export async function listSupabaseContentItems(env, { profileAirtableId, limit =
   return {
     profileMissing: false,
     records: [...byId.values()].map(airtableShapedContentFromSupabase),
-    outputs: [...outputById.values()].map(airtableShapedOutputFromSupabase),
+    outputs: stripDeletedDuplicateOutputRecords([...outputById.values()].map(airtableShapedOutputFromSupabase)),
   };
 }
 
@@ -664,7 +664,7 @@ export async function listSupabaseOverviewPack(env, { profileAirtableIds = [], o
 
   return {
     profilesMissing: false,
-    outputs: (outputRows || []).map(flattenOutputRow).map(airtableShapedOutputFromSupabase),
+    outputs: stripDeletedDuplicateOutputRecords((outputRows || []).map(flattenOutputRow).map(airtableShapedOutputFromSupabase)),
     ideas: (ideaRows || []).map(flattenIdeaRow).map(airtableShapedIdeaFromSupabase),
     output_count: (outputRows || []).length,
     idea_count: (ideaRows || []).length,
@@ -1374,10 +1374,25 @@ const DELETED_DUPLICATE_IDEA_IDS = [
 ];
 const DELETED_DUPLICATE_PROFILE_IDS = ["recF7UAn0LkMZZrWZ", "recpNlNn6U6eq0M9r"];
 const deletedDuplicateOutputIdSet = new Set(DELETED_DUPLICATE_OUTPUT_IDS);
+const deletedDuplicateContentIdSet = new Set(DELETED_DUPLICATE_CONTENT_IDS);
+
+function firstLinkedId(value) {
+  return Array.isArray(value) && value.length ? String(value[0] || "") : "";
+}
 
 export function stripDeletedDuplicateOutputRecords(records) {
   if (!Array.isArray(records) || !records.length) return records;
-  const next = records.filter((row) => !deletedDuplicateOutputIdSet.has(String(row?.id || "")));
+  const next = records.filter((row) => {
+    if (deletedDuplicateOutputIdSet.has(String(row?.id || ""))) return false;
+    const contentId = String(
+      row?.content_item_id
+      || row?.content_item_airtable_id
+      || firstLinkedId(row?.content_item_links)
+      || firstLinkedId(row?.fields?.Content_Item)
+      || "",
+    );
+    return !deletedDuplicateContentIdSet.has(contentId);
+  });
   return next.length === records.length ? records : next;
 }
 
