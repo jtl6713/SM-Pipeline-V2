@@ -1,0 +1,9 @@
+{
+  "name": "factory-batch-acceptance-local-only",
+  "main": "factory-batch-acceptance-worker.mjs",
+  "compatibility_date": "2026-08-02",
+  "workers_dev": false,
+  "r2_buckets": [
+    { "binding": "STUDIO_MEDIA", "bucket_name": "factory-batch-disposable-test-only" }
+  ]
+}
