@@ -132,7 +132,16 @@ try {
  await page.goto(origin,{waitUntil:"domcontentloaded"});
  await page.waitForFunction(()=>window.StudioFactoryDesk&&typeof window.StudioFactoryDesk.load==="function");
  await page.evaluate(()=>{document.querySelector("#page-factory").classList.add("active")});
- await page.evaluate(()=>window.StudioFactoryDesk.load());
+ const firstResult=await page.evaluate(()=>window.StudioFactoryDesk.load());
+ const beforeBoxes=await page.locator('[data-factory-select-output]').count();
+ console.log("STAGING_UI_DIAGNOSTIC",JSON.stringify({
+   loaded:Boolean(firstResult),beforeBoxes,
+   status:await page.locator("#factoryDeskStatus").innerText(),
+   lanes:await page.locator("#factoryLaneNeedsEyes").count(),
+   factoryRoot:await page.locator("#page-factory").count(),
+   firstErrors:jsErrors.slice(0,4),
+   htmlExcerpt:(await page.locator("#factoryLaneNeedsEyes").innerHTML()).slice(0,500),
+ }));
  await page.locator('[data-factory-band-toggle]').first().click();
  assert.equal(await page.locator('[data-factory-select-output]').count(),20);
  const boxes=page.locator('[data-factory-select-output]');
