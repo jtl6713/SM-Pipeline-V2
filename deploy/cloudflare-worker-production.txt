@@ -328,3 +328,4 @@ Deploy scheduled overview and dispatch shared eligibility from main 3ed88f1 (202
 2026-10-15: Worker 0.10.623-failed-publish-selfheal. Heal live-Failed publishes, TTD0_ROUTE blank TikTok_Draft_Type, and Facebook Graph 368 rate-limit park; FBS3 reconcile honors Publish_Next_Retry_At.
 2026-10-16: Worker 0.10.624-fb-rate-limit-retry-pending. Paint Facebook Graph 368 / FBS3_RATE_LIMIT parks as Retry Pending in Pipeline (not Failed).
 phase4-reads 2026-10-16T01:47:22Z worker 0.10.625-supabase-phase4-reads
+2026-10-15: Regenerate reliability fix. Discover eligible schedule rows server-side, canonicalize platform names, reuse healthy in-flight jobs, supersede stale starts, and recover interrupted Processing slices.
