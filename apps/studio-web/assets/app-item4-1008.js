@@ -277,7 +277,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.702-schedule-regen-soft-lease";
+  const BUILD_ID = "item4-0.6.703-schedule-regen-empty-lane";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -19432,10 +19432,17 @@ function timedScriptAssetLabel(asset, index) {
   }
 
   function pipelineRegenOutputTypes(records) {
+    // Keep calendar regen on real publish lanes. Forwarding every distinct type
+    // (Video Draft, aliases, …) spawned dozens of empty combos and stuck Chicago.
+    const allow = new Set([
+      "reel", "story", "carousel", "short",
+      "multi-image post", "multi-photo", "single image", "single photo",
+      "slideshow video", "slideshow reel",
+    ]);
     const types = new Set();
     for (const record of records || []) {
       const type = String(record?.studio_output_type || record?.format || record?.output_type || "").trim();
-      if (type) types.add(type);
+      if (type && allow.has(type.toLowerCase())) types.add(type);
     }
     return [...types].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }));
   }
