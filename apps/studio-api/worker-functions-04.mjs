@@ -12116,7 +12116,7 @@ export async function factoryBatchCronResume(env, ctx = null) {
   const { objects } = await factoryBatchCronScan(env.STUDIO_MEDIA, { maxScan: 200 });
   let started = 0;
   for (const object of objects) {
-    const match = object.key.match(/\\/jobs\\/(rec[A-Za-z0-9]+)\\/([A-Za-z0-9_-]{12,128})\\.json$/);
+    const match = object.key.match(/\/jobs\/(rec[A-Za-z0-9]+)\/([A-Za-z0-9_-]{12,128})\.json$/);
     if (!match) continue;
     const job = await factoryBatchRead(env.STUDIO_MEDIA, match[1], match[2]);
     if (!job) continue;
