@@ -368,3 +368,4 @@ UI 0.6.607 hashtag mismatch warning only; approval no longer blocked.
 2026-10-15: UI 0.6.696-approve-binding-dirty. Redeploy Pages after custom-domain verify connection reset on #756.
 Redeploy Studio Pages from main 3ed88f1 alongside scheduled overview/dispatch backend (2026-10-15).
 2026-10-15: UI 0.6.697-schedule-regen-live. Keep calendar regeneration button busy through the durable job, scope it to the selected profile, retry slow status polls, and repaint the calendar after every completed slice.
+2026-10-15: Regenerate authoritative preview fix. Calendar regeneration no longer depends on the possibly partial Pipeline list; the Worker previews eligible posts for the selected profile/platforms and the UI cache-busts the oversized app bundle.
