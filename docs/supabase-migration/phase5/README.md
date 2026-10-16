@@ -19,7 +19,7 @@ Approve, schedule, publish-status, and heal paths already go through `airtableFe
 
 ## Side-effect outbox
 
-`docs/supabase-migration/phase5/003_side_effect_outbox.sql` defines `studio_side_effect_outbox`. The Worker inserts a small status snapshot after each mirrored row. If the table is not created yet, the insert is skipped (`PGRST205` / schema cache). Make and pipeline-runner still read Airtable. Nothing in this slice consumes the outbox.
+`docs/supabase-migration/phase5/003_side_effect_outbox.sql` defines `studio_side_effect_outbox`. The Worker inserts a small status snapshot after each mirrored row. If the table is not created yet, the insert is skipped (`PGRST205` / schema cache). Nothing in this slice reads that table. The pipeline runner still reads Airtable.
 
 ## Health
 
@@ -27,13 +27,21 @@ Approve, schedule, publish-status, and heal paths already go through `airtableFe
 
 `GET /api/ops/supabase/sync` includes `phase5_writes: "airtable_sor_write_through"` and `phase5_write_tables`.
 
+## Second half — pipeline runner
+
+The pipeline runner is the other writer. `AirtableClient` create, update, and atomic upsert of Platform Outputs and Content Items now mirror the Airtable response into Supabase when `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` are set on the runner. A Supabase error does not fail the Airtable write. Other tables are unchanged.
+
+`STUDIO_WRITE_SOURCE` stays `airtable`. Setting it to `supabase` makes those two tables commit to Supabase first and treats the Airtable update as a best-effort legacy export. Creates still go to Airtable first so Airtable can mint `rec` ids. Leave the flag on `airtable` until the runner host has the Supabase secrets and the project is on Pro. Pipeline-runner reads are still Airtable.
+
+`/health` on the runner reports `studio_write_source` and `supabase_pipeline_writes`.
+
 ## Still out of scope
 
-- Flipping writes off Airtable. The assessment gate (“no dual-write; Airtable becomes legacy export”) waits until Phase 3/4 reads stay clean and Make / pipeline-runner writes move.
+- Turning on `STUDIO_WRITE_SOURCE=supabase` in production. That is the legacy-export switch, and it stays off while reads in the runner still come from Airtable.
 - Deleting or stopping Airtable records.
 - Production Requests, media metadata, and cron as a write source of truth (Phase 6).
 - `resolveAuthorization` on Supabase user tables.
 
 ## Operator notes
 
-Keep `STUDIO_READ_SOURCE=supabase` with `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY`. Write-through runs whenever those secrets are set, including when reads are still on Airtable. Drive remains the media authority.
+Keep `STUDIO_READ_SOURCE=supabase` with `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` on the Worker. Put the same two secrets on the pipeline runner for its mirror to run. Leave `STUDIO_WRITE_SOURCE=airtable`. Drive remains the media authority.

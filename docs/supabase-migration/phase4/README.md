@@ -28,7 +28,7 @@ Heavy cron + `POST /api/ops/supabase/sync` now also upsert:
 
 - Keep `STUDIO_READ_SOURCE=supabase` and use Pipeline for a few days; flip to `airtable` if list/schedule look wrong.
 - Consider moving the Supabase project to **Pro** before treating this as a hard dependency.
-- Phase 5 write-through (Airtable still the write source of truth) is in `docs/supabase-migration/phase5/`. The legacy-export cutover stays gated until reads stay clean and Make / pipeline-runner move off Airtable.
+- Phase 5 write-through for the Worker and the pipeline runner is in `docs/supabase-migration/phase5/`. `STUDIO_WRITE_SOURCE` stays `airtable`. The legacy-export switch stays off while the runner still reads Airtable.
 
 ## Health / status
 
