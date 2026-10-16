@@ -16,7 +16,7 @@ test("typed library search is not idea-ranked", async () => {
   assert.match(app, /search is not limited to this idea/);
   assert.match(app, /\{ flat: operatorSearch \}/);
   assert.match(app, /\(operatorSearch \|\| quoted\.phrase\) \? \[\] : suggested/);
-  assert.match(worker, /0.10.644-manual-post-link/);
+  assert.match(worker, /0.10.645-supabase-phase5-writes/);
   assert.match(worker, /studio_idea_library_search_all_hits_v1: true/);
   assert.match(worker, /operator_search: operatorSearch/);
   assert.match(worker, /Typed search is operator choice only/);

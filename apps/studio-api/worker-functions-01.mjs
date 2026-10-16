@@ -11,6 +11,8 @@ import {
   syncAllProfilesPipelineToSupabase,
   syncProfilePipelineToSupabase,
   syncAirtableOutputRowToSupabase,
+  syncAirtableContentRowToSupabase,
+  enqueueStudioSideEffectOutbox,
   STUDIO_SUPABASE_PIPELINE_READ_ROUTES,
   STUDIO_SUPABASE_PHASE4_READ_ROUTES,
   STUDIO_SUPABASE_READ_ROUTES,
@@ -954,6 +956,85 @@ export async function studioSupabaseWriteThroughOutput(env, record, label = "out
   }
 }
 /*__STUDIO_WORKER_END:studioSupabaseWriteThroughOutput__*/
+
+export async function studioSupabaseWriteThroughContent(env, record, label = "content") {
+  if (!studioSupabaseConfigured(env) || !record?.id) return { skipped: true };
+  try {
+    const result = await syncAirtableContentRowToSupabase(env, record);
+    studioReadCacheDropPrefix("content-labels:");
+    studioReadCacheDropPrefix("content-list:");
+    return result;
+  } catch (error) {
+    console.warn(`supabase ${label} write-through failed`, record.id, error);
+    return { ok: false, error: error instanceof Error ? error.message : String(error) };
+  }
+}
+/*__STUDIO_WORKER_END:studioSupabaseWriteThroughContent__*/
+
+export function airtableWriteThroughRecords(body) {
+  if (Array.isArray(body?.records)) return body.records.filter((row) => row?.id);
+  if (body?.id && body?.fields && typeof body.fields === "object") return [body];
+  return [];
+}
+/*__STUDIO_WORKER_END:airtableWriteThroughRecords__*/
+
+/**
+ * Phase 5: after a successful Airtable PATCH/POST, mirror Output and Content
+ * Item rows into Supabase. Airtable remains write SoR. Failures are logged
+ * and do not fail the Airtable write. GET/HEAD/DELETE are ignored.
+ * A row is mirrored only when Airtable returned an identity field, so a
+ * partial body cannot blank the Supabase projection.
+ */
+export async function studioSupabaseWriteThroughAirtableMutation(env, tableId, method, body) {
+  const ready = (record, kind) => {
+    const fields = record?.fields;
+    if (!record?.id || !fields || typeof fields !== "object") return false;
+    if (kind === "output") return fields.Output_ID != null || fields.Platform != null;
+    return fields.Content_ID != null || fields.Content_Title != null || fields.Content_Status != null;
+  };
+  const snapshot = (record, kind) => {
+    const fields = record?.fields || {};
+    if (kind === "output") {
+      return {
+        output_status: fields.Output_Status ?? null,
+        publish_status: fields.Publish_Status ?? null,
+        review_status: fields.Review_Status ?? null,
+        render_status: fields.Render_Status ?? null,
+      };
+    }
+    return {
+      content_status: fields.Content_Status ?? null,
+      voiceover_status: fields.Voiceover_Status ?? null,
+    };
+  };
+  const verb = String(method || "GET").toUpperCase();
+  if (verb === "GET" || verb === "HEAD" || verb === "DELETE") return { skipped: true, reason: "read" };
+  if (!studioSupabaseConfigured(env)) return { skipped: true, reason: "supabase_not_configured" };
+  const table = String(tableId || "");
+  const kind = env?.AIRTABLE_OUTPUT_TABLE_ID && table === env.AIRTABLE_OUTPUT_TABLE_ID
+    ? "output"
+    : env?.AIRTABLE_CONTENT_TABLE_ID && table === env.AIRTABLE_CONTENT_TABLE_ID
+      ? "content"
+      : "";
+  if (!kind) return { skipped: true, reason: "table" };
+  const records = airtableWriteThroughRecords(body).filter((record) => ready(record, kind));
+  if (!records.length) return { skipped: true, reason: "no_records", kind };
+  const results = [];
+  for (const record of records) {
+    const synced = kind === "output"
+      ? await studioSupabaseWriteThroughOutput(env, record, "output")
+      : await studioSupabaseWriteThroughContent(env, record, "content");
+    const outbox = await enqueueStudioSideEffectOutbox(env, {
+      airtable_table: kind === "output" ? "platform_outputs" : "content_items",
+      airtable_record_id: record.id,
+      mutation: verb,
+      payload: snapshot(record, kind),
+    }).catch((error) => ({ ok: false, error: error instanceof Error ? error.message : String(error) }));
+    results.push({ id: record.id, synced, outbox });
+  }
+  return { ok: true, kind, count: results.length, results };
+}
+/*__STUDIO_WORKER_END:studioSupabaseWriteThroughAirtableMutation__*/
 
 export function studioInvalidateHotReads(env, tableId, method) {
   const verb = String(method || "GET").toUpperCase();
