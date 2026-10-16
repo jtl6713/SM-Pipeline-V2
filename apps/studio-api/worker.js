@@ -10,6 +10,8 @@ import {
   syncAllProfilesPipelineToSupabase,
   syncProfilePipelineToSupabase,
   syncAirtableOutputRowToSupabase,
+  syncAirtableContentRowToSupabase,
+  enqueueStudioSideEffectOutbox,
   STUDIO_SUPABASE_PIPELINE_READ_ROUTES,
   STUDIO_SUPABASE_PHASE4_READ_ROUTES,
   STUDIO_SUPABASE_READ_ROUTES,
@@ -503,6 +505,7 @@ import {
   studioHealIgCarouselChildVerificationRace,
   studioHealIgCarouselChildPollFailure,
   studioHealIgCarouselRateLimit,
+  studioSupabaseWriteThroughAirtableMutation,
 } from "./worker-functions-01.mjs";
 import {
   studioHealEscalatedProduce,
@@ -1032,13 +1035,14 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.644-manual-post-link",
+          version: "0.10.645-supabase-phase5-writes",
           studio_supabase_pipeline_reads_v1: true,
           studio_supabase_sync_gate_v1: true,
           studio_supabase_phase3_stable_v1: true,
           studio_supabase_phase4_reads_v1: true,
           studio_supabase_schedule_writethrough_v1: true,
           studio_supabase_approve_writethrough_v1: true,
+          studio_supabase_phase5_writes_v1: true,
           studio_read_source: studioReadSource(env),
           studio_supabase_configured: studioSupabaseConfigured(env),
           studio_supabase_read_routes: STUDIO_SUPABASE_READ_ROUTES,
@@ -2751,6 +2755,9 @@ function studioMarkMappedListDirty() {
 }
 
 /*__STUDIO_WORKER_EXTRACT:studioSupabaseWriteThroughOutput__*/
+/*__STUDIO_WORKER_EXTRACT:studioSupabaseWriteThroughContent__*/
+/*__STUDIO_WORKER_EXTRACT:airtableWriteThroughRecords__*/
+/*__STUDIO_WORKER_EXTRACT:studioSupabaseWriteThroughAirtableMutation__*/
 /*__STUDIO_WORKER_EXTRACT:studioInvalidateHotReads__*/
 /*__STUDIO_WORKER_EXTRACT:studioReadCoalesce__*/
 async function airtableFetch(env, tableId, pathOrParams = "", options = {}) {
@@ -2781,6 +2788,9 @@ async function airtableFetch(env, tableId, pathOrParams = "", options = {}) {
     const detail = [airtableType, airtableMessage].filter(Boolean).join(": ");
     throw new HttpError(response.status, detail ? `Airtable: ${detail}` : `Airtable request failed (${response.status})`);
   }
+  await studioSupabaseWriteThroughAirtableMutation(env, tableId, options?.method, body).catch((error) => {
+    console.warn("supabase airtable write-through failed", tableId, error);
+  });
   return body;
 }
 

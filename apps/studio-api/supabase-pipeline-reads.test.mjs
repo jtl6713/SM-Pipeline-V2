@@ -17,6 +17,8 @@ import {
   mapAirtableProductionRequestToSupabase,
   packOutputListFields,
   supabaseRestAll,
+  syncAirtableContentRowToSupabase,
+  enqueueStudioSideEffectOutbox,
   STUDIO_SUPABASE_PIPELINE_READ_ROUTES,
   STUDIO_SUPABASE_PHASE4_READ_ROUTES,
   STUDIO_SUPABASE_READ_ROUTES,
@@ -227,12 +229,18 @@ test("supabaseRestAll pages past PostgREST max-rows so overview counts stay comp
 
 test("worker wires supabase phase4 reads behind the same flag", async () => {
   const worker = readStudioWorkerSource();
-  assert.match(worker, /version: "0.10.644-manual-post-link"/);
+  assert.match(worker, /version: "0.10.645-supabase-phase5-writes"/);
   assert.match(worker, /studio_supabase_pipeline_reads_v1: true/);
   assert.match(worker, /studio_supabase_phase3_stable_v1: true/);
   assert.match(worker, /studio_supabase_phase4_reads_v1: true/);
   assert.match(worker, /studio_supabase_schedule_writethrough_v1: true/);
   assert.match(worker, /studio_supabase_approve_writethrough_v1: true/);
+  assert.match(worker, /studio_supabase_phase5_writes_v1: true/);
+  assert.match(worker, /studioSupabaseWriteThroughAirtableMutation/);
+  assert.match(worker, /syncAirtableContentRowToSupabase/);
+  assert.match(worker, /enqueueStudioSideEffectOutbox/);
+  assert.match(worker, /phase5_writes: "airtable_sor_write_through"/);
+  assert.match(worker, /supabase airtable write-through failed/);
   assert.match(worker, /from "\.\/supabase-pipeline-reads\.mjs"/);
   assert.match(worker, /listSupabaseContentItems/);
   assert.match(worker, /listSupabaseOverviewPack/);
@@ -267,4 +275,156 @@ test("phase4 docs exist", async () => {
   assert.match(readme, /GET \/api\/content/);
   assert.match(readme, /GET \/api\/profiles\/overview/);
   assert.match(readme, /GET \/api\/factory\/desk/);
+});
+
+const supabaseEnv = {
+  SUPABASE_URL: "https://example.supabase.co",
+  SUPABASE_SERVICE_ROLE_KEY: "sb_secret_test",
+  AIRTABLE_OUTPUT_TABLE_ID: "tblOutputs",
+  AIRTABLE_CONTENT_TABLE_ID: "tblContent",
+};
+
+test("phase 5 content write-through patches present columns when profile is unresolved", async () => {
+  const calls = [];
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (url, init) => {
+    calls.push({ url: String(url), method: init?.method || "GET", body: init?.body || "" });
+    return { ok: true, async text() { return ""; } };
+  };
+  try {
+    const result = await syncAirtableContentRowToSupabase(supabaseEnv, {
+      id: "recContent1",
+      fields: { Content_ID: 12, Content_Status: "Thumbnail Ready", Content_Title: "Pier" },
+    });
+    assert.equal(result.mode, "patch");
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].method, "PATCH");
+    assert.match(calls[0].url, /content_items\?airtable_record_id=eq\.recContent1/);
+    const body = JSON.parse(calls[0].body);
+    assert.equal(body.content_number, 12);
+    assert.equal(body.content_title, "Pier");
+    assert.equal(body.content_status, "Thumbnail Ready");
+    assert.equal(body.content_profile_id, undefined);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("phase 5 content write-through upserts when the profile uuid resolves", async () => {
+  const calls = [];
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (url, init) => {
+    calls.push({ url: String(url), method: init?.method || "GET", body: init?.body || "" });
+    if (String(url).includes("content_profiles")) {
+      return { ok: true, async text() { return JSON.stringify([{ id: "prof-uuid", airtable_record_id: "recProfile1" }]); } };
+    }
+    return { ok: true, async text() { return ""; } };
+  };
+  try {
+    const result = await syncAirtableContentRowToSupabase(supabaseEnv, {
+      id: "recContent2",
+      fields: {
+        Content_ID: 44,
+        Content_Title: "Walk",
+        Content_Status: "Ready",
+        Content_Profile: ["recProfile1"],
+      },
+    });
+    assert.equal(result.mode, "upsert");
+    const post = calls.find((call) => call.method === "POST" && call.url.includes("content_items"));
+    assert.ok(post);
+    const rows = JSON.parse(post.body);
+    assert.equal(rows[0].airtable_record_id, "recContent2");
+    assert.equal(rows[0].content_profile_id, "prof-uuid");
+    assert.equal(rows[0].content_number, 44);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("phase 5 outbox insert skips when the table is not created yet", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => ({
+    ok: false,
+    status: 404,
+    async text() {
+      return JSON.stringify({ code: "PGRST205", message: "Could not find the table 'public.studio_side_effect_outbox' in the schema cache" });
+    },
+  });
+  try {
+    const result = await enqueueStudioSideEffectOutbox(supabaseEnv, {
+      airtable_table: "platform_outputs",
+      airtable_record_id: "recOutput1",
+      mutation: "PATCH",
+      payload: { publish_status: "Scheduled" },
+    });
+    assert.equal(result.skipped, true);
+    assert.equal(result.reason, "outbox_table_missing");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("phase 5 airtable mutation mirrors an output PATCH and ignores GET", async () => {
+  const { studioSupabaseWriteThroughAirtableMutation } = await import("./worker-functions-01.mjs");
+  const calls = [];
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (url, init) => {
+    const href = String(url);
+    calls.push({ url: href, method: init?.method || "GET", body: init?.body || "" });
+    if (href.includes("content_profiles")) {
+      return { ok: true, async text() { return JSON.stringify([{ id: "prof-uuid" }]); } };
+    }
+    if (href.includes("studio_side_effect_outbox")) {
+      return {
+        ok: false,
+        status: 404,
+        async text() { return JSON.stringify({ code: "PGRST205", message: "schema cache" }); },
+      };
+    }
+    return { ok: true, async text() { return "[]"; } };
+  };
+  try {
+    const skipped = await studioSupabaseWriteThroughAirtableMutation(supabaseEnv, "tblOutputs", "GET", {
+      id: "recOutput1",
+      fields: { Output_ID: 9, Platform: "Instagram" },
+    });
+    assert.equal(skipped.reason, "read");
+    assert.equal(calls.length, 0);
+    const result = await studioSupabaseWriteThroughAirtableMutation(supabaseEnv, "tblOutputs", "PATCH", {
+      records: [{
+        id: "recOutput1",
+        fields: {
+          Output_ID: 9,
+          Platform: "Instagram",
+          Publish_Status: "Scheduled",
+          Content_Profile: ["recProfile1"],
+        },
+      }],
+    });
+    assert.equal(result.ok, true);
+    assert.equal(result.kind, "output");
+    assert.equal(result.count, 1);
+    assert.equal(result.results[0].outbox.reason, "outbox_table_missing");
+    assert.ok(calls.some((call) => call.method === "POST" && call.url.includes("platform_outputs")));
+    const incomplete = await studioSupabaseWriteThroughAirtableMutation(supabaseEnv, "tblOutputs", "PATCH", {
+      id: "recPartial",
+      fields: { Error_Message: "only a note" },
+    });
+    assert.equal(incomplete.reason, "no_records");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("phase5 docs keep Airtable as write source of truth", async () => {
+  const readme = await readFile(path.join(here, "../../docs/supabase-migration/phase5/README.md"), "utf8");
+  assert.match(readme, /Phase 5/);
+  assert.match(readme, /Airtable remains the write source of truth/);
+  assert.match(readme, /platform_outputs/);
+  assert.match(readme, /content_items/);
+  assert.match(readme, /studio_side_effect_outbox/);
+  assert.match(readme, /legacy export/);
+  const sql = await readFile(path.join(here, "../../docs/supabase-migration/phase5/003_side_effect_outbox.sql"), "utf8");
+  assert.match(sql, /create table if not exists studio_side_effect_outbox/);
 });

@@ -14,6 +14,12 @@
  * - GET /api/factory/desk (via operations-queue + idea candidates)
  * - GET /api/operations/queue (same output/request pack as Factory)
  *
+ * Phase 5 write-through (Airtable remains write SoR):
+ * - After a successful Airtable PATCH/POST on Platform Outputs or Content Items,
+ *   upsert the returned row into Supabase.
+ * - studio_side_effect_outbox inserts are best-effort and no-op when the table
+ *   is not created yet. Make and pipeline-runner still read Airtable.
+ *
  * Sync: heavy cron Airtable→Supabase upsert (studioSyncSupabasePipelineReads)
  * and POST/GET /api/ops/supabase/sync.
  *
@@ -1167,4 +1173,78 @@ export async function syncAirtableOutputRowToSupabase(env, record) {
   const row = mapAirtableOutputToSupabase(record, { profileUuid, contentUuidByAirtableId });
   await upsertChunk(env, "platform_outputs", [row]);
   return { ok: true, mode: "upsert" };
+}
+
+/**
+ * Write-through one Content Item. Airtable stays write SoR.
+ * Without a resolved profile uuid, patch columns that are present on the
+ * Airtable record so a partial body cannot blank content_profile_id.
+ */
+export async function syncAirtableContentRowToSupabase(env, record) {
+  if (!studioSupabaseConfigured(env)) return { skipped: true, reason: "supabase_not_configured" };
+  if (!record?.id) return { skipped: true, reason: "missing_record" };
+  const fields = record.fields || {};
+  const profileAirtableId = firstLink(fields.Content_Profile);
+  const profileUuid = profileAirtableId ? await resolveSupabaseProfileId(env, profileAirtableId) : null;
+  const canUpsert = Boolean(profileUuid) && (
+    fields.Content_ID != null || fields.Content_Status != null || fields.Content_Title != null
+  );
+  if (canUpsert) {
+    await upsertChunk(env, "content_items", [mapAirtableContentToSupabase(record, profileUuid)]);
+    return { ok: true, mode: "upsert" };
+  }
+
+  const patch = {};
+  if ("Content_ID" in fields) patch.content_number = fields.Content_ID ?? null;
+  if ("Content_Title" in fields) patch.content_title = fields.Content_Title || null;
+  if ("Content_Status" in fields) patch.content_status = selectName(fields.Content_Status);
+  if ("Primary_Location" in fields) patch.primary_location = fields.Primary_Location || null;
+  if ("Voiceover_Status" in fields) patch.voiceover_status = selectName(fields.Voiceover_Status);
+  if ("Thumbnail_URL" in fields) patch.thumbnail_url = fields.Thumbnail_URL || null;
+  if ("Created_At" in fields || record.createdTime) patch.created_at = fields.Created_At || record.createdTime || null;
+  if ("Content_ID" in fields) patch.extras = packContentExtras(fields);
+  if (!Object.keys(patch).length) return { skipped: true, reason: "empty_patch" };
+  await supabaseRest(
+    env,
+    `content_items?airtable_record_id=eq.${encodeURIComponent(record.id)}`,
+    {
+      method: "PATCH",
+      body: patch,
+      headers: { Prefer: "return=minimal" },
+    },
+  );
+  return { ok: true, mode: "patch" };
+}
+
+export function studioSideEffectOutboxMissing(error) {
+  const text = String(error?.message || error || "");
+  return /PGRST205|schema cache|does not exist|Could not find the table|404/.test(text);
+}
+
+/**
+ * Best-effort side-effect outbox. Missing table is a skip until
+ * docs/supabase-migration/phase5/003_side_effect_outbox.sql is applied.
+ * Make does not consume this table in Phase 5.
+ */
+export async function enqueueStudioSideEffectOutbox(env, entry) {
+  if (!studioSupabaseConfigured(env)) return { skipped: true, reason: "supabase_not_configured" };
+  const row = {
+    airtable_table: String(entry?.airtable_table || ""),
+    airtable_record_id: String(entry?.airtable_record_id || ""),
+    mutation: String(entry?.mutation || "PATCH"),
+    payload: entry?.payload && typeof entry.payload === "object" && !Array.isArray(entry.payload) ? entry.payload : {},
+    status: "pending",
+  };
+  if (!row.airtable_record_id || !row.airtable_table) return { skipped: true, reason: "missing_record" };
+  try {
+    await supabaseRest(env, "studio_side_effect_outbox", {
+      method: "POST",
+      body: [row],
+      headers: { Prefer: "return=minimal" },
+    });
+    return { ok: true };
+  } catch (error) {
+    if (studioSideEffectOutboxMissing(error)) return { skipped: true, reason: "outbox_table_missing" };
+    return { ok: false, error: error instanceof Error ? error.message : String(error) };
+  }
 }

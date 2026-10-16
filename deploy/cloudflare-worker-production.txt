@@ -366,3 +366,4 @@ phase4-followup tiktok-inbox-hold 2026-10-16T12:08:29Z worker 0.10.643-tiktok-in
 phase4-followup manual-post-link 2026-10-16T12:40:00Z worker 0.10.644-manual-post-link (clear Manual Action Required when a post URL is stored; show the post link on the thumbnail)
 
 # 2026-10-16 skip redundant automatic video AI frames and explicit-prompt theme calls
+phase5-writes 2026-10-16T14:35:00Z worker 0.10.645-supabase-phase5-writes (Airtable SoR write-through for Platform Outputs and Content Items; best-effort side-effect outbox)
