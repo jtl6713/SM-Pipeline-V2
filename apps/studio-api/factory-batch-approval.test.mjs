@@ -47,3 +47,16 @@ test("Factory status source restores last terminal job and rejects unnecessary r
   assert.match(worker, /studioResumeApproveAllJobs\(env, ctx\)/);
   assert.match(worker, /approveOutputRecordForPublishing\(env, record/);
 });
+
+test("new Factory batch POST is default-off until explicit rollout flag", () => {
+  assert.match(worker, /FACTORY_BATCH_APPROVALS_ENABLED/);
+  assert.match(worker, /Factory batch approvals are not enabled/);
+  const route = worker.indexOf("async function factoryBatchSubmitRoute(");
+  const flag = worker.indexOf("FACTORY_BATCH_APPROVALS_ENABLED", route);
+  const parse = worker.indexOf("request.json()", route);
+  assert.ok(route >= 0 && flag > route && parse > flag,
+    "Feature gate must reject writes before request processing");
+  const status = worker.indexOf("async function factoryBatchStatusRoute(");
+  assert.ok(status >= 0 && status < route,
+    "Status endpoint must remain independently readable");
+});
