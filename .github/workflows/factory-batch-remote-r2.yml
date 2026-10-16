@@ -41,6 +41,7 @@ jobs:
           curl -fsS "$API/versions/$VERSION" -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -o /tmp/factory-smoke-version.json
           BUCKET=$(jq -er '.result.resources.bindings[] | select(.name == "STUDIO_MEDIA") | (.bucket_name // .bucket)' /tmp/factory-smoke-version.json)
           test -n "$BUCKET"
+          export BUCKET
           echo "BUCKET=$BUCKET" >> "$GITHUB_ENV"
           python - <<'PY'
           import json,os
