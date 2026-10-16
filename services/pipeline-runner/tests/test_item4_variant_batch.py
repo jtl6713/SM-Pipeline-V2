@@ -83,3 +83,22 @@ def test_process_variant_group_downloads_once(monkeypatch):
     assert drive.downloads == 1
     assert drive.uploads == 3
     assert [row["ratio"] for row in results] == ["9:16", "4:5", "16:9"]
+
+
+def test_matching_production_jpeg_skips_variant_service(monkeypatch):
+    from item4.processor import _reuse_matching_frame
+    out = io.BytesIO()
+    Image.new("RGB", (1080, 1920), (12, 40, 80)).save(out, format="JPEG")
+    source = out.getvalue()
+    assert _reuse_matching_frame(source, "9:16", "center") == source
+    assert _reuse_matching_frame(source, "4:5", "center") is None
+    assert _reuse_matching_frame(source, "9:16", "focal:0.2,0.3") is None
+
+
+def test_nonproduction_frame_keeps_transform():
+    from item4.processor import _reuse_matching_frame
+    # Matching ratio alone is not enough: expected canonical dimensions,
+    # lettering/watermark composition and finalization must remain intact.
+    out = io.BytesIO()
+    Image.new("RGB", (540, 960)).save(out, format="JPEG")
+    assert _reuse_matching_frame(out.getvalue(), "9:16", "center") is None
