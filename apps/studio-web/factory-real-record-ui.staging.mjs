@@ -144,8 +144,14 @@ try {
  }));
  await page.locator('[data-factory-band-toggle]').first().click();
  assert.equal(await page.locator('[data-factory-select-output]').count(),20);
- const boxes=page.locator('[data-factory-select-output]');
- for(let i=0;i<20;i++) await boxes.nth(i).check();
+ const groups=page.locator('[data-factory-select-content]');
+ assert.equal(await groups.count(),9,"Nine real linked Content Items should be grouped");
+ for(let i=0;i<9;i++) await groups.nth(i).check();
+ assert.match(await page.locator("#factoryBatchSelectionCount").innerText(),/20 outputs selected/);
+ const firstOutput=page.locator('[data-factory-select-output]').first();
+ await firstOutput.uncheck();
+ assert.match(await page.locator("#factoryBatchSelectionCount").innerText(),/19 outputs selected/);
+ await firstOutput.check();
  assert.match(await page.locator("#factoryBatchSelectionCount").innerText(),/20 outputs selected/);
  await page.locator("#factoryBatchSubmit").click();
  await page.waitForFunction(()=>document.getElementById("factoryDeskStatus").textContent.includes("accepted"));
