@@ -7,11 +7,14 @@ import { fileURLToPath } from "node:url";
 import {
   SCHEDULE_REGEN_JOBS_SETTING,
   SCHEDULE_REGEN_STATUS,
+  SCHEDULE_REGEN_POSTS_PER_SLICE,
+  SCHEDULE_REGEN_MAX_SLICES_PER_DRAIN,
   buildScheduleRegenCombinations,
   canonicalizeScheduleRegenPlatform,
   createScheduleRegenJob,
   reclaimStaleScheduleRegenJob,
   scheduleRegenCandidateFilterFormula,
+  scheduleRegenComboHasRemainingPlan,
   scheduleRegenJobCounts,
   scheduleRegenJobIsStale,
   scheduleRegenProgressMessage,
@@ -93,11 +96,18 @@ test("stale Processing jobs can be reclaimed so regenerate is not stuck forever"
   });
   job.status = "running";
   job.combinations[0].status = SCHEDULE_REGEN_STATUS.PROCESSING;
+  job.combinations[0].plan = [{ id: "recA", iso: "2026-10-20T12:00:00.000Z" }, { id: "recB", iso: "2026-10-20T12:30:00.000Z" }];
+  job.combinations[0].completed_posts = 1;
   job.updated_at = new Date(Date.now() - 5 * 60 * 1000).toISOString();
   assert.equal(scheduleRegenJobIsStale(job), true);
+  assert.equal(scheduleRegenComboHasRemainingPlan(job.combinations[0]), true);
   const reclaimed = reclaimStaleScheduleRegenJob(job);
   assert.equal(reclaimed.combinations[0].status, SCHEDULE_REGEN_STATUS.PENDING);
+  assert.equal(reclaimed.combinations[0].completed_posts, 1);
+  assert.equal(reclaimed.combinations[0].plan.length, 2);
   assert.equal(reclaimed.cursor, 0);
+  assert.ok(SCHEDULE_REGEN_POSTS_PER_SLICE >= 5);
+  assert.ok(SCHEDULE_REGEN_MAX_SLICES_PER_DRAIN >= 2);
 });
 
 test("progress counts report actual combination completion", () => {
@@ -187,7 +197,12 @@ test("Worker and Pipeline wire durable schedule regeneration", () => {
   assert.match(worker, /forceFresh/);
   assert.match(worker, /fresh=1 \(UI during schedule regen\)/);
   assert.match(worker, /Content_Profile: \[profileStamp\]/);
-  assert.match(worker, /version: "0\.10\.631-schedule-regen-fresh"/);
+  assert.match(worker, /getScheduleRegenJobStatus\(request, env, authorization, ctx\)/);
+  assert.match(worker, /Never await a full combination on the status GET/);
+  assert.match(worker, /async function studioDrainScheduleRegenJob/);
+  assert.match(worker, /ctx\.waitUntil\(studioDrainScheduleRegenJob/);
+  assert.match(worker, /SCHEDULE_REGEN_POSTS_PER_SLICE/);
+  assert.match(worker, /version: "0\.10\.632-schedule-regen-waituntil"/);
   assert.match(app, /\/api\/outputs\/schedule-regen/);
   assert.match(app, /pathname === "\/api\/outputs\/schedule-regen"/);
   assert.match(app, /queuePipelineScheduleRegenPoll/);

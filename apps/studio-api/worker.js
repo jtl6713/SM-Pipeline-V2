@@ -335,6 +335,8 @@ import {
 } from "./mae-schedule.mjs";
 import {
   SCHEDULE_REGEN_JOBS_SETTING,
+  SCHEDULE_REGEN_POSTS_PER_SLICE,
+  SCHEDULE_REGEN_MAX_SLICES_PER_DRAIN,
   createScheduleRegenJob,
   emptyScheduleRegenJobStore,
   parseScheduleRegenJobStore,
@@ -347,6 +349,7 @@ import {
   canonicalizeScheduleRegenPlatform,
   scheduleRegenJobIsStale,
   reclaimStaleScheduleRegenJob,
+  scheduleRegenComboHasRemainingPlan,
   SCHEDULE_REGEN_STATUS,
 } from "./schedule-regen-batch.mjs";
 import {
@@ -1017,7 +1020,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.631-schedule-regen-fresh",
+          version: "0.10.632-schedule-regen-waituntil",
           studio_supabase_pipeline_reads_v1: true,
           studio_supabase_sync_gate_v1: true,
           studio_supabase_phase3_stable_v1: true,
@@ -2106,7 +2109,7 @@ export default {
       if (isScheduleRegenRoute) {
         requirePermission(authorization, "outputs_review");
         if (request.method === "GET") {
-          return getScheduleRegenJobStatus(request, env, authorization);
+          return getScheduleRegenJobStatus(request, env, authorization, ctx);
         }
         assertWriteRequest(request, env);
         return startScheduleRegenJob(request, env, authorization, ctx);
@@ -5206,6 +5209,7 @@ const STUDIO_OVERDUE_SCHEDULED_FORMULA = 'AND({Test_Run_ID}=BLANK(),{Do_Not_Publ
 /*__STUDIO_WORKER_EXTRACT:studioPutScheduleRegenJob__*/
 /*__STUDIO_WORKER_EXTRACT:studioNormalizeRegenFilters__*/
 /*__STUDIO_WORKER_EXTRACT:studioProcessScheduleRegenJobSlice__*/
+/*__STUDIO_WORKER_EXTRACT:studioDrainScheduleRegenJob__*/
 /*__STUDIO_WORKER_EXTRACT:startScheduleRegenJob__*/
 /*__STUDIO_WORKER_EXTRACT:getScheduleRegenJobStatus__*/
 /*__STUDIO_WORKER_EXTRACT:getStudioScheduleSettings__*/

@@ -35,13 +35,13 @@ test("outputPreview wires Render_Server_URL through the render-server accept hel
   assert.match(worker, /item4UrlIsRenderServerVideo\(href\)/);
   assert.match(worker, /f\(record, "Render_Server_URL"\)/);
   assert.match(worker, /studio_render_server_preview_v1: true/);
-  assert.match(worker, /version: "0.10.631-schedule-regen-fresh"/);
+  assert.match(worker, /version: "0.10.632-schedule-regen-waituntil"/);
   assert.match(worker, /previewSource = item4UrlIsRenderServerVideo\(studioPreviewUrl\)/);
   assert.match(worker, /"render-server-out"/);
 });
 
 test("Review Open rendered file prefers /api/outputs/:id/preview for finished video", () => {
-  assert.match(app, /BUILD_ID = "item4-0.6.699-schedule-regen-fresh"/);
+  assert.match(app, /BUILD_ID = "item4-0.6.700-schedule-regen-waituntil"/);
   const fn = app.match(/function phase6ReviewWatchUrl\(output = \{\}\) \{[\s\S]*?\n  \}/)?.[0] || "";
   assert.match(fn, /phase6OutputHasVideoFinal\(output\)/);
   assert.match(fn, /\/api\/outputs\/\$\{encodeURIComponent\(output\.id\)\}\/preview/);
