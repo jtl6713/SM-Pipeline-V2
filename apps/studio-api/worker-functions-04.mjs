@@ -1849,12 +1849,24 @@ export async function studioPutScheduleRegenJob(env, job) {
 }
 /*__STUDIO_WORKER_END:studioPutScheduleRegenJob__*/
 
+export const STUDIO_SCHEDULE_REGEN_STALE_MS = 3 * 60 * 1000;
+
+export function studioCanonicalRegenPlatform(value) {
+  const raw = String(value || "").trim();
+  const key = raw.toLowerCase().replace(/[^a-z]/g, "");
+  if (key === "instagram") return "Instagram";
+  if (key === "facebook") return "Facebook";
+  if (key === "tiktok") return "TikTok";
+  if (key === "youtube") return "YouTube";
+  return raw;
+}
+
 export function studioNormalizeRegenFilters(payload = {}) {
   const platforms = Array.isArray(payload.platforms)
-    ? payload.platforms.map((v) => String(v || "").trim()).filter(Boolean)
+    ? [...new Set(payload.platforms.map(studioCanonicalRegenPlatform).filter(Boolean))]
     : [];
   const outputTypes = Array.isArray(payload.output_types || payload.outputTypes)
-    ? (payload.output_types || payload.outputTypes).map((v) => String(v || "").trim()).filter(Boolean)
+    ? [...new Set((payload.output_types || payload.outputTypes).map((v) => String(v || "").trim()).filter(Boolean))]
     : [];
   const profiles = Array.isArray(payload.profiles)
     ? payload.profiles.map((row) => ({
@@ -1865,6 +1877,93 @@ export function studioNormalizeRegenFilters(payload = {}) {
   return { platforms, outputTypes, profiles };
 }
 /*__STUDIO_WORKER_END:studioNormalizeRegenFilters__*/
+
+export function studioScheduleRegenJobIsStale(job, nowMs = Date.now()) {
+  if (!job || !["queued", "running"].includes(String(job.status || ""))) return false;
+  const updatedMs = Date.parse(String(job.updated_at || job.created_at || ""));
+  return Number.isFinite(updatedMs) && nowMs - updatedMs > STUDIO_SCHEDULE_REGEN_STALE_MS;
+}
+
+export function studioRecoverStaleScheduleRegenJob(job) {
+  if (!job || typeof job !== "object") return job;
+  const combinations = Array.isArray(job.combinations)
+    ? job.combinations.map((row) => String(row?.status || "") === SCHEDULE_REGEN_STATUS.PROCESSING
+      ? { ...row, status: SCHEDULE_REGEN_STATUS.PENDING, error: "Recovered after an interrupted regeneration slice." }
+      : { ...row })
+    : [];
+  const nextPending = combinations.findIndex((row) => String(row?.status || "") === SCHEDULE_REGEN_STATUS.PENDING);
+  return {
+    ...job,
+    status: nextPending >= 0 ? "queued" : job.status,
+    cursor: nextPending >= 0 ? nextPending : Number(job.cursor || 0),
+    combinations,
+    updated_at: new Date().toISOString(),
+  };
+}
+
+export async function studioDiscoverScheduleRegenScope(env, profile, platforms, horizonDays) {
+  const nowMs = Date.now();
+  const canonicalPlatforms = [...new Set((platforms || []).map(studioCanonicalRegenPlatform).filter(Boolean))];
+  const wanted = new Set(canonicalPlatforms.map((value) => value.toLowerCase()));
+  if (!wanted.size) return { platforms: [], outputTypes: [], eligibleCount: 0, combinationCount: 0 };
+  const rows = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
+    limit: STUDIO_OCCUPIED_LIST_LIMIT,
+    sortField: "Scheduled_Post_Date",
+    sortDirection: "asc",
+    filterFormula: scheduleRegenCandidateFilterFormula({
+      nowMs,
+      horizonDays,
+      profileFormula: contentProfileFilterFormula(profile) || "",
+    }),
+    fields: [
+      "Platform",
+      "Scheduled_Post_Date",
+      "YouTube_Scheduled_Publish_At",
+      "Studio_Scheduled_At",
+      "Publish_Status",
+      "Studio_Output_Type",
+      "Format",
+      "Content_Profile",
+      "Published_At",
+      "Do_Not_Publish",
+      "Output_Status",
+      "Output_ID",
+    ],
+  });
+  const outputTypes = new Set();
+  const pairs = new Set();
+  let eligibleCount = 0;
+  const horizonMs = nowMs + maeNormalizeHorizonDays(horizonDays, MAE_SUGGEST_HORIZON_DAYS) * 24 * 60 * 60 * 1000;
+  for (const row of rows || []) {
+    if (!studioOccupiedRowMatchesProfile(row, profile)) continue;
+    const platform = studioCanonicalRegenPlatform(f(row, "Platform"));
+    if (!wanted.has(platform.toLowerCase())) continue;
+    if (Boolean(f(row, "Do_Not_Publish"))) continue;
+    const published = Boolean(String(f(row, "Published_At") || "").trim())
+      || String(f(row, "Publish_Status") || "").trim() === "Published"
+      || String(f(row, "Output_Status") || "").trim() === "Published";
+    if (published) continue;
+    const iso = String(
+      f(row, "Scheduled_Post_Date")
+      || f(row, "YouTube_Scheduled_Publish_At")
+      || f(row, "Studio_Scheduled_At")
+      || ""
+    ).trim();
+    const stamp = iso ? Date.parse(iso) : NaN;
+    if (iso && Number.isFinite(stamp) && (stamp <= nowMs || stamp > horizonMs)) continue;
+    const outputType = String(f(row, "Studio_Output_Type") || f(row, "Format") || "").trim();
+    if (!outputType) continue;
+    eligibleCount += 1;
+    outputTypes.add(outputType);
+    pairs.add(`${platform.toLowerCase()}::${outputType.toLowerCase()}`);
+  }
+  return {
+    platforms: canonicalPlatforms,
+    outputTypes: [...outputTypes],
+    eligibleCount,
+    combinationCount: pairs.size,
+  };
+}
 
 export async function studioProcessScheduleRegenJobSlice(env, jobId, options = {}) {
   let job = await studioGetScheduleRegenJob(env, jobId);
@@ -2064,34 +2163,64 @@ export async function studioProcessScheduleRegenJobSlice(env, jobId, options = {
 export async function startScheduleRegenJob(request, env, authorization, ctx = null) {
   const payload = await readJsonBody(request);
   const profile = await resolveWorkingContentProfile(env, authorization, requestedProfileId(new URL(request.url), payload));
-  const { platforms, outputTypes, profiles } = studioNormalizeRegenFilters(payload);
-  if (!platforms.length || !outputTypes.length) {
-    throw new HttpError(400, "Select at least one platform and one output type");
+  const normalized = studioNormalizeRegenFilters(payload);
+  if (!normalized.platforms.length) {
+    throw new HttpError(400, "Select at least one platform");
   }
   const horizonDays = maeNormalizeHorizonDays(
     payload.horizon_days ?? payload.horizonDays,
     await studioScheduleHorizonDays(env),
   );
+  const discovered = await studioDiscoverScheduleRegenScope(env, profile, normalized.platforms, horizonDays);
+  if (!discovered.eligibleCount || !discovered.outputTypes.length) {
+    return respond(request, env, {
+      ok: true,
+      status: "idle",
+      job_id: null,
+      eligible_count: 0,
+      output_types: [],
+      combination_count: 0,
+      message: `No unpublished future or unscheduled posts are eligible in the next ${horizonDays} days.`,
+    });
+  }
+
   const store = await studioLoadScheduleRegenJobStore(env);
   const scope = String(profile?.id || "_all");
   const activeId = store.active_by_scope[scope];
-  if (activeId && store.jobs[activeId] && ["queued", "running"].includes(store.jobs[activeId].status)) {
-    return respond(request, env, {
-      ok: false,
-      error: "A schedule regeneration job is already running for this profile",
-      job: summarizeScheduleRegenJob(store.jobs[activeId]),
-    }, 409);
+  const active = activeId ? store.jobs[activeId] : null;
+  if (active && ["queued", "running"].includes(active.status)) {
+    if (!studioScheduleRegenJobIsStale(active)) {
+      return respond(request, env, {
+        ok: true,
+        reused: true,
+        job: summarizeScheduleRegenJob(active),
+        message: scheduleRegenProgressMessage(active),
+      });
+    }
+    const staleJob = {
+      ...active,
+      status: "failed",
+      updated_at: new Date().toISOString(),
+      combinations: Array.isArray(active.combinations)
+        ? active.combinations.map((row) => String(row?.status || "") === SCHEDULE_REGEN_STATUS.PROCESSING
+          ? { ...row, status: SCHEDULE_REGEN_STATUS.FAILED, error: "Interrupted regeneration was superseded by a new request." }
+          : { ...row })
+        : [],
+    };
+    store.jobs[activeId] = staleJob;
+    delete store.active_by_scope[scope];
   }
-  const profileList = profiles.length
-    ? profiles
+
+  const profileList = normalized.profiles.length
+    ? normalized.profiles
     : [{ id: profile?.id || "", name: String(f(profile, "Name") || f(profile, "Profile_Name") || "").trim() }];
   const job = createScheduleRegenJob({
     profileId: profile?.id || "",
     profiles: profileList,
-    platforms,
-    outputTypes,
+    platforms: discovered.platforms,
+    outputTypes: discovered.outputTypes,
     horizonDays,
-    eligibleCount: Number(payload.eligible_count || payload.eligibleCount || 0) || 0,
+    eligibleCount: discovered.eligibleCount,
   });
   store.jobs[job.id] = job;
   store.active_by_scope[scope] = job.id;
@@ -2105,6 +2234,9 @@ export async function startScheduleRegenJob(request, env, authorization, ctx = n
   }
   return respond(request, env, {
     ok: true,
+    eligible_count: discovered.eligibleCount,
+    combination_count: discovered.combinationCount,
+    output_types: discovered.outputTypes,
     job: summarizeScheduleRegenJob(job),
     message: scheduleRegenProgressMessage(job),
   });
@@ -2113,8 +2245,30 @@ export async function startScheduleRegenJob(request, env, authorization, ctx = n
 
 export async function getScheduleRegenJobStatus(request, env, authorization) {
   const url = new URL(request.url);
-  const jobId = String(url.searchParams.get("job_id") || "").trim();
   const profile = await resolveWorkingContentProfile(env, authorization, requestedProfileId(url, null));
+
+  if (url.searchParams.get("preview") === "1") {
+    const platforms = String(url.searchParams.get("platforms") || "")
+      .split(",")
+      .map(studioCanonicalRegenPlatform)
+      .filter(Boolean);
+    const horizonDays = maeNormalizeHorizonDays(
+      url.searchParams.get("horizon_days") || url.searchParams.get("horizonDays"),
+      await studioScheduleHorizonDays(env),
+    );
+    const discovered = await studioDiscoverScheduleRegenScope(env, profile, platforms, horizonDays);
+    return respond(request, env, {
+      ok: true,
+      status: "preview",
+      eligible_count: discovered.eligibleCount,
+      output_types: discovered.outputTypes,
+      platforms: discovered.platforms,
+      combination_count: discovered.combinationCount,
+      horizon_days: horizonDays,
+    });
+  }
+
+  const jobId = String(url.searchParams.get("job_id") || "").trim();
   const store = await studioLoadScheduleRegenJobStore(env);
   let job = jobId ? store.jobs[jobId] : null;
   if (!job && profile?.id) {
@@ -2130,6 +2284,10 @@ export async function getScheduleRegenJobStatus(request, env, authorization) {
     });
   }
   if (job.status === "queued" || job.status === "running") {
+    if (studioScheduleRegenJobIsStale(job)) {
+      job = studioRecoverStaleScheduleRegenJob(job);
+      await studioPutScheduleRegenJob(env, job);
+    }
     const sliceAlreadyRunning = (job.combinations || []).some(
       (row) => String(row?.status || "") === SCHEDULE_REGEN_STATUS.PROCESSING,
     );
