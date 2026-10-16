@@ -12063,6 +12063,12 @@ export async function factoryBatchProcess(env, profileId, requestId, ctx = null)
 /*__STUDIO_WORKER_END:factoryBatchProcess__*/
 
 export async function factoryBatchSubmitRoute(request, env, authorization, ctx = null) {
+  // Release safety: a deployed Worker remains read-only for Factory batches
+  // until operators explicitly enable this independent feature flag. GET status
+  // and the legacy single-item approval routes are unaffected.
+  if (String(env?.FACTORY_BATCH_APPROVALS_ENABLED || "").toLowerCase() !== "true") {
+    throw new HttpError(503, "Factory batch approvals are not enabled. Existing single-item approvals remain available.");
+  }
   let payload;
   try { payload = await request.json(); } catch { throw new HttpError(400, "Invalid JSON"); }
   const profile = await resolveWorkingContentProfile(env, authorization, requestedProfileId(null, payload));
