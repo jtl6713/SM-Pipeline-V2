@@ -5339,11 +5339,15 @@ export async function generateItem4PreProductionAiMaster(request, env, url, auth
   if (!assetName) throw new HttpError(500, "Could not allocate the next Asset Manager name for this AI image");
 
   const pseudoParent = { fields: { Content_Title: context.title, Hook: context.title, Market_Name: context.market } };
+  // An explicit user image prompt is authoritative: do not spend another
+  // model call on slide themes that the prompt will override anyway.
   let themes = null;
-  try {
-    themes = await item4RequestAiSlideThemes(env, record, pseudoParent, 1);
-  } catch (error) {
-    console.warn("Studio pre-production AI theme generation failed", recordId, error);
+  if (!promptGuidance) {
+    try {
+      themes = await item4RequestAiSlideThemes(env, record, pseudoParent, 1);
+    } catch (error) {
+      console.warn("Studio pre-production AI theme generation failed", recordId, error);
+    }
   }
   const nextIndex = generated.length + 1;
   const caption = String(themes?.slides?.[0]?.caption || "").trim();
