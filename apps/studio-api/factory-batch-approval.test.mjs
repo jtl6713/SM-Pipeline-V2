@@ -60,3 +60,12 @@ test("new Factory batch POST is default-off until explicit rollout flag", () => 
   assert.ok(status >= 0 && status < route,
     "Status endpoint must remain independently readable");
 });
+
+test("rollout flag also prevents cron and background drain while disabled", () => {
+  const cron = worker.indexOf("async function factoryBatchCronResume(");
+  const drain = worker.indexOf("async function factoryBatchProcess(");
+  assert.ok(cron >= 0 && drain >= 0);
+  assert.match(worker.slice(cron, cron + 350), /FACTORY_BATCH_APPROVALS_ENABLED/);
+  assert.match(worker.slice(drain, drain + 350), /FACTORY_BATCH_APPROVALS_ENABLED/);
+  assert.match(worker, /approvals_enabled: String\(env\?\.FACTORY_BATCH_APPROVALS_ENABLED/);
+});
