@@ -28,6 +28,7 @@ const runtime = vm.runInNewContext(
     "function pipelineRecordIsAzAutoQueue() { return false; }",
     "function pipelineRecordIsScheduled() { return false; }",
     "function pipelineRecordMatchesColumnFilters() { return true; }",
+    appFunction("outputHasLivePostUrl"),
     appFunction("creativeIsPublished"),
     appFunction("pipelineIsRetryingRender"),
     appFunction("pipelineMixRerenderInProgress"),

@@ -131,7 +131,7 @@ test("Home dashboard exposes only actionable counts and filtered destinations", 
   assert.doesNotMatch(app, /label: "Platform outputs"/);
   assert.doesNotMatch(app, /label: "Active outputs"/);
   assert.doesNotMatch(app, /label: "Published"/);
-  assert.match(app, /if \(filter === "manual"\) return state === "Manual Action Required"/);
+  assert.match(app, /if \(filter === "attention" \|\| filter === "manual"\) return studio === "Manual Action Required"/);
   assert.match(app, /if \(filter === "failed"\) return state === "Failed"/);
   assert.match(app, /if \(filter === "approval"\) \{\s*const approvalState = studio === "Ready for Review"/);
   assert.match(app, /const awaitingApprovalCount = outputs\.filter\(\(record\) => pipelineRecordMatchesFilter\(record, "approval"\)\)\.length/);

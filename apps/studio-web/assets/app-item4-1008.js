@@ -16991,8 +16991,9 @@ function timedScriptAssetLabel(asset, index) {
     const output = String(record?.output_status || "").trim().toLowerCase();
     const draft = String(record?.tiktok_draft_status || "").trim().toLowerCase();
     if (publish === "published" || output === "published" || draft === "published") return false;
-    // A saved public URL means the operator already finished manual entry
-    // (Output 2631, Tram Ride Over East River). Do not ask for it again.
+    // A saved public URL means the operator already finished manual entry.
+    // Tram Ride Over East River, Wynwood Wall Pockets, and Art Deco Clues
+    // all show Open TikTok while the card still asked for a URL.
     if (/^https?:\/\//i.test(tiktokLiveUrl(record))) return false;
     const manual = String(record?.manual_completion_status || "").trim().toLowerCase();
     const studio = String(record?.studio_state || pipelineStudioStateLabel(record) || "").trim().toLowerCase();
