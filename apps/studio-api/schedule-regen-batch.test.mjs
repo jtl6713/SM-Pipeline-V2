@@ -8,6 +8,7 @@ import {
   SCHEDULE_REGEN_JOBS_SETTING,
   SCHEDULE_REGEN_STATUS,
   SCHEDULE_REGEN_POSTS_PER_SLICE,
+  SCHEDULE_REGEN_PLAN_SLOTS_PER_SLICE,
   SCHEDULE_REGEN_MAX_SLICES_PER_DRAIN,
   buildScheduleRegenCombinations,
   canonicalizeScheduleRegenPlatform,
@@ -15,6 +16,8 @@ import {
   reclaimStaleScheduleRegenJob,
   scheduleRegenCandidateFilterFormula,
   scheduleRegenComboHasRemainingPlan,
+  scheduleRegenComboPlanComplete,
+  scheduleRegenComboNeedsPlanning,
   scheduleRegenComboNeedsWork,
   scheduleRegenComboIsOrphanProcessing,
   scheduleRegenJobCounts,
@@ -98,26 +101,39 @@ test("stale Processing jobs can be reclaimed so regenerate is not stuck forever"
   });
   job.status = "running";
   job.combinations[0].status = SCHEDULE_REGEN_STATUS.PROCESSING;
+  job.combinations[0].total_posts = 2;
   job.combinations[0].plan = [{ id: "recA", iso: "2026-10-20T12:00:00.000Z" }, { id: "recB", iso: "2026-10-20T12:30:00.000Z" }];
   job.combinations[0].completed_posts = 1;
   job.updated_at = new Date(Date.now() - 5 * 60 * 1000).toISOString();
   assert.equal(scheduleRegenJobIsStale(job), true);
+  assert.equal(scheduleRegenComboPlanComplete(job.combinations[0]), true);
   assert.equal(scheduleRegenComboHasRemainingPlan(job.combinations[0]), true);
   assert.equal(scheduleRegenComboNeedsWork(job.combinations[0]), true);
   assert.equal(scheduleRegenComboIsOrphanProcessing(job.combinations[0]), false);
   const orphan = {
     ...job.combinations[0],
     plan: [],
+    eligible_ids: [],
     completed_posts: 0,
+    total_posts: 0,
   };
   assert.equal(scheduleRegenComboIsOrphanProcessing(orphan), true);
   assert.equal(scheduleRegenComboNeedsWork(orphan), true);
+  const checkpoint = {
+    ...orphan,
+    total_posts: 57,
+    eligible_ids: Array.from({ length: 57 }, (_, i) => `rec${i}`),
+    plan: [{ id: "rec0", iso: "2026-10-20T12:00:00.000Z" }],
+  };
+  assert.equal(scheduleRegenComboNeedsPlanning(checkpoint), true);
+  assert.equal(scheduleRegenComboIsOrphanProcessing(checkpoint), false);
   const reclaimed = reclaimStaleScheduleRegenJob(job);
   assert.equal(reclaimed.combinations[0].status, SCHEDULE_REGEN_STATUS.PENDING);
   assert.equal(reclaimed.combinations[0].completed_posts, 1);
   assert.equal(reclaimed.combinations[0].plan.length, 2);
   assert.equal(reclaimed.cursor, 0);
   assert.ok(SCHEDULE_REGEN_POSTS_PER_SLICE >= 5);
+  assert.ok(SCHEDULE_REGEN_PLAN_SLOTS_PER_SLICE >= 5);
   assert.ok(SCHEDULE_REGEN_MAX_SLICES_PER_DRAIN >= 2);
 });
 
@@ -199,7 +215,9 @@ test("Worker and Pipeline wire durable schedule regeneration", () => {
   assert.match(worker, /maeScheduleNextSlot/);
   assert.match(worker, /studioLoadOccupiedScheduleRows/);
   assert.match(worker, /platformProtectedTimes/);
-  assert.match(worker, /unsettledPlatformTypes/);
+  assert.match(worker, /eligible_ids/);
+  assert.match(worker, /Checkpoint before MAE/);
+  assert.match(worker, /SCHEDULE_REGEN_PLAN_SLOTS_PER_SLICE/);
   assert.match(worker, /platformOccupiedMs:\s*reservedPlatform/);
   assert.match(worker, /schedule-regen-jobs-v1\.json/);
   assert.match(worker, /preferScheduleRegenJobStore/);
@@ -215,8 +233,8 @@ test("Worker and Pipeline wire durable schedule regeneration", () => {
   assert.match(worker, /SCHEDULE_REGEN_POSTS_PER_SLICE/);
   assert.match(worker, /scheduleRegenComboIsOrphanProcessing/);
   assert.match(worker, /placed_isos/);
-  assert.match(worker, /Orphan Processing \(no plan\)/);
-  assert.match(worker, /version: "0\.10\.633-schedule-regen-story-drain"/);
+  assert.match(worker, /Orphan Processing \(no plan/);
+  assert.match(worker, /version: "0\.10\.634-schedule-regen-plan-persist"/);
   assert.match(app, /\/api\/outputs\/schedule-regen/);
   assert.match(app, /pathname === "\/api\/outputs\/schedule-regen"/);
   assert.match(app, /queuePipelineScheduleRegenPoll/);

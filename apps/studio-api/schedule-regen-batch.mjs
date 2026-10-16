@@ -10,8 +10,10 @@ export const SCHEDULE_REGEN_MAX_TERMINAL_JOBS = 3;
 export const SCHEDULE_REGEN_STALE_PROCESSING_MS = 45 * 1000;
 /** Max Airtable/Supabase schedule writes per Worker slice so a 50+ Story lane cannot hang Regenerating… forever. */
 export const SCHEDULE_REGEN_POSTS_PER_SLICE = 10;
+/** Max MAE plan slots to compute per slice before persisting (plan must finish before apply). */
+export const SCHEDULE_REGEN_PLAN_SLOTS_PER_SLICE = 15;
 /** Max slices to chain inside one waitUntil / drain invocation. */
-export const SCHEDULE_REGEN_MAX_SLICES_PER_DRAIN = 6;
+export const SCHEDULE_REGEN_MAX_SLICES_PER_DRAIN = 8;
 
 const CANONICAL_PLATFORMS = Object.freeze({
   instagram: "Instagram",
@@ -240,12 +242,34 @@ export function scheduleRegenJobIsStale(job, nowMs = Date.now(), staleMs = SCHED
   return false;
 }
 
-/** True when a combination still has planned posts left to stamp. */
-export function scheduleRegenComboHasRemainingPlan(combo) {
+/** True when MAE has assigned an iso for every eligible post. */
+export function scheduleRegenComboPlanComplete(combo) {
   if (!combo || typeof combo !== "object") return false;
+  const total = Math.max(0, Number(combo.total_posts) || 0);
+  const planLen = Array.isArray(combo.plan) ? combo.plan.length : 0;
+  return total > 0 && planLen >= total;
+}
+
+/** True when a finished plan still has posts left to stamp in Airtable. */
+export function scheduleRegenComboHasRemainingPlan(combo) {
+  if (!scheduleRegenComboPlanComplete(combo)) return false;
   const plan = Array.isArray(combo.plan) ? combo.plan : [];
   const done = Math.max(0, Number(combo.completed_posts) || 0);
-  return plan.length > 0 && done < plan.length;
+  return done < plan.length;
+}
+
+/** True when eligible ids exist but the MAE plan is still incomplete. */
+export function scheduleRegenComboNeedsPlanning(combo) {
+  if (!combo || typeof combo !== "object") return false;
+  const status = String(combo.status || "");
+  if (status !== SCHEDULE_REGEN_STATUS.PENDING && status !== SCHEDULE_REGEN_STATUS.PROCESSING) {
+    return false;
+  }
+  if (scheduleRegenComboPlanComplete(combo)) return false;
+  const eligible = Array.isArray(combo.eligible_ids) ? combo.eligible_ids : [];
+  const total = Math.max(0, Number(combo.total_posts) || 0);
+  if (eligible.length > 0 && total > 0) return true;
+  return status === SCHEDULE_REGEN_STATUS.PENDING || status === SCHEDULE_REGEN_STATUS.PROCESSING;
 }
 
 /**
@@ -256,13 +280,21 @@ export function scheduleRegenComboNeedsWork(combo) {
   const status = String(combo?.status || "");
   if (status === SCHEDULE_REGEN_STATUS.PENDING) return true;
   if (status !== SCHEDULE_REGEN_STATUS.PROCESSING) return false;
-  return true;
+  return scheduleRegenComboNeedsPlanning(combo) || scheduleRegenComboHasRemainingPlan(combo);
 }
 
-/** Processing with no durable plan is an orphan crash, not an in-flight slice. */
+/**
+ * Processing with no durable plan/checkpoint is an orphan crash.
+ * Mid-planning (eligible_ids present) is not an orphan — the next slice continues.
+ */
 export function scheduleRegenComboIsOrphanProcessing(combo) {
-  return String(combo?.status || "") === SCHEDULE_REGEN_STATUS.PROCESSING
-    && !scheduleRegenComboHasRemainingPlan(combo);
+  if (String(combo?.status || "") !== SCHEDULE_REGEN_STATUS.PROCESSING) return false;
+  if (scheduleRegenComboHasRemainingPlan(combo)) return false;
+  if (scheduleRegenComboNeedsPlanning(combo)) {
+    const eligible = Array.isArray(combo.eligible_ids) ? combo.eligible_ids : [];
+    if (eligible.length > 0) return false;
+  }
+  return true;
 }
 
 /** Reset crashed Processing combos so a later slice can finish them (keep plan progress). */
