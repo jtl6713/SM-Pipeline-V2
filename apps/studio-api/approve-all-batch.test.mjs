@@ -151,7 +151,7 @@ test("approve-all store stays under Airtable Setting_Value budget", () => {
 test("worker exposes durable approve-all batch routes and cron resume", () => {
   assert.match(worker, /from "\.\/approve-all-batch\.mjs"/);
   assert.match(worker, /studio_approve_all_batch_v1:\s*true/);
-  assert.match(worker, /0.10.639-schedule-regen-cron/);
+  assert.match(worker, /0.10.640-schedule-regen-serialize/);
   assert.match(worker, /async function studioFetchApproveAllRecordsByIds/);
   assert.match(worker, /async function studioProcessApproveAllJobSlice/);
   assert.match(worker, /skipOccupancyRefresh: true/);

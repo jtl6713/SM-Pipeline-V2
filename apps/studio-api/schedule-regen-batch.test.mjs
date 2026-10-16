@@ -278,10 +278,13 @@ test("Worker and Pipeline wire durable schedule regeneration", () => {
   assert.match(worker, /leasedProcessing/);
   assert.match(worker, /SCHEDULE_REGEN_LIVE_LEASE_MS/);
   assert.match(worker, /softLeaseMs/);
-  assert.match(worker, /version: "0.10.639-schedule-regen-cron"/);
+  assert.match(worker, /version: "0.10.640-schedule-regen-serialize"/);
   assert.match(worker, /SCHEDULE_REGEN_OVERNIGHT_V1/);
   assert.match(worker, /studioEnqueueOvernightScheduleRegenJobs/);
   assert.match(worker, /studioResumeScheduleRegenJobs/);
+  assert.match(worker, /SCHEDULE_REGEN_DRAIN_LEASE_MS/);
+  assert.match(worker, /drain_until/);
+  assert.match(worker, /One job per light-cron tick/);
   assert.match(worker, /Scanned\n\s*\/\/ eligible_ids with plan=\[\]/);
   assert.match(worker, /studio schedule-regen resume failed/);
   assert.match(worker, /scheduleRegenComboIsEmptyLane\(combo\)/);
