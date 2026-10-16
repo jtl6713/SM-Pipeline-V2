@@ -5,7 +5,25 @@
     desk: null,
     expandedReviewGroup: null,
     pendingFactoryFeedback: null,
+    selectedOutputs: new Set(),
+    submittingBatch: false,
+    batch: null,
+    batchTimer: null,
+    batchDetailsOpen: false,
+    lastBatchProfile: "",
+    batchApprovalsEnabled: null,
   };
+  const FACTORY_SELECTION_KEY = "studio.factory.batch-selection.v1";
+  const FACTORY_LAST_BATCH_KEY = "studio.factory.last-batch.v1";
+  const FACTORY_PENDING_REQUEST_KEY = "studio.factory.pending-approval-request.v1";
+  try {
+    const saved = JSON.parse(localStorage.getItem(FACTORY_SELECTION_KEY) || "[]");
+    state.selectedOutputs = new Set(Array.isArray(saved)
+      ? saved.filter((id) => /^rec[A-Za-z0-9]+$/.test(String(id))).slice(0, 100)
+      : []);
+    const latest = JSON.parse(localStorage.getItem(FACTORY_LAST_BATCH_KEY) || "{}");
+    state.lastBatchProfile = String(latest.profile_id || "");
+  } catch { /* storage disabled: selection still persists while page is open */ }
 
   function esc(value) {
     return String(value == null ? "" : value)
@@ -217,6 +235,183 @@
     video.play?.().catch(() => {});
   }
 
+
+  function saveFactorySelection() {
+    try { localStorage.setItem(FACTORY_SELECTION_KEY, JSON.stringify([...state.selectedOutputs])); } catch {}
+    updateFactoryBatchToolbar();
+  }
+
+  function readyFactoryOutputs() {
+    return (state.desk?.lanes?.needs_eyes || [])
+      .filter((card) => card?.kind === "output" && canReviewActions(card));
+  }
+
+  function updateFactoryBatchToolbar() {
+    const ready = new Set(readyFactoryOutputs().map((card) => card.id));
+    const selectable = [...state.selectedOutputs].filter((id) => ready.has(id)).length;
+    const missing = state.selectedOutputs.size - selectable;
+    const count = $("factoryBatchSelectionCount");
+    if (count) count.textContent = `${selectable} output${selectable === 1 ? "" : "s"} selected${missing ? ` · ${missing} no longer ready` : ""}`;
+    const submit = $("factoryBatchSubmit");
+    if (submit) {
+      submit.disabled = !selectable || state.submittingBatch || state.batchApprovalsEnabled === false;
+      submit.title = state.batchApprovalsEnabled === false ? "Batch approval rollout is currently disabled; individual approvals remain available." : "";
+      submit.textContent = state.submittingBatch ? "Submitting…" : `Submit Approvals${selectable ? ` (${selectable})` : ""}`;
+    }
+    const clear = $("factoryBatchClear");
+    if (clear) clear.disabled = !state.selectedOutputs.size || state.submittingBatch;
+  }
+
+  function renderFactoryBatchActivity(batch) {
+    state.batch = batch || null;
+    const summary = $("factoryBatchSummary");
+    const inspect = $("factoryBatchInspect");
+    const retry = $("factoryBatchRetry");
+    const details = $("factoryBatchDetails");
+    const updated = $("factoryBatchUpdated");
+    if (!summary || !details) return;
+    if (!batch || batch.status === "idle" || !batch.job_id) {
+      summary.textContent = "No recent Factory approval batch for the selected profile.";
+      details.hidden = true;
+      details.innerHTML = "";
+      if (inspect) inspect.hidden = true;
+      if (retry) retry.hidden = true;
+      if (updated) updated.textContent = "No active batch";
+      return;
+    }
+    const n = Number(batch.total) || 0;
+    const success = Number(batch.approved_count) || 0;
+    const skipped = Number(batch.skipped_count) || 0;
+    const failed = Number(batch.failed_count) || 0;
+    const pending = Number(batch.pending_count) || 0;
+    const consistent = n === success + skipped + failed + pending;
+    summary.textContent = `${batch.status === "running" || batch.status === "queued" ? "Processing" : "Finished"} · ${n} total · ${success} approved · ${skipped} already satisfied/skipped · ${pending} pending · ${failed} failed${consistent ? "" : " · COUNTERS NEED RECONCILIATION"}`;
+    if (updated) updated.textContent = `Batch ${batch.job_id} · ${batch.updated_at ? new Date(batch.updated_at).toLocaleString() : "Status available"}`;
+    if (inspect) { inspect.hidden = false; inspect.setAttribute("aria-expanded", String(state.batchDetailsOpen)); }
+    if (retry) {
+      retry.hidden = !(failed > 0 && batch.can_retry);
+      retry.disabled = state.submittingBatch;
+    }
+    const items = Array.isArray(batch.items) ? batch.items : [];
+    details.hidden = !state.batchDetailsOpen;
+    details.innerHTML = items.length
+      ? `<ul class="factory-batch-item-list">${items.map((item) =>
+          `<li><strong>${esc(item.platform || "Output")} ${esc(item.format || "")}</strong>
+             <span>${esc(item.output_id ? `O${item.output_id}` : item.id)} · ${esc(item.status || "pending")}</span>
+             ${item.error ? `<small>${esc(item.error)}</small>` : ""}</li>`
+        ).join("")}</ul>`
+      : '<p class="subtle">Item detail is not available from this Worker version.</p>';
+  }
+
+  async function refreshFactoryBatchActivity() {
+    const params = new URLSearchParams();
+    const profileId = String($("studioProfileSelect")?.value || state.lastBatchProfile || "").trim();
+    if (/^rec[A-Za-z0-9]+$/.test(profileId)) params.set("profile", profileId);
+    try {
+      const batch = await fetchJson(`/api/factory/approval-batches?${params.toString()}`);
+      if (typeof batch.approvals_enabled === "boolean") {
+        state.batchApprovalsEnabled = batch.approvals_enabled;
+        updateFactoryBatchToolbar();
+      }
+      renderFactoryBatchActivity(batch);
+      return batch;
+    } catch (error) {
+      const summary = $("factoryBatchSummary");
+      if (summary) summary.textContent = `Batch status temporarily unavailable: ${error.message || error}. Retry status refresh; do not resubmit blindly.`;
+      return null;
+    }
+  }
+
+  async function submitFactoryBatchApprovals() {
+    if (state.submittingBatch) return;
+    if (state.batchApprovalsEnabled === false) { setStatus("Batch approvals are not enabled yet; individual approvals still work.", true); return; }
+    const ready = readyFactoryOutputs().filter((card) => state.selectedOutputs.has(card.id));
+    if (!ready.length) { updateFactoryBatchToolbar(); setStatus("Select one or more review-ready outputs.", true); return; }
+    const profiles = [...new Set(ready.map((card) => String(card.profile_id || "").trim()))];
+    if (profiles.length !== 1 || !/^rec[A-Za-z0-9]+$/.test(profiles[0])) {
+      setStatus("Select outputs from a single known profile per batch. Other selections have been preserved.", true);
+      return;
+    }
+    // The existing canonical Approve All engine owns profile-local scheduling.
+    // Refuse to mix profiles rather than stamp an output in the wrong timezone.
+    state.submittingBatch = true;
+    updateFactoryBatchToolbar();
+    const selectionIds = ready.map((card) => card.id);
+    let pending = null;
+    try { pending = JSON.parse(localStorage.getItem(FACTORY_PENDING_REQUEST_KEY) || "null"); } catch {}
+    const reuseRequest = pending && pending.profile_id === profiles[0]
+      && JSON.stringify(pending.ids) === JSON.stringify(selectionIds)
+      && Date.now() - Number(pending.saved_ms || 0) < 24 * 60 * 60 * 1000;
+    const requestId = reuseRequest
+      ? pending.request_id
+      : (typeof window.crypto?.randomUUID === "function"
+        ? window.crypto.randomUUID() : `factory_${Date.now()}_${Math.random().toString(36).slice(2)}`).replace(/[^A-Za-z0-9_-]/g, "");
+    try { localStorage.setItem(FACTORY_PENDING_REQUEST_KEY, JSON.stringify({
+      request_id: requestId, profile_id: profiles[0], ids: selectionIds, saved_ms: Date.now(),
+    })); } catch {}
+    try {
+      const batch = await fetchJson("/api/factory/approval-batches", {
+        method: "POST",
+        body: JSON.stringify({
+          action: "start",
+          request_id: requestId,
+          content_profile_id: profiles[0],
+          notes: "Studio Factory Batch Approval",
+          record_ids: ready.map((card) => card.id),
+          items: ready.map((card) => ({
+            id: card.id, output_id: card.output_id || null,
+            platform: card.platform || null, format: card.studio_output_type || null,
+          })),
+        }),
+      });
+      if (!batch.accepted) throw new Error("Approval queue did not acknowledge the batch.");
+      if (batch.already_running && !batch.already_submitted) {
+        renderFactoryBatchActivity(batch);
+        setStatus("A previous batch for this profile is still running. Selection is preserved; submit again after it completes.", true);
+        return;
+      }
+      state.lastBatchProfile = profiles[0];
+      try { localStorage.setItem(FACTORY_LAST_BATCH_KEY, JSON.stringify({ job_id: batch.job_id, profile_id: profiles[0] })); } catch {}
+      try { localStorage.removeItem(FACTORY_PENDING_REQUEST_KEY); } catch {}
+      ready.forEach((card) => state.selectedOutputs.delete(card.id));
+      saveFactorySelection();
+      closeFactoryPreview();
+      renderFactoryBatchActivity(batch);
+      setStatus(`Batch ${batch.job_id} accepted. You can leave Factory; processing continues on the server.`);
+      // Never wait for all approvals in the click handler.
+    } catch (error) {
+      setStatus(`Batch submission not confirmed: ${error.message || error}. Check Activity before retrying.`, true);
+      await refreshFactoryBatchActivity();
+    } finally {
+      state.submittingBatch = false;
+      updateFactoryBatchToolbar();
+    }
+  }
+
+  async function retryFactoryBatchFailures() {
+    const batch = state.batch;
+    if (!batch?.job_id || !batch.can_retry || state.submittingBatch) return;
+    state.submittingBatch = true;
+    updateFactoryBatchToolbar();
+    try {
+      const result = await fetchJson("/api/factory/approval-batches", {
+        method: "POST",
+        body: JSON.stringify({
+          action: "retry", request_id: batch.request_id,
+          content_profile_id: batch.profile_id,
+        }),
+      });
+      renderFactoryBatchActivity(result);
+      setStatus(result.message || "Failed items sent for retry.");
+    } catch (error) {
+      setStatus(`Retry not confirmed: ${error.message || error}`, true);
+      await refreshFactoryBatchActivity();
+    } finally {
+      state.submittingBatch = false;
+      updateFactoryBatchToolbar();
+    }
+  }
+
   function renderCard(card, { pile = false, candidate = false, lane = "" } = {}) {
     const actions = [];
     actions.push(`<button type="button" class="text-button" data-factory-open="${esc(card.id)}">Open</button>`);
@@ -242,15 +437,17 @@
         </button>`
       : `<span class="factory-line-thumb factory-line-thumb-empty" aria-hidden="true"></span>`;
     const alert = card.stuck_kind || card.produce_error || "";
-    const state = card.studio_state || (alert ? "Needs repair" : "—");
+    const stateLabel = card.studio_state || (alert ? "Needs repair" : "—");
     const cell = (value) => `<span class="factory-line-cell">${esc(value || "—")}</span>`;
     return `<div class="factory-line" data-factory-id="${esc(card.id)}" data-factory-kind="${esc(card.kind || "")}" data-lane="${esc(lane)}" title="${esc(cardLabel(card))}">
-      ${media}
+      ${lane === "needs_eyes" && card.kind === "output" && canReviewActions(card)
+        ? `<span class="factory-media-select"><input type="checkbox" data-factory-select-output="${esc(card.id)}" aria-label="Select ${esc(cardLabel(card))}" ${state.selectedOutputs.has(card.id) ? "checked" : ""}>${media}</span>`
+        : media}
       <span class="factory-line-title">${esc(card.title || cardLabel(card))}</span>
       ${cell(card.profile_name)}
       ${cell(card.platform)}
       ${cell(card.studio_output_type)}
-      <span class="factory-line-cell factory-line-state"${alert ? ` title="${esc(alert)}"` : ""}>${esc(state)}</span>
+      <span class="factory-line-cell factory-line-state"${alert ? ` title="${esc(alert)}"` : ""}>${esc(stateLabel)}</span>
       <div class="factory-line-actions">${actions.join("")}</div>
     </div>`;
   }
@@ -334,7 +531,14 @@
         ? `<button type="button" class="primary-button factory-content-approve" data-factory-approve-content="${esc(group.key)}" disabled title="Wait until sibling Stories finish rendering, then Approve all together">${esc(`Approve all (${ready.length}) — wait for Stories`)}</button>`
         : `<button type="button" class="primary-button factory-content-approve" data-factory-approve-content="${esc(group.key)}">Approve all (${ready.length})</button>`)
       : "";
+    const contentSelected = ready.length > 0 && ready.every((card) => state.selectedOutputs.has(card.id));
+    const selectContent = `<label class="factory-content-batch-select">
+      <input type="checkbox" data-factory-select-content="${esc(group.key)}"
+        aria-label="Select all review-ready outputs for ${esc(title)}"
+        ${contentSelected ? "checked" : ""} ${(!ready.length || pending.length) ? "disabled" : ""}>
+      Select content</label>`;
     return `<div class="factory-content-bar" data-factory-content="${esc(group.key)}">
+      ${selectContent}
       <button type="button" class="factory-content-toggle" data-factory-toggle-content="${esc(group.key)}" aria-expanded="${expanded}" aria-controls="factory-review-${esc(group.key.replace(/[^a-zA-Z0-9_-]/g, "-"))}">
         <span class="factory-content-chevron" aria-hidden="true">${expanded ? "▾" : "▸"}</span>
         <span class="factory-content-label"><strong class="factory-content-title">${esc(title)}</strong><span class="factory-content-meta">${esc(meta)}</span></span>
@@ -545,6 +749,37 @@
         });
       });
     });
+    root.querySelectorAll("[data-factory-select-output]").forEach((checkbox) => {
+      checkbox.addEventListener("change", () => {
+        const id = checkbox.getAttribute("data-factory-select-output");
+        if (checkbox.checked) state.selectedOutputs.add(id);
+        else state.selectedOutputs.delete(id);
+        saveFactorySelection();
+        updateFactoryBatchToolbar();
+        // Sync content-level checked state without closing review groups.
+        const group = checkbox.closest(".factory-content-rows")?.previousElementSibling;
+        const groupBox = group?.querySelector("[data-factory-select-content]");
+        if (groupBox) {
+          const ids = [...checkbox.closest(".factory-content-rows").querySelectorAll("[data-factory-select-output]")];
+          groupBox.checked = ids.length > 0 && ids.every((input) => input.checked);
+          groupBox.indeterminate = ids.some((input) => input.checked) && !groupBox.checked;
+        }
+      });
+    });
+    root.querySelectorAll("[data-factory-select-content]").forEach((checkbox) => {
+      const key = checkbox.getAttribute("data-factory-select-content");
+      const ids = readyContentCards({ cards: (desk?.lanes?.needs_eyes || []).filter((card) => contentGroupKey(card) === key) }).map((card) => card.id);
+      checkbox.indeterminate = ids.some((id) => state.selectedOutputs.has(id))
+        && !ids.every((id) => state.selectedOutputs.has(id));
+      checkbox.addEventListener("change", () => {
+        ids.forEach((id) => checkbox.checked ? state.selectedOutputs.add(id) : state.selectedOutputs.delete(id));
+        saveFactorySelection();
+        updateFactoryBatchToolbar();
+        const rows = checkbox.closest(".factory-content-bar")?.nextElementSibling;
+        rows?.querySelectorAll("[data-factory-select-output]").forEach((input) => { input.checked = checkbox.checked; });
+        checkbox.indeterminate = false;
+      });
+    });
     root.querySelectorAll("[data-factory-approve-content]").forEach((button) => {
       button.addEventListener("click", () => {
         const key = button.getAttribute("data-factory-approve-content");
@@ -639,6 +874,7 @@
       pileMeta.textContent = `Working pile ${used}/${max}. Pin candidates below.`;
     }
     bindCardActions(desk);
+    updateFactoryBatchToolbar();
   }
 
   const ACTION_STATUS = {
@@ -786,6 +1022,11 @@
     state.loading = true;
     setStatus("Loading Factory Desk…");
     try {
+      // Fetch independently of the expensive Factory queue; activity remains visible during a slow desk refresh.
+      refreshFactoryBatchActivity().catch(() => {});
+      if (!state.batchTimer) state.batchTimer = setInterval(() => {
+        if (!document.hidden && $("page-factory")?.classList.contains("active")) refreshFactoryBatchActivity().catch(() => {});
+      }, 5000);
       const desk = await fetchJson("/api/factory/desk");
       renderDesk(desk);
       setStatus(desk.warning || "Factory Desk ready.");
@@ -815,6 +1056,22 @@
     }
   });
 
+  $("factoryBatchSubmit")?.addEventListener("click", () => { submitFactoryBatchApprovals().catch((error) => setStatus(error.message || String(error), true)); });
+  $("factoryBatchClear")?.addEventListener("click", () => {
+    state.selectedOutputs.clear();
+    saveFactorySelection();
+    if (state.desk) renderDesk(state.desk);
+  });
+  $("factoryBatchRefresh")?.addEventListener("click", () => { refreshFactoryBatchActivity().catch(() => {}); });
+  $("factoryBatchRetry")?.addEventListener("click", () => { retryFactoryBatchFailures().catch(() => {}); });
+  $("factoryBatchInspect")?.addEventListener("click", () => {
+    state.batchDetailsOpen = !state.batchDetailsOpen;
+    renderFactoryBatchActivity(state.batch);
+  });
+  document.addEventListener("visibilitychange", () => {
+    if (!document.hidden && $("page-factory")?.classList.contains("active")) refreshFactoryBatchActivity().catch(() => {});
+  });
+  $("studioProfileSelect")?.addEventListener("change", () => { refreshFactoryBatchActivity().catch(() => {}); });
   $("factoryDeskRefresh")?.addEventListener("click", () => {
     loadFactoryDesk(true).catch(() => {});
   });
