@@ -285,7 +285,7 @@ test("worker and UI wire Operations multi-queue + prepare-to-review", () => {
   assert.match(worker, /mergeOpsQueueOutputRecords/);
   assert.match(worker, /OPS_QUEUE_RENDER_FORMULA/);
   assert.match(worker, /async function prepareIdeaToReview/);
-  assert.match(worker, /version: "0.10.629-schedule-regen-r2"/);
+  assert.match(worker, /version: "0.10.630-schedule-regen-phase2a"/);
   assert.match(worker, /origin=prepare-to-review/);
   assert.match(worker, /readOpsQueueControls/);
   assert.match(html, /data-ops-tab="queue"/);

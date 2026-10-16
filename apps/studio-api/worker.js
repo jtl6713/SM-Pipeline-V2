@@ -862,6 +862,8 @@ export default {
       const isOutputCreativeEditWrite = isOutputCreativeRoute && request.method === "PATCH";
       const isOutputCreativeReviewWrite = isOutputCreativeReviewRoute && request.method === "POST";
       const isOutputApproveAllWrite = isOutputApproveAllRoute && request.method === "POST";
+      const isScheduleRegenWrite = isScheduleRegenRoute && request.method === "POST";
+      const isScheduleSettingsWrite = isScheduleSettingsRoute && (request.method === "POST" || request.method === "PUT" || request.method === "PATCH");
       const isOutputTiktokCompleteWrite = isOutputTiktokCompleteRoute && request.method === "POST";
       const isOutputTiktokResendWrite = isOutputTiktokResendRoute && request.method === "POST";
       const isOutputYoutubeCompleteWrite = isOutputYoutubeCompleteRoute && request.method === "POST";
@@ -940,6 +942,8 @@ export default {
         isOutputCreativeEditWrite ||
         isOutputCreativeReviewWrite ||
         isOutputApproveAllWrite ||
+        isScheduleRegenWrite ||
+        isScheduleSettingsWrite ||
         isOutputTiktokCompleteWrite ||
         isOutputTiktokResendWrite ||
         isOutputYoutubeCompleteWrite ||
@@ -1013,7 +1017,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.629-schedule-regen-r2",
+          version: "0.10.630-schedule-regen-phase2a",
           studio_supabase_pipeline_reads_v1: true,
           studio_supabase_sync_gate_v1: true,
           studio_supabase_phase3_stable_v1: true,
