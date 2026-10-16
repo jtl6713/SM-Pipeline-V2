@@ -2,6 +2,7 @@ import { countPendingPlatformDispatch } from "./overview-dispatch-counts.mjs";
 import {
   factoryBatchEnqueue, factoryBatchRead, factoryBatchList,
   factoryBatchDrain, factoryBatchRetry, factoryBatchSummary, factoryBatchCounts,
+  factoryBatchQualitySignals, factoryBatchReconcile,
 } from "./factory-approval-queue.mjs";
 import { createProfileOnboarding } from "./profile-onboarding.mjs";
 import {
@@ -11991,7 +11992,9 @@ export async function factoryBatchStatusRoute(request, env, authorization) {
   const job = requestId
     ? await factoryBatchRead(env.STUDIO_MEDIA, profile.id, requestId)
     : (await factoryBatchList(env.STUDIO_MEDIA, profile.id, { limit: 40 }))[0] || null;
-  return respond(request, env, factoryBatchSummary(job));
+  return respond(request, env, {
+    ...factoryBatchSummary(job), quality_signals: factoryBatchQualitySignals(job),
+  });
 }
 /*__STUDIO_WORKER_END:factoryBatchStatusRoute__*/
 
@@ -12084,7 +12087,17 @@ export async function factoryBatchCronResume(env, ctx = null) {
       const match = object.key.match(/\/jobs\/(rec[A-Za-z0-9]+)\/([A-Za-z0-9_-]{12,128})\.json$/);
       if (!match) continue;
       const job = await factoryBatchRead(env.STUDIO_MEDIA, match[1], match[2]);
-      if (!job || !["queued", "running"].includes(job.status)) continue;
+      if (!job) continue;
+      const signatures = factoryBatchQualitySignals(job);
+      if (signatures.length) {
+        console.warn("Factory batch Quality Agent", match[2], JSON.stringify(signatures));
+      }
+      if (signatures.some(item => item.code === "QA-FACTORY-BATCH-STATE-MISMATCH")
+          && !signatures.some(item => item.code === "QA-FACTORY-BATCH-DUPLICATE-ITEM")) {
+        await factoryBatchReconcile(env.STUDIO_MEDIA, match[1], match[2]);
+      }
+      if (!["queued", "running"].includes(job.status) &&
+          !signatures.some(item => item.code === "QA-FACTORY-BATCH-STATE-MISMATCH")) continue;
       if (started >= 5) break;
       await factoryBatchProcess(env, match[1], match[2], ctx);
       started++;
