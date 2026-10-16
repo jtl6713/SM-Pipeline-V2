@@ -25,7 +25,8 @@ export const SCHEDULE_REGEN_OVERNIGHT_OUTPUT_TYPES = Object.freeze([
   "Slideshow Video",
 ]);
 export const SCHEDULE_REGEN_JOB_TTL_MS = 24 * 60 * 60 * 1000;
-export const SCHEDULE_REGEN_STORE_CHAR_BUDGET = 80000;
+/** Raised for overnight 3–4 concurrent profile jobs with Story plans (was 80k). */
+export const SCHEDULE_REGEN_STORE_CHAR_BUDGET = 150000;
 export const SCHEDULE_REGEN_MAX_TERMINAL_JOBS = 1;
 /** A Processing combo older than this is treated as crashed; GET/POST may resume or reclaim. */
 export const SCHEDULE_REGEN_STALE_PROCESSING_MS = 20 * 1000;
@@ -412,6 +413,11 @@ export function scheduleRegenComboIsOrphanProcessing(combo) {
   if (String(combo?.status || "") !== SCHEDULE_REGEN_STATUS.PROCESSING) return false;
   if (scheduleRegenComboIsEmptyLane(combo)) return false;
   if (scheduleRegenComboHasRemainingPlan(combo)) return false;
+  // Never wipe mid-apply / mid-plan progress when a truncated store read drops
+  // eligible_ids — NYC Instagram Story lost 15/52 applies that way overnight.
+  if ((Number(combo?.completed_posts) || 0) > 0) return false;
+  if (Array.isArray(combo?.plan) && combo.plan.length > 0) return false;
+  if ((Number(combo?.total_posts) || 0) > 0) return false;
   if (scheduleRegenComboNeedsPlanning(combo)) {
     const eligible = Array.isArray(combo.eligible_ids) ? combo.eligible_ids : [];
     if (eligible.length > 0) return false;

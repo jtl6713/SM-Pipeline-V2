@@ -1032,7 +1032,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.641-schedule-regen-zombie-lease",
+          version: "0.10.642-schedule-regen-sequential",
           studio_supabase_pipeline_reads_v1: true,
           studio_supabase_sync_gate_v1: true,
           studio_supabase_phase3_stable_v1: true,

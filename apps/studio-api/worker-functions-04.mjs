@@ -2880,9 +2880,9 @@ export async function studioEnqueueOvernightScheduleRegenJobs(env) {
 /*__STUDIO_WORKER_END:studioEnqueueOvernightScheduleRegenJobs__*/
 
 /**
- * Keep calendar regenerate moving without a browser poll. Light cron drains one
- * queued/running schedule-regen job per tick (oldest updated_at first) so four
- * overnight waitUntils cannot lost-update the shared store and wipe plan slots.
+ * Keep calendar regenerate moving without a browser poll. Light cron drains every
+ * open job sequentially inside one waitUntil (never parallel) so overnight
+ * profiles all advance each tick without lost-updating the shared store.
  */
 export async function studioResumeScheduleRegenJobs(env, ctx = null) {
   const store = await studioLoadScheduleRegenJobStore(env);
@@ -2911,38 +2911,42 @@ export async function studioResumeScheduleRegenJobs(env, ctx = null) {
     candidates.push(job);
   }
   candidates.sort((a, b) => {
-    // Prefer scanned lanes that still need MAE plan slots (Chicago Story 0/83
-    // plan=[]) over fresh Pending scans so overnight does not starve mid-plan.
-    const aMid = (a.combinations || []).some((row) => (
-      scheduleRegenComboNeedsPlanning(row)
-      && Array.isArray(row.eligible_ids)
-      && row.eligible_ids.length > 0
-      && !(Array.isArray(row.plan) && row.plan.length > 0)
-    )) ? 0 : 1;
-    const bMid = (b.combinations || []).some((row) => (
-      scheduleRegenComboNeedsPlanning(row)
-      && Array.isArray(row.eligible_ids)
-      && row.eligible_ids.length > 0
-      && !(Array.isArray(row.plan) && row.plan.length > 0)
-    )) ? 0 : 1;
-    if (aMid !== bMid) return aMid - bMid;
+    // Prefer mid-apply, then scanned lanes that still need MAE plan slots, then
+    // oldest updated_at — NYC Story apply must not starve behind empty-plan scans.
+    const rank = (job) => {
+      const combos = job.combinations || [];
+      if (combos.some((row) => scheduleRegenComboHasRemainingPlan(row))) return 0;
+      if (combos.some((row) => (
+        scheduleRegenComboNeedsPlanning(row)
+        && Array.isArray(row.eligible_ids)
+        && row.eligible_ids.length > 0
+        && !(Array.isArray(row.plan) && row.plan.length > 0)
+      ))) return 1;
+      return 2;
+    };
+    const aRank = rank(a);
+    const bRank = rank(b);
+    if (aRank !== bRank) return aRank - bRank;
     const aMs = Date.parse(a.updated_at || a.created_at || "") || 0;
     const bMs = Date.parse(b.updated_at || b.created_at || "") || 0;
     return aMs - bMs;
   });
-  const job = candidates[0];
-  if (!job) return 0;
-  // One job per light-cron tick — never fan out parallel drains overnight.
+  if (!candidates.length) return 0;
+  // Sequential drains in one waitUntil — parallel fan-out raced the shared store
+  // and rewound NYC Instagram Story mid-apply (15/52 → 0/52 plan wiped).
+  const run = async () => {
+    for (const job of candidates) {
+      await studioDrainScheduleRegenJob(env, job.id).catch((error) => {
+        console.warn("schedule regen cron resume failed", job.id, error);
+      });
+    }
+  };
   if (ctx && typeof ctx.waitUntil === "function") {
-    ctx.waitUntil(studioDrainScheduleRegenJob(env, job.id).catch((error) => {
-      console.warn("schedule regen cron resume failed", job.id, error);
-    }));
+    ctx.waitUntil(run());
   } else {
-    await studioDrainScheduleRegenJob(env, job.id).catch((error) => {
-      console.warn("schedule regen cron resume failed", job.id, error);
-    });
+    await run();
   }
-  return 1;
+  return candidates.length;
 }
 /*__STUDIO_WORKER_END:studioResumeScheduleRegenJobs__*/
 
