@@ -1,4 +1,8 @@
 import { countPendingPlatformDispatch } from "./overview-dispatch-counts.mjs";
+import {
+  factoryBatchEnqueue, factoryBatchRead, factoryBatchList,
+  factoryBatchDrain, factoryBatchRetry, factoryBatchSummary, factoryBatchCounts,
+} from "./factory-approval-queue.mjs";
 import { createProfileOnboarding } from "./profile-onboarding.mjs";
 import {
   studioReadSource,
@@ -11973,3 +11977,120 @@ export async function getStudioLibraryIntakeStatus(request, env, url) {
 }
 
 /*__STUDIO_WORKER_END:getStudioLibraryIntakeStatus__*/
+
+
+/**
+ * Factory Batch Approval V2: R2 CAS storage, profile scoped, canonical approval.
+ * Kept separate from legacy Pipeline Approve All to prevent Settings JSON races.
+ */
+export async function factoryBatchStatusRoute(request, env, authorization) {
+  const url = new URL(request.url);
+  const profile = await resolveWorkingContentProfile(env, authorization, requestedProfileId(url, null));
+  if (!profile?.id) throw new HttpError(400, "Choose a content profile");
+  const requestId = String(url.searchParams.get("request_id") || "").trim();
+  const job = requestId
+    ? await factoryBatchRead(env.STUDIO_MEDIA, profile.id, requestId)
+    : (await factoryBatchList(env.STUDIO_MEDIA, profile.id, { limit: 40 }))[0] || null;
+  return respond(request, env, factoryBatchSummary(job));
+}
+/*__STUDIO_WORKER_END:factoryBatchStatusRoute__*/
+
+export async function factoryBatchProcess(env, profileId, requestId, ctx = null) {
+  const run = async () => {
+    const result = await factoryBatchDrain(env.STUDIO_MEDIA, {
+      profileId, requestId, maxItems: 5,
+      approve: async (id, job) => {
+        // Canonical Factory single-item guard handles existing Approved/Published,
+        // render eligibility, Do_Not_Publish and the MAE / Story scheduling rules.
+        // Reject profile drift before calling any authoritative approval mutation.
+        const record = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, id);
+        const raw = f(record, "Content_Profile");
+        const ownProfileIds = (Array.isArray(raw) ? raw : [raw]).map(String);
+        if (ownProfileIds.some(value => /^rec[A-Za-z0-9]+$/.test(value))
+          && !ownProfileIds.includes(profileId)) {
+          throw new HttpError(409, "Output belongs to a different content profile");
+        }
+        return factoryApproveOutput(env, id, "Factory Batch", job.notes || "", ctx);
+      },
+    });
+    return result;
+  };
+  if (ctx?.waitUntil) {
+    ctx.waitUntil(run().catch(error => console.warn("Factory batch drain", requestId, error)));
+    return null;
+  }
+  return run();
+}
+/*__STUDIO_WORKER_END:factoryBatchProcess__*/
+
+export async function factoryBatchSubmitRoute(request, env, authorization, ctx = null) {
+  let payload;
+  try { payload = await request.json(); } catch { throw new HttpError(400, "Invalid JSON"); }
+  const profile = await resolveWorkingContentProfile(env, authorization, requestedProfileId(null, payload));
+  if (!profile?.id) throw new HttpError(400, "Choose a content profile");
+  const action = String(payload?.action || "start").toLowerCase();
+  const requestId = String(payload?.request_id || "");
+  if (action === "retry") {
+    if (!requestId) throw new HttpError(400, "request_id required for retry");
+    const job = await factoryBatchRetry(env.STUDIO_MEDIA, profile.id, requestId);
+    await factoryBatchProcess(env, profile.id, requestId, ctx);
+    return respond(request, env, { ...factoryBatchSummary(job), accepted: true });
+  }
+  if (action !== "start") throw new HttpError(400, "Invalid batch action");
+  if (!Array.isArray(payload?.record_ids) || !payload.record_ids.length || payload.record_ids.length > 100) {
+    throw new HttpError(400, "Select 1–100 output IDs");
+  }
+  const itemMap = new Map(
+    (Array.isArray(payload.items) ? payload.items : [])
+      .filter(row => /^rec[A-Za-z0-9]+$/.test(String(row?.id || "")))
+      .map(row => [row.id, row]),
+  );
+  const records = [...new Set(payload.record_ids.map(String))]
+    .map(id => ({ ...itemMap.get(id), id }));
+  let enqueued;
+  try {
+    enqueued = await factoryBatchEnqueue(env.STUDIO_MEDIA, {
+      profileId: profile.id, requestId, records,
+      note: String(payload.notes || ""),
+    });
+  } catch (error) {
+    throw new HttpError(409, error?.message || "Batch enqueue failed");
+  }
+  if (!enqueued.already_submitted && ctx?.waitUntil) {
+    await factoryBatchProcess(env, profile.id, requestId, ctx);
+  }
+  return respond(request, env, {
+    ...factoryBatchSummary(enqueued.job), accepted: true,
+    already_submitted: enqueued.already_submitted,
+  });
+}
+/*__STUDIO_WORKER_END:factoryBatchSubmitRoute__*/
+
+/**
+ * Cron recovery: enumerate bounded recent jobs for each profile in the R2 jobs
+ * hierarchy. No client poll is necessary. An expired R2 lease can be reclaimed.
+ */
+export async function factoryBatchCronResume(env, ctx = null) {
+  if (!env?.STUDIO_MEDIA?.list) return 0;
+  let marker;
+  let started = 0, scanned = 0;
+  do {
+    const page = await env.STUDIO_MEDIA.list({
+      prefix: "studio/state/factory-approvals/v2/jobs/",
+      limit: 100, ...(marker ? { cursor: marker } : {}),
+    });
+    for (const object of page.objects || []) {
+      if (++scanned > 200) break;
+      const match = object.key.match(/\/jobs\/(rec[A-Za-z0-9]+)\/([A-Za-z0-9_-]{12,128})\.json$/);
+      if (!match) continue;
+      const job = await factoryBatchRead(env.STUDIO_MEDIA, match[1], match[2]);
+      if (!job || !["queued", "running"].includes(job.status)) continue;
+      if (started >= 5) break;
+      await factoryBatchProcess(env, match[1], match[2], ctx);
+      started++;
+    }
+    marker = page.truncated ? page.cursor : null;
+  } while (marker && started < 5 && scanned < 200);
+  return started;
+}
+/*__STUDIO_WORKER_END:factoryBatchCronResume__*/
