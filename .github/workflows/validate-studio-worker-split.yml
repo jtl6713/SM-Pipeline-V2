@@ -39,7 +39,9 @@ jobs:
             grep -E '^# tests |^# pass |^# fail ' /tmp/studio-api-regression.log | tail -3
           else
             echo "::error::Studio API test failures; compact diagnostic listing follows"
-            grep -n -B 2 -A 16 -E '^not ok [0-9]+' /tmp/studio-api-regression.log | head -180 || true
+            grep -n -B 2 -A 16 -E '^not ok [0-9]+' /tmp/studio-api-regression.log | head -120 || true
+            echo '--- all failed subtest names ---'
+            grep -E '^not ok [0-9]+' /tmp/studio-api-regression.log || true
             echo "--- final test summary ---"
             grep -E '^# tests |^# pass |^# fail ' /tmp/studio-api-regression.log | tail -3 || true
             exit 1
