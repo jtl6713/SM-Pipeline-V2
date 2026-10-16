@@ -236,3 +236,6 @@ jobs:
 # 2026-10-16 service_version=2026-10-16-ap1c-ready-slide-recovery
 
 # Smart frame reuse deployment: 2026-10-16-smart-frame-reuse
+
+# Redeploy final HD 9:16 source-reuse and same-source six-output crop coalescing
+# 2026-10-16 source=82b5e937a2d4c0bf1d28c25f1b20b99f705fb640
