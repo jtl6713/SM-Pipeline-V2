@@ -364,3 +364,5 @@ phase4-followup schedule-regen-zombie-lease 2026-10-16T05:59:00Z worker 0.10.641
 phase4-followup schedule-regen-sequential 2026-10-16T08:20:00Z worker 0.10.642-schedule-regen-sequential (sequential multi-job drain; protect mid-apply from orphan wipe; 150k store budget)
 phase4-followup tiktok-inbox-hold 2026-10-16T12:08:29Z worker 0.10.643-tiktok-inbox-hold (hold future TikTok inbox until 15 min lead; refresh published URL badge)
 phase4-followup manual-post-link 2026-10-16T12:40:00Z worker 0.10.644-manual-post-link (clear Manual Action Required when a post URL is stored; show the post link on the thumbnail)
+
+# 2026-10-16 skip redundant automatic video AI frames and explicit-prompt theme calls
