@@ -1,4 +1,4 @@
-name: Factory Batch Remote R2 Acceptance (Disposable)
+name: Factory Batch Cloudflare R2 Binding Acceptance (Synthetic)
 on:
   pull_request:
     paths:
@@ -30,15 +30,18 @@ jobs:
           node-version: "22"
       - name: Install pinned Wrangler
         run: npm install --no-save wrangler@4.123.0
-      - name: Create disposable remote Cloudflare R2 bucket
+      - name: Resolve existing Cloudflare R2 binding (read-only metadata)
         shell: bash
         run: |
           set -euo pipefail
           test -n "${CLOUDFLARE_API_TOKEN:-}" && test -n "${CLOUDFLARE_ACCOUNT_ID:-}"
-          BUCKET="factory-batch-smoke-${GITHUB_RUN_ID}"
+          API="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/chicagoshining-studio-api"
+          curl -fsS "$API/deployments" -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -o /tmp/factory-smoke-deployments.json
+          VERSION=$(jq -er '.result.deployments[0].versions | max_by(.percentage) | .version_id' /tmp/factory-smoke-deployments.json)
+          curl -fsS "$API/versions/$VERSION" -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -o /tmp/factory-smoke-version.json
+          BUCKET=$(jq -er '.result.resources.bindings[] | select(.name == "STUDIO_MEDIA") | (.bucket_name // .bucket)' /tmp/factory-smoke-version.json)
+          test -n "$BUCKET"
           echo "BUCKET=$BUCKET" >> "$GITHUB_ENV"
-          ./node_modules/.bin/wrangler r2 bucket create "$BUCKET"
-          echo "$BUCKET" > /tmp/factory-batch-disposable-bucket.txt
           python - <<'PY'
           import json,os
           path='apps/studio-api/factory-batch-acceptance.wrangler.jsonc'
@@ -46,7 +49,7 @@ jobs:
           config['r2_buckets']=[{'binding':'STUDIO_MEDIA','bucket_name':os.environ['BUCKET'],'remote':True}]
           with open('apps/studio-api/factory-batch-acceptance.remote.jsonc','w') as f: json.dump(config,f)
           PY
-      - name: Run real Cloudflare Worker runtime against remote disposable R2
+      - name: Run 20 synthetic approvals via actual Cloudflare R2 remote binding
         shell: bash
         run: |
           set -euo pipefail
@@ -123,17 +126,13 @@ jobs:
           assert obj['total']==20 and obj['approved_count']==20 and obj['stored_commits']==20 and obj['failed_count']==0,obj
           print('persisted_after_server_restart_and_new_client=PASS')
           PY
-      - name: Delete disposable Cloudflare R2 bucket
+      - name: Clean up isolated synthetic R2 test keys
         if: always()
         shell: bash
         run: |
-          if [ -f /tmp/factory-batch-disposable-bucket.txt ]; then
-            BUCKET=$(cat /tmp/factory-batch-disposable-bucket.txt)
-            curl -fsS --max-time 25 -X POST 'http://127.0.0.1:8976/api/cleanup?request_id=smoke_runtime_factory_20261016' || true
-            ./node_modules/.bin/wrangler r2 bucket delete "$BUCKET" || {
-              echo "::warning::Dispose manually of test-only R2 bucket: $BUCKET"
-            }
-          fi
+          curl -fsS --max-time 25 -X POST 'http://127.0.0.1:8976/api/cleanup?request_id=smoke_runtime_factory_20261016' || {
+            echo "::warning::Test-only keys may remain; never delete unrelated R2 data"
+          }
       - name: Show Worker diagnostics on failure
         if: failure()
         run: |
