@@ -527,6 +527,7 @@ import {
   mapOutput,
   googleDriveFileId,
   requestedProfileId,
+  studioContentProfileRecordIdForOutput,
   studioThemeForProfile,
   studioCityLabel,
   studioScheduleTimeZoneForProfile,
