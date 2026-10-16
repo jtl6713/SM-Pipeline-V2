@@ -633,6 +633,7 @@ import {
   putStudioScheduleSettings,
   getApproveAllJobStatus,
   studioResumeApproveAllJobs,
+  studioResumeScheduleRegenJobs,
   approveAllOutputsForPublishing,
   reviewOutputCreative,
   getRecordRoute,
@@ -1027,7 +1028,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.638-schedule-regen-empty-early",
+          version: "0.10.639-schedule-regen-cron",
           studio_supabase_pipeline_reads_v1: true,
           studio_supabase_sync_gate_v1: true,
           studio_supabase_phase3_stable_v1: true,
@@ -2312,6 +2313,14 @@ export default {
         await studioResumeApproveAllJobs(env, ctx);
       } catch (error) {
         console.warn("studio approve-all batch resume failed", error);
+      }
+      // Calendar regenerate used to freeze when the browser closed (no status poll).
+      // Drain every active schedule-regen job on the light tick so overnight
+      // all-profile runs finish without a laptop left open.
+      try {
+        await studioResumeScheduleRegenJobs(env, ctx);
+      } catch (error) {
+        console.warn("studio schedule-regen resume failed", error);
       }
       try {
         await resumeStaleStudioProductionJobs(env);
@@ -5226,6 +5235,7 @@ const STUDIO_OVERDUE_SCHEDULED_FORMULA = 'AND({Test_Run_ID}=BLANK(),{Do_Not_Publ
 /*__STUDIO_WORKER_EXTRACT:studioProcessApproveAllJobSlice__*/
 /*__STUDIO_WORKER_EXTRACT:studioRunApproveAllJob__*/
 /*__STUDIO_WORKER_EXTRACT:studioResumeApproveAllJobs__*/
+/*__STUDIO_WORKER_EXTRACT:studioResumeScheduleRegenJobs__*/
 /*__STUDIO_WORKER_EXTRACT:approveAllOutputsForPublishing__*/
 /*__STUDIO_WORKER_EXTRACT:reviewOutputCreative__*/
 /*__STUDIO_WORKER_EXTRACT:getRecordRoute__*/

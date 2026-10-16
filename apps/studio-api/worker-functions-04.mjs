@@ -2756,6 +2756,45 @@ export async function studioResumeApproveAllJobs(env, ctx = null) {
 }
 /*__STUDIO_WORKER_END:studioResumeApproveAllJobs__*/
 
+/**
+ * Keep calendar regenerate moving without a browser poll. Light cron drains every
+ * queued/running schedule-regen job so overnight all-profile runs finish after
+ * Joseph closes the laptop.
+ */
+export async function studioResumeScheduleRegenJobs(env, ctx = null) {
+  const store = await studioLoadScheduleRegenJobStore(env);
+  const activeIds = Object.values(store.active_by_scope || {});
+  const running = Object.values(store.jobs || {}).filter((job) => {
+    if (!job) return false;
+    if (activeIds.includes(job.id)) return true;
+    return job.status === "queued" || job.status === "running";
+  });
+  const seen = new Set();
+  for (const job of running) {
+    if (!job?.id || seen.has(job.id)) continue;
+    seen.add(job.id);
+    const open = (job.combinations || []).some((row) => scheduleRegenComboNeedsWork(row));
+    if (!open && (job.status === "queued" || job.status === "running")) {
+      const failed = (job.combinations || []).some((row) => row.status === SCHEDULE_REGEN_STATUS.FAILED);
+      job.status = failed ? "failed" : "completed";
+      job.updated_at = new Date().toISOString();
+      await studioPutScheduleRegenJob(env, job);
+      continue;
+    }
+    if (ctx && typeof ctx.waitUntil === "function") {
+      ctx.waitUntil(studioDrainScheduleRegenJob(env, job.id).catch((error) => {
+        console.warn("schedule regen cron resume failed", job.id, error);
+      }));
+    } else {
+      await studioDrainScheduleRegenJob(env, job.id).catch((error) => {
+        console.warn("schedule regen cron resume failed", job.id, error);
+      });
+    }
+  }
+  return seen.size;
+}
+/*__STUDIO_WORKER_END:studioResumeScheduleRegenJobs__*/
+
 export async function approveAllOutputsForPublishing(request, env, authorization, ctx = null) {
   let payload = {};
   try { payload = await request.json(); } catch { payload = {}; }
