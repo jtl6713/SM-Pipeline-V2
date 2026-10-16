@@ -7,13 +7,18 @@ export const SCHEDULE_REGEN_JOB_TTL_MS = 24 * 60 * 60 * 1000;
 export const SCHEDULE_REGEN_STORE_CHAR_BUDGET = 80000;
 export const SCHEDULE_REGEN_MAX_TERMINAL_JOBS = 1;
 /** A Processing combo older than this is treated as crashed; GET/POST may resume or reclaim. */
-export const SCHEDULE_REGEN_STALE_PROCESSING_MS = 45 * 1000;
+export const SCHEDULE_REGEN_STALE_PROCESSING_MS = 20 * 1000;
+/**
+ * Soft lease for status GET: only treat Processing as "live" while updated_at is this fresh.
+ * Longer gaps mean waitUntil died after a plan/apply checkpoint — resume immediately.
+ */
+export const SCHEDULE_REGEN_LIVE_LEASE_MS = 20 * 1000;
 /** Max Airtable/Supabase schedule writes per Worker slice so a 50+ Story lane cannot hang Regenerating… forever. */
-export const SCHEDULE_REGEN_POSTS_PER_SLICE = 10;
+export const SCHEDULE_REGEN_POSTS_PER_SLICE = 15;
 /** Max MAE plan slots to compute per slice before persisting (plan must finish before apply). */
-export const SCHEDULE_REGEN_PLAN_SLOTS_PER_SLICE = 15;
+export const SCHEDULE_REGEN_PLAN_SLOTS_PER_SLICE = 25;
 /** Max slices to chain inside one waitUntil / drain invocation. */
-export const SCHEDULE_REGEN_MAX_SLICES_PER_DRAIN = 8;
+export const SCHEDULE_REGEN_MAX_SLICES_PER_DRAIN = 16;
 
 const CANONICAL_PLATFORMS = Object.freeze({
   instagram: "Instagram",
@@ -360,9 +365,14 @@ export function scheduleRegenJobCounts(job) {
   const total = combos.length;
   const done = completed + failed;
   const overallPct = total ? Math.round((done / total) * 100) : 0;
-  const active = combos.find((combo) => combo?.status === SCHEDULE_REGEN_STATUS.PROCESSING) || null;
+  const active = combos.find((combo) => combo?.status === SCHEDULE_REGEN_STATUS.PROCESSING)
+    || combos.find((combo) => combo?.status === SCHEDULE_REGEN_STATUS.PENDING)
+    || null;
   const activeTotal = Number(active?.total_posts || 0) || 0;
-  const activeDone = Number(active?.completed_posts || 0) || 0;
+  const applied = Number(active?.completed_posts || 0) || 0;
+  const planned = Array.isArray(active?.plan) ? active.plan.length : 0;
+  // During MAE planning, completed_posts stays 0 — surface plan progress so Regenerating… is not stuck at 0%.
+  const activeDone = Math.max(applied, scheduleRegenComboPlanComplete(active) ? applied : planned);
   const activePct = activeTotal ? Math.round((activeDone / activeTotal) * 100) : (active ? 0 : 100);
   return {
     total_combinations: total,

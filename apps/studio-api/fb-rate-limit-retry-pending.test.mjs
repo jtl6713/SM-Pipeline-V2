@@ -7,7 +7,7 @@ import { normalizedOutputState } from "./worker-functions-01.mjs";
 
 const root = dirname(fileURLToPath(import.meta.url));
 
-test("Worker version is 0.10.635-schedule-regen-ig-resume", () => {
+test("Worker version is 0.10.636-schedule-regen-soft-lease", () => {
   const worker = readFileSync(join(root, "worker.js"), "utf8");
   assert.match(worker, /version: "0\.10\.635-schedule-regen-ig-resume"/);
 });

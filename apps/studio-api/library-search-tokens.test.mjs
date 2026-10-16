@@ -17,5 +17,5 @@ test("assetLibraryFilterFormula uses token OR FIND for unquoted search", async (
   assert.match(fn, /OR\(\$\{clauses\.join/);
   assert.doesNotMatch(fn, /const needle = String\(phrase \|\| query/);
   assert.doesNotMatch(fn, /FIND\("\$\{escaped\}", \$\{hay\}\)/);
-  assert.match(worker, /version: "0.10.635-schedule-regen-ig-resume"/);
+  assert.match(worker, /version: "0.10.636-schedule-regen-soft-lease"/);
 });

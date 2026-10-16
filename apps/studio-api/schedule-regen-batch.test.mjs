@@ -10,6 +10,7 @@ import {
   SCHEDULE_REGEN_POSTS_PER_SLICE,
   SCHEDULE_REGEN_PLAN_SLOTS_PER_SLICE,
   SCHEDULE_REGEN_MAX_SLICES_PER_DRAIN,
+  SCHEDULE_REGEN_LIVE_LEASE_MS,
   buildScheduleRegenCombinations,
   canonicalizeScheduleRegenPlatform,
   createScheduleRegenJob,
@@ -134,9 +135,10 @@ test("stale Processing jobs can be reclaimed so regenerate is not stuck forever"
   assert.equal(reclaimed.combinations[0].completed_posts, 1);
   assert.equal(reclaimed.combinations[0].plan.length, 2);
   assert.equal(reclaimed.cursor, 0);
-  assert.ok(SCHEDULE_REGEN_POSTS_PER_SLICE >= 5);
-  assert.ok(SCHEDULE_REGEN_PLAN_SLOTS_PER_SLICE >= 5);
-  assert.ok(SCHEDULE_REGEN_MAX_SLICES_PER_DRAIN >= 2);
+  assert.ok(SCHEDULE_REGEN_POSTS_PER_SLICE >= 10);
+  assert.ok(SCHEDULE_REGEN_LIVE_LEASE_MS >= 10_000);
+  assert.ok(SCHEDULE_REGEN_PLAN_SLOTS_PER_SLICE >= 15);
+  assert.ok(SCHEDULE_REGEN_MAX_SLICES_PER_DRAIN >= 8);
   assert.equal(SCHEDULE_REGEN_MAX_TERMINAL_JOBS, 1);
   const slimed = slimScheduleRegenCombination({
     status: SCHEDULE_REGEN_STATUS.COMPLETED,
@@ -250,7 +252,9 @@ test("Worker and Pipeline wire durable schedule regeneration", () => {
   assert.match(worker, /Orphan Processing \(no plan/);
   assert.match(worker, /froze Instagram Reel at 45\/95/);
   assert.match(worker, /leasedProcessing/);
-  assert.match(worker, /version: "0\.10\.635-schedule-regen-ig-resume"/);
+  assert.match(worker, /SCHEDULE_REGEN_LIVE_LEASE_MS/);
+  assert.match(worker, /softLeaseMs/);
+  assert.match(worker, /version: "0.10.636-schedule-regen-soft-lease"/);
   assert.match(app, /\/api\/outputs\/schedule-regen/);
   assert.match(app, /pathname === "\/api\/outputs\/schedule-regen"/);
   assert.match(app, /queuePipelineScheduleRegenPoll/);

@@ -378,3 +378,5 @@ phase4-followup schedule-regen-waituntil 2026-10-16T04:01:32Z UI 0.6.701-schedul
 phase4-followup schedule-regen-chunked-drain 2026-10-16T04:04:25Z UI 0.6.701-schedule-regen-story-drain (footer must show 0.6.701 / Worker 0.10.634)
 
 phase4-followup schedule-regen-story-drain 2026-10-16T04:14:23Z UI 0.6.701-schedule-regen-story-drain (footer must show 0.6.701 / Worker 0.10.634)
+
+phase4-followup schedule-regen-soft-lease 2026-10-16T04:51:30Z UI 0.6.702-schedule-regen-soft-lease (footer must show 0.6.702 / Worker 0.10.636)
