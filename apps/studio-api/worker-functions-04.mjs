@@ -354,6 +354,8 @@ import {
   scheduleRegenJobIsStale,
   reclaimStaleScheduleRegenJob,
   scheduleRegenComboHasRemainingPlan,
+  scheduleRegenComboNeedsWork,
+  scheduleRegenComboIsOrphanProcessing,
   preferScheduleRegenJobStore,
   SCHEDULE_REGEN_STATUS,
 } from "./schedule-regen-batch.mjs";
@@ -1956,26 +1958,33 @@ export async function studioProcessScheduleRegenJobSlice(env, jobId, options = {
   const combos = Array.isArray(job.combinations) ? job.combinations.map((row) => ({ ...row })) : [];
   const start = Math.max(0, Number(job.cursor) || 0);
   // One combination per slice — sequential. Resume mid-plan Processing after a crash.
-  const index = combos.findIndex((row, i) => {
-    if (i < start) return false;
-    const status = String(row.status || "");
-    if (status === SCHEDULE_REGEN_STATUS.PENDING) return true;
-    return status === SCHEDULE_REGEN_STATUS.PROCESSING && scheduleRegenComboHasRemainingPlan(row);
-  });
+  // Orphan Processing (no plan) must rebuild — the old findIndex skipped it and the
+  // drain refreshed updated_at forever while Story stayed 0/57.
+  for (let i = 0; i < combos.length; i += 1) {
+    if (scheduleRegenComboIsOrphanProcessing(combos[i])) {
+      combos[i] = {
+        ...combos[i],
+        status: SCHEDULE_REGEN_STATUS.PENDING,
+        error: "",
+        plan: [],
+      };
+    }
+  }
+  const index = combos.findIndex((row, i) => i >= start && scheduleRegenComboNeedsWork(row));
   if (index < 0) {
     const failed = combos.some((row) => row.status === SCHEDULE_REGEN_STATUS.FAILED);
-    const stillOpen = combos.some((row) => {
-      const status = String(row.status || "");
-      return status === SCHEDULE_REGEN_STATUS.PENDING || status === SCHEDULE_REGEN_STATUS.PROCESSING;
-    });
-    job = {
-      ...job,
-      combinations: combos,
-      cursor: stillOpen ? start : combos.length,
-      status: stillOpen ? "running" : (failed ? "failed" : "completed"),
-      updated_at: new Date().toISOString(),
-    };
-    await studioPutScheduleRegenJob(env, job);
+    const stillOpen = combos.some((row) => scheduleRegenComboNeedsWork(row));
+    // Avoid bumping updated_at on a pure no-op so stale reclaim can still fire.
+    if (!stillOpen) {
+      job = {
+        ...job,
+        combinations: combos,
+        cursor: combos.length,
+        status: failed ? "failed" : "completed",
+        updated_at: new Date().toISOString(),
+      };
+      await studioPutScheduleRegenJob(env, job);
+    }
     return job;
   }
 
@@ -1992,12 +2001,15 @@ export async function studioProcessScheduleRegenJobSlice(env, jobId, options = {
     let plan = Array.isArray(combo.plan) ? combo.plan.map((entry) => ({ ...entry })) : [];
     let planBuiltThisSlice = false;
 
-    if (!plan.length) {
+    if (!scheduleRegenComboHasRemainingPlan(combo)) {
       planBuiltThisSlice = true;
+      plan = [];
       const nowMs = Date.now();
       const horizonMs = nowMs + horizonDays * 24 * 60 * 60 * 1000;
       const platformWant = String(combo.platform || "").trim().toLowerCase();
       const typeWant = String(combo.output_type || "").trim().toLowerCase();
+      const profileFormula = contentProfileFilterFormula(profile) || "";
+      const scheduleFields = ["Platform", "Scheduled_Post_Date", "YouTube_Scheduled_Publish_At", "Studio_Scheduled_At", "Publish_Status", "Studio_Output_Type", "Format", "Content_Profile", "Published_At", "Do_Not_Publish", "Output_Status", "Output_ID"];
       const rows = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
         limit: STUDIO_OCCUPIED_LIST_LIMIT,
         sortField: "Scheduled_Post_Date",
@@ -2005,11 +2017,11 @@ export async function studioProcessScheduleRegenJobSlice(env, jobId, options = {
         filterFormula: scheduleRegenCandidateFilterFormula({
           nowMs,
           horizonDays,
-          profileFormula: contentProfileFilterFormula(profile) || "",
+          profileFormula,
           platform: combo.platform,
           outputType: combo.output_type,
         }),
-        fields: ["Platform", "Scheduled_Post_Date", "YouTube_Scheduled_Publish_At", "Studio_Scheduled_At", "Publish_Status", "Studio_Output_Type", "Format", "Content_Profile", "Published_At", "Do_Not_Publish", "Output_Status", "Output_ID"],
+        fields: scheduleFields,
       });
       const eligible = [];
       const protectedTimes = [];
@@ -2041,42 +2053,66 @@ export async function studioProcessScheduleRegenJobSlice(env, jobId, options = {
       combo.rescheduled = 0;
 
       const eligibleIds = new Set(eligible.map((row) => row.id));
-      // A bulk regeneration is a clean rebuild of every still-unprocessed lane on
-      // this platform. Their old future stamps must not constrain the first lane,
-      // but lanes already completed in this job must immediately become blockers.
+      // Prefer placed_isos from combos already finished in this job (cheap). Fall back
+      // to a same-platform horizon list — never the full 1200-row occupied scan that
+      // killed waitUntil before the Story plan could persist.
+      const platformProtectedTimes = [];
+      for (const prior of combos) {
+        if (String(prior?.profile_id || "") !== String(combo.profile_id || "")) continue;
+        if (String(prior?.platform || "").trim().toLowerCase() !== platformWant) continue;
+        if (String(prior?.status || "") !== SCHEDULE_REGEN_STATUS.COMPLETED) continue;
+        for (const iso of prior.placed_isos || []) {
+          const ms = Date.parse(iso);
+          if (Number.isFinite(ms)) platformProtectedTimes.push(ms);
+        }
+      }
       const unsettledPlatformTypes = new Set(
         combos
           .filter((row, comboIndex) => {
             if (comboIndex < index) return false;
             if (String(row?.profile_id || "") !== String(combo.profile_id || "")) return false;
             if (String(row?.platform || "").trim().toLowerCase() !== platformWant) return false;
-            return [SCHEDULE_REGEN_STATUS.PENDING, SCHEDULE_REGEN_STATUS.PROCESSING].includes(String(row?.status || ""));
+            return scheduleRegenComboNeedsWork(row)
+              || String(row?.status || "") === SCHEDULE_REGEN_STATUS.PROCESSING;
           })
           .map((row) => String(row?.output_type || "").trim().toLowerCase())
           .filter(Boolean),
       );
-      const platformRows = await studioLoadOccupiedScheduleRows(env, { profile });
-      const platformProtectedTimes = [];
-      for (const row of platformRows || []) {
-        if (eligibleIds.has(row.id) || !studioOccupiedRowMatchesProfile(row, profile)) continue;
-        const platform = String(f(row, "Platform") || "").trim().toLowerCase();
-        if (platform !== platformWant) continue;
-        const outputType = String(f(row, "Studio_Output_Type") || f(row, "Format") || "").trim().toLowerCase();
-        const published = Boolean(String(f(row, "Published_At") || "").trim())
-          || String(f(row, "Publish_Status") || "").trim() === "Published"
-          || String(f(row, "Output_Status") || "").trim() === "Published";
-        const ms = studioOccupiedMsFromRow(row, nowMs);
-        if (
-          ms != null
-          && ms > nowMs
-          && ms <= horizonMs
-          && !published
-          && !Boolean(f(row, "Do_Not_Publish"))
-          && unsettledPlatformTypes.has(outputType)
-        ) {
-          continue;
+      if (!platformProtectedTimes.length) {
+        const platformRows = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
+          limit: 400,
+          sortField: "Scheduled_Post_Date",
+          sortDirection: "asc",
+          filterFormula: scheduleRegenCandidateFilterFormula({
+            nowMs,
+            horizonDays,
+            profileFormula,
+            platform: combo.platform,
+            outputType: "",
+          }),
+          fields: scheduleFields,
+        });
+        for (const row of platformRows || []) {
+          if (eligibleIds.has(row.id) || !studioOccupiedRowMatchesProfile(row, profile)) continue;
+          const platform = String(f(row, "Platform") || "").trim().toLowerCase();
+          if (platform !== platformWant) continue;
+          const outputType = String(f(row, "Studio_Output_Type") || f(row, "Format") || "").trim().toLowerCase();
+          const published = Boolean(String(f(row, "Published_At") || "").trim())
+            || String(f(row, "Publish_Status") || "").trim() === "Published"
+            || String(f(row, "Output_Status") || "").trim() === "Published";
+          const ms = studioOccupiedMsFromRow(row, nowMs);
+          if (
+            ms != null
+            && ms > nowMs
+            && ms <= horizonMs
+            && !published
+            && !Boolean(f(row, "Do_Not_Publish"))
+            && unsettledPlatformTypes.has(outputType)
+          ) {
+            continue;
+          }
+          if (ms != null) platformProtectedTimes.push(ms);
         }
-        if (ms != null) platformProtectedTimes.push(ms);
       }
 
       const reservedLane = protectedTimes.slice();
@@ -2162,6 +2198,8 @@ export async function studioProcessScheduleRegenJobSlice(env, jobId, options = {
     if ((Number(combo.completed_posts) || 0) >= plan.length) {
       combo.status = SCHEDULE_REGEN_STATUS.COMPLETED;
       combo.error = "";
+      // Keep placed times so later lanes (Story after Reel) skip the heavy occupied scan.
+      combo.placed_isos = plan.map((entry) => entry.iso).filter(Boolean);
       combo.plan = [];
     } else {
       // More posts remain — stay Processing so the next drain/poll slice continues.
@@ -2170,6 +2208,7 @@ export async function studioProcessScheduleRegenJobSlice(env, jobId, options = {
       combo.plan = plan;
       if (planBuiltThisSlice && !plan.length) {
         combo.status = SCHEDULE_REGEN_STATUS.COMPLETED;
+        combo.placed_isos = [];
       }
     }
   } catch (error) {
@@ -2178,15 +2217,7 @@ export async function studioProcessScheduleRegenJobSlice(env, jobId, options = {
   }
 
   combos[index] = { ...combo };
-  const comboStillOpen = String(combo.status || "") === SCHEDULE_REGEN_STATUS.PROCESSING
-    || String(combo.status || "") === SCHEDULE_REGEN_STATUS.PENDING;
-  const nextPending = combos.findIndex((row, i) => {
-    if (i < index) return false;
-    if (i === index && comboStillOpen) return true;
-    const status = String(row.status || "");
-    return status === SCHEDULE_REGEN_STATUS.PENDING
-      || (status === SCHEDULE_REGEN_STATUS.PROCESSING && scheduleRegenComboHasRemainingPlan(row));
-  });
+  const nextPending = combos.findIndex((row, i) => i >= index && scheduleRegenComboNeedsWork(row));
   const failed = combos.some((row) => row.status === SCHEDULE_REGEN_STATUS.FAILED);
   const more = nextPending >= 0;
   job = {
@@ -2208,15 +2239,17 @@ export async function studioDrainScheduleRegenJob(env, jobId, options = {}) {
     Math.min(20, Number(options.maxSlices) || SCHEDULE_REGEN_MAX_SLICES_PER_DRAIN),
   );
   let job = null;
+  let lastSig = "";
   for (let i = 0; i < maxSlices; i += 1) {
     job = await studioProcessScheduleRegenJobSlice(env, jobId, options);
     if (!job || job.status === "completed" || job.status === "failed") return job;
-    const open = (job.combinations || []).some((row) => {
-      const status = String(row?.status || "");
-      return status === SCHEDULE_REGEN_STATUS.PENDING
-        || status === SCHEDULE_REGEN_STATUS.PROCESSING;
-    });
+    const open = (job.combinations || []).some((row) => scheduleRegenComboNeedsWork(row));
     if (!open) return job;
+    const sig = (job.combinations || [])
+      .map((row) => `${row.status}:${row.completed_posts || 0}:${(row.plan || []).length}`)
+      .join("|");
+    if (sig === lastSig) return job;
+    lastSig = sig;
   }
   return job;
 }
@@ -2316,16 +2349,15 @@ export async function getScheduleRegenJobStatus(request, env, authorization, ctx
     });
   }
   if (job.status === "queued" || job.status === "running") {
-    const sliceAlreadyRunning = (job.combinations || []).some(
-      (row) => String(row?.status || "") === SCHEDULE_REGEN_STATUS.PROCESSING,
-    );
+    const combos = job.combinations || [];
+    const healthyProcessing = combos.some((row) => scheduleRegenComboHasRemainingPlan(row));
+    const orphanProcessing = combos.some((row) => scheduleRegenComboIsOrphanProcessing(row));
     const stale = scheduleRegenJobIsStale(job);
-    // Never await a full combination on the status GET — a 57-story Facebook lane
-    // exceeded the request budget, left Processing forever, and froze Regenerating…
-    // after refresh while the 10:00 AM Story stack never moved. Drain bounded
-    // chunks via waitUntil; polls reclaim + resume if the prior drain died.
-    if (!sliceAlreadyRunning || stale) {
-      if (stale && sliceAlreadyRunning) {
+    // Never await a full combination on the status GET. Kick drain when idle/orphan/
+    // stale — but not while a healthy mid-plan Processing slice is still leased.
+    // Orphan Processing (no plan) used to look "busy" forever while Story stayed 0/57.
+    if (!healthyProcessing || stale || orphanProcessing) {
+      if (stale && healthyProcessing) {
         job = reclaimStaleScheduleRegenJob(job);
         job.status = "running";
         job.updated_at = new Date().toISOString();

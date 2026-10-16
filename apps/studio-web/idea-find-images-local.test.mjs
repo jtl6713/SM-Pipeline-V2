@@ -9,9 +9,9 @@ const app = fs.readFileSync(path.join(here, "assets/app-item4-1008.js"), "utf8")
 const html = fs.readFileSync(path.join(here, "index.html"), "utf8");
 
 test("UI build advertises idea find-images local refresh", () => {
-  assert.match(app, /BUILD_ID = "item4-0.6.700-schedule-regen-waituntil"/);
-  assert.match(html, /UI build 0.6.700/);
-  assert.match(html, /app-item4-1008\.js\?v=0.6.700-schedule-regen-waituntil/);
+  assert.match(app, /BUILD_ID = "item4-0.6.701-schedule-regen-story-drain"/);
+  assert.match(html, /UI build 0.6.701/);
+  assert.match(html, /app-item4-1008\.js\?v=0.6.701-schedule-regen-story-drain/);
 });
 
 test("Find images now patches one idea row instead of reloading Ideas", () => {

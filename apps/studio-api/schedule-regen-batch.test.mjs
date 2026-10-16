@@ -15,6 +15,8 @@ import {
   reclaimStaleScheduleRegenJob,
   scheduleRegenCandidateFilterFormula,
   scheduleRegenComboHasRemainingPlan,
+  scheduleRegenComboNeedsWork,
+  scheduleRegenComboIsOrphanProcessing,
   scheduleRegenJobCounts,
   scheduleRegenJobIsStale,
   scheduleRegenProgressMessage,
@@ -101,6 +103,15 @@ test("stale Processing jobs can be reclaimed so regenerate is not stuck forever"
   job.updated_at = new Date(Date.now() - 5 * 60 * 1000).toISOString();
   assert.equal(scheduleRegenJobIsStale(job), true);
   assert.equal(scheduleRegenComboHasRemainingPlan(job.combinations[0]), true);
+  assert.equal(scheduleRegenComboNeedsWork(job.combinations[0]), true);
+  assert.equal(scheduleRegenComboIsOrphanProcessing(job.combinations[0]), false);
+  const orphan = {
+    ...job.combinations[0],
+    plan: [],
+    completed_posts: 0,
+  };
+  assert.equal(scheduleRegenComboIsOrphanProcessing(orphan), true);
+  assert.equal(scheduleRegenComboNeedsWork(orphan), true);
   const reclaimed = reclaimStaleScheduleRegenJob(job);
   assert.equal(reclaimed.combinations[0].status, SCHEDULE_REGEN_STATUS.PENDING);
   assert.equal(reclaimed.combinations[0].completed_posts, 1);
@@ -202,7 +213,10 @@ test("Worker and Pipeline wire durable schedule regeneration", () => {
   assert.match(worker, /async function studioDrainScheduleRegenJob/);
   assert.match(worker, /ctx\.waitUntil\(studioDrainScheduleRegenJob/);
   assert.match(worker, /SCHEDULE_REGEN_POSTS_PER_SLICE/);
-  assert.match(worker, /version: "0\.10\.632-schedule-regen-waituntil"/);
+  assert.match(worker, /scheduleRegenComboIsOrphanProcessing/);
+  assert.match(worker, /placed_isos/);
+  assert.match(worker, /Orphan Processing \(no plan\)/);
+  assert.match(worker, /version: "0\.10\.633-schedule-regen-story-drain"/);
   assert.match(app, /\/api\/outputs\/schedule-regen/);
   assert.match(app, /pathname === "\/api\/outputs\/schedule-regen"/);
   assert.match(app, /queuePipelineScheduleRegenPoll/);
