@@ -277,7 +277,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.698-schedule-regen-r2";
+  const BUILD_ID = "item4-0.6.699-schedule-regen-fresh";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -19454,6 +19454,8 @@ function timedScriptAssetLabel(asset, index) {
     if (current && (job.status === "running" || job.status === "queued")) {
       lines.push(`Currently processing: ${current}`);
       lines.push(`Current combination: ${counts.active_percent || 0}% complete.`);
+      const moved = Number(counts.posts_rescheduled || summary.posts_rescheduled || 0) || 0;
+      if (moved > 0) lines.push(`Posts rescheduled so far: ${moved}. Calendar refreshes from live Airtable times.`);
     }
     if (job.status === "completed" || job.status === "failed") {
       lines.push(`Successfully completed: ${summary.completed_combinations || counts.completed_combinations || 0}`);
@@ -19487,7 +19489,6 @@ function timedScriptAssetLabel(asset, index) {
       `/api/outputs/schedule-regen?job_id=${encodeURIComponent(jobId)}`,
       { timeoutMs: 90000, retries: 1 },
     );
-    renderScheduleRegenProgress(data);
     if (data?.status === "queued" || data?.status === "running") {
       if (button) {
         button.disabled = true;
@@ -19495,10 +19496,14 @@ function timedScriptAssetLabel(asset, index) {
       }
       // Repaint after every completed backend slice so the operator can watch
       // the bubbles move instead of waiting for the entire job to finish.
-      await loadPipelineScheduleGridWindow().catch(() => {});
+      // fresh=1 forces Airtable so Supabase write-through lag cannot freeze the grid.
+      await loadPipelineScheduleGridWindow("", { fresh: true }).catch(() => {});
+      // Re-apply progress after calendar load (it may reset the message strip).
+      renderScheduleRegenProgress(data);
       queuePipelineScheduleRegenPoll(jobId, button);
       return data;
     }
+    renderScheduleRegenProgress(data);
     // Idle right after start means the durable store lost the job (empty Airtable
     // seed used to shadow R2). Surface that instead of silently resetting the button.
     if (data?.status === "idle") {
@@ -19513,7 +19518,7 @@ function timedScriptAssetLabel(asset, index) {
       button.textContent = "Regenerate schedules";
     }
     await refreshPipelineOutputs({ silent: true, force: true });
-    await loadPipelineScheduleGridWindow();
+    await loadPipelineScheduleGridWindow("", { fresh: true });
     return data;
   }
 
@@ -20621,11 +20626,11 @@ function timedScriptAssetLabel(asset, index) {
     return helper.dayKey(first, workingStudioTimeZone()) === helper.dayKey(new Date(), workingStudioTimeZone());
   }
 
-  async function loadPipelineScheduleGridWindow(message = "") {
+  async function loadPipelineScheduleGridWindow(message = "", options = {}) {
     const generation = ++pipelineScheduleGridLoadGeneration;
     if (message) setPipelineScheduleGridMessage(message);
     try {
-      const result = await api(pipelineScheduleGridApiPath(), { timeoutMs: 15000, retries: 1 });
+      const result = await api(pipelineScheduleGridApiPath({ fresh: Boolean(options?.fresh) }), { timeoutMs: 15000, retries: 1 });
       if (generation !== pipelineScheduleGridLoadGeneration) return;
       pipelineScheduleGridRecords = mergeCalendarYouTubePublishedRows(result?.records || []);
       renderPipelineScheduleGrid(pipelineScheduleGridRecords, String(result?.schedule_error || ""));
@@ -21104,14 +21109,16 @@ function timedScriptAssetLabel(asset, index) {
     }
   }
 
-  function pipelineScheduleGridApiPath() {
+  function pipelineScheduleGridApiPath(options = {}) {
     const windowValue = pipelineScheduleWindow();
-    if (!windowValue) return "/api/outputs/schedule-grid";
-    const params = new URLSearchParams({
-      start: windowValue.now.toISOString(),
-      end: windowValue.end.toISOString(),
-    });
-    return `/api/outputs/schedule-grid?${params.toString()}`;
+    const params = new URLSearchParams();
+    if (windowValue) {
+      params.set("start", windowValue.now.toISOString());
+      params.set("end", windowValue.end.toISOString());
+    }
+    if (options?.fresh) params.set("fresh", "1");
+    const query = params.toString();
+    return query ? `/api/outputs/schedule-grid?${query}` : "/api/outputs/schedule-grid";
   }
 
   function syncPipelineScheduleGridRecord(record) {
