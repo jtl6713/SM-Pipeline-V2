@@ -282,6 +282,7 @@ test("Worker and Pipeline wire durable schedule regeneration", () => {
   assert.match(worker, /SCHEDULE_REGEN_OVERNIGHT_V1/);
   assert.match(worker, /studioEnqueueOvernightScheduleRegenJobs/);
   assert.match(worker, /studioResumeScheduleRegenJobs/);
+  assert.match(worker, /Scanned\n\s*eligible_ids with plan=\[\]/);
   assert.match(worker, /studio schedule-regen resume failed/);
   assert.match(worker, /scheduleRegenComboIsEmptyLane\(combo\)/);
   // Empty-lane Complete must run before the needsPlanning gate (Chicago 0/0 after 0.10.637).
