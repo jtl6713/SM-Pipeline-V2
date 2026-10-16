@@ -12007,10 +12007,14 @@ export async function factoryBatchProcess(env, profileId, requestId, ctx = null)
         // render eligibility, Do_Not_Publish and the MAE / Story scheduling rules.
         // Reject profile drift before calling any authoritative approval mutation.
         const record = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, id);
-        const raw = f(record, "Content_Profile");
-        const ownProfileIds = (Array.isArray(raw) ? raw : [raw]).map(String);
-        if (ownProfileIds.some(value => /^rec[A-Za-z0-9]+$/.test(value))
-          && !ownProfileIds.includes(profileId)) {
+        // Profile ownership must resolve from the authoritative Content Item
+        // when Platform Output exposes only a lookup display-name, never infer
+        // a city from the operator's selected profile.
+        const ownerProfileId = await studioContentProfileRecordIdForOutput(env, record);
+        if (!ownerProfileId) {
+          throw new HttpError(409, "Cannot verify output's Content Profile; approval was not submitted");
+        }
+        if (ownerProfileId !== profileId) {
           throw new HttpError(409, "Output belongs to a different content profile");
         }
         return factoryApproveOutput(env, id, "Factory Batch", job.notes || "", ctx);
