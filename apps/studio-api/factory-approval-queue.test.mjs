@@ -156,3 +156,55 @@ test("cron recovery rotates across old R2 history beyond 200 jobs without starvi
   const wrapped = await factoryBatchCronScan(bucket, { maxScan: 120 });
   assert.ok(wrapped.objects.some(row => row.key.includes("/rec00000/")), "Full pass must restart to catch newly inserted keys");
 });
+
+test("bounded drain executes a useful chunk then safely leaves the remainder for cron", async () => {
+  const bucket = new FakeR2();
+  const rid = "bounded_factory_drain_20";
+  await factoryBatchEnqueue(bucket, { profileId, requestId: rid, records });
+  let clockMs = 100000;
+  let calls = 0;
+  const result = await factoryBatchDrain(bucket, {
+    profileId, requestId: rid, maxItems: 20, maxElapsedMs: 15000,
+    now: () => clockMs, makeOwner: () => "bounded-worker",
+    approve: async () => { calls++; clockMs += 6000; },
+  });
+  assert.equal(result.processed, 3);
+  assert.equal(result.job.status, "running");
+  assert.equal(factoryBatchCounts(result.job).pending_count, 17);
+  assert.equal(calls, 3);
+  const resumed = await factoryBatchDrain(bucket, {
+    profileId, requestId: rid, maxItems: 20, now: () => clockMs,
+    makeOwner: () => "cron-worker", approve: async () => { calls++; },
+  });
+  assert.equal(resumed.job.status, "completed");
+  assert.equal(resumed.job.items.filter(item => item.status === "approved").length, 20);
+  assert.equal(calls, 20);
+});
+
+test("independent batch IDs for same outputs must use canonical state to skip duplicates", async () => {
+  const bucket = new FakeR2();
+  const firstRequest = "cross_job_first_20261016";
+  const secondRequest = "cross_job_second_20261016";
+  const selected = records.slice(0, 4);
+  await factoryBatchEnqueue(bucket, { profileId, requestId: firstRequest, records: selected });
+  await factoryBatchEnqueue(bucket, { profileId, requestId: secondRequest, records: selected });
+  const previouslyApproved = new Set();
+  let canonicalCommits = 0;
+  const canonicalApproval = async id => {
+    if (previouslyApproved.has(id)) return { already_approved: true };
+    previouslyApproved.add(id);
+    canonicalCommits++;
+    return { id };
+  };
+  const initial = await factoryBatchDrain(bucket, {
+    profileId, requestId: firstRequest, approve: canonicalApproval,
+    maxItems: 10, makeOwner: () => "job-one",
+  });
+  const duplicate = await factoryBatchDrain(bucket, {
+    profileId, requestId: secondRequest, approve: canonicalApproval,
+    maxItems: 10, makeOwner: () => "job-two",
+  });
+  assert.equal(initial.job.items.filter(x => x.status === "approved").length, 4);
+  assert.equal(duplicate.job.items.filter(x => x.status === "already_satisfied").length, 4);
+  assert.equal(canonicalCommits, 4);
+});
