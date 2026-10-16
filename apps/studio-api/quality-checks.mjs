@@ -29,6 +29,8 @@ export const QUALITY_HEALS = Object.freeze([
   "release_autonomous_revision_lock",
   "extend_last_clip_requeue_r4",
   "ticket_only",
+  "resume_factory_batch",
+  "reconcile_factory_batch",
   "none",
 ]);
 
@@ -53,6 +55,16 @@ function check(row) {
 
 /** Precise operator sentences. `kind` matches a classifier or tester assertion. */
 export const QUALITY_CHECKS = Object.freeze([
+  check({ id: "factory_batch_stalled", title: "Detect Factory approval batches stalled beyond recovery heartbeat", lane: "service",
+    kind: "factory_batch_stalled", actor: "worker_heal", heal: "resume_factory_batch" }),
+  check({ id: "factory_batch_state_mismatch", title: "Reconcile Factory batch status that disagrees with durable item states", lane: "service",
+    kind: "factory_batch_state_mismatch", actor: "worker_heal", heal: "reconcile_factory_batch" }),
+  check({ id: "factory_batch_duplicate_item", title: "Block Factory batch with duplicate output IDs; require manual inspection", lane: "service",
+    kind: "factory_batch_duplicate_item", actor: "desk_agent", heal: "ticket_only" }),
+  check({ id: "factory_batch_transient_wait", title: "Track transient Factory item retries without bypassing backoff", lane: "service",
+    kind: "factory_batch_transient_wait", actor: "worker_heal", heal: "resume_factory_batch" }),
+  check({ id: "factory_batch_failed_item", title: "Surface failed-only Factory approval retries without touching successes", lane: "service",
+    kind: "factory_batch_failed_item", actor: "desk_agent", heal: "ticket_only" }),
   check({
     id: "intake_processed_residue",
     title: "Check for orphaned ingestion content that has already been fully processed",
