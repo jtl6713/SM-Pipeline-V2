@@ -338,6 +338,7 @@ import {
   SCHEDULE_REGEN_POSTS_PER_SLICE,
   SCHEDULE_REGEN_PLAN_SLOTS_PER_SLICE,
   SCHEDULE_REGEN_MAX_SLICES_PER_DRAIN,
+  SCHEDULE_REGEN_LIVE_LEASE_MS,
   createScheduleRegenJob,
   emptyScheduleRegenJobStore,
   parseScheduleRegenJobStore,
@@ -1025,7 +1026,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.635-schedule-regen-ig-resume",
+          version: "0.10.636-schedule-regen-soft-lease",
           studio_supabase_pipeline_reads_v1: true,
           studio_supabase_sync_gate_v1: true,
           studio_supabase_phase3_stable_v1: true,

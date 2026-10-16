@@ -342,6 +342,7 @@ import {
   SCHEDULE_REGEN_POSTS_PER_SLICE,
   SCHEDULE_REGEN_PLAN_SLOTS_PER_SLICE,
   SCHEDULE_REGEN_MAX_SLICES_PER_DRAIN,
+  SCHEDULE_REGEN_LIVE_LEASE_MS,
   createScheduleRegenJob,
   scheduleRegenCandidateFilterFormula,
   emptyScheduleRegenJobStore,
@@ -2351,9 +2352,13 @@ export async function getScheduleRegenJobStatus(request, env, authorization, ctx
   }
   if (job.status === "queued" || job.status === "running") {
     const combos = job.combinations || [];
-    // Only a live Processing lease should block resume. Pending + partial plan used to
+    const jobUpdatedMs = Date.parse(job.updated_at || job.created_at || "") || 0;
+    const jobAgeMs = Math.max(0, Date.now() - jobUpdatedMs);
+    // Only a *fresh* Processing lease should block resume. Pending + partial plan used to
     // look "healthy" and froze Instagram Reel at 45/95 while Regenerating… stayed lit.
-    const leasedProcessing = combos.some((row) => {
+    // Mid-plan / mid-apply with a dead waitUntil also looked healthy (IG Story plan-complete 0/68).
+    const softLeaseMs = Math.max(10_000, Number(SCHEDULE_REGEN_LIVE_LEASE_MS) || 20_000);
+    const leasedProcessing = jobAgeMs < softLeaseMs && combos.some((row) => {
       if (String(row?.status || "") !== SCHEDULE_REGEN_STATUS.PROCESSING) return false;
       if (scheduleRegenComboIsOrphanProcessing(row)) return false;
       return scheduleRegenComboHasRemainingPlan(row)
