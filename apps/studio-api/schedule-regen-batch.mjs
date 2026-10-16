@@ -27,6 +27,24 @@ const CANONICAL_PLATFORMS = Object.freeze({
   youtube: "YouTube",
 });
 
+/**
+ * Calendar regen only schedules real publish lanes. UI used to forward every distinct
+ * Studio_Output_Type on the grid (Video Draft, Multi-Photo aliases, …), which created
+ * dozens of empty combinations and stuck Chicago on Facebook Carousel 0/0 forever.
+ */
+export const SCHEDULE_REGEN_OUTPUT_TYPE_ALLOWLIST = Object.freeze(new Set([
+  "reel",
+  "story",
+  "carousel",
+  "short",
+  "multi-image post",
+  "multi-photo",
+  "single image",
+  "single photo",
+  "slideshow video",
+  "slideshow reel",
+]));
+
 /** Pipeline calendar sends lowercase keys; Airtable Platform is title case. */
 export function canonicalizeScheduleRegenPlatform(value) {
   const raw = String(value || "").trim();
@@ -34,6 +52,31 @@ export function canonicalizeScheduleRegenPlatform(value) {
   const hit = CANONICAL_PLATFORMS[raw.toLowerCase()];
   if (hit) return hit;
   return raw[0].toUpperCase() + raw.slice(1);
+}
+
+export function canonicalizeScheduleRegenOutputType(value) {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+  if (!SCHEDULE_REGEN_OUTPUT_TYPE_ALLOWLIST.has(raw.toLowerCase())) return "";
+  // Preserve common Airtable casing.
+  if (raw === "Reel" || raw === "Story" || raw === "Carousel" || raw === "Short") return raw;
+  if (/^multi-image post$/i.test(raw)) return "Multi-Image Post";
+  if (/^multi-photo$/i.test(raw)) return "Multi-Photo";
+  if (/^single image$/i.test(raw)) return "Single Image";
+  if (/^single photo$/i.test(raw)) return "Single Photo";
+  if (/^slideshow video$/i.test(raw)) return "Slideshow Video";
+  if (/^slideshow reel$/i.test(raw)) return "Slideshow Reel";
+  return raw[0].toUpperCase() + raw.slice(1);
+}
+
+/** True when the eligible scan finished and this lane has nothing to reschedule. */
+export function scheduleRegenComboIsEmptyLane(combo) {
+  if (!combo || typeof combo !== "object") return false;
+  const total = Math.max(0, Number(combo.total_posts) || 0);
+  if (total > 0) return false;
+  // eligible_ids present (even []) after a scan checkpoint — not a pre-scan orphan.
+  if (!Object.prototype.hasOwnProperty.call(combo, "eligible_ids")) return false;
+  return Array.isArray(combo.eligible_ids);
 }
 
 export const SCHEDULE_REGEN_STATUS = Object.freeze({
@@ -269,9 +312,10 @@ export function scheduleRegenJobIsStale(job, nowMs = Date.now(), staleMs = SCHED
   return false;
 }
 
-/** True when MAE has assigned an iso for every eligible post. */
+/** True when MAE has assigned an iso for every eligible post (or the lane is empty). */
 export function scheduleRegenComboPlanComplete(combo) {
   if (!combo || typeof combo !== "object") return false;
+  if (scheduleRegenComboIsEmptyLane(combo)) return true;
   const total = Math.max(0, Number(combo.total_posts) || 0);
   const planLen = Array.isArray(combo.plan) ? combo.plan.length : 0;
   return total > 0 && planLen >= total;
@@ -292,6 +336,7 @@ export function scheduleRegenComboNeedsPlanning(combo) {
   if (status !== SCHEDULE_REGEN_STATUS.PENDING && status !== SCHEDULE_REGEN_STATUS.PROCESSING) {
     return false;
   }
+  if (scheduleRegenComboIsEmptyLane(combo)) return false;
   if (scheduleRegenComboPlanComplete(combo)) return false;
   const eligible = Array.isArray(combo.eligible_ids) ? combo.eligible_ids : [];
   const total = Math.max(0, Number(combo.total_posts) || 0);
@@ -302,20 +347,25 @@ export function scheduleRegenComboNeedsPlanning(combo) {
 /**
  * Pending work, mid-plan Processing, or orphan Processing (crash before plan
  * persisted). Orphans must not sit forever — that froze LA Facebook Story at 0/57.
+ * Empty scanned lanes still need a slice so the Worker can mark them Completed
+ * (otherwise Chicago Facebook Carousel 0/0 spins forever with needsWork=false).
  */
 export function scheduleRegenComboNeedsWork(combo) {
   const status = String(combo?.status || "");
   if (status === SCHEDULE_REGEN_STATUS.PENDING) return true;
   if (status !== SCHEDULE_REGEN_STATUS.PROCESSING) return false;
+  if (scheduleRegenComboIsEmptyLane(combo)) return true;
   return scheduleRegenComboNeedsPlanning(combo) || scheduleRegenComboHasRemainingPlan(combo);
 }
 
 /**
  * Processing with no durable plan/checkpoint is an orphan crash.
  * Mid-planning (eligible_ids present) is not an orphan — the next slice continues.
+ * Scanned-empty lanes are not orphans either — they complete as 0/0.
  */
 export function scheduleRegenComboIsOrphanProcessing(combo) {
   if (String(combo?.status || "") !== SCHEDULE_REGEN_STATUS.PROCESSING) return false;
+  if (scheduleRegenComboIsEmptyLane(combo)) return false;
   if (scheduleRegenComboHasRemainingPlan(combo)) return false;
   if (scheduleRegenComboNeedsPlanning(combo)) {
     const eligible = Array.isArray(combo.eligible_ids) ? combo.eligible_ids : [];

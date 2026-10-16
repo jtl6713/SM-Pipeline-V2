@@ -15,6 +15,8 @@ import {
   canonicalizeScheduleRegenPlatform,
   createScheduleRegenJob,
   reclaimStaleScheduleRegenJob,
+  scheduleRegenComboIsEmptyLane,
+  canonicalizeScheduleRegenOutputType,
   scheduleRegenCandidateFilterFormula,
   scheduleRegenComboHasRemainingPlan,
   scheduleRegenComboPlanComplete,
@@ -113,13 +115,15 @@ test("stale Processing jobs can be reclaimed so regenerate is not stuck forever"
   assert.equal(scheduleRegenComboHasRemainingPlan(job.combinations[0]), true);
   assert.equal(scheduleRegenComboNeedsWork(job.combinations[0]), true);
   assert.equal(scheduleRegenComboIsOrphanProcessing(job.combinations[0]), false);
+  // True orphan = Processing crash before scan checkpoint (no eligible_ids key).
+  // eligible_ids:[] is a finished empty lane, not an orphan.
   const orphan = {
     ...job.combinations[0],
     plan: [],
-    eligible_ids: [],
     completed_posts: 0,
     total_posts: 0,
   };
+  delete orphan.eligible_ids;
   assert.equal(scheduleRegenComboIsOrphanProcessing(orphan), true);
   assert.equal(scheduleRegenComboNeedsWork(orphan), true);
   const checkpoint = {
@@ -151,6 +155,26 @@ test("stale Processing jobs can be reclaimed so regenerate is not stuck forever"
   assert.deepEqual(slimed.plan, []);
   assert.deepEqual(slimed.eligible_ids, []);
   assert.equal(slimed.placed_isos.length, 1);
+});
+
+
+test("empty lane with 0 eligible completes and is not an orphan spin", () => {
+  const empty = {
+    status: SCHEDULE_REGEN_STATUS.PROCESSING,
+    total_posts: 0,
+    completed_posts: 0,
+    plan: [],
+    eligible_ids: [],
+  };
+  assert.equal(scheduleRegenComboIsEmptyLane(empty), true);
+  assert.equal(scheduleRegenComboPlanComplete(empty), true);
+  assert.equal(scheduleRegenComboNeedsPlanning(empty), false);
+  assert.equal(scheduleRegenComboIsOrphanProcessing(empty), false);
+  // Still needs a drain slice so the Worker marks Completed (unstick 0/0).
+  assert.equal(scheduleRegenComboNeedsWork(empty), true);
+  assert.equal(canonicalizeScheduleRegenOutputType("Video Draft"), "");
+  assert.equal(canonicalizeScheduleRegenOutputType("Reel"), "Reel");
+  assert.equal(canonicalizeScheduleRegenOutputType("multi-image post"), "Multi-Image Post");
 });
 
 test("progress counts report actual combination completion", () => {
@@ -254,7 +278,7 @@ test("Worker and Pipeline wire durable schedule regeneration", () => {
   assert.match(worker, /leasedProcessing/);
   assert.match(worker, /SCHEDULE_REGEN_LIVE_LEASE_MS/);
   assert.match(worker, /softLeaseMs/);
-  assert.match(worker, /version: "0.10.636-schedule-regen-soft-lease"/);
+  assert.match(worker, /version: "0.10.637-schedule-regen-empty-lane"/);
   assert.match(app, /\/api\/outputs\/schedule-regen/);
   assert.match(app, /pathname === "\/api\/outputs\/schedule-regen"/);
   assert.match(app, /queuePipelineScheduleRegenPoll/);

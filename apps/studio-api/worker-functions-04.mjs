@@ -353,6 +353,7 @@ import {
   scheduleRegenProgressMessage,
   summarizeScheduleRegenJob,
   canonicalizeScheduleRegenPlatform,
+  canonicalizeScheduleRegenOutputType,
   scheduleRegenJobIsStale,
   reclaimStaleScheduleRegenJob,
   scheduleRegenComboHasRemainingPlan,
@@ -360,6 +361,7 @@ import {
   scheduleRegenComboNeedsPlanning,
   scheduleRegenComboNeedsWork,
   scheduleRegenComboIsOrphanProcessing,
+  scheduleRegenComboIsEmptyLane,
   preferScheduleRegenJobStore,
   SCHEDULE_REGEN_STATUS,
 } from "./schedule-regen-batch.mjs";
@@ -1931,7 +1933,11 @@ export function studioNormalizeRegenFilters(payload = {}) {
     ? [...new Set(payload.platforms.map((v) => canonicalizeScheduleRegenPlatform(v)).filter(Boolean))]
     : [];
   const outputTypes = Array.isArray(payload.output_types || payload.outputTypes)
-    ? (payload.output_types || payload.outputTypes).map((v) => String(v || "").trim()).filter(Boolean)
+    ? [...new Set(
+      (payload.output_types || payload.outputTypes)
+        .map((v) => canonicalizeScheduleRegenOutputType(v))
+        .filter(Boolean),
+    )]
     : [];
   const profiles = Array.isArray(payload.profiles)
     ? payload.profiles.map((row) => ({
@@ -1969,15 +1975,22 @@ export async function studioProcessScheduleRegenJobSlice(env, jobId, options = {
   // Orphan Processing (no plan/checkpoint) must rebuild — otherwise Story stays 0/57.
   for (let i = 0; i < combos.length; i += 1) {
     if (scheduleRegenComboIsOrphanProcessing(combos[i])) {
-      combos[i] = {
+      // Drop scan markers so the next pass re-lists Airtable (do not set eligible_ids=[] —
+      // that looks like a finished empty lane and would skip the scan).
+      const reset = {
         ...combos[i],
         status: SCHEDULE_REGEN_STATUS.PENDING,
         error: "",
         plan: [],
-        eligible_ids: [],
-        lane_reserved_ms: [],
-        platform_reserved_ms: [],
+        completed_posts: 0,
+        total_posts: 0,
+        rescheduled: 0,
       };
+      delete reset.eligible_ids;
+      delete reset.lane_reserved_ms;
+      delete reset.platform_reserved_ms;
+      delete reset.placed_isos;
+      combos[i] = reset;
     }
   }
   const index = combos.findIndex((row, i) => i >= start && scheduleRegenComboNeedsWork(row));
@@ -2017,7 +2030,10 @@ export async function studioProcessScheduleRegenJobSlice(env, jobId, options = {
       const typeWant = String(combo.output_type || "").trim().toLowerCase();
       const profileFormula = contentProfileFilterFormula(profile) || "";
       const scheduleFields = ["Platform", "Scheduled_Post_Date", "YouTube_Scheduled_Publish_At", "Studio_Scheduled_At", "Publish_Status", "Studio_Output_Type", "Format", "Content_Profile", "Published_At", "Do_Not_Publish", "Output_Status", "Output_ID"];
-      let eligibleIds = Array.isArray(combo.eligible_ids) ? combo.eligible_ids.map(String) : [];
+      const alreadyScanned = Object.prototype.hasOwnProperty.call(combo, "eligible_ids");
+      let eligibleIds = alreadyScanned
+        ? (Array.isArray(combo.eligible_ids) ? combo.eligible_ids.map(String) : [])
+        : [];
       let reservedLane = Array.isArray(combo.lane_reserved_ms)
         ? combo.lane_reserved_ms.map(Number).filter(Number.isFinite)
         : [];
@@ -2025,7 +2041,7 @@ export async function studioProcessScheduleRegenJobSlice(env, jobId, options = {
         ? combo.platform_reserved_ms.map(Number).filter(Number.isFinite)
         : [];
 
-      if (!eligibleIds.length) {
+      if (!alreadyScanned) {
         const rows = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
           limit: STUDIO_OCCUPIED_LIST_LIMIT,
           sortField: "Scheduled_Post_Date",
@@ -2091,6 +2107,35 @@ export async function studioProcessScheduleRegenJobSlice(env, jobId, options = {
         job = { ...job, combinations: combos, updated_at: new Date().toISOString() };
         // Checkpoint before MAE so a crash is not an empty orphan Processing.
         await studioPutScheduleRegenJob(env, job);
+      }
+
+      // Empty lane (0 eligible) used to fail planComplete and spin Processing forever
+      // (Chicago Facebook Carousel 0/0). Mark Completed and advance.
+      if (scheduleRegenComboIsEmptyLane(combo) || !eligibleIds.length) {
+        combo.status = SCHEDULE_REGEN_STATUS.COMPLETED;
+        combo.error = "";
+        combo.total_posts = 0;
+        combo.completed_posts = 0;
+        combo.rescheduled = 0;
+        combo.placed_isos = [];
+        combo.plan = [];
+        combo.eligible_ids = [];
+        combo.lane_reserved_ms = [];
+        combo.platform_reserved_ms = [];
+        combos[index] = { ...combo };
+        const nextPending = combos.findIndex((row, i) => i >= index && scheduleRegenComboNeedsWork(row));
+        const failed = combos.some((row) => row.status === SCHEDULE_REGEN_STATUS.FAILED);
+        const more = nextPending >= 0;
+        job = {
+          ...job,
+          combinations: combos,
+          cursor: more ? nextPending : combos.length,
+          status: more ? "running" : (failed ? "failed" : "completed"),
+          updated_at: new Date().toISOString(),
+        };
+        studioInvalidateOccupiedScheduleCache();
+        await studioPutScheduleRegenJob(env, job);
+        return job;
       }
 
       const planStart = plan.length;
