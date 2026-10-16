@@ -11,6 +11,13 @@ Status: **WIP / DRAFT PR #786. DO NOT MERGE OR DEPLOY AS RELEASE-COMPLETE.**
 - Resume: Cloudflare cron calls `factoryBatchCronResume` without a browser. Crashed workers can be reclaimed after lease expiry, with canonical output state reread before any further approval.
 - Quality: typed signatures and health checks, bounded transient backoff and safe state reconciliation. Terminal failures stay manual unless Retry Failed is clicked.
 
+## Controlled rollout guard (added after staging)
+
+- New `POST /api/factory/approval-batches` requests are **disabled by default**. Only an explicit Worker environment variable `FACTORY_BATCH_APPROVALS_ENABLED=true` enables batch approval mutations. With the flag unset, POST returns HTTP 503 **before** reading the request body or creating any batch, and individual Factory/Pipeline approval routes remain available.
+- `GET /api/factory/approval-batches` remains read-only and returns `approvals_enabled`. Factory UI disables Submit Approvals with a descriptive tooltip if that value is false; existing approved/failed batch status remains visible.
+- **Release sequence:** synchronize the branch with current `main`, use the next Worker and UI version **after comparing the latest main versions**, pass all CI, merge and deploy with the flag absent/false, inspect health/read-only Factory, then enable the flag only after a live nonpublishing staging write test is independently validated. Feature activation is separate from code deployment.
+- Rollback activation by setting the flag false/unset, independent of restoring the previous Worker/UI versions. Never enable the flag simply to make CI pass or exercise unapproved production content.
+
 ## HTTP contract
 
 POST start: `{ action:"start", content_profile_id:"rec...", request_id:"UUID", record_ids:["rec..."], items:[{id,output_id,platform,format}], notes:"..." }`
