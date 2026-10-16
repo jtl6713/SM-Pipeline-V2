@@ -347,3 +347,5 @@ phase4-followup schedule-regen-chunked-drain 2026-10-16T04:04:25Z worker 0.10.63
 phase4-followup schedule-regen-story-drain 2026-10-16T04:14:23Z worker 0.10.634-schedule-regen-plan-persist UI 0.6.701 (orphan Processing + light Story plan)
 
 phase4-followup schedule-regen-plan-persist 2026-10-16T04:26:08Z worker 0.10.634-schedule-regen-plan-persist (checkpoint eligible_ids + chunked MAE plan)
+
+phase4-followup schedule-regen-ig-resume 2026-10-16T04:38:42Z worker 0.10.635-schedule-regen-ig-resume (Pending mid-plan must resume; slim store)

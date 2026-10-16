@@ -1025,7 +1025,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.634-schedule-regen-plan-persist",
+          version: "0.10.635-schedule-regen-ig-resume",
           studio_supabase_pipeline_reads_v1: true,
           studio_supabase_sync_gate_v1: true,
           studio_supabase_phase3_stable_v1: true,

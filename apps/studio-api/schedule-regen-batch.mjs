@@ -5,7 +5,7 @@ import { maeSortRegenCombinations } from "./mae-schedule.mjs";
 export const SCHEDULE_REGEN_JOBS_SETTING = "SCHEDULE_REGEN_JOBS_V1";
 export const SCHEDULE_REGEN_JOB_TTL_MS = 24 * 60 * 60 * 1000;
 export const SCHEDULE_REGEN_STORE_CHAR_BUDGET = 80000;
-export const SCHEDULE_REGEN_MAX_TERMINAL_JOBS = 3;
+export const SCHEDULE_REGEN_MAX_TERMINAL_JOBS = 1;
 /** A Processing combo older than this is treated as crashed; GET/POST may resume or reclaim. */
 export const SCHEDULE_REGEN_STALE_PROCESSING_MS = 45 * 1000;
 /** Max Airtable/Supabase schedule writes per Worker slice so a 50+ Story lane cannot hang Regenerating… forever. */
@@ -115,6 +115,22 @@ export function scheduleRegenCombinationKey(combo) {
   return `${profileId || profile}::${platform}::${outputType}`;
 }
 
+/** Drop bulky plan checkpoints from finished combinations so Airtable/R2 stay under budget. */
+export function slimScheduleRegenCombination(combo, { keepPlacedIsos = false } = {}) {
+  if (!combo || typeof combo !== "object") return combo;
+  const status = String(combo.status || "");
+  const finished = status === SCHEDULE_REGEN_STATUS.COMPLETED || status === SCHEDULE_REGEN_STATUS.FAILED;
+  if (!finished) return combo;
+  return {
+    ...combo,
+    plan: [],
+    eligible_ids: [],
+    lane_reserved_ms: [],
+    platform_reserved_ms: [],
+    placed_isos: keepPlacedIsos && Array.isArray(combo.placed_isos) ? combo.placed_isos : [],
+  };
+}
+
 export function pruneScheduleRegenJobStore(store, nowMs = Date.now(), limits = {}) {
   const maxChars = Number(limits.maxChars) > 0 ? Number(limits.maxChars) : SCHEDULE_REGEN_STORE_CHAR_BUDGET;
   const maxTerminal = Number(limits.maxTerminalJobs) > 0
@@ -126,7 +142,13 @@ export function pruneScheduleRegenJobStore(store, nowMs = Date.now(), limits = {
     const terminal = job?.status === "completed" || job?.status === "failed";
     if (terminal && updated && nowMs - updated > SCHEDULE_REGEN_JOB_TTL_MS) {
       delete next.jobs[id];
+      continue;
     }
+    // Running jobs keep placed_isos on completed lanes (Story after Reel). Terminal jobs drop them.
+    job.combinations = (Array.isArray(job.combinations) ? job.combinations : []).map((combo) => (
+      slimScheduleRegenCombination(combo, { keepPlacedIsos: !terminal })
+    ));
+    next.jobs[id] = job;
   }
   const terminalIds = Object.entries(next.jobs)
     .filter(([, job]) => job?.status === "completed" || job?.status === "failed")

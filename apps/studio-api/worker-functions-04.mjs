@@ -2351,16 +2351,20 @@ export async function getScheduleRegenJobStatus(request, env, authorization, ctx
   }
   if (job.status === "queued" || job.status === "running") {
     const combos = job.combinations || [];
-    const healthyProcessing = combos.some((row) => (
-      scheduleRegenComboHasRemainingPlan(row)
-      || (scheduleRegenComboNeedsPlanning(row) && Array.isArray(row.eligible_ids) && row.eligible_ids.length > 0)
-    ));
+    // Only a live Processing lease should block resume. Pending + partial plan used to
+    // look "healthy" and froze Instagram Reel at 45/95 while Regenerating… stayed lit.
+    const leasedProcessing = combos.some((row) => {
+      if (String(row?.status || "") !== SCHEDULE_REGEN_STATUS.PROCESSING) return false;
+      if (scheduleRegenComboIsOrphanProcessing(row)) return false;
+      return scheduleRegenComboHasRemainingPlan(row)
+        || (scheduleRegenComboNeedsPlanning(row) && Array.isArray(row.eligible_ids) && row.eligible_ids.length > 0);
+    });
     const orphanProcessing = combos.some((row) => scheduleRegenComboIsOrphanProcessing(row));
     const stale = scheduleRegenJobIsStale(job);
     // Never await a full combination on the status GET. Kick drain when idle/orphan/
-    // stale — but not while a healthy mid-plan / mid-apply Processing slice is leased.
-    if (!healthyProcessing || stale || orphanProcessing) {
-      if (stale && healthyProcessing) {
+    // stale / Pending work remains — but not while a healthy Processing lease is live.
+    if (!leasedProcessing || stale || orphanProcessing) {
+      if (stale && leasedProcessing) {
         job = reclaimStaleScheduleRegenJob(job);
         job.status = "running";
         job.updated_at = new Date().toISOString();

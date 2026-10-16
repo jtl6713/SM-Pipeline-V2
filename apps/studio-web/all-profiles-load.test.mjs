@@ -52,5 +52,5 @@ test("Worker budgets overview Airtable work so home never waits 60s", () => {
   assert.match(worker, /studio_home_overview_budget_v1:\s*true/);
   assert.match(worker, /STUDIO_PROFILES_OVERVIEW_BUILD_BUDGET_MS/);
   assert.match(worker, /raceStudioOverviewBudget/);
-  assert.match(worker, /0.10.634-schedule-regen-plan-persist/);
+  assert.match(worker, /0.10.635-schedule-regen-ig-resume/);
 });
