@@ -117,7 +117,20 @@ test("Worker and Pipeline wire durable schedule regeneration", () => {
   assert.match(worker, /platformProtectedTimes/);
   assert.match(worker, /unsettledPlatformTypes/);
   assert.match(worker, /platformOccupiedMs:\s*reservedPlatform/);
+  assert.match(worker, /studioDiscoverScheduleRegenScope/);
+  assert.match(worker, /studioScheduleRegenJobIsStale/);
+  assert.match(worker, /studioRecoverStaleScheduleRegenJob/);
+  assert.match(worker, /url\.searchParams\.get\("preview"\) === "1"/);
   assert.match(app, /\/api\/outputs\/schedule-regen/);
+  assert.match(app, /preview:\s*"1"/);
+  assert.match(app, /eligible_count/);
+  assert.match(app, /Checking the live schedule for eligible posts/);
+  const bulkRegen = app.slice(
+    app.indexOf("async function regeneratePipelineSchedulesForPlatforms"),
+    app.indexOf("async function regeneratePipelineContentSchedule"),
+  );
+  assert.doesNotMatch(bulkRegen, /pipelineRegenOutputTypes\(eligible\)/);
+  assert.doesNotMatch(bulkRegen, /\(pipelineOutputs \|\| \[\]\)\.filter/);
   assert.match(app, /pathname === "\/api\/outputs\/schedule-regen"/);
   assert.match(app, /queuePipelineScheduleRegenPoll/);
   assert.match(app, /loadPipelineScheduleGridWindow/);
