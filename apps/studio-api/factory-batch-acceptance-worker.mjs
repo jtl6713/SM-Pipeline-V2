@@ -44,7 +44,7 @@ async function approve(env, id, job) {
   });
 }
 async function drain(env, req) {
-  const rid = requestId(req);
+  const rid = requestId(new URL(req.url));
   return factoryBatchDrain(env.STUDIO_MEDIA, {
     profileId: PROFILE, requestId: rid, maxItems: COUNT,
     approve: (id, job) => approve(env, id, job),
