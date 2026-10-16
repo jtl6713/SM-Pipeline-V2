@@ -5689,6 +5689,10 @@ const YOUTUBE_COMPLETE_ERRORS = {
 /*__STUDIO_WORKER_EXTRACT:describeA2Run__*/
 /*__STUDIO_WORKER_EXTRACT:buildLibraryIntakeStatus__*/
 /*__STUDIO_WORKER_EXTRACT:getStudioLibraryIntakeStatus__*/
+/*__STUDIO_WORKER_EXTRACT:factoryBatchStatusRoute__*/
+/*__STUDIO_WORKER_EXTRACT:factoryBatchProcess__*/
+/*__STUDIO_WORKER_EXTRACT:factoryBatchSubmitRoute__*/
+/*__STUDIO_WORKER_EXTRACT:factoryBatchCronResume__*/
 // Shared bindings for the extracted function modules (live ESM references).
 export {
   airtableFetch,
