@@ -339,6 +339,9 @@ import {
 } from "./mae-schedule.mjs";
 import {
   SCHEDULE_REGEN_JOBS_SETTING,
+  SCHEDULE_REGEN_OVERNIGHT_SETTING,
+  SCHEDULE_REGEN_OVERNIGHT_PLATFORMS,
+  SCHEDULE_REGEN_OVERNIGHT_OUTPUT_TYPES,
   SCHEDULE_REGEN_POSTS_PER_SLICE,
   SCHEDULE_REGEN_PLAN_SLOTS_PER_SLICE,
   SCHEDULE_REGEN_MAX_SLICES_PER_DRAIN,
@@ -2016,6 +2019,36 @@ export async function studioProcessScheduleRegenJobSlice(env, jobId, options = {
   job = { ...job, combinations: combos, cursor: index, updated_at: new Date().toISOString() };
   await studioPutScheduleRegenJob(env, job);
 
+  // Empty scanned lanes must Complete even when needsPlanning is false (empty-lane
+  // short-circuit). Leaving this only inside the planning block left Chicago
+  // Facebook Carousel Processing 0/0 after 0.10.637 while polls kept refreshing the lease.
+  if (scheduleRegenComboIsEmptyLane(combo)) {
+    combo.status = SCHEDULE_REGEN_STATUS.COMPLETED;
+    combo.error = "";
+    combo.total_posts = 0;
+    combo.completed_posts = 0;
+    combo.rescheduled = 0;
+    combo.placed_isos = [];
+    combo.plan = [];
+    combo.eligible_ids = [];
+    combo.lane_reserved_ms = [];
+    combo.platform_reserved_ms = [];
+    combos[index] = { ...combo };
+    const nextPending = combos.findIndex((row, i) => i > index && scheduleRegenComboNeedsWork(row));
+    const failed = combos.some((row) => row.status === SCHEDULE_REGEN_STATUS.FAILED);
+    const more = nextPending >= 0;
+    job = {
+      ...job,
+      combinations: combos,
+      cursor: more ? nextPending : combos.length,
+      status: more ? "running" : (failed ? "failed" : "completed"),
+      updated_at: new Date().toISOString(),
+    };
+    studioInvalidateOccupiedScheduleCache();
+    await studioPutScheduleRegenJob(env, job);
+    return job;
+  }
+
   try {
     const profile = combo.profile_id
       ? await airtableFetch(env, "Content Profiles", combo.profile_id).catch(() => null)
@@ -2406,8 +2439,16 @@ export async function getScheduleRegenJobStatus(request, env, authorization, ctx
     const leasedProcessing = jobAgeMs < softLeaseMs && combos.some((row) => {
       if (String(row?.status || "") !== SCHEDULE_REGEN_STATUS.PROCESSING) return false;
       if (scheduleRegenComboIsOrphanProcessing(row)) return false;
-      return scheduleRegenComboHasRemainingPlan(row)
-        || (scheduleRegenComboNeedsPlanning(row) && Array.isArray(row.eligible_ids) && row.eligible_ids.length > 0);
+      // Apply mid-flight is a real lease.
+      if (scheduleRegenComboHasRemainingPlan(row)) return true;
+      // Mid-plan only leases once MAE has persisted at least one slot. Scanned
+      // eligible_ids with plan=[] used to refresh updated_at on every failed
+      // kick and freeze Chicago Facebook Story at 0/83 forever.
+      const planLen = Array.isArray(row.plan) ? row.plan.length : 0;
+      return scheduleRegenComboNeedsPlanning(row)
+        && Array.isArray(row.eligible_ids)
+        && row.eligible_ids.length > 0
+        && planLen > 0;
     });
     const orphanProcessing = combos.some((row) => scheduleRegenComboIsOrphanProcessing(row));
     const stale = scheduleRegenJobIsStale(job);
@@ -2725,6 +2766,122 @@ export async function studioResumeApproveAllJobs(env, ctx = null) {
   return seen.size;
 }
 /*__STUDIO_WORKER_END:studioResumeApproveAllJobs__*/
+
+/**
+ * One-shot overnight fanout controlled by Pipeline Setting SCHEDULE_REGEN_OVERNIGHT_V1:
+ * `{ "enabled": true, "day": "YYYY-MM-DD" }`. Enqueues allowlisted platform×type
+ * jobs for every Active Content Profile that is not already running.
+ */
+export async function studioEnqueueOvernightScheduleRegenJobs(env) {
+  const row = await studioSettingsByName(env, SCHEDULE_REGEN_OVERNIGHT_SETTING).catch(() => null);
+  const raw = row?.fields?.Setting_Value || row?.fields?.Value || "";
+  let cfg = {};
+  try {
+    cfg = JSON.parse(raw || "{}") || {};
+  } catch {
+    return { enqueued: 0, reason: "invalid_json" };
+  }
+  if (!cfg?.enabled) return { enqueued: 0, reason: "disabled" };
+  const today = new Date().toISOString().slice(0, 10);
+  if (String(cfg.day || "") !== today) return { enqueued: 0, reason: "wrong_day" };
+
+  const store = await studioLoadScheduleRegenJobStore(env);
+  const profiles = await listRecords(env, "Content Profiles", {
+    limit: 50,
+    filterFormula: "{Active}=1",
+    fields: ["Profile_Name", "Active"],
+  }).catch(() => []);
+  const already = new Set(
+    (Array.isArray(cfg.enqueued_profile_ids) ? cfg.enqueued_profile_ids : []).map((id) => String(id || "").trim()).filter(Boolean),
+  );
+  const horizonDays = maeNormalizeHorizonDays(
+    cfg.horizon_days,
+    await studioScheduleHorizonDays(env).catch(() => 30),
+  );
+  let created = 0;
+  for (const profile of profiles || []) {
+    const profileId = String(profile?.id || "").trim();
+    if (!profileId) continue;
+    const activeId = store.active_by_scope[profileId];
+    const activeJob = activeId ? store.jobs[activeId] : null;
+    if (activeJob && ["queued", "running"].includes(String(activeJob.status || ""))) {
+      already.add(profileId);
+      continue;
+    }
+    if (already.has(profileId)) continue;
+    const rawName = String(f(profile, "Profile_Name") || "").trim() || profileId;
+    const shortName = rawName.includes(" - ") ? rawName.split(" - ").slice(-1)[0].trim() : rawName;
+    const job = createScheduleRegenJob({
+      profileId,
+      profiles: [{ id: profileId, name: shortName }],
+      platforms: [...SCHEDULE_REGEN_OVERNIGHT_PLATFORMS],
+      outputTypes: [...SCHEDULE_REGEN_OVERNIGHT_OUTPUT_TYPES],
+      horizonDays,
+      eligibleCount: 0,
+    });
+    store.jobs[job.id] = job;
+    store.active_by_scope[profileId] = job.id;
+    already.add(profileId);
+    created += 1;
+  }
+  if (created > 0) {
+    await studioPutScheduleRegenJobStore(env, store, "Overnight schedule regeneration enqueue");
+  }
+  await studioUpsertSetting(
+    env,
+    SCHEDULE_REGEN_OVERNIGHT_SETTING,
+    JSON.stringify({
+      ...cfg,
+      enabled: true,
+      day: today,
+      enqueued_profile_ids: [...already],
+      last_enqueue_at: new Date().toISOString(),
+      last_created: created,
+    }),
+    "Overnight all-profile schedule regen",
+  );
+  return { enqueued: created, tracked: already.size };
+}
+/*__STUDIO_WORKER_END:studioEnqueueOvernightScheduleRegenJobs__*/
+
+/**
+ * Keep calendar regenerate moving without a browser poll. Light cron drains every
+ * queued/running schedule-regen job so overnight all-profile runs finish after
+ * Joseph closes the laptop.
+ */
+export async function studioResumeScheduleRegenJobs(env, ctx = null) {
+  const store = await studioLoadScheduleRegenJobStore(env);
+  const activeIds = Object.values(store.active_by_scope || {});
+  const running = Object.values(store.jobs || {}).filter((job) => {
+    if (!job) return false;
+    if (activeIds.includes(job.id)) return true;
+    return job.status === "queued" || job.status === "running";
+  });
+  const seen = new Set();
+  for (const job of running) {
+    if (!job?.id || seen.has(job.id)) continue;
+    seen.add(job.id);
+    const open = (job.combinations || []).some((row) => scheduleRegenComboNeedsWork(row));
+    if (!open && (job.status === "queued" || job.status === "running")) {
+      const failed = (job.combinations || []).some((row) => row.status === SCHEDULE_REGEN_STATUS.FAILED);
+      job.status = failed ? "failed" : "completed";
+      job.updated_at = new Date().toISOString();
+      await studioPutScheduleRegenJob(env, job);
+      continue;
+    }
+    if (ctx && typeof ctx.waitUntil === "function") {
+      ctx.waitUntil(studioDrainScheduleRegenJob(env, job.id).catch((error) => {
+        console.warn("schedule regen cron resume failed", job.id, error);
+      }));
+    } else {
+      await studioDrainScheduleRegenJob(env, job.id).catch((error) => {
+        console.warn("schedule regen cron resume failed", job.id, error);
+      });
+    }
+  }
+  return seen.size;
+}
+/*__STUDIO_WORKER_END:studioResumeScheduleRegenJobs__*/
 
 export async function approveAllOutputsForPublishing(request, env, authorization, ctx = null) {
   let payload = {};
