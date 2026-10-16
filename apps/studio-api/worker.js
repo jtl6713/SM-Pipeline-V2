@@ -350,6 +350,8 @@ import {
   scheduleRegenJobIsStale,
   reclaimStaleScheduleRegenJob,
   scheduleRegenComboHasRemainingPlan,
+  scheduleRegenComboNeedsWork,
+  scheduleRegenComboIsOrphanProcessing,
   SCHEDULE_REGEN_STATUS,
 } from "./schedule-regen-batch.mjs";
 import {
@@ -1020,7 +1022,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.632-schedule-regen-waituntil",
+          version: "0.10.633-schedule-regen-story-drain",
           studio_supabase_pipeline_reads_v1: true,
           studio_supabase_sync_gate_v1: true,
           studio_supabase_phase3_stable_v1: true,

@@ -7,7 +7,7 @@ import { normalizedOutputState } from "./worker-functions-01.mjs";
 
 const root = dirname(fileURLToPath(import.meta.url));
 
-test("Worker version is 0.10.632-schedule-regen-waituntil", () => {
+test("Worker version is 0.10.633-schedule-regen-story-drain", () => {
   const worker = readFileSync(join(root, "worker.js"), "utf8");
   assert.match(worker, /version: "0\.10\.632-schedule-regen-waituntil"/);
 });

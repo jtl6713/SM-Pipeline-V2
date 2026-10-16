@@ -151,7 +151,7 @@ test("approve-all store stays under Airtable Setting_Value budget", () => {
 test("worker exposes durable approve-all batch routes and cron resume", () => {
   assert.match(worker, /from "\.\/approve-all-batch\.mjs"/);
   assert.match(worker, /studio_approve_all_batch_v1:\s*true/);
-  assert.match(worker, /0.10.632-schedule-regen-waituntil/);
+  assert.match(worker, /0.10.633-schedule-regen-story-drain/);
   assert.match(worker, /async function studioFetchApproveAllRecordsByIds/);
   assert.match(worker, /async function studioProcessApproveAllJobSlice/);
   assert.match(worker, /skipOccupancyRefresh: true/);
@@ -171,7 +171,7 @@ test("worker exposes durable approve-all batch routes and cron resume", () => {
 });
 
 test("Studio UI starts Approve All as a background job and polls progress", () => {
-  assert.match(app, /item4-0.6.700-schedule-regen-waituntil/);
+  assert.match(app, /item4-0.6.701-schedule-regen-story-drain/);
   assert.match(app, /startPipelineApproveAllJobWatch/);
   assert.match(app, /pollPipelineApproveAllJob/);
   assert.match(app, /Retry failed/);

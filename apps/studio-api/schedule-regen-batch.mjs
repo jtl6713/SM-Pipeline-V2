@@ -248,6 +248,23 @@ export function scheduleRegenComboHasRemainingPlan(combo) {
   return plan.length > 0 && done < plan.length;
 }
 
+/**
+ * Pending work, mid-plan Processing, or orphan Processing (crash before plan
+ * persisted). Orphans must not sit forever — that froze LA Facebook Story at 0/57.
+ */
+export function scheduleRegenComboNeedsWork(combo) {
+  const status = String(combo?.status || "");
+  if (status === SCHEDULE_REGEN_STATUS.PENDING) return true;
+  if (status !== SCHEDULE_REGEN_STATUS.PROCESSING) return false;
+  return true;
+}
+
+/** Processing with no durable plan is an orphan crash, not an in-flight slice. */
+export function scheduleRegenComboIsOrphanProcessing(combo) {
+  return String(combo?.status || "") === SCHEDULE_REGEN_STATUS.PROCESSING
+    && !scheduleRegenComboHasRemainingPlan(combo);
+}
+
 /** Reset crashed Processing combos so a later slice can finish them (keep plan progress). */
 export function reclaimStaleScheduleRegenJob(job, nowMs = Date.now()) {
   if (!job || typeof job !== "object") return job;

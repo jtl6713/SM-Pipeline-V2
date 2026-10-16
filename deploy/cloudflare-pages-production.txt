@@ -367,12 +367,14 @@ UI 0.6.607 hashtag mismatch warning only; approval no longer blocked.
 
 2026-10-15: UI 0.6.696-approve-binding-dirty. Redeploy Pages after custom-domain verify connection reset on #756.
 Redeploy Studio Pages from main 3ed88f1 alongside scheduled overview/dispatch backend (2026-10-15).
-2026-10-15: UI 0.6.700-schedule-regen-waituntil. Keep calendar regeneration button busy through the durable job, scope it to the selected profile, retry slow status polls, and repaint the calendar after every completed slice.
+2026-10-15: UI 0.6.701-schedule-regen-story-drain. Keep calendar regeneration button busy through the durable job, scope it to the selected profile, retry slow status polls, and repaint the calendar after every completed slice.
 
-phase4-followup schedule-regen-r2 2026-10-16T03:22:06Z UI 0.6.700-schedule-regen-waituntil
+phase4-followup schedule-regen-r2 2026-10-16T03:22:06Z UI 0.6.701-schedule-regen-story-drain
 
-phase4-followup schedule-regen-fresh 2026-10-16T03:52:10Z UI 0.6.700-schedule-regen-waituntil
+phase4-followup schedule-regen-fresh 2026-10-16T03:52:10Z UI 0.6.701-schedule-regen-story-drain
 
-phase4-followup schedule-regen-waituntil 2026-10-16T04:01:32Z UI 0.6.700-schedule-regen-waituntil (cache-bust; prior hard-refresh still on 0.6.698)
+phase4-followup schedule-regen-waituntil 2026-10-16T04:01:32Z UI 0.6.701-schedule-regen-story-drain (cache-bust; prior hard-refresh still on 0.6.698)
 
-phase4-followup schedule-regen-chunked-drain 2026-10-16T04:04:25Z UI 0.6.700-schedule-regen-waituntil (footer must show 0.6.700 / Worker 0.10.632)
+phase4-followup schedule-regen-chunked-drain 2026-10-16T04:04:25Z UI 0.6.701-schedule-regen-story-drain (footer must show 0.6.701 / Worker 0.10.633)
+
+phase4-followup schedule-regen-story-drain 2026-10-16T04:14:23Z UI 0.6.701-schedule-regen-story-drain (footer must show 0.6.701 / Worker 0.10.633)
