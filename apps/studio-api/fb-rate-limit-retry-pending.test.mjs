@@ -9,7 +9,7 @@ const root = dirname(fileURLToPath(import.meta.url));
 
 test("Worker version is 0.10.643-tiktok-inbox-hold", () => {
   const worker = readFileSync(join(root, "worker.js"), "utf8");
-  assert.match(worker, /version: "0\.10\.642-schedule-regen-sequential"/);
+  assert.match(worker, /version: "0\.10\.643-tiktok-inbox-hold"/);
 });
 
 test("Facebook Graph 368 park paints Retry Pending, not Failed", () => {
