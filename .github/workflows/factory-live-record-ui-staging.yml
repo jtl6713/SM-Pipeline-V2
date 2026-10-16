@@ -1,0 +1,35 @@
+name: Factory Live-Record UI Staging (No Publishing)
+on:
+  pull_request:
+    paths:
+      - "apps/studio-web/factory-real-record-ui.staging.mjs"
+      - "apps/studio-web/assets/factory-desk.js"
+      - "apps/studio-web/index.html"
+      - ".github/workflows/factory-live-record-ui-staging.yml"
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  staging-ui:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install isolated headless Chromium
+        run: |
+          npm install --no-save playwright@1.58.2
+          npx playwright install --with-deps chromium
+      - name: Validate actual Factory UI with 20 audited review-ready Airtable output IDs
+        run: node apps/studio-web/factory-real-record-ui.staging.mjs
+      - name: Save desktop and mobile Factory screen evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: factory-stage-20-real-record-ids
+          path: |
+            /tmp/factory-real-stage-desktop.png
+            /tmp/factory-real-stage-mobile.png
+          if-no-files-found: ignore
