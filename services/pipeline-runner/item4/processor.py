@@ -4,6 +4,9 @@ import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from pathlib import Path
+import io
+
+from PIL import Image
 from typing import Any
 
 from airtable.client import AirtableClient
@@ -511,6 +514,27 @@ def _complete_variant_upload(
     }
 
 
+def _reuse_matching_frame(source: bytes, ratio: str, gravity: str) -> bytes | None:
+    """Bypass remote cropping for an exact, production-sized JPEG frame.
+
+    Keep the normal upload/watermark/media-asset finalization path. Images
+    requiring dimensions, focal cropping, lettering, or format conversion
+    still pass through the variant service.
+    """
+    from item4.constants import RATIO_SPECS
+
+    spec = RATIO_SPECS.get(str(ratio or "").strip())
+    if not spec or gravity not in {"", "center", "center_crop"}:
+        return None
+    try:
+        with Image.open(io.BytesIO(source)) as image:
+            if image.format != "JPEG" or image.size != (spec["width"], spec["height"]):
+                return None
+    except (OSError, ValueError):
+        return None
+    return source
+
+
 def _process_variant_pending(
     client: AirtableClient,
     drive: GoogleDriveClient,
@@ -550,15 +574,18 @@ def _process_variant_pending(
         drive_id=source_drive_id,
         ext=source_ext,
     )
-    rendered = variant.render(
-        source_bytes,
-        ratio,
-        _gravity_token(fields),
-        drive=drive,
-        drive_id=source_drive_id,
-        ext=source_ext,
-    )
-    return _complete_variant_upload(client, drive, row, rendered)
+    gravity = _gravity_token(fields)
+    rendered = _reuse_matching_frame(source_bytes, ratio, gravity)
+    reused = rendered is not None
+    if rendered is None:
+        rendered = variant.render(
+            source_bytes, ratio, gravity,
+            drive=drive, drive_id=source_drive_id, ext=source_ext,
+        )
+    result = _complete_variant_upload(client, drive, row, rendered)
+    if reused:
+        result["route"] = "variant_original_frame_reuse"
+    return result
 
 
 def process_variant_group(
@@ -633,17 +660,22 @@ def process_variant_group(
             else variant
         )
         try:
-            rendered = local_variant.render(
-                source_bytes,
-                ratio,
-                _gravity_token(fields),
-                drive=local_drive,
-                drive_id=source_drive_id,
-                ext=str(fields.get("Source_Extension") or source_ext),
-            )
-            return _complete_variant_upload(
+            gravity = _gravity_token(fields)
+            rendered = _reuse_matching_frame(source_bytes, ratio, gravity)
+            reused = rendered is not None
+            if rendered is None:
+                rendered = local_variant.render(
+                    source_bytes, ratio, gravity,
+                    drive=local_drive,
+                    drive_id=source_drive_id,
+                    ext=str(fields.get("Source_Extension") or source_ext),
+                )
+            result = _complete_variant_upload(
                 client, local_drive, row, rendered, airtable_lock=airtable_lock
             )
+            if reused:
+                result["route"] = "variant_original_frame_reuse"
+            return result
         except Exception as exc:
             try:
                 if airtable_lock:
