@@ -1,5 +1,11 @@
 name: Factory Batch Remote R2 Acceptance (Disposable)
 on:
+  pull_request:
+    paths:
+      - 'apps/studio-api/factory-batch-acceptance-worker.mjs'
+      - 'apps/studio-api/factory-approval-queue.mjs'
+      - 'apps/studio-api/output-approval-lease.mjs'
+      - '.github/workflows/factory-batch-remote-r2.yml'
   push:
     branches: [feature/factory-batch-approval-20261016]
     paths:
