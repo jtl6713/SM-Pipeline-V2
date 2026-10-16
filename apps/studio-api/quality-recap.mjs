@@ -22,6 +22,18 @@ const COPY = {
     found: "A post failed while sending to Instagram, Facebook, TikTok, or YouTube.",
     action: "Restarted the send.",
   },
+  publish_live_failed_status: {
+    found: "A post already went live on the platform, but Pipeline still showed Failed.",
+    action: "Marked it Published and cleared the stale retry flags.",
+  },
+  ttd0_route_blank_draft: {
+    found: "A TikTok video had a public MP4 ready, but draft routing never saw TikTok_Draft_Type=Video.",
+    action: "Stamped Video draft type, restored the CDN publish URL, and restarted TikTok draft prep.",
+  },
+  facebook_publish_rate_limit: {
+    found: "Facebook temporarily blocked Reel upload because the page hit a post rate limit.",
+    action: "Parked the retry for about six hours so Graph is not stormed.",
+  },
   tiktok_auth_signature: {
     found: "A TikTok draft failed because the city auth Worker rejected the pipeline secret (HTTP 401).",
     action: "Aligned the auth Worker signature, then rearmed and republished the draft once.",

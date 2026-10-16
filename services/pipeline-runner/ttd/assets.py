@@ -39,9 +39,30 @@ def video_source_url(record: dict[str, Any]) -> str:
 
 
 def is_video_route(record: dict[str, Any]) -> bool:
-    return _ci(field_str(record, "TikTok_Draft_Type")) == _ci(DRAFT_TYPE_VIDEO) and video_source_url(record).startswith(
-        DEFAULT_MEDIA_PREFIX
+    """True when this TikTok output should take the video draft path.
+
+    Prefer an explicit TikTok_Draft_Type=Video stamp. Also accept Platform /
+    Studio output types that already say TikTok Video when a public CDN MP4 or
+    Final_File_ID is present — blank draft type used to strand Ready videos on
+    TTD0_ROUTE forever (Output 2863).
+    """
+    if is_photo_route(record):
+        return False
+    draft = _ci(field_str(record, "TikTok_Draft_Type"))
+    if draft == _ci(DRAFT_TYPE_VIDEO):
+        # Allow ensure_public_mp4 to stage Drive masters; do not require CDN yet.
+        return bool(video_source_url(record) or field_str(record, "Final_File_ID"))
+    platform_type = _ci(field_str(record, "Platform_Output_Type"))
+    studio_type = _ci(field_str(record, "Studio_Output_Type"))
+    looks_tiktok_video = (
+        ("tiktok" in platform_type and "video" in platform_type)
+        or studio_type in {_ci("Video"), _ci("Video Draft"), _ci("Standard Video")}
     )
+    if not looks_tiktok_video:
+        # Legacy: CDN URL already present, draft type never stamped.
+        url = video_source_url(record)
+        return bool(url.startswith(DEFAULT_MEDIA_PREFIX) and not draft)
+    return bool(video_source_url(record) or field_str(record, "Final_File_ID"))
 
 
 def slide_formula(output_id: str) -> str:

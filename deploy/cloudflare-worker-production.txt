@@ -324,3 +324,5 @@ Deploy scheduled overview and dispatch shared eligibility from main 3ed88f1 (202
 2026-10-15: Guard platform fanout against Cancelled Production Requests and Archived duplicate Content Items to stop output resurrection; regression tested.
 2026-10-15: Worker 0.10.622-schedule-regen-live. Fix calendar regeneration candidate loading (including unscheduled rows), batch Airtable schedule updates, and prevent a status poll from starting a second slice while one is already processing.
 2026-10-15: Fix MAE pileups: restore 5:30/11:30/4:30 profile-local anchors and enforce one wall-clock occupancy per platform while retaining output-type sequencing and cross-platform independence.
+
+2026-10-15: Worker 0.10.623-failed-publish-selfheal. Heal live-Failed publishes, TTD0_ROUTE blank TikTok_Draft_Type, and Facebook Graph 368 rate-limit park; FBS3 reconcile honors Publish_Next_Retry_At.

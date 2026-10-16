@@ -228,3 +228,6 @@ jobs:
 
 # Trigger pipeline-runner deploy so a voiceover is spoken once and then reused
 # 2026-10-14 service_version=2026-10-14-voiceover-once
+
+# Trigger pipeline-runner deploy for TTD0 blank-draft video route + FBS3 Graph 368 rate-limit park
+# 2026-10-15 service_version=2026-10-15-failed-publish-selfheal

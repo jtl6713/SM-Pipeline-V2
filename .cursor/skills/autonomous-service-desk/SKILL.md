@@ -105,6 +105,26 @@ Classify as `tiktok_auth_signature` / `code_bug` / actor `desk_agent` (not `publ
 
 Auto-correct for ordinary Graph/transient Failed publishes remains Worker `studioHealFailedStatuses`. TikTok Manual Fallback / auth-worker 401 is **not** that path.
 
+## Watch: Publish_Status=Failed but the post is already live
+
+Platform Output has `Publish_Status=Failed` while `Platform_Post_ID` / `Published_At` / `Platform_Post_URL` already prove the post is live (often Facebook Reel after cover attach). Cover heal used to skip promoting to Published when `Published_At` was already set, so Pipeline kept painting Failed. Kind `publish_live_failed_status`, class `transient`, actor `worker_heal`, fingerprint `publish_live_failed_status:<output_rec>:post_live`.
+
+Auto-correct: Worker `studioHealLiveFailedPublishStatus` sets `Publish_Status=Published`, clears Retry Pending FB slideshow flags/errors. Do not Publish Now. Proven: Output **1338** / `recsjWNjzcO4nITmZ` / Facebook reel `1437981591868633`. Same fingerprint after a heal tick → `code_bug`.
+
+## Watch: TTD0_ROUTE with CDN MP4 but blank TikTok_Draft_Type
+
+TikTok Video Failed at `Publish_Error_Stage=TTD0_ROUTE` ("found neither a TikTok Draft 9:16 photo set nor a public media.chicagoshining.com video URL") while `Final_File_URL` / `Publish_Asset_URL` already starts with `https://media.chicagoshining.com/` and `TikTok_Draft_Type` is blank. Old `is_video_route` required Draft_Type=Video **and** CDN prefix, so Ready videos looped forever (Output **2863** hit 55 attempts). Kind `ttd0_route_blank_draft`, class `transient`, actor `worker_heal`, fingerprint `ttd0_route_blank_draft:<output_rec>:cdn_video`.
+
+Auto-correct: Worker `studioHealTtd0RouteBlankDraft` stamps `TikTok_Draft_Type=Video`, copies CDN URL onto `Publish_Asset_URL` when needed, sets `TikTok_Draft_Status=Ready for Assets`, clears the error, then TikTok reconcile pulses TTD0. Runner `is_video_route` also accepts Platform_Output_Type TikTok Video + CDN/Final_File_ID. Do not Approve. Proven: Output **2863** / `recLParqcGimTvAr8` / Content 559. Same fingerprint after stamp + TTD0 → `code_bug`.
+
+## Watch: Facebook Graph 368 / 1390008 Reel rate limit
+
+Facebook Reel Failed at FBS3 with Graph OAuthException **368** / subcode **1390008** ("We limit how often you can post… protect the community from spam"). Generic `Publish_Error_Message` used to say only "did not create a Reel upload session" while `FB_Slideshow_Error_Message` held the real text, so Worker heal requeued every few minutes and made the block worse. Kind `facebook_publish_rate_limit`, class `transient`, actor `worker_heal`, fingerprint `facebook_publish_rate_limit:<output_rec>:graph_368`.
+
+Auto-correct: Runner marks `FBS3_RATE_LIMIT` with ~6h `Publish_Next_Retry_At`. Worker `studioHealFailedStatuses` parks (does not pulse FBS3). FBS3 reconcile honors `Publish_Next_Retry_At`. Do not Publish Now during the cooldown. Proven: LA Outputs **3544** / `recBp5anIszX6Ja5k`, **2408** / `reckcUI7Zz8lgkdTF`. Same fingerprint after cooldown + one successful FBS3 → clear; after cooldown still 368 → escalate Joseph (page token / Meta block).
+
+Ordinary FBS2 R2 staging failures (`FBS2_DIRECT_STORAGE`, connection aborted / 10053) stay `publish_failed_transient` — Worker requeues and FBS2 reconcile retries staging from Drive `Final_File_ID`. Proven: Output **1703** / `rec2mZPvJGyxFoqI8`.
+
 ## Watch: Instagram carousel AP3C too many attachments
 
 Instagram Carousel stuck at `IG_Carousel_Status=Children Ready` with `IG_Carousel_Error_Stage=AP3C Parent Creation` and Graph `(#100) Unsupported post type. The post has too little or too many attachments` means the package sent more than **10** child container IDs. Instagram Graph allows **2–10** carousel children. Facebook planning already clamps `Image_Count` to 10; IG carousel stamp used to pass the full clip count through (12 on Output **1235** / Millennium Park Fewer Crowds / `recVphOmGqaxIYHSD`).
