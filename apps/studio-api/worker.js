@@ -639,6 +639,9 @@ import {
   getStudioScheduleSettings,
   putStudioScheduleSettings,
   getApproveAllJobStatus,
+  factoryBatchStatusRoute,
+  factoryBatchSubmitRoute,
+  factoryBatchCronResume,
   studioResumeApproveAllJobs,
   studioEnqueueOvernightScheduleRegenJobs,
   studioResumeScheduleRegenJobs,
@@ -779,6 +782,7 @@ export default {
       const isOperationsQueuePauseRoute = url.pathname === "/api/operations/queue/pause";
       const isOperationsQueueReorderRoute = url.pathname === "/api/operations/queue/reorder";
       const isFactoryDeskRoute = url.pathname === "/api/factory/desk";
+      const isFactoryBatchRoute = url.pathname === "/api/factory/approval-batches";
       const isOperationsProfileRoute = /^\/api\/operations\/profiles\/rec[A-Za-z0-9]+$/.test(url.pathname);
       const isIdeaPrepareToReviewRoute = /^\/api\/ideas\/rec[A-Za-z0-9]+\/prepare-to-review$/.test(url.pathname);
       const isProfileSetupRoute = /^\/api\/profiles\/rec[A-Za-z0-9]+\/setup$/.test(url.pathname);
@@ -1036,7 +1040,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.649-purge-deleted-duplicates",
+          version: "0.10.650-factory-batch-gated",
           studio_supabase_pipeline_reads_v1: true,
           studio_supabase_sync_gate_v1: true,
           studio_supabase_phase3_stable_v1: true,
@@ -1515,6 +1519,16 @@ export default {
         requireAnyPermission(authorization, ["tenant_admin", "publishing_control", "production_configure"]);
         assertWriteRequest(request, env);
         return reorderStudioOperationsRenderQueue(request, env, authorization);
+      }
+
+      if (isFactoryBatchRoute) {
+        requirePermission(authorization, "outputs_review");
+        if (request.method === "GET") return factoryBatchStatusRoute(request, env, authorization);
+        if (request.method === "POST") {
+          assertWriteRequest(request, env);
+          return factoryBatchSubmitRoute(request, env, authorization, ctx);
+        }
+        throw new HttpError(405, "Method not allowed");
       }
 
       if (isFactoryDeskRoute) {
@@ -2329,6 +2343,11 @@ export default {
         await studioHealPhantomRerender(env, { limit: 8 });
       } catch (error) {
         console.warn("phantom rerender heal failed", error);
+      }
+      try {
+        await factoryBatchCronResume(env, ctx);
+      } catch (error) {
+        console.warn("Factory approval batch cron recovery failed", error);
       }
       try {
         await studioResumeApproveAllJobs(env, ctx);
@@ -5683,6 +5702,10 @@ const YOUTUBE_COMPLETE_ERRORS = {
 /*__STUDIO_WORKER_EXTRACT:describeA2Run__*/
 /*__STUDIO_WORKER_EXTRACT:buildLibraryIntakeStatus__*/
 /*__STUDIO_WORKER_EXTRACT:getStudioLibraryIntakeStatus__*/
+/*__STUDIO_WORKER_EXTRACT:factoryBatchStatusRoute__*/
+/*__STUDIO_WORKER_EXTRACT:factoryBatchProcess__*/
+/*__STUDIO_WORKER_EXTRACT:factoryBatchSubmitRoute__*/
+/*__STUDIO_WORKER_EXTRACT:factoryBatchCronResume__*/
 // Shared bindings for the extracted function modules (live ESM references).
 export {
   airtableFetch,
