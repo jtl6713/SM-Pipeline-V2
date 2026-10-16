@@ -2556,6 +2556,13 @@ export async function getApproveAllJobStatus(request, env, authorization) {
     const activeId = store.active_by_profile[profile.id];
     job = activeId ? store.jobs[activeId] : null;
   }
+  // Factory must still show the latest completed batch after the active slot is
+  // cleared. Otherwise closing the browser made completed work vanish from view.
+  if (!job) {
+    job = Object.values(store.jobs || {})
+      .filter((entry) => entry && (!profile?.id || entry.profile_id === profile.id))
+      .sort((a, b) => Date.parse(b.updated_at || b.created_at || 0) - Date.parse(a.updated_at || a.created_at || 0))[0] || null;
+  }
   if (!job) {
     return respond(request, env, {
       ok: true,
@@ -2755,7 +2762,9 @@ export async function studioRunApproveAllJob(env, jobId, ctx = null) {
     }));
   }
   const counts = approveAllJobCounts(job);
-  if (counts.pending_count > 0) {
+  if (counts.pending_count > 0 && result.approvedThisInvoke > 0) {
+    // Do not endlessly recurse on render-wait items with no progress. Cron resumes
+    // them independently, even when every browser has been closed.
     // Chain slices after the HTTP response returns. Cron also resumes queued/running
     // jobs if an isolate budget cut lands mid-batch.
     const continuation = studioRunApproveAllJob(env, jobId, null).catch((error) => {
@@ -2958,6 +2967,10 @@ export async function approveAllOutputsForPublishing(request, env, authorization
   const stamp = new Date().toISOString();
   const profile = await resolveWorkingContentProfile(env, authorization, requestedProfileId(null, payload));
   const action = String(payload?.action || "start").trim().toLowerCase();
+  const requestId = String(payload?.request_id || "").trim();
+  if (requestId && !/^[A-Za-z0-9_-]{12,128}$/.test(requestId)) {
+    throw new HttpError(400, "Invalid batch request_id");
+  }
 
   if (action === "retry") {
     const jobId = String(payload?.job_id || "").trim();
@@ -2968,6 +2981,12 @@ export async function approveAllOutputsForPublishing(request, env, authorization
       throw new HttpError(404, "Approve All job not found for this profile");
     }
     const counts = approveAllJobCounts(existing);
+    if (existing.status === "queued" || existing.status === "running") {
+      return respond(request, env, {
+        ...summarizeApproveAllJob(existing),
+        message: "The batch is still processing; retry is available when it finishes.",
+      });
+    }
     if (counts.failed_count <= 0) {
       return respond(request, env, {
         ...summarizeApproveAllJob(existing),
@@ -2991,6 +3010,17 @@ export async function approveAllOutputsForPublishing(request, env, authorization
   }
 
   const store = await studioLoadApproveAllJobStore(env);
+  // Repeat delivery with the same client request ID must resolve to its original
+  // batch rather than creating another independent approval request.
+  const prior = requestId
+    ? Object.values(store.jobs || {}).find((entry) =>
+        entry?.request_id === requestId && entry?.profile_id === (profile?.id || null))
+    : null;
+  if (prior) {
+    return respond(request, env, {
+      ...summarizeApproveAllJob(prior), accepted: true, already_submitted: true,
+    });
+  }
   const activeId = profile?.id ? store.active_by_profile[profile.id] : null;
   const activeJob = activeId ? store.jobs[activeId] : null;
   if (activeJob && (activeJob.status === "queued" || activeJob.status === "running")) {
@@ -3069,6 +3099,7 @@ export async function approveAllOutputsForPublishing(request, env, authorization
   const job = buildApproveAllJob({
     jobId: newApproveAllJobId(),
     profileId: profile?.id || null,
+    requestId,
     note,
     schedules,
     records: eligibleSummaries,
