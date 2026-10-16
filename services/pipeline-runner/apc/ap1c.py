@@ -6,7 +6,7 @@ from typing import Any
 
 from airtable.client import AirtableClient
 from airtable.constants import CAROUSEL_SLIDES_TABLE, PLATFORM_OUTPUTS_TABLE
-from apc.assets import current_order, list_final_slides
+from apc.assets import current_order, list_final_slides, list_ready_public_assets
 from apc.common import (
     clamp_ig_graph_children,
     expected_child_count,
@@ -121,7 +121,27 @@ def process_request(
         typecast=True,
     )
 
-    slides = list_final_slides(client, field_str(output, "Output_ID") or field(output, "Output_ID"))
+    output_id = field_str(output, "Output_ID") or field(output, "Output_ID")
+    slides = list_final_slides(client, output_id)
+    expected_before_clamp = expected_child_count(output, len(slides))
+    # The C9 final-slides view can omit the first approved cover even though
+    # its IG public asset is Ready. AP1C then repeatedly sees only 4/5 slides
+    # (Output 3420). Recover from the authoritative public-ready slide set,
+    # but only when it has the exact expected number and unique record IDs.
+    if len(slides) != expected_before_clamp:
+        ready_slides = list_ready_public_assets(client, output_id)
+        ready_ids = [str(s.get("id") or "") for s in ready_slides]
+        if len(ready_slides) == expected_before_clamp and len(set(ready_ids)) == len(ready_ids):
+            slides = ready_slides
+            result["recovered_from_public_ready_slides"] = True
+        else:
+            message = (
+                f"AP1C slide-set mismatch: final view {len(slides)}, "
+                f"public-ready {len(ready_slides)}, expected {expected_before_clamp}; "
+                "not creating an incomplete carousel."
+            )
+            _reset_parent(client, output, message, retry_minutes=AP1C_RATE_LIMIT_RETRY_MINUTES)
+            return {"processed": True, "needs_children": True, "reason": "incomplete_slide_set", **result}
     slides, capped = clamp_ig_graph_children(slides, IG_GRAPH_MAX_CHILDREN)
     if capped:
         client.update_record(
