@@ -102,3 +102,47 @@ def test_nonproduction_frame_keeps_transform():
     out = io.BytesIO()
     Image.new("RGB", (540, 960)).save(out, format="JPEG")
     assert _reuse_matching_frame(out.getvalue(), "9:16", "center") is None
+
+
+def test_shared_source_same_ratio_renders_once(monkeypatch):
+    class FakeDrive:
+        def __init__(self):
+            self.downloads = 0
+            self.uploads = 0
+
+        def download_file(self, _file_id):
+            self.downloads += 1
+            return _jpeg_bytes(), "image/jpeg"
+
+        def upload_file(self, _folder, _name, _data, _mime):
+            self.uploads += 1
+            return {"id": f"up{self.uploads}", "webViewLink": "https://drive.google.com/file/d/up/view"}
+
+    class FakeVariant:
+        def __init__(self):
+            self.renders = 0
+
+        def render(self, _source, _ratio, _gravity, **_kwargs):
+            self.renders += 1
+            return b"cropped"
+
+    class FakeAirtable:
+        def update_record(self, *_args, **_kwargs):
+            pass
+
+    monkeypatch.setattr("item4.processor.ensure_media_asset", lambda *_args, **_kwargs: "recMedia")
+    drive = FakeDrive()
+    variant = FakeVariant()
+    rows = [_variant_row(f"r{i}", "shared", "9:16") for i in range(6)]
+    results = process_variant_group(FakeAirtable(), drive, variant, rows)
+    assert len(results) == 6
+    assert drive.downloads == 1
+    assert variant.renders == 1
+    assert drive.uploads == 6
+
+
+def test_hd_original_vertical_frame_skips_upscale():
+    from item4.processor import _reuse_matching_frame
+    out = io.BytesIO()
+    Image.new("RGB", (720, 1280)).save(out, format="JPEG")
+    assert _reuse_matching_frame(out.getvalue(), "9:16", "center") == out.getvalue()
