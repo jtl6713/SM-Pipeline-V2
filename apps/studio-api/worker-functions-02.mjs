@@ -4,10 +4,15 @@ import {
   studioSupabaseConfigured,
   listSupabasePipelineOutputs,
   listSupabaseScheduleGrid,
+  listSupabaseContentItems,
+  listSupabaseOverviewPack,
+  listSupabaseFactoryDeskPack,
   syncAllProfilesPipelineToSupabase,
   syncProfilePipelineToSupabase,
   syncAirtableOutputRowToSupabase,
   STUDIO_SUPABASE_PIPELINE_READ_ROUTES,
+  STUDIO_SUPABASE_PHASE4_READ_ROUTES,
+  STUDIO_SUPABASE_READ_ROUTES,
 } from "./supabase-pipeline-reads.mjs";
 import {
   DESK_SETTING_NAME,
@@ -1068,6 +1073,30 @@ export async function writeFactoryDeskControls(env, controls, actor = null) {
 /*__STUDIO_WORKER_END:writeFactoryDeskControls__*/
 
 export async function loadFactoryIdeaCandidates(env) {
+  if (studioReadSource(env) === "supabase") {
+    try {
+      const pack = await listSupabaseFactoryDeskPack(env, { outputLimit: 50, requestLimit: 20 });
+      const profileMap = new Map((pack.profiles || []).map((row) => [row.id, row]));
+      return (pack.photoWaitIdeas || []).map((record) => {
+        const profile = mapOpsQueueProfileName(profileMap, f(record, "Content_Profile"));
+        return {
+          kind: "idea",
+          id: record.id,
+          idea_id: record.id,
+          title: String(f(record, "Candidate_Title") || `Idea ${f(record, "Candidate_ID") || ""}`).trim(),
+          ...profile,
+          studio_state: "Waiting for photos",
+          photo_wait_status: f(record, "Studio_Photo_Wait_Status") || "Waiting",
+          production_notes: f(record, "Production_Notes") || "",
+          request_status: null,
+          updated_at: record?.createdTime || null,
+          read_source: "supabase",
+        };
+      });
+    } catch (error) {
+      console.warn("supabase factory idea candidates failed; falling back to Airtable", error);
+    }
+  }
   if (!env.AIRTABLE_IDEA_TABLE_ID) return [];
   const ideas = await listRecords(env, env.AIRTABLE_IDEA_TABLE_ID, {
     limit: 40,
@@ -1104,6 +1133,7 @@ export async function loadFactoryIdeaCandidates(env) {
       production_notes: f(record, "Production_Notes") || "",
       request_status: null,
       updated_at: record?.createdTime || null,
+      read_source: "airtable",
     };
   });
 }

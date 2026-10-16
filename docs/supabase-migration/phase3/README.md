@@ -25,9 +25,10 @@
 | Manual / status sync ops | **Yes** | tenant_admin |
 | Schedule Save write-through | **Yes** (upsert after Airtable PATCH) | Keeps calendar drag-drop from snapping back |
 | Approve / Approve All write-through | **Yes** (upsert after Airtable PATCH) | Keeps Pipeline from showing stale Ready for Review |
-| Factory desk | **No** (Airtable live) | Why Factory can look “approved” while Pipeline lags |
-| All Profiles overview | No | Airtable (+ R2 snapshot) |
-| Ideas / Production Requests | No | Airtable |
+| Factory desk | **Phase 4** (when flag on) | See `docs/supabase-migration/phase4/` |
+| All Profiles overview | **Phase 4** | Same flag; Airtable fallback |
+| Content list | **Phase 4** | Same flag; Airtable fallback |
+| Ideas / Production Requests | Sync yes / write No | Synced for Phase 4 reads; writes stay Airtable |
 | Approve / schedule / publish / produce | **Writes stay Airtable**; schedule also upserts Supabase | Airtable write SoR |
 | Asset / music library | No | Drive + Airtable |
 | Make / Remotion / platform publish | No | unchanged |

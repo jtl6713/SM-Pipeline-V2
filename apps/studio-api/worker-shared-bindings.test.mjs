@@ -48,5 +48,5 @@ test("extracted modules that call shared helpers also import them from worker.js
 test("assembled Worker still defines studioMarkMappedListDirty for Approve write-through", () => {
   const worker = readStudioWorkerSource();
   assert.match(worker, /function studioMarkMappedListDirty/);
-  assert.match(worker, /0\.10\.624-fb-rate-limit-retry-pending/);
+  assert.match(worker, /0\.10\.625-supabase-phase4-reads/);
 });
