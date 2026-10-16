@@ -35,7 +35,7 @@ test("outputPreview wires Render_Server_URL through the render-server accept hel
   assert.match(worker, /item4UrlIsRenderServerVideo\(href\)/);
   assert.match(worker, /f\(record, "Render_Server_URL"\)/);
   assert.match(worker, /studio_render_server_preview_v1: true/);
-  assert.match(worker, /version: "0.10.625-supabase-phase4-reads"/);
+  assert.match(worker, /version: "0.10.626-schedule-regen-platform-case"/);
   assert.match(worker, /previewSource = item4UrlIsRenderServerVideo\(studioPreviewUrl\)/);
   assert.match(worker, /"render-server-out"/);
 });

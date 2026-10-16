@@ -347,6 +347,9 @@ import {
   scheduleRegenJobCounts,
   scheduleRegenProgressMessage,
   summarizeScheduleRegenJob,
+  canonicalizeScheduleRegenPlatform,
+  scheduleRegenJobIsStale,
+  reclaimStaleScheduleRegenJob,
   SCHEDULE_REGEN_STATUS,
 } from "./schedule-regen-batch.mjs";
 import {
@@ -1851,7 +1854,7 @@ export async function studioPutScheduleRegenJob(env, job) {
 
 export function studioNormalizeRegenFilters(payload = {}) {
   const platforms = Array.isArray(payload.platforms)
-    ? payload.platforms.map((v) => String(v || "").trim()).filter(Boolean)
+    ? [...new Set(payload.platforms.map((v) => canonicalizeScheduleRegenPlatform(v)).filter(Boolean))]
     : [];
   const outputTypes = Array.isArray(payload.output_types || payload.outputTypes)
     ? (payload.output_types || payload.outputTypes).map((v) => String(v || "").trim()).filter(Boolean)
@@ -1870,6 +1873,10 @@ export async function studioProcessScheduleRegenJobSlice(env, jobId, options = {
   let job = await studioGetScheduleRegenJob(env, jobId);
   if (!job) return null;
   if (job.status === "completed" || job.status === "failed") return job;
+  if (scheduleRegenJobIsStale(job)) {
+    job = reclaimStaleScheduleRegenJob(job);
+    await studioPutScheduleRegenJob(env, job);
+  }
   const horizonDays = maeNormalizeHorizonDays(job.horizon_days, await studioScheduleHorizonDays(env));
   job = { ...job, status: "running", updated_at: new Date().toISOString(), horizon_days: horizonDays };
   await studioPutScheduleRegenJob(env, job);
@@ -2076,11 +2083,22 @@ export async function startScheduleRegenJob(request, env, authorization, ctx = n
   const scope = String(profile?.id || "_all");
   const activeId = store.active_by_scope[scope];
   if (activeId && store.jobs[activeId] && ["queued", "running"].includes(store.jobs[activeId].status)) {
-    return respond(request, env, {
-      ok: false,
-      error: "A schedule regeneration job is already running for this profile",
-      job: summarizeScheduleRegenJob(store.jobs[activeId]),
-    }, 409);
+    const active = store.jobs[activeId];
+    if (scheduleRegenJobIsStale(active)) {
+      // Crashed mid-slice left Processing forever and blocked every new click.
+      const reclaimed = reclaimStaleScheduleRegenJob(active);
+      reclaimed.status = "failed";
+      reclaimed.updated_at = new Date().toISOString();
+      store.jobs[activeId] = reclaimed;
+      delete store.active_by_scope[scope];
+      await studioPutScheduleRegenJobStore(env, store, "Reclaim stale schedule regeneration job");
+    } else {
+      return respond(request, env, {
+        ok: false,
+        error: "A schedule regeneration job is already running for this profile",
+        job: summarizeScheduleRegenJob(active),
+      }, 409);
+    }
   }
   const profileList = profiles.length
     ? profiles
@@ -2133,7 +2151,10 @@ export async function getScheduleRegenJobStatus(request, env, authorization) {
     const sliceAlreadyRunning = (job.combinations || []).some(
       (row) => String(row?.status || "") === SCHEDULE_REGEN_STATUS.PROCESSING,
     );
-    if (!sliceAlreadyRunning) job = await studioProcessScheduleRegenJobSlice(env, job.id) || job;
+    const stale = scheduleRegenJobIsStale(job);
+    if (!sliceAlreadyRunning || stale) {
+      job = await studioProcessScheduleRegenJobSlice(env, job.id) || job;
+    }
   }
   return respond(request, env, summarizeScheduleRegenJob(job));
 }

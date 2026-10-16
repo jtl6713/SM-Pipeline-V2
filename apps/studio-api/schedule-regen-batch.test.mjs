@@ -8,9 +8,12 @@ import {
   SCHEDULE_REGEN_JOBS_SETTING,
   SCHEDULE_REGEN_STATUS,
   buildScheduleRegenCombinations,
+  canonicalizeScheduleRegenPlatform,
   createScheduleRegenJob,
+  reclaimStaleScheduleRegenJob,
   scheduleRegenCandidateFilterFormula,
   scheduleRegenJobCounts,
+  scheduleRegenJobIsStale,
   scheduleRegenProgressMessage,
   summarizeScheduleRegenJob,
 } from "./schedule-regen-batch.mjs";
@@ -53,7 +56,7 @@ test("candidate filter includes unscheduled and future rows in the selected prof
     outputType: "Reel",
   });
   assert.match(formula, /recCHI/);
-  assert.ok(formula.includes('{Platform}="Instagram"'));
+  assert.ok(formula.includes('LOWER({Platform})="instagram"'));
   assert.match(formula, /Studio_Output_Type.*Reel/);
   assert.match(formula, /Scheduled_Post_Date.*BLANK/);
   assert.match(formula, /YouTube_Scheduled_Publish_At.*BLANK/);
@@ -61,6 +64,37 @@ test("candidate filter includes unscheduled and future rows in the selected prof
   assert.match(formula, /IS_AFTER/);
   assert.match(formula, /IS_BEFORE/);
   assert.match(formula, /Published_At.*BLANK/);
+});
+
+test("lowercase Pipeline calendar platforms match Airtable Platform values", () => {
+  assert.equal(canonicalizeScheduleRegenPlatform("instagram"), "Instagram");
+  assert.equal(canonicalizeScheduleRegenPlatform("FACEBOOK"), "Facebook");
+  assert.equal(canonicalizeScheduleRegenPlatform("tiktok"), "TikTok");
+  assert.equal(canonicalizeScheduleRegenPlatform("youtube"), "YouTube");
+  const formula = scheduleRegenCandidateFilterFormula({
+    platform: "instagram",
+    outputType: "Reel",
+    nowMs: Date.parse("2026-10-16T02:00:00Z"),
+    horizonDays: 30,
+  });
+  assert.ok(formula.includes('LOWER({Platform})="instagram"'));
+  assert.doesNotMatch(formula, /\{Platform\}="instagram"/);
+});
+
+test("stale Processing jobs can be reclaimed so regenerate is not stuck forever", () => {
+  const job = createScheduleRegenJob({
+    profiles: [{ id: "rec1", name: "Chicago" }],
+    platforms: ["Instagram"],
+    outputTypes: ["Reel", "Story"],
+    horizonDays: 30,
+  });
+  job.status = "running";
+  job.combinations[0].status = SCHEDULE_REGEN_STATUS.PROCESSING;
+  job.updated_at = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+  assert.equal(scheduleRegenJobIsStale(job), true);
+  const reclaimed = reclaimStaleScheduleRegenJob(job);
+  assert.equal(reclaimed.combinations[0].status, SCHEDULE_REGEN_STATUS.PENDING);
+  assert.equal(reclaimed.cursor, 0);
 });
 
 test("progress counts report actual combination completion", () => {

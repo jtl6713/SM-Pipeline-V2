@@ -903,7 +903,7 @@ test("Worker stamps photo-ready ideas and drains the 30m SLA on light ticks", as
   const path = await import("node:path");
   const here = path.dirname(fileURLToPath(import.meta.url));
   const worker = readStudioWorkerSource();
-  assert.match(worker, /version: "0.10.625-supabase-phase4-reads"/);
+  assert.match(worker, /version: "0.10.626-schedule-regen-platform-case"/);
   assert.match(worker, /studio_autonomous_ten_ideas_anyway_v1: true/);
   assert.match(worker, /planAutonomousHourIdeas/);
   const hourFill = worker.slice(
