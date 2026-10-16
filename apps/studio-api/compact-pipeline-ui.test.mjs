@@ -11,7 +11,7 @@ const app = fs.readFileSync(path.join(web, "assets/app-item4-1008.js"), "utf8");
 const css = fs.readFileSync(path.join(web, "assets/styles-phase7-0621.css"), "utf8");
 
 test("compact Pipeline build and cache bust stay aligned", () => {
-  assert.match(app, /BUILD_ID = "item4-0.6.707-duplicate-skip"/);
+  assert.match(app, /BUILD_ID = "item4-0[.]6[.]708-factory-batch-gated"/);
   assert.match(html, /UI build 0.6.708/);
   assert.match(html, /app-item4-1008\.js\?v=0.6.708-factory-batch-gated/);
   assert.match(html, /styles-phase7-0621\.css\?v=0.6.708-factory-batch-gated/);
