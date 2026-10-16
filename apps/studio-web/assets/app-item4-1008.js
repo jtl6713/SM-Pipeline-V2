@@ -19552,29 +19552,54 @@ function timedScriptAssetLabel(asset, index) {
       button.textContent = "Preparing regeneration…";
     }
     await loadPipelineScheduleHorizonDays();
-    const nowMs = Date.now();
-    const cutoffMs = nowMs + pipelineScheduleHorizonDays * 24 * 60 * 60 * 1000;
-    const selected = new Set((platforms || []).map((key) => String(key || "").toLowerCase()));
-    const eligible = (pipelineOutputs || []).filter((record) => {
-      if (!record?.id || record.do_not_publish || creativeIsPublished(record)) return false;
-      if (!selected.has(pipelineSchedulePlatformKey(record))) return false;
-      const iso = pipelineRecordScheduleIso(record);
-      const ms = iso ? Date.parse(iso) : NaN;
-      return !iso || !Number.isFinite(ms) || (ms > nowMs && ms <= cutoffMs);
-    });
-    const outputTypes = pipelineRegenOutputTypes(eligible);
-    if (!eligible.length || !outputTypes.length) {
+
+    const selected = [...new Set((platforms || [])
+      .map((key) => String(key || "").trim().toLowerCase())
+      .filter(Boolean))];
+    if (!selected.length) {
       if (button) {
         button.disabled = false;
         button.textContent = "Regenerate schedules";
       }
-      setPipelineScheduleGridMessage(`No unpublished posts for the selected platforms are scheduled in the next ${pipelineScheduleHorizonDays} days.`);
+      setPipelineScheduleGridMessage("Select at least one platform using the calendar checkboxes.", true);
       return;
     }
-    const platformNames = platforms.map((key) => key[0].toUpperCase() + key.slice(1)).join(", ");
-    const comboCount = platforms.length * outputTypes.length;
+
+    // The calendar is now sourced independently from the Pipeline list. Asking
+    // the Worker for an authoritative preview avoids a stale/partial Pipeline
+    // snapshot making Regenerate appear to do nothing.
+    setPipelineScheduleGridMessage("Checking the live schedule for eligible posts…");
+    const previewParams = new URLSearchParams({
+      preview: "1",
+      platforms: selected.join(","),
+      horizon_days: String(pipelineScheduleHorizonDays),
+    });
+    const preview = await api(`/api/outputs/schedule-regen?${previewParams.toString()}`, {
+      timeoutMs: 90000,
+      retries: 1,
+    });
+    const eligibleCount = Number(preview?.eligible_count || 0) || 0;
+    const outputTypes = Array.isArray(preview?.output_types) ? preview.output_types.filter(Boolean) : [];
+    const canonicalPlatforms = Array.isArray(preview?.platforms) && preview.platforms.length
+      ? preview.platforms
+      : selected;
+    const comboCount = Number(preview?.combination_count || 0)
+      || (canonicalPlatforms.length * outputTypes.length);
+
+    if (!eligibleCount || !outputTypes.length) {
+      if (button) {
+        button.disabled = false;
+        button.textContent = "Regenerate schedules";
+      }
+      setPipelineScheduleGridMessage(
+        `No unpublished future or unscheduled posts are eligible in the next ${pipelineScheduleHorizonDays} days.`
+      );
+      return;
+    }
+
+    const platformNames = canonicalPlatforms.join(", ");
     const confirmed = window.confirm(
-      `You are about to regenerate publishing schedules for ${eligible.length} future unpublished posts across ${comboCount} platform/output combinations (${platformNames}).\n\nExisting eligible future schedules will be replaced using the MAE-first, balanced-overflow scheduling algorithm.\n\nPublished posts and historical records will not be modified.\n\nContinue?`
+      `You are about to regenerate publishing schedules for ${eligibleCount} future unpublished posts across ${comboCount} active platform/output combinations (${platformNames}).\n\nExisting eligible future schedules will be replaced using the MAE-first, balanced-overflow scheduling algorithm.\n\nPublished posts and historical records will not be modified.\n\nContinue?`
     );
     if (!confirmed) {
       if (button) {
@@ -19586,26 +19611,44 @@ function timedScriptAssetLabel(asset, index) {
 
     button.disabled = true;
     button.textContent = "Regenerating…";
-    setPipelineScheduleGridMessage(`Queueing schedule regeneration for ${eligible.length} posts across ${comboCount} combinations…`);
+    setPipelineScheduleGridMessage(
+      `Queueing schedule regeneration for ${eligibleCount} posts across ${comboCount} active combinations…`
+    );
     const started = await api("/api/outputs/schedule-regen", {
       method: "POST",
       body: JSON.stringify({
         content_profile_id: selectedProfileId || "",
-        platforms: [...selected],
+        platforms: canonicalPlatforms,
         output_types: outputTypes,
         horizon_days: pipelineScheduleHorizonDays,
-        eligible_count: eligible.length,
+        eligible_count: eligibleCount,
         profiles: [{
           id: selectedProfileId || "",
           name: workingStudioCityLabel(),
         }],
       }),
     });
+
+    if (started?.status === "idle" && !(started?.job || started?.job_id)) {
+      if (button) {
+        button.disabled = false;
+        button.textContent = "Regenerate schedules";
+      }
+      setPipelineScheduleGridMessage(
+        started?.message || "No unpublished future or unscheduled posts are eligible for regeneration."
+      );
+      await loadPipelineScheduleGridWindow().catch(() => {});
+      return;
+    }
+
     const job = started?.job || started;
     const jobId = job?.id || started?.job_id;
     if (!jobId) throw new Error("Schedule regeneration did not return a job id.");
     renderScheduleRegenProgress(job);
-    queuePipelineScheduleRegenPoll(jobId, button, 1200);
+    if (started?.reused) {
+      setPipelineScheduleGridMessage("A regeneration was already running for this profile. Reattached to it.");
+    }
+    queuePipelineScheduleRegenPoll(jobId, button, 700);
   }
 
   async function regeneratePipelineContentSchedule(groupKey, button = null) {
