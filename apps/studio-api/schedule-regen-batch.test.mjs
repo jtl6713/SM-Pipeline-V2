@@ -278,7 +278,11 @@ test("Worker and Pipeline wire durable schedule regeneration", () => {
   assert.match(worker, /leasedProcessing/);
   assert.match(worker, /SCHEDULE_REGEN_LIVE_LEASE_MS/);
   assert.match(worker, /softLeaseMs/);
-  assert.match(worker, /version: "0.10.637-schedule-regen-empty-lane"/);
+  assert.match(worker, /version: "0.10.638-schedule-regen-empty-early"/);
+  assert.match(worker, /scheduleRegenComboIsEmptyLane\(combo\)/);
+  // Empty-lane Complete must run before the needsPlanning gate (Chicago 0/0 after 0.10.637).
+  assert.match(worker, /Empty scanned lanes must Complete even when needsPlanning is false/);
+
   assert.match(app, /\/api\/outputs\/schedule-regen/);
   assert.match(app, /pathname === "\/api\/outputs\/schedule-regen"/);
   assert.match(app, /queuePipelineScheduleRegenPoll/);

@@ -2016,6 +2016,36 @@ export async function studioProcessScheduleRegenJobSlice(env, jobId, options = {
   job = { ...job, combinations: combos, cursor: index, updated_at: new Date().toISOString() };
   await studioPutScheduleRegenJob(env, job);
 
+  // Empty scanned lanes must Complete even when needsPlanning is false (empty-lane
+  // short-circuit). Leaving this only inside the planning block left Chicago
+  // Facebook Carousel Processing 0/0 after 0.10.637 while polls kept refreshing the lease.
+  if (scheduleRegenComboIsEmptyLane(combo)) {
+    combo.status = SCHEDULE_REGEN_STATUS.COMPLETED;
+    combo.error = "";
+    combo.total_posts = 0;
+    combo.completed_posts = 0;
+    combo.rescheduled = 0;
+    combo.placed_isos = [];
+    combo.plan = [];
+    combo.eligible_ids = [];
+    combo.lane_reserved_ms = [];
+    combo.platform_reserved_ms = [];
+    combos[index] = { ...combo };
+    const nextPending = combos.findIndex((row, i) => i > index && scheduleRegenComboNeedsWork(row));
+    const failed = combos.some((row) => row.status === SCHEDULE_REGEN_STATUS.FAILED);
+    const more = nextPending >= 0;
+    job = {
+      ...job,
+      combinations: combos,
+      cursor: more ? nextPending : combos.length,
+      status: more ? "running" : (failed ? "failed" : "completed"),
+      updated_at: new Date().toISOString(),
+    };
+    studioInvalidateOccupiedScheduleCache();
+    await studioPutScheduleRegenJob(env, job);
+    return job;
+  }
+
   try {
     const profile = combo.profile_id
       ? await airtableFetch(env, "Content Profiles", combo.profile_id).catch(() => null)
