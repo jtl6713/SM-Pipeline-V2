@@ -234,3 +234,5 @@ jobs:
 
 # Deploy AP1C public-ready source reconciliation for Output 3420
 # 2026-10-16 service_version=2026-10-16-ap1c-ready-slide-recovery
+
+# Smart frame reuse deployment: 2026-10-16-smart-frame-reuse
