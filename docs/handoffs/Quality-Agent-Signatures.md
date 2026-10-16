@@ -87,3 +87,39 @@ Recognize these `kind` values from Engagement Action `classification.kind` / Wor
 - Classifier helpers: `apps/studio-api/engagement.mjs` → `classifyEngagementFailure`
 - Catalog: `apps/studio-api/quality-checks.mjs`
 - Signature family: `QA-ENGAGEMENT-*`
+
+
+## QA-IG-AP1C-MISSING-CHILD — Instagram carousel child creation partially committed
+
+**Observed:** Instagram Platform Output 3420 on 2026-10-16 (five linked slides, four child IDs, AP1C retry count 83).
+
+### Detection
+
+- Platform = Instagram; output type = Carousel; native-photo render route.
+- Ordered, linked Carousel Slides count matches approved `Image_Count = N`, and all N public 4:5/IG source asset URLs are Ready.
+- `IG_Carousel_Error_Stage = AP1C Child Creation` and `IG_Carousel_Error_Message` matches `AP1C child-ID verification mismatch. Created/retained: M; expected: N.` where `0 < M < N`.
+- At least one ordered slide has a blank `IG_Child_Container_ID` while other slides have IDs. For output 3420: slide 1 has no child ID; slides 2–5 have IDs marked IN_PROGRESS.
+- A high repeated `IG_Carousel_Retry_Count` (83 on 3420) demonstrates that simply rerunning the same parent stage without slide-level diagnosis is ineffective.
+
+### Root-cause class
+
+**Partial AP1C child creation or partial persistence**: some Instagram child containers were created and retained but at least one was not, preventing the parent from reaching its required N children. The missing slide's Meta API response/transport logs are required to distinguish child-creation failure from persistence failure; do not claim an exact upstream Meta error from the count alone.
+
+### Required Quality Agent repair
+
+1. **Never re-publish when `Platform_Post_ID`, `IG_Carousel_Published_Media_ID` or a verified public permalink exists.** Reconcile status only. Outputs 2352 and 2605 were already Published, and 1702 was Rendered on the 2026-10-16 audit.
+2. Obtain a per-slide ledger sorted by `Slide Number` with public asset readiness, `IG_Child_Container_ID`, child status and error/response JSON. Verify exactly N unique numbered linked slides and prevent duplicate logical links.
+3. For each nonblank child container ID, query Meta for that specific ID; retain only valid, attributable IDs for the current output and revision. Treat IN_PROGRESS as an asynchronous poll state, not proof of a failure.
+4. For blank child IDs only, attempt creation **once under an output+revision+slide idempotency lease**, after confirming no previously created child is recoverable from saved response/attempt log. Record the returned child ID durably on its original slide before verifying aggregate completeness. Never recreate all N children for a single missing ID.
+5. Recount N unique valid child IDs, poll each to FINISHED or an explicit terminal error, and only then advance AP2C/AP3C through the existing dispatch guard. Never fabricate child IDs or mark a missing child Ready.
+6. If a missing child cannot be safely attributed or created, record its precise slide number and provider response, cap the automatic retry count, use bounded exponential backoff, and raise actionable Needs Eyes. Do not spin 83 retries.
+7. On verified Published state, clear historical failed-facing attention indicators by reconciling canonical publication state; never trigger a new publish from a stale failure badge.
+
+### Acceptance checks
+
+- Output 3420 has exactly five distinct Meta child IDs, one for each ordered slide, all verified before any parent publish attempt. State advances beyond AP1C without a repeat 4-of-5 mismatch.
+- No duplicate Instagram media is created and published outputs remain terminal.
+- Quality Agent reports the missing slide number and actionable recovery step, not only a generic `render_failed` retry.
+- Distinguish native-photo carousel children from Remotion MP4 rendering: `Render_Status = Native Photo Route` is expected, **not** a render failure.
+
+**Existing check mapping:** `apps/studio-api/quality-checks.mjs` check `ig_carousel_child_verification_race` / `verify_children_then_advance`. This document refines that signature; runtime implementation and real Meta verification must be confirmed separately.
