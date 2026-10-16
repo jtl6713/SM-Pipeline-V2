@@ -74,7 +74,7 @@ test("supabase read-route inventory is explicit", () => {
 
 test("worker wires supabase pipeline reads behind a flag", async () => {
   const worker = readStudioWorkerSource();
-  assert.match(worker, /version: "0.10.623-failed-publish-selfheal"/);
+  assert.match(worker, /version: "0.10.624-fb-rate-limit-retry-pending"/);
   assert.match(worker, /studio_supabase_pipeline_reads_v1: true/);
   assert.match(worker, /studio_supabase_phase3_stable_v1: true/);
   assert.match(worker, /studio_supabase_schedule_writethrough_v1: true/);

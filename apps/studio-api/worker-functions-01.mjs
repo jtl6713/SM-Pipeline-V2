@@ -1755,6 +1755,14 @@ export function normalizedOutputState(record) {
   const thumbnailOnlyError = /thumb/i.test(text("Publish_Error_Stage") + " " + text("YouTube_Error_Message") + " " + text("Publish_Error_Message"));
   const igCarouselRateLimited = retryablePublish
     && /user is performing too many actions|rate limit|request limit/i.test(text("IG_Carousel_Error_Message"));
+  // Facebook Graph 368 / 1390008 parks keep Publish_Status=Failed until cooldown
+  // re-arm, but Pipeline must paint Retry Pending (same as IG AP1C rate limits).
+  const fbGraphRateLimited = /FBS3_RATE_LIMIT|FB_GRAPH_RATE_LIMIT/i.test(text("Publish_Error_Stage"))
+    || isFacebookPublishRateLimitError([
+      text("Publish_Error_Message"),
+      text("FB_Slideshow_Error_Message"),
+      text("Publish_Error_Stage"),
+    ].join(" "));
 
   const errors = [
     "Publish_Error_Message", "Remotion_Error_Message", "Final_File_Error_Message",
@@ -1833,7 +1841,7 @@ export function normalizedOutputState(record) {
   }
 
   // Meta action throttling is a timed automatic retry, not a terminal failure.
-  if (igCarouselRateLimited) return "Retry Pending";
+  if (igCarouselRateLimited || fbGraphRateLimited) return "Retry Pending";
 
   if ((errors || explicitFailed) && !(retryablePublish && thumbnailOnlyError && youtubeVideoReady)) {
     const output = text("Output_Status").toLowerCase();
