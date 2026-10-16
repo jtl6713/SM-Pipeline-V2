@@ -334,14 +334,16 @@ phase4-followup overview-supabase-page 2026-10-16T02:28:32Z worker 0.10.627
 
 phase4-followup schedule-regen-store 2026-10-16T02:58:00Z worker 0.10.628
 
-phase4-followup schedule-regen-r2 2026-10-16T03:22:06Z worker 0.10.633-schedule-regen-story-drain
+phase4-followup schedule-regen-r2 2026-10-16T03:22:06Z worker 0.10.634-schedule-regen-plan-persist
 
-phase4-followup schedule-regen-phase2a 2026-10-16T03:33:45Z worker 0.10.633-schedule-regen-story-drain
+phase4-followup schedule-regen-phase2a 2026-10-16T03:33:45Z worker 0.10.634-schedule-regen-plan-persist
 
-phase4-followup schedule-regen-fresh 2026-10-16T03:52:10Z worker 0.10.633-schedule-regen-story-drain UI 0.6.701
+phase4-followup schedule-regen-fresh 2026-10-16T03:52:10Z worker 0.10.634-schedule-regen-plan-persist UI 0.6.701
 
-phase4-followup schedule-regen-waituntil 2026-10-16T04:01:32Z worker 0.10.633 UI 0.6.701
+phase4-followup schedule-regen-waituntil 2026-10-16T04:01:32Z worker 0.10.634 UI 0.6.701
 
-phase4-followup schedule-regen-chunked-drain 2026-10-16T04:04:25Z worker 0.10.633-schedule-regen-story-drain UI 0.6.701 (chunked Story drain + GET waitUntil resume)
+phase4-followup schedule-regen-chunked-drain 2026-10-16T04:04:25Z worker 0.10.634-schedule-regen-plan-persist UI 0.6.701 (chunked Story drain + GET waitUntil resume)
 
-phase4-followup schedule-regen-story-drain 2026-10-16T04:14:23Z worker 0.10.633-schedule-regen-story-drain UI 0.6.701 (orphan Processing + light Story plan)
+phase4-followup schedule-regen-story-drain 2026-10-16T04:14:23Z worker 0.10.634-schedule-regen-plan-persist UI 0.6.701 (orphan Processing + light Story plan)
+
+phase4-followup schedule-regen-plan-persist 2026-10-16T04:26:08Z worker 0.10.634-schedule-regen-plan-persist (checkpoint eligible_ids + chunked MAE plan)

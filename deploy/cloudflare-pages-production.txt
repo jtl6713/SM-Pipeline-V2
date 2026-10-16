@@ -375,6 +375,6 @@ phase4-followup schedule-regen-fresh 2026-10-16T03:52:10Z UI 0.6.701-schedule-re
 
 phase4-followup schedule-regen-waituntil 2026-10-16T04:01:32Z UI 0.6.701-schedule-regen-story-drain (cache-bust; prior hard-refresh still on 0.6.698)
 
-phase4-followup schedule-regen-chunked-drain 2026-10-16T04:04:25Z UI 0.6.701-schedule-regen-story-drain (footer must show 0.6.701 / Worker 0.10.633)
+phase4-followup schedule-regen-chunked-drain 2026-10-16T04:04:25Z UI 0.6.701-schedule-regen-story-drain (footer must show 0.6.701 / Worker 0.10.634)
 
-phase4-followup schedule-regen-story-drain 2026-10-16T04:14:23Z UI 0.6.701-schedule-regen-story-drain (footer must show 0.6.701 / Worker 0.10.633)
+phase4-followup schedule-regen-story-drain 2026-10-16T04:14:23Z UI 0.6.701-schedule-regen-story-drain (footer must show 0.6.701 / Worker 0.10.634)

@@ -340,6 +340,7 @@ import {
 import {
   SCHEDULE_REGEN_JOBS_SETTING,
   SCHEDULE_REGEN_POSTS_PER_SLICE,
+  SCHEDULE_REGEN_PLAN_SLOTS_PER_SLICE,
   SCHEDULE_REGEN_MAX_SLICES_PER_DRAIN,
   createScheduleRegenJob,
   scheduleRegenCandidateFilterFormula,
@@ -354,6 +355,8 @@ import {
   scheduleRegenJobIsStale,
   reclaimStaleScheduleRegenJob,
   scheduleRegenComboHasRemainingPlan,
+  scheduleRegenComboPlanComplete,
+  scheduleRegenComboNeedsPlanning,
   scheduleRegenComboNeedsWork,
   scheduleRegenComboIsOrphanProcessing,
   preferScheduleRegenJobStore,
@@ -1952,14 +1955,17 @@ export async function studioProcessScheduleRegenJobSlice(env, jobId, options = {
     1,
     Math.min(25, Number(options.postsPerSlice) || SCHEDULE_REGEN_POSTS_PER_SLICE),
   );
+  const planSlotsPerSlice = Math.max(
+    1,
+    Math.min(40, Number(options.planSlotsPerSlice) || SCHEDULE_REGEN_PLAN_SLOTS_PER_SLICE),
+  );
   job = { ...job, status: "running", updated_at: new Date().toISOString(), horizon_days: horizonDays };
   await studioPutScheduleRegenJob(env, job);
 
   const combos = Array.isArray(job.combinations) ? job.combinations.map((row) => ({ ...row })) : [];
   const start = Math.max(0, Number(job.cursor) || 0);
   // One combination per slice — sequential. Resume mid-plan Processing after a crash.
-  // Orphan Processing (no plan) must rebuild — the old findIndex skipped it and the
-  // drain refreshed updated_at forever while Story stayed 0/57.
+  // Orphan Processing (no plan/checkpoint) must rebuild — otherwise Story stays 0/57.
   for (let i = 0; i < combos.length; i += 1) {
     if (scheduleRegenComboIsOrphanProcessing(combos[i])) {
       combos[i] = {
@@ -1967,6 +1973,9 @@ export async function studioProcessScheduleRegenJobSlice(env, jobId, options = {
         status: SCHEDULE_REGEN_STATUS.PENDING,
         error: "",
         plan: [],
+        eligible_ids: [],
+        lane_reserved_ms: [],
+        platform_reserved_ms: [],
       };
     }
   }
@@ -1999,88 +2008,25 @@ export async function studioProcessScheduleRegenJobSlice(env, jobId, options = {
       : null;
     const timeZone = studioScheduleTimeZoneForProfile(profile, MAE_DEFAULT_TIME_ZONE);
     let plan = Array.isArray(combo.plan) ? combo.plan.map((entry) => ({ ...entry })) : [];
-    let planBuiltThisSlice = false;
 
-    if (!scheduleRegenComboHasRemainingPlan(combo)) {
-      planBuiltThisSlice = true;
-      plan = [];
+    if (scheduleRegenComboNeedsPlanning(combo)) {
       const nowMs = Date.now();
       const horizonMs = nowMs + horizonDays * 24 * 60 * 60 * 1000;
       const platformWant = String(combo.platform || "").trim().toLowerCase();
       const typeWant = String(combo.output_type || "").trim().toLowerCase();
       const profileFormula = contentProfileFilterFormula(profile) || "";
       const scheduleFields = ["Platform", "Scheduled_Post_Date", "YouTube_Scheduled_Publish_At", "Studio_Scheduled_At", "Publish_Status", "Studio_Output_Type", "Format", "Content_Profile", "Published_At", "Do_Not_Publish", "Output_Status", "Output_ID"];
-      const rows = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
-        limit: STUDIO_OCCUPIED_LIST_LIMIT,
-        sortField: "Scheduled_Post_Date",
-        sortDirection: "asc",
-        filterFormula: scheduleRegenCandidateFilterFormula({
-          nowMs,
-          horizonDays,
-          profileFormula,
-          platform: combo.platform,
-          outputType: combo.output_type,
-        }),
-        fields: scheduleFields,
-      });
-      const eligible = [];
-      const protectedTimes = [];
-      for (const row of rows || []) {
-        if (!studioOccupiedRowMatchesProfile(row, profile)) continue;
-        const platform = String(f(row, "Platform") || "").trim();
-        const outputType = String(f(row, "Studio_Output_Type") || f(row, "Format") || "").trim();
-        if (platform.toLowerCase() !== platformWant) continue;
-        if (outputType.toLowerCase() !== typeWant) continue;
-        const published = Boolean(String(f(row, "Published_At") || "").trim())
-          || String(f(row, "Publish_Status") || "").trim() === "Published"
-          || String(f(row, "Output_Status") || "").trim() === "Published";
-        const ms = studioOccupiedMsFromRow(row, nowMs);
-        if (published || Boolean(f(row, "Do_Not_Publish"))) {
-          if (ms != null) protectedTimes.push(ms);
-          continue;
-        }
-        const iso = String(f(row, "Scheduled_Post_Date") || f(row, "YouTube_Scheduled_Publish_At") || f(row, "Studio_Scheduled_At") || "").trim();
-        const stamp = iso ? Date.parse(iso) : NaN;
-        if (iso && Number.isFinite(stamp) && stamp <= nowMs) {
-          protectedTimes.push(stamp);
-          continue;
-        }
-        if (iso && Number.isFinite(stamp) && stamp > horizonMs) continue;
-        eligible.push(row);
-      }
-      combo.total_posts = eligible.length;
-      combo.completed_posts = 0;
-      combo.rescheduled = 0;
+      let eligibleIds = Array.isArray(combo.eligible_ids) ? combo.eligible_ids.map(String) : [];
+      let reservedLane = Array.isArray(combo.lane_reserved_ms)
+        ? combo.lane_reserved_ms.map(Number).filter(Number.isFinite)
+        : [];
+      let reservedPlatform = Array.isArray(combo.platform_reserved_ms)
+        ? combo.platform_reserved_ms.map(Number).filter(Number.isFinite)
+        : [];
 
-      const eligibleIds = new Set(eligible.map((row) => row.id));
-      // Prefer placed_isos from combos already finished in this job (cheap). Fall back
-      // to a same-platform horizon list — never the full 1200-row occupied scan that
-      // killed waitUntil before the Story plan could persist.
-      const platformProtectedTimes = [];
-      for (const prior of combos) {
-        if (String(prior?.profile_id || "") !== String(combo.profile_id || "")) continue;
-        if (String(prior?.platform || "").trim().toLowerCase() !== platformWant) continue;
-        if (String(prior?.status || "") !== SCHEDULE_REGEN_STATUS.COMPLETED) continue;
-        for (const iso of prior.placed_isos || []) {
-          const ms = Date.parse(iso);
-          if (Number.isFinite(ms)) platformProtectedTimes.push(ms);
-        }
-      }
-      const unsettledPlatformTypes = new Set(
-        combos
-          .filter((row, comboIndex) => {
-            if (comboIndex < index) return false;
-            if (String(row?.profile_id || "") !== String(combo.profile_id || "")) return false;
-            if (String(row?.platform || "").trim().toLowerCase() !== platformWant) return false;
-            return scheduleRegenComboNeedsWork(row)
-              || String(row?.status || "") === SCHEDULE_REGEN_STATUS.PROCESSING;
-          })
-          .map((row) => String(row?.output_type || "").trim().toLowerCase())
-          .filter(Boolean),
-      );
-      if (!platformProtectedTimes.length) {
-        const platformRows = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
-          limit: 400,
+      if (!eligibleIds.length) {
+        const rows = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
+          limit: STUDIO_OCCUPIED_LIST_LIMIT,
           sortField: "Scheduled_Post_Date",
           sortDirection: "asc",
           filterFormula: scheduleRegenCandidateFilterFormula({
@@ -2088,36 +2034,67 @@ export async function studioProcessScheduleRegenJobSlice(env, jobId, options = {
             horizonDays,
             profileFormula,
             platform: combo.platform,
-            outputType: "",
+            outputType: combo.output_type,
           }),
           fields: scheduleFields,
         });
-        for (const row of platformRows || []) {
-          if (eligibleIds.has(row.id) || !studioOccupiedRowMatchesProfile(row, profile)) continue;
-          const platform = String(f(row, "Platform") || "").trim().toLowerCase();
-          if (platform !== platformWant) continue;
-          const outputType = String(f(row, "Studio_Output_Type") || f(row, "Format") || "").trim().toLowerCase();
+        const eligible = [];
+        const protectedTimes = [];
+        for (const row of rows || []) {
+          if (!studioOccupiedRowMatchesProfile(row, profile)) continue;
+          const platform = String(f(row, "Platform") || "").trim();
+          const outputType = String(f(row, "Studio_Output_Type") || f(row, "Format") || "").trim();
+          if (platform.toLowerCase() !== platformWant) continue;
+          if (outputType.toLowerCase() !== typeWant) continue;
           const published = Boolean(String(f(row, "Published_At") || "").trim())
             || String(f(row, "Publish_Status") || "").trim() === "Published"
             || String(f(row, "Output_Status") || "").trim() === "Published";
           const ms = studioOccupiedMsFromRow(row, nowMs);
-          if (
-            ms != null
-            && ms > nowMs
-            && ms <= horizonMs
-            && !published
-            && !Boolean(f(row, "Do_Not_Publish"))
-            && unsettledPlatformTypes.has(outputType)
-          ) {
+          if (published || Boolean(f(row, "Do_Not_Publish"))) {
+            if (ms != null) protectedTimes.push(ms);
             continue;
           }
-          if (ms != null) platformProtectedTimes.push(ms);
+          const iso = String(f(row, "Scheduled_Post_Date") || f(row, "YouTube_Scheduled_Publish_At") || f(row, "Studio_Scheduled_At") || "").trim();
+          const stamp = iso ? Date.parse(iso) : NaN;
+          if (iso && Number.isFinite(stamp) && stamp <= nowMs) {
+            protectedTimes.push(stamp);
+            continue;
+          }
+          if (iso && Number.isFinite(stamp) && stamp > horizonMs) continue;
+          eligible.push(row);
         }
+        eligibleIds = eligible.map((row) => row.id);
+        // Prefer placed_isos from completed combos. Skip the heavy same-platform
+        // Airtable scan — it kept killing waitUntil before Story could persist a plan.
+        const platformProtectedTimes = [];
+        for (const prior of combos) {
+          if (String(prior?.profile_id || "") !== String(combo.profile_id || "")) continue;
+          if (String(prior?.platform || "").trim().toLowerCase() !== platformWant) continue;
+          if (String(prior?.status || "") !== SCHEDULE_REGEN_STATUS.COMPLETED) continue;
+          for (const iso of prior.placed_isos || []) {
+            const ms = Date.parse(iso);
+            if (Number.isFinite(ms)) platformProtectedTimes.push(ms);
+          }
+        }
+        reservedLane = protectedTimes.slice();
+        reservedPlatform = [...new Set([...platformProtectedTimes, ...protectedTimes])];
+        combo.total_posts = eligibleIds.length;
+        combo.completed_posts = 0;
+        combo.rescheduled = 0;
+        combo.eligible_ids = eligibleIds;
+        combo.lane_reserved_ms = reservedLane;
+        combo.platform_reserved_ms = reservedPlatform;
+        combo.plan = [];
+        plan = [];
+        combos[index] = { ...combo };
+        job = { ...job, combinations: combos, updated_at: new Date().toISOString() };
+        // Checkpoint before MAE so a crash is not an empty orphan Processing.
+        await studioPutScheduleRegenJob(env, job);
       }
 
-      const reservedLane = protectedTimes.slice();
-      const reservedPlatform = [...new Set([...platformProtectedTimes, ...protectedTimes])];
-      for (const row of eligible) {
+      const planStart = plan.length;
+      const planEnd = Math.min(eligibleIds.length, planStart + planSlotsPerSlice);
+      for (let i = planStart; i < planEnd; i += 1) {
         const picked = maeScheduleNextSlot({
           timeZone,
           laneOccupiedMs: reservedLane,
@@ -2127,16 +2104,37 @@ export async function studioProcessScheduleRegenJobSlice(env, jobId, options = {
         if (!picked.ok) {
           throw new HttpError(409, picked.error || `Capacity failure for ${combo.platform} ${combo.output_type}`);
         }
-        // Persist only ids + iso in the durable job store (records re-fetched on apply).
-        plan.push({ id: row.id, iso: picked.iso });
+        plan.push({ id: eligibleIds[i], iso: picked.iso });
         const pickedMs = Date.parse(picked.iso);
         reservedLane.push(pickedMs);
         reservedPlatform.push(pickedMs);
       }
       combo.plan = plan;
+      combo.eligible_ids = eligibleIds;
+      combo.lane_reserved_ms = reservedLane;
+      combo.platform_reserved_ms = reservedPlatform;
+      combo.total_posts = eligibleIds.length;
       combos[index] = { ...combo };
       job = { ...job, combinations: combos, updated_at: new Date().toISOString() };
       await studioPutScheduleRegenJob(env, job);
+
+      if (!scheduleRegenComboPlanComplete(combo)) {
+        // More MAE slots next slice — do not apply a partial plan.
+        combos[index] = { ...combo, status: SCHEDULE_REGEN_STATUS.PROCESSING, error: "" };
+        job = {
+          ...job,
+          combinations: combos,
+          cursor: index,
+          status: "running",
+          updated_at: new Date().toISOString(),
+        };
+        await studioPutScheduleRegenJob(env, job);
+        return job;
+      }
+    }
+
+    if (!scheduleRegenComboPlanComplete(combo)) {
+      throw new HttpError(500, `Schedule regeneration plan incomplete for ${combo.platform} ${combo.output_type}`);
     }
 
     const done = Math.max(0, Number(combo.completed_posts) || 0);
@@ -2201,15 +2199,18 @@ export async function studioProcessScheduleRegenJobSlice(env, jobId, options = {
       // Keep placed times so later lanes (Story after Reel) skip the heavy occupied scan.
       combo.placed_isos = plan.map((entry) => entry.iso).filter(Boolean);
       combo.plan = [];
+      combo.eligible_ids = [];
+      combo.lane_reserved_ms = [];
+      combo.platform_reserved_ms = [];
+    } else if (!plan.length && !(Number(combo.total_posts) || 0)) {
+      combo.status = SCHEDULE_REGEN_STATUS.COMPLETED;
+      combo.error = "";
+      combo.placed_isos = [];
     } else {
       // More posts remain — stay Processing so the next drain/poll slice continues.
       combo.status = SCHEDULE_REGEN_STATUS.PROCESSING;
       combo.error = "";
       combo.plan = plan;
-      if (planBuiltThisSlice && !plan.length) {
-        combo.status = SCHEDULE_REGEN_STATUS.COMPLETED;
-        combo.placed_isos = [];
-      }
     }
   } catch (error) {
     combo.status = SCHEDULE_REGEN_STATUS.FAILED;
@@ -2350,12 +2351,14 @@ export async function getScheduleRegenJobStatus(request, env, authorization, ctx
   }
   if (job.status === "queued" || job.status === "running") {
     const combos = job.combinations || [];
-    const healthyProcessing = combos.some((row) => scheduleRegenComboHasRemainingPlan(row));
+    const healthyProcessing = combos.some((row) => (
+      scheduleRegenComboHasRemainingPlan(row)
+      || (scheduleRegenComboNeedsPlanning(row) && Array.isArray(row.eligible_ids) && row.eligible_ids.length > 0)
+    ));
     const orphanProcessing = combos.some((row) => scheduleRegenComboIsOrphanProcessing(row));
     const stale = scheduleRegenJobIsStale(job);
     // Never await a full combination on the status GET. Kick drain when idle/orphan/
-    // stale — but not while a healthy mid-plan Processing slice is still leased.
-    // Orphan Processing (no plan) used to look "busy" forever while Story stayed 0/57.
+    // stale — but not while a healthy mid-plan / mid-apply Processing slice is leased.
     if (!healthyProcessing || stale || orphanProcessing) {
       if (stale && healthyProcessing) {
         job = reclaimStaleScheduleRegenJob(job);

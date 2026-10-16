@@ -29,7 +29,7 @@ test("a failed linked-request lookup cannot silently regenerate a duplicate", ()
 });
 
 test("Worker version is incremented for deployed idempotency fix", () => {
-  assert.match(worker, /version: "0.10.633-schedule-regen-story-drain"/);
+  assert.match(worker, /version: "0.10.634-schedule-regen-plan-persist"/);
 });
 
 test("explicit Create VO Timeline does not silently make a Photo Set", () => {
