@@ -15,6 +15,7 @@ export function tiktokCompleteEligibility(record = {}) {
   const output = String(record.output_status || "").trim().toLowerCase();
   const draft = String(record.tiktok_draft_status || "").trim().toLowerCase();
   if (publish === "published" || output === "published" || draft === "published") return "already_published";
+  if (isTikTokPostUrl(record.platform_post_url) || isTikTokPostUrl(record.manual_published_url)) return "already_published";
   const manual = String(record.manual_completion_status || "").trim().toLowerCase();
   const studio = String(record.studio_state || "").trim().toLowerCase();
   const awaiting = manual === "required"

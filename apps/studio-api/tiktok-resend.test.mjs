@@ -46,6 +46,8 @@ test("tiktokResendRearmFields clear auth park and arm Ready for Delivery", () =>
   const fields = tiktokResendRearmFields({
     now: "2026-09-28T15:30:00.000Z",
     existingNotes: "prior note",
+    scheduledPostDate: "2026-09-28T15:40:00.000Z",
+    nowMs: Date.parse("2026-09-28T15:30:00.000Z"),
   });
   assert.equal(fields.TikTok_Draft_Status, "Ready for Delivery");
   assert.equal(fields.Publish_Status, "Ready to Publish");
@@ -60,15 +62,41 @@ test("tiktokResendRearmFields clear auth park and arm Ready for Delivery", () =>
   assert.match(fields.Output_Notes, /draft resend requested/);
 });
 
+test("tiktokResendRearmFields holds a future schedule out of the TikTok inbox", () => {
+  const fields = tiktokResendRearmFields({
+    now: "2026-10-15T23:31:11.230Z",
+    existingNotes: "prior note",
+    scheduledPostDate: "2026-11-14T00:00:00.000Z",
+    nowMs: Date.parse("2026-10-15T23:31:11.230Z"),
+  });
+  assert.equal(fields.TikTok_Draft_Status, "Waiting for Schedule");
+  assert.equal(fields.Publish_Status, "Ready to Schedule");
+  assert.equal(fields.Output_Status, "Approved for Publishing");
+  assert.equal(fields.Publish_Retry_Eligible, false);
+  assert.equal(fields.TikTok_Draft_Publish_ID, "");
+});
+
 test("Worker and Pipeline UI advertise TikTok draft resend", async () => {
   const worker = readStudioWorkerSource();
   const app = await readFile(path.join(here, "../studio-web/assets/app-item4-1008.js"), "utf8");
   assert.match(worker, /studio_tiktok_draft_resend_v1: true/);
-  assert.match(worker, /version: "0.10.642-schedule-regen-sequential"/);
+  assert.match(worker, /version: "0.10.644-manual-post-link"/);
   assert.match(worker, /function resendStudioTiktokDraft/);
   assert.match(worker, /\/tiktok-resend\$/);
-  assert.match(app, /BUILD_ID = "item4-0.6.703-schedule-regen-empty-lane"/);
+  assert.match(app, /BUILD_ID = "item4-0.6.706-tiktok-live-copy"/);
   assert.match(app, /Resend draft to TikTok/);
   assert.match(app, /\/tiktok-resend/);
   assert.match(app, /function tiktokNeedsDraftResend/);
+  assert.match(app, /Held until the scheduled time/);
+  assert.match(app, /if \(creativeIsPublished\(record\)\) return "Published"/);
+  const reconcileStart = worker.indexOf("async function studioReconcileTiktokDrafts");
+  const reconcileEnd = worker.indexOf("async function studioReconcileFacebookPhotos", reconcileStart);
+  const reconcile = worker.slice(reconcileStart, reconcileEnd);
+  const ttd1 = reconcile.indexOf('stage: "ttd1"');
+  const ttd2 = reconcile.indexOf('stage: "ttd2"');
+  const ttd3 = reconcile.indexOf('stage: "ttd3"');
+  assert.match(reconcile.slice(ttd1, ttd2), /STUDIO_TIKTOK_INBOX_DUE_FORMULA/);
+  assert.match(reconcile.slice(ttd2, ttd3), /STUDIO_TIKTOK_INBOX_DUE_FORMULA/);
+  assert.match(worker, /function overlayLiveTikTokPublishRows/);
+  assert.match(worker, /decorate: \(records\) => overlayLiveTikTokPublishRows/);
 });

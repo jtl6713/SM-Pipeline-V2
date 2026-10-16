@@ -7,9 +7,9 @@ import { normalizedOutputState } from "./worker-functions-01.mjs";
 
 const root = dirname(fileURLToPath(import.meta.url));
 
-test("Worker version is 0.10.642-schedule-regen-sequential", () => {
+test("Worker version is 0.10.644-manual-post-link", () => {
   const worker = readFileSync(join(root, "worker.js"), "utf8");
-  assert.match(worker, /version: "0\.10\.642-schedule-regen-sequential"/);
+  assert.match(worker, /version: "0\.10\.644-manual-post-link"/);
 });
 
 test("Facebook Graph 368 park paints Retry Pending, not Failed", () => {

@@ -277,7 +277,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.703-schedule-regen-empty-lane";
+  const BUILD_ID = "item4-0.6.706-tiktok-live-copy";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -754,6 +754,10 @@
   });
 
   function pipelineDisplayPercent(record) {
+    if (creativeIsPublished(record) && !pipelineMixRerenderInProgress(record)) {
+      if (record?.id) pipelineProgressHighWater.delete(record.id);
+      return 100;
+    }
     const raw = record?.studio_progress_percent ?? record?.youtube_processing_progress_percent ?? record?.youtube_upload_progress_percent;
     const n = Number(raw);
     if (!Number.isFinite(n)) return raw;
@@ -1574,6 +1578,9 @@
 
   function pipelineStudioStateLabel(record) {
     if (pipelineMixRerenderInProgress(record)) return "Rerendering";
+    // A saved TikTok URL sets Output_Status/Publish_Status/Published_At. Those
+    // win over a snapshot that still says Manual Action Required (Output 3923).
+    if (creativeIsPublished(record)) return "Published";
     const queueLabel = pipelineRenderQueueLabel(record);
     if (queueLabel) return queueLabel;
     if (pipelineIsRetryingRender(record)) return "Trying Again";
@@ -16230,9 +16237,11 @@ function timedScriptAssetLabel(asset, index) {
       slideshow: finishedVideo
         ? ["This Facebook Reel", "Your uploaded video. The 3D still is the grid cover only."]
         : ["This Facebook Reel", "Photo sequence with your audio settings. Music volume is the useful control."],
-      tiktok: finishedVideo
-        ? ["This TikTok video", "Your uploaded video, saved as a TikTok draft after Approve. The 3D still is the cover to set in TikTok."]
-        : ["This TikTok video", "Finished file saved as a TikTok draft. Download the 3D cover from Thumbnail in the details panel, then set it in TikTok."],
+      tiktok: ["This TikTok video", creativeIsPublished(output)
+        ? "This TikTok is already live. The public URL is saved. Set the 3D cover in the TikTok app if the grid still needs it."
+        : (finishedVideo
+          ? "Your uploaded video, saved as a TikTok draft after Approve. The 3D still is the cover to set in TikTok."
+          : "Finished file saved as a TikTok draft. Download the 3D cover from Thumbnail in the details panel, then set it in TikTok.")],
       short: finishedVideo
         ? ["This YouTube Short", "Your uploaded video. The 3D still is the grid cover only."]
         : ["This YouTube Short", "Photo sequence with your audio settings. Download the cover from Thumbnail in the details panel if YouTube needs a custom thumb."],
@@ -16982,6 +16991,10 @@ function timedScriptAssetLabel(asset, index) {
     const output = String(record?.output_status || "").trim().toLowerCase();
     const draft = String(record?.tiktok_draft_status || "").trim().toLowerCase();
     if (publish === "published" || output === "published" || draft === "published") return false;
+    // A saved public URL means the operator already finished manual entry.
+    // Tram Ride Over East River, Wynwood Wall Pockets, and Art Deco Clues
+    // all show Open TikTok while the card still asked for a URL.
+    if (/^https?:\/\//i.test(tiktokLiveUrl(record))) return false;
     const manual = String(record?.manual_completion_status || "").trim().toLowerCase();
     const studio = String(record?.studio_state || pipelineStudioStateLabel(record) || "").trim().toLowerCase();
     return manual === "required"
@@ -16990,6 +17003,26 @@ function timedScriptAssetLabel(asset, index) {
       || draft.includes("manual action")
       || draft.includes("draft delivered")
       || draft.includes("manual completion received");
+  }
+
+  function tiktokInboxIsDue(record) {
+    const raw = String(record?.scheduled_post_date || "").trim();
+    if (!raw) return true;
+    const ms = Date.parse(raw);
+    if (!Number.isFinite(ms)) return true;
+    return ms <= Date.now() + (15 * 60 * 1000);
+  }
+
+  function tiktokResendConfirm(record) {
+    if (tiktokInboxIsDue(record)) {
+      return "Resend this TikTok draft to the inbox?\n\nTikTok will receive a fresh draft. Approve/publish it in the TikTok app, then paste the live URL here if needed.";
+    }
+    return "This TikTok is scheduled for later.\n\nStudio will hold the draft and send it about 15 minutes before that time. It will not go to TikTok now.";
+  }
+
+  function tiktokResendWasHeld(result) {
+    return String(result?.dispatch?.skipped || "") === "scheduled-hold"
+      || /waiting for schedule/i.test(String(result?.record?.tiktok_draft_status || ""));
   }
 
   function tiktokNeedsDraftResend(record) {
@@ -17091,12 +17124,15 @@ function timedScriptAssetLabel(asset, index) {
     const resendWrap = $("creativeTiktokResendWrap");
     const resendButton = $("creativeTiktokResend");
     const resendMessage = $("creativeTiktokResendMessage");
+    const copy = $("creativeTiktokCompleteCopy");
     if (!card || !form || !live || !input) return;
     const tiktok = String(output?.platform || "").trim().toLowerCase() === "tiktok";
     const awaiting = tiktok && tiktokNeedsUrlEntry(output);
     const canResend = tiktok && tiktokNeedsDraftResend(output);
     const photoSoundRequired = tiktok && tiktokPhotoSoundRequired(output);
     const posted = tiktok ? tiktokLiveUrl(output) : "";
+    const prompt = "Manage the TikTok draft here. After publishing from the TikTok inbox, paste the public URL below when required.";
+    if (copy) copy.textContent = (!awaiting && posted) ? "This TikTok is already live. The public URL is saved." : prompt;
     if (!tiktok || (!awaiting && !canResend && !posted)) {
       card.hidden = true;
       form.hidden = true;
@@ -17135,10 +17171,13 @@ function timedScriptAssetLabel(asset, index) {
     const form = $("creativeYoutubeCompleteForm");
     const live = $("creativeYoutubeCompleteLive");
     const input = $("creativeYoutubeUrl");
+    const copy = $("creativeYoutubeCompleteCopy");
     if (!card || !form || !live || !input) return;
     const youtube = String(output?.platform || "").trim().toLowerCase() === "youtube";
     const awaiting = youtube && youtubeNeedsUrlEntry(output);
     const posted = youtube ? youtubeLiveUrl(output) : "";
+    const prompt = "After you upload the video and/or set the 3D cover in YouTube Studio, paste the watch URL here to close this output as published.";
+    if (copy) copy.textContent = (!awaiting && posted) ? "This video is already live. The watch URL is saved." : prompt;
     if (!youtube || (!awaiting && !posted)) {
       card.hidden = true;
       form.hidden = true;
@@ -18095,7 +18134,7 @@ function timedScriptAssetLabel(asset, index) {
   function creativePublishSettled(output = activeCreativeOutput) {
     const status = String(output?.output_status || "").trim();
     const pub = String(output?.publish_status || "").trim();
-    return status === "Published" || pub === "Published";
+    return status === "Published" || pub === "Published" || outputHasLivePostUrl(output);
   }
 
   function creativeCanApproveForPublishing(output = activeCreativeOutput) {
@@ -18115,11 +18154,18 @@ function timedScriptAssetLabel(asset, index) {
     return status === "Ready for Review" || review === "Review Sent";
   }
 
+  function outputHasLivePostUrl(output) {
+    const url = String(output?.platform_post_url || output?.manual_published_url || "").trim();
+    return /^https?:\/\//i.test(url);
+  }
+
   function creativeIsPublished(output = activeCreativeOutput) {
     if (!output) return false;
     const status = String(output.output_status || "").trim();
     const publish = String(output.publish_status || "").trim();
-    return status === "Published" || publish === "Published" || Boolean(output.published_at);
+    // A saved post URL clears Manual Action Required even when the snapshot
+    // still says Draft Delivered (Output 3923 and the All Profiles manual count).
+    return status === "Published" || publish === "Published" || Boolean(output.published_at) || outputHasLivePostUrl(output);
   }
 
   function creativeCanReschedule(output = activeCreativeOutput) {
@@ -18276,16 +18322,18 @@ function timedScriptAssetLabel(asset, index) {
         event.preventDefault();
         event.stopPropagation();
         const id = wrap.dataset.tiktokResend;
+        const record = (pipelineOutputs || []).find((row) => row.id === id);
         if (!id || !button) return;
-        if (!window.confirm("Resend this TikTok draft to the inbox?\n\nTikTok will receive a fresh draft. Approve/publish it in the TikTok app, then paste the live URL here if needed.")) return;
+        if (!window.confirm(tiktokResendConfirm(record))) return;
         button.disabled = true;
         if (message) {
           message.classList.remove("error-text");
           message.textContent = "Sending…";
         }
         try {
-          await submitTiktokDraftResend(id);
-          if (message) message.textContent = "Sent — check TikTok inbox";
+          const result = await submitTiktokDraftResend(id);
+          const held = tiktokResendWasHeld(result);
+          if (message) message.textContent = held ? "Held until the scheduled time" : "Sent — check TikTok inbox";
           await refreshPipelineOutputs({ silent: true });
         } catch (error) {
           if (message) {
@@ -18655,6 +18703,23 @@ function timedScriptAssetLabel(asset, index) {
     if (platform === "youtube") return youtubeLiveUrl(record);
     if (platform === "tiktok") return tiktokLiveUrl(record);
     return String(record.platform_post_url || record.manual_published_url || "").trim();
+  }
+
+  function pipelineGroupLivePost(records = []) {
+    const preferred = pipelinePreferredMainOutput(records);
+    const ordered = [preferred, ...(Array.isArray(records) ? records : [])].filter(Boolean);
+    const seen = new Set();
+    for (const record of ordered) {
+      if (!record?.id || seen.has(record.id) || pipelineScheduleIsStory(record)) continue;
+      seen.add(record.id);
+      const url = pipelinePreferredLiveUrl(record);
+      if (!url) continue;
+      return {
+        url,
+        platform: String(record.platform || "").trim(),
+      };
+    }
+    return null;
   }
 
   function pipelineGlobalScheduleMs(reserved) {
@@ -19849,8 +19914,10 @@ function timedScriptAssetLabel(asset, index) {
     const publish = String(pipelinePublishStatusLabel(record) || record?.publish_status || "");
     if (!filter || filter === "all") return true;
     if (filter === "published") return studio === "Published" || state === "Published";
-    if (filter === "attention") return state === "Manual Action Required";
-    if (filter === "manual") return state === "Manual Action Required";
+    // Same predicate as All Profiles manual_action_required. A stored post URL
+    // makes pipelineStudioStateLabel return Published, so the click-through
+    // cannot keep a row the overview has already cleared.
+    if (filter === "attention" || filter === "manual") return studio === "Manual Action Required";
     if (filter === "failed") return state === "Failed" || /failed|error/i.test(render) || /failed|error/i.test(publish);
     // Match All-Profiles / dashboard awaiting_approval (studio_state), not the
     // stricter Approve-button gate. mode=review used to fetch Pending Review and
@@ -20181,7 +20248,8 @@ function timedScriptAssetLabel(asset, index) {
       ...group.records.filter((record) => record !== preferredMain && !pipelineScheduleIsStory(record)),
       ...group.records.filter((record) => pipelineScheduleIsStory(record)),
     ].map((record) => phase6ThumbnailDownloadUrl(record)).find(Boolean) || "";
-    const liveUrl = pipelinePreferredLiveUrl(preferredMain);
+    const livePost = pipelineGroupLivePost(group.records);
+    const liveUrl = livePost?.url || "";
     const groupTone = pipelineGroupVisualTone(group.records);
     const rowSpan = Math.max(1, group.records.length);
     const contentLabel = contentNumber ? `#${contentNumber} - ${title}` : title;
@@ -20218,8 +20286,11 @@ function timedScriptAssetLabel(asset, index) {
       : "";
     // Thumb click must open Reel / Video / Short — never a Story companion, even when
     // the rowspan content cell sits on the first (Story) row.
+    const postLink = liveUrl
+      ? `<a class="pipeline-content-post-link" href="${escapeHtml(liveUrl)}" target="_blank" rel="noopener noreferrer">Open post ↗</a>`
+      : "";
     const media = liveUrl
-      ? `<a class="pipeline-content-thumb-link" href="${escapeHtml(liveUrl)}" target="_blank" rel="noopener noreferrer" title="Open ${escapeHtml(preferredLabel || "published video")}">${thumbImg}</a>`
+      ? `<a class="pipeline-content-thumb-link" href="${escapeHtml(liveUrl)}" target="_blank" rel="noopener noreferrer" title="Open ${escapeHtml(livePost?.platform || preferredLabel || "published post")}">${thumbImg}</a>${postLink}`
       : (preferredMain?.id
         ? `<button type="button" class="pipeline-content-thumb-button" data-pipeline-thumb-open="${escapeHtml(preferredMain.id)}" title="Open ${escapeHtml(preferredLabel || "main video output")}">${thumbImg}</button>`
         : thumbImg);
@@ -20410,7 +20481,14 @@ function timedScriptAssetLabel(asset, index) {
     updatePipelineQuickTabs(records);
     renderPipelineAdvancedFilters();
     const source = filteredPipelineRecords(records);
-    updatePipelineFilterBar(source.length);
+    const matchingCount = (records || []).filter((record) => (
+      pipelineRecordMatchesFilter(record)
+      && pipelineRecordMatchesColumnFilters(record, pipelineColumnFilters, records)
+    )).length;
+    // Attention/manual must show the same output count All Profiles uses,
+    // not the sibling-expanded package size.
+    const countFilter = pipelineViewFilter === "attention" || pipelineViewFilter === "manual";
+    updatePipelineFilterBar(countFilter ? matchingCount : source.length);
     if (!source.length) {
       const filteredEmpty = (pipelineViewFilter && pipelineViewFilter !== "all") || pipelineColumnFiltersActive();
       target.innerHTML = filteredEmpty
@@ -21604,6 +21682,14 @@ function timedScriptAssetLabel(asset, index) {
       const historyStale = !outputsSettled.ok || Boolean(outputsResult.stale);
       pipelineListUnverified = historyStale;
       pipelineOutputs = records;
+      if (activeCreativeOutputId && $("creativeOutputMeta")) {
+        const freshCreative = records.find((row) => row && row.id === activeCreativeOutputId);
+        if (freshCreative) {
+          activeCreativeOutput = { ...(activeCreativeOutput || {}), ...freshCreative };
+          renderCreativeOutputMeta(activeCreativeOutput);
+          renderCreativeTiktokComplete(activeCreativeOutput);
+        }
+      }
       pipelineContentRecords = contentRecords;
       target.querySelector(":scope > .pipeline-stale-note")?.remove();
       if (historyStale) {
@@ -25737,7 +25823,7 @@ function timedScriptAssetLabel(asset, index) {
     const button = $("creativeTiktokResend");
     const message = $("creativeTiktokResendMessage");
     if (!id || !record || !tiktokNeedsDraftResend(record) || !button) return;
-    if (!window.confirm("Resend this TikTok draft to the inbox?\n\nTikTok will receive a fresh draft. Approve/publish it in the TikTok app, then paste the live URL here if needed.")) return;
+    if (!window.confirm(tiktokResendConfirm(record))) return;
     button.disabled = true;
     if (message) {
       message.classList.remove("error-text");
@@ -25745,13 +25831,16 @@ function timedScriptAssetLabel(asset, index) {
     }
     try {
       const result = await submitTiktokDraftResend(id);
+      const held = tiktokResendWasHeld(result);
       if (result?.record) {
         activeCreativeOutput = { ...record, ...result.record };
         renderCreativeOutputMeta(activeCreativeOutput);
         renderCreativeTiktokComplete(activeCreativeOutput);
       }
-      if (message) message.textContent = "Sent — check TikTok inbox";
-      phase6Message("TikTok draft resent. Check the TikTok inbox.");
+      if (message) message.textContent = held ? "Held until the scheduled time" : "Sent — check TikTok inbox";
+      phase6Message(held
+        ? "TikTok draft held until 15 minutes before the scheduled time."
+        : "TikTok draft resent. Check the TikTok inbox.");
       refreshPipelineOutputs({ silent: true }).catch(() => {});
     } catch (error) {
       if (message) {

@@ -48,5 +48,5 @@ test("extracted modules that call shared helpers also import them from worker.js
 test("assembled Worker still defines studioMarkMappedListDirty for Approve write-through", () => {
   const worker = readStudioWorkerSource();
   assert.match(worker, /function studioMarkMappedListDirty/);
-  assert.match(worker, /0\.10\.642-schedule-regen-sequential/);
+  assert.match(worker, /0\.10\.644-manual-post-link/);
 });

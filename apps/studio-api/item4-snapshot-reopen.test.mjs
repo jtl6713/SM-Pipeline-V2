@@ -21,5 +21,5 @@ test("Item4 snapshot is authorized, read-only, and bypasses reconciliation", () 
   assert.ok(handler.indexOf('snapshot: true') < handler.indexOf('item4ReconcileVariants'));
 });
 test("Worker version advances for Chinatown request reopen", () => {
-  assert.match(source, /version: "0.10.642-schedule-regen-sequential"/);
+  assert.match(source, /version: "0.10.644-manual-post-link"/);
 });

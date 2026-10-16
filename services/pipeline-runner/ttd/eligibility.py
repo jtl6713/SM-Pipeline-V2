@@ -61,6 +61,12 @@ def _scheduled_ms(record: dict[str, Any]) -> int | None:
         return None
 
 
+def _inbox_lead_hold(record: dict[str, Any]) -> str | None:
+    if tiktok_inbox_is_due(record):
+        return None
+    return "tiktok_draft_before_inbox_lead_window"
+
+
 def tiktok_inbox_is_due(
     record: dict[str, Any],
     *,
@@ -121,9 +127,9 @@ def ttd1_eligibility_reason(
         return "replace_address_mismatch"
     status = _ci(field_str(record, "TikTok_Draft_Status"))
     if status == _ci(STATUS_READY_FOR_DELIVERY):
-        return None
+        return _inbox_lead_hold(record)
     if is_retry_for(record, STAGE_TTD1) or is_retry_for(record, STAGE_CAPACITY):
-        return None
+        return _inbox_lead_hold(record)
     return "tiktok_draft_not_ready_for_delivery"
 
 
@@ -149,7 +155,7 @@ def ttd2_eligibility_reason(
         return "replace_address_mismatch"
     status = _ci(field_str(record, "TikTok_Draft_Status"))
     if status == _ci(STATUS_PROCESSING) or is_retry_for(record, STAGE_TTD2):
-        return None
+        return _inbox_lead_hold(record)
     return "tiktok_draft_not_processing"
 
 
