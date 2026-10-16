@@ -76,6 +76,20 @@ export default {
         ctx.waitUntil(drain(env, req));
         return json({ ...factoryBatchSummary(job), accepted: true });
       }
+      if (req.method === "POST" && url.pathname === "/api/cleanup") {
+        // Acceptance harness only. This endpoint is NEVER installed on the
+        // production Worker. Only call with a dedicated throwaway R2 bucket.
+        let deleted = 0;
+        for (let pageNumber = 0; pageNumber < 10; pageNumber++) {
+          const listing = await env.STUDIO_MEDIA.list({ limit: 1000 });
+          const keys = listing.objects.map(item => item.key);
+          if (!keys.length) break;
+          await env.STUDIO_MEDIA.delete(keys);
+          deleted += keys.length;
+        }
+        const verify = await env.STUDIO_MEDIA.list({ limit: 1 });
+        return json({ cleanup: true, deleted, empty: verify.objects.length === 0 });
+      }
       if (req.method === "POST" && url.pathname === "/api/diagnose") {
         const result = await drain(env, req);
         return json({ ...factoryBatchSummary(result.job), claimed: result.claimed, processed: result.processed });
