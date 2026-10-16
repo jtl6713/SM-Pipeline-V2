@@ -168,6 +168,10 @@ test("preferScheduleRegenJobStore does not let empty Airtable seed shadow R2 act
 test("Worker and Pipeline wire durable schedule regeneration", () => {
   assert.equal(SCHEDULE_REGEN_JOBS_SETTING, "SCHEDULE_REGEN_JOBS_V1");
   assert.match(worker, /isScheduleRegenRoute/);
+  assert.match(worker, /const isScheduleRegenWrite = isScheduleRegenRoute && request\.method === "POST"/);
+  assert.match(worker, /isScheduleRegenWrite \|/);
+  assert.match(worker, /const isScheduleSettingsWrite = isScheduleSettingsRoute &&/);
+  assert.match(worker, /isScheduleSettingsWrite \|/);
   assert.match(worker, /async function startScheduleRegenJob/);
   assert.match(worker, /async function studioProcessScheduleRegenJobSlice/);
   assert.match(worker, /SCHEDULE_REGEN_STATUS\.PROCESSING/);
@@ -180,6 +184,7 @@ test("Worker and Pipeline wire durable schedule regeneration", () => {
   assert.match(worker, /preferScheduleRegenJobStore/);
   assert.match(worker, /did not persist/);
   assert.match(worker, /display names \("Miami - Miami"\)/);
+  assert.match(worker, /version: "0\.10\.630-schedule-regen-phase2a"/);
   assert.match(app, /\/api\/outputs\/schedule-regen/);
   assert.match(app, /pathname === "\/api\/outputs\/schedule-regen"/);
   assert.match(app, /queuePipelineScheduleRegenPoll/);
