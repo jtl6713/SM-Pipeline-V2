@@ -277,7 +277,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.705-manual-post-link";
+  const BUILD_ID = "item4-0.6.706-tiktok-live-copy";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -16237,9 +16237,11 @@ function timedScriptAssetLabel(asset, index) {
       slideshow: finishedVideo
         ? ["This Facebook Reel", "Your uploaded video. The 3D still is the grid cover only."]
         : ["This Facebook Reel", "Photo sequence with your audio settings. Music volume is the useful control."],
-      tiktok: finishedVideo
-        ? ["This TikTok video", "Your uploaded video, saved as a TikTok draft after Approve. The 3D still is the cover to set in TikTok."]
-        : ["This TikTok video", "Finished file saved as a TikTok draft. Download the 3D cover from Thumbnail in the details panel, then set it in TikTok."],
+      tiktok: ["This TikTok video", creativeIsPublished(output)
+        ? "This TikTok is already live. The public URL is saved. Set the 3D cover in the TikTok app if the grid still needs it."
+        : (finishedVideo
+          ? "Your uploaded video, saved as a TikTok draft after Approve. The 3D still is the cover to set in TikTok."
+          : "Finished file saved as a TikTok draft. Download the 3D cover from Thumbnail in the details panel, then set it in TikTok.")],
       short: finishedVideo
         ? ["This YouTube Short", "Your uploaded video. The 3D still is the grid cover only."]
         : ["This YouTube Short", "Photo sequence with your audio settings. Download the cover from Thumbnail in the details panel if YouTube needs a custom thumb."],
@@ -16989,6 +16991,9 @@ function timedScriptAssetLabel(asset, index) {
     const output = String(record?.output_status || "").trim().toLowerCase();
     const draft = String(record?.tiktok_draft_status || "").trim().toLowerCase();
     if (publish === "published" || output === "published" || draft === "published") return false;
+    // A saved public URL means the operator already finished manual entry
+    // (Output 2631, Tram Ride Over East River). Do not ask for it again.
+    if (/^https?:\/\//i.test(tiktokLiveUrl(record))) return false;
     const manual = String(record?.manual_completion_status || "").trim().toLowerCase();
     const studio = String(record?.studio_state || pipelineStudioStateLabel(record) || "").trim().toLowerCase();
     return manual === "required"
@@ -17118,12 +17123,15 @@ function timedScriptAssetLabel(asset, index) {
     const resendWrap = $("creativeTiktokResendWrap");
     const resendButton = $("creativeTiktokResend");
     const resendMessage = $("creativeTiktokResendMessage");
+    const copy = $("creativeTiktokCompleteCopy");
     if (!card || !form || !live || !input) return;
     const tiktok = String(output?.platform || "").trim().toLowerCase() === "tiktok";
     const awaiting = tiktok && tiktokNeedsUrlEntry(output);
     const canResend = tiktok && tiktokNeedsDraftResend(output);
     const photoSoundRequired = tiktok && tiktokPhotoSoundRequired(output);
     const posted = tiktok ? tiktokLiveUrl(output) : "";
+    const prompt = "Manage the TikTok draft here. After publishing from the TikTok inbox, paste the public URL below when required.";
+    if (copy) copy.textContent = (!awaiting && posted) ? "This TikTok is already live. The public URL is saved." : prompt;
     if (!tiktok || (!awaiting && !canResend && !posted)) {
       card.hidden = true;
       form.hidden = true;
@@ -17162,10 +17170,13 @@ function timedScriptAssetLabel(asset, index) {
     const form = $("creativeYoutubeCompleteForm");
     const live = $("creativeYoutubeCompleteLive");
     const input = $("creativeYoutubeUrl");
+    const copy = $("creativeYoutubeCompleteCopy");
     if (!card || !form || !live || !input) return;
     const youtube = String(output?.platform || "").trim().toLowerCase() === "youtube";
     const awaiting = youtube && youtubeNeedsUrlEntry(output);
     const posted = youtube ? youtubeLiveUrl(output) : "";
+    const prompt = "After you upload the video and/or set the 3D cover in YouTube Studio, paste the watch URL here to close this output as published.";
+    if (copy) copy.textContent = (!awaiting && posted) ? "This video is already live. The watch URL is saved." : prompt;
     if (!youtube || (!awaiting && !posted)) {
       card.hidden = true;
       form.hidden = true;
@@ -18122,7 +18133,7 @@ function timedScriptAssetLabel(asset, index) {
   function creativePublishSettled(output = activeCreativeOutput) {
     const status = String(output?.output_status || "").trim();
     const pub = String(output?.publish_status || "").trim();
-    return status === "Published" || pub === "Published";
+    return status === "Published" || pub === "Published" || outputHasLivePostUrl(output);
   }
 
   function creativeCanApproveForPublishing(output = activeCreativeOutput) {

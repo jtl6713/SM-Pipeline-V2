@@ -8,7 +8,7 @@ const html = fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.ur
 const app = fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), "assets/app-item4-1008.js"), "utf8");
 
 test("Studio page sections are siblings under main (profiles closes before operations)", () => {
-  assert.match(app, /BUILD_ID = "item4-0.6.705-manual-post-link"/);
+  assert.match(app, /BUILD_ID = "item4-0.6.706-tiktok-live-copy"/);
   const profiles = html.indexOf('id="page-profiles"');
   const operations = html.indexOf('id="page-operations"');
   const factory = html.indexOf('id="page-factory"');

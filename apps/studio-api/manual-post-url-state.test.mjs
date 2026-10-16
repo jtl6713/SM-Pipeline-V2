@@ -60,4 +60,7 @@ test("overview and Pipeline share the live-post clear", () => {
   assert.match(app, /function pipelineGroupLivePost/);
   assert.match(app, /pipeline-content-post-link/);
   assert.match(app, /filter === "attention" \|\| filter === "manual"/);
+  assert.match(app, /tiktokLiveUrl\(record\)\)\) return false/);
+  assert.match(app, /This TikTok is already live\. The public URL is saved\./);
+  assert.match(app, /This video is already live\. The watch URL is saved\./);
 });

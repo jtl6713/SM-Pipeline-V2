@@ -387,3 +387,5 @@ phase4-followup schedule-regen-empty-lane 2026-10-16T05:05:00Z UI 0.6.703-schedu
 
 phase4-followup tiktok-inbox-hold 2026-10-16T12:08:29Z UI 0.6.704-tiktok-inbox-hold (footer must show 0.6.704 / Worker 0.10.643)
 phase4-followup manual-post-link 2026-10-16T12:40:00Z UI 0.6.705-manual-post-link (footer must show 0.6.705 / Worker 0.10.644)
+
+phase4-followup tiktok-live-copy 2026-10-16T13:10:00Z UI 0.6.706-tiktok-live-copy (footer must show 0.6.706 / Worker 0.10.644)
