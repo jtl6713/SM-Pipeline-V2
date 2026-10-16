@@ -351,6 +351,7 @@ import {
   canonicalizeScheduleRegenPlatform,
   scheduleRegenJobIsStale,
   reclaimStaleScheduleRegenJob,
+  preferScheduleRegenJobStore,
   SCHEDULE_REGEN_STATUS,
 } from "./schedule-regen-batch.mjs";
 import {
@@ -1816,27 +1817,34 @@ export function mapApproveAllEligibleSummary(record) {
 
 /*__STUDIO_WORKER_END:mapApproveAllEligibleSummary__*/
 
-export async function studioLoadScheduleRegenJobStore(env) {
-  const row = await studioSettingsByName(env, SCHEDULE_REGEN_JOBS_SETTING).catch(() => null);
-  if (row?.fields?.Setting_Value || row?.fields?.Value) {
-    return pruneScheduleRegenJobStore(
-      parseScheduleRegenJobStore(row?.fields?.Setting_Value || row?.fields?.Value || "{}"),
-    );
-  }
-  // R2 fallback when the Airtable setting row was never creatable by the Worker PAT.
+async function studioReadScheduleRegenJobStoreFromR2(env) {
   const r2Key = "studio/state/schedule-regen-jobs-v1.json";
-  if (env?.STUDIO_MEDIA?.get) {
-    try {
-      const object = await env.STUDIO_MEDIA.get(r2Key);
-      if (object) {
-        const text = typeof object.text === "function" ? await object.text() : "";
-        return pruneScheduleRegenJobStore(parseScheduleRegenJobStore(text || "{}"));
-      }
-    } catch (error) {
-      console.warn("schedule regen R2 store read failed", error);
-    }
+  if (!env?.STUDIO_MEDIA?.get) return null;
+  try {
+    const object = await env.STUDIO_MEDIA.get(r2Key);
+    if (!object) return null;
+    const text = typeof object.text === "function" ? await object.text() : "";
+    return pruneScheduleRegenJobStore(parseScheduleRegenJobStore(text || "{}"));
+  } catch (error) {
+    console.warn("schedule regen R2 store read failed", error);
+    return null;
   }
-  return pruneScheduleRegenJobStore(emptyScheduleRegenJobStore());
+}
+/*__STUDIO_WORKER_END:studioReadScheduleRegenJobStoreFromR2__*/
+
+export async function studioLoadScheduleRegenJobStore(env) {
+  // R2 is primary. A seeded Airtable row with empty jobs{} used to win the read and
+  // make every POST look like it "started" while GET/poll immediately saw idle.
+  const r2Store = await studioReadScheduleRegenJobStoreFromR2(env);
+  let airtableStore = null;
+  try {
+    const row = await studioSettingsByName(env, SCHEDULE_REGEN_JOBS_SETTING);
+    const raw = row?.fields?.Setting_Value || row?.fields?.Value || "";
+    if (raw) airtableStore = pruneScheduleRegenJobStore(parseScheduleRegenJobStore(raw));
+  } catch (error) {
+    console.warn("schedule regen Airtable store read failed", error);
+  }
+  return pruneScheduleRegenJobStore(preferScheduleRegenJobStore(r2Store, airtableStore));
 }
 /*__STUDIO_WORKER_END:studioLoadScheduleRegenJobStore__*/
 
@@ -1845,6 +1853,7 @@ export async function studioPutScheduleRegenJobStore(env, store, notes = "Schedu
   const payload = JSON.stringify(pruned);
   const r2Key = "studio/state/schedule-regen-jobs-v1.json";
   let r2Ok = false;
+  let r2Error = null;
   if (env?.STUDIO_MEDIA?.put) {
     try {
       await env.STUDIO_MEDIA.put(r2Key, payload, {
@@ -1852,22 +1861,37 @@ export async function studioPutScheduleRegenJobStore(env, store, notes = "Schedu
       });
       r2Ok = true;
     } catch (error) {
+      r2Error = error;
       console.warn("schedule regen R2 store write failed", error);
     }
+  } else {
+    r2Error = new Error("STUDIO_MEDIA binding is not configured");
   }
+  let airtableOk = false;
+  let airtableError = null;
   try {
     await studioUpsertSetting(env, SCHEDULE_REGEN_JOBS_SETTING, payload, notes);
+    airtableOk = true;
   } catch (error) {
-    if (r2Ok) {
-      console.warn("schedule regen Airtable store write failed; continuing with R2", error);
-      return pruned;
-    }
-    throw new HttpError(
-      502,
-      `Could not persist schedule regeneration job (${error?.message || error}). Seed Pipeline Setting SCHEDULE_REGEN_JOBS_V1 or check STUDIO_MEDIA.`,
-    );
+    airtableError = error;
+    console.warn("schedule regen Airtable store write failed", error);
   }
-  return pruned;
+  // Either durable backend is enough. R2 is what the load path prefers for active jobs.
+  if (r2Ok || airtableOk) {
+    if (!r2Ok || !airtableOk) {
+      console.warn("schedule regen store partial persist", {
+        r2Ok,
+        airtableOk,
+        r2Error: r2Error?.message || String(r2Error || ""),
+        airtableError: airtableError?.message || String(airtableError || ""),
+      });
+    }
+    return pruned;
+  }
+  throw new HttpError(
+    502,
+    `Could not persist schedule regeneration job (R2: ${r2Error?.message || r2Error || "failed"}; Airtable: ${airtableError?.message || airtableError || "failed"}).`,
+  );
 }
 /*__STUDIO_WORKER_END:studioPutScheduleRegenJobStore__*/
 
@@ -2155,6 +2179,14 @@ export async function startScheduleRegenJob(request, env, authorization, ctx = n
   store.jobs[job.id] = job;
   store.active_by_scope[scope] = job.id;
   await studioPutScheduleRegenJobStore(env, store);
+  // Re-load once so we fail loud if neither R2 nor Airtable kept the active job.
+  const verified = await studioGetScheduleRegenJob(env, job.id);
+  if (!verified) {
+    throw new HttpError(
+      502,
+      "Schedule regeneration job did not persist (store reload missed the new job id). Check STUDIO_MEDIA and Pipeline Setting SCHEDULE_REGEN_JOBS_V1.",
+    );
+  }
   if (ctx?.waitUntil) {
     ctx.waitUntil(studioProcessScheduleRegenJobSlice(env, job.id).catch((error) => {
       console.warn("schedule regen slice failed", job.id, error);
@@ -2162,9 +2194,13 @@ export async function startScheduleRegenJob(request, env, authorization, ctx = n
   } else {
     await studioProcessScheduleRegenJobSlice(env, job.id);
   }
+  const summary = summarizeScheduleRegenJob(job);
   return respond(request, env, {
     ok: true,
-    job: summarizeScheduleRegenJob(job),
+    job: summary,
+    job_id: job.id,
+    id: job.id,
+    status: job.status,
     message: scheduleRegenProgressMessage(job),
   });
 }
@@ -2184,8 +2220,10 @@ export async function getScheduleRegenJobStatus(request, env, authorization) {
     return respond(request, env, {
       ok: true,
       status: "idle",
-      job_id: null,
-      message: "No schedule regeneration job is running.",
+      job_id: jobId || null,
+      message: jobId
+        ? `No schedule regeneration job found for ${jobId}.`
+        : "No schedule regeneration job is running.",
     });
   }
   if (job.status === "queued" || job.status === "running") {

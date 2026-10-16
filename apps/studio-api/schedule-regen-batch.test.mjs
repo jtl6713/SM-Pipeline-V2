@@ -16,6 +16,9 @@ import {
   scheduleRegenJobIsStale,
   scheduleRegenProgressMessage,
   summarizeScheduleRegenJob,
+  preferScheduleRegenJobStore,
+  scheduleRegenStoreActivityScore,
+  emptyScheduleRegenJobStore,
 } from "./schedule-regen-batch.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -140,6 +143,28 @@ test("failed combination stays Failed and is counted separately", () => {
   assert.match(scheduleRegenProgressMessage(job), /failed/i);
 });
 
+test("preferScheduleRegenJobStore does not let empty Airtable seed shadow R2 active jobs", () => {
+  const emptySeed = emptyScheduleRegenJobStore();
+  const r2Active = {
+    schema_version: 1,
+    jobs: {
+      sr_1: {
+        id: "sr_1",
+        status: "queued",
+        updated_at: "2026-10-16T03:30:00.000Z",
+        combinations: [],
+      },
+    },
+    active_by_scope: { recpNlNn6U6eq0M9r: "sr_1" },
+  };
+  assert.ok(scheduleRegenStoreActivityScore(r2Active) > scheduleRegenStoreActivityScore(emptySeed));
+  const picked = preferScheduleRegenJobStore(r2Active, emptySeed);
+  assert.equal(picked.jobs.sr_1.id, "sr_1");
+  assert.equal(picked.active_by_scope.recpNlNn6U6eq0M9r, "sr_1");
+  // Tie / both empty → primary (R2).
+  assert.deepEqual(preferScheduleRegenJobStore(emptySeed, emptySeed), emptySeed);
+});
+
 test("Worker and Pipeline wire durable schedule regeneration", () => {
   assert.equal(SCHEDULE_REGEN_JOBS_SETTING, "SCHEDULE_REGEN_JOBS_V1");
   assert.match(worker, /isScheduleRegenRoute/);
@@ -152,12 +177,15 @@ test("Worker and Pipeline wire durable schedule regeneration", () => {
   assert.match(worker, /unsettledPlatformTypes/);
   assert.match(worker, /platformOccupiedMs:\s*reservedPlatform/);
   assert.match(worker, /schedule-regen-jobs-v1\.json/);
-  assert.match(worker, /Seed that Setting_Name row in Airtable/);
+  assert.match(worker, /preferScheduleRegenJobStore/);
+  assert.match(worker, /did not persist/);
   assert.match(worker, /display names \("Miami - Miami"\)/);
   assert.match(app, /\/api\/outputs\/schedule-regen/);
   assert.match(app, /pathname === "\/api\/outputs\/schedule-regen"/);
   assert.match(app, /queuePipelineScheduleRegenPoll/);
   assert.match(app, /loadPipelineScheduleGridWindow/);
+  assert.match(app, /was lost after start/);
+  assert.match(app, /window\.alert\(message\)/);
   assert.match(app, /Will be scheduled on approval/);
   assert.match(app, /operationsScheduleHorizonDays/);
   assert.match(app, /MAE-first, balanced-overflow/);

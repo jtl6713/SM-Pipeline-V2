@@ -277,7 +277,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.697-schedule-regen-live";
+  const BUILD_ID = "item4-0.6.698-schedule-regen-r2";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -19499,6 +19499,11 @@ function timedScriptAssetLabel(asset, index) {
       queuePipelineScheduleRegenPoll(jobId, button);
       return data;
     }
+    // Idle right after start means the durable store lost the job (empty Airtable
+    // seed used to shadow R2). Surface that instead of silently resetting the button.
+    if (data?.status === "idle") {
+      throw new Error(data?.message || `Schedule regeneration job ${jobId} was lost after start.`);
+    }
     if (pipelineScheduleRegenPollTimer) {
       clearTimeout(pipelineScheduleRegenPollTimer);
       pipelineScheduleRegenPollTimer = null;
@@ -19532,7 +19537,9 @@ function timedScriptAssetLabel(asset, index) {
       regeneratePipelineSchedulesForPlatforms(platforms, button).catch((error) => {
         button.disabled = false;
         button.textContent = "Regenerate schedules";
-        setPipelineScheduleGridMessage(error?.message || "Could not regenerate schedules.", true);
+        const message = error?.message || "Could not regenerate schedules.";
+        setPipelineScheduleGridMessage(message, true);
+        try { window.alert(message); } catch {}
       });
     });
     // Resume any in-flight regeneration after refresh/navigation.
@@ -19600,11 +19607,18 @@ function timedScriptAssetLabel(asset, index) {
           name: workingStudioCityLabel(),
         }],
       }),
+      timeoutMs: 90000,
+      retries: 1,
     });
     const job = started?.job || started;
-    const jobId = job?.id || started?.job_id;
-    if (!jobId) throw new Error("Schedule regeneration did not return a job id.");
-    renderScheduleRegenProgress(job);
+    const jobId = job?.id || started?.job_id || started?.id;
+    if (!jobId) throw new Error(started?.error || started?.message || "Schedule regeneration did not return a job id.");
+    if (button) {
+      button.disabled = true;
+      button.textContent = "Regenerating…";
+    }
+    renderScheduleRegenProgress(job?.status ? job : { ...job, id: jobId, status: started?.status || "queued" });
+    setPipelineScheduleGridMessage(started?.message || `Schedule regeneration started (${jobId}).`);
     queuePipelineScheduleRegenPoll(jobId, button, 1200);
   }
 
