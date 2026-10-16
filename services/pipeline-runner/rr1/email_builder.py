@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from typing import Any
 from urllib.parse import parse_qs, urlparse
 
-from p3.helpers import caption_with_hashtags
+from p3.helpers import caption_for_notification
 from render.fields import field_str
 
 
@@ -94,7 +94,7 @@ def build_review_card(
     review_images = field_str(output, "Selected_Review_Images_HTML")
     thumbnail_url = field_str(output, "Thumbnail_URL")
     caption = html.escape(
-        caption_with_hashtags(
+        caption_for_notification(
             field_str(output, "Output_Caption"),
             field_str(output, "Output_Hashtags"),
         )
