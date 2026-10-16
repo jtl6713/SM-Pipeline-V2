@@ -39,6 +39,7 @@ jobs:
       - name: Hermetic packs
         shell: bash
         run: |
+          set +e
           set -uo pipefail
           python tests/regression/runner.py hermetic > /tmp/hermetic-regression.log 2>&1
           result=$?
