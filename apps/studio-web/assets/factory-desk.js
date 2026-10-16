@@ -748,6 +748,7 @@
         if (checkbox.checked) state.selectedOutputs.add(id);
         else state.selectedOutputs.delete(id);
         saveFactorySelection();
+        updateFactoryBatchToolbar();
         // Sync content-level checked state without closing review groups.
         const group = checkbox.closest(".factory-content-rows")?.previousElementSibling;
         const groupBox = group?.querySelector("[data-factory-select-content]");
@@ -766,6 +767,7 @@
       checkbox.addEventListener("change", () => {
         ids.forEach((id) => checkbox.checked ? state.selectedOutputs.add(id) : state.selectedOutputs.delete(id));
         saveFactorySelection();
+        updateFactoryBatchToolbar();
         const rows = checkbox.closest(".factory-content-bar")?.nextElementSibling;
         rows?.querySelectorAll("[data-factory-select-output]").forEach((input) => { input.checked = checkbox.checked; });
         checkbox.indeterminate = false;
