@@ -1,4 +1,5 @@
 import { countPendingPlatformDispatch } from "./overview-dispatch-counts.mjs";
+import { withOutputApprovalLock } from "./output-approval-lease.mjs";
 import {
   factoryBatchEnqueue, factoryBatchRead, factoryBatchList,
   factoryBatchDrain, factoryBatchRetry, factoryBatchSummary, factoryBatchCounts,
@@ -1601,14 +1602,26 @@ export async function studioReconcileFacebookReels(env, options = {}) {
 
 export async function approveOutputRecordForPublishing(env, existing, note, stamp, payload = {}, options = {}) {
   const id = existing.id;
-  if (Boolean(f(existing, "Do_Not_Publish"))) {
+  return withOutputApprovalLock(env.STUDIO_MEDIA, id, async () => {
+  // Canonical re-read under the shared per-output lease. Legacy Pipeline, single
+  // Approve, and Factory batch cannot concurrently commit two approvals for
+  // the same record. Never trust a caller's earlier Ready for Review snapshot.
+  const current = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, id);
+  const currentOutput = String(f(current, "Output_Status") || "").trim();
+  const currentPublish = String(f(current, "Publish_Status") || "").trim();
+  const currentReview = String(f(current, "Review_Status") || "").trim();
+  if (currentOutput === "Published" || currentPublish === "Published" ||
+      currentOutput === "Approved for Publishing" || currentReview === "Approved") {
+    return { ...current, __already_approved: true };
+  }
+  if (Boolean(f(current, "Do_Not_Publish"))) {
     throw new HttpError(409, "Do_Not_Publish outputs cannot be approved for live publishing");
   }
-  if (!studioOutputReadyForPublishApproval(existing)) {
+  if (!studioOutputReadyForPublishApproval(current)) {
     throw new HttpError(409, "This output is not ready for publishing approval");
   }
-  const existingNotes = String(f(existing, "Review_Notes") || "").trim();
-  let record = existing;
+  const existingNotes = String(f(current, "Review_Notes") || "").trim();
+  let record = current;
   if (studioOutputIsNativePhoto(record)) {
     await item4PulseLetterPython(env, { outputRecordId: record.id }).catch((error) => {
       console.warn("native photo branding before publish approval failed", record.id, error);
@@ -1759,6 +1772,7 @@ export async function approveOutputRecordForPublishing(env, existing, note, stam
     await writeThrough;
   }
   return updated;
+  });
 }
 /*__STUDIO_WORKER_END:approveOutputRecordForPublishing__*/
 
