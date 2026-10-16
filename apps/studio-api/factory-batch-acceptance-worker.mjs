@@ -62,7 +62,11 @@ export default {
         const submitted = await factoryBatchEnqueue(env.STUDIO_MEDIA, {
           profileId: PROFILE, requestId: rid, records, note: "non-publishing-acceptance",
         });
-        if (!submitted.already_submitted) ctx.waitUntil(drain(env, req));
+        if (!submitted.already_submitted) ctx.waitUntil(drain(env, req).catch(async error => {
+          const message = String(error?.stack || error?.message || error);
+          console.error("FACTORY_SMOKE_BACKGROUND_FAILURE", message);
+          await env.STUDIO_MEDIA.put(PREFIX + "/" + rid + "/failure-diagnostics.json", JSON.stringify({ message }));
+        }));
         return json({ ...factoryBatchSummary(submitted.job), accepted: true,
           already_submitted: submitted.already_submitted });
       }
@@ -72,6 +76,10 @@ export default {
         ctx.waitUntil(drain(env, req));
         return json({ ...factoryBatchSummary(job), accepted: true });
       }
+      if (req.method === "POST" && url.pathname === "/api/diagnose") {
+        const result = await drain(env, req);
+        return json({ ...factoryBatchSummary(result.job), claimed: result.claimed, processed: result.processed });
+      }
       if (req.method === "POST" && url.pathname === "/api/resume") {
         ctx.waitUntil(drain(env, req));
         return json({ accepted: true, resumed: true });
@@ -80,7 +88,9 @@ export default {
         const job = await factoryBatchRead(env.STUDIO_MEDIA, PROFILE, rid);
         if (!job) return json({ error: "not found" }, 404);
         const rows = await env.STUDIO_MEDIA.list({ prefix: PREFIX + "/" + rid + "/committed/" });
-        return json({ ...factoryBatchSummary(job), stored_commits: rows.objects.length });
+        const diagnostics = await read(env, PREFIX + "/" + rid + "/failure-diagnostics.json");
+        return json({ ...factoryBatchSummary(job), stored_commits: rows.objects.length,
+          background_error: diagnostics?.message || null });
       }
       return json({ error: "unsupported" }, 404);
     } catch (error) {
