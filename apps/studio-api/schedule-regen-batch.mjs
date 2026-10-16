@@ -6,6 +6,24 @@ export const SCHEDULE_REGEN_JOBS_SETTING = "SCHEDULE_REGEN_JOBS_V1";
 export const SCHEDULE_REGEN_JOB_TTL_MS = 24 * 60 * 60 * 1000;
 export const SCHEDULE_REGEN_STORE_CHAR_BUDGET = 80000;
 export const SCHEDULE_REGEN_MAX_TERMINAL_JOBS = 3;
+/** A Processing combo older than this is treated as crashed; GET/POST may resume or reclaim. */
+export const SCHEDULE_REGEN_STALE_PROCESSING_MS = 2 * 60 * 1000;
+
+const CANONICAL_PLATFORMS = Object.freeze({
+  instagram: "Instagram",
+  facebook: "Facebook",
+  tiktok: "TikTok",
+  youtube: "YouTube",
+});
+
+/** Pipeline calendar sends lowercase keys; Airtable Platform is title case. */
+export function canonicalizeScheduleRegenPlatform(value) {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+  const hit = CANONICAL_PLATFORMS[raw.toLowerCase()];
+  if (hit) return hit;
+  return raw[0].toUpperCase() + raw.slice(1);
+}
 
 export const SCHEDULE_REGEN_STATUS = Object.freeze({
   PENDING: "Pending",
@@ -151,14 +169,57 @@ export function scheduleRegenCandidateFilterFormula({
     '{Publish_Status}!="Published"',
     '{Output_Status}!="Published"',
   ];
-  const p = String(platform || "").trim();
-  if (p) clauses.push(`{Platform}="${escaped(p)}"`);
+  const p = canonicalizeScheduleRegenPlatform(platform);
+  // Case-insensitive: UI sends "instagram"; Airtable stores "Instagram".
+  if (p) clauses.push(`LOWER({Platform})="${escaped(p.toLowerCase())}"`);
   const t = String(outputType || "").trim();
   if (t) clauses.push(`OR({Studio_Output_Type}="${escaped(t)}",{Format}="${escaped(t)}")`);
   clauses.push(`OR(${scheduleBlank},${scheduleFuture})`);
   const base = `AND(${clauses.join(",")})`;
   const scope = String(profileFormula || "").trim();
   return scope ? `AND(${scope},${base})` : base;
+}
+
+export function scheduleRegenJobIsStale(job, nowMs = Date.now(), staleMs = SCHEDULE_REGEN_STALE_PROCESSING_MS) {
+  if (!job || typeof job !== "object") return false;
+  const status = String(job.status || "");
+  if (status !== "queued" && status !== "running") return false;
+  const updated = Date.parse(job.updated_at || job.created_at || "") || 0;
+  if (!updated) return true;
+  const age = Math.max(0, Number(nowMs) || Date.now()) - updated;
+  const hasProcessing = (job.combinations || []).some(
+    (row) => String(row?.status || "") === SCHEDULE_REGEN_STATUS.PROCESSING,
+  );
+  if (hasProcessing && age >= Math.max(30_000, Number(staleMs) || SCHEDULE_REGEN_STALE_PROCESSING_MS)) {
+    return true;
+  }
+  // Queued/running with no progress for a long time (store write may have died).
+  if (!hasProcessing && age >= Math.max(5 * 60_000, Number(staleMs) || SCHEDULE_REGEN_STALE_PROCESSING_MS)) {
+    return true;
+  }
+  return false;
+}
+
+/** Reset crashed Processing combos back to Pending so a later slice can finish them. */
+export function reclaimStaleScheduleRegenJob(job, nowMs = Date.now()) {
+  if (!job || typeof job !== "object") return job;
+  if (!scheduleRegenJobIsStale(job, nowMs)) return job;
+  const combinations = (Array.isArray(job.combinations) ? job.combinations : []).map((row) => {
+    if (String(row?.status || "") !== SCHEDULE_REGEN_STATUS.PROCESSING) return row;
+    return {
+      ...row,
+      status: SCHEDULE_REGEN_STATUS.PENDING,
+      error: "",
+    };
+  });
+  const firstPending = combinations.findIndex((row) => String(row?.status || "") === SCHEDULE_REGEN_STATUS.PENDING);
+  return {
+    ...job,
+    combinations,
+    cursor: firstPending >= 0 ? firstPending : 0,
+    status: firstPending >= 0 ? "running" : job.status,
+    updated_at: new Date(nowMs).toISOString(),
+  };
 }
 
 export function scheduleRegenJobCounts(job) {
