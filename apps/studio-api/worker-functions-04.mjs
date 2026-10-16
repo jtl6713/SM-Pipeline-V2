@@ -1165,7 +1165,7 @@ export async function studioHealApprovedMissingSchedule(env, options = {}) {
     }
     const occupiedByLane = occupiedByProfile.get(profileKey) || {};
     const platform = String(f(row, "Platform") || "").trim();
-    const outputType = String(f(row, "Studio_Output_Type") || f(row, "Format") || "").trim();
+    const outputType = String(f(row, "Studio_Output_Type") || f(row, "Platform_Output_Type") || f(row, "Format") || "").trim();
     const isStory = /story/i.test(outputType);
     const laneKey = maeScheduleLaneKey(platform, outputType) || platform.toLowerCase();
     const lane = studioOccupiedForLane(occupiedByLane, platform, outputType);
@@ -1922,6 +1922,7 @@ export async function studioDiscoverScheduleRegenScope(env, profile, platforms, 
       "Studio_Scheduled_At",
       "Publish_Status",
       "Studio_Output_Type",
+      "Platform_Output_Type",
       "Format",
       "Content_Profile",
       "Published_At",
@@ -1951,7 +1952,7 @@ export async function studioDiscoverScheduleRegenScope(env, profile, platforms, 
     ).trim();
     const stamp = iso ? Date.parse(iso) : NaN;
     if (iso && Number.isFinite(stamp) && (stamp <= nowMs || stamp > horizonMs)) continue;
-    const outputType = String(f(row, "Studio_Output_Type") || f(row, "Format") || "").trim();
+    const outputType = String(f(row, "Studio_Output_Type") || f(row, "Platform_Output_Type") || f(row, "Format") || "").trim();
     if (!outputType) continue;
     eligibleCount += 1;
     outputTypes.add(outputType);
@@ -2022,7 +2023,7 @@ export async function studioProcessScheduleRegenJobSlice(env, jobId, options = {
     for (const row of rows || []) {
       if (!studioOccupiedRowMatchesProfile(row, profile)) continue;
       const platform = String(f(row, "Platform") || "").trim();
-      const outputType = String(f(row, "Studio_Output_Type") || f(row, "Format") || "").trim();
+      const outputType = String(f(row, "Studio_Output_Type") || f(row, "Platform_Output_Type") || f(row, "Format") || "").trim();
       if (platform.toLowerCase() !== platformWant) continue;
       if (outputType.toLowerCase() !== typeWant) continue;
       const published = Boolean(String(f(row, "Published_At") || "").trim())
@@ -2070,7 +2071,7 @@ export async function studioProcessScheduleRegenJobSlice(env, jobId, options = {
       if (eligibleIds.has(row.id) || !studioOccupiedRowMatchesProfile(row, profile)) continue;
       const platform = String(f(row, "Platform") || "").trim().toLowerCase();
       if (platform !== platformWant) continue;
-      const outputType = String(f(row, "Studio_Output_Type") || f(row, "Format") || "").trim().toLowerCase();
+      const outputType = String(f(row, "Studio_Output_Type") || f(row, "Platform_Output_Type") || f(row, "Format") || "").trim().toLowerCase();
       const published = Boolean(String(f(row, "Published_At") || "").trim())
         || String(f(row, "Publish_Status") || "").trim() === "Published"
         || String(f(row, "Output_Status") || "").trim() === "Published";
