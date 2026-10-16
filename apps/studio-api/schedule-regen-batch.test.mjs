@@ -20,6 +20,7 @@ import {
   scheduleRegenComboNeedsPlanning,
   scheduleRegenComboNeedsWork,
   scheduleRegenComboIsOrphanProcessing,
+  slimScheduleRegenCombination,
   scheduleRegenJobCounts,
   scheduleRegenJobIsStale,
   scheduleRegenProgressMessage,
@@ -27,6 +28,7 @@ import {
   preferScheduleRegenJobStore,
   scheduleRegenStoreActivityScore,
   emptyScheduleRegenJobStore,
+  SCHEDULE_REGEN_MAX_TERMINAL_JOBS,
 } from "./schedule-regen-batch.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -135,6 +137,18 @@ test("stale Processing jobs can be reclaimed so regenerate is not stuck forever"
   assert.ok(SCHEDULE_REGEN_POSTS_PER_SLICE >= 5);
   assert.ok(SCHEDULE_REGEN_PLAN_SLOTS_PER_SLICE >= 5);
   assert.ok(SCHEDULE_REGEN_MAX_SLICES_PER_DRAIN >= 2);
+  assert.equal(SCHEDULE_REGEN_MAX_TERMINAL_JOBS, 1);
+  const slimed = slimScheduleRegenCombination({
+    status: SCHEDULE_REGEN_STATUS.COMPLETED,
+    plan: [{ id: "x" }],
+    eligible_ids: ["x"],
+    lane_reserved_ms: [1],
+    platform_reserved_ms: [1],
+    placed_isos: ["2026-10-20T12:00:00.000Z"],
+  }, { keepPlacedIsos: true });
+  assert.deepEqual(slimed.plan, []);
+  assert.deepEqual(slimed.eligible_ids, []);
+  assert.equal(slimed.placed_isos.length, 1);
 });
 
 test("progress counts report actual combination completion", () => {
@@ -234,7 +248,9 @@ test("Worker and Pipeline wire durable schedule regeneration", () => {
   assert.match(worker, /scheduleRegenComboIsOrphanProcessing/);
   assert.match(worker, /placed_isos/);
   assert.match(worker, /Orphan Processing \(no plan/);
-  assert.match(worker, /version: "0\.10\.634-schedule-regen-plan-persist"/);
+  assert.match(worker, /froze Instagram Reel at 45\/95/);
+  assert.match(worker, /leasedProcessing/);
+  assert.match(worker, /version: "0\.10\.635-schedule-regen-ig-resume"/);
   assert.match(app, /\/api\/outputs\/schedule-regen/);
   assert.match(app, /pathname === "\/api\/outputs\/schedule-regen"/);
   assert.match(app, /queuePipelineScheduleRegenPoll/);

@@ -14,7 +14,7 @@ test("Pipeline open-pack uses the stored Studio_Pipeline_Open index", async () =
   assert.match(worker, /legacy \? STUDIO_PIPELINE_OPEN_LEGACY_FORMULA : STUDIO_PIPELINE_OPEN_FIELD_FORMULA/);
   assert.match(worker, /allowRefresh: url.searchParams.get\("refresh"\) !== "0"/);
   assert.match(worker, /if \(allowRefresh && !fresh\) scheduleMappedListRefresh/);
-  assert.match(worker, /version: "0.10.634-schedule-regen-plan-persist"/);
+  assert.match(worker, /version: "0.10.635-schedule-regen-ig-resume"/);
 });
 
 test("Home polls the snapshot without triggering an Airtable rebuild", async () => {
