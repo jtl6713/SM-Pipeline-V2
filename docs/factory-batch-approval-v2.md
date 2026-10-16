@@ -6,6 +6,7 @@ Status: **WIP / DRAFT PR #786. DO NOT MERGE OR DEPLOY AS RELEASE-COMPLETE.**
 
 - Factory page: per-content and per-output checkboxes, deduplicated output selection, local selection persistence, sticky one-click submit, authoritative server activity at page top, inspect items, failed-only retry. The UI does not wait for all items.
 - Factory API: `GET/POST /api/factory/approval-batches` for profile-scoped R2 jobs. Legacy Pipeline Approve All remains untouched as a separate endpoint.
+- Shared output-approval mutex: conditional R2 per-output lease now wraps the canonical `approveOutputRecordForPublishing` transaction used by Factory, Pipeline single approvals and legacy Approve All. Re-reads the latest Airtable record inside the lease and returns `__already_approved` without a second write or publishing dispatch. Expired leases permit recovery; this still requires staging integration testing.
 - Durable queue: R2 job JSON under `studio/state/factory-approvals/v2/jobs/{profile}/{request_id}.json`; conditional If-None-Match avoids duplicate request IDs and conditional ETag writes prevent lost job updates. Per-profile lease under `.../locks/{profile}.json` serializes Factory batches. Canonical `factoryApproveOutput` checks state and invokes canonical schedule/publish gates.
 - Resume: Cloudflare cron calls `factoryBatchCronResume` without a browser. Crashed workers can be reclaimed after lease expiry, with canonical output state reread before any further approval.
 - Quality: typed signatures and health checks, bounded transient backoff and safe state reconciliation. Terminal failures stay manual unless Retry Failed is clicked.
@@ -38,12 +39,21 @@ Reopening Factory fetches fresh state from R2, not local browser state. Selectio
 
 ## Release blockers and mandatory tests
 
-1. Verify actual production R2 conditional `put(onlyIf)` behavior against Cloudflare, not merely the FakeR2 test.
-2. Validate full Wrangler deploy dry-run and generated source modules after source-split markers.
-3. Verify Quality Agent checks appear in the actual inventory, not only the catalog and R2 status endpoint.
-4. Verify no duplicate approval under concurrent Factory batches AND overlapping existing single-item/Pipeline Approve All routes.
-5. Run 20 live/review-ready approvals in a controlled staging environment, submit and instantly close browser, and verify later from a different device that every selected ID has exactly one result, with correct MAE schedule and no unintended publication.
-6. Confirm mobile/tablet Factory and existing single-item, Story and TikTok draft regressions.
-7. Bump versions via repository-wide standard and deploy only after all required workflows pass. Verify live Cloudflare Worker/UI versions and rollback readiness.
+1. Restore GitHub Actions: as of the 2026-10-16 rerun, all PR workflows terminate with zero job steps and no job log. GitHub Status reports no general Actions incident; inspect repo/account Actions permissions, runner availability, billing/usage and failed-run banner. Static syntax/source-split and isolated queue/lease simulations passed, but **do not infer green CI**.
+2. Verify actual production R2 conditional `put(onlyIf)` behavior against Cloudflare, not merely the FakeR2 test.
+3. Validate full Wrangler deploy dry-run and generated source modules after source-split markers.
+4. Verify Quality Agent checks appear in the actual inventory, not only the catalog and R2 status endpoint.
+5. Verify no duplicate approval under concurrent Factory batches AND overlapping existing single-item/Pipeline Approve All routes.
+6. Run 20 live/review-ready approvals in a controlled staging environment, submit and instantly close browser, and verify later from a different device that every selected ID has exactly one result, with correct MAE schedule and no unintended publication.
+7. Confirm mobile/tablet Factory and existing single-item, Story and TikTok draft regressions.
+8. Bump versions via repository-wide standard and deploy only after all required workflows pass. Verify live Cloudflare Worker/UI versions and rollback readiness.
 
 Do not declare complete until the real 20-output browser-close acceptance and single-item regression are verified.
+
+## Verification observed 2026-10-16
+
+- Queue source compiled in independent JS harness. 20 selected outputs persisted and completed across two separate drain calls (8 + 12); repeat request ID returned original record; 20/20 counted done.
+- Separate deterministic R2 harness verified canonical per-output mutual exclusion (overlapping caller 409), lock release and subsequent acquisition. Bounded transient wait and failed-only retry were exercised and reconciled 3/3 results.
+- Worker source-split markers manually checked: 1,409 function declarations, 1,409 extract markers, no mismatch. Core changed scripts parsed successfully.
+- Quality catalog validation completed: 66 unique valid checks, including five Factory batch signatures.
+- These are **simulation and static checks**. Live Cloudflare, 20-item end-to-end/browser-close scenario and Wrangler deployment remain unverified due blocked CI/runner execution.
