@@ -391,7 +391,7 @@ test("Worker stamp paths use MAE horizon engine", () => {
   assert.match(worker, /studio_mae_horizon_days_v1: true/);
   assert.match(worker, /studio_mae_output_type_lanes_v1: true/);
   assert.match(worker, /studio_mae_profile_occupancy_v1: true/);
-  assert.match(worker, /0.10.624-fb-rate-limit-retry-pending/);
+  assert.match(worker, /0.10.625-supabase-phase4-reads/);
   assert.match(worker, /MAE_PRIORITY_SCHEDULE_WINDOWS/);
   assert.match(worker, /maeScheduleLaneKey/);
   assert.match(worker, /STUDIO_SCHEDULE_HORIZON_DAYS|MAE_SCHEDULE_HORIZON_SETTING/);

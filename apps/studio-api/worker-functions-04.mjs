@@ -5,10 +5,15 @@ import {
   studioSupabaseConfigured,
   listSupabasePipelineOutputs,
   listSupabaseScheduleGrid,
+  listSupabaseContentItems,
+  listSupabaseOverviewPack,
+  listSupabaseFactoryDeskPack,
   syncAllProfilesPipelineToSupabase,
   syncProfilePipelineToSupabase,
   syncAirtableOutputRowToSupabase,
   STUDIO_SUPABASE_PIPELINE_READ_ROUTES,
+  STUDIO_SUPABASE_PHASE4_READ_ROUTES,
+  STUDIO_SUPABASE_READ_ROUTES,
 } from "./supabase-pipeline-reads.mjs";
 import {
   DESK_SETTING_NAME,
@@ -2951,28 +2956,54 @@ export function studioOverviewRowMatchesProfile(row, profile) {
 /*__STUDIO_WORKER_END:studioOverviewRowMatchesProfile__*/
 
 export async function buildStudioProfilesOverviewRows(env, profiles) {
-  const formula = studioProfilesOverviewCombinedFormula(profiles);
-  // Fetch every matching row; the previous global 800/300 caps silently excluded
-  // older profiles. listRecords follows Airtable offsets until exhausted.
-  // Treat reaching the safety ceiling as incomplete, never as a valid snapshot.
-  const outputRows = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
-    limit: STUDIO_PROFILES_OVERVIEW_OUTPUT_LIMIT,
-    filterFormula: formula,
-    sortField: "Output_ID",
-    sortDirection: "desc",
-    fields: OUTPUT_LIST_FIELDS,
-  });
-  if (outputRows.length >= STUDIO_PROFILES_OVERVIEW_OUTPUT_LIMIT) {
-    throw new Error("Profiles overview outputs exceeded complete-scan safety ceiling");
+  let outputRows = null;
+  let ideaRows = null;
+  let readSource = "airtable";
+
+  if (studioReadSource(env) === "supabase") {
+    try {
+      const pack = await listSupabaseOverviewPack(env, {
+        profileAirtableIds: (profiles || []).map((profile) => profile.id),
+        outputLimit: STUDIO_PROFILES_OVERVIEW_OUTPUT_LIMIT,
+        ideaLimit: STUDIO_PROFILES_OVERVIEW_IDEA_LIMIT,
+      });
+      // Require outputs; ideas can be empty right after Phase 4 deploy until sync warms them.
+      if (!pack.profilesMissing && (pack.outputs || []).length) {
+        outputRows = pack.outputs || [];
+        ideaRows = pack.ideas || [];
+        readSource = "supabase";
+      }
+    } catch (error) {
+      console.warn("supabase profiles overview read failed; falling back to Airtable", error);
+    }
   }
-  const ideaRows = await listRecords(env, env.AIRTABLE_IDEA_TABLE_ID, {
-    limit: STUDIO_PROFILES_OVERVIEW_IDEA_LIMIT,
-    sortField: "Create_Date",
-    filterFormula: formula,
-  });
-  if (ideaRows.length >= STUDIO_PROFILES_OVERVIEW_IDEA_LIMIT) {
-    throw new Error("Profiles overview ideas exceeded complete-scan safety ceiling");
+
+  if (!outputRows || !ideaRows) {
+    const formula = studioProfilesOverviewCombinedFormula(profiles);
+    // Fetch every matching row; the previous global 800/300 caps silently excluded
+    // older profiles. listRecords follows Airtable offsets until exhausted.
+    // Treat reaching the safety ceiling as incomplete, never as a valid snapshot.
+    outputRows = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
+      limit: STUDIO_PROFILES_OVERVIEW_OUTPUT_LIMIT,
+      filterFormula: formula,
+      sortField: "Output_ID",
+      sortDirection: "desc",
+      fields: OUTPUT_LIST_FIELDS,
+    });
+    if (outputRows.length >= STUDIO_PROFILES_OVERVIEW_OUTPUT_LIMIT) {
+      throw new Error("Profiles overview outputs exceeded complete-scan safety ceiling");
+    }
+    ideaRows = await listRecords(env, env.AIRTABLE_IDEA_TABLE_ID, {
+      limit: STUDIO_PROFILES_OVERVIEW_IDEA_LIMIT,
+      sortField: "Create_Date",
+      filterFormula: formula,
+    });
+    if (ideaRows.length >= STUDIO_PROFILES_OVERVIEW_IDEA_LIMIT) {
+      throw new Error("Profiles overview ideas exceeded complete-scan safety ceiling");
+    }
+    readSource = "airtable";
   }
+
   return (profiles || []).map((profile) => {
     const profileOutputs = (outputRows || []).filter((row) => studioOverviewRowMatchesProfile(row, profile));
     const profileIdeas = (ideaRows || []).filter((row) => studioOverviewRowMatchesProfile(row, profile));
@@ -2991,6 +3022,7 @@ export async function buildStudioProfilesOverviewRows(env, profiles) {
       approval: metrics.awaiting_approval,
       ideas: metrics.ideas_not_in_production,
       metrics,
+      read_source: readSource,
     };
   });
 }
@@ -7435,7 +7467,48 @@ export async function getStudioOperationsQueue(request, env, authorization) {
       return [];
     }
   };
-  const [profiles, outputs, requests, activeHolds, renderLaneOutputs, reviewOutputs] = await Promise.all([
+
+  let profiles = [];
+  let outputs = [];
+  let requests = [];
+  let activeHolds = [];
+  let renderLaneOutputs = [];
+  let reviewOutputs = [];
+  let contentMap = new Map();
+  let ideaMetaById = new Map();
+  let queueReadSource = "airtable";
+
+  if (studioReadSource(env) === "supabase") {
+    try {
+      const pack = await listSupabaseFactoryDeskPack(env);
+      const packedOutputs = pack.outputs || [];
+      const packedRequests = pack.requests || [];
+      // Empty pack usually means Phase 4 sync has not warmed requests/outputs yet.
+      if (packedOutputs.length || packedRequests.length) {
+        profiles = pack.profiles || [];
+        outputs = packedOutputs;
+        requests = packedRequests;
+        activeHolds = pack.activeHolds || [];
+        renderLaneOutputs = pack.renderLaneOutputs || [];
+        reviewOutputs = pack.reviewOutputs || [];
+        contentMap = pack.contentById instanceof Map ? pack.contentById : new Map();
+        for (const idea of pack.ideas || []) {
+          if (!idea?.id) continue;
+          ideaMetaById.set(idea.id, {
+            profile_id: firstOpsLinkedId(f(idea, "Content_Profile")),
+            title: String(f(idea, "Candidate_Title") || "").trim(),
+          });
+        }
+        queueReadSource = "supabase";
+      }
+    } catch (error) {
+      console.warn("supabase factory/ops queue read failed; falling back to Airtable", error);
+      fetchErrors.push(`supabase: ${error?.message || error}`);
+    }
+  }
+
+  if (queueReadSource !== "supabase") {
+  const settled = await Promise.all([
     settleList("profiles", listRecords(env, STUDIO_IDEA_PROFILE_TABLE_ID, { limit: 50 })),
     settleList("outputs", listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
       limit: 160,
@@ -7472,6 +7545,15 @@ export async function getStudioOperationsQueue(request, env, authorization) {
       filterFormula: OPS_QUEUE_REVIEW_FORMULA,
     })),
   ]);
+  profiles = settled[0];
+  outputs = settled[1];
+  requests = settled[2];
+  activeHolds = settled[3];
+  renderLaneOutputs = settled[4];
+  reviewOutputs = settled[5];
+  contentMap = new Map();
+  ideaMetaById = new Map();
+  }
   const mergedOutputs = mergeOpsQueueOutputRecords(outputs, renderLaneOutputs, activeHolds, reviewOutputs);
   const profileMap = new Map((profiles || []).map((row) => [row.id, row]));
   const queueCandidates = sortRenderQueueCandidates(
@@ -7485,11 +7567,11 @@ export async function getStudioOperationsQueue(request, env, authorization) {
     { activeHolds, controls },
   );
 
+  if (queueReadSource !== "supabase") {
   const contentIds = [...new Set([
     ...mergedOutputs.map((row) => firstOpsLinkedId(f(row, "Content_Item"))),
     ...(requests || []).map((row) => firstOpsLinkedId(f(row, "Promoted_Content_Item"))),
   ].filter((id) => /^rec[A-Za-z0-9]+$/.test(id)))];
-  const contentMap = new Map();
   if (contentIds.length && env.AIRTABLE_CONTENT_TABLE_ID) {
     const formula = contentIds.length === 1
       ? `RECORD_ID()="${contentIds[0]}"`
@@ -7502,12 +7584,9 @@ export async function getStudioOperationsQueue(request, env, authorization) {
     for (const row of contentRows || []) contentMap.set(row.id, row);
   }
 
-  const requestByContent = new Map();
-  const requestRows = [];
   const ideaIds = [...new Set((requests || [])
     .map((row) => firstOpsLinkedId(f(row, "Idea_Candidate")))
     .filter((id) => /^rec[A-Za-z0-9]+$/.test(id)))];
-  const ideaMetaById = new Map();
   if (ideaIds.length && env.AIRTABLE_IDEA_TABLE_ID) {
     const ideaFormula = ideaIds.length === 1
       ? `RECORD_ID()="${ideaIds[0]}"`
@@ -7524,6 +7603,9 @@ export async function getStudioOperationsQueue(request, env, authorization) {
       });
     }
   }
+  }
+  const requestByContent = new Map();
+  const requestRows = [];
   for (const record of requests || []) {
     const job = parseStudioProductionJob(record);
     const producePaused = jobIsOpsPaused(job) || isProducePaused(controls, record.id);
@@ -7721,6 +7803,7 @@ export async function getStudioOperationsQueue(request, env, authorization) {
     ),
     rows,
     fetch_errors: fetchErrors,
+    read_source: queueReadSource,
     warning: fetchErrors.length
       ? `Queue data incomplete: ${fetchErrors.slice(0, 2).join(" · ")}`
       : null,
@@ -7755,6 +7838,7 @@ export async function getFactoryDesk(request, env, authorization) {
       || authorization?.permissions?.publishing_control
       || authorization?.permissions?.production_configure
     ),
+    read_source: queue.read_source || studioReadSource(env),
     warning: warningBits.length ? warningBits.join(" · ") : null,
   });
 }

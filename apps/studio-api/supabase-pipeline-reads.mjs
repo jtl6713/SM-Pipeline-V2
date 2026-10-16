@@ -1,16 +1,27 @@
 /**
- * Phase 3: Pipeline list / schedule-grid reads from Supabase.
+ * Phase 3–4: Studio list reads from Supabase.
  * Airtable remains write SoR. Default source is airtable until
  * STUDIO_READ_SOURCE=supabase and SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY are set.
  *
- * What currently relies on this module (when flag + secrets are set):
+ * Phase 3 routes:
  * - GET /api/outputs (full Pipeline list + mode=review)
  * - GET /api/outputs?mode=latest
  * - GET /api/outputs/schedule-grid
- * - Heavy cron Airtable→Supabase upsert (studioSyncSupabasePipelineReads)
- * - POST/GET /api/ops/supabase/sync
- * Everything else (Factory, Overview, Approve, produce, publish, ideas, assets)
- * still uses Airtable only.
+ *
+ * Phase 4 routes:
+ * - GET /api/content
+ * - GET /api/profiles/overview
+ * - GET /api/factory/desk (via operations-queue + idea candidates)
+ * - GET /api/operations/queue (same output/request pack as Factory)
+ *
+ * Sync: heavy cron Airtable→Supabase upsert (studioSyncSupabasePipelineReads)
+ * and POST/GET /api/ops/supabase/sync.
+ *
+ * Extra Airtable list fields ride in jsonb bags (no schema migrate required):
+ * - platform_outputs.error_messages → lean OUTPUT_LIST_FIELDS projection
+ * - content_items.extras → Content list fields
+ * - idea_candidates.payload → overview / Factory idea fields
+ * - production_requests.publish_status → request link bag for Factory
  */
 
 export const STUDIO_SUPABASE_PIPELINE_READ_ROUTES = Object.freeze([
@@ -18,6 +29,91 @@ export const STUDIO_SUPABASE_PIPELINE_READ_ROUTES = Object.freeze([
   "GET /api/outputs?mode=latest",
   "GET /api/outputs?mode=review",
   "GET /api/outputs/schedule-grid",
+]);
+
+export const STUDIO_SUPABASE_PHASE4_READ_ROUTES = Object.freeze([
+  "GET /api/content",
+  "GET /api/profiles/overview",
+  "GET /api/factory/desk",
+  "GET /api/operations/queue",
+]);
+
+export const STUDIO_SUPABASE_READ_ROUTES = Object.freeze([
+  ...STUDIO_SUPABASE_PIPELINE_READ_ROUTES,
+  ...STUDIO_SUPABASE_PHASE4_READ_ROUTES,
+]);
+
+/** Large / unused-on-list Airtable columns — never pack into jsonb projection. */
+export const SUPABASE_OUTPUT_LIST_EXCLUDE = Object.freeze([
+  "Selected_Assets_JSON",
+  "Creative_Render_Manifest_JSON",
+  "Render_Clip_List_JSON",
+  "Remotion_Props_JSON",
+  "Platform_Publish_Response_JSON",
+  "Insights_Platform_Metrics_JSON",
+]);
+
+export const CONTENT_LIST_SYNC_FIELDS = Object.freeze([
+  "Content_ID",
+  "Content_Title",
+  "Content_Status",
+  "Content_Profile",
+  "Content_Type",
+  "Primary_Location",
+  "Neighborhood_or_Area",
+  "Voiceover_Status",
+  "Thumbnail_URL",
+  "Created_At",
+  "Asset_Match_Status",
+  "Script_Status",
+  "Thumbnail_Status",
+  "Render_Status",
+  "Review_Status",
+  "Carousel_Review_Status",
+  "Content_Duration",
+  "Content_Themes",
+  "Include_Voiceover",
+  "Include_Background_Music",
+  "Include_Thumbnail",
+  "Video_Clip_Count",
+  "Music_URL",
+  "Voiceover_URL",
+  "Platform Outputs",
+  "Production Requests",
+  "Production_Request",
+  "Brand_Name",
+  "Market_Name",
+]);
+
+export const IDEA_LIST_SYNC_FIELDS = Object.freeze([
+  "Candidate_ID",
+  "Candidate_Title",
+  "Idea_Summary",
+  "Candidate_Status",
+  "Content_Profile",
+  "Content Items",
+  "Promoted_Content_Record_ID",
+  "Create_Date",
+  "Studio_Photo_Wait_Status",
+  "Production_Notes",
+  "Production_Config_Notes",
+]);
+
+export const PRODUCTION_REQUEST_SYNC_FIELDS = Object.freeze([
+  "Production_Request_ID",
+  "Request_Status",
+  "Production_Notes",
+  "Studio_Production_Job_JSON",
+  "Studio_Variant_Status",
+  "Studio_Output_Plan_Status",
+  "Master_Content_Type",
+  "Target_Platforms",
+  "Requested_Title",
+  "Idea_Candidate",
+  "Promoted_Content_Item",
+  "Created_At",
+  "Updated_At",
+  "Test_Run_ID",
 ]);
 
 export function studioSupabaseConfigured(env) {
@@ -75,12 +171,56 @@ function selectName(value) {
   return null;
 }
 
+function isPlainObject(value) {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+const TYPED_OUTPUT_FIELD_KEYS = new Set([
+  "Output_ID", "Platform", "Format", "Platform_Output_Type", "Studio_Output_Type", "Aspect_Ratio",
+  "Output_Status", "Render_Status", "Review_Status", "Publish_Status", "Publish_Method",
+  "Do_Not_Publish", "Test_Run_ID", "Output_Title", "Output_Caption", "Output_Hashtags",
+  "Thumbnail_URL", "Final_File_URL", "Publish_Asset_URL", "Studio_Preview_URL", "Platform_Post_URL",
+  "Scheduled_Post_Date", "Studio_Scheduled_At", "YouTube_Scheduled_Publish_At", "Published_At",
+  "Remotion_Job_ID", "Selected_Clip_Count", "Content_Item", "Content_Profile",
+]);
+
+const TYPED_CONTENT_FIELD_KEYS = new Set([
+  "Content_ID", "Content_Title", "Content_Status", "Primary_Location",
+  "Voiceover_Status", "Thumbnail_URL", "Created_At", "Content_Profile",
+]);
+
+const OUTPUT_EXCLUDE = new Set(SUPABASE_OUTPUT_LIST_EXCLUDE);
+
+/** Pack non-typed list fields into jsonb (platform_outputs.error_messages). */
+export function packOutputListFields(fields = {}) {
+  const bag = {};
+  for (const [key, value] of Object.entries(fields || {})) {
+    if (!key || TYPED_OUTPUT_FIELD_KEYS.has(key) || OUTPUT_EXCLUDE.has(key)) continue;
+    if (value == null || value === "") continue;
+    bag[key] = value;
+  }
+  return bag;
+}
+
+export function packContentExtras(fields = {}) {
+  const bag = {};
+  for (const [key, value] of Object.entries(fields || {})) {
+    if (!key || TYPED_CONTENT_FIELD_KEYS.has(key)) continue;
+    if (value == null || value === "") continue;
+    bag[key] = value;
+  }
+  return bag;
+}
+
 /** Build an Airtable-shaped record so existing mapOutput / f() keep working. */
 export function airtableShapedOutputFromSupabase(row) {
   const contentAirtableId = row.content_item_airtable_id || null;
+  const bag = isPlainObject(row.error_messages) ? row.error_messages : {};
   return {
     id: row.airtable_record_id,
+    createdTime: row.created_at || undefined,
     fields: {
+      ...bag,
       Output_ID: row.output_number,
       Platform: row.platform,
       Format: row.format,
@@ -108,16 +248,22 @@ export function airtableShapedOutputFromSupabase(row) {
       Published_At: row.published_at,
       Remotion_Job_ID: row.remotion_job_id,
       Selected_Clip_Count: row.selected_clip_count,
-      Content_Item: contentAirtableId ? [contentAirtableId] : [],
-      Content_Profile: row.content_profile_airtable_id ? [row.content_profile_airtable_id] : [],
+      Content_Item: contentAirtableId ? [contentAirtableId] : (Array.isArray(bag.Content_Item) ? bag.Content_Item : []),
+      Content_Profile: row.content_profile_airtable_id
+        ? [row.content_profile_airtable_id]
+        : (Array.isArray(bag.Content_Profile) ? bag.Content_Profile : []),
     },
   };
 }
 
 export function airtableShapedContentFromSupabase(row) {
+  const bag = isPlainObject(row.extras) ? row.extras : {};
+  const profileId = row.content_profile_airtable_id || null;
   return {
     id: row.airtable_record_id,
+    createdTime: row.created_at || undefined,
     fields: {
+      ...bag,
       Content_ID: row.content_number,
       Content_Title: row.content_title,
       Content_Status: row.content_status,
@@ -125,6 +271,63 @@ export function airtableShapedContentFromSupabase(row) {
       Voiceover_Status: row.voiceover_status,
       Thumbnail_URL: row.thumbnail_url,
       Created_At: row.created_at,
+      Content_Profile: profileId
+        ? [profileId]
+        : (Array.isArray(bag.Content_Profile) ? bag.Content_Profile : []),
+    },
+  };
+}
+
+export function airtableShapedIdeaFromSupabase(row) {
+  const bag = isPlainObject(row.payload) ? row.payload : {};
+  const profileId = row.content_profile_airtable_id || bag.content_profile_airtable_id || null;
+  return {
+    id: row.airtable_record_id,
+    createdTime: bag.Create_Date || row.created_at || undefined,
+    fields: {
+      Candidate_ID: bag.Candidate_ID ?? null,
+      Candidate_Title: row.candidate_title || bag.Candidate_Title || null,
+      Idea_Summary: row.idea_summary || bag.Idea_Summary || null,
+      Candidate_Status: row.status || bag.Candidate_Status || null,
+      Content_Profile: profileId ? [profileId] : (Array.isArray(bag.Content_Profile) ? bag.Content_Profile : []),
+      "Content Items": Array.isArray(bag["Content Items"]) ? bag["Content Items"] : [],
+      Promoted_Content_Record_ID: bag.Promoted_Content_Record_ID || null,
+      Create_Date: bag.Create_Date || row.created_at || null,
+      Studio_Photo_Wait_Status: bag.Studio_Photo_Wait_Status || null,
+      Production_Notes: bag.Production_Notes || null,
+      Production_Config_Notes: bag.Production_Config_Notes || null,
+    },
+  };
+}
+
+export function airtableShapedProductionRequestFromSupabase(row) {
+  const bag = isPlainObject(row.publish_status) ? row.publish_status : {};
+  const ideaId = bag.idea_candidate_airtable_id || null;
+  const contentId = bag.promoted_content_airtable_id || null;
+  const profileId = bag.content_profile_airtable_id || row.content_profile_airtable_id || null;
+  let jobJson = row.production_job;
+  if (jobJson && typeof jobJson === "object") {
+    try { jobJson = JSON.stringify(jobJson); } catch { jobJson = ""; }
+  }
+  return {
+    id: row.airtable_record_id,
+    createdTime: bag.Created_At || row.created_at || undefined,
+    fields: {
+      Production_Request_ID: row.production_request_id || bag.Production_Request_ID || null,
+      Request_Status: row.request_status || null,
+      Production_Notes: row.production_notes || null,
+      Studio_Production_Job_JSON: typeof jobJson === "string" ? jobJson : (bag.Studio_Production_Job_JSON || ""),
+      Studio_Variant_Status: row.variant_status || bag.Studio_Variant_Status || null,
+      Studio_Output_Plan_Status: row.output_plan_status || bag.Studio_Output_Plan_Status || null,
+      Master_Content_Type: bag.Master_Content_Type || null,
+      Target_Platforms: Array.isArray(bag.Target_Platforms) ? bag.Target_Platforms : [],
+      Requested_Title: row.requested_title || bag.Requested_Title || null,
+      Idea_Candidate: ideaId ? [ideaId] : [],
+      Promoted_Content_Item: contentId ? [contentId] : [],
+      Content_Profile: profileId ? [profileId] : [],
+      Created_At: bag.Created_At || row.created_at || null,
+      Updated_At: bag.Updated_At || row.updated_at || null,
+      Test_Run_ID: bag.Test_Run_ID || null,
     },
   };
 }
@@ -171,8 +374,54 @@ const OUTPUT_SELECT = [
   "published_at",
   "remotion_job_id",
   "selected_clip_count",
+  "error_messages",
+  "created_at",
+  "updated_at",
   "content_items(airtable_record_id,content_number,content_title)",
   "content_profiles(airtable_record_id)",
+].join(",");
+
+const CONTENT_SELECT = [
+  "id",
+  "airtable_record_id",
+  "content_number",
+  "content_title",
+  "content_status",
+  "content_profile_id",
+  "primary_location",
+  "voiceover_status",
+  "thumbnail_url",
+  "created_at",
+  "extras",
+  "content_profiles(airtable_record_id)",
+].join(",");
+
+const IDEA_SELECT = [
+  "id",
+  "airtable_record_id",
+  "content_profile_id",
+  "candidate_title",
+  "idea_summary",
+  "status",
+  "payload",
+  "created_at",
+  "updated_at",
+  "content_profiles(airtable_record_id)",
+].join(",");
+
+const REQUEST_SELECT = [
+  "id",
+  "airtable_record_id",
+  "production_request_id",
+  "request_status",
+  "requested_title",
+  "production_notes",
+  "variant_status",
+  "output_plan_status",
+  "production_job",
+  "publish_status",
+  "created_at",
+  "updated_at",
 ].join(",");
 
 function flattenOutputRow(row) {
@@ -181,6 +430,20 @@ function flattenOutputRow(row) {
     content_item_airtable_id: row.content_items?.airtable_record_id || null,
     content_number: row.content_items?.content_number ?? null,
     content_title: row.content_items?.content_title || null,
+    content_profile_airtable_id: row.content_profiles?.airtable_record_id || null,
+  };
+}
+
+function flattenContentRow(row) {
+  return {
+    ...row,
+    content_profile_airtable_id: row.content_profiles?.airtable_record_id || null,
+  };
+}
+
+function flattenIdeaRow(row) {
+  return {
+    ...row,
     content_profile_airtable_id: row.content_profiles?.airtable_record_id || null,
   };
 }
@@ -262,6 +525,259 @@ export async function listSupabaseScheduleGrid(env, { profileAirtableId, startIs
   };
 }
 
+export async function listSupabaseContentItems(env, { profileAirtableId, limit = 100 } = {}) {
+  const profileId = await resolveSupabaseProfileId(env, profileAirtableId);
+  if (!profileId) return { records: [], outputs: [], profileMissing: true };
+
+  const capped = Math.max(1, Math.min(500, Number(limit) || 100));
+  const [newest, openOutputs] = await Promise.all([
+    supabaseRest(
+      env,
+      `content_items?content_profile_id=eq.${profileId}&select=${CONTENT_SELECT}`
+        + `&order=created_at.desc.nullslast&limit=${capped}`,
+    ),
+    supabaseRest(
+      env,
+      `platform_outputs?content_profile_id=eq.${profileId}&do_not_publish=eq.false`
+        + `&output_status=neq.Published&output_status=neq.Cancelled`
+        + `&select=${OUTPUT_SELECT}&order=output_number.desc.nullslast&limit=1000`,
+    ).catch(() => []),
+  ]);
+
+  const openContentIds = new Set();
+  for (const row of openOutputs || []) {
+    const flat = flattenOutputRow(row);
+    if (flat.content_item_airtable_id) openContentIds.add(flat.content_item_airtable_id);
+  }
+
+  const byId = new Map();
+  for (const row of newest || []) {
+    if (!row?.airtable_record_id) continue;
+    byId.set(row.airtable_record_id, flattenContentRow(row));
+  }
+
+  const missing = [...openContentIds].filter((id) => !byId.has(id));
+  if (missing.length) {
+    for (let i = 0; i < missing.length; i += 40) {
+      const batch = missing.slice(i, i + 40);
+      const orParts = batch.map((id) => `airtable_record_id.eq.${id}`).join(",");
+      const extra = await supabaseRest(
+        env,
+        `content_items?or=(${orParts})&select=${CONTENT_SELECT}&limit=${batch.length}`,
+      ).catch(() => []);
+      for (const row of extra || []) {
+        if (row?.airtable_record_id) byId.set(row.airtable_record_id, flattenContentRow(row));
+      }
+    }
+  }
+
+  const recentOutputs = await supabaseRest(
+    env,
+    `platform_outputs?content_profile_id=eq.${profileId}&select=${OUTPUT_SELECT}`
+      + `&order=output_number.desc.nullslast&limit=200`,
+  ).catch(() => []);
+
+  const outputById = new Map();
+  for (const row of [...(recentOutputs || []), ...(openOutputs || [])]) {
+    if (!row?.airtable_record_id) continue;
+    outputById.set(row.airtable_record_id, flattenOutputRow(row));
+  }
+
+  return {
+    profileMissing: false,
+    records: [...byId.values()].map(airtableShapedContentFromSupabase),
+    outputs: [...outputById.values()].map(airtableShapedOutputFromSupabase),
+  };
+}
+
+export async function listSupabaseOverviewPack(env, { profileAirtableIds = [], outputLimit = 10000, ideaLimit = 10000 } = {}) {
+  const ids = (profileAirtableIds || []).map((id) => String(id || "").trim()).filter(Boolean);
+  if (!ids.length) return { outputs: [], ideas: [], profilesMissing: true };
+
+  const profileUuidByAirtable = new Map();
+  for (const airtableId of ids) {
+    const uuid = await resolveSupabaseProfileId(env, airtableId);
+    if (uuid) profileUuidByAirtable.set(airtableId, uuid);
+  }
+  if (!profileUuidByAirtable.size) return { outputs: [], ideas: [], profilesMissing: true };
+
+  const uuids = [...profileUuidByAirtable.values()];
+  const profileFilter = uuids.length === 1
+    ? `content_profile_id=eq.${uuids[0]}`
+    : `content_profile_id=in.(${uuids.join(",")})`;
+
+  const [outputRows, ideaRows] = await Promise.all([
+    supabaseRest(
+      env,
+      `platform_outputs?${profileFilter}&select=${OUTPUT_SELECT}`
+        + `&order=output_number.desc.nullslast&limit=${Math.max(1, Math.min(10000, Number(outputLimit) || 10000))}`,
+    ),
+    supabaseRest(
+      env,
+      `idea_candidates?${profileFilter}&select=${IDEA_SELECT}`
+        + `&order=created_at.desc.nullslast&limit=${Math.max(1, Math.min(10000, Number(ideaLimit) || 10000))}`,
+    ).catch(() => []),
+  ]);
+
+  if ((outputRows || []).length >= Math.min(10000, Number(outputLimit) || 10000)) {
+    throw new Error("Profiles overview outputs exceeded complete-scan safety ceiling");
+  }
+  if ((ideaRows || []).length >= Math.min(10000, Number(ideaLimit) || 10000)) {
+    throw new Error("Profiles overview ideas exceeded complete-scan safety ceiling");
+  }
+
+  return {
+    profilesMissing: false,
+    outputs: (outputRows || []).map(flattenOutputRow).map(airtableShapedOutputFromSupabase),
+    ideas: (ideaRows || []).map(flattenIdeaRow).map(airtableShapedIdeaFromSupabase),
+  };
+}
+
+function matchesOpsQueueOutputFormula(fields = {}) {
+  if (String(fields.Test_Run_ID || "").trim()) return false;
+  if (fields.Do_Not_Publish) return false;
+  const output = String(fields.Output_Status || "");
+  const review = String(fields.Review_Status || "");
+  const render = String(fields.Render_Status || "");
+  const openOutput = [
+    "In Production", "Ready for Render", "Rendering", "Rendered", "Ready for Review",
+    "Approved", "Approved for Publishing", "Ready to Schedule", "Ready to Publish",
+    "Scheduled", "Failed", "Blocked",
+  ].includes(output);
+  const openReview = review === "Review Sent";
+  const openRender = [
+    "Waiting in Render Queue", "Ready for Render", "Ready to Render", "Rendering", "Failed", "Blocked",
+  ].includes(render);
+  return openOutput || openReview || openRender;
+}
+
+function matchesOpsQueueRenderFormula(fields = {}) {
+  if (String(fields.Test_Run_ID || "").trim()) return false;
+  if (fields.Do_Not_Publish) return false;
+  const render = String(fields.Render_Status || "");
+  const output = String(fields.Output_Status || "");
+  return [
+    "Ready for Render", "Ready to Render", "Waiting in Render Queue", "Rendering", "Failed", "Blocked",
+  ].includes(render) || ["Ready for Render", "Rendering"].includes(output);
+}
+
+function matchesOpsQueueReviewFormula(fields = {}) {
+  if (String(fields.Test_Run_ID || "").trim()) return false;
+  if (fields.Do_Not_Publish) return false;
+  const output = String(fields.Output_Status || "");
+  const review = String(fields.Review_Status || "");
+  if (output === "Ready for Review") return true;
+  if (review !== "Review Sent") return false;
+  return !["Approved", "Approved for Publishing", "Scheduled", "Published"].includes(output);
+}
+
+function matchesRenderActiveHold(fields = {}) {
+  if (String(fields.Test_Run_ID || "").trim()) return false;
+  return String(fields.Render_Status || "") === "Rendering"
+    && Boolean(String(fields.Remotion_Job_ID || "").trim())
+    && !String(fields.Final_File_URL || "").trim();
+}
+
+function matchesOpsQueueRequestFormula(fields = {}) {
+  if (String(fields.Test_Run_ID || "").trim()) return false;
+  const status = String(fields.Request_Status || "");
+  if (status === "Cancelled") return false;
+  if (["Draft", "Ready", "Submitted"].includes(status)) return true;
+  const job = String(fields.Studio_Production_Job_JSON || "");
+  return Boolean(job) && !job.includes('"step":"done"');
+}
+
+/**
+ * Factory desk / Ops Queue pack from Supabase (Airtable-shaped records).
+ */
+export async function listSupabaseFactoryDeskPack(env, { outputLimit = 800, requestLimit = 120 } = {}) {
+  const outCap = Math.max(50, Math.min(2000, Number(outputLimit) || 800));
+  const reqCap = Math.max(20, Math.min(300, Number(requestLimit) || 120));
+  const [outputRows, requestRows, ideaRows, profileRows] = await Promise.all([
+    supabaseRest(
+      env,
+      `platform_outputs?do_not_publish=eq.false&output_status=neq.Published&output_status=neq.Cancelled`
+        + `&select=${OUTPUT_SELECT}&order=output_number.desc.nullslast&limit=${outCap}`,
+    ).catch(() => []),
+    supabaseRest(
+      env,
+      `production_requests?request_status=neq.Cancelled&select=${REQUEST_SELECT}`
+        + `&order=updated_at.desc.nullslast&limit=${reqCap}`,
+    ).catch(() => []),
+    supabaseRest(
+      env,
+      `idea_candidates?select=${IDEA_SELECT}&order=created_at.desc.nullslast&limit=80`,
+    ).catch(() => []),
+    supabaseRest(
+      env,
+      `content_profiles?active=eq.true&select=id,airtable_record_id,profile_name,brand_name,market_name,active&limit=50`,
+    ).catch(() => []),
+  ]);
+
+  const shapedOutputs = (outputRows || [])
+    .map(flattenOutputRow)
+    .filter((row) => !String(row.test_run_id || "").trim())
+    .map(airtableShapedOutputFromSupabase);
+
+  const outputs = shapedOutputs.filter((row) => matchesOpsQueueOutputFormula(row.fields));
+  const renderLaneOutputs = shapedOutputs.filter((row) => matchesOpsQueueRenderFormula(row.fields));
+  const reviewOutputs = shapedOutputs.filter((row) => matchesOpsQueueReviewFormula(row.fields));
+  const activeHolds = shapedOutputs.filter((row) => matchesRenderActiveHold(row.fields));
+
+  const requests = (requestRows || [])
+    .map(airtableShapedProductionRequestFromSupabase)
+    .filter((row) => matchesOpsQueueRequestFormula(row.fields));
+
+  const ideas = (ideaRows || []).map(flattenIdeaRow).map(airtableShapedIdeaFromSupabase);
+  const photoWaitIdeas = ideas.filter((row) => {
+    const wait = String(row.fields?.Studio_Photo_Wait_Status || "");
+    const status = String(row.fields?.Candidate_Status || "");
+    const promoted = String(row.fields?.Promoted_Content_Record_ID || "").trim();
+    return wait === "Waiting" && !promoted && status !== "On Hold";
+  }).slice(0, 40);
+
+  const contentIds = [...new Set([
+    ...shapedOutputs.map((row) => firstLink(row.fields?.Content_Item)),
+    ...requests.map((row) => firstLink(row.fields?.Promoted_Content_Item)),
+  ].filter((id) => /^rec[A-Za-z0-9]+$/.test(String(id || ""))))];
+
+  const contentById = new Map();
+  for (let i = 0; i < contentIds.length; i += 40) {
+    const batch = contentIds.slice(i, i + 40);
+    const orParts = batch.map((id) => `airtable_record_id.eq.${id}`).join(",");
+    const rows = await supabaseRest(
+      env,
+      `content_items?or=(${orParts})&select=${CONTENT_SELECT}&limit=${batch.length}`,
+    ).catch(() => []);
+    for (const row of rows || []) {
+      if (!row?.airtable_record_id) continue;
+      contentById.set(row.airtable_record_id, airtableShapedContentFromSupabase(flattenContentRow(row)));
+    }
+  }
+
+  const profiles = (profileRows || []).map((row) => ({
+    id: row.airtable_record_id,
+    fields: {
+      Profile_Name: row.profile_name,
+      Brand_Name: row.brand_name,
+      Market_Name: row.market_name,
+      Active: Boolean(row.active),
+    },
+  })).filter((row) => row.id);
+
+  return {
+    profiles,
+    outputs,
+    renderLaneOutputs,
+    reviewOutputs,
+    activeHolds,
+    requests,
+    contentById,
+    ideas,
+    photoWaitIdeas,
+  };
+}
+
 function upsertChunk(env, table, rows) {
   if (!rows.length) return Promise.resolve();
   return supabaseRest(env, `${table}?on_conflict=airtable_record_id`, {
@@ -297,7 +813,7 @@ export function mapAirtableContentToSupabase(record, profileUuid) {
     voiceover_status: selectName(fields.Voiceover_Status),
     thumbnail_url: fields.Thumbnail_URL || null,
     created_at: fields.Created_At || record.createdTime || null,
-    extras: {},
+    extras: packContentExtras(fields),
   };
 }
 
@@ -335,12 +851,78 @@ export function mapAirtableOutputToSupabase(record, { profileUuid, contentUuidBy
     published_at: fields.Published_At || null,
     remotion_job_id: fields.Remotion_Job_ID || null,
     selected_clip_count: fields.Selected_Clip_Count ?? null,
-    error_messages: {},
+    error_messages: packOutputListFields(fields),
+  };
+}
+
+export function mapAirtableIdeaToSupabase(record, profileUuid) {
+  const fields = record?.fields || {};
+  return {
+    airtable_record_id: record.id,
+    content_profile_id: profileUuid,
+    candidate_title: fields.Candidate_Title || null,
+    idea_summary: fields.Idea_Summary || null,
+    status: selectName(fields.Candidate_Status),
+    payload: {
+      Candidate_ID: fields.Candidate_ID ?? null,
+      Candidate_Title: fields.Candidate_Title || null,
+      Idea_Summary: fields.Idea_Summary || null,
+      Candidate_Status: selectName(fields.Candidate_Status),
+      Content_Profile: fields.Content_Profile || [],
+      "Content Items": fields["Content Items"] || [],
+      Promoted_Content_Record_ID: fields.Promoted_Content_Record_ID || null,
+      Create_Date: fields.Create_Date || record.createdTime || null,
+      Studio_Photo_Wait_Status: fields.Studio_Photo_Wait_Status || null,
+      Production_Notes: fields.Production_Notes || null,
+      Production_Config_Notes: fields.Production_Config_Notes || null,
+      content_profile_airtable_id: firstLink(fields.Content_Profile),
+    },
+  };
+}
+
+export function mapAirtableProductionRequestToSupabase(record, profileUuid = null) {
+  const fields = record?.fields || {};
+  let productionJob = {};
+  const rawJob = fields.Studio_Production_Job_JSON;
+  if (typeof rawJob === "string" && rawJob.trim()) {
+    try { productionJob = JSON.parse(rawJob); } catch { productionJob = { raw: rawJob.slice(0, 2000) }; }
+  } else if (isPlainObject(rawJob)) {
+    productionJob = rawJob;
+  }
+  const rawStatus = selectName(fields.Request_Status) || "Draft";
+  const allowedStatus = new Set(["Draft", "Ready", "Submitted", "Promoted", "Cancelled"]);
+  const requestStatus = allowedStatus.has(rawStatus) ? rawStatus : "Draft";
+  return {
+    airtable_record_id: record.id,
+    production_request_id: fields.Production_Request_ID != null ? String(fields.Production_Request_ID) : null,
+    request_status: requestStatus,
+    requested_title: fields.Requested_Title || null,
+    production_notes: fields.Production_Notes || null,
+    variant_status: selectName(fields.Studio_Variant_Status),
+    output_plan_status: selectName(fields.Studio_Output_Plan_Status),
+    production_job: productionJob,
+    origin: null,
+    publish_status: {
+      Production_Request_ID: fields.Production_Request_ID ?? null,
+      Studio_Variant_Status: selectName(fields.Studio_Variant_Status),
+      Studio_Output_Plan_Status: selectName(fields.Studio_Output_Plan_Status),
+      Master_Content_Type: fields.Master_Content_Type || null,
+      Target_Platforms: Array.isArray(fields.Target_Platforms) ? fields.Target_Platforms : [],
+      Requested_Title: fields.Requested_Title || null,
+      idea_candidate_airtable_id: firstLink(fields.Idea_Candidate),
+      promoted_content_airtable_id: firstLink(fields.Promoted_Content_Item),
+      content_profile_airtable_id: firstLink(fields.Content_Profile) || null,
+      Created_At: fields.Created_At || record.createdTime || null,
+      Updated_At: fields.Updated_At || null,
+      Test_Run_ID: fields.Test_Run_ID || null,
+      Studio_Production_Job_JSON: typeof rawJob === "string" ? rawJob : "",
+      profile_uuid: profileUuid,
+    },
   };
 }
 
 /**
- * Upsert one profile's content items + platform outputs into Supabase.
+ * Upsert one profile's content items + platform outputs (+ ideas / requests) into Supabase.
  * `deps.listRecords` / `deps.f` / `deps.contentProfileFilterFormula` come from worker.js.
  */
 export async function syncProfilePipelineToSupabase(env, profile, deps = {}) {
@@ -369,14 +951,25 @@ export async function syncProfilePipelineToSupabase(env, profile, deps = {}) {
   const profileFormula = contentProfileFilterFormula(profile);
   const outputLimit = Math.max(50, Math.min(1000, Number(deps.outputLimit) || 500));
   const contentLimit = Math.max(50, Math.min(500, Number(deps.contentLimit) || 250));
+  const ideaLimit = Math.max(20, Math.min(500, Number(deps.ideaLimit) || 200));
+  const ideaTableId = deps.ideaTableId || env.AIRTABLE_IDEA_TABLE_ID;
 
-  const [contents, newest, openExtra] = await Promise.all([
+  const leanContentFields = [
+    "Content_ID", "Content_Title", "Content_Status", "Content_Profile",
+    "Primary_Location", "Voiceover_Status", "Thumbnail_URL", "Created_At",
+  ];
+  const [contents, newest, openExtra, ideas] = await Promise.all([
     listRecords(env, env.AIRTABLE_CONTENT_TABLE_ID, {
       limit: contentLimit,
       sortField: "Created_At",
       filterFormula: profileFormula,
-      fields: ["Content_ID", "Content_Title", "Content_Status", "Content_Profile", "Primary_Location", "Voiceover_Status", "Thumbnail_URL", "Created_At"],
-    }).catch(() => []),
+      fields: [...CONTENT_LIST_SYNC_FIELDS],
+    }).catch(() => listRecords(env, env.AIRTABLE_CONTENT_TABLE_ID, {
+      limit: contentLimit,
+      sortField: "Created_At",
+      filterFormula: profileFormula,
+      fields: leanContentFields,
+    }).catch(() => [])),
     listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
       limit: outputLimit,
       sortField: "Output_ID",
@@ -386,6 +979,21 @@ export async function syncProfilePipelineToSupabase(env, profile, deps = {}) {
     }).catch(() => []),
     typeof deps.listOpenOutputs === "function"
       ? deps.listOpenOutputs(profile).catch(() => [])
+      : Promise.resolve([]),
+    ideaTableId
+      ? listRecords(env, ideaTableId, {
+        limit: ideaLimit,
+        sortField: "Create_Date",
+        sortDirection: "desc",
+        filterFormula: profileFormula,
+        fields: [...IDEA_LIST_SYNC_FIELDS],
+      }).catch(() => listRecords(env, ideaTableId, {
+        limit: ideaLimit,
+        sortField: "Create_Date",
+        sortDirection: "desc",
+        filterFormula: profileFormula,
+        fields: ["Candidate_ID", "Candidate_Title", "Candidate_Status", "Content_Profile", "Create_Date"],
+      }).catch(() => []))
       : Promise.resolve([]),
   ]);
 
@@ -418,6 +1026,11 @@ export async function syncProfilePipelineToSupabase(env, profile, deps = {}) {
     await upsertChunk(env, "platform_outputs", outputRows.slice(i, i + 200));
   }
 
+  const ideaRows = (ideas || []).map((row) => mapAirtableIdeaToSupabase(row, profileUuid));
+  for (let i = 0; i < ideaRows.length; i += 200) {
+    await upsertChunk(env, "idea_candidates", ideaRows.slice(i, i + 200));
+  }
+
   return {
     ok: true,
     profile_id: profile.id,
@@ -425,7 +1038,33 @@ export async function syncProfilePipelineToSupabase(env, profile, deps = {}) {
     platform_outputs: outputRows.length,
     newest_outputs: (newest || []).length,
     open_outputs: (openExtra || []).length,
+    idea_candidates: ideaRows.length,
   };
+}
+
+/** Open Production Requests are cross-profile; sync once after profile packs. */
+export async function syncOpenProductionRequestsToSupabase(env, deps = {}) {
+  const listRecords = deps.listRecords;
+  if (!listRecords) throw new Error("syncOpenProductionRequestsToSupabase requires listRecords");
+  if (!studioSupabaseConfigured(env)) {
+    return { skipped: true, reason: "supabase_not_configured" };
+  }
+  const requestTableId = deps.requestTableId || deps.productionRequestTable || "Production Requests";
+  const requestLimit = Math.max(20, Math.min(300, Number(deps.requestLimit) || 120));
+  const filterFormula = deps.requestFilterFormula
+    || 'AND({Test_Run_ID}=BLANK(),{Request_Status}!="Cancelled",OR({Request_Status}="Draft",{Request_Status}="Ready",{Request_Status}="Submitted",AND({Studio_Production_Job_JSON}!="",FIND(\'"step":"done"\',{Studio_Production_Job_JSON}&\'\')=0)))';
+  const requests = await listRecords(env, requestTableId, {
+    limit: requestLimit,
+    sortField: "Updated_At",
+    sortDirection: "desc",
+    fields: [...PRODUCTION_REQUEST_SYNC_FIELDS],
+    filterFormula,
+  }).catch(() => []);
+  const requestRows = (requests || []).map((row) => mapAirtableProductionRequestToSupabase(row, null));
+  for (let i = 0; i < requestRows.length; i += 200) {
+    await upsertChunk(env, "production_requests", requestRows.slice(i, i + 200));
+  }
+  return { ok: true, production_requests: requestRows.length };
 }
 
 export async function syncAllProfilesPipelineToSupabase(env, profiles, deps = {}) {
@@ -439,7 +1078,13 @@ export async function syncAllProfilesPipelineToSupabase(env, profiles, deps = {}
       results.push({ ok: false, profile_id: profile.id, error: error?.message || String(error) });
     }
   }
-  return { ok: true, results };
+  let requests = null;
+  try {
+    requests = await syncOpenProductionRequestsToSupabase(env, deps);
+  } catch (error) {
+    requests = { ok: false, error: error?.message || String(error) };
+  }
+  return { ok: true, results, production_requests: requests };
 }
 
 /**
@@ -466,6 +1111,7 @@ export async function syncAirtableOutputRowToSupabase(env, record) {
           publish_status: selectName(record.fields?.Publish_Status),
           output_status: selectName(record.fields?.Output_Status),
           review_status: selectName(record.fields?.Review_Status),
+          error_messages: packOutputListFields(record.fields || {}),
         },
         headers: { Prefer: "return=minimal" },
       },

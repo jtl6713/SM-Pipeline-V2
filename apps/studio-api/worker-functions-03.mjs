@@ -4,10 +4,15 @@ import {
   studioSupabaseConfigured,
   listSupabasePipelineOutputs,
   listSupabaseScheduleGrid,
+  listSupabaseContentItems,
+  listSupabaseOverviewPack,
+  listSupabaseFactoryDeskPack,
   syncAllProfilesPipelineToSupabase,
   syncProfilePipelineToSupabase,
   syncAirtableOutputRowToSupabase,
   STUDIO_SUPABASE_PIPELINE_READ_ROUTES,
+  STUDIO_SUPABASE_PHASE4_READ_ROUTES,
+  STUDIO_SUPABASE_READ_ROUTES,
 } from "./supabase-pipeline-reads.mjs";
 import {
   DESK_SETTING_NAME,
@@ -1059,6 +1064,30 @@ export async function listContent(request, env, url, authorization) {
   const profile = await resolveWorkingContentProfile(env, authorization, requestedProfileId(url));
   const limit = clampLimit(url);
   const payload = await studioReadCoalesce(`content-list:${profile.id}:${limit}`, 25000, async () => {
+  if (studioReadSource(env) === "supabase") {
+    try {
+      const packed = await listSupabaseContentItems(env, {
+        profileAirtableId: profile.id,
+        limit,
+      });
+      if (!packed.profileMissing) {
+        const outputsByContent = new Map();
+        for (const output of packed.outputs || []) {
+          const contentId = studioFirstLinkedId(f(output, "Content_Item"));
+          if (!contentId) continue;
+          if (!outputsByContent.has(contentId)) outputsByContent.set(contentId, []);
+          outputsByContent.get(contentId).push(output);
+        }
+        return {
+          records: (packed.records || []).map((record) => mapContent(record, outputsByContent.get(record.id) || [])),
+          profile: mapStudioContentProfile(profile),
+          read_source: "supabase",
+        };
+      }
+    } catch (error) {
+      console.warn("supabase content list read failed; falling back to Airtable", error);
+    }
+  }
   const profileFormula = contentProfileFilterFormula(profile);
   const [newest, openPack, recentOutputs] = await Promise.all([
     listRecords(env, env.AIRTABLE_CONTENT_TABLE_ID, {
@@ -1097,6 +1126,7 @@ export async function listContent(request, env, url, authorization) {
   return {
     records: records.map((record) => mapContent(record, outputsByContent.get(record.id) || [])),
     profile: mapStudioContentProfile(profile),
+    read_source: "airtable",
   };
   });
   return respond(request, env, { ok: true, ...payload });
@@ -1519,8 +1549,10 @@ export async function studioSyncSupabasePipelineReads(env, options = {}) {
       platform_outputs: row.platform_outputs ?? null,
       newest_outputs: row.newest_outputs ?? null,
       open_outputs: row.open_outputs ?? null,
+      idea_candidates: row.idea_candidates ?? null,
       error: row.error || null,
     })),
+    production_requests: result?.production_requests || null,
     read_source: studioReadSource(env),
   };
   await writeStudioSupabaseSyncLast(env, stamp);
@@ -1534,7 +1566,8 @@ export async function getStudioSupabaseSyncStatus(request, env) {
     ok: true,
     configured: studioSupabaseConfigured(env),
     read_source: studioReadSource(env),
-    read_routes: STUDIO_SUPABASE_PIPELINE_READ_ROUTES,
+    read_routes: STUDIO_SUPABASE_READ_ROUTES,
+    phase4_read_routes: STUDIO_SUPABASE_PHASE4_READ_ROUTES,
     last_sync: last,
   });
 }
@@ -1553,7 +1586,8 @@ export async function postStudioSupabaseSync(request, env) {
   return respond(request, env, {
     ok: true,
     read_source: studioReadSource(env),
-    read_routes: STUDIO_SUPABASE_PIPELINE_READ_ROUTES,
+    read_routes: STUDIO_SUPABASE_READ_ROUTES,
+    phase4_read_routes: STUDIO_SUPABASE_PHASE4_READ_ROUTES,
     sync: result,
   });
 }
