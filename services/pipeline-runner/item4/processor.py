@@ -528,7 +528,13 @@ def _reuse_matching_frame(source: bytes, ratio: str, gravity: str) -> bytes | No
         return None
     try:
         with Image.open(io.BytesIO(source)) as image:
-            if image.format != "JPEG" or image.size != (spec["width"], spec["height"]):
+            width, height = image.size
+            orientation = image.getexif().get(274, 1)
+            # Avoid unnecessary upscaling of usable HD vertical originals.
+            # Smaller frames and rotated source JPEGs still follow normal prep.
+            if (image.format != "JPEG" or orientation != 1
+                or width < 720 or height < 720
+                or width * spec["height"] != height * spec["width"]):
                 return None
     except (OSError, ValueError):
         return None
@@ -646,6 +652,9 @@ def process_variant_group(
         drive_id=source_drive_id,
         ext=source_ext,
     )
+    render_cache: dict[tuple[str, str, str], bytes] = {}
+    render_lock = threading.Lock()
+
     def _crop_one(row: dict) -> dict[str, Any]:
         fields = row.get("fields") or {}
         ratio = str(fields.get("Aspect_Ratio") or "").strip()
@@ -663,13 +672,21 @@ def process_variant_group(
             gravity = _gravity_token(fields)
             rendered = _reuse_matching_frame(source_bytes, ratio, gravity)
             reused = rendered is not None
+            # Same source + recipe + ratio + gravity must only be transformed
+            # once per batch. Store unwatermarked bytes; finalization applies
+            # the correct profile watermark separately for each target.
+            key = (VARIANT_RECIPE_VERSION, ratio, gravity)
             if rendered is None:
-                rendered = local_variant.render(
-                    source_bytes, ratio, gravity,
-                    drive=local_drive,
-                    drive_id=source_drive_id,
-                    ext=str(fields.get("Source_Extension") or source_ext),
-                )
+                with render_lock:
+                    rendered = render_cache.get(key)
+                    if rendered is None:
+                        rendered = local_variant.render(
+                            source_bytes, ratio, gravity,
+                            drive=local_drive,
+                            drive_id=source_drive_id,
+                            ext=str(fields.get("Source_Extension") or source_ext),
+                        )
+                        render_cache[key] = rendered
             result = _complete_variant_upload(
                 client, local_drive, row, rendered, airtable_lock=airtable_lock
             )
