@@ -2439,8 +2439,16 @@ export async function getScheduleRegenJobStatus(request, env, authorization, ctx
     const leasedProcessing = jobAgeMs < softLeaseMs && combos.some((row) => {
       if (String(row?.status || "") !== SCHEDULE_REGEN_STATUS.PROCESSING) return false;
       if (scheduleRegenComboIsOrphanProcessing(row)) return false;
-      return scheduleRegenComboHasRemainingPlan(row)
-        || (scheduleRegenComboNeedsPlanning(row) && Array.isArray(row.eligible_ids) && row.eligible_ids.length > 0);
+      // Apply mid-flight is a real lease.
+      if (scheduleRegenComboHasRemainingPlan(row)) return true;
+      // Mid-plan only leases once MAE has persisted at least one slot. Scanned
+      // eligible_ids with plan=[] used to refresh updated_at on every failed
+      // kick and freeze Chicago Facebook Story at 0/83 forever.
+      const planLen = Array.isArray(row.plan) ? row.plan.length : 0;
+      return scheduleRegenComboNeedsPlanning(row)
+        && Array.isArray(row.eligible_ids)
+        && row.eligible_ids.length > 0
+        && planLen > 0;
     });
     const orphanProcessing = combos.some((row) => scheduleRegenComboIsOrphanProcessing(row));
     const stale = scheduleRegenJobIsStale(job);
