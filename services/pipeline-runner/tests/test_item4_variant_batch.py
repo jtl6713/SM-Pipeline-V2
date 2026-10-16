@@ -146,3 +146,38 @@ def test_hd_original_vertical_frame_skips_upscale():
     out = io.BytesIO()
     Image.new("RGB", (720, 1280)).save(out, format="JPEG")
     assert _reuse_matching_frame(out.getvalue(), "9:16", "center") == out.getvalue()
+
+
+def test_persistent_cache_skips_transform_and_source_download(monkeypatch):
+    from item4.processor import process_variant_group
+    class FakeClient:
+        def __init__(self):
+            self.updates = []
+        def list_records(self, *args, **kwargs):
+            return [self.previous]
+        def update_record(self, _table, rid, patch, **kwargs):
+            self.updates.append((rid, patch))
+    class FakeDrive:
+        def download_file(self, *_args):
+            raise AssertionError("cache hit must not download or regenerate")
+    class FakeVariant:
+        def render(self, *_args, **kwargs):
+            raise AssertionError("cache hit must not render")
+    row = _variant_row("new", "source-drive", "9:16")
+    row["fields"].update({
+        "Source_Asset_ID": "asset-one", "Source_R2_Key": "revision-one",
+        "Source_Size_Bytes": 45232, "Content_Profile": [{"id": "recProfile"}],
+    })
+    older = _variant_row("older", "source-drive", "9:16")
+    older["fields"].update({
+        "Source_Asset_ID": "asset-one", "Source_R2_Key": "revision-one",
+        "Source_Size_Bytes": 45232, "Content_Profile": [{"id": "recProfile"}],
+        "Target_File_Name": "asset__fill-crop-v2.jpg", "Drive_File_ID": "cachedDrive",
+        "Media_Asset_Record_ID": "recMedia",
+    })
+    client = FakeClient()
+    client.previous = older
+    monkeypatch.setattr("item4.processor._production_profile", lambda _client, _fields: ("recProfile", "Chicago"))
+    result = process_variant_group(client, FakeDrive(), FakeVariant(), [row])
+    assert result[0]["route"] == "variant_persistent_cache_reuse"
+    assert result[0]["drive_file_id"] == "cachedDrive"
