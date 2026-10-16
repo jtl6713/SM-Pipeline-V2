@@ -12026,6 +12026,7 @@ export async function factoryBatchStatusRoute(request, env, authorization) {
     : (await factoryBatchList(env.STUDIO_MEDIA, profile.id, { limit: 40 }))[0] || null;
   return respond(request, env, {
     ...factoryBatchSummary(job), quality_signals: factoryBatchQualitySignals(job),
+    approvals_enabled: String(env?.FACTORY_BATCH_APPROVALS_ENABLED || "").toLowerCase() === "true",
   });
 }
 /*__STUDIO_WORKER_END:factoryBatchStatusRoute__*/
