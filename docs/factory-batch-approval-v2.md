@@ -37,23 +37,26 @@ Selected items only — no bulk approval of invisible/nonreviewable outputs. Con
 
 Reopening Factory fetches fresh state from R2, not local browser state. Selection is browser-local and persists ordinary navigation; submitted batch records are server-global and accessible on another authorized device. An ambiguous HTTP timeout preserves request identity for retry.
 
-## Release blockers and mandatory tests
+## Hardening completed (2026-10-16)
 
-1. Restore GitHub Actions: as of the 2026-10-16 rerun, all PR workflows terminate with zero job steps and no job log. GitHub Status reports no general Actions incident; inspect repo/account Actions permissions, runner availability, billing/usage and failed-run banner. Static syntax/source-split and isolated queue/lease simulations passed, but **do not infer green CI**.
-2. Verify actual production R2 conditional `put(onlyIf)` behavior against Cloudflare, not merely the FakeR2 test.
-3. Validate full Wrangler deploy dry-run and generated source modules after source-split markers.
-4. Verify Quality Agent checks appear in the actual inventory, not only the catalog and R2 status endpoint.
-5. Verify no duplicate approval under concurrent Factory batches AND overlapping existing single-item/Pipeline Approve All routes.
-6. Run 20 live/review-ready approvals in a controlled staging environment, submit and instantly close browser, and verify later from a different device that every selected ID has exactly one result, with correct MAE schedule and no unintended publication.
-7. Confirm mobile/tablet Factory and existing single-item, Story and TikTok draft regressions.
-8. Bump versions via repository-wide standard and deploy only after all required workflows pass. Verify live Cloudflare Worker/UI versions and rollback readiness.
+- **Worker-accurate scheduling budget:** The canonical Factory drain processes up to 25 outputs per invocation while observing a 20-second elapsed-work budget. Incomplete jobs remain persistent and eligible for later cron continuation, rather than stopping unconditionally after five approvals. An explicit bound/resume unit test covers the remainder.
+- **Non-starving recovery:** Cron uses `factoryBatchCronScan` with a CAS-persisted rotating R2 listing cursor. This avoids perpetually rereading the lexically first 200 historical batches. Unit tests cover 307 records across three passes and wrap-around.
+- **Global output idempotency:** Shared R2 per-output lease and fresh Airtable reread cover existing Factory, Pipeline single-item and legacy Approve All approval paths. A cross-job-ID test exercises already-satisfied behavior without a second canonical commit; an output-lease test checks lock contention, reclaim and ownership.
+- **Profile isolation:** Every batch approval resolves its actual linked Content Profile ID; if ownership cannot be established or mismatches, the item fails closed.
+- **Quality checks:** Five Factory batch conditions registered in the quality catalog; terminal failures require explicit operator retry.
 
-Do not declare complete until the real 20-output browser-close acceptance and single-item regression are verified.
+## Acceptance evidence
 
-## Verification observed 2026-10-16
+1. **GitHub automated gates**: dedicated Factory CI, Worker source split and Wrangler bundle dry-run, Cloudflare source validation, Complete Profiles Overview, Scheduled Queue Counts, functional regression and isolated 20-output Worker runtime checks have passed in earlier runs. Final updated commit CI runs must all complete before merging.
+2. **Isolated Cloudflare Worker runtime**: [Factory Batch Runtime Acceptance](https://github.com/jtl6713/SM-Pipeline-V2/actions/runs/38949121380) passed: 20 outputs, HTTP-client disconnect, server-backed status from a separate client, 19 initial approvals + one controlled failure, failed-only retry to 20, duplicate submission reuse, and persistence after Worker restart.
+3. **Actual Cloudflare R2 integration**: [Remote R2 acceptance](https://github.com/jtl6713/SM-Pipeline-V2/actions/runs/38950037510) **passed** with the real Cloudflare R2 binding. It used only `recFactorySmokeOnly` and test-only storage prefixes; **no Airtable records, platform APIs, real publishing, or UI approval routes were invoked**. Final stored totals: 20 approved, 0 failed, 20 unique commits. After restart, records persisted. Cleanup deleted 43 synthetic objects and confirmed test prefixes empty.
+4. The disposable R2 bucket creation attempt was denied by existing Cloudflare token scope (Cloudflare API code 10000). The safe alternative was to use a synthetic namespace in the existing R2 bucket, with tightly scoped cleanup. No real content objects were removed.
 
-- Queue source compiled in independent JS harness. 20 selected outputs persisted and completed across two separate drain calls (8 + 12); repeat request ID returned original record; 20/20 counted done.
-- Separate deterministic R2 harness verified canonical per-output mutual exclusion (overlapping caller 409), lock release and subsequent acquisition. Bounded transient wait and failed-only retry were exercised and reconciled 3/3 results.
-- Worker source-split markers manually checked: 1,409 function declarations, 1,409 extract markers, no mismatch. Core changed scripts parsed successfully.
-- Quality catalog validation completed: 66 unique valid checks, including five Factory batch signatures.
-- These are **simulation and static checks**. Live Cloudflare, 20-item end-to-end/browser-close scenario and Wrangler deployment remain unverified due blocked CI/runner execution.
+## Remaining requirements before production merge
+
+- **Production-route and scheduling integration:** A staging environment with review-ready Airtable outputs is required to validate the *actual* canonical Factory/Pipeline routes, correct MAE scheduling, Stories, TikTok/YouTube publishing gates and exactly-once handoff. The nonpublishing R2 smoke Worker intentionally cannot exercise these external side effects.
+- **Device/browser UX acceptance:** Verify the actual Factory screen's top progress, mobile/tablet layout, and permissions across another authorized browser/device. Runtime HTTP-client disconnection and process restart were verified, but physical cross-device UI checks are not yet evidenced.
+- **Quality Agent live inventory:** Verify signatures surface in its operator-facing alerts, not merely in the validated catalog and API status.
+- **Release:** Complete repository-wide Worker/UI version bump, run all CI checks, review rollback point, merge to main and deploy through controlled Cloudflare workflows. Do not ship based solely on synthetic approval data.
+
+**PR #786 stays draft until production-route acceptance and release gates are satisfied.**
