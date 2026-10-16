@@ -5302,6 +5302,20 @@ export async function generateItem4PreProductionAiMaster(request, env, url, auth
   const requestedTotal = item4PreProductionAiRequestedCount(record);
   const manualCount = assets.filter((asset) => !/^studio_ai/i.test(String(asset?.source || ""))).length;
   const generated = assets.filter((asset) => /^studio_ai/i.test(String(asset?.source || "")));
+  // Six 9:16 distribution outputs are not six requests for generated images.
+  // A video package with an existing user/source master must never silently
+  // call image generation. Operators can still explicitly Add AI images.
+  const videoPackage = /ez-package=video/i.test(String(f(record, "Production_Notes") || ""))
+    || /vertical short video/i.test(String(f(record, "Master_Content_Type") || ""));
+  if (!explicitAiAdd && !reset && videoPackage && manualCount > 0
+      && origin.inputKind !== "mixed" && !origin.aiCount) {
+    return respond(request, env, {
+      ok: true, completed: true, reused_source_master: true,
+      requested_count: 0, generated_count: generated.length,
+      assets, production_request: mapProductionRequest(record),
+      message: "Existing source master reused; no AI frames needed for 9:16 video outputs.",
+    });
+  }
   const desiredAiCount = Number.isFinite(requestedTarget) && requestedTarget > 0
     ? requestedTarget
     : Number.isFinite(requestedAdd) && requestedAdd > 0
