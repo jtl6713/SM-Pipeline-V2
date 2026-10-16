@@ -78,6 +78,8 @@ def health():
             "ok": True,
             "service": "pipeline-runner",
             "version": settings["service_version"],
+            "studio_write_source": settings.get("studio_write_source") or "airtable",
+            "supabase_pipeline_writes": bool(settings.get("supabase_url") and settings.get("supabase_service_role_key")),
             "openai_account": settings.get("openai_account"),
             "t1_shorten_to_footage": True,
             "stages_registered": len(STAGE_NAMES),

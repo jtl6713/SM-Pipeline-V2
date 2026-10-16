@@ -1,6 +1,9 @@
+import logging
 from typing import Any
 
 from config import load_settings
+
+logger = logging.getLogger("pipeline-runner.airtable")
 
 
 class AirtableClient:
@@ -11,12 +14,23 @@ class AirtableClient:
         pat = settings.get("airtable_pat", "")
         if not pat:
             raise RuntimeError("AIRTABLE_PAT is required for Airtable operations")
+        self._settings = settings
         self._base_id = settings["airtable_base_id"]
         self._headers = {
             "Authorization": f"Bearer {pat}",
             "Content-Type": "application/json",
         }
         self._api_root = "https://api.airtable.com/v0"
+
+    def _mirror(self, table_id: str, records: list[dict], *, partial: bool = False) -> None:
+        from supabase_pipeline import mirror_airtable_records
+
+        mirror_airtable_records(self._settings, table_id, records, partial=partial)
+
+    def _legacy_export(self, table_id: str) -> bool:
+        from supabase_pipeline import legacy_export_enabled
+
+        return legacy_export_enabled(self._settings, table_id)
 
     def get_record(self, table_id: str, record_id: str) -> dict:
         import requests
@@ -26,7 +40,7 @@ class AirtableClient:
         response.raise_for_status()
         return response.json()
 
-    def update_record(self, table_id: str, record_id: str, fields: dict, *, typecast: bool = False) -> dict:
+    def _patch_record(self, table_id: str, record_id: str, fields: dict, *, typecast: bool = False) -> dict:
         import requests
 
         url = f"{self._api_root}/{self._base_id}/{table_id}/{record_id}"
@@ -41,6 +55,20 @@ class AirtableClient:
                 message = f"{message} {detail}"
             raise requests.HTTPError(message, response=response)
         return response.json()
+
+    def update_record(self, table_id: str, record_id: str, fields: dict, *, typecast: bool = False) -> dict:
+        if self._legacy_export(table_id):
+            self._mirror(table_id, [{"id": record_id, "fields": fields}], partial=True)
+            try:
+                record = self._patch_record(table_id, record_id, fields, typecast=typecast)
+            except Exception as error:
+                logger.warning("Airtable legacy export failed for %s %s: %s", table_id, record_id, error)
+                return {"id": record_id, "fields": fields}
+            self._mirror(table_id, [record])
+            return record
+        record = self._patch_record(table_id, record_id, fields, typecast=typecast)
+        self._mirror(table_id, [record])
+        return record
 
     def list_records(
         self,
@@ -103,7 +131,9 @@ class AirtableClient:
                 body["typecast"] = True
             response = requests.post(url, headers=self._headers, json=body, timeout=60)
             response.raise_for_status()
-            created.extend(response.json().get("records", []))
+            batch = response.json().get("records", [])
+            created.extend(batch)
+            self._mirror(table_id, batch)
         return created
 
     def update_records(
@@ -121,22 +151,38 @@ class AirtableClient:
 
         url = f"{self._api_root}/{self._base_id}/{table_id}"
         updated: list[dict[str, Any]] = []
+        legacy = self._legacy_export(table_id)
         for start in range(0, len(records), 10):
-            chunk = records[start : start + 10]
+            chunk = [item for item in records[start : start + 10] if item.get("id")]
             body: dict[str, Any] = {
                 "records": [
                     {"id": str(item["id"]), "fields": dict(item.get("fields") or {})}
                     for item in chunk
-                    if item.get("id")
                 ]
             }
             if not body["records"]:
                 continue
+            if legacy:
+                self._mirror(table_id, [
+                    {"id": str(item["id"]), "fields": dict(item.get("fields") or {})}
+                    for item in chunk
+                ], partial=True)
             if typecast:
                 body["typecast"] = True
             response = requests.patch(url, headers=self._headers, json=body, timeout=60)
+            if not response.ok and legacy:
+                logger.warning(
+                    "Airtable legacy export batch failed for %s: %s %s",
+                    table_id,
+                    response.status_code,
+                    (response.text or "")[:300],
+                )
+                updated.extend({"id": str(item["id"]), "fields": dict(item.get("fields") or {})} for item in chunk)
+                continue
             response.raise_for_status()
-            updated.extend(response.json().get("records", []))
+            batch = response.json().get("records", [])
+            updated.extend(batch)
+            self._mirror(table_id, batch)
         return updated
 
     def upsert_record(
@@ -180,7 +226,9 @@ class AirtableClient:
         created_ids = payload.get("createdRecords") or []
         updated_ids = payload.get("updatedRecords") or []
         if record_id in created_ids and record_id not in updated_ids:
+            self._mirror(table_id, [record])
             return record, True
         if record_id in updated_ids and record_id not in created_ids:
+            self._mirror(table_id, [record])
             return record, False
         raise RuntimeError("Airtable did not confirm whether upsert created or updated; do not retry as create")

@@ -32,7 +32,8 @@ jobs:
             services/pipeline-runner/tests/test_airtable_atomic_upsert.py \
             services/pipeline-runner/tests/test_r2_studio_exact_source.py \
             services/pipeline-runner/tests/test_profile_music_policy.py \
-            services/pipeline-runner/tests/test_item4_variant_batch.py
+            services/pipeline-runner/tests/test_item4_variant_batch.py \
+            services/pipeline-runner/tests/test_supabase_pipeline_writes.py
 
       - name: Deploy Pipeline Runner through allowlisted Ops action
         shell: bash
@@ -242,3 +243,5 @@ jobs:
 # 2026-10-16 source=82b5e937a2d4c0bf1d28c25f1b20b99f705fb640
 
 # 2026-10-16 persistent frame cache across batches; runner 2026-10-16-persistent-frame-cache
+
+# 2026-10-16 phase 5 runner write-through for Platform Outputs and Content Items; runner 2026-10-16-phase5-runner-writes
