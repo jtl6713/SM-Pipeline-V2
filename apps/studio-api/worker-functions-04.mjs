@@ -3,7 +3,7 @@ import { withOutputApprovalLock } from "./output-approval-lease.mjs";
 import {
   factoryBatchEnqueue, factoryBatchRead, factoryBatchList,
   factoryBatchDrain, factoryBatchRetry, factoryBatchSummary, factoryBatchCounts,
-  factoryBatchQualitySignals, factoryBatchReconcile,
+  factoryBatchQualitySignals, factoryBatchReconcile, factoryBatchCronScan,
 } from "./factory-approval-queue.mjs";
 import { createProfileOnboarding } from "./profile-onboarding.mjs";
 import {
@@ -12111,35 +12111,29 @@ export async function factoryBatchSubmitRoute(request, env, authorization, ctx =
  */
 export async function factoryBatchCronResume(env, ctx = null) {
   if (!env?.STUDIO_MEDIA?.list) return 0;
-  let marker;
-  let started = 0, scanned = 0;
-  do {
-    const page = await env.STUDIO_MEDIA.list({
-      prefix: "studio/state/factory-approvals/v2/jobs/",
-      limit: 100, ...(marker ? { cursor: marker } : {}),
-    });
-    for (const object of page.objects || []) {
-      if (++scanned > 200) break;
-      const match = object.key.match(/\/jobs\/(rec[A-Za-z0-9]+)\/([A-Za-z0-9_-]{12,128})\.json$/);
-      if (!match) continue;
-      const job = await factoryBatchRead(env.STUDIO_MEDIA, match[1], match[2]);
-      if (!job) continue;
-      const signatures = factoryBatchQualitySignals(job);
-      if (signatures.length) {
-        console.warn("Factory batch Quality Agent", match[2], JSON.stringify(signatures));
-      }
-      if (signatures.some(item => item.code === "QA-FACTORY-BATCH-STATE-MISMATCH")
-          && !signatures.some(item => item.code === "QA-FACTORY-BATCH-DUPLICATE-ITEM")) {
-        await factoryBatchReconcile(env.STUDIO_MEDIA, match[1], match[2]);
-      }
-      if (!["queued", "running"].includes(job.status) &&
-          !signatures.some(item => item.code === "QA-FACTORY-BATCH-STATE-MISMATCH")) continue;
-      if (started >= 5) break;
-      await factoryBatchProcess(env, match[1], match[2], ctx);
-      started++;
+  // The persisted cursor rotates through old histories (rather than rereading
+  // the first 200 lexical R2 keys forever). Process only a bounded scan on each tick.
+  const { objects } = await factoryBatchCronScan(env.STUDIO_MEDIA, { maxScan: 200 });
+  let started = 0;
+  for (const object of objects) {
+    const match = object.key.match(/\\/jobs\\/(rec[A-Za-z0-9]+)\\/([A-Za-z0-9_-]{12,128})\\.json$/);
+    if (!match) continue;
+    const job = await factoryBatchRead(env.STUDIO_MEDIA, match[1], match[2]);
+    if (!job) continue;
+    const signatures = factoryBatchQualitySignals(job);
+    if (signatures.length) {
+      console.warn("Factory batch Quality Agent", match[2], JSON.stringify(signatures));
     }
-    marker = page.truncated ? page.cursor : null;
-  } while (marker && started < 5 && scanned < 200);
+    if (signatures.some(item => item.code === "QA-FACTORY-BATCH-STATE-MISMATCH")
+        && !signatures.some(item => item.code === "QA-FACTORY-BATCH-DUPLICATE-ITEM")) {
+      await factoryBatchReconcile(env.STUDIO_MEDIA, match[1], match[2]);
+    }
+    if (!["queued", "running"].includes(job.status) &&
+        !signatures.some(item => item.code === "QA-FACTORY-BATCH-STATE-MISMATCH")) continue;
+    if (started >= 5) break;
+    await factoryBatchProcess(env, match[1], match[2], ctx);
+    started++;
+  }
   return started;
 }
 /*__STUDIO_WORKER_END:factoryBatchCronResume__*/
