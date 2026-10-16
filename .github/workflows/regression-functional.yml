@@ -44,9 +44,9 @@ jobs:
           result=$?
           if [ "$result" -ne 0 ]; then
             echo "::error::Hermetic regression failed (exit $result); see compact failing-test summary below and full log artifact."
-            grep -n -B 2 -A 20 -E '^(not ok [0-9]+|FAILED |ERROR |E   |# (fail |tests |pass )|=+ .* (FAILED|ERRORS))' /tmp/hermetic-regression.log | tail -180 || true
-            echo "--- last 50 lines ---"
-            tail -50 /tmp/hermetic-regression.log || true
+            grep -E '^(not ok [0-9]+|FAILED |ERROR |# (fail |tests |pass )|=+ .* (FAILED|ERRORS))' /tmp/hermetic-regression.log | tail -120 || true
+            echo "--- last 20 short lines (long source dumps intentionally omitted) ---"
+            tail -25 /tmp/hermetic-regression.log | cut -c1-260 || true
           else
             tail -30 /tmp/hermetic-regression.log
           fi
