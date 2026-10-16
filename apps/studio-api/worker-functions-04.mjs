@@ -2741,6 +2741,12 @@ export async function studioProcessApproveAllJobSlice(env, jobId, options = {}) 
           profile,
           timeZone,
         });
+        if (updated.__already_approved) {
+          item.status = "skipped";
+          item.error = null;
+          Object.assign(item, mapApproveAllEligibleSummary(updated));
+          continue;
+        }
         const booked = studioScheduleMs(f(updated, "Scheduled_Post_Date")) ?? Date.now();
         const lane = maeScheduleLaneKey(platform, outputType) || platform.toLowerCase();
         (occupiedByLane[lane] ||= []).push(booked);
@@ -3186,6 +3192,14 @@ export async function reviewOutputCreative(request, env, url, authorization, ctx
     }
     try {
       const updated = await approveOutputRecordForPublishing(env, existing, note, stamp, payload);
+      if (updated.__already_approved) {
+        return respond(request, env, {
+          ok: true, action: "approve_for_publishing", already_approved: true,
+          record: mapPhase6CreativeOutput(updated),
+          handoff_state: "approved_for_publishing",
+          message: "Output was already approved by another session; nothing was dispatched twice.",
+        });
+      }
       const held = !studioPublishCanDispatchNow(updated);
       // Facebook Reel/Story publish can take a minute. Return as soon as the
       // row is approved so the review click cannot time out into a fake 500.
@@ -8496,6 +8510,9 @@ export async function factoryApproveOutput(env, id, actor, note, ctx = null) {
     {},
     { recheckBestSlot: true },
   );
+  if (updated.__already_approved) {
+    return { id, already_approved: true, message: "Output already approved in another session; no duplicate dispatch." };
+  }
   const held = !studioPublishCanDispatchNow(updated);
   if (ctx && typeof ctx.waitUntil === "function") {
     ctx.waitUntil(studioDispatchApprovedPublishAndSchedule(null, env, updated).catch((error) => {
