@@ -1,7 +1,7 @@
 import json
 
 from fbs3.caption import reel_description
-from p3.helpers import caption_with_hashtags
+from p3.helpers import caption_for_notification, caption_with_hashtags
 from rr1.email_builder import build_review_card
 from studio_produce.steps import apply_caption
 from ttd.package import photo_description
@@ -89,3 +89,28 @@ def test_review_email_caption_block_contains_hashtags_once():
     assert "Caption + hashtags" in card
     assert card.count("#Chicago") == 1
     assert card.count("#Travel") == 1
+
+
+def test_notification_caption_keeps_at_most_five_hashtags():
+    tags = "#One #Two #Three #Four #Five #Six #Seven"
+    shown = caption_for_notification("Walk the city.", tags)
+    assert shown == "Walk the city.\n\n#One #Two #Three #Four #Five"
+    assert "#Six" not in shown
+    assert "#Seven" not in shown
+    assert caption_with_hashtags("Walk the city.", tags).count("#") == 7
+
+
+def test_review_email_caption_block_stops_at_five_hashtags():
+    record = _record(
+        "Walk the city. #Chicago",
+        "#Chicago #Travel #Food #Night #Skyline #Extra #More",
+    )
+    card = build_review_card(record, decision_webhook_url="https://example.com/review")
+    assert "#Chicago" in card
+    assert "#Travel" in card
+    assert "#Food" in card
+    assert "#Night" in card
+    assert "#Skyline" in card
+    assert "#Extra" not in card
+    assert "#More" not in card
+    assert "Walk the city. #Chicago\n\n#Travel #Food #Night #Skyline" in card

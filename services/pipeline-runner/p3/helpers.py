@@ -19,6 +19,7 @@ from render.fields import field, field_str, first_linked_id
 
 
 _HASHTAG_TOKEN = re.compile(r"#[^\s#]+")
+NOTIFICATION_HASHTAG_LIMIT = 5
 
 
 def caption_with_hashtags(caption: Any, hashtags: Any) -> str:
@@ -40,6 +41,41 @@ def caption_with_hashtags(caption: Any, hashtags: Any) -> str:
             return body
         suffix = raw_tags
     return f"{body}\n\n{suffix}".strip()
+
+
+def caption_for_notification(
+    caption: Any,
+    hashtags: Any,
+    *,
+    limit: int = NOTIFICATION_HASHTAG_LIMIT,
+) -> str:
+    """Operator email caption block. Same text as publish, with at most `limit` hashtags."""
+    combined = caption_with_hashtags(caption, hashtags)
+    cap = max(0, int(limit))
+    seen = 0
+
+    def keep(match: re.Match[str]) -> str:
+        nonlocal seen
+        seen += 1
+        return match.group(0) if seen <= cap else ""
+
+    trimmed = _HASHTAG_TOKEN.sub(keep, combined)
+    lines: list[str] = []
+    for line in trimmed.splitlines():
+        lines.append(re.sub(r"[ \t]{2,}", " ", line).strip())
+    cleaned: list[str] = []
+    previous_blank = False
+    for line in lines:
+        if not line:
+            if cleaned and not previous_blank:
+                cleaned.append("")
+                previous_blank = True
+            continue
+        previous_blank = False
+        cleaned.append(line)
+    while cleaned and cleaned[-1] == "":
+        cleaned.pop()
+    return "\n".join(cleaned)
 
 
 def csv_join(value: Any) -> str:

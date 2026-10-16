@@ -36,6 +36,9 @@ def test_tiktok_handoff_text_is_professional_and_contains_no_html_markup():
     assert "TikTok: @nyshining8" in body
     assert "OUTPUT #1304 — OMNY Tap Tips" in body
     assert "CAPTION + HASHTAGS" in body
+    assert "Tap in and ride like a local." in body
+    assert "#NYC" in body
+    assert "#OMNY" in body
     assert "ORDERED DRAFT ASSETS" in body
     assert "MARK AS PUBLISHED" in body
     assert "https://media.chicagoshining.com/omny-01.jpg" in body
@@ -44,6 +47,21 @@ def test_tiktok_handoff_text_is_professional_and_contains_no_html_markup():
     assert "<br" not in body.casefold()
     assert "<a " not in body.casefold()
     assert "</" not in body.casefold()
+
+
+def test_tiktok_handoff_caption_stops_at_five_hashtags():
+    record = {
+        "fields": {
+            "Output_ID": 1304,
+            "Output_Title": "OMNY Tap Tips",
+            "Output_Caption": "Tap in and ride like a local.",
+            "Output_Hashtags": "#NYC #OMNY #Subway #Transit #Local #Extra #More",
+        }
+    }
+    body = handoff_email_text(record)
+    assert "#NYC #OMNY #Subway #Transit #Local" in body
+    assert "#Extra" not in body
+    assert "#More" not in body
 
 
 def test_ttd3_uses_plain_text_sender_not_html_sender():

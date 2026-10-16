@@ -9,7 +9,7 @@ from urllib.parse import urlencode
 from ap0.public_cover import graph_fetchable_cover_url
 from carousel.timeutil import iso_utc, utc_now
 from config import load_settings
-from p3.helpers import caption_with_hashtags
+from p3.helpers import caption_for_notification, caption_with_hashtags
 from publish.location import PublishLocation, append_location_line
 from render.fields import field, field_str, first_linked_id, parse_json_field
 from rr1.email_builder import thumbnail_download_url
@@ -393,7 +393,7 @@ def handoff_email_text(
     title = field_str(record, "Output_Title") or "TikTok draft"
     draft_type = field_str(record, "TikTok_Draft_Type") or ""
     music_required = tiktok_photo_sound_required(record)
-    caption = caption_with_hashtags(
+    caption = caption_for_notification(
         field_str(record, "Output_Caption"),
         field_str(record, "Output_Hashtags"),
     )
@@ -497,7 +497,7 @@ def handoff_email_html(
     title = html.escape(field_str(record, "Output_Title") or "TikTok draft")
     draft_type = html.escape(field_str(record, "TikTok_Draft_Type") or "")
     caption = html.escape(
-        caption_with_hashtags(
+        caption_for_notification(
             field_str(record, "Output_Caption"),
             field_str(record, "Output_Hashtags"),
         )
