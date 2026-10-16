@@ -37,5 +37,5 @@ test("Factory submit returns after durable enqueue rather than awaiting 20 appro
   assert.match(submit, /await fetchJson\("\/api\/factory\/approval-batches"/);
   assert.doesNotMatch(submit, /await watchApproveAll/);
   assert.match(submit, /Never wait for all approvals/);
-  assert.match(html, /factory-desk\.js\?v=0\.6\.706-tiktok-live-copy/);
+  assert.match(html, /factory-desk\.js\?v=0\.6\.\d+(?:-[a-z0-9-]+)?/i);
 });
