@@ -1032,7 +1032,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.643-tiktok-inbox-hold",
+          version: "0.10.644-manual-post-link",
           studio_supabase_pipeline_reads_v1: true,
           studio_supabase_sync_gate_v1: true,
           studio_supabase_phase3_stable_v1: true,
@@ -4487,6 +4487,7 @@ function schedulePipelineListHeal(ctx, env, records) {
 
 /*__STUDIO_WORKER_EXTRACT:readPipelineOutputsSnapshot__*/
 /*__STUDIO_WORKER_EXTRACT:writePipelineOutputsSnapshot__*/
+/*__STUDIO_WORKER_EXTRACT:loadManualActionPipelineOutputs__*/
 /*__STUDIO_WORKER_EXTRACT:buildPipelineOutputsPayloadFromSupabase__*/
 /*__STUDIO_WORKER_EXTRACT:buildPipelineOutputsPayload__*/
 const STUDIO_SUPABASE_SYNC_LAST_KEY = "studio/state/supabase-pipeline-sync-last.json";

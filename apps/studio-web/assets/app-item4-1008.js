@@ -277,7 +277,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.704-tiktok-inbox-hold";
+  const BUILD_ID = "item4-0.6.705-manual-post-link";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -18142,11 +18142,18 @@ function timedScriptAssetLabel(asset, index) {
     return status === "Ready for Review" || review === "Review Sent";
   }
 
+  function outputHasLivePostUrl(output) {
+    const url = String(output?.platform_post_url || output?.manual_published_url || "").trim();
+    return /^https?:\/\//i.test(url);
+  }
+
   function creativeIsPublished(output = activeCreativeOutput) {
     if (!output) return false;
     const status = String(output.output_status || "").trim();
     const publish = String(output.publish_status || "").trim();
-    return status === "Published" || publish === "Published" || Boolean(output.published_at);
+    // A saved post URL clears Manual Action Required even when the snapshot
+    // still says Draft Delivered (Output 3923 and the All Profiles manual count).
+    return status === "Published" || publish === "Published" || Boolean(output.published_at) || outputHasLivePostUrl(output);
   }
 
   function creativeCanReschedule(output = activeCreativeOutput) {
@@ -18684,6 +18691,23 @@ function timedScriptAssetLabel(asset, index) {
     if (platform === "youtube") return youtubeLiveUrl(record);
     if (platform === "tiktok") return tiktokLiveUrl(record);
     return String(record.platform_post_url || record.manual_published_url || "").trim();
+  }
+
+  function pipelineGroupLivePost(records = []) {
+    const preferred = pipelinePreferredMainOutput(records);
+    const ordered = [preferred, ...(Array.isArray(records) ? records : [])].filter(Boolean);
+    const seen = new Set();
+    for (const record of ordered) {
+      if (!record?.id || seen.has(record.id) || pipelineScheduleIsStory(record)) continue;
+      seen.add(record.id);
+      const url = pipelinePreferredLiveUrl(record);
+      if (!url) continue;
+      return {
+        url,
+        platform: String(record.platform || "").trim(),
+      };
+    }
+    return null;
   }
 
   function pipelineGlobalScheduleMs(reserved) {
@@ -19878,8 +19902,10 @@ function timedScriptAssetLabel(asset, index) {
     const publish = String(pipelinePublishStatusLabel(record) || record?.publish_status || "");
     if (!filter || filter === "all") return true;
     if (filter === "published") return studio === "Published" || state === "Published";
-    if (filter === "attention") return state === "Manual Action Required";
-    if (filter === "manual") return state === "Manual Action Required";
+    // Same predicate as All Profiles manual_action_required. A stored post URL
+    // makes pipelineStudioStateLabel return Published, so the click-through
+    // cannot keep a row the overview has already cleared.
+    if (filter === "attention" || filter === "manual") return studio === "Manual Action Required";
     if (filter === "failed") return state === "Failed" || /failed|error/i.test(render) || /failed|error/i.test(publish);
     // Match All-Profiles / dashboard awaiting_approval (studio_state), not the
     // stricter Approve-button gate. mode=review used to fetch Pending Review and
@@ -20210,7 +20236,8 @@ function timedScriptAssetLabel(asset, index) {
       ...group.records.filter((record) => record !== preferredMain && !pipelineScheduleIsStory(record)),
       ...group.records.filter((record) => pipelineScheduleIsStory(record)),
     ].map((record) => phase6ThumbnailDownloadUrl(record)).find(Boolean) || "";
-    const liveUrl = pipelinePreferredLiveUrl(preferredMain);
+    const livePost = pipelineGroupLivePost(group.records);
+    const liveUrl = livePost?.url || "";
     const groupTone = pipelineGroupVisualTone(group.records);
     const rowSpan = Math.max(1, group.records.length);
     const contentLabel = contentNumber ? `#${contentNumber} - ${title}` : title;
@@ -20247,8 +20274,11 @@ function timedScriptAssetLabel(asset, index) {
       : "";
     // Thumb click must open Reel / Video / Short — never a Story companion, even when
     // the rowspan content cell sits on the first (Story) row.
+    const postLink = liveUrl
+      ? `<a class="pipeline-content-post-link" href="${escapeHtml(liveUrl)}" target="_blank" rel="noopener noreferrer">Open post ↗</a>`
+      : "";
     const media = liveUrl
-      ? `<a class="pipeline-content-thumb-link" href="${escapeHtml(liveUrl)}" target="_blank" rel="noopener noreferrer" title="Open ${escapeHtml(preferredLabel || "published video")}">${thumbImg}</a>`
+      ? `<a class="pipeline-content-thumb-link" href="${escapeHtml(liveUrl)}" target="_blank" rel="noopener noreferrer" title="Open ${escapeHtml(livePost?.platform || preferredLabel || "published post")}">${thumbImg}</a>${postLink}`
       : (preferredMain?.id
         ? `<button type="button" class="pipeline-content-thumb-button" data-pipeline-thumb-open="${escapeHtml(preferredMain.id)}" title="Open ${escapeHtml(preferredLabel || "main video output")}">${thumbImg}</button>`
         : thumbImg);
@@ -20439,7 +20469,14 @@ function timedScriptAssetLabel(asset, index) {
     updatePipelineQuickTabs(records);
     renderPipelineAdvancedFilters();
     const source = filteredPipelineRecords(records);
-    updatePipelineFilterBar(source.length);
+    const matchingCount = (records || []).filter((record) => (
+      pipelineRecordMatchesFilter(record)
+      && pipelineRecordMatchesColumnFilters(record, pipelineColumnFilters, records)
+    )).length;
+    // Attention/manual must show the same output count All Profiles uses,
+    // not the sibling-expanded package size.
+    const countFilter = pipelineViewFilter === "attention" || pipelineViewFilter === "manual";
+    updatePipelineFilterBar(countFilter ? matchingCount : source.length);
     if (!source.length) {
       const filteredEmpty = (pipelineViewFilter && pipelineViewFilter !== "all") || pipelineColumnFiltersActive();
       target.innerHTML = filteredEmpty

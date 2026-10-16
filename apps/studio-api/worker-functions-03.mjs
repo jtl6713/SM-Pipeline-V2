@@ -1397,6 +1397,26 @@ export async function writePipelineOutputsSnapshot(env, snapshotKey, payload) {
 }
 /*__STUDIO_WORKER_END:writePipelineOutputsSnapshot__*/
 
+export async function loadManualActionPipelineOutputs(env, profile) {
+  const profileFormula = contentProfileFilterFormula(profile);
+  // Older manuals fall out of newest-250 once Studio_Pipeline_Open flips off.
+  // All Profiles still counts them, so the attention click showed fewer rows.
+  // A stored post URL is already Published and stays out of this scan.
+  const manual = 'AND({Test_Run_ID}=BLANK(),{Do_Not_Publish}=0,{Output_Status}!="Published",{Output_Status}!="Skipped",{Publish_Status}!="Published",{Publish_Status}!="Published Privately",{Platform_Post_URL}=BLANK(),{Manual_Published_URL}=BLANK(),OR({Publish_Status}="Manual Publish Required",FIND("Manual Action",{TikTok_Draft_Status}&""),FIND("Manual Fallback",{TikTok_Draft_Status}&""),{Manual_Completion_Status}="Required",{Music_Status}="Manual Action Required",{Manual_Fallback_Required}=1))';
+  const filterFormula = profileFormula ? `AND(${profileFormula},${manual})` : manual;
+  return listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
+    fields: OUTPUT_LIST_FIELDS,
+    sortField: "Output_ID",
+    sortDirection: "desc",
+    limit: 50,
+    filterFormula,
+  }).catch((error) => {
+    console.warn("pipeline manual-action scan failed", error);
+    return [];
+  });
+}
+/*__STUDIO_WORKER_END:loadManualActionPipelineOutputs__*/
+
 export async function buildPipelineOutputsPayloadFromSupabase(env, profile, { limit, reviewOnly, ctx = null } = {}) {
   const packed = await listSupabasePipelineOutputs(env, {
     profileAirtableId: profile.id,
@@ -1406,7 +1426,8 @@ export async function buildPipelineOutputsPayloadFromSupabase(env, profile, { li
   if (packed.profileMissing) {
     throw new Error(`Supabase content profile missing for ${profile.id}; run supabase sync`);
   }
-  const records = packed.records;
+  const manualRows = reviewOnly ? [] : await loadManualActionPipelineOutputs(env, profile);
+  const records = mergePipelineOutputRecords(packed.records, manualRows);
   if (!reviewOnly) schedulePipelineListHeal(ctx, env, records);
   const [jobs, queueControls, activeHolds] = await Promise.all([
     loadStudioProductionJobsForOutputs(env, records).catch(() => new Map()),
@@ -1471,7 +1492,11 @@ export async function buildPipelineOutputsPayload(env, profile, { limit, reviewO
       }),
       loadOpenPipelineOutputPack(env, profile),
     ]);
-    records = mergePipelineOutputRecords(newest, mergePipelineOutputRecords(openPack.open, openPack.siblings));
+    const manualRows = await loadManualActionPipelineOutputs(env, profile);
+    records = mergePipelineOutputRecords(
+      newest,
+      mergePipelineOutputRecords(openPack.open, mergePipelineOutputRecords(openPack.siblings, manualRows)),
+    );
   }
   if (!reviewOnly) schedulePipelineListHeal(ctx, env, records);
   const [jobs, queueControls, activeHolds, labels] = await Promise.all([
@@ -1648,10 +1673,11 @@ export async function warmOldestStudioReadSnapshot(env) {
 /*__STUDIO_WORKER_END:warmOldestStudioReadSnapshot__*/
 
 export function mappedTikTokNeedsLivePublishCheck(row) {
-  if (String(row?.platform || "").trim().toLowerCase() !== "tiktok") return false;
   const output = String(row?.output_status || "").trim().toLowerCase();
   const publish = String(row?.publish_status || "").trim().toLowerCase();
   if (output === "published" || publish === "published") return false;
+  if (String(row?.studio_state || "") === "Manual Action Required") return true;
+  if (String(row?.platform || "").trim().toLowerCase() !== "tiktok") return false;
   const state = String(row?.studio_state || "");
   const draft = String(row?.tiktok_draft_status || "");
   const manual = String(row?.manual_completion_status || "").trim().toLowerCase();
@@ -1664,7 +1690,7 @@ export function mappedTikTokNeedsLivePublishCheck(row) {
 
 export async function overlayLiveTikTokPublishRows(env, mappedRows) {
   const rows = Array.isArray(mappedRows) ? mappedRows : [];
-  const suspects = rows.filter(mappedTikTokNeedsLivePublishCheck).slice(0, 12);
+  const suspects = rows.filter(mappedTikTokNeedsLivePublishCheck).slice(0, 24);
   if (!suspects.length || !env?.AIRTABLE_OUTPUT_TABLE_ID) return rows;
   const formula = `OR(${suspects.map((row) => `RECORD_ID()='${String(row.id).replace(/'/g, "")}'`).join(",")})`;
   let live = [];
@@ -1696,7 +1722,8 @@ export async function overlayLiveTikTokPublishRows(env, mappedRows) {
       content_number: mapped.content_number || row.content_number,
       content_title: row.content_title || mapped.content_title,
     });
-    if (/published/i.test(liveOutput) || /published/i.test(livePublish)) {
+    const liveUrl = String(f(fresh, "Platform_Post_URL") || f(fresh, "Manual_Published_URL") || "").trim();
+    if (/published/i.test(liveOutput) || /published/i.test(livePublish) || /^https?:\/\//i.test(liveUrl)) {
       try {
         await syncAirtableOutputRowToSupabase(env, fresh);
         studioMarkMappedListDirty();

@@ -227,7 +227,7 @@ test("supabaseRestAll pages past PostgREST max-rows so overview counts stay comp
 
 test("worker wires supabase phase4 reads behind the same flag", async () => {
   const worker = readStudioWorkerSource();
-  assert.match(worker, /version: "0.10.643-tiktok-inbox-hold"/);
+  assert.match(worker, /version: "0.10.644-manual-post-link"/);
   assert.match(worker, /studio_supabase_pipeline_reads_v1: true/);
   assert.match(worker, /studio_supabase_phase3_stable_v1: true/);
   assert.match(worker, /studio_supabase_phase4_reads_v1: true/);
@@ -252,7 +252,7 @@ test("worker wires supabase phase4 reads behind the same flag", async () => {
   assert.match(worker, /supabase content list read failed/);
   assert.match(worker, /supabase profiles overview read failed/);
   assert.match(worker, /supabase factory\/ops queue read failed/);
-  assert.match(worker, /schemaVersion: 3/);
+  assert.match(worker, /schemaVersion: 4/);
   assert.match(worker, /ideaLimit: options\.ideaLimit \?\? 2000/);
   assert.match(worker, /usedSupabaseOutputs/);
   assert.match(worker, /Ideas column from Airtable/);

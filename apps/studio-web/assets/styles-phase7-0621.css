@@ -4426,6 +4426,18 @@ body:has(#page-outputs.active) .main{
   background:#eef3f7;
   box-shadow:0 2px 5px rgba(15,23,42,.08);
 }
+.pipeline-content-post-link{
+  display:block;
+  margin-top:4px;
+  max-width:92px;
+  font-size:.62rem;
+  font-weight:750;
+  line-height:1.2;
+  color:#075fd8;
+  text-decoration:none;
+  text-align:center;
+}
+.pipeline-content-post-link:hover{text-decoration:underline}
 .pipeline-content-thumb-link,
 .pipeline-content-thumb-button{
   display:block;

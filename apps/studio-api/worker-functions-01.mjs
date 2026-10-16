@@ -1832,6 +1832,13 @@ export function normalizedOutputState(record) {
   // must not beat Published. Output 372 had the same pattern with FB error text.
   if (has("Publish_Status", "published") || has("Output_Status", "published") || has("FB_Publish_Status", "published") || has("FB_Slideshow_Status", "published") || has("TikTok_Draft_Status", "publish complete") || text("YouTube_Stage") === "Complete") return "Published";
 
+  // A stored live post URL means the operator already finished the manual step.
+  // Music_Status can stay "Manual Action Required" after TikTok "no music", and a
+  // snapshot can keep Draft Delivered after TTD4 wrote the URL. Those rows must
+  // leave All Profiles Manual and the Pipeline attention filter together.
+  const livePostUrl = String(text("Platform_Post_URL") || text("Manual_Published_URL") || "").trim();
+  if (/^https?:\/\//i.test(livePostUrl)) return "Published";
+
   // Live Short + daily quota is an automatic midnight retry. Do not paint
   // Manual Action Required even when YTS2 left Publish_Status=Manual Publish Required.
   if (youtubeLiveQuotaOnly(fields) && youtubeVideoReady) {
@@ -1872,7 +1879,7 @@ export function normalizedOutputState(record) {
     has("Publish_Status", "manual publish required")
     || has("TikTok_Draft_Status", "manual action")
     || has("TikTok_Draft_Status", "manual fallback")
-    || has("Manual_Completion_Status", "required")
+    || text("Manual_Completion_Status").toLowerCase() === "required"
     || has("Music_Status", "manual action")
     || fields.Manual_Fallback_Required
   ) return "Manual Action Required";

@@ -684,6 +684,7 @@ import {
   studioDispatchApprovedPublishAndSchedule,
   studioHealFailedYoutubeSourceDownloads,
   studioParkStaleYoutubeQuotaPolls,
+  overlayLiveTikTokPublishRows,
 } from "./worker-functions-03.mjs";
 
 export async function healStaleManualFlagsOnPublishedRecord(env, record) {
@@ -3530,11 +3531,21 @@ export async function buildStudioProfilesOverviewRows(env, profiles) {
     throw new Error("Profiles overview ideas exceeded complete-scan safety ceiling");
   }
 
+  // Re-read Manual Action Required rows so a post URL saved in Airtable clears the
+  // All Profiles count even when the Supabase pack is still on the old status.
+  let mappedAll = (outputRows || []).map((row) => mapOutput(row, null));
+  try {
+    mappedAll = await overlayLiveTikTokPublishRows(env, mappedAll);
+  } catch (error) {
+    console.warn("overview manual publish overlay failed", error);
+  }
+  const mappedById = new Map(mappedAll.filter((row) => row?.id).map((row) => [row.id, row]));
+
   return (profiles || []).map((profile) => {
     const profileOutputs = (outputRows || []).filter((row) => studioOverviewRowMatchesProfile(row, profile));
     const profileIdeas = (ideaRows || []).filter((row) => studioOverviewRowMatchesProfile(row, profile));
     // Skip produce-job hydration — overview only needs studio_state + schedule fields.
-    const mappedOutputs = profileOutputs.map((row) => mapOutput(row, null));
+    const mappedOutputs = profileOutputs.map((row) => mappedById.get(row.id) || mapOutput(row, null));
     const ideas = profileIdeas.map(mapIdea);
     const metrics = studioOverviewOperationalMetrics(mappedOutputs, ideas);
     const mapped = mapStudioContentProfile(profile);
@@ -3613,7 +3624,7 @@ export async function readStudioProfilesOverviewSnapshot(env) {
 /*__STUDIO_WORKER_END:readStudioProfilesOverviewSnapshot__*/
 
 export async function writeStudioProfilesOverviewSnapshot(env, rows, authKey) {
-  const snapshot = rememberProfilesOverviewSnapshot({ rows, authKey, at: Date.now(), complete: true, schemaVersion: 3 });
+  const snapshot = rememberProfilesOverviewSnapshot({ rows, authKey, at: Date.now(), complete: true, schemaVersion: 4 });
   if (!snapshot || !env?.STUDIO_MEDIA?.put) return snapshot;
   try {
     await env.STUDIO_MEDIA.put(
@@ -3660,7 +3671,7 @@ export function scheduleStudioProfilesOverviewRefresh(ctx, env, authorization) {
 export async function profilesOverview(request, env, authorization, ctx) {
   const snapshot = await readStudioProfilesOverviewSnapshot(env);
   const age = snapshot?.at ? Date.now() - snapshot.at : Infinity;
-  if (snapshot?.rows?.length && snapshot.complete === true && snapshot.schemaVersion === 3 && age < STUDIO_PROFILES_OVERVIEW_CACHE_MS) {
+  if (snapshot?.rows?.length && snapshot.complete === true && snapshot.schemaVersion === 4 && age < STUDIO_PROFILES_OVERVIEW_CACHE_MS) {
     return respondProfilesOverviewSoft(request, env, {
       records: snapshot.rows,
       cached: true,

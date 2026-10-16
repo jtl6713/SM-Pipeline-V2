@@ -34,6 +34,10 @@ test("Studio can record a URL while the draft is waiting for manual posting", ()
   assert.equal(tiktokCompleteEligibility({ ...waiting, publish_status: "Published" }), "already_published");
   assert.equal(tiktokCompleteEligibility({
     ...waiting,
+    platform_post_url: "https://www.tiktok.com/t/ZPLSb2yDG/",
+  }), "already_published");
+  assert.equal(tiktokCompleteEligibility({
+    ...waiting,
     tiktok_draft_status: "Processing",
     manual_completion_status: "",
     studio_state: "Uploading",
