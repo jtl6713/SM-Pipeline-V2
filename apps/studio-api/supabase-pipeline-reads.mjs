@@ -959,6 +959,91 @@ export function mapAirtableProductionRequestToSupabase(record, profileUuid = nul
   };
 }
 
+async function listAirtableOutputsByIds(env, listRecords, tableId, ids, fields) {
+  const rows = [];
+  const unique = [...new Set(ids.filter((id) => /^rec[A-Za-z0-9]{14}$/.test(String(id || ""))))];
+  for (let index = 0; index < unique.length; index += 20) {
+    const batch = unique.slice(index, index + 20);
+    const formula = batch.map((id) => `RECORD_ID()='${String(id).replace(/'/g, "")}'`).join(",");
+    const found = await listRecords(env, tableId, {
+      limit: batch.length,
+      fields,
+      filterFormula: batch.length === 1 ? formula : `OR(${formula})`,
+    }).catch(() => []);
+    rows.push(...(found || []));
+  }
+  return rows;
+}
+
+/**
+ * Supabase open reads keep any row with do_not_publish=false. Skipping a
+ * package removes it from the Airtable open pack, so the cron never upserts
+ * it again and the old row stays on Awaiting Approval. Pull those Airtable
+ * records and write the skipped state through.
+ */
+export async function reconcileSupabaseDroppedOpenOutputs(env, {
+  profileUuid,
+  keptIds,
+  listRecords,
+  outputFields,
+  contentUuidByAirtableId,
+} = {}) {
+  const tableId = env?.AIRTABLE_OUTPUT_TABLE_ID;
+  if (!studioSupabaseConfigured(env) || !tableId || !profileUuid || !listRecords) return 0;
+  const kept = keptIds instanceof Map ? new Set(keptIds.keys()) : new Set(keptIds || []);
+  let remote = [];
+  try {
+    remote = await supabaseRest(
+      env,
+      `platform_outputs?content_profile_id=eq.${profileUuid}&do_not_publish=eq.false&output_status=neq.Published&select=airtable_record_id&limit=1000`,
+    );
+  } catch (error) {
+    console.warn("supabase dropped-open reconcile list failed", error);
+    return 0;
+  }
+  const missing = [];
+  for (const row of remote || []) {
+    const id = String(row?.airtable_record_id || "");
+    if (/^rec[A-Za-z0-9]{14}$/.test(id) && !kept.has(id)) missing.push(id);
+  }
+  if (!missing.length) return 0;
+  const fresh = await listAirtableOutputsByIds(
+    env,
+    listRecords,
+    tableId,
+    missing.slice(0, 200),
+    outputFields,
+  );
+  if (!fresh.length) return 0;
+  const needContent = [];
+  for (const row of fresh) {
+    const contentId = firstLink(row?.fields?.Content_Item);
+    if (contentId && contentUuidByAirtableId && !contentUuidByAirtableId.has(contentId)) needContent.push(contentId);
+  }
+  if (needContent.length && contentUuidByAirtableId) {
+    const quoted = [...new Set(needContent)].map((id) => encodeURIComponent(id)).join(",");
+    const found = await supabaseRest(
+      env,
+      `content_items?airtable_record_id=in.(${quoted})&select=id,airtable_record_id&limit=200`,
+    ).catch(() => []);
+    for (const row of found || []) {
+      if (row?.airtable_record_id && row.id) contentUuidByAirtableId.set(row.airtable_record_id, row.id);
+    }
+  }
+  const outputRows = fresh.map((row) => {
+    const mapped = mapAirtableOutputToSupabase(row, {
+      profileUuid,
+      contentUuidByAirtableId: contentUuidByAirtableId || new Map(),
+    });
+    if (!mapped.content_item_id) delete mapped.content_item_id;
+    return mapped;
+  });
+  for (let index = 0; index < outputRows.length; index += 200) {
+    await upsertChunk(env, "platform_outputs", outputRows.slice(index, index + 200));
+  }
+  return outputRows.length;
+}
+
 /**
  * Upsert one profile's content items + platform outputs (+ ideas / requests) into Supabase.
  * `deps.listRecords` / `deps.f` / `deps.contentProfileFilterFormula` come from worker.js.
@@ -1065,6 +1150,17 @@ export async function syncProfilePipelineToSupabase(env, profile, deps = {}) {
     await upsertChunk(env, "platform_outputs", outputRows.slice(i, i + 200));
   }
 
+  // A Factory skip leaves the Airtable open pack, but an older Supabase row
+  // can still say do_not_publish=false. Refresh those rows from Airtable so
+  // Pipeline stops listing the duplicate.
+  const reconciledOutputs = await reconcileSupabaseDroppedOpenOutputs(env, {
+    profileUuid,
+    keptIds: outputsById,
+    listRecords,
+    outputFields,
+    contentUuidByAirtableId,
+  });
+
   const ideaRows = (ideas || []).map((row) => mapAirtableIdeaToSupabase(row, profileUuid));
   for (let i = 0; i < ideaRows.length; i += 200) {
     await upsertChunk(env, "idea_candidates", ideaRows.slice(i, i + 200));
@@ -1075,6 +1171,7 @@ export async function syncProfilePipelineToSupabase(env, profile, deps = {}) {
     profile_id: profile.id,
     content_items: contentRows.length,
     platform_outputs: outputRows.length,
+    reconciled_outputs: reconciledOutputs,
     newest_outputs: (newest || []).length,
     open_outputs: (openExtra || []).length,
     idea_candidates: ideaRows.length,

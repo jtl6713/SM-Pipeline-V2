@@ -18,6 +18,7 @@ import {
   packOutputListFields,
   supabaseRestAll,
   syncAirtableContentRowToSupabase,
+  syncProfilePipelineToSupabase,
   enqueueStudioSideEffectOutbox,
   STUDIO_SUPABASE_PIPELINE_READ_ROUTES,
   STUDIO_SUPABASE_PHASE4_READ_ROUTES,
@@ -412,6 +413,58 @@ test("phase 5 airtable mutation mirrors an output PATCH and ignores GET", async 
       fields: { Error_Message: "only a note" },
     });
     assert.equal(incomplete.reason, "no_records");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("profile sync refreshes Supabase rows that left the Airtable open pack", async () => {
+  const posts = [];
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (url, init) => {
+    const href = String(url);
+    const method = init?.method || "GET";
+    if (method === "POST" && href.includes("platform_outputs")) posts.push(JSON.parse(init.body));
+    if (href.includes("content_profiles") && method === "GET") {
+      return { ok: true, async text() { return JSON.stringify([{ id: "prof-uuid", airtable_record_id: "recProfile1" }]); } };
+    }
+    if (method === "GET" && href.includes("do_not_publish=eq.false")) {
+      return { ok: true, async text() { return JSON.stringify([{ airtable_record_id: "recStaleSkip00001" }]); } };
+    }
+    return { ok: true, async text() { return method === "GET" ? "[]" : ""; } };
+  };
+  try {
+    const result = await syncProfilePipelineToSupabase(supabaseEnv, {
+      id: "recProfile1",
+      fields: { Active: true, Profile_Name: "Miami" },
+    }, {
+      listRecords: async (_env, _table, opts) => {
+        const formula = String(opts?.filterFormula || "");
+        if (!formula.includes("recStaleSkip00001")) return [];
+        return [{
+          id: "recStaleSkip00001",
+          fields: {
+            Output_ID: 3750,
+            Platform: "YouTube",
+            Output_Status: "Skipped",
+            Publish_Status: "Not Ready",
+            Review_Status: "Skipped",
+            Do_Not_Publish: true,
+            Output_Title: "Little Havana, Miami 3",
+            Content_Profile: ["recProfile1"],
+          },
+        }];
+      },
+      f: (record, name) => record?.fields?.[name],
+      contentProfileFilterFormula: () => '{Content_Profile}="recProfile1"',
+    });
+    assert.equal(result.reconciled_outputs, 1);
+    const skipped = posts.flat().find((row) => row.airtable_record_id === "recStaleSkip00001");
+    assert.ok(skipped);
+    assert.equal(skipped.output_status, "Skipped");
+    assert.equal(skipped.do_not_publish, true);
+    assert.equal(skipped.publish_status, "Not Ready");
+    assert.equal(skipped.scheduled_post_date, null);
   } finally {
     globalThis.fetch = originalFetch;
   }
