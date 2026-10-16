@@ -226,3 +226,53 @@ export async function factoryBatchRetry(bucket, profileId, requestId) {
     };
   });
 }
+
+/**
+ * Explicit Quality Agent batch signatures. These classify the authoritative
+ * stored item ledger; derived counters cannot disagree unless the stored
+ * snapshot contains contradictory legacy metadata.
+ */
+export function factoryBatchQualitySignals(job, nowMs = Date.now()) {
+  if (!job) return [];
+  const signals = [];
+  const counts = factoryBatchCounts(job);
+  const ids = job.items.map(item => item.id);
+  if (new Set(ids).size !== ids.length) {
+    signals.push({ code: "QA-FACTORY-BATCH-DUPLICATE-ITEM", safe_auto_recover: false,
+      detail: "Duplicate output IDs in batch ledger; prevent any further dispatch" });
+  }
+  if ((job.status === "completed" || job.status === "failed") && counts.pending_count) {
+    signals.push({ code: "QA-FACTORY-BATCH-STATE-MISMATCH", safe_auto_recover: true,
+      detail: "Terminal job still has pending/processing items" });
+  }
+  if ((job.status === "queued" || job.status === "running") && !counts.pending_count) {
+    signals.push({ code: "QA-FACTORY-BATCH-STATE-MISMATCH", safe_auto_recover: true,
+      detail: "Active job has only terminal items" });
+  }
+  const updated = Date.parse(job.updated_at || job.created_at || "");
+  if (counts.pending_count && updated && nowMs - updated > 20 * 60 * 1000) {
+    signals.push({ code: "QA-FACTORY-BATCH-STALLED", safe_auto_recover: true,
+      detail: "No durable batch progress for over 20 minutes; cron may reclaim expired lease" });
+  }
+  if (job.items.some(item => item.status === "pending" && Number(item.next_attempt_ms) > nowMs)) {
+    signals.push({ code: "QA-FACTORY-BATCH-TRANSIENT-WAIT", safe_auto_recover: true,
+      detail: "Transient item(s) are scheduled for bounded retry; do not dispatch before backoff expires" });
+  }
+  if (counts.failed_count) {
+    signals.push({ code: "QA-FACTORY-BATCH-FAILED-ITEM", safe_auto_recover: false,
+      detail: "Failed outputs require inspection or Retry Failed; never retry successful rows" });
+  }
+  return signals;
+}
+export async function factoryBatchReconcile(bucket, profileId, requestId) {
+  assertBucket(bucket);
+  const key = factoryBatchKey(profileId, requestId);
+  return cas(bucket, key, job => {
+    if (new Set(job.items.map(item => item.id)).size !== job.items.length) return null;
+    const counts = factoryBatchCounts(job);
+    const expected = counts.pending_count ? "running"
+      : counts.failed_count && !counts.approved_count && !counts.skipped_count ? "failed" : "completed";
+    if (job.status === expected || (job.status === "queued" && counts.pending_count)) return null;
+    return { ...job, status: expected, updated_at: new Date().toISOString() };
+  });
+}
