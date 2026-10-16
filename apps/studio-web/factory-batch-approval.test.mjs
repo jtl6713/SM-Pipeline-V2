@@ -34,7 +34,7 @@ test("Factory submit returns after durable enqueue rather than awaiting 20 appro
   const end = js.indexOf("async function retryFactoryBatchFailures", start);
   assert.ok(start > 0 && end > start);
   const submit = js.slice(start, end);
-  assert.match(submit, /await fetchJson\("\/api\/outputs\/approve-all"/);
+  assert.match(submit, /await fetchJson\("\/api\/factory\/approval-batches"/);
   assert.doesNotMatch(submit, /await watchApproveAll/);
   assert.match(submit, /Never wait for all approvals/);
   assert.match(html, /factory-desk\.js\?v=0\.6\.706-tiktok-live-copy/);
