@@ -10,7 +10,7 @@ const html = fs.readFileSync(path.join(here, "index.html"), "utf8");
 
 test("UI build advertises idea find-images local refresh", () => {
   assert.match(app, /BUILD_ID = "item4-0.6.698-schedule-regen-r2"/);
-  assert.match(html, /UI build 0.6.697/);
+  assert.match(html, /UI build 0.6.698/);
   assert.match(html, /app-item4-1008\.js\?v=0.6.698-schedule-regen-r2/);
 });
 

@@ -12,7 +12,7 @@ const worker = readStudioWorkerSource();
 
 test("UI enables Save schedule for Ready for Review (Output 1795)", () => {
   assert.match(app, /BUILD_ID = "item4-0.6.698-schedule-regen-r2"/);
-  assert.match(html, /UI build 0.6.697/);
+  assert.match(html, /UI build 0.6.698/);
   assert.match(html, /app-item4-1008\.js\?v=0.6.698-schedule-regen-r2/);
   // setCreativeBusy must gate Save on creativeCanSetSchedule, not only approved reschedule.
   assert.match(
