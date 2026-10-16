@@ -430,7 +430,7 @@
         </button>`
       : `<span class="factory-line-thumb factory-line-thumb-empty" aria-hidden="true"></span>`;
     const alert = card.stuck_kind || card.produce_error || "";
-    const state = card.studio_state || (alert ? "Needs repair" : "—");
+    const stateLabel = card.studio_state || (alert ? "Needs repair" : "—");
     const cell = (value) => `<span class="factory-line-cell">${esc(value || "—")}</span>`;
     return `<div class="factory-line" data-factory-id="${esc(card.id)}" data-factory-kind="${esc(card.kind || "")}" data-lane="${esc(lane)}" title="${esc(cardLabel(card))}">
       ${lane === "needs_eyes" && card.kind === "output" && canReviewActions(card)
@@ -440,7 +440,7 @@
       ${cell(card.profile_name)}
       ${cell(card.platform)}
       ${cell(card.studio_output_type)}
-      <span class="factory-line-cell factory-line-state"${alert ? ` title="${esc(alert)}"` : ""}>${esc(state)}</span>
+      <span class="factory-line-cell factory-line-state"${alert ? ` title="${esc(alert)}"` : ""}>${esc(stateLabel)}</span>
       <div class="factory-line-actions">${actions.join("")}</div>
     </div>`;
   }
