@@ -154,7 +154,7 @@ export function scheduleRegenCandidateFilterFormula({
   const p = String(platform || "").trim();
   if (p) clauses.push(`{Platform}="${escaped(p)}"`);
   const t = String(outputType || "").trim();
-  if (t) clauses.push(`OR({Studio_Output_Type}="${escaped(t)}",{Format}="${escaped(t)}")`);
+  if (t) clauses.push(`OR({Studio_Output_Type}="${escaped(t)}",{Platform_Output_Type}="${escaped(t)}",{Format}="${escaped(t)}")`);
   clauses.push(`OR(${scheduleBlank},${scheduleFuture})`);
   const base = `AND(${clauses.join(",")})`;
   const scope = String(profileFormula || "").trim();
