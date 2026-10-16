@@ -12033,7 +12033,7 @@ export async function factoryBatchStatusRoute(request, env, authorization) {
 export async function factoryBatchProcess(env, profileId, requestId, ctx = null) {
   const run = async () => {
     const result = await factoryBatchDrain(env.STUDIO_MEDIA, {
-      profileId, requestId, maxItems: 5,
+      profileId, requestId, maxItems: 25, maxElapsedMs: 20000,
       approve: async (id, job) => {
         // Canonical Factory single-item guard handles existing Approved/Published,
         // render eligibility, Do_Not_Publish and the MAE / Story scheduling rules.
