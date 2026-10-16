@@ -336,12 +336,17 @@ import {
 import {
   SCHEDULE_REGEN_JOBS_SETTING,
   createScheduleRegenJob,
+  emptyScheduleRegenJobStore,
   parseScheduleRegenJobStore,
   pruneScheduleRegenJobStore,
+  scheduleRegenCandidateFilterFormula,
   scheduleRegenCombinationKey,
   scheduleRegenJobCounts,
   scheduleRegenProgressMessage,
   summarizeScheduleRegenJob,
+  canonicalizeScheduleRegenPlatform,
+  scheduleRegenJobIsStale,
+  reclaimStaleScheduleRegenJob,
   SCHEDULE_REGEN_STATUS,
 } from "./schedule-regen-batch.mjs";
 import {
@@ -1008,7 +1013,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.627-overview-supabase-page",
+          version: "0.10.628-schedule-regen-store",
           studio_supabase_pipeline_reads_v1: true,
           studio_supabase_sync_gate_v1: true,
           studio_supabase_phase3_stable_v1: true,

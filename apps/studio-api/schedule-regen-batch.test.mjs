@@ -151,6 +151,9 @@ test("Worker and Pipeline wire durable schedule regeneration", () => {
   assert.match(worker, /platformProtectedTimes/);
   assert.match(worker, /unsettledPlatformTypes/);
   assert.match(worker, /platformOccupiedMs:\s*reservedPlatform/);
+  assert.match(worker, /schedule-regen-jobs-v1\.json/);
+  assert.match(worker, /Seed that Setting_Name row in Airtable/);
+  assert.match(worker, /display names \("Miami - Miami"\)/);
   assert.match(app, /\/api\/outputs\/schedule-regen/);
   assert.match(app, /pathname === "\/api\/outputs\/schedule-regen"/);
   assert.match(app, /queuePipelineScheduleRegenPoll/);
@@ -158,4 +161,21 @@ test("Worker and Pipeline wire durable schedule regeneration", () => {
   assert.match(app, /Will be scheduled on approval/);
   assert.match(app, /operationsScheduleHorizonDays/);
   assert.match(app, /MAE-first, balanced-overflow/);
+});
+
+test("occupied profile match accepts Content_Profile lookup display names", async () => {
+  const { studioOccupiedRowMatchesProfile } = await import("./worker-functions-01.mjs");
+  const profile = { id: "recpNlNn6U6eq0M9r", fields: { Profile_Name: "Miami" } };
+  assert.equal(
+    studioOccupiedRowMatchesProfile({ fields: { Content_Profile: ["Miami - Miami"] } }, profile),
+    true,
+  );
+  assert.equal(
+    studioOccupiedRowMatchesProfile({ fields: { Content_Profile: ["recpNlNn6U6eq0M9r"] } }, profile),
+    true,
+  );
+  assert.equal(
+    studioOccupiedRowMatchesProfile({ fields: { Content_Profile: ["Chicago"] } }, profile),
+    false,
+  );
 });
