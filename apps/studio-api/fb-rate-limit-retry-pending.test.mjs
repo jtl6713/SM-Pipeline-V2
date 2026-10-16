@@ -7,7 +7,7 @@ import { normalizedOutputState } from "./worker-functions-01.mjs";
 
 const root = dirname(fileURLToPath(import.meta.url));
 
-test("Worker version is 0.10.645-supabase-phase5-writes", () => {
+test("Worker version is 0.10.646-duplicate-skip", () => {
   const worker = readFileSync(join(root, "worker.js"), "utf8");
   assert.match(worker, /version: "0\.10\.645-supabase-phase5-writes"/);
 });

@@ -277,7 +277,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.706-tiktok-live-copy";
+  const BUILD_ID = "item4-0.6.707-duplicate-skip";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -19923,6 +19923,11 @@ function timedScriptAssetLabel(asset, index) {
     // stricter Approve-button gate. mode=review used to fetch Pending Review and
     // leave Review empty while home still showed needs-approval counts.
     if (filter === "approval") {
+      // A skipped or do-not-publish row must leave this screen even when a
+      // stale studio_state snapshot still says Ready for Review.
+      if (record?.do_not_publish) return false;
+      const outputStatus = String(record?.output_status || "").trim().toLowerCase();
+      if (outputStatus === "skipped" || outputStatus === "cancelled" || outputStatus === "rejected") return false;
       const approvalState = studio === "Ready for Review" || studio === "Awaiting Approval"
         || state === "Ready for Review" || state === "Awaiting Approval";
       return approvalState && !pipelineRecordIsAzAutoQueue(record);

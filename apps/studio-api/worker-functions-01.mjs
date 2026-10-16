@@ -1920,6 +1920,13 @@ export function normalizedOutputState(record) {
   const livePostUrl = String(text("Platform_Post_URL") || text("Manual_Published_URL") || "").trim();
   if (/^https?:\/\//i.test(livePostUrl)) return "Published";
 
+  // Factory delete sets Output_Status=Skipped and leaves Render_Status=Rendered
+  // plus a finished file. The later Ready-for-Review check used to win, so the
+  // package stayed on Awaiting Approval. A live URL above still means Published.
+  if (outputStatusLc === "skipped" || outputStatusLc === "cancelled" || outputStatusLc === "rejected") {
+    return "Skipped";
+  }
+
   // Live Short + daily quota is an automatic midnight retry. Do not paint
   // Manual Action Required even when YTS2 left Publish_Status=Manual Publish Required.
   if (youtubeLiveQuotaOnly(fields) && youtubeVideoReady) {

@@ -13,9 +13,9 @@ test("idea library search sequence + pins", async () => {
   const worker = readStudioWorkerSource();
   assert.match(app, /ideaLibraryLoadSequence/);
   assert.match(app, /Ignore stale responses so a slow empty-query open cannot wipe a later "Museum" search/);
-  assert.match(app, /item4-0.6.706-tiktok-live-copy/);
-  assert.match(html, /UI build 0.6.706/);
-  assert.match(worker, /0.10.645-supabase-phase5-writes/);
+  assert.match(app, /item4-0.6.707-duplicate-skip/);
+  assert.match(html, /UI build 0.6.707/);
+  assert.match(worker, /0.10.646-duplicate-skip/);
   assert.match(worker, /studio_idea_library_typeahead_v1: true/);
   assert.match(worker, /ideaLibrarySearchHit/);
   assert.match(worker, /ideaLibrarySearchFilterKeys\(queryTokens\)/);

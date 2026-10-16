@@ -29,7 +29,7 @@ test("a failed linked-request lookup cannot silently regenerate a duplicate", ()
 });
 
 test("Worker version is incremented for deployed idempotency fix", () => {
-  assert.match(worker, /version: "0.10.645-supabase-phase5-writes"/);
+  assert.match(worker, /version: "0.10.646-duplicate-skip"/);
 });
 
 test("explicit Create VO Timeline does not silently make a Photo Set", () => {

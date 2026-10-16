@@ -8678,25 +8678,54 @@ export async function factoryDeleteDeskItem(env, id, kind, actor, note) {
   const existing = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, id);
   const outputStatus = String(f(existing, "Output_Status") || "").trim();
   const publishStatus = String(f(existing, "Publish_Status") || "").trim();
-  if (publishStatus === "Published" || outputStatus === "Published") {
+  if (publishStatus === "Published" || outputStatus === "Published" || f(existing, "Published_At")) {
     throw new HttpError(409, "Published outputs cannot be deleted");
   }
-  const existingNotes = String(f(existing, "Review_Notes") || "").trim();
   const line = `Factory Desk delete/skip by ${actor || "operator"} at ${stamp}.${note ? ` ${note}` : ""}`;
-  await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, id, {
-    method: "PATCH",
-    body: JSON.stringify({
+  const contentId = studioFirstLinkedId(f(existing, "Content_Item"));
+  const targets = new Map([[existing.id, existing]]);
+  if (contentId) {
+    const siblings = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
+      limit: 40,
+      fields: ["Output_Status", "Publish_Status", "Published_At", "Platform_Post_URL", "Review_Notes", "Content_Item"],
+      filterFormula: `AND({Test_Run_ID}=BLANK(),FIND("${contentId}", ARRAYJOIN({Content_Item})))`,
+    }).catch(() => []);
+    for (const row of siblings || []) {
+      if (!row?.id || targets.has(row.id)) continue;
+      const siblingOutput = String(f(row, "Output_Status") || "").trim();
+      const siblingPublish = String(f(row, "Publish_Status") || "").trim();
+      if (siblingOutput === "Published" || siblingPublish === "Published" || f(row, "Published_At") || f(row, "Platform_Post_URL")) {
+        continue;
+      }
+      targets.set(row.id, row);
+    }
+  }
+  const patches = [...targets.values()].map((row) => {
+    const existingNotes = String(f(row, "Review_Notes") || "").trim();
+    return {
+      id: row.id,
       fields: {
         Output_Status: "Skipped",
         Publish_Status: "Not Ready",
+        Review_Status: "Skipped",
         Do_Not_Publish: true,
+        Auto_Publish_Enabled: false,
+        Scheduled_Post_Date: null,
         Review_Decision_At: stamp,
         Review_Notes: [existingNotes, line].filter(Boolean).join("\n\n"),
       },
-      typecast: true,
-    }),
+    };
   });
-  return { id, kind: "output", message: "Output marked Skipped (removed from Factory queues)." };
+  await airtableBatchUpdate(env, env.AIRTABLE_OUTPUT_TABLE_ID, patches, { typecast: true });
+  const count = patches.length;
+  return {
+    id,
+    kind: "output",
+    output_ids: patches.map((row) => row.id),
+    message: count === 1
+      ? "Output marked Skipped (removed from Factory queues)."
+      : `Removed ${count} unpublished outputs from this content package.`,
+  };
 }
 /*__STUDIO_WORKER_END:factoryDeleteDeskItem__*/
 

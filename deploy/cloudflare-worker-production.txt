@@ -367,3 +367,4 @@ phase4-followup manual-post-link 2026-10-16T12:40:00Z worker 0.10.644-manual-pos
 
 # 2026-10-16 skip redundant automatic video AI frames and explicit-prompt theme calls
 phase5-writes 2026-10-16T14:35:00Z worker 0.10.645-supabase-phase5-writes (Airtable SoR write-through for Platform Outputs and Content Items; best-effort side-effect outbox)
+phase4-followup duplicate-skip 2026-10-16T16:50:00Z worker 0.10.646-duplicate-skip (skipped rendered packages leave Awaiting Approval; Factory delete removes the unpublished content package)
