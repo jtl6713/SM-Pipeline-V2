@@ -8,7 +8,7 @@ const here = path.dirname(new URL(import.meta.url).pathname);
 const worker = readStudioWorkerSource();
 
 test("idea promotion reconciles successful side effects after transient handoff errors", () => {
-  assert.match(worker, /0.10.639-schedule-regen-cron/);
+  assert.match(worker, /0.10.640-schedule-regen-serialize/);
   assert.match(worker, /studio_promotion_reconcile_after_handoff_error_v1: true/);
   assert.match(worker, /try \{\s*await fetchPromotionHandoff\(env, webhook\);\s*\} catch \(error\) \{/s);
   assert.match(worker, /const reconciled = await waitForPromotionResult\(env, recordId\);/);

@@ -40,6 +40,12 @@ export const SCHEDULE_REGEN_POSTS_PER_SLICE = 15;
 export const SCHEDULE_REGEN_PLAN_SLOTS_PER_SLICE = 25;
 /** Max slices to chain inside one waitUntil / drain invocation. */
 export const SCHEDULE_REGEN_MAX_SLICES_PER_DRAIN = 16;
+/**
+ * Soft drain lease so cron + status GET cannot run two studioDrainScheduleRegenJob
+ * loops on the same job (or four overnight jobs in parallel) and lost-update the
+ * shared R2/Airtable store — that wiped Chicago Facebook Story plan slots back to [].
+ */
+export const SCHEDULE_REGEN_DRAIN_LEASE_MS = 90 * 1000;
 
 const CANONICAL_PLATFORMS = Object.freeze({
   instagram: "Instagram",

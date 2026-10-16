@@ -346,6 +346,7 @@ import {
   SCHEDULE_REGEN_PLAN_SLOTS_PER_SLICE,
   SCHEDULE_REGEN_MAX_SLICES_PER_DRAIN,
   SCHEDULE_REGEN_LIVE_LEASE_MS,
+  SCHEDULE_REGEN_DRAIN_LEASE_MS,
   createScheduleRegenJob,
   scheduleRegenCandidateFilterFormula,
   emptyScheduleRegenJobStore,
@@ -2318,7 +2319,22 @@ export async function studioDrainScheduleRegenJob(env, jobId, options = {}) {
     1,
     Math.min(20, Number(options.maxSlices) || SCHEDULE_REGEN_MAX_SLICES_PER_DRAIN),
   );
-  let job = null;
+  const force = Boolean(options.force);
+  let job = await studioGetScheduleRegenJob(env, jobId);
+  if (!job) return null;
+  if (job.status === "completed" || job.status === "failed") return job;
+  const nowMs = Date.now();
+  const leaseUntilMs = Date.parse(job.drain_until || "") || 0;
+  // Another waitUntil (cron or status GET) already owns this job — bail so we do
+  // not overwrite its mid-plan checkpoints with a stale in-memory snapshot.
+  if (!force && leaseUntilMs > nowMs) return job;
+  job = {
+    ...job,
+    drain_until: new Date(nowMs + SCHEDULE_REGEN_DRAIN_LEASE_MS).toISOString(),
+    updated_at: new Date().toISOString(),
+  };
+  await studioPutScheduleRegenJob(env, job);
+
   let lastSig = "";
   for (let i = 0; i < maxSlices; i += 1) {
     job = await studioProcessScheduleRegenJobSlice(env, jobId, options);
@@ -2330,6 +2346,14 @@ export async function studioDrainScheduleRegenJob(env, jobId, options = {}) {
       .join("|");
     if (sig === lastSig) return job;
     lastSig = sig;
+    // Refresh the drain lease between slices so a long Story plan cannot be
+    // stolen by the next light-cron tick.
+    const refreshed = {
+      ...job,
+      drain_until: new Date(Date.now() + SCHEDULE_REGEN_DRAIN_LEASE_MS).toISOString(),
+    };
+    await studioPutScheduleRegenJob(env, refreshed);
+    job = refreshed;
   }
   return job;
 }
@@ -2845,9 +2869,9 @@ export async function studioEnqueueOvernightScheduleRegenJobs(env) {
 /*__STUDIO_WORKER_END:studioEnqueueOvernightScheduleRegenJobs__*/
 
 /**
- * Keep calendar regenerate moving without a browser poll. Light cron drains every
- * queued/running schedule-regen job so overnight all-profile runs finish after
- * Joseph closes the laptop.
+ * Keep calendar regenerate moving without a browser poll. Light cron drains one
+ * queued/running schedule-regen job per tick (oldest updated_at first) so four
+ * overnight waitUntils cannot lost-update the shared store and wipe plan slots.
  */
 export async function studioResumeScheduleRegenJobs(env, ctx = null) {
   const store = await studioLoadScheduleRegenJobStore(env);
@@ -2857,6 +2881,8 @@ export async function studioResumeScheduleRegenJobs(env, ctx = null) {
     if (activeIds.includes(job.id)) return true;
     return job.status === "queued" || job.status === "running";
   });
+  const nowMs = Date.now();
+  const candidates = [];
   const seen = new Set();
   for (const job of running) {
     if (!job?.id || seen.has(job.id)) continue;
@@ -2869,17 +2895,29 @@ export async function studioResumeScheduleRegenJobs(env, ctx = null) {
       await studioPutScheduleRegenJob(env, job);
       continue;
     }
-    if (ctx && typeof ctx.waitUntil === "function") {
-      ctx.waitUntil(studioDrainScheduleRegenJob(env, job.id).catch((error) => {
-        console.warn("schedule regen cron resume failed", job.id, error);
-      }));
-    } else {
-      await studioDrainScheduleRegenJob(env, job.id).catch((error) => {
-        console.warn("schedule regen cron resume failed", job.id, error);
-      });
-    }
+    if (!open) continue;
+    const leaseUntilMs = Date.parse(job.drain_until || "") || 0;
+    if (leaseUntilMs > nowMs) continue;
+    candidates.push(job);
   }
-  return seen.size;
+  candidates.sort((a, b) => {
+    const aMs = Date.parse(a.updated_at || a.created_at || "") || 0;
+    const bMs = Date.parse(b.updated_at || b.created_at || "") || 0;
+    return aMs - bMs;
+  });
+  const job = candidates[0];
+  if (!job) return 0;
+  // One job per light-cron tick — never fan out parallel drains overnight.
+  if (ctx && typeof ctx.waitUntil === "function") {
+    ctx.waitUntil(studioDrainScheduleRegenJob(env, job.id).catch((error) => {
+      console.warn("schedule regen cron resume failed", job.id, error);
+    }));
+  } else {
+    await studioDrainScheduleRegenJob(env, job.id).catch((error) => {
+      console.warn("schedule regen cron resume failed", job.id, error);
+    });
+  }
+  return 1;
 }
 /*__STUDIO_WORKER_END:studioResumeScheduleRegenJobs__*/
 
