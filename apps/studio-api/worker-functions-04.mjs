@@ -12061,6 +12061,7 @@ export async function factoryBatchStatusRoute(request, env, authorization) {
 /*__STUDIO_WORKER_END:factoryBatchStatusRoute__*/
 
 export async function factoryBatchProcess(env, profileId, requestId, ctx = null) {
+  if (String(env?.FACTORY_BATCH_APPROVALS_ENABLED || "").toLowerCase() !== "true") return null;
   const run = async () => {
     const result = await factoryBatchDrain(env.STUDIO_MEDIA, {
       profileId, requestId, maxItems: 25, maxElapsedMs: 20000,
@@ -12146,6 +12147,7 @@ export async function factoryBatchSubmitRoute(request, env, authorization, ctx =
  * hierarchy. No client poll is necessary. An expired R2 lease can be reclaimed.
  */
 export async function factoryBatchCronResume(env, ctx = null) {
+  if (String(env?.FACTORY_BATCH_APPROVALS_ENABLED || "").toLowerCase() !== "true") return 0;
   if (!env?.STUDIO_MEDIA?.list) return 0;
   // The persisted cursor rotates through old histories (rather than rereading
   // the first 200 lexical R2 keys forever). Process only a bounded scan on each tick.
