@@ -340,6 +340,8 @@ import {
   SCHEDULE_REGEN_MAX_SLICES_PER_DRAIN,
   SCHEDULE_REGEN_LIVE_LEASE_MS,
   SCHEDULE_REGEN_DRAIN_LEASE_MS,
+  SCHEDULE_REGEN_DRAIN_LEASE_HEARTBEAT_MS,
+  scheduleRegenDrainLeaseIsLive,
   canonicalizeScheduleRegenOutputType,
   createScheduleRegenJob,
   emptyScheduleRegenJobStore,
@@ -1030,7 +1032,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.640-schedule-regen-serialize",
+          version: "0.10.641-schedule-regen-zombie-lease",
           studio_supabase_pipeline_reads_v1: true,
           studio_supabase_sync_gate_v1: true,
           studio_supabase_phase3_stable_v1: true,
