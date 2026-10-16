@@ -11,6 +11,7 @@
     batchTimer: null,
     batchDetailsOpen: false,
     lastBatchProfile: "",
+    batchApprovalsEnabled: null,
   };
   const FACTORY_SELECTION_KEY = "studio.factory.batch-selection.v1";
   const FACTORY_LAST_BATCH_KEY = "studio.factory.last-batch.v1";
@@ -253,7 +254,8 @@
     if (count) count.textContent = `${selectable} output${selectable === 1 ? "" : "s"} selected${missing ? ` · ${missing} no longer ready` : ""}`;
     const submit = $("factoryBatchSubmit");
     if (submit) {
-      submit.disabled = !selectable || state.submittingBatch;
+      submit.disabled = !selectable || state.submittingBatch || state.batchApprovalsEnabled === false;
+      submit.title = state.batchApprovalsEnabled === false ? "Batch approval rollout is currently disabled; individual approvals remain available." : "";
       submit.textContent = state.submittingBatch ? "Submitting…" : `Submit Approvals${selectable ? ` (${selectable})` : ""}`;
     }
     const clear = $("factoryBatchClear");
@@ -307,6 +309,10 @@
     if (/^rec[A-Za-z0-9]+$/.test(profileId)) params.set("profile", profileId);
     try {
       const batch = await fetchJson(`/api/factory/approval-batches?${params.toString()}`);
+      if (typeof batch.approvals_enabled === "boolean") {
+        state.batchApprovalsEnabled = batch.approvals_enabled;
+        updateFactoryBatchToolbar();
+      }
       renderFactoryBatchActivity(batch);
       return batch;
     } catch (error) {
@@ -318,6 +324,7 @@
 
   async function submitFactoryBatchApprovals() {
     if (state.submittingBatch) return;
+    if (state.batchApprovalsEnabled === false) { setStatus("Batch approvals are not enabled yet; individual approvals still work.", true); return; }
     const ready = readyFactoryOutputs().filter((card) => state.selectedOutputs.has(card.id));
     if (!ready.length) { updateFactoryBatchToolbar(); setStatus("Select one or more review-ready outputs.", true); return; }
     const profiles = [...new Set(ready.map((card) => String(card.profile_id || "").trim()))];
