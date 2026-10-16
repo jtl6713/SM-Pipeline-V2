@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import {
   factoryBatchEnqueue, factoryBatchRead, factoryBatchList,
   factoryBatchSummary, factoryBatchCounts, factoryBatchDrain,
-  factoryBatchRetry, factoryBatchLockKey,
+  factoryBatchRetry, factoryBatchLockKey, factoryBatchCronScan,
 } from "./factory-approval-queue.mjs";
 
 class FakeR2 {
@@ -21,9 +21,14 @@ class FakeR2 {
     this.objects.set(key, next);
     return { etag: next.etag };
   }
-  async list({ prefix, limit = 100 }) {
-    const keys = [...this.objects.keys()].filter(key => key.startsWith(prefix)).slice(0, limit);
-    return { truncated: false, objects: keys.map(key => ({ key })) };
+  async list({ prefix, limit = 100, cursor }) {
+    const keys = [...this.objects.keys()].filter(key => key.startsWith(prefix)).sort();
+    const start = cursor ? keys.findIndex(key => key > cursor) : 0;
+    const from = start < 0 ? keys.length : start;
+    const page = keys.slice(from, from + limit);
+    const truncated = from + limit < keys.length;
+    return { truncated, cursor: truncated ? page.at(-1) : undefined,
+      objects: page.map(key => ({ key })) };
   }
 }
 const profileId = "recProfileTest";
@@ -127,4 +132,27 @@ test("Retry Failed never resets already-approved or already-satisfied items", as
   const retried = await factoryBatchRetry(bucket, profileId, "factory_retry_request");
   assert.deepEqual(retried.items.map(x => x.status), ["approved", "already_satisfied", "pending"]);
   assert.equal(retried.status, "queued");
+});
+
+test("cron recovery rotates across old R2 history beyond 200 jobs without starving new profiles", async () => {
+  const bucket = new FakeR2();
+  const base = "studio/state/factory-approvals/v2/jobs/";
+  for (let i = 0; i < 307; i++) {
+    const key = base + "rec" + String(i).padStart(5, "0") + "/factory_cron_" + String(i).padStart(5, "0") + ".json";
+    await bucket.put(key, JSON.stringify({ status: i === 306 ? "queued" : "completed", items: [] }));
+  }
+  let foundLast = false;
+  const pages = [];
+  for (let scan = 0; scan < 3; scan++) {
+    const result = await factoryBatchCronScan(bucket, { maxScan: 120, pageSize: 60 });
+    pages.push(result);
+    if (result.objects.some(row => row.key.includes("/rec00306/"))) foundLast = true;
+  }
+  assert.equal(foundLast, true, "Queued work behind first 200 keys must be seen");
+  assert.equal(pages[0].scanned, 120);
+  assert.equal(pages[1].scanned, 120);
+  assert.equal(pages[2].scanned, 67);
+  assert.equal(pages[2].wrapped, true);
+  const wrapped = await factoryBatchCronScan(bucket, { maxScan: 120 });
+  assert.ok(wrapped.objects.some(row => row.key.includes("/rec00000/")), "Full pass must restart to catch newly inserted keys");
 });
