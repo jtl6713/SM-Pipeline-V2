@@ -633,6 +633,7 @@ import {
   putStudioScheduleSettings,
   getApproveAllJobStatus,
   studioResumeApproveAllJobs,
+  studioEnqueueOvernightScheduleRegenJobs,
   studioResumeScheduleRegenJobs,
   approveAllOutputsForPublishing,
   reviewOutputCreative,
@@ -2314,9 +2315,13 @@ export default {
       } catch (error) {
         console.warn("studio approve-all batch resume failed", error);
       }
-      // Calendar regenerate used to freeze when the browser closed (no status poll).
-      // Drain every active schedule-regen job on the light tick so overnight
-      // all-profile runs finish without a laptop left open.
+      // Overnight all-profile calendar regen (SCHEDULE_REGEN_OVERNIGHT_V1), then
+      // drain every active job so Regenerating finishes without a browser poll.
+      try {
+        await studioEnqueueOvernightScheduleRegenJobs(env);
+      } catch (error) {
+        console.warn("studio schedule-regen overnight enqueue failed", error);
+      }
       try {
         await studioResumeScheduleRegenJobs(env, ctx);
       } catch (error) {
@@ -5235,6 +5240,7 @@ const STUDIO_OVERDUE_SCHEDULED_FORMULA = 'AND({Test_Run_ID}=BLANK(),{Do_Not_Publ
 /*__STUDIO_WORKER_EXTRACT:studioProcessApproveAllJobSlice__*/
 /*__STUDIO_WORKER_EXTRACT:studioRunApproveAllJob__*/
 /*__STUDIO_WORKER_EXTRACT:studioResumeApproveAllJobs__*/
+/*__STUDIO_WORKER_EXTRACT:studioEnqueueOvernightScheduleRegenJobs__*/
 /*__STUDIO_WORKER_EXTRACT:studioResumeScheduleRegenJobs__*/
 /*__STUDIO_WORKER_EXTRACT:approveAllOutputsForPublishing__*/
 /*__STUDIO_WORKER_EXTRACT:reviewOutputCreative__*/

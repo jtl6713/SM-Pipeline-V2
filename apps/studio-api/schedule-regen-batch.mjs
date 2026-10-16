@@ -3,6 +3,27 @@
 import { maeSortRegenCombinations } from "./mae-schedule.mjs";
 
 export const SCHEDULE_REGEN_JOBS_SETTING = "SCHEDULE_REGEN_JOBS_V1";
+/** One-shot overnight enqueue: `{ "enabled": true, "day": "YYYY-MM-DD" }`. */
+export const SCHEDULE_REGEN_OVERNIGHT_SETTING = "SCHEDULE_REGEN_OVERNIGHT_V1";
+/** Platforms used when overnight cron fans out all-profile calendar regen. */
+export const SCHEDULE_REGEN_OVERNIGHT_PLATFORMS = Object.freeze([
+  "Facebook",
+  "Instagram",
+  "TikTok",
+  "YouTube",
+]);
+/** Allowlisted output types for overnight fanout (matches UI/Worker canonicalize). */
+export const SCHEDULE_REGEN_OVERNIGHT_OUTPUT_TYPES = Object.freeze([
+  "Reel",
+  "Story",
+  "Carousel",
+  "Short",
+  "Multi-Image Post",
+  "Multi-Photo",
+  "Single Image",
+  "Single Photo",
+  "Slideshow Video",
+]);
 export const SCHEDULE_REGEN_JOB_TTL_MS = 24 * 60 * 60 * 1000;
 export const SCHEDULE_REGEN_STORE_CHAR_BUDGET = 80000;
 export const SCHEDULE_REGEN_MAX_TERMINAL_JOBS = 1;

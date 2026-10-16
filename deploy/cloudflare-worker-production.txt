@@ -357,3 +357,5 @@ phase4-followup schedule-regen-empty-lane 2026-10-16T05:03:29Z worker 0.10.637-s
 phase4-followup schedule-regen-empty-lane 2026-10-16T05:05:00Z worker 0.10.637-schedule-regen-empty-lane (needsWork empty Processing + Complete)
 
 phase4-followup schedule-regen-empty-early 2026-10-16T05:16:00Z worker 0.10.638-schedule-regen-empty-early (Complete empty lane before needsPlanning gate)
+
+phase4-followup schedule-regen-overnight 2026-10-16T05:26:00Z worker 0.10.639-schedule-regen-cron (overnight enqueue all profiles + cron drain)

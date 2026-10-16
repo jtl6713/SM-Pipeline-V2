@@ -339,6 +339,9 @@ import {
 } from "./mae-schedule.mjs";
 import {
   SCHEDULE_REGEN_JOBS_SETTING,
+  SCHEDULE_REGEN_OVERNIGHT_SETTING,
+  SCHEDULE_REGEN_OVERNIGHT_PLATFORMS,
+  SCHEDULE_REGEN_OVERNIGHT_OUTPUT_TYPES,
   SCHEDULE_REGEN_POSTS_PER_SLICE,
   SCHEDULE_REGEN_PLAN_SLOTS_PER_SLICE,
   SCHEDULE_REGEN_MAX_SLICES_PER_DRAIN,
@@ -2755,6 +2758,83 @@ export async function studioResumeApproveAllJobs(env, ctx = null) {
   return seen.size;
 }
 /*__STUDIO_WORKER_END:studioResumeApproveAllJobs__*/
+
+/**
+ * One-shot overnight fanout controlled by Pipeline Setting SCHEDULE_REGEN_OVERNIGHT_V1:
+ * `{ "enabled": true, "day": "YYYY-MM-DD" }`. Enqueues allowlisted platform×type
+ * jobs for every Active Content Profile that is not already running.
+ */
+export async function studioEnqueueOvernightScheduleRegenJobs(env) {
+  const row = await studioSettingsByName(env, SCHEDULE_REGEN_OVERNIGHT_SETTING).catch(() => null);
+  const raw = row?.fields?.Setting_Value || row?.fields?.Value || "";
+  let cfg = {};
+  try {
+    cfg = JSON.parse(raw || "{}") || {};
+  } catch {
+    return { enqueued: 0, reason: "invalid_json" };
+  }
+  if (!cfg?.enabled) return { enqueued: 0, reason: "disabled" };
+  const today = new Date().toISOString().slice(0, 10);
+  if (String(cfg.day || "") !== today) return { enqueued: 0, reason: "wrong_day" };
+
+  const store = await studioLoadScheduleRegenJobStore(env);
+  const profiles = await listRecords(env, "Content Profiles", {
+    limit: 50,
+    filterFormula: "{Active}=1",
+    fields: ["Profile_Name", "Active"],
+  }).catch(() => []);
+  const already = new Set(
+    (Array.isArray(cfg.enqueued_profile_ids) ? cfg.enqueued_profile_ids : []).map((id) => String(id || "").trim()).filter(Boolean),
+  );
+  const horizonDays = maeNormalizeHorizonDays(
+    cfg.horizon_days,
+    await studioScheduleHorizonDays(env).catch(() => 30),
+  );
+  let created = 0;
+  for (const profile of profiles || []) {
+    const profileId = String(profile?.id || "").trim();
+    if (!profileId) continue;
+    const activeId = store.active_by_scope[profileId];
+    const activeJob = activeId ? store.jobs[activeId] : null;
+    if (activeJob && ["queued", "running"].includes(String(activeJob.status || ""))) {
+      already.add(profileId);
+      continue;
+    }
+    if (already.has(profileId)) continue;
+    const rawName = String(f(profile, "Profile_Name") || "").trim() || profileId;
+    const shortName = rawName.includes(" - ") ? rawName.split(" - ").slice(-1)[0].trim() : rawName;
+    const job = createScheduleRegenJob({
+      profileId,
+      profiles: [{ id: profileId, name: shortName }],
+      platforms: [...SCHEDULE_REGEN_OVERNIGHT_PLATFORMS],
+      outputTypes: [...SCHEDULE_REGEN_OVERNIGHT_OUTPUT_TYPES],
+      horizonDays,
+      eligibleCount: 0,
+    });
+    store.jobs[job.id] = job;
+    store.active_by_scope[profileId] = job.id;
+    already.add(profileId);
+    created += 1;
+  }
+  if (created > 0) {
+    await studioPutScheduleRegenJobStore(env, store, "Overnight schedule regeneration enqueue");
+  }
+  await studioUpsertSetting(
+    env,
+    SCHEDULE_REGEN_OVERNIGHT_SETTING,
+    JSON.stringify({
+      ...cfg,
+      enabled: true,
+      day: today,
+      enqueued_profile_ids: [...already],
+      last_enqueue_at: new Date().toISOString(),
+      last_created: created,
+    }),
+    "Overnight all-profile schedule regen",
+  );
+  return { enqueued: created, tracked: already.size };
+}
+/*__STUDIO_WORKER_END:studioEnqueueOvernightScheduleRegenJobs__*/
 
 /**
  * Keep calendar regenerate moving without a browser poll. Light cron drains every
