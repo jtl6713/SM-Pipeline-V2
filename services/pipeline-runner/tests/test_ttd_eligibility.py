@@ -81,6 +81,21 @@ def test_ttd1_and_poll_gates():
 
     processing = _record(Platform="TikTok", TikTok_Draft_Publish_ID="pub-1", TikTok_Draft_Status="Processing")
     assert ttd2_eligibility_reason(processing) is None
+    future = (datetime.now(timezone.utc) + timedelta(days=20)).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+    early_delivery = _record(
+        Platform="TikTok",
+        Auto_Publish_Enabled=True,
+        TikTok_Draft_Status="Ready for Delivery",
+        Scheduled_Post_Date=future,
+    )
+    assert ttd1_eligibility_reason(early_delivery) == "tiktok_draft_before_inbox_lead_window"
+    early_inbox = _record(
+        Platform="TikTok",
+        TikTok_Draft_Publish_ID="pub-1",
+        TikTok_Draft_Status="Processing",
+        Scheduled_Post_Date=future,
+    )
+    assert ttd2_eligibility_reason(early_inbox) == "tiktok_draft_before_inbox_lead_window"
     assert ttd2_eligibility_reason(_record(Platform="TikTok", TikTok_Draft_Status="Processing")) == "missing_draft_publish_id"
 
     delivered = _record(

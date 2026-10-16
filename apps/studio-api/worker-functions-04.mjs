@@ -914,12 +914,12 @@ export async function studioReconcileTiktokDrafts(env, options = {}) {
     {
       stage: "ttd1",
       pulse: studioPulseTtd1,
-      formula: 'AND({Test_Run_ID}=BLANK(),{Platform}="TikTok",{Do_Not_Publish}=0,{Auto_Publish_Enabled}=1,{TikTok_Draft_Publish_ID}="",OR({TikTok_Draft_Status}="Ready for Delivery",AND({TikTok_Draft_Status}="Retry Pending",OR(FIND("TTD1",UPPER({Publish_Error_Stage}&""))>0,{Publish_Error_Stage}="TTD_CAPACITY"))))',
+      formula: `AND({Test_Run_ID}=BLANK(),{Platform}="TikTok",{Do_Not_Publish}=0,{Auto_Publish_Enabled}=1,{TikTok_Draft_Publish_ID}="",${STUDIO_TIKTOK_INBOX_DUE_FORMULA},OR({TikTok_Draft_Status}="Ready for Delivery",AND({TikTok_Draft_Status}="Retry Pending",OR(FIND("TTD1",UPPER({Publish_Error_Stage}&""))>0,{Publish_Error_Stage}="TTD_CAPACITY"))))`,
     },
     {
       stage: "ttd2",
       pulse: studioPulseTtd2,
-      formula: 'AND({Test_Run_ID}=BLANK(),{Platform}="TikTok",{Do_Not_Publish}=0,{TikTok_Draft_Publish_ID}!="",OR({TikTok_Draft_Status}="Processing",AND({TikTok_Draft_Status}="Retry Pending",FIND("TTD2",UPPER({Publish_Error_Stage}&""))>0)))',
+      formula: `AND({Test_Run_ID}=BLANK(),{Platform}="TikTok",{Do_Not_Publish}=0,{TikTok_Draft_Publish_ID}!="",${STUDIO_TIKTOK_INBOX_DUE_FORMULA},OR({TikTok_Draft_Status}="Processing",AND({TikTok_Draft_Status}="Retry Pending",FIND("TTD2",UPPER({Publish_Error_Stage}&""))>0)))`,
     },
     {
       stage: "ttd3",
@@ -11381,6 +11381,7 @@ export async function markStudioTiktokComplete(request, env, url) {
     url: postUrl,
     musicCompleted: payload?.music_completed,
   });
+  await studioSupabaseWriteThroughOutput(env, updated, "tiktok-complete");
   return respond(request, env, { ok: true, published: true, record: mapOutput(updated) });
 }
 /*__STUDIO_WORKER_END:markStudioTiktokComplete__*/
@@ -11400,13 +11401,22 @@ export async function resendStudioTiktokDraft(request, env, url, authorization, 
   const fields = tiktokResendRearmFields({
     now: new Date().toISOString(),
     existingNotes: f(existing, "Output_Notes"),
+    scheduledPostDate: f(existing, "Scheduled_Post_Date"),
   });
   const rearmed = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, match[1], {
     method: "PATCH",
     body: JSON.stringify({ fields, typecast: true }),
   });
-  const dispatch = await studioDispatchApprovedPublishNow(env, rearmed);
-  if (ctx && typeof ctx.waitUntil === "function") {
+  const dueNow = fields.TikTok_Draft_Status === "Ready for Delivery";
+  const dispatch = dueNow
+    ? await studioDispatchApprovedPublishNow(env, rearmed)
+    : {
+      ok: true,
+      skipped: "scheduled-hold",
+      held_until: f(existing, "Scheduled_Post_Date") || null,
+      record: rearmed,
+    };
+  if (dueNow && ctx && typeof ctx.waitUntil === "function") {
     ctx.waitUntil(studioDispatchApprovedPublishTail(env, rearmed, dispatch).catch((error) => {
       console.warn("tiktok-resend tail failed", match[1], error);
     }));

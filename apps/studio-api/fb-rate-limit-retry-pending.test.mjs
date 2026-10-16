@@ -7,7 +7,7 @@ import { normalizedOutputState } from "./worker-functions-01.mjs";
 
 const root = dirname(fileURLToPath(import.meta.url));
 
-test("Worker version is 0.10.642-schedule-regen-sequential", () => {
+test("Worker version is 0.10.643-tiktok-inbox-hold", () => {
   const worker = readFileSync(join(root, "worker.js"), "utf8");
   assert.match(worker, /version: "0\.10\.642-schedule-regen-sequential"/);
 });

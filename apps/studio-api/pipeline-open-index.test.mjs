@@ -14,12 +14,12 @@ test("Pipeline open-pack uses the stored Studio_Pipeline_Open index", async () =
   assert.match(worker, /legacy \? STUDIO_PIPELINE_OPEN_LEGACY_FORMULA : STUDIO_PIPELINE_OPEN_FIELD_FORMULA/);
   assert.match(worker, /allowRefresh: url.searchParams.get\("refresh"\) !== "0"/);
   assert.match(worker, /if \(allowRefresh && !fresh\) scheduleMappedListRefresh/);
-  assert.match(worker, /version: "0.10.642-schedule-regen-sequential"/);
+  assert.match(worker, /version: "0.10.643-tiktok-inbox-hold"/);
 });
 
 test("Home polls the snapshot without triggering an Airtable rebuild", async () => {
   const app = await readFile(path.join(here, "../studio-web/assets/app-item4-1008.js"), "utf8");
-  assert.match(app, /BUILD_ID = "item4-0.6.703-schedule-regen-empty-lane"/);
+  assert.match(app, /BUILD_ID = "item4-0.6.704-tiktok-inbox-hold"/);
   assert.match(app, /const DASHBOARD_POLL_MS = 60000/);
   assert.match(app, /loadDashboard\(true, \{ snapshotOnly: true \}\)/);
   assert.match(app, /api\(`\/api\/outputs\?limit=250\$\{snapshotOnly \? "&refresh=0" : ""\}/);

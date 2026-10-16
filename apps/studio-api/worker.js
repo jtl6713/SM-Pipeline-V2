@@ -1032,7 +1032,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.642-schedule-regen-sequential",
+          version: "0.10.643-tiktok-inbox-hold",
           studio_supabase_pipeline_reads_v1: true,
           studio_supabase_sync_gate_v1: true,
           studio_supabase_phase3_stable_v1: true,
@@ -4497,6 +4497,8 @@ const STUDIO_SUPABASE_SYNC_LAST_KEY = "studio/state/supabase-pipeline-sync-last.
 /*__STUDIO_WORKER_EXTRACT:getStudioSupabaseSyncStatus__*/
 /*__STUDIO_WORKER_EXTRACT:postStudioSupabaseSync__*/
 /*__STUDIO_WORKER_EXTRACT:warmOldestStudioReadSnapshot__*/
+/*__STUDIO_WORKER_EXTRACT:mappedTikTokNeedsLivePublishCheck__*/
+/*__STUDIO_WORKER_EXTRACT:overlayLiveTikTokPublishRows__*/
 /*__STUDIO_WORKER_EXTRACT:listOutputs__*/
 /*__STUDIO_WORKER_EXTRACT:listMusic__*/
 /*__STUDIO_WORKER_EXTRACT:musicSortName__*/

@@ -11,9 +11,9 @@ const html = fs.readFileSync(path.join(here, "index.html"), "utf8");
 const worker = readStudioWorkerSource();
 
 test("UI enables Save schedule for Ready for Review (Output 1795)", () => {
-  assert.match(app, /BUILD_ID = "item4-0.6.703-schedule-regen-empty-lane"/);
-  assert.match(html, /UI build 0.6.703/);
-  assert.match(html, /app-item4-1008\.js\?v=0.6.703-schedule-regen-empty-lane/);
+  assert.match(app, /BUILD_ID = "item4-0.6.704-tiktok-inbox-hold"/);
+  assert.match(html, /UI build 0.6.704/);
+  assert.match(html, /app-item4-1008\.js\?v=0.6.704-tiktok-inbox-hold/);
   // setCreativeBusy must gate Save on creativeCanSetSchedule, not only approved reschedule.
   assert.match(
     app,
@@ -31,7 +31,7 @@ test("UI enables Save schedule for Ready for Review (Output 1795)", () => {
 });
 
 test("Worker keeps Ready for Review over Ready to Schedule until Approve", () => {
-  assert.match(worker, /version: "0.10.642-schedule-regen-sequential"/);
+  assert.match(worker, /version: "0.10.643-tiktok-inbox-hold"/);
   // Ready to Schedule / Ready to Publish must not be in approvedOrScheduledEarly.
   const block = worker.match(
     /A pre-filled Publish_Status of "Ready to Schedule"[\s\S]{0,400}const approvedOrScheduledEarly =([\s\S]{0,500}?);/

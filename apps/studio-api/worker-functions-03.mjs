@@ -1304,20 +1304,29 @@ export function scheduleMappedListRefresh(ctx, env, memoryKey, snapshotKey, ttlM
 }
 /*__STUDIO_WORKER_END:scheduleMappedListRefresh__*/
 
-export function respondStudioMappedList(request, env, ctx, { memoryKey, snapshotKey, profile, ttlMs, builder, allowRefresh = true }) {
+export function respondStudioMappedList(request, env, ctx, { memoryKey, snapshotKey, profile, ttlMs, builder, allowRefresh = true, decorate = null }) {
   const freshMs = Math.max(1000, Number(ttlMs) || STUDIO_READ_SNAPSHOT_FRESH_MS);
-  return readMappedListSnapshot(env, memoryKey, snapshotKey).then((remembered) => {
+  return readMappedListSnapshot(env, memoryKey, snapshotKey).then(async (remembered) => {
     const fresh = studioMappedListSnapshotFresh(remembered, freshMs);
     if (allowRefresh && !fresh) scheduleMappedListRefresh(ctx, env, memoryKey, snapshotKey, freshMs, builder);
+    let payload = remembered?.payload || {};
+    if (decorate && Array.isArray(payload.records) && payload.records.length) {
+      try {
+        const records = await decorate(payload.records);
+        if (Array.isArray(records)) payload = { ...payload, records };
+      } catch (error) {
+        console.warn("mapped list decorate failed", error);
+      }
+    }
     return respond(request, env, {
       ok: true,
       snapshot: Boolean(remembered),
       cached: Boolean(fresh),
       stale: Boolean(remembered) && !fresh,
       refreshing: !remembered,
-      records: Array.isArray(remembered?.payload?.records) ? remembered.payload.records : [],
-      ...(remembered?.payload || {}),
-      profile: remembered?.payload?.profile || mapStudioContentProfile(profile),
+      ...payload,
+      records: Array.isArray(payload.records) ? payload.records : [],
+      profile: payload.profile || mapStudioContentProfile(profile),
     });
   });
 }
@@ -1638,6 +1647,68 @@ export async function warmOldestStudioReadSnapshot(env) {
 }
 /*__STUDIO_WORKER_END:warmOldestStudioReadSnapshot__*/
 
+export function mappedTikTokNeedsLivePublishCheck(row) {
+  if (String(row?.platform || "").trim().toLowerCase() !== "tiktok") return false;
+  const output = String(row?.output_status || "").trim().toLowerCase();
+  const publish = String(row?.publish_status || "").trim().toLowerCase();
+  if (output === "published" || publish === "published") return false;
+  const state = String(row?.studio_state || "");
+  const draft = String(row?.tiktok_draft_status || "");
+  const manual = String(row?.manual_completion_status || "").trim().toLowerCase();
+  return /manual action|draft delivered/i.test(state)
+    || /manual|draft delivered/i.test(draft)
+    || manual === "required"
+    || row?.manual_fallback_required === true;
+}
+/*__STUDIO_WORKER_END:mappedTikTokNeedsLivePublishCheck__*/
+
+export async function overlayLiveTikTokPublishRows(env, mappedRows) {
+  const rows = Array.isArray(mappedRows) ? mappedRows : [];
+  const suspects = rows.filter(mappedTikTokNeedsLivePublishCheck).slice(0, 12);
+  if (!suspects.length || !env?.AIRTABLE_OUTPUT_TABLE_ID) return rows;
+  const formula = `OR(${suspects.map((row) => `RECORD_ID()='${String(row.id).replace(/'/g, "")}'`).join(",")})`;
+  let live = [];
+  try {
+    live = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
+      filterFormula: formula,
+      fields: OUTPUT_LIST_FIELDS,
+      limit: suspects.length,
+    });
+  } catch (error) {
+    console.warn("tiktok publish overlay failed", error);
+    return rows;
+  }
+  const byId = new Map((live || []).filter((row) => row?.id).map((row) => [row.id, row]));
+  if (!byId.size) return rows;
+  const next = [];
+  for (const row of rows) {
+    const fresh = byId.get(row?.id);
+    if (!fresh) {
+      next.push(row);
+      continue;
+    }
+    const liveOutput = String(f(fresh, "Output_Status") || "");
+    const livePublish = String(f(fresh, "Publish_Status") || "");
+    const mapped = mapOutput(fresh, row?.studio_production_job || null);
+    next.push({
+      ...row,
+      ...mapped,
+      content_number: mapped.content_number || row.content_number,
+      content_title: row.content_title || mapped.content_title,
+    });
+    if (/published/i.test(liveOutput) || /published/i.test(livePublish)) {
+      try {
+        await syncAirtableOutputRowToSupabase(env, fresh);
+        studioMarkMappedListDirty();
+      } catch (error) {
+        console.warn("tiktok publish overlay write-through failed", row.id, error);
+      }
+    }
+  }
+  return next;
+}
+/*__STUDIO_WORKER_END:overlayLiveTikTokPublishRows__*/
+
 export async function listOutputs(request, env, url, authorization, ctx = null) {
   const profile = await resolveWorkingContentProfile(env, authorization, requestedProfileId(url));
   // QA-PIPELINE-NEWEST-MISSING: bypass potentially stale heavy snapshots with
@@ -1653,15 +1724,16 @@ export async function listOutputs(request, env, url, authorization, ctx = null) 
         }));
         if (!packed.profileMissing) {
           const recent = (packed.records || []).slice(0, 60);
+          const mapped = recent.map((record) => mapOutput(
+            record,
+            null,
+            null,
+            packed.contentByAirtableId.get(studioFirstLinkedId(f(record, "Content_Item"))) || null,
+          ));
           return respond(request, env, {
             ok: true,
             fresh: true,
-            records: recent.map((record) => mapOutput(
-              record,
-              null,
-              null,
-              packed.contentByAirtableId.get(studioFirstLinkedId(f(record, "Content_Item"))) || null,
-            )),
+            records: await overlayLiveTikTokPublishRows(env, mapped),
             profile: mapStudioContentProfile(profile),
             read_source: "supabase",
           });
@@ -1685,15 +1757,16 @@ export async function listOutputs(request, env, url, authorization, ctx = null) 
       profile,
       studioPipelineContentIdsFromOutputs(recent),
     );
+    const mapped = recent.map((record) => mapOutput(
+      record,
+      null,
+      null,
+      labels.get(studioFirstLinkedId(f(record, "Content_Item"))) || null,
+    ));
     return respond(request, env, {
       ok: true,
       fresh: true,
-      records: recent.map((record) => mapOutput(
-        record,
-        null,
-        null,
-        labels.get(studioFirstLinkedId(f(record, "Content_Item"))) || null,
-      )),
+      records: await overlayLiveTikTokPublishRows(env, mapped),
       profile: mapStudioContentProfile(profile),
       read_source: "airtable",
     });
@@ -1716,6 +1789,7 @@ export async function listOutputs(request, env, url, authorization, ctx = null) 
     ttlMs: PIPELINE_OUTPUT_LIST_CACHE_MS,
     allowRefresh: url.searchParams.get("refresh") !== "0",
     builder: () => buildPipelineOutputsPayload(env, profile, { limit, reviewOnly, ctx }),
+    decorate: (records) => overlayLiveTikTokPublishRows(env, records),
   });
 }
 

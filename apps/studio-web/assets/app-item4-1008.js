@@ -277,7 +277,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.703-schedule-regen-empty-lane";
+  const BUILD_ID = "item4-0.6.704-tiktok-inbox-hold";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -754,6 +754,10 @@
   });
 
   function pipelineDisplayPercent(record) {
+    if (creativeIsPublished(record) && !pipelineMixRerenderInProgress(record)) {
+      if (record?.id) pipelineProgressHighWater.delete(record.id);
+      return 100;
+    }
     const raw = record?.studio_progress_percent ?? record?.youtube_processing_progress_percent ?? record?.youtube_upload_progress_percent;
     const n = Number(raw);
     if (!Number.isFinite(n)) return raw;
@@ -1574,6 +1578,9 @@
 
   function pipelineStudioStateLabel(record) {
     if (pipelineMixRerenderInProgress(record)) return "Rerendering";
+    // A saved TikTok URL sets Output_Status/Publish_Status/Published_At. Those
+    // win over a snapshot that still says Manual Action Required (Output 3923).
+    if (creativeIsPublished(record)) return "Published";
     const queueLabel = pipelineRenderQueueLabel(record);
     if (queueLabel) return queueLabel;
     if (pipelineIsRetryingRender(record)) return "Trying Again";
@@ -16992,6 +16999,26 @@ function timedScriptAssetLabel(asset, index) {
       || draft.includes("manual completion received");
   }
 
+  function tiktokInboxIsDue(record) {
+    const raw = String(record?.scheduled_post_date || "").trim();
+    if (!raw) return true;
+    const ms = Date.parse(raw);
+    if (!Number.isFinite(ms)) return true;
+    return ms <= Date.now() + (15 * 60 * 1000);
+  }
+
+  function tiktokResendConfirm(record) {
+    if (tiktokInboxIsDue(record)) {
+      return "Resend this TikTok draft to the inbox?\n\nTikTok will receive a fresh draft. Approve/publish it in the TikTok app, then paste the live URL here if needed.";
+    }
+    return "This TikTok is scheduled for later.\n\nStudio will hold the draft and send it about 15 minutes before that time. It will not go to TikTok now.";
+  }
+
+  function tiktokResendWasHeld(result) {
+    return String(result?.dispatch?.skipped || "") === "scheduled-hold"
+      || /waiting for schedule/i.test(String(result?.record?.tiktok_draft_status || ""));
+  }
+
   function tiktokNeedsDraftResend(record) {
     if (String(record?.platform || "").trim().toLowerCase() !== "tiktok") return false;
     if (record?.do_not_publish) return false;
@@ -18276,16 +18303,18 @@ function timedScriptAssetLabel(asset, index) {
         event.preventDefault();
         event.stopPropagation();
         const id = wrap.dataset.tiktokResend;
+        const record = (pipelineOutputs || []).find((row) => row.id === id);
         if (!id || !button) return;
-        if (!window.confirm("Resend this TikTok draft to the inbox?\n\nTikTok will receive a fresh draft. Approve/publish it in the TikTok app, then paste the live URL here if needed.")) return;
+        if (!window.confirm(tiktokResendConfirm(record))) return;
         button.disabled = true;
         if (message) {
           message.classList.remove("error-text");
           message.textContent = "Sending…";
         }
         try {
-          await submitTiktokDraftResend(id);
-          if (message) message.textContent = "Sent — check TikTok inbox";
+          const result = await submitTiktokDraftResend(id);
+          const held = tiktokResendWasHeld(result);
+          if (message) message.textContent = held ? "Held until the scheduled time" : "Sent — check TikTok inbox";
           await refreshPipelineOutputs({ silent: true });
         } catch (error) {
           if (message) {
@@ -21604,6 +21633,14 @@ function timedScriptAssetLabel(asset, index) {
       const historyStale = !outputsSettled.ok || Boolean(outputsResult.stale);
       pipelineListUnverified = historyStale;
       pipelineOutputs = records;
+      if (activeCreativeOutputId && $("creativeOutputMeta")) {
+        const freshCreative = records.find((row) => row && row.id === activeCreativeOutputId);
+        if (freshCreative) {
+          activeCreativeOutput = { ...(activeCreativeOutput || {}), ...freshCreative };
+          renderCreativeOutputMeta(activeCreativeOutput);
+          renderCreativeTiktokComplete(activeCreativeOutput);
+        }
+      }
       pipelineContentRecords = contentRecords;
       target.querySelector(":scope > .pipeline-stale-note")?.remove();
       if (historyStale) {
@@ -25737,7 +25774,7 @@ function timedScriptAssetLabel(asset, index) {
     const button = $("creativeTiktokResend");
     const message = $("creativeTiktokResendMessage");
     if (!id || !record || !tiktokNeedsDraftResend(record) || !button) return;
-    if (!window.confirm("Resend this TikTok draft to the inbox?\n\nTikTok will receive a fresh draft. Approve/publish it in the TikTok app, then paste the live URL here if needed.")) return;
+    if (!window.confirm(tiktokResendConfirm(record))) return;
     button.disabled = true;
     if (message) {
       message.classList.remove("error-text");
@@ -25745,13 +25782,16 @@ function timedScriptAssetLabel(asset, index) {
     }
     try {
       const result = await submitTiktokDraftResend(id);
+      const held = tiktokResendWasHeld(result);
       if (result?.record) {
         activeCreativeOutput = { ...record, ...result.record };
         renderCreativeOutputMeta(activeCreativeOutput);
         renderCreativeTiktokComplete(activeCreativeOutput);
       }
-      if (message) message.textContent = "Sent — check TikTok inbox";
-      phase6Message("TikTok draft resent. Check the TikTok inbox.");
+      if (message) message.textContent = held ? "Held until the scheduled time" : "Sent — check TikTok inbox";
+      phase6Message(held
+        ? "TikTok draft held until 15 minutes before the scheduled time."
+        : "TikTok draft resent. Check the TikTok inbox.");
       refreshPipelineOutputs({ silent: true }).catch(() => {});
     } catch (error) {
       if (message) {
