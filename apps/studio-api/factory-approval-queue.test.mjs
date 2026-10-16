@@ -1,0 +1,130 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import {
+  factoryBatchEnqueue, factoryBatchRead, factoryBatchList,
+  factoryBatchSummary, factoryBatchCounts, factoryBatchDrain,
+  factoryBatchRetry, factoryBatchLockKey,
+} from "./factory-approval-queue.mjs";
+
+class FakeR2 {
+  constructor() { this.objects = new Map(); this.version = 0; }
+  async get(key) {
+    const obj = this.objects.get(key);
+    return obj ? { etag: obj.etag, text: async () => JSON.stringify(obj.value) } : null;
+  }
+  async put(key, body, options = {}) {
+    const old = this.objects.get(key);
+    const headers = options.onlyIf;
+    if (headers instanceof Headers && headers.get("If-None-Match") === "*" && old) return null;
+    if (headers?.etagMatches && old?.etag !== headers.etagMatches) return null;
+    const next = { value: JSON.parse(body), etag: String(++this.version) };
+    this.objects.set(key, next);
+    return { etag: next.etag };
+  }
+  async list({ prefix, limit = 100 }) {
+    const keys = [...this.objects.keys()].filter(key => key.startsWith(prefix)).slice(0, limit);
+    return { truncated: false, objects: keys.map(key => ({ key })) };
+  }
+}
+const profileId = "recProfileTest";
+const requestId = "factory_test_request_20";
+const records = Array.from({ length: 20 }, (_, i) => ({
+  id: "recBatch" + (300 + i), output_id: i + 100,
+  platform: "Instagram", format: i % 2 ? "Story" : "Reel",
+}));
+const opts = { profileId, requestId, records, note: "test" };
+
+test("20 requests survive browser close, process via two independent workers, and show authoritative counts", async () => {
+  const bucket = new FakeR2();
+  const first = await factoryBatchEnqueue(bucket, opts);
+  assert.equal(first.already_submitted, false);
+  const retrySubmit = await factoryBatchEnqueue(bucket, opts);
+  assert.equal(retrySubmit.already_submitted, true);
+  assert.equal(bucket.objects.size, 1);
+  let committed = 0;
+  const approve = async () => { committed++; };
+  const workerA = await factoryBatchDrain(bucket, { profileId, requestId, approve, maxItems: 8, makeOwner: () => "worker-a" });
+  assert.equal(workerA.processed, 8);
+  // A distinct worker/isolate owns subsequent work; no browser/global UI state.
+  const workerB = await factoryBatchDrain(bucket, { profileId, requestId, approve, maxItems: 12, makeOwner: () => "worker-b" });
+  assert.equal(workerB.processed, 12);
+  const readBack = await factoryBatchRead(bucket, profileId, requestId);
+  const status = factoryBatchSummary(readBack);
+  assert.equal(status.status, "completed");
+  assert.equal(status.approved_count, 20);
+  assert.equal(status.done_count, 20);
+  assert.equal(committed, 20);
+  assert.equal(status.items.length, 20);
+  assert.equal(factoryBatchCounts(readBack).pending_count, 0);
+  assert.equal((await factoryBatchList(bucket, profileId))[0].id, readBack.id);
+  const third = await factoryBatchDrain(bucket, { profileId, requestId, approve });
+  assert.equal(third.processed, 0);
+  assert.equal(committed, 20);
+});
+
+test("Atomic profile lock prevents concurrent submissions and prevents item overlap", async () => {
+  const bucket = new FakeR2();
+  await factoryBatchEnqueue(bucket, opts);
+  let release;
+  const blocked = new Promise(resolve => { release = resolve; });
+  let entered = 0;
+  const first = factoryBatchDrain(bucket, {
+    profileId, requestId, maxItems: 1, makeOwner: () => "first",
+    approve: async () => { entered++; await blocked; },
+  });
+  // Force the approve callback to enter before attempting second claimant.
+  while (entered === 0) await Promise.resolve();
+  const second = await factoryBatchDrain(bucket, {
+    profileId, requestId, maxItems: 1, makeOwner: () => "second",
+    approve: async () => { entered++; },
+  });
+  assert.equal(second.claimed, false);
+  assert.equal(entered, 1);
+  release();
+  const finished = await first;
+  assert.equal(finished.processed, 1);
+  assert.equal(factoryBatchCounts(finished.job).approved_count, 1);
+});
+
+test("Stale worker lease is reclaimed; canonical state check makes crash recovery idempotent", async () => {
+  const bucket = new FakeR2();
+  const old = await factoryBatchEnqueue(bucket, {
+    profileId, requestId: "factory_reclaim_request",
+    records: [records[0]],
+  });
+  // Simulate a crash after setting 'processing' and canonical commit.
+  const jobKey = "studio/state/factory-approvals/v2/jobs/" + profileId + "/factory_reclaim_request.json";
+  bucket.objects.get(jobKey).value.items[0].status = "processing";
+  bucket.objects.get(jobKey).value.items[0].attempts = 1;
+  const lock = factoryBatchLockKey(profileId);
+  await bucket.put(lock, JSON.stringify({ owner: "dead-worker", expires_ms: 1000 }));
+  let commits = 0;
+  const recovered = await factoryBatchDrain(bucket, {
+    profileId, requestId: "factory_reclaim_request", now: () => 2000000,
+    makeOwner: () => "new-worker", approve: async () => {
+      // The canonical approval endpoint discovers this output is already approved.
+      return { already_approved: true };
+    },
+  });
+  assert.equal(recovered.claimed, true);
+  assert.equal(recovered.job.items[0].status, "already_satisfied");
+  assert.equal(commits, 0);
+  assert.equal(recovered.job.status, "completed");
+});
+
+test("Retry Failed never resets already-approved or already-satisfied items", async () => {
+  const bucket = new FakeR2();
+  const job = (await factoryBatchEnqueue(bucket, {
+    profileId, requestId: "factory_retry_request",
+    records: records.slice(0, 3),
+  })).job;
+  const key = "studio/state/factory-approvals/v2/jobs/" + profileId + "/factory_retry_request.json";
+  const stored = bucket.objects.get(key);
+  stored.value.items[0].status = "approved";
+  stored.value.items[1].status = "already_satisfied";
+  stored.value.items[2].status = "failed";
+  stored.value.status = "completed";
+  const retried = await factoryBatchRetry(bucket, profileId, "factory_retry_request");
+  assert.deepEqual(retried.items.map(x => x.status), ["approved", "already_satisfied", "pending"]);
+  assert.equal(retried.status, "queued");
+});
