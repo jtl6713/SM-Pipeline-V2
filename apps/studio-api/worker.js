@@ -3665,7 +3665,7 @@ const PR_CONTENT_TYPES = new Set([
   "Vertical Short Video","Story","Carousel","Feed Post","Text Post","Thread",
   "Longform Video","Thumbnail / Promo Still","Event / Flyer Post","Photo Set"
 ]);
-const PR_PLATFORMS = new Set(["Instagram","Facebook","TikTok","YouTube","Threads","X","Lemon8"]);
+const PR_PLATFORMS = new Set(["Instagram","Facebook","TikTok","YouTube","X","Lemon8"]);
 const PR_PLATFORM_ALIASES = new Map([
   ["instagram reel", "Instagram"],
   ["instagram reels", "Instagram"],
@@ -4332,8 +4332,7 @@ const STUDIO_PROMOTION_CONTENT_TYPES = new Set([
 ]);
 
 // Phase 2A promotion intentionally limits selection to platforms with an
-// already-established ChicagoShining execution path. Threads/X/Lemon8 can be
-// added when their publishing chains are productionized.
+// already-established ChicagoShining execution path. Other platforms can be added only after their publishing chains are productionized.
 const STUDIO_PROMOTION_PLATFORMS = new Set(["Instagram", "Facebook", "TikTok", "YouTube"]);
 const STUDIO_TRISTATE = new Set(["Use Profile Default", "Yes", "No"]);
 
