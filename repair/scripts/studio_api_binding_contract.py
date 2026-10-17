@@ -155,6 +155,8 @@ GLOBAL_FACTORY_BINDINGS = (
     "FACTORY_BATCH_GLOBAL_PRODUCTION_SIGNOFF",
 )
 GLOBAL_FACTORY_CAPS = {"pilot": (4, 2), "expanded": (20, 10)}
+GLOBAL_FACTORY_MODE = GLOBAL_FACTORY_MODE
+GLOBAL_FACTORY_LEGACY_MODE = "global_ig_reel_story_v1"
 
 
 def global_factory_manifest_values(rollout):
@@ -166,13 +168,13 @@ def global_factory_manifest_values(rollout):
         if stage not in GLOBAL_FACTORY_CAPS:
             raise SystemExit("Unknown global Factory release stage")
         total, per_profile = GLOBAL_FACTORY_CAPS[stage]
-        if (item.get("mode") != "global_all_platforms_v2"
+        if (item.get("mode") != GLOBAL_FACTORY_MODE
                 or item.get("max_total") != total
                 or item.get("max_per_profile") != per_profile
                 or item.get("production_signoff") != "explicit-review"):
             raise SystemExit("Global Factory release manifest does not match signed stage")
         return dict(zip(GLOBAL_FACTORY_BINDINGS,
-            ("true", "global_all_platforms_v2", str(total), str(per_profile), "explicit-review")))
+            ("true", GLOBAL_FACTORY_MODE, str(total), str(per_profile), "explicit-review")))
     if (item.get("stage") != "disabled" or item.get("mode") != "disabled"
             or item.get("max_total") != 0 or item.get("max_per_profile") != 0
             or item.get("production_signoff") != "disabled"):
@@ -190,8 +192,9 @@ def assert_global_factory_binding_tuple(plain, label, allow_absent=False):
     if found == disabled:
         return "disabled"
     for stage, (total, per_profile) in GLOBAL_FACTORY_CAPS.items():
-        expected = dict(zip(GLOBAL_FACTORY_BINDINGS,
-            ("true", "global_all_platforms_v2", str(total), str(per_profile), "explicit-review")))
-        if found == expected:
-            return stage
+        for mode in (GLOBAL_FACTORY_MODE, GLOBAL_FACTORY_LEGACY_MODE):
+            expected = dict(zip(GLOBAL_FACTORY_BINDINGS,
+                ("true", mode, str(total), str(per_profile), "explicit-review")))
+            if found == expected:
+                return stage
     raise SystemExit(f"{label}: unrecognized global Factory binding tuple")
