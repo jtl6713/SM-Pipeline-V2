@@ -256,8 +256,11 @@ jobs:
             async fetch(request, env) {
               const url = new URL(request.url);
               const factoryStatus = url.pathname === "/$TOKEN/factory-status";
-              if (url.pathname !== "/$TOKEN" && !factoryStatus) return new Response("Not found", {status:404});
-              const path = factoryStatus ? "/api/factory/approval-batches?profile_id=recF7UAn0LkMZZrWZ" : "/api/session";
+              const chicagoCanary = url.pathname === "/$TOKEN/factory-status-chicago";
+              if (url.pathname !== "/$TOKEN" && !factoryStatus && !chicagoCanary) return new Response("Not found", {status:404});
+              const path = chicagoCanary
+                ? "/api/factory/approval-batches?profile_id=recT2rbKX3MF7cVFU"
+                : factoryStatus ? "/api/factory/approval-batches?profile_id=recF7UAn0LkMZZrWZ" : "/api/session";
               const internal = new Request("https://studio.chicagoshining.com" + path, {
                 method:"GET",
                 headers:{"Cf-Access-Authenticated-User-Email":"joseph.t.logan@gmail.com","Origin":"https://studio.chicagoshining.com","Accept":"application/json"}
