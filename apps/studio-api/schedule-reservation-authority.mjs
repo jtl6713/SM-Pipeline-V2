@@ -327,14 +327,36 @@ export class ScheduleReservationLane {
     if (!bucket?.put || !meta?.lane?.lock_key) return;
     const key = `${SCHEDULE_RESERVATION_INDEX_PREFIX}/${encodeURIComponent(meta.lane.lock_key)}.json`;
     const nowMs = this._now();
+    const activeReservation = meta.lock?.reservation_id
+      ? await this._readReservation(this.state.storage, meta.lock.reservation_id).catch(() => null)
+      : null;
+    const waiters = Object.values(meta.waiters || {})
+      .sort((a, b) => parseMs(a.first_waiting_timestamp) - parseMs(b.first_waiting_timestamp))
+      .slice(0, 10);
     const payload = {
       schema: SCHEDULE_RESERVATION_SCHEMA,
       lane: meta.lane,
       generation: meta.generation,
       lock: publicLock(meta.lock, nowMs),
       quarantine: meta.quarantine || null,
+      active_reservation: activeReservation ? {
+        reservation_id: activeReservation.reservation_id,
+        platform_output_record_id: activeReservation.platform_output_record_id,
+        factory_batch_id: activeReservation.factory_batch_id || null,
+        output_type: activeReservation.output_type || null,
+        fencing_generation: activeReservation.fencing_generation,
+        state: activeReservation.state,
+        action: activeReservation.action,
+        selected_iso: activeReservation.selected_iso || null,
+        previous_iso: activeReservation.previous_iso || null,
+        authoritative_iso: activeReservation.authoritative_iso || null,
+        commit_started_timestamp: activeReservation.commit_started_timestamp || null,
+        recovery_reason: activeReservation.recovery_reason || null,
+      } : null,
       waiter_count: Object.keys(meta.waiters || {}).length,
+      waiters,
       recent_reservation_count: (meta.recent_reservations || []).length,
+      recent_reservations: (meta.recent_reservations || []).slice(0, 64),
       updated_at: meta.updated_at || nowIso(nowMs),
     };
     await bucket.put(key, JSON.stringify(payload), {
@@ -349,6 +371,10 @@ export class ScheduleReservationLane {
   async _writeMeta(storage, meta, nowMs) {
     meta.updated_at = nowIso(nowMs);
     await storage.put("meta", meta);
+    const alarmAt = parseMs(meta.lock?.lease_expiration_timestamp);
+    if (meta.lock?.owner_operation_id && alarmAt > nowMs && typeof storage.setAlarm === "function") {
+      await storage.setAlarm(alarmAt);
+    }
     return meta;
   }
 
@@ -879,8 +905,12 @@ export class ScheduleReservationLane {
       }
 
       // Fence the previous owner before evaluating any recovery result.
-      const recoveryGeneration = Math.max(Number(meta.generation) || 0, Number(lock.fencing_generation) || 0) + 1;
-      meta.generation = recoveryGeneration;
+      const sameRecoveryOwner = lock.state === SCHEDULE_RESERVATION_STATES.RECOVERY_REQUIRED
+        && lock.owner_operation_id === recoveryOperationId;
+      const recoveryGeneration = sameRecoveryOwner
+        ? Number(lock.fencing_generation)
+        : Math.max(Number(meta.generation) || 0, Number(lock.fencing_generation) || 0) + 1;
+      meta.generation = Math.max(Number(meta.generation) || 0, recoveryGeneration);
       meta.lock = {
         ...lock,
         owner_operation_id: recoveryOperationId,
@@ -1059,6 +1089,65 @@ export class ScheduleReservationLane {
         recovery_stable_ms: SCHEDULE_RESERVATION_RECOVERY_STABLE_MS,
       },
     };
+  }
+
+  async alarm() {
+    const nowMs = this._now();
+    const result = await this._transaction(async (storage) => {
+      const meta = await this._readMeta(storage);
+      const lock = meta.lock;
+      if (!lock?.owner_operation_id || !lockExpired(lock, nowMs)) {
+        return { meta, changed: false };
+      }
+      const reservation = lock.reservation_id
+        ? await this._readReservation(storage, lock.reservation_id)
+        : null;
+      if (EXTERNAL_WRITE_POSSIBLE_STATES.has(lock.state)) {
+        const reason = lock.recovery_reason || "lease expired after external schedule commit became possible";
+        meta.lock = {
+          ...lock,
+          state: SCHEDULE_RESERVATION_STATES.RECOVERY_REQUIRED,
+          recovery_reason: reason,
+          last_error: lock.last_error || "lease_expired_alarm",
+        };
+        meta.quarantine = {
+          reason,
+          reservation_id: lock.reservation_id,
+          fencing_generation: lock.fencing_generation,
+          since: meta.quarantine?.since || nowIso(nowMs),
+        };
+        if (reservation) {
+          await this._writeReservation(storage, {
+            ...reservation,
+            state: SCHEDULE_RESERVATION_STATES.RECOVERY_REQUIRED,
+            recovery_reason: reason,
+            updated_at: nowIso(nowMs),
+          });
+        }
+      } else {
+        if (reservation && reservation.committed !== true) {
+          await this._writeReservation(storage, {
+            ...reservation,
+            state: SCHEDULE_RESERVATION_STATES.EXPIRED,
+            recovery_reason: "prewrite lease expired; fenced by Durable Object alarm",
+            updated_at: nowIso(nowMs),
+          });
+        }
+        meta.lock = {
+          ...lock,
+          owner_operation_id: null,
+          factory_batch_id: null,
+          platform_output_record_id: null,
+          state: SCHEDULE_RESERVATION_STATES.EXPIRED,
+          last_error: "lease_expired_alarm",
+          recovery_reason: "prewrite lease expired; safe for the next fenced owner",
+          external_commit_possible: false,
+        };
+      }
+      await this._writeMeta(storage, meta, nowMs);
+      return { meta, changed: true };
+    });
+    if (result.changed) await this._snapshot(result.meta).catch(() => {});
   }
 
   async fetch(request) {
