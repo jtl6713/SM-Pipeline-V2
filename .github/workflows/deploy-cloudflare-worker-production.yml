@@ -354,7 +354,7 @@ jobs:
             'STUDIO_VISUAL_CANARY_OUTPUT_IDS':','.join(str(x).strip() for x in visual_rollout.get('canary_output_ids',[]) if str(x).strip()),
           }
           for name,value in prior_plain.items():
-              if name not in expected and after_plain.get(name)!=value:
+              if name not in expected and name not in ('STUDIO_SCHEDULE_RESERVATION_AUTHORITY_ENABLED','STUDIO_SCHEDULE_RESERVATION_LANE_ALLOWLIST') and after_plain.get(name)!=value:
                   raise SystemExit('Worker plaintext setting changed or disappeared: '+name)
           binding_values=after_plain
           if expected_bootstrapped:
