@@ -392,3 +392,5 @@ phase4-followup tiktok-live-copy 2026-10-16T13:10:00Z UI 0.6.706-tiktok-live-cop
 phase4-followup duplicate-skip 2026-10-16T16:50:00Z UI 0.6.707-duplicate-skip (footer must show 0.6.707 / Worker 0.10.646)
 
 PR #789 guarded Factory Batch V2 UI | 0.6.708-factory-batch-gated | Worker 0.10.650 verified | batch submission disabled via live status GET | Pages rollout
+
+overview-fast-refresh 2026-10-17T01:20:00Z UI 0.6.709-overview-fast-refresh (footer must show UI 0.6.709 / Worker 0.10.651; All Profiles polls every 5s while the dashboard is visible)
