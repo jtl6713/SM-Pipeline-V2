@@ -606,6 +606,7 @@ import {
   phase6RestoreProductionReviewReady,
   getOutputCreativeHandoffStatus,
   continueOutputCreativeHandoff,
+  studioPrepareVisualVoiceoverCanary,
   cadenceScheduleSync,
   studioHealPromotedMissingFanout,
   continueParkedProductionAfterPromote,
@@ -788,6 +789,7 @@ export default {
       const isAdminMakeDeployRoute = url.pathname === "/api/admin/make-deploy";
       const isAdminFbPublicDiagnosticRoute = url.pathname === "/api/admin/fb-public-diagnostic";
       const isAdminRepairControlRoute = url.pathname === "/api/admin/repair/control";
+      const isAdminVisualVoiceoverCanaryRoute = url.pathname === "/api/admin/visual-voiceover-canary";
       const isOperationsRoute = url.pathname === "/api/operations";
       const isOperationsProfilesListRoute = url.pathname === "/api/operations/profiles";
       const isOperationsQueueRoute = url.pathname === "/api/operations/queue";
@@ -907,6 +909,7 @@ export default {
       const isOutputCreativeContinueWrite = isOutputCreativeContinueRoute && request.method === "POST";
       const isAdminMakeDeployWrite = isAdminMakeDeployRoute && request.method === "POST";
       const isAdminRepairControlWrite = isAdminRepairControlRoute && request.method === "POST";
+      const isAdminVisualVoiceoverCanaryWrite = isAdminVisualVoiceoverCanaryRoute && request.method === "POST";
       const isOperationsProfileWrite = isOperationsProfileRoute && request.method === "PATCH";
       const isOperationsDailyIdeasWrite = isOperationsDailyIdeasRoute && request.method === "POST";
       const isOperationsAutonomousWrite = isOperationsAutonomousRoute && request.method === "POST";
@@ -991,6 +994,7 @@ export default {
         isVoiceCatalogRoute ||
         isAdminMakeDeployWrite ||
         isAdminRepairControlWrite ||
+        isAdminVisualVoiceoverCanaryWrite ||
         isOperationsProfileWrite ||
         isOperationsDailyIdeasWrite ||
         isOperationsAutonomousWrite ||
@@ -1073,6 +1077,7 @@ export default {
           studio_supabase_last_sync_at: supabaseSyncLast?.at || null,
           studio_supabase_last_sync_ok: supabaseSyncLast?.ok ?? null,
           studio_voiceover_once_v1: true,
+          studio_visual_voiceover_canary_v1: true,
           studio_factory_desk_v1: true,
           studio_factory_inflight_blocked_parent_v1: true,
           studio_factory_desk_actions_v1: true,
@@ -1469,6 +1474,13 @@ export default {
         if (request.method === "GET") return await adminRepairControlStatus(request, env);
         assertWriteRequest(request, env);
         return await adminRepairControl(request, env, authorization);
+      }
+
+      if (isAdminVisualVoiceoverCanaryRoute) {
+        requirePermission(authorization, "tenant_admin");
+        if (request.method !== "POST") throw new HttpError(405, "Method not allowed");
+        assertWriteRequest(request, env);
+        return studioPrepareVisualVoiceoverCanary(request, env);
       }
 
       if (isAiApiRoute) {
@@ -4811,6 +4823,11 @@ const STUDIO_R5_DONE_HOOK_TOKEN = "r5done_7kqp2nvm4w8x1c9h3z";
 /*__STUDIO_WORKER_EXTRACT:phase6SlidePreviewUrl__*/
 /*__STUDIO_WORKER_EXTRACT:mapPhase6CreativeSlide__*/
 /*__STUDIO_WORKER_EXTRACT:phase6VirtualSlidesFromSelectedAssets__*/
+/*__STUDIO_WORKER_EXTRACT:phase6MergeSelectedVideoMetadata__*/
+/*__STUDIO_WORKER_EXTRACT:phase6VisualCanaryOutputIds__*/
+/*__STUDIO_WORKER_EXTRACT:phase6VisualTimelineEnabledForOutput__*/
+/*__STUDIO_WORKER_EXTRACT:phase6VisualScriptEnabledForOutput__*/
+/*__STUDIO_WORKER_EXTRACT:studioPrepareVisualVoiceoverCanary__*/
 /*__STUDIO_WORKER_EXTRACT:phase6SlidesForOutput__*/
 /*__STUDIO_WORKER_EXTRACT:phase6CachedVoiceCatalog__*/
 /*__STUDIO_WORKER_EXTRACT:mapElevenLabsVoice__*/
