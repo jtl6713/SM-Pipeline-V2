@@ -116,6 +116,13 @@ jobs:
             'FACTORY_BATCH_APPROVALS_ENABLED':'true' if rollout['enabled'] else 'false',
             'FACTORY_BATCH_ROLLOUT_MODE':rollout['mode'],
             'FACTORY_BATCH_ROLLOUT_MAX_ITEMS':str(rollout['max_items']),
+            # Explicitly clobber any inherited global variables: code deployment
+            # is not authorization to widen Factory approvals.
+            'FACTORY_BATCH_GLOBAL_APPROVALS_ENABLED':'false',
+            'FACTORY_BATCH_GLOBAL_MODE':'disabled',
+            'FACTORY_BATCH_GLOBAL_MAX_TOTAL':'0',
+            'FACTORY_BATCH_GLOBAL_MAX_PER_PROFILE':'0',
+            'FACTORY_BATCH_GLOBAL_PRODUCTION_SIGNOFF':'disabled',
           }
           cfg={
             'name':os.environ['TARGET_WORKER'],
@@ -176,12 +183,18 @@ jobs:
             'FACTORY_BATCH_APPROVALS_ENABLED':'true' if rollout['enabled'] else 'false',
             'FACTORY_BATCH_ROLLOUT_MODE':rollout['mode'],
             'FACTORY_BATCH_ROLLOUT_MAX_ITEMS':str(rollout['max_items']),
+            'FACTORY_BATCH_GLOBAL_APPROVALS_ENABLED':'false',
+            'FACTORY_BATCH_GLOBAL_MODE':'disabled',
+            'FACTORY_BATCH_GLOBAL_MAX_TOTAL':'0',
+            'FACTORY_BATCH_GLOBAL_MAX_PER_PROFILE':'0',
+            'FACTORY_BATCH_GLOBAL_PRODUCTION_SIGNOFF':'disabled',
           }
           binding_values={b.get('name'):str(b.get('text','')) for b in bindings}
           for name,value in expected.items():
               if binding_values.get(name)!=value:
                   raise SystemExit('Factory batch release verification mismatch: '+name)
           print('factory_batch_canary_binding_contract=PASS profile=Chicago platform=Instagram format=Reel max='+str(rollout['max_items'])+' enabled='+expected['FACTORY_BATCH_APPROVALS_ENABLED'])
+          print('factory_global_release_gate=PASS enabled=false mode=disabled max_total=0 signoff=disabled')
           safe={'version_id':r.get('id'),'version_number':r.get('number'),'binding_count':len(bindings),'contract':contract['contract'],'core_ok':contract['core_ok'],'elevenlabs_present':contract['optional_present'].get('ELEVENLABS_API_KEY'),'bindings':contract['bindings']}
           Path('/tmp/postdeploy-contract-sanitized.json').write_text(json.dumps(safe,indent=2,sort_keys=True))
           print('postdeploy_binding_contract=PASS')
