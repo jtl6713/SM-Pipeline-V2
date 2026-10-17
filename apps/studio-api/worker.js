@@ -5669,7 +5669,7 @@ const AUTONOMOUS_OPEN_IDEAS_FORMULA =
 /** Count open ideas up to cap+1 so we can tell at-cap without paging the whole table. */
 /*__STUDIO_WORKER_EXTRACT:countAutonomousOpenIdeas__*/
 /**
- * Create AUTONOMOUS_IDEAS_PER_HOUR ideas for one city under 200 Scheduled+Awaiting Approval.
+ * Create AUTONOMOUS_IDEAS_PER_HOUR ideas for one city under 500 Scheduled+Awaiting Approval.
  * Subjects already in flight do not reduce the count. A library photo group
  * is attached when one exists so resume can take that draft to final approval.
  * An idea with no stills is stamped Waiting for Factory Needs Assets.
