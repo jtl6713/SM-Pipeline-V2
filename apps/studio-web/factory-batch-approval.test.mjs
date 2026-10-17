@@ -60,12 +60,13 @@ test("Global group UI is gated and follows the server-signed platform matrix", (
   assert.match(js,/state\.batchGlobal\?\.enabled/);
   assert.match(js,/state\.batchGlobal\.allowed_platforms/);
   assert.match(js,/allowed_output_types_by_platform/);
-  assert.match(js,/action: global \? "start_group" : "start"/);
+  assert.match(js,/action: "start_group"/);
+  assert.match(js,/action: "start"/);
   assert.match(js,/readyFactoryOutputs\(true\)/);
   assert.match(js,/max_per_profile/);
   assert.match(js,/profile_ids/);
   assert.match(js,/retry_group/);
-  assert.match(js,/supported outputs per batch/);
+  assert.match(js,/supported outputs per backend batch/);
 });
 test("Story v3 UI remains dormant while Reel v2 restricts selection", () => {
   const fn = js.slice(js.indexOf("function canSelectBatchOutput("),
@@ -75,4 +76,47 @@ test("Story v3 UI remains dormant while Reel v2 restricts selection", () => {
   assert.match(fn, /String\(card\?\.profile_id \|\| ""\) === String\(rollout.profile_id \|\| ""\)/);
   assert.match(fn, /String\(card\?\.platform \|\| ""\) === "Instagram"/);
   assert.match(js, /Chicago Instagram pilot: select up to five Reels or Stories per batch/);
+});
+
+function extractNamedFunction(source, name) {
+  const start = source.indexOf(`function ${name}(`);
+  assert.ok(start >= 0, `Missing ${name}`);
+  const brace = source.indexOf("{", start);
+  let depth = 0;
+  for (let i = brace; i < source.length; i++) {
+    if (source[i] === "{") depth++;
+    else if (source[i] === "}") {
+      depth--;
+      if (depth === 0) return source.slice(start, i + 1);
+    }
+  }
+  throw new Error(`Unterminated ${name}`);
+}
+
+test("Large global selections are partitioned instead of disabling Submit", () => {
+  const fn = extractNamedFunction(js, "planFactoryApprovalBatches");
+  const planFactoryApprovalBatches = new Function(`${fn}; return planFactoryApprovalBatches;`)();
+  const chicago = Array.from({length:27}, (_,i)=>({id:`recChi${i}`,profile_id:"recChicago"}));
+  const chunks = planFactoryApprovalBatches(chicago,20,10);
+  assert.deepEqual(chunks.map(x=>x.length),[10,10,7]);
+  assert.equal(chunks.flat().length,27);
+  assert.equal(new Set(chunks.flat().map(x=>x.id)).size,27);
+
+  const mixed = [
+    ...Array.from({length:12},(_,i)=>({id:`recA${i}`,profile_id:"recA"})),
+    ...Array.from({length:12},(_,i)=>({id:`recB${i}`,profile_id:"recB"})),
+    ...Array.from({length:3},(_,i)=>({id:`recC${i}`,profile_id:"recC"})),
+  ];
+  const mixedChunks = planFactoryApprovalBatches(mixed,20,10);
+  assert.equal(mixedChunks.flat().length,27);
+  for (const chunk of mixedChunks) {
+    assert.ok(chunk.length <= 20);
+    const counts = new Map();
+    for (const row of chunk) counts.set(row.profile_id,(counts.get(row.profile_id)||0)+1);
+    assert.ok([...counts.values()].every(x=>x<=10));
+  }
+  assert.match(js,/will submit as \$\{planned\} batches/);
+  assert.match(js,/submitFactoryGlobalApprovalBatches/);
+  assert.match(js,/persistRemaining\(planned\)/);
+  assert.match(js,/Submitted all \$\{ready\.length\} outputs as/);
 });
