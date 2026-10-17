@@ -37,6 +37,9 @@ jobs:
           node --test apps/studio-api/production-photo-wait-visibility.test.mjs
           node --test apps/studio-api/production-request-suggested-platforms-fallback.test.mjs
           node --test apps/studio-api/quality-checks.test.mjs
+          node --test apps/studio-api/profiles-overview-refresh.test.mjs
+          node --test apps/studio-api/profiles-overview-force-refresh-contract.test.mjs
+          node --test apps/studio-api/overview-dispatch-counts.test.mjs
 
       - name: Validate source and install pinned Wrangler
         shell: bash
@@ -270,6 +273,7 @@ jobs:
                   b'phase6VoicePreview',
                   b'chicagoshining-studio-api',
                   b'repair_item7_rr1_canonical_maxrecords_v9',
+                  b'studio_home_overview_force_refresh_v1',
               ]
               missing = [marker.decode() for marker in markers if marker not in live]
               bundled = live.startswith(b'var __defProp') or b'// worker.js' in live[:500]
@@ -304,13 +308,24 @@ jobs:
               const factoryStatus = url.pathname === "/$TOKEN/factory-status";
               const chicagoCanary = url.pathname === "/$TOKEN/factory-status-chicago";
               const globalCanary = url.pathname === "/$TOKEN/factory-status-global";
-              if (url.pathname !== "/$TOKEN" && !factoryStatus && !chicagoCanary && !globalCanary) return new Response("Not found", {status:404});
-              const path = globalCanary ? "/api/factory/approval-batches?scope=all"
+              const overview = url.pathname === "/$TOKEN/overview";
+              const overviewRefresh = url.pathname === "/$TOKEN/overview-refresh";
+              const overviewStatus = url.pathname === "/$TOKEN/overview-status";
+              if (url.pathname !== "/$TOKEN" && !factoryStatus && !chicagoCanary && !globalCanary && !overview && !overviewRefresh && !overviewStatus) return new Response("Not found", {status:404});
+              const generation = String(url.searchParams.get("generation") || "");
+              const path = overviewRefresh ? "/api/profiles/overview/refresh"
+                : overviewStatus ? "/api/profiles/overview/refresh-status"
+                : overview ? "/api/profiles/overview" + (generation ? "?min_generation=" + encodeURIComponent(generation) : "")
+                : globalCanary ? "/api/factory/approval-batches?scope=all"
                 : chicagoCanary ? "/api/factory/approval-batches?profile=recT2rbKX3MF7cVFU"
                 : factoryStatus ? "/api/factory/approval-batches?profile=recF7UAn0LkMZZrWZ" : "/api/session";
+              const method = overviewRefresh ? "POST" : "GET";
+              const headers = {"Cf-Access-Authenticated-User-Email":"joseph.t.logan@gmail.com","Origin":"https://studio.chicagoshining.com","Accept":"application/json"};
+              if (overviewRefresh) headers["Content-Type"] = "application/json";
               const internal = new Request("https://studio.chicagoshining.com" + path, {
-                method:"GET",
-                headers:{"Cf-Access-Authenticated-User-Email":"joseph.t.logan@gmail.com","Origin":"https://studio.chicagoshining.com","Accept":"application/json"}
+                method,
+                headers,
+                body: overviewRefresh ? "{}" : undefined,
               });
               const response = await env.STUDIO_API.fetch(internal);
               return new Response(await response.text(), {status:response.status,headers:{"Content-Type":"application/json","Cache-Control":"no-store"}});
@@ -363,6 +378,87 @@ jobs:
           test "$SESSION_CODE" = "200"
           jq -e '.ok==true and .authenticated==true and .authorized==true and .email=="joseph.t.logan@gmail.com"' /tmp/session.json >/dev/null
           echo "functional_session_check=PASS"
+
+      - name: Verify authoritative All Profiles force refresh through service binding
+        shell: bash
+        run: |
+          set -euo pipefail
+          API_ROOT="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID"
+          AUTH="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
+          curl -fsS "$API_ROOT/workers/subdomain" -H "$AUTH" -o /tmp/account-subdomain-overview.json
+          SUBDOMAIN=$(jq -er '.result.subdomain' /tmp/account-subdomain-overview.json)
+          TOKEN=$(cat /tmp/verify-token.txt)
+          BASE="https://$VERIFY_BRIDGE.$SUBDOMAIN.workers.dev/$TOKEN"
+
+          curl -fsS --max-time 60 "$BASE/overview" -o /tmp/overview-before.json
+          jq -e '.ok==true and (.records|type)=="array" and (.records|length)>=4' /tmp/overview-before.json >/dev/null
+          BEFORE_AT=$(jq -r '.snapshot_at // 0' /tmp/overview-before.json)
+          BEFORE_GENERATION=$(jq -r '.snapshot_generation // ""' /tmp/overview-before.json)
+
+          ACCEPTED=0
+          for attempt in 1 2 3 4 5 6; do
+            CODE=$(curl -sS --max-time 60 -o /tmp/overview-refresh-start.json -w '%{http_code}' -X POST "$BASE/overview-refresh" || true)
+            STATUS=$(jq -r '.refresh.status // .status // ""' /tmp/overview-refresh-start.json 2>/dev/null || true)
+            if [[ "$CODE" =~ ^20[02]$ ]] && [[ "$STATUS" == "refreshing" || "$STATUS" == "completed" ]]; then
+              ACCEPTED=1
+              break
+            fi
+            if [[ "$STATUS" == "cooling_down" ]]; then
+              RETRY_MS=$(jq -r '.refresh.retry_after_ms // .refresh.cooldown_remaining_ms // 3000' /tmp/overview-refresh-start.json)
+              SLEEP_SECS=$(( (RETRY_MS + 999) / 1000 ))
+              if (( SLEEP_SECS < 1 )); then SLEEP_SECS=1; fi
+              if (( SLEEP_SECS > 15 )); then SLEEP_SECS=15; fi
+              sleep "$SLEEP_SECS"
+              continue
+            fi
+            echo "Overview refresh start failed http=$CODE status=$STATUS" >&2
+            cat /tmp/overview-refresh-start.json >&2 || true
+            exit 1
+          done
+          test "$ACCEPTED" = "1"
+
+          COMPLETE=0
+          for attempt in $(seq 1 60); do
+            curl -fsS --max-time 60 "$BASE/overview-status" -o /tmp/overview-refresh-status.json
+            STATUS=$(jq -r '.refresh.status // .status // ""' /tmp/overview-refresh-status.json)
+            if [[ "$STATUS" == "completed" ]]; then
+              COMPLETE=1
+              break
+            fi
+            if [[ "$STATUS" == "failed" ]]; then
+              echo "Overview force refresh failed in production" >&2
+              jq -c '.refresh | {status,error,component_status,duration_ms}' /tmp/overview-refresh-status.json >&2 || true
+              exit 1
+            fi
+            sleep 2
+          done
+          test "$COMPLETE" = "1"
+
+          GENERATION=$(jq -er '.refresh.snapshot_generation' /tmp/overview-refresh-status.json)
+          SNAPSHOT_AT=$(jq -er '.refresh.snapshot_at' /tmp/overview-refresh-status.json)
+          jq -e '.refresh.component_status.outputs=="completed" and .refresh.component_status.ideas=="completed"' /tmp/overview-refresh-status.json >/dev/null
+          test -n "$GENERATION"
+          test "$GENERATION" != "$BEFORE_GENERATION"
+          test "$SNAPSHOT_AT" -gt "$BEFORE_AT"
+
+          curl -fsS --max-time 60 "$BASE/overview?generation=$GENERATION" -o /tmp/overview-after.json
+          jq -e --arg generation "$GENERATION" --argjson at "$SNAPSHOT_AT" '
+            .ok==true
+            and .snapshot_generation==$generation
+            and .snapshot_at==$at
+            and (.records|length)>=4
+            and ([.records[] |
+              (.scheduled.Facebook|numbers),
+              (.scheduled.Instagram|numbers),
+              (.scheduled.TikTok|numbers),
+              (.scheduled.YouTube|numbers),
+              (.manual|numbers),
+              (.failed|numbers),
+              (.approval|numbers),
+              (.ideas|numbers)
+            ] | length) >= 32
+          ' /tmp/overview-after.json >/dev/null
+          echo "overview_force_refresh_production=PASS generation=$GENERATION profiles=$(jq '.records|length' /tmp/overview-after.json) snapshot_at=$SNAPSHOT_AT"
 
       - name: Verify Chicago-only Factory batch canary via read-only Worker status
         shell: bash
@@ -458,5 +554,8 @@ jobs:
             /tmp/predeploy-contract-sanitized.json
             /tmp/postdeploy-contract-sanitized.json
             /tmp/session.json
+            /tmp/overview-before.json
+            /tmp/overview-refresh-status.json
+            /tmp/overview-after.json
           if-no-files-found: ignore
           retention-days: 30
