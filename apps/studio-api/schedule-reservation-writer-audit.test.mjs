@@ -54,6 +54,7 @@ const EXPECTED_WRITER_SURFACE = [
   "worker-functions-01.mjs:studioCompleteNativePhotoPublishArming",
   "worker-functions-02.mjs:fanoutProductionRequestOutputsToContentItems",
   "worker-functions-02.mjs:studioAtomicApplyPlatformOutputSeedSchedule",
+  "worker-functions-03.mjs:studioPrepareVisualVoiceoverCanary",
   "worker-functions-03.mjs:studioResetYoutubeUploadForRetry",
   "worker-functions-04.mjs:approveOutputRecordForPublishing",
   "worker-functions-04.mjs:factoryDeleteDeskItem",
@@ -178,6 +179,30 @@ test("status-only writers cannot accidentally mutate authoritative schedule capa
   assert.doesNotMatch(resend, /(^|[,{]\s*)Studio_Scheduled_At\s*:/m);
 });
 
+test("visual voiceover canary may clear schedule fields only on isolated nonpublishing test outputs", () => {
+  const canary = topLevelFunctionBodies(sources["worker-functions-03.mjs"])
+    .get("studioPrepareVisualVoiceoverCanary");
+  assert.ok(canary);
+  assert.match(canary, /Test_Run_ID/);
+  assert.match(canary, /Do_Not_Publish/);
+  assert.match(canary, /Published_At/);
+  assert.match(canary, /Platform_Post_ID/);
+  assert.match(canary, /Platform_Post_URL/);
+  assert.match(canary, /if \(!String\(f\(row, "Test_Run_ID"\) \|\| ""\)\.trim\(\)\) continue/);
+  assert.match(canary, /if \(!Boolean\(f\(row, "Do_Not_Publish"\)\)\) continue/);
+  assert.match(canary, /Do_Not_Publish:\s*true/);
+  assert.match(canary, /Auto_Publish_Enabled:\s*false/);
+  assert.match(canary, /Publish_Status:\s*"Not Ready"/);
+  assert.match(canary, /Scheduled_Post_Date:\s*null/);
+  assert.match(canary, /Studio_Scheduled_At:\s*null/);
+  assert.match(canary, /YouTube_Scheduled_Publish_At:\s*null/);
+  assert.doesNotMatch(
+    canary,
+    /Do_Not_Publish:\s*false|Auto_Publish_Enabled:\s*true/,
+    "visual canary schedule reset must never arm publishing while bypassing production occupancy",
+  );
+});
+
 test("YouTube retry reset never frees canonical platform occupancy", () => {
   const reset = topLevelFunctionBodies(sources["worker-functions-03.mjs"])
     .get("studioResetYoutubeUploadForRetry");
@@ -265,6 +290,11 @@ test("direct schedule-field mutations are confined to audited constructors, atom
       ),
     ]],
     ["worker-functions-03.mjs", [
+      sourceRegion(
+        worker03,
+        "export async function studioPrepareVisualVoiceoverCanary",
+        "/*__STUDIO_WORKER_END:studioPrepareVisualVoiceoverCanary__*/",
+      ),
       sourceRegion(
         worker03,
         "export async function studioResetYoutubeUploadForRetry",
