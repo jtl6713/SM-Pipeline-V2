@@ -220,9 +220,9 @@ test("open ideas cap is 20 and hour drain advances asset-ready drafts", () => {
   assert.equal(batch[19].requestRecord.id, "recDraft0000000019");
 });
 
-test("hourly refill creates 10 ideas under 200 and skips over 209", () => {
-  assert.equal(AUTONOMOUS_SCHEDULED_TARGET, 200);
-  assert.equal(AUTONOMOUS_SCHEDULED_SKIP_ABOVE, 209);
+test("hourly refill creates 10 ideas under 500 and skips over 509", () => {
+  assert.equal(AUTONOMOUS_SCHEDULED_TARGET, 500);
+  assert.equal(AUTONOMOUS_SCHEDULED_SKIP_ABOVE, 509);
   assert.equal(AUTONOMOUS_IDEAS_PER_HOUR, 10);
   assert.equal(AUTONOMOUS_CITY_CREATE_MS, 180000);
   assert.equal(AUTONOMOUS_CITY_CREATE_ATTEMPTS, 40);
@@ -246,24 +246,24 @@ test("hourly refill creates 10 ideas under 200 and skips over 209", () => {
   );
   assert.equal(autonomousScheduledTotal({ Facebook: 14, Instagram: 20 }), 34);
   assert.equal(autonomousScheduledBand(67), "refill");
-  assert.equal(autonomousScheduledBand(199), "refill");
-  assert.equal(autonomousScheduledBand(200), "hold");
-  assert.equal(autonomousScheduledBand(209), "hold");
-  assert.equal(autonomousScheduledBand(210), "skip");
+  assert.equal(autonomousScheduledBand(499), "refill");
+  assert.equal(autonomousScheduledBand(500), "hold");
+  assert.equal(autonomousScheduledBand(509), "hold");
+  assert.equal(autonomousScheduledBand(510), "skip");
   assert.equal(autonomousPipelineLoadTotal(67, 140), 207);
   assert.equal(autonomousPipelineLoadTotal(199, 1), 200);
   assert.equal(autonomousProfileNeedsScheduledRefill(67, 0), true);
-  assert.equal(autonomousProfileNeedsScheduledRefill(200, 0), false);
-  assert.equal(autonomousProfileNeedsScheduledRefill(209, 0), false);
-  assert.equal(autonomousProfileNeedsScheduledRefill(210, 0), false);
-  // Scheduled 67 + Awaiting Approval 140 = 207 → hold (not refill).
-  assert.equal(autonomousProfileNeedsScheduledRefill(67, 140), false);
-  assert.equal(autonomousProfileNeedsScheduledRefill(199, 0), true);
-  assert.equal(autonomousProfileNeedsScheduledRefill(150, 60), false);
-  assert.equal(autonomousScheduledDeficit(67, 0), 133);
-  assert.equal(autonomousScheduledDeficit(67, 140), 0);
-  assert.equal(autonomousScheduledDeficit(150, 20), 30);
-  assert.equal(autonomousScheduledDeficit(210, 0), 0);
+  assert.equal(autonomousProfileNeedsScheduledRefill(500, 0), false);
+  assert.equal(autonomousProfileNeedsScheduledRefill(509, 0), false);
+  assert.equal(autonomousProfileNeedsScheduledRefill(510, 0), false);
+  // Scheduled 67 + Awaiting Approval 440 = 507 → hold (not refill).
+  assert.equal(autonomousProfileNeedsScheduledRefill(67, 440), false);
+  assert.equal(autonomousProfileNeedsScheduledRefill(499, 0), true);
+  assert.equal(autonomousProfileNeedsScheduledRefill(150, 360), false);
+  assert.equal(autonomousScheduledDeficit(67, 0), 433);
+  assert.equal(autonomousScheduledDeficit(67, 440), 0);
+  assert.equal(autonomousScheduledDeficit(150, 20), 330);
+  assert.equal(autonomousScheduledDeficit(510, 0), 0);
   const slot = "2026-10-14:h09";
   const oneIdea = {
     slot,
@@ -324,7 +324,7 @@ test("refill scores prefer the city with the largest Scheduled+Awaiting Approval
     {
       id: "recMia",
       name: "Miami",
-      scheduled: { Facebook: 50, Instagram: 50, TikTok: 50, YouTube: 50 },
+      scheduled: { Facebook: 125, Instagram: 125, TikTok: 125, YouTube: 125 },
       approval: 10,
     },
   ]);
@@ -332,13 +332,13 @@ test("refill scores prefer the city with the largest Scheduled+Awaiting Approval
   assert.equal(scores.recChi.pipeline_load, 67);
   assert.equal(scores.recChi.needed, true);
   assert.equal(scores.recChi.band, "refill");
-  assert.equal(scores.recChi.deficit, 133);
+  assert.equal(scores.recChi.deficit, 433);
   // LA scheduled 69 + awaiting 50 = 119 → still refill, smaller deficit than Chicago.
   assert.equal(scores.recLA.pipeline_load, 119);
   assert.equal(scores.recLA.needed, true);
-  assert.equal(scores.recLA.deficit, 81);
-  // Miami scheduled 200 + awaiting 10 = 210 → skip.
-  assert.equal(scores.recMia.pipeline_load, 210);
+  assert.equal(scores.recLA.deficit, 381);
+  // Miami scheduled 500 + awaiting 10 = 510 → skip.
+  assert.equal(scores.recMia.pipeline_load, 510);
   assert.equal(scores.recMia.needed, false);
   assert.equal(scores.recMia.band, "skip");
   const profiles = [
@@ -851,7 +851,7 @@ test("unused stills cluster into a related 5-10 set", () => {
   assert.deepEqual(occupiedRequest.media_asset_ids, ["recPilsen0000000000"]);
 });
 
-test("under 200 the hour plans 10 ideas even when subjects repeat or stills are thin", () => {
+test("under 500 the hour plans 10 ideas even when subjects repeat or stills are thin", () => {
   const thin = [
     {
       id: "recThin0000000001",
@@ -926,7 +926,7 @@ test("Worker stamps photo-ready ideas and drains the 30m SLA on light ticks", as
   assert.match(worker, /selectAutonomousResumeDraftBatch/);
   assert.match(worker, /AUTONOMOUS_CITY_CREATE_MS/);
   assert.match(worker, /AUTONOMOUS_CITY_CREATE_ATTEMPTS/);
-  assert.match(worker, /scheduled_over_209/);
+  assert.match(worker, /scheduled_over_509/);
   assert.match(worker, /ideas_by_profile/);
   assert.match(worker, /fillAutonomousScheduledHour/);
   assert.match(worker, /autonomousAtTopOfHour/);
