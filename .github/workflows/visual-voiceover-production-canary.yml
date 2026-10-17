@@ -269,6 +269,55 @@ jobs:
             return w.body;
           }
           const id=process.env.CANARY_ID;
+
+          // Make the fixture repeatable after an interrupted canary. A prior
+          // run may have accepted narration that later failed the visual
+          // duration guard. Normalize the target scene through the same
+          // revision-guarded visual-script API before baseline TTS.
+          let baselineCreative=await call("GET",`/api/outputs/${id}/creative`);
+          const baselineTimeline=baselineCreative?.visual_timeline;
+          const baselineScript=baselineCreative?.visual_script;
+          const baselineTarget=(baselineScript?.scenes||[]).find(
+            scene=>String(scene.scene_id||"")===String(process.env.VIDEO_SCENE_ID||"")
+          ) || (baselineScript?.scenes||[]).find(
+            scene=>scene.voiceover_mode!=="silent" && Number(scene.duration_ms||0)>=2000
+          );
+          if(!baselineTimeline || !baselineScript || !baselineTarget) {
+            throw new Error("canary baseline visual/script authority is unavailable");
+          }
+          const safeBaselineText="City above.";
+          if(String(baselineTarget.narration_text||"").trim()!==safeBaselineText){
+            const baselineBase={
+              visual_revision:baselineTimeline.revision,
+              visual_sequence_hash:baselineTimeline.sequence_hash,
+              script_revision:baselineScript.revision,
+              script_hash:baselineScript.script_hash
+            };
+            const proposed=await call("PATCH",`/api/outputs/${id}/creative`,{
+              visual_script_action:"propose",
+              visual_script_mode:"selected",
+              selected_scene_ids:[baselineTarget.scene_id],
+              visual_script_base:baselineBase
+            });
+            const proposal=proposed?.proposal;
+            const proposalTarget=(proposal?.scenes||[]).find(scene=>scene.scene_id===baselineTarget.scene_id);
+            if(!proposalTarget) throw new Error("canary baseline narration proposal is missing target scene");
+            proposalTarget.proposed_text=safeBaselineText;
+            proposalTarget.changed=String(proposalTarget.current_text||"").trim()!==safeBaselineText;
+            const normalized=await call("PATCH",`/api/outputs/${id}/creative`,{
+              visual_script_action:"accept",
+              visual_script_base:baselineBase,
+              visual_script_proposal:proposal
+            });
+            if(normalized?.visual_script_action!=="accepted") {
+              throw new Error("canary baseline narration normalization was not accepted");
+            }
+            if(!(normalized?.tts_invalidated_scene_ids||[]).includes(baselineTarget.scene_id)) {
+              throw new Error("canary baseline narration normalization did not invalidate target TTS");
+            }
+            console.log(`canary_baseline_normalized=PASS scene=${baselineTarget.scene_id} script_revision=${normalized.visual_script?.revision}`);
+          }
+
           let review=null;
           for(let i=1;i<=6;i++){
             review=await call("POST",`/api/outputs/${id}/creative/review`,{
