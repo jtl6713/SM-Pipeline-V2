@@ -1,9 +1,9 @@
 /**
  * Production Factory Batch approval rollout policy.
  *
- * Production is fail-closed: only the configured Chicago Instagram Reel
- * single-output canary can use the POST. No YouTube, Stories, TikTok,
- * Carousel, cross-profile, or multi-output batches are permitted in phase 1.
+ * Production is fail-closed. The active manifest only allows Chicago Instagram
+ * Reels. Dormant expansion modes are not activated unless the exact deployment
+ * policy, base, profile, and maximum count are configured.
  *
  * The explicitly isolated staging Airtable base retains its broader synthetic
  * acceptance behavior; it never grants permissions to a production Airtable base.
@@ -13,6 +13,9 @@ export const FACTORY_BATCH_PRODUCTION_BASE_ID = "appe33zkZn35yirTL";
 export const FACTORY_BATCH_CHICAGO_PROFILE_ID = "recT2rbKX3MF7cVFU";
 export const FACTORY_BATCH_CANARY_MODE = "chicago_ig_reel_v1";
 export const FACTORY_BATCH_MULTI_REEL_MODE = "chicago_ig_reels_v2";
+// Dormant Phase 3A: this policy cannot be used until a separately reviewed
+// rollout manifest + Cloudflare deployment gate explicitly authorize it.
+export const FACTORY_BATCH_IG_REEL_STORY_MODE = "chicago_ig_reel_story_v3";
 
 export function factoryBatchRolloutPolicy(env, selectedProfileId = "") {
   const base = String(env?.AIRTABLE_BASE_ID || "");
@@ -29,7 +32,8 @@ export function factoryBatchRolloutPolicy(env, selectedProfileId = "") {
   }
   const selectedMode = String(env?.FACTORY_BATCH_ROLLOUT_MODE || "");
   const expectedMax = selectedMode === FACTORY_BATCH_CANARY_MODE ? 1 :
-    selectedMode === FACTORY_BATCH_MULTI_REEL_MODE ? 5 : 0;
+    selectedMode === FACTORY_BATCH_MULTI_REEL_MODE ? 5 :
+    selectedMode === FACTORY_BATCH_IG_REEL_STORY_MODE ? 5 : 0;
   const configured = base === FACTORY_BATCH_PRODUCTION_BASE_ID
     && expectedMax > 0
     && String(env?.FACTORY_BATCH_ROLLOUT_MAX_ITEMS || "") === String(expectedMax);
@@ -47,10 +51,16 @@ export function factoryBatchRolloutPolicy(env, selectedProfileId = "") {
 export function factoryBatchRolloutAcceptsOutput(policy, output) {
   if (!policy?.enabled || !output?.fields) return false;
   if (policy.mode === "isolated_staging") return true;
-  if (![FACTORY_BATCH_CANARY_MODE, FACTORY_BATCH_MULTI_REEL_MODE].includes(policy.mode)) return false;
+  if (![FACTORY_BATCH_CANARY_MODE, FACTORY_BATCH_MULTI_REEL_MODE,
+    FACTORY_BATCH_IG_REEL_STORY_MODE].includes(policy.mode)) return false;
   const platform = String(output.fields.Platform || "").trim();
   const type = String(output.fields.Studio_Output_Type || output.fields.Format || "").trim();
-  return platform === "Instagram" && type === "Reel";
+  // Format-aware: Story approval invokes the canonical single-output path,
+  // which applies Story scheduling and platform handoff rules. No other
+  // platform or output type is implied by the Instagram expansion.
+  if (platform !== "Instagram") return false;
+  return type === "Reel" ||
+    (policy.mode === FACTORY_BATCH_IG_REEL_STORY_MODE && type === "Story");
 }
 
 export function factoryBatchRolloutAcceptsIds(policy, ids) {
