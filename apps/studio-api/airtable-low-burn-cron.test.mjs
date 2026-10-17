@@ -37,12 +37,19 @@ test("Worker health advertises airtable burn-kill cron build", () => {
   assert.match(worker, /airtableCooldownWaitMs/);
 });
 
-test("production Worker deploy cron is every five minutes plus dedicated 06:00 UTC daily I1", () => {
+test("production Worker keeps five-minute Studio cron and isolates Factory one-minute recovery", () => {
   assert.match(
     deployWorkflow,
-    /'triggers':\{'crons':\['\*\/5 \* \* \* \*', '0 6 \* \* \*'\]\}/
+    /'triggers':\{'crons':\['\*\/5 \* \* \* \*', '0 6 \* \* \*', '\* \* \* \* \*'\]\}/
   );
   assert.doesNotMatch(deployWorkflow, /'crons':\['\*\/2 \* \* \* \*'\]/);
+  const scheduled = scheduledBody();
+  const isolated = scheduled.indexOf('String(event?.cron || "").trim() === "* * * * *"');
+  const heavy = scheduled.indexOf("const cronInstant");
+  assert.ok(isolated >= 0 && isolated < heavy, "Factory-only cron must dispatch before Studio heavy work");
+  assert.match(scheduled, /if \(String\(event\?\.cron \|\| ""\)\.trim\(\) === "\* \* \* \* \*"\) \{[\s\S]*?await factoryBatchCronResume\(env, ctx\)/);
+  assert.match(scheduled, /if \(cooling > AIRTABLE_SLOT_FAIL_FAST_MS\)/);
+  assert.doesNotMatch(scheduled.slice(heavy), /await factoryBatchCronResume\(env, ctx\)/);
 });
 
 test("scheduled retries daily ideas throughout Chicago hour 1, not only heavy ticks", () => {
