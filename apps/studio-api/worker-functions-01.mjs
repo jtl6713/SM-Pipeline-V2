@@ -2200,17 +2200,22 @@ export function selectMatchedPhotos({ matches, min, max, pendingBatchIds, force 
   if (high.length < floor) {
     return { action: "wait", high_count: high.length, selected: [], reason: "below_min" };
   }
-  if (!force) {
-    const blocked = high.some((row) => row.intake_batch_id && pending.has(row.intake_batch_id));
-    if (blocked) {
-      return { action: "wait_batch", high_count: high.length, selected: [], reason: "intake_batch_in_progress" };
-    }
+  // A still-classifying intake batch must not block older, already usable
+  // assets. Only exclude photos belonging to an unfinished batch.
+  const usable = force ? high : high.filter(
+    row => !row.intake_batch_id || !pending.has(row.intake_batch_id)
+  );
+  if (usable.length < floor) {
+    return { action: "wait_batch", high_count: high.length, usable_count: usable.length,
+      selected: [], reason: "intake_batch_in_progress" };
   }
   return {
     action: "ready",
     high_count: high.length,
-    selected: high.slice(0, cap),
-    reason: "min_met_take_all_up_to_max",
+    usable_count: usable.length,
+    selected: usable.slice(0, cap),
+    reason: usable.length < high.length
+      ? "min_met_from_completed_intake" : "min_met_take_all_up_to_max",
   };
 }
 /*__STUDIO_WORKER_END:selectMatchedPhotos__*/
