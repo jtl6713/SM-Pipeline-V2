@@ -193,9 +193,14 @@ for attempt in $(seq 1 25); do
     --data '{"action":"start"}' -o /tmp/factory-staging-denied-post.json -w '%{http_code}' \
     "$STAGING_WORKER_URL/api/factory/approval-batches" || true)
   if [ "$noauth" = 401 ] && [ "$post" = 503 ]; then locked=1;break;fi
+  if [ "$attempt" = 1 ] || [ "$attempt" = 5 ] || [ "$attempt" = 10 ] || [ "$attempt" = 20 ]; then
+    echo "staging_pretest_attempt=$attempt unauthorized_http=$noauth disabled_post_http=$post"
+    echo -n "staging_pretest_unauth_body="; head -c 240 /tmp/factory-staging-unauth.json | tr '\n' ' '; echo
+    echo -n "staging_pretest_post_body="; head -c 240 /tmp/factory-staging-denied-post.json | tr '\n' ' '; echo
+  fi
   sleep 3
 done
-test "$locked" = 1
+test "$locked" = 1 || { echo "Staging preflight refused activation (auth=$noauth, disabled POST=$post)"; exit 1; }
 echo "FACTORY_STAGING_LOCKED_POST_AND_AUTH=PASS"
 
 # Only the staging Worker gets this brief activation. The exit trap returns it
