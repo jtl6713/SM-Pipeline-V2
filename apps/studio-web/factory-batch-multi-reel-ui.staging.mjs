@@ -146,7 +146,7 @@ try{
   assert.equal(await phone.locator("[data-factory-select-output]").count(),0);
   await phone.locator("#factoryProfileFilter").selectOption("");
   await phone.locator('[data-factory-band-toggle]').first().click();
-  assert.equal(await phone.locator("[data-factory-select-output]").count(),1);
+  assert.equal(await phone.locator("[data-factory-select-output]").count(),5);
   assert.deepEqual(posts.map(x=>x.record_ids),[cards.slice(0,5).map(card=>card.id)]);
   assert.deepEqual(jsErrors,[]);
   assert.deepEqual(errors,[]);
