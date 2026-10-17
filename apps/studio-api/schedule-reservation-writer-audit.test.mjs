@@ -218,3 +218,131 @@ test("standalone runtime modules do not hide direct Airtable schedule writers", 
     "Standalone runtime module gained a direct Airtable schedule writer; route it through the canonical reservation authority.",
   );
 });
+
+
+function lineNumberAt(source, index) {
+  return source.slice(0, index).split("\n").length;
+}
+
+function sourceRegion(source, startNeedle, endNeedle) {
+  const start = source.indexOf(startNeedle);
+  assert.ok(start >= 0, `missing audited region start: ${startNeedle}`);
+  const end = source.indexOf(endNeedle, start);
+  assert.ok(end > start, `missing audited region end: ${endNeedle}`);
+  return { start, end };
+}
+
+test("direct schedule-field mutations are confined to audited constructors, atomic writers, and flag guards", () => {
+  const worker01 = sources["worker-functions-01.mjs"];
+  const worker02 = sources["worker-functions-02.mjs"];
+  const worker03 = sources["worker-functions-03.mjs"];
+  const worker04 = sources["worker-functions-04.mjs"];
+  const assembledWorker = fs.readFileSync(path.join(here, "worker.js"), "utf8");
+
+  const allowed = new Map([
+    ["worker-functions-01.mjs", [
+      sourceRegion(
+        worker01,
+        "export function studioPublishScheduleFields",
+        "/*__STUDIO_WORKER_END:studioPublishScheduleFields__*/",
+      ),
+    ]],
+    ["worker-functions-02.mjs", [
+      sourceRegion(
+        worker02,
+        "export function platformOutputSeedFields",
+        "/*__STUDIO_WORKER_END:platformOutputSeedFields__*/",
+      ),
+      sourceRegion(
+        worker02,
+        "async function studioAtomicApplyPlatformOutputSeedSchedule",
+        "/*__STUDIO_WORKER_END:studioAtomicApplyPlatformOutputSeedSchedule__*/",
+      ),
+      sourceRegion(
+        worker02,
+        "export async function fanoutProductionRequestOutputsToContentItems",
+        "/*__STUDIO_WORKER_END:fanoutProductionRequestOutputsToContentItems__*/",
+      ),
+    ]],
+    ["worker-functions-03.mjs", [
+      sourceRegion(
+        worker03,
+        "export async function studioResetYoutubeUploadForRetry",
+        "/*__STUDIO_WORKER_END:studioResetYoutubeUploadForRetry__*/",
+      ),
+    ]],
+    ["worker-functions-04.mjs", [
+      sourceRegion(
+        worker04,
+        "async function studioAtomicVacateSkippedOutput",
+        "/*__STUDIO_WORKER_END:studioAtomicVacateSkippedOutput__*/",
+      ),
+      sourceRegion(
+        worker04,
+        "export async function factoryDeleteDeskItem",
+        "/*__STUDIO_WORKER_END:factoryDeleteDeskItem__*/",
+      ),
+      sourceRegion(
+        worker04,
+        "export async function scheduleStudioPublishOutput",
+        "/*__STUDIO_WORKER_END:scheduleStudioPublishOutput__*/",
+      ),
+    ]],
+  ]);
+
+  const fieldNames = [
+    "Scheduled_Post_Date",
+    "YouTube_Scheduled_Publish_At",
+    "Studio_Scheduled_At",
+  ];
+  const escaped = fieldNames.join("|");
+  const mutationPattern = new RegExp(
+    `(?:\\b(?:${escaped})\\s*:|["'](?:${escaped})["']\\s*:|\\.(?:${escaped})\\s*=(?!=)|\\[\\s*["'](?:${escaped})["']\\s*\\]\\s*=(?!=)|delete\\s+[^;\\n]*(?:${escaped}))`,
+    "g",
+  );
+
+  for (const [file, source] of Object.entries(sources)) {
+    const ranges = allowed.get(file) || [];
+    let match;
+    while ((match = mutationPattern.exec(source))) {
+      const inside = ranges.some((range) => match.index >= range.start && match.index < range.end);
+      assert.ok(
+        inside,
+        `${file}:${lineNumberAt(source, match.index)} has an unaudited direct schedule-field mutation: ${match[0]}`,
+      );
+    }
+  }
+
+  // worker.js is the reconstructed production entrypoint. It may reference
+  // schedule fields for reads/formulas, but it must not acquire a new unsplit
+  // direct mutation that bypasses the split-module audit above.
+  assert.doesNotMatch(
+    assembledWorker,
+    mutationPattern,
+    "assembled worker.js contains a direct schedule-field mutation outside the audited split modules",
+  );
+});
+
+test("flag-on protective seed stripping and Factory vacate remain before legacy Airtable writes", () => {
+  const fanout = topLevelFunctionBodies(sources["worker-functions-02.mjs"])
+    .get("fanoutProductionRequestOutputsToContentItems");
+  assert.ok(fanout);
+  const flagAt = fanout.indexOf("scheduleReservationAuthorityEnabled(env)");
+  const stripAt = fanout.indexOf("delete seed.Scheduled_Post_Date");
+  const patchAt = fanout.indexOf("airtableFetch(env,STUDIO_PLATFORM_OUTPUT_TABLE");
+  assert.ok(flagAt >= 0 && stripAt > flagAt, "flag-on fanout must strip seed schedule fields");
+  assert.ok(
+    patchAt < 0 || stripAt < patchAt,
+    "seed schedule stripping must happen before Platform Output POST/PATCH",
+  );
+  assert.match(fanout, /studioAtomicApplyPlatformOutputSeedSchedule\(env/);
+
+  const factoryDelete = topLevelFunctionBodies(sources["worker-functions-04.mjs"])
+    .get("factoryDeleteDeskItem");
+  assert.ok(factoryDelete);
+  const vacateFlag = factoryDelete.indexOf("scheduleReservationAuthorityEnabled(env)");
+  const atomicVacate = factoryDelete.indexOf("studioAtomicVacateSkippedOutput(");
+  const legacyBatch = factoryDelete.indexOf("airtableBatchUpdate(");
+  assert.ok(vacateFlag >= 0 && atomicVacate > vacateFlag);
+  assert.ok(legacyBatch > atomicVacate, "legacy Factory batch vacate must stay below the atomic flag-on path");
+});
