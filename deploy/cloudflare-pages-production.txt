@@ -390,3 +390,5 @@ phase4-followup manual-post-link 2026-10-16T12:40:00Z UI 0.6.705-manual-post-lin
 
 phase4-followup tiktok-live-copy 2026-10-16T13:10:00Z UI 0.6.706-tiktok-live-copy (footer must show 0.6.706 / Worker 0.10.644)
 phase4-followup duplicate-skip 2026-10-16T16:50:00Z UI 0.6.707-duplicate-skip (footer must show 0.6.707 / Worker 0.10.646)
+
+PR #789 guarded Factory Batch V2 UI | 0.6.708-factory-batch-gated | Worker 0.10.650 verified | batch submission disabled via live status GET | Pages rollout
