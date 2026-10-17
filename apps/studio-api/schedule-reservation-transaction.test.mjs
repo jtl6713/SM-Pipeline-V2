@@ -160,3 +160,34 @@ test("flag off executes only the legacy callback", async () => {
   assert.deepEqual(value, { ok: true });
   assert.deepEqual(calls, ["legacy"]);
 });
+
+
+test("write callback receives a bounded AbortSignal for the external commit window", async () => {
+  const { env } = makeEnv();
+  let authoritative = "";
+  let seenSignal = null;
+  let seenTimeout = null;
+  const result = await runAtomicScheduleTransaction(env, {
+    ...args,
+    platform_output_record_id: "recAbortable",
+    owner_operation_id: "approve:recAbortable",
+  }, {
+    plan: async () => ({
+      action: "reserve",
+      selectedIso: "2026-10-18T10:30:00.000Z",
+      previousIso: "",
+    }),
+    write: async (plan, ctx) => {
+      seenSignal = ctx.signal;
+      seenTimeout = ctx.external_write_timeout_ms;
+      authoritative = plan.selectedIso;
+      return { id: "recAbortable" };
+    },
+    verify: async () => authoritative,
+  }, { jitter: false });
+
+  assert.equal(result.atomic_schedule, true);
+  assert.ok(seenSignal instanceof AbortSignal);
+  assert.equal(seenSignal.aborted, false);
+  assert.equal(seenTimeout, 30_000);
+});
