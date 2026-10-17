@@ -562,6 +562,14 @@ export const QUALITY_CHECKS = Object.freeze([
     heal: "ticket_only",
   }),
   check({
+    id: "retired_platform_residue",
+    title: "Check that retired platform values cannot enter Production approval validation, output plans, or operator-facing errors",
+    lane: "both",
+    kind: "retired_platform_residue",
+    actor: "regression",
+    heal: "none",
+  }),
+  check({
     id: "tester_catalog_assert",
     title: "Check cheap Quality Agent catalog assertions without seeding live platform-matrix rows",
     lane: "tester",
