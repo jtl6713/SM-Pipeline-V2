@@ -107,7 +107,7 @@ test("real canonical Worker enforces rollout at HTTP submit, retry, and cron-dra
   assert.match(worker, /factoryBatchRolloutPolicy\(env, profileId\)/);
 });
 
-test("production rollout manifest and deployment workflow force a single safe pilot", () => {
+test("production rollout manifest enables only the guarded five-Reel Chicago pilot", () => {
   const here = path.dirname(fileURLToPath(import.meta.url));
   const repo = path.resolve(here, "../..");
   const manifest = JSON.parse(fs.readFileSync(path.join(repo,"deploy/factory-batch-production-rollout.json"),"utf8"));
@@ -115,10 +115,26 @@ test("production rollout manifest and deployment workflow force a single safe pi
     mode:manifest.mode,profile_id:manifest.profile_id,
     max_items:manifest.max_items,platform:manifest.platform,output_type:manifest.output_type
   },{
-    mode:"chicago_ig_reel_v1",profile_id:FACTORY_BATCH_CHICAGO_PROFILE_ID,
-    max_items:1,platform:"Instagram",output_type:"Reel"
+    mode:"chicago_ig_reels_v2",profile_id:FACTORY_BATCH_CHICAGO_PROFILE_ID,
+    max_items:5,platform:"Instagram",output_type:"Reel"
   });
-  assert.equal(typeof manifest.enabled,"boolean");
+  assert.equal(manifest.enabled,true);
+  const active=factoryBatchRolloutPolicy({
+    AIRTABLE_BASE_ID:FACTORY_BATCH_PRODUCTION_BASE_ID,
+    FACTORY_BATCH_APPROVALS_ENABLED:String(manifest.enabled),
+    FACTORY_BATCH_ROLLOUT_MODE:manifest.mode,
+    FACTORY_BATCH_ROLLOUT_MAX_ITEMS:String(manifest.max_items),
+  },chicago);
+  assert.equal(active.enabled,true);
+  assert.equal(active.max_items,5);
+  assert.equal(factoryBatchRolloutAcceptsOutput(active,output("Instagram","Reel")),true);
+  assert.equal(factoryBatchRolloutAcceptsOutput(active,output("Instagram","Story")),false);
+  assert.equal(factoryBatchRolloutPolicy({
+    AIRTABLE_BASE_ID:FACTORY_BATCH_PRODUCTION_BASE_ID,
+    FACTORY_BATCH_APPROVALS_ENABLED:"true",
+    FACTORY_BATCH_ROLLOUT_MODE:manifest.mode,
+    FACTORY_BATCH_ROLLOUT_MAX_ITEMS:String(manifest.max_items),
+  },la).enabled,false);
   const workflow=fs.readFileSync(path.join(repo,".github/workflows/deploy-cloudflare-worker-production.yml"),"utf8");
   assert.match(workflow,/factory-batch-production-rollout\.json/);
   assert.match(workflow,/factory_batch_canary_binding_contract=PASS/);
