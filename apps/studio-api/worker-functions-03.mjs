@@ -5924,6 +5924,7 @@ export async function studioPrepareVisualVoiceoverCanary(request, env) {
   let videoScene = null;
   for (const row of rows || []) {
     if (!String(f(row, "Test_Run_ID") || "").trim()) continue;
+    if (!Boolean(f(row, "Do_Not_Publish"))) continue;
     if (f(row, "Published_At") || f(row, "Platform_Post_ID") || f(row, "Platform_Post_URL")) continue;
     if (String(f(row, "Render_Status") || "").trim() === "Rendering") continue;
     const linkedSlideIds = Array.isArray(f(row, "Carousel Slides")) ? f(row, "Carousel Slides") : [];
