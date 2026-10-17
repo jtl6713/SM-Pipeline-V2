@@ -250,8 +250,18 @@
 
   function canSelectBatchOutput(card) {
     if (state.batchApprovalsEnabled === false) return false;
-    if (state.batchGlobal?.enabled) return String(card?.platform||"")==="Instagram"
-      && ["Reel","Story"].includes(String(card?.studio_output_type||card?.format||""));
+    if (state.batchGlobal?.enabled) {
+      const platform = String(card?.platform || "");
+      const type = String(card?.studio_output_type || card?.format || "");
+      const platforms = Array.isArray(state.batchGlobal.allowed_platforms)
+        ? state.batchGlobal.allowed_platforms : ["Instagram"];
+      if (!platforms.includes(platform)) return false;
+      const byPlatform = state.batchGlobal.allowed_output_types_by_platform || {};
+      const types = Array.isArray(byPlatform[platform]) ? byPlatform[platform]
+        : (Array.isArray(state.batchGlobal.allowed_formats)
+          ? state.batchGlobal.allowed_formats : ["Reel","Story"]);
+      return types.includes(type);
+    }
     const rollout = state.batchRollout;
     if (!rollout) return state.batchApprovalsEnabled !== false;
     if (rollout.mode === "isolated_staging") return true;
@@ -322,7 +332,9 @@
       const rollout = state.batchRollout;
       if (state.batchGlobal?.enabled) {
         rolloutNotice.hidden = false;
-        rolloutNotice.textContent = `Global Factory (${state.batchGlobal.stage === "pilot" ? "pilot" : "expanded"}): up to ${state.batchGlobal.max_total} Instagram Reels or Stories per batch, maximum ${state.batchGlobal.max_per_profile} per profile. Profile-local scheduling remains authoritative.`;
+        const platforms = Array.isArray(state.batchGlobal.allowed_platforms) && state.batchGlobal.allowed_platforms.length
+          ? state.batchGlobal.allowed_platforms.join(", ") : "Instagram";
+        rolloutNotice.textContent = `Global Factory (${state.batchGlobal.stage === "pilot" ? "pilot" : "expanded"}): up to ${state.batchGlobal.max_total} supported outputs per batch, maximum ${state.batchGlobal.max_per_profile} per profile, across ${platforms}. Profile-local scheduling remains authoritative.`;
       } else if (["chicago_ig_reel_v1", "chicago_ig_reels_v2",
         "chicago_ig_reel_story_v3"].includes(rollout?.mode)) {
         rolloutNotice.hidden = false;

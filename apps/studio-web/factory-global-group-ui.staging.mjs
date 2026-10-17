@@ -18,15 +18,23 @@ const css=[...html.matchAll(/<link[^>]+rel="stylesheet"[^>]*>/gi)].map(x=>x[0]).
 const styles=[...html.matchAll(/<style[^>]*>[\s\S]*?<\/style>/gi)].map(x=>x[0]).join("\n");
 const chicago="recT2rbKX3MF7cVFU",nyc="recgtK8Z7eNADNtVy";
 const cards=[
-  {id:"recFixtureGlobalChiReel1",profile_id:chicago,profile_name:"Chicago",content_id:"recFixtureChiContent",output_id:8001,platform:"Instagram",studio_output_type:"Reel"},
-  {id:"recFixtureGlobalChiStory2",profile_id:chicago,profile_name:"Chicago",content_id:"recFixtureChiContent",output_id:8002,platform:"Instagram",studio_output_type:"Story"},
-  {id:"recFixtureGlobalNycReel3",profile_id:nyc,profile_name:"New York",content_id:"recFixtureNycContent",output_id:8003,platform:"Instagram",studio_output_type:"Reel"},
-  {id:"recFixtureGlobalNycShort4",profile_id:nyc,profile_name:"New York",content_id:"recFixtureNycContent",output_id:8004,platform:"YouTube",studio_output_type:"Short"},
+  {id:"recFixtureGlobalChiIg1",profile_id:chicago,profile_name:"Chicago",content_id:"recFixtureChiContent",output_id:8001,platform:"Instagram",studio_output_type:"Reel"},
+  {id:"recFixtureGlobalChiFb2",profile_id:chicago,profile_name:"Chicago",content_id:"recFixtureChiContent",output_id:8002,platform:"Facebook",studio_output_type:"Slideshow Reel"},
+  {id:"recFixtureGlobalNycTt3",profile_id:nyc,profile_name:"New York",content_id:"recFixtureNycContent",output_id:8003,platform:"TikTok",studio_output_type:"Video Draft"},
+  {id:"recFixtureGlobalNycYt4",profile_id:nyc,profile_name:"New York",content_id:"recFixtureNycContent",output_id:8004,platform:"YouTube",studio_output_type:"Short"},
 ].map(x=>({...x,kind:"output",title:"Fixture "+x.output_id,output_status:"Ready for Review",
   review_status:"Review Sent",studio_state:"Ready for Review",render_status:"Rendered"}));
 const desk={ok:true,lanes:{needs_eyes:cards,auto_high:[],manual:[],needs_assets:[]},
   needs_assets_candidates:[],summary:{needs_eyes:4,auto_high:0,manual:0,needs_assets_pile:0}};
-const policy={enabled:true,stage:"pilot",mode:"global_ig_reel_story_v1",max_total:4,max_per_profile:2};
+const policy={enabled:true,stage:"pilot",mode:"global_all_platforms_v2",max_total:4,max_per_profile:2,
+  allowed_platforms:["Instagram","Facebook","TikTok","YouTube"],
+  allowed_formats:["Reel","Story","Single Image","Carousel","Multi-Image Post","Slideshow Reel","Video Draft","Single Photo","Multi-Photo","Short","Standard Video","Slideshow Video"],
+  allowed_output_types_by_platform:{
+    Instagram:["Reel","Story","Single Image","Carousel"],
+    Facebook:["Reel","Story","Single Image","Multi-Image Post","Slideshow Reel"],
+    TikTok:["Video Draft","Story","Single Photo","Multi-Photo"],
+    YouTube:["Short","Standard Video","Slideshow Video"],
+  }};
 let job=null,started=0,retried=0,unexpected=[];
 const send=(res,value,status=200)=>{
   res.writeHead(status,{"content-type":"application/json","cache-control":"no-store"});
@@ -37,20 +45,20 @@ function rebuild(phase) {
   const failed=phase==="failed",done=phase==="done";
   job={
     ...job,status:failed||done?"completed":"queued",
-    approved_count:done?3:failed?2:0,
-    failed_count:failed?1:0,pending_count:failed||done?0:3,
-    done_count:failed||done?3:0,can_retry:failed,
+    approved_count:done?4:failed?3:0,
+    failed_count:failed?1:0,pending_count:failed||done?0:4,
+    done_count:failed||done?4:0,can_retry:failed,
     updated_at:new Date().toISOString(),
     children:[
       {profile_id:chicago,status:done||failed?"completed":"queued",total:2,
         done_count:done||failed?2:0,approved_count:done||failed?2:0,pending_count:done||failed?0:2,failed_count:0},
-      {profile_id:nyc,status:done||failed?"completed":"queued",total:1,
-        done_count:done||failed?1:0,approved_count:done?1:0,pending_count:done||failed?0:1,failed_count:failed?1:0},
+      {profile_id:nyc,status:done||failed?"completed":"queued",total:2,
+        done_count:done||failed?2:0,approved_count:done?2:failed?1:0,pending_count:done||failed?0:2,failed_count:failed?1:0},
     ],
-    items:cards.slice(0,3).map((x,i)=>({id:x.id,output_id:x.output_id,title:x.title,
+    items:cards.map((x,i)=>({id:x.id,output_id:x.output_id,title:x.title,
       platform:x.platform,format:x.studio_output_type,profile_id:x.profile_id,
-      status:done||i<2&&failed?"approved":failed?"failed":"pending",
-      ...(failed&&i===2?{error:"Controlled synthetic rejection"}:{})})),
+      status:done||i<3&&failed?"approved":failed?"failed":"pending",
+      ...(failed&&i===3?{error:"Controlled synthetic rejection"}:{})})),
   };
 }
 const server=createServer(async(req,res)=>{
@@ -88,9 +96,11 @@ const server=createServer(async(req,res)=>{
     const payload=JSON.parse(body);
     if(payload.action==="start_group"){
       started++;
-      assert.deepEqual(new Set(payload.record_ids),new Set(cards.slice(0,3).map(c=>c.id)));
+      assert.deepEqual(new Set(payload.record_ids),new Set(cards.map(c=>c.id)));
       assert.equal(payload.content_profile_id,undefined);
-      assert.equal(payload.items.length,3);
+      assert.equal(payload.items.length,4);
+      assert.deepEqual(new Set(payload.items.map(x=>x.platform)),
+        new Set(["Instagram","Facebook","TikTok","YouTube"]));
       job={ok:true,batch:true,group:true,accepted:true,job_id:"fg_"+payload.request_id,
         request_id:payload.request_id,profile_id:null,profile_ids:[chicago,nyc],
         created_at:new Date().toISOString()};
@@ -117,14 +127,14 @@ try{
   await page.waitForFunction(()=>Boolean(window.StudioFactoryDesk?.load));
   await page.evaluate(()=>document.querySelector("#page-factory").classList.add("active"));
   await page.evaluate(()=>window.StudioFactoryDesk.load());
-  await page.getByText(/Global Factory \(pilot\): up to 4 Instagram Reels or Stories/).waitFor();
+  await page.getByText(/Global Factory \(pilot\): up to 4 supported outputs per batch/).waitFor();
   await page.locator("[data-factory-band-toggle]").first().click();
   assert.equal(await page.locator("[data-factory-select-content]").count(),2);
   await page.locator("#factoryProfileFilter").selectOption(chicago);
   await page.locator("[data-factory-select-content]").first().check();
   await page.locator("#factoryProfileFilter").selectOption(nyc);
   await page.locator("[data-factory-select-content]").first().check();
-  assert.match(await page.locator("#factoryBatchSelectionCount").innerText(),/3 outputs selected/);
+  assert.match(await page.locator("#factoryBatchSelectionCount").innerText(),/4 outputs selected/);
   await page.locator("#factoryProfileFilter").selectOption("");
   await page.locator("#factoryBatchSubmit").click();
   await page.waitForFunction(()=>document.querySelector("#factoryDeskStatus").textContent.includes("accepted"));
@@ -133,10 +143,10 @@ try{
   await page.locator("#factoryBatchRefresh").click();
   await page.locator(".factory-batch-activity-choice").first().click();
   assert.equal(await page.locator(".factory-batch-child").count(),2);
-  assert.equal(await page.locator("#factoryBatchDetails li").count(),3);
-  assert.match(await page.locator("#factoryBatchSummary").innerText(),/2 approved/);
+  assert.equal(await page.locator("#factoryBatchDetails li").count(),4);
+  assert.match(await page.locator("#factoryBatchSummary").innerText(),/3 approved/);
   await page.locator("#factoryBatchRetry").click();
-  await page.waitForFunction(()=>document.querySelector("#factoryBatchSummary").textContent.includes("3 approved"),null,{timeout:15000});
+  await page.waitForFunction(()=>document.querySelector("#factoryBatchSummary").textContent.includes("4 approved"),null,{timeout:15000});
   assert.equal(started,1);
   assert.equal(retried,1);
   await context.close();
@@ -147,12 +157,12 @@ try{
   await phone.waitForFunction(()=>Boolean(window.StudioFactoryDesk?.load));
   await phone.evaluate(()=>document.querySelector("#page-factory").classList.add("active"));
   await phone.evaluate(()=>window.StudioFactoryDesk.load());
-  await phone.waitForFunction(()=>document.querySelector("#factoryBatchSummary").textContent.includes("3 approved"));
+  await phone.waitForFunction(()=>document.querySelector("#factoryBatchSummary").textContent.includes("4 approved"));
   await phone.locator(".factory-batch-activity-choice").first().click();
   assert.equal(await phone.locator(".factory-batch-child").count(),2);
   assert.deepEqual(errors,[]);
   assert.deepEqual(unexpected,[]);
-  console.log("FACTORY_GLOBAL_GROUP_UI=PASS stage=pilot max_total=4 max_per_profile=2 desktop_mobile=true profiles=2 outputs=3 retry_failed_only=true publish_calls=0");
+  console.log("FACTORY_GLOBAL_GROUP_UI=PASS stage=pilot max_total=4 max_per_profile=2 desktop_mobile=true profiles=2 outputs=4 platforms=Instagram,Facebook,TikTok,YouTube retry_failed_only=true publish_calls=0");
   await phoneCtx.close();
 }finally{
   await browser?.close();

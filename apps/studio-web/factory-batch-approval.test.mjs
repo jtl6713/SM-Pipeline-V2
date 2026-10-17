@@ -56,13 +56,16 @@ test("Finished durable batches reconcile the live Needs Eyes desk and clear sele
     "Submitting must repaint DOM selection once the accepted IDs leave selectedOutputs");
 });
 
-test("Global group UI is gated; pilot path remains restricted when not enabled", () => {
+test("Global group UI is gated and follows the server-signed platform matrix", () => {
   assert.match(js,/state\.batchGlobal\?\.enabled/);
+  assert.match(js,/state\.batchGlobal\.allowed_platforms/);
+  assert.match(js,/allowed_output_types_by_platform/);
   assert.match(js,/action: global \? "start_group" : "start"/);
   assert.match(js,/readyFactoryOutputs\(true\)/);
   assert.match(js,/max_per_profile/);
   assert.match(js,/profile_ids/);
   assert.match(js,/retry_group/);
+  assert.match(js,/supported outputs per batch/);
 });
 test("Story v3 UI remains dormant while Reel v2 restricts selection", () => {
   const fn = js.slice(js.indexOf("function canSelectBatchOutput("),

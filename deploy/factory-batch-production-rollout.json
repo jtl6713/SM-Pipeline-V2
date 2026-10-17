@@ -10,10 +10,10 @@
   "global": {
     "enabled": true,
     "stage": "expanded",
-    "mode": "global_ig_reel_story_v1",
+    "mode": "global_all_platforms_v2",
     "max_total": 20,
     "max_per_profile": 10,
     "production_signoff": "explicit-review",
-    "notes": "Expanded operator-selected global Factory groups: maximum 20 verified Instagram Reels/Stories total and 10 per profile. Released only after 7/7 PR pilot gates, read-only signed 4/2 production Worker canary, Pages production verification, and 20-output two-profile negative boundary tests. Profile-local scheduling, Quality Agent, retries, idempotence unchanged. Emergency rollback: restore pilot stage/4/2 and redeploy; oversized queued global groups pause; or use exact disabled tuple. No automatic approval or publication."
+    "notes": "Expanded operator-selected global Factory groups: maximum 20 supported outputs total and 10 per profile across Instagram, Facebook, TikTok, and YouTube. Every output still uses the canonical profile-local approval, MAE scheduling, platform handoff, Quality Agent, retry, and idempotence path. Threads remains excluded because it is not implemented. Emergency rollback: disable the global tuple or restore the prior signed Instagram-only deployment."
   }
 }
