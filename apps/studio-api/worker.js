@@ -1061,7 +1061,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.651-overview-fast-refresh",
+          version: "0.10.652-manual-clickthrough",
           factory_batch_canary_revision: "chicago-ig-reel-v1",
           factory_batch_phase2a_post_gate_fix_v1: true,
           studio_supabase_pipeline_reads_v1: true,
@@ -4633,6 +4633,7 @@ const STUDIO_SUPABASE_SYNC_LAST_KEY = "studio/state/supabase-pipeline-sync-last.
 /*__STUDIO_WORKER_EXTRACT:warmOldestStudioReadSnapshot__*/
 /*__STUDIO_WORKER_EXTRACT:mappedTikTokNeedsLivePublishCheck__*/
 /*__STUDIO_WORKER_EXTRACT:overlayLiveTikTokPublishRows__*/
+/*__STUDIO_WORKER_EXTRACT:mergeLatestPipelineWithManualRows__*/
 /*__STUDIO_WORKER_EXTRACT:listOutputs__*/
 /*__STUDIO_WORKER_EXTRACT:listMusic__*/
 /*__STUDIO_WORKER_EXTRACT:musicSortName__*/

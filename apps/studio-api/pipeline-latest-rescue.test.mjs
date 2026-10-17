@@ -1,4 +1,5 @@
 import { readStudioWorkerSource } from "./worker-source-reader.mjs";
+import { mergePipelineOutputRecords } from "./worker-functions-01.mjs";
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
@@ -14,9 +15,22 @@ test("Worker latest mode fetches one live Airtable page before history snapshot"
   assert.match(route,/limit: 60/);
   assert.match(route,/filterFormula: contentProfileFilterFormula\(profile\)/);
   assert.match(route,/fresh: true/);
+  // All Profiles counts older Manual Action Required rows. Newest-60 drops them
+  // (Miami Output 2143), so latest mode must union the live manual scan.
+  assert.equal((route.match(/mergeLatestPipelineWithManualRows/g) || []).length, 2);
   // Latest returns a live page immediately; full list uses respondStudioMappedList (R2 snapshot).
   assert.ok(route.indexOf('mode") === "latest"') < route.indexOf("respondStudioMappedList"));
   assert.match(route, /fresh: true/);
+});
+test("Live manual rows win over a stale newest-page copy and keep older manuals", () => {
+  const recent = [{ id: "recboquxw992wKbnF", fields: { Output_ID: 2143, TikTok_Draft_Status: "Ready for Delivery" } }];
+  const manual = [
+    { id: "recboquxw992wKbnF", fields: { Output_ID: 2143, TikTok_Draft_Status: "Draft Delivered — Manual Action Required" } },
+    { id: "recOlderManual", fields: { Output_ID: 100, TikTok_Draft_Status: "Draft Delivered — Manual Action Required" } },
+  ];
+  const merged = mergePipelineOutputRecords(manual, recent);
+  assert.equal(merged.find((row) => row.id === "recboquxw992wKbnF").fields.TikTok_Draft_Status, "Draft Delivered — Manual Action Required");
+  assert.ok(merged.some((row) => row.id === "recOlderManual"));
 });
 test("Newest live rows override stale snapshot rows without losing older items",()=>{
   const match=app.match(/  function mergePipelineFreshOutputs\(baseRows, freshRows\) \{[\s\S]*?\n  \}/);
