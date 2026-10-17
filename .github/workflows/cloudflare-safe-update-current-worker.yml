@@ -104,6 +104,8 @@ jobs:
           by_name={str(x.get('name')):x for x in bindings}
           missing={k:v for k,v in core.items() if str(by_name.get(k,{}).get('type'))!=v}
           if missing: raise SystemExit(f'Current active Worker missing core bindings: {missing}')
+          if str(by_name.get('STUDIO_SCHEDULE_RESERVATIONS',{}).get('type')) != 'durable_object_namespace':
+              raise SystemExit('Atomic scheduling namespace is not bootstrapped; versions upload cannot create Durable Object lifecycle state')
           plain=[k for k,v in core.items() if v=='plain_text']
           vars_out={k:by_name[k].get('text') for k in plain}
           if any(v is None for v in vars_out.values()): raise SystemExit('Could not recover active non-secret values')
@@ -123,12 +125,6 @@ jobs:
                 'name':'STUDIO_SCHEDULE_RESERVATIONS',
                 'class_name':'ScheduleReservationLane',
               }],
-            },
-            'exports':{
-              'ScheduleReservationLane':{
-                'type':'durable-object',
-                'storage':'sqlite',
-              },
             },
           }
           work=Path('/tmp/studio-current-rollout')
