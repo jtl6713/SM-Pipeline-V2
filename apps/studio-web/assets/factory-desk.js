@@ -253,8 +253,9 @@
     if (state.batchGlobal?.enabled) return String(card?.platform||"")==="Instagram"
       && ["Reel","Story"].includes(String(card?.studio_output_type||card?.format||""));
     const rollout = state.batchRollout;
-    if (rollout?.mode === "isolated_staging") return true;
-    if (!rollout || !["chicago_ig_reel_v1", "chicago_ig_reels_v2",
+    if (!rollout) return state.batchApprovalsEnabled !== false;
+    if (rollout.mode === "isolated_staging") return true;
+    if (!["chicago_ig_reel_v1", "chicago_ig_reels_v2",
       "chicago_ig_reel_story_v3"].includes(rollout.mode)) return false;
     const type = String(card?.studio_output_type || card?.format || "");
     return String(card?.profile_id || "") === String(rollout.profile_id || "")
@@ -308,7 +309,7 @@
     const submit = $("factoryBatchSubmit");
     if (submit) {
       const limit = Math.max(1, Number(state.batchGlobal?.enabled ? state.batchGlobal.max_total : (state.batchRollout?.max_items || 100)));
-      submit.disabled = !selectable || selectable > limit || state.submittingBatch || state.batchApprovalsEnabled === false;
+      submit.disabled = !selectable || selectable > limit || state.submittingBatch || state.batchApprovalsEnabled !== true;
       submit.title = state.batchApprovalsEnabled === false
         ? "Batch approval rollout is disabled for this profile; individual approvals remain available."
         : selectable > limit ? `Select at most ${limit} output${limit === 1 ? "" : "s"} for this rollout.` : "";
@@ -359,7 +360,7 @@
       failed: batches.reduce((sum, row) => sum + Number(row.failed_count || 0), 0),
     };
     if (count) count.textContent = String(Number(totals.batches) || 0);
-    summary.textContent = `${Number(totals.active) || 0} active · ${Number(totals.pending) || 0} pending · ${Number(totals.failed) || 0} failed`;
+    summary.textContent = `${Number(totals.active) || 0} active · ${Number(totals.approved) || 0} approved · ${Number(totals.pending) || 0} pending · ${Number(totals.failed) || 0} failed`;
     if (updated) updated.textContent = batch?.history_complete === false
       ? "Recent history (bounded window)" : "Latest activity · all matching profiles";
     const latest = batches.find(row => row.job_id === state.inspectedBatchKey) || batches[0] || null;
