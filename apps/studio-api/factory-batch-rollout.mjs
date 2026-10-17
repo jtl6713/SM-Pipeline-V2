@@ -12,6 +12,7 @@ export const FACTORY_BATCH_STAGING_BASE_ID = "appJ0ox62OMfZuE1v";
 export const FACTORY_BATCH_PRODUCTION_BASE_ID = "appe33zkZn35yirTL";
 export const FACTORY_BATCH_CHICAGO_PROFILE_ID = "recT2rbKX3MF7cVFU";
 export const FACTORY_BATCH_CANARY_MODE = "chicago_ig_reel_v1";
+export const FACTORY_BATCH_MULTI_REEL_MODE = "chicago_ig_reels_v2";
 
 export function factoryBatchRolloutPolicy(env, selectedProfileId = "") {
   const base = String(env?.AIRTABLE_BASE_ID || "");
@@ -26,14 +27,17 @@ export function factoryBatchRolloutPolicy(env, selectedProfileId = "") {
       output_type: "",
     };
   }
+  const selectedMode = String(env?.FACTORY_BATCH_ROLLOUT_MODE || "");
+  const expectedMax = selectedMode === FACTORY_BATCH_CANARY_MODE ? 1 :
+    selectedMode === FACTORY_BATCH_MULTI_REEL_MODE ? 5 : 0;
   const configured = base === FACTORY_BATCH_PRODUCTION_BASE_ID
-    && String(env?.FACTORY_BATCH_ROLLOUT_MODE || "") === FACTORY_BATCH_CANARY_MODE
-    && String(env?.FACTORY_BATCH_ROLLOUT_MAX_ITEMS || "") === "1";
+    && expectedMax > 0
+    && String(env?.FACTORY_BATCH_ROLLOUT_MAX_ITEMS || "") === String(expectedMax);
   const profile = FACTORY_BATCH_CHICAGO_PROFILE_ID;
   return {
     enabled: flag && configured && (!selectedProfileId || selectedProfileId === profile),
-    mode: configured ? FACTORY_BATCH_CANARY_MODE : "disabled",
-    max_items: configured ? 1 : 0,
+    mode: configured ? selectedMode : "disabled",
+    max_items: configured ? expectedMax : 0,
     profile_id: configured ? profile : "",
     platform: configured ? "Instagram" : "",
     output_type: configured ? "Reel" : "",
@@ -43,7 +47,7 @@ export function factoryBatchRolloutPolicy(env, selectedProfileId = "") {
 export function factoryBatchRolloutAcceptsOutput(policy, output) {
   if (!policy?.enabled || !output?.fields) return false;
   if (policy.mode === "isolated_staging") return true;
-  if (policy.mode !== FACTORY_BATCH_CANARY_MODE) return false;
+  if (![FACTORY_BATCH_CANARY_MODE, FACTORY_BATCH_MULTI_REEL_MODE].includes(policy.mode)) return false;
   const platform = String(output.fields.Platform || "").trim();
   const type = String(output.fields.Studio_Output_Type || output.fields.Format || "").trim();
   return platform === "Instagram" && type === "Reel";

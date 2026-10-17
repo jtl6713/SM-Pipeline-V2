@@ -4,6 +4,7 @@ on:
     paths:
       - "apps/studio-web/factory-real-record-ui.staging.mjs"
       - "apps/studio-web/factory-batch-canary-ui.staging.mjs"
+      - "apps/studio-web/factory-batch-multi-reel-ui.staging.mjs"
       - "apps/studio-web/assets/factory-desk.js"
       - "apps/studio-web/assets/factory-batch-quality-0710.js"
       - "apps/studio-web/assets/factory-batch-quality-0710.css"
@@ -32,6 +33,8 @@ jobs:
         run: node apps/studio-web/factory-real-record-ui.staging.mjs
       - name: Verify the Chicago Reel-only rollout UI and mobile state restoration
         run: node apps/studio-web/factory-batch-canary-ui.staging.mjs
+      - name: Verify five Reel guarded production mode with a simulated browser and no publishing
+        run: node apps/studio-web/factory-batch-multi-reel-ui.staging.mjs
       - name: Save desktop and mobile Factory screen evidence
         if: always()
         uses: actions/upload-artifact@v4

@@ -59,6 +59,30 @@ test("single-output Chicago Instagram Reel only; all other platforms and Stories
   assert.equal(factoryBatchRolloutAcceptsIds(rule, ["not a record"]), false);
 });
 
+test("five-Reel Chicago expansion requires exact mode, count and profile", () => {
+  const multi={...enabled,
+    FACTORY_BATCH_ROLLOUT_MODE:"chicago_ig_reels_v2",
+    FACTORY_BATCH_ROLLOUT_MAX_ITEMS:"5",
+  };
+  const policy=factoryBatchRolloutPolicy(multi,chicago);
+  assert.equal(policy.enabled,true);
+  assert.equal(policy.max_items,5);
+  assert.equal(policy.mode,"chicago_ig_reels_v2");
+  const ids=Array.from({length:5},(_,i)=>"recChicagoMulti"+i);
+  assert.equal(factoryBatchRolloutAcceptsIds(policy,ids),true);
+  assert.equal(factoryBatchRolloutAcceptsIds(policy,ids.concat("recTooMany")),false);
+  assert.equal(factoryBatchRolloutAcceptsIds(policy,[ids[0],ids[0]]),true);
+  assert.equal(factoryBatchRolloutAcceptsOutput(policy,output("Instagram","Reel")),true);
+  for(const [platform,type] of [["Instagram","Story"],["Facebook","Reel"],
+    ["TikTok","Video Draft"],["YouTube","Short"]]) {
+    assert.equal(factoryBatchRolloutAcceptsOutput(policy,output(platform,type)),false);
+  }
+  assert.equal(factoryBatchRolloutPolicy(multi,la).enabled,false);
+  assert.equal(factoryBatchRolloutPolicy({...multi,FACTORY_BATCH_ROLLOUT_MAX_ITEMS:"20"},chicago).enabled,false);
+  assert.equal(factoryBatchRolloutPolicy({...multi,FACTORY_BATCH_APPROVALS_ENABLED:"false"},chicago).enabled,false);
+  assert.equal(factoryBatchRolloutPolicy({...multi,AIRTABLE_BASE_ID:"appDifferentBase012"},chicago).enabled,false);
+});
+
 test("explicitly isolated staging retains multi-output integration acceptance", () => {
   const stage = factoryBatchRolloutPolicy({
     AIRTABLE_BASE_ID: FACTORY_BATCH_STAGING_BASE_ID,
