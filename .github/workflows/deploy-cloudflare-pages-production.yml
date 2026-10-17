@@ -51,7 +51,9 @@ jobs:
             apps/studio-web/unified-platform-outputs.test.mjs \
             apps/studio-web/all-profiles-load.test.mjs \
             apps/studio-web/all-profiles-cache-age.test.mjs \
-            apps/studio-web/all-profiles-force-refresh.test.mjs
+            apps/studio-web/all-profiles-force-refresh.test.mjs \
+            apps/studio-web/ui-release-contract.test.mjs \
+            apps/studio-web/pages-production-deploy-contract.test.mjs
 
       - name: Validate Pages source and stage deployment directory
         shell: bash
@@ -85,6 +87,8 @@ jobs:
           }
           if (!app || !css) throw new Error('Pages baseline must include referenced application JS and CSS');
           NODE
+          node apps/studio-web/ui-release-contract.mjs --json > /tmp/pages-expected.json
+          jq -e '.version and .cacheKey and .expectedBuildId and .expectedJsUrl' /tmp/pages-expected.json >/dev/null
           for file in apps/studio-web/assets/*.js; do
             [ -e "$file" ] || continue
             cp "$file" /tmp/"$(basename "$file" .js)".mjs
@@ -108,6 +112,37 @@ jobs:
           if [ -f apps/studio-web/docs/Quality-Agent.docx ]; then
             cp apps/studio-web/docs/Quality-Agent.docx /tmp/pages-deploy/docs/Quality-Agent.docx
           fi
+
+      - name: Reject unchanged custom-domain UI version on push
+        if: github.event_name == 'push'
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$CF_ACCESS_CLIENT_ID"
+          test -n "$CF_ACCESS_CLIENT_SECRET"
+          ACCESS_HEADERS=(-H "CF-Access-Client-Id: $CF_ACCESS_CLIENT_ID" -H "CF-Access-Client-Secret: $CF_ACCESS_CLIENT_SECRET")
+          LIVE_INDEX_CODE=""
+          for attempt in 1 2 3; do
+            LIVE_INDEX_CODE=$(curl -sS -L "${ACCESS_HEADERS[@]}" \
+              -o /tmp/predeploy-live-index.html -w '%{http_code}' \
+              "https://studio.chicagoshining.com/?release_preflight=$GITHUB_SHA&attempt=$attempt" || true)
+            if [[ "$LIVE_INDEX_CODE" == "200" ]]; then break; fi
+            sleep 5
+          done
+          test "$LIVE_INDEX_CODE" = "200"
+          LIVE_APP_URL=$(node apps/studio-web/ui-release-contract.mjs --html /tmp/predeploy-live-index.html --app-url)
+          LIVE_APP_CODE=$(curl -sS -L "${ACCESS_HEADERS[@]}" \
+            -o /tmp/predeploy-live-app.js -w '%{http_code}' \
+            "https://studio.chicagoshining.com$LIVE_APP_URL" || true)
+          test "$LIVE_APP_CODE" = "200"
+          node apps/studio-web/ui-release-contract.mjs \
+            --html /tmp/predeploy-live-index.html \
+            --app /tmp/predeploy-live-app.js > /tmp/predeploy-live-contract.json
+          LIVE_UI_VERSION=$(jq -r .version /tmp/predeploy-live-contract.json)
+          EXPECTED_UI_VERSION=$(jq -r .version /tmp/pages-expected.json)
+          node apps/studio-web/ui-release-contract.mjs --assert-newer-than "$LIVE_UI_VERSION"
+          echo "predeploy_live_ui=$LIVE_UI_VERSION"
+          echo "predeploy_requested_ui=$EXPECTED_UI_VERSION"
 
       - name: Read existing Pages production branch
         shell: bash
@@ -207,6 +242,9 @@ jobs:
             expectedBuildId: buildIdMatch[1],
           }));
           NODE
+          # Re-read the contract through the same parser used by CI and the
+          # pre-deploy newness gate so verification cannot drift independently.
+          node apps/studio-web/ui-release-contract.mjs --json > /tmp/pages-expected.json
           EXPECTED_JS_URL=$(jq -r .expectedJsUrl /tmp/pages-expected.json)
           EXPECTED_JS_PATH=$(jq -r .expectedJsPath /tmp/pages-expected.json)
           EXPECTED_DENSITY_CSS_URL=$(jq -r .expectedDensityCssUrl /tmp/pages-expected.json)
@@ -367,21 +405,36 @@ jobs:
           # The operator uses the custom domain, so a green deploy is not enough unless
           # studio.chicagoshining.com is serving this exact build too.
           CUSTOM_URL="https://studio.chicagoshining.com"
-          CUSTOM_INDEX_CODE=$(curl -sS \
-            "${ACCESS_HEADERS[@]}" \
-            -D /tmp/custom-index.headers \
-            -o /tmp/custom-index.html \
-            -w '%{http_code}' \
-            "$CUSTOM_URL/?studio_build=$EXPECTED_LABEL&commit=$GITHUB_SHA" || true)
+          CUSTOM_INDEX_OK=0
+          CUSTOM_INDEX_CODE=""
+          CUSTOM_SERVED_LABEL=""
+          for attempt in 1 2 3 4 5 6 7 8; do
+            CUSTOM_INDEX_CODE=$(curl -sS \
+              "${ACCESS_HEADERS[@]}" \
+              -D /tmp/custom-index.headers \
+              -o /tmp/custom-index.html \
+              -w '%{http_code}' \
+              "$CUSTOM_URL/?studio_build=$EXPECTED_LABEL&commit=$GITHUB_SHA&attempt=$attempt" || true)
+            CUSTOM_SERVED_LABEL=$(node apps/studio-web/ui-release-contract.mjs \
+              --html /tmp/custom-index.html --html-version 2>/dev/null || true)
+            if [[ "$CUSTOM_INDEX_CODE" == "200" ]] \
+              && [[ "$CUSTOM_SERVED_LABEL" == "$EXPECTED_LABEL" ]] \
+              && grep -Fq "$EXPECTED_JS_URL" /tmp/custom-index.html; then
+              CUSTOM_INDEX_OK=1
+              echo "custom_domain_index_attempt=$attempt http=$CUSTOM_INDEX_CODE ui=$CUSTOM_SERVED_LABEL asset=ok"
+              break
+            fi
+            echo "custom_domain_index_attempt=$attempt http=$CUSTOM_INDEX_CODE ui=${CUSTOM_SERVED_LABEL:-unreadable} asset=miss"
+            sleep 10
+          done
           CUSTOM_LOCATION=$(awk 'BEGIN{IGNORECASE=1} /^location:/{sub(/^[^:]*:[[:space:]]*/, ""); sub(/\r$/, ""); print; exit}' /tmp/custom-index.headers)
-          echo "custom_domain_http=$CUSTOM_INDEX_CODE"
-          if [[ "$CUSTOM_INDEX_CODE" != "200" ]]; then
-            echo "Authenticated Studio custom-domain verification failed with HTTP $CUSTOM_INDEX_CODE (location: $CUSTOM_LOCATION)." >&2
+          if [[ "$CUSTOM_INDEX_OK" != "1" ]]; then
+            echo "Authenticated Studio custom-domain verification never served UI $EXPECTED_LABEL with $EXPECTED_JS_URL (last HTTP $CUSTOM_INDEX_CODE, location: $CUSTOM_LOCATION)." >&2
             exit 1
           fi
           require_match "UI build $EXPECTED_LABEL" /tmp/custom-index.html "custom-domain UI build label"
           require_match "$EXPECTED_DENSITY_CSS_PATH" /tmp/custom-index.html "custom-domain density css path"
-          require_match "$EXPECTED_JS_PATH" /tmp/custom-index.html "custom-domain js path"
+          require_match "$EXPECTED_JS_URL" /tmp/custom-index.html "custom-domain cache-busted js URL"
           require_match "$EXPECTED_OVERVIEW_URL" /tmp/custom-index.html "custom-domain Home overview cache-busted asset"
           CUSTOM_OVERVIEW_CODE=$(curl -sS \
             "${ACCESS_HEADERS[@]}" \
@@ -402,7 +455,7 @@ jobs:
           # Path renames are the hard cache bust; still retry briefly because the
           # custom-domain alias can lag pages.dev by a few seconds after deploy.
           CUSTOM_APP_OK=0
-          for attempt in 1 2 3 4 5 6; do
+          for attempt in 1 2 3 4 5 6 7 8; do
             CUSTOM_APP_CODE=$(curl -sS \
               "${ACCESS_HEADERS[@]}" \
               -o /tmp/custom-app.js \
@@ -440,15 +493,19 @@ jobs:
           if grep -Fq 'rollout=chicago-ig-reel-v1' apps/studio-web/index.html; then
             require_match 'factoryBatchRolloutNotice' /tmp/custom-index.html "Factory canary notice element"
             require_match 'rollout=chicago-ig-reel-v1' /tmp/custom-index.html "Factory canary cache-busted script URL"
+            FACTORY_DESK_URL=$(grep -oE '/assets/factory-desk\.js\?[^"[:space:]]+' apps/studio-web/index.html | head -n 1)
+            test -n "$FACTORY_DESK_URL"
             PILOT_JS_HTTP=$(curl -sS "${ACCESS_HEADERS[@]}" \
               -o /tmp/custom-factory-canary.js -w '%{http_code}' \
-              "$CUSTOM_URL/assets/factory-desk.js?v=0.6.709-overview-fast-refresh&rollout=chicago-ig-reel-v1" || true)
+              "$CUSTOM_URL$FACTORY_DESK_URL" || true)
             test "$PILOT_JS_HTTP" = "200"
             require_match 'function canSelectBatchOutput(card)' /tmp/custom-factory-canary.js "Factory canary client guard"
             require_match 'Limited production pilot: approve one Chicago Instagram Reel at a time.' /tmp/custom-factory-canary.js "Factory canary operator guidance"
             require_match 'selectable > limit' /tmp/custom-factory-canary.js "Factory single-output limit"
             echo "factory_chicago_canary_live_asset_verify=PASS"
           fi
+          echo "custom_domain_verified_ui=$EXPECTED_LABEL"
+          echo "custom_domain_verified_build_id=$EXPECTED_BUILD_ID"
           echo "custom_domain_content_verify=PASS"
 
       - name: Publish Studio Pages production deployment status

@@ -1,9 +1,10 @@
 import fs from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import test from "node:test";
 import assert from "node:assert/strict";
 
-const here = path.dirname(new URL(import.meta.url).pathname);
+const here = path.dirname(fileURLToPath(import.meta.url));
 const html = fs.readFileSync(path.join(here, "index.html"), "utf8");
 const css = fs.readFileSync(path.join(here, "assets/topbar-banner-0618.css"), "utf8");
 
@@ -12,7 +13,7 @@ test("Studio topbar loads skyline banner after existing styles", () => {
   const banner = html.indexOf("/assets/topbar-banner-0618.css");
   assert.ok(sticky >= 0);
   assert.ok(banner > sticky);
-  assert.match(html, /topbar-banner-0618\.css\?v=0.6.709-overview-fast-refresh/);
+  assert.match(html, /topbar-banner-0618\.css\?v=0.6.711-live-version-proof/);
   assert.match(css, /STUDIO_TOPBAR_CITY_BANNER_20261007/);
   assert.match(css, /data:image\/webp;base64,/);
 });

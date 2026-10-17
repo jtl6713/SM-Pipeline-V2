@@ -422,3 +422,4 @@ Deploy Factory ambiguous-submit reconciliation 2026-10-17. PR #817. Recover exac
 
 2026-10-17 Visual-aware voiceover + clip trim editor release. Deploy Studio Pages for PR #810 after green CI; feature remains server-gated to Do_Not_Publish canaries.
 2026-10-17 Factory activity layout Pages-only release | PR #842 merged aef275e74e0ca127ea365df20a7681a03d4d21cb | Recent batches and Recent approvals first row, Quality Agent full-width below with responsive horizontal findings; no Worker rollout.
+2026-10-17: Deploy Studio UI 0.6.711-live-version-proof. Advance the visible footer and every asset cache key for the Factory Quality Agent layout, reject unchanged push releases, and prove the exact build on the live custom domain.
