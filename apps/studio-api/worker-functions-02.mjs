@@ -6645,7 +6645,7 @@ export function platformOutputSeedFields(parentContentItem, requestRecord, outpu
 }
 /*__STUDIO_WORKER_END:platformOutputSeedFields__*/
 
-async function studioAtomicApplyPlatformOutputSeedSchedule(env, {
+export async function studioAtomicApplyPlatformOutputSeedSchedule(env, {
   platformOutput,
   desiredSchedule,
   vacate = false,
