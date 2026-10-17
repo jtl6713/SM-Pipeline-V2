@@ -41,6 +41,16 @@ jobs:
           node --test apps/studio-api/profiles-overview-refresh.test.mjs
           node --test apps/studio-api/profiles-overview-force-refresh-contract.test.mjs
           node --test apps/studio-api/overview-dispatch-counts.test.mjs
+          node --check apps/studio-api/schedule-reservation-authority.mjs
+          node --check apps/studio-api/schedule-reservation-transaction.mjs
+          node --check apps/studio-api/schedule-reservation-quality.mjs
+          node --test \
+            apps/studio-api/schedule-reservation-authority.test.mjs \
+            apps/studio-api/schedule-reservation-transaction.test.mjs \
+            apps/studio-api/schedule-reservation-concurrency.test.mjs \
+            apps/studio-api/schedule-reservation-quality.test.mjs \
+            apps/studio-api/schedule-reservation-integration.test.mjs \
+            apps/studio-api/schedule-reservation-runtime.test.mjs
 
       - name: Validate source and install pinned Wrangler
         shell: bash
