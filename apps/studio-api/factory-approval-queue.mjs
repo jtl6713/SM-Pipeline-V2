@@ -40,7 +40,8 @@ export function factoryBatchSummary(job) {
     can_retry: counts.failed_count > 0 && ["completed", "failed"].includes(job.status),
     items: job.items.map(item => ({
       id: item.id, output_id: item.output_id, platform: item.platform,
-      format: item.format, status: item.status, error: item.error || null,
+      format: item.format, title: item.title || null, content_id: item.content_id || null,
+      status: item.status, error: item.error || null,
     })),
   };
 }
@@ -55,7 +56,10 @@ export function factoryBatchBuild({ profileId, requestId, records, note = "", no
     seen.add(id);
     items.push({
       id, output_id: record.output_id || null, platform: record.platform || null,
-      format: record.format || null, status: "pending", error: null,
+      format: record.format || null,
+      title: String(record.title || "").slice(0, 180) || null,
+      content_id: record.content_id || null,
+      status: "pending", error: null,
       attempts: 0, next_attempt_ms: 0,
     });
   }
