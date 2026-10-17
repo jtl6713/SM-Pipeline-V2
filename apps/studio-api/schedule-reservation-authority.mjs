@@ -126,6 +126,7 @@ function operationDescriptor(payload = {}) {
     reservation_id: reservationId,
     factory_batch_id: clean(payload.factory_batch_id, 180) || null,
     output_type: clean(payload.output_type || payload.platform_output_type, 120) || null,
+    content_item_id: clean(payload.content_item_id, 128) || null,
   };
 }
 
@@ -226,6 +227,7 @@ function committedOccupancy(meta, excludeOutputId = "") {
       platform_output_record_id: row.platform_output_record_id,
       reservation_id: row.reservation_id,
       output_type: row.output_type || null,
+      content_item_id: row.content_item_id || null,
       scheduled_iso: row.scheduled_iso,
       fencing_generation: row.fencing_generation,
       committed_timestamp: row.committed_timestamp,
@@ -241,6 +243,7 @@ function setRecentReservation(meta, reservation, nowMs) {
       platform_output_record_id: outputId,
       reservation_id: reservation.reservation_id,
       output_type: reservation.output_type || null,
+      content_item_id: reservation.content_item_id || null,
       scheduled_iso: reservation.scheduled_iso,
       fencing_generation: reservation.fencing_generation,
       committed_timestamp: reservation.committed_timestamp || nowIso(nowMs),
@@ -534,6 +537,7 @@ export class ScheduleReservationLane {
         factory_batch_id: op.factory_batch_id,
         platform_output_record_id: op.platform_output_record_id,
         output_type: op.output_type,
+        content_item_id: op.content_item_id,
         fencing_generation: generation,
         acquired_timestamp: acquiredAt,
         last_heartbeat_timestamp: acquiredAt,
@@ -555,6 +559,7 @@ export class ScheduleReservationLane {
         factory_batch_id: op.factory_batch_id,
         platform_output_record_id: op.platform_output_record_id,
         output_type: op.output_type,
+        content_item_id: op.content_item_id,
         fencing_generation: generation,
         state: SCHEDULE_RESERVATION_STATES.ACQUIRED,
         action: "reserve",
