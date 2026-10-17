@@ -230,7 +230,8 @@ try {
  ];
  await phone.locator("#factoryBatchQualityRefresh").click();
  const sample=await phone.locator("#factoryBatchQualitySignals").innerText();
- for(const code of syntheticQualitySignals.map(x=>x.code)) assert.ok(sample.includes(code),code);
+ const technicalCodes=await phone.locator("#factoryBatchQualitySignals").textContent();
+ for(const code of syntheticQualitySignals.map(x=>x.code)) assert.ok(technicalCodes.includes(code),code);
  assert.match(sample,/Do not retry until the duplicate ledger is investigated/);
  // A malicious backend detail remains escaped text, never executable markup.
  syntheticQualitySignals=[{code:"QA-FACTORY-BATCH-FAILED-ITEM",
@@ -239,7 +240,7 @@ try {
  await phone.locator("#factoryBatchQualitySignals").getByText(/<img src="broken"/).waitFor();
  assert.equal(await phone.locator("#factoryBatchQualitySignals img").count(),0);
  assert.equal(await phone.evaluate(()=>window.qaInjected===true),false);
- // Switching a profile must not show a different profile's latest batch.
+ // Studio header does NOT control global Factory history.
  syntheticQualitySignals=null;
  await phone.evaluate(()=>{
    const select=document.getElementById("studioProfileSelect");
@@ -249,15 +250,21 @@ try {
    select.dispatchEvent(new Event("change",{bubbles:true}));
  });
  await phone.locator("#factoryBatchQualityRefresh").click();
- await phone.locator("#factoryBatchQualitySignals").getByText("No recent Factory batch").waitFor();
+ await phone.locator("#factoryBatchQualitySignals").getByText("No Quality Agent findings").waitFor();
+ assert.equal(await phone.locator("#factoryProfileFilter").inputValue(),"");
+ // Only Factory's own filter changes the monitoring scope.
  await phone.evaluate(()=>{
-   const select=document.getElementById("studioProfileSelect");
-   select.value="recF7UAn0LkMZZrWZ";
-   select.dispatchEvent(new Event("change",{bubbles:true}));
+   const filter=document.getElementById("factoryProfileFilter");
+   filter.add(new Option("Other profile","recOtherQualityProfile123"));
+   filter.value="recOtherQualityProfile123";
+   filter.dispatchEvent(new Event("change",{bubbles:true}));
  });
  await phone.locator("#factoryBatchQualityRefresh").click();
+ await phone.locator("#factoryBatchQualitySignals").getByText("No recent Factory batches in this view").waitFor();
+ await phone.locator("#factoryProfileFilter").selectOption("");
+ await phone.locator("#factoryBatchQualityRefresh").click();
  await phone.locator("#factoryBatchQualitySignals").getByText("No Quality Agent findings").waitFor();
- console.log("factory_quality_agent_profile_isolation_and_xss=PASS");
+ console.log("factory_quality_agent_global_independent_filter_and_xss=PASS");
  // Never blindly treat an unavailable Quality Agent GET as "no findings".
  syntheticQualitySignals=null;
  console.log("factory_quality_agent_all_five_signatures=PASS");
