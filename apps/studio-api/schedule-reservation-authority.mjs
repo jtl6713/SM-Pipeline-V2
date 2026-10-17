@@ -1070,6 +1070,9 @@ export class ScheduleReservationLane {
   async _status() {
     const nowMs = this._now();
     const meta = await this._readMeta();
+    const activeReservation = meta.lock?.reservation_id
+      ? await this._readReservation(this.state.storage, meta.lock.reservation_id).catch(() => null)
+      : null;
     return {
       ok: true,
       schema: meta.schema,
@@ -1077,6 +1080,7 @@ export class ScheduleReservationLane {
       generation: meta.generation,
       lock: publicLock(meta.lock, nowMs),
       quarantine: meta.quarantine,
+      active_reservation: activeReservation,
       waiters: Object.values(meta.waiters || {}),
       recent_reservations: meta.recent_reservations || [],
       updated_at: meta.updated_at,
