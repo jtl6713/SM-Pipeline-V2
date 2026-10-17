@@ -114,6 +114,20 @@ test("documented Story main +10 companion pair is not classified as collision", 
   assert.deepEqual(scheduleReservationCollisionFindings(row, now), []);
 });
 
+test("two Stories ten minutes apart are still classified as a platform collision", () => {
+  const row = snapshot({
+    lock: null,
+    active_reservation: null,
+    recent_reservations: [
+      { platform_output_record_id: "recStoryA", reservation_id: "story-a", output_type: "Story", scheduled_iso: "2026-10-18T10:30:00.000Z" },
+      { platform_output_record_id: "recStoryB", reservation_id: "story-b", output_type: "Story", scheduled_iso: "2026-10-18T10:40:00.000Z" },
+    ],
+  });
+  const collisions = scheduleReservationCollisionFindings(row, now);
+  assert.equal(collisions.length, 1);
+  assert.equal(collisions[0].signature, SCHEDULE_RESERVATION_SIGNATURES.COLLISION);
+});
+
 test("recovery observation distinguishes committed, not-committed, and ambiguous external writes", () => {
   const row = snapshot({
     active_reservation: {
