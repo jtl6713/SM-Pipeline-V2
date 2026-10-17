@@ -325,42 +325,66 @@
   function renderFactoryBatchActivity(batch) {
     state.batch = batch || null;
     const summary = $("factoryBatchSummary");
+    const count = $("factoryBatchMetricValue");
+    const recent = $("factoryBatchRecentList");
     const inspect = $("factoryBatchInspect");
     const retry = $("factoryBatchRetry");
     const details = $("factoryBatchDetails");
     const updated = $("factoryBatchUpdated");
     if (!summary || !details) return;
-    if (!batch || batch.status === "idle" || !batch.job_id) {
-      summary.textContent = "No recent Factory approval batch for the selected profile.";
-      details.hidden = true;
-      details.innerHTML = "";
-      if (inspect) inspect.hidden = true;
-      if (retry) retry.hidden = true;
-      if (updated) updated.textContent = "No active batch";
-      return;
+    const batches = Array.isArray(batch?.batches) ? batch.batches :
+      (batch?.job_id ? [batch] : []);
+    const totals = batch?.totals || {
+      batches: batches.length,
+      active: batches.filter(row => ["queued", "running"].includes(row.status)).length,
+      approved: batches.reduce((sum, row) => sum + Number(row.approved_count || 0), 0),
+      failed: batches.reduce((sum, row) => sum + Number(row.failed_count || 0), 0),
+    };
+    if (count) count.textContent = String(Number(totals.batches) || 0);
+    summary.textContent = `${Number(totals.active) || 0} active · ${Number(totals.approved) || 0} approved · ${Number(totals.failed) || 0} failed`;
+    if (updated) updated.textContent = batch?.history_complete === false
+      ? "Recent history (bounded window)" : "Latest activity · all matching profiles";
+    if (recent) recent.innerHTML = batches.length
+      ? batches.slice(0, 8).map(row => {
+        const item = (row.items || [])[0] || {};
+        const label = item.title || [item.platform, item.format].filter(Boolean).join(" ") || "Approval batch";
+        const outputLabel = item.output_id ? `Output #${item.output_id}` : `${row.total || 0} outputs`;
+        const stateLabel = ["running", "queued"].includes(row.status) ? "Processing"
+          : row.failed_count ? "Needs attention" : "Completed";
+        const passed = Number(row.approved_count || 0);
+        return `<div class="factory-batch-recent-row">
+          <div class="factory-batch-recent-info">
+            <strong>${esc(label)}</strong>
+            <span>${esc(factoryProfileLabel(row.profile_id))} · ${esc(outputLabel)} · ${esc([item.platform, item.format].filter(Boolean).join(" "))}</span>
+          </div>
+          <div class="factory-batch-recent-result">
+            <strong>${esc(stateLabel)}</strong><span>${passed} approved · ${Number(row.failed_count) || 0} failed</span>
+          </div>
+        </div>`;
+      }).join("")
+      : '<p class="subtle">No recent approval batches in this Factory view.</p>';
+    const latest = batches[0] || null;
+    if (inspect) {
+      inspect.hidden = !latest;
+      inspect.setAttribute("aria-expanded", String(state.batchDetailsOpen));
     }
-    const n = Number(batch.total) || 0;
-    const success = Number(batch.approved_count) || 0;
-    const skipped = Number(batch.skipped_count) || 0;
-    const failed = Number(batch.failed_count) || 0;
-    const pending = Number(batch.pending_count) || 0;
-    const consistent = n === success + skipped + failed + pending;
-    summary.textContent = `${batch.status === "running" || batch.status === "queued" ? "Processing" : "Finished"} · ${n} total · ${success} approved · ${skipped} already satisfied/skipped · ${pending} pending · ${failed} failed${consistent ? "" : " · COUNTERS NEED RECONCILIATION"}`;
-    if (updated) updated.textContent = `Batch ${batch.job_id} · ${batch.updated_at ? new Date(batch.updated_at).toLocaleString() : "Status available"}`;
-    if (inspect) { inspect.hidden = false; inspect.setAttribute("aria-expanded", String(state.batchDetailsOpen)); }
     if (retry) {
-      retry.hidden = !(failed > 0 && batch.can_retry);
+      retry.hidden = !(latest?.failed_count > 0 && latest?.can_retry);
       retry.disabled = state.submittingBatch;
     }
-    const items = Array.isArray(batch.items) ? batch.items : [];
-    details.hidden = !state.batchDetailsOpen;
-    details.innerHTML = items.length
-      ? `<ul class="factory-batch-item-list">${items.map((item) =>
-          `<li><strong>${esc(item.platform || "Output")} ${esc(item.format || "")}</strong>
-             <span>${esc(item.output_id ? `O${item.output_id}` : item.id)} · ${esc(item.status || "pending")}</span>
-             ${item.error ? `<small>${esc(item.error)}</small>` : ""}</li>`
-        ).join("")}</ul>`
-      : '<p class="subtle">Item detail is not available from this Worker version.</p>';
+    details.hidden = !state.batchDetailsOpen || !latest;
+    const items = Array.isArray(latest?.items) ? latest.items : [];
+    details.innerHTML = latest ? `<ul class="factory-batch-item-list">${items.map(item =>
+      `<li><strong>${esc(item.title || [item.platform, item.format].filter(Boolean).join(" ") || "Output")}</strong>
+      <span>${esc(item.output_id ? `Output #${item.output_id}` : "Output")} · ${esc(item.status || "pending")}</span>
+      ${item.error ? `<small>${esc(item.error)}</small>` : ""}</li>`).join("")}</ul>
+      <details class="factory-batch-technical"><summary>Technical reference</summary>
+      <code>${esc(latest.job_id)}</code> <button type="button" class="secondary-button"
+      data-factory-copy-batch="${esc(latest.job_id)}">Copy batch ID</button></details>` : "";
+    details.querySelector("[data-factory-copy-batch]")?.addEventListener("click", () => {
+      const value = String(latest?.job_id || "");
+      if (value) navigator.clipboard?.writeText(value).catch(() => {});
+    });
   }
 
   // Batch status is independently polled, but the Needs Eyes list is not.
