@@ -168,8 +168,7 @@ test("group status and discovery are durable and multi-profile",async()=>{
   assert.equal(group.items.find(item=>item.id===outputs[1].id).profile_id,nyc);
 });
 test("global submission route is explicitly gated and wired to parent/child ledger",async()=>{
-  const {readStudioWorkerSource}=await import("./worker-source-reader.mjs");
-  const worker=readStudioWorkerSource();
+  const worker=(await import("node:fs")).readFileSync(new URL("./worker-functions-04.mjs",import.meta.url),"utf8");
   assert.match(worker,/factoryApprovalGroupEnqueue/);
   assert.match(worker,/factoryApprovalGroupResume/);
   assert.match(worker,/factoryGlobalPolicy\(env\)/);
