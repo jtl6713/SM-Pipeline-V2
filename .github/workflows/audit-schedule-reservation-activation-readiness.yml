@@ -1,0 +1,46 @@
+name: Audit Atomic Scheduling Activation Readiness
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - name: Read-only production version, disabled flag, and canary cleanup audit
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+          API="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts"
+          AUTH="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
+          curl -fsS -H "$AUTH" "$API/chicagoshining-studio-api/deployments" -o /tmp/reservation-deployments.json
+          jq -e '.success==true' /tmp/reservation-deployments.json >/dev/null
+          VERSION="$(jq -er '.result.deployments[0].versions|max_by(.percentage)|.version_id' /tmp/reservation-deployments.json)"
+          curl -fsS -H "$AUTH" "$API/chicagoshining-studio-api/versions/$VERSION" -o /tmp/reservation-version.json
+          jq -e '.success==true' /tmp/reservation-version.json >/dev/null
+          jq -e '
+            [.result.resources.bindings[]? | select(.name=="STUDIO_SCHEDULE_RESERVATION_AUTHORITY_ENABLED" and .type=="plain_text" and .text=="false")] | length == 1
+          ' /tmp/reservation-version.json >/dev/null
+          jq -e '
+            [.result.resources.bindings[]? | select(.name=="STUDIO_SCHEDULE_RESERVATIONS" and .type=="durable_object_namespace")] | length == 1
+          ' /tmp/reservation-version.json >/dev/null
+          echo "production_authority_flag=DISABLED"
+          echo "production_durable_object_binding=PRESENT"
+          echo "active_version=$VERSION"
+          STATUS="$(curl -sS -o /tmp/canary-script-check.json -w '%{http_code}' -H "$AUTH" "$API/studio-schedule-reservation-synthetic-canary/settings")"
+          if [ "$STATUS" = "404" ]; then
+            echo "temporary_canary_worker=ABSENT"
+          elif [ "$STATUS" = "200" ]; then
+            echo "temporary_canary_worker=STILL_PRESENT"
+            exit 1
+          else
+            echo "temporary_canary_worker=UNVERIFIED_HTTP_$STATUS"
+            exit 1
+          fi
+          echo "activation_readiness_audit=PASS_FLAG_STILL_DISABLED"
