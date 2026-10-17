@@ -4845,6 +4845,8 @@ const STUDIO_R5_DONE_HOOK_TOKEN = "r5done_7kqp2nvm4w8x1c9h3z";
 /*__STUDIO_WORKER_EXTRACT:getOutputCreative__*/
 /*__STUDIO_WORKER_EXTRACT:phase6Select__*/
 /*__STUDIO_WORKER_EXTRACT:phase6SlideDirectiveFromPayload__*/
+/*__STUDIO_WORKER_EXTRACT:phase6MergeVisualTimelineInputs__*/
+/*__STUDIO_WORKER_EXTRACT:phase6NextVisualTimeline__*/
 /*__STUDIO_WORKER_EXTRACT:updateOutputCreative__*/
 /*__STUDIO_WORKER_EXTRACT:phase6DimensionsForRatio__*/
 /*__STUDIO_WORKER_EXTRACT:phase6AssetSourceForSlide__*/
@@ -5116,6 +5118,7 @@ async function syncProductionCadence(env, { force = false, startRender = false, 
 /*__STUDIO_WORKER_EXTRACT:phase6WaitForScenarioExecution__*/
 /*__STUDIO_WORKER_EXTRACT:phase6WaitForVoicePrepCompletion__*/
 /*__STUDIO_WORKER_EXTRACT:phase6ClearVoicePrepTokens__*/
+/*__STUDIO_WORKER_EXTRACT:phase6VoicePrepRevisionIdentity__*/
 /*__STUDIO_WORKER_EXTRACT:phase6AdvanceVoicePrepShort__*/
 /*__STUDIO_WORKER_EXTRACT:phase6AutoVoicePrepForOutput__*/
 /*__STUDIO_WORKER_EXTRACT:studioOutputReadyForPublishApproval__*/
