@@ -109,7 +109,28 @@ jobs:
           if any(v is None for v in vars_out.values()): raise SystemExit('Could not recover active non-secret values')
           bucket=by_name['STUDIO_MEDIA'].get('bucket_name') or by_name['STUDIO_MEDIA'].get('bucket')
           if not bucket: raise SystemExit('Could not recover active STUDIO_MEDIA bucket identity')
-          cfg={'name':'chicagoshining-studio-api','main':'worker.js','compatibility_date':'2026-08-02','workers_dev':False,'keep_vars':True,'vars':vars_out,'r2_buckets':[{'binding':'STUDIO_MEDIA','bucket_name':bucket}]}
+          vars_out['STUDIO_SCHEDULE_RESERVATION_AUTHORITY_ENABLED']='false'
+          cfg={
+            'name':'chicagoshining-studio-api',
+            'main':'worker.js',
+            'compatibility_date':'2026-08-02',
+            'workers_dev':False,
+            'keep_vars':True,
+            'vars':vars_out,
+            'r2_buckets':[{'binding':'STUDIO_MEDIA','bucket_name':bucket}],
+            'durable_objects':{
+              'bindings':[{
+                'name':'STUDIO_SCHEDULE_RESERVATIONS',
+                'class_name':'ScheduleReservationLane',
+              }],
+            },
+            'exports':{
+              'ScheduleReservationLane':{
+                'type':'durable-object',
+                'storage':'sqlite',
+              },
+            },
+          }
           work=Path('/tmp/studio-current-rollout')
           (work/'wrangler.jsonc').write_text(json.dumps(cfg,indent=2))
           (work/'worker.js').write_bytes(Path('apps/studio-api/worker.js').read_bytes())
@@ -160,7 +181,9 @@ jobs:
           from pathlib import Path
           core={'AIRTABLE_BASE_ID':'plain_text','AIRTABLE_CONTENT_TABLE_ID':'plain_text','AIRTABLE_IDEA_TABLE_ID':'plain_text','AIRTABLE_MEDIA_TABLE_ID':'plain_text','AIRTABLE_MUSIC_VIEW_ID':'plain_text','AIRTABLE_OUTPUT_TABLE_ID':'plain_text','AIRTABLE_PAT':'secret_text','ALLOWED_ORIGINS':'plain_text','I3_DECISION_WEBHOOK_URL':'plain_text','STUDIO_MEDIA':'r2_bucket'}
           r=json.loads(Path('/tmp/candidate-version.json').read_text())['result']; got={str(x.get('name')):str(x.get('type')) for x in ((r.get('resources') or {}).get('bindings') or [])}
-          missing={k:v for k,v in core.items() if got.get(k)!=v}; unexpected={k:v for k,v in got.items() if k not in core and k!='ELEVENLABS_API_KEY'}
+          missing={k:v for k,v in core.items() if got.get(k)!=v};
+          if got.get('STUDIO_SCHEDULE_RESERVATIONS') != 'durable_object_namespace':
+              raise SystemExit('Candidate lost atomic scheduling Durable Object binding') unexpected={k:v for k,v in got.items() if k not in core and k!='ELEVENLABS_API_KEY'}
           if missing or unexpected: raise SystemExit(f'Candidate binding contract failed; missing={missing}, unexpected={unexpected}')
           Path('/tmp/candidate-binding-audit.json').write_text(json.dumps({'version_id':r.get('id'),'version_number':r.get('number'),'binding_count':len(got),'core_ok':True},indent=2,sort_keys=True))
           PY
