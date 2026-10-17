@@ -106,15 +106,16 @@ jobs:
           from pathlib import Path
           bucket=Path('/tmp/studio-media-bucket.txt').read_text().strip()
           rollout=json.loads(Path('deploy/factory-batch-production-rollout.json').read_text())
-          assert rollout.get('mode')=='chicago_ig_reel_v1'
+          safe_modes={'chicago_ig_reel_v1':1,'chicago_ig_reels_v2':5}
+          assert rollout.get('mode') in safe_modes
           assert rollout.get('profile_id')=='recT2rbKX3MF7cVFU'
           assert rollout.get('platform')=='Instagram' and rollout.get('output_type')=='Reel'
-          assert rollout.get('max_items')==1
+          assert rollout.get('max_items')==safe_modes[rollout['mode']]
           assert type(rollout.get('enabled')) is bool
           factory_vars={
             'FACTORY_BATCH_APPROVALS_ENABLED':'true' if rollout['enabled'] else 'false',
-            'FACTORY_BATCH_ROLLOUT_MODE':'chicago_ig_reel_v1',
-            'FACTORY_BATCH_ROLLOUT_MAX_ITEMS':'1',
+            'FACTORY_BATCH_ROLLOUT_MODE':rollout['mode'],
+            'FACTORY_BATCH_ROLLOUT_MAX_ITEMS':str(rollout['max_items']),
           }
           cfg={
             'name':os.environ['TARGET_WORKER'],
@@ -173,14 +174,14 @@ jobs:
           rollout=json.loads(Path('deploy/factory-batch-production-rollout.json').read_text())
           expected={
             'FACTORY_BATCH_APPROVALS_ENABLED':'true' if rollout['enabled'] else 'false',
-            'FACTORY_BATCH_ROLLOUT_MODE':'chicago_ig_reel_v1',
-            'FACTORY_BATCH_ROLLOUT_MAX_ITEMS':'1',
+            'FACTORY_BATCH_ROLLOUT_MODE':rollout['mode'],
+            'FACTORY_BATCH_ROLLOUT_MAX_ITEMS':str(rollout['max_items']),
           }
           binding_values={b.get('name'):str(b.get('text','')) for b in bindings}
           for name,value in expected.items():
               if binding_values.get(name)!=value:
                   raise SystemExit('Factory batch release verification mismatch: '+name)
-          print('factory_batch_canary_binding_contract=PASS profile=Chicago platform=Instagram format=Reel max=1 enabled='+expected['FACTORY_BATCH_APPROVALS_ENABLED'])
+          print('factory_batch_canary_binding_contract=PASS profile=Chicago platform=Instagram format=Reel max='+str(rollout['max_items'])+' enabled='+expected['FACTORY_BATCH_APPROVALS_ENABLED'])
           safe={'version_id':r.get('id'),'version_number':r.get('number'),'binding_count':len(bindings),'contract':contract['contract'],'core_ok':contract['core_ok'],'elevenlabs_present':contract['optional_present'].get('ELEVENLABS_API_KEY'),'bindings':contract['bindings']}
           Path('/tmp/postdeploy-contract-sanitized.json').write_text(json.dumps(safe,indent=2,sort_keys=True))
           print('postdeploy_binding_contract=PASS')
@@ -341,11 +342,13 @@ jobs:
           done
           jq -e '.ok==true and .batch==true and .approvals_enabled==false' /tmp/factory-batch-status.json >/dev/null || { echo "Factory LA must remain excluded from pilot" >&2; exit 1; }
           CHICAGO="https://$VERIFY_BRIDGE.$SUBDOMAIN.workers.dev/$TOKEN/factory-status-chicago"
+          EXPECTED_MODE=$(jq -r '.mode' deploy/factory-batch-production-rollout.json)
+          EXPECTED_MAX=$(jq -r '.max_items' deploy/factory-batch-production-rollout.json)
           PILOT_CODE=000
           for i in 1 2 3 4 5; do
             PILOT_CODE=$(curl -sS --max-time 60 -o /tmp/factory-batch-chicago.json -w '%{http_code}' "$CHICAGO" || true)
-            if [[ "$PILOT_CODE" == "200" ]] && jq -e '.ok==true and .batch==true and .approvals_enabled==true and .rollout.mode=="chicago_ig_reel_v1" and .rollout.max_items==1 and .rollout.platform=="Instagram" and .rollout.output_type=="Reel" and .rollout.profile_id=="recT2rbKX3MF7cVFU"' /tmp/factory-batch-chicago.json >/dev/null 2>&1; then
-              echo "factory_batch_chicago_pilot=PASS one_Instagram_Reel"
+            if [[ "$PILOT_CODE" == "200" ]] && jq -e --arg mode "$EXPECTED_MODE" --argjson max "$EXPECTED_MAX" '.ok==true and .batch==true and .approvals_enabled==true and .rollout.mode==$mode and .rollout.max_items==$max and .rollout.platform=="Instagram" and .rollout.output_type=="Reel" and .rollout.profile_id=="recT2rbKX3MF7cVFU"' /tmp/factory-batch-chicago.json >/dev/null 2>&1; then
+              echo "factory_batch_chicago_pilot=PASS max_items=$EXPECTED_MAX Instagram_Reel_only"
               exit 0
             fi
             sleep 3
