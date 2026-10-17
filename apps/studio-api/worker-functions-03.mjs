@@ -7205,11 +7205,19 @@ export async function updateOutputCreative(request, env, url, authorization) {
   return respond(request, env, {
     ok: true,
     saved: true,
+    visual_timeline_saved: Boolean(nextVisualTimeline),
     record: mapPhase6CreativeOutput(refreshedOutput),
     slides: phase6SlidesWithTitleRenderInput(refreshedOutput, slides),
+    visual_timeline: nextVisualTimeline || (
+      phase6VisualTimelineEnabledForOutput(env, refreshedOutput)
+        ? buildVisualTimelineFromSlides(slides, { previousTimeline: current.creative_settings?.visual_timeline || null })
+        : null
+    ),
     title_lock: titleLock,
     make_voice_mapping: makeVoiceMigration,
-    message: unlockRequested
+    message: nextVisualTimeline
+      ? "Visual timeline saved. Publishing state was not changed; render/TTS were not started."
+      : unlockRequested
       ? "Per-photo titles are unlocked. Save a new preview and approve again before publishing review is complete."
       : "Phase 6 creative settings saved. Publishing state was not changed.",
   });
