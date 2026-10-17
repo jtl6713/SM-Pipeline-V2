@@ -1759,6 +1759,15 @@ export async function overlayLiveTikTokPublishRows(env, mappedRows) {
 }
 /*__STUDIO_WORKER_END:overlayLiveTikTokPublishRows__*/
 
+export async function mergeLatestPipelineWithManualRows(env, profile, recent = []) {
+  const manualRows = await loadManualActionPipelineOutputs(env, profile);
+  // First argument wins. A live manual row replaces a stale newest-page copy.
+  // Output 2143 (Miami TikTok inbox draft) is outside newest-60, and All Profiles
+  // still counts it, so the Attention click-through was empty.
+  return mergePipelineOutputRecords(manualRows, recent);
+}
+/*__STUDIO_WORKER_END:mergeLatestPipelineWithManualRows__*/
+
 export async function listOutputs(request, env, url, authorization, ctx = null) {
   const profile = await resolveWorkingContentProfile(env, authorization, requestedProfileId(url));
   // QA-PIPELINE-NEWEST-MISSING: bypass potentially stale heavy snapshots with
@@ -1773,12 +1782,21 @@ export async function listOutputs(request, env, url, authorization, ctx = null) 
           reviewOnly: false,
         }));
         if (!packed.profileMissing) {
-          const recent = (packed.records || []).slice(0, 60);
+          const recent = await mergeLatestPipelineWithManualRows(
+            env,
+            profile,
+            (packed.records || []).slice(0, 60),
+          );
+          const labelIds = studioPipelineContentIdsFromOutputs(recent)
+            .filter((id) => !packed.contentByAirtableId.has(id));
+          const extraLabels = await pipelineContentLabelsById(env, profile, labelIds);
           const mapped = recent.map((record) => mapOutput(
             record,
             null,
             null,
-            packed.contentByAirtableId.get(studioFirstLinkedId(f(record, "Content_Item"))) || null,
+            packed.contentByAirtableId.get(studioFirstLinkedId(f(record, "Content_Item")))
+              || extraLabels.get(studioFirstLinkedId(f(record, "Content_Item")))
+              || null,
           ));
           return respond(request, env, {
             ok: true,
@@ -1792,13 +1810,14 @@ export async function listOutputs(request, env, url, authorization, ctx = null) 
         console.warn("supabase pipeline latest read failed; falling back to Airtable", error);
       }
     }
-    const recent = await studioReadCoalesce(key, 7000, () => listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
+    const recentPage = await studioReadCoalesce(key, 7000, () => listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
       fields: OUTPUT_LIST_FIELDS,
       sortField: "Output_ID",
       sortDirection: "desc",
       filterFormula: contentProfileFilterFormula(profile),
       limit: 60,
     }));
+    const recent = await mergeLatestPipelineWithManualRows(env, profile, recentPage);
     // The lightweight latest path used to skip the Content Item label lookup,
     // so its mapped rows had content_number=null and the Pipeline could not
     // display Content ID even though the full snapshot already knew it.
