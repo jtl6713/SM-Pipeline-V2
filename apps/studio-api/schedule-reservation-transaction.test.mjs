@@ -32,6 +32,7 @@ function makeEnv() {
   return {
     env: {
       STUDIO_SCHEDULE_RESERVATION_AUTHORITY_ENABLED: "true",
+      STUDIO_SCHEDULE_RESERVATION_LANE_ALLOWLIST: "recChicago::tiktok",
       STUDIO_SCHEDULE_RESERVATIONS: namespace,
     },
     lane,
