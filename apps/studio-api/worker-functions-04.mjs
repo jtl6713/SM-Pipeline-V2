@@ -1648,7 +1648,14 @@ async function studioApproveOutputRecordAtomic(env, record, note, stamp, payload
       && !markerIso);
   const existingNotes = String(f(record, "Review_Notes") || "").trim();
   const prepared = await studioEnsureNativePublishSlides(env, record);
-  const operationId = String(options.scheduleOperationId || `approve:${id}:${stamp}`).trim();
+  const approvalCycle = String(
+    f(record, "Final_File_ID")
+    || f(record, "Remotion_Job_ID")
+    || f(record, "Final_File_URL")
+    || f(record, "Studio_Preview_R2_Key")
+    || "current"
+  ).replace(/[^A-Za-z0-9._:-]+/g, "_").slice(0, 96);
+  const operationId = String(options.scheduleOperationId || `approve:${id}:${approvalCycle}`).trim();
   const factoryBatchId = String(options.factoryBatchId || options.factory_batch_id || "").trim() || null;
 
   const result = await runAtomicScheduleTransaction(env, {
@@ -11995,7 +12002,10 @@ export async function scheduleStudioPublishOutput(request, env, url, authorizati
       platform,
       output_type: outputType,
       platform_output_record_id: match[1],
-      operation_id: "",
+      operation_id: String(
+        payload?.schedule_operation_id
+        || `schedule:${match[1]}:${previousRaw || "blank"}->${value || (publishNowImmediate ? "immediate" : "auto")}`
+      ).replace(/[^A-Za-z0-9._:>+-]+/g, "_").slice(0, 180),
     }, {
       legacy: async () => {
         throw new HttpError(503, "Atomic schedule transaction unexpectedly entered legacy mode");
