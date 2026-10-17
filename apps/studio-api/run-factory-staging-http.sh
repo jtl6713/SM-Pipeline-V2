@@ -12,6 +12,9 @@ ACTIVE="wrangler.factory-staging.active.jsonc"
 WRANGLER="./node_modules/.bin/wrangler"
 STAGED_DEPLOYED=0
 RELOCK_OK=0
+ACCEPTANCE_PASSED=0
+STAGING_TEST_AUTH=""
+STAGING_WORKER_URL=""
 API_ROOT="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID"
 WORKER_API="$API_ROOT/workers/scripts/$EXPECTED_WORKER"
 
@@ -48,6 +51,19 @@ finish() {
       if ! jq -e '.ok==true and .approvals_enabled==false' /tmp/factory-staging-final-health.json >/dev/null 2>&1; then
         echo "ERROR: Could not independently confirm staging feature flag is OFF." >&2
         original=1
+      fi
+      if [ "$ACCEPTANCE_PASSED" = 1 ] && [ -s /tmp/factory-stage-requestid.txt ]; then
+        rid=$(cat /tmp/factory-stage-requestid.txt)
+        curl -fsS --max-time 30 -H "Authorization: Bearer $STAGING_TEST_AUTH" \
+          "$STAGING_WORKER_URL/api/factory/approval-batches?profile_id=rect1wQB9BeUSEimn&request_id=$rid" \
+          -o /tmp/factory-staging-persisted-after-redeploy.json
+        if jq -e '.total==5 and .approved_count==4 and .failed_count==1 and .pending_count==0 and .approvals_enabled==false' \
+          /tmp/factory-staging-persisted-after-redeploy.json >/dev/null 2>&1; then
+          echo "FACTORY_STAGING_R2_PERSISTED_ACROSS_REDEPLOY=PASS"
+        else
+          echo "ERROR: Staging batch R2 ledger did not persist after Worker redeploy" >&2
+          original=1
+        fi
       fi
       if [ -s /tmp/factory-stage-requestid.txt ]; then
         rid=$(cat /tmp/factory-stage-requestid.txt)
@@ -210,4 +226,5 @@ jq -e '.staging==true and .approvals_enabled==true and .transport=="intercepted"
 echo "FACTORY_STAGING_TEMPORARY_ACTIVATION=PASS"
 
 node apps/studio-api/factory-batch-deployed-http.staging.mjs
+ACCEPTANCE_PASSED=1
 echo "FACTORY_STAGING_ACTUAL_DEPLOYED_HTTP_ACCEPTANCE=PASS"
