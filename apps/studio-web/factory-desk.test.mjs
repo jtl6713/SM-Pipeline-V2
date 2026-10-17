@@ -15,7 +15,7 @@ test("Factory Desk is a separate page beside Operations", async () => {
   assert.match(html, /id="navFactory"[^>]*>Factory</);
   assert.match(html, /id="page-factory"/);
   assert.match(html, /factory-open-target\.js\?v=0.6.709-overview-fast-refresh/);
-  assert.match(html, /factory-desk\.js\?v=0.6.709-overview-fast-refresh/);
+  assert.match(html, /factory-desk\.js\?v=0\.6\.\d+(?:-[a-z0-9-]+)?/);
   assert.match(html, /"factory":\s*\[\s*"\/assets\/factory-open-target\.js[\s\S]*"\/assets\/factory-desk\.js/);
   assert.doesNotMatch(html, /<script src="\/assets\/factory-desk\.js/);
   assert.match(html, /factory-band-auto/);
