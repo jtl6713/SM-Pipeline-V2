@@ -1106,7 +1106,29 @@ export class ScheduleReservationLane {
       const reservation = lock.reservation_id
         ? await this._readReservation(storage, lock.reservation_id)
         : null;
-      if (EXTERNAL_WRITE_POSSIBLE_STATES.has(lock.state)) {
+      if (lock.state === SCHEDULE_RESERVATION_STATES.COMMITTED && reservation?.committed === true) {
+        const releasedAt = nowIso(nowMs);
+        await this._writeReservation(storage, {
+          ...reservation,
+          state: SCHEDULE_RESERVATION_STATES.RELEASED,
+          released_timestamp: releasedAt,
+          recovery_reason: "verified committed owner expired before release; lane auto-released from durable ledger",
+          updated_at: releasedAt,
+        });
+        meta.lock = {
+          ...lock,
+          owner_operation_id: null,
+          factory_batch_id: null,
+          platform_output_record_id: null,
+          state: SCHEDULE_RESERVATION_STATES.RELEASED,
+          released_timestamp: releasedAt,
+          lease_expiration_timestamp: releasedAt,
+          external_commit_possible: false,
+          last_error: null,
+          recovery_reason: "verified committed owner expired before release; safe automatic release",
+        };
+        meta.quarantine = null;
+      } else if (EXTERNAL_WRITE_POSSIBLE_STATES.has(lock.state)) {
         const reason = lock.recovery_reason || "lease expired after external schedule commit became possible";
         meta.lock = {
           ...lock,
