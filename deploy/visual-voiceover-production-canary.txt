@@ -9,3 +9,4 @@
 2026-10-17 rerun after live nonpublishing visual timeline response contract deployment 1b7ef6069d9c7a378526428b71f5021f215ff192.
 2026-10-17 rerun with duration-safe canary narration after commit 39be3a97c33c1b9896e63c3509c2064f6fb8b428.
 2026-10-17 rerun after idempotent baseline narration recovery (6c1433163fc109903b7bc07f1dd5e59b2b1cfd2c).
+2026-10-17 rerun after repairing stale canary narration state and enabling duration-safe alternating test narration.
