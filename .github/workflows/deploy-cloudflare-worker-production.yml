@@ -461,7 +461,7 @@ jobs:
           ' /tmp/overview-after.json >/dev/null
           echo "overview_force_refresh_production=PASS generation=$GENERATION profiles=$(jq '.records|length' /tmp/overview-after.json) snapshot_at=$SNAPSHOT_AT"
 
-      - name: Verify Chicago-only Factory batch canary via read-only Worker status
+      - name: Verify Factory batch rollout via read-only Worker status
         shell: bash
         run: |
           set -euo pipefail
@@ -501,12 +501,12 @@ jobs:
           GLOBAL_CODE=000
           for i in 1 2 3 4 5; do
             GLOBAL_CODE=$(curl -sS --max-time 60 -o /tmp/factory-batch-global.json -w '%{http_code}' "$GLOBAL_URL" || true)
-            if [[ "$GLOBAL_CODE" == "200" ]] && jq -e --arg stage "$EXPECTED_STAGE" --argjson total "$EXPECTED_TOTAL" --argjson per "$EXPECTED_PER_PROFILE" '.ok==true and .scope=="all" and .global_rollout.enabled==true and .global_rollout.stage==$stage and .global_rollout.max_total==$total and .global_rollout.max_per_profile==$per and .global_rollout.allowed_platforms==["Instagram"] and .global_rollout.allowed_formats==["Reel","Story"]' /tmp/factory-batch-global.json >/dev/null 2>&1; then
+            if [[ "$GLOBAL_CODE" == "200" ]] && jq -e --arg stage "$EXPECTED_STAGE" --argjson total "$EXPECTED_TOTAL" --argjson per "$EXPECTED_PER_PROFILE" '.ok==true and .scope=="all" and .global_rollout.enabled==true and .global_rollout.stage==$stage and .global_rollout.max_total==$total and .global_rollout.max_per_profile==$per and .global_rollout.allowed_platforms==["Instagram","Facebook","TikTok","YouTube"] and .global_rollout.allowed_output_types_by_platform=={"Instagram":["Reel","Story","Single Image","Carousel"],"Facebook":["Reel","Story","Single Image","Multi-Image Post","Slideshow Reel"],"TikTok":["Video Draft","Story","Single Photo","Multi-Photo"],"YouTube":["Short","Standard Video","Slideshow Video"]}' /tmp/factory-batch-global.json >/dev/null 2>&1; then
               break
             fi
             sleep 3
           done
-          jq -e --arg stage "$EXPECTED_STAGE" --argjson total "$EXPECTED_TOTAL" --argjson per "$EXPECTED_PER_PROFILE" '.ok==true and .scope=="all" and .global_rollout.enabled==true and .global_rollout.stage==$stage and .global_rollout.max_total==$total and .global_rollout.max_per_profile==$per and .global_rollout.allowed_platforms==["Instagram"] and .global_rollout.allowed_formats==["Reel","Story"]' /tmp/factory-batch-global.json >/dev/null || { echo "Global Factory read-only canary failed (HTTP $GLOBAL_CODE)" >&2; exit 1; }
+          jq -e --arg stage "$EXPECTED_STAGE" --argjson total "$EXPECTED_TOTAL" --argjson per "$EXPECTED_PER_PROFILE" '.ok==true and .scope=="all" and .global_rollout.enabled==true and .global_rollout.stage==$stage and .global_rollout.max_total==$total and .global_rollout.max_per_profile==$per and .global_rollout.allowed_platforms==["Instagram","Facebook","TikTok","YouTube"] and .global_rollout.allowed_output_types_by_platform=={"Instagram":["Reel","Story","Single Image","Carousel"],"Facebook":["Reel","Story","Single Image","Multi-Image Post","Slideshow Reel"],"TikTok":["Video Draft","Story","Single Photo","Multi-Photo"],"YouTube":["Short","Standard Video","Slideshow Video"]}' /tmp/factory-batch-global.json >/dev/null || { echo "Global Factory read-only canary failed (HTTP $GLOBAL_CODE)" >&2; exit 1; }
           echo "factory_global_read_only_canary=PASS signed_stage=$EXPECTED_STAGE total=$EXPECTED_TOTAL per_profile=$EXPECTED_PER_PROFILE"
 
       - name: Delete functional verification bridge
