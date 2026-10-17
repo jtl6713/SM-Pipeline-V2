@@ -10128,14 +10128,26 @@ export async function factoryApproveOutput(env, id, actor, note, ctx = null, sch
     throw new HttpError(409, "Cannot approve this output yet: a finished render and Ready for Review are required.");
   }
   const stamp = new Date().toISOString();
+  // An authoritative Airtable schedule commit completes approval. Supabase is
+  // a downstream read mirror, so it must not keep the output lock held.
+  // The existing writeThroughQueue contract preserves the write and Worker
+  // waitUntil keeps it alive after the Factory response.
+  const writeThroughQueue = [];
   const updated = await approveOutputRecordForPublishing(
     env,
     existing,
     note || `Factory Desk approve by ${actor || "operator"}`,
     stamp,
     {},
-    { recheckBestSlot: true, ...(scheduleOptions || {}) },
+    { recheckBestSlot: true, ...(scheduleOptions || {}), writeThroughQueue },
   );
+  if (writeThroughQueue.length) {
+    const syncing = Promise.all(writeThroughQueue).catch(error => {
+      console.warn("Factory approval Supabase write-through failed", id, error);
+    });
+    if (ctx?.waitUntil) ctx.waitUntil(syncing);
+    else await syncing;
+  }
   if (updated.__already_approved) {
     return { id, already_approved: true, message: "Output already approved in another session; no duplicate dispatch." };
   }
