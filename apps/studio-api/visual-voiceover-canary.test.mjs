@@ -86,3 +86,14 @@ test("production canary must already be Do_Not_Publish before preparation", asyn
   const functions = await readFile(path.join(here, "worker-functions-03.mjs"), "utf8");
   assert.match(functions, /if \(!Boolean\(f\(row, "Do_Not_Publish"\)\)\) continue/);
 });
+
+
+test("production canary proves baseline TTS reuse before final rerender", async () => {
+  const workflow = await readFile(path.join(here, "../../.github/workflows/visual-voiceover-production-canary.yml"), "utf8");
+  assert.match(workflow, /Generate baseline TTS and capture reusable scene audio/);
+  assert.match(workflow, /baseline_scene_tts=PASS/);
+  assert.match(workflow, /changed scene retained stale TTS URL after narration acceptance/);
+  assert.match(workflow, /did not retain its baseline TTS URL/);
+  assert.match(workflow, /selective_tts_reuse=PASS/);
+  assert.match(workflow, /canary-reuse\.json/);
+});
