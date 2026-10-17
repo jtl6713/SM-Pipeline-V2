@@ -6673,6 +6673,7 @@ async function studioAtomicApplyPlatformOutputSeedSchedule(env, {
     platform,
     output_type: outputType,
     platform_output_record_id: current.id,
+    content_item_id: studioFirstLinkedId(f(current, "Content_Item")) || null,
     owner_operation_id: operationId || `seed-schedule:${current.id}`,
   }, {
     legacy: async () => {
