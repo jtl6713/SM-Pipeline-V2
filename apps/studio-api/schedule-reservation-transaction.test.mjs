@@ -85,6 +85,36 @@ test("atomic transaction releases only after authoritative verification and dura
   assert.deepEqual(events, ["plan", "write", "verify", "afterCommit"]);
 });
 
+test("post-commit downstream failure preserves the verified reservation", async () => {
+  const { env, lane } = makeEnv();
+  const selected = "2026-10-18T11:30:00.000Z";
+
+  await assert.rejects(
+    runAtomicScheduleTransaction(env, {
+      ...args,
+      owner_operation_id: "approve:recOut1:post-commit",
+    }, {
+      plan: async () => ({
+        action: "reserve",
+        selectedIso: selected,
+        previousIso: "",
+      }),
+      write: async () => ({ id: "recOut1" }),
+      verify: async () => selected,
+      afterCommit: async () => {
+        throw new Error("supabase write-through failed");
+      },
+    }, { jitter: false }),
+    /supabase write-through failed/,
+  );
+
+  const status = await (await lane.fetch(new Request("https://lane/status"))).json();
+  assert.equal(status.quarantine, null);
+  assert.equal(status.lock.state, "Released");
+  assert.equal(status.recent_reservations.length, 1);
+  assert.equal(status.recent_reservations[0].scheduled_iso, selected);
+});
+
 test("pre-write failure is retryable and does not quarantine the lane", async () => {
   const { env, lane } = makeEnv();
   await assert.rejects(
