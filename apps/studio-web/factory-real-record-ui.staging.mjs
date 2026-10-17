@@ -81,8 +81,10 @@ const srv=createServer(async(req,res)=>{
  }
  if(url.pathname==="/api/factory/desk"&&req.method==="GET"){send(res,desk);return}
  if(url.pathname==="/api/factory/approval-batches"&&req.method==="GET"){
-   const current=batch||{ok:true,batch:true,status:"idle",job_id:null,items:[]};
-   send(res,{...current,quality_signals:syntheticQualitySignals??batchSignals(batch),approvals_enabled:true});return;
+   const queryProfile=url.searchParams.get("profile")||url.searchParams.get("profile_id");
+   const scopedBatch=queryProfile===profileId?batch:null;
+   const current=scopedBatch||{ok:true,batch:true,status:"idle",job_id:null,items:[]};
+   send(res,{...current,quality_signals:scopedBatch?(syntheticQualitySignals??batchSignals(scopedBatch)):[],approvals_enabled:true});return;
  }
  if(url.pathname==="/api/factory/approval-batches"&&req.method==="POST"){
    let body="";for await(const part of req)body+=part;
@@ -223,6 +225,32 @@ try {
  const sample=await phone.locator("#factoryBatchQualitySignals").innerText();
  for(const code of syntheticQualitySignals.map(x=>x.code)) assert.ok(sample.includes(code),code);
  assert.match(sample,/Do not retry until the duplicate ledger is investigated/);
+ // A malicious backend detail remains escaped text, never executable markup.
+ syntheticQualitySignals=[{code:"QA-FACTORY-BATCH-FAILED-ITEM",
+   detail:'<img src="broken" onerror="window.qaInjected=true">'}];
+ await phone.locator("#factoryBatchQualityRefresh").click();
+ await phone.locator("#factoryBatchQualitySignals").getByText(/<img src="broken"/).waitFor();
+ assert.equal(await phone.locator("#factoryBatchQualitySignals img").count(),0);
+ assert.equal(await phone.evaluate(()=>window.qaInjected===true),false);
+ // Switching a profile must not show a different profile's latest batch.
+ syntheticQualitySignals=null;
+ await phone.evaluate(()=>{
+   const select=document.getElementById("studioProfileSelect");
+   const option=new Option("Other profile","recOtherQualityProfile123");
+   select.add(option);
+   select.value=option.value;
+   select.dispatchEvent(new Event("change",{bubbles:true}));
+ });
+ await phone.locator("#factoryBatchQualityRefresh").click();
+ await phone.locator("#factoryBatchQualitySignals").getByText("No recent Factory batch").waitFor();
+ await phone.evaluate(()=>{
+   const select=document.getElementById("studioProfileSelect");
+   select.value="recF7UAn0LkMZZrWZ";
+   select.dispatchEvent(new Event("change",{bubbles:true}));
+ });
+ await phone.locator("#factoryBatchQualityRefresh").click();
+ await phone.locator("#factoryBatchQualitySignals").getByText("No Quality Agent findings").waitFor();
+ console.log("factory_quality_agent_profile_isolation_and_xss=PASS");
  // Never blindly treat an unavailable Quality Agent GET as "no findings".
  syntheticQualitySignals=null;
  console.log("factory_quality_agent_all_five_signatures=PASS");
