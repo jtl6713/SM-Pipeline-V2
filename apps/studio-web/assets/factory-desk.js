@@ -12,6 +12,7 @@
     batchDetailsOpen: false,
     lastBatchProfile: "",
     batchApprovalsEnabled: null,
+    batchRollout: null,
   };
   const FACTORY_SELECTION_KEY = "studio.factory.batch-selection.v1";
   const FACTORY_LAST_BATCH_KEY = "studio.factory.last-batch.v1";
@@ -241,9 +242,17 @@
     updateFactoryBatchToolbar();
   }
 
+  function canSelectBatchOutput(card) {
+    const rollout = state.batchRollout;
+    if (!rollout || rollout.mode !== "chicago_ig_reel_v1") return true;
+    return String(card?.profile_id || "") === String(rollout.profile_id || "")
+      && String(card?.platform || "") === "Instagram"
+      && String(card?.studio_output_type || card?.format || "") === "Reel";
+  }
+
   function readyFactoryOutputs() {
     return (state.desk?.lanes?.needs_eyes || [])
-      .filter((card) => card?.kind === "output" && canReviewActions(card));
+      .filter((card) => card?.kind === "output" && canReviewActions(card) && canSelectBatchOutput(card));
   }
 
   function updateFactoryBatchToolbar() {
@@ -251,15 +260,31 @@
     const selectable = [...state.selectedOutputs].filter((id) => ready.has(id)).length;
     const missing = state.selectedOutputs.size - selectable;
     const count = $("factoryBatchSelectionCount");
-    if (count) count.textContent = `${selectable} output${selectable === 1 ? "" : "s"} selected${missing ? ` · ${missing} no longer ready` : ""}`;
+    if (count) count.textContent = `${selectable} output${selectable === 1 ? "" : "s"} selected${missing ? ` · ${missing} outside current pilot or no longer ready` : ""}`;
     const submit = $("factoryBatchSubmit");
     if (submit) {
-      submit.disabled = !selectable || state.submittingBatch || state.batchApprovalsEnabled === false;
-      submit.title = state.batchApprovalsEnabled === false ? "Batch approval rollout is currently disabled; individual approvals remain available." : "";
+      const limit = Math.max(1, Number(state.batchRollout?.max_items || 100));
+      submit.disabled = !selectable || selectable > limit || state.submittingBatch || state.batchApprovalsEnabled === false;
+      submit.title = state.batchApprovalsEnabled === false
+        ? "Batch approval rollout is disabled for this profile; individual approvals remain available."
+        : selectable > limit ? `Select at most ${limit} output${limit === 1 ? "" : "s"} for this rollout.` : "";
       submit.textContent = state.submittingBatch ? "Submitting…" : `Submit Approvals${selectable ? ` (${selectable})` : ""}`;
     }
     const clear = $("factoryBatchClear");
     if (clear) clear.disabled = !state.selectedOutputs.size || state.submittingBatch;
+    const rolloutNotice = $("factoryBatchRolloutNotice");
+    if (rolloutNotice) {
+      const rollout = state.batchRollout;
+      if (rollout?.mode === "chicago_ig_reel_v1") {
+        rolloutNotice.hidden = false;
+        rolloutNotice.textContent = state.batchApprovalsEnabled
+          ? "Limited production pilot: approve one Chicago Instagram Reel at a time. Stories, YouTube and other platforms are not available for batch approval yet."
+          : "Limited production pilot: only Chicago Instagram Reels are eligible. Select Chicago to submit; individual approvals remain available elsewhere.";
+      } else {
+        rolloutNotice.hidden = true;
+        rolloutNotice.textContent = "";
+      }
+    }
   }
 
   function renderFactoryBatchActivity(batch) {
@@ -310,8 +335,11 @@
     try {
       const batch = await fetchJson(`/api/factory/approval-batches?${params.toString()}`);
       if (typeof batch.approvals_enabled === "boolean") {
+        const before = JSON.stringify(state.batchRollout);
         state.batchApprovalsEnabled = batch.approvals_enabled;
+        state.batchRollout = batch.rollout || null;
         updateFactoryBatchToolbar();
+        if (state.desk && before !== JSON.stringify(state.batchRollout)) renderDesk(state.desk);
       }
       renderFactoryBatchActivity(batch);
       return batch;
@@ -328,6 +356,10 @@
     const ready = readyFactoryOutputs().filter((card) => state.selectedOutputs.has(card.id));
     if (!ready.length) { updateFactoryBatchToolbar(); setStatus("Select one or more review-ready outputs.", true); return; }
     const profiles = [...new Set(ready.map((card) => String(card.profile_id || "").trim()))];
+    if (ready.length > Math.max(1, Number(state.batchRollout?.max_items || 100))) {
+      setStatus("The current pilot permits only one Instagram Reel at a time.", true);
+      return;
+    }
     if (profiles.length !== 1 || !/^rec[A-Za-z0-9]+$/.test(profiles[0])) {
       setStatus("Select outputs from a single known profile per batch. Other selections have been preserved.", true);
       return;
@@ -440,7 +472,7 @@
     const stateLabel = card.studio_state || (alert ? "Needs repair" : "—");
     const cell = (value) => `<span class="factory-line-cell">${esc(value || "—")}</span>`;
     return `<div class="factory-line" data-factory-id="${esc(card.id)}" data-factory-kind="${esc(card.kind || "")}" data-lane="${esc(lane)}" title="${esc(cardLabel(card))}">
-      ${lane === "needs_eyes" && card.kind === "output" && canReviewActions(card)
+      ${lane === "needs_eyes" && card.kind === "output" && canReviewActions(card) && canSelectBatchOutput(card)
         ? `<span class="factory-media-select"><input type="checkbox" data-factory-select-output="${esc(card.id)}" aria-label="Select ${esc(cardLabel(card))}" ${state.selectedOutputs.has(card.id) ? "checked" : ""}>${media}</span>`
         : media}
       <span class="factory-line-title">${esc(card.title || cardLabel(card))}</span>
@@ -531,12 +563,13 @@
         ? `<button type="button" class="primary-button factory-content-approve" data-factory-approve-content="${esc(group.key)}" disabled title="Wait until sibling Stories finish rendering, then Approve all together">${esc(`Approve all (${ready.length}) — wait for Stories`)}</button>`
         : `<button type="button" class="primary-button factory-content-approve" data-factory-approve-content="${esc(group.key)}">Approve all (${ready.length})</button>`)
       : "";
-    const contentSelected = ready.length > 0 && ready.every((card) => state.selectedOutputs.has(card.id));
+    const batchReady = ready.filter(canSelectBatchOutput);
+    const contentSelected = batchReady.length > 0 && batchReady.every((card) => state.selectedOutputs.has(card.id));
     const selectContent = `<label class="factory-content-batch-select">
       <input type="checkbox" data-factory-select-content="${esc(group.key)}"
         aria-label="Select all review-ready outputs for ${esc(title)}"
-        ${contentSelected ? "checked" : ""} ${(!ready.length || pending.length) ? "disabled" : ""}>
-      Select content</label>`;
+        ${contentSelected ? "checked" : ""} ${(!batchReady.length || pending.length) ? "disabled" : ""}>
+      ${state.batchRollout?.mode === "chicago_ig_reel_v1" ? "Select pilot Reel" : "Select content"}</label>`;
     return `<div class="factory-content-bar" data-factory-content="${esc(group.key)}">
       ${selectContent}
       <button type="button" class="factory-content-toggle" data-factory-toggle-content="${esc(group.key)}" aria-expanded="${expanded}" aria-controls="factory-review-${esc(group.key.replace(/[^a-zA-Z0-9_-]/g, "-"))}">
