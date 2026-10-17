@@ -412,7 +412,7 @@ export class ScheduleReservationLane {
           fencing_generation: lock.fencing_generation,
           since: nowIso(nowMs),
         };
-        throw authorityError(423, "recovery_required", "Scheduling lane is quarantined pending reconciliation");
+        throw authorityError(423, "recovery_required", "Recovery Required: scheduling lane is quarantined pending fenced reconciliation");
       }
       throw authorityError(409, "lease_expired", "Scheduling reservation lease expired");
     }
@@ -975,12 +975,19 @@ export class ScheduleReservationLane {
 
       const commitStartedMs = parseMs(reservation.commit_started_timestamp);
       const oldProbe = reservation.recovery_probe || null;
+      const oldProbeObservedMs = parseMs(oldProbe?.observed_at);
+      const settleAge = commitStartedMs ? nowMs - commitStartedMs : 0;
+      const oldProbeWasPostSettle = Boolean(
+        commitStartedMs
+        && oldProbeObservedMs
+        && oldProbeObservedMs - commitStartedMs >= SCHEDULE_RESERVATION_AMBIGUOUS_SETTLE_MS
+      );
       const sameNotCommittedObservation = observation === "not_committed"
         && (authoritativeIso || "") === (previous || "")
         && oldProbe?.observation === "not_committed"
-        && (oldProbe.authoritative_iso || "") === (authoritativeIso || "");
-      const probeAge = sameNotCommittedObservation ? nowMs - parseMs(oldProbe.observed_at) : 0;
-      const settleAge = commitStartedMs ? nowMs - commitStartedMs : 0;
+        && (oldProbe.authoritative_iso || "") === (authoritativeIso || "")
+        && oldProbeWasPostSettle;
+      const probeAge = sameNotCommittedObservation ? nowMs - oldProbeObservedMs : 0;
       const maySafelyAbandon = observation === "not_committed"
         && (authoritativeIso || "") === (previous || "")
         && sameNotCommittedObservation
@@ -1257,15 +1264,25 @@ export async function acquireScheduleReservation(env, args = {}, options = {}) {
   if (!scheduleReservationAuthorityEnabled(env)) {
     return { ok: true, bypass: true, enabled: false, occupied_reservations: [] };
   }
-  const lane = laneDescriptor(args);
-  const operation = operationDescriptor(args);
+  const ownerOperationId = clean(args.owner_operation_id || args.operation_id, 180);
+  const outputId = clean(args.platform_output_record_id || args.output_id, 128);
+  const normalizedArgs = {
+    ...args,
+    ...(args.reservation_id
+      ? {}
+      : (ownerOperationId && outputId
+        ? { reservation_id: scheduleReservationId(outputId, ownerOperationId) }
+        : {})),
+  };
+  const lane = laneDescriptor(normalizedArgs);
+  const operation = operationDescriptor(normalizedArgs);
   const maxWaitMs = Math.max(0, Math.min(2 * 60 * 1000, Number(options.maxWaitMs ?? 30_000)));
   const started = Date.now();
   let attempt = 0;
   while (true) {
     attempt += 1;
     try {
-      return await callLane(env, lane, "/acquire", { ...args, ...operation });
+      return await callLane(env, lane, "/acquire", { ...normalizedArgs, ...operation });
     } catch (error) {
       if (!(error instanceof ScheduleReservationError) || error.code !== "lane_busy") throw error;
       const elapsed = Date.now() - started;
