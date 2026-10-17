@@ -51,18 +51,39 @@ def _request_snapshot(slide: dict[str, Any] | None) -> tuple[str, str, str]:
     )
 
 
+def request_identity_matches(
+    original: dict[str, Any] | None,
+    current: dict[str, Any] | None,
+) -> bool:
+    """Return true only for the same slide and exact request token/text/voice."""
+    return bool(
+        original
+        and current
+        and original.get("id") == current.get("id")
+        and _request_snapshot(original) == _request_snapshot(current)
+    )
+
+
 def request_still_current(
     original: dict[str, Any] | None,
     current: dict[str, Any] | None,
 ) -> bool:
     """A completed TTS job may write only if its exact request is still current."""
-    return (
-        bool(original)
-        and bool(current)
-        and original.get("id") == current.get("id")
-        and _request_snapshot(original) == _request_snapshot(current)
-        and eligibility_reason(current) is None
+    return request_identity_matches(original, current) and eligibility_reason(current) is None
+
+
+def stale_completion_cleanup_fields(current: dict[str, Any] | None) -> dict[str, Any]:
+    """Restore a safe pre-generation state after detecting a post-write race."""
+    deleted = field(current or {}, "Deleted From Carousel") in (True, 1, "1")
+    narrated = (
+        bool(field_str(current or {}, "Slide_Voiceover_Text"))
+        and bool(field_str(current or {}, "Slide_Voice_ID"))
+        and not deleted
     )
+    return {
+        "Slide_Voiceover_Status": "Ready" if narrated else "Not Requested",
+        "Slide_Voiceover_URL": None,
+    }
 
 
 def process_request(
@@ -137,6 +158,31 @@ def process_request(
         },
         typecast=True,
     )
+
+    # Airtable has no compare-and-swap update. Close the narrow recheck/write race
+    # by reading back the row and compensating only when *our exact URL* landed
+    # after a newer request replaced the token/text/voice. Never clear a newer
+    # TTS completion whose URL differs from this job's file.
+    committed = _pick_slide(client, slide["id"])
+    if not request_identity_matches(slide, committed):
+        committed_url = field_str(committed or {}, "Slide_Voiceover_URL")
+        compensated = False
+        if committed and committed_url == url:
+            client.update_record(
+                CAROUSEL_SLIDES_TABLE,
+                slide["id"],
+                stale_completion_cleanup_fields(committed),
+                typecast=True,
+            )
+            compensated = True
+        return {
+            "processed": False,
+            "reason": "stale_post_write",
+            "drive_file_id": file_id,
+            "stale_url_compensated": compensated,
+            **preview,
+        }
+
     return {
         "processed": True,
         "drive_file_id": file_id,
