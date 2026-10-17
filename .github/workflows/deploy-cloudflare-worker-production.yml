@@ -389,13 +389,26 @@ jobs:
           for i in 1 2 3 4 5; do
             PILOT_CODE=$(curl -sS --max-time 60 -o /tmp/factory-batch-chicago.json -w '%{http_code}' "$CHICAGO" || true)
             if [[ "$PILOT_CODE" == "200" ]] && jq -e --arg mode "$EXPECTED_MODE" --argjson max "$EXPECTED_MAX" '.ok==true and .batch==true and .approvals_enabled==true and .rollout.mode==$mode and .rollout.max_items==$max and .rollout.platform=="Instagram" and .rollout.output_type=="Reel" and .rollout.profile_id=="recT2rbKX3MF7cVFU"' /tmp/factory-batch-chicago.json >/dev/null 2>&1; then
-              echo "factory_batch_chicago_pilot=PASS max_items=$EXPECTED_MAX Instagram_Reel_only"
-              exit 0
+              break
             fi
             sleep 3
           done
-          echo "Factory Chicago canary verification failed (HTTP $PILOT_CODE)" >&2
-          exit 1
+          jq -e --arg mode "$EXPECTED_MODE" --argjson max "$EXPECTED_MAX" '.ok==true and .batch==true and .approvals_enabled==true and .rollout.mode==$mode and .rollout.max_items==$max and .rollout.platform=="Instagram" and .rollout.output_type=="Reel" and .rollout.profile_id=="recT2rbKX3MF7cVFU"' /tmp/factory-batch-chicago.json >/dev/null || { echo "Factory Chicago canary verification failed (HTTP $PILOT_CODE)" >&2; exit 1; }
+          echo "factory_batch_chicago_pilot=PASS max_items=$EXPECTED_MAX Instagram_Reel_only"
+          GLOBAL_URL="https://$VERIFY_BRIDGE.$SUBDOMAIN.workers.dev/$TOKEN/factory-status-global"
+          EXPECTED_STAGE=$(jq -r '.global.stage' deploy/factory-batch-production-rollout.json)
+          EXPECTED_TOTAL=$(jq -r '.global.max_total' deploy/factory-batch-production-rollout.json)
+          EXPECTED_PER_PROFILE=$(jq -r '.global.max_per_profile' deploy/factory-batch-production-rollout.json)
+          GLOBAL_CODE=000
+          for i in 1 2 3 4 5; do
+            GLOBAL_CODE=$(curl -sS --max-time 60 -o /tmp/factory-batch-global.json -w '%{http_code}' "$GLOBAL_URL" || true)
+            if [[ "$GLOBAL_CODE" == "200" ]] && jq -e --arg stage "$EXPECTED_STAGE" --argjson total "$EXPECTED_TOTAL" --argjson per "$EXPECTED_PER_PROFILE" '.ok==true and .scope=="all" and .global_rollout.enabled==true and .global_rollout.stage==$stage and .global_rollout.max_total==$total and .global_rollout.max_per_profile==$per and .global_rollout.allowed_platforms==["Instagram"] and .global_rollout.allowed_formats==["Reel","Story"]' /tmp/factory-batch-global.json >/dev/null 2>&1; then
+              break
+            fi
+            sleep 3
+          done
+          jq -e --arg stage "$EXPECTED_STAGE" --argjson total "$EXPECTED_TOTAL" --argjson per "$EXPECTED_PER_PROFILE" '.ok==true and .scope=="all" and .global_rollout.enabled==true and .global_rollout.stage==$stage and .global_rollout.max_total==$total and .global_rollout.max_per_profile==$per and .global_rollout.allowed_platforms==["Instagram"] and .global_rollout.allowed_formats==["Reel","Story"]' /tmp/factory-batch-global.json >/dev/null || { echo "Global Factory read-only canary failed (HTTP $GLOBAL_CODE)" >&2; exit 1; }
+          echo "factory_global_read_only_canary=PASS signed_stage=$EXPECTED_STAGE total=$EXPECTED_TOTAL per_profile=$EXPECTED_PER_PROFILE"
 
       - name: Delete functional verification bridge
         if: always()
