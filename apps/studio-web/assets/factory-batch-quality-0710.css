@@ -65,7 +65,7 @@
 #page-factory .factory-heading-controls { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 #page-factory .factory-heading-controls label { font-size: .76rem; font-weight: 650; opacity: .78; }
 #page-factory #factoryProfileFilter { min-height: 35px; min-width: 160px; max-width: 270px; font-size: .84rem; border-radius: 8px; }
-#page-factory .factory-global-summary { display:grid; grid-template-columns:minmax(170px,220px) minmax(0,1fr); align-items:stretch; gap:12px; padding:10px; }
+#page-factory .factory-global-summary { display:grid; grid-template-columns:minmax(170px,220px) minmax(0,1fr); align-items:start; gap:12px; padding:10px; }
 #page-factory .factory-global-metrics { display:grid; grid-template-columns:minmax(0,1fr); gap:8px; min-width:0; }
 #page-factory .factory-mini-metric { margin:0; padding:10px; border-radius:9px; border:1px solid var(--border-color,#d5dce2); background:var(--surface,#fff); min-width:0; box-sizing:border-box; }
 #page-factory .factory-mini-label { display:block; margin:0; font-size:.72rem; line-height:1.2; font-weight:700; color:var(--text-muted,#526576); }
@@ -157,4 +157,9 @@
  #page-factory .factory-global-summary { padding:8px; }
  #page-factory .factory-batch-recent-row { flex-wrap:wrap; }
  #page-factory .factory-batch-recent-result { text-align:left; }
+}
+
+/* Retain the full-width Quality Agent layout after compact-theme overrides. */
+#page-factory .factory-global-quality.factory-batch-quality-panel #factoryBatchQualityRefresh {
+  margin:0 0 0 auto;
 }
