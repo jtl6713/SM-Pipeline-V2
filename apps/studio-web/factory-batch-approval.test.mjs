@@ -51,7 +51,7 @@ test("Finished durable batches reconcile the live Needs Eyes desk and clear sele
   assert.match(reconcile, /renderDesk\(desk\)/);
   assert.match(reconcile, /confirmed\.every\(\(id\) => !stillReviewing\.has\(id\)\)/,
     "Stale read copies must be retried, not considered successfully reconciled");
-  assert.match(js, /renderFactoryBatchActivity\(batch\);[\s\S]{0,180}reconcileFinishedBatchDesk\(batch\)\.catch/);
+  assert.match(js, /renderFactoryBatchActivity\(batch\);[\s\S]{0,180}reconcileFinishedBatchDesk\(batch\?\.batches\?\.\[0\] \|\| batch\)\.catch/);
   assert.match(js, /ready\.forEach\(\(card\) => state\.selectedOutputs\.delete\(card\.id\)\);\s*saveFactorySelection\(\);[\s\S]{0,220}if \(state\.desk\) renderDesk\(state\.desk\);/,
     "Submitting must repaint DOM selection once the accepted IDs leave selectedOutputs");
 });
