@@ -2698,6 +2698,17 @@ export async function loadIdeaPhotoWaitStatesByRecordId(env, ideaIds) {
 
 export function mapProductionRequest(record, ideaTitle = null) {
   const links = (name) => Array.isArray(f(record, name)) ? f(record, name) : [];
+  const platforms = canonicalProductionPlatforms(f(record, "Target_Platforms") || [])
+    .filter((platform) => PR_PLATFORMS.has(platform));
+  const rawStudioOutputPlan = item4ParseJson(f(record, "Studio_Output_Plan_JSON"), null);
+  const studioOutputPlan = rawStudioOutputPlan && Array.isArray(rawStudioOutputPlan.items)
+    ? {
+        ...rawStudioOutputPlan,
+        items: rawStudioOutputPlan.items.filter((item) =>
+          PR_PLATFORMS.has(String(item?.platform || "").trim())
+        ),
+      }
+    : rawStudioOutputPlan;
   return {
     id: record.id,
     production_request_id: f(record, "Production_Request_ID"),
@@ -2710,7 +2721,7 @@ export function mapProductionRequest(record, ideaTitle = null) {
     created_by_links: links("Created_By"),
     status: f(record, "Request_Status"),
     content_type: f(record, "Master_Content_Type"),
-    platforms: f(record, "Target_Platforms") || [],
+    platforms,
     voiceover_mode: f(record, "Voiceover_Mode"),
     voice_id: f(record, "Voice_ID") || null,
     voice_name: f(record, "Voice_Name") || null,
@@ -2748,7 +2759,7 @@ export function mapProductionRequest(record, ideaTitle = null) {
     studio_master_assets: item4ParseJson(f(record, "Studio_Master_Assets_JSON"), []),
     studio_master_asset_count: Number(f(record, "Studio_Master_Asset_Count") || 0),
     studio_master_asset_status: f(record, "Studio_Master_Asset_Status") || "None",
-    studio_output_plan: item4ParseJson(f(record, "Studio_Output_Plan_JSON"), null),
+    studio_output_plan: studioOutputPlan,
     studio_output_plan_status: f(record, "Studio_Output_Plan_Status") || "Needs Plan",
     studio_variant_manifest: item4ParseJson(f(record, "Studio_Variant_Manifest_JSON"), null),
     studio_variant_status: f(record, "Studio_Variant_Status") || "None",
@@ -3762,11 +3773,17 @@ export async function item4SourceToProductionBridgePreflight(env, requestRecord,
     );
   }
 
-  const planItems = Array.isArray(plan?.items) ? plan.items : [];
+  const rawPlanItems = Array.isArray(plan?.items) ? plan.items : [];
+  const planItems = rawPlanItems.filter((item) =>
+    PR_PLATFORMS.has(String(item?.platform || "").trim())
+  );
+  const activePlan = plan ? { ...plan, items: planItems } : plan;
+  const retiredPlanResidue = rawPlanItems.length !== planItems.length;
   addCheck("output_plan_items_present", planItems.length > 0, "The saved platform output plan has no items.");
 
   const outputRows = (await outputRowsForProductionRequest(env, requestRecord.id))
-    .filter(row => Boolean(f(row, "Enabled")));
+    .filter(row => Boolean(f(row, "Enabled")))
+    .filter(row => PR_PLATFORMS.has(String(f(row, "Platform") || "").trim()));
 
   addCheck("enabled_outputs_present", outputRows.length > 0, "Choose at least one enabled Production Request Output.");
 
@@ -3806,7 +3823,10 @@ export async function item4SourceToProductionBridgePreflight(env, requestRecord,
   const variantAssets = Array.isArray(variantManifest?.assets) ? variantManifest.assets : [];
   const targetCount = Number(variantManifest?.plan_target_count || variantManifest?.target_count || 0);
   const readyCount = Number(variantManifest?.plan_ready_count || variantManifest?.ready_count || 0);
-  const manifestComplete = finishedPassthrough || item4VariantManifestPlanComplete(variantManifest, plan, masterAssets);
+  const manifestForActivePlan = retiredPlanResidue && variantManifest
+    ? { ...variantManifest, plan_target_count: 0, plan_ready_count: 0 }
+    : variantManifest;
+  const manifestComplete = finishedPassthrough || item4VariantManifestPlanComplete(manifestForActivePlan, activePlan, masterAssets);
 
   addCheck(
     "variant_manifest_complete",
