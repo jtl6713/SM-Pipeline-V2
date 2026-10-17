@@ -1,3 +1,4 @@
 2026-10-17 PR #810 visual-aware voiceover production acceptance canary. Run only after Worker, Pipeline Runner, and Remotion release versions are live. Nonpublishing test output only; Do_Not_Publish must remain true.
 2026-10-17 rerun after verified fresh Ops sync/deploy and Remotion health version 2026-10-17-visual-voiceover-timeline.
 2026-10-17 rerun with per-attempt ephemeral Cloudflare bridge after repeated workers.dev 1042 readiness failures.
+2026-10-17 rerun after canary bridge runtime hardening commit b92699e44232ddecc8d1a4d1cc77344492671d3a.
