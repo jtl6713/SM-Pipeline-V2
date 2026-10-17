@@ -332,7 +332,9 @@
       const rollout = state.batchRollout;
       if (state.batchGlobal?.enabled) {
         rolloutNotice.hidden = false;
-        const platforms = Array.isArray(state.batchGlobal.allowed_platforms) && state.batchGlobal.allowed_platforms.length\n          ? state.batchGlobal.allowed_platforms.join(", ") : "Instagram";\n        rolloutNotice.textContent = `Global Factory (${state.batchGlobal.stage === "pilot" ? "pilot" : "expanded"}): up to ${state.batchGlobal.max_total} supported outputs per batch, maximum ${state.batchGlobal.max_per_profile} per profile, across ${platforms}. Profile-local scheduling remains authoritative.`;
+        const platforms = Array.isArray(state.batchGlobal.allowed_platforms) && state.batchGlobal.allowed_platforms.length
+          ? state.batchGlobal.allowed_platforms.join(", ") : "Instagram";
+        rolloutNotice.textContent = `Global Factory (${state.batchGlobal.stage === "pilot" ? "pilot" : "expanded"}): up to ${state.batchGlobal.max_total} supported outputs per batch, maximum ${state.batchGlobal.max_per_profile} per profile, across ${platforms}. Profile-local scheduling remains authoritative.`;
       } else if (["chicago_ig_reel_v1", "chicago_ig_reels_v2",
         "chicago_ig_reel_story_v3"].includes(rollout?.mode)) {
         rolloutNotice.hidden = false;
