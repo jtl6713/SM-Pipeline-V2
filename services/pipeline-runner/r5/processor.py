@@ -163,6 +163,53 @@ def _current_or_stale(
     )
 
 
+def stale_finalization_cleanup_fields(
+    current: dict[str, Any],
+    *,
+    expected_job_id: str,
+    drive_file_id: str,
+    drive_link: str,
+    preview_key: str,
+    preview_url: str,
+) -> dict[str, Any]:
+    """Compensate only artifacts written by a stale finalizer; never clear newer URLs."""
+    fields: dict[str, Any] = {}
+    ours = False
+    if drive_link and field_str(current, "Final_File_URL") == drive_link:
+        fields["Final_File_URL"] = ""
+        ours = True
+    if drive_link and field_str(current, "Output_URL") == drive_link:
+        fields["Output_URL"] = ""
+        ours = True
+    if drive_file_id and field_str(current, "Final_File_ID") == drive_file_id:
+        fields["Final_File_ID"] = ""
+        ours = True
+    if preview_url and field_str(current, "Studio_Preview_URL") == preview_url:
+        fields["Studio_Preview_URL"] = ""
+        fields["Studio_Preview_Updated_At"] = ""
+        ours = True
+    if preview_key and field_str(current, "Studio_Preview_R2_Key") == preview_key:
+        fields["Studio_Preview_R2_Key"] = ""
+        ours = True
+    if not ours:
+        return {}
+
+    # Keep the output fail-closed while the current creative revision wins.
+    fields.update(
+        {
+            "Final_File_Storage_Status": "",
+            "Output_Status": "In Production",
+            "Publish_Status": "Not Ready",
+            "Review_Status": "Changes Requested",
+            "Final_File_Error_Message": "Stale render completion discarded; rerender the current creative revision.",
+        }
+    )
+    current_job_id = field_str(current, "Remotion_Job_ID")
+    if current_job_id and expected_job_id and current_job_id != expected_job_id:
+        fields["Render_Status"] = "Rendering"
+    return fields
+
+
 def process_one_output(
     client: AirtableClient,
     output: dict[str, Any],
@@ -322,13 +369,9 @@ def process_one_output(
                 "Remotion_Error_Message": "",
                 "Final_File_ID": file_id,
                 "Output_Status": output_status_after_successful_render(current),
-                "Output_Filename": field_str(current, "Output_Filename"),
                 "Final_File_Storage_Status": "Uploaded",
-                "Render_Server_URL": render_url,
                 "Output_URL": drive_link,
-                "Remotion_Job_ID": job_id,
                 "Final_File_URL": drive_link,
-                "Remotion_Status_URL": status_url,
                 "Studio_Preview_URL": preview_url,
                 "Studio_Preview_R2_Key": preview_key,
                 "Studio_Preview_Updated_At": completed_at,
@@ -337,7 +380,47 @@ def process_one_output(
             },
         )
 
-        remotion.cleanup_job(job_id, filename=field_str(current, "Output_Filename") or None)
+        # Airtable does not expose compare-and-swap updates. Re-read after the
+        # final artifact write so a creative edit/new R4 job that won the tiny
+        # check/write race cannot be left pointing at this stale render. The
+        # finalizer deliberately does not rewrite job identity fields above.
+        committed, post_write_stale = _current_or_stale(
+            client,
+            output["id"],
+            expected_job_id=expected_job_id,
+            expected_status_url=expected_status_url,
+        )
+        if post_write_stale:
+            cleanup = stale_finalization_cleanup_fields(
+                committed,
+                expected_job_id=expected_job_id,
+                drive_file_id=file_id,
+                drive_link=drive_link,
+                preview_key=preview_key,
+                preview_url=preview_url,
+            )
+            if cleanup:
+                client.update_record(
+                    PLATFORM_OUTPUTS_TABLE,
+                    output["id"],
+                    cleanup,
+                    typecast=True,
+                )
+            try:
+                remotion.cleanup_job(job_id, filename=field_str(current, "Output_Filename") or None)
+            except Exception:
+                pass
+            return {
+                "processed": False,
+                "reason": "stale_render_completion_post_write",
+                "error": post_write_stale,
+                "drive_file_id": file_id,
+                "orphan_preview_key": preview_key,
+                "stale_artifacts_compensated": bool(cleanup),
+                **preview,
+            }
+
+        remotion.cleanup_job(job_id, filename=field_str(committed, "Output_Filename") or field_str(current, "Output_Filename") or None)
     except Exception as exc:
         message = str(exc) or "Render completed, but final Google Drive upload did not complete."
         current, stale_error = _current_or_stale(
