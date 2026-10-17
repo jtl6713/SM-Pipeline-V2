@@ -75,10 +75,68 @@ def _slideshow_settings(client: AirtableClient) -> dict[str, str]:
     }
 
 
+def _upload_r2_multipart(*, upload_url: str, upload_secret: str, key: str, content: bytes) -> tuple[int, Any]:
+    """Upload large final MP4s in bounded chunks, preserving the final R2 key.
+
+    A single large HTTP PUT repeatedly timed out for Output 1703. The
+    existing R2 worker supports the multipart protocol and 8 MiB chunks.
+    """
+    headers = {"x-pipeline-secret": upload_secret}
+    response = requests.post(upload_url, params={"key": key, "action": "mpu-create"},
+                             headers={**headers, "Content-Type": "video/mp4"}, timeout=60)
+    response.raise_for_status()
+    upload_id = str(response.json().get("uploadId") or "")
+    if not upload_id:
+        raise RuntimeError("R2 multipart create returned no uploadId")
+    parts = []
+    try:
+        for index, offset in enumerate(range(0, len(content), 8 * 1024 * 1024), start=1):
+            chunk = content[offset:offset + 8 * 1024 * 1024]
+            last_error = None
+            for attempt in range(3):
+                try:
+                    part = requests.put(upload_url, params={"key": key, "action": "mpu-part",
+                                        "uploadId": upload_id, "partNumber": str(index)},
+                                        headers={**headers, "Content-Type": "application/octet-stream"},
+                                        data=chunk, timeout=(30, 180))
+                    part.raise_for_status()
+                    etag = str(part.json().get("etag") or "")
+                    if not etag:
+                        raise RuntimeError(f"R2 multipart part {index} missing ETag")
+                    parts.append({"partNumber": index, "etag": etag})
+                    last_error = None
+                    break
+                except (requests.ConnectionError, requests.Timeout) as exc:
+                    last_error = exc
+                    if attempt < 2:
+                        time.sleep(min(2 ** attempt, 4))
+            if last_error:
+                raise last_error
+        completed = requests.post(upload_url,
+                                  params={"key": key, "action": "mpu-complete", "uploadId": upload_id},
+                                  headers={**headers, "Content-Type": "application/json"},
+                                  json={"parts": parts}, timeout=120)
+        completed.raise_for_status()
+        payload = completed.json()
+        if payload.get("ok") is False:
+            raise RuntimeError(f"R2 multipart completion rejected: {payload}")
+        return completed.status_code, payload
+    except Exception:
+        try:
+            requests.post(upload_url, params={"key": key, "action": "mpu-abort", "uploadId": upload_id},
+                          headers=headers, timeout=30)
+        except Exception:
+            pass
+        raise
+
+
 def _upload_r2(*, upload_url: str, upload_secret: str, key: str, content: bytes) -> tuple[int, Any]:
     # R2 upload intermittently aborts a connection mid-MP4 (Output 1703,
     # WinError 10053). Retry the *same deterministic object key*, never
     # regenerate the rendered video or create a second publish request.
+    if len(content) > 8 * 1024 * 1024:
+        return _upload_r2_multipart(upload_url=upload_url, upload_secret=upload_secret,
+                                    key=key, content=content)
     last_error = None
     for attempt in range(3):
         try:
