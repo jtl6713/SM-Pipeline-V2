@@ -102,3 +102,16 @@ test("nonpublishing visual timeline saves return the same persisted timeline con
   assert.match(worker, /Publishing state was not changed; render\/TTS were not started/);
 });
 
+test("Phase 6 render continuation uses exact-target Python R4/R5 pulses instead of retired Make scenarios", () => {
+  const start = worker.indexOf("export async function phase6PulseInactiveScenario");
+  const end = worker.indexOf("/*__STUDIO_WORKER_END:phase6PulseInactiveScenario__*/", start);
+  assert.ok(start >= 0 && end > start);
+  const block = worker.slice(start, end);
+  assert.match(block, /item4PulseR4Python\(env/);
+  assert.match(block, /item4PulseR5Python\(env/);
+  assert.match(block, /outputRecordId/);
+  assert.match(block, /backend: "python"/);
+  assert.doesNotMatch(block, /phase6SetScenarioActive/);
+  assert.doesNotMatch(block, /phase6RunScenario/);
+});
+
