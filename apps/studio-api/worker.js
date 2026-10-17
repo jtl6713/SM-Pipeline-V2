@@ -366,6 +366,12 @@ import {
   SCHEDULE_REGEN_STATUS,
 } from "./schedule-regen-batch.mjs";
 import {
+  scheduleReservationAuthorityEnabled,
+  SCHEDULE_RESERVATION_BINDING,
+} from "./schedule-reservation-authority.mjs";
+export { ScheduleReservationLane } from "./schedule-reservation-authority.mjs";
+
+import {
   libraryAssetNameFindFormula,
   libraryNameHasPhrase,
   libraryNameSort,
@@ -629,6 +635,8 @@ import {
   studioReconcileOverdueScheduledPublishes,
   studioHealApprovedMissingSchedule,
   studioHealStoryCompanionDrift,
+  studioScheduleReservationQualitySweep,
+  studioScheduleReservationQualityLatest,
   studioReconcileApprovedPublishes,
   studioReconcileFacebookVideoCovers,
   studioReconcilePublishingInstagramStories,
@@ -1121,6 +1129,9 @@ export default {
           studio_az_large_video_staging_v1: true,
           studio_ig_carousel_due_publish_v1: true,
           studio_schedule_spacing_v1: true,
+          studio_schedule_reservation_authority_v1: scheduleReservationAuthorityEnabled(env),
+          studio_schedule_reservation_authority_binding_v1: Boolean(env?.[SCHEDULE_RESERVATION_BINDING]),
+          studio_schedule_reservation_quality_agent_v1: scheduleReservationAuthorityEnabled(env),
           studio_open_review_reschedule_v1: true,
           studio_yt_manual_schedule_lock_v1: true,
           studio_insights_watchlist_v2: true,
@@ -2380,6 +2391,22 @@ export default {
         await studioHealPhantomRerender(env, { limit: 8 });
       } catch (error) {
         console.warn("phantom rerender heal failed", error);
+      }
+      try {
+        const scheduleQuality = await studioScheduleReservationQualitySweep(env, {
+          limit: 100,
+          maxDriftReads: 40,
+          recover: true,
+        });
+        if (scheduleQuality?.finding_count || scheduleQuality?.recovered_count) {
+          console.warn("schedule reservation Quality Agent", JSON.stringify({
+            findings: scheduleQuality.finding_count || 0,
+            recovered: scheduleQuality.recovered_count || 0,
+            lanes_scanned: scheduleQuality.lanes_scanned || 0,
+          }));
+        }
+      } catch (error) {
+        console.warn("schedule reservation Quality Agent sweep failed", error);
       }
       try {
         await factoryBatchCronResume(env, ctx);
@@ -4005,6 +4032,7 @@ const STUDIO_PLATFORM_OUTPUT_TABLE = "tblrlPeboBthkplH0";
 
 /*__STUDIO_WORKER_EXTRACT:item4PlanItemForOutput__*/
 /*__STUDIO_WORKER_EXTRACT:platformOutputSeedFields__*/
+/*__STUDIO_WORKER_EXTRACT:studioAtomicApplyPlatformOutputSeedSchedule__*/
 /*__STUDIO_WORKER_EXTRACT:studioFinishedSeedOverlay__*/
 const STUDIO_SIMILAR_WATCHLIST_SETTING = "SIMILAR_ACCOUNT_WATCHLIST";
 
@@ -4817,6 +4845,8 @@ const STUDIO_R5_DONE_HOOK_TOKEN = "r5done_7kqp2nvm4w8x1c9h3z";
 /*__STUDIO_WORKER_EXTRACT:getOutputCreative__*/
 /*__STUDIO_WORKER_EXTRACT:phase6Select__*/
 /*__STUDIO_WORKER_EXTRACT:phase6SlideDirectiveFromPayload__*/
+/*__STUDIO_WORKER_EXTRACT:phase6MergeVisualTimelineInputs__*/
+/*__STUDIO_WORKER_EXTRACT:phase6NextVisualTimeline__*/
 /*__STUDIO_WORKER_EXTRACT:updateOutputCreative__*/
 /*__STUDIO_WORKER_EXTRACT:phase6DimensionsForRatio__*/
 /*__STUDIO_WORKER_EXTRACT:phase6AssetSourceForSlide__*/
@@ -5088,6 +5118,7 @@ async function syncProductionCadence(env, { force = false, startRender = false, 
 /*__STUDIO_WORKER_EXTRACT:phase6WaitForScenarioExecution__*/
 /*__STUDIO_WORKER_EXTRACT:phase6WaitForVoicePrepCompletion__*/
 /*__STUDIO_WORKER_EXTRACT:phase6ClearVoicePrepTokens__*/
+/*__STUDIO_WORKER_EXTRACT:phase6VoicePrepRevisionIdentity__*/
 /*__STUDIO_WORKER_EXTRACT:phase6AdvanceVoicePrepShort__*/
 /*__STUDIO_WORKER_EXTRACT:phase6AutoVoicePrepForOutput__*/
 /*__STUDIO_WORKER_EXTRACT:studioOutputReadyForPublishApproval__*/
@@ -5291,9 +5322,16 @@ const STUDIO_OVERDUE_SCHEDULED_FORMULA = 'AND({Test_Run_ID}=BLANK(),{Do_Not_Publ
 /*__STUDIO_WORKER_EXTRACT:studioPublishLockIsStale__*/
 /*__STUDIO_WORKER_EXTRACT:studioHealOverdueTikTokPrep__*/
 /*__STUDIO_WORKER_EXTRACT:studioReconcileOverdueScheduledPublishes__*/
+/*__STUDIO_WORKER_EXTRACT:studioScheduleOperationToken__*/
+/*__STUDIO_WORKER_EXTRACT:studioHealApprovedMissingScheduleAtomic__*/
+/*__STUDIO_WORKER_EXTRACT:studioHealStoryCompanionDriftAtomic__*/
+/*__STUDIO_WORKER_EXTRACT:studioScheduleReservationPublished__*/
+/*__STUDIO_WORKER_EXTRACT:studioReconcileReservationDriftAtomic__*/
 // Approval is one click, and it has to survive a publisher scenario that drifted off, a Make API
 // hiccup, and a Worker invocation that ran out of budget before reaching the webhook. Nothing else
 // guarantees an approved output reaches a publisher, so this sweep runs first on every cron tick.
+/*__STUDIO_WORKER_EXTRACT:studioScheduleReservationQualitySweep__*/
+/*__STUDIO_WORKER_EXTRACT:studioScheduleReservationQualityLatest__*/
 /*__STUDIO_WORKER_EXTRACT:studioHealApprovedMissingSchedule__*/
 // Approved Stories that already carry today's next MAE instant (11:30 / 5:30 /
 // 16:30) still publish at that instant. Once the same-content main has a later
@@ -5306,6 +5344,7 @@ const STUDIO_OVERDUE_SCHEDULED_FORMULA = 'AND({Test_Run_ID}=BLANK(),{Do_Not_Publ
 /*__STUDIO_WORKER_EXTRACT:studioReconcilePublishingInstagramReels__*/
 /*__STUDIO_WORKER_EXTRACT:studioReconcileFacebookSlideshows__*/
 /*__STUDIO_WORKER_EXTRACT:studioReconcileFacebookReels__*/
+/*__STUDIO_WORKER_EXTRACT:studioStoryCompanionPlatformBlockers__*/
 /*__STUDIO_WORKER_EXTRACT:approveOutputRecordForPublishing__*/
 /*__STUDIO_WORKER_EXTRACT:mapApprovedOutputSummary__*/
 /*__STUDIO_WORKER_EXTRACT:studioLoadApproveAllJobStore__*/
@@ -5313,11 +5352,13 @@ const STUDIO_OVERDUE_SCHEDULED_FORMULA = 'AND({Test_Run_ID}=BLANK(),{Do_Not_Publ
 /*__STUDIO_WORKER_EXTRACT:studioGetApproveAllJob__*/
 /*__STUDIO_WORKER_EXTRACT:studioPutApproveAllJob__*/
 /*__STUDIO_WORKER_EXTRACT:mapApproveAllEligibleSummary__*/
+/*__STUDIO_WORKER_EXTRACT:studioReadScheduleRegenJobStoreFromR2__*/
 /*__STUDIO_WORKER_EXTRACT:studioLoadScheduleRegenJobStore__*/
 /*__STUDIO_WORKER_EXTRACT:studioPutScheduleRegenJobStore__*/
 /*__STUDIO_WORKER_EXTRACT:studioGetScheduleRegenJob__*/
 /*__STUDIO_WORKER_EXTRACT:studioPutScheduleRegenJob__*/
 /*__STUDIO_WORKER_EXTRACT:studioNormalizeRegenFilters__*/
+/*__STUDIO_WORKER_EXTRACT:studioAtomicApplyScheduleRegenEntry__*/
 /*__STUDIO_WORKER_EXTRACT:studioProcessScheduleRegenJobSlice__*/
 /*__STUDIO_WORKER_EXTRACT:studioDrainScheduleRegenJob__*/
 /*__STUDIO_WORKER_EXTRACT:startScheduleRegenJob__*/
@@ -5654,6 +5695,7 @@ let studioAiApiPreferenceCache = { preferred: "OpenAI", failoverEnabled: true, a
 /*__STUDIO_WORKER_EXTRACT:factoryLatestReviewFeedback__*/
 /*__STUDIO_WORKER_EXTRACT:factorySendBackOutput__*/
 /*__STUDIO_WORKER_EXTRACT:factorySendBackContent__*/
+/*__STUDIO_WORKER_EXTRACT:studioAtomicVacateSkippedOutput__*/
 /*__STUDIO_WORKER_EXTRACT:factoryDeleteDeskItem__*/
 /*__STUDIO_WORKER_EXTRACT:mutateFactoryDesk__*/
 /*__STUDIO_WORKER_EXTRACT:pauseStudioOperationsQueueItem__*/

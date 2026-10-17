@@ -32,6 +32,8 @@ export const QUALITY_HEALS = Object.freeze([
   "ticket_only",
   "resume_factory_batch",
   "reconcile_factory_batch",
+  "recover_schedule_lock",
+  "reconcile_schedule_reservation",
   "none",
 ]);
 
@@ -56,6 +58,51 @@ function check(row) {
 
 /** Precise operator sentences. `kind` matches a classifier or tester assertion. */
 export const QUALITY_CHECKS = Object.freeze([
+  check({
+    id: "schedule_lock_hung",
+    signature: "QA-SCHEDULE-LOCK-HUNG",
+    title: "Detect expired or abandoned profile/platform scheduling reservation locks",
+    lane: "service",
+    kind: "schedule_lock_hung",
+    actor: "worker_heal",
+    heal: "recover_schedule_lock",
+  }),
+  check({
+    id: "schedule_lock_contention",
+    signature: "QA-SCHEDULE-LOCK-CONTENTION",
+    title: "Detect scheduling requests waiting too long behind a profile/platform reservation owner",
+    lane: "service",
+    kind: "schedule_lock_contention",
+    actor: "worker_heal",
+    heal: "none",
+  }),
+  check({
+    id: "schedule_reservation_drift",
+    signature: "QA-SCHEDULE-RESERVATION-DRIFT",
+    title: "Detect disagreement between durable scheduling reservation ledger and authoritative Platform Output",
+    lane: "service",
+    kind: "schedule_reservation_drift",
+    actor: "worker_heal",
+    heal: "reconcile_schedule_reservation",
+  }),
+  check({
+    id: "schedule_collision",
+    signature: "QA-SCHEDULE-COLLISION",
+    title: "Detect committed same-profile/platform schedules that violate separation policy",
+    lane: "both",
+    kind: "schedule_collision",
+    actor: "desk_agent",
+    heal: "ticket_only",
+  }),
+  check({
+    id: "schedule_queue_stalled",
+    signature: "QA-SCHEDULE-QUEUE-STALLED",
+    title: "Detect scheduling approval queues unable to advance because a reservation lane is blocked",
+    lane: "service",
+    kind: "schedule_queue_stalled",
+    actor: "worker_heal",
+    heal: "recover_schedule_lock",
+  }),
   check({ id: "factory_batch_stalled", title: "Detect Factory approval batches stalled beyond recovery heartbeat", lane: "service",
     kind: "factory_batch_stalled", actor: "worker_heal", heal: "resume_factory_batch" }),
   check({ id: "factory_batch_state_mismatch", title: "Reconcile Factory batch status that disagrees with durable item states", lane: "service",

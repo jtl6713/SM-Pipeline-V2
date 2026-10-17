@@ -1,6 +1,8 @@
 """Canonical Studio API Worker binding contract.
 
-Live production uses 10 core bindings. ELEVENLABS_API_KEY is optional secret_text.
+Live production uses 10 legacy core bindings plus the atomic scheduling reservation
+feature-flag and Durable Object namespace after reservation bootstrap.
+ELEVENLABS_API_KEY is optional secret_text.
 Pipeline-runner vars (PIPELINE_RUNNER_URL, PIPELINE_RUNNER_SHARED_SECRET,
 STAGE_BACKEND_SMV1, STAGE_BACKEND_R2, STAGE_BACKEND_R3, STAGE_BACKEND_R4,
 STAGE_BACKEND_R5, STAGE_BACKEND_RR1, STAGE_BACKEND_RR2, STAGE_BACKEND_R2B, STAGE_BACKEND_P1, STAGE_BACKEND_P2, STAGE_BACKEND_P3, STAGE_BACKEND_P4, STAGE_BACKEND_P5, STAGE_BACKEND_C2, STAGE_BACKEND_C3, STAGE_BACKEND_C3B, STAGE_BACKEND_SAI1, STAGE_BACKEND_C4, STAGE_BACKEND_C5, STAGE_BACKEND_C6, STAGE_BACKEND_C7, STAGE_BACKEND_C8, STAGE_BACKEND_C9, STAGE_BACKEND_I1, STAGE_BACKEND_I2, STAGE_BACKEND_I3, STAGE_BACKEND_I4, STAGE_BACKEND_A2, STAGE_BACKEND_A2B, STAGE_BACKEND_A3, STAGE_BACKEND_A4, STAGE_BACKEND_A1P, STAGE_BACKEND_A1S, STAGE_BACKEND_M1, STAGE_BACKEND_AP0, STAGE_BACKEND_AP1_IG, STAGE_BACKEND_AP1_IGS, STAGE_BACKEND_FBS1, STAGE_BACKEND_FBS3, STAGE_BACKEND_YT0, STAGE_BACKEND_TTD0, STAGE_BACKEND_FB0, STAGE_BACKEND_AP0C, STAGE_BACKEND_TTD_ORCH, STAGE_BACKEND_YT_ORCH, STAGE_BACKEND_FB_ORCH, STAGE_BACKEND_APCAR_ORCH, STAGE_BACKEND_IG_ORCH, STAGE_BACKEND_P0202) may already exist on the live Worker; treat them as optional.
@@ -22,6 +24,11 @@ CORE_BINDINGS = {
     "ALLOWED_ORIGINS": "plain_text",
     "I3_DECISION_WEBHOOK_URL": "plain_text",
     "STUDIO_MEDIA": "r2_bucket",
+}
+
+RESERVATION_BINDINGS = {
+    "STUDIO_SCHEDULE_RESERVATION_AUTHORITY_ENABLED": "plain_text",
+    "STUDIO_SCHEDULE_RESERVATIONS": "durable_object_namespace",
 }
 
 OPTIONAL_BINDINGS = {
@@ -114,13 +121,26 @@ def binding_map(bindings):
     return {str(item.get("name") or ""): str(item.get("type") or "") for item in bindings or []}
 
 
-def evaluate_bindings(got):
+def evaluate_bindings(got, *, allow_reservation_absent=False):
     got = {str(k): str(v) for k, v in (got or {}).items() if k}
     missing = {name: expected for name, expected in CORE_BINDINGS.items() if got.get(name) != expected}
+    reservation_present = {name for name in RESERVATION_BINDINGS if name in got}
+    reservation_missing = {
+        name: expected
+        for name, expected in RESERVATION_BINDINGS.items()
+        if got.get(name) != expected
+    }
+    reservation_bootstrap_absent = (
+        allow_reservation_absent
+        and not reservation_present
+    )
+    effective_reservation_missing = {} if reservation_bootstrap_absent else reservation_missing
     unexpected = {
         name: found
         for name, found in got.items()
-        if name not in CORE_BINDINGS and name not in OPTIONAL_BINDINGS
+        if name not in CORE_BINDINGS
+        and name not in RESERVATION_BINDINGS
+        and name not in OPTIONAL_BINDINGS
     }
     optional_mismatch = {
         name: got[name]
@@ -131,22 +151,27 @@ def evaluate_bindings(got):
         "contract": CONTRACT_ID,
         "binding_count": len(got),
         "core_ok": not missing,
-        "ok": not missing and not unexpected and not optional_mismatch,
+        "reservation_ok": not effective_reservation_missing,
+        "reservation_bootstrap_absent": reservation_bootstrap_absent,
+        "ok": not missing and not effective_reservation_missing and not unexpected and not optional_mismatch,
         "missing": missing,
+        "reservation_missing": effective_reservation_missing,
         "unexpected": unexpected,
         "optional_present": {name: name in got for name in OPTIONAL_BINDINGS},
+        "reservation_present": {name: name in got for name in RESERVATION_BINDINGS},
         "optional_mismatch": optional_mismatch,
         "elevenlabs_required": False,
         "bindings": [{"name": name, "type": got[name]} for name in sorted(got)],
     }
 
 
-def assert_live_contract(got, label="bindings"):
-    result = evaluate_bindings(got)
+def assert_live_contract(got, label="bindings", *, allow_reservation_absent=False):
+    result = evaluate_bindings(got, allow_reservation_absent=allow_reservation_absent)
     if not result["ok"]:
         raise SystemExit(
-            f"{label} failed {CONTRACT_ID}: missing={result['missing']} unexpected={result['unexpected']} "
-            f"optional_mismatch={result['optional_mismatch']}"
+            f"{label} failed {CONTRACT_ID}: missing={result['missing']} "
+            f"reservation_missing={result['reservation_missing']} "
+            f"unexpected={result['unexpected']} optional_mismatch={result['optional_mismatch']}"
         )
     return result
 

@@ -22,14 +22,30 @@ jobs:
           set -euo pipefail
           python - <<'PY'
           from pathlib import Path
+          import re
           names = [Path('apps/studio-api/worker.js'), *sorted(Path('apps/studio-api').glob('worker-functions-*.mjs'))]
           assert len(names)==5, [str(x) for x in names]
           for p in names:
               size=p.stat().st_size
               print(f'{p}: {size} bytes')
               assert 0<size<1000000, f'{p} exceeds the GitHub Contents API limit'
+          worker = names[0].read_text()
+          extracts = set(re.findall(r'/\*__STUDIO_WORKER_EXTRACT:([^*]+)__\*/', worker))
+          missing = []
+          nonexported = []
+          for p in names[1:]:
+              source = p.read_text()
+              ends = re.findall(r'/\*__STUDIO_WORKER_END:([^*]+)__\*/', source)
+              exported = set(re.findall(r'^export (?:async )?function ([A-Za-z_$][\w$]*)\(', source, re.M))
+              missing.extend(f'{p.name}:{name}' for name in ends if name not in extracts)
+              nonexported.extend(f'{p.name}:{name}' for name in ends if name not in exported)
+          assert not missing, 'worker.js missing split reconstruction markers: ' + ', '.join(missing)
+          assert not nonexported, 'split reconstruction functions must be exported: ' + ', '.join(nonexported)
+          print(f'worker_split_reconstruction_markers=PASS count={len(extracts)}')
           PY
           node --check apps/studio-api/worker.js
+          node --check apps/studio-api/schedule-reservation-authority.mjs
+          node --check apps/studio-api/schedule-reservation-transaction.mjs
           for file in apps/studio-api/worker-functions-*.mjs; do node --check "$file"; done
       - name: Run existing Studio API tests
         shell: bash
@@ -64,7 +80,10 @@ jobs:
             "main": "worker.js",
             "compatibility_date": "2026-08-02",
             "workers_dev": false,
-            "r2_buckets": [{"binding":"STUDIO_MEDIA","bucket_name":"dummy"}]
+            "vars": {"STUDIO_SCHEDULE_RESERVATION_AUTHORITY_ENABLED":"false"},
+            "r2_buckets": [{"binding":"STUDIO_MEDIA","bucket_name":"dummy"}],
+            "durable_objects": {"bindings":[{"name":"STUDIO_SCHEDULE_RESERVATIONS","class_name":"ScheduleReservationLane"}]},
+            "exports": {"ScheduleReservationLane":{"type":"durable-object","storage":"sqlite"}}
           }
           EOF
           ./node_modules/.bin/wrangler deploy --config wrangler.jsonc --dry-run

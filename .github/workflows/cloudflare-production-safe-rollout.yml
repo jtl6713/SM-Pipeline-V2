@@ -71,6 +71,8 @@ jobs:
           bindings=(r.get('resources') or {}).get('bindings') or []
           by_name={str(b.get('name')):b for b in bindings}
           got={k:str(v.get('type')) for k,v in by_name.items()}
+          if got.get('STUDIO_SCHEDULE_RESERVATIONS') != 'durable_object_namespace':
+              raise SystemExit('Atomic scheduling namespace is not bootstrapped; run the direct production deploy bootstrap first')
           contract=assert_live_contract(got, 'live Worker binding contract')
           vars_out={k:by_name[k].get('text') for k in (
             'AIRTABLE_BASE_ID','AIRTABLE_CONTENT_TABLE_ID','AIRTABLE_IDEA_TABLE_ID','AIRTABLE_MEDIA_TABLE_ID',
@@ -87,6 +89,7 @@ jobs:
           secret_names={str(x.get('name')) for x in secret_payload.get('result') or []}
           if not set(REQUIRED_SECRETS).issubset(secret_names):
               raise SystemExit('Required production secret names are not configured')
+          vars_out['STUDIO_SCHEDULE_RESERVATION_AUTHORITY_ENABLED']='false'
           cfg={
             'name':'chicagoshining-studio-api',
             'main':'apps/studio-api/worker.js',
@@ -94,6 +97,12 @@ jobs:
             'keep_vars':True,
             'vars':vars_out,
             'r2_buckets':[{'binding':'STUDIO_MEDIA','bucket_name':bucket}],
+            'durable_objects':{
+              'bindings':[{
+                'name':'STUDIO_SCHEDULE_RESERVATIONS',
+                'class_name':'ScheduleReservationLane',
+              }],
+            },
             'secrets':{'required':list(REQUIRED_SECRETS)}
           }
           Path('wrangler.production.generated.jsonc').write_text(json.dumps(cfg,indent=2))
@@ -162,6 +171,11 @@ jobs:
           r=json.loads(Path('/tmp/staged-version.json').read_text())['result']
           got={str(b.get('name')):str(b.get('type')) for b in ((r.get('resources') or {}).get('bindings') or [])}
           contract=assert_live_contract(got, 'Staged version')
+          if got.get('STUDIO_SCHEDULE_RESERVATIONS') != 'durable_object_namespace':
+              raise SystemExit('Staged version lost atomic scheduling Durable Object binding')
+          plain={str(b.get('name')):str(b.get('text')) for b in ((r.get('resources') or {}).get('bindings') or []) if b.get('type')=='plain_text' and 'text' in b}
+          if plain.get('STUDIO_SCHEDULE_RESERVATION_AUTHORITY_ENABLED') != 'false':
+              raise SystemExit('Staged atomic scheduling feature flag must remain false')
           Path('/tmp/staged-binding-audit.json').write_text(json.dumps({
             'binding_count':len(got),
             'contract':contract['contract'],
@@ -312,6 +326,11 @@ jobs:
           r=json.loads(Path('/tmp/final-version.json').read_text())['result']
           got={str(b.get('name')):str(b.get('type')) for b in ((r.get('resources') or {}).get('bindings') or [])}
           assert_live_contract(got, 'Final active version')
+          if got.get('STUDIO_SCHEDULE_RESERVATIONS') != 'durable_object_namespace':
+              raise SystemExit('Final active version lost atomic scheduling Durable Object binding')
+          plain={str(b.get('name')):str(b.get('text')) for b in ((r.get('resources') or {}).get('bindings') or []) if b.get('type')=='plain_text' and 'text' in b}
+          if plain.get('STUDIO_SCHEDULE_RESERVATION_AUTHORITY_ENABLED') != 'false':
+              raise SystemExit('Final active atomic scheduling feature flag must remain false')
           PY
 
       - name: Delete rollout verifier

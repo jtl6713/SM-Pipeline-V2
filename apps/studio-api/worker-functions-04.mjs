@@ -6,6 +6,21 @@ import {
   readProfilesOverviewRefreshStateRecord,
 } from "./profiles-overview-refresh.mjs";
 import { withOutputApprovalLock } from "./output-approval-lease.mjs";
+import {
+  reconcileScheduleReservation,
+  scheduleReservationAuthorityEnabled,
+  SCHEDULE_RESERVATION_STATES,
+} from "./schedule-reservation-authority.mjs";
+import { runAtomicScheduleTransaction } from "./schedule-reservation-transaction.mjs";
+import {
+  listScheduleReservationSnapshots,
+  readScheduleReservationQualityLatest,
+  scheduleReservationAuthoritativeIso,
+  scheduleReservationDriftFinding,
+  scheduleReservationRecoveryObservation,
+  scheduleReservationSnapshotFindings,
+  writeScheduleReservationQualityLatest,
+} from "./schedule-reservation-quality.mjs";
 import { factoryBatchRolloutPolicy, factoryBatchRolloutAcceptsOutput, factoryBatchRolloutAcceptsIds } from "./factory-batch-rollout.mjs";
 import {
   factoryBatchEnqueue, factoryBatchRead, factoryBatchList, factoryBatchListGlobal,
@@ -1184,6 +1199,549 @@ export async function studioReconcileOverdueScheduledPublishes(env, options = {}
 }
 /*__STUDIO_WORKER_END:studioReconcileOverdueScheduledPublishes__*/
 
+
+
+export function studioScheduleOperationToken(prefix, row, fallback = "current") {
+  const cycle = String(
+    f(row, "Review_Decision_At")
+    || f(row, "Final_File_ID")
+    || f(row, "Remotion_Job_ID")
+    || f(row, "Final_File_URL")
+    || fallback
+  ).replace(/[^A-Za-z0-9._:-]+/g, "_").slice(0, 96);
+  return `${prefix}:${row.id}:${cycle}`.slice(0, 180);
+}
+
+/*__STUDIO_WORKER_END:studioScheduleOperationToken__*/
+
+export async function studioHealApprovedMissingScheduleAtomic(env, row) {
+  const profile = await item4ProductionProfileRecord(env, row).catch(() => null);
+  const profileId = String(profile?.id || "").trim();
+  const platform = String(f(row, "Platform") || "").trim();
+  const outputType = String(f(row, "Studio_Output_Type") || f(row, "Format") || "").trim();
+  if (!profileId || !platform) throw new HttpError(409, "Missing authoritative profile/platform for atomic schedule heal");
+  const timeZone = await studioScheduleTimeZoneForRecord(env, row, null);
+  const horizonDays = await studioScheduleHorizonDays(env).catch(() => MAE_SUGGEST_HORIZON_DAYS);
+  const operationId = studioScheduleOperationToken("heal-missing-schedule", row);
+
+  const result = await runAtomicScheduleTransaction(env, {
+    content_profile_id: profileId,
+    platform,
+    output_type: outputType,
+    platform_output_record_id: row.id,
+    content_item_id: studioFirstLinkedId(f(row, "Content_Item")) || null,
+    owner_operation_id: operationId,
+  }, {
+    legacy: async () => {
+      throw new HttpError(503, "Atomic schedule heal unexpectedly fell back to legacy mode");
+    },
+    plan: async ({ occupied_reservations: durableReservations }) => {
+      const authoritative = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, row.id);
+      const alreadyRaw = String(
+        f(authoritative, "Scheduled_Post_Date")
+        || f(authoritative, "YouTube_Scheduled_Publish_At")
+        || ""
+      ).trim();
+      if (alreadyRaw && Number.isFinite(Date.parse(alreadyRaw))) {
+        return {
+          action: "reserve",
+          selectedIso: new Date(Date.parse(alreadyRaw)).toISOString(),
+          previousIso: "",
+          patchFields: null,
+        };
+      }
+
+      studioInvalidateOccupiedScheduleCache();
+      const occupied = await studioOccupiedSchedulesOrEmpty(env, {
+        excludeIds: [row.id],
+        profile,
+      });
+      const laneOccupied = studioOccupiedForLane(occupied, platform, outputType).slice();
+      const platformOccupied = studioOccupiedForPlatform(occupied, platform).slice();
+      for (const durable of durableReservations || []) {
+        const ms = Date.parse(String(durable?.scheduled_iso || ""));
+        if (!Number.isFinite(ms)) continue;
+        platformOccupied.push(ms);
+        if (String(durable?.output_type || "").trim().toLowerCase() === outputType.toLowerCase()) {
+          laneOccupied.push(ms);
+        }
+      }
+      const lane = [...new Set(laneOccupied.filter(Number.isFinite))];
+      const platformLane = [...new Set(platformOccupied.filter(Number.isFinite))];
+      const isStory = /story/i.test(outputType);
+      let selectedIso = "";
+      let storyCompanion = false;
+
+      if (isStory) {
+        const resolved = await studioResolveStoryPublishIso(env, authoritative, {
+          occupiedMs: lane,
+          timeZone,
+        });
+        selectedIso = String(resolved.iso || "").trim();
+        storyCompanion = resolved.source === "companion" || resolved.source === "mae_plus_10";
+        if (storyCompanion && selectedIso) {
+          const selectedMs = Date.parse(selectedIso);
+          const blockers = studioStoryCompanionPlatformBlockers(platformLane, selectedIso);
+          if (!Number.isFinite(selectedMs) || maeScheduleConflicts(selectedMs, blockers)) {
+            selectedIso = "";
+            storyCompanion = false;
+          }
+        }
+      }
+
+      if (!selectedIso) {
+        const picked = maeScheduleNextSlot({
+          timeZone,
+          laneOccupiedMs: lane,
+          platformOccupiedMs: platformLane,
+          horizonDays,
+        });
+        if (!picked.ok) throw new HttpError(409, picked.error || "No scheduling capacity available");
+        selectedIso = picked.iso;
+      }
+
+      const fields = studioPublishScheduleFields(
+        { scheduled_post_date: selectedIso, timezone: timeZone },
+        authoritative,
+        {
+          occupiedMs: storyCompanion ? [] : platformLane,
+          timeZone,
+          forceWrite: true,
+          storyCompanion,
+        },
+      );
+      const storedCandidate = String(fields.Scheduled_Post_Date || "").trim();
+      if (!storedCandidate || !Number.isFinite(Date.parse(storedCandidate))) {
+        throw new HttpError(409, "Missing-schedule heal did not produce a verifiable slot");
+      }
+      return {
+        action: "reserve",
+        selectedIso: new Date(Date.parse(storedCandidate)).toISOString(),
+        previousIso: "",
+        patchFields: fields,
+      };
+    },
+    write: async (plan, { signal }) => {
+      if (!plan.patchFields) return airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, row.id);
+      return airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, row.id, {
+        method: "PATCH",
+        signal,
+        body: JSON.stringify({ fields: plan.patchFields, typecast: true }),
+      });
+    },
+    verify: async (_written, plan) => {
+      const verified = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, row.id);
+      const raw = String(f(verified, "Scheduled_Post_Date") || "").trim();
+      const expected = Date.parse(plan.selectedIso);
+      const actual = Date.parse(raw);
+      if (!Number.isFinite(expected) || !Number.isFinite(actual) || expected !== actual) {
+        throw new HttpError(503, "Missing-schedule heal Airtable write could not be verified");
+      }
+      if (platform === "YouTube") {
+        const youtube = Date.parse(String(f(verified, "YouTube_Scheduled_Publish_At") || "").trim());
+        if (!Number.isFinite(youtube) || youtube !== expected) {
+          throw new HttpError(503, "Missing-schedule heal YouTube time could not be verified");
+        }
+      }
+      return new Date(actual).toISOString();
+    },
+    afterCommit: async () => {
+      studioInvalidateOccupiedScheduleCache();
+    },
+  }, {
+    maxWaitMs: 8_000,
+  });
+
+  const scheduled = String(
+    result?.reservation?.scheduled_iso
+    || result?.value?.fields?.Scheduled_Post_Date
+    || result?.value?.Scheduled_Post_Date
+    || ""
+  ).trim();
+  const current = scheduled
+    ? scheduled
+    : String(f(await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, row.id), "Scheduled_Post_Date") || "").trim();
+  return current
+    ? { id: row.id, output_id: f(row, "Output_ID") || null, scheduled_post_date: current }
+    : null;
+}
+
+/*__STUDIO_WORKER_END:studioHealApprovedMissingScheduleAtomic__*/
+
+export async function studioHealStoryCompanionDriftAtomic(env, row) {
+  const profile = await item4ProductionProfileRecord(env, row).catch(() => null);
+  const profileId = String(profile?.id || "").trim();
+  const platform = String(f(row, "Platform") || "").trim();
+  const outputType = String(f(row, "Studio_Output_Type") || f(row, "Format") || "").trim();
+  const scannedRaw = String(f(row, "Scheduled_Post_Date") || "").trim();
+  if (!profileId || !platform || !/story/i.test(outputType)) {
+    throw new HttpError(409, "Missing authoritative Story profile/platform for atomic drift heal");
+  }
+  const timeZone = await studioScheduleTimeZoneForRecord(env, row, null);
+  const operationId = `heal-story-drift:${row.id}:${scannedRaw || "blank"}`
+    .replace(/[^A-Za-z0-9._:>+-]+/g, "_")
+    .slice(0, 180);
+
+  const result = await runAtomicScheduleTransaction(env, {
+    content_profile_id: profileId,
+    platform,
+    output_type: outputType,
+    platform_output_record_id: row.id,
+    content_item_id: studioFirstLinkedId(f(row, "Content_Item")) || null,
+    owner_operation_id: operationId,
+  }, {
+    legacy: async () => {
+      throw new HttpError(503, "Atomic Story drift heal unexpectedly fell back to legacy mode");
+    },
+    plan: async ({ occupied_reservations: durableReservations }) => {
+      const authoritative = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, row.id);
+      const previousRaw = String(f(authoritative, "Scheduled_Post_Date") || "").trim();
+      const previousMs = Date.parse(previousRaw);
+      if (!Number.isFinite(previousMs)) {
+        throw new HttpError(409, "Story drift heal requires an existing authoritative schedule");
+      }
+      const resolved = await studioResolveStoryPublishIso(env, authoritative, {
+        timeZone,
+        existingIso: previousRaw,
+        allowMaeFallback: false,
+      });
+      if (resolved.source !== "companion" || !resolved.iso) {
+        return {
+          action: "reserve",
+          selectedIso: new Date(previousMs).toISOString(),
+          previousIso: new Date(previousMs).toISOString(),
+          patchFields: null,
+        };
+      }
+      const selectedMs = Date.parse(resolved.iso);
+      if (!Number.isFinite(selectedMs)) throw new HttpError(409, "Story companion schedule is invalid");
+
+      studioInvalidateOccupiedScheduleCache();
+      const occupied = await studioOccupiedSchedulesOrEmpty(env, {
+        excludeIds: [row.id],
+        profile,
+      });
+      const platformOccupied = studioOccupiedForPlatform(occupied, platform).slice();
+      for (const durable of durableReservations || []) {
+        const ms = Date.parse(String(durable?.scheduled_iso || ""));
+        if (Number.isFinite(ms)) platformOccupied.push(ms);
+      }
+      const platformLane = [...new Set(platformOccupied.filter(Number.isFinite))];
+      const blockers = studioStoryCompanionPlatformBlockers(platformLane, resolved.iso);
+      if (maeScheduleConflicts(selectedMs, blockers)) {
+        throw new HttpError(409, "Story companion move conflicts with another output on this profile/platform");
+      }
+
+      const fields = studioPublishScheduleFields(
+        { scheduled_post_date: resolved.iso, timezone: timeZone },
+        authoritative,
+        { occupiedMs: [], timeZone, forceWrite: true, storyCompanion: true },
+      );
+      const candidate = Date.parse(String(fields.Scheduled_Post_Date || ""));
+      if (!Number.isFinite(candidate)) throw new HttpError(409, "Story drift heal did not produce a verifiable slot");
+      const changed = Math.abs(candidate - previousMs) >= 2 * 60 * 1000;
+      return {
+        action: changed ? "move" : "reserve",
+        selectedIso: new Date(candidate).toISOString(),
+        previousIso: new Date(previousMs).toISOString(),
+        patchFields: changed ? fields : null,
+      };
+    },
+    write: async (plan, { signal }) => {
+      if (!plan.patchFields) return airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, row.id);
+      return airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, row.id, {
+        method: "PATCH",
+        signal,
+        body: JSON.stringify({ fields: plan.patchFields, typecast: true }),
+      });
+    },
+    verify: async (_written, plan) => {
+      const verified = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, row.id);
+      const actual = Date.parse(String(f(verified, "Scheduled_Post_Date") || "").trim());
+      const expected = Date.parse(plan.selectedIso);
+      if (!Number.isFinite(actual) || !Number.isFinite(expected) || actual !== expected) {
+        throw new HttpError(503, "Story drift heal Airtable write could not be verified");
+      }
+      return new Date(actual).toISOString();
+    },
+    afterCommit: async () => {
+      studioInvalidateOccupiedScheduleCache();
+    },
+  }, {
+    maxWaitMs: 8_000,
+  });
+
+  const current = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, row.id).catch(() => row);
+  return {
+    id: row.id,
+    output_id: f(row, "Output_ID") || null,
+    scheduled_post_date: f(current, "Scheduled_Post_Date") || null,
+    offset_ms: MAE_STORY_COMPANION_OFFSET_MS,
+  };
+}
+
+/*__STUDIO_WORKER_END:studioHealStoryCompanionDriftAtomic__*/
+
+export function studioScheduleReservationPublished(record) {
+  return /published/i.test(String(f(record, "Publish_Status") || f(record, "Output_Status") || ""))
+    || Boolean(f(record, "Published_At"));
+}
+
+/*__STUDIO_WORKER_END:studioScheduleReservationPublished__*/
+
+export async function studioReconcileReservationDriftAtomic(env, snapshot, reservation, record) {
+  const profileId = String(snapshot?.lane?.content_profile_id || "").trim();
+  const platform = String(snapshot?.lane?.platform || f(record, "Platform") || "").trim();
+  const outputType = String(
+    reservation?.output_type
+    || f(record, "Studio_Output_Type")
+    || f(record, "Format")
+    || ""
+  ).trim();
+  const outputId = String(reservation?.platform_output_record_id || record?.id || "").trim();
+  if (!profileId || !platform || !outputId) {
+    throw new HttpError(409, "Reservation drift cannot establish its profile/platform/output identity");
+  }
+  if (studioScheduleReservationPublished(record)) {
+    throw new HttpError(409, "Published reservation drift requires Needs Eyes");
+  }
+  const previousIso = String(reservation?.scheduled_iso || "").trim();
+  const targetIso = scheduleReservationAuthoritativeIso(record);
+  const operationId = `qa-drift:${outputId}:${previousIso || "blank"}->${targetIso || "blank"}`
+    .replace(/[^A-Za-z0-9._:>+-]+/g, "_")
+    .slice(0, 180);
+
+  return runAtomicScheduleTransaction(env, {
+    content_profile_id: profileId,
+    platform,
+    output_type: outputType,
+    platform_output_record_id: outputId,
+    content_item_id: studioFirstLinkedId(f(record, "Content_Item")) || null,
+    owner_operation_id: operationId,
+  }, {
+    legacy: async () => {
+      throw new HttpError(503, "Reservation drift reconciliation unexpectedly entered legacy mode");
+    },
+    plan: async ({ occupied_reservations: durableReservations }) => {
+      const authoritative = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, outputId);
+      if (studioScheduleReservationPublished(authoritative)) {
+        throw new HttpError(409, "Published reservation drift requires Needs Eyes");
+      }
+      const currentIso = scheduleReservationAuthoritativeIso(authoritative);
+      if (currentIso) {
+        const currentMs = Date.parse(currentIso);
+        const profile = await item4ProductionProfileRecord(env, authoritative).catch(() => null);
+        const timeZone = await studioScheduleTimeZoneForRecord(env, authoritative, null);
+        studioInvalidateOccupiedScheduleCache();
+        const occupied = await studioOccupiedSchedulesOrEmpty(env, {
+          excludeIds: [outputId],
+          profile,
+        });
+        const platformOccupied = studioOccupiedForPlatform(occupied, platform).slice();
+        for (const durable of durableReservations || []) {
+          const ms = Date.parse(String(durable?.scheduled_iso || ""));
+          if (Number.isFinite(ms)) platformOccupied.push(ms);
+        }
+        const blockers = [...new Set(platformOccupied.filter(Number.isFinite))];
+        if (!Number.isFinite(currentMs)
+            || maeIsBlackoutLocalTime(currentMs, timeZone)
+            || maeScheduleConflicts(currentMs, blockers)) {
+          throw new HttpError(
+            409,
+            "Authoritative reservation drift violates blackout or current profile/platform separation; Needs Eyes required",
+          );
+        }
+      }
+      return {
+        action: currentIso ? "move" : "vacate",
+        selectedIso: currentIso,
+        previousIso,
+        authoritativeRecord: authoritative,
+      };
+    },
+    write: async (plan) => plan.authoritativeRecord,
+    verify: async (_record, plan) => {
+      const verified = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, outputId);
+      const currentIso = scheduleReservationAuthoritativeIso(verified);
+      if (currentIso !== String(plan.selectedIso || "")) {
+        throw new HttpError(409, "Authoritative schedule changed during reservation drift reconciliation");
+      }
+      return currentIso;
+    },
+    afterCommit: async () => {
+      studioInvalidateOccupiedScheduleCache();
+    },
+  }, { maxWaitMs: 5_000 });
+}
+
+/*__STUDIO_WORKER_END:studioReconcileReservationDriftAtomic__*/
+
+export async function studioScheduleReservationQualitySweep(env, options = {}) {
+  const nowMs = Number(options.nowMs) || Date.now();
+  if (!scheduleReservationAuthorityEnabled(env)) {
+    return {
+      enabled: false,
+      scanned_at: new Date(nowMs).toISOString(),
+      lanes_scanned: 0,
+      findings: [],
+      recoveries: [],
+    };
+  }
+  const snapshots = await listScheduleReservationSnapshots(env.STUDIO_MEDIA, {
+    limit: Math.max(1, Math.min(250, Number(options.limit) || 100)),
+  });
+  const findings = [];
+  const recoveries = [];
+  const maxDriftReads = Math.max(0, Math.min(100, Number(options.maxDriftReads) || 40));
+  let driftReads = 0;
+
+  for (const snapshot of snapshots) {
+    const laneFindings = scheduleReservationSnapshotFindings(snapshot, nowMs);
+    findings.push(...laneFindings);
+
+    const active = snapshot?.active_reservation || null;
+    const lockState = String(snapshot?.lock?.state || "").trim();
+    const leaseExpirationMs = Date.parse(String(snapshot?.lock?.lease_expiration_timestamp || ""));
+    const leaseExpired = Number.isFinite(leaseExpirationMs) && leaseExpirationMs <= nowMs;
+    const recoverableExpiredState = leaseExpired && [
+      SCHEDULE_RESERVATION_STATES.VERIFYING,
+      SCHEDULE_RESERVATION_STATES.COMMITTED,
+      SCHEDULE_RESERVATION_STATES.RECOVERY_REQUIRED,
+    ].includes(lockState);
+    // Recovery is evidence-driven only after an external write may have happened
+    // (Verifying), after a durable commit whose release was lost (Committed), or
+    // when the lane is explicitly quarantined. Expired Acquired/Reserving owners
+    // are pre-write and are safely fenced by the next normal acquirer instead.
+    const shouldRecoverActive = Boolean(
+      options.recover !== false
+      && active?.platform_output_record_id
+      && (snapshot?.quarantine || recoverableExpiredState)
+    );
+    if (shouldRecoverActive) {
+      try {
+        const record = await airtableFetch(
+          env,
+          env.AIRTABLE_OUTPUT_TABLE_ID,
+          active.platform_output_record_id,
+        );
+        const authoritativeIso = scheduleReservationAuthoritativeIso(record);
+        const observation = scheduleReservationRecoveryObservation(snapshot, authoritativeIso);
+        const recoveryOperationId = `qa-recovery:${active.reservation_id || active.platform_output_record_id}`
+          .replace(/[^A-Za-z0-9._:-]+/g, "_")
+          .slice(0, 180);
+        try {
+          const reconciled = await reconcileScheduleReservation(env, {
+            content_profile_id: snapshot.lane?.content_profile_id,
+            platform: snapshot.lane?.platform,
+            recovery_operation_id: recoveryOperationId,
+            observation: observation.observation,
+            authoritative_iso: observation.authoritative_iso,
+          });
+          if (reconciled?.reconciled) {
+            recoveries.push({
+              signature: "QA-SCHEDULE-LOCK-HUNG",
+              lane: snapshot.lane,
+              output_id: active.platform_output_record_id,
+              reservation_id: active.reservation_id,
+              observation: observation.observation,
+              result: reconciled.committed ? "committed_reconciled" : "not_committed_reconciled",
+            });
+            for (const item of laneFindings) {
+              if (item.signature === "QA-SCHEDULE-LOCK-HUNG"
+                  || item.signature === "QA-SCHEDULE-QUEUE-STALLED") {
+                item.auto_recovered = true;
+                item.status = "reconciled";
+              }
+            }
+          }
+        } catch (error) {
+          // 423 is the expected durable quarantine while not-committed evidence
+          // is still inside the settle/stability window or the result is ambiguous.
+          if (error?.code !== "recovery_still_ambiguous") {
+            console.warn("schedule reservation fenced recovery failed", snapshot.lane?.lock_key, error);
+          }
+          if (observation.observation === "ambiguous") {
+            const hung = laneFindings.find((item) => item.signature === "QA-SCHEDULE-LOCK-HUNG");
+            if (hung) {
+              hung.needs_eyes = true;
+              hung.urgent = true;
+              hung.blocker = "Airtable does not match either the selected or previous reservation; lane remains quarantined.";
+              hung.proposed_recovery_action = "Needs Eyes: inspect the Platform Output and reservation ledger. Do not clear this lane automatically.";
+            }
+          }
+        }
+      } catch (error) {
+        const hung = laneFindings.find((item) => item.signature === "QA-SCHEDULE-LOCK-HUNG");
+        if (hung) {
+          hung.needs_eyes = true;
+          hung.urgent = true;
+          hung.blocker = "Quality Agent could not read the authoritative Platform Output for fenced recovery.";
+        }
+        console.warn("schedule reservation authoritative recovery read failed", active.platform_output_record_id, error);
+      }
+    }
+
+    for (const reservation of snapshot?.recent_reservations || []) {
+      if (driftReads >= maxDriftReads) break;
+      const outputId = String(reservation?.platform_output_record_id || "").trim();
+      if (!outputId) continue;
+      driftReads += 1;
+      let record;
+      try {
+        record = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, outputId);
+      } catch (error) {
+        console.warn("schedule reservation drift read failed", outputId, error);
+        continue;
+      }
+      const drift = scheduleReservationDriftFinding(snapshot, reservation, record, nowMs);
+      if (!drift) continue;
+      findings.push(drift);
+      if (!drift.needs_eyes && options.recover !== false) {
+        try {
+          await studioReconcileReservationDriftAtomic(env, snapshot, reservation, record);
+          drift.auto_recovered = true;
+          drift.status = "reconciled";
+          recoveries.push({
+            signature: drift.signature,
+            lane: snapshot.lane,
+            output_id: outputId,
+            reservation_id: reservation.reservation_id || null,
+            result: "ledger_adopted_authoritative_schedule",
+          });
+        } catch (error) {
+          drift.needs_eyes = true;
+          drift.blocker = `Automatic reservation drift reconciliation failed: ${String(error?.message || error)}`.slice(0, 1000);
+          console.warn("schedule reservation drift reconciliation failed", outputId, error);
+        }
+      }
+    }
+  }
+
+  const activeFindings = findings.filter((row) => row?.auto_recovered !== true);
+  const report = {
+    schema: "studio.schedule-reservation-quality.1",
+    enabled: true,
+    scanned_at: new Date(nowMs).toISOString(),
+    lanes_scanned: snapshots.length,
+    drift_records_read: driftReads,
+    finding_count: activeFindings.length,
+    findings: activeFindings,
+    recovered_count: recoveries.length,
+    recoveries,
+  };
+  await writeScheduleReservationQualityLatest(env.STUDIO_MEDIA, report);
+  return report;
+}
+
+/*__STUDIO_WORKER_END:studioScheduleReservationQualitySweep__*/
+
+export async function studioScheduleReservationQualityLatest(env) {
+  if (!scheduleReservationAuthorityEnabled(env)) return null;
+  return readScheduleReservationQualityLatest(env.STUDIO_MEDIA);
+}
+
+/*__STUDIO_WORKER_END:studioScheduleReservationQualityLatest__*/
+
 export async function studioHealApprovedMissingSchedule(env, options = {}) {
   const limit = Math.max(1, Math.min(20, Number(options.limit || 16)));
   let rows = [];
@@ -1200,6 +1758,19 @@ export async function studioHealApprovedMissingSchedule(env, options = {}) {
     console.warn("approved missing-schedule scan failed", error);
     return [];
   }
+  if (scheduleReservationAuthorityEnabled(env)) {
+    const healed = [];
+    for (const row of rows || []) {
+      try {
+        const result = await studioHealApprovedMissingScheduleAtomic(env, row);
+        if (result) healed.push(result);
+      } catch (error) {
+        console.warn("atomic approved missing-schedule heal failed", row.id, error);
+      }
+    }
+    return healed;
+  }
+
   const occupiedByProfile = new Map();
   const healed = [];
   for (const row of rows || []) {
@@ -1278,6 +1849,19 @@ export async function studioHealStoryCompanionDrift(env, options = {}) {
     console.warn("story companion drift scan failed", error);
     return [];
   }
+  if (scheduleReservationAuthorityEnabled(env)) {
+    const healed = [];
+    for (const row of rows || []) {
+      try {
+        const result = await studioHealStoryCompanionDriftAtomic(env, row);
+        if (result) healed.push(result);
+      } catch (error) {
+        console.warn("atomic Story companion drift heal failed", row.id, error);
+      }
+    }
+    return healed;
+  }
+
   const healed = [];
   for (const row of rows || []) {
     const currentRaw = String(f(row, "Scheduled_Post_Date") || "").trim();
@@ -1615,6 +2199,283 @@ export async function studioReconcileFacebookReels(env, options = {}) {
 }
 /*__STUDIO_WORKER_END:studioReconcileFacebookReels__*/
 
+
+export function studioStoryCompanionPlatformBlockers(platformOccupiedMs, companionIso) {
+  const companionMs = Date.parse(String(companionIso || ""));
+  if (!Number.isFinite(companionMs)) return (platformOccupiedMs || []).filter(Number.isFinite);
+  const mainMs = companionMs - MAE_STORY_COMPANION_OFFSET_MS;
+  let companionMainExempted = false;
+  return (platformOccupiedMs || []).filter((ms) => {
+    if (!Number.isFinite(ms)) return false;
+    if (!companionMainExempted && Math.abs(ms - mainMs) < 60 * 1000) {
+      companionMainExempted = true;
+      return false;
+    }
+    return true;
+  });
+}
+
+/*__STUDIO_WORKER_END:studioStoryCompanionPlatformBlockers__*/
+
+async function studioApproveOutputRecordAtomic(env, record, note, stamp, payload = {}, options = {}) {
+  const id = record.id;
+  const platform = String(f(record, "Platform") || "").trim();
+  const outputType = String(f(record, "Studio_Output_Type") || f(record, "Format") || "").trim();
+  const profile = options.profile || await item4ProductionProfileRecord(env, record).catch(() => null);
+  const profileId = String(profile?.id || "").trim();
+  if (!profileId) {
+    throw new HttpError(409, "Atomic scheduling requires an authoritative Content Profile ID");
+  }
+  if (!platform) throw new HttpError(409, "Atomic scheduling requires a platform");
+
+  const horizonDays = options.horizonDays
+    || await studioScheduleHorizonDays(env).catch(() => MAE_SUGGEST_HORIZON_DAYS);
+  const timeZone = options.timeZone || await studioScheduleTimeZoneForRecord(env, record, payload);
+  const isStory = /story/i.test(outputType);
+  const markerIso = String(f(record, "Studio_Scheduled_At") || "").trim();
+  const existingScheduleIso = String(
+    f(record, "Scheduled_Post_Date") || f(record, "YouTube_Scheduled_Publish_At") || ""
+  ).trim();
+  const rawIn = String(payload?.scheduled_post_date || "").trim();
+  const publishNowImmediate = Boolean(
+    payload?.publish_now === true || rawIn.toLowerCase() === "immediate"
+  );
+  const recheckBestSlot = options.recheckBestSlot === true
+    || (options.recheckBestSlot !== false
+      && !publishNowImmediate
+      && payload?.manual_schedule_override !== true
+      && !markerIso);
+  const existingNotes = String(f(record, "Review_Notes") || "").trim();
+  const prepared = await studioEnsureNativePublishSlides(env, record);
+  // The cycle identity must be stable across retries of one approval attempt,
+  // but must change after a send-back even when the same finished file is reused.
+  // Factory send-back stamps Review_Decision_At, so combining it with the
+  // render/file identity prevents an old committed reservation from short-
+  // circuiting a legitimate later re-approval.
+  const approvalArtifact = String(
+    f(record, "Final_File_ID")
+    || f(record, "Remotion_Job_ID")
+    || f(record, "Final_File_URL")
+    || f(record, "Studio_Preview_R2_Key")
+    || "current"
+  );
+  const approvalDecisionCycle = String(f(record, "Review_Decision_At") || "initial");
+  const approvalCycle = `${approvalArtifact}:${approvalDecisionCycle}`
+    .replace(/[^A-Za-z0-9._:-]+/g, "_")
+    .slice(0, 128);
+  const operationId = String(options.scheduleOperationId || `approve:${id}:${approvalCycle}`).trim();
+  const factoryBatchId = String(options.factoryBatchId || options.factory_batch_id || "").trim() || null;
+
+  const result = await runAtomicScheduleTransaction(env, {
+    content_profile_id: profileId,
+    platform,
+    output_type: outputType,
+    platform_output_record_id: id,
+    content_item_id: studioFirstLinkedId(f(record, "Content_Item")) || null,
+    owner_operation_id: operationId,
+    factory_batch_id: factoryBatchId,
+  }, {
+    // This callback is not used because the caller only enters this helper when
+    // the feature flag is enabled. It exists as a defensive fallback.
+    legacy: async () => {
+      throw new HttpError(503, "Atomic schedule transaction unexpectedly fell back to legacy mode");
+    },
+    plan: async ({ occupied_reservations: durableReservations }) => {
+      // Commit-time source of truth: never trust Approve All / Factory batch
+      // occupancy snapshots here. Force the shared cache cold, then re-read.
+      studioInvalidateOccupiedScheduleCache();
+      const occupied = await studioOccupiedSchedulesOrEmpty(env, {
+        excludeIds: [id],
+        profile,
+      });
+      const laneOccupied = studioOccupiedForLane(occupied, platform, outputType).slice();
+      const platformOccupied = studioOccupiedForPlatform(occupied, platform).slice();
+
+      for (const durable of durableReservations || []) {
+        const ms = Date.parse(String(durable?.scheduled_iso || ""));
+        if (!Number.isFinite(ms)) continue;
+        platformOccupied.push(ms);
+        const durableType = String(durable?.output_type || "").trim().toLowerCase();
+        if (durableType && durableType === outputType.toLowerCase()) laneOccupied.push(ms);
+      }
+      const uniqueFinite = (values) => [...new Set((values || []).filter(Number.isFinite))];
+      const lane = uniqueFinite(laneOccupied);
+      const platformLane = uniqueFinite(platformOccupied);
+      const capacityMessage = `No open morning, afternoon, evening, or overflow slot in the next ${horizonDays} days`;
+      const pickLaneIso = () => {
+        const picked = maeScheduleNextSlot({
+          timeZone,
+          laneOccupiedMs: lane,
+          platformOccupiedMs: platformLane,
+          horizonDays,
+        });
+        if (!picked.ok) throw new HttpError(409, picked.error || capacityMessage);
+        return picked.iso;
+      };
+
+      let requestedRaw = recheckBestSlot ? "" : rawIn;
+      let exactOverride = false;
+      let storyCompanion = false;
+
+      if (publishNowImmediate) {
+        requestedRaw = "immediate";
+      } else if (payload?.manual_schedule_override === true && rawIn) {
+        requestedRaw = rawIn;
+        exactOverride = true;
+      } else if (markerIso && !recheckBestSlot) {
+        requestedRaw = markerIso;
+        exactOverride = true;
+      } else if (isStory) {
+        const resolved = await studioResolveStoryPublishIso(env, record, {
+          timeZone,
+          occupiedMs: lane,
+          requestedIso: recheckBestSlot ? "" : requestedRaw,
+          existingIso: recheckBestSlot ? "" : existingScheduleIso,
+          extraSiblings: options.extraSiblings || [],
+          siblingRows: options.siblingRows,
+        });
+        if (!resolved.iso) {
+          requestedRaw = pickLaneIso();
+        } else {
+          requestedRaw = resolved.iso;
+          storyCompanion = resolved.source === "companion" || resolved.source === "mae_plus_10";
+        }
+      } else if (!recheckBestSlot && !requestedRaw && existingScheduleIso) {
+        requestedRaw = existingScheduleIso;
+      } else if (!requestedRaw) {
+        requestedRaw = pickLaneIso();
+      }
+
+      if (exactOverride && requestedRaw && requestedRaw !== "immediate") {
+        const requestedMs = Date.parse(requestedRaw);
+        if (!Number.isFinite(requestedMs)) {
+          throw new HttpError(400, "Scheduled date/time is invalid");
+        }
+        if (maeIsBlackoutLocalTime(requestedMs, timeZone)) {
+          throw new HttpError(409, "The requested manual schedule is inside the profile-local 8:00 PM–3:30 AM blackout");
+        }
+        if (maeScheduleConflicts(requestedMs, platformLane)) {
+          throw new HttpError(409, "The requested manual schedule conflicts with an existing reservation on this profile/platform");
+        }
+      } else if (storyCompanion && requestedRaw && requestedRaw !== "immediate") {
+        const requestedMs = Date.parse(requestedRaw);
+        const companionBlockers = studioStoryCompanionPlatformBlockers(platformLane, requestedRaw);
+        if (!Number.isFinite(requestedMs) || maeScheduleConflicts(requestedMs, companionBlockers)) {
+          requestedRaw = pickLaneIso();
+          storyCompanion = false;
+        }
+      } else if (
+        !publishNowImmediate
+        && requestedRaw
+        && requestedRaw !== "immediate"
+      ) {
+        const requestedMs = Date.parse(requestedRaw);
+        if (!Number.isFinite(requestedMs) || maeScheduleConflicts(requestedMs, platformLane)) {
+          requestedRaw = pickLaneIso();
+        }
+      }
+
+      const scheduleFields = studioPublishScheduleFields(
+        { ...(payload || {}), scheduled_post_date: requestedRaw, timezone: timeZone },
+        record,
+        {
+          // The candidate above already preserves output-type sequencing; final
+          // collision validation is platform-wide.
+          occupiedMs: storyCompanion ? [] : platformLane,
+          exactOverride,
+          storyCompanion,
+          timeZone,
+          forceWrite: publishNowImmediate,
+        },
+      );
+      const scheduledIso = String(
+        scheduleFields.Scheduled_Post_Date || f(record, "Scheduled_Post_Date") || ""
+      ).trim();
+      if (!scheduledIso) throw new HttpError(409, "Scheduling did not produce a verifiable publication time");
+
+      const fields = {
+        Review_Status: "Approved",
+        Output_Status: "Approved for Publishing",
+        Publish_Status: "Ready to Schedule",
+        Publish_Method: "Automated",
+        Auto_Publish_Enabled: true,
+        Review_Decision_At: stamp,
+        Do_Not_Publish: false,
+        Review_Notes: [existingNotes, note, `Studio Pipeline approved for publishing at ${stamp}.`].filter(Boolean).join("\n\n"),
+        ...studioPublishHandoffFields(record, { scheduledPostDate: scheduledIso }),
+        ...scheduleFields,
+      };
+      const preparedHandoff = studioPublishHandoffFields(prepared, {
+        scheduledPostDate: scheduleFields.Scheduled_Post_Date || f(prepared, "Scheduled_Post_Date") || scheduledIso,
+      });
+      return {
+        action: existingScheduleIso && existingScheduleIso !== scheduledIso ? "move" : "reserve",
+        selectedIso: scheduledIso,
+        previousIso: existingScheduleIso,
+        patchFields: { ...fields, ...preparedHandoff, ...scheduleFields },
+      };
+    },
+    write: async (plan, { signal }) => airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, prepared.id || id, {
+      method: "PATCH",
+      signal,
+      body: JSON.stringify({ fields: plan.patchFields, typecast: true }),
+    }),
+    verify: async (_updated, plan) => {
+      const verified = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, prepared.id || id);
+      const storedIso = String(
+        f(verified, "Scheduled_Post_Date")
+        || f(verified, "YouTube_Scheduled_Publish_At")
+        || f(verified, "Studio_Scheduled_At")
+        || ""
+      ).trim();
+      if (!storedIso || Number.isNaN(Date.parse(storedIso))) {
+        throw new HttpError(503, "Airtable schedule write could not be verified");
+      }
+      const expectedMs = Date.parse(plan.selectedIso);
+      const storedMs = Date.parse(storedIso);
+      if (!Number.isFinite(expectedMs) || !Number.isFinite(storedMs) || expectedMs !== storedMs) {
+        throw new HttpError(503, "Airtable stored schedule does not match the reserved MAE slot");
+      }
+      return new Date(storedMs).toISOString();
+    },
+    afterCommit: async (updated) => {
+      studioInvalidateOccupiedScheduleCache();
+      const writeThrough = studioSupabaseWriteThroughOutput(env, updated, "approve");
+      if (Array.isArray(options.writeThroughQueue)) {
+        options.writeThroughQueue.push(writeThrough);
+      } else {
+        await writeThrough;
+      }
+    },
+  }, {
+    maxWaitMs: options.scheduleLockWaitMs ?? 30_000,
+  });
+
+  if (result?.already_committed) {
+    // Idempotent retry after a prior verified commit: return the authoritative
+    // row only when it still proves this approval is committed. A stale
+    // reservation from an older review cycle must never silently approve.
+    const authoritative = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, prepared.id || id);
+    const approved = String(f(authoritative, "Review_Status") || "").trim() === "Approved"
+      || String(f(authoritative, "Output_Status") || "").trim() === "Approved for Publishing";
+    const authoritativeIso = String(
+      f(authoritative, "Scheduled_Post_Date")
+      || f(authoritative, "YouTube_Scheduled_Publish_At")
+      || f(authoritative, "Studio_Scheduled_At")
+      || ""
+    ).trim();
+    const ledgerIso = String(result?.reservation?.scheduled_iso || result?.reservation?.authoritative_iso || "").trim();
+    if (!approved || !authoritativeIso || (ledgerIso && Date.parse(ledgerIso) !== Date.parse(authoritativeIso))) {
+      throw new HttpError(
+        409,
+        "Committed scheduling reservation no longer matches the current approval cycle; retry requires a new fenced operation",
+      );
+    }
+    return { ...authoritative, __already_approved: true };
+  }
+  return result.value;
+}
+
 export async function approveOutputRecordForPublishing(env, existing, note, stamp, payload = {}, options = {}) {
   const id = existing.id;
   return withOutputApprovalLock(env.STUDIO_MEDIA, id, async () => {
@@ -1642,6 +2503,9 @@ export async function approveOutputRecordForPublishing(env, existing, note, stam
       console.warn("native photo branding before publish approval failed", record.id, error);
     });
     record = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, record.id);
+  }
+  if (scheduleReservationAuthorityEnabled(env)) {
+    return studioApproveOutputRecordAtomic(env, record, note, stamp, payload, options);
   }
   const platform = String(f(record, "Platform") || "").trim();
   const outputType = String(f(record, "Studio_Output_Type") || f(record, "Format") || "").trim();
@@ -1870,7 +2734,7 @@ export function mapApproveAllEligibleSummary(record) {
 
 /*__STUDIO_WORKER_END:mapApproveAllEligibleSummary__*/
 
-async function studioReadScheduleRegenJobStoreFromR2(env) {
+export async function studioReadScheduleRegenJobStoreFromR2(env) {
   const r2Key = "studio/state/schedule-regen-jobs-v1.json";
   if (!env?.STUDIO_MEDIA?.get) return null;
   try {
@@ -1990,6 +2854,160 @@ export function studioNormalizeRegenFilters(payload = {}) {
   return { platforms, outputTypes, profiles };
 }
 /*__STUDIO_WORKER_END:studioNormalizeRegenFilters__*/
+
+export async function studioAtomicApplyScheduleRegenEntry(env, {
+  entry,
+  record,
+  profile,
+  combo,
+  job,
+  timeZone,
+  horizonDays,
+}) {
+  const outputId = entry.id;
+  const platform = String(f(record, "Platform") || combo.platform || "").trim();
+  const outputType = String(
+    f(record, "Studio_Output_Type") || f(record, "Format") || combo.output_type || ""
+  ).trim();
+  const profileId = String(profile?.id || combo.profile_id || job.profile_id || "").trim();
+  if (!profileId || !platform) {
+    throw new HttpError(409, "Schedule regeneration cannot establish the atomic profile/platform lane");
+  }
+  const previousRaw = String(
+    f(record, "Scheduled_Post_Date")
+    || f(record, "YouTube_Scheduled_Publish_At")
+    || f(record, "Studio_Scheduled_At")
+    || ""
+  ).trim();
+  const jobKey = String(job?.id || job?.job_id || "regen").trim();
+
+  const result = await runAtomicScheduleTransaction(env, {
+    content_profile_id: profileId,
+    platform,
+    output_type: outputType,
+    platform_output_record_id: outputId,
+    content_item_id: studioFirstLinkedId(f(record, "Content_Item")) || null,
+    owner_operation_id: `schedule-regen:${jobKey}:${outputId}`,
+  }, {
+    legacy: async () => {
+      throw new HttpError(503, "Atomic schedule transaction unexpectedly entered legacy mode");
+    },
+    plan: async ({ occupied_reservations: durableReservations }) => {
+      studioInvalidateOccupiedScheduleCache();
+      const regenExclusions = Array.isArray(combo?.eligible_ids) && combo.eligible_ids.length
+        ? combo.eligible_ids.map(String).filter(Boolean)
+        : [outputId];
+      const fresh = await studioOccupiedSchedulesOrEmpty(env, {
+        // Other outputs in this regeneration lane are being replaced too. Their
+        // superseded times are planning residue, not protected capacity. Earlier
+        // atomic commits are reintroduced below from the durable reservation ledger.
+        excludeIds: regenExclusions,
+        profile,
+      });
+      const laneOccupied = studioOccupiedForLane(fresh, platform, outputType).slice();
+      const platformOccupied = studioOccupiedForPlatform(fresh, platform).slice();
+      for (const durable of durableReservations || []) {
+        const ms = Date.parse(String(durable?.scheduled_iso || ""));
+        if (!Number.isFinite(ms)) continue;
+        platformOccupied.push(ms);
+        if (String(durable?.output_type || "").trim().toLowerCase() === outputType.toLowerCase()) {
+          laneOccupied.push(ms);
+        }
+      }
+      const laneMs = [...new Set(laneOccupied.filter(Number.isFinite))];
+      const platformMs = [...new Set(platformOccupied.filter(Number.isFinite))];
+      const picked = maeScheduleNextSlot({
+        timeZone,
+        laneOccupiedMs: laneMs,
+        platformOccupiedMs: platformMs,
+        horizonDays,
+      });
+      if (!picked.ok) {
+        throw new HttpError(409, picked.error || `Capacity failure for ${platform} ${outputType}`);
+      }
+      const fields = studioPublishScheduleFields(
+        { scheduled_post_date: picked.iso, timezone: timeZone },
+        record,
+        {
+          occupiedMs: platformMs,
+          timeZone,
+          forceWrite: true,
+          exactOverride: true,
+        },
+      );
+      const selectedRaw = String(fields.Scheduled_Post_Date || picked.iso || "").trim();
+      const selectedMs = Date.parse(selectedRaw);
+      if (!Number.isFinite(selectedMs)) {
+        throw new HttpError(409, "Schedule regeneration did not produce a verifiable slot");
+      }
+      const previousMs = Date.parse(previousRaw);
+      return {
+        action: Number.isFinite(previousMs) ? "move" : "reserve",
+        selectedIso: new Date(selectedMs).toISOString(),
+        previousIso: Number.isFinite(previousMs) ? new Date(previousMs).toISOString() : "",
+        patchFields: fields,
+      };
+    },
+    write: async (plan, { signal }) => airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, outputId, {
+      method: "PATCH",
+      signal,
+      body: JSON.stringify({ fields: plan.patchFields, typecast: true }),
+    }),
+    verify: async (written, plan) => {
+      const authoritative = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, outputId);
+      const storedMs = Date.parse(String(f(authoritative, "Scheduled_Post_Date") || "").trim());
+      const selectedMs = Date.parse(plan.selectedIso);
+      if (!Number.isFinite(storedMs) || !Number.isFinite(selectedMs)
+          || new Date(storedMs).toISOString() !== new Date(selectedMs).toISOString()) {
+        throw new HttpError(409, "Regenerated schedule did not persist the reserved MAE slot");
+      }
+      if (platform === "YouTube") {
+        const youtubeMs = Date.parse(String(f(authoritative, "YouTube_Scheduled_Publish_At") || "").trim());
+        if (!Number.isFinite(youtubeMs)
+            || new Date(youtubeMs).toISOString() !== new Date(selectedMs).toISOString()) {
+          throw new HttpError(409, "Regenerated YouTube schedule mirror did not persist the reserved MAE slot");
+        }
+      }
+      written.__atomic_verified_record = authoritative;
+      return new Date(storedMs).toISOString();
+    },
+    afterCommit: async (written) => {
+      const authoritative = written.__atomic_verified_record || written;
+      const profileStamp = String(job.profile_id || combo.profile_id || "").trim();
+      await studioSupabaseWriteThroughOutput(
+        env,
+        {
+          id: authoritative.id || outputId,
+          fields: {
+            ...(authoritative.fields || {}),
+            ...(profileStamp && /^rec[A-Za-z0-9]+$/.test(profileStamp)
+              ? { Content_Profile: [profileStamp] }
+              : {}),
+          },
+        },
+        "schedule-regen",
+      ).catch((error) => {
+        console.warn("schedule-regen supabase write-through failed", outputId, error);
+        return null;
+      });
+      studioInvalidateOccupiedScheduleCache();
+    },
+  }, { maxWaitMs: 30_000 });
+
+  const authoritative = result?.already_committed
+    ? await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, outputId)
+    : (result?.value?.__atomic_verified_record || result?.value);
+  const iso = String(
+    f(authoritative, "Scheduled_Post_Date")
+    || f(authoritative, "YouTube_Scheduled_Publish_At")
+    || ""
+  ).trim();
+  return {
+    record: authoritative,
+    iso: Number.isNaN(Date.parse(iso)) ? entry.iso : new Date(Date.parse(iso)).toISOString(),
+  };
+}
+/*__STUDIO_WORKER_END:studioAtomicApplyScheduleRegenEntry__*/
 
 export async function studioProcessScheduleRegenJobSlice(env, jobId, options = {}) {
   let job = await studioGetScheduleRegenJob(env, jobId);
@@ -2267,58 +3285,83 @@ export async function studioProcessScheduleRegenJobSlice(env, jobId, options = {
 
     const done = Math.max(0, Number(combo.completed_posts) || 0);
     const sliceEnd = Math.min(plan.length, done + postsPerSlice);
-    // Apply a bounded chunk so waitUntil / status polls cannot die mid 57-Story lane.
-    for (let planIndex = done; planIndex < sliceEnd; planIndex += 10) {
-      const chunkEntries = plan.slice(planIndex, Math.min(sliceEnd, planIndex + 10));
-      const records = await Promise.all(chunkEntries.map(async (entry) => {
+    if (scheduleReservationAuthorityEnabled(env)) {
+      // The stored regeneration plan is a progress/order checkpoint only.
+      // Final slot selection is repeated against authoritative occupancy while
+      // this output owns the shared profile/platform reservation lane.
+      for (let planIndex = done; planIndex < sliceEnd; planIndex += 1) {
+        const entry = plan[planIndex];
         const record = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, entry.id).catch(() => null);
-        return { ...entry, record };
-      }));
-      const chunk = records.filter((entry) => entry.record).map((entry) => ({
-        ...entry,
-        fields: studioPublishScheduleFields(
-          { scheduled_post_date: entry.iso, timezone: timeZone },
-          entry.record,
-          { occupiedMs: [], timeZone, forceWrite: true, exactOverride: true },
-        ),
-      }));
-      if (!chunk.length) {
-        combo.completed_posts = Math.min(plan.length, planIndex + chunkEntries.length);
-        continue;
+        if (record) {
+          const applied = await studioAtomicApplyScheduleRegenEntry(env, {
+            entry,
+            record,
+            profile,
+            combo,
+            job,
+            timeZone,
+            horizonDays,
+          });
+          if (applied?.iso) plan[planIndex] = { ...entry, iso: applied.iso };
+        }
+        combo.completed_posts = Math.min(plan.length, planIndex + 1);
+        combo.rescheduled = Number(combo.completed_posts) || 0;
+        combo.plan = plan;
+        combos[index] = { ...combo };
+        job = { ...job, combinations: combos, updated_at: new Date().toISOString() };
+        await studioPutScheduleRegenJob(env, job);
       }
-      await airtableBatchUpdate(
-        env,
-        env.AIRTABLE_OUTPUT_TABLE_ID,
-        chunk.map((entry) => ({ id: entry.id, fields: entry.fields })),
-        { typecast: true },
-      );
-      // Content_Profile on Platform Outputs is often a lookup display name. Stamp the
-      // known profile rec id so Supabase upsert resolves content_profile_id and the
-      // calendar (Supabase schedule-grid) moves with Airtable.
-      const profileStamp = String(job.profile_id || combo.profile_id || "").trim();
-      await Promise.all(chunk.map((entry) => studioSupabaseWriteThroughOutput(
-        env,
-        {
-          id: entry.id,
-          fields: {
-            ...(entry.record.fields || {}),
-            ...entry.fields,
-            ...(profileStamp && /^rec[A-Za-z0-9]+$/.test(profileStamp)
-              ? { Content_Profile: [profileStamp] }
-              : {}),
+    } else {
+      // Legacy flag-OFF behavior: preserve the existing bounded batch writer.
+      for (let planIndex = done; planIndex < sliceEnd; planIndex += 10) {
+        const chunkEntries = plan.slice(planIndex, Math.min(sliceEnd, planIndex + 10));
+        const records = await Promise.all(chunkEntries.map(async (entry) => {
+          const record = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, entry.id).catch(() => null);
+          return { ...entry, record };
+        }));
+        const chunk = records.filter((entry) => entry.record).map((entry) => ({
+          ...entry,
+          fields: studioPublishScheduleFields(
+            { scheduled_post_date: entry.iso, timezone: timeZone },
+            entry.record,
+            { occupiedMs: [], timeZone, forceWrite: true, exactOverride: true },
+          ),
+        }));
+        if (!chunk.length) {
+          combo.completed_posts = Math.min(plan.length, planIndex + chunkEntries.length);
+          continue;
+        }
+        await airtableBatchUpdate(
+          env,
+          env.AIRTABLE_OUTPUT_TABLE_ID,
+          chunk.map((entry) => ({ id: entry.id, fields: entry.fields })),
+          { typecast: true },
+        );
+        const profileStamp = String(job.profile_id || combo.profile_id || "").trim();
+        await Promise.all(chunk.map((entry) => studioSupabaseWriteThroughOutput(
+          env,
+          {
+            id: entry.id,
+            fields: {
+              ...(entry.record.fields || {}),
+              ...entry.fields,
+              ...(profileStamp && /^rec[A-Za-z0-9]+$/.test(profileStamp)
+                ? { Content_Profile: [profileStamp] }
+                : {}),
+            },
           },
-        },
-        "schedule-regen",
-      ).catch((error) => {
-        console.warn("schedule-regen supabase write-through failed", entry.id, error);
-        return null;
-      })));
-      combo.completed_posts = Math.min(plan.length, planIndex + chunkEntries.length);
-      combo.rescheduled = Number(combo.completed_posts) || 0;
-      combo.plan = plan;
-      combos[index] = { ...combo };
-      job = { ...job, combinations: combos, updated_at: new Date().toISOString() };
-      await studioPutScheduleRegenJob(env, job);
+          "schedule-regen",
+        ).catch((error) => {
+          console.warn("schedule-regen supabase write-through failed", entry.id, error);
+          return null;
+        })));
+        combo.completed_posts = Math.min(plan.length, planIndex + chunkEntries.length);
+        combo.rescheduled = Number(combo.completed_posts) || 0;
+        combo.plan = plan;
+        combos[index] = { ...combo };
+        job = { ...job, combinations: combos, updated_at: new Date().toISOString() };
+        await studioPutScheduleRegenJob(env, job);
+      }
     }
 
     if ((Number(combo.completed_posts) || 0) >= plan.length) {
@@ -2755,6 +3798,7 @@ export async function studioProcessApproveAllJobSlice(env, jobId, options = {}) 
           horizonDays,
           profile,
           timeZone,
+          scheduleOperationId: `approve-all:${job.id}:${record.id}`,
         });
         if (updated.__already_approved) {
           item.status = "skipped";
@@ -8136,6 +9180,27 @@ export async function gatherStudioDeskInventory(env) {
     console.warn("desk tester nightly scan failed", error);
   }
 
+  if (scheduleReservationAuthorityEnabled(env)) {
+    scanned(
+      "schedule_lock_hung",
+      "schedule_lock_contention",
+      "schedule_reservation_drift",
+      "schedule_collision",
+      "schedule_queue_stalled",
+    );
+    try {
+      const scheduleQuality = await studioScheduleReservationQualityLatest(env);
+      const reportAge = scheduleQuality?.scanned_at
+        ? nowMs - Date.parse(scheduleQuality.scanned_at)
+        : Infinity;
+      if (reportAge <= 15 * 60 * 1000) {
+        for (const finding of scheduleQuality?.findings || []) push(finding);
+      }
+    } catch (error) {
+      console.warn("schedule reservation Quality Agent latest-report read failed", error);
+    }
+  }
+
   const identityByRecord = new Map();
   const rememberIdentity = (id, ident) => {
     if (!id || !ident) return;
@@ -8999,7 +10064,7 @@ export async function factoryDeskRefreshPayload(request, env, authorization, con
 }
 /*__STUDIO_WORKER_END:factoryDeskRefreshPayload__*/
 
-export async function factoryApproveOutput(env, id, actor, note, ctx = null) {
+export async function factoryApproveOutput(env, id, actor, note, ctx = null, scheduleOptions = {}) {
   const existing = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, id);
   const outputStatus = String(f(existing, "Output_Status") || "").trim();
   const reviewStatus = String(f(existing, "Review_Status") || "").trim();
@@ -9026,7 +10091,7 @@ export async function factoryApproveOutput(env, id, actor, note, ctx = null) {
     note || `Factory Desk approve by ${actor || "operator"}`,
     stamp,
     {},
-    { recheckBestSlot: true },
+    { recheckBestSlot: true, ...(scheduleOptions || {}) },
   );
   if (updated.__already_approved) {
     return { id, already_approved: true, message: "Output already approved in another session; no duplicate dispatch." };
@@ -9249,6 +10314,81 @@ export async function factorySendBackContent(env, productionRequestId, outputIds
 }
 /*__STUDIO_WORKER_END:factorySendBackContent__*/
 
+export async function studioAtomicVacateSkippedOutput(env, row, fields, operationId) {
+  const current = row?.id
+    ? await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, row.id)
+    : null;
+  if (!current?.id) throw new HttpError(404, "Platform Output was not found for schedule vacate");
+  const platform = String(f(current, "Platform") || "").trim();
+  const outputType = String(f(current, "Studio_Output_Type") || f(current, "Format") || "").trim();
+  const profile = await item4ProductionProfileRecord(env, current).catch(() => null);
+  const profileId = String(profile?.id || "").trim();
+  if (!profileId || !platform) {
+    throw new HttpError(409, "Schedule vacate cannot establish the atomic profile/platform lane");
+  }
+  const previousRaw = String(
+    f(current, "Scheduled_Post_Date")
+    || f(current, "YouTube_Scheduled_Publish_At")
+    || f(current, "Studio_Scheduled_At")
+    || ""
+  ).trim();
+  const result = await runAtomicScheduleTransaction(env, {
+    content_profile_id: profileId,
+    platform,
+    output_type: outputType,
+    platform_output_record_id: current.id,
+    content_item_id: studioFirstLinkedId(f(current, "Content_Item")) || null,
+    owner_operation_id: operationId || `vacate:${current.id}`,
+  }, {
+    legacy: async () => {
+      throw new HttpError(503, "Atomic schedule transaction unexpectedly entered legacy mode");
+    },
+    plan: async () => ({
+      action: "vacate",
+      selectedIso: "",
+      previousIso: previousRaw,
+      patchFields: {
+        ...(fields || {}),
+        Scheduled_Post_Date: null,
+        YouTube_Scheduled_Publish_At: null,
+        Studio_Scheduled_At: null,
+      },
+    }),
+    write: async (plan, { signal }) => airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, current.id, {
+      method: "PATCH",
+      signal,
+      body: JSON.stringify({ fields: plan.patchFields, typecast: true }),
+    }),
+    verify: async (written) => {
+      const authoritative = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, current.id);
+      const stillScheduled = [
+        f(authoritative, "Scheduled_Post_Date"),
+        f(authoritative, "YouTube_Scheduled_Publish_At"),
+        f(authoritative, "Studio_Scheduled_At"),
+      ].some((value) => String(value || "").trim());
+      if (stillScheduled) {
+        throw new HttpError(409, "Schedule vacate could not be verified in Airtable");
+      }
+      written.__atomic_verified_record = authoritative;
+      return "";
+    },
+    afterCommit: async (written) => {
+      studioInvalidateOccupiedScheduleCache();
+      await studioSupabaseWriteThroughOutput(
+        env,
+        written.__atomic_verified_record || written,
+        "schedule-vacate",
+      ).catch((error) => console.warn("schedule vacate supabase write-through failed", current.id, error));
+    },
+  }, { maxWaitMs: 30_000 });
+
+  if (result?.already_committed) {
+    return airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, current.id);
+  }
+  return result?.value?.__atomic_verified_record || result?.value;
+}
+/*__STUDIO_WORKER_END:studioAtomicVacateSkippedOutput__*/
+
 export async function factoryDeleteDeskItem(env, id, kind, actor, note) {
   const stamp = new Date().toISOString();
   if (kind === "idea") {
@@ -9302,7 +10442,21 @@ export async function factoryDeleteDeskItem(env, id, kind, actor, note) {
       },
     };
   });
-  await airtableBatchUpdate(env, env.AIRTABLE_OUTPUT_TABLE_ID, patches, { typecast: true });
+  if (scheduleReservationAuthorityEnabled(env)) {
+    // Vacating is a schedule write: keep the old occupancy durable until Airtable
+    // is reread and confirms all scheduling fields are empty.
+    for (const patch of patches) {
+      const source = targets.get(patch.id) || { id: patch.id };
+      await studioAtomicVacateSkippedOutput(
+        env,
+        source,
+        patch.fields,
+        `factory-skip:${id}:${patch.id}`,
+      );
+    }
+  } else {
+    await airtableBatchUpdate(env, env.AIRTABLE_OUTPUT_TABLE_ID, patches, { typecast: true });
+  }
   const count = patches.length;
   return {
     id,
@@ -11753,6 +12907,7 @@ export async function scheduleStudioPublishOutput(request, env, url, authorizati
     || Boolean(f(existing, "Published_At"));
   if (published) throw new HttpError(409, "Published outputs cannot be rescheduled");
   const platform = String(f(existing, "Platform") || "").trim();
+  const outputType = String(f(existing, "Studio_Output_Type") || f(existing, "Format") || "").trim();
   const manualScheduleOverride = Boolean(
     payload?.manual_schedule_override === true
     && value
@@ -11762,41 +12917,155 @@ export async function scheduleStudioPublishOutput(request, env, url, authorizati
     payload?.publish_now === true
     && (!value || value.toLowerCase() === "immediate")
   );
-  // Calendar Save sends manual_schedule_override and keeps the exact slot.
-  // Occupancy is only for MAE auto-stamp; do not let a list 422/500 block Save.
-  const occupied = (manualScheduleOverride || publishNowImmediate)
-    ? {}
-    : await studioOccupiedSchedulesOrEmpty(env, {
-      excludeIds: [match[1]],
-      profile: await item4ProductionProfileRecord(env, existing).catch(() => null),
+  let updated;
+  if (scheduleReservationAuthorityEnabled(env)) {
+    const profile = await item4ProductionProfileRecord(env, existing).catch(() => null);
+    const timeZone = await studioScheduleTimeZoneForRecord(env, existing, payload);
+    const previousRaw = String(
+      f(existing, "Scheduled_Post_Date") || f(existing, "YouTube_Scheduled_Publish_At") || ""
+    ).trim();
+    const transaction = await runAtomicScheduleTransaction(env, {
+      content_profile_id: profile?.id || "",
+      platform,
+      output_type: outputType,
+      platform_output_record_id: match[1],
+      content_item_id: studioFirstLinkedId(f(existing, "Content_Item")) || null,
+      operation_id: String(
+        payload?.schedule_operation_id
+        || `schedule:${match[1]}:${previousRaw || "blank"}->${value || (publishNowImmediate ? "immediate" : "auto")}`
+      ).replace(/[^A-Za-z0-9._:>+-]+/g, "_").slice(0, 180),
+    }, {
+      legacy: async () => {
+        throw new HttpError(503, "Atomic schedule transaction unexpectedly entered legacy mode");
+      },
+      plan: async ({ occupied_reservations: durableReservations }) => {
+        studioInvalidateOccupiedScheduleCache();
+        const fresh = await studioOccupiedSchedulesOrEmpty(env, {
+          excludeIds: [match[1]],
+          profile,
+        });
+        let platformOccupiedMs = studioOccupiedForPlatform(fresh, platform).slice();
+        for (const reservation of durableReservations || []) {
+          const ms = Date.parse(String(reservation?.scheduled_iso || ""));
+          if (Number.isFinite(ms)) platformOccupiedMs.push(ms);
+        }
+        platformOccupiedMs = [...new Set(platformOccupiedMs.filter(Number.isFinite))];
+
+        if (manualScheduleOverride) {
+          const requestedMs = Date.parse(value);
+          if (!Number.isFinite(requestedMs)) throw new HttpError(400, "Scheduled date/time is invalid");
+          if (maeIsBlackoutLocalTime(requestedMs, timeZone)) {
+            throw new HttpError(409, "Requested manual schedule is inside the 8:00 PM–3:30 AM profile blackout");
+          }
+          if (maeScheduleConflicts(requestedMs, platformOccupiedMs)) {
+            throw new HttpError(409, "Requested manual schedule conflicts with another output on this profile and platform");
+          }
+        }
+
+        const fields = studioPublishScheduleFields(
+          { scheduled_post_date: value || "immediate", timezone: timeZone },
+          existing,
+          {
+            occupiedMs: publishNowImmediate ? null : platformOccupiedMs,
+            forceWrite: true,
+            exactOverride: manualScheduleOverride,
+            timeZone,
+          },
+        );
+        if (!manualScheduleOverride) fields.Studio_Scheduled_At = null;
+        if (String(f(existing, "Review_Status") || "").trim() === "Approved") {
+          fields.Output_Status = "Approved for Publishing";
+        }
+        fields.Publish_Error_Message = "";
+
+        const selectedRaw = String(fields.Scheduled_Post_Date || "").trim();
+        const selectedMs = Date.parse(selectedRaw);
+        if (!Number.isFinite(selectedMs)) {
+          throw new HttpError(409, "Schedule change did not produce a verifiable publication time");
+        }
+        const previousMs = Date.parse(previousRaw);
+        return {
+          action: Number.isFinite(previousMs) ? "move" : "reserve",
+          selectedIso: new Date(selectedMs).toISOString(),
+          previousIso: Number.isFinite(previousMs) ? new Date(previousMs).toISOString() : "",
+          fields,
+        };
+      },
+      write: async (plan, { signal }) => airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, match[1], {
+        method: "PATCH",
+        signal,
+        body: JSON.stringify({ fields: plan.fields, typecast: true }),
+      }),
+      verify: async (written, plan) => {
+        const authoritative = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, match[1]);
+        const storedRaw = String(f(authoritative, "Scheduled_Post_Date") || "").trim();
+        const storedMs = Date.parse(storedRaw);
+        const selectedMs = Date.parse(plan.selectedIso);
+        if (!Number.isFinite(storedMs) || !Number.isFinite(selectedMs)
+            || new Date(storedMs).toISOString() !== new Date(selectedMs).toISOString()) {
+          const error = new HttpError(409, "Authoritative schedule did not match the reserved manual schedule");
+          error.authoritative_record = authoritative;
+          throw error;
+        }
+        if (platform === "YouTube") {
+          const youtubeMs = Date.parse(String(f(authoritative, "YouTube_Scheduled_Publish_At") || "").trim());
+          if (!Number.isFinite(youtubeMs)
+              || new Date(youtubeMs).toISOString() !== new Date(selectedMs).toISOString()) {
+            const error = new HttpError(409, "YouTube scheduled publish time did not match the reserved manual schedule");
+            error.authoritative_record = authoritative;
+            throw error;
+          }
+        }
+        written.__atomic_verified_record = authoritative;
+        return new Date(storedMs).toISOString();
+      },
+      afterCommit: async (written) => {
+        studioInvalidateOccupiedScheduleCache();
+        await studioSupabaseWriteThroughOutput(
+          env,
+          written.__atomic_verified_record || written,
+          "schedule",
+        );
+      },
     });
-  const timeZone = await studioScheduleTimeZoneForRecord(env, existing, payload);
-  const fields = studioPublishScheduleFields(
-    { scheduled_post_date: value || "immediate", timezone: timeZone },
-    existing,
-    {
-      occupiedMs: publishNowImmediate ? null : studioOccupiedForPlatform(occupied, platform),
-      forceWrite: true,
-      exactOverride: manualScheduleOverride,
-      timeZone,
-    },
-  );
-  if (!manualScheduleOverride) fields.Studio_Scheduled_At = null;
-  if (String(f(existing, "Review_Status") || "").trim() === "Approved") {
-    fields.Output_Status = "Approved for Publishing";
+    updated = transaction?.already_committed
+      ? await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, match[1])
+      : (transaction?.value?.__atomic_verified_record || transaction?.value);
+  } else {
+    // Legacy path remains byte-for-byte equivalent in behavior while the flag is OFF.
+    // Calendar Save keeps its exact slot and bypasses occupancy; MAE auto-stamp reads occupancy.
+    const occupied = (manualScheduleOverride || publishNowImmediate)
+      ? {}
+      : await studioOccupiedSchedulesOrEmpty(env, {
+        excludeIds: [match[1]],
+        profile: await item4ProductionProfileRecord(env, existing).catch(() => null),
+      });
+    const timeZone = await studioScheduleTimeZoneForRecord(env, existing, payload);
+    const fields = studioPublishScheduleFields(
+      { scheduled_post_date: value || "immediate", timezone: timeZone },
+      existing,
+      {
+        occupiedMs: publishNowImmediate ? null : studioOccupiedForPlatform(occupied, platform),
+        forceWrite: true,
+        exactOverride: manualScheduleOverride,
+        timeZone,
+      },
+    );
+    if (!manualScheduleOverride) fields.Studio_Scheduled_At = null;
+    if (String(f(existing, "Review_Status") || "").trim() === "Approved") {
+      fields.Output_Status = "Approved for Publishing";
+    }
+    fields.Publish_Error_Message = "";
+    updated = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, match[1], {
+      method: "PATCH",
+      body: JSON.stringify({
+        fields,
+        typecast: true,
+      }),
+    });
+    studioInvalidateOccupiedScheduleCache();
+    await studioSupabaseWriteThroughOutput(env, updated, "schedule");
   }
-  fields.Publish_Error_Message = "";
-  const updated = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, match[1], {
-    method: "PATCH",
-    body: JSON.stringify({
-      fields,
-      typecast: true,
-    }),
-  });
-  studioInvalidateOccupiedScheduleCache();
-  // Phase 3: keep Supabase schedule-grid in lockstep so the calendar does not
-  // snap the bubble back after refreshPipelineOutputs reloads from Supabase.
-  await studioSupabaseWriteThroughOutput(env, updated, "schedule");
   const due = studioPublishIsDue(updated);
   const approved = String(f(updated, "Output_Status") || "").trim() === "Approved for Publishing"
     || String(f(updated, "Review_Status") || "").trim() === "Approved";
@@ -12667,7 +13936,17 @@ export async function factoryBatchProcess(env, profileId, requestId, ctx = null)
           throw new HttpError(409, "Output belongs to a different content profile");
         }
         // Canonical single-output approval owns terminal-state idempotence and Do_Not_Publish.
-        return factoryApproveOutput(env, id, "Factory Batch", job.notes || "", ctx);
+        return factoryApproveOutput(
+          env,
+          id,
+          "Factory Batch",
+          job.notes || "",
+          ctx,
+          {
+            scheduleOperationId: `factory-batch:${requestId}:${id}`,
+            factoryBatchId: requestId,
+          },
+        );
       },
     });
     return result;

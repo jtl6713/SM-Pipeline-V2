@@ -1,4 +1,6 @@
 import { createProfileOnboarding } from "./profile-onboarding.mjs";
+import { scheduleReservationAuthorityEnabled } from "./schedule-reservation-authority.mjs";
+import { runAtomicScheduleTransaction } from "./schedule-reservation-transaction.mjs";
 import {
   studioReadSource,
   studioSupabaseConfigured,
@@ -590,6 +592,7 @@ import {
   item4PulseClipPosterJob,
   item4PulseStudioCompressJob,
   studioRequestNotesText,
+  studioInvalidateOccupiedScheduleCache,
   studioIsAzFinishedVideo,
   studioIsVibeCut,
   skipsProductionApprove,
@@ -6642,6 +6645,158 @@ export function platformOutputSeedFields(parentContentItem, requestRecord, outpu
 }
 /*__STUDIO_WORKER_END:platformOutputSeedFields__*/
 
+export async function studioAtomicApplyPlatformOutputSeedSchedule(env, {
+  platformOutput,
+  desiredSchedule,
+  vacate = false,
+  operationId = "",
+}) {
+  const current = await airtableFetch(env, STUDIO_PLATFORM_OUTPUT_TABLE, platformOutput.id);
+  const platform = String(f(current, "Platform") || "").trim();
+  const outputType = String(f(current, "Studio_Output_Type") || f(current, "Format") || "").trim();
+  const profile = await item4ProductionProfileRecord(env, current).catch(() => null);
+  const profileId = String(profile?.id || "").trim();
+  if (!profileId || !platform) {
+    throw new HttpError(409, "Platform Output seed schedule cannot establish the atomic profile/platform lane");
+  }
+  const timeZone = studioScheduleTimeZoneForProfile(profile, MAE_DEFAULT_TIME_ZONE);
+  const horizonDays = await studioScheduleHorizonDays(env).catch(() => MAE_SUGGEST_HORIZON_DAYS);
+  const previousRaw = String(
+    f(current, "Scheduled_Post_Date")
+    || f(current, "YouTube_Scheduled_Publish_At")
+    || f(current, "Studio_Scheduled_At")
+    || ""
+  ).trim();
+
+  const result = await runAtomicScheduleTransaction(env, {
+    content_profile_id: profileId,
+    platform,
+    output_type: outputType,
+    platform_output_record_id: current.id,
+    content_item_id: studioFirstLinkedId(f(current, "Content_Item")) || null,
+    owner_operation_id: operationId || `seed-schedule:${current.id}`,
+  }, {
+    legacy: async () => {
+      throw new HttpError(503, "Atomic schedule transaction unexpectedly entered legacy mode");
+    },
+    plan: async ({ occupied_reservations: durableReservations }) => {
+      if (vacate) {
+        return {
+          action: "vacate",
+          selectedIso: "",
+          previousIso: previousRaw,
+          patchFields: {
+            Scheduled_Post_Date: null,
+            YouTube_Scheduled_Publish_At: null,
+            Studio_Scheduled_At: null,
+          },
+        };
+      }
+
+      studioInvalidateOccupiedScheduleCache();
+      const occupied = await studioOccupiedSchedulesOrEmpty(env, {
+        excludeIds: [current.id],
+        profile,
+      });
+      const laneOccupied = studioOccupiedForLane(occupied, platform, outputType).slice();
+      const platformOccupied = studioOccupiedForPlatform(occupied, platform).slice();
+      for (const durable of durableReservations || []) {
+        const ms = Date.parse(String(durable?.scheduled_iso || ""));
+        if (!Number.isFinite(ms)) continue;
+        platformOccupied.push(ms);
+        if (String(durable?.output_type || "").trim().toLowerCase() === outputType.toLowerCase()) {
+          laneOccupied.push(ms);
+        }
+      }
+      const laneMs = [...new Set(laneOccupied.filter(Number.isFinite))];
+      const platformMs = [...new Set(platformOccupied.filter(Number.isFinite))];
+      const requestedSchedule = String(desiredSchedule || "").trim();
+      let candidate = requestedSchedule;
+      let candidateMs = Date.parse(candidate);
+      if (requestedSchedule) {
+        // Production Request Output Scheduled_At is explicit scheduling intent.
+        // Preserve it when valid; never silently replace it with another MAE slot.
+        if (!Number.isFinite(candidateMs)) {
+          throw new HttpError(400, "Requested Platform Output seed schedule is invalid");
+        }
+        if (maeIsBlackoutLocalTime(candidateMs, timeZone)) {
+          throw new HttpError(409, "Requested Platform Output seed schedule is inside the profile-local blackout");
+        }
+        if (maeScheduleConflicts(candidateMs, platformMs)) {
+          throw new HttpError(
+            409,
+            "Requested Platform Output seed schedule conflicts with another output on this profile/platform",
+          );
+        }
+      } else {
+        const picked = maeScheduleNextSlot({
+          timeZone,
+          laneOccupiedMs: laneMs,
+          platformOccupiedMs: platformMs,
+          horizonDays,
+        });
+        if (!picked.ok) throw new HttpError(409, picked.error || "No safe MAE slot is available for Platform Output seed");
+        candidate = picked.iso;
+        candidateMs = Date.parse(candidate);
+      }
+      if (!Number.isFinite(candidateMs)) {
+        throw new HttpError(409, "Platform Output seed did not produce a verifiable schedule");
+      }
+      const iso = new Date(candidateMs).toISOString();
+      return {
+        action: Number.isFinite(Date.parse(previousRaw)) ? "move" : "reserve",
+        selectedIso: iso,
+        previousIso: Number.isFinite(Date.parse(previousRaw))
+          ? new Date(Date.parse(previousRaw)).toISOString()
+          : "",
+        patchFields: {
+          Scheduled_Post_Date: iso,
+          ...(platform === "YouTube" ? { YouTube_Scheduled_Publish_At: iso } : {}),
+        },
+      };
+    },
+    write: async (plan, { signal }) => airtableFetch(env, STUDIO_PLATFORM_OUTPUT_TABLE, current.id, {
+      method: "PATCH",
+      signal,
+      body: JSON.stringify({ fields: plan.patchFields, typecast: true }),
+    }),
+    verify: async (written, plan) => {
+      const authoritative = await airtableFetch(env, STUDIO_PLATFORM_OUTPUT_TABLE, current.id);
+      if (vacate) {
+        const stillScheduled = [
+          f(authoritative, "Scheduled_Post_Date"),
+          f(authoritative, "YouTube_Scheduled_Publish_At"),
+          f(authoritative, "Studio_Scheduled_At"),
+        ].some((value) => String(value || "").trim());
+        if (stillScheduled) throw new HttpError(409, "Platform Output seed vacate could not be verified");
+        written.__atomic_verified_record = authoritative;
+        return "";
+      }
+      const storedMs = Date.parse(String(f(authoritative, "Scheduled_Post_Date") || "").trim());
+      const selectedMs = Date.parse(plan.selectedIso);
+      if (!Number.isFinite(storedMs) || !Number.isFinite(selectedMs) || storedMs !== selectedMs) {
+        throw new HttpError(409, "Platform Output seed schedule could not be verified");
+      }
+      if (platform === "YouTube") {
+        const youtubeMs = Date.parse(String(f(authoritative, "YouTube_Scheduled_Publish_At") || "").trim());
+        if (!Number.isFinite(youtubeMs) || youtubeMs !== selectedMs) {
+          throw new HttpError(409, "Platform Output YouTube seed mirror could not be verified");
+        }
+      }
+      written.__atomic_verified_record = authoritative;
+      return new Date(storedMs).toISOString();
+    },
+    afterCommit: async () => {
+      studioInvalidateOccupiedScheduleCache();
+    },
+  }, { maxWaitMs: 30_000 });
+
+  return result?.already_committed
+    ? airtableFetch(env, STUDIO_PLATFORM_OUTPUT_TABLE, current.id)
+    : (result?.value?.__atomic_verified_record || result?.value);
+}
+/*__STUDIO_WORKER_END:studioAtomicApplyPlatformOutputSeedSchedule__*/
+
 export function studioFinishedSeedOverlay(requestRecord, clips, nativeReady) {
   const kind = studioFinishedOriginKind(requestRecord);
   if (!kind) return {};
@@ -9731,7 +9886,20 @@ export async function fanoutProductionRequestOutputsToContentItems(env, requestR
       continue;
     }
     const sourcePackage=item4StudioSourcePackageForOutput(requestRecord,outputRow,effective,parent);
-    const seed=platformOutputSeedFields(parent,requestRecord,outputRow,effective,sourcePackage);
+    let seed=platformOutputSeedFields(parent,requestRecord,outputRow,effective,sourcePackage);
+    let atomicSeedSchedule = null;
+    let atomicSeedVacate = false;
+    let atomicSeedHasScheduleMutation = false;
+    if (scheduleReservationAuthorityEnabled(env)
+        && Object.prototype.hasOwnProperty.call(seed, "Scheduled_Post_Date")) {
+      atomicSeedHasScheduleMutation = true;
+      atomicSeedVacate = seed.Scheduled_Post_Date == null || String(seed.Scheduled_Post_Date || "").trim() === "";
+      atomicSeedSchedule = atomicSeedVacate ? null : String(seed.Scheduled_Post_Date).trim();
+      seed = { ...seed };
+      delete seed.Scheduled_Post_Date;
+      delete seed.YouTube_Scheduled_Publish_At;
+      delete seed.Studio_Scheduled_At;
+    }
     const existingLinks=arrayOrEmpty(f(outputRow,"Platform_Output"));
     let poId=existingLinks.find(id=>/^rec[A-Za-z0-9]+$/.test(String(id||"")))||null;
     if(!poId && !onlyMissing){
@@ -9770,6 +9938,14 @@ export async function fanoutProductionRequestOutputsToContentItems(env, requestR
       } catch(error) {
         console.warn("Platform Output fanout post-create reconciliation failed", outputRow.id, error);
       }
+    }
+    if (atomicSeedHasScheduleMutation && po?.id) {
+      po = await studioAtomicApplyPlatformOutputSeedSchedule(env, {
+        platformOutput: po,
+        desiredSchedule: atomicSeedSchedule,
+        vacate: atomicSeedVacate,
+        operationId: `production-seed:${requestRecord.id}:${outputRow.id}:${po.id}`,
+      });
     }
     const now=new Date().toISOString();
     await airtableFetch(env,PRODUCTION_REQUEST_OUTPUT_TABLE,outputRow.id,{method:"PATCH",body:JSON.stringify({fields:{Content_Item:[parent.id],Platform_Output:[po.id],Pipeline_Family:route.pipeline_family,Pipeline_Route_Status:"Routed",Pipeline_Route_Notes:`Single-parent route: ${route.pipeline_family}; Platform Output ${po.id}; Content Item ${parent.id}.`,Routed_At:now,Updated_At:now},typecast:false})});

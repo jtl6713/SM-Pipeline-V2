@@ -2,6 +2,17 @@ name: Deploy Studio API Worker Production
 
 on:
   workflow_dispatch:
+    inputs:
+      bootstrap_schedule_reservation_namespace:
+        description: 'Provision the dormant atomic scheduling Durable Object namespace (flag remains false)'
+        required: false
+        type: boolean
+        default: false
+      bootstrap_confirmation:
+        description: 'When bootstrapping, enter BOOTSTRAP-DORMANT-SCHEDULE-AUTHORITY'
+        required: false
+        type: string
+        default: ''
   push:
     branches: [main]
     paths:
@@ -25,9 +36,30 @@ jobs:
       TARGET_WORKER: chicagoshining-studio-api
       VERIFY_BRIDGE: chicagoshining-studio-deploy-verify
       WRANGLER_VERSION: 4.123.0
+      BOOTSTRAP_RESERVATION: ${{ inputs.bootstrap_schedule_reservation_namespace || 'false' }}
+      BOOTSTRAP_CONFIRMATION: ${{ inputs.bootstrap_confirmation || '' }}
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+
+      - name: Gate dormant reservation namespace bootstrap
+        if: env.BOOTSTRAP_RESERVATION == 'true'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          test "$GITHUB_EVENT_NAME" = "workflow_dispatch"
+          test "$BOOTSTRAP_CONFIRMATION" = "BOOTSTRAP-DORMANT-SCHEDULE-AUTHORITY"
+          # Lifecycle changes should be independent of code changes. Require this
+          # exact commit to have already completed the ordinary production deploy
+          # and functional verification before adding the namespace.
+          curl -fsS             -H "Authorization: Bearer $GH_TOKEN"             -H "Accept: application/vnd.github+json"             -H "X-GitHub-Api-Version: 2022-11-28"             "https://api.github.com/repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA/status"             -o /tmp/bootstrap-commit-status.json
+          jq -e '
+            [.statuses[] | select(.context=="production/studio-api-worker" and .state=="success")]
+            | length > 0
+          ' /tmp/bootstrap-commit-status.json >/dev/null
+          echo "reservation_bootstrap_code_precondition=PASS"
 
       - name: Verify engagement auth recovery regression before deployment
         shell: bash
@@ -41,6 +73,19 @@ jobs:
           node --test apps/studio-api/profiles-overview-refresh.test.mjs
           node --test apps/studio-api/profiles-overview-force-refresh-contract.test.mjs
           node --test apps/studio-api/overview-dispatch-counts.test.mjs
+          PYTHONPATH=repair/scripts python -m unittest repair.scripts.studio_api_binding_contract_test
+          node --check apps/studio-api/schedule-reservation-authority.mjs
+          node --check apps/studio-api/schedule-reservation-transaction.mjs
+          node --check apps/studio-api/schedule-reservation-quality.mjs
+          node --test \
+            apps/studio-api/schedule-reservation-authority.test.mjs \
+            apps/studio-api/schedule-reservation-transaction.test.mjs \
+            apps/studio-api/schedule-reservation-concurrency.test.mjs \
+            apps/studio-api/schedule-reservation-quality.test.mjs \
+            apps/studio-api/schedule-reservation-integration.test.mjs \
+            apps/studio-api/schedule-reservation-policy.test.mjs \
+            apps/studio-api/schedule-reservation-writer-audit.test.mjs \
+            apps/studio-api/schedule-reservation-runtime.test.mjs
 
       - name: Validate source and install pinned Wrangler
         shell: bash
@@ -86,7 +131,19 @@ jobs:
           r=json.loads(Path('/tmp/version-before.json').read_text())['result']
           bindings=(r.get('resources') or {}).get('bindings') or []
           got={str(x.get('name')):str(x.get('type')) for x in bindings}
-          contract=assert_live_contract(got, 'Predeploy live Worker')
+          contract=assert_live_contract(
+              got,
+              'Predeploy live Worker',
+              allow_reservation_absent=True,
+          )
+          reservation_bootstrapped = (
+              got.get('STUDIO_SCHEDULE_RESERVATIONS') == 'durable_object_namespace'
+              and got.get('STUDIO_SCHEDULE_RESERVATION_AUTHORITY_ENABLED') == 'plain_text'
+          )
+          Path('/tmp/reservation-binding-state.txt').write_text(
+              'bootstrapped' if reservation_bootstrapped else 'absent'
+          )
+          print('reservation_binding_state=' + ('bootstrapped' if reservation_bootstrapped else 'absent'))
           # Read the active deployment's plain-text values as the authoritative
           # source. A failed, rolled-back version can still be Wrangler's
           # --keep-vars source and silently reintroduce old global flags.
@@ -159,6 +216,10 @@ jobs:
           module.assert_global_factory_binding_tuple(active_vars,'Predeploy Worker',allow_absent=True)
           active_vars.update(factory_vars)
           active_vars.update(visual_vars)
+          reservation_state=Path('/tmp/reservation-binding-state.txt').read_text().strip()
+          bootstrap_requested=os.environ.get('BOOTSTRAP_RESERVATION','false').strip().lower()=='true'
+          lifecycle_change = reservation_state == 'absent' and bootstrap_requested
+          Path('/tmp/reservation-lifecycle-change.txt').write_text('true' if lifecycle_change else 'false')
           cfg={
             'name':os.environ['TARGET_WORKER'],
             'main':'worker.js',
@@ -171,6 +232,26 @@ jobs:
             'r2_buckets':[{'binding':'STUDIO_MEDIA','bucket_name':bucket}],
             'secrets':{'required':['AIRTABLE_PAT']}
           }
+          if reservation_state == 'bootstrapped' or lifecycle_change:
+              # Preserve an existing namespace, or perform the explicit one-time
+              # bootstrap. In both cases the scheduling authority remains OFF.
+              active_vars['STUDIO_SCHEDULE_RESERVATION_AUTHORITY_ENABLED']='false'
+              cfg['durable_objects']={
+                  'bindings':[{
+                      'name':'STUDIO_SCHEDULE_RESERVATIONS',
+                      'class_name':'ScheduleReservationLane',
+                  }],
+              }
+              cfg['exports']={
+                  'ScheduleReservationLane':{
+                      'type':'durable-object',
+                      'storage':'sqlite',
+                  },
+              }
+          else:
+              # Before the explicit bootstrap runs, ordinary production deploys
+              # keep the legacy binding/configuration tuple unchanged.
+              active_vars.pop('STUDIO_SCHEDULE_RESERVATION_AUTHORITY_ENABLED', None)
           Path('/tmp/wrangler-production/wrangler.jsonc').write_text(json.dumps(cfg,indent=2))
           PY
           cd /tmp/wrangler-production
@@ -212,7 +293,21 @@ jobs:
           r=json.loads(Path('/tmp/version-after.json').read_text())['result']
           bindings=(r.get('resources') or {}).get('bindings') or []
           got={str(x.get('name')):str(x.get('type')) for x in bindings}
-          contract=assert_live_contract(got, 'Postdeploy live Worker')
+          reservation_state=Path('/tmp/reservation-binding-state.txt').read_text().strip()
+          lifecycle_change=Path('/tmp/reservation-lifecycle-change.txt').read_text().strip() == 'true'
+          expected_bootstrapped = reservation_state == 'bootstrapped' or lifecycle_change
+          contract=assert_live_contract(
+              got,
+              'Postdeploy live Worker',
+              allow_reservation_absent=(not expected_bootstrapped),
+          )
+          if expected_bootstrapped:
+              if got.get('STUDIO_SCHEDULE_RESERVATIONS') != 'durable_object_namespace':
+                  raise SystemExit('Atomic scheduling Durable Object binding disappeared after deploy')
+          else:
+              if ('STUDIO_SCHEDULE_RESERVATIONS' in got
+                  or 'STUDIO_SCHEDULE_RESERVATION_AUTHORITY_ENABLED' in got):
+                  raise SystemExit('Ordinary production deploy unexpectedly bootstrapped atomic scheduling bindings')
           # Catch any dropped or changed runtime settings, including optional
           # secrets, before the new version is accepted. Never print values.
           before=json.loads(Path('/tmp/version-before.json').read_text())['result']
@@ -238,6 +333,11 @@ jobs:
               if name not in expected and after_plain.get(name)!=value:
                   raise SystemExit('Worker plaintext setting changed or disappeared: '+name)
           binding_values=after_plain
+          if expected_bootstrapped:
+              if binding_values.get('STUDIO_SCHEDULE_RESERVATION_AUTHORITY_ENABLED') != 'false':
+                  raise SystemExit('Atomic scheduling feature flag must remain disabled during reservation-authority rollout')
+          elif 'STUDIO_SCHEDULE_RESERVATION_AUTHORITY_ENABLED' in binding_values:
+              raise SystemExit('Atomic scheduling feature flag appeared before namespace bootstrap')
           for name,value in expected.items():
               if binding_values.get(name)!=value:
                   raise SystemExit('Factory batch release verification mismatch: '+name)
@@ -575,8 +675,36 @@ jobs:
           API="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/$TARGET_WORKER"
           AUTH="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
           BEFORE=$(cat /tmp/active-before.txt)
+          LIFECYCLE_CHANGE=false
+          if [[ -f /tmp/reservation-lifecycle-change.txt ]]; then
+            LIFECYCLE_CHANGE=$(cat /tmp/reservation-lifecycle-change.txt)
+          fi
           curl -fsS "$API/deployments" -H "$AUTH" -o /tmp/current-deployments.json
           CURRENT=$(jq -er '.result.deployments[0].versions|max_by(.percentage)|.version_id' /tmp/current-deployments.json)
+          if [[ "$CURRENT" == "$BEFORE" ]]; then
+            echo "automatic_rollback_not_needed=production_version_unchanged"
+            exit 0
+          fi
+          if [[ "$LIFECYCLE_CHANGE" == "true" ]]; then
+            # Only treat the lifecycle boundary as applied when the active
+            # version actually exposes the namespace plus disabled flag. If the
+            # deploy failed before lifecycle reconciliation, the normal prior-
+            # version rollback below is still valid.
+            curl -fsS "$API/versions/$CURRENT" -H "$AUTH" -o /tmp/bootstrap-failure-version.json
+            if jq -e '
+              .result.resources.bindings as $b
+              | ([$b[] | select(.name=="STUDIO_SCHEDULE_RESERVATIONS" and .type=="durable_object_namespace")] | length)==1
+              and ([$b[] | select(.name=="STUDIO_SCHEDULE_RESERVATION_AUTHORITY_ENABLED" and .type=="plain_text" and .text=="false")] | length)==1
+            ' /tmp/bootstrap-failure-version.json >/dev/null; then
+              # Cloudflare cannot roll back across a Durable Object lifecycle
+              # boundary. The exact code commit was already production-green
+              # before bootstrap and the new authority remains disabled, so
+              # retain the dormant namespace and fail visibly instead of
+              # attempting an invalid historical rollback.
+              echo "automatic_rollback_skipped=dormant_durable_object_lifecycle_boundary"
+              exit 0
+            fi
+          fi
           if [[ "$CURRENT" != "$BEFORE" ]]; then
             cat >/tmp/rollback.json <<EOF
           {"strategy":"percentage","versions":[{"version_id":"$BEFORE","percentage":100}],"annotations":{"workers/message":"Automatic rollback after Studio API deployment verification failure"}}
