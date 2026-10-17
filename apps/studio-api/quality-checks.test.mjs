@@ -62,3 +62,19 @@ test("Quality Agent catalog includes retired-platform approval regression review
   assert.match(row.title, /Production approval validation/i);
   assert.match(row.title, /operator-facing errors/i);
 });
+
+test("Quality Agent catalog registers all atomic scheduling runtime signatures", () => {
+  const expected = {
+    schedule_lock_hung: ["QA-SCHEDULE-LOCK-HUNG", "recover_schedule_lock"],
+    schedule_lock_contention: ["QA-SCHEDULE-LOCK-CONTENTION", "none"],
+    schedule_reservation_drift: ["QA-SCHEDULE-RESERVATION-DRIFT", "reconcile_schedule_reservation"],
+    schedule_collision: ["QA-SCHEDULE-COLLISION", "ticket_only"],
+    schedule_queue_stalled: ["QA-SCHEDULE-QUEUE-STALLED", "recover_schedule_lock"],
+  };
+  for (const [kind, [signature, heal]] of Object.entries(expected)) {
+    const row = QUALITY_CHECK_BY_KIND[kind];
+    assert.ok(row, `missing Quality Agent catalog row for ${kind}`);
+    assert.equal(row.signature, signature);
+    assert.equal(row.heal, heal);
+  }
+});
