@@ -1,3 +1,5 @@
+import { factoryApprovalItemTiming, factoryApprovalTimingReport } from "./factory-approval-timings.mjs";
+
 /**
  * Durable Factory approval batches: R2 CAS per request + a CAS profile mutex.
  * Browser-independent: HTTP waitUntil starts work, cron reclaims pending jobs.
@@ -33,15 +35,17 @@ export function factoryBatchCounts(job) {
 export function factoryBatchSummary(job) {
   if (!job) return { ok: true, batch: true, status: "idle", job_id: null, items: [] };
   const counts = factoryBatchCounts(job);
+  const timing_report = factoryApprovalTimingReport(job.items || []);
   return {
     ok: true, batch: true, job_id: job.id, profile_id: job.profile_id,
     request_id: job.request_id, created_at: job.created_at, updated_at: job.updated_at,
-    status: job.status, ...counts,
+    status: job.status, ...counts, timing_report,
     can_retry: counts.failed_count > 0 && ["completed", "failed"].includes(job.status),
     items: job.items.map(item => ({
       id: item.id, output_id: item.output_id, platform: item.platform,
       format: item.format, title: item.title || null, content_id: item.content_id || null,
       status: item.status, error: item.error || null,
+      timing: factoryApprovalItemTiming(item),
     })),
   };
 }
@@ -61,7 +65,8 @@ export function factoryBatchBuild({ profileId, requestId, records, note = "", gr
       title: String(record.title || "").slice(0, 180) || null,
       content_id: record.content_id || null,
       status: "pending", error: null,
-      attempts: 0, next_attempt_ms: 0,
+      attempts: 0, total_attempts: 0, next_attempt_ms: 0,
+      timeline: [{ state: "queued", at: now, attempt: 0 }],
     });
   }
   return {
@@ -309,13 +314,25 @@ export async function factoryBatchDrain(bucket, options) {
       job = await cas(bucket, key, value => ({
         ...value, status: "running", updated_at: stamp,
         items: value.items.map(row => row.id === item.id
-          ? { ...row, status: "processing", attempts: (row.attempts || 0) + 1, error: null }
+          ? { ...row, status: "processing", attempts: (row.attempts || 0) + 1,
+            total_attempts: (row.total_attempts || row.attempts || 0) + 1, error: null,
+            timeline: [...(row.timeline || []), {
+              state: "processing", at: stamp,
+              attempt: (row.total_attempts || row.attempts || 0) + 1,
+            }].slice(-180),
+          }
           : row),
       }));
       processed++;
+      const attempt = (item.total_attempts || item.attempts || 0) + 1;
+      const events = [];
+      const checkpoint = state => {
+        if (typeof state !== "string" || !/^[a-z_]{3,64}$/.test(state) || events.length >= 64) return;
+        events.push({ state, at: new Date(now()).toISOString(), attempt });
+      };
       let outcome;
       try {
-        const result = await approve(item.id, job);
+        const result = await approve(item.id, job, checkpoint);
         outcome = {
           status: result?.already_approved || result?.already_published ? "already_satisfied" : "approved",
           error: null, next_attempt_ms: 0,
@@ -331,10 +348,16 @@ export async function factoryBatchDrain(bucket, options) {
             : 0,
         };
       }
+      const completedAt = new Date(now()).toISOString();
       job = await cas(bucket, key, value => {
         const updated = {
-          ...value, updated_at: new Date(now()).toISOString(),
-          items: value.items.map(row => row.id === item.id ? { ...row, ...outcome } : row),
+          ...value, updated_at: completedAt,
+          items: value.items.map(row => row.id === item.id ? {
+            ...row, ...outcome,
+            timeline: [...(row.timeline || []), ...events, {
+              state: outcome.status, at: completedAt, attempt,
+            }].slice(-180),
+          } : row),
         };
         const counts = factoryBatchCounts(updated);
         updated.status = counts.pending_count ? "running"
@@ -361,7 +384,12 @@ export async function factoryBatchRetry(bucket, profileId, requestId) {
     return {
       ...job, status: "queued", updated_at: new Date().toISOString(),
       items: job.items.map(item => item.status === "failed"
-        ? { ...item, status: "pending", error: null, attempts: 0, next_attempt_ms: 0 }
+        ? { ...item, status: "pending", error: null, attempts: 0, next_attempt_ms: 0,
+          timeline: [...(item.timeline || []), {
+            state: "pending", at: new Date().toISOString(),
+            attempt: item.total_attempts || 0,
+          }].slice(-180),
+        }
         : item),
     };
   });
