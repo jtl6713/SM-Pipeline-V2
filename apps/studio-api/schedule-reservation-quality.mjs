@@ -184,7 +184,11 @@ function isStoryType(value) {
 
 function documentedStoryCompanionPair(a, b, delta) {
   if (delta < 60 * 1000) return false;
-  if (!isStoryType(a?.output_type) && !isStoryType(b?.output_type)) return false;
+  const aStory = isStoryType(a?.output_type);
+  const bStory = isStoryType(b?.output_type);
+  // The documented exception is one Story sitting at main + 10 minutes.
+  // Two Stories 10 minutes apart still compete for normal platform capacity.
+  if (aStory === bStory) return false;
   return Math.abs(delta - MAE_STORY_COMPANION_OFFSET_MS) < 60 * 1000;
 }
 
