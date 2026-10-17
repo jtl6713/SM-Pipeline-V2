@@ -9,6 +9,7 @@
  */
 import {
   factoryBatchEnqueue, factoryBatchRead, factoryBatchCounts, factoryBatchRetry,
+  factoryBatchQualitySignals,
 } from "./factory-approval-queue.mjs";
 
 export const FACTORY_GROUP_PREFIX = "studio/state/factory-approvals/v2/groups";
@@ -165,6 +166,7 @@ export async function factoryApprovalGroupStatus(bucket,requestId) {
   };
   const children=[];
   const items=[];
+  const qualitySignals=[];
   for (const child of parent.children) {
     const job=await factoryBatchRead(bucket,child.profile_id,child.request_id);
     const counts=job ? factoryBatchCounts(job) : {
@@ -172,6 +174,10 @@ export async function factoryApprovalGroupStatus(bucket,requestId) {
       failed_count:0,pending_count:child.records.length,
     };
     for (const key of Object.keys(totals)) totals[key]+=counts[key];
+    if (job) qualitySignals.push(...factoryBatchQualitySignals(job).map(signal=>({
+      ...signal,profile_id:child.profile_id,job_id:job.id,
+      output_ids:job.items.map(item=>item.output_id).filter(Boolean),
+    })));
     children.push({
       profile_id:child.profile_id,request_id:child.request_id,
       status:job?.status||"missing",...counts,
@@ -192,6 +198,7 @@ export async function factoryApprovalGroupStatus(bucket,requestId) {
     ok:true, batch:true, group:true, group_id:parent.id, job_id:parent.id,
     request_id:parent.request_id, profile_id:null,
     profile_ids:parent.children.map(x=>x.profile_id), items,
+    quality_signals:qualitySignals,
     created_at:parent.created_at,updated_at:parent.updated_at,
     status,...totals,done_count:totals.total-totals.pending_count,
     can_retry:!totals.pending_count && totals.failed_count>0,
