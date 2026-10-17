@@ -1847,6 +1847,219 @@ async function approveOutputRecordForPublishingAtomic(
 
 /*__STUDIO_WORKER_END:approveOutputRecordForPublishingAtomic__*/
 
+async function studioApproveOutputRecordAtomic(env, record, note, stamp, payload = {}, options = {}) {
+  const id = record.id;
+  const platform = String(f(record, "Platform") || "").trim();
+  const outputType = String(f(record, "Studio_Output_Type") || f(record, "Format") || "").trim();
+  const profile = options.profile || await item4ProductionProfileRecord(env, record).catch(() => null);
+  const profileId = String(profile?.id || "").trim();
+  if (!profileId) {
+    throw new HttpError(409, "Atomic scheduling requires an authoritative Content Profile ID");
+  }
+  if (!platform) throw new HttpError(409, "Atomic scheduling requires a platform");
+
+  const horizonDays = options.horizonDays
+    || await studioScheduleHorizonDays(env).catch(() => MAE_SUGGEST_HORIZON_DAYS);
+  const timeZone = options.timeZone || await studioScheduleTimeZoneForRecord(env, record, payload);
+  const isStory = /story/i.test(outputType);
+  const markerIso = String(f(record, "Studio_Scheduled_At") || "").trim();
+  const existingScheduleIso = String(
+    f(record, "Scheduled_Post_Date") || f(record, "YouTube_Scheduled_Publish_At") || ""
+  ).trim();
+  const rawIn = String(payload?.scheduled_post_date || "").trim();
+  const publishNowImmediate = Boolean(
+    payload?.publish_now === true || rawIn.toLowerCase() === "immediate"
+  );
+  const recheckBestSlot = options.recheckBestSlot === true
+    || (options.recheckBestSlot !== false
+      && !publishNowImmediate
+      && payload?.manual_schedule_override !== true
+      && !markerIso);
+  const existingNotes = String(f(record, "Review_Notes") || "").trim();
+  const prepared = await studioEnsureNativePublishSlides(env, record);
+  const operationId = String(options.scheduleOperationId || `approve:${id}`).trim();
+  const factoryBatchId = String(options.factoryBatchId || options.factory_batch_id || "").trim() || null;
+
+  const result = await runAtomicScheduleTransaction(env, {
+    content_profile_id: profileId,
+    platform,
+    output_type: outputType,
+    platform_output_record_id: id,
+    owner_operation_id: operationId,
+    factory_batch_id: factoryBatchId,
+  }, {
+    // This callback is not used because the caller only enters this helper when
+    // the feature flag is enabled. It exists as a defensive fallback.
+    legacy: async () => {
+      throw new HttpError(503, "Atomic schedule transaction unexpectedly fell back to legacy mode");
+    },
+    plan: async ({ occupied_reservations: durableReservations }) => {
+      // Commit-time source of truth: never trust Approve All / Factory batch
+      // occupancy snapshots here. Force the shared cache cold, then re-read.
+      studioInvalidateOccupiedScheduleCache();
+      const occupied = await studioOccupiedSchedulesOrEmpty(env, {
+        excludeIds: [id],
+        profile,
+      });
+      const laneOccupied = studioOccupiedForLane(occupied, platform, outputType).slice();
+      const platformOccupied = studioOccupiedForPlatform(occupied, platform).slice();
+
+      for (const durable of durableReservations || []) {
+        const ms = Date.parse(String(durable?.scheduled_iso || ""));
+        if (!Number.isFinite(ms)) continue;
+        platformOccupied.push(ms);
+        const durableType = String(durable?.output_type || "").trim().toLowerCase();
+        if (durableType && durableType === outputType.toLowerCase()) laneOccupied.push(ms);
+      }
+      const uniqueFinite = (values) => [...new Set((values || []).filter(Number.isFinite))];
+      const lane = uniqueFinite(laneOccupied);
+      const platformLane = uniqueFinite(platformOccupied);
+      const capacityMessage = `No open morning, afternoon, evening, or overflow slot in the next ${horizonDays} days`;
+      const pickLaneIso = () => {
+        const picked = maeScheduleNextSlot({
+          timeZone,
+          laneOccupiedMs: lane,
+          platformOccupiedMs: platformLane,
+          horizonDays,
+        });
+        if (!picked.ok) throw new HttpError(409, picked.error || capacityMessage);
+        return picked.iso;
+      };
+
+      let requestedRaw = recheckBestSlot ? "" : rawIn;
+      let exactOverride = false;
+      let storyCompanion = false;
+
+      if (publishNowImmediate) {
+        requestedRaw = "immediate";
+      } else if (payload?.manual_schedule_override === true && rawIn) {
+        requestedRaw = rawIn;
+        exactOverride = true;
+      } else if (markerIso && !recheckBestSlot) {
+        requestedRaw = markerIso;
+        exactOverride = true;
+      } else if (isStory) {
+        const resolved = await studioResolveStoryPublishIso(env, record, {
+          timeZone,
+          occupiedMs: lane,
+          requestedIso: recheckBestSlot ? "" : requestedRaw,
+          existingIso: recheckBestSlot ? "" : existingScheduleIso,
+          extraSiblings: options.extraSiblings || [],
+          siblingRows: options.siblingRows,
+        });
+        if (!resolved.iso) {
+          requestedRaw = pickLaneIso();
+        } else {
+          requestedRaw = resolved.iso;
+          storyCompanion = resolved.source === "companion" || resolved.source === "mae_plus_10";
+        }
+      } else if (!recheckBestSlot && !requestedRaw && existingScheduleIso) {
+        requestedRaw = existingScheduleIso;
+      } else if (!requestedRaw) {
+        requestedRaw = pickLaneIso();
+      }
+
+      if (exactOverride && requestedRaw && requestedRaw !== "immediate") {
+        const requestedMs = Date.parse(requestedRaw);
+        if (!Number.isFinite(requestedMs)) {
+          throw new HttpError(400, "Scheduled date/time is invalid");
+        }
+        if (maeIsBlackoutLocalTime(requestedMs, timeZone)) {
+          throw new HttpError(409, "The requested manual schedule is inside the profile-local 8:00 PM–3:30 AM blackout");
+        }
+        if (maeScheduleConflicts(requestedMs, platformLane)) {
+          throw new HttpError(409, "The requested manual schedule conflicts with an existing reservation on this profile/platform");
+        }
+      } else if (
+        !publishNowImmediate
+        && !storyCompanion
+        && requestedRaw
+        && requestedRaw !== "immediate"
+      ) {
+        const requestedMs = Date.parse(requestedRaw);
+        if (!Number.isFinite(requestedMs) || maeScheduleConflicts(requestedMs, platformLane)) {
+          requestedRaw = pickLaneIso();
+        }
+      }
+
+      const scheduleFields = studioPublishScheduleFields(
+        { ...(payload || {}), scheduled_post_date: requestedRaw, timezone: timeZone },
+        record,
+        {
+          // The candidate above already preserves output-type sequencing; final
+          // collision validation is platform-wide.
+          occupiedMs: storyCompanion ? [] : platformLane,
+          exactOverride,
+          storyCompanion,
+          timeZone,
+          forceWrite: publishNowImmediate,
+        },
+      );
+      const scheduledIso = String(
+        scheduleFields.Scheduled_Post_Date || f(record, "Scheduled_Post_Date") || ""
+      ).trim();
+      if (!scheduledIso) throw new HttpError(409, "Scheduling did not produce a verifiable publication time");
+
+      const fields = {
+        Review_Status: "Approved",
+        Output_Status: "Approved for Publishing",
+        Publish_Status: "Ready to Schedule",
+        Publish_Method: "Automated",
+        Auto_Publish_Enabled: true,
+        Review_Decision_At: stamp,
+        Do_Not_Publish: false,
+        Review_Notes: [existingNotes, note, `Studio Pipeline approved for publishing at ${stamp}.`].filter(Boolean).join("\n\n"),
+        ...studioPublishHandoffFields(record, { scheduledPostDate: scheduledIso }),
+        ...scheduleFields,
+      };
+      const preparedHandoff = studioPublishHandoffFields(prepared, {
+        scheduledPostDate: scheduleFields.Scheduled_Post_Date || f(prepared, "Scheduled_Post_Date") || scheduledIso,
+      });
+      return {
+        action: existingScheduleIso && existingScheduleIso !== scheduledIso ? "move" : "reserve",
+        selectedIso: scheduledIso,
+        previousIso: existingScheduleIso,
+        patchFields: { ...fields, ...preparedHandoff, ...scheduleFields },
+      };
+    },
+    write: async (plan) => airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, prepared.id || id, {
+      method: "PATCH",
+      body: JSON.stringify({ fields: plan.patchFields, typecast: true }),
+    }),
+    verify: async (_updated, plan) => {
+      const verified = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, prepared.id || id);
+      const storedIso = String(
+        f(verified, "Scheduled_Post_Date")
+        || f(verified, "YouTube_Scheduled_Publish_At")
+        || f(verified, "Studio_Scheduled_At")
+        || ""
+      ).trim();
+      if (!storedIso || Number.isNaN(Date.parse(storedIso))) {
+        throw new HttpError(503, "Airtable schedule write could not be verified");
+      }
+      const expectedMs = Date.parse(plan.selectedIso);
+      const storedMs = Date.parse(storedIso);
+      if (!Number.isFinite(expectedMs) || !Number.isFinite(storedMs) || expectedMs !== storedMs) {
+        throw new HttpError(503, "Airtable stored schedule does not match the reserved MAE slot");
+      }
+      return new Date(storedMs).toISOString();
+    },
+    afterCommit: async (updated) => {
+      studioInvalidateOccupiedScheduleCache();
+      const writeThrough = studioSupabaseWriteThroughOutput(env, updated, "approve");
+      if (Array.isArray(options.writeThroughQueue)) {
+        options.writeThroughQueue.push(writeThrough);
+      } else {
+        await writeThrough;
+      }
+    },
+  }, {
+    maxWaitMs: options.scheduleLockWaitMs ?? 30_000,
+  });
+
+  return result.value;
+}
+
 export async function approveOutputRecordForPublishing(env, existing, note, stamp, payload = {}, options = {}) {
   const id = existing.id;
   return withOutputApprovalLock(env.STUDIO_MEDIA, id, async () => {
@@ -1874,6 +2087,9 @@ export async function approveOutputRecordForPublishing(env, existing, note, stam
       console.warn("native photo branding before publish approval failed", record.id, error);
     });
     record = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, record.id);
+  }
+  if (scheduleReservationAuthorityEnabled(env)) {
+    return studioApproveOutputRecordAtomic(env, record, note, stamp, payload, options);
   }
   const platform = String(f(record, "Platform") || "").trim();
   const outputType = String(f(record, "Studio_Output_Type") || f(record, "Format") || "").trim();
