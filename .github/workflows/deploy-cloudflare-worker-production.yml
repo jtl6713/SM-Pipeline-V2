@@ -167,10 +167,17 @@ jobs:
           bindings=(r.get('resources') or {}).get('bindings') or []
           got={str(x.get('name')):str(x.get('type')) for x in bindings}
           contract=assert_live_contract(got, 'Postdeploy live Worker')
-          flag=next((b for b in bindings if b.get('name')=='FACTORY_BATCH_APPROVALS_ENABLED'),None)
-          if not flag or str(flag.get('text','')).strip().lower()!='false':
-              raise SystemExit('Factory batch release gate: flag must be disabled')
-          print('factory_batch_approvals_disabled=PASS')
+          rollout=json.loads(Path('deploy/factory-batch-production-rollout.json').read_text())
+          expected={
+            'FACTORY_BATCH_APPROVALS_ENABLED':'true' if rollout['enabled'] else 'false',
+            'FACTORY_BATCH_ROLLOUT_MODE':'chicago_ig_reel_v1',
+            'FACTORY_BATCH_ROLLOUT_MAX_ITEMS':'1',
+          }
+          binding_values={b.get('name'):str(b.get('text','')) for b in bindings}
+          for name,value in expected.items():
+              if binding_values.get(name)!=value:
+                  raise SystemExit('Factory batch release verification mismatch: '+name)
+          print('factory_batch_canary_binding_contract=PASS profile=Chicago platform=Instagram format=Reel max=1 enabled='+expected['FACTORY_BATCH_APPROVALS_ENABLED'])
           safe={'version_id':r.get('id'),'version_number':r.get('number'),'binding_count':len(bindings),'contract':contract['contract'],'core_ok':contract['core_ok'],'elevenlabs_present':contract['optional_present'].get('ELEVENLABS_API_KEY'),'bindings':contract['bindings']}
           Path('/tmp/postdeploy-contract-sanitized.json').write_text(json.dumps(safe,indent=2,sort_keys=True))
           print('postdeploy_binding_contract=PASS')
