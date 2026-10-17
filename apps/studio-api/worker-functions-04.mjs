@@ -12339,7 +12339,9 @@ export async function factoryBatchProcess(env, profileId, requestId, ctx = null)
     if (!globalPolicy.enabled) return null;
     const parent=await factoryApprovalGroupRead(env.STUDIO_MEDIA,parentId);
     const child=parent?.children?.find(row=>row.profile_id===profileId&&row.request_id===requestId);
-    if (!child||child.records.length!==job.items.length||
+    if (!child||parent.records.length>globalPolicy.max_total||
+        child.records.length>globalPolicy.max_per_profile||
+        child.records.length!==job.items.length||
         child.records.some((row,i)=>row.id!==job.items[i]?.id)) return null;
   } else if (!rollout.enabled) return null;
   const run = async () => {

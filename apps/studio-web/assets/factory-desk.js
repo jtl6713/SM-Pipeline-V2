@@ -322,7 +322,7 @@
       const rollout = state.batchRollout;
       if (state.batchGlobal?.enabled) {
         rolloutNotice.hidden = false;
-        rolloutNotice.textContent = "Global Factory: up to 20 Instagram Reels or Stories per batch, maximum 10 per profile. Profile-local scheduling remains authoritative.";
+        rolloutNotice.textContent = `Global Factory (${state.batchGlobal.stage === "pilot" ? "pilot" : "expanded"}): up to ${state.batchGlobal.max_total} Instagram Reels or Stories per batch, maximum ${state.batchGlobal.max_per_profile} per profile. Profile-local scheduling remains authoritative.`;
       } else if (["chicago_ig_reel_v1", "chicago_ig_reels_v2",
         "chicago_ig_reel_story_v3"].includes(rollout?.mode)) {
         rolloutNotice.hidden = false;
@@ -515,7 +515,7 @@
       return;
     }
     if (global && profiles.some(id=>ready.filter(card=>card.profile_id===id).length>state.batchGlobal.max_per_profile)) {
-      setStatus("Select at most 10 outputs from each profile.",true);return;
+      setStatus(`Select at most ${state.batchGlobal.max_per_profile} outputs from each profile.`,true);return;
     }
     // Each child owns profile-local scheduling.
     // Refuse to mix profiles rather than stamp an output in the wrong timezone.

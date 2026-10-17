@@ -4,6 +4,9 @@ on:
     paths:
       - "apps/studio-api/**"
       - "apps/studio-web/**"
+      - "deploy/factory-batch-production-rollout.json"
+      - "repair/scripts/studio_api_binding_contract.py"
+      - ".github/workflows/deploy-cloudflare-worker-production.yml"
       - ".github/workflows/factory-batch-approval-ci.yml"
   workflow_dispatch:
 permissions:
@@ -30,3 +33,34 @@ jobs:
       - name: Factory single and batch approval regressions
         run: |
           node --test apps/studio-api/approve-all-batch.test.mjs apps/studio-api/factory-approve.test.mjs apps/studio-api/factory-batch-approval.test.mjs apps/studio-api/factory-approval-queue.test.mjs apps/studio-api/factory-approval-groups.test.mjs apps/studio-api/factory-batch-global-policy.test.mjs apps/studio-api/factory-real-record-publish-route.staging.test.mjs apps/studio-api/output-approval-lease.test.mjs apps/studio-web/factory-desk.test.mjs apps/studio-web/factory-batch-approval.test.mjs
+      - name: Validate signed Factory global deployment contract and reject drift
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json, sys
+          from pathlib import Path
+          sys.path.insert(0,'repair/scripts')
+          from studio_api_binding_contract import (
+              global_factory_manifest_values,assert_global_factory_binding_tuple,GLOBAL_FACTORY_CAPS)
+          manifest=json.loads(Path('deploy/factory-batch-production-rollout.json').read_text())
+          original=global_factory_manifest_values(manifest)
+          assert assert_global_factory_binding_tuple(original,'signed test') == manifest['global']['stage']
+          for key, value in [
+              ('max_total',5),('max_per_profile',3),('mode','invalid'),
+              ('production_signoff',''),('stage','unknown')]:
+              bad=json.loads(json.dumps(manifest));bad['global'][key]=value
+              try: global_factory_manifest_values(bad)
+              except SystemExit: pass
+              else: raise AssertionError('Release drift not rejected: '+key)
+          for key,value in [
+              ('FACTORY_BATCH_GLOBAL_MAX_TOTAL','999'),
+              ('FACTORY_BATCH_GLOBAL_PRODUCTION_SIGNOFF',''),
+              ('FACTORY_BATCH_GLOBAL_APPROVALS_ENABLED','false')]:
+              bad={**original,key:value}
+              try: assert_global_factory_binding_tuple(bad,'invalid')
+              except SystemExit: pass
+              else: raise AssertionError('Binding drift not rejected: '+key)
+          assert set(GLOBAL_FACTORY_CAPS)=={'pilot','expanded'}
+          print('FACTORY_SIGNED_GLOBAL_RELEASE=PASS stage='+manifest['global']['stage'])
+          PY

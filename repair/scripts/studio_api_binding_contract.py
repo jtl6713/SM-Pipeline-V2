@@ -29,6 +29,13 @@ OPTIONAL_BINDINGS = {
     "FACTORY_BATCH_APPROVALS_ENABLED": "plain_text",
     "FACTORY_BATCH_ROLLOUT_MODE": "plain_text",
     "FACTORY_BATCH_ROLLOUT_MAX_ITEMS": "plain_text",
+    # The five global settings are allowed only by TYPE here; the production
+    # deployment workflow separately enforces exact signed values and caps.
+    "FACTORY_BATCH_GLOBAL_APPROVALS_ENABLED": "plain_text",
+    "FACTORY_BATCH_GLOBAL_MODE": "plain_text",
+    "FACTORY_BATCH_GLOBAL_MAX_TOTAL": "plain_text",
+    "FACTORY_BATCH_GLOBAL_MAX_PER_PROFILE": "plain_text",
+    "FACTORY_BATCH_GLOBAL_PRODUCTION_SIGNOFF": "plain_text",
     "ELEVENLABS_API_KEY": "secret_text",
     "PIPELINE_RUNNER_SHARED_SECRET": "secret_text",
     "PIPELINE_RUNNER_URL": "plain_text",
@@ -137,3 +144,54 @@ def assert_live_contract(got, label="bindings"):
             f"optional_mismatch={result['optional_mismatch']}"
         )
     return result
+
+# Signed rollout values are verified separately from the type-only binding
+# contract. Never accept a partial tuple or ad-hoc increased limits.
+GLOBAL_FACTORY_BINDINGS = (
+    "FACTORY_BATCH_GLOBAL_APPROVALS_ENABLED",
+    "FACTORY_BATCH_GLOBAL_MODE",
+    "FACTORY_BATCH_GLOBAL_MAX_TOTAL",
+    "FACTORY_BATCH_GLOBAL_MAX_PER_PROFILE",
+    "FACTORY_BATCH_GLOBAL_PRODUCTION_SIGNOFF",
+)
+GLOBAL_FACTORY_CAPS = {"pilot": (4, 2), "expanded": (20, 10)}
+
+
+def global_factory_manifest_values(rollout):
+    item = rollout.get("global")
+    if not isinstance(item, dict) or type(item.get("enabled")) is not bool:
+        raise SystemExit("Missing signed global Factory release manifest")
+    if item["enabled"]:
+        stage = item.get("stage")
+        if stage not in GLOBAL_FACTORY_CAPS:
+            raise SystemExit("Unknown global Factory release stage")
+        total, per_profile = GLOBAL_FACTORY_CAPS[stage]
+        if (item.get("mode") != "global_ig_reel_story_v1"
+                or item.get("max_total") != total
+                or item.get("max_per_profile") != per_profile
+                or item.get("production_signoff") != "explicit-review"):
+            raise SystemExit("Global Factory release manifest does not match signed stage")
+        return dict(zip(GLOBAL_FACTORY_BINDINGS,
+            ("true", "global_ig_reel_story_v1", str(total), str(per_profile), "explicit-review")))
+    if (item.get("stage") != "disabled" or item.get("mode") != "disabled"
+            or item.get("max_total") != 0 or item.get("max_per_profile") != 0
+            or item.get("production_signoff") != "disabled"):
+        raise SystemExit("Disabled global Factory release must use exact off values")
+    return dict(zip(GLOBAL_FACTORY_BINDINGS, ("false", "disabled", "0", "0", "disabled")))
+
+
+def assert_global_factory_binding_tuple(plain, label, allow_absent=False):
+    found = {k: plain[k] for k in GLOBAL_FACTORY_BINDINGS if k in plain}
+    if not found and allow_absent:
+        return "absent"
+    if len(found) != len(GLOBAL_FACTORY_BINDINGS):
+        raise SystemExit(f"{label}: partial global Factory binding tuple")
+    disabled = dict(zip(GLOBAL_FACTORY_BINDINGS, ("false", "disabled", "0", "0", "disabled")))
+    if found == disabled:
+        return "disabled"
+    for stage, (total, per_profile) in GLOBAL_FACTORY_CAPS.items():
+        expected = dict(zip(GLOBAL_FACTORY_BINDINGS,
+            ("true", "global_ig_reel_story_v1", str(total), str(per_profile), "explicit-review")))
+        if found == expected:
+            return stage
+    raise SystemExit(f"{label}: unrecognized global Factory binding tuple")
