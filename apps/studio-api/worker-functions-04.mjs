@@ -1648,7 +1648,7 @@ async function studioApproveOutputRecordAtomic(env, record, note, stamp, payload
       && !markerIso);
   const existingNotes = String(f(record, "Review_Notes") || "").trim();
   const prepared = await studioEnsureNativePublishSlides(env, record);
-  const operationId = String(options.scheduleOperationId || `approve:${id}`).trim();
+  const operationId = String(options.scheduleOperationId || `approve:${id}:${stamp}`).trim();
   const factoryBatchId = String(options.factoryBatchId || options.factory_batch_id || "").trim() || null;
 
   const result = await runAtomicScheduleTransaction(env, {
@@ -2974,6 +2974,7 @@ export async function studioProcessApproveAllJobSlice(env, jobId, options = {}) 
           horizonDays,
           profile,
           timeZone,
+          scheduleOperationId: `approve-all:${job.id}:${record.id}`,
         });
         if (updated.__already_approved) {
           item.status = "skipped";
@@ -9218,7 +9219,7 @@ export async function factoryDeskRefreshPayload(request, env, authorization, con
 }
 /*__STUDIO_WORKER_END:factoryDeskRefreshPayload__*/
 
-export async function factoryApproveOutput(env, id, actor, note, ctx = null) {
+export async function factoryApproveOutput(env, id, actor, note, ctx = null, scheduleOptions = {}) {
   const existing = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, id);
   const outputStatus = String(f(existing, "Output_Status") || "").trim();
   const reviewStatus = String(f(existing, "Review_Status") || "").trim();
@@ -9245,7 +9246,7 @@ export async function factoryApproveOutput(env, id, actor, note, ctx = null) {
     note || `Factory Desk approve by ${actor || "operator"}`,
     stamp,
     {},
-    { recheckBestSlot: true },
+    { recheckBestSlot: true, ...(scheduleOptions || {}) },
   );
   if (updated.__already_approved) {
     return { id, already_approved: true, message: "Output already approved in another session; no duplicate dispatch." };
@@ -11972,6 +11973,7 @@ export async function scheduleStudioPublishOutput(request, env, url, authorizati
     || Boolean(f(existing, "Published_At"));
   if (published) throw new HttpError(409, "Published outputs cannot be rescheduled");
   const platform = String(f(existing, "Platform") || "").trim();
+  const outputType = String(f(existing, "Studio_Output_Type") || f(existing, "Format") || "").trim();
   const manualScheduleOverride = Boolean(
     payload?.manual_schedule_override === true
     && value
@@ -11991,6 +11993,7 @@ export async function scheduleStudioPublishOutput(request, env, url, authorizati
     const transaction = await runAtomicScheduleTransaction(env, {
       content_profile_id: profile?.id || "",
       platform,
+      output_type: outputType,
       platform_output_record_id: match[1],
       operation_id: "",
     }, {
@@ -12994,7 +12997,17 @@ export async function factoryBatchProcess(env, profileId, requestId, ctx = null)
           throw new HttpError(409, "Output belongs to a different content profile");
         }
         // Canonical single-output approval owns terminal-state idempotence and Do_Not_Publish.
-        return factoryApproveOutput(env, id, "Factory Batch", job.notes || "", ctx);
+        return factoryApproveOutput(
+          env,
+          id,
+          "Factory Batch",
+          job.notes || "",
+          ctx,
+          {
+            scheduleOperationId: `factory-batch:${requestId}:${id}`,
+            factoryBatchId: requestId,
+          },
+        );
       },
     });
     return result;
