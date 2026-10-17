@@ -72,6 +72,35 @@ test("rejects wrong identities, scope drift, and backend count overflow",()=>{
     {...opts,maxTotal:101},
   ]) assert.throws(()=>factoryApprovalGroupPlan(value));
 });
+test("expanded Factory 20-output groups preserve 10-per-profile cap and reject overflow",()=>{
+  const make=(profileId,prefix,count)=>Array.from({length:count},(_,i)=>({
+    id:"rec"+prefix+String(i+1).padStart(4,"0"),
+    profile_id:profileId,platform:"Instagram",format:i%2?"Story":"Reel",
+    output_id:90000+i,
+  }));
+  const chicago=make(chi,"WideChi",10);
+  const newYork=make(nyc,"WideNyc",10);
+  const records=[...chicago,...newYork];
+  const plan=factoryApprovalGroupPlan({
+    requestId:"global_expanded_20_profile_boundary_01",records,maxTotal:20,maxPerProfile:10,
+  });
+  assert.equal(plan.records.length,20);
+  assert.equal(plan.children.length,2);
+  assert.deepEqual(plan.children.map(child=>child.items.length),[10,10]);
+  assert.throws(()=>factoryApprovalGroupPlan({
+    requestId:"global_expanded_20_profile_boundary_02",
+    records:[...records,...make(mia,"WideMia",1)],maxTotal:20,maxPerProfile:10,
+  }),/maximum/);
+  assert.throws(()=>factoryApprovalGroupPlan({
+    requestId:"global_expanded_20_profile_boundary_03",
+    records:[...chicago,...make(chi,"ExtraChi",1),...newYork.slice(0,9)],
+    maxTotal:20,maxPerProfile:10,
+  }),/Profile child batch size/);
+  assert.throws(()=>factoryApprovalGroupPlan({
+    requestId:"global_expanded_20_profile_boundary_04",
+    records,maxTotal:4,maxPerProfile:2,
+  }),/maximum/);
+});
 test("one global submission creates exactly one durable parent and three children",async()=>{
   const bucket=new FakeR2();
   const first=await factoryApprovalGroupEnqueue(bucket,opts);
