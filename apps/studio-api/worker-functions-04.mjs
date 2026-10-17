@@ -1618,6 +1618,23 @@ export async function studioReconcileFacebookReels(env, options = {}) {
 /*__STUDIO_WORKER_END:studioReconcileFacebookReels__*/
 
 
+function studioStoryCompanionPlatformBlockers(platformOccupiedMs, companionIso) {
+  const companionMs = Date.parse(String(companionIso || ""));
+  if (!Number.isFinite(companionMs)) return (platformOccupiedMs || []).filter(Number.isFinite);
+  const mainMs = companionMs - MAE_STORY_COMPANION_OFFSET_MS;
+  let companionMainExempted = false;
+  return (platformOccupiedMs || []).filter((ms) => {
+    if (!Number.isFinite(ms)) return false;
+    if (!companionMainExempted && Math.abs(ms - mainMs) < 60 * 1000) {
+      companionMainExempted = true;
+      return false;
+    }
+    return true;
+  });
+}
+
+/*__STUDIO_WORKER_END:studioStoryCompanionPlatformBlockers__*/
+
 async function studioApproveOutputRecordAtomic(env, record, note, stamp, payload = {}, options = {}) {
   const id = record.id;
   const platform = String(f(record, "Platform") || "").trim();
@@ -1748,9 +1765,15 @@ async function studioApproveOutputRecordAtomic(env, record, note, stamp, payload
         if (maeScheduleConflicts(requestedMs, platformLane)) {
           throw new HttpError(409, "The requested manual schedule conflicts with an existing reservation on this profile/platform");
         }
+      } else if (storyCompanion && requestedRaw && requestedRaw !== "immediate") {
+        const requestedMs = Date.parse(requestedRaw);
+        const companionBlockers = studioStoryCompanionPlatformBlockers(platformLane, requestedRaw);
+        if (!Number.isFinite(requestedMs) || maeScheduleConflicts(requestedMs, companionBlockers)) {
+          requestedRaw = pickLaneIso();
+          storyCompanion = false;
+        }
       } else if (
         !publishNowImmediate
-        && !storyCompanion
         && requestedRaw
         && requestedRaw !== "immediate"
       ) {
