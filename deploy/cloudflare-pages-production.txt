@@ -421,3 +421,4 @@ Deploy Factory large-selection auto-batching 2026-10-17. PR #816. 27+ selected o
 Deploy Factory ambiguous-submit reconciliation 2026-10-17. PR #817. Recover exact durable groups after lost client acknowledgement and reconcile stale local selections.
 
 2026-10-17 Visual-aware voiceover + clip trim editor release. Deploy Studio Pages for PR #810 after green CI; feature remains server-gated to Do_Not_Publish canaries.
+2026-10-17 Factory activity layout Pages-only release | PR #842 merged aef275e74e0ca127ea365df20a7681a03d4d21cb | Recent batches and Recent approvals first row, Quality Agent full-width below with responsive horizontal findings; no Worker rollout.
