@@ -41,8 +41,11 @@ test("desk inventory marks scheduling checks scanned and surfaces runtime findin
   assert.match(functions04, /for \(const finding of scheduleQuality\?\.findings \|\| \[\]\) push\(finding\)/);
 });
 
-test("production deployment provisions Durable Object but forces authority off", () => {
-  assert.match(deploy, /STUDIO_SCHEDULE_RESERVATION_AUTHORITY_ENABLED'\]='false'/);
+test("production deployment provisions Durable Object and activates only with exact confirmed lane", () => {
+  assert.match(deploy, /STUDIO_SCHEDULE_RESERVATION_AUTHORITY_ENABLED'\]='true' if activation else 'false'/);
+  assert.match(deploy, /STUDIO_SCHEDULE_RESERVATION_LANE_ALLOWLIST'\]=activation/);
+  assert.match(deploy, /confirmation!='ACTIVATE-SCHEDULE-LANE'/);
+  assert.match(deploy, /reservation_state!='bootstrapped'/);
   assert.match(deploy, /'name':'STUDIO_SCHEDULE_RESERVATIONS'/);
   assert.match(deploy, /'class_name':'ScheduleReservationLane'/);
   assert.match(deploy, /'storage':'sqlite'/);
