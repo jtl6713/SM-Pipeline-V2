@@ -120,7 +120,7 @@ try{
   assert.equal(await page.locator("[data-factory-select-output]").count(),5,
     "Exactly four Chicago Reels and one Story may expose pilot batch checkboxes");
   const eligibleSelection = await page.locator("[data-factory-select-output]").evaluateAll(
-    inputs => inputs.map(node => node.value));
+    inputs => inputs.map(node => node.getAttribute("data-factory-select-output")));
   assert.ok(eligibleSelection.includes(cards[4].id),
     "The selected Chicago Instagram Story must be available in the v3 pilot");
   assert.ok(!eligibleSelection.includes(cards[5].id),
