@@ -13,6 +13,9 @@
     lastBatchProfile: "",
     batchApprovalsEnabled: null,
     batchRollout: null,
+    reconciledBatchDeskKey: "",
+    reconcilingBatchDesk: false,
+    batchDeskReconcileNextAttempt: 0,
   };
   const FACTORY_SELECTION_KEY = "studio.factory.batch-selection.v1";
   const FACTORY_LAST_BATCH_KEY = "studio.factory.last-batch.v1";
@@ -328,6 +331,35 @@
       : '<p class="subtle">Item detail is not available from this Worker version.</p>';
   }
 
+  // Batch status is independently polled, but the Needs Eyes list is not.
+  // Once the durable batch finishes, fetch an authoritative Desk snapshot so
+  // approved outputs disappear from Needs Eyes without a page reload.
+  async function reconcileFinishedBatchDesk(batch) {
+    if (!batch?.job_id || !["completed", "failed"].includes(batch.status)) return;
+    const confirmed = (Array.isArray(batch.items) ? batch.items : [])
+      .filter((item) => item.status === "approved" || item.status === "already_satisfied")
+      .map((item) => String(item.id || ""));
+    if (!confirmed.length || !state.desk || state.loading || state.reconcilingBatchDesk) return;
+    if (document.hidden || !$("page-factory")?.classList.contains("active")) return;
+    const key = String(batch.job_id);
+    if (state.reconciledBatchDeskKey === key || Date.now() < state.batchDeskReconcileNextAttempt) return;
+    state.reconcilingBatchDesk = true;
+    state.batchDeskReconcileNextAttempt = Date.now() + 10000;
+    try {
+      const desk = await fetchJson("/api/factory/desk", { cache: "no-store" });
+      if (state.batch?.job_id !== key) return;
+      renderDesk(desk);
+      const stillReviewing = new Set((desk.lanes?.needs_eyes || [])
+        .filter((card) => card?.kind === "output").map((card) => String(card.id || "")));
+      // A lagging read copy must not suppress later reconciliation attempts.
+      if (confirmed.every((id) => !stillReviewing.has(id))) state.reconciledBatchDeskKey = key;
+    } catch (error) {
+      setStatus("Batch completed, but Factory list refresh failed. Refresh Factory to reconcile the list.", true);
+    } finally {
+      state.reconcilingBatchDesk = false;
+    }
+  }
+
   async function refreshFactoryBatchActivity() {
     const params = new URLSearchParams();
     const profileId = String($("studioProfileSelect")?.value || state.lastBatchProfile || "").trim();
@@ -342,6 +374,7 @@
         if (state.desk && before !== JSON.stringify(state.batchRollout)) renderDesk(state.desk);
       }
       renderFactoryBatchActivity(batch);
+      reconcileFinishedBatchDesk(batch).catch(() => {});
       return batch;
     } catch (error) {
       const summary = $("factoryBatchSummary");
@@ -407,6 +440,9 @@
       try { localStorage.removeItem(FACTORY_PENDING_REQUEST_KEY); } catch {}
       ready.forEach((card) => state.selectedOutputs.delete(card.id));
       saveFactorySelection();
+      // Repaint row checkboxes immediately; a toolbar count of zero must not
+      // leave an old checked DOM checkbox visible after durable enqueue.
+      if (state.desk) renderDesk(state.desk);
       closeFactoryPreview();
       renderFactoryBatchActivity(batch);
       setStatus(`Batch ${batch.job_id} accepted. You can leave Factory; processing continues on the server.`);
