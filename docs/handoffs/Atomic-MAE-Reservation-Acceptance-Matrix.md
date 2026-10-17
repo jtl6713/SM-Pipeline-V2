@@ -59,3 +59,13 @@ Do not enable `STUDIO_SCHEDULE_RESERVATION_AUTHORITY_ENABLED` until all of the f
 5. Binding/Worker version verification passes.
 6. A controlled synthetic or explicitly authorized canary is executed.
 7. Only after canary evidence confirms sequential reservations and Quality Agent health may the production feature flag be considered for activation.
+
+## Live production-namespace synthetic canary evidence (2026-10-17)
+
+GitHub Actions run: https://github.com/jtl6713/SM-Pipeline-V2/actions/runs/39065990167
+
+Exact tested commit: `62c33d9db89a8c7695e145651083c60ee222173d`.
+
+All six live SQLite checks passed: same-lane contention, unique committed occupancy, prewrite failure, prewrite recovery queue progress, ambiguous quarantine reconciliation, and lease expiry with stale-owner fencing. Sanitized response confirmed `live_namespace=true`, `production_flag_unchanged=true`, `external_write=in_memory_stub_only`, `airtable_writes=0`, and `publishing_calls=0`.
+
+This is not proof of an end-to-end production Airtable scheduling transaction. Before enabling the authority, independently verify temporary canary Worker deletion, current active production Worker version, active flag value, rollback eligibility, and a bounded activation scope. The existing production deploy workflow deliberately enforces the disabled flag.
