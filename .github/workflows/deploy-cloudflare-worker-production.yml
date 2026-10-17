@@ -41,6 +41,7 @@ jobs:
           node --test apps/studio-api/profiles-overview-refresh.test.mjs
           node --test apps/studio-api/profiles-overview-force-refresh-contract.test.mjs
           node --test apps/studio-api/overview-dispatch-counts.test.mjs
+          PYTHONPATH=repair/scripts python -m unittest repair.scripts.studio_api_binding_contract_test
           node --check apps/studio-api/schedule-reservation-authority.mjs
           node --check apps/studio-api/schedule-reservation-transaction.mjs
           node --check apps/studio-api/schedule-reservation-quality.mjs
