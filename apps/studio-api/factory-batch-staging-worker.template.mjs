@@ -128,8 +128,8 @@ export default {
           approvals_enabled:String(env.FACTORY_BATCH_APPROVALS_ENABLED).toLowerCase()==="true",
           airtable_base:BASE,transport:"intercepted"});
       if (url.pathname==="/api/factory/approval-batches") {
-        if (request.method==="GET") return factoryBatchStatusRoute(request,env,null);
-        if (request.method==="POST") return factoryBatchSubmitRoute(request,env,null,ctx);
+        if (request.method==="GET") return await factoryBatchStatusRoute(request,env,null);
+        if (request.method==="POST") return await factoryBatchSubmitRoute(request,env,null,ctx);
       }
       if (url.pathname==="/__staging/cleanup" && request.method==="POST")
         return respond(request,env,await cleanup(request,env));
