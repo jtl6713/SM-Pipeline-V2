@@ -15,3 +15,4 @@
 2026-10-17 final rerun after guarded Python R4/R5 continuation deploy 39052019633.
 2026-10-17 rerun after exact-isolated Worker deploy 39052179547 completed successfully on b69694d106f23fb77c5265dc41650029cd84d504.
 2026-10-17 clean post-deploy canary after exact-target concurrency deploy 39052398811 on 2c7782d4bc77b7c19f2e45e136400812b1c92508.
+2026-10-17 final current-head canary after exact-target R4/R5, authoritative timing bypass, and stale-run cancellation hardening.
