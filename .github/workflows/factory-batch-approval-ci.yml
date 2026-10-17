@@ -46,6 +46,9 @@ jobs:
           manifest=json.loads(Path('deploy/factory-batch-production-rollout.json').read_text())
           original=global_factory_manifest_values(manifest)
           assert assert_global_factory_binding_tuple(original,'signed test') == manifest['global']['stage']
+          legacy={**original,'FACTORY_BATCH_GLOBAL_MODE':'global_ig_reel_story_v1'}
+          assert assert_global_factory_binding_tuple(legacy,'legacy migration source') == manifest['global']['stage']
+          assert original['FACTORY_BATCH_GLOBAL_MODE']=='global_all_platforms_v2'
           for key, value in [
               ('max_total',5),('max_per_profile',3),('mode','invalid'),
               ('production_signoff',''),('stage','unknown')]:
