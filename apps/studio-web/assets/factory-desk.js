@@ -616,11 +616,11 @@
           job_id: batch.job_id, profile_id: "global",
         })); } catch {}
         renderFactoryBatchActivity(batch);
-        setStatus(`Submitted ${acceptedOutputs} of ${ready.length} outputs in ${acceptedBatches} batch${acceptedBatches === 1 ? "" : "es"}. Server processing continues in the background.`);
+        setStatus(`Accepted ${acceptedOutputs} of ${ready.length} outputs in ${acceptedBatches} batch${acceptedBatches === 1 ? "" : "es"}. Server processing continues in the background.`);
       }
       if (state.desk) renderDesk(state.desk);
       closeFactoryPreview();
-      setStatus(`Submitted all ${ready.length} outputs as ${acceptedBatches} durable approval batch${acceptedBatches === 1 ? "" : "es"}. Server processing continues after leaving Factory.`);
+      setStatus(`All ${ready.length} outputs accepted as ${acceptedBatches} durable approval batch${acceptedBatches === 1 ? "" : "es"}. Server processing continues after leaving Factory.`);
       refreshFactoryBatchActivity(true).catch(() => {});
       // Never wait for all approvals in the click handler.
     } catch (error) {
