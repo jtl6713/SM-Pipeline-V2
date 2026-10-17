@@ -2312,6 +2312,24 @@ export default {
     }
   },
   async scheduled(event, env, ctx) {
+    // Dedicated one-minute Factory-only recovery. Do not run the expensive
+    // Studio light/heavy cron sweep for these ticks. Each tick chooses at most
+    // one eligible child per profile, leaving the profile CAS lock intact.
+    if (String(event?.cron || "").trim() === "* * * * *") {
+      ctx.waitUntil((async () => {
+        const cooling = airtableCooldownWaitMs();
+        if (cooling > AIRTABLE_SLOT_FAIL_FAST_MS) {
+          console.warn("Factory one-minute cron deferred during Airtable cooldown", { waitMs: cooling });
+          return;
+        }
+        try {
+          await factoryBatchCronResume(env, ctx);
+        } catch (error) {
+          console.warn("Factory one-minute recovery failed", error);
+        }
+      })());
+      return;
+    }
     // 2026-10-11 burn-kill: light ticks were still running ~25 platform reconciles
     // + heals every 5 minutes, colliding with Studio UI polls and Airtable 429
     // cooldowns (603 Worker hung-cancels in 3h). Light = publish/produce rescue
@@ -2409,11 +2427,8 @@ export default {
       } catch (error) {
         console.warn("schedule reservation Quality Agent sweep failed", error);
       }
-      try {
-        await factoryBatchCronResume(env, ctx);
-      } catch (error) {
-        console.warn("Factory approval batch cron recovery failed", error);
-      }
+      // Factory approval recovery runs on its own one-minute tick above,
+      // avoiding competing per-profile R2 CAS claims from the 5-minute sweep.
       try {
         await studioResumeApproveAllJobs(env, ctx);
       } catch (error) {
