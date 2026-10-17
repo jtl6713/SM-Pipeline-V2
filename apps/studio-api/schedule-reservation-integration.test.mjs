@@ -52,7 +52,8 @@ test("atomic approval persists, re-reads Airtable, verifies exact schedule, then
     "export async function approveOutputRecordForPublishing",
   );
   assert.match(atomic, /runAtomicScheduleTransaction\(env/);
-  assert.match(atomic, /write: async \(plan\) => airtableFetch/);
+  assert.match(atomic, /write: async \(plan, \{ signal \}\) => airtableFetch/);
+  assert.match(atomic, /method: "PATCH",[\s\S]{0,100}signal,/);
   assert.match(atomic, /verify: async \(_updated, plan\) => \{[\s\S]*await airtableFetch/);
   assert.match(atomic, /Airtable stored schedule does not match the reserved MAE slot/);
   assert.match(transaction, /phase = "begin_verify"/);
