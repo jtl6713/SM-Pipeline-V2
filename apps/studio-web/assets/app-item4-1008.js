@@ -272,6 +272,9 @@
   let creativeHandoffPollToken = 0;
   let creativeHandoffStatus = null;
   let creativeTitleLock = null;
+  let creativeVisualTimeline = null;
+  let creativeVisualScript = null;
+  let creativeFeatures = {};
   let creativeEditorDirty = false;
   let creativeSavedFingerprint = "";
   let creativeDirtyTimer = null;
@@ -16566,7 +16569,7 @@ function timedScriptAssetLabel(asset, index) {
     voiceover_voice: "ElevenLabs voice to use when this slide narration is generated or regenerated. Studio saves the underlying voice ID, so names can change without breaking generation.",
     voiceover_voice_preview: "Plays the ElevenLabs sample for this slide selected voice without changing the saved narration.",
     voiceover_volume_override: "Optional narration-volume override for this slide. Leave blank to use the global voiceover volume above. 100% matches the original proven level.",
-    voiceover_text: "The narration script spoken for this slide. Editing the script can require a regenerated voiceover before the next render.",
+    voiceover_text: "The narration script spoken for this slide. When visual-aware narration is enabled, use Regenerate VO script so wording changes are versioned and explicitly accepted.",
     motion_type: "Image movement during this slide, such as a slow zoom or pan.",
     transition_type: "Visual transition from this slide into the next slide.",
     transition_frames: "Length of this slide's transition in frames. At 30 fps, 12 frames is about 0.4 seconds.",
@@ -17373,6 +17376,7 @@ function timedScriptAssetLabel(asset, index) {
     const motions = creativeOptions.motions || [];
     const transitions = creativeOptions.transitions || [];
     const voices = phase6NormalizeVoices(creativeOptions.voices || []);
+    const visualTimelineEnabled = Boolean(creativeFeatures?.visual_timeline_v1);
 
     target.innerHTML = creativeSlides.map((slide, index) => {
       const overlay = slide.overlay || {};
@@ -17385,6 +17389,22 @@ function timedScriptAssetLabel(asset, index) {
       const media = phase6CreativeSlideMedia(slide);
       const preview = String(media.preview_url || "").trim();
       const isVideo = phase6CreativeSlideIsVideo(slide);
+      const voiceoverSilent = visualTimelineEnabled
+        ? String(slide.voiceover_mode || (voiceover.enabled === false ? "silent" : "narrated")).toLowerCase() === "silent"
+        : voiceover.enabled === false;
+      const rawSourceInMs = slide.source_in_ms;
+      const rawSourceOutMs = slide.source_out_ms;
+      const sourceInSeconds = rawSourceInMs !== null && rawSourceInMs !== undefined && rawSourceInMs !== ""
+        ? Math.max(0, Number(rawSourceInMs) / 1000)
+        : 0;
+      const sourceOutSeconds = rawSourceOutMs !== null && rawSourceOutMs !== undefined && rawSourceOutMs !== ""
+        ? Math.max(sourceInSeconds, Number(rawSourceOutMs) / 1000)
+        : sourceInSeconds + Math.max(0.1, Number(slide.duration_seconds || 4));
+      const sourceDurationSeconds = slide.source_duration_ms !== null
+        && slide.source_duration_ms !== undefined
+        && slide.source_duration_ms !== ""
+        ? Math.max(0, Number(slide.source_duration_ms) / 1000)
+        : null;
       const previewCandidates = isVideo ? phase6CreativeSlidePosterCandidates(slide) : [preview].filter(Boolean);
       const poster = previewCandidates[0] || "";
       const stream = isVideo ? phase6CreativeSlideStreamUrl(slide) : "";
@@ -17432,11 +17452,16 @@ function timedScriptAssetLabel(asset, index) {
             <div class="slide-control-section">
               <div class="slide-control-section-title">Timing & framing</div>
               <div class="slide-control-row">
-                <label class="form-field"><span>Duration (sec)</span><input data-field="duration_seconds" type="number" min="0.5" max="60" step="0.1" value="${escapeHtml(slide.duration_seconds ?? 4)}"></label>
+                <label class="form-field"><span>Duration (sec)</span><input data-field="duration_seconds" type="number" min="0.1" max="60" step="0.001" value="${escapeHtml(slide.duration_seconds ?? 4)}" ${visualTimelineEnabled && isVideo ? "readonly" : ""}></label>
                 <label class="form-field"><span>Focal point</span><select data-field="focal_point">${phase6OptionList(focalPoints, slide.focal_point || "center")}</select></label>
                 <label class="form-field"><span>Fit mode</span><select data-field="fit_mode">${phase6OptionList(fits, slide.fit_mode || "fill_crop", { label: phase6FitLabel })}</select></label>
                 <label class="toggle-control"><input data-field="safe_area_aware" type="checkbox" ${slide.safe_area_aware !== false ? "checked" : ""}><span>Show / honor safe area</span></label>
               </div>
+              ${visualTimelineEnabled && isVideo ? `<div class="slide-control-row two">
+                <label class="form-field"><span>Clip source in (sec)</span><input data-field="source_in_seconds" data-trim-touched="false" type="number" min="0" ${sourceDurationSeconds !== null ? `max="${escapeHtml(sourceDurationSeconds)}"` : ""} step="0.001" value="${escapeHtml(sourceInSeconds.toFixed(3))}"></label>
+                <label class="form-field"><span>Clip source out (sec)</span><input data-field="source_out_seconds" data-trim-touched="false" type="number" min="0.1" ${sourceDurationSeconds !== null ? `max="${escapeHtml(sourceDurationSeconds)}"` : ""} step="0.001" value="${escapeHtml(sourceOutSeconds.toFixed(3))}"></label>
+                <div class="form-field"><span>Selected clip range</span><div class="visual-trim-range-summary"><span class="subtle">Duration follows source out − source in.</span><button type="button" class="secondary-button visual-trim-open-button" data-visual-trim-open data-trim-title="${escapeHtml(slide.name || `Clip ${index + 1}`)}" data-trim-stream="${escapeHtml(stream)}" data-trim-poster="${escapeHtml(poster)}" data-trim-source-duration="${sourceDurationSeconds !== null ? escapeHtml(sourceDurationSeconds) : ""}" data-trim-in="${escapeHtml(sourceInSeconds.toFixed(3))}" data-trim-out="${escapeHtml(sourceOutSeconds.toFixed(3))}" data-trim-fps="30">Open trim editor</button></div></div>
+              </div>` : ""}
             </div>
             <div class="slide-control-section">
               <div class="slide-control-section-title">On-photo title ${titleLocked ? "· locked" : `· v${overlayVersion}`}</div>
@@ -17459,12 +17484,14 @@ function timedScriptAssetLabel(asset, index) {
             <div class="slide-control-section">
               <div class="slide-control-section-title">Voiceover</div>
               <div class="slide-control-row">
-                <label class="toggle-control"><input data-field="voiceover_enabled" type="checkbox" ${voiceover.enabled !== false ? "checked" : ""}><span>Voiceover on</span></label>
+                ${visualTimelineEnabled
+                  ? `<label class="toggle-control"><input data-field="voiceover_silent" type="checkbox" ${voiceoverSilent ? "checked" : ""}><span>No voiceover for this scene</span></label>`
+                  : `<label class="toggle-control"><input data-field="voiceover_enabled" type="checkbox" ${voiceover.enabled !== false ? "checked" : ""}><span>Voiceover on</span></label>`}
                 <div class="voice-select-wrap"><label class="form-field"><span>Voice</span><select data-field="voiceover_voice">${phase6VoiceOptionList(voices, voiceover.voice_id || "", voiceover.voice || "Kate")}</select></label><button type="button" class="voice-preview-button" data-field="voiceover_voice_preview">▶ Preview</button></div>
                 <label class="form-field"><span>VO volume override (%)</span><input data-field="voiceover_volume_override" type="number" min="0" max="125" step="1" value="${voiceover.volume_override === null || voiceover.volume_override === undefined ? "" : escapeHtml(phase6FormatPercent(Number(voiceover.volume_override) * 100))}" placeholder="Global ${escapeHtml(phase6FormatPercent(Number(activeCreativeOutput?.voiceover?.volume ?? 1) * 100))}%"></label>
                 <div class="form-field"><span>Current audio</span><div class="subtle">${escapeHtml(audioStatus)}${voiceover.duration_seconds ? ` · ${Number(voiceover.duration_seconds).toFixed(1)}s` : ""} · ${escapeHtml(phase6FormatPercent(Number(voiceover.volume ?? activeCreativeOutput?.voiceover?.volume ?? 1) * 100))}%</div></div>
               </div>
-              <label class="form-field"><span>Narration text</span><textarea class="voiceover-text" data-field="voiceover_text">${escapeHtml(voiceover.text || "")}</textarea></label>
+              <label class="form-field"><span>Narration text</span><textarea class="voiceover-text" data-field="voiceover_text" ${creativeFeatures?.visual_script_v1 ? "readonly" : ""}>${escapeHtml(voiceover.text || "")}</textarea>${creativeFeatures?.visual_script_v1 ? '<span class="subtle">Versioned narration is edited through Regenerate VO script so changes can be compared, locked, accepted, and rolled back.</span>' : ""}</label>
             </div>
             <div class="slide-control-section">
               <div class="slide-control-section-title">Motion & transition</div>
@@ -17528,6 +17555,20 @@ function timedScriptAssetLabel(asset, index) {
       });
       card.querySelector('[data-field="include"]')?.addEventListener("change", (event) => card.classList.toggle("excluded", !event.target.checked));
       card.querySelector('[data-field="safe_area_aware"]')?.addEventListener("change", (event) => card.querySelector(".safe-zone-overlay")?.classList.toggle("on", event.target.checked));
+      if (visualTimelineEnabled) {
+        const sourceIn = card.querySelector('[data-field="source_in_seconds"]');
+        const sourceOut = card.querySelector('[data-field="source_out_seconds"]');
+        const duration = card.querySelector('[data-field="duration_seconds"]');
+        const syncTrimDuration = (event) => {
+          if (event?.currentTarget?.dataset) event.currentTarget.dataset.trimTouched = "true";
+          const start = Number(sourceIn?.value);
+          const end = Number(sourceOut?.value);
+          if (!duration || !Number.isFinite(start) || !Number.isFinite(end) || end <= start) return;
+          duration.value = Math.max(0.1, end - start).toFixed(3);
+        };
+        sourceIn?.addEventListener("input", syncTrimDuration);
+        sourceOut?.addEventListener("input", syncTrimDuration);
+      }
       card.querySelector('[data-field="overlay_style"]')?.addEventListener("change", (event) => {
         if (event.target.value === "No Text") card.querySelector('[data-field="overlay_enabled"]').checked = false;
       });
@@ -17553,14 +17594,50 @@ function timedScriptAssetLabel(asset, index) {
     if (!list) return creativeSlides;
     const byId = new Map(creativeSlides.map((s) => [s.id, s]));
     const collected = [];
+    const visualTimelineEnabled = Boolean(creativeFeatures?.visual_timeline_v1);
     list.querySelectorAll(".creative-slide-card").forEach((card, index) => {
       const base = byId.get(card.dataset.slideId) || { id: card.dataset.slideId };
       const get = (field) => card.querySelector(`[data-field="${field}"]`);
+      const isVideo = phase6CreativeSlideIsVideo(base);
+      const silentControl = get("voiceover_silent");
+      const legacyVoiceControl = get("voiceover_enabled");
+      const voiceEnabled = visualTimelineEnabled && silentControl
+        ? !silentControl.checked
+        : Boolean(legacyVoiceControl?.checked);
+      const sourceInField = get("source_in_seconds");
+      const sourceOutField = get("source_out_seconds");
+      const sourceInSeconds = Number(sourceInField?.value);
+      const sourceOutSeconds = Number(sourceOutField?.value);
+      const validTrim = visualTimelineEnabled
+        && isVideo
+        && Number.isFinite(sourceInSeconds)
+        && Number.isFinite(sourceOutSeconds)
+        && sourceInSeconds >= 0
+        && sourceOutSeconds > sourceInSeconds;
+      const sourceInMs = validTrim ? Math.round(sourceInSeconds * 1000) : (base.source_in_ms ?? null);
+      const sourceOutMs = validTrim ? Math.round(sourceOutSeconds * 1000) : (base.source_out_ms ?? null);
+      const trimTouched = Boolean(
+        sourceInField?.dataset?.trimTouched === "true"
+        || sourceOutField?.dataset?.trimTouched === "true"
+      );
+      const durationSeconds = validTrim
+        ? Number(Math.max(0.1, sourceOutSeconds - sourceInSeconds).toFixed(3))
+        : Number(get("duration_seconds")?.value || 4);
       collected.push({
         ...base,
         order: index + 1,
         include: Boolean(get("include")?.checked),
-        duration_seconds: Number(get("duration_seconds")?.value || 4),
+        ...(visualTimelineEnabled ? {
+          scene_id: base.scene_id || base.id || card.dataset.slideId,
+          voiceover_mode: voiceEnabled ? "narrated" : "silent",
+          narration_locked: Boolean(base.narration_locked),
+          source_in_ms: isVideo ? sourceInMs : null,
+          source_out_ms: isVideo ? sourceOutMs : null,
+          source_duration_ms: isVideo ? (base.source_duration_ms ?? null) : null,
+          trim_user_set: isVideo ? Boolean(base.trim_user_set || trimTouched) : false,
+          native_audio_mode: base.native_audio_mode || "inherit",
+        } : {}),
+        duration_seconds: durationSeconds,
         focal_point: get("focal_point")?.value || "center",
         fit_mode: get("fit_mode")?.value || "fill_crop",
         safe_area_aware: Boolean(get("safe_area_aware")?.checked),
@@ -17579,7 +17656,7 @@ function timedScriptAssetLabel(asset, index) {
         },
         voiceover: {
           ...(base.voiceover || {}),
-          enabled: Boolean(get("voiceover_enabled")?.checked),
+          enabled: voiceEnabled,
           text: get("voiceover_text")?.value || "",
           voice_id: phase6SelectedVoice(get("voiceover_voice")).id || base.voiceover?.voice_id || "",
           voice: phase6SelectedVoice(get("voiceover_voice")).name || base.voiceover?.voice || "Kate",
@@ -17813,10 +17890,129 @@ function timedScriptAssetLabel(asset, index) {
     return parts.join(" • ");
   }
 
+  function creativeVisualScriptSnapshot() {
+    if (activeCreativeOutputId) syncCreativeSlidesFromDom();
+    return {
+      enabled: Boolean(creativeFeatures?.visual_timeline_v1 && creativeFeatures?.visual_script_v1),
+      output_id: activeCreativeOutputId,
+      output: activeCreativeOutput,
+      visual_timeline: creativeVisualTimeline,
+      visual_script: creativeVisualScript,
+      slides: creativeSlides,
+    };
+  }
+
+  async function creativeVisualScriptSyncVisualIfDirty() {
+    if (!creativeEditorDirty || !activeCreativeOutputId || !creativeFeatures?.visual_timeline_v1) return null;
+    const currentSlides = syncCreativeSlidesFromDom();
+    const visualRows = (Array.isArray(currentSlides) ? currentSlides : []).map((slide) => ({
+      id: slide.id,
+      order: slide.order,
+      include: slide.include,
+      scene_id: slide.scene_id,
+      voiceover_mode: slide.voiceover_mode,
+      narration_locked: Boolean(slide.narration_locked),
+      source_in_ms: slide.source_in_ms ?? null,
+      source_out_ms: slide.source_out_ms ?? null,
+      source_duration_ms: slide.source_duration_ms ?? null,
+      trim_user_set: Boolean(slide.trim_user_set),
+      native_audio_mode: slide.native_audio_mode || "inherit",
+      duration_seconds: Number(slide.duration_seconds || 4),
+    }));
+    const result = await api(`/api/outputs/${encodeURIComponent(activeCreativeOutputId)}/creative`, {
+      method: "PATCH",
+      body: JSON.stringify({
+        visual_timeline: {
+          base_revision: creativeVisualTimeline?.revision ?? null,
+          base_sequence_hash: creativeVisualTimeline?.sequence_hash || "",
+        },
+        slides: visualRows,
+      }),
+      timeoutMs: 30000,
+      retries: 1,
+    });
+    if (result?.visual_timeline) creativeVisualTimeline = result.visual_timeline;
+    return result;
+  }
+
+  async function creativeVisualScriptRequest(payload = {}) {
+    if (!activeCreativeOutputId) throw new Error("Open an output before revising narration.");
+    if (!creativeFeatures?.visual_script_v1) throw new Error("Visual-aware narration is not enabled for this environment.");
+    if (String(payload?.visual_script_action || "").toLowerCase() === "propose") {
+      await creativeVisualScriptSyncVisualIfDirty();
+    }
+    const body = {
+      ...payload,
+      visual_script_base: {
+        script_revision: creativeVisualScript?.revision ?? null,
+        script_hash: creativeVisualScript?.script_hash || "",
+        visual_revision: creativeVisualTimeline?.revision ?? null,
+        visual_sequence_hash: creativeVisualTimeline?.sequence_hash || "",
+      },
+    };
+    const result = await api(`/api/outputs/${encodeURIComponent(activeCreativeOutputId)}/creative`, {
+      method: "PATCH",
+      body: JSON.stringify(body),
+      timeoutMs: payload?.visual_script_action === "propose" ? 60000 : 30000,
+      retries: 1,
+    });
+    if (result?.visual_script_action === "accepted") {
+      const refreshed = await api(`/api/outputs/${encodeURIComponent(activeCreativeOutputId)}/creative`);
+      populateCreativeEditor(refreshed);
+      return { ...result, refreshed };
+    }
+    return result;
+  }
+
+  window.StudioVisualScriptBridge = {
+    snapshot: creativeVisualScriptSnapshot,
+    request: creativeVisualScriptRequest,
+  };
+
   function populateCreativeEditor(data) {
     activeCreativeOutput = data.output || null;
     creativeSlides = Array.isArray(data.slides) ? data.slides : [];
     creativeOptions = data.options || {};
+    creativeFeatures = data.features || creativeFeatures || {};
+    creativeVisualTimeline = data.visual_timeline
+      || data.output?.creative_settings?.visual_timeline
+      || creativeVisualTimeline
+      || null;
+    creativeVisualScript = data.visual_script
+      || data.output?.creative_settings?.visual_script
+      || creativeVisualScript
+      || null;
+    if (creativeFeatures?.visual_timeline_v1 && Array.isArray(creativeVisualTimeline?.scenes)) {
+      const scenesById = new Map(
+        creativeVisualTimeline.scenes
+          .map((scene) => [String(scene?.scene_id || "").trim(), scene])
+          .filter(([id]) => Boolean(id))
+      );
+      creativeSlides = creativeSlides.map((slide, index) => {
+        const sceneId = String(slide?.scene_id || slide?.id || "").trim();
+        const scene = scenesById.get(sceneId) || creativeVisualTimeline.scenes[index] || null;
+        if (!scene) return slide;
+        const durationMs = Number(scene.duration_ms);
+        return {
+          ...slide,
+          scene_id: scene.scene_id || sceneId || slide.id,
+          voiceover_mode: scene.voiceover_mode || (slide.voiceover?.enabled === false ? "silent" : "narrated"),
+          narration_locked: Boolean(scene.narration_locked),
+          source_in_ms: scene.source_in_ms ?? slide.source_in_ms ?? null,
+          source_out_ms: scene.source_out_ms ?? slide.source_out_ms ?? null,
+          source_duration_ms: scene.source_duration_ms ?? slide.source_duration_ms ?? null,
+          trim_user_set: Boolean(scene.trim_user_set),
+          native_audio_mode: scene.native_audio_mode || slide.native_audio_mode || "inherit",
+          duration_seconds: Number.isFinite(durationMs) && durationMs > 0
+            ? durationMs / 1000
+            : Number(slide.duration_seconds || 4),
+          voiceover: {
+            ...(slide.voiceover || {}),
+            enabled: String(scene.voiceover_mode || "").toLowerCase() !== "silent",
+          },
+        };
+      });
+    }
     creativeTitleLock = data.title_lock || data.output?.creative_settings?.title_lock || null;
     const output = activeCreativeOutput || {};
     const titleLocked = Boolean(creativeTitleLock?.locked);
@@ -17877,7 +18073,9 @@ function timedScriptAssetLabel(asset, index) {
     const watchOnly = !output.do_not_publish;
     $("saveCreativeEditor").disabled = watchOnly;
     if ($("creativeRequestChanges")) {
-      $("creativeRequestChanges").textContent = watchOnly ? "Apply mix & rerender" : "Save & rerender preview";
+      $("creativeRequestChanges").textContent = watchOnly
+        ? (creativeFeatures?.visual_timeline_v1 ? "Apply visual/audio changes & rerender" : "Apply mix & rerender")
+        : "Save & rerender preview";
       $("creativeRequestChanges").disabled = watchOnly ? creativeMixInProgress(data.handoff || creativeHandoffStatus, output) : false;
     }
     if ($("creativeAudioHelp")) {
@@ -17898,12 +18096,16 @@ function timedScriptAssetLabel(asset, index) {
       $("creativeUnlockTitles").hidden = !titleLocked;
       $("creativeUnlockTitles").disabled = !output.do_not_publish || !titleLocked;
     }
+    window.StudioVisualScriptEditor?.syncAvailability?.();
     requestAnimationFrame(() => phase6MarkSaved());
   }
 
   async function openCreativeEditor(recordId) {
     if (activeCreativeOutputId && activeCreativeOutputId !== recordId && !phase6ConfirmDiscardUnsaved("open another output")) return;
-    if (activeCreativeOutputId !== recordId) creativeSlideCollapsed.clear();
+    if (activeCreativeOutputId !== recordId) {
+      creativeSlideCollapsed.clear();
+      creativeVisualScript = null;
+    }
     activeCreativeOutputId = recordId;
     $("creativeEditorPanel").hidden = false;
     window.scrollTo(0, 0);
@@ -17936,6 +18138,16 @@ function timedScriptAssetLabel(asset, index) {
       id: slide.id,
       order: index + 1,
       include: slide.include !== false,
+      ...(creativeFeatures?.visual_timeline_v1 ? {
+        scene_id: slide.scene_id || slide.id,
+        voiceover_mode: slide.voiceover_mode || (slide.voiceover?.enabled === false ? "silent" : "narrated"),
+        narration_locked: Boolean(slide.narration_locked),
+        source_in_ms: slide.source_in_ms ?? null,
+        source_out_ms: slide.source_out_ms ?? null,
+        source_duration_ms: slide.source_duration_ms ?? null,
+        trim_user_set: Boolean(slide.trim_user_set),
+        native_audio_mode: slide.native_audio_mode || "inherit",
+      } : {}),
       duration_seconds: Number(slide.duration_seconds || 4),
       focal_point: slide.focal_point || "center",
       fit_mode: slide.fit_mode || "fill_crop",
@@ -17969,6 +18181,12 @@ function timedScriptAssetLabel(asset, index) {
     if (duckingEnabled && duckedPct > normalPct) throw new Error("Music during narration cannot be louder than normal music while ducking is enabled.");
 
     return {
+      ...(creativeFeatures?.visual_timeline_v1 ? {
+        visual_timeline: {
+          base_revision: creativeVisualTimeline?.revision ?? null,
+          base_sequence_hash: creativeVisualTimeline?.sequence_hash || "",
+        },
+      } : {}),
       audio: {
         voiceover_volume: Math.max(0, Math.min(125, phase6NumberFromInput("creativeVoiceoverVolume", 100))) / 100,
         normal_volume: normalPct / 100,
@@ -18006,9 +18224,20 @@ function timedScriptAssetLabel(asset, index) {
       });
       activeCreativeOutput = result.record || activeCreativeOutput;
       creativeSlides = Array.isArray(result.slides) ? result.slides : creativeSlides;
+      if (result.visual_timeline) creativeVisualTimeline = result.visual_timeline;
+      if (result.visual_script) creativeVisualScript = result.visual_script;
+      if (result.features) creativeFeatures = result.features;
       if (result.title_lock) creativeTitleLock = result.title_lock;
       if (!quiet) {
-        populateCreativeEditor({ output: activeCreativeOutput, slides: creativeSlides, options: creativeOptions, handoff: creativeHandoffStatus });
+        populateCreativeEditor({
+          output: activeCreativeOutput,
+          slides: creativeSlides,
+          options: creativeOptions,
+          handoff: creativeHandoffStatus,
+          visual_timeline: creativeVisualTimeline,
+          visual_script: creativeVisualScript,
+          features: creativeFeatures,
+        });
         phase6Message("Draft saved. The rendered preview is unchanged until you choose Save & rerender preview.", "success");
         refreshCreativeChangeProgress().catch(() => {});
       } else {
@@ -25596,6 +25825,9 @@ function timedScriptAssetLabel(asset, index) {
     activeCreativeOutputId = null;
     activeCreativeOutput = null;
     creativeSlides = [];
+    creativeVisualTimeline = null;
+    creativeVisualScript = null;
+    creativeFeatures = {};
     creativeEditorDirty = false;
     creativeSavedFingerprint = "";
     const video = $("creativeRenderPreview");

@@ -1,6 +1,13 @@
 from r4.constants import R4_CLEAR_FIELDS
 from r4.formulas import r4_exact_output_formula, r4_production_formula
-from r4.processor import _eligible_exact_output, repair_studio_stream_render_sources, render_watermark_url
+from r4.processor import (
+    _eligible_exact_output,
+    repair_studio_stream_render_sources,
+    render_snapshot_error,
+    render_snapshot_identity,
+    render_watermark_url,
+    stale_r4_launch_cleanup_fields,
+)
 from r4.render_request import brand_text, choose_render_request, expected_clip_count, voiceover_is_required
 
 
@@ -271,3 +278,110 @@ def test_r4_repairs_studio_relative_stream_url_before_remotion():
     assert clips[0]["googleDriveFileId"] == "drive123"
     assert clips[1]["url"].startswith("https://media.chicagoshining.com/")
     assert client.updates
+
+
+def test_r4_p020_carries_studio_revision_contract_to_remotion_props():
+    import json
+
+    contract = {
+        "visualRevision": 4,
+        "visualSequenceHash": "vt1-current",
+        "scriptRevision": 9,
+        "scriptHash": "vs1-current",
+    }
+    output = _photo_output(
+        Creative_Render_Manifest_JSON=json.dumps({"studioRevision": contract}),
+    )
+    route, payload = choose_render_request(output, None, default_music=0.35, default_voice=1.0)
+    assert route == "p020_manifest"
+    assert payload["studioRevision"] == contract
+
+
+def test_r4_scene_authority_suppresses_legacy_global_voiceover_even_when_url_exists():
+    import json
+
+    contract = {
+        "visualRevision": 4,
+        "visualSequenceHash": "vt1-silent",
+        "scriptRevision": 9,
+        "scriptHash": "vs1-silent",
+    }
+    output = _photo_output(
+        Voiceover_URL="https://example.com/legacy-global.mp3",
+        Creative_Render_Manifest_JSON=json.dumps({
+            "sceneVoiceoverAuthority": True,
+            "studioRevision": contract,
+        }),
+    )
+    route, payload = choose_render_request(output, None, default_music=0.35, default_voice=1.0)
+    assert route == "p020_manifest"
+    assert payload["sceneVoiceoverAuthority"] is True
+    assert "voiceoverUrl" not in payload
+    assert "voiceover" not in payload
+
+
+
+def test_r4_immutable_snapshot_rejects_revision_or_package_change():
+    import json
+
+    contract = {
+        "visualRevision": 4,
+        "visualSequenceHash": "vt1-current",
+        "scriptRevision": 9,
+        "scriptHash": "vs1-current",
+    }
+    settings = {
+        "visual_timeline": {"revision": 4, "sequence_hash": "vt1-current"},
+        "visual_script": {"revision": 9, "script_hash": "vs1-current"},
+    }
+    output = _photo_output(
+        Creative_Render_Manifest_JSON=json.dumps({"studioRevision": contract}),
+        Studio_Creative_Settings_JSON=json.dumps(settings),
+        Render_Clip_List_JSON='[{"sceneId":"scene-a","sourceInMs":1000,"sourceOutMs":4000}]',
+    )
+    snapshot = render_snapshot_identity(output)
+    assert render_snapshot_error(snapshot, contract, output) is None
+
+    newer_script = _photo_output(**output["fields"])
+    newer_settings = json.loads(newer_script["fields"]["Studio_Creative_Settings_JSON"])
+    newer_settings["visual_script"] = {"revision": 10, "script_hash": "vs1-new"}
+    newer_script["fields"]["Studio_Creative_Settings_JSON"] = json.dumps(newer_settings)
+    assert "stale" in render_snapshot_error(snapshot, contract, newer_script).lower()
+
+    changed_package = _photo_output(**output["fields"])
+    changed_package["fields"]["Render_Clip_List_JSON"] = (
+        '[{"sceneId":"scene-a","sourceInMs":1250,"sourceOutMs":4250}]'
+    )
+    error = render_snapshot_error(snapshot, contract, changed_package)
+    assert error
+    assert "render package changed" in error.lower()
+
+
+def test_r4_post_write_compensation_clears_only_its_own_job():
+    current = _photo_output(
+        Remotion_Job_ID="job-old",
+        Remotion_Status_URL="https://render/status/job-old",
+        Remotion_Props_JSON='{"studioRevision":{"visualRevision":1}}',
+        Render_Server_URL="https://render/job-old",
+        Render_Status="Rendering",
+    )
+    cleanup = stale_r4_launch_cleanup_fields(
+        current,
+        launched_job_id="job-old",
+        error="stale render snapshot",
+    )
+    assert cleanup["Remotion_Job_ID"] == ""
+    assert cleanup["Remotion_Status_URL"] == ""
+    assert cleanup["Remotion_Props_JSON"] == ""
+    assert cleanup["Render_Status"] == "Ready for Render"
+
+    newer = _photo_output(
+        Remotion_Job_ID="job-new",
+        Remotion_Status_URL="https://render/status/job-new",
+        Render_Status="Rendering",
+    )
+    assert stale_r4_launch_cleanup_fields(
+        newer,
+        launched_job_id="job-old",
+        error="stale render snapshot",
+    ) == {}

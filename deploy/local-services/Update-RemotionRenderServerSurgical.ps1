@@ -36,7 +36,7 @@ Write-Host "  $src"
 Write-Host "  -> $dst"
 Copy-Item -Force $src $dst
 
-$expected = "2026-10-11-force-release-slots"
+$expected = "2026-10-17-visual-voiceover-timeline"
 if (-not (Select-String -Path $dst -SimpleMatch $expected -Quiet)) {
     throw "Copied render-server.js does not contain SERVICE_VERSION $expected"
 }

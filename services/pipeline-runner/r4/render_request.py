@@ -208,7 +208,9 @@ def build_p020_request(
     cover = _cover_url(output)
     total_frames = int(_num(field(output, "Render_Total_Frames"), 0))
     clips = _clip_list_json(output)
-    return {
+    manifest = parse_json_field(field(output, "Creative_Render_Manifest_JSON"))
+    studio_revision = manifest.get("studioRevision") if isinstance(manifest, dict) else None
+    payload = {
         "filename": field_str(output, "Output_Filename"),
         "compositionId": field_str(output, "Composition_ID"),
         "titleText": field_str(output, "Title_Text"),
@@ -238,6 +240,11 @@ def build_p020_request(
             "loop": True,
         }, output),
     }
+    if isinstance(studio_revision, dict):
+        payload["studioRevision"] = dict(studio_revision)
+    if isinstance(manifest, dict) and manifest.get("sceneVoiceoverAuthority") is True:
+        payload["sceneVoiceoverAuthority"] = True
+    return payload
 
 
 def build_voiceover_request(
@@ -356,7 +363,7 @@ def choose_render_request(
     vo = "" if voiceover_is_disabled(output, content_item) else voiceover_url(output, content_item)
     if field_str(output, "Creative_Render_Manifest_JSON"):
         payload = build_p020_request(output, content_item, default_music=default_music)
-        if vo:
+        if vo and payload.get("sceneVoiceoverAuthority") is not True:
             attach_voiceover(
                 payload,
                 output,

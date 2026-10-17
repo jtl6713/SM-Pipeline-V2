@@ -1,0 +1,408 @@
+name: Visual Voiceover Production Canary
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'deploy/visual-voiceover-production-canary.txt'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: visual-voiceover-production-canary
+  cancel-in-progress: false
+
+jobs:
+  canary:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      TARGET_WORKER: chicagoshining-studio-api
+      BRIDGE_WORKER: chicagoshining-visual-voiceover-canary
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Build one-time guarded Studio service bridge
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "${CLOUDFLARE_API_TOKEN:-}"
+          test -n "${CLOUDFLARE_ACCOUNT_ID:-}"
+          TOKEN=$(python - <<'PY'
+          import secrets
+          print(secrets.token_urlsafe(36))
+          PY
+          )
+          printf '%s' "$TOKEN" >/tmp/token
+          cat >/tmp/worker.js <<'EOF'
+          export default {
+            async fetch(request, env) {
+              const outer = new URL(request.url);
+              if (outer.pathname !== ROUTE) return new Response("Not found", {status:404});
+              if (request.method !== "POST") return new Response("Method not allowed", {status:405});
+              let spec = {};
+              try { spec = await request.json(); } catch { return Response.json({ok:false,error:"invalid-json"},{status:400}); }
+              const method = String(spec.method || "GET").toUpperCase();
+              const path = String(spec.path || "");
+              const allowed =
+                path === "/api/health" ||
+                path === "/api/admin/visual-voiceover-canary" ||
+                /^\/api\/outputs\/rec[A-Za-z0-9]+\/creative$/.test(path) ||
+                /^\/api\/outputs\/rec[A-Za-z0-9]+\/creative\/review$/.test(path) ||
+                /^\/api\/outputs\/rec[A-Za-z0-9]+\/creative\/render\/continue$/.test(path) ||
+                /^\/api\/outputs\/rec[A-Za-z0-9]+\/creative\/handoff\/status$/.test(path);
+              if (!allowed) return Response.json({ok:false,error:"path-not-allowed",path},{status:400});
+              if (!["GET","PATCH","POST"].includes(method)) return Response.json({ok:false,error:"method-not-allowed"},{status:405});
+              const headers = new Headers({
+                "Cf-Access-Authenticated-User-Email":"joseph.t.logan@gmail.com",
+                "Origin":"https://studio.chicagoshining.com",
+                "Accept":"application/json",
+                "Cache-Control":"no-store"
+              });
+              let body;
+              if (method !== "GET") {
+                headers.set("Content-Type","application/json");
+                body = JSON.stringify(spec.body ?? {});
+              }
+              const response = await env.STUDIO_API.fetch(new Request("https://studio.chicagoshining.com" + path, {
+                method, headers, body
+              }));
+              const text = await response.text();
+              let parsed;
+              try { parsed = text ? JSON.parse(text) : null; } catch { parsed = {raw:text.slice(0,20000)}; }
+              return Response.json({
+                ok: response.ok,
+                status: response.status,
+                path,
+                method,
+                body: parsed
+              }, {headers:{"Cache-Control":"no-store"}});
+            }
+          };
+          EOF
+          python - <<'PY'
+          from pathlib import Path
+          token=Path('/tmp/token').read_text().strip()
+          p=Path('/tmp/worker.js')
+          p.write_text(p.read_text().replace('ROUTE', repr('/'+token).replace("'", '"')))
+          PY
+          node --check /tmp/worker.js
+          printf '%s' '{"main_module":"worker.js","compatibility_date":"2026-08-02","bindings":[{"type":"service","name":"STUDIO_API","service":"chicagoshining-studio-api"}]}' >/tmp/meta.json
+          API_ROOT="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID"
+          AUTH="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
+          curl -sS -X DELETE "$API_ROOT/workers/scripts/$BRIDGE_WORKER" -H "$AUTH" >/dev/null || true
+          code=$(curl -sS -o /tmp/upload.json -w '%{http_code}' -X PUT "$API_ROOT/workers/scripts/$BRIDGE_WORKER/content" -H "$AUTH" \
+            -F 'metadata=@/tmp/meta.json;type=application/json' \
+            -F 'worker.js=@/tmp/worker.js;type=application/javascript+module;filename=worker.js')
+          test "$code" -ge 200 -a "$code" -lt 300
+          jq -e '.success==true' /tmp/upload.json >/dev/null
+          curl -fsS -X POST "$API_ROOT/workers/scripts/$BRIDGE_WORKER/subdomain" -H "$AUTH" -H 'Content-Type: application/json' \
+            --data '{"enabled":true,"previews_enabled":false}' >/tmp/sub.json
+          jq -e '.success==true and .result.enabled==true' /tmp/sub.json >/dev/null
+          curl -fsS "$API_ROOT/workers/subdomain" -H "$AUTH" -o /tmp/account-sub.json
+          SUBDOMAIN=$(jq -er '.result.subdomain' /tmp/account-sub.json)
+          echo "BRIDGE_URL=https://$BRIDGE_WORKER.$SUBDOMAIN.workers.dev/$(cat /tmp/token)" >> "$GITHUB_ENV"
+
+      - name: Wait for bridge readiness
+        shell: bash
+        run: |
+          set -euo pipefail
+          code=000
+          for i in $(seq 1 40); do
+            code=$(curl -sS --max-time 30 -o /tmp/probe.json -w '%{http_code}' \
+              -H 'Content-Type: application/json' \
+              -d '{"method":"GET","path":"/api/outputs/recINVALID/creative"}' "$BRIDGE_URL" || true)
+            if grep -Fq 'error code: 1042' /tmp/probe.json 2>/dev/null; then
+              sleep 3
+              continue
+            fi
+            [[ "$code" == "200" ]] && break
+            sleep 3
+          done
+          test "$code" = "200"
+
+      - name: Wait for production Worker runner and Remotion release
+        shell: bash
+        run: |
+          set -euo pipefail
+          worker_ok=false
+          runner_ok=false
+          remotion_ok=false
+          for i in $(seq 1 180); do
+            wcode=$(curl -sS --max-time 20 -o /tmp/worker-health.json -w '%{http_code}' \
+              -H 'Content-Type: application/json' \
+              -d '{"method":"GET","path":"/api/health"}' "$BRIDGE_URL" || true)
+            if [[ "$wcode" == "200" ]] && jq -e '.ok==true and .body.ok==true and .body.studio_visual_voiceover_canary_v1==true' /tmp/worker-health.json >/dev/null 2>&1; then
+              worker_ok=true
+            fi
+
+            rcode=$(curl -sS --max-time 20 -o /tmp/runner-health.json -w '%{http_code}' 'https://pipeline.chicagoshining.com/health' || true)
+            if [[ "$rcode" == "200" ]] && jq -e '.ok==true and .version=="2026-10-17-visual-voiceover-revision-guard"' /tmp/runner-health.json >/dev/null 2>&1; then
+              runner_ok=true
+            fi
+
+            mcode=$(curl -sS --max-time 20 -o /tmp/remotion-health.json -w '%{http_code}' 'https://render.chicagoshining.com/health' || true)
+            if [[ "$mcode" == "200" ]] && jq -e '.ok==true and .version=="2026-10-17-visual-voiceover-timeline"' /tmp/remotion-health.json >/dev/null 2>&1; then
+              remotion_ok=true
+            fi
+
+            echo "release_wait attempt=$i worker=$worker_ok runner=$runner_ok remotion=$remotion_ok"
+            if [[ "$worker_ok" == "true" && "$runner_ok" == "true" && "$remotion_ok" == "true" ]]; then
+              echo "visual_voiceover_release_components=PASS"
+              break
+            fi
+            sleep 5
+          done
+          [[ "$worker_ok" == "true" && "$runner_ok" == "true" && "$remotion_ok" == "true" ]]
+
+      - name: Prepare nonpublishing canary output
+        shell: bash
+        run: |
+          set -euo pipefail
+          node <<'NODE'
+          const fs = require("fs");
+          async function call(method,path,body){
+            const r=await fetch(process.env.BRIDGE_URL,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({method,path,body})});
+            const w=await r.json();
+            if(!r.ok || !w.ok) throw new Error(`bridge ${method} ${path} failed: ${JSON.stringify(w).slice(0,2000)}`);
+            return w.body;
+          }
+          const prep=await call("POST","/api/admin/visual-voiceover-canary",{action:"prepare",confirm:"prepare-nonpublishing-canary"});
+          const rollout=JSON.parse(fs.readFileSync("deploy/visual-voiceover-production-rollout.json","utf8"));
+          const expectedIds=Array.isArray(rollout?.canary_output_ids)?rollout.canary_output_ids.filter(Boolean):[];
+          if(expectedIds.length!==1) throw new Error(`expected exactly one production canary id, found ${expectedIds.length}`);
+          if(prep?.record_id!==expectedIds[0]) throw new Error(`prepared canary ${prep?.record_id||""} does not match rollout allowlist ${expectedIds[0]}`);
+          if(!prep?.prepared || !prep?.record_id || prep?.do_not_publish!==true) throw new Error("canary was not prepared safely");
+          if(prep?.safety?.auto_publish_enabled!==false) throw new Error("canary auto publishing is not disabled");
+          if(prep?.safety?.published_at || prep?.safety?.platform_post_id || prep?.safety?.platform_post_url) throw new Error("canary seed is already published");
+          fs.writeFileSync("/tmp/canary-prep.json",JSON.stringify(prep,null,2));
+          fs.appendFileSync(process.env.GITHUB_ENV,`CANARY_ID=${prep.record_id}\nVIDEO_SCENE_ID=${prep.video_scene_id||""}\n`);
+          console.log(`canary_prepared=PASS record=${prep.record_id} output=${prep.output_id||""} test_run=${prep.test_run_id||""}`);
+          NODE
+
+      - name: Generate baseline TTS and capture reusable scene audio
+        shell: bash
+        run: |
+          set -euo pipefail
+          node <<'NODE'
+          const fs=require("fs");
+          async function call(method,path,body){
+            const r=await fetch(process.env.BRIDGE_URL,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({method,path,body})});
+            const w=await r.json();
+            if(!r.ok || !w.ok) throw new Error(`bridge ${method} ${path} failed: ${JSON.stringify(w).slice(0,3000)}`);
+            return w.body;
+          }
+          const id=process.env.CANARY_ID;
+          let review=null;
+          for(let i=1;i<=6;i++){
+            review=await call("POST",`/api/outputs/${id}/creative/review`,{
+              action:"changes_requested",
+              notes:"Visual-aware voiceover canary baseline TTS only. Do not publish."
+            });
+            console.log(`baseline_voice_prep attempt=${i} pending=${Boolean(review?.voice_prep_pending)} state=${review?.handoff_state||""}`);
+            if(review?.voice_prep_failed) throw new Error(`baseline voice prep failed: ${JSON.stringify(review).slice(0,2500)}`);
+            if(!review?.voice_prep_pending) break;
+            await new Promise(r=>setTimeout(r,2500));
+          }
+          if(review?.voice_prep_pending) throw new Error("baseline voice prep did not complete");
+          const creative=await call("GET",`/api/outputs/${id}/creative`);
+          const baseline=(creative?.slides||[])
+            .filter(slide=>slide?.voiceover?.enabled!==false && slide?.voiceover?.url)
+            .map(slide=>({
+              id:String(slide.id||slide.scene_id||""),
+              url:String(slide.voiceover.url||""),
+              status:String(slide.voiceover.status||""),
+              text:String(slide.voiceover.text||"")
+            }))
+            .filter(row=>row.id&&row.url);
+          if(baseline.length<2) throw new Error(`expected at least two generated baseline scene voiceovers, found ${baseline.length}`);
+          fs.writeFileSync("/tmp/canary-baseline-audio.json",JSON.stringify({record_id:id,slides:baseline},null,2));
+          console.log(`baseline_scene_tts=PASS generated=${baseline.length}`);
+          NODE
+
+      - name: Trim video and accept visual-aware narration
+        shell: bash
+        run: |
+          set -euo pipefail
+          node <<'NODE'
+          const fs=require("fs");
+          async function call(method,path,body){
+            const r=await fetch(process.env.BRIDGE_URL,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({method,path,body})});
+            const w=await r.json();
+            if(!r.ok || !w.ok) throw new Error(`bridge ${method} ${path} failed: ${JSON.stringify(w).slice(0,3000)}`);
+            return w.body;
+          }
+          const id=process.env.CANARY_ID;
+          let creative=await call("GET",`/api/outputs/${id}/creative`);
+          if(creative?.features?.visual_timeline_v1!==true || creative?.features?.visual_script_v1!==true) throw new Error("visual feature flags are not active on canary");
+          if(creative?.safety?.do_not_publish!==true) throw new Error("creative canary lost Do_Not_Publish");
+
+          const timeline=creative.visual_timeline;
+          const scenes=JSON.parse(JSON.stringify(timeline?.scenes||[]));
+          let video=scenes.find(s=>String(s.scene_id||s.id||"")===String(process.env.VIDEO_SCENE_ID||""));
+          if(!video) video=scenes.find(s=>/video|mp4|mov|m4v|webm/i.test(String(s.media_type||s.url||"")));
+          if(!video) throw new Error("no video scene found");
+          const sourceMs=Number(video.source_duration_ms||0);
+          const durationMs=Number(video.duration_ms||0);
+          if(!(sourceMs>durationMs+250 && durationMs>=2000)) throw new Error(`video is not safely trimmable source=${sourceMs} duration=${durationMs}`);
+          const oldStart=Number(video.source_in_ms||0);
+          const maxStart=Math.max(0,sourceMs-durationMs);
+          let newStart=Math.min(maxStart,oldStart+250);
+          if(newStart===oldStart) newStart=Math.max(0,oldStart-250);
+          video.source_in_ms=Math.round(newStart);
+          video.source_out_ms=Math.round(newStart+durationMs);
+          video.trim_user_set=true;
+          video.native_audio_mode="mute";
+          video.voiceover_mode="narrated";
+          const silent=scenes.find(s=>s!==video && s.include!==false);
+          if(silent) silent.voiceover_mode="silent";
+
+          const saved=await call("PATCH",`/api/outputs/${id}/creative`,{
+            visual_timeline:{
+              base_revision:timeline.revision,
+              base_sequence_hash:timeline.sequence_hash,
+              scenes
+            }
+          });
+          if(saved?.visual_timeline_saved!==true) throw new Error("visual timeline save did not persist");
+
+          creative=await call("GET",`/api/outputs/${id}/creative`);
+          const nextTimeline=creative.visual_timeline;
+          const script=creative.visual_script;
+          const target=(script?.scenes||[]).find(s=>String(s.scene_id||"")===String(video.scene_id||video.id||""))
+            || (script?.scenes||[]).find(s=>s.voiceover_mode!=="silent" && Number(s.duration_ms||0)>=2000);
+          if(!target) throw new Error("no narrated target scene available");
+
+          const base={
+            visual_revision:nextTimeline.revision,
+            visual_sequence_hash:nextTimeline.sequence_hash,
+            script_revision:script.revision,
+            script_hash:script.script_hash
+          };
+          const proposed=await call("PATCH",`/api/outputs/${id}/creative`,{
+            visual_script_action:"propose",
+            visual_script_mode:"selected",
+            selected_scene_ids:[target.scene_id],
+            visual_script_base:base
+          });
+          const proposal=proposed?.proposal;
+          if(!proposal?.scenes) throw new Error("visual narration proposal missing");
+          const proposedTarget=proposal.scenes.find(s=>s.scene_id===target.scene_id);
+          if(!proposedTarget) throw new Error("selected narration proposal scene missing");
+          proposedTarget.proposed_text=`Canary voice timing ${process.env.GITHUB_RUN_ID||Date.now()}.`;
+          proposedTarget.changed=String(proposedTarget.current_text||"").trim()!==proposedTarget.proposed_text;
+
+          const accepted=await call("PATCH",`/api/outputs/${id}/creative`,{
+            visual_script_action:"accept",
+            visual_script_base:base,
+            visual_script_proposal:proposal
+          });
+          if(accepted?.visual_script_action!=="accepted") throw new Error("narration proposal was not accepted");
+          if(!(accepted?.tts_invalidated_scene_ids||[]).includes(target.scene_id)) throw new Error("changed narration did not invalidate scene TTS");
+
+          const afterAccept=await call("GET",`/api/outputs/${id}/creative`);
+          const baseline=JSON.parse(fs.readFileSync("/tmp/canary-baseline-audio.json","utf8")).slides||[];
+          const currentSlides=new Map((afterAccept?.slides||[]).map(slide=>[String(slide.id||slide.scene_id||""),slide]));
+          const invalidated=new Set(accepted?.tts_invalidated_scene_ids||[]);
+          const changedSlide=currentSlides.get(String(target.scene_id));
+          if(changedSlide?.voiceover?.url) throw new Error("changed scene retained stale TTS URL after narration acceptance");
+          const silentIds=new Set((accepted?.visual_script?.scenes||[]).filter(scene=>scene.voiceover_mode==="silent").map(scene=>String(scene.scene_id||"")));
+          const reusable=baseline.filter(row=>!invalidated.has(row.id)&&!silentIds.has(row.id));
+          if(!reusable.length) throw new Error("no unchanged narrated baseline scene remained available for TTS reuse verification");
+          for(const row of reusable){
+            const slide=currentSlides.get(row.id);
+            if(!slide?.voiceover?.url || String(slide.voiceover.url)!==row.url){
+              throw new Error(`unchanged scene ${row.id} did not retain its baseline TTS URL`);
+            }
+          }
+          fs.writeFileSync("/tmp/canary-reuse.json",JSON.stringify({reused_scene_ids:reusable.map(row=>row.id),invalidated_scene_ids:[...invalidated],silent_scene_ids:[...silentIds]},null,2));
+          console.log(`selective_tts_reuse=PASS reused=${reusable.length} invalidated=${invalidated.size}`);
+
+          fs.writeFileSync("/tmp/canary-edit.json",JSON.stringify({
+            record_id:id,
+            video_scene_id:video.scene_id||video.id,
+            source_in_ms:video.source_in_ms,
+            source_out_ms:video.source_out_ms,
+            visual_revision:accepted.visual_timeline?.revision||nextTimeline.revision,
+            visual_sequence_hash:accepted.visual_timeline?.sequence_hash||nextTimeline.sequence_hash,
+            script_revision:accepted.visual_script?.revision,
+            script_hash:accepted.visual_script?.script_hash,
+            tts_invalidated_scene_ids:accepted.tts_invalidated_scene_ids
+          },null,2));
+          console.log(`visual_edit_accept=PASS record=${id} scene=${target.scene_id} script_revision=${accepted.visual_script?.revision}`);
+          NODE
+
+      - name: Run TTS and rerender to completion
+        shell: bash
+        run: |
+          set -euo pipefail
+          node <<'NODE'
+          const fs=require("fs");
+          const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+          async function call(method,path,body){
+            const r=await fetch(process.env.BRIDGE_URL,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({method,path,body})});
+            const w=await r.json();
+            if(!r.ok || !w.ok) throw new Error(`bridge ${method} ${path} failed: ${JSON.stringify(w).slice(0,3000)}`);
+            return w.body;
+          }
+          const id=process.env.CANARY_ID;
+          const started=await call("POST",`/api/outputs/${id}/creative/review`,{
+            action:"changes_requested",
+            notes:"Visual-aware voiceover production canary. Do not publish."
+          });
+          console.log(`handoff_start=${started?.handoff_state||""}`);
+          let last=started;
+          for(let i=1;i<=48;i++){
+            if(last?.completed===true || last?.handoff?.completed===true) break;
+            await sleep(i<8?5000:10000);
+            last=await call("POST",`/api/outputs/${id}/creative/render/continue`,{});
+            console.log(`handoff_attempt=${i} state=${last?.handoff_state||last?.handoff?.handoff_state||""} completed=${Boolean(last?.completed||last?.handoff?.completed)}`);
+            if(last?.error) throw new Error(last.error);
+            if(String(last?.handoff_state||"").includes("failed") || String(last?.handoff?.overall_status||"")==="error") throw new Error(JSON.stringify(last).slice(0,3000));
+          }
+          const status=await call("GET",`/api/outputs/${id}/creative/handoff/status`);
+          if(status?.handoff?.completed!==true) throw new Error(`canary handoff did not complete: ${JSON.stringify(status).slice(0,4000)}`);
+          const inspect=await call("POST","/api/admin/visual-voiceover-canary",{action:"inspect",record_id:id});
+          if(inspect?.do_not_publish!==true || inspect?.auto_publish_enabled!==false) throw new Error("publishing safety gate changed during canary");
+          if(inspect?.published_at || inspect?.platform_post_id || inspect?.platform_post_url) throw new Error("canary unexpectedly published");
+          if(["Approved for Publishing","Published"].includes(String(inspect?.output_status||""))) throw new Error("canary entered a publishing output state");
+          if(["Ready to Publish","Ready to Schedule","Scheduled","Publishing","Published"].includes(String(inspect?.publish_status||""))) throw new Error("canary entered a publish queue");
+          if(!inspect?.studio_preview_url || !inspect?.final_file_url) throw new Error("final preview/file is missing");
+          const current=inspect.current_revision||{};
+          const manifest=inspect.manifest_revision||{};
+          const props=inspect.props_revision||{};
+          for(const key of ["visualRevision","visualSequenceHash","scriptRevision","scriptHash"]){
+            if(String(current[key]??"")!==String(manifest[key]??"")) throw new Error(`manifest revision mismatch ${key}`);
+            if(String(current[key]??"")!==String(props[key]??"")) throw new Error(`Remotion props revision mismatch ${key}`);
+          }
+          fs.writeFileSync("/tmp/canary-final.json",JSON.stringify({status,inspect},null,2));
+          console.log(`visual_voiceover_production_canary=PASS record=${id} preview=${Boolean(inspect.studio_preview_url)} render_status=${inspect.render_status}`);
+          NODE
+
+      - name: Upload sanitized canary evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: visual-voiceover-production-canary-${{ github.run_id }}
+          path: |
+            /tmp/canary-prep.json
+            /tmp/canary-baseline-audio.json
+            /tmp/canary-edit.json
+            /tmp/canary-reuse.json
+            /tmp/canary-final.json
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: Delete one-time service bridge
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -z "${CLOUDFLARE_API_TOKEN:-}" || -z "${CLOUDFLARE_ACCOUNT_ID:-}" ]]; then exit 0; fi
+          curl -sS -X DELETE \
+            "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/$BRIDGE_WORKER" \
+            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" >/tmp/delete.json || true
