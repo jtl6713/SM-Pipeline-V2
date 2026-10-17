@@ -15,7 +15,7 @@ import {
   failScheduleReservation,
   heartbeatScheduleReservation,
   releaseScheduleReservation,
-  scheduleReservationAuthorityEnabled,
+  scheduleReservationLaneEnabled,
   scheduleReservationId,
   stageScheduleReservation,
 } from "./schedule-reservation-authority.mjs";
@@ -82,7 +82,7 @@ async function safeRelease(env, token) {
  * - afterCommit(writeResult, plan, ctx): optional Supabase/cache/write-through work.
  */
 export async function runAtomicScheduleTransaction(env, args = {}, callbacks = {}, options = {}) {
-  if (!scheduleReservationAuthorityEnabled(env)) {
+  if (!scheduleReservationLaneEnabled(env, args.content_profile_id || args.profile_id, args.platform)) {
     if (typeof callbacks.legacy !== "function") {
       throw new Error("Atomic schedule feature is disabled and no legacy callback was provided");
     }

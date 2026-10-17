@@ -286,6 +286,14 @@ export function scheduleReservationAuthorityEnabled(env = {}) {
   return /^(?:1|true|yes|on|enabled)$/i.test(clean(env?.[SCHEDULE_RESERVATION_FLAG], 32));
 }
 
+export function scheduleReservationLaneEnabled(env = {}, contentProfileId, platform) {
+  if (!scheduleReservationAuthorityEnabled(env)) return false;
+  const allowlist = String(env?.STUDIO_SCHEDULE_RESERVATION_LANE_ALLOWLIST ?? "").trim();
+  if (!allowlist) return false;
+  const lane = scheduleReservationLaneKey(contentProfileId, platform);
+  return allowlist.split(",").map((entry) => entry.trim()).filter(Boolean).includes(lane);
+}
+
 export function scheduleReservationLaneKey(contentProfileId, platform) {
   const profile = clean(contentProfileId, 128);
   const p = normalizePlatform(platform);

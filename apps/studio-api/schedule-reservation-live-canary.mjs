@@ -27,6 +27,7 @@ export async function runLiveScheduleReservationCanary(env, { nonce } = {}) {
     STUDIO_SCHEDULE_RESERVATIONS: env.STUDIO_SCHEDULE_RESERVATIONS,
   };
   const lane = PREFIX + nonce;
+  isolated.STUDIO_SCHEDULE_RESERVATION_LANE_ALLOWLIST = `${lane}::synthetic`;
   const shadow = new Map();
   const results = [];
   const held = deferred();

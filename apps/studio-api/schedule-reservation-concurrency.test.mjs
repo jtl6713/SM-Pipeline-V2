@@ -47,6 +47,7 @@ class FakeNamespace {
 function makeEnv() {
   return {
     STUDIO_SCHEDULE_RESERVATION_AUTHORITY_ENABLED: "true",
+    STUDIO_SCHEDULE_RESERVATION_LANE_ALLOWLIST: ["recChicago", "recNewYork", "recOther", "recMiami", "recLosAngeles", "recFacebookHeld", "recTikTokFree", "recChicagoHeld", "recNewYorkFree"].flatMap(p => ["facebook","tiktok","instagram","youtube"].map(v => `${p}::${v}`)).join(","),
     STUDIO_SCHEDULE_RESERVATIONS: new FakeNamespace(),
   };
 }
