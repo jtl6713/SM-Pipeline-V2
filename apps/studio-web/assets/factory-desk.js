@@ -66,7 +66,7 @@
   function cardLabel(card) {
     const bits = [];
     if (card.content_id) bits.push(`C${card.content_id}`);
-    if (card.output_id) bits.push(`O${card.output_id}`);
+    if (card.output_id) bits.push(`Output #${card.output_id}`);
     if (card.production_request_number) bits.push(`PR${card.production_request_number}`);
     return bits.length ? `${bits.join(" · ")} — ${card.title || "Untitled"}` : (card.title || "Untitled");
   }
@@ -543,7 +543,7 @@
       ${lane === "needs_eyes" && card.kind === "output" && canReviewActions(card) && canSelectBatchOutput(card)
         ? `<span class="factory-media-select"><input type="checkbox" data-factory-select-output="${esc(card.id)}" aria-label="Select ${esc(cardLabel(card))}" ${state.selectedOutputs.has(card.id) ? "checked" : ""}>${media}</span>`
         : media}
-      <span class="factory-line-title">${esc(card.title || cardLabel(card))}</span>
+      <span class="factory-line-title">${esc(card.title || cardLabel(card))}${card.output_id ? `<small class="factory-output-number">Output #${esc(card.output_id)}</small>` : ""}</span>
       ${cell(card.profile_name)}
       ${cell(card.platform)}
       ${cell(card.studio_output_type)}
@@ -958,20 +958,34 @@
 
   function renderDesk(desk) {
     state.desk = desk;
-    renderSummary(desk.summary);
-    renderLane("factoryLaneAutoHigh", desk.lanes?.auto_high, "Nothing in active produce/render right now.", { lane: "auto_high" });
-    renderLane("factoryLaneNeedsEyes", desk.lanes?.needs_eyes, "No Ready for Review items waiting on eyes.", { lane: "needs_eyes", groupContent: true });
-    renderLane("factoryLaneNeedsAssets", desk.lanes?.needs_assets, "Pile empty — add up to 3 from candidates below.", { pile: true, lane: "needs_assets" });
-    renderLane("factoryLaneManual", desk.lanes?.manual, "No stuck or failed work in view.", { lane: "manual" });
+    syncFactoryFilterOptions();
+    const filtered = (cards) => (cards || []).filter(factoryMatchesProfile);
+    // Global counts come from the authoritative Desk summary. With a Factory
+    // filter, only rows in the returned snapshot are counted and labelled.
+    const summary = factoryProfileId() ? {
+      auto_high: filtered(desk.lanes?.auto_high).length,
+      needs_eyes: filtered(desk.lanes?.needs_eyes).length,
+      needs_assets_pile: filtered(desk.lanes?.needs_assets).length,
+      needs_assets_max: desk.summary?.needs_assets_max || 3,
+      manual: filtered(desk.lanes?.manual).length,
+    } : desk.summary;
+    renderSummary(summary);
+    const visibleNote = $("factoryProfileScopeNote");
+    if (visibleNote) visibleNote.textContent = factoryProfileId()
+      ? "Filtered counts show visible queue rows." : "Global counts from the Factory queue.";
+    renderLane("factoryLaneAutoHigh", filtered(desk.lanes?.auto_high), "Nothing in active produce/render right now.", { lane: "auto_high" });
+    renderLane("factoryLaneNeedsEyes", filtered(desk.lanes?.needs_eyes), "No Ready for Review items waiting on eyes.", { lane: "needs_eyes", groupContent: true });
+    renderLane("factoryLaneNeedsAssets", filtered(desk.lanes?.needs_assets), "Pile empty — add up to 3 from candidates below.", { pile: true, lane: "needs_assets" });
+    renderLane("factoryLaneManual", filtered(desk.lanes?.manual), "No stuck or failed work in view.", { lane: "manual" });
     renderLane(
       "factoryNeedsAssetsCandidates",
-      desk.needs_assets_candidates,
+      filtered(desk.needs_assets_candidates),
       "No photo-wait / assets-needed candidates.",
       { candidate: true, lane: "needs_assets" },
     );
     const pileMeta = $("factoryNeedsAssetsMeta");
     if (pileMeta) {
-      const used = desk.summary?.needs_assets_pile || 0;
+      const used = summary?.needs_assets_pile || 0;
       const max = desk.summary?.needs_assets_max || 3;
       pileMeta.textContent = `Working pile ${used}/${max}. Pin candidates below.`;
     }
@@ -1173,7 +1187,12 @@
   document.addEventListener("visibilitychange", () => {
     if (!document.hidden && $("page-factory")?.classList.contains("active")) refreshFactoryBatchActivity().catch(() => {});
   });
-  $("studioProfileSelect")?.addEventListener("change", () => { refreshFactoryBatchActivity().catch(() => {}); });
+  $("factoryProfileFilter")?.addEventListener("change", () => {
+    if (state.desk) renderDesk(state.desk);
+    refreshFactoryBatchActivity(true).catch(() => {});
+    window.StudioFactoryBatchQuality?.refresh?.(true);
+  });
+  // Studio profile changes must not alter global Factory monitoring.
   $("factoryDeskRefresh")?.addEventListener("click", () => {
     loadFactoryDesk(true).catch(() => {});
   });
