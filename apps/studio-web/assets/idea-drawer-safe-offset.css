@@ -1,0 +1,30 @@
+/* IDEA_DRAWER_TOPBAR_OFFSET_20261017
+ * The fixed Studio header uses a higher z-index than the idea drawer.
+ * Offset the entire drawer rather than padding its scrollable contents,
+ * keeping the heading, Close button, and first fields visible.
+ */
+@media (max-width: 760px) {
+  /* Legacy mobile height is 56px but .topbar has min-height:64px. */
+  body {
+    --studio-topbar-height: 64px;
+  }
+}
+
+#ideaManageDrawer {
+  top: var(--studio-topbar-height, 72px);
+  height: calc(100vh - var(--studio-topbar-height, 72px));
+  height: calc(100dvh - var(--studio-topbar-height, 72px));
+  max-height: calc(100dvh - var(--studio-topbar-height, 72px));
+}
+
+#ideaManageDrawer .drawer-header {
+  flex: 0 0 auto;
+}
+
+#ideaManageDrawer .drawer-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+}
