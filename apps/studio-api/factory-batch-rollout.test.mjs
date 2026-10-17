@@ -98,6 +98,13 @@ test("production rollout manifest and deployment workflow force a single safe pi
   assert.match(workflow,/factory-batch-production-rollout\.json/);
   assert.match(workflow,/factory_batch_canary_binding_contract=PASS/);
   assert.match(workflow,/factory_batch_chicago_pilot=PASS/);
+  // The GET route accepts ?profile or ?content_profile_id, NOT ?profile_id.
+  // A wrong query silently chooses the operator default profile and can make
+  // an LA-disabled/Chicago-enabled production smoke look misleading.
+  assert.match(workflow, /\\?profile=recT2rbKX3MF7cVFU/);
+  assert.match(workflow, /\\?profile=recF7UAn0LkMZZrWZ/);
+  assert.doesNotMatch(workflow, /\\?profile_id=rec(?:T2rbKX3MF7cVFU|F7UAn0LkMZZrWZ)/);
+
   assert.match(workflow,/Factory Chicago canary verification failed/);
   assert.match(workflow,/Roll back to captured production version on any failure/);
 });
