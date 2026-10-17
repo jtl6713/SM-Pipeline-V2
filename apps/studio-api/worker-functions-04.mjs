@@ -2230,6 +2230,8 @@ export function studioStoryCompanionPlatformBlockers(platformOccupiedMs, compani
 
 async function studioApproveOutputRecordAtomic(env, record, note, stamp, payload = {}, options = {}) {
   const id = record.id;
+  const checkpoint = typeof options.onTimingCheckpoint === "function"
+    ? options.onTimingCheckpoint : () => {};
   const platform = String(f(record, "Platform") || "").trim();
   const outputType = String(f(record, "Studio_Output_Type") || f(record, "Format") || "").trim();
   const profile = options.profile || await item4ProductionProfileRecord(env, record).catch(() => null);
@@ -2292,6 +2294,7 @@ async function studioApproveOutputRecordAtomic(env, record, note, stamp, payload
       throw new HttpError(503, "Atomic schedule transaction unexpectedly fell back to legacy mode");
     },
     plan: async ({ occupied_reservations: durableReservations }) => {
+      checkpoint("slot_search_started");
       // Commit-time source of truth: never trust Approve All / Factory batch
       // occupancy snapshots here. Force the shared cache cold, then re-read.
       studioInvalidateOccupiedScheduleCache();
@@ -2419,6 +2422,7 @@ async function studioApproveOutputRecordAtomic(env, record, note, stamp, payload
       const preparedHandoff = studioPublishHandoffFields(prepared, {
         scheduledPostDate: scheduleFields.Scheduled_Post_Date || f(prepared, "Scheduled_Post_Date") || scheduledIso,
       });
+      checkpoint("slot_search_finished");
       return {
         action: existingScheduleIso && existingScheduleIso !== scheduledIso ? "move" : "reserve",
         selectedIso: scheduledIso,
@@ -2426,12 +2430,18 @@ async function studioApproveOutputRecordAtomic(env, record, note, stamp, payload
         patchFields: { ...fields, ...preparedHandoff, ...scheduleFields },
       };
     },
-    write: async (plan, { signal }) => airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, prepared.id || id, {
-      method: "PATCH",
-      signal,
-      body: JSON.stringify({ fields: plan.patchFields, typecast: true }),
-    }),
+    write: async (plan, { signal }) => {
+      checkpoint("schedule_write_started");
+      const written = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, prepared.id || id, {
+        method: "PATCH",
+        signal,
+        body: JSON.stringify({ fields: plan.patchFields, typecast: true }),
+      });
+      checkpoint("schedule_write_finished");
+      return written;
+    },
     verify: async (_updated, plan) => {
+      checkpoint("schedule_verify_started");
       const verified = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, prepared.id || id);
       const storedIso = String(
         f(verified, "Scheduled_Post_Date")
@@ -2447,15 +2457,18 @@ async function studioApproveOutputRecordAtomic(env, record, note, stamp, payload
       if (!Number.isFinite(expectedMs) || !Number.isFinite(storedMs) || expectedMs !== storedMs) {
         throw new HttpError(503, "Airtable stored schedule does not match the reserved MAE slot");
       }
+      checkpoint("schedule_verify_finished");
       return new Date(storedMs).toISOString();
     },
     afterCommit: async (updated) => {
       studioInvalidateOccupiedScheduleCache();
+      checkpoint("supabase_sync_started");
       const writeThrough = studioSupabaseWriteThroughOutput(env, updated, "approve");
       if (Array.isArray(options.writeThroughQueue)) {
         options.writeThroughQueue.push(writeThrough);
       } else {
         await writeThrough;
+        checkpoint("supabase_sync_finished");
       }
     },
   }, {
@@ -2489,7 +2502,11 @@ async function studioApproveOutputRecordAtomic(env, record, note, stamp, payload
 
 export async function approveOutputRecordForPublishing(env, existing, note, stamp, payload = {}, options = {}) {
   const id = existing.id;
+  const checkpoint = typeof options.onTimingCheckpoint === "function"
+    ? options.onTimingCheckpoint : () => {};
+  checkpoint("approval_lease_wait_started");
   return withOutputApprovalLock(env.STUDIO_MEDIA, id, async () => {
+  checkpoint("approval_lease_acquired");
   // Canonical re-read under the shared per-output lease. Legacy Pipeline, single
   // Approve, and Factory batch cannot concurrently commit two approvals for
   // the same record. Never trust a caller's earlier Ready for Review snapshot.
@@ -2524,6 +2541,7 @@ export async function approveOutputRecordForPublishing(env, existing, note, stam
       });
     }
   }
+  checkpoint("slot_search_started");
   const platform = String(f(record, "Platform") || "").trim();
   const outputType = String(f(record, "Studio_Output_Type") || f(record, "Format") || "").trim();
   const laneKey = maeScheduleLaneKey(platform, outputType) || String(platform || "").toLowerCase();
@@ -2637,6 +2655,7 @@ export async function approveOutputRecordForPublishing(env, existing, note, stam
     },
   );
   const scheduledIso = scheduleFields.Scheduled_Post_Date || f(record, "Scheduled_Post_Date");
+  checkpoint("slot_search_finished");
   const fields = {
     Review_Status: "Approved",
     Output_Status: "Approved for Publishing",
@@ -2654,18 +2673,23 @@ export async function approveOutputRecordForPublishing(env, existing, note, stam
   const preparedHandoff = studioPublishHandoffFields(prepared, {
     scheduledPostDate: scheduleFields.Scheduled_Post_Date || f(prepared, "Scheduled_Post_Date") || scheduledIso,
   });
+  checkpoint("schedule_write_started");
   const updated = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, prepared.id || id, {
     method: "PATCH",
     body: JSON.stringify({ fields: { ...fields, ...preparedHandoff, ...scheduleFields }, typecast: true }),
   });
+  checkpoint("schedule_write_finished");
   if (!options.skipOccupancyRefresh) studioInvalidateOccupiedScheduleCache();
   // Phase 3: Factory/Approve updates Airtable; Pipeline list/grid read Supabase.
   // Without write-through, Approved rows stay "Ready for Review" in Pipeline.
+  checkpoint("supabase_sync_started");
   const writeThrough = studioSupabaseWriteThroughOutput(env, updated, "approve");
   if (Array.isArray(options.writeThroughQueue)) {
     options.writeThroughQueue.push(writeThrough);
+    // Deferred write-through has no completed checkpoint in this approval.
   } else {
     await writeThrough;
+    checkpoint("supabase_sync_finished");
   }
   return updated;
   });
@@ -10082,7 +10106,9 @@ export async function factoryDeskRefreshPayload(request, env, authorization, con
 /*__STUDIO_WORKER_END:factoryDeskRefreshPayload__*/
 
 export async function factoryApproveOutput(env, id, actor, note, ctx = null, scheduleOptions = {}) {
-  const existing = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, id);
+  const existing = scheduleOptions.prefetchedFactoryRecord?.id === id
+    ? scheduleOptions.prefetchedFactoryRecord
+    : await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, id);
   const outputStatus = String(f(existing, "Output_Status") || "").trim();
   const reviewStatus = String(f(existing, "Review_Status") || "").trim();
   const publishStatus = String(f(existing, "Publish_Status") || "").trim();
@@ -10102,14 +10128,26 @@ export async function factoryApproveOutput(env, id, actor, note, ctx = null, sch
     throw new HttpError(409, "Cannot approve this output yet: a finished render and Ready for Review are required.");
   }
   const stamp = new Date().toISOString();
+  // An authoritative Airtable schedule commit completes approval. Supabase is
+  // a downstream read mirror, so it must not keep the output lock held.
+  // The existing writeThroughQueue contract preserves the write and Worker
+  // waitUntil keeps it alive after the Factory response.
+  const writeThroughQueue = [];
   const updated = await approveOutputRecordForPublishing(
     env,
     existing,
     note || `Factory Desk approve by ${actor || "operator"}`,
     stamp,
     {},
-    { recheckBestSlot: true, ...(scheduleOptions || {}) },
+    { recheckBestSlot: true, ...(scheduleOptions || {}), writeThroughQueue },
   );
+  if (writeThroughQueue.length) {
+    const syncing = Promise.all(writeThroughQueue).catch(error => {
+      console.warn("Factory approval Supabase write-through failed", id, error);
+    });
+    if (ctx?.waitUntil) ctx.waitUntil(syncing);
+    else await syncing;
+  }
   if (updated.__already_approved) {
     return { id, already_approved: true, message: "Output already approved in another session; no duplicate dispatch." };
   }
@@ -13936,11 +13974,13 @@ export async function factoryBatchProcess(env, profileId, requestId, ctx = null)
   const run = async () => {
     const result = await factoryBatchDrain(env.STUDIO_MEDIA, {
       profileId, requestId, maxItems: 25, maxElapsedMs: 20000,
-      approve: async (id, job) => {
+      approve: async (id, job, checkpoint = () => {}) => {
         // Canonical Factory single-item guard handles existing Approved/Published,
         // render eligibility, Do_Not_Publish and the MAE / Story scheduling rules.
         // Reject profile drift before calling any authoritative approval mutation.
+        checkpoint("preflight_fetch_started");
         const record = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, id);
+        checkpoint("preflight_fetch_finished");
         if (parentId
           ? (job.items.length>globalPolicy.max_per_profile ||
              !factoryGlobalAcceptsOutput(globalPolicy,record))
@@ -13951,7 +13991,9 @@ export async function factoryBatchProcess(env, profileId, requestId, ctx = null)
         // Profile ownership must resolve from the authoritative Content Item
         // when Platform Output exposes only a lookup display-name, never infer
         // a city from the operator's selected profile.
+        checkpoint("ownership_check_started");
         const ownerProfileId = await studioContentProfileRecordIdForOutput(env, record);
+        checkpoint("ownership_check_finished");
         if (!ownerProfileId) {
           throw new HttpError(409, "Cannot verify output's Content Profile; approval was not submitted");
         }
@@ -13959,7 +14001,8 @@ export async function factoryBatchProcess(env, profileId, requestId, ctx = null)
           throw new HttpError(409, "Output belongs to a different content profile");
         }
         // Canonical single-output approval owns terminal-state idempotence and Do_Not_Publish.
-        return factoryApproveOutput(
+        checkpoint("approval_started");
+        const result = await factoryApproveOutput(
           env,
           id,
           "Factory Batch",
@@ -13968,8 +14011,15 @@ export async function factoryBatchProcess(env, profileId, requestId, ctx = null)
           {
             scheduleOperationId: `factory-batch:${requestId}:${id}`,
             factoryBatchId: requestId,
+            onTimingCheckpoint: checkpoint,
+            // The record was just read from Airtable and ownership verified.
+            // Canonical approval still performs its own authoritative reread
+            // under the shared output lock before making any changes.
+            prefetchedFactoryRecord: record,
           },
         );
+        checkpoint("approval_finished");
+        return result;
       },
     });
     return result;

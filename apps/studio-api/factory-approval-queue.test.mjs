@@ -236,3 +236,92 @@ test("minute recovery chooses the oldest eligible child once per profile", () =>
   assert.ok(factoryBatchCronSelectJobs(rows, {nowMs:now}).some(x=>x.requestId==="miami_new"));
   assert.equal(factoryBatchCronSelectJobs(rows,{maxProfiles:1,nowMs:now}).length,1);
 });
+
+test("durable Factory timing measures queue, preflight, lease, schedule write and 60-second budget", async () => {
+  const bucket = new FakeR2();
+  const rid = "factory_latency_instrumented";
+  let clockMs = 100000;
+  await factoryBatchEnqueue(bucket, {
+    profileId, requestId: rid, records: records.slice(0, 1),
+    now: new Date(clockMs).toISOString(),
+  });
+  clockMs += 250;
+  const finished = await factoryBatchDrain(bucket, {
+    profileId, requestId: rid, now: () => clockMs, makeOwner: () => "timed",
+    approve: async (_id, _job, checkpoint) => {
+      checkpoint("preflight_fetch_started");
+      clockMs += 40;
+      checkpoint("preflight_fetch_finished");
+      checkpoint("ownership_check_started");
+      clockMs += 60;
+      checkpoint("ownership_check_finished");
+      checkpoint("approval_started");
+      checkpoint("approval_lease_wait_started");
+      clockMs += 15;
+      checkpoint("approval_lease_acquired");
+      checkpoint("slot_search_started");
+      clockMs += 120;
+      checkpoint("slot_search_finished");
+      checkpoint("schedule_write_started");
+      clockMs += 80;
+      checkpoint("schedule_write_finished");
+      checkpoint("schedule_verify_started");
+      clockMs += 30;
+      checkpoint("schedule_verify_finished");
+      checkpoint("supabase_sync_started");
+      clockMs += 20;
+      checkpoint("supabase_sync_finished");
+      checkpoint("approval_finished");
+    },
+  });
+  const summary = factoryBatchSummary(finished.job);
+  const metrics = summary.timing_report.metrics;
+  assert.equal(metrics.queue_wait.p50_ms, 250);
+  assert.equal(metrics.preflight_airtable_fetch.p50_ms, 40);
+  assert.equal(metrics.profile_ownership_check.p50_ms, 60);
+  assert.equal(metrics.approval_lease_wait.p50_ms, 15);
+  assert.equal(metrics.schedule_slot_selection.p50_ms, 120);
+  assert.equal(metrics.airtable_schedule_commit.p50_ms, 80);
+  assert.equal(metrics.schedule_verification.p50_ms, 30);
+  assert.equal(metrics.canonical_approval.p50_ms, 265);
+  assert.equal(metrics.max_single_attempt_processing.p99_ms, 365);
+  assert.equal(metrics.enqueue_to_terminal.p95_ms, 615);
+  assert.equal(metrics.enqueue_to_terminal.over_target_count, 0);
+  assert.equal(summary.timing_report.performance_budget.target_ms, 60000);
+  assert.equal(summary.items[0].timing.events.at(-1).state, "approved");
+});
+
+test("older Factory batches show missing timings rather than invented history", async () => {
+  const bucket = new FakeR2();
+  const rid = "factory_latency_legacy_job";
+  const job = (await factoryBatchEnqueue(bucket, {
+    profileId, requestId: rid, records: records.slice(0, 1),
+  })).job;
+  delete job.items[0].timeline;
+  const summary = factoryBatchSummary(job);
+  assert.equal(summary.timing_report.instrumented, 0);
+  assert.deepEqual(summary.timing_report.metrics, {});
+  assert.equal(summary.items[0].timing, null);
+});
+
+test("Factory timing retains distinct attempt history after failed-only retry", async () => {
+  const bucket = new FakeR2();
+  const rid = "factory_latency_retry_cycle";
+  await factoryBatchEnqueue(bucket, {profileId, requestId: rid, records: records.slice(0, 1)});
+  let nowMs = 100000;
+  const first = await factoryBatchDrain(bucket, {
+    profileId,requestId:rid,now:()=>nowMs,makeOwner:()=>"first",
+    approve:async ()=>{nowMs+=80;throw new Error("persistent test failure");},
+  });
+  assert.equal(first.job.items[0].status, "failed");
+  const reset = await factoryBatchRetry(bucket,profileId,rid);
+  assert.equal(reset.items[0].attempts,0);
+  const second = await factoryBatchDrain(bucket,{
+    profileId,requestId:rid,now:()=>nowMs+120,
+    makeOwner:()=>"second",approve:async ()=>{nowMs+=20;},
+  });
+  assert.equal(second.job.items[0].total_attempts,2);
+  const timeline = factoryBatchSummary(second.job).items[0].timing;
+  const starts = timeline.events.filter(x=>x.state==="processing").map(x=>x.attempt);
+  assert.deepEqual(starts,[1,2]);
+});

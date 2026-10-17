@@ -82,3 +82,21 @@ test("Phase 2A method gate admits Factory batch POST before scoped approval hand
   assert.match(worker, /if \(isFactoryBatchRoute\)[\s\S]*?assertWriteRequest\(request, env\);[\s\S]*?factoryBatchSubmitRoute\(request, env, authorization, ctx\)/,
     "The route retains write security and existing safe rollout enforcement");
 });
+
+test("Factory skips one redundant GET but still rereads authoritative output under lock", () => {
+  const start = worker.indexOf("async function factoryApproveOutput(");
+  const end = worker.indexOf("/*__STUDIO_WORKER_END:factoryApproveOutput__*/", start);
+  const factory = worker.slice(start,end);
+  assert.match(factory, /prefetchedFactoryRecord\?\.id === id/);
+  assert.match(factory, /await airtableFetch\(env, env\.AIRTABLE_OUTPUT_TABLE_ID, id\)/);
+  const canonicalStart = worker.indexOf("async function approveOutputRecordForPublishing(");
+  const canonicalEnd = worker.indexOf("/*__STUDIO_WORKER_END:approveOutputRecordForPublishing__*/",canonicalStart);
+  const canonical = worker.slice(canonicalStart,canonicalEnd);
+  assert.match(canonical, /return withOutputApprovalLock/);
+  assert.match(canonical, /const current = await airtableFetch\(env, env\.AIRTABLE_OUTPUT_TABLE_ID, id\)/);
+  assert.ok(canonical.indexOf("return withOutputApprovalLock") < canonical.indexOf("const current = await airtableFetch"),
+    "authoritative re-read must remain inside the shared lease");
+  assert.match(factory, /writeThroughQueue/);
+  assert.match(factory, /ctx\.waitUntil\(syncing\)/);
+  assert.match(factory, /else await syncing/);
+});

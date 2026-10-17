@@ -11,12 +11,18 @@ const app = fs.readFileSync(path.join(web, "assets/app-item4-1008.js"), "utf8");
 const css = fs.readFileSync(path.join(web, "assets/styles-phase7-0621.css"), "utf8");
 
 test("compact Pipeline build and cache bust stay aligned", () => {
-  assert.match(app, /BUILD_ID = "item4-0[.]6[.]709-overview-fast-refresh"/);
-  assert.match(html, /UI build 0.6.709/);
-  assert.match(html, /app-item4-1008\.js\?v=0.6.709-overview-fast-refresh/);
-  assert.match(html, /styles-phase7-0621\.css\?v=0.6.709-overview-fast-refresh/);
+  assert.match(app, /BUILD_ID = "item4-0[.]6[.][0-9]+[-a-zA-Z0-9.]*"/);
+  assert.match(html, /UI build 0[.]6[.][0-9]+/);
+  assert.match(html, /app-item4-1008\.js\?v=0[.]6[.][0-9]+[-a-zA-Z0-9.]*/);
+  assert.match(html, /styles-phase7-0621\.css\?v=0[.]6[.][0-9]+[-a-zA-Z0-9.]*/);
+  const build = app.match(/BUILD_ID = "item4-([^"]+)"/)?.[1];
+  const scriptCache = html.match(/app-item4-1008\.js\?v=([^"'&]+)/)?.[1];
+  assert.ok(build && scriptCache, "Studio app must expose a versioned build");
+  assert.equal(scriptCache, build, "HTML script cache tag must match the JS BUILD_ID exactly");
+  assert.ok(html.includes("UI build " + build.match(/^\d+\.\d+\.\d+/)?.[0]),
+    "displayed UI release label must match current application version");
   assert.match(css, /COMPACT_PIPELINE_V2_20261006/);
-  assert.match(html, /home-density-0517\.css\?v=0.6.709-overview-fast-refresh/);
+  assert.match(html, /home-density-0517\.css\?v=0[.]6[.][0-9]+[-a-zA-Z0-9.]*/);
 });
 
 test("compact Pipeline exposes quick views, search, and advanced filters", () => {

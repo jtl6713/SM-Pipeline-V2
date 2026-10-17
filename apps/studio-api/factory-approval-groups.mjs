@@ -11,6 +11,7 @@ import {
   factoryBatchEnqueue, factoryBatchRead, factoryBatchCounts, factoryBatchRetry,
   factoryBatchQualitySignals,
 } from "./factory-approval-queue.mjs";
+import { factoryApprovalItemTiming, factoryApprovalTimingReport } from "./factory-approval-timings.mjs";
 
 export const FACTORY_GROUP_PREFIX = "studio/state/factory-approvals/v2/groups";
 export const FACTORY_GROUP_SCHEMA = "studio.factory-approval-group.1";
@@ -166,6 +167,7 @@ export async function factoryApprovalGroupStatus(bucket,requestId) {
   };
   const children=[];
   const items=[];
+  const observedTimings=[];
   const qualitySignals=[];
   for (const child of parent.children) {
     const job=await factoryBatchRead(bucket,child.profile_id,child.request_id);
@@ -174,6 +176,7 @@ export async function factoryApprovalGroupStatus(bucket,requestId) {
       failed_count:0,pending_count:child.records.length,
     };
     for (const key of Object.keys(totals)) totals[key]+=counts[key];
+    if (job) observedTimings.push(...(job.items || []));
     if (job) qualitySignals.push(...factoryBatchQualitySignals(job).map(signal=>({
       ...signal,profile_id:child.profile_id,job_id:job.id,
       output_ids:job.items.map(item=>item.output_id).filter(Boolean),
@@ -187,7 +190,8 @@ export async function factoryApprovalGroupStatus(bucket,requestId) {
       items.push({ id:entry.id, output_id:entry.output_id,
         profile_id:child.profile_id, platform:entry.platform, format:entry.format,
         title:entry.title, content_id:entry.content_id,
-        status:item?.status||"pending", error:item?.error||null });
+        status:item?.status||"pending", error:item?.error||null,
+        timing: item ? factoryApprovalItemTiming(item) : null });
     }
   }
   const allEnqueued=children.every(x=>x.status!=="missing");
@@ -201,6 +205,7 @@ export async function factoryApprovalGroupStatus(bucket,requestId) {
     quality_signals:qualitySignals,
     created_at:parent.created_at,updated_at:parent.updated_at,
     status,...totals,done_count:totals.total-totals.pending_count,
+    timing_report:factoryApprovalTimingReport(observedTimings),
     can_retry:!totals.pending_count && totals.failed_count>0,
     children,
   };
