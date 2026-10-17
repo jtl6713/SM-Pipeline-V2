@@ -11,6 +11,9 @@ on:
       - 'apps/studio-web/all-profiles-*.test.mjs'
       - 'apps/studio-web/index.html'
       - '.github/workflows/verify-overview-force-refresh.yml'
+      - '.github/workflows/deploy-cloudflare-worker-production.yml'
+      - '.github/workflows/deploy-cloudflare-pages-production.yml'
+      - 'apps/studio-api/profiles-overview-deployment-contract.test.mjs'
   workflow_dispatch:
 permissions:
   contents: read
