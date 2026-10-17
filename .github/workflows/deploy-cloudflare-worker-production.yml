@@ -81,6 +81,9 @@ jobs:
           bindings=(r.get('resources') or {}).get('bindings') or []
           got={str(x.get('name')):str(x.get('type')) for x in bindings}
           contract=assert_live_contract(got, 'Predeploy live Worker')
+          prod_base=next((b.get('text') for b in bindings if b.get('name')=='AIRTABLE_BASE_ID'),None)
+          if prod_base != 'appe33zkZn35yirTL':
+              raise SystemExit('Factory canary predeploy refused: production Airtable base identity mismatch')
           r2=next(x for x in bindings if x.get('name')=='STUDIO_MEDIA')
           bucket=r2.get('bucket_name') or r2.get('bucket')
           if not bucket:
