@@ -201,9 +201,13 @@ function documentedStoryCompanionPair(a, b, delta) {
   if (delta < 60 * 1000) return false;
   const aStory = isStoryType(a?.output_type);
   const bStory = isStoryType(b?.output_type);
-  // The documented exception is one Story sitting at main + 10 minutes.
-  // Two Stories 10 minutes apart still compete for normal platform capacity.
+  // The documented exception is one Story from the SAME content package sitting
+  // at main + 10 minutes. Timing alone is never enough evidence to suppress a
+  // collision finding for unrelated posts.
   if (aStory === bStory) return false;
+  const aContent = clean(a?.content_item_id, 128);
+  const bContent = clean(b?.content_item_id, 128);
+  if (!aContent || !bContent || aContent !== bContent) return false;
   return Math.abs(delta - MAE_STORY_COMPANION_OFFSET_MS) < 60 * 1000;
 }
 
