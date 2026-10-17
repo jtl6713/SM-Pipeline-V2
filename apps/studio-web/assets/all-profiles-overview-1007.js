@@ -27,7 +27,7 @@
     try { sessionStorage.setItem(CACHE_KEY, payload); } catch { /* ignore quota */ }
   }
   function cacheAgeLabel() {
-    if (!state.cacheAt || !Number.isFinite(state.cacheAt)) return "age unknown";
+    if (!state.cacheAt || !Number.isFinite(state.cacheAt)) return "age unavailable";
     const seconds = Math.max(0, Math.floor((Date.now() - state.cacheAt) / 1000));
     if (seconds < 60) return `${seconds}s old`;
     if (seconds < 3600) return `${Math.floor(seconds / 60)}m old`;
@@ -214,7 +214,7 @@
     } catch (error) {
       // Timeouts and 429s are soft — never paint a red "unavailable" banner on home.
       const cooling = isOverviewSoftFailure(error);
-      const cached = state.rows.length ? state.rows : readCache();
+      const cached = state.rows.length ? { rows: state.rows, at: state.cacheAt } : readCache();
       if (cached?.rows?.length) {
         state.rows = cached.rows;
         state.cacheAt = cached.at;
