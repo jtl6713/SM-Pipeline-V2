@@ -26,7 +26,7 @@ const cards=[
   review_status:"Review Sent",studio_state:"Ready for Review",render_status:"Rendered"}));
 const desk={ok:true,lanes:{needs_eyes:cards,auto_high:[],manual:[],needs_assets:[]},
   needs_assets_candidates:[],summary:{needs_eyes:4,auto_high:0,manual:0,needs_assets_pile:0}};
-const policy={enabled:true,mode:"global_ig_reel_story_v1",max_total:20,max_per_profile:10};
+const policy={enabled:true,stage:"expanded",mode:"global_ig_reel_story_v1",max_total:20,max_per_profile:10};
 let job=null,started=0,retried=0,unexpected=[];
 const send=(res,value,status=200)=>{
   res.writeHead(status,{"content-type":"application/json","cache-control":"no-store"});
@@ -117,7 +117,7 @@ try{
   await page.waitForFunction(()=>Boolean(window.StudioFactoryDesk?.load));
   await page.evaluate(()=>document.querySelector("#page-factory").classList.add("active"));
   await page.evaluate(()=>window.StudioFactoryDesk.load());
-  await page.getByText(/Global Factory: up to 20 Instagram Reels or Stories/).waitFor();
+  await page.getByText(/Global Factory \(expanded\): up to 20 Instagram Reels or Stories/).waitFor();
   await page.locator("[data-factory-band-toggle]").first().click();
   assert.equal(await page.locator("[data-factory-select-content]").count(),2);
   await page.locator("#factoryProfileFilter").selectOption(chicago);
