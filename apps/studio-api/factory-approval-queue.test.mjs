@@ -4,6 +4,7 @@ import {
   factoryBatchEnqueue, factoryBatchRead, factoryBatchList,
   factoryBatchSummary, factoryBatchCounts, factoryBatchDrain,
   factoryBatchRetry, factoryBatchLockKey, factoryBatchCronScan,
+  factoryBatchCronSelectJobs,
 } from "./factory-approval-queue.mjs";
 
 class FakeR2 {
@@ -207,4 +208,31 @@ test("independent batch IDs for same outputs must use canonical state to skip du
   assert.equal(initial.job.items.filter(x => x.status === "approved").length, 4);
   assert.equal(duplicate.job.items.filter(x => x.status === "already_satisfied").length, 4);
   assert.equal(canonicalCommits, 4);
+});
+
+test("minute recovery chooses the oldest eligible child once per profile", () => {
+  const now = Date.parse("2026-10-17T22:35:00Z");
+  const child = (profileId, requestId, iso, status="pending", next_attempt_ms=0) => ({
+    profileId, requestId,
+    job: {
+      status: "running", updated_at: iso,
+      items: [{status, next_attempt_ms}],
+    },
+  });
+  const rows = [
+    child("recMiami", "miami_new", "2026-10-17T22:30:00Z"),
+    child("recMiami", "miami_stale", "2026-10-17T21:45:00Z"),
+    child("recMiami", "miami_backoff", "2026-10-17T21:30:00Z", "pending", now+120000),
+    child("recMiami", "miami_complete", "2026-10-17T21:00:00Z", "approved"),
+    child("recChicago", "chicago_ready", "2026-10-17T22:25:00Z"),
+    child("recNewYork", "newyork_ready", "2026-10-17T22:33:00Z"),
+  ];
+  const chosen = factoryBatchCronSelectJobs(rows, {maxProfiles:5, nowMs:now});
+  assert.deepEqual(chosen.map(x=>x.requestId), ["miami_stale","chicago_ready","newyork_ready"]);
+  assert.equal(new Set(chosen.map(x=>x.profileId)).size, chosen.length);
+  const after = rows.find(x=>x.requestId === "miami_stale");
+  after.job.updated_at = "2026-10-17T22:34:00Z";
+  assert.equal(factoryBatchCronSelectJobs(rows, {nowMs:now})[0].requestId,"chicago_ready");
+  assert.ok(factoryBatchCronSelectJobs(rows, {nowMs:now}).some(x=>x.requestId==="miami_new"));
+  assert.equal(factoryBatchCronSelectJobs(rows,{maxProfiles:1,nowMs:now}).length,1);
 });
