@@ -12,7 +12,10 @@ permissions:
 
 concurrency:
   group: visual-voiceover-production-canary
-  cancel-in-progress: false
+  # There is exactly one production canary fixture. A newer current-head
+  # acceptance run must supersede stale attempts rather than wait behind them
+  # and mutate the same record after newer code has shipped.
+  cancel-in-progress: true
 
 jobs:
   canary:
