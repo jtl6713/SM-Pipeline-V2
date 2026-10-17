@@ -6,3 +6,4 @@
 2026-10-17 rerun after Node 24 compatibility fix for canary inline scripts (eb1ce91800ac074da45e28e2e600cae338b28b36).
 2026-10-17 rerun after live Worker canary duration detector fix verified by production deploy 39051204002.
 2026-10-17 rerun after authoritative visual timeline persistence assertion fix (dcc728f031c0bc5b5a4e48be7d0624f63025c48c).
+2026-10-17 rerun after live nonpublishing visual timeline response contract deployment 1b7ef6069d9c7a378526428b71f5021f215ff192.
