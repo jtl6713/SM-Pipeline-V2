@@ -7975,15 +7975,13 @@ export async function phase6PulseInactiveScenario(env, scenarioId, outputRecordI
     throw new HttpError(400, `Phase 6 Python pulse does not support legacy scenario ${scenarioId}`);
   }
 
-  if (eligible.length) {
-    if (eligible.length !== 1 || eligible[0]?.id !== outputRecordId) {
-      throw new HttpError(409, `Phase 6 exact pulse isolation blocked stage ${scenarioId}; eligible outputs=${eligible.map((row) => row.id).join(',') || 'none'}, requested=${outputRecordId}`);
-    }
-  } else {
-    throw new HttpError(409, `Phase 6 exact pulse isolation found no eligible output for stage ${scenarioId}; requested=${outputRecordId}`);
+  const target = eligible.find((row) => row?.id === outputRecordId) || null;
+  if (!target) {
+    throw new HttpError(
+      409,
+      `Phase 6 exact pulse isolation found requested output ineligible for stage ${scenarioId}; eligible outputs=${eligible.map((row) => row.id).join(',') || 'none'}, requested=${outputRecordId}`
+    );
   }
-
-  const target = eligible[0] || await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, outputRecordId);
   const testRunId = String(f(target, "Test_Run_ID") || "").trim() || undefined;
   let pulse;
   if (stage === PHASE6_R4_SCENARIO_ID) {
