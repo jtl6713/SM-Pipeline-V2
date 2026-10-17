@@ -27,3 +27,17 @@ test("legacy output-style platform labels normalize to Production platforms", as
   assert.match(worker, /const platforms = canonicalProductionPlatforms\(platformsRaw\)/);
   assert.match(worker, /if \(productionPlatforms\.length\) return canonicalProductionPlatforms\(productionPlatforms\)/);
 });
+
+
+test("retired platform residue is filtered before bridge compatibility and promotion payloads", () => {
+  const worker = readStudioWorkerSource();
+  const compatibilityStart = worker.indexOf("function productionRequestCompatibilityIssues");
+  const compatibilityEnd = worker.indexOf("function promotionThumbnailTriState", compatibilityStart);
+  const compatibility = worker.slice(compatibilityStart, compatibilityEnd);
+  assert.match(compatibility, /canonicalProductionPlatforms\(rawPlatforms\)\.filter\(\(platform\) => PR_PLATFORMS\.has\(platform\)\)/);
+
+  const promotionStart = worker.indexOf("function promotionInputFromProductionRequest");
+  const promotionEnd = worker.indexOf("function updateProductionRequestPromotionState", promotionStart);
+  const promotion = worker.slice(promotionStart, promotionEnd);
+  assert.match(promotion, /canonicalProductionPlatforms\(rawPlatforms\)\.filter\(\(platform\) => PR_PLATFORMS\.has\(platform\)\)/);
+});
