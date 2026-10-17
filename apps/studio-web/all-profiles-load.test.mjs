@@ -24,6 +24,8 @@ test("All Profiles overview uses one lean /api/profiles/overview call", () => {
   assert.match(overview, /sessionStorage/);
   assert.match(overview, /localStorage/);
   assert.match(overview, /Showing last good overview/);
+  assert.match(overview, /Automatic polling remains a read-only snapshot GET/);
+  assert.match(overview, /\/api\/profiles\/overview\?_=/);
   assert.match(html, /all-profiles-overview-1007\.js\?v=/);
 });
 
@@ -47,6 +49,7 @@ test("Worker exposes profilesOverview lean batch route", () => {
   assert.match(worker, /readStudioProfilesOverviewSnapshot/);
   assert.match(worker, /refreshStudioProfilesOverviewSnapshot/);
   assert.match(worker, /studio_home_overview_snapshot_v1: true/);
+  assert.match(worker, /studio_home_overview_force_refresh_v1: true/);
   assert.match(worker, /respondProfilesOverviewSoft/);
   assert.match(worker, /Never HTTP 429 the home overview/);
 });
