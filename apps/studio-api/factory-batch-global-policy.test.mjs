@@ -1,6 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import {factoryGlobalPolicy,factoryGlobalAcceptsOutput,FACTORY_GLOBAL_MODE,FACTORY_GLOBAL_STAGES} from "./factory-batch-global-policy.mjs";
+import {
+  factoryGlobalPolicy,factoryGlobalAcceptsOutput,FACTORY_GLOBAL_MODE,
+  FACTORY_GLOBAL_STAGES,FACTORY_GLOBAL_OUTPUT_TYPES,
+} from "./factory-batch-global-policy.mjs";
 import {FACTORY_BATCH_PRODUCTION_BASE_ID,FACTORY_BATCH_STAGING_BASE_ID} from "./factory-batch-rollout.mjs";
 const config=(base,stage="pilot")=>({AIRTABLE_BASE_ID:base,
   FACTORY_BATCH_GLOBAL_APPROVALS_ENABLED:"true",
@@ -42,13 +45,20 @@ test("wider release activates only with exact 20 / 10 signed pair",()=>{
     {FACTORY_BATCH_GLOBAL_APPROVALS_ENABLED:"disabled"},
   ]) assert.equal(factoryGlobalPolicy({...full,...drift}).enabled,false);
 });
-test("global approvals accept only Instagram Reels and Stories in both stages",()=>{
+test("global approvals accept every implemented platform output type and reject unsupported destinations",()=>{
   for(const stage of ["pilot","expanded"]){
     const policy=factoryGlobalPolicy(config(FACTORY_BATCH_STAGING_BASE_ID,stage));
-    for(const kind of ["Reel","Story"]) assert.equal(factoryGlobalAcceptsOutput(
-      policy,{fields:{Platform:"Instagram",Studio_Output_Type:kind}}),true);
-    for(const [platform,kind] of [["TikTok","Reel"],["Instagram","Carousel"],["YouTube","Short"]])
-      assert.equal(factoryGlobalAcceptsOutput(policy,{fields:{Platform:platform,Studio_Output_Type:kind}}),false);
+    assert.deepEqual(policy.allowed_platforms,["Instagram","Facebook","TikTok","YouTube"]);
+    for(const [platform,types] of Object.entries(FACTORY_GLOBAL_OUTPUT_TYPES)){
+      assert.deepEqual(policy.allowed_output_types_by_platform[platform],[...types]);
+      for(const kind of types) assert.equal(factoryGlobalAcceptsOutput(
+        policy,{fields:{Platform:platform,Studio_Output_Type:kind}}),true,`${platform} ${kind}`);
+    }
+    for(const [platform,kind] of [
+      ["Threads","Post"],["Instagram","Video Draft"],["TikTok","Short"],
+      ["YouTube","Reel"],["Facebook","Carousel"],["Instagram","Unknown"],
+    ]) assert.equal(factoryGlobalAcceptsOutput(
+      policy,{fields:{Platform:platform,Studio_Output_Type:kind}}),false,`${platform} ${kind}`);
   }
   assert.equal(factoryGlobalAcceptsOutput(factoryGlobalPolicy({}),{fields:{Platform:"Instagram",Studio_Output_Type:"Reel"}}),false);
 });
