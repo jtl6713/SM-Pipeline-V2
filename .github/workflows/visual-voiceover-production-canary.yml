@@ -32,6 +32,12 @@ jobs:
           set -euo pipefail
           test -n "${CLOUDFLARE_API_TOKEN:-}"
           test -n "${CLOUDFLARE_ACCOUNT_ID:-}"
+          # A fixed workers.dev hostname can retain a disabled/stale route after
+          # delete/recreate and surface Cloudflare 1042. Give every attempt its
+          # own ephemeral DNS label while preserving the same service binding
+          # and authenticated Studio request pattern.
+          BRIDGE_WORKER="smv2-vv-canary-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          echo "BRIDGE_WORKER=$BRIDGE_WORKER" >> "$GITHUB_ENV"
           TOKEN=$(python - <<'PY'
           import secrets
           print(secrets.token_urlsafe(36))
@@ -112,18 +118,29 @@ jobs:
         run: |
           set -euo pipefail
           code=000
+          ready=false
           for i in $(seq 1 40); do
             code=$(curl -sS --max-time 30 -o /tmp/probe.json -w '%{http_code}' \
               -H 'Content-Type: application/json' \
               -d '{"method":"GET","path":"/api/outputs/recINVALID/creative"}' "$BRIDGE_URL" || true)
             if grep -Fq 'error code: 1042' /tmp/probe.json 2>/dev/null; then
+              echo "bridge_not_ready attempt=$i http=$code cloudflare=1042"
               sleep 3
               continue
             fi
-            [[ "$code" == "200" ]] && break
+            if [[ "$code" == "200" ]] && jq -e '.path=="/api/outputs/recINVALID/creative" and .method=="GET"' /tmp/probe.json >/dev/null 2>&1; then
+              echo "bridge_ready attempt=$i worker=$BRIDGE_WORKER"
+              ready=true
+              break
+            fi
+            echo "bridge_read_retry attempt=$i http=$code body=$(head -c 240 /tmp/probe.json 2>/dev/null | tr '\n' ' ')"
             sleep 3
           done
-          test "$code" = "200"
+          if [[ "$ready" != "true" ]]; then
+            echo "::error::Ephemeral Studio service bridge did not become ready (worker=$BRIDGE_WORKER http=$code)"
+            head -c 1000 /tmp/probe.json 2>/dev/null || true
+            exit 1
+          fi
 
       - name: Wait for production Worker runner and Remotion release
         shell: bash
