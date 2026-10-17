@@ -29,7 +29,8 @@ test("canonical approval has one atomic feature branch and preserves the legacy 
     1,
     "canonical approval must have exactly one reservation-authority branch",
   );
-  assert.match(canonical, /return studioApproveOutputRecordAtomic\(env, record, note, stamp, payload, options\)/);
+  assert.match(canonical, /scheduleReservationLaneEnabled\(env, reservationProfile\?\.id, f\(record, "Platform"\)\)/);
+  assert.match(canonical, /return studioApproveOutputRecordAtomic\(env, record, note, stamp, payload, \{/);
   assert.match(canonical, /let occupiedMs = Array\.isArray\(options\.occupiedMs\)/);
   assert.match(canonical, /skipOccupancyRefresh/);
 });

@@ -9,6 +9,7 @@ import { withOutputApprovalLock } from "./output-approval-lease.mjs";
 import {
   reconcileScheduleReservation,
   scheduleReservationAuthorityEnabled,
+  scheduleReservationLaneEnabled,
   SCHEDULE_RESERVATION_STATES,
 } from "./schedule-reservation-authority.mjs";
 import { runAtomicScheduleTransaction } from "./schedule-reservation-transaction.mjs";
@@ -1758,9 +1759,15 @@ export async function studioHealApprovedMissingSchedule(env, options = {}) {
     console.warn("approved missing-schedule scan failed", error);
     return [];
   }
+  const healed = [];
   if (scheduleReservationAuthorityEnabled(env)) {
-    const healed = [];
+    const legacyRows = [];
     for (const row of rows || []) {
+      const profile = await item4ProductionProfileRecord(env, row).catch(() => null);
+      if (!scheduleReservationLaneEnabled(env, profile?.id, f(row, "Platform"))) {
+        legacyRows.push(row);
+        continue;
+      }
       try {
         const result = await studioHealApprovedMissingScheduleAtomic(env, row);
         if (result) healed.push(result);
@@ -1768,11 +1775,10 @@ export async function studioHealApprovedMissingSchedule(env, options = {}) {
         console.warn("atomic approved missing-schedule heal failed", row.id, error);
       }
     }
-    return healed;
+    rows = legacyRows;
   }
 
   const occupiedByProfile = new Map();
-  const healed = [];
   for (const row of rows || []) {
     const profile = await item4ProductionProfileRecord(env, row).catch(() => null);
     const profileKey = profile?.id || "_all";
@@ -1849,9 +1855,15 @@ export async function studioHealStoryCompanionDrift(env, options = {}) {
     console.warn("story companion drift scan failed", error);
     return [];
   }
+  const healed = [];
   if (scheduleReservationAuthorityEnabled(env)) {
-    const healed = [];
+    const legacyRows = [];
     for (const row of rows || []) {
+      const profile = await item4ProductionProfileRecord(env, row).catch(() => null);
+      if (!scheduleReservationLaneEnabled(env, profile?.id, f(row, "Platform"))) {
+        legacyRows.push(row);
+        continue;
+      }
       try {
         const result = await studioHealStoryCompanionDriftAtomic(env, row);
         if (result) healed.push(result);
@@ -1859,10 +1871,8 @@ export async function studioHealStoryCompanionDrift(env, options = {}) {
         console.warn("atomic Story companion drift heal failed", row.id, error);
       }
     }
-    return healed;
+    rows = legacyRows;
   }
-
-  const healed = [];
   for (const row of rows || []) {
     const currentRaw = String(f(row, "Scheduled_Post_Date") || "").trim();
     const currentMs = Date.parse(currentRaw);
@@ -2504,13 +2514,19 @@ export async function approveOutputRecordForPublishing(env, existing, note, stam
     });
     record = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, record.id);
   }
+  let reservationProfile = options.profile || null;
   if (scheduleReservationAuthorityEnabled(env)) {
-    return studioApproveOutputRecordAtomic(env, record, note, stamp, payload, options);
+    reservationProfile ||= await item4ProductionProfileRecord(env, record).catch(() => null);
+    if (scheduleReservationLaneEnabled(env, reservationProfile?.id, f(record, "Platform"))) {
+      return studioApproveOutputRecordAtomic(env, record, note, stamp, payload, {
+        ...options, profile: reservationProfile,
+      });
+    }
   }
   const platform = String(f(record, "Platform") || "").trim();
   const outputType = String(f(record, "Studio_Output_Type") || f(record, "Format") || "").trim();
   const laneKey = maeScheduleLaneKey(platform, outputType) || String(platform || "").toLowerCase();
-  const profile = options.profile || await item4ProductionProfileRecord(env, record).catch(() => null);
+  const profile = reservationProfile || await item4ProductionProfileRecord(env, record).catch(() => null);
   const horizonDays = options.horizonDays
     || await studioScheduleHorizonDays(env).catch(() => MAE_SUGGEST_HORIZON_DAYS);
   let occupiedMs = Array.isArray(options.occupiedMs) ? options.occupiedMs.slice() : null;
@@ -3285,7 +3301,7 @@ export async function studioProcessScheduleRegenJobSlice(env, jobId, options = {
 
     const done = Math.max(0, Number(combo.completed_posts) || 0);
     const sliceEnd = Math.min(plan.length, done + postsPerSlice);
-    if (scheduleReservationAuthorityEnabled(env)) {
+    if (scheduleReservationLaneEnabled(env, job.profile_id || combo.profile_id, combo.platform)) {
       // The stored regeneration plan is a progress/order checkpoint only.
       // Final slot selection is repeated against authoritative occupancy while
       // this output owns the shared profile/platform reservation lane.
@@ -10442,20 +10458,23 @@ export async function factoryDeleteDeskItem(env, id, kind, actor, note) {
       },
     };
   });
-  if (scheduleReservationAuthorityEnabled(env)) {
-    // Vacating is a schedule write: keep the old occupancy durable until Airtable
-    // is reread and confirms all scheduling fields are empty.
-    for (const patch of patches) {
-      const source = targets.get(patch.id) || { id: patch.id };
+  const legacyPatches = [];
+  for (const patch of patches) {
+    const source = targets.get(patch.id) || { id: patch.id };
+    const profile = scheduleReservationAuthorityEnabled(env)
+      ? await item4ProductionProfileRecord(env, source).catch(() => null)
+      : null;
+    if (scheduleReservationLaneEnabled(env, profile?.id, f(source, "Platform"))) {
+      // Vacating an enabled lane requires a fenced authoritative confirmation.
       await studioAtomicVacateSkippedOutput(
-        env,
-        source,
-        patch.fields,
-        `factory-skip:${id}:${patch.id}`,
+        env, source, patch.fields, `factory-skip:${id}:${patch.id}`,
       );
+    } else {
+      legacyPatches.push(patch);
     }
-  } else {
-    await airtableBatchUpdate(env, env.AIRTABLE_OUTPUT_TABLE_ID, patches, { typecast: true });
+  }
+  if (legacyPatches.length) {
+    await airtableBatchUpdate(env, env.AIRTABLE_OUTPUT_TABLE_ID, legacyPatches, { typecast: true });
   }
   const count = patches.length;
   return {
@@ -12918,8 +12937,11 @@ export async function scheduleStudioPublishOutput(request, env, url, authorizati
     && (!value || value.toLowerCase() === "immediate")
   );
   let updated;
-  if (scheduleReservationAuthorityEnabled(env)) {
-    const profile = await item4ProductionProfileRecord(env, existing).catch(() => null);
+  const reservationProfile = scheduleReservationAuthorityEnabled(env)
+    ? await item4ProductionProfileRecord(env, existing).catch(() => null)
+    : null;
+  if (scheduleReservationLaneEnabled(env, reservationProfile?.id, platform)) {
+    const profile = reservationProfile;
     const timeZone = await studioScheduleTimeZoneForRecord(env, existing, payload);
     const previousRaw = String(
       f(existing, "Scheduled_Post_Date") || f(existing, "YouTube_Scheduled_Publish_At") || ""

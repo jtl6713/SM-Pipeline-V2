@@ -95,7 +95,7 @@ test("every true flag-on schedule mutation uses the shared transaction authority
   }
 });
 
-test("legacy schedule writers are unreachable when the authority flag is enabled", () => {
+test("only exact enabled scheduling lanes use atomic writers; others retain legacy paths", () => {
   const guarded = [
     ["worker-functions-02.mjs", "fanoutProductionRequestOutputsToContentItems"],
     ["worker-functions-04.mjs", "studioHealApprovedMissingSchedule"],
@@ -108,10 +108,13 @@ test("legacy schedule writers are unreachable when the authority flag is enabled
   for (const [file, name] of guarded) {
     const body = topLevelFunctionBodies(sources[file]).get(name);
     assert.ok(body, `missing ${file}:${name}`);
+    const guard = name === "fanoutProductionRequestOutputsToContentItems"
+      ? /scheduleReservationAuthorityEnabled\(env\)/
+      : /scheduleReservationLaneEnabled\(env,/;
     assert.match(
       body,
-      /scheduleReservationAuthorityEnabled\(env\)/,
-      `${file}:${name} must explicitly gate legacy scheduling behind the authority flag`,
+      guard,
+      `${file}:${name} must explicitly check atomic authority for its exact lane`,
     );
   }
 
@@ -125,23 +128,23 @@ test("legacy schedule writers are unreachable when the authority flag is enabled
   const missing = topLevelFunctionBodies(sources["worker-functions-04.mjs"])
     .get("studioHealApprovedMissingSchedule");
   assert.ok(
-    missing.indexOf("scheduleReservationAuthorityEnabled(env)")
+    missing.indexOf("scheduleReservationLaneEnabled(env")
       < missing.indexOf('method: "PATCH"'),
-    "missing-schedule legacy PATCH must occur only after the flag-on early return",
+    "missing-schedule legacy PATCH must occur only after the lane-scoped dispatch",
   );
 
   const story = topLevelFunctionBodies(sources["worker-functions-04.mjs"])
     .get("studioHealStoryCompanionDrift");
   assert.ok(
-    story.indexOf("scheduleReservationAuthorityEnabled(env)")
+    story.indexOf("scheduleReservationLaneEnabled(env")
       < story.indexOf('method: "PATCH"'),
-    "Story drift legacy PATCH must occur only after the flag-on early return",
+    "Story drift legacy PATCH must occur only after the lane-scoped dispatch",
   );
 
   const approval = topLevelFunctionBodies(sources["worker-functions-04.mjs"])
     .get("approveOutputRecordForPublishing");
   assert.ok(
-    approval.indexOf("scheduleReservationAuthorityEnabled(env)")
+    approval.indexOf("scheduleReservationLaneEnabled(env")
       < approval.indexOf('method: "PATCH"'),
     "canonical legacy approval PATCH must occur only after the atomic branch",
   );
@@ -149,17 +152,17 @@ test("legacy schedule writers are unreachable when the authority flag is enabled
   const regen = topLevelFunctionBodies(sources["worker-functions-04.mjs"])
     .get("studioProcessScheduleRegenJobSlice");
   assert.ok(
-    regen.indexOf("scheduleReservationAuthorityEnabled(env)")
+    regen.indexOf("scheduleReservationLaneEnabled(env")
       < regen.indexOf("airtableBatchUpdate("),
-    "legacy regeneration batch write must remain below the flag-on atomic branch",
+    "legacy regeneration batch write must remain below the lane-scoped atomic branch",
   );
 
   const factoryDelete = topLevelFunctionBodies(sources["worker-functions-04.mjs"])
     .get("factoryDeleteDeskItem");
   assert.ok(
-    factoryDelete.indexOf("scheduleReservationAuthorityEnabled(env)")
+    factoryDelete.indexOf("scheduleReservationLaneEnabled(env")
       < factoryDelete.indexOf("airtableBatchUpdate("),
-    "legacy Factory vacate batch write must remain below the flag-on atomic branch",
+    "legacy Factory vacate batch write must remain below the lane-scoped atomic branch",
   );
 });
 

@@ -367,6 +367,7 @@ import {
 } from "./schedule-regen-batch.mjs";
 import {
   scheduleReservationAuthorityEnabled,
+  scheduleReservationLaneEnabled,
   SCHEDULE_RESERVATION_BINDING,
 } from "./schedule-reservation-authority.mjs";
 export { ScheduleReservationLane } from "./schedule-reservation-authority.mjs";
