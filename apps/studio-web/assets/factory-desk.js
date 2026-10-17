@@ -248,10 +248,12 @@
 
   function canSelectBatchOutput(card) {
     const rollout = state.batchRollout;
-    if (!rollout || !["chicago_ig_reel_v1", "chicago_ig_reels_v2"].includes(rollout.mode)) return true;
+    if (!rollout || !["chicago_ig_reel_v1", "chicago_ig_reels_v2",
+      "chicago_ig_reel_story_v3"].includes(rollout.mode)) return true;
+    const type = String(card?.studio_output_type || card?.format || "");
     return String(card?.profile_id || "") === String(rollout.profile_id || "")
       && String(card?.platform || "") === "Instagram"
-      && String(card?.studio_output_type || card?.format || "") === "Reel";
+      && (type === "Reel" || (rollout.mode === "chicago_ig_reel_story_v3" && type === "Story"));
   }
 
   function factoryProfileId() {
@@ -311,10 +313,15 @@
     const rolloutNotice = $("factoryBatchRolloutNotice");
     if (rolloutNotice) {
       const rollout = state.batchRollout;
-      if (["chicago_ig_reel_v1", "chicago_ig_reels_v2"].includes(rollout?.mode)) {
+      if (["chicago_ig_reel_v1", "chicago_ig_reels_v2",
+        "chicago_ig_reel_story_v3"].includes(rollout?.mode)) {
         rolloutNotice.hidden = false;
         rolloutNotice.textContent = state.batchApprovalsEnabled
-          ? (rollout.mode === "chicago_ig_reels_v2" ? "Chicago Reel pilot: select up to five Instagram Reels per batch. Other formats and profiles remain blocked." : "Limited production pilot: approve one Chicago Instagram Reel at a time. Stories, YouTube and other platforms are not available for batch approval yet.")
+          ? (rollout.mode === "chicago_ig_reel_story_v3"
+            ? "Chicago Instagram pilot: select up to five Reels or Stories per batch. Other formats and profiles remain blocked."
+            : rollout.mode === "chicago_ig_reels_v2"
+              ? "Chicago Reel pilot: select up to five Instagram Reels per batch. Other formats and profiles remain blocked."
+              : "Limited production pilot: approve one Chicago Instagram Reel at a time. Stories, YouTube and other platforms are not available for batch approval yet.")
           : "Limited production pilot: only Chicago Instagram Reels are eligible. Select Chicago to submit; individual approvals remain available elsewhere.";
       } else {
         rolloutNotice.hidden = true;
@@ -451,7 +458,7 @@
     if (!ready.length) { updateFactoryBatchToolbar(); setStatus("Select one or more review-ready outputs.", true); return; }
     const profiles = [...new Set(ready.map((card) => String(card.profile_id || "").trim()))];
     if (ready.length > Math.max(1, Number(state.batchRollout?.max_items || 100))) {
-      setStatus(`The current pilot permits at most ${Math.max(1, Number(state.batchRollout?.max_items || 1))} eligible Instagram Reels.`, true);
+      setStatus(`The current pilot permits at most ${Math.max(1, Number(state.batchRollout?.max_items || 1))} eligible outputs.`, true);
       return;
     }
     if (profiles.length !== 1 || !/^rec[A-Za-z0-9]+$/.test(profiles[0])) {

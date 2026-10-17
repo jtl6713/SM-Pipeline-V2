@@ -55,3 +55,13 @@ test("Finished durable batches reconcile the live Needs Eyes desk and clear sele
   assert.match(js, /ready\.forEach\(\(card\) => state\.selectedOutputs\.delete\(card\.id\)\);\s*saveFactorySelection\(\);[\s\S]{0,220}if \(state\.desk\) renderDesk\(state\.desk\);/,
     "Submitting must repaint DOM selection once the accepted IDs leave selectedOutputs");
 });
+
+test("Story v3 UI remains dormant while Reel v2 restricts selection", () => {
+  const fn = js.slice(js.indexOf("function canSelectBatchOutput("),
+    js.indexOf("function factoryProfileId(", js.indexOf("function canSelectBatchOutput(")));
+  assert.match(fn, /chicago_ig_reel_story_v3/);
+  assert.match(fn, /rollout.mode === "chicago_ig_reel_story_v3" && type === "Story"/);
+  assert.match(fn, /String\(card\?\.profile_id \|\| ""\) === String\(rollout.profile_id \|\| ""\)/);
+  assert.match(fn, /String\(card\?\.platform \|\| ""\) === "Instagram"/);
+  assert.match(js, /Chicago Instagram pilot: select up to five Reels or Stories per batch/);
+});

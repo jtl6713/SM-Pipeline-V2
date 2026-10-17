@@ -83,6 +83,57 @@ test("five-Reel Chicago expansion requires exact mode, count and profile", () =>
   assert.equal(factoryBatchRolloutPolicy({...multi,AIRTABLE_BASE_ID:"appDifferentBase012"},chicago).enabled,false);
 });
 
+test("dormant Chicago Reel+Story mode is exact-gated and preserves v2", () => {
+  const active = {...enabled,
+    FACTORY_BATCH_ROLLOUT_MODE: "chicago_ig_reels_v2",
+    FACTORY_BATCH_ROLLOUT_MAX_ITEMS: "5",
+  };
+  const v2 = factoryBatchRolloutPolicy(active, chicago);
+  assert.equal(v2.enabled, true);
+  assert.equal(factoryBatchRolloutAcceptsOutput(v2, output("Instagram", "Story")), false);
+
+  const proposed = {...active, FACTORY_BATCH_ROLLOUT_MODE: "chicago_ig_reel_story_v3"};
+  const policy = factoryBatchRolloutPolicy(proposed, chicago);
+  assert.equal(policy.enabled, true);
+  assert.equal(policy.max_items, 5);
+  for (const type of ["Reel", "Story"]) {
+    assert.equal(factoryBatchRolloutAcceptsOutput(policy, output("Instagram", type)), true, type);
+  }
+  for (const [platform, type] of [
+    ["Instagram", "Carousel"], ["Instagram", "Single Image"],
+    ["Facebook", "Reel"], ["Facebook", "Story"],
+    ["YouTube", "Short"], ["TikTok", "Video Draft"],
+    ["instagram", "Story"], ["Instagram", "Stories"],
+  ]) assert.equal(factoryBatchRolloutAcceptsOutput(policy, output(platform, type)), false,
+    platform + " " + type);
+  const ids = Array.from({length:5}, (_,i) => "recStoryTrial" + i);
+  assert.equal(factoryBatchRolloutAcceptsIds(policy, ids), true);
+  assert.equal(factoryBatchRolloutAcceptsIds(policy, [...ids, "recStoryTrialExtra"]), false);
+  for (const bad of [
+    {...proposed, FACTORY_BATCH_ROLLOUT_MAX_ITEMS:"10"},
+    {...proposed, FACTORY_BATCH_APPROVALS_ENABLED:"false"},
+    {...proposed, AIRTABLE_BASE_ID:"appUnexpected0123"},
+  ]) assert.equal(factoryBatchRolloutPolicy(bad, chicago).enabled, false);
+  assert.equal(factoryBatchRolloutPolicy(proposed, la).enabled, false);
+  assert.equal(factoryBatchRolloutAcceptsOutput(
+    factoryBatchRolloutPolicy({...proposed, FACTORY_BATCH_ROLLOUT_MODE:"unrecognized"}, chicago),
+    output("Instagram", "Story")), false);
+});
+
+test("Story extension is dormant in the committed production manifest", () => {
+  const here = path.dirname(fileURLToPath(import.meta.url));
+  const root = path.resolve(here, "../..");
+  const manifest = JSON.parse(fs.readFileSync(
+    path.join(root, "deploy/factory-batch-production-rollout.json"), "utf8"));
+  assert.equal(manifest.mode, "chicago_ig_reels_v2");
+  assert.equal(manifest.max_items, 5);
+  assert.equal(manifest.output_type, "Reel");
+  const workflow = fs.readFileSync(
+    path.join(root, ".github/workflows/deploy-cloudflare-worker-production.yml"), "utf8");
+  assert.match(workflow, /safe_modes=\{'chicago_ig_reel_v1':1,'chicago_ig_reels_v2':5\}/);
+  assert.doesNotMatch(workflow, /chicago_ig_reel_story_v3/);
+});
+
 test("explicitly isolated staging retains multi-output integration acceptance", () => {
   const stage = factoryBatchRolloutPolicy({
     AIRTABLE_BASE_ID: FACTORY_BATCH_STAGING_BASE_ID,
