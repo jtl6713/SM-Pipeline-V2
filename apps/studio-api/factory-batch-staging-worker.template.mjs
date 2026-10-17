@@ -9,6 +9,7 @@ import {
   factoryBatchQualitySignals, factoryBatchKey, factoryBatchLockKey,
 } from "./factory-approval-queue.mjs";
 import { withOutputApprovalLock, OUTPUT_APPROVAL_LOCK_PREFIX } from "./output-approval-lease.mjs";
+import { factoryBatchRolloutPolicy, factoryBatchRolloutAcceptsOutput, factoryBatchRolloutAcceptsIds } from "./factory-batch-rollout.mjs";
 import {
   maeNormalizeTimeZone, maeScheduleNextSlot, maeScheduleLaneKey,
   maeScheduleConflicts, maeIsBlackoutLocalTime, maeIsPriorityLocalTime,
