@@ -6572,7 +6572,7 @@ export function phase6SlideDirectiveFromPayload(input, existing) {
 }
 /*__STUDIO_WORKER_END:phase6SlideDirectiveFromPayload__*/
 
-function phase6MergeVisualTimelineInputs(currentSlides = [], slideInputs = []) {
+export function phase6MergeVisualTimelineInputs(currentSlides = [], slideInputs = []) {
   const incoming = new Map(
     (Array.isArray(slideInputs) ? slideInputs : [])
       .map((slide) => [String(slide?.scene_id || slide?.id || "").trim(), slide])
@@ -6596,7 +6596,7 @@ function phase6MergeVisualTimelineInputs(currentSlides = [], slideInputs = []) {
 }
 /*__STUDIO_WORKER_END:phase6MergeVisualTimelineInputs__*/
 
-function phase6NextVisualTimeline(payload, currentSlides, previousTimeline) {
+export function phase6NextVisualTimeline(payload, currentSlides, previousTimeline) {
   if (!visualTimelineHasMutation(payload)) return null;
   const requested = payload?.visual_timeline && typeof payload.visual_timeline === "object"
     ? payload.visual_timeline
@@ -10054,7 +10054,7 @@ export async function phase6ClearVoicePrepTokens(env, slides) {
 }
 /*__STUDIO_WORKER_END:phase6ClearVoicePrepTokens__*/
 
-function phase6VoicePrepRevisionIdentity(outputRecord) {
+export function phase6VoicePrepRevisionIdentity(outputRecord) {
   const settings = phase6ParseJson(f(outputRecord, "Studio_Creative_Settings_JSON"), {}) || {};
   const script = settings?.visual_script && typeof settings.visual_script === "object"
     ? settings.visual_script
