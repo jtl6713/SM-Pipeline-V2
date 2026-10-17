@@ -396,3 +396,5 @@ PR #789 guarded Factory Batch V2 UI | 0.6.708-factory-batch-gated | Worker 0.10.
 overview-fast-refresh 2026-10-17T01:20:00Z UI 0.6.709-overview-fast-refresh (footer must show UI 0.6.709 / Worker 0.10.651; All Profiles polls every 5s while the dashboard is visible)
 
 Step3-factory-ui-qa-20261017 | PR #792 d71b34a3e80a18bbc1bb4e0ec50fe6b68e96a649 | Factory batch Quality Agent panel, desktop/mobile/tablet acceptance, custom-domain verify | staging real-HTTP #38994271366 PASS | production batch approvals OFF
+
+2026-10-17: PR #793 Ideas drawer header-safe offset (CSS-only). Keep title and Close visible below fixed topbar at desktop/tablet/mobile; preserve current 0.6.709 cached application bundle. Deploy Studio Pages production.
