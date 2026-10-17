@@ -7959,49 +7959,57 @@ export async function phase6StopScenarioVerified(env, scenarioId, attempts = 3) 
 /*__STUDIO_WORKER_END:phase6StopScenarioVerified__*/
 
 export async function phase6PulseInactiveScenario(env, scenarioId, outputRecordId, predicate, waitMs = 9000) {
-  const before = await phase6ScenarioState(env, scenarioId);
-  if (before.isActive) {
-    throw new HttpError(409, `Phase 6 refuses to pulse active scenario ${scenarioId}; an unrelated execution may own it`);
-  }
-
   let eligible = [];
-  if (Number(scenarioId) === PHASE6_R4_SCENARIO_ID) {
+  const stage = Number(scenarioId);
+  if (stage === PHASE6_R4_SCENARIO_ID) {
     eligible = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
       limit: 3,
       filterFormula: 'AND({Render_Status}="Ready for Render",{Composition_ID}!="",{Output_Filename}!="",{Render_Clip_List_JSON}!="",{Render_Total_Frames}>0)',
     });
-  } else if (Number(scenarioId) === PHASE6_R5_SCENARIO_ID) {
+  } else if (stage === PHASE6_R5_SCENARIO_ID) {
     eligible = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
       limit: 6,
       view: 'R5 - Rendering Jobs to Poll',
     });
+  } else {
+    throw new HttpError(400, `Phase 6 Python pulse does not support legacy scenario ${scenarioId}`);
   }
 
   if (eligible.length) {
     if (eligible.length !== 1 || eligible[0]?.id !== outputRecordId) {
-      throw new HttpError(409, `Phase 6 exact pulse isolation blocked scenario ${scenarioId}; eligible outputs=${eligible.map((row) => row.id).join(',') || 'none'}, requested=${outputRecordId}`);
+      throw new HttpError(409, `Phase 6 exact pulse isolation blocked stage ${scenarioId}; eligible outputs=${eligible.map((row) => row.id).join(',') || 'none'}, requested=${outputRecordId}`);
     }
-  } else if ([PHASE6_R4_SCENARIO_ID, PHASE6_R5_SCENARIO_ID].includes(Number(scenarioId))) {
-    throw new HttpError(409, `Phase 6 exact pulse isolation found no eligible output for scenario ${scenarioId}; requested=${outputRecordId}`);
+  } else {
+    throw new HttpError(409, `Phase 6 exact pulse isolation found no eligible output for stage ${scenarioId}; requested=${outputRecordId}`);
   }
 
-  let started = false;
-  let observed = { matched: false, record: await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, outputRecordId) };
-  let cleanup = null;
-  try {
-    await phase6SetScenarioActive(env, scenarioId, true);
-    started = true;
-    try {
-      await phase6RunScenario(env, scenarioId);
-    } catch (error) {
-      if (!phase6RunAlreadyActiveError(error)) throw error;
-    }
-    observed = await phase6WaitForOutputStatus(env, outputRecordId, predicate, waitMs, 1000);
-    return { started, observed, was_active: false, exact_selector_isolation: true, eligible_count: eligible.length };
-  } finally {
-    cleanup = await phase6StopScenarioVerified(env, scenarioId, 4);
-    if (!cleanup.inactive) console.error(`Phase 6 could not restore scenario ${scenarioId} inactive`, cleanup);
+  const target = eligible[0] || await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, outputRecordId);
+  const testRunId = String(f(target, "Test_Run_ID") || "").trim() || undefined;
+  let pulse;
+  if (stage === PHASE6_R4_SCENARIO_ID) {
+    pulse = await item4PulseR4Python(env, {
+      outputRecordId,
+      forceSlot: true,
+      testRunId,
+    });
+  } else {
+    pulse = await item4PulseR5Python(env, {
+      outputRecordId,
+      maxRuns: 1,
+      testRunId,
+    });
   }
+
+  const observed = await phase6WaitForOutputStatus(env, outputRecordId, predicate, waitMs, 1000);
+  return {
+    started: true,
+    observed,
+    was_active: false,
+    exact_selector_isolation: true,
+    eligible_count: eligible.length,
+    backend: "python",
+    pulse,
+  };
 }
 /*__STUDIO_WORKER_END:phase6PulseInactiveScenario__*/
 
