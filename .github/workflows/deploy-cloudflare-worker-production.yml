@@ -143,6 +143,9 @@ jobs:
           active_vars=json.loads(Path('/tmp/active-plain-vars.json').read_text())
           module.assert_global_factory_binding_tuple(active_vars,'Predeploy Worker',allow_absent=True)
           active_vars.update(factory_vars)
+          # Atomic MAE reservations are provisioned but remain hard-disabled until
+          # deterministic concurrency/recovery tests and a controlled canary pass.
+          active_vars['STUDIO_SCHEDULE_RESERVATION_AUTHORITY_ENABLED']='false'
           cfg={
             'name':os.environ['TARGET_WORKER'],
             'main':'worker.js',
@@ -153,6 +156,18 @@ jobs:
             'triggers':{'crons':['*/5 * * * *', '0 6 * * *']},
             'observability':{'enabled':True,'head_sampling_rate':1},
             'r2_buckets':[{'binding':'STUDIO_MEDIA','bucket_name':bucket}],
+            'durable_objects':{
+              'bindings':[{
+                'name':'STUDIO_SCHEDULE_RESERVATIONS',
+                'class_name':'ScheduleReservationLane',
+              }],
+            },
+            'exports':{
+              'ScheduleReservationLane':{
+                'type':'durable-object',
+                'storage':'sqlite',
+              },
+            },
             'secrets':{'required':['AIRTABLE_PAT']}
           }
           Path('/tmp/wrangler-production/wrangler.jsonc').write_text(json.dumps(cfg,indent=2))
@@ -197,6 +212,8 @@ jobs:
           bindings=(r.get('resources') or {}).get('bindings') or []
           got={str(x.get('name')):str(x.get('type')) for x in bindings}
           contract=assert_live_contract(got, 'Postdeploy live Worker')
+          if got.get('STUDIO_SCHEDULE_RESERVATIONS') != 'durable_object_namespace':
+              raise SystemExit('Atomic scheduling Durable Object binding missing after deploy')
           # Catch any dropped or changed runtime settings, including optional
           # secrets, before the new version is accepted. Never print values.
           before=json.loads(Path('/tmp/version-before.json').read_text())['result']
@@ -218,6 +235,8 @@ jobs:
               if name not in expected and after_plain.get(name)!=value:
                   raise SystemExit('Worker plaintext setting changed or disappeared: '+name)
           binding_values=after_plain
+          if binding_values.get('STUDIO_SCHEDULE_RESERVATION_AUTHORITY_ENABLED') != 'false':
+              raise SystemExit('Atomic scheduling feature flag must remain disabled during reservation-authority rollout')
           for name,value in expected.items():
               if binding_values.get(name)!=value:
                   raise SystemExit('Factory batch release verification mismatch: '+name)
