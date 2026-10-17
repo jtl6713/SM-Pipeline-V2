@@ -120,3 +120,24 @@ test("Large global selections are partitioned instead of disabling Submit", () =
   assert.match(js,/persistRemaining\(planned\)/);
   assert.match(js,/All \$\{ready\.length\} outputs accepted as/);
 });
+
+test("Ambiguous global POST responses reconcile only an exact durable Activity match", () => {
+  const rowsFn = extractNamedFunction(js, "factoryActivityRows");
+  const matchFn = extractNamedFunction(js, "factoryActivityMatchesPlan");
+  const factoryActivityMatchesPlan = new Function(`${rowsFn}; ${matchFn}; return factoryActivityMatchesPlan;`)();
+  const plan = {request_id:"req_ambiguous_123456",ids:["recOne","recTwo"]};
+  const activity = {batches:[{
+    job_id:"fg_req_ambiguous_123456",request_id:"req_ambiguous_123456",
+    items:[{id:"recTwo"},{id:"recOne"}],status:"running",
+  }]};
+  assert.equal(factoryActivityMatchesPlan(activity,plan)?.status,"running");
+  assert.equal(factoryActivityMatchesPlan({batches:[{
+    request_id:"req_ambiguous_123456",items:[{id:"recOne"},{id:"recOther"}],
+  }]},plan),null);
+  assert.equal(factoryActivityMatchesPlan({batches:[{
+    request_id:"different_request",items:[{id:"recOne"},{id:"recTwo"}],
+  }]},plan),null);
+  assert.match(js,/recoverSubmittedFactoryPlan\(plan, error\)/);
+  assert.match(js,/reconcilePendingGlobalSelection\(batch\)/);
+  assert.match(js,/Recovered a confirmed server submission after a connection error/);
+});
