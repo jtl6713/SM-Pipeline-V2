@@ -5933,7 +5933,11 @@ export async function studioPrepareVisualVoiceoverCanary(request, env) {
     const video = (slides || []).find((slide) => {
       const media = String(slide?.media_type || slide?.mime_type || slide?.url || slide?.preview_url || "").toLowerCase();
       const sourceMs = Number(slide?.source_duration_ms || slide?.sourceDurationMs || 0);
-      const durationMs = Number(slide?.duration_ms || slide?.durationSeconds * 1000 || 0);
+      const durationMs = Number(
+        slide?.duration_ms
+        || Number(slide?.duration_seconds || slide?.durationSeconds || 0) * 1000
+        || 0
+      );
       return /video|mp4|mov|m4v|webm/.test(media) && durationMs >= 2000 && sourceMs > durationMs + 250;
     });
     if (!video) continue;
