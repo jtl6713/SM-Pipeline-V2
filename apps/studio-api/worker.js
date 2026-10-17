@@ -859,6 +859,7 @@ export default {
       const isOperationsQueuePauseWrite = isOperationsQueuePauseRoute && request.method === "POST";
       const isOperationsQueueReorderWrite = isOperationsQueueReorderRoute && request.method === "POST";
       const isFactoryDeskWrite = isFactoryDeskRoute && request.method === "POST";
+      const isFactoryBatchWrite = isFactoryBatchRoute && request.method === "POST";
       const isIdeaWatchPhotosWrite = isIdeaWatchPhotosRoute && request.method === "POST";
       const isIdeaPhotoListeningSessionWrite = isIdeaPhotoListeningSessionRoute && request.method === "POST";
       const isIdeaMatchPhotosWrite = isIdeaMatchPhotosRoute && request.method === "POST";
@@ -982,6 +983,7 @@ export default {
         isOperationsQueuePauseWrite ||
         isOperationsQueueReorderWrite ||
         isFactoryDeskWrite ||
+        isFactoryBatchWrite ||
         isOperationsOutputScheduleWrite ||
         isOperationsOutputPublishedWrite ||
         isOperationsOutputPublishKickWrite ||
@@ -1040,7 +1042,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.651-overview-fast-refresh",
+          version: "0.10.652-factory-batch-phase2a-post",
           factory_batch_canary_revision: "chicago-ig-reel-v1",
           studio_supabase_pipeline_reads_v1: true,
           studio_supabase_sync_gate_v1: true,
