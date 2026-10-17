@@ -126,6 +126,11 @@ jobs:
               raise SystemExit('Visual voiceover rollout must remain do_not_publish_only')
           if type(visual_rollout.get('enabled')) is not bool:
               raise SystemExit('Visual voiceover rollout enabled must be boolean')
+          canary_ids=[str(x).strip() for x in visual_rollout.get('canary_output_ids',[]) if str(x).strip()]
+          if visual_rollout.get('enabled'):
+              import re
+              if len(canary_ids)!=1 or not re.fullmatch(r'rec[A-Za-z0-9]{14}',canary_ids[0]):
+                  raise SystemExit('Enabled visual voiceover rollout requires exactly one Airtable canary record id')
           safe_modes={'chicago_ig_reel_v1':1,'chicago_ig_reels_v2':5}
           assert rollout.get('mode') in safe_modes
           assert rollout.get('profile_id')=='recT2rbKX3MF7cVFU'
@@ -145,7 +150,7 @@ jobs:
           visual_vars={
             'STUDIO_VISUAL_TIMELINE_V1':'true' if visual_rollout.get('enabled') and visual_rollout.get('timeline_enabled') else 'false',
             'STUDIO_VISUAL_SCRIPT_V1':'true' if visual_rollout.get('enabled') and visual_rollout.get('script_enabled') else 'false',
-            'STUDIO_VISUAL_CANARY_OUTPUT_IDS':','.join(str(x).strip() for x in visual_rollout.get('canary_output_ids',[]) if str(x).strip()),
+            'STUDIO_VISUAL_CANARY_OUTPUT_IDS':','.join(canary_ids),
           }
           # Preserve all active plaintext settings explicitly; never use
           # --keep-vars, which can inherit stale settings from rolled-back
