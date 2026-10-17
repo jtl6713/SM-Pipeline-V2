@@ -12288,10 +12288,10 @@ export async function factoryBatchStatusRoute(request, env, authorization) {
         ...factoryBatchSummary(job),
         quality_signals:factoryBatchQualitySignals(job),
       })),
-      ...groupHistory.groups.map(group=>({...group,quality_signals:[]})),
+      ...groupHistory.groups,
     ].sort((a,b)=>Date.parse(b.created_at||"")-Date.parse(a.created_at||"")).slice(0,40);
     const qualitySignals = batches.flatMap(job => (job.quality_signals || [])
-      .map(signal => ({ ...signal, profile_id: job.profile_id,
+      .map(signal => ({ ...signal, profile_id: signal.profile_id || job.profile_id,
         job_id: job.job_id, output_ids: (job.items || []).map(row => row.output_id).filter(Boolean) })));
     const totals = {
       batches: batches.length,
