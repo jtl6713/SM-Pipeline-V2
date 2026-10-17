@@ -6,6 +6,8 @@ import {
   readProfilesOverviewRefreshStateRecord,
 } from "./profiles-overview-refresh.mjs";
 import { withOutputApprovalLock } from "./output-approval-lease.mjs";
+import { scheduleReservationAuthorityEnabled } from "./schedule-reservation-authority.mjs";
+import { runAtomicScheduleTransaction } from "./schedule-reservation-transaction.mjs";
 import { factoryBatchRolloutPolicy, factoryBatchRolloutAcceptsOutput, factoryBatchRolloutAcceptsIds } from "./factory-batch-rollout.mjs";
 import {
   factoryBatchEnqueue, factoryBatchRead, factoryBatchList, factoryBatchListGlobal,
@@ -1615,6 +1617,236 @@ export async function studioReconcileFacebookReels(env, options = {}) {
 }
 /*__STUDIO_WORKER_END:studioReconcileFacebookReels__*/
 
+async function approveOutputRecordForPublishingAtomic(
+  env,
+  record,
+  note,
+  stamp,
+  payload,
+  options,
+  context,
+) {
+  const id = record.id;
+  const platform = context.platform;
+  const outputType = context.outputType;
+  const profile = context.profile;
+  const existingNotes = context.existingNotes;
+  const horizonDays = options.horizonDays
+    || await studioScheduleHorizonDays(env).catch(() => MAE_SUGGEST_HORIZON_DAYS);
+  const timeZone = options.timeZone || await studioScheduleTimeZoneForRecord(env, record, payload);
+  const isStory = /story/i.test(outputType);
+  const markerIso = String(f(record, "Studio_Scheduled_At") || "").trim();
+  const existingScheduleIso = String(
+    f(record, "Scheduled_Post_Date") || f(record, "YouTube_Scheduled_Publish_At") || ""
+  ).trim();
+  const rawIn = String(payload?.scheduled_post_date || "").trim();
+  const publishNowImmediate = Boolean(
+    payload?.publish_now === true || rawIn.toLowerCase() === "immediate"
+  );
+  const recheckBestSlot = options.recheckBestSlot === true
+    || (options.recheckBestSlot !== false
+      && !publishNowImmediate
+      && payload?.manual_schedule_override !== true
+      && !markerIso);
+
+  // Native publishing preparation may touch asset metadata, but it must not
+  // consume the scheduling lane. Finish it before acquiring profile/platform capacity.
+  const prepared = await studioEnsureNativePublishSlides(env, record);
+
+  const transaction = await runAtomicScheduleTransaction(env, {
+    content_profile_id: profile?.id || "",
+    platform,
+    platform_output_record_id: id,
+    operation_id: options.scheduleOperationId || "",
+    factory_batch_id: options.factoryBatchId || null,
+  }, {
+    // This helper is invoked only while the feature flag is on. The explicit
+    // legacy callback is still supplied so the adapter remains total.
+    legacy: async () => {
+      throw new HttpError(503, "Atomic schedule transaction unexpectedly entered legacy mode");
+    },
+    plan: async ({ occupied_reservations: durableReservations }) => {
+      // The final slot is selected only after this lane owns the shared
+      // profile/platform reservation authority. Never trust batch-start occupancy.
+      studioInvalidateOccupiedScheduleCache();
+      const fresh = await studioOccupiedSchedulesOrEmpty(env, {
+        excludeIds: [id],
+        profile,
+      });
+      let laneOccupiedMs = studioOccupiedForLane(fresh, platform, outputType).slice();
+      let platformOccupiedMs = studioOccupiedForPlatform(fresh, platform).slice();
+
+      // Airtable and Durable Object storage are different systems. Include
+      // committed ledger entries that have not appeared in the Airtable query yet.
+      for (const reservation of durableReservations || []) {
+        const ms = Date.parse(String(reservation?.scheduled_iso || ""));
+        if (Number.isFinite(ms)) platformOccupiedMs.push(ms);
+      }
+      laneOccupiedMs = [...new Set(laneOccupiedMs.filter(Number.isFinite))];
+      platformOccupiedMs = [...new Set(platformOccupiedMs.filter(Number.isFinite))];
+
+      let requestedRaw = recheckBestSlot ? "" : rawIn;
+      let exactOverride = false;
+      let storyCompanion = false;
+      const capacityMessage = `No open morning, afternoon, evening, or overflow slot in the next ${horizonDays} days`;
+      const pickLaneIso = (lane) => {
+        const picked = maeScheduleNextSlot({
+          timeZone,
+          laneOccupiedMs: lane || [],
+          platformOccupiedMs,
+          horizonDays,
+        });
+        if (!picked.ok) throw new HttpError(409, picked.error || capacityMessage);
+        return picked.iso;
+      };
+
+      if (publishNowImmediate) {
+        requestedRaw = "immediate";
+      } else if (payload?.manual_schedule_override === true && rawIn) {
+        requestedRaw = rawIn;
+        exactOverride = true;
+      } else if (markerIso && !recheckBestSlot) {
+        requestedRaw = markerIso;
+        exactOverride = true;
+      } else if (isStory) {
+        const resolved = await studioResolveStoryPublishIso(env, record, {
+          timeZone,
+          occupiedMs: laneOccupiedMs,
+          requestedIso: recheckBestSlot ? "" : requestedRaw,
+          existingIso: recheckBestSlot ? "" : existingScheduleIso,
+          extraSiblings: options.extraSiblings || [],
+          siblingRows: options.siblingRows,
+        });
+        if (!resolved.iso) {
+          requestedRaw = pickLaneIso(laneOccupiedMs);
+        } else {
+          requestedRaw = resolved.iso;
+          storyCompanion = resolved.source === "companion" || resolved.source === "mae_plus_10";
+        }
+      } else if (!recheckBestSlot && !requestedRaw && existingScheduleIso) {
+        requestedRaw = existingScheduleIso;
+      } else if (!requestedRaw) {
+        requestedRaw = pickLaneIso(laneOccupiedMs);
+      }
+
+      // Explicit operator times remain exact, but exact does not mean unsafe:
+      // reject a platform-wall-clock collision rather than silently moving it.
+      if (
+        !publishNowImmediate
+        && !storyCompanion
+        && requestedRaw
+        && requestedRaw !== "immediate"
+      ) {
+        const requestedMs = Date.parse(requestedRaw);
+        if (Number.isFinite(requestedMs) && maeScheduleConflicts(requestedMs, platformOccupiedMs)) {
+          if (exactOverride) {
+            throw new HttpError(409, "Requested schedule conflicts with another output on this profile and platform");
+          }
+          requestedRaw = pickLaneIso(laneOccupiedMs);
+        }
+      }
+
+      const scheduleFields = studioPublishScheduleFields(
+        { ...(payload || {}), scheduled_post_date: requestedRaw, timezone: timeZone },
+        record,
+        {
+          // Companion Stories intentionally remain main + 10 minutes. Other
+          // schedule writes enforce the shared platform wall-clock occupancy.
+          occupiedMs: storyCompanion ? [] : platformOccupiedMs,
+          exactOverride,
+          storyCompanion,
+          timeZone,
+          forceWrite: publishNowImmediate,
+        },
+      );
+      const selectedIso = String(
+        scheduleFields.Scheduled_Post_Date || f(record, "Scheduled_Post_Date") || ""
+      ).trim();
+      if (!selectedIso || Number.isNaN(Date.parse(selectedIso))) {
+        throw new HttpError(409, "Atomic scheduling could not produce a verifiable publication time");
+      }
+
+      const fields = {
+        Review_Status: "Approved",
+        Output_Status: "Approved for Publishing",
+        Publish_Status: "Ready to Schedule",
+        Publish_Method: "Automated",
+        Auto_Publish_Enabled: true,
+        Review_Decision_At: stamp,
+        Do_Not_Publish: false,
+        Review_Notes: [existingNotes, note, `Studio Pipeline approved for publishing at ${stamp}.`].filter(Boolean).join("\n\n"),
+        ...studioPublishHandoffFields(record, { scheduledPostDate: selectedIso }),
+        ...scheduleFields,
+      };
+      const preparedHandoff = studioPublishHandoffFields(prepared, {
+        scheduledPostDate: scheduleFields.Scheduled_Post_Date
+          || f(prepared, "Scheduled_Post_Date")
+          || selectedIso,
+      });
+
+      const previousMs = Date.parse(existingScheduleIso);
+      const selectedMs = Date.parse(selectedIso);
+      const action = Number.isFinite(previousMs)
+        && new Date(previousMs).toISOString() !== new Date(selectedMs).toISOString()
+        ? "move"
+        : (Number.isFinite(previousMs) ? "move" : "reserve");
+
+      return {
+        action,
+        selectedIso: new Date(selectedMs).toISOString(),
+        previousIso: Number.isFinite(previousMs) ? new Date(previousMs).toISOString() : "",
+        fields: { ...fields, ...preparedHandoff, ...scheduleFields },
+      };
+    },
+    write: async (plan) => airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, prepared.id || id, {
+      method: "PATCH",
+      body: JSON.stringify({ fields: plan.fields, typecast: true }),
+    }),
+    verify: async (written, plan) => {
+      const authoritative = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, prepared.id || id);
+      const storedRaw = String(f(authoritative, "Scheduled_Post_Date") || "").trim();
+      const storedMs = Date.parse(storedRaw);
+      const selectedMs = Date.parse(plan.selectedIso);
+      if (!Number.isFinite(storedMs) || !Number.isFinite(selectedMs)
+          || new Date(storedMs).toISOString() !== new Date(selectedMs).toISOString()) {
+        const error = new HttpError(409, "Authoritative schedule did not match the reserved MAE slot");
+        error.authoritative_record = authoritative;
+        throw error;
+      }
+      if (platform === "YouTube") {
+        const youtubeRaw = String(f(authoritative, "YouTube_Scheduled_Publish_At") || "").trim();
+        const youtubeMs = Date.parse(youtubeRaw);
+        if (!Number.isFinite(youtubeMs)
+            || new Date(youtubeMs).toISOString() !== new Date(selectedMs).toISOString()) {
+          const error = new HttpError(409, "YouTube scheduled publish time did not match the reserved MAE slot");
+          error.authoritative_record = authoritative;
+          throw error;
+        }
+      }
+      written.__atomic_verified_record = authoritative;
+      return new Date(storedMs).toISOString();
+    },
+    afterCommit: async (written) => {
+      studioInvalidateOccupiedScheduleCache();
+      const authoritative = written.__atomic_verified_record || written;
+      const writeThrough = studioSupabaseWriteThroughOutput(env, authoritative, "approve");
+      if (Array.isArray(options.writeThroughQueue)) {
+        options.writeThroughQueue.push(writeThrough);
+      } else {
+        await writeThrough;
+      }
+    },
+  });
+
+  if (transaction?.already_committed) {
+    const current = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, prepared.id || id);
+    return { ...current, __already_approved: true };
+  }
+  return transaction?.value?.__atomic_verified_record || transaction?.value;
+}
+
+/*__STUDIO_WORKER_END:approveOutputRecordForPublishingAtomic__*/
+
 export async function approveOutputRecordForPublishing(env, existing, note, stamp, payload = {}, options = {}) {
   const id = existing.id;
   return withOutputApprovalLock(env.STUDIO_MEDIA, id, async () => {
@@ -1647,6 +1879,17 @@ export async function approveOutputRecordForPublishing(env, existing, note, stam
   const outputType = String(f(record, "Studio_Output_Type") || f(record, "Format") || "").trim();
   const laneKey = maeScheduleLaneKey(platform, outputType) || String(platform || "").toLowerCase();
   const profile = options.profile || await item4ProductionProfileRecord(env, record).catch(() => null);
+  if (scheduleReservationAuthorityEnabled(env)) {
+    return approveOutputRecordForPublishingAtomic(
+      env,
+      record,
+      note,
+      stamp,
+      payload,
+      options,
+      { platform, outputType, profile, existingNotes },
+    );
+  }
   const horizonDays = options.horizonDays
     || await studioScheduleHorizonDays(env).catch(() => MAE_SUGGEST_HORIZON_DAYS);
   let occupiedMs = Array.isArray(options.occupiedMs) ? options.occupiedMs.slice() : null;
