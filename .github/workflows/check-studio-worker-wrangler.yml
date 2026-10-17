@@ -28,7 +28,10 @@ jobs:
             "main":"worker.js",
             "compatibility_date":"2026-08-02",
             "workers_dev":false,
-            "r2_buckets":[{"binding":"STUDIO_MEDIA","bucket_name":"dummy"}]
+            "vars":{"STUDIO_SCHEDULE_RESERVATION_AUTHORITY_ENABLED":"false"},
+            "r2_buckets":[{"binding":"STUDIO_MEDIA","bucket_name":"dummy"}],
+            "durable_objects":{"bindings":[{"name":"STUDIO_SCHEDULE_RESERVATIONS","class_name":"ScheduleReservationLane"}]},
+            "exports":{"ScheduleReservationLane":{"type":"durable-object","storage":"sqlite"}}
           }
           EOF
           ./node_modules/.bin/wrangler deploy --config wrangler.jsonc --dry-run > /tmp/dry.log 2>&1
