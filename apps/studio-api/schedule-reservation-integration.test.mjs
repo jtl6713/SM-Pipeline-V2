@@ -57,6 +57,9 @@ test("atomic approval persists, re-reads Airtable, verifies exact schedule, then
   assert.match(atomic, /Airtable stored schedule does not match the reserved MAE slot/);
   assert.match(transaction, /phase = "begin_verify"/);
   assert.match(transaction, /phase = "write"/);
+  assert.match(transaction, /SCHEDULE_RESERVATION_EXTERNAL_WRITE_TIMEOUT_MS/);
+  assert.match(transaction, /signal: controller\.signal/);
+  assert.match(transaction, /heartbeatScheduleReservation\(env, token\)/);
   assert.match(transaction, /phase = "verify"/);
   assert.match(transaction, /phase = "commit"/);
   assert.match(transaction, /phase = "release"/);
