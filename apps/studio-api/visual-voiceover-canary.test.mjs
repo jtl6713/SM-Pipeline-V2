@@ -38,14 +38,14 @@ test("production rollout remains fail-closed to nonpublishing outputs", async ()
   assert.equal(rollout.timeline_enabled, true);
   assert.equal(rollout.script_enabled, true);
   assert.equal(rollout.scope, "do_not_publish_only");
-  assert.deepEqual(rollout.canary_output_ids, []);
+  assert.deepEqual(rollout.canary_output_ids, ["recL2zjZc7XGRJyRt"]);
 
   const gateStart = functions.indexOf("export function phase6VisualTimelineEnabledForOutput");
   const gateEnd = functions.indexOf("/*__STUDIO_WORKER_END:phase6VisualTimelineEnabledForOutput__*/", gateStart);
   assert.ok(gateStart >= 0 && gateEnd > gateStart);
   const gate = functions.slice(gateStart, gateEnd);
   assert.match(gate, /if \(!Boolean\(f\(outputRecord, "Do_Not_Publish"\)\)\) return false;/);
-  assert.match(gate, /STUDIO_VISUAL_CANARY_OUTPUT_IDS/);
+  assert.match(gate, /phase6VisualCanaryOutputIds\(env\)/);
 });
 
 
