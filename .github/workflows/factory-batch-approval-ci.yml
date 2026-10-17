@@ -23,8 +23,9 @@ jobs:
           node --check apps/studio-api/worker-functions-04.mjs
           node --check apps/studio-api/approve-all-batch.mjs
           node --check apps/studio-api/factory-approval-queue.mjs
+          node --check apps/studio-api/factory-approval-groups.mjs
           node --check apps/studio-api/output-approval-lease.mjs
           node --check apps/studio-web/assets/factory-desk.js
       - name: Factory single and batch approval regressions
         run: |
-          node --test apps/studio-api/approve-all-batch.test.mjs apps/studio-api/factory-approve.test.mjs apps/studio-api/factory-batch-approval.test.mjs apps/studio-api/factory-approval-queue.test.mjs apps/studio-api/factory-real-record-publish-route.staging.test.mjs apps/studio-api/output-approval-lease.test.mjs apps/studio-web/factory-desk.test.mjs apps/studio-web/factory-batch-approval.test.mjs
+          node --test apps/studio-api/approve-all-batch.test.mjs apps/studio-api/factory-approve.test.mjs apps/studio-api/factory-batch-approval.test.mjs apps/studio-api/factory-approval-queue.test.mjs apps/studio-api/factory-approval-groups.test.mjs apps/studio-api/factory-real-record-publish-route.staging.test.mjs apps/studio-api/output-approval-lease.test.mjs apps/studio-web/factory-desk.test.mjs apps/studio-web/factory-batch-approval.test.mjs
