@@ -1517,12 +1517,36 @@ async function studioReconcileReservationDriftAtomic(env, snapshot, reservation,
     legacy: async () => {
       throw new HttpError(503, "Reservation drift reconciliation unexpectedly entered legacy mode");
     },
-    plan: async () => {
+    plan: async ({ occupied_reservations: durableReservations }) => {
       const authoritative = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, outputId);
       if (studioScheduleReservationPublished(authoritative)) {
         throw new HttpError(409, "Published reservation drift requires Needs Eyes");
       }
       const currentIso = scheduleReservationAuthoritativeIso(authoritative);
+      if (currentIso) {
+        const currentMs = Date.parse(currentIso);
+        const profile = await item4ProductionProfileRecord(env, authoritative).catch(() => null);
+        const timeZone = await studioScheduleTimeZoneForRecord(env, authoritative, null);
+        studioInvalidateOccupiedScheduleCache();
+        const occupied = await studioOccupiedSchedulesOrEmpty(env, {
+          excludeIds: [outputId],
+          profile,
+        });
+        const platformOccupied = studioOccupiedForPlatform(occupied, platform).slice();
+        for (const durable of durableReservations || []) {
+          const ms = Date.parse(String(durable?.scheduled_iso || ""));
+          if (Number.isFinite(ms)) platformOccupied.push(ms);
+        }
+        const blockers = [...new Set(platformOccupied.filter(Number.isFinite))];
+        if (!Number.isFinite(currentMs)
+            || maeIsBlackoutLocalTime(currentMs, timeZone)
+            || maeScheduleConflicts(currentMs, blockers)) {
+          throw new HttpError(
+            409,
+            "Authoritative reservation drift violates blackout or current profile/platform separation; Needs Eyes required",
+          );
+        }
+      }
       return {
         action: currentIso ? "move" : "vacate",
         selectedIso: currentIso,
@@ -1584,7 +1608,8 @@ export async function studioScheduleReservationQualitySweep(env, options = {}) {
     // when the lane is explicitly quarantined. Expired Acquired/Reserving owners
     // are pre-write and are safely fenced by the next normal acquirer instead.
     const shouldRecoverActive = Boolean(
-      active?.platform_output_record_id
+      options.recover !== false
+      && active?.platform_output_record_id
       && (snapshot?.quarantine || recoverableExpiredState)
     );
     if (shouldRecoverActive) {
