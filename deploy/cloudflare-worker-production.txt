@@ -397,3 +397,5 @@ overview-fast-refresh 2026-10-17T01:20:00Z worker 0.10.651-overview-fast-refresh
 2026-10-17 Factory five Chicago Reel dormant-code rollout | PR #798 merge ae5c09a7fdbc318ef88e003cad4479ff289d5262 | CI 5/5 PASS | rollout manifest remains chicago_ig_reel_v1 max_items=1 enabled=true | worker code supports guarded chicago_ig_reels_v2 only after later controlled manifest switch; no approvals submitted.
 
 2026-10-17 Activate guarded five Chicago Instagram Reel operator-selected batches | PR #799 merge 33812021c81cf7aff9edb763260bb9ff68c33295 | CI factory-batch, validate, hermetic PASS | signed manifest chicago_ig_reels_v2 max_items=5, Chicago only | No approval POST or publishing issued; rollback mode v1 max1 or enabled=false.
+
+# Factory Phase 3A dormant Story policy deployment; active Reel-only rollout unchanged. PR #800 merged 4b164d3d86cebfca8f2c101c496c5b742bac8d0f (2026-10-17).
