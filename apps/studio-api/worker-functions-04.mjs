@@ -1201,7 +1201,7 @@ export async function studioReconcileOverdueScheduledPublishes(env, options = {}
 
 
 
-function studioScheduleOperationToken(prefix, row, fallback = "current") {
+export function studioScheduleOperationToken(prefix, row, fallback = "current") {
   const cycle = String(
     f(row, "Review_Decision_At")
     || f(row, "Final_File_ID")
@@ -1214,7 +1214,7 @@ function studioScheduleOperationToken(prefix, row, fallback = "current") {
 
 /*__STUDIO_WORKER_END:studioScheduleOperationToken__*/
 
-async function studioHealApprovedMissingScheduleAtomic(env, row) {
+export async function studioHealApprovedMissingScheduleAtomic(env, row) {
   const profile = await item4ProductionProfileRecord(env, row).catch(() => null);
   const profileId = String(profile?.id || "").trim();
   const platform = String(f(row, "Platform") || "").trim();
@@ -1368,7 +1368,7 @@ async function studioHealApprovedMissingScheduleAtomic(env, row) {
 
 /*__STUDIO_WORKER_END:studioHealApprovedMissingScheduleAtomic__*/
 
-async function studioHealStoryCompanionDriftAtomic(env, row) {
+export async function studioHealStoryCompanionDriftAtomic(env, row) {
   const profile = await item4ProductionProfileRecord(env, row).catch(() => null);
   const profileId = String(profile?.id || "").trim();
   const platform = String(f(row, "Platform") || "").trim();
@@ -1482,14 +1482,14 @@ async function studioHealStoryCompanionDriftAtomic(env, row) {
 
 /*__STUDIO_WORKER_END:studioHealStoryCompanionDriftAtomic__*/
 
-function studioScheduleReservationPublished(record) {
+export function studioScheduleReservationPublished(record) {
   return /published/i.test(String(f(record, "Publish_Status") || f(record, "Output_Status") || ""))
     || Boolean(f(record, "Published_At"));
 }
 
 /*__STUDIO_WORKER_END:studioScheduleReservationPublished__*/
 
-async function studioReconcileReservationDriftAtomic(env, snapshot, reservation, record) {
+export async function studioReconcileReservationDriftAtomic(env, snapshot, reservation, record) {
   const profileId = String(snapshot?.lane?.content_profile_id || "").trim();
   const platform = String(snapshot?.lane?.platform || f(record, "Platform") || "").trim();
   const outputType = String(
@@ -2200,7 +2200,7 @@ export async function studioReconcileFacebookReels(env, options = {}) {
 /*__STUDIO_WORKER_END:studioReconcileFacebookReels__*/
 
 
-function studioStoryCompanionPlatformBlockers(platformOccupiedMs, companionIso) {
+export function studioStoryCompanionPlatformBlockers(platformOccupiedMs, companionIso) {
   const companionMs = Date.parse(String(companionIso || ""));
   if (!Number.isFinite(companionMs)) return (platformOccupiedMs || []).filter(Number.isFinite);
   const mainMs = companionMs - MAE_STORY_COMPANION_OFFSET_MS;
@@ -2734,7 +2734,7 @@ export function mapApproveAllEligibleSummary(record) {
 
 /*__STUDIO_WORKER_END:mapApproveAllEligibleSummary__*/
 
-async function studioReadScheduleRegenJobStoreFromR2(env) {
+export async function studioReadScheduleRegenJobStoreFromR2(env) {
   const r2Key = "studio/state/schedule-regen-jobs-v1.json";
   if (!env?.STUDIO_MEDIA?.get) return null;
   try {
@@ -2855,7 +2855,7 @@ export function studioNormalizeRegenFilters(payload = {}) {
 }
 /*__STUDIO_WORKER_END:studioNormalizeRegenFilters__*/
 
-async function studioAtomicApplyScheduleRegenEntry(env, {
+export async function studioAtomicApplyScheduleRegenEntry(env, {
   entry,
   record,
   profile,
@@ -10314,7 +10314,7 @@ export async function factorySendBackContent(env, productionRequestId, outputIds
 }
 /*__STUDIO_WORKER_END:factorySendBackContent__*/
 
-async function studioAtomicVacateSkippedOutput(env, row, fields, operationId) {
+export async function studioAtomicVacateSkippedOutput(env, row, fields, operationId) {
   const current = row?.id
     ? await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, row.id)
     : null;
