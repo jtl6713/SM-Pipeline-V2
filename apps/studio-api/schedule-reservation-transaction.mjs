@@ -111,6 +111,7 @@ export async function runAtomicScheduleTransaction(env, args = {}, callbacks = {
     owner_operation_id: opId,
     reservation_id: reservationId,
     factory_batch_id: clean(args.factory_batch_id, 180) || null,
+    output_type: clean(args.output_type || args.platform_output_type, 120) || null,
   };
 
   let phase = "acquire";
