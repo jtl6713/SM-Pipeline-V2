@@ -2359,6 +2359,17 @@ export default {
         return;
       }
 
+      // Fail-safe recovery: the dedicated one-minute Factory cron should
+      // normally drain the queue. A one-time production Cron propagation lag,
+      // skipped trigger, or transient Worker scheduling issue must never strand
+      // durable approvals indefinitely. The fair candidate selection dispatches
+      // only one child per profile; the R2 CAS lock protects overlapping ticks.
+      try {
+        await factoryBatchCronResume(env, ctx);
+      } catch (error) {
+        console.warn("Factory five-minute fallback recovery failed", error);
+      }
+
       // Create the hour's ideas before publish heals. Those heals were still
       // running at :12, so the harvest saw a non-zero minute and created nothing.
       if (cadence.heavy && Number(cadence.minute) === 0) {
