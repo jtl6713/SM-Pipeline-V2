@@ -429,3 +429,4 @@ Deploy Factory all-platform batch approvals 2026-10-17. PR #813. Signed global m
 2026-10-17 deploy nonpublishing visual timeline response contract fix 191a21bab30c5723d57579ecbfdaecbfaa38bb81 with regression ab43d2ab2a7c4bb608693826ef6746eb6f49b202.
 2026-10-17 deploy nonpublishing visual timeline response contract fix 191a21bab30c5723d57579ecbfdaecbfaa38bb81 with regression ab43d2ab2a7c4bb608693826ef6746eb6f49b202.
 2026-10-17 deploy Phase 6 Python R4/R5 continuation fix 706c301b15336aa3d6e641914c593f98d92e3f1d with regression c2a58e0f3fa30bc0d3495d32da74c6092cf66335.
+2026-10-17 deploy Phase 6 Python Runner continuation fix 4ecf01f561999a19dc9b025ca5b5890a7d6b0d46 with regression 86feb516eb7db7f88abe71c239aa257152b8dc9a.
