@@ -9,11 +9,11 @@
   "notes": "Operator-selected 1–5 review-ready Chicago Instagram Reels per batch only; no automatic approval. Other profiles, Stories, YouTube, TikTok, Facebook, and carousels remain excluded. Roll back by restoring chicago_ig_reel_v1 and max_items=1 or set enabled=false.",
   "global": {
     "enabled": true,
-    "stage": "pilot",
+    "stage": "expanded",
     "mode": "global_ig_reel_story_v1",
-    "max_total": 4,
-    "max_per_profile": 2,
+    "max_total": 20,
+    "max_per_profile": 10,
     "production_signoff": "explicit-review",
-    "notes": "Operator-selected only: up to 4 verified Instagram Reels/Stories per global group and 2 per profile. Retain independent Chicago Reel-only max-5 batch pilot. No automatic approval or publishing. Expand ONLY after gated acceptance, by separate manifest edit to stage=expanded max_total=20 max_per_profile=10. Emergency stop: set global.enabled=false, deploy and confirm global approval routes denied; existing child workers stop."
+    "notes": "Expanded operator-selected global Factory groups: maximum 20 verified Instagram Reels/Stories total and 10 per profile. Released only after 7/7 PR pilot gates, read-only signed 4/2 production Worker canary, Pages production verification, and 20-output two-profile negative boundary tests. Profile-local scheduling, Quality Agent, retries, idempotence unchanged. Emergency rollback: restore pilot stage/4/2 and redeploy; oversized queued global groups pause; or use exact disabled tuple. No automatic approval or publication."
   }
 }
