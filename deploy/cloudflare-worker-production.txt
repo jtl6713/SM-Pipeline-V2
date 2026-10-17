@@ -393,3 +393,5 @@ overview-fast-refresh 2026-10-17T01:20:00Z worker 0.10.651-overview-fast-refresh
 # 2026-10-16 hourly ideas refill target 500 / upper band 509
 
 2026-10-17 Global Factory read-only history rollout | PR #797 merge 1304fb60ef736f304f298095d5cac4265466fac7 | 9 checks PASS | GET /api/factory/approval-batches?scope=all from durable R2 | preserve v1 Chicago one-Reel write policy | Worker before Pages.
+
+2026-10-17 Factory five Chicago Reel dormant-code rollout | PR #798 merge ae5c09a7fdbc318ef88e003cad4479ff289d5262 | CI 5/5 PASS | rollout manifest remains chicago_ig_reel_v1 max_items=1 enabled=true | worker code supports guarded chicago_ig_reels_v2 only after later controlled manifest switch; no approvals submitted.
