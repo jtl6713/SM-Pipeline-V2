@@ -114,12 +114,14 @@ export async function runLiveScheduleReservationCanary(env, { nonce } = {}) {
     }, { maxWaitMs: 0 });
   } catch (e) { quarantined = /quarantined|recovery_required/i.test(String(e.code || e.message)); }
   assert(quarantined, "Ambiguous lane allowed a new writer");
-  const ambiguous = await reconcileScheduleReservation(isolated, {
-    ...token, recovery_operation_id: PREFIX + nonce + "-recovery",
-    observation: "ambiguous", authoritative_iso: "",
-  });
-  assert(ambiguous.recovery_required === true || ambiguous.reconciled === false,
-    "Ambiguous observation incorrectly cleared quarantine");
+  let ambiguityRetained = false;
+  try {
+    await reconcileScheduleReservation(isolated, {
+      ...token, recovery_operation_id: PREFIX + nonce + "-recovery",
+      observation: "ambiguous", authoritative_iso: "",
+    });
+  } catch (e) { ambiguityRetained = e.code === "recovery_still_ambiguous"; }
+  assert(ambiguityRetained, "Ambiguous observation incorrectly cleared quarantine");
   const reconciled = await reconcileScheduleReservation(isolated, {
     ...token, recovery_operation_id: PREFIX + nonce + "-recovery",
     observation: "committed", authoritative_iso: iso,
