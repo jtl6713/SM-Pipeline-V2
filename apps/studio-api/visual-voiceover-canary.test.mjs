@@ -120,3 +120,4 @@ test("visual voiceover rerender continuation uses exact-isolated Python R4/R5, n
   assert.doesNotMatch(pulse, /phase6SetScenarioActive/);
   assert.doesNotMatch(pulse, /phase6RunScenario/);
 });
+// Final CI verification marker for deployed exact-isolated visual rerender.
