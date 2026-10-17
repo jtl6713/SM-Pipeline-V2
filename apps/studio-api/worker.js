@@ -634,6 +634,8 @@ import {
   studioReconcileOverdueScheduledPublishes,
   studioHealApprovedMissingSchedule,
   studioHealStoryCompanionDrift,
+  studioScheduleReservationQualitySweep,
+  studioScheduleReservationQualityLatest,
   studioReconcileApprovedPublishes,
   studioReconcileFacebookVideoCovers,
   studioReconcilePublishingInstagramStories,
@@ -1124,6 +1126,7 @@ export default {
           studio_schedule_spacing_v1: true,
           studio_schedule_reservation_authority_v1: scheduleReservationAuthorityEnabled(env),
           studio_schedule_reservation_authority_binding_v1: Boolean(env?.[SCHEDULE_RESERVATION_BINDING]),
+          studio_schedule_reservation_quality_agent_v1: scheduleReservationAuthorityEnabled(env),
           studio_open_review_reschedule_v1: true,
           studio_yt_manual_schedule_lock_v1: true,
           studio_insights_watchlist_v2: true,
@@ -2376,6 +2379,22 @@ export default {
         await studioHealPhantomRerender(env, { limit: 8 });
       } catch (error) {
         console.warn("phantom rerender heal failed", error);
+      }
+      try {
+        const scheduleQuality = await studioScheduleReservationQualitySweep(env, {
+          limit: 100,
+          maxDriftReads: 40,
+          recover: true,
+        });
+        if (scheduleQuality?.finding_count || scheduleQuality?.recovered_count) {
+          console.warn("schedule reservation Quality Agent", JSON.stringify({
+            findings: scheduleQuality.finding_count || 0,
+            recovered: scheduleQuality.recovered_count || 0,
+            lanes_scanned: scheduleQuality.lanes_scanned || 0,
+          }));
+        }
+      } catch (error) {
+        console.warn("schedule reservation Quality Agent sweep failed", error);
       }
       try {
         await factoryBatchCronResume(env, ctx);
@@ -5285,6 +5304,8 @@ const STUDIO_OVERDUE_SCHEDULED_FORMULA = 'AND({Test_Run_ID}=BLANK(),{Do_Not_Publ
 // Approval is one click, and it has to survive a publisher scenario that drifted off, a Make API
 // hiccup, and a Worker invocation that ran out of budget before reaching the webhook. Nothing else
 // guarantees an approved output reaches a publisher, so this sweep runs first on every cron tick.
+/*__STUDIO_WORKER_EXTRACT:studioScheduleReservationQualitySweep__*/
+/*__STUDIO_WORKER_EXTRACT:studioScheduleReservationQualityLatest__*/
 /*__STUDIO_WORKER_EXTRACT:studioHealApprovedMissingSchedule__*/
 // Approved Stories that already carry today's next MAE instant (11:30 / 5:30 /
 // 16:30) still publish at that instant. Once the same-content main has a later
