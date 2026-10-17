@@ -431,3 +431,4 @@ Deploy Factory all-platform batch approvals 2026-10-17. PR #813. Signed global m
 2026-10-17 deploy Phase 6 Python R4/R5 continuation fix 706c301b15336aa3d6e641914c593f98d92e3f1d with regression c2a58e0f3fa30bc0d3495d32da74c6092cf66335.
 2026-10-17 deploy Phase 6 Python Runner continuation fix 4ecf01f561999a19dc9b025ca5b5890a7d6b0d46 with regression 86feb516eb7db7f88abe71c239aa257152b8dc9a.
 2026-10-17 deploy exact-isolated Python Phase 6 rerender hardening b6eff29f21f266511f910b4a728fcb3f21a9d426 with regression 7b93cee7321f0e1df7e74562bc1386c0300f7eaf.
+2026-10-17 deploy exact-target Python rerender concurrency fix 1dc60567bfb6380610ec56caf29010d65b21d63f with regression 8dc56dd1bb3d9ef326e423b3ee47e123b33c5618.
