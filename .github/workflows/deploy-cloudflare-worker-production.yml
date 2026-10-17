@@ -657,21 +657,29 @@ jobs:
           fi
           curl -fsS "$API/deployments" -H "$AUTH" -o /tmp/current-deployments.json
           CURRENT=$(jq -er '.result.deployments[0].versions|max_by(.percentage)|.version_id' /tmp/current-deployments.json)
+          if [[ "$CURRENT" == "$BEFORE" ]]; then
+            echo "automatic_rollback_not_needed=production_version_unchanged"
+            exit 0
+          fi
           if [[ "$LIFECYCLE_CHANGE" == "true" ]]; then
-            # Cloudflare cannot roll back across a Durable Object lifecycle
-            # boundary. This bootstrap is allowed only after the exact code
-            # commit already passed ordinary production verification, and the
-            # authority flag is forced false. Keep the newly provisioned
-            # namespace dormant and fail visibly rather than attempt an invalid
-            # previous-version rollback.
+            # Only treat the lifecycle boundary as applied when the active
+            # version actually exposes the namespace plus disabled flag. If the
+            # deploy failed before lifecycle reconciliation, the normal prior-
+            # version rollback below is still valid.
             curl -fsS "$API/versions/$CURRENT" -H "$AUTH" -o /tmp/bootstrap-failure-version.json
-            jq -e '
+            if jq -e '
               .result.resources.bindings as $b
               | ([$b[] | select(.name=="STUDIO_SCHEDULE_RESERVATIONS" and .type=="durable_object_namespace")] | length)==1
               and ([$b[] | select(.name=="STUDIO_SCHEDULE_RESERVATION_AUTHORITY_ENABLED" and .type=="plain_text" and .text=="false")] | length)==1
-            ' /tmp/bootstrap-failure-version.json >/dev/null
-            echo "automatic_rollback_skipped=dormant_durable_object_lifecycle_boundary"
-            exit 0
+            ' /tmp/bootstrap-failure-version.json >/dev/null; then
+              # Cloudflare cannot roll back across a Durable Object lifecycle
+              # boundary. The exact code commit was already production-green
+              # before bootstrap and the new authority remains disabled, so
+              # retain the dormant namespace and fail visibly instead of
+              # attempting an invalid historical rollback.
+              echo "automatic_rollback_skipped=dormant_durable_object_lifecycle_boundary"
+              exit 0
+            fi
           fi
           if [[ "$CURRENT" != "$BEFORE" ]]; then
             cat >/tmp/rollback.json <<EOF
