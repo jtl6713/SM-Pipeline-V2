@@ -23,7 +23,7 @@
 <link rel="stylesheet" href="/assets/production-progress-0601.css?v=0.6.709-overview-fast-refresh">
 <link rel="stylesheet" href="/assets/production-render-layout-0678.css?v=0.6.709-overview-fast-refresh">
 <link rel="stylesheet" href="/assets/factory-layout-0680.css?v=0.6.709-overview-fast-refresh">
-<link rel="stylesheet" href="/assets/factory-batch-quality-0710.css?v=0.6.709-overview-fast-refresh&global=factory-v1">
+<link rel="stylesheet" href="/assets/factory-batch-quality-0710.css?v=0.6.709-overview-fast-refresh&global=factory-v2-quality-horizontal">
 <link rel="stylesheet" href="/assets/idea-drawer-safe-offset.css?v=0.6.709-overview-fast-refresh">
 <link rel="stylesheet" href="/assets/visual-timeline-trim.css?v=0.6.709-overview-fast-refresh">
 <link rel="stylesheet" href="/assets/visual-script-editor.css?v=0.6.709-overview-fast-refresh">
@@ -2140,14 +2140,6 @@
     <strong id="factoryBatchMetricValue" class="factory-mini-value">—</strong>
     <p id="factoryBatchSummary">Checking activity…</p>
    </div>
-   <section class="factory-batch-quality-panel factory-mini-metric" id="factoryBatchQuality" aria-labelledby="factoryBatchQualityHeading">
-    <div class="factory-batch-quality-head">
-      <h3 id="factoryBatchQualityHeading" class="factory-mini-label">Quality Agent</h3>
-      <strong id="factoryBatchQualityMetric" class="factory-mini-value">—</strong>
-    </div>
-    <div id="factoryBatchQualitySignals" aria-live="polite"><p class="subtle">Checking findings…</p></div>
-    <button type="button" class="secondary-button" id="factoryBatchQualityRefresh">Refresh findings</button>
-   </section>
   </div>
   <div class="factory-global-history">
    <div class="factory-batch-heading"><strong>Recent approvals</strong><span id="factoryBatchUpdated">Authoritative batch history</span></div>
@@ -2159,6 +2151,14 @@
    </div>
    <div id="factoryBatchDetails" hidden></div>
   </div>
+   <section class="factory-batch-quality-panel factory-global-quality" id="factoryBatchQuality" aria-labelledby="factoryBatchQualityHeading">
+    <div class="factory-batch-quality-head">
+      <h3 id="factoryBatchQualityHeading" class="factory-mini-label">Quality Agent</h3>
+      <strong id="factoryBatchQualityMetric" class="factory-mini-value">—</strong>
+      <button type="button" class="secondary-button" id="factoryBatchQualityRefresh">Refresh findings</button>
+    </div>
+    <div id="factoryBatchQualitySignals" aria-live="polite"><p class="subtle">Checking findings…</p></div>
+   </section>
  </section>
  <p class="subtle" id="factoryBatchRolloutNotice" aria-live="polite" hidden></p>
  <div class="factory-batch-toolbar" id="factoryBatchToolbar" role="group" aria-label="Selected Factory approvals">
