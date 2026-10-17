@@ -56,11 +56,17 @@ const server=createServer(async(req,res)=>{
   }
   if(url.pathname==="/api/factory/desk"&&req.method==="GET"){respond(res,desk);return}
   if(url.pathname==="/api/factory/approval-batches"&&req.method==="GET"){
-    const selected=url.searchParams.get("profile")||url.searchParams.get("profile_id");
-    const pilot=selected===profile;
+    const isGlobal=url.searchParams.get("scope")==="all";
+    const selected=isGlobal ? url.searchParams.get("factory_profile") :
+      url.searchParams.get("profile")||url.searchParams.get("profile_id");
+    const pilot=isGlobal ? (!selected || selected===profile) : selected===profile;
     respond(res,{
       ...(pilot && job ? job : {ok:true,batch:true,status:"idle",job_id:null,items:[]}),
-      approvals_enabled:pilot,
+      scope:isGlobal?"all":undefined,
+      batches:isGlobal&&pilot&&job?[job]:[],
+      totals:isGlobal?{batches:pilot&&job?1:0,active:pilot&&job&&["queued","running"].includes(job.status)?1:0,
+        approved:pilot&&job?job.approved_count:0,failed:pilot&&job?job.failed_count:0}:undefined,
+      approvals_enabled:isGlobal?true:pilot,
       rollout:{enabled:pilot,mode:"chicago_ig_reel_v1",max_items:1,
         profile_id:profile,platform:"Instagram",output_type:"Reel"},
       quality_signals:[],
@@ -126,15 +132,22 @@ try{
   await phone.evaluate(()=>window.StudioFactoryDesk.load());
   await phone.waitForFunction(()=>document.getElementById("factoryBatchSummary").textContent.includes("1 approved"));
   assert.equal(started,1,"Status restoration must not send a second approval");
+  // Studio header controls neither Factory history nor rollout eligibility.
   await phone.locator("#studioProfileSelect").selectOption(la);
   await phone.locator("#factoryBatchRefresh").click();
-  await phone.waitForFunction(()=>document.getElementById("factoryBatchSubmit").disabled);
-  assert.match(await phone.locator("#factoryBatchRolloutNotice").innerText(),/Select Chicago to submit/i);
+  assert.match(await phone.locator("#factoryBatchSummary").innerText(),/1 approved/);
+  assert.equal(await phone.locator("#factoryProfileFilter").inputValue(),"");
+  // Factory's own selector scopes displayed review rows.
+  await phone.locator("#factoryProfileFilter").selectOption(la);
+  assert.equal(await phone.locator("[data-factory-select-output]").count(),0);
+  await phone.locator("#factoryProfileFilter").selectOption("");
+  await phone.locator('[data-factory-band-toggle]').first().click();
+  assert.equal(await phone.locator("[data-factory-select-output]").count(),1);
   assert.deepEqual(posts.map(x=>x.record_ids),[[cards[0].id]]);
   assert.deepEqual(jsErrors,[]);
   assert.deepEqual(errors,[]);
   await phoneCtx.close();
-  console.log("FACTORY_CHICAGO_SINGLE_REEL_UI_CANARY=PASS; desktop=1_eligible; Story_YouTube_Facebook_excluded=true; mobile_status_restored=true; profile_disabled=true; publish_calls=0");
+  console.log("FACTORY_CHICAGO_SINGLE_REEL_UI_CANARY=PASS; desktop=1_eligible; Story_YouTube_Facebook_excluded=true; mobile_status_restored=true; factory_filter_independent=true; publish_calls=0");
 }finally{
   await browser?.close();
   await new Promise(resolve=>server.close(resolve));
