@@ -9,6 +9,7 @@ import { withOutputApprovalLock } from "./output-approval-lease.mjs";
 import {
   reconcileScheduleReservation,
   scheduleReservationAuthorityEnabled,
+  SCHEDULE_RESERVATION_STATES,
 } from "./schedule-reservation-authority.mjs";
 import { runAtomicScheduleTransaction } from "./schedule-reservation-transaction.mjs";
 import {
@@ -1570,7 +1571,23 @@ export async function studioScheduleReservationQualitySweep(env, options = {}) {
     findings.push(...laneFindings);
 
     const active = snapshot?.active_reservation || null;
-    if (snapshot?.quarantine && active?.platform_output_record_id) {
+    const lockState = String(snapshot?.lock?.state || "").trim();
+    const leaseExpirationMs = Date.parse(String(snapshot?.lock?.lease_expiration_timestamp || ""));
+    const leaseExpired = Number.isFinite(leaseExpirationMs) && leaseExpirationMs <= nowMs;
+    const recoverableExpiredState = leaseExpired && [
+      SCHEDULE_RESERVATION_STATES.VERIFYING,
+      SCHEDULE_RESERVATION_STATES.COMMITTED,
+      SCHEDULE_RESERVATION_STATES.RECOVERY_REQUIRED,
+    ].includes(lockState);
+    // Recovery is evidence-driven only after an external write may have happened
+    // (Verifying), after a durable commit whose release was lost (Committed), or
+    // when the lane is explicitly quarantined. Expired Acquired/Reserving owners
+    // are pre-write and are safely fenced by the next normal acquirer instead.
+    const shouldRecoverActive = Boolean(
+      active?.platform_output_record_id
+      && (snapshot?.quarantine || recoverableExpiredState)
+    );
+    if (shouldRecoverActive) {
       try {
         const record = await airtableFetch(
           env,
