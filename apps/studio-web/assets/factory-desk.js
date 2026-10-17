@@ -801,7 +801,8 @@
     });
     root.querySelectorAll("[data-factory-select-content]").forEach((checkbox) => {
       const key = checkbox.getAttribute("data-factory-select-content");
-      const ids = readyContentCards({ cards: (desk?.lanes?.needs_eyes || []).filter((card) => contentGroupKey(card) === key) }).map((card) => card.id);
+      const ids = readyContentCards({ cards: (desk?.lanes?.needs_eyes || []).filter((card) => contentGroupKey(card) === key) })
+        .filter(canSelectBatchOutput).map((card) => card.id);
       checkbox.indeterminate = ids.some((id) => state.selectedOutputs.has(id))
         && !ids.every((id) => state.selectedOutputs.has(id));
       checkbox.addEventListener("change", () => {
