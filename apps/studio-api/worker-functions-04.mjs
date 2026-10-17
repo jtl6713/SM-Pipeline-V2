@@ -1,4 +1,10 @@
 import { countPendingPlatformDispatch } from "./overview-dispatch-counts.mjs";
+import { withOutputApprovalLock } from "./output-approval-lease.mjs";
+import {
+  factoryBatchEnqueue, factoryBatchRead, factoryBatchList,
+  factoryBatchDrain, factoryBatchRetry, factoryBatchSummary, factoryBatchCounts,
+  factoryBatchQualitySignals, factoryBatchReconcile, factoryBatchCronScan,
+} from "./factory-approval-queue.mjs";
 import { createProfileOnboarding } from "./profile-onboarding.mjs";
 import {
   studioReadSource,
@@ -522,6 +528,7 @@ import {
   mapOutput,
   googleDriveFileId,
   requestedProfileId,
+  studioContentProfileRecordIdForOutput,
   studioThemeForProfile,
   studioCityLabel,
   studioScheduleTimeZoneForProfile,
@@ -1595,14 +1602,26 @@ export async function studioReconcileFacebookReels(env, options = {}) {
 
 export async function approveOutputRecordForPublishing(env, existing, note, stamp, payload = {}, options = {}) {
   const id = existing.id;
-  if (Boolean(f(existing, "Do_Not_Publish"))) {
+  return withOutputApprovalLock(env.STUDIO_MEDIA, id, async () => {
+  // Canonical re-read under the shared per-output lease. Legacy Pipeline, single
+  // Approve, and Factory batch cannot concurrently commit two approvals for
+  // the same record. Never trust a caller's earlier Ready for Review snapshot.
+  const current = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, id);
+  const currentOutput = String(f(current, "Output_Status") || "").trim();
+  const currentPublish = String(f(current, "Publish_Status") || "").trim();
+  const currentReview = String(f(current, "Review_Status") || "").trim();
+  if (currentOutput === "Published" || currentPublish === "Published" ||
+      currentOutput === "Approved for Publishing" || currentReview === "Approved") {
+    return { ...current, __already_approved: true };
+  }
+  if (Boolean(f(current, "Do_Not_Publish"))) {
     throw new HttpError(409, "Do_Not_Publish outputs cannot be approved for live publishing");
   }
-  if (!studioOutputReadyForPublishApproval(existing)) {
+  if (!studioOutputReadyForPublishApproval(current)) {
     throw new HttpError(409, "This output is not ready for publishing approval");
   }
-  const existingNotes = String(f(existing, "Review_Notes") || "").trim();
-  let record = existing;
+  const existingNotes = String(f(current, "Review_Notes") || "").trim();
+  let record = current;
   if (studioOutputIsNativePhoto(record)) {
     await item4PulseLetterPython(env, { outputRecordId: record.id }).catch((error) => {
       console.warn("native photo branding before publish approval failed", record.id, error);
@@ -1753,6 +1772,7 @@ export async function approveOutputRecordForPublishing(env, existing, note, stam
     await writeThrough;
   }
   return updated;
+  });
 }
 /*__STUDIO_WORKER_END:approveOutputRecordForPublishing__*/
 
@@ -2556,6 +2576,13 @@ export async function getApproveAllJobStatus(request, env, authorization) {
     const activeId = store.active_by_profile[profile.id];
     job = activeId ? store.jobs[activeId] : null;
   }
+  // Factory must still show the latest completed batch after the active slot is
+  // cleared. Otherwise closing the browser made completed work vanish from view.
+  if (!job) {
+    job = Object.values(store.jobs || {})
+      .filter((entry) => entry && (!profile?.id || entry.profile_id === profile.id))
+      .sort((a, b) => Date.parse(b.updated_at || b.created_at || 0) - Date.parse(a.updated_at || a.created_at || 0))[0] || null;
+  }
   if (!job) {
     return respond(request, env, {
       ok: true,
@@ -2714,6 +2741,12 @@ export async function studioProcessApproveAllJobSlice(env, jobId, options = {}) 
           profile,
           timeZone,
         });
+        if (updated.__already_approved) {
+          item.status = "skipped";
+          item.error = null;
+          Object.assign(item, mapApproveAllEligibleSummary(updated));
+          continue;
+        }
         const booked = studioScheduleMs(f(updated, "Scheduled_Post_Date")) ?? Date.now();
         const lane = maeScheduleLaneKey(platform, outputType) || platform.toLowerCase();
         (occupiedByLane[lane] ||= []).push(booked);
@@ -2755,7 +2788,9 @@ export async function studioRunApproveAllJob(env, jobId, ctx = null) {
     }));
   }
   const counts = approveAllJobCounts(job);
-  if (counts.pending_count > 0) {
+  if (counts.pending_count > 0 && result.approvedThisInvoke > 0) {
+    // Do not endlessly recurse on render-wait items with no progress. Cron resumes
+    // them independently, even when every browser has been closed.
     // Chain slices after the HTTP response returns. Cron also resumes queued/running
     // jobs if an isolate budget cut lands mid-batch.
     const continuation = studioRunApproveAllJob(env, jobId, null).catch((error) => {
@@ -2958,6 +2993,10 @@ export async function approveAllOutputsForPublishing(request, env, authorization
   const stamp = new Date().toISOString();
   const profile = await resolveWorkingContentProfile(env, authorization, requestedProfileId(null, payload));
   const action = String(payload?.action || "start").trim().toLowerCase();
+  const requestId = String(payload?.request_id || "").trim();
+  if (requestId && !/^[A-Za-z0-9_-]{12,128}$/.test(requestId)) {
+    throw new HttpError(400, "Invalid batch request_id");
+  }
 
   if (action === "retry") {
     const jobId = String(payload?.job_id || "").trim();
@@ -2968,6 +3007,12 @@ export async function approveAllOutputsForPublishing(request, env, authorization
       throw new HttpError(404, "Approve All job not found for this profile");
     }
     const counts = approveAllJobCounts(existing);
+    if (existing.status === "queued" || existing.status === "running") {
+      return respond(request, env, {
+        ...summarizeApproveAllJob(existing),
+        message: "The batch is still processing; retry is available when it finishes.",
+      });
+    }
     if (counts.failed_count <= 0) {
       return respond(request, env, {
         ...summarizeApproveAllJob(existing),
@@ -2991,6 +3036,17 @@ export async function approveAllOutputsForPublishing(request, env, authorization
   }
 
   const store = await studioLoadApproveAllJobStore(env);
+  // Repeat delivery with the same client request ID must resolve to its original
+  // batch rather than creating another independent approval request.
+  const prior = requestId
+    ? Object.values(store.jobs || {}).find((entry) =>
+        entry?.request_id === requestId && entry?.profile_id === (profile?.id || null))
+    : null;
+  if (prior) {
+    return respond(request, env, {
+      ...summarizeApproveAllJob(prior), accepted: true, already_submitted: true,
+    });
+  }
   const activeId = profile?.id ? store.active_by_profile[profile.id] : null;
   const activeJob = activeId ? store.jobs[activeId] : null;
   if (activeJob && (activeJob.status === "queued" || activeJob.status === "running")) {
@@ -3069,6 +3125,7 @@ export async function approveAllOutputsForPublishing(request, env, authorization
   const job = buildApproveAllJob({
     jobId: newApproveAllJobId(),
     profileId: profile?.id || null,
+    requestId,
     note,
     schedules,
     records: eligibleSummaries,
@@ -3135,6 +3192,14 @@ export async function reviewOutputCreative(request, env, url, authorization, ctx
     }
     try {
       const updated = await approveOutputRecordForPublishing(env, existing, note, stamp, payload);
+      if (updated.__already_approved) {
+        return respond(request, env, {
+          ok: true, action: "approve_for_publishing", already_approved: true,
+          record: mapPhase6CreativeOutput(updated),
+          handoff_state: "approved_for_publishing",
+          message: "Output was already approved by another session; nothing was dispatched twice.",
+        });
+      }
       const held = !studioPublishCanDispatchNow(updated);
       // Facebook Reel/Story publish can take a minute. Return as soon as the
       // row is approved so the review click cannot time out into a fake 500.
@@ -8445,6 +8510,9 @@ export async function factoryApproveOutput(env, id, actor, note, ctx = null) {
     {},
     { recheckBestSlot: true },
   );
+  if (updated.__already_approved) {
+    return { id, already_approved: true, message: "Output already approved in another session; no duplicate dispatch." };
+  }
   const held = !studioPublishCanDispatchNow(updated);
   if (ctx && typeof ctx.waitUntil === "function") {
     ctx.waitUntil(studioDispatchApprovedPublishAndSchedule(null, env, updated).catch((error) => {
@@ -11971,3 +12039,139 @@ export async function getStudioLibraryIntakeStatus(request, env, url) {
 }
 
 /*__STUDIO_WORKER_END:getStudioLibraryIntakeStatus__*/
+
+
+/**
+ * Factory Batch Approval V2: R2 CAS storage, profile scoped, canonical approval.
+ * Kept separate from legacy Pipeline Approve All to prevent Settings JSON races.
+ */
+export async function factoryBatchStatusRoute(request, env, authorization) {
+  const url = new URL(request.url);
+  const profile = await resolveWorkingContentProfile(env, authorization, requestedProfileId(url, null));
+  if (!profile?.id) throw new HttpError(400, "Choose a content profile");
+  const requestId = String(url.searchParams.get("request_id") || "").trim();
+  const job = requestId
+    ? await factoryBatchRead(env.STUDIO_MEDIA, profile.id, requestId)
+    : (await factoryBatchList(env.STUDIO_MEDIA, profile.id, { limit: 40 }))[0] || null;
+  return respond(request, env, {
+    ...factoryBatchSummary(job), quality_signals: factoryBatchQualitySignals(job),
+    approvals_enabled: String(env?.FACTORY_BATCH_APPROVALS_ENABLED || "").toLowerCase() === "true",
+  });
+}
+/*__STUDIO_WORKER_END:factoryBatchStatusRoute__*/
+
+export async function factoryBatchProcess(env, profileId, requestId, ctx = null) {
+  if (String(env?.FACTORY_BATCH_APPROVALS_ENABLED || "").toLowerCase() !== "true") return null;
+  const run = async () => {
+    const result = await factoryBatchDrain(env.STUDIO_MEDIA, {
+      profileId, requestId, maxItems: 25, maxElapsedMs: 20000,
+      approve: async (id, job) => {
+        // Canonical Factory single-item guard handles existing Approved/Published,
+        // render eligibility, Do_Not_Publish and the MAE / Story scheduling rules.
+        // Reject profile drift before calling any authoritative approval mutation.
+        const record = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, id);
+        // Profile ownership must resolve from the authoritative Content Item
+        // when Platform Output exposes only a lookup display-name, never infer
+        // a city from the operator's selected profile.
+        const ownerProfileId = await studioContentProfileRecordIdForOutput(env, record);
+        if (!ownerProfileId) {
+          throw new HttpError(409, "Cannot verify output's Content Profile; approval was not submitted");
+        }
+        if (ownerProfileId !== profileId) {
+          throw new HttpError(409, "Output belongs to a different content profile");
+        }
+        return factoryApproveOutput(env, id, "Factory Batch", job.notes || "", ctx);
+      },
+    });
+    return result;
+  };
+  if (ctx?.waitUntil) {
+    ctx.waitUntil(run().catch(error => console.warn("Factory batch drain", requestId, error)));
+    return null;
+  }
+  return run();
+}
+/*__STUDIO_WORKER_END:factoryBatchProcess__*/
+
+export async function factoryBatchSubmitRoute(request, env, authorization, ctx = null) {
+  // Release safety: a deployed Worker remains read-only for Factory batches
+  // until operators explicitly enable this independent feature flag. GET status
+  // and the legacy single-item approval routes are unaffected.
+  if (String(env?.FACTORY_BATCH_APPROVALS_ENABLED || "").toLowerCase() !== "true") {
+    throw new HttpError(503, "Factory batch approvals are not enabled. Existing single-item approvals remain available.");
+  }
+  let payload;
+  try { payload = await request.json(); } catch { throw new HttpError(400, "Invalid JSON"); }
+  const profile = await resolveWorkingContentProfile(env, authorization, requestedProfileId(null, payload));
+  if (!profile?.id) throw new HttpError(400, "Choose a content profile");
+  const action = String(payload?.action || "start").toLowerCase();
+  const requestId = String(payload?.request_id || "");
+  if (action === "retry") {
+    if (!requestId) throw new HttpError(400, "request_id required for retry");
+    const job = await factoryBatchRetry(env.STUDIO_MEDIA, profile.id, requestId);
+    await factoryBatchProcess(env, profile.id, requestId, ctx);
+    return respond(request, env, { ...factoryBatchSummary(job), accepted: true });
+  }
+  if (action !== "start") throw new HttpError(400, "Invalid batch action");
+  if (!Array.isArray(payload?.record_ids) || !payload.record_ids.length || payload.record_ids.length > 100) {
+    throw new HttpError(400, "Select 1–100 output IDs");
+  }
+  const itemMap = new Map(
+    (Array.isArray(payload.items) ? payload.items : [])
+      .filter(row => /^rec[A-Za-z0-9]+$/.test(String(row?.id || "")))
+      .map(row => [row.id, row]),
+  );
+  const records = [...new Set(payload.record_ids.map(String))]
+    .map(id => ({ ...itemMap.get(id), id }));
+  let enqueued;
+  try {
+    enqueued = await factoryBatchEnqueue(env.STUDIO_MEDIA, {
+      profileId: profile.id, requestId, records,
+      note: String(payload.notes || ""),
+    });
+  } catch (error) {
+    throw new HttpError(409, error?.message || "Batch enqueue failed");
+  }
+  if (!enqueued.already_submitted && ctx?.waitUntil) {
+    await factoryBatchProcess(env, profile.id, requestId, ctx);
+  }
+  return respond(request, env, {
+    ...factoryBatchSummary(enqueued.job), accepted: true,
+    already_submitted: enqueued.already_submitted,
+  });
+}
+/*__STUDIO_WORKER_END:factoryBatchSubmitRoute__*/
+
+/**
+ * Cron recovery: enumerate bounded recent jobs for each profile in the R2 jobs
+ * hierarchy. No client poll is necessary. An expired R2 lease can be reclaimed.
+ */
+export async function factoryBatchCronResume(env, ctx = null) {
+  if (String(env?.FACTORY_BATCH_APPROVALS_ENABLED || "").toLowerCase() !== "true") return 0;
+  if (!env?.STUDIO_MEDIA?.list) return 0;
+  // The persisted cursor rotates through old histories (rather than rereading
+  // the first 200 lexical R2 keys forever). Process only a bounded scan on each tick.
+  const { objects } = await factoryBatchCronScan(env.STUDIO_MEDIA, { maxScan: 200 });
+  let started = 0;
+  for (const object of objects) {
+    const match = object.key.match(/\/jobs\/(rec[A-Za-z0-9]+)\/([A-Za-z0-9_-]{12,128})\.json$/);
+    if (!match) continue;
+    const job = await factoryBatchRead(env.STUDIO_MEDIA, match[1], match[2]);
+    if (!job) continue;
+    const signatures = factoryBatchQualitySignals(job);
+    if (signatures.length) {
+      console.warn("Factory batch Quality Agent", match[2], JSON.stringify(signatures));
+    }
+    if (signatures.some(item => item.code === "QA-FACTORY-BATCH-STATE-MISMATCH")
+        && !signatures.some(item => item.code === "QA-FACTORY-BATCH-DUPLICATE-ITEM")) {
+      await factoryBatchReconcile(env.STUDIO_MEDIA, match[1], match[2]);
+    }
+    if (!["queued", "running"].includes(job.status) &&
+        !signatures.some(item => item.code === "QA-FACTORY-BATCH-STATE-MISMATCH")) continue;
+    if (started >= 5) break;
+    await factoryBatchProcess(env, match[1], match[2], ctx);
+    started++;
+  }
+  return started;
+}
+/*__STUDIO_WORKER_END:factoryBatchCronResume__*/

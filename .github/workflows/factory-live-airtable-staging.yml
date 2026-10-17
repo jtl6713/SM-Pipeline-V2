@@ -1,0 +1,32 @@
+name: Factory Actual Airtable Approval Route - Isolated Staging
+on:
+  push:
+    branches:
+      - release/factory-batch-v2-main-sync-20261016
+    paths:
+      - apps/studio-api/factory-live-airtable-approval-route.staging.mjs
+      - .github/workflows/factory-live-airtable-staging.yml
+permissions:
+  contents: read
+jobs:
+  actual-writable-staging:
+    if: github.repository == 'jtl6713/SM-Pipeline-V2' && github.ref == 'refs/heads/release/factory-batch-v2-main-sync-20261016'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      STAGING_AIRTABLE_API_TOKEN: ${{ secrets.STAGING_AIRTABLE_API_TOKEN }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Reject missing staging-only secret
+        shell: bash
+        run: |
+          test -n "${STAGING_AIRTABLE_API_TOKEN:-}" || { echo 'Missing STAGING_AIRTABLE_API_TOKEN repository secret'; exit 1; }
+      - name: Validate isolated acceptance script
+        run: node --check apps/studio-api/factory-live-airtable-approval-route.staging.mjs
+      - name: Exercise actual Factory approval route against separate staging Airtable
+        run: node apps/studio-api/factory-live-airtable-approval-route.staging.mjs

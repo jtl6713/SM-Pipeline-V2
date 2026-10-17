@@ -37,7 +37,31 @@ jobs:
           pip install -r services/timing-engine/requirements.txt
 
       - name: Hermetic packs
-        run: python tests/regression/runner.py hermetic
+        shell: bash
+        run: |
+          set +e
+          set -uo pipefail
+          python tests/regression/runner.py hermetic > /tmp/hermetic-regression.log 2>&1
+          result=$?
+          if [ "$result" -ne 0 ]; then
+            echo "::error::Hermetic regression failed (exit $result); see compact failing-test summary below and full log artifact."
+            grep -E '^(not ok [0-9]+|FAILED |ERROR |# (fail |tests |pass )|=+ .* (FAILED|ERRORS))' /tmp/hermetic-regression.log | tail -120 || true
+            echo "--- last 20 short lines (long source dumps intentionally omitted) ---"
+            tail -25 /tmp/hermetic-regression.log | cut -c1-260 || true
+          else
+            tail -30 /tmp/hermetic-regression.log
+          fi
+          exit "$result"
+
+      - name: Upload hermetic diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: hermetic-regression-failure
+          path: /tmp/hermetic-regression.log
+          retention-days: 7
+          compression-level: 6
+          if-no-files-found: warn
 
       - name: Log result to Task Organizer
         if: always()

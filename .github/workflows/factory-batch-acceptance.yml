@@ -1,0 +1,105 @@
+name: Factory Batch Runtime Acceptance (No Publishing)
+on:
+  pull_request:
+    paths:
+      - "apps/studio-api/factory-approval-queue.mjs"
+      - "apps/studio-api/output-approval-lease.mjs"
+      - "apps/studio-api/factory-batch-acceptance-worker.mjs"
+      - "apps/studio-api/factory-batch-acceptance.wrangler.jsonc"
+      - ".github/workflows/factory-batch-acceptance.yml"
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  runtime-acceptance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install pinned Wrangler
+        run: npm install --no-save wrangler@4.123.0
+      - name: Run real Cloudflare Worker runtime against isolated local R2
+        shell: bash
+        run: |
+          set -euo pipefail
+          CONFIG=apps/studio-api/factory-batch-acceptance.wrangler.jsonc
+          mkdir -p /tmp/factory-batch-r2
+          ./node_modules/.bin/wrangler dev --config "$CONFIG" --local \
+            --port 8976 --persist-to /tmp/factory-batch-r2 \
+            >/tmp/factory-batch-wrangler.log 2>&1 &
+          echo "$!" > /tmp/factory-batch-worker.pid
+          for n in $(seq 1 45); do
+            if curl -sS -o /dev/null 'http://127.0.0.1:8976/' 2>/dev/null; then
+              break
+            fi
+            sleep 1
+          done
+          curl -fsS -X POST 'http://127.0.0.1:8976/api/start?request_id=smoke_runtime_factory_20261016' -o /tmp/factory-start.json
+          python - <<'PY'
+          import json
+          obj=json.load(open('/tmp/factory-start.json'))
+          assert obj['accepted'] and obj['total']==20 and obj['status'] in ('queued','running'),obj
+          print('submitted_20=PASS')
+          PY
+          # New standalone HTTP client: proves progress is stored server-side, not in browser memory.
+          python - <<'PY'
+          import json,time,urllib.request
+          url='http://127.0.0.1:8976/api/status?request_id=smoke_runtime_factory_20261016'
+          result=None
+          for i in range(110):
+            result=json.load(urllib.request.urlopen(url))
+            if result['pending_count']==0:
+              break
+            time.sleep(.3)
+          assert result['total']==20 and result['approved_count']==19 and result['failed_count']==1 and result['stored_commits']==19,result
+          print('background_finished_after_client_disconnected=PASS')
+          print('controlled_failed_only_retry_ready=PASS')
+          PY
+          curl -fsS -X POST 'http://127.0.0.1:8976/api/start?request_id=smoke_runtime_factory_20261016' \
+            -o /tmp/factory-duplicate.json
+          python - <<'PY'
+          import json
+          obj=json.load(open('/tmp/factory-duplicate.json'))
+          assert obj['already_submitted'] and obj['total']==20,obj
+          print('duplicate_request_idempotent=PASS')
+          PY
+          curl -fsS -X POST 'http://127.0.0.1:8976/api/retry?request_id=smoke_runtime_factory_20261016' -o /tmp/factory-retry.json
+          python - <<'PY'
+          import json,time,urllib.request
+          url='http://127.0.0.1:8976/api/status?request_id=smoke_runtime_factory_20261016'
+          result=None
+          for i in range(80):
+            result=json.load(urllib.request.urlopen(url))
+            if result['status']=='completed' and result['pending_count']==0 and result['failed_count']==0:
+              break
+            time.sleep(.3)
+          assert result['total']==20 and result['approved_count']==20 and result['stored_commits']==20 and result['done_count']==20,result
+          print('failed_only_retry=PASS; 20_unique_commits=PASS')
+          PY
+          # Stop/restart the Worker, imitating a client/dev-server shutdown.
+          kill "$(cat /tmp/factory-batch-worker.pid)"
+          sleep 2
+          ./node_modules/.bin/wrangler dev --config "$CONFIG" --local \
+            --port 8976 --persist-to /tmp/factory-batch-r2 \
+            >/tmp/factory-batch-wrangler-restart.log 2>&1 &
+          echo "$!" > /tmp/factory-batch-worker-restarted.pid
+          for n in $(seq 1 45); do
+            if curl -fsS 'http://127.0.0.1:8976/api/status?request_id=smoke_runtime_factory_20261016' -o /tmp/factory-persisted.json 2>/dev/null; then
+              break
+            fi
+            sleep 1
+          done
+          python - <<'PY'
+          import json
+          obj=json.load(open('/tmp/factory-persisted.json'))
+          assert obj['total']==20 and obj['approved_count']==20 and obj['stored_commits']==20 and obj['failed_count']==0,obj
+          print('persisted_after_server_restart_and_new_client=PASS')
+          PY
+      - name: Show Worker diagnostics on failure
+        if: failure()
+        run: |
+          cat /tmp/factory-batch-wrangler.log 2>/dev/null | tail -100 || true
+          cat /tmp/factory-batch-wrangler-restart.log 2>/dev/null | tail -100 || true

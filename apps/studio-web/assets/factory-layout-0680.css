@@ -433,3 +433,69 @@
  #page-content .item4-output-selection-actions{display:grid;grid-template-columns:1fr}
  #page-content .item4-output-selection-actions .primary-button{width:100%;min-height:46px}
 }
+
+
+/* Factory Batch Approval: top-level server activity and selection controls. */
+#page-factory .factory-batch-activity{
+  box-sizing:border-box;width:100%;min-width:0;display:grid;gap:8px;
+  padding:14px 16px;border:1px solid #ccdae9;border-radius:13px;
+  background:#f8fbff;margin:10px 0 12px;
+}
+#page-factory .factory-batch-heading{
+  display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:7px;
+  color:#123e73;
+}
+#page-factory #factoryBatchSummary{margin:0;overflow-wrap:anywhere;font-size:.87rem}
+#page-factory #factoryBatchUpdated{font-size:.73rem;color:#596a80;overflow-wrap:anywhere}
+#page-factory .factory-batch-actions{display:flex;gap:8px;flex-wrap:wrap}
+#page-factory .factory-batch-actions button{min-height:36px}
+#page-factory .factory-batch-toolbar{
+  display:flex;align-items:center;flex-wrap:wrap;gap:9px;
+  position:sticky;top:72px;z-index:20;box-sizing:border-box;
+  padding:10px 12px;margin:8px 0 12px;border-radius:11px;
+  border:1px solid #bdcce0;background:#fff;box-shadow:0 3px 12px rgba(16,44,79,.10);
+}
+#page-factory #factoryBatchSelectionCount{
+  flex:1 1 170px;min-width:0;font-weight:700;font-size:.86rem;overflow-wrap:anywhere;
+}
+#page-factory .factory-batch-toolbar button{min-height:40px}
+#page-factory .factory-batch-item-list{
+  list-style:none;padding:0;margin:0;display:grid;gap:5px;
+  max-height:350px;overflow-y:auto;
+}
+#page-factory .factory-batch-item-list li{
+  display:flex;flex-wrap:wrap;gap:4px 14px;align-items:baseline;
+  padding:8px 9px;border:1px solid #e4eaf2;border-radius:7px;background:#fff;font-size:.8rem;
+}
+#page-factory .factory-batch-item-list small{flex:1 1 100%;color:#ae2e35;overflow-wrap:anywhere}
+#page-factory .factory-media-select{
+  display:flex;flex-direction:column;align-items:center;gap:4px;min-width:0;
+}
+#page-factory .factory-media-select input,
+#page-factory .factory-content-batch-select input{width:18px;height:18px;cursor:pointer;accent-color:#123e73}
+#page-factory .factory-band-eyes .factory-content-bar{
+  grid-template-columns:auto minmax(0,1fr) auto auto;
+}
+#page-factory .factory-band-eyes .factory-content-batch-select{
+  grid-column:1;grid-row:1 / span 2;
+  display:flex;flex-direction:column;align-items:center;justify-content:center;
+  min-width:58px;gap:3px;font-size:.65rem;font-weight:700;color:#37506c;
+}
+#page-factory .factory-band-eyes .factory-content-toggle{grid-column:2;grid-row:1 / span 2}
+#page-factory .factory-band-eyes .factory-content-send-back{grid-column:3}
+#page-factory .factory-band-eyes .factory-content-approve{grid-column:4}
+@media(max-width:980px){
+ #page-factory .factory-band-eyes .factory-content-bar{grid-template-columns:64px minmax(0,1fr);gap:8px}
+ #page-factory .factory-band-eyes .factory-content-batch-select{grid-column:1;grid-row:1}
+ #page-factory .factory-band-eyes .factory-content-toggle{grid-column:2;grid-row:1}
+ #page-factory .factory-band-eyes .factory-content-send-back{grid-column:1;grid-row:2}
+ #page-factory .factory-band-eyes .factory-content-approve{grid-column:2;grid-row:2}
+}
+@media(max-width:560px){
+ #page-factory .factory-batch-toolbar{top:55px;gap:7px}
+ #page-factory .factory-batch-toolbar button{flex:1 1 125px;white-space:normal}
+ #page-factory .factory-batch-toolbar #factoryBatchSelectionCount{flex-basis:100%}
+ #page-factory .factory-batch-activity{padding:12px}
+ #page-factory .factory-band-eyes .factory-content-bar{grid-template-columns:52px minmax(0,1fr)}
+ #page-factory .factory-band-eyes .factory-content-batch-select{min-width:0;font-size:.57rem}
+}

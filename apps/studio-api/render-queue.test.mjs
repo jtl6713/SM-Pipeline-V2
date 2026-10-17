@@ -173,7 +173,7 @@ test("Trying Again only for real Remotion failures, never queue wait", () => {
 });
 
 test("Worker admit + mapOutput expose queue meta and Remotion job id", () => {
-  assert.match(worker, /version: "0.10.649-purge-deleted-duplicates"/);
+  assert.match(worker, /version: "0.10.650-factory-batch-gated"/);
   assert.match(worker, /studio_shared_render_queue_v1: true/);
   assert.match(worker, /studio_render_queue_wait_v1: true/);
   assert.match(worker, /async function studioAdmitRenderQueue/);
@@ -190,9 +190,9 @@ test("Worker admit + mapOutput expose queue meta and Remotion job id", () => {
 });
 
 test("UI shows Waiting in render queue and shared-render sibling wait", () => {
-  assert.match(app, /BUILD_ID = "item4-0.6.707-duplicate-skip"/);
-  assert.match(html, /app-item4-1008\.js\?v=0.6.707-duplicate-skip/);
-  assert.match(html, /UI build 0.6.707/);
+  assert.match(app, /BUILD_ID = "item4-0[.]6[.]708-factory-batch-gated"/);
+  assert.match(html, /app-item4-1008\.js\?v=0.6.708-factory-batch-gated/);
+  assert.match(html, /UI build 0.6.708/);
   assert.match(app, /function pipelineRenderQueueLabel/);
   assert.match(app, /Waiting in render queue \(#\$\{pos\} of \$\{total\}\)/);
   assert.match(app, /Waiting for shared render/);

@@ -33,7 +33,19 @@ jobs:
           for file in apps/studio-api/worker-functions-*.mjs; do node --check "$file"; done
       - name: Run existing Studio API tests
         shell: bash
-        run: node --test apps/studio-api/*.test.mjs
+        run: |
+          set -euo pipefail
+          if node --test apps/studio-api/*.test.mjs >/tmp/studio-api-regression.log 2>&1; then
+            grep -E '^# tests |^# pass |^# fail ' /tmp/studio-api-regression.log | tail -3
+          else
+            echo "::error::Studio API test failures; compact diagnostic listing follows"
+            grep -n -B 2 -A 16 -E '^not ok [0-9]+' /tmp/studio-api-regression.log | head -120 || true
+            echo '--- all failed subtest names ---'
+            grep -E '^not ok [0-9]+' /tmp/studio-api-regression.log || true
+            echo "--- final test summary ---"
+            grep -E '^# tests |^# pass |^# fail ' /tmp/studio-api-regression.log | tail -3 || true
+            exit 1
+          fi
       - name: Wrangler bundle dry run (no deploy)
         if: always()
         shell: bash
