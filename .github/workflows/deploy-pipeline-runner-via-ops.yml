@@ -248,3 +248,5 @@ jobs:
 # 2026-10-16 phase 5 runner write-through for Platform Outputs and Content Items; runner 2026-10-16-phase5-runner-writes
 
 # 2026-10-16 FBS2 1703 connection-aborted R2 upload reuse and Quality Agent signature
+
+# 2026-10-16 FBS2 Output 1703 upload timeout permanent multipart fix, runner 2026-10-16-fbs2-multipart-storage
