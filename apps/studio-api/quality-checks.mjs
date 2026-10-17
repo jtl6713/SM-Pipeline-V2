@@ -12,6 +12,7 @@ export const QUALITY_HEALS = Object.freeze([
   "requeue_failed",
   "promote_published",
   "stamp_video_draft_then_ttd0",
+  "retry_existing_final_mp4_staging",
   "park_six_hours",
   "repair_render_sources",
   "promote_native_photo_review_strand",
