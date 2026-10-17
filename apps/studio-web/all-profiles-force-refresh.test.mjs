@@ -25,9 +25,12 @@ test("refresh preserves prior rows and disables repeated clicks", () => {
 test("manual success requires the completed generation to be fetched", () => {
   assert.match(source, /function refreshMatchesSnapshot/);
   assert.match(source, /generation === state\.snapshotGeneration/);
-  assert.match(source, /await load\(true\)/);
+  assert.match(source, /await load\(true, String\(refresh\?\.snapshot_generation \|\| ""\)\)/);
+  assert.match(source, /min_generation=\$\{encodeURIComponent\(minGeneration\)\}/);
   assert.match(source, /if \(!refreshMatchesSnapshot\(refresh\)\)/);
-  assert.match(source, /state\.refreshMessage = "Updated just now"/);
+  assert.match(source, /function snapshotUpdateLabel\(\)/);
+  assert.match(source, /Updated just now/);
+  assert.match(source, /toLocaleTimeString/);
 });
 
 test("failure and cooldown retain old data with compact age messaging", () => {
