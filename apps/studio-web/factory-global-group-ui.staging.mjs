@@ -127,7 +127,7 @@ try{
   await page.waitForFunction(()=>Boolean(window.StudioFactoryDesk?.load));
   await page.evaluate(()=>document.querySelector("#page-factory").classList.add("active"));
   await page.evaluate(()=>window.StudioFactoryDesk.load());
-  await page.getByText(/Global Factory \(pilot\): up to 4 supported outputs per batch/).waitFor();
+  await page.getByText(/Global Factory \(pilot\): up to 4 supported outputs per backend batch/).waitFor();
   await page.locator("[data-factory-band-toggle]").first().click();
   assert.equal(await page.locator("[data-factory-select-content]").count(),2);
   await page.locator("#factoryProfileFilter").selectOption(chicago);
