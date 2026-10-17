@@ -12367,9 +12367,7 @@ export async function factoryBatchProcess(env, profileId, requestId, ctx = null)
         if (ownerProfileId !== profileId) {
           throw new HttpError(409, "Output belongs to a different content profile");
         }
-        if (Boolean(f(record,"Do_Not_Publish")) || !studioOutputReadyForPublishApproval(record)) {
-          throw new HttpError(409,"Output no longer review-ready or publishing is blocked");
-        }
+        // Canonical single-output approval owns terminal-state idempotence and Do_Not_Publish.
         return factoryApproveOutput(env, id, "Factory Batch", job.notes || "", ctx);
       },
     });
