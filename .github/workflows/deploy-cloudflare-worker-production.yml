@@ -51,6 +51,8 @@ jobs:
             apps/studio-api/schedule-reservation-concurrency.test.mjs \
             apps/studio-api/schedule-reservation-quality.test.mjs \
             apps/studio-api/schedule-reservation-integration.test.mjs \
+            apps/studio-api/schedule-reservation-policy.test.mjs \
+            apps/studio-api/schedule-reservation-writer-audit.test.mjs \
             apps/studio-api/schedule-reservation-runtime.test.mjs
 
       - name: Validate source and install pinned Wrangler
