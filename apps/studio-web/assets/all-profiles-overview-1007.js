@@ -145,7 +145,7 @@
   function tone(value, kind) {
     const n = Number(value) || 0;
     if (kind === "approval") return n === 0 ? "ok" : n <= 5 ? "warn" : "critical";
-    if (kind === "ideas") return n === 0 ? "ok" : n <= 4 ? "warn" : "critical";
+    if ("ideas" === kind) return n === 0 ? "ok" : n <= 4 ? "warn" : "critical";
     return n === 0 ? "ok" : n <= 2 ? "warn" : "critical";
   }
 
@@ -185,7 +185,8 @@
       profile.value = profileId;
       profile.dispatchEvent(new Event("change", { bubbles: true }));
     }
-    document.querySelector('[data-page="outputs"]')?.click();
+    const nav = document.querySelector('[data-page="outputs"]');
+    nav?.click();
     activateStudioPage("outputs");
     const openView = () => document.querySelector(`[data-pipeline-quick-view="${view}"]`)?.click();
     window.setTimeout(openView, 150);
