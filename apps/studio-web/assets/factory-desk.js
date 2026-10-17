@@ -16,6 +16,7 @@
     reconciledBatchDeskKey: "",
     reconcilingBatchDesk: false,
     batchDeskReconcileNextAttempt: 0,
+    lastBatchFetchMs: 0,
   };
   const FACTORY_SELECTION_KEY = "studio.factory.batch-selection.v1";
   const FACTORY_LAST_BATCH_KEY = "studio.factory.last-batch.v1";
@@ -416,12 +417,15 @@
     }
   }
 
-  async function refreshFactoryBatchActivity() {
-    const params = new URLSearchParams();
-    const profileId = String($("studioProfileSelect")?.value || state.lastBatchProfile || "").trim();
-    if (/^rec[A-Za-z0-9]+$/.test(profileId)) params.set("profile", profileId);
+  async function refreshFactoryBatchActivity(force = false) {
+    const now = Date.now();
+    const minInterval = Number(state.batch?.totals?.active || 0) ? 5000 : 30000;
+    if (!force && state.batch && now - state.lastBatchFetchMs < minInterval) return state.batch;
+    const params = new URLSearchParams({ scope: "all" });
+    if (factoryProfileId()) params.set("factory_profile", factoryProfileId());
     try {
-      const batch = await fetchJson(`/api/factory/approval-batches?${params.toString()}`);
+      const batch = await fetchJson(`/api/factory/approval-batches?${params.toString()}`, { cache: "no-store" });
+      state.lastBatchFetchMs = Date.now();
       if (typeof batch.approvals_enabled === "boolean") {
         const before = JSON.stringify(state.batchRollout);
         state.batchApprovalsEnabled = batch.approvals_enabled;
@@ -430,6 +434,7 @@
         if (state.desk && before !== JSON.stringify(state.batchRollout)) renderDesk(state.desk);
       }
       renderFactoryBatchActivity(batch);
+      document.dispatchEvent(new CustomEvent("factory:batch-status", { detail: batch }));
       reconcileFinishedBatchDesk(batch).catch(() => {});
       return batch;
     } catch (error) {
@@ -481,6 +486,7 @@
           record_ids: ready.map((card) => card.id),
           items: ready.map((card) => ({
             id: card.id, output_id: card.output_id || null,
+            title: card.title || null, content_id: card.content_id || null,
             platform: card.platform || null, format: card.studio_output_type || null,
           })),
         }),
@@ -1165,7 +1171,7 @@
       // Fetch independently of the expensive Factory queue; activity remains visible during a slow desk refresh.
       refreshFactoryBatchActivity().catch(() => {});
       if (!state.batchTimer) state.batchTimer = setInterval(() => {
-        if (!document.hidden && $("page-factory")?.classList.contains("active")) refreshFactoryBatchActivity().catch(() => {});
+        if (!document.hidden && $("page-factory")?.classList.contains("active")) refreshFactoryBatchActivity(true).catch(() => {});
       }, 5000);
       const desk = await fetchJson("/api/factory/desk");
       renderDesk(desk);
@@ -1202,7 +1208,7 @@
     saveFactorySelection();
     if (state.desk) renderDesk(state.desk);
   });
-  $("factoryBatchRefresh")?.addEventListener("click", () => { refreshFactoryBatchActivity().catch(() => {}); });
+  $("factoryBatchRefresh")?.addEventListener("click", () => { refreshFactoryBatchActivity(true).catch(() => {}); });
   $("factoryBatchRetry")?.addEventListener("click", () => { retryFactoryBatchFailures().catch(() => {}); });
   $("factoryBatchInspect")?.addEventListener("click", () => {
     state.batchDetailsOpen = !state.batchDetailsOpen;
