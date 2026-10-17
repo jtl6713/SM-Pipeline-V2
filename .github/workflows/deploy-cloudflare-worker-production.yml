@@ -102,6 +102,17 @@ jobs:
           import json, os
           from pathlib import Path
           bucket=Path('/tmp/studio-media-bucket.txt').read_text().strip()
+          rollout=json.loads(Path('deploy/factory-batch-production-rollout.json').read_text())
+          assert rollout.get('mode')=='chicago_ig_reel_v1'
+          assert rollout.get('profile_id')=='recT2rbKX3MF7cVFU'
+          assert rollout.get('platform')=='Instagram' and rollout.get('output_type')=='Reel'
+          assert rollout.get('max_items')==1
+          assert type(rollout.get('enabled')) is bool
+          factory_vars={
+            'FACTORY_BATCH_APPROVALS_ENABLED':'true' if rollout['enabled'] else 'false',
+            'FACTORY_BATCH_ROLLOUT_MODE':'chicago_ig_reel_v1',
+            'FACTORY_BATCH_ROLLOUT_MAX_ITEMS':'1',
+          }
           cfg={
             'name':os.environ['TARGET_WORKER'],
             'main':'worker.js',
