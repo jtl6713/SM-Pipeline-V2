@@ -46,6 +46,25 @@ class StudioApiBindingContractTest(unittest.TestCase):
         self.assertTrue(result["reservation_ok"])
         self.assertFalse(result["reservation_bootstrap_absent"])
 
+    def test_scoped_scheduling_allowlist_is_approved_plain_text_only(self):
+        got = self.legacy_core()
+        got.update(RESERVATION_BINDINGS)
+        got["STUDIO_SCHEDULE_RESERVATION_LANE_ALLOWLIST"] = "plain_text"
+        result = assert_live_contract(got, "one scoped scheduling lane")
+        self.assertTrue(result["ok"])
+        self.assertTrue(result["optional_present"]["STUDIO_SCHEDULE_RESERVATION_LANE_ALLOWLIST"])
+
+        got["STUDIO_SCHEDULE_RESERVATION_LANE_ALLOWLIST"] = "secret_text"
+        with self.assertRaises(SystemExit):
+            assert_live_contract(got, "wrong scheduling allowlist binding type")
+
+    def test_unknown_scheduling_binding_is_still_rejected(self):
+        got = self.legacy_core()
+        got.update(RESERVATION_BINDINGS)
+        got["STUDIO_SCHEDULE_RESERVATION_LANE_ALLOWLIST_UNSAFE"] = "plain_text"
+        with self.assertRaises(SystemExit):
+            assert_live_contract(got, "unknown scheduling binding")
+
     def test_wrong_durable_object_type_fails(self):
         got = self.legacy_core()
         got.update(RESERVATION_BINDINGS)
