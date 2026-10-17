@@ -1,4 +1,10 @@
 import { countPendingPlatformDispatch } from "./overview-dispatch-counts.mjs";
+import {
+  claimProfilesOverviewRefresh,
+  patchProfilesOverviewRefreshState,
+  publicProfilesOverviewRefreshState,
+  readProfilesOverviewRefreshStateRecord,
+} from "./profiles-overview-refresh.mjs";
 import { withOutputApprovalLock } from "./output-approval-lease.mjs";
 import { factoryBatchRolloutPolicy, factoryBatchRolloutAcceptsOutput, factoryBatchRolloutAcceptsIds } from "./factory-batch-rollout.mjs";
 import {
@@ -3600,16 +3606,18 @@ function ideasNotInProductionFromRows(ideaRows, profile) {
   };
 }
 
-export async function buildStudioProfilesOverviewRows(env, profiles) {
+export async function buildStudioProfilesOverviewRows(env, profiles, options = {}) {
   let outputRows = null;
   let supabaseIdeaRows = [];
   let supabaseIdeasUsable = false;
   let readSource = "airtable";
   let usedSupabaseOutputs = false;
+  const forceIdeas = options.forceIdeas === true;
+  const commitIdeas = options.commitIdeas !== false;
   const profileList = Array.isArray(profiles) ? profiles : [];
   const profileIds = profileList.map((profile) => profile?.id).filter(Boolean);
   const ideaCounts = overviewIdeaCountMap();
-  const missingIdeaCounts = profileIds.some((id) => !ideaCounts.has(String(id)));
+  const missingIdeaCounts = forceIdeas || profileIds.some((id) => !ideaCounts.has(String(id)));
 
   if (studioReadSource(env) === "supabase") {
     try {
@@ -3618,14 +3626,14 @@ export async function buildStudioProfilesOverviewRows(env, profiles) {
         outputLimit: STUDIO_PROFILES_OVERVIEW_OUTPUT_LIMIT,
         ideaLimit: STUDIO_PROFILES_OVERVIEW_IDEA_LIMIT,
         // Skip idea_candidates once every profile already has a last-good count.
-        includeIdeas: missingIdeaCounts,
+        includeIdeas: missingIdeaCounts && !forceIdeas,
       });
       // Require a non-empty output pack. Empty ideas used to short-circuit to 0
       // Ideas totals while still painting supabase scheduled counts.
       if (!pack.profilesMissing && (pack.outputs || []).length) {
         outputRows = pack.outputs || [];
         supabaseIdeaRows = Array.isArray(pack.ideas) ? pack.ideas : [];
-        supabaseIdeasUsable = missingIdeaCounts && pack.ideas_incomplete !== true;
+        supabaseIdeasUsable = !forceIdeas && missingIdeaCounts && pack.ideas_incomplete !== true;
         usedSupabaseOutputs = true;
         readSource = "supabase";
       }
@@ -3663,6 +3671,20 @@ export async function buildStudioProfilesOverviewRows(env, profiles) {
     }
   }
 
+  // A manual force refresh must refresh Ideas too. Supabase remains the configured
+  // hot source for output rows, but Ideas are still authoritatively rescanned from
+  // Airtable so the UI cannot claim the entire overview is current while Ideas lag.
+  if (usedSupabaseOutputs && forceIdeas) {
+    airtableIdeaRows = await listRecords(env, env.AIRTABLE_IDEA_TABLE_ID, {
+      limit: STUDIO_PROFILES_OVERVIEW_IDEA_LIMIT,
+      sortField: "Create_Date",
+      filterFormula: formula,
+    });
+    if (airtableIdeaRows.length >= STUDIO_PROFILES_OVERVIEW_IDEA_LIMIT) {
+      throw new Error("Profiles overview ideas exceeded complete-scan safety ceiling");
+    }
+  }
+
   // Re-read Manual Action Required rows so a post URL saved in Airtable clears the
   // All Profiles count even when the Supabase pack is still on the old status.
   let mappedAll = (outputRows || []).map((row) => mapOutput(row, null));
@@ -3673,7 +3695,7 @@ export async function buildStudioProfilesOverviewRows(env, profiles) {
   }
   const mappedById = new Map(mappedAll.filter((row) => row?.id).map((row) => [row.id, row]));
 
-  if (airtableIdeaRows) {
+  if (airtableIdeaRows && commitIdeas) {
     studioProfilesOverviewCache.ideasAt = Date.now();
     studioProfilesOverviewCache.ideasSource = "airtable";
   }
@@ -3690,7 +3712,7 @@ export async function buildStudioProfilesOverviewRows(env, profiles) {
       ideasCount = counted.count;
       ideasSource = "airtable";
       metrics.ideas = counted.total;
-      rememberOverviewIdeaCount(profile.id, ideasCount, "airtable");
+      if (commitIdeas) rememberOverviewIdeaCount(profile.id, ideasCount, "airtable");
     } else if (ideaCounts.has(String(profile.id))) {
       // Reuse last-good Ideas counts so scheduled/manual/failed/approval can
       // update from Supabase without waiting on an Airtable Ideas scan.
@@ -3701,7 +3723,7 @@ export async function buildStudioProfilesOverviewRows(env, profiles) {
       ideasCount = counted.count;
       ideasSource = "supabase";
       metrics.ideas = counted.total;
-      rememberOverviewIdeaCount(profile.id, ideasCount, "supabase");
+      if (commitIdeas) rememberOverviewIdeaCount(profile.id, ideasCount, "supabase");
     }
     metrics.ideas_not_in_production = ideasCount;
     const mapped = mapStudioContentProfile(profile);
@@ -3733,6 +3755,7 @@ export function respondProfilesOverviewSoft(request, env, { records = [], cached
   // Never HTTP 429 the home overview — cold isolates + Airtable cooldown used to
   // paint a red banner on every Studio open even when the selected-profile feed
   // could still recover. Soft 200 keeps the shell usable.
+  const meta = profilesOverviewSnapshotView();
   return respond(request, env, {
     ok: true,
     cached: Boolean(cached),
@@ -3740,6 +3763,10 @@ export function respondProfilesOverviewSoft(request, env, { records = [], cached
     cooling: Boolean(cooling),
     refreshing: Boolean(refreshing),
     snapshot: Boolean(snapshot),
+    snapshot_at: Number(meta.at || 0) || null,
+    snapshot_generation: meta.generation || null,
+    ideas_at: Number(meta.ideasAt || 0) || null,
+    read_source: meta.readSource || null,
     records: Array.isArray(records) ? records : [],
   });
 }
@@ -3753,7 +3780,9 @@ function profilesOverviewSnapshotView() {
     authKey: cache.authKey,
     complete: cache.complete === true,
     schemaVersion: cache.schemaVersion || 0,
+    generation: String(cache.generation || ""),
     ideasAt: Number(cache.ideasAt || 0),
+    ideasSource: String(cache.ideasSource || cache.rows?.[0]?.ideas_source || ""),
     readSource: String(cache.readSource || cache.rows?.[0]?.read_source || ""),
   };
 }
@@ -3766,6 +3795,7 @@ export function rememberProfilesOverviewSnapshot(snapshot) {
   studioProfilesOverviewCache.authKey = String(snapshot.authKey || "");
   studioProfilesOverviewCache.complete = snapshot.complete === true;
   studioProfilesOverviewCache.schemaVersion = Number(snapshot.schemaVersion || 0);
+  studioProfilesOverviewCache.generation = String(snapshot.generation || "");
   if (snapshot.ideasAt != null) studioProfilesOverviewCache.ideasAt = Number(snapshot.ideasAt) || 0;
   const readSource = String(snapshot.readSource || rows[0]?.read_source || studioProfilesOverviewCache.readSource || "");
   if (readSource) studioProfilesOverviewCache.readSource = readSource;
@@ -3785,14 +3815,21 @@ export function rememberProfilesOverviewSnapshot(snapshot) {
 }
 /*__STUDIO_WORKER_END:rememberProfilesOverviewSnapshot__*/
 
+export async function readStudioProfilesOverviewSnapshotFromR2(env) {
+  if (!env?.STUDIO_MEDIA?.get) return null;
+  const object = await env.STUDIO_MEDIA.get(STUDIO_PROFILES_OVERVIEW_SNAPSHOT_KEY);
+  if (!object) return null;
+  return object.json();
+}
+/*__STUDIO_WORKER_END:readStudioProfilesOverviewSnapshotFromR2__*/
+
 export async function readStudioProfilesOverviewSnapshot(env) {
   const cache = studioProfilesOverviewCache;
   if (cache.rows?.length) return profilesOverviewSnapshotView();
   if (!env?.STUDIO_MEDIA?.get) return null;
   try {
-    const object = await env.STUDIO_MEDIA.get(STUDIO_PROFILES_OVERVIEW_SNAPSHOT_KEY);
-    if (!object) return null;
-    return rememberProfilesOverviewSnapshot(await object.json());
+    const snapshot = await readStudioProfilesOverviewSnapshotFromR2(env);
+    return snapshot ? rememberProfilesOverviewSnapshot(snapshot) : null;
   } catch (error) {
     console.warn("profiles overview snapshot read failed", error);
     return null;
@@ -3801,25 +3838,44 @@ export async function readStudioProfilesOverviewSnapshot(env) {
 /*__STUDIO_WORKER_END:readStudioProfilesOverviewSnapshot__*/
 
 export async function writeStudioProfilesOverviewSnapshot(env, rows, authKey, extra = {}) {
-  const merged = applyCachedOverviewIdeaCounts(rows);
+  const merged = extra.preserveRowIdeas === true
+    ? (Array.isArray(rows) ? rows : [])
+    : applyCachedOverviewIdeaCounts(rows);
   const at = extra.at != null ? Number(extra.at) || Date.now() : Date.now();
   const ideasAt = extra.ideasAt != null ? Number(extra.ideasAt) || 0 : Number(studioProfilesOverviewCache.ideasAt || 0);
   const readSource = String(extra.readSource || merged?.[0]?.read_source || studioProfilesOverviewCache.readSource || "");
-  const snapshot = rememberProfilesOverviewSnapshot({
+  const generation = String(
+    extra.generation
+      || `overview-${at}-${globalThis.crypto?.randomUUID?.() || Math.random().toString(36).slice(2, 12)}`,
+  );
+  const rawSnapshot = {
     rows: merged,
     authKey,
     at,
     complete: true,
     schemaVersion: 4,
+    generation,
     ideasAt,
     readSource,
-    ideasSource: studioProfilesOverviewCache.ideasSource || merged?.[0]?.ideas_source || "",
-  });
+    ideasSource: String(extra.ideasSource || studioProfilesOverviewCache.ideasSource || merged?.[0]?.ideas_source || ""),
+  };
+
+  if (extra.durableRequired === true) {
+    if (!env?.STUDIO_MEDIA?.put) throw new Error("STUDIO_MEDIA binding is not configured");
+    await env.STUDIO_MEDIA.put(
+      STUDIO_PROFILES_OVERVIEW_SNAPSHOT_KEY,
+      JSON.stringify(rawSnapshot),
+      { httpMetadata: { contentType: "application/json" } },
+    );
+    return rememberProfilesOverviewSnapshot(rawSnapshot);
+  }
+
+  const snapshot = rememberProfilesOverviewSnapshot(rawSnapshot);
   if (!snapshot || !env?.STUDIO_MEDIA?.put) return snapshot;
   try {
     await env.STUDIO_MEDIA.put(
       STUDIO_PROFILES_OVERVIEW_SNAPSHOT_KEY,
-      JSON.stringify(snapshot),
+      JSON.stringify(rawSnapshot),
       { httpMetadata: { contentType: "application/json" } },
     );
   } catch (error) {
@@ -3828,6 +3884,18 @@ export async function writeStudioProfilesOverviewSnapshot(env, rows, authKey, ex
   return snapshot;
 }
 /*__STUDIO_WORKER_END:writeStudioProfilesOverviewSnapshot__*/
+
+export async function verifyStudioProfilesOverviewSnapshot(env, expectedGeneration) {
+  const snapshot = await readStudioProfilesOverviewSnapshotFromR2(env);
+  if (!snapshot?.complete || snapshot.schemaVersion !== 4 || !Array.isArray(snapshot.rows) || !snapshot.rows.length) {
+    throw new Error("Forced overview refresh could not verify a complete durable snapshot");
+  }
+  if (String(snapshot.generation || "") !== String(expectedGeneration || "")) {
+    throw new Error("Forced overview refresh completed without the expected snapshot generation");
+  }
+  return snapshot;
+}
+/*__STUDIO_WORKER_END:verifyStudioProfilesOverviewSnapshot__*/
 
 export async function refreshStudioProfilesOverviewSnapshot(env, authorization) {
   const cache = studioProfilesOverviewCache;
@@ -3945,33 +4013,48 @@ export function scheduleStudioProfilesOverviewIdeasRefresh(ctx, env, authorizati
 /*__STUDIO_WORKER_END:scheduleStudioProfilesOverviewIdeasRefresh__*/
 
 export async function profilesOverview(request, env, authorization, ctx) {
-  const snapshot = await readStudioProfilesOverviewSnapshot(env);
+  const [snapshot, refreshRecord] = await Promise.all([
+    readStudioProfilesOverviewSnapshot(env),
+    readProfilesOverviewRefreshStateRecord(env).catch(() => null),
+  ]);
+  const manualRefresh = publicProfilesOverviewRefreshState(refreshRecord?.state || null);
+  const manualRefreshing = manualRefresh.status === "refreshing";
   const age = snapshot?.at ? Date.now() - snapshot.at : Infinity;
   const freshMs = studioProfilesOverviewFreshMs(snapshot);
   if (snapshot?.rows?.length && snapshot.complete === true && snapshot.schemaVersion === 4 && age < freshMs) {
-    scheduleStudioProfilesOverviewIdeasRefresh(ctx, env, authorization);
+    if (!manualRefreshing) scheduleStudioProfilesOverviewIdeasRefresh(ctx, env, authorization);
     return respondProfilesOverviewSoft(request, env, {
       records: snapshot.rows,
       cached: true,
       snapshot: true,
+      refreshing: manualRefreshing,
     });
   }
   if (snapshot?.rows?.length) {
     const supabaseBacked = studioProfilesOverviewReadSource(snapshot) === "supabase" || studioReadSource(env) === "supabase";
     const cooling = !supabaseBacked && airtableCooldownWaitMs() > AIRTABLE_SLOT_FAIL_FAST_MS;
-    if (!cooling) scheduleStudioProfilesOverviewRefresh(ctx, env, authorization);
-    scheduleStudioProfilesOverviewIdeasRefresh(ctx, env, authorization);
+    if (!cooling && !manualRefreshing) scheduleStudioProfilesOverviewRefresh(ctx, env, authorization);
+    if (!manualRefreshing) scheduleStudioProfilesOverviewIdeasRefresh(ctx, env, authorization);
     return respondProfilesOverviewSoft(request, env, {
       records: snapshot.rows,
       cached: true,
       stale: true,
       cooling,
-      refreshing: !cooling,
+      refreshing: manualRefreshing || !cooling,
       snapshot: true,
     });
   }
 
   const cache = studioProfilesOverviewCache;
+  if (manualRefreshing) {
+    return respondProfilesOverviewSoft(request, env, {
+      records: cache.rows || [],
+      cached: Boolean(cache.rows?.length),
+      stale: true,
+      refreshing: true,
+      snapshot: Boolean(cache.rows?.length),
+    });
+  }
   const supabase = studioReadSource(env) === "supabase";
   const coolMs = airtableCooldownWaitMs();
   if (!supabase && coolMs > AIRTABLE_SLOT_FAIL_FAST_MS) {
@@ -4003,20 +4086,21 @@ export async function profilesOverview(request, env, authorization, ctx) {
       "overview-resolve",
     );
     cache.authKey = studioProfilesOverviewAuthKey(profiles);
-    cache.inflight = buildStudioProfilesOverviewRows(env, profiles)
+    const build = buildStudioProfilesOverviewRows(env, profiles)
       .then((rows) => writeStudioProfilesOverviewSnapshot(env, rows, cache.authKey, {
         readSource: rows[0]?.read_source || "",
         ideasAt: studioProfilesOverviewCache.ideasAt || 0,
-      }).then(() => rows))
-      .finally(() => {
-        if (cache.inflight) cache.inflight = null;
-      });
-    ctx?.waitUntil?.(cache.inflight.catch((error) => {
+      }).then(() => rows));
+    cache.inflight = build;
+    build.finally(() => {
+      if (cache.inflight === build) cache.inflight = null;
+    });
+    ctx?.waitUntil?.(build.catch((error) => {
       console.warn("profiles overview snapshot build failed", error);
     }));
     scheduleStudioProfilesOverviewIdeasRefresh(ctx, env, authorization);
     const rows = await raceStudioOverviewBudget(
-      cache.inflight,
+      build,
       STUDIO_PROFILES_OVERVIEW_BUILD_BUDGET_MS,
       "overview-build",
     );
@@ -4032,6 +4116,197 @@ export async function profilesOverview(request, env, authorization, ctx) {
   }
 }
 /*__STUDIO_WORKER_END:profilesOverview__*/
+
+export function validateStudioProfilesOverviewRows(rows, profiles) {
+  const expected = new Set((profiles || []).map((row) => String(row?.id || "")).filter(Boolean));
+  const actual = new Set((rows || []).map((row) => String(row?.id || "")).filter(Boolean));
+  if (!expected.size || actual.size !== expected.size || [...expected].some((id) => !actual.has(id))) {
+    throw new Error("Profiles overview rebuild did not return every authorized profile");
+  }
+  for (const row of rows || []) {
+    for (const platform of ["Facebook", "Instagram", "TikTok", "YouTube"]) {
+      if (!Number.isFinite(Number(row?.scheduled?.[platform]))) {
+        throw new Error(`Profiles overview scheduled count is incomplete for ${platform}`);
+      }
+    }
+    for (const key of ["manual", "failed", "approval", "ideas"]) {
+      if (!Number.isFinite(Number(row?.[key]))) {
+        throw new Error(`Profiles overview ${key} count is incomplete`);
+      }
+    }
+  }
+  return true;
+}
+/*__STUDIO_WORKER_END:validateStudioProfilesOverviewRows__*/
+
+function profilesOverviewRefreshFailureComponents(error) {
+  const message = String(error?.message || error || "");
+  if (/ideas/i.test(message)) return { outputs: "not_committed", ideas: "failed" };
+  if (/output/i.test(message)) return { outputs: "failed", ideas: "not_committed" };
+  return { outputs: "failed", ideas: "failed" };
+}
+
+export async function runStudioProfilesOverviewForceRefresh(env, authorization, refreshState) {
+  const operationId = String(refreshState?.operation_id || "");
+  const startedMs = Date.now();
+  await patchProfilesOverviewRefreshState(env, operationId, {
+    status: "refreshing",
+    started_at: new Date(startedMs).toISOString(),
+    error: "",
+    component_status: { outputs: "refreshing", ideas: "refreshing" },
+  });
+  try {
+    const cache = studioProfilesOverviewCache;
+    if (cache.inflight) {
+      await raceStudioOverviewBudget(cache.inflight, STUDIO_PROFILES_OVERVIEW_BUILD_BUDGET_MS * 2, "overview-existing-build");
+    }
+    const profiles = await raceStudioOverviewBudget(
+      resolveAuthorizedContentProfiles(env, authorization),
+      Math.max(STUDIO_PROFILES_OVERVIEW_RESOLVE_BUDGET_MS, 5000),
+      "overview-force-resolve",
+    );
+    if (!profiles?.length) throw new Error("Profiles overview refresh resolved no authorized profiles");
+
+    const build = buildStudioProfilesOverviewRows(env, profiles, { forceIdeas: true, commitIdeas: false });
+    cache.inflight = build;
+    build.finally(() => {
+      if (cache.inflight === build) cache.inflight = null;
+    });
+    const rows = await raceStudioOverviewBudget(build, 45_000, "overview-force-build");
+    validateStudioProfilesOverviewRows(rows, profiles);
+
+    const snapshotAt = Math.max(Date.now(), Number(refreshState?.baseline_snapshot_at || 0) + 1);
+    const generation = `manual-${operationId}`;
+    const snapshot = await writeStudioProfilesOverviewSnapshot(
+      env,
+      rows,
+      studioProfilesOverviewAuthKey(profiles),
+      {
+        at: snapshotAt,
+        generation,
+        durableRequired: true,
+        preserveRowIdeas: true,
+        ideasAt: snapshotAt,
+        ideasSource: "airtable",
+        readSource: rows[0]?.read_source || "",
+      },
+    );
+    const verified = await verifyStudioProfilesOverviewSnapshot(env, generation);
+    if (Number(verified.at || 0) < snapshotAt || String(verified.generation || "") !== generation) {
+      throw new Error("Forced overview refresh did not publish a newer verified snapshot");
+    }
+
+    const durationMs = Date.now() - startedMs;
+    await patchProfilesOverviewRefreshState(env, operationId, {
+      status: "completed",
+      completed_at: new Date().toISOString(),
+      snapshot_at: Number(snapshot?.at || verified.at || snapshotAt),
+      snapshot_generation: generation,
+      ideas_at: Number(snapshot?.ideasAt || verified.ideasAt || snapshotAt),
+      read_source: String(snapshot?.readSource || verified.readSource || rows[0]?.read_source || ""),
+      duration_ms: durationMs,
+      error: "",
+      component_status: { outputs: "completed", ideas: "completed" },
+    });
+    console.info("profiles overview force refresh completed", {
+      operation_id: operationId,
+      duration_ms: durationMs,
+      snapshot_at: snapshotAt,
+      snapshot_generation: generation,
+      profiles: rows.length,
+      read_source: rows[0]?.read_source || "",
+    });
+    return verified;
+  } catch (error) {
+    const durationMs = Date.now() - startedMs;
+    await patchProfilesOverviewRefreshState(env, operationId, {
+      status: "failed",
+      failed_at: new Date().toISOString(),
+      duration_ms: durationMs,
+      error: String(error?.message || error || "Overview refresh failed").slice(0, 500),
+      component_status: profilesOverviewRefreshFailureComponents(error),
+    }).catch(() => null);
+    console.warn("profiles overview force refresh failed", {
+      operation_id: operationId,
+      duration_ms: durationMs,
+      error: error?.message || String(error || ""),
+    });
+    throw error;
+  }
+}
+/*__STUDIO_WORKER_END:runStudioProfilesOverviewForceRefresh__*/
+
+export async function startProfilesOverviewForceRefresh(request, env, authorization, ctx) {
+  const snapshot = await readStudioProfilesOverviewSnapshot(env);
+  const coolMs = airtableCooldownWaitMs();
+  if (coolMs > AIRTABLE_SLOT_FAIL_FAST_MS) {
+    return respond(request, env, {
+      ok: true,
+      accepted: false,
+      status: "cooling_down",
+      refresh: {
+        status: "cooling_down",
+        retry_after_ms: coolMs,
+        snapshot_at: Number(snapshot?.at || 0) || null,
+        snapshot_generation: snapshot?.generation || null,
+        ideas_at: Number(snapshot?.ideasAt || 0) || null,
+        error: "Authoritative Ideas refresh is temporarily rate-limited.",
+      },
+    });
+  }
+
+  const claim = await claimProfilesOverviewRefresh(env, {
+    baselineSnapshotAt: Number(snapshot?.at || 0),
+    baselineGeneration: String(snapshot?.generation || ""),
+  });
+  if (!claim.claimed) {
+    return respond(request, env, {
+      ok: true,
+      accepted: false,
+      status: claim.state?.status || (claim.reason === "cooldown" ? "cooling_down" : "refreshing"),
+      refresh: claim.state,
+    }, claim.reason === "in_progress" ? 202 : 200);
+  }
+
+  const run = runStudioProfilesOverviewForceRefresh(env, authorization, claim.state);
+  if (ctx?.waitUntil) ctx.waitUntil(run.catch(() => null));
+  else await run;
+  return respond(request, env, {
+    ok: true,
+    accepted: true,
+    status: "refreshing",
+    refresh: claim.state,
+  }, 202);
+}
+/*__STUDIO_WORKER_END:startProfilesOverviewForceRefresh__*/
+
+export async function getProfilesOverviewRefreshStatus(request, env) {
+  const [record, snapshot] = await Promise.all([
+    readProfilesOverviewRefreshStateRecord(env).catch(() => null),
+    readStudioProfilesOverviewSnapshot(env),
+  ]);
+  const refresh = publicProfilesOverviewRefreshState(record?.state || null);
+  const now = Date.now();
+  const snapshotAt = Number(snapshot?.at || 0);
+  const ideasAt = Number(snapshot?.ideasAt || 0);
+  const freshMs = studioProfilesOverviewFreshMs(snapshot);
+  return respond(request, env, {
+    ok: true,
+    status: refresh.status,
+    refresh: {
+      ...refresh,
+      snapshot_at: Number(refresh.snapshot_at || snapshotAt) || null,
+      snapshot_generation: refresh.snapshot_generation || snapshot?.generation || null,
+      ideas_at: Number(refresh.ideas_at || ideasAt) || null,
+      read_source: refresh.read_source || studioProfilesOverviewReadSource(snapshot) || null,
+      current_snapshot_at: snapshotAt || null,
+      current_snapshot_generation: snapshot?.generation || null,
+      current_snapshot_stale: !snapshotAt || now - snapshotAt >= freshMs,
+      ideas_stale: !ideasAt || now - ideasAt >= STUDIO_PROFILES_OVERVIEW_IDEAS_REFRESH_MS,
+    },
+  });
+}
+/*__STUDIO_WORKER_END:getProfilesOverviewRefreshStatus__*/
 
 export async function dashboard(request, env, url, authorization) {
   const profile = await resolveWorkingContentProfile(env, authorization, requestedProfileId(url));
