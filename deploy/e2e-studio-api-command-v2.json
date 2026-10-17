@@ -1,10 +1,10 @@
 {
-  "correlation_id": "NYC-LIVE-PIPELINE-OUTPUTS-20261012",
+  "correlation_id": "VISUAL-VOICEOVER-CANARY-READ-20261017-01",
   "requests": [
     {
-      "name": "nyc_recent_outputs",
+      "name": "read_canary_creative",
       "method": "GET",
-      "path": "/api/outputs?mode=latest&profile=recgtK8Z7eNADNtVy"
+      "path": "/api/outputs/recL2zjZc7XGRJyRt/creative"
     }
   ]
 }
