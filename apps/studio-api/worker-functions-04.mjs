@@ -2247,13 +2247,22 @@ async function studioApproveOutputRecordAtomic(env, record, note, stamp, payload
       && !markerIso);
   const existingNotes = String(f(record, "Review_Notes") || "").trim();
   const prepared = await studioEnsureNativePublishSlides(env, record);
-  const approvalCycle = String(
+  // The cycle identity must be stable across retries of one approval attempt,
+  // but must change after a send-back even when the same finished file is reused.
+  // Factory send-back stamps Review_Decision_At, so combining it with the
+  // render/file identity prevents an old committed reservation from short-
+  // circuiting a legitimate later re-approval.
+  const approvalArtifact = String(
     f(record, "Final_File_ID")
     || f(record, "Remotion_Job_ID")
     || f(record, "Final_File_URL")
     || f(record, "Studio_Preview_R2_Key")
     || "current"
-  ).replace(/[^A-Za-z0-9._:-]+/g, "_").slice(0, 96);
+  );
+  const approvalDecisionCycle = String(f(record, "Review_Decision_At") || "initial");
+  const approvalCycle = `${approvalArtifact}:${approvalDecisionCycle}`
+    .replace(/[^A-Za-z0-9._:-]+/g, "_")
+    .slice(0, 128);
   const operationId = String(options.scheduleOperationId || `approve:${id}:${approvalCycle}`).trim();
   const factoryBatchId = String(options.factoryBatchId || options.factory_batch_id || "").trim() || null;
 
@@ -2442,6 +2451,28 @@ async function studioApproveOutputRecordAtomic(env, record, note, stamp, payload
     maxWaitMs: options.scheduleLockWaitMs ?? 30_000,
   });
 
+  if (result?.already_committed) {
+    // Idempotent retry after a prior verified commit: return the authoritative
+    // row only when it still proves this approval is committed. A stale
+    // reservation from an older review cycle must never silently approve.
+    const authoritative = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, prepared.id || id);
+    const approved = String(f(authoritative, "Review_Status") || "").trim() === "Approved"
+      || String(f(authoritative, "Output_Status") || "").trim() === "Approved for Publishing";
+    const authoritativeIso = String(
+      f(authoritative, "Scheduled_Post_Date")
+      || f(authoritative, "YouTube_Scheduled_Publish_At")
+      || f(authoritative, "Studio_Scheduled_At")
+      || ""
+    ).trim();
+    const ledgerIso = String(result?.reservation?.scheduled_iso || result?.reservation?.authoritative_iso || "").trim();
+    if (!approved || !authoritativeIso || (ledgerIso && Date.parse(ledgerIso) !== Date.parse(authoritativeIso))) {
+      throw new HttpError(
+        409,
+        "Committed scheduling reservation no longer matches the current approval cycle; retry requires a new fenced operation",
+      );
+    }
+    return { ...authoritative, __already_approved: true };
+  }
   return result.value;
 }
 
