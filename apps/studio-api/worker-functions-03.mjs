@@ -8256,6 +8256,21 @@ export async function phase6AdvanceRenderPipelineShort(env, outputRecordId) {
         message: pulse.pulse?.message || "Waiting for the shared Remotion render slot.",
       };
     }
+    const pythonRun = pulse.pulse?.details?.run || {};
+    const pythonSkipped = String(pulse.pulse?.status || "").toLowerCase() === "skipped" || pythonRun?.processed === false;
+    if (!pulse.observed?.matched && queuedStatus === "Ready for Render" && pythonSkipped) {
+      const reason = String(pythonRun?.reason || pulse.pulse?.reason || pulse.pulse?.message || "R4 skipped").trim();
+      return {
+        completed: false,
+        handoff_state: "render_start_blocked",
+        record: current,
+        error: `R4 Python stage did not start the exact output: ${reason}`,
+        python_stage: {
+          status: pulse.pulse?.status || null,
+          reason: pythonRun?.reason || pulse.pulse?.reason || null,
+        },
+      };
+    }
     state = phase6RenderHandoffState(current);
     if (state === "render_failed") return { completed: false, handoff_state: state, record: current, error: "R4 marked the output Failed" };
     if (state === "render_ready") {
