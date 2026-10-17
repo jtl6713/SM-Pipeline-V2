@@ -2230,6 +2230,8 @@ export function studioStoryCompanionPlatformBlockers(platformOccupiedMs, compani
 
 async function studioApproveOutputRecordAtomic(env, record, note, stamp, payload = {}, options = {}) {
   const id = record.id;
+  const checkpoint = typeof options.onTimingCheckpoint === "function"
+    ? options.onTimingCheckpoint : () => {};
   const platform = String(f(record, "Platform") || "").trim();
   const outputType = String(f(record, "Studio_Output_Type") || f(record, "Format") || "").trim();
   const profile = options.profile || await item4ProductionProfileRecord(env, record).catch(() => null);
@@ -2292,6 +2294,7 @@ async function studioApproveOutputRecordAtomic(env, record, note, stamp, payload
       throw new HttpError(503, "Atomic schedule transaction unexpectedly fell back to legacy mode");
     },
     plan: async ({ occupied_reservations: durableReservations }) => {
+      checkpoint("slot_search_started");
       // Commit-time source of truth: never trust Approve All / Factory batch
       // occupancy snapshots here. Force the shared cache cold, then re-read.
       studioInvalidateOccupiedScheduleCache();
@@ -2419,6 +2422,7 @@ async function studioApproveOutputRecordAtomic(env, record, note, stamp, payload
       const preparedHandoff = studioPublishHandoffFields(prepared, {
         scheduledPostDate: scheduleFields.Scheduled_Post_Date || f(prepared, "Scheduled_Post_Date") || scheduledIso,
       });
+      checkpoint("slot_search_finished");
       return {
         action: existingScheduleIso && existingScheduleIso !== scheduledIso ? "move" : "reserve",
         selectedIso: scheduledIso,
@@ -2426,12 +2430,18 @@ async function studioApproveOutputRecordAtomic(env, record, note, stamp, payload
         patchFields: { ...fields, ...preparedHandoff, ...scheduleFields },
       };
     },
-    write: async (plan, { signal }) => airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, prepared.id || id, {
-      method: "PATCH",
-      signal,
-      body: JSON.stringify({ fields: plan.patchFields, typecast: true }),
-    }),
+    write: async (plan, { signal }) => {
+      checkpoint("schedule_write_started");
+      const written = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, prepared.id || id, {
+        method: "PATCH",
+        signal,
+        body: JSON.stringify({ fields: plan.patchFields, typecast: true }),
+      });
+      checkpoint("schedule_write_finished");
+      return written;
+    },
     verify: async (_updated, plan) => {
+      checkpoint("schedule_verify_started");
       const verified = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, prepared.id || id);
       const storedIso = String(
         f(verified, "Scheduled_Post_Date")
@@ -2447,15 +2457,18 @@ async function studioApproveOutputRecordAtomic(env, record, note, stamp, payload
       if (!Number.isFinite(expectedMs) || !Number.isFinite(storedMs) || expectedMs !== storedMs) {
         throw new HttpError(503, "Airtable stored schedule does not match the reserved MAE slot");
       }
+      checkpoint("schedule_verify_finished");
       return new Date(storedMs).toISOString();
     },
     afterCommit: async (updated) => {
       studioInvalidateOccupiedScheduleCache();
+      checkpoint("supabase_sync_started");
       const writeThrough = studioSupabaseWriteThroughOutput(env, updated, "approve");
       if (Array.isArray(options.writeThroughQueue)) {
         options.writeThroughQueue.push(writeThrough);
       } else {
         await writeThrough;
+        checkpoint("supabase_sync_finished");
       }
     },
   }, {
