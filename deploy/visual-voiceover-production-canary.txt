@@ -1,1 +1,2 @@
 2026-10-17 PR #810 visual-aware voiceover production acceptance canary. Run only after Worker, Pipeline Runner, and Remotion release versions are live. Nonpublishing test output only; Do_Not_Publish must remain true.
+2026-10-17 rerun after verified fresh Ops sync/deploy and Remotion health version 2026-10-17-visual-voiceover-timeline.
