@@ -10082,7 +10082,9 @@ export async function factoryDeskRefreshPayload(request, env, authorization, con
 /*__STUDIO_WORKER_END:factoryDeskRefreshPayload__*/
 
 export async function factoryApproveOutput(env, id, actor, note, ctx = null, scheduleOptions = {}) {
-  const existing = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, id);
+  const existing = scheduleOptions.prefetchedFactoryRecord?.id === id
+    ? scheduleOptions.prefetchedFactoryRecord
+    : await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, id);
   const outputStatus = String(f(existing, "Output_Status") || "").trim();
   const reviewStatus = String(f(existing, "Review_Status") || "").trim();
   const publishStatus = String(f(existing, "Publish_Status") || "").trim();
@@ -13936,11 +13938,13 @@ export async function factoryBatchProcess(env, profileId, requestId, ctx = null)
   const run = async () => {
     const result = await factoryBatchDrain(env.STUDIO_MEDIA, {
       profileId, requestId, maxItems: 25, maxElapsedMs: 20000,
-      approve: async (id, job) => {
+      approve: async (id, job, checkpoint = () => {}) => {
         // Canonical Factory single-item guard handles existing Approved/Published,
         // render eligibility, Do_Not_Publish and the MAE / Story scheduling rules.
         // Reject profile drift before calling any authoritative approval mutation.
+        checkpoint("preflight_fetch_started");
         const record = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, id);
+        checkpoint("preflight_fetch_finished");
         if (parentId
           ? (job.items.length>globalPolicy.max_per_profile ||
              !factoryGlobalAcceptsOutput(globalPolicy,record))
@@ -13951,7 +13955,9 @@ export async function factoryBatchProcess(env, profileId, requestId, ctx = null)
         // Profile ownership must resolve from the authoritative Content Item
         // when Platform Output exposes only a lookup display-name, never infer
         // a city from the operator's selected profile.
+        checkpoint("ownership_check_started");
         const ownerProfileId = await studioContentProfileRecordIdForOutput(env, record);
+        checkpoint("ownership_check_finished");
         if (!ownerProfileId) {
           throw new HttpError(409, "Cannot verify output's Content Profile; approval was not submitted");
         }
@@ -13959,7 +13965,8 @@ export async function factoryBatchProcess(env, profileId, requestId, ctx = null)
           throw new HttpError(409, "Output belongs to a different content profile");
         }
         // Canonical single-output approval owns terminal-state idempotence and Do_Not_Publish.
-        return factoryApproveOutput(
+        checkpoint("approval_started");
+        const result = await factoryApproveOutput(
           env,
           id,
           "Factory Batch",
@@ -13968,8 +13975,15 @@ export async function factoryBatchProcess(env, profileId, requestId, ctx = null)
           {
             scheduleOperationId: `factory-batch:${requestId}:${id}`,
             factoryBatchId: requestId,
+            onTimingCheckpoint: checkpoint,
+            // The record was just read from Airtable and ownership verified.
+            // Canonical approval still performs its own authoritative reread
+            // under the shared output lock before making any changes.
+            prefetchedFactoryRecord: record,
           },
         );
+        checkpoint("approval_finished");
+        return result;
       },
     });
     return result;
