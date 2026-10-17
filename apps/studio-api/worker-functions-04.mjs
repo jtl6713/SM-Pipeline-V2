@@ -1229,6 +1229,7 @@ async function studioHealApprovedMissingScheduleAtomic(env, row) {
     platform,
     output_type: outputType,
     platform_output_record_id: row.id,
+    content_item_id: studioFirstLinkedId(f(row, "Content_Item")) || null,
     owner_operation_id: operationId,
   }, {
     legacy: async () => {
@@ -1385,6 +1386,7 @@ async function studioHealStoryCompanionDriftAtomic(env, row) {
     platform,
     output_type: outputType,
     platform_output_record_id: row.id,
+    content_item_id: studioFirstLinkedId(f(row, "Content_Item")) || null,
     owner_operation_id: operationId,
   }, {
     legacy: async () => {
@@ -1512,6 +1514,7 @@ async function studioReconcileReservationDriftAtomic(env, snapshot, reservation,
     platform,
     output_type: outputType,
     platform_output_record_id: outputId,
+    content_item_id: studioFirstLinkedId(f(record, "Content_Item")) || null,
     owner_operation_id: operationId,
   }, {
     legacy: async () => {
@@ -2257,6 +2260,7 @@ async function studioApproveOutputRecordAtomic(env, record, note, stamp, payload
     platform,
     output_type: outputType,
     platform_output_record_id: id,
+    content_item_id: studioFirstLinkedId(f(record, "Content_Item")) || null,
     owner_operation_id: operationId,
     factory_batch_id: factoryBatchId,
   }, {
@@ -2848,6 +2852,7 @@ async function studioAtomicApplyScheduleRegenEntry(env, {
     platform,
     output_type: outputType,
     platform_output_record_id: outputId,
+    content_item_id: studioFirstLinkedId(f(record, "Content_Item")) || null,
     owner_operation_id: `schedule-regen:${jobKey}:${outputId}`,
   }, {
     legacy: async () => {
@@ -10297,6 +10302,7 @@ async function studioAtomicVacateSkippedOutput(env, row, fields, operationId) {
     platform,
     output_type: outputType,
     platform_output_record_id: current.id,
+    content_item_id: studioFirstLinkedId(f(current, "Content_Item")) || null,
     owner_operation_id: operationId || `vacate:${current.id}`,
   }, {
     legacy: async () => {
@@ -12887,6 +12893,7 @@ export async function scheduleStudioPublishOutput(request, env, url, authorizati
       platform,
       output_type: outputType,
       platform_output_record_id: match[1],
+      content_item_id: studioFirstLinkedId(f(existing, "Content_Item")) || null,
       operation_id: String(
         payload?.schedule_operation_id
         || `schedule:${match[1]}:${previousRaw || "blank"}->${value || (publishNowImmediate ? "immediate" : "auto")}`
