@@ -5,7 +5,7 @@
   const platformOrder = ["Facebook","Instagram","TikTok","YouTube"];
   const CACHE_KEY = "studio.allProfilesOverview.v1";
   const POLL_MS = 5000;
-  const state = { rows: [], timer: 0, loading: false, deferred: false, followUp: false };
+  const state = { rows: [], timer: 0, loading: false, deferred: false, followUp: false, cacheAt: 0 };
 
   function scheduledTotal(row) {
     return platformOrder.reduce((sum, platform) => sum + (Number(row?.scheduled?.[platform]) || 0), 0);
@@ -15,15 +15,24 @@
       const raw = localStorage.getItem(CACHE_KEY) || sessionStorage.getItem(CACHE_KEY);
       if (!raw) return null;
       const parsed = JSON.parse(raw);
-      return Array.isArray(parsed?.rows) ? parsed.rows : null;
+      return Array.isArray(parsed?.rows) ? { rows: parsed.rows, at: Number(parsed.at) || 0 } : null;
     } catch {
       return null;
     }
   }
   function writeCache(rows) {
-    const payload = JSON.stringify({ rows, at: Date.now() });
+    state.cacheAt = Date.now();
+    const payload = JSON.stringify({ rows, at: state.cacheAt });
     try { localStorage.setItem(CACHE_KEY, payload); } catch { /* ignore quota */ }
     try { sessionStorage.setItem(CACHE_KEY, payload); } catch { /* ignore quota */ }
+  }
+  function cacheAgeLabel() {
+    if (!state.cacheAt || !Number.isFinite(state.cacheAt)) return "age unknown";
+    const seconds = Math.max(0, Math.floor((Date.now() - state.cacheAt) / 1000));
+    if (seconds < 60) return `${seconds}s old`;
+    if (seconds < 3600) return `${Math.floor(seconds / 60)}m old`;
+    if (seconds < 86400) return `${Math.floor(seconds / 3600)}h ${Math.floor((seconds % 3600) / 60)}m old`;
+    return `${Math.floor(seconds / 86400)}d ${Math.floor((seconds % 86400) / 3600)}h old`;
   }
   function isOverviewSoftFailure(error) {
     const name = String(error?.name || "");
@@ -131,7 +140,7 @@
       <td data-label="Ideas" class="overview-tone-${tone(row.ideas,"ideas")}">${actionCount(row, "ideas", "ideas")}</td>
     </tr>`;
     const staleNote = stale || error
-      ? `<p class="subtle all-profiles-stale">${esc(error ? `Showing last good overview (${error}).` : "Showing cached overview.")}</p>`
+      ? `<p class="subtle all-profiles-stale">${esc(error ? `Showing last good overview (${cacheAgeLabel()}; ${error}).` : `Showing cached overview (${cacheAgeLabel()}).`)}</p>`
       : "";
     host.innerHTML = `<div class="all-profiles-heading"><div><p class="studio-hub-kicker">ALL PROFILES</p><h1>Studio overview</h1>${staleNote}</div><button type="button" class="secondary-button" id="allProfilesRefresh">Refresh</button></div>
       <div class="all-profiles-table-wrap"><table class="all-profiles-table"><thead><tr class="all-profiles-group-row"><th rowspan="2">Profile</th><th colspan="4" class="all-profiles-scheduled-group">Scheduled posts</th><th rowspan="2">Manual action</th><th rowspan="2">Failed</th><th rowspan="2">Awaiting approval</th><th rowspan="2">Ideas</th></tr><tr class="all-profiles-platform-row">${platformOrder.map((p)=>`<th class="all-profiles-scheduled-col">${p}</th>`).join("")}</tr></thead>
@@ -161,8 +170,9 @@
     state.loading = true;
     if (!state.rows.length) {
       const cached = readCache();
-      if (cached?.length) {
-        state.rows = cached;
+      if (cached?.rows?.length) {
+        state.rows = cached.rows;
+        state.cacheAt = cached.at;
         render({ stale: true });
       } else {
         render();
@@ -192,7 +202,7 @@
         approval: Number(row.approval) || 0,
         ideas: Number(row.ideas) || 0,
       }));
-      writeCache(state.rows);
+      if (!data?.stale && !data?.cooling) writeCache(state.rows);
       render({ stale: Boolean(data?.stale || data?.cooling), error: data?.cooling ? "Airtable busy" : "" });
       if (data?.refreshing && !state.followUp) {
         state.followUp = true;
@@ -205,8 +215,9 @@
       // Timeouts and 429s are soft — never paint a red "unavailable" banner on home.
       const cooling = isOverviewSoftFailure(error);
       const cached = state.rows.length ? state.rows : readCache();
-      if (cached?.length) {
-        state.rows = cached;
+      if (cached?.rows?.length) {
+        state.rows = cached.rows;
+        state.cacheAt = cached.at;
         render({ stale: true, cooling, error: cooling ? "Airtable busy" : String(error?.message || error || "") });
       } else {
         render({ cooling: true, error: "" });
@@ -217,8 +228,9 @@
     }
   }
   const cachedNow = readCache();
-  if (cachedNow?.length) {
-    state.rows = cachedNow;
+  if (cachedNow?.rows?.length) {
+    state.rows = cachedNow.rows;
+    state.cacheAt = cachedNow.at;
     render({ stale: true });
   }
   // Cached rows already painted. Fetch immediately so first paint is not
