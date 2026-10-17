@@ -255,6 +255,59 @@ jobs:
           });
           NODE
 
+      - name: Normalize canary narration baseline
+        shell: bash
+        run: |
+          set -euo pipefail
+          node <<'NODE'
+          (async () => {
+          async function call(method,path,body){
+            const r=await fetch(process.env.BRIDGE_URL,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({method,path,body})});
+            const w=await r.json();
+            if(!r.ok || !w.ok) throw new Error(`bridge ${method} ${path} failed: ${JSON.stringify(w).slice(0,3000)}`);
+            return w.body;
+          }
+          const id=process.env.CANARY_ID;
+          const creative=await call("GET",`/api/outputs/${id}/creative`);
+          const timeline=creative?.visual_timeline;
+          const script=creative?.visual_script;
+          const narrated=(script?.scenes||[]).filter(scene=>String(scene?.voiceover_mode||"narrated").toLowerCase()!=="silent");
+          if(!timeline || !script || narrated.length<2) throw new Error("canary baseline requires a visual timeline/script with at least two narrated scenes");
+          const base={
+            visual_revision:timeline.revision,
+            visual_sequence_hash:timeline.sequence_hash,
+            script_revision:script.revision,
+            script_hash:script.script_hash
+          };
+          const proposed=await call("PATCH",`/api/outputs/${id}/creative`,{
+            visual_script_action:"propose",
+            visual_script_mode:"all",
+            visual_script_base:base
+          });
+          const proposal=proposed?.proposal;
+          if(!proposal?.scenes) throw new Error("canary baseline narration proposal missing");
+          const shortLines=["Skyline view.","Lake view.","City lights.","Chicago glows."];
+          let narratedIndex=0;
+          for(const scene of proposal.scenes){
+            if(String(scene?.voiceover_mode||"narrated").toLowerCase()==="silent") continue;
+            const line=shortLines[narratedIndex % shortLines.length];
+            narratedIndex+=1;
+            scene.proposed_text=line;
+            scene.changed=String(scene.current_text||"").trim()!==line;
+          }
+          const accepted=await call("PATCH",`/api/outputs/${id}/creative`,{
+            visual_script_action:"accept",
+            visual_script_base:base,
+            visual_script_proposal:proposal
+          });
+          if(accepted?.visual_script_action!=="accepted") throw new Error("canary baseline narration was not accepted");
+          console.log(`canary_baseline_narration=PASS narrated=${narratedIndex} script_revision=${accepted?.visual_script?.revision||""}`);
+          })().catch((error) => {
+            console.error(error);
+            process.exit(1);
+          });
+          NODE
+
       - name: Generate baseline TTS and capture reusable scene audio
         shell: bash
         run: |
