@@ -27,6 +27,7 @@ import {
   factoryBatchEnqueue, factoryBatchRead, factoryBatchList, factoryBatchListGlobal,
   factoryBatchDrain, factoryBatchRetry, factoryBatchSummary, factoryBatchCounts,
   factoryBatchQualitySignals, factoryBatchReconcile, factoryBatchCronScan,
+  factoryBatchCronSelectJobs,
 } from "./factory-approval-queue.mjs";
 import { factoryGlobalPolicy, factoryGlobalAcceptsOutput } from "./factory-batch-global-policy.mjs";
 import {
@@ -14171,11 +14172,11 @@ export async function factoryBatchCronResume(env, ctx = null) {
   // The persisted cursor rotates through old histories (rather than rereading
   // the first 200 lexical R2 keys forever). Process only a bounded scan on each tick.
   const { objects } = await factoryBatchCronScan(env.STUDIO_MEDIA, { maxScan: 200 });
-  let started = 0;
+  const candidates = [];
   for (const object of objects) {
     const match = object.key.match(/\/jobs\/(rec[A-Za-z0-9]+)\/([A-Za-z0-9_-]{12,128})\.json$/);
     if (!match) continue;
-    const job = await factoryBatchRead(env.STUDIO_MEDIA, match[1], match[2]);
+    let job = await factoryBatchRead(env.STUDIO_MEDIA, match[1], match[2]);
     if (!job) continue;
     const signatures = factoryBatchQualitySignals(job);
     if (signatures.length) {
@@ -14183,14 +14184,25 @@ export async function factoryBatchCronResume(env, ctx = null) {
     }
     if (signatures.some(item => item.code === "QA-FACTORY-BATCH-STATE-MISMATCH")
         && !signatures.some(item => item.code === "QA-FACTORY-BATCH-DUPLICATE-ITEM")) {
-      await factoryBatchReconcile(env.STUDIO_MEDIA, match[1], match[2]);
+      job = await factoryBatchReconcile(env.STUDIO_MEDIA, match[1], match[2]);
     }
-    if (!["queued", "running"].includes(job.status) &&
-        !signatures.some(item => item.code === "QA-FACTORY-BATCH-STATE-MISMATCH")) continue;
-    if (started >= 5) break;
-    await factoryBatchProcess(env, match[1], match[2], ctx);
-    started++;
+    // Never schedule two child jobs from the same profile in one cron event.
+    // Both would race for the same 12-minute profile lease and the loser may
+    // starve behind newer global batches despite expired retry backoffs.
+    if (signatures.some(item => item.code === "QA-FACTORY-BATCH-DUPLICATE-ITEM")) continue;
+    candidates.push({ profileId: match[1], requestId: match[2], job });
   }
-  return started;
+  const selected = factoryBatchCronSelectJobs(candidates, { maxProfiles: 5 });
+  for (const candidate of selected) {
+    await factoryBatchProcess(env, candidate.profileId, candidate.requestId, ctx);
+  }
+  if (selected.length) {
+    console.log("Factory cron fair recovery", {
+      profiles: selected.length,
+      jobs_scanned: candidates.length,
+      oldest_wait_seconds: Math.round(Math.max(0, Date.now() - selected[0].orderMs) / 1000),
+    });
+  }
+  return selected.length;
 }
 /*__STUDIO_WORKER_END:factoryBatchCronResume__*/
