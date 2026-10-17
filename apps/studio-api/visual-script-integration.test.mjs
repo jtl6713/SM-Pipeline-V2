@@ -90,3 +90,8 @@ test("Studio TTS pulses are exact-slide scoped instead of consuming any global R
   const exactScopedPulses = worker.match(/extra: \{ slide_record_id: targetSlideId \}/g) || [];
   assert.equal(exactScopedPulses.length, 2);
 });
+
+test("production canary accepts normalized snake_case slide durations when finding trimmable video", () => {
+  assert.match(worker, /slide\?\.duration_seconds \|\| slide\?\.durationSeconds/);
+  assert.match(worker, /sourceMs > durationMs \+ 250/);
+});
