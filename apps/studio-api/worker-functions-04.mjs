@@ -6,8 +6,20 @@ import {
   readProfilesOverviewRefreshStateRecord,
 } from "./profiles-overview-refresh.mjs";
 import { withOutputApprovalLock } from "./output-approval-lease.mjs";
-import { scheduleReservationAuthorityEnabled } from "./schedule-reservation-authority.mjs";
+import {
+  reconcileScheduleReservation,
+  scheduleReservationAuthorityEnabled,
+} from "./schedule-reservation-authority.mjs";
 import { runAtomicScheduleTransaction } from "./schedule-reservation-transaction.mjs";
+import {
+  listScheduleReservationSnapshots,
+  readScheduleReservationQualityLatest,
+  scheduleReservationAuthoritativeIso,
+  scheduleReservationDriftFinding,
+  scheduleReservationRecoveryObservation,
+  scheduleReservationSnapshotFindings,
+  writeScheduleReservationQualityLatest,
+} from "./schedule-reservation-quality.mjs";
 import { factoryBatchRolloutPolicy, factoryBatchRolloutAcceptsOutput, factoryBatchRolloutAcceptsIds } from "./factory-batch-rollout.mjs";
 import {
   factoryBatchEnqueue, factoryBatchRead, factoryBatchList, factoryBatchListGlobal,
@@ -1464,6 +1476,224 @@ async function studioHealStoryCompanionDriftAtomic(env, row) {
 }
 
 /*__STUDIO_WORKER_END:studioHealStoryCompanionDriftAtomic__*/
+
+function studioScheduleReservationPublished(record) {
+  return /published/i.test(String(f(record, "Publish_Status") || f(record, "Output_Status") || ""))
+    || Boolean(f(record, "Published_At"));
+}
+
+/*__STUDIO_WORKER_END:studioScheduleReservationPublished__*/
+
+async function studioReconcileReservationDriftAtomic(env, snapshot, reservation, record) {
+  const profileId = String(snapshot?.lane?.content_profile_id || "").trim();
+  const platform = String(snapshot?.lane?.platform || f(record, "Platform") || "").trim();
+  const outputType = String(
+    reservation?.output_type
+    || f(record, "Studio_Output_Type")
+    || f(record, "Format")
+    || ""
+  ).trim();
+  const outputId = String(reservation?.platform_output_record_id || record?.id || "").trim();
+  if (!profileId || !platform || !outputId) {
+    throw new HttpError(409, "Reservation drift cannot establish its profile/platform/output identity");
+  }
+  if (studioScheduleReservationPublished(record)) {
+    throw new HttpError(409, "Published reservation drift requires Needs Eyes");
+  }
+  const previousIso = String(reservation?.scheduled_iso || "").trim();
+  const targetIso = scheduleReservationAuthoritativeIso(record);
+  const operationId = `qa-drift:${outputId}:${previousIso || "blank"}->${targetIso || "blank"}`
+    .replace(/[^A-Za-z0-9._:>+-]+/g, "_")
+    .slice(0, 180);
+
+  return runAtomicScheduleTransaction(env, {
+    content_profile_id: profileId,
+    platform,
+    output_type: outputType,
+    platform_output_record_id: outputId,
+    owner_operation_id: operationId,
+  }, {
+    legacy: async () => {
+      throw new HttpError(503, "Reservation drift reconciliation unexpectedly entered legacy mode");
+    },
+    plan: async () => {
+      const authoritative = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, outputId);
+      if (studioScheduleReservationPublished(authoritative)) {
+        throw new HttpError(409, "Published reservation drift requires Needs Eyes");
+      }
+      const currentIso = scheduleReservationAuthoritativeIso(authoritative);
+      return {
+        action: currentIso ? "move" : "vacate",
+        selectedIso: currentIso,
+        previousIso,
+        authoritativeRecord: authoritative,
+      };
+    },
+    write: async (plan) => plan.authoritativeRecord,
+    verify: async (_record, plan) => {
+      const verified = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, outputId);
+      const currentIso = scheduleReservationAuthoritativeIso(verified);
+      if (currentIso !== String(plan.selectedIso || "")) {
+        throw new HttpError(409, "Authoritative schedule changed during reservation drift reconciliation");
+      }
+      return currentIso;
+    },
+    afterCommit: async () => {
+      studioInvalidateOccupiedScheduleCache();
+    },
+  }, { maxWaitMs: 5_000 });
+}
+
+/*__STUDIO_WORKER_END:studioReconcileReservationDriftAtomic__*/
+
+export async function studioScheduleReservationQualitySweep(env, options = {}) {
+  const nowMs = Number(options.nowMs) || Date.now();
+  if (!scheduleReservationAuthorityEnabled(env)) {
+    return {
+      enabled: false,
+      scanned_at: new Date(nowMs).toISOString(),
+      lanes_scanned: 0,
+      findings: [],
+      recoveries: [],
+    };
+  }
+  const snapshots = await listScheduleReservationSnapshots(env.STUDIO_MEDIA, {
+    limit: Math.max(1, Math.min(250, Number(options.limit) || 100)),
+  });
+  const findings = [];
+  const recoveries = [];
+  const maxDriftReads = Math.max(0, Math.min(100, Number(options.maxDriftReads) || 40));
+  let driftReads = 0;
+
+  for (const snapshot of snapshots) {
+    const laneFindings = scheduleReservationSnapshotFindings(snapshot, nowMs);
+    findings.push(...laneFindings);
+
+    const active = snapshot?.active_reservation || null;
+    if (snapshot?.quarantine && active?.platform_output_record_id) {
+      try {
+        const record = await airtableFetch(
+          env,
+          env.AIRTABLE_OUTPUT_TABLE_ID,
+          active.platform_output_record_id,
+        );
+        const authoritativeIso = scheduleReservationAuthoritativeIso(record);
+        const observation = scheduleReservationRecoveryObservation(snapshot, authoritativeIso);
+        const recoveryOperationId = `qa-recovery:${active.reservation_id || active.platform_output_record_id}`
+          .replace(/[^A-Za-z0-9._:-]+/g, "_")
+          .slice(0, 180);
+        try {
+          const reconciled = await reconcileScheduleReservation(env, {
+            content_profile_id: snapshot.lane?.content_profile_id,
+            platform: snapshot.lane?.platform,
+            recovery_operation_id: recoveryOperationId,
+            observation: observation.observation,
+            authoritative_iso: observation.authoritative_iso,
+          });
+          if (reconciled?.reconciled) {
+            recoveries.push({
+              signature: "QA-SCHEDULE-LOCK-HUNG",
+              lane: snapshot.lane,
+              output_id: active.platform_output_record_id,
+              reservation_id: active.reservation_id,
+              observation: observation.observation,
+              result: reconciled.committed ? "committed_reconciled" : "not_committed_reconciled",
+            });
+            for (const item of laneFindings) {
+              if (item.signature === "QA-SCHEDULE-LOCK-HUNG"
+                  || item.signature === "QA-SCHEDULE-QUEUE-STALLED") {
+                item.auto_recovered = true;
+                item.status = "reconciled";
+              }
+            }
+          }
+        } catch (error) {
+          // 423 is the expected durable quarantine while not-committed evidence
+          // is still inside the settle/stability window or the result is ambiguous.
+          if (error?.code !== "recovery_still_ambiguous") {
+            console.warn("schedule reservation fenced recovery failed", snapshot.lane?.lock_key, error);
+          }
+          if (observation.observation === "ambiguous") {
+            const hung = laneFindings.find((item) => item.signature === "QA-SCHEDULE-LOCK-HUNG");
+            if (hung) {
+              hung.needs_eyes = true;
+              hung.urgent = true;
+              hung.blocker = "Airtable does not match either the selected or previous reservation; lane remains quarantined.";
+              hung.proposed_recovery_action = "Needs Eyes: inspect the Platform Output and reservation ledger. Do not clear this lane automatically.";
+            }
+          }
+        }
+      } catch (error) {
+        const hung = laneFindings.find((item) => item.signature === "QA-SCHEDULE-LOCK-HUNG");
+        if (hung) {
+          hung.needs_eyes = true;
+          hung.urgent = true;
+          hung.blocker = "Quality Agent could not read the authoritative Platform Output for fenced recovery.";
+        }
+        console.warn("schedule reservation authoritative recovery read failed", active.platform_output_record_id, error);
+      }
+    }
+
+    for (const reservation of snapshot?.recent_reservations || []) {
+      if (driftReads >= maxDriftReads) break;
+      const outputId = String(reservation?.platform_output_record_id || "").trim();
+      if (!outputId) continue;
+      driftReads += 1;
+      let record;
+      try {
+        record = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, outputId);
+      } catch (error) {
+        console.warn("schedule reservation drift read failed", outputId, error);
+        continue;
+      }
+      const drift = scheduleReservationDriftFinding(snapshot, reservation, record, nowMs);
+      if (!drift) continue;
+      findings.push(drift);
+      if (!drift.needs_eyes && options.recover !== false) {
+        try {
+          await studioReconcileReservationDriftAtomic(env, snapshot, reservation, record);
+          drift.auto_recovered = true;
+          drift.status = "reconciled";
+          recoveries.push({
+            signature: drift.signature,
+            lane: snapshot.lane,
+            output_id: outputId,
+            reservation_id: reservation.reservation_id || null,
+            result: "ledger_adopted_authoritative_schedule",
+          });
+        } catch (error) {
+          drift.needs_eyes = true;
+          drift.blocker = `Automatic reservation drift reconciliation failed: ${String(error?.message || error)}`.slice(0, 1000);
+          console.warn("schedule reservation drift reconciliation failed", outputId, error);
+        }
+      }
+    }
+  }
+
+  const activeFindings = findings.filter((row) => row?.auto_recovered !== true);
+  const report = {
+    schema: "studio.schedule-reservation-quality.1",
+    enabled: true,
+    scanned_at: new Date(nowMs).toISOString(),
+    lanes_scanned: snapshots.length,
+    drift_records_read: driftReads,
+    finding_count: activeFindings.length,
+    findings: activeFindings,
+    recovered_count: recoveries.length,
+    recoveries,
+  };
+  await writeScheduleReservationQualityLatest(env.STUDIO_MEDIA, report);
+  return report;
+}
+
+/*__STUDIO_WORKER_END:studioScheduleReservationQualitySweep__*/
+
+export async function studioScheduleReservationQualityLatest(env) {
+  if (!scheduleReservationAuthorityEnabled(env)) return null;
+  return readScheduleReservationQualityLatest(env.STUDIO_MEDIA);
+}
+
+/*__STUDIO_WORKER_END:studioScheduleReservationQualityLatest__*/
 
 export async function studioHealApprovedMissingSchedule(env, options = {}) {
   const limit = Math.max(1, Math.min(20, Number(options.limit || 16)));
@@ -8866,6 +9096,27 @@ export async function gatherStudioDeskInventory(env) {
     push(classifyTesterNightly([...(tester.events || []), ...(results.events || [])], nowMs));
   } catch (error) {
     console.warn("desk tester nightly scan failed", error);
+  }
+
+  if (scheduleReservationAuthorityEnabled(env)) {
+    scanned(
+      "schedule_lock_hung",
+      "schedule_lock_contention",
+      "schedule_reservation_drift",
+      "schedule_collision",
+      "schedule_queue_stalled",
+    );
+    try {
+      const scheduleQuality = await studioScheduleReservationQualityLatest(env);
+      const reportAge = scheduleQuality?.scanned_at
+        ? nowMs - Date.parse(scheduleQuality.scanned_at)
+        : Infinity;
+      if (reportAge <= 15 * 60 * 1000) {
+        for (const finding of scheduleQuality?.findings || []) push(finding);
+      }
+    } catch (error) {
+      console.warn("schedule reservation Quality Agent latest-report read failed", error);
+    }
   }
 
   const identityByRecord = new Map();
