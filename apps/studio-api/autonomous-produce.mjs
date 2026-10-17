@@ -4,9 +4,9 @@ import { firstLinkedRecordId } from "./asset-library.mjs";
 import { IDEA_LIBRARY_NAMED_PLACES } from "./idea-photo-wait.mjs";
 
 /** All-Profiles load per city: keep Scheduled + Awaiting Approval at or above this. */
-export const AUTONOMOUS_SCHEDULED_TARGET = 200;
-/** Combined load above this skips that city for the Chicago hour. 200–209 holds. */
-export const AUTONOMOUS_SCHEDULED_SKIP_ABOVE = 209;
+export const AUTONOMOUS_SCHEDULED_TARGET = 500;
+/** Combined load above this skips that city for the Chicago hour. 500–509 holds. */
+export const AUTONOMOUS_SCHEDULED_SKIP_ABOVE = 509;
 /** Distinct-subject ideas to open per city per Chicago hour while Scheduled+Awaiting Approval is under target. */
 export const AUTONOMOUS_IDEAS_PER_HOUR = 10;
 /**
@@ -151,7 +151,7 @@ export function autonomousScheduledTotal(scheduledByPlatform) {
   return total;
 }
 
-/** Scheduled parenthesis total plus Awaiting Approval — the 200 / 209 ceiling uses this. */
+/** Scheduled parenthesis total plus Awaiting Approval — the 500 / 509 ceiling uses this. */
 export function autonomousPipelineLoadTotal(scheduledTotal, awaitingApproval = 0) {
   return Math.max(0, Number(scheduledTotal) || 0) + Math.max(0, Number(awaitingApproval) || 0);
 }
