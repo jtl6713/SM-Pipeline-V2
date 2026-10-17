@@ -12387,7 +12387,7 @@ export async function factoryBatchSubmitRoute(request, env, authorization, ctx =
   // Release safety: a deployed Worker remains read-only for Factory batches
   // until operators explicitly enable this independent feature flag. GET status
   // and the legacy single-item approval routes are unaffected.
-  if (String(env?.FACTORY_BATCH_APPROVALS_ENABLED || "").toLowerCase() !== "true") {
+  if (String(env?.FACTORY_BATCH_APPROVALS_ENABLED || "").toLowerCase() !== "true" && !factoryGlobalPolicy(env).enabled) {
     throw new HttpError(503, "Factory batch approvals are not enabled. Existing single-item approvals remain available.");
   }
   let payload;
@@ -12555,7 +12555,7 @@ async function factoryBatchGroupSubmitRoute(request,env,authorization,payload,ct
  * hierarchy. No client poll is necessary. An expired R2 lease can be reclaimed.
  */
 export async function factoryBatchCronResume(env, ctx = null) {
-  if (String(env?.FACTORY_BATCH_APPROVALS_ENABLED || "").toLowerCase() !== "true") return 0;
+  if (String(env?.FACTORY_BATCH_APPROVALS_ENABLED || "").toLowerCase() !== "true" && !factoryGlobalPolicy(env).enabled) return 0;
   if (!env?.STUDIO_MEDIA?.list) return 0;
   // Independently resume parent ledgers after interrupted child enqueue.
   if (factoryGlobalPolicy(env).enabled) {
