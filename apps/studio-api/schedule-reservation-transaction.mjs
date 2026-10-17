@@ -293,12 +293,15 @@ export async function runAtomicScheduleTransaction(env, args = {}, callbacks = {
     // Before begin-verify there is no external scheduling write in flight:
     // record a Retryable Failure and safely release. After begin-verify the
     // failure path deliberately quarantines the lane as Recovery Required.
-    const failed = token ? await safeFail(env, token, error) : null;
+    // Once the Durable Object has accepted a verified commit, later failures
+    // are downstream side-effect failures (for example Supabase/cache sync).
+    // They must never downgrade or quarantine an already committed reservation.
+    const failed = token && !committed ? await safeFail(env, token, error) : null;
     if (
       token
+      && !committed
       && !externalCommitPossible
       && failed?.recovery_required !== true
-      && !committed
     ) {
       await safeRelease(env, token);
     }
