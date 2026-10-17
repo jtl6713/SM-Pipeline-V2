@@ -10242,6 +10242,79 @@ export async function factorySendBackContent(env, productionRequestId, outputIds
 }
 /*__STUDIO_WORKER_END:factorySendBackContent__*/
 
+async function studioAtomicVacateSkippedOutput(env, row, fields, operationId) {
+  const current = row?.id
+    ? await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, row.id)
+    : null;
+  if (!current?.id) throw new HttpError(404, "Platform Output was not found for schedule vacate");
+  const platform = String(f(current, "Platform") || "").trim();
+  const outputType = String(f(current, "Studio_Output_Type") || f(current, "Format") || "").trim();
+  const profile = await item4ProductionProfileRecord(env, current).catch(() => null);
+  const profileId = String(profile?.id || "").trim();
+  if (!profileId || !platform) {
+    throw new HttpError(409, "Schedule vacate cannot establish the atomic profile/platform lane");
+  }
+  const previousRaw = String(
+    f(current, "Scheduled_Post_Date")
+    || f(current, "YouTube_Scheduled_Publish_At")
+    || f(current, "Studio_Scheduled_At")
+    || ""
+  ).trim();
+  const result = await runAtomicScheduleTransaction(env, {
+    content_profile_id: profileId,
+    platform,
+    output_type: outputType,
+    platform_output_record_id: current.id,
+    owner_operation_id: operationId || `vacate:${current.id}`,
+  }, {
+    legacy: async () => {
+      throw new HttpError(503, "Atomic schedule transaction unexpectedly entered legacy mode");
+    },
+    plan: async () => ({
+      action: "vacate",
+      selectedIso: "",
+      previousIso: previousRaw,
+      patchFields: {
+        ...(fields || {}),
+        Scheduled_Post_Date: null,
+        YouTube_Scheduled_Publish_At: null,
+        Studio_Scheduled_At: null,
+      },
+    }),
+    write: async (plan) => airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, current.id, {
+      method: "PATCH",
+      body: JSON.stringify({ fields: plan.patchFields, typecast: true }),
+    }),
+    verify: async (written) => {
+      const authoritative = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, current.id);
+      const stillScheduled = [
+        f(authoritative, "Scheduled_Post_Date"),
+        f(authoritative, "YouTube_Scheduled_Publish_At"),
+        f(authoritative, "Studio_Scheduled_At"),
+      ].some((value) => String(value || "").trim());
+      if (stillScheduled) {
+        throw new HttpError(409, "Schedule vacate could not be verified in Airtable");
+      }
+      written.__atomic_verified_record = authoritative;
+      return "";
+    },
+    afterCommit: async (written) => {
+      studioInvalidateOccupiedScheduleCache();
+      await studioSupabaseWriteThroughOutput(
+        env,
+        written.__atomic_verified_record || written,
+        "schedule-vacate",
+      ).catch((error) => console.warn("schedule vacate supabase write-through failed", current.id, error));
+    },
+  }, { maxWaitMs: 30_000 });
+
+  if (result?.already_committed) {
+    return airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, current.id);
+  }
+  return result?.value?.__atomic_verified_record || result?.value;
+}
+/*__STUDIO_WORKER_END:studioAtomicVacateSkippedOutput__*/
+
 export async function factoryDeleteDeskItem(env, id, kind, actor, note) {
   const stamp = new Date().toISOString();
   if (kind === "idea") {
@@ -10295,7 +10368,21 @@ export async function factoryDeleteDeskItem(env, id, kind, actor, note) {
       },
     };
   });
-  await airtableBatchUpdate(env, env.AIRTABLE_OUTPUT_TABLE_ID, patches, { typecast: true });
+  if (scheduleReservationAuthorityEnabled(env)) {
+    // Vacating is a schedule write: keep the old occupancy durable until Airtable
+    // is reread and confirms all scheduling fields are empty.
+    for (const patch of patches) {
+      const source = targets.get(patch.id) || { id: patch.id };
+      await studioAtomicVacateSkippedOutput(
+        env,
+        source,
+        patch.fields,
+        `factory-skip:${id}:${patch.id}:${stamp}`,
+      );
+    }
+  } else {
+    await airtableBatchUpdate(env, env.AIRTABLE_OUTPUT_TABLE_ID, patches, { typecast: true });
+  }
   const count = patches.length;
   return {
     id,
