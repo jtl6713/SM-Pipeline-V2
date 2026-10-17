@@ -250,7 +250,7 @@ jobs:
             'workers_dev':False,
             'keep_vars':False,
             'vars':active_vars,
-            'triggers':{'crons':['*/5 * * * *', '0 6 * * *']},
+            'triggers':{'crons':['*/5 * * * *', '0 6 * * *', '* * * * *']},
             'observability':{'enabled':True,'head_sampling_rate':1},
             'r2_buckets':[{'binding':'STUDIO_MEDIA','bucket_name':bucket}],
             'secrets':{'required':['AIRTABLE_PAT']}
