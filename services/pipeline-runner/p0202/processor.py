@@ -43,6 +43,28 @@ def _pick_slide(client: AirtableClient, slide_record_id: str | None) -> dict[str
     return rows[0] if rows else None
 
 
+def _request_snapshot(slide: dict[str, Any] | None) -> tuple[str, str, str]:
+    return (
+        field_str(slide or {}, "Studio_Voice_Prep_Request_ID"),
+        field_str(slide or {}, "Slide_Voiceover_Text"),
+        field_str(slide or {}, "Slide_Voice_ID"),
+    )
+
+
+def request_still_current(
+    original: dict[str, Any] | None,
+    current: dict[str, Any] | None,
+) -> bool:
+    """A completed TTS job may write only if its exact request is still current."""
+    return (
+        bool(original)
+        and bool(current)
+        and original.get("id") == current.get("id")
+        and _request_snapshot(original) == _request_snapshot(current)
+        and eligibility_reason(current) is None
+    )
+
+
 def process_request(
     *,
     dry_run: bool = False,
@@ -96,10 +118,12 @@ def process_request(
     if not file_id:
         raise RuntimeError("Google Drive did not return a voiceover file id")
     rechecked = _pick_slide(client, slide["id"])
-    if eligibility_reason(rechecked):
+    recheck_reason = eligibility_reason(rechecked)
+    if recheck_reason or not request_still_current(slide, rechecked):
         return {
             "processed": False,
-            "reason": "recheck_failed",
+            "reason": "recheck_failed" if recheck_reason else "stale_request",
+            "recheck_reason": recheck_reason or "request_changed",
             "drive_file_id": file_id,
             **preview,
         }
