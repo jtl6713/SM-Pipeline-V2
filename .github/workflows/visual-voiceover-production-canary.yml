@@ -159,25 +159,35 @@ jobs:
           code=000
           ready=false
           for i in $(seq 1 40); do
+            # Probe the target Worker's read-only health route. The previous
+            # fake Airtable record probe intentionally caused Studio to throw
+            # "Airtable request failed (404)", which made a healthy service
+            # binding look like a Cloudflare bridge failure.
             code=$(curl -sS --max-time 30 -o /tmp/probe.json -w '%{http_code}' \
               -H 'Content-Type: application/json' \
-              -d '{"method":"GET","path":"/api/outputs/recINVALID/creative"}' "$BRIDGE_URL" || true)
+              -d '{"method":"GET","path":"/api/health"}' "$BRIDGE_URL" || true)
             if grep -Fq 'error code: 1042' /tmp/probe.json 2>/dev/null; then
               echo "bridge_not_ready attempt=$i http=$code cloudflare=1042"
               sleep 3
               continue
             fi
-            if [[ "$code" == "200" ]] && jq -e '.path=="/api/outputs/recINVALID/creative" and .method=="GET"' /tmp/probe.json >/dev/null 2>&1; then
+            if [[ "$code" == "200" ]] && jq -e '
+              .ok==true
+              and .status==200
+              and .path=="/api/health"
+              and .method=="GET"
+              and .body.ok==true
+            ' /tmp/probe.json >/dev/null 2>&1; then
               echo "bridge_ready attempt=$i worker=$BRIDGE_WORKER"
               ready=true
               break
             fi
-            echo "bridge_read_retry attempt=$i http=$code body=$(head -c 240 /tmp/probe.json 2>/dev/null | tr '\n' ' ')"
+            echo "bridge_read_retry attempt=$i http=$code body=$(head -c 320 /tmp/probe.json 2>/dev/null | tr '\n' ' ')"
             sleep 3
           done
           if [[ "$ready" != "true" ]]; then
             echo "::error::Ephemeral Studio service bridge did not become ready (worker=$BRIDGE_WORKER http=$code)"
-            head -c 1000 /tmp/probe.json 2>/dev/null || true
+            head -c 1200 /tmp/probe.json 2>/dev/null || true
             exit 1
           fi
 
