@@ -8345,6 +8345,10 @@ export async function phase6EnsureRenderPackageForContinuation(env, outputRecord
         Output_Filename: renderPackage.filename,
         Creative_Render_Manifest_JSON: JSON.stringify(renderPackage.manifest),
         Music_URL: renderPackage.musicUrl,
+        ...(renderPackage.manifest?.visualTimeline ? {
+          Timing_Status: "Skipped",
+          Timing_Timeline_JSON: null,
+        } : {}),
         Do_Not_Publish: true,
       },
       typecast: true,
