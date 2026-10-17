@@ -4,3 +4,4 @@
 2026-10-17 rerun after canary bridge runtime hardening commit b92699e44232ddecc8d1a4d1cc77344492671d3a.
 2026-10-17 rerun after bridge readiness switched to safe Studio /api/health probe (06d82a1206750add83161fb0b35589aff1e5858e).
 2026-10-17 rerun after Node 24 compatibility fix for canary inline scripts (eb1ce91800ac074da45e28e2e600cae338b28b36).
+2026-10-17 rerun after live Worker canary duration detector fix verified by production deploy 39051204002.
