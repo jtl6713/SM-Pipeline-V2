@@ -4020,6 +4020,7 @@ const STUDIO_PLATFORM_OUTPUT_TABLE = "tblrlPeboBthkplH0";
 
 /*__STUDIO_WORKER_EXTRACT:item4PlanItemForOutput__*/
 /*__STUDIO_WORKER_EXTRACT:platformOutputSeedFields__*/
+/*__STUDIO_WORKER_EXTRACT:studioAtomicApplyPlatformOutputSeedSchedule__*/
 /*__STUDIO_WORKER_EXTRACT:studioFinishedSeedOverlay__*/
 const STUDIO_SIMILAR_WATCHLIST_SETTING = "SIMILAR_ACCOUNT_WATCHLIST";
 
@@ -5301,6 +5302,11 @@ const STUDIO_OVERDUE_SCHEDULED_FORMULA = 'AND({Test_Run_ID}=BLANK(),{Do_Not_Publ
 /*__STUDIO_WORKER_EXTRACT:studioPublishLockIsStale__*/
 /*__STUDIO_WORKER_EXTRACT:studioHealOverdueTikTokPrep__*/
 /*__STUDIO_WORKER_EXTRACT:studioReconcileOverdueScheduledPublishes__*/
+/*__STUDIO_WORKER_EXTRACT:studioScheduleOperationToken__*/
+/*__STUDIO_WORKER_EXTRACT:studioHealApprovedMissingScheduleAtomic__*/
+/*__STUDIO_WORKER_EXTRACT:studioHealStoryCompanionDriftAtomic__*/
+/*__STUDIO_WORKER_EXTRACT:studioScheduleReservationPublished__*/
+/*__STUDIO_WORKER_EXTRACT:studioReconcileReservationDriftAtomic__*/
 // Approval is one click, and it has to survive a publisher scenario that drifted off, a Make API
 // hiccup, and a Worker invocation that ran out of budget before reaching the webhook. Nothing else
 // guarantees an approved output reaches a publisher, so this sweep runs first on every cron tick.
@@ -5318,6 +5324,7 @@ const STUDIO_OVERDUE_SCHEDULED_FORMULA = 'AND({Test_Run_ID}=BLANK(),{Do_Not_Publ
 /*__STUDIO_WORKER_EXTRACT:studioReconcilePublishingInstagramReels__*/
 /*__STUDIO_WORKER_EXTRACT:studioReconcileFacebookSlideshows__*/
 /*__STUDIO_WORKER_EXTRACT:studioReconcileFacebookReels__*/
+/*__STUDIO_WORKER_EXTRACT:studioStoryCompanionPlatformBlockers__*/
 /*__STUDIO_WORKER_EXTRACT:approveOutputRecordForPublishing__*/
 /*__STUDIO_WORKER_EXTRACT:mapApprovedOutputSummary__*/
 /*__STUDIO_WORKER_EXTRACT:studioLoadApproveAllJobStore__*/
@@ -5325,11 +5332,13 @@ const STUDIO_OVERDUE_SCHEDULED_FORMULA = 'AND({Test_Run_ID}=BLANK(),{Do_Not_Publ
 /*__STUDIO_WORKER_EXTRACT:studioGetApproveAllJob__*/
 /*__STUDIO_WORKER_EXTRACT:studioPutApproveAllJob__*/
 /*__STUDIO_WORKER_EXTRACT:mapApproveAllEligibleSummary__*/
+/*__STUDIO_WORKER_EXTRACT:studioReadScheduleRegenJobStoreFromR2__*/
 /*__STUDIO_WORKER_EXTRACT:studioLoadScheduleRegenJobStore__*/
 /*__STUDIO_WORKER_EXTRACT:studioPutScheduleRegenJobStore__*/
 /*__STUDIO_WORKER_EXTRACT:studioGetScheduleRegenJob__*/
 /*__STUDIO_WORKER_EXTRACT:studioPutScheduleRegenJob__*/
 /*__STUDIO_WORKER_EXTRACT:studioNormalizeRegenFilters__*/
+/*__STUDIO_WORKER_EXTRACT:studioAtomicApplyScheduleRegenEntry__*/
 /*__STUDIO_WORKER_EXTRACT:studioProcessScheduleRegenJobSlice__*/
 /*__STUDIO_WORKER_EXTRACT:studioDrainScheduleRegenJob__*/
 /*__STUDIO_WORKER_EXTRACT:startScheduleRegenJob__*/
@@ -5666,6 +5675,7 @@ let studioAiApiPreferenceCache = { preferred: "OpenAI", failoverEnabled: true, a
 /*__STUDIO_WORKER_EXTRACT:factoryLatestReviewFeedback__*/
 /*__STUDIO_WORKER_EXTRACT:factorySendBackOutput__*/
 /*__STUDIO_WORKER_EXTRACT:factorySendBackContent__*/
+/*__STUDIO_WORKER_EXTRACT:studioAtomicVacateSkippedOutput__*/
 /*__STUDIO_WORKER_EXTRACT:factoryDeleteDeskItem__*/
 /*__STUDIO_WORKER_EXTRACT:mutateFactoryDesk__*/
 /*__STUDIO_WORKER_EXTRACT:pauseStudioOperationsQueueItem__*/
