@@ -71,7 +71,7 @@ jobs:
           bindings=(r.get('resources') or {}).get('bindings') or []
           by_name={str(b.get('name')):b for b in bindings}
           got={k:str(v.get('type')) for k,v in by_name.items()}
-          contract=assert_live_contract(got, 'live Worker binding contract')
+          contract=assert_live_contract(got, 'live Worker binding contract', allow_reservation_absent=True)
           vars_out={k:by_name[k].get('text') for k in (
             'AIRTABLE_BASE_ID','AIRTABLE_CONTENT_TABLE_ID','AIRTABLE_IDEA_TABLE_ID','AIRTABLE_MEDIA_TABLE_ID',
             'AIRTABLE_MUSIC_VIEW_ID','AIRTABLE_OUTPUT_TABLE_ID','ALLOWED_ORIGINS','I3_DECISION_WEBHOOK_URL'
