@@ -387,3 +387,5 @@ overview-fast-refresh 2026-10-17T01:20:00Z worker 0.10.651-overview-fast-refresh
 2026-10-17 Step4 guarded production canary retry | previous Worker run 38997480251 failed read-only LA check because verification bridge sent unsupported ?profile_id= rather than ?profile=; automatic rollback verified true. Fix commits 753837f3 and 28cc2116 correct query and add regression assertion. Retry deployment of one Chicago Instagram Reel canary with LA denial verification; no approval or publish call.
 
 # 2026-10-16 FBS2 1703 connection-aborted R2 upload reuse and Quality Agent signature
+
+2026-10-17 Factory Batch Phase2A POST gate hotfix | PR #795 merge 197b8d9d9f41f7c5ced6aa06657e0f8f1ed50a1e | six PR checks PASS | scoped Chicago Instagram Reel single-output pilot only | Worker health factory_batch_phase2a_post_gate_fix_v1=true | preserve rollback and bindings | NO automatic approvals.
