@@ -13,3 +13,4 @@
 2026-10-17 rerun with self-healing short narration baseline after commit e6ba06d7916349358b3403e7b923ad76b598f53d.
 2026-10-17 rerun after live Phase 6 Python R4/R5 continuation deployment de552d75fbe1596b12bd653674e2f9daa06fc7ba.
 2026-10-17 final rerun after guarded Python R4/R5 continuation deploy 39052019633.
+2026-10-17 rerun after exact-isolated Worker deploy 39052179547 completed successfully on b69694d106f23fb77c5265dc41650029cd84d504.
