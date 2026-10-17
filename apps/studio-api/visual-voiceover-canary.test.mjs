@@ -21,6 +21,8 @@ test("visual voiceover canary seed is tenant-admin only and nonpublishing", asyn
   assert.match(functions, /Do_Not_Publish: true/);
   assert.match(functions, /Auto_Publish_Enabled: false/);
   assert.match(functions, /Publish_Status: "Not Ready"/);
+  assert.match(functions, /"Carousel Slides"/);
+  assert.match(functions, /if \(!linkedSlideIds\.length\) continue/);
   assert.match(functions, /No unpublished test output with a trimmable video scene/);
   assert.match(functions, /Canary inspection is limited to Do_Not_Publish test outputs/);
 });
@@ -44,4 +46,28 @@ test("production rollout remains fail-closed to nonpublishing outputs", async ()
   const gate = functions.slice(gateStart, gateEnd);
   assert.match(gate, /if \(!Boolean\(f\(outputRecord, "Do_Not_Publish"\)\)\) return false;/);
   assert.match(gate, /STUDIO_VISUAL_CANARY_OUTPUT_IDS/);
+});
+
+
+test("canary inspection exposes revision parity evidence without publishing authority", async () => {
+  const worker = await readFile(path.join(here, "worker.js"), "utf8");
+  const functions = await readFile(path.join(here, "worker-functions-03.mjs"), "utf8");
+  assert.match(worker, /studio_visual_voiceover_canary_v1:\s*true/);
+  assert.match(functions, /action === "inspect"/);
+  assert.match(functions, /Canary inspection is limited to Do_Not_Publish test outputs/);
+  assert.match(functions, /current_revision:/);
+  assert.match(functions, /manifest_revision:/);
+  assert.match(functions, /props_revision:/);
+  assert.match(functions, /studio_preview_url:/);
+  assert.match(functions, /final_file_url:/);
+});
+
+
+test("dedicated production rollout allowlist targets only the nonpublishing canary", async () => {
+  const rollout = JSON.parse(await readFile(path.join(here, "../../deploy/visual-voiceover-production-rollout.json"), "utf8"));
+  assert.equal(rollout.scope, "do_not_publish_only");
+  assert.equal(rollout.enabled, true);
+  assert.equal(rollout.timeline_enabled, true);
+  assert.equal(rollout.script_enabled, true);
+  assert.deepEqual(rollout.canary_output_ids, ["recL2zjZc7XGRJyRt"]);
 });

@@ -3,5 +3,7 @@
   "timeline_enabled": true,
   "script_enabled": true,
   "scope": "do_not_publish_only",
-  "canary_output_ids": []
+  "canary_output_ids": [
+    "recL2zjZc7XGRJyRt"
+  ]
 }

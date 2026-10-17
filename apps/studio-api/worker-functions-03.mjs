@@ -5911,6 +5911,8 @@ export async function studioPrepareVisualVoiceoverCanary(request, env) {
   let videoScene = null;
   for (const row of rows || []) {
     if (String(f(row, "Render_Status") || "").trim() === "Rendering") continue;
+    const linkedSlideIds = Array.isArray(f(row, "Carousel Slides")) ? f(row, "Carousel Slides") : [];
+    if (!linkedSlideIds.length) continue;
     const slides = await phase6SlidesForOutput(env, row);
     const video = (slides || []).find((slide) => {
       const media = String(slide?.media_type || slide?.mime_type || slide?.url || slide?.preview_url || "").toLowerCase();

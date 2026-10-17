@@ -17,7 +17,7 @@ concurrency:
 jobs:
   canary:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 40
     env:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
@@ -49,6 +49,7 @@ jobs:
               const method = String(spec.method || "GET").toUpperCase();
               const path = String(spec.path || "");
               const allowed =
+                path === "/api/health" ||
                 path === "/api/admin/visual-voiceover-canary" ||
                 /^\/api\/outputs\/rec[A-Za-z0-9]+\/creative$/.test(path) ||
                 /^\/api\/outputs\/rec[A-Za-z0-9]+\/creative\/review$/.test(path) ||
@@ -123,6 +124,40 @@ jobs:
             sleep 3
           done
           test "$code" = "200"
+
+      - name: Wait for production Worker runner and Remotion release
+        shell: bash
+        run: |
+          set -euo pipefail
+          worker_ok=false
+          runner_ok=false
+          remotion_ok=false
+          for i in $(seq 1 180); do
+            wcode=$(curl -sS --max-time 20 -o /tmp/worker-health.json -w '%{http_code}' \
+              -H 'Content-Type: application/json' \
+              -d '{"method":"GET","path":"/api/health"}' "$BRIDGE_URL" || true)
+            if [[ "$wcode" == "200" ]] && jq -e '.ok==true and .body.ok==true and .body.studio_visual_voiceover_canary_v1==true' /tmp/worker-health.json >/dev/null 2>&1; then
+              worker_ok=true
+            fi
+
+            rcode=$(curl -sS --max-time 20 -o /tmp/runner-health.json -w '%{http_code}' 'https://pipeline.chicagoshining.com/health' || true)
+            if [[ "$rcode" == "200" ]] && jq -e '.ok==true and .version=="2026-10-17-visual-voiceover-revision-guard"' /tmp/runner-health.json >/dev/null 2>&1; then
+              runner_ok=true
+            fi
+
+            mcode=$(curl -sS --max-time 20 -o /tmp/remotion-health.json -w '%{http_code}' 'https://render.chicagoshining.com/health' || true)
+            if [[ "$mcode" == "200" ]] && jq -e '.ok==true and .version=="2026-10-17-visual-voiceover-timeline"' /tmp/remotion-health.json >/dev/null 2>&1; then
+              remotion_ok=true
+            fi
+
+            echo "release_wait attempt=$i worker=$worker_ok runner=$runner_ok remotion=$remotion_ok"
+            if [[ "$worker_ok" == "true" && "$runner_ok" == "true" && "$remotion_ok" == "true" ]]; then
+              echo "visual_voiceover_release_components=PASS"
+              break
+            fi
+            sleep 5
+          done
+          [[ "$worker_ok" == "true" && "$runner_ok" == "true" && "$remotion_ok" == "true" ]]
 
       - name: Prepare nonpublishing canary output
         shell: bash
@@ -214,7 +249,7 @@ jobs:
           if(!proposal?.scenes) throw new Error("visual narration proposal missing");
           const proposedTarget=proposal.scenes.find(s=>s.scene_id===target.scene_id);
           if(!proposedTarget) throw new Error("selected narration proposal scene missing");
-          proposedTarget.proposed_text="Canary voice timing test.";
+          proposedTarget.proposed_text=`Canary voice timing ${process.env.GITHUB_RUN_ID||Date.now()}.`;
           proposedTarget.changed=String(proposedTarget.current_text||"").trim()!==proposedTarget.proposed_text;
 
           const accepted=await call("PATCH",`/api/outputs/${id}/creative`,{
