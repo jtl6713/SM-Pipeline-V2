@@ -10538,7 +10538,7 @@ export async function fillAutonomousScheduledHour(env, authorization, {
   if (refillScores && !needing.length) {
     const bands = Object.values(refillScores).map((row) => row?.band);
     const skipReason = bands.length && bands.every((band) => band === "skip")
-      ? "scheduled_over_209"
+      ? "scheduled_over_509"
       : "scheduled_target_met";
     if (sameSlot && last?.status === "skipped" && last?.skip_reason === skipReason) {
       return { terminal: true, created_count: 0, last, result: last };
@@ -10863,11 +10863,11 @@ export async function executeStudioAutonomousProduce(env, ctx, options = {}) {
     return result;
   }
 
-  // Top of the Chicago hour only: 10 ideas per city under 200 Scheduled+Awaiting
+  // Top of the Chicago hour only: 10 ideas per city under 500 Scheduled+Awaiting
   // Approval, even when the subject is already in flight. When open ideas are
   // already at/over the cap (20), skip create and drain up to 20 asset-ready
   // drafts toward Ready for Review instead. :05 and :30 ticks resume one draft.
-  // Combined load over 209 skips that city.
+  // Combined load over 509 skips that city.
   if (harvestThisHour) {
     const openIdeasCount = await countAutonomousOpenIdeas(env);
     const skipCreate = autonomousOpenIdeasAtCap(openIdeasCount);
@@ -10939,7 +10939,7 @@ export async function executeStudioAutonomousProduce(env, ctx, options = {}) {
   }
 
   // Manual / dry-run: one idea. Scheduled hours already returned above.
-  // Hold at 200–209 Scheduled+Awaiting Approval. Skip when that combined load is over 209.
+  // Hold at 500–509 Scheduled+Awaiting Approval. Skip when that combined load is over 509.
   // Global open-ideas cap still wins over the scheduled-target refill.
   const openIdeasCount = await countAutonomousOpenIdeas(env);
   if (autonomousOpenIdeasAtCap(openIdeasCount)) {
@@ -10973,7 +10973,7 @@ export async function executeStudioAutonomousProduce(env, ctx, options = {}) {
       if (!needing.length) {
         const bands = Object.values(refillScores).map((row) => row?.band);
         const skipReason = bands.length && bands.every((band) => band === "skip")
-          ? "scheduled_over_209"
+          ? "scheduled_over_509"
           : "scheduled_target_met";
         const result = {
           skipped: skipReason,
