@@ -101,4 +101,4 @@ test("nonpublishing visual timeline saves return the same persisted timeline con
   assert.match(worker, /visual_timeline: nextVisualTimeline \|\| \(/);
   assert.match(worker, /Publishing state was not changed; render\/TTS were not started/);
 });
-
+// CI verification marker: visual voiceover production release 2026-10-17.
