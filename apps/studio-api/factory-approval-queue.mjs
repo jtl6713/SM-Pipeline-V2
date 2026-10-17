@@ -225,6 +225,40 @@ export async function factoryBatchCronScan(bucket, { maxScan = 200, pageSize = 1
   return { objects, scanned, wrapped: !cursor, next_cursor: cursor || null };
 }
 
+/**
+ * Schedule at most one child approval drain per Content Profile on each cron
+ * tick. Multiple children of the same global Factory submission share the
+ * per-profile R2 CAS lock: dispatching all of them simultaneously makes all
+ * but one fail to claim and can starve an older child for many 5-minute ticks.
+ * Oldest durable progress wins so active jobs rotate fairly between ticks.
+ * Only jobs with an eligible nonterminal item consume a dispatch opportunity.
+ */
+export function factoryBatchCronSelectJobs(candidates = [], { maxProfiles = 5, nowMs = Date.now() } = {}) {
+  const byProfile = new Map();
+  for (const candidate of candidates) {
+    const profileId = String(candidate?.profileId || "");
+    const job = candidate?.job;
+    if (!/^rec[A-Za-z0-9]+$/.test(profileId) || !job
+      || !["queued", "running"].includes(job.status)) continue;
+    const eligible = (job.items || []).some(item =>
+      !done.has(item.status) && Number(item.next_attempt_ms || 0) <= nowMs
+    );
+    if (!eligible) continue;
+    const timestamp = Date.parse(String(job.updated_at || job.created_at || ""));
+    const orderMs = Number.isFinite(timestamp) ? timestamp : 0;
+    const prior = byProfile.get(profileId);
+    if (!prior || orderMs < prior.orderMs ||
+        (orderMs === prior.orderMs && String(candidate.requestId) < String(prior.requestId))) {
+      byProfile.set(profileId, { profileId, requestId: candidate.requestId, orderMs });
+    }
+  }
+  return [...byProfile.values()]
+    .sort((a, b) => a.orderMs - b.orderMs
+      || a.profileId.localeCompare(b.profileId)
+      || String(a.requestId).localeCompare(String(b.requestId)))
+    .slice(0, Math.max(0, Math.min(5, Math.trunc(maxProfiles) || 0)));
+}
+
 export async function factoryBatchLock(bucket, profileId, owner, nowMs, leaseMs = FACTORY_BATCH_LEASE_MS) {
   const key = factoryBatchLockKey(profileId);
   for (let i = 0; i < 8; i++) {
