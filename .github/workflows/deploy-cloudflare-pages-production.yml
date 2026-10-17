@@ -47,7 +47,10 @@ jobs:
             apps/studio-web/production-render-layout.test.mjs \
             apps/studio-web/factory-needs-eyes-layout.test.mjs \
             apps/studio-web/factory-review-feedback.test.mjs \
-            apps/studio-web/unified-platform-outputs.test.mjs
+            apps/studio-web/unified-platform-outputs.test.mjs \
+            apps/studio-web/all-profiles-load.test.mjs \
+            apps/studio-web/all-profiles-cache-age.test.mjs \
+            apps/studio-web/all-profiles-force-refresh.test.mjs
 
       - name: Validate Pages source and stage deployment directory
         shell: bash
@@ -181,9 +184,12 @@ jobs:
             if (loose) expectedJsUrl = loose[1];
           }
           const densityCssMatch = html.match(/href=["'](\/assets\/home-density-0517\.css(?:\?[^"']*)?)/);
+          const overviewMatch = html.match(/(\/assets\/all-profiles-overview-1007\.js(?:\?[^"'\s]*)?)/);
           const labelMatch = html.match(/UI build (\d+\.\d+\.\d+)/);
-          if (!expectedJsUrl || !densityCssMatch || !labelMatch) throw new Error('index.html is missing app-item4 script, cache-busted home density CSS, or UI build label');
+          if (!expectedJsUrl || !densityCssMatch || !overviewMatch || !labelMatch) throw new Error('index.html is missing app-item4 script, cache-busted Home overview JS, home density CSS, or UI build label');
           const expectedJsPath = expectedJsUrl.split('?')[0];
+          const expectedOverviewUrl = overviewMatch[1];
+          const expectedOverviewPath = expectedOverviewUrl.split('?')[0];
           const expectedDensityCssUrl = densityCssMatch[1];
           const expectedDensityCssPath = expectedDensityCssUrl.split('?')[0];
           const expectedLabel = labelMatch[1];
@@ -194,6 +200,8 @@ jobs:
             expectedJsPath,
             expectedDensityCssUrl,
             expectedDensityCssPath,
+            expectedOverviewUrl,
+            expectedOverviewPath,
             expectedLabel,
             expectedBuildId: buildIdMatch[1],
           }));
@@ -202,6 +210,8 @@ jobs:
           EXPECTED_JS_PATH=$(jq -r .expectedJsPath /tmp/pages-expected.json)
           EXPECTED_DENSITY_CSS_URL=$(jq -r .expectedDensityCssUrl /tmp/pages-expected.json)
           EXPECTED_DENSITY_CSS_PATH=$(jq -r .expectedDensityCssPath /tmp/pages-expected.json)
+          EXPECTED_OVERVIEW_URL=$(jq -r .expectedOverviewUrl /tmp/pages-expected.json)
+          EXPECTED_OVERVIEW_PATH=$(jq -r .expectedOverviewPath /tmp/pages-expected.json)
           EXPECTED_LABEL=$(jq -r .expectedLabel /tmp/pages-expected.json)
           EXPECTED_BUILD_ID=$(jq -r .expectedBuildId /tmp/pages-expected.json)
           API_ROOT="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID"
@@ -270,7 +280,7 @@ jobs:
             jq -c '[.result[]? | {pattern,script}]' /tmp/worker-routes.json 2>/dev/null || true
             curl -sS -X POST "https://api.cloudflare.com/client/v4/zones/$ZONE_ID/purge_cache" \
               -H "$AUTH" -H "Content-Type: application/json" \
-              --data "{\"files\":[\"https://studio.chicagoshining.com/\",\"https://studio.chicagoshining.com/index.html\",\"https://studio.chicagoshining.com$EXPECTED_JS_PATH\",\"https://studio.chicagoshining.com$EXPECTED_JS_URL\"]}" \
+              --data "{\"files\":[\"https://studio.chicagoshining.com/\",\"https://studio.chicagoshining.com/index.html\",\"https://studio.chicagoshining.com$EXPECTED_JS_PATH\",\"https://studio.chicagoshining.com$EXPECTED_JS_URL\",\"https://studio.chicagoshining.com$EXPECTED_OVERVIEW_PATH\",\"https://studio.chicagoshining.com$EXPECTED_OVERVIEW_URL\"]}" \
               -o /tmp/purge-files.json || true
             jq -c '{mode:"files",success:(.success // false),errors:(.errors // [])}' /tmp/purge-files.json 2>/dev/null || true
             if jq -e '.success == true' /tmp/purge-files.json >/dev/null 2>&1; then PURGE_OK=1; fi
@@ -324,6 +334,15 @@ jobs:
             fi
             test "$APP_CODE" = "200"
             require_match "$EXPECTED_BUILD_ID" /tmp/live-app.js "pages.dev BUILD_ID"
+            require_match "$EXPECTED_OVERVIEW_PATH" /tmp/live-index.html "pages.dev Home overview asset"
+            OVERVIEW_CODE=$(curl -sS -L "${ACCESS_HEADERS[@]}" -o /tmp/live-overview.js -w '%{http_code}' "$LATEST_URL$EXPECTED_OVERVIEW_URL" || true)
+            if [[ "$OVERVIEW_CODE" != "200" ]]; then
+              OVERVIEW_CODE=$(curl -sS -L -o /tmp/live-overview.js -w '%{http_code}' "$LATEST_URL$EXPECTED_OVERVIEW_URL" || true)
+            fi
+            test "$OVERVIEW_CODE" = "200"
+            require_match '/api/profiles/overview/refresh' /tmp/live-overview.js "pages.dev force-refresh route"
+            require_match 'min_generation=' /tmp/live-overview.js "pages.dev generation barrier"
+            require_match 'Updated just now' /tmp/live-overview.js "pages.dev authoritative refresh status"
             CSS_CODE=$(curl -sS -L "${ACCESS_HEADERS[@]}" -o /tmp/live-home-density.css -w '%{http_code}' "$LATEST_URL$EXPECTED_DENSITY_CSS_URL" || true)
             if [[ "$CSS_CODE" != "200" ]]; then
               CSS_CODE=$(curl -sS -L -o /tmp/live-home-density.css -w '%{http_code}' "$LATEST_URL$EXPECTED_DENSITY_CSS_URL" || true)
@@ -362,6 +381,16 @@ jobs:
           require_match "UI build $EXPECTED_LABEL" /tmp/custom-index.html "custom-domain UI build label"
           require_match "$EXPECTED_DENSITY_CSS_PATH" /tmp/custom-index.html "custom-domain density css path"
           require_match "$EXPECTED_JS_PATH" /tmp/custom-index.html "custom-domain js path"
+          require_match "$EXPECTED_OVERVIEW_URL" /tmp/custom-index.html "custom-domain Home overview cache-busted asset"
+          CUSTOM_OVERVIEW_CODE=$(curl -sS \
+            "${ACCESS_HEADERS[@]}" \
+            -o /tmp/custom-overview.js \
+            -w '%{http_code}' \
+            "$CUSTOM_URL$EXPECTED_OVERVIEW_URL" || true)
+          test "$CUSTOM_OVERVIEW_CODE" = "200"
+          require_match '/api/profiles/overview/refresh' /tmp/custom-overview.js "custom-domain force-refresh route"
+          require_match 'min_generation=' /tmp/custom-overview.js "custom-domain generation barrier"
+          require_match 'Updated just now' /tmp/custom-overview.js "custom-domain authoritative refresh status"
           CUSTOM_CSS_CODE=$(curl -sS \
             "${ACCESS_HEADERS[@]}" \
             -o /tmp/custom-home-density.css \
