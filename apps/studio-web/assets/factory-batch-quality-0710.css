@@ -65,13 +65,65 @@
 #page-factory .factory-heading-controls { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 #page-factory .factory-heading-controls label { font-size: .76rem; font-weight: 650; opacity: .78; }
 #page-factory #factoryProfileFilter { min-height: 35px; min-width: 160px; max-width: 270px; font-size: .84rem; border-radius: 8px; }
-#page-factory .factory-global-summary { display: grid; grid-template-columns: minmax(0,330px) minmax(0,1fr); align-items: start; gap: 12px; padding: 10px; }
-#page-factory .factory-global-metrics { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; }
-#page-factory .factory-mini-metric { margin:0; padding:10px; border-radius:9px; border:1px solid var(--border-color,#d5dce2); background:var(--surface,#fff); min-width:0; }
+#page-factory .factory-global-summary { display:grid; grid-template-columns:minmax(170px,220px) minmax(0,1fr); align-items:stretch; gap:12px; padding:10px; }
+#page-factory .factory-global-metrics { display:grid; grid-template-columns:minmax(0,1fr); gap:8px; min-width:0; }
+#page-factory .factory-mini-metric { margin:0; padding:10px; border-radius:9px; border:1px solid var(--border-color,#d5dce2); background:var(--surface,#fff); min-width:0; box-sizing:border-box; }
 #page-factory .factory-mini-label { display:block; margin:0; font-size:.72rem; line-height:1.2; font-weight:700; color:var(--text-muted,#526576); }
 #page-factory .factory-mini-value { display:block; margin:3px 0 1px; line-height:1.1; font-size:1.8rem; font-weight:780; font-variant-numeric:tabular-nums; }
 #page-factory #factoryBatchSummary, #page-factory .factory-batch-quality-clear { margin:4px 0 0; font-size:.72rem; line-height:1.3; overflow-wrap:normal; }
 #page-factory .factory-global-history { min-width:0; }
+/* Second dashboard row: Quality Agent spans the full width instead of
+   squeezing verbose findings into the narrow Recent batches metric. */
+#page-factory .factory-global-quality {
+  grid-column:1 / -1;
+  min-width:0;
+  margin:0;
+  padding:10px 12px;
+  box-sizing:border-box;
+}
+#page-factory .factory-global-quality .factory-batch-quality-head {
+  display:flex;
+  align-items:center;
+  flex-wrap:wrap;
+  gap:8px 12px;
+}
+#page-factory .factory-global-quality .factory-batch-quality-head h3 {
+  margin:0;
+  font-size:.84rem;
+}
+#page-factory .factory-global-quality .factory-mini-value {
+  font-size:1.25rem;
+  line-height:1;
+  margin:0;
+}
+#page-factory .factory-global-quality #factoryBatchQualityRefresh {
+  width:auto;
+  min-height:30px;
+  margin:0 0 0 auto;
+}
+#page-factory .factory-global-quality .factory-batch-quality-heading {
+  margin:7px 0 4px;
+  font-size:.76rem;
+}
+#page-factory .factory-global-quality .factory-batch-quality-list {
+  display:grid;
+  grid-template-columns:repeat(auto-fit,minmax(min(100%,265px),1fr));
+  gap:8px;
+  padding:0;
+  margin:6px 0 0;
+  list-style:none;
+}
+#page-factory .factory-global-quality .factory-batch-quality-item {
+  min-width:0;
+  margin:0;
+  padding:8px 10px;
+  border-radius:6px;
+}
+#page-factory .factory-global-quality .factory-batch-quality-item p {
+  overflow-wrap:break-word;
+  line-height:1.35;
+}
+
 #page-factory .factory-global-history .factory-batch-heading { font-size:.85rem; margin-bottom:7px; }
 #page-factory .factory-global-history #factoryBatchUpdated { font-size:.7rem; opacity:.7; }
 #page-factory .factory-batch-recent-list { display:grid; gap:5px; }
@@ -93,9 +145,10 @@
 #page-factory .factory-batch-technical code { overflow-wrap:anywhere; }
 #page-factory .factory-line-title .factory-output-number { display:block; margin-top:2px; font-size:.72rem; opacity:.75; font-weight:600; }
 #page-factory .factory-batch-quality-tech { font-size:.68rem; opacity:.7; }
-@media (max-width: 900px) {
- #page-factory .factory-global-summary { grid-template-columns:1fr; }
- #page-factory .factory-global-metrics { max-width:360px; }
+@media (max-width: 680px) {
+ #page-factory .factory-global-summary { grid-template-columns:minmax(0,1fr); }
+ #page-factory .factory-global-metrics { max-width:none; }
+ #page-factory .factory-global-quality { grid-column:1; }
 }
 @media (max-width: 560px) {
  #page-factory .factory-global-heading { align-items:stretch; }
