@@ -156,6 +156,27 @@ test("same intake batch still classifying does not lock the set", () => {
   assert.equal(forced.selected.length, 3);
 });
 
+test("completed intake photos at minimum unblock automatic promotion despite unfinished batch", () => {
+  const matches = [
+    {id:"recReady1",confidence:"high",score:90,intake_batch_id:"completed"},
+    {id:"recPending1",confidence:"high",score:80,intake_batch_id:"unfinished"},
+    {id:"recReady2",confidence:"high",score:70,intake_batch_id:"completed"},
+    {id:"recReady3",confidence:"high",score:60,intake_batch_id:"completed"},
+  ];
+  const result=selectMatchedPhotos({matches,min:3,max:8,pendingBatchIds:["unfinished"]});
+  assert.equal(result.action,"ready");
+  assert.equal(result.reason,"min_met_from_completed_intake");
+  assert.equal(result.high_count,4);
+  assert.equal(result.usable_count,3);
+  assert.deepEqual(result.selected.map(x=>x.id),["recReady1","recReady2","recReady3"]);
+  const insufficient=selectMatchedPhotos({matches,min:4,max:8,pendingBatchIds:["unfinished"]});
+  assert.equal(insufficient.action,"wait_batch");
+  assert.equal(insufficient.usable_count,3);
+  const forced=selectMatchedPhotos({matches,min:4,max:8,pendingBatchIds:["unfinished"],force:true});
+  assert.equal(forced.action,"ready");
+  assert.equal(forced.selected.length,4);
+});
+
 test("operator photo deletes lock photo-wait so cron cannot restore or reshuffle", () => {
   assert.equal(shouldAttachPhotoWaitAssets({ action: "wait_batch" }), false);
   assert.equal(shouldAttachPhotoWaitAssets({ action: "wait" }), false);
