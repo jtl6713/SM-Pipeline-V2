@@ -7,7 +7,7 @@
  * in production Worker configuration.
  */
 import { runAtomicScheduleTransaction } from "./schedule-reservation-transaction.mjs";
-import { acquireScheduleReservation, failScheduleReservation } from "./schedule-reservation-authority.mjs";
+import { acquireScheduleReservation, failScheduleReservation, releaseScheduleReservation, stageScheduleReservation, beginScheduleReservationVerification, reconcileScheduleReservation } from "./schedule-reservation-authority.mjs";
 
 const PREFIX = "__synthetic_schedule_canary__";
 function assert(ok, message) { if (!ok) throw new Error(message); }
@@ -80,6 +80,53 @@ export async function runLiveScheduleReservationCanary(env, { nonce } = {}) {
   });
   assert(failed.recovery_required === false, "Prewrite failure unexpectedly quarantined");
   results.push({ check: "prewrite_failure", pass: true });
+
+  await releaseScheduleReservation(isolated, {
+    content_profile_id: lane, platform: "synthetic",
+    platform_output_record_id: PREFIX + "abandoned",
+    owner_operation_id: PREFIX + nonce + "-abandoned",
+    reservation_id: crash.reservation_id,
+    fencing_generation: crash.fencing_generation,
+  });
+  await schedule("after-abandoned");
+  results.push({ check: "prewrite_recovery_queue_progress", pass: true });
+
+  const ambiguityLane = lane + "-ambiguity";
+  const identity = {
+    content_profile_id: ambiguityLane, platform: "synthetic",
+    platform_output_record_id: PREFIX + "ambiguous",
+    owner_operation_id: PREFIX + nonce + "-ambiguous",
+    reservation_id: PREFIX + nonce + "-ambiguous",
+  };
+  const a = await acquireScheduleReservation(isolated, identity, { maxWaitMs: 0 });
+  const token = { ...identity, fencing_generation: a.fencing_generation };
+  const iso = "2035-02-01T12:00:00.000Z";
+  await stageScheduleReservation(isolated, { ...token, action: "reserve", selected_iso: iso, previous_iso: "" });
+  await beginScheduleReservationVerification(isolated, token);
+  const pending = await failScheduleReservation(isolated, { ...token, error: "synthetic ambiguous response" });
+  assert(pending.recovery_required === true, "Ambiguous write was not quarantined");
+  let quarantined = false;
+  try {
+    await acquireScheduleReservation(isolated, {
+      ...identity, owner_operation_id: PREFIX + nonce + "-contender",
+      reservation_id: PREFIX + nonce + "-contender",
+      platform_output_record_id: PREFIX + "contender",
+    }, { maxWaitMs: 0 });
+  } catch (e) { quarantined = /quarantined|recovery_required/i.test(String(e.code || e.message)); }
+  assert(quarantined, "Ambiguous lane allowed a new writer");
+  const ambiguous = await reconcileScheduleReservation(isolated, {
+    ...token, recovery_operation_id: PREFIX + nonce + "-recovery",
+    observation: "ambiguous", authoritative_iso: "",
+  });
+  assert(ambiguous.recovery_required === true || ambiguous.reconciled === false,
+    "Ambiguous observation incorrectly cleared quarantine");
+  const reconciled = await reconcileScheduleReservation(isolated, {
+    ...token, recovery_operation_id: PREFIX + nonce + "-recovery",
+    observation: "committed", authoritative_iso: iso,
+  });
+  assert(reconciled.reconciled === true && reconciled.committed === true,
+    "Synthetic authoritative commit was not reconciled");
+  results.push({ check: "ambiguous_quarantine_reconciliation", pass: true });
   return {
     schema: "studio.synthetic-live-reservation-canary.1",
     live_namespace: true,
