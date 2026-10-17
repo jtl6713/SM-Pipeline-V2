@@ -401,3 +401,5 @@ overview-fast-refresh 2026-10-17T01:20:00Z worker 0.10.651-overview-fast-refresh
 # Factory Phase 3A dormant Story policy deployment; active Reel-only rollout unchanged. PR #800 merged 4b164d3d86cebfca8f2c101c496c5b742bac8d0f (2026-10-17).
 
 2026-10-17 Factory global Activity #803 production Worker rollout after #804 fail-closed guard | merged source b034f4c18a388324b27d02f2c4529e4f6e6e68c9 | guarded deploy binding global approvals false / disabled / zero with explicit postdeploy verification | preserve Chicago Instagram Reel-only pilot max=5 | no real approval or publish action.
+
+2026-10-17 Factory #803 global Activity Worker deployment retry | PR #805 merged 919a5519813acb45ad00bb93c4841b35b7b3a513 | previous rollout automatically rolled back after strict binding contract rejected extra vars | new pre/post check forbids ALL global Factory approval bindings, allowing strict 10-core contract | Chicago Instagram Reels v2 max 5 unchanged, no approval POST or publishing.
