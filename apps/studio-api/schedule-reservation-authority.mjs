@@ -288,6 +288,9 @@ export function scheduleReservationAuthorityEnabled(env = {}) {
 
 export function scheduleReservationLaneEnabled(env = {}, contentProfileId, platform) {
   if (!scheduleReservationAuthorityEnabled(env)) return false;
+  // Missing authoritative identity must fall back closed to legacy rather
+  // than throw while inspecting a non-allowlisted output.
+  if (!String(contentProfileId || "").trim() || !String(platform || "").trim()) return false;
   const allowlist = String(env?.STUDIO_SCHEDULE_RESERVATION_LANE_ALLOWLIST ?? "").trim();
   if (!allowlist) return false;
   const lane = scheduleReservationLaneKey(contentProfileId, platform);
