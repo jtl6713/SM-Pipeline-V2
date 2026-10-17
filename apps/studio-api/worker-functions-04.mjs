@@ -3823,16 +3823,21 @@ export async function readStudioProfilesOverviewSnapshotFromR2(env) {
 }
 /*__STUDIO_WORKER_END:readStudioProfilesOverviewSnapshotFromR2__*/
 
-export async function readStudioProfilesOverviewSnapshot(env) {
+export async function readStudioProfilesOverviewSnapshot(env, options = {}) {
   const cache = studioProfilesOverviewCache;
-  if (cache.rows?.length) return profilesOverviewSnapshotView();
-  if (!env?.STUDIO_MEDIA?.get) return null;
+  const expectedGeneration = String(options.minGeneration || "");
+  const cacheGeneration = String(cache.generation || "");
+  const needsDurable = options.forceDurable === true
+    || (expectedGeneration && cacheGeneration !== expectedGeneration);
+  if (!needsDurable && cache.rows?.length) return profilesOverviewSnapshotView();
+  if (!env?.STUDIO_MEDIA?.get) return cache.rows?.length ? profilesOverviewSnapshotView() : null;
   try {
     const snapshot = await readStudioProfilesOverviewSnapshotFromR2(env);
-    return snapshot ? rememberProfilesOverviewSnapshot(snapshot) : null;
+    if (!snapshot) return cache.rows?.length ? profilesOverviewSnapshotView() : null;
+    return rememberProfilesOverviewSnapshot(snapshot);
   } catch (error) {
     console.warn("profiles overview snapshot read failed", error);
-    return null;
+    return cache.rows?.length ? profilesOverviewSnapshotView() : null;
   }
 }
 /*__STUDIO_WORKER_END:readStudioProfilesOverviewSnapshot__*/
@@ -4013,8 +4018,10 @@ export function scheduleStudioProfilesOverviewIdeasRefresh(ctx, env, authorizati
 /*__STUDIO_WORKER_END:scheduleStudioProfilesOverviewIdeasRefresh__*/
 
 export async function profilesOverview(request, env, authorization, ctx) {
+  const url = new URL(request.url);
+  const minGeneration = String(url.searchParams.get("min_generation") || "");
   const [snapshot, refreshRecord] = await Promise.all([
-    readStudioProfilesOverviewSnapshot(env),
+    readStudioProfilesOverviewSnapshot(env, { minGeneration }),
     readProfilesOverviewRefreshStateRecord(env).catch(() => null),
   ]);
   const manualRefresh = publicProfilesOverviewRefreshState(refreshRecord?.state || null);
@@ -4283,7 +4290,7 @@ export async function startProfilesOverviewForceRefresh(request, env, authorizat
 export async function getProfilesOverviewRefreshStatus(request, env) {
   const [record, snapshot] = await Promise.all([
     readProfilesOverviewRefreshStateRecord(env).catch(() => null),
-    readStudioProfilesOverviewSnapshot(env),
+    readStudioProfilesOverviewSnapshot(env, { forceDurable: true }),
   ]);
   const refresh = publicProfilesOverviewRefreshState(record?.state || null);
   const now = Date.now();
