@@ -427,3 +427,4 @@ Deploy Factory all-platform batch approvals 2026-10-17. PR #813. Signed global m
 2026-10-17 Visual voiceover Worker redeploy after binding-contract allowlist fix | permit STUDIO_VISUAL_TIMELINE_V1, STUDIO_VISUAL_SCRIPT_V1, and STUDIO_VISUAL_CANARY_OUTPUT_IDS as optional plaintext types; exact signed values remain enforced by deployment release gate; preserve automatic rollback.
 2026-10-17 deploy canary trimmable-video duration detection fix 9055fd40ae4476105efd268681d2f242ed21926c with regression fb447857a3a43548963b209603078a670d111422.
 2026-10-17 deploy nonpublishing visual timeline response contract fix 191a21bab30c5723d57579ecbfdaecbfaa38bb81 with regression ab43d2ab2a7c4bb608693826ef6746eb6f49b202.
+2026-10-17 deploy nonpublishing visual timeline response contract fix 191a21bab30c5723d57579ecbfdaecbfaa38bb81 with regression ab43d2ab2a7c4bb608693826ef6746eb6f49b202.
