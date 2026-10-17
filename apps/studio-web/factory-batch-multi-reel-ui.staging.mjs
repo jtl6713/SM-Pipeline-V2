@@ -139,7 +139,7 @@ try{
   // Studio header controls neither Factory history nor rollout eligibility.
   await phone.locator("#studioProfileSelect").selectOption(la);
   await phone.locator("#factoryBatchRefresh").click();
-  assert.match(await phone.locator("#factoryBatchSummary").innerText(),/1 approved/);
+  assert.match(await phone.locator("#factoryBatchSummary").innerText(),/5 approved/);
   assert.equal(await phone.locator("#factoryProfileFilter").inputValue(),"");
   // Factory's own selector scopes displayed review rows.
   await phone.locator("#factoryProfileFilter").selectOption(la);
