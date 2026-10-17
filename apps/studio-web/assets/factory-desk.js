@@ -248,7 +248,7 @@
 
   function canSelectBatchOutput(card) {
     const rollout = state.batchRollout;
-    if (!rollout || rollout.mode !== "chicago_ig_reel_v1") return true;
+    if (!rollout || !["chicago_ig_reel_v1", "chicago_ig_reels_v2"].includes(rollout.mode)) return true;
     return String(card?.profile_id || "") === String(rollout.profile_id || "")
       && String(card?.platform || "") === "Instagram"
       && String(card?.studio_output_type || card?.format || "") === "Reel";
@@ -311,10 +311,10 @@
     const rolloutNotice = $("factoryBatchRolloutNotice");
     if (rolloutNotice) {
       const rollout = state.batchRollout;
-      if (rollout?.mode === "chicago_ig_reel_v1") {
+      if (["chicago_ig_reel_v1", "chicago_ig_reels_v2"].includes(rollout?.mode)) {
         rolloutNotice.hidden = false;
         rolloutNotice.textContent = state.batchApprovalsEnabled
-          ? "Limited production pilot: approve one Chicago Instagram Reel at a time. Stories, YouTube and other platforms are not available for batch approval yet."
+          ? (rollout.mode === "chicago_ig_reels_v2" ? "Chicago Reel pilot: select up to five Instagram Reels per batch. Other formats and profiles remain blocked." : "Limited production pilot: approve one Chicago Instagram Reel at a time. Stories, YouTube and other platforms are not available for batch approval yet.")
           : "Limited production pilot: only Chicago Instagram Reels are eligible. Select Chicago to submit; individual approvals remain available elsewhere.";
       } else {
         rolloutNotice.hidden = true;
@@ -451,7 +451,7 @@
     if (!ready.length) { updateFactoryBatchToolbar(); setStatus("Select one or more review-ready outputs.", true); return; }
     const profiles = [...new Set(ready.map((card) => String(card.profile_id || "").trim()))];
     if (ready.length > Math.max(1, Number(state.batchRollout?.max_items || 100))) {
-      setStatus("The current pilot permits only one Instagram Reel at a time.", true);
+      setStatus(`The current pilot permits at most ${Math.max(1, Number(state.batchRollout?.max_items || 1))} eligible Instagram Reels.`, true);
       return;
     }
     if (profiles.length !== 1 || !/^rec[A-Za-z0-9]+$/.test(profiles[0])) {
@@ -667,7 +667,7 @@
       <input type="checkbox" data-factory-select-content="${esc(group.key)}"
         aria-label="Select all review-ready outputs for ${esc(title)}"
         ${contentSelected ? "checked" : ""} ${(!batchReady.length || pending.length) ? "disabled" : ""}>
-      ${state.batchRollout?.mode === "chicago_ig_reel_v1" ? "Select pilot Reel" : "Select content"}</label>`;
+      ${["chicago_ig_reel_v1", "chicago_ig_reels_v2"].includes(state.batchRollout?.mode) ? "Select Reel(s)" : "Select content"}</label>`;
     return `<div class="factory-content-bar" data-factory-content="${esc(group.key)}">
       ${selectContent}
       <button type="button" class="factory-content-toggle" data-factory-toggle-content="${esc(group.key)}" aria-expanded="${expanded}" aria-controls="factory-review-${esc(group.key.replace(/[^a-zA-Z0-9_-]/g, "-"))}">
