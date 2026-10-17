@@ -339,3 +339,29 @@ test("vacate removes committed occupancy only after authoritative schedule is co
   const status = await get(lane);
   assert.equal(status.body.recent_reservations.length, 0);
 });
+
+
+test("alarm safely releases a verified committed owner without losing occupancy", async () => {
+  const { lane, advance } = makeLane();
+  const a = op("recOutA", "op-a");
+  const iso = "2026-10-18T10:30:00.000Z";
+  await post(lane, "/acquire", { ...a, lease_ms: 30_000 });
+  await post(lane, "/reserve", { ...a, fencing_generation: 1, selected_iso: iso });
+  await post(lane, "/begin-verify", { ...a, fencing_generation: 1, lease_ms: 30_000 });
+  await post(lane, "/commit", { ...a, fencing_generation: 1, authoritative_iso: iso });
+
+  advance(31_000);
+  await lane.alarm();
+
+  const status = await get(lane);
+  assert.equal(status.body.lock.state, SCHEDULE_RESERVATION_STATES.RELEASED);
+  assert.equal(status.body.lock.owner_operation_id, null);
+  assert.equal(status.body.quarantine, null);
+  assert.equal(status.body.recent_reservations.length, 1);
+  assert.equal(status.body.recent_reservations[0].scheduled_iso, iso);
+
+  const b = op("recOutB", "op-b");
+  const next = await post(lane, "/acquire", b);
+  assert.equal(next.status, 200);
+  assert.deepEqual(next.body.occupied_reservations.map((row) => row.scheduled_iso), [iso]);
+});
