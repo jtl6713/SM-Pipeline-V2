@@ -135,7 +135,7 @@ These signatures apply only when the atomic reservation authority feature is ena
 
 | Signature | Detection | Safe response |
 |---|---|---|
-| `QA-SCHEDULE-LOCK-HUNG` | Lease expired, heartbeat stale, or lane entered Recovery Required | Fence the prior owner. If no external write was possible, resume safely. If Airtable may have been written, reconcile authoritative state before releasing. |
+| `QA-SCHEDULE-LOCK-HUNG` | Owner lease expired or lane entered Recovery Required/quarantine | Fence the prior owner. If no external write was possible, resume safely. If Airtable may have been written, reconcile authoritative state before releasing. A stale heartbeat with a still-valid lease is contention/slow progress, not a hung lock. |
 | `QA-SCHEDULE-LOCK-CONTENTION` | A request waits 30 seconds or more on the lane | Record contention and inspect owner progress. Never bypass the lock. |
 | `QA-SCHEDULE-RESERVATION-DRIFT` | Durable committed reservation and authoritative Platform Output schedule differ | For unpublished outputs, adopt the authoritative schedule under the same lane lock without moving the post. Published drift requires operator review. |
 | `QA-SCHEDULE-COLLISION` | Two committed outputs on one profile/platform violate the platform separation policy | Urgent Needs Eyes. Do not silently move approved schedules. The documented Story companion main +10 exception is not considered a collision with its own main. |
