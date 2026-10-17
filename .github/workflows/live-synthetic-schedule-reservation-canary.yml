@@ -23,7 +23,7 @@ jobs:
     env:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-      RUNNER_NAME: studio-schedule-reservation-synthetic-canary
+      CANARY_WORKER_NAME: studio-schedule-reservation-synthetic-canary
     steps:
       - uses: actions/checkout@v4
       - name: Validate synthetic-only harness
@@ -63,15 +63,15 @@ jobs:
           TOKEN="$(openssl rand -hex 32)"
           cleanup() {
             cd "$ROOT"
-            "$ROOT/node_modules/.bin/wrangler" delete --config /tmp/synthetic-schedule-canary/wrangler.jsonc --name "$RUNNER_NAME" --force >/dev/null 2>&1 || true
+            "$ROOT/node_modules/.bin/wrangler" delete --config /tmp/synthetic-schedule-canary/wrangler.jsonc --name "$CANARY_WORKER_NAME" --force >/dev/null 2>&1 || true
           }
           trap cleanup EXIT
-          "$ROOT/node_modules/.bin/wrangler" deploy --config wrangler.jsonc >/tmp/canary-deploy.log 2>&1
-          printf '%s' "$TOKEN" | "$ROOT/node_modules/.bin/wrangler" secret put CANARY_TOKEN --config wrangler.jsonc --name "$RUNNER_NAME" >/dev/null
+          "$ROOT/node_modules/.bin/wrangler" deploy --name "$CANARY_WORKER_NAME" --config wrangler.jsonc >/tmp/canary-deploy.log 2>&1
+          printf '%s' "$TOKEN" | "$ROOT/node_modules/.bin/wrangler" secret put CANARY_TOKEN --config wrangler.jsonc --name "$CANARY_WORKER_NAME" >/dev/null
           SUBDOMAIN="$(curl -fsS -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/subdomain" | jq -r '.result.subdomain')"
           test -n "$SUBDOMAIN" && test "$SUBDOMAIN" != null
           NONCE="$(openssl rand -hex 12)"
-          RESULT="$(curl --fail-with-body -fsS --retry 4 --retry-delay 2 -X POST "https://$RUNNER_NAME.$SUBDOMAIN.workers.dev/run" -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" --data "{\"nonce\":\"$NONCE\"}")"
+          RESULT="$(curl --fail-with-body -fsS --retry 4 --retry-delay 2 -X POST "https://$CANARY_WORKER_NAME.$SUBDOMAIN.workers.dev/run" -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" --data "{\"nonce\":\"$NONCE\"}")"
           echo "$RESULT" | jq -e '.ok == true and .live_namespace == true and .production_flag_unchanged == true and .airtable_writes == 0 and .publishing_calls == 0 and ([.results[] | select(.pass != true)] | length == 0)' >/dev/null
           echo "live_sqlite_synthetic_canary=PASS"
           echo "$RESULT" | jq -c '{schema, live_namespace, production_flag_unchanged, external_write, airtable_writes, publishing_calls, results}'
