@@ -48,7 +48,7 @@ test("mixed profile plan deduplicates overlapping selections and preserves profi
   const plan=factoryApprovalGroupPlan({...opts,records:[...outputs,outputs[0],outputs[2]]});
   assert.equal(plan.records.length,4);
   assert.equal(plan.children.length,3);
-  assert.deepEqual(plan.children.map(x=>x.profile_id),[chi,nyc,mia].sort());
+  assert.deepEqual(plan.children.map(x=>x.profile_id),[chi,nyc,mia].sort((a,b)=>a.localeCompare(b)));
   assert.deepEqual(plan.children.find(x=>x.profile_id===chi).items.map(x=>x.id),
     [outputs[0].id,outputs[2].id]);
   const builder=factoryApprovalGroupBuild({...opts,records:outputs});
