@@ -1321,10 +1321,11 @@ async function studioHealApprovedMissingScheduleAtomic(env, row) {
         patchFields: fields,
       };
     },
-    write: async (plan) => {
+    write: async (plan, { signal }) => {
       if (!plan.patchFields) return airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, row.id);
       return airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, row.id, {
         method: "PATCH",
+        signal,
         body: JSON.stringify({ fields: plan.patchFields, typecast: true }),
       });
     },
@@ -1446,10 +1447,11 @@ async function studioHealStoryCompanionDriftAtomic(env, row) {
         patchFields: changed ? fields : null,
       };
     },
-    write: async (plan) => {
+    write: async (plan, { signal }) => {
       if (!plan.patchFields) return airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, row.id);
       return airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, row.id, {
         method: "PATCH",
+        signal,
         body: JSON.stringify({ fields: plan.patchFields, typecast: true }),
       });
     },
@@ -2404,8 +2406,9 @@ async function studioApproveOutputRecordAtomic(env, record, note, stamp, payload
         patchFields: { ...fields, ...preparedHandoff, ...scheduleFields },
       };
     },
-    write: async (plan) => airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, prepared.id || id, {
+    write: async (plan, { signal }) => airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, prepared.id || id, {
       method: "PATCH",
+      signal,
       body: JSON.stringify({ fields: plan.patchFields, typecast: true }),
     }),
     verify: async (_updated, plan) => {
@@ -2914,8 +2917,9 @@ async function studioAtomicApplyScheduleRegenEntry(env, {
         patchFields: fields,
       };
     },
-    write: async (plan) => airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, outputId, {
+    write: async (plan, { signal }) => airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, outputId, {
       method: "PATCH",
+      signal,
       body: JSON.stringify({ fields: plan.patchFields, typecast: true }),
     }),
     verify: async (written, plan) => {
@@ -10319,8 +10323,9 @@ async function studioAtomicVacateSkippedOutput(env, row, fields, operationId) {
         Studio_Scheduled_At: null,
       },
     }),
-    write: async (plan) => airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, current.id, {
+    write: async (plan, { signal }) => airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, current.id, {
       method: "PATCH",
+      signal,
       body: JSON.stringify({ fields: plan.patchFields, typecast: true }),
     }),
     verify: async (written) => {
@@ -12955,8 +12960,9 @@ export async function scheduleStudioPublishOutput(request, env, url, authorizati
           fields,
         };
       },
-      write: async (plan) => airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, match[1], {
+      write: async (plan, { signal }) => airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, match[1], {
         method: "PATCH",
+        signal,
         body: JSON.stringify({ fields: plan.fields, typecast: true }),
       }),
       verify: async (written, plan) => {
