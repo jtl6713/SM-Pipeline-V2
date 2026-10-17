@@ -301,9 +301,10 @@ jobs:
               const url = new URL(request.url);
               const factoryStatus = url.pathname === "/$TOKEN/factory-status";
               const chicagoCanary = url.pathname === "/$TOKEN/factory-status-chicago";
-              if (url.pathname !== "/$TOKEN" && !factoryStatus && !chicagoCanary) return new Response("Not found", {status:404});
-              const path = chicagoCanary
-                ? "/api/factory/approval-batches?profile=recT2rbKX3MF7cVFU"
+              const globalCanary = url.pathname === "/$TOKEN/factory-status-global";
+              if (url.pathname !== "/$TOKEN" && !factoryStatus && !chicagoCanary && !globalCanary) return new Response("Not found", {status:404});
+              const path = globalCanary ? "/api/factory/approval-batches?scope=all"
+                : chicagoCanary ? "/api/factory/approval-batches?profile=recT2rbKX3MF7cVFU"
                 : factoryStatus ? "/api/factory/approval-batches?profile=recF7UAn0LkMZZrWZ" : "/api/session";
               const internal = new Request("https://studio.chicagoshining.com" + path, {
                 method:"GET",
