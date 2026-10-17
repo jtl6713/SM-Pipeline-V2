@@ -113,7 +113,9 @@ test("visual voiceover rerender continuation uses exact-isolated Python R4/R5, n
   const pulse = functions.slice(pulseStart, pulseEnd);
   assert.match(pulse, /item4PulseR4Python\(env/);
   assert.match(pulse, /item4PulseR5Python\(env/);
-  assert.match(pulse, /eligible\.length !== 1 \|\| eligible\[0\]\?\.id !== outputRecordId/);
+  assert.match(pulse, /eligible\.find\(\(row\) => row\?\.id === outputRecordId\)/);
+  assert.match(pulse, /requested output ineligible/);
+  assert.doesNotMatch(pulse, /eligible\.length !== 1/);
   assert.match(pulse, /testRunId/);
   assert.match(pulse, /backend: "python"/);
   assert.doesNotMatch(pulse, /forceSlot: true/);
