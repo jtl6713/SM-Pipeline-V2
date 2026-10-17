@@ -3875,6 +3875,21 @@ export async function writeStudioProfilesOverviewSnapshot(env, rows, authKey, ex
     return rememberProfilesOverviewSnapshot(rawSnapshot);
   }
 
+  // Fence ordinary/background writes while a manual rebuild owns the durable
+  // generation. A build that began in another isolate before the manual claim
+  // must not finish later and clobber the newly verified forced snapshot.
+  const refreshRecord = await readProfilesOverviewRefreshStateRecord(env).catch(() => null);
+  const refreshState = publicProfilesOverviewRefreshState(refreshRecord?.state || null);
+  const manualGenerationProtected = refreshState.status === "refreshing"
+    || (refreshState.status === "completed" && Number(refreshState.cooldown_remaining_ms || 0) > 0);
+  if (manualGenerationProtected) {
+    const durable = await readStudioProfilesOverviewSnapshotFromR2(env).catch(() => null);
+    if (durable?.complete && Array.isArray(durable.rows) && durable.rows.length) {
+      return rememberProfilesOverviewSnapshot(durable);
+    }
+    return profilesOverviewSnapshotView();
+  }
+
   const snapshot = rememberProfilesOverviewSnapshot(rawSnapshot);
   if (!snapshot || !env?.STUDIO_MEDIA?.put) return snapshot;
   try {
@@ -4175,11 +4190,11 @@ export async function runStudioProfilesOverviewForceRefresh(env, authorization, 
     if (!profiles?.length) throw new Error("Profiles overview refresh resolved no authorized profiles");
 
     const build = buildStudioProfilesOverviewRows(env, profiles, { forceIdeas: true, commitIdeas: false });
-    cache.inflight = build;
-    build.finally(() => {
-      if (cache.inflight === build) cache.inflight = null;
+    const trackedBuild = build.finally(() => {
+      if (cache.inflight === trackedBuild) cache.inflight = null;
     });
-    const rows = await raceStudioOverviewBudget(build, 45_000, "overview-force-build");
+    cache.inflight = trackedBuild;
+    const rows = await raceStudioOverviewBudget(trackedBuild, 45_000, "overview-force-build");
     validateStudioProfilesOverviewRows(rows, profiles);
 
     const snapshotAt = Math.max(Date.now(), Number(refreshState?.baseline_snapshot_at || 0) + 1);
