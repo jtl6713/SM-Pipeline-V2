@@ -95,3 +95,10 @@ test("production canary accepts normalized snake_case slide durations when findi
   assert.match(worker, /slide\?\.duration_seconds \|\| slide\?\.durationSeconds/);
   assert.match(worker, /sourceMs > durationMs \+ 250/);
 });
+
+test("nonpublishing visual timeline saves return the same persisted timeline contract used by production", () => {
+  assert.match(worker, /visual_timeline_saved: Boolean\(nextVisualTimeline\)/);
+  assert.match(worker, /visual_timeline: nextVisualTimeline \|\| \(/);
+  assert.match(worker, /Publishing state was not changed; render\/TTS were not started/);
+});
+
