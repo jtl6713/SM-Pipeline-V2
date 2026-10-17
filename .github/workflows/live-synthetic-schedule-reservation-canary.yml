@@ -1,0 +1,77 @@
+name: Live Synthetic Scheduling Reservation Canary
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirmation:
+        description: 'Enter RUN-SYNTHETIC-DO-CANARY'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: live-synthetic-schedule-reservation-canary
+  cancel-in-progress: false
+
+jobs:
+  canary:
+    if: ${{ inputs.confirmation == 'RUN-SYNTHETIC-DO-CANARY' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      RUNNER_NAME: studio-schedule-reservation-synthetic-canary
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate synthetic-only harness
+        run: |
+          set -euo pipefail
+          node --check apps/studio-api/schedule-reservation-live-canary.mjs
+          node --check apps/studio-api/schedule-reservation-live-canary-worker.mjs
+          node --test apps/studio-api/schedule-reservation-live-canary.test.mjs
+      - name: Deploy isolated ephemeral Worker, run live namespace checks, remove Worker
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm install --no-save wrangler@4.123.0
+          ROOT="$PWD"
+          mkdir -p /tmp/synthetic-schedule-canary
+          cp apps/studio-api/schedule-reservation-live-canary-worker.mjs /tmp/synthetic-schedule-canary/worker.mjs
+          cp apps/studio-api/schedule-reservation-live-canary.mjs /tmp/synthetic-schedule-canary/
+          cp apps/studio-api/schedule-reservation-authority.mjs /tmp/synthetic-schedule-canary/
+          cp apps/studio-api/schedule-reservation-transaction.mjs /tmp/synthetic-schedule-canary/
+          cd /tmp/synthetic-schedule-canary
+          cat >wrangler.jsonc <<'EOF'
+          {
+            "name": "studio-schedule-reservation-synthetic-canary",
+            "main": "worker.mjs",
+            "compatibility_date": "2026-10-01",
+            "workers_dev": true,
+            "durable_objects": {
+              "bindings": [{
+                "name": "STUDIO_SCHEDULE_RESERVATIONS",
+                "class_name": "ScheduleReservationLane",
+                "script_name": "chicagoshining-studio-api"
+              }]
+            },
+            "vars": {"STUDIO_SCHEDULE_RESERVATION_AUTHORITY_ENABLED": "false"}
+          }
+          EOF
+          TOKEN="$(openssl rand -hex 32)"
+          cleanup() {
+            cd "$ROOT"
+            "$ROOT/node_modules/.bin/wrangler" delete --name "$RUNNER_NAME" --force >/dev/null 2>&1 || true
+          }
+          trap cleanup EXIT
+          "$ROOT/node_modules/.bin/wrangler" deploy --config wrangler.jsonc >/tmp/canary-deploy.log 2>&1
+          printf '%s' "$TOKEN" | "$ROOT/node_modules/.bin/wrangler" secret put CANARY_TOKEN --name "$RUNNER_NAME" >/dev/null
+          SUBDOMAIN="$(curl -fsS -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/subdomain" | jq -r '.result.subdomain')"
+          test -n "$SUBDOMAIN" && test "$SUBDOMAIN" != null
+          NONCE="$(openssl rand -hex 12)"
+          RESULT="$(curl --fail-with-body -fsS --retry 4 --retry-delay 2 -X POST "https://$RUNNER_NAME.$SUBDOMAIN.workers.dev/run" -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" --data "{\"nonce\":\"$NONCE\"}")"
+          echo "$RESULT" | jq -e '.ok == true and .live_namespace == true and .production_flag_unchanged == true and .airtable_writes == 0 and .publishing_calls == 0 and ([.results[] | select(.pass != true)] | length == 0)' >/dev/null
+          echo "live_sqlite_synthetic_canary=PASS"
+          echo "$RESULT" | jq -c '{schema, live_namespace, production_flag_unchanged, external_write, airtable_writes, publishing_calls, results}'
