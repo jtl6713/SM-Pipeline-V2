@@ -377,3 +377,5 @@ phase4-followup purge-deleted-duplicates 2026-10-16T19:30:00Z worker 0.10.648-pu
 phase4-followup purge-deleted-duplicates 2026-10-16T19:42:00Z worker 0.10.649-purge-deleted-duplicates (drop the later cancelled Huntington, Downtown LA, Griffith, Brickell, Vizcaya, and Little Havana copies that the read copy was still serving)
 
 PR #789 guarded Factory Batch Approval V2 | merge b1b3df84e8b066efee7716b6d209e04c0a0a9f70 | Worker 0.10.650-factory-batch-gated | FACTORY_BATCH_APPROVALS_ENABLED=false | writable staging acceptance passed | Worker-first deployment
+
+PR #789 guarded Worker retry | 0.10.650-factory-batch-gated | binding contract now permits explicit FACTORY_BATCH_APPROVALS_ENABLED=false | previous attempt rolled back correctly
