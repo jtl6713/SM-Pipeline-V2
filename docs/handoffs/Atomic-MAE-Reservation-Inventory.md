@@ -50,19 +50,28 @@ This branch adds two **optional** bindings to the contract:
 The flag is false when absent. If the flag is explicitly enabled and the Durable
 Object binding is unavailable, scheduling must fail closed with 503.
 
-### Production rollout caveat
+### Production rollout contract
 
-The current safe-rollout workflow rebuilds a Wrangler configuration from the
-live Worker and explicitly preserves the existing core text/R2/secret binding
-set. It does not yet define a Durable Object namespace or Durable Object
-migration.
+The production deploy workflow now provisions the reservation authority using
+Cloudflare's current declarative Durable Object lifecycle:
 
-That is intentional during this phase: production must remain unchanged.
+- `durable_objects.bindings` binds `STUDIO_SCHEDULE_RESERVATIONS` to
+  `ScheduleReservationLane`.
+- `exports.ScheduleReservationLane` declares
+  `type = "durable-object"` and `storage = "sqlite"`.
+- The deploy workflow forcibly writes
+  `STUDIO_SCHEDULE_RESERVATION_AUTHORITY_ENABLED=false`.
+- Postdeploy verification fails if the Durable Object binding is missing or the
+  feature flag is anything other than `false`.
 
-Before staging/production activation, add an explicit Durable Object binding and
-migration, for example a Wrangler `durable_objects.bindings` entry plus a
-`new_sqlite_classes` migration for `ScheduleReservationLane`. Do not add that
-migration to production until deterministic concurrency/recovery tests pass.
+Cloudflare's current Wrangler model prefers `exports` for new Durable Object
+classes; legacy `migrations` must not be combined with these Durable Object
+`exports` entries.
+
+The namespace may therefore be provisioned safely while production scheduling
+continues on the legacy path. Activation remains blocked until the reservation
+test suites, Wrangler dry run, controlled canary, and Quality Agent health checks
+all pass.
 
 ## 3. Actual Platform Output schedule writers
 
@@ -394,8 +403,8 @@ load testing proves safe ranges.
 6. Regeneration commit path.
 7. Factory cancellation/vacate.
 8. Quality Agent runtime scan/recovery.
-9. Staging Wrangler namespace + migration.
-10. Concurrency/recovery stress tests.
+9. Provision the SQLite Durable Object namespace with the feature flag forced off.
+10. Concurrency/recovery stress tests and Wrangler validation.
 11. Controlled canary.
 12. Only then consider production flag activation.
 
