@@ -6,6 +6,12 @@ import {
   factoryBatchDrain, factoryBatchRetry, factoryBatchSummary, factoryBatchCounts,
   factoryBatchQualitySignals, factoryBatchReconcile, factoryBatchCronScan,
 } from "./factory-approval-queue.mjs";
+import { factoryGlobalPolicy, factoryGlobalAcceptsOutput } from "./factory-batch-global-policy.mjs";
+import {
+  factoryApprovalGroupPlan, factoryApprovalGroupEnqueue, factoryApprovalGroupRead,
+  factoryApprovalGroupResume, factoryApprovalGroupStatus, factoryApprovalGroupRetryFailures,
+  factoryApprovalGroupList, factoryApprovalGroupCronScan,
+} from "./factory-approval-groups.mjs";
 import { createProfileOnboarding } from "./profile-onboarding.mjs";
 import {
   studioReadSource,
@@ -12272,10 +12278,18 @@ export async function factoryBatchStatusRoute(request, env, authorization) {
     const history = await factoryBatchListGlobal(env.STUDIO_MEDIA, {
       profileId: factoryProfile, limit: 40, maxScan: 3000,
     });
-    const batches = history.jobs.map(job => ({
-      ...factoryBatchSummary(job),
-      quality_signals: factoryBatchQualitySignals(job),
-    }));
+    const groupHistory=await factoryApprovalGroupList(env.STUDIO_MEDIA,{
+      profileId:factoryProfile,limit:40,maxScan:2000,
+    });
+    const groupedChildIds=new Set(groupHistory.groups.flatMap(group=>
+      group.children.map(child=>child.request_id)));
+    const batches=[
+      ...history.jobs.filter(job=>!groupedChildIds.has(job.request_id)).map(job=>({
+        ...factoryBatchSummary(job),
+        quality_signals:factoryBatchQualitySignals(job),
+      })),
+      ...groupHistory.groups.map(group=>({...group,quality_signals:[]})),
+    ].sort((a,b)=>Date.parse(b.created_at||"")-Date.parse(a.created_at||"")).slice(0,40);
     const qualitySignals = batches.flatMap(job => (job.quality_signals || [])
       .map(signal => ({ ...signal, profile_id: job.profile_id,
         job_id: job.job_id, output_ids: (job.items || []).map(row => row.output_id).filter(Boolean) })));
@@ -12290,12 +12304,13 @@ export async function factoryBatchStatusRoute(request, env, authorization) {
       findings: qualitySignals.length,
     };
     return respond(request, env, {
-      ...factoryBatchSummary(history.jobs[0] || null),
+      ...(batches[0]||factoryBatchSummary(null)),
       scope: "all", filter_profile_id: factoryProfile || null,
       batches, totals, quality_signals: qualitySignals,
-      history_complete: history.complete, history_scanned: history.scanned,
-      approvals_enabled: factoryBatchRolloutPolicy(env).enabled,
-      rollout: factoryBatchRolloutPolicy(env),
+      history_complete: history.complete && groupHistory.complete,
+      history_scanned: history.scanned+groupHistory.scanned,
+      approvals_enabled: factoryBatchRolloutPolicy(env).enabled||factoryGlobalPolicy(env).enabled,
+      rollout: factoryBatchRolloutPolicy(env), global_rollout:factoryGlobalPolicy(env),
     });
   }
   const profile = await resolveWorkingContentProfile(env, authorization, requestedProfileId(url, null));
@@ -12316,7 +12331,17 @@ export async function factoryBatchProcess(env, profileId, requestId, ctx = null)
   // Do not let an old queued job bypass an operator's active rollout scope.
   // This guard also runs on cron recovery, not only on fresh HTTP requests.
   const rollout = factoryBatchRolloutPolicy(env, profileId);
-  if (!rollout.enabled) return null;
+  const job=await factoryBatchRead(env.STUDIO_MEDIA,profileId,requestId);
+  if (!job) return null;
+  const globalPolicy=factoryGlobalPolicy(env);
+  const parentId=job.group_request_id||null;
+  if (parentId) {
+    if (!globalPolicy.enabled) return null;
+    const parent=await factoryApprovalGroupRead(env.STUDIO_MEDIA,parentId);
+    const child=parent?.children?.find(row=>row.profile_id===profileId&&row.request_id===requestId);
+    if (!child||child.records.length!==job.items.length||
+        child.records.some((row,i)=>row.id!==job.items[i]?.id)) return null;
+  } else if (!rollout.enabled) return null;
   const run = async () => {
     const result = await factoryBatchDrain(env.STUDIO_MEDIA, {
       profileId, requestId, maxItems: 25, maxElapsedMs: 20000,
@@ -12325,8 +12350,12 @@ export async function factoryBatchProcess(env, profileId, requestId, ctx = null)
         // render eligibility, Do_Not_Publish and the MAE / Story scheduling rules.
         // Reject profile drift before calling any authoritative approval mutation.
         const record = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, id);
-        if (job.items.length > rollout.max_items || !factoryBatchRolloutAcceptsOutput(rollout, record)) {
-          throw new HttpError(409, "This output is outside the authorized Factory batch rollout; no approval was performed");
+        if (parentId
+          ? (job.items.length>globalPolicy.max_per_profile ||
+             !factoryGlobalAcceptsOutput(globalPolicy,record))
+          : (job.items.length>rollout.max_items ||
+             !factoryBatchRolloutAcceptsOutput(rollout,record))) {
+          throw new HttpError(409, "Output outside the authorized Factory batch rollout; no approval performed");
         }
         // Profile ownership must resolve from the authoritative Content Item
         // when Platform Output exposes only a lookup display-name, never infer
@@ -12337,6 +12366,9 @@ export async function factoryBatchProcess(env, profileId, requestId, ctx = null)
         }
         if (ownerProfileId !== profileId) {
           throw new HttpError(409, "Output belongs to a different content profile");
+        }
+        if (Boolean(f(record,"Do_Not_Publish")) || !studioOutputReadyForPublishApproval(record)) {
+          throw new HttpError(409,"Output no longer review-ready or publishing is blocked");
         }
         return factoryApproveOutput(env, id, "Factory Batch", job.notes || "", ctx);
       },
@@ -12360,13 +12392,16 @@ export async function factoryBatchSubmitRoute(request, env, authorization, ctx =
   }
   let payload;
   try { payload = await request.json(); } catch { throw new HttpError(400, "Invalid JSON"); }
+  const action = String(payload?.action || "start").toLowerCase();
+  if (action==="start_group"||action==="retry_group") {
+    return factoryBatchGroupSubmitRoute(request,env,authorization,payload,ctx);
+  }
   const profile = await resolveWorkingContentProfile(env, authorization, requestedProfileId(null, payload));
   if (!profile?.id) throw new HttpError(400, "Choose a content profile");
   const rollout = factoryBatchRolloutPolicy(env, profile.id);
   if (!rollout.enabled) {
     throw new HttpError(403, "Factory batch pilot is currently limited to one Chicago Instagram Reel");
   }
-  const action = String(payload?.action || "start").toLowerCase();
   const requestId = String(payload?.request_id || "");
   if (action === "retry") {
     if (!requestId) throw new HttpError(400, "request_id required for retry");
@@ -12428,6 +12463,93 @@ export async function factoryBatchSubmitRoute(request, env, authorization, ctx =
 }
 /*__STUDIO_WORKER_END:factoryBatchSubmitRoute__*/
 
+/** Global parent approval route, dormant until independently authorized. */
+async function factoryBatchGroupSubmitRoute(request,env,authorization,payload,ctx) {
+  const policy=factoryGlobalPolicy(env);
+  if (!policy.enabled) throw new HttpError(403,"Global multi-profile approvals are not enabled");
+  const requestId=String(payload?.request_id||"").trim();
+  if (!/^[A-Za-z0-9_-]{12,128}$/.test(requestId)) throw new HttpError(400,"Invalid group request ID");
+  const action=String(payload.action||"");
+  if (action==="retry_group") {
+    const status=await factoryApprovalGroupStatus(env.STUDIO_MEDIA,requestId);
+    if (!status) throw new HttpError(404,"Approval group not found");
+    for (const profileId of status.profile_ids) {
+      const allowed=await resolveWorkingContentProfile(env,authorization,profileId);
+      if (allowed?.id!==profileId) throw new HttpError(403,"Profile access is required");
+    }
+    const updated=await factoryApprovalGroupRetryFailures(env.STUDIO_MEDIA,requestId);
+    for (const child of updated.children.filter(row=>row.failed_count || row.pending_count)) {
+      await factoryBatchProcess(env,child.profile_id,child.request_id,ctx);
+    }
+    return respond(request,env,{...updated,accepted:true});
+  }
+  if (action!=="start_group") throw new HttpError(400,"Invalid group action");
+  const rawIds=payload?.record_ids;
+  if (!Array.isArray(rawIds)||!rawIds.length||rawIds.length>policy.max_total) {
+    throw new HttpError(400,"Select 1–20 distinct outputs for global Factory batch");
+  }
+  const ids=[...new Set(rawIds.map(String))];
+  if (ids.length>policy.max_total||ids.some(id=>!/^rec[A-Za-z0-9]+$/.test(id))) {
+    throw new HttpError(400,"Invalid Factory output selection");
+  }
+  const existing=await factoryApprovalGroupRead(env.STUDIO_MEDIA,requestId);
+  if (existing) {
+    if (existing.records.length!==ids.length||
+        existing.records.some(row=>!ids.includes(row.id))) {
+      throw new HttpError(409,"Group request ID already belongs to another selection");
+    }
+    for (const child of existing.children) {
+      const allowed=await resolveWorkingContentProfile(env,authorization,child.profile_id);
+      if (allowed?.id!==child.profile_id) throw new HttpError(403,"Profile access is required");
+    }
+    const resumed=await factoryApprovalGroupResume(env.STUDIO_MEDIA,requestId);
+    for (const child of resumed.children) await factoryBatchProcess(env,child.profile_id,child.request_id,ctx);
+    return respond(request,env,{...resumed,accepted:true,already_submitted:true});
+  }
+  // Fail closed for the whole group: fetch and verify all authoritative rows
+  // BEFORE creating any parent/child R2 record or scheduling any work.
+  const records=[];
+  const clientInfo=new Map((Array.isArray(payload.items)?payload.items:[])
+    .filter(row=>/^rec[A-Za-z0-9]+$/.test(String(row?.id||"")))
+    .map(row=>[row.id,row]));
+  const verifiedProfiles=new Set();
+  for (const id of ids) {
+    const record=await airtableFetch(env,env.AIRTABLE_OUTPUT_TABLE_ID,id);
+    const profileId=await studioContentProfileRecordIdForOutput(env,record);
+    if (!profileId||!factoryGlobalAcceptsOutput(policy,record)||
+        Boolean(f(record,"Do_Not_Publish"))||!studioOutputReadyForPublishApproval(record)) {
+      throw new HttpError(409,"At least one selected output is not ready or eligible for global batch approval");
+    }
+    if (!verifiedProfiles.has(profileId)) {
+      const allowed=await resolveWorkingContentProfile(env,authorization,profileId);
+      if (allowed?.id!==profileId) throw new HttpError(403,"Profile access is required for every output");
+      verifiedProfiles.add(profileId);
+    }
+    const info=clientInfo.get(id)||{};
+    records.push({id,profile_id:profileId,
+      output_id:f(record,"Output_ID")||info.output_id||null,
+      platform:f(record,"Platform"),format:f(record,"Studio_Output_Type")||f(record,"Format"),
+      title:f(record,"Title")||info.title||"",
+      content_id:info.content_id||null});
+  }
+  try {
+    factoryApprovalGroupPlan({requestId,records,maxTotal:policy.max_total,
+      maxPerProfile:policy.max_per_profile});
+  } catch(error) {throw new HttpError(400,error.message||"Invalid global Factory group");}
+  let submitted;
+  try {
+    submitted=await factoryApprovalGroupEnqueue(env.STUDIO_MEDIA,{
+      requestId,records,maxTotal:policy.max_total,maxPerProfile:policy.max_per_profile,
+      note:String(payload.notes||""),
+    });
+  } catch(error) {throw new HttpError(409,error.message||"Group submission failed");}
+  for (const child of submitted.children) {
+    await factoryBatchProcess(env,child.profile_id,child.request_id,ctx);
+  }
+  return respond(request,env,{...submitted,accepted:true});
+}
+
+
 /**
  * Cron recovery: enumerate bounded recent jobs for each profile in the R2 jobs
  * hierarchy. No client poll is necessary. An expired R2 lease can be reclaimed.
@@ -12435,6 +12557,19 @@ export async function factoryBatchSubmitRoute(request, env, authorization, ctx =
 export async function factoryBatchCronResume(env, ctx = null) {
   if (String(env?.FACTORY_BATCH_APPROVALS_ENABLED || "").toLowerCase() !== "true") return 0;
   if (!env?.STUDIO_MEDIA?.list) return 0;
+  // Independently resume parent ledgers after interrupted child enqueue.
+  if (factoryGlobalPolicy(env).enabled) {
+    const groupIds=await factoryApprovalGroupCronScan(env.STUDIO_MEDIA,{maxScan:50});
+    let groupResumes=0;
+    for (const groupId of groupIds) {
+      if (groupResumes>=5) break;
+      const parent=await factoryApprovalGroupRead(env.STUDIO_MEDIA,groupId);
+      if (parent?.status==="enqueuing") {
+        await factoryApprovalGroupResume(env.STUDIO_MEDIA,groupId);
+        groupResumes++;
+      }
+    }
+  }
   // The persisted cursor rotates through old histories (rather than rereading
   // the first 200 lexical R2 keys forever). Process only a bounded scan on each tick.
   const { objects } = await factoryBatchCronScan(env.STUDIO_MEDIA, { maxScan: 200 });
