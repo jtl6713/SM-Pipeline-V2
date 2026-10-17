@@ -172,6 +172,10 @@ jobs:
             return w.body;
           }
           const prep=await call("POST","/api/admin/visual-voiceover-canary",{action:"prepare",confirm:"prepare-nonpublishing-canary"});
+          const rollout=JSON.parse(fs.readFileSync("deploy/visual-voiceover-production-rollout.json","utf8"));
+          const expectedIds=Array.isArray(rollout?.canary_output_ids)?rollout.canary_output_ids.filter(Boolean):[];
+          if(expectedIds.length!==1) throw new Error(`expected exactly one production canary id, found ${expectedIds.length}`);
+          if(prep?.record_id!==expectedIds[0]) throw new Error(`prepared canary ${prep?.record_id||""} does not match rollout allowlist ${expectedIds[0]}`);
           if(!prep?.prepared || !prep?.record_id || prep?.do_not_publish!==true) throw new Error("canary was not prepared safely");
           if(prep?.safety?.auto_publish_enabled!==false) throw new Error("canary auto publishing is not disabled");
           if(prep?.safety?.published_at || prep?.safety?.platform_post_id || prep?.safety?.platform_post_url) throw new Error("canary seed is already published");
