@@ -14,7 +14,13 @@ test("All Profiles overview uses one lean /api/profiles/overview call", () => {
   assert.match(overview, /\/api\/profiles\/overview/);
   assert.doesNotMatch(overview, /\/api\/dashboard\?profile=/);
   assert.doesNotMatch(overview, /mapPool\(profiles/);
-  assert.match(overview, /requestIdleCallback|setTimeout\(start/);
+  assert.match(overview, /POLL_MS = 5000/);
+  assert.match(overview, /overviewViewActive/);
+  assert.match(overview, /document\.hidden/);
+  assert.match(overview, /\n  start\(\);/);
+  assert.doesNotMatch(overview, /120000/);
+  assert.doesNotMatch(overview, /timeout: 4500/);
+  assert.doesNotMatch(overview, /setTimeout\(start, 3200\)/);
   assert.match(overview, /sessionStorage/);
   assert.match(overview, /localStorage/);
   assert.match(overview, /Showing last good overview/);
@@ -30,6 +36,13 @@ test("Worker exposes profilesOverview lean batch route", () => {
   assert.match(worker, /studio_home_overview_soft_429_v1: true/);
   assert.match(worker, /buildStudioProfilesOverviewRows/);
   assert.match(worker, /STUDIO_PROFILES_OVERVIEW_CACHE_MS/);
+  assert.match(worker, /STUDIO_PROFILES_OVERVIEW_SUPABASE_CACHE_MS = 10 \* 1000/);
+  assert.match(worker, /STUDIO_PROFILES_OVERVIEW_IDEAS_REFRESH_MS = 15 \* 60 \* 1000/);
+  assert.match(worker, /studio_home_overview_fast_poll_v1: true/);
+  assert.match(worker, /Reuse last-good Ideas counts/);
+  assert.match(worker, /do not block the Supabase output rebuild/);
+  assert.match(worker, /refreshStudioProfilesOverviewIdeas/);
+  assert.match(worker, /includeIdeas/);
   assert.match(worker, /studio\/state\/profiles-overview\.json/);
   assert.match(worker, /readStudioProfilesOverviewSnapshot/);
   assert.match(worker, /refreshStudioProfilesOverviewSnapshot/);
@@ -52,5 +65,5 @@ test("Worker budgets overview Airtable work so home never waits 60s", () => {
   assert.match(worker, /studio_home_overview_budget_v1:\s*true/);
   assert.match(worker, /STUDIO_PROFILES_OVERVIEW_BUILD_BUDGET_MS/);
   assert.match(worker, /raceStudioOverviewBudget/);
-  assert.match(worker, /0.10.650-factory-batch-gated/);
+  assert.match(worker, /0\.10\.651-overview-fast-refresh/);
 });

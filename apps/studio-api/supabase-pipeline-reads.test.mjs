@@ -232,7 +232,7 @@ test("supabaseRestAll pages past PostgREST max-rows so overview counts stay comp
 
 test("worker wires supabase phase4 reads behind the same flag", async () => {
   const worker = readStudioWorkerSource();
-  assert.match(worker, /version: "0.10.650-factory-batch-gated"/);
+  assert.match(worker, /version: "0.10.651-overview-fast-refresh"/);
   assert.match(worker, /studio_supabase_pipeline_reads_v1: true/);
   assert.match(worker, /studio_supabase_phase3_stable_v1: true/);
   assert.match(worker, /studio_supabase_phase4_reads_v1: true/);
@@ -266,7 +266,9 @@ test("worker wires supabase phase4 reads behind the same flag", async () => {
   assert.match(worker, /schemaVersion: 4/);
   assert.match(worker, /ideaLimit: options\.ideaLimit \?\? 2000/);
   assert.match(worker, /usedSupabaseOutputs/);
-  assert.match(worker, /Ideas column from Airtable/);
+  assert.match(worker, /Reuse last-good Ideas counts/);
+  assert.match(worker, /do not block the Supabase output rebuild/);
+  assert.match(worker, /includeIdeas/);
   const reads = await readFile(path.join(here, "supabase-pipeline-reads.mjs"), "utf8");
   assert.match(reads, /export async function supabaseRestAll/);
   assert.match(reads, /listSupabaseOverviewPack[\s\S]*supabaseRestAll/);

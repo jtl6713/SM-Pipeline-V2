@@ -379,3 +379,5 @@ phase4-followup purge-deleted-duplicates 2026-10-16T19:42:00Z worker 0.10.649-pu
 PR #789 guarded Factory Batch Approval V2 | merge b1b3df84e8b066efee7716b6d209e04c0a0a9f70 | Worker 0.10.650-factory-batch-gated | FACTORY_BATCH_APPROVALS_ENABLED=false | writable staging acceptance passed | Worker-first deployment
 
 PR #789 guarded Worker retry | 0.10.650-factory-batch-gated | binding contract now permits explicit FACTORY_BATCH_APPROVALS_ENABLED=false | previous attempt rolled back correctly
+
+overview-fast-refresh 2026-10-17T01:20:00Z worker 0.10.651-overview-fast-refresh (Supabase All Profiles cache 10s; Ideas reuse last-good counts and refresh every 15m without blocking output counts)

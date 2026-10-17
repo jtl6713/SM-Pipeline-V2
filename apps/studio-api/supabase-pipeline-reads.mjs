@@ -622,7 +622,7 @@ export async function listSupabaseContentItems(env, { profileAirtableId, limit =
   };
 }
 
-export async function listSupabaseOverviewPack(env, { profileAirtableIds = [], outputLimit = 10000, ideaLimit = 10000 } = {}) {
+export async function listSupabaseOverviewPack(env, { profileAirtableIds = [], outputLimit = 10000, ideaLimit = 10000, includeIdeas = true } = {}) {
   const ids = (profileAirtableIds || []).map((id) => String(id || "").trim()).filter(Boolean);
   if (!ids.length) return { outputs: [], ideas: [], profilesMissing: true };
 
@@ -642,32 +642,38 @@ export async function listSupabaseOverviewPack(env, { profileAirtableIds = [], o
 
   // Must page: a bare limit=10000 is still capped by PostgREST max-rows (~1000),
   // which silently dropped older Scheduled rows and crushed All Profiles totals.
-  const [outputRows, ideaRows] = await Promise.all([
-    supabaseRestAll(
-      env,
-      `platform_outputs?${profileFilter}&select=${OUTPUT_SELECT}&order=output_number.desc.nullslast`,
-      { pageSize: 1000, maxRows: outCeiling },
-    ),
-    supabaseRestAll(
+  // Ideas are optional. The All Profiles hot path refreshes output counts without
+  // waiting on idea_candidates; an incomplete idea page must not discard outputs.
+  const outputRows = await supabaseRestAll(
+    env,
+    `platform_outputs?${profileFilter}&select=${OUTPUT_SELECT}&order=output_number.desc.nullslast`,
+    { pageSize: 1000, maxRows: outCeiling },
+  );
+  let ideaRows = [];
+  let ideasIncomplete = false;
+  if (includeIdeas) {
+    ideaRows = await supabaseRestAll(
       env,
       `idea_candidates?${profileFilter}&select=${IDEA_SELECT}&order=created_at.desc.nullslast`,
       { pageSize: 1000, maxRows: ideaCeiling },
-    ).catch(() => []),
-  ]);
+    ).catch(() => []);
+    if ((ideaRows || []).length >= ideaCeiling) {
+      ideasIncomplete = true;
+      ideaRows = [];
+    }
+  }
 
   if ((outputRows || []).length >= outCeiling) {
     throw new Error("Profiles overview outputs exceeded complete-scan safety ceiling");
-  }
-  if ((ideaRows || []).length >= ideaCeiling) {
-    throw new Error("Profiles overview ideas exceeded complete-scan safety ceiling");
   }
 
   return {
     profilesMissing: false,
     outputs: stripDeletedDuplicateOutputRecords((outputRows || []).map(flattenOutputRow).map(airtableShapedOutputFromSupabase)),
     ideas: (ideaRows || []).map(flattenIdeaRow).map(airtableShapedIdeaFromSupabase),
+    ideas_incomplete: ideasIncomplete,
     output_count: (outputRows || []).length,
-    idea_count: (ideaRows || []).length,
+    idea_count: ideasIncomplete ? 0 : (ideaRows || []).length,
   };
 }
 

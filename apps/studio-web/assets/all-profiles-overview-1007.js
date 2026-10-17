@@ -4,6 +4,7 @@
   const esc = (value) => String(value ?? "").replace(/[&<>"']/g, (ch) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[ch]));
   const platformOrder = ["Facebook","Instagram","TikTok","YouTube"];
   const CACHE_KEY = "studio.allProfilesOverview.v1";
+  const POLL_MS = 5000;
   const state = { rows: [], timer: 0, loading: false, deferred: false, followUp: false };
 
   function scheduledTotal(row) {
@@ -148,8 +149,15 @@
       load();
     }, 5000);
   }
+  function overviewViewActive() {
+    if (document.hidden) return false;
+    const page = document.getElementById("page-dashboard");
+    if (!page) return true;
+    return page.classList.contains("active");
+  }
   async function load(force=false) {
     if (state.loading) return;
+    if (!force && !overviewViewActive()) return;
     state.loading = true;
     if (!state.rows.length) {
       const cached = readCache();
@@ -190,8 +198,8 @@
         state.followUp = true;
         window.setTimeout(() => {
           state.followUp = false;
-          load(true);
-        }, 8000);
+          if (overviewViewActive()) load();
+        }, POLL_MS);
       }
     } catch (error) {
       // Timeouts and 429s are soft — never paint a red "unavailable" banner on home.
@@ -213,19 +221,21 @@
     state.rows = cachedNow;
     render({ stale: true });
   }
-  // Let selected-profile health + home dashboard claim Airtable slots first.
+  // Cached rows already painted. Fetch immediately so first paint is not
+  // deferred 3–4.5s. Output counts are Supabase-backed and no longer wait
+  // on a full Airtable Ideas scan.
   const start = () => {
     if (state.deferred) return;
     state.deferred = true;
     load();
   };
-  if (typeof window.requestIdleCallback === "function") {
-    window.requestIdleCallback(start, { timeout: 4500 });
-  } else {
-    window.setTimeout(start, 3200);
-  }
-  // Poll less often — overview is cached on the Worker but still shares the Airtable slot.
+  start();
+  // Poll about every 5s while the dashboard is visible. Hidden tabs and other
+  // Studio pages do not call the overview route.
   state.timer = window.setInterval(() => {
-    if (!document.hidden && document.getElementById("page-dashboard")?.classList.contains("active")) load();
-  }, 120000);
+    if (overviewViewActive()) load();
+  }, POLL_MS);
+  document.addEventListener?.("visibilitychange", () => {
+    if (overviewViewActive()) load();
+  });
 })();

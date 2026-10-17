@@ -1040,7 +1040,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.650-factory-batch-gated",
+          version: "0.10.651-overview-fast-refresh",
           studio_supabase_pipeline_reads_v1: true,
           studio_supabase_sync_gate_v1: true,
           studio_supabase_phase3_stable_v1: true,
@@ -1130,6 +1130,7 @@ export default {
           studio_list_read_snapshot_v2: true,
           studio_pipeline_open_index_v1: true,
           studio_home_overview_soft_429_v1: true,
+          studio_home_overview_fast_poll_v1: true,
           studio_oversized_list_refresh_v1: true,
           studio_library_published_files_v1: true,
           studio_native_grid_cover_v1: true,
@@ -5298,15 +5299,31 @@ const STUDIO_OVERDUE_SCHEDULED_FORMULA = 'AND({Test_Run_ID}=BLANK(),{Do_Not_Publ
 /*__STUDIO_WORKER_EXTRACT:studioOverviewOperationalMetrics__*/
 // Last-good counts. Home reads the snapshot and does not scan Airtable on open.
 // Isolate memory is only a hot copy; R2 keeps it across cold Workers.
-// Complete paginated refresh is more expensive than the previous capped scan.
+// Airtable-backed snapshots stay warm for 15 minutes. Supabase-backed snapshots
+// use a 10s TTL so a 5s All Profiles poll can see fresh output counts, and a
+// stale snapshot is still served immediately while a rebuild runs in the background.
+// Ideas counts refresh on a slower cadence and must not block that output rebuild.
 const STUDIO_PROFILES_OVERVIEW_CACHE_MS = 15 * 60 * 1000;
+const STUDIO_PROFILES_OVERVIEW_SUPABASE_CACHE_MS = 10 * 1000;
+const STUDIO_PROFILES_OVERVIEW_IDEAS_REFRESH_MS = 15 * 60 * 1000;
 const STUDIO_PROFILES_OVERVIEW_SNAPSHOT_KEY = "studio/state/profiles-overview.json";
 /** Hard wall for overview Airtable work so home never waits on a 60s browser abort. */
 const STUDIO_PROFILES_OVERVIEW_BUILD_BUDGET_MS = 4000;
 const STUDIO_PROFILES_OVERVIEW_RESOLVE_BUDGET_MS = 2500;
 const STUDIO_PROFILES_OVERVIEW_OUTPUT_LIMIT = 10000;
 const STUDIO_PROFILES_OVERVIEW_IDEA_LIMIT = 10000;
-const studioProfilesOverviewCache = { at: 0, authKey: "", rows: null, complete: false, inflight: null };
+const studioProfilesOverviewCache = {
+  at: 0,
+  authKey: "",
+  rows: null,
+  complete: false,
+  inflight: null,
+  ideasAt: 0,
+  ideasInflight: null,
+  ideasSource: "",
+  ideaCounts: new Map(),
+  readSource: "",
+};
 
 /*__STUDIO_WORKER_EXTRACT:studioOverviewBudgetError__*/
 /*__STUDIO_WORKER_EXTRACT:raceStudioOverviewBudget__*/
@@ -5321,6 +5338,11 @@ const studioProfilesOverviewCache = { at: 0, authKey: "", rows: null, complete: 
 /*__STUDIO_WORKER_EXTRACT:writeStudioProfilesOverviewSnapshot__*/
 /*__STUDIO_WORKER_EXTRACT:refreshStudioProfilesOverviewSnapshot__*/
 /*__STUDIO_WORKER_EXTRACT:scheduleStudioProfilesOverviewRefresh__*/
+/*__STUDIO_WORKER_EXTRACT:studioProfilesOverviewReadSource__*/
+/*__STUDIO_WORKER_EXTRACT:studioProfilesOverviewFreshMs__*/
+/*__STUDIO_WORKER_EXTRACT:studioProfilesOverviewIdeasFresh__*/
+/*__STUDIO_WORKER_EXTRACT:refreshStudioProfilesOverviewIdeas__*/
+/*__STUDIO_WORKER_EXTRACT:scheduleStudioProfilesOverviewIdeasRefresh__*/
 /** One Worker request for All Profiles home table — no N× /api/dashboard fan-out. */
 /*__STUDIO_WORKER_EXTRACT:profilesOverview__*/
 /*__STUDIO_WORKER_EXTRACT:dashboard__*/
@@ -5978,6 +6000,8 @@ export {
   STUDIO_PUBLISH_RECONCILE_FORMULA,
   STUDIO_OVERDUE_SCHEDULED_FORMULA,
   STUDIO_PROFILES_OVERVIEW_CACHE_MS,
+  STUDIO_PROFILES_OVERVIEW_SUPABASE_CACHE_MS,
+  STUDIO_PROFILES_OVERVIEW_IDEAS_REFRESH_MS,
   STUDIO_PROFILES_OVERVIEW_SNAPSHOT_KEY,
   STUDIO_PROFILES_OVERVIEW_BUILD_BUDGET_MS,
   STUDIO_PROFILES_OVERVIEW_RESOLVE_BUDGET_MS,
