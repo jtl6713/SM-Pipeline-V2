@@ -2217,6 +2217,152 @@ export function studioNormalizeRegenFilters(payload = {}) {
 }
 /*__STUDIO_WORKER_END:studioNormalizeRegenFilters__*/
 
+async function studioAtomicApplyScheduleRegenEntry(env, {
+  entry,
+  record,
+  profile,
+  combo,
+  job,
+  timeZone,
+  horizonDays,
+}) {
+  const outputId = entry.id;
+  const platform = String(f(record, "Platform") || combo.platform || "").trim();
+  const outputType = String(
+    f(record, "Studio_Output_Type") || f(record, "Format") || combo.output_type || ""
+  ).trim();
+  const profileId = String(profile?.id || combo.profile_id || job.profile_id || "").trim();
+  if (!profileId || !platform) {
+    throw new HttpError(409, "Schedule regeneration cannot establish the atomic profile/platform lane");
+  }
+  const previousRaw = String(
+    f(record, "Scheduled_Post_Date")
+    || f(record, "YouTube_Scheduled_Publish_At")
+    || f(record, "Studio_Scheduled_At")
+    || ""
+  ).trim();
+  const jobKey = String(job?.id || job?.job_id || "regen").trim();
+
+  const result = await runAtomicScheduleTransaction(env, {
+    content_profile_id: profileId,
+    platform,
+    output_type: outputType,
+    platform_output_record_id: outputId,
+    owner_operation_id: `schedule-regen:${jobKey}:${outputId}`,
+  }, {
+    legacy: async () => {
+      throw new HttpError(503, "Atomic schedule transaction unexpectedly entered legacy mode");
+    },
+    plan: async ({ occupied_reservations: durableReservations }) => {
+      studioInvalidateOccupiedScheduleCache();
+      const fresh = await studioOccupiedSchedulesOrEmpty(env, {
+        excludeIds: [outputId],
+        profile,
+      });
+      const laneOccupied = studioOccupiedForLane(fresh, platform, outputType).slice();
+      const platformOccupied = studioOccupiedForPlatform(fresh, platform).slice();
+      for (const durable of durableReservations || []) {
+        const ms = Date.parse(String(durable?.scheduled_iso || ""));
+        if (!Number.isFinite(ms)) continue;
+        platformOccupied.push(ms);
+        if (String(durable?.output_type || "").trim().toLowerCase() === outputType.toLowerCase()) {
+          laneOccupied.push(ms);
+        }
+      }
+      const laneMs = [...new Set(laneOccupied.filter(Number.isFinite))];
+      const platformMs = [...new Set(platformOccupied.filter(Number.isFinite))];
+      const picked = maeScheduleNextSlot({
+        timeZone,
+        laneOccupiedMs: laneMs,
+        platformOccupiedMs: platformMs,
+        horizonDays,
+      });
+      if (!picked.ok) {
+        throw new HttpError(409, picked.error || `Capacity failure for ${platform} ${outputType}`);
+      }
+      const fields = studioPublishScheduleFields(
+        { scheduled_post_date: picked.iso, timezone: timeZone },
+        record,
+        {
+          occupiedMs: platformMs,
+          timeZone,
+          forceWrite: true,
+          exactOverride: true,
+        },
+      );
+      const selectedRaw = String(fields.Scheduled_Post_Date || picked.iso || "").trim();
+      const selectedMs = Date.parse(selectedRaw);
+      if (!Number.isFinite(selectedMs)) {
+        throw new HttpError(409, "Schedule regeneration did not produce a verifiable slot");
+      }
+      const previousMs = Date.parse(previousRaw);
+      return {
+        action: Number.isFinite(previousMs) ? "move" : "reserve",
+        selectedIso: new Date(selectedMs).toISOString(),
+        previousIso: Number.isFinite(previousMs) ? new Date(previousMs).toISOString() : "",
+        patchFields: fields,
+      };
+    },
+    write: async (plan) => airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, outputId, {
+      method: "PATCH",
+      body: JSON.stringify({ fields: plan.patchFields, typecast: true }),
+    }),
+    verify: async (written, plan) => {
+      const authoritative = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, outputId);
+      const storedMs = Date.parse(String(f(authoritative, "Scheduled_Post_Date") || "").trim());
+      const selectedMs = Date.parse(plan.selectedIso);
+      if (!Number.isFinite(storedMs) || !Number.isFinite(selectedMs)
+          || new Date(storedMs).toISOString() !== new Date(selectedMs).toISOString()) {
+        throw new HttpError(409, "Regenerated schedule did not persist the reserved MAE slot");
+      }
+      if (platform === "YouTube") {
+        const youtubeMs = Date.parse(String(f(authoritative, "YouTube_Scheduled_Publish_At") || "").trim());
+        if (!Number.isFinite(youtubeMs)
+            || new Date(youtubeMs).toISOString() !== new Date(selectedMs).toISOString()) {
+          throw new HttpError(409, "Regenerated YouTube schedule mirror did not persist the reserved MAE slot");
+        }
+      }
+      written.__atomic_verified_record = authoritative;
+      return new Date(storedMs).toISOString();
+    },
+    afterCommit: async (written) => {
+      const authoritative = written.__atomic_verified_record || written;
+      const profileStamp = String(job.profile_id || combo.profile_id || "").trim();
+      await studioSupabaseWriteThroughOutput(
+        env,
+        {
+          id: authoritative.id || outputId,
+          fields: {
+            ...(authoritative.fields || {}),
+            ...(profileStamp && /^rec[A-Za-z0-9]+$/.test(profileStamp)
+              ? { Content_Profile: [profileStamp] }
+              : {}),
+          },
+        },
+        "schedule-regen",
+      ).catch((error) => {
+        console.warn("schedule-regen supabase write-through failed", outputId, error);
+        return null;
+      });
+      studioInvalidateOccupiedScheduleCache();
+    },
+  }, { maxWaitMs: 30_000 });
+
+  const authoritative = result?.already_committed
+    ? await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, outputId)
+    : (result?.value?.__atomic_verified_record || result?.value);
+  const iso = String(
+    f(authoritative, "Scheduled_Post_Date")
+    || f(authoritative, "YouTube_Scheduled_Publish_At")
+    || ""
+  ).trim();
+  return {
+    record: authoritative,
+    iso: Number.isNaN(Date.parse(iso)) ? entry.iso : new Date(Date.parse(iso)).toISOString(),
+  };
+}
+/*__STUDIO_WORKER_END:studioAtomicApplyScheduleRegenEntry__*/
+
 export async function studioProcessScheduleRegenJobSlice(env, jobId, options = {}) {
   let job = await studioGetScheduleRegenJob(env, jobId);
   if (!job) return null;
@@ -2493,58 +2639,83 @@ export async function studioProcessScheduleRegenJobSlice(env, jobId, options = {
 
     const done = Math.max(0, Number(combo.completed_posts) || 0);
     const sliceEnd = Math.min(plan.length, done + postsPerSlice);
-    // Apply a bounded chunk so waitUntil / status polls cannot die mid 57-Story lane.
-    for (let planIndex = done; planIndex < sliceEnd; planIndex += 10) {
-      const chunkEntries = plan.slice(planIndex, Math.min(sliceEnd, planIndex + 10));
-      const records = await Promise.all(chunkEntries.map(async (entry) => {
+    if (scheduleReservationAuthorityEnabled(env)) {
+      // The stored regeneration plan is a progress/order checkpoint only.
+      // Final slot selection is repeated against authoritative occupancy while
+      // this output owns the shared profile/platform reservation lane.
+      for (let planIndex = done; planIndex < sliceEnd; planIndex += 1) {
+        const entry = plan[planIndex];
         const record = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, entry.id).catch(() => null);
-        return { ...entry, record };
-      }));
-      const chunk = records.filter((entry) => entry.record).map((entry) => ({
-        ...entry,
-        fields: studioPublishScheduleFields(
-          { scheduled_post_date: entry.iso, timezone: timeZone },
-          entry.record,
-          { occupiedMs: [], timeZone, forceWrite: true, exactOverride: true },
-        ),
-      }));
-      if (!chunk.length) {
-        combo.completed_posts = Math.min(plan.length, planIndex + chunkEntries.length);
-        continue;
+        if (record) {
+          const applied = await studioAtomicApplyScheduleRegenEntry(env, {
+            entry,
+            record,
+            profile,
+            combo,
+            job,
+            timeZone,
+            horizonDays,
+          });
+          if (applied?.iso) plan[planIndex] = { ...entry, iso: applied.iso };
+        }
+        combo.completed_posts = Math.min(plan.length, planIndex + 1);
+        combo.rescheduled = Number(combo.completed_posts) || 0;
+        combo.plan = plan;
+        combos[index] = { ...combo };
+        job = { ...job, combinations: combos, updated_at: new Date().toISOString() };
+        await studioPutScheduleRegenJob(env, job);
       }
-      await airtableBatchUpdate(
-        env,
-        env.AIRTABLE_OUTPUT_TABLE_ID,
-        chunk.map((entry) => ({ id: entry.id, fields: entry.fields })),
-        { typecast: true },
-      );
-      // Content_Profile on Platform Outputs is often a lookup display name. Stamp the
-      // known profile rec id so Supabase upsert resolves content_profile_id and the
-      // calendar (Supabase schedule-grid) moves with Airtable.
-      const profileStamp = String(job.profile_id || combo.profile_id || "").trim();
-      await Promise.all(chunk.map((entry) => studioSupabaseWriteThroughOutput(
-        env,
-        {
-          id: entry.id,
-          fields: {
-            ...(entry.record.fields || {}),
-            ...entry.fields,
-            ...(profileStamp && /^rec[A-Za-z0-9]+$/.test(profileStamp)
-              ? { Content_Profile: [profileStamp] }
-              : {}),
+    } else {
+      // Legacy flag-OFF behavior: preserve the existing bounded batch writer.
+      for (let planIndex = done; planIndex < sliceEnd; planIndex += 10) {
+        const chunkEntries = plan.slice(planIndex, Math.min(sliceEnd, planIndex + 10));
+        const records = await Promise.all(chunkEntries.map(async (entry) => {
+          const record = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, entry.id).catch(() => null);
+          return { ...entry, record };
+        }));
+        const chunk = records.filter((entry) => entry.record).map((entry) => ({
+          ...entry,
+          fields: studioPublishScheduleFields(
+            { scheduled_post_date: entry.iso, timezone: timeZone },
+            entry.record,
+            { occupiedMs: [], timeZone, forceWrite: true, exactOverride: true },
+          ),
+        }));
+        if (!chunk.length) {
+          combo.completed_posts = Math.min(plan.length, planIndex + chunkEntries.length);
+          continue;
+        }
+        await airtableBatchUpdate(
+          env,
+          env.AIRTABLE_OUTPUT_TABLE_ID,
+          chunk.map((entry) => ({ id: entry.id, fields: entry.fields })),
+          { typecast: true },
+        );
+        const profileStamp = String(job.profile_id || combo.profile_id || "").trim();
+        await Promise.all(chunk.map((entry) => studioSupabaseWriteThroughOutput(
+          env,
+          {
+            id: entry.id,
+            fields: {
+              ...(entry.record.fields || {}),
+              ...entry.fields,
+              ...(profileStamp && /^rec[A-Za-z0-9]+$/.test(profileStamp)
+                ? { Content_Profile: [profileStamp] }
+                : {}),
+            },
           },
-        },
-        "schedule-regen",
-      ).catch((error) => {
-        console.warn("schedule-regen supabase write-through failed", entry.id, error);
-        return null;
-      })));
-      combo.completed_posts = Math.min(plan.length, planIndex + chunkEntries.length);
-      combo.rescheduled = Number(combo.completed_posts) || 0;
-      combo.plan = plan;
-      combos[index] = { ...combo };
-      job = { ...job, combinations: combos, updated_at: new Date().toISOString() };
-      await studioPutScheduleRegenJob(env, job);
+          "schedule-regen",
+        ).catch((error) => {
+          console.warn("schedule-regen supabase write-through failed", entry.id, error);
+          return null;
+        })));
+        combo.completed_posts = Math.min(plan.length, planIndex + chunkEntries.length);
+        combo.rescheduled = Number(combo.completed_posts) || 0;
+        combo.plan = plan;
+        combos[index] = { ...combo };
+        job = { ...job, combinations: combos, updated_at: new Date().toISOString() };
+        await studioPutScheduleRegenJob(env, job);
+      }
     }
 
     if ((Number(combo.completed_posts) || 0) >= plan.length) {
