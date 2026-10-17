@@ -1,0 +1,60 @@
+
+/* Read-only Factory Batch Quality Agent findings in Factory and Operations. */
+.factory-batch-quality-panel {
+  box-sizing: border-box;
+  margin: 0.65rem 0 0.85rem;
+  border: 1px solid var(--border-color, #ccd3da);
+  border-radius: 10px;
+  background: var(--surface, #fff);
+  padding: 0.8rem 0.9rem;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.factory-batch-quality-panel h3 {
+  font-size: 0.96rem;
+  margin: 0;
+}
+.factory-batch-quality-panel .factory-batch-quality-heading,
+.factory-batch-quality-panel .factory-batch-quality-meta {
+  margin: 0.45rem 0;
+  font-size: 0.88rem;
+}
+.factory-batch-quality-panel .factory-batch-quality-meta { opacity: 0.8; }
+.factory-batch-quality-head {
+  display: flex;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+}
+.factory-batch-quality-head button { min-height: 34px; }
+.factory-batch-quality-list {
+  padding-left: 1.1rem;
+  margin: 0.5rem 0 0;
+}
+.factory-batch-quality-item {
+  margin: 0.45rem 0;
+  padding: 0.5rem 0.7rem;
+  border-left: 3px solid #ad7c0a;
+  background: rgba(160, 125, 28, 0.07);
+}
+.factory-batch-quality-item.factory-batch-quality-critical {
+  border-left-color: #b42d2d;
+  background: rgba(180, 45, 45, 0.07);
+}
+.factory-batch-quality-item.factory-batch-quality-info {
+  border-left-color: #397da0;
+  background: rgba(49, 130, 180, 0.07);
+}
+.factory-batch-quality-item strong {
+  display: block;
+  font-size: 0.9rem;
+}
+.factory-batch-quality-item p { margin: 0.3rem 0 0; font-size: 0.86rem; }
+.factory-batch-quality-code { font-size: 0.74rem; opacity: 0.72; word-break: break-word; }
+.factory-batch-quality-clear { margin: 0.5rem 0 0; font-size: 0.88rem; }
+.factory-batch-quality-unavailable { color: #a03226; font-size: 0.88rem; }
+@media (max-width: 600px) {
+  .factory-batch-quality-panel { padding: 0.65rem; margin-inline: 0; }
+  .factory-batch-quality-head button { width: 100%; }
+}
