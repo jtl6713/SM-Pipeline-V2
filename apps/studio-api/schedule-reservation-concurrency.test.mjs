@@ -385,3 +385,85 @@ test("same-lane crash before external write is safely retryable after explicit f
   });
   assert.equal(failure.recovery_required, false);
 });
+
+
+test("manual override cannot bypass an automatic reservation on the same lane", async () => {
+  const env = makeEnv();
+  const authoritative = new Map();
+  const barrier = deferred();
+  const writeStarted = deferred();
+
+  const automatic = scheduleOne(env, authoritative, {
+    platform: "Facebook",
+    outputId: "recAutoHeld",
+    operation: "pipeline-approve:recAutoHeld",
+    hooks: {
+      writeBarrier: barrier,
+      onWriteStarted: () => writeStarted.resolve(),
+    },
+  });
+  await writeStarted.promise;
+
+  let manualWrites = 0;
+  const manualArgs = {
+    content_profile_id: "recChicago",
+    platform: "Facebook",
+    output_type: "Multi-Image Post",
+    platform_output_record_id: "recManual",
+    owner_operation_id: "manual:recManual",
+  };
+  const manualTarget = "2026-10-18T10:30:00.000Z";
+  const manualCallbacks = {
+    plan: async ({ occupied_reservations }) => {
+      const occupied = (occupied_reservations || [])
+        .map((row) => Date.parse(String(row.scheduled_iso || "")))
+        .filter(Number.isFinite);
+      const requestedMs = Date.parse(manualTarget);
+      if (maeScheduleConflicts(requestedMs, occupied)) {
+        throw new Error("manual schedule conflict");
+      }
+      return { action: "reserve", selectedIso: manualTarget, previousIso: "" };
+    },
+    write: async (plan) => {
+      manualWrites += 1;
+      authoritative.set("recManual", plan.selectedIso);
+      return { id: "recManual", selectedIso: plan.selectedIso };
+    },
+    verify: async (_row, plan) => authoritative.get("recManual") || plan.selectedIso,
+  };
+
+  await assert.rejects(
+    runAtomicScheduleTransaction(env, manualArgs, manualCallbacks, { maxWaitMs: 0, jitter: false }),
+    /lane|waiting|busy/i,
+  );
+  assert.equal(manualWrites, 0, "manual override must not write while the automatic owner holds the lane");
+
+  barrier.resolve();
+  const committedAuto = await automatic;
+  const committedIso = committedAuto.value.selectedIso;
+
+  const conflictingCallbacks = {
+    ...manualCallbacks,
+    plan: async ({ occupied_reservations }) => {
+      const occupied = (occupied_reservations || [])
+        .map((row) => Date.parse(String(row.scheduled_iso || "")))
+        .filter(Number.isFinite);
+      assert.ok(occupied.includes(Date.parse(committedIso)));
+      if (maeScheduleConflicts(Date.parse(committedIso), occupied)) {
+        throw new Error("manual schedule conflict");
+      }
+      return { action: "reserve", selectedIso: committedIso, previousIso: "" };
+    },
+  };
+
+  await assert.rejects(
+    runAtomicScheduleTransaction(
+      env,
+      { ...manualArgs, owner_operation_id: "manual:recManual:retry" },
+      conflictingCallbacks,
+      { maxWaitMs: 0, jitter: false },
+    ),
+    /manual schedule conflict/,
+  );
+  assert.equal(manualWrites, 0, "conflicting explicit manual time must be rejected, not silently moved or written");
+});
