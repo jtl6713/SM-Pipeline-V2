@@ -191,3 +191,51 @@ test("write callback receives a bounded AbortSignal for the external commit wind
   assert.equal(seenSignal.aborted, false);
   assert.equal(seenTimeout, 30_000);
 });
+
+
+test("ambiguous response after successful external write is reconciled without a second schedule write", async () => {
+  const { env, lane } = makeEnv();
+  const selected = "2026-10-18T10:30:00.000Z";
+  let authoritative = "";
+  let writes = 0;
+  const opArgs = {
+    ...args,
+    platform_output_record_id: "recAmbiguousCommit",
+    owner_operation_id: "approve:recAmbiguousCommit",
+  };
+
+  await assert.rejects(
+    runAtomicScheduleTransaction(env, opArgs, {
+      plan: async () => ({ action: "reserve", selectedIso: selected, previousIso: "" }),
+      write: async () => {
+        writes += 1;
+        authoritative = selected;
+        throw new Error("connection closed after Airtable accepted write");
+      },
+      verify: async () => authoritative,
+    }, { jitter: false }),
+    /connection closed/,
+  );
+  assert.equal(writes, 1);
+
+  let status = await (await lane.fetch(new Request("https://lane/status"))).json();
+  assert.equal(status.lock.state, "Recovery Required");
+  const recoveryResponse = await lane.fetch(new Request("https://lane/reconcile", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      content_profile_id: "recChicago",
+      platform: "TikTok",
+      recovery_operation_id: "qa-recovery-ambiguous-commit",
+      observation: "committed",
+      authoritative_iso: authoritative,
+    }),
+  }));
+  assert.equal(recoveryResponse.status, 200);
+  const recovery = await recoveryResponse.json();
+  assert.equal(recovery.committed, true);
+  status = await (await lane.fetch(new Request("https://lane/status"))).json();
+  assert.equal(status.quarantine, null);
+  assert.equal(status.recent_reservations[0].scheduled_iso, selected);
+  assert.equal(writes, 1);
+});
