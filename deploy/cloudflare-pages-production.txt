@@ -402,3 +402,5 @@ Step3-factory-ui-qa-20261017 | PR #792 d71b34a3e80a18bbc1bb4e0ec50fe6b68e96a649 
 2026-10-17 Step4 Chicago Factory batch canary UI: PR #794 merged 43518e2b; staging HTTP run 38997268878 PASS; one Chicago Instagram Reel; new factory-desk.js cache-bust and pilot notice. Deploy Pages and verify factory_chicago_canary_live_asset_verify=PASS. Production Worker activation is separate.
 
 2026-10-16: Show age of cached all-profiles Pipeline overview; source 92c0e1ee1274d143c971588b780a914b78fe16e2
+
+2026-10-17 Factory terminal batch Desk reconciliation | PR #796 merge 7ac1d662d9fde766ba837198062f8af1584a642a | four checks PASS | UI 0.6.709 current build maintained; factory-desk asset cache marker reconcile=finished-batch-v1 | repaint selection and re-fetch completed batch Needs Eyes | no approval/publishing mutation.
