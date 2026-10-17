@@ -71,3 +71,12 @@ test("dedicated production rollout allowlist targets only the nonpublishing cana
   assert.equal(rollout.script_enabled, true);
   assert.deepEqual(rollout.canary_output_ids, ["recL2zjZc7XGRJyRt"]);
 });
+
+
+test("deployment gate rejects a broad or malformed canary rollout", async () => {
+  const workflow = await readFile(path.join(here, "../../.github/workflows/deploy-cloudflare-worker-production.yml"), "utf8");
+  assert.match(workflow, /len\(canary_ids\)!=1/);
+  assert.match(workflow, /re\.fullmatch\(r'rec\[A-Za-z0-9\]\{14\}'/);
+  assert.match(workflow, /Enabled visual voiceover rollout requires exactly one Airtable canary record id/);
+  assert.match(workflow, /STUDIO_VISUAL_CANARY_OUTPUT_IDS':','\.join\(canary_ids\)/);
+});
