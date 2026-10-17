@@ -73,3 +73,12 @@ test("old voice prep cleanup cannot clear a newer request token", () => {
   assert.match(worker, /const currentSlide = await airtableFetch\(env, PHASE6_CAROUSEL_SLIDES_TABLE, slideId\)/);
   assert.match(worker, /Studio_Voice_Prep_Request_ID"\) \|\| ""\)\.trim\(\) !== requestId/);
 });
+
+
+test("voice prep request identity includes the accepted script revision and hash", () => {
+  assert.match(worker, /function phase6VoicePrepRevisionIdentity/);
+  assert.match(worker, /script\.revision/);
+  assert.match(worker, /script\.script_hash \|\| script\.scriptHash/);
+  assert.match(worker, /phase6VoicePrepRevisionIdentity\(outputRecord\)/);
+  assert.match(worker, /Studio_Voice_Prep_Request_ID: requestId/);
+});
