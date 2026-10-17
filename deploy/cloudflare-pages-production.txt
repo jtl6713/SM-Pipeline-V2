@@ -404,3 +404,5 @@ Step3-factory-ui-qa-20261017 | PR #792 d71b34a3e80a18bbc1bb4e0ec50fe6b68e96a649 
 2026-10-16: Show age of cached all-profiles Pipeline overview; source 92c0e1ee1274d143c971588b780a914b78fe16e2
 
 2026-10-17 Factory terminal batch Desk reconciliation | PR #796 merge 7ac1d662d9fde766ba837198062f8af1584a642a | four checks PASS | UI 0.6.709 current build maintained; factory-desk asset cache marker reconcile=finished-batch-v1 | repaint selection and re-fetch completed batch Needs Eyes | no approval/publishing mutation.
+
+2026-10-16 fix cached overview elapsed age, preserve fallback timestamp, bust script 0.6.710-cache-age-fix
