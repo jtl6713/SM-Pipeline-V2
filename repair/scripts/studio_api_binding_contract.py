@@ -25,8 +25,10 @@ CORE_BINDINGS = {
 }
 
 OPTIONAL_BINDINGS = {
-    # Safe, explicitly false at deploy: Factory batch submissions remain OFF.
+    # Production rollout flags are allowlisted but validated by live release gates.
     "FACTORY_BATCH_APPROVALS_ENABLED": "plain_text",
+    "FACTORY_BATCH_ROLLOUT_MODE": "plain_text",
+    "FACTORY_BATCH_ROLLOUT_MAX_ITEMS": "plain_text",
     "ELEVENLABS_API_KEY": "secret_text",
     "PIPELINE_RUNNER_SHARED_SECRET": "secret_text",
     "PIPELINE_RUNNER_URL": "plain_text",

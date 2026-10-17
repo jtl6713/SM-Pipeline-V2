@@ -81,6 +81,9 @@ jobs:
           bindings=(r.get('resources') or {}).get('bindings') or []
           got={str(x.get('name')):str(x.get('type')) for x in bindings}
           contract=assert_live_contract(got, 'Predeploy live Worker')
+          prod_base=next((b.get('text') for b in bindings if b.get('name')=='AIRTABLE_BASE_ID'),None)
+          if prod_base != 'appe33zkZn35yirTL':
+              raise SystemExit('Factory canary predeploy refused: production Airtable base identity mismatch')
           r2=next(x for x in bindings if x.get('name')=='STUDIO_MEDIA')
           bucket=r2.get('bucket_name') or r2.get('bucket')
           if not bucket:
@@ -102,13 +105,24 @@ jobs:
           import json, os
           from pathlib import Path
           bucket=Path('/tmp/studio-media-bucket.txt').read_text().strip()
+          rollout=json.loads(Path('deploy/factory-batch-production-rollout.json').read_text())
+          assert rollout.get('mode')=='chicago_ig_reel_v1'
+          assert rollout.get('profile_id')=='recT2rbKX3MF7cVFU'
+          assert rollout.get('platform')=='Instagram' and rollout.get('output_type')=='Reel'
+          assert rollout.get('max_items')==1
+          assert type(rollout.get('enabled')) is bool
+          factory_vars={
+            'FACTORY_BATCH_APPROVALS_ENABLED':'true' if rollout['enabled'] else 'false',
+            'FACTORY_BATCH_ROLLOUT_MODE':'chicago_ig_reel_v1',
+            'FACTORY_BATCH_ROLLOUT_MAX_ITEMS':'1',
+          }
           cfg={
             'name':os.environ['TARGET_WORKER'],
             'main':'worker.js',
             'compatibility_date':'2026-08-02',
             'workers_dev':False,
             'keep_vars':True,
-            'vars':{'FACTORY_BATCH_APPROVALS_ENABLED':'false'},
+            'vars':factory_vars,
             'triggers':{'crons':['*/5 * * * *', '0 6 * * *']},
             'observability':{'enabled':True,'head_sampling_rate':1},
             'r2_buckets':[{'binding':'STUDIO_MEDIA','bucket_name':bucket}],
@@ -156,10 +170,17 @@ jobs:
           bindings=(r.get('resources') or {}).get('bindings') or []
           got={str(x.get('name')):str(x.get('type')) for x in bindings}
           contract=assert_live_contract(got, 'Postdeploy live Worker')
-          flag=next((b for b in bindings if b.get('name')=='FACTORY_BATCH_APPROVALS_ENABLED'),None)
-          if not flag or str(flag.get('text','')).strip().lower()!='false':
-              raise SystemExit('Factory batch release gate: flag must be disabled')
-          print('factory_batch_approvals_disabled=PASS')
+          rollout=json.loads(Path('deploy/factory-batch-production-rollout.json').read_text())
+          expected={
+            'FACTORY_BATCH_APPROVALS_ENABLED':'true' if rollout['enabled'] else 'false',
+            'FACTORY_BATCH_ROLLOUT_MODE':'chicago_ig_reel_v1',
+            'FACTORY_BATCH_ROLLOUT_MAX_ITEMS':'1',
+          }
+          binding_values={b.get('name'):str(b.get('text','')) for b in bindings}
+          for name,value in expected.items():
+              if binding_values.get(name)!=value:
+                  raise SystemExit('Factory batch release verification mismatch: '+name)
+          print('factory_batch_canary_binding_contract=PASS profile=Chicago platform=Instagram format=Reel max=1 enabled='+expected['FACTORY_BATCH_APPROVALS_ENABLED'])
           safe={'version_id':r.get('id'),'version_number':r.get('number'),'binding_count':len(bindings),'contract':contract['contract'],'core_ok':contract['core_ok'],'elevenlabs_present':contract['optional_present'].get('ELEVENLABS_API_KEY'),'bindings':contract['bindings']}
           Path('/tmp/postdeploy-contract-sanitized.json').write_text(json.dumps(safe,indent=2,sort_keys=True))
           print('postdeploy_binding_contract=PASS')
@@ -238,8 +259,11 @@ jobs:
             async fetch(request, env) {
               const url = new URL(request.url);
               const factoryStatus = url.pathname === "/$TOKEN/factory-status";
-              if (url.pathname !== "/$TOKEN" && !factoryStatus) return new Response("Not found", {status:404});
-              const path = factoryStatus ? "/api/factory/approval-batches?profile_id=recF7UAn0LkMZZrWZ" : "/api/session";
+              const chicagoCanary = url.pathname === "/$TOKEN/factory-status-chicago";
+              if (url.pathname !== "/$TOKEN" && !factoryStatus && !chicagoCanary) return new Response("Not found", {status:404});
+              const path = chicagoCanary
+                ? "/api/factory/approval-batches?profile_id=recT2rbKX3MF7cVFU"
+                : factoryStatus ? "/api/factory/approval-batches?profile_id=recF7UAn0LkMZZrWZ" : "/api/session";
               const internal = new Request("https://studio.chicagoshining.com" + path, {
                 method:"GET",
                 headers:{"Cf-Access-Authenticated-User-Email":"joseph.t.logan@gmail.com","Origin":"https://studio.chicagoshining.com","Accept":"application/json"}
@@ -296,7 +320,7 @@ jobs:
           jq -e '.ok==true and .authenticated==true and .authorized==true and .email=="joseph.t.logan@gmail.com"' /tmp/session.json >/dev/null
           echo "functional_session_check=PASS"
 
-      - name: Read-only Factory batch status smoke while submissions disabled
+      - name: Verify Chicago-only Factory batch canary via read-only Worker status
         shell: bash
         run: |
           set -euo pipefail
@@ -310,12 +334,23 @@ jobs:
           for i in 1 2 3 4 5; do
             FACTORY_CODE=$(curl -sS --max-time 60 -o /tmp/factory-batch-status.json -w '%{http_code}' "$URL" || true)
             if [[ "$FACTORY_CODE" == "200" ]] && jq -e '.ok==true and .batch==true and .approvals_enabled==false' /tmp/factory-batch-status.json >/dev/null 2>&1; then
-              echo "factory_batch_read_only_smoke=PASS approvals_enabled=false"
+              echo "factory_batch_la_denied=PASS approvals_enabled=false"
+              break
+            fi
+            sleep 3
+          done
+          jq -e '.ok==true and .batch==true and .approvals_enabled==false' /tmp/factory-batch-status.json >/dev/null || { echo "Factory LA must remain excluded from pilot" >&2; exit 1; }
+          CHICAGO="https://$VERIFY_BRIDGE.$SUBDOMAIN.workers.dev/$TOKEN/factory-status-chicago"
+          PILOT_CODE=000
+          for i in 1 2 3 4 5; do
+            PILOT_CODE=$(curl -sS --max-time 60 -o /tmp/factory-batch-chicago.json -w '%{http_code}' "$CHICAGO" || true)
+            if [[ "$PILOT_CODE" == "200" ]] && jq -e '.ok==true and .batch==true and .approvals_enabled==true and .rollout.mode=="chicago_ig_reel_v1" and .rollout.max_items==1 and .rollout.platform=="Instagram" and .rollout.output_type=="Reel" and .rollout.profile_id=="recT2rbKX3MF7cVFU"' /tmp/factory-batch-chicago.json >/dev/null 2>&1; then
+              echo "factory_batch_chicago_pilot=PASS one_Instagram_Reel"
               exit 0
             fi
             sleep 3
           done
-          echo "Read-only Factory batch status smoke failed (HTTP $FACTORY_CODE)" >&2
+          echo "Factory Chicago canary verification failed (HTTP $PILOT_CODE)" >&2
           exit 1
 
       - name: Delete functional verification bridge

@@ -1,5 +1,6 @@
 import { countPendingPlatformDispatch } from "./overview-dispatch-counts.mjs";
 import { withOutputApprovalLock } from "./output-approval-lease.mjs";
+import { factoryBatchRolloutPolicy, factoryBatchRolloutAcceptsOutput, factoryBatchRolloutAcceptsIds } from "./factory-batch-rollout.mjs";
 import {
   factoryBatchEnqueue, factoryBatchRead, factoryBatchList,
   factoryBatchDrain, factoryBatchRetry, factoryBatchSummary, factoryBatchCounts,
@@ -12269,13 +12270,17 @@ export async function factoryBatchStatusRoute(request, env, authorization) {
     : (await factoryBatchList(env.STUDIO_MEDIA, profile.id, { limit: 40 }))[0] || null;
   return respond(request, env, {
     ...factoryBatchSummary(job), quality_signals: factoryBatchQualitySignals(job),
-    approvals_enabled: String(env?.FACTORY_BATCH_APPROVALS_ENABLED || "").toLowerCase() === "true",
+    approvals_enabled: factoryBatchRolloutPolicy(env, profile.id).enabled,
+    rollout: factoryBatchRolloutPolicy(env, profile.id),
   });
 }
 /*__STUDIO_WORKER_END:factoryBatchStatusRoute__*/
 
 export async function factoryBatchProcess(env, profileId, requestId, ctx = null) {
-  if (String(env?.FACTORY_BATCH_APPROVALS_ENABLED || "").toLowerCase() !== "true") return null;
+  // Do not let an old queued job bypass an operator's active rollout scope.
+  // This guard also runs on cron recovery, not only on fresh HTTP requests.
+  const rollout = factoryBatchRolloutPolicy(env, profileId);
+  if (!rollout.enabled) return null;
   const run = async () => {
     const result = await factoryBatchDrain(env.STUDIO_MEDIA, {
       profileId, requestId, maxItems: 25, maxElapsedMs: 20000,
@@ -12284,6 +12289,9 @@ export async function factoryBatchProcess(env, profileId, requestId, ctx = null)
         // render eligibility, Do_Not_Publish and the MAE / Story scheduling rules.
         // Reject profile drift before calling any authoritative approval mutation.
         const record = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, id);
+        if (job.items.length > rollout.max_items || !factoryBatchRolloutAcceptsOutput(rollout, record)) {
+          throw new HttpError(409, "This output is outside the authorized Factory batch rollout; no approval was performed");
+        }
         // Profile ownership must resolve from the authoritative Content Item
         // when Platform Output exposes only a lookup display-name, never infer
         // a city from the operator's selected profile.
@@ -12318,10 +12326,18 @@ export async function factoryBatchSubmitRoute(request, env, authorization, ctx =
   try { payload = await request.json(); } catch { throw new HttpError(400, "Invalid JSON"); }
   const profile = await resolveWorkingContentProfile(env, authorization, requestedProfileId(null, payload));
   if (!profile?.id) throw new HttpError(400, "Choose a content profile");
+  const rollout = factoryBatchRolloutPolicy(env, profile.id);
+  if (!rollout.enabled) {
+    throw new HttpError(403, "Factory batch pilot is currently limited to one Chicago Instagram Reel");
+  }
   const action = String(payload?.action || "start").toLowerCase();
   const requestId = String(payload?.request_id || "");
   if (action === "retry") {
     if (!requestId) throw new HttpError(400, "request_id required for retry");
+    const previous = await factoryBatchRead(env.STUDIO_MEDIA, profile.id, requestId);
+    if (!previous || !factoryBatchRolloutAcceptsIds(rollout, previous.items.map(item => item.id))) {
+      throw new HttpError(409, "This batch is outside the current rollout and cannot be retried");
+    }
     const job = await factoryBatchRetry(env.STUDIO_MEDIA, profile.id, requestId);
     await factoryBatchProcess(env, profile.id, requestId, ctx);
     return respond(request, env, { ...factoryBatchSummary(job), accepted: true });
@@ -12337,6 +12353,26 @@ export async function factoryBatchSubmitRoute(request, env, authorization, ctx =
   );
   const records = [...new Set(payload.record_ids.map(String))]
     .map(id => ({ ...itemMap.get(id), id }));
+  if (!factoryBatchRolloutAcceptsIds(rollout, records.map(row => row.id))) {
+    throw new HttpError(409, "Batch rollout permits only one eligible Chicago Instagram Reel");
+  }
+  // Preflight authoritative records before writing any batch ledger; returning
+  // a rejected response is safer than accepting an ineligible mixed selection.
+  // Existing request IDs can be replayed idempotently after an earlier success.
+  if (rollout.mode !== "isolated_staging" &&
+      !(await factoryBatchRead(env.STUDIO_MEDIA, profile.id, requestId))) {
+    for (const item of records) {
+      const record = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, item.id);
+      const owner = await studioContentProfileRecordIdForOutput(env, record);
+      if (owner !== profile.id || !factoryBatchRolloutAcceptsOutput(rollout, record) ||
+          Boolean(f(record, "Do_Not_Publish"))) {
+        throw new HttpError(409, "Selected output is not an authorized, publishable Chicago Instagram Reel");
+      }
+      if (!studioOutputReadyForPublishApproval(record)) {
+        throw new HttpError(409, "Selected Reel is no longer Ready for Review");
+      }
+    }
+  }
   let enqueued;
   try {
     enqueued = await factoryBatchEnqueue(env.STUDIO_MEDIA, {
