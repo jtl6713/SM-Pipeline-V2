@@ -82,3 +82,11 @@ test("voice prep request identity includes the accepted script revision and hash
   assert.match(worker, /phase6VoicePrepRevisionIdentity\(outputRecord\)/);
   assert.match(worker, /Studio_Voice_Prep_Request_ID: requestId/);
 });
+
+
+test("Studio TTS pulses are exact-slide scoped instead of consuming any global Ready slide", () => {
+  assert.match(worker, /const targetSlideId = String\(pending\[0\]\?\.id \|\| ""\)\.trim\(\)/);
+  assert.match(worker, /extra: \{ slide_record_id: targetSlideId \}/);
+  const exactScopedPulses = worker.match(/extra: \{ slide_record_id: targetSlideId \}/g) || [];
+  assert.equal(exactScopedPulses.length, 2);
+});
