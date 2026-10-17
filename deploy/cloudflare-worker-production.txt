@@ -423,3 +423,5 @@ Deploy Factory all-platform batch approvals 2026-10-17. PR #813. Signed global m
 2026-10-17 Factory all-platform Worker deployment retry | PR #813 feature + PR #814 signed tuple migration fix | require global_all_platforms_v2 postdeploy, accept exact prior global_ig_reel_story_v1 only as predeploy/rollback source | verify authenticated four-platform Factory status and automatic rollback safeguards.
 
 2026-10-17 Visual-aware voiceover production canary release | PR #810 | deploy fail-closed Do_Not_Publish-only visual timeline + visual script flags, tenant-admin canary seed/inspection, stale TTS/render revision guards; run guarded nonpublishing production canary after deploy; rollback by disabling visual rollout flags.
+
+2026-10-17 Visual voiceover Worker redeploy after binding-contract allowlist fix | permit STUDIO_VISUAL_TIMELINE_V1, STUDIO_VISUAL_SCRIPT_V1, and STUDIO_VISUAL_CANARY_OUTPUT_IDS as optional plaintext types; exact signed values remain enforced by deployment release gate; preserve automatic rollback.
