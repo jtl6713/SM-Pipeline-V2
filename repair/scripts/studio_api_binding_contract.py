@@ -26,6 +26,8 @@ CORE_BINDINGS = {
 
 OPTIONAL_BINDINGS = {
     # Production rollout flags are allowlisted but validated by live release gates.
+    "STUDIO_SCHEDULE_RESERVATION_AUTHORITY_ENABLED": "plain_text",
+    "STUDIO_SCHEDULE_RESERVATIONS": "durable_object_namespace",
     "FACTORY_BATCH_APPROVALS_ENABLED": "plain_text",
     "FACTORY_BATCH_ROLLOUT_MODE": "plain_text",
     "FACTORY_BATCH_ROLLOUT_MAX_ITEMS": "plain_text",
