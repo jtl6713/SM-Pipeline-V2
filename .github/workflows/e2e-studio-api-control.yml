@@ -22,7 +22,7 @@ jobs:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
       TARGET_WORKER: chicagoshining-studio-api
-      BRIDGE_WORKER: chicagoshining-e2e-service-bridge
+      BRIDGE_WORKER: chicagoshining-e2e-${{ github.run_id }}-${{ github.run_attempt }}
       OWNER_EMAIL: joseph.t.logan@gmail.com
       BRIDGE_RETRY_MAX: "12"
       BRIDGE_RETRY_SLEEP_S: "3"

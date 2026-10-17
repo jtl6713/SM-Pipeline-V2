@@ -419,3 +419,5 @@ Step3-factory-ui-qa-20261017 | PR #792 d71b34a3e80a18bbc1bb4e0ec50fe6b68e96a649 
 2026-10-17 Factory all-platform batch UI production release | PR #813 merged d82c786d35cfe6b3df2d16ef500cbb191f37a516 | Worker production run 39039105873 PASS signed expanded 20/10 and authenticated global Factory canary | expose server-signed Instagram, Facebook, TikTok, YouTube selection matrix; preserve profile-local scheduling and failed-only retry; Threads excluded.
 Deploy Factory large-selection auto-batching 2026-10-17. PR #816. 27+ selected outputs remain one-click; UI partitions into signed 20-total / 10-per-profile durable groups.
 Deploy Factory ambiguous-submit reconciliation 2026-10-17. PR #817. Recover exact durable groups after lost client acknowledgement and reconcile stale local selections.
+
+2026-10-17 Visual-aware voiceover + clip trim editor release. Deploy Studio Pages for PR #810 after green CI; feature remains server-gated to Do_Not_Publish canaries.

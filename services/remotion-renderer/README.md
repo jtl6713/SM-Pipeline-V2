@@ -52,3 +52,6 @@ Found an issue with Remotion? [File an issue here](https://github.com/remotion-d
 ## License
 
 Note that for some entities a company license is needed. [Read the terms here](https://github.com/remotion-dev/remotion/blob/main/LICENSE.md).
+
+<!-- deployment retry 2026-10-17: force fresh Ops sync/redeploy after old health version remained live -->
+<!-- 2026-10-17 final visual voiceover canary: restart to clear possible ghost Remotion slot; zero Airtable Rendering outputs verified -->

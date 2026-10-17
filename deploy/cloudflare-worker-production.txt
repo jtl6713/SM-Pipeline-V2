@@ -421,3 +421,16 @@ overview-fast-refresh 2026-10-17T01:20:00Z worker 0.10.651-overview-fast-refresh
 2026-10-17 Home overview force refresh production verification rerun | same PR #812 Worker source; deployment workflow now publishes sanitized commit status after binding/source/live authoritative refresh canary | redeploy serialized with automatic rollback on verification failure.
 Deploy Factory all-platform batch approvals 2026-10-17. PR #813. Signed global mode global_all_platforms_v2; Instagram, Facebook, TikTok, YouTube; 20 total / 10 per profile; Threads excluded.
 2026-10-17 Factory all-platform Worker deployment retry | PR #813 feature + PR #814 signed tuple migration fix | require global_all_platforms_v2 postdeploy, accept exact prior global_ig_reel_story_v1 only as predeploy/rollback source | verify authenticated four-platform Factory status and automatic rollback safeguards.
+
+2026-10-17 Visual-aware voiceover production canary release | PR #810 | deploy fail-closed Do_Not_Publish-only visual timeline + visual script flags, tenant-admin canary seed/inspection, stale TTS/render revision guards; run guarded nonpublishing production canary after deploy; rollback by disabling visual rollout flags.
+
+2026-10-17 Visual voiceover Worker redeploy after binding-contract allowlist fix | permit STUDIO_VISUAL_TIMELINE_V1, STUDIO_VISUAL_SCRIPT_V1, and STUDIO_VISUAL_CANARY_OUTPUT_IDS as optional plaintext types; exact signed values remain enforced by deployment release gate; preserve automatic rollback.
+2026-10-17 deploy canary trimmable-video duration detection fix 9055fd40ae4476105efd268681d2f242ed21926c with regression fb447857a3a43548963b209603078a670d111422.
+2026-10-17 deploy nonpublishing visual timeline response contract fix 191a21bab30c5723d57579ecbfdaecbfaa38bb81 with regression ab43d2ab2a7c4bb608693826ef6746eb6f49b202.
+2026-10-17 deploy nonpublishing visual timeline response contract fix 191a21bab30c5723d57579ecbfdaecbfaa38bb81 with regression ab43d2ab2a7c4bb608693826ef6746eb6f49b202.
+2026-10-17 deploy Phase 6 Python R4/R5 continuation fix 706c301b15336aa3d6e641914c593f98d92e3f1d with regression c2a58e0f3fa30bc0d3495d32da74c6092cf66335.
+2026-10-17 deploy Phase 6 Python Runner continuation fix 4ecf01f561999a19dc9b025ca5b5890a7d6b0d46 with regression 86feb516eb7db7f88abe71c239aa257152b8dc9a.
+2026-10-17 deploy exact-isolated Python Phase 6 rerender hardening b6eff29f21f266511f910b4a728fcb3f21a9d426 with regression 7b93cee7321f0e1df7e74562bc1386c0300f7eaf.
+2026-10-17 deploy exact-target Python rerender concurrency fix 1dc60567bfb6380610ec56caf29010d65b21d63f with regression 8dc56dd1bb3d9ef326e423b3ee47e123b33c5618.
+2026-10-17 deploy visual-timeline authoritative timing gate fix ae4c6fd3ae7b5827b76ea65f82c7fa96ad45c862 with regression 279e4d1383b7090329fc03d8444b95288a28d0f1.
+2026-10-17 deploy visual R4 Python skip diagnostics 746f95f0306b51d4960eccd0092473980b73f90a with regression ff761ecb0ae720381329654d34fc7f7cf394c9e2.

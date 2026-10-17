@@ -19,7 +19,7 @@ jobs:
       OPS_TOKEN_A: ${{ secrets.OPS_DASHBOARD_TOKEN }}
       OPS_TOKEN_B: ${{ secrets.DASHBOARD_TOKEN }}
       OPS_TOKEN_C: ${{ secrets.OPS_TOKEN }}
-      EXPECTED_VERSION: '2026-10-11-force-release-slots'
+      EXPECTED_VERSION: '2026-10-17-visual-voiceover-timeline'
     steps:
       - name: Authenticate to Ops Dashboard
         id: auth
@@ -52,25 +52,36 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
       - name: Sync git checkout on render PC
-        continue-on-error: true
         shell: bash
         env:
           OPS_TOKEN: ${{ steps.auth.outputs.token }}
         run: |
           set -euo pipefail
           BASE='https://ops.chicagoshining.com'
-          code=$(curl -sS --max-time 30 -o /tmp/run.json -w '%{http_code}' \
-            -X POST "$BASE/api/run" \
-            -H "Authorization: Bearer $OPS_TOKEN" \
-            -H 'Content-Type: application/json' \
-            --data '{"action":"sync","confirm":true}' || true)
-          if [[ "$code" == "409" ]]; then
-            JOB=$(jq -r '.jobId // .job.id // empty' /tmp/run.json)
-          else
-            test "$code" = "202"
-            jq -e '.ok==true' /tmp/run.json >/dev/null
-            JOB=$(jq -r '.job.id // empty' /tmp/run.json)
-          fi
+          JOB=''
+          for attempt in $(seq 1 60); do
+            code=$(curl -sS --max-time 30 -o /tmp/run.json -w '%{http_code}' \
+              -X POST "$BASE/api/run" \
+              -H "Authorization: Bearer $OPS_TOKEN" \
+              -H 'Content-Type: application/json' \
+              --data '{"action":"sync","confirm":true}' || true)
+            if [[ "$code" == "202" ]] && jq -e '.ok==true and .job.action=="sync"' /tmp/run.json >/dev/null 2>&1; then
+              JOB=$(jq -r '.job.id // empty' /tmp/run.json)
+              echo "ops_sync_fresh_job=$JOB"
+              break
+            fi
+            if [[ "$code" == "409" ]]; then
+              ACTIVE=$(jq -r '.jobId // .job.id // "unknown"' /tmp/run.json)
+              ACTIVE_ACTION=$(jq -r '.job.action // "unknown"' /tmp/run.json)
+              ACTIVE_SERVICE=$(jq -r '.job.service // "none"' /tmp/run.json)
+              echo "ops_busy attempt=$attempt active_job=$ACTIVE action=$ACTIVE_ACTION service=$ACTIVE_SERVICE waiting_for_fresh_sync"
+              sleep 5
+              continue
+            fi
+            echo "Unable to create fresh Ops sync job http=$code" >&2
+            cat /tmp/run.json >&2 || true
+            exit 2
+          done
           test -n "$JOB"
           for i in $(seq 1 60); do
             code=$(curl -sS --max-time 20 -o /tmp/job.json -w '%{http_code}' \
@@ -79,15 +90,19 @@ jobs:
               status=$(jq -r '.job.status // empty' /tmp/job.json)
               echo "ops_sync_status=$status"
               case "$status" in
-                ok) exit 0 ;;
+                ok)
+                  jq -e '.job.action=="sync"' /tmp/job.json >/dev/null
+                  exit 0
+                  ;;
                 failed)
-                  jq -c '{ok,job:{id:.job.id,status:.job.status,exitCode:.job.exitCode,log:.job.log}}' /tmp/job.json
+                  jq -c '{ok,job:{id:.job.id,action:.job.action,service:.job.service,status:.job.status,exitCode:.job.exitCode,log:.job.log}}' /tmp/job.json
                   exit 4
                   ;;
               esac
             fi
             sleep 5
           done
+          echo "ops_sync_timeout=$JOB" >&2
           exit 5
 
       - name: Deploy Remotion renderer through allowlisted Ops action
@@ -97,20 +112,30 @@ jobs:
         run: |
           set -euo pipefail
           BASE='https://ops.chicagoshining.com'
-          code=$(curl -sS --max-time 30 -o /tmp/run.json -w '%{http_code}' \
-            -X POST "$BASE/api/run" \
-            -H "Authorization: Bearer $OPS_TOKEN" \
-            -H 'Content-Type: application/json' \
-            --data '{"action":"deploy","service":"remotion-renderer","confirm":true}' || true)
-
-          if [[ "$code" == "409" ]]; then
-            JOB=$(jq -r '.jobId // .job.id // empty' /tmp/run.json)
-            echo "ops_dashboard_existing_job=$JOB"
-          else
-            test "$code" = "202"
-            jq -e '.ok==true' /tmp/run.json >/dev/null
-            JOB=$(jq -r '.job.id // empty' /tmp/run.json)
-          fi
+          JOB=''
+          for attempt in $(seq 1 60); do
+            code=$(curl -sS --max-time 30 -o /tmp/run.json -w '%{http_code}' \
+              -X POST "$BASE/api/run" \
+              -H "Authorization: Bearer $OPS_TOKEN" \
+              -H 'Content-Type: application/json' \
+              --data '{"action":"deploy","service":"remotion-renderer","confirm":true}' || true)
+            if [[ "$code" == "202" ]] && jq -e '.ok==true and .job.action=="deploy" and .job.service=="remotion-renderer"' /tmp/run.json >/dev/null 2>&1; then
+              JOB=$(jq -r '.job.id // empty' /tmp/run.json)
+              echo "ops_remotion_fresh_deploy_job=$JOB"
+              break
+            fi
+            if [[ "$code" == "409" ]]; then
+              ACTIVE=$(jq -r '.jobId // .job.id // "unknown"' /tmp/run.json)
+              ACTIVE_ACTION=$(jq -r '.job.action // "unknown"' /tmp/run.json)
+              ACTIVE_SERVICE=$(jq -r '.job.service // "none"' /tmp/run.json)
+              echo "ops_busy attempt=$attempt active_job=$ACTIVE action=$ACTIVE_ACTION service=$ACTIVE_SERVICE waiting_for_fresh_remotion_deploy"
+              sleep 5
+              continue
+            fi
+            echo "Unable to create fresh Remotion deploy job http=$code" >&2
+            cat /tmp/run.json >&2 || true
+            exit 2
+          done
           test -n "$JOB"
 
           for i in $(seq 1 120); do
@@ -121,11 +146,15 @@ jobs:
               echo "ops_job_status=$status"
               case "$status" in
                 ok)
-                  jq -c '{ok,job:{id:.job.id,status:.job.status,exitCode:.job.exitCode}}' /tmp/job.json
+                  jq -e '.job.action=="deploy" and .job.service=="remotion-renderer"' /tmp/job.json >/dev/null
+                  jq -c '{ok,job:{id:.job.id,action:.job.action,service:.job.service,status:.job.status,exitCode:.job.exitCode}}' /tmp/job.json
+                  echo "ops_deploy_log_tail_begin"
+                  jq -r '.job.log // ""' /tmp/job.json | tail -n 80
+                  echo "ops_deploy_log_tail_end"
                   exit 0
                   ;;
                 failed)
-                  jq -c '{ok,job:{id:.job.id,status:.job.status,exitCode:.job.exitCode,log:.job.log}}' /tmp/job.json
+                  jq -c '{ok,job:{id:.job.id,action:.job.action,service:.job.service,status:.job.status,exitCode:.job.exitCode,log:.job.log}}' /tmp/job.json
                   exit 4
                   ;;
               esac

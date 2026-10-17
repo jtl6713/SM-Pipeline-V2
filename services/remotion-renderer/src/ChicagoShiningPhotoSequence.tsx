@@ -186,6 +186,7 @@ export type ChicagoShiningPhotoSequenceProps = {
   defaultBackgroundColor?: string;
   music?: PhotoSequenceMusic;
   voiceover?: PhotoSequenceVoiceover;
+  sceneVoiceoverAuthority?: boolean;
   voiceoverDurationSeconds?: number;
   voiceoverEndFrame?: number;
   voiceoverText?: string;
@@ -763,10 +764,12 @@ const MediaFill: React.FC<{
   clip: ChicagoShiningPhotoClip;
   source: string;
   style: React.CSSProperties;
-}> = ({clip, source, style}) => {
+  forceMuted?: boolean;
+}> = ({clip, source, style, forceMuted = false}) => {
   const {fps} = useVideoConfig();
   if (isVideoClip(clip)) {
-    const keepSourceAudio = Boolean(clip.keepSourceAudio) || clip.muted === false;
+    const keepSourceAudio =
+      !forceMuted && (Boolean(clip.keepSourceAudio) || clip.muted === false);
     return (
       <OffthreadVideo
         src={source}
@@ -942,6 +945,7 @@ const ImageSegment: React.FC<{
           <MediaFill
             clip={clip}
             source={source}
+            forceMuted
             style={{
               width: "100%",
               height: "100%",
@@ -1333,6 +1337,7 @@ React.FC<ChicagoShiningPhotoSequenceProps> = ({
   defaultBackgroundColor = "black",
   music,
   voiceover,
+  sceneVoiceoverAuthority = false,
   voiceoverDurationSeconds,
   voiceoverEndFrame,
   voiceoverText = "",
@@ -1508,6 +1513,7 @@ React.FC<ChicagoShiningPhotoSequenceProps> = ({
   const perClipVoiceoverIntervals = getVoiceoverIntervals(safeClips, fps);
   const globalVoiceoverSource = resolveSource(voiceover?.src ?? voiceover?.url);
   const globalVoiceoverEnabled =
+    sceneVoiceoverAuthority !== true &&
     perClipVoiceoverIntervals.length === 0 &&
     voiceover?.enabled !== false &&
     Boolean(globalVoiceoverSource);
