@@ -49,7 +49,13 @@ test("production Worker keeps five-minute Studio cron and isolates Factory one-m
   assert.ok(isolated >= 0 && isolated < heavy, "Factory-only cron must dispatch before Studio heavy work");
   assert.match(scheduled, /if \(String\(event\?\.cron \|\| ""\)\.trim\(\) === "\* \* \* \* \*"\) \{[\s\S]*?await factoryBatchCronResume\(env, ctx\)/);
   assert.match(scheduled, /if \(cooling > AIRTABLE_SLOT_FAIL_FAST_MS\)/);
-  assert.doesNotMatch(scheduled.slice(heavy), /await factoryBatchCronResume\(env, ctx\)/);
+  assert.match(scheduled.slice(heavy), /await factoryBatchCronResume\(env, ctx\)/);
+  assert.ok(scheduled.indexOf('const coolMs = airtableCooldownWaitMs();') <
+    scheduled.lastIndexOf('await factoryBatchCronResume(env, ctx)'),
+    "five-minute fallback must respect Airtable cooldown before dispatch");
+  assert.ok(scheduled.indexOf('await factoryBatchCronResume(env, ctx)', heavy) <
+    scheduled.indexOf('runStudioAutonomousProduce(null, env,', heavy),
+    "fallback Factory recovery runs before costly heavy Studio tasks");
 });
 
 test("scheduled retries daily ideas throughout Chicago hour 1, not only heavy ticks", () => {
