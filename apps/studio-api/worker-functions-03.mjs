@@ -374,6 +374,24 @@ import {
   unassignedSuggestionCount,
 } from "./idea-timed-script.mjs";
 import {
+  applyVisualTimelineToSlides,
+  assertVisualTimelineRevision,
+  buildVisualTimeline,
+  buildVisualTimelineFromSlides,
+  isVisualTimelineVideo,
+  visualTimelineEnabled,
+  visualTimelineHasMutation,
+} from "./visual-timeline.mjs";
+import {
+  acceptVisualScriptProposal,
+  applyVisualScriptToSlides,
+  assertVisualScriptRevision,
+  buildVisualScriptProposal,
+  buildVisualScriptState,
+  visualScriptChangedSceneIds,
+  visualScriptEnabled,
+} from "./visual-script.mjs";
+import {
   anotherCutFromUnused,
   capVibeCutPlanItems,
   defaultVibeCutConfig,
@@ -5584,6 +5602,16 @@ export function mapPhase6CreativeSlide(slide, targetRatio = null, defaultVoiceov
     is_cover: Boolean(f(slide, "Is Cover")),
     review_status: f(slide, "Review Status"),
     include: directives.include !== false && !Boolean(f(slide, "Deleted From Carousel")),
+    media_type: phase6Text(directives.mediaType || directives.media_type, 120) || null,
+    media_kind: phase6Text(directives.mediaKind || directives.media_kind || directives.mediaType || directives.media_type, 120) || null,
+    source_duration_seconds: phase6Number(
+      directives.sourceDurationSeconds ?? directives.source_duration_seconds,
+      null,
+    ),
+    source_in_ms: phase6Number(directives.sourceInMs ?? directives.source_in_ms, null),
+    source_out_ms: phase6Number(directives.sourceOutMs ?? directives.source_out_ms, null),
+    trim_user_set: Boolean(directives.trimUserSet ?? directives.trim_user_set),
+    native_audio_mode: phase6Text(directives.nativeAudioMode || directives.native_audio_mode || "inherit", 40) || "inherit",
     duration_seconds: phase6Number(directives.durationSeconds, null),
     focal_point: phase6Text(directives.focalPoint || "center", 40) || "center",
     fit_mode: phase6Text(directives.fitMode || "fill_crop", 60) || "fill_crop",
@@ -5656,6 +5684,22 @@ export function phase6VirtualSlidesFromSelectedAssets(outputRecord, preferredVoi
       name: clip.asset_name || clip.assetName || `Photo ${index + 1}`,
       slide_number: index + 1,
       order: Number(clip.order || index + 1),
+      media_type: clip.media_type || clip.mediaType || clip.media_kind || clip.mediaKind || null,
+      media_kind: clip.media_kind || clip.mediaKind || null,
+      source_duration_seconds: Number(
+        clip.source_duration_seconds
+        ?? clip.sourceDurationSeconds
+        ?? clip.original_duration_seconds
+        ?? 0
+      ) || null,
+      source_in_ms: Number.isFinite(Number(clip.source_in_ms ?? clip.sourceInMs))
+        ? Math.max(0, Math.round(Number(clip.source_in_ms ?? clip.sourceInMs)))
+        : null,
+      source_out_ms: Number.isFinite(Number(clip.source_out_ms ?? clip.sourceOutMs))
+        ? Math.max(0, Math.round(Number(clip.source_out_ms ?? clip.sourceOutMs)))
+        : null,
+      trim_user_set: Boolean(clip.trim_user_set ?? clip.trimUserSet),
+      native_audio_mode: String(clip.native_audio_mode ?? clip.nativeAudioMode ?? "inherit").trim().toLowerCase() || "inherit",
       is_cover: index === 0,
       review_status: null,
       include: true,
@@ -5713,16 +5757,244 @@ export function phase6VirtualSlidesFromSelectedAssets(outputRecord, preferredVoi
 }
 /*__STUDIO_WORKER_END:phase6VirtualSlidesFromSelectedAssets__*/
 
+/*__STUDIO_WORKER_START:phase6MergeSelectedVideoMetadata__*/
+export function phase6MergeSelectedVideoMetadata(slides = [], outputRecord = null) {
+  const clips = selectedVisualClips(outputRecord);
+  if (!Array.isArray(slides) || !slides.length || !Array.isArray(clips) || !clips.length) return Array.isArray(slides) ? slides : [];
+  const parsed = phase6ParseJson(f(outputRecord, "Selected_Assets_JSON"), {}) || {};
+  const fps = Math.max(1, Number(parsed.fps || 30) || 30);
+  const ordered = clips.map((clip, index) => ({ clip, index }))
+    .sort((a, b) => Number(a.clip?.order || a.index + 1) - Number(b.clip?.order || b.index + 1));
+  return slides.map((slide, index) => {
+    const clip = ordered[index]?.clip;
+    if (!clip) return slide;
+    const sourceUrl = String(clip.url || clip.src || clip.google_drive_url || "").trim();
+    const mediaKind = String(clip.media_kind || clip.mediaKind || clip.media_type || clip.mediaType || "").trim().toLowerCase();
+    const isVideo = /video|mp4|mov|m4v|webm/.test((mediaKind + " " + sourceUrl).toLowerCase());
+    if (!isVideo) return slide;
+
+    const sourceDurationSeconds = Number(
+      clip.source_duration_seconds
+      ?? clip.sourceDurationSeconds
+      ?? clip.original_duration_seconds
+      ?? clip.originalDurationSeconds
+      ?? 0
+    ) || phase6Number(slide.source_duration_seconds, null);
+    const rawInMs = Number(clip.source_in_ms ?? clip.sourceInMs);
+    const rawInSeconds = Number(clip.in_seconds ?? clip.inSeconds ?? clip.startFromSeconds);
+    const sourceInMs = Number.isFinite(rawInMs)
+      ? Math.max(0, Math.round(rawInMs))
+      : Number.isFinite(rawInSeconds)
+        ? Math.max(0, Math.round(rawInSeconds * 1000))
+        : Math.max(0, Math.round(Number(slide.source_in_ms || 0)));
+
+    const rawOutMs = Number(clip.source_out_ms ?? clip.sourceOutMs);
+    const rawOutSeconds = Number(clip.out_seconds ?? clip.outSeconds ?? clip.sourceOutSeconds);
+    const durationFrames = Number(clip.durationFrames ?? clip.duration_frames ?? 0);
+    const fallbackDurationMs = durationFrames > 0
+      ? Math.max(1, Math.round((durationFrames / fps) * 1000))
+      : Math.max(1, Math.round(Number(slide.duration_seconds || 4) * 1000));
+    let sourceOutMs = Number.isFinite(rawOutMs)
+      ? Math.max(sourceInMs, Math.round(rawOutMs))
+      : Number.isFinite(rawOutSeconds)
+        ? Math.max(sourceInMs, Math.round(rawOutSeconds * 1000))
+        : sourceInMs + fallbackDurationMs;
+    if (sourceDurationSeconds) sourceOutMs = Math.min(sourceOutMs, Math.round(sourceDurationSeconds * 1000));
+    const durationMs = Math.max(1, sourceOutMs - sourceInMs);
+    const nativeAudioMode = String(
+      clip.native_audio_mode
+      ?? clip.nativeAudioMode
+      ?? (clip.keepSourceAudio === true ? "preserve" : clip.muted === true ? "mute" : slide.native_audio_mode || "inherit")
+    ).trim().toLowerCase() || "inherit";
+    const ratio = String(f(outputRecord, "Aspect_Ratio") || "").trim();
+
+    return {
+      ...slide,
+      media_type: clip.media_type || clip.mediaType || "video/mp4",
+      media_kind: clip.media_kind || clip.mediaKind || "video",
+      source_duration_seconds: sourceDurationSeconds,
+      source_duration_ms: sourceDurationSeconds ? Math.round(sourceDurationSeconds * 1000) : null,
+      source_in_ms: sourceInMs,
+      source_out_ms: sourceOutMs,
+      trim_user_set: Boolean(clip.trim_user_set ?? clip.trimUserSet ?? slide.trim_user_set),
+      native_audio_mode: nativeAudioMode,
+      duration_seconds: durationMs / 1000,
+      ...(sourceUrl ? {
+        preview_url: sourceUrl,
+        current_image_url: sourceUrl,
+        final_image_url: sourceUrl,
+        variants: { ...(slide.variants || {}), ...(ratio ? { [ratio]: sourceUrl } : {}) },
+      } : {}),
+    };
+  });
+}
+/*__STUDIO_WORKER_END:phase6MergeSelectedVideoMetadata__*/
+
+/*__STUDIO_WORKER_START:phase6VisualTimelineEnabledForOutput__*/
+export function phase6VisualTimelineEnabledForOutput(env, outputRecord) {
+  if (!visualTimelineEnabled(env)) return false;
+  // Production rollout is fail-closed: visual timeline/script features are exposed
+  // only on outputs already protected by Do_Not_Publish. An empty allowlist means
+  // "all nonpublishing canaries", never "all production outputs".
+  if (!Boolean(f(outputRecord, "Do_Not_Publish"))) return false;
+  const allowlist = String(env?.STUDIO_VISUAL_CANARY_OUTPUT_IDS || "")
+    .split(/[\s,;]+/)
+    .map(value => value.trim())
+    .filter(Boolean);
+  if (!allowlist.length) return true;
+  const outputId = String(outputRecord?.id || "").trim();
+  return Boolean(outputId && allowlist.includes(outputId));
+}
+/*__STUDIO_WORKER_END:phase6VisualTimelineEnabledForOutput__*/
+
+/*__STUDIO_WORKER_START:phase6VisualScriptEnabledForOutput__*/
+export function phase6VisualScriptEnabledForOutput(env, outputRecord) {
+  return phase6VisualTimelineEnabledForOutput(env, outputRecord) && visualScriptEnabled(env);
+}
+/*__STUDIO_WORKER_END:phase6VisualScriptEnabledForOutput__*/
+
+/*__STUDIO_WORKER_START:studioPrepareVisualVoiceoverCanary__*/
+export async function studioPrepareVisualVoiceoverCanary(request, env) {
+  let payload = {};
+  try { payload = await request.json(); } catch { payload = {}; }
+  const action = String(payload?.action || "prepare").trim().toLowerCase();
+  if (action === "inspect") {
+    const recordId = String(payload?.record_id || "").trim();
+    if (!/^rec[A-Za-z0-9]+$/.test(recordId)) throw new HttpError(400, "record_id is required");
+    const record = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, recordId);
+    if (!Boolean(f(record, "Do_Not_Publish")) || !String(f(record, "Test_Run_ID") || "").trim()) {
+      throw new HttpError(409, "Canary inspection is limited to Do_Not_Publish test outputs");
+    }
+    const settings = phase6ParseJson(f(record, "Studio_Creative_Settings_JSON"), {}) || {};
+    const manifest = phase6ParseJson(f(record, "Creative_Render_Manifest_JSON"), {}) || {};
+    const props = phase6ParseJson(f(record, "Remotion_Props_JSON"), {}) || {};
+    return respond(request, env, {
+      ok: true,
+      action: "inspect",
+      record_id: record.id,
+      output_id: f(record, "Output_ID") || null,
+      test_run_id: f(record, "Test_Run_ID") || null,
+      do_not_publish: Boolean(f(record, "Do_Not_Publish")),
+      auto_publish_enabled: Boolean(f(record, "Auto_Publish_Enabled")),
+      output_status: f(record, "Output_Status") || null,
+      review_status: f(record, "Review_Status") || null,
+      publish_status: f(record, "Publish_Status") || null,
+      render_status: f(record, "Render_Status") || null,
+      published_at: f(record, "Published_At") || null,
+      platform_post_id: f(record, "Platform_Post_ID") || null,
+      platform_post_url: f(record, "Platform_Post_URL") || null,
+      studio_preview_url: f(record, "Studio_Preview_URL") || null,
+      final_file_url: f(record, "Final_File_URL") || null,
+      current_revision: {
+        visualRevision: Number(settings?.visual_timeline?.revision || 0),
+        visualSequenceHash: String(settings?.visual_timeline?.sequence_hash || settings?.visual_timeline?.sequenceHash || ""),
+        scriptRevision: Number(settings?.visual_script?.revision || 0),
+        scriptHash: String(settings?.visual_script?.script_hash || settings?.visual_script?.scriptHash || ""),
+      },
+      manifest_revision: manifest?.studioRevision || null,
+      props_revision: props?.studioRevision || null,
+    });
+  }
+  if (action !== "prepare" || String(payload?.confirm || "").trim() !== "prepare-nonpublishing-canary") {
+    throw new HttpError(400, "confirm=prepare-nonpublishing-canary is required");
+  }
+
+  const rows = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
+    limit: 60,
+    sortField: "Output_ID",
+    sortDirection: "desc",
+    filterFormula: 'AND({Test_Run_ID}!="",{Published_At}=BLANK(),{Platform_Post_ID}=BLANK(),{Platform_Post_URL}=BLANK())',
+  });
+
+  let candidate = null;
+  let candidateSlides = [];
+  let videoScene = null;
+  for (const row of rows || []) {
+    if (String(f(row, "Render_Status") || "").trim() === "Rendering") continue;
+    const slides = await phase6SlidesForOutput(env, row);
+    const video = (slides || []).find((slide) => {
+      const media = String(slide?.media_type || slide?.mime_type || slide?.url || slide?.preview_url || "").toLowerCase();
+      const sourceMs = Number(slide?.source_duration_ms || slide?.sourceDurationMs || 0);
+      const durationMs = Number(slide?.duration_ms || slide?.durationSeconds * 1000 || 0);
+      return /video|mp4|mov|m4v|webm/.test(media) && durationMs >= 2000 && sourceMs > durationMs + 250;
+    });
+    if (!video) continue;
+    candidate = row;
+    candidateSlides = slides;
+    videoScene = video;
+    break;
+  }
+
+  if (!candidate || !videoScene) {
+    throw new HttpError(409, "No unpublished test output with a trimmable video scene is available for the visual voiceover canary");
+  }
+
+  const now = new Date().toISOString();
+  const existingNotes = String(f(candidate, "Output_Notes") || "").trim();
+  const note = "VISUAL_VOICEOVER_CANARY_V1 — nonpublishing production acceptance output";
+  const updated = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, candidate.id, {
+    method: "PATCH",
+    body: JSON.stringify({
+      fields: {
+        Do_Not_Publish: true,
+        Auto_Publish_Enabled: false,
+        Publish_Status: "Not Ready",
+        Review_Status: "Pending Review",
+        Output_Status: "In Production",
+        Scheduled_Post_Date: null,
+        Studio_Scheduled_At: null,
+        YouTube_Scheduled_Publish_At: null,
+        Review_Decision_At: null,
+        Output_Notes: [existingNotes, note, `Prepared ${now}`].filter(Boolean).join("\n\n"),
+      },
+      typecast: true,
+    }),
+  });
+
+  return respond(request, env, {
+    ok: true,
+    prepared: true,
+    record_id: updated.id,
+    output_id: f(updated, "Output_ID") || null,
+    test_run_id: f(updated, "Test_Run_ID") || null,
+    do_not_publish: Boolean(f(updated, "Do_Not_Publish")),
+    platform: f(updated, "Platform") || null,
+    output_type: f(updated, "Studio_Output_Type") || f(updated, "Format") || null,
+    slide_count: candidateSlides.length,
+    video_scene_id: String(videoScene?.scene_id || videoScene?.id || "").trim() || null,
+    safety: {
+      published_at: f(updated, "Published_At") || null,
+      platform_post_id: f(updated, "Platform_Post_ID") || null,
+      platform_post_url: f(updated, "Platform_Post_URL") || null,
+      auto_publish_enabled: Boolean(f(updated, "Auto_Publish_Enabled")),
+      publish_status: f(updated, "Publish_Status") || null,
+    },
+  });
+}
+/*__STUDIO_WORKER_END:studioPrepareVisualVoiceoverCanary__*/
+
 export async function phase6SlidesForOutput(env, outputRecord, preferredVoice = null) {
   const narration = preferredVoice || await phase6ResolveNarrationVoice(env, outputRecord);
   const ids = Array.isArray(f(outputRecord, "Carousel Slides")) ? f(outputRecord, "Carousel Slides") : [];
-  if (!ids.length) return phase6VirtualSlidesFromSelectedAssets(outputRecord, narration);
-  const records = await Promise.all(ids.map(id => airtableFetch(env, PHASE6_CAROUSEL_SLIDES_TABLE, id)));
-  const ratio = String(f(outputRecord, "Aspect_Ratio") || "").trim() || null;
-  const platform = String(f(outputRecord, "Platform") || "").trim();
-  const defaultVoiceoverVolume = phase6ResolvedVoiceoverVolume(outputRecord);
-  return records.map(record => mapPhase6CreativeSlide(record, ratio, defaultVoiceoverVolume, platform, narration))
-    .sort((a, b) => Number(a.order || 0) - Number(b.order || 0));
+  let slides;
+  if (!ids.length) {
+    slides = phase6VirtualSlidesFromSelectedAssets(outputRecord, narration);
+  } else {
+    const records = await Promise.all(ids.map(id => airtableFetch(env, PHASE6_CAROUSEL_SLIDES_TABLE, id)));
+    const ratio = String(f(outputRecord, "Aspect_Ratio") || "").trim() || null;
+    const platform = String(f(outputRecord, "Platform") || "").trim();
+    const defaultVoiceoverVolume = phase6ResolvedVoiceoverVolume(outputRecord);
+    slides = phase6MergeSelectedVideoMetadata(
+      records.map(record => mapPhase6CreativeSlide(record, ratio, defaultVoiceoverVolume, platform, narration))
+        .sort((a, b) => Number(a.order || 0) - Number(b.order || 0)),
+      outputRecord,
+    );
+  }
+  if (!phase6VisualTimelineEnabledForOutput(env, outputRecord)) return slides;
+  const settings = phase6ParseJson(f(outputRecord, "Studio_Creative_Settings_JSON"), {}) || {};
+  const visualSlides = applyVisualTimelineToSlides(slides, settings.visual_timeline || null);
+  if (!phase6VisualScriptEnabledForOutput(env, outputRecord)) return visualSlides;
+  return applyVisualScriptToSlides(visualSlides, settings.visual_script || null);
 }
 /*__STUDIO_WORKER_END:phase6SlidesForOutput__*/
 
@@ -6144,10 +6416,27 @@ export async function getOutputCreative(request, env, url, authorization) {
   ]);
   const handoff = phase6CreativeHandoffStatus(record, slides);
   const titleLock = phase6TitleLockView(record, slides);
+  const savedVisualTimeline = output.creative_settings?.visual_timeline || null;
+  const visualTimelineOn = phase6VisualTimelineEnabledForOutput(env, record);
+  const visualScriptOn = phase6VisualScriptEnabledForOutput(env, record);
+  const visualTimeline = visualTimelineOn
+    ? buildVisualTimelineFromSlides(slides, { previousTimeline: savedVisualTimeline })
+    : null;
+  const visualScript = visualScriptOn
+    ? buildVisualScriptState(slides, visualTimeline, {
+        previousState: output.creative_settings?.visual_script || null,
+      })
+    : null;
   return respond(request, env, {
     ok: true,
     output,
     slides: phase6SlidesWithTitleRenderInput(record, slides),
+    visual_timeline: visualTimeline,
+    visual_script: visualScript,
+    features: {
+      visual_timeline_v1: visualTimelineOn,
+      visual_script_v1: visualScriptOn,
+    },
     handoff,
     title_lock: titleLock,
     options: {
@@ -6261,14 +6550,429 @@ export function phase6SlideDirectiveFromPayload(input, existing) {
 }
 /*__STUDIO_WORKER_END:phase6SlideDirectiveFromPayload__*/
 
+function phase6MergeVisualTimelineInputs(currentSlides = [], slideInputs = []) {
+  const incoming = new Map(
+    (Array.isArray(slideInputs) ? slideInputs : [])
+      .map((slide) => [String(slide?.scene_id || slide?.id || "").trim(), slide])
+      .filter(([id]) => Boolean(id))
+  );
+  return (Array.isArray(currentSlides) ? currentSlides : []).map((slide, index) => {
+    const id = String(slide?.scene_id || slide?.id || "").trim();
+    const input = incoming.get(id);
+    if (!input) return { ...slide, order: index + 1 };
+    return {
+      ...slide,
+      ...input,
+      scene_id: input.scene_id || slide.scene_id || slide.id,
+      order: Number(input.order || index + 1),
+      voiceover: {
+        ...(slide.voiceover || {}),
+        ...(input.voiceover || {}),
+      },
+    };
+  }).sort((a, b) => Number(a.order || 0) - Number(b.order || 0));
+}
+/*__STUDIO_WORKER_END:phase6MergeVisualTimelineInputs__*/
+
+function phase6NextVisualTimeline(payload, currentSlides, previousTimeline) {
+  if (!visualTimelineHasMutation(payload)) return null;
+  const requested = payload?.visual_timeline && typeof payload.visual_timeline === "object"
+    ? payload.visual_timeline
+    : {};
+  const currentTimeline = buildVisualTimelineFromSlides(currentSlides, { previousTimeline });
+  try {
+    assertVisualTimelineRevision(
+      requested.base_revision ?? payload?.based_on_timeline_revision ?? null,
+      requested.base_sequence_hash ?? payload?.based_on_timeline_hash ?? "",
+      currentTimeline,
+    );
+  } catch (error) {
+    throw new HttpError(
+      409,
+      error instanceof Error ? error.message : "outdated visual sequence",
+    );
+  }
+  if (Array.isArray(requested.scenes)) {
+    return buildVisualTimeline(requested.scenes, { previousTimeline: currentTimeline });
+  }
+  return buildVisualTimelineFromSlides(
+    phase6MergeVisualTimelineInputs(currentSlides, payload?.slides),
+    { previousTimeline: currentTimeline },
+  );
+}
+/*__STUDIO_WORKER_END:phase6NextVisualTimeline__*/
+
+function phase6VisualScriptRowsFromModel(payload) {
+  const candidates = [
+    payload?.details?.run?.scenes,
+    payload?.details?.themes?.scenes,
+    payload?.details?.scenes,
+    payload?.scenes,
+  ];
+  return candidates.find((rows) => Array.isArray(rows)) || [];
+}
+
+async function phase6GenerateVisualScriptProposal(env, outputRecord, currentScript, visualTimeline, payload = {}) {
+  const mode = String(payload?.visual_script_mode || payload?.mode || "all").trim().toLowerCase() === "selected"
+    ? "selected"
+    : "all";
+  const selectedSceneIds = [...new Set(
+    (Array.isArray(payload?.selected_scene_ids) ? payload.selected_scene_ids : [])
+      .map((value) => String(value || "").trim())
+      .filter(Boolean)
+  )];
+  const locks = payload?.narration_locks && typeof payload.narration_locks === "object"
+    ? payload.narration_locks
+    : {};
+  const selected = new Set(selectedSceneIds);
+  const eligible = (Array.isArray(currentScript?.scenes) ? currentScript.scenes : [])
+    .filter((scene) => scene.voiceover_mode !== "silent")
+    .filter((scene) => !Boolean(locks?.[scene.scene_id] ?? scene.narration_locked))
+    .filter((scene) => mode !== "selected" || selected.has(scene.scene_id));
+
+  const generated = {};
+  let source = "fallback";
+  if (eligible.length) {
+    try {
+      const { response, payload: modelPayload } = await item4PulsePipelineStage(env, "its1", {
+        source: "studio-visual-aware-script",
+        title: String(
+          f(outputRecord, "Output_Title")
+          || f(outputRecord, "Content_Title")
+          || f(outputRecord, "Title")
+          || "Studio output"
+        ).trim().slice(0, 200),
+        mode,
+        selected_scene_ids: selectedSceneIds,
+        visual_revision: visualTimeline?.revision || 0,
+        visual_sequence_hash: visualTimeline?.sequence_hash || "",
+        script_revision: currentScript?.revision || 0,
+        scenes: eligible.map((scene) => ({
+          scene_id: scene.scene_id,
+          order: scene.ordinal,
+          duration_seconds: Number(scene.duration_ms || 0) / 1000,
+          max_words: scene.max_words,
+          current_text: scene.narration_text || "",
+          instruction: "Write only narration that fits this exact visual window. Do not add narration for silent scenes.",
+        })),
+      }, "ITS1");
+      if (response.ok) {
+        const rows = phase6VisualScriptRowsFromModel(modelPayload);
+        rows.forEach((row, index) => {
+          const fallbackScene = eligible[index] || null;
+          const sceneId = String(
+            row?.scene_id
+            || row?.sceneId
+            || fallbackScene?.scene_id
+            || ""
+          ).trim();
+          const text = String(
+            row?.proposed_text
+            ?? row?.narration_text
+            ?? row?.voiceover_text
+            ?? row?.text
+            ?? ""
+          ).replace(/\s+/g, " ").trim();
+          if (sceneId && text) generated[sceneId] = text;
+        });
+        if (Object.keys(generated).length) source = "its1";
+      }
+    } catch (error) {
+      console.warn("visual-aware script proposal generation failed", outputRecord?.id, error);
+    }
+  }
+
+  return {
+    source,
+    proposal: buildVisualScriptProposal(currentScript, visualTimeline, generated, {
+      mode,
+      selectedSceneIds,
+      locks,
+      source,
+    }),
+  };
+}
+
+function phase6VisualScriptAudioChangedIds(beforeState, afterState) {
+  const before = new Map(
+    (Array.isArray(beforeState?.scenes) ? beforeState.scenes : [])
+      .map((scene) => [String(scene?.scene_id || "").trim(), scene])
+      .filter(([id]) => Boolean(id))
+  );
+  return (Array.isArray(afterState?.scenes) ? afterState.scenes : [])
+    .filter((scene) => {
+      const id = String(scene?.scene_id || "").trim();
+      const old = before.get(id) || {};
+      return String(old.voiceover_mode || "narrated") !== String(scene.voiceover_mode || "narrated")
+        || String(old.narration_text || "").trim() !== String(scene.narration_text || "").trim();
+    })
+    .map((scene) => String(scene.scene_id || "").trim())
+    .filter(Boolean);
+}
+
+async function phase6PersistAcceptedVisualScript(env, outputRecord, mappedOutput, currentSlides, acceptedScript, authorization) {
+  const acceptedById = new Map(
+    (Array.isArray(acceptedScript?.scenes) ? acceptedScript.scenes : [])
+      .map((scene) => [String(scene?.scene_id || "").trim(), scene])
+      .filter(([id]) => Boolean(id))
+  );
+  const linkedIds = new Set(
+    (Array.isArray(f(outputRecord, "Carousel Slides")) ? f(outputRecord, "Carousel Slides") : [])
+      .map((id) => String(id || "").trim())
+      .filter(Boolean)
+  );
+
+  for (let index = 0; index < currentSlides.length; index += 1) {
+    const slide = currentSlides[index] || {};
+    const id = String(slide.scene_id || slide.id || "").trim();
+    const accepted = acceptedById.get(id);
+    if (!accepted || !linkedIds.has(slide.id) || slide.virtual === true) continue;
+
+    const existing = await airtableFetch(env, PHASE6_CAROUSEL_SLIDES_TABLE, slide.id);
+    const directive = phase6ParseJson(f(existing, "Creative_Directives_JSON"), {}) || {};
+    const oldVoice = directive.voiceover && typeof directive.voiceover === "object" ? directive.voiceover : {};
+    const silent = String(accepted.voiceover_mode || "").toLowerCase() === "silent";
+    const text = silent ? "" : phase6Text(accepted.narration_text, 5000);
+    const priorText = String(f(existing, "Slide_Voiceover_Text") || "").trim();
+    const priorEnabled = oldVoice.enabled !== false && String(f(existing, "Slide_Voiceover_Status") || "") !== "Not Requested";
+    const audioChanged = priorText !== text || priorEnabled === silent;
+    const voiceId = String(f(existing, "Slide_Voice_ID") || oldVoice.voiceId || PHASE6_DEFAULT_VOICE_ID).trim() || PHASE6_DEFAULT_VOICE_ID;
+    const voiceName = String(
+      f(existing, "Slide_Voice_Name")
+      || f(existing, "Slide_Voice")
+      || oldVoice.voice
+      || "Kate"
+    ).trim() || "Kate";
+
+    const nextDirective = {
+      ...directive,
+      voiceover: {
+        ...oldVoice,
+        enabled: !silent,
+        text,
+        voiceId,
+        voice: voiceName,
+      },
+    };
+    const fields = {
+      Creative_Directives_JSON: JSON.stringify(nextDirective),
+      Slide_Voiceover_Text: text || null,
+      Slide_Voice_ID: voiceId,
+      Slide_Voice_Name: voiceName,
+      Studio_Voice_Prep_Request_ID: null,
+    };
+    if (PHASE6_VOICES.includes(voiceName)) fields.Slide_Voice = voiceName;
+    if (silent) {
+      fields.Slide_Voiceover_Status = "Not Requested";
+      fields.Slide_Voiceover_URL = null;
+      fields.Slide_Voiceover_Duration_Seconds = null;
+    } else if (audioChanged || !f(existing, "Slide_Voiceover_URL")) {
+      fields.Slide_Voiceover_Status = "Ready";
+      fields.Slide_Voiceover_URL = null;
+      fields.Slide_Voiceover_Duration_Seconds = null;
+    }
+    await airtableFetch(env, PHASE6_CAROUSEL_SLIDES_TABLE, slide.id, {
+      method: "PATCH",
+      body: JSON.stringify({ fields, typecast: false }),
+    });
+  }
+
+  const settings = mappedOutput.creative_settings && typeof mappedOutput.creative_settings === "object"
+    ? mappedOutput.creative_settings
+    : {};
+  const nextSettings = {
+    ...settings,
+    schemaVersion: "p020.phase6.ui.2",
+    visual_script: acceptedScript,
+    savedAt: new Date().toISOString(),
+    savedBy: authorization?.email || null,
+  };
+  await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, outputRecord.id, {
+    method: "PATCH",
+    body: JSON.stringify({
+      fields: {
+        Studio_Creative_Settings_JSON: JSON.stringify(nextSettings),
+      },
+      typecast: false,
+    }),
+  });
+}
+
+function phase6AssertVisualScriptReviewAllowed(record) {
+  if (Boolean(f(record, "Do_Not_Publish"))) return true;
+  const outputStatus = String(f(record, "Output_Status") || "").trim();
+  const reviewStatus = String(f(record, "Review_Status") || "").trim();
+  const publishStatus = String(f(record, "Publish_Status") || "").trim();
+  const renderStatus = String(f(record, "Render_Status") || "").trim();
+  if (
+    reviewStatus === "Approved"
+    || outputStatus === "Approved for Publishing"
+    || ["Published", "Publishing", "Scheduled"].includes(publishStatus)
+  ) {
+    throw new HttpError(409, "Narration can be revised only before publishing approval.");
+  }
+  if (renderStatus === "Rendering") {
+    throw new HttpError(409, "A render is already in progress. Wait until it finishes before revising narration.");
+  }
+  const reviewOpen = ["Ready for Review", "In Production"].includes(outputStatus)
+    || ["Review Sent", "Changes Requested"].includes(reviewStatus);
+  if (!reviewOpen) {
+    throw new HttpError(409, "Narration can be revised only while this output is in creative review.");
+  }
+  return true;
+}
+
+async function phase6HandleVisualScriptAction(request, env, outputRecord, mappedOutput, payload, authorization) {
+  if (!phase6VisualScriptEnabledForOutput(env, outputRecord)) {
+    throw new HttpError(409, "Visual-aware script editing is not enabled for this environment.");
+  }
+  phase6AssertVisualScriptReviewAllowed(outputRecord);
+  const action = String(payload?.visual_script_action || "").trim().toLowerCase();
+  const slides = await phase6SlidesForOutput(env, outputRecord);
+  const savedVisualTimeline = mappedOutput.creative_settings?.visual_timeline || null;
+  const visualTimeline = buildVisualTimelineFromSlides(slides, { previousTimeline: savedVisualTimeline });
+  const currentScript = buildVisualScriptState(slides, visualTimeline, {
+    previousState: mappedOutput.creative_settings?.visual_script || null,
+  });
+
+  const base = payload?.visual_script_base && typeof payload.visual_script_base === "object"
+    ? payload.visual_script_base
+    : {};
+  try {
+    assertVisualTimelineRevision(
+      base.visual_revision ?? payload?.based_on_timeline_revision ?? null,
+      base.visual_sequence_hash ?? payload?.based_on_timeline_hash ?? "",
+      visualTimeline,
+    );
+    assertVisualScriptRevision(
+      base.script_revision ?? null,
+      base.script_hash ?? "",
+      currentScript,
+    );
+  } catch (error) {
+    throw new HttpError(409, error instanceof Error ? error.message : "outdated visual/script revision");
+  }
+
+  if (action === "propose") {
+    const generated = await phase6GenerateVisualScriptProposal(
+      env,
+      outputRecord,
+      currentScript,
+      visualTimeline,
+      payload,
+    );
+    return respond(request, env, {
+      ok: true,
+      saved: false,
+      visual_script_action: "proposal",
+      current_script: currentScript,
+      visual_timeline: visualTimeline,
+      proposal: generated.proposal,
+      source: generated.source,
+      message: generated.source === "its1"
+        ? "Visual-aware narration proposal is ready. Review the changes; nothing has been saved or rendered."
+        : "A fit-safe fallback proposal is ready. Review it; nothing has been saved or rendered.",
+    });
+  }
+
+  if (action === "discard") {
+    return respond(request, env, {
+      ok: true,
+      saved: false,
+      visual_script_action: "discarded",
+      current_script: currentScript,
+      visual_timeline: visualTimeline,
+      message: "Narration proposal discarded. Saved narration and render state are unchanged.",
+    });
+  }
+
+  if (action !== "accept") {
+    throw new HttpError(400, "visual_script_action must be propose, accept, or discard");
+  }
+
+  let acceptedScript;
+  try {
+    acceptedScript = acceptVisualScriptProposal(
+      currentScript,
+      visualTimeline,
+      payload?.visual_script_proposal,
+      {
+        acceptedAt: new Date().toISOString(),
+        acceptedBy: authorization?.email || null,
+      },
+    );
+  } catch (error) {
+    throw new HttpError(409, error instanceof Error ? error.message : "Narration proposal is stale");
+  }
+
+  const changedSceneIds = visualScriptChangedSceneIds(currentScript, acceptedScript);
+  const audioChangedSceneIds = phase6VisualScriptAudioChangedIds(currentScript, acceptedScript);
+  await phase6PersistAcceptedVisualScript(
+    env,
+    outputRecord,
+    mappedOutput,
+    slides,
+    acceptedScript,
+    authorization,
+  );
+  const refreshedOutput = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, outputRecord.id);
+  const refreshedSlides = await phase6SlidesForOutput(env, refreshedOutput);
+  return respond(request, env, {
+    ok: true,
+    saved: true,
+    visual_script_action: "accepted",
+    record: mapPhase6CreativeOutput(refreshedOutput),
+    slides: phase6SlidesWithTitleRenderInput(refreshedOutput, refreshedSlides),
+    visual_timeline: visualTimeline,
+    visual_script: acceptedScript,
+    changed_scene_ids: changedSceneIds,
+    tts_invalidated_scene_ids: audioChangedSceneIds,
+    render_started: false,
+    tts_started: false,
+    message: audioChangedSceneIds.length
+      ? `Narration v${acceptedScript.revision} accepted. ${audioChangedSceneIds.length} changed scene audio segment(s) are invalidated; TTS/render will start only after an explicit rerender action.`
+      : `Narration v${acceptedScript.revision} accepted. No audio regeneration is required.`,
+  });
+}
+
 export async function updateOutputCreative(request, env, url, authorization) {
   let payload;
   try { payload = await request.json(); } catch { throw new HttpError(400, "Request body must be valid JSON"); }
   const id = phase6RecordIdFromPath(url);
   const existingOutput = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, id);
   const current = mapPhase6CreativeOutput(existingOutput);
+  const visualScriptAction = String(payload?.visual_script_action || "").trim().toLowerCase();
+  if (visualScriptAction) {
+    return phase6HandleVisualScriptAction(
+      request,
+      env,
+      existingOutput,
+      current,
+      payload,
+      authorization,
+    );
+  }
+  const timelineMutationRequested = visualTimelineHasMutation(payload);
+  if (timelineMutationRequested && !phase6VisualTimelineEnabledForOutput(env, existingOutput)) {
+    throw new HttpError(409, "Visual timeline editing is not enabled for this environment.");
+  }
+  if (timelineMutationRequested && String(f(existingOutput, "Render_Status") || "").trim() === "Rendering") {
+    throw new HttpError(409, "A render is already in progress. Wait until it finishes before changing the visual timeline.");
+  }
+  const currentSlidesForTimeline = timelineMutationRequested
+    ? await phase6SlidesForOutput(env, existingOutput)
+    : [];
+  const nextVisualTimeline = timelineMutationRequested
+    ? phase6NextVisualTimeline(
+        payload,
+        currentSlidesForTimeline,
+        current.creative_settings?.visual_timeline || null,
+      )
+    : null;
 
-  // Production review posts can save mix levels only. Slide/title editing stays locked.
+  // Production review remains title/overlay locked. When the feature flag is on,
+  // visual order, mute directives and clip trims are stored only in the canonical
+  // output-level timeline; existing slide/TTS artifacts remain available for rollback.
   if (!Boolean(f(existingOutput, "Do_Not_Publish"))) {
     phase6AssertProductionAudioMixAllowed(existingOutput);
     if (payload?.unlock_titles === true) {
@@ -6277,6 +6981,15 @@ export async function updateOutputCreative(request, env, url, authorization) {
     const outputFields = phase6AudioMixFieldsFromPayload(payload, current);
     if (typeof payload?.review_notes === "string") {
       outputFields.Review_Notes = phase6Text(payload.review_notes, 10000) || null;
+    }
+    if (nextVisualTimeline) {
+      outputFields.Studio_Creative_Settings_JSON = JSON.stringify({
+        ...(current.creative_settings || {}),
+        schemaVersion: "p020.phase6.ui.2",
+        visual_timeline: nextVisualTimeline,
+        savedAt: new Date().toISOString(),
+        savedBy: authorization?.email || null,
+      });
     }
     await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, id, {
       method: "PATCH",
@@ -6293,12 +7006,20 @@ export async function updateOutputCreative(request, env, url, authorization) {
     return respond(request, env, {
       ok: true,
       saved: true,
-      audio_only: true,
+      audio_only: !nextVisualTimeline,
+      visual_timeline_saved: Boolean(nextVisualTimeline),
       shared_vertical_short_siblings: sharedSiblings.length,
       record: mapPhase6CreativeOutput(refreshedOutput),
       slides: phase6SlidesWithTitleRenderInput(refreshedOutput, slides),
+      visual_timeline: nextVisualTimeline || (
+        phase6VisualTimelineEnabledForOutput(env, refreshedOutput)
+          ? buildVisualTimelineFromSlides(slides, { previousTimeline: current.creative_settings?.visual_timeline || null })
+          : null
+      ),
       title_lock: phase6TitleLockView(refreshedOutput, slides),
-      message: sharedSiblings.length > 1
+      message: nextVisualTimeline
+        ? "Visual timeline saved. Existing approval and publishing gates are unchanged; render/TTS were not started."
+        : sharedSiblings.length > 1
         ? "Audio mix saved for all Reels, Shorts, and TikTok on this post. Apply mix & rerender once to refresh every preview."
         : "Audio mix saved. Apply mix & rerender to hear it on a new preview.",
     });
@@ -6308,15 +7029,31 @@ export async function updateOutputCreative(request, env, url, authorization) {
 
   const creativeSettings = payload?.creative_settings && typeof payload.creative_settings === "object"
     ? payload.creative_settings : current.creative_settings || {};
-  const { title_lock: _clientTitleLock, ...safeCreativeSettings } = creativeSettings;
+  // Canonical visual/script state is written only through its dedicated guarded
+  // paths. Generic creative saves may update styling defaults but must never erase,
+  // replace or roll back accepted visual/script revisions with client snapshots.
+  const {
+    title_lock: _clientTitleLock,
+    visual_timeline: _clientVisualTimeline,
+    visual_script: _clientVisualScript,
+    ...safeCreativeSettings
+  } = creativeSettings;
   const existingTitleLock = current.creative_settings?.title_lock && typeof current.creative_settings.title_lock === "object"
     ? current.creative_settings.title_lock : {};
+  const existingVisualTimeline = current.creative_settings?.visual_timeline && typeof current.creative_settings.visual_timeline === "object"
+    ? current.creative_settings.visual_timeline : null;
+  const existingVisualScript = current.creative_settings?.visual_script && typeof current.creative_settings.visual_script === "object"
+    ? current.creative_settings.visual_script : null;
   const settingsSnapshot = {
     ...safeCreativeSettings,
     schemaVersion: "p020.phase6.ui.2",
     savedAt: new Date().toISOString(),
     savedBy: authorization?.email || null,
     title_lock: existingTitleLock,
+    ...((nextVisualTimeline || existingVisualTimeline)
+      ? { visual_timeline: nextVisualTimeline || existingVisualTimeline }
+      : {}),
+    ...(existingVisualScript ? { visual_script: existingVisualScript } : {}),
   };
   outputFields.Studio_Creative_Settings_JSON = JSON.stringify(settingsSnapshot);
   if (payload?.voiceover_tail_seconds !== undefined) {
@@ -6637,6 +7374,10 @@ export async function phase6BuildPreviewRenderPackage(env, outputRecord) {
   if (!slides.length) throw new HttpError(409, "At least one included slide is required for a Phase 6 preview rerender");
 
   const settings = mapped.creative_settings || {};
+  const visualTimelineOn = phase6VisualTimelineEnabledForOutput(env, outputRecord);
+  const visualTimeline = visualTimelineOn ? (settings.visual_timeline || null) : null;
+  const visualScriptOn = phase6VisualScriptEnabledForOutput(env, outputRecord);
+  const visualScript = visualScriptOn ? (settings.visual_script || null) : null;
   const globalVoiceoverVolume = phase6Clamp(mapped?.voiceover?.volume, 0, 1.25, 1);
   const defaultDuration = phase6Clamp(settings.default_slide_duration_seconds, 0.5, 60, 4);
   const tailSeconds = 0;
@@ -6656,17 +7397,41 @@ export async function phase6BuildPreviewRenderPackage(env, outputRecord) {
     const measuredFrames = voiceEnabled
       ? Math.max(1, Math.ceil(phase6Number(slide.voiceover.duration_seconds, 0) * 30))
       : 1;
-    let durationFrames = voiceEnabled ? measuredFrames : requestedFrames;
+    if (visualTimelineOn && voiceEnabled && measuredFrames > requestedFrames + 1) {
+      throw new HttpError(
+        409,
+        `Narration for scene ${slide.name || slide.id} exceeds its visual duration. Shorten/regenerate the scene narration or extend the visual; Studio will not silently change the visual timing.`,
+      );
+    }
+    const durationFrames = visualTimelineOn ? requestedFrames : (voiceEnabled ? measuredFrames : requestedFrames);
 
     const url = slide.preview_url;
     if (!url) throw new HttpError(409, `Slide ${slide.name || slide.id} has no usable image URL for preview rerender`);
 
     clips.push({
       id: `slide-${i + 1}`,
+      sceneId: slide.scene_id || slide.id,
       slideRecordId: slide.id,
       slideNumber: phase6Number(slide.slide_number, i + 1),
       order: i + 1,
       url,
+      mediaKind: isVisualTimelineVideo(slide) ? "video" : "photo",
+      ...(visualTimelineOn && isVisualTimelineVideo(slide) && Number.isFinite(Number(slide.source_in_ms))
+        ? {
+            startFromSeconds: Math.max(0, Number(slide.source_in_ms) / 1000),
+            sourceInMs: Math.max(0, Math.round(Number(slide.source_in_ms))),
+            sourceOutMs: Number.isFinite(Number(slide.source_out_ms))
+              ? Math.max(0, Math.round(Number(slide.source_out_ms)))
+              : null,
+          }
+        : {}),
+      nativeAudioMode: visualTimelineOn ? String(slide.native_audio_mode || "inherit").toLowerCase() : "inherit",
+      ...(visualTimelineOn && String(slide.native_audio_mode || "").toLowerCase() === "preserve"
+        ? { keepSourceAudio: true }
+        : {}),
+      ...(visualTimelineOn && String(slide.native_audio_mode || "").toLowerCase() === "mute"
+        ? { keepSourceAudio: false, muted: true }
+        : {}),
       fitMode: phase6Text(slide.fit_mode || "fill_crop", 60),
       focalPoint: phase6Text(slide.focal_point || "center", 60),
       durationFrames,
@@ -6755,11 +7520,27 @@ export async function phase6BuildPreviewRenderPackage(env, outputRecord) {
       ...(priorManifest?.voiceover || {}),
       globalVolume: globalVoiceoverVolume,
     },
+    sceneVoiceoverAuthority: visualTimelineOn,
     voiceoverTailSeconds: tailSeconds,
+    visualTimeline: visualTimelineOn && visualTimeline ? {
+      revision: visualTimeline.revision,
+      sequenceHash: visualTimeline.sequence_hash,
+    } : null,
+    visualScript: visualScriptOn && visualScript ? {
+      revision: visualScript.revision,
+      scriptHash: visualScript.script_hash,
+    } : null,
+    studioRevision: {
+      visualRevision: visualTimelineOn && visualTimeline ? Math.max(0, Number(visualTimeline.revision) || 0) : 0,
+      visualSequenceHash: visualTimelineOn && visualTimeline ? String(visualTimeline.sequence_hash || "") : "",
+      scriptRevision: visualScriptOn && visualScript ? Math.max(0, Number(visualScript.revision) || 0) : 0,
+      scriptHash: visualScriptOn && visualScript ? String(visualScript.script_hash || "") : "",
+    },
     endHoldFrames: 0,
     totalFrames,
     totalSeconds: totalFrames / 30,
     slides: clips.map(clip => ({
+      sceneId: clip.sceneId,
       slideRecordId: clip.slideRecordId,
       order: clip.order,
       targetAspectRatio: ratio,
@@ -6769,6 +7550,12 @@ export async function phase6BuildPreviewRenderPackage(env, outputRecord) {
       fitMode: clip.fitMode,
       focalPoint: clip.focalPoint,
       durationFrames: clip.durationFrames,
+      mediaKind: clip.mediaKind,
+      startFromSeconds: clip.startFromSeconds ?? null,
+      sourceInMs: clip.sourceInMs ?? null,
+      sourceOutMs: clip.sourceOutMs ?? null,
+      nativeAudioMode: clip.nativeAudioMode || "inherit",
+      voiceoverMode: clip.voiceover?.enabled === false ? "silent" : "narrated",
     })),
     phase6Preview: {
       preparedAt: new Date().toISOString(),
@@ -9344,6 +10131,8 @@ export async function phase6AutoVoicePrepForOutput(env, outputRecord, authorizat
     // Always release the request-scoping token, even when Make/ElevenLabs fails.
     for (const slideId of scopedSlideIds) {
       try {
+        const currentSlide = await airtableFetch(env, PHASE6_CAROUSEL_SLIDES_TABLE, slideId);
+        if (String(f(currentSlide, "Studio_Voice_Prep_Request_ID") || "").trim() !== requestId) continue;
         await airtableFetch(env, PHASE6_CAROUSEL_SLIDES_TABLE, slideId, {
           method: "PATCH",
           body: JSON.stringify({ fields: { Studio_Voice_Prep_Request_ID: null }, typecast: false }),

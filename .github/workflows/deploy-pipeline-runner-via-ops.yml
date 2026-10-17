@@ -250,3 +250,7 @@ jobs:
 # 2026-10-16 FBS2 1703 connection-aborted R2 upload reuse and Quality Agent signature
 
 # 2026-10-16 FBS2 Output 1703 upload timeout permanent multipart fix, runner 2026-10-16-fbs2-multipart-storage
+
+
+# Trigger pipeline-runner deploy for visual-aware voiceover TTS/render revision guards
+# 2026-10-17 service_version=2026-10-17-visual-voiceover-revision-guard

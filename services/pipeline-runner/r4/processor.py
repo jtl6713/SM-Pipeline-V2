@@ -23,6 +23,7 @@ from r4.render_request import choose_render_request, timing_blocks_render, voice
 from render.fields import field, field_str, first_linked_id
 from render.remotion_client import RemotionClient
 from render.settings import get_render_server_url, get_render_volumes
+from render.studio_revision import render_package_revision_error
 
 
 STUDIO_STREAM_PREFIX = "/api/media-assets/"
@@ -226,6 +227,27 @@ def process_one(
         return {
             "processed": False,
             "reason": "waiting_for_timing",
+            "output_record_id": output["id"],
+            "output_id": field_str(output, "Output_ID"),
+            "make_scenario_id": MAKE_SCENARIO_ID,
+            "make_scenario_name": MAKE_SCENARIO_NAME,
+        }
+
+    revision_error = render_package_revision_error(output)
+    if revision_error:
+        client.update_record(
+            PLATFORM_OUTPUTS_TABLE,
+            output["id"],
+            {
+                "Render_Status": "Blocked",
+                "Remotion_Error_Message": revision_error[:10000],
+            },
+            typecast=True,
+        )
+        return {
+            "processed": False,
+            "reason": "stale_render_package",
+            "error": revision_error,
             "output_record_id": output["id"],
             "output_id": field_str(output, "Output_ID"),
             "make_scenario_id": MAKE_SCENARIO_ID,

@@ -1,5 +1,6 @@
 from p0202.constants import SEARCH_FORMULA
 from p0202.eligibility import eligibility_reason
+from p0202.processor import request_still_current
 from stages.registry import STAGE_NAMES, is_implemented
 
 
@@ -43,3 +44,41 @@ def test_p0202_gate_failures():
     assert eligibility_reason(_ready(Slide_Voice_ID="")) == "missing_voice_id"
     assert eligibility_reason(_ready(Studio_Voice_Prep_Request_ID="")) == "missing_request_token"
     assert eligibility_reason(_ready(Slide_Voiceover_URL="https://drive.google.com/uc?id=abc")) == "already_has_url"
+
+
+def test_p0202_stale_tts_request_cannot_overwrite_newer_scene_request():
+    original = _ready(
+        Studio_Voice_Prep_Request_ID="studio-recOUT-100",
+        Slide_Voiceover_Text="Original narration.",
+        Slide_Voice_ID="voice-a",
+    )
+    assert request_still_current(original, _ready(
+        Studio_Voice_Prep_Request_ID="studio-recOUT-100",
+        Slide_Voiceover_Text="Original narration.",
+        Slide_Voice_ID="voice-a",
+    )) is True
+    assert request_still_current(original, _ready(
+        Studio_Voice_Prep_Request_ID="studio-recOUT-101",
+        Slide_Voiceover_Text="Original narration.",
+        Slide_Voice_ID="voice-a",
+    )) is False
+    assert request_still_current(original, _ready(
+        Studio_Voice_Prep_Request_ID="studio-recOUT-100",
+        Slide_Voiceover_Text="New accepted narration.",
+        Slide_Voice_ID="voice-a",
+    )) is False
+    assert request_still_current(original, _ready(
+        Studio_Voice_Prep_Request_ID="studio-recOUT-100",
+        Slide_Voiceover_Text="Original narration.",
+        Slide_Voice_ID="voice-b",
+    )) is False
+
+
+def test_p0202_completion_rejects_replaced_slide_or_ineligible_state():
+    original = _ready()
+    replacement = _ready()
+    replacement["id"] = "recDIFFERENTSLIDE"
+    assert request_still_current(original, replacement) is False
+    assert request_still_current(original, _ready(Slide_Voiceover_Status="Generated")) is False
+    assert request_still_current(original, _ready(**{"Deleted From Carousel": True})) is False
+    assert request_still_current(original, None) is False

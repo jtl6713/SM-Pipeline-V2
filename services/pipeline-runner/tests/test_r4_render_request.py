@@ -271,3 +271,43 @@ def test_r4_repairs_studio_relative_stream_url_before_remotion():
     assert clips[0]["googleDriveFileId"] == "drive123"
     assert clips[1]["url"].startswith("https://media.chicagoshining.com/")
     assert client.updates
+
+
+def test_r4_p020_carries_studio_revision_contract_to_remotion_props():
+    import json
+
+    contract = {
+        "visualRevision": 4,
+        "visualSequenceHash": "vt1-current",
+        "scriptRevision": 9,
+        "scriptHash": "vs1-current",
+    }
+    output = _photo_output(
+        Creative_Render_Manifest_JSON=json.dumps({"studioRevision": contract}),
+    )
+    route, payload = choose_render_request(output, None, default_music=0.35, default_voice=1.0)
+    assert route == "p020_manifest"
+    assert payload["studioRevision"] == contract
+
+
+def test_r4_scene_authority_suppresses_legacy_global_voiceover_even_when_url_exists():
+    import json
+
+    contract = {
+        "visualRevision": 4,
+        "visualSequenceHash": "vt1-silent",
+        "scriptRevision": 9,
+        "scriptHash": "vs1-silent",
+    }
+    output = _photo_output(
+        Voiceover_URL="https://example.com/legacy-global.mp3",
+        Creative_Render_Manifest_JSON=json.dumps({
+            "sceneVoiceoverAuthority": True,
+            "studioRevision": contract,
+        }),
+    )
+    route, payload = choose_render_request(output, None, default_music=0.35, default_voice=1.0)
+    assert route == "p020_manifest"
+    assert payload["sceneVoiceoverAuthority"] is True
+    assert "voiceoverUrl" not in payload
+    assert "voiceover" not in payload

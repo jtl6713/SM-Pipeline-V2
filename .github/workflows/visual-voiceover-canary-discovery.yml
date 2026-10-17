@@ -1,0 +1,194 @@
+name: Discover Visual Voiceover Canary Candidate
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/visual-voiceover-canary-discovery.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: visual-voiceover-canary-discovery
+  cancel-in-progress: true
+
+jobs:
+  discover:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      TARGET_WORKER: chicagoshining-studio-api
+      VERIFY_BRIDGE: chicagoshining-visual-voiceover-canary-discovery
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Build and upload one-time read-only Studio service bridge
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "${CLOUDFLARE_API_TOKEN:-}"
+          test -n "${CLOUDFLARE_ACCOUNT_ID:-}"
+          TOKEN=$(python - <<'PY'
+          import secrets
+          print(secrets.token_urlsafe(32))
+          PY
+          )
+          printf '%s' "$TOKEN" >/tmp/verify-token.txt
+          cat >/tmp/verify-worker.js <<EOF
+          export default {
+            async fetch(request, env) {
+              const url = new URL(request.url);
+              if (url.pathname !== "/$TOKEN/outputs") return new Response("Not found", {status:404});
+              if (request.method !== "GET") return new Response("Method not allowed", {status:405});
+              const profile = String(url.searchParams.get("profile") || "");
+              const allowed = new Set(["recT2rbKX3MF7cVFU", "recF7UAn0LkMZZrWZ"]);
+              if (!allowed.has(profile)) return Response.json({ok:false,error:"profile-not-allowed"}, {status:400});
+              const internal = new Request(
+                "https://studio.chicagoshining.com/api/outputs?mode=latest&profile=" + encodeURIComponent(profile),
+                {
+                  method:"GET",
+                  headers:{
+                    "Cf-Access-Authenticated-User-Email":"joseph.t.logan@gmail.com",
+                    "Origin":"https://studio.chicagoshining.com",
+                    "Accept":"application/json",
+                    "Cache-Control":"no-store"
+                  }
+                }
+              );
+              const response = await env.STUDIO_API.fetch(internal);
+              return new Response(await response.text(), {
+                status:response.status,
+                headers:{"Content-Type":"application/json","Cache-Control":"no-store"}
+              });
+            }
+          };
+          EOF
+          cat >/tmp/verify-metadata.json <<EOF
+          {"main_module":"worker.js","compatibility_date":"2026-08-02","bindings":[{"type":"service","name":"STUDIO_API","service":"$TARGET_WORKER"}]}
+          EOF
+          node --check /tmp/verify-worker.js
+          API_ROOT="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID"
+          AUTH="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
+          curl -sS -X DELETE "$API_ROOT/workers/scripts/$VERIFY_BRIDGE" -H "$AUTH" >/dev/null || true
+          code=$(curl -sS -o /tmp/verify-upload.json -w '%{http_code}' -X PUT "$API_ROOT/workers/scripts/$VERIFY_BRIDGE/content" -H "$AUTH" \
+            -F 'metadata=@/tmp/verify-metadata.json;type=application/json' \
+            -F 'worker.js=@/tmp/verify-worker.js;type=application/javascript+module;filename=worker.js')
+          test "$code" -ge 200 -a "$code" -lt 300
+          jq -e '.success==true' /tmp/verify-upload.json >/dev/null
+          curl -fsS -X POST "$API_ROOT/workers/scripts/$VERIFY_BRIDGE/subdomain" -H "$AUTH" -H 'Content-Type: application/json' \
+            --data '{"enabled":true,"previews_enabled":false}' -o /tmp/verify-subdomain.json
+          jq -e '.success==true and .result.enabled==true' /tmp/verify-subdomain.json >/dev/null
+
+      - name: Read recent production outputs through existing Studio service-binding pattern
+        shell: bash
+        run: |
+          set -euo pipefail
+          API_ROOT="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID"
+          AUTH="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
+          curl -fsS "$API_ROOT/workers/subdomain" -H "$AUTH" -o /tmp/account-subdomain.json
+          SUBDOMAIN=$(jq -er '.result.subdomain' /tmp/account-subdomain.json)
+          TOKEN=$(cat /tmp/verify-token.txt)
+          BASE="https://$VERIFY_BRIDGE.$SUBDOMAIN.workers.dev/$TOKEN/outputs"
+          : >/tmp/all-output-records.ndjson
+          for profile in recT2rbKX3MF7cVFU recF7UAn0LkMZZrWZ; do
+            code=000
+            for i in $(seq 1 40); do
+              code=$(curl -sS --max-time 60 -o "/tmp/outputs-$profile.json" -w '%{http_code}' \
+                -H 'Accept: application/json' \
+                -H 'Cache-Control: no-store' \
+                "$BASE?profile=$profile" || true)
+              if grep -Fq 'error code: 1042' "/tmp/outputs-$profile.json" 2>/dev/null; then
+                echo "bridge_not_ready profile=$profile attempt=$i http=$code"
+                sleep 3
+                continue
+              fi
+              [[ "$code" == "200" ]] && break
+              echo "bridge_read_retry profile=$profile attempt=$i http=$code"
+              sleep 3
+            done
+            if [[ "$code" != "200" ]]; then
+              echo "::error::Read-only Studio service-binding request returned HTTP $code for profile $profile"
+              head -c 400 "/tmp/outputs-$profile.json" || true
+              exit 1
+            fi
+            jq -e '.records|type=="array"' "/tmp/outputs-$profile.json" >/dev/null
+            jq -c --arg profile "$profile" '.records[]? | {profile:$profile,row:.}' "/tmp/outputs-$profile.json" >>/tmp/all-output-records.ndjson
+          done
+
+      - name: Select nonpublishing canary candidates
+        shell: bash
+        run: |
+          set -euo pipefail
+          node <<'NODE'
+          const fs = require('fs');
+          const lines = fs.readFileSync('/tmp/all-output-records.ndjson','utf8').split(/\n/).filter(Boolean);
+          const source = lines.map(line => JSON.parse(line));
+
+          const first = (value, ...keys) => {
+            for (const key of keys) {
+              if (value && value[key] !== undefined && value[key] !== null) return value[key];
+              if (value?.fields && value.fields[key] !== undefined && value.fields[key] !== null) return value.fields[key];
+            }
+            return null;
+          };
+          const truthy = (value) => {
+            if (value === true || value === 1) return true;
+            return ['1','true','yes','on','checked'].includes(String(value ?? '').trim().toLowerCase());
+          };
+          const mapped = source.map(({profile,row}) => {
+            const outputStatus = String(first(row,'output_status','Output_Status') || '').trim();
+            const renderStatus = String(first(row,'render_status','Render_Status') || '').trim();
+            const reviewStatus = String(first(row,'review_status','Review_Status') || '').trim();
+            const publishStatus = String(first(row,'publish_status','Publish_Status') || '').trim();
+            const publishedAt = String(first(row,'published_at','Published_At') || '').trim();
+            const finalFile = String(first(row,'final_file_url','Final_File_URL') || '').trim();
+            return {
+              profile,
+              record_id: String(first(row,'id','record_id','recordId','airtable_record_id') || '').trim(),
+              output_id: first(row,'output_id','Output_ID'),
+              do_not_publish: truthy(first(row,'do_not_publish','Do_Not_Publish')),
+              output_status: outputStatus,
+              render_status: renderStatus,
+              review_status: reviewStatus,
+              publish_status: publishStatus,
+              platform: String(first(row,'platform','Platform') || '').trim(),
+              output_type: String(first(row,'studio_output_type','Studio_Output_Type','format','Format') || '').trim(),
+              has_final_file: Boolean(finalFile),
+              published: Boolean(publishedAt) || publishStatus.toLowerCase() === 'published' || outputStatus.toLowerCase() === 'published',
+            };
+          });
+          const safe = mapped.filter(row => row.record_id && row.do_not_publish && !row.published);
+          const preferred = safe.filter(row =>
+            row.render_status.toLowerCase() === 'rendered' &&
+            row.has_final_file &&
+            ['ready for review','in production'].includes(row.output_status.toLowerCase())
+          );
+          fs.writeFileSync('/tmp/candidates.json', JSON.stringify({ok:true,scanned:mapped.length,preferred:preferred.slice(0,10),safe:safe.slice(0,25)}, null, 2));
+          NODE
+          jq -e '.ok==true and (.scanned|type=="number")' /tmp/candidates.json >/dev/null
+          echo "visual_voiceover_canary_discovery=PASS scanned=$(jq -r .scanned /tmp/candidates.json) preferred=$(jq -r '.preferred|length' /tmp/candidates.json) safe=$(jq -r '.safe|length' /tmp/candidates.json)"
+          jq -c '{preferred,safe}' /tmp/candidates.json
+
+      - name: Upload sanitized candidate evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: visual-voiceover-canary-candidates-${{ github.run_id }}
+          path: /tmp/candidates.json
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: Delete one-time read-only Studio service bridge
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -z "${CLOUDFLARE_API_TOKEN:-}" || -z "${CLOUDFLARE_ACCOUNT_ID:-}" ]]; then
+            exit 0
+          fi
+          API_ROOT="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID"
+          AUTH="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
+          curl -sS -X DELETE "$API_ROOT/workers/scripts/$VERIFY_BRIDGE" -H "$AUTH" -o /tmp/verify-delete.json || true
