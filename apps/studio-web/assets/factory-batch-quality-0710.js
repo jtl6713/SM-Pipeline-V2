@@ -3,7 +3,7 @@
  * R2-backed GET /api/factory/approval-batches endpoint.
  *
  * This is NOT the Quality Agent ticket inventory. It is an operational health
- * panel scoped to the currently selected Content Profile's latest batch.
+ * panel scoped to Factory's optional city filter or the Operations profile.
  * No approval POST or publishing action is performed here.
  */
 (() => {
@@ -63,10 +63,11 @@
       return '<p class="factory-batch-quality-unavailable">Worker has not supplied Quality Agent batch signals. Do not assume there are no findings.</p>';
     }
     if (!data.job_id) return '<p class="subtle">No recent Factory batches in this view.</p>';
+    const global = data.scope === "all";
     const total = Number(data.total) || 0;
-    const pending = Number(data.pending_count) || 0;
-    const failed = Number(data.failed_count) || 0;
-    const countMismatch = total !== (
+    const pending = Number(global ? data.totals?.pending : data.pending_count) || 0;
+    const failed = Number(global ? data.totals?.failed : data.failed_count) || 0;
+    const countMismatch = !global && total !== (
       (Number(data.approved_count) || 0) +
       (Number(data.skipped_count) || 0) + pending + failed
     );
@@ -85,11 +86,11 @@
         <p class="factory-batch-quality-action">${esc(catalog.guidance)}</p>
       </li>`;
     }).join("");
-    return `<p class="factory-batch-quality-meta">${data.scope === "all" ? "Across visible Factory profiles" : "Current profile"} · ${total} latest batch outputs · ${pending} pending · ${failed} failed</p>
+    return `<p class="factory-batch-quality-meta">${global ? `${Number(data.totals?.batches)||0} recent Factory batches` : `${total} latest batch outputs`} · ${pending} pending · ${failed} failed</p>
       ${countMismatch ? '<p class="factory-batch-quality-unavailable">Batch totals disagree: investigate status reconciliation.</p>' : ""}
       ${signals.length ? `<p class="factory-batch-quality-heading">${signals.length} Quality Agent finding${signals.length === 1 ? "" : "s"} for this batch</p>
         <ul class="factory-batch-quality-list">${rowMarkup}</ul>`
-        : '<p class="factory-batch-quality-clear">No Quality Agent findings in the latest batch.</p>'}`;
+         : `<p class="factory-batch-quality-clear">No Quality Agent findings in ${global ? "recent Factory batches" : "the latest batch"}.</p>`}`;
   }
 
   function render(profileId, data, error = "") {
