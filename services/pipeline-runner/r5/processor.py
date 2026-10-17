@@ -14,6 +14,7 @@ from r5.constants import COMPLETE_STATUSES, MAKE_SCENARIO_ID, MAKE_SCENARIO_NAME
 from r5.formulas import r5_exact_output_formula, r5_production_formula
 from render.fields import field_str
 from render.remotion_client import RemotionClient
+from render.studio_revision import render_job_revision_error
 from render.settings import get_google_drive_folder_id, get_render_server_url
 
 
@@ -90,17 +91,28 @@ def _preview_settings(client: AirtableClient) -> tuple[str, str, str, str]:
     return upload_url.rstrip("/"), upload_secret, prefix, public_base.rstrip("/")
 
 
+def _safe_preview_token(value: str) -> str:
+    clean = "".join(ch for ch in str(value or "").strip() if ch.isalnum() or ch in {"-", "_"})
+    return clean[:120]
+
+
 def _upload_preview(
     client: AirtableClient,
     *,
     output_id: str,
     content: bytes,
+    revision_token: str | None = None,
 ) -> tuple[str, str]:
     upload_url, upload_secret, prefix, public_base = _preview_settings(client)
     if not upload_url or not upload_secret:
         raise RuntimeError("R2 preview upload settings are not configured")
 
-    key = f"{prefix}/{output_id}/current.mp4"
+    token = _safe_preview_token(revision_token or "")
+    key = (
+        f"{prefix}/{output_id}/jobs/{token}.mp4"
+        if token
+        else f"{prefix}/{output_id}/current.mp4"
+    )
     import requests
 
     response = requests.put(
@@ -118,6 +130,39 @@ def _upload_preview(
     return key, f"{public_base}/{key}"
 
 
+def _stale_completion_error(
+    current: dict[str, Any],
+    *,
+    expected_job_id: str,
+    expected_status_url: str,
+) -> str | None:
+    current_job = field_str(current, "Remotion_Job_ID")
+    current_status_url = field_str(current, "Remotion_Status_URL")
+    if expected_job_id and current_job and current_job != expected_job_id:
+        return (
+            f"Stale render completion: job {expected_job_id} is no longer current "
+            f"(current job is {current_job})."
+        )
+    if expected_status_url and current_status_url and current_status_url != expected_status_url:
+        return "Stale render completion: the Remotion status URL no longer matches the current render."
+    return render_job_revision_error(current)
+
+
+def _current_or_stale(
+    client: AirtableClient,
+    output_record_id: str,
+    *,
+    expected_job_id: str,
+    expected_status_url: str,
+) -> tuple[dict[str, Any], str | None]:
+    current = client.get_record(PLATFORM_OUTPUTS_TABLE, output_record_id)
+    return current, _stale_completion_error(
+        current,
+        expected_job_id=expected_job_id,
+        expected_status_url=expected_status_url,
+    )
+
+
 def process_one_output(
     client: AirtableClient,
     output: dict[str, Any],
@@ -132,6 +177,24 @@ def process_one_output(
             "output_record_id": output["id"],
             "make_scenario_id": MAKE_SCENARIO_ID,
         }
+
+    expected_job_id = field_str(output, "Remotion_Job_ID")
+    expected_status_url = status_url
+    current, stale_error = _current_or_stale(
+        client,
+        output["id"],
+        expected_job_id=expected_job_id,
+        expected_status_url=expected_status_url,
+    )
+    if stale_error:
+        return {
+            "processed": False,
+            "reason": "stale_render_completion",
+            "error": stale_error,
+            "output_record_id": output["id"],
+            "make_scenario_id": MAKE_SCENARIO_ID,
+        }
+    output = current
 
     remotion = RemotionClient(get_render_server_url(client))
     status = remotion.get_status(status_url)
@@ -154,6 +217,19 @@ def process_one_output(
         return {"processed": False, "reason": "still_rendering", **preview}
 
     if route == "failed":
+        current, stale_error = _current_or_stale(
+            client,
+            output["id"],
+            expected_job_id=expected_job_id,
+            expected_status_url=expected_status_url,
+        )
+        if stale_error:
+            return {
+                "processed": False,
+                "reason": "stale_render_completion",
+                "error": stale_error,
+                **preview,
+            }
         error = str(payload.get("error") or payload.get("message") or "Renderer reported failed status.")
         client.update_record(
             PLATFORM_OUTPUTS_TABLE,
@@ -199,6 +275,45 @@ def process_one_output(
         file_id = str(drive_file.get("id") or "")
         drive_link = f"https://drive.google.com/file/d/{file_id}/view" if file_id else ""
 
+        current, stale_error = _current_or_stale(
+            client,
+            output["id"],
+            expected_job_id=expected_job_id,
+            expected_status_url=expected_status_url,
+        )
+        if stale_error:
+            return {
+                "processed": False,
+                "reason": "stale_render_completion",
+                "error": stale_error,
+                "drive_file_id": file_id,
+                **preview,
+            }
+
+        preview_key, preview_url = _upload_preview(
+            client,
+            output_id=output["id"],
+            content=mp4_bytes,
+            revision_token=job_id or expected_job_id,
+        )
+
+        current, stale_error = _current_or_stale(
+            client,
+            output["id"],
+            expected_job_id=expected_job_id,
+            expected_status_url=expected_status_url,
+        )
+        if stale_error:
+            return {
+                "processed": False,
+                "reason": "stale_render_completion",
+                "error": stale_error,
+                "drive_file_id": file_id,
+                "orphan_preview_key": preview_key,
+                **preview,
+            }
+
+        completed_at = _now_iso()
         client.update_record(
             PLATFORM_OUTPUTS_TABLE,
             output["id"],
@@ -206,53 +321,62 @@ def process_one_output(
                 "Final_File_Error_Message": "",
                 "Remotion_Error_Message": "",
                 "Final_File_ID": file_id,
-                "Output_Status": output_status_after_successful_render(output),
-                "Output_Filename": field_str(output, "Output_Filename"),
+                "Output_Status": output_status_after_successful_render(current),
+                "Output_Filename": field_str(current, "Output_Filename"),
                 "Final_File_Storage_Status": "Uploaded",
                 "Render_Server_URL": render_url,
                 "Output_URL": drive_link,
                 "Remotion_Job_ID": job_id,
                 "Final_File_URL": drive_link,
                 "Remotion_Status_URL": status_url,
-                "Render_Status": "Rendered",
-                **review_fields_after_successful_render(output),
-            },
-        )
-
-        remotion.cleanup_job(job_id, filename=field_str(output, "Output_Filename") or None)
-
-        preview_key, preview_url = _upload_preview(client, output_id=output["id"], content=mp4_bytes)
-        client.update_record(
-            PLATFORM_OUTPUTS_TABLE,
-            output["id"],
-            {
                 "Studio_Preview_URL": preview_url,
                 "Studio_Preview_R2_Key": preview_key,
-                "Studio_Preview_Updated_At": _now_iso(),
+                "Studio_Preview_Updated_At": completed_at,
+                "Render_Status": "Rendered",
+                **review_fields_after_successful_render(current),
             },
         )
+
+        remotion.cleanup_job(job_id, filename=field_str(current, "Output_Filename") or None)
     except Exception as exc:
         message = str(exc) or "Render completed, but final Google Drive upload did not complete."
-        existing_url = field_str(output, "Final_File_URL")
-        same_job = field_str(output, "Remotion_Job_ID") == job_id
+        current, stale_error = _current_or_stale(
+            client,
+            output["id"],
+            expected_job_id=expected_job_id,
+            expected_status_url=expected_status_url,
+        )
+        if stale_error:
+            try:
+                remotion.cleanup_job(job_id, filename=field_str(output, "Output_Filename") or None)
+            except Exception:
+                pass
+            return {
+                "processed": False,
+                "reason": "stale_render_completion",
+                "error": stale_error,
+                **preview,
+            }
+        existing_url = field_str(current, "Final_File_URL")
+        same_job = field_str(current, "Remotion_Job_ID") == job_id
         if existing_url and "404" in message.lower() and same_job:
             client.update_record(
                 PLATFORM_OUTPUTS_TABLE,
                 output["id"],
                 {
                     "Render_Status": "Rendered",
-                    "Output_Status": output_status_after_successful_render(output),
+                    "Output_Status": output_status_after_successful_render(current),
                     "Final_File_Error_Message": "",
                     "Remotion_Error_Message": "",
-                    **review_fields_after_successful_render(output),
+                    **review_fields_after_successful_render(current),
                 },
                 typecast=True,
             )
             return {
                 "processed": True,
                 "route": "complete",
-                "drive_file_id": field_str(output, "Final_File_ID"),
-                "studio_preview_url": field_str(output, "Studio_Preview_URL"),
+                "drive_file_id": field_str(current, "Final_File_ID"),
+                "studio_preview_url": field_str(current, "Studio_Preview_URL"),
                 **preview,
             }
         transient = any(
@@ -273,6 +397,19 @@ def process_one_output(
         )
         # Keep Remotion's completed job harvestable. A read-timeout while copying
         # the MP4 must not permanently mark the output Failed / Blocked.
+        current, stale_error = _current_or_stale(
+            client,
+            output["id"],
+            expected_job_id=expected_job_id,
+            expected_status_url=expected_status_url,
+        )
+        if stale_error:
+            return {
+                "processed": False,
+                "reason": "stale_render_completion",
+                "error": stale_error,
+                **preview,
+            }
         client.update_record(
             PLATFORM_OUTPUTS_TABLE,
             output["id"],
