@@ -45,8 +45,9 @@ export function factoryBatchSummary(job) {
     })),
   };
 }
-export function factoryBatchBuild({ profileId, requestId, records, note = "", now = new Date().toISOString() }) {
+export function factoryBatchBuild({ profileId, requestId, records, note = "", groupRequestId = null, now = new Date().toISOString() }) {
   factoryBatchKey(profileId, requestId);
+  if (groupRequestId !== null && !/^[A-Za-z0-9_-]{12,128}$/.test(String(groupRequestId))) throw Error("Invalid parent group request ID");
   if (!Array.isArray(records) || !records.length || records.length > 100) throw Error("Select 1–100 output records");
   const seen = new Set(), items = [];
   for (const record of records) {
@@ -65,7 +66,7 @@ export function factoryBatchBuild({ profileId, requestId, records, note = "", no
   }
   return {
     schema: "studio.factory-batch.2", id: "fb_" + requestId, request_id: requestId,
-    profile_id: profileId, status: "queued", created_at: now, updated_at: now,
+    profile_id: profileId, group_request_id: groupRequestId, status: "queued", created_at: now, updated_at: now,
     notes: String(note || "").slice(0, 3000), items,
   };
 }
@@ -104,7 +105,10 @@ export async function factoryBatchEnqueue(bucket, options) {
   const prior = await get(bucket, key);
   if (!prior) throw Error("Submission still committing; inspect activity status");
   const previousIds = prior.value.items.map(x => x.id).join(",");
-  if (previousIds !== job.items.map(x => x.id).join(",")) throw Error("request_id already bound to different outputs");
+  if (previousIds !== job.items.map(x => x.id).join(",") ||
+      (prior.value.group_request_id || null) !== (job.group_request_id || null)) {
+    throw Error("request_id already bound to different outputs or parent group");
+  }
   return { job: prior.value, already_submitted: true };
 }
 export async function factoryBatchRead(bucket, profileId, requestId) {

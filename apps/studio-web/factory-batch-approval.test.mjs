@@ -24,7 +24,7 @@ test("Factory batch UI has selection, activity, refresh, inspect and failed-only
   assert.match(js, /already_running && !batch\.already_submitted/);
   assert.match(js, /refreshFactoryBatchActivity\(\)\.catch/);
   assert.match(js, /visibilitychange/);
-  assert.match(js, /action: "retry"/);
+  assert.match(js, /action: batch.group \? "retry_group" : "retry"/);
   assert.match(css, /position:sticky/);
   assert.match(css, /@media\(max-width:560px\)/);
 });
@@ -51,11 +51,19 @@ test("Finished durable batches reconcile the live Needs Eyes desk and clear sele
   assert.match(reconcile, /renderDesk\(desk\)/);
   assert.match(reconcile, /confirmed\.every\(\(id\) => !stillReviewing\.has\(id\)\)/,
     "Stale read copies must be retried, not considered successfully reconciled");
-  assert.match(js, /renderFactoryBatchActivity\(batch\);[\s\S]{0,180}reconcileFinishedBatchDesk\(batch\)\.catch/);
+  assert.match(js, /renderFactoryBatchActivity\(batch\);[\s\S]{0,180}reconcileFinishedBatchDesk\(batch\?\.batches\?\.\[0\] \|\| batch\)\.catch/);
   assert.match(js, /ready\.forEach\(\(card\) => state\.selectedOutputs\.delete\(card\.id\)\);\s*saveFactorySelection\(\);[\s\S]{0,220}if \(state\.desk\) renderDesk\(state\.desk\);/,
     "Submitting must repaint DOM selection once the accepted IDs leave selectedOutputs");
 });
 
+test("Global group UI is gated; pilot path remains restricted when not enabled", () => {
+  assert.match(js,/state\.batchGlobal\?\.enabled/);
+  assert.match(js,/action: global \? "start_group" : "start"/);
+  assert.match(js,/readyFactoryOutputs\(true\)/);
+  assert.match(js,/max_per_profile/);
+  assert.match(js,/profile_ids/);
+  assert.match(js,/retry_group/);
+});
 test("Story v3 UI remains dormant while Reel v2 restricts selection", () => {
   const fn = js.slice(js.indexOf("function canSelectBatchOutput("),
     js.indexOf("function factoryProfileId(", js.indexOf("function canSelectBatchOutput(")));

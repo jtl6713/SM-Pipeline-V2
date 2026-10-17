@@ -10,9 +10,11 @@
     batch: null,
     batchTimer: null,
     batchDetailsOpen: false,
+    inspectedBatchKey: "",
     lastBatchProfile: "",
     batchApprovalsEnabled: null,
     batchRollout: null,
+    batchGlobal: null,
     reconciledBatchDeskKey: "",
     reconcilingBatchDesk: false,
     batchDeskReconcileNextAttempt: 0,
@@ -247,9 +249,14 @@
   }
 
   function canSelectBatchOutput(card) {
+    if (state.batchApprovalsEnabled === false) return false;
+    if (state.batchGlobal?.enabled) return String(card?.platform||"")==="Instagram"
+      && ["Reel","Story"].includes(String(card?.studio_output_type||card?.format||""));
     const rollout = state.batchRollout;
-    if (!rollout || !["chicago_ig_reel_v1", "chicago_ig_reels_v2",
-      "chicago_ig_reel_story_v3"].includes(rollout.mode)) return true;
+    if (!rollout) return state.batchApprovalsEnabled !== false;
+    if (rollout.mode === "isolated_staging") return true;
+    if (!["chicago_ig_reel_v1", "chicago_ig_reels_v2",
+      "chicago_ig_reel_story_v3"].includes(rollout.mode)) return false;
     const type = String(card?.studio_output_type || card?.format || "");
     return String(card?.profile_id || "") === String(rollout.profile_id || "")
       && String(card?.platform || "") === "Instagram"
@@ -287,22 +294,22 @@
   function factoryMatchesProfile(card) {
     return !factoryProfileId() || String(card?.profile_id || "") === factoryProfileId();
   }
-  function readyFactoryOutputs() {
+  function readyFactoryOutputs(includeOtherProfiles=false) {
     return (state.desk?.lanes?.needs_eyes || [])
-      .filter((card) => factoryMatchesProfile(card) && card?.kind === "output"
+      .filter((card) => (includeOtherProfiles || factoryMatchesProfile(card)) && card?.kind === "output"
         && canReviewActions(card) && canSelectBatchOutput(card));
   }
 
   function updateFactoryBatchToolbar() {
-    const ready = new Set(readyFactoryOutputs().map((card) => card.id));
+    const ready = new Set(readyFactoryOutputs(true).map((card) => card.id));
     const selectable = [...state.selectedOutputs].filter((id) => ready.has(id)).length;
     const missing = state.selectedOutputs.size - selectable;
     const count = $("factoryBatchSelectionCount");
-    if (count) count.textContent = `${selectable} output${selectable === 1 ? "" : "s"} selected${missing ? ` · ${missing} outside current pilot or no longer ready` : ""}`;
+    if (count) count.textContent = `${selectable} output${selectable === 1 ? "" : "s"} selected${missing ? ` · ${missing} no longer eligible` : ""}`;
     const submit = $("factoryBatchSubmit");
     if (submit) {
-      const limit = Math.max(1, Number(state.batchRollout?.max_items || 100));
-      submit.disabled = !selectable || selectable > limit || state.submittingBatch || state.batchApprovalsEnabled === false;
+      const limit = Math.max(1, Number(state.batchGlobal?.enabled ? state.batchGlobal.max_total : (state.batchRollout?.max_items || 100)));
+      submit.disabled = !selectable || selectable > limit || state.submittingBatch || state.batchApprovalsEnabled !== true;
       submit.title = state.batchApprovalsEnabled === false
         ? "Batch approval rollout is disabled for this profile; individual approvals remain available."
         : selectable > limit ? `Select at most ${limit} output${limit === 1 ? "" : "s"} for this rollout.` : "";
@@ -313,7 +320,10 @@
     const rolloutNotice = $("factoryBatchRolloutNotice");
     if (rolloutNotice) {
       const rollout = state.batchRollout;
-      if (["chicago_ig_reel_v1", "chicago_ig_reels_v2",
+      if (state.batchGlobal?.enabled) {
+        rolloutNotice.hidden = false;
+        rolloutNotice.textContent = "Global Factory: up to 20 Instagram Reels or Stories per batch, maximum 10 per profile. Profile-local scheduling remains authoritative.";
+      } else if (["chicago_ig_reel_v1", "chicago_ig_reels_v2",
         "chicago_ig_reel_story_v3"].includes(rollout?.mode)) {
         rolloutNotice.hidden = false;
         rolloutNotice.textContent = state.batchApprovalsEnabled
@@ -344,34 +354,47 @@
       (batch?.job_id ? [batch] : []);
     const totals = batch?.totals || {
       batches: batches.length,
-      active: batches.filter(row => ["queued", "running"].includes(row.status)).length,
+      active: batches.filter(row => ["queued", "running", "enqueuing"].includes(row.status)).length,
       approved: batches.reduce((sum, row) => sum + Number(row.approved_count || 0), 0),
+      pending: batches.reduce((sum, row) => sum + Number(row.pending_count || 0), 0),
       failed: batches.reduce((sum, row) => sum + Number(row.failed_count || 0), 0),
     };
     if (count) count.textContent = String(Number(totals.batches) || 0);
-    summary.textContent = `${Number(totals.active) || 0} active · ${Number(totals.approved) || 0} approved · ${Number(totals.failed) || 0} failed`;
+    summary.textContent = `${Number(totals.active) || 0} active · ${Number(totals.approved) || 0} approved · ${Number(totals.pending) || 0} pending · ${Number(totals.failed) || 0} failed`;
     if (updated) updated.textContent = batch?.history_complete === false
       ? "Recent history (bounded window)" : "Latest activity · all matching profiles";
+    const latest = batches.find(row => row.job_id === state.inspectedBatchKey) || batches[0] || null;
+    if (state.inspectedBatchKey && !batches.some(row => row.job_id === state.inspectedBatchKey)) {
+      state.inspectedBatchKey = latest?.job_id || "";
+    }
     if (recent) recent.innerHTML = batches.length
       ? batches.slice(0, 8).map(row => {
         const item = (row.items || [])[0] || {};
-        const label = item.title || [item.platform, item.format].filter(Boolean).join(" ") || "Approval batch";
-        const outputLabel = item.output_id ? `Output #${item.output_id}` : `${row.total || 0} outputs`;
-        const stateLabel = ["running", "queued"].includes(row.status) ? "Processing"
-          : row.failed_count ? "Needs attention" : "Completed";
-        const passed = Number(row.approved_count || 0);
-        return `<div class="factory-batch-recent-row">
-          <div class="factory-batch-recent-info">
+        const groupLabel = row.group ? `${row.profile_ids?.length || 1} profiles`
+          : factoryProfileLabel(row.profile_id);
+        const outputLabel = row.group ? `${row.total || 0} outputs`
+          : item.output_id ? `Output #${item.output_id}` : `${row.total || 0} outputs`;
+        const label = row.group ? `Global approval · ${groupLabel}`
+          : item.title || [item.platform, item.format].filter(Boolean).join(" ") || "Approval batch";
+        const active = ["running", "queued", "enqueuing"].includes(row.status);
+        const stateLabel = active ? "Processing" : row.failed_count ? "Needs attention" : "Completed";
+        const completed = Number(row.done_count ?? (Number(row.total||0)-Number(row.pending_count||0)));
+        const percent = row.total ? Math.round(100 * completed / row.total) : 0;
+        const picked = latest?.job_id === row.job_id;
+        return `<button type="button" class="factory-batch-recent-row factory-batch-activity-choice${picked ? " is-selected" : ""}"
+          data-factory-activity-key="${esc(row.job_id)}" aria-pressed="${picked}"
+          aria-label="Inspect ${esc(label)}">
+          <span class="factory-batch-recent-info">
             <strong>${esc(label)}</strong>
-            <span>${esc(factoryProfileLabel(row.profile_id))} · ${esc(outputLabel)} · ${esc([item.platform, item.format].filter(Boolean).join(" "))}</span>
-          </div>
-          <div class="factory-batch-recent-result">
-            <strong>${esc(stateLabel)}</strong><span>${passed} approved · ${Number(row.failed_count) || 0} failed</span>
-          </div>
-        </div>`;
+            <span>${esc(outputLabel)} · ${Number(row.approved_count)||0} approved · ${Number(row.pending_count)||0} pending</span>
+            <span class="factory-batch-mini-progress" aria-hidden="true"><span style="width:${percent}%"></span></span>
+          </span>
+          <span class="factory-batch-recent-result">
+            <strong>${esc(stateLabel)}</strong><span>${Number(row.failed_count)||0} failed</span>
+          </span>
+        </button>`;
       }).join("")
       : '<p class="subtle">No recent approval batches in this Factory view.</p>';
-    const latest = batches[0] || null;
     if (inspect) {
       inspect.hidden = !latest;
       inspect.setAttribute("aria-expanded", String(state.batchDetailsOpen));
@@ -382,16 +405,39 @@
     }
     details.hidden = !state.batchDetailsOpen || !latest;
     const items = Array.isArray(latest?.items) ? latest.items : [];
-    details.innerHTML = latest ? `<ul class="factory-batch-item-list">${items.map(item =>
-      `<li><strong>${esc(item.title || [item.platform, item.format].filter(Boolean).join(" ") || "Output")}</strong>
-      <span>${esc(item.output_id ? `Output #${item.output_id}` : "Output")} · ${esc(item.status || "pending")}</span>
-      ${item.error ? `<small>${esc(item.error)}</small>` : ""}</li>`).join("")}</ul>
+    const children = Array.isArray(latest?.children) ? latest.children : [];
+    const childrenHtml = children.length ? `<div class="factory-batch-child-grid">${children.map(child => {
+      const done = Number(child.done_count ?? (Number(child.total||0)-Number(child.pending_count||0)));
+      const percent = child.total ? Math.round(100*done/child.total) : 0;
+      return `<section class="factory-batch-child">
+        <strong>${esc(factoryProfileLabel(child.profile_id))}</strong>
+        <span>${esc(["queued","running","enqueuing","missing"].includes(child.status) ? "Processing" : child.failed_count ? "Needs attention" : "Completed")}</span>
+        <progress max="${Number(child.total)||1}" value="${done}">${percent}%</progress>
+        <small>${Number(child.approved_count)||0} approved · ${Number(child.pending_count)||0} pending · ${Number(child.failed_count)||0} failed</small>
+      </section>`;
+    }).join("")}</div>` : "";
+    details.innerHTML = latest ? `<div class="factory-batch-inspect-heading">
+        <strong>${esc(latest.group ? "Global approval · per-profile progress" : factoryProfileLabel(latest.profile_id))}</strong>
+        <span>${Number(latest.done_count)||0} / ${Number(latest.total)||0} processed</span>
+      </div>
+      ${childrenHtml}
+      <ul class="factory-batch-item-list">${items.map(item =>
+        `<li><strong>${esc(item.title || [item.platform, item.format].filter(Boolean).join(" ") || "Output")}</strong>
+        <span>${esc(item.output_id ? `Output #${item.output_id}` : "Output")} · ${esc(item.profile_id ? factoryProfileLabel(item.profile_id)+" · " : "")}${esc(item.status || "pending")}</span>
+        ${item.error ? `<small>${esc(item.error)}</small>` : ""}</li>`).join("")}</ul>
       <details class="factory-batch-technical"><summary>Technical reference</summary>
       <code>${esc(latest.job_id)}</code> <button type="button" class="secondary-button"
       data-factory-copy-batch="${esc(latest.job_id)}">Copy batch ID</button></details>` : "";
     details.querySelector("[data-factory-copy-batch]")?.addEventListener("click", () => {
       const value = String(latest?.job_id || "");
       if (value) navigator.clipboard?.writeText(value).catch(() => {});
+    });
+    recent?.querySelectorAll("[data-factory-activity-key]").forEach(button => {
+      button.addEventListener("click", () => {
+        state.inspectedBatchKey = button.getAttribute("data-factory-activity-key") || "";
+        state.batchDetailsOpen = true;
+        renderFactoryBatchActivity(state.batch);
+      });
     });
   }
 
@@ -411,7 +457,7 @@
     state.batchDeskReconcileNextAttempt = Date.now() + 10000;
     try {
       const desk = await fetchJson("/api/factory/desk", { cache: "no-store" });
-      if (state.batch?.job_id !== key) return;
+      if (!(state.batch?.batches || [state.batch]).some(row => row?.job_id === key)) return;
       renderDesk(desk);
       const stillReviewing = new Set((desk.lanes?.needs_eyes || [])
         .filter((card) => card?.kind === "output").map((card) => String(card.id || "")));
@@ -434,15 +480,16 @@
       const batch = await fetchJson(`/api/factory/approval-batches?${params.toString()}`, { cache: "no-store" });
       state.lastBatchFetchMs = Date.now();
       if (typeof batch.approvals_enabled === "boolean") {
-        const before = JSON.stringify(state.batchRollout);
+        const before = JSON.stringify([state.batchRollout,state.batchGlobal]);
         state.batchApprovalsEnabled = batch.approvals_enabled;
         state.batchRollout = batch.rollout || null;
+        state.batchGlobal = batch.global_rollout || null;
         updateFactoryBatchToolbar();
-        if (state.desk && before !== JSON.stringify(state.batchRollout)) renderDesk(state.desk);
+        if (state.desk && before !== JSON.stringify([state.batchRollout,state.batchGlobal])) renderDesk(state.desk);
       }
       renderFactoryBatchActivity(batch);
       document.dispatchEvent(new CustomEvent("factory:batch-status", { detail: batch }));
-      reconcileFinishedBatchDesk(batch).catch(() => {});
+      reconcileFinishedBatchDesk(batch?.batches?.[0] || batch).catch(() => {});
       return batch;
     } catch (error) {
       const summary = $("factoryBatchSummary");
@@ -454,25 +501,30 @@
   async function submitFactoryBatchApprovals() {
     if (state.submittingBatch) return;
     if (state.batchApprovalsEnabled === false) { setStatus("Batch approvals are not enabled yet; individual approvals still work.", true); return; }
-    const ready = readyFactoryOutputs().filter((card) => state.selectedOutputs.has(card.id));
+    const ready = readyFactoryOutputs(true).filter((card) => state.selectedOutputs.has(card.id));
     if (!ready.length) { updateFactoryBatchToolbar(); setStatus("Select one or more review-ready outputs.", true); return; }
     const profiles = [...new Set(ready.map((card) => String(card.profile_id || "").trim()))];
-    if (ready.length > Math.max(1, Number(state.batchRollout?.max_items || 100))) {
-      setStatus(`The current pilot permits at most ${Math.max(1, Number(state.batchRollout?.max_items || 1))} eligible outputs.`, true);
+    const global = state.batchGlobal?.enabled === true;
+    const limit = Math.max(1, Number(global ? state.batchGlobal.max_total : (state.batchRollout?.max_items || 100)));
+    if (ready.length > limit) {
+      setStatus(`The current rollout permits at most ${limit} eligible outputs.`, true);
       return;
     }
-    if (profiles.length !== 1 || !/^rec[A-Za-z0-9]+$/.test(profiles[0])) {
-      setStatus("Select outputs from a single known profile per batch. Other selections have been preserved.", true);
+    if (profiles.some(id=>!/^rec[A-Za-z0-9]+$/.test(id)) || (!global && profiles.length!==1)) {
+      setStatus("Global approvals are not enabled for this selection; select one authorized profile.", true);
       return;
     }
-    // The existing canonical Approve All engine owns profile-local scheduling.
+    if (global && profiles.some(id=>ready.filter(card=>card.profile_id===id).length>state.batchGlobal.max_per_profile)) {
+      setStatus("Select at most 10 outputs from each profile.",true);return;
+    }
+    // Each child owns profile-local scheduling.
     // Refuse to mix profiles rather than stamp an output in the wrong timezone.
     state.submittingBatch = true;
     updateFactoryBatchToolbar();
     const selectionIds = ready.map((card) => card.id);
     let pending = null;
     try { pending = JSON.parse(localStorage.getItem(FACTORY_PENDING_REQUEST_KEY) || "null"); } catch {}
-    const reuseRequest = pending && pending.profile_id === profiles[0]
+    const reuseRequest = pending && pending.profile_id === (global ? "global" : profiles[0])
       && JSON.stringify(pending.ids) === JSON.stringify(selectionIds)
       && Date.now() - Number(pending.saved_ms || 0) < 24 * 60 * 60 * 1000;
     const requestId = reuseRequest
@@ -480,15 +532,15 @@
       : (typeof window.crypto?.randomUUID === "function"
         ? window.crypto.randomUUID() : `factory_${Date.now()}_${Math.random().toString(36).slice(2)}`).replace(/[^A-Za-z0-9_-]/g, "");
     try { localStorage.setItem(FACTORY_PENDING_REQUEST_KEY, JSON.stringify({
-      request_id: requestId, profile_id: profiles[0], ids: selectionIds, saved_ms: Date.now(),
+      request_id: requestId, profile_id: global ? "global" : profiles[0], ids: selectionIds, saved_ms: Date.now(),
     })); } catch {}
     try {
       const batch = await fetchJson("/api/factory/approval-batches", {
         method: "POST",
         body: JSON.stringify({
-          action: "start",
+          action: global ? "start_group" : "start",
           request_id: requestId,
-          content_profile_id: profiles[0],
+          ...(!global ? {content_profile_id: profiles[0]} : {}),
           notes: "Studio Factory Batch Approval",
           record_ids: ready.map((card) => card.id),
           items: ready.map((card) => ({
@@ -504,8 +556,8 @@
         setStatus("A previous batch for this profile is still running. Selection is preserved; submit again after it completes.", true);
         return;
       }
-      state.lastBatchProfile = profiles[0];
-      try { localStorage.setItem(FACTORY_LAST_BATCH_KEY, JSON.stringify({ job_id: batch.job_id, profile_id: profiles[0] })); } catch {}
+      state.lastBatchProfile = global ? "global" : profiles[0];
+      try { localStorage.setItem(FACTORY_LAST_BATCH_KEY, JSON.stringify({ job_id: batch.job_id, profile_id: global ? "global" : profiles[0] })); } catch {}
       try { localStorage.removeItem(FACTORY_PENDING_REQUEST_KEY); } catch {}
       ready.forEach((card) => state.selectedOutputs.delete(card.id));
       saveFactorySelection();
@@ -514,7 +566,7 @@
       if (state.desk) renderDesk(state.desk);
       closeFactoryPreview();
       renderFactoryBatchActivity(batch);
-      setStatus(`Batch ${batch.job_id} accepted. You can leave Factory; processing continues on the server.`);
+      setStatus(`${global ? "Global " : ""}batch accepted for ${ready.length} outputs across ${profiles.length} profiles. Server processing continues after leaving Factory.`);
       // Never wait for all approvals in the click handler.
     } catch (error) {
       setStatus(`Batch submission not confirmed: ${error.message || error}. Check Activity before retrying.`, true);
@@ -526,7 +578,8 @@
   }
 
   async function retryFactoryBatchFailures() {
-    const batch = state.batch;
+    const batch = state.batch?.batches?.find(row => row.job_id === state.inspectedBatchKey)
+      || state.batch?.batches?.[0] || state.batch;
     if (!batch?.job_id || !batch.can_retry || state.submittingBatch) return;
     state.submittingBatch = true;
     updateFactoryBatchToolbar();
@@ -534,12 +587,13 @@
       const result = await fetchJson("/api/factory/approval-batches", {
         method: "POST",
         body: JSON.stringify({
-          action: "retry", request_id: batch.request_id,
-          content_profile_id: batch.profile_id,
+          action: batch.group ? "retry_group" : "retry", request_id: batch.request_id,
+          ...(!batch.group ? {content_profile_id: batch.profile_id} : {}),
         }),
       });
-      renderFactoryBatchActivity(result);
+      state.inspectedBatchKey = result.job_id || batch.job_id;
       setStatus(result.message || "Failed items sent for retry.");
+      await refreshFactoryBatchActivity(true);
     } catch (error) {
       setStatus(`Retry not confirmed: ${error.message || error}`, true);
       await refreshFactoryBatchActivity();

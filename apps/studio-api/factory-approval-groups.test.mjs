@@ -4,6 +4,7 @@ import {
   FACTORY_GROUP_PREFIX, factoryApprovalGroupPlan, factoryApprovalGroupBuild,
   factoryApprovalGroupEnqueue, factoryApprovalGroupRead, factoryApprovalGroupResume,
   factoryApprovalGroupStatus, factoryApprovalGroupRetryFailures,
+  factoryApprovalGroupList, factoryApprovalGroupCronScan,
 } from "./factory-approval-groups.mjs";
 import {factoryBatchRead, factoryBatchDrain, factoryBatchCounts} from "./factory-approval-queue.mjs";
 
@@ -80,6 +81,9 @@ test("one global submission creates exactly one durable parent and three childre
   assert.equal(first.pending_count,4);
   assert.equal(count(bucket,FACTORY_GROUP_PREFIX+"/"),1);
   assert.equal(count(bucket,"studio/state/factory-approvals/v2/jobs/"),3);
+  const chicagoJob=await factoryBatchRead(bucket,chi,first.children.find(row=>row.profile_id===chi).request_id);
+  assert.equal(chicagoJob.group_request_id,opts.requestId);
+  assert.equal(first.items.length,4);
   const second=await factoryApprovalGroupEnqueue(bucket,{
     ...opts,records:[outputs[3],outputs[0],outputs[2],outputs[1],outputs[0]],
   });
@@ -150,8 +154,24 @@ test("independent profile child drains roll up partial success then only retry f
   assert.equal(commits,4);
   await assert.rejects(()=>factoryApprovalGroupRetryFailures(bucket,opts.requestId),/No terminal failed/);
 });
-test("parent grouping module is dormant: production route does not call it",async()=>{
-  const {readStudioWorkerSource}=await import("./worker-source-reader.mjs");
-  const worker=readStudioWorkerSource();
-  assert.doesNotMatch(worker,/factoryApprovalGroupEnqueue|factoryApprovalGroupResume/);
+test("group status and discovery are durable and multi-profile",async()=>{
+  const bucket=new FakeR2();
+  await factoryApprovalGroupEnqueue(bucket,opts);
+  const history=await factoryApprovalGroupList(bucket,{profileId:nyc});
+  assert.equal(history.groups.length,1);
+  assert.equal(history.groups[0].group,true);
+  assert.equal(history.groups[0].profile_ids.length,3);
+  const scanned=await factoryApprovalGroupCronScan(bucket,{maxScan:1});
+  assert.deepEqual(scanned,[opts.requestId]);
+  const group=history.groups[0];
+  assert.equal(group.items.length,4);
+  assert.equal(group.items.find(item=>item.id===outputs[1].id).profile_id,nyc);
+});
+test("global submission route is explicitly gated and wired to parent/child ledger",async()=>{
+  const worker=(await import("node:fs")).readFileSync(new URL("./worker-functions-04.mjs",import.meta.url),"utf8");
+  assert.match(worker,/factoryApprovalGroupEnqueue/);
+  assert.match(worker,/factoryApprovalGroupResume/);
+  assert.match(worker,/factoryGlobalPolicy\(env\)/);
+  assert.match(worker,/if \(!policy\.enabled\) throw new HttpError\(403/);
+  assert.match(worker,/groupRequestId:parent.request_id|group_request_id/);
 });
