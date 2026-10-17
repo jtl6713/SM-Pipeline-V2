@@ -20,6 +20,9 @@ import {
   stageScheduleReservation,
 } from "./schedule-reservation-authority.mjs";
 
+export const SCHEDULE_RESERVATION_EXTERNAL_WRITE_TIMEOUT_MS = 30 * 1000;
+export const SCHEDULE_RESERVATION_HEARTBEAT_INTERVAL_MS = 20 * 1000;
+
 function clean(value, max = 256) {
   return String(value ?? "").trim().slice(0, max);
 }
@@ -119,6 +122,35 @@ export async function runAtomicScheduleTransaction(env, args = {}, callbacks = {
   let token = null;
   let externalCommitPossible = false;
   let committed = false;
+  let heartbeatTimer = null;
+  let heartbeatInFlight = false;
+  let heartbeatFailure = null;
+  let activeWriteAbort = null;
+
+  const heartbeatIntervalMs = Math.max(
+    5_000,
+    Math.min(45_000, Number(options.heartbeatIntervalMs) || SCHEDULE_RESERVATION_HEARTBEAT_INTERVAL_MS),
+  );
+  const externalWriteTimeoutMs = Math.max(
+    5_000,
+    Math.min(60_000, Number(options.externalWriteTimeoutMs) || SCHEDULE_RESERVATION_EXTERNAL_WRITE_TIMEOUT_MS),
+  );
+  const stopHeartbeat = () => {
+    if (heartbeatTimer != null) clearInterval(heartbeatTimer);
+    heartbeatTimer = null;
+  };
+  const heartbeatTick = async () => {
+    if (!token?.enabled || heartbeatInFlight || committed) return;
+    heartbeatInFlight = true;
+    try {
+      await heartbeatScheduleReservation(env, token);
+    } catch (error) {
+      heartbeatFailure ||= error;
+      try { activeWriteAbort?.abort(error); } catch {}
+    } finally {
+      heartbeatInFlight = false;
+    }
+  };
 
   try {
     const acquired = await acquireScheduleReservation(env, lane, {
@@ -141,6 +173,8 @@ export async function runAtomicScheduleTransaction(env, args = {}, callbacks = {
       enabled: true,
       fencing_generation: acquired.fencing_generation,
     };
+    heartbeatTimer = setInterval(() => { void heartbeatTick(); }, heartbeatIntervalMs);
+    if (typeof heartbeatTimer?.unref === "function") heartbeatTimer.unref();
 
     phase = "plan";
     const plan = await callbacks.plan({
@@ -173,12 +207,38 @@ export async function runAtomicScheduleTransaction(env, args = {}, callbacks = {
     externalCommitPossible = true;
 
     phase = "write";
-    const writeResult = await callbacks.write(plan, {
-      token,
-      action,
-      selected_iso: selectedIso,
-      previous_iso: previousIso,
-    });
+    const controller = new AbortController();
+    activeWriteAbort = controller;
+    const writeTimeout = setTimeout(() => {
+      controller.abort(new ScheduleReservationError(
+        "Authoritative scheduling write exceeded the bounded external-write window",
+        {
+          status: 504,
+          code: "schedule_external_write_timeout",
+          details: { timeout_ms: externalWriteTimeoutMs },
+        },
+      ));
+    }, externalWriteTimeoutMs);
+    if (typeof writeTimeout?.unref === "function") writeTimeout.unref();
+    let writeResult;
+    try {
+      writeResult = await callbacks.write(plan, {
+        token,
+        action,
+        selected_iso: selectedIso,
+        previous_iso: previousIso,
+        signal: controller.signal,
+        external_write_timeout_ms: externalWriteTimeoutMs,
+      });
+    } finally {
+      clearTimeout(writeTimeout);
+      activeWriteAbort = null;
+    }
+    if (heartbeatFailure) throw heartbeatFailure;
+    // The write can legitimately consume part of the lease. Renew ownership
+    // before the authoritative re-read so a healthy transaction is not fenced
+    // between PATCH completion and verification.
+    await heartbeatScheduleReservation(env, token);
 
     phase = "verify";
     const authoritativeIsoRaw = await callbacks.verify(writeResult, plan, {
@@ -218,6 +278,7 @@ export async function runAtomicScheduleTransaction(env, args = {}, callbacks = {
       });
     }
 
+    stopHeartbeat();
     return {
       value: writeResult,
       atomic_schedule: true,
@@ -227,6 +288,8 @@ export async function runAtomicScheduleTransaction(env, args = {}, callbacks = {
       released: Boolean(release?.released),
     };
   } catch (error) {
+    stopHeartbeat();
+    try { activeWriteAbort?.abort(error); } catch {}
     // Before begin-verify there is no external scheduling write in flight:
     // record a Retryable Failure and safely release. After begin-verify the
     // failure path deliberately quarantines the lane as Recovery Required.
