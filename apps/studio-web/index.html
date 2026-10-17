@@ -23,7 +23,7 @@
 <link rel="stylesheet" href="/assets/production-progress-0601.css?v=0.6.709-overview-fast-refresh">
 <link rel="stylesheet" href="/assets/production-render-layout-0678.css?v=0.6.709-overview-fast-refresh">
 <link rel="stylesheet" href="/assets/factory-layout-0680.css?v=0.6.709-overview-fast-refresh">
-<link rel="stylesheet" href="/assets/factory-batch-quality-0710.css?v=0.6.709-overview-fast-refresh">
+<link rel="stylesheet" href="/assets/factory-batch-quality-0710.css?v=0.6.709-overview-fast-refresh&global=factory-v1">
 <link rel="stylesheet" href="/assets/idea-drawer-safe-offset.css?v=0.6.709-overview-fast-refresh">
 </head>
 <body>
@@ -2123,29 +2123,41 @@
 
 
  <section id="page-factory" class="page">
- <div class="page-heading">
- <div><span class="eyebrow">Parallel desk</span><h1>Factory</h1><p>Four streams in one column, Needs eyes first. All streams start collapsed — expand a header to work that queue.</p></div>
- <button class="secondary-button" id="factoryDeskRefresh" data-refresh="factory">Refresh</button>
+ <div class="page-heading factory-global-heading">
+ <div><span class="eyebrow">Global operations</span><h1>Factory</h1><p>Review and approve work across every city in one place.</p></div>
+ <div class="factory-heading-controls">
+  <label for="factoryProfileFilter">Factory profile</label>
+  <select id="factoryProfileFilter" aria-label="Filter Factory by profile"><option value="">All Profiles</option></select>
+  <button class="secondary-button" id="factoryDeskRefresh" data-refresh="factory">Refresh</button>
+ </div>
  </div>
  <div class="form-message" id="factoryDeskStatus" aria-live="polite">Open Factory to load lanes.</div>
- <section class="factory-batch-activity" id="factoryBatchActivity" aria-label="Batch approval activity" aria-live="polite">
-  <div class="factory-batch-heading"><strong>Batch Approval Activity</strong><span id="factoryBatchUpdated">Live status from Studio</span></div>
-  <p id="factoryBatchSummary">Checking recent approvals…</p>
-  <section class="factory-batch-quality-panel" id="factoryBatchQuality" aria-labelledby="factoryBatchQualityHeading">
+ <section class="factory-batch-activity factory-global-summary" id="factoryBatchActivity" aria-label="Global batch approval activity" aria-live="polite">
+  <div class="factory-global-metrics">
+   <div class="factory-mini-metric">
+    <span class="factory-mini-label">Recent batches</span>
+    <strong id="factoryBatchMetricValue" class="factory-mini-value">—</strong>
+    <p id="factoryBatchSummary">Checking activity…</p>
+   </div>
+   <section class="factory-batch-quality-panel factory-mini-metric" id="factoryBatchQuality" aria-labelledby="factoryBatchQualityHeading">
     <div class="factory-batch-quality-head">
-      <h3 id="factoryBatchQualityHeading">Quality Agent · batch findings</h3>
-      <button type="button" class="secondary-button" id="factoryBatchQualityRefresh">Refresh findings</button>
+      <h3 id="factoryBatchQualityHeading" class="factory-mini-label">Quality Agent</h3>
+      <strong id="factoryBatchQualityMetric" class="factory-mini-value">—</strong>
     </div>
-    <div id="factoryBatchQualitySignals" aria-live="polite">
-      <p class="subtle">Checking the latest Factory batch…</p>
-    </div>
-  </section>
-  <div class="factory-batch-actions">
-   <button type="button" class="secondary-button" id="factoryBatchInspect" aria-expanded="false" aria-controls="factoryBatchDetails" hidden>Inspect items</button>
-   <button type="button" class="secondary-button" id="factoryBatchRetry" hidden>Retry Failed</button>
-   <button type="button" class="secondary-button" id="factoryBatchRefresh">Refresh status</button>
+    <div id="factoryBatchQualitySignals" aria-live="polite"><p class="subtle">Checking findings…</p></div>
+    <button type="button" class="secondary-button" id="factoryBatchQualityRefresh">Refresh findings</button>
+   </section>
   </div>
-  <div id="factoryBatchDetails" hidden></div>
+  <div class="factory-global-history">
+   <div class="factory-batch-heading"><strong>Recent approvals</strong><span id="factoryBatchUpdated">Authoritative batch history</span></div>
+   <div id="factoryBatchRecentList" class="factory-batch-recent-list" aria-live="polite"></div>
+   <div class="factory-batch-actions">
+    <button type="button" class="secondary-button" id="factoryBatchInspect" aria-expanded="false" aria-controls="factoryBatchDetails" hidden>View batch details</button>
+    <button type="button" class="secondary-button" id="factoryBatchRetry" hidden>Retry Failed</button>
+    <button type="button" class="secondary-button" id="factoryBatchRefresh">Refresh activity</button>
+   </div>
+   <div id="factoryBatchDetails" hidden></div>
+  </div>
  </section>
  <p class="subtle" id="factoryBatchRolloutNotice" aria-live="polite" hidden></p>
  <div class="factory-batch-toolbar" id="factoryBatchToolbar" role="group" aria-label="Selected Factory approvals">
@@ -2866,7 +2878,7 @@
     "/assets/studio-profile-identity-0599.js?v=0.6.709-overview-fast-refresh"
   ],
   "afterHome": [
-    "/assets/all-profiles-overview-1007.js?v=0.6.710-cache-age-fix"
+    "/assets/all-profiles-overview-1007.js?v=0.6.709-overview-fast-refresh&cache=age-fix"
   ],
   "groups": {
     "home": [],
@@ -2898,7 +2910,7 @@
     ],
     "factory": [
       "/assets/factory-open-target.js?v=0.6.709-overview-fast-refresh",
-      "/assets/factory-desk.js?v=0.6.709-overview-fast-refresh&rollout=chicago-ig-reel-v1&reconcile=finished-batch-v1"
+      "/assets/factory-desk.js?v=0.6.709-overview-fast-refresh&rollout=chicago-ig-reel-v1&reconcile=finished-batch-v1&global=factory-v1"
     ]
   },
   "prefetch": [
@@ -2914,7 +2926,7 @@
   ]
 }
  </script>
- <script defer src="/assets/factory-batch-quality-0710.js?v=0.6.709-overview-fast-refresh"></script>
+ <script defer src="/assets/factory-batch-quality-0710.js?v=0.6.709-overview-fast-refresh&global=factory-v1"></script>
  <script src="/assets/studio-lazy-pages.js?v=0.6.709-overview-fast-refresh"></script>
  <script>window.StudioLazyLoad.boot();</script>
 <script>

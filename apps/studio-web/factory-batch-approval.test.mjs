@@ -42,7 +42,7 @@ test("Factory submit returns after durable enqueue rather than awaiting 20 appro
 
 test("Finished durable batches reconcile the live Needs Eyes desk and clear selected row checkboxes", () => {
   const start = js.indexOf("async function reconcileFinishedBatchDesk(batch)");
-  const end = js.indexOf("async function refreshFactoryBatchActivity()", start);
+  const end = js.indexOf("async function refreshFactoryBatchActivity(", start);
   assert.ok(start > 0 && end > start, "Terminal-state Desk reconciliation must be implemented");
   const reconcile = js.slice(start, end);
   assert.match(reconcile, /\["completed", "failed"\]\.includes\(batch\.status\)/);
@@ -51,7 +51,7 @@ test("Finished durable batches reconcile the live Needs Eyes desk and clear sele
   assert.match(reconcile, /renderDesk\(desk\)/);
   assert.match(reconcile, /confirmed\.every\(\(id\) => !stillReviewing\.has\(id\)\)/,
     "Stale read copies must be retried, not considered successfully reconciled");
-  assert.match(js, /renderFactoryBatchActivity\(batch\);\s*reconcileFinishedBatchDesk\(batch\)\.catch/);
+  assert.match(js, /renderFactoryBatchActivity\(batch\);[\s\S]{0,180}reconcileFinishedBatchDesk\(batch\)\.catch/);
   assert.match(js, /ready\.forEach\(\(card\) => state\.selectedOutputs\.delete\(card\.id\)\);\s*saveFactorySelection\(\);[\s\S]{0,220}if \(state\.desk\) renderDesk\(state\.desk\);/,
     "Submitting must repaint DOM selection once the accepted IDs leave selectedOutputs");
 });

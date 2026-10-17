@@ -40,7 +40,8 @@ export function factoryBatchSummary(job) {
     can_retry: counts.failed_count > 0 && ["completed", "failed"].includes(job.status),
     items: job.items.map(item => ({
       id: item.id, output_id: item.output_id, platform: item.platform,
-      format: item.format, status: item.status, error: item.error || null,
+      format: item.format, title: item.title || null, content_id: item.content_id || null,
+      status: item.status, error: item.error || null,
     })),
   };
 }
@@ -55,7 +56,10 @@ export function factoryBatchBuild({ profileId, requestId, records, note = "", no
     seen.add(id);
     items.push({
       id, output_id: record.output_id || null, platform: record.platform || null,
-      format: record.format || null, status: "pending", error: null,
+      format: record.format || null,
+      title: String(record.title || "").slice(0, 180) || null,
+      content_id: record.content_id || null,
+      status: "pending", error: null,
       attempts: 0, next_attempt_ms: 0,
     });
   }
@@ -128,6 +132,51 @@ export async function factoryBatchList(bucket, profileId, { limit = 40, maxScan 
     .map(row => row.value)
     .sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at));
 }
+/**
+ * Read-only global Factory activity. Scan R2's canonical batch prefix (not the
+ * selected Studio profile). Reads a bounded recent window, never rewrites jobs.
+ * If the history is too large for the scan budget, explicitly mark it partial.
+ * This is a recent-activity window; the number of old batches is not fabricated.
+ */
+export async function factoryBatchListGlobal(bucket, {
+  profileId = "", limit = 30, maxScan = 2000,
+} = {}) {
+  assertBucket(bucket);
+  if (profileId && !ID.test(String(profileId))) throw Error("Invalid Factory filter");
+  const prefix = FACTORY_BATCH_PREFIX + "/jobs/";
+  const budget = Math.max(1, Math.min(10000, Math.floor(Number(maxScan) || 2000)));
+  const take = Math.max(1, Math.min(100, Math.floor(Number(limit) || 30)));
+  const objects = [];
+  let cursor;
+  let complete = true;
+  do {
+    const remaining = budget - objects.length;
+    if (remaining <= 0) { complete = false; break; }
+    const page = await bucket.list({
+      prefix, limit: Math.min(1000, remaining),
+      ...(cursor ? { cursor } : {}),
+    });
+    objects.push(...(page.objects || []));
+    if (!page.truncated) { cursor = null; break; }
+    if (!page.cursor || page.cursor === cursor) throw Error("Factory global batch cursor stalled");
+    cursor = page.cursor;
+  } while (cursor);
+  if (cursor) complete = false;
+  const match = /^studio\/state\/factory-approvals\/v2\/jobs\/(rec[A-Za-z0-9]+)\/([A-Za-z0-9_-]{12,128})\.json$/;
+  const matching = objects.filter(row => {
+    const parts = String(row.key || "").match(match);
+    return parts && (!profileId || parts[1] === profileId);
+  }).sort((a, b) => new Date(b.uploaded || 0) - new Date(a.uploaded || 0));
+  const latest = matching.slice(0, take);
+  const loaded = await Promise.all(latest.map(row => get(bucket, row.key)));
+  const jobs = loaded.filter(row => row?.value?.schema === "studio.factory-batch.2")
+    .map(row => row.value)
+    .sort((a, b) => Date.parse(b.updated_at || b.created_at || "") -
+      Date.parse(a.updated_at || a.created_at || ""));
+  return { jobs, complete: complete && matching.length <= take,
+    scanned: objects.length, matched: matching.length };
+}
+
 /**
  * Durable rolling cron cursor. R2 lists jobs lexicographically, so scanning
  * only the first 200 on every tick indefinitely starves later profile keys.

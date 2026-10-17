@@ -16,6 +16,7 @@
     reconciledBatchDeskKey: "",
     reconcilingBatchDesk: false,
     batchDeskReconcileNextAttempt: 0,
+    lastBatchFetchMs: 0,
   };
   const FACTORY_SELECTION_KEY = "studio.factory.batch-selection.v1";
   const FACTORY_LAST_BATCH_KEY = "studio.factory.last-batch.v1";
@@ -66,7 +67,7 @@
   function cardLabel(card) {
     const bits = [];
     if (card.content_id) bits.push(`C${card.content_id}`);
-    if (card.output_id) bits.push(`O${card.output_id}`);
+    if (card.output_id) bits.push(`Output #${card.output_id}`);
     if (card.production_request_number) bits.push(`PR${card.production_request_number}`);
     return bits.length ? `${bits.join(" · ")} — ${card.title || "Untitled"}` : (card.title || "Untitled");
   }
@@ -253,9 +254,41 @@
       && String(card?.studio_output_type || card?.format || "") === "Reel";
   }
 
+  function factoryProfileId() {
+    return String($("factoryProfileFilter")?.value || "").trim();
+  }
+  function factoryProfileLabel(profileId) {
+    const id = String(profileId || "");
+    if (!id) return "All Profiles";
+    const option = [...($("factoryProfileFilter")?.options || [])].find(row => row.value === id);
+    return option?.textContent?.trim() || "City profile";
+  }
+  function syncFactoryFilterOptions() {
+    const select = $("factoryProfileFilter");
+    if (!select) return;
+    const prior = select.value;
+    const profiles = new Map();
+    for (const option of $("studioProfileSelect")?.options || []) {
+      if (/^rec[A-Za-z0-9]+$/.test(option.value)) profiles.set(option.value, option.textContent.trim());
+    }
+    for (const card of Object.values(state.desk?.lanes || {}).flat()
+      .concat(state.desk?.needs_assets_candidates || [])) {
+      if (/^rec[A-Za-z0-9]+$/.test(card?.profile_id || "")) {
+        profiles.set(card.profile_id, card.profile_name || profiles.get(card.profile_id) || "City profile");
+      }
+    }
+    select.innerHTML = '<option value="">All Profiles</option>' +
+      [...profiles.entries()].sort((a, b) => a[1].localeCompare(b[1]))
+        .map(([id, name]) => `<option value="${esc(id)}">${esc(name)}</option>`).join("");
+    select.value = profiles.has(prior) ? prior : "";
+  }
+  function factoryMatchesProfile(card) {
+    return !factoryProfileId() || String(card?.profile_id || "") === factoryProfileId();
+  }
   function readyFactoryOutputs() {
     return (state.desk?.lanes?.needs_eyes || [])
-      .filter((card) => card?.kind === "output" && canReviewActions(card) && canSelectBatchOutput(card));
+      .filter((card) => factoryMatchesProfile(card) && card?.kind === "output"
+        && canReviewActions(card) && canSelectBatchOutput(card));
   }
 
   function updateFactoryBatchToolbar() {
@@ -293,42 +326,66 @@
   function renderFactoryBatchActivity(batch) {
     state.batch = batch || null;
     const summary = $("factoryBatchSummary");
+    const count = $("factoryBatchMetricValue");
+    const recent = $("factoryBatchRecentList");
     const inspect = $("factoryBatchInspect");
     const retry = $("factoryBatchRetry");
     const details = $("factoryBatchDetails");
     const updated = $("factoryBatchUpdated");
     if (!summary || !details) return;
-    if (!batch || batch.status === "idle" || !batch.job_id) {
-      summary.textContent = "No recent Factory approval batch for the selected profile.";
-      details.hidden = true;
-      details.innerHTML = "";
-      if (inspect) inspect.hidden = true;
-      if (retry) retry.hidden = true;
-      if (updated) updated.textContent = "No active batch";
-      return;
+    const batches = Array.isArray(batch?.batches) ? batch.batches :
+      (batch?.job_id ? [batch] : []);
+    const totals = batch?.totals || {
+      batches: batches.length,
+      active: batches.filter(row => ["queued", "running"].includes(row.status)).length,
+      approved: batches.reduce((sum, row) => sum + Number(row.approved_count || 0), 0),
+      failed: batches.reduce((sum, row) => sum + Number(row.failed_count || 0), 0),
+    };
+    if (count) count.textContent = String(Number(totals.batches) || 0);
+    summary.textContent = `${Number(totals.active) || 0} active · ${Number(totals.approved) || 0} approved · ${Number(totals.failed) || 0} failed`;
+    if (updated) updated.textContent = batch?.history_complete === false
+      ? "Recent history (bounded window)" : "Latest activity · all matching profiles";
+    if (recent) recent.innerHTML = batches.length
+      ? batches.slice(0, 8).map(row => {
+        const item = (row.items || [])[0] || {};
+        const label = item.title || [item.platform, item.format].filter(Boolean).join(" ") || "Approval batch";
+        const outputLabel = item.output_id ? `Output #${item.output_id}` : `${row.total || 0} outputs`;
+        const stateLabel = ["running", "queued"].includes(row.status) ? "Processing"
+          : row.failed_count ? "Needs attention" : "Completed";
+        const passed = Number(row.approved_count || 0);
+        return `<div class="factory-batch-recent-row">
+          <div class="factory-batch-recent-info">
+            <strong>${esc(label)}</strong>
+            <span>${esc(factoryProfileLabel(row.profile_id))} · ${esc(outputLabel)} · ${esc([item.platform, item.format].filter(Boolean).join(" "))}</span>
+          </div>
+          <div class="factory-batch-recent-result">
+            <strong>${esc(stateLabel)}</strong><span>${passed} approved · ${Number(row.failed_count) || 0} failed</span>
+          </div>
+        </div>`;
+      }).join("")
+      : '<p class="subtle">No recent approval batches in this Factory view.</p>';
+    const latest = batches[0] || null;
+    if (inspect) {
+      inspect.hidden = !latest;
+      inspect.setAttribute("aria-expanded", String(state.batchDetailsOpen));
     }
-    const n = Number(batch.total) || 0;
-    const success = Number(batch.approved_count) || 0;
-    const skipped = Number(batch.skipped_count) || 0;
-    const failed = Number(batch.failed_count) || 0;
-    const pending = Number(batch.pending_count) || 0;
-    const consistent = n === success + skipped + failed + pending;
-    summary.textContent = `${batch.status === "running" || batch.status === "queued" ? "Processing" : "Finished"} · ${n} total · ${success} approved · ${skipped} already satisfied/skipped · ${pending} pending · ${failed} failed${consistent ? "" : " · COUNTERS NEED RECONCILIATION"}`;
-    if (updated) updated.textContent = `Batch ${batch.job_id} · ${batch.updated_at ? new Date(batch.updated_at).toLocaleString() : "Status available"}`;
-    if (inspect) { inspect.hidden = false; inspect.setAttribute("aria-expanded", String(state.batchDetailsOpen)); }
     if (retry) {
-      retry.hidden = !(failed > 0 && batch.can_retry);
+      retry.hidden = !(latest?.failed_count > 0 && latest?.can_retry);
       retry.disabled = state.submittingBatch;
     }
-    const items = Array.isArray(batch.items) ? batch.items : [];
-    details.hidden = !state.batchDetailsOpen;
-    details.innerHTML = items.length
-      ? `<ul class="factory-batch-item-list">${items.map((item) =>
-          `<li><strong>${esc(item.platform || "Output")} ${esc(item.format || "")}</strong>
-             <span>${esc(item.output_id ? `O${item.output_id}` : item.id)} · ${esc(item.status || "pending")}</span>
-             ${item.error ? `<small>${esc(item.error)}</small>` : ""}</li>`
-        ).join("")}</ul>`
-      : '<p class="subtle">Item detail is not available from this Worker version.</p>';
+    details.hidden = !state.batchDetailsOpen || !latest;
+    const items = Array.isArray(latest?.items) ? latest.items : [];
+    details.innerHTML = latest ? `<ul class="factory-batch-item-list">${items.map(item =>
+      `<li><strong>${esc(item.title || [item.platform, item.format].filter(Boolean).join(" ") || "Output")}</strong>
+      <span>${esc(item.output_id ? `Output #${item.output_id}` : "Output")} · ${esc(item.status || "pending")}</span>
+      ${item.error ? `<small>${esc(item.error)}</small>` : ""}</li>`).join("")}</ul>
+      <details class="factory-batch-technical"><summary>Technical reference</summary>
+      <code>${esc(latest.job_id)}</code> <button type="button" class="secondary-button"
+      data-factory-copy-batch="${esc(latest.job_id)}">Copy batch ID</button></details>` : "";
+    details.querySelector("[data-factory-copy-batch]")?.addEventListener("click", () => {
+      const value = String(latest?.job_id || "");
+      if (value) navigator.clipboard?.writeText(value).catch(() => {});
+    });
   }
 
   // Batch status is independently polled, but the Needs Eyes list is not.
@@ -360,12 +417,15 @@
     }
   }
 
-  async function refreshFactoryBatchActivity() {
-    const params = new URLSearchParams();
-    const profileId = String($("studioProfileSelect")?.value || state.lastBatchProfile || "").trim();
-    if (/^rec[A-Za-z0-9]+$/.test(profileId)) params.set("profile", profileId);
+  async function refreshFactoryBatchActivity(force = false) {
+    const now = Date.now();
+    const minInterval = Number(state.batch?.totals?.active || 0) ? 5000 : 30000;
+    if (!force && state.batch && now - state.lastBatchFetchMs < minInterval) return state.batch;
+    const params = new URLSearchParams({ scope: "all" });
+    if (factoryProfileId()) params.set("factory_profile", factoryProfileId());
     try {
-      const batch = await fetchJson(`/api/factory/approval-batches?${params.toString()}`);
+      const batch = await fetchJson(`/api/factory/approval-batches?${params.toString()}`, { cache: "no-store" });
+      state.lastBatchFetchMs = Date.now();
       if (typeof batch.approvals_enabled === "boolean") {
         const before = JSON.stringify(state.batchRollout);
         state.batchApprovalsEnabled = batch.approvals_enabled;
@@ -374,6 +434,7 @@
         if (state.desk && before !== JSON.stringify(state.batchRollout)) renderDesk(state.desk);
       }
       renderFactoryBatchActivity(batch);
+      document.dispatchEvent(new CustomEvent("factory:batch-status", { detail: batch }));
       reconcileFinishedBatchDesk(batch).catch(() => {});
       return batch;
     } catch (error) {
@@ -425,6 +486,7 @@
           record_ids: ready.map((card) => card.id),
           items: ready.map((card) => ({
             id: card.id, output_id: card.output_id || null,
+            title: card.title || null, content_id: card.content_id || null,
             platform: card.platform || null, format: card.studio_output_type || null,
           })),
         }),
@@ -511,7 +573,7 @@
       ${lane === "needs_eyes" && card.kind === "output" && canReviewActions(card) && canSelectBatchOutput(card)
         ? `<span class="factory-media-select"><input type="checkbox" data-factory-select-output="${esc(card.id)}" aria-label="Select ${esc(cardLabel(card))}" ${state.selectedOutputs.has(card.id) ? "checked" : ""}>${media}</span>`
         : media}
-      <span class="factory-line-title">${esc(card.title || cardLabel(card))}</span>
+      <span class="factory-line-title">${esc(card.title || cardLabel(card))}${card.output_id ? `<small class="factory-output-number">Output #${esc(card.output_id)}</small>` : ""}</span>
       ${cell(card.profile_name)}
       ${cell(card.platform)}
       ${cell(card.studio_output_type)}
@@ -926,20 +988,34 @@
 
   function renderDesk(desk) {
     state.desk = desk;
-    renderSummary(desk.summary);
-    renderLane("factoryLaneAutoHigh", desk.lanes?.auto_high, "Nothing in active produce/render right now.", { lane: "auto_high" });
-    renderLane("factoryLaneNeedsEyes", desk.lanes?.needs_eyes, "No Ready for Review items waiting on eyes.", { lane: "needs_eyes", groupContent: true });
-    renderLane("factoryLaneNeedsAssets", desk.lanes?.needs_assets, "Pile empty — add up to 3 from candidates below.", { pile: true, lane: "needs_assets" });
-    renderLane("factoryLaneManual", desk.lanes?.manual, "No stuck or failed work in view.", { lane: "manual" });
+    syncFactoryFilterOptions();
+    const filtered = (cards) => (cards || []).filter(factoryMatchesProfile);
+    // Global counts come from the authoritative Desk summary. With a Factory
+    // filter, only rows in the returned snapshot are counted and labelled.
+    const summary = factoryProfileId() ? {
+      auto_high: filtered(desk.lanes?.auto_high).length,
+      needs_eyes: filtered(desk.lanes?.needs_eyes).length,
+      needs_assets_pile: filtered(desk.lanes?.needs_assets).length,
+      needs_assets_max: desk.summary?.needs_assets_max || 3,
+      manual: filtered(desk.lanes?.manual).length,
+    } : desk.summary;
+    renderSummary(summary);
+    const visibleNote = $("factoryProfileScopeNote");
+    if (visibleNote) visibleNote.textContent = factoryProfileId()
+      ? "Filtered counts show visible queue rows." : "Global counts from the Factory queue.";
+    renderLane("factoryLaneAutoHigh", filtered(desk.lanes?.auto_high), "Nothing in active produce/render right now.", { lane: "auto_high" });
+    renderLane("factoryLaneNeedsEyes", filtered(desk.lanes?.needs_eyes), "No Ready for Review items waiting on eyes.", { lane: "needs_eyes", groupContent: true });
+    renderLane("factoryLaneNeedsAssets", filtered(desk.lanes?.needs_assets), "Pile empty — add up to 3 from candidates below.", { pile: true, lane: "needs_assets" });
+    renderLane("factoryLaneManual", filtered(desk.lanes?.manual), "No stuck or failed work in view.", { lane: "manual" });
     renderLane(
       "factoryNeedsAssetsCandidates",
-      desk.needs_assets_candidates,
+      filtered(desk.needs_assets_candidates),
       "No photo-wait / assets-needed candidates.",
       { candidate: true, lane: "needs_assets" },
     );
     const pileMeta = $("factoryNeedsAssetsMeta");
     if (pileMeta) {
-      const used = desk.summary?.needs_assets_pile || 0;
+      const used = summary?.needs_assets_pile || 0;
       const max = desk.summary?.needs_assets_max || 3;
       pileMeta.textContent = `Working pile ${used}/${max}. Pin candidates below.`;
     }
@@ -1095,7 +1171,7 @@
       // Fetch independently of the expensive Factory queue; activity remains visible during a slow desk refresh.
       refreshFactoryBatchActivity().catch(() => {});
       if (!state.batchTimer) state.batchTimer = setInterval(() => {
-        if (!document.hidden && $("page-factory")?.classList.contains("active")) refreshFactoryBatchActivity().catch(() => {});
+        if (!document.hidden && $("page-factory")?.classList.contains("active")) refreshFactoryBatchActivity(true).catch(() => {});
       }, 5000);
       const desk = await fetchJson("/api/factory/desk");
       renderDesk(desk);
@@ -1132,7 +1208,7 @@
     saveFactorySelection();
     if (state.desk) renderDesk(state.desk);
   });
-  $("factoryBatchRefresh")?.addEventListener("click", () => { refreshFactoryBatchActivity().catch(() => {}); });
+  $("factoryBatchRefresh")?.addEventListener("click", () => { refreshFactoryBatchActivity(true).catch(() => {}); });
   $("factoryBatchRetry")?.addEventListener("click", () => { retryFactoryBatchFailures().catch(() => {}); });
   $("factoryBatchInspect")?.addEventListener("click", () => {
     state.batchDetailsOpen = !state.batchDetailsOpen;
@@ -1141,7 +1217,12 @@
   document.addEventListener("visibilitychange", () => {
     if (!document.hidden && $("page-factory")?.classList.contains("active")) refreshFactoryBatchActivity().catch(() => {});
   });
-  $("studioProfileSelect")?.addEventListener("change", () => { refreshFactoryBatchActivity().catch(() => {}); });
+  $("factoryProfileFilter")?.addEventListener("change", () => {
+    if (state.desk) renderDesk(state.desk);
+    refreshFactoryBatchActivity(true).catch(() => {});
+    window.StudioFactoryBatchQuality?.refresh?.(true);
+  });
+  // Studio profile changes must not alter global Factory monitoring.
   $("factoryDeskRefresh")?.addEventListener("click", () => {
     loadFactoryDesk(true).catch(() => {});
   });

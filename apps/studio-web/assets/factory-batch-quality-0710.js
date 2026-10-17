@@ -43,7 +43,8 @@
     .replace(/'/g, "&#39;");
 
   const panelIds = ["factoryBatchQualitySignals", "operationsFactoryBatchQualitySignals"];
-  function selectedProfile() { return String($("studioProfileSelect")?.value || "").trim(); }
+  function isFactoryView() { return $("page-factory")?.classList.contains("active") || false; }
+  function selectedProfile() { return String((isFactoryView() ? $("factoryProfileFilter") : $("studioProfileSelect"))?.value || "").trim(); }
   function isVisible(id) {
     const node = $(id);
     if (!node) return false;
@@ -52,7 +53,7 @@
       && ($("page-operations")?.classList.contains("active") || false);
   }
   function panelMarkup({ profileId, data, error }) {
-    if (!/^rec[A-Za-z0-9]+$/.test(profileId)) {
+    if (data?.scope !== "all" && !/^rec[A-Za-z0-9]+$/.test(profileId)) {
       return '<p class="subtle">Select a Content Profile to check Factory batches.</p>';
     }
     if (error) {
@@ -61,7 +62,7 @@
     if (!data || !Array.isArray(data.quality_signals)) {
       return '<p class="factory-batch-quality-unavailable">Worker has not supplied Quality Agent batch signals. Do not assume there are no findings.</p>';
     }
-    if (!data.job_id) return '<p class="subtle">No recent Factory batch for the selected Content Profile.</p>';
+    if (!data.job_id) return '<p class="subtle">No recent Factory batches in this view.</p>';
     const total = Number(data.total) || 0;
     const pending = Number(data.pending_count) || 0;
     const failed = Number(data.failed_count) || 0;
@@ -79,12 +80,12 @@
       };
       return `<li class="factory-batch-quality-item factory-batch-quality-${esc(catalog.severity)}">
         <strong>${esc(catalog.title)}</strong>
-        <span class="factory-batch-quality-code">${esc(key)}</span>
+        <details class="factory-batch-quality-tech"><summary>Technical code</summary><code>${esc(key)}</code></details>
         ${signal?.detail ? `<p>${esc(signal.detail)}</p>` : ""}
         <p class="factory-batch-quality-action">${esc(catalog.guidance)}</p>
       </li>`;
     }).join("");
-    return `<p class="factory-batch-quality-meta">Batch ${esc(data.job_id)} · ${total} outputs · ${pending} pending · ${failed} failed · ${esc(data.updated_at ? new Date(data.updated_at).toLocaleString() : "Status available")}</p>
+    return `<p class="factory-batch-quality-meta">${data.scope === "all" ? "Across visible Factory profiles" : "Current profile"} · ${total} latest batch outputs · ${pending} pending · ${failed} failed</p>
       ${countMismatch ? '<p class="factory-batch-quality-unavailable">Batch totals disagree: investigate status reconciliation.</p>' : ""}
       ${signals.length ? `<p class="factory-batch-quality-heading">${signals.length} Quality Agent finding${signals.length === 1 ? "" : "s"} for this batch</p>
         <ul class="factory-batch-quality-list">${rowMarkup}</ul>`
@@ -92,6 +93,8 @@
   }
 
   function render(profileId, data, error = "") {
+    const metric = $("factoryBatchQualityMetric");
+    if (metric) metric.textContent = error ? "!" : String(data?.quality_signals?.length ?? "—");
     const html = panelMarkup({ profileId, data, error });
     for (const id of panelIds) {
       const node = $(id);
@@ -101,26 +104,28 @@
 
   async function refresh(force = false) {
     const profileId = selectedProfile();
+    const global = isFactoryView();
     const now = Date.now();
-    if (!force && state.profile === profileId && now - state.lastRequest < 3000) return;
+    if (!force && state.profile === (global ? "all:" : "profile:") + profileId && now - state.lastRequest < 3000) return;
     if (!force && !panelIds.some(isVisible)) return;
     const sequence = ++state.sequence;
-    state.profile = profileId;
+    state.profile = (global ? "all:" : "profile:") + profileId;
     state.lastRequest = now;
-    if (!/^rec[A-Za-z0-9]+$/.test(profileId)) { render(profileId, null); return; }
+    if (!global && !/^rec[A-Za-z0-9]+$/.test(profileId)) { render(profileId, null); return; }
     state.inFlight = true;
     try {
-      const query = new URLSearchParams({ profile: profileId });
+      const query = global ? new URLSearchParams({ scope: "all" }) : new URLSearchParams({ profile: profileId });
+      if (global && profileId) query.set("factory_profile", profileId);
       const response = await fetch("/api/factory/approval-batches?" + query, {
         method: "GET", credentials: "same-origin", cache: "no-store",
         headers: { Accept: "application/json" }
       });
       if (!response.ok) throw new Error("HTTP " + response.status);
       const data = await response.json();
-      if (sequence !== state.sequence || selectedProfile() !== profileId) return;
+      if (sequence !== state.sequence || selectedProfile() !== profileId || isFactoryView() !== global) return;
       render(profileId, data);
     } catch (error) {
-      if (sequence !== state.sequence || selectedProfile() !== profileId) return;
+      if (sequence !== state.sequence || selectedProfile() !== profileId || isFactoryView() !== global) return;
       render(profileId, null, error?.message || String(error));
     } finally {
       if (sequence === state.sequence) state.inFlight = false;
@@ -130,7 +135,8 @@
   function refreshSoon() { window.setTimeout(() => { refresh(true).catch(() => {}); }, 0); }
   $("factoryBatchQualityRefresh")?.addEventListener("click", refreshSoon);
   $("operationsFactoryBatchQualityRefresh")?.addEventListener("click", refreshSoon);
-  $("studioProfileSelect")?.addEventListener("change", refreshSoon);
+  $("studioProfileSelect")?.addEventListener("change", () => { if (!isFactoryView()) refreshSoon(); });
+  $("factoryProfileFilter")?.addEventListener("change", refreshSoon);
   document.addEventListener("click", (event) => {
     if (event.target.closest?.("#operationsViewAgent, #navFactory, #navOperations, [data-ops-tab]")) refreshSoon();
     if (event.target.closest?.("#factoryBatchRefresh, #factoryBatchRetry, #factoryBatchSubmit")) refreshSoon();

@@ -2,7 +2,7 @@ import { countPendingPlatformDispatch } from "./overview-dispatch-counts.mjs";
 import { withOutputApprovalLock } from "./output-approval-lease.mjs";
 import { factoryBatchRolloutPolicy, factoryBatchRolloutAcceptsOutput, factoryBatchRolloutAcceptsIds } from "./factory-batch-rollout.mjs";
 import {
-  factoryBatchEnqueue, factoryBatchRead, factoryBatchList,
+  factoryBatchEnqueue, factoryBatchRead, factoryBatchList, factoryBatchListGlobal,
   factoryBatchDrain, factoryBatchRetry, factoryBatchSummary, factoryBatchCounts,
   factoryBatchQualitySignals, factoryBatchReconcile, factoryBatchCronScan,
 } from "./factory-approval-queue.mjs";
@@ -12262,6 +12262,42 @@ export async function getStudioLibraryIntakeStatus(request, env, url) {
  */
 export async function factoryBatchStatusRoute(request, env, authorization) {
   const url = new URL(request.url);
+  if (url.searchParams.get("scope") === "all") {
+    // The Factory desk itself is global. Never inherit the header's selected
+    // profile for batch history; a Factory-only filter is explicit.
+    const factoryProfile = String(url.searchParams.get("factory_profile") || "").trim();
+    if (factoryProfile && !/^rec[A-Za-z0-9]+$/.test(factoryProfile)) {
+      throw new HttpError(400, "Invalid Factory profile filter");
+    }
+    const history = await factoryBatchListGlobal(env.STUDIO_MEDIA, {
+      profileId: factoryProfile, limit: 40, maxScan: 3000,
+    });
+    const batches = history.jobs.map(job => ({
+      ...factoryBatchSummary(job),
+      quality_signals: factoryBatchQualitySignals(job),
+    }));
+    const qualitySignals = batches.flatMap(job => (job.quality_signals || [])
+      .map(signal => ({ ...signal, profile_id: job.profile_id,
+        job_id: job.job_id, output_ids: (job.items || []).map(row => row.output_id).filter(Boolean) })));
+    const totals = {
+      batches: batches.length,
+      active: batches.filter(job => ["queued", "running"].includes(job.status)).length,
+      completed: batches.filter(job => job.status === "completed").length,
+      failed_batches: batches.filter(job => job.status === "failed").length,
+      approved: batches.reduce((sum, job) => sum + job.approved_count, 0),
+      pending: batches.reduce((sum, job) => sum + job.pending_count, 0),
+      failed: batches.reduce((sum, job) => sum + job.failed_count, 0),
+      findings: qualitySignals.length,
+    };
+    return respond(request, env, {
+      ...factoryBatchSummary(history.jobs[0] || null),
+      scope: "all", filter_profile_id: factoryProfile || null,
+      batches, totals, quality_signals: qualitySignals,
+      history_complete: history.complete, history_scanned: history.scanned,
+      approvals_enabled: factoryBatchRolloutPolicy(env).enabled,
+      rollout: factoryBatchRolloutPolicy(env),
+    });
+  }
   const profile = await resolveWorkingContentProfile(env, authorization, requestedProfileId(url, null));
   if (!profile?.id) throw new HttpError(400, "Choose a content profile");
   const requestId = String(url.searchParams.get("request_id") || "").trim();
