@@ -8,6 +8,16 @@ on:
         required: false
         type: boolean
         default: false
+      activate_schedule_lane:
+        description: 'Exact Airtable profile ID::platform lane for scoped atomic scheduling'
+        required: false
+        type: string
+        default: ''
+      activate_schedule_confirmation:
+        description: 'Enter ACTIVATE-SCHEDULE-LANE to activate the exact lane'
+        required: false
+        type: string
+        default: ''
       bootstrap_confirmation:
         description: 'When bootstrapping, enter BOOTSTRAP-DORMANT-SCHEDULE-AUTHORITY'
         required: false
@@ -36,6 +46,8 @@ jobs:
       TARGET_WORKER: chicagoshining-studio-api
       VERIFY_BRIDGE: chicagoshining-studio-deploy-verify
       WRANGLER_VERSION: 4.123.0
+      ACTIVATE_SCHEDULE_LANE: ${{ inputs.activate_schedule_lane || '' }}
+      ACTIVATE_SCHEDULE_CONFIRMATION: ${{ inputs.activate_schedule_confirmation || '' }}
       BOOTSTRAP_RESERVATION: ${{ inputs.bootstrap_schedule_reservation_namespace || 'false' }}
       BOOTSTRAP_CONFIRMATION: ${{ inputs.bootstrap_confirmation || '' }}
     steps:
@@ -217,6 +229,17 @@ jobs:
           active_vars.update(factory_vars)
           active_vars.update(visual_vars)
           reservation_state=Path('/tmp/reservation-binding-state.txt').read_text().strip()
+          import re
+          activation=os.environ.get('ACTIVATE_SCHEDULE_LANE','').strip()
+          confirmation=os.environ.get('ACTIVATE_SCHEDULE_CONFIRMATION','').strip()
+          if activation or confirmation:
+              if confirmation!='ACTIVATE-SCHEDULE-LANE' or not re.fullmatch(r'rec[A-Za-z0-9]{14}::(?:facebook|instagram|tiktok|youtube)',activation):
+                  raise SystemExit('Activation refused: exact profile::platform lane and confirmation required')
+              if reservation_state!='bootstrapped':
+                  raise SystemExit('Activation refused: Durable Object namespace not bootstrapped')
+              if os.environ.get('BOOTSTRAP_RESERVATION','false').lower()=='true':
+                  raise SystemExit('Activation and bootstrap must be separate runs')
+          Path('/tmp/schedule-activation-lane.txt').write_text(activation)
           bootstrap_requested=os.environ.get('BOOTSTRAP_RESERVATION','false').strip().lower()=='true'
           lifecycle_change = reservation_state == 'absent' and bootstrap_requested
           Path('/tmp/reservation-lifecycle-change.txt').write_text('true' if lifecycle_change else 'false')
@@ -235,7 +258,8 @@ jobs:
           if reservation_state == 'bootstrapped' or lifecycle_change:
               # Preserve an existing namespace, or perform the explicit one-time
               # bootstrap. In both cases the scheduling authority remains OFF.
-              active_vars['STUDIO_SCHEDULE_RESERVATION_AUTHORITY_ENABLED']='false'
+              active_vars['STUDIO_SCHEDULE_RESERVATION_AUTHORITY_ENABLED']='true' if activation else 'false'
+              active_vars['STUDIO_SCHEDULE_RESERVATION_LANE_ALLOWLIST']=activation
               cfg['durable_objects']={
                   'bindings':[{
                       'name':'STUDIO_SCHEDULE_RESERVATIONS',
@@ -334,8 +358,11 @@ jobs:
                   raise SystemExit('Worker plaintext setting changed or disappeared: '+name)
           binding_values=after_plain
           if expected_bootstrapped:
-              if binding_values.get('STUDIO_SCHEDULE_RESERVATION_AUTHORITY_ENABLED') != 'false':
-                  raise SystemExit('Atomic scheduling feature flag must remain disabled during reservation-authority rollout')
+              activation=Path('/tmp/schedule-activation-lane.txt').read_text().strip()
+              if binding_values.get('STUDIO_SCHEDULE_RESERVATION_AUTHORITY_ENABLED') != ('true' if activation else 'false'):
+                  raise SystemExit('Atomic scheduling authority flag differs from requested rollout')
+              if binding_values.get('STUDIO_SCHEDULE_RESERVATION_LANE_ALLOWLIST','') != activation:
+                  raise SystemExit('Atomic scheduling lane allowlist differs from requested rollout')
           elif 'STUDIO_SCHEDULE_RESERVATION_AUTHORITY_ENABLED' in binding_values:
               raise SystemExit('Atomic scheduling feature flag appeared before namespace bootstrap')
           for name,value in expected.items():
