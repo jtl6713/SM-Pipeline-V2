@@ -10009,6 +10009,19 @@ export async function phase6ClearVoicePrepTokens(env, slides) {
 }
 /*__STUDIO_WORKER_END:phase6ClearVoicePrepTokens__*/
 
+function phase6VoicePrepRevisionIdentity(outputRecord) {
+  const settings = phase6ParseJson(f(outputRecord, "Studio_Creative_Settings_JSON"), {}) || {};
+  const script = settings?.visual_script && typeof settings.visual_script === "object"
+    ? settings.visual_script
+    : {};
+  const revision = Math.max(0, Number(script.revision) || 0);
+  const hash = String(script.script_hash || script.scriptHash || "none")
+    .replace(/[^A-Za-z0-9_-]+/g, "")
+    .slice(0, 24) || "none";
+  return `s${revision}-${hash}`;
+}
+/*__STUDIO_WORKER_END:phase6VoicePrepRevisionIdentity__*/
+
 export async function phase6AdvanceVoicePrepShort(env, outputRecord) {
   let slides = await phase6SlidesForOutput(env, outputRecord);
   let pending = phase6PendingVoicePrepSlides(slides);
@@ -10034,7 +10047,7 @@ export async function phase6AdvanceVoicePrepShort(env, outputRecord) {
   }
 
   const existingToken = pending.map((x) => x.voice_prep_request_id).find(Boolean) || null;
-  const requestId = existingToken || `studio-${outputRecord.id}-${Date.now()}`;
+  const requestId = existingToken || `studio-${outputRecord.id}-${phase6VoicePrepRevisionIdentity(outputRecord)}-${Date.now()}`;
   const scopedSlideIds = [...new Set(pending.map((x) => x.id).filter(Boolean))];
   for (const slideId of scopedSlideIds) {
     await airtableFetch(env, PHASE6_CAROUSEL_SLIDES_TABLE, slideId, {
@@ -10088,7 +10101,7 @@ export async function phase6AutoVoicePrepForOutput(env, outputRecord, authorizat
 
   // Scope P020-2 to only the slides belonging to this Studio request. This prevents a
   // globally scheduled/manual P020-2 run from consuming unrelated Ready slides.
-  const requestId = `studio-${outputRecord.id}-${Date.now()}`;
+  const requestId = `studio-${outputRecord.id}-${phase6VoicePrepRevisionIdentity(outputRecord)}-${Date.now()}`;
   const scopedSlideIds = [...new Set(pending.map((x) => x.id).filter(Boolean))];
   for (const slideId of scopedSlideIds) {
     await airtableFetch(env, PHASE6_CAROUSEL_SLIDES_TABLE, slideId, {
