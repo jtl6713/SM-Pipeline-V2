@@ -208,3 +208,69 @@ test("independent batch IDs for same outputs must use canonical state to skip du
   assert.equal(duplicate.job.items.filter(x => x.status === "already_satisfied").length, 4);
   assert.equal(canonicalCommits, 4);
 });
+
+test("Factory timing report measures queue, preflight, ownership, approval and terminal latency", async () => {
+  const bucket = new FakeR2();
+  const rid = "factory_latency_instrumented";
+  let clockMs = 100000;
+  await factoryBatchEnqueue(bucket, {
+    profileId, requestId: rid, records: records.slice(0, 1),
+    now: new Date(clockMs).toISOString(),
+  });
+  clockMs += 250;
+  const finished = await factoryBatchDrain(bucket, {
+    profileId, requestId: rid, now: () => clockMs, makeOwner: () => "measured",
+    approve: async (_id, _job, checkpoint) => {
+      checkpoint("preflight_fetch_started");
+      clockMs += 40;
+      checkpoint("preflight_fetch_finished");
+      checkpoint("ownership_check_started");
+      clockMs += 60;
+      checkpoint("ownership_check_finished");
+      checkpoint("approval_started");
+      checkpoint("approval_lease_wait_started");
+      clockMs += 15;
+      checkpoint("approval_lease_acquired");
+      checkpoint("slot_search_started");
+      clockMs += 120;
+      checkpoint("slot_search_finished");
+      checkpoint("schedule_write_started");
+      clockMs += 80;
+      checkpoint("schedule_write_finished");
+      checkpoint("schedule_verify_started");
+      clockMs += 30;
+      checkpoint("schedule_verify_finished");
+      checkpoint("supabase_sync_started");
+      clockMs += 20;
+      checkpoint("supabase_sync_finished");
+      checkpoint("approval_finished");
+    },
+  });
+  const summary = factoryBatchSummary(finished.job);
+  const m = summary.timing_report.metrics;
+  assert.equal(m.queue_wait.p50_ms, 250);
+  assert.equal(m.preflight_airtable_fetch.p50_ms, 40);
+  assert.equal(m.profile_ownership_check.p50_ms, 60);
+  assert.equal(m.approval_lease_wait.p50_ms, 15);
+  assert.equal(m.schedule_slot_selection.p50_ms, 120);
+  assert.equal(m.airtable_schedule_commit.p50_ms, 80);
+  assert.equal(m.schedule_verification.p50_ms, 30);
+  assert.equal(m.supabase_sync.p50_ms, 20);
+  assert.equal(m.canonical_approval.p50_ms, 265);
+  assert.equal(m.worker_processing.p50_ms, 365);
+  assert.equal(m.enqueue_to_terminal.p50_ms, 615);
+  assert.equal(summary.items[0].timing.events.at(-1).state, "approved");
+});
+
+test("legacy Factory records remain explicitly unmeasured rather than fabricated", async () => {
+  const bucket = new FakeR2();
+  const rid = "factory_latency_older_job";
+  const job = (await factoryBatchEnqueue(bucket, {profileId, requestId: rid, records: records.slice(0,1)})).job;
+  const key = "studio/state/factory-approvals/v2/jobs/" + profileId + "/" + rid + ".json";
+  const record = bucket.objects.get(key);
+  delete record.value.items[0].timeline;
+  const summary = factoryBatchSummary(record.value);
+  assert.equal(summary.timing_report.instrumented, 0);
+  assert.deepEqual(summary.timing_report.metrics, {});
+  assert.equal(summary.items[0].timing, null);
+});
