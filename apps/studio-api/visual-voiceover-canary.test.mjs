@@ -80,3 +80,9 @@ test("deployment gate rejects a broad or malformed canary rollout", async () => 
   assert.match(workflow, /Enabled visual voiceover rollout requires exactly one Airtable canary record id/);
   assert.match(workflow, /STUDIO_VISUAL_CANARY_OUTPUT_IDS':','\.join\(canary_ids\)/);
 });
+
+
+test("production canary must already be Do_Not_Publish before preparation", async () => {
+  const functions = await readFile(path.join(here, "worker-functions-03.mjs"), "utf8");
+  assert.match(functions, /if \(!Boolean\(f\(row, "Do_Not_Publish"\)\)\) continue/);
+});
