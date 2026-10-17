@@ -48,6 +48,9 @@ OPTIONAL_BINDINGS = {
     "STUDIO_VISUAL_TIMELINE_V1": "plain_text",
     "STUDIO_VISUAL_SCRIPT_V1": "plain_text",
     "STUDIO_VISUAL_CANARY_OUTPUT_IDS": "plain_text",
+    # Scoped atomic scheduling allowlist; deployment verifies the exact value
+    # against the explicitly confirmed single-lane activation input.
+    "STUDIO_SCHEDULE_RESERVATION_LANE_ALLOWLIST": "plain_text",
     "ELEVENLABS_API_KEY": "secret_text",
     "PIPELINE_RUNNER_SHARED_SECRET": "secret_text",
     "PIPELINE_RUNNER_URL": "plain_text",
