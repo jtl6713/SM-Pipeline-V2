@@ -183,7 +183,8 @@ jobs:
           r=json.loads(Path('/tmp/candidate-version.json').read_text())['result']; got={str(x.get('name')):str(x.get('type')) for x in ((r.get('resources') or {}).get('bindings') or [])}
           missing={k:v for k,v in core.items() if got.get(k)!=v};
           if got.get('STUDIO_SCHEDULE_RESERVATIONS') != 'durable_object_namespace':
-              raise SystemExit('Candidate lost atomic scheduling Durable Object binding') unexpected={k:v for k,v in got.items() if k not in core and k!='ELEVENLABS_API_KEY'}
+              raise SystemExit('Candidate lost atomic scheduling Durable Object binding')
+          unexpected={k:v for k,v in got.items() if k not in core and k not in {'ELEVENLABS_API_KEY','STUDIO_SCHEDULE_RESERVATIONS','STUDIO_SCHEDULE_RESERVATION_AUTHORITY_ENABLED'}}
           if missing or unexpected: raise SystemExit(f'Candidate binding contract failed; missing={missing}, unexpected={unexpected}')
           Path('/tmp/candidate-binding-audit.json').write_text(json.dumps({'version_id':r.get('id'),'version_number':r.get('number'),'binding_count':len(got),'core_ok':True},indent=2,sort_keys=True))
           PY
