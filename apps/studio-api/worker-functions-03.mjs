@@ -5830,6 +5830,15 @@ export function phase6MergeSelectedVideoMetadata(slides = [], outputRecord = nul
 }
 /*__STUDIO_WORKER_END:phase6MergeSelectedVideoMetadata__*/
 
+/*__STUDIO_WORKER_START:phase6VisualCanaryOutputIds__*/
+export function phase6VisualCanaryOutputIds(env) {
+  return String(env?.STUDIO_VISUAL_CANARY_OUTPUT_IDS || "")
+    .split(/[\s,;]+/)
+    .map(value => value.trim())
+    .filter(value => /^rec[A-Za-z0-9]+$/.test(value));
+}
+/*__STUDIO_WORKER_END:phase6VisualCanaryOutputIds__*/
+
 /*__STUDIO_WORKER_START:phase6VisualTimelineEnabledForOutput__*/
 export function phase6VisualTimelineEnabledForOutput(env, outputRecord) {
   if (!visualTimelineEnabled(env)) return false;
@@ -5837,10 +5846,7 @@ export function phase6VisualTimelineEnabledForOutput(env, outputRecord) {
   // only on outputs already protected by Do_Not_Publish. An empty allowlist means
   // "all nonpublishing canaries", never "all production outputs".
   if (!Boolean(f(outputRecord, "Do_Not_Publish"))) return false;
-  const allowlist = String(env?.STUDIO_VISUAL_CANARY_OUTPUT_IDS || "")
-    .split(/[\s,;]+/)
-    .map(value => value.trim())
-    .filter(Boolean);
+  const allowlist = phase6VisualCanaryOutputIds(env);
   if (!allowlist.length) return true;
   const outputId = String(outputRecord?.id || "").trim();
   return Boolean(outputId && allowlist.includes(outputId));
@@ -5899,17 +5905,26 @@ export async function studioPrepareVisualVoiceoverCanary(request, env) {
     throw new HttpError(400, "confirm=prepare-nonpublishing-canary is required");
   }
 
-  const rows = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
-    limit: 60,
-    sortField: "Output_ID",
-    sortDirection: "desc",
-    filterFormula: 'AND({Test_Run_ID}!="",{Published_At}=BLANK(),{Platform_Post_ID}=BLANK(),{Platform_Post_URL}=BLANK())',
-  });
+  const allowlist = phase6VisualCanaryOutputIds(env);
+  const rows = allowlist.length
+    ? (await Promise.all(
+        allowlist.slice(0, 10).map((id) =>
+          airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, id).catch(() => null)
+        )
+      )).filter(Boolean)
+    : await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
+        limit: 60,
+        sortField: "Output_ID",
+        sortDirection: "desc",
+        filterFormula: 'AND({Test_Run_ID}!="",{Published_At}=BLANK(),{Platform_Post_ID}=BLANK(),{Platform_Post_URL}=BLANK())',
+      });
 
   let candidate = null;
   let candidateSlides = [];
   let videoScene = null;
   for (const row of rows || []) {
+    if (!String(f(row, "Test_Run_ID") || "").trim()) continue;
+    if (f(row, "Published_At") || f(row, "Platform_Post_ID") || f(row, "Platform_Post_URL")) continue;
     if (String(f(row, "Render_Status") || "").trim() === "Rendering") continue;
     const linkedSlideIds = Array.isArray(f(row, "Carousel Slides")) ? f(row, "Carousel Slides") : [];
     if (!linkedSlideIds.length) continue;
