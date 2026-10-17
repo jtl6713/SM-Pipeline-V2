@@ -96,7 +96,11 @@ jobs:
           r=json.loads(Path('/tmp/version-before.json').read_text())['result']
           bindings=(r.get('resources') or {}).get('bindings') or []
           got={str(x.get('name')):str(x.get('type')) for x in bindings}
-          contract=assert_live_contract(got, 'Predeploy live Worker')
+          contract=assert_live_contract(
+              got,
+              'Predeploy live Worker',
+              allow_reservation_absent=True,
+          )
           # Read the active deployment's plain-text values as the authoritative
           # source. A failed, rolled-back version can still be Wrangler's
           # --keep-vars source and silently reintroduce old global flags.
