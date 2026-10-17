@@ -42,6 +42,14 @@ test("forced result is complete, durable, generation-verified and last-good safe
   assert.match(functions04, /preserveRowIdeas: true/);
 });
 
+test("manual generation is fenced from pre-existing background rebuilds", () => {
+  assert.match(functions04, /manualGenerationProtected/);
+  assert.match(functions04, /refreshState\.status === "refreshing"/);
+  assert.match(functions04, /refreshState\.status === "completed"[\s\S]*cooldown_remaining_ms/);
+  assert.match(functions04, /readStudioProfilesOverviewSnapshotFromR2\(env\)/);
+  assert.match(functions04, /trackedBuild = build\.finally/);
+});
+
 test("scheduled overview stays on the canonical platform-dispatch eligibility function", () => {
   assert.match(functions04, /studioOverviewScheduledCounts\(mappedOutputs\)[\s\S]*countPendingPlatformDispatch\(mappedOutputs\)/);
 });
