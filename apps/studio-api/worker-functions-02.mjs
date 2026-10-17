@@ -592,6 +592,7 @@ import {
   item4PulseClipPosterJob,
   item4PulseStudioCompressJob,
   studioRequestNotesText,
+  studioInvalidateOccupiedScheduleCache,
   studioIsAzFinishedVideo,
   studioIsVibeCut,
   skipsProductionApprove,
