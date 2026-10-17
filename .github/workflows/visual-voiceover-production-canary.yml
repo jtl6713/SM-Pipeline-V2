@@ -338,17 +338,34 @@ jobs:
           const silent=scenes.find(s=>s!==video && s.include!==false);
           if(silent) silent.voiceover_mode="silent";
 
-          const saved=await call("PATCH",`/api/outputs/${id}/creative`,{
+          await call("PATCH",`/api/outputs/${id}/creative`,{
             visual_timeline:{
               base_revision:timeline.revision,
               base_sequence_hash:timeline.sequence_hash,
               scenes
             }
           });
-          if(saved?.visual_timeline_saved!==true) throw new Error("visual timeline save did not persist");
 
+          // Airtable/current creative state is the authority. Do not rely on an
+          // optional response convenience flag to prove persistence.
           creative=await call("GET",`/api/outputs/${id}/creative`);
           const nextTimeline=creative.visual_timeline;
+          if(!nextTimeline) throw new Error("visual timeline reread is missing after save");
+          if(Number(nextTimeline.revision||0)<=Number(timeline.revision||0)) {
+            throw new Error(`visual timeline revision did not advance: before=${timeline.revision} after=${nextTimeline.revision}`);
+          }
+          if(String(nextTimeline.sequence_hash||"")===String(timeline.sequence_hash||"")) {
+            throw new Error("visual timeline sequence hash did not change after trim");
+          }
+          const persistedVideo=(nextTimeline.scenes||[]).find(s=>String(s.scene_id||s.id||"")===String(video.scene_id||video.id||""));
+          if(!persistedVideo) throw new Error("trimmed video scene missing after authoritative reread");
+          if(Number(persistedVideo.source_in_ms)!==Number(video.source_in_ms)
+              || Number(persistedVideo.source_out_ms)!==Number(video.source_out_ms)
+              || persistedVideo.trim_user_set!==true
+              || String(persistedVideo.native_audio_mode||"")!=="mute") {
+            throw new Error(`visual timeline trim did not persist exactly: ${JSON.stringify(persistedVideo).slice(0,1200)}`);
+          }
+          console.log(`visual_timeline_persisted=PASS revision=${nextTimeline.revision} hash=${nextTimeline.sequence_hash} source_in_ms=${persistedVideo.source_in_ms}`);
           const script=creative.visual_script;
           const target=(script?.scenes||[]).find(s=>String(s.scene_id||"")===String(video.scene_id||video.id||""))
             || (script?.scenes||[]).find(s=>s.voiceover_mode!=="silent" && Number(s.duration_ms||0)>=2000);
