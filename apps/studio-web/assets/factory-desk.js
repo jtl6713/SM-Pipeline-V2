@@ -249,11 +249,13 @@
   }
 
   function canSelectBatchOutput(card) {
+    if (state.batchApprovalsEnabled === false) return false;
     if (state.batchGlobal?.enabled) return String(card?.platform||"")==="Instagram"
       && ["Reel","Story"].includes(String(card?.studio_output_type||card?.format||""));
     const rollout = state.batchRollout;
+    if (rollout?.mode === "isolated_staging") return true;
     if (!rollout || !["chicago_ig_reel_v1", "chicago_ig_reels_v2",
-      "chicago_ig_reel_story_v3"].includes(rollout.mode)) return true;
+      "chicago_ig_reel_story_v3"].includes(rollout.mode)) return false;
     const type = String(card?.studio_output_type || card?.format || "");
     return String(card?.profile_id || "") === String(rollout.profile_id || "")
       && String(card?.platform || "") === "Instagram"
@@ -353,6 +355,7 @@
       batches: batches.length,
       active: batches.filter(row => ["queued", "running", "enqueuing"].includes(row.status)).length,
       approved: batches.reduce((sum, row) => sum + Number(row.approved_count || 0), 0),
+      pending: batches.reduce((sum, row) => sum + Number(row.pending_count || 0), 0),
       failed: batches.reduce((sum, row) => sum + Number(row.failed_count || 0), 0),
     };
     if (count) count.textContent = String(Number(totals.batches) || 0);
