@@ -55,8 +55,9 @@ export async function runLiveScheduleReservationCanary(env, { nonce } = {}) {
   try {
     await entered.promise;
     let blocked = false;
-    try { await schedule("b"); } catch (e) { blocked = /busy|waiting|lane/i.test(String(e.code || e.message)); }
-    assert(blocked, "Concurrent contender was not blocked");
+    let contenderOutcome = "resolved";
+    try { const contender = await schedule("b"); contenderOutcome = contender?.already_committed ? "already_committed" : "acquired"; } catch (e) { contenderOutcome = String(e?.code || "unknown_error").slice(0,80); blocked = /busy|wait|lane/i.test(contenderOutcome); }
+    assert(blocked, `Concurrent contender was not blocked: ${contenderOutcome}`);
     results.push({ check: "same_lane_contention", pass: true });
   } finally { held.resolve(); }
   await first;
