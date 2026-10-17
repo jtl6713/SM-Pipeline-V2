@@ -35,3 +35,10 @@ test("Operations copy uses Quality Agent as the operator-facing umbrella", () =>
   assert.doesNotMatch(html, /id="helpTabDesk"[^>]*>Service desk</);
   assert.doesNotMatch(html, /id="operationsTabInventory"/);
 });
+
+test("Quality Agent regression: unsupported platform must not appear in Studio requests or API eligibility", () => {
+  const api = fs.readFileSync(path.join(here, "..", "studio-api", "worker.js"), "utf8");
+  assert.doesNotMatch(html, /name="prPlatform" value="Threads"/i);
+  assert.doesNotMatch(api, /PR_PLATFORMS[^;]*["']Threads["']/i);
+  assert.doesNotMatch(api, /STUDIO_PROMOTION_PLATFORMS[^;]*["']Threads["']/i);
+});
