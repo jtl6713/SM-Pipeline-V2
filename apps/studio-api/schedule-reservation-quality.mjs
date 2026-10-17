@@ -115,11 +115,11 @@ export function scheduleReservationSnapshotFindings(snapshot, nowMs = Date.now()
   const recoveryRequired = lock?.state === SCHEDULE_RESERVATION_STATES.RECOVERY_REQUIRED
     || Boolean(snapshot.quarantine);
 
-  if (recoveryRequired || leaseExpired || (
-    lock?.owner_operation_id
-    && heartbeatAgeMs >= SCHEDULE_RESERVATION_HEARTBEAT_WARN_MS
-    && ![SCHEDULE_RESERVATION_STATES.COMMITTED, SCHEDULE_RESERVATION_STATES.RELEASED].includes(lock.state)
-  )) {
+  // A stale heartbeat alone does not make a lock abandoned. While the lease is
+  // still valid, classify it as slow/contended and never run hung-lock recovery.
+  // QA-SCHEDULE-LOCK-HUNG is reserved for fenced Recovery Required lanes or
+  // genuinely expired owners.
+  if (recoveryRequired || leaseExpired) {
     findings.push(finding(SCHEDULE_RESERVATION_SIGNATURES.LOCK_HUNG, snapshot, {
       class: recoveryRequired ? "code_bug" : "transient",
       needs_eyes: recoveryRequired && !active,
@@ -128,9 +128,7 @@ export function scheduleReservationSnapshotFindings(snapshot, nowMs = Date.now()
       heartbeat_age_ms: heartbeatAgeMs,
       blocker: recoveryRequired
         ? "Scheduling lane is quarantined because an external Airtable commit may be ambiguous."
-        : leaseExpired
-          ? "Scheduling owner lease expired."
-          : "Scheduling owner heartbeat is stale.",
+        : "Scheduling owner lease expired.",
       diagnosis: clean(
         snapshot?.quarantine?.reason
         || active?.recovery_reason
@@ -142,6 +140,23 @@ export function scheduleReservationSnapshotFindings(snapshot, nowMs = Date.now()
       proposed_recovery_action: recoveryRequired
         ? "Fence the stale owner, inspect Airtable and the reservation ledger, then reconcile only from authoritative evidence."
         : "Verify owner state; pre-write expiration may be fenced safely, but never clear a Verifying owner blindly.",
+    }));
+  } else if (
+    lock?.owner_operation_id
+    && heartbeatAgeMs >= SCHEDULE_RESERVATION_HEARTBEAT_WARN_MS
+    && ![SCHEDULE_RESERVATION_STATES.COMMITTED, SCHEDULE_RESERVATION_STATES.RELEASED].includes(lock.state)
+  ) {
+    findings.push(finding(SCHEDULE_RESERVATION_SIGNATURES.LOCK_CONTENTION, snapshot, {
+      class: "transient",
+      actor: "worker_heal",
+      needs_eyes: false,
+      urgent: false,
+      lock_age_ms: lockAgeMs,
+      heartbeat_age_ms: heartbeatAgeMs,
+      blocker: "Scheduling owner heartbeat is stale but its lease is still valid.",
+      diagnosis: "Slow but still-owned scheduling transaction; elapsed time alone is not safe evidence of abandonment.",
+      proposed_recovery_action: "Record contention and recheck owner progress. Do not clear, replace, or reconcile the owner until fencing or lease expiry proves it is safe.",
+      fingerprint_suffix: "slow-live-owner",
     }));
   }
 
