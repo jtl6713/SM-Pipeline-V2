@@ -10116,7 +10116,7 @@ export async function factoryDeleteDeskItem(env, id, kind, actor, note) {
         env,
         source,
         patch.fields,
-        `factory-skip:${id}:${patch.id}:${stamp}`,
+        `factory-skip:${id}:${patch.id}`,
       );
     }
   } else {
