@@ -436,3 +436,4 @@ Deploy Factory all-platform batch approvals 2026-10-17. PR #813. Signed global m
 2026-10-17 deploy visual R4 Python skip diagnostics 746f95f0306b51d4960eccd0092473980b73f90a with regression ff761ecb0ae720381329654d34fc7f7cf394c9e2.
 
 2026-10-17 Atomic MAE reservation authority ordinary source deploy | merged PR #819 | reservation namespace bootstrap NOT requested | feature flag remains absent/off | establish exact-commit production status before dormant lifecycle bootstrap.
+Deploy merged scoped scheduling authority f8828617a31cf8855249660a58439818c90178a0 dormant. Preserve STUDIO_SCHEDULE_RESERVATION_AUTHORITY_ENABLED=false and existing production bindings. No live activation.
