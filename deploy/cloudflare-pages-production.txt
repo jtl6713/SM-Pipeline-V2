@@ -406,3 +406,5 @@ Step3-factory-ui-qa-20261017 | PR #792 d71b34a3e80a18bbc1bb4e0ec50fe6b68e96a649 
 2026-10-17 Factory terminal batch Desk reconciliation | PR #796 merge 7ac1d662d9fde766ba837198062f8af1584a642a | four checks PASS | UI 0.6.709 current build maintained; factory-desk asset cache marker reconcile=finished-batch-v1 | repaint selection and re-fetch completed batch Needs Eyes | no approval/publishing mutation.
 
 2026-10-16 fix cached overview elapsed age, preserve fallback timestamp, bust script 0.6.710-cache-age-fix
+
+2026-10-17 Factory Global UI read-only release | PR #797 merge 1304fb60ef736f304f298095d5cac4265466fac7 | Worker #39005189565 PASS max=1 Chicago Instagram Reel remains | Factory-only All Profiles filter, compact cards, readable history and output IDs; no production approval broadening.
