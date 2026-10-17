@@ -123,6 +123,9 @@ try{
   assert.equal(status.failed_count,1,JSON.stringify(status));
   assert.equal(status.done_count,5);
   assert.ok(Array.isArray(status.quality_signals));
+  assert.ok(status.quality_signals.some(signal=>signal.code==="QA-FACTORY-BATCH-FAILED-ITEM"),
+    "Deployed staging Worker must report failed item in its R2-backed Quality Agent signals");
+  console.log("staging_live_factory_quality_failed_item=PASS");
   const blocked=status.items.find(row=>row.id===createdIds[4]);
   assert.equal(blocked.status,"failed");
   assert.match(blocked.error,/Do_Not_Publish|Cannot approve/i);
