@@ -6710,13 +6710,25 @@ async function studioAtomicApplyPlatformOutputSeedSchedule(env, {
       }
       const laneMs = [...new Set(laneOccupied.filter(Number.isFinite))];
       const platformMs = [...new Set(platformOccupied.filter(Number.isFinite))];
-      let candidate = String(desiredSchedule || "").trim();
+      const requestedSchedule = String(desiredSchedule || "").trim();
+      let candidate = requestedSchedule;
       let candidateMs = Date.parse(candidate);
-      if (
-        !Number.isFinite(candidateMs)
-        || maeIsBlackoutLocalTime(candidateMs, timeZone)
-        || maeScheduleConflicts(candidateMs, platformMs)
-      ) {
+      if (requestedSchedule) {
+        // Production Request Output Scheduled_At is explicit scheduling intent.
+        // Preserve it when valid; never silently replace it with another MAE slot.
+        if (!Number.isFinite(candidateMs)) {
+          throw new HttpError(400, "Requested Platform Output seed schedule is invalid");
+        }
+        if (maeIsBlackoutLocalTime(candidateMs, timeZone)) {
+          throw new HttpError(409, "Requested Platform Output seed schedule is inside the profile-local blackout");
+        }
+        if (maeScheduleConflicts(candidateMs, platformMs)) {
+          throw new HttpError(
+            409,
+            "Requested Platform Output seed schedule conflicts with another output on this profile/platform",
+          );
+        }
+      } else {
         const picked = maeScheduleNextSlot({
           timeZone,
           laneOccupiedMs: laneMs,
