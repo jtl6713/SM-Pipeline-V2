@@ -523,6 +523,69 @@
     }
   }
 
+  function factoryActivityRows(activity) {
+    return Array.isArray(activity?.batches) ? activity.batches
+      : (activity?.job_id ? [activity] : []);
+  }
+
+  function factoryActivityMatchesPlan(activity, plan) {
+    const expected = [...(plan?.ids || [])].map(String).sort();
+    if (!plan?.request_id || !expected.length) return null;
+    for (const row of factoryActivityRows(activity)) {
+      if (String(row?.request_id || "") !== String(plan.request_id)
+          && String(row?.job_id || "") !== `fg_${plan.request_id}`) continue;
+      const actual = (Array.isArray(row?.items) ? row.items : [])
+        .map((item) => String(item?.id || "")).filter(Boolean).sort();
+      if (actual.length === expected.length
+          && actual.every((id, index) => id === expected[index])) return row;
+    }
+    return null;
+  }
+
+  function reconcilePendingGlobalSelection(activity) {
+    let pending = null;
+    try { pending = JSON.parse(localStorage.getItem(FACTORY_PENDING_REQUEST_KEY) || "null"); } catch {}
+    if (pending?.profile_id !== "global" || !Array.isArray(pending?.batches) || !pending.batches.length) return 0;
+    const remaining = [];
+    let recovered = 0;
+    for (const plan of pending.batches) {
+      if (factoryActivityMatchesPlan(activity, plan)) {
+        for (const id of plan.ids || []) {
+          if (state.selectedOutputs.delete(id)) recovered++;
+        }
+      } else {
+        remaining.push(plan);
+      }
+    }
+    if (!recovered) return 0;
+    saveFactorySelection();
+    try {
+      if (remaining.length) {
+        localStorage.setItem(FACTORY_PENDING_REQUEST_KEY, JSON.stringify({
+          profile_id: "global",
+          ids: remaining.flatMap((row) => row.ids || []),
+          batches: remaining,
+          saved_ms: Number(pending.saved_ms || Date.now()),
+        }));
+      } else {
+        localStorage.removeItem(FACTORY_PENDING_REQUEST_KEY);
+      }
+    } catch {}
+    if (state.desk) renderDesk(state.desk);
+    updateFactoryBatchToolbar();
+    return recovered;
+  }
+
+  async function recoverSubmittedFactoryPlan(plan, originalError) {
+    for (let attempt = 0; attempt < 3; attempt++) {
+      if (attempt) await new Promise((resolve) => setTimeout(resolve, 350 * attempt));
+      const activity = await refreshFactoryBatchActivity(true);
+      const found = factoryActivityMatchesPlan(activity, plan);
+      if (found) return { ...found, accepted: true, recovered_after_error: true };
+    }
+    throw originalError;
+  }
+
   async function refreshFactoryBatchActivity(force = false) {
     const now = Date.now();
     const minInterval = Number(state.batch?.totals?.active || 0) ? 5000 : 30000;
@@ -541,6 +604,7 @@
         if (state.desk && before !== JSON.stringify([state.batchRollout,state.batchGlobal])) renderDesk(state.desk);
       }
       renderFactoryBatchActivity(batch);
+      reconcilePendingGlobalSelection(batch);
       document.dispatchEvent(new CustomEvent("factory:batch-status", { detail: batch }));
       reconcileFinishedBatchDesk(batch?.batches?.[0] || batch).catch(() => {});
       return batch;
@@ -590,20 +654,28 @@
         const chunk = plan.ids.map((id) => byId.get(id)).filter(Boolean);
         if (chunk.length !== plan.ids.length) throw new Error("Factory selection changed before all batches were submitted.");
         const profiles = [...new Set(chunk.map((card) => String(card.profile_id || "").trim()))];
-        const batch = await fetchJson("/api/factory/approval-batches", {
-          method: "POST",
-          body: JSON.stringify({
-            action: "start_group",
-            request_id: plan.request_id,
-            notes: "Studio Factory Batch Approval",
-            record_ids: chunk.map((card) => card.id),
-            items: chunk.map((card) => ({
-              id: card.id, output_id: card.output_id || null,
-              title: card.title || null, content_id: card.content_id || null,
-              platform: card.platform || null, format: card.studio_output_type || null,
-            })),
-          }),
-        });
+        let batch;
+        try {
+          batch = await fetchJson("/api/factory/approval-batches", {
+            method: "POST",
+            body: JSON.stringify({
+              action: "start_group",
+              request_id: plan.request_id,
+              notes: "Studio Factory Batch Approval",
+              record_ids: chunk.map((card) => card.id),
+              items: chunk.map((card) => ({
+                id: card.id, output_id: card.output_id || null,
+                title: card.title || null, content_id: card.content_id || null,
+                platform: card.platform || null, format: card.studio_output_type || null,
+              })),
+            }),
+          });
+        } catch (error) {
+          // The POST may have committed even if iOS/networking lost the response.
+          // Prove the exact request ID + output set exists in authoritative Activity
+          // before treating it as accepted and continuing to the next chunk.
+          batch = await recoverSubmittedFactoryPlan(plan, error);
+        }
         if (!batch.accepted) throw new Error("Approval queue did not acknowledge the batch.");
         acceptedOutputs += chunk.length;
         acceptedBatches++;
@@ -616,7 +688,9 @@
           job_id: batch.job_id, profile_id: "global",
         })); } catch {}
         renderFactoryBatchActivity(batch);
-        setStatus(`Accepted ${acceptedOutputs} of ${ready.length} outputs in ${acceptedBatches} batch${acceptedBatches === 1 ? "" : "es"}. Server processing continues in the background.`);
+        setStatus(batch.recovered_after_error
+          ? `Recovered a confirmed server submission after a connection error. Accepted ${acceptedOutputs} of ${ready.length} outputs; continuing automatically.`
+          : `Accepted ${acceptedOutputs} of ${ready.length} outputs in ${acceptedBatches} batch${acceptedBatches === 1 ? "" : "es"}. Server processing continues in the background.`);
       }
       if (state.desk) renderDesk(state.desk);
       closeFactoryPreview();
