@@ -383,3 +383,5 @@ PR #789 guarded Worker retry | 0.10.650-factory-batch-gated | binding contract n
 overview-fast-refresh 2026-10-17T01:20:00Z worker 0.10.651-overview-fast-refresh (Supabase All Profiles cache 10s; Ideas reuse last-good counts and refresh every 15m without blocking output counts)
 
 2026-10-17 Step4 Factory Chicago Instagram Reel 1-output canary | PR #794 43518e2b74cc7a27a3514b96abba91742746ae8c | eight PR checks green | staging HTTP #38997268878 PASS incl relock | Pages #38997396724 PASS with authenticated canary asset verification | deploy new production Worker with fail-closed rollout and rollback-on-failure; NO live approval request.
+
+2026-10-17 Step4 guarded production canary retry | previous Worker run 38997480251 failed read-only LA check because verification bridge sent unsupported ?profile_id= rather than ?profile=; automatic rollback verified true. Fix commits 753837f3 and 28cc2116 correct query and add regression assertion. Retry deployment of one Chicago Instagram Reel canary with LA denial verification; no approval or publish call.
