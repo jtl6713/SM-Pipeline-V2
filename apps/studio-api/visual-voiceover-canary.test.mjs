@@ -123,6 +123,17 @@ test("visual voiceover rerender continuation uses exact-isolated Python R4/R5, n
   assert.doesNotMatch(pulse, /phase6RunScenario/);
 });
 
+test("visual rerender surfaces targeted Python R4 skip reasons instead of silent retry loops", async () => {
+  const functions = await readFile(path.join(here, "worker-functions-03.mjs"), "utf8");
+  const start = functions.indexOf("export async function phase6AdvanceRenderPipelineShort");
+  const end = functions.indexOf("/*__STUDIO_WORKER_END:phase6AdvanceRenderPipelineShort__*/", start);
+  assert.ok(start >= 0 && end > start);
+  const continuation = functions.slice(start, end);
+  assert.match(continuation, /pulse\.pulse\?\.details\?\.run/);
+  assert.match(continuation, /render_start_blocked/);
+  assert.match(continuation, /R4 Python stage did not start the exact output/);
+});
+
 test("authoritative visual timeline preview packages skip T1 without weakening normal timing gates", async () => {
   const functions = await readFile(path.join(here, "worker-functions-03.mjs"), "utf8");
   const start = functions.indexOf("export async function phase6EnsureRenderPackageForContinuation");
