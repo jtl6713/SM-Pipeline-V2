@@ -1,10 +1,14 @@
 {
-  "correlation_id": "VISUAL-VOICEOVER-CANARY-READ-FULL-20261017-01",
+  "correlation_id": "VISUAL-VOICEOVER-CANARY-BASELINE-TTS-20261017-01",
   "requests": [
     {
-      "name": "read_canary_creative",
-      "method": "GET",
-      "path": "/api/outputs/recL2zjZc7XGRJyRt/creative"
+      "name": "baseline_voice_prep",
+      "method": "POST",
+      "path": "/api/outputs/recL2zjZc7XGRJyRt/creative/review",
+      "body": {
+        "action": "changes_requested",
+        "notes": "Visual-aware voiceover canary baseline TTS only. Do not publish."
+      }
     }
   ]
 }
