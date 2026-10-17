@@ -10,6 +10,7 @@
  * Run only in the restricted trusted release-branch staging GitHub workflow.
  */
 import assert from "node:assert/strict";
+import fs from "node:fs";
 import { randomUUID } from "node:crypto";
 import { readStudioWorkerSource } from "./worker-source-reader.mjs";
 import {
@@ -96,15 +97,22 @@ class MemoryR2 {
     for (const key of Array.isArray(keys) ? keys : [keys]) this.rows.delete(key);
   }
 }
-const source = readStudioWorkerSource();
+// Validate the split Worker reconstruction, then extract function bodies from
+// the actual compiled-in source modules with their unambiguous end markers.
+readStudioWorkerSource();
+const modules = ["01", "02", "03", "04"].map(n =>
+  fs.readFileSync(new URL("./worker-functions-" + n + ".mjs", import.meta.url), "utf8"));
 function extract(name) {
-  const start = source.indexOf("function " + name + "(");
-  const asyncStart = source.indexOf("async function " + name + "(");
-  let at = asyncStart >= 0 && (start < 0 || asyncStart < start) ? asyncStart : start;
-  assert.ok(at >= 0, "Missing real Worker handler: " + name);
-  const end = source.indexOf("/*__STUDIO_WORKER_END:" + name + "__*/", at);
-  assert.ok(end > at, "Missing Worker extraction boundary: " + name);
-  return source.slice(at, end);
+  for (const moduleText of modules) {
+    const pattern = new RegExp("(?:^|\\n)export (?:async )?function " + name + "\\(");
+    const match = pattern.exec(moduleText);
+    if (!match) continue;
+    const start = match.index + (match[0].startsWith("\n") ? 1 : 0) + 7;
+    const end = moduleText.indexOf("/*__STUDIO_WORKER_END:" + name + "__*/", start);
+    assert.ok(end > start, "Missing Worker extraction boundary: " + name);
+    return moduleText.slice(start, end);
+  }
+  throw new Error("Missing real Worker handler: " + name);
 }
 function compile(name, dependencies) {
   return new Function(...Object.keys(dependencies),
