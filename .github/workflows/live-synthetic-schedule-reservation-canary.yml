@@ -71,7 +71,9 @@ jobs:
           SUBDOMAIN="$(curl -fsS -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/subdomain" | jq -r '.result.subdomain')"
           test -n "$SUBDOMAIN" && test "$SUBDOMAIN" != null
           NONCE="$(openssl rand -hex 12)"
-          RESULT="$(curl --fail-with-body -sS --retry 4 --retry-delay 2 -X POST "https://$CANARY_WORKER_NAME.$SUBDOMAIN.workers.dev/run" -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" --data "{\"nonce\":\"$NONCE\"}")"
+          RESULT="$(curl -sS --retry 4 --retry-delay 2 -X POST "https://$CANARY_WORKER_NAME.$SUBDOMAIN.workers.dev/run" -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" --data "{\"nonce\":\"$NONCE\"}")"
+          echo "$RESULT" | jq -c '{ok, error_code, message, schema, live_namespace, production_flag_unchanged, external_write, airtable_writes, publishing_calls, results}'
+          echo "$RESULT" | jq -e '.ok == true' >/dev/null
           echo "$RESULT" | jq -e '.ok == true and .live_namespace == true and .production_flag_unchanged == true and .airtable_writes == 0 and .publishing_calls == 0 and ([.results[] | select(.pass != true)] | length == 0)' >/dev/null
           echo "live_sqlite_synthetic_canary=PASS"
           echo "$RESULT" | jq -c '{schema, live_namespace, production_flag_unchanged, external_write, airtable_writes, publishing_calls, results}'
