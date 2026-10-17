@@ -118,5 +118,5 @@ test("Large global selections are partitioned instead of disabling Submit", () =
   assert.match(js,/will submit as \$\{planned\} batches/);
   assert.match(js,/submitFactoryGlobalApprovalBatches/);
   assert.match(js,/persistRemaining\(planned\)/);
-  assert.match(js,/Submitted all \$\{ready\.length\} outputs as/);
+  assert.match(js,/All \$\{ready\.length\} outputs accepted as/);
 });
