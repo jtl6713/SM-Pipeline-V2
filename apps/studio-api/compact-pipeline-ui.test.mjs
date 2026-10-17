@@ -16,7 +16,7 @@ test("compact Pipeline build and cache bust stay aligned", () => {
   assert.match(html, /app-item4-1008\.js\?v=0[.]6[.][0-9]+[-a-zA-Z0-9.]*/);
   assert.match(html, /styles-phase7-0621\.css\?v=0[.]6[.][0-9]+[-a-zA-Z0-9.]*/);
   const build = app.match(/BUILD_ID = "item4-([^"]+)"/)?.[1];
-  const scriptCache = html.match(/app-item4-1008\.js\?v=([^"']+)/)?.[1];
+  const scriptCache = html.match(/app-item4-1008\.js\?v=([^"'&]+)/)?.[1];
   assert.ok(build && scriptCache, "Studio app must expose a versioned build");
   assert.equal(scriptCache, build, "HTML script cache tag must match the JS BUILD_ID exactly");
   assert.ok(html.includes("UI build " + build.match(/^\d+\.\d+\.\d+/)?.[0]),
