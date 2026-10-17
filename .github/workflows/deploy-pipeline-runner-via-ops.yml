@@ -254,3 +254,4 @@ jobs:
 
 # Trigger pipeline-runner deploy for visual-aware voiceover TTS/render revision guards
 # 2026-10-17 service_version=2026-10-17-visual-voiceover-revision-guard
+# 2026-10-17: fresh runner restart to clear stale final visual-canary request after exact-target/timing fixes.
