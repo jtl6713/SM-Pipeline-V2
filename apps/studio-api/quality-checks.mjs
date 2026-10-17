@@ -191,6 +191,14 @@ export const QUALITY_CHECKS = Object.freeze([
     heal: "stamp_video_draft_then_ttd0",
   }),
   check({
+    id: "facebook_fbs2_storage_disconnect",
+    title: "Check Facebook Reel FBS2_DIRECT_STORAGE failed R2 transfers with an existing rendered MP4; retry staging, never regenerate frames",
+    lane: "service",
+    kind: "facebook_fbs2_storage_disconnect",
+    actor: "worker_heal",
+    heal: "retry_existing_final_mp4_staging",
+  }),
+  check({
     id: "facebook_publish_rate_limit",
     title: "Check for Facebook Graph 368 / 1390008 spam rate-limit during FBS3 Reel upload session start",
     lane: "service",
