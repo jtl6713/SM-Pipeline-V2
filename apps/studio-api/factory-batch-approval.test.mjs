@@ -69,3 +69,16 @@ test("rollout flag also prevents cron and background drain while disabled", () =
   assert.match(worker.slice(drain, drain + 550), /factoryBatchRolloutPolicy\(env, profileId\)/);
   assert.match(worker, /approvals_enabled: factoryBatchRolloutPolicy\(env, profile.id\).enabled/);
 });
+
+test("Phase 2A method gate admits Factory batch POST before scoped approval handler", () => {
+  assert.match(worker, /const isFactoryBatchWrite = isFactoryBatchRoute && request\.method === "POST";/);
+  const gateStart = worker.indexOf("const allowedMethod =");
+  const gateEnd = worker.indexOf("if (!allowedMethod)", gateStart);
+  assert.ok(gateStart >= 0 && gateEnd > gateStart, "Phase 2A global gate exists");
+  assert.match(worker.slice(gateStart, gateEnd), /isFactoryBatchWrite\s*\|\|/,
+    "POST /api/factory/approval-batches must pass the method allowlist");
+  assert.match(worker, /if \(isFactoryBatchRoute\) \{\s*requirePermission\(authorization, "outputs_review"\)/,
+    "The route retains its authenticated outputs_review permission check");
+  assert.match(worker, /if \(isFactoryBatchRoute\)[\s\S]*?assertWriteRequest\(request, env\);[\s\S]*?factoryBatchSubmitRoute\(request, env, authorization, ctx\)/,
+    "The route retains write security and existing safe rollout enforcement");
+});
