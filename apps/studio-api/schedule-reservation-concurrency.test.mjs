@@ -85,7 +85,7 @@ function schedulerCallbacks(authoritative, outputId, type = "Reel", hooks = {}) 
       hooks.onWriteStarted?.(plan);
       if (hooks.writeBarrier) await hooks.writeBarrier.promise;
       authoritative.set(outputId, plan.selectedIso);
-      return { id: outputId };
+      return { id: outputId, selectedIso: plan.selectedIso };
     },
     verify: async (_row, plan) => {
       const stored = authoritative.get(outputId) || "";
@@ -136,7 +136,7 @@ test("ten Facebook outputs commit ten unique nonconflicting MAE reservations", a
   for (let i = 1; i <= 10; i += 1) {
     const outputId = `recFacebook${i}`;
     const result = await scheduleOne(env, authoritative, { platform: "Facebook", outputId, type: "Reel" });
-    isos.push(result.plan.selectedIso);
+    isos.push(result.value.selectedIso);
   }
   assert.equal(new Set(isos).size, 10);
   assertSeparated(isos);
@@ -149,7 +149,7 @@ test("ten TikTok outputs commit ten unique nonconflicting MAE reservations", asy
   for (let i = 1; i <= 10; i += 1) {
     const outputId = `recTikTok${i}`;
     const result = await scheduleOne(env, authoritative, { platform: "TikTok", outputId, type: "Video Draft" });
-    isos.push(result.plan.selectedIso);
+    isos.push(result.value.selectedIso);
   }
   assert.equal(new Set(isos).size, 10);
   assertSeparated(isos);
@@ -192,7 +192,7 @@ test("two Factory-style batches on the same lane cannot plan concurrently", asyn
     hooks: { onPlan: (rows) => { seen = rows; } },
   });
   assert.ok(seen.some((row) => row.platform_output_record_id === "recBatchA1"));
-  assert.notEqual(committedSecond.plan.selectedIso, committedFirst.plan.selectedIso);
+  assert.notEqual(committedSecond.value.selectedIso, committedFirst.value.selectedIso);
 });
 
 test("Factory batch and Pipeline single approval serialize on the same lane", async () => {
@@ -228,7 +228,7 @@ test("Factory batch and Pipeline single approval serialize on the same lane", as
     outputId: "recPipeline",
     operation: "pipeline-approve:recPipeline",
   });
-  assert.notEqual(first.plan.selectedIso, second.plan.selectedIso);
+  assert.notEqual(first.value.selectedIso, second.value.selectedIso);
 });
 
 test("different platforms do not block while another platform is inside external write", async () => {
@@ -252,7 +252,7 @@ test("different platforms do not block while another platform is inside external
     outputId: "recTikTokFree",
     type: "Video Draft",
   });
-  assert.ok(tiktok.plan.selectedIso);
+  assert.ok(tiktok.value.selectedIso);
 
   barrier.resolve();
   await facebook;
@@ -280,7 +280,7 @@ test("different content profiles do not block on the same platform", async () =>
     platform: "Facebook",
     outputId: "recNewYorkFree",
   });
-  assert.ok(newYork.plan.selectedIso);
+  assert.ok(newYork.value.selectedIso);
 
   barrier.resolve();
   await chicago;
@@ -306,8 +306,8 @@ test("different output types share one platform wall-clock occupancy", async () 
     },
   });
   assert.equal(feedSawReel, true);
-  assert.notEqual(feed.plan.selectedIso, reel.plan.selectedIso);
-  assertSeparated([reel.plan.selectedIso, feed.plan.selectedIso]);
+  assert.notEqual(feed.value.selectedIso, reel.value.selectedIso);
+  assertSeparated([reel.value.selectedIso, feed.value.selectedIso]);
 });
 
 test("browser/client disappearance cannot release a transaction frozen after external-write intent", async () => {
@@ -340,7 +340,7 @@ test("browser/client disappearance cannot release a transaction frozen after ext
   // backend write is sufficient for the durable Worker transaction to finish.
   barrier.resolve();
   const result = await background;
-  assert.equal(authoritative.get("recBackground"), result.plan.selectedIso);
+  assert.equal(authoritative.get("recBackground"), result.value.selectedIso);
 });
 
 test("operation retry is idempotent after a verified commit and does not write twice", async () => {
@@ -359,7 +359,7 @@ test("operation retry is idempotent after a verified commit and does not write t
   });
   const first = await runAtomicScheduleTransaction(env, args, callbacks, { maxWaitMs: 0, jitter: false });
   const second = await runAtomicScheduleTransaction(env, args, callbacks, { maxWaitMs: 0, jitter: false });
-  assert.equal(first.plan.selectedIso, authoritative.get("recRetry"));
+  assert.equal(first.value.selectedIso, authoritative.get("recRetry"));
   assert.equal(second.already_committed, true);
   assert.equal(writes, 1);
 });
