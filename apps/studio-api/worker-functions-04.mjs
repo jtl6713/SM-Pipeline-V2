@@ -2278,8 +2278,14 @@ async function studioAtomicApplyScheduleRegenEntry(env, {
     },
     plan: async ({ occupied_reservations: durableReservations }) => {
       studioInvalidateOccupiedScheduleCache();
+      const regenExclusions = Array.isArray(combo?.eligible_ids) && combo.eligible_ids.length
+        ? combo.eligible_ids.map(String).filter(Boolean)
+        : [outputId];
       const fresh = await studioOccupiedSchedulesOrEmpty(env, {
-        excludeIds: [outputId],
+        // Other outputs in this regeneration lane are being replaced too. Their
+        // superseded times are planning residue, not protected capacity. Earlier
+        // atomic commits are reintroduced below from the durable reservation ledger.
+        excludeIds: regenExclusions,
         profile,
       });
       const laneOccupied = studioOccupiedForLane(fresh, platform, outputType).slice();
