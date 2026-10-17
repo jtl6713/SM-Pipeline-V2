@@ -59,7 +59,7 @@ test("All Profiles client soft-handles Airtable cooling without a red HTTP 429 b
   assert.match(overview, /waiting on Airtable/);
   assert.match(overview, /timeoutMs: 8000/);
   assert.match(overview, /isOverviewSoftFailure/);
-  assert.match(overview, /never paint a red/i);
+  assert.match(overview, /never paint a red unavailable banner/i);
   assert.doesNotMatch(overview, /timeoutMs: 60000/);
   assert.doesNotMatch(overview, /could not load:/i);
 });
