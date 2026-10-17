@@ -366,6 +366,12 @@ import {
   SCHEDULE_REGEN_STATUS,
 } from "./schedule-regen-batch.mjs";
 import {
+  scheduleReservationAuthorityEnabled,
+  SCHEDULE_RESERVATION_BINDING,
+} from "./schedule-reservation-authority.mjs";
+export { ScheduleReservationLane } from "./schedule-reservation-authority.mjs";
+
+import {
   libraryAssetNameFindFormula,
   libraryNameHasPhrase,
   libraryNameSort,
@@ -1116,6 +1122,8 @@ export default {
           studio_az_large_video_staging_v1: true,
           studio_ig_carousel_due_publish_v1: true,
           studio_schedule_spacing_v1: true,
+          studio_schedule_reservation_authority_v1: scheduleReservationAuthorityEnabled(env),
+          studio_schedule_reservation_authority_binding_v1: Boolean(env?.[SCHEDULE_RESERVATION_BINDING]),
           studio_open_review_reschedule_v1: true,
           studio_yt_manual_schedule_lock_v1: true,
           studio_insights_watchlist_v2: true,
