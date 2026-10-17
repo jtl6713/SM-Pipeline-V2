@@ -5,6 +5,8 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
+const worker01 = fs.readFileSync(path.join(here, "worker-functions-01.mjs"), "utf8");
+const worker02 = fs.readFileSync(path.join(here, "worker-functions-02.mjs"), "utf8");
 const worker04 = fs.readFileSync(path.join(here, "worker-functions-04.mjs"), "utf8");
 const authority = fs.readFileSync(path.join(here, "schedule-reservation-authority.mjs"), "utf8");
 const transaction = fs.readFileSync(path.join(here, "schedule-reservation-transaction.mjs"), "utf8");
@@ -101,4 +103,36 @@ test("expired Verifying ownership is quarantined rather than silently cleared", 
   assert.match(authority, /EXTERNAL_WRITE_POSSIBLE_STATES\.has\(lock\.state\)/);
   assert.match(authority, /state: SCHEDULE_RESERVATION_STATES\.RECOVERY_REQUIRED/);
   assert.match(authority, /Expired scheduling owner may have written Airtable; reconciliation is required/);
+});
+
+
+test("schedule regeneration, cron heals, Factory vacate, and production seed all join the authority", () => {
+  assert.match(worker04, /async function studioAtomicApplyScheduleRegenEntry[\s\S]*runAtomicScheduleTransaction\(env/);
+  assert.match(worker04, /async function studioHealApprovedMissingScheduleAtomic[\s\S]*runAtomicScheduleTransaction\(env/);
+  assert.match(worker04, /async function studioHealStoryCompanionDriftAtomic[\s\S]*runAtomicScheduleTransaction\(env/);
+  assert.match(worker04, /async function studioAtomicVacateSkippedOutput[\s\S]*runAtomicScheduleTransaction\(env/);
+  assert.match(worker02, /async function studioAtomicApplyPlatformOutputSeedSchedule[\s\S]*runAtomicScheduleTransaction\(env/);
+});
+
+test("all atomic Airtable schedule mutations consume the bounded write AbortSignal", () => {
+  const combined = worker02 + "\n" + worker04;
+  const mutatingCallbacks = [...combined.matchAll(/write: async \(plan, \{ signal \}\) =>[\s\S]{0,450}?method: "PATCH",[\s\S]{0,100}?signal,/g)];
+  assert.ok(mutatingCallbacks.length >= 7, "every atomic schedule mutation must pass the transaction AbortSignal to airtableFetch");
+});
+
+test("Quality Agent reservation recovery never dispatches or republishes content", () => {
+  const qualityStart = worker04.indexOf("async function studioReconcileReservationDriftAtomic");
+  const qualityEnd = worker04.indexOf("export async function studioHealApprovedMissingSchedule", qualityStart);
+  assert.ok(qualityStart >= 0 && qualityEnd > qualityStart);
+  const qualityRuntime = worker04.slice(qualityStart, qualityEnd);
+  assert.doesNotMatch(qualityRuntime, /studioDispatchApprovedPublishNow|studioDispatchApprovedPublishAndSchedule|publish-kick/i);
+});
+
+test("published scheduled rows remain occupancy inputs instead of being freed after workflow completion", () => {
+  const start = worker01.indexOf("export function studioOccupiedFilterFormula");
+  const end = worker01.indexOf("export function studioOccupiedCacheSlot", start);
+  assert.ok(start >= 0 && end > start);
+  const occupancy = worker01.slice(start, end);
+  assert.match(occupancy, /Published rows stay in the window/);
+  assert.doesNotMatch(occupancy, /Publish_Status.*!=.*Published|Output_Status.*!=.*Published/);
 });
