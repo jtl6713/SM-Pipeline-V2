@@ -127,6 +127,34 @@ export async function runLiveScheduleReservationCanary(env, { nonce } = {}) {
   assert(reconciled.reconciled === true && reconciled.committed === true,
     "Synthetic authoritative commit was not reconciled");
   results.push({ check: "ambiguous_quarantine_reconciliation", pass: true });
+
+  const expiryLane = lane + "-expiry";
+  const expiredIdentity = {
+    content_profile_id: expiryLane, platform: "synthetic",
+    platform_output_record_id: PREFIX + "expired",
+    owner_operation_id: PREFIX + nonce + "-expired",
+    reservation_id: PREFIX + nonce + "-expired",
+    lease_ms: 30000,
+  };
+  const oldOwner = await acquireScheduleReservation(isolated, expiredIdentity, {maxWaitMs:0});
+  await new Promise(resolve => setTimeout(resolve, 31500));
+  const successorIdentity = {
+    ...expiredIdentity,
+    platform_output_record_id: PREFIX + "successor",
+    owner_operation_id: PREFIX + nonce + "-successor",
+    reservation_id: PREFIX + nonce + "-successor",
+  };
+  const successor = await acquireScheduleReservation(isolated, successorIdentity, {maxWaitMs:0});
+  assert(successor.fencing_generation > oldOwner.fencing_generation, "Expired lock did not advance fencing generation");
+  let fenced = false;
+  try {
+    await releaseScheduleReservation(isolated, {...expiredIdentity, fencing_generation:oldOwner.fencing_generation});
+  } catch (e) { fenced = /stale|fenc|owner|token/i.test(String(e.code || e.message)); }
+  assert(fenced, "Expired owner released successor lock");
+  const successorFailure = await failScheduleReservation(isolated, {...successorIdentity, fencing_generation:successor.fencing_generation, error:"synthetic cleanup"});
+  assert(successorFailure.recovery_required === false, "Successor cleanup unexpectedly quarantined");
+  await releaseScheduleReservation(isolated, {...successorIdentity, fencing_generation:successor.fencing_generation});
+  results.push({check:"live_lease_expiry_and_stale_owner_fencing",pass:true});
   return {
     schema: "studio.synthetic-live-reservation-canary.1",
     live_namespace: true,
