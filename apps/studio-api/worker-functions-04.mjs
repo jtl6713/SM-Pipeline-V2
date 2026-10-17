@@ -2489,7 +2489,11 @@ async function studioApproveOutputRecordAtomic(env, record, note, stamp, payload
 
 export async function approveOutputRecordForPublishing(env, existing, note, stamp, payload = {}, options = {}) {
   const id = existing.id;
+  const checkpoint = typeof options.onTimingCheckpoint === "function"
+    ? options.onTimingCheckpoint : () => {};
+  checkpoint("approval_lease_wait_started");
   return withOutputApprovalLock(env.STUDIO_MEDIA, id, async () => {
+  checkpoint("approval_lease_acquired");
   // Canonical re-read under the shared per-output lease. Legacy Pipeline, single
   // Approve, and Factory batch cannot concurrently commit two approvals for
   // the same record. Never trust a caller's earlier Ready for Review snapshot.
@@ -2524,6 +2528,7 @@ export async function approveOutputRecordForPublishing(env, existing, note, stam
       });
     }
   }
+  checkpoint("slot_search_started");
   const platform = String(f(record, "Platform") || "").trim();
   const outputType = String(f(record, "Studio_Output_Type") || f(record, "Format") || "").trim();
   const laneKey = maeScheduleLaneKey(platform, outputType) || String(platform || "").toLowerCase();
@@ -2637,6 +2642,7 @@ export async function approveOutputRecordForPublishing(env, existing, note, stam
     },
   );
   const scheduledIso = scheduleFields.Scheduled_Post_Date || f(record, "Scheduled_Post_Date");
+  checkpoint("slot_search_finished");
   const fields = {
     Review_Status: "Approved",
     Output_Status: "Approved for Publishing",
@@ -2654,18 +2660,23 @@ export async function approveOutputRecordForPublishing(env, existing, note, stam
   const preparedHandoff = studioPublishHandoffFields(prepared, {
     scheduledPostDate: scheduleFields.Scheduled_Post_Date || f(prepared, "Scheduled_Post_Date") || scheduledIso,
   });
+  checkpoint("schedule_write_started");
   const updated = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, prepared.id || id, {
     method: "PATCH",
     body: JSON.stringify({ fields: { ...fields, ...preparedHandoff, ...scheduleFields }, typecast: true }),
   });
+  checkpoint("schedule_write_finished");
   if (!options.skipOccupancyRefresh) studioInvalidateOccupiedScheduleCache();
   // Phase 3: Factory/Approve updates Airtable; Pipeline list/grid read Supabase.
   // Without write-through, Approved rows stay "Ready for Review" in Pipeline.
+  checkpoint("supabase_sync_started");
   const writeThrough = studioSupabaseWriteThroughOutput(env, updated, "approve");
   if (Array.isArray(options.writeThroughQueue)) {
     options.writeThroughQueue.push(writeThrough);
+    // Deferred write-through has no completed checkpoint in this approval.
   } else {
     await writeThrough;
+    checkpoint("supabase_sync_finished");
   }
   return updated;
   });
