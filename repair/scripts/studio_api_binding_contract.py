@@ -43,6 +43,11 @@ OPTIONAL_BINDINGS = {
     "FACTORY_BATCH_GLOBAL_MAX_TOTAL": "plain_text",
     "FACTORY_BATCH_GLOBAL_MAX_PER_PROFILE": "plain_text",
     "FACTORY_BATCH_GLOBAL_PRODUCTION_SIGNOFF": "plain_text",
+    # Visual-aware voiceover rollout bindings are type-allowlisted here;
+    # deploy-cloudflare-worker-production.yml separately enforces exact signed values.
+    "STUDIO_VISUAL_TIMELINE_V1": "plain_text",
+    "STUDIO_VISUAL_SCRIPT_V1": "plain_text",
+    "STUDIO_VISUAL_CANARY_OUTPUT_IDS": "plain_text",
     "ELEVENLABS_API_KEY": "secret_text",
     "PIPELINE_RUNNER_SHARED_SECRET": "secret_text",
     "PIPELINE_RUNNER_URL": "plain_text",
