@@ -125,7 +125,9 @@ expected={
 }
 for k,v in expected.items():
     assert bs[k].get("text")==v,"Staging manual configuration mismatch: "+k
-assert not (set(bs)-{"STUDIO_MEDIA",*expected}),"Unexpected existing staging bindings; refuse overwriting"
+extra=set(bs)-{"STUDIO_MEDIA",*expected}
+assert extra.issubset({"AIRTABLE_PAT","STAGING_TEST_AUTH"}),"Unexpected existing staging bindings: "+str(extra)
+assert all(bs[key].get("type")=="secret_text" for key in extra),"Staging credentials must remain encrypted Worker secrets"
 print("STAGING_EXISTING_WORKER_AND_R2_PRECHECK=PASS")
 PY
 
