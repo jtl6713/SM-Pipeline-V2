@@ -405,4 +405,18 @@ jobs:
             require_match 'QA-FACTORY-BATCH-DUPLICATE-ITEM' /tmp/custom-factory-quality.js "Factory duplicate-item finding"
             echo "factory_quality_agent_live_asset_verify=PASS"
           fi
+          # Step 4: prove the authenticated production site has the canary
+          # selector guard, not just the generic Factory UI or a build label.
+          if grep -Fq 'rollout=chicago-ig-reel-v1' apps/studio-web/index.html; then
+            require_match 'factoryBatchRolloutNotice' /tmp/custom-index.html "Factory canary notice element"
+            require_match 'rollout=chicago-ig-reel-v1' /tmp/custom-index.html "Factory canary cache-busted script URL"
+            PILOT_JS_HTTP=$(curl -sS "${ACCESS_HEADERS[@]}" \
+              -o /tmp/custom-factory-canary.js -w '%{http_code}' \
+              "$CUSTOM_URL/assets/factory-desk.js?v=0.6.709-overview-fast-refresh&rollout=chicago-ig-reel-v1" || true)
+            test "$PILOT_JS_HTTP" = "200"
+            require_match 'function canSelectBatchOutput(card)' /tmp/custom-factory-canary.js "Factory canary client guard"
+            require_match 'Limited production pilot: approve one Chicago Instagram Reel at a time.' /tmp/custom-factory-canary.js "Factory canary operator guidance"
+            require_match 'selectable > limit' /tmp/custom-factory-canary.js "Factory single-output limit"
+            echo "factory_chicago_canary_live_asset_verify=PASS"
+          fi
           echo "custom_domain_content_verify=PASS"
