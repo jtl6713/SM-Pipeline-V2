@@ -4795,8 +4795,11 @@ const STUDIO_R5_DONE_HOOK_TOKEN = "r5done_7kqp2nvm4w8x1c9h3z";
 /*__STUDIO_WORKER_EXTRACT:phase6SlidePreviewUrl__*/
 /*__STUDIO_WORKER_EXTRACT:mapPhase6CreativeSlide__*/
 /*__STUDIO_WORKER_EXTRACT:phase6VirtualSlidesFromSelectedAssets__*/
+/*__STUDIO_WORKER_EXTRACT:phase6MergeSelectedVideoMetadata__*/
+/*__STUDIO_WORKER_EXTRACT:phase6VisualCanaryOutputIds__*/
 /*__STUDIO_WORKER_EXTRACT:phase6VisualTimelineEnabledForOutput__*/
 /*__STUDIO_WORKER_EXTRACT:phase6VisualScriptEnabledForOutput__*/
+/*__STUDIO_WORKER_EXTRACT:studioPrepareVisualVoiceoverCanary__*/
 /*__STUDIO_WORKER_EXTRACT:phase6SlidesForOutput__*/
 /*__STUDIO_WORKER_EXTRACT:phase6CachedVoiceCatalog__*/
 /*__STUDIO_WORKER_EXTRACT:mapElevenLabsVoice__*/
