@@ -234,7 +234,7 @@ export async function factoryApprovalGroupList(bucket, { profileId="", limit=40,
   const groups=[];
   for (const object of objects) {
     if (groups.length>=limit) break;
-    const match=String(object.key).match(/\\/groups\\/([A-Za-z0-9_-]{12,128})\\.json$/);
+    const match=String(object.key).match(new RegExp("/groups/([A-Za-z0-9_-]{12,128})[.]json$"));
     if (!match) continue;
     const status=await factoryApprovalGroupStatus(bucket,match[1]);
     if (status && (!profileId || status.profile_ids.includes(profileId))) groups.push(status);
@@ -263,5 +263,5 @@ export async function factoryApprovalGroupCronScan(bucket,{maxScan=50}={}) {
   const next={cursor:cursor||null,updated_at:new Date().toISOString()};
   if (checkpoint) await mutate(bucket,FACTORY_GROUP_CRON_CURSOR_KEY,()=>next);
   else await absent(bucket,FACTORY_GROUP_CRON_CURSOR_KEY,next);
-  return objects.map(row=>String(row.key).match(/\\/groups\\/([A-Za-z0-9_-]{12,128})\\.json$/)?.[1]).filter(Boolean);
+  return objects.map(row=>String(row.key).match(new RegExp("/groups/([A-Za-z0-9_-]{12,128})[.]json$"))?.[1]).filter(Boolean);
 }
