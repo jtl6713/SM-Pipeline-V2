@@ -123,3 +123,36 @@ Recognize these `kind` values from Engagement Action `classification.kind` / Wor
 - Distinguish native-photo carousel children from Remotion MP4 rendering: `Render_Status = Native Photo Route` is expected, **not** a render failure.
 
 **Existing check mapping:** `apps/studio-api/quality-checks.mjs` check `ig_carousel_child_verification_race` / `verify_children_then_advance`. This document refines that signature; runtime implementation and real Meta verification must be confirmed separately.
+
+
+## QA-SCHEDULE-* — Atomic scheduling reservation authority
+
+**Introduced:** October 17, 2026.
+
+These signatures apply only when the atomic reservation authority feature is enabled. The reservation lane is Content Profile ID + Platform; output type remains a sequencing dimension but does not create an independent wall-clock lock.
+
+### Signatures
+
+| Signature | Detection | Safe response |
+|---|---|---|
+| `QA-SCHEDULE-LOCK-HUNG` | Lease expired, heartbeat stale, or lane entered Recovery Required | Fence the prior owner. If no external write was possible, resume safely. If Airtable may have been written, reconcile authoritative state before releasing. |
+| `QA-SCHEDULE-LOCK-CONTENTION` | A request waits 30 seconds or more on the lane | Record contention and inspect owner progress. Never bypass the lock. |
+| `QA-SCHEDULE-RESERVATION-DRIFT` | Durable committed reservation and authoritative Platform Output schedule differ | For unpublished outputs, adopt the authoritative schedule under the same lane lock without moving the post. Published drift requires operator review. |
+| `QA-SCHEDULE-COLLISION` | Two committed outputs on one profile/platform violate the platform separation policy | Urgent Needs Eyes. Do not silently move approved schedules. The documented Story companion main +10 exception is not considered a collision with its own main. |
+| `QA-SCHEDULE-QUEUE-STALLED` | Oldest waiter exceeds two minutes or quarantine prevents queue progress | Reconcile/recover the blocking lane, then allow normal retries to resume. |
+
+### Recovery contract
+
+A `Verifying` reservation means an Airtable schedule write may be in flight. Lease expiry must quarantine the lane; elapsed time alone never clears it.
+
+Recovery reads the current fencing generation, active reservation, and authoritative Platform Output schedule. The previous owner is fenced before reconciliation. If Airtable matches the selected reservation, preserve it as committed. If Airtable still matches the previous schedule (or remains blank for a first reservation), automatic abandonment requires the configured ambiguity settle period and two stable authoritative observations. Any third state is ambiguous and remains Needs Eyes.
+
+Durable Object alarms perform immediate lease-expiry fencing. The Worker Quality Agent scans the sanitized R2 lane index on its normal cadence for reconciliation, contention, queue, collision, and drift findings.
+
+### Runtime implementation
+
+- Authority: `apps/studio-api/schedule-reservation-authority.mjs`
+- Quality classifiers: `apps/studio-api/schedule-reservation-quality.mjs`
+- Runtime sweep: Studio API Worker scheduled handler (only after the feature is enabled)
+- Durable lane index: `studio/state/schedule-reservation-lanes/v1/`
+- Latest Quality Agent report: `studio/state/schedule-reservation-quality/v1/latest.json`
