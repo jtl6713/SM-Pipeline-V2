@@ -36,7 +36,7 @@ test("desk inventory marks scheduling checks scanned and surfaces runtime findin
     "schedule_reservation_drift",
     "schedule_collision",
     "schedule_queue_stalled",
-  ]) assert.match(functions04, new RegExp("\\"" + kind + "\\""));
+  ]) assert.ok(functions04.includes(`"${kind}"`), kind + " must be wired into the runtime desk scan");
   assert.match(functions04, /studioScheduleReservationQualityLatest\(env\)/);
   assert.match(functions04, /for \(const finding of scheduleQuality\?\.findings \|\| \[\]\) push\(finding\)/);
 });
