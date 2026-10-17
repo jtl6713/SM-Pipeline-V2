@@ -437,3 +437,4 @@ Deploy Factory all-platform batch approvals 2026-10-17. PR #813. Signed global m
 
 2026-10-17 Atomic MAE reservation authority ordinary source deploy | merged PR #819 | reservation namespace bootstrap NOT requested | feature flag remains absent/off | establish exact-commit production status before dormant lifecycle bootstrap.
 Deploy merged scoped scheduling authority f8828617a31cf8855249660a58439818c90178a0 dormant. Preserve STUDIO_SCHEDULE_RESERVATION_AUTHORITY_ENABLED=false and existing production bindings. No live activation.
+2026-10-17 Deploy merged PR #839: exact profile/platform schedule authority dispatch. Restore legacy routing for non-Miami-Instagram lanes; normal protected deploy intentionally disables authority for safety. After stable batch recovery, re-activate only approved Miami Instagram lane via existing confirmed workflow.
