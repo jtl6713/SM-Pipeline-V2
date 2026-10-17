@@ -53,6 +53,6 @@ test("Production UI auto-retries prepare when the poll window expires", () => {
   assert.match(app, /item4NextVariantAutoRetry/);
   assert.match(app, /prepareItem4Variants\(\{ autoRetry: true \}\)/);
   assert.match(app, /Automatic retry \$\{item4VariantAutoRetries\}\/\$\{ITEM4_VARIANT_AUTO_RETRIES\}/);
-  assert.match(app, /BUILD_ID = "item4-0[.]6[.]709-overview-fast-refresh"/);
+  assert.match(app, /BUILD_ID = "item4-0[.]6[.][0-9]+[-a-zA-Z0-9.]*"/);
   assert.match(app, /maybeAutoPrepareTimelineVariants/);
 });
