@@ -23,7 +23,7 @@ from r4.render_request import choose_render_request, timing_blocks_render, voice
 from render.fields import field, field_str, first_linked_id
 from render.remotion_client import RemotionClient
 from render.settings import get_render_server_url, get_render_volumes
-from render.studio_revision import render_package_revision_error
+from render.studio_revision import manifest_studio_revision, render_package_revision_error, studio_revision_error
 
 
 STUDIO_STREAM_PREFIX = "/api/media-assets/"
@@ -170,6 +170,58 @@ def select_output(
     return rows[0] if rows else None
 
 
+def render_snapshot_identity(output: dict[str, Any]) -> tuple[str, ...]:
+    """Immutable R4 input identity for the exact render package we are launching."""
+    fields = output.get("fields") or {}
+    names = (
+        "Creative_Render_Manifest_JSON",
+        "Render_Clip_List_JSON",
+        "Render_Total_Frames",
+        "Composition_ID",
+        "Output_Filename",
+        "Music_URL",
+        "Voiceover_URL",
+        "Voiceover_Render_Volume",
+        "Music_Volume",
+        "Music_Ducked_Volume",
+        "Music_Ducking_Enabled",
+        "Music_Duck_Fade_Frames",
+    )
+    return tuple(str(fields.get(name) if fields.get(name) is not None else "") for name in names)
+
+
+def render_snapshot_error(
+    expected_snapshot: tuple[str, ...],
+    expected_revision: dict[str, Any] | None,
+    current: dict[str, Any],
+) -> str | None:
+    revision_error = studio_revision_error(expected_revision, current)
+    if revision_error:
+        return revision_error
+    if render_snapshot_identity(current) != expected_snapshot:
+        return "R4 render package changed after this render request was prepared; launch the current package instead."
+    return None
+
+
+def stale_r4_launch_cleanup_fields(
+    current: dict[str, Any],
+    *,
+    launched_job_id: str,
+    error: str,
+) -> dict[str, Any]:
+    """Clear only this stale launch; never overwrite a newer R4 job."""
+    if not launched_job_id or field_str(current, "Remotion_Job_ID") != launched_job_id:
+        return {}
+    return {
+        "Remotion_Job_ID": "",
+        "Remotion_Status_URL": "",
+        "Remotion_Props_JSON": "",
+        "Render_Server_URL": "",
+        "Render_Status": "Ready for Render",
+        "Remotion_Error_Message": error[:10000],
+    }
+
+
 def process_one(
     *,
     output_record_id: str | None = None,
@@ -306,6 +358,8 @@ def process_one(
         default_music=music_default,
         default_voice=voice_default,
     )
+    expected_revision = manifest_studio_revision(output)
+    expected_snapshot = render_snapshot_identity(output)
     watermark_url = render_watermark_url(client, output, content_item)
     if watermark_url:
         payload["watermarkUrl"] = watermark_url
@@ -349,9 +403,50 @@ def process_one(
             "make_scenario_name": MAKE_SCENARIO_NAME,
         }
 
+    # The payload above is an immutable snapshot. Re-read immediately before
+    # clearing old artifacts and again before launch so a concurrent Studio edit
+    # cannot cause R4 to start an older visual/script revision.
+    current = client.get_record(PLATFORM_OUTPUTS_TABLE, output["id"])
+    snapshot_error = render_snapshot_error(expected_snapshot, expected_revision, current)
+    if snapshot_error:
+        return {
+            "processed": False,
+            "reason": "stale_render_snapshot",
+            "error": snapshot_error,
+            **preview,
+        }
+
     client.update_record(PLATFORM_OUTPUTS_TABLE, output["id"], dict(R4_CLEAR_FIELDS))
 
+    current = client.get_record(PLATFORM_OUTPUTS_TABLE, output["id"])
+    snapshot_error = render_snapshot_error(expected_snapshot, expected_revision, current)
+    if snapshot_error:
+        return {
+            "processed": False,
+            "reason": "stale_render_snapshot",
+            "error": snapshot_error,
+            **preview,
+        }
+
     response = remotion.post_render(payload)
+    launched_job_id = str(response.get("jobId") or "").strip()
+
+    # A creative edit or a competing R4 launch may win while Remotion is
+    # accepting the request. Never stamp this stale job onto the output.
+    current = client.get_record(PLATFORM_OUTPUTS_TABLE, output["id"])
+    snapshot_error = render_snapshot_error(expected_snapshot, expected_revision, current)
+    current_job_id = field_str(current, "Remotion_Job_ID")
+    if snapshot_error or current_job_id:
+        error = snapshot_error or (
+            f"R4 render launch superseded by job {current_job_id}; discarded job {launched_job_id}."
+        )
+        remotion.cleanup_job(launched_job_id, filename=field_str(output, "Output_Filename") or None)
+        return {
+            "processed": False,
+            "reason": "stale_render_launch" if snapshot_error else "render_already_started",
+            "error": error,
+            **preview,
+        }
 
     save_fields: dict[str, Any] = {
         "Remotion_Job_ID": response.get("jobId"),
@@ -374,4 +469,32 @@ def process_one(
         save_fields["Music_Volume"] = payload.get("music", {}).get("volume", music_default)
 
     client.update_record(PLATFORM_OUTPUTS_TABLE, output["id"], save_fields)
+
+    # Close the final check/write race. If a Studio edit landed after the last
+    # re-read, discard only the job identity written by this launch. If a newer
+    # R4 job already replaced it, leave that newer job untouched.
+    committed = client.get_record(PLATFORM_OUTPUTS_TABLE, output["id"])
+    post_write_error = render_snapshot_error(expected_snapshot, expected_revision, committed)
+    if post_write_error:
+        cleanup = stale_r4_launch_cleanup_fields(
+            committed,
+            launched_job_id=launched_job_id,
+            error=post_write_error,
+        )
+        if cleanup:
+            client.update_record(
+                PLATFORM_OUTPUTS_TABLE,
+                output["id"],
+                cleanup,
+                typecast=True,
+            )
+        remotion.cleanup_job(launched_job_id, filename=field_str(output, "Output_Filename") or None)
+        return {
+            "processed": False,
+            "reason": "stale_render_launch_post_write",
+            "error": post_write_error,
+            "stale_job_compensated": bool(cleanup),
+            **preview,
+        }
+
     return {"processed": True, **preview, "job_id": response.get("jobId")}
