@@ -93,6 +93,18 @@
     return `${Math.floor(seconds / 86400)}d ${Math.floor((seconds % 86400) / 3600)}h old`;
   }
 
+  function snapshotUpdateLabel() {
+    if (!state.cacheAt) return "Updated";
+    const seconds = Math.max(0, Math.floor((Date.now() - state.cacheAt) / 1000));
+    const age = seconds < 60 ? "Updated just now" : `Updated ${cacheAgeLabel().replace(/ old$/, "")} ago`;
+    try {
+      const clock = new Date(state.cacheAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+      return clock ? `${age} · ${clock}` : age;
+    } catch {
+      return age;
+    }
+  }
+
   function isOverviewSoftFailure(error) {
     const name = String(error?.name || "");
     const message = String(error?.message || error || "");
@@ -182,6 +194,7 @@
 
   function refreshStatusText({ stale = false, error = "", cooling = false } = {}) {
     if (state.manualRefreshing) return "Refreshing…";
+    if (state.refreshTone === "ok" && state.cacheAt) return snapshotUpdateLabel();
     if (state.refreshMessage) return state.refreshMessage;
     if (error) return `Showing last good overview (${cacheAgeLabel()}; ${error}).`;
     if (cooling) return `Showing previous data (${cacheAgeLabel()}).`;
@@ -302,7 +315,7 @@
   }
 
   async function finishVerifiedRefresh(refresh) {
-    await load(true);
+    await load(true, String(refresh?.snapshot_generation || ""));
     if (!refreshMatchesSnapshot(refresh)) {
       state.manualRefreshing = true;
       state.refreshMessage = "";
@@ -312,7 +325,7 @@
     }
     state.manualRefreshing = false;
     state.refreshOperationId = "";
-    state.refreshMessage = "Updated just now";
+    state.refreshMessage = "";
     state.refreshTone = "ok";
     clearRefreshIntent();
     render();
@@ -424,7 +437,7 @@
     }
   }
 
-  async function load(force = false) {
+  async function load(force = false, minGeneration = "") {
     if (state.loading) return;
     if (!force && !overviewViewActive()) return;
     state.loading = true;
@@ -445,7 +458,10 @@
     try {
       // Automatic polling remains a read-only snapshot GET. It never triggers the
       // manual force-refresh route; expired snapshots are rebuilt by Worker policy.
-      const data = await json(`/api/profiles/overview?_=${Date.now()}`, { timeoutMs: 8000 });
+      const minGenerationQuery = minGeneration
+        ? `&min_generation=${encodeURIComponent(minGeneration)}`
+        : "";
+      const data = await json(`/api/profiles/overview?_=${Date.now()}${minGenerationQuery}`, { timeoutMs: 8000 });
       const adopted = adoptOverview(data);
       if (!adopted) {
         if (data?.cooling || data?.refreshing) {
