@@ -47,46 +47,85 @@ jobs:
           cat >/tmp/worker.js <<'EOF'
           export default {
             async fetch(request, env) {
-              const outer = new URL(request.url);
-              if (outer.pathname !== ROUTE) return new Response("Not found", {status:404});
-              if (request.method !== "POST") return new Response("Method not allowed", {status:405});
-              let spec = {};
-              try { spec = await request.json(); } catch { return Response.json({ok:false,error:"invalid-json"},{status:400}); }
-              const method = String(spec.method || "GET").toUpperCase();
-              const path = String(spec.path || "");
-              const allowed =
-                path === "/api/health" ||
-                path === "/api/admin/visual-voiceover-canary" ||
-                /^\/api\/outputs\/rec[A-Za-z0-9]+\/creative$/.test(path) ||
-                /^\/api\/outputs\/rec[A-Za-z0-9]+\/creative\/review$/.test(path) ||
-                /^\/api\/outputs\/rec[A-Za-z0-9]+\/creative\/render\/continue$/.test(path) ||
-                /^\/api\/outputs\/rec[A-Za-z0-9]+\/creative\/handoff\/status$/.test(path);
-              if (!allowed) return Response.json({ok:false,error:"path-not-allowed",path},{status:400});
-              if (!["GET","PATCH","POST"].includes(method)) return Response.json({ok:false,error:"method-not-allowed"},{status:405});
-              const headers = new Headers({
-                "Cf-Access-Authenticated-User-Email":"joseph.t.logan@gmail.com",
-                "Origin":"https://studio.chicagoshining.com",
-                "Accept":"application/json",
-                "Cache-Control":"no-store"
-              });
-              let body;
-              if (method !== "GET") {
-                headers.set("Content-Type","application/json");
-                body = JSON.stringify(spec.body ?? {});
+              try {
+                const outer = new URL(request.url);
+                if (outer.pathname !== ROUTE) return new Response("Not found", {status:404});
+                if (request.method !== "POST") return new Response("Method not allowed", {status:405});
+                let spec = {};
+                try {
+                  spec = await request.json();
+                } catch {
+                  return new Response(JSON.stringify({ok:false,error:"invalid-json"}), {
+                    status:400,
+                    headers:{"Content-Type":"application/json","Cache-Control":"no-store"}
+                  });
+                }
+                const method = String(spec.method || "GET").toUpperCase();
+                const path = String(spec.path || "");
+                const allowed =
+                  path === "/api/health" ||
+                  path === "/api/admin/visual-voiceover-canary" ||
+                  /^\/api\/outputs\/rec[A-Za-z0-9]+\/creative$/.test(path) ||
+                  /^\/api\/outputs\/rec[A-Za-z0-9]+\/creative\/review$/.test(path) ||
+                  /^\/api\/outputs\/rec[A-Za-z0-9]+\/creative\/render\/continue$/.test(path) ||
+                  /^\/api\/outputs\/rec[A-Za-z0-9]+\/creative\/handoff\/status$/.test(path);
+                if (!allowed) {
+                  return new Response(JSON.stringify({ok:false,error:"path-not-allowed",path}), {
+                    status:400,
+                    headers:{"Content-Type":"application/json","Cache-Control":"no-store"}
+                  });
+                }
+                if (!["GET","PATCH","POST"].includes(method)) {
+                  return new Response(JSON.stringify({ok:false,error:"method-not-allowed"}), {
+                    status:405,
+                    headers:{"Content-Type":"application/json","Cache-Control":"no-store"}
+                  });
+                }
+                const headers = {
+                  "Cf-Access-Authenticated-User-Email":"joseph.t.logan@gmail.com",
+                  "Origin":"https://studio.chicagoshining.com",
+                  "Accept":"application/json",
+                  "Cache-Control":"no-store"
+                };
+                let body;
+                if (method !== "GET") {
+                  headers["Content-Type"] = "application/json";
+                  body = JSON.stringify(spec.body ?? {});
+                }
+                const internal = new Request("https://studio.chicagoshining.com" + path, {
+                  method,
+                  headers,
+                  body
+                });
+                const response = await env.STUDIO_API.fetch(internal);
+                const responseText = await response.text();
+                let parsed;
+                try {
+                  parsed = responseText ? JSON.parse(responseText) : null;
+                } catch {
+                  parsed = {raw:responseText.slice(0,20000)};
+                }
+                return new Response(JSON.stringify({
+                  ok: response.ok,
+                  status: response.status,
+                  path,
+                  method,
+                  body: parsed
+                }), {
+                  status:200,
+                  headers:{"Content-Type":"application/json","Cache-Control":"no-store"}
+                });
+              } catch (error) {
+                return new Response(JSON.stringify({
+                  ok:false,
+                  status:502,
+                  error:"bridge-runtime",
+                  message:String(error && error.message ? error.message : error).slice(0,500)
+                }), {
+                  status:502,
+                  headers:{"Content-Type":"application/json","Cache-Control":"no-store"}
+                });
               }
-              const response = await env.STUDIO_API.fetch(new Request("https://studio.chicagoshining.com" + path, {
-                method, headers, body
-              }));
-              const text = await response.text();
-              let parsed;
-              try { parsed = text ? JSON.parse(text) : null; } catch { parsed = {raw:text.slice(0,20000)}; }
-              return Response.json({
-                ok: response.ok,
-                status: response.status,
-                path,
-                method,
-                body: parsed
-              }, {headers:{"Cache-Control":"no-store"}});
             }
           };
           EOF
