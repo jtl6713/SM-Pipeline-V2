@@ -7,3 +7,4 @@
 2026-10-17 rerun after live Worker canary duration detector fix verified by production deploy 39051204002.
 2026-10-17 rerun after authoritative visual timeline persistence assertion fix (dcc728f031c0bc5b5a4e48be7d0624f63025c48c).
 2026-10-17 rerun after live nonpublishing visual timeline response contract deployment 1b7ef6069d9c7a378526428b71f5021f215ff192.
+2026-10-17 rerun with duration-safe canary narration after commit 39be3a97c33c1b9896e63c3509c2064f6fb8b428.
