@@ -253,9 +253,41 @@
       && String(card?.studio_output_type || card?.format || "") === "Reel";
   }
 
+  function factoryProfileId() {
+    return String($("factoryProfileFilter")?.value || "").trim();
+  }
+  function factoryProfileLabel(profileId) {
+    const id = String(profileId || "");
+    if (!id) return "All Profiles";
+    const option = [...($("factoryProfileFilter")?.options || [])].find(row => row.value === id);
+    return option?.textContent?.trim() || "City profile";
+  }
+  function syncFactoryFilterOptions() {
+    const select = $("factoryProfileFilter");
+    if (!select) return;
+    const prior = select.value;
+    const profiles = new Map();
+    for (const option of $("studioProfileSelect")?.options || []) {
+      if (/^rec[A-Za-z0-9]+$/.test(option.value)) profiles.set(option.value, option.textContent.trim());
+    }
+    for (const card of Object.values(state.desk?.lanes || {}).flat()
+      .concat(state.desk?.needs_assets_candidates || [])) {
+      if (/^rec[A-Za-z0-9]+$/.test(card?.profile_id || "")) {
+        profiles.set(card.profile_id, card.profile_name || profiles.get(card.profile_id) || "City profile");
+      }
+    }
+    select.innerHTML = '<option value="">All Profiles</option>' +
+      [...profiles.entries()].sort((a, b) => a[1].localeCompare(b[1]))
+        .map(([id, name]) => `<option value="${esc(id)}">${esc(name)}</option>`).join("");
+    select.value = profiles.has(prior) ? prior : "";
+  }
+  function factoryMatchesProfile(card) {
+    return !factoryProfileId() || String(card?.profile_id || "") === factoryProfileId();
+  }
   function readyFactoryOutputs() {
     return (state.desk?.lanes?.needs_eyes || [])
-      .filter((card) => card?.kind === "output" && canReviewActions(card) && canSelectBatchOutput(card));
+      .filter((card) => factoryMatchesProfile(card) && card?.kind === "output"
+        && canReviewActions(card) && canSelectBatchOutput(card));
   }
 
   function updateFactoryBatchToolbar() {
