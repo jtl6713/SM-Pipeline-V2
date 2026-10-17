@@ -12005,41 +12005,149 @@ export async function scheduleStudioPublishOutput(request, env, url, authorizati
     payload?.publish_now === true
     && (!value || value.toLowerCase() === "immediate")
   );
-  // Calendar Save sends manual_schedule_override and keeps the exact slot.
-  // Occupancy is only for MAE auto-stamp; do not let a list 422/500 block Save.
-  const occupied = (manualScheduleOverride || publishNowImmediate)
-    ? {}
-    : await studioOccupiedSchedulesOrEmpty(env, {
-      excludeIds: [match[1]],
-      profile: await item4ProductionProfileRecord(env, existing).catch(() => null),
+  let updated;
+  if (scheduleReservationAuthorityEnabled(env)) {
+    const profile = await item4ProductionProfileRecord(env, existing).catch(() => null);
+    const timeZone = await studioScheduleTimeZoneForRecord(env, existing, payload);
+    const previousRaw = String(
+      f(existing, "Scheduled_Post_Date") || f(existing, "YouTube_Scheduled_Publish_At") || ""
+    ).trim();
+    const transaction = await runAtomicScheduleTransaction(env, {
+      content_profile_id: profile?.id || "",
+      platform,
+      platform_output_record_id: match[1],
+      operation_id: "",
+    }, {
+      legacy: async () => {
+        throw new HttpError(503, "Atomic schedule transaction unexpectedly entered legacy mode");
+      },
+      plan: async ({ occupied_reservations: durableReservations }) => {
+        studioInvalidateOccupiedScheduleCache();
+        const fresh = await studioOccupiedSchedulesOrEmpty(env, {
+          excludeIds: [match[1]],
+          profile,
+        });
+        let platformOccupiedMs = studioOccupiedForPlatform(fresh, platform).slice();
+        for (const reservation of durableReservations || []) {
+          const ms = Date.parse(String(reservation?.scheduled_iso || ""));
+          if (Number.isFinite(ms)) platformOccupiedMs.push(ms);
+        }
+        platformOccupiedMs = [...new Set(platformOccupiedMs.filter(Number.isFinite))];
+
+        if (manualScheduleOverride) {
+          const requestedMs = Date.parse(value);
+          if (!Number.isFinite(requestedMs)) throw new HttpError(400, "Scheduled date/time is invalid");
+          if (maeIsBlackoutLocalTime(requestedMs, timeZone)) {
+            throw new HttpError(409, "Requested manual schedule is inside the 8:00 PM–3:30 AM profile blackout");
+          }
+          if (maeScheduleConflicts(requestedMs, platformOccupiedMs)) {
+            throw new HttpError(409, "Requested manual schedule conflicts with another output on this profile and platform");
+          }
+        }
+
+        const fields = studioPublishScheduleFields(
+          { scheduled_post_date: value || "immediate", timezone: timeZone },
+          existing,
+          {
+            occupiedMs: publishNowImmediate ? null : platformOccupiedMs,
+            forceWrite: true,
+            exactOverride: manualScheduleOverride,
+            timeZone,
+          },
+        );
+        if (!manualScheduleOverride) fields.Studio_Scheduled_At = null;
+        if (String(f(existing, "Review_Status") || "").trim() === "Approved") {
+          fields.Output_Status = "Approved for Publishing";
+        }
+        fields.Publish_Error_Message = "";
+
+        const selectedRaw = String(fields.Scheduled_Post_Date || "").trim();
+        const selectedMs = Date.parse(selectedRaw);
+        if (!Number.isFinite(selectedMs)) {
+          throw new HttpError(409, "Schedule change did not produce a verifiable publication time");
+        }
+        const previousMs = Date.parse(previousRaw);
+        return {
+          action: Number.isFinite(previousMs) ? "move" : "reserve",
+          selectedIso: new Date(selectedMs).toISOString(),
+          previousIso: Number.isFinite(previousMs) ? new Date(previousMs).toISOString() : "",
+          fields,
+        };
+      },
+      write: async (plan) => airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, match[1], {
+        method: "PATCH",
+        body: JSON.stringify({ fields: plan.fields, typecast: true }),
+      }),
+      verify: async (written, plan) => {
+        const authoritative = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, match[1]);
+        const storedRaw = String(f(authoritative, "Scheduled_Post_Date") || "").trim();
+        const storedMs = Date.parse(storedRaw);
+        const selectedMs = Date.parse(plan.selectedIso);
+        if (!Number.isFinite(storedMs) || !Number.isFinite(selectedMs)
+            || new Date(storedMs).toISOString() !== new Date(selectedMs).toISOString()) {
+          const error = new HttpError(409, "Authoritative schedule did not match the reserved manual schedule");
+          error.authoritative_record = authoritative;
+          throw error;
+        }
+        if (platform === "YouTube") {
+          const youtubeMs = Date.parse(String(f(authoritative, "YouTube_Scheduled_Publish_At") || "").trim());
+          if (!Number.isFinite(youtubeMs)
+              || new Date(youtubeMs).toISOString() !== new Date(selectedMs).toISOString()) {
+            const error = new HttpError(409, "YouTube scheduled publish time did not match the reserved manual schedule");
+            error.authoritative_record = authoritative;
+            throw error;
+          }
+        }
+        written.__atomic_verified_record = authoritative;
+        return new Date(storedMs).toISOString();
+      },
+      afterCommit: async (written) => {
+        studioInvalidateOccupiedScheduleCache();
+        await studioSupabaseWriteThroughOutput(
+          env,
+          written.__atomic_verified_record || written,
+          "schedule",
+        );
+      },
     });
-  const timeZone = await studioScheduleTimeZoneForRecord(env, existing, payload);
-  const fields = studioPublishScheduleFields(
-    { scheduled_post_date: value || "immediate", timezone: timeZone },
-    existing,
-    {
-      occupiedMs: publishNowImmediate ? null : studioOccupiedForPlatform(occupied, platform),
-      forceWrite: true,
-      exactOverride: manualScheduleOverride,
-      timeZone,
-    },
-  );
-  if (!manualScheduleOverride) fields.Studio_Scheduled_At = null;
-  if (String(f(existing, "Review_Status") || "").trim() === "Approved") {
-    fields.Output_Status = "Approved for Publishing";
+    updated = transaction?.already_committed
+      ? await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, match[1])
+      : (transaction?.value?.__atomic_verified_record || transaction?.value);
+  } else {
+    // Legacy path remains byte-for-byte equivalent in behavior while the flag is OFF.
+    // Calendar Save keeps its exact slot and bypasses occupancy; MAE auto-stamp reads occupancy.
+    const occupied = (manualScheduleOverride || publishNowImmediate)
+      ? {}
+      : await studioOccupiedSchedulesOrEmpty(env, {
+        excludeIds: [match[1]],
+        profile: await item4ProductionProfileRecord(env, existing).catch(() => null),
+      });
+    const timeZone = await studioScheduleTimeZoneForRecord(env, existing, payload);
+    const fields = studioPublishScheduleFields(
+      { scheduled_post_date: value || "immediate", timezone: timeZone },
+      existing,
+      {
+        occupiedMs: publishNowImmediate ? null : studioOccupiedForPlatform(occupied, platform),
+        forceWrite: true,
+        exactOverride: manualScheduleOverride,
+        timeZone,
+      },
+    );
+    if (!manualScheduleOverride) fields.Studio_Scheduled_At = null;
+    if (String(f(existing, "Review_Status") || "").trim() === "Approved") {
+      fields.Output_Status = "Approved for Publishing";
+    }
+    fields.Publish_Error_Message = "";
+    updated = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, match[1], {
+      method: "PATCH",
+      body: JSON.stringify({
+        fields,
+        typecast: true,
+      }),
+    });
+    studioInvalidateOccupiedScheduleCache();
+    await studioSupabaseWriteThroughOutput(env, updated, "schedule");
   }
-  fields.Publish_Error_Message = "";
-  const updated = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, match[1], {
-    method: "PATCH",
-    body: JSON.stringify({
-      fields,
-      typecast: true,
-    }),
-  });
-  studioInvalidateOccupiedScheduleCache();
-  // Phase 3: keep Supabase schedule-grid in lockstep so the calendar does not
-  // snap the bubble back after refreshPipelineOutputs reloads from Supabase.
-  await studioSupabaseWriteThroughOutput(env, updated, "schedule");
   const due = studioPublishIsDue(updated);
   const approved = String(f(updated, "Output_Status") || "").trim() === "Approved for Publishing"
     || String(f(updated, "Review_Status") || "").trim() === "Approved";
