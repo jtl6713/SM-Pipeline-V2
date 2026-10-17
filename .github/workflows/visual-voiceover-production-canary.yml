@@ -387,7 +387,9 @@ jobs:
           if(!proposal?.scenes) throw new Error("visual narration proposal missing");
           const proposedTarget=proposal.scenes.find(s=>s.scene_id===target.scene_id);
           if(!proposedTarget) throw new Error("selected narration proposal scene missing");
-          proposedTarget.proposed_text=`Canary voice timing ${process.env.GITHUB_RUN_ID||Date.now()}.`;
+          const shortCanaryLines=["City above.","Lake below."];
+          const currentCanaryText=String(proposedTarget.current_text||"").trim();
+          proposedTarget.proposed_text=currentCanaryText===shortCanaryLines[0]?shortCanaryLines[1]:shortCanaryLines[0];
           proposedTarget.changed=String(proposedTarget.current_text||"").trim()!==proposedTarget.proposed_text;
 
           const accepted=await call("PATCH",`/api/outputs/${id}/creative`,{
