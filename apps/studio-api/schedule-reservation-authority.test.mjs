@@ -365,3 +365,35 @@ test("alarm safely releases a verified committed owner without losing occupancy"
   assert.equal(next.status, 200);
   assert.deepEqual(next.body.occupied_reservations.map((row) => row.scheduled_iso), [iso]);
 });
+
+
+test("crash after authoritative write before ledger confirmation preserves and reconciles the committed slot", async () => {
+  const { lane, advance } = makeLane();
+  const a = op("recCrashAfter", "op-crash-after");
+  const b = op("recNext", "op-next");
+  const iso = "2026-10-18T10:30:00.000Z";
+
+  await post(lane, "/acquire", { ...a, lease_ms: 30_000 });
+  await post(lane, "/reserve", { ...a, fencing_generation: 1, selected_iso: iso });
+  await post(lane, "/begin-verify", { ...a, fencing_generation: 1, lease_ms: 30_000 });
+
+  // Simulate Airtable accepting the PATCH, then the Worker dying before /commit.
+  const authoritativeIso = iso;
+  advance(31_000);
+  const blocked = await post(lane, "/acquire", b);
+  assert.equal(blocked.status, 423);
+
+  const recovery = await post(lane, "/reconcile", {
+    ...base,
+    recovery_operation_id: "qa-recovery-crash-after",
+    observation: "committed",
+    authoritative_iso: authoritativeIso,
+  });
+  assert.equal(recovery.status, 200);
+  assert.equal(recovery.body.reconciled, true);
+  assert.equal(recovery.body.committed, true);
+
+  const next = await post(lane, "/acquire", b);
+  assert.equal(next.status, 200);
+  assert.deepEqual(next.body.occupied_reservations.map((row) => row.scheduled_iso), [iso]);
+});
