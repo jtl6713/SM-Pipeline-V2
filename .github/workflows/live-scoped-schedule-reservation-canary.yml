@@ -32,6 +32,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Confirm exact Miami Instagram production activation and isolated canary cleanup
+        id: preflight
         shell: bash
         run: |
           set -euo pipefail
@@ -100,12 +101,26 @@ jobs:
           SUBDOMAIN="$(curl -fsS -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/subdomain" | jq -r '.result.subdomain')"
           test -n "$SUBDOMAIN" && test "$SUBDOMAIN" != null
           NONCE="$(openssl rand -hex 12)"
-          RESULT="$(curl -sS --retry 4 --retry-delay 2 -X POST "https://$CANARY_WORKER_NAME.$SUBDOMAIN.workers.dev/run" -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" --data "{\"nonce\":\"$NONCE\"}")"
-          if ! echo "$RESULT" | jq -e 'type == "object"' >/dev/null 2>&1; then
-            echo "canary_response_format=non_json"
-            echo "canary_response_bytes=${#RESULT}"
+          # A secret-put creates a fresh Worker version. Wait for its authenticated
+          # endpoint to propagate before treating 401/404/temporary edge errors
+          # as application failures. Never log the token or raw response body.
+          RESULT=""
+          HTTP_CODE=""
+          for attempt in $(seq 1 12); do
+            HTTP_CODE="$(curl -sS --max-time 90 --retry 2 --retry-delay 2 -o /tmp/miami-synthetic-response.json -w '%{http_code}' -X POST "https://$CANARY_WORKER_NAME.$SUBDOMAIN.workers.dev/run" -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" --data "{\"nonce\":\"$NONCE\"}")"
+            if [[ "$HTTP_CODE" == "200" ]] && jq -e 'type=="object"' /tmp/miami-synthetic-response.json >/dev/null 2>&1; then
+              RESULT="$(cat /tmp/miami-synthetic-response.json)"
+              break
+            fi
+            if [[ "$HTTP_CODE" =~ ^(401|403|404|502|503|504)$ ]] && [[ "$attempt" -lt 12 ]]; then
+              echo "canary_auth_or_route_not_ready attempt=$attempt http_status=$HTTP_CODE"
+              sleep 3
+              continue
+            fi
+            echo "canary_bad_response http_status=$HTTP_CODE body_bytes=$(wc -c </tmp/miami-synthetic-response.json)"
             exit 1
-          fi
+          done
+          test -n "$RESULT" || { echo "canary_response_missing_after_retries"; exit 1; }
           echo "$RESULT" | jq -c '{ok, error_code, message, schema, live_namespace, production_flag_unchanged, external_write, airtable_writes, publishing_calls, results}'
           echo "$RESULT" | jq -e '.ok == true' >/dev/null
           echo "$RESULT" | jq -e '.ok == true and .live_namespace == true and .production_flag_unchanged == true and .airtable_writes == 0 and .publishing_calls == 0 and ([.results[] | select(.pass != true)] | length == 0)' >/dev/null
@@ -113,6 +128,7 @@ jobs:
           echo "$RESULT" | jq -c '{schema, live_namespace, production_flag_unchanged, external_write, airtable_writes, publishing_calls, results}'
 
       - name: Confirm production version and Miami-only scope unchanged and canary Worker removed
+        if: ${{ always() && steps.preflight.outcome == 'success' }}
         shell: bash
         run: |
           set -euo pipefail
@@ -133,4 +149,4 @@ jobs:
           echo "production_version_unchanged=PASS"
           echo "miami_instagram_only_activation=PASS"
           echo "synthetic_canary_worker_removed=PASS"
-          echo "no_airtable_writes_or_publishing=PASS"
+          echo "production_scope_read_only_postflight=PASS"
