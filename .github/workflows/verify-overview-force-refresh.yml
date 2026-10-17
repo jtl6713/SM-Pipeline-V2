@@ -1,0 +1,51 @@
+name: Verify Home Overview Force Refresh
+on:
+  pull_request:
+    paths:
+      - 'apps/studio-api/profiles-overview-refresh*'
+      - 'apps/studio-api/profiles-overview-force-refresh-contract.test.mjs'
+      - 'apps/studio-api/overview-dispatch-counts*'
+      - 'apps/studio-api/worker.js'
+      - 'apps/studio-api/worker-functions-04.mjs'
+      - 'apps/studio-web/assets/all-profiles-overview-1007.js'
+      - 'apps/studio-web/all-profiles-*.test.mjs'
+      - 'apps/studio-web/index.html'
+      - '.github/workflows/verify-overview-force-refresh.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Targeted force-refresh tests
+        run: |
+          set -euo pipefail
+          node --test             apps/studio-api/profiles-overview-refresh.test.mjs             apps/studio-api/profiles-overview-force-refresh-contract.test.mjs             apps/studio-api/overview-dispatch-counts.test.mjs             apps/studio-web/all-profiles-load.test.mjs             apps/studio-web/all-profiles-cache-age.test.mjs             apps/studio-web/all-profiles-force-refresh.test.mjs
+      - name: Syntax checks
+        run: |
+          set -euo pipefail
+          node --check apps/studio-api/worker.js
+          node --check apps/studio-api/worker-functions-04.mjs
+          node --check apps/studio-api/profiles-overview-refresh.mjs
+          node --check apps/studio-web/assets/all-profiles-overview-1007.js
+      - name: Wrangler production-layout dry run
+        run: |
+          set -euo pipefail
+          rm -rf /tmp/overview-force-refresh
+          mkdir -p /tmp/overview-force-refresh
+          cp apps/studio-api/worker.js /tmp/overview-force-refresh/
+          cp apps/studio-api/*.mjs /tmp/overview-force-refresh/
+          rm -f /tmp/overview-force-refresh/*.test.mjs
+          cd /tmp/overview-force-refresh
+          npm init -y >/dev/null
+          npm install --no-save wrangler@4.123.0 >/dev/null
+          cat >wrangler.jsonc <<'EOF'
+          {"name":"overview-force-refresh-check","main":"worker.js","compatibility_date":"2026-08-02","workers_dev":false,"r2_buckets":[{"binding":"STUDIO_MEDIA","bucket_name":"dummy"}]}
+          EOF
+          ./node_modules/.bin/wrangler deploy --config wrangler.jsonc --dry-run
