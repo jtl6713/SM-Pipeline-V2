@@ -121,6 +121,11 @@ jobs:
           from pathlib import Path
           bucket=Path('/tmp/studio-media-bucket.txt').read_text().strip()
           rollout=json.loads(Path('deploy/factory-batch-production-rollout.json').read_text())
+          visual_rollout=json.loads(Path('deploy/visual-voiceover-production-rollout.json').read_text())
+          if visual_rollout.get('scope')!='do_not_publish_only':
+              raise SystemExit('Visual voiceover rollout must remain do_not_publish_only')
+          if type(visual_rollout.get('enabled')) is not bool:
+              raise SystemExit('Visual voiceover rollout enabled must be boolean')
           safe_modes={'chicago_ig_reel_v1':1,'chicago_ig_reels_v2':5}
           assert rollout.get('mode') in safe_modes
           assert rollout.get('profile_id')=='recT2rbKX3MF7cVFU'
@@ -137,12 +142,18 @@ jobs:
             'FACTORY_BATCH_ROLLOUT_MAX_ITEMS':str(rollout['max_items']),
             **global_vars,
           }
+          visual_vars={
+            'STUDIO_VISUAL_TIMELINE_V1':'true' if visual_rollout.get('enabled') and visual_rollout.get('timeline_enabled') else 'false',
+            'STUDIO_VISUAL_SCRIPT_V1':'true' if visual_rollout.get('enabled') and visual_rollout.get('script_enabled') else 'false',
+            'STUDIO_VISUAL_CANARY_OUTPUT_IDS':','.join(str(x).strip() for x in visual_rollout.get('canary_output_ids',[]) if str(x).strip()),
+          }
           # Preserve all active plaintext settings explicitly; never use
           # --keep-vars, which can inherit stale settings from rolled-back
           # Worker versions instead of the currently active deployment.
           active_vars=json.loads(Path('/tmp/active-plain-vars.json').read_text())
           module.assert_global_factory_binding_tuple(active_vars,'Predeploy Worker',allow_absent=True)
           active_vars.update(factory_vars)
+          active_vars.update(visual_vars)
           cfg={
             'name':os.environ['TARGET_WORKER'],
             'main':'worker.js',
@@ -208,11 +219,15 @@ jobs:
           after_plain={str(b['name']):str(b['text']) for b in bindings if b.get('type')=='plain_text' and 'text' in b}
           from studio_api_binding_contract import global_factory_manifest_values, assert_global_factory_binding_tuple
           rollout=json.loads(Path('deploy/factory-batch-production-rollout.json').read_text())
+          visual_rollout=json.loads(Path('deploy/visual-voiceover-production-rollout.json').read_text())
           expected={
             'FACTORY_BATCH_APPROVALS_ENABLED':'true' if rollout['enabled'] else 'false',
             'FACTORY_BATCH_ROLLOUT_MODE':rollout['mode'],
             'FACTORY_BATCH_ROLLOUT_MAX_ITEMS':str(rollout['max_items']),
             **global_factory_manifest_values(rollout),
+            'STUDIO_VISUAL_TIMELINE_V1':'true' if visual_rollout.get('enabled') and visual_rollout.get('timeline_enabled') else 'false',
+            'STUDIO_VISUAL_SCRIPT_V1':'true' if visual_rollout.get('enabled') and visual_rollout.get('script_enabled') else 'false',
+            'STUDIO_VISUAL_CANARY_OUTPUT_IDS':','.join(str(x).strip() for x in visual_rollout.get('canary_output_ids',[]) if str(x).strip()),
           }
           for name,value in prior_plain.items():
               if name not in expected and after_plain.get(name)!=value:
@@ -228,6 +243,10 @@ jobs:
           print('factory_global_release_gate=PASS signed_stage='+stage+
               ' max_total='+str(rollout['global']['max_total'])+
               ' max_per_profile='+str(rollout['global']['max_per_profile']))
+          print('visual_voiceover_rollout=PASS scope='+str(visual_rollout.get('scope'))+
+              ' timeline='+expected['STUDIO_VISUAL_TIMELINE_V1']+
+              ' script='+expected['STUDIO_VISUAL_SCRIPT_V1']+
+              ' allowlist='+expected['STUDIO_VISUAL_CANARY_OUTPUT_IDS'])
           safe={'version_id':r.get('id'),'version_number':r.get('number'),'binding_count':len(bindings),'contract':contract['contract'],'core_ok':contract['core_ok'],'elevenlabs_present':contract['optional_present'].get('ELEVENLABS_API_KEY'),'bindings':contract['bindings']}
           Path('/tmp/postdeploy-contract-sanitized.json').write_text(json.dumps(safe,indent=2,sort_keys=True))
           print('postdeploy_binding_contract=PASS')
