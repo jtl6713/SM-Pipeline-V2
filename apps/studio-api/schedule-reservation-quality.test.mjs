@@ -61,6 +61,20 @@ test("Recovery Required lane raises QA-SCHEDULE-LOCK-HUNG and Needs Eyes when re
   assert.equal(hung.fencing_generation, 7);
 });
 
+test("slow live owner is contention, not hung", () => {
+  const row = snapshot({
+    lock: {
+      ...snapshot().lock,
+      last_heartbeat_timestamp: "2026-10-17T15:58:50.000Z",
+      lease_expiration_timestamp: "2026-10-17T16:01:20.000Z",
+      state: "Reserving",
+    },
+  });
+  const findings = scheduleReservationSnapshotFindings(row, now);
+  assert.ok(findings.some((x) => x.signature === SCHEDULE_RESERVATION_SIGNATURES.LOCK_CONTENTION));
+  assert.equal(findings.some((x) => x.signature === SCHEDULE_RESERVATION_SIGNATURES.LOCK_HUNG), false);
+});
+
 test("30-second waiting emits contention and two-minute waiting emits queue stalled", () => {
   const base = snapshot({
     waiters: [{
@@ -107,11 +121,25 @@ test("documented Story main +10 companion pair is not classified as collision", 
     lock: null,
     active_reservation: null,
     recent_reservations: [
-      { platform_output_record_id: "recMain", reservation_id: "main", output_type: "Reel", scheduled_iso: "2026-10-18T10:30:00.000Z" },
-      { platform_output_record_id: "recStory", reservation_id: "story", output_type: "Story", scheduled_iso: "2026-10-18T10:40:00.000Z" },
+      { platform_output_record_id: "recMain", reservation_id: "main", output_type: "Reel", content_item_id: "recContent1", scheduled_iso: "2026-10-18T10:30:00.000Z" },
+      { platform_output_record_id: "recStory", reservation_id: "story", output_type: "Story", content_item_id: "recContent1", scheduled_iso: "2026-10-18T10:40:00.000Z" },
     ],
   });
   assert.deepEqual(scheduleReservationCollisionFindings(row, now), []);
+});
+
+test("unrelated Story exactly +10 minutes is still a collision", () => {
+  const row = snapshot({
+    lock: null,
+    active_reservation: null,
+    recent_reservations: [
+      { platform_output_record_id: "recMainOther", reservation_id: "main-other", output_type: "Reel", content_item_id: "recContentA", scheduled_iso: "2026-10-18T10:30:00.000Z" },
+      { platform_output_record_id: "recStoryOther", reservation_id: "story-other", output_type: "Story", content_item_id: "recContentB", scheduled_iso: "2026-10-18T10:40:00.000Z" },
+    ],
+  });
+  const collisions = scheduleReservationCollisionFindings(row, now);
+  assert.equal(collisions.length, 1);
+  assert.equal(collisions[0].signature, SCHEDULE_RESERVATION_SIGNATURES.COLLISION);
 });
 
 test("two Stories ten minutes apart are still classified as a platform collision", () => {
