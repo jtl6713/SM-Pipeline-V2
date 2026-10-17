@@ -29,6 +29,13 @@ OPTIONAL_BINDINGS = {
     "FACTORY_BATCH_APPROVALS_ENABLED": "plain_text",
     "FACTORY_BATCH_ROLLOUT_MODE": "plain_text",
     "FACTORY_BATCH_ROLLOUT_MAX_ITEMS": "plain_text",
+    # The five global settings are allowed only by TYPE here; the production
+    # deployment workflow separately enforces exact signed values and caps.
+    "FACTORY_BATCH_GLOBAL_APPROVALS_ENABLED": "plain_text",
+    "FACTORY_BATCH_GLOBAL_MODE": "plain_text",
+    "FACTORY_BATCH_GLOBAL_MAX_TOTAL": "plain_text",
+    "FACTORY_BATCH_GLOBAL_MAX_PER_PROFILE": "plain_text",
+    "FACTORY_BATCH_GLOBAL_PRODUCTION_SIGNOFF": "plain_text",
     "ELEVENLABS_API_KEY": "secret_text",
     "PIPELINE_RUNNER_SHARED_SECRET": "secret_text",
     "PIPELINE_RUNNER_URL": "plain_text",
