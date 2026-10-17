@@ -1,31 +1,81 @@
 {
-  "correlation_id": "VISUAL-VOICEOVER-CANARY-BASELINE-TTS-PULSES-20261017-02",
+  "correlation_id": "VISUAL-VOICEOVER-CANARY-TRIM-20261017-01",
   "requests": [
     {
-      "name": "baseline_voice_prep_2",
-      "method": "POST",
-      "path": "/api/outputs/recL2zjZc7XGRJyRt/creative/review",
+      "name": "save_visual_timeline",
+      "method": "PATCH",
+      "path": "/api/outputs/recL2zjZc7XGRJyRt/creative",
       "body": {
-        "action": "changes_requested",
-        "notes": "Visual-aware voiceover canary baseline TTS only. Do not publish."
-      }
-    },
-    {
-      "name": "baseline_voice_prep_3",
-      "method": "POST",
-      "path": "/api/outputs/recL2zjZc7XGRJyRt/creative/review",
-      "body": {
-        "action": "changes_requested",
-        "notes": "Visual-aware voiceover canary baseline TTS only. Do not publish."
-      }
-    },
-    {
-      "name": "baseline_voice_prep_4",
-      "method": "POST",
-      "path": "/api/outputs/recL2zjZc7XGRJyRt/creative/review",
-      "body": {
-        "action": "changes_requested",
-        "notes": "Visual-aware voiceover canary baseline TTS only. Do not publish."
+        "visual_timeline": {
+          "base_revision": 1,
+          "base_sequence_hash": "vt1-19df5820c3bed005",
+          "scenes": [
+            {
+              "scene_id": "recn6KdvSU0RQGZ7E",
+              "asset_id": "recn6KdvSU0RQGZ7E",
+              "ordinal": 1,
+              "include": true,
+              "media_type": "video",
+              "duration_ms": 3400,
+              "voiceover_mode": "narrated",
+              "narration_locked": false,
+              "narration_text": "Adler frames Chicago from above.",
+              "source_in_ms": 47518,
+              "source_out_ms": 50918,
+              "source_duration_ms": 304688,
+              "trim_user_set": true,
+              "native_audio_mode": "mute"
+            },
+            {
+              "scene_id": "rect0otSM9MzT33ch",
+              "asset_id": "rect0otSM9MzT33ch",
+              "ordinal": 2,
+              "include": true,
+              "media_type": "video",
+              "duration_ms": 3400,
+              "voiceover_mode": "silent",
+              "narration_locked": false,
+              "narration_text": "",
+              "source_in_ms": 156085,
+              "source_out_ms": 159485,
+              "source_duration_ms": 304688,
+              "trim_user_set": true,
+              "native_audio_mode": "mute"
+            },
+            {
+              "scene_id": "recRmY8MoJcitSSmm",
+              "asset_id": "recRmY8MoJcitSSmm",
+              "ordinal": 3,
+              "include": true,
+              "media_type": "video",
+              "duration_ms": 3400,
+              "voiceover_mode": "narrated",
+              "narration_locked": false,
+              "narration_text": "The skyline tightens in this pass.",
+              "source_in_ms": 264902,
+              "source_out_ms": 268302,
+              "source_duration_ms": 304688,
+              "trim_user_set": true,
+              "native_audio_mode": "mute"
+            },
+            {
+              "scene_id": "recL1hsxbclNjsdW3",
+              "asset_id": "recL1hsxbclNjsdW3",
+              "ordinal": 4,
+              "include": true,
+              "media_type": "video",
+              "duration_ms": 3400,
+              "voiceover_mode": "narrated",
+              "narration_locked": false,
+              "narration_text": "Hold the aerial for the finish.",
+              "source_in_ms": 36386,
+              "source_out_ms": 39786,
+              "source_duration_ms": 304688,
+              "trim_user_set": true,
+              "native_audio_mode": "mute"
+            }
+          ]
+        }
       }
     }
   ]
