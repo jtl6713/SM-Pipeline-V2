@@ -6743,8 +6743,9 @@ async function studioAtomicApplyPlatformOutputSeedSchedule(env, {
         },
       };
     },
-    write: async (plan) => airtableFetch(env, STUDIO_PLATFORM_OUTPUT_TABLE, current.id, {
+    write: async (plan, { signal }) => airtableFetch(env, STUDIO_PLATFORM_OUTPUT_TABLE, current.id, {
       method: "PATCH",
+      signal,
       body: JSON.stringify({ fields: plan.patchFields, typecast: true }),
     }),
     verify: async (written, plan) => {
