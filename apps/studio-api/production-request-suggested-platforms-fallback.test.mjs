@@ -41,3 +41,25 @@ test("retired platform residue is filtered before bridge compatibility and promo
   const promotion = worker.slice(promotionStart, promotionEnd);
   assert.match(promotion, /canonicalProductionPlatforms\(rawPlatforms\)\.filter\(\(platform\) => PR_PLATFORMS\.has\(platform\)\)/);
 });
+
+test("retired platform residue is hidden from API responses and ignored by bridge route validation", () => {
+  const worker = readStudioWorkerSource();
+
+  const mapStart = worker.indexOf("function mapProductionRequest");
+  const mapEnd = worker.indexOf("function productionRequestRecordIdFromPath", mapStart);
+  const mapped = worker.slice(mapStart, mapEnd);
+  assert.match(mapped, /canonicalProductionPlatforms\(f\(record, "Target_Platforms"\) \|\| \[\]\)/);
+  assert.match(mapped, /PR_PLATFORMS\.has\(String\(item\?\.platform \|\| ""\)\.trim\(\)\)/);
+
+  const preflightStart = worker.indexOf("function item4SourceToProductionBridgePreflight");
+  const preflightEnd = worker.indexOf("function productionRequestBridgePreflightRoute", preflightStart);
+  const preflight = worker.slice(preflightStart, preflightEnd);
+  assert.match(preflight, /rawPlanItems\.filter\(\(item\) =>/);
+  assert.match(preflight, /PR_PLATFORMS\.has\(String\(f\(row, "Platform"\) \|\| ""\)\.trim\(\)\)/);
+  assert.match(preflight, /manifestForActivePlan/);
+});
+
+test("current Studio backend contains no retired social-platform brand reference", () => {
+  const worker = readStudioWorkerSource();
+  assert.doesNotMatch(worker, /\bThreads\b/i);
+});
