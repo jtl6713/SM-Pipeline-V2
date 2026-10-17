@@ -441,7 +441,7 @@ jobs:
           test "$GENERATION" != "$BEFORE_GENERATION"
           test "$SNAPSHOT_AT" -gt "$BEFORE_AT"
 
-          curl -fsS --max-time 60 "$BASE/overview?generation=$(python -c 'import os,urllib.parse; print(urllib.parse.quote(os.environ["GENERATION"]))')" -o /tmp/overview-after.json
+          curl -fsS --max-time 60 "$BASE/overview?generation=$GENERATION" -o /tmp/overview-after.json
           jq -e --arg generation "$GENERATION" --argjson at "$SNAPSHOT_AT" '
             .ok==true
             and .snapshot_generation==$generation
