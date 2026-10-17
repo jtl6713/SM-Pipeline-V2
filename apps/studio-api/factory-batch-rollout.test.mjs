@@ -1,4 +1,7 @@
 import test from "node:test";
+import fs from "node:fs";
+import { fileURLToPath } from "node:url";
+import path from "node:path";
 import assert from "node:assert/strict";
 import { readStudioWorkerSource } from "./worker-source-reader.mjs";
 import {
@@ -77,4 +80,24 @@ test("real canonical Worker enforces rollout at HTTP submit, retry, and cron-dra
   assert.match(worker, /Do_Not_Publish/);
   assert.match(worker, /owner !== profile\.id/);
   assert.match(worker, /factoryBatchRolloutPolicy\(env, profileId\)/);
+});
+
+test("production rollout manifest and deployment workflow force a single safe pilot", () => {
+  const here = path.dirname(fileURLToPath(import.meta.url));
+  const repo = path.resolve(here, "../..");
+  const manifest = JSON.parse(fs.readFileSync(path.join(repo,"deploy/factory-batch-production-rollout.json"),"utf8"));
+  assert.deepEqual({
+    mode:manifest.mode,profile_id:manifest.profile_id,
+    max_items:manifest.max_items,platform:manifest.platform,output_type:manifest.output_type
+  },{
+    mode:"chicago_ig_reel_v1",profile_id:FACTORY_BATCH_CHICAGO_PROFILE_ID,
+    max_items:1,platform:"Instagram",output_type:"Reel"
+  });
+  assert.equal(typeof manifest.enabled,"boolean");
+  const workflow=fs.readFileSync(path.join(repo,".github/workflows/deploy-cloudflare-worker-production.yml"),"utf8");
+  assert.match(workflow,/factory-batch-production-rollout\.json/);
+  assert.match(workflow,/factory_batch_canary_binding_contract=PASS/);
+  assert.match(workflow,/factory_batch_chicago_pilot=PASS/);
+  assert.match(workflow,/Factory Chicago canary verification failed/);
+  assert.match(workflow,/Roll back to captured production version on any failure/);
 });
