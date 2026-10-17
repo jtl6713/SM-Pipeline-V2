@@ -8,4 +8,5 @@ test("cached overview indicates age based on persisted creation time", () => {
   assert.match(source, /function cacheAgeLabel\(/);
   assert.match(source, /Showing cached overview \(\$\{cacheAgeLabel\(\)\}\)/);
   assert.match(source, /if \(!data\?\.stale && !data\?\.cooling\) writeCache\(state\.rows\)/);
+  assert.match(source, /state\.rows\.length \? \{ rows: state\.rows, at: state\.cacheAt \} : readCache\(\)/);
 });
