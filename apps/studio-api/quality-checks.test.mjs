@@ -50,3 +50,15 @@ test("inventory payload.checks covers the catalog with pass or finding", () => {
   const attached = attachQualityChecks([], { generatedAt: "2026-09-07T23:00:00Z" });
   assert.equal(attached.every((row) => row.status === "pass"), true);
 });
+
+
+test("Quality Agent catalog includes retired-platform approval regression review", () => {
+  const row = QUALITY_CHECK_BY_KIND.retired_platform_residue;
+  assert.ok(row);
+  assert.equal(row.id, "retired_platform_residue");
+  assert.equal(row.lane, "both");
+  assert.equal(row.actor, "regression");
+  assert.match(row.title, /retired platform values/i);
+  assert.match(row.title, /Production approval validation/i);
+  assert.match(row.title, /operator-facing errors/i);
+});
