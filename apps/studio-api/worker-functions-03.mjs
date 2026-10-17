@@ -10059,7 +10059,10 @@ export async function phase6AdvanceVoicePrepShort(env, outputRecord) {
   let started = false;
   try {
     if (python) {
-      const { response, payload } = await item4PulsePipelineStage(env, "p0202", { extra: {} }, "P0202");
+      const targetSlideId = String(pending[0]?.id || "").trim();
+      const { response, payload } = await item4PulsePipelineStage(env, "p0202", {
+        extra: { slide_record_id: targetSlideId },
+      }, "P0202");
       if (!response.ok) {
         throw new HttpError(
           response.status,
@@ -10124,7 +10127,10 @@ export async function phase6AutoVoicePrepForOutput(env, outputRecord, authorizat
 
       const signature = pending.map((x) => `${x.id}:${x.reason}`).join("|");
       if (python) {
-        const { response, payload } = await item4PulsePipelineStage(env, "p0202", { extra: {} }, "P0202");
+        const targetSlideId = String(pending[0]?.id || "").trim();
+      const { response, payload } = await item4PulsePipelineStage(env, "p0202", {
+        extra: { slide_record_id: targetSlideId },
+      }, "P0202");
         if (!response.ok) {
           throw new HttpError(
             response.status,
