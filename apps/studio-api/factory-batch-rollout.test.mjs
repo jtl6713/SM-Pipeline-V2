@@ -1,3 +1,4 @@
+import { factoryBatchListGlobal, factoryBatchSummary } from "./factory-approval-queue.mjs";
 import test from "node:test";
 import fs from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -107,4 +108,47 @@ test("production rollout manifest and deployment workflow force a single safe pi
 
   assert.match(workflow,/Factory Chicago canary verification failed/);
   assert.match(workflow,/Roll back to captured production version on any failure/);
+});
+
+test("global Factory history is profile-independent, filtered explicitly, and bounded", async () => {
+  const chicago = FACTORY_BATCH_CHICAGO_PROFILE_ID;
+  const nyc = "recNYCProfile123";
+  const jobs = [
+    { schema:"studio.factory-batch.2", id:"fb_chicago", profile_id:chicago, request_id:"chicago-request-123",
+      status:"completed", created_at:"2026-10-17T04:00:00Z", updated_at:"2026-10-17T04:01:00Z",
+      items:[{id:"recChicagoOutput01",output_id:4906,platform:"Instagram",format:"Reel",status:"approved"}] },
+    { schema:"studio.factory-batch.2", id:"fb_nyc", profile_id:nyc, request_id:"nyc-request-123",
+      status:"failed", created_at:"2026-10-17T05:00:00Z",updated_at:"2026-10-17T05:02:00Z",
+      items:[{id:"recNYCOutput1234",output_id:5001,platform:"Facebook",format:"Reel",status:"failed"}] },
+  ];
+  const keys = jobs.map(job => ({
+    key:"studio/state/factory-approvals/v2/jobs/"+job.profile_id+"/"+job.request_id+".json",
+    uploaded:new Date(job.updated_at),
+  }));
+  const store = new Map(keys.map((entry, i) => [entry.key,jobs[i]]));
+  const bucket = { put: async()=>{}, get:async key => {
+    const value=store.get(key);return value ? { text:async()=>JSON.stringify(value),etag:"e"}:null;
+  },list:async ({prefix})=>({objects:keys.filter(row=>row.key.startsWith(prefix)),truncated:false})};
+  const all = await factoryBatchListGlobal(bucket,{limit:10});
+  assert.equal(all.jobs.length,2);
+  assert.deepEqual(all.jobs.map(job=>job.id),["fb_nyc","fb_chicago"]);
+  assert.equal(factoryBatchSummary(all.jobs[1]).items[0].output_id,4906);
+  const filtered=await factoryBatchListGlobal(bucket,{profileId:chicago,limit:10});
+  assert.deepEqual(filtered.jobs.map(job=>job.id),["fb_chicago"]);
+  assert.equal(filtered.complete,true);
+  await assert.rejects(()=>factoryBatchListGlobal(bucket,{profileId:"not-a-profile"}),/Invalid Factory filter/);
+});
+
+test("global Factory status is opt-in read-only and keeps scoped history available", () => {
+ const worker=readStudioWorkerSource();
+ const p=worker.indexOf("async function factoryBatchStatusRoute(");
+ const end=worker.indexOf("async function factoryBatchProcess(",p);
+ assert.ok(p>0&&end>p);
+ const route=worker.slice(p,end);
+ assert.match(route,/searchParams.get\("scope"\) === "all"/);
+ assert.match(route,/factoryBatchListGlobal\(env.STUDIO_MEDIA/);
+ assert.match(route,/factory_profile/);
+ assert.match(route,/quality_signals: qualitySignals/);
+ assert.match(route,/factoryBatchRead\(env.STUDIO_MEDIA, profile.id, requestId\)/);
+ assert.doesNotMatch(route,/request\.json\(\)|factoryBatchEnqueue/);
 });
