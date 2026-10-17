@@ -1186,6 +1186,224 @@ export async function studioReconcileOverdueScheduledPublishes(env, options = {}
 }
 /*__STUDIO_WORKER_END:studioReconcileOverdueScheduledPublishes__*/
 
+async function studioAtomicHealApprovedMissingScheduleRow(env, row, profile, timeZone, horizonDays) {
+  const platform = String(f(row, "Platform") || "").trim();
+  const outputType = String(f(row, "Studio_Output_Type") || f(row, "Format") || "").trim();
+  const profileId = String(profile?.id || "").trim();
+  if (!profileId || !platform) {
+    throw new HttpError(409, "Missing-schedule recovery cannot establish the atomic profile/platform lane");
+  }
+  const isStory = /story/i.test(outputType);
+  const result = await runAtomicScheduleTransaction(env, {
+    content_profile_id: profileId,
+    platform,
+    output_type: outputType,
+    platform_output_record_id: row.id,
+    owner_operation_id: `heal-missing-schedule:${row.id}`,
+  }, {
+    legacy: async () => {
+      throw new HttpError(503, "Atomic schedule transaction unexpectedly entered legacy mode");
+    },
+    plan: async ({ occupied_reservations: durableReservations }) => {
+      const authoritative = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, row.id);
+      const alreadyRaw = String(
+        f(authoritative, "Scheduled_Post_Date")
+        || f(authoritative, "YouTube_Scheduled_Publish_At")
+        || ""
+      ).trim();
+      if (alreadyRaw && Number.isFinite(Date.parse(alreadyRaw))) {
+        const iso = new Date(Date.parse(alreadyRaw)).toISOString();
+        return {
+          action: "move",
+          selectedIso: iso,
+          previousIso: iso,
+          patchFields: {},
+          authoritativeAlreadyScheduled: true,
+        };
+      }
+
+      studioInvalidateOccupiedScheduleCache();
+      const occupied = await studioOccupiedSchedulesOrEmpty(env, {
+        excludeIds: [row.id],
+        profile,
+      });
+      const laneOccupied = studioOccupiedForLane(occupied, platform, outputType).slice();
+      const platformOccupied = studioOccupiedForPlatform(occupied, platform).slice();
+      for (const durable of durableReservations || []) {
+        const ms = Date.parse(String(durable?.scheduled_iso || ""));
+        if (!Number.isFinite(ms)) continue;
+        platformOccupied.push(ms);
+        if (String(durable?.output_type || "").trim().toLowerCase() === outputType.toLowerCase()) {
+          laneOccupied.push(ms);
+        }
+      }
+      const laneMs = [...new Set(laneOccupied.filter(Number.isFinite))];
+      const platformMs = [...new Set(platformOccupied.filter(Number.isFinite))];
+
+      let iso = "";
+      let storyCompanion = false;
+      if (isStory) {
+        const resolved = await studioResolveStoryPublishIso(env, authoritative, {
+          occupiedMs: laneMs,
+          timeZone,
+        });
+        iso = resolved.iso || "";
+        storyCompanion = resolved.source === "companion" || resolved.source === "mae_plus_10";
+      }
+      if (!iso) {
+        const picked = maeScheduleNextSlot({
+          timeZone,
+          laneOccupiedMs: laneMs,
+          platformOccupiedMs: platformMs,
+          horizonDays,
+        });
+        if (!picked.ok) throw new HttpError(409, picked.error || "No safe slot is available for schedule recovery");
+        iso = picked.iso;
+        storyCompanion = false;
+      }
+      const fields = studioPublishScheduleFields(
+        { scheduled_post_date: iso, timezone: timeZone },
+        authoritative,
+        {
+          occupiedMs: storyCompanion ? [] : platformMs,
+          timeZone,
+          forceWrite: true,
+          storyCompanion,
+        },
+      );
+      const selectedRaw = String(fields.Scheduled_Post_Date || iso || "").trim();
+      const selectedMs = Date.parse(selectedRaw);
+      if (!Number.isFinite(selectedMs)) {
+        throw new HttpError(409, "Missing-schedule recovery did not produce a verifiable slot");
+      }
+      return {
+        action: "reserve",
+        selectedIso: new Date(selectedMs).toISOString(),
+        previousIso: "",
+        patchFields: fields,
+      };
+    },
+    write: async (plan) => {
+      if (plan.authoritativeAlreadyScheduled) {
+        return airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, row.id);
+      }
+      return airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, row.id, {
+        method: "PATCH",
+        body: JSON.stringify({ fields: plan.patchFields, typecast: true }),
+      });
+    },
+    verify: async (written, plan) => {
+      const authoritative = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, row.id);
+      const storedMs = Date.parse(String(f(authoritative, "Scheduled_Post_Date") || "").trim());
+      const selectedMs = Date.parse(plan.selectedIso);
+      if (!Number.isFinite(storedMs) || !Number.isFinite(selectedMs) || storedMs !== selectedMs) {
+        throw new HttpError(409, "Recovered schedule could not be verified in Airtable");
+      }
+      if (platform === "YouTube") {
+        const youtubeMs = Date.parse(String(f(authoritative, "YouTube_Scheduled_Publish_At") || "").trim());
+        if (!Number.isFinite(youtubeMs) || youtubeMs !== selectedMs) {
+          throw new HttpError(409, "Recovered YouTube schedule mirror could not be verified");
+        }
+      }
+      written.__atomic_verified_record = authoritative;
+      return new Date(storedMs).toISOString();
+    },
+    afterCommit: async (written) => {
+      studioInvalidateOccupiedScheduleCache();
+      await studioSupabaseWriteThroughOutput(
+        env,
+        written.__atomic_verified_record || written,
+        "schedule-heal",
+      ).catch((error) => console.warn("missing-schedule supabase write-through failed", row.id, error));
+    },
+  }, { maxWaitMs: 30_000 });
+
+  const authoritative = result?.already_committed
+    ? await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, row.id)
+    : (result?.value?.__atomic_verified_record || result?.value);
+  const iso = String(f(authoritative, "Scheduled_Post_Date") || "").trim();
+  return { record: authoritative, iso };
+}
+/*__STUDIO_WORKER_END:studioAtomicHealApprovedMissingScheduleRow__*/
+
+async function studioAtomicHealStoryCompanionDriftRow(env, row, profile, timeZone) {
+  const platform = String(f(row, "Platform") || "").trim();
+  const outputType = String(f(row, "Studio_Output_Type") || f(row, "Format") || "").trim();
+  const profileId = String(profile?.id || "").trim();
+  if (!profileId || !platform) {
+    throw new HttpError(409, "Story companion recovery cannot establish the atomic profile/platform lane");
+  }
+  const result = await runAtomicScheduleTransaction(env, {
+    content_profile_id: profileId,
+    platform,
+    output_type: outputType,
+    platform_output_record_id: row.id,
+    owner_operation_id: `heal-story-companion:${row.id}`,
+  }, {
+    legacy: async () => {
+      throw new HttpError(503, "Atomic schedule transaction unexpectedly entered legacy mode");
+    },
+    plan: async () => {
+      const authoritative = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, row.id);
+      const previousRaw = String(f(authoritative, "Scheduled_Post_Date") || "").trim();
+      const previousMs = Date.parse(previousRaw);
+      if (!Number.isFinite(previousMs)) {
+        throw new HttpError(409, "Story companion recovery lost its authoritative existing schedule");
+      }
+      const resolved = await studioResolveStoryPublishIso(env, authoritative, {
+        timeZone,
+        existingIso: previousRaw,
+        allowMaeFallback: false,
+      });
+      const selectedRaw = String(
+        resolved.source === "companion" && resolved.iso ? resolved.iso : previousRaw
+      ).trim();
+      const selectedMs = Date.parse(selectedRaw);
+      if (!Number.isFinite(selectedMs)) {
+        throw new HttpError(409, "Story companion recovery did not produce a verifiable slot");
+      }
+      const fields = studioPublishScheduleFields(
+        { scheduled_post_date: selectedRaw, timezone: timeZone },
+        authoritative,
+        { occupiedMs: [], timeZone, forceWrite: true, storyCompanion: true },
+      );
+      return {
+        action: "move",
+        selectedIso: new Date(selectedMs).toISOString(),
+        previousIso: new Date(previousMs).toISOString(),
+        patchFields: fields,
+      };
+    },
+    write: async (plan) => airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, row.id, {
+      method: "PATCH",
+      body: JSON.stringify({ fields: plan.patchFields, typecast: true }),
+    }),
+    verify: async (written, plan) => {
+      const authoritative = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, row.id);
+      const storedMs = Date.parse(String(f(authoritative, "Scheduled_Post_Date") || "").trim());
+      const selectedMs = Date.parse(plan.selectedIso);
+      if (!Number.isFinite(storedMs) || !Number.isFinite(selectedMs) || storedMs !== selectedMs) {
+        throw new HttpError(409, "Story companion move could not be verified in Airtable");
+      }
+      written.__atomic_verified_record = authoritative;
+      return new Date(storedMs).toISOString();
+    },
+    afterCommit: async (written) => {
+      studioInvalidateOccupiedScheduleCache();
+      await studioSupabaseWriteThroughOutput(
+        env,
+        written.__atomic_verified_record || written,
+        "story-companion-heal",
+      ).catch((error) => console.warn("story companion supabase write-through failed", row.id, error));
+    },
+  }, { maxWaitMs: 30_000 });
+  const authoritative = result?.already_committed
+    ? await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, row.id)
+    : (result?.value?.__atomic_verified_record || result?.value);
+  return String(f(authoritative, "Scheduled_Post_Date") || "").trim();
+}
+/*__STUDIO_WORKER_END:studioAtomicHealStoryCompanionDriftRow__*/
+
 export async function studioHealApprovedMissingSchedule(env, options = {}) {
   const limit = Math.max(1, Math.min(20, Number(options.limit || 16)));
   let rows = [];
@@ -1218,6 +1436,29 @@ export async function studioHealApprovedMissingSchedule(env, options = {}) {
     const lane = studioOccupiedForLane(occupiedByLane, platform, outputType);
     const timeZone = await studioScheduleTimeZoneForRecord(env, row, null);
     const horizonDays = await studioScheduleHorizonDays(env).catch(() => MAE_SUGGEST_HORIZON_DAYS);
+    if (scheduleReservationAuthorityEnabled(env)) {
+      try {
+        const atomic = await studioAtomicHealApprovedMissingScheduleRow(
+          env,
+          row,
+          profile,
+          timeZone,
+          horizonDays,
+        );
+        const booked = Date.parse(String(atomic?.iso || ""));
+        if (Number.isFinite(booked)) {
+          (occupiedByLane[laneKey] ||= []).push(booked);
+          healed.push({
+            id: row.id,
+            output_id: f(row, "Output_ID") || null,
+            scheduled_post_date: new Date(booked).toISOString(),
+          });
+        }
+      } catch (error) {
+        console.warn("approved missing-schedule atomic stamp failed", row.id, error);
+      }
+      continue;
+    }
     let iso = "";
     let storyCompanion = false;
     if (isStory) {
@@ -1294,6 +1535,28 @@ export async function studioHealStoryCompanionDrift(env, options = {}) {
     if (resolved.source !== "companion" || !resolved.iso) continue;
     const companionMs = Date.parse(resolved.iso);
     if (!Number.isFinite(companionMs) || Math.abs(companionMs - currentMs) < 2 * 60 * 1000) continue;
+    if (scheduleReservationAuthorityEnabled(env)) {
+      const profile = await item4ProductionProfileRecord(env, row).catch(() => null);
+      try {
+        const scheduledPostDate = await studioAtomicHealStoryCompanionDriftRow(
+          env,
+          row,
+          profile,
+          timeZone,
+        );
+        if (scheduledPostDate) {
+          healed.push({
+            id: row.id,
+            output_id: f(row, "Output_ID") || null,
+            scheduled_post_date: scheduledPostDate,
+            offset_ms: MAE_STORY_COMPANION_OFFSET_MS,
+          });
+        }
+      } catch (error) {
+        console.warn("story companion atomic drift stamp failed", row.id, error);
+      }
+      continue;
+    }
     const fields = studioPublishScheduleFields(
       { scheduled_post_date: resolved.iso, timezone: timeZone },
       row,
