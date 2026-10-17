@@ -25,6 +25,8 @@ CORE_BINDINGS = {
 }
 
 OPTIONAL_BINDINGS = {
+    # Safe, explicitly false at deploy: Factory batch submissions remain OFF.
+    "FACTORY_BATCH_APPROVALS_ENABLED": "plain_text",
     "ELEVENLABS_API_KEY": "secret_text",
     "PIPELINE_RUNNER_SHARED_SECRET": "secret_text",
     "PIPELINE_RUNNER_URL": "plain_text",
