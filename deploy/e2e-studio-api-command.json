@@ -1,23 +1,10 @@
 {
-  "correlation_id": "CONTENT-263-REMAINING-LONG-VIDEO-RECOVERY-20260929",
+  "correlation_id": "VISUAL-VOICEOVER-CANARY-READ-FULL-20261017-01",
   "requests": [
     {
-      "name": "263-fb-reel-continue",
-      "method": "POST",
-      "path": "/api/outputs/recitkWdyJzuyahDE/creative/render/continue",
-      "body": {}
-    },
-    {
-      "name": "263-tiktok-continue",
-      "method": "POST",
-      "path": "/api/outputs/recihZYCI3HIIalc3/creative/render/continue",
-      "body": {}
-    },
-    {
-      "name": "263-youtube-short-continue",
-      "method": "POST",
-      "path": "/api/outputs/reczJjZxB8EKmvKLS/creative/render/continue",
-      "body": {}
+      "name": "read_canary_creative",
+      "method": "GET",
+      "path": "/api/outputs/recL2zjZc7XGRJyRt/creative"
     }
   ]
 }
