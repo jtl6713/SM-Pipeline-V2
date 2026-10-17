@@ -42,10 +42,25 @@ jobs:
           from pathlib import Path
           sys.path.insert(0,'repair/scripts')
           from studio_api_binding_contract import (
-              global_factory_manifest_values,assert_global_factory_binding_tuple,GLOBAL_FACTORY_CAPS)
+              global_factory_manifest_values,assert_global_factory_binding_tuple,GLOBAL_FACTORY_CAPS,
+              GLOBAL_FACTORY_BINDINGS,GLOBAL_FACTORY_CURRENT_MODE)
           manifest=json.loads(Path('deploy/factory-batch-production-rollout.json').read_text())
           original=global_factory_manifest_values(manifest)
           assert assert_global_factory_binding_tuple(original,'signed test') == manifest['global']['stage']
+          # The immediately previous signed production tuple is a valid
+          # predeploy/rollback source during this mode migration, but it is not
+          # a valid release manifest target.
+          legacy=dict(zip(GLOBAL_FACTORY_BINDINGS,(
+              'true','global_ig_reel_story_v1',
+              str(manifest['global']['max_total']),str(manifest['global']['max_per_profile']),
+              'explicit-review')))
+          assert assert_global_factory_binding_tuple(legacy,'legacy predeploy') == manifest['global']['stage']
+          old_manifest=json.loads(json.dumps(manifest))
+          old_manifest['global']['mode']='global_ig_reel_story_v1'
+          try: global_factory_manifest_values(old_manifest)
+          except SystemExit: pass
+          else: raise AssertionError('Legacy mode accepted as current release target')
+          assert GLOBAL_FACTORY_CURRENT_MODE == 'global_all_platforms_v2'
           for key, value in [
               ('max_total',5),('max_per_profile',3),('mode','invalid'),
               ('production_signoff',''),('stage','unknown')]:
