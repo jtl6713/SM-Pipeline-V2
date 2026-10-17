@@ -184,6 +184,46 @@ jobs:
           console.log(`canary_prepared=PASS record=${prep.record_id} output=${prep.output_id||""} test_run=${prep.test_run_id||""}`);
           NODE
 
+      - name: Generate baseline TTS and capture reusable scene audio
+        shell: bash
+        run: |
+          set -euo pipefail
+          node <<'NODE'
+          const fs=require("fs");
+          async function call(method,path,body){
+            const r=await fetch(process.env.BRIDGE_URL,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({method,path,body})});
+            const w=await r.json();
+            if(!r.ok || !w.ok) throw new Error(`bridge ${method} ${path} failed: ${JSON.stringify(w).slice(0,3000)}`);
+            return w.body;
+          }
+          const id=process.env.CANARY_ID;
+          let review=null;
+          for(let i=1;i<=6;i++){
+            review=await call("POST",`/api/outputs/${id}/creative/review`,{
+              action:"changes_requested",
+              notes:"Visual-aware voiceover canary baseline TTS only. Do not publish."
+            });
+            console.log(`baseline_voice_prep attempt=${i} pending=${Boolean(review?.voice_prep_pending)} state=${review?.handoff_state||""}`);
+            if(review?.voice_prep_failed) throw new Error(`baseline voice prep failed: ${JSON.stringify(review).slice(0,2500)}`);
+            if(!review?.voice_prep_pending) break;
+            await new Promise(r=>setTimeout(r,2500));
+          }
+          if(review?.voice_prep_pending) throw new Error("baseline voice prep did not complete");
+          const creative=await call("GET",`/api/outputs/${id}/creative`);
+          const baseline=(creative?.slides||[])
+            .filter(slide=>slide?.voiceover?.enabled!==false && slide?.voiceover?.url)
+            .map(slide=>({
+              id:String(slide.id||slide.scene_id||""),
+              url:String(slide.voiceover.url||""),
+              status:String(slide.voiceover.status||""),
+              text:String(slide.voiceover.text||"")
+            }))
+            .filter(row=>row.id&&row.url);
+          if(baseline.length<2) throw new Error(`expected at least two generated baseline scene voiceovers, found ${baseline.length}`);
+          fs.writeFileSync("/tmp/canary-baseline-audio.json",JSON.stringify({record_id:id,slides:baseline},null,2));
+          console.log(`baseline_scene_tts=PASS generated=${baseline.length}`);
+          NODE
+
       - name: Trim video and accept visual-aware narration
         shell: bash
         run: |
@@ -263,6 +303,25 @@ jobs:
           });
           if(accepted?.visual_script_action!=="accepted") throw new Error("narration proposal was not accepted");
           if(!(accepted?.tts_invalidated_scene_ids||[]).includes(target.scene_id)) throw new Error("changed narration did not invalidate scene TTS");
+
+          const afterAccept=await call("GET",`/api/outputs/${id}/creative`);
+          const baseline=JSON.parse(fs.readFileSync("/tmp/canary-baseline-audio.json","utf8")).slides||[];
+          const currentSlides=new Map((afterAccept?.slides||[]).map(slide=>[String(slide.id||slide.scene_id||""),slide]));
+          const invalidated=new Set(accepted?.tts_invalidated_scene_ids||[]);
+          const changedSlide=currentSlides.get(String(target.scene_id));
+          if(changedSlide?.voiceover?.url) throw new Error("changed scene retained stale TTS URL after narration acceptance");
+          const silentIds=new Set((accepted?.visual_script?.scenes||[]).filter(scene=>scene.voiceover_mode==="silent").map(scene=>String(scene.scene_id||"")));
+          const reusable=baseline.filter(row=>!invalidated.has(row.id)&&!silentIds.has(row.id));
+          if(!reusable.length) throw new Error("no unchanged narrated baseline scene remained available for TTS reuse verification");
+          for(const row of reusable){
+            const slide=currentSlides.get(row.id);
+            if(!slide?.voiceover?.url || String(slide.voiceover.url)!==row.url){
+              throw new Error(`unchanged scene ${row.id} did not retain its baseline TTS URL`);
+            }
+          }
+          fs.writeFileSync("/tmp/canary-reuse.json",JSON.stringify({reused_scene_ids:reusable.map(row=>row.id),invalidated_scene_ids:[...invalidated],silent_scene_ids:[...silentIds]},null,2));
+          console.log(`selective_tts_reuse=PASS reused=${reusable.length} invalidated=${invalidated.size}`);
+
           fs.writeFileSync("/tmp/canary-edit.json",JSON.stringify({
             record_id:id,
             video_scene_id:video.scene_id||video.id,
@@ -331,7 +390,9 @@ jobs:
           name: visual-voiceover-production-canary-${{ github.run_id }}
           path: |
             /tmp/canary-prep.json
+            /tmp/canary-baseline-audio.json
             /tmp/canary-edit.json
+            /tmp/canary-reuse.json
             /tmp/canary-final.json
           if-no-files-found: ignore
           retention-days: 14
