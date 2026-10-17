@@ -122,3 +122,16 @@ test("visual voiceover rerender continuation uses exact-isolated Python R4/R5, n
   assert.doesNotMatch(pulse, /phase6SetScenarioActive/);
   assert.doesNotMatch(pulse, /phase6RunScenario/);
 });
+
+test("authoritative visual timeline preview packages skip T1 without weakening normal timing gates", async () => {
+  const functions = await readFile(path.join(here, "worker-functions-03.mjs"), "utf8");
+  const start = functions.indexOf("export async function phase6EnsureRenderPackageForContinuation");
+  const end = functions.indexOf("/*__STUDIO_WORKER_END:phase6EnsureRenderPackageForContinuation__*/", start);
+  assert.ok(start >= 0 && end > start);
+  const block = functions.slice(start, end);
+  assert.match(block, /renderPackage\.manifest\?\.visualTimeline/);
+  assert.match(block, /Timing_Status: "Skipped"/);
+  assert.match(block, /Timing_Timeline_JSON: null/);
+  assert.match(block, /if \(!Boolean\(f\(outputRecord, "Do_Not_Publish"\)\)\) return outputRecord/);
+});
+
