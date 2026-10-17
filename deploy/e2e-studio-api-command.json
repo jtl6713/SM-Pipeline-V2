@@ -1,10 +1,23 @@
 {
-  "correlation_id": "VISUAL-VOICEOVER-CANARY-READ-AFTER-TRIM-20261017-02",
+  "correlation_id": "VISUAL-VOICEOVER-CANARY-PROPOSE-20261017-01",
   "requests": [
     {
-      "name": "read_canary_after_trim",
-      "method": "GET",
-      "path": "/api/outputs/recL2zjZc7XGRJyRt/creative"
+      "name": "propose_visual_narration",
+      "method": "PATCH",
+      "path": "/api/outputs/recL2zjZc7XGRJyRt/creative",
+      "body": {
+        "visual_script_action": "propose",
+        "visual_script_mode": "selected",
+        "selected_scene_ids": [
+          "recn6KdvSU0RQGZ7E"
+        ],
+        "visual_script_base": {
+          "visual_revision": 2,
+          "visual_sequence_hash": "vt1-3e8613f7274a2921",
+          "script_revision": 1,
+          "script_hash": "vs1-ea1d5808a6a01ef0"
+        }
+      }
     }
   ]
 }
