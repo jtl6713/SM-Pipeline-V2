@@ -8242,14 +8242,28 @@ export async function phase6AdvanceRenderPipelineShort(env, outputRecordId) {
   }
 
   if (state === "render_ready") {
-    const pulse = await phase6PulseInactiveScenario(
+    const testRunId = String(f(current, "Test_Run_ID") || "").trim() || undefined;
+    const r4 = await item4PulseR4Python(env, {
+      outputRecordId,
+      testRunId,
+    });
+    const observed = await phase6WaitForOutputStatus(
       env,
-      PHASE6_R4_SCENARIO_ID,
       outputRecordId,
       (record) => ["Rendering", "Rendered", "Failed"].includes(String(f(record, "Render_Status") || "")),
       12000,
+      1000,
     );
-    current = pulse.observed?.record || await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, outputRecordId);
+    current = observed.record || await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, outputRecordId);
+    const queuedStatus = String(f(current, "Render_Status") || "").trim();
+    if (!observed.matched && isRenderQueueWaitingStatus(queuedStatus)) {
+      return {
+        completed: false,
+        handoff_state: "render_start_pending",
+        record: current,
+        message: r4?.message || "Waiting for the shared Remotion render slot.",
+      };
+    }
     state = phase6RenderHandoffState(current);
     if (state === "render_failed") return { completed: false, handoff_state: state, record: current, error: "R4 marked the output Failed" };
     if (state === "render_ready") {
@@ -8283,14 +8297,20 @@ export async function phase6AdvanceRenderPipelineShort(env, outputRecordId) {
         message: "Remotion is still rendering. R5 will run when that job finishes.",
       };
     }
-    const pulse = await phase6PulseInactiveScenario(
+    const testRunId = String(f(current, "Test_Run_ID") || "").trim() || undefined;
+    await item4PulseR5Python(env, {
+      outputRecordId,
+      testRunId,
+      maxRuns: 1,
+    });
+    const observed = await phase6WaitForOutputStatus(
       env,
-      PHASE6_R5_SCENARIO_ID,
       outputRecordId,
       (record) => ["Rendered", "Failed"].includes(String(f(record, "Render_Status") || "")),
       8000,
+      1000,
     );
-    current = pulse.observed?.record || await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, outputRecordId);
+    current = observed.record || await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, outputRecordId);
     state = phase6RenderHandoffState(current);
     if (state === "render_failed") return { completed: false, handoff_state: state, record: current, error: String(f(current, "Final_File_Error_Message") || f(current, "Remotion_Error_Message") || "R5 marked the output Failed") };
     if (state === "rendered_preview_ready") {
