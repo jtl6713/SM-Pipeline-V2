@@ -6,6 +6,7 @@ from datetime import timedelta
 from typing import Any
 
 import requests
+import time
 
 from airtable.client import AirtableClient
 from airtable.constants import PLATFORM_OUTPUTS_TABLE
@@ -75,15 +76,30 @@ def _slideshow_settings(client: AirtableClient) -> dict[str, str]:
 
 
 def _upload_r2(*, upload_url: str, upload_secret: str, key: str, content: bytes) -> tuple[int, Any]:
-    response = requests.put(
-        upload_url,
-        params={"key": key},
-        data=content,
-        headers={"x-pipeline-secret": upload_secret, "Content-Type": "video/mp4"},
-        timeout=300,
-    )
-    data = response.json() if response.content and "json" in (response.headers.get("Content-Type") or "") else (response.text[:500] if response.content else {})
-    return response.status_code, data
+    # R2 upload intermittently aborts a connection mid-MP4 (Output 1703,
+    # WinError 10053). Retry the *same deterministic object key*, never
+    # regenerate the rendered video or create a second publish request.
+    last_error = None
+    for attempt in range(3):
+        try:
+            response = requests.put(
+                upload_url,
+                params={"key": key},
+                data=content,
+                headers={"x-pipeline-secret": upload_secret, "Content-Type": "video/mp4"},
+                timeout=(30, 300),
+            )
+            data = response.json() if response.content and "json" in (response.headers.get("Content-Type") or "") else (response.text[:500] if response.content else {})
+            if response.status_code in {408, 429, 500, 502, 503, 504} and attempt < 2:
+                time.sleep(min(2 ** attempt, 4))
+                continue
+            return response.status_code, data
+        except (requests.ConnectionError, requests.Timeout) as exc:
+            last_error = exc
+            if attempt < 2:
+                time.sleep(min(2 ** attempt, 4))
+                continue
+    raise last_error or RuntimeError("R2 MP4 upload failed after retries")
 
 
 def process_request(
