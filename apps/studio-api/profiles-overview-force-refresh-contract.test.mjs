@@ -61,3 +61,12 @@ test("overview response exposes source snapshot age and generation metadata", ()
   assert.match(functions04, /snapshot_generation: meta\.generation \|\| null/);
   assert.match(functions04, /ideas_at: Number\(meta\.ideasAt \|\| 0\) \|\| null/);
 });
+
+
+test("completed manual generation can force a durable R2 reread across Worker isolates", () => {
+  assert.match(functions04, /minGeneration = String\(url\.searchParams\.get\("min_generation"\) \|\| ""\)/);
+  assert.match(functions04, /readStudioProfilesOverviewSnapshot\(env, \{ minGeneration \}\)/);
+  assert.match(functions04, /options\.forceDurable === true/);
+  assert.match(functions04, /cacheGeneration !== expectedGeneration/);
+  assert.match(functions04, /readStudioProfilesOverviewSnapshot\(env, \{ forceDurable: true \}\)/);
+});
