@@ -467,3 +467,119 @@ test("manual override cannot bypass an automatic reservation on the same lane", 
   );
   assert.equal(manualWrites, 0, "conflicting explicit manual time must be rejected, not silently moved or written");
 });
+
+
+test("manual exact-time override competing with automatic reservation waits, then rejects the occupied slot", async () => {
+  const env = makeEnv();
+  const authoritative = new Map();
+  const barrier = deferred();
+  const writeStarted = deferred();
+
+  const automatic = scheduleOne(env, authoritative, {
+    platform: "Facebook",
+    outputId: "recAutoHeld",
+    operation: "pipeline-approve:recAutoHeld",
+    hooks: {
+      writeBarrier: barrier,
+      onWriteStarted: () => writeStarted.resolve(),
+    },
+  });
+  await writeStarted.promise;
+
+  // A manual request cannot bypass a live automatic owner merely because the
+  // operator supplied an exact time.
+  await assert.rejects(
+    runAtomicScheduleTransaction(env, {
+      content_profile_id: "recChicago",
+      platform: "Facebook",
+      output_type: "Multi-Image Post",
+      platform_output_record_id: "recManual",
+      owner_operation_id: "manual-schedule:recManual",
+    }, {
+      plan: async () => ({
+        action: "reserve",
+        selectedIso: "2026-10-18T10:30:00.000Z",
+        previousIso: "",
+      }),
+      write: async () => ({ id: "recManual" }),
+      verify: async () => "2026-10-18T10:30:00.000Z",
+    }, { maxWaitMs: 0, jitter: false }),
+    /lane|waiting|busy/i,
+  );
+
+  barrier.resolve();
+  const committed = await automatic;
+  const occupiedIso = committed.value.selectedIso;
+
+  // After the automatic owner commits, the manual transaction gets the lane,
+  // sees that durable occupancy, and must reject the explicit conflicting time
+  // instead of silently shifting it.
+  await assert.rejects(
+    runAtomicScheduleTransaction(env, {
+      content_profile_id: "recChicago",
+      platform: "Facebook",
+      output_type: "Multi-Image Post",
+      platform_output_record_id: "recManual",
+      owner_operation_id: "manual-schedule:recManual:retry",
+    }, {
+      plan: async ({ occupied_reservations }) => {
+        const occupiedMs = occupied_reservations
+          .map((row) => Date.parse(String(row.scheduled_iso || "")))
+          .filter(Number.isFinite);
+        const requestedMs = Date.parse(occupiedIso);
+        assert.equal(maeScheduleConflicts(requestedMs, occupiedMs), true);
+        throw new Error("Requested manual schedule conflicts with another output on this profile and platform");
+      },
+      write: async () => {
+        throw new Error("manual conflict must never write");
+      },
+      verify: async () => "",
+    }, { maxWaitMs: 0, jitter: false }),
+    /conflicts with another output/,
+  );
+});
+
+test("lease expiration during an in-flight external write quarantines the lane until fenced reconciliation", async () => {
+  const env = makeEnv();
+  const namespace = env.STUDIO_SCHEDULE_RESERVATIONS;
+  const authoritative = new Map();
+  const barrier = deferred();
+  const writeStarted = deferred();
+
+  const pending = scheduleOne(env, authoritative, {
+    platform: "TikTok",
+    outputId: "recLeaseInflight",
+    type: "Video Draft",
+    operation: "factory-batch:lease-test:recLeaseInflight",
+    hooks: {
+      writeBarrier: barrier,
+      onWriteStarted: () => writeStarted.resolve(),
+    },
+  });
+  await writeStarted.promise;
+
+  const lane = namespace.lane("recChicago::tiktok");
+  assert.ok(lane, "Durable Object lane must exist");
+  const originalNow = lane._now();
+  lane._now = () => originalNow + 91_000;
+  await lane.alarm();
+
+  const status = await (await lane.fetch(new Request("https://lane/status"))).json();
+  assert.equal(status.lock.state, "Recovery Required");
+  assert.ok(status.quarantine);
+
+  await assert.rejects(
+    scheduleOne(env, authoritative, {
+      platform: "TikTok",
+      outputId: "recLeaseContender",
+      type: "Video Draft",
+      operation: "pipeline-approve:recLeaseContender",
+    }),
+    /reconciliation|quarantined|recovery/i,
+  );
+
+  // Finish the simulated request only so the promise does not leak. The stale
+  // owner's later verify/commit is fenced by the recovery-required lane.
+  barrier.resolve();
+  await assert.rejects(pending, /recovery|required|lease|fenced/i);
+});
