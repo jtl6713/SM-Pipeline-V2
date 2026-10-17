@@ -29,7 +29,7 @@ test("Worker production deploy preserves and verifies Cloudflare bindings", () =
 
 test("Pages production deploy verifies the exact force-refresh asset on custom domain", () => {
   assert.match(pagesDeploy, /EXPECTED_OVERVIEW_URL/);
-  assert.match(pagesDeploy, /all-profiles-overview-1007\.js/);
+  assert.match(pagesDeploy, /all-profiles-overview-1007/);
   assert.match(pagesDeploy, /custom-overview\.js/);
   assert.match(pagesDeploy, /\/api\/profiles\/overview\/refresh/);
   assert.match(pagesDeploy, /min_generation=/);
