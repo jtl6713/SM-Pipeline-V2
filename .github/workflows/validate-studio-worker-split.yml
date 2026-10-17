@@ -36,7 +36,7 @@ jobs:
           for p in names[1:]:
               source = p.read_text()
               ends = re.findall(r'/\*__STUDIO_WORKER_END:([^*]+)__\*/', source)
-              exported = set(re.findall(r'^export (?:async )?function ([A-Za-z_$][\\w$]*)\\(', source, re.M))
+              exported = set(re.findall(r'^export (?:async )?function ([A-Za-z_$][\w$]*)\(', source, re.M))
               missing.extend(f'{p.name}:{name}' for name in ends if name not in extracts)
               nonexported.extend(f'{p.name}:{name}' for name in ends if name not in exported)
           assert not missing, 'worker.js missing split reconstruction markers: ' + ', '.join(missing)
