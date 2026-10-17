@@ -317,7 +317,7 @@ jobs:
           jq -e '.ok==true and .authenticated==true and .authorized==true and .email=="joseph.t.logan@gmail.com"' /tmp/session.json >/dev/null
           echo "functional_session_check=PASS"
 
-      - name: Read-only Factory batch status smoke while submissions disabled
+      - name: Verify Chicago-only Factory batch canary via read-only Worker status
         shell: bash
         run: |
           set -euo pipefail
@@ -331,12 +331,23 @@ jobs:
           for i in 1 2 3 4 5; do
             FACTORY_CODE=$(curl -sS --max-time 60 -o /tmp/factory-batch-status.json -w '%{http_code}' "$URL" || true)
             if [[ "$FACTORY_CODE" == "200" ]] && jq -e '.ok==true and .batch==true and .approvals_enabled==false' /tmp/factory-batch-status.json >/dev/null 2>&1; then
-              echo "factory_batch_read_only_smoke=PASS approvals_enabled=false"
+              echo "factory_batch_la_denied=PASS approvals_enabled=false"
+              break
+            fi
+            sleep 3
+          done
+          jq -e '.ok==true and .batch==true and .approvals_enabled==false' /tmp/factory-batch-status.json >/dev/null || { echo "Factory LA must remain excluded from pilot" >&2; exit 1; }
+          CHICAGO="https://$VERIFY_BRIDGE.$SUBDOMAIN.workers.dev/$TOKEN/factory-status-chicago"
+          PILOT_CODE=000
+          for i in 1 2 3 4 5; do
+            PILOT_CODE=$(curl -sS --max-time 60 -o /tmp/factory-batch-chicago.json -w '%{http_code}' "$CHICAGO" || true)
+            if [[ "$PILOT_CODE" == "200" ]] && jq -e '.ok==true and .batch==true and .approvals_enabled==true and .rollout.mode=="chicago_ig_reel_v1" and .rollout.max_items==1 and .rollout.platform=="Instagram" and .rollout.output_type=="Reel" and .rollout.profile_id=="recT2rbKX3MF7cVFU"' /tmp/factory-batch-chicago.json >/dev/null 2>&1; then
+              echo "factory_batch_chicago_pilot=PASS one_Instagram_Reel"
               exit 0
             fi
             sleep 3
           done
-          echo "Read-only Factory batch status smoke failed (HTTP $FACTORY_CODE)" >&2
+          echo "Factory Chicago canary verification failed (HTTP $PILOT_CODE)" >&2
           exit 1
 
       - name: Delete functional verification bridge
