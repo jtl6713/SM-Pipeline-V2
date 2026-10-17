@@ -652,6 +652,8 @@ import {
   readStudioProfilesOverviewSnapshot,
   refreshStudioProfilesOverviewSnapshot,
   profilesOverview,
+  startProfilesOverviewForceRefresh,
+  getProfilesOverviewRefreshStatus,
   dashboard,
   adminRepairControlStatus,
   adminRepairControl,
@@ -717,6 +719,8 @@ export default {
       const isMediaAssetStreamRoute = /^\/api\/media-assets\/rec[A-Za-z0-9]+\/stream$/.test(url.pathname);
       const isPublicBrandWatermarkRoute = url.pathname === "/api/public/branding/watermark.png";
       const isMediaLibraryStillsRoute = url.pathname === "/api/media-assets/library-stills";
+      const isProfilesOverviewRefreshRoute = url.pathname === "/api/profiles/overview/refresh";
+      const isProfilesOverviewRefreshStatusRoute = url.pathname === "/api/profiles/overview/refresh-status";
       const isIdeaRecordRoute = /^\/api\/ideas\/rec[A-Za-z0-9]+$/.test(url.pathname);
       const isIdeaHoldRoute = /^\/api\/ideas\/rec[A-Za-z0-9]+\/hold$/.test(url.pathname);
       const isIdeaRestoreRoute = /^\/api\/ideas\/rec[A-Za-z0-9]+\/restore$/.test(url.pathname);
@@ -847,6 +851,7 @@ export default {
       const isAssetLibraryDurationWrite = isAssetLibraryDurationRoute && request.method === "POST";
       const isPublishedLibraryReleaseRoute = /^\/api\/library\/published\/rec[A-Za-z0-9]+\/release-file$/.test(url.pathname);
       const isPublishedLibraryReleaseWrite = isPublishedLibraryReleaseRoute && request.method === "POST";
+      const isProfilesOverviewRefreshWrite = isProfilesOverviewRefreshRoute && request.method === "POST";
       const isIdeaCreateRoute = url.pathname === "/api/ideas" && request.method === "POST";
       const isIdeaGenerateWrite = isIdeaGenerateRoute && request.method === "POST";
       const isScriptedShortProposeWrite = isScriptedShortProposeRoute && request.method === "POST";
@@ -921,6 +926,7 @@ export default {
       const allowedMethod =
         request.method === "GET" ||
         (request.method === "HEAD" && (isMusicPreviewRoute || isMediaAssetPreviewRoute || isMediaAssetStreamRoute || isPublicBrandWatermarkRoute || isOutputPreviewRoute || isVoicePreviewRoute)) ||
+        isProfilesOverviewRefreshWrite ||
         isIdeaCreateRoute ||
         isIdeaGenerateWrite ||
         isScriptedShortProposeWrite ||
@@ -1129,6 +1135,7 @@ export default {
           studio_home_overview_lean_v1: true,
           studio_home_overview_cache_v1: true,
           studio_home_overview_snapshot_v1: true,
+          studio_home_overview_force_refresh_v1: true,
           studio_keep_last_list_v1: true,
           studio_pipeline_list_snapshot_v1: true,
           studio_list_read_snapshot_v2: true,
@@ -1792,6 +1799,19 @@ export default {
         }
         if (request.method !== "GET") throw new HttpError(405, "Method not allowed");
         return listStudioContentProfiles(request, env, authorization);
+      }
+
+      if (isProfilesOverviewRefreshRoute) {
+        if (request.method !== "POST") throw new HttpError(405, "Method not allowed");
+        assertWriteRequest(request, env);
+        requireAnyPermission(authorization, ["tenant_admin", "publishing_control", "production_configure", "outputs_review"]);
+        return startProfilesOverviewForceRefresh(request, env, authorization, ctx);
+      }
+
+      if (isProfilesOverviewRefreshStatusRoute) {
+        if (request.method !== "GET") throw new HttpError(405, "Method not allowed");
+        requireAnyPermission(authorization, ["tenant_admin", "publishing_control", "production_configure", "outputs_review"]);
+        return getProfilesOverviewRefreshStatus(request, env);
       }
 
       if (url.pathname === "/api/profiles/overview") {
@@ -5320,6 +5340,7 @@ const studioProfilesOverviewCache = {
   authKey: "",
   rows: null,
   complete: false,
+  generation: "",
   inflight: null,
   ideasAt: 0,
   ideasInflight: null,
@@ -5337,8 +5358,10 @@ const studioProfilesOverviewCache = {
 /*__STUDIO_WORKER_EXTRACT:isAirtableCoolingError__*/
 /*__STUDIO_WORKER_EXTRACT:respondProfilesOverviewSoft__*/
 /*__STUDIO_WORKER_EXTRACT:rememberProfilesOverviewSnapshot__*/
+/*__STUDIO_WORKER_EXTRACT:readStudioProfilesOverviewSnapshotFromR2__*/
 /*__STUDIO_WORKER_EXTRACT:readStudioProfilesOverviewSnapshot__*/
 /*__STUDIO_WORKER_EXTRACT:writeStudioProfilesOverviewSnapshot__*/
+/*__STUDIO_WORKER_EXTRACT:verifyStudioProfilesOverviewSnapshot__*/
 /*__STUDIO_WORKER_EXTRACT:refreshStudioProfilesOverviewSnapshot__*/
 /*__STUDIO_WORKER_EXTRACT:scheduleStudioProfilesOverviewRefresh__*/
 /*__STUDIO_WORKER_EXTRACT:studioProfilesOverviewReadSource__*/
@@ -5348,6 +5371,10 @@ const studioProfilesOverviewCache = {
 /*__STUDIO_WORKER_EXTRACT:scheduleStudioProfilesOverviewIdeasRefresh__*/
 /** One Worker request for All Profiles home table — no N× /api/dashboard fan-out. */
 /*__STUDIO_WORKER_EXTRACT:profilesOverview__*/
+/*__STUDIO_WORKER_EXTRACT:validateStudioProfilesOverviewRows__*/
+/*__STUDIO_WORKER_EXTRACT:runStudioProfilesOverviewForceRefresh__*/
+/*__STUDIO_WORKER_EXTRACT:startProfilesOverviewForceRefresh__*/
+/*__STUDIO_WORKER_EXTRACT:getProfilesOverviewRefreshStatus__*/
 /*__STUDIO_WORKER_EXTRACT:dashboard__*/
 /*__STUDIO_WORKER_EXTRACT:respondHtml__*/
 /*__STUDIO_WORKER_EXTRACT:listPipelineSettingsForAdmin__*/
