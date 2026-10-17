@@ -63,11 +63,11 @@ jobs:
           TOKEN="$(openssl rand -hex 32)"
           cleanup() {
             cd "$ROOT"
-            "$ROOT/node_modules/.bin/wrangler" delete --name "$RUNNER_NAME" --force >/dev/null 2>&1 || true
+            "$ROOT/node_modules/.bin/wrangler" delete --config /tmp/synthetic-schedule-canary/wrangler.jsonc --name "$RUNNER_NAME" --force >/dev/null 2>&1 || true
           }
           trap cleanup EXIT
           "$ROOT/node_modules/.bin/wrangler" deploy --config wrangler.jsonc >/tmp/canary-deploy.log 2>&1
-          printf '%s' "$TOKEN" | "$ROOT/node_modules/.bin/wrangler" secret put CANARY_TOKEN --name "$RUNNER_NAME" >/dev/null
+          printf '%s' "$TOKEN" | "$ROOT/node_modules/.bin/wrangler" secret put CANARY_TOKEN --config wrangler.jsonc --name "$RUNNER_NAME" >/dev/null
           SUBDOMAIN="$(curl -fsS -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/subdomain" | jq -r '.result.subdomain')"
           test -n "$SUBDOMAIN" && test "$SUBDOMAIN" != null
           NONCE="$(openssl rand -hex 12)"
