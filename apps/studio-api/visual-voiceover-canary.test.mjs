@@ -97,3 +97,16 @@ test("production canary proves baseline TTS reuse before final rerender", async 
   assert.match(workflow, /selective_tts_reuse=PASS/);
   assert.match(workflow, /canary-reuse\.json/);
 });
+
+test("visual voiceover rerender continuation uses targeted Python R4/R5, never retired Make pulses", async () => {
+  const functions = await readFile(path.join(here, "worker-functions-03.mjs"), "utf8");
+  const start = functions.indexOf("export async function phase6AdvanceRenderPipelineShort");
+  const end = functions.indexOf("/*__STUDIO_WORKER_END:phase6AdvanceRenderPipelineShort__*/", start);
+  assert.ok(start >= 0 && end > start);
+  const continuation = functions.slice(start, end);
+  assert.match(continuation, /item4PulseR4Python\(env/);
+  assert.match(continuation, /item4PulseR5Python\(env/);
+  assert.match(continuation, /Test_Run_ID/);
+  assert.doesNotMatch(continuation, /phase6PulseInactiveScenario/);
+  assert.doesNotMatch(continuation, /phase6MakeApi/);
+});
