@@ -388,4 +388,21 @@ jobs:
           done
           test "$CUSTOM_APP_OK" = "1"
           require_match "$EXPECTED_BUILD_ID" /tmp/custom-app.js "custom-domain BUILD_ID"
+          # A no-op footer build label is insufficient when adding a new lazy
+          # Quality Agent asset. Verify the operator-facing Factory batch UI
+          # from the *authenticated custom domain*, not only source files.
+          if grep -Fq 'factory-batch-quality-0710.js' apps/studio-web/index.html; then
+            require_match 'factory-batch-quality-0710.js' /tmp/custom-index.html "Factory QA module loaded on custom domain"
+            require_match 'operationsFactoryBatchQualitySignals' /tmp/custom-index.html "Quality Agent operator panel"
+            require_match 'factoryBatchQualitySignals' /tmp/custom-index.html "Factory operator panel"
+            QA_CODE=$(curl -sS \
+              "${ACCESS_HEADERS[@]}" \
+              -o /tmp/custom-factory-quality.js \
+              -w '%{http_code}' \
+              "$CUSTOM_URL/assets/factory-batch-quality-0710.js?v=$GITHUB_SHA" || true)
+            test "$QA_CODE" = "200"
+            require_match 'QA-FACTORY-BATCH-FAILED-ITEM' /tmp/custom-factory-quality.js "Factory failed-item finding"
+            require_match 'QA-FACTORY-BATCH-DUPLICATE-ITEM' /tmp/custom-factory-quality.js "Factory duplicate-item finding"
+            echo "factory_quality_agent_live_asset_verify=PASS"
+          fi
           echo "custom_domain_content_verify=PASS"

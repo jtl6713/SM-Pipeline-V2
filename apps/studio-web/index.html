@@ -23,6 +23,7 @@
 <link rel="stylesheet" href="/assets/production-progress-0601.css?v=0.6.709-overview-fast-refresh">
 <link rel="stylesheet" href="/assets/production-render-layout-0678.css?v=0.6.709-overview-fast-refresh">
 <link rel="stylesheet" href="/assets/factory-layout-0680.css?v=0.6.709-overview-fast-refresh">
+<link rel="stylesheet" href="/assets/factory-batch-quality-0710.css?v=0.6.709-overview-fast-refresh">
 </head>
 <body>
  <header class="topbar">
@@ -2060,6 +2061,15 @@
  <button type="button" class="secondary-button" id="operationsAgentRecapPastHour">Past hour</button>
  <span class="subtle ops-recap-refresh-meta" id="operationsAgentRefreshMeta">Auto-refreshes every minute.</span>
  </div>
+ <section class="factory-batch-quality-panel" id="operationsFactoryBatchQuality" aria-labelledby="operationsFactoryBatchQualityHeading">
+  <div class="factory-batch-quality-head">
+    <h3 id="operationsFactoryBatchQualityHeading">Factory batch health · selected profile</h3>
+    <button type="button" class="secondary-button" id="operationsFactoryBatchQualityRefresh">Refresh Factory health</button>
+  </div>
+  <div id="operationsFactoryBatchQualitySignals" aria-live="polite">
+    <p class="subtle">Checking the latest Factory batch in R2…</p>
+  </div>
+</section>
  <p class="subtle" id="operationsAgentRecapLead">Loading recap…</p>
  <ol id="operationsAgentRecap" class="ops-recap-list"></ol>
  </div>
@@ -2120,6 +2130,15 @@
  <section class="factory-batch-activity" id="factoryBatchActivity" aria-label="Batch approval activity" aria-live="polite">
   <div class="factory-batch-heading"><strong>Batch Approval Activity</strong><span id="factoryBatchUpdated">Live status from Studio</span></div>
   <p id="factoryBatchSummary">Checking recent approvals…</p>
+  <section class="factory-batch-quality-panel" id="factoryBatchQuality" aria-labelledby="factoryBatchQualityHeading">
+    <div class="factory-batch-quality-head">
+      <h3 id="factoryBatchQualityHeading">Quality Agent · batch findings</h3>
+      <button type="button" class="secondary-button" id="factoryBatchQualityRefresh">Refresh findings</button>
+    </div>
+    <div id="factoryBatchQualitySignals" aria-live="polite">
+      <p class="subtle">Checking the latest Factory batch…</p>
+    </div>
+  </section>
   <div class="factory-batch-actions">
    <button type="button" class="secondary-button" id="factoryBatchInspect" aria-expanded="false" aria-controls="factoryBatchDetails" hidden>Inspect items</button>
    <button type="button" class="secondary-button" id="factoryBatchRetry" hidden>Retry Failed</button>
@@ -2893,6 +2912,7 @@
   ]
 }
  </script>
+ <script defer src="/assets/factory-batch-quality-0710.js?v=0.6.709-overview-fast-refresh"></script>
  <script src="/assets/studio-lazy-pages.js?v=0.6.709-overview-fast-refresh"></script>
  <script>window.StudioLazyLoad.boot();</script>
 <script>

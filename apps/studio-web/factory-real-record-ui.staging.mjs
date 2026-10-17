@@ -10,6 +10,7 @@ import { readFileSync } from "node:fs";
 import { chromium } from "playwright";
 import { setTimeout as sleep } from "node:timers/promises";
 import path from "node:path";
+import { factoryBatchQualitySignals } from "../studio-api/factory-approval-queue.mjs";
 
 const base = path.resolve("apps/studio-web");
 const raw = readFileSync(path.join(base, "index.html"), "utf8");
@@ -17,6 +18,9 @@ const start = raw.indexOf('<section id="page-factory"');
 const end = raw.indexOf('<section id="page-support"', start);
 assert.ok(start >= 0 && end > start, "Current Factory markup in real index.html");
 const section = raw.slice(start, end);
+const opsStart = raw.indexOf('<section id="page-operations"');
+assert.ok(opsStart >= 0 && opsStart < start, "Current Operations Quality Agent page exists");
+const opsSection = raw.slice(opsStart, start);
 const cssLinks = [...raw.matchAll(/<link[^>]+rel="stylesheet"[^>]*>/gi)].map(m=>m[0]).join("\n");
 const embeddedStyle = [...raw.matchAll(/<style[^>]*>[\s\S]*?<\/style>/gi)].map(m=>m[0]).join("\n");
 const profileId = "recF7UAn0LkMZZrWZ";
@@ -52,6 +56,8 @@ const cards = items.map(([id,output_id,content_id,platform,studio_output_type]) 
 const desk = {ok:true,summary:{needs_eyes:20,auto_high:0,needs_assets_pile:0,needs_assets_max:3,manual:0},
 lanes:{needs_eyes:cards,auto_high:[],needs_assets:[],manual:[]},needs_assets_candidates:[]};
 let batch=null,starts=0,retries=0,unexpected=[];
+const batchSignals=(value)=>value ? factoryBatchQualitySignals(value) : [];
+let syntheticQualitySignals=null;
 const send = (res,value,status=200) => {
  res.writeHead(status,{"content-type":"application/json","cache-control":"no-store"});
  res.end(JSON.stringify(value));
@@ -62,7 +68,9 @@ const srv=createServer(async(req,res)=>{
    const html='<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">'
    + cssLinks+embeddedStyle+'</head><body><select id="studioProfileSelect">'
    +'<option value="'+profileId+'">Los Angeles</option></select>'
-   +section+'<script src="/assets/factory-desk.js"></script></body></html>';
+   +opsSection+section+
+   '<script src="/assets/factory-desk.js"></script>'+
+   '<script src="/assets/factory-batch-quality-0710.js"></script></body></html>';
    res.writeHead(200,{"content-type":"text/html"});res.end(html);return;
  }
  if(url.pathname.startsWith("/assets/")){
@@ -73,7 +81,10 @@ const srv=createServer(async(req,res)=>{
  }
  if(url.pathname==="/api/factory/desk"&&req.method==="GET"){send(res,desk);return}
  if(url.pathname==="/api/factory/approval-batches"&&req.method==="GET"){
-   send(res,batch||{ok:true,batch:true,status:"idle",job_id:null,items:[]});return;
+   const queryProfile=url.searchParams.get("profile")||url.searchParams.get("profile_id");
+   const scopedBatch=queryProfile===profileId?batch:null;
+   const current=scopedBatch||{ok:true,batch:true,status:"idle",job_id:null,items:[]};
+   send(res,{...current,quality_signals:scopedBatch?(syntheticQualitySignals??batchSignals(scopedBatch)):[],approvals_enabled:true});return;
  }
  if(url.pathname==="/api/factory/approval-batches"&&req.method==="POST"){
    let body="";for await(const part of req)body+=part;
@@ -153,6 +164,14 @@ try {
  assert.match(await page.locator("#factoryBatchSelectionCount").innerText(),/19 outputs selected/);
  await firstOutput.check();
  assert.match(await page.locator("#factoryBatchSelectionCount").innerText(),/20 outputs selected/);
+ // Ordinary Factory navigation and browser refresh retain the local selection.
+ await page.reload({waitUntil:"domcontentloaded"});
+ await page.waitForFunction(()=>window.StudioFactoryDesk?.load);
+ await page.evaluate(()=>{document.querySelector("#page-factory").classList.add("active")});
+ await page.evaluate(()=>window.StudioFactoryDesk.load());
+ await page.locator('[data-factory-band-toggle]').first().click();
+ assert.match(await page.locator("#factoryBatchSelectionCount").innerText(),/20 outputs selected/);
+ console.log("factory_batch_selection_survives_navigation=PASS");
  await page.locator("#factoryBatchSubmit").click();
  await page.waitForFunction(()=>document.getElementById("factoryDeskStatus").textContent.includes("accepted"));
  assert.equal(starts,1);
@@ -168,6 +187,24 @@ try {
  await phone.evaluate(()=>window.StudioFactoryDesk.load());
  await phone.waitForFunction(()=>document.getElementById("factoryBatchSummary").textContent.includes("19 approved"));
  assert.match(await phone.locator("#factoryBatchSummary").innerText(),/1 failed/);
+ await phone.locator("#factoryBatchQualityRefresh").click();
+ await phone.locator("#factoryBatchQualitySignals").getByText("Approval item failed").waitFor();
+ assert.match(await phone.locator("#factoryBatchQualitySignals").innerText(),/QA-FACTORY-BATCH-FAILED-ITEM/);
+ // The Quality Agent operator view presents the same authoritative finding.
+ await phone.evaluate(()=>{
+   document.querySelector("#page-factory").classList.remove("active");
+   document.querySelector("#page-operations").classList.add("active");
+   document.querySelector("#operationsAgentView").hidden=false;
+ });
+ await phone.locator("#operationsFactoryBatchQualityRefresh").click();
+ await phone.locator("#operationsFactoryBatchQualitySignals").getByText("Approval item failed").waitFor();
+ assert.match(await phone.locator("#operationsFactoryBatchQualitySignals").innerText(),/Only use Retry Failed/i);
+ console.log("factory_quality_agent_operator_visibility=PASS");
+ // Return to Factory to exercise the same batch's failed-only retry.
+ await phone.evaluate(()=>{
+   document.querySelector("#page-operations").classList.remove("active");
+   document.querySelector("#page-factory").classList.add("active");
+ });
  await phone.locator("#factoryBatchInspect").click();
  assert.equal(await phone.locator("#factoryBatchDetails li").count(),20);
  await phone.locator("#factoryBatchRetry").click();
@@ -175,10 +212,67 @@ try {
  assert.equal(starts,1,"No duplicate batch on returning mobile browser");
  assert.equal(retries,1,"Only one retry for failed item");
  assert.equal(batch.items.filter(x=>x.status==="approved").length,20);
+ await phone.locator("#factoryBatchQualityRefresh").click();
+ await phone.locator("#factoryBatchQualitySignals").getByText("No Quality Agent findings").waitFor();
+ // All additional Quality Agent signature types must be operator-readable, not just logged.
+ syntheticQualitySignals=[
+   {code:"QA-FACTORY-BATCH-STALLED",detail:"No durable progress for 21 minutes"},
+   {code:"QA-FACTORY-BATCH-STATE-MISMATCH",detail:"Counters disagree"},
+   {code:"QA-FACTORY-BATCH-DUPLICATE-ITEM",detail:"Duplicate output IDs in batch ledger"},
+   {code:"QA-FACTORY-BATCH-TRANSIENT-WAIT",detail:"Waiting on a bounded retry"},
+ ];
+ await phone.locator("#factoryBatchQualityRefresh").click();
+ const sample=await phone.locator("#factoryBatchQualitySignals").innerText();
+ for(const code of syntheticQualitySignals.map(x=>x.code)) assert.ok(sample.includes(code),code);
+ assert.match(sample,/Do not retry until the duplicate ledger is investigated/);
+ // A malicious backend detail remains escaped text, never executable markup.
+ syntheticQualitySignals=[{code:"QA-FACTORY-BATCH-FAILED-ITEM",
+   detail:'<img src="broken" onerror="window.qaInjected=true">'}];
+ await phone.locator("#factoryBatchQualityRefresh").click();
+ await phone.locator("#factoryBatchQualitySignals").getByText(/<img src="broken"/).waitFor();
+ assert.equal(await phone.locator("#factoryBatchQualitySignals img").count(),0);
+ assert.equal(await phone.evaluate(()=>window.qaInjected===true),false);
+ // Switching a profile must not show a different profile's latest batch.
+ syntheticQualitySignals=null;
+ await phone.evaluate(()=>{
+   const select=document.getElementById("studioProfileSelect");
+   const option=new Option("Other profile","recOtherQualityProfile123");
+   select.add(option);
+   select.value=option.value;
+   select.dispatchEvent(new Event("change",{bubbles:true}));
+ });
+ await phone.locator("#factoryBatchQualityRefresh").click();
+ await phone.locator("#factoryBatchQualitySignals").getByText("No recent Factory batch").waitFor();
+ await phone.evaluate(()=>{
+   const select=document.getElementById("studioProfileSelect");
+   select.value="recF7UAn0LkMZZrWZ";
+   select.dispatchEvent(new Event("change",{bubbles:true}));
+ });
+ await phone.locator("#factoryBatchQualityRefresh").click();
+ await phone.locator("#factoryBatchQualitySignals").getByText("No Quality Agent findings").waitFor();
+ console.log("factory_quality_agent_profile_isolation_and_xss=PASS");
+ // Never blindly treat an unavailable Quality Agent GET as "no findings".
+ syntheticQualitySignals=null;
+ console.log("factory_quality_agent_all_five_signatures=PASS");
  await phone.screenshot({path:"/tmp/factory-real-stage-mobile.png"});
  assert.deepEqual(jsErrors,[],"No uncaught Factory UI exceptions");
  assert.deepEqual(unexpected,[],"No unexpected API calls during Factory staging UI");
  console.log("FACTORY_REAL_RECORD_UI_STAGING=PASS");
  console.log("real_output_ids=20; profile=LA; desktop_select=20; background_client_close=true; mobile_restore=true; inspect=20; retry_failed_only=true; published=0; airtable_writes=0");
  await two.close();
+ // Tablet: separate browser context, independent server-backed status and no new submission.
+ const tabletContext=await browser.newContext({viewport:{width:820,height:1180}});
+ const tablet=await tabletContext.newPage();
+ tablet.on("pageerror",e=>jsErrors.push(e.message));
+ await tablet.goto(origin,{waitUntil:"domcontentloaded"});
+ await tablet.waitForFunction(()=>window.StudioFactoryDesk?.load);
+ await tablet.evaluate(()=>document.querySelector("#page-factory").classList.add("active"));
+ await tablet.evaluate(()=>window.StudioFactoryDesk.load());
+ await tablet.waitForFunction(()=>document.getElementById("factoryBatchSummary").textContent.includes("20 approved"));
+ assert.equal(starts,1,"Tablet status inspection never resubmits");
+ const tabletPanel=await tablet.locator("#factoryBatchQuality").boundingBox();
+ assert.ok(tabletPanel && tabletPanel.width <= 820,"Quality panel fits tablet viewport");
+ await tablet.screenshot({path:"/tmp/factory-real-stage-tablet.png"});
+ await tabletContext.close();
+ console.log("factory_batch_tablet_and_mobile=PASS");
 }finally{await browser?.close();await new Promise(resolve=>srv.close(resolve))}
