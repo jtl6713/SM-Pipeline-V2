@@ -3983,7 +3983,10 @@ export function productionRequestAudioPlatformWarnings(record, routeRows = []) {
 export function productionRequestCompatibilityIssues(record) {
   const issues = [];
   const contentType = String(f(record, "Master_Content_Type") || "").trim();
-  const platforms = Array.isArray(f(record, "Target_Platforms")) ? f(record, "Target_Platforms") : [];
+  const rawPlatforms = Array.isArray(f(record, "Target_Platforms")) ? f(record, "Target_Platforms") : [];
+  // Historical platform values that are no longer part of the current Studio
+  // platform registry are ignored rather than surfaced as approval blockers.
+  const platforms = canonicalProductionPlatforms(rawPlatforms).filter((platform) => PR_PLATFORMS.has(platform));
 
   if (!contentType) issues.push("Choose a Master content type.");
   if (!platforms.length) issues.push("Choose at least one Target platform.");
@@ -4123,7 +4126,8 @@ export function promotionInputFromProductionRequest(record) {
   }
 
   const contentType = String(f(record, "Master_Content_Type") || "").trim();
-  const platforms = Array.isArray(f(record, "Target_Platforms")) ? f(record, "Target_Platforms") : [];
+  const rawPlatforms = Array.isArray(f(record, "Target_Platforms")) ? f(record, "Target_Platforms") : [];
+  const platforms = canonicalProductionPlatforms(rawPlatforms).filter((platform) => PR_PLATFORMS.has(platform));
   const videoMode = String(f(record, "Video_Clip_Count_Mode") || "AI decides").trim();
   const carouselMode = String(f(record, "Carousel_Slide_Count_Mode") || "AI decides").trim();
 
