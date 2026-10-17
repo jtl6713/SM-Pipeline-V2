@@ -485,6 +485,7 @@
       });
       if (data?.refreshing && !state.followUp) retrySoon();
     } catch (error) {
+      // Timeouts and rate limits are soft: never paint a red unavailable banner when last-good data exists.
       const cooling = isOverviewSoftFailure(error);
       const cached = state.rows.length
         ? { rows: state.rows, at: state.cacheAt, generation: state.snapshotGeneration, ideasAt: state.ideasAt }
