@@ -279,8 +279,9 @@ test("overview pack pages open rows and keeps blank statuses", async () => {
       assert.equal(outputCall.prefer, "count=none");
       assert.match(outputCall.href, /content_profile_id=eq\./);
       assert.match(outputCall.href, /do_not_publish=eq\.false/);
-      assert.match(outputCall.href, /output_status=not\.eq\.Published/);
-      assert.match(outputCall.href, /output_status=not\.eq\.Cancelled/);
+      assert.match(outputCall.href, /output_status\.is\.null/);
+      assert.match(outputCall.href, /output_status\.neq\.Published/);
+      assert.match(outputCall.href, /output_status\.neq\.Cancelled/);
       assert.match(outputCall.href, /publish_status\.is\.null/);
       assert.match(outputCall.href, /publish_status\.neq\.Published/);
       assert.doesNotMatch(outputCall.href, /output_caption/);
@@ -298,7 +299,7 @@ test("overview pack pages open rows and keeps blank statuses", async () => {
 
 test("worker wires supabase phase4 reads behind the same flag", async () => {
   const worker = readStudioWorkerSource();
-  assert.match(worker, /version: "0.10.660-overview-parallel-pages"/);
+  assert.match(worker, /version: "0.10.661-overview-read-error"/);
   assert.match(worker, /studio_supabase_pipeline_reads_v1: true/);
   assert.match(worker, /studio_supabase_phase3_stable_v1: true/);
   assert.match(worker, /studio_supabase_phase4_reads_v1: true/);
@@ -338,11 +339,11 @@ test("worker wires supabase phase4 reads behind the same flag", async () => {
   const reads = await readFile(path.join(here, "supabase-pipeline-reads.mjs"), "utf8");
   assert.match(reads, /export async function supabaseRestAll/);
   assert.match(reads, /listSupabaseOverviewPack[\s\S]*supabaseRestAll/);
-  assert.match(reads, /output_status=not\.eq\.Published/);
-  assert.match(reads, /output_status=not\.eq\.Cancelled/);
+  assert.match(reads, /output_status\.is\.null,and\(output_status\.neq\.Published,output_status\.neq\.Cancelled\)/);
   assert.match(reads, /publish_status\.is\.null,publish_status\.neq\.Published/);
   assert.match(reads, /Prefer: "count=none"/);
   assert.match(reads, /OVERVIEW_OUTPUT_SELECT/);
+  assert.match(reads, /supabase overview pack timed out after 18s/);
   assert.match(reads, /promoted:payload-%3E%3EPromoted_Content_Record_ID/);
   assert.match(reads, /const \[outputGroups, ideaResult\] = await Promise\.all/);
 });

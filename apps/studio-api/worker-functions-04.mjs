@@ -4726,7 +4726,11 @@ export async function buildStudioProfilesOverviewRows(env, profiles, options = {
         readSource = "supabase";
       }
     } catch (error) {
-      console.warn("supabase profiles overview read failed; falling back to Airtable", error);
+      console.warn("supabase profiles overview read failed", error);
+      if (preferSupabase) {
+        const detail = String(error?.message || error || "supabase overview read failed").slice(0, 240);
+        throw new HttpError(429, `Airtable cooling down (overview-force-build budget); ${detail}`);
+      }
     }
   }
 
