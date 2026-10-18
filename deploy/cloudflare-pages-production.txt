@@ -436,3 +436,4 @@ Deploy Factory ambiguous-submit reconciliation 2026-10-17. PR #817. Recover exac
 2026-10-18 UI 0.6.717 Home overview refresh recovery | stale refresh intent recovery plus aligned release regression pins | deploy and verify custom domain.
 2026-10-18 UI 0.6.717 retry after release-contract expectation alignment | deploy and verify custom domain.
 2026-10-18 Retry UI 0.6.717 Home overview refresh recovery after correcting release-contract cache key.
+2026-10-18 UI 0.6.718 Factory batch and content expand/collapse toggle | second click closes selected batch details and Needs Eyes content items; preserve collapsed state across activity refresh; regression tests in Pages deployment gate; deploy Pages only and verify custom domain.
