@@ -42,7 +42,7 @@ test("Worker exposes profilesOverview lean batch route", () => {
   assert.match(worker, /STUDIO_PROFILES_OVERVIEW_IDEAS_REFRESH_MS = 15 \* 60 \* 1000/);
   assert.match(worker, /studio_home_overview_fast_poll_v1: true/);
   assert.match(worker, /Reuse last-good Ideas counts/);
-  assert.match(worker, /do not block the Supabase output rebuild/);
+  assert.match(worker, /must not block that output rebuild/);
   assert.match(worker, /refreshStudioProfilesOverviewIdeas/);
   assert.match(worker, /includeIdeas/);
   assert.match(worker, /studio\/state\/profiles-overview\.json/);
@@ -68,5 +68,5 @@ test("Worker budgets overview Airtable work so home never waits 60s", () => {
   assert.match(worker, /studio_home_overview_budget_v1:\s*true/);
   assert.match(worker, /STUDIO_PROFILES_OVERVIEW_BUILD_BUDGET_MS/);
   assert.match(worker, /raceStudioOverviewBudget/);
-  assert.match(worker, /0\.10\.656-factory-accept-first/);
+  assert.match(worker, /0\.10\.657-stop-duplicate-purge/);
 });

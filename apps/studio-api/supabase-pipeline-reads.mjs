@@ -1492,6 +1492,9 @@ async function stripDeletedDuplicateSnapshots(env) {
   return touched;
 }
 
+// Do not call this from the 5-minute cron. production_request_outputs.platform_output_id
+// has no index, so each DELETE scans that table until Postgres cancels it (57014)
+// and the pool fills (PGRST003). The Pipeline list filter already drops these ids.
 export async function purgeDeletedDuplicatePackages(env) {
   const result = { outputs: 0, requests: 0, ideas: 0, content: 0, snapshots: 0 };
   if (studioSupabaseConfigured(env)) {
