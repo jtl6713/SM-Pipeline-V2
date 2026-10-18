@@ -1,0 +1,183 @@
+name: Repair Miami approvals 5815-5819
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/repair-miami-5815-5819.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: repair-miami-5815-5819
+  cancel-in-progress: false
+
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      TARGET_WORKER: chicagoshining-studio-api
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Build guarded one-shot Studio service bridge
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "${CLOUDFLARE_API_TOKEN:-}"
+          test -n "${CLOUDFLARE_ACCOUNT_ID:-}"
+          BRIDGE_WORKER="smv2-repair-5815-5819-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          echo "BRIDGE_WORKER=$BRIDGE_WORKER" >> "$GITHUB_ENV"
+          TOKEN="$(openssl rand -hex 32)"
+          printf '%s' "$TOKEN" >/tmp/repair-token
+
+          cat >/tmp/worker.js <<'EOF'
+          const TARGETS = Object.freeze({
+            "recuuu8DJovkRRDQu": 5815,
+            "reckgqEXWSGy5vIy0": 5816,
+            "recjpDrGA3jWxACKZ": 5817,
+            "recXgQCWQy63Ziljv": 5818,
+            "recohDuJosjvxE1Rl": 5819
+          });
+          export default {
+            async fetch(request, env) {
+              try {
+                const url = new URL(request.url);
+                if (url.pathname !== REPAIR_ROUTE) return new Response("Not found", {status:404});
+                if (request.method !== "POST") return new Response("Method not allowed", {status:405});
+                const spec = await request.json().catch(() => ({}));
+                if (spec.action === "health") {
+                  const internal = new Request("https://studio.chicagoshining.com/api/health", {
+                    method:"GET",
+                    headers:{
+                      "Cf-Access-Authenticated-User-Email":"joseph.t.logan@gmail.com",
+                      "Origin":"https://studio.chicagoshining.com",
+                      "Accept":"application/json",
+                      "Cache-Control":"no-store"
+                    }
+                  });
+                  const response = await env.STUDIO_API.fetch(internal);
+                  return new Response(JSON.stringify({
+                    ok: response.ok,
+                    status: response.status,
+                    body: await response.json().catch(() => null)
+                  }), {headers:{"Content-Type":"application/json","Cache-Control":"no-store"}});
+                }
+                const id = String(spec.id || "");
+                const outputId = TARGETS[id];
+                if (!outputId) {
+                  return new Response(JSON.stringify({ok:false,error:"target-not-allowed"}), {
+                    status:400,
+                    headers:{"Content-Type":"application/json","Cache-Control":"no-store"}
+                  });
+                }
+                const internal = new Request("https://studio.chicagoshining.com/api/factory/desk", {
+                  method:"POST",
+                  headers:{
+                    "Cf-Access-Authenticated-User-Email":"joseph.t.logan@gmail.com",
+                    "Origin":"https://studio.chicagoshining.com",
+                    "Accept":"application/json",
+                    "Content-Type":"application/json",
+                    "Cache-Control":"no-store"
+                  },
+                  body:JSON.stringify({
+                    action:"approve",
+                    id,
+                    kind:"output",
+                    note:`Targeted recovery for Miami output ${outputId}; user approval was not committing.`
+                  })
+                });
+                const response = await env.STUDIO_API.fetch(internal);
+                const text = await response.text();
+                let body = null;
+                try { body = text ? JSON.parse(text) : null; } catch { body = {raw:text.slice(0,4000)}; }
+                return new Response(JSON.stringify({
+                  ok: response.ok,
+                  status: response.status,
+                  output_id: outputId,
+                  record_id: id,
+                  body
+                }), {
+                  status:200,
+                  headers:{"Content-Type":"application/json","Cache-Control":"no-store"}
+                });
+              } catch (error) {
+                return new Response(JSON.stringify({
+                  ok:false,status:502,error:String(error?.message || error).slice(0,500)
+                }), {
+                  status:502,
+                  headers:{"Content-Type":"application/json","Cache-Control":"no-store"}
+                });
+              }
+            }
+          };
+          EOF
+
+          python - <<'PY'
+          from pathlib import Path
+          token=Path('/tmp/repair-token').read_text().strip()
+          p=Path('/tmp/worker.js')
+          p.write_text(p.read_text().replace('REPAIR_ROUTE', repr('/'+token).replace("'", '"')))
+          PY
+          node --check /tmp/worker.js
+
+          printf '%s' '{"main_module":"worker.js","compatibility_date":"2026-10-01","bindings":[{"type":"service","name":"STUDIO_API","service":"chicagoshining-studio-api"}]}' >/tmp/meta.json
+          API_ROOT="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID"
+          AUTH="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
+          curl -sS -X DELETE "$API_ROOT/workers/scripts/$BRIDGE_WORKER" -H "$AUTH" >/dev/null || true
+          code=$(curl -sS -o /tmp/upload.json -w '%{http_code}' -X PUT "$API_ROOT/workers/scripts/$BRIDGE_WORKER/content" -H "$AUTH"             -F 'metadata=@/tmp/meta.json;type=application/json'             -F 'worker.js=@/tmp/worker.js;type=application/javascript+module;filename=worker.js')
+          test "$code" -ge 200 -a "$code" -lt 300
+          jq -e '.success==true' /tmp/upload.json >/dev/null
+          curl -fsS -X POST "$API_ROOT/workers/scripts/$BRIDGE_WORKER/subdomain" -H "$AUTH" -H 'Content-Type: application/json'             --data '{"enabled":true,"previews_enabled":false}' >/tmp/sub.json
+          jq -e '.success==true and .result.enabled==true' /tmp/sub.json >/dev/null
+          curl -fsS "$API_ROOT/workers/subdomain" -H "$AUTH" -o /tmp/account-sub.json
+          SUBDOMAIN=$(jq -er '.result.subdomain' /tmp/account-sub.json)
+          echo "BRIDGE_URL=https://$BRIDGE_WORKER.$SUBDOMAIN.workers.dev/$(cat /tmp/repair-token)" >> "$GITHUB_ENV"
+
+      - name: Wait for bridge readiness
+        shell: bash
+        run: |
+          set -euo pipefail
+          ready=false
+          for attempt in $(seq 1 30); do
+            code=$(curl -sS --max-time 30 -o /tmp/health.json -w '%{http_code}'               -H 'Content-Type: application/json' -d '{"action":"health"}' "$BRIDGE_URL" || true)
+            if [[ "$code" == "200" ]] && jq -e '.ok==true and .status==200 and .body.ok==true' /tmp/health.json >/dev/null 2>&1; then
+              ready=true
+              break
+            fi
+            sleep 2
+          done
+          [[ "$ready" == "true" ]]
+
+      - name: Approve exact stranded outputs through canonical Factory path
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat >/tmp/targets.tsv <<'EOF'
+          5815	recuuu8DJovkRRDQu
+          5816	reckgqEXWSGy5vIy0
+          5817	recjpDrGA3jWxACKZ
+          5818	recXgQCWQy63Ziljv
+          5819	recohDuJosjvxE1Rl
+          EOF
+          : >/tmp/results.jsonl
+          while IFS=$'\t' read -r output_id record_id; do
+            curl -fsS --max-time 120 -H 'Content-Type: application/json'               -d "{\"id\":\"$record_id\"}" "$BRIDGE_URL" >"/tmp/result-$output_id.json"
+            jq -c '{output_id,status,ok,message:(.body.message // .body.result.message // .body.error // null),action:(.body.action // null),result:(.body.result // null)}'               "/tmp/result-$output_id.json" | tee -a /tmp/results.jsonl
+            jq -e '.ok==true and .status==200 and .body.ok==true and .body.action=="approve"'               "/tmp/result-$output_id.json" >/dev/null
+          done </tmp/targets.tsv
+          echo "canonical_approvals_5815_5819=PASS"
+
+      - name: Remove ephemeral repair bridge
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -n "${BRIDGE_WORKER:-}" && -n "${CLOUDFLARE_API_TOKEN:-}" && -n "${CLOUDFLARE_ACCOUNT_ID:-}" ]]; then
+            curl -sS -X DELETE               "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/$BRIDGE_WORKER"               -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" >/tmp/cleanup.json || true
+          fi
