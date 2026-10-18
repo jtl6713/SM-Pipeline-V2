@@ -110,7 +110,7 @@ test("Airtable force fallback interleaves lean output and idea scans instead of 
   const start = functions04.indexOf("async function buildStudioProfilesOverviewRows");
   const end = functions04.indexOf("/*__STUDIO_WORKER_END:buildStudioProfilesOverviewRows__*/", start);
   const build = functions04.slice(start, end);
-  assert.match(build, /const \[freshOutputs, freshIdeas\] = await Promise\.all\(\[/);
+  assert.match(build, /const \[outputs, ideas\] = await Promise\.all\(\[/);
   assert.match(build, /fields: \["Content_Profile", "Promoted_Content_Record_ID", "Content Items"\]/);
   assert.match(build, /if \(usedSupabaseOutputs\) \{[\s\S]*overlayLiveTikTokPublishRows/);
 });
@@ -120,8 +120,8 @@ test("authoritative Airtable refresh filters terminal output history and promote
   const start = functions04.indexOf("async function buildStudioProfilesOverviewRows");
   const end = functions04.indexOf("/*__STUDIO_WORKER_END:buildStudioProfilesOverviewRows__*/", start);
   const build = functions04.slice(start, end);
-  assert.match(build, /const outputFormula = formula[\s\S]*\{Output_Status\}!="Published"[\s\S]*\{Publish_Status\}!="Published"/);
-  assert.match(build, /const ideaFormula = formula[\s\S]*\{Promoted_Content_Record_ID\}=BLANK\(\)[\s\S]*\{Content Items\}=BLANK\(\)/);
-  assert.match(build, /filterFormula: outputFormula/);
-  assert.match(build, /filterFormula: ideaFormula/);
+  assert.match(build, /profileOutputFormula = profileFormula[\s\S]*\{Output_Status\}!="Published"[\s\S]*\{Publish_Status\}!="Published"/);
+  assert.match(build, /profileIdeaFormula = profileFormula[\s\S]*\{Promoted_Content_Record_ID\}=BLANK\(\)[\s\S]*\{Content Items\}=BLANK\(\)/);
+  assert.match(build, /filterFormula: profileOutputFormula/);
+  assert.match(build, /filterFormula: profileIdeaFormula/);
 });
