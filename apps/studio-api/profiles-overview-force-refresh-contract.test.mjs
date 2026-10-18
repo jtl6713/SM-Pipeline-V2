@@ -86,9 +86,9 @@ test("manual refresh cannot hang behind a slow background rebuild or Airtable co
   const start = functions04.indexOf("export async function runStudioProfilesOverviewForceRefresh");
   const end = functions04.indexOf("/*__STUDIO_WORKER_END:runStudioProfilesOverviewForceRefresh__*/", start);
   const force = functions04.slice(start, end);
-  assert.match(force, /raceStudioOverviewBudget\(cache\.inflight, 1500, "overview-existing-build"\)/);
+  assert.match(force, /raceStudioOverviewBudget\(cache\.inflight, 250, "overview-existing-build"\)/);
   assert.match(force, /superseding slow background rebuild/);
-  assert.match(force, /raceStudioOverviewBudget\(trackedBuild, 20_000, "overview-force-build"\)/);
+  assert.match(force, /raceStudioOverviewBudget\(trackedBuild, 26_000, "overview-force-build"\)/);
 
   const routeStart = functions04.indexOf("export async function startProfilesOverviewForceRefresh");
   const routeEnd = functions04.indexOf("/*__STUDIO_WORKER_END:startProfilesOverviewForceRefresh__*/", routeStart);
