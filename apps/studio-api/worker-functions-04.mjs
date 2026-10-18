@@ -4731,6 +4731,17 @@ export async function buildStudioProfilesOverviewRows(env, profiles, options = {
   }
 
   const formula = studioProfilesOverviewCombinedFormula(profileList);
+  // Home only renders outstanding schedule/attention counts. Published history
+  // does not contribute to Scheduled, Manual Action, Failed, or Awaiting Approval,
+  // so do not page thousands of terminal rows during an authoritative refresh.
+  const outputFormula = formula
+    ? `AND(${formula},{Output_Status}!="Published",{Publish_Status}!="Published")`
+    : `AND({Output_Status}!="Published",{Publish_Status}!="Published")`;
+  // The Home Ideas column is explicitly "ideas not in production". Filter those
+  // server-side instead of downloading the entire historical Ideas table.
+  const ideaFormula = formula
+    ? `AND(${formula},{Promoted_Content_Record_ID}=BLANK(),{Content Items}=BLANK())`
+    : `AND({Promoted_Content_Record_ID}=BLANK(),{Content Items}=BLANK())`;
   let airtableIdeaRows = null;
   if (!usedSupabaseOutputs) {
     // Fetch outputs and the minimal Ideas projection in parallel. Airtable request
@@ -4740,14 +4751,14 @@ export async function buildStudioProfilesOverviewRows(env, profiles, options = {
     const [freshOutputs, freshIdeas] = await Promise.all([
       listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
         limit: STUDIO_PROFILES_OVERVIEW_OUTPUT_LIMIT,
-        filterFormula: formula,
+        filterFormula: outputFormula,
         sortField: "Output_ID",
         sortDirection: "desc",
         fields: OUTPUT_LIST_FIELDS,
       }),
       listRecords(env, env.AIRTABLE_IDEA_TABLE_ID, {
         limit: STUDIO_PROFILES_OVERVIEW_IDEA_LIMIT,
-        filterFormula: formula,
+        filterFormula: ideaFormula,
         fields: ["Content_Profile", "Promoted_Content_Record_ID", "Content Items"],
       }),
     ]);
@@ -4767,7 +4778,7 @@ export async function buildStudioProfilesOverviewRows(env, profiles, options = {
   if (usedSupabaseOutputs && forceIdeas && !supabaseIdeasUsable) {
     airtableIdeaRows = await listRecords(env, env.AIRTABLE_IDEA_TABLE_ID, {
       limit: STUDIO_PROFILES_OVERVIEW_IDEA_LIMIT,
-      filterFormula: formula,
+      filterFormula: ideaFormula,
       fields: ["Content_Profile", "Promoted_Content_Record_ID", "Content Items"],
     });
     if (airtableIdeaRows.length >= STUDIO_PROFILES_OVERVIEW_IDEA_LIMIT) {
