@@ -166,7 +166,7 @@ export async function supabaseRest(env, pathAndQuery, { method = "GET", body = n
  * PostgREST/Supabase caps a single response (often 1000 rows) even when limit=10000.
  * Page with offset until exhausted or maxRows is reached.
  */
-export async function supabaseRestAll(env, pathAndQuery, { pageSize = 1000, maxRows = 10000 } = {}) {
+export async function supabaseRestAll(env, pathAndQuery, { pageSize = 1000, maxRows = 10000, headers = {} } = {}) {
   const size = Math.max(1, Math.min(1000, Number(pageSize) || 1000));
   const ceiling = Math.max(1, Math.min(20000, Number(maxRows) || 10000));
   const stripped = String(pathAndQuery || "")
@@ -179,7 +179,7 @@ export async function supabaseRestAll(env, pathAndQuery, { pageSize = 1000, maxR
   let offset = 0;
   while (rows.length < ceiling) {
     const take = Math.min(size, ceiling - rows.length);
-    const page = await supabaseRest(env, `${stripped}${joiner}limit=${take}&offset=${offset}`);
+    const page = await supabaseRest(env, `${stripped}${joiner}limit=${take}&offset=${offset}`, { headers });
     const batch = Array.isArray(page) ? page : [];
     rows.push(...batch);
     if (batch.length < take) break;
@@ -413,6 +413,42 @@ const OUTPUT_SELECT = [
   "content_profiles(airtable_record_id)",
 ].join(",");
 
+// Home counts do not need captions, hashtags, or content-item joins. Those
+// columns made every overview page too large to finish inside the 26s budget.
+const OVERVIEW_OUTPUT_SELECT = [
+  "airtable_record_id",
+  "output_number",
+  "content_profile_id",
+  "platform",
+  "format",
+  "platform_output_type",
+  "studio_output_type",
+  "aspect_ratio",
+  "output_status",
+  "render_status",
+  "review_status",
+  "publish_status",
+  "publish_method",
+  "do_not_publish",
+  "test_run_id",
+  "output_title",
+  "platform_post_url",
+  "scheduled_post_date",
+  "studio_scheduled_at",
+  "youtube_scheduled_publish_at",
+  "published_at",
+  "remotion_job_id",
+  "error_messages",
+  "created_at",
+].join(",");
+
+const OVERVIEW_IDEA_SELECT = [
+  "airtable_record_id",
+  "content_profile_id",
+  "payload",
+  "created_at",
+].join(",");
+
 const CONTENT_SELECT = [
   "id",
   "airtable_record_id",
@@ -626,13 +662,11 @@ export async function listSupabaseOverviewPack(env, { profileAirtableIds = [], o
   const ids = (profileAirtableIds || []).map((id) => String(id || "").trim()).filter(Boolean);
   if (!ids.length) return { outputs: [], ideas: [], profilesMissing: true };
 
-  const profileUuidByAirtable = new Map();
-  for (const airtableId of ids) {
-    const uuid = await resolveSupabaseProfileId(env, airtableId);
-    if (uuid) profileUuidByAirtable.set(airtableId, uuid);
-  }
+  const resolved = await Promise.all(ids.map(async (airtableId) => [airtableId, await resolveSupabaseProfileId(env, airtableId)]));
+  const profileUuidByAirtable = new Map(resolved.filter(([, uuid]) => uuid));
   if (!profileUuidByAirtable.size) return { outputs: [], ideas: [], profilesMissing: true };
 
+  const airtableByUuid = new Map([...profileUuidByAirtable].map(([airtableId, uuid]) => [uuid, airtableId]));
   const uuids = [...profileUuidByAirtable.values()];
   const profileFilter = uuids.length === 1
     ? `content_profile_id=eq.${uuids[0]}`
@@ -642,39 +676,62 @@ export async function listSupabaseOverviewPack(env, { profileAirtableIds = [], o
 
   // Must page: a bare limit=10000 is still capped by PostgREST max-rows (~1000),
   // which silently dropped older Scheduled rows and crushed All Profiles totals.
-  // Ideas are optional. The All Profiles hot path refreshes output counts without
-  // waiting on idea_candidates; an incomplete idea page must not discard outputs.
-  // Home counts only outstanding rows. Published history made this scan exceed
-  // the 26s refresh budget and statement timeout. Blank status still counts:
-  // PostgREST neq drops nulls, and Airtable {!="Published"} keeps them.
-  const openOutputFilter = "and=(or(output_status.is.null,output_status.neq.Published),or(publish_status.is.null,publish_status.neq.Published))";
-  const outputRows = await supabaseRestAll(
+  // Ideas run beside outputs. An incomplete idea page must not discard outputs.
+  // This predicate matches platform_outputs_pipeline_open_idx so Postgres does
+  // not seq-scan published history. not.eq is IS DISTINCT FROM, so blank
+  // output_status still counts. count=exact would recount the whole set on
+  // every page and blew the 26s refresh budget.
+  const openOutputFilter = [
+    "do_not_publish=eq.false",
+    "or=(test_run_id.is.null,test_run_id.eq.)",
+    "output_status=not.eq.Published",
+    "output_status=not.eq.Cancelled",
+    "or=(publish_status.is.null,publish_status.neq.Published)",
+  ].join("&");
+  const pageHeaders = { Prefer: "count=none" };
+  const outputPromise = supabaseRestAll(
     env,
-    `platform_outputs?${profileFilter}&${openOutputFilter}&select=${OUTPUT_SELECT}&order=output_number.desc.nullslast`,
-    { pageSize: 1000, maxRows: outCeiling },
+    `platform_outputs?${profileFilter}&${openOutputFilter}&select=${OVERVIEW_OUTPUT_SELECT}&order=output_number.desc.nullslast`,
+    { pageSize: 1000, maxRows: outCeiling, headers: pageHeaders },
   );
-  let ideaRows = [];
-  let ideasIncomplete = false;
-  if (includeIdeas) {
-    ideaRows = await supabaseRestAll(
+  const ideaPromise = includeIdeas
+    ? supabaseRestAll(
       env,
-      `idea_candidates?${profileFilter}&select=${IDEA_SELECT}&order=created_at.desc.nullslast`,
-      { pageSize: 1000, maxRows: ideaCeiling },
-    ).catch(() => []);
-    if ((ideaRows || []).length >= ideaCeiling) {
-      ideasIncomplete = true;
-      ideaRows = [];
-    }
+      `idea_candidates?${profileFilter}&select=${OVERVIEW_IDEA_SELECT}&order=created_at.desc.nullslast`,
+      { pageSize: 1000, maxRows: ideaCeiling, headers: pageHeaders },
+    ).catch(() => null)
+    : Promise.resolve([]);
+  const [outputRows, ideaResult] = await Promise.all([outputPromise, ideaPromise]);
+  let ideaRows = Array.isArray(ideaResult) ? ideaResult : [];
+  let ideasIncomplete = includeIdeas && ideaResult == null;
+  if ((ideaRows || []).length >= ideaCeiling) {
+    ideasIncomplete = true;
+    ideaRows = [];
   }
 
   if ((outputRows || []).length >= outCeiling) {
     throw new Error("Profiles overview outputs exceeded complete-scan safety ceiling");
   }
 
+  const shapeOutput = (row) => {
+    const flat = flattenOutputRow(row);
+    if (!flat.content_profile_airtable_id) {
+      flat.content_profile_airtable_id = airtableByUuid.get(row.content_profile_id) || null;
+    }
+    return airtableShapedOutputFromSupabase(flat);
+  };
+  const shapeIdea = (row) => {
+    const flat = flattenIdeaRow(row);
+    if (!flat.content_profile_airtable_id) {
+      flat.content_profile_airtable_id = airtableByUuid.get(row.content_profile_id) || null;
+    }
+    return airtableShapedIdeaFromSupabase(flat);
+  };
+
   return {
     profilesMissing: false,
-    outputs: stripDeletedDuplicateOutputRecords((outputRows || []).map(flattenOutputRow).map(airtableShapedOutputFromSupabase)),
-    ideas: (ideaRows || []).map(flattenIdeaRow).map(airtableShapedIdeaFromSupabase),
+    outputs: stripDeletedDuplicateOutputRecords((outputRows || []).map(shapeOutput)),
+    ideas: (ideaRows || []).map(shapeIdea),
     ideas_incomplete: ideasIncomplete,
     output_count: (outputRows || []).length,
     idea_count: ideasIncomplete ? 0 : (ideaRows || []).length,
