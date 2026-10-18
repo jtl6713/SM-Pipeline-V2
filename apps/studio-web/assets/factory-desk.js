@@ -136,6 +136,8 @@
     // In Production. Approve all must only claim Airtable-ready rows.
     const output = String(card.output_status || "").trim().toLowerCase();
     const review = String(card.review_status || "").trim().toLowerCase();
+    const render = String(card.render_status || "").trim().toLowerCase();
+    if (/ready for render|waiting in render queue|^rendering$/.test(render)) return false;
     if (output === "in production" || output === "rendering" || output === "ready for render") return false;
     if (output === "ready for review") return true;
     if (review === "review sent" || review === "ready for review") return true;
