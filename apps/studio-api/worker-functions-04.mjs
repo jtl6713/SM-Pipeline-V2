@@ -14097,7 +14097,8 @@ export async function factoryBatchProcess(env, profileId, requestId, ctx = null,
       const processed = Number(result?.processed || 0);
       if (result?.claimed && processed > 0 && pending > 0 && continueSlice < 8 && ctx?.waitUntil) {
         ctx.waitUntil((async () => {
-          await sleepMs(300);
+          // Local delay avoids a circular sleepMs import from worker.js.
+          await new Promise((resolve) => setTimeout(resolve, 300));
           return factoryBatchProcess(env, profileId, requestId, ctx, { continueSlice: continueSlice + 1 });
         })().catch((error) => console.warn("Factory batch continue", requestId, error)));
       }
@@ -14194,6 +14195,66 @@ export async function factoryBatchSubmitRoute(request, env, authorization, ctx =
 }
 /*__STUDIO_WORKER_END:factoryBatchSubmitRoute__*/
 
+/**
+ * Resolve Factory output → Content Profile without one Airtable GET per row.
+ * Lookup-shaped Content_Profile on Platform Outputs forces a Content Item hop;
+ * batch those hops (OR of 10) so a 10-output NYC/Miami chunk cannot hang the
+ * HTTP accept path long enough for Cloudflare to return an empty 500.
+ */
+async function factoryResolveGroupOwnershipIds(env, recordsById, ids) {
+  const ownership = new Map();
+  const needContent = [];
+  for (const id of ids) {
+    const record = recordsById.get(id);
+    if (!record) continue;
+    const direct = studioFirstLinkedId(f(record, "Content_Profile"));
+    if (direct && /^rec[A-Za-z0-9]+$/.test(direct)) {
+      ownership.set(id, direct);
+      continue;
+    }
+    const contentId = studioFirstLinkedId(f(record, "Content_Item"));
+    if (contentId) needContent.push([id, contentId]);
+  }
+  if (!needContent.length || !env.AIRTABLE_CONTENT_TABLE_ID) return ownership;
+  const uniqueContent = [...new Set(needContent.map(([, contentId]) => contentId))];
+  const contentById = new Map();
+  for (let i = 0; i < uniqueContent.length; i += 10) {
+    const chunk = uniqueContent.slice(i, i + 10);
+    const formula = chunk.length === 1
+      ? `RECORD_ID()="${chunk[0]}"`
+      : `OR(${chunk.map((id) => `RECORD_ID()="${id}"`).join(",")})`;
+    const rows = await listRecords(env, env.AIRTABLE_CONTENT_TABLE_ID, {
+      limit: chunk.length,
+      filterFormula: formula,
+    }).catch(() => []);
+    for (const row of rows || []) {
+      if (row?.id) contentById.set(row.id, row);
+    }
+    for (const contentId of chunk) {
+      if (contentById.has(contentId)) continue;
+      try {
+        contentById.set(contentId, await airtableFetch(env, env.AIRTABLE_CONTENT_TABLE_ID, contentId));
+      } catch {
+        // Leave missing; caller maps to a clear 409/503.
+      }
+    }
+  }
+  for (const [outputId, contentId] of needContent) {
+    const linked = studioFirstLinkedId(f(contentById.get(contentId), "Content_Profile"));
+    if (linked && /^rec[A-Za-z0-9]+$/.test(linked)) ownership.set(outputId, linked);
+  }
+  return ownership;
+}
+
+function factoryMapSubmitAirtableError(error) {
+  const status = Number(error?.status) || 0;
+  const message = String(error?.message || error || "");
+  if (status === 429 || /cooling down|rate.?limit|too many requests/i.test(message)) {
+    return new HttpError(503, message || "Airtable is busy; Factory cannot verify outputs yet. Retry shortly.");
+  }
+  return error;
+}
+
 /** Global parent approval route, dormant until independently authorized. */
 async function factoryBatchGroupSubmitRoute(request,env,authorization,payload,ctx) {
   const policy=factoryGlobalPolicy(env);
@@ -14234,59 +14295,111 @@ async function factoryBatchGroupSubmitRoute(request,env,authorization,payload,ct
       if (allowed?.id!==child.profile_id) throw new HttpError(403,"Profile access is required");
     }
     const resumed=await factoryApprovalGroupResume(env.STUDIO_MEDIA,requestId);
-    for (const child of resumed.children) await factoryBatchProcess(env,child.profile_id,child.request_id,ctx);
+    // Durable resume already happened — never let drain scheduling 500 the client.
+    try {
+      for (const child of resumed.children) await factoryBatchProcess(env,child.profile_id,child.request_id,ctx);
+    } catch (error) {
+      console.warn("Factory group resume process schedule failed", requestId, error);
+    }
     return respond(request,env,{...resumed,accepted:true,already_submitted:true});
   }
   // Fail closed for the whole group: fetch and verify all authoritative rows
   // BEFORE creating any parent/child R2 record or scheduling any work.
-  // Batch the Airtable reads (OR of 10) instead of one GET per selected row.
-  // A 67-output Miami submit still partitions into ≤10-row children, but the
-  // old sequential preflight could storm Airtable and surface as HTTP 500
-  // before any durable child batch was accepted.
-  const records=[];
-  const clientInfo=new Map((Array.isArray(payload.items)?payload.items:[])
-    .filter(row=>/^rec[A-Za-z0-9]+$/.test(String(row?.id||"")))
-    .map(row=>[row.id,row]));
-  const verifiedProfiles=new Set();
-  const ownershipCache=new Map();
-  const byId=await studioFetchApproveAllRecordsByIds(env,ids);
-  for (const id of ids) {
-    const record=byId.get(id);
-    if (!record) throw new HttpError(409,"At least one selected output could not be loaded for global batch approval");
-    let profileId=ownershipCache.get(id)||null;
-    if (!profileId) {
-      profileId=await studioContentProfileRecordIdForOutput(env,record);
-      if (profileId) ownershipCache.set(id,profileId);
+  // Bound wall clock so a hung Airtable hop cannot surface as Cloudflare's
+  // empty HTML 500 ("Factory desk failed (500)") with Submitted 0 of N.
+  const SUBMIT_BUDGET_MS = 18000;
+  let budgetTimer = null;
+  const budgetExceeded = new Promise((_, reject) => {
+    budgetTimer = setTimeout(() => {
+      reject(new HttpError(503,
+        "Factory submit timed out verifying outputs before accept. Check Activity, then retry — do not assume the batch was stored."));
+    }, SUBMIT_BUDGET_MS);
+  });
+  const runAccept = async () => {
+    const records=[];
+    const clientInfo=new Map((Array.isArray(payload.items)?payload.items:[])
+      .filter(row=>/^rec[A-Za-z0-9]+$/.test(String(row?.id||"")))
+      .map(row=>[row.id,row]));
+    const verifiedProfiles=new Set();
+    let byId;
+    try {
+      byId=await studioFetchApproveAllRecordsByIds(env,ids);
+    } catch (error) {
+      throw factoryMapSubmitAirtableError(error);
     }
-    if (!profileId||!factoryGlobalAcceptsOutput(policy,record)||
-        Boolean(f(record,"Do_Not_Publish"))||!studioOutputReadyForPublishApproval(record)) {
-      throw new HttpError(409,"At least one selected output is not ready or eligible for global batch approval");
+    const missing=ids.filter((id)=>!byId.get(id));
+    if (missing.length) {
+      const coolMs=airtableCooldownWaitMs();
+      if (coolMs>0) {
+        throw new HttpError(503,
+          `Airtable is busy (${Math.ceil(coolMs/1000)}s); Factory could not verify ${missing.length} selected output(s). Retry shortly.`);
+      }
+      throw new HttpError(409,"At least one selected output could not be loaded for global batch approval");
     }
-    if (!verifiedProfiles.has(profileId)) {
-      const allowed=await resolveWorkingContentProfile(env,authorization,profileId);
-      if (allowed?.id!==profileId) throw new HttpError(403,"Profile access is required for every output");
-      verifiedProfiles.add(profileId);
+    let ownershipCache;
+    try {
+      ownershipCache=await factoryResolveGroupOwnershipIds(env,byId,ids);
+    } catch (error) {
+      throw factoryMapSubmitAirtableError(error);
     }
-    const info=clientInfo.get(id)||{};
-    records.push({id,profile_id:profileId,
-      output_id:f(record,"Output_ID")||info.output_id||null,
-      platform:f(record,"Platform"),format:f(record,"Studio_Output_Type")||f(record,"Format"),
-      title:f(record,"Title")||info.title||"",
-      content_id:info.content_id||null});
-  }
-  try {
-    factoryApprovalGroupPlan({requestId,records,maxTotal:policy.max_total,
-      maxPerProfile:policy.max_per_profile});
-  } catch(error) {throw new HttpError(400,error.message||"Invalid global Factory group");}
+    for (const id of ids) {
+      const record=byId.get(id);
+      let profileId=ownershipCache.get(id)||null;
+      // Client desk cards already carry the working profile; use only as a
+      // last-resort hint when Airtable ownership fields are blank, then still
+      // require an authorized profile match below.
+      if (!profileId) {
+        const hinted=String(clientInfo.get(id)?.profile_id||"").trim();
+        if (/^rec[A-Za-z0-9]+$/.test(hinted)) profileId=hinted;
+      }
+      if (!profileId||!factoryGlobalAcceptsOutput(policy,record)||
+          Boolean(f(record,"Do_Not_Publish"))||!studioOutputReadyForPublishApproval(record)) {
+        throw new HttpError(409,"At least one selected output is not ready or eligible for global batch approval");
+      }
+      if (!verifiedProfiles.has(profileId)) {
+        let allowed;
+        try {
+          allowed=await resolveWorkingContentProfile(env,authorization,profileId);
+        } catch (error) {
+          throw factoryMapSubmitAirtableError(error);
+        }
+        if (allowed?.id!==profileId) throw new HttpError(403,"Profile access is required for every output");
+        verifiedProfiles.add(profileId);
+      }
+      const info=clientInfo.get(id)||{};
+      records.push({id,profile_id:profileId,
+        output_id:f(record,"Output_ID")||info.output_id||null,
+        platform:f(record,"Platform"),format:f(record,"Studio_Output_Type")||f(record,"Format"),
+        title:f(record,"Title")||info.title||"",
+        content_id:info.content_id||null});
+    }
+    try {
+      factoryApprovalGroupPlan({requestId,records,maxTotal:policy.max_total,
+        maxPerProfile:policy.max_per_profile});
+    } catch(error) {throw new HttpError(400,error.message||"Invalid global Factory group");}
+    let submitted;
+    try {
+      submitted=await factoryApprovalGroupEnqueue(env.STUDIO_MEDIA,{
+        requestId,records,maxTotal:policy.max_total,maxPerProfile:policy.max_per_profile,
+        note:String(payload.notes||""),
+      });
+    } catch(error) {throw new HttpError(409,error.message||"Group submission failed");}
+    // Parent+child ledgers are durable. Drain scheduling must not turn an
+    // accepted submit into HTTP 500 / Submitted 0 of N.
+    try {
+      for (const child of submitted.children) {
+        await factoryBatchProcess(env,child.profile_id,child.request_id,ctx);
+      }
+    } catch (error) {
+      console.warn("Factory group process schedule failed after durable accept", requestId, error);
+    }
+    return submitted;
+  };
   let submitted;
   try {
-    submitted=await factoryApprovalGroupEnqueue(env.STUDIO_MEDIA,{
-      requestId,records,maxTotal:policy.max_total,maxPerProfile:policy.max_per_profile,
-      note:String(payload.notes||""),
-    });
-  } catch(error) {throw new HttpError(409,error.message||"Group submission failed");}
-  for (const child of submitted.children) {
-    await factoryBatchProcess(env,child.profile_id,child.request_id,ctx);
+    submitted=await Promise.race([runAccept(), budgetExceeded]);
+  } finally {
+    if (budgetTimer) clearTimeout(budgetTimer);
   }
   return respond(request,env,{...submitted,accepted:true});
 }

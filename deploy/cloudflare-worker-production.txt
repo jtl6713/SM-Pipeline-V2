@@ -447,3 +447,5 @@ Deploy merged scoped scheduling authority f8828617a31cf8855249660a58439818c90178
 2026-10-18 Factory schedule/batch perf | worker 0.10.653-factory-schedule-perf | shared occupancy map + skipOccupancyRefresh for Factory drain (same pattern as Approve All); batched OR-of-10 preflight for global group submit so large Miami selections do not 500 before accept.
 
 2026-10-18 Factory drain continue | worker 0.10.654-factory-drain-continue | chain waitUntil after productive drain slices; Factory 1-min and 5-min recovery keep running through Airtable cooldown so accepted Miami children do not park at 3/60.
+
+2026-10-18 Factory submit accept harden | worker 0.10.655-factory-submit-accept | wall-clock submit budget + batched ownership + never 500 after durable group enqueue; clear 503 instead of empty Cloudflare 500 on NYC/Miami large submit.

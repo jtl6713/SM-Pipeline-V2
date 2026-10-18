@@ -65,7 +65,15 @@
     let body = null;
     try { body = await response.json(); } catch { body = null; }
     if (!response.ok) {
-      throw new Error(body?.error || body?.message || (`Factory desk failed (${response.status})`));
+      const detail = body?.error || body?.message || "";
+      if (detail) throw new Error(detail);
+      if (response.status === 503) {
+        throw new Error("Factory desk is busy (503). Wait a moment, check Activity, then retry.");
+      }
+      if (response.status >= 500) {
+        throw new Error(`Factory desk timed out or failed (${response.status}). Check Activity before retrying — the batch may not have been stored.`);
+      }
+      throw new Error(`Factory desk failed (${response.status})`);
     }
     return body || {};
   }
@@ -734,6 +742,7 @@
               items: chunk.map((card) => ({
                 id: card.id, output_id: card.output_id || null,
                 title: card.title || null, content_id: card.content_id || null,
+                profile_id: card.profile_id || null,
                 platform: card.platform || null, format: card.studio_output_type || null,
               })),
             }),
