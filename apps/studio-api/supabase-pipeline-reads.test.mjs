@@ -235,9 +235,9 @@ test("supabaseRestAll pages past PostgREST max-rows so overview counts stay comp
 test("overview pack pages open rows and keeps blank statuses", async () => {
   const calls = [];
   const originalFetch = globalThis.fetch;
-  globalThis.fetch = async (url) => {
+  globalThis.fetch = async (url, init) => {
     const href = String(url);
-    calls.push(href);
+    calls.push({ href, prefer: init?.headers?.Prefer || "" });
     const path = new URL(href).pathname;
     if (path.endsWith("/content_profiles")) {
       const id = href.includes("recF7UAn0LkMZZrWZ")
@@ -251,6 +251,7 @@ test("overview pack pages open rows and keeps blank statuses", async () => {
         async text() {
           return JSON.stringify([{
             airtable_record_id: "recOpenOutput00001",
+            content_profile_id: "aa4b857d-e588-46aa-97ba-77cdd3c25dff",
             output_number: 411,
             output_status: null,
             publish_status: "Scheduled",
@@ -269,18 +270,22 @@ test("overview pack pages open rows and keeps blank statuses", async () => {
         includeIdeas: false,
       },
     );
-    const outputCall = calls.find((href) => href.includes("platform_outputs"));
+    const outputCall = calls.find((call) => call.href.includes("/platform_outputs"));
     assert.ok(outputCall);
-    assert.match(outputCall, /content_profile_id=in\.\(/);
-    assert.match(outputCall, /output_status\.is\.null/);
-    assert.match(outputCall, /output_status\.neq\.Published/);
-    assert.match(outputCall, /publish_status\.is\.null/);
-    assert.match(outputCall, /publish_status\.neq\.Published/);
-    assert.doesNotMatch(outputCall, /platform_outputs\?content_profile_id=in\.\([^)]+\)&select=/);
-    assert.equal(calls.some((href) => href.includes("idea_candidates")), false);
+    assert.equal(outputCall.prefer, "count=none");
+    assert.match(outputCall.href, /content_profile_id=in\.\(/);
+    assert.match(outputCall.href, /do_not_publish=eq\.false/);
+    assert.match(outputCall.href, /output_status=not\.eq\.Published/);
+    assert.match(outputCall.href, /output_status=not\.eq\.Cancelled/);
+    assert.match(outputCall.href, /publish_status\.is\.null/);
+    assert.match(outputCall.href, /publish_status\.neq\.Published/);
+    assert.doesNotMatch(outputCall.href, /output_caption/);
+    assert.doesNotMatch(outputCall.href, /content_items\(/);
+    assert.equal(calls.some((call) => call.href.includes("idea_candidates")), false);
     assert.equal(pack.profilesMissing, false);
     assert.equal(pack.outputs.length, 1);
     assert.equal(pack.outputs[0].id, "recOpenOutput00001");
+    assert.deepEqual(pack.outputs[0].fields.Content_Profile, ["recF7UAn0LkMZZrWZ"]);
   } finally {
     globalThis.fetch = originalFetch;
   }
@@ -288,7 +293,7 @@ test("overview pack pages open rows and keeps blank statuses", async () => {
 
 test("worker wires supabase phase4 reads behind the same flag", async () => {
   const worker = readStudioWorkerSource();
-  assert.match(worker, /version: "0.10.658-overview-open-rows"/);
+  assert.match(worker, /version: "0.10.659-overview-indexed-open"/);
   assert.match(worker, /studio_supabase_pipeline_reads_v1: true/);
   assert.match(worker, /studio_supabase_phase3_stable_v1: true/);
   assert.match(worker, /studio_supabase_phase4_reads_v1: true/);
@@ -328,8 +333,12 @@ test("worker wires supabase phase4 reads behind the same flag", async () => {
   const reads = await readFile(path.join(here, "supabase-pipeline-reads.mjs"), "utf8");
   assert.match(reads, /export async function supabaseRestAll/);
   assert.match(reads, /listSupabaseOverviewPack[\s\S]*supabaseRestAll/);
-  assert.match(reads, /output_status\.is\.null,output_status\.neq\.Published/);
+  assert.match(reads, /output_status=not\.eq\.Published/);
+  assert.match(reads, /output_status=not\.eq\.Cancelled/);
   assert.match(reads, /publish_status\.is\.null,publish_status\.neq\.Published/);
+  assert.match(reads, /Prefer: "count=none"/);
+  assert.match(reads, /OVERVIEW_OUTPUT_SELECT/);
+  assert.match(reads, /const \[outputRows, ideaResult\] = await Promise\.all/);
 });
 
 test("phase4 docs exist", async () => {
