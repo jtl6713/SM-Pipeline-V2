@@ -4,7 +4,7 @@ import {
   factoryBatchEnqueue, factoryBatchRead, factoryBatchList,
   factoryBatchSummary, factoryBatchCounts, factoryBatchDrain,
   factoryBatchRetry, factoryBatchLockKey, factoryBatchCronScan,
-  factoryBatchCronSelectJobs,
+  factoryBatchCronSelectJobs, factoryBatchListGlobal, factoryBatchNeedsAttention,
 } from "./factory-approval-queue.mjs";
 
 class FakeR2 {
@@ -18,7 +18,7 @@ class FakeR2 {
     const headers = options.onlyIf;
     if (headers instanceof Headers && headers.get("If-None-Match") === "*" && old) return null;
     if (headers?.etagMatches && old?.etag !== headers.etagMatches) return null;
-    const next = { value: JSON.parse(body), etag: String(++this.version) };
+    const next = { value: JSON.parse(body), etag: String(++this.version), customMetadata: options.customMetadata || {} };
     this.objects.set(key, next);
     return { etag: next.etag };
   }
@@ -29,7 +29,7 @@ class FakeR2 {
     const page = keys.slice(from, from + limit);
     const truncated = from + limit < keys.length;
     return { truncated, cursor: truncated ? page.at(-1) : undefined,
-      objects: page.map(key => ({ key })) };
+      objects: page.map(key => ({ key, customMetadata: this.objects.get(key).customMetadata })) };
   }
 }
 const profileId = "recProfileTest";
@@ -324,4 +324,43 @@ test("Factory timing retains distinct attempt history after failed-only retry", 
   const timeline = factoryBatchSummary(second.job).items[0].timing;
   const starts = timeline.events.filter(x=>x.state==="processing").map(x=>x.attempt);
   assert.deepEqual(starts,[1,2]);
+});
+
+test("Factory activity separates actionable, failed, and completed jobs on the server", async () => {
+  const bucket = new FakeR2();
+  const jobs = ["factory_activity_running_0001", "factory_activity_completed_0002", "factory_activity_failed_0003"];
+  for (const requestId of jobs) await factoryBatchEnqueue(bucket, {
+    ...opts, requestId, records: [records[0]],
+  });
+  await factoryBatchDrain(bucket, {profileId, requestId: jobs[1], approve: async () => {}});
+  await factoryBatchDrain(bucket, {profileId, requestId: jobs[2],
+    approve: async () => { throw Error("requires manual review"); },
+    maxItems: 1, now: () => 1700000000000,
+  });
+  const active = await factoryBatchListGlobal(bucket, {mode: "active"});
+  const completed = await factoryBatchListGlobal(bucket, {mode: "completed"});
+  assert.deepEqual(new Set(active.jobs.map(j => j.request_id)),
+    new Set([jobs[0], jobs[2]]), "failed items must remain actionable");
+  assert.deepEqual(completed.jobs.map(j => j.request_id), [jobs[1]]);
+  assert.equal(factoryBatchNeedsAttention(active.jobs.find(j => j.request_id === jobs[2])), true);
+  assert.equal(factoryBatchNeedsAttention(completed.jobs[0]), false);
+  assert.equal(active.jobs.some(j => j.request_id === jobs[1]), false);
+  assert.equal(completed.jobs.some(j => j.request_id === jobs[0]), false);
+});
+
+test("Factory completed history is page-scoped and does not appear in active list", async () => {
+  const bucket = new FakeR2();
+  const ids = Array.from({length: 5}, (_,i) => "factory_page_approval_" + String(i).padStart(4, "0"));
+  for (const requestId of ids) {
+    await factoryBatchEnqueue(bucket, {...opts, requestId, records: [records[0]]});
+    await factoryBatchDrain(bucket, {profileId, requestId, approve: async () => {}});
+  }
+  assert.equal((await factoryBatchListGlobal(bucket,{mode:"active"})).jobs.length,0);
+  const first = await factoryBatchListGlobal(bucket,{mode:"completed",limit:2,offset:0});
+  const second = await factoryBatchListGlobal(bucket,{mode:"completed",limit:2,offset:2});
+  assert.equal(first.jobs.length,2);
+  assert.equal(second.jobs.length,2);
+  assert.equal(first.has_more,true);
+  assert.equal(second.has_more,true);
+  assert.equal(new Set([...first.jobs,...second.jobs].map(x=>x.request_id)).size,4);
 });
