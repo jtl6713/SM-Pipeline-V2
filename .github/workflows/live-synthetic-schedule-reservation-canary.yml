@@ -81,7 +81,7 @@ jobs:
           RESULT=""
           HTTP_CODE=""
           for attempt in $(seq 1 16); do
-            HTTP_CODE="$(curl -sS --max-time 90 --retry 2 --retry-delay 2 -o /tmp/synthetic-canary-response.json -w '%{http_code}' -X POST "https://$CANARY_WORKER_NAME.$SUBDOMAIN.workers.dev/run" -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" --data "{\\"nonce\\":\\"$NONCE\\"}" || true)"
+            HTTP_CODE="$(curl -sS --max-time 90 --retry 2 --retry-delay 2 -o /tmp/synthetic-canary-response.json -w '%{http_code}' -X POST "https://$CANARY_WORKER_NAME.$SUBDOMAIN.workers.dev/run" -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" --data "$(jq -nc --arg nonce "$NONCE" '{nonce:$nonce}')" || true)"
             if [[ "$HTTP_CODE" == "200" ]] && jq -e 'type == "object"' /tmp/synthetic-canary-response.json >/dev/null 2>&1; then
               RESULT="$(cat /tmp/synthetic-canary-response.json)"
               break
