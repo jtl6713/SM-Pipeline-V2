@@ -61,15 +61,15 @@ test("Factory loads only active batches by default; completed history is explici
   assert.match(html, /Completed Batches/);
   const load = desk.slice(desk.indexOf("async function refreshFactoryBatchActivity("),
     desk.indexOf("async function submitFactoryGlobalApprovalBatches("));
-  assert.match(load, /params\\.set\\("view", "active"\\)/);
-  assert.match(load, /async function refreshFactoryCompletedBatches\\(offset = 0\\)/);
-  assert.match(load, /view: "completed", offset: String\\(offset\\)/);
+  assert.match(load, /params\.set\("view", "active"\)/);
+  assert.match(load, /async function refreshFactoryCompletedBatches\(offset = 0\)/);
+  assert.match(load, /view: "completed", offset: String\(offset\)/);
   const initial = desk.slice(desk.indexOf("async function loadFactoryDesk("),
     desk.indexOf('  $("factoryFeedbackForm")'));
   assert.doesNotMatch(initial, /refreshFactoryCompletedBatches/);
   const timer = desk.slice(desk.indexOf("async function loadFactoryDesk("));
-  assert.match(timer, /refreshFactoryBatchActivity\\(true\\)/);
-  assert.match(timer, /factoryBatchCompletedToggle[^]*?refreshFactoryCompletedBatches\\(0\\)/);
-  assert.match(timer, /factoryBatchCompletedNext[^]*?state\\.completedOffset \\+ 20/);
-  assert.match(desk, /previousActive\\.some\\(row => !liveIds\\.has\\(row\\.job_id\\)\\)/);
+  assert.match(timer, /refreshFactoryBatchActivity\(true\)/);
+  assert.match(timer, /factoryBatchCompletedToggle[^]*?refreshFactoryCompletedBatches\(0\)/);
+  assert.match(timer, /factoryBatchCompletedNext[^]*?state\.completedOffset \+ 20/);
+  assert.match(desk, /previousActive\.some\(row => !liveIds\.has\(row\.job_id\)\)/);
 });
