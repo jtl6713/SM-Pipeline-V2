@@ -465,3 +465,4 @@ Deploy merged scoped scheduling authority f8828617a31cf8855249660a58439818c90178
 2026-10-18 keep the Worker when the overview rebuild stays over 26s | six budget failures rolled 0.10.657 back again | redeploy 0.10.657-stop-duplicate-purge.
 2026-10-18 overview refresh reads open rows only | worker 0.10.658-overview-open-rows | Home was paging published history and exceeding the 26s refresh budget | deploy so Refresh can write a new snapshot.
 2026-10-18 overview refresh uses the open-row index | worker 0.10.659-overview-indexed-open | count=exact plus a non-index filter still exceeded 26s | deploy so Refresh can finish.
+2026-10-18 overview refresh pages each city and skips the idea blob | worker 0.10.660-overview-parallel-pages | the combined scan and full idea payloads still exceeded 26s | deploy so Refresh can finish.
