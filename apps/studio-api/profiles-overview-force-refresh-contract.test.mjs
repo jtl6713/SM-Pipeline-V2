@@ -104,3 +104,13 @@ test("manual force refresh can prefer Supabase without changing the global Studi
   assert.match(build, /const preferSupabase = options\.preferSupabase === true && studioSupabaseConfigured\(env\)/);
   assert.match(build, /studioReadSource\(env\) === "supabase" \|\| preferSupabase/);
 });
+
+
+test("Airtable force fallback interleaves lean output and idea scans instead of running full tables serially", () => {
+  const start = functions04.indexOf("async function buildStudioProfilesOverviewRows");
+  const end = functions04.indexOf("/*__STUDIO_WORKER_END:buildStudioProfilesOverviewRows__*/", start);
+  const build = functions04.slice(start, end);
+  assert.match(build, /const \[freshOutputs, freshIdeas\] = await Promise\.all\(\[/);
+  assert.match(build, /fields: \["Content_Profile", "Promoted_Content_Record_ID", "Content Items"\]/);
+  assert.match(build, /if \(usedSupabaseOutputs\) \{[\s\S]*overlayLiveTikTokPublishRows/);
+});
