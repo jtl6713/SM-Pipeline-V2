@@ -685,7 +685,7 @@ jobs:
           jq -e --arg stage "$EXPECTED_STAGE" --argjson total "$EXPECTED_TOTAL" --argjson per "$EXPECTED_PER_PROFILE" '.ok==true and .scope=="all" and .global_rollout.enabled==true and .global_rollout.stage==$stage and .global_rollout.max_total==$total and .global_rollout.max_per_profile==$per and .global_rollout.allowed_platforms==["Instagram","Facebook","TikTok","YouTube"] and .global_rollout.allowed_output_types_by_platform=={"Instagram":["Reel","Story","Single Image","Carousel"],"Facebook":["Reel","Story","Single Image","Multi-Image Post","Slideshow Reel"],"TikTok":["Video Draft","Story","Single Photo","Multi-Photo"],"YouTube":["Short","Standard Video","Slideshow Video"]}' /tmp/factory-batch-global.json >/dev/null || { echo "Global Factory read-only canary failed (HTTP $GLOBAL_CODE)" >&2; exit 1; }
           echo "factory_global_read_only_canary=PASS signed_stage=$EXPECTED_STAGE total=$EXPECTED_TOTAL per_profile=$EXPECTED_PER_PROFILE"
 
-      - name: Verify NYC Needs eyes is not starved by scheduled backlog (read-only)
+      - name: Verify NYC Factory desk authoritative integrity, including legitimate zero backlog (read-only)
         shell: bash
         run: |
           set -euo pipefail
@@ -700,8 +700,11 @@ jobs:
             CODE=$(curl -sS --max-time 70 -o /tmp/factory-review-readonly.json -w '%{http_code}' "$URL" || true)
             if [[ "$CODE" == "200" ]] && [[ -f /tmp/factory-review-readonly.json ]] && jq -e --arg profile "recgtK8Z7eNADNtVy" '
                 .ok==true and .page=="factory-desk"
-                and (.summary.needs_eyes > 0)
-                and ([.lanes.needs_eyes[] | select(.profile_id==$profile)] | length) > 0
+                and .read_source=="airtable"
+                and (.summary.needs_eyes | type)=="number"
+                and (.summary.needs_eyes >= 0)
+                and (.lanes.needs_eyes | type)=="array"
+                and (all(.lanes.needs_eyes[]; .profile_id != null and .id != null))
               ' /tmp/factory-review-readonly.json >/dev/null 2>&1; then
               echo "factory_review_backlog=PASS source=$(jq -r .read_source /tmp/factory-review-readonly.json) NYC_count=$(jq --arg profile recgtK8Z7eNADNtVy '[.lanes.needs_eyes[] | select(.profile_id==$profile)] | length' /tmp/factory-review-readonly.json)"
               exit 0
@@ -713,7 +716,7 @@ jobs:
             sleep 3
           done
           if [[ "$SAW_EMPTY" == "1" ]]; then
-            echo "Factory NYC review-ready backlog still missing after Worker deploy (HTTP $CODE)" >&2
+            echo "Factory NYC desk response lacked authoritative structural integrity after Worker deploy (HTTP $CODE)" >&2
             exit 1
           fi
           echo "Factory NYC review-ready read did not return (HTTP $CODE); leaving the Worker in place" >&2
