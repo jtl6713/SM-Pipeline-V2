@@ -1061,7 +1061,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.653-factory-schedule-perf",
+          version: "0.10.654-factory-drain-continue",
           factory_batch_canary_revision: "chicago-ig-reel-v1",
           factory_batch_phase2a_post_gate_fix_v1: true,
           studio_supabase_pipeline_reads_v1: true,
@@ -2317,10 +2317,12 @@ export default {
     // one eligible child per profile, leaving the profile CAS lock intact.
     if (String(event?.cron || "").trim() === "* * * * *") {
       ctx.waitUntil((async () => {
+        // Factory recovery must still run while Airtable is cooling. Skipping the
+        // whole tick parked Miami's 6 accepted children after the first 20s drain
+        // (3 approved / 57 pending). Individual Airtable calls fail-fast inside.
         const cooling = airtableCooldownWaitMs();
         if (cooling > AIRTABLE_SLOT_FAIL_FAST_MS) {
-          console.warn("Factory one-minute cron deferred during Airtable cooldown", { waitMs: cooling });
-          return;
+          console.warn("Factory one-minute cron continuing through Airtable cooldown", { waitMs: cooling });
         }
         try {
           await factoryBatchCronResume(env, ctx);
@@ -2353,21 +2355,18 @@ export default {
         console.warn("purge deleted duplicate packages failed", error);
       }
 
-      const coolMs = airtableCooldownWaitMs();
-      if (coolMs > AIRTABLE_SLOT_FAIL_FAST_MS) {
-        console.warn("cron skipped: Airtable cooling down", { waitMs: coolMs, heavy: cadence.heavy });
-        return;
-      }
-
-      // Fail-safe recovery: the dedicated one-minute Factory cron should
-      // normally drain the queue. A one-time production Cron propagation lag,
-      // skipped trigger, or transient Worker scheduling issue must never strand
-      // durable approvals indefinitely. The fair candidate selection dispatches
-      // only one child per profile; the R2 CAS lock protects overlapping ticks.
+      // Fail-safe Factory recovery before the Airtable cooldown return so a busy
+      // approve wave cannot strand accepted children until cooling fully clears.
       try {
         await factoryBatchCronResume(env, ctx);
       } catch (error) {
         console.warn("Factory five-minute fallback recovery failed", error);
+      }
+
+      const coolMs = airtableCooldownWaitMs();
+      if (coolMs > AIRTABLE_SLOT_FAIL_FAST_MS) {
+        console.warn("cron skipped: Airtable cooling down", { waitMs: coolMs, heavy: cadence.heavy });
+        return;
       }
 
       // Create the hour's ideas before publish heals. Those heals were still

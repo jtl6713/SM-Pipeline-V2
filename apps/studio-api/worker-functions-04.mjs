@@ -13991,9 +13991,10 @@ export async function factoryBatchStatusRoute(request, env, authorization) {
 }
 /*__STUDIO_WORKER_END:factoryBatchStatusRoute__*/
 
-export async function factoryBatchProcess(env, profileId, requestId, ctx = null) {
+export async function factoryBatchProcess(env, profileId, requestId, ctx = null, options = {}) {
   // Do not let an old queued job bypass an operator's active rollout scope.
   // This guard also runs on cron recovery, not only on fresh HTTP requests.
+  const continueSlice = Math.max(0, Math.min(12, Number(options?.continueSlice || 0) || 0));
   const rollout = factoryBatchRolloutPolicy(env, profileId);
   const job=await factoryBatchRead(env.STUDIO_MEDIA,profileId,requestId);
   if (!job) return null;
@@ -14088,6 +14089,18 @@ export async function factoryBatchProcess(env, profileId, requestId, ctx = null)
           return result;
         },
       });
+      // Global Miami/LA submits schedule every child waitUntil at once; only one
+      // claims the profile lock for ~20s. Without chaining, the other children
+      // exit empty-handed and the 1-minute cron can skip while Airtable cools —
+      // Activity then sits at "3 approved / 57 pending" for many minutes.
+      const pending = Number(factoryBatchCounts(result?.job).pending_count || 0);
+      const processed = Number(result?.processed || 0);
+      if (result?.claimed && processed > 0 && pending > 0 && continueSlice < 8 && ctx?.waitUntil) {
+        ctx.waitUntil((async () => {
+          await sleepMs(300);
+          return factoryBatchProcess(env, profileId, requestId, ctx, { continueSlice: continueSlice + 1 });
+        })().catch((error) => console.warn("Factory batch continue", requestId, error)));
+      }
       return result;
     } finally {
       studioInvalidateOccupiedScheduleCache();
