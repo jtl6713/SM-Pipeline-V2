@@ -463,11 +463,11 @@
           <span class="factory-batch-recent-info">
             <strong>${esc(label)}</strong>
             <span>${esc(outputLabel)} · ${Number(row.approved_count)||0} approved · ${Number(row.pending_count)||0} pending</span>
-            <span class="factory-batch-mini-progress" aria-hidden="true"><span style="width:${percent}%"></span></span>
           </span>
           <span class="factory-batch-recent-result">
             <strong>${esc(stateLabel)}</strong><span>${Number(row.failed_count)||0} failed</span>
           </span>
+          <span class="factory-batch-mini-progress" aria-hidden="true"><span style="width:${percent}%"></span></span>
         </button>`;
       }).join("")
       : '<p class="subtle">' + (state.completedOpen
