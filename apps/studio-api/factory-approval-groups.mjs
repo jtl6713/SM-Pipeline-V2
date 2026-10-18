@@ -230,7 +230,7 @@ export async function factoryApprovalGroupList(bucket, {
   assertBucket(bucket);
   if (profileId && !ID.test(profileId)) throw Error("Invalid Factory profile filter");
   if (!["all", "active", "completed"].includes(mode)) throw Error("Invalid Factory activity mode");
-  const take = Math.max(1, Math.min(100, Math.floor(Number(limit) || 40)));
+  const take = Math.max(1, Math.min(500, Math.floor(Number(limit) || 40)));
   const skip = Math.max(0, Math.min(1000, Math.floor(Number(offset) || 0)));
   const objects = [];
   let cursor = null;
