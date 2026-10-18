@@ -1,10 +1,6 @@
 name: E2E Studio API Control
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - 'deploy/e2e-studio-api-command.json'
   workflow_dispatch:
 
 permissions:
