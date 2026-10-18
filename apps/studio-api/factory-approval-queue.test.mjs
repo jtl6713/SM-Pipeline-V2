@@ -364,3 +364,28 @@ test("Factory completed history is page-scoped and does not appear in active lis
   assert.equal(second.has_more,true);
   assert.equal(new Set([...first.jobs,...second.jobs].map(x=>x.request_id)).size,4);
 });
+
+test("profile handoff chooses oldest eligible sibling after first child completes", async () => {
+  const bucket = new FakeR2();
+  const firstId = "handoff_first_child_20261018";
+  const secondId = "handoff_second_child_20261018";
+  await factoryBatchEnqueue(bucket, { profileId, requestId: firstId, records: records.slice(0, 6),
+    now: "2026-10-18T10:00:00.000Z" });
+  await factoryBatchEnqueue(bucket, { profileId, requestId: secondId, records: records.slice(6, 10),
+    now: "2026-10-18T10:01:00.000Z" });
+  const calls = new Map();
+  const approve = async id => { calls.set(id, (calls.get(id) || 0) + 1); };
+  const first = await factoryBatchDrain(bucket, { profileId, requestId: firstId, approve,
+    maxItems: 25, makeOwner: () => "first-drain" });
+  assert.equal(first.job.status, "completed");
+  const siblings = await factoryBatchList(bucket, profileId, { limit: 40 });
+  const next = factoryBatchCronSelectJobs(siblings.map(job => ({
+    profileId, requestId: job.request_id, job,
+  })), { maxProfiles: 1 })[0];
+  assert.equal(next.requestId, secondId, "completed first child must hand off to pending sibling");
+  const second = await factoryBatchDrain(bucket, { profileId, requestId: next.requestId, approve,
+    maxItems: 25, makeOwner: () => "second-drain" });
+  assert.equal(second.job.status, "completed");
+  assert.equal(calls.size, 10);
+  assert.ok([...calls.values()].every(n => n === 1));
+});
