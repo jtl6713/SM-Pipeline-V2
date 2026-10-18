@@ -164,7 +164,7 @@ export async function factoryBatchListGlobal(bucket, {
   if (!["all", "active", "completed"].includes(mode)) throw Error("Invalid Factory activity mode");
   const prefix = FACTORY_BATCH_PREFIX + "/jobs/";
   const budget = Math.max(1, Math.min(10000, Math.floor(Number(maxScan) || 2000)));
-  const take = Math.max(1, Math.min(100, Math.floor(Number(limit) || 30)));
+  const take = Math.max(1, Math.min(500, Math.floor(Number(limit) || 30)));
   const skip = Math.max(0, Math.min(1000, Math.floor(Number(offset) || 0)));
   const objects = [];
   let cursor;
