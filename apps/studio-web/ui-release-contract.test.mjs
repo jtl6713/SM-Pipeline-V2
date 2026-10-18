@@ -39,6 +39,6 @@ test("release contract rejects drift that can produce a green stale deploy", () 
 
 test("release newness comparison is numeric and rejects unchanged versions", () => {
   assert.equal(compareUiVersions("0.6.712", "0.6.709"), 1);
-  assert.equal(compareUiVersions("0.6.712", "0.6.711"), 0);
+  assert.equal(compareUiVersions("0.6.712", "0.6.712"), 0);
   assert.equal(compareUiVersions("0.6.709", "0.6.712"), -1);
 });
