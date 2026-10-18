@@ -32,7 +32,7 @@ test("Monitor R2 errors remain visible as unavailable instead of an empty all-cl
 });
 
 test("Partial history is explicitly distinguished from a definitive clean result", () => {
-  assert.match(lowCost, /quality_status: history\.complete \? "ok" : "partial"/);
+  assert.match(lowCost, /quality_status: history\.complete && !history\.has_more \? "ok" : "partial"/);
   assert.match(qualityUI, /quality_status === "partial"/);
   assert.match(qualityUI, /Partial monitoring snapshot/);
   new Function(qualityUI);
