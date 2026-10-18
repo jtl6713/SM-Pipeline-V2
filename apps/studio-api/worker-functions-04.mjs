@@ -13896,6 +13896,17 @@ export async function getStudioLibraryIntakeStatus(request, env, url) {
 export async function factoryBatchStatusRoute(request, env, authorization) {
   const url = new URL(request.url);
   if (url.searchParams.get("scope") === "all") {
+    // Exact-id recovery is separate from completed-history browsing. This
+    // preserves idempotent POST recovery even if a small group already finished.
+    const exactRequest = String(url.searchParams.get("request_id") || "").trim();
+    if (exactRequest) {
+      if (!/^[A-Za-z0-9_-]{12,128}$/.test(exactRequest)) throw new HttpError(400, "Invalid Factory batch ID");
+      const group = await factoryApprovalGroupStatus(env.STUDIO_MEDIA, exactRequest);
+      return respond(request, env, {
+        ok: true, scope: "all", exact_request_id: exactRequest,
+        batches: group ? [group] : [],
+      });
+    }
     // Only the explicit view=completed request may load terminal batch history.
     // Default view is actionable work (in progress or requiring operator attention).
     const view = String(url.searchParams.get("view") || "active");
