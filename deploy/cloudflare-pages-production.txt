@@ -427,3 +427,5 @@ Deploy Factory ambiguous-submit reconciliation 2026-10-17. PR #817. Recover exac
 2026-10-17: Deploy Studio UI 0.6.713-factory-fullwidth-progress | PR #855 merged 1f7045c94f1436552d574541dbf18a4d642853ba | Full-width Active Approvals progress bars beneath right status; preserve percentages and mobile inset; 5 CI workflows successful. Pages only.
 2026-10-17 Factory approval row overlap fix | UI 0.6.714-factory-approval-row-grid | PR #856 merged 2e272c436222649b3a2ab29c6ae1a5d86ce39fc0 | Counts and status in separate grid areas; full-width progress is its own row; mobile stacks. CSS/UI-only, all 5 CI green.
 2026-10-18 Factory submit accept UX | UI 0.6.715-factory-submit-accept | clearer Factory desk 5xx/503 copy; send profile_id on group submit items for ownership hint.
+
+2026-10-18: Deploy Studio UI 0.6.716-factory-activity-history from PR #860 / 13e26a1e. Restore Completed Batches history and correct false Story rendering gate; production Pages UI-only with strict custom-domain verification.
