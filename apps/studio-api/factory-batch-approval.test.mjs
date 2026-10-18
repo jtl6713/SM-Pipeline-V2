@@ -134,6 +134,11 @@ test("Global Factory group submit batches Airtable preflight reads", () => {
   const end = functions04.indexOf("export async function factoryBatchCronResume(", start);
   const group = functions04.slice(start, end > start ? end : start + 4000);
   assert.match(group, /studioFetchApproveAllRecordsByIds\(env,ids\)/);
+  assert.match(group, /factoryResolveGroupOwnershipIds/);
+  assert.match(group, /SUBMIT_BUDGET_MS/);
+  assert.match(group, /Factory submit timed out verifying outputs before accept/);
+  assert.match(group, /durable accept/);
+  assert.match(group, /factoryMapSubmitAirtableError/);
   assert.doesNotMatch(
     group.slice(0, group.indexOf("for (const id of ids)")),
     /await airtableFetch\(env,env\.AIRTABLE_OUTPUT_TABLE_ID,id\)/,

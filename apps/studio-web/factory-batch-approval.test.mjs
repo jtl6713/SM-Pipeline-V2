@@ -67,6 +67,8 @@ test("Global group UI is gated and follows the server-signed platform matrix", (
   assert.match(js,/profile_ids/);
   assert.match(js,/retry_group/);
   assert.match(js,/supported outputs per backend batch/);
+  assert.match(js,/profile_id: card\.profile_id \|\| null/);
+  assert.match(js,/Factory desk timed out or failed/);
 });
 test("Story v3 UI remains dormant while Reel v2 restricts selection", () => {
   const fn = js.slice(js.indexOf("function canSelectBatchOutput("),
