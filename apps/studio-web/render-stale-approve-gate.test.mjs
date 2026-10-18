@@ -11,10 +11,10 @@ const html = fs.readFileSync(path.join(here, "index.html"), "utf8");
 const worker = readStudioWorkerSource();
 
 test("UI 0.6.516 Approve gate rejects stale Rendering / In Production (Output 1807)", () => {
-  assert.match(app, /BUILD_ID = "item4-0.6.717-overview-refresh-recovery"/);
-  assert.match(html, /UI build 0.6.717/);
-  assert.match(html, /app-item4-1008\.js\?v=0.6.717-overview-refresh-recovery/);
-  assert.match(html, /styles-phase7-0621\.css\?v=0.6.717-overview-refresh-recovery/);
+  assert.match(app, /BUILD_ID = "item4-0.6.718-factory-toggle-collapse"/);
+  assert.match(html, /UI build 0.6.718/);
+  assert.match(html, /app-item4-1008\.js\?v=0.6.718-factory-toggle-collapse/);
+  assert.match(html, /styles-phase7-0621\.css\?v=0.6.718-factory-toggle-collapse/);
   assert.match(app, /function creativeCanApproveForPublishing\(/);
   assert.match(
     app,
