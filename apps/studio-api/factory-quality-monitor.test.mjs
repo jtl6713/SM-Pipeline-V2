@@ -18,6 +18,8 @@ test("Quality Agent is separately bounded from expensive global Factory activity
   assert.match(lowCost, /studioReadCoalesce\(/);
   assert.match(lowCost, /factoryBatchListGlobal\(env\.STUDIO_MEDIA, \{[\s\S]*?mode: "active", limit: 24, maxScan: 1200/);
   assert.doesNotMatch(lowCost, /factoryApprovalGroupList\(/);
+  assert.match(lowCost, /factoryBatchCounts\(job\)/);
+  assert.doesNotMatch(lowCost, /factoryBatchSummary\(job\)/);
   assert.match(qualityUI, /query\.set\("quality_only", "1"\)/);
   assert.match(qualityUI, /}, 30000\)/);
 });
