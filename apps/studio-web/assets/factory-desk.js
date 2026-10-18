@@ -420,6 +420,7 @@
     const updated = $("factoryBatchUpdated");
     const listHeading = $("factoryBatchListHeading");
     const toggle = $("factoryBatchCompletedToggle");
+    const close = $("factoryBatchCompletedClose");
     const prev = $("factoryBatchCompletedPrev");
     const next = $("factoryBatchCompletedNext");
     const page = $("factoryBatchCompletedPage");
@@ -442,6 +443,7 @@
       toggle.textContent = state.completedOpen ? "Back to Active Batches" : "Completed Batches";
       toggle.setAttribute("aria-pressed", String(state.completedOpen));
     }
+    if (close) close.hidden = !state.completedOpen;
     if (prev) prev.hidden = !state.completedOpen || state.completedOffset === 0;
     if (next) next.hidden = !state.completedOpen || !viewed?.has_more;
     if (page) {
@@ -1609,16 +1611,19 @@
     if (state.desk) renderDesk(state.desk);
   });
   $("factoryBatchRefresh")?.addEventListener("click", () => { refreshFactoryBatchActivity(true).catch(() => {}); });
-  $("factoryBatchCompletedToggle")?.addEventListener("click", () => {
-    state.completedOpen = !state.completedOpen;
+  function setFactoryCompletedOpen(open) {
+    if (state.completedOpen === open) return;
+    state.completedOpen = open;
     state.batchDetailsOpen = false;
     state.inspectedBatchKey = "";
-    if (state.completedOpen) {
+    if (open) {
       state.completedBatch = null;
       state.completedOffset = 0;
       refreshFactoryCompletedBatches(0).catch(() => {});
     } else renderFactoryBatchActivity(state.batch);
-  });
+  }
+  $("factoryBatchCompletedToggle")?.addEventListener("click", () => setFactoryCompletedOpen(!state.completedOpen));
+  $("factoryBatchCompletedClose")?.addEventListener("click", () => setFactoryCompletedOpen(false));
   $("factoryBatchCompletedPrev")?.addEventListener("click", () => {
     refreshFactoryCompletedBatches(Math.max(0, state.completedOffset - 20)).catch(() => {});
   });

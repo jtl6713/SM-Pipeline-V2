@@ -22,6 +22,7 @@ function viewHarness() {
     "factoryBatchSummary", "factoryBatchMetricValue", "factoryBatchRecentList",
     "factoryBatchInspect", "factoryBatchRetry", "factoryBatchDetails",
     "factoryBatchUpdated", "factoryBatchListHeading", "factoryBatchCompletedToggle",
+    "factoryBatchCompletedClose",
     "factoryBatchCompletedPrev", "factoryBatchCompletedNext", "factoryBatchCompletedPage",
   ];
   const nodes = Object.fromEntries(ids.map(id => [id, {
@@ -67,6 +68,7 @@ test("completed history shows a 24-output batch when active activity has no rows
   const { state, nodes, render } = viewHarness();
   const emptyActive = { view:"active",batches:[],totals:{batches:0,active:0,pending:0,approved:0,failed:0} };
   render(emptyActive);
+  assert.equal(nodes.factoryBatchCompletedClose.hidden, true, "Close button stays hidden in active view");
   assert.match(nodes.factoryBatchRecentList.innerHTML, /No active approval batches/);
   assert.equal(nodes.factoryBatchMetricValue.textContent,"0");
 
@@ -74,6 +76,7 @@ test("completed history shows a 24-output batch when active activity has no rows
   const completed = { view:"completed",batches:[job("fg_batch123","24 Outputs")],
     totals:{batches:1,active:0,approved:24,pending:0,failed:0},has_more:false };
   render(completed);
+  assert.equal(nodes.factoryBatchCompletedClose.hidden, false, "Completed view exposes header close button");
   assert.match(nodes.factoryBatchRecentList.innerHTML,/24 approved/);
   assert.match(nodes.factoryBatchRecentList.innerHTML,/24 outputs/);
   assert.doesNotMatch(nodes.factoryBatchRecentList.innerHTML,/No completed batches/);
@@ -90,6 +93,7 @@ test("completed history shows a 24-output batch when active activity has no rows
 
   state.completedOpen = false;
   render(state.batch);
+  assert.equal(nodes.factoryBatchCompletedClose.hidden, true, "Closing completed history restores active header");
   assert.match(nodes.factoryBatchRecentList.innerHTML,/No active approval batches/);
 });
 
@@ -144,4 +148,11 @@ test("completed batch rows also collapse on second click without replacing activ
   nodes.factoryBatchRecentList.buttons[0].click();
   assert.equal(nodes.factoryBatchDetails.hidden,true);
   assert.equal(state.batch,active,"Completed view must not overwrite active state");
+});
+
+test("completed header Close control is wired to the shared active-view transition", () => {
+  const html = readFileSync(join(here, "index.html"), "utf8");
+  assert.match(html, /id="factoryBatchCompletedClose"[^>]*aria-label="Close completed approvals and return to active approvals"[^>]*hidden/);
+  assert.match(source, /\$\("factoryBatchCompletedClose"\)\?\.addEventListener\("click", \(\) => setFactoryCompletedOpen\(false\)\)/);
+  assert.match(source, /\$\("factoryBatchCompletedToggle"\)\?\.addEventListener\("click", \(\) => setFactoryCompletedOpen\(!state\.completedOpen\)\)/);
 });

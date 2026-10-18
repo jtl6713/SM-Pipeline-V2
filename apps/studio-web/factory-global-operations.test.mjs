@@ -54,7 +54,7 @@ test("Profile-scoped writes still use canonical submission and unchanged rollout
 
 test("Factory loads only active batches by default; completed history is explicit and paged", () => {
   new Function(desk);
-  for (const id of ["factoryBatchCompletedToggle", "factoryBatchCompletedPrev",
+  for (const id of ["factoryBatchCompletedToggle", "factoryBatchCompletedClose", "factoryBatchCompletedPrev",
     "factoryBatchCompletedNext", "factoryBatchCompletedPage", "factoryBatchListHeading"]) {
     assert.match(html, new RegExp('id="' + id + '"'));
   }
@@ -70,7 +70,9 @@ test("Factory loads only active batches by default; completed history is explici
   assert.doesNotMatch(initial, /refreshFactoryCompletedBatches/);
   const timer = desk.slice(desk.indexOf("async function loadFactoryDesk("));
   assert.match(timer, /refreshFactoryBatchActivity\(true\)/);
-  assert.match(timer, /factoryBatchCompletedToggle[^]*?refreshFactoryCompletedBatches\(0\)/);
+  assert.match(timer, /function setFactoryCompletedOpen\(open\)[^]*?refreshFactoryCompletedBatches\(0\)/);
+  assert.match(timer, /factoryBatchCompletedToggle[^]*?setFactoryCompletedOpen\(!state\.completedOpen\)/);
+  assert.match(timer, /factoryBatchCompletedClose[^]*?setFactoryCompletedOpen\(false\)/);
   assert.match(timer, /factoryBatchCompletedNext[^]*?state\.completedOffset \+ 20/);
   assert.match(desk, /previousActive\.some\(row => !liveIds\.has\(row\.job_id\)\)/);
 });
