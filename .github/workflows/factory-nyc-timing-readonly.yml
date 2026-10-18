@@ -1,0 +1,103 @@
+name: NYC Factory Timing Read-Only R2 Acceptance
+on:
+  push:
+    branches: [main]
+    paths:
+      - "deploy/factory-nyc-timing-readonly.txt"
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: factory-nyc-timing-readonly
+  cancel-in-progress: false
+jobs:
+  timing-audit:
+    if: github.repository == 'jtl6713/SM-Pipeline-V2'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      TARGET_WORKER: chicagoshining-studio-api
+      AUDITOR_WORKER: studio-factory-timing-readonly-audit
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Verify that the timing worker cannot mutate production
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check apps/studio-api/factory-timing-r2-inspector.mjs
+          node --test apps/studio-api/factory-timing-r2-inspector.test.mjs
+      - name: Read current production R2 binding and refuse existing audit Worker
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+          API="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts"
+          AUTH="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
+          curl -fsS -H "$AUTH" "$API/$TARGET_WORKER/deployments" -o /tmp/factory-deployments.json
+          ACTIVE="$(jq -er '.result.deployments[0].versions | max_by(.percentage) | .version_id' /tmp/factory-deployments.json)"
+          curl -fsS -H "$AUTH" "$API/$TARGET_WORKER/versions/$ACTIVE" -o /tmp/factory-version.json
+          jq -e '.success==true and ([.result.resources.bindings[]? | select(.name=="AIRTABLE_BASE_ID" and .text=="appe33zkZn35yirTL")] | length)==1' /tmp/factory-version.json >/dev/null
+          R2_BUCKET="$(jq -er '.result.resources.bindings[] | select(.name=="STUDIO_MEDIA") | (.bucket_name // .bucket)' /tmp/factory-version.json)"
+          test -n "$R2_BUCKET" && test "$R2_BUCKET" != null
+          printf "%s" "$R2_BUCKET" >/tmp/factory-r2-bucket-name
+          CODE="$(curl -sS -o /tmp/factory-ephemeral-preflight.json -w '%{http_code}' -H "$AUTH" "$API/$AUDITOR_WORKER/settings")"
+          if [[ "$CODE" != "404" ]]; then
+            echo "preexisting_readonly_timing_worker_refused=true http=$CODE"
+            exit 1
+          fi
+          echo "production_r2_binding_verified=PASS; auditor_absent=PASS"
+      - name: Run ephemeral authenticated read-only Worker and remove it
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm install --no-save wrangler@4.123.0 >/dev/null
+          ROOT="$PWD"
+          mkdir -p /tmp/factory-timing-readonly
+          cp apps/studio-api/factory-timing-r2-inspector.mjs /tmp/factory-timing-readonly/worker.mjs
+          cp apps/studio-api/factory-approval-queue.mjs /tmp/factory-timing-readonly/
+          cp apps/studio-api/factory-approval-timings.mjs /tmp/factory-timing-readonly/
+          cd /tmp/factory-timing-readonly
+          R2_BUCKET="$(cat /tmp/factory-r2-bucket-name)"
+          jq -n --arg name "$AUDITOR_WORKER" --arg bucket "$R2_BUCKET" '{
+            name:$name,main:"worker.mjs",compatibility_date:"2026-10-01",workers_dev:true,
+            r2_buckets:[{binding:"STUDIO_MEDIA",bucket_name:$bucket}]
+          }' > wrangler.jsonc
+          cleanup() {
+            cd "$ROOT"
+            "$ROOT/node_modules/.bin/wrangler" delete --config /tmp/factory-timing-readonly/wrangler.jsonc --name "$AUDITOR_WORKER" --force >/dev/null 2>&1 || true
+          }
+          trap cleanup EXIT
+          "$ROOT/node_modules/.bin/wrangler" deploy --config wrangler.jsonc --name "$AUDITOR_WORKER" > /tmp/factory-timing-deploy.log 2>&1
+          REPORT_TOKEN="$(openssl rand -hex 32)"
+          printf "%s" "$REPORT_TOKEN" | "$ROOT/node_modules/.bin/wrangler" secret put REPORT_TOKEN --config wrangler.jsonc --name "$AUDITOR_WORKER" >/dev/null
+          SUBDOMAIN="$(curl -fsS -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/subdomain" | jq -r '.result.subdomain')"
+          test -n "$SUBDOMAIN" && test "$SUBDOMAIN" != null
+          RESULT_HTTP=""
+          for attempt in $(seq 1 16); do
+            RESULT_HTTP="$(curl -sS --max-time 60 -o /tmp/factory-timing-result.json -w '%{http_code}' -H "Authorization: Bearer $REPORT_TOKEN" "https://$AUDITOR_WORKER.$SUBDOMAIN.workers.dev/report" || true)"
+            if [[ "$RESULT_HTTP" == "200" ]]; then break; fi
+            sleep 2
+          done
+          if [[ "$RESULT_HTTP" != "200" ]]; then
+            echo "factory_timing_read_only_probe_failed_http=$RESULT_HTTP"
+            exit 1
+          fi
+          jq -e '.schema=="studio.factory-nyc-batch-timing-audit.1" and .read_only==true' /tmp/factory-timing-result.json >/dev/null
+          jq -c '{schema,read_only,profile,jobs_scanned,eligible_ten_output_batches,shown_bundles,combined_timing_report,batches}' /tmp/factory-timing-result.json
+          echo "factory_real_r2_timing_readonly=PASS"
+      - name: Upload sanitized performance report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nyc-factory-approval-timing-${{ github.run_id }}
+          path: /tmp/factory-timing-result.json
+          if-no-files-found: ignore
+          retention-days: 14
