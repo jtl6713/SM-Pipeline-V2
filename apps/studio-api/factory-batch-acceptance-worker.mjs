@@ -5,7 +5,7 @@
  */
 import {
   factoryBatchEnqueue, factoryBatchRead, factoryBatchSummary,
-  factoryBatchDrain, factoryBatchRetry,
+  factoryBatchDrain, factoryBatchRetry, factoryBatchList, factoryBatchCronSelectJobs,
 } from "./factory-approval-queue.mjs";
 import { withOutputApprovalLock } from "./output-approval-lease.mjs";
 
@@ -75,6 +75,51 @@ export default {
         const job = await factoryBatchRetry(env.STUDIO_MEDIA, PROFILE, rid);
         ctx.waitUntil(drain(env, req));
         return json({ ...factoryBatchSummary(job), accepted: true });
+      }
+      if (req.method === "POST" && url.pathname === "/api/competing-profile") {
+        // Synthetic same-profile contention: two distinct child ledgers, no publishing.
+        const firstId = rid + "_a";
+        const secondId = rid + "_b";
+        const children = [firstId, secondId];
+        for (let i = 0; i < children.length; i++) {
+          const offset = i * 10;
+          await factoryBatchEnqueue(env.STUDIO_MEDIA, {
+            profileId: PROFILE, requestId: children[i],
+            records: Array.from({ length: 10 }, (_, j) => ({
+              id: idFor(offset + j), platform: "Instagram", format: "Reel",
+            })), note: "same-profile-contention-acceptance",
+          });
+        }
+        const first = await factoryBatchDrain(env.STUDIO_MEDIA, {
+          profileId: PROFILE, requestId: firstId, maxItems: 10,
+          approve: (id, job) => withOutputApprovalLock(env.STUDIO_MEDIA, id, async () => {
+            const key = PREFIX + "/" + rid + "/contention/" + id + ".json";
+            if (await read(env, key)) return { already_approved: true };
+            await new Promise(resolve => setTimeout(resolve, 20));
+            await env.STUDIO_MEDIA.put(key, JSON.stringify({ id }));
+            return { id };
+          }),
+        });
+        const siblings = await factoryBatchList(env.STUDIO_MEDIA, PROFILE, { limit: 40 });
+        const next = factoryBatchCronSelectJobs(siblings.map(job => ({
+          profileId: PROFILE, requestId: job.request_id, job,
+        })), { maxProfiles: 1 })[0];
+        if (next?.requestId !== secondId) throw Error("Fair handoff did not select pending sibling");
+        const second = await factoryBatchDrain(env.STUDIO_MEDIA, {
+          profileId: PROFILE, requestId: next.requestId, maxItems: 10,
+          approve: async id => {
+            const key = PREFIX + "/" + rid + "/contention/" + id + ".json";
+            if (await read(env, key)) return { already_approved: true };
+            await env.STUDIO_MEDIA.put(key, JSON.stringify({ id }));
+            return { id };
+          },
+        });
+        const committed = await env.STUDIO_MEDIA.list({ prefix: PREFIX + "/" + rid + "/contention/" });
+        return json({ first_completed: first.job.status === "completed",
+          second_completed: second.job.status === "completed",
+          handoff_to: next.requestId, unique_commits: committed.objects.length,
+          passed: first.job.status === "completed" && second.job.status === "completed"
+            && committed.objects.length === 20 });
       }
       if (req.method === "POST" && url.pathname === "/api/cleanup") {
         // Even if a live Cloudflare R2 bucket is bound by a staging test,
