@@ -469,10 +469,11 @@
         const stateLabel = active ? "Processing" : row.failed_count ? "Needs attention" : "Completed";
         const completed = Number(row.done_count ?? (Number(row.total||0)-Number(row.pending_count||0)));
         const percent = row.total ? Math.round(100 * completed / row.total) : 0;
-        const picked = latest?.job_id === row.job_id;
+        const picked = state.batchDetailsOpen && latest?.job_id === row.job_id;
         return `<button type="button" class="factory-batch-recent-row factory-batch-activity-choice${picked ? " is-selected" : ""}"
           data-factory-activity-key="${esc(row.job_id)}" aria-pressed="${picked}"
-          aria-label="Inspect ${esc(label)}">
+          aria-expanded="${picked}" aria-controls="factoryBatchDetails"
+          aria-label="${picked ? "Collapse" : "Inspect"} ${esc(label)}">
           <span class="factory-batch-recent-info">
             <strong>${esc(label)}</strong>
             <span>${esc(outputLabel)} · ${Number(row.approved_count)||0} approved · ${Number(row.pending_count)||0} pending</span>
@@ -525,9 +526,13 @@
     });
     recent?.querySelectorAll("[data-factory-activity-key]").forEach(button => {
       button.addEventListener("click", () => {
-        state.inspectedBatchKey = button.getAttribute("data-factory-activity-key") || "";
-        state.batchDetailsOpen = true;
-        renderFactoryBatchActivity(state.batch);
+        const key = button.getAttribute("data-factory-activity-key") || "";
+        // The selected batch is a toggle: clicking it again hides its details.
+        // Selecting a different batch opens that batch without losing its status.
+        const alreadyOpen = state.batchDetailsOpen && latest?.job_id === key;
+        state.inspectedBatchKey = key;
+        state.batchDetailsOpen = !alreadyOpen;
+        renderFactoryBatchActivity(state.completedOpen ? state.completedBatch : state.batch);
       });
     });
   }
@@ -1067,7 +1072,11 @@
     }
     if (options.groupContent) {
       const groups = groupByContent(cards);
-      if (!groups.some((group) => group.key === state.expandedReviewGroup)) state.expandedReviewGroup = groups[0]?.key || null;
+      // "" means the operator explicitly collapsed every content item.
+      // Only choose a default when the previous expanded item disappeared.
+      if (state.expandedReviewGroup !== "" && !groups.some((group) => group.key === state.expandedReviewGroup)) {
+        state.expandedReviewGroup = groups[0]?.key || null;
+      }
       node.innerHTML = groups.map((group) => {
         const expanded = group.key === state.expandedReviewGroup;
         const id = `factory-review-${group.key.replace(/[^a-zA-Z0-9_-]/g, "-")}`;
