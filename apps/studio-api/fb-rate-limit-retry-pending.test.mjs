@@ -9,7 +9,7 @@ const root = dirname(fileURLToPath(import.meta.url));
 
 test("Worker version is 0.10.654-factory-drain-continue", () => {
   const worker = readFileSync(join(root, "worker.js"), "utf8");
-  assert.match(worker, /version: "0\.10\.653-factory-schedule-perf"/);
+  assert.match(worker, /version: "0\.10\.654-factory-drain-continue"/);
 });
 
 test("Facebook Graph 368 park paints Retry Pending, not Failed", () => {
