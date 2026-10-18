@@ -1257,7 +1257,7 @@ export async function studioHealApprovedMissingScheduleAtomic(env, row) {
       const occupied = await studioOccupiedSchedulesOrEmpty(env, {
         excludeIds: [row.id],
         profile,
-      });
+      , requireComplete: true });
       const laneOccupied = studioOccupiedForLane(occupied, platform, outputType).slice();
       const platformOccupied = studioOccupiedForPlatform(occupied, platform).slice();
       for (const durable of durableReservations || []) {
@@ -1422,7 +1422,7 @@ export async function studioHealStoryCompanionDriftAtomic(env, row) {
       const occupied = await studioOccupiedSchedulesOrEmpty(env, {
         excludeIds: [row.id],
         profile,
-      });
+      , requireComplete: true });
       const platformOccupied = studioOccupiedForPlatform(occupied, platform).slice();
       for (const durable of durableReservations || []) {
         const ms = Date.parse(String(durable?.scheduled_iso || ""));
@@ -1538,7 +1538,7 @@ export async function studioReconcileReservationDriftAtomic(env, snapshot, reser
         const occupied = await studioOccupiedSchedulesOrEmpty(env, {
           excludeIds: [outputId],
           profile,
-        });
+        , requireComplete: true });
         const platformOccupied = studioOccupiedForPlatform(occupied, platform).slice();
         for (const durable of durableReservations || []) {
           const ms = Date.parse(String(durable?.scheduled_iso || ""));
@@ -2301,7 +2301,7 @@ async function studioApproveOutputRecordAtomic(env, record, note, stamp, payload
       const occupied = await studioOccupiedSchedulesOrEmpty(env, {
         excludeIds: [id],
         profile,
-      });
+      , requireComplete: true });
       const laneOccupied = studioOccupiedForLane(occupied, platform, outputType).slice();
       const platformOccupied = studioOccupiedForPlatform(occupied, platform).slice();
 
@@ -2555,7 +2555,7 @@ export async function approveOutputRecordForPublishing(env, existing, note, stam
     const occupied = await studioOccupiedSchedulesOrEmpty(env, {
       excludeIds: [id],
       profile,
-    });
+    , requireComplete: true });
     occupiedMs = studioOccupiedForLane(occupied, platform, outputType);
   }
   const timeZone = options.timeZone || await studioScheduleTimeZoneForRecord(env, record, payload);
@@ -2632,7 +2632,7 @@ export async function approveOutputRecordForPublishing(env, existing, note, stam
     && requestedRaw !== "immediate"
   ) {
     studioInvalidateOccupiedScheduleCache();
-    const fresh = await studioOccupiedSchedulesOrEmpty(env, { excludeIds: [id], profile });
+    const fresh = await studioOccupiedSchedulesOrEmpty(env, { excludeIds: [id], profile , requireComplete: true });
     const freshLane = studioOccupiedForLane(fresh, platform, outputType);
     const ms = Date.parse(requestedRaw);
     if (Number.isFinite(ms) && maeScheduleConflicts(ms, freshLane)) {
@@ -2948,7 +2948,7 @@ export async function studioAtomicApplyScheduleRegenEntry(env, {
         // atomic commits are reintroduced below from the durable reservation ledger.
         excludeIds: regenExclusions,
         profile,
-      });
+      , requireComplete: true });
       const laneOccupied = studioOccupiedForLane(fresh, platform, outputType).slice();
       const platformOccupied = studioOccupiedForPlatform(fresh, platform).slice();
       for (const durable of durableReservations || []) {
@@ -3752,7 +3752,7 @@ export async function studioProcessApproveAllJobSlice(env, jobId, options = {}) 
   const occupiedByLane = await studioOccupiedSchedulesOrEmpty(env, {
     excludeIds: (job.items || []).map((item) => item.id),
     profile,
-  });
+  , requireComplete: true });
   const horizonDays = await studioScheduleHorizonDays(env).catch(() => MAE_SUGGEST_HORIZON_DAYS);
   // One profile timezone for the whole job — avoid per-row Airtable theme lookups.
   const timeZone = studioScheduleTimeZoneForProfile(profile, MAE_DEFAULT_TIME_ZONE);
@@ -13051,7 +13051,7 @@ export async function scheduleStudioPublishOutput(request, env, url, authorizati
         const fresh = await studioOccupiedSchedulesOrEmpty(env, {
           excludeIds: [match[1]],
           profile,
-        });
+        , requireComplete: true });
         let platformOccupiedMs = studioOccupiedForPlatform(fresh, platform).slice();
         for (const reservation of durableReservations || []) {
           const ms = Date.parse(String(reservation?.scheduled_iso || ""));
@@ -14063,7 +14063,7 @@ export async function factoryBatchProcess(env, profileId, requestId, ctx = null,
         .filter((item) => !["approved", "already_satisfied", "failed"].includes(String(item.status || "")))
         .map((item) => item.id),
       profile,
-    });
+    , requireComplete: true });
     const timeZone = studioScheduleTimeZoneForProfile(profile, MAE_DEFAULT_TIME_ZONE);
     const horizonDays = await studioScheduleHorizonDays(env).catch(() => MAE_SUGGEST_HORIZON_DAYS);
     try {
