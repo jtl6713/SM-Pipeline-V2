@@ -4730,18 +4730,8 @@ export async function buildStudioProfilesOverviewRows(env, profiles, options = {
     }
   }
 
-  const formula = studioProfilesOverviewCombinedFormula(profileList);
-  // Home only renders outstanding schedule/attention counts. Published history
-  // does not contribute to Scheduled, Manual Action, Failed, or Awaiting Approval,
-  // so do not page thousands of terminal rows during an authoritative refresh.
-  const outputFormula = formula
-    ? `AND(${formula},{Output_Status}!="Published",{Publish_Status}!="Published")`
-    : `AND({Output_Status}!="Published",{Publish_Status}!="Published")`;
-  // The Home Ideas column is explicitly "ideas not in production". Filter those
-  // server-side instead of downloading the entire historical Ideas table.
-  const ideaFormula = formula
-    ? `AND(${formula},{Promoted_Content_Record_ID}=BLANK(),{Content Items}=BLANK())`
-    : `AND({Promoted_Content_Record_ID}=BLANK(),{Content Items}=BLANK())`;
+  // Home only needs outstanding schedule/attention rows and unpromoted Ideas.
+  // The per-profile Airtable fallback below applies those filters before paging.
   let airtableIdeaRows = null;
   if (!usedSupabaseOutputs) {
     // Scan each profile independently and in parallel. Airtable request starts are
