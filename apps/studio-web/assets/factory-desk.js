@@ -604,9 +604,15 @@
   async function recoverSubmittedFactoryPlan(plan, originalError) {
     for (let attempt = 0; attempt < 3; attempt++) {
       if (attempt) await new Promise((resolve) => setTimeout(resolve, 350 * attempt));
-      const activity = await refreshFactoryBatchActivity(true);
+      // Exact-id read avoids querying historical completed batches when a
+      // POST response was lost and the job finished before our next poll.
+      const activity = await fetchJson("/api/factory/approval-batches?scope=all&request_id=" +
+        encodeURIComponent(plan.request_id), { cache: "no-store" });
       const found = factoryActivityMatchesPlan(activity, plan);
-      if (found) return { ...found, accepted: true, recovered_after_error: true };
+      if (found) {
+        refreshFactoryBatchActivity(true).catch(() => {});
+        return { ...found, accepted: true, recovered_after_error: true };
+      }
     }
     throw originalError;
   }
