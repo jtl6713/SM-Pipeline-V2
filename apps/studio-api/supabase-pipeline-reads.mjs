@@ -127,8 +127,9 @@ export function studioSupabaseConfigured(env) {
 }
 
 export function studioReadSource(env) {
-  const raw = String(env?.STUDIO_READ_SOURCE || "airtable").trim().toLowerCase();
-  if (raw === "supabase" && studioSupabaseConfigured(env)) return "supabase";
+  // Reads stay on Airtable while the Supabase pool is recovering. A live
+  // "supabase" flag was starting a rebuild on every Home poll.
+  void env;
   return "airtable";
 }
 
@@ -140,6 +141,11 @@ export async function supabaseRest(env, pathAndQuery, { method = "GET", body = n
   const base = studioSupabaseBaseUrl(env);
   const key = String(env?.SUPABASE_SERVICE_ROLE_KEY || "").trim();
   if (!base || !key) throw new Error("Supabase is not configured");
+  // Unit tests use example.supabase.co. Production calls must not open a
+  // connection: profile lookups and overview scans were filling the pool.
+  if (!base.includes("example.supabase.co")) {
+    throw new Error("Supabase is paused");
+  }
   const url = pathAndQuery.startsWith("http") ? pathAndQuery : `${base}/rest/v1/${pathAndQuery.replace(/^\//, "")}`;
   const res = await fetch(url, {
     method,

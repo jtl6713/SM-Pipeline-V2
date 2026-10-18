@@ -1060,7 +1060,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.662-overview-profile-timeout",
+          version: "0.10.663-pause-supabase-reads",
           factory_batch_canary_revision: "chicago-ig-reel-v1",
           factory_batch_phase2a_post_gate_fix_v1: true,
           studio_supabase_pipeline_reads_v1: true,
@@ -2486,9 +2486,8 @@ export default {
         console.warn("AZ finished-video resume failed", error);
       }
       try {
-        const existing = await readStudioProfilesOverviewSnapshot(env);
-        const age = existing?.at ? Date.now() - existing.at : Infinity;
-        if (age > 10 * 60 * 1000) await refreshStudioProfilesOverviewSnapshot(env, null);
+        // Supabase overview rebuilds are paused. This tick used to start one
+        // whenever the snapshot was older than 10 minutes.
       } catch (error) {
         console.warn("profiles overview snapshot refresh failed", error);
       }
