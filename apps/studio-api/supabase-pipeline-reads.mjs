@@ -445,8 +445,8 @@ const OVERVIEW_OUTPUT_SELECT = [
 const OVERVIEW_IDEA_SELECT = [
   "airtable_record_id",
   "content_profile_id",
-  "payload",
-  "created_at",
+  "promoted:payload-%3E%3EPromoted_Content_Record_ID",
+  "content_items:payload-%3EContent%20Items",
 ].join(",");
 
 const CONTENT_SELECT = [
@@ -674,13 +674,11 @@ export async function listSupabaseOverviewPack(env, { profileAirtableIds = [], o
   const outCeiling = Math.max(1, Math.min(10000, Number(outputLimit) || 10000));
   const ideaCeiling = Math.max(1, Math.min(10000, Number(ideaLimit) || 10000));
 
-  // Must page: a bare limit=10000 is still capped by PostgREST max-rows (~1000),
-  // which silently dropped older Scheduled rows and crushed All Profiles totals.
-  // Ideas run beside outputs. An incomplete idea page must not discard outputs.
-  // This predicate matches platform_outputs_pipeline_open_idx so Postgres does
-  // not seq-scan published history. not.eq is IS DISTINCT FROM, so blank
-  // output_status still counts. count=exact would recount the whole set on
-  // every page and blew the 26s refresh budget.
+  // Each city uses platform_outputs_pipeline_open_idx (profile id, then open
+  // status). One combined IN scan was still over the 26s refresh budget.
+  // not.eq is IS DISTINCT FROM, so blank output_status still counts.
+  // count=exact recounts the whole set on every page, so paging opts out.
+  // Idea rows only need the promotion keys, not the payload blob.
   const openOutputFilter = [
     "do_not_publish=eq.false",
     "or=(test_run_id.is.null,test_run_id.eq.)",
@@ -689,27 +687,30 @@ export async function listSupabaseOverviewPack(env, { profileAirtableIds = [], o
     "or=(publish_status.is.null,publish_status.neq.Published)",
   ].join("&");
   const pageHeaders = { Prefer: "count=none" };
-  const outputPromise = supabaseRestAll(
+  const outputPromise = Promise.all(uuids.map((uuid) => supabaseRestAll(
     env,
-    `platform_outputs?${profileFilter}&${openOutputFilter}&select=${OVERVIEW_OUTPUT_SELECT}&order=output_number.desc.nullslast`,
+    `platform_outputs?content_profile_id=eq.${uuid}&${openOutputFilter}&select=${OVERVIEW_OUTPUT_SELECT}&order=output_number.desc.nullslast`,
     { pageSize: 1000, maxRows: outCeiling, headers: pageHeaders },
-  );
+  )));
   const ideaPromise = includeIdeas
-    ? supabaseRestAll(
-      env,
-      `idea_candidates?${profileFilter}&select=${OVERVIEW_IDEA_SELECT}&order=created_at.desc.nullslast`,
-      { pageSize: 1000, maxRows: ideaCeiling, headers: pageHeaders },
-    ).catch(() => null)
+    ? new Promise((resolve) => {
+      const timer = setTimeout(() => resolve(null), 8000);
+      supabaseRestAll(
+        env,
+        `idea_candidates?${profileFilter}&select=${OVERVIEW_IDEA_SELECT}&order=created_at.desc.nullslast`,
+        { pageSize: 1000, maxRows: ideaCeiling, headers: pageHeaders },
+      ).then(
+        (rows) => { clearTimeout(timer); resolve(rows); },
+        () => { clearTimeout(timer); resolve(null); },
+      );
+    })
     : Promise.resolve([]);
-  const [outputRows, ideaResult] = await Promise.all([outputPromise, ideaPromise]);
+  const [outputGroups, ideaResult] = await Promise.all([outputPromise, ideaPromise]);
+  const outputRows = outputGroups.flat();
   let ideaRows = Array.isArray(ideaResult) ? ideaResult : [];
-  let ideasIncomplete = includeIdeas && ideaResult == null;
-  if ((ideaRows || []).length >= ideaCeiling) {
-    ideasIncomplete = true;
-    ideaRows = [];
-  }
+  const ideasIncomplete = includeIdeas && !Array.isArray(ideaResult);
 
-  if ((outputRows || []).length >= outCeiling) {
+  if (outputGroups.some((group) => group.length >= outCeiling)) {
     throw new Error("Profiles overview outputs exceeded complete-scan safety ceiling");
   }
 
@@ -721,7 +722,15 @@ export async function listSupabaseOverviewPack(env, { profileAirtableIds = [], o
     return airtableShapedOutputFromSupabase(flat);
   };
   const shapeIdea = (row) => {
-    const flat = flattenIdeaRow(row);
+    const promoted = row?.promoted ?? (isPlainObject(row?.payload) ? row.payload.Promoted_Content_Record_ID : null);
+    const linked = row?.content_items ?? (isPlainObject(row?.payload) ? row.payload["Content Items"] : null);
+    const flat = flattenIdeaRow({
+      ...row,
+      payload: {
+        Promoted_Content_Record_ID: promoted || null,
+        "Content Items": Array.isArray(linked) ? linked : [],
+      },
+    });
     if (!flat.content_profile_airtable_id) {
       flat.content_profile_airtable_id = airtableByUuid.get(row.content_profile_id) || null;
     }

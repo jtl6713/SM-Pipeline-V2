@@ -4779,27 +4779,9 @@ export async function buildStudioProfilesOverviewRows(env, profiles, options = {
     readSource = "airtable";
   }
 
-  // If the Supabase idea pack is incomplete, fall back to Airtable for manual
-  // force refresh rather than publishing an incomplete Ideas count.
   if (usedSupabaseOutputs && forceIdeas && !supabaseIdeasUsable) {
-    const ideaPacks = await Promise.all(profileList.map(async (profile) => {
-      const profileFormula = contentProfileFilterFormula(profile);
-      const profileIdeaFormula = profileFormula
-        ? `AND(${profileFormula},{Promoted_Content_Record_ID}=BLANK(),{Content Items}=BLANK())`
-        : `AND({Promoted_Content_Record_ID}=BLANK(),{Content Items}=BLANK())`;
-      const rows = await listRecords(env, env.AIRTABLE_IDEA_TABLE_ID, {
-        limit: STUDIO_PROFILES_OVERVIEW_IDEA_LIMIT,
-        filterFormula: profileIdeaFormula,
-        fields: ["Content_Profile", "Promoted_Content_Record_ID", "Content Items"],
-      });
-      if (rows.length >= STUDIO_PROFILES_OVERVIEW_IDEA_LIMIT) {
-        throw new Error(`Profiles overview ideas exceeded complete-scan safety ceiling for ${profile?.id || "profile"}`);
-      }
-      return rows;
-    }));
-    const ideaById = new Map();
-    for (const rows of ideaPacks) for (const row of rows || []) if (row?.id) ideaById.set(row.id, row);
-    airtableIdeaRows = [...ideaById.values()];
+    // Last-good Ideas counts are applied below. An Airtable idea scan here
+    // stayed inside the 26s refresh budget and kept Home Refresh failed.
   }
 
   // Only Supabase-backed rows need the Airtable live-publish overlay. A direct

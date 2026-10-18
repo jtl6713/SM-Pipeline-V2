@@ -1060,7 +1060,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.659-overview-indexed-open",
+          version: "0.10.660-overview-parallel-pages",
           factory_batch_canary_revision: "chicago-ig-reel-v1",
           factory_batch_phase2a_post_gate_fix_v1: true,
           studio_supabase_pipeline_reads_v1: true,
