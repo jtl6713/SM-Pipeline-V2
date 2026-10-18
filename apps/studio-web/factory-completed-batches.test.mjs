@@ -29,6 +29,17 @@ function viewHarness() {
     setAttribute() {}, addEventListener() {}, querySelector() { return null; },
     querySelectorAll() { return []; },
   }]));
+  nodes.factoryBatchRecentList.querySelectorAll = (selector) => {
+    if (selector !== "[data-factory-activity-key]") return [];
+    const buttons = [...nodes.factoryBatchRecentList.innerHTML.matchAll(/data-factory-activity-key="([^"]+)"/g)]
+      .map((match) => ({
+        key: match[1],
+        getAttribute(name) { return name === "data-factory-activity-key" ? this.key : null; },
+        addEventListener(name, handler) { if (name === "click") this.click = handler; },
+      }));
+    nodes.factoryBatchRecentList.buttons = buttons;
+    return buttons;
+  };
   const state = {
     completedOpen: false, completedBatch: null, completedLoading: false,
     completedOffset: 0, batch: null, batchDetailsOpen: true,
@@ -89,4 +100,48 @@ test("completed view renders a terminal per-profile batch as well as a global gr
   render({view:"completed",batches:[{...job("fb_job123","Finished reel"),group:false}],totals:{batches:1,approved:24}});
   assert.match(nodes.factoryBatchRecentList.innerHTML,/Finished reel/);
   assert.match(nodes.factoryBatchRecentList.innerHTML,/24 approved/);
+});
+
+
+test("clicking the same active batch twice collapses its details; another batch opens normally", () => {
+  const {state,nodes,render}=viewHarness();
+  state.batchDetailsOpen=false;
+  const active = {view:"active",batches:[
+    {...job("fg_batchA","First"),status:"running",approved_count:2,pending_count:22},
+    {...job("fg_batchB","Second"),status:"running",approved_count:4,pending_count:20},
+  ]};
+  render(active);
+  assert.equal(nodes.factoryBatchDetails.hidden,true);
+  assert.match(nodes.factoryBatchRecentList.innerHTML,/aria-expanded="false"/);
+
+  nodes.factoryBatchRecentList.buttons[0].click();
+  assert.equal(state.inspectedBatchKey,"fg_batchA");
+  assert.equal(nodes.factoryBatchDetails.hidden,false);
+  assert.match(nodes.factoryBatchRecentList.innerHTML,/data-factory-activity-key="fg_batchA" aria-pressed="true"\s+aria-expanded="true"/);
+
+  nodes.factoryBatchRecentList.buttons[0].click();
+  assert.equal(nodes.factoryBatchDetails.hidden,true,"Second click should collapse the batch");
+  assert.equal(state.batchDetailsOpen,false);
+  render(active); // Background status polling must not reopen the collapsed batch.
+  assert.equal(nodes.factoryBatchDetails.hidden,true);
+
+  nodes.factoryBatchRecentList.buttons[1].click();
+  assert.equal(state.inspectedBatchKey,"fg_batchB");
+  assert.equal(nodes.factoryBatchDetails.hidden,false);
+  nodes.factoryBatchRecentList.buttons[1].click();
+  assert.equal(nodes.factoryBatchDetails.hidden,true);
+});
+
+test("completed batch rows also collapse on second click without replacing active activity", () => {
+  const {state,nodes,render}=viewHarness();
+  state.batchDetailsOpen=false;
+  const active={view:"active",batches:[],totals:{batches:0}};
+  render(active);
+  state.completedOpen=true;
+  render({view:"completed",batches:[job("fg_completedA","Finished")],totals:{batches:1}});
+  nodes.factoryBatchRecentList.buttons[0].click();
+  assert.equal(nodes.factoryBatchDetails.hidden,false);
+  nodes.factoryBatchRecentList.buttons[0].click();
+  assert.equal(nodes.factoryBatchDetails.hidden,true);
+  assert.equal(state.batch,active,"Completed view must not overwrite active state");
 });
