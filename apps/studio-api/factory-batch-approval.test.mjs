@@ -123,7 +123,9 @@ test("Factory batch drain reuses one occupancy map like Approve All", () => {
   assert.match(drain, /\(occupiedByLane\[lane\] \|\|= \[\]\)\.push\(Number\(result\.scheduled_ms\)\)/);
   assert.match(drain, /Factory batch continue/);
   assert.match(drain, /continueSlice/);
-  assert.match(drain, /result\?\.claimed && processed > 0 && pending > 0/);
+  assert.match(drain, /result\?\.claimed && processed > 0 && continueSlice < 8/);
+  assert.match(drain, /factoryBatchCronSelectJobs/);
+  assert.match(drain, /factoryBatchList\(env\.STUDIO_MEDIA, profileId/);
 });
 
 test("Global Factory group submit accepts from desk hints before Airtable", () => {
