@@ -587,6 +587,7 @@ import {
   studioScheduleMs,
   studioOccupiedRowMatchesProfile,
   studioOccupiedFilterFormula,
+  studioReadCoalesce,
   studioLoadOccupiedScheduleRows,
   studioInvalidateOccupiedScheduleCache,
   studioOccupiedMsFromRow,
