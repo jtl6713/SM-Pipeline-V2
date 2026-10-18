@@ -1015,7 +1015,7 @@
     });
     const requiresRepair = pending.filter((card) =>
       /failed|blocked|error|needs repair/i.test(`${card.output_status || ""} ${card.render_status || ""} ${card.studio_state || ""} ${card.stuck_kind || ""}`));
-    if (requiresRepair.length) return `${requiresRepair.length} sibling output${requiresRepair.length === 1 ? "" : "s"} need attention`;
+    if (requiresRepair.length) return `${requiresRepair.length} sibling output${requiresRepair.length === 1 ? " needs" : "s need"} attention`;
     if (active.length === pending.length) {
       if (stories === pending.length) return `${stories} Stor${stories === 1 ? "y" : "ies"} still rendering`;
       return `${pending.length} sibling${pending.length === 1 ? "" : "s"} still rendering`;
