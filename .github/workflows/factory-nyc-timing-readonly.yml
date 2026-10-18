@@ -75,7 +75,12 @@ jobs:
             "$ROOT/node_modules/.bin/wrangler" delete --config /tmp/factory-timing-readonly/wrangler.jsonc --name "$AUDITOR_WORKER" --force >/dev/null 2>&1 || true
           }
           trap cleanup EXIT
-          "$ROOT/node_modules/.bin/wrangler" deploy --config wrangler.jsonc --name "$AUDITOR_WORKER" > /tmp/factory-timing-deploy.log 2>&1
+          "$ROOT/node_modules/.bin/wrangler" deploy --config wrangler.jsonc --name "$AUDITOR_WORKER" > /tmp/factory-timing-deploy.log 2>&1 || {
+            echo "factory_timing_ephemeral_deploy=FAILED (no production modification)"
+            grep -E 'ERROR|Error:|error:|\[code: [0-9]+\]' /tmp/factory-timing-deploy.log | tail -12 | cut -c1-250 || true
+            exit 1
+          }
+          echo "factory_timing_ephemeral_deploy=PASS"
           REPORT_TOKEN="$(openssl rand -hex 32)"
           printf "%s" "$REPORT_TOKEN" | "$ROOT/node_modules/.bin/wrangler" secret put REPORT_TOKEN --config wrangler.jsonc --name "$AUDITOR_WORKER" >/dev/null
           SUBDOMAIN="$(curl -fsS -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/subdomain" | jq -r '.result.subdomain')"
