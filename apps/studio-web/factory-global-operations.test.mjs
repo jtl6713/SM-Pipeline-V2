@@ -75,12 +75,22 @@ test("Factory loads only active batches by default; completed history is explici
   assert.match(desk, /previousActive\.some\(row => !liveIds\.has\(row\.job_id\)\)/);
 });
 
-test("Factory approval progress track spans entire row beneath right-aligned status", () => {
- assert.match(desk,/class="factory-batch-mini-progress"/);
- assert.match(layout,/\.factory-batch-activity-choice\{[^}]*position:relative;padding-bottom:18px/);
- assert.match(layout, /\.factory-batch-activity-choice \.factory-batch-mini-progress\{[^}]*position:absolute;left:10px;right:10px;bottom:6px/);
- assert.match(layout, /overflow:hidden;width:auto;max-width:none;margin:0/);
- assert.match(desk,/style="width:\$\{percent\}%"/);
- assert.match(layout, /\.factory-batch-activity-choice \.factory-batch-mini-progress\{left:6px;right:6px\}/);
- assert.doesNotMatch(layout,/max-width:260px/);
+test("Factory batch counts and status never overlap the full-width progress rail", () => {
+  const renderer = desk.slice(desk.indexOf('return `<button type="button" class="factory-batch-recent-row'),
+    desk.indexOf(': \'<p class="subtle">\''));
+  assert.ok(renderer.includes('class="factory-batch-recent-info"'));
+  const counts = renderer.indexOf('${Number(row.approved_count)||0} approved');
+  const status = renderer.indexOf('class="factory-batch-recent-result"');
+  const progress = renderer.indexOf('class="factory-batch-mini-progress"');
+  assert.ok(counts > 0 && counts < status && status < progress,
+    "counts, status and progress must be separate siblings in DOM order");
+  assert.match(layout, /\.factory-batch-recent-row\.factory-batch-activity-choice\{[^}]*display:grid;grid-template-columns:minmax\(0,1fr\) max-content/);
+  assert.match(layout, /grid-template-areas:"info status" "progress progress"/);
+  assert.match(layout, /\.factory-batch-activity-choice \.factory-batch-recent-info\{[^}]*grid-area:info/);
+  assert.match(layout, /\.factory-batch-activity-choice \.factory-batch-recent-result\{[^}]*grid-area:status/);
+  assert.match(layout, /\.factory-batch-activity-choice \.factory-batch-mini-progress\{[^}]*grid-area:progress;[^}]*position:static/);
+  assert.match(layout, /width:100%;max-width:none;height:5px/);
+  assert.match(layout, /grid-template-areas:"info" "status" "progress"/);
+  assert.doesNotMatch(layout, /max-width:260px|position:absolute;left:10px/);
+  assert.match(desk, /style="width:\$\{percent\}%"/);
 });
