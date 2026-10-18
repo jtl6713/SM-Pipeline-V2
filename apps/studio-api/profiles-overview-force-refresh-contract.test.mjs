@@ -26,7 +26,7 @@ test("manual refresh bypasses normal snapshot TTL and refreshes Ideas too", () =
   const start = functions04.indexOf("export async function runStudioProfilesOverviewForceRefresh");
   const end = functions04.indexOf("/*__STUDIO_WORKER_END:runStudioProfilesOverviewForceRefresh__*/", start);
   const force = functions04.slice(start, end);
-  assert.match(force, /buildStudioProfilesOverviewRows\(env, profiles, \{ forceIdeas: true, commitIdeas: false \}\)/);
+  assert.match(force, /buildStudioProfilesOverviewRows\(env, profiles, \{ forceIdeas: true, commitIdeas: false, preferSupabase: true \}\)/);
   assert.doesNotMatch(force, /studioProfilesOverviewFreshMs/);
   assert.match(functions04, /includeIdeas: missingIdeaCounts/);
   assert.match(functions04, /supabaseIdeasUsable = missingIdeaCounts && pack\.ideas_incomplete !== true/);
@@ -93,5 +93,14 @@ test("manual refresh cannot hang behind a slow background rebuild or Airtable co
   const routeStart = functions04.indexOf("export async function startProfilesOverviewForceRefresh");
   const routeEnd = functions04.indexOf("/*__STUDIO_WORKER_END:startProfilesOverviewForceRefresh__*/", routeStart);
   const route = functions04.slice(routeStart, routeEnd);
-  assert.match(route, /studioReadSource\(env\) !== "supabase" && coolMs > AIRTABLE_SLOT_FAIL_FAST_MS/);
+  assert.match(route, /!studioSupabaseConfigured\(env\).*coolMs > AIRTABLE_SLOT_FAIL_FAST_MS/s);
+});
+
+
+test("manual force refresh can prefer Supabase without changing the global Studio read-source flag", () => {
+  const buildStart = functions04.indexOf("async function buildStudioProfilesOverviewRows");
+  const buildEnd = functions04.indexOf("/*__STUDIO_WORKER_END:buildStudioProfilesOverviewRows__*/", buildStart);
+  const build = functions04.slice(buildStart, buildEnd);
+  assert.match(build, /const preferSupabase = options\.preferSupabase === true && studioSupabaseConfigured\(env\)/);
+  assert.match(build, /studioReadSource\(env\) === "supabase" \|\| preferSupabase/);
 });
