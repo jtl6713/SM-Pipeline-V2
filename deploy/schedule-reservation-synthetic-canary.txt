@@ -1,0 +1,2 @@
+2026-10-18 scoped production proof for MAE scheduling reservation locks and hung-lock recovery.
+Existing synthetic canary ONLY: no real profile, Airtable, or publishing writes.

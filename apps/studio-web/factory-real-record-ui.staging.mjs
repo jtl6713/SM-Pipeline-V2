@@ -260,7 +260,7 @@ try {
    filter.dispatchEvent(new Event("change",{bubbles:true}));
  });
  await phone.locator("#factoryBatchQualityRefresh").click();
- await phone.locator("#factoryBatchQualitySignals").getByText("No recent Factory batches in this view").waitFor();
+ await phone.locator("#factoryBatchQualitySignals").getByText("No active Factory batches requiring attention in the checked window").waitFor();
  await phone.locator("#factoryProfileFilter").selectOption("");
  await phone.locator("#factoryBatchQualityRefresh").click();
  await phone.locator("#factoryBatchQualitySignals").getByText("No Quality Agent findings").waitFor();

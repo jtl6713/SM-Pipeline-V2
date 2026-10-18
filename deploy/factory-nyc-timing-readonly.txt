@@ -1,0 +1,2 @@
+2026-10-18 single-run NYC Factory acceptance timing read from existing R2 ledger.
+No Airtable writes or publishing; ephemeral worker is deleted after inspection.

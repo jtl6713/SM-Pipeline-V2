@@ -587,6 +587,7 @@ import {
   studioScheduleMs,
   studioOccupiedRowMatchesProfile,
   studioOccupiedFilterFormula,
+  studioReadCoalesce,
   studioLoadOccupiedScheduleRows,
   studioInvalidateOccupiedScheduleCache,
   studioOccupiedMsFromRow,
@@ -13948,6 +13949,70 @@ export async function factoryBatchStatusRoute(request, env, authorization) {
         ok: true, scope: "all", exact_request_id: exactRequest,
         batches: group ? [group] : [],
       });
+    }
+    // The Quality Agent is a read-only monitor, not a second Factory activity
+    // browser. The ordinary global route enumerates parent group history and
+    // dereferences each child, which multiplied R2 reads on every 15s poll.
+    // This bounded child-ledger view still exposes live failure/stall signals,
+    // but never walks completed parent group history.
+    if (url.searchParams.get("quality_only") === "1") {
+      const factoryProfile = String(url.searchParams.get("factory_profile") || "").trim();
+      if (factoryProfile && !/^rec[A-Za-z0-9]+$/.test(factoryProfile)) {
+        throw new HttpError(400, "Invalid Factory profile filter");
+      }
+      try {
+        const report = await studioReadCoalesce(
+          `factory-batch-quality-active:${factoryProfile || "all"}`, 12000,
+          async () => {
+            const history = await factoryBatchListGlobal(env.STUDIO_MEDIA, {
+              profileId: factoryProfile, mode: "active", limit: 24, maxScan: 1200,
+            });
+            // Quality polling needs only counts/signatures, not every
+            // per-output timeline (which can contain 180 events per item).
+            const batches = history.jobs.map(job => ({
+              job_id: job.id, profile_id: job.profile_id,
+              status: job.status, ...factoryBatchCounts(job),
+              items: (job.items || []).map(item => ({
+                id: item.id, output_id: item.output_id, status: item.status,
+              })),
+              quality_signals: factoryBatchQualitySignals(job),
+            }));
+            const signals = batches.flatMap(job => (job.quality_signals || [])
+              .map(signal => ({
+                ...signal, profile_id: job.profile_id, job_id: job.job_id,
+                output_ids: (job.items || []).map(item => item.output_id).filter(Boolean),
+              })));
+            return {
+              ok: true, scope: "all", quality_only: true,
+              quality_status: history.complete && !history.has_more ? "ok" : "partial",
+              monitored_at: new Date().toISOString(),
+              history_complete: history.complete && !history.has_more,
+              history_scanned: history.scanned,
+              job_id: batches[0]?.job_id || null,
+              batches, quality_signals: signals,
+              totals: {
+                batches: batches.length,
+                pending: batches.reduce((sum, item) => sum + (item.pending_count || 0), 0),
+                failed: batches.reduce((sum, item) => sum + (item.failed_count || 0), 0),
+                findings: signals.length,
+              },
+            };
+          },
+        );
+        return respond(request, env, report);
+      } catch (error) {
+        console.warn("Factory quality read-only R2 monitoring degraded",
+          String(error?.code || error?.status || error?.name || "unknown"));
+        // Never return a fabricated "no findings" or cascade a monitor read
+        // failure into a Factory approval action. The UI flags degraded data.
+        return respond(request, env, {
+          ok: false, scope: "all", quality_only: true,
+          quality_status: "unavailable",
+          monitored_at: new Date().toISOString(),
+          job_id: null, batches: [], quality_signals: [],
+          totals: { batches: 0, pending: 0, failed: 0, findings: 0 },
+        });
+      }
     }
     // Only the explicit view=completed request may load terminal batch history.
     // Default view is actionable work (in progress or requiring operator attention).

@@ -59,11 +59,21 @@
     if (error) {
       return `<p class="factory-batch-quality-unavailable">Factory batch monitoring temporarily unavailable: ${esc(error)}. Refresh to retry; do not resubmit an uncertain approval.</p>`;
     }
+    if (data?.quality_status === "unavailable" || data?.ok === false) {
+      return '<p class="factory-batch-quality-unavailable">Quality Agent cannot verify authoritative batch status right now. Factory approvals are not blocked. Refresh monitoring later; do not resubmit uncertain approvals.</p>';
+    }
     if (!data || !Array.isArray(data.quality_signals)) {
       return '<p class="factory-batch-quality-unavailable">Worker has not supplied Quality Agent batch signals. Do not assume there are no findings.</p>';
     }
-    if (!data.job_id) return '<p class="subtle">No recent Factory batches in this view.</p>';
+    if (!data.job_id) {
+      return data?.quality_status === "partial"
+        ? '<p class="factory-batch-quality-unavailable">Partial batch monitoring window. No findings were returned from the scanned records; older activity was not verified.</p>'
+        : '<p class="subtle">No active Factory batches requiring attention in the checked window.</p>';
+    }
     const global = data.scope === "all";
+    const partialNotice = data?.quality_status === "partial"
+      ? '<p class="factory-batch-quality-unavailable">Partial monitoring snapshot: not all older batches were checked.</p>'
+      : "";
     const total = Number(data.total) || 0;
     const pending = Number(global ? data.totals?.pending : data.pending_count) || 0;
     const failed = Number(global ? data.totals?.failed : data.failed_count) || 0;
@@ -86,7 +96,7 @@
         <p class="factory-batch-quality-action">${esc(catalog.guidance)}</p>
       </li>`;
     }).join("");
-    return `<p class="factory-batch-quality-meta">${global ? `${Number(data.totals?.batches)||0} recent Factory batches` : `${total} latest batch outputs`} · ${pending} pending · ${failed} failed</p>
+    return `${partialNotice}<p class="factory-batch-quality-meta">${global ? `${Number(data.totals?.batches)||0} active Factory batches` : `${total} latest batch outputs`} · ${pending} pending · ${failed} failed</p>
       ${countMismatch ? '<p class="factory-batch-quality-unavailable">Batch totals disagree: investigate status reconciliation.</p>' : ""}
       ${signals.length ? `<p class="factory-batch-quality-heading">${signals.length} Quality Agent finding${signals.length === 1 ? "" : "s"} for this batch</p>
         <ul class="factory-batch-quality-list">${rowMarkup}</ul>`
@@ -95,7 +105,7 @@
 
   function render(profileId, data, error = "") {
     const metric = $("factoryBatchQualityMetric");
-    if (metric) metric.textContent = error ? "!" : String(data?.quality_signals?.length ?? "—");
+    if (metric) metric.textContent = error || data?.quality_status === "unavailable" ? "!" : String(data?.quality_signals?.length ?? "—");
     const html = panelMarkup({ profileId, data, error });
     for (const id of panelIds) {
       const node = $(id);
@@ -107,7 +117,9 @@
     const profileId = selectedProfile();
     const global = isFactoryView();
     const now = Date.now();
-    if (!force && state.profile === (global ? "all:" : "profile:") + profileId && now - state.lastRequest < 3000) return;
+    const scopeKey = (global ? "all:" : "profile:") + profileId;
+    if (!force && state.inFlight && state.profile === scopeKey) return;
+    if (!force && state.profile === scopeKey && now - state.lastRequest < 12000) return;
     if (!force && !panelIds.some(isVisible)) return;
     const sequence = ++state.sequence;
     state.profile = (global ? "all:" : "profile:") + profileId;
@@ -117,6 +129,7 @@
     try {
       const query = global ? new URLSearchParams({ scope: "all" }) : new URLSearchParams({ profile: profileId });
       if (global && profileId) query.set("factory_profile", profileId);
+      if (global) query.set("quality_only", "1");
       const response = await fetch("/api/factory/approval-batches?" + query, {
         method: "GET", credentials: "same-origin", cache: "no-store",
         headers: { Accept: "application/json" }
@@ -150,7 +163,7 @@
   });
   window.setInterval(() => {
     if (!document.hidden && panelIds.some(isVisible)) refresh().catch(() => {});
-  }, 15000);
+  }, 30000);
   refreshSoon();
   window.StudioFactoryBatchQuality = Object.freeze({ refresh });
 })();
