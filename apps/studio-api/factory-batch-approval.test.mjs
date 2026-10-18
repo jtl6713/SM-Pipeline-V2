@@ -126,22 +126,29 @@ test("Factory batch drain reuses one occupancy map like Approve All", () => {
   assert.match(drain, /result\?\.claimed && processed > 0 && pending > 0/);
 });
 
-test("Global Factory group submit batches Airtable preflight reads", () => {
+test("Global Factory group submit accepts from desk hints before Airtable", () => {
   // Group submit lives as a module sibling after the submit-route extract marker,
   // so assert against the live ESM source rather than the reconstructed Worker.
   const start = functions04.indexOf("async function factoryBatchGroupSubmitRoute(");
   assert.ok(start >= 0, "factoryBatchGroupSubmitRoute present");
   const end = functions04.indexOf("export async function factoryBatchCronResume(", start);
-  const group = functions04.slice(start, end > start ? end : start + 4000);
-  assert.match(group, /studioFetchApproveAllRecordsByIds\(env,ids\)/);
-  assert.match(group, /factoryResolveGroupOwnershipIds/);
-  assert.match(group, /SUBMIT_BUDGET_MS/);
-  assert.match(group, /Factory submit timed out verifying outputs before accept/);
+  const group = functions04.slice(start, end > start ? end : start + 8000);
+  assert.match(functions04, /function factoryGroupRecordsFromClientHints/);
+  assert.match(group, /factoryGroupRecordsFromClientHints\(ids, payload, policy\)/);
+  assert.match(group, /accept_mode: "client_hints"/);
   assert.match(group, /durable accept/);
   assert.match(group, /factoryMapSubmitAirtableError/);
+  assert.match(group, /Airtable is busy/);
+  // Happy path must not wait on N output GETs before enqueue.
+  const hintsIdx = group.indexOf("factoryGroupRecordsFromClientHints");
+  const enqueueIdx = group.indexOf("factoryApprovalGroupEnqueue");
+  assert.ok(hintsIdx >= 0 && enqueueIdx > hintsIdx, "client hints before enqueue");
   assert.doesNotMatch(
-    group.slice(0, group.indexOf("for (const id of ids)")),
-    /await airtableFetch\(env,env\.AIRTABLE_OUTPUT_TABLE_ID,id\)/,
+    group.slice(hintsIdx, enqueueIdx),
+    /studioFetchApproveAllRecordsByIds/,
   );
-  assert.match(group, /At least one selected output could not be loaded for global batch approval/);
+  // Legacy clients without profile_id still get a bounded Airtable fallback.
+  assert.match(functions04, /async function factoryGroupRecordsFromAirtablePreflight/);
+  assert.match(functions04, /SUBMIT_BUDGET_MS/);
+  assert.match(functions04, /Factory submit timed out verifying outputs before accept/);
 });
