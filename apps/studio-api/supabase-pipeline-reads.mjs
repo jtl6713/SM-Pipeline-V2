@@ -737,12 +737,27 @@ function matchesOpsQueueRequestFormula(fields = {}) {
 export async function listSupabaseFactoryDeskPack(env, { outputLimit = 800, requestLimit = 120 } = {}) {
   const outCap = Math.max(50, Math.min(2000, Number(outputLimit) || 800));
   const reqCap = Math.max(20, Math.min(300, Number(requestLimit) || 120));
-  const [outputRows, requestRows, ideaRows, profileRows] = await Promise.all([
+  // The global newest-output sample is NOT authoritative for Needs eyes.
+  // More than 800 scheduled posts can crowd every older Ready-for-Review output
+  // out of that sample (NYC had 30 actionable records while Factory showed 0).
+  // Fetch the review queue independently and paginate past Supabase's 1000-row
+  // response cap; do not silently convert an incomplete review scan into zero.
+  const [outputRows, reviewReadyRows, requestRows, ideaRows, profileRows] = await Promise.all([
     supabaseRest(
       env,
       `platform_outputs?do_not_publish=eq.false&output_status=neq.Published&output_status=neq.Cancelled`
         + `&select=${OUTPUT_SELECT}&order=output_number.desc.nullslast&limit=${outCap}`,
     ).catch(() => []),
+    supabaseRestAll(
+      env,
+      `platform_outputs?do_not_publish=eq.false`
+        + `&or=(output_status.eq.Ready%20for%20Review,review_status.eq.Review%20Sent)`
+        + `&select=${OUTPUT_SELECT}&order=output_number.desc.nullslast`,
+      { pageSize: 500, maxRows: 10000 },
+    ).then((rows) => {
+      if (rows.length >= 10000) throw new Error("Factory review-ready output scan exceeded safety ceiling");
+      return rows;
+    }),
     supabaseRest(
       env,
       `production_requests?request_status=neq.Cancelled&select=${REQUEST_SELECT}`
@@ -758,7 +773,13 @@ export async function listSupabaseFactoryDeskPack(env, { outputLimit = 800, requ
     ).catch(() => []),
   ]);
 
-  const shapedOutputs = (outputRows || [])
+  // Merge by authoritative output identity, retaining the independent
+  // review-ready scan even when its records predate the newest-output sample.
+  const outputById = new Map();
+  for (const row of [...(outputRows || []), ...(reviewReadyRows || [])]) {
+    if (row?.airtable_record_id) outputById.set(row.airtable_record_id, row);
+  }
+  const shapedOutputs = [...outputById.values()]
     .map(flattenOutputRow)
     .filter((row) => !String(row.test_run_id || "").trim())
     .map(airtableShapedOutputFromSupabase);

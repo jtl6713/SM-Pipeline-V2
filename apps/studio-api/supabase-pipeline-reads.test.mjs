@@ -17,6 +17,7 @@ import {
   mapAirtableProductionRequestToSupabase,
   packOutputListFields,
   supabaseRestAll,
+  listSupabaseFactoryDeskPack,
   syncAirtableContentRowToSupabase,
   syncProfilePipelineToSupabase,
   enqueueStudioSideEffectOutbox,
@@ -529,4 +530,68 @@ test("phase5 docs keep Airtable as write source of truth", async () => {
   assert.match(readme, /legacy export/);
   const sql = await readFile(path.join(here, "../../docs/supabase-migration/phase5/003_side_effect_outbox.sql"), "utf8");
   assert.match(sql, /create table if not exists studio_side_effect_outbox/);
+});
+
+
+test("Factory Needs eyes loads older review outputs beyond 800 newer scheduled posts", async () => {
+  const oldFetch = globalThis.fetch;
+  const urls = [];
+  const newer = Array.from({ length: 800 }, (_, i) => ({
+    airtable_record_id: `recSched${String(i).padStart(9, "0")}`,
+    output_number: 6000 - i, output_status: "Scheduled",
+    render_status: "Rendered", do_not_publish: false,
+    platform: "Instagram", studio_output_type: "Reel",
+  }));
+  const olderReview = Array.from({ length: 30 }, (_, i) => ({
+    airtable_record_id: `recReview${String(i).padStart(8, "0")}`,
+    output_number: 4700 - i, output_status: "Ready for Review",
+    review_status: "Review Sent", render_status: "Rendered",
+    do_not_publish: false, platform: "Instagram", studio_output_type: "Reel",
+    final_file_url: "https://example.test/ready.mp4",
+  }));
+  globalThis.fetch = async (url) => {
+    const href = String(url);
+    urls.push(href);
+    let rows = [];
+    if (href.includes("platform_outputs?") && href.includes("&or=(")) {
+      const q = new URL(href).searchParams;
+      rows = olderReview.slice(Number(q.get("offset") || 0),
+        Number(q.get("offset") || 0) + Number(q.get("limit") || 500));
+    } else if (href.includes("platform_outputs?")) {
+      rows = newer;
+    }
+    return { ok: true, async text() { return JSON.stringify(rows); } };
+  };
+  try {
+    const pack = await listSupabaseFactoryDeskPack(
+      { SUPABASE_URL: "https://example.supabase.co", SUPABASE_SERVICE_ROLE_KEY: "secret" },
+      { outputLimit: 800 },
+    );
+    assert.equal(pack.outputs.length, 830);
+    assert.equal(pack.reviewOutputs.length, 30);
+    assert.equal(pack.outputs.filter((row) => row.fields.Output_Status === "Ready for Review").length, 30);
+    assert.equal(pack.reviewOutputs[0].fields.Output_ID, 4700);
+    assert.ok(urls.some((url) => url.includes("or=(output_status.eq.Ready%20for%20Review,review_status.eq.Review%20Sent)")));
+    assert.ok(urls.some((url) => url.includes("&offset=0")));
+  } finally {
+    globalThis.fetch = oldFetch;
+  }
+});
+
+test("Factory review-ready query errors must not become a misleading empty lane", async () => {
+  const oldFetch = globalThis.fetch;
+  globalThis.fetch = async (url) => {
+    if (String(url).includes("&or=(")) {
+      return { ok: false, status: 503, async text() { return '{"message":"review scan unavailable"}'; } };
+    }
+    return { ok: true, async text() { return "[]"; } };
+  };
+  try {
+    await assert.rejects(
+      listSupabaseFactoryDeskPack({ SUPABASE_URL: "https://example.supabase.co", SUPABASE_SERVICE_ROLE_KEY: "secret" }),
+      /review scan unavailable/,
+    );
+  } finally {
+    globalThis.fetch = oldFetch;
+  }
 });
