@@ -9922,7 +9922,7 @@ export async function azAutoApproveIfReady(env, requestId, options = {}) {
   // timezone fills M1 then A1 then E1 then M2. Industry evening windows and
   // +3h occupancy bumps are what used to land NYC at 12:00 AM / 1:00 AM.
   const occupancyProfile = await item4ProductionProfileRecord(env, requestRecord).catch(() => null);
-  const occupiedByPlatform = await studioOccupiedSchedulesOrEmpty(env, { profile: occupancyProfile });
+  const occupiedByPlatform = await studioOccupiedSchedulesOrEmpty(env, { profile: occupancyProfile, requireComplete: true });
   const reservedAll = studioFlattenOccupiedByPlatform(occupiedByPlatform);
   const timeZone = await studioScheduleTimeZoneForRecord(env, requestRecord);
   const stamp = new Date().toISOString();
