@@ -6,8 +6,8 @@ const html = readFileSync(new URL("index.html", root), "utf8");
 const css = readFileSync(new URL("assets/production-render-layout-0678.css", root), "utf8");
 
 test("Rendering layout fix is linked and shipped with its cache-busted version", () => {
-assert.match(html, /production-render-layout-0678\.css\?v=0.6.712-active-factory-batches/);
-assert.match(html, /UI build 0.6.712/);
+assert.match(html, /production-render-layout-0678\.css\?v=0.6.713-factory-fullwidth-progress/);
+assert.match(html, /UI build 0.6.713/);
 });
 test("Production no longer crops a long timed script at an 880px shell", () => {
   assert.match(css, /#page-content\.production-page\s*\{[^}]*max-width:\s*1280px/);

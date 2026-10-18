@@ -9,6 +9,7 @@ const html=read("index.html");
 const desk=read("assets/factory-desk.js");
 const quality=read("assets/factory-batch-quality-0710.js");
 const css=read("assets/factory-batch-quality-0710.css");
+const layout=read("assets/factory-layout-0680.css");
 
 test("Factory is global by default with an independent optional profile filter", () => {
  new Function(desk);
@@ -72,4 +73,14 @@ test("Factory loads only active batches by default; completed history is explici
   assert.match(timer, /factoryBatchCompletedToggle[^]*?refreshFactoryCompletedBatches\(0\)/);
   assert.match(timer, /factoryBatchCompletedNext[^]*?state\.completedOffset \+ 20/);
   assert.match(desk, /previousActive\.some\(row => !liveIds\.has\(row\.job_id\)\)/);
+});
+
+test("Factory approval progress track spans entire row beneath right-aligned status", () => {
+ assert.match(desk,/class="factory-batch-mini-progress"/);
+ assert.match(layout,/\.factory-batch-activity-choice\{[^}]*position:relative;padding-bottom:18px/);
+ assert.match(layout, /\.factory-batch-activity-choice \.factory-batch-mini-progress\{[^}]*position:absolute;left:10px;right:10px;bottom:6px/);
+ assert.match(layout, /overflow:hidden;width:auto;max-width:none;margin:0/);
+ assert.match(desk,/style="width:\$\{percent\}%"/);
+ assert.match(layout, /\.factory-batch-activity-choice \.factory-batch-mini-progress\{left:6px;right:6px\}/);
+ assert.doesNotMatch(layout,/max-width:260px/);
 });
