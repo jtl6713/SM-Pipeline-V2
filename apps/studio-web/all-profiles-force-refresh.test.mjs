@@ -53,3 +53,19 @@ test("durable refresh status continues independently of Home visibility", () => 
   assert.match(source, /scheduleRefreshStatusPoll/);
   assert.match(source, /syncRefreshStatus\(\{ quiet: true \}\)/);
 });
+
+
+test("stale browser refresh intent cannot keep Home stuck on Refreshing", () => {
+  assert.match(source, /REFRESH_INTENT_MAX_MS = 150000/);
+  assert.match(source, /Date\.now\(\) - requestedMs >= REFRESH_INTENT_MAX_MS/);
+  assert.match(source, /clearRefreshIntent\(\);\n\s*return null;/);
+});
+
+test("durable completed or failed status overrides stale local operation identity", () => {
+  const start = source.indexOf("async function syncRefreshStatus");
+  const end = source.indexOf("async function forceRefresh", start);
+  const body = source.slice(start, end);
+  assert.match(body, /if \(status === "completed"\)[\s\S]*await finishVerifiedRefresh\(refresh\)/);
+  assert.doesNotMatch(body, /status === "completed"[\s\S]{0,500}intended === operationId/);
+  assert.match(body, /if \(status === "failed"\)[\s\S]*state\.manualRefreshing = false/);
+});
