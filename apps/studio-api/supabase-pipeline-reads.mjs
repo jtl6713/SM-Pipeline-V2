@@ -644,9 +644,13 @@ export async function listSupabaseOverviewPack(env, { profileAirtableIds = [], o
   // which silently dropped older Scheduled rows and crushed All Profiles totals.
   // Ideas are optional. The All Profiles hot path refreshes output counts without
   // waiting on idea_candidates; an incomplete idea page must not discard outputs.
+  // Home counts only outstanding rows. Published history made this scan exceed
+  // the 26s refresh budget and statement timeout. Blank status still counts:
+  // PostgREST neq drops nulls, and Airtable {!="Published"} keeps them.
+  const openOutputFilter = "and=(or(output_status.is.null,output_status.neq.Published),or(publish_status.is.null,publish_status.neq.Published))";
   const outputRows = await supabaseRestAll(
     env,
-    `platform_outputs?${profileFilter}&select=${OUTPUT_SELECT}&order=output_number.desc.nullslast`,
+    `platform_outputs?${profileFilter}&${openOutputFilter}&select=${OUTPUT_SELECT}&order=output_number.desc.nullslast`,
     { pageSize: 1000, maxRows: outCeiling },
   );
   let ideaRows = [];
