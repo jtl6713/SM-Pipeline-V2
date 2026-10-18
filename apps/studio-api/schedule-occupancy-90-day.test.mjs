@@ -47,9 +47,9 @@ test("Factory, Approve All, atomic approval, regeneration and Calendar save requ
   assert.match(approve, /requireComplete: true/);
   const seed = between(f02, "async function studioAtomicApplyPlatformOutputSeedSchedule", "/*__STUDIO_WORKER_END:studioAtomicApplyPlatformOutputSeedSchedule__*/");
   assert.match(seed, /requireComplete: true/);
-  const regeneration = between(f04, "export async function studio", "/*__STUDIO_WORKER_END:factoryBatchProcess__*/");
+  const regeneration = between(f04, "export async function studioAtomicApplyScheduleRegenEntry", "/*__STUDIO_WORKER_END:studioAtomicApplyScheduleRegenEntry__*/");
   assert.match(regeneration, /requireComplete: true/);
-  const calendar = between(f04, "export async function studio", "/*__STUDIO_WORKER_END:factoryBatchProcess__*/");
+  const calendar = between(f04, "export async function scheduleStudioPublishOutput", "/*__STUDIO_WORKER_END:scheduleStudioPublishOutput__*/");
   assert.match(calendar, /requireComplete: true/);
 });
 
