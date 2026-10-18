@@ -14140,7 +14140,16 @@ export async function factoryBatchProcess(env, profileId, requestId, ctx = null,
         ctx.waitUntil((async () => {
           // Local delay avoids a circular sleepMs import from worker.js.
           await new Promise((resolve) => setTimeout(resolve, 300));
-          return factoryBatchProcess(env, profileId, requestId, ctx, { continueSlice: continueSlice + 1 });
+          // Fairly hand off to the oldest eligible child of this profile, not
+          // necessarily the child that just used the profile lock. This avoids
+          // leaving sibling submissions stranded until cron recovery.
+          const siblings = await factoryBatchList(env.STUDIO_MEDIA, profileId, { limit: 40 });
+          const next = factoryBatchCronSelectJobs(
+            siblings.map((job) => ({ profileId, requestId: job.request_id, job })),
+            { maxProfiles: 1 },
+          )[0];
+          if (!next) return null;
+          return factoryBatchProcess(env, profileId, next.requestId, ctx, { continueSlice: continueSlice + 1 });
         })().catch((error) => console.warn("Factory batch continue", requestId, error)));
       }
       return result;
