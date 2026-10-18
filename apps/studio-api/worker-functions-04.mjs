@@ -4705,7 +4705,9 @@ export async function buildStudioProfilesOverviewRows(env, profiles, options = {
   const ideaCounts = overviewIdeaCountMap();
   const missingIdeaCounts = forceIdeas || profileIds.some((id) => !ideaCounts.has(String(id)));
 
-  if (studioReadSource(env) === "supabase" || preferSupabase) {
+  // Supabase overview reads are paused. preferSupabase stays in the call so a
+  // manual refresh still runs, but it must not open a database connection.
+  if (false && (studioReadSource(env) === "supabase" || preferSupabase)) {
     try {
       const pack = await listSupabaseOverviewPack(env, {
         profileAirtableIds: profileIds,
@@ -4727,10 +4729,6 @@ export async function buildStudioProfilesOverviewRows(env, profiles, options = {
       }
     } catch (error) {
       console.warn("supabase profiles overview read failed", error);
-      if (preferSupabase) {
-        const detail = String(error?.message || error || "supabase overview read failed").slice(0, 240);
-        throw new HttpError(429, `Airtable cooling down (overview-force-build budget); ${detail}`);
-      }
     }
   }
 
@@ -5160,7 +5158,8 @@ export async function profilesOverview(request, env, authorization, ctx) {
   if (snapshot?.rows?.length) {
     const supabaseBacked = studioProfilesOverviewReadSource(snapshot) === "supabase" || studioReadSource(env) === "supabase";
     const cooling = !supabaseBacked && airtableCooldownWaitMs() > AIRTABLE_SLOT_FAIL_FAST_MS;
-    if (!cooling && !manualRefreshing) scheduleStudioProfilesOverviewRefresh(ctx, env, authorization);
+    // Do not scheduleStudioProfilesOverviewRefresh from this poll. Every stale
+    // Home view was starting a Supabase rebuild and GET content_profiles 504'd.
     if (!manualRefreshing) scheduleStudioProfilesOverviewIdeasRefresh(ctx, env, authorization);
     return respondProfilesOverviewSoft(request, env, {
       records: snapshot.rows,

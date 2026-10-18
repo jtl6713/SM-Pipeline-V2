@@ -41,7 +41,7 @@ test("studioReadSource defaults to airtable and requires supabase secrets", () =
       SUPABASE_URL: "https://example.supabase.co",
       SUPABASE_SERVICE_ROLE_KEY: "sb_secret_test",
     }),
-    "supabase",
+    "airtable",
   );
 });
 
@@ -337,7 +337,7 @@ test("overview pack aborts a hung profile lookup before the 26s race", async () 
 
 test("worker wires supabase phase4 reads behind the same flag", async () => {
   const worker = readStudioWorkerSource();
-  assert.match(worker, /version: "0.10.662-overview-profile-timeout"/);
+  assert.match(worker, /version: "0.10.663-pause-supabase-reads"/);
   assert.match(worker, /studio_supabase_pipeline_reads_v1: true/);
   assert.match(worker, /studio_supabase_phase3_stable_v1: true/);
   assert.match(worker, /studio_supabase_phase4_reads_v1: true/);
