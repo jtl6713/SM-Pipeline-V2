@@ -5286,14 +5286,14 @@ export async function runStudioProfilesOverviewForceRefresh(env, authorization, 
       // A slow background rebuild must never cause the operator's explicit refresh
       // to fail. Give it a brief chance to finish, then start a fenced manual build.
       try {
-        await raceStudioOverviewBudget(cache.inflight, 1500, "overview-existing-build");
+        await raceStudioOverviewBudget(cache.inflight, 250, "overview-existing-build");
       } catch (error) {
         console.warn("profiles overview force refresh superseding slow background rebuild", error);
       }
     }
     const profiles = await raceStudioOverviewBudget(
       resolveAuthorizedContentProfiles(env, authorization),
-      3000,
+      1500,
       "overview-force-resolve",
     );
     if (!profiles?.length) throw new Error("Profiles overview refresh resolved no authorized profiles");
@@ -5305,7 +5305,7 @@ export async function runStudioProfilesOverviewForceRefresh(env, authorization, 
     cache.inflight = trackedBuild;
     // Keep the detached waitUntil operation safely inside Cloudflare's post-response
     // lifetime. If this budget is exceeded, state is marked failed instead of hanging.
-    const rows = await raceStudioOverviewBudget(trackedBuild, 20_000, "overview-force-build");
+    const rows = await raceStudioOverviewBudget(trackedBuild, 26_000, "overview-force-build");
     validateStudioProfilesOverviewRows(rows, profiles);
 
     const snapshotAt = Math.max(Date.now(), Number(refreshState?.baseline_snapshot_at || 0) + 1);
