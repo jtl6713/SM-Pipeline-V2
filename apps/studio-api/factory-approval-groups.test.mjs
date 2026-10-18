@@ -204,3 +204,23 @@ test("global submission route is explicitly gated and wired to parent/child ledg
   assert.match(worker,/if \(!policy\.enabled\) throw new HttpError\(403/);
   assert.match(worker,/groupRequestId:parent.request_id|group_request_id/);
 });
+
+test("global Factory group history separates active work from fully completed parents", async () => {
+  const bucket = new FakeR2();
+  const activeId = "factory_groups_active_test_0001";
+  const completedId = "factory_groups_done_test_0002";
+  const input = [outputs[0], outputs[1]];
+  const active = await factoryApprovalGroupEnqueue(bucket, {requestId: activeId, records: input});
+  const complete = await factoryApprovalGroupEnqueue(bucket, {requestId: completedId, records: input});
+  assert.equal(active.pending_count,2);
+  for (const child of complete.children) {
+    await factoryBatchDrain(bucket, {
+      profileId: child.profile_id, requestId: child.request_id,
+      approve: async () => {},
+    });
+  }
+  const live = await factoryApprovalGroupList(bucket,{mode:"active"});
+  const history = await factoryApprovalGroupList(bucket,{mode:"completed"});
+  assert.deepEqual(live.groups.map(x=>x.request_id),[activeId]);
+  assert.deepEqual(history.groups.map(x=>x.request_id),[completedId]);
+});
