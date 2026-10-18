@@ -473,3 +473,4 @@ Deploy merged scoped scheduling authority f8828617a31cf8855249660a58439818c90178
 2026-10-18 Factory same-profile fair handoff | PR 876 | immediately continue eligible sibling approval batches after profile lock release; isolated simultaneous-dispatch runtime acceptance passed | deploy Studio Worker only; no Studio UI changes.
 2026-10-18 MAE 90-day occupancy fix | PR 877 | scan maximum horizon and fail closed on incomplete occupancy across authoritative approvals and schedule writes | production Worker only; no UI or Supabase reads change.
 2026-10-18 Factory Quality Agent bounded R2 monitor | PR 880 | isolate and coalesce read-only QA status; never treat read error as all-clear; no approval/scheduling state mutations.
+2026-10-18 Studio API Factory Quality Agent rollout retry PR 882 | legitimate zero NYC review backlog integrity canary after approvals.
