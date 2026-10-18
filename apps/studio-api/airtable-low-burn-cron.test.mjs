@@ -30,7 +30,7 @@ function scheduledBody() {
 }
 
 test("Worker health advertises airtable burn-kill cron build", () => {
-  assert.match(worker, /version: "0.10.653-factory-schedule-perf"/);
+  assert.match(worker, /version: "0.10.654-factory-drain-continue"/);
   assert.match(worker, /studio_airtable_low_burn_cron_v1: true/);
   assert.match(worker, /studio_airtable_burn_kill_v1: true/);
   assert.match(worker, /studioCronAirtableCadence/);
@@ -48,11 +48,12 @@ test("production Worker keeps five-minute Studio cron and isolates Factory one-m
   const heavy = scheduled.indexOf("const cronInstant");
   assert.ok(isolated >= 0 && isolated < heavy, "Factory-only cron must dispatch before Studio heavy work");
   assert.match(scheduled, /if \(String\(event\?\.cron \|\| ""\)\.trim\(\) === "\* \* \* \* \*"\) \{[\s\S]*?await factoryBatchCronResume\(env, ctx\)/);
-  assert.match(scheduled, /if \(cooling > AIRTABLE_SLOT_FAIL_FAST_MS\)/);
+  assert.match(scheduled, /Factory one-minute cron continuing through Airtable cooldown/);
   assert.match(scheduled.slice(heavy), /await factoryBatchCronResume\(env, ctx\)/);
-  assert.ok(scheduled.indexOf('const coolMs = airtableCooldownWaitMs();') <
-    scheduled.lastIndexOf('await factoryBatchCronResume(env, ctx)'),
-    "five-minute fallback must respect Airtable cooldown before dispatch");
+  // Five-minute Studio work still respects cooling, but Factory resume must run first.
+  assert.ok(scheduled.indexOf('await factoryBatchCronResume(env, ctx)', heavy) <
+    scheduled.indexOf('const coolMs = airtableCooldownWaitMs();', heavy),
+    "five-minute Factory fallback must run before the Airtable cooldown return");
   assert.ok(scheduled.indexOf('await factoryBatchCronResume(env, ctx)', heavy) <
     scheduled.indexOf('runStudioAutonomousProduce(null, env,', heavy),
     "fallback Factory recovery runs before costly heavy Studio tasks");

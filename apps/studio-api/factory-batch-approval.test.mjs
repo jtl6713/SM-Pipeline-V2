@@ -121,6 +121,9 @@ test("Factory batch drain reuses one occupancy map like Approve All", () => {
   assert.match(drain, /filter\(\(item\) => !\["approved", "already_satisfied", "failed"\]/);
   assert.match(drain, /result\?\.scheduled_ms/);
   assert.match(drain, /\(occupiedByLane\[lane\] \|\|= \[\]\)\.push\(Number\(result\.scheduled_ms\)\)/);
+  assert.match(drain, /Factory batch continue/);
+  assert.match(drain, /continueSlice/);
+  assert.match(drain, /result\?\.claimed && processed > 0 && pending > 0/);
 });
 
 test("Global Factory group submit batches Airtable preflight reads", () => {
