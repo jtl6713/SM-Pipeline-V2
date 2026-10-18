@@ -1,101 +1,59 @@
 {
-  "correlation_id": "VISUAL-VOICEOVER-CANARY-ACCEPT-20261017-01",
+  "correlation_id": "RECOVER-STUCK-APPROVALS-5815-5819-20261018-01",
   "requests": [
     {
-      "name": "accept_visual_narration",
-      "method": "PATCH",
-      "path": "/api/outputs/recL2zjZc7XGRJyRt/creative",
+      "name": "approve_output_5815",
+      "method": "POST",
+      "path": "/api/factory/desk",
       "body": {
-        "visual_script_action": "accept",
-        "visual_script_base": {
-          "visual_revision": 2,
-          "visual_sequence_hash": "vt1-3e8613f7274a2921",
-          "script_revision": 1,
-          "script_hash": "vs1-ea1d5808a6a01ef0"
-        },
-        "visual_script_proposal": {
-          "schema_version": "studio.visual-script.1",
-          "proposal_id": "proposal-1792255621479-a6a01ef0",
-          "source": "fallback",
-          "mode": "selected",
-          "selected_scene_ids": [
-            "recn6KdvSU0RQGZ7E"
-          ],
-          "base_script_revision": 1,
-          "base_script_hash": "vs1-ea1d5808a6a01ef0",
-          "base_visual_revision": 2,
-          "base_visual_sequence_hash": "vt1-3e8613f7274a2921",
-          "proposed_script_hash": "vs1-473ae0a79a236410",
-          "scenes": [
-            {
-              "scene_id": "recn6KdvSU0RQGZ7E",
-              "ordinal": 1,
-              "voiceover_mode": "narrated",
-              "narration_locked": false,
-              "selected": true,
-              "duration_ms": 3400,
-              "max_words": 7,
-              "current_text": "Adler frames Chicago from above.",
-              "proposed_text": "Canary voice timing 39050892337.",
-              "changed": true,
-              "current_estimated_seconds": 2,
-              "proposed_estimated_seconds": 1.6,
-              "fits_visual": true,
-              "reason": "generated"
-            },
-            {
-              "scene_id": "rect0otSM9MzT33ch",
-              "ordinal": 2,
-              "voiceover_mode": "silent",
-              "narration_locked": false,
-              "selected": false,
-              "duration_ms": 3400,
-              "max_words": 7,
-              "current_text": "",
-              "proposed_text": "",
-              "changed": false,
-              "current_estimated_seconds": 0,
-              "proposed_estimated_seconds": 0,
-              "fits_visual": true,
-              "reason": "silent"
-            },
-            {
-              "scene_id": "recRmY8MoJcitSSmm",
-              "ordinal": 3,
-              "voiceover_mode": "narrated",
-              "narration_locked": false,
-              "selected": false,
-              "duration_ms": 3400,
-              "max_words": 7,
-              "current_text": "The skyline tightens in this pass.",
-              "proposed_text": "The skyline tightens in this pass.",
-              "changed": false,
-              "current_estimated_seconds": 2.4,
-              "proposed_estimated_seconds": 2.4,
-              "fits_visual": true,
-              "reason": "not_selected"
-            },
-            {
-              "scene_id": "recL1hsxbclNjsdW3",
-              "ordinal": 4,
-              "voiceover_mode": "narrated",
-              "narration_locked": false,
-              "selected": false,
-              "duration_ms": 3400,
-              "max_words": 7,
-              "current_text": "Hold the aerial for the finish.",
-              "proposed_text": "Hold the aerial for the finish.",
-              "changed": false,
-              "current_estimated_seconds": 2.4,
-              "proposed_estimated_seconds": 2.4,
-              "fits_visual": true,
-              "reason": "not_selected"
-            }
-          ],
-          "changed_scene_ids": [
-            "recn6KdvSU0RQGZ7E"
-          ]
-        }
+        "action": "approve",
+        "id": "recuuu8DJovkRRDQu",
+        "kind": "output",
+        "note": "Recovery of stuck Studio approval for Output 5815."
+      }
+    },
+    {
+      "name": "approve_output_5816",
+      "method": "POST",
+      "path": "/api/factory/desk",
+      "body": {
+        "action": "approve",
+        "id": "reckgqEXWSGy5vIy0",
+        "kind": "output",
+        "note": "Recovery of stuck Studio approval for Output 5816."
+      }
+    },
+    {
+      "name": "approve_output_5817",
+      "method": "POST",
+      "path": "/api/factory/desk",
+      "body": {
+        "action": "approve",
+        "id": "recjpDrGA3jWxACKZ",
+        "kind": "output",
+        "note": "Recovery of stuck Studio approval for Output 5817."
+      }
+    },
+    {
+      "name": "approve_output_5818",
+      "method": "POST",
+      "path": "/api/factory/desk",
+      "body": {
+        "action": "approve",
+        "id": "recXgQCWQy63Ziljv",
+        "kind": "output",
+        "note": "Recovery of stuck Studio approval for Output 5818."
+      }
+    },
+    {
+      "name": "approve_output_5819",
+      "method": "POST",
+      "path": "/api/factory/desk",
+      "body": {
+        "action": "approve",
+        "id": "recohDuJosjvxE1Rl",
+        "kind": "output",
+        "note": "Recovery of stuck Studio approval for Output 5819."
       }
     }
   ]
