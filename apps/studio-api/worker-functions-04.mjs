@@ -13913,7 +13913,7 @@ export async function factoryBatchStatusRoute(request, env, authorization) {
     if (!["active", "completed"].includes(view)) throw new HttpError(400, "Invalid Factory activity view");
     const rawOffset = String(url.searchParams.get("offset") || "0");
     const offset = Number(rawOffset);
-    if (!/^\\d{1,4}$/.test(rawOffset) || !Number.isSafeInteger(offset) || offset > 400) {
+    if (!/^\d{1,4}$/.test(rawOffset) || !Number.isSafeInteger(offset) || offset > 400) {
       throw new HttpError(400, "Invalid Factory history offset");
     }
     const limit = view === "completed" ? 20 : 40;
