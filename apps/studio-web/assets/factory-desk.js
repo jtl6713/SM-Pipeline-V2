@@ -8,6 +8,10 @@
     selectedOutputs: new Set(),
     submittingBatch: false,
     batch: null,
+    completedBatch: null,
+    completedOpen: false,
+    completedOffset: 0,
+    completedLoading: false,
     batchTimer: null,
     batchDetailsOpen: false,
     inspectedBatchKey: "",
@@ -394,7 +398,9 @@
   }
 
   function renderFactoryBatchActivity(batch) {
-    state.batch = batch || null;
+    if (batch?.view === "completed") state.completedBatch = batch;
+    else state.batch = batch || null;
+    const viewed = state.completedOpen ? state.completedBatch : state.batch;
     const summary = $("factoryBatchSummary");
     const count = $("factoryBatchMetricValue");
     const recent = $("factoryBatchRecentList");
@@ -402,26 +408,43 @@
     const retry = $("factoryBatchRetry");
     const details = $("factoryBatchDetails");
     const updated = $("factoryBatchUpdated");
+    const listHeading = $("factoryBatchListHeading");
+    const toggle = $("factoryBatchCompletedToggle");
+    const prev = $("factoryBatchCompletedPrev");
+    const next = $("factoryBatchCompletedNext");
+    const page = $("factoryBatchCompletedPage");
     if (!summary || !details) return;
-    const batches = Array.isArray(batch?.batches) ? batch.batches :
-      (batch?.job_id ? [batch] : []);
-    const totals = batch?.totals || {
+    const batches = Array.isArray(viewed?.batches) ? batch.batches :
+      (viewed?.job_id ? [batch] : []);
+    const totals = viewed?.totals || {
       batches: batches.length,
       active: batches.filter(row => ["queued", "running", "enqueuing"].includes(row.status)).length,
       approved: batches.reduce((sum, row) => sum + Number(row.approved_count || 0), 0),
       pending: batches.reduce((sum, row) => sum + Number(row.pending_count || 0), 0),
       failed: batches.reduce((sum, row) => sum + Number(row.failed_count || 0), 0),
     };
-    if (count) count.textContent = String(Number(totals.batches) || 0);
+    if (count) count.textContent = String(state.batch?.totals?.batches || 0);
+    if (listHeading) listHeading.textContent = state.completedOpen ? "Completed approvals" : "Active approvals";
+    if (toggle) {
+      toggle.textContent = state.completedOpen ? "Back to Active Batches" : "Completed Batches";
+      toggle.setAttribute("aria-pressed", String(state.completedOpen));
+    }
+    if (prev) prev.hidden = !state.completedOpen || state.completedOffset === 0;
+    if (next) next.hidden = !state.completedOpen || !viewed?.has_more;
+    if (page) {
+      page.hidden = !state.completedOpen || !viewed;
+      page.textContent = "Page " + (1 + Math.floor(state.completedOffset / 20));
+    }
     summary.textContent = `${Number(totals.active) || 0} active · ${Number(totals.approved) || 0} approved · ${Number(totals.pending) || 0} pending · ${Number(totals.failed) || 0} failed`;
-    if (updated) updated.textContent = batch?.history_complete === false
-      ? "Recent history (bounded window)" : "Latest activity · all matching profiles";
+    if (updated) updated.textContent = state.completedOpen
+      ? (state.completedLoading ? "Loading completed batches…" : "Loaded only on request")
+      : "Live · batches needing action";
     const latest = batches.find(row => row.job_id === state.inspectedBatchKey) || batches[0] || null;
     if (state.inspectedBatchKey && !batches.some(row => row.job_id === state.inspectedBatchKey)) {
       state.inspectedBatchKey = latest?.job_id || "";
     }
     if (recent) recent.innerHTML = batches.length
-      ? batches.slice(0, 8).map(row => {
+      ? batches.slice(0, state.completedOpen ? 20 : 40).map(row => {
         const item = (row.items || [])[0] || {};
         const groupLabel = row.group ? `${row.profile_ids?.length || 1} profiles`
           : factoryProfileLabel(row.profile_id);
@@ -447,7 +470,9 @@
           </span>
         </button>`;
       }).join("")
-      : '<p class="subtle">No recent approval batches in this Factory view.</p>';
+      : '<p class="subtle">' + (state.completedOpen
+        ? (state.completedLoading ? "Loading completed batches…" : "No completed batches in this page.")
+        : "No active approval batches. All clear.") + '</p>';
     if (inspect) {
       inspect.hidden = !latest;
       inspect.setAttribute("aria-expanded", String(state.batchDetailsOpen));
@@ -591,8 +616,10 @@
     const minInterval = Number(state.batch?.totals?.active || 0) ? 5000 : 30000;
     if (!force && state.batch && now - state.lastBatchFetchMs < minInterval) return state.batch;
     const params = new URLSearchParams({ scope: "all" });
+    params.set("view", "active");
     if (factoryProfileId()) params.set("factory_profile", factoryProfileId());
     try {
+      const previousActive = (state.batch?.batches || []).filter(row => row?.job_id);
       const batch = await fetchJson(`/api/factory/approval-batches?${params.toString()}`, { cache: "no-store" });
       state.lastBatchFetchMs = Date.now();
       if (typeof batch.approvals_enabled === "boolean") {
@@ -607,11 +634,46 @@
       reconcilePendingGlobalSelection(batch);
       document.dispatchEvent(new CustomEvent("factory:batch-status", { detail: batch }));
       reconcileFinishedBatchDesk(batch?.batches?.[0] || batch).catch(() => {});
+      // The API intentionally omits completed jobs from the active feed.
+      // When a running batch disappears, refresh the authoritative Desk once,
+      // without fetching terminal batch history or leaving stale Needs Eyes rows.
+      const liveIds = new Set((batch.batches || []).map(row => row.job_id));
+      if (previousActive.some(row => !liveIds.has(row.job_id)) &&
+          !state.loading && !state.reconcilingBatchDesk) {
+        state.reconcilingBatchDesk = true;
+        fetchJson("/api/factory/desk", { cache: "no-store" })
+          .then(desk => { state.desk = desk; renderDesk(desk); })
+          .catch(() => {})
+          .finally(() => { state.reconcilingBatchDesk = false; });
+      }
       return batch;
     } catch (error) {
       const summary = $("factoryBatchSummary");
       if (summary) summary.textContent = `Batch status temporarily unavailable: ${error.message || error}. Retry status refresh; do not resubmit blindly.`;
       return null;
+    }
+  }
+
+  // Terminal history is never fetched by Factory's load, refresh, or status timer.
+  // An explicit Completed Batches click is the only entry point here.
+  async function refreshFactoryCompletedBatches(offset = 0) {
+    if (!state.completedOpen || state.completedLoading) return;
+    state.completedLoading = true;
+    const profileAtRequest = factoryProfileId();
+    state.completedOffset = offset;
+    renderFactoryBatchActivity(state.batch);
+    const params = new URLSearchParams({ scope: "all", view: "completed", offset: String(offset) });
+    if (profileAtRequest) params.set("factory_profile", profileAtRequest);
+    try {
+      const completed = await fetchJson(`/api/factory/approval-batches?${params.toString()}`, { cache: "no-store" });
+      if (!state.completedOpen || factoryProfileId() !== profileAtRequest) return;
+      renderFactoryBatchActivity(completed);
+    } catch (error) {
+      const node = $("factoryBatchUpdated");
+      if (node && state.completedOpen) node.textContent = "Completed history unavailable: " + (error.message || error);
+    } finally {
+      state.completedLoading = false;
+      if (state.completedOpen) renderFactoryBatchActivity(state.batch);
     }
   }
 
@@ -1474,6 +1536,22 @@
     if (state.desk) renderDesk(state.desk);
   });
   $("factoryBatchRefresh")?.addEventListener("click", () => { refreshFactoryBatchActivity(true).catch(() => {}); });
+  $("factoryBatchCompletedToggle")?.addEventListener("click", () => {
+    state.completedOpen = !state.completedOpen;
+    state.batchDetailsOpen = false;
+    state.inspectedBatchKey = "";
+    if (state.completedOpen) {
+      state.completedBatch = null;
+      state.completedOffset = 0;
+      refreshFactoryCompletedBatches(0).catch(() => {});
+    } else renderFactoryBatchActivity(state.batch);
+  });
+  $("factoryBatchCompletedPrev")?.addEventListener("click", () => {
+    refreshFactoryCompletedBatches(Math.max(0, state.completedOffset - 20)).catch(() => {});
+  });
+  $("factoryBatchCompletedNext")?.addEventListener("click", () => {
+    if (state.completedBatch?.has_more) refreshFactoryCompletedBatches(state.completedOffset + 20).catch(() => {});
+  });
   $("factoryBatchRetry")?.addEventListener("click", () => { retryFactoryBatchFailures().catch(() => {}); });
   $("factoryBatchInspect")?.addEventListener("click", () => {
     state.batchDetailsOpen = !state.batchDetailsOpen;
@@ -1483,6 +1561,10 @@
     if (!document.hidden && $("page-factory")?.classList.contains("active")) refreshFactoryBatchActivity().catch(() => {});
   });
   $("factoryProfileFilter")?.addEventListener("change", () => {
+    state.completedOpen = false;
+    state.completedBatch = null;
+    state.completedOffset = 0;
+    state.inspectedBatchKey = "";
     if (state.desk) renderDesk(state.desk);
     refreshFactoryBatchActivity(true).catch(() => {});
     window.StudioFactoryBatchQuality?.refresh?.(true);
