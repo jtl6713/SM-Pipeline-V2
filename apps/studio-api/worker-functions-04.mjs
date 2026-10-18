@@ -26,7 +26,7 @@ import { factoryBatchRolloutPolicy, factoryBatchRolloutAcceptsOutput, factoryBat
 import {
   factoryBatchEnqueue, factoryBatchRead, factoryBatchList, factoryBatchListGlobal,
   factoryBatchDrain, factoryBatchRetry, factoryBatchSummary, factoryBatchCounts,
-  factoryBatchQualitySignals, factoryBatchReconcile, factoryBatchCronScan,
+  factoryBatchQualitySignals, factoryBatchNeedsAttention, factoryBatchReconcile, factoryBatchCronScan,
   factoryBatchCronSelectJobs,
 } from "./factory-approval-queue.mjs";
 import { factoryGlobalPolicy, factoryGlobalAcceptsOutput } from "./factory-batch-global-policy.mjs";
@@ -13896,48 +13896,66 @@ export async function getStudioLibraryIntakeStatus(request, env, url) {
 export async function factoryBatchStatusRoute(request, env, authorization) {
   const url = new URL(request.url);
   if (url.searchParams.get("scope") === "all") {
-    // The Factory desk itself is global. Never inherit the header's selected
-    // profile for batch history; a Factory-only filter is explicit.
+    // Only the explicit view=completed request may load terminal batch history.
+    // Default view is actionable work (in progress or requiring operator attention).
+    const view = String(url.searchParams.get("view") || "active");
+    if (!["active", "completed"].includes(view)) throw new HttpError(400, "Invalid Factory activity view");
+    const rawOffset = String(url.searchParams.get("offset") || "0");
+    const offset = Number(rawOffset);
+    if (!/^\\d{1,4}$/.test(rawOffset) || !Number.isSafeInteger(offset) || offset > 400) {
+      throw new HttpError(400, "Invalid Factory history offset");
+    }
+    const limit = view === "completed" ? 20 : 40;
+    // The Factory desk is global; the optional Factory-only profile filter is independent
+    // from the Studio header's selected profile.
     const factoryProfile = String(url.searchParams.get("factory_profile") || "").trim();
     if (factoryProfile && !/^rec[A-Za-z0-9]+$/.test(factoryProfile)) {
       throw new HttpError(400, "Invalid Factory profile filter");
     }
-    const history = await factoryBatchListGlobal(env.STUDIO_MEDIA, {
-      profileId: factoryProfile, limit: 40, maxScan: 3000,
-    });
-    const groupHistory=await factoryApprovalGroupList(env.STUDIO_MEDIA,{
-      profileId:factoryProfile,limit:40,maxScan:2000,
-    });
-    const groupedChildIds=new Set(groupHistory.groups.flatMap(group=>
-      group.children.map(child=>child.request_id)));
-    const batches=[
-      ...history.jobs.filter(job=>!groupedChildIds.has(job.request_id)).map(job=>({
-        ...factoryBatchSummary(job),
-        quality_signals:factoryBatchQualitySignals(job),
+    // Request a bounded candidate window from each storage family before merging
+    // by timestamp. Do not load either family's terminal rows for the default view.
+    const window = offset + limit + 1;
+    const [history, groupHistory] = await Promise.all([
+      factoryBatchListGlobal(env.STUDIO_MEDIA, {
+        profileId: factoryProfile, mode: view, limit: window, maxScan: 3000,
+      }),
+      factoryApprovalGroupList(env.STUDIO_MEDIA, {
+        profileId: factoryProfile, mode: view, limit: window, maxScan: 2000,
+      }),
+    ]);
+    const visible = [
+      ...history.jobs.filter(job => !job.group_request_id).map(job => ({
+        ...factoryBatchSummary(job), quality_signals: factoryBatchQualitySignals(job),
       })),
       ...groupHistory.groups,
-    ].sort((a,b)=>Date.parse(b.created_at||"")-Date.parse(a.created_at||"")).slice(0,40);
+    ].filter(job => view === "active"
+      ? factoryBatchNeedsAttention(job) : !factoryBatchNeedsAttention(job))
+      .sort((a,b) => Date.parse(b.created_at || "") - Date.parse(a.created_at || ""));
+    const batches = visible.slice(offset, offset + limit);
+    const hasMore = visible.length > offset + limit ||
+      history.has_more || groupHistory.has_more;
     const qualitySignals = batches.flatMap(job => (job.quality_signals || [])
       .map(signal => ({ ...signal, profile_id: signal.profile_id || job.profile_id,
         job_id: job.job_id, output_ids: (job.items || []).map(row => row.output_id).filter(Boolean) })));
     const totals = {
       batches: batches.length,
-      active: batches.filter(job => ["queued", "running"].includes(job.status)).length,
-      completed: batches.filter(job => job.status === "completed").length,
-      failed_batches: batches.filter(job => job.status === "failed").length,
+      active: batches.filter(factoryBatchNeedsAttention).length,
+      completed: batches.filter(job => !factoryBatchNeedsAttention(job)).length,
+      failed_batches: batches.filter(job => job.failed_count > 0).length,
       approved: batches.reduce((sum, job) => sum + job.approved_count, 0),
       pending: batches.reduce((sum, job) => sum + job.pending_count, 0),
       failed: batches.reduce((sum, job) => sum + job.failed_count, 0),
       findings: qualitySignals.length,
     };
     return respond(request, env, {
-      ...(batches[0]||factoryBatchSummary(null)),
-      scope: "all", filter_profile_id: factoryProfile || null,
+      ...(batches[0] || factoryBatchSummary(null)),
+      scope: "all", view, offset, page_limit: limit, has_more: hasMore,
+      filter_profile_id: factoryProfile || null,
       batches, totals, quality_signals: qualitySignals,
       history_complete: history.complete && groupHistory.complete,
-      history_scanned: history.scanned+groupHistory.scanned,
-      approvals_enabled: factoryBatchRolloutPolicy(env).enabled||factoryGlobalPolicy(env).enabled,
-      rollout: factoryBatchRolloutPolicy(env), global_rollout:factoryGlobalPolicy(env),
+      history_scanned: history.scanned + groupHistory.scanned,
+      approvals_enabled: factoryBatchRolloutPolicy(env).enabled || factoryGlobalPolicy(env).enabled,
+      rollout: factoryBatchRolloutPolicy(env), global_rollout: factoryGlobalPolicy(env),
     });
   }
   const profile = await resolveWorkingContentProfile(env, authorization, requestedProfileId(url, null));
