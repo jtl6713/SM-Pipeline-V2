@@ -1,6 +1,10 @@
 name: Live Synthetic Scheduling Reservation Canary
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - 'deploy/schedule-reservation-synthetic-canary.txt'
   workflow_dispatch:
     inputs:
       confirmation:
@@ -17,7 +21,7 @@ concurrency:
 
 jobs:
   canary:
-    if: ${{ inputs.confirmation == 'RUN-SYNTHETIC-DO-CANARY' }}
+    if: ${{ github.event_name == 'push' || inputs.confirmation == 'RUN-SYNTHETIC-DO-CANARY' }}
     runs-on: ubuntu-latest
     timeout-minutes: 12
     env:
