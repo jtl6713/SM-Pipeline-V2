@@ -13978,9 +13978,10 @@ export async function factoryBatchStatusRoute(request, env, authorization) {
               })));
             return {
               ok: true, scope: "all", quality_only: true,
-              quality_status: history.complete ? "ok" : "partial",
+              quality_status: history.complete && !history.has_more ? "ok" : "partial",
               monitored_at: new Date().toISOString(),
-              history_complete: history.complete, history_scanned: history.scanned,
+              history_complete: history.complete && !history.has_more,
+              history_scanned: history.scanned,
               job_id: batches[0]?.job_id || null,
               batches, quality_signals: signals,
               totals: {
