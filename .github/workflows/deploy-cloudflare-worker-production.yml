@@ -572,7 +572,8 @@ jobs:
           test "$ACCEPTED" = "1"
 
           COMPLETE=0
-          for attempt in $(seq 1 60); do
+          BUDGET_RETRIES=0
+          for attempt in $(seq 1 90); do
             curl -fsS --max-time 60 "$BASE/overview-status" -o /tmp/overview-refresh-status.json
             STATUS=$(jq -r '.refresh.status // .status // ""' /tmp/overview-refresh-status.json)
             if [[ "$STATUS" == "completed" ]]; then
@@ -580,6 +581,23 @@ jobs:
               break
             fi
             if [[ "$STATUS" == "failed" ]]; then
+              ERROR=$(jq -r '.refresh.error // ""' /tmp/overview-refresh-status.json)
+              # The 26s label says Airtable cooling even when the build is waiting on a
+              # saturated Supabase pool. The new Worker is already live here, so give
+              # the pool time to drain and try the canary again before rolling it back.
+              if [[ "$ERROR" == *"overview-force-build budget"* ]] && (( BUDGET_RETRIES < 6 )); then
+                BUDGET_RETRIES=$((BUDGET_RETRIES + 1))
+                echo "Overview force refresh exceeded the 26s build budget (retry $BUDGET_RETRIES/6)" >&2
+                jq -c '.refresh | {status,error,component_status,duration_ms}' /tmp/overview-refresh-status.json >&2 || true
+                sleep 8
+                CODE=$(curl -sS --max-time 60 -o /tmp/overview-refresh-start.json -w '%{http_code}' -X POST "$BASE/overview-refresh" || true)
+                RETRY_STATUS=$(jq -r '.refresh.status // .status // ""' /tmp/overview-refresh-start.json 2>/dev/null || true)
+                echo "Overview force refresh retry http=$CODE status=$RETRY_STATUS" >&2
+                if [[ "$CODE" =~ ^20[02]$ ]] && [[ "$RETRY_STATUS" == "refreshing" || "$RETRY_STATUS" == "completed" || "$RETRY_STATUS" == "cooling_down" ]]; then
+                  sleep 8
+                  continue
+                fi
+              fi
               echo "Overview force refresh failed in production" >&2
               jq -c '.refresh | {status,error,component_status,duration_ms}' /tmp/overview-refresh-status.json >&2 || true
               exit 1
