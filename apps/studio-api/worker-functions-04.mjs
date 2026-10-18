@@ -9779,7 +9779,10 @@ export async function getStudioOperationsQueue(request, env, authorization) {
       filterFormula: OPS_QUEUE_RENDER_FORMULA,
     })),
     settleList("review", listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
-      limit: 500,
+      // Review-ready is an independent priority lane, not a top-500 sample.
+      // The live backlog already approaches 500; do not silently hide older
+      // review outputs when Supabase is unavailable.
+      limit: 2500,
       sortField: "Output_ID",
       sortDirection: "desc",
       fields: OPS_QUEUE_OUTPUT_FIELDS,
