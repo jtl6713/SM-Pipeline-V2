@@ -4744,46 +4744,72 @@ export async function buildStudioProfilesOverviewRows(env, profiles, options = {
     : `AND({Promoted_Content_Record_ID}=BLANK(),{Content Items}=BLANK())`;
   let airtableIdeaRows = null;
   if (!usedSupabaseOutputs) {
-    // Fetch outputs and the minimal Ideas projection in parallel. Airtable request
-    // pacing remains serialized by airtableRequestSlot(), but interleaving the two
-    // paginated scans avoids making the force refresh wait for one complete table
-    // before the other can begin.
-    const [freshOutputs, freshIdeas] = await Promise.all([
-      listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
-        limit: STUDIO_PROFILES_OVERVIEW_OUTPUT_LIMIT,
-        filterFormula: outputFormula,
-        sortField: "Output_ID",
-        sortDirection: "desc",
-        fields: OUTPUT_LIST_FIELDS,
-      }),
-      listRecords(env, env.AIRTABLE_IDEA_TABLE_ID, {
-        limit: STUDIO_PROFILES_OVERVIEW_IDEA_LIMIT,
-        filterFormula: ideaFormula,
-        fields: ["Content_Profile", "Promoted_Content_Record_ID", "Content Items"],
-      }),
-    ]);
-    outputRows = freshOutputs;
-    airtableIdeaRows = freshIdeas;
-    if (outputRows.length >= STUDIO_PROFILES_OVERVIEW_OUTPUT_LIMIT) {
-      throw new Error("Profiles overview outputs exceeded complete-scan safety ceiling");
+    // Scan each profile independently and in parallel. Airtable request starts are
+    // still globally paced by airtableRequestSlot(), but network waits overlap.
+    // This avoids one 15–25 page serial cursor across all cities, which made an
+    // explicit Home refresh exceed the Worker lifetime even though each city is small.
+    const perProfile = await Promise.all(profileList.map(async (profile) => {
+      const profileFormula = contentProfileFilterFormula(profile);
+      const profileOutputFormula = profileFormula
+        ? `AND(${profileFormula},{Output_Status}!="Published",{Publish_Status}!="Published")`
+        : `AND({Output_Status}!="Published",{Publish_Status}!="Published")`;
+      const profileIdeaFormula = profileFormula
+        ? `AND(${profileFormula},{Promoted_Content_Record_ID}=BLANK(),{Content Items}=BLANK())`
+        : `AND({Promoted_Content_Record_ID}=BLANK(),{Content Items}=BLANK())`;
+      const [outputs, ideas] = await Promise.all([
+        listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
+          limit: STUDIO_PROFILES_OVERVIEW_OUTPUT_LIMIT,
+          filterFormula: profileOutputFormula,
+          sortField: "Output_ID",
+          sortDirection: "desc",
+          fields: OUTPUT_LIST_FIELDS,
+        }),
+        listRecords(env, env.AIRTABLE_IDEA_TABLE_ID, {
+          limit: STUDIO_PROFILES_OVERVIEW_IDEA_LIMIT,
+          filterFormula: profileIdeaFormula,
+          fields: ["Content_Profile", "Promoted_Content_Record_ID", "Content Items"],
+        }),
+      ]);
+      if (outputs.length >= STUDIO_PROFILES_OVERVIEW_OUTPUT_LIMIT) {
+        throw new Error(`Profiles overview outputs exceeded complete-scan safety ceiling for ${profile?.id || "profile"}`);
+      }
+      if (ideas.length >= STUDIO_PROFILES_OVERVIEW_IDEA_LIMIT) {
+        throw new Error(`Profiles overview ideas exceeded complete-scan safety ceiling for ${profile?.id || "profile"}`);
+      }
+      return { outputs, ideas };
+    }));
+    const outputById = new Map();
+    const ideaById = new Map();
+    for (const pack of perProfile) {
+      for (const row of pack.outputs || []) if (row?.id) outputById.set(row.id, row);
+      for (const row of pack.ideas || []) if (row?.id) ideaById.set(row.id, row);
     }
-    if (airtableIdeaRows.length >= STUDIO_PROFILES_OVERVIEW_IDEA_LIMIT) {
-      throw new Error("Profiles overview ideas exceeded complete-scan safety ceiling");
-    }
+    outputRows = [...outputById.values()];
+    airtableIdeaRows = [...ideaById.values()];
     readSource = "airtable";
   }
 
   // If the Supabase idea pack is incomplete, fall back to Airtable for manual
   // force refresh rather than publishing an incomplete Ideas count.
   if (usedSupabaseOutputs && forceIdeas && !supabaseIdeasUsable) {
-    airtableIdeaRows = await listRecords(env, env.AIRTABLE_IDEA_TABLE_ID, {
-      limit: STUDIO_PROFILES_OVERVIEW_IDEA_LIMIT,
-      filterFormula: ideaFormula,
-      fields: ["Content_Profile", "Promoted_Content_Record_ID", "Content Items"],
-    });
-    if (airtableIdeaRows.length >= STUDIO_PROFILES_OVERVIEW_IDEA_LIMIT) {
-      throw new Error("Profiles overview ideas exceeded complete-scan safety ceiling");
-    }
+    const ideaPacks = await Promise.all(profileList.map(async (profile) => {
+      const profileFormula = contentProfileFilterFormula(profile);
+      const profileIdeaFormula = profileFormula
+        ? `AND(${profileFormula},{Promoted_Content_Record_ID}=BLANK(),{Content Items}=BLANK())`
+        : `AND({Promoted_Content_Record_ID}=BLANK(),{Content Items}=BLANK())`;
+      const rows = await listRecords(env, env.AIRTABLE_IDEA_TABLE_ID, {
+        limit: STUDIO_PROFILES_OVERVIEW_IDEA_LIMIT,
+        filterFormula: profileIdeaFormula,
+        fields: ["Content_Profile", "Promoted_Content_Record_ID", "Content Items"],
+      });
+      if (rows.length >= STUDIO_PROFILES_OVERVIEW_IDEA_LIMIT) {
+        throw new Error(`Profiles overview ideas exceeded complete-scan safety ceiling for ${profile?.id || "profile"}`);
+      }
+      return rows;
+    }));
+    const ideaById = new Map();
+    for (const rows of ideaPacks) for (const row of rows || []) if (row?.id) ideaById.set(row.id, row);
+    airtableIdeaRows = [...ideaById.values()];
   }
 
   // Only Supabase-backed rows need the Airtable live-publish overlay. A direct
