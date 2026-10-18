@@ -439,3 +439,4 @@ Deploy Factory ambiguous-submit reconciliation 2026-10-17. PR #817. Recover exac
 2026-10-18 UI 0.6.718 Factory batch and content expand/collapse toggle | second click closes selected batch details and Needs Eyes content items; preserve collapsed state across activity refresh; regression tests in Pages deployment gate; deploy Pages only and verify custom domain.
 2026-10-18 Retry Studio UI 0.6.718 Factory expand-collapse release after aligning pinned UI regression assertions across Studio web tests; preserve full Pages regression and custom-domain verification.
 2026-10-18 Factory Quality Agent UI monitor | PR 880 | fetch lightweight quality-only response, label degraded/partial snapshots accurately, poll every 30 seconds.
+2026-10-18 Studio UI 0.6.719 quality monitoring release | valid version increment and cache identity.
