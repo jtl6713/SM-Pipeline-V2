@@ -7365,14 +7365,9 @@ export function studioOccupiedMsFromRow(row, now = Date.now()) {
 }
 /*__STUDIO_WORKER_END:studioOccupiedMsFromRow__*/
 
-export async function studioLoadOccupiedScheduleRows(env, { profile = null } = {}) {
+export async function studioLoadOccupiedScheduleRows(env, { profile = null, requireComplete = false } = {}) {
   const now = Date.now();
-  const cache = studioOccupiedCacheSlot(profile);
-  if (cache.rows && now - cache.at < STUDIO_OCCUPIED_CACHE_MS) {
-    return cache.rows;
-  }
-  if (cache.inflight) return cache.inflight;
-  cache.inflight = listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
+  const fetchRows = () => listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
     limit: STUDIO_OCCUPIED_LIST_LIMIT,
     sortField: "Scheduled_Post_Date",
     sortDirection: "asc",
@@ -7380,7 +7375,29 @@ export async function studioLoadOccupiedScheduleRows(env, { profile = null } = {
     // Platform Outputs has Content_Profile (lookup) but no Brand field.
     // Requesting Brand 422s Airtable and 500s calendar Save Schedule.
     fields: ["Platform", "Scheduled_Post_Date", "YouTube_Scheduled_Publish_At", "Studio_Scheduled_At", "Publish_Status", "Studio_Output_Type", "Format", "Content_Profile"],
-  }).then((rows) => {
+  });
+  // Mutations must NEVER interpret an unavailable or truncated calendar as
+  // empty capacity. Strict reads bypass the best-effort UI cache and fail closed.
+  if (requireComplete) {
+    if (!profile?.id) throw new HttpError(503, "Profile is required to reserve MAE capacity");
+    let rows;
+    try {
+      rows = await fetchRows();
+    } catch (error) {
+      console.warn("authoritative MAE occupancy read failed", error);
+      throw new HttpError(503, "Cannot verify MAE occupancy; approval or reschedule was not committed");
+    }
+    if (!Array.isArray(rows) || rows.length >= STUDIO_OCCUPIED_LIST_LIMIT) {
+      throw new HttpError(503, "MAE occupancy result is incomplete; scheduling blocked to prevent collisions");
+    }
+    return rows;
+  }
+  const cache = studioOccupiedCacheSlot(profile);
+  if (cache.rows && now - cache.at < STUDIO_OCCUPIED_CACHE_MS) {
+    return cache.rows;
+  }
+  if (cache.inflight) return cache.inflight;
+  cache.inflight = fetchRows().then((rows) => {
     cache.at = Date.now();
     cache.rows = rows || [];
     cache.inflight = null;
@@ -7395,9 +7412,9 @@ export async function studioLoadOccupiedScheduleRows(env, { profile = null } = {
 }
 /*__STUDIO_WORKER_END:studioLoadOccupiedScheduleRows__*/
 
-export async function studioLoadOccupiedSchedules(env, { excludeIds = [], profile = null } = {}) {
+export async function studioLoadOccupiedSchedules(env, { excludeIds = [], profile = null, requireComplete = false } = {}) {
   const skip = new Set((excludeIds || []).filter(Boolean));
-  const rows = await studioLoadOccupiedScheduleRows(env, { profile });
+  const rows = await studioLoadOccupiedScheduleRows(env, { profile, requireComplete });
   const now = Date.now();
   const byLane = {};
   for (const row of rows || []) {
