@@ -13140,6 +13140,7 @@ export async function scheduleStudioPublishOutput(request, env, url, authorizati
       : await studioOccupiedSchedulesOrEmpty(env, {
         excludeIds: [match[1]],
         profile: await item4ProductionProfileRecord(env, existing).catch(() => null),
+        requireComplete: true,
       });
     const timeZone = await studioScheduleTimeZoneForRecord(env, existing, payload);
     const fields = studioPublishScheduleFields(
