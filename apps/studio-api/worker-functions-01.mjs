@@ -3,6 +3,7 @@ import { createProfileOnboarding } from "./profile-onboarding.mjs";
 import {
   studioReadSource,
   studioSupabaseConfigured,
+  supabaseCircuitOpen,
   listSupabasePipelineOutputs,
   listSupabaseScheduleGrid,
   listSupabaseContentItems,
@@ -944,6 +945,7 @@ export function studioReadCacheDropPrefix(prefix) {
 
 export async function studioSupabaseWriteThroughOutput(env, record, label = "output") {
   if (!studioSupabaseConfigured(env) || !record?.id) return { skipped: true };
+  if (supabaseCircuitOpen()) return { skipped: true, reason: "supabase_circuit_open" };
   try {
     const result = await syncAirtableOutputRowToSupabase(env, record);
     studioMarkMappedListDirty();
@@ -959,6 +961,7 @@ export async function studioSupabaseWriteThroughOutput(env, record, label = "out
 
 export async function studioSupabaseWriteThroughContent(env, record, label = "content") {
   if (!studioSupabaseConfigured(env) || !record?.id) return { skipped: true };
+  if (supabaseCircuitOpen()) return { skipped: true, reason: "supabase_circuit_open" };
   try {
     const result = await syncAirtableContentRowToSupabase(env, record);
     studioReadCacheDropPrefix("content-labels:");
@@ -1010,6 +1013,7 @@ export async function studioSupabaseWriteThroughAirtableMutation(env, tableId, m
   const verb = String(method || "GET").toUpperCase();
   if (verb === "GET" || verb === "HEAD" || verb === "DELETE") return { skipped: true, reason: "read" };
   if (!studioSupabaseConfigured(env)) return { skipped: true, reason: "supabase_not_configured" };
+  if (supabaseCircuitOpen()) return { skipped: true, reason: "supabase_circuit_open" };
   const table = String(tableId || "");
   const kind = env?.AIRTABLE_OUTPUT_TABLE_ID && table === env.AIRTABLE_OUTPUT_TABLE_ID
     ? "output"
@@ -1106,7 +1110,7 @@ export async function airtableBatchCreate(env, tableId, fieldRows, { typecast = 
 }
 /*__STUDIO_WORKER_END:airtableBatchCreate__*/
 
-export async function airtableBatchUpdate(env, tableId, updates, { typecast = true } = {}) {
+export async function airtableBatchUpdate(env, tableId, updates, { typecast = true, skipSupabaseWriteThrough = false } = {}) {
   const rows = Array.isArray(updates) ? updates.filter((row) => row?.id && row?.fields) : [];
   const updated = [];
   for (let i = 0; i < rows.length; i += AIRTABLE_BATCH_LIMIT) {
@@ -1116,6 +1120,7 @@ export async function airtableBatchUpdate(env, tableId, updates, { typecast = tr
     }));
     const body = await airtableFetch(env, tableId, "", {
       method: "PATCH",
+      skipSupabaseWriteThrough,
       body: JSON.stringify({ records: chunk, typecast }),
     });
     updated.push(...(Array.isArray(body?.records) ? body.records : []));
@@ -11669,6 +11674,7 @@ export async function studioHealAwaitingApprovalStaleRfr(env, options = {}) {
     try {
       const updated = await airtableFetch(env, outputTable, record.id, {
         method: "PATCH",
+        skipSupabaseWriteThrough: true,
         body: JSON.stringify({
           fields: { Output_Status: "Approved for Publishing" },
           typecast: true,
