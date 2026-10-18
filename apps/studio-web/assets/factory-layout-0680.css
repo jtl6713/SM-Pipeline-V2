@@ -500,12 +500,17 @@
  #page-factory .factory-band-eyes .factory-content-batch-select{min-width:0;font-size:.57rem}
 }
 
-/* Global Factory Activity: compact, selectable recent approvals. */
-#page-factory .factory-batch-activity-choice{
+/* Factory batch rows: counts and status occupy distinct grid cells.
+   The progress rail is a third full-width row, never layered over text.
+   Doubling .factory-batch-activity-choice specificity intentionally overrides
+   the later-loaded compact-theme .factory-batch-recent-row flex rule. */
+#page-factory .factory-batch-recent-row.factory-batch-activity-choice{
   appearance:none;font:inherit;cursor:pointer;text-align:left;width:100%;
-  border:1px solid transparent;border-radius:9px;padding:9px 10px;
-  display:flex;align-items:center;justify-content:space-between;gap:12px;
-  position:relative;padding-bottom:18px;
+  border:1px solid transparent;border-radius:9px;
+  padding:9px 10px 10px;
+  display:grid;grid-template-columns:minmax(0,1fr) max-content;
+  grid-template-areas:"info status" "progress progress";
+  align-items:start;column-gap:16px;row-gap:8px;
   background:transparent;color:inherit;min-width:0;
 }
 #page-factory .factory-batch-activity-choice:hover{
@@ -518,19 +523,18 @@
   outline:2px solid #245ea4;outline-offset:2px;
 }
 #page-factory .factory-batch-activity-choice .factory-batch-recent-info{
-  flex:1 1 auto;min-width:0;
+  grid-area:info;min-width:0;overflow-wrap:anywhere;
 }
 #page-factory .factory-batch-activity-choice .factory-batch-recent-result{
-  flex:0 0 auto;text-align:right;
+  grid-area:status;min-width:max-content;text-align:right;
+  align-self:start;white-space:nowrap;
 }
-/* Progress uses the entire batch row, including the space beneath
-   the right-aligned status. Percentage fill still reflects true progress. */
 #page-factory .factory-batch-activity-choice .factory-batch-mini-progress{
-  position:absolute;left:10px;right:10px;bottom:6px;
-  display:block;height:4px;border-radius:5px;background:#dfe7f1;
-  overflow:hidden;width:auto;max-width:none;margin:0;
+  grid-area:progress;display:block;position:static;min-width:0;
+  width:100%;max-width:none;height:5px;margin:0;
+  border-radius:5px;background:#dfe7f1;overflow:hidden;
 }
-#page-factory .factory-batch-mini-progress span{
+#page-factory .factory-batch-mini-progress > span{
   display:block;height:100%;background:#2866a7;border-radius:5px;
 }
 #page-factory .factory-batch-inspect-heading{
@@ -549,8 +553,12 @@
 #page-factory .factory-batch-child progress{width:100%;height:9px;accent-color:#245ea4}
 #page-factory .factory-batch-child small{font-size:.73rem;color:#445873}
 @media(max-width:560px){
-  #page-factory .factory-batch-activity-choice{padding:9px 6px 17px;gap:8px}
-  #page-factory .factory-batch-activity-choice .factory-batch-mini-progress{left:6px;right:6px}
-  #page-factory .factory-batch-activity-choice .factory-batch-recent-result{max-width:120px}
+  #page-factory .factory-batch-recent-row.factory-batch-activity-choice{
+    padding:9px 8px;grid-template-columns:minmax(0,1fr);
+    grid-template-areas:"info" "status" "progress";row-gap:6px;
+  }
+  #page-factory .factory-batch-activity-choice .factory-batch-recent-result{
+    text-align:left;min-width:0;
+  }
   #page-factory .factory-batch-child-grid{grid-template-columns:1fr}
 }
