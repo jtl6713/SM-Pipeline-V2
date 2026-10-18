@@ -4699,12 +4699,13 @@ export async function buildStudioProfilesOverviewRows(env, profiles, options = {
   let usedSupabaseOutputs = false;
   const forceIdeas = options.forceIdeas === true;
   const commitIdeas = options.commitIdeas !== false;
+  const preferSupabase = options.preferSupabase === true && studioSupabaseConfigured(env);
   const profileList = Array.isArray(profiles) ? profiles : [];
   const profileIds = profileList.map((profile) => profile?.id).filter(Boolean);
   const ideaCounts = overviewIdeaCountMap();
   const missingIdeaCounts = forceIdeas || profileIds.some((id) => !ideaCounts.has(String(id)));
 
-  if (studioReadSource(env) === "supabase") {
+  if (studioReadSource(env) === "supabase" || preferSupabase) {
     try {
       const pack = await listSupabaseOverviewPack(env, {
         profileAirtableIds: profileIds,
@@ -5280,7 +5281,7 @@ export async function runStudioProfilesOverviewForceRefresh(env, authorization, 
     );
     if (!profiles?.length) throw new Error("Profiles overview refresh resolved no authorized profiles");
 
-    const build = buildStudioProfilesOverviewRows(env, profiles, { forceIdeas: true, commitIdeas: false });
+    const build = buildStudioProfilesOverviewRows(env, profiles, { forceIdeas: true, commitIdeas: false, preferSupabase: true });
     const trackedBuild = build.finally(() => {
       if (cache.inflight === trackedBuild) cache.inflight = null;
     });
@@ -5356,7 +5357,7 @@ export async function startProfilesOverviewForceRefresh(request, env, authorizat
   const coolMs = airtableCooldownWaitMs();
   // Supabase-backed force refreshes no longer depend on Airtable unless the
   // Supabase Ideas pack proves incomplete, so Airtable cooldown must not block them.
-  if (studioReadSource(env) !== "supabase" && coolMs > AIRTABLE_SLOT_FAIL_FAST_MS) {
+  if (!studioSupabaseConfigured(env) && studioReadSource(env) !== "supabase" && coolMs > AIRTABLE_SLOT_FAIL_FAST_MS) {
     return respond(request, env, {
       ok: true,
       accepted: false,
