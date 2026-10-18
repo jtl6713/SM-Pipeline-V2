@@ -320,6 +320,7 @@ import {
   MAE_SCHEDULE_HORIZON_SETTING,
   MAE_STORY_COMPANION_OFFSET_MS,
   MAE_SUGGEST_HORIZON_DAYS,
+  MAE_SCHEDULE_HORIZON_MAX,
   MAE_SUGGEST_LEAD_MS,
   maeAdvancePastBlackout,
   maeBuildSuggestedScheduleMap,
@@ -3400,7 +3401,10 @@ const STUDIO_OCCUPIED_CACHE_MS = 45 * 1000;
 // drop day-1 mornings while ancient rows still fit in the page.
 const STUDIO_OCCUPIED_LIST_LIMIT = 1200;
 const STUDIO_OCCUPIED_LOOKBACK_MS = 12 * 60 * 60 * 1000;
-const STUDIO_OCCUPIED_HORIZON_MS = MAE_SUGGEST_HORIZON_DAYS * 24 * 60 * 60 * 1000;
+// The MAE setting can be 90 days while its default is 30. Scan the entire
+// supported horizon (plus a local-day/DST boundary) when reserving a slot.
+// Otherwise day 31-90 appears empty and Factory double-books those dates.
+const STUDIO_OCCUPIED_HORIZON_MS = (MAE_SCHEDULE_HORIZON_MAX + 2) * 24 * 60 * 60 * 1000;
 
 /*__STUDIO_WORKER_EXTRACT:studioOccupiedDateInWindowFormula__*/
 /*__STUDIO_WORKER_EXTRACT:studioOccupiedLinkedIds__*/

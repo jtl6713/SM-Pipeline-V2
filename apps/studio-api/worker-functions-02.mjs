@@ -6697,6 +6697,7 @@ export async function studioAtomicApplyPlatformOutputSeedSchedule(env, {
       const occupied = await studioOccupiedSchedulesOrEmpty(env, {
         excludeIds: [current.id],
         profile,
+        requireComplete: true,
       });
       const laneOccupied = studioOccupiedForLane(occupied, platform, outputType).slice();
       const platformOccupied = studioOccupiedForPlatform(occupied, platform).slice();
@@ -7045,6 +7046,11 @@ export function studioBuildSuggestedScheduleMap(items, occupiedByPlatform = {}, 
 /*__STUDIO_WORKER_END:studioBuildSuggestedScheduleMap__*/
 
 export async function studioOccupiedSchedulesOrEmpty(env, options = {}) {
+  // Only suggestions may fall back to empty. Any approval/MAE reservation must
+  // explicitly require a complete, authoritative calendar and fail closed.
+  if (options.requireComplete === true) {
+    return studioLoadOccupiedSchedules(env, options);
+  }
   try {
     return await studioLoadOccupiedSchedules(env, options);
   } catch (error) {
