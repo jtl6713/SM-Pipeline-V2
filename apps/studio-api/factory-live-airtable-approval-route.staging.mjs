@@ -157,6 +157,10 @@ const approveSingle = compile("factoryApproveOutput", {
   approveOutputRecordForPublishing: approved,
   studioPublishCanDispatchNow: () => false,
   studioDispatchApprovedPublishAndSchedule: async () => { dispatchCalls++; return { blocked: true }; },
+  studioScheduleMs: (value) => {
+    const ms = Date.parse(String(value || ""));
+    return Number.isFinite(ms) ? ms : null;
+  },
 });
 const firstLink = value => Array.isArray(value) ? value[0] : null;
 const profileForOutput = compile("studioContentProfileRecordIdForOutput", {

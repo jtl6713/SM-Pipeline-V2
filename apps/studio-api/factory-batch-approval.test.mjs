@@ -1,5 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { readStudioWorkerSource } from "./worker-source-reader.mjs";
 import {
   buildApproveAllJob, summarizeApproveAllJob, approveAllJobCounts,
@@ -7,6 +10,10 @@ import {
 } from "./approve-all-batch.mjs";
 
 const worker = readStudioWorkerSource();
+const functions04 = fs.readFileSync(
+  path.join(path.dirname(fileURLToPath(import.meta.url)), "worker-functions-04.mjs"),
+  "utf8",
+);
 
 test("Factory batch tracks all 20 items without a browser-owned job state", () => {
   const records = Array.from({ length: 20 }, (_, i) => ({
@@ -99,4 +106,34 @@ test("Factory skips one redundant GET but still rereads authoritative output und
   assert.match(factory, /writeThroughQueue/);
   assert.match(factory, /ctx\.waitUntil\(syncing\)/);
   assert.match(factory, /else await syncing/);
+  assert.match(factory, /scheduled_ms: studioScheduleMs/);
+});
+
+test("Factory batch drain reuses one occupancy map like Approve All", () => {
+  const start = worker.indexOf("async function factoryBatchProcess(");
+  const end = worker.indexOf("async function factoryBatchSubmitRoute(", start);
+  assert.ok(start >= 0 && end > start, "factoryBatchProcess extract present");
+  const drain = worker.slice(start, end);
+  assert.match(drain, /studioOccupiedSchedulesOrEmpty/);
+  assert.match(drain, /skipOccupancyRefresh: true/);
+  assert.match(drain, /occupiedMs: studioOccupiedForLane\(occupiedByLane/);
+  assert.match(drain, /studioInvalidateOccupiedScheduleCache\(\)/);
+  assert.match(drain, /filter\(\(item\) => !\["approved", "already_satisfied", "failed"\]/);
+  assert.match(drain, /result\?\.scheduled_ms/);
+  assert.match(drain, /\(occupiedByLane\[lane\] \|\|= \[\]\)\.push\(Number\(result\.scheduled_ms\)\)/);
+});
+
+test("Global Factory group submit batches Airtable preflight reads", () => {
+  // Group submit lives as a module sibling after the submit-route extract marker,
+  // so assert against the live ESM source rather than the reconstructed Worker.
+  const start = functions04.indexOf("async function factoryBatchGroupSubmitRoute(");
+  assert.ok(start >= 0, "factoryBatchGroupSubmitRoute present");
+  const end = functions04.indexOf("export async function factoryBatchCronResume(", start);
+  const group = functions04.slice(start, end > start ? end : start + 4000);
+  assert.match(group, /studioFetchApproveAllRecordsByIds\(env,ids\)/);
+  assert.doesNotMatch(
+    group.slice(0, group.indexOf("for (const id of ids)")),
+    /await airtableFetch\(env,env\.AIRTABLE_OUTPUT_TABLE_ID,id\)/,
+  );
+  assert.match(group, /At least one selected output could not be loaded for global batch approval/);
 });

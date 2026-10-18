@@ -88,13 +88,16 @@ test("20 actual LA record identities pass canonical Factory approval route again
    rows.set(record.id,next);
    return next;
  };
+ const studioScheduleMs=(value)=>{const ms=Date.parse(String(value||""));return Number.isFinite(ms)?ms:null;};
  const factory=new Function("airtableFetch","f","HttpError",
   "studioOutputReadyForPublishApproval","approveOutputRecordForPublishing",
   "studioPublishCanDispatchNow","studioDispatchApprovedPublishAndSchedule",
+  "studioScheduleMs",
   approvalSource+"\nreturn factoryApproveOutput")(
    async(_env,_table,id)=>rows.get(id),
    lookup,HttpError,eligible,wouldApprove,()=>false,
-   async()=>{stagedDispatchCalls++;return{skipped:"test-only"}}
+   async()=>{stagedDispatchCalls++;return{skipped:"test-only"}},
+   studioScheduleMs
  );
  const bucket=new MemoryR2();
  const profileId=PROFILE,requestId="factory_live_record_stage_20";
@@ -130,9 +133,11 @@ test("canonical Factory approval rejections prevent unsafe published/blocked/rer
   const factory=new Function("airtableFetch","f","HttpError",
     "studioOutputReadyForPublishApproval","approveOutputRecordForPublishing",
     "studioPublishCanDispatchNow","studioDispatchApprovedPublishAndSchedule",
+    "studioScheduleMs",
     approvalSource+"\nreturn factoryApproveOutput")(
       async()=>({id:"recFactoryGuardedExample",fields}),
-      lookup,HttpError,eligible,async()=>{writes++;return{}},()=>false,async()=>{}
+      lookup,HttpError,eligible,async()=>{writes++;return{}},()=>false,async()=>{},
+      (value)=>{const ms=Date.parse(String(value||""));return Number.isFinite(ms)?ms:null;}
     );
   if(kind==="already_approved"||kind==="already_published"){
     const r=await factory({AIRTABLE_OUTPUT_TABLE_ID:"stage"},"recFactoryGuardedExample","stage","",null);

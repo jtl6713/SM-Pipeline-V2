@@ -232,7 +232,7 @@ test("supabaseRestAll pages past PostgREST max-rows so overview counts stay comp
 
 test("worker wires supabase phase4 reads behind the same flag", async () => {
   const worker = readStudioWorkerSource();
-  assert.match(worker, /version: "0.10.652-manual-clickthrough"/);
+  assert.match(worker, /version: "0.10.653-factory-schedule-perf"/);
   assert.match(worker, /studio_supabase_pipeline_reads_v1: true/);
   assert.match(worker, /studio_supabase_phase3_stable_v1: true/);
   assert.match(worker, /studio_supabase_phase4_reads_v1: true/);
