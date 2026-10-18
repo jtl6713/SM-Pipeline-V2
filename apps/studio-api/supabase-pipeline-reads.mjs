@@ -137,35 +137,103 @@ export function studioSupabaseBaseUrl(env) {
   return String(env?.SUPABASE_URL || "").trim().replace(/\/+$/, "");
 }
 
+const SUPABASE_CIRCUIT_OPEN_MS = 15 * 60 * 1000;
+const SUPABASE_CIRCUIT_FAIL_THRESHOLD = 2;
+const supabaseCircuitState = {
+  openUntil: 0,
+  failures: 0,
+  lastError: "",
+};
+
+export function supabasePoolErrorMessage(error) {
+  return String(error?.message || error || "");
+}
+
+export function isSupabasePoolOrTimeoutError(error) {
+  return /PGRST003|57014|statement timeout|connection pool|Timed out acquiring|circuit open/i
+    .test(supabasePoolErrorMessage(error));
+}
+
+export function supabaseCircuitSnapshot(now = Date.now()) {
+  const openUntil = Number(supabaseCircuitState.openUntil || 0);
+  return {
+    open: openUntil > Number(now),
+    open_until: openUntil || 0,
+    failures: Number(supabaseCircuitState.failures || 0),
+    last_error: String(supabaseCircuitState.lastError || ""),
+  };
+}
+
+export function supabaseCircuitOpen(now = Date.now()) {
+  return Boolean(supabaseCircuitSnapshot(now).open);
+}
+
+export function noteSupabaseCircuitFailure(error, now = Date.now()) {
+  if (!isSupabasePoolOrTimeoutError(error)) return false;
+  supabaseCircuitState.failures = Number(supabaseCircuitState.failures || 0) + 1;
+  supabaseCircuitState.lastError = supabasePoolErrorMessage(error).slice(0, 240);
+  if (supabaseCircuitState.failures >= SUPABASE_CIRCUIT_FAIL_THRESHOLD) {
+    supabaseCircuitState.openUntil = Math.max(
+      Number(supabaseCircuitState.openUntil || 0),
+      Number(now) + SUPABASE_CIRCUIT_OPEN_MS,
+    );
+  }
+  return true;
+}
+
+export function noteSupabaseCircuitSuccess() {
+  supabaseCircuitState.failures = 0;
+}
+
+export function resetSupabaseCircuitForTests() {
+  supabaseCircuitState.openUntil = 0;
+  supabaseCircuitState.failures = 0;
+  supabaseCircuitState.lastError = "";
+}
+
+export function assertSupabaseCircuitAllowsTraffic() {
+  if (!supabaseCircuitOpen()) return;
+  const snap = supabaseCircuitSnapshot();
+  throw new Error(`Supabase circuit open (${snap.last_error || "pool/timeout"}); try again later`);
+}
+
 export async function supabaseRest(env, pathAndQuery, { method = "GET", body = null, headers = {}, signal = null } = {}) {
   const base = studioSupabaseBaseUrl(env);
   const key = String(env?.SUPABASE_SERVICE_ROLE_KEY || "").trim();
   if (!base || !key) throw new Error("Supabase is not configured");
-  // Unit tests use example.supabase.co. Production calls must not open a
-  // connection: profile lookups and overview scans were filling the pool.
+  // Unit tests use example.supabase.co and bypass the production circuit.
   if (!base.includes("example.supabase.co")) {
-    throw new Error("Supabase is paused");
+    assertSupabaseCircuitAllowsTraffic();
   }
   const url = pathAndQuery.startsWith("http") ? pathAndQuery : `${base}/rest/v1/${pathAndQuery.replace(/^\//, "")}`;
-  const res = await fetch(url, {
-    method,
-    headers: {
-      apikey: key,
-      Authorization: `Bearer ${key}`,
-      "Content-Type": "application/json",
-      Prefer: method === "GET" ? "count=exact" : "resolution=merge-duplicates,return=minimal",
-      ...headers,
-    },
-    body: body == null ? undefined : (typeof body === "string" ? body : JSON.stringify(body)),
-    signal: signal || undefined,
-  });
+  let res;
+  try {
+    res = await fetch(url, {
+      method,
+      headers: {
+        apikey: key,
+        Authorization: `Bearer ${key}`,
+        "Content-Type": "application/json",
+        Prefer: method === "GET" ? "count=exact" : "resolution=merge-duplicates,return=minimal",
+        ...headers,
+      },
+      body: body == null ? undefined : (typeof body === "string" ? body : JSON.stringify(body)),
+      signal: signal || undefined,
+    });
+  } catch (error) {
+    noteSupabaseCircuitFailure(error);
+    throw error;
+  }
   const text = await res.text();
   let parsed = null;
   try { parsed = text ? JSON.parse(text) : null; } catch { parsed = text; }
   if (!res.ok) {
     const detail = typeof parsed === "string" ? parsed.slice(0, 400) : JSON.stringify(parsed).slice(0, 400);
-    throw new Error(`Supabase ${method} ${url} failed ${res.status}: ${detail}`);
+    const error = new Error(`Supabase ${method} ${url} failed ${res.status}: ${detail}`);
+    noteSupabaseCircuitFailure(error);
+    throw error;
   }
+  if (!base.includes("example.supabase.co")) noteSupabaseCircuitSuccess();
   return parsed;
 }
 

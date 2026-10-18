@@ -2435,6 +2435,8 @@ async function studioApproveOutputRecordAtomic(env, record, note, stamp, payload
       const written = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, prepared.id || id, {
         method: "PATCH",
         signal,
+        // afterCommit owns the one Supabase mirror outside the scheduling lock.
+        skipSupabaseWriteThrough: true,
         body: JSON.stringify({ fields: plan.patchFields, typecast: true }),
       });
       checkpoint("schedule_write_finished");
@@ -2676,6 +2678,8 @@ export async function approveOutputRecordForPublishing(env, existing, note, stam
   checkpoint("schedule_write_started");
   const updated = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, prepared.id || id, {
     method: "PATCH",
+    // Explicit write-through below is the single Supabase mirror for this path.
+    skipSupabaseWriteThrough: true,
     body: JSON.stringify({ fields: { ...fields, ...preparedHandoff, ...scheduleFields }, typecast: true }),
   });
   checkpoint("schedule_write_finished");
@@ -2992,6 +2996,8 @@ export async function studioAtomicApplyScheduleRegenEntry(env, {
     write: async (plan, { signal }) => airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, outputId, {
       method: "PATCH",
       signal,
+      // afterCommit owns the one Supabase mirror outside the scheduling lock.
+      skipSupabaseWriteThrough: true,
       body: JSON.stringify({ fields: plan.patchFields, typecast: true }),
     }),
     verify: async (written, plan) => {
@@ -3376,7 +3382,7 @@ export async function studioProcessScheduleRegenJobSlice(env, jobId, options = {
           env,
           env.AIRTABLE_OUTPUT_TABLE_ID,
           chunk.map((entry) => ({ id: entry.id, fields: entry.fields })),
-          { typecast: true },
+          { typecast: true, skipSupabaseWriteThrough: true },
         );
         const profileStamp = String(job.profile_id || combo.profile_id || "").trim();
         await Promise.all(chunk.map((entry) => studioSupabaseWriteThroughOutput(
@@ -10452,6 +10458,7 @@ export async function studioAtomicVacateSkippedOutput(env, row, fields, operatio
     write: async (plan, { signal }) => airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, current.id, {
       method: "PATCH",
       signal,
+      skipSupabaseWriteThrough: true,
       body: JSON.stringify({ fields: plan.patchFields, typecast: true }),
     }),
     verify: async (written) => {
@@ -13095,6 +13102,7 @@ export async function scheduleStudioPublishOutput(request, env, url, authorizati
       write: async (plan, { signal }) => airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, match[1], {
         method: "PATCH",
         signal,
+        skipSupabaseWriteThrough: true,
         body: JSON.stringify({ fields: plan.fields, typecast: true }),
       }),
       verify: async (written, plan) => {
@@ -13159,6 +13167,7 @@ export async function scheduleStudioPublishOutput(request, env, url, authorizati
     fields.Publish_Error_Message = "";
     updated = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, match[1], {
       method: "PATCH",
+      skipSupabaseWriteThrough: true,
       body: JSON.stringify({
         fields,
         typecast: true,
@@ -13373,11 +13382,11 @@ export async function markStudioTiktokComplete(request, env, url) {
     return respond(request, env, { ok: true, already_published: true, record: mapOutput(current) });
   }
   if (reason) throw new HttpError(reason === "do_not_publish" ? 409 : 400, TIKTOK_COMPLETE_ERRORS[reason] || reason);
+  // airtableFetch inside patchTiktokManualPublish owns the single Supabase mirror.
   const updated = await patchTiktokManualPublish(env, current, {
     url: postUrl,
     musicCompleted: payload?.music_completed,
   });
-  await studioSupabaseWriteThroughOutput(env, updated, "tiktok-complete");
   return respond(request, env, { ok: true, published: true, record: mapOutput(updated) });
 }
 /*__STUDIO_WORKER_END:markStudioTiktokComplete__*/

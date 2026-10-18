@@ -18,7 +18,7 @@ test("Worker heal auto-starts Prepare for timeline drafts stuck at None", () => 
   assert.match(worker, /item4HealTimelineAutoPrepare\(env, ctx\)/);
   assert.match(worker, /Studio_Variant_Status\}="None"/);
   assert.match(worker, /FIND\("idea-vo-timeline=",\{Production_Notes\}\)/);
-  assert.match(worker, /version: "0.10.663-pause-supabase-reads"/);
+  assert.match(worker, /version: "0.10.664-supabase-write-once"/);
 });
 
 test("Production UI kicks Prepare once for timeline drafts with Ready plan and None variants", () => {

@@ -2,6 +2,7 @@ import { createProfileOnboarding } from "./profile-onboarding.mjs";
 import {
   studioReadSource,
   studioSupabaseConfigured,
+  supabaseCircuitOpen,
   listSupabasePipelineOutputs,
   listSupabaseScheduleGrid,
   listSupabaseContentItems,
@@ -1581,6 +1582,7 @@ export async function writeStudioSupabaseSyncLast(env, payload) {
 
 export async function studioSyncSupabasePipelineReads(env, options = {}) {
   if (!studioSupabaseConfigured(env)) return { skipped: true, reason: "supabase_not_configured" };
+  if (supabaseCircuitOpen()) return { skipped: true, reason: "supabase_circuit_open" };
   const profiles = (await listContentProfileRecords(env).catch(() => [])).filter((row) => Boolean(f(row, "Active")));
   const startedAt = new Date().toISOString();
   const result = await syncAllProfilesPipelineToSupabase(env, profiles, {

@@ -7,6 +7,10 @@ import path from "node:path";
 import {
   studioReadSource,
   studioSupabaseConfigured,
+  supabaseCircuitOpen,
+  noteSupabaseCircuitFailure,
+  noteSupabaseCircuitSuccess,
+  resetSupabaseCircuitForTests,
   airtableShapedOutputFromSupabase,
   airtableShapedContentFromSupabase,
   airtableShapedIdeaFromSupabase,
@@ -43,6 +47,19 @@ test("studioReadSource defaults to airtable and requires supabase secrets", () =
     }),
     "airtable",
   );
+});
+
+test("supabase circuit opens on repeated pool or statement timeouts", () => {
+  resetSupabaseCircuitForTests();
+  assert.equal(supabaseCircuitOpen(), false);
+  noteSupabaseCircuitFailure(new Error("PGRST003 Timed out acquiring connection from connection pool."));
+  assert.equal(supabaseCircuitOpen(), false);
+  noteSupabaseCircuitFailure(new Error("canceling statement due to statement timeout 57014"));
+  assert.equal(supabaseCircuitOpen(), true);
+  noteSupabaseCircuitSuccess();
+  assert.equal(supabaseCircuitOpen(), true);
+  resetSupabaseCircuitForTests();
+  assert.equal(supabaseCircuitOpen(), false);
 });
 
 test("airtable-shaped output preserves rec id for approve/creative routes", () => {
@@ -337,7 +354,9 @@ test("overview pack aborts a hung profile lookup before the 26s race", async () 
 
 test("worker wires supabase phase4 reads behind the same flag", async () => {
   const worker = readStudioWorkerSource();
-  assert.match(worker, /version: "0.10.663-pause-supabase-reads"/);
+  assert.match(worker, /version: "0.10.664-supabase-write-once"/);
+  assert.match(worker, /skipSupabaseWriteThrough/);
+  assert.match(worker, /supabaseCircuitOpen/);
   assert.match(worker, /studio_supabase_pipeline_reads_v1: true/);
   assert.match(worker, /studio_supabase_phase3_stable_v1: true/);
   assert.match(worker, /studio_supabase_phase4_reads_v1: true/);

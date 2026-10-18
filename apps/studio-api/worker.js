@@ -1060,7 +1060,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.663-pause-supabase-reads",
+          version: "0.10.664-supabase-write-once",
           factory_batch_canary_revision: "chicago-ig-reel-v1",
           factory_batch_phase2a_post_gate_fix_v1: true,
           studio_supabase_pipeline_reads_v1: true,
@@ -2896,9 +2896,14 @@ async function airtableFetch(env, tableId, pathOrParams = "", options = {}) {
     const detail = [airtableType, airtableMessage].filter(Boolean).join(": ");
     throw new HttpError(response.status, detail ? `Airtable: ${detail}` : `Airtable request failed (${response.status})`);
   }
-  await studioSupabaseWriteThroughAirtableMutation(env, tableId, options?.method, body).catch((error) => {
-    console.warn("supabase airtable write-through failed", tableId, error);
-  });
+  // Callers that own the post-commit Supabase mirror (Factory approve,
+  // schedule regen, calendar save) pass skipSupabaseWriteThrough so Airtable
+  // verify under the scheduling lock is not followed by a second mirror.
+  if (options?.skipSupabaseWriteThrough !== true) {
+    await studioSupabaseWriteThroughAirtableMutation(env, tableId, options?.method, body).catch((error) => {
+      console.warn("supabase airtable write-through failed", tableId, error);
+    });
+  }
   return body;
 }
 
