@@ -429,3 +429,5 @@ Deploy Factory ambiguous-submit reconciliation 2026-10-17. PR #817. Recover exac
 2026-10-18 Factory submit accept UX | UI 0.6.715-factory-submit-accept | clearer Factory desk 5xx/503 copy; send profile_id on group submit items for ownership hint.
 
 2026-10-18: Deploy Studio UI 0.6.716-factory-activity-history from PR #860 / 13e26a1e. Restore Completed Batches history and correct false Story rendering gate; production Pages UI-only with strict custom-domain verification.
+
+2026-10-18: Retry Studio UI 0.6.716-factory-activity-history Pages release after correcting pipeline-rendering-terminal and unified-platform-outputs pinned version regressions; preserve exact custom-domain verification.
