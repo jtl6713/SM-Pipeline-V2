@@ -458,16 +458,18 @@ jobs:
             async fetch(request, env) {
               const url = new URL(request.url);
               const factoryStatus = url.pathname === "/$TOKEN/factory-status";
+              const factoryDesk = url.pathname === "/$TOKEN/factory-desk";
               const chicagoCanary = url.pathname === "/$TOKEN/factory-status-chicago";
               const globalCanary = url.pathname === "/$TOKEN/factory-status-global";
               const overview = url.pathname === "/$TOKEN/overview";
               const overviewRefresh = url.pathname === "/$TOKEN/overview-refresh";
               const overviewStatus = url.pathname === "/$TOKEN/overview-status";
-              if (url.pathname !== "/$TOKEN" && !factoryStatus && !chicagoCanary && !globalCanary && !overview && !overviewRefresh && !overviewStatus) return new Response("Not found", {status:404});
+              if (url.pathname !== "/$TOKEN" && !factoryStatus && !factoryDesk && !chicagoCanary && !globalCanary && !overview && !overviewRefresh && !overviewStatus) return new Response("Not found", {status:404});
               const generation = String(url.searchParams.get("generation") || "");
               const path = overviewRefresh ? "/api/profiles/overview/refresh"
                 : overviewStatus ? "/api/profiles/overview/refresh-status"
                 : overview ? "/api/profiles/overview" + (generation ? "?min_generation=" + encodeURIComponent(generation) : "")
+                : factoryDesk ? "/api/factory/desk"
                 : globalCanary ? "/api/factory/approval-batches?scope=all"
                 : chicagoCanary ? "/api/factory/approval-batches?profile=recT2rbKX3MF7cVFU"
                 : factoryStatus ? "/api/factory/approval-batches?profile=recF7UAn0LkMZZrWZ" : "/api/session";
@@ -659,6 +661,37 @@ jobs:
           done
           jq -e --arg stage "$EXPECTED_STAGE" --argjson total "$EXPECTED_TOTAL" --argjson per "$EXPECTED_PER_PROFILE" '.ok==true and .scope=="all" and .global_rollout.enabled==true and .global_rollout.stage==$stage and .global_rollout.max_total==$total and .global_rollout.max_per_profile==$per and .global_rollout.allowed_platforms==["Instagram","Facebook","TikTok","YouTube"] and .global_rollout.allowed_output_types_by_platform=={"Instagram":["Reel","Story","Single Image","Carousel"],"Facebook":["Reel","Story","Single Image","Multi-Image Post","Slideshow Reel"],"TikTok":["Video Draft","Story","Single Photo","Multi-Photo"],"YouTube":["Short","Standard Video","Slideshow Video"]}' /tmp/factory-batch-global.json >/dev/null || { echo "Global Factory read-only canary failed (HTTP $GLOBAL_CODE)" >&2; exit 1; }
           echo "factory_global_read_only_canary=PASS signed_stage=$EXPECTED_STAGE total=$EXPECTED_TOTAL per_profile=$EXPECTED_PER_PROFILE"
+
+      - name: Verify NYC Needs eyes is not starved by scheduled backlog (read-only)
+        shell: bash
+        run: |
+          set -euo pipefail
+          API_ROOT="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID"
+          curl -fsS "$API_ROOT/workers/subdomain" -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -o /tmp/factory-review-subdomain.json
+          SUBDOMAIN=$(jq -er '.result.subdomain' /tmp/factory-review-subdomain.json)
+          TOKEN=$(cat /tmp/verify-token.txt)
+          URL="https://$VERIFY_BRIDGE.$SUBDOMAIN.workers.dev/$TOKEN/factory-desk"
+          CODE=000
+          for i in 1 2 3; do
+            CODE=$(curl -sS --max-time 70 -o /tmp/factory-review-readonly.json -w '%{http_code}' "$URL" || true)
+            if [[ "$CODE" == "200" ]] && jq -e --arg profile "recgtK8Z7eNADNtVy" '
+                .ok==true and .page=="factory-desk"
+                and (.summary.needs_eyes > 0)
+                and ([.lanes.needs_eyes[] | select(.profile_id==$profile)] | length) > 0
+              ' /tmp/factory-review-readonly.json >/dev/null 2>&1; then
+              echo "factory_review_backlog=PASS source=$(jq -r .read_source /tmp/factory-review-readonly.json) NYC_count=$(jq --arg profile recgtK8Z7eNADNtVy '[.lanes.needs_eyes[] | select(.profile_id==$profile)] | length' /tmp/factory-review-readonly.json)"
+              break
+            fi
+            sleep 3
+          done
+          jq -e --arg profile "recgtK8Z7eNADNtVy" '
+              .ok==true and .page=="factory-desk"
+              and (.summary.needs_eyes > 0)
+              and ([.lanes.needs_eyes[] | select(.profile_id==$profile)] | length) > 0
+            ' /tmp/factory-review-readonly.json >/dev/null || {
+              echo "Factory NYC review-ready backlog still missing after Worker deploy (HTTP $CODE)" >&2
+              exit 1
+            }
 
       - name: Delete functional verification bridge
         if: always()
