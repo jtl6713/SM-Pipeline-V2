@@ -4733,30 +4733,33 @@ export async function buildStudioProfilesOverviewRows(env, profiles, options = {
   const formula = studioProfilesOverviewCombinedFormula(profileList);
   let airtableIdeaRows = null;
   if (!usedSupabaseOutputs) {
-    // Fetch every matching row; the previous global 800/300 caps silently excluded
-    // older profiles. listRecords follows Airtable offsets until exhausted.
-    // Treat reaching the safety ceiling as incomplete, never as a valid snapshot.
-    outputRows = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
-      limit: STUDIO_PROFILES_OVERVIEW_OUTPUT_LIMIT,
-      filterFormula: formula,
-      sortField: "Output_ID",
-      sortDirection: "desc",
-      fields: OUTPUT_LIST_FIELDS,
-    });
+    // Fetch outputs and the minimal Ideas projection in parallel. Airtable request
+    // pacing remains serialized by airtableRequestSlot(), but interleaving the two
+    // paginated scans avoids making the force refresh wait for one complete table
+    // before the other can begin.
+    const [freshOutputs, freshIdeas] = await Promise.all([
+      listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
+        limit: STUDIO_PROFILES_OVERVIEW_OUTPUT_LIMIT,
+        filterFormula: formula,
+        sortField: "Output_ID",
+        sortDirection: "desc",
+        fields: OUTPUT_LIST_FIELDS,
+      }),
+      listRecords(env, env.AIRTABLE_IDEA_TABLE_ID, {
+        limit: STUDIO_PROFILES_OVERVIEW_IDEA_LIMIT,
+        filterFormula: formula,
+        fields: ["Content_Profile", "Promoted_Content_Record_ID", "Content Items"],
+      }),
+    ]);
+    outputRows = freshOutputs;
+    airtableIdeaRows = freshIdeas;
     if (outputRows.length >= STUDIO_PROFILES_OVERVIEW_OUTPUT_LIMIT) {
       throw new Error("Profiles overview outputs exceeded complete-scan safety ceiling");
     }
-    readSource = "airtable";
-    // Airtable fallback still loads Ideas in this same rebuild. This is not the
-    // Supabase hot path: do not block the Supabase output rebuild on Ideas.
-    airtableIdeaRows = await listRecords(env, env.AIRTABLE_IDEA_TABLE_ID, {
-      limit: STUDIO_PROFILES_OVERVIEW_IDEA_LIMIT,
-      sortField: "Create_Date",
-      filterFormula: formula,
-    });
     if (airtableIdeaRows.length >= STUDIO_PROFILES_OVERVIEW_IDEA_LIMIT) {
       throw new Error("Profiles overview ideas exceeded complete-scan safety ceiling");
     }
+    readSource = "airtable";
   }
 
   // If the Supabase idea pack is incomplete, fall back to Airtable for manual
@@ -4764,21 +4767,24 @@ export async function buildStudioProfilesOverviewRows(env, profiles, options = {
   if (usedSupabaseOutputs && forceIdeas && !supabaseIdeasUsable) {
     airtableIdeaRows = await listRecords(env, env.AIRTABLE_IDEA_TABLE_ID, {
       limit: STUDIO_PROFILES_OVERVIEW_IDEA_LIMIT,
-      sortField: "Create_Date",
       filterFormula: formula,
+      fields: ["Content_Profile", "Promoted_Content_Record_ID", "Content Items"],
     });
     if (airtableIdeaRows.length >= STUDIO_PROFILES_OVERVIEW_IDEA_LIMIT) {
       throw new Error("Profiles overview ideas exceeded complete-scan safety ceiling");
     }
   }
 
-  // Re-read Manual Action Required rows so a post URL saved in Airtable clears the
-  // All Profiles count even when the Supabase pack is still on the old status.
+  // Only Supabase-backed rows need the Airtable live-publish overlay. A direct
+  // Airtable force scan is already authoritative and should not spend another
+  // request pass rereading the same publication state.
   let mappedAll = (outputRows || []).map((row) => mapOutput(row, null));
-  try {
-    mappedAll = await overlayLiveTikTokPublishRows(env, mappedAll);
-  } catch (error) {
-    console.warn("overview manual publish overlay failed", error);
+  if (usedSupabaseOutputs) {
+    try {
+      mappedAll = await overlayLiveTikTokPublishRows(env, mappedAll);
+    } catch (error) {
+      console.warn("overview manual publish overlay failed", error);
+    }
   }
   const mappedById = new Map(mappedAll.filter((row) => row?.id).map((row) => [row.id, row]));
 
