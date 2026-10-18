@@ -1,5 +1,5 @@
 import { readStudioWorkerSource } from "./worker-source-reader.mjs";
-import test from "node:test";
+import test, { mock } from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
@@ -237,7 +237,7 @@ test("overview pack pages open rows and keeps blank statuses", async () => {
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async (url, init) => {
     const href = String(url);
-    calls.push({ href, prefer: init?.headers?.Prefer || "" });
+    calls.push({ href, prefer: init?.headers?.Prefer || "", signal: init?.signal || null });
     const path = new URL(href).pathname;
     if (path.endsWith("/content_profiles")) {
       const id = href.includes("recF7UAn0LkMZZrWZ")
@@ -273,6 +273,12 @@ test("overview pack pages open rows and keeps blank statuses", async () => {
         includeIdeas: false,
       },
     );
+    const profileCalls = calls.filter((call) => call.href.includes("/content_profiles"));
+    assert.equal(profileCalls.length, 2);
+    for (const profileCall of profileCalls) {
+      assert.equal(profileCall.prefer, "count=none");
+      assert.ok(profileCall.signal);
+    }
     const outputCalls = calls.filter((call) => call.href.includes("/platform_outputs"));
     assert.equal(outputCalls.length, 2);
     for (const outputCall of outputCalls) {
@@ -297,9 +303,41 @@ test("overview pack pages open rows and keeps blank statuses", async () => {
   }
 });
 
+test("overview pack aborts a hung profile lookup before the 26s race", async () => {
+  mock.timers.enable({ apis: ["setTimeout"] });
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (_url, init) => new Promise((_resolve, reject) => {
+    const signal = init?.signal;
+    if (!signal) return;
+    if (signal.aborted) {
+      const error = new Error("The operation was aborted");
+      error.name = "AbortError";
+      reject(error);
+      return;
+    }
+    signal.addEventListener("abort", () => {
+      const error = new Error("The operation was aborted");
+      error.name = "AbortError";
+      reject(error);
+    });
+  });
+  try {
+    const pending = listSupabaseOverviewPack(
+      { SUPABASE_URL: "https://example.supabase.co", SUPABASE_SERVICE_ROLE_KEY: "sb_secret_test" },
+      { profileAirtableIds: ["recF7UAn0LkMZZrWZ"], includeIdeas: false },
+    );
+    const rejected = assert.rejects(pending, /supabase overview pack timed out after 18s/);
+    mock.timers.tick(18000);
+    await rejected;
+  } finally {
+    globalThis.fetch = originalFetch;
+    mock.timers.reset();
+  }
+});
+
 test("worker wires supabase phase4 reads behind the same flag", async () => {
   const worker = readStudioWorkerSource();
-  assert.match(worker, /version: "0.10.661-overview-read-error"/);
+  assert.match(worker, /version: "0.10.662-overview-profile-timeout"/);
   assert.match(worker, /studio_supabase_pipeline_reads_v1: true/);
   assert.match(worker, /studio_supabase_phase3_stable_v1: true/);
   assert.match(worker, /studio_supabase_phase4_reads_v1: true/);
@@ -344,6 +382,8 @@ test("worker wires supabase phase4 reads behind the same flag", async () => {
   assert.match(reads, /Prefer: "count=none"/);
   assert.match(reads, /OVERVIEW_OUTPUT_SELECT/);
   assert.match(reads, /supabase overview pack timed out after 18s/);
+  assert.match(reads, /const controller = new AbortController\(\);[\s\S]*resolveSupabaseProfileId\(env, airtableId, \{ signal/);
+  assert.match(reads, /export async function resolveSupabaseProfileId\(env, airtableProfileId, options = \{\}\)/);
   assert.match(reads, /promoted:payload-%3E%3EPromoted_Content_Record_ID/);
   assert.match(reads, /const \[outputGroups, ideaResult\] = await Promise\.all/);
 });

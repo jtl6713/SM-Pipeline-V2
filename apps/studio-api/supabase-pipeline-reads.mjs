@@ -365,12 +365,16 @@ export function airtableShapedProductionRequestFromSupabase(row) {
   };
 }
 
-export async function resolveSupabaseProfileId(env, airtableProfileId) {
+export async function resolveSupabaseProfileId(env, airtableProfileId, options = {}) {
   const id = String(airtableProfileId || "").trim();
   if (!id) return null;
   const rows = await supabaseRest(
     env,
     `content_profiles?airtable_record_id=eq.${encodeURIComponent(id)}&select=id,airtable_record_id&limit=1`,
+    {
+      signal: options?.signal || null,
+      headers: options?.headers || {},
+    },
   );
   return Array.isArray(rows) && rows[0]?.id ? rows[0].id : null;
 }
@@ -663,31 +667,37 @@ export async function listSupabaseOverviewPack(env, { profileAirtableIds = [], o
   const ids = (profileAirtableIds || []).map((id) => String(id || "").trim()).filter(Boolean);
   if (!ids.length) return { outputs: [], ideas: [], profilesMissing: true };
 
-  const resolved = await Promise.all(ids.map(async (airtableId) => [airtableId, await resolveSupabaseProfileId(env, airtableId)]));
-  const profileUuidByAirtable = new Map(resolved.filter(([, uuid]) => uuid));
-  if (!profileUuidByAirtable.size) return { outputs: [], ideas: [], profilesMissing: true };
-
-  const airtableByUuid = new Map([...profileUuidByAirtable].map(([airtableId, uuid]) => [uuid, airtableId]));
-  const uuids = [...profileUuidByAirtable.values()];
-  const profileFilter = uuids.length === 1
-    ? `content_profile_id=eq.${uuids[0]}`
-    : `content_profile_id=in.(${uuids.join(",")})`;
-  const outCeiling = Math.max(1, Math.min(10000, Number(outputLimit) || 10000));
-  const ideaCeiling = Math.max(1, Math.min(10000, Number(ideaLimit) || 10000));
-
-  // Known-valid PostgREST operators only. not.eq was not proven against this
-  // project's PostgREST, and a rejected filter fell through to an Airtable scan
-  // that cannot finish inside the refresh budget. Blank statuses still count.
-  const openOutputFilter = [
-    "do_not_publish=eq.false",
-    "or=(output_status.is.null,and(output_status.neq.Published,output_status.neq.Cancelled))",
-    "or=(publish_status.is.null,publish_status.neq.Published)",
-  ].join("&");
-  const pageHeaders = { Prefer: "count=none" };
+  // Start the abort before profile lookup. A wedged pool makes the 1-row
+  // content_profiles read wait until the outer 26s race, and the canary then
+  // only sees the generic budget error.
   const controller = new AbortController();
   const abortTimer = setTimeout(() => controller.abort(), 18000);
   const signal = controller.signal;
+  const pageHeaders = { Prefer: "count=none" };
   try {
+    const resolved = await Promise.all(ids.map(async (airtableId) => [
+      airtableId,
+      await resolveSupabaseProfileId(env, airtableId, { signal, headers: pageHeaders }),
+    ]));
+    const profileUuidByAirtable = new Map(resolved.filter(([, uuid]) => uuid));
+    if (!profileUuidByAirtable.size) return { outputs: [], ideas: [], profilesMissing: true };
+
+    const airtableByUuid = new Map([...profileUuidByAirtable].map(([airtableId, uuid]) => [uuid, airtableId]));
+    const uuids = [...profileUuidByAirtable.values()];
+    const profileFilter = uuids.length === 1
+      ? `content_profile_id=eq.${uuids[0]}`
+      : `content_profile_id=in.(${uuids.join(",")})`;
+    const outCeiling = Math.max(1, Math.min(10000, Number(outputLimit) || 10000));
+    const ideaCeiling = Math.max(1, Math.min(10000, Number(ideaLimit) || 10000));
+
+    // Known-valid PostgREST operators only. not.eq was not proven against this
+    // project's PostgREST, and a rejected filter fell through to an Airtable scan
+    // that cannot finish inside the refresh budget. Blank statuses still count.
+    const openOutputFilter = [
+      "do_not_publish=eq.false",
+      "or=(output_status.is.null,and(output_status.neq.Published,output_status.neq.Cancelled))",
+      "or=(publish_status.is.null,publish_status.neq.Published)",
+    ].join("&");
     const outputPromise = Promise.all(uuids.map((uuid) => supabaseRestAll(
       env,
       `platform_outputs?content_profile_id=eq.${uuid}&${openOutputFilter}&select=${OVERVIEW_OUTPUT_SELECT}&order=output_number.desc.nullslast`,
@@ -747,7 +757,7 @@ export async function listSupabaseOverviewPack(env, { profileAirtableIds = [], o
       idea_count: ideasIncomplete ? 0 : (ideaRows || []).length,
     };
   } catch (error) {
-    if (signal.aborted) throw new Error("supabase overview pack timed out after 18s");
+    if (signal.aborted || error?.name === "AbortError") throw new Error("supabase overview pack timed out after 18s");
     throw error;
   } finally {
     clearTimeout(abortTimer);
