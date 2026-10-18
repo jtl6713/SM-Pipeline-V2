@@ -182,7 +182,7 @@ export async function factoryBatchListGlobal(bucket, {
     cursor = page.cursor;
   } while (cursor);
   if (cursor) complete = false;
-  const match = /^studio\\/state\\/factory-approvals\\/v2\\/jobs\\/(rec[A-Za-z0-9]+)\\/([A-Za-z0-9_-]{12,128})\\.json$/;
+  const match = /^studio\/state\/factory-approvals\/v2\/jobs\/(rec[A-Za-z0-9]+)\/([A-Za-z0-9_-]{12,128})\.json$/;
   const matching = objects.filter(row => {
     const parts = String(row.key || "").match(match);
     return parts && (!profileId || parts[1] === profileId);
