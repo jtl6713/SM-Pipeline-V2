@@ -9,7 +9,7 @@
  */
 import {
   factoryBatchEnqueue, factoryBatchRead, factoryBatchCounts, factoryBatchRetry,
-  factoryBatchQualitySignals,
+  factoryBatchQualitySignals, factoryBatchNeedsAttention,
 } from "./factory-approval-queue.mjs";
 import { factoryApprovalItemTiming, factoryApprovalTimingReport } from "./factory-approval-timings.mjs";
 
@@ -224,35 +224,45 @@ export async function factoryApprovalGroupRetryFailures(bucket,requestId) {
 }
 
 /** Bounded global parent activity; child jobs are separately stored. */
-export async function factoryApprovalGroupList(bucket, { profileId="", limit=40, maxScan=2000 }={}) {
+export async function factoryApprovalGroupList(bucket, {
+  profileId = "", limit = 40, maxScan = 2000, mode = "all", offset = 0,
+} = {}) {
   assertBucket(bucket);
   if (profileId && !ID.test(profileId)) throw Error("Invalid Factory profile filter");
-  const objects=[];
-  let cursor=null;
-  const budget=Math.max(1,Math.min(3000,Math.floor(maxScan)));
-  let complete=true;
+  if (!["all", "active", "completed"].includes(mode)) throw Error("Invalid Factory activity mode");
+  const take = Math.max(1, Math.min(500, Math.floor(Number(limit) || 40)));
+  const skip = Math.max(0, Math.min(1000, Math.floor(Number(offset) || 0)));
+  const objects = [];
+  let cursor = null;
+  const budget = Math.max(1, Math.min(3000, Math.floor(maxScan)));
+  let complete = true;
   do {
-    const count=Math.min(1000,budget-objects.length);
-    if (count<=0) { complete=false; break; }
-    const page=await bucket.list({prefix:FACTORY_GROUP_PREFIX+"/",limit:count,
-      ...(cursor?{cursor}:{})});
-    objects.push(...(page.objects||[]));
-    if (!page.truncated) { cursor=null;break; }
-    if (!page.cursor||page.cursor===cursor) throw Error("Factory group history cursor stalled");
-    cursor=page.cursor;
-  } while(cursor);
-  if (cursor) complete=false;
-  objects.sort((a,b)=>new Date(b.uploaded||0)-new Date(a.uploaded||0));
-  const groups=[];
+    const count = Math.min(1000, budget - objects.length);
+    if (count <= 0) { complete = false; break; }
+    const page = await bucket.list({prefix: FACTORY_GROUP_PREFIX + "/", limit: count,
+      ...(cursor ? {cursor} : {})});
+    objects.push(...(page.objects || []));
+    if (!page.truncated) { cursor = null; break; }
+    if (!page.cursor || page.cursor === cursor) throw Error("Factory group history cursor stalled");
+    cursor = page.cursor;
+  } while (cursor);
+  if (cursor) complete = false;
+  objects.sort((a,b) => new Date(b.uploaded || 0) - new Date(a.uploaded || 0));
+  const groups = [];
   for (const object of objects) {
-    if (groups.length>=limit) break;
-    const match=String(object.key).match(new RegExp("/groups/([A-Za-z0-9_-]{12,128})[.]json$"));
+    if (groups.length >= skip + take + 1) break;
+    const match = String(object.key).match(/\/groups\/([A-Za-z0-9_-]{12,128})[.]json$/);
     if (!match) continue;
-    const status=await factoryApprovalGroupStatus(bucket,match[1]);
-    if (status && (!profileId || status.profile_ids.includes(profileId))) groups.push(status);
+    const status = await factoryApprovalGroupStatus(bucket, match[1]);
+    if (!status || (profileId && !status.profile_ids.includes(profileId))) continue;
+    if (mode === "active" && !factoryBatchNeedsAttention(status)) continue;
+    if (mode === "completed" && factoryBatchNeedsAttention(status)) continue;
+    groups.push(status);
   }
-  groups.sort((a,b)=>Date.parse(b.created_at)-Date.parse(a.created_at));
-  return {groups,complete:complete&&objects.length<=limit,scanned:objects.length};
+  return { groups: groups.slice(skip, skip + take),
+    has_more: groups.length > skip + take,
+    complete: complete && objects.length <= take && mode === "all",
+    scanned: objects.length };
 }
 
 /** Cursor-backed cron discovery prevents lexicographic parent starvation. */

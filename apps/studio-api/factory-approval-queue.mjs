@@ -32,6 +32,13 @@ export function factoryBatchCounts(job) {
   }
   return { ...result, done_count: result.approved_count + result.skipped_count + result.failed_count };
 }
+/** Pending or failed work stays on the operator's active desk until resolved. */
+export function factoryBatchNeedsAttention(job) {
+  if (!job) return false;
+  const counts = factoryBatchCounts(job);
+  return counts.pending_count > 0 || counts.failed_count > 0 ||
+    !["completed"].includes(job.status);
+}
 export function factoryBatchSummary(job) {
   if (!job) return { ok: true, batch: true, status: "idle", job_id: null, items: [] };
   const counts = factoryBatchCounts(job);
@@ -83,12 +90,14 @@ async function putAbsent(bucket, key, value) {
   return bucket.put(key, JSON.stringify(value), {
     onlyIf: new Headers({ "If-None-Match": "*" }),
     httpMetadata: { contentType: "application/json" },
+    customMetadata: { factory_status: String(value.status || ""), factory_failed: String(factoryBatchCounts(value).failed_count), factory_group: String(value.group_request_id || "") },
   });
 }
 async function putMatch(bucket, key, value, etag) {
   return bucket.put(key, JSON.stringify(value), {
     onlyIf: { etagMatches: etag },
     httpMetadata: { contentType: "application/json" },
+    customMetadata: { factory_status: String(value.status || ""), factory_failed: String(factoryBatchCounts(value).failed_count), factory_group: String(value.group_request_id || "") },
   });
 }
 async function cas(bucket, key, fn, max = 8) {
@@ -148,13 +157,15 @@ export async function factoryBatchList(bucket, profileId, { limit = 40, maxScan 
  * This is a recent-activity window; the number of old batches is not fabricated.
  */
 export async function factoryBatchListGlobal(bucket, {
-  profileId = "", limit = 30, maxScan = 2000,
+  profileId = "", limit = 30, maxScan = 2000, mode = "all", offset = 0,
 } = {}) {
   assertBucket(bucket);
   if (profileId && !ID.test(String(profileId))) throw Error("Invalid Factory filter");
+  if (!["all", "active", "completed"].includes(mode)) throw Error("Invalid Factory activity mode");
   const prefix = FACTORY_BATCH_PREFIX + "/jobs/";
   const budget = Math.max(1, Math.min(10000, Math.floor(Number(maxScan) || 2000)));
-  const take = Math.max(1, Math.min(100, Math.floor(Number(limit) || 30)));
+  const take = Math.max(1, Math.min(500, Math.floor(Number(limit) || 30)));
+  const skip = Math.max(0, Math.min(1000, Math.floor(Number(offset) || 0)));
   const objects = [];
   let cursor;
   let complete = true;
@@ -162,7 +173,7 @@ export async function factoryBatchListGlobal(bucket, {
     const remaining = budget - objects.length;
     if (remaining <= 0) { complete = false; break; }
     const page = await bucket.list({
-      prefix, limit: Math.min(1000, remaining),
+      prefix, limit: Math.min(1000, remaining), include: ["customMetadata"],
       ...(cursor ? { cursor } : {}),
     });
     objects.push(...(page.objects || []));
@@ -176,14 +187,34 @@ export async function factoryBatchListGlobal(bucket, {
     const parts = String(row.key || "").match(match);
     return parts && (!profileId || parts[1] === profileId);
   }).sort((a, b) => new Date(b.uploaded || 0) - new Date(a.uploaded || 0));
-  const latest = matching.slice(0, take);
-  const loaded = await Promise.all(latest.map(row => get(bucket, row.key)));
-  const jobs = loaded.filter(row => row?.value?.schema === "studio.factory-batch.2")
-    .map(row => row.value)
-    .sort((a, b) => Date.parse(b.updated_at || b.created_at || "") -
-      Date.parse(a.updated_at || a.created_at || ""));
-  return { jobs, complete: complete && matching.length <= take,
-    scanned: objects.length, matched: matching.length };
+  const candidates = matching.filter(row => {
+    const meta = row.customMetadata || {};
+    if (mode !== "all" && meta.factory_group) return false;
+    if (!meta.factory_status || mode === "all") return true; // legacy jobs require a read
+    const attention = meta.factory_status !== "completed" || Number(meta.factory_failed || 0) > 0;
+    return mode === "active" ? attention : !attention;
+  });
+  const qualified = [];
+  const needed = skip + take + 1;
+  // Read only metadata-matching jobs. The legacy metadata-less records are
+  // examined for correctness, but never fetched on the usual fast path again.
+  for (let index = 0; index < candidates.length && qualified.length < needed; index += 25) {
+    const loaded = await Promise.all(candidates.slice(index, index + 25).map(row => get(bucket, row.key)));
+    for (const entry of loaded) {
+      const job = entry?.value;
+      if (job?.schema !== "studio.factory-batch.2") continue;
+      if (mode !== "all" && job.group_request_id) continue;
+      if (mode === "active" && !factoryBatchNeedsAttention(job)) continue;
+      if (mode === "completed" && factoryBatchNeedsAttention(job)) continue;
+      qualified.push(job);
+    }
+  }
+  return {
+    jobs: qualified.slice(skip, skip + take),
+    has_more: qualified.length > skip + take,
+    complete: complete && matching.length <= take && mode === "all",
+    scanned: objects.length, matched: matching.length,
+  };
 }
 
 /**
