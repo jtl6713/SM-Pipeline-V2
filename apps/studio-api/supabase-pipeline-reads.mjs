@@ -136,7 +136,7 @@ export function studioSupabaseBaseUrl(env) {
   return String(env?.SUPABASE_URL || "").trim().replace(/\/+$/, "");
 }
 
-export async function supabaseRest(env, pathAndQuery, { method = "GET", body = null, headers = {} } = {}) {
+export async function supabaseRest(env, pathAndQuery, { method = "GET", body = null, headers = {}, signal = null } = {}) {
   const base = studioSupabaseBaseUrl(env);
   const key = String(env?.SUPABASE_SERVICE_ROLE_KEY || "").trim();
   if (!base || !key) throw new Error("Supabase is not configured");
@@ -151,6 +151,7 @@ export async function supabaseRest(env, pathAndQuery, { method = "GET", body = n
       ...headers,
     },
     body: body == null ? undefined : (typeof body === "string" ? body : JSON.stringify(body)),
+    signal: signal || undefined,
   });
   const text = await res.text();
   let parsed = null;
@@ -166,7 +167,7 @@ export async function supabaseRest(env, pathAndQuery, { method = "GET", body = n
  * PostgREST/Supabase caps a single response (often 1000 rows) even when limit=10000.
  * Page with offset until exhausted or maxRows is reached.
  */
-export async function supabaseRestAll(env, pathAndQuery, { pageSize = 1000, maxRows = 10000, headers = {} } = {}) {
+export async function supabaseRestAll(env, pathAndQuery, { pageSize = 1000, maxRows = 10000, headers = {}, signal = null } = {}) {
   const size = Math.max(1, Math.min(1000, Number(pageSize) || 1000));
   const ceiling = Math.max(1, Math.min(20000, Number(maxRows) || 10000));
   const stripped = String(pathAndQuery || "")
@@ -179,7 +180,7 @@ export async function supabaseRestAll(env, pathAndQuery, { pageSize = 1000, maxR
   let offset = 0;
   while (rows.length < ceiling) {
     const take = Math.min(size, ceiling - rows.length);
-    const page = await supabaseRest(env, `${stripped}${joiner}limit=${take}&offset=${offset}`, { headers });
+    const page = await supabaseRest(env, `${stripped}${joiner}limit=${take}&offset=${offset}`, { headers, signal });
     const batch = Array.isArray(page) ? page : [];
     rows.push(...batch);
     if (batch.length < take) break;
@@ -674,77 +675,83 @@ export async function listSupabaseOverviewPack(env, { profileAirtableIds = [], o
   const outCeiling = Math.max(1, Math.min(10000, Number(outputLimit) || 10000));
   const ideaCeiling = Math.max(1, Math.min(10000, Number(ideaLimit) || 10000));
 
-  // Each city uses platform_outputs_pipeline_open_idx (profile id, then open
-  // status). One combined IN scan was still over the 26s refresh budget.
-  // not.eq is IS DISTINCT FROM, so blank output_status still counts.
-  // count=exact recounts the whole set on every page, so paging opts out.
-  // Idea rows only need the promotion keys, not the payload blob.
+  // Known-valid PostgREST operators only. not.eq was not proven against this
+  // project's PostgREST, and a rejected filter fell through to an Airtable scan
+  // that cannot finish inside the refresh budget. Blank statuses still count.
   const openOutputFilter = [
     "do_not_publish=eq.false",
-    "or=(test_run_id.is.null,test_run_id.eq.)",
-    "output_status=not.eq.Published",
-    "output_status=not.eq.Cancelled",
+    "or=(output_status.is.null,and(output_status.neq.Published,output_status.neq.Cancelled))",
     "or=(publish_status.is.null,publish_status.neq.Published)",
   ].join("&");
   const pageHeaders = { Prefer: "count=none" };
-  const outputPromise = Promise.all(uuids.map((uuid) => supabaseRestAll(
-    env,
-    `platform_outputs?content_profile_id=eq.${uuid}&${openOutputFilter}&select=${OVERVIEW_OUTPUT_SELECT}&order=output_number.desc.nullslast`,
-    { pageSize: 1000, maxRows: outCeiling, headers: pageHeaders },
-  )));
-  const ideaPromise = includeIdeas
-    ? new Promise((resolve) => {
-      const timer = setTimeout(() => resolve(null), 8000);
-      supabaseRestAll(
-        env,
-        `idea_candidates?${profileFilter}&select=${OVERVIEW_IDEA_SELECT}&order=created_at.desc.nullslast`,
-        { pageSize: 1000, maxRows: ideaCeiling, headers: pageHeaders },
-      ).then(
-        (rows) => { clearTimeout(timer); resolve(rows); },
-        () => { clearTimeout(timer); resolve(null); },
-      );
-    })
-    : Promise.resolve([]);
-  const [outputGroups, ideaResult] = await Promise.all([outputPromise, ideaPromise]);
-  const outputRows = outputGroups.flat();
-  let ideaRows = Array.isArray(ideaResult) ? ideaResult : [];
-  const ideasIncomplete = includeIdeas && !Array.isArray(ideaResult);
+  const controller = new AbortController();
+  const abortTimer = setTimeout(() => controller.abort(), 18000);
+  const signal = controller.signal;
+  try {
+    const outputPromise = Promise.all(uuids.map((uuid) => supabaseRestAll(
+      env,
+      `platform_outputs?content_profile_id=eq.${uuid}&${openOutputFilter}&select=${OVERVIEW_OUTPUT_SELECT}&order=output_number.desc.nullslast`,
+      { pageSize: 1000, maxRows: outCeiling, headers: pageHeaders, signal },
+    )));
+    const ideaPromise = includeIdeas
+      ? new Promise((resolve) => {
+        const timer = setTimeout(() => resolve(null), 8000);
+        supabaseRestAll(
+          env,
+          `idea_candidates?${profileFilter}&select=${OVERVIEW_IDEA_SELECT}&order=created_at.desc.nullslast`,
+          { pageSize: 1000, maxRows: ideaCeiling, headers: pageHeaders, signal },
+        ).then(
+          (rows) => { clearTimeout(timer); resolve(rows); },
+          () => { clearTimeout(timer); resolve(null); },
+        );
+      })
+      : Promise.resolve([]);
+    const [outputGroups, ideaResult] = await Promise.all([outputPromise, ideaPromise]);
+    const outputRows = outputGroups.flat();
+    let ideaRows = Array.isArray(ideaResult) ? ideaResult : [];
+    const ideasIncomplete = includeIdeas && !Array.isArray(ideaResult);
 
-  if (outputGroups.some((group) => group.length >= outCeiling)) {
-    throw new Error("Profiles overview outputs exceeded complete-scan safety ceiling");
+    if (outputGroups.some((group) => group.length >= outCeiling)) {
+      throw new Error("Profiles overview outputs exceeded complete-scan safety ceiling");
+    }
+
+    const shapeOutput = (row) => {
+      const flat = flattenOutputRow(row);
+      if (!flat.content_profile_airtable_id) {
+        flat.content_profile_airtable_id = airtableByUuid.get(row.content_profile_id) || null;
+      }
+      return airtableShapedOutputFromSupabase(flat);
+    };
+    const shapeIdea = (row) => {
+      const promoted = row?.promoted ?? (isPlainObject(row?.payload) ? row.payload.Promoted_Content_Record_ID : null);
+      const linked = row?.content_items ?? (isPlainObject(row?.payload) ? row.payload["Content Items"] : null);
+      const flat = flattenIdeaRow({
+        ...row,
+        payload: {
+          Promoted_Content_Record_ID: promoted || null,
+          "Content Items": Array.isArray(linked) ? linked : [],
+        },
+      });
+      if (!flat.content_profile_airtable_id) {
+        flat.content_profile_airtable_id = airtableByUuid.get(row.content_profile_id) || null;
+      }
+      return airtableShapedIdeaFromSupabase(flat);
+    };
+
+    return {
+      profilesMissing: false,
+      outputs: stripDeletedDuplicateOutputRecords((outputRows || []).map(shapeOutput)),
+      ideas: (ideaRows || []).map(shapeIdea),
+      ideas_incomplete: ideasIncomplete,
+      output_count: (outputRows || []).length,
+      idea_count: ideasIncomplete ? 0 : (ideaRows || []).length,
+    };
+  } catch (error) {
+    if (signal.aborted) throw new Error("supabase overview pack timed out after 18s");
+    throw error;
+  } finally {
+    clearTimeout(abortTimer);
   }
-
-  const shapeOutput = (row) => {
-    const flat = flattenOutputRow(row);
-    if (!flat.content_profile_airtable_id) {
-      flat.content_profile_airtable_id = airtableByUuid.get(row.content_profile_id) || null;
-    }
-    return airtableShapedOutputFromSupabase(flat);
-  };
-  const shapeIdea = (row) => {
-    const promoted = row?.promoted ?? (isPlainObject(row?.payload) ? row.payload.Promoted_Content_Record_ID : null);
-    const linked = row?.content_items ?? (isPlainObject(row?.payload) ? row.payload["Content Items"] : null);
-    const flat = flattenIdeaRow({
-      ...row,
-      payload: {
-        Promoted_Content_Record_ID: promoted || null,
-        "Content Items": Array.isArray(linked) ? linked : [],
-      },
-    });
-    if (!flat.content_profile_airtable_id) {
-      flat.content_profile_airtable_id = airtableByUuid.get(row.content_profile_id) || null;
-    }
-    return airtableShapedIdeaFromSupabase(flat);
-  };
-
-  return {
-    profilesMissing: false,
-    outputs: stripDeletedDuplicateOutputRecords((outputRows || []).map(shapeOutput)),
-    ideas: (ideaRows || []).map(shapeIdea),
-    ideas_incomplete: ideasIncomplete,
-    output_count: (outputRows || []).length,
-    idea_count: ideasIncomplete ? 0 : (ideaRows || []).length,
-  };
 }
 
 function matchesOpsQueueOutputFormula(fields = {}) {

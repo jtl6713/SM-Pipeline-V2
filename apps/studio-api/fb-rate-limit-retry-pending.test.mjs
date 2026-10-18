@@ -7,9 +7,9 @@ import { normalizedOutputState } from "./worker-functions-01.mjs";
 
 const root = dirname(fileURLToPath(import.meta.url));
 
-test("Worker version is 0.10.660-overview-parallel-pages", () => {
+test("Worker version is 0.10.661-overview-read-error", () => {
   const worker = readFileSync(join(root, "worker.js"), "utf8");
-  assert.match(worker, /version: "0\.10\.660-overview-parallel-pages"/);
+  assert.match(worker, /version: "0\.10\.661-overview-read-error"/);
 });
 
 test("Facebook Graph 368 park paints Retry Pending, not Failed", () => {

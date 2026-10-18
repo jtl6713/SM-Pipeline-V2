@@ -48,5 +48,5 @@ test("extracted modules that call shared helpers also import them from worker.js
 test("assembled Worker still defines studioMarkMappedListDirty for Approve write-through", () => {
   const worker = readStudioWorkerSource();
   assert.match(worker, /function studioMarkMappedListDirty/);
-  assert.match(worker, /0\.10\.660-overview-parallel-pages/);
+  assert.match(worker, /0\.10\.661-overview-read-error/);
 });
