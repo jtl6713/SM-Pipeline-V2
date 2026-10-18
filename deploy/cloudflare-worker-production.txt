@@ -460,3 +460,4 @@ Deploy merged scoped scheduling authority f8828617a31cf8855249660a58439818c90178
 2026-10-18 Home overview force-refresh bounded-budget finalization | production canary measured 20.65s after row-scope optimization; shorten prebuild wait and allow 26s verified build while remaining within Worker post-response lifetime | deploy and verify fresh durable generation.
 
 2026-10-18 stop duplicate purge cron | worker 0.10.657-stop-duplicate-purge | the 5-minute DELETE of removed packages was scanning production_request_outputs and exhausting the Supabase pool.
+2026-10-18 retry overview canary when the 26s build budget trips | a saturated Supabase pool was rolling the purge-stop Worker back | redeploy 0.10.657-stop-duplicate-purge.
