@@ -11,7 +11,6 @@ import {
   syncProfilePipelineToSupabase,
   syncAirtableOutputRowToSupabase,
   syncAirtableContentRowToSupabase,
-  purgeDeletedDuplicatePackages,
   enqueueStudioSideEffectOutbox,
   STUDIO_SUPABASE_PIPELINE_READ_ROUTES,
   STUDIO_SUPABASE_PHASE4_READ_ROUTES,
@@ -1061,7 +1060,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.656-factory-accept-first",
+          version: "0.10.657-stop-duplicate-purge",
           factory_batch_canary_revision: "chicago-ig-reel-v1",
           factory_batch_phase2a_post_gate_fix_v1: true,
           studio_supabase_pipeline_reads_v1: true,
@@ -2343,18 +2342,6 @@ export default {
     const cadenceNow = Number.isFinite(cronInstant) && cronInstant > 1e12 ? new Date(cronInstant) : new Date();
     const cadence = studioCronAirtableCadence(cadenceNow, event?.cron || "");
     ctx.waitUntil((async () => {
-      // Supabase and the Pipeline snapshot are not Airtable. A cooldown skip
-      // used to return before this delete, so the read copy kept serving the
-      // packages Airtable had already removed.
-      try {
-        const purged = await purgeDeletedDuplicatePackages(env);
-        if (purged?.outputs || purged?.content || purged?.snapshots) {
-          console.log("purged deleted duplicate packages", purged);
-        }
-      } catch (error) {
-        console.warn("purge deleted duplicate packages failed", error);
-      }
-
       // Fail-safe Factory recovery before the Airtable cooldown return so a busy
       // approve wave cannot strand accepted children until cooling fully clears.
       try {
