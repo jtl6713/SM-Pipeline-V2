@@ -136,7 +136,9 @@
     // In Production. Approve all must only claim Airtable-ready rows.
     const output = String(card.output_status || "").trim().toLowerCase();
     const review = String(card.review_status || "").trim().toLowerCase();
-    if (output === "in production" || output === "rendering" || output === "ready for render") return false;
+    const render = String(card.render_status || "").trim().toLowerCase();
+    if (/ready for render|waiting in render queue|^rendering$|^failed$|^blocked$/.test(render)) return false;
+    if (["in production", "rendering", "ready for render", "failed", "blocked"].includes(output)) return false;
     if (output === "ready for review") return true;
     if (review === "review sent" || review === "ready for review") return true;
     return /ready for review/i.test(String(card.studio_state || ""));
@@ -422,8 +424,11 @@
     const next = $("factoryBatchCompletedNext");
     const page = $("factoryBatchCompletedPage");
     if (!summary || !details) return;
-    const batches = Array.isArray(viewed?.batches) ? batch.batches :
-      (viewed?.job_id ? [batch] : []);
+    // Activity is split into active and completed snapshots. Always render the
+    // selected snapshot: using 'batch.batches' here silently replaced completed
+    // history with the (often empty) active list.
+    const batches = Array.isArray(viewed?.batches) ? viewed.batches :
+      (viewed?.job_id ? [viewed] : []);
     const totals = viewed?.totals || {
       batches: batches.length,
       active: batches.filter(row => ["queued", "running", "enqueuing"].includes(row.status)).length,
@@ -954,22 +959,47 @@
   }
 
   /**
-   * Same-content outputs still in Auto-high / Manual (usually Stories still
-   * rendering). Approve all only sees Needs eyes, so without this gate mains
-   * approve first and Stories reappear alone as Ready for Review.
+   * A content package is identified by its Airtable Content Item record, not
+   * its human-facing Content_ID number. The old numeric-only cross-lane scan
+   * counted unrelated/stale cards as "still rendering" and disabled Approve all
+   * after both Stories had actually finished (Content 924 / outputs 5047-48).
+   *
+   * A sibling blocks group approval only if it is a distinct, current output
+   * for that same authoritative Content Item and has not reached review.
+   * Incomplete genuine siblings still block; approval endpoints revalidate.
    */
   function pendingSiblingOutputsForGroup(group) {
-    const contentId = String(group?.cards?.[0]?.content_id || "").trim();
-    if (!contentId || !state.desk?.lanes) return [];
-    const readyIds = new Set((group?.cards || []).map((card) => String(card?.id || "")).filter(Boolean));
+    const cards = group?.cards || [];
+    const contentItemId = String(cards.find((card) => card?.content_item_id)?.content_item_id || "").trim();
+    const contentId = String(cards[0]?.content_id || "").trim();
+    const profileId = String(cards.find((card) => card?.profile_id)?.profile_id || "").trim();
+    if ((!contentItemId && !contentId) || !state.desk?.lanes) return [];
+    const readyIds = new Set(cards.map((card) => String(card?.id || "").trim()).filter(Boolean));
+    const readyNumbers = new Set(cards.map((card) => String(card?.output_id || "").trim()).filter(Boolean));
     const elsewhere = [
       ...(state.desk.lanes.auto_high || []),
       ...(state.desk.lanes.manual || []),
     ];
+    const seen = new Set();
     return elsewhere.filter((card) => {
       if (card?.kind !== "output") return false;
-      if (String(card.content_id || "").trim() !== contentId) return false;
-      if (readyIds.has(String(card.id || ""))) return false;
+      const id = String(card.id || "").trim();
+      if (!/^rec[A-Za-z0-9]+$/.test(id) || readyIds.has(id) || seen.has(id)) return false;
+      // No numeric Content_ID guess when a canonical Airtable link is available.
+      if (contentItemId) {
+        if (String(card.content_item_id || "").trim() !== contentItemId) return false;
+      } else if (String(card.content_id || "").trim() !== contentId) {
+        return false;
+      }
+      if (profileId && String(card.profile_id || "").trim() !== profileId) return false;
+      // Prevent a stale synthetic projection of a ready output being counted twice.
+      if (readyNumbers.has(String(card.output_id || "").trim())) return false;
+      const status = String(card.output_status || "").trim().toLowerCase();
+      const publish = String(card.publish_status || "").trim().toLowerCase();
+      if (/^(approved|approved for publishing|ready to schedule|ready to publish|scheduled|publishing|published|skipped)$/.test(status)
+        || /^(scheduled|publishing|published|skipped)$/.test(publish)) return false;
+      if (canReviewActions(card)) return false;
+      seen.add(id);
       return true;
     });
   }
@@ -977,13 +1007,20 @@
   function pendingSiblingMeta(pending) {
     if (!pending.length) return "";
     const stories = pending.filter(isStoryOutputCard).length;
-    if (stories && stories === pending.length) {
-      return `${stories} Stor${stories === 1 ? "y" : "ies"} still rendering`;
+    const active = pending.filter((card) => {
+      const render = String(card.render_status || "").toLowerCase();
+      const stateLabel = String(card.studio_state || "").toLowerCase();
+      return /ready for render|waiting in render queue|rendering/.test(render)
+        || /ready for render|waiting in render queue|rendering/.test(stateLabel);
+    });
+    const requiresRepair = pending.filter((card) =>
+      /failed|blocked|error|needs repair/i.test(`${card.output_status || ""} ${card.render_status || ""} ${card.studio_state || ""} ${card.stuck_kind || ""}`));
+    if (requiresRepair.length) return `${requiresRepair.length} sibling output${requiresRepair.length === 1 ? " needs" : "s need"} attention`;
+    if (active.length === pending.length) {
+      if (stories === pending.length) return `${stories} Stor${stories === 1 ? "y" : "ies"} still rendering`;
+      return `${pending.length} sibling${pending.length === 1 ? "" : "s"} still rendering`;
     }
-    if (stories) {
-      return `${pending.length} still rendering (${stories} Stor${stories === 1 ? "y" : "ies"})`;
-    }
-    return `${pending.length} sibling${pending.length === 1 ? "" : "s"} still rendering`;
+    return `${pending.length} sibling output${pending.length === 1 ? "" : "s"} awaiting review readiness`;
   }
 
   function renderContentBar(group, expanded) {
@@ -1408,6 +1445,17 @@
   }
 
   async function approveContentGroup(key, button) {
+    // Never submit group approval from a stale desk snapshot. Changes in R4/R5
+    // or other approvals must be observed before computing sibling membership.
+    if (state.loading) {
+      setStatus("Factory is refreshing output readiness. Try Approve all again shortly.", true);
+      return;
+    }
+    const fresh = await loadFactoryDesk(true);
+    if (!fresh) {
+      setStatus("Cannot verify current sibling readiness. Refresh Factory and retry.", true);
+      return;
+    }
     const cards = (state.desk?.lanes?.needs_eyes || []).filter((card) => contentGroupKey(card) === key);
     const ready = readyContentCards({ cards });
     if (ready.length < 2) {
@@ -1506,7 +1554,8 @@
   }
 
   async function loadFactoryDesk(force = false) {
-    if (state.loading && !force) return state.desk;
+    // One authoritative Desk snapshot at a time, including forced refreshes.
+    if (state.loading) return state.desk;
     state.loading = true;
     setStatus("Loading Factory Desk…");
     try {
@@ -1515,7 +1564,7 @@
       if (!state.batchTimer) state.batchTimer = setInterval(() => {
         if (!document.hidden && $("page-factory")?.classList.contains("active")) refreshFactoryBatchActivity(true).catch(() => {});
       }, 5000);
-      const desk = await fetchJson("/api/factory/desk");
+      const desk = await fetchJson("/api/factory/desk", { cache: "no-store" });
       renderDesk(desk);
       setStatus(desk.warning || "Factory Desk ready.");
       return desk;
@@ -1573,8 +1622,18 @@
     renderFactoryBatchActivity(state.batch);
   });
   document.addEventListener("visibilitychange", () => {
-    if (!document.hidden && $("page-factory")?.classList.contains("active")) refreshFactoryBatchActivity().catch(() => {});
+    if (!document.hidden && $("page-factory")?.classList.contains("active")) {
+      refreshFactoryBatchActivity().catch(() => {});
+      loadFactoryDesk(true).catch(() => {});
+    }
   });
+  // Rendering continues in the background: Factory must refresh actual output
+  // readiness, not just its separate batch-status widget, while the page is open.
+  setInterval(() => {
+    if (!document.hidden && $("page-factory")?.classList.contains("active")) {
+      loadFactoryDesk(true).catch(() => {});
+    }
+  }, 45000);
   $("factoryProfileFilter")?.addEventListener("change", () => {
     state.completedOpen = false;
     state.completedBatch = null;
