@@ -5,7 +5,7 @@
  */
 import {
   factoryBatchEnqueue, factoryBatchRead, factoryBatchSummary,
-  factoryBatchDrain, factoryBatchRetry,
+  factoryBatchDrain, factoryBatchRetry, factoryBatchList, factoryBatchCronSelectJobs,
 } from "./factory-approval-queue.mjs";
 import { withOutputApprovalLock } from "./output-approval-lease.mjs";
 
@@ -75,6 +75,100 @@ export default {
         const job = await factoryBatchRetry(env.STUDIO_MEDIA, PROFILE, rid);
         ctx.waitUntil(drain(env, req));
         return json({ ...factoryBatchSummary(job), accepted: true });
+      }
+      if (req.method === "POST" && url.pathname === "/api/simultaneous-profile") {
+        // Launch two distinct same-profile drains in the same Worker turn.
+        // A barrier holds the winning approval long enough for the rival to
+        // attempt the profile lock. Never publish or call Airtable.
+        const ids = [rid + "_sim_a", rid + "_sim_b"];
+        for (let i = 0; i < 2; i++) {
+          await factoryBatchEnqueue(env.STUDIO_MEDIA, {
+            profileId: PROFILE, requestId: ids[i],
+            records: Array.from({ length: 10 }, (_, j) => ({
+              id: idFor(i * 10 + j), platform: "Instagram", format: "Reel",
+            })), note: "simultaneous-profile-contention",
+          });
+        }
+        const approveSynthetic = async id => {
+          const key = PREFIX + "/" + rid + "/simultaneous/" + id + ".json";
+          return withOutputApprovalLock(env.STUDIO_MEDIA, id, async () => {
+            if (await read(env, key)) return { already_approved: true };
+            await new Promise(resolve => setTimeout(resolve, 60));
+            await env.STUDIO_MEDIA.put(key, JSON.stringify({ id }), {
+              onlyIf: new Headers({ "If-None-Match": "*" }),
+            });
+            return { id };
+          });
+        };
+        const [a, b] = await Promise.all(ids.map(requestId => factoryBatchDrain(env.STUDIO_MEDIA, {
+          profileId: PROFILE, requestId, maxItems: 10,
+          approve: approveSynthetic,
+        })));
+        const claimedCount = Number(Boolean(a.claimed)) + Number(Boolean(b.claimed));
+        if (claimedCount !== 1) throw Error("Expected exactly one simultaneous profile-lock winner");
+        const siblings = await factoryBatchList(env.STUDIO_MEDIA, PROFILE, { limit: 40 });
+        const next = factoryBatchCronSelectJobs(siblings.map(job => ({
+          profileId: PROFILE, requestId: job.request_id, job,
+        })), { maxProfiles: 1 })[0];
+        const loserId = a.claimed ? ids[1] : ids[0];
+        if (next?.requestId !== loserId) throw Error("Profile handoff did not select lock loser");
+        const resumed = await factoryBatchDrain(env.STUDIO_MEDIA, {
+          profileId: PROFILE, requestId: loserId, maxItems: 10,
+          approve: approveSynthetic,
+        });
+        const commits = await env.STUDIO_MEDIA.list({ prefix: PREFIX + "/" + rid + "/simultaneous/" });
+        const first = await factoryBatchRead(env.STUDIO_MEDIA, PROFILE, ids[0]);
+        const second = await factoryBatchRead(env.STUDIO_MEDIA, PROFILE, ids[1]);
+        const passed = claimedCount === 1 && resumed.claimed &&
+          first?.status === "completed" && second?.status === "completed" && commits.objects.length === 20;
+        if (!passed) throw Error("Simultaneous profile contention did not complete exactly once");
+        return json({ passed, claimed_count: claimedCount, lock_loser: loserId,
+          handoff_to: next.requestId, unique_commits: commits.objects.length });
+      }
+      if (req.method === "POST" && url.pathname === "/api/competing-profile") {
+        // Synthetic same-profile contention: two distinct child ledgers, no publishing.
+        const firstId = rid + "_a";
+        const secondId = rid + "_b";
+        const children = [firstId, secondId];
+        for (let i = 0; i < children.length; i++) {
+          const offset = i * 10;
+          await factoryBatchEnqueue(env.STUDIO_MEDIA, {
+            profileId: PROFILE, requestId: children[i],
+            records: Array.from({ length: 10 }, (_, j) => ({
+              id: idFor(offset + j), platform: "Instagram", format: "Reel",
+            })), note: "same-profile-contention-acceptance",
+          });
+        }
+        const first = await factoryBatchDrain(env.STUDIO_MEDIA, {
+          profileId: PROFILE, requestId: firstId, maxItems: 10,
+          approve: (id, job) => withOutputApprovalLock(env.STUDIO_MEDIA, id, async () => {
+            const key = PREFIX + "/" + rid + "/contention/" + id + ".json";
+            if (await read(env, key)) return { already_approved: true };
+            await new Promise(resolve => setTimeout(resolve, 20));
+            await env.STUDIO_MEDIA.put(key, JSON.stringify({ id }));
+            return { id };
+          }),
+        });
+        const siblings = await factoryBatchList(env.STUDIO_MEDIA, PROFILE, { limit: 40 });
+        const next = factoryBatchCronSelectJobs(siblings.map(job => ({
+          profileId: PROFILE, requestId: job.request_id, job,
+        })), { maxProfiles: 1 })[0];
+        if (next?.requestId !== secondId) throw Error("Fair handoff did not select pending sibling");
+        const second = await factoryBatchDrain(env.STUDIO_MEDIA, {
+          profileId: PROFILE, requestId: next.requestId, maxItems: 10,
+          approve: async id => {
+            const key = PREFIX + "/" + rid + "/contention/" + id + ".json";
+            if (await read(env, key)) return { already_approved: true };
+            await env.STUDIO_MEDIA.put(key, JSON.stringify({ id }));
+            return { id };
+          },
+        });
+        const committed = await env.STUDIO_MEDIA.list({ prefix: PREFIX + "/" + rid + "/contention/" });
+        return json({ first_completed: first.job.status === "completed",
+          second_completed: second.job.status === "completed",
+          handoff_to: next.requestId, unique_commits: committed.objects.length,
+          passed: first.job.status === "completed" && second.job.status === "completed"
+            && committed.objects.length === 20 });
       }
       if (req.method === "POST" && url.pathname === "/api/cleanup") {
         // Even if a live Cloudflare R2 bucket is bound by a staging test,

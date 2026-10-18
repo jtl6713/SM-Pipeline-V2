@@ -14134,13 +14134,21 @@ export async function factoryBatchProcess(env, profileId, requestId, ctx = null,
       // claims the profile lock for ~20s. Without chaining, the other children
       // exit empty-handed and the 1-minute cron can skip while Airtable cools —
       // Activity then sits at "3 approved / 57 pending" for many minutes.
-      const pending = Number(factoryBatchCounts(result?.job).pending_count || 0);
-      const processed = Number(result?.processed || 0);
-      if (result?.claimed && processed > 0 && pending > 0 && continueSlice < 8 && ctx?.waitUntil) {
+       const processed = Number(result?.processed || 0);
+      if (result?.claimed && processed > 0 && continueSlice < 8 && ctx?.waitUntil) {
         ctx.waitUntil((async () => {
           // Local delay avoids a circular sleepMs import from worker.js.
           await new Promise((resolve) => setTimeout(resolve, 300));
-          return factoryBatchProcess(env, profileId, requestId, ctx, { continueSlice: continueSlice + 1 });
+          // Fairly hand off to the oldest eligible child of this profile, not
+          // necessarily the child that just used the profile lock. This avoids
+          // leaving sibling submissions stranded until cron recovery.
+          const siblings = await factoryBatchList(env.STUDIO_MEDIA, profileId, { limit: 40 });
+          const next = factoryBatchCronSelectJobs(
+            siblings.map((job) => ({ profileId, requestId: job.request_id, job })),
+            { maxProfiles: 1 },
+          )[0];
+          if (!next) return null;
+          return factoryBatchProcess(env, profileId, next.requestId, ctx, { continueSlice: continueSlice + 1 });
         })().catch((error) => console.warn("Factory batch continue", requestId, error)));
       }
       return result;
