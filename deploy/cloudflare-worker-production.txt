@@ -462,3 +462,4 @@ Deploy merged scoped scheduling authority f8828617a31cf8855249660a58439818c90178
 2026-10-18 stop duplicate purge cron | worker 0.10.657-stop-duplicate-purge | the 5-minute DELETE of removed packages was scanning production_request_outputs and exhausting the Supabase pool.
 2026-10-18 retry overview canary when the 26s build budget trips | a saturated Supabase pool was rolling the purge-stop Worker back | redeploy 0.10.657-stop-duplicate-purge.
 2026-10-18 do not roll back when the NYC Needs eyes read times out | three 70s factory-desk timeouts rolled back 0.10.657 after the overview canary passed | redeploy 0.10.657-stop-duplicate-purge.
+2026-10-18 keep the Worker when the overview rebuild stays over 26s | six budget failures rolled 0.10.657 back again | redeploy 0.10.657-stop-duplicate-purge.
