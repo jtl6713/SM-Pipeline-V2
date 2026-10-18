@@ -435,3 +435,4 @@ Deploy Factory ambiguous-submit reconciliation 2026-10-17. PR #817. Recover exac
 2026-10-18 UI 0.6.717 overview refresh recovery | release cache key bumped so Safari receives stale-refresh recovery fix; deploy and verify custom domain.
 2026-10-18 UI 0.6.717 Home overview refresh recovery | stale refresh intent recovery plus aligned release regression pins | deploy and verify custom domain.
 2026-10-18 UI 0.6.717 retry after release-contract expectation alignment | deploy and verify custom domain.
+2026-10-18 Retry UI 0.6.717 Home overview refresh recovery after correcting release-contract cache key.
