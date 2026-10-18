@@ -8,6 +8,10 @@
   const REFRESH_KEY = "studio.allProfilesOverview.refresh.v1";
   const POLL_MS = 5000;
   const REFRESH_POLL_MS = 1800;
+  // The Worker expires abandoned refresh operations after 120s. Keep a small
+  // client grace period, then stop painting "Refreshing…" if browser storage
+  // contains an orphaned operation from another tab/session.
+  const REFRESH_INTENT_MAX_MS = 150000;
   const state = {
     rows: [],
     timer: 0,
@@ -64,10 +68,17 @@
       const raw = localStorage.getItem(REFRESH_KEY) || sessionStorage.getItem(REFRESH_KEY);
       if (!raw) return null;
       const parsed = JSON.parse(raw);
-      return parsed?.operationId ? {
+      if (!parsed?.operationId) return null;
+      const intent = {
         operationId: String(parsed.operationId),
         requestedAt: String(parsed.requestedAt || ""),
-      } : null;
+      };
+      const requestedMs = Date.parse(intent.requestedAt);
+      if (!Number.isFinite(requestedMs) || Date.now() - requestedMs >= REFRESH_INTENT_MAX_MS) {
+        clearRefreshIntent();
+        return null;
+      }
+      return intent;
     } catch {
       return null;
     }
@@ -350,24 +361,20 @@
       }
 
       if (status === "completed") {
-        const intended = state.refreshOperationId || readRefreshIntent()?.operationId || "";
-        if (!intended || intended === operationId) {
-          state.refreshOperationId = operationId || intended;
-          await finishVerifiedRefresh(refresh);
-        }
+        // Durable server state is authoritative across tabs and browser restores.
+        // A stale local operation id must never leave Home stuck on "Refreshing…".
+        state.refreshOperationId = operationId || state.refreshOperationId;
+        await finishVerifiedRefresh(refresh);
         return;
       }
 
       if (status === "failed") {
-        const intended = state.refreshOperationId || readRefreshIntent()?.operationId || "";
-        if (!intended || intended === operationId) {
-          state.manualRefreshing = false;
-          state.refreshOperationId = "";
-          state.refreshMessage = `Refresh failed · Showing previous data (${cacheAgeLabel()})`;
-          state.refreshTone = "error";
-          clearRefreshIntent();
-          render({ stale: true });
-        }
+        state.manualRefreshing = false;
+        state.refreshOperationId = "";
+        state.refreshMessage = `Refresh failed · Showing previous data (${cacheAgeLabel()})`;
+        state.refreshTone = "error";
+        clearRefreshIntent();
+        render({ stale: true });
         return;
       }
 
@@ -389,7 +396,17 @@
         render({ stale: true });
       }
     } catch (error) {
-      if (state.manualRefreshing || readRefreshIntent()) {
+      const intent = readRefreshIntent();
+      if (state.manualRefreshing || intent) {
+        if (!intent && state.manualRefreshing) {
+          state.manualRefreshing = false;
+          state.refreshOperationId = "";
+          state.refreshMessage = `Refresh status unavailable · Showing previous data (${cacheAgeLabel()})`;
+          state.refreshTone = "warn";
+          clearRefreshIntent();
+          render({ stale: true });
+          return;
+        }
         state.manualRefreshing = true;
         render({ stale: true });
         scheduleRefreshStatusPoll(3000);
