@@ -90,6 +90,17 @@ jobs:
           assert obj['handoff_to']=='smoke_competing_profile_20261018_b',obj
           print('same_profile_competing_children=PASS; unique_commits=20')
           PY
+          # True simultaneous dispatch: both children contend for the same R2
+          # profile lock in one Promise.all, then hand off to the lock loser.
+          curl -fsS -X POST 'http://127.0.0.1:8976/api/simultaneous-profile?request_id=smoke_simultaneous_profile_20261018' -o /tmp/factory-simultaneous.json
+          python - <<'PY'
+          import json
+          obj=json.load(open('/tmp/factory-simultaneous.json'))
+          assert obj['passed'] and obj['claimed_count']==1,obj
+          assert obj['unique_commits']==20,obj
+          assert obj['handoff_to']==obj['lock_loser'],obj
+          print('simultaneous_same_profile_lock=PASS; winner=1; unique_commits=20')
+          PY
           # Stop/restart the Worker, imitating a client/dev-server shutdown.
           kill "$(cat /tmp/factory-batch-worker.pid)"
           sleep 2
