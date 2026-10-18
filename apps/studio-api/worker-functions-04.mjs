@@ -13967,8 +13967,14 @@ export async function factoryBatchStatusRoute(request, env, authorization) {
             const history = await factoryBatchListGlobal(env.STUDIO_MEDIA, {
               profileId: factoryProfile, mode: "active", limit: 24, maxScan: 1200,
             });
+            // Quality polling needs only counts/signatures, not every
+            // per-output timeline (which can contain 180 events per item).
             const batches = history.jobs.map(job => ({
-              ...factoryBatchSummary(job),
+              job_id: job.id, profile_id: job.profile_id,
+              status: job.status, ...factoryBatchCounts(job),
+              items: (job.items || []).map(item => ({
+                id: item.id, output_id: item.output_id, status: item.status,
+              })),
               quality_signals: factoryBatchQualitySignals(job),
             }));
             const signals = batches.flatMap(job => (job.quality_signals || [])
