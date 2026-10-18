@@ -76,6 +76,55 @@ export default {
         ctx.waitUntil(drain(env, req));
         return json({ ...factoryBatchSummary(job), accepted: true });
       }
+      if (req.method === "POST" && url.pathname === "/api/simultaneous-profile") {
+        // Launch two distinct same-profile drains in the same Worker turn.
+        // A barrier holds the winning approval long enough for the rival to
+        // attempt the profile lock. Never publish or call Airtable.
+        const ids = [rid + "_sim_a", rid + "_sim_b"];
+        for (let i = 0; i < 2; i++) {
+          await factoryBatchEnqueue(env.STUDIO_MEDIA, {
+            profileId: PROFILE, requestId: ids[i],
+            records: Array.from({ length: 10 }, (_, j) => ({
+              id: idFor(i * 10 + j), platform: "Instagram", format: "Reel",
+            })), note: "simultaneous-profile-contention",
+          });
+        }
+        const approveSynthetic = async id => {
+          const key = PREFIX + "/" + rid + "/simultaneous/" + id + ".json";
+          return withOutputApprovalLock(env.STUDIO_MEDIA, id, async () => {
+            if (await read(env, key)) return { already_approved: true };
+            await new Promise(resolve => setTimeout(resolve, 60));
+            await env.STUDIO_MEDIA.put(key, JSON.stringify({ id }), {
+              onlyIf: new Headers({ "If-None-Match": "*" }),
+            });
+            return { id };
+          });
+        };
+        const [a, b] = await Promise.all(ids.map(requestId => factoryBatchDrain(env.STUDIO_MEDIA, {
+          profileId: PROFILE, requestId, maxItems: 10,
+          approve: approveSynthetic,
+        })));
+        const claimedCount = Number(Boolean(a.claimed)) + Number(Boolean(b.claimed));
+        if (claimedCount !== 1) throw Error("Expected exactly one simultaneous profile-lock winner");
+        const siblings = await factoryBatchList(env.STUDIO_MEDIA, PROFILE, { limit: 40 });
+        const next = factoryBatchCronSelectJobs(siblings.map(job => ({
+          profileId: PROFILE, requestId: job.request_id, job,
+        })), { maxProfiles: 1 })[0];
+        const loserId = a.claimed ? ids[1] : ids[0];
+        if (next?.requestId !== loserId) throw Error("Profile handoff did not select lock loser");
+        const resumed = await factoryBatchDrain(env.STUDIO_MEDIA, {
+          profileId: PROFILE, requestId: loserId, maxItems: 10,
+          approve: approveSynthetic,
+        });
+        const commits = await env.STUDIO_MEDIA.list({ prefix: PREFIX + "/" + rid + "/simultaneous/" });
+        const first = await factoryBatchRead(env.STUDIO_MEDIA, PROFILE, ids[0]);
+        const second = await factoryBatchRead(env.STUDIO_MEDIA, PROFILE, ids[1]);
+        const passed = claimedCount === 1 && resumed.claimed &&
+          first?.status === "completed" && second?.status === "completed" && commits.objects.length === 20;
+        if (!passed) throw Error("Simultaneous profile contention did not complete exactly once");
+        return json({ passed, claimed_count: claimedCount, lock_loser: loserId,
+          handoff_to: next.requestId, unique_commits: commits.objects.length });
+      }
       if (req.method === "POST" && url.pathname === "/api/competing-profile") {
         // Synthetic same-profile contention: two distinct child ledgers, no publishing.
         const firstId = rid + "_a";
