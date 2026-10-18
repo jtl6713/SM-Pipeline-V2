@@ -75,10 +75,22 @@ jobs:
           SUBDOMAIN="$(curl -fsS -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/subdomain" | jq -r '.result.subdomain')"
           test -n "$SUBDOMAIN" && test "$SUBDOMAIN" != null
           NONCE="$(openssl rand -hex 12)"
-          RESULT="$(curl -sS --retry 4 --retry-delay 2 -X POST "https://$CANARY_WORKER_NAME.$SUBDOMAIN.workers.dev/run" -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" --data "{\"nonce\":\"$NONCE\"}")"
-          if ! echo "$RESULT" | jq -e 'type == "object"' >/dev/null 2>&1; then
-            echo "canary_response_format=non_json"
-            echo "canary_response_bytes=${#RESULT}"
+          # A Wrangler secret-put creates a fresh Worker version. Cloudflare
+          # edge propagation may initially return plain text error code 1042.
+          # Retry only the synthetic endpoint, never an Airtable or publish call.
+          RESULT=""
+          HTTP_CODE=""
+          for attempt in $(seq 1 16); do
+            HTTP_CODE="$(curl -sS --max-time 90 --retry 2 --retry-delay 2 -o /tmp/synthetic-canary-response.json -w '%{http_code}' -X POST "https://$CANARY_WORKER_NAME.$SUBDOMAIN.workers.dev/run" -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" --data "{\\"nonce\\":\\"$NONCE\\"}" || true)"
+            if [[ "$HTTP_CODE" == "200" ]] && jq -e 'type == "object"' /tmp/synthetic-canary-response.json >/dev/null 2>&1; then
+              RESULT="$(cat /tmp/synthetic-canary-response.json)"
+              break
+            fi
+            echo "synthetic_canary_waiting_for_edge attempt=$attempt http=$HTTP_CODE"
+            sleep 3
+          done
+          if [[ -z "$RESULT" ]]; then
+            echo "synthetic_canary_unavailable_after_retries http=$HTTP_CODE"
             exit 1
           fi
           echo "$RESULT" | jq -c '{ok, error_code, message, schema, live_namespace, production_flag_unchanged, external_write, airtable_writes, publishing_calls, results}'
