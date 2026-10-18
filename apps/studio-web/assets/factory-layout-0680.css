@@ -505,6 +505,7 @@
   appearance:none;font:inherit;cursor:pointer;text-align:left;width:100%;
   border:1px solid transparent;border-radius:9px;padding:9px 10px;
   display:flex;align-items:center;justify-content:space-between;gap:12px;
+  position:relative;padding-bottom:18px;
   background:transparent;color:inherit;min-width:0;
 }
 #page-factory .factory-batch-activity-choice:hover{
@@ -522,9 +523,12 @@
 #page-factory .factory-batch-activity-choice .factory-batch-recent-result{
   flex:0 0 auto;text-align:right;
 }
-#page-factory .factory-batch-mini-progress{
+/* Progress uses the entire batch row, including the space beneath
+   the right-aligned status. Percentage fill still reflects true progress. */
+#page-factory .factory-batch-activity-choice .factory-batch-mini-progress{
+  position:absolute;left:10px;right:10px;bottom:6px;
   display:block;height:4px;border-radius:5px;background:#dfe7f1;
-  overflow:hidden;width:100%;max-width:260px;margin-top:4px;
+  overflow:hidden;width:auto;max-width:none;margin:0;
 }
 #page-factory .factory-batch-mini-progress span{
   display:block;height:100%;background:#2866a7;border-radius:5px;
@@ -545,7 +549,8 @@
 #page-factory .factory-batch-child progress{width:100%;height:9px;accent-color:#245ea4}
 #page-factory .factory-batch-child small{font-size:.73rem;color:#445873}
 @media(max-width:560px){
-  #page-factory .factory-batch-activity-choice{padding:9px 6px;gap:8px}
+  #page-factory .factory-batch-activity-choice{padding:9px 6px 17px;gap:8px}
+  #page-factory .factory-batch-activity-choice .factory-batch-mini-progress{left:6px;right:6px}
   #page-factory .factory-batch-activity-choice .factory-batch-recent-result{max-width:120px}
   #page-factory .factory-batch-child-grid{grid-template-columns:1fr}
 }
