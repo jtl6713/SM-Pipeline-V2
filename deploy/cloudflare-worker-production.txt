@@ -451,3 +451,5 @@ Deploy merged scoped scheduling authority f8828617a31cf8855249660a58439818c90178
 2026-10-18 Factory submit accept harden | worker 0.10.656-factory-accept-first | wall-clock submit budget + batched ownership + never 500 after durable group enqueue; clear 503 instead of empty Cloudflare 500 on NYC/Miami large submit.
 
 2026-10-18 Factory accept-first group submit | worker 0.10.656-factory-accept-first | durable R2 accept from desk profile_id/platform/format hints; skip N Airtable output GETs on HTTP path (drain still verifies). Stops empty Cloudflare 500 / Submitted 0 of N on large NYC/Miami.
+
+2026-10-18: Deploy PR #861 Factory Needs eyes full review-backlog scan / a97b0d8 — independent paginated review-ready Supabase query, Airtable review fallback >500, and authenticated read-only NYC backlog acceptance gate. No approval, scheduling or publishing mutation.
