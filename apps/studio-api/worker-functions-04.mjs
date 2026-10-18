@@ -4710,15 +4710,17 @@ export async function buildStudioProfilesOverviewRows(env, profiles, options = {
         profileAirtableIds: profileIds,
         outputLimit: STUDIO_PROFILES_OVERVIEW_OUTPUT_LIMIT,
         ideaLimit: STUDIO_PROFILES_OVERVIEW_IDEA_LIMIT,
-        // Skip idea_candidates once every profile already has a last-good count.
-        includeIdeas: missingIdeaCounts && !forceIdeas,
+        // A manual force refresh must fetch a fresh idea_candidates snapshot too.
+        // Supabase is the configured hot source and this call bypasses the Studio
+        // overview cache, so use its complete idea pack before falling back to Airtable.
+        includeIdeas: missingIdeaCounts,
       });
       // Require a non-empty output pack. Empty ideas used to short-circuit to 0
       // Ideas totals while still painting supabase scheduled counts.
       if (!pack.profilesMissing && (pack.outputs || []).length) {
         outputRows = pack.outputs || [];
         supabaseIdeaRows = Array.isArray(pack.ideas) ? pack.ideas : [];
-        supabaseIdeasUsable = !forceIdeas && missingIdeaCounts && pack.ideas_incomplete !== true;
+        supabaseIdeasUsable = missingIdeaCounts && pack.ideas_incomplete !== true;
         usedSupabaseOutputs = true;
         readSource = "supabase";
       }
@@ -4756,10 +4758,9 @@ export async function buildStudioProfilesOverviewRows(env, profiles, options = {
     }
   }
 
-  // A manual force refresh must refresh Ideas too. Supabase remains the configured
-  // hot source for output rows, but Ideas are still authoritatively rescanned from
-  // Airtable so the UI cannot claim the entire overview is current while Ideas lag.
-  if (usedSupabaseOutputs && forceIdeas) {
+  // If the Supabase idea pack is incomplete, fall back to Airtable for manual
+  // force refresh rather than publishing an incomplete Ideas count.
+  if (usedSupabaseOutputs && forceIdeas && !supabaseIdeasUsable) {
     airtableIdeaRows = await listRecords(env, env.AIRTABLE_IDEA_TABLE_ID, {
       limit: STUDIO_PROFILES_OVERVIEW_IDEA_LIMIT,
       sortField: "Create_Date",
@@ -4798,17 +4799,16 @@ export async function buildStudioProfilesOverviewRows(env, profiles, options = {
       ideasSource = "airtable";
       metrics.ideas = counted.total;
       if (commitIdeas) rememberOverviewIdeaCount(profile.id, ideasCount, "airtable");
-    } else if (ideaCounts.has(String(profile.id))) {
-      // Reuse last-good Ideas counts so scheduled/manual/failed/approval can
-      // update from Supabase without waiting on an Airtable Ideas scan.
-      ideasCount = ideaCounts.get(String(profile.id));
-      ideasSource = studioProfilesOverviewCache.ideasSource || "snapshot";
     } else if (supabaseIdeasUsable) {
       const counted = ideasNotInProductionFromRows(supabaseIdeaRows, profile);
       ideasCount = counted.count;
       ideasSource = "supabase";
       metrics.ideas = counted.total;
       if (commitIdeas) rememberOverviewIdeaCount(profile.id, ideasCount, "supabase");
+    } else if (ideaCounts.has(String(profile.id))) {
+      // Reuse last-good Ideas counts only when no complete fresh idea pack is available.
+      ideasCount = ideaCounts.get(String(profile.id));
+      ideasSource = studioProfilesOverviewCache.ideasSource || "snapshot";
     }
     metrics.ideas_not_in_production = ideasCount;
     const mapped = mapStudioContentProfile(profile);
@@ -5265,11 +5265,17 @@ export async function runStudioProfilesOverviewForceRefresh(env, authorization, 
   try {
     const cache = studioProfilesOverviewCache;
     if (cache.inflight) {
-      await raceStudioOverviewBudget(cache.inflight, STUDIO_PROFILES_OVERVIEW_BUILD_BUDGET_MS * 2, "overview-existing-build");
+      // A slow background rebuild must never cause the operator's explicit refresh
+      // to fail. Give it a brief chance to finish, then start a fenced manual build.
+      try {
+        await raceStudioOverviewBudget(cache.inflight, 1500, "overview-existing-build");
+      } catch (error) {
+        console.warn("profiles overview force refresh superseding slow background rebuild", error);
+      }
     }
     const profiles = await raceStudioOverviewBudget(
       resolveAuthorizedContentProfiles(env, authorization),
-      Math.max(STUDIO_PROFILES_OVERVIEW_RESOLVE_BUDGET_MS, 5000),
+      3000,
       "overview-force-resolve",
     );
     if (!profiles?.length) throw new Error("Profiles overview refresh resolved no authorized profiles");
@@ -5279,7 +5285,9 @@ export async function runStudioProfilesOverviewForceRefresh(env, authorization, 
       if (cache.inflight === trackedBuild) cache.inflight = null;
     });
     cache.inflight = trackedBuild;
-    const rows = await raceStudioOverviewBudget(trackedBuild, 45_000, "overview-force-build");
+    // Keep the detached waitUntil operation safely inside Cloudflare's post-response
+    // lifetime. If this budget is exceeded, state is marked failed instead of hanging.
+    const rows = await raceStudioOverviewBudget(trackedBuild, 20_000, "overview-force-build");
     validateStudioProfilesOverviewRows(rows, profiles);
 
     const snapshotAt = Math.max(Date.now(), Number(refreshState?.baseline_snapshot_at || 0) + 1);
@@ -5346,7 +5354,9 @@ export async function runStudioProfilesOverviewForceRefresh(env, authorization, 
 export async function startProfilesOverviewForceRefresh(request, env, authorization, ctx) {
   const snapshot = await readStudioProfilesOverviewSnapshot(env);
   const coolMs = airtableCooldownWaitMs();
-  if (coolMs > AIRTABLE_SLOT_FAIL_FAST_MS) {
+  // Supabase-backed force refreshes no longer depend on Airtable unless the
+  // Supabase Ideas pack proves incomplete, so Airtable cooldown must not block them.
+  if (studioReadSource(env) !== "supabase" && coolMs > AIRTABLE_SLOT_FAIL_FAST_MS) {
     return respond(request, env, {
       ok: true,
       accepted: false,
