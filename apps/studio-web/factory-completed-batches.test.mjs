@@ -46,7 +46,7 @@ function viewHarness() {
 }
 const job = (id, title) => ({
   job_id: id, request_id: id.slice(3), profile_id: "recTestProfileAAAA",
-  status: "completed", total: 24, done_count: 24,
+  status: "completed", group: true, profile_ids: ["recTestProfileAAAA"], total: 24, done_count: 24,
   approved_count: 24, pending_count: 0, failed_count: 0,
   created_at: "2026-10-17T22:00:00.000Z",
   items: [{id:"recTestOutputAAA",output_id: 5047,title,status:"approved"}],
