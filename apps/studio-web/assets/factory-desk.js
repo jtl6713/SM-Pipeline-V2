@@ -424,8 +424,11 @@
     const next = $("factoryBatchCompletedNext");
     const page = $("factoryBatchCompletedPage");
     if (!summary || !details) return;
-    const batches = Array.isArray(viewed?.batches) ? batch.batches :
-      (viewed?.job_id ? [batch] : []);
+    // Activity is split into active and completed snapshots. Always render the
+    // selected snapshot: using 'batch.batches' here silently replaced completed
+    // history with the (often empty) active list.
+    const batches = Array.isArray(viewed?.batches) ? viewed.batches :
+      (viewed?.job_id ? [viewed] : []);
     const totals = viewed?.totals || {
       batches: batches.length,
       active: batches.filter(row => ["queued", "running", "enqueuing"].includes(row.status)).length,
