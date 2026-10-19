@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { creativeSettingName, parseCreativeGuidance, validateCreativeGuidancePatch } from "./profile-creative-guidance.mjs";
+import { creativeSettingName, parseCreativeGuidance, resolveCreativeGuidance, validateCreativeGuidancePatch } from "./profile-creative-guidance.mjs";
 
 test("creative guidance is scoped by exact profile record id", () => {
   const chicago = creativeSettingName("rec12345678901234");
@@ -21,4 +21,33 @@ test("rejects unrecognized and overlong settings, tolerates legacy blanks", () =
   assert.deepEqual(parseCreativeGuidance("not json"), {
     shared_direction: "", thumbnail_instructions: "", narration_instructions: "",
   });
+});
+
+test("inherited Airtable prompt text populates selected profile without leaking another city's style", () => {
+  const chicago = resolveCreativeGuidance({
+    profile: { Brand_Voice: "Chicago upbeat guide" },
+    brand: { Thumbnail_Style_Guidelines: "Chicago photorealistic gold headlines", Brand_Personality: "Chicago locally curious" },
+    persona: { Tone_Guidelines: "Warm tone", Pacing_Guidelines: "Short opening" },
+  });
+  const miami = resolveCreativeGuidance({
+    profile: { Brand_Voice: "Miami relaxed guide" },
+    brand: { Brand_Personality: "Miami warm" },
+    persona: { Tone_Guidelines: "Warm tone" },
+  });
+  assert.match(chicago.creative.thumbnail_instructions, /gold headlines/);
+  assert.equal(chicago.creative.narration_instructions, "Chicago upbeat guide");
+  assert.equal(chicago.sources.thumbnail_instructions.label, "Brands · Thumbnail_Style_Guidelines");
+  assert.equal(miami.creative.narration_instructions, "Miami relaxed guide");
+  assert.doesNotMatch(JSON.stringify(miami), /Chicago/);
+  assert.equal(miami.creative.thumbnail_instructions, "");
+});
+test("saved per-profile edits override database guidance without mutating shared source", () => {
+  const brand = { Thumbnail_Style_Guidelines: "Original shared brand rule" };
+  const result = resolveCreativeGuidance({
+    saved: { thumbnail_instructions: "Selected profile override" },
+    brand,
+  });
+  assert.equal(result.creative.thumbnail_instructions, "Selected profile override");
+  assert.equal(result.sources.thumbnail_instructions.inherited, false);
+  assert.equal(brand.Thumbnail_Style_Guidelines, "Original shared brand rule");
 });
