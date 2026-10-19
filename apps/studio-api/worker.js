@@ -2503,7 +2503,17 @@ export default {
         console.warn("profiles overview snapshot refresh failed", error);
       }
 
-      if (!cadence.heavy) return;
+      if (!cadence.heavy) {
+        // Make progress on the waiting-photo queue between heavy half-hour
+        // sweeps. One fair candidate per five-minute light tick avoids a
+        // large Airtable burst while preventing hours of silent starvation.
+        try {
+          await runWaitingIdeaPhotoMatches(env, { limit: 1 });
+        } catch (error) {
+          console.warn("idea light photo-wait matcher failed", error);
+        }
+        return;
+      }
 
       // --- HEAVY (UTC :00 / :30): platform polls, heals, ideas, ingest, release ---
       try {
