@@ -28,6 +28,7 @@ def run(request: StageRequest) -> StageResult:
             "covered_text": str(request.extra.get("covered_text") or "(none)"),
             "needed": needed_int,
             "total": total_int,
+            "creative_guidance": request.extra.get("creative_guidance") if isinstance(request.extra.get("creative_guidance"), dict) else {},
             "dry_run": bool(request.extra.get("dry_run")),
         },
         skip_message="SAI1 did not return slide themes",
