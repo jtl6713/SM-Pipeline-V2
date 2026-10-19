@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from studio_produce.creative_guidance import creative_prompt_suffix
+
 PROMPT_TEMPLATE = """You are ChicagoShining's timed-script writer for a mixed-media Reel / Short with spoken voiceover.
 
 Return strict JSON only. No markdown. No explanations.
@@ -67,14 +69,16 @@ def build_timed_script_prompt(
     location: str,
     market: str,
     catalog: list[dict],
+    creative_guidance: dict | None = None,
 ) -> str:
-    return PROMPT_TEMPLATE.format(
+    prompt = PROMPT_TEMPLATE.format(
         title=title or "",
         summary=summary or "",
         location=location or "",
         market=market or "Chicago",
         catalog=catalog if isinstance(catalog, str) else _catalog_json(catalog),
     )
+    return prompt + creative_prompt_suffix(creative_guidance, mode="narration")
 
 
 def _catalog_json(catalog: list[dict]) -> str:
