@@ -1063,7 +1063,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.664-supabase-write-once",
+          version: "0.10.665-manual-ideas-no-cap",
           factory_batch_canary_revision: "chicago-ig-reel-v1",
           factory_batch_phase2a_post_gate_fix_v1: true,
           studio_supabase_pipeline_reads_v1: true,
@@ -1120,6 +1120,7 @@ export default {
           studio_autonomous_scheduled_target_v1: true,
           studio_autonomous_scheduled_plus_awaiting_v1: true,
           studio_autonomous_open_ideas_cap_v1: true,
+          studio_autonomous_manual_no_idea_cap_v1: true,
           studio_autonomous_hour_asset_drain_v1: true,
           studio_autonomous_ten_per_hour_v1: true,
           studio_autonomous_cron_minute_v1: true,

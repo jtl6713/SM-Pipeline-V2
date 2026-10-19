@@ -903,7 +903,7 @@ test("Worker stamps photo-ready ideas and drains the 30m SLA on light ticks", as
   const path = await import("node:path");
   const here = path.dirname(fileURLToPath(import.meta.url));
   const worker = readStudioWorkerSource();
-  assert.match(worker, /version: "0.10.664-supabase-write-once"/);
+  assert.match(worker, /version: "0.10.665-manual-ideas-no-cap"/);
   assert.match(worker, /studio_autonomous_ten_ideas_anyway_v1: true/);
   assert.match(worker, /planAutonomousHourIdeas/);
   const hourFill = worker.slice(
@@ -916,12 +916,20 @@ test("Worker stamps photo-ready ideas and drains the 30m SLA on light ticks", as
   assert.match(worker, /if \(!harvestThisHour && last\.production_request_id && last\.idea_id\)/);
   assert.match(worker, /studio_autonomous_ten_per_hour_v1: true/);
   assert.match(worker, /studio_autonomous_open_ideas_cap_v1: true/);
+  assert.match(worker, /studio_autonomous_manual_no_idea_cap_v1: true/);
   assert.match(worker, /studio_autonomous_hour_asset_drain_v1: true/);
   assert.match(worker, /AUTONOMOUS_IDEAS_PER_HOUR/);
   assert.match(worker, /AUTONOMOUS_OPEN_IDEAS_CAP/);
   assert.match(worker, /AUTONOMOUS_HOUR_ASSET_DRAIN/);
   assert.match(worker, /countAutonomousOpenIdeas/);
   assert.match(worker, /open_ideas_cap/);
+  const manualIdeaGateStart = worker.indexOf("// Manual / dry-run: one idea.");
+  const manualIdeaGate = worker.slice(
+    manualIdeaGateStart,
+    worker.indexOf("let refillScores = null;", manualIdeaGateStart),
+  );
+  assert.match(manualIdeaGate, /if \(!options\.force\) \{[\s\S]*countAutonomousOpenIdeas/);
+  assert.match(manualIdeaGate, /operator run \(`force`\) bypasses it/);
   assert.match(worker, /hourAssetDrain: true/);
   assert.match(worker, /selectAutonomousResumeDraftBatch/);
   assert.match(worker, /AUTONOMOUS_CITY_CREATE_MS/);

@@ -173,7 +173,7 @@ test("Trying Again only for real Remotion failures, never queue wait", () => {
 });
 
 test("Worker admit + mapOutput expose queue meta and Remotion job id", () => {
-  assert.match(worker, /version: "0.10.664-supabase-write-once"/);
+  assert.match(worker, /version: "0.10.665-manual-ideas-no-cap"/);
   assert.match(worker, /studio_shared_render_queue_v1: true/);
   assert.match(worker, /studio_render_queue_wait_v1: true/);
   assert.match(worker, /async function studioAdmitRenderQueue/);

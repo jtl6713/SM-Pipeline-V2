@@ -10,9 +10,10 @@ export const AUTONOMOUS_SCHEDULED_SKIP_ABOVE = 509;
 /** Distinct-subject ideas to open per city per Chicago hour while Scheduled+Awaiting Approval is under target. */
 export const AUTONOMOUS_IDEAS_PER_HOUR = 10;
 /**
- * Hard ceiling on unpromoted Idea Candidates across all cities.
+ * Background-automation ceiling on unpromoted Idea Candidates across all cities.
  * When open ≥ this at the Chicago top of hour, skip create and drain
- * asset-ready drafts through promote / produce instead.
+ * asset-ready drafts through promote / produce instead. Operator-triggered
+ * runs must never use this background backlog brake.
  */
 export const AUTONOMOUS_OPEN_IDEAS_CAP = 20;
 /** How many asset-ready autonomous drafts the top-of-hour tick may advance toward Ready for Review. */

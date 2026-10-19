@@ -280,7 +280,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.721-profile-audio-previews";
+  const BUILD_ID = "item4-0.6.722-manual-ideas-no-cap";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -1100,6 +1100,9 @@
     }
     if (key === "already_ran_slot") {
       return "This Chicago slot already harvested an idea. Resume the in-flight request, or wait for the next window.";
+    }
+    if (key === "open_ideas_cap") {
+      return "Studio could not start this manual idea run. Refresh and try again; manual runs are not capped.";
     }
     return key ? `Skipped: ${key}` : "Skipped.";
   }

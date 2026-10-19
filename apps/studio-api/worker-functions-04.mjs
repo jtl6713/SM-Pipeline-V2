@@ -12586,23 +12586,25 @@ export async function executeStudioAutonomousProduce(env, ctx, options = {}) {
   }
 
   // Manual / dry-run: one idea. Scheduled hours already returned above.
-  // Hold at 500–509 Scheduled+Awaiting Approval. Skip when that combined load is over 509.
-  // Global open-ideas cap still wins over the scheduled-target refill.
-  const openIdeasCount = await countAutonomousOpenIdeas(env);
-  if (autonomousOpenIdeasAtCap(openIdeasCount)) {
-    const result = {
-      skipped: "open_ideas_cap",
-      chicago_date: chicago.date,
-      chicago_hour: chicago.hour,
-      slot,
-      status: "skipped",
-      skip_reason: "open_ideas_cap",
-      open_ideas_count: openIdeasCount,
-      open_ideas_cap: AUTONOMOUS_OPEN_IDEAS_CAP,
-      scheduled_target: AUTONOMOUS_SCHEDULED_TARGET,
-    };
-    if (options.scheduled || options.force) await studioSaveAutonomousLastRun(env, result);
-    return result;
+  // The global cap is a background-automation backlog brake only. A deliberate
+  // operator run (`force`) bypasses it and also avoids the Airtable count request.
+  if (!options.force) {
+    const openIdeasCount = await countAutonomousOpenIdeas(env);
+    if (autonomousOpenIdeasAtCap(openIdeasCount)) {
+      const result = {
+        skipped: "open_ideas_cap",
+        chicago_date: chicago.date,
+        chicago_hour: chicago.hour,
+        slot,
+        status: "skipped",
+        skip_reason: "open_ideas_cap",
+        open_ideas_count: openIdeasCount,
+        open_ideas_cap: AUTONOMOUS_OPEN_IDEAS_CAP,
+        scheduled_target: AUTONOMOUS_SCHEDULED_TARGET,
+      };
+      if (options.scheduled) await studioSaveAutonomousLastRun(env, result);
+      return result;
+    }
   }
   let refillScores = null;
   let refillMeta = null;
