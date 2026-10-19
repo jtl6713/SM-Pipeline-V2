@@ -37,6 +37,9 @@ import {
   readyProductionFailure,
   readyProductionFinishClaim,
   readyProductionList,
+  readyProductionRead,
+  readyProductionReadCronDiagnostic,
+  readyProductionWriteCronDiagnostic,
   readyProductionOutputsAwaitingFinalApproval,
   readyProductionSelectJobs,
 } from "./ready-production-queue.mjs";
@@ -11168,64 +11171,143 @@ async function processReadyProductionClaim(env, authorization, ctx, lease, { def
 
 async function studioReadyProductionCronResume(env, ctx = null, options = {}) {
   if (!env?.STUDIO_MEDIA) throw new HttpError(503, "Ready-to-produce durable queue storage is unavailable");
-  const authorization = options.authorization?.user?.record_id
-    ? options.authorization
-    : await resolveStudioCronAuthorization(env);
-  const discovered = await discoverReadyProductionIdeas(env, { limit: options.discoveryLimit || 100 });
-  const enqueued = [];
-  for (const idea of discovered) {
-    const result = await readyProductionEnqueue(env.STUDIO_MEDIA, {
-      ideaId: idea.id,
-      profileId: firstLinkedRecordId(f(idea, "Content_Profile")) || null,
-      createdAt: f(idea, "Create_Date") || idea.createdTime || null,
-    });
-    enqueued.push({ idea_id: idea.id, created: result.created, revived: Boolean(result.revived) });
-  }
-  const jobs = await readyProductionList(env.STUDIO_MEDIA, { maxScan: options.maxScan || 500 });
-  const selected = readyProductionSelectJobs(jobs, {
-    maxConcurrency: options.maxConcurrency || READY_PRODUCTION_MAX_CONCURRENCY,
-    maxPerProfile: 1,
-  });
-  const claims = [];
-  for (const job of selected) {
-    const owner = crypto.randomUUID();
-    const lease = await readyProductionClaim(env.STUDIO_MEDIA, job.idea_id, owner);
-    if (lease) claims.push(lease);
-  }
-  const settled = await Promise.all(claims.map(async (lease, index) => {
+  const state = { started_at: new Date().toISOString(), status: "running", stage: "authorization" };
+  // Persist checkpoints before the first Airtable/auth call; otherwise a
+  // dispatcher that fails before discovery leaves no evidence in Airtable.
+  const checkpoint = async (stage, details = {}) => {
+    Object.assign(state, details, { stage });
     try {
-      const job = await processReadyProductionClaim(env, authorization, ctx, lease, {
-        // Only one new heavy produce enqueue per pass; the existing render queue
-        // and later one-minute ticks advance the other claimed profile safely.
-        deferProduce: index > 0,
-      });
-      return { idea_id: lease.job.idea_id, status: job?.status || "unknown", stage: job?.stage || null };
+      await readyProductionWriteCronDiagnostic(env.STUDIO_MEDIA, state);
     } catch (error) {
-      const failure = readyProductionFailure(error);
-      console.warn("Ready-to-produce dispatch failed", lease.job.idea_id, error);
-      const job = await readyProductionFinishClaim(env.STUDIO_MEDIA, lease, {
-        status: "retry_wait",
-        stage: "retry",
-        last_error: failure.message,
-        ...(!failure.transient ? { retry_delay_ms: 30 * 60 * 1000 } : {}),
-      });
-      return { idea_id: lease.job.idea_id, status: job?.status || "retry_wait", error: failure.message };
+      // Observability may not block production; R2 read failures are reported on
+      // the admin-only diagnostics route when possible.
+      console.warn("Ready-to-produce cron checkpoint unavailable", stage, error?.name || "Error");
     }
-  }));
-  return {
-    ok: true,
-    discovered: discovered.length,
-    enqueued: enqueued.filter((row) => row.created || row.revived).length,
-    claimed: claims.length,
-    max_concurrency: READY_PRODUCTION_MAX_CONCURRENCY,
-    results: settled,
-    final_approval: "human_only",
   };
+  await checkpoint("authorization");
+  try {
+    const authorization = options.authorization?.user?.record_id
+      ? options.authorization
+      : await resolveStudioCronAuthorization(env);
+    await checkpoint("discovery");
+    const discovered = await discoverReadyProductionIdeas(env, { limit: options.discoveryLimit || 100 });
+    state.discovered = discovered.length;
+    await checkpoint("enqueue");
+    const enqueued = [];
+    for (const idea of discovered) {
+      const result = await readyProductionEnqueue(env.STUDIO_MEDIA, {
+        ideaId: idea.id,
+        profileId: firstLinkedRecordId(f(idea, "Content_Profile")) || null,
+        createdAt: f(idea, "Create_Date") || idea.createdTime || null,
+      });
+      enqueued.push({ idea_id: idea.id, created: result.created, revived: Boolean(result.revived) });
+    }
+    state.enqueued = enqueued.filter((row) => row.created || row.revived).length;
+    await checkpoint("queue_list");
+    const jobs = await readyProductionList(env.STUDIO_MEDIA, { maxScan: options.maxScan || 500 });
+    const selected = readyProductionSelectJobs(jobs, {
+      maxConcurrency: options.maxConcurrency || READY_PRODUCTION_MAX_CONCURRENCY,
+      maxPerProfile: 1,
+    });
+    await checkpoint("claim");
+    const claims = [];
+    for (const job of selected) {
+      const owner = crypto.randomUUID();
+      const lease = await readyProductionClaim(env.STUDIO_MEDIA, job.idea_id, owner);
+      if (lease) claims.push(lease);
+    }
+    state.claimed = claims.length;
+    await checkpoint("processing");
+    const settled = await Promise.all(claims.map(async (lease, index) => {
+      try {
+        const job = await processReadyProductionClaim(env, authorization, ctx, lease, {
+          // Only one new heavy produce enqueue per pass; the existing render queue
+          // and later one-minute ticks advance the other claimed profile safely.
+          deferProduce: index > 0,
+        });
+        return { idea_id: lease.job.idea_id, status: job?.status || "unknown", stage: job?.stage || null };
+      } catch (error) {
+        const failure = readyProductionFailure(error);
+        console.warn("Ready-to-produce dispatch failed", lease.job.idea_id, error);
+        const job = await readyProductionFinishClaim(env.STUDIO_MEDIA, lease, {
+          status: "retry_wait",
+          stage: "retry",
+          last_error: failure.message,
+          ...(!failure.transient ? { retry_delay_ms: 30 * 60 * 1000 } : {}),
+        });
+        return { idea_id: lease.job.idea_id, status: job?.status || "retry_wait", error: failure.message };
+      }
+    }));
+    state.status = "completed";
+    await checkpoint("complete");
+    return {
+      ok: true,
+      discovered: discovered.length,
+      enqueued: state.enqueued,
+      claimed: claims.length,
+      max_concurrency: READY_PRODUCTION_MAX_CONCURRENCY,
+      results: settled,
+      final_approval: "human_only",
+    };
+  } catch (error) {
+    const failure = readyProductionFailure(error);
+    state.status = "failed";
+    await checkpoint(state.stage, {
+      error_name: String(error?.name || "Error"),
+      error_status: Number(error?.status || error?.statusCode || 0) || null,
+      error: failure.message,
+    });
+    throw error;
+  }
 }
 
 export { studioReadyProductionCronResume };
 
 export async function getStudioOperations(request, env, authorization) {
+  // Read-only, tenant-admin-only diagnostics from the Worker that actually owns
+  // STUDIO_MEDIA. No Cloudflare API token, user session, or R2 access is exposed.
+  const diagnosticUrl = new URL(request.url);
+  if (diagnosticUrl.searchParams.get("ready_production_diagnostic") === "1") {
+    requirePermission(authorization, "tenant_admin");
+    if (request.method !== "GET") throw new HttpError(405, "Method not allowed");
+    if (!env?.STUDIO_MEDIA) throw new HttpError(503, "Ready-to-produce queue binding unavailable");
+    const rawIds = diagnosticUrl.searchParams.get("idea_ids") || "";
+    const ideaIds = [...new Set(rawIds.split(",").map((id) => id.trim()).filter(Boolean))];
+    if (ideaIds.length > 8 || ideaIds.some((id) => !/^rec[A-Za-z0-9]{14}$/.test(id))) {
+      throw new HttpError(400, "Provide at most eight valid Airtable idea record IDs");
+    }
+    const [cron, jobs] = await Promise.all([
+      readyProductionReadCronDiagnostic(env.STUDIO_MEDIA),
+      Promise.all(ideaIds.map(async (ideaId) => {
+        const job = await readyProductionRead(env.STUDIO_MEDIA, ideaId);
+        const idea = await airtableFetch(env, env.AIRTABLE_IDEA_TABLE_ID, ideaId).catch(() => null);
+        const requestRow = idea ? await readyProductionRequestForIdea(env, idea).catch(() => null) : null;
+        return {
+          idea_id: ideaId,
+          found_in_r2: Boolean(job),
+          status: job?.status || null,
+          stage: job?.stage || null,
+          attempts: Number(job?.attempts || 0),
+          updated_at: job?.updated_at || null,
+          next_attempt_ms: Number(job?.next_attempt_ms || 0),
+          lease_expires_ms: Number(job?.lease_expires_ms || 0),
+          last_error: String(job?.last_error || "").slice(0,240) || null,
+          request_id: requestRow?.id || job?.production_request_id || null,
+          request_status: requestRow ? String(f(requestRow, "Request_Status") || "") : null,
+          plan_status: requestRow ? String(f(requestRow, "Studio_Output_Plan_Status") || "") : null,
+          variant_status: requestRow ? String(f(requestRow, "Studio_Variant_Status") || "") : null,
+          has_production_job: Boolean(requestRow && f(requestRow, "Studio_Production_Job_JSON")),
+        };
+      })),
+    ]);
+    return respond(request, env, {
+      ok: true,
+      readonly: true,
+      queue: "ready-production",
+      cron,
+      jobs,
+    });
+  }
   const chicago = chicagoNowParts();
   const lastDaily = await studioSettingsByName(env, STUDIO_I1_LAST_DAILY_SETTING);
   const lastAutonomous = await studioSettingsByName(env, STUDIO_AUTONOMOUS_LAST_SETTING);
