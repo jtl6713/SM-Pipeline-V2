@@ -410,7 +410,7 @@ test("occupancy load windows the Airtable query and sorts nearest-first", () => 
     worker.indexOf("async function studioLoadOccupiedSchedules"),
   );
   assert.match(loadFn, /sortDirection: "asc"/);
-  assert.match(loadFn, /studioOccupiedFilterFormula\(now, profile\)/);
+  assert.match(loadFn, /studioOccupiedFilterFormula\(now, profile, platform\)/);
   assert.match(loadFn, /"Studio_Output_Type"/);
   assert.match(loadFn, /"Content_Profile"/);
   const occupyFn = worker.slice(
