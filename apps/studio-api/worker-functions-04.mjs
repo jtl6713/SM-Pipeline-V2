@@ -10942,12 +10942,29 @@ export async function getStudioOperationsProfiles(request, env, authorization) {
   } else {
     profiles = await listRecords(env, STUDIO_IDEA_PROFILE_TABLE_ID, { limit: 50 });
   }
+  let musicRecords = [];
+  if (selectedOnly && env.AIRTABLE_MEDIA_TABLE_ID) {
+    const ids = [...new Set(linkedRecordIds(f(profiles[0], "Autonomous_Music_Pool")))]
+      .filter((id) => /^rec[A-Za-z0-9]{14}$/.test(id)).slice(0, 50);
+    if (ids.length) {
+      // The normal music catalog is capped at 100 records: selected tracks
+      // outside that page must still have their real names and preview media.
+      const formula = "OR(" + ids.map((id) => 'RECORD_ID()="' + id + '"').join(",") + ")";
+      const linked = await listRecords(env, env.AIRTABLE_MEDIA_TABLE_ID, {
+        limit: ids.length, filterFormula: formula,
+      });
+      musicRecords = (linked || [])
+        .filter((record) => String(f(record, "Asset_Role") || "") === "Music")
+        .map(mapMusic);
+    }
+  }
   return respond(request, env, {
     ok: true,
     page: "operations-profiles",
     selected_only: selectedOnly,
     can_edit_profiles: Boolean(authorization?.permissions?.tenant_admin),
     profiles: (profiles || []).map(mapOperationsProfile),
+    ...(selectedOnly ? { music_records: musicRecords } : {}),
   });
 }
 /*__STUDIO_WORKER_END:getStudioOperationsProfiles__*/
