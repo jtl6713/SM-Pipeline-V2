@@ -3579,7 +3579,7 @@ export async function studioReleaseContentItemVoiceoverThumbnail(env, outputReco
 }
 /*__STUDIO_WORKER_END:studioReleaseContentItemVoiceoverThumbnail__*/
 
-export async function fetchGoogleDriveAudio(record, request) {
+export async function fetchGoogleDriveAudio(record, request, env = null) {
   const mapped = mapMusic(record);
   const fileId = mapped.google_drive_file_id;
   if (!fileId) throw new HttpError(404, "Google Drive file ID is not available for this music asset");
@@ -3588,6 +3588,24 @@ export async function fetchGoogleDriveAudio(record, request) {
   headers.set("Accept", "audio/mpeg,audio/*;q=0.9,*/*;q=0.8");
   const requestedRange = request.headers.get("Range");
   if (requestedRange) headers.set("Range", requestedRange);
+
+  // The user's music is in Google Drive; public download endpoints can return
+  // a 403/login page even when an authenticated Studio worker can read it.
+  // Reuse the existing authorized Drive service identity (same as video).
+  const token = env ? await item4GoogleAccessToken(env) : "";
+  if (token) {
+    const authHeaders = new Headers(headers);
+    authHeaders.set("Authorization", `Bearer ${token}`);
+    const response = await fetch(
+      `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}?alt=media&supportsAllDrives=true`,
+      { method: "GET", headers: authHeaders, redirect: "follow" }
+    );
+    const mime = String(response.headers.get("Content-Type") || "").toLowerCase();
+    if (response.ok && (mime.startsWith("audio/") || mime === "application/octet-stream")) {
+      return response;
+    }
+    try { await response.body?.cancel(); } catch {}
+  }
 
   const urls = [
     googleDriveDownloadUrl(fileId),
@@ -3680,7 +3698,7 @@ export async function musicPreview(request, env, url) {
       method: "GET",
       headers: { Range: "bytes=0-0" },
     });
-    const upstream = await fetchGoogleDriveAudio(record, probeRequest);
+    const upstream = await fetchGoogleDriveAudio(record, probeRequest, env);
     const headers = copyDriveAudioHeaders(upstream, mapped);
 
     const contentRange = upstream.headers.get("Content-Range") || "";
@@ -3695,7 +3713,7 @@ export async function musicPreview(request, env, url) {
     return new Response(null, { status: 200, headers });
   }
 
-  const upstream = await fetchGoogleDriveAudio(record, request);
+  const upstream = await fetchGoogleDriveAudio(record, request, env);
   const headers = copyDriveAudioHeaders(upstream, mapped);
 
   // Preserve Google's 206 response when the browser asks for a byte range.
