@@ -5737,6 +5737,7 @@ let studioAiApiPreferenceCache = { preferred: "OpenAI", failoverEnabled: true, a
 /** Lean Profiles tab payload — Content Profiles only (voice/music settings). */
 /*__STUDIO_WORKER_EXTRACT:getStudioOperationsProfiles__*/
 /*__STUDIO_WORKER_EXTRACT:patchStudioOperationsProfile__*/
+/*__STUDIO_WORKER_EXTRACT:studioProfileCreativeGuidance__*/
 /*__STUDIO_WORKER_EXTRACT:studioInternalJsonRequest__*/
 /*__STUDIO_WORKER_EXTRACT:studioSaveAutonomousLastRun__*/
 /*__STUDIO_WORKER_EXTRACT:studioLoadAutonomousLastRun__*/
