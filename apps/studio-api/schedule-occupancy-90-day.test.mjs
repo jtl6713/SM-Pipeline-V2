@@ -64,10 +64,10 @@ test("atomic Factory strict occupancy is platform-scoped without weakening its c
   assert.match(formula, /platformClause/);
   assert.match(formula, /Platform/);
   const loader = between(f01, "export async function studioLoadOccupiedScheduleRows", "/*__STUDIO_WORKER_END:studioLoadOccupiedScheduleRows__*/");
-  assert.match(loader, /studioOccupiedFilterFormula\\(now, profile, platform\\)/);
+  assert.match(loader, /studioOccupiedFilterFormula\(now, profile, platform\)/);
   assert.match(loader, /requireComplete/);
   const approve = between(f04, "async function studioApproveOutputRecordAtomic", "/*__STUDIO_WORKER_END:approveOutputRecordForPublishing__*/");
-  assert.match(approve, /excludeIds: \\[id\\],[\\s\\S]*?profile, platform, requireComplete: true/);
+  assert.match(approve, /excludeIds: \[id\],[\s\S]*?profile, platform, requireComplete: true/);
   assert.match(approve, /durableReservations/);
   assert.match(approve, /runAtomicScheduleTransaction/);
 });
