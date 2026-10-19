@@ -163,3 +163,15 @@ test("P0 #907 exposes cron-stage diagnostics only through tenant-admin GET; no q
     assert.match(dispatcher, new RegExp(stage));
   }
 });
+
+
+test("P0 #907 Airtable discovery never selects nonexistent Production_Notes on Idea Candidates", async () => {
+  const functions = await readFile(new URL("./worker-functions-04.mjs", import.meta.url), "utf8");
+  const discovery = functions.slice(
+    functions.indexOf("async function discoverReadyProductionIdeas("),
+    functions.indexOf("async function readyProductionRequestForIdea("),
+  );
+  assert.match(discovery, /Production_Config_Notes/);
+  assert.doesNotMatch(discovery, /"Production_Notes"\s*,/);
+  assert.match(discovery, /READY_PRODUCTION_IDEA_FORMULA/);
+});
