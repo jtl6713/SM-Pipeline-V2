@@ -695,29 +695,30 @@ jobs:
           TOKEN=$(cat /tmp/verify-token.txt)
           URL="https://$VERIFY_BRIDGE.$SUBDOMAIN.workers.dev/$TOKEN/factory-desk"
           CODE=000
-          SAW_EMPTY=0
           for i in 1 2 3; do
             CODE=$(curl -sS --max-time 70 -o /tmp/factory-review-readonly.json -w '%{http_code}' "$URL" || true)
-            if [[ "$CODE" == "200" ]] && [[ -f /tmp/factory-review-readonly.json ]] && jq -e --arg profile "recgtK8Z7eNADNtVy" '
-                .ok==true and .page=="factory-desk"
-                and (.summary.needs_eyes > 0)
-                and ([.lanes.needs_eyes[] | select(.profile_id==$profile)] | length) > 0
+            if [[ "$CODE" == "200" ]] && jq -e '
+                .ok == true
+                and .page == "factory-desk"
+                and (.summary | type == "object")
+                and (.summary.needs_eyes | type == "number" and . >= 0)
+                and (.lanes.needs_eyes | type == "array")
+                and (.read_source | type == "string" and length > 0)
               ' /tmp/factory-review-readonly.json >/dev/null 2>&1; then
-              echo "factory_review_backlog=PASS source=$(jq -r .read_source /tmp/factory-review-readonly.json) NYC_count=$(jq --arg profile recgtK8Z7eNADNtVy '[.lanes.needs_eyes[] | select(.profile_id==$profile)] | length' /tmp/factory-review-readonly.json)"
+              # A successful, structurally valid zero-row backlog is not a
+              # deployment failure: operators may have approved every NYC item.
+              # Do not infer non-starvation solely from today's positive count.
+              NYC_COUNT=$(jq --arg profile recgtK8Z7eNADNtVy '[.lanes.needs_eyes[] | select(.profile_id==$profile)] | length' /tmp/factory-review-readonly.json)
+              TOTAL=$(jq -r '.summary.needs_eyes' /tmp/factory-review-readonly.json)
+              SOURCE=$(jq -r '.read_source' /tmp/factory-review-readonly.json)
+              echo "factory_review_backlog=PASS source=$SOURCE total=$TOTAL NYC_count=$NYC_COUNT"
               exit 0
             fi
-            if [[ "$CODE" == "200" ]] && [[ -f /tmp/factory-review-readonly.json ]]; then
-              SAW_EMPTY=1
-            fi
-            echo "factory_review_backlog attempt=$i http=$CODE" >&2
+            echo "factory_review_backlog invalid_or_unavailable attempt=$i http=$CODE" >&2
             sleep 3
           done
-          if [[ "$SAW_EMPTY" == "1" ]]; then
-            echo "Factory NYC review-ready backlog still missing after Worker deploy (HTTP $CODE)" >&2
-            exit 1
-          fi
-          echo "Factory NYC review-ready read did not return (HTTP $CODE); leaving the Worker in place" >&2
-          exit 0
+          echo "Factory Needs Eyes API never produced a valid complete response (HTTP $CODE)" >&2
+          exit 1
 
       - name: Delete functional verification bridge
         if: always()
