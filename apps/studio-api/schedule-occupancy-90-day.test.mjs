@@ -21,7 +21,7 @@ test("MAE occupancy scans up to the configured maximum, not the 30-day suggestio
   assert.equal(MAE_SCHEDULE_HORIZON_MAX, 90);
   assert.match(worker, /MAE_SCHEDULE_HORIZON_MAX/);
   assert.match(worker, /STUDIO_OCCUPIED_HORIZON_MS = \(MAE_SCHEDULE_HORIZON_MAX \+ 2\) \* 24/);
-  assert.match(f01, /studioOccupiedFilterFormula\(now, profile\)/);
+  assert.match(f01, /studioOccupiedFilterFormula\(now, profile, platform\)/);
   assert.match(f01, /STUDIO_OCCUPIED_HORIZON_MS/);
 });
 
@@ -56,4 +56,18 @@ test("Factory, Approve All, atomic approval, regeneration and Calendar save requ
 test("strict occupancy reads do not rely on the best-effort UI cache", () => {
   const scan = between(f01, "export async function studioLoadOccupiedScheduleRows", "/*__STUDIO_WORKER_END:studioLoadOccupiedScheduleRows__*/");
   assert.ok(scan.indexOf("if (requireComplete)") < scan.indexOf("const cache = studioOccupiedCacheSlot"));
+});
+
+
+test("atomic Factory strict occupancy is platform-scoped without weakening its complete-read check", () => {
+  const formula = between(f01, "export function studioOccupiedFilterFormula", "/*__STUDIO_WORKER_END:studioOccupiedFilterFormula__*/");
+  assert.match(formula, /platformClause/);
+  assert.match(formula, /\\{Platform\\}/);
+  const loader = between(f01, "export async function studioLoadOccupiedScheduleRows", "/*__STUDIO_WORKER_END:studioLoadOccupiedScheduleRows__*/");
+  assert.match(loader, /studioOccupiedFilterFormula\\(now, profile, platform\\)/);
+  assert.match(loader, /requireComplete/);
+  const approve = between(f04, "async function studioApproveOutputRecordAtomic", "/*__STUDIO_WORKER_END:approveOutputRecordForPublishing__*/");
+  assert.match(approve, /excludeIds: \\[id\\],[\\s\\S]*?profile, platform, requireComplete: true/);
+  assert.match(approve, /durableReservations/);
+  assert.match(approve, /runAtomicScheduleTransaction/);
 });
