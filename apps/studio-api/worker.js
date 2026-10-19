@@ -5768,6 +5768,7 @@ let studioAiApiPreferenceCache = { preferred: "OpenAI", failoverEnabled: true, a
 /*__STUDIO_WORKER_EXTRACT:reorderStudioOperationsRenderQueue__*/
 /*__STUDIO_WORKER_EXTRACT:stampPrepareToReviewNotes__*/
 /*__STUDIO_WORKER_EXTRACT:prepareIdeaToReview__*/
+/*__STUDIO_WORKER_EXTRACT:getStudioReadyProductionDiagnostic__*/
 /*__STUDIO_WORKER_EXTRACT:getStudioOperations__*/
 /** Lean Profiles tab payload — Content Profiles only (voice/music settings). */
 /*__STUDIO_WORKER_EXTRACT:getStudioOperationsProfiles__*/
