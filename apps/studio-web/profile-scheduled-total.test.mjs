@@ -14,7 +14,7 @@ test("all-profiles overview shows each profile's own scheduled total beside its 
   };
   const overviewRows = [
     {
-      id: "recChicago",
+      id: "recChicago0000000",
       city_label: "Chicago",
       name: "Chicago",
       scheduled: { Facebook: 1, Instagram: 1, TikTok: 0, YouTube: 1 },
@@ -24,7 +24,7 @@ test("all-profiles overview shows each profile's own scheduled total beside its 
       ideas: 0,
     },
     {
-      id: "recMiami",
+      id: "recMiami000000000",
       city_label: "Miami",
       name: "Miami",
       scheduled: { Facebook: 0, Instagram: 0, TikTok: 1, YouTube: 0 },
