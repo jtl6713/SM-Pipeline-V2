@@ -13,7 +13,31 @@
   let loadedProfile = "";
   let requestSerial = 0;
   let pending = false;
+  const cardsHost = $("operationsProfiles");
 
+  // The older Operations renderer still fetches all profiles to populate
+  // canonical voice/music choices; only the header-selected card is visible.
+  function showSelectedProfileOnly() {
+    const id = String(profileSelect.value || "");
+    if (!cardsHost) return;
+    let visible = 0;
+    cardsHost.querySelectorAll(".ops-profile-card[data-profile-id]").forEach((card) => {
+      const matches = card.dataset.profileId === id;
+      card.hidden = !matches;
+      if (matches) {
+        card.style.removeProperty("display");
+        visible += 1;
+      } else {
+        card.style.setProperty("display", "none", "important");
+      }
+    });
+    const meta = $("operationsIdeaMeta");
+    if (visible && meta && !/unable|error|failed/i.test(meta.textContent || "")) {
+      meta.textContent = "Showing settings for the selected profile only. Change the Profile in the header to edit a different city.";
+    }
+  }
+  if (cardsHost) new MutationObserver(showSelectedProfileOnly).observe(cardsHost, { childList: true });
+  
   function status(text, isError = false) {
     message.textContent = text || "";
     message.classList.toggle("error-text", Boolean(isError));
@@ -56,9 +80,43 @@
       if (serial !== requestSerial || profileSelect.value !== id) return;
       loadedProfile = id;
       revision = String(data.revision || "0");
-      fields.forEach((key) => { controls[key].value = data.creative?.[key] || ""; });
+      fields.forEach((key) => {
+        controls[key].value = data.creative?.[key] || "";
+        const source = $("operationsCreativeSource_" + key);
+        if (source) {
+          const item = data.sources?.[key] || {};
+          source.textContent = item.inherited
+            ? "Existing Airtable guidance: " + (item.label || "no value yet") + ". Editing creates a copy for this profile."
+            : "Saved in Airtable: " + (item.label || "Profile-specific creative guidance") + ".";
+        }
+      });
+      const referenceHost = $("operationsCreativeReferences");
+      if (referenceHost) {
+        referenceHost.replaceChildren();
+        const addReference = (label, scope, items) => {
+          const details = document.createElement("details");
+          const summary = document.createElement("summary");
+          summary.textContent = label + " (" + scope + ")";
+          details.append(summary);
+          for (const [name, value] of items) {
+            if (!value) continue;
+            const heading = document.createElement("strong");
+            heading.textContent = name;
+            const pre = document.createElement("pre");
+            pre.className = "ops-prompt-text";
+            pre.textContent = value;
+            details.append(heading, pre);
+          }
+          referenceHost.append(details);
+        };
+        (data.references || []).forEach((ref) => addReference(ref.label, ref.scope, [["Stored database guidance", ref.text]]));
+        (data.templates || []).forEach((ref) => addReference(ref.label, ref.scope, [
+          ["System Prompt", ref.system_prompt],
+          ["User Prompt Template", ref.user_prompt_template],
+        ]));
+      }
       disable(!data.can_edit);
-      status("Changes apply to newly generated thumbnail designs and AI-written narration. Existing published or approved content is not rewritten.");
+      status("Loaded existing Airtable prompts and profile overrides. Save creates a selected-profile version; shared Brand, Persona and P1/P2 templates remain unchanged.");
     } catch (error) {
       if (serial !== requestSerial) return;
       status(error.message || String(error), true);
@@ -79,8 +137,12 @@
       });
       if (serial !== requestSerial || profileSelect.value !== id) return;
       revision = String(data.revision || revision);
-      fields.forEach((key) => { controls[key].value = data.creative?.[key] || ""; });
-      status("Saved to " + ($("operationsCreativeProfile").textContent || "this profile") + ". Future generated media will use this guidance.");
+      fields.forEach((key) => {
+        controls[key].value = data.creative?.[key] || "";
+        const source = $("operationsCreativeSource_" + key);
+        if (source) source.textContent = "Saved in Airtable: selected profile creative guidance override.";
+      });
+      status("Saved profile-specific instructions to Airtable for " + ($("operationsCreativeProfile").textContent || "this profile") + ". Shared prompts were not changed.");
     } catch (error) {
       if (serial === requestSerial) status(error.message || String(error), true);
     } finally {
@@ -90,7 +152,7 @@
   });
   reload.addEventListener("click", load);
   $("operationsTabProfiles")?.addEventListener("click", () => queueMicrotask(load));
-  profileSelect.addEventListener("change", load);
+  profileSelect.addEventListener("change", () => { showSelectedProfileOnly(); load(); });
   new MutationObserver(() => {
     if (profileSelect.value !== (loadedProfile || "") && !pending) load();
   }).observe(profileSelect, { childList: true });
@@ -112,5 +174,6 @@
     });
     for (const tab of otherTabs) tab.addEventListener("click", () => { globalPanel.hidden = true; });
   }
+  showSelectedProfileOnly();
   if (profileAdminVisible()) load();
 })();
