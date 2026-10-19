@@ -27,6 +27,7 @@
 <link rel="stylesheet" href="/assets/idea-drawer-safe-offset.css?v=0.6.718-factory-toggle-collapse">
 <link rel="stylesheet" href="/assets/visual-timeline-trim.css?v=0.6.718-factory-toggle-collapse">
 <link rel="stylesheet" href="/assets/visual-script-editor.css?v=0.6.718-factory-toggle-collapse">
+ <link rel="stylesheet" href="/assets/profile-admin-creative.css?v=profile-admin-creative-v1">
 </head>
 <body>
  <header class="topbar">
@@ -1848,7 +1849,8 @@
  <nav class="ops-card-tabs" role="tablist" aria-label="Control tools">
  <button type="button" class="ops-card-tab active" role="tab" id="operationsTabDesk" data-ops-tab="desk" aria-controls="operationsDeskPanel" aria-selected="true">Service desk</button>
  <button type="button" class="ops-card-tab" role="tab" id="operationsTabQueue" data-ops-tab="queue" aria-controls="operationsQueuePanel" aria-selected="false" tabindex="-1">Queue</button>
- <button type="button" class="ops-card-tab" role="tab" id="operationsTabProfiles" data-ops-tab="profiles" aria-controls="operationsProfilesPanel" aria-selected="false" tabindex="-1">Profiles</button>
+ <button type="button" class="ops-card-tab" role="tab" id="operationsTabProfiles" data-ops-tab="profiles" aria-controls="operationsProfilesPanel" aria-selected="false" tabindex="-1">Profile Admin</button>
+ <button type="button" class="ops-card-tab" role="tab" id="operationsTabGlobal" data-ops-tab="global" aria-controls="operationsGlobalPanel" aria-selected="false" tabindex="-1">Global Admin</button>
  <button type="button" class="ops-card-tab" role="tab" id="operationsTabProduce" data-ops-tab="produce" aria-controls="operationsProducePanel" aria-selected="false" tabindex="-1">Autonomous produce</button>
  <button type="button" class="ops-card-tab" role="tab" id="operationsTabIntake" data-ops-tab="intake" aria-controls="operationsIntakePanel" aria-selected="false" tabindex="-1">Library intake</button>
  <button type="button" class="ops-card-tab" role="tab" id="operationsTabAnalytics" data-ops-tab="analytics" aria-controls="operationsAnalyticsPanel" aria-selected="false" tabindex="-1">Analytics</button>
@@ -1917,9 +1919,33 @@
  </div>
  </div>
  <div class="ops-tab-panel" id="operationsProfilesPanel" data-ops-tab-panel="profiles" role="tabpanel" aria-labelledby="operationsTabProfiles" hidden>
- <div class="panel-heading"><div><h2>Profiles</h2><p>Per-profile Studio settings: hub background, daily idea cadence, default narration voice, and the music pool autonomous produce may choose from. Admin follows the header Profile control. Use Run ideas now for enabled daily-idea profiles.</p></div>
+ <div class="panel-heading"><div><h2>Profile Admin</h2><p>Settings and creative direction belong to the Content Profile selected in the header. Edit narration voice, music, daily ideas, thumbnail direction, and storytelling separately for each city.</p></div>
  <button type="button" class="secondary-button" id="operationsRunDailyIdeas">Run ideas now</button>
  </div>
+
+ <p class="subtle" id="operationsIdeaMeta">Loading profiles…</p>
+ <div class="ops-profile-context" id="operationsProfileContext" hidden></div>
+ <div id="operationsProfiles" class="ops-profile-list"></div>
+
+ <section class="ops-creative-panel" id="operationsCreativePanel" aria-labelledby="operationsCreativeHeading">
+ <div class="ops-creative-heading"><h3 id="operationsCreativeHeading">Creative Guidance</h3><strong id="operationsCreativeProfile">Selected profile</strong></div>
+ <p class="subtle">One consistent creative identity across thumbnails and spoken storytelling, with separate instructions for each format. Blank fields preserve the existing generation defaults. Changes affect future generation only.</p>
+ <form id="operationsCreativeForm">
+ <div class="ops-creative-fields">
+ <label class="form-field"><span>Shared Creative Direction</span><textarea name="shared_direction" maxlength="4000" rows="7" placeholder="Brand personality, local perspective, target audience, recurring visual motifs and story themes"></textarea><small class="subtle">Used by both thumbnail composition and narration.</small></label>
+ <label class="form-field"><span>Thumbnail Instructions</span><textarea name="thumbnail_instructions" maxlength="4000" rows="7" placeholder="Photo realism, lighting, cover titles, typography, color palette, safe zones"></textarea><small class="subtle">Applies to newly designed thumbnails and covers.</small></label>
+ <label class="form-field"><span>Narration Instructions</span><textarea name="narration_instructions" maxlength="4000" rows="7" placeholder="Voice and pace, style of opening hook, local facts, narrative arc, what to avoid"></textarea><small class="subtle">Applies when AI writes a spoken script; never overrides Force exact.</small></label>
+ </div>
+ <div class="ops-creative-actions">
+ <button type="submit" class="primary-button" id="operationsCreativeSave" disabled>Save creative guidance</button>
+ <button type="button" class="secondary-button" id="operationsCreativeReload" disabled>Reload saved instructions</button>
+ <span id="operationsCreativeStatus" class="subtle" role="status" aria-live="polite"></span>
+ </div>
+ </form>
+ </section>
+ </div>
+ <div class="ops-tab-panel ops-global-settings" id="operationsGlobalPanel" data-ops-tab-panel="global" role="tabpanel" aria-labelledby="operationsTabGlobal" hidden>
+ <div class="panel-heading"><div><h2>Global Admin</h2><p>System-wide settings that apply to all profiles. Scheduling follows each profile’s local time zone.</p></div></div>
  <section class="ops-schedule-settings" aria-labelledby="operationsScheduleSettingsHeading" style="margin:1rem 0 1.5rem;padding:1rem 0;border-top:1px solid rgba(0,0,0,.08);border-bottom:1px solid rgba(0,0,0,.08)">
  <h3 id="operationsScheduleSettingsHeading" style="margin:0 0 .35rem">Global scheduling</h3>
  <p class="subtle" style="margin:0 0 .75rem">Scheduling Horizon controls how many future calendar days the MAE-first / balanced-overflow engine considers. Changing it does not rewrite existing schedules.</p>
@@ -1931,9 +1957,6 @@
  <p class="subtle" id="operationsScheduleSettingsMeta" style="margin:0">Default 30 days. Morning 5:00–7:00, Afternoon 10:30–12:30, Evening 4:00–6:00. Blackout 8:00 PM–3:30 AM profile-local.</p>
  </div>
  </section>
- <p class="subtle" id="operationsIdeaMeta">Loading profiles…</p>
- <div class="ops-profile-context" id="operationsProfileContext" hidden></div>
- <div id="operationsProfiles" class="ops-profile-list"></div>
  </div>
  <div class="ops-tab-panel" id="operationsProducePanel" data-ops-tab-panel="produce" role="tabpanel" aria-labelledby="operationsTabProduce" hidden>
  <div class="panel-heading"><div><h2>Autonomous produce</h2><p>When a profile toggle is on, Studio overviews unused library stills, picks 5–10 related photos that have not been used on a platform output, writes the idea and caption, produces the standard template, and stops at Ready for Review. Nothing publishes. Scheduled around 8:00 a.m. and 4:00 p.m. Chicago, or run on demand here or from Ideas.</p></div>
@@ -2935,6 +2958,7 @@
  </script>
  <script defer src="/assets/factory-batch-quality-0710.js?v=0.6.718-factory-toggle-collapse&global=factory-v1&monitor=lightweight-quality-20261018"></script>
  <script src="/assets/studio-lazy-pages.js?v=0.6.718-factory-toggle-collapse"></script>
+ <script defer src="/assets/profile-admin-creative.js?v=profile-admin-creative-v1"></script>
  <script>window.StudioLazyLoad.boot();</script>
 <script>
 (function(){
