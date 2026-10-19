@@ -163,3 +163,28 @@ test("P0 #907 exposes cron-stage diagnostics only through tenant-admin GET; no q
     assert.match(dispatcher, new RegExp(stage));
   }
 });
+
+test("P0 #907 discovery requests only fields present on Airtable Idea Candidates", async () => {
+  const source = await readFile(new URL("./worker-functions-04.mjs", import.meta.url), "utf8");
+  const discovery = source.slice(source.indexOf("async function discoverReadyProductionIdeas("),
+    source.indexOf("async function readyProductionRequestForIdea("));
+  assert.ok(discovery.startsWith("async function discoverReadyProductionIdeas("));
+  const queried = discovery.match(/fields:\s*\[([\s\S]*?)\]/);
+  assert.ok(queried, "discovery must use a bounded explicit field projection");
+  const fields = [...queried[1].matchAll(/"([^"]+)"/g)].map(match => match[1]);
+  // Verified against the authoritative Idea Candidates table on 2026-10-19.
+  // Production_Notes is a field on Production Requests, NOT Idea Candidates.
+  const allowed = new Set([
+    "Candidate_Title", "Candidate_Status", "Content_Profile", "Content Items",
+    "Promoted_Content_Record_ID", "Production Requests", "Studio_Photo_Wait_Status",
+    "Studio_Matched_Media_Assets", "Production_Config_Notes",
+    "Production_Content_Type", "Production_Target_Platforms", "Suggested_Platforms",
+    "Production_Include_Voiceover", "Production_Include_Background_Music",
+    "Production_Include_Thumbnail", "Production_Video_Duration", "Test_Run_ID", "Create_Date",
+  ]);
+  assert.ok(fields.length >= 12, "cannot silently disable essential discovery fields");
+  assert.deepEqual(fields.filter(name => !allowed.has(name)), [],
+    "unknown projected fields cause a 422 that blocks the entire one-minute queue");
+  assert.ok(!fields.includes("Production_Notes"));
+  assert.ok(fields.includes("Production_Config_Notes"));
+});

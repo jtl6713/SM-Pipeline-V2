@@ -10984,7 +10984,6 @@ async function discoverReadyProductionIdeas(env, { limit = 100 } = {}) {
       "Production_Include_Background_Music",
       "Production_Include_Thumbnail",
       "Production_Video_Duration",
-      "Production_Notes",
       "Test_Run_ID",
       "Create_Date",
     ],
