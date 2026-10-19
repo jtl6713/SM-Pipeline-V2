@@ -3164,12 +3164,28 @@ export async function listOpenProductionRequests(env, { limit = 100, fields = PR
 }
 /*__STUDIO_WORKER_END:listOpenProductionRequests__*/
 
-export async function existingDraftForIdea(env, ideaRecordId, authorization) {
-  const records = await listOpenProductionRequests(env);
+export async function existingDraftForIdea(env, ideaRecordId, authorization, loadedIdea = null) {
+  // The Idea Candidate owns the reciprocal "Production Requests" link. Looking
+  // up its draft through the global open-request list is both unnecessarily
+  // expensive and incomplete when the list is capped/paginated. It can exhaust
+  // the Worker subrequest budget and turn Open Production into HTTP 500.
+  const idea = loadedIdea?.id === ideaRecordId
+    ? loadedIdea
+    : await airtableFetch(env, env.AIRTABLE_IDEA_TABLE_ID, ideaRecordId);
+  const linkedIds = [...new Set(arrayOrEmpty(f(idea, "Production Requests"))
+    .map(id => String(id || "").trim())
+    .filter(id => /^rec[A-Za-z0-9]+$/.test(id)))];
+  if (!linkedIds.length) return null;
+
+  // Fail closed if a linked draft cannot be read; treating that as "no draft"
+  // would create a duplicate request and could produce the same idea twice.
+  const records = await Promise.all(linkedIds.map(id =>
+    airtableFetch(env, PRODUCTION_REQUEST_TABLE, id)
+  ));
   const matches = records.filter((record) => {
-    const ideaLinks = Array.isArray(f(record, "Idea_Candidate")) ? f(record, "Idea_Candidate") : [];
-    const orgLinks = Array.isArray(f(record, "Organization")) ? f(record, "Organization") : [];
-    const brandLinks = Array.isArray(f(record, "Brand")) ? f(record, "Brand") : [];
+    const ideaLinks = arrayOrEmpty(f(record, "Idea_Candidate"));
+    const orgLinks = arrayOrEmpty(f(record, "Organization"));
+    const brandLinks = arrayOrEmpty(f(record, "Brand"));
     const status = String(f(record, "Request_Status") || "").trim();
     return ideaLinks.includes(ideaRecordId) &&
       orgLinks.includes(authorization?.organization?.record_id) &&
@@ -3183,11 +3199,7 @@ export async function existingDraftForIdea(env, ideaRecordId, authorization) {
     record,
   }));
   const preferred = preferAuthoritativeProductionRequest(matches);
-  const chosen = preferred ? (matches.find((row) => row.id === preferred.id)?.record || null) : null;
-  if (!chosen?.id) return null;
-  // The list omits asset/plan/variant JSON. Callers that continue the draft
-  // need the full record, and only this one row is fetched.
-  return airtableFetch(env, PRODUCTION_REQUEST_TABLE, chosen.id);
+  return preferred ? (matches.find(row => row.id === preferred.id)?.record || null) : null;
 }
 /*__STUDIO_WORKER_END:existingDraftForIdea__*/
 
@@ -3332,7 +3344,7 @@ export async function getOrCreateProductionRequestForIdea(request, env, url, aut
 
   let preferredProfileId = null;
   try { preferredProfileId = requestedProfileId(url, await request.clone().json().catch(() => ({}))); } catch { preferredProfileId = requestedProfileId(url); }
-  const existing = await existingDraftForIdea(env, ideaRecordId, authorization);
+  const existing = await existingDraftForIdea(env, ideaRecordId, authorization, idea);
   if (existing) {
     return respond(request, env, {
       ok: true,
@@ -3359,7 +3371,7 @@ export async function createProductionRequestFromBody(request, env, authorizatio
   const idea = await loadAuthorizedIdea(env, ideaRecordId, authorization);
   if (promotionCompleted(idea)) throw new HttpError(409, "This idea has already been promoted");
   const preferredProfileId = requestedProfileId(url, payload);
-  const existing = await existingDraftForIdea(env, ideaRecordId, authorization);
+  const existing = await existingDraftForIdea(env, ideaRecordId, authorization, idea);
   if (existing) {
     return respond(request, env, {
       ok: true,
