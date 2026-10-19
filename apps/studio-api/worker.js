@@ -691,6 +691,7 @@ import {
   studioProfileCreativeGuidance,
   studioHealAutonomousRevisionLock,
   studioReadyProductionCronResume,
+  getStudioReadyProductionDiagnostic,
   runStudioAutonomousProduce,
   runStudioDailyIdeas,
   kickStudioOutputPublish,
@@ -794,6 +795,7 @@ export default {
       const isAdminRepairControlRoute = url.pathname === "/api/admin/repair/control";
       const isAdminVisualVoiceoverCanaryRoute = url.pathname === "/api/admin/visual-voiceover-canary";
       const isOperationsRoute = url.pathname === "/api/operations";
+      const isReadyProductionDiagnosticRoute = url.pathname === "/api/admin/ready-production-diagnostic";
       const isOperationsProfilesListRoute = url.pathname === "/api/operations/profiles";
       const isOperationsCreativeRoute = /^\/api\/operations\/profiles\/rec[A-Za-z0-9]+\/creative$/.test(url.pathname);
       const isOperationsQueueRoute = url.pathname === "/api/operations/queue";
@@ -1534,6 +1536,12 @@ export default {
         requirePermission(authorization, "tenant_admin");
         assertWriteRequest(request, env);
         return patchLibraryCrossScope(request, env);
+      }
+
+      if (isReadyProductionDiagnosticRoute) {
+        requirePermission(authorization, "tenant_admin");
+        if (request.method !== "GET") throw new HttpError(405, "Method not allowed");
+        return getStudioReadyProductionDiagnostic(request, env, url);
       }
 
       if (isOperationsRoute) {
