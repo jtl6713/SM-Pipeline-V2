@@ -497,3 +497,5 @@ Deploy PR #903: await asynchronous photo-matching route and persist bounded matc
 Deploy PR #905 photo-wait historical platform default repair (Threads 400): filter unsupported inherited idea platforms before production draft creation. Airtable authoritative; preserve Supabase Phase 5, scheduling, publishing and binding contract. 2026-10-19.
 
 2026-10-19: Deploy Worker 0.10.667-ready-production-flow. Continuously claim every eligible Ready-to-produce idea across profiles and advance it through Factory production, rendering, and QA to human Awaiting final approval with bounded retries and no automatic final approval.
+
+2026-10-19: P0 #907 release Ready-to-produce draft recovery isolation and retired-platform guard (PR #908). Preserve existing bindings, Airtable SoR, Phase 5 breaker, scheduling and final human approval. Verify resumed production plans, render completion and Factory final review against the 38 existing PRs.
