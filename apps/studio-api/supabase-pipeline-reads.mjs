@@ -1407,26 +1407,33 @@ export async function syncOpenProductionRequestsToSupabase(env, deps = {}) {
 
 export async function syncAllProfilesPipelineToSupabase(env, profiles, deps = {}) {
   const results = [];
+  const assertLease = async () => {
+    try { await deps.assertLease?.(); }
+    catch (error) {
+      if (error && typeof error === "object") error.phase5_sync_lease_lost = true;
+      throw error;
+    }
+  };
   let abortedForCircuit = false;
   for (const profile of profiles || []) {
     if (!profile?.id) continue;
     if (deps.f && !deps.f(profile, "Active")) continue;
     if (supabaseCircuitOpen()) { abortedForCircuit = true; break; }
     try {
-      await deps.assertLease?.();
-      results.push(await syncProfilePipelineToSupabase(env, profile, deps));
+      await assertLease();
+      results.push(await syncProfilePipelineToSupabase(env, profile, { ...deps, assertLease }));
     } catch (error) {
       results.push({ ok: false, profile_id: profile.id, error: error?.message || String(error) });
       if (supabaseCircuitOpen()) { abortedForCircuit = true; break; }
       // Lost lease is never a recoverable profile-local failure.
-      if (/Phase 5 sync lost lease|renewal lost CAS/.test(String(error?.message || ""))) throw error;
+      if (error?.phase5_sync_lease_lost) throw error;
     }
   }
   let requests = null;
   if (!abortedForCircuit && !supabaseCircuitOpen()) {
     try {
-      await deps.assertLease?.();
-      requests = await syncOpenProductionRequestsToSupabase(env, deps);
+      await assertLease();
+      requests = await syncOpenProductionRequestsToSupabase(env, { ...deps, assertLease });
     } catch (error) {
       requests = { ok: false, error: error?.message || String(error) };
       if (/Phase 5 sync lost lease|renewal lost CAS/.test(String(error?.message || ""))) throw error;
