@@ -69,22 +69,38 @@ test("Phase 5 wrapper skips concurrent invocation then releases ownership", asyn
   assert.equal((await withPhase5SyncLease(bucket, () => ({ ok: true }))).ok, true);
 });
 
-test("Phase 5 sync reports partial failure rather than unconditional success", async () => {
+test("Phase 5 sync reports Supabase upsert failure instead of false success", async () => {
   resetSupabaseCircuitForTests();
-  const result = await syncAllProfilesPipelineToSupabase({
-    SUPABASE_URL: "https://example.supabase.co",
-    SUPABASE_SERVICE_ROLE_KEY: "test",
-  }, [{ id: "recProfile123", fields: { Active: true } }], {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => ({ ok: false, status: 500,
+    text: async () => JSON.stringify({ message: "synthetic upsert failure" }) });
+  try {
+    const result = await syncAllProfilesPipelineToSupabase({
+      SUPABASE_URL: "https://example.supabase.co",
+      SUPABASE_SERVICE_ROLE_KEY: "test",
+    }, [{ id: "recProfile123", fields: { Active: true } }], {
+      f: (row, field) => row.fields[field],
+      listRecords: async () => [],
+      contentProfileFilterFormula: () => "TRUE()",
+    });
+    assert.equal(result.ok, false);
+    assert.equal(result.status, "partial");
+    assert.match(result.results[0].error, /synthetic upsert failure/);
+    assert.equal(result.production_requests.ok, true);
+  } finally {
+    globalThis.fetch = originalFetch;
+    resetSupabaseCircuitForTests();
+  }
+});
+
+test("Phase 5 aborts all further profile work on lease verification failure", async () => {
+  const resultPromise = syncAllProfilesPipelineToSupabase({}, [
+    { id: "profile1", fields: { Active: true } }, { id: "profile2", fields: { Active: true } },
+  ], {
     f: (row, field) => row.fields[field],
-    listRecords: async () => [],
-    contentProfileFilterFormula: () => "TRUE()",
-    assertLease: async () => { throw new Error("lease check failed"); },
+    assertLease: async () => { throw new Error("R2 unavailable"); },
   });
-  // Lease ownership failure must propagate rather than permit a second writer.
-  assert.equal(result.ok, false);
-  assert.equal(result.status, "partial");
-  assert.match(result.results[0].error, /lease check failed/);
-  resetSupabaseCircuitForTests();
+  await assert.rejects(resultPromise, /R2 unavailable/);
 });
 
 test("Phase 5 circuit activation aborts remaining profiles and production requests", async () => {
