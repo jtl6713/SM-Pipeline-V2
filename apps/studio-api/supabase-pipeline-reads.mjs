@@ -1237,6 +1237,7 @@ export async function reconcileSupabaseDroppedOpenOutputs(env, {
  * `deps.listRecords` / `deps.f` / `deps.contentProfileFilterFormula` come from worker.js.
  */
 export async function syncProfilePipelineToSupabase(env, profile, deps = {}) {
+  await deps.assertLease?.();
   const listRecords = deps.listRecords;
   const f = deps.f;
   const contentProfileFilterFormula = deps.contentProfileFilterFormula;
@@ -1255,7 +1256,13 @@ export async function syncProfilePipelineToSupabase(env, profile, deps = {}) {
     return { skipped: true, reason: "supabase_not_configured" };
   }
 
-  await upsertChunk(env, "content_profiles", [mapAirtableProfileToSupabase(profile)]);
+  const guardedUpsert = async (table, rows) => {
+    await deps.assertLease?.();
+    const started = Date.now();
+    await upsertChunk(env, table, rows);
+    deps.onUpsert?.(table, rows.length, Date.now() - started);
+  };
+  await guardedUpsert("content_profiles", [mapAirtableProfileToSupabase(profile)]);
   const profileUuid = await resolveSupabaseProfileId(env, profile.id);
   if (!profileUuid) throw new Error(`Supabase profile missing after upsert for ${profile.id}`);
 
@@ -1281,14 +1288,14 @@ export async function syncProfilePipelineToSupabase(env, profile, deps = {}) {
       sortField: "Created_At",
       filterFormula: profileFormula,
       fields: leanContentFields,
-    }).catch(() => [])),
+    })),
     listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
       limit: outputLimit,
       sortField: "Output_ID",
       sortDirection: "desc",
       filterFormula: profileFormula,
       fields: outputFields,
-    }).catch(() => []),
+    }),
     typeof deps.listOpenOutputs === "function"
       ? deps.listOpenOutputs(profile).catch(() => [])
       : Promise.resolve([]),
@@ -1305,7 +1312,7 @@ export async function syncProfilePipelineToSupabase(env, profile, deps = {}) {
         sortDirection: "desc",
         filterFormula: profileFormula,
         fields: ["Candidate_ID", "Candidate_Title", "Candidate_Status", "Content_Profile", "Create_Date"],
-      }).catch(() => []))
+      }))
       : Promise.resolve([]),
   ]);
 
@@ -1319,9 +1326,10 @@ export async function syncProfilePipelineToSupabase(env, profile, deps = {}) {
 
   const contentRows = (contents || []).map((row) => mapAirtableContentToSupabase(row, profileUuid));
   for (let i = 0; i < contentRows.length; i += 200) {
-    await upsertChunk(env, "content_items", contentRows.slice(i, i + 200));
+    await guardedUpsert("content_items", contentRows.slice(i, i + 200));
   }
 
+  await deps.assertLease?.();
   const contentUuidRows = await supabaseRest(
     env,
     `content_items?content_profile_id=eq.${profileUuid}&select=id,airtable_record_id&limit=1000`,
@@ -1335,12 +1343,13 @@ export async function syncProfilePipelineToSupabase(env, profile, deps = {}) {
     contentUuidByAirtableId,
   }));
   for (let i = 0; i < outputRows.length; i += 200) {
-    await upsertChunk(env, "platform_outputs", outputRows.slice(i, i + 200));
+    await guardedUpsert("platform_outputs", outputRows.slice(i, i + 200));
   }
 
   // A Factory skip leaves the Airtable open pack, but an older Supabase row
   // can still say do_not_publish=false. Refresh those rows from Airtable so
   // Pipeline stops listing the duplicate.
+  await deps.assertLease?.();
   const reconciledOutputs = await reconcileSupabaseDroppedOpenOutputs(env, {
     profileUuid,
     keptIds: outputsById,
@@ -1351,7 +1360,7 @@ export async function syncProfilePipelineToSupabase(env, profile, deps = {}) {
 
   const ideaRows = (ideas || []).map((row) => mapAirtableIdeaToSupabase(row, profileUuid));
   for (let i = 0; i < ideaRows.length; i += 200) {
-    await upsertChunk(env, "idea_candidates", ideaRows.slice(i, i + 200));
+    await guardedUpsert("idea_candidates", ideaRows.slice(i, i + 200));
   }
 
   return {
@@ -1368,6 +1377,7 @@ export async function syncProfilePipelineToSupabase(env, profile, deps = {}) {
 
 /** Open Production Requests are cross-profile; sync once after profile packs. */
 export async function syncOpenProductionRequestsToSupabase(env, deps = {}) {
+  await deps.assertLease?.();
   const listRecords = deps.listRecords;
   if (!listRecords) throw new Error("syncOpenProductionRequestsToSupabase requires listRecords");
   if (!studioSupabaseConfigured(env)) {
@@ -1383,32 +1393,56 @@ export async function syncOpenProductionRequestsToSupabase(env, deps = {}) {
     sortDirection: "desc",
     fields: [...PRODUCTION_REQUEST_SYNC_FIELDS],
     filterFormula,
-  }).catch(() => []);
+  });
   const requestRows = (requests || []).map((row) => mapAirtableProductionRequestToSupabase(row, null));
   for (let i = 0; i < requestRows.length; i += 200) {
-    await upsertChunk(env, "production_requests", requestRows.slice(i, i + 200));
+    await deps.assertLease?.();
+    const started = Date.now();
+    const chunk = requestRows.slice(i, i + 200);
+    await upsertChunk(env, "production_requests", chunk);
+    deps.onUpsert?.("production_requests", chunk.length, Date.now() - started);
   }
   return { ok: true, production_requests: requestRows.length };
 }
 
 export async function syncAllProfilesPipelineToSupabase(env, profiles, deps = {}) {
   const results = [];
+  let abortedForCircuit = false;
   for (const profile of profiles || []) {
     if (!profile?.id) continue;
     if (deps.f && !deps.f(profile, "Active")) continue;
+    if (supabaseCircuitOpen()) { abortedForCircuit = true; break; }
     try {
+      await deps.assertLease?.();
       results.push(await syncProfilePipelineToSupabase(env, profile, deps));
     } catch (error) {
       results.push({ ok: false, profile_id: profile.id, error: error?.message || String(error) });
+      if (supabaseCircuitOpen()) { abortedForCircuit = true; break; }
+      // Lost lease is never a recoverable profile-local failure.
+      if (/Phase 5 sync lost lease|renewal lost CAS/.test(String(error?.message || ""))) throw error;
     }
   }
   let requests = null;
-  try {
-    requests = await syncOpenProductionRequestsToSupabase(env, deps);
-  } catch (error) {
-    requests = { ok: false, error: error?.message || String(error) };
+  if (!abortedForCircuit && !supabaseCircuitOpen()) {
+    try {
+      await deps.assertLease?.();
+      requests = await syncOpenProductionRequestsToSupabase(env, deps);
+    } catch (error) {
+      requests = { ok: false, error: error?.message || String(error) };
+      if (/Phase 5 sync lost lease|renewal lost CAS/.test(String(error?.message || ""))) throw error;
+    }
+  } else {
+    requests = { skipped: true, reason: "supabase_circuit_open" };
   }
-  return { ok: true, results, production_requests: requests };
+  const ok = results.length > 0 && results.every((row) => row?.ok === true)
+    && requests?.ok === true && !abortedForCircuit && !supabaseCircuitOpen();
+  return {
+    ok,
+    status: abortedForCircuit || supabaseCircuitOpen() ? "circuit_open"
+      : ok ? "completed" : "partial",
+    results,
+    production_requests: requests,
+  };
 }
 
 /**
