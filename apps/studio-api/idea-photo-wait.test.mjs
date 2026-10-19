@@ -339,6 +339,34 @@ test("operator library search keeps museu and Museum hits", () => {
   assert.ok(full.match_reasons.includes("search_hit"));
 });
 
+
+test("ordinary idea save preserves a ready photo handoff when the selected photos meet the minimum", () => {
+  const input = {
+    save_production_config: true,
+    platforms: ["Instagram", "Facebook"],
+    content_type: "Feed Post",
+    carousel_slide_count_mode: "Target range",
+    carousel_slide_count_min: 1,
+    carousel_slide_count_max: 4,
+    carousel_image_mode: "Wait for matching photos",
+    library_asset_ids: ["recPhotoA", "recPhotoB", "recPhotoC", "recPhotoD"],
+    production_notes: "",
+  };
+  const photoWait = { status: "Ready", selectedAssetCount: 4, minimum: 1 };
+  const ready = ideaProductionConfigFields(input, "", photoWait);
+  assert.equal(ready.Studio_Photo_Wait_Status, undefined, "do not revert an already-ready candidate to Waiting");
+  assert.deepEqual(ready.Studio_Matched_Media_Assets, input.library_asset_ids);
+
+  const insufficient = ideaProductionConfigFields(
+    { ...input, carousel_slide_count_min: 3, library_asset_ids: ["recPhotoA"] }, "", photoWait
+  );
+  assert.equal(insufficient.Studio_Photo_Wait_Status, "Waiting",
+    "re-arm only if operator changes the selection below the new minimum");
+
+  const initial = ideaProductionConfigFields(input, "", { status: "Waiting", selectedAssetCount: 0 });
+  assert.equal(initial.Studio_Photo_Wait_Status, "Waiting");
+});
+
 test("idea save persists platforms and exact slide count", () => {
   assert.deepEqual(ideaProductionConfigFields({ title: "Only title" }), {});
   const fields = ideaProductionConfigFields({
