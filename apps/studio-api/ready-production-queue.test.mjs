@@ -188,3 +188,12 @@ test("P0 #907 discovery requests only fields present on Airtable Idea Candidates
   assert.ok(!fields.includes("Production_Notes"));
   assert.ok(fields.includes("Production_Config_Notes"));
 });
+
+
+test("P0 #907 Ready-production planner imports its platform registry at runtime", async () => {
+  const source = await readFile(new URL("./worker-functions-04.mjs", import.meta.url), "utf8");
+  const header = source.slice(source.indexOf("// Functions extracted verbatim from worker.js."), source.indexOf('} from "./worker.js";') + 22);
+  assert.match(header, /\bPR_PLATFORMS\s*,/);
+  const planner = source.slice(source.indexOf("function readyProductionIdeaPlan("), source.indexOf("async function monitorReadyProductionRequest("));
+  assert.match(planner, /PR_PLATFORMS\.has\(platform\)/);
+});
