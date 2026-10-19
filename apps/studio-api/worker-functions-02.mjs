@@ -1,5 +1,6 @@
 import { createProfileOnboarding } from "./profile-onboarding.mjs";
 import { scheduleReservationAuthorityEnabled } from "./schedule-reservation-authority.mjs";
+import { creativeSettingName, parseCreativeGuidance } from "./profile-creative-guidance.mjs";
 import { runAtomicScheduleTransaction } from "./schedule-reservation-transaction.mjs";
 import {
   studioReadSource,
@@ -11312,6 +11313,16 @@ export async function pulseIdeaTimedScriptWriter(env, idea, catalog) {
   const location = String(f(idea, "Primary_Location") || f(idea, "Neighborhood_or_Area") || "").trim();
   const marketRaw = f(idea, "Market_Name");
   const market = (Array.isArray(marketRaw) ? String(marketRaw[0] || "") : String(marketRaw || "")).trim() || "Chicago";
+  const profileId = firstLinkedRecordId(f(idea, "Content_Profile"));
+  let creativeGuidance = {};
+  if (profileId && /^rec[A-Za-z0-9]{14}$/.test(profileId)) {
+    try {
+      const setting = await studioSettingsByName(env, creativeSettingName(profileId));
+      creativeGuidance = parseCreativeGuidance(f(setting, "Setting_Value"));
+    } catch (error) {
+      console.warn("creative guidance read failed; using script defaults", profileId, error);
+    }
+  }
   const compact = (catalog || []).map((row) => ({
     id: row.id,
     name: row.name,
@@ -11330,6 +11341,7 @@ export async function pulseIdeaTimedScriptWriter(env, idea, catalog) {
       location,
       market,
       catalog: compact,
+      creative_guidance: creativeGuidance,
     }, "ITS1");
     if (response.ok && payload?.status === "ok") {
       const scenes = payload?.details?.run?.scenes || payload?.details?.themes?.scenes;
@@ -11348,6 +11360,7 @@ export async function pulseIdeaTimedScriptWriter(env, idea, catalog) {
       covered_text: covered || "(none)",
       needed: 0,
       total: compact.length,
+      creative_guidance: creativeGuidance,
     }, "SAI1");
     if (response.ok) {
       const themes = payload?.details?.themes || payload?.details?.run?.themes || {};
