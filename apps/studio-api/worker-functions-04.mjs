@@ -10987,7 +10987,7 @@ export async function patchStudioOperationsProfile(request, env, url, authorizat
 // Scoped creative instructions are saved as Pipeline Settings, so existing
 // Content Profile schemas/defaults and Supabase read gating remain unchanged.
 export async function studioProfileCreativeGuidance(request, env, url, authorization) {
-  const match = /^\\/api\\/operations\\/profiles\\/(rec[A-Za-z0-9]+)\\/creative$/.exec(url.pathname);
+  const match = /^\/api\/operations\/profiles\/(rec[A-Za-z0-9]+)\/creative$/.exec(url.pathname);
   if (!match) throw new HttpError(400, "Invalid profile creative-guidance path");
   const profileId = match[1];
   const profile = await airtableFetch(env, STUDIO_IDEA_PROFILE_TABLE_ID, profileId);
