@@ -14,8 +14,8 @@ test("five expected outputs per idea; round upward, never over-create for zero g
 });
 test("city inventory 396 requires 21 estimated ideas, but target 500 requires none", () => {
   const scores = autonomousRefillScoresFromOverview([
-    { id: "recLA", name: "Los Angeles", scheduled: { total: 390 }, approval: 6 },
-    { id: "recMiami", name: "Miami", scheduled: { total: 500 }, approval: 0 },
+    { id: "recLA", name: "Los Angeles", scheduled: { Instagram: 390 }, approval: 6 },
+    { id: "recMiami", name: "Miami", scheduled: { Instagram: 500 }, approval: 0 },
   ]);
   assert.equal(scores.recLA.pipeline_load, 396);
   assert.equal(scores.recLA.deficit, 104);
