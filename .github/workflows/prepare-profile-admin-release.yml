@@ -48,7 +48,7 @@ jobs:
           )
           app.write_text(source_app.replace('item4-' + previous, 'item4-' + release), encoding='utf-8')
           test.write_text(
-              source_test.replace(previous, release).replace('0.6.718', '0.6.719'),
+              source_test.replace(previous, release).replace('0.6.718', '0.6.719').replace(r'0\\.6\\.718-factory-toggle-collapse', r'0\\.6\\.719-profile-creative-guidance'),
               encoding='utf-8',
           )
           print('Version bump: 0.6.719, with app build ID and all asset cache keys')
