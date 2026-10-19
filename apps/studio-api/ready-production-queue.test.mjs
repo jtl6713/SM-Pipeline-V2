@@ -121,6 +121,15 @@ test("Worker continuously dispatches every Airtable-ready profile but never perf
     worker.indexOf("// 2026-10-11 burn-kill"),
   );
   assert.match(minuteCron, /studioReadyProductionCronResume\(env, ctx\)/);
+  // Regression for incident #907: Factory recovery must never block the
+  // first planning attempt of another profile's already-asset-ready draft.
+  assert.equal((minuteCron.match(/ctx\.waitUntil\(/g) || []).length, 2,
+    "cron must register two independent lifetime promises");
+  assert.ok(minuteCron.indexOf("await studioReadyProductionCronResume(env, ctx)") <
+    minuteCron.indexOf("await factoryBatchCronResume(env, ctx)"),
+    "the ready dispatcher must start before potentially slow Factory recovery");
+  assert.match(minuteCron, /console\.info\("Ready-to-produce one-minute dispatch"/);
+
   assert.match(functions, /Studio_Photo_Wait_Status}='Ready'/);
   const dispatcher = functions.slice(
     functions.indexOf("async function studioReadyProductionCronResume"),
