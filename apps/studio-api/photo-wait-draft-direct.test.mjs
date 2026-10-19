@@ -8,7 +8,7 @@ const source = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "worke
 const start = source.indexOf("export async function findDraftProductionRequestForIdea(");
 const end = source.indexOf("/*__STUDIO_WORKER_END:findDraftProductionRequestForIdea__*/", start);
 assert.ok(start>=0 && end>start, "photo-wait direct draft lookup is extracted");
-const fn = source.slice(start,end);
+const fn = source.slice(start,end).replace(/^export /, "");
 
 function harness({linked=[],requests={},missing=false}={}) {
   const calls=[];
