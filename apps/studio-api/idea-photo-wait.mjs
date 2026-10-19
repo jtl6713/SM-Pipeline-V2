@@ -244,6 +244,39 @@ export function ideaAutoListenContentType({ productionContentType, suggestedForm
   return "Carousel";
 }
 
+/**
+ * Choose a bounded, fair photo-wait cron slice from a lightweight scan of
+ * waiting ideas. The old Airtable limit=8 repeatedly returned the same first
+ * rows and starved newly uploaded matching photos for ideas farther down.
+ * Never-scanned ideas go first; thereafter use the oldest successful scan.
+ * Ignore temporary Manage Idea pauses without changing the operator's picks.
+ */
+export function prioritizeWaitingIdeaPhotoScans(records, { limit = 8, nowMs = Date.now() } = {}) {
+  const quota = Math.max(1, Math.floor(Number(limit) || 8));
+  const lastScan = (row) => {
+    const raw = row?.fields?.Studio_Photo_Match_JSON;
+    if (!raw) return 0;
+    try {
+      const parsed = typeof raw === "string" ? JSON.parse(raw) : raw;
+      const ms = Date.parse(String(parsed?.evaluated_at || parsed?.last_attempted_at || ""));
+      return Number.isFinite(ms) ? ms : 0;
+    } catch {
+      return 0;
+    }
+  };
+  return [...(records || [])]
+    .filter((row) => row?.id && !ideaManagePhotoPauseActive(row?.fields?.Production_Config_Notes, nowMs))
+    .sort((a, b) => {
+      const last = lastScan(a) - lastScan(b);
+      if (last) return last;
+      // Prefer newly uploaded ideas in a never-scanned tie, while a successful
+      // scan always rotates them behind unscanned rows on the next tick.
+      const created = String(b.createdTime || "").localeCompare(String(a.createdTime || ""));
+      return created || String(a.id).localeCompare(String(b.id));
+    })
+    .slice(0, quota);
+}
+
 export function ideaPhotoWaitApplies(input = {}) {
   const contentType = String(input.content_type || "").trim();
   const mode = String(input.carousel_slide_count_mode || "").trim();
