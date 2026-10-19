@@ -1903,6 +1903,24 @@ export async function listOutputs(request, env, url, authorization, ctx = null) 
 /*__STUDIO_WORKER_END:listOutputs__*/
 
 export async function listMusic(request, env, url) {
+  const requestedIds = String(url.searchParams.get("ids") || "").trim();
+  if (requestedIds) {
+    const ids = [...new Set(requestedIds.split(",").map((id) => id.trim()).filter(Boolean))];
+    if (ids.length > 50 || ids.some((id) => !/^rec[A-Za-z0-9]{14}$/.test(id))) {
+      throw new HttpError(400, "Provide up to 50 valid music record IDs");
+    }
+    const key = "music:linked:" + ids.slice().sort().join(",");
+    const payload = await studioReadCoalesce(key, 60000, async () => {
+      const formula = "OR(" + ids.map((id) => 'RECORD_ID()="' + id + '"').join(",") + ")";
+      const records = await listRecords(env, env.AIRTABLE_MEDIA_TABLE_ID, {
+        limit: ids.length, filterFormula: formula,
+      });
+      return { records: sortMusicRecords(records.filter(
+        (record) => String(f(record, "Asset_Role") || "") === "Music"
+      )).map(mapMusic), selected_only: true };
+    });
+    return respond(request, env, { ok: true, ...payload });
+  }
   const limit = clampLimit(url, 100, 100);
   const payload = await studioReadCoalesce(`music:${limit}`, 60000, async () => {
   const [catalog, uploaded] = await Promise.all([
