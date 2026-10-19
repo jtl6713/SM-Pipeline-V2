@@ -7,3 +7,13 @@
 .ops-creative-panel .ops-creative-actions{display:flex;align-items:center;gap:.75rem;flex-wrap:wrap;margin-top:1rem}
 .ops-creative-panel .subtle{line-height:1.45}
 .ops-global-settings{max-width:900px}
+
+/* The legacy Operations renderer may assign display:grid/flex to profile cards. */
+#operationsProfiles .ops-profile-card[hidden]{display:none!important}
+.ops-creative-panel .ops-creative-source{font-style:italic;opacity:.85}
+.ops-creative-reference-drawer{margin-top:1.15rem;padding-top:.85rem;border-top:1px solid var(--line,rgba(0,0,0,.14))}
+.ops-creative-reference-drawer>summary{cursor:pointer;font-weight:650}
+.ops-creative-reference-list{display:grid;gap:.65rem;margin-top:.8rem}
+.ops-creative-reference-list details{padding:.65rem .8rem;border:1px solid var(--line,rgba(0,0,0,.14));border-radius:.5rem}
+.ops-creative-reference-list details summary{cursor:pointer}
+.ops-prompt-text{white-space:pre-wrap;overflow-wrap:anywhere;max-height:300px;overflow:auto;font:inherit;font-size:.85rem;line-height:1.5;padding:.65rem;background:rgba(127,127,127,.07);border-radius:.3rem}

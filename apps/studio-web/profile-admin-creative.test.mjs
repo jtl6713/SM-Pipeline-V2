@@ -33,3 +33,18 @@ test("Admin uses an independently cached client asset", () => {
   assert.match(html, /profile-admin-creative\.js/);
   assert.match(html, /profile-admin-creative\.css/);
 });
+
+test("only the header-selected profile card is visible and admin lists existing prompt provenance", () => {
+  assert.match(client, /studioProfileSelect/);
+  assert.match(client, /cardsHost\.querySelectorAll\("\.ops-profile-card\[data-profile-id\]"\)/);
+  assert.match(client, /card\.dataset\.profileId === id/);
+  assert.match(client, /card\.style\.setProperty\("display", "none", "important"\)/);
+  assert.match(client, /MutationObserver\(showSelectedProfileOnly\)/);
+  for (const field of ["shared_direction", "thumbnail_instructions", "narration_instructions"]) {
+    assert.match(html, new RegExp('id="operationsCreativeSource_' + field + '"'));
+  }
+  assert.match(html, /id="operationsCreativeReferences"/);
+  assert.match(client, /data\.templates/);
+  assert.match(client, /data\.references/);
+  assert.match(client, /Saved profile-specific instructions to Airtable/);
+});

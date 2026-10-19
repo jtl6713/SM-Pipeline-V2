@@ -6,7 +6,7 @@ import {
   readProfilesOverviewRefreshStateRecord,
 } from "./profiles-overview-refresh.mjs";
 import { withOutputApprovalLock } from "./output-approval-lease.mjs";
-import { creativeSettingName, parseCreativeGuidance, validateCreativeGuidancePatch } from "./profile-creative-guidance.mjs";
+import { creativeSettingName, parseCreativeGuidance, resolveCreativeGuidance, validateCreativeGuidancePatch } from "./profile-creative-guidance.mjs";
 import {
   reconcileScheduleReservation,
   scheduleReservationAuthorityEnabled,
@@ -10999,8 +10999,48 @@ export async function studioProfileCreativeGuidance(request, env, url, authoriza
   try { version = String(JSON.parse(raw)?.revision || "0"); } catch { /* old/missing setting */ }
   const previous = parseCreativeGuidance(raw);
   if (request.method === "GET") {
-    return respond(request, env, { ok: true, profile_id: profileId, profile_name: String(f(profile, "Profile_Name") || ""),
-      creative: previous, revision: version, can_edit: true });
+    // These records are linked from the selected profile. They may be shared
+    // with other profiles, so the editor displays their actual database text
+    // but saves changes to this profile's own Pipeline Settings override.
+    const brandId = firstLinkedRecordId(f(profile, "Brand"));
+    const personaId = firstLinkedRecordId(f(profile, "AI_Persona"));
+    const fetchOptional = async (tableId, id) => {
+      if (!id) return null;
+      try { return await airtableFetch(env, tableId, id); }
+      catch (error) {
+        console.warn("profile creative source unavailable", tableId, id, error?.message || error);
+        return null;
+      }
+    };
+    const [brand, persona, thumbnailTemplate, packageTemplate] = await Promise.all([
+      fetchOptional("tblUV8Cd7C2UCyuJ9", brandId),
+      fetchOptional("tblIfUHO11qzUgZ24", personaId),
+      fetchOptional("tbl3bGFEcfruzyUVT", "recNwBofjF7gw5CEu"),
+      fetchOptional("tbl3bGFEcfruzyUVT", "recZTvVhFf8CrcUcU"),
+    ]);
+    const from = (row, names) => Object.fromEntries(names.map((field) => [field, String(f(row, field) || "")]));
+    const resolved = resolveCreativeGuidance({
+      saved: previous,
+      profile: from(profile, ["Brand_Voice", "Profile_Override_Guidelines", "Content_Strategy_Overrides", "Thumbnail_Guideline_Overrides"]),
+      brand: from(brand, ["Brand_Name", "Brand_Voice", "Brand_Personality", "Visual_Style_Guidelines", "Thumbnail_Style_Guidelines"]),
+      persona: from(persona, ["Persona_Name", "Communication_Style", "Tone_Guidelines", "Pacing_Guidelines"]),
+    });
+    const templates = [
+      { row: thumbnailTemplate, type: "Thumbnail generation · P2", name: "P2_THUMBNAIL_PROMPT" },
+      { row: packageTemplate, type: "Content package / narration · P1", name: "P1_CONTENT_PACKAGE" },
+    ].filter((item) => item.row?.id)
+      .map((item) => ({
+        key: item.name,
+        label: item.type,
+        scope: "Shared across profiles",
+        system_prompt: String(f(item.row, "System Prompt") || ""),
+        user_prompt_template: String(f(item.row, "User Prompt Template") || ""),
+      }));
+    return respond(request, env, { ok: true, profile_id: profileId,
+      profile_name: String(f(profile, "Profile_Name") || ""),
+      creative: resolved.creative, sources: resolved.sources,
+      references: resolved.references, templates,
+      revision: version, can_edit: Boolean(authorization?.permissions?.tenant_admin) });
   }
   let payload;
   try { payload = await request.json(); } catch { throw new HttpError(400, "Request body must be valid JSON"); }
