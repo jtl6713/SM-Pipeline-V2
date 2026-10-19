@@ -108,6 +108,6 @@ test("Factory Open uses direct record helpers and Production tolerates a missing
   const resolverAsset = html.indexOf("/assets/factory-open-target.js");
   const deskAsset = html.indexOf("/assets/factory-desk.js");
   assert.ok(resolverAsset > 0 && deskAsset > resolverAsset, "Factory target resolver must load before the desk binder");
-  assert.match(app, /BUILD_ID = "item4-0.6.723-profile-fast-music"/);
-  assert.match(html, /UI build 0.6.723/);
+  assert.match(app, /BUILD_ID = "item4-0.6.724-home-overview-cache-guard"/);
+  assert.match(html, /UI build 0.6.724/);
 });
