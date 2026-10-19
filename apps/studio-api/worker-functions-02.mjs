@@ -11287,10 +11287,30 @@ export async function matchIdeaPhotosRoute(request, env, url, authorization) {
   if (waitStatus !== "Waiting" && waitStatus !== "Ready") {
     throw new HttpError(409, "This idea is not listening for matching photos");
   }
-  const result = await evaluateAndMaybeAttachWaitingIdeaPhotos(env, idea, {
-    authorization,
-    force: Boolean(payload?.force),
-  });
+  let result;
+  try {
+    result = await evaluateAndMaybeAttachWaitingIdeaPhotos(env, idea, {
+      authorization,
+      force: Boolean(payload?.force),
+    });
+  } catch (error) {
+    console.warn("idea manual photo match failed", idea.id, error);
+    // Surface a terminal diagnostic on the idea instead of leaving an
+    // unscanned 0/N row with no explanation after the request fails.
+    try {
+      await airtableFetch(env, env.AIRTABLE_IDEA_TABLE_ID, idea.id, {
+        method: "PATCH",
+        body: JSON.stringify({ fields: { Studio_Photo_Match_JSON: JSON.stringify({
+          evaluated_at: new Date().toISOString(),
+          action: "error",
+          reason: "manual_match_failed",
+        }) } }),
+      });
+    } catch (diagnosticError) {
+      console.warn("idea manual match diagnostic write failed", idea.id, diagnosticError);
+    }
+    throw error;
+  }
   return respond(request, env, {
     ok: true,
     photo_wait: result,
