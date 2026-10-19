@@ -10984,7 +10984,8 @@ async function discoverReadyProductionIdeas(env, { limit = 100 } = {}) {
       "Production_Include_Background_Music",
       "Production_Include_Thumbnail",
       "Production_Video_Duration",
-      "Production_Notes",
+      // The Idea Candidates table has Production_Config_Notes, not Production_Notes.
+      // Requesting that nonexistent field aborts every cron discovery with Airtable 422.
       "Test_Run_ID",
       "Create_Date",
     ],
