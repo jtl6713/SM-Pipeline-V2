@@ -280,7 +280,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.720-single-profile-prompts";
+  const BUILD_ID = "item4-0.6.721-profile-audio-previews";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -24560,6 +24560,8 @@ function timedScriptAssetLabel(asset, index) {
   function renderOperationsProfiles(profiles, canEdit) {
     const target = $("operationsProfiles");
     if (!target) return;
+    // A refresh replaces these controls; do not orphan an active preview.
+    if (studioPreviewButton && target.contains(studioPreviewButton)) stopStudioAudioPreview();
     if (!profiles.length) {
       target.innerHTML = '<div class="empty">No Content Profiles were returned.</div>';
       syncOperationsProfileContext();
@@ -24585,12 +24587,12 @@ function timedScriptAssetLabel(asset, index) {
         : [];
       const selectedMusicSet = new Set(selectedMusicIds);
       const voiceOptions = [
-        `<option value="">Default (Kate)</option>`,
+        `<option value="" data-name="${escapeHtml(DEFAULT_VOICE_NAME)}" data-preview="">Default (Kate)</option>`,
         ...operationsVoiceOptions.map((voice) => {
           const voiceId = String(voice.id || "").trim();
           if (!voiceId) return "";
           const selected = voiceId === selectedVoiceId ? "selected" : "";
-          return `<option value="${escapeHtml(voiceId)}" data-name="${escapeHtml(voice.name || voiceId)}" ${selected}>${escapeHtml(phase6VoiceLabel(voice))}</option>`;
+          return `<option value="${escapeHtml(voiceId)}" data-name="${escapeHtml(voice.name || voiceId)}" data-preview="${escapeHtml(voice.preview_url || "")}" ${selected}>${escapeHtml(phase6VoiceLabel(voice))}</option>`;
         }),
         selectedVoiceId && !operationsVoiceOptions.some((voice) => String(voice.id || "").trim() === selectedVoiceId)
           ? `<option value="${escapeHtml(selectedVoiceId)}" data-name="${escapeHtml(profile.default_narration_voice_name || selectedVoiceId)}" selected>${escapeHtml(profile.default_narration_voice_name || selectedVoiceId)} · current</option>`
@@ -24607,7 +24609,10 @@ function timedScriptAssetLabel(asset, index) {
             const trackId = String(track.id || "").trim();
             if (!trackId) return "";
             const checked = selectedMusicSet.has(trackId) ? "checked" : "";
-            return `<label class="ops-music-option"><input type="checkbox" data-ops-music-option value="${escapeHtml(trackId)}" ${checked} ${canEdit ? "" : "disabled"}> <span>${escapeHtml(musicOptionLabel(track))}</span></label>`;
+            return `<div class="ops-music-preview-row">
+              <label class="ops-music-option"><input type="checkbox" data-ops-music-option value="${escapeHtml(trackId)}" ${checked} ${canEdit ? "" : "disabled"}> <span>${escapeHtml(musicOptionLabel(track))}</span></label>
+              <button type="button" class="secondary-button ops-audio-preview-btn" data-ops-music-preview="${escapeHtml(trackId)}" data-preview-url="${escapeHtml(musicPreviewUrl(track))}" aria-label="Preview music ${escapeHtml(musicOptionLabel(track))}">▶ Preview</button>
+            </div>`;
           }).join("")
         : `<div class="subtle">No music library tracks available.</div>`;
       return `
@@ -24625,10 +24630,13 @@ function timedScriptAssetLabel(asset, index) {
           <label><input type="checkbox" data-ops-autonomous-toggle ${profile.autonomous_produce_enabled ? "checked" : ""} ${canEdit ? "" : "disabled"}> Autonomous produce</label>
           <label>Limit <input type="number" min="1" max="10" step="1" value="${escapeHtml(String(profile.daily_idea_limit || 5))}" data-ops-idea-limit ${canEdit ? "" : "disabled"}></label>
         </div>
-        <label class="ops-profile-voice-field">
-          <span>Default narration voice</span>
-          <select data-ops-voice ${canEdit ? "" : "disabled"}>${voiceOptions}</select>
-        </label>
+        <div class="ops-profile-voice-field">
+          <label for="ops-voice-${escapeHtml(profile.id)}">Default narration voice</label>
+          <div class="ops-voice-preview-row">
+            <select id="ops-voice-${escapeHtml(profile.id)}" data-ops-voice ${canEdit ? "" : "disabled"}>${voiceOptions}</select>
+            <button type="button" class="secondary-button ops-audio-preview-btn" data-ops-voice-preview aria-label="Preview selected narration voice">▶ Preview</button>
+          </div>
+        </div>
         <div class="ops-profile-music-field">
           <span>Autonomous music pool</span>
           <div class="ops-music-checklist" data-ops-music-pool>${musicChecklist}</div>
@@ -24727,8 +24735,32 @@ function timedScriptAssetLabel(asset, index) {
         saveBackground("");
       });
       card.querySelector("[data-ops-voice]")?.addEventListener("change", saveVoice);
+      // Preview is read-only: it never calls saveVoice/saveMusicPool or PATCH.
+      card.querySelector("[data-ops-voice-preview]")?.addEventListener("click", (event) => {
+        const select = card.querySelector("[data-ops-voice]");
+        const option = select?.selectedOptions?.[0];
+        const voiceId = String(select?.value || DEFAULT_VOICE_ID).trim();
+        const voiceName = String(option?.dataset?.name || DEFAULT_VOICE_NAME).trim();
+        if (!voiceId) {
+          setOperationsMessage("No narration voice is available to preview.", "error-text");
+          return;
+        }
+        const preview = String(option?.dataset?.preview || "").trim()
+          || `/api/voices/${encodeURIComponent(voiceId)}/preview`;
+        playStudioAudioPreview(preview, event.currentTarget, setOperationsMessage, voiceName);
+      });
       card.querySelectorAll("[data-ops-music-option]").forEach((input) => {
         input.addEventListener("change", saveMusicPool);
+      });
+      card.querySelectorAll("[data-ops-music-preview]").forEach((button) => {
+        button.addEventListener("click", () => {
+          const id = String(button.dataset.opsMusicPreview || "").trim();
+          if (!id) return;
+          const preview = String(button.dataset.previewUrl || "").trim()
+            || `/api/music/${encodeURIComponent(id)}/preview`;
+          const label = button.closest(".ops-music-preview-row")?.querySelector(".ops-music-option span")?.textContent?.trim() || "track";
+          playStudioAudioPreview(preview, button, setOperationsMessage, label);
+        });
       });
     });
     syncOperationsProfileContext();
