@@ -1077,6 +1077,7 @@
     showOperationsView(parsed.view, parsed.tab, { skipHash: true });
   });
 
+  $("operationsProfilesRefresh")?.addEventListener("click", () => { loadOperationsProfilesPanel().catch(() => {}); });
   $("operationsQueueRefresh")?.addEventListener("click", () => {
     loadOperationsQueue().catch(() => {});
   });
