@@ -24605,7 +24605,7 @@ function timedScriptAssetLabel(asset, index) {
         ...operationsMusicOptions,
         ...selectedMusicIds
           .filter((id) => !musicById.has(id))
-          .map((id) => ({ id, display_name: id, name: id })),
+          .map((id) => ({ id, display_name: "Track details unavailable", name: "Track details unavailable", unresolved: true })),
       ];
       const musicChecklist = musicTracks.length
         ? musicTracks.map((track) => {
@@ -24614,7 +24614,7 @@ function timedScriptAssetLabel(asset, index) {
             const checked = selectedMusicSet.has(trackId) ? "checked" : "";
             return `<div class="ops-music-preview-row">
               <label class="ops-music-option"><input type="checkbox" data-ops-music-option value="${escapeHtml(trackId)}" ${checked} ${canEdit ? "" : "disabled"}> <span>${escapeHtml(musicOptionLabel(track))}</span></label>
-              <button type="button" class="secondary-button ops-audio-preview-btn" data-ops-music-preview="${escapeHtml(trackId)}" data-preview-url="${escapeHtml(musicPreviewUrl(track))}" aria-label="Preview music ${escapeHtml(musicOptionLabel(track))}">▶ Preview</button>
+              <button type="button" class="secondary-button ops-audio-preview-btn" data-ops-music-preview="${escapeHtml(trackId)}" data-preview-url="${escapeHtml(musicPreviewUrl(track))}" ${track.unresolved ? "disabled title=\"Track details are loading or unavailable\"" : ""} aria-label="Preview music ${escapeHtml(musicOptionLabel(track))}">▶ Preview</button>
             </div>`;
           }).join("")
         : `<div class="subtle">No music library tracks available.</div>`;
@@ -25597,10 +25597,10 @@ function timedScriptAssetLabel(asset, index) {
         const profiles = Array.isArray(profilesResult?.profiles) ? profilesResult.profiles : [];
         if (!profiles.length) throw new Error("The selected profile was not returned");
         operationsCanEditProfiles = Boolean(profilesResult?.can_edit_profiles);
-        operationsMusicOptions = sortClientMusic(
-          (Array.isArray(profilesResult?.music_records) ? profilesResult.music_records : [])
-            .filter((record) => !record.do_not_use)
-        );
+        // Show voice/default profile instantly. Music is resolved in a second
+        // targeted request, not by a 100-item global catalog scan.
+        operationsMusicOptions = [];
+
         mergeOperationsProfilesIntoStudio(profiles);
         profileVoicesLoaded = true;
         if (!$("productionRequestWorkspace")?.hidden) applyResolvedDefaultVoice();
@@ -25612,35 +25612,64 @@ function timedScriptAssetLabel(asset, index) {
         const run = $("operationsRunDailyIdeas");
         if (run) run.hidden = !operationsCanEditProfiles;
 
-        // Load enrichment independently. A failed global catalog must not hide
-        // linked track names, checkboxes or their playable source URLs.
+        // Load the selected pool's linked track names first; never substitute
+        // GUIDs just because those 10 tracks aren't in the first catalog page.
         let voiceFailed = false;
         let musicFailed = false;
+        const linkedIds = (Array.isArray(profiles[0].autonomous_music_asset_ids)
+          ? profiles[0].autonomous_music_asset_ids : [])
+          .filter((id) => /^rec[A-Za-z0-9]{14}$/.test(String(id))).slice(0, 50);
+        const selectedMusicTask = linkedIds.length
+          ? api("/api/music?ids=" + encodeURIComponent(linkedIds.join(",")), {
+            timeoutMs: 15000, retries: 1,
+          }).then((data) => {
+            if (!sameProfile()) return;
+            operationsMusicOptions = sortClientMusic(
+              (Array.isArray(data?.records) ? data.records : []).filter((record) => !record.do_not_use)
+            );
+            renderOperationsProfiles(profiles, operationsCanEditProfiles);
+          }).catch((error) => {
+            musicFailed = true;
+            console.warn("Selected profile music pool lookup", error);
+            if (sameProfile()) setOperationsMessage("Could not resolve the selected music pool; retry below.", "error-text");
+          })
+          : Promise.resolve();
+
         const voiceTask = api("/api/voices", { timeoutMs: 15000, retries: 1 })
           .then((data) => {
             if (!sameProfile()) return;
             operationsVoiceOptions = phase6NormalizeVoices(data?.voices || data?.records || data?.items || []);
             if (operationsVoiceOptions.length) renderOperationsProfiles(profiles, operationsCanEditProfiles);
-          })
-          .catch((error) => { voiceFailed = true; console.warn("Profile Admin voice catalog", error); });
-        const musicTask = api("/api/music?limit=100", { timeoutMs: 15000, retries: 1 })
+          }).catch((error) => {
+            voiceFailed = true;
+            console.warn("Profile Admin voice catalog", error);
+          });
+        await Promise.allSettled([selectedMusicTask, voiceTask]);
+        if (!sameProfile()) return;
+        if (meta) {
+          meta.textContent = voiceFailed || musicFailed
+            ? "Showing selected profile. Some voice/music choices were unavailable. Click Refresh profile settings to retry."
+            : "Showing " + (profiles[0].name || "selected profile") + " settings. Loading optional music library…";
+        }
+        // Optional choices extend the pool but may be slow. Do not block this
+        // page's ready state or hold up selected track names and voice samples.
+        api("/api/music?limit=100", { timeoutMs: 12000, retries: 1 })
           .then((data) => {
             if (!sameProfile()) return;
             const records = (Array.isArray(data?.records) ? data.records : []).filter((record) => !record.do_not_use);
             const byId = new Map(operationsMusicOptions.map((record) => [record.id, record]));
-            // Selected linked records always win over truncated global catalog.
             records.forEach((record) => { if (!byId.has(record.id)) byId.set(record.id, record); });
             operationsMusicOptions = sortClientMusic([...byId.values()]);
             renderOperationsProfiles(profiles, operationsCanEditProfiles);
-          })
-          .catch((error) => { musicFailed = true; console.warn("Profile Admin music catalog", error); });
-        await Promise.allSettled([voiceTask, musicTask]);
-        if (!sameProfile()) return;
-        if (meta) {
-          meta.textContent = voiceFailed || musicFailed
-            ? "Showing selected profile. Some additional choices could not load; use this tab's Refresh button to retry."
-            : "Showing " + (profiles[0].name || "selected profile") + " settings.";
-        }
+            if (meta && !voiceFailed && !musicFailed) {
+              meta.textContent = "Showing " + (profiles[0].name || "selected profile") + " settings.";
+            }
+          }).catch((error) => {
+            console.warn("Optional global music choices unavailable", error);
+            if (sameProfile() && meta && !voiceFailed && !musicFailed) {
+              meta.textContent = "Selected profile is ready. Additional music choices unavailable; Refresh to retry.";
+            }
+          });
       } catch (error) {
         if (!sameProfile()) return;
         setOperationsMessage(error?.message || "Profile settings could not load.", "error-text");
