@@ -17,3 +17,12 @@
 .ops-creative-reference-list details{padding:.65rem .8rem;border:1px solid var(--line,rgba(0,0,0,.14));border-radius:.5rem}
 .ops-creative-reference-list details summary{cursor:pointer}
 .ops-prompt-text{white-space:pre-wrap;overflow-wrap:anywhere;max-height:300px;overflow:auto;font:inherit;font-size:.85rem;line-height:1.5;padding:.65rem;background:rgba(127,127,127,.07);border-radius:.3rem}
+
+/* Profile Admin audio sampling: separate play controls from saved selections. */
+#operationsProfiles .ops-voice-preview-row{display:flex;align-items:center;gap:.65rem;flex-wrap:wrap;margin-top:.35rem}
+#operationsProfiles .ops-voice-preview-row select{flex:1 1 240px;min-width:0;max-width:100%}
+#operationsProfiles .ops-audio-preview-btn{flex:0 0 auto;white-space:nowrap;min-width:6.4rem}
+#operationsProfiles .ops-music-preview-row{display:flex;align-items:center;justify-content:space-between;gap:.65rem;min-width:0}
+#operationsProfiles .ops-music-preview-row>.ops-music-option{flex:1 1 auto;min-width:0}
+#operationsProfiles .ops-music-preview-row .ops-audio-preview-btn{font-size:.85rem;padding:.35rem .6rem}
+@media(max-width:560px){#operationsProfiles .ops-voice-preview-row select{flex-basis:100%}#operationsProfiles .ops-music-preview-row{align-items:flex-start}}
