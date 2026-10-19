@@ -501,3 +501,5 @@ Deploy PR #905 photo-wait historical platform default repair (Threads 400): filt
 2026-10-19: P0 #907 release Ready-to-produce draft recovery isolation and retired-platform guard (PR #908). Preserve existing bindings, Airtable SoR, Phase 5 breaker, scheduling and final human approval. Verify resumed production plans, render completion and Factory final review against the 38 existing PRs.
 
 2026-10-19: P0 #907 diagnostic-only deployment: durable one-minute cron stage/error heartbeat, authenticated tenant-admin R2 queue inspector, read-only 4-idea service-binding verification. Do not change Airtable authority, Supabase Phase 5 read breaker, scheduling or human approval. Keep issue open until live render/QA/final-review trace.
+
+2026-10-19: P0 #907 confirmed live Airtable 422 fix: remove nonexistent Idea Candidates Production_Notes from Ready-production discovery fields. Existing Production Requests reused; preserve Airtable SoR, Supabase Phase 5 breaker, and human final review. Run the same authenticated cron/R2 diagnostic after deploy and require actual job claims and rendered Factory Ready for Review before closing.
