@@ -1,0 +1,129 @@
+name: Verify Selected Profile Music Names and Audio Stream (Read Only)
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/verify-profile-admin-music-readonly.yml'
+permissions:
+  contents: read
+jobs:
+  music-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      BRIDGE: chicagoshining-studio-music-smoke
+      TARGET: chicagoshining-studio-api
+    steps:
+      - name: Deploy temporary scoped read-only verification bridge
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+          TOKEN=$(python -c 'import secrets; print(secrets.token_urlsafe(32))')
+          printf '%s' "$TOKEN" >/tmp/music-smoke-token.txt
+          cat >/tmp/music-smoke-worker.js <<EOF
+          export default {
+            async fetch(request, env) {
+              const pathname = new URL(request.url).pathname;
+              if (pathname !== "/$TOKEN") return new Response("Not found", { status: 404 });
+              const headers = {
+                "Cf-Access-Authenticated-User-Email": "joseph.t.logan@gmail.com",
+                "Origin": "https://studio.chicagoshining.com",
+                "Accept": "application/json",
+              };
+              const call = async (path, more = {}) => {
+                const start = Date.now();
+                const res = await env.STUDIO_API.fetch(new Request("https://studio.chicagoshining.com" + path, {
+                  method: "GET", headers: { ...headers, ...more },
+                }));
+                return { res, ms: Date.now() - start };
+              };
+              const profileRequest = await call("/api/operations/profiles?selected_only=1&profile=recpNlNn6U6eq0M9r");
+              const profileData = await profileRequest.res.json().catch(() => ({}));
+              const musicRequest = await call("/api/music?ids=recGi7dAEYQpjJE1Y,rec2Tv0guQNHkcACP");
+              const musicData = await musicRequest.res.json().catch(() => ({}));
+              const previewRequest = await call("/api/music/recGi7dAEYQpjJE1Y/preview", {
+                "Accept": "audio/mpeg,audio/*",
+                "Range": "bytes=0-32767"
+              });
+              const audio = previewRequest.res;
+              let magic = [];
+              let error = "";
+              if (audio.ok && audio.body) {
+                const reader = audio.body.getReader();
+                const first = await reader.read();
+                magic = Array.from((first.value || new Uint8Array()).slice(0, 8));
+                await reader.cancel().catch(() => {});
+              } else {
+                error = (await audio.text().catch(() => "")).slice(0, 250);
+              }
+              const profileOk = profileRequest.res.ok
+                && profileData.profiles?.length === 1
+                && profileData.profiles[0]?.id === "recpNlNn6U6eq0M9r";
+              const names = (musicData.records || []).map((r) => ({
+                id: r.id, name: String(r.display_name || r.name || ""),
+                preview_available: Boolean(r.preview_available)
+              }));
+              const musicOk = musicRequest.res.ok && names.length === 2
+                && names.every((r) => r.name && !r.name.startsWith("rec") && r.preview_available);
+              const mime = audio.headers.get("Content-Type") || "";
+              const previewOk = audio.ok && magic.length > 0
+                && (mime.startsWith("audio/") || mime.includes("octet-stream"));
+              return Response.json({
+                ok: Boolean(profileOk && musicOk && previewOk),
+                profile: { ok: profileOk, ms: profileRequest.ms, status: profileRequest.res.status },
+                music: { ok: musicOk, ms: musicRequest.ms, status: musicRequest.res.status, tracks: names },
+                preview: {
+                  ok: previewOk, ms: previewRequest.ms, status: audio.status, mime,
+                  source: audio.headers.get("X-Studio-Preview-Source"),
+                  first_bytes: magic, error
+                }
+              }, { headers: { "Cache-Control": "no-store" } });
+            }
+          };
+          EOF
+          cat >/tmp/music-smoke-metadata.json <<EOF
+          {"main_module":"worker.js","compatibility_date":"2026-08-02","bindings":[{"type":"service","name":"STUDIO_API","service":"$TARGET"}]}
+          EOF
+          node --check /tmp/music-smoke-worker.js
+          API="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID"
+          AUTH="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
+          curl -sS -X DELETE "$API/workers/scripts/$BRIDGE" -H "$AUTH" >/dev/null || true
+          code=$(curl -sS -o /tmp/music-smoke-upload.json -w '%{http_code}' -X PUT "$API/workers/scripts/$BRIDGE/content" -H "$AUTH" \
+            -F 'metadata=@/tmp/music-smoke-metadata.json;type=application/json' \
+            -F 'worker.js=@/tmp/music-smoke-worker.js;type=application/javascript+module;filename=worker.js')
+          test "$code" -ge 200 -a "$code" -lt 300
+          jq -e '.success==true' /tmp/music-smoke-upload.json >/dev/null
+          curl -fsS -X POST "$API/workers/scripts/$BRIDGE/subdomain" -H "$AUTH" -H 'Content-Type: application/json' \
+            --data '{"enabled":true,"previews_enabled":false}' >/tmp/music-smoke-subdomain.json
+          jq -e '.success==true and .result.enabled==true' /tmp/music-smoke-subdomain.json >/dev/null
+      - name: Verify one selected profile, two real named tracks, and one playable media stream
+        shell: bash
+        run: |
+          set -euo pipefail
+          API="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID"
+          AUTH="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
+          curl -fsS "$API/workers/subdomain" -H "$AUTH" -o /tmp/music-smoke-account.json
+          DOMAIN=$(jq -er '.result.subdomain' /tmp/music-smoke-account.json)
+          TOKEN=$(cat /tmp/music-smoke-token.txt)
+          URL="https://$BRIDGE.$DOMAIN.workers.dev/$TOKEN"
+          code="000"
+          for i in $(seq 1 25); do
+            code=$(curl -sS --max-time 75 -o /tmp/music-smoke-result.json -w '%{http_code}' "$URL" || true)
+            if [[ "$code" = "200" ]] && jq -e '.profile and .music and .preview' /tmp/music-smoke-result.json >/dev/null 2>&1; then break; fi
+            sleep 3
+          done
+          jq -S . /tmp/music-smoke-result.json
+          test "$code" = "200"
+          jq -e '.ok==true and .profile.ok==true and .music.ok==true and .preview.ok==true' /tmp/music-smoke-result.json >/dev/null
+          echo "profile_music_and_audio_functional_smoke=PASS"
+      - name: Delete temporary verification bridge
+        if: always()
+        shell: bash
+        run: |
+          API="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID"
+          curl -sS -X DELETE "$API/workers/scripts/$BRIDGE" -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" >/dev/null || true
+          echo "temporary_music_bridge_cleanup=attempted"
