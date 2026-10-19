@@ -478,3 +478,4 @@ Deploy PR 884 profile creative settings API Worker; preserve Phase 5 Airtable so
 Deploy Worker PR 886 profile-scoped Creative Guidance from inherited Brand/Persona and P1/P2 Airtable templates.
 2026-10-18 Phase 5 sync pool safety | PR #887 merged 6928d788352a0966948d655d5da6176c8cdf6eb0 | deploy Worker-only R2 CAS sweep lease, circuit abort, truthful sync status/telemetry; keep STUDIO_READ_SOURCE paused and STUDIO_WRITE_SOURCE=airtable on all services; no Phase 6.
 2026-10-18: Deploy Worker 0.10.665-manual-ideas-no-cap. Operator-triggered unused-photo ideas bypass the background backlog brake and its extra count request.
+2026-10-19 Factory/Home approval reconciliation | PR #889 | merged d83fd48b19c0 | deploy Worker-only: actionable LA review outputs, queued siblings excluded; preserve Airtable authority, Supabase read circuit breaker and existing Cloudflare bindings; no Phase 6.
