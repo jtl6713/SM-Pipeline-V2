@@ -89,6 +89,7 @@ def process_request(
     needed: int = 0,
     total: int | None = None,
     market: str | None = None,
+    creative_guidance: dict[str, Any] | None = None,
     dry_run: bool = False,
 ) -> dict[str, Any]:
     if not str(market or "").strip():
@@ -101,6 +102,7 @@ def process_request(
         needed=needed_count,
         total=total_count,
         market=str(market).strip(),
+        creative_guidance=creative_guidance,
     )
     preview = {
         "make_scenario_id": MAKE_SCENARIO_ID,
