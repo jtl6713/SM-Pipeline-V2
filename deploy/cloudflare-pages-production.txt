@@ -440,3 +440,4 @@ Deploy Factory ambiguous-submit reconciliation 2026-10-17. PR #817. Recover exac
 2026-10-18 Retry Studio UI 0.6.718 Factory expand-collapse release after aligning pinned UI regression assertions across Studio web tests; preserve full Pages regression and custom-domain verification.
 2026-10-18 Factory Quality Agent UI monitor | PR 880 | fetch lightweight quality-only response, label degraded/partial snapshots accurately, poll every 30 seconds.
 Deploy PR 884 Studio Profile Admin / Global Admin UI 0.6.719-creative-guidance.
+Deploy Studio Pages UI 0.6.720 single-profile Admin and inherited Airtable creative prompt editor (PR 886).
